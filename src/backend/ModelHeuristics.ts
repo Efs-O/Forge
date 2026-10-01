@@ -26,6 +26,18 @@ export function isLocalModel(model: ModelConfig | undefined): boolean {
   return false;
 }
 
+/** Returns true for models whose endpoint runs on this machine's GPUs. */
+export function usesLocalGpu(model: ModelConfig | undefined): boolean {
+  if (isLocalModel(model)) return true;
+  if (model?.provider !== 'openai-compatible' || !model.endpoint) return false;
+  try {
+    const hostname = new URL(model.endpoint).hostname.toLowerCase().replace(/^\[|\]$/gu, '');
+    return hostname === '127.0.0.1' || hostname === 'localhost' || hostname === '::1';
+  } catch {
+    return false;
+  }
+}
+
 export function detectFamily(filename: string): ModelFamily {
   const lower = filename.toLowerCase();
   if (lower.includes('qwen3') || lower.includes('qwen3.')) return 'qwen3';

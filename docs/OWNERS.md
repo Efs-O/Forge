@@ -535,6 +535,7 @@ the configured override stays the existing `video.ffmpeg_path` key.
 | `agent_task` durable run state (config backup path, crash recovery) | `src/jobs/agentTaskState.ts`                                   |
 | `agent_task` step 7 (restart after turn, config rollback)          | `src/jobs/agentTaskRestart.ts`                                   |
 | `agent_task` admission (slot check, busy/TTL defer)                | `src/jobs/agentTaskAdmission.ts`                                 |
+| Local-GPU agent-task admission gate (hold file + sampled probe)  | `src/jobs/gpuIdleGate.ts`                                     |
 | `agent_task` max_minutes cap (send + cancel race)                  | `src/jobs/agentTaskCap.ts`                                       |
 | `agent_task` report (outcome mapping, report text)                 | `src/jobs/agentTaskReport.ts`                                    |
 | `llamacpp_update` action (stages 6-8, switch, rollback)    | `src/jobs/actions/llamacppUpdate.ts`                           |

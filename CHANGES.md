@@ -2,6 +2,19 @@
 
 ## 0.16.71
 
+### Keep scheduled agent tasks off a busy local GPU (2026-10-01)
+
+- Local-GPU `agent_task` jobs now honor `~/.forge/jobs/gpu.hold` and can use
+  an opt-in sampled `jobs.gpu_gate` to defer while configured GPUs are busy.
+- Pending jobs retain their latest admission reason, show it in `manage_jobs`,
+  and include it in the one-time TTL skip summary.
+
+### GitHub issue watch quotes the newest comment (2026-10-01)
+
+- A `github_issue` check's notification quoted the issue's *first* comment:
+  GitHub's per-issue comments endpoint ignores sort order. It now fetches
+  the last comment, and makes no comments request for an issue with none.
+
 ### `reasoning_effort` reaches OpenAI-style servers (2026-10-01)
 
 - A model's `reasoning_effort` is now sent as the request's top-level

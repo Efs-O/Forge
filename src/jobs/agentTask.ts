@@ -12,6 +12,9 @@ import { resolveJobConversation } from './jobDiscuss';
 import { nextDueWithBackoff } from './backoff';
 import { restartAfterTurn } from './agentTaskRestart';
 import type { Action, JobFile, RunRow } from './jobSchema';
+import type { ModelConfig, GpuGateConfig } from '../config/types';
+import type { GpuInfo } from '../system/systemProbes';
+import { gpuGateReason } from './gpuIdleGate';
 import { buildAgentTaskPrompt } from './agentTaskPrompt';
 import {
   canStartNow,
@@ -54,6 +57,15 @@ export interface AgentTaskDeps {
   configPath?: string;
   /** Injectable abortable timer for the `max_minutes` cap. Defaults to setTimeout. */
   sleep?: (ms: number, signal?: AbortSignal) => Promise<void>;
+  /** Model and optional probe config used only for local-GPU admission. */
+  gpuGate?: {
+    config: () => GpuGateConfig | undefined;
+    model: (name: string) => ModelConfig | undefined;
+    loadedModels: () => readonly ModelConfig[];
+    signal?: () => AbortSignal;
+    probe?: (signal?: AbortSignal) => Promise<GpuInfo[]>;
+    wait?: (ms: number, signal?: AbortSignal) => Promise<void>;
+  };
 }
 
 export class AgentTaskRunner {
@@ -113,27 +125,43 @@ export class AgentTaskRunner {
       return this.deps.store.appendRun(job.id, blocked);
     }
     const status = host.status();
-    const slot = canStartNow(
-      jobModel,
-      state.conversation_id,
-      pool,
-      status.streamingConversationIds,
+    const gpu = this.deps.gpuGate;
+    const admissionReason = await gpuGateReason(
+      {
+        jobsRoot: this.deps.store.root,
+        model: gpu?.model(jobModel),
+        gpuGate: gpu?.config(),
+        loadedModels: gpu?.loadedModels ?? (() => []),
+        now: this.deps.now,
+        ...(gpu?.signal ? { signal: gpu.signal() } : {}),
+        ...(gpu?.probe ? { probe: gpu.probe } : {}),
+        ...(gpu?.wait ? { wait: gpu.wait } : {}),
+      },
+      async () => {
+        const slot = canStartNow(
+          jobModel,
+          state.conversation_id,
+          pool,
+          status.streamingConversationIds,
+        );
+        // Only a recent conversation can hold the job back; read which ones are
+        // the jobs' own (they must not) only when there is one.
+        const recent = status.conversations.filter((c) => startedAt - c.updatedAt < USER_QUIET_MS);
+        const quiet =
+          recent.length === 0
+            ? undefined
+            : userQuietGate(
+                recent,
+                new Set(
+                  (await this.deps.store.loadAll()).flatMap((jf) => jf.state.conversation_id ?? []),
+                ),
+                startedAt,
+              );
+        return !slot.start ? slot.reason : quiet;
+      },
     );
-    // Only a recent conversation can hold the job back; read which ones are
-    // the jobs' own (they must not) only when there is one.
-    const recent = status.conversations.filter((c) => startedAt - c.updatedAt < USER_QUIET_MS);
-    const quiet =
-      recent.length === 0
-        ? undefined
-        : userQuietGate(
-            recent,
-            new Set(
-              (await this.deps.store.loadAll()).flatMap((jf) => jf.state.conversation_id ?? []),
-            ),
-            startedAt,
-          );
-    if (!slot.start || quiet !== undefined) {
-      await deferBusyTask(this.deps.store, jobFile, startedAt, wasLate);
+    if (admissionReason !== undefined) {
+      await deferBusyTask(this.deps.store, jobFile, startedAt, wasLate, admissionReason);
       return;
     }
     // A previously-pending task that can now start: clear the pending flag.

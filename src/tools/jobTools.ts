@@ -287,6 +287,10 @@ async function listJobs(deps: ManageJobsDeps): Promise<string> {
   const lines = all.map((jf) => {
     const { job, state } = jf;
     const status = job.enabled ? 'enabled' : 'paused';
+    const pending =
+      state.task_pending && state.task_pending_reason
+        ? ` · pending: ${state.task_pending_reason}`
+        : '';
     const last = state.last_run_at === null ? 'never' : formatWhen(state.last_run_at, now);
     const outcome = lastOutcome(state);
     const next =
@@ -295,7 +299,7 @@ async function listJobs(deps: ManageJobsDeps): Promise<string> {
         : job.enabled
           ? `next ${formatWhen(state.next_due_at, now)}`
           : 'paused';
-    return `- ${job.name} [${job.id}] — ${status} · ${describeSchedule(job.schedule)} · last ${last} (${outcome}) · ${next}`;
+    return `- ${job.name} [${job.id}] — ${status}${pending} · ${describeSchedule(job.schedule)} · last ${last} (${outcome}) · ${next}`;
   });
   return lines.join('\n');
 }
@@ -435,7 +439,7 @@ function describeJob(jobFile: JobFile): string {
   const { job, state } = jobFile;
   const lines = [
     `Job "${job.name}" [${job.id}]`,
-    `  status: ${job.enabled ? 'enabled' : 'paused'}`,
+    `  status: ${job.enabled ? 'enabled' : 'paused'}${state.task_pending && state.task_pending_reason ? ` · pending: ${state.task_pending_reason}` : ''}`,
     `  schedule: ${describeSchedule(job.schedule)}`,
     `  check: ${describeCheck(job.check)}`,
     `  on_change: ${describeOnChange(job.on_change)}`,

@@ -72,6 +72,7 @@ export class JobScheduler {
   private readonly tickMs: number;
   private readonly llamacpp: LlamacppAction | undefined;
   private readonly agentTask: AgentTaskRunner | undefined;
+  private gpuGateAbortController = new AbortController();
   private readonly etagCache = new Map<string, string>();
   /** User-facing delivery: the outbox, the toast, and the summarize timing (B.4). */
   private readonly delivery: JobDelivery;
@@ -119,7 +120,19 @@ export class JobScheduler {
           notifyLocal: this.notifyLocal,
         })
       : undefined;
-    this.agentTask = deps.agentTask ? new AgentTaskRunner(deps.agentTask) : undefined;
+    this.agentTask = deps.agentTask
+      ? new AgentTaskRunner({
+          ...deps.agentTask,
+          ...(deps.agentTask.gpuGate
+            ? {
+                gpuGate: {
+                  ...deps.agentTask.gpuGate,
+                  signal: () => this.gpuGateAbortController.signal,
+                },
+              }
+            : {}),
+        })
+      : undefined;
   }
 
   /**
@@ -161,12 +174,16 @@ export class JobScheduler {
    * without one, so a lost lease is recovered rather than fatal.
    */
   private async acquireLease(): Promise<boolean> {
+    if (this.gpuGateAbortController.signal.aborted) {
+      this.gpuGateAbortController = new AbortController();
+    }
     this.lease = await acquireSchedulerLease(
       this.leaseDirectory,
       this.workspaceId,
       this.instanceId,
       () => {
         this.lease = undefined;
+        this.gpuGateAbortController.abort();
       },
       this.wakes,
     );
@@ -184,6 +201,7 @@ export class JobScheduler {
   async stop(): Promise<void> {
     if (this.disposed) return;
     this.disposed = true;
+    this.gpuGateAbortController.abort();
     if (this.timer) clearInterval(this.timer);
     this.timer = undefined;
     // Its failure was already reported to whoever started it.

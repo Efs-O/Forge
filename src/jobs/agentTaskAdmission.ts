@@ -75,6 +75,7 @@ export function schedulePeriodMs(schedule: Schedule, now: number): number {
 /** The state patch that clears the `task_pending` bookkeeping fields. */
 export const CLEAR_PENDING = {
   task_pending: false,
+  task_pending_reason: null,
   task_pending_since: null,
   task_pending_observation: null,
 } as const;
@@ -90,6 +91,7 @@ export async function deferBusyTask(
   jobFile: JobFile,
   startedAt: number,
   wasLate: boolean,
+  reason: string,
 ): Promise<void> {
   const { job, state } = jobFile;
   // Drop a pending task older than one schedule period (the task_pending TTL).
@@ -107,7 +109,7 @@ export async function deferBusyTask(
         late: wasLate,
         outcome: 'skipped',
         changed: false,
-        summary: `skipped: busy (pending ${Math.round((startedAt - state.task_pending_since) / 60000)} min)`,
+        summary: `skipped: busy (pending ${Math.round((startedAt - state.task_pending_since) / 60000)} min; ${reason})`,
         delivered: 0,
       });
       return;
@@ -115,6 +117,7 @@ export async function deferBusyTask(
   }
   store.patchState(job.id, {
     task_pending: true,
+    task_pending_reason: reason,
     task_pending_since: state.task_pending ? state.task_pending_since : startedAt,
     // The observation handed over by this tick: the fresh check's, or on a
     // retry the one saved here when the task was first deferred.
