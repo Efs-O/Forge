@@ -69,6 +69,7 @@ export function reduceTurn(
       current.endedAt = now;
       break;
     case 'commentary':
+    case 'reasoning':
     case 'status':
       break;
   }

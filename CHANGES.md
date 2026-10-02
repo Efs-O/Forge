@@ -2,6 +2,11 @@
 
 ## 0.16.71
 
+### Silent Telegram liveness clock (2026-10-02)
+
+- Telegram's live progress bubble now shows elapsed time, tool calls and the
+  last activity time, refreshed by silent edits about once a minute.
+
 ### Unload commands reach Strata (2026-10-02)
 
 - New model field `unload_path` (openai-compatible only): the path Forge

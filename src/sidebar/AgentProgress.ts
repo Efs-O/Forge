@@ -1,5 +1,7 @@
 /** Visible, conversation-addressed progress that may be mirrored to an authorized surface. */
 export type AgentProgressEvent =
+  /** Activity only. Reasoning text must never cross this event boundary. */
+  | { conversationId: string; kind: 'reasoning' }
   | { conversationId: string; kind: 'commentary'; text: string }
   /**
    * One finished mid-turn thought: the paragraph a round wrote before calling

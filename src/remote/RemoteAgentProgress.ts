@@ -1,8 +1,10 @@
 import type { AgentProgressEvent } from '../sidebar/AgentProgress';
 import type { RemoteChannel } from './types';
 import { QUEUED_ACK_DELETE_SECONDS } from './TelegramAcknowledgement';
+import { renderRemoteProgress } from './remoteProgressRender';
 
 const DEFAULT_EDIT_INTERVAL_MS = 1_500;
+export const CLOCK_INTERVAL_MS = 60_000;
 const MAX_STATUS_CHARS = 500;
 const MAX_TOOL_NAME_CHARS = 80;
 const MAX_NOTICE_CHARS = 300;
@@ -51,6 +53,7 @@ interface ActiveProgress {
    */
   warnings: string[];
   lastText: string;
+  queuedText?: string;
   /**
    * Every narration already delivered as its own message this turn.
    *
@@ -62,7 +65,11 @@ interface ActiveProgress {
    * same thing again.
    */
   narrations: string[];
+  startedAt: number;
+  lastActivityAt: number;
+  toolCalls: number;
   timer?: ReturnType<typeof setTimeout>;
+  clock?: ReturnType<typeof setInterval>;
   tail: Promise<void>;
   closed: boolean;
 }
@@ -113,6 +120,7 @@ export class RemoteAgentProgress {
       messageIds: string[],
       delaySeconds: number,
     ) => void,
+    private readonly clockIntervalMs = CLOCK_INTERVAL_MS,
   ) {}
 
   updateMaxMessageChars(maxMessageChars: number): void {
@@ -126,6 +134,7 @@ export class RemoteAgentProgress {
     origin: ProgressOrigin = 'remote',
   ): void {
     this.drop(conversationId);
+    const now = Date.now();
     this.active.set(conversationId, {
       origin,
       chatId,
@@ -134,9 +143,16 @@ export class RemoteAgentProgress {
       warnings: [],
       lastText: DEFAULT_HEADLINE,
       narrations: [],
+      startedAt: now,
+      lastActivityAt: now,
+      toolCalls: 0,
       tail: Promise.resolve(),
       closed: false,
     });
+    const state = this.active.get(conversationId)!;
+    if (this.channel.editMessage) {
+      state.clock = setInterval(() => this.queueEdit(conversationId, state), this.clockIntervalMs);
+    }
   }
 
   /**
@@ -186,13 +202,14 @@ export class RemoteAgentProgress {
       void this.finish(event.conversationId, event.ok ? 'Forge: completed.' : 'Forge: failed.');
       return;
     }
+    state.lastActivityAt = Date.now();
     if (event.kind === 'narration') {
       this.queueNarration(event.conversationId, state, event.text);
       return;
     }
     // Streamed tokens stay out of the bubble; the finished text arrives as a
     // narration or the final answer instead. See the class comment.
-    if (event.kind === 'commentary') return;
+    if (event.kind === 'commentary' || event.kind === 'reasoning') return;
     if (event.kind === 'phase') {
       const headline = keepTail(sanitize(event.text ?? '').trim(), MAX_HEADLINE_CHARS);
       const next = headline || DEFAULT_HEADLINE;
@@ -218,6 +235,7 @@ export class RemoteAgentProgress {
         state.milestone = notice;
       }
     } else if (event.kind === 'tool') {
+      state.toolCalls += 1;
       const toolName = sanitizeToolName(event.toolName);
       if (!toolName) return;
       state.milestone = `Running ${toolName}…`;
@@ -256,8 +274,7 @@ export class RemoteAgentProgress {
     const state = this.active.get(conversationId);
     if (!state) return;
     state.closed = true;
-    if (state.timer) clearTimeout(state.timer);
-    delete state.timer;
+    this.clearTimers(state);
     await state.tail;
     // Only this state: a new message may have begun for the conversation
     // while the tail settled, and it is not this call's to delete.
@@ -276,7 +293,7 @@ export class RemoteAgentProgress {
     const pending: Promise<void>[] = [];
     for (const [conversationId, state] of this.active) {
       state.closed = true;
-      if (state.timer) clearTimeout(state.timer);
+      this.clearTimers(state);
       pending.push(state.tail);
       this.active.delete(conversationId);
     }
@@ -324,8 +341,9 @@ export class RemoteAgentProgress {
   }
 
   private queueEdit(conversationId: string, state: ActiveProgress): void {
-    const text = render(state, this.maxMessageChars);
-    if (text === state.lastText) return;
+    const text = renderRemoteProgress(state, this.maxMessageChars, Date.now());
+    if (text === state.lastText || text === state.queuedText) return;
+    state.queuedText = text;
     state.tail = state.tail
       .then(async () => {
         if (state.closed || this.signal.aborted || !this.channel.editMessage) return;
@@ -336,15 +354,25 @@ export class RemoteAgentProgress {
         });
         state.lastText = text;
       })
-      .catch((err) => this.report(err));
+      .catch((err) => this.report(err))
+      .finally(() => {
+        if (state.queuedText === text) delete state.queuedText;
+      });
   }
 
   private drop(conversationId: string): void {
     const previous = this.active.get(conversationId);
     if (!previous) return;
     previous.closed = true;
-    if (previous.timer) clearTimeout(previous.timer);
+    this.clearTimers(previous);
     this.active.delete(conversationId);
+  }
+
+  private clearTimers(state: ActiveProgress): void {
+    if (state.timer) clearTimeout(state.timer);
+    if (state.clock) clearInterval(state.clock);
+    delete state.timer;
+    delete state.clock;
   }
 
   private report(err: unknown): void {
@@ -361,18 +389,6 @@ export class RemoteAgentProgress {
       return false;
     }
   }
-}
-
-function render(state: ActiveProgress, maximum: number): string {
-  const sections = [state.headline];
-  // Warnings sit below the headline and above the live milestone: they are
-  // the part of the message the reader most needs and the part most likely to
-  // be trimmed, so they are never the first thing the tail cut reaches.
-  if (state.warnings.length) {
-    sections.push(state.warnings.map((warning) => `\u26a0 ${warning}`).join('\n'));
-  }
-  if (state.milestone) sections.push(state.milestone);
-  return keepTailWithPrefix(sections.join('\n\n'), maximum, `${state.headline}\n\n`);
 }
 
 function sanitize(value: string): string {
@@ -392,10 +408,4 @@ function sanitizeToolName(value: string): string {
 
 function keepTail(value: string, maximum: number): string {
   return value.length <= maximum ? value : `…${value.slice(-(maximum - 1))}`;
-}
-
-function keepTailWithPrefix(value: string, maximum: number, prefix: string): string {
-  if (value.length <= maximum) return value;
-  const room = Math.max(1, maximum - prefix.length);
-  return `${prefix}…${value.slice(-(room - 1))}`;
 }

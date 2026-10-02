@@ -50,6 +50,13 @@ describe('reduceTurn', () => {
     expect(after).toEqual({ ...before, lastEventAt: 20 });
   });
 
+  it('records reasoning as liveness without retaining reasoning text', () => {
+    const before = reduceTurn(undefined, event('tool', { toolName: 'read_file' }), 10);
+    const after = reduceTurn(before, event('reasoning', { text: 'SECRET reasoning' }), 20);
+    expect(after).toEqual({ ...before, lastEventAt: 20 });
+    expect(JSON.stringify(after)).not.toContain('SECRET');
+  });
+
   it('keeps the previous narration when the new one is blank', () => {
     const said = reduceTurn(undefined, event('narration', { text: 'reading the plan' }), 10);
     expect(reduceTurn(said, event('narration', { text: ' \n\t ' }), 20).lastNarration).toBe('reading the plan');

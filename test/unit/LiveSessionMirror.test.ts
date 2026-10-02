@@ -41,4 +41,23 @@ describe('mirrorLiveSessionAnswers', () => {
       text: '🔁 Forge ↔ live session\n\nCould not deliver to codex',
     });
   });
+
+  it('mirrors only the live-session tool result, never reasoning content', () => {
+    const events: AgentProgressEvent[] = [];
+    mirrorLiveSessionAnswers(
+      'c1',
+      [call('a', 'ask_live_session', { target: 'claude', subject: 'review' })],
+      [{ role: 'tool', tool_call_id: 'a', content: 'The session answered.' }],
+      (event) => events.push(event),
+    );
+
+    expect(events).toEqual([
+      {
+        conversationId: 'c1',
+        kind: 'narration',
+        text: '🔁 Forge ↔ claude · review\n\nThe session answered.',
+      },
+    ]);
+    expect(JSON.stringify(events)).not.toContain('reasoning');
+  });
 });

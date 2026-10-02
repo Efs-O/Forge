@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { FakeRemoteChannel } from '../../src/remote/FakeRemoteChannel';
-import { RemoteAgentProgress } from '../../src/remote/RemoteAgentProgress';
+import { CLOCK_INTERVAL_MS, RemoteAgentProgress } from '../../src/remote/RemoteAgentProgress';
+import { formatElapsed, formatLastActivity, renderRemoteProgress } from '../../src/remote/remoteProgressRender';
 import { summarizeCliProgress } from '../../src/sidebar/AgentProgress';
 
 afterEach(() => {
@@ -40,13 +41,14 @@ describe('RemoteAgentProgress', () => {
       {
         chatId: 'chat-a',
         messageId: 'message-1',
-        text: 'Forge: working…\n\nRunning read_file…',
+        text: 'Forge: working…\n\nRunning read_file…\n\n⏱ <1 min · 1 tool call · last activity 1 s ago',
       },
     ]);
 
     progress.handle({ conversationId: 'c1', kind: 'tool', toolName: 'read_file' });
     await vi.advanceTimersByTimeAsync(1_000);
-    expect(channel.edits).toHaveLength(1);
+    expect(channel.edits).toHaveLength(2);
+    expect(channel.edits.at(-1)?.text).toContain('2 tool calls');
   });
 
   it('sends a finished mid-turn narration as its own message, never in the bubble', async () => {
@@ -73,7 +75,7 @@ describe('RemoteAgentProgress', () => {
     expect(channel.edits.at(-1)).toEqual({
       chatId: 'chat-a',
       messageId: 'message-1',
-      text: 'Forge: working…\n\nRunning read_file…',
+      text: 'Forge: working…\n\nRunning read_file…\n\n⏱ <1 min · 1 tool call · last activity 1 s ago',
     });
 
     // A round that says the same thing again does not send it twice.
@@ -180,7 +182,11 @@ describe('RemoteAgentProgress', () => {
     await vi.advanceTimersByTimeAsync(999);
     await vi.advanceTimersByTimeAsync(1);
     expect(channel.edits).toEqual([
-      { chatId: 'chat-a', messageId: 'message-1', text: 'Forge: loading the model…' },
+      {
+        chatId: 'chat-a',
+        messageId: 'message-1',
+        text: 'Forge: loading the model…\n\n⏱ <1 min · 0 tool calls · last activity 1 s ago',
+      },
     ]);
 
     progress.handle({ conversationId: 'c1', kind: 'phase', text: undefined });
@@ -189,7 +195,7 @@ describe('RemoteAgentProgress', () => {
     expect(channel.edits.at(-1)).toEqual({
       chatId: 'chat-a',
       messageId: 'message-1',
-      text: 'Forge: working…',
+      text: 'Forge: working…\n\n⏱ <1 min · 0 tool calls · last activity 1 s ago',
     });
   });
 
@@ -351,5 +357,145 @@ describe('RemoteAgentProgress', () => {
     progress.begin('c1', 'chat-a', 'message-1');
 
     await expect(progress.finish('c1', 'Forge: completed.')).resolves.toBeUndefined();
+  });
+
+  it('formats the elapsed time and activity age', () => {
+    expect(formatElapsed(59_999)).toBe('<1 min');
+    expect(formatElapsed(4 * 60_000)).toBe('4 min');
+    expect(formatElapsed(65 * 60_000)).toBe('1 h 05 min');
+    expect(formatLastActivity(59_999)).toBe('59 s');
+    expect(formatLastActivity(4 * 60_000)).toBe('4 min');
+  });
+
+  it('silently edits the clock once per interval and keeps the clock at the tail on truncation', async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(0);
+    const channel = new FakeRemoteChannel();
+    const progress = new RemoteAgentProgress(
+      channel,
+      new AbortController().signal,
+      () => true,
+      3_900,
+      1_000_000,
+      undefined,
+      undefined,
+      CLOCK_INTERVAL_MS,
+    );
+    progress.begin('c1', 'chat-a', 'message-1');
+    await vi.advanceTimersByTimeAsync(30_000);
+    progress.handle({ conversationId: 'c1', kind: 'tool', toolName: 'run_build' });
+
+    await vi.advanceTimersByTimeAsync(CLOCK_INTERVAL_MS);
+    expect(channel.edits).toEqual([
+      {
+        chatId: 'chat-a',
+        messageId: 'message-1',
+        text: 'Forge: working…\n\nRunning run_build…\n\n⏱ 1 min · 1 tool call · last activity 30 s ago',
+      },
+    ]);
+    expect(channel.sent).toEqual([]);
+
+    await vi.advanceTimersByTimeAsync(CLOCK_INTERVAL_MS);
+    expect(channel.edits).toHaveLength(2);
+    expect(channel.edits[1]?.text).toContain('⏱ 2 min · 1 tool call · last activity 1 min ago');
+    expect(channel.sent).toEqual([]);
+
+    const truncated = renderRemoteProgress(
+      {
+        headline: 'Forge: working…',
+        warnings: [],
+        milestone: 'Running '.concat('very_long_tool '.repeat(30)),
+        startedAt: 0,
+        lastActivityAt: 0,
+        toolCalls: 2,
+      },
+      90,
+      60_000,
+    );
+    expect(truncated.startsWith('Forge: working…\n\n')).toBe(true);
+    expect(truncated).toContain('⏱ 1 min · 2 tool calls · last activity 1 min ago');
+  });
+
+  it('counts every tool and treats every non-terminal event, including reasoning, as activity only', async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(0);
+    const channel = new FakeRemoteChannel();
+    const progress = new RemoteAgentProgress(
+      channel,
+      new AbortController().signal,
+      () => true,
+      3_900,
+      120_000,
+      undefined,
+      undefined,
+      CLOCK_INTERVAL_MS,
+    );
+    progress.begin('c1', 'chat-a', 'message-1');
+    const events = [
+      { conversationId: 'c1', kind: 'tool', toolName: 'read_file' },
+      { conversationId: 'c1', kind: 'commentary', text: 'hidden words' },
+      { conversationId: 'c1', kind: 'narration', text: 'a finished thought' },
+      { conversationId: 'c1', kind: 'status', text: 'working' },
+      { conversationId: 'c1', kind: 'phase', text: 'Thinking' },
+      { conversationId: 'c1', kind: 'notice', severity: 'info', text: 'compacting' },
+      { conversationId: 'c1', kind: 'reasoning' },
+      { conversationId: 'c1', kind: 'tool', toolName: 'write_file' },
+    ] as const;
+    for (const event of events) {
+      vi.setSystemTime(Date.now() + 1_000);
+      progress.handle(event);
+    }
+    await vi.advanceTimersByTimeAsync(CLOCK_INTERVAL_MS);
+
+    const bubble = channel.edits.at(-1)?.text ?? '';
+    expect(bubble).toContain('2 tool calls');
+    expect(bubble).toContain('last activity 1 min ago');
+    expect(bubble).not.toContain('hidden words');
+    expect(bubble).not.toContain('reasoning');
+    expect(channel.sent).toEqual(['a finished thought'].map((text) => ({ chatId: 'chat-a', text })));
+  });
+
+  it('clears clock intervals on finish, dispose and replacement, and does not start one without edits', async () => {
+    vi.useFakeTimers();
+    const channel = new FakeRemoteChannel();
+    const progress = new RemoteAgentProgress(
+      channel,
+      new AbortController().signal,
+      () => true,
+      3_900,
+      1_000,
+      undefined,
+      undefined,
+      1_000,
+    );
+    progress.begin('c1', 'chat-a', 'message-1');
+    await progress.finish('c1', 'Forge: completed.');
+    await vi.advanceTimersByTimeAsync(5_000);
+    expect(channel.edits).toHaveLength(1);
+
+    progress.begin('c2', 'chat-a', 'message-2');
+    progress.begin('c2', 'chat-a', 'message-3');
+    await vi.advanceTimersByTimeAsync(1_000);
+    expect(channel.edits).toHaveLength(2);
+    await progress.dispose();
+    expect(vi.getTimerCount()).toBe(0);
+    await vi.advanceTimersByTimeAsync(5_000);
+    expect(channel.edits).toHaveLength(2);
+
+    const noEditChannel = new FakeRemoteChannel();
+    noEditChannel.editMessage = undefined;
+    const noEditProgress = new RemoteAgentProgress(
+      noEditChannel,
+      new AbortController().signal,
+      () => true,
+      3_900,
+      1_000,
+      undefined,
+      undefined,
+      1_000,
+    );
+    noEditProgress.begin('c3', 'chat-a', 'message-4');
+    expect(vi.getTimerCount()).toBe(0);
+    await noEditProgress.dispose();
   });
 });

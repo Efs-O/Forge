@@ -1,6 +1,6 @@
 # Remote Failure Visibility — what a phone is still not told
 
-Status: **#1 shipped in 0.15.33. #2 largely superseded; #4 revised to a silent bubble clock and implementing (2026-10-02); #3 unbuilt.** `src/llm/streamWatchdog.ts` now aborts a stream after 120 s idle once bytes flow (600 s before the first byte), the turn fails, and `failureNotice` sends that to the phone. What #2 would still add: a warning inside the 600 s first-byte window, where silence is usually a legitimate long prefill, so a 60 s warning there risks being the false positive §2 warns about. #3 needs its audit first.
+Status: **#1 shipped in 0.15.33. #2 largely superseded; #4 implemented (2026-10-02); #3 unbuilt.** `src/llm/streamWatchdog.ts` now aborts a stream after 120 s idle once bytes flow (600 s before the first byte), the turn fails, and `failureNotice` sends that to the phone. What #2 would still add: a warning inside the 600 s first-byte window, where silence is usually a legitimate long prefill, so a 60 s warning there risks being the false positive §2 warns about. #3 needs its audit first.
 Written 2026-09-10, from the diagnosis of the halluscribe session `3c073ca7`.
 
 ## The rule this all follows
@@ -144,27 +144,27 @@ its `docs/OWNERS.md` row.
 
 ### Acceptance criteria
 
-- [ ] With fake timers, a live bubble is re-edited once per `CLOCK_INTERVAL_MS`
+- [x] With fake timers, a live bubble is re-edited once per `CLOCK_INTERVAL_MS`
   with an updated clock line, and the clock never calls `channel.send`.
-- [ ] Elapsed, tool-call and last-activity text match the format above
+- [x] Elapsed, tool-call and last-activity text match the format above
   (`<1 min`, `N min`, `1 h 05 min`; `1 tool call` / `N tool calls`;
   `N s` / `N min`). Pure-function tests.
-- [ ] `tool` events increment the count. `tool`, `commentary`, `narration`,
+- [x] `tool` events increment the count. `tool`, `commentary`, `narration`,
   `status`, `phase`, `notice` and `reasoning` events all reset last activity.
-- [ ] A `reasoning` event never puts text in the bubble and is never sent. Its
+- [x] A `reasoning` event never puts text in the bubble and is never sent. Its
   only effect in `RemoteAgentProgress` is the activity reset.
-- [ ] `ModelTurn.onReasoning` emits `{ kind: 'reasoning' }`. Every other
+- [x] `ModelTurn.onReasoning` emits `{ kind: 'reasoning' }`. Every other
   `AgentProgressEvent` consumer was checked and ignores it (or treats it as
   liveness like `commentary`). Tests cover at least `busTurnWatch` and
   `liveSessionMirror`.
-- [ ] After `finish()`, `dispose()` or a second `begin()` for the same
+- [x] After `finish()`, `dispose()` or a second `begin()` for the same
   conversation, no further clock edit happens (advance timers well past the
   interval and assert no edit). After `dispose()`, `vi.getTimerCount()` is 0.
-- [ ] No clock interval starts when `channel.editMessage` is absent.
-- [ ] An unchanged render is not re-sent (existing `lastText` guard).
-- [ ] The clock line survives `maxMessageChars` truncation (render test with a
+- [x] No clock interval starts when `channel.editMessage` is absent.
+- [x] An unchanged render is not re-sent (existing `lastText` guard).
+- [x] The clock line survives `maxMessageChars` truncation (render test with a
   long milestone).
-- [ ] Every new or touched `.ts` file is under 500 lines. `npm run ci` is green
+- [x] Every new or touched `.ts` file is under 500 lines. `npm run ci` is green
   after the last edit. `CHANGES.md` has a bullet. `docs/OWNERS.md` has a row for
   any new module.
 - [ ] Live check (Claude, after review): a Telegram-started turn on a local

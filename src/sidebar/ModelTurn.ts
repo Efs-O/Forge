@@ -350,6 +350,7 @@ export async function runModelTurn(
       onReasoning: (text) => {
         ctx.streamMeter?.add(conv.id, 'reasoning', text);
         postC({ type: 'reasoningToken', text });
+        ctx.emitAgentProgress({ conversationId: conv.id, kind: 'reasoning' });
       },
       // The round's own words, once it has finished saying them. Only remote
       // surfaces act on this: the sidebar already rendered every token of it.
