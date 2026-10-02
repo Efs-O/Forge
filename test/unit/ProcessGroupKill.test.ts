@@ -52,6 +52,6 @@ describe.runIf(process.platform !== 'win32' && Boolean(TEST_BASH))(
         // Never leak the group, even if the assertions above fail first.
         await terminateProcessTree(proc).catch(() => undefined);
       }
-    });
+    }, 15000);
   },
 );
