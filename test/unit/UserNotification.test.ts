@@ -3,6 +3,7 @@ import * as os from 'os';
 import * as path from 'path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import {
+  FILE_DELIVERY_TURN_LIMIT,
   NOTIFY_IDLE_RESET_MS,
   NOTIFY_TURN_LIMIT,
   UserNotificationService,
@@ -99,6 +100,119 @@ describe('UserNotificationService', () => {
     expect(await service.notify({ conversationId: 'c1', text: 'a' })).toBe(5);
     subscription.dispose();
     expect(await service.notify({ conversationId: 'c1', text: 'b' })).toBe(0);
+  });
+});
+
+describe('deliverFile per-turn file budget', () => {
+  const fileEvent = (conversationId: string) => ({
+    conversationId,
+    text: 'caption',
+    imagePath: 'C:/workspace/report.pdf',
+  });
+
+  it('queues up to the limit and refuses the next one, naming the reason', async () => {
+    const service = new UserNotificationService();
+    service.addSink(async () => 1);
+    for (let i = 0; i < FILE_DELIVERY_TURN_LIMIT; i += 1) {
+      expect(service.remainingFileDeliveries('c1')).toBeGreaterThan(0);
+      const result = await service.deliverFile(fileEvent('c1'));
+      expect(result.kind).toBe('queued');
+    }
+    expect(service.remainingFileDeliveries('c1')).toBe(0);
+    const capped = await service.deliverFile(fileEvent('c1'));
+    expect(capped.kind).toBe('refused');
+    if (capped.kind === 'refused') {
+      expect(capped.sentThisTurn).toBe(FILE_DELIVERY_TURN_LIMIT);
+      expect(capped.reason).toContain('File delivery limit reached');
+      // The refusal must point at the alternative, or the agent retries.
+      expect(capped.reason).toContain('saved in the workspace');
+    }
+  });
+
+  // The send is queued BEFORE the count matters to the caller: a turn with no
+  // chat bound still spends the slot, so "no chat is watching" cannot be farmed
+  // for unlimited fan-out attempts.
+  it('reports 0 chats but still charges the budget when nothing is bound', async () => {
+    const service = new UserNotificationService();
+    for (let i = 0; i < FILE_DELIVERY_TURN_LIMIT; i += 1) {
+      const result = await service.deliverFile(fileEvent('c1'));
+      expect(result).toEqual({ kind: 'queued', chats: 0 });
+    }
+    expect((await service.deliverFile(fileEvent('c1'))).kind).toBe('refused');
+  });
+
+  // CI-enforced ledger row: the counter lives in the service, cleared by the
+  // existing resetTurn. A counter in a tool closure has no reset path and would
+  // mute the tool for the rest of the session.
+  it('does not leak the file budget across turns', async () => {
+    const service = new UserNotificationService();
+    service.addSink(async () => 1);
+    for (let i = 0; i < FILE_DELIVERY_TURN_LIMIT + 3; i += 1) {
+      await service.deliverFile(fileEvent('c1'));
+    }
+    expect(service.remainingFileDeliveries('c1')).toBe(0);
+    service.resetTurn('c1');
+    expect(service.remainingFileDeliveries('c1')).toBe(FILE_DELIVERY_TURN_LIMIT);
+    expect(await service.deliverFile(fileEvent('c1'))).toEqual({ kind: 'queued', chats: 1 });
+  });
+
+  it('budgets each conversation separately', async () => {
+    const service = new UserNotificationService();
+    service.addSink(async () => 1);
+    for (let i = 0; i < FILE_DELIVERY_TURN_LIMIT; i += 1) {
+      await service.deliverFile(fileEvent('c1'));
+    }
+    expect(service.remainingFileDeliveries('c1')).toBe(0);
+    expect(service.remainingFileDeliveries('c2')).toBe(FILE_DELIVERY_TURN_LIMIT);
+  });
+
+  // One counter for both tools (send_file + render_html_to_image): the cap is
+  // on what the phone receives, not on which tool made the bytes.
+  it('shares one counter across every budgeted delivery', async () => {
+    const service = new UserNotificationService();
+    service.addSink(async () => 1);
+    await service.deliverFile(fileEvent('c1')); // send_file
+    await service.deliverFile(fileEvent('c1')); // render_html_to_image
+    expect(service.remainingFileDeliveries('c1')).toBe(FILE_DELIVERY_TURN_LIMIT - 2);
+  });
+
+  // The two brakes answer different questions, so spending one must not mute
+  // the other: five files must not cost the turn its ability to notify.
+  it('keeps the notify budget intact when the file budget is spent', async () => {
+    const service = new UserNotificationService();
+    service.addSink(async () => 1);
+    for (let i = 0; i < FILE_DELIVERY_TURN_LIMIT; i += 1) {
+      await service.deliverFile(fileEvent('c1'));
+    }
+    expect(service.remainingFileDeliveries('c1')).toBe(0);
+    expect(service.remaining('c1')).toBe(NOTIFY_TURN_LIMIT);
+    expect(await service.notify({ conversationId: 'c1', text: 'still allowed' })).toBe(1);
+  });
+
+  // generate_image keeps the unbudgeted path: it has a per-call approval, and
+  // a render loop is not the risk this budget exists to stop.
+  it('leaves deliverImage unbudgeted', async () => {
+    const service = new UserNotificationService();
+    service.addSink(async () => 1);
+    for (let i = 0; i < FILE_DELIVERY_TURN_LIMIT + 5; i += 1) {
+      expect(await service.deliverImage(fileEvent('c1'))).toBe(1);
+    }
+    expect(service.remainingFileDeliveries('c1')).toBe(FILE_DELIVERY_TURN_LIMIT);
+  });
+
+  // Unlike notify, the file budget has no idle refill. Pin that, so a later
+  // "consistency" change to add one is a decision rather than an accident.
+  it('does not refill the file budget on quiet time', async () => {
+    let clock = 0;
+    const service = new UserNotificationService(undefined, () => clock);
+    service.addSink(async () => 1);
+    for (let i = 0; i < FILE_DELIVERY_TURN_LIMIT; i += 1) {
+      await service.deliverFile(fileEvent('c1'));
+    }
+    clock += NOTIFY_IDLE_RESET_MS * 2;
+    expect(service.remainingFileDeliveries('c1')).toBe(0);
+    // ...while the notify budget does refill, which is the difference.
+    expect(service.remaining('c1')).toBe(NOTIFY_TURN_LIMIT);
   });
 });
 

@@ -13,6 +13,28 @@ export type UserNotificationSink = (event: UserNotificationEvent) => Promise<num
 export const NOTIFY_TURN_LIMIT = 5;
 
 /**
+ * File deliveries a single turn may queue before `deliverFile` refuses.
+ *
+ * Sized to `NOTIFY_TURN_LIMIT` deliberately: both brakes answer the same
+ * question (how much may one turn push at the phone), and a runaway render
+ * loop takes a second or two per call rather than the 30 s a model turn does.
+ * The COUNTERS are separate, though: five images must not spend the ability to
+ * notify, and five notifications must not spend the ability to send a file.
+ */
+export const FILE_DELIVERY_TURN_LIMIT = NOTIFY_TURN_LIMIT;
+
+/**
+ * What a budgeted file delivery decided.
+ *
+ * A discriminated union rather than a bare count because `0` is already a
+ * meaningful count ("no chat is watching") and must not double as "refused" --
+ * the same overclaim the `Sent to` wording once made.
+ */
+export type FileDeliveryResult =
+  | { readonly kind: 'queued'; readonly chats: number }
+  | { readonly kind: 'refused'; readonly sentThisTurn: number; readonly reason: string };
+
+/**
  * Quiet time that returns the whole budget.
  *
  * The cap was sized against `max_tool_rounds` (40) to stop a runaway loop
@@ -59,6 +81,7 @@ export class UserNotificationService {
   private readonly sinks = new Set<UserNotificationSink>();
   private readonly sent = new Map<string, number>();
   private readonly lastSentAt = new Map<string, number>();
+  private readonly filesSent = new Map<string, number>();
   private reachProbe: ((conversationId: string) => number) | undefined;
 
   constructor(
@@ -114,6 +137,11 @@ export class UserNotificationService {
     const key = conversationId ?? NO_CONVERSATION;
     this.sent.delete(key);
     this.lastSentAt.delete(key);
+    // The file budget clears here and nowhere else. Neither budgeted tool has
+    // a turn hook of its own, so a counter kept in a tool closure would have
+    // no reset path at all and would mute the tool for the rest of the session
+    // -- the exact failure this method was moved to turn START to avoid.
+    this.filesSent.delete(key);
   }
 
   /** Remaining notifications right now, after any idle reset has been applied. */
@@ -164,12 +192,56 @@ export class UserNotificationService {
   /**
    * Delivers a generated image to the conversation's remote chats.
    *
-   * Not charged against the notify_user budget: every image already passed a
-   * per-call approval, which is a stronger brake than the burst cap, and an
-   * agent asked for five images must not lose its ability to notify.
+   * The ONE unbudgeted delivery path, and it stays that way on purpose:
+   * `generate_image` asks for approval on every call, which is a stronger brake
+   * than any burst cap, and an agent asked for five images must not lose its
+   * ability to notify. A tool with no per-call approval must use `deliverFile`
+   * instead -- without an approval and without a budget, nothing at all brakes a
+   * loop, and a render takes a second or two rather than a whole model turn.
    */
   async deliverImage(event: UserNotificationEvent & { imagePath: string }): Promise<number> {
     return this.fanOut(event);
+  }
+
+  /** File deliveries still available to this conversation in the current turn. */
+  remainingFileDeliveries(conversationId: string | undefined): number {
+    return FILE_DELIVERY_TURN_LIMIT - this.filesSpent(conversationId ?? NO_CONVERSATION);
+  }
+
+  /**
+   * Queues a file for delivery, charging the shared per-turn file budget.
+   *
+   * `send_file` and `render_html_to_image` share one counter: the limit is on
+   * what the phone receives, not on which tool made the bytes. The check and
+   * the charge are one method rather than a `canSend` probe plus a send, so a
+   * caller cannot forget the check or race its own budget.
+   *
+   * No idle refill, unlike `notify`: a refused file send costs the user nothing
+   * they cannot recover -- the file is on disk and the tool result names its
+   * path -- so a per-turn ceiling is enough. A queued send is NOT refunded when
+   * the later transport fails; the turn already spent the slot it was given.
+   */
+  async deliverFile(
+    event: UserNotificationEvent & { imagePath: string },
+  ): Promise<FileDeliveryResult> {
+    const key = event.conversationId ?? NO_CONVERSATION;
+    const spent = this.filesSpent(key);
+    if (spent >= FILE_DELIVERY_TURN_LIMIT) {
+      return {
+        kind: 'refused',
+        sentThisTurn: spent,
+        reason:
+          `File delivery limit reached: ${spent} of ${FILE_DELIVERY_TURN_LIMIT} allowed this turn. ` +
+          'The file is saved in the workspace -- give the user its path instead of sending it, ' +
+          'or send it in a later turn.',
+      };
+    }
+    this.filesSent.set(key, spent + 1);
+    return { kind: 'queued', chats: await this.fanOut(event) };
+  }
+
+  private filesSpent(key: string): number {
+    return this.filesSent.get(key) ?? 0;
   }
 
   private async fanOut(event: UserNotificationEvent): Promise<number> {
