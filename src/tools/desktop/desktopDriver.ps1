@@ -14,8 +14,9 @@
 #     SendInput time and refuses (sending nothing) if it changed, and reports
 #     the foreground it observed in every input response. It wraps multi-step
 #     input (drag) in try/finally so a held button is released on error (B3).
-#   - `release_all` / `dispose` send button-up + key-up for everything, so an
-#     abort or dispose never leaves a key or button held (B3).
+#   - `release_all` / `dispose` send button-up + key-up only for inputs Windows
+#     reports as down, so an abort cannot leave input held and idle teardown
+#     cannot synthesize a stray right-click (B3).
 
 $ErrorActionPreference = 'Stop'
 [Console]::OutputEncoding = [System.Text.Encoding]::UTF8
@@ -126,6 +127,7 @@ public static class Win32 {
   [DllImport("user32.dll")] public static extern bool IsWindow(IntPtr hWnd);
   [DllImport("user32.dll")] public static extern IntPtr WindowFromPoint(POINT pt);
   [DllImport("user32.dll")] public static extern IntPtr GetAncestor(IntPtr hWnd, uint flags);
+  [DllImport("user32.dll")] public static extern short GetAsyncKeyState(int vKey);
   [DllImport("user32.dll")] public static extern IntPtr OpenInputDesktop(uint dwFlags, bool fInherit, uint dwDesiredAccess);
   [DllImport("user32.dll")] public static extern bool CloseDesktop(IntPtr hDesktop);
   [DllImport("user32.dll")] public static extern bool GetUserObjectInformation(IntPtr hObj, int nIndex, IntPtr pvInfo, int nLength, out int pnLengthNeeded);
@@ -286,14 +288,21 @@ function Send-Button($down, $button) {
   $idx = if ($down) { 0 } else { 1 }
   Send-Inputs @((New-MouseInput 0 0 $map[$button][$idx] 0))
 }
+function Test-InputDown([int]$virtualKey) {
+  # GetAsyncKeyState's high bit is the current down state. Sending a bare UP
+  # for an input that is already up is not harmless: RIGHTUP at the current
+  # cursor can make Electron/VS Code open a context menu during driver cleanup.
+  return (([int][Forge.Win32]::GetAsyncKeyState($virtualKey) -band 0x8000) -ne 0)
+}
 function Send-ReleaseAll {
   $ups = New-Object System.Collections.ArrayList
-  [void]$ups.Add((New-MouseInput 0 0 0x0004 0))  # MOUSEEVENTF_LEFTUP
-  [void]$ups.Add((New-MouseInput 0 0 0x0010 0))  # MOUSEEVENTF_RIGHTUP
-  [void]$ups.Add((New-MouseInput 0 0 0x0040 0))  # MOUSEEVENTF_MIDDLEUP
+  if (Test-InputDown 0x01) { [void]$ups.Add((New-MouseInput 0 0 0x0004 0)) }  # VK_LBUTTON / LEFTUP
+  if (Test-InputDown 0x02) { [void]$ups.Add((New-MouseInput 0 0 0x0010 0)) }  # VK_RBUTTON / RIGHTUP
+  if (Test-InputDown 0x04) { [void]$ups.Add((New-MouseInput 0 0 0x0040 0)) }  # VK_MBUTTON / MIDDLEUP
   foreach ($vk in @(0x11, 0xA2, 0xA3, 0x10, 0xA0, 0xA1, 0x12, 0xA4, 0x5B, 0x5C)) {
-    [void]$ups.Add((New-VkInput $vk $true))
+    if (Test-InputDown $vk) { [void]$ups.Add((New-VkInput $vk $true)) }
   }
+  if ($ups.Count -eq 0) { return }
   try { Send-Inputs $ups } catch { }
 }
 $MAX_EDGE = 1344
