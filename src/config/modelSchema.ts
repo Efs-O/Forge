@@ -61,6 +61,17 @@ export const ModelConfigSchema = z.object({
     .string()
     .regex(/^\/\S*$/, 'unload_path must be an absolute path such as /unload')
     .optional(),
+  // Opt-in process stop for a managed external server. argv only: never a
+  // shell command string, and never interpreted by Forge.
+  stop_on_exit: z.boolean().optional(),
+  stop_command: z
+    .array(
+      z
+        .string()
+        .refine((value) => value.trim().length > 0, 'stop_command entries must not be empty'),
+    )
+    .min(1)
+    .optional(),
   // Omitted = disabled. No implicit default, and YAML `null` is rejected rather
   // than silently meaning "off" — opting in is explicit.
   image_retention_turns: z.number().int().nonnegative().optional(),

@@ -144,6 +144,10 @@ export interface ModelConfig {
    * loads beside a llama.cpp/Ollama model. See ExternalModelServers.
    */
   unload_path?: string;
+  /** Opt in to launching `stop_command` when the last Forge window exits. */
+  stop_on_exit?: boolean;
+  /** Executable plus argv; spawned directly, never interpreted as a shell string. */
+  stop_command?: string[];
   /** Base URL for Ollama or OpenAI-compatible HTTP providers. */
   endpoint?: string;
   /** Per-model GPU layer override. Falls back to LlamaServerConfig.n_gpu_layers. */

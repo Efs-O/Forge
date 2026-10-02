@@ -264,6 +264,30 @@ export const ForgeConfigSchema = z
         });
       }
       if (
+        (model.stop_on_exit !== undefined || model.stop_command) &&
+        provider !== 'openai-compatible'
+      ) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          path: ['models', index, 'stop_on_exit'],
+          message: `stop_on_exit and stop_command are only for provider: openai-compatible (got ${provider})`,
+        });
+      }
+      if (model.stop_on_exit === true && !model.stop_command) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          path: ['models', index, 'stop_command'],
+          message: 'stop_command is required when stop_on_exit is true',
+        });
+      }
+      if (model.stop_on_exit === true && !model.unload_path) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          path: ['models', index, 'unload_path'],
+          message: 'unload_path is required when stop_on_exit is true',
+        });
+      }
+      if (
         (provider === 'xai' ||
           provider === 'openrouter' ||
           provider === 'openai' ||

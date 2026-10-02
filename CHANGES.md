@@ -1,5 +1,19 @@
 # Forge — Recent Changes
 
+## 0.16.73
+
+### Strata lifecycle follows Forge (2026-10-02)
+
+- Fixed a residency race where a slow unload completion could overwrite a
+  newer Strata request, causing later unload commands to report that the model
+  was not loaded and skip the unload POST.
+- Managed external models can now opt into `stop_on_exit` with an argv-only
+  `stop_command`. The last live Forge window unloads the server, then launches
+  its detached stop command; other windows, active turns, and a server-reported
+  busy state prevent the stop.
+- Extension deactivation now awaits backend unload instead of discarding the
+  asynchronous teardown promise.
+
 ## 0.16.72
 
 ### Silent Telegram liveness clock (2026-10-02)

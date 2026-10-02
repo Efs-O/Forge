@@ -1,5 +1,5 @@
 import * as path from 'path';
-import { createHash } from 'crypto';
+import { createHash, randomUUID } from 'crypto';
 import * as vscode from 'vscode';
 import { UserQuestionService } from './sidebar/UserQuestionService';
 import { UserNotificationService } from './sidebar/UserNotificationService';
@@ -9,6 +9,7 @@ import { HistoryArchive } from './sidebar/HistoryArchive';
 import { watchWorkspaceFolders } from './sidebar/workspaceInfo';
 import { BackendPool } from './backend/BackendPool';
 import { ExternalModelServers, setExternalRequestHook } from './backend/ExternalModelServers';
+import { SharedRuntimeRegistry } from './backend/SharedRuntimeRegistry';
 import { disposeServerChannel } from './backend/DirectBackend';
 import { ControlServer } from './backend/ControlServer';
 import { ControlServerRegistry, controlServerRegistryPath } from './backend/ControlServerRegistry';
@@ -58,6 +59,17 @@ import { setupJobs } from './vscode/jobsSetup';
 import { JobStore } from './jobs/JobStore';
 
 let activeRemoteRuntime: RemoteRuntime | undefined;
+const EXTERNAL_LIFECYCLE_LEASE_KEY = 'external-model-stop-on-exit';
+
+interface ActiveExternalLifecycle {
+  pool: BackendPool;
+  servers: ExternalModelServers;
+  registry: SharedRuntimeRegistry;
+  leaseId: string;
+  isBusy: (modelName: string) => boolean;
+}
+
+let activeExternalLifecycle: ActiveExternalLifecycle | undefined;
 
 export async function activate(context: vscode.ExtensionContext): Promise<void> {
   initLogger(context);
@@ -92,7 +104,12 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
     () => config,
     async (key) => context.secrets.get(key),
   );
-  const pool = new BackendPool(config, undefined, externalServers);
+  // Reuse the shared-runtime lease registry for cross-window liveness. Its
+  // existing PID cleanup means a crashed extension host cannot block shutdown.
+  const sharedRegistry = new SharedRuntimeRegistry();
+  const externalLifecycleLeaseId = randomUUID();
+  sharedRegistry.acquireLease(EXTERNAL_LIFECYCLE_LEASE_KEY, externalLifecycleLeaseId);
+  const pool = new BackendPool(config, sharedRegistry, externalServers);
   setExternalRequestHook((model) => pool.prepareExternal(model.name));
 
   // ── Tool registry ─────────────────────────────────────────────────────────
@@ -213,6 +230,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
 
   let refreshSessionTime = (): void => {};
   let followSessionTime: (conversationId: string | undefined) => void = () => {};
+  const activeTurnModels = new Map<string, string>();
   sidebarProvider = new SidebarProvider(
     context.extensionUri,
     pool,
@@ -228,6 +246,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
     templateEngine,
     {
       onGenerationStarted: (modelName, conversationId) => {
+        if (modelName && conversationId) activeTurnModels.set(conversationId, modelName);
         statusBar.setGenerating(modelName);
         // Turn START, not end: a cancelled or thrown turn never reaches its end,
         // and a leaked counter would silently mute the agent from then on.
@@ -237,7 +256,8 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
         if (conversationId !== undefined) followSessionTime(conversationId);
         refreshSessionTime();
       },
-      onGenerationFinished: (modelName) => {
+      onGenerationFinished: (modelName, conversationId) => {
+        if (conversationId) activeTurnModels.delete(conversationId);
         if (pool.isAnyReady()) statusBar.setReady(modelName);
         else statusBar.setStopped(modelName);
         refreshSessionTime();
@@ -260,6 +280,13 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
     chatAttachments,
     HistoryArchive.inStorageDir(context.storageUri?.fsPath, workspaceRoot),
   );
+  activeExternalLifecycle = {
+    pool,
+    servers: externalServers,
+    registry: sharedRegistry,
+    leaseId: externalLifecycleLeaseId,
+    isBusy: (modelName) => [...activeTurnModels.values()].includes(modelName),
+  };
   // Best-effort, after the session is loaded: an attachment whose conversation
   // is gone is unreachable, and nothing else ever deletes it.
   void chatAttachments.prune(sidebarProvider.liveConversationIds());
@@ -365,8 +392,10 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
   });
 
   context.subscriptions.push(
-    { dispose: () => void pool.stopAll() },
-    { dispose: () => setExternalRequestHook(undefined) },
+    {
+      dispose: () =>
+        sharedRegistry.releaseLease(EXTERNAL_LIFECYCLE_LEASE_KEY, externalLifecycleLeaseId),
+    },
     { dispose: () => backgroundExecutionManager.dispose() },
   );
 
@@ -374,7 +403,20 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
 }
 
 export async function deactivate(): Promise<void> {
-  // backend.stop() runs via the subscription above; the rest is explicit teardown.
+  const lifecycle = activeExternalLifecycle;
+  activeExternalLifecycle = undefined;
+  if (lifecycle) {
+    lifecycle.registry.releaseLease(EXTERNAL_LIFECYCLE_LEASE_KEY, lifecycle.leaseId);
+    const lastWindow = !lifecycle.registry.hasBorrowers(EXTERNAL_LIFECYCLE_LEASE_KEY);
+    await lifecycle.servers.stopOnExit({
+      lastWindow,
+      isBusy: lifecycle.isBusy,
+    });
+    await lifecycle.pool
+      .stopAll()
+      .catch((error) => getLogger().error('[BackendPool] deactivate stop failed', error));
+  }
+  setExternalRequestHook(undefined);
   disposeServerChannel();
   await closeBrowserSessionOnShutdown((err) => getLogger().error('browser close failed', err));
   const desktopDriver = getDesktopDriver();

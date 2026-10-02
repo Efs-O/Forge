@@ -1,3 +1,4 @@
+import { spawn, type SpawnOptions } from 'child_process';
 import type { ForgeConfig, ModelConfig } from '../config/types';
 import { mergeGroupsIntoModel } from '../config/ConfigResolver';
 import { getLogger } from '../util/logger';
@@ -11,6 +12,24 @@ type Residency = 'unknown' | 'loaded' | 'unloaded';
 
 export type SecretLookup = (key: string) => Promise<string | undefined>;
 
+export interface StopChild {
+  unref(): void;
+  once?(event: 'error', listener: (error: Error) => void): unknown;
+}
+
+export type StopSpawner = (
+  command: string,
+  args: readonly string[],
+  options: SpawnOptions,
+) => StopChild;
+
+export interface StopOnExitOptions {
+  lastWindow: boolean;
+  isBusy: (modelName: string) => boolean;
+}
+
+export class ExternalServerBusyError extends Error {}
+
 /**
  * Local model servers Forge does not spawn but can unload (Strata): an
  * `openai-compatible` model with `unload_path`. The server process stays up;
@@ -21,11 +40,15 @@ export type SecretLookup = (key: string) => Promise<string | undefined>;
  */
 export class ExternalModelServers {
   private readonly residency = new Map<string, Residency>();
+  /** Incremented before each request so a late unload completion cannot erase it. */
+  private readonly activityGeneration = new Map<string, number>();
 
   constructor(
     private readonly getConfig: () => ForgeConfig,
     private readonly secret: SecretLookup,
     private readonly fetchImpl: typeof fetch = fetch,
+    private readonly spawnImpl: StopSpawner = (command, args, options) =>
+      spawn(command, [...args], options),
   ) {}
 
   /** The resolved model when `name` (a pool key) is a managed server. */
@@ -54,12 +77,15 @@ export class ExternalModelServers {
 
   /** A request is about to go to `name`; the server will load its model. */
   markInUse(name: string): void {
-    if (this.isManaged(name)) this.residency.set(name, 'loaded');
+    if (!this.isManaged(name)) return;
+    this.activityGeneration.set(name, (this.activityGeneration.get(name) ?? 0) + 1);
+    this.residency.set(name, 'loaded');
   }
 
   async unload(name: string): Promise<void> {
     const model = this.managed(name);
     if (!model?.endpoint || !model.unload_path) return;
+    const generation = this.activityGeneration.get(name) ?? 0;
     const url = new URL(model.unload_path, model.endpoint).toString();
     const token = model.api_key_secret ? await this.secret(model.api_key_secret) : undefined;
     let response: Response;
@@ -72,7 +98,7 @@ export class ExternalModelServers {
     } catch (err) {
       // No listening server holds no VRAM — the one error that means "unloaded".
       if (isConnectionRefused(err)) {
-        this.residency.set(name, 'unloaded');
+        this.markUnloadedUnlessReused(name, generation);
         log.info(`[ExternalModelServers] "${name}" is not running — nothing to unload`);
         return;
       }
@@ -81,9 +107,11 @@ export class ExternalModelServers {
     if (!response.ok) {
       const body = (await response.text().catch(() => '')).slice(0, 300);
       const busy = response.status === 409 ? ' — a request is still running on it' : '';
-      throw new Error(`Could not unload "${name}": HTTP ${response.status}${busy} ${body}`.trim());
+      const message = `Could not unload "${name}": HTTP ${response.status}${busy} ${body}`.trim();
+      if (response.status === 409) throw new ExternalServerBusyError(message);
+      throw new Error(message);
     }
-    this.residency.set(name, 'unloaded');
+    this.markUnloadedUnlessReused(name, generation);
     log.info(`[ExternalModelServers] unloaded "${name}"`);
   }
 
@@ -94,6 +122,61 @@ export class ExternalModelServers {
       .filter((r): r is PromiseRejectedResult => r.status === 'rejected')
       .map((r) => (r.reason instanceof Error ? r.reason.message : String(r.reason)));
     if (failures.length) throw new Error(failures.join('\n'));
+  }
+
+  /** Unload and launch each opted-in server's detached stop command. */
+  async stopOnExit(options: StopOnExitOptions): Promise<void> {
+    const models = this.getConfig().models.filter((model) => model.stop_on_exit === true);
+    for (const model of models) {
+      if (!options.lastWindow) {
+        log.info(`[ExternalModelServers] skipped stop "${model.name}": other Forge windows`);
+        continue;
+      }
+      if (options.isBusy(model.name)) {
+        log.info(`[ExternalModelServers] skipped stop "${model.name}": busy in this window`);
+        continue;
+      }
+      try {
+        await this.unload(model.name);
+      } catch (error) {
+        if (error instanceof ExternalServerBusyError) {
+          log.info(`[ExternalModelServers] skipped stop "${model.name}": server reported busy`);
+        } else {
+          log.error(`[ExternalModelServers] could not unload "${model.name}" before stop`, error);
+        }
+        continue;
+      }
+      this.launchStop(model);
+    }
+  }
+
+  private markUnloadedUnlessReused(name: string, generation: number): void {
+    if ((this.activityGeneration.get(name) ?? 0) === generation) {
+      this.residency.set(name, 'unloaded');
+    } else {
+      log.info(
+        `[ExternalModelServers] "${name}" was requested during unload; residency stays loaded`,
+      );
+    }
+  }
+
+  private launchStop(model: ModelConfig): void {
+    const [command, ...args] = model.stop_command ?? [];
+    if (!command) return; // Config validation makes this unreachable in production.
+    try {
+      const child = this.spawnImpl(command, args, {
+        detached: true,
+        windowsHide: true,
+        stdio: 'ignore',
+      });
+      child.once?.('error', (error) =>
+        log.error(`[ExternalModelServers] stop command failed for "${model.name}"`, error),
+      );
+      child.unref();
+      log.info(`[ExternalModelServers] stop launched for "${model.name}"`);
+    } catch (error) {
+      log.error(`[ExternalModelServers] could not launch stop for "${model.name}"`, error);
+    }
   }
 }
 

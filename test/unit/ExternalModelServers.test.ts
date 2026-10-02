@@ -116,6 +116,24 @@ describe('ExternalModelServers', () => {
     expect(servers.isLoaded('strata')).toBe(true);
   });
 
+  it('does not let a late unload completion erase a concurrent request', async () => {
+    let finishUnload: ((response: Response) => void) | undefined;
+    const response = new Promise<Response>((resolve) => {
+      finishUnload = resolve;
+    });
+    const { servers, calls } = makeServers(async () => response);
+
+    const unloading = servers.unload('strata');
+    await vi.waitFor(() => expect(calls).toHaveLength(1));
+    servers.markInUse('strata');
+    finishUnload?.(new Response('{"status":"unloaded"}', { status: 200 }));
+    await unloading;
+
+    expect(servers.isLoaded('strata')).toBe(true);
+    await servers.unload('strata');
+    expect(calls).toHaveLength(2);
+  });
+
   it('surfaces a busy server instead of claiming it unloaded', async () => {
     const { servers } = makeServers(async () => new Response('{"status":"busy"}', { status: 409 }));
     await expect(servers.unload('strata')).rejects.toThrow(/409 — a request is still running/);
@@ -137,6 +155,53 @@ describe('ExternalModelServers', () => {
       throw new TypeError('fetch failed');
     });
     await expect(servers.unload('strata')).rejects.toThrow(/Could not unload "strata"/);
+  });
+
+  it('launches an injected detached stop command only for the last idle window', async () => {
+    const config = makeConfig();
+    const strata = config.models.find((model) => model.name === 'strata')!;
+    strata.stop_on_exit = true;
+    strata.stop_command = ['stop-strata', '--graceful'];
+    const fetchImpl = vi.fn(async () => new Response('{"status":"unloaded"}', { status: 200 }));
+    const unref = vi.fn();
+    const spawnImpl = vi.fn(() => ({ unref }));
+    const servers = new ExternalModelServers(
+      () => config,
+      async () => undefined,
+      fetchImpl as unknown as typeof fetch,
+      spawnImpl,
+    );
+
+    await servers.stopOnExit({ lastWindow: false, isBusy: () => false });
+    await servers.stopOnExit({ lastWindow: true, isBusy: () => true });
+    expect(fetchImpl).not.toHaveBeenCalled();
+    expect(spawnImpl).not.toHaveBeenCalled();
+
+    await servers.stopOnExit({ lastWindow: true, isBusy: () => false });
+    expect(fetchImpl).toHaveBeenCalledTimes(1);
+    expect(spawnImpl).toHaveBeenCalledWith('stop-strata', ['--graceful'], {
+      detached: true,
+      windowsHide: true,
+      stdio: 'ignore',
+    });
+    expect(unref).toHaveBeenCalledOnce();
+  });
+
+  it('does not launch the stop command when the server reports busy', async () => {
+    const config = makeConfig();
+    const strata = config.models.find((model) => model.name === 'strata')!;
+    strata.stop_on_exit = true;
+    strata.stop_command = ['stop-strata'];
+    const spawnImpl = vi.fn(() => ({ unref: vi.fn() }));
+    const servers = new ExternalModelServers(
+      () => config,
+      async () => undefined,
+      async () => new Response('{"status":"busy"}', { status: 409 }),
+      spawnImpl,
+    );
+
+    await servers.stopOnExit({ lastWindow: true, isBusy: () => false });
+    expect(spawnImpl).not.toHaveBeenCalled();
   });
 });
 
@@ -226,5 +291,25 @@ describe('unload_path config', () => {
     });
     expect(bad.success).toBe(false);
     expect(JSON.stringify(bad.error?.issues)).toContain('only for provider: openai-compatible');
+  });
+
+  it('requires stop_command and unload_path when stop_on_exit is true', () => {
+    const model = {
+      name: 'm',
+      provider: 'openai-compatible' as const,
+      endpoint: 'http://127.0.0.1:8080',
+      api_key_secret: 's',
+      stop_on_exit: true,
+    };
+    const missingBoth = ForgeConfigSchema.safeParse({ ...base, models: [model] });
+    expect(missingBoth.success).toBe(false);
+    expect(JSON.stringify(missingBoth.error?.issues)).toContain('stop_command is required');
+    expect(JSON.stringify(missingBoth.error?.issues)).toContain('unload_path is required');
+
+    const valid = ForgeConfigSchema.safeParse({
+      ...base,
+      models: [{ ...model, unload_path: '/unload', stop_command: ['cmd.exe', '/c', 'stop.bat'] }],
+    });
+    expect(valid.success).toBe(true);
   });
 });
