@@ -1,10 +1,15 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { spawn } from 'child_process';
+import * as fs from 'fs';
+import * as os from 'os';
+import * as path from 'path';
 import { BackendPool } from '../../src/backend/BackendPool';
 import {
   ExternalModelServers,
   beforeExternalRequest,
   setExternalRequestHook,
 } from '../../src/backend/ExternalModelServers';
+import { deferredStopInvocation, STOP_GRACE_MS } from '../../src/backend/deferredStop';
 import { freeLocalForExternal } from '../../src/backend/poolAcquisition';
 import { ForgeConfigSchema } from '../../src/config/schema';
 import { resolveRequestModel } from '../../src/config/ConfigResolver';
@@ -172,27 +177,33 @@ describe('ExternalModelServers', () => {
       spawnImpl,
     );
 
-    await servers.stopOnExit({ lastWindow: false, isBusy: () => false });
-    await servers.stopOnExit({ lastWindow: true, isBusy: () => true });
+    await servers.stopOnExit({ lastWindow: false, isBusy: () => false, leaseDir: 'leases' });
+    await servers.stopOnExit({ lastWindow: true, isBusy: () => true, leaseDir: 'leases' });
     expect(fetchImpl).not.toHaveBeenCalled();
     expect(spawnImpl).not.toHaveBeenCalled();
 
-    await servers.stopOnExit({ lastWindow: true, isBusy: () => false });
+    await servers.stopOnExit({ lastWindow: true, isBusy: () => false, leaseDir: 'leases' });
     expect(fetchImpl).toHaveBeenCalledTimes(1);
-    expect(spawnImpl).toHaveBeenCalledWith('stop-strata', ['--graceful'], {
+    const { command, args, env } = deferredStopInvocation('leases', STOP_GRACE_MS, [
+      'stop-strata',
+      '--graceful',
+    ]);
+    expect(spawnImpl).toHaveBeenCalledWith(command, args, {
       detached: true,
       windowsHide: true,
       stdio: 'ignore',
+      env,
     });
     expect(unref).toHaveBeenCalledOnce();
   });
 
-  it('does not launch the stop command when the server reports busy', async () => {
+  it('cancels the stop watcher when the server reports busy', async () => {
     const config = makeConfig();
     const strata = config.models.find((model) => model.name === 'strata')!;
     strata.stop_on_exit = true;
     strata.stop_command = ['stop-strata'];
-    const spawnImpl = vi.fn(() => ({ unref: vi.fn() }));
+    const kill = vi.fn(() => true);
+    const spawnImpl = vi.fn(() => ({ unref: vi.fn(), kill }));
     const servers = new ExternalModelServers(
       () => config,
       async () => undefined,
@@ -200,9 +211,68 @@ describe('ExternalModelServers', () => {
       spawnImpl,
     );
 
-    await servers.stopOnExit({ lastWindow: true, isBusy: () => false });
-    expect(spawnImpl).not.toHaveBeenCalled();
+    await servers.stopOnExit({ lastWindow: true, isBusy: () => false, leaseDir: 'leases' });
+    expect(kill).toHaveBeenCalledOnce();
   });
+
+  it('keeps the stop watcher when the unload fails for another reason', async () => {
+    const config = makeConfig();
+    const strata = config.models.find((model) => model.name === 'strata')!;
+    strata.stop_on_exit = true;
+    strata.stop_command = ['stop-strata'];
+    const kill = vi.fn(() => true);
+    const spawnImpl = vi.fn(() => ({ unref: vi.fn(), kill }));
+    const servers = new ExternalModelServers(
+      () => config,
+      async () => undefined,
+      async () => {
+        throw new TypeError('fetch failed');
+      },
+      spawnImpl,
+    );
+
+    await servers.stopOnExit({ lastWindow: true, isBusy: () => false, leaseDir: 'leases' });
+    expect(spawnImpl).toHaveBeenCalledOnce();
+    expect(kill).not.toHaveBeenCalled();
+  });
+});
+
+describe('deferred stop watcher', () => {
+  // Runs the real watcher script; the "stop command" is node writing a marker.
+  async function runWatcher(leasePid: number | undefined): Promise<boolean> {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'forge-stop-'));
+    const leaseDir = path.join(dir, 'leases');
+    fs.mkdirSync(leaseDir);
+    if (leasePid !== undefined) {
+      fs.writeFileSync(path.join(leaseDir, 'a.json'), JSON.stringify({ pid: leasePid }));
+    }
+    const marker = path.join(dir, 'stopped');
+    const stop = [
+      process.execPath,
+      '-e',
+      `require('fs').writeFileSync(${JSON.stringify(marker)}, 'x')`,
+    ];
+    const { command, args, env } = deferredStopInvocation(leaseDir, 50, stop);
+    await new Promise<void>((resolve, reject) => {
+      const child = spawn(command, args, { env, stdio: 'ignore' });
+      child.once('error', reject);
+      child.once('exit', () => resolve());
+    });
+    for (let i = 0; i < 30 && !fs.existsSync(marker); i++) {
+      await new Promise((resolve) => setTimeout(resolve, 100));
+    }
+    const stopped = fs.existsSync(marker);
+    fs.rmSync(dir, { recursive: true, force: true });
+    return stopped;
+  }
+
+  it('stops the server when no Forge window holds a lease', async () => {
+    expect(await runWatcher(undefined)).toBe(true);
+  }, 15_000);
+
+  it('leaves the server running when a live window re-took a lease (reload)', async () => {
+    expect(await runWatcher(process.pid)).toBe(false);
+  }, 15_000);
 });
 
 describe('BackendPool with a managed external server', () => {

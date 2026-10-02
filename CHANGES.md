@@ -13,6 +13,8 @@
   busy state prevent the stop.
 - Extension deactivation now awaits backend unload instead of discarding the
   asynchronous teardown promise.
+- The stop is deferred 20 s by a detached watcher and skipped if a Forge window
+  has come back by then, so reloading the only window no longer stops Strata.
 
 ## 0.16.72
 

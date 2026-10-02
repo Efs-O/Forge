@@ -152,7 +152,8 @@ export class SharedRuntimeRegistry {
     fs.mkdirSync(this.root, { recursive: true });
     writeFileAtomicSync(this.ownerPath(record.key), `${JSON.stringify(record)}\n`);
   }
-  private leaseDir(key: string): string {
+  /** Where `key`'s lease files live; the deferred stop watcher reads it after the host exits. */
+  leaseDir(key: string): string {
     return path.join(this.root, `${key}.leases`);
   }
 }

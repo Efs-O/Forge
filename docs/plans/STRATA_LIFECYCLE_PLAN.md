@@ -169,7 +169,15 @@ launched`) to the Forge log. A stop that couldn't launch is an error in the
 - **Starting** Strata from Forge. It stays a manual or startup-script action;
   that's a separate decision.
 - Window _reload_. A reload is not the last window closing; the existing
-  unload-on-reload behaviour stays as it is.
+  unload-on-reload behaviour stays as it is. **Review finding (2026-10-02):**
+  `deactivate()` cannot tell a reload from a close, so the first implementation
+  stopped Strata on every single-window reload. Fixed by deferring the stop:
+  `deactivate()` launches a detached watcher (`src/backend/deferredStop.ts`,
+  this host's own binary under `ELECTRON_RUN_AS_NODE`) that waits
+  `STOP_GRACE_MS` (20 s) and runs `stop_command` only if no live window holds a
+  lifecycle lease by then. A reloaded window re-acquires its lease during
+  `onStartupFinished` activation. The watcher starts *before* the unload POST,
+  so a host killed mid-unload still stops Strata; a 409 kills the watcher.
 - Force-killing. `stop_command` is the user's; Forge never `taskkill /F`s
   anything on its own (CLAUDE.md hard stop).
 
@@ -190,14 +198,15 @@ launched`) to the Forge log. A stop that couldn't launch is an error in the
 | --------------------------------------------------------- | -------------------------------------------------------------- | ----------------------------------------------------------------------- | --------------------------------------- | ----------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------- | ------------------ |
 | `stop_on_exit` / `stop_command` in config.yaml            | Hand edit only                                                 | Hand edit; absent = no stop (today's behaviour)                         | `stop_on_exit: false` is the off switch | Existing loader reports an unparseable config and Forge keeps the last good config                    | Read via `getConfig()` at deactivate; nothing cached                                                                                         | None               |
 | Strata server process (owned by the user's start script)  | `start-strata-hidden.vbs`, by hand or at login; never by Forge | Forge launches `stop_command` at last-window exit; or the user stops it | `stop_on_exit: false`                   | `stop_command` fails mid-run: Strata keeps running, which is today's state, and the failure is logged | VS Code killed or crashed, so deactivate never runs: Strata keeps running, which is today's state; the next close of a Forge window stops it | None               |
-| Detached stop child (`cmd`/`explorer` running the .bat)   | `deactivate()`                                                 | Exits on its own after taskkill + 3 s                                   | n/a                                     | Dies part-way: Strata either got the close message or keeps running, as above                         | Must outlive the extension host; phase 1 step 4 verifies this                                                                                | Finishes in ~3–5 s |
+| Detached stop watcher (host binary as Node, then `stop_command`) | `deactivate()`, before the unload POST                  | Exits after the grace period, having launched `stop_command` or not     | A live lease at expiry (reload) skips the stop; a 409 kills it while the host lives | Dies part-way: Strata either got the close message or keeps running, as above                         | Must outlive the extension host; phase 1 step 4 verifies this                                                                                | 20 s grace, then ~3–5 s |
 | Cross-window liveness entries (existing registry, reused) | Owned by the existing registry; no new artifact                | Existing rules                                                          | n/a                                     | Existing rules                                                                                        | Existing staleness rule; a crashed window must not block the stop forever                                                                    | Existing rule      |
 | Residency map (in memory, existing)                       | First config read: `unknown`                                   | Dies with the extension host                                            | n/a                                     | n/a                                                                                                   | Restart starts at `unknown` = loaded                                                                                                         | None               |
 
 CI-enforced row: a unit test proves `stop_on_exit` without `stop_command` (or
 without `unload_path`) is rejected by the config schema, and that
 `ExternalModelServers` launches the stop command only when it is the last window
-and nothing is busy. The spawn is injected and asserted, never really run.
+and nothing is busy. The spawn is injected and asserted; the watcher script
+itself is really run against a lease directory with and without a live pid.
 
 ## Acceptance criteria
 
@@ -209,7 +218,8 @@ and nothing is busy. The spawn is injected and asserted, never really run.
   covered by `test/unit/ExternalModelServers.test.ts`; the live GPU check is
   intentionally left to the reviewer.
 - [ ] With `stop_on_exit: true`: closing the last VS Code window stops the Strata
-  process. No `strata.exe` remains within 15 s, and port 8080 is closed. Closing
+  process. No `strata.exe` remains within 30 s (20 s grace + the .bat), and
+  port 8080 is closed. Reloading the only window leaves it running. Closing
   one of two Forge windows leaves it running. Closing while a Strata turn or job
   runs leaves it running and logs why. Unit coverage proves the last-window,
   busy, 409, detached-spawn, and `unref()` decisions; process survival is left

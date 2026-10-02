@@ -2,6 +2,7 @@ import { spawn, type SpawnOptions } from 'child_process';
 import type { ForgeConfig, ModelConfig } from '../config/types';
 import { mergeGroupsIntoModel } from '../config/ConfigResolver';
 import { getLogger } from '../util/logger';
+import { deferredStopInvocation, STOP_GRACE_MS } from './deferredStop';
 
 const log = getLogger();
 
@@ -14,6 +15,7 @@ export type SecretLookup = (key: string) => Promise<string | undefined>;
 
 export interface StopChild {
   unref(): void;
+  kill?(): boolean;
   once?(event: 'error', listener: (error: Error) => void): unknown;
 }
 
@@ -26,6 +28,8 @@ export type StopSpawner = (
 export interface StopOnExitOptions {
   lastWindow: boolean;
   isBusy: (modelName: string) => boolean;
+  /** Lifecycle lease directory the deferred watcher re-checks before stopping. */
+  leaseDir: string;
 }
 
 export class ExternalServerBusyError extends Error {}
@@ -124,7 +128,11 @@ export class ExternalModelServers {
     if (failures.length) throw new Error(failures.join('\n'));
   }
 
-  /** Unload and launch each opted-in server's detached stop command. */
+  /**
+   * For each opted-in server: start the deferred stop watcher, then unload.
+   * The watcher starts first because the host may die before the unload
+   * returns; a server-reported busy (409) cancels it while the host lives.
+   */
   async stopOnExit(options: StopOnExitOptions): Promise<void> {
     const models = this.getConfig().models.filter((model) => model.stop_on_exit === true);
     for (const model of models) {
@@ -136,17 +144,17 @@ export class ExternalModelServers {
         log.info(`[ExternalModelServers] skipped stop "${model.name}": busy in this window`);
         continue;
       }
+      const watcher = this.launchStop(model, options.leaseDir);
       try {
         await this.unload(model.name);
       } catch (error) {
         if (error instanceof ExternalServerBusyError) {
+          watcher?.kill?.();
           log.info(`[ExternalModelServers] skipped stop "${model.name}": server reported busy`);
         } else {
           log.error(`[ExternalModelServers] could not unload "${model.name}" before stop`, error);
         }
-        continue;
       }
-      this.launchStop(model);
     }
   }
 
@@ -160,22 +168,28 @@ export class ExternalModelServers {
     }
   }
 
-  private launchStop(model: ModelConfig): void {
-    const [command, ...args] = model.stop_command ?? [];
-    if (!command) return; // Config validation makes this unreachable in production.
+  private launchStop(model: ModelConfig, leaseDir: string): StopChild | undefined {
+    const stopCommand = model.stop_command ?? [];
+    if (!stopCommand[0]) return undefined; // Config validation makes this unreachable in production.
+    const { command, args, env } = deferredStopInvocation(leaseDir, STOP_GRACE_MS, stopCommand);
     try {
       const child = this.spawnImpl(command, args, {
         detached: true,
         windowsHide: true,
         stdio: 'ignore',
+        env,
       });
       child.once?.('error', (error) =>
-        log.error(`[ExternalModelServers] stop command failed for "${model.name}"`, error),
+        log.error(`[ExternalModelServers] stop watcher failed for "${model.name}"`, error),
       );
       child.unref();
-      log.info(`[ExternalModelServers] stop launched for "${model.name}"`);
+      log.info(
+        `[ExternalModelServers] stop scheduled for "${model.name}" in ${STOP_GRACE_MS / 1000} s unless a Forge window reopens`,
+      );
+      return child;
     } catch (error) {
       log.error(`[ExternalModelServers] could not launch stop for "${model.name}"`, error);
+      return undefined;
     }
   }
 }

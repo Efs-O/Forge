@@ -411,6 +411,7 @@ export async function deactivate(): Promise<void> {
     await lifecycle.servers.stopOnExit({
       lastWindow,
       isBusy: lifecycle.isBusy,
+      leaseDir: lifecycle.registry.leaseDir(EXTERNAL_LIFECYCLE_LEASE_KEY),
     });
     await lifecycle.pool
       .stopAll()
