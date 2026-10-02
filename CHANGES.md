@@ -1,6 +1,6 @@
 # Forge — Recent Changes
 
-## 0.16.71
+## 0.16.72
 
 ### Silent Telegram liveness clock (2026-10-02)
 
@@ -20,6 +20,8 @@
   a running turn it refuses with the model's name instead.
 - Requests to such a server wait up to 30 min for headers, like llama.cpp,
   because a just-unloaded Strata reloads before it answers.
+
+## 0.16.71
 
 ### Keep scheduled agent tasks off a busy local GPU (2026-10-01)
 
