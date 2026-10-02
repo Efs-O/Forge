@@ -42,3 +42,27 @@ export function codexThreadStartParams(cwd: string, model?: string): Record<stri
     ...(model ? { model } : {}),
   };
 }
+
+/**
+ * Parameters for `thread/resume`. A resumed thread otherwise keeps the
+ * model/effort it was created with, so `agent_bus.codex_model`/`codex_effort`
+ * have to be re-applied here — verified 2026-10-03 against codex-cli 0.155.1:
+ * a thread created on `gpt-5.6-sol`/`medium` runs the next turn on
+ * `gpt-6-luna`/`xhigh` when resumed with these params, and a later plain
+ * resume keeps them. `config` on `thread/resume` is NOT experimental-gated,
+ * unlike `thread/settings/update` (which needs `experimentalApi` and so is
+ * unusable here). No fallback on rejection: a Codex that stops accepting
+ * these overrides must fail visibly rather than silently keep the old model.
+ * See docs/CODEX_MODEL_SELECTION.md.
+ */
+export function codexThreadResumeParams(
+  threadId: string,
+  model?: string,
+  effort?: string,
+): Record<string, unknown> {
+  return {
+    threadId,
+    ...(model ? { model } : {}),
+    ...(effort ? { config: { model_reasoning_effort: effort } } : {}),
+  };
+}

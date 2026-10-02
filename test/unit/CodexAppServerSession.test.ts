@@ -59,6 +59,42 @@ describe('CodexAppServerSession', () => {
     await current.dispose();
   });
 
+  // The resume path used to drop agent_bus.codex_model/codex_effort, so a
+  // resumed thread silently kept the model it was created with. The fixture
+  // refuses the resume unless the overrides are on the wire.
+  it('re-applies codex_model and codex_effort when resuming a thread', async () => {
+    const current = new CodexAppServerSession({
+      cliName: 'codex',
+      executable: process.execPath,
+      argsPrefix: [fixture, 'REQUIRE_FORGE_RESUME_MODEL', 'REQUIRE_FORGE_RESUME_EFFORT'],
+      access: 'full',
+      cwd: process.cwd(),
+      confirmedSessionId: 'persisted-thread',
+      model: 'gpt-6-luna',
+      effort: 'xhigh',
+    });
+    const result = await current.send('resumed with overrides');
+    expect(result.error).toBeUndefined();
+    expect(result.status).toBe('completed');
+    expect(result.sessionId).toBe('persisted-thread');
+    await current.dispose();
+  });
+
+  it('sends no resume overrides when neither model nor effort is configured', async () => {
+    const current = new CodexAppServerSession({
+      cliName: 'codex',
+      executable: process.execPath,
+      argsPrefix: [fixture, 'REQUIRE_FORGE_RESUME_BARE'],
+      access: 'full',
+      cwd: process.cwd(),
+      confirmedSessionId: 'persisted-thread',
+    });
+    const result = await current.send('resumed bare');
+    expect(result.error).toBeUndefined();
+    expect(result.status).toBe('completed');
+    await current.dispose();
+  });
+
   it('applies the full-access, never-approval policy to the Forge-owned app-server process', async () => {
     const current = new CodexAppServerSession({
       cliName: 'codex',

@@ -1,5 +1,21 @@
 # Forge — Recent Changes
 
+## 0.16.76
+
+### Codex sessions now honour `agent_bus.codex_model` / `codex_effort` on resume
+
+A Forge-owned Codex session starts a thread with the configured model, but the
+**resume** path sent only `threadId`, so a resumed thread silently kept whatever
+model and reasoning effort it was created with — changing `codex_model` in
+`.forge/config.yaml` had no effect on an existing chat. `thread/resume` now
+carries `model` and `config.model_reasoning_effort`, the only non-experimental
+override channel (`thread/settings/update` needs `experimentalApi`). Nothing is
+sent when neither key is configured, so a plain resume stays byte-identical.
+
+- New reference doc `docs/CODEX_MODEL_SELECTION.md`: the two config keys, the
+  authoritative model/effort list from one `model/list` call, where selection
+  applies, and how to verify the model a running Codex actually uses.
+
 ## 0.16.75
 
 ### Bug-hunt fixes (2026-10-02)

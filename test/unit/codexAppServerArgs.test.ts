@@ -1,5 +1,9 @@
 import { describe, expect, it } from 'vitest';
-import { codexAppServerArgs, codexThreadStartParams } from '../../src/agents/codexAppServerArgs';
+import {
+  codexAppServerArgs,
+  codexThreadResumeParams,
+  codexThreadStartParams,
+} from '../../src/agents/codexAppServerArgs';
 
 describe('codexAppServerArgs', () => {
   it('is byte-identical to today when no effort is set (Side change A)', () => {
@@ -51,6 +55,34 @@ describe('codexThreadStartParams', () => {
       sandbox: 'danger-full-access',
       ephemeral: false,
       model: 'gpt-6-luna',
+    });
+  });
+});
+
+describe('codexThreadResumeParams', () => {
+  it('is byte-identical to today when neither key is set', () => {
+    expect(codexThreadResumeParams('th-1')).toEqual({ threadId: 'th-1' });
+  });
+
+  it('re-applies the model on resume — the fix for config never reaching a resumed thread', () => {
+    expect(codexThreadResumeParams('th-1', 'gpt-6-luna')).toEqual({
+      threadId: 'th-1',
+      model: 'gpt-6-luna',
+    });
+  });
+
+  it('routes effort through config.model_reasoning_effort, the only non-experimental path', () => {
+    expect(codexThreadResumeParams('th-1', undefined, 'xhigh')).toEqual({
+      threadId: 'th-1',
+      config: { model_reasoning_effort: 'xhigh' },
+    });
+  });
+
+  it('carries both together', () => {
+    expect(codexThreadResumeParams('th-1', 'gpt-6-sol', 'medium')).toEqual({
+      threadId: 'th-1',
+      model: 'gpt-6-sol',
+      config: { model_reasoning_effort: 'medium' },
     });
   });
 });

@@ -8,7 +8,11 @@ import type {
 } from './CliAgentSession';
 import type { CliAgentRunResult } from './types';
 import { JsonRpcPending, routeJsonRpcLine } from './jsonRpcStdio';
-import { codexAppServerArgs, codexThreadStartParams } from './codexAppServerArgs';
+import {
+  codexAppServerArgs,
+  codexThreadResumeParams,
+  codexThreadStartParams,
+} from './codexAppServerArgs';
 import {
   appendAgentText,
   captureCompletedAgentMessage,
@@ -144,7 +148,10 @@ export class CodexAppServerSession {
     });
     this.notify('initialized');
     if (this.threadId) {
-      const result = await this.request('thread/resume', { threadId: this.threadId });
+      const result = await this.request(
+        'thread/resume',
+        codexThreadResumeParams(this.threadId, this.options.model, this.options.effort),
+      );
       this.validateThreadResult(result, 'thread/resume');
     } else {
       const result = await this.request(

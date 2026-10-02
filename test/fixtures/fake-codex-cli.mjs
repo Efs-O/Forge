@@ -59,6 +59,24 @@ if (process.argv.includes('app-server')) {
       return;
     }
     if (message.method === 'thread/resume') {
+      if (process.argv.includes('REQUIRE_FORGE_RESUME_MODEL')) {
+        if (message.params.model !== 'gpt-6-luna') {
+          line({ id: message.id, error: { message: 'missing Forge resume model override' } });
+          return;
+        }
+      }
+      if (process.argv.includes('REQUIRE_FORGE_RESUME_EFFORT')) {
+        if (message.params.config?.model_reasoning_effort !== 'xhigh') {
+          line({ id: message.id, error: { message: 'missing Forge resume effort override' } });
+          return;
+        }
+      }
+      if (process.argv.includes('REQUIRE_FORGE_RESUME_BARE')) {
+        if (message.params.model !== undefined || message.params.config !== undefined) {
+          line({ id: message.id, error: { message: 'unexpected Forge resume override' } });
+          return;
+        }
+      }
       threadId = message.params.threadId;
       line({ id: message.id, result: { thread: { id: threadId } } });
       return;
