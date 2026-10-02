@@ -26,6 +26,10 @@ export function renderRemoteProgress(
   now: number,
 ): string {
   const sections = [state.headline];
+  // Warnings sit below the headline and above the live milestone: they are
+  // the part of the message the reader most needs and the part most likely to
+  // be trimmed, so they are never the first thing the tail cut reaches. The
+  // clock goes last for the same reason in reverse: the tail cut keeps it.
   if (state.warnings.length) {
     sections.push(state.warnings.map((warning) => `⚠ ${warning}`).join('\n'));
   }
