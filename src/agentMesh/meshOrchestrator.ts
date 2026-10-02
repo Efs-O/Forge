@@ -125,7 +125,11 @@ export class MeshOrchestrator {
    * Forge-originated send (the `tell_live_session` path). Resolves the
    * recipient, enqueues through its FIFO, and returns at once (no wait).
    */
-  async tell(to: string, message: string): Promise<TellOutcome | { error: string }> {
+  async tell(
+    to: string,
+    message: string,
+    options: { expectsReply?: boolean } = {},
+  ): Promise<TellOutcome | { error: string }> {
     const alias = to.trim().toLowerCase();
     if (!this.isKnownAlias(alias)) {
       return {
@@ -143,9 +147,12 @@ export class MeshOrchestrator {
     // F-03: a non-observing recipient cannot be observed directly, so the
     // exchange id is bound into the message: the agent's verdict file is
     // `<exchangeId>.verdict.md`, which the wiring polls to complete the exchange.
-    const outbound = fifo.observesTurns
-      ? message
-      : `${message}\n\n[forge: when you finish this, write your verdict to outbox/${exchangeId}.verdict.md]`;
+    // A status notice (expectsReply: false) asks for nothing, so it carries no
+    // verdict instruction; its exchange ages out like any unanswered one.
+    const outbound =
+      fifo.observesTurns || options.expectsReply === false
+        ? message
+        : `${message}\n\n[forge: when you finish this, write your verdict to outbox/${exchangeId}.verdict.md]`;
     // F-03: the FIFO's `accepted` is the durable acknowledgement — awaited so
     // it is on disk before we return the exchange id. A failed durable write
     // throws (onEvent rethrows); surface it as a clean error, not a 500.

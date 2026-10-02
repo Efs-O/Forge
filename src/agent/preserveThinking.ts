@@ -52,20 +52,21 @@ export function attachCurrentTaskReasoning(messages: ChatMessage[]): ChatMessage
 }
 
 /**
- * Drop sent reasoning oldest-first until `fits` holds or none is left. Runs
- * before any tool result is excerpted: the thinking is a convenience, the
- * results are the evidence.
+ * Drop the first `count` sent reasoning turns, oldest-first. The caller owns
+ * the monotonic count so later rounds do not recalculate a moving fit point.
  */
-export function dropOldestReasoning(
-  messages: ChatMessage[],
-  fits: (messages: ChatMessage[]) => boolean,
-): ChatMessage[] {
-  let current = messages;
-  for (let i = 0; i < current.length && !fits(current); i++) {
-    if (current[i].reasoning_content === undefined) continue;
-    const rest = { ...current[i] };
+export function dropOldestReasoning(messages: ChatMessage[], count: number): ChatMessage[] {
+  if (count <= 0) return messages;
+  let dropped = 0;
+  const current = messages.map((message) => {
+    if (dropped >= count || message.reasoning_content === undefined) return message;
+    dropped += 1;
+    const rest = { ...message };
     delete rest.reasoning_content;
-    current = [...current.slice(0, i), rest, ...current.slice(i + 1)];
+    return rest;
+  });
+  if (dropped === 0) {
+    return messages;
   }
   return current;
 }

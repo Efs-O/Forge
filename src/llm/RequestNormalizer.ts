@@ -85,6 +85,7 @@ export function normalizeRequestForModel(
     repeat_penalty: request.repeat_penalty,
     repeat_last_n: request.repeat_last_n,
     reasoning_effort: ollamaReasoningEffort(model),
+    ...(request.chat_template_kwargs?.['enable_thinking'] === false ? { think: false } : {}),
     ...(request.stop ? { stop: request.stop } : {}),
     ...(request.tools ? { tools: request.tools } : {}),
   };

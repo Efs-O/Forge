@@ -74,9 +74,9 @@ describe('isolated editor, language, search, and memory tool execution', () => {
         message: 'fixture warning',
       },
     ] as never);
-    await expect(makeCodeIntelTool().handler({ operation: 'diagnostics', path: 'sample.ts' })).resolves.toBe(
-      'sample.ts:1: warning: fixture warning',
-    );
+    await expect(
+      makeCodeIntelTool().handler({ operation: 'diagnostics', path: 'sample.ts' }),
+    ).resolves.toBe('sample.ts:1: warning: fixture warning');
 
     vi.spyOn(vscode.commands, 'executeCommand').mockImplementation(
       async (command: string): Promise<unknown> => {
@@ -116,20 +116,30 @@ describe('isolated editor, language, search, and memory tool execution', () => {
       },
     );
 
-    await expect(makeCodeIntelTool().handler({ operation: 'document_symbols', path: 'sample.ts' })).resolves.toContain(
-      'Variable sample (line 1)',
-    );
-    await expect(makeCodeIntelTool().handler({ operation: 'workspace_symbols', query: 'sample' })).resolves.toContain(
-      'Variable sample — sample.ts:1',
-    );
+    await expect(
+      makeCodeIntelTool().handler({ operation: 'document_symbols', path: 'sample.ts' }),
+    ).resolves.toContain('Variable sample (line 1)');
+    await expect(
+      makeCodeIntelTool().handler({ operation: 'workspace_symbols', query: 'sample' }),
+    ).resolves.toContain('Variable sample — sample.ts:1');
     await expect(
       makeCodeIntelTool().handler({ operation: 'hover', path: 'sample.ts', line: 0, character: 1 }),
     ).resolves.toBe('const sample: 1');
     await expect(
-      makeCodeIntelTool().handler({ operation: 'definition', path: 'sample.ts', line: 0, character: 1 }),
+      makeCodeIntelTool().handler({
+        operation: 'definition',
+        path: 'sample.ts',
+        line: 0,
+        character: 1,
+      }),
     ).resolves.toBe('sample.ts:1:1');
     await expect(
-      makeCodeIntelTool().handler({ operation: 'references', path: 'sample.ts', line: 0, character: 1 }),
+      makeCodeIntelTool().handler({
+        operation: 'references',
+        path: 'sample.ts',
+        line: 0,
+        character: 1,
+      }),
     ).resolves.toBe('sample.ts:1:1');
   });
 
@@ -212,10 +222,10 @@ describe('isolated editor, language, search, and memory tool execution', () => {
 
   it('executes format and rename through disposable VS Code adapters', async () => {
     const save = vi.fn().mockResolvedValue(true);
-    vi.spyOn(vscode.workspace, 'openTextDocument').mockResolvedValue({
-      uri: vscode.Uri.file(path.join(root, 'sample.ts')),
-      save,
-    } as never);
+    // format_file refuses to save unless applyEdit bumped the version by exactly
+    // one, so the fake document carries a version the fake applyEdit advances.
+    const doc = { uri: vscode.Uri.file(path.join(root, 'sample.ts')), save, version: 1 };
+    vi.spyOn(vscode.workspace, 'openTextDocument').mockResolvedValue(doc as never);
     const workspaceEdit = {
       entries: () => [[vscode.Uri.file(path.join(root, 'sample.ts')), []]],
     };
@@ -227,7 +237,10 @@ describe('isolated editor, language, search, and memory tool execution', () => {
         if (command === 'vscode.executeFormatDocumentProvider') return formatEdits;
         return undefined;
       });
-    const apply = vi.spyOn(vscode.workspace, 'applyEdit').mockResolvedValue(true);
+    const apply = vi.spyOn(vscode.workspace, 'applyEdit').mockImplementation(async () => {
+      doc.version += 1;
+      return true;
+    });
 
     await expect(makeFormatFileTool().handler({ path: 'sample.ts' })).resolves.toBe(
       'Formatted: sample.ts',

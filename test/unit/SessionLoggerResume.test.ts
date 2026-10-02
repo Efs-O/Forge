@@ -87,4 +87,15 @@ describe('SessionLogger resumes where the last run stopped', () => {
     const starts = rows().filter((r) => r['type'] === 'session_start');
     expect(starts.map((s) => s['forge_version'])).toEqual(['0.13.19', '0.13.20']);
   });
+
+  it('writes matching tool call and result ids to session rows', () => {
+    const messages: ChatMessage[] = [
+      { role: 'assistant', content: null, tool_calls: [{ id: 'call-real', type: 'function', function: { name: 'read_file', arguments: '{"path":"a"}' } }] },
+      { role: 'tool', content: 'file contents', tool_call_id: 'call-real', name: 'read_file' },
+    ];
+    new SessionLogger(id, 'T', 'm').flush(messages, 'm');
+    const rows = messageRows();
+    expect((rows[0]?.['tool_calls'] as Array<Record<string, unknown>>)[0]?.['id']).toBe('call-real');
+    expect(rows[1]?.['tool_call_id']).toBe('call-real');
+  });
 });

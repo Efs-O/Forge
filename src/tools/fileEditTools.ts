@@ -2,7 +2,7 @@ import * as fs from 'fs';
 import * as path from 'path';
 import * as vscode from 'vscode';
 import type { RegisteredTool } from './ToolRegistry';
-import { resolveWorkspacePath } from '../util/WorkspacePaths';
+import { resolveRealWorkspacePath } from '../util/WorkspacePaths';
 
 /** Join a result line to its optional follow-up sentence. */
 function withWarning(result: string, warning: string): string {
@@ -61,8 +61,8 @@ export function makeCreateDirectoryTool(
     mutation: { paths: (args) => [args['path'] as string] },
     handler: async (args) => {
       const dirPath = args['path'] as string;
-      const resolvedPath = resolveWorkspacePath(dirPath, {
-        mustBeInsideWorkspace: true,
+      const resolvedPath = await resolveRealWorkspacePath(dirPath, undefined, {
+        allowMissing: true,
         extraRoots: extraRoots(),
       });
       fs.mkdirSync(resolvedPath, { recursive: true });
@@ -105,11 +105,11 @@ export function makeMoveFileTool(): RegisteredTool {
       showDiff: true,
     },
     handler: async (args) => {
-      const src = resolveWorkspacePath(args['source'] as string, {
-        mustBeInsideWorkspace: true,
+      const src = await resolveRealWorkspacePath(args['source'] as string, undefined, {
+        allowMissing: true,
       });
-      const dst = resolveWorkspacePath(args['destination'] as string, {
-        mustBeInsideWorkspace: true,
+      const dst = await resolveRealWorkspacePath(args['destination'] as string, undefined, {
+        allowMissing: true,
       });
       fs.mkdirSync(path.dirname(dst), { recursive: true });
       fs.renameSync(src, dst);
@@ -160,8 +160,8 @@ export function makeDeleteFileTool(extraRoots: () => readonly string[] = () => [
     mutation: { paths: (args) => [args['path'] as string], showDiff: true },
     handler: async (args) => {
       const filePath = args['path'] as string;
-      const resolved = resolveWorkspacePath(filePath, {
-        mustBeInsideWorkspace: true,
+      const resolved = await resolveRealWorkspacePath(filePath, undefined, {
+        allowMissing: true,
         extraRoots: extraRoots(),
       });
       const recursive = args['recursive'] === true;
@@ -254,7 +254,9 @@ export function makeFormatFileTool(): RegisteredTool {
     mutation: { paths: (args) => [args['path'] as string], showDiff: true },
     handler: async (args, context) => {
       const filePath = args['path'] as string;
-      const uri = vscode.Uri.file(resolveWorkspacePath(filePath, { mustBeInsideWorkspace: true }));
+      const uri = vscode.Uri.file(
+        await resolveRealWorkspacePath(filePath, undefined, { allowMissing: true }),
+      );
       // Load the document only. Never show, activate or close an editor: a tool
       // call must not move the user's focus, and the close command acted on
       // whatever was active by the time it ran, not necessarily on this file.
@@ -290,8 +292,17 @@ export function makeFormatFileTool(): RegisteredTool {
 
       const workspaceEdit = new vscode.WorkspaceEdit();
       workspaceEdit.set(uri, edits);
+      const versionBeforeApply = doc.version;
       const applied = await vscode.workspace.applyEdit(workspaceEdit);
       if (!applied) throw new Error(`format_file: workspace edit was rejected for ${filePath}`);
+      // applyEdit commits the formatter's ranges as a single transaction, bumping
+      // the version by exactly one. A user keystroke that lands while the async
+      // apply is in flight bumps it again; saving that would persist an edit the
+      // formatter never computed against. Refuse rather than save a document we
+      // did not fully author.
+      if (doc.version !== versionBeforeApply + 1) {
+        throw new Error(`format_file: ${filePath} changed while the edit was applied; not saved`);
+      }
 
       const saved = await doc.save();
       if (!saved) {
@@ -338,7 +349,9 @@ export function makeRenameSymbolTool(): RegisteredTool {
     handler: async (args, context) => {
       const filePath = args['path'] as string;
       const newName = args['new_name'] as string;
-      const uri = vscode.Uri.file(resolveWorkspacePath(filePath, { mustBeInsideWorkspace: true }));
+      const uri = vscode.Uri.file(
+        await resolveRealWorkspacePath(filePath, undefined, { allowMissing: true }),
+      );
       const position = new vscode.Position(args['line'] as number, args['character'] as number);
 
       const edit = await vscode.commands.executeCommand<vscode.WorkspaceEdit>(

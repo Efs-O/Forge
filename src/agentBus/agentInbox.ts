@@ -13,7 +13,26 @@ export interface InboxMessageOptions {
   replyInChat?: boolean;
   /** The bus sender; the host routes its message to the chat it last wrote in. */
   from?: string;
+  /** A sender-selected Forge conversation, resolved by the host before queuing. */
+  targetConversationId?: string;
+  /** Request selection of the currently running Forge conversation. */
+  toRunning?: boolean;
+  /** A sender-selected conversation before host-side resolution. */
+  conversationId?: string;
 }
+
+export interface ChatTargetSelection {
+  conversationId?: string;
+  toRunning?: boolean;
+}
+
+export type ChatTargetResult =
+  | { ok: true; conversationId: string; title: string }
+  | { ok: false; status?: 400 | 404 | 409; error: string };
+
+export type ForgeSteerResult =
+  | { steered: true; conversationId: string; title: string }
+  | { steered: false; reason: string };
 
 /**
  * How a bus-started turn ended. `submit` resolving used to mean "finished",

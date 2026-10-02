@@ -1,10 +1,59 @@
 import { describe, expect, it, vi } from 'vitest';
-import { busModelIds, submitBusMessage } from '../../src/vscode/agentMessagingSetup';
+import {
+  busModelIds,
+  interruptForgeForSender,
+  submitBusMessage,
+} from '../../src/vscode/agentMessagingSetup';
 import { forgeInboundPrompt } from '../../src/agentBus/busContent';
 import type { ForgeConfig } from '../../src/config/types';
 import type { ForgeHostFacade } from '../../src/sidebar/ForgeHostFacade';
 
 describe('agent bus conversation targeting', () => {
+  it('steers the sender conversation, not the currently visible conversation', async () => {
+    const interrupt = vi.fn(async () => {});
+    const facade = {
+      status: () => ({
+        activeConversationId: 'visible',
+        streamingConversationIds: ['sender-chat'],
+        conversations: [
+          { id: 'visible', title: 'Visible', updatedAt: 2 },
+          { id: 'sender-chat', title: 'Codex: task', updatedAt: 1 },
+        ],
+      }),
+      recentExchanges: () => [],
+      interrupt,
+    } as unknown as ForgeHostFacade;
+
+    await expect(interruptForgeForSender(facade, 'codex')).resolves.toEqual({
+      steered: true,
+      conversationId: 'sender-chat',
+      title: 'Codex: task',
+    });
+    expect(interrupt).toHaveBeenCalledExactlyOnceWith('sender-chat');
+  });
+
+  it('reports that no turn was stopped when the sender conversation is idle', async () => {
+    const interrupt = vi.fn(async () => {});
+    const facade = {
+      status: () => ({
+        activeConversationId: 'visible',
+        streamingConversationIds: ['visible'],
+        conversations: [
+          { id: 'visible', title: 'Visible', updatedAt: 2 },
+          { id: 'sender-chat', title: 'Codex: task', updatedAt: 1 },
+        ],
+      }),
+      recentExchanges: () => [],
+      interrupt,
+    } as unknown as ForgeHostFacade;
+
+    await expect(interruptForgeForSender(facade, 'codex')).resolves.toMatchObject({
+      steered: false,
+      reason: expect.stringContaining('not streaming'),
+    });
+    expect(interrupt).not.toHaveBeenCalled();
+  });
+
   it.each([
     { options: { from: 'codex' }, conversationId: 'sender-chat', creates: 0, restores: 1 },
     {

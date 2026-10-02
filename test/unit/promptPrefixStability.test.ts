@@ -225,6 +225,60 @@ describe('strict chat-template safety', () => {
       image_url: { url: 'data:image/png;base64,abc' },
     });
   });
+
+  describe('context-trim prefix stability', () => {
+    it('keeps earlier prepared messages byte-identical between watermark advances', () => {
+      const model: ModelConfig = { name: 'trim-test', num_ctx: 131_072 } as ModelConfig;
+      const state = { reasoningDropped: 0, excerpts: new Map<string, number>() };
+      const messages: ChatMessage[] = [
+        { role: 'user', content: 'u'.repeat(10_000) },
+        ...Array.from({ length: 10 }, (_, index) => ({
+          role: 'tool' as const,
+          tool_call_id: `large-result-${index}`,
+          content: 'x'.repeat(50_000),
+        })),
+      ];
+      let previous: ChatMessage[] | undefined;
+      let advances = 0;
+
+      for (let round = 0; round < 20; round += 1) {
+        messages.push(
+          {
+            role: 'assistant',
+            content: null,
+            reasoning_content: `reasoning-${round}-${'r'.repeat(1_000)}`,
+            tool_calls: [
+              {
+                id: `call-${round}`,
+                type: 'function',
+                function: { name: 'read_file', arguments: '{}' },
+              },
+            ],
+          },
+          { role: 'tool', tool_call_id: `call-${round}`, content: 't'.repeat(9_300) },
+        );
+        const result = prepareToolResultContext({
+          messages,
+          toolTokens: 0,
+          model,
+          responseReserve: 10_000,
+          state,
+        });
+        if (round === 0) {
+          expect(result.messages[1]?.content).not.toBe(messages[1]?.content);
+        }
+        if (result.trimAdvanced) advances += 1;
+        if (previous && !result.trimAdvanced) {
+          expect(JSON.stringify(result.messages.slice(0, previous.length)) === JSON.stringify(previous)).toBe(
+            true,
+          );
+        }
+        previous = result.messages;
+      }
+
+      expect(advances).toBeLessThanOrEqual(3);
+    });
+  });
 });
 
 describe('a turn held across tool rounds', () => {

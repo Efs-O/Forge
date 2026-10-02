@@ -122,14 +122,24 @@ export async function ensureOllamaReady(
       log.info(`[OllamaAdapter] daemon down at ${baseUrl} — launched "${label}"`);
       const result = await waitForHealthy({ baseUrl, timeoutMs: 15_000 }, undefined, signal);
       if (result.ok) return;
+      // An abort is not a failed candidate. Logging "still down — trying next
+      // candidate" sent a cancelled start looking like a broken daemon, and the
+      // loop's own `signal?.aborted` break then fell through to the final wait
+      // below, which used to poll another 10 s on a dead signal.
+      if (result.reason === 'aborted') throw new Error('Ollama start cancelled.');
       log.warn(
         `[OllamaAdapter] "${label}" spawned but ${baseUrl} still down — trying next candidate`,
       );
     }
   }
 
+  if (signal?.aborted) throw new Error('Ollama start cancelled.');
   const result = await waitForHealthy({ baseUrl, timeoutMs: 10_000 }, undefined, signal);
   if (!result.ok) {
+    // An abort DURING this final wait is a cancellation, not a dead daemon: the
+    // message below tells the user to start ollama themselves and check their
+    // config, which is wrong advice for someone who just pressed Stop.
+    if (result.reason === 'aborted') throw new Error('Ollama start cancelled.');
     const attempted = anySpawned
       ? `Forge launched the ollama daemon but it did not become reachable: ${result.message}. `
       : autoStartWanted

@@ -84,9 +84,17 @@ export class FileLease {
       const stalePath = `${filePath}.stale-${record.token}`;
       try {
         await fs.rename(filePath, stalePath);
+        const moved = await FileLease.read(stalePath).catch(() => undefined);
+        if ((existing && moved?.token !== existing.token) || (!existing && moved !== undefined)) {
+          await fs.rename(stalePath, filePath);
+          throw new FileLeaseError(
+            `Forge lease "${options.key}" is already owned by another window.`,
+          );
+        }
         await FileLease.createExclusive(filePath, record);
         await fs.unlink(stalePath).catch(() => undefined);
       } catch (recoveryError) {
+        if (recoveryError instanceof FileLeaseError) throw recoveryError;
         throw new FileLeaseError(
           `Forge could not safely recover a stale lease: ${(recoveryError as Error).message}`,
         );

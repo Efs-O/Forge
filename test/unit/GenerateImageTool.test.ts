@@ -24,7 +24,10 @@ import {
   targetPath,
 } from '../../src/tools/imageGeneration/generateImageTool';
 import { generateCloudImage } from '../../src/tools/imageGeneration/cloudImageBackend';
-import { SDCPP_SIZE_NAMES, type SdcppImageRequest } from '../../src/tools/imageGeneration/sdcppImageBackend';
+import {
+  SDCPP_SIZE_NAMES,
+  type SdcppImageRequest,
+} from '../../src/tools/imageGeneration/sdcppImageBackend';
 import { UserNotificationService } from '../../src/sidebar/UserNotificationService';
 
 const JPEG = Buffer.from([0xff, 0xd8, 0xff, 0xe0, 0x00, 0x10]);
@@ -83,7 +86,9 @@ function rig(config: ImageGenerationConfig | undefined = imageConfig()) {
 const noSnapshot = { beforeMutate: (): void => undefined };
 
 beforeEach(() => {
-  root = fs.mkdtempSync(path.join(os.tmpdir(), 'forge-generate-image-'));
+  // Real-pathed: generate_image resolves symlinks and 8.3 short names (EFSOOF~1)
+  // before writing, so expectations must use the same spelling.
+  root = fs.realpathSync.native(fs.mkdtempSync(path.join(os.tmpdir(), 'forge-generate-image-')));
   (vscode.workspace as unknown as { workspaceFolders: unknown }).workspaceFolders = [
     { uri: { fsPath: root } },
   ];
@@ -307,7 +312,15 @@ describe('generate_image with an sdcpp backend', () => {
   function localConfig(): ImageGenerationConfig {
     return imageConfig({
       default: 'qwen-local',
-      backends: [LOCAL, { name: 'grok-imagine', provider: 'xai', model: 'grok-imagine-image-2.0', api_key_secret: 'xai' }],
+      backends: [
+        LOCAL,
+        {
+          name: 'grok-imagine',
+          provider: 'xai',
+          model: 'grok-imagine-image-2.0',
+          api_key_secret: 'xai',
+        },
+      ],
     }) as ImageGenerationConfig;
   }
 
@@ -315,7 +328,10 @@ describe('generate_image with an sdcpp backend', () => {
     const startApproval = vi.fn(() =>
       options.startDetail ? { detail: options.startDetail } : undefined,
     );
-    const server = { startApproval, baseUrl: () => 'http://127.0.0.1:8093' } as unknown as SdServerBackend;
+    const server = {
+      startApproval,
+      baseUrl: () => 'http://127.0.0.1:8093',
+    } as unknown as SdServerBackend;
     const servers = new Map<string, SdServerBackend>(
       options.withServer === false ? [] : [[LOCAL.name, server]],
     );
@@ -387,7 +403,9 @@ describe('generate_image with an sdcpp backend', () => {
   });
 
   it('adds the start approval only when a spawn is needed', () => {
-    const cold = localRig({ startDetail: 'Start qwen-local (qwen_image_2.1-Q4_K.gguf) on CUDA device 2' });
+    const cold = localRig({
+      startDetail: 'Start qwen-local (qwen_image_2.1-Q4_K.gguf) on CUDA device 2',
+    });
     const coldApproval = cold.tool.approval?.({ prompt: 'a fox' });
     expect(coldApproval?.detail).toContain(
       'Start qwen-local (qwen_image_2.1-Q4_K.gguf) on CUDA device 2',
@@ -401,12 +419,16 @@ describe('generate_image with an sdcpp backend', () => {
 
   it('lists backends with cost tags and never an undefined model', () => {
     const described = localRig().tool.describe?.();
-    const backend = (described?.function.parameters['properties'] as Record<
-      string,
-      { enum?: string[]; description?: string }
-    >)['backend'];
+    const backend = (
+      described?.function.parameters['properties'] as Record<
+        string,
+        { enum?: string[]; description?: string }
+      >
+    )['backend'];
     expect(backend?.enum).toEqual(['qwen-local', 'grok-imagine']);
-    expect(backend?.description).toContain('qwen-local (local · free · sdcpp · qwen_image_2.1-Q4_K)');
+    expect(backend?.description).toContain(
+      'qwen-local (local · free · sdcpp · qwen_image_2.1-Q4_K)',
+    );
     expect(backend?.description).toContain(
       'grok-imagine (cloud · billed per image · xai · grok-imagine-image-2.0)',
     );
@@ -415,10 +437,9 @@ describe('generate_image with an sdcpp backend', () => {
 
   it('offers the size enum, and says when a cloud backend ignored it', async () => {
     const described = localRig().tool.describe?.();
-    const size = (described?.function.parameters['properties'] as Record<
-      string,
-      { enum?: string[] }
-    >)['size'];
+    const size = (
+      described?.function.parameters['properties'] as Record<string, { enum?: string[] }>
+    )['size'];
     // The definition inlines the literals for scripts/tool-audit-catalog.mjs;
     // this is what keeps them from drifting away from the request mapping.
     expect(size?.enum).toEqual([...SDCPP_SIZE_NAMES]);
@@ -435,9 +456,7 @@ describe('generate_image with an sdcpp backend', () => {
   it('tags each backend by provider alone', () => {
     const [local, cloud] = localConfig().backends;
     expect(backendCostTag(local!)).toBe('local · free · sdcpp · qwen_image_2.1-Q4_K');
-    expect(backendCostTag(cloud!)).toBe(
-      'cloud · billed per image · xai · grok-imagine-image-2.0',
-    );
+    expect(backendCostTag(cloud!)).toBe('cloud · billed per image · xai · grok-imagine-image-2.0');
   });
 
   it('says the description no longer promises an approval for every call', () => {
@@ -446,7 +465,9 @@ describe('generate_image with an sdcpp backend', () => {
       secrets: undefined,
       notifications: new UserNotificationService(),
     }).definition.function.description!;
-    expect(description).toContain('Cloud backends ask for approval and bill per image; local backends are free');
+    expect(description).toContain(
+      'Cloud backends ask for approval and bill per image; local backends are free',
+    );
     expect(description).not.toContain('Each call asks the user to approve it');
   });
 });

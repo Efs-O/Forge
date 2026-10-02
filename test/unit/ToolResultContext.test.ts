@@ -1,5 +1,10 @@
 import { describe, expect, it } from 'vitest';
-import { prepareToolResultContext } from '../../src/agent/toolResultContext';
+import {
+  createContextTrimState,
+  MIN_TOOL_RESULT_EXCERPT_CHARS,
+  PREFERRED_TOOL_RESULT_CHARS,
+  prepareToolResultContext,
+} from '../../src/agent/toolResultContext';
 import { CONTEXT_INPUT_EXHAUSTED_MESSAGE, runToolCallingLoop } from '../../src/agent/ToolCallingLoop';
 import type { ChatMessage } from '../../src/llm/types';
 import { makeReadToolResultTool, MAX_TOOL_RESULT_READ_CHARS } from '../../src/tools/toolResultTools';
@@ -39,6 +44,65 @@ describe('loss-aware tool-result context', () => {
     const result = prepareToolResultContext({ messages, toolTokens: 0, model });
     expect(result.messages).toBe(messages);
     expect(result.excerptedToolCallIds).toEqual([]);
+  });
+});
+
+describe('context trim state', () => {
+  it('reuses the same fixed-size excerpt as overflow changes', () => {
+    const state = createContextTrimState();
+    const messages: ChatMessage[] = [
+      { role: 'user', content: 'go' },
+      { role: 'tool', tool_call_id: 'stable', content: 'x'.repeat(100_000) },
+    ];
+    const first = prepareToolResultContext({
+      messages,
+      toolTokens: 0,
+      model: { name: 'local', num_ctx: 30_000 } as never,
+      state,
+    });
+    const firstExcerpt = first.messages[1]?.content;
+    messages.push({ role: 'user', content: 'q'.repeat(7_000) });
+    const second = prepareToolResultContext({
+      messages,
+      toolTokens: 0,
+      model: { name: 'local', num_ctx: 30_000 } as never,
+      state,
+    });
+
+    expect(firstExcerpt).not.toBe(messages[1]?.content);
+    expect(second.rawUsed).toBeGreaterThan(first.rawUsed);
+    expect(second.messages[1]?.content).toBe(firstExcerpt);
+    expect(state.excerpts.get('stable')).toBe(PREFERRED_TOOL_RESULT_CHARS);
+  });
+
+  it('keeps dropped reasoning and excerpt IDs monotonic before reset', () => {
+    const state = createContextTrimState();
+    const messages: ChatMessage[] = [
+      { role: 'user', content: 'go' },
+      { role: 'assistant', content: null, reasoning_content: 'r'.repeat(10_000) },
+      { role: 'tool', tool_call_id: 'first', content: 'x'.repeat(100_000) },
+    ];
+    const input = {
+      messages,
+      toolTokens: 0,
+      model: { name: 'local', num_ctx: 30_000 } as never,
+      state,
+    };
+    prepareToolResultContext(input);
+    const droppedBefore = state.reasoningDropped;
+    const excerptsBefore = new Set(state.excerpts.keys());
+
+    messages.push(
+      { role: 'assistant', content: null, reasoning_content: 's'.repeat(10_000) },
+      { role: 'tool', tool_call_id: 'second', content: 'y'.repeat(100_000) },
+    );
+    prepareToolResultContext(input);
+
+    expect(state.reasoningDropped).toBeGreaterThanOrEqual(droppedBefore);
+    expect([...excerptsBefore].every((id) => state.excerpts.has(id))).toBe(true);
+    expect([...state.excerpts.values()].every((size) =>
+      size === PREFERRED_TOOL_RESULT_CHARS || size === MIN_TOOL_RESULT_EXCERPT_CHARS,
+    )).toBe(true);
   });
 });
 

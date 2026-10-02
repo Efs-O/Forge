@@ -252,6 +252,7 @@ export class ArchivedSessions {
       this.delete(id);
       return undefined;
     }
+    const pendingCallIds: string[] = [];
     const messages = this.readLogRows(file).flatMap((row, index) => {
       if (!['user', 'assistant', 'tool'].includes(String(row['role']))) return [];
       const role = row['role'] as 'user' | 'assistant' | 'tool';
@@ -261,9 +262,11 @@ export class ArchivedSessions {
       const tool_calls = rawCalls.flatMap((call, callIndex) => {
         if (typeof call !== 'object' || call === null) return [];
         const value = call as Record<string, unknown>;
+        const callId = typeof value['id'] === 'string' ? value['id'] : `log-${index}-${callIndex}`;
+        pendingCallIds.push(callId);
         return [
           {
-            id: `log-${index}-${callIndex}`,
+            id: callId,
             type: 'function' as const,
             function: {
               name: typeof value['name'] === 'string' ? value['name'] : 'tool',
@@ -272,10 +275,19 @@ export class ArchivedSessions {
           },
         ];
       });
+      let toolCallId = this.stringField(row, 'tool_call_id');
+      if (role === 'tool' && toolCallId) {
+        const pendingIndex = pendingCallIds.indexOf(toolCallId);
+        if (pendingIndex >= 0) pendingCallIds.splice(pendingIndex, 1);
+      } else if (role === 'tool') {
+        toolCallId = pendingCallIds.shift();
+      }
       return [
         {
           role,
           content,
+          ...(toolCallId ? { tool_call_id: toolCallId } : {}),
+          ...(this.stringField(row, 'name') ? { name: this.stringField(row, 'name') } : {}),
           ...(reasoning ? { reasoning } : {}),
           ...(tool_calls.length ? { tool_calls } : {}),
         },
@@ -292,8 +304,7 @@ export class ArchivedSessions {
   }
 
   private readLogRows(file: string): Array<Record<string, unknown>> {
-    const seen = new Set<string>();
-    const rows: Array<Record<string, unknown>> = [];
+    const parsedRows: Array<Record<string, unknown>> = [];
     let unreadable = 0;
     for (const line of fs.readFileSync(file, 'utf8').split(/\r?\n/)) {
       if (!line.trim()) continue;
@@ -307,16 +318,88 @@ export class ArchivedSessions {
       }
       if (typeof value !== 'object' || value === null || Array.isArray(value)) continue;
       const row = value as Record<string, unknown>;
-      const canonical = { ...row };
-      delete canonical['timestamp_ms'];
-      const hash = createHash('sha256').update(JSON.stringify(canonical)).digest('hex');
-      if (seen.has(hash)) continue;
-      seen.add(hash);
-      rows.push(row);
+      parsedRows.push(row);
     }
     if (unreadable > 0) {
       log.warn(`[ArchivedSessions] ${file}: skipped ${unreadable} unreadable line(s)`);
     }
+    const rows: Array<Record<string, unknown>> = [];
+    const historyHashes: string[] = [];
+    const acceptedHashes: string[] = [];
+    const hashRow = (row: Record<string, unknown>): string => {
+      const canonical = { ...row };
+      delete canonical['timestamp_ms'];
+      return createHash('sha256').update(JSON.stringify(canonical)).digest('hex');
+    };
+    const parsedHashes = parsedRows.map(hashRow);
+    // Accepted positions per hash, so a legacy replay scan only visits starts that match.
+    const acceptedStarts = new Map<string, number[]>();
+    const hasCursor = parsedRows.some((row) => row['type'] === 'cursor');
+    let expectedReplay: string[] | undefined;
+    let replayBuffer: Array<{ row: Record<string, unknown>; hash: string }> = [];
+    const appendRow = (row: Record<string, unknown>, hash: string): void => {
+      rows.push(row);
+      const starts = acceptedStarts.get(hash);
+      if (starts) starts.push(acceptedHashes.length);
+      else acceptedStarts.set(hash, [acceptedHashes.length]);
+      acceptedHashes.push(hash);
+      if (['user', 'assistant', 'tool'].includes(String(row['role']))) historyHashes.push(hash);
+    };
+    const flushReplayBuffer = (): void => {
+      for (const item of replayBuffer) appendRow(item.row, item.hash);
+      replayBuffer = [];
+      expectedReplay = undefined;
+    };
+    for (let index = 0; index < parsedRows.length; index += 1) {
+      const row = parsedRows[index]!;
+      if (row['type'] === 'cursor' && typeof row['written_count'] === 'number') {
+        flushReplayBuffer();
+        expectedReplay = hasCursor
+          ? historyHashes.slice(0, Math.max(0, row['written_count']))
+          : undefined;
+        if (expectedReplay?.length === 0) expectedReplay = undefined;
+        rows.push(row);
+        continue;
+      }
+      const role = row['role'];
+      const hash = parsedHashes[index]!;
+      if (expectedReplay && ['user', 'assistant', 'tool'].includes(String(role))) {
+        const offset = replayBuffer.length;
+        if (hash === expectedReplay[offset]) {
+          replayBuffer.push({ row, hash });
+          if (replayBuffer.length === expectedReplay.length) {
+            replayBuffer = [];
+            expectedReplay = undefined;
+          }
+          continue;
+        }
+        // A matching single row is not enough to call it a replay. Once the
+        // sequence diverges, preserve every buffered row as new transcript.
+        flushReplayBuffer();
+      }
+      if (!hasCursor) {
+        // Pre-cursor logs re-appended the full transcript on each reload.
+        // Collapse only a repeated contiguous run; equal individual rows are valid data.
+        let replayLength = 0;
+        for (const start of acceptedStarts.get(hash) ?? []) {
+          let length = 0;
+          while (
+            index + length < parsedRows.length &&
+            start + length < acceptedHashes.length &&
+            parsedHashes[index + length] === acceptedHashes[start + length]
+          ) {
+            length += 1;
+          }
+          replayLength = Math.max(replayLength, length);
+        }
+        if (replayLength >= 2) {
+          index += replayLength - 1;
+          continue;
+        }
+      }
+      appendRow(row, hash);
+    }
+    flushReplayBuffer();
     return rows;
   }
 

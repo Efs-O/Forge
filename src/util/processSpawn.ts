@@ -1,5 +1,6 @@
 import * as child_process from 'child_process';
 import { terminateCliProcessTree } from '../agents/cliProcess';
+import { RollingOutputCap } from './outputCap';
 
 /**
  * Canonical `spawn`-and-collect primitive. Lives here rather than in
@@ -10,6 +11,10 @@ import { terminateCliProcessTree } from '../agents/cliProcess';
 export interface SpawnResult {
   stdout: string;
   stderr: string;
+  /** Characters discarded from the middle of stdout by the rolling cap. */
+  stdoutDropped: number;
+  /** Characters discarded from the middle of stderr by the rolling cap. */
+  stderrDropped: number;
   exitCode: number | null;
 }
 
@@ -61,8 +66,12 @@ export function spawnAndWait(
   signal?: AbortSignal,
 ): Promise<SpawnResult> {
   return new Promise((resolve, reject) => {
-    let stdout = '';
-    let stderr = '';
+    // Cap each stream WHILE it is read, not after the process exits: a child
+    // that writes gigabytes must not pin that much in memory for the life of
+    // the call. The pipes keep draining (every chunk is consumed); only the
+    // middle is dropped, so the head and tail the model wants are retained.
+    const stdoutCap = new RollingOutputCap();
+    const stderrCap = new RollingOutputCap();
     let settled = false;
 
     const proc = child_process.spawn(command, args, {
@@ -106,10 +115,10 @@ export function spawnAndWait(
     proc.stdout.setEncoding('utf8');
     proc.stderr.setEncoding('utf8');
     proc.stdout.on('data', (chunk: string) => {
-      stdout += chunk;
+      stdoutCap.append(chunk);
     });
     proc.stderr.on('data', (chunk: string) => {
-      stderr += chunk;
+      stderrCap.append(chunk);
     });
 
     proc.on('error', (err: NodeJS.ErrnoException) => {
@@ -123,7 +132,13 @@ export function spawnAndWait(
     });
 
     proc.on('close', (code) => {
-      finish({ stdout, stderr, exitCode: code });
+      finish({
+        stdout: stdoutCap.text(),
+        stderr: stderrCap.text(),
+        stdoutDropped: stdoutCap.dropped,
+        stderrDropped: stderrCap.dropped,
+        exitCode: code,
+      });
     });
   });
 }

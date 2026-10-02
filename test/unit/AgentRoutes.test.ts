@@ -250,6 +250,73 @@ describe('routes', () => {
     expect(acceptedOptions[0]).toEqual({ model: 'alpha', newChat: true });
   });
 
+  it('names the resolved Forge chat in the accepted-message response', async () => {
+    const options: unknown[] = [];
+    routes = new AgentRoutes({
+      paths: () => paths,
+      inbox: {
+        accept: (_prompt, _from, _front, messageOptions) => (
+          options.push(messageOptions),
+          { position: 1, id: 'm1' }
+        ),
+        cancel: () => 0,
+      },
+      token: TOKEN,
+      resolveChatTarget: (_from, selection) => ({
+        ok: true,
+        conversationId: selection.conversationId ?? 'running-chat',
+        title: 'Q6 investigation',
+      }),
+    });
+    routes.setEnabled(true);
+    routes.onListening(base);
+
+    const response = await post(
+      '/agent/message?from=codex&to_running=true',
+      'continue the investigation',
+    );
+
+    expect(response).toEqual({
+      status: 202,
+      body: {
+        queued: 1,
+        id: 'm1',
+        conversationId: 'running-chat',
+        title: 'Q6 investigation',
+      },
+    });
+    expect(options[0]).toMatchObject({ targetConversationId: 'running-chat' });
+  });
+
+  it('reports a steer that found no running Forge turn', async () => {
+    routes = new AgentRoutes({
+      paths: () => paths,
+      inbox: stubInbox(),
+      token: TOKEN,
+      resolveChatTarget: () => ({
+        ok: true,
+        conversationId: 'sender-chat',
+        title: 'Codex: task',
+      }),
+      interruptForge: async () => ({
+        steered: false,
+        reason: 'Forge chat "Codex: task" (sender-chat) is not streaming',
+      }),
+    });
+    routes.setEnabled(true);
+    routes.onListening(base);
+
+    expect(await post('/agent/message?from=codex&to=forge&priority=steer', 'stop')).toEqual({
+      status: 202,
+      body: {
+        queued: expect.any(Number),
+        id: expect.any(String),
+        steered: false,
+        reason: 'Forge chat "Codex: task" (sender-chat) is not streaming',
+      },
+    });
+  });
+
   it('keeps an explicit chat reply in Forge without changing ordinary Claude replies', async () => {
     const codex = await post('/agent/message?from=codex&reply_in_chat=true', 'question');
     expect(codex.status).toBe(202);
@@ -469,16 +536,60 @@ describe('forge.sh against the routes', () => {
         cancel: () => 0,
       },
       token: TOKEN,
-      interruptForge: async () => void calls.push('interrupt'),
+      interruptForge: async () => {
+        calls.push('interrupt');
+        return { steered: true, conversationId: 'sender-chat', title: 'Codex: task' };
+      },
     });
     routes.setEnabled(true);
     routes.onListening(base);
     const steered = await runClient(['steer', 'claude', 'forge'], 'use ask_live_session');
-    expect(steered.out).toContain('"steered":true');
+    expect(JSON.parse(steered.out.trim())).toMatchObject({
+      queued: expect.any(Number),
+      id: expect.any(String),
+      steered: true,
+      conversationId: 'sender-chat',
+      title: 'Codex: task',
+    });
     expect(calls).toEqual(['accept front=true', 'interrupt']);
     const said = await runClient(['say', 'claude'], 'plain');
     expect(said.out).toContain('"queued"');
     expect(calls.slice(2)).toEqual(['accept front=false']);
+  }, 30_000);
+
+  it('say/send support an explicit chat target and --to-running', async (ctx) => {
+    if (!usable) ctx.skip();
+    const delivered: unknown[] = [];
+    routes = new AgentRoutes({
+      paths: () => paths,
+      inbox: {
+        accept: (_prompt, _from, _front, options) => (
+          delivered.push(options),
+          { position: delivered.length, id: `m${delivered.length}` }
+        ),
+        cancel: () => 0,
+      },
+      token: TOKEN,
+      resolveChatTarget: (_from, selection) => ({
+        ok: true,
+        conversationId: selection.conversationId ?? 'running-chat',
+        title: 'Q6 investigation',
+      }),
+    });
+    routes.setEnabled(true);
+    routes.onListening(base);
+
+    const said = await runClient(['say', 'codex', '--to', 'sender-chat'], 'direct follow-up\n');
+    const sent = await runClient(['send', 'codex', 'forge', '--to-running'], 'interrupt context\n');
+
+    expect(said.code).toBe(0);
+    expect(said.out).toContain('"conversationId":"sender-chat"');
+    expect(sent.code).toBe(0);
+    expect(sent.out).toContain('"conversationId":"running-chat"');
+    expect(delivered).toEqual([
+      expect.objectContaining({ targetConversationId: 'sender-chat' }),
+      expect.objectContaining({ toRunning: true, targetConversationId: 'running-chat' }),
+    ]);
   }, 30_000);
 
   it('refuses a queued message from the agent Forge is blocked on, for any sender', async (ctx) => {
@@ -495,7 +606,10 @@ describe('forge.sh against the routes', () => {
         cancel: () => 0,
       },
       token: TOKEN,
-      interruptForge: async () => void calls.push('interrupt'),
+      interruptForge: async () => {
+        calls.push('interrupt');
+        return { steered: true, conversationId: 'sender-chat', title: 'Codex: task' };
+      },
       awaitingAnswerFrom: (from) => awaited[from],
     });
     routes.setEnabled(true);

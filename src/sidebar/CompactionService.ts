@@ -33,6 +33,7 @@ import { reportedContextTokens } from '../util/contextBudget';
 import { boundMemoryKeys, compactionWindowChars } from './compactionWindow';
 import type { CompactionState } from './compactionTypes';
 import { deactivateLazyGroups, lazyGroupSummaryNote } from '../tools/lazyToolGroups';
+import { resetContextTrimState } from '../agent/toolResultContext';
 
 const log = getLogger();
 
@@ -423,6 +424,7 @@ async function compactOnce(
 
     // Non-destructive: recorded only once the candidate is known to be better.
     conv.compaction = candidate;
+    resetContextTrimState(conv);
     conv.updatedAt = Date.now();
     // Before invalidateExactTokenBudget below: that deletes the very counters
     // this row exists to preserve.

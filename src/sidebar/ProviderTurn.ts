@@ -189,97 +189,114 @@ export async function runLocalProviderTurn(
   }, BACKEND_START_NOTICE_MS);
   try {
     try {
-      if (typeof ctx.pool.acquireForTurn === 'function') {
-        turnLease = await ctx.pool.acquireForTurn(model.name);
-      } else {
-        const legacyBackend = await ctx.pool.acquire(model.name);
-        turnLease = { backend: legacyBackend, release: async () => undefined };
+      try {
+        if (typeof ctx.pool.acquireForTurn === 'function') {
+          turnLease = await ctx.pool.acquireForTurn(model.name);
+        } else {
+          const legacyBackend = await ctx.pool.acquire(model.name);
+          turnLease = { backend: legacyBackend, release: async () => undefined };
+        }
+        backend = turnLease.backend;
+      } finally {
+        // Cleared on the failure path too: a spawn that fails inside the window
+        // reports its own error, and the notice would arrive after it.
+        clearTimeout(notice);
+        // Restore the default headline whichever way the wait ended, so the
+        // startup phase never outlives the startup.
+        if (announcedStart) {
+          ctx.emitAgentProgress({ conversationId: convId, kind: 'phase', text: undefined });
+        }
       }
-      backend = turnLease.backend;
-    } finally {
-      // Cleared on the failure path too: a spawn that fails inside the window
-      // reports its own error, and the notice would arrive after it.
-      clearTimeout(notice);
-      // Restore the default headline whichever way the wait ended, so the
-      // startup phase never outlives the startup.
-      if (announcedStart) {
-        ctx.emitAgentProgress({ conversationId: convId, kind: 'phase', text: undefined });
+      ctx.lifecycle.setBackend(convId, backend);
+      ctx.events.onBackendReady?.(model.name);
+      if (ctrl.signal.aborted) {
+        // Release BEFORE settling. This path throws nothing, so the `catch`
+        // above never runs for it, and it sits outside the second `try` — the
+        // outer `finally` is a net, not the release point, because `settle`
+        // already told the window the turn is over while `turnPins[key]` was
+        // still held. Pressing Stop during a cold load used to leave that pin
+        // at 1 for the life of the window: the slot stopped being an eviction
+        // candidate and `prepareExternal` reported "a turn is running on it"
+        // with no turn running.
+        await turnLease?.release();
+        postC({ type: 'done', finishReason: 'cancelled' });
+        ctx.lifecycle.settle(convId);
+        return abortedTurnOutcome(ctx.lifecycle.terminationKind(convId));
       }
-    }
-    ctx.lifecycle.setBackend(convId, backend);
-    ctx.events.onBackendReady?.(model.name);
-    if (ctrl.signal.aborted) {
-      postC({ type: 'done', finishReason: 'cancelled' });
-      ctx.lifecycle.settle(convId);
-      return abortedTurnOutcome(ctx.lifecycle.terminationKind(convId));
-    }
-    ctx.commitUserPrompt(conv, text, attachments, promptOptions);
-    postC({ type: 'ready' });
-  } catch (err) {
-    await turnLease?.release();
-    const msg = ctrl.signal.aborted
-      ? 'Backend start cancelled.'
-      : `Backend failed to start: ${describeError(err)}`;
-    ctx.events.onBackendError?.(msg);
-    ctx.events.onTurnFailed?.(convId, msg);
-    postC({ type: 'backendDown', message: msg });
-    ctx.lifecycle.settle(convId);
-    return ctrl.signal.aborted
-      ? abortedTurnOutcome(ctx.lifecycle.terminationKind(convId))
-      : { kind: 'failed', error: msg, finalText: '' };
-  }
-
-  const checkpoint = ctx.checkpoints.beginTurn(`turn-${Date.now()}`, convId);
-  ctx.lifecycle.markStreaming(convId);
-  ctx.events.onGenerationStarted?.(model.name, convId);
-  let finalText = '';
-  let outcome: ForgeTurnOutcome;
-  try {
-    const result = await ctx.runModelTurn(
-      // The POOL, not `backend`. A model unloaded mid-turn comes back through
-      // `startSlot`, which builds a new controller on a newly claimed port —
-      // the one we hold is then orphaned and its baseUrl() is stale forever.
-      // Re-acquiring is a cheap map lookup while the slot is live, and blocks
-      // for the reload when it is not.
-      async () => (await ctx.pool.acquire(model.name)).baseUrl(),
-      conv,
-      model,
-      activeFile,
-      ctrl,
-      postC,
-      undefined,
-      checkpoint,
-    );
-    const incompleteReason = ctx.lifecycle.incompleteReason(convId);
-    outcome = {
-      kind: 'completed',
-      finalText: result.finalText,
-      finishReason: result.finishReason,
-      ...(incompleteReason ? { incompleteReason } : {}),
-    };
-    finalText = result.finalText;
-  } catch (err) {
-    const message = err instanceof Error ? err.message : String(err);
-    if (ctrl.signal.aborted) {
-      postC({ type: 'done', finishReason: 'cancelled' });
-      outcome = abortedTurnOutcome(ctx.lifecycle.terminationKind(convId));
-    } else {
-      // `provider` is optional and unset for local llama entries, which is how
-      // this line read "[AgentLoop] undefined chat failed" in the 09-05 logs.
-      log.error(
-        `[AgentLoop] ${model.provider ?? 'local'} chat failed model=${model.name}: ${message}`,
-      );
-      ctx.events.onBackendError?.(message);
-      ctx.events.onTurnFailed?.(convId, message);
-      postC({ type: 'error', message });
-      outcome = { kind: 'failed', error: message, finalText: '' };
-    }
-  } finally {
-    try {
-      finishTurn(ctx, conv, model, checkpoint, postC, true, finalText);
-    } finally {
+      ctx.commitUserPrompt(conv, text, attachments, promptOptions);
+      postC({ type: 'ready' });
+    } catch (err) {
       await turnLease?.release();
+      const msg = ctrl.signal.aborted
+        ? 'Backend start cancelled.'
+        : `Backend failed to start: ${describeError(err)}`;
+      ctx.events.onBackendError?.(msg);
+      ctx.events.onTurnFailed?.(convId, msg);
+      postC({ type: 'backendDown', message: msg });
+      ctx.lifecycle.settle(convId);
+      return ctrl.signal.aborted
+        ? abortedTurnOutcome(ctx.lifecycle.terminationKind(convId))
+        : { kind: 'failed', error: msg, finalText: '' };
     }
+
+    const checkpoint = ctx.checkpoints.beginTurn(`turn-${Date.now()}`, convId);
+    ctx.lifecycle.markStreaming(convId);
+    ctx.events.onGenerationStarted?.(model.name, convId);
+    let finalText = '';
+    let outcome: ForgeTurnOutcome;
+    try {
+      const result = await ctx.runModelTurn(
+        // The POOL, not `backend`. A model unloaded mid-turn comes back through
+        // `startSlot`, which builds a new controller on a newly claimed port —
+        // the one we hold is then orphaned and its baseUrl() is stale forever.
+        // Re-acquiring is a cheap map lookup while the slot is live, and blocks
+        // for the reload when it is not.
+        async () => (await ctx.pool.acquire(model.name)).baseUrl(),
+        conv,
+        model,
+        activeFile,
+        ctrl,
+        postC,
+        undefined,
+        checkpoint,
+      );
+      const incompleteReason = ctx.lifecycle.incompleteReason(convId);
+      outcome = {
+        kind: 'completed',
+        finalText: result.finalText,
+        finishReason: result.finishReason,
+        ...(incompleteReason ? { incompleteReason } : {}),
+      };
+      finalText = result.finalText;
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      if (ctrl.signal.aborted) {
+        postC({ type: 'done', finishReason: 'cancelled' });
+        outcome = abortedTurnOutcome(ctx.lifecycle.terminationKind(convId));
+      } else {
+        // `provider` is optional and unset for local llama entries, which is how
+        // this line read "[AgentLoop] undefined chat failed" in the 09-05 logs.
+        log.error(
+          `[AgentLoop] ${model.provider ?? 'local'} chat failed model=${model.name}: ${message}`,
+        );
+        ctx.events.onBackendError?.(message);
+        ctx.events.onTurnFailed?.(convId, message);
+        postC({ type: 'error', message });
+        outcome = { kind: 'failed', error: message, finalText: '' };
+      }
+    } finally {
+      try {
+        finishTurn(ctx, conv, model, checkpoint, postC, true, finalText);
+      } finally {
+        await turnLease?.release();
+      }
+    }
+    return outcome;
+  } finally {
+    // Safety net for exit paths added later. `release()` is idempotent, so the
+    // explicit calls above stay — they matter because they free the slot BEFORE
+    // `settle`, and the net would otherwise be the only release on the aborted
+    // early return, i.e. after the window was already told the turn ended.
+    await turnLease?.release();
   }
-  return outcome;
 }

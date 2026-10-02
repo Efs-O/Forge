@@ -17,6 +17,7 @@ import type { ForgeInstructionsLoader } from '../llm/ForgeInstructionsLoader';
 import type { ToolRegistry } from '../tools/ToolRegistry';
 import type { ToolDefinition } from '../llm/types';
 import type { MidTurnDrainResult } from '../agent/MidTurnInbox';
+import { createContextTrimState } from '../agent/toolResultContext';
 import type { ToolDispatch } from './ToolDispatch';
 import type { ToolFailureTracker } from '../tools/StripTools';
 import type { TurnLifecycle } from './TurnLifecycle';
@@ -285,9 +286,12 @@ export async function runModelTurn(
       canUseThinkingKwargs: thinkingKwargs,
       stripThinkingChannels,
       ...(apiKey ? { apiKey } : {}),
-      prepareMessages: (messages) =>
-        prepareModelTurnMessages(messages, {
+      prepareMessages: (messages) => {
+        const contextTrimState =
+          conv.contextTrimState ?? (conv.contextTrimState = createContextTrimState());
+        return prepareModelTurnMessages(messages, {
           compaction: conv.compaction,
+          contextTrimState,
           isVisionModel,
           model,
           templateEngine: ctx.templateEngine,
@@ -296,7 +300,8 @@ export async function runModelTurn(
           activeFile,
           turnContext,
           getToolDefinitions: buildToolDefinitions,
-        }),
+        });
+      },
       dispatchToolCalls: async (toolCalls, messages) => {
         applyToolCalls(conv, toolCalls.length);
         for (const call of toolCalls) {

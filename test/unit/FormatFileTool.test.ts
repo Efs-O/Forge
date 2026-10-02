@@ -1,4 +1,7 @@
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import * as fs from 'fs';
+import * as os from 'os';
+import * as path from 'path';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import * as vscode from 'vscode';
 
 vi.mock('vscode', () => ({
@@ -36,24 +39,45 @@ const ws = vscode.workspace as unknown as {
 };
 const cmds = vscode.commands as unknown as { executeCommand: ReturnType<typeof vi.fn> };
 
+// The document most recently created by doc(); the applyEdit mock bumps its
+// version by one, mirroring the real workspace.applyEdit committing a single
+// transaction. A test that needs a different bump (a keystroke in flight)
+// overrides the mock with its own implementation.
+let activeDoc: { version: number } | undefined;
+
 function doc(opts: { version?: number; save?: () => Promise<boolean> } = {}) {
-  return {
+  const d = {
     uri: { fsPath: '/ws/a.ts', toString: () => 'file:///ws/a.ts' },
     languageId: 'typescript',
     version: opts.version ?? 1,
     save: opts.save ?? (async () => true),
   };
+  activeDoc = d;
+  return d;
 }
 
 const format = (path = 'a.ts', context?: Parameters<ReturnType<typeof makeFormatFileTool>['handler']>[1]) =>
   makeFormatFileTool().handler({ path }, context) as Promise<string>;
 
 describe('format_file', () => {
+  let root: string;
   beforeEach(() => {
+    // A real directory: format_file now resolves its target with
+    // resolveRealWorkspacePath, which real-paths the workspace root, so the
+    // old fake '/ws' (absent on disk) would fail the containment check.
+    root = fs.mkdtempSync(path.join(os.tmpdir(), 'forge-format-'));
+    vscode.workspace.workspaceFolders.splice(0, Infinity, { uri: vscode.Uri.file(root) });
     vi.clearAllMocks();
     win.visibleTextEditors = [];
-    ws.applyEdit.mockResolvedValue(true);
+    ws.applyEdit.mockImplementation(async () => {
+      if (activeDoc) activeDoc.version += 1;
+      return true;
+    });
     ws.getConfiguration.mockReturnValue({ get: () => undefined });
+  });
+  afterEach(() => {
+    vscode.workspace.workspaceFolders.splice(0);
+    fs.rmSync(root, { recursive: true, force: true });
   });
 
   it('formats through the provider without opening, showing or closing an editor', async () => {
@@ -99,6 +123,23 @@ describe('format_file', () => {
 
     await expect(format()).rejects.toThrow(/changed while formatting/);
     expect(ws.applyEdit).not.toHaveBeenCalled();
+  });
+
+  it('refuses to save when the document changes while the edit is applied', async () => {
+    const save = vi.fn(async () => true);
+    const d = doc({ version: 1 });
+    d.save = save;
+    ws.openTextDocument.mockResolvedValue(d);
+    cmds.executeCommand.mockResolvedValue([{ newText: 'x' }]);
+    // applyEdit's own transaction bumps the version by one; a user keystroke
+    // that lands while the async apply is in flight bumps it again, so after
+    // apply the version is two ahead of the one the formatter computed against.
+    ws.applyEdit.mockImplementation(async () => {
+      d.version += 2;
+      return true;
+    });
+    await expect(format()).rejects.toThrow(/changed while the edit was applied/);
+    expect(save).not.toHaveBeenCalled();
   });
 
   it('does not apply edits after cancellation', async () => {

@@ -30,6 +30,12 @@ export function spawnCliProcess(options: SpawnCliProcessOptions): ChildProcess {
     ...(options.env ? { env: { ...process.env, ...options.env } } : {}),
     stdio: [options.stdin ?? 'ignore', 'pipe', 'pipe'],
     windowsHide: true,
+    // POSIX: make the child a process-group leader so terminateProcessTree can
+    // signal the whole tree with process.kill(-pid). Without this, a CLI agent
+    // that forks its own subprocesses leaves them running after the direct
+    // child is killed. Windows kills via a taskkill /T job instead, so detached
+    // is irrelevant there.
+    ...(process.platform !== 'win32' ? { detached: true } : {}),
     ...(wrap ? { windowsVerbatimArguments: true } : {}),
   });
 }
@@ -72,19 +78,34 @@ export function terminateProcessTree(proc: ChildProcess): Promise<void> {
       killer.once('exit', () => setTimeout(finish, 250));
       killer.once('error', () => setTimeout(finish, 250));
     } else {
-      try {
-        proc.kill('SIGTERM');
-      } catch {
+      // POSIX: signal the whole process group, not just the direct child. The
+      // child is a group leader (spawned detached), so -pid reaches every
+      // descendant it forked. If it is not a group leader (e.g. a child from
+      // spawnAndWait, which does not detach), -pid matches no group and we fall
+      // back to signalling the direct child, preserving the old behaviour.
+      const pid = proc.pid;
+      const signalTree = (sig: NodeJS.Signals): boolean => {
+        if (pid !== undefined) {
+          try {
+            process.kill(-pid, sig);
+            return true;
+          } catch {
+            // Not a group leader, or the group is already gone — fall through.
+          }
+        }
+        try {
+          proc.kill(sig);
+          return true;
+        } catch {
+          // The process (and its group) already exited.
+          return false;
+        }
+      };
+      if (!signalTree('SIGTERM')) {
         finish();
         return;
       }
-      setTimeout(() => {
-        try {
-          proc.kill('SIGKILL');
-        } catch {
-          // The process likely exited during the grace period.
-        }
-      }, 5000);
+      setTimeout(() => signalTree('SIGKILL'), 5000);
     }
     setTimeout(finish, 6000);
   });

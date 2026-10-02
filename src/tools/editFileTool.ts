@@ -1,6 +1,6 @@
 import * as fs from 'fs';
 import type { RegisteredTool } from './ToolRegistry';
-import { resolveWorkspacePath } from '../util/WorkspacePaths';
+import { resolveRealWorkspacePath } from '../util/WorkspacePaths';
 import { applyEol, describeEditMiss, dominantEol, findEditMatch } from './editMatch';
 import { writeFileAtomicSync, type ExpectedFileState } from '../util/atomicWrite';
 
@@ -106,8 +106,8 @@ export function makeEditFileTool(): RegisteredTool {
     permission: 'write',
     mutation: { paths: (args) => [args['filepath'] as string], showDiff: true },
     handler: async (args) => {
-      const filepath = resolveWorkspacePath(args['filepath'] as string, {
-        mustBeInsideWorkspace: true,
+      const filepath = await resolveRealWorkspacePath(args['filepath'] as string, undefined, {
+        allowMissing: true,
       });
       const edits = parseEdits(args);
 

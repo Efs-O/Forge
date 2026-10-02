@@ -3,6 +3,7 @@ import * as os from 'os';
 import * as path from 'path';
 import { afterEach, describe, expect, it } from 'vitest';
 import { ArchivedSessions } from '../../src/sidebar/ArchivedSessions';
+import { persistedToRuntime, TOOL_INTERRUPTED_RESULT } from '../../src/sidebar/sessionPersistence';
 
 describe('ArchivedSessions', () => {
   let root: string;
@@ -109,6 +110,67 @@ describe('ArchivedSessions', () => {
     fs.rmSync(path.join(storage, 'archive', 'index.json'));
     expect(new ArchivedSessions(storage, 'C:/repo', logs).list()).toEqual([]);
     expect(fs.existsSync(path.join(logs, 'gone.jsonl'))).toBe(false);
+  });
+
+  it('pairs tool rows for legacy and id-bearing logs before interrupted-call repair', () => {
+    root = fs.mkdtempSync(path.join(os.tmpdir(), 'forge-archived-'));
+    const logs = path.join(root, 'logs');
+    fs.mkdirSync(logs);
+    const start = { type: 'session_start', timestamp_ms: 1, workspace_path: 'C:/repo' };
+    const assistant = (id?: string) => ({ role: 'assistant', content: null, tool_calls: [
+      { ...(id ? { id } : {}), name: 'read_file', input: { path: 'a' } },
+    ] });
+    const tool = (id?: string) => ({ role: 'tool', content: 'result', ...(id ? { tool_call_id: id } : {}) });
+    for (const [name, rows] of [
+      ['legacy', [start, assistant(), tool()]],
+      ['modern', [start, assistant('call-modern'), tool('call-modern')]],
+    ] as const) {
+      fs.writeFileSync(path.join(logs, `${name}.jsonl`), rows.map((row) => JSON.stringify(row)).join('\n'));
+    }
+    const archive = new ArchivedSessions(path.join(root, 'storage'), 'C:/repo', logs);
+    for (const id of ['legacy', 'modern']) {
+      const stored = archive.read(id);
+      expect(stored).toBeDefined();
+      const runtime = persistedToRuntime(stored!);
+      const calls = runtime.messages.flatMap((m) => m.role === 'assistant' ? (m.tool_calls ?? []) : []);
+      const results = runtime.messages.filter((m) => m.role === 'tool');
+      expect(calls).toHaveLength(1);
+      expect(results).toHaveLength(1);
+      expect(results[0]?.tool_call_id).toBe(calls[0]?.id);
+      expect(results[0]?.content).not.toBe(TOOL_INTERRUPTED_RESULT);
+    }
+  });
+
+  it('keeps repeated user messages but collapses a full replayed legacy block', () => {
+    root = fs.mkdtempSync(path.join(os.tmpdir(), 'forge-archived-'));
+    const logs = path.join(root, 'logs');
+    fs.mkdirSync(logs);
+    const block = [
+      { type: 'session_start', session_id: 'replay', timestamp_ms: 1, workspace_path: 'C:/repo' },
+      { role: 'user', content: 'continue', timestamp_ms: 2 },
+      { role: 'user', content: 'continue', timestamp_ms: 3 },
+      { role: 'assistant', content: 'ok', timestamp_ms: 4 },
+    ];
+    const replay = block.map((row) => ({ ...row, timestamp_ms: Number(row.timestamp_ms) + 100 }));
+    fs.writeFileSync(path.join(logs, 'replay.jsonl'), [...block, ...replay].map((row) => JSON.stringify(row)).join('\n'));
+    const archive = new ArchivedSessions(path.join(root, 'storage'), 'C:/repo', logs);
+    expect(archive.read('replay')?.messages.map((m) => m.content)).toEqual(['continue', 'continue', 'ok']);
+  });
+
+  it('skips cursor-position rows replayed after the cursor', () => {
+    root = fs.mkdtempSync(path.join(os.tmpdir(), 'forge-archived-'));
+    const logs = path.join(root, 'logs');
+    fs.mkdirSync(logs);
+    const block = [
+      { type: 'session_start', session_id: 'cursor-replay', timestamp_ms: 1, workspace_path: 'C:/repo' },
+      { role: 'user', content: 'continue', timestamp_ms: 2 },
+      { role: 'assistant', content: 'ok', timestamp_ms: 3 },
+    ];
+    const replay = block.slice(1).map((row) => ({ ...row, timestamp_ms: Number(row.timestamp_ms) + 100 }));
+    const rows = [...block, { type: 'cursor', written_count: 2 }, ...replay];
+    fs.writeFileSync(path.join(logs, 'cursor-replay.jsonl'), rows.map((row) => JSON.stringify(row)).join('\n'));
+    const archive = new ArchivedSessions(path.join(root, 'storage'), 'C:/repo', logs);
+    expect(archive.read('cursor-replay')?.messages.map((m) => m.content)).toEqual(['continue', 'ok']);
   });
 
   it('a cached listing hands out copies and still sees a removed log', () => {

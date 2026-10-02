@@ -45,6 +45,9 @@ export function buildRoundRequest(input: RoundRequestInput): RoundRequest {
     messages: nativeDefinitions.length > 0 ? prepared : fallbackMessages,
     stream: true,
     ...(input.includeUsage ? { stream_options: { include_usage: true } } : {}),
+    ...(suppressThinking && model.provider === 'ollama'
+      ? { chat_template_kwargs: { enable_thinking: false } }
+      : {}),
     ...(input.maxOutputTokens !== undefined ? { max_tokens: input.maxOutputTokens } : {}),
     ...(nativeDefinitions.length > 0 ? { tools: nativeDefinitions } : {}),
     ...(input.canUseThinkingKwargs && (model.think !== undefined || suppressThinking)

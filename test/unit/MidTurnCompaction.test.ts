@@ -14,6 +14,7 @@ import {
 import { ToolCallTruncatedError } from '../../src/llm/ToolCallTruncatedError';
 import { runCompaction, type CompactionDeps } from '../../src/sidebar/CompactionService';
 import { compactMidTurn, MID_TURN_RESUME_NUDGE } from '../../src/sidebar/midTurnCompaction';
+import { prepareToolResultContext } from '../../src/agent/toolResultContext';
 import type { ForgeConfig } from '../../src/config/types';
 import type { ConversationRuntime } from '../../src/sidebar/sessionTypes';
 import type { HostToWebview } from '../../src/sidebar/messageBridge';
@@ -255,6 +256,63 @@ describe('compactMidTurn policy', () => {
     await expect(compactMidTurn(forced.deps, conv(), { exhausted: true })).resolves.toBe(true);
   });
 
+  it('uses the raw prompt estimate when the reported trimmed count is below threshold', async () => {
+    const enabled = deps({ enabled: true, at: 0.9 }, 830);
+    await expect(
+      compactMidTurn(enabled.deps, conv(), { exhausted: false, rawUsed: 1_050 } as never),
+    ).resolves.toBe(true);
+    expect(enabled.compact).toHaveBeenCalledOnce();
+
+    const disabled = deps({ enabled: false, at: 0.9 }, 830);
+    await expect(
+      compactMidTurn(disabled.deps, conv(), { exhausted: false, rawUsed: 1_050 } as never),
+    ).resolves.toBe(false);
+    expect(disabled.compact).not.toHaveBeenCalled();
+
+    const advanced = deps({ enabled: true, at: 0.9 }, 500);
+    await expect(
+      compactMidTurn(advanced.deps, conv(), {
+        exhausted: false,
+        rawUsed: 500,
+        trimAdvanced: true,
+      } as never),
+    ).resolves.toBe(true);
+    expect(advanced.compact).toHaveBeenCalledOnce();
+  });
+
+  it('passes raw estimate and trim advancement from preparation into the compaction check', async () => {
+    streamModelChatCompletion.mockImplementation(
+      async (_u: string, _r: unknown, _m: unknown, h: Handlers) => {
+        h.onToken('done');
+        h.onDone('stop');
+      },
+    );
+    let checked: { exhausted: boolean; rawUsed?: number; trimAdvanced?: boolean } | undefined;
+    await runToolCallingLoop(
+      runOptions([{ role: 'user', content: 'go' }], {
+        prepareMessages: () => ({
+          messages: [{ role: 'user', content: 'trimmed' }],
+          used: 100,
+          rawUsed: 1_050,
+          inputBudget: 500,
+          fits: true,
+          excerptedToolCallIds: [],
+          trimAdvanced: true,
+        }),
+        compactMidTurn: async (request: {
+          exhausted: boolean;
+          rawUsed?: number;
+          trimAdvanced?: boolean;
+        }) => {
+          checked = request;
+          return false;
+        },
+      }) as never,
+    );
+
+    expect(checked).toEqual({ exhausted: false, rawUsed: 1_050, trimAdvanced: true });
+  });
+
   it('adds no nudge when compaction did not happen', async () => {
     const c = conv();
     const h = deps({ enabled: true }, 990, 'failed');
@@ -273,6 +331,7 @@ describe('runCompaction midTurn', () => {
       title: 't',
       createdAt: 0,
       updatedAt: 0,
+      contextTrimState: { reasoningDropped: 1, excerpts: new Map([['stale', 2_000]]) },
       messages: [
         { role: 'user', content: 'first task' },
         { role: 'assistant', content: 'did it' },
@@ -302,6 +361,22 @@ describe('runCompaction midTurn', () => {
     expect(h.beginCompaction).not.toHaveBeenCalled();
     expect(h.posted.some((m) => m.type === 'generationStarted' || m.type === 'done')).toBe(false);
     expect(h.conversation.compaction?.summary).toContain('summary');
+    expect(h.conversation.contextTrimState).toEqual({ reasoningDropped: 0, excerpts: new Map() });
+
+    const nextMessages: ChatMessage[] = [
+      { role: 'user', content: 'go' },
+      { role: 'assistant', content: null, reasoning_content: 'keep this reasoning' },
+      { role: 'tool', tool_call_id: 'stale', content: 'x'.repeat(20_000) },
+    ];
+    const model = { name: 'local', num_ctx: 30_000 } as never;
+    const afterCompaction = prepareToolResultContext({
+      messages: nextMessages,
+      toolTokens: 0,
+      model,
+      state: h.conversation.contextTrimState,
+    });
+    const fresh = prepareToolResultContext({ messages: nextMessages, toolTokens: 0, model });
+    expect(afterCompaction.messages).toEqual(fresh.messages);
   });
 
   it('still refuses a normal compaction during a turn', async () => {

@@ -13,6 +13,7 @@ import {
   ToolLoopGuard,
 } from './ToolLoopGuard';
 import { StreamedAssistantTurn } from './StreamedAssistantTurn';
+import type { ToolResultContextResult } from './toolResultContext';
 import { buildRoundRequest } from './buildRoundRequest';
 import { sanitizeText, streamOnce } from './toolCallingStream';
 import {
@@ -67,7 +68,7 @@ export interface ToolCallingLoopOptions {
    */
   getToolDefinitions: () => ToolDefinition[];
   dispatchToolCalls: (calls: ToolCall[], messages: ChatMessage[]) => Promise<void>;
-  prepareMessages?: (messages: ChatMessage[]) => ChatMessage[];
+  prepareMessages?: (messages: ChatMessage[]) => ChatMessage[] | ToolResultContextResult;
   signal: AbortSignal;
   apiKey?: string;
   maxRounds: number;
@@ -116,13 +117,12 @@ export interface ToolCallingLoopOptions {
    */
   getOutputRoom?: (messages: ChatMessage[]) => number | undefined;
   isMutatingTool?: (name: string) => boolean;
-  /**
-   * Compacts the conversation between two rounds of this turn. Resolves true
-   * only when it compacted (and left the window ending on a user turn); the
-   * loop then re-prepares the request. `exhausted` means the next round cannot
-   * be sent as things stand, so the threshold does not apply.
-   */
-  compactMidTurn?: (request: { exhausted: boolean }) => Promise<boolean>;
+  /** Compacts between rounds; `exhausted` means the next round cannot fit. */
+  compactMidTurn?: (request: {
+    exhausted: boolean;
+    rawUsed?: number | undefined;
+    trimAdvanced?: boolean;
+  }) => Promise<boolean>;
 }
 
 export interface ToolCallingLoopResult {
@@ -161,16 +161,22 @@ export async function runToolCallingLoop(
 
   for (let round = 0; round < options.maxRounds; round++) {
     options.signal.throwIfAborted();
-    const measure = (): { prepared: ChatMessage[]; outputRoom: number | undefined } => {
-      const messages = options.prepareMessages
+    const measure = () => {
+      const preparedResult = options.prepareMessages
         ? options.prepareMessages([...options.messages])
         : [...options.messages];
+      const messages = Array.isArray(preparedResult) ? preparedResult : preparedResult.messages;
       const estimated = options.getOutputRoom?.(messages);
       const outputRoom =
         serverRoom === undefined ? estimated : Math.min(serverRoom, estimated ?? serverRoom);
-      return { prepared: messages, outputRoom };
+      return {
+        prepared: messages,
+        outputRoom,
+        ...(Array.isArray(preparedResult) ? {} : { rawUsed: preparedResult.rawUsed }),
+        trimAdvanced: !Array.isArray(preparedResult) && preparedResult.trimAdvanced,
+      };
     };
-    let { prepared, outputRoom } = measure();
+    let { prepared, outputRoom, rawUsed, trimAdvanced } = measure();
     // A recovery round runs with thinking off, so the reasoning reserve does
     // not apply to it — see `contextExhaustionReason` and `suppressThinking`.
     const suppressesThinking =
@@ -184,20 +190,19 @@ export async function runToolCallingLoop(
         truncationRecoveries,
         minRoundHeadroom: MIN_ROUND_HEADROOM_TOKENS,
       });
-    // Compact between rounds rather than failing the turn and resuming it
-    // afterwards: auto-compaction only ran post-turn, so a long turn could
-    // start at 60% and die at 100% without the threshold ever being checked.
+    // Check context between rounds: post-turn compaction can miss a turn that
+    // grows from 60% to exhaustion before it ends.
     if (round - lastCompactionRound >= MID_TURN_COMPACTION_RESET_ROUNDS) midTurnCompactions = 0;
     if (options.compactMidTurn && midTurnCompactions < MAX_MID_TURN_COMPACTIONS) {
       const exhausted = forceCompaction || exhaustion() !== undefined;
-      if (await options.compactMidTurn({ exhausted })) {
+      if (await options.compactMidTurn({ exhausted, rawUsed, trimAdvanced })) {
         midTurnCompactions++;
         lastCompactionRound = round;
         // Room changed, so a pending retry starts a fresh (thinking-off) streak.
         truncationRecoveries = Math.min(truncationRecoveries, 1);
         options.onMessagesChanged?.();
         serverRoom = undefined;
-        ({ prepared, outputRoom } = measure());
+        ({ prepared, outputRoom, rawUsed, trimAdvanced } = measure());
       } else if (forceCompaction) {
         throw new Error(CONTEXT_EXHAUSTED_MESSAGE);
       }

@@ -5,7 +5,13 @@ import { z } from 'zod';
 import { BUS_ID_PATTERN, ensureBus, writeReply, type BusPaths } from '../agentBus/agentBus';
 import { MAX_INBOUND_CHARS, forgeInboundPrompt } from '../agentBus/busContent';
 import { parseMeshCommand } from '../agentMesh/meshCommands';
-import type { AgentInbox, InboxMessageOptions } from '../agentBus/agentInbox';
+import type {
+  AgentInbox,
+  ChatTargetResult,
+  ChatTargetSelection,
+  ForgeSteerResult,
+  InboxMessageOptions,
+} from '../agentBus/agentInbox';
 import { sendJson, sendText } from './controlHttp';
 import { getLogger } from '../util/logger';
 
@@ -71,12 +77,10 @@ export interface AgentRoutesDeps {
    * §10: a user-opened Claude/Codex session registers itself as an alias.
    * Claude identifies by pid; Codex identifies by thread id.
    */
-  /**
-   * §6: a `priority=steer` message to Forge itself interrupts Forge's active
-   * turn (same as Telegram `/steer`); the steer is queued first, so it runs
-   * next. Absent ⇒ a steer to Forge queues like any message.
-   */
-  interruptForge?: () => Promise<void>;
+  /** Interrupt Forge's addressed chat and report whether it was streaming. */
+  interruptForge?: (from: string, conversationId: string | undefined) => Promise<ForgeSteerResult>;
+  /** Resolve the Forge chat that will receive an accepted agent message. */
+  resolveChatTarget?: (from: string, selection: ChatTargetSelection) => ChatTargetResult;
   /**
    * The question Forge's turn is blocked on `from` answering, if any. A queued
    * message from that sender would run only after the answer and read as newer
@@ -117,11 +121,20 @@ interface Fields {
   [key: string]: unknown;
 }
 
-const AgentMessageOptionsSchema = z.object({
-  model: z.string().trim().min(1).optional(),
-  new_chat: z.boolean().optional(),
-  reply_in_chat: z.boolean().optional(),
-});
+const AgentMessageOptionsSchema = z
+  .object({
+    model: z.string().trim().min(1).optional(),
+    new_chat: z.boolean().optional(),
+    reply_in_chat: z.boolean().optional(),
+    conversation_id: z.string().trim().min(1).max(128).optional(),
+    to_running: z.boolean().optional(),
+  })
+  .refine(
+    (options) =>
+      !(options.conversation_id && options.to_running) &&
+      !(options.new_chat && (options.conversation_id || options.to_running)),
+    'choose one Forge chat target; new_chat cannot be combined with a target',
+  );
 
 class HttpError extends Error {
   constructor(
@@ -169,6 +182,8 @@ async function readFields(req: http.IncomingMessage, url: URL): Promise<Fields> 
   if (fields['new_chat'] === 'false') fields['new_chat'] = false;
   if (fields['reply_in_chat'] === 'true') fields['reply_in_chat'] = true;
   if (fields['reply_in_chat'] === 'false') fields['reply_in_chat'] = false;
+  if (fields['to_running'] === 'true') fields['to_running'] = true;
+  if (fields['to_running'] === 'false') fields['to_running'] = false;
   return fields;
 }
 
@@ -332,6 +347,9 @@ export class AgentRoutes {
       // prompt for itself).
       const to = (typeof fields['to'] === 'string' ? fields['to'] : '').trim();
       if (to && to.toLowerCase() !== 'forge') {
+        if (fields['conversation_id'] !== undefined || fields['to_running'] !== undefined) {
+          throw new HttpError(400, 'Forge chat targeting requires to=forge');
+        }
         const text = requireText(fields, MAX_INBOUND_CHARS);
         // F-06: a `priority=steer` message interrupts the recipient's active
         // turn and runs the steer next, instead of queuing behind it.
@@ -370,7 +388,19 @@ export class AgentRoutes {
             `forge.sh reply ${awaited} <file>. To stop Forge's turn, send it as a steer.`,
         );
       }
-      const options = this.messageOptions(fields);
+      let options = this.messageOptions(fields);
+      let target: Extract<ChatTargetResult, { ok: true }> | undefined;
+      if (this.deps.resolveChatTarget && !options.newChat) {
+        const resolved = this.deps.resolveChatTarget(from, {
+          ...(options.conversationId ? { conversationId: options.conversationId } : {}),
+          ...(options.toRunning ? { toRunning: true } : {}),
+        });
+        if (!resolved.ok) throw new HttpError(resolved.status ?? 404, resolved.error);
+        target = resolved;
+        options = { ...options, targetConversationId: target.conversationId };
+      } else if (options.conversationId || options.toRunning) {
+        throw new HttpError(400, 'Forge chat targeting is unavailable in this window');
+      }
       // A `--new` needs a tab to exist, so it is the one message the cap can
       // make undeliverable. Refuse it here, with the reasons, rather than
       // accepting it and losing it: `drain()` can only report after the 202.
@@ -395,10 +425,17 @@ export class AgentRoutes {
         throw new HttpError(429, 'Forge has too many unread agent messages');
       const { position: queued, id } = accepted;
       if (steerForge) {
-        await (this.deps.interruptForge as () => Promise<void>)();
-        return sendJson(res, 202, { queued, id, steered: true });
+        const outcome = (await this.deps.interruptForge?.(from, target?.conversationId)) ?? {
+          steered: false as const,
+          reason: 'no Forge turn was stopped',
+        };
+        return sendJson(res, 202, { queued, id, ...outcome });
       }
-      return sendJson(res, 202, { queued, id });
+      return sendJson(res, 202, {
+        queued,
+        id,
+        ...(target ? { conversationId: target.conversationId, title: target.title } : {}),
+      });
     } catch (err) {
       if (err instanceof HttpError) return sendJson(res, err.status, { error: err.message });
       throw err;
@@ -410,6 +447,8 @@ export class AgentRoutes {
       model: fields['model'],
       new_chat: fields['new_chat'],
       reply_in_chat: fields['reply_in_chat'],
+      conversation_id: fields['conversation_id'],
+      to_running: fields['to_running'],
     });
     if (!parsed.success) throw new HttpError(400, zodMessage(parsed.error));
 
@@ -426,6 +465,10 @@ export class AgentRoutes {
       ...(parsed.data.reply_in_chat !== undefined
         ? { replyInChat: parsed.data.reply_in_chat }
         : {}),
+      ...(parsed.data.conversation_id !== undefined
+        ? { conversationId: parsed.data.conversation_id }
+        : {}),
+      ...(parsed.data.to_running !== undefined ? { toRunning: parsed.data.to_running } : {}),
     };
   }
 

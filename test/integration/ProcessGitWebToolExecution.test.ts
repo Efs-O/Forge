@@ -6,6 +6,17 @@ import * as vscode from 'vscode';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { makeExecCommandTool, makeRunTerminalTool } from '../../src/tools/execTools';
 import { makeWebFetchTool } from '../../src/tools/fetchTool';
+
+/**
+ * web_fetch pins its vetted DNS answer into an undici dispatcher, so a global
+ * `fetch` stub never sees its requests; inject both adapters to stay offline.
+ */
+function offlineWebFetch(fetchImpl: (url: string) => Promise<Response>) {
+  return makeWebFetchTool({
+    lookup: async () => [{ address: '93.184.216.34', family: 4 }],
+    fetch: (url) => fetchImpl(url),
+  });
+}
 import { makeGitReadTool } from '../../src/tools/gitReadTool';
 import {
   makeCommitTool,
@@ -95,7 +106,9 @@ describe('isolated process, Git, and web tool execution', () => {
     expect(log).toContain('fixture commit (Forge Test, ');
     expect(log).not.toContain('body line');
 
-    await expect(gitRead.handler({ operation: 'diff', staged: false })).resolves.toContain('-fixture');
+    await expect(gitRead.handler({ operation: 'diff', staged: false })).resolves.toContain(
+      '-fixture',
+    );
     await expect(gitRead.handler({ operation: 'blame', path: 'tracked.txt' })).resolves.toContain(
       'author Not Committed Yet',
     );
@@ -105,7 +118,9 @@ describe('isolated process, Git, and web tool execution', () => {
       'Branch created: feature',
     );
     expect(currentBranch(root)).toBe('feature');
-    await expect(makeSwitchBranchTool().handler({ name: 'main' })).resolves.toBe('Switched to main');
+    await expect(makeSwitchBranchTool().handler({ name: 'main' })).resolves.toBe(
+      'Switched to main',
+    );
     expect(currentBranch(root)).toBe('main');
 
     // Acceptance #9: the refusal must name the tool that fixes it, not just
@@ -134,7 +149,9 @@ describe('isolated process, Git, and web tool execution', () => {
     execFileSync('git', ['checkout', '-b', 'feature'], { cwd: root });
     fs.writeFileSync(path.join(root, 'main'), 'edited\n', 'utf8');
 
-    await expect(makeSwitchBranchTool().handler({ name: 'main' })).resolves.toBe('Switched to main');
+    await expect(makeSwitchBranchTool().handler({ name: 'main' })).resolves.toBe(
+      'Switched to main',
+    );
     expect(currentBranch(root)).toBe('main');
   });
 
@@ -145,9 +162,9 @@ describe('isolated process, Git, and web tool execution', () => {
     await expect(makeSwitchBranchTool().handler({ name: '--orphan' })).rejects.toThrow(
       /looks like an option/u,
     );
-    await expect(
-      makeCreateBranchTool().handler({ name: 'ok', from: '--force' }),
-    ).rejects.toThrow(/looks like an option/u);
+    await expect(makeCreateBranchTool().handler({ name: 'ok', from: '--force' })).rejects.toThrow(
+      /looks like an option/u,
+    );
     await expect(makeCreateBranchTool().handler({ name: 'bad\nname' })).rejects.toThrow(
       /control characters/u,
     );
@@ -161,7 +178,9 @@ describe('isolated process, Git, and web tool execution', () => {
     execFileSync('git', ['init', '-b', 'main'], { cwd: root });
 
     await expect(makeGitReadTool().handler({ operation: 'log' })).resolves.toBe('No commits.');
-    await expect(makeGitReadTool().handler({ operation: 'log', branch: 'no-such-branch' })).rejects.toThrow(/git log/u);
+    await expect(
+      makeGitReadTool().handler({ operation: 'log', branch: 'no-such-branch' }),
+    ).rejects.toThrow(/git log/u);
   });
 
   it('frames log records so separator characters in a message cannot split them', async () => {
@@ -203,11 +222,11 @@ describe('isolated process, Git, and web tool execution', () => {
     vi.stubGlobal('fetch', fetchMock);
 
     await expect(
-      makeWebFetchTool().handler({ url: 'https://example.com/page', max_chars: 100 }),
+      offlineWebFetch(fetchMock).handler({ url: 'https://example.com/page', max_chars: 100 }),
     ).resolves.toContain('Fixture page');
-    await expect(makeWebFetchTool().handler({ url: 'http://127.0.0.1/private' })).rejects.toThrow(
-      'Blocked loopback',
-    );
+    await expect(
+      offlineWebFetch(fetchMock).handler({ url: 'http://127.0.0.1/private' }),
+    ).rejects.toThrow('raw IP address not permitted: 127.0.0.1');
     const secrets = { get: async () => 'fixture-secret' } as unknown as vscode.SecretStorage;
     await expect(
       makeWebSearchTool(secrets, {
@@ -223,21 +242,21 @@ describe('web_fetch auth refusals', () => {
   afterEach(() => vi.unstubAllGlobals());
 
   it('points a GitHub API 401 at the gh CLI, and leaves other hosts alone', async () => {
-    vi.stubGlobal(
-      'fetch',
-      vi.fn().mockImplementation(
-        async () => new Response('{}', { status: 401, statusText: 'Unauthorized' }),
-      ),
+    const tool = offlineWebFetch(
+      async () => new Response('{}', { status: 401, statusText: 'Unauthorized' }),
     );
     await expect(
-      makeWebFetchTool().handler({ url: 'https://api.github.com/search/code?q=sd-server' }),
+      tool.handler({ url: 'https://api.github.com/search/code?q=sd-server' }),
     ).rejects.toThrow('`gh api <path>` or `gh search code <query>`');
-    await expect(
-      makeWebFetchTool().handler({ url: 'https://example.com/private' }),
-    ).rejects.toThrow(/^web_fetch: HTTP 401 Unauthorized$/);
+    await expect(tool.handler({ url: 'https://example.com/private' })).rejects.toThrow(
+      /^web_fetch: HTTP 401 Unauthorized$/,
+    );
   });
 });
 
 function currentBranch(cwd: string): string {
-  return execFileSync('git', ['rev-parse', '--abbrev-ref', 'HEAD'], { cwd, encoding: 'utf8' }).trim();
+  return execFileSync('git', ['rev-parse', '--abbrev-ref', 'HEAD'], {
+    cwd,
+    encoding: 'utf8',
+  }).trim();
 }

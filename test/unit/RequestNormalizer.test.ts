@@ -3,6 +3,7 @@ import { normalizeRequestForModel } from '../../src/llm/RequestNormalizer';
 import type { ModelConfig } from '../../src/config/types';
 import { ReasoningEffortSchema } from '../../src/config/schemaShared';
 import type { ChatCompletionRequest } from '../../src/llm/types';
+import { buildRoundRequest } from '../../src/agent/buildRoundRequest';
 
 const baseRequest: ChatCompletionRequest = {
   model: 'demo',
@@ -30,6 +31,24 @@ const baseRequest: ChatCompletionRequest = {
 };
 
 describe('normalizeRequestForModel', () => {
+  it('preserves recovery thinking suppression for native Ollama', () => {
+    const model: ModelConfig = { name: 'qwen', provider: 'ollama', think: true };
+    const request = buildRoundRequest({
+      model,
+      prepared: baseRequest.messages,
+      toolDefinitions: [],
+      nativeTools: false,
+      stripAllTools: false,
+      includeUsage: false,
+      maxOutputTokens: undefined,
+      canUseThinkingKwargs: false,
+      suppressThinking: true,
+      outputRoom: undefined,
+    }).request as ChatCompletionRequest & { think?: boolean };
+
+    expect(request.think).toBe(false);
+  });
+
   it('preserves Ollama-native sampling fields and maps thinking controls', () => {
     const model: ModelConfig = {
       name: 'gemma4:26b',

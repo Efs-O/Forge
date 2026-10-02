@@ -41,6 +41,7 @@ overlaps with an existing owner, extend the owner instead.
 | Model-endpoint turn: preflight + request             | `src/sidebar/ModelTurn.ts`               |
 | Vision gate: single source of truth (advertise + refuse) | `src/sidebar/visionGate.ts`    |
 | Model-facing message preparation for a turn (window, images, system prompt, turn context, tool-result excerpts) | `src/sidebar/prepareModelTurnMessages.ts` |
+| Context-trim policy and per-conversation hysteresis state | `src/agent/toolResultContext.ts` |
 | Per-round chat request assembly (native vs fallback tools, thinking kwargs, sampling, output cap) | `src/agent/buildRoundRequest.ts` |
 | Cloud target / local backend startup                 | `src/sidebar/ProviderTurn.ts`            |
 | Turn served by a local CLI agent                     | `src/sidebar/CliTurn.ts`                 |
@@ -605,6 +606,7 @@ the configured override stays the existing `video.ffmpeg_path` key.
 | ------------------------------------------- | ----------------------------- |
 | Path containment test (vscode-free)         | `src/util/pathContainment.ts` |
 | Spawn-and-collect child process (no vscode) | `src/util/processSpawn.ts`    |
+| Streamed child-output head+tail cap         | `src/util/outputCap.ts`       |
 | Workspace path resolution + realpath        | `src/util/WorkspacePaths.ts`  |
 | Structured logging                          | `src/util/logger.ts`          |
 | Error message + cause-chain description     | `src/util/describeError.ts`   |

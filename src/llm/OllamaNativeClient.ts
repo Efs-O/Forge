@@ -4,6 +4,7 @@ import type { ChatCompletionRequest, ChatMessage, ContentPart, ToolCall } from '
 import { wireMessageContent, type StreamHandlers } from './OpenAIClient';
 import { StreamWatchdog } from './streamWatchdog';
 import { withDescribedCause } from '../util/describeError';
+import { argumentsAreIncomplete } from './ToolCallTruncatedError';
 
 interface OllamaToolCallChunk {
   function?: {
@@ -255,13 +256,17 @@ function accumulateToolCalls(
   toolAccum: Map<number, OllamaToolCallAccumulator>,
 ): void {
   if (!chunks?.length) return;
+  const seenInFrame = new Set<string>();
   chunks.forEach((toolCall, position) => {
     const incomingName = toolCall.function?.name;
     const incomingArguments = toolCall.function?.arguments;
     const declaredIndex = toolCall.function?.index ?? position;
+    const occurrence = `${declaredIndex}:${JSON.stringify([incomingName, incomingArguments])}`;
+    const repeatedInFrame = seenInFrame.has(occurrence);
+    seenInFrame.add(occurrence);
     let key = declaredIndex;
     const current = toolAccum.get(key);
-    if (current && opensNewCall(current, incomingName, incomingArguments)) {
+    if (current && (repeatedInFrame || opensNewCall(current, incomingName, incomingArguments))) {
       key = freeSlotKey(toolAccum, declaredIndex);
     }
     if (!toolAccum.has(key)) {
@@ -315,7 +320,8 @@ export async function streamOllamaChatCompletion(
   signal?: AbortSignal,
 ): Promise<void> {
   const options = buildOllamaOptions(request, model);
-  const think = toOllamaThink(model);
+  const explicitThink = (request as ChatCompletionRequest & { think?: boolean }).think;
+  const think = explicitThink ?? toOllamaThink(model);
   const startedAt = Date.now();
   let response: Response;
   try {
@@ -385,6 +391,34 @@ export async function streamOllamaChatCompletion(
     () => void reader.cancel().catch(() => undefined),
     (err) => handlers.onError(err),
   );
+  const handleFrame = (raw: string): 'continue' | 'terminal' | 'error' => {
+    let chunk: OllamaStreamChunk;
+    try {
+      chunk = JSON.parse(raw) as OllamaStreamChunk;
+    } catch {
+      return 'continue';
+    }
+    if (chunk.error) {
+      handlers.onError(new Error(chunk.error));
+      return 'error';
+    }
+    if (typeof chunk.message?.thinking === 'string' && chunk.message.thinking.length > 0) {
+      reasoningChars += chunk.message.thinking.length;
+      if (handlers.onReasoning) handlers.onReasoning(chunk.message.thinking);
+      else handlers.onToken(chunk.message.thinking);
+    }
+    if (typeof chunk.message?.content === 'string' && chunk.message.content.length > 0) {
+      textChars += chunk.message.content.length;
+      handlers.onToken(chunk.message.content);
+    }
+    toolDeltaCount += chunk.message?.tool_calls?.length ?? 0;
+    accumulateToolCalls(chunk.message?.tool_calls, toolAccum);
+    if (!chunk.done) return 'continue';
+    flushToolCalls(toolAccum, handlers.onToolCalls);
+    reportUsage(chunk, handlers);
+    handlers.onDone(chunk.done_reason ?? null);
+    return 'terminal';
+  };
 
   try {
     while (true) {
@@ -401,67 +435,25 @@ export async function streamOllamaChatCompletion(
         const trimmed = line.trim();
         if (!trimmed) continue;
 
-        let chunk: OllamaStreamChunk;
-        try {
-          chunk = JSON.parse(trimmed) as OllamaStreamChunk;
-        } catch {
-          continue;
-        }
-
-        if (chunk.error) {
-          handlers.onError(new Error(chunk.error));
-          return;
-        }
-
-        if (typeof chunk.message?.thinking === 'string' && chunk.message.thinking.length > 0) {
-          reasoningChars += chunk.message.thinking.length;
-          if (handlers.onReasoning) handlers.onReasoning(chunk.message.thinking);
-          else handlers.onToken(chunk.message.thinking);
-        }
-        if (typeof chunk.message?.content === 'string' && chunk.message.content.length > 0) {
-          textChars += chunk.message.content.length;
-          handlers.onToken(chunk.message.content);
-        }
-        toolDeltaCount += chunk.message?.tool_calls?.length ?? 0;
-        accumulateToolCalls(chunk.message?.tool_calls, toolAccum);
-
-        if (chunk.done) {
-          flushToolCalls(toolAccum, handlers.onToolCalls);
-          reportUsage(chunk, handlers);
-          handlers.onDone(chunk.done_reason ?? null);
-          return;
-        }
+        const handled = handleFrame(trimmed);
+        if (handled === 'terminal' || handled === 'error') return;
       }
     }
 
     if (buffer.trim()) {
-      try {
-        const trailing = JSON.parse(buffer.trim()) as OllamaStreamChunk;
-        if (
-          typeof trailing.message?.thinking === 'string' &&
-          trailing.message.thinking.length > 0
-        ) {
-          reasoningChars += trailing.message.thinking.length;
-          if (handlers.onReasoning) handlers.onReasoning(trailing.message.thinking);
-          else handlers.onToken(trailing.message.thinking);
-        }
-        if (typeof trailing.message?.content === 'string' && trailing.message.content.length > 0) {
-          textChars += trailing.message.content.length;
-          handlers.onToken(trailing.message.content);
-        }
-        toolDeltaCount += trailing.message?.tool_calls?.length ?? 0;
-        accumulateToolCalls(trailing.message?.tool_calls, toolAccum);
-        if (trailing.done) {
-          flushToolCalls(toolAccum, handlers.onToolCalls);
-          reportUsage(trailing, handlers);
-          handlers.onDone(trailing.done_reason ?? null);
-          return;
-        }
-      } catch {
-        // ignore malformed trailing bytes
-      }
+      const handled = handleFrame(buffer.trim());
+      if (handled === 'terminal' || handled === 'error') return;
     }
     if (watchdog.stalled) return;
+    const incomplete = [...toolAccum.values()].find((acc) => argumentsAreIncomplete(acc.arguments));
+    if (incomplete) {
+      handlers.onError(
+        new Error(
+          `Stream ended with incomplete tool call arguments for ${incomplete.name || 'unknown tool'}.`,
+        ),
+      );
+      return;
+    }
     flushToolCalls(toolAccum, handlers.onToolCalls);
     handlers.onDone(null);
   } catch (err) {

@@ -253,6 +253,7 @@ export class SessionLogger {
           role: msg.role,
           content: null,
           tool_calls: msg.tool_calls.map((tc) => ({
+            id: tc.id,
             name: tc.function.name,
             input: (() => {
               try {
@@ -297,6 +298,8 @@ export class SessionLogger {
         model,
       };
       if (msg.reasoning) line['reasoning'] = msg.reasoning;
+      if (msg.role === 'tool' && msg.tool_call_id) line['tool_call_id'] = msg.tool_call_id;
+      if (msg.role === 'tool' && msg.name) line['name'] = msg.name;
       if (msg.role === 'user' && typeof msg.turnContext === 'string') {
         line['turn_context'] = msg.turnContext;
       }

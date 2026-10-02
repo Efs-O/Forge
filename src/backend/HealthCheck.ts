@@ -72,7 +72,11 @@ export interface HealthCheckOptions {
 
 export type HealthCheckResult =
   | { ok: true }
-  | { ok: false; reason: 'timeout' | 'process_exit' | 'process_error' | 'error'; message: string };
+  | {
+      ok: false;
+      reason: 'timeout' | 'process_exit' | 'process_error' | 'error' | 'aborted';
+      message: string;
+    };
 
 /**
  * Polls GET /v1/models until the server responds 200 or a limit is reached.
@@ -87,38 +91,61 @@ export async function waitForHealthy(
   const url = `${baseUrl}/v1/models`;
   const deadline = Date.now() + timeoutMs;
 
+  // An already-aborted signal will never fire its listener again, so without
+  // this the poll ran the FULL timeout against a caller that had already given
+  // up. Reached for real from `ensureOllamaReady`: an abort during one launch
+  // candidate breaks out of the candidate loop and then calls this a final time
+  // on the same dead signal, costing 10 s of dead polling and reporting "did not
+  // become reachable" to a user who had pressed Stop.
+  //
+  // `reason: 'aborted'` is a discriminated outcome, not a message string: the
+  // message is user-facing text and callers must branch on the reason.
+  if (signal?.aborted) return { ok: false, reason: 'aborted', message: 'Aborted' };
+
   return new Promise<HealthCheckResult>((resolve) => {
     let settled = false;
+    let abortListener: (() => void) | undefined;
+    let inFlight = false;
+    let probeController: AbortController | undefined;
+    const onExit = (code: number | null): void => {
+      done({
+        ok: false,
+        reason: 'process_exit',
+        message: `llama-server exited with code ${code}`,
+      });
+    };
+    const onError = (err: Error): void => {
+      done({ ok: false, reason: 'process_error', message: err.message });
+    };
 
     function done(result: HealthCheckResult): void {
       if (settled) return;
       settled = true;
       clearInterval(ticker);
+      probeController?.abort();
+      if (proc) {
+        proc.removeListener('exit', onExit);
+        proc.removeListener('error', onError);
+      }
+      if (signal && abortListener) signal.removeEventListener('abort', abortListener);
       resolve(result);
     }
 
     // Fail immediately if the process exits before we get healthy.
     if (proc) {
-      proc.once('exit', (code) => {
-        done({
-          ok: false,
-          reason: 'process_exit',
-          message: `llama-server exited with code ${code}`,
-        });
-      });
-      proc.once('error', (err) => {
-        done({ ok: false, reason: 'process_error', message: err.message });
-      });
+      proc.once('exit', onExit);
+      proc.once('error', onError);
     }
 
     if (signal) {
-      signal.addEventListener('abort', () => {
-        done({ ok: false, reason: 'error', message: 'Aborted' });
-      });
+      abortListener = (): void => {
+        done({ ok: false, reason: 'aborted', message: 'Aborted' });
+      };
+      signal.addEventListener('abort', abortListener, { once: true });
     }
 
     const probe = async (): Promise<void> => {
-      if (settled) return;
+      if (settled || inFlight) return;
       if (Date.now() >= deadline) {
         done({
           ok: false,
@@ -127,8 +154,12 @@ export async function waitForHealthy(
         });
         return;
       }
+      inFlight = true;
+      probeController = new AbortController();
       try {
-        const res = await fetch(url, { signal: signal ?? null });
+        const signals = [probeController.signal, AbortSignal.timeout(2000)];
+        if (signal) signals.push(signal);
+        const res = await fetch(url, { signal: AbortSignal.any(signals) });
         if (res.ok) done({ ok: true });
         else if (res.status >= 400 && res.status < 500) {
           done({
@@ -139,6 +170,9 @@ export async function waitForHealthy(
         }
       } catch {
         // not ready yet — keep polling
+      } finally {
+        inFlight = false;
+        probeController = undefined;
       }
     };
 

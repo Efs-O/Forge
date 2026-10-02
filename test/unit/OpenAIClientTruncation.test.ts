@@ -51,6 +51,19 @@ afterEach(() => {
 });
 
 describe('OpenAIClient truncation handling', () => {
+  it('rejects incomplete tool arguments when the stream ends at EOF', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => sseResponse([
+      chunk({ tool_calls: [{ index: 0, id: 'call-1', function: { name: 'read_file', arguments: '{\"path\":\"a' } }] }),
+    ])));
+    const h = handlers();
+
+    await streamChatCompletion('http://127.0.0.1:8080', request, h);
+
+    expect(h.onToolCalls).not.toHaveBeenCalled();
+    expect(h.onError).toHaveBeenCalledWith(expect.objectContaining({ message: expect.stringMatching(/incomplete|ended/u) }));
+    expect(h.onError.mock.calls[0]?.[0]).not.toBeInstanceOf(ToolCallTruncatedError);
+  });
+
   it('waits out a silent first byte longer than an idle stream', async () => {
     vi.useFakeTimers();
     const encoder = new TextEncoder();

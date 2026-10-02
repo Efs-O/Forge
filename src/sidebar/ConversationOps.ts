@@ -8,6 +8,7 @@ import {
   upsertHistoryConversation,
 } from './sessionTypes';
 import { displayPersistMessages } from './sessionProjections';
+import { resetContextTrimState } from '../agent/toolResultContext';
 
 export type NewConvResult =
   | { atCap: true }
@@ -248,6 +249,7 @@ export function opClearMessages(conv: ConversationRuntime): void {
   conv.title = UNTITLED_TITLE;
   conv.updatedAt = Date.now();
   opResetReportedContext(conv);
+  resetContextTrimState(conv);
 }
 
 /**
@@ -279,6 +281,7 @@ export function opSetActiveConversationModel(
     (candidate) => candidate.id === sidebar.activeConversationId,
   );
   if (!conversation) return;
+  if (conversation.active_model !== (modelName || undefined)) resetContextTrimState(conversation);
   if (modelName) conversation.active_model = modelName;
   else delete conversation.active_model;
   conversation.updatedAt = Date.now();
@@ -292,6 +295,7 @@ export function opSetConversationModel(
 ): boolean {
   const conversation = sidebar.conversations.find((candidate) => candidate.id === conversationId);
   if (!conversation) return false;
+  if (conversation.active_model !== (modelName || undefined)) resetContextTrimState(conversation);
   if (modelName) conversation.active_model = modelName;
   else delete conversation.active_model;
   conversation.updatedAt = Date.now();

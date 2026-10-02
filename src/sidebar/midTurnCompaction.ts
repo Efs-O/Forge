@@ -35,7 +35,7 @@ export interface MidTurnCompactionDeps {
 export async function compactMidTurn(
   deps: MidTurnCompactionDeps,
   conv: ConversationRuntime,
-  request: { exhausted: boolean },
+  request: { exhausted: boolean; rawUsed?: number | undefined; trimAdvanced?: boolean },
 ): Promise<boolean> {
   const auto = deps.getConfig().auto_compact;
   // `resume: false` opts out of Forge continuing a task on its own after a
@@ -43,8 +43,18 @@ export async function compactMidTurn(
   if (auto?.enabled !== true || auto.resume === false) return false;
   if (!request.exhausted) {
     const { used, max } = deps.snapshot(conv);
-    if (max <= 0 || used / max < (auto.at ?? DEFAULT_AUTO_COMPACT_AT)) return false;
-    log.info(`[auto-compact] mid-turn at ${Math.round((used / max) * 100)}% — compacting`);
+    const decisionUsed = Math.max(used, request.rawUsed ?? 0);
+    if (
+      !request.trimAdvanced &&
+      (max <= 0 || decisionUsed / max < (auto.at ?? DEFAULT_AUTO_COMPACT_AT))
+    ) {
+      return false;
+    }
+    log.info(
+      max > 0
+        ? `[auto-compact] mid-turn at ${Math.round((decisionUsed / max) * 100)}% — compacting`
+        : '[auto-compact] context trim advanced — compacting',
+    );
   } else {
     log.info('[auto-compact] next round cannot fit — compacting mid-turn');
   }

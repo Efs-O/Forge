@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 #   forge.sh reply <id> [file]        answer a question Forge is waiting on
-#   forge.sh say <your-name> [--model <name>] [--new] [--reply-in-chat] [file]  message Forge; chat reply is read with view
-#   forge.sh send <your-name> <to> [file]  relay a message to another agent (claude/codex/copilot)
+#   forge.sh say <your-name> [--model <name>] [--new] [--reply-in-chat] [--to <conversationId>|--to-running] [file]  message Forge
+#   forge.sh send <your-name> <to> [--to <conversationId>|--to-running] [file]  relay, or target a Forge chat when <to> is forge
 #   forge.sh steer <your-name> <to> [file] interrupt <to>'s running turn (forge/claude/codex/copilot); runs next
 #   forge.sh cancel <your-name> <id|all>  withdraw your queued message(s) to Forge not yet started
 #   forge.sh join claude|codex        this interactive session becomes that mesh alias
@@ -130,7 +130,7 @@ if [ "$VERB" = "wait" ]; then
   done
 fi
 [ $# -ge 2 ] || usage
-ARG=""; SRC="-"; MODEL=""; NEW_CHAT=""; REPLY_IN_CHAT=""
+ARG=""; SRC="-"; MODEL=""; NEW_CHAT=""; REPLY_IN_CHAT=""; CONVERSATION_ID=""; TO_RUNNING=""
 if [ "$VERB" = "say" ]; then
   shift
   while [ $# -gt 0 ]; do
@@ -138,6 +138,8 @@ if [ "$VERB" = "say" ]; then
       --model) [ $# -ge 2 ] || usage; MODEL="$2"; shift 2;;
       --new) NEW_CHAT=true; shift;;
       --reply-in-chat) REPLY_IN_CHAT=true; shift;;
+      --to) [ $# -ge 2 ] || usage; CONVERSATION_ID="$2"; shift 2;;
+      --to-running) TO_RUNNING=true; shift;;
       --*) usage;;
       *) if [ -z "$ARG" ]; then ARG="$1"; elif [ "$SRC" = "-" ]; then SRC="$1"; else usage; fi; shift;;
     esac
@@ -146,7 +148,15 @@ if [ "$VERB" = "say" ]; then
 elif [ "$VERB" = "send" ] || [ "$VERB" = "steer" ]; then
   ARG="$2"
   [ $# -ge 3 ] || usage
-  TO="$3"; [ $# -ge 4 ] && SRC="$4"
+  TO="$3"; shift 3
+  while [ $# -gt 0 ]; do
+    case "$1" in
+      --to) [ "$VERB" = "send" ] && [ "$TO" = "forge" ] && [ $# -ge 2 ] || usage; CONVERSATION_ID="$2"; shift 2;;
+      --to-running) [ "$VERB" = "send" ] && [ "$TO" = "forge" ] || usage; TO_RUNNING=true; shift;;
+      --*) usage;;
+      *) [ "$SRC" = "-" ] || usage; SRC="$1"; shift;;
+    esac
+  done
   case "$TO" in ""|*[!A-Za-z0-9._-]*) echo "forge.sh: bad recipient '$TO'" >&2; exit 2;; esac
 elif [ $# -ge 2 ]; then
   ARG="$2"
@@ -156,9 +166,14 @@ case "$VERB" in
   reply) case "$ARG" in ""|*[!A-Za-z0-9_-]*) echo "forge.sh: bad id '$ARG'" >&2; exit 2;; esac
          ROUTE=reply; QUERY="id=$ARG" ;;
   say)   case "$ARG" in ""|*[!A-Za-z0-9._-]*) echo "forge.sh: a name is letters, digits, . _ - only" >&2; exit 2;; esac
-         ROUTE=message; QUERY="from=$ARG"; [ -n "$MODEL" ] && QUERY="$QUERY&model=$MODEL"; [ -n "$NEW_CHAT" ] && QUERY="$QUERY&new_chat=true"; [ -n "$REPLY_IN_CHAT" ] && QUERY="$QUERY&reply_in_chat=true" ;;
+         case "$CONVERSATION_ID" in ""|*[!A-Za-z0-9._-]*) [ -z "$CONVERSATION_ID" ] || { echo "forge.sh: bad conversation id '$CONVERSATION_ID'" >&2; exit 2; };; esac
+         [ -z "$CONVERSATION_ID" ] || [ -z "$TO_RUNNING" ] || usage
+         [ -z "$NEW_CHAT" ] || { [ -z "$CONVERSATION_ID" ] && [ -z "$TO_RUNNING" ]; } || usage
+         ROUTE=message; QUERY="from=$ARG"; [ -n "$MODEL" ] && QUERY="$QUERY&model=$MODEL"; [ -n "$NEW_CHAT" ] && QUERY="$QUERY&new_chat=true"; [ -n "$REPLY_IN_CHAT" ] && QUERY="$QUERY&reply_in_chat=true"; [ -n "$CONVERSATION_ID" ] && QUERY="$QUERY&conversation_id=$CONVERSATION_ID"; [ -n "$TO_RUNNING" ] && QUERY="$QUERY&to_running=true" ;;
   send)  case "$ARG" in ""|*[!A-Za-z0-9._-]*) echo "forge.sh: a name is letters, digits, . _ - only" >&2; exit 2;; esac
-         ROUTE=message; QUERY="from=$ARG&to=$TO" ;;
+         case "$CONVERSATION_ID" in ""|*[!A-Za-z0-9._-]*) [ -z "$CONVERSATION_ID" ] || { echo "forge.sh: bad conversation id '$CONVERSATION_ID'" >&2; exit 2; };; esac
+         [ -z "$CONVERSATION_ID" ] || [ -z "$TO_RUNNING" ] || usage
+         ROUTE=message; QUERY="from=$ARG&to=$TO"; [ -n "$CONVERSATION_ID" ] && QUERY="$QUERY&conversation_id=$CONVERSATION_ID"; [ -n "$TO_RUNNING" ] && QUERY="$QUERY&to_running=true" ;;
   steer) case "$ARG" in ""|*[!A-Za-z0-9._-]*) echo "forge.sh: a name is letters, digits, . _ - only" >&2; exit 2;; esac
          ROUTE=message; QUERY="from=$ARG&to=$TO&priority=steer" ;;
   cancel) case "$ARG" in ""|*[!A-Za-z0-9._-]*) echo "forge.sh: a name is letters, digits, . _ - only" >&2; exit 2;; esac

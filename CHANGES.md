@@ -1,5 +1,62 @@
 # Forge — Recent Changes
 
+## 0.16.74
+
+### Bug-hunt fixes (2026-10-02)
+
+This release ships 0.16.72, 0.16.73 and 0.16.74 together (remote tags stop at
+v0.16.71). Twenty-one bugs found by the 2026-10-02 Strata/Codex/Q6 bug hunt are
+fixed here, plus a desktop right-click fix already committed as `feb04d0`.
+
+- Stopping a turn during a cold model load no longer leaks a model slot; the
+  next model can load or evict normally.
+- Aborting a model load now reports "cancelled" immediately instead of polling
+  a dead signal for 10 s and reporting "daemon not reachable".
+- A steer now interrupts the chat the sender's messages route to, not whatever
+  chat happens to be visible in the sidebar.
+- A steer reports which conversation was interrupted (or why it was not),
+  instead of claiming success when the target kept running.
+- `forge.sh send/say` now accepts a `--to-running` flag to target the chat that
+  is actually streaming, and warns when a message will open a turn in a
+  different chat.
+- Cross-session status notices no longer carry a spurious "write your verdict
+  to outbox/…" instruction.
+- Near the context limit, the trimmer now uses a per-conversation watermark
+  with hysteresis instead of re-cutting from scratch every round. Cache reuse
+  after a trim went from ~31 % to ~99 %. The trimmer engaging now also triggers
+  auto-compact, so a turn no longer stays in a re-prefill loop indefinitely.
+- Every write tool (write, edit, move, delete, image generation) now resolves
+  paths through the filesystem, so a symlink pointing outside the workspace is
+  refused instead of writing to the target.
+- Ollama recovery rounds no longer re-enable thinking when the original request
+  had it suppressed.
+- Foreground `exec_command` output is now capped at 200 KB while reading (head
+  + tail), matching the background path, instead of accumulating unbounded
+  memory.
+- Chats restored from the session log keep their original tool-call ids, so
+  past results are no longer orphaned.
+- Log recovery no longer drops legitimately repeated rows; deduplication is by
+  log position, not content.
+- A stream that ends mid-arguments now raises a stream error instead of
+  dispatching a half-written tool call.
+- Health-check probes are now serial with a per-probe timeout, and abort
+  listeners are cleaned up.
+- A trailing Ollama error frame is no longer silently ignored.
+- Identical Ollama calls in a reused index no longer collapse into one.
+- `format_file` re-checks the document version after formatting; if the user
+  typed in the meantime, the save is refused instead of overwriting the
+  keystroke.
+- `web_fetch` now resolves DNS and rejects loopback, private, link-local,
+  CGNAT and ULA addresses, and pins the connection to the vetted address so a
+  DNS rebind cannot switch it. Redirect hops are checked the same way.
+- On POSIX, CLI agents are spawned detached and killed by process group, so
+  grandchildren no longer survive a stop.
+- File-lease stale recovery now confirms the moved file's token matches the
+  stale record before claiming it, so a fresh lease from another window is no
+  longer stolen.
+- Desktop: a phantom right-click context menu that appeared after a left-click
+  on the status bar is gone (`feb04d0`).
+
 ## 0.16.73
 
 ### Strata lifecycle follows Forge (2026-10-02)

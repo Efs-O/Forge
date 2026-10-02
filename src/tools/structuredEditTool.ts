@@ -1,6 +1,6 @@
 import * as fs from 'fs';
 import type { RegisteredTool } from './ToolRegistry';
-import { resolveWorkspacePath } from '../util/WorkspacePaths';
+import { resolveRealWorkspacePath } from '../util/WorkspacePaths';
 import { writeFileAtomicSync } from '../util/atomicWrite';
 
 const MAX_EDIT_OPERATIONS = 20;
@@ -123,7 +123,9 @@ export function makeApplyLineEditsTool(): RegisteredTool {
     handler: async (args) => {
       const suppliedPath = requireString(args['path'], 'path');
       const operations = parseOperations(args['operations']);
-      const filePath = resolveWorkspacePath(suppliedPath, { mustBeInsideWorkspace: true });
+      const filePath = await resolveRealWorkspacePath(suppliedPath, undefined, {
+        allowMissing: true,
+      });
       let content: string;
       let fileState: { size: number; mtimeMs: number; ctimeMs: number };
       try {

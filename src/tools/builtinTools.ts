@@ -2,7 +2,7 @@ import * as fs from 'fs';
 import * as path from 'path';
 import * as vscode from 'vscode';
 import type { RegisteredTool } from './ToolRegistry';
-import { resolveWorkspacePath } from '../util/WorkspacePaths';
+import { resolveRealWorkspacePath, resolveWorkspacePath } from '../util/WorkspacePaths';
 import { CHUNKED_WRITE_ADVICE } from './writeChunking';
 import { mimeFromHeader } from './imageTool';
 import { MAX_READ_FILE_CHARS, capResultText } from './resultCap';
@@ -169,8 +169,8 @@ export function makeWriteFileTool(): RegisteredTool {
     permission: 'write',
     mutation: { paths: (args) => [args['path'] as string], showDiff: true },
     handler: async (args) => {
-      const filePath = resolveWorkspacePath(args['path'] as string, {
-        mustBeInsideWorkspace: true,
+      const filePath = await resolveRealWorkspacePath(args['path'] as string, undefined, {
+        allowMissing: true,
       });
       const content = args['content'] as string;
       fs.mkdirSync(path.dirname(filePath), { recursive: true });
@@ -210,8 +210,8 @@ export function makeAppendFileTool(): RegisteredTool {
     permission: 'write',
     mutation: { paths: (args) => [args['path'] as string], showDiff: true },
     handler: async (args) => {
-      const filePath = resolveWorkspacePath(args['path'] as string, {
-        mustBeInsideWorkspace: true,
+      const filePath = await resolveRealWorkspacePath(args['path'] as string, undefined, {
+        allowMissing: true,
       });
       const content = args['content'] as string;
       fs.mkdirSync(path.dirname(filePath), { recursive: true });

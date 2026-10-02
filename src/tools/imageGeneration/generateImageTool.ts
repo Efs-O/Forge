@@ -5,7 +5,7 @@ import type { SdServerBackend } from '../../backend/SdServerBackend';
 import type { ForgeConfig, ImageBackendConfig, ImageGenerationConfig } from '../../config/types';
 import type { ToolDefinition } from '../../llm/types';
 import type { UserNotificationService } from '../../sidebar/UserNotificationService';
-import { resolveWorkspacePath } from '../../util/WorkspacePaths';
+import { resolveRealWorkspacePath } from '../../util/WorkspacePaths';
 import { GENERATED_IMAGE_PREFIX } from '../../sidebar/toolResultView';
 import type { RegisteredTool, ToolHandlerContext } from '../ToolRegistry';
 import { generateCloudImage, type GeneratedImage } from './cloudImageBackend';
@@ -164,7 +164,7 @@ async function runGenerateImage(
     image,
     (deps.now ?? (() => new Date()))(),
   );
-  const absolute = resolveWorkspacePath(target, { mustBeInsideWorkspace: true });
+  const absolute = await resolveRealWorkspacePath(target, undefined, { allowMissing: true });
   context?.beforeMutate([absolute]);
   await fs.mkdir(path.dirname(absolute), { recursive: true });
   await fs.writeFile(absolute, image.bytes);

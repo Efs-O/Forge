@@ -48,6 +48,11 @@ Codex message each other, each message shown in the receiving window.
 When several Forge windows are open, the client reaches the last focused
 Forge window. \`forge.sh say <name> --new\` opens and selects a new chat there;
 ordinary \`say\` follows that sender's previous chat without changing the view.
+Use \`say <name> --to <conversationId>\` to select a specific Forge chat, or
+\`say <name> --to-running\` to select the currently running chat. The same flags
+work with \`send <name> forge\`; \`send\` to another agent remains a relay.
+Messages routed to an existing Forge chat print its id and title in the 202
+response.
 
 A \`--new\` needs a free chat tab. If that window is at its chat cap and nothing
 can be archived, \`say --new\` exits non-zero with a 409 naming what is holding
@@ -60,8 +65,7 @@ A Claude Code session runs \`forge.sh join claude\`; an interactive API Codex
 session runs \`forge.sh join codex\`. Joining makes that visible session the
 stable alias, so inbound messages wake it instead of starting a separate
 Forge-owned CLI turn. With no joined session, Forge may create its own owned
-peer. Relay to another agent with
-\`forge.sh send <your-name> <to>\`.
+peer. Relay to another agent with \`forge.sh send <your-name> <to>\`.
 
 ## Small follow-ups
 

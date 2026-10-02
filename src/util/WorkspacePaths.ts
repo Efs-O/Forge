@@ -67,20 +67,66 @@ export function resolveWorkspaceUri(
   return vscode.Uri.file(resolveWorkspacePath(filePath, options));
 }
 
+export interface ResolveRealWorkspacePathOptions {
+  /**
+   * Allow a target that does not exist yet (a new file or directory). The
+   * nearest existing ancestor is real-pathed instead, so a symlink in the
+   * parent chain is still caught. Default false: a missing target throws.
+   */
+  allowMissing?: boolean;
+  /** Refuse absolute paths, resolving only against the workspace root. */
+  relativeOnly?: boolean;
+  /**
+   * Absolute folders outside the workspace that also satisfy containment —
+   * config.yaml `extra_file_roots`. Passed through to the lexical check and
+   * real-pathed here so a symlink that stays inside an extra root is allowed
+   * but one that points past it is refused.
+   */
+  extraRoots?: readonly string[];
+}
+
+/**
+ * Realpath-aware workspace containment. `resolveWorkspacePath` is lexical and
+ * cannot see a symlink or junction inside the workspace that points outside it
+ * — every write tool used to trust it, so `write_file` to `link/evil.txt`
+ * (where `link` is a junction to `..`) wrote outside the workspace. This
+ * resolves the candidate (or, for a not-yet-created target, its nearest
+ * existing ancestor) with `fs.realpath` and re-checks containment against the
+ * REAL workspace root and any real extra roots. Returns the real path, which
+ * is what the tool should actually write.
+ */
 export async function resolveRealWorkspacePath(
   filePath: string,
-  workspaceRoot: string,
-  options: { allowMissing?: boolean; relativeOnly?: boolean } = {},
+  workspaceRoot?: string,
+  options: ResolveRealWorkspacePathOptions = {},
 ): Promise<string> {
+  const root = workspaceRoot ?? defaultWorkspaceRoot();
+  const extra = options.extraRoots ?? [];
   const resolved = resolveWorkspacePath(filePath, {
-    workspaceRoot,
+    // exactOptionalPropertyTypes: only pass the root when we have one, so an
+    // undefined never lands in a `string?` slot.
+    ...(root ? { workspaceRoot: root } : {}),
     allowAbsolute: !(options.relativeOnly ?? false),
     mustBeInsideWorkspace: true,
+    extraRoots: extra,
   });
-  const realRoot = await fs.realpath(workspaceRoot);
+
+  // The lexical check passed (workspace or an extra root). Now confirm the REAL
+  // path stays there. A missing extra root contributes nothing: no path inside
+  // it can exist, so it cannot be the destination of an escape.
+  const realRoots: string[] = [];
+  for (const candidate of root ? [root, ...extra] : extra) {
+    try {
+      realRoots.push(await fs.realpath(candidate));
+    } catch (err) {
+      if ((err as NodeJS.ErrnoException).code !== 'ENOENT') throw err;
+    }
+  }
+  const insideRealRoot = (p: string): boolean => realRoots.some((r) => isPathInside(r, p));
+
   try {
     const realCandidate = await fs.realpath(resolved);
-    if (!isPathInside(realRoot, realCandidate)) {
+    if (!insideRealRoot(realCandidate)) {
       throw new Error(`Path resolves outside the workspace: ${filePath}`);
     }
     return realCandidate;
@@ -89,12 +135,15 @@ export async function resolveRealWorkspacePath(
     if (!options.allowMissing || (code !== 'ENOENT' && code !== 'ENOTDIR')) throw err;
   }
 
+  // Target does not exist yet. Walk up to the nearest existing ancestor and
+  // confirm IT stays inside; a symlink in the parent chain surfaces here.
+  // Re-append the missing tail so the returned path is the real destination.
   let existing = path.dirname(resolved);
   const suffix: string[] = [path.basename(resolved)];
   while (existing !== path.dirname(existing)) {
     try {
       const realParent = await fs.realpath(existing);
-      if (!isPathInside(realRoot, realParent)) {
+      if (!insideRealRoot(realParent)) {
         throw new Error(`Path parent resolves outside the workspace: ${filePath}`);
       }
       return path.join(realParent, ...suffix.reverse());

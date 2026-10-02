@@ -400,6 +400,15 @@ export async function streamChatCompletion(
     if (watchdog.stalled) return;
     // Stream ended without [DONE] or a terminal finish_reason (server crash or
     // dropped connection) — settle anyway so the agent loop never hangs.
+    const incomplete = [...toolAccum.values()].find((acc) => argumentsAreIncomplete(acc.arguments));
+    if (incomplete) {
+      handlers.onError(
+        new Error(
+          `Stream ended with incomplete tool call arguments for ${incomplete.name || 'unknown tool'}.`,
+        ),
+      );
+      return;
+    }
     flushAccumulatedToolCalls();
     log.warn(`[OpenAIClient] stream ended without terminal frame ${streamSummary()}`);
     handlers.onDone(terminalFinishReason);

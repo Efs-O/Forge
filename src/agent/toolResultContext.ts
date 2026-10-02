@@ -1,6 +1,7 @@
 import type { ChatMessage } from '../llm/types';
-import { CHARS_PER_TOKEN, computeContextBudget, minimumOutputReserve } from '../util/contextBudget';
+import { computeContextBudget, minimumOutputReserve } from '../util/contextBudget';
 import type { LlamaServerConfig, ModelConfig } from '../config/types';
+import { getLogger } from '../util/logger';
 import { dropOldestReasoning } from './preserveThinking';
 
 /**
@@ -12,18 +13,40 @@ import { dropOldestReasoning } from './preserveThinking';
 export const PREFERRED_TOOL_RESULT_CHARS = 12_000;
 /** A result smaller than this stays whole unless no input budget exists at all. */
 export const MIN_TOOL_RESULT_EXCERPT_CHARS = 2_000;
+const LOW_WATER_FRACTION = 0.7;
+
+const log = getLogger();
+
+export interface ContextTrimState {
+  /** Reasoning-carrying assistant turns stripped oldest-first. */
+  reasoningDropped: number;
+  /** Tool call IDs and their fixed excerpt sizes in chars. */
+  excerpts: Map<string, number>;
+}
+
+export function createContextTrimState(): ContextTrimState {
+  return { reasoningDropped: 0, excerpts: new Map() };
+}
+
+export function resetContextTrimState(conversation: { contextTrimState?: ContextTrimState }): void {
+  conversation.contextTrimState = createContextTrimState();
+}
 
 export interface ToolResultContextResult {
   /** A model-only copy. The stored/sidebar transcript is never changed. */
   messages: ChatMessage[];
   /** Estimated input tokens after the model-only reductions. */
   used: number;
+  /** Estimate before any context trimming. */
+  rawUsed: number;
   /** Input budget after reserving enough room for a useful reply. */
   inputBudget: number;
   /** True when the prepared request has room for both prompt and reply. */
   fits: boolean;
   /** IDs whose raw result remains stored but was excerpted for this request. */
   excerptedToolCallIds: string[];
+  /** True only when this prepare call advanced the persisted trim watermark. */
+  trimAdvanced: boolean;
 }
 
 function textContent(message: ChatMessage): string | undefined {
@@ -53,6 +76,34 @@ function excerpt(text: string, toolCallId: string, maxChars: number): string {
   return `${text.slice(0, finalHead)}${marker(finalHead, finalTailStart)}${text.slice(finalTailStart)}`;
 }
 
+function applyTrimState(
+  messages: ChatMessage[],
+  state: ContextTrimState,
+  estimate: (messages: ChatMessage[]) => number,
+): { messages: ChatMessage[]; used: number; excerptedToolCallIds: string[] } {
+  const carriers = messages.filter((message) => message.reasoning_content !== undefined).length;
+  const withoutReasoning = dropOldestReasoning(
+    messages,
+    Math.min(state.reasoningDropped, carriers),
+  );
+  let trimmed = withoutReasoning;
+  const excerptedToolCallIds: string[] = [];
+
+  for (let index = 0; index < withoutReasoning.length; index += 1) {
+    const message = withoutReasoning[index]!;
+    const id = message.role === 'tool' ? message.tool_call_id : undefined;
+    const size = id ? state.excerpts.get(id) : undefined;
+    const text = textContent(message);
+    if (id && size !== undefined && text !== undefined && text.length > size) {
+      if (trimmed === withoutReasoning) trimmed = [...withoutReasoning];
+      trimmed[index] = { ...message, content: excerpt(text, id, size) };
+      excerptedToolCallIds.push(id);
+    }
+  }
+
+  return { messages: trimmed, used: estimate(trimmed), excerptedToolCallIds };
+}
+
 /**
  * Reduce only tool-result bodies in a model-facing copy until a useful output
  * reserve remains. The original messages, including every raw result, are
@@ -64,7 +115,9 @@ export function prepareToolResultContext(input: {
   model: ModelConfig;
   server?: LlamaServerConfig;
   responseReserve?: number;
+  state?: ContextTrimState;
 }): ToolResultContextResult {
+  const state = input.state ?? createContextTrimState();
   // Reserve thinking AND an answer, not just an answer. `MIN_ROUND_HEADROOM_TOKENS`
   // alone left less output room than the model's own `--reasoning-budget`, which
   // makes a long-thinking round unable to finish by construction — see
@@ -79,52 +132,71 @@ export function prepareToolResultContext(input: {
     });
   const first = estimate(input.messages);
   const inputBudget = Math.max(0, first.max - responseReserve);
-  // Preserved thinking goes first, oldest turn first, before any tool result
-  // is cut. A no-op when nothing carries `reasoning_content`.
-  const trimmed =
-    first.max > 0 && first.used > inputBudget
-      ? dropOldestReasoning(input.messages, (m) => estimate(m).used <= inputBudget)
-      : input.messages;
-  const initial = trimmed === input.messages ? first : estimate(trimmed);
-  if (initial.max <= 0 || initial.used <= inputBudget) {
-    return {
-      messages: trimmed,
-      used: initial.used,
-      inputBudget,
-      fits: initial.max <= 0 || initial.used <= inputBudget,
-      excerptedToolCallIds: [],
-    };
+  let applied = applyTrimState(input.messages, state, (messages) => estimate(messages).used);
+  let trimAdvanced = false;
+
+  if (first.max > 0 && applied.used > inputBudget) {
+    const target = inputBudget * LOW_WATER_FRACTION;
+    const carrierCount = input.messages.filter(
+      (message) => message.reasoning_content !== undefined,
+    ).length;
+    while (applied.used > target && state.reasoningDropped < carrierCount) {
+      state.reasoningDropped += 1;
+      trimAdvanced = true;
+      applied = applyTrimState(input.messages, state, (messages) => estimate(messages).used);
+    }
+
+    // Short results can seed the first trim. Once fixed excerpts exist, do not
+    // chase each new small result and move the watermark on every tool round.
+    const includeShortResults = state.excerpts.size === 0;
+    const candidates = input.messages
+      .map((message) => ({ message, text: textContent(message) }))
+      .filter(
+        (candidate): candidate is { message: ChatMessage; text: string } =>
+          candidate.message.role === 'tool' &&
+          candidate.message.tool_call_id !== undefined &&
+          candidate.text !== undefined &&
+          (candidate.text.length > PREFERRED_TOOL_RESULT_CHARS ||
+            (includeShortResults && candidate.text.length > MIN_TOOL_RESULT_EXCERPT_CHARS)),
+      )
+      .sort((a, b) => b.text.length - a.text.length);
+
+    for (const candidate of candidates) {
+      if (applied.used <= target) break;
+      const id = candidate.message.tool_call_id!;
+      if (state.excerpts.has(id)) continue;
+      state.excerpts.set(id, PREFERRED_TOOL_RESULT_CHARS);
+      trimAdvanced = true;
+      applied = applyTrimState(input.messages, state, (messages) => estimate(messages).used);
+    }
+
+    if (applied.used > target) {
+      for (const [id, size] of state.excerpts) {
+        if (size !== MIN_TOOL_RESULT_EXCERPT_CHARS) {
+          state.excerpts.set(id, MIN_TOOL_RESULT_EXCERPT_CHARS);
+          trimAdvanced = true;
+        }
+      }
+      if (trimAdvanced) {
+        applied = applyTrimState(input.messages, state, (messages) => estimate(messages).used);
+      }
+    }
   }
 
-  const messages = [...trimmed];
-  const candidates = messages
-    .map((message, index) => ({ message, index, text: textContent(message) }))
-    .filter(
-      (candidate): candidate is { message: ChatMessage; index: number; text: string } =>
-        candidate.message.role === 'tool' &&
-        candidate.message.tool_call_id !== undefined &&
-        candidate.text !== undefined &&
-        candidate.text.length > MIN_TOOL_RESULT_EXCERPT_CHARS,
-    )
-    .sort((a, b) => b.text.length - a.text.length);
-  const excerptedToolCallIds: string[] = [];
-  let used = initial.used;
-
-  for (const candidate of candidates) {
-    if (used <= inputBudget) break;
-    const requiredChars = Math.ceil((used - inputBudget) * CHARS_PER_TOKEN);
-    const targetChars = Math.max(
-      MIN_TOOL_RESULT_EXCERPT_CHARS,
-      Math.min(PREFERRED_TOOL_RESULT_CHARS, candidate.text.length - requiredChars),
+  if (trimAdvanced) {
+    log.info(
+      `[context-trim] advanced reasoning=${state.reasoningDropped} excerpts=${state.excerpts.size} ` +
+        `raw=${first.used} sent=${applied.used} budget=${inputBudget} low=${inputBudget * LOW_WATER_FRACTION}`,
     );
-    if (targetChars >= candidate.text.length) continue;
-    messages[candidate.index] = {
-      ...candidate.message,
-      content: excerpt(candidate.text, candidate.message.tool_call_id as string, targetChars),
-    };
-    excerptedToolCallIds.push(candidate.message.tool_call_id as string);
-    used = estimate(messages).used;
   }
 
-  return { messages, used, inputBudget, fits: used <= inputBudget, excerptedToolCallIds };
+  return {
+    messages: applied.messages,
+    used: applied.used,
+    rawUsed: first.used,
+    inputBudget,
+    fits: first.max <= 0 || applied.used <= inputBudget,
+    excerptedToolCallIds: applied.excerptedToolCallIds,
+    trimAdvanced,
+  };
 }

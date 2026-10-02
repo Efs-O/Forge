@@ -27,6 +27,69 @@ const baseRequest: ChatCompletionRequest = {
 };
 
 describe('streamOllamaChatCompletion', () => {
+  it('uses an explicit recovery think=false override', async () => {
+    const fetchMock = vi.fn().mockResolvedValue({ ok: true, body: new Response(`${JSON.stringify({ done: true })}\n`).body });
+    vi.stubGlobal('fetch', fetchMock);
+    await streamOllamaChatCompletion('http://127.0.0.1:11434', { ...baseRequest, think: false }, baseModel, {
+      onToken: vi.fn(), onDone: vi.fn(), onError: vi.fn(),
+    });
+    expect(JSON.parse(String((fetchMock.mock.calls[0]?.[1] as RequestInit).body)).think).toBe(false);
+    vi.unstubAllGlobals();
+  });
+
+  it('rejects incomplete tool arguments when EOF arrives without a done frame', async () => {
+    const line = JSON.stringify({ message: { tool_calls: [{ function: { name: 'read_file', arguments: '{"path":"a' } }] } });
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue({ ok: true, body: new Response(`${line}\n`).body }));
+    const onToolCalls = vi.fn();
+    const onError = vi.fn();
+    await streamOllamaChatCompletion('http://127.0.0.1:11434', baseRequest, baseModel, {
+      onToken: vi.fn(), onDone: vi.fn(), onError, onToolCalls,
+    });
+    expect(onToolCalls).not.toHaveBeenCalled();
+    expect(onError).toHaveBeenCalledWith(expect.objectContaining({ message: expect.stringMatching(/incomplete|ended/u) }));
+    vi.unstubAllGlobals();
+  });
+
+  it('handles an error in the trailing unterminated frame', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue({ ok: true, body: new Response('{"error":"trailing failure"}').body }));
+    const onError = vi.fn();
+    await streamOllamaChatCompletion('http://127.0.0.1:11434', baseRequest, baseModel, {
+      onToken: vi.fn(), onDone: vi.fn(), onError,
+    });
+    expect(onError).toHaveBeenCalledWith(expect.objectContaining({ message: 'trailing failure' }));
+    vi.unstubAllGlobals();
+  });
+
+  it('keeps identical whole calls at the same index when they share one frame', async () => {
+    const line = JSON.stringify({ message: { tool_calls: [
+      { function: { index: 0, name: 'read_file', arguments: { path: 'same' } } },
+      { function: { index: 0, name: 'read_file', arguments: { path: 'same' } } },
+    ] }, done: true });
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue({ ok: true, body: new Response(`${line}\n`).body }));
+    const onToolCalls = vi.fn();
+    await streamOllamaChatCompletion('http://127.0.0.1:11434', baseRequest, baseModel, {
+      onToken: vi.fn(), onDone: vi.fn(), onError: vi.fn(), onToolCalls,
+    });
+    expect(onToolCalls.mock.calls[0]?.[0]).toHaveLength(2);
+    vi.unstubAllGlobals();
+  });
+
+  it('keeps an identical whole payload across frames as a retransmission', async () => {
+    const payload = { function: { index: 0, name: 'read_file', arguments: { path: 'same' } } };
+    const lines = [
+      JSON.stringify({ message: { tool_calls: [payload] }, done: false }),
+      JSON.stringify({ message: { tool_calls: [payload] }, done: false }),
+      JSON.stringify({ done: true }),
+    ].join('\n');
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue({ ok: true, body: new Response(`${lines}\n`).body }));
+    const onToolCalls = vi.fn();
+    await streamOllamaChatCompletion('http://127.0.0.1:11434', baseRequest, baseModel, {
+      onToken: vi.fn(), onDone: vi.fn(), onError: vi.fn(), onToolCalls,
+    });
+    expect(onToolCalls.mock.calls[0]?.[0]).toHaveLength(1);
+    vi.unstubAllGlobals();
+  });
+
   it('sends Ollama-native options and think controls', async () => {
     const lines = [
       JSON.stringify({ message: { thinking: 'plan ' }, done: false }),

@@ -4,6 +4,7 @@
 
 import { z } from 'zod';
 import type { CompactionState } from './compactionTypes';
+import type { ContextTrimState } from '../agent/toolResultContext';
 import { compactionPersistedSchema } from './compactionPersistedSchema';
 export {
   createDefaultSession,
@@ -244,6 +245,8 @@ export interface ConversationRuntime {
    * persisted record stay whole. Clearing this restores full context.
    */
   compaction?: CompactionState;
+  /** Model-facing context reductions; in-memory only, reset when history/model changes. */
+  contextTrimState?: ContextTrimState;
   /**
    * Agent-maintained task ledger, written by the `update_plan` tool.
    *

@@ -13,7 +13,7 @@ import type { ForgeInstructionsLoader } from '../llm/ForgeInstructionsLoader';
 import type { ToolDefinition, ChatMessage } from '../llm/types';
 import { estimateToolTokens } from '../util/contextBudget';
 import { stampToolResultClocks } from '../agent/toolResultClock';
-import { prepareToolResultContext } from '../agent/toolResultContext';
+import { prepareToolResultContext, type ContextTrimState } from '../agent/toolResultContext';
 import { annotateRereads } from '../agent/staleReadSupersede';
 import { nudgeTruncatedResults } from '../agent/truncatedResultNudge';
 import { applyCompactionWindow } from './compactionWindow';
@@ -25,6 +25,7 @@ import { attachCurrentTaskReasoning, preservesThinking } from '../agent/preserve
 
 export interface PrepareModelTurnMessagesInput {
   compaction: ConversationRuntime['compaction'];
+  contextTrimState: ContextTrimState;
   isVisionModel: boolean;
   model: ModelConfig;
   templateEngine: TemplateEngine | undefined;
@@ -38,7 +39,7 @@ export interface PrepareModelTurnMessagesInput {
 export function prepareModelTurnMessages(
   messages: ChatMessage[],
   input: PrepareModelTurnMessagesInput,
-): ChatMessage[] {
+): ReturnType<typeof prepareToolResultContext> {
   // Compaction shrinks what the MODEL sees, never the stored transcript.
   // The loop hands us a copy and re-runs this every round, so the window
   // holds for the whole turn without touching conv.messages.
@@ -87,5 +88,6 @@ export function prepareModelTurnMessages(
     toolTokens: estimateToolTokens(input.getToolDefinitions()),
     model: input.model,
     server: input.config.llama_server,
-  }).messages;
+    state: input.contextTrimState,
+  });
 }

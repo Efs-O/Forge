@@ -179,6 +179,16 @@ describe('orchestrator: tell + FIFO (M5)', () => {
     expect(states).toEqual(['accepted']); // no started, no completed
   });
 
+  it('a status notice (expectsReply: false) carries no verdict instruction', async () => {
+    const adapter = new FakeAdapter(false);
+    const orch = makeOrchestrator({ adapters: { codex: adapter } });
+    await orch.tell('codex', 'cancelled · 3s · the turn you started was stopped', {
+      expectsReply: false,
+    });
+    await flush();
+    expect(adapter.sends).toEqual(['cancelled · 3s · the turn you started was stopped']);
+  });
+
   it('an unknown recipient is rejected with the live list (§4)', async () => {
     const adapter = new FakeAdapter(true);
     const orch = makeOrchestrator({ adapters: { codex: adapter }, known: ['codex'] });

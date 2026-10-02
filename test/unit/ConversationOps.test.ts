@@ -7,6 +7,7 @@ import {
   opRenameConversation,
   opRestoreConversation,
   opSetActiveConversationModel,
+  opSetConversationModel,
 } from '../../src/sidebar/ConversationOps';
 import type { SidebarRuntime } from '../../src/sidebar/sessionTypes';
 import { UNTITLED_TITLE } from '../../src/sidebar/sessionTypes';
@@ -45,11 +46,19 @@ function sidebar(): SidebarRuntime {
 describe('opSetActiveConversationModel', () => {
   it('replaces the model pinned to the active conversation only', () => {
     const state = sidebar();
+    state.conversations[0]!.contextTrimState = {
+      reasoningDropped: 2,
+      excerpts: new Map([['old-call', 2_000]]),
+    };
 
     opSetActiveConversationModel(state, 'local-model');
 
     expect(state.conversations[0]?.active_model).toBe('local-model');
     expect(state.conversations[1]?.active_model).toBe('codex');
+    expect(state.conversations[0]?.contextTrimState).toEqual({
+      reasoningDropped: 0,
+      excerpts: new Map(),
+    });
   });
 
   it('clears the active conversation override when no model is selected', () => {
@@ -58,6 +67,21 @@ describe('opSetActiveConversationModel', () => {
     opSetActiveConversationModel(state, null);
 
     expect(state.conversations[0]).not.toHaveProperty('active_model');
+  });
+
+  it('resets trim state when an addressed conversation changes model', () => {
+    const state = sidebar();
+    state.conversations[1]!.contextTrimState = {
+      reasoningDropped: 1,
+      excerpts: new Map([['old-call', 12_000]]),
+    };
+
+    expect(opSetConversationModel(state, 'other', 'local-model')).toBe(true);
+
+    expect(state.conversations[1]?.contextTrimState).toEqual({
+      reasoningDropped: 0,
+      excerpts: new Map(),
+    });
   });
 });
 
@@ -229,11 +253,13 @@ describe('opClearMessages', () => {
     const state = sidebar();
     const conv = state.conversations[0]!;
     conv.messages = [{ role: 'user', content: 'hi' }];
+    conv.contextTrimState = { reasoningDropped: 1, excerpts: new Map([['old-call', 2_000]]) };
 
     opClearMessages(conv);
 
     expect(conv.messages).toEqual([]);
     expect(conv.active_model).toBe('claude');
+    expect(conv.contextTrimState).toEqual({ reasoningDropped: 0, excerpts: new Map() });
   });
 });
 

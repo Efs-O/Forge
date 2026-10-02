@@ -70,10 +70,7 @@ describe('preserve_thinking', () => {
 
   it('drops the oldest reasoning first', () => {
     const out = attachCurrentTaskReasoning(task());
-    const trimmed = dropOldestReasoning(
-      out,
-      (m) => m.filter((x) => x.reasoning_content !== undefined).length <= 1,
-    );
+    const trimmed = dropOldestReasoning(out, 1);
     expect(trimmed[3]?.reasoning_content).toBeUndefined();
     expect(trimmed[6]?.reasoning_content).toBe('Round two.');
   });
