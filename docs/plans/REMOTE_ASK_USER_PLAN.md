@@ -1,6 +1,6 @@
 # Remote ask_user Plan
 
-Status: proposed — 2026-08-31
+Status: implemented 2026-08-31 (`bbda424`, `d75f780`); multi-question free-text route `1e750d6`.
 
 ## Problem
 

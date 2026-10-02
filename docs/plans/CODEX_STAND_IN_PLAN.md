@@ -1,6 +1,6 @@
 # Codex stand-in: headless comms for a user-joined Codex with no open window
 
-**Status:** proposed — awaiting user review, then implementation
+**Status:** implemented 2026-09-29 (`2b8a689`).
 **Date:** 2026-09-28
 **Builds on:** [COPILOT_AGENT_MESH_PLAN.md](COPILOT_AGENT_MESH_PLAN.md) § P4b
 (findings + proposal, Claude-reviewed), [CLAUDE_STAND_IN_RESUME_PLAN.md](CLAUDE_STAND_IN_RESUME_PLAN.md)

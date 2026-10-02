@@ -1,7 +1,7 @@
 # `/system` Command — Handoff
 
-Status: **design agreed, nothing implemented.** No code written, no files
-touched other than this one. Written 2026-09-04.
+Status: **implemented 2026-09-04** (`5f55b6b`, released in 0.15.27). The design below is
+what shipped. Written 2026-09-04.
 
 ## What the user asked for
 

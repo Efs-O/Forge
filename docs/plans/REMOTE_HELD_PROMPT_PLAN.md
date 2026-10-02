@@ -1,6 +1,6 @@
 # Remote Held Prompt Plan
 
-Status: proposed — 2026-08-31
+Status: implemented 2026-08-31 (`15894f2`).
 
 ## Problem
 

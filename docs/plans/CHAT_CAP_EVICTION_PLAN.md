@@ -1,6 +1,6 @@
 # Chat cap: evict un-kept chats without losing Undo, say why when nothing can go, stop the bus lying
 
-Status: **revised 2026-10-01 after review — change 1 simplified; implementing.**
+Status: **implemented 2026-10-01** (`bc53d12`, follow-up fix `f5885e2`); CI green on all three OSes (`95602e0`).
 
 Three defects at `MAX_CONVERSATIONS = 12`, one root cause: the eviction gate
 treats "nobody pressed Keep or Undo yet" as "busy", and the refusal it produces
@@ -290,35 +290,35 @@ checkpoint destroy on the eviction path fails the first test.
 
 ## 8. Acceptance criteria
 
-- [ ] Archiving a chat at the cap never destroys its checkpoint: the conversation's
+- [x] Archiving a chat at the cap never destroys its checkpoint: the conversation's
       stack stays in the Map and its `turn-*` directory survives.
       → *"eviction keeps the stack and the disk dir"*.
-- [ ] Keep and Undo work again, in the same window, once the chat is restored
+- [x] Keep and Undo work again, in the same window, once the chat is restored
       from history, with the existing postcondition refusal intact.
       → *"Undo works after evict → restore"*, *"restore re-posts the bar"*.
-- [ ] `undecidedChanges` is gone from `ConversationEvictionSignals` and from the
+- [x] `undecidedChanges` is gone from `ConversationEvictionSignals` and from the
       wiring; a chat with un-kept changes is evictable.
       → *"eviction no longer blocked by undecided changes"*.
-- [ ] A user who closes a tab with ✕, or deletes a chat, still forfeits its Undo
+- [x] A user who closes a tab with ✕, or deletes a chat, still forfeits its Undo
       and its disk dirs. → *"close and delete still forfeit"*.
-- [ ] At an unrecoverable cap the message names counts per reason and an action,
+- [x] At an unrecoverable cap the message names counts per reason and an action,
       and never says "all 12 open chats are busy", and never advises
       Keep/Undo-ing pending changes as a way to free a slot.
       → *"the refusal counts reasons"* asserts the literal absence of both.
-- [ ] Transport callers get a structured reason, not a sentence, and their
+- [x] Transport callers get a structured reason, not a sentence, and their
       existing throw handling still works.
       → *"cap error carries reasons to transports"*.
-- [ ] `forge.sh say <name> --new` at an unrecoverable cap exits non-zero with the
+- [x] `forge.sh say <name> --new` at an unrecoverable cap exits non-zero with the
       reason on stderr, and no message id is returned.
       → *"bus says no"* (409 + body); `forge.sh:170-172` renders it.
-- [ ] A bus message that fails after accept produces exactly one `failed`
+- [x] A bus message that fails after accept produces exactly one `failed`
       sender line and is not silently re-queued.
       → *"bus reports a dropped message"*.
-- [ ] A reload between archiving and restoring still loses that chat's Undo —
+- [x] A reload between archiving and restoring still loses that chat's Undo —
       the same as for a chat that stayed open — and nothing on disk points at a
       stack that no longer exists. → *named validation step: read §3.1 "The
       honest limit" and the ledger row; no test asserts cross-window Undo.*
-- [ ] `CHANGES.md` gains the bullet in the same change; `docs/OWNERS.md` needs no
+- [x] `CHANGES.md` gains the bullet in the same change; `docs/OWNERS.md` needs no
       new row (no new owner). → *named validation step: grep both files.*
-- [ ] `npx vitest run test/unit/PlanLedgerContract.test.ts` green; `npm run ci`
+- [x] `npx vitest run test/unit/PlanLedgerContract.test.ts` green; `npm run ci`
       green on Windows, ubuntu and macOS.

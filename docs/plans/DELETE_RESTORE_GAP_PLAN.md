@@ -1,5 +1,7 @@
 # Delete/Restore Gap Plan
 
+Status: **implemented 2026-09-10** (`e401225`, released in 0.15.35).
+
 Diagnosed from session `3510c96c-a888-4877-96d2-847060f66607.jsonl`
 (qwen38-27b-mtp-ud-q4kxl, Forge 0.15.34, 2026-09-10 21:39–22:11).
 

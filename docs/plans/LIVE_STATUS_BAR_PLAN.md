@@ -1,5 +1,7 @@
 # Live status bar: follow the running chat, show streaming tokens
 
+Status: **implemented 2026-10-01** (`6d4b4f5`).
+
 ## Problem
 
 The session status bar (`SessionTimeStatusBar`) reads the chat on screen. A

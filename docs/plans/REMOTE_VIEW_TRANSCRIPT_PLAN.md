@@ -1,6 +1,6 @@
 # `/view` — read a conversation back from the phone
 
-Status: planned 2026-09-07, for 0.15.24.
+Status: implemented 2026-09-07 (`9480af9`), shipped in 0.15.24.
 
 ## The gap
 

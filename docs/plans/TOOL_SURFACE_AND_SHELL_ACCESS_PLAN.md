@@ -1,5 +1,7 @@
 # Tool Surface & Shell Access Plan
 
+Status: **implemented 2026-09-30** — phase 0 measured; phase 1 `2d3bd56`, phase 2 `6aa8732`, phase 3 `8b18a5b` + `a6e9328`.
+
 Opt-in shell scripts for the agent, a smaller always-on tool list, and README
 warnings that tell a new user what each switch really hands over.
 

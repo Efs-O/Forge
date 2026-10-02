@@ -1,6 +1,6 @@
 # Job GPU gate plan
 
-Status: proposed 2026-10-01. Implementer: Strata via Forge. Reviewer: Claude.
+Status: **implemented 2026-10-01** (`38eea37`, merged `85b3f34`, 0.16.71); live check pending. Implementer: Copilot CLI. Reviewer: Claude.
 
 ## Problem
 
@@ -215,37 +215,37 @@ definitions is never returned by `JobStore.loadAll()`.
 
 ## Acceptance criteria
 
-- [ ] With `gpu.hold` present (empty), a due local-model `agent_task` defers.
+- [x] With `gpu.hold` present (empty), a due local-model `agent_task` defers.
   `task_pending_reason` names the hold, and no conversation is created.
   — `GpuIdleGate.test.ts`, agent-task test
-- [ ] `gpu.hold` with a dead `pid`, or an `until` in the past, does not block,
-  and the reason is reported as stale or expired. — `GpuIdleGate.test.ts`
-- [ ] An unparseable `gpu.hold` blocks (fail closed). — `GpuIdleGate.test.ts`
-- [ ] `JobStore.loadAll()` never returns `gpu.hold` as a job.
+- [x] `gpu.hold` with a dead `pid`, or an `until` in the past, does not block,
+  and is logged as stale or expired (Forge log only — see Deviations). — `GpuIdleGate.test.ts`
+- [x] An unparseable `gpu.hold` blocks (fail closed). — `GpuIdleGate.test.ts`
+- [x] `JobStore.loadAll()` never returns `gpu.hold` as a job.
   — `GpuIdleGate.test.ts`
-- [ ] With `gpu_gate` configured: samples `[0,0,0,0,41]` on GPU 0 defer, and
+- [x] With `gpu_gate` configured: samples `[0,0,0,0,41]` on GPU 0 defer, and
   sampling stops at the first sample over the limit (the stub sees five
   calls, not fifteen). All-zero samples admit. — `GpuIdleGate.test.ts`
-- [ ] With no Forge local model loaded, a listed GPU over `max_idle_vram_mb`
+- [x] With no Forge local model loaded, a listed GPU over `max_idle_vram_mb`
   defers. With a Forge local model loaded, the same VRAM does not defer.
   — `GpuIdleGate.test.ts`
-- [ ] `nvidia-smi` missing or failing, or a listed index absent from the
+- [x] `nvidia-smi` missing or failing, or a listed index absent from the
   probe output, defers with the probe's error text. — `GpuIdleGate.test.ts`
-- [ ] Cloud, CLI-agent and watch-only jobs are never gated, even with
+- [x] Cloud, CLI-agent and watch-only jobs are never gated, even with
   `gpu.hold` present. A `openai-compatible` loopback model (Strata) is gated.
   — `GpuIdleGate.test.ts`, `ModelHeuristics` test
-- [ ] Without a `gpu_gate` block, the probe is never called (existing tests
+- [x] Without a `gpu_gate` block, the probe is never called (existing tests
   unchanged and green).
-- [ ] A pending task past one schedule period writes one
+- [x] A pending task past one schedule period writes one
   `skipped: busy (pending N min; <reason>)` row, then waits for the next due
   time. — admission test
-- [ ] `manage_jobs list` shows `pending: <reason>` for a pending job.
+- [x] `manage_jobs list` shows `pending: <reason>` for a pending job.
   — jobTools test
-- [ ] Aborting the scheduler mid-sample defers and does not fail the run.
+- [x] Aborting the scheduler mid-sample defers and does not fail the run.
   — `GpuIdleGate.test.ts`
-- [ ] Every new or touched `.ts` file is under 500 lines, and `npm run ci` is
+- [x] Every new or touched `.ts` file is under 500 lines, and `npm run ci` is
   green after the last edit.
-- [ ] `docs/JOBS.md`, `config/config.example.yaml`, `docs/OWNERS.md` and
+- [x] `docs/JOBS.md`, `config/config.example.yaml`, `docs/OWNERS.md` and
   `CHANGES.md` updated.
 - [ ] Live check (Claude, after review): with training running on GPUs 0/1
   and `gpu_gate.gpus: [0, 1]`, `run_now` on `hf-qwopus-thread` stays pending

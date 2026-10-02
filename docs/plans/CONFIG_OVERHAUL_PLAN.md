@@ -1,6 +1,6 @@
 # Config Overhaul + Model Manager Plan
 
-Status: APPROVED — all questions (Q1–Q8) decided; ready for implementation.
+Status: implemented 2026-07-24 (`c8be509`, released in 0.12.29).
 Coordinator: Claude (Fable), worker: Claude Sonnet. Date: 2026-07-18
 
 ## 0. Problem statement (user's words, condensed)

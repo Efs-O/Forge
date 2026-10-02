@@ -1,7 +1,7 @@
 # Browser & Windows Desktop-Use Tools for Forge
 
-**Status:** plan v2 — incorporates Claude's supervisor review (8 blockers, improvements, design
-calls) + user decisions. Ready for implementation after the job split is agreed with Claude.
+**Status:** implemented 2026-09-30 (`e69abf1`). Plan v2 below incorporates Claude's supervisor review
+(8 blockers, improvements, design calls) and the user's decisions.
 
 **Decisions locked in**
 - **Live model for demos:** the already-loaded Qwen3.8-27B vision backend (the resident Forge

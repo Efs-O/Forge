@@ -1,5 +1,7 @@
 # Sidebar: cancel a message sent mid-turn
 
+Status: **implemented 2026-09-29** (`3799a7c`).
+
 ## Problem
 
 When the user types a text-only message into the sidebar while a turn is running, it becomes a "tell"

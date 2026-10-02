@@ -1,6 +1,6 @@
 # Agent-task jobs — a job that runs an agent turn, unattended (impl plan)
 
-Status: plan, not started. Owner of the final call: Claude. Implementer: Forge,
+Status: **implemented 2026-09-22** — phases 1–5 signed off (runner `1588cdf`, `afb2f92`; phase 5 doc `a224794`). Owner of the final call: Claude. Implementer: Forge,
 phase by phase; Codex reviews and fixes each phase; Claude has the final word
 and drives the whole run (the owner only says go). If Codex is unavailable
 (credits), Claude takes its reviewer role.
