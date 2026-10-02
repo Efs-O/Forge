@@ -1,6 +1,6 @@
 # Delegate Safety & Local Tool Access — Findings and Proposals
 
-Status: **report for review — nothing implemented.**
+Status: **obsolete (2026-10-02).** Superseded by the delegation decision in CLAUDE.md § "CLI Agent Delegation" (validated 2026-08-15): CLI agents run unrestricted and the pre-run workspace checkpoint is the rollback, so per-action approval is not wanted. Kept as a record of the findings.
 Date: 2026-08-16. Grounded in a read of the current `main` working tree.
 
 ## Decisions already taken by the user

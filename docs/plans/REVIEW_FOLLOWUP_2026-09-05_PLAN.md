@@ -1,6 +1,6 @@
 # Review follow-up (2026-09-05) — implementation plan
 
-Status: **DRAFT — evaluated and corrected 2026-09-05; implementation not started by this review.**
+Status: **implemented 2026-09-06** — A `3a613fd`, B `65df3db`, C `4445c37`, D `137bcd2`, H `9954668` (+ `d624eca`). E, F and G stay gated on measurement and are not scheduled.
 
 Source: [architecture review](../FORGE_ARCHITECTURE_REVIEW_2026-09-05.md).
 This plan supersedes its original implementation sketches where they disagree.

@@ -1,6 +1,6 @@
 # F6 — Models-vs-Profiles Redesign (Forge side) — FULL IMPLEMENTATION PLAN
 
-Status: PLAN (implement in a fresh session). Breaking schema change.
+Status: **obsolete (2026-10-02).** Superseded by CONFIG_OVERHAUL_PLAN.md (`c8be509`, 0.12.29): `profiles:` exist and `mmproj_path` derives the `vision` cap (`ConfigResolver.ts`). Breaking schema change, never implemented as written.
 Reference format: `F3_CHAT_PROXY_PLAN.md`. Findings: `docs/archive/validation/RELAY_SMOKE_FINDINGS.md` §F6.
 Relay counterpart: `forge-relay/F6_RELAY_PROFILES_PLAN.md`.
 User decisions (2026-06-13): migrate live `.forge/config.yaml` in place (+ `.bak`);

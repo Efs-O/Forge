@@ -1,6 +1,6 @@
 # Sidebar switch latency — why a tab switch costs 1–2 s, and how to make it instant
 
-Status: implemented 2026-09-07, except F2 (see below). Written 2026-09-07.
+Status: implemented 2026-09-07. F2 closed as obsolete 2026-10-02: single-view conversations (`1ea94c6`) removed the tab strip, so the per-switch resend F2 targets is now rare. Written 2026-09-07.
 
 ## Symptom
 

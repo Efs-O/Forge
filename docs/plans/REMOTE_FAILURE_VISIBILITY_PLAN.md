@@ -1,6 +1,6 @@
 # Remote Failure Visibility — what a phone is still not told
 
-Status: **#1 shipped in 0.15.33. #2, #3, #4 are unbuilt.**
+Status: **#1 shipped in 0.15.33. #2 largely superseded; #3 and #4 unbuilt and need a decision (2026-10-02).** `src/llm/streamWatchdog.ts` now aborts a stream after 120 s idle once bytes flow (600 s before the first byte), the turn fails, and `failureNotice` sends that to the phone. What #2 would still add: a warning inside the 600 s first-byte window, where silence is usually a legitimate long prefill, so a 60 s warning there risks being the false positive §2 warns about. #3 needs its audit first; #4 was conditional on #2.
 Written 2026-09-10, from the diagnosis of the halluscribe session `3c073ca7`.
 
 ## The rule this all follows

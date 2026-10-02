@@ -1,6 +1,6 @@
 # `notify_user` — agent-initiated message to the chat that started the turn
 
-**Status:** planned, not implemented. Written 2026-08-31.
+**Status:** implemented 2026-08-31 (`c8daea6`). Written 2026-08-31.
 
 **Goal:** let the agent send the user a one-way message mid-turn that reaches
 whichever surface started the turn — the VS Code window, or the Telegram /

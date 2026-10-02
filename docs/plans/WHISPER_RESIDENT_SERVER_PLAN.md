@@ -1,6 +1,6 @@
 # Resident whisper server — plan
 
-Status: **proposed**, not implemented. Written 2026-09-04.
+Status: **implemented 2026-09-04** (`5f55b6b`, shipped inside the `/system` commit): `voice.server` block, `keep_model_loaded` rejection, `WhisperServerRunner`, `WhisperServerProcess`, wiring in `remoteVoiceWiring.ts`, both test files. Live check (§6 step 5) pending: build `whisper-server.exe` and set `voice.server.enabled`.
 
 Owner concern: STT process lifecycle. Related: `docs/VOICE_STT_TTS_IMPLEMENTATION_PLAN.md`
 §6.1b (why whisper.cpp), §2.4 (why residency defaults off).

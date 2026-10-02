@@ -1,6 +1,6 @@
 # Plan — Interactive Question Selection for CLI Agents (FINDING-001)
 
-**Status:** DRAFT for review — no code written yet.
+**Status:** DRAFT, not ready (re-checked 2026-10-02). Predates the owned Codex/Claude/Copilot sessions (`src/agentMesh/`), so §4 must be re-grounded against them. Open: §9 Q2 (does `claude -p` under `bypassPermissions` route `AskUserQuestion` anywhere Forge can answer? needs a live probe) and Q3 (timeout). Q1 is answered: native `ask_user` already exists for local models. No code written.
 **Goal:** Let a CLI agent (Claude Code / Codex) driving a Forge sidebar chat ask
 the user a *structured, clickable* question (the `AskUserQuestion` picker) and
 receive the chosen answer, instead of the current behaviour where the tool call
