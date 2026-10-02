@@ -137,6 +137,13 @@ export interface ModelConfig {
    * output channel from activation on, starting at the file's current end.
    */
   server_log?: string;
+  /**
+   * openai-compatible only: path POSTed against `endpoint` to free the local
+   * server's GPU/RAM (Strata: `/unload`; it reloads on its next request). Marks
+   * the model as holding VRAM, so Forge's unload commands reach it and it never
+   * loads beside a llama.cpp/Ollama model. See ExternalModelServers.
+   */
+  unload_path?: string;
   /** Base URL for Ollama or OpenAI-compatible HTTP providers. */
   endpoint?: string;
   /** Per-model GPU layer override. Falls back to LlamaServerConfig.n_gpu_layers. */

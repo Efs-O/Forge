@@ -2,6 +2,20 @@
 
 ## 0.16.71
 
+### Unload commands reach Strata (2026-10-02)
+
+- New model field `unload_path` (openai-compatible only): the path Forge
+  POSTs to free a local server it does not spawn. Strata's is `/unload`; the
+  server stays up and reloads on its next request.
+- With it set, `/unloadModel`, `/unloadAll`, the command palette, Telegram,
+  the control API's `POST /unload`, a chat's model switch and a window reload
+  all unload Strata, the same as a llama.cpp model.
+- Forge never loads the two side by side: a llama.cpp/Ollama load unloads
+  Strata first, and a request to Strata stops idle local models first. Under
+  a running turn it refuses with the model's name instead.
+- Requests to such a server wait up to 30 min for headers, like llama.cpp,
+  because a just-unloaded Strata reloads before it answers.
+
 ### Keep scheduled agent tasks off a busy local GPU (2026-10-01)
 
 - Local-GPU `agent_task` jobs now honor `~/.forge/jobs/gpu.hold` and can use

@@ -11,7 +11,13 @@ import { DelegationGate } from './DelegationGate';
 import type { DelegationCheck, DelegationHold } from './DelegationGate';
 import { getLogger } from '../util/logger';
 import { SharedRuntimeRegistry, sharedRuntimeKey } from './SharedRuntimeRegistry';
-import { acquireOllamaSlot, borrowSharedRuntime, stopAllSlots } from './poolAcquisition';
+import {
+  acquireOllamaSlot,
+  borrowSharedRuntime,
+  freeLocalForExternal,
+  settleAll,
+  stopAllSlots,
+} from './poolAcquisition';
 import { claimPort, freeSlot, mostRecentSlot } from './poolSlots';
 import {
   changedStructuralSettings,
@@ -23,6 +29,7 @@ import type { StructuralSettings } from './poolStructuralConfig';
 import type { PortClaim, PoolSlot, SlotTable } from './poolSlots';
 import type { BackendTurnLease, IBackendPool } from './poolTypes';
 import type { BackendProcess } from '../system/SystemReport';
+import type { ExternalModelServers } from './ExternalModelServers';
 import { reconcileDeadSlot, restartSlot, startSlot, type SlotStartContext } from './poolStart';
 
 export type { DelegationCheck, DelegationHold } from './DelegationGate';
@@ -57,6 +64,8 @@ export class BackendPool implements IBackendPool {
   constructor(
     private config: ForgeConfig,
     sharedRegistry: SharedRuntimeRegistry = new SharedRuntimeRegistry(),
+    /** Local servers Forge does not spawn but unloads (Strata). */
+    private readonly external?: ExternalModelServers,
   ) {
     this.sharedRegistry = sharedRegistry;
     const max = config.max_simultaneous_models ?? 1;
@@ -127,6 +136,10 @@ export class BackendPool implements IBackendPool {
   private async acquireByKey(key: string, allowEvict: boolean): Promise<BackendController> {
     const pendingReleases = this.pendingReleaseWait();
     if (pendingReleases) await pendingReleases;
+    // A new local model never loads beside a managed external one (Strata).
+    if (!this.isLoaded(key) && this.external?.loadedNames().length) {
+      await this.external.unloadAll();
+    }
 
     if (this.isOllamaModel(key)) {
       this.lastAcquiredModel = key;
@@ -182,6 +195,7 @@ export class BackendPool implements IBackendPool {
     if (this.gate.isPinned(key)) {
       throw new Error(`Cannot release "${key}": an active delegation hold is using it.`);
     }
+    if (this.external?.isManaged(key)) return this.external.unload(key);
     if (this.isOllamaModel(key)) {
       const backend = this.ollamaSlots.get(key);
       if (backend) {
@@ -240,7 +254,27 @@ export class BackendPool implements IBackendPool {
     });
   }
 
+  /** Every local model AND every managed external server. */
   async stopAll(): Promise<void> {
+    await settleAll([this.stopLocal(), this.external?.unloadAll()]);
+  }
+
+  /**
+   * Before a request to a managed external server: free every local model so
+   * the two never share VRAM, but never under a running turn.
+   */
+  async prepareExternal(modelName: string): Promise<void> {
+    const key = this.poolKey(modelName);
+    if (!this.external?.isManaged(key)) return;
+    await freeLocalForExternal(key, {
+      local: [...this.slots.keys(), ...this.sharedSlots.keys(), ...this.ollamaSlots.keys()],
+      busy: (m) => (this.turnPins.get(m) ?? 0) > 0 || this.gate.isPinned(m),
+      stopLocal: () => this.stopLocal(),
+    });
+    this.external.markInUse(key);
+  }
+
+  private async stopLocal(): Promise<void> {
     await stopAllSlots({
       slots: this.slots,
       ollamaSlots: this.ollamaSlots,
@@ -306,7 +340,8 @@ export class BackendPool implements IBackendPool {
 
   loadedModelsExcept(modelName: string): string[] {
     const key = this.poolKey(modelName);
-    return this.loadedModelNames().filter((name) => name !== key);
+    const external = this.external?.loadedNames() ?? [];
+    return [...this.loadedModelNames(), ...external].filter((name) => name !== key);
   }
 
   /**
@@ -316,7 +351,7 @@ export class BackendPool implements IBackendPool {
    */
   isLoaded(modelName: string): boolean {
     const key = this.poolKey(modelName);
-    return this.slots.has(key) || this.sharedSlots.has(key) || this.ollamaSlots.has(key);
+    return this.backendFor(key) !== undefined || (this.external?.isLoaded(key) ?? false);
   }
 
   /**

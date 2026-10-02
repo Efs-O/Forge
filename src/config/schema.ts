@@ -256,6 +256,13 @@ export const ForgeConfigSchema = z
           message: `endpoint is required for provider: ${provider} (directly, or via a referenced group)`,
         });
       }
+      if (model.unload_path && provider !== 'openai-compatible') {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          path: ['models', index, 'unload_path'],
+          message: `unload_path is only for provider: openai-compatible (got ${provider})`,
+        });
+      }
       if (
         (provider === 'xai' ||
           provider === 'openrouter' ||

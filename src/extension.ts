@@ -8,6 +8,7 @@ import { ChatAttachmentStore } from './sidebar/ChatAttachmentStore';
 import { HistoryArchive } from './sidebar/HistoryArchive';
 import { watchWorkspaceFolders } from './sidebar/workspaceInfo';
 import { BackendPool } from './backend/BackendPool';
+import { ExternalModelServers, setExternalRequestHook } from './backend/ExternalModelServers';
 import { disposeServerChannel } from './backend/DirectBackend';
 import { ControlServer } from './backend/ControlServer';
 import { ControlServerRegistry, controlServerRegistryPath } from './backend/ControlServerRegistry';
@@ -87,7 +88,12 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
 
   // ── Backend pool ──────────────────────────────────────────────────────────
   // Created before the tool registry so LocalDelegationService can be injected.
-  const pool = new BackendPool(config);
+  const externalServers = new ExternalModelServers(
+    () => config,
+    async (key) => context.secrets.get(key),
+  );
+  const pool = new BackendPool(config, undefined, externalServers);
+  setExternalRequestHook((model) => pool.prepareExternal(model.name));
 
   // ── Tool registry ─────────────────────────────────────────────────────────
   const embeddingBackend = new EmbeddingBackend(config);
@@ -360,6 +366,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
 
   context.subscriptions.push(
     { dispose: () => void pool.stopAll() },
+    { dispose: () => setExternalRequestHook(undefined) },
     { dispose: () => backgroundExecutionManager.dispose() },
   );
 

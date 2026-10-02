@@ -2,6 +2,7 @@ import type * as vscode from 'vscode';
 import type { ModelConfig } from '../config/types';
 import { getCloudBaseUrl, getCloudProviderLabel, isCloudProvider } from './CloudProviders';
 import { resolveXaiToken } from './XaiAuth';
+import { beforeExternalRequest } from '../backend/ExternalModelServers';
 
 export interface CloudRequestTarget {
   baseUrl: string;
@@ -28,5 +29,7 @@ export async function resolveCloudRequestTarget(
         'api_key_secret in config.yaml.',
     );
   }
+  // A local server Forge unloads (Strata) frees the local models first.
+  await beforeExternalRequest(model);
   return { baseUrl, apiKey };
 }

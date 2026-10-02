@@ -55,6 +55,12 @@ export const ModelConfigSchema = z.object({
   // Log file of a server Forge does not spawn (e.g. Strata), mirrored into an
   // output channel. See src/backend/serverLogFollower.ts.
   server_log: z.string().min(1).optional(),
+  // POSTed against `endpoint` to free a local openai-compatible server's memory
+  // (Strata). See src/backend/ExternalModelServers.ts.
+  unload_path: z
+    .string()
+    .regex(/^\/\S*$/, 'unload_path must be an absolute path such as /unload')
+    .optional(),
   // Omitted = disabled. No implicit default, and YAML `null` is rejected rather
   // than silently meaning "off" — opting in is explicit.
   image_retention_turns: z.number().int().nonnegative().optional(),

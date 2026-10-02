@@ -30,9 +30,12 @@ export async function streamModelChatCompletion(
     await streamOllamaChatCompletion(baseUrl, request, model, handlers, signal);
     return;
   }
-  // Only local llama.cpp gets the longer headers wait; cloud providers keep
-  // the extension host's fetch. An unset provider means llama.cpp.
-  const local = model !== undefined && (model.provider ?? 'llama.cpp') === 'llama.cpp';
+  // Only local servers get the longer headers wait: llama.cpp, and one Forge
+  // unloads (unload_path — Strata reloads before it answers). Cloud providers
+  // keep the extension host's fetch. An unset provider means llama.cpp.
+  const local =
+    model !== undefined &&
+    ((model.provider ?? 'llama.cpp') === 'llama.cpp' || model.unload_path !== undefined);
   await streamChatCompletion(
     baseUrl,
     request,

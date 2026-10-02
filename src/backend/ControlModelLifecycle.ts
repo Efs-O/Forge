@@ -182,7 +182,8 @@ export async function unloadModel(
   if (!known) {
     return { status: 404, body: { error: `unknown model "${requested}" — not in config` } };
   }
-  if (isCloudProvider(known.provider)) {
+  // unload_path: a local server Forge does not spawn but can unload (Strata).
+  if (isCloudProvider(known.provider) && !known.unload_path) {
     return {
       status: 422,
       body: { error: `"${model}" is a cloud-provider model — nothing local to unload` },

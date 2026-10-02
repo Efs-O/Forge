@@ -147,13 +147,7 @@ export async function stopAllSlots(ctx: StopAllContext): Promise<void> {
       /* best-effort */
     }
   });
-  const results = await Promise.allSettled([...slotStops, ...ollamaStops]);
-  const failures = results
-    .filter((result): result is PromiseRejectedResult => result.status === 'rejected')
-    .map((result) =>
-      result.reason instanceof Error ? result.reason.message : String(result.reason),
-    );
-  if (failures.length) throw new Error(failures.join('\n'));
+  await settleAll([...slotStops, ...ollamaStops]);
 
   for (const [model, slot] of [...ctx.slots.entries()]) {
     if (retained(model)) continue;
@@ -162,4 +156,33 @@ export async function stopAllSlots(ctx: StopAllContext): Promise<void> {
   }
   ctx.ollamaSlots.clear();
   log.info('[BackendPool] all slots stopped');
+}
+
+/**
+ * Free every local model before a request to a managed external server
+ * (Strata), so the two never share VRAM — refused, never forced, while a turn
+ * or delegation hold is using one. See ExternalModelServers.
+ */
+export async function freeLocalForExternal(
+  external: string,
+  ctx: { local: string[]; busy(model: string): boolean; stopLocal(): Promise<void> },
+): Promise<void> {
+  const busy = ctx.local.filter((model) => ctx.busy(model));
+  if (busy.length) {
+    throw new Error(
+      `Cannot load "${external}" beside ${busy.join(', ')}: a turn is running on it. ` +
+        'Wait for it to finish or stop it, then retry.',
+    );
+  }
+  if (!ctx.local.length) return;
+  await ctx.stopLocal();
+  log.info(`[BackendPool] freed ${ctx.local.join(', ')} for "${external}"`);
+}
+
+/** Wait for every task; throw once with every failure's message. */
+export async function settleAll(tasks: Array<Promise<void> | undefined>): Promise<void> {
+  const failures = (await Promise.allSettled(tasks))
+    .filter((r): r is PromiseRejectedResult => r.status === 'rejected')
+    .map((r) => (r.reason instanceof Error ? r.reason.message : String(r.reason)));
+  if (failures.length) throw new Error(failures.join('\n'));
 }
