@@ -1,12 +1,14 @@
 # Forge — Recent Changes
 
-## 0.16.74
+## 0.16.75
 
 ### Bug-hunt fixes (2026-10-02)
 
-This release ships 0.16.72, 0.16.73 and 0.16.74 together (remote tags stop at
-v0.16.71). Twenty-one bugs found by the 2026-10-02 Strata/Codex/Q6 bug hunt are
-fixed here, plus a desktop right-click fix already committed as `feb04d0`.
+This release ships 0.16.72, 0.16.73 and 0.16.75 together (remote tags stop at
+v0.16.71). v0.16.74 was tagged but never published (its publish job hit a
+Windows-runner test timeout); 0.16.75 ships the same fixes. Twenty-one bugs
+found by the 2026-10-02 Strata/Codex/Q6 bug hunt are fixed here, plus a
+desktop right-click fix already committed as `feb04d0`.
 
 - Stopping a turn during a cold model load no longer leaks a model slot; the
   next model can load or evict normally.

@@ -150,6 +150,7 @@ describe('P3: forge.sh who renders copilot truthfully (A10)', () => {
 });
 
 describe('P3: the sidebar board projection renders copilot truthfully (A10)', () => {
+  // ~3.3 s on GitHub windows-latest runners (sync fs churn); the 5 s default flaked the v0.16.74 publish twice.
   it('owned+alive is live, parked is parked, dead owner is dead, no record is none', () => {
     registerAlias(root, 'copilot', { agent: 'copilot', session_id: 's', registered_at: 1, by: 'forge' });
     own({ alias: 'copilot', owner_host: { pid: 1, startedAt: 1 } });
@@ -165,7 +166,7 @@ describe('P3: the sidebar board projection renders copilot truthfully (A10)', ()
     // A clean close (owner null) is dead, not live.
     own({ alias: 'copilot', owner_host: null });
     expect(projectLiveSessions(root, deps).find((s) => s.alias === 'copilot')?.state).toBe('dead');
-  });
+  }, 15000);
 
   it('reports the agent as copilot, never defaulting an unknown agent to codex', () => {
     own({ alias: 'copilot', owner_host: { pid: 1, startedAt: 1 } });
