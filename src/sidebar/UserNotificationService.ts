@@ -32,7 +32,7 @@ export const FILE_DELIVERY_TURN_LIMIT = NOTIFY_TURN_LIMIT;
  */
 export type FileDeliveryResult =
   | { readonly kind: 'queued'; readonly chats: number }
-  | { readonly kind: 'refused'; readonly sentThisTurn: number; readonly reason: string };
+  | { readonly kind: 'refused'; readonly spentThisTurn: number; readonly reason: string };
 
 /**
  * Quiet time that returns the whole budget.
@@ -190,14 +190,20 @@ export class UserNotificationService {
   }
 
   /**
-   * Delivers a generated image to the conversation's remote chats.
+   * Delivers an image to the conversation's remote chats, unbudgeted.
    *
-   * The ONE unbudgeted delivery path, and it stays that way on purpose:
-   * `generate_image` asks for approval on every call, which is a stronger brake
-   * than any burst cap, and an agent asked for five images must not lose its
-   * ability to notify. A tool with no per-call approval must use `deliverFile`
-   * instead -- without an approval and without a budget, nothing at all brakes a
-   * loop, and a render takes a second or two rather than a whole model turn.
+   * Exempt on purpose for a tool that confirms every call: `generate_image`
+   * asks for approval each time, which is a stronger brake than any burst cap,
+   * and an agent asked for five images must not lose its ability to notify. A
+   * tool with no per-call approval must use `deliverFile` instead -- without an
+   * approval and without a budget, nothing at all brakes a loop, and a render
+   * takes a second or two rather than a whole model turn.
+   *
+   * KNOWN GAP, not a rule: `image_search` also delivers through here, on an
+   * approval that is absent unless `image_search.confirm_upload` is set, so its
+   * thumbnails are currently unbudgeted. Pre-existing (that tool shipped
+   * first), left alone by docs/plans/SEND_FILE_AND_RENDER_HTML_PLAN.md, and
+   * recorded there as a follow-up rather than asserted as an invariant here.
    */
   async deliverImage(event: UserNotificationEvent & { imagePath: string }): Promise<number> {
     return this.fanOut(event);
@@ -229,11 +235,11 @@ export class UserNotificationService {
     if (spent >= FILE_DELIVERY_TURN_LIMIT) {
       return {
         kind: 'refused',
-        sentThisTurn: spent,
+        spentThisTurn: spent,
         reason:
           `File delivery limit reached: ${spent} of ${FILE_DELIVERY_TURN_LIMIT} allowed this turn. ` +
-          'The file is saved in the workspace -- give the user its path instead of sending it, ' +
-          'or send it in a later turn.',
+          `The file is still on disk at ${event.imagePath} — give the user that path instead of ` +
+          'sending it, or send it in a later turn.',
       };
     }
     this.filesSent.set(key, spent + 1);

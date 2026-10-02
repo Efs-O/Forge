@@ -94,6 +94,27 @@ describe('UserNotificationService', () => {
     expect(service.remaining('c1')).toBe(0);
   });
 
+  // ...but the CONVERSATION-LESS bucket must still drain. extension.ts calls
+  // resetTurn unconditionally; guarded on a defined id, a notify_user or
+  // send_file run with no conversation would fill that bucket once and never
+  // empty it, muting those tools for the rest of the session.
+  it('clears the conversation-less bucket on a conversation-less turn start', async () => {
+    const service = new UserNotificationService();
+    service.addSink(async () => 1);
+    for (let i = 0; i < NOTIFY_TURN_LIMIT; i += 1) {
+      await service.notify({ text: 'm' });
+    }
+    expect(service.remaining(undefined)).toBe(0);
+    service.resetTurn(undefined);
+    expect(service.remaining(undefined)).toBe(NOTIFY_TURN_LIMIT);
+    for (let i = 0; i < FILE_DELIVERY_TURN_LIMIT; i += 1) {
+      await service.deliverFile({ text: 'f', imagePath: 'C:/workspace/f.pdf' });
+    }
+    expect(service.remainingFileDeliveries(undefined)).toBe(0);
+    service.resetTurn(undefined);
+    expect(service.remainingFileDeliveries(undefined)).toBe(FILE_DELIVERY_TURN_LIMIT);
+  });
+
   it('stops fanning out to a disposed sink', async () => {
     const service = new UserNotificationService();
     const subscription = service.addSink(async () => 5);
@@ -122,11 +143,36 @@ describe('deliverFile per-turn file budget', () => {
     const capped = await service.deliverFile(fileEvent('c1'));
     expect(capped.kind).toBe('refused');
     if (capped.kind === 'refused') {
-      expect(capped.sentThisTurn).toBe(FILE_DELIVERY_TURN_LIMIT);
+      expect(capped.spentThisTurn).toBe(FILE_DELIVERY_TURN_LIMIT);
       expect(capped.reason).toContain('File delivery limit reached');
-      // The refusal must point at the alternative, or the agent retries.
-      expect(capped.reason).toContain('saved in the workspace');
+      // The refusal must point at the alternative, and name the real path --
+      // a screenshot-dir file is not in the workspace.
+      expect(capped.reason).toContain('still on disk at');
+      expect(capped.reason).toContain('C:/workspace/report.pdf');
     }
+  });
+
+  // Codex review of Phase 1: the check and the charge are safe only because
+  // they run synchronously before the first await. Pin that against a future
+  // refactor that puts an await between them -- six concurrent calls against a
+  // blocked sink must land exactly five sends and one refusal.
+  it('accepts exactly the limit under concurrent calls', async () => {
+    let release: () => void = () => undefined;
+    const gate = new Promise<void>((resolve) => (release = resolve));
+    const service = new UserNotificationService();
+    service.addSink(async () => {
+      await gate;
+      return 1;
+    });
+    const calls = Array.from({ length: FILE_DELIVERY_TURN_LIMIT + 1 }, () =>
+      service.deliverFile(fileEvent('c1')),
+    );
+    release();
+    const results = await Promise.all(calls);
+    expect(results.filter((result) => result.kind === 'queued')).toHaveLength(
+      FILE_DELIVERY_TURN_LIMIT,
+    );
+    expect(results.filter((result) => result.kind === 'refused')).toHaveLength(1);
   });
 
   // The send is queued BEFORE the count matters to the caller: a turn with no

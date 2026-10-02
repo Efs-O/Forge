@@ -250,7 +250,11 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
         statusBar.setGenerating(modelName);
         // Turn START, not end: a cancelled or thrown turn never reaches its end,
         // and a leaked counter would silently mute the agent from then on.
-        if (conversationId !== undefined) userNotifications.resetTurn(conversationId);
+        // Unconditional, including the no-conversation key: a conversation-less
+        // turn still charges that bucket (notify_user from a /compact summary,
+        // send_file with no chat bound), so guarding this call on a defined id
+        // would let that budget fill once and never drain again.
+        userNotifications.resetTurn(conversationId);
         // The bar follows the chat that just started, so a chat run in the
         // background (`forge.sh --new`) is the one it shows.
         if (conversationId !== undefined) followSessionTime(conversationId);
