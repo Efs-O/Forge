@@ -174,11 +174,18 @@ async function runGenerateImage(
   // caption and the result are where the user learns it was billed.
   const paid = backend.provider === 'sdcpp' ? '' : ` (paid ${backend.provider} API)`;
   const caption = `🖼 ${backend.name}${paid}: ${prompt.slice(0, CAPTION_PROMPT_CHARS)}${prompt.length > CAPTION_PROMPT_CHARS ? '…' : ''}`;
-  const reached = await deps.notifications.deliverImage({
+  const deliveryEvent = {
     ...(context?.conversationId ? { conversationId: context.conversationId } : {}),
     text: caption,
     imagePath: absolute,
-  });
+  };
+  const delivery =
+    backend.confirm_each === true
+      ? {
+          kind: 'queued' as const,
+          chats: await deps.notifications.deliverImageUnbudgeted('confirm_each', deliveryEvent),
+        }
+      : await deps.notifications.deliverFile(deliveryEvent);
 
   const lines = [
     `${GENERATED_IMAGE_PREFIX}${displayPath(absolute)} (${image.mime}, ${image.bytes.length.toLocaleString()} bytes) with backend ${backend.name}.`,
@@ -186,9 +193,11 @@ async function runGenerateImage(
     // was queued for on the turn's tail. The send runs later and can still
     // fail, so claiming it was sent overclaims — the same reason send_file and
     // render_html_to_image say Queued.
-    reached > 0
-      ? `Queued for ${reached} remote chat(s).`
-      : 'No remote chat is watching this turn, so nothing was sent to a phone.',
+    delivery.kind === 'refused'
+      ? `Saved to ${displayPath(absolute)}, not sent: per-turn file limit (${delivery.reason})`
+      : delivery.chats > 0
+        ? `Queued for ${delivery.chats} remote chat(s).`
+        : 'No remote chat is watching this turn, so nothing was sent to a phone.',
   ];
   if (paid) lines.push(`This was a paid ${backend.provider} API call, billed per image.`);
   if (isLocalImage(image)) {

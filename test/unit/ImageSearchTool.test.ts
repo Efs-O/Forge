@@ -19,7 +19,7 @@ import {
   IMAGE_SEARCH_THUMBNAILS_PREFIX,
   imageSearchThumbnails,
 } from '../../src/sidebar/toolResultView';
-import type { UserNotificationService } from '../../src/sidebar/UserNotificationService';
+import { UserNotificationService } from '../../src/sidebar/UserNotificationService';
 import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
@@ -111,7 +111,6 @@ function makeTool(
     key?: string;
     bytes?: Uint8Array;
     workspace?: string | undefined;
-    reached?: number;
   } = {},
 ) {
   const cfg = 'cfg' in options ? options.cfg : config();
@@ -127,15 +126,21 @@ function makeTool(
     })),
     failures: [] as string[],
   }));
-  const deliverImage = vi.fn(async () => options.reached ?? 0);
+  // A real budgeted service rather than a cast fake: a fake that only carries
+  // the old unbudgeted method compiles against an optional dependency and
+  // silently restores the unbudgeted path the delivery suite exists to prevent.
+  // With no sink registered, every grant reaches 0 chats — the "no phone is
+  // watching" case. Budgeted delivery itself is covered in
+  // test/unit/ImageSearchDelivery.test.ts.
   let clock = 0;
+  const notifications = new UserNotificationService();
   const tool = makeImageSearchTool({
     getConfig: () => ({ ...(cfg ? { image_search: cfg } : {}) }) as ForgeConfig,
     secrets: {
       get: async () => ('key' in options ? options.key : 'serp-key'),
     } as unknown as vscode.SecretStorage,
     resolveAttachment: (relativePath) => `/store/${relativePath}`,
-    notifications: { deliverImage } as unknown as UserNotificationService,
+    notifications,
     upload,
     searchLens: search,
     searchYandex: yandex,
@@ -151,7 +156,6 @@ function makeTool(
     yandex,
     readFile,
     download,
-    deliverImage,
     advance: (ms: number) => (clock += ms),
   };
 }
@@ -364,8 +368,8 @@ describe('thumbnails', () => {
     conversationId: 'c1',
   };
 
-  it('lists saved thumbnails in the parseable line and says when no phone watches', async () => {
-    const { tool, download, deliverImage } = makeTool();
+  it('saves the picked thumbnails for the sidebar and says when no phone watches', async () => {
+    const { tool, download } = makeTool();
     const result = String(await tool.handler({}, context));
     expect(download).toHaveBeenCalledWith(
       [
@@ -383,19 +387,7 @@ describe('thumbnails', () => {
         original: 'https://en.wikipedia.org/wiki/Eiffel_Tower',
       },
     ]);
-    expect(deliverImage).toHaveBeenCalledWith({
-      conversationId: 'c1',
-      text: '🔎 1/1 Eiffel Tower - Wikipedia — Wikipedia\nhttps://en.wikipedia.org/wiki/Eiffel_Tower',
-      imagePath: '/ws/.forge/image-search/0/1.jpg',
-    });
     expect(result).toContain('No remote chat is watching this turn');
-  });
-
-  it('reports a phone delivery only when a remote chat took it', async () => {
-    const { tool } = makeTool({ reached: 1 });
-    expect(String(await tool.handler({}, context))).toContain(
-      'Sent 1 thumbnail(s) to 1 remote chat(s).',
-    );
   });
 
   it('skips thumbnails when configured to 0 or no workspace is open', async () => {

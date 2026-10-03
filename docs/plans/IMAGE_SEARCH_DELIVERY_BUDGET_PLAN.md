@@ -1,14 +1,13 @@
 # image_search delivery budget — plan
 
-**Status: DRAFT — not implemented.**
+**Status: Implemented in 0.16.78 (2026-10-03). Live handset validation deferred
+at the owner's request.**
 Written 2026-10-03. Found by Codex while reviewing Phase 1 of
-`docs/plans/SEND_FILE_AND_RENDER_HTML_PLAN.md`; recorded there as follow-up 4 and
-in `src/sidebar/UserNotificationService.ts` as a "KNOWN GAP, not a rule".
+`docs/plans/SEND_FILE_AND_RENDER_HTML_PLAN.md`; it was recorded there as
+follow-up 4 and in `src/sidebar/UserNotificationService.ts` as a known gap.
 
-Implementation prerequisite: a base containing `deliverFile` and
-`FILE_DELIVERY_TURN_LIMIT` (`2e9304d` onward, present on the current
-`feat/send-file-and-render-html` branch). Verify that commit is in the chosen
-base before implementation; this plan does not assume `main` has merged it.
+Implemented on the `feat/send-file-and-render-html` branch, whose base contains
+`deliverFile` and `FILE_DELIVERY_TURN_LIMIT` (`2e9304d` onward).
 
 ---
 
@@ -295,11 +294,11 @@ update the surrounding comment: the unbudgeted route is used only for
 
 | File | Change |
 |---|---|
-| `src/sidebar/UserNotificationService.ts` | Bounded lease, turn invalidation, `deliverFile` integration, explicit unbudgeted method; currently 266 lines. |
-| `src/tools/imageSearch/imageSearchTool.ts` | Reserve after download, deliver granted prefix, accurate captions/result; currently 343 lines. Extract `src/tools/imageSearch/thumbnailDelivery.ts` before crossing 500. |
-| `src/tools/imageGeneration/generateImageTool.ts` | Budget the selected backend when `confirm_each: false`; explicit unbudgeted call when true. Currently 344 lines; extract before crossing 500. |
-| `test/unit/UserNotification.test.ts` | Service lease and reset tests; currently 439 lines. Put the new lease suite in `test/unit/UserNotificationFileLease.test.ts` rather than growing this file. |
-| `test/unit/ImageSearchTool.test.ts` | Move the thumbnail delivery tests and fake (currently lines 360 onward) into `test/unit/ImageSearchDelivery.test.ts`; current file is already 538 lines. Add budget tests to focused new files, each under 500. |
+| `src/sidebar/UserNotificationService.ts` | Bounded lease, turn invalidation, `deliverFile` integration, explicit unbudgeted method; 312 lines after implementation. |
+| `src/tools/imageSearch/imageSearchTool.ts` | Reserve after download, deliver granted prefix, accurate captions/result; 393 lines after implementation, so no extraction needed. |
+| `src/tools/imageGeneration/generateImageTool.ts` | Budget the selected backend when `confirm_each: false`; explicit unbudgeted call when true. 353 lines after implementation. |
+| `test/unit/UserNotification.test.ts` | Existing refusal tests retained; new lease and reset tests live in `test/unit/UserNotificationFileLease.test.ts`. |
+| `test/unit/ImageSearchTool.test.ts` | Thumbnail delivery tests moved to `test/unit/ImageSearchDelivery.test.ts`; the former is 530 lines and the new focused suite is 339 lines. |
 | `test/unit/RemoteImageDelivery.test.ts`, `test/unit/SymlinkEscape.test.ts` | Update only service-method calls/fakes; keep `RemoteAgentProgress.deliverImage` unchanged. |
 | `test/unit/GenerateImageTool.test.ts` and new `test/unit/GenerateImageBudget.test.ts` | Keep existing cases green; put new approved/unapproved budget rows in the new suite. Existing file is 485 lines and must not grow past 500. |
 | `docs/OWNERS.md` | Register any extracted source owner. |
@@ -356,64 +355,67 @@ Each row maps to a named test or validation step.
 
 ### Service and turn lifetime
 
-- [ ] In `UserNotificationFileLease.test.ts`, reserve 4 and send 4: exactly
+- [x] In `UserNotificationFileLease.test.ts`, reserve 4 and send 4: exactly
       four slots charged, never eight; a fifth lease send is refused.
-- [ ] In the same suite, requested 0 grants 0; requested 8 in a fresh turn
+- [x] In the same suite, requested 0 grants 0; requested 8 in a fresh turn
       grants 5; requested 4 with 2 remaining grants 2. The counter never
       exceeds 5 under concurrent calls, including a competing `deliverFile`.
-- [ ] In the same suite, `deliverFile` retains its current refusal text and
-      `FileDeliveryResult` shape; `send_file` and render tests remain green.
-- [ ] In the same suite, an attempted send returning zero chats or a throwing
+- [x] Across that suite and `UserNotification.test.ts`, `deliverFile` retains
+      its refusal text and `FileDeliveryResult` shape; `send_file` and render
+      tests remain green.
+- [x] In the same suite, an attempted send returning zero chats or a throwing
       sink stays charged; no retry occurs automatically.
-- [ ] In the same suite, `resetTurn(c1)` restores c1's allowance and makes an
+- [x] In the same suite, `resetTurn(c1)` restores c1's allowance and makes an
       old lease stale, while c2 and the no-conversation bucket remain separate.
       An old lease's `deliver` called after the reset returns `stale` without
       calling any sink.
-- [ ] In the same suite, an abort before reservation charges zero; cancellation
-      between lease sends stops the rest without a refund or later replay.
+- [x] In `ImageSearchDelivery.test.ts`, an abort before reservation charges
+      zero; cancellation between lease sends stops the rest without a refund or
+      later replay.
 
 ### Thumbnail files and delivery
 
-- [ ] In `ImageSearchDelivery.test.ts`, `thumbnails: 0` performs no
+- [x] In `ImageSearchDelivery.test.ts`, `thumbnails: 0` performs no
       download/reservation; missing `deps.notifications` takes the current
       line-218 return; both existing thumbnail cases and the updated fake pass.
-- [ ] In the same suite, 4 saved with 4 left queues all 4 with captions
+- [x] In the same suite, 4 saved with 4 left queues all 4 with captions
       `1/4`…`4/4`; 4 saved with 2 left queues 2 with `1/2`…`2/2`,
       names 2 withheld and the folder, and keeps all 4 sidebar entries.
-- [ ] In the same suite, zero left queues none with an explicit folder/count;
+- [x] In the same suite, zero left queues none with an explicit folder/count;
       8 saved in a fresh turn queues 5 and labels 3 withheld. No result says
       “sent” when the sink returns zero or a lease goes stale.
-- [ ] In the same suite, 4 requested with 2 failed downloads charges 2,
+- [x] In the same suite, 4 requested with 2 failed downloads charges 2,
       not 4. A download abort charges zero.
-- [ ] In the same suite, a search in a conversation whose sinks all return 0
+- [x] In the same suite, a search in a conversation whose sinks all return 0
       charges its grant and keeps the existing "No remote chat is watching"
       footer; the sidebar line still lists every saved file.
-- [ ] In `ImageSearchDelivery.test.ts`, repeated search calls in one turn
+- [x] In `ImageSearchDelivery.test.ts`, repeated search calls in one turn
       never exceed five queued photos; each queued photo is attempted once.
       A later turn can search again after reset.
-- [ ] In the image-search approval tests, public `image_url` skips upload
+- [x] In the image-search approval tests, public `image_url` skips upload
       approval yet budgets thumbnails; a local attachment with
       `confirm_upload: true` still prompts.
 
 ### Other senders and integration
 
-- [ ] In a generate-image budget suite, `confirm_each: true` uses the
+- [x] In a generate-image budget suite, `confirm_each: true` uses the
       explicit unbudgeted method; `confirm_each: false` uses `deliverFile`.
       With the budget already spent, `confirm_each: false` still generates and
       writes the image, and the result names the saved path and says it was not
       sent. Cover cloud and warm local backends; cold-start approval does not
       exempt later unapproved calls.
-- [ ] In a real-service integration test, 2 renders + 1 `send_file` + a
+- [x] In a real-service integration test, 2 simulated renders + 1 simulated
+      `send_file` (all using the real `deliverFile`) + a
       2-thumbnail search consume all 5 slots; the sixth file/photo is refused.
-- [ ] Run `rg -n '\.deliverImage\(' src test/unit`: only the
+- [x] Run `rg -n '\.deliverImage\(' src test/unit`: only the
       `RemoteAgentProgress` transport calls remain; grep
       `deliverImageUnbudgeted` separately to verify its sole production caller
       is the approved `generate_image` branch. `RemoteImageDelivery` service
       tests are updated and its transport tests still pass.
-- [ ] Review `UserNotificationService.ts:192-210`: remove the KNOWN GAP
+- [x] Review `UserNotificationService.ts:192-210`: remove the KNOWN GAP
       paragraph and describe the conditional generate-image exemption.
       Mark follow-up 4 resolved in `SEND_FILE_AND_RENDER_HTML_PLAN.md`.
-- [ ] Check every touched/created **`src/`** `.ts` file has at most 500 physical
+- [x] Check every touched/created **`src/`** `.ts` file has at most 500 physical
       lines — that is the enforced `max-lines` gate — and run ESLint (which
       includes Prettier) on each touched `src/` file. Do **not** run ESLint on
       test files: `npm run lint` is `eslint src webview-ui --ext .ts,.tsx`, and
@@ -423,7 +425,7 @@ Each row maps to a named test or validation step.
       existing `test/unit` files already exceed it, up to 1571), so record the
       count instead of claiming a gate. Confirm `docs/OWNERS.md` for any
       extracted source owner.
-- [ ] After the final source/test/doc/changelog edit, run `npm run ci`,
+- [x] After the final source/test/doc/changelog edit, run `npm run ci`,
       `npm run package`, `git diff --check`, and inspect `git status`.
       Record exact command results and test counts; add the matching
       `CHANGES.md` entry for the implementation version.
@@ -432,3 +434,17 @@ Each row maps to a named test or validation step.
       renders in the same turn and confirm the first arrives (slot 5) and the
       shared cap refuses the second. A queue count
       alone is insufficient proof of handset receipt.
+
+## Known limitation
+
+The automated checks verify admission and queue counts, including a real
+`UserNotificationService` shared by the sending paths. They cannot prove that
+Telegram delivered a queued photo to a handset. The owner deferred the live
+bound-chat test above for this implementation turn.
+
+## Implementation verification
+
+On 2026-10-03, `npm run ci` completed with 390 test files passed, 6 skipped;
+3,976 tests passed, 40 skipped. Type-check, lint, production build, and bundle
+check passed. `npm run package` completed and rebuilt
+`forge-llm-0.16.78.vsix` (126 files, 11.66 MB). `git diff --check` exited 0.

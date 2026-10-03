@@ -235,13 +235,12 @@ describe('deliverFile per-turn file budget', () => {
     expect(await service.notify({ conversationId: 'c1', text: 'still allowed' })).toBe(1);
   });
 
-  // generate_image keeps the unbudgeted path: it has a per-call approval, and
-  // a render loop is not the risk this budget exists to stop.
-  it('leaves deliverImage unbudgeted', async () => {
+  // generate_image must explicitly name its per-call approval brake.
+  it('leaves confirm_each image delivery unbudgeted', async () => {
     const service = new UserNotificationService();
     service.addSink(async () => 1);
     for (let i = 0; i < FILE_DELIVERY_TURN_LIMIT + 5; i += 1) {
-      expect(await service.deliverImage(fileEvent('c1'))).toBe(1);
+      expect(await service.deliverImageUnbudgeted('confirm_each', fileEvent('c1'))).toBe(1);
     }
     expect(service.remainingFileDeliveries('c1')).toBe(FILE_DELIVERY_TURN_LIMIT);
   });

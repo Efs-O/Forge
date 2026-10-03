@@ -34,6 +34,16 @@ export type FileDeliveryResult =
   | { readonly kind: 'queued'; readonly chats: number }
   | { readonly kind: 'refused'; readonly spentThisTurn: number; readonly reason: string };
 
+export type FileLeaseSendResult =
+  | { readonly kind: 'queued'; readonly chats: number }
+  | { readonly kind: 'exhausted' | 'stale' };
+
+export interface FileDeliveryLease {
+  readonly granted: number;
+  readonly remaining: number;
+  deliver(event: { text: string; imagePath: string }): Promise<FileLeaseSendResult>;
+}
+
 /**
  * Quiet time that returns the whole budget.
  *
@@ -81,7 +91,7 @@ export class UserNotificationService {
   private readonly sinks = new Set<UserNotificationSink>();
   private readonly sent = new Map<string, number>();
   private readonly lastSentAt = new Map<string, number>();
-  private readonly filesSent = new Map<string, number>();
+  private readonly filesSent = new Map<string, { spent: number }>();
   private reachProbe: ((conversationId: string) => number) | undefined;
 
   constructor(
@@ -192,26 +202,53 @@ export class UserNotificationService {
   /**
    * Delivers an image to the conversation's remote chats, unbudgeted.
    *
-   * Exempt on purpose for a tool that confirms every call: `generate_image`
-   * asks for approval each time, which is a stronger brake than any burst cap,
-   * and an agent asked for five images must not lose its ability to notify. A
-   * tool with no per-call approval must use `deliverFile` instead -- without an
-   * approval and without a budget, nothing at all brakes a loop, and a render
-   * takes a second or two rather than a whole model turn.
-   *
-   * KNOWN GAP, not a rule: `image_search` also delivers through here, on an
-   * approval that is absent unless `image_search.confirm_upload` is set, so its
-   * thumbnails are currently unbudgeted. Pre-existing (that tool shipped
-   * first), left alone by docs/plans/SEND_FILE_AND_RENDER_HTML_PLAN.md, and
-   * recorded there as a follow-up rather than asserted as an invariant here.
+   * Exempt only for `generate_image` calls whose selected backend has
+   * `confirm_each: true`. Every caller must state that approval brake.
    */
-  async deliverImage(event: UserNotificationEvent & { imagePath: string }): Promise<number> {
+  async deliverImageUnbudgeted(
+    brake: 'confirm_each',
+    event: UserNotificationEvent & { imagePath: string },
+  ): Promise<number> {
+    void brake;
     return this.fanOut(event);
   }
 
   /** File deliveries still available to this conversation in the current turn. */
   remainingFileDeliveries(conversationId: string | undefined): number {
     return FILE_DELIVERY_TURN_LIMIT - this.filesSpent(conversationId ?? NO_CONVERSATION);
+  }
+
+  /**
+   * Atomically reserves up to `requested` shared file-delivery slots.
+   *
+   * A lease binds its conversation and the current turn's budget object, so
+   * resetTurn invalidates unused grants without allowing them into a new turn.
+   */
+  reserveFileDeliveries(conversationId: string | undefined, requested: number): FileDeliveryLease {
+    if (!Number.isInteger(requested) || requested < 0) {
+      throw new RangeError('requested file deliveries must be a nonnegative integer');
+    }
+    const key = conversationId ?? NO_CONVERSATION;
+    const budget = this.filesSent.get(key) ?? { spent: 0 };
+    const granted = Math.min(requested, FILE_DELIVERY_TURN_LIMIT - budget.spent);
+    budget.spent += granted;
+    this.filesSent.set(key, budget);
+    let attempts = 0;
+    return {
+      granted,
+      remaining: FILE_DELIVERY_TURN_LIMIT - budget.spent,
+      deliver: async (event) => {
+        if (this.filesSent.get(key) !== budget) return { kind: 'stale' };
+        if (attempts >= granted) return { kind: 'exhausted' };
+        attempts += 1;
+        const chats = await this.fanOut({
+          ...(conversationId !== undefined ? { conversationId } : {}),
+          text: event.text,
+          imagePath: event.imagePath,
+        });
+        return { kind: 'queued', chats };
+      },
+    };
   }
 
   /**
@@ -230,9 +267,9 @@ export class UserNotificationService {
   async deliverFile(
     event: UserNotificationEvent & { imagePath: string },
   ): Promise<FileDeliveryResult> {
-    const key = event.conversationId ?? NO_CONVERSATION;
-    const spent = this.filesSpent(key);
-    if (spent >= FILE_DELIVERY_TURN_LIMIT) {
+    const lease = this.reserveFileDeliveries(event.conversationId, 1);
+    if (lease.granted === 0) {
+      const spent = FILE_DELIVERY_TURN_LIMIT - lease.remaining;
       return {
         kind: 'refused',
         spentThisTurn: spent,
@@ -242,12 +279,21 @@ export class UserNotificationService {
           'sending it, or send it in a later turn.',
       };
     }
-    this.filesSent.set(key, spent + 1);
-    return { kind: 'queued', chats: await this.fanOut(event) };
+    const result = await lease.deliver({ text: event.text, imagePath: event.imagePath });
+    if (result.kind === 'queued') return result;
+    const spent = FILE_DELIVERY_TURN_LIMIT - this.remainingFileDeliveries(event.conversationId);
+    return {
+      kind: 'refused',
+      spentThisTurn: spent,
+      reason:
+        `File delivery limit reached: ${spent} of ${FILE_DELIVERY_TURN_LIMIT} allowed this turn. ` +
+        `The file is still on disk at ${event.imagePath} — give the user that path instead of ` +
+        'sending it, or send it in a later turn.',
+    };
   }
 
   private filesSpent(key: string): number {
-    return this.filesSent.get(key) ?? 0;
+    return this.filesSent.get(key)?.spent ?? 0;
   }
 
   private async fanOut(event: UserNotificationEvent): Promise<number> {

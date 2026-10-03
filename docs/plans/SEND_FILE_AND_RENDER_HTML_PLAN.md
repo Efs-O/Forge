@@ -29,8 +29,10 @@ and `subscribeHostToRemote`'s `imagePath → deliverHostImage` arm plus
 `RemoteController.deliverHostImage` now have direct tests, so the production
 subscription is no longer only mirrored by a shaped-like-it sink.
 
-Deferred by decision: `image_search` thumbnails remain unbudgeted (Open
-question 4) — charging one slot per atomic result batch is the follow-up.
+Follow-up 4 is resolved by
+[`IMAGE_SEARCH_DELIVERY_BUDGET_PLAN.md`](IMAGE_SEARCH_DELIVERY_BUDGET_PLAN.md):
+each saved thumbnail uses one shared per-turn file slot. A search can save more
+thumbnails than the phone limit allows and report the withheld count.
 
 ## Problem
 
@@ -498,16 +500,11 @@ No new config fields, no new persistent processes, no new directories.
    guard proves insufficient.
 3. **Rename `deliverImage` / `imagePath`.** The chain is image-named but
    file-generic. Leaving the names avoids churn in four files. Cosmetic follow-up.
-4. **`image_search` thumbnails are unbudgeted** (found by Codex reviewing Phase 1,
-   2026-10-03). `imageSearchTool.ts` delivers every saved thumbnail through
-   unbudgeted `deliverImage`, and its `approval` is absent unless
-   `image_search.confirm_upload` is set — so an image-search loop can spam the
-   phone with no approval and no cap, the exact class of defect the new
-   `deliverFile` budget exists to stop. Pre-existing (the tool shipped first) and
-   deliberately NOT fixed in this plan: routing thumbnails through `deliverFile`
-   would silently truncate a 10-thumbnail result to 5, a user-visible change
-   outside this plan's scope. Follow-up: budget it, and decide whether one
-   image_search call should cost one slot or one per thumbnail.
+4. **Resolved in the image-search delivery budget plan (0.16.78).** Each saved
+   thumbnail charges one shared per-turn file slot. The result keeps every
+   saved thumbnail visible in the sidebar and reports when the phone limit
+   withholds a photo. `generate_image` also uses that limit when its selected
+   backend has `confirm_each: false`.
 
 ---
 

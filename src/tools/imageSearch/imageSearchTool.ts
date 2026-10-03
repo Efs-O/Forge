@@ -193,6 +193,13 @@ async function runEngine(
  * Saves thumbnails for the sidebar and sends them to a watching remote chat.
  * Returns the lines the model reads, which state exactly what happened: a
  * claimed send with no chat watching would repeat ask_user's lie.
+ *
+ * Delivery is budgeted as one decision over the whole result set, not one per
+ * thumbnail: `confirm_upload` gates a local file leaving the machine, never the
+ * photos coming back, so these sends are unapproved by definition and each one
+ * must spend a slot of the conversation's per-turn file budget. The schema
+ * allows up to 8 thumbnails against a 5-slot turn, so a partial grant is a
+ * normal outcome and is named in the captions the phone actually sees.
  */
 async function saveAndDeliverThumbnails(
   deps: ImageSearchDeps,
@@ -216,29 +223,72 @@ async function saveAndDeliverThumbnails(
     lines.push(`${failures.length} thumbnail(s) could not be saved: ${failures.join('; ')}`);
   }
   if (!saved.length || !deps.notifications) return lines.join('\n');
-
-  let reached = 0;
+  const folder = saved[0]!.relativePath.replace(/\/[^/]+$/u, '');
+  // Reservation happens after the files exist, so a cancelled download charges
+  // nothing; a cancellation that lands after it costs unused slots until the
+  // next turn, which is the same no-refund rule deliverFile already ships.
+  if (signal.aborted) {
+    lines.push(
+      `Search was cancelled: ${saved.length} thumbnail(s) saved under ${folder}, none queued to a phone.`,
+    );
+    return lines.join('\n');
+  }
+  const lease = deps.notifications.reserveFileDeliveries(context?.conversationId, saved.length);
+  const withheldByLimit = saved.length - lease.granted;
+  // The phone only ever sees the caption, so the withheld count belongs there:
+  // a user who gets 1/2 must be able to tell withheld from nonexistent.
+  const withheldNote = withheldByLimit
+    ? ` (of ${saved.length} saved; ${withheldByLimit} withheld by the per-turn file limit)`
+    : '';
+  let queued = 0;
+  let chats = 0;
+  let stopped: string | undefined;
   for (const [index, thumbnail] of saved.entries()) {
+    if (index >= lease.granted) break;
+    if (signal.aborted) {
+      stopped = 'the search was cancelled';
+      break;
+    }
     const caption = [
-      `🔎 ${index + 1}/${saved.length} ${thumbnail.title}${thumbnail.source ? ` — ${thumbnail.source}` : ''}`,
+      `🔎 ${index + 1}/${lease.granted}${withheldNote} ${thumbnail.title}${thumbnail.source ? ` — ${thumbnail.source}` : ''}`,
       thumbnail.link,
     ]
       .filter(Boolean)
       .join('\n');
-    reached = Math.max(
-      reached,
-      await deps.notifications.deliverImage({
-        ...(context?.conversationId ? { conversationId: context.conversationId } : {}),
-        text: caption,
-        imagePath: thumbnail.absolutePath,
-      }),
+    const sent = await lease.deliver({ text: caption, imagePath: thumbnail.absolutePath });
+    if (sent.kind !== 'queued') {
+      stopped =
+        sent.kind === 'stale'
+          ? 'this turn ended and its delivery budget was reset'
+          : 'the delivery lease ran out';
+      break;
+    }
+    if (sent.chats > 0) {
+      queued += 1;
+      chats = Math.max(chats, sent.chats);
+    }
+  }
+  // Only a nonzero chat count may be worded as a send: a granted slot that
+  // reached nobody is the "no chat is watching" case, not a delivery. A stop
+  // that queued nothing is reported by the unsent line below, which names the
+  // reason; the reservation-to-first-send span is synchronous, so a lease
+  // cannot go stale before its first attempt.
+  if (queued && chats) {
+    lines.push(`Sent ${queued} thumbnail(s) to ${chats} remote chat(s).`);
+  } else if (lease.granted === 0) {
+    lines.push(
+      "No thumbnails were queued to a phone: this turn's file-delivery limit is already spent.",
+    );
+  } else {
+    lines.push('No remote chat is watching this turn, so no thumbnails were sent to a phone.');
+  }
+  const unsent = saved.length - queued;
+  if (unsent) {
+    lines.push(
+      `${unsent} of ${saved.length} thumbnail(s) were not queued to a phone${stopped ? ` — ${stopped}` : ''}. ` +
+        `All ${saved.length} are saved under ${folder}; name that folder to the user instead of sending them.`,
     );
   }
-  lines.push(
-    reached > 0
-      ? `Sent ${saved.length} thumbnail(s) to ${reached} remote chat(s).`
-      : 'No remote chat is watching this turn, so no thumbnails were sent to a phone.',
-  );
   return lines.join('\n');
 }
 

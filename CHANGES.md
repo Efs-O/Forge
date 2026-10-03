@@ -2,6 +2,19 @@
 
 ## 0.16.78
 
+### Image-search photos share the per-turn file limit
+
+- `image_search` saves all returned thumbnails for the sidebar, then reserves
+  delivery slots for the saved files. A turn can queue at most five files or
+  photos across `image_search`, `send_file`, `render_html_to_image`, and
+  `generate_image` backends with approval disabled.
+  When the limit is reached, the result names the saved folder and how many
+  thumbnails were withheld from phone delivery.
+- `generate_image` uses the same limit when its selected backend has
+  `confirm_each: false`. It still saves a generated image when delivery is
+  refused and reports the saved path. A backend with `confirm_each: true`
+  keeps its per-call approval and can deliver outside the shared limit.
+
 ### Tool-call recovery messages stay brief
 
 - An unknown tool name gets a short suggestion only when it uniquely prefixes

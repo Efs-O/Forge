@@ -14,6 +14,7 @@ import { makeEditFileTool } from '../../src/tools/editFileTool';
 import { makeApplyLineEditsTool } from '../../src/tools/structuredEditTool';
 import { makeGenerateImageTool } from '../../src/tools/imageGeneration/generateImageTool';
 import type { ForgeConfig } from '../../src/config/types';
+import { UserNotificationService } from '../../src/sidebar/UserNotificationService';
 
 /**
  * #9 — symlink escape. Every write/move/delete tool used to resolve its target
@@ -142,7 +143,7 @@ describe.runIf(linkSupported)('symlink escape is refused by every write/move/del
     const tool = makeGenerateImageTool({
       getConfig: () => config,
       secrets: undefined,
-      notifications: { deliverImage: async () => undefined } as never,
+      notifications: new UserNotificationService(),
       generate: async () => ({ bytes: Buffer.from([0x89, 0x50, 0x4e, 0x47]), mime: 'image/png' }),
       now: () => new Date(),
     });

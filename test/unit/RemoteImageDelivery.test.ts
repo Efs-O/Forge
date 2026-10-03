@@ -83,12 +83,16 @@ describe('RemoteAgentProgress.deliverImage', () => {
   });
 });
 
-describe('UserNotificationService.deliverImage', () => {
+describe('UserNotificationService.deliverImageUnbudgeted', () => {
   it('does not spend the notify_user burst budget', async () => {
     const notifications = new UserNotificationService();
     notifications.addSink(async () => 1);
     for (let index = 0; index < 8; index += 1) {
-      await notifications.deliverImage({ conversationId: 'c1', text: 'img', imagePath: 'a.png' });
+      await notifications.deliverImageUnbudgeted('confirm_each', {
+        conversationId: 'c1',
+        text: 'img',
+        imagePath: 'a.png',
+      });
     }
     expect(notifications.remaining('c1')).toBe(5);
   });
