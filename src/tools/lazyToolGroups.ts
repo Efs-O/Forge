@@ -44,7 +44,7 @@ const NATIVE_GROUP_BY_TOOL: ReadonlyMap<string, string> = new Map([
     'desktop_type',
     'desktop_press',
   ].map((name) => [name, 'computer_use'] as const),
-  ...['view_image', 'view_video', 'generate_image', 'image_search'].map(
+  ...['view_image', 'view_video', 'generate_image', 'image_search', 'send_file'].map(
     (name) => [name, 'media'] as const,
   ),
   ...[

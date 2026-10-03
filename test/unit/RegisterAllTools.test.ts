@@ -98,6 +98,7 @@ const EXPECTED_NATIVE_NAMES = [
   'schedule_wake',
   'search_code',
   'search_codebase',
+  'send_file',
   'show_diff',
   'show_notification',
   'sleep_computer',
@@ -207,6 +208,22 @@ describe('registerAllTools canonical coordinator catalog', () => {
     expect(names).not.toContain('web_search');
     expect(names).not.toContain('ask_local_agent');
     expect(names).not.toContain('list_delegation_targets');
-    expect(names).toHaveLength(57);
+    expect(names).toHaveLength(58);
+  });
+
+  // send_file's only outbound step is api.telegram.org, so a profile with
+  // net.fetch off must not see the tool at all -- otherwise the model calls it
+  // and gets an unknown-tool error, the failure mode PermissionResolver exists
+  // to prevent.
+  it('advertises send_file only with the fetch permission', () => {
+    const registry = makeRegistry({ delegation: true });
+    const withFetch = registry
+      .definitions(new Set<ToolPermission>(['read', 'fetch']))
+      .map((tool) => tool.function.name);
+    const withoutFetch = registry
+      .definitions(new Set<ToolPermission>(['read']))
+      .map((tool) => tool.function.name);
+    expect(withFetch).toContain('send_file');
+    expect(withoutFetch).not.toContain('send_file');
   });
 });

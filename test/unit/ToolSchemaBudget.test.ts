@@ -137,10 +137,10 @@ describe('tool schema CI budget (TOOL_SCHEMA_GROWTH_PLAN.md Step 1)', () => {
     Object.defineProperty(process, 'platform', { value: realPlatform, configurable: true }),
   );
 
-  it('advertises the full 65-tool set under the maximal config', () => {
+  it('advertises the full 66-tool set under the maximal config', () => {
     const registry = makeMaximalRegistry();
     const names = registry.definitions(ALL_PERMISSIONS).map((d) => d.function.name).sort();
-    expect(names).toHaveLength(65);
+    expect(names).toHaveLength(66);
     // Spot-check the five self-suppressing tools that only appear when their
     // config block is present — these are the ones a bare config would drop.
     for (const name of [

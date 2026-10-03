@@ -65,6 +65,7 @@ import type { JobStore } from '../jobs/JobStore';
 import type { ForgeHostFacade } from '../sidebar/ForgeHostFacade';
 import { makeApplyLineEditsTool } from './structuredEditTool';
 import { makeViewImageTool } from './imageTool';
+import { makeSendFileTool } from './sendFileTool';
 import { makeWaitTool } from './waitTool';
 import { makeViewVideoTool } from './videoTool';
 import { makeGenerateImageTool } from './imageGeneration/generateImageTool';
@@ -108,6 +109,12 @@ export function registerAllTools(
   // v0.1 builtins
   registry.register(makeReadFileTool());
   registry.register(makeViewImageTool());
+  // Registered unconditionally, unlike generate_image: send_file reads a file
+  // and delivers it, so it needs no config block to exist — the same reasoning
+  // as view_image two lines up. Gating it on getConfig would silently drop the
+  // tool wherever that getter is not supplied. `notifications` is a required
+  // argument of this signature, so the delivery dependency is always present.
+  registry.register(makeSendFileTool({ notifications }));
   // Registered unconditionally: getConfig is optional on this signature, and
   // gating on it would silently drop the tool wherever it is not supplied.
   registry.register(makeViewVideoTool(getConfig ? () => getConfig().video : undefined));

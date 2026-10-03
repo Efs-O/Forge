@@ -2,11 +2,26 @@ import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
+import * as vscode from 'vscode';
 import { FakeRemoteChannel } from '../../src/remote/FakeRemoteChannel';
 import { RemoteAgentProgress } from '../../src/remote/RemoteAgentProgress';
 import { sendTelegramPhoto, TELEGRAM_MAX_PHOTO_BYTES } from '../../src/remote/TelegramPhoto';
 import { TelegramChatQueue } from '../../src/remote/telegramSendQueue';
 import { UserNotificationService } from '../../src/sidebar/UserNotificationService';
+import { makeSendFileTool } from '../../src/tools/sendFileTool';
+
+// send_file resolves its path through WorkspacePaths, which reads the vscode
+// workspace root. This suite otherwise never touches vscode, so the mock exists
+// only to give that resolver a folder to contain the temp file.
+vi.mock('vscode', () => ({ workspace: { workspaceFolders: undefined } }));
+
+function setWorkspace(folder: string): void {
+  (
+    vscode.workspace as unknown as {
+      workspaceFolders: Array<{ uri: { fsPath: string } }> | undefined;
+    }
+  ).workspaceFolders = [{ uri: { fsPath: folder } }];
+}
 
 afterEach(() => {
   vi.useRealTimers();
@@ -76,6 +91,82 @@ describe('UserNotificationService.deliverImage', () => {
       await notifications.deliverImage({ conversationId: 'c1', text: 'img', imagePath: 'a.png' });
     }
     expect(notifications.remaining('c1')).toBe(5);
+  });
+});
+
+// The plan's acceptance criterion: "The send rides state.tail behind a
+// preceding narration." Unit tests prove each link; this proves the seam, by
+// wiring the real send_file tool to the real service with a sink shaped like
+// remoteHostSubscriptions.ts (imagePath -> controller.deliverHostImage ->
+// progress.deliverImage). A regression in how the two halves are joined -- the
+// sink ignoring imagePath, or deliverFile bypassing the fan-out -- fails only
+// here.
+describe('send_file through the remote delivery chain', () => {
+  let dir: string | undefined;
+  afterEach(() => {
+    if (dir) fs.rmSync(dir, { recursive: true, force: true });
+    dir = undefined;
+    (
+      vscode.workspace as unknown as { workspaceFolders: unknown }
+    ).workspaceFolders = undefined;
+  });
+
+  it('queues the file behind the narration that preceded it', async () => {
+    vi.useFakeTimers();
+    dir = fs.mkdtempSync(path.join(os.tmpdir(), 'forge-send-file-chain-'));
+    setWorkspace(dir);
+    const file = path.join(dir, 'plan.md');
+    fs.writeFileSync(file, '# plan\n');
+
+    const { channel, progress } = progressRig();
+    // Record what the channel sees, in order: the point of this test is that
+    // the queued file send lands BEHIND the narration that preceded it.
+    const order: string[] = [];
+    const sendPhoto = channel.sendPhoto.bind(channel);
+    channel.sendPhoto = async (chatId, filePath, caption) => {
+      order.push(`photo:${path.basename(filePath)}:${caption}`);
+      await sendPhoto(chatId, filePath, caption);
+    };
+    const send = channel.send.bind(channel);
+    channel.send = async (chatId, text, options) => {
+      order.push(`text:${text}`);
+      await send(chatId, text, options);
+    };
+    progress.begin('c1', 'chat-a', 'message-1');
+
+    // Mirrors remoteHostSubscriptions.ts: an imagePath routes to the photo
+    // path; a plain notification would go to controller.enqueueHostNotification.
+    // send_file always sets imagePath, so only that arm is exercised here.
+    const notifications = new UserNotificationService();
+    notifications.addSink(async (event) =>
+      event.conversationId && event.imagePath
+        ? progress.deliverImage(event.conversationId, event.imagePath, event.text)
+        : 0,
+    );
+
+    const tool = makeSendFileTool({ notifications });
+    // Narration first, exactly as a real turn emits it before the tool runs.
+    progress.handle({ conversationId: 'c1', kind: 'narration', text: 'Sending the plan now.' });
+    const result = await tool.handler(
+      { path: file, caption: 'the plan doc' },
+      { beforeMutate: () => undefined, conversationId: 'c1' },
+    );
+
+    expect(result).toContain('Queued plan.md for 1 remote chat(s).');
+    await vi.advanceTimersByTimeAsync(1_000);
+    // The seam this test exists for: the file send goes out AFTER the narration
+    // that preceded it, because both ride the same per-turn tail.
+    expect(order).toEqual(['text:Sending the plan now.', 'photo:plan.md:the plan doc']);
+    // The sink got a path that names the real file. Full-string comparison is
+    // deliberately avoided: Windows hands back either the long-name or the 8.3
+    // short-name spelling of a temp path depending on the call, so pinning one
+    // would make this test machine-dependent rather than about the seam.
+    expect(channel.photos).toHaveLength(1);
+    const sent = channel.photos[0]!;
+    expect(sent.chatId).toBe('chat-a');
+    expect(sent.caption).toBe('the plan doc');
+    expect(path.basename(sent.filePath)).toBe('plan.md');
+    expect(fs.existsSync(sent.filePath)).toBe(true);
   });
 });
 
