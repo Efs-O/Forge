@@ -648,7 +648,8 @@ Each maps to a test or a named validation step.
       NOT advertise it, and `fetch`+`write` does without `browser`).
 
 **Live smoke (Phase 2, recorded in PR)**
-- [ ] Write a simple HTML poster (neon text on dark background) → `render_html_to_image` → PNG saved → Telegram photo arrives. The render leg is verified (see Phase 3 live smoke, 900×514 neon poster); the Telegram leg needs a real turn from the bound chat after install.
+- [x] Write a simple HTML poster (neon text on dark background) → `render_html_to_image` → PNG saved. **Verified from a real bound-chat turn on this machine, 2026-10-03, on 0.16.77 after Reload Window:** `20261003-073651-xronia-polla-neon.png`, **900×532**, 173,030 bytes, result `Queued for 1 remote chat(s).` Inspected by eye: Greek lettering correct ("Χρόνια Πολλά!", accents and final sigma intact), cyan and magenta glows present, height is the content height (532) rather than the 400 px viewport.
+- [ ] …→ Telegram photo arrives on the phone. **Awaiting the user's confirmation** — the harness can prove the queue accepted it, not the handset render it.
 - [x] `full_page: true` with a tall layout (birthday invite shape) → correct aspect ratio. → live (`RenderHtmlLive.test.ts`, 3000 px content height).
 - [x] HTML with `<img src="https://...">` → image is blocked (broken icon), render still succeeds. → live.
 - [x] HTML referencing `http://127.0.0.1:8799/...` and `file:///C:/...` (in `<img>`, `<iframe>`, CSS `@import`) → nothing loads; a local test server records zero hits. → live.
@@ -735,7 +736,10 @@ Each maps to a test or a named validation step.
 
 ### Live smoke (Phase 3, recorded in PR)
 
-- [ ] **The plan-doc use case:** `send_file` on `docs/plans/SEND_FILE_AND_RENDER_HTML_PLAN.md` → the .md arrives as a document in the Telegram chat, openable on the phone. **Needs a real turn from the bound chat** — no tool in the agent's own harness can enqueue a delivery, so this is verified on the phone after the 0.16.77 install.
+- [x] **The plan-doc use case (tool side):** `send_file` on `docs/plans/SEND_FILE_AND_RENDER_HTML_PLAN.md` from a real bound-chat turn, 2026-10-03 on 0.16.77. Result: `Queued SEND_FILE_AND_RENDER_HTML_PLAN.md for 1 remote chat(s).` — which exercises the `TelegramPhoto` non-image early-exit (straight to `sendDocument`, no `sendPhoto` attempt).
+- [ ] …→ the .md arrives as an openable document on the phone. **Awaiting the user's confirmation**, same reason as above.
+- [x] **Shared budget, live from one turn (2026-10-03):** 5 deliveries queued across BOTH tools (1 poster + 3 renders + 1 `send_file`), and the 6th was refused with `the per-turn file delivery limit is already spent (0 left). Nothing was rendered.` Checked on disk afterwards: no 6th PNG and no `.forge-claim` residue, so the early check really did skip the browser, the write and the Undo entry.
+- [x] **Path refusal, live:** `send_file` on `C:\Windows\win.ini` → `path must be in the workspace or this conversation's screenshot directory.`
 - [x] **The HTML pipeline end-to-end:** a Greek birthday invite with neon glow rendered through real Chrome with `full_page: true`. Measured on this machine (2026-10-03, Chrome): `20261003-024738-render.png`, **900×514**, 109,077 bytes, non-blank (pixel-variance assertion), and the rendered PNG inspected by eye — Greek lettering correct ("Χρόνια Πολλά!", accents and final sigma intact), cyan and magenta glows present, height is the content height rather than the 400 px viewport. The Telegram leg of this row is the same one above: pending a phone-side check.
 
 ### Real-browser integration (replaces the two `→ integration` rows above)
