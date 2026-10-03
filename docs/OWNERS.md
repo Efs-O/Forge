@@ -384,6 +384,10 @@ overlaps with an existing owner, extend the owner instead.
 | Per-turn tool allowlist + call-budget      | `src/tools/ToolBudget.ts`             |
 | Plan rendering + `PLAN_GUIDANCE`           | `src/tools/planTools.ts`              |
 | `view_image` tool                          | `src/tools/imageTool.ts`              |
+| `send_file` tool (workspace + screenshot-dir delivery) | `src/tools/sendFileTool.ts` |
+| `render_html_to_image` tool (schema, naming, delivery) | `src/tools/renderHtmlToImageTool.ts` |
+| HTML→PNG render engine (launch hardening, abort/timeout cleanup) | `src/tools/renderHtml/renderEngine.ts` |
+| Code-point length counting (schema/Telegram char limits) | `src/util/codePoints.ts` |
 | `generate_image` tool + save/deliver       | `src/tools/imageGeneration/generateImageTool.ts` |
 | Cloud `/v1/images/generations` backend     | `src/tools/imageGeneration/cloudImageBackend.ts` |
 | Local `/sdapi/v1/txt2img` backend + VRAM gate | `src/tools/imageGeneration/sdcppImageBackend.ts` |

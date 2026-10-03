@@ -85,6 +85,10 @@ const ImageBackendSchema = z
     }
   });
 
+/** Default workspace-relative folder for saved images, shared with any tool
+ *  that must fall back when no `image_generation:` block is configured. */
+export const DEFAULT_IMAGE_OUTPUT_DIR = 'generated-images';
+
 /** `image_generation:` — absent means the `generate_image` tool is never advertised. */
 export const ImageGenerationConfigSchema = z
   .object({
@@ -92,7 +96,7 @@ export const ImageGenerationConfigSchema = z
     /** Backend used when the model names none. Defaults to the first entry. */
     default: z.string().min(1).optional(),
     /** Workspace-relative folder for images saved without an explicit path. */
-    output_dir: z.string().min(1).default('generated-images'),
+    output_dir: z.string().min(1).default(DEFAULT_IMAGE_OUTPUT_DIR),
   })
   .superRefine((cfg, ctx) => {
     const names = cfg.backends.map((backend) => backend.name);

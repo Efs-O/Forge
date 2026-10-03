@@ -183,7 +183,7 @@ describe('generate_image', () => {
     ]);
     expect(result).toContain('This was a paid xai API call, billed per image.');
     expect(result).toContain('art/fox.jpg');
-    expect(result).toContain('Sent to 1 remote chat(s).');
+    expect(result).toContain('Queued for 1 remote chat(s).');
     expect(result).toContain('view_image');
   });
 
@@ -469,5 +469,17 @@ describe('generate_image with an sdcpp backend', () => {
       'Cloud backends ask for approval and bill per image; local backends are free',
     );
     expect(description).not.toContain('Each call asks the user to approve it');
+  });
+
+  it('routes text-heavy graphics to render_html_to_image', () => {
+    // The routing hint is the plan's cross-cutting row: without it the model
+    // burns a billed diffusion call on a poster and gets garbled lettering.
+    const description = makeGenerateImageTool({
+      getConfig: () => ({ image_generation: localConfig() }) as unknown as ForgeConfig,
+      secrets: undefined,
+      notifications: new UserNotificationService(),
+    }).definition.function.description!;
+    expect(description).toContain('text-heavy graphics');
+    expect(description).toContain('use render_html_to_image instead');
   });
 });

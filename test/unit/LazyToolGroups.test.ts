@@ -147,7 +147,8 @@ describe('lazy tool groups', () => {
     const registry = new ToolRegistry();
     registry.register(makeLoadToolGroupTool());
     for (const name of [
-      'desktop_capture', 'view_image', 'send_file', 'get_editor_context', 'install_llamacpp',
+      'desktop_capture', 'view_image', 'send_file', 'render_html_to_image',
+      'get_editor_context', 'install_llamacpp',
       'get_power_info', 'remember', 'read_notebook', 'ask_live_session', 'ask_user',
       'notify_user', 'get_system_status',
     ]) {
@@ -165,12 +166,13 @@ describe('lazy tool groups', () => {
     expect([
       lazyGroupForTool('desktop_capture'), lazyGroupForTool('view_image'),
       lazyGroupForTool('send_file'),
+      lazyGroupForTool('render_html_to_image'),
       lazyGroupForTool('get_editor_context'), lazyGroupForTool('install_llamacpp'),
       lazyGroupForTool('get_power_info'), lazyGroupForTool('remember'),
       lazyGroupForTool('read_notebook'), lazyGroupForTool('search_sessions'),
     ]).toEqual([
-      'computer_use', 'media', 'media', 'editor_ui', 'system', 'system', 'memory', 'notebook',
-      'halluscribe',
+      'computer_use', 'media', 'media', 'media', 'editor_ui', 'system', 'system', 'memory',
+      'notebook', 'halluscribe',
     ]);
     for (const name of [
       'ask_live_session', 'manage_jobs', 'notify_user', 'ask_local_agent',
@@ -179,14 +181,19 @@ describe('lazy tool groups', () => {
       expect(lazyGroupForTool(name)).toBeUndefined();
       expect(hiddenLazyToolNames('conv-a')).not.toContain(name);
     }
-    // send_file is in media, and media is never vision-gated: a model with no
-    // projector can still deliver a file it never rendered. Only computer_use
-    // hides for a non-vision model, so send_file must be hidden/visible
-    // identically in both states.
+    // send_file and render_html_to_image are in media, and media is never
+    // vision-gated: a model with no projector can still deliver a file it never
+    // rendered, and rendering HTML needs no vision at all. Only computer_use
+    // hides for a non-vision model, so both must be hidden/visible identically
+    // in both states.
     for (const isVisionModel of [true, false]) {
-      expect(hiddenLazyToolNames('conv-a', new Set(), isVisionModel)).toContain('send_file');
+      for (const name of ['send_file', 'render_html_to_image']) {
+        expect(hiddenLazyToolNames('conv-a', new Set(), isVisionModel)).toContain(name);
+      }
       activateLazyGroup('conv-a', 'media');
-      expect(hiddenLazyToolNames('conv-a', new Set(), isVisionModel)).not.toContain('send_file');
+      for (const name of ['send_file', 'render_html_to_image']) {
+        expect(hiddenLazyToolNames('conv-a', new Set(), isVisionModel)).not.toContain(name);
+      }
       deactivateLazyGroups('conv-a');
     }
     const loader = registry.definitions(ALL_PERMISSIONS).find((d) => d.function.name === 'load_tool_group');

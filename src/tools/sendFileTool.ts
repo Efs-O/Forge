@@ -2,6 +2,7 @@ import * as fs from 'fs/promises';
 import * as os from 'os';
 import * as path from 'path';
 import type { UserNotificationService } from '../sidebar/UserNotificationService';
+import { codePointLength } from '../util/codePoints';
 import { isPathInside } from '../util/pathContainment';
 import { resolveRealWorkspacePath } from '../util/WorkspacePaths';
 import type { RegisteredTool, ToolHandlerContext } from './ToolRegistry';
@@ -25,8 +26,12 @@ async function resolveFilePath(
   }
 
   try {
+    // `default` is the shared directory browserTools falls back to when a turn
+    // has no conversation, so it is never a per-conversation root. Compared
+    // case-insensitively: the filesystem is case-insensitive on Windows and
+    // macOS, so `Default` is the same directory as `default`.
     if (
-      conversationId === 'default' ||
+      conversationId.toLowerCase() === 'default' ||
       conversationId === '.' ||
       conversationId === '..' ||
       /[\\/]/.test(conversationId)
@@ -43,6 +48,13 @@ async function resolveFilePath(
     ) {
       return undefined;
     }
+    // The conversation directory must be a REAL direct child of the real base,
+    // not merely inside it. Containment alone is not enough: if `conv-a` is a
+    // junction pointing at `conv-b`, the resolved path is still strictly inside
+    // the screenshot base, so a containment check would hand conv-b's files to
+    // conv-a. Equality against the expected child path is what enforces "this
+    // conversation only".
+    if (realScreenshotDir !== screenshotDir) return undefined;
     const candidate = path.isAbsolute(requestedPath)
       ? path.resolve(requestedPath)
       : path.resolve(realScreenshotDir, requestedPath);
@@ -95,7 +107,13 @@ export function makeSendFileTool(deps: SendFileDeps): RegisteredTool {
       if (typeof requestedPath !== 'string' || !requestedPath.trim()) {
         return PATH_REFUSAL;
       }
-      if (caption !== undefined && (typeof caption !== 'string' || caption.length > 1024)) {
+      // Code points, not UTF-16 code units: the schema's maxLength and
+      // Telegram's caption limit are both character counts, and measuring an
+      // emoji-heavy caption in code units would refuse text that fits.
+      if (
+        caption !== undefined &&
+        (typeof caption !== 'string' || codePointLength(caption) > 1024)
+      ) {
         return 'Error: caption must be text no longer than 1024 characters.';
       }
 

@@ -69,6 +69,7 @@ import { makeSendFileTool } from './sendFileTool';
 import { makeWaitTool } from './waitTool';
 import { makeViewVideoTool } from './videoTool';
 import { makeGenerateImageTool } from './imageGeneration/generateImageTool';
+import { makeRenderHtmlToImageTool } from './renderHtmlToImageTool';
 import { SdServerRegistry } from '../backend/sdServerRegistry';
 import { makeImageSearchTool } from './imageSearch/imageSearchTool';
 import { makeBrowserTools } from './browser/browserTools';
@@ -115,6 +116,18 @@ export function registerAllTools(
   // tool wherever that getter is not supplied. `notifications` is a required
   // argument of this signature, so the delivery dependency is always present.
   registry.register(makeSendFileTool({ notifications }));
+  // Registered unconditionally, beside send_file: it needs no config block to
+  // exist. `browser.channel` is read to locate the binary and falls back to
+  // 'chrome', and a missing binary errors at call time naming the fix. It is
+  // deliberately NOT gated by permissions.browser.enabled -- that gate is for
+  // interactive browsing, and this is a render engine (headless, JS disabled,
+  // network blocked, per-call). See docs/plans/SEND_FILE_AND_RENDER_HTML_PLAN.md.
+  registry.register(
+    makeRenderHtmlToImageTool({
+      ...(getConfig ? { getConfig } : {}),
+      notifications,
+    }),
+  );
   // Registered unconditionally: getConfig is optional on this signature, and
   // gating on it would silently drop the tool wherever it is not supplied.
   registry.register(makeViewVideoTool(getConfig ? () => getConfig().video : undefined));

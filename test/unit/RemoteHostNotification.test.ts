@@ -146,6 +146,40 @@ describe('RemoteController.enqueueHostNotification', () => {
   });
 });
 
+// The other half of the delivery seam: `deliverHostImage` must reach the
+// progress channel of the turn that is actually watching, and report 0 when no
+// turn is open. `RemoteHostSubscriptions.test.ts` pins the routing decision
+// (imagePath -> deliverHostImage); this pins what the controller then does with
+// it, which a mocked controller cannot show.
+describe('RemoteController.deliverHostImage', () => {
+  it('delivers to the chat watching the turn', async () => {
+    const { controller, channel, cleanup } = await rig(['chat-1']);
+    try {
+      // Open the turn the way the queue drain does: a progress message whose id
+      // becomes the message the send rides behind.
+      controller['progress'].begin('c1', 'chat-1', 'progress-1');
+      expect(controller.deliverHostImage('c1', 'C:/img/fox.jpg', 'fox')).toBe(1);
+      await vi.waitFor(() =>
+        expect(channel.photos).toEqual([
+          { chatId: 'chat-1', filePath: 'C:/img/fox.jpg', caption: 'fox' },
+        ]),
+      );
+    } finally {
+      await cleanup();
+    }
+  });
+
+  it('reports 0 when no chat is watching the conversation', async () => {
+    const { controller, channel, cleanup } = await rig(['chat-1']);
+    try {
+      expect(controller.deliverHostImage('c1', 'C:/img/fox.jpg', 'fox')).toBe(0);
+      expect(channel.photos).toEqual([]);
+    } finally {
+      await cleanup();
+    }
+  });
+});
+
 // The full chain: broadcast -> durable outbox -> delivery -> armed delete.
 // Each link is tested in isolation elsewhere; this is the glue, where a
 // positional constructor argument could silently land in the wrong slot.

@@ -1,5 +1,53 @@
 # Forge — Recent Changes
 
+## 0.16.77
+
+### Two new media tools: `render_html_to_image` and `send_file`
+
+Anything the model makes as a file could only reach a phone through
+`generate_image`. Two tools close that gap, and both deliver through the same
+already-tested chain (`UserNotificationService` → fan-out → `deliverHostImage`
+→ `sendPhoto`), so no remote plumbing changed.
+
+- **`render_html_to_image`** renders inline HTML (or a workspace `.html` file)
+  to a PNG and queues it for the watching chat. It is a render engine, not a
+  browser: headless, JavaScript disabled on the context, every request aborted
+  via `context.route`, `--host-resolver-rules=MAP * ~NOTFOUND`, and content set
+  with `setContent` — never a `file://` navigation, so it cannot read the local
+  disk. Viewport and PNG size are capped (1–8192 px, 10 MB, 16384 px for
+  `full_page`), the browser is closed on timeout, on abort, and on a launch that
+  loses the race, and the PNG is written atomically because the delivery reads
+  the path later.
+- **`send_file`** delivers any file the model made by other means — Pillow
+  composites, browser screenshots, reports, plan docs. It reaches the workspace
+  and **this conversation's** screenshot directory only, resolved through
+  `fs.realpath` with an equality check against the expected conversation
+  directory, so a junction or symlink at the conversation directory cannot hand
+  another conversation's files over. Empty files and anything over 50 MB are
+  refused; the caption limit is counted in code points, matching Telegram and
+  the schema's `maxLength`.
+- Both share one **per-turn file budget of 5**, owned by
+  `UserNotificationService.deliverFile` and cleared in `resetTurn`, so neither
+  tool can flood a chat. `generate_image` stays deliberately outside that budget:
+  it asks for approval on every call, which is a stronger brake than a burst cap.
+  Results say **Queued**, never Sent — delivery is asynchronous and reach-gated.
+- Render output names are deconflicted. The name is
+  `<second-granularity stamp>-<title slug>.png`, so two renders of the same title
+  inside one second used to land on the same path — and because delivery is
+  queued and reads the file later, the second write could replace what the first
+  upload was about to send. A name is now reserved before the render by an
+  exclusive (`wx`) sidecar file, so the reservation holds across VS Code windows
+  and other processes, and is released on every exit — success, render failure,
+  refused size, abort, or a rejected write. A taken name moves to `-2`, `-3`, …
+- `generate_image`'s description now points text-heavy graphics at
+  `render_html_to_image` (diffusion models garble text), which is the routing
+  table between the two.
+- `sendTelegramPhoto` skips the doomed `sendPhoto` call for a non-image
+  extension and goes straight to `sendDocument`.
+- Tool counts: the native catalog is 68 and the maximally-advertised set is 67.
+  `TOOL_SCHEMA_CHAR_BUDGET` was **not** raised — the new schema measures 53,252
+  chars against the unchanged 55,483 ceiling.
+
 ## 0.16.76
 
 ### Codex sessions now honour `agent_bus.codex_model` / `codex_effort` on resume

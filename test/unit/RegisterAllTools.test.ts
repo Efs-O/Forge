@@ -91,6 +91,7 @@ const EXPECTED_NATIVE_NAMES = [
   'recall',
   'remember',
   'rename_symbol',
+  'render_html_to_image',
   'replace_selection',
   'restore_file',
   'run_terminal',
@@ -208,7 +209,7 @@ describe('registerAllTools canonical coordinator catalog', () => {
     expect(names).not.toContain('web_search');
     expect(names).not.toContain('ask_local_agent');
     expect(names).not.toContain('list_delegation_targets');
-    expect(names).toHaveLength(58);
+    expect(names).toHaveLength(59);
   });
 
   // send_file's only outbound step is api.telegram.org, so a profile with
@@ -225,5 +226,24 @@ describe('registerAllTools canonical coordinator catalog', () => {
       .map((tool) => tool.function.name);
     expect(withFetch).toContain('send_file');
     expect(withoutFetch).not.toContain('send_file');
+  });
+
+  // render_html_to_image is a render engine, not interactive browsing: it must
+  // NOT require the 'browser' permission (that gate belongs to browser_* tools).
+  // It writes a PNG and posts to api.telegram.org, so it needs fetch + write and
+  // a profile with either off must not see it at all.
+  it('advertises render_html_to_image on fetch+write, never on the browser permission', () => {
+    const registry = makeRegistry({ delegation: true });
+    const namesFor = (permissions: ToolPermission[]) =>
+      registry.definitions(new Set(permissions)).map((tool) => tool.function.name);
+    expect(namesFor(['read', 'fetch', 'write'])).toContain('render_html_to_image');
+    expect(namesFor(['read', 'fetch'])).not.toContain('render_html_to_image');
+    expect(namesFor(['read', 'write'])).not.toContain('render_html_to_image');
+    // The 'browser' permission is not what gates it: fetch+browser alone is not
+    // enough, and fetch+write works without it.
+    expect(namesFor(['read', 'fetch', 'browser'])).not.toContain('render_html_to_image');
+    const tool = registry.get('render_html_to_image');
+    expect(tool?.permission).toBe('fetch');
+    expect(tool?.additionalPermissions).toEqual(['write']);
   });
 });

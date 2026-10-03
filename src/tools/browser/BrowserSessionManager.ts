@@ -75,8 +75,14 @@ const INTERACTIVE_SELECTOR = [
  * file lookups). Requiring it at module top would load it on every activation,
  * even for users who never enable the browser; it loads only when a session is
  * launched. Node caches the require, so repeat calls are cheap.
+ *
+ * Exported because `render_html_to_image` needs the same lazy require without
+ * duplicating the 12.8 MB import rule — a second copy is a second place to get
+ * B4 wrong. It does NOT imply the `permissions.browser.enabled` gate: that gate
+ * is for interactive browsing, and the render tool is exempt by owner decision
+ * (docs/plans/SEND_FILE_AND_RENDER_HTML_PLAN.md).
  */
-function getPlaywright(): typeof import('playwright-core') {
+export function getPlaywright(): typeof import('playwright-core') {
   // Deliberate lazy require: playwright-core is external (shipped intact in
   // dist/node_modules) and must not load at module top (12.8 MB on every
   // activation). See B4.
@@ -95,8 +101,13 @@ export function webOriginOf(url: string): string | undefined {
   }
 }
 
-/** True PNG dimensions from the IHDR box (no full decode needed). */
-function pngDimensions(buf: Buffer): { width: number; height: number } {
+/**
+ * True PNG dimensions from the IHDR box (no full decode needed). Exported for
+ * `render_html_to_image`, which reports the size of the PNG it just made and
+ * caps a `full_page` capture by its real height; a second copy of this reader
+ * is a second place to get the IHDR offset wrong.
+ */
+export function pngDimensions(buf: Buffer): { width: number; height: number } {
   if (buf.length < 24) return { width: 0, height: 0 };
   return { width: buf.readUInt32BE(16), height: buf.readUInt32BE(20) };
 }

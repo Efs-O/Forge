@@ -38,8 +38,12 @@ export async function sendTelegramPhoto(
 ): Promise<void> {
   const bytes = await fsp.readFile(filePath);
   const name = path.basename(filePath);
-  const type =
-    MIME_BY_EXTENSION[path.extname(filePath).toLowerCase()] ?? 'application/octet-stream';
+  const ext = path.extname(filePath).toLowerCase();
+  const type = MIME_BY_EXTENSION[ext] ?? 'application/octet-stream';
+  // A non-image extension can never be accepted by sendPhoto, so attempting it
+  // first is a guaranteed 400 and a wasted round trip on the chat queue. The
+  // photo path itself is untouched for real images.
+  const isImage = ext in MIME_BY_EXTENSION;
   const post = async (method: 'sendPhoto' | 'sendDocument'): Promise<Response> => {
     const form = new FormData();
     form.append('chat_id', chatId);
@@ -56,7 +60,7 @@ export async function sendTelegramPhoto(
     });
   };
   await sendQueue.run(chatId, async () => {
-    if (bytes.length <= TELEGRAM_MAX_PHOTO_BYTES) {
+    if (isImage && bytes.length <= TELEGRAM_MAX_PHOTO_BYTES) {
       const photo = await post('sendPhoto');
       if (photo.ok) return;
       if (photo.status !== 400) throw new Error(`Telegram sendPhoto HTTP ${photo.status}.`);

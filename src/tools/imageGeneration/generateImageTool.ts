@@ -52,7 +52,7 @@ export function makeGenerateImageTool(deps: GenerateImageDeps): RegisteredTool {
       function: {
         name: 'generate_image',
         description:
-          'Generate an image from a text prompt with a configured image model and save it into the workspace. Cloud backends ask for approval and bill per image; local backends are free. Write one good prompt rather than retrying variations. The image is opened in the editor and sent to the remote chat watching this turn, if any. It is NOT added to your context: call view_image on the saved path if you need to look at it.',
+          'Generate an image from a text prompt with a configured image model and save it into the workspace. Cloud backends ask for approval and bill per image; local backends are free. Write one good prompt rather than retrying variations. The image is opened in the editor and sent to the remote chat watching this turn, if any. It is NOT added to your context: call view_image on the saved path if you need to look at it. For text-heavy graphics with exact layout (posters, cards, invites, diagrams), use render_html_to_image instead — diffusion models garble text.',
         parameters: {
           type: 'object',
           properties: {
@@ -182,8 +182,12 @@ async function runGenerateImage(
 
   const lines = [
     `${GENERATED_IMAGE_PREFIX}${displayPath(absolute)} (${image.mime}, ${image.bytes.length.toLocaleString()} bytes) with backend ${backend.name}.`,
+    // "Queued", not "Sent": deliverImage returns the number of chats the send
+    // was queued for on the turn's tail. The send runs later and can still
+    // fail, so claiming it was sent overclaims — the same reason send_file and
+    // render_html_to_image say Queued.
     reached > 0
-      ? `Sent to ${reached} remote chat(s).`
+      ? `Queued for ${reached} remote chat(s).`
       : 'No remote chat is watching this turn, so nothing was sent to a phone.',
   ];
   if (paid) lines.push(`This was a paid ${backend.provider} API call, billed per image.`);

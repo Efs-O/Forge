@@ -115,6 +115,54 @@ describe('send_file', () => {
     expect(escaped).toContain('path must be in the workspace');
   });
 
+  it('refuses a conversation directory that is a junction to another conversation', async () => {
+    // "This conversation only" has to survive an alias AT the conversation
+    // directory itself. realpath(conv-a) landing inside the screenshot base is
+    // not enough: containment would then hand conv-b's files to conv-a.
+    const fileB = await screenshotPath('conv-b', 'capture.png');
+    const dirB = path.join(home, '.forge', 'screenshots', 'conv-b');
+    const dirA = path.join(home, '.forge', 'screenshots', 'conv-a');
+    await fs.rm(dirA, { recursive: true, force: true });
+    await fs.symlink(dirB, dirA, 'junction');
+    const { tool } = makeTool();
+
+    const result = await tool.handler({ path: fileB }, context('conv-a'));
+
+    expect(result).toContain('path must be in the workspace');
+  });
+
+  it.each(['Default', 'DEFAULT'])(
+    'refuses the shared screenshot directory when conversationId is %j',
+    async (conversationId) => {
+      // The filesystem is case-insensitive on Windows and macOS, so a
+      // differently-cased spelling is the same shared directory.
+      const file = await screenshotPath(conversationId, 'capture.png');
+      const { tool } = makeTool();
+      const result = await tool.handler({ path: file }, context(conversationId));
+      expect(result).toContain('path must be in the workspace');
+    },
+  );
+
+  it('refuses a workspace child junction that escapes the workspace', async () => {
+    // send_file resolves the workspace arm through the realpath resolver, so a
+    // junction inside the workspace must not become a read of anything it
+    // points at. Pinning this here (not only in the resolver's own tests) means
+    // a future switch to the lexical resolver fails this suite.
+    const outside = path.join(root, '..', 'forge-send-file-outside');
+    await fs.mkdir(outside, { recursive: true });
+    try {
+      await writeFile(path.join(outside, 'stolen.txt'));
+      await fs.symlink(outside, path.join(root, 'link'), 'junction');
+      const { tool } = makeTool();
+
+      const result = await tool.handler({ path: 'link/stolen.txt' }, context('conv-a'));
+
+      expect(result).toContain('path must be in the workspace');
+    } finally {
+      await fs.rm(outside, { recursive: true, force: true });
+    }
+  });
+
   it('refuses paths outside both roots and names the allowed locations', async () => {
     const outside = await fs.mkdtemp(path.join(os.tmpdir(), 'forge-outside-'));
     const file = await writeFile(path.join(outside, 'secret.txt'));
@@ -217,6 +265,28 @@ describe('send_file', () => {
     await tool.handler({ path: 'report.md' }, context('conv-a'));
     expect(deliverFile.mock.calls[0]?.[0]).toMatchObject({ text: 'Review this report.' });
     expect(deliverFile.mock.calls[1]?.[0]).toMatchObject({ text: '' });
+  });
+
+  it('refuses a caption over 1024 code points but accepts one of 1024 emoji', async () => {
+    // The schema's maxLength and Telegram's caption limit both mean characters.
+    // Measuring an emoji-heavy caption in UTF-16 code units would refuse text
+    // that fits, and the sender's trim could cut a surrogate pair.
+    await writeFile(path.join(root, 'report.md'));
+    const deliverFile = vi.fn(async () => ({ kind: 'queued' as const, chats: 1 }));
+    const { tool } = makeTool(deliverFile);
+
+    const fits = '🖼'.repeat(1024);
+    expect(fits.length).toBe(2048);
+    expect(await tool.handler({ path: 'report.md', caption: fits }, context('conv-a'))).toContain(
+      'Queued',
+    );
+
+    const tooLong = await tool.handler(
+      { path: 'report.md', caption: '🖼'.repeat(1025) },
+      context('conv-a'),
+    );
+    expect(tooLong).toContain('caption must be text no longer than 1024 characters');
+    expect(deliverFile).toHaveBeenCalledTimes(1);
   });
 
   it('includes the safety routing text in the definition', () => {

@@ -18,11 +18,17 @@ export const DesktopPermissionSchema = z
   })
   .optional();
 
+/** The channel used when `browser:` is absent. Exported so a tool that must
+ *  fall back without a config getter reads the same value the schema defaults
+ *  to, rather than repeating the literal (CLAUDE.md: prefer explicit config
+ *  over hidden fallback behaviour). */
+export const DEFAULT_BROWSER_CHANNEL = 'chrome' as const;
+
 /** Non-permission browser knobs. `channel` is used as configured (no silent
  *  fallback); `headless` is a config value (tests), never a model arg. */
 export const BrowserConfigSchema = z
   .object({
-    channel: z.enum(['chrome', 'msedge', 'chromium']).default('chrome'),
+    channel: z.enum(['chrome', 'msedge', 'chromium']).default(DEFAULT_BROWSER_CHANNEL),
     headless: z.boolean().default(false),
     allowed_origins: z.array(z.string()).optional(),
   })

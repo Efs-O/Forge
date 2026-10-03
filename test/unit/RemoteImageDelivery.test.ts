@@ -157,16 +157,17 @@ describe('send_file through the remote delivery chain', () => {
     // The seam this test exists for: the file send goes out AFTER the narration
     // that preceded it, because both ride the same per-turn tail.
     expect(order).toEqual(['text:Sending the plan now.', 'photo:plan.md:the plan doc']);
-    // The sink got a path that names the real file. Full-string comparison is
-    // deliberately avoided: Windows hands back either the long-name or the 8.3
-    // short-name spelling of a temp path depending on the call, so pinning one
-    // would make this test machine-dependent rather than about the seam.
+    // Path identity, not just a name that happens to match: basename plus
+    // existence would also pass if the sink had picked a DIFFERENT existing
+    // plan.md. Windows hands back either the long-name or the 8.3 short-name
+    // spelling of a temp path depending on the call, so the comparison is done
+    // on realpaths rather than on the raw strings.
     expect(channel.photos).toHaveLength(1);
     const sent = channel.photos[0]!;
     expect(sent.chatId).toBe('chat-a');
     expect(sent.caption).toBe('the plan doc');
-    expect(path.basename(sent.filePath)).toBe('plan.md');
-    expect(fs.existsSync(sent.filePath)).toBe(true);
+    expect(fs.realpathSync.native(sent.filePath)).toBe(fs.realpathSync.native(file));
+    expect(fs.readFileSync(sent.filePath, 'utf8')).toBe('# plan\n');
   });
 });
 
@@ -210,6 +211,19 @@ describe('sendTelegramPhoto', () => {
     const { methods, fetchImpl } = recordingFetch({});
     const big = imageFile(TELEGRAM_MAX_PHOTO_BYTES + 1);
     await sendTelegramPhoto(fetchImpl, 't', new TelegramChatQueue(), '1', big, 'fox');
+    expect(methods).toEqual(['sendDocument']);
+  });
+
+  it('goes straight to a document for a non-image extension, never calling sendPhoto', async () => {
+    // sendPhoto cannot accept a .md/.pdf/.txt, so attempting it first is a
+    // guaranteed 400 plus a wasted round trip on the per-chat send queue. The
+    // photo path for real images is unchanged (see the .jpg tests above).
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'forge-tg-photo-'));
+    dirs.push(dir);
+    const file = path.join(dir, 'plan.md');
+    fs.writeFileSync(file, '# plan\n');
+    const { methods, fetchImpl } = recordingFetch({ sendPhoto: 400 });
+    await sendTelegramPhoto(fetchImpl, 't', new TelegramChatQueue(), '1', file, 'plan');
     expect(methods).toEqual(['sendDocument']);
   });
 
