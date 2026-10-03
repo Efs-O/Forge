@@ -213,7 +213,7 @@ describe('image_search tool', () => {
   it('uploads the attachment, searches, and returns trimmed text', async () => {
     const { tool, upload, search, readFile } = makeTool();
     const result = await tool.handler(
-      { type: 'exact_matches' },
+      { engine: 'google_lens', type: 'exact_matches' },
       { beforeMutate: () => undefined, conversationMessages: messages },
     );
     expect(readFile).toHaveBeenCalledWith('/store/conv/new.jpg');
@@ -234,19 +234,19 @@ describe('image_search tool', () => {
   it('reuses an upload inside 50 minutes and re-uploads after', async () => {
     const { tool, upload, advance } = makeTool();
     const context = { beforeMutate: () => undefined, conversationMessages: messages };
-    await tool.handler({}, context);
+    await tool.handler({ engine: 'google_lens' }, context);
     advance(49 * 60 * 1000);
-    await tool.handler({ type: 'visual_matches' }, context);
+    await tool.handler({ engine: 'google_lens', type: 'visual_matches' }, context);
     expect(upload).toHaveBeenCalledTimes(1);
     advance(2 * 60 * 1000);
-    await tool.handler({}, context);
+    await tool.handler({ engine: 'google_lens' }, context);
     expect(upload).toHaveBeenCalledTimes(2);
   });
 
   it('never uploads a public URL', async () => {
     const { tool, upload, search } = makeTool();
     await tool.handler(
-      { image_url: 'https://example.com/a.jpg' },
+      { engine: 'google_lens', image_url: 'https://example.com/a.jpg' },
       { beforeMutate: () => undefined },
     );
     expect(upload).not.toHaveBeenCalled();
@@ -370,7 +370,7 @@ describe('thumbnails', () => {
 
   it('saves the picked thumbnails for the sidebar and says when no phone watches', async () => {
     const { tool, download } = makeTool();
-    const result = String(await tool.handler({}, context));
+    const result = String(await tool.handler({ engine: 'google_lens' }, context));
     expect(download).toHaveBeenCalledWith(
       [
         expect.objectContaining({
@@ -450,6 +450,16 @@ describe('thumbnails', () => {
 
 describe('yandex engine', () => {
   const context = { beforeMutate: () => undefined, conversationMessages: messages };
+
+  it('defaults to yandex, and Lens stays reachable only when asked for', async () => {
+    const { tool, search, yandex } = makeTool();
+    const result = String(await tool.handler({}, context));
+    expect(search).not.toHaveBeenCalled();
+    expect(yandex).toHaveBeenCalledWith(
+      expect.objectContaining({ imageUrl: 'https://litter.catbox.moe/abc.jpg', apiKey: 'serp-key' }),
+    );
+    expect(result.split('\n')[0]).toBe('Yandex identifies it as: eiffel tower paris; torre eiffel');
+  });
 
   it('routes engine yandex to Yandex and leads with tags and the largest copies', async () => {
     const { tool, search, yandex, download } = makeTool();

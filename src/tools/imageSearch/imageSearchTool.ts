@@ -81,7 +81,7 @@ export function makeImageSearchTool(deps: ImageSearchDeps): RegisteredTool {
               type: 'string',
               enum: [...IMAGE_SEARCH_ENGINES],
               description:
-                'google_lens (default): cleanest matches, 20-60 s. yandex: ~5 s, lists the largest copies of the image (best lead to an original), strong on faces and non-Western sites, noisier pages.',
+                'yandex (default, ~5 s): pages carrying the image, the largest copies of it, faces, non-Western sites; noisier titles. google_lens (20-60 s, and sometimes returns nothing): use it when you need WHAT the image shows — identification, knowledge, products — or when yandex returns no matches.',
             },
             type: {
               type: 'string',
@@ -119,7 +119,10 @@ async function runImageSearch(
   context: ToolHandlerContext | undefined,
 ): Promise<string> {
   if (!config) throw new Error('image_search: no image_search block in config.yaml.');
-  const engine = parseEnum(args['engine'], IMAGE_SEARCH_ENGINES, 'google_lens', 'engine');
+  // Yandex is the default engine: it answers in ~5 s against Lens's 18-52 s, and
+  // it kept answering on 2026-10-03 when Lens returned HTTP 200 with zero
+  // matches. Lens stays reachable for identification and product queries.
+  const engine = parseEnum(args['engine'], IMAGE_SEARCH_ENGINES, 'yandex', 'engine');
   const type = parseEnum(args['type'], LENS_SEARCH_TYPES, 'all', 'type');
   if (engine === 'yandex' && args['type'] !== undefined) {
     throw new Error('image_search: type applies to google_lens only. Drop type for engine yandex.');

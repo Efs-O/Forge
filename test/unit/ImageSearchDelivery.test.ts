@@ -132,7 +132,10 @@ function harness(options: HarnessOptions = {}) {
   });
   const run = () =>
     tool.handler(
-      { image_url: 'https://example.com/input.jpg' },
+      // Pinned to Lens because this harness stubs only `searchLens`; the tool's
+      // default engine is yandex, and an unstubbed engine here would reach the
+      // network. Delivery budgeting is engine-independent.
+      { engine: 'google_lens', image_url: 'https://example.com/input.jpg' },
       { beforeMutate: () => undefined, abortSignal: controller.signal, conversationId },
     );
   return {
