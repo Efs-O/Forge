@@ -1,7 +1,9 @@
-# Commit audit — 2026-10-03 (Europe/Athens), branch `master`
+# Commit audit — 2026-10-03 (Europe/Athens), branch `main`
 
 Baseline: `7da37b5` (2026-10-02 19:29) → `be4152c` (HEAD, 2026-10-03 15:13).
 16 commits in range. Times from `git log --date=format-local` with `TZ=Europe/Athens`.
+(The header first said `master`; the repository's branch is `main` — verified with
+`git branch --show-current` after the fixes landed.)
 Working tree at audit time: 21 modified tracked files (an unrelated in-progress
 external-server feature) + 4 untracked paths. Those uncommitted changes are
 **outside** the commit-audit scope and are called out in §5.
@@ -263,3 +265,17 @@ Codex), and the `exec_command` bare-`rg` resolution (separate planned feature).
 | `npm run ci` | exit 0 — `type-check`, `lint` (one prettier error in the `dirTools.ts` import, fixed with `--fix`), `npm test` 390 files / 4011 tests passed (40 skipped), `build`, `check:bundle` |
 | `git diff --check` | clean |
 | Codex round 2 | F1, F2, F3, F5, F7, F8 correct; F6 the recorded deliberate decision; F4 needed one more doc correction (worker-vs-main-agent scope in the glob bullet and the smoke case), applied and re-confirmed YES |
+| `npm run ci` at `3c093fc` alone (detached checkout) | exit 0 — 390 files / 4005 tests, build, bundle check. Proves the audit commit is green without the concurrent feature, i.e. bisectable |
+| `npm run ci` at `4601c6d` (HEAD, both commits) | exit 0 — 390 files / 4011 tests |
+
+## 9. Where the fixes landed
+
+- `3c093fc` — the audit fixes (F1, F2, F3, F4, F5, F7, F8) plus this report.
+- `4601c6d` — the concurrent unload/`stop_command` feature that was already in
+  the working tree, committed separately at the user's instruction. `F2`'s
+  hunks in the two shared files were staged with `git apply --cached` from a
+  generated patch, so neither commit carries the other's work.
+- Not committed: `docs/plans/COMPACTION_MEMORY_SEARCH_RECOVERY_PLAN.md`,
+  `docs/reports/ASK_USER_WEBVIEW_STATE_LOSS_2026-10-03.md` and
+  `docs/reports/COMPACTION_HANDOFF_COMPARISON_2026-10-03.md` — other work, and
+  `docs/` is gitignored (`docs/*`) so they are untracked unless force-added.
