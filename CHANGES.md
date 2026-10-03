@@ -1,5 +1,19 @@
 # Forge — Recent Changes
 
+## 0.16.81
+
+### Compaction handoff, memory cleanup, and bundled ripgrep
+
+- Compaction now sizes its source and replacement from the reported context use,
+  preserves user and assistant findings across long tool output, and refuses a
+  handoff that cannot fit without dropping required state. The summarizer's
+  visible output and configured thinking reserve are budgeted separately.
+- `forget` removes one workspace memory through the normal delete approval.
+  Concurrent memory updates are serialized; stale index entries and forgotten
+  keys are hidden from subsequent compaction requests.
+- Bare `rg` and `rg.exe` in `exec_command` resolve to VS Code's bundled ripgrep.
+  `search_code` remains the scoped repository search tool.
+
 ## 0.16.80
 
 ### Explicit unload stops a configured external server

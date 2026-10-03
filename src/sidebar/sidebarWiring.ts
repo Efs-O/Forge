@@ -38,6 +38,8 @@ import { SendPipeline } from './SendPipeline';
 import { opResetReportedContext } from './ConversationOps';
 import { snapshotRepoState } from './repoSnapshot';
 import { listMemoryKeys } from '../tools/memoryTools';
+import { resolveRequestModel } from '../config/ConfigResolver';
+import { reasoningReserve } from '../util/contextBudget';
 import { RequestChainLifecycle } from './RequestChainLifecycle';
 import { MidTurnInbox } from '../agent/MidTurnInbox';
 import { MidTurnTellDrain } from '../agent/MidTurnTellDrain';
@@ -216,8 +218,11 @@ export function wireSidebar(host: SidebarHost, parts: SidebarParts): SidebarRunt
     logCompaction: (conv, entry) => send.logCompaction(conv.id, entry),
     compactionMetrics: (conv) => {
       const { max } = budget.snapshot(conv);
-      const at = host.getConfig().auto_compact?.at;
-      return { max, ...(at !== undefined ? { threshold: at } : {}) };
+      const config = host.getConfig();
+      const at = config.auto_compact?.at;
+      const modelName = conv.active_model ?? config.active_model;
+      const reserve = modelName ? reasoningReserve(resolveRequestModel(config, modelName)) : 0;
+      return { max, reasoningReserve: reserve, ...(at !== undefined ? { threshold: at } : {}) };
     },
     runPromptToMarkdown: (text, conversationId, options) =>
       agentLoop.runPromptToMarkdown(text, conversationId, options),
@@ -334,6 +339,7 @@ export function wireSidebar(host: SidebarHost, parts: SidebarParts): SidebarRunt
   };
 
   const tabs = new ConversationTabs({
+    liveMemoryKeys: () => listMemoryKeys(workspaceState),
     isStreaming: () => agentLoop.streaming,
     getConfig: host.getConfig,
     getSidebar: host.getSidebar,

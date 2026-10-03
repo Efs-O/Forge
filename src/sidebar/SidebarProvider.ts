@@ -1,13 +1,4 @@
-/*
- * The sidebar's VS Code surface: webview lifecycle, the public API extension.ts
- * calls, and the `post*`/`persist` helpers every collaborator borrows.
- * Collaborators are built elsewhere — `wireSidebar` (turn, compaction, tabs,
- * send) and `createSidebarHostFacade` (the remote/extension seam); construction
- * wiring added here is what pushed this file past 500 before. What stays is
- * deliberate: the helpers close over `sidebar`, `config`, `pool`, `agentLoop`,
- * `workspaceRoot` and `budget`, and `handleMessage`'s actions literal over eight
- * fields — extracting either threads a context object purely to shed lines.
- */
+/** VS Code sidebar surface; turn and tab collaborators are built in wireSidebar. */
 import * as vscode from 'vscode';
 import type { IBackendPool } from '../backend/BackendPool';
 import type { ForgeConfig } from '../config/types';
@@ -57,6 +48,8 @@ import type { MidTurnTellDrain } from '../agent/MidTurnTellDrain';
 import { HiddenChatAlerts } from './hiddenChatAlerts';
 import type { SidebarPromptRouter } from './backgroundExitNotice';
 import { attachmentsRootUri, openAttachment } from './attachmentAccess';
+import { listMemoryKeys } from '../tools/memoryTools';
+import { retainSessionMemoryKeys } from './memorySnapshotLifecycle';
 
 export type { SidebarProviderEvents };
 /** Residency refresh while visible: cheap, but fast enough to avoid a stale dot. */
@@ -122,6 +115,7 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
     private readonly historyArchive?: HistoryArchive,
   ) {
     this.sidebar = loadSidebarSession(workspaceState, historyArchive);
+    retainSessionMemoryKeys(this.sidebar, listMemoryKeys(workspaceState));
     const runtime = wireSidebar(
       {
         getConfig: () => this.config,
@@ -394,6 +388,14 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
       ...this.sidebar.conversations.map((conversation) => conversation.id),
       ...this.sidebar.history.map((conversation) => conversation.id),
     ];
+  }
+
+  /** A forgotten workspace memory must also leave already-saved compaction snapshots. */
+  forgetMemoryKey(_key: string): void {
+    if (retainSessionMemoryKeys(this.sidebar, listMemoryKeys(this.workspaceState))) {
+      this.persistSession();
+      this.postSessionSync();
+    }
   }
 
   private persistSession(): void {

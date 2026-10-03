@@ -89,14 +89,14 @@ export function makeExecCommandTool(
       function: {
         name: 'exec_command',
         description:
-          'Run an executable directly without a shell; pass args separately. npm/npx work cross-platform — `npm test` / `npm run <script>` work directly (no shell needed). Shell builtins, operators, and dangerous commands are refused. Shell scripts require permissions.exec.shell_scripts in config.yaml. Use the output options instead of pipes. Long jobs: background=true + monitor_execution or notify_on_exit.',
+          'Run an executable directly without a shell; pass args separately. Bare rg uses VS Code bundled ripgrep; search_code is the scoped default for repository searches. npm/npx work cross-platform — `npm test` / `npm run <script>` work directly (no shell needed). Shell builtins, operators, and dangerous commands are refused. Shell scripts require permissions.exec.shell_scripts in config.yaml. Use the output options instead of pipes. Long jobs: background=true + monitor_execution or notify_on_exit.',
         parameters: {
           type: 'object',
           properties: {
             command: {
               type: 'string',
               description:
-                'Executable name or path. Bare npm/npx are resolved on Windows; bare bash is Git Bash, not WSL.',
+                'Executable name or path. Bare rg/rg.exe use VS Code bundled ripgrep; bare npm/npx are resolved on Windows; bare bash is Git Bash, not WSL.',
             },
             args: { type: 'array', items: { type: 'string' }, description: 'Arguments array.' },
             cwd: { type: 'string', description: 'Working directory. Optional.' },
@@ -213,7 +213,13 @@ export function makeExecCommandTool(
       // the node.exe it resolves to. Only the spawn sees the translation.
       let spawned;
       try {
-        spawned = resolveExecInvocation(command, cmdArgs);
+        spawned = resolveExecInvocation(
+          command,
+          cmdArgs,
+          process.platform,
+          undefined,
+          vscode.env.appRoot,
+        );
       } catch (error) {
         throw new ExecCommandError(
           'missing_executable',

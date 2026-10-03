@@ -66,6 +66,8 @@ export interface PromptRunOptions {
   /** Output room ON TOP of the model's reasoning reserve. Thinking spends from
    *  the same budget, so a bare 4096 can be exhausted before any prose. */
   outputTokens?: number;
+  /** Honor outputTokens even when model sampling.max_tokens is larger. */
+  strictOutputTokens?: boolean;
   /** Strip thinking channels regardless of `model.think`. A `<think>` block
    *  arriving as `content` would otherwise be stored verbatim. */
   alwaysStripThinking?: boolean;
@@ -117,9 +119,13 @@ function replacementPrompt(ctx: PromptRunContext, options: PromptRunOptions): st
  * auto-compaction retried it every round. A thinking model with no reserve gets
  * its own configured output cap instead, when that is larger.
  */
-function outputBudget(model: ReturnType<typeof resolveRequestModel>, outputTokens: number): number {
+function outputBudget(
+  model: ReturnType<typeof resolveRequestModel>,
+  outputTokens: number,
+  strict = false,
+): number {
   const reserve = reasoningReserve(model);
-  if (reserve > 0 || model.think === false) return reserve + outputTokens;
+  if (strict || reserve > 0 || model.think === false) return reserve + outputTokens;
   return Math.max(model.sampling?.max_tokens ?? 0, outputTokens);
 }
 
@@ -197,7 +203,13 @@ export async function runPromptToMarkdown(
         // its thinking out of max_tokens, so a bare 2048 leaves a thinking model
         // nothing to answer with.
         ...(options.outputTokens !== undefined
-          ? { max_tokens: outputBudget(selectedModel, options.outputTokens) }
+          ? {
+              max_tokens: outputBudget(
+                selectedModel,
+                options.outputTokens,
+                options.strictOutputTokens,
+              ),
+            }
           : {}),
         ...(options.contactTools && options.dispatchContactTool
           ? { tools: [...options.contactTools] }

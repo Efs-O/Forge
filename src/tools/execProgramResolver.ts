@@ -1,6 +1,7 @@
 import * as child_process from 'child_process';
 import * as fs from 'fs';
 import * as path from 'path';
+import { resolveRipgrep } from './RipgrepResolver';
 
 /**
  * Single owner of "what does `exec_command` actually spawn". Commands run with
@@ -157,7 +158,6 @@ const UNAVAILABLE_PROGRAM_ALTERNATIVES: ReadonlyMap<string, string> = new Map([
   ['grep', SEARCH_ALTERNATIVE],
   ['egrep', SEARCH_ALTERNATIVE],
   ['fgrep', SEARCH_ALTERNATIVE],
-  ['rg', SEARCH_ALTERNATIVE],
   ['ripgrep', SEARCH_ALTERNATIVE],
   ['ack', SEARCH_ALTERNATIVE],
   // `find` and `findstr` are deliberately absent: both are real programs on
@@ -273,7 +273,21 @@ export function resolveExecInvocation(
   args: string[],
   platform: NodeJS.Platform = process.platform,
   probe?: RunnerProbe,
+  appRoot?: string,
 ): ExecInvocation {
+  if (command.toLowerCase() === 'rg' || command.toLowerCase() === 'rg.exe') {
+    const resolution = resolveRipgrep(
+      appRoot,
+      (candidate) => (probe ?? SYSTEM_PROBE).exists(candidate),
+      platform,
+    );
+    if (resolution.command === 'rg') {
+      throw new Error(
+        'rg: VS Code bundled ripgrep was not found; search_code is also unavailable until the bundled executable is installed.',
+      );
+    }
+    return { command: resolution.command, args };
+  }
   if (platform === 'win32' && isBareBash(command)) {
     return { command: resolveGitBash(probe ?? SYSTEM_PROBE), args };
   }

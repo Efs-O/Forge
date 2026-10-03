@@ -9,12 +9,8 @@
 import * as vscode from 'vscode';
 import type { HostToWebview } from './messageBridge';
 import type { ConversationRuntime } from './sessionTypes';
-import {
-  buildSummaryPrompt,
-  capSummary,
-  isUsableSummary,
-  SUMMARY_OUTPUT_TOKENS,
-} from './compactionPrompt';
+import { buildSummaryPrompt, capSummary, isUsableSummary } from './compactionPrompt';
+import { COMPACTION_CHARS_PER_TOKEN, compactionBudget, fitSummaryPrompt } from './compactionBudget';
 import {
   collectRecordedActions,
   mergeRecordedActions,
@@ -30,7 +26,7 @@ import { collectLastReply, toolActivityFollowedLastReply } from './compactionLas
 import { selectCompactionSplit } from './compactionSplit';
 import type { CompactionLogEntry } from './SessionLogger';
 import { reportedContextTokens } from '../util/contextBudget';
-import { boundMemoryKeys, compactionWindowChars } from './compactionWindow';
+import { boundMemoryKeys, compactionWindowChars, messageCostChars } from './compactionWindow';
 import type { CompactionState } from './compactionTypes';
 import { deactivateLazyGroups, lazyGroupSummaryNote } from '../tools/lazyToolGroups';
 import { resetContextTrimState } from '../agent/toolResultContext';
@@ -54,7 +50,11 @@ export interface CompactionDeps {
    */
   logCompaction?: (conv: ConversationRuntime, entry: CompactionLogEntry) => void;
   /** Per-slot window and the configured auto-compaction threshold, for the log row. */
-  compactionMetrics?: (conv: ConversationRuntime) => { max: number; threshold?: number };
+  compactionMetrics?: (conv: ConversationRuntime) => {
+    max: number;
+    threshold?: number;
+    reasoningReserve?: number;
+  };
   runPromptToMarkdown: (
     text: string,
     conversationId?: string,
@@ -98,41 +98,15 @@ export interface CompactionEvent {
 
 export type CompactionOutcome = 'compacted' | 'skipped' | 'failed';
 
-/**
- * Prompt used to continue the active task after a compaction. Every noun must
- * name something already in the model's window, in that window's own words:
- * "Read the continuation checkpoint" sent agents hunting for a file, because
- * the phrase lived only in `buildSummaryPrompt` (a request they never see)
- * while what they DO see says "Conversation summary" — and "checkpoint" is
- * Forge's Keep/Undo system while "Read" is the `read_file` verb.
- *
- * Third instance, 2026-08-22: "Continue the task from its Next section" pointed
- * at a section `buildSummaryPrompt` had told the model to omit when empty. The
- * task was finished, the summary correctly carried no Next, and the resumed
- * agent burned a turn hunting for it. `buildSummaryPrompt` now always emits
- * Next, and this prompt no longer assumes what that section says.
- *
- * Fourth instance, 2026-08-27: increasingly forceful resume wording still
- * drifted because the missing state was structural, not instructional. The
- * replacement context now carries user intent and host facts independently,
- * so this is deliberately only a neutral protocol trigger. Chat Completions
- * still needs a user-role input to begin another response; no task state is
- * entrusted to that input.
- */
+/** Neutral user-role trigger. Task state lives in the replacement context;
+ * references to a "checkpoint" or a possibly absent section caused prior
+ * agents to hunt for nonexistent state after compaction. */
 export const RESUME_PROMPT = 'Continue the active task from the compacted context.';
 
 /** Consecutive auto-resumes allowed without an intervening user prompt. */
 export const MAX_CONSECUTIVE_AUTO_CONTINUES = 2;
 
-/**
- * Below this the "did it shrink?" check does not apply.
- *
- * A short conversation can legitimately compact into something larger than it
- * was — a 600-word structured summary of four messages — and refusing that
- * would break an explicit `/compact` on a small chat. The check exists to stop
- * a compact/resume loop, and a loop needs a window near the context limit, so a
- * window smaller than one summarization source is out of its scope.
- */
+/** Small manual compactions may grow; only a substantial window risks a loop. */
 export const MIN_WINDOW_CHARS_FOR_FIT_GUARD = 24000;
 
 /** The one wording for a refused compaction, whichever check refused it. */
@@ -229,7 +203,17 @@ async function compactOnce(
   // must not re-summarize turns already folded into the previous summary.
   const from = conv.compaction ? Math.min(conv.compaction.fromIndex, conv.messages.length) : 0;
   const pending = conv.messages.slice(from);
-  const split = selectCompactionSplit(pending);
+  const beforeChars = compactionWindowChars(conv.messages, conv.compaction);
+  const metrics = deps.compactionMetrics?.(conv);
+  const modelMax = metrics?.max ?? 0;
+  const thinkingTokens = metrics?.reasoningReserve ?? 0;
+  const budget = compactionBudget(
+    reportedContextTokens(conv),
+    beforeChars,
+    modelMax,
+    thinkingTokens,
+  );
+  const split = selectCompactionSplit(pending, budget.tailMaxChars);
   if (!split) {
     if (!options.auto) {
       void vscode.window.showInformationMessage(
@@ -290,9 +274,6 @@ async function compactOnce(
     ...(lastReply && lastReplyFollowedByTools ? { lastReplyFollowedByTools } : {}),
   });
 
-  // Read before conv.compaction is replaced below.
-  const beforeChars = compactionWindowChars(conv.messages, conv.compaction);
-
   deps.post({ type: 'notice', message: 'Compacting conversation…', conversationId: conv.id });
   // The webview treats the conversation as streaming between these two, so a
   // prompt typed during the summarization is queued and flushed after it rather
@@ -309,6 +290,7 @@ async function compactOnce(
     ...(remoteOrigin ? { remoteOrigin } : {}),
   });
   let summary = '';
+  let summaryPrompt = '';
   let repoState = '';
   let outcome: CompactionOutcome = 'failed';
   try {
@@ -326,15 +308,17 @@ async function compactOnce(
           log.info(`[compact] repo snapshot unavailable — ${(err as Error).message}`);
         }
       }
-      // The fit check, run against the cheapest candidate that could exist: an
-      // EMPTY summary. A summary only adds characters, so if even a zero-length
-      // one does not shrink the window, no summary will, and the check after
-      // the request is certain to refuse. Deciding it here costs one snapshot
-      // that has already been taken; deciding it there pays for a summarization
-      // whose result is thrown away, on every threshold crossing, for as long
-      // as the window stays stuck. It sits after the repo snapshot because
-      // repoState is part of what the candidate carries.
+      // If even an empty summary cannot shrink this window, skip the model call.
       const floorChars = compactionWindowChars(conv.messages, candidateWithSummary(''));
+      const tailChars = pending
+        .slice(split.tailStart)
+        .reduce((sum, message) => sum + messageCostChars(message), 0);
+      const hostChars = floorChars - tailChars;
+      if (hostChars > budget.hostMaxChars) {
+        throw new Error(
+          `Host-preserved compaction facts need an estimated ${hostChars} characters, above the ${budget.hostMaxChars}-character budget; previous context kept.`,
+        );
+      }
       if (beforeChars >= MIN_WINDOW_CHARS_FOR_FIT_GUARD && floorChars >= beforeChars) {
         log.info(
           `[compact] no summary could shrink this window (~${floorChars} vs ~${beforeChars} chars before the summary) — not summarizing`,
@@ -350,34 +334,49 @@ async function compactOnce(
       // Supply the deterministic ledger to the summarizer as well as pinning it
       // below. A long tool dump used to hide an already-completed download from
       // the model that wrote the summary, leaving only an earlier "next" step.
-      summary = await deps.runPromptToMarkdown(
-        buildSummaryPrompt(
-          conv.compaction?.summary,
-          split.summarize,
-          recordedActionsText + repoState,
-          userContext,
-          // The agent's own plan, which the summarization request did not carry
-          // before. Supplied as intent, not evidence — see planSnapshotBlock.
-          conv.plan?.items,
-        ),
-        conv.id,
-        {
-          // The conversation's OWN model, not the picker's global default: a
-          // pinned conversation was being summarized by whatever was last
-          // selected elsewhere.
-          ...(conv.active_model ? { modelName: conv.active_model } : {}),
-          systemPromptTemplate: 'summarize',
-          outputTokens: SUMMARY_OUTPUT_TOKENS,
-          alwaysStripThinking: true,
-        },
+      const fit = fitSummaryPrompt(
+        budget,
+        modelMax,
+        (sourceMaxChars) =>
+          buildSummaryPrompt(
+            conv.compaction?.summary,
+            split.summarize,
+            recordedActionsText + repoState,
+            userContext,
+            // The agent's own plan, which the summarization request did not carry
+            // before. Supplied as intent, not evidence — see planSnapshotBlock.
+            conv.plan?.items,
+            { ...budget, sourceMaxChars },
+          ),
+        thinkingTokens,
       );
+      summaryPrompt = fit.prompt;
+      log.info(
+        `[compact] budget P=${budget.policyTokens} (${budget.estimated ? 'estimated' : 'reported'}), source~${fit.estimatedTokens} tokens, host~${Math.ceil(hostChars / COMPACTION_CHARS_PER_TOKEN)}, tail~${Math.ceil(tailChars / COMPACTION_CHARS_PER_TOKEN)}, output=${budget.summaryTargetTokens}`,
+      );
+      summary = await deps.runPromptToMarkdown(summaryPrompt, conv.id, {
+        // The conversation's OWN model, not the picker's global default: a
+        // pinned conversation was being summarized by whatever was last
+        // selected elsewhere.
+        ...(conv.active_model ? { modelName: conv.active_model } : {}),
+        systemPromptTemplate: 'summarize',
+        outputTokens: budget.summaryTargetTokens,
+        strictOutputTokens: true,
+        alwaysStripThinking: true,
+      });
     } finally {
       release();
       if (!midTurn) deps.post({ type: 'done', finishReason: 'stop', conversationId: conv.id });
     }
 
     const groupsNote = lazyGroupSummaryNote(conversationId);
-    const trimmed = capSummary(groupsNote ? `${summary.trim()}\n\n${groupsNote}` : summary);
+    const proposed = groupsNote ? `${summary.trim()}\n\n${groupsNote}` : summary.trim();
+    if (proposed.length > budget.summaryCeilingChars) {
+      throw new Error(
+        `Summary exceeds the estimated ${budget.summaryCeilingChars}-character ceiling; previous context kept.`,
+      );
+    }
+    const trimmed = capSummary(proposed, budget.summaryCeilingChars);
     if (!isUsableSummary(trimmed)) {
       log.info(`[compact] rejected unusable summary (${trimmed.length} chars)`);
       void vscode.window.showWarningMessage(
@@ -400,16 +399,13 @@ async function compactOnce(
 
     // Does the candidate actually shrink the window?
     //
-    // A summary plus a preserved state block plus a retained tail can add up to
-    // more than it replaced — a long tail of large tool arguments is the usual
-    // shape. Committing that and then auto-resuming is how a compact/resume
-    // loop starts: each pass costs a model call, replaces good state with a
-    // paraphrase of it, and leaves the window no smaller. Estimated in
-    // characters, which is enough to tell a reduction from an increase.
-    //
-    // The floor check before the request rules out the hopeless case; this one
-    // catches a summary that came back long enough to undo a real reduction.
+    // The returned summary can be long enough to undo the estimated reduction.
     const afterChars = compactionWindowChars(conv.messages, candidate);
+    if (afterChars > budget.replacementMaxChars) {
+      throw new Error(
+        `Replacement context needs an estimated ${afterChars} characters, above its ${budget.replacementMaxChars}-character budget; previous context kept.`,
+      );
+    }
     if (beforeChars >= MIN_WINDOW_CHARS_FOR_FIT_GUARD && afterChars >= beforeChars) {
       log.info(
         `[compact] candidate window is not smaller (~${afterChars} vs ~${beforeChars} chars) — keeping the previous state`,
@@ -421,6 +417,9 @@ async function compactOnce(
       });
       return 'failed';
     }
+    log.info(
+      `[compact] replacement~${Math.ceil(afterChars / COMPACTION_CHARS_PER_TOKEN)} estimated tokens, summary=${trimmed.length} chars, omitted-source=${summaryPrompt.includes('omitted for space')}`,
+    );
 
     // Non-destructive: recorded only once the candidate is known to be better.
     conv.compaction = candidate;

@@ -74,6 +74,8 @@ export interface RegisteredTool {
   additionalPermissionsForArgs?: (args: Record<string, unknown>) => readonly ToolPermission[];
   handler: ToolHandler;
   mutation?: ToolMutation;
+  /** Mutates VS Code workspace state, which has no file path for a checkpoint. */
+  workspaceStateMutation?: boolean;
   approval?: (args: Record<string, unknown>) => ToolApprovalMetadata | undefined;
   /**
    * The handler's inputs and effects are structurally bounded enough to run
@@ -174,8 +176,15 @@ export class ToolRegistry {
     if (this.tools.has(name)) {
       throw new Error(`ToolRegistry: duplicate tool name "${name}"`);
     }
-    if ((tool.permission === 'write' || tool.permission === 'delete') && !tool.mutation) {
+    if (
+      (tool.permission === 'write' || tool.permission === 'delete') &&
+      !tool.mutation &&
+      !tool.workspaceStateMutation
+    ) {
       throw new Error(`ToolRegistry: mutating tool "${name}" must declare mutation metadata`);
+    }
+    if (tool.mutation && tool.workspaceStateMutation) {
+      throw new Error(`ToolRegistry: tool "${name}" cannot mix file and workspace-state mutations`);
     }
     this.tools.set(name, tool);
     recordNativeLazyTool(name);

@@ -161,6 +161,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
     () => pool.backendProcesses(),
     (relativePath) => chatAttachments.resolve(relativePath),
     { store: jobsStore, hostFacade: jobsHostFacade, configPath: activeConfigPath },
+    (key) => sidebarProvider.forgetMemoryKey(key),
   );
   // The sd-server children built for `generate_image`. Teardown on deactivate,
   // and reconciliation on a config reload that removes or edits an sdcpp

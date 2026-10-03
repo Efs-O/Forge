@@ -50,6 +50,39 @@ describe('resolveExecInvocation', () => {
       args: ['install'],
     });
   });
+
+  it('resolves only bare rg spellings to the bundled executable without changing argv', () => {
+    const appRoot = path.join('C:', 'VS Code', 'resources', 'app');
+    const bundled = path.join(
+      appRoot,
+      'node_modules.asar.unpacked',
+      '@vscode',
+      'ripgrep-universal',
+      'bin',
+      'win32-x64',
+      'rg.exe',
+    );
+    const probe = probeFor([bundled], {});
+    const args = ['--regexp', '--new', 'src'];
+    for (const name of ['rg', 'rg.exe', 'RG.EXE']) {
+      expect(resolveExecInvocation(name, args, 'win32', probe, appRoot)).toEqual({
+        command: bundled,
+        args,
+      });
+    }
+    expect(
+      resolveExecInvocation(path.join('C:', 'other', 'rg.exe'), args, 'win32', probe, appRoot),
+    ).toEqual({ command: path.join('C:', 'other', 'rg.exe'), args });
+  });
+
+  it('fails clearly when no bundled rg exists, rather than deferring to PATH', () => {
+    expect(() =>
+      resolveExecInvocation('rg', ['--version'], 'win32', probeFor([], {}), 'missing'),
+    ).toThrow(/bundled ripgrep was not found/u);
+    expect(() => resolveExecInvocation('rg', [], 'linux', probeFor([], {}))).toThrow(
+      /bundled ripgrep was not found/u,
+    );
+  });
 });
 
 // Built with the host's own separator: resolvePackageRunnerInvocation uses
@@ -146,9 +179,10 @@ describe('describeShellBuiltin', () => {
   // naming nothing usable, and the agent went looking for a workaround instead
   // of calling search_code, which had ripgrep behind it the whole time.
   it('points every spelling of grep at search_code', () => {
-    for (const spelling of ['grep', 'egrep', 'fgrep', 'rg', 'ripgrep', 'ack']) {
+    for (const spelling of ['grep', 'egrep', 'fgrep', 'ripgrep', 'ack']) {
       expect(describeShellBuiltin(spelling)).toContain('search_code');
     }
+    expect(describeShellBuiltin('rg')).toBeUndefined();
   });
 
   it('names read_file for the Unix pagers', () => {

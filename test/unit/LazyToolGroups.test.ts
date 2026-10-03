@@ -147,13 +147,25 @@ describe('lazy tool groups', () => {
     const registry = new ToolRegistry();
     registry.register(makeLoadToolGroupTool());
     for (const name of [
-      'desktop_capture', 'view_image', 'send_file', 'render_html_to_image',
-      'get_editor_context', 'install_llamacpp',
-      'get_power_info', 'remember', 'read_notebook', 'ask_live_session', 'ask_user',
-      'notify_user', 'get_system_status',
+      'desktop_capture',
+      'view_image',
+      'send_file',
+      'render_html_to_image',
+      'get_editor_context',
+      'install_llamacpp',
+      'get_power_info',
+      'remember',
+      'read_notebook',
+      'ask_live_session',
+      'ask_user',
+      'notify_user',
+      'get_system_status',
     ]) {
       registry.register({
-        definition: { type: 'function', function: { name, description: '', parameters: { type: 'object' } } },
+        definition: {
+          type: 'function',
+          function: { name, description: '', parameters: { type: 'object' } },
+        },
         permission: 'read',
         handler: async () => 'ok',
       });
@@ -161,22 +173,48 @@ describe('lazy tool groups', () => {
     bridge(registry, 'halluscribe', HALLUSCRIBE_TOOLS);
 
     expect(lazyGroupNames()).toEqual([
-      'computer_use', 'editor_ui', 'halluscribe', 'media', 'memory', 'notebook', 'system',
+      'computer_use',
+      'editor_ui',
+      'halluscribe',
+      'media',
+      'memory',
+      'notebook',
+      'system',
     ]);
     expect([
-      lazyGroupForTool('desktop_capture'), lazyGroupForTool('view_image'),
+      lazyGroupForTool('desktop_capture'),
+      lazyGroupForTool('view_image'),
       lazyGroupForTool('send_file'),
       lazyGroupForTool('render_html_to_image'),
-      lazyGroupForTool('get_editor_context'), lazyGroupForTool('install_llamacpp'),
-      lazyGroupForTool('get_power_info'), lazyGroupForTool('remember'),
-      lazyGroupForTool('read_notebook'), lazyGroupForTool('search_sessions'),
+      lazyGroupForTool('get_editor_context'),
+      lazyGroupForTool('install_llamacpp'),
+      lazyGroupForTool('get_power_info'),
+      lazyGroupForTool('remember'),
+      lazyGroupForTool('forget'),
+      lazyGroupForTool('read_notebook'),
+      lazyGroupForTool('search_sessions'),
     ]).toEqual([
-      'computer_use', 'media', 'media', 'media', 'editor_ui', 'system', 'system', 'memory',
-      'notebook', 'halluscribe',
+      'computer_use',
+      'media',
+      'media',
+      'media',
+      'editor_ui',
+      'system',
+      'system',
+      'memory',
+      'memory',
+      'notebook',
+      'halluscribe',
     ]);
     for (const name of [
-      'ask_live_session', 'manage_jobs', 'notify_user', 'ask_local_agent',
-      'ask_user', 'tell_live_session', 'list_delegation_targets', 'get_system_status',
+      'ask_live_session',
+      'manage_jobs',
+      'notify_user',
+      'ask_local_agent',
+      'ask_user',
+      'tell_live_session',
+      'list_delegation_targets',
+      'get_system_status',
     ]) {
       expect(lazyGroupForTool(name)).toBeUndefined();
       expect(hiddenLazyToolNames('conv-a')).not.toContain(name);
@@ -196,45 +234,68 @@ describe('lazy tool groups', () => {
       }
       deactivateLazyGroups('conv-a');
     }
-    const loader = registry.definitions(ALL_PERMISSIONS).find((d) => d.function.name === 'load_tool_group');
+    const loader = registry
+      .definitions(ALL_PERMISSIONS)
+      .find((d) => d.function.name === 'load_tool_group');
     expect(loader?.function.parameters).toMatchObject({
       properties: { group: { enum: lazyGroupNames() } },
     });
-    expect(loader?.function.description).toContain('computer_use: control browser tabs and the desktop; tools: desktop_capture');
-    expect(loader?.function.description).toContain('system: install llama.cpp and inspect or control computer power; tools: get_power_info');
-    expect(loader?.function.description).toContain('search previous AI coding sessions and historical workspace/user context');
+    expect(loader?.function.description).toContain(
+      'computer_use: control browser tabs and the desktop; tools: desktop_capture',
+    );
+    expect(loader?.function.description).toContain(
+      'system: install llama.cpp and inspect or control computer power; tools: get_power_info',
+    );
+    expect(loader?.function.description).toContain(
+      'search previous AI coding sessions and historical workspace/user context',
+    );
     expect(loader?.function.description.split(/\s+/).length).toBeLessThanOrEqual(350);
     const staticDefinition = makeLoadToolGroupTool().definition;
     expect(staticDefinition.function.parameters).toMatchObject({
       properties: { group: { type: 'string' } },
     });
-    expect((staticDefinition.function.parameters.properties as Record<string, { enum?: unknown[] }>).group.enum).toBeUndefined();
+    expect(
+      (staticDefinition.function.parameters.properties as Record<string, { enum?: unknown[] }>)
+        .group.enum,
+    ).toBeUndefined();
   });
 
   it('refuses computer_use on a non-vision model and names that model', async () => {
     const registry = new ToolRegistry();
     registry.register(makeLoadToolGroupTool());
     registry.register({
-      definition: { type: 'function', function: { name: 'desktop_capture', description: '', parameters: { type: 'object' } } },
+      definition: {
+        type: 'function',
+        function: { name: 'desktop_capture', description: '', parameters: { type: 'object' } },
+      },
       permission: 'read',
       handler: async () => 'should not run',
     });
     activateLazyGroup('conv-a', 'computer_use');
 
-    await expect(registry.dispatch('load_tool_group', { group: 'computer_use' }, ALL_PERMISSIONS, {
-      beforeMutate: () => undefined,
-      conversationId: 'conv-a',
-      modelName: 'qwen38-no-vision',
-      isVisionModel: false,
-    })).rejects.toThrow('computer_use is unavailable on non-vision model "qwen38-no-vision"; do not retry. Answer from the workspace and the conversation instead.');
+    await expect(
+      registry.dispatch('load_tool_group', { group: 'computer_use' }, ALL_PERMISSIONS, {
+        beforeMutate: () => undefined,
+        conversationId: 'conv-a',
+        modelName: 'qwen38-no-vision',
+        isVisionModel: false,
+      }),
+    ).rejects.toThrow(
+      'computer_use is unavailable on non-vision model "qwen38-no-vision"; do not retry. Answer from the workspace and the conversation instead.',
+    );
     expect(isLazyGroupActive('conv-a', 'computer_use')).toBe(true);
-    expect(hiddenLazyToolNames('conv-a', new Set(['desktop_capture']), false)).toContain('desktop_capture');
+    expect(hiddenLazyToolNames('conv-a', new Set(['desktop_capture']), false)).toContain(
+      'desktop_capture',
+    );
   });
 
   it('eagerly advertises configured native tools from the lazy groups', () => {
     const registry = new ToolRegistry();
     registry.register({
-      definition: { type: 'function', function: { name: 'remember', description: '', parameters: { type: 'object' } } },
+      definition: {
+        type: 'function',
+        function: { name: 'remember', description: '', parameters: { type: 'object' } },
+      },
       permission: 'read',
       handler: async () => 'ok',
     });

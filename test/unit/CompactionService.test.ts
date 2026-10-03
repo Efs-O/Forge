@@ -21,7 +21,11 @@ import type { ChatMessage } from '../../src/llm/types';
 import type { ConversationRuntime } from '../../src/sidebar/sessionTypes';
 import type { HostToWebview } from '../../src/sidebar/messageBridge';
 import type { CompactionLogEntry } from '../../src/sidebar/SessionLogger';
-import { activateLazyGroup, isLazyGroupActive, resetLazyToolGroups } from '../../src/tools/lazyToolGroups';
+import {
+  activateLazyGroup,
+  isLazyGroupActive,
+  resetLazyToolGroups,
+} from '../../src/tools/lazyToolGroups';
 
 function conv(messages: ChatMessage[]): ConversationRuntime {
   return { id: 'c1', title: 't', messages, createdAt: 0, updatedAt: 0 } as ConversationRuntime;
@@ -672,13 +676,12 @@ describe('runCompaction', () => {
     expect(h.posted.some((m) => m.type === 'error')).toBe(true);
   });
 
-  it('caps the persisted checkpoint instead of allowing it to become a second transcript', async () => {
+  it('rejects an oversized summary instead of silently cutting task evidence', async () => {
     const c = conv([...base]);
     const h = harness(c, async () => 'x'.repeat(COMPACTION_SUMMARY_MAX_CHARS + 100));
 
-    expect(await runCompaction(h.deps, c.id, { auto: true })).toBe('compacted');
-    expect(c.compaction?.summary.length).toBe(COMPACTION_SUMMARY_MAX_CHARS + 13);
-    expect(c.compaction?.summary).toContain('…[truncated]');
+    expect(await runCompaction(h.deps, c.id, { auto: true })).toBe('failed');
+    expect(c.compaction).toBeUndefined();
   });
 
   it('emits started once and finished(compacted) after validation', async () => {
@@ -901,7 +904,9 @@ describe('runCompaction', () => {
       {
         role: 'assistant',
         content: null,
-        tool_calls: [{ id: 't1', type: 'function', function: { name: 'read_file', arguments: '{}' } }],
+        tool_calls: [
+          { id: 't1', type: 'function', function: { name: 'read_file', arguments: '{}' } },
+        ],
       },
       { role: 'tool', tool_call_id: 't1', content: 'file text' },
     ]);
@@ -967,6 +972,7 @@ describe('compaction fit guard', () => {
     messages.push({ role: 'user', content: 'last small task' });
     messages.push({ role: 'assistant', content: 'ok' });
     const c = conv(messages);
+    c.last_input_tokens = 170_000;
     const h = harness(c, async () => long('summary'));
 
     await expect(runCompaction(h.deps, c.id, { auto: true })).resolves.toBe('compacted');
@@ -1052,7 +1058,7 @@ describe('summary prompt continuation fidelity', () => {
       { role: 'user', content: 'the original request' },
       ...Array.from(
         { length: 20 },
-        (_, i): ChatMessage => ({ role: 'assistant', content: `middle ${i} ${'m'.repeat(3000)}` }),
+        (_, i): ChatMessage => ({ role: 'tool', content: `middle ${i} ${'m'.repeat(3000)}` }),
       ),
       { role: 'assistant', content: 'FINAL: the build is green and the fix is committed.' },
     ];
@@ -1060,8 +1066,8 @@ describe('summary prompt continuation fidelity', () => {
 
     // The most recent message survives intact — it is the completion report.
     expect(prompt).toContain('FINAL: the build is green and the fix is committed.');
-    expect(prompt).toMatch(/\[\d+ messages from the middle of this window omitted for space/u);
-    expect(prompt).toContain('they happened');
+    expect(prompt).toMatch(/\[\d+ tool results omitted for space/u);
+    expect(prompt).toContain('read_tool_result');
   });
 });
 

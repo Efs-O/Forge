@@ -63,6 +63,7 @@ const EXPECTED_NATIVE_NAMES = [
   'edit_notebook_cell',
   'exec_command',
   'find_files',
+  'forget',
   'format_file',
   'generate_image',
   'get_editor_context',
@@ -165,7 +166,7 @@ function makeRegistry(
 }
 
 describe('registerAllTools canonical coordinator catalog', () => {
-  it('exposes the exact 100-tool native catalog when all optional wiring is present', () => {
+  it('exposes the exact native catalog when all optional wiring is present', () => {
     const registry = makeRegistry({ search: true, delegation: true });
     expect(registry.names().sort()).toEqual(EXPECTED_NATIVE_NAMES);
     // load_tool_group is advertised for registered native groups; generate_image while config.yaml
@@ -209,7 +210,7 @@ describe('registerAllTools canonical coordinator catalog', () => {
     expect(names).not.toContain('web_search');
     expect(names).not.toContain('ask_local_agent');
     expect(names).not.toContain('list_delegation_targets');
-    expect(names).toHaveLength(59);
+    expect(names).toHaveLength(60);
   });
 
   // send_file's only outbound step is api.telegram.org, so a profile with

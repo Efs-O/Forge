@@ -56,6 +56,19 @@ export function boundMemoryKeys(keys: readonly string[]): string[] {
     .slice(-COMPACTION_MEMORY_KEYS_MAX);
 }
 
+/** Historical snapshots may name a key removed after their compaction ran. */
+export function retainLiveMemoryKeys(
+  compaction: CompactionState | undefined,
+  liveKeys: readonly string[],
+): CompactionState | undefined {
+  if (!compaction?.memoryKeys?.length) return compaction;
+  const live = new Set(liveKeys);
+  const kept = compaction.memoryKeys.filter((key) => live.has(key));
+  return kept.length === compaction.memoryKeys.length
+    ? compaction
+    : { ...compaction, memoryKeys: kept };
+}
+
 function renderMemoryKeysBlock(keys: readonly string[] | undefined): string {
   if (!keys || keys.length === 0) return '';
   return (

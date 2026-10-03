@@ -31,6 +31,7 @@ test/         — unit and integration tests
 - Grep before creating — check if a function or file already exists
 - New backend logic → src/backend/, new tools → src/tools/, new LLM logic → src/llm/
 - Do not put business logic in src/extension.ts — it is wiring only
+- When a task used memories, review its task-specific notes at completion: update durable facts, forget pending-only notes, and leave unrelated tasks' memories alone
 
 ## Hard Stops
 - No destructive shell commands (rm -rf, git reset --hard) without explicit user confirmation

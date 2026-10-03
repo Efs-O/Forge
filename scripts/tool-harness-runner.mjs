@@ -40,6 +40,7 @@ const EXAMPLE_ARGS = {
   web_search: { query: 'Forge LLM local model tool calling' },
   remember: { key: 'tool-test', value: 'Forge tool-call smoke test' },
   recall: { key: 'tool-test' },
+  forget: { key: 'tool-test' },
   list_memories: {},
   edit_file: {
     filepath: '.forge/tool-test-write.txt',

@@ -31,7 +31,12 @@ import { PowerControl } from '../system/PowerControl';
 import { makeGetPowerInfoTool, makeScheduleWakeTool, makeSleepComputerTool } from './powerTools';
 import { makeWebFetchTool } from './fetchTool';
 import { makeWebSearchTool } from './searchTool';
-import { makeRememberTool, makeRecallTool, makeListMemoriesTool } from './memoryTools';
+import {
+  makeRememberTool,
+  makeRecallTool,
+  makeListMemoriesTool,
+  makeForgetTool,
+} from './memoryTools';
 import { makeEditFileTool } from './editFileTool';
 import {
   makeCreateDirectoryTool,
@@ -102,6 +107,7 @@ export function registerAllTools(
     /** The active config.yaml, for install_llamacpp's binary switch. */
     configPath?: string;
   },
+  onForgetMemory?: (key: string) => void,
 ): SdServerRegistry | undefined {
   // config.yaml `extra_file_roots`: absolute folders outside the workspace that
   // create_directory / delete_file may also reach. A getter, so a
@@ -167,6 +173,7 @@ export function registerAllTools(
   registry.register(makeRememberTool(workspaceState));
   registry.register(makeRecallTool(workspaceState));
   registry.register(makeListMemoriesTool(workspaceState));
+  registry.register(makeForgetTool(workspaceState, onForgetMemory));
   if (searchConfig) {
     registry.register(makeWebSearchTool(secrets, searchConfig));
   }

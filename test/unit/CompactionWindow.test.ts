@@ -1,5 +1,9 @@
 import { describe, expect, it } from 'vitest';
-import { applyCompactionWindow, SUMMARY_PREAMBLE } from '../../src/sidebar/compactionWindow';
+import {
+  applyCompactionWindow,
+  retainLiveMemoryKeys,
+  SUMMARY_PREAMBLE,
+} from '../../src/sidebar/compactionWindow';
 import type { ChatMessage } from '../../src/llm/types';
 
 const transcript = (): ChatMessage[] => [
@@ -10,6 +14,18 @@ const transcript = (): ChatMessage[] => [
 ];
 
 describe('applyCompactionWindow', () => {
+  it('filters forgotten keys from a persisted snapshot before the next model request', () => {
+    const restored = {
+      summary: 'State: done. Next: continue.',
+      fromIndex: 1,
+      memoryKeys: ['removed', 'kept'],
+    };
+    const clean = retainLiveMemoryKeys(restored, ['kept']);
+    const output = applyCompactionWindow([{ role: 'user', content: 'old' }], clean);
+    expect(output[1]?.content).toContain('kept');
+    expect(output[1]?.content).not.toContain('removed');
+    expect(clean?.memoryKeys).toEqual(['kept']);
+  });
   it('points resumed agents at search for stored pre-compaction conversation text', () => {
     expect(SUMMARY_PREAMBLE).toContain(
       'Earlier conversation text is still stored; use `read_tool_result` with `query` to search it.',

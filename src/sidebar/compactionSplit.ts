@@ -31,7 +31,10 @@ export interface CompactionSplit {
 }
 
 /** Keep the last affordable user-started exchange as a complete protocol tail. */
-export function selectCompactionSplit(pending: ChatMessage[]): CompactionSplit | null {
+export function selectCompactionSplit(
+  pending: ChatMessage[],
+  tailMaxChars = RETAINED_TAIL_MAX_CHARS,
+): CompactionSplit | null {
   const summarizable = pending.filter(isSummarizable);
   if (summarizable.length < MIN_SUMMARIZED_MESSAGES) return null;
 
@@ -40,7 +43,7 @@ export function selectCompactionSplit(pending: ChatMessage[]): CompactionSplit |
     if (pending[index]?.role !== 'user') continue;
     const candidate = pending.slice(index);
     const chars = candidate.reduce((sum, message) => sum + retainedTailCost(message), 0);
-    if (chars > RETAINED_TAIL_MAX_CHARS) break;
+    if (chars > tailMaxChars) break;
     if (pending.slice(0, index).filter(isSummarizable).length < MIN_SUMMARIZED_MESSAGES) break;
     tailStart = index;
     break;

@@ -38,6 +38,7 @@ import { getLogger } from '../util/logger';
 import type { ArchivedSessions } from './ArchivedSessions';
 import { persistedToRuntime } from './sessionPersistence';
 import { TabModelRelease } from './TabModelRelease';
+import { retainLiveMemoryKeys } from './compactionWindow';
 
 const log = getLogger();
 
@@ -74,6 +75,7 @@ export interface ConversationTabsDeps {
    */
   evictionBlockers: (id: string) => string[];
   archivedSessions?: ArchivedSessions;
+  liveMemoryKeys?: () => readonly string[];
 }
 
 export class ConversationTabs {
@@ -373,6 +375,11 @@ export class ConversationTabs {
     }
     if ('notFound' in result) return undefined;
     if (!('ok' in result)) return undefined;
+    const restored = result.sidebar.conversations.find((conv) => conv.id === id);
+    if (restored?.compaction && this.deps.liveMemoryKeys) {
+      const retained = retainLiveMemoryKeys(restored.compaction, this.deps.liveMemoryKeys());
+      if (retained) restored.compaction = retained;
+    }
     this.deps.setSidebar(result.sidebar);
     if (options.activate === false) {
       this.deps.persistSession();
