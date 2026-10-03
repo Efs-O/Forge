@@ -6,7 +6,10 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import * as vscode from 'vscode';
 import type { ForgeConfig } from '../../src/config/types';
 import { makeRenderHtmlToImageTool } from '../../src/tools/renderHtmlToImageTool';
-import type { UserNotificationService } from '../../src/sidebar/UserNotificationService';
+import {
+  FILE_DELIVERY_TURN_LIMIT,
+  type UserNotificationService,
+} from '../../src/sidebar/UserNotificationService';
 import type { RegisteredTool, ToolHandlerContext } from '../../src/tools/ToolRegistry';
 
 /**
@@ -65,6 +68,7 @@ describe('render_html_to_image against real Chrome', () => {
         delivered.push(opts);
         return { kind: 'queued' as const, chats: 1 };
       },
+      remainingFileDeliveries: () => FILE_DELIVERY_TURN_LIMIT,
     } as unknown as UserNotificationService;
     const getConfig = (): ForgeConfig =>
       ({

@@ -233,9 +233,21 @@ Policy requirements:
 - `context_files` remains an optional list of suggested starting reads for both
   read-only and write workers. It grants no extra access and does not imply
   writable ownership.
-- All file/path inputs are workspace-relative and canonicalized.
-- Glob scopes cannot escape or enumerate outside the workspace.
-- Search and find results contain workspace-relative paths only.
+- Worker file/path inputs are workspace-relative and canonicalized. (This is the
+  worker surface only. The main agent's `search_code` has allowed an explicitly
+  named absolute path, folder, or glob since 2026-10-03; a worker does not
+  inherit that, and nothing here licenses a worker to escape the workspace.)
+- Glob scopes cannot escape or enumerate the workspace by accident on either
+  surface: a relative include stays rooted at the workspace, and an absolute
+  include must name an existing path or a root below the drive root — `N:\*`-style
+  whole-drive crawls are refused. The deliberate external-read exception in the
+  rest of this bullet is the MAIN AGENT's `search_code` only, and it applies only
+  when the caller names that path, folder, or glob itself (2026-10-03; matches
+  the main-agent `search_code` smoke case below and `read_file`, which already
+  reads anywhere). A worker's glob scope has no such exception.
+- Worker search and find results contain workspace-relative paths only. (The
+  main agent's `search_code` echoes paths under the root it searched, so an
+  explicitly named external target comes back absolute — a worker's may not.)
 - Diagnostics require an explicit workspace-contained file.
 - Existing per-result caps apply, plus cumulative worker result accounting.
 - Add explicit maximum result counts and search-context bounds to
@@ -408,8 +420,9 @@ Required installed-VSIX smoke cases:
 - coordinator calls `list_worker_models`, then dispatches an exact local model;
 - read-only worker reviews a file with no writable paths;
 - write worker edits one exact file and Keep/Undo restores it;
-- worker `find_files` stays inside the workspace; `search_code` may also target
-  an explicitly named absolute path, folder, or glob outside it;
+- worker `find_files` and worker `search_code` stay inside the workspace; the
+  MAIN AGENT's `search_code` may also target an explicitly named absolute path,
+  folder, or glob outside it (a worker may not — see the policy bullets above);
 - missing ripgrep fails clearly without hanging;
 - Stop during search, model startup, worker generation, approval, and review;
 - cloud catalog filtering and dangerous approval;

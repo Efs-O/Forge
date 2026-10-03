@@ -4,7 +4,10 @@ import * as path from 'path';
 import { vi } from 'vitest';
 import * as vscode from 'vscode';
 import type { ForgeConfig } from '../../src/config/types';
-import type { UserNotificationService } from '../../src/sidebar/UserNotificationService';
+import {
+  FILE_DELIVERY_TURN_LIMIT,
+  type UserNotificationService,
+} from '../../src/sidebar/UserNotificationService';
 import type { ToolHandlerContext } from '../../src/tools/ToolRegistry';
 
 /**
@@ -26,9 +29,11 @@ export interface RigOptions {
   deliver?: () => Promise<unknown>;
   renderTimeoutMs?: number;
   /**
-   * The service's "how many sends are left" probe. Omitting it (the default)
-   * leaves it undefined, which is what a service without the method looks like;
+   * The service's "how many sends are left" probe. Defaults to a full budget;
    * supplying 0 exercises the tool's early refusal before it spends a browser.
+   * Always present: `remainingFileDeliveries` is a real method on
+   * `UserNotificationService`, so the tool calls it unconditionally and a rig
+   * that omitted it would only be simulating a shape production never has.
    */
   remaining?: number;
   /**
@@ -47,11 +52,10 @@ export function rigDeps(options: RigOptions) {
   // Spied too, so a suite can assert the probe was asked about the SAME
   // conversation id the delivery will charge — an id mix-up would otherwise
   // read someone else's budget and go unnoticed.
-  const remainingFileDeliveries =
-    options.remaining === undefined ? undefined : vi.fn(() => options.remaining);
+  const remainingFileDeliveries = vi.fn(() => options.remaining ?? FILE_DELIVERY_TURN_LIMIT);
   const notifications = {
     deliverFile,
-    ...(remainingFileDeliveries ? { remainingFileDeliveries } : {}),
+    remainingFileDeliveries,
   } as unknown as UserNotificationService;
   return {
     deliverFile,

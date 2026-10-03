@@ -5,7 +5,12 @@ import type { RegisteredTool } from './ToolRegistry';
 import { resolveRipgrep, type RipgrepResolution } from './RipgrepResolver';
 import { capResultText } from './resultCap';
 import { capSnippetLine, MAX_SEARCH_RESULT_CHARS } from './searchSnippet';
-import { SEARCH_EXCLUDES, namedExistingPath, resolveSearchCodeScope } from './searchScope';
+import {
+  SEARCH_EXCLUDES,
+  namedExistingPath,
+  resolveSearchCodeScope,
+  rgScopeArgs,
+} from './searchScope';
 
 const OUTPUT_LINE_LIMIT = 50;
 const CONTEXT_LINES = 2;
@@ -323,9 +328,9 @@ async function searchWorkspaceText(
     '--context',
     String(CONTEXT_LINES),
     '--hidden',
-    ...(scope.explicitPath
-      ? ['--no-ignore-vcs']
-      : ['--glob', scope.glob ?? include, ...SEARCH_EXCLUDES.flatMap((glob) => ['--glob', glob])]),
+    // The ignore-file decision and the noise-directory decision are separate;
+    // `rgScopeArgs` is the single owner of both (audit F1, 2026-10-03).
+    ...rgScopeArgs(scope),
     // Behind --regexp, so a query like `--new` is the pattern, not a flag rg refuses.
     '--regexp',
     query,

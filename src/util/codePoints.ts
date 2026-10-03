@@ -16,9 +16,11 @@
 
 /** Number of code points in `text` — what an API means by "characters". */
 export function codePointLength(text: string): number {
-  // `.` with the `u` flag matches one whole code point, surrogate pairs
-  // included, so the match count is the code-point count.
-  return text.match(/./gu)?.length ?? 0;
+  // `Array.from` iterates by code point, surrogate pairs included. A `/./gu`
+  // match count is NOT equivalent: `.` never matches a line terminator, so
+  // `a\nb` counted 2 instead of 3 and a multi-line caption passed a guard it
+  // should have failed (audit F8, 2026-10-03).
+  return Array.from(text).length;
 }
 
 /** First `limit` code points of `text`, never cutting a surrogate pair. */

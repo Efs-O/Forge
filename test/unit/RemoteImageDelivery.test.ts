@@ -231,6 +231,44 @@ describe('sendTelegramPhoto', () => {
     expect(methods).toEqual(['sendDocument']);
   });
 
+  // The trim is the delivery, not a utility function: a 1,024-code-point emoji
+  // caption is 2,048 UTF-16 units, and `.slice(0, 1024)` used to cut the pair in
+  // half so Telegram rendered U+FFFD (audit F5, 2026-10-03).
+  function postedCaption(caption: string): Promise<string> {
+    let captured: string | undefined;
+    const captureFetch = (async (_url: string | URL | Request, init?: RequestInit) => {
+      captured = String((init?.body as FormData).get('caption'));
+      return new Response('{}', { status: 200 });
+    }) as unknown as typeof fetch;
+    return (async () => {
+      await sendTelegramPhoto(captureFetch, 't', new TelegramChatQueue(), '1', imageFile(10), caption);
+      if (captured === undefined) throw new Error('no caption was posted');
+      return captured;
+    })();
+  }
+
+  it('trims an over-long emoji caption on a code-point boundary, never a lone surrogate', async () => {
+    // 1,030 emoji = 2,060 UTF-16 units: over the limit, and the cut point lands
+    // inside a pair for a UTF-16 slice.
+    const posted = await postedCaption('\u{1F5BC}'.repeat(1_030));
+    expect(Array.from(posted)).toHaveLength(1_024);
+    expect(posted).toBe('\u{1F5BC}'.repeat(1_024));
+    for (let i = 0; i < posted.length; i += 2) {
+      expect(posted.charCodeAt(i)).toBeGreaterThanOrEqual(0xd800);
+      expect(posted.charCodeAt(i + 1)).toBeLessThanOrEqual(0xdfff);
+    }
+  });
+
+  it('sends a multi-line caption whole, counting its line breaks as characters', async () => {
+    // `.` with /gu never matches a newline, so the old counter under-read a
+    // multi-line caption (audit F8, 2026-10-03). 1,024 code points INCLUDING 3
+    // newlines must arrive intact.
+    const caption = `${'a'.repeat(1_021)}\n\n\n`;
+    expect(Array.from(caption)).toHaveLength(1_024);
+    const posted = await postedCaption(caption);
+    expect(posted).toBe(caption);
+  });
+
   it('throws on a non-400 failure instead of retrying as a document', async () => {
     const { methods, fetchImpl } = recordingFetch({ sendPhoto: 401 });
     await expect(

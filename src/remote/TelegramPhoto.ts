@@ -1,5 +1,6 @@
 import * as fsp from 'fs/promises';
 import * as path from 'path';
+import { sliceCodePoints } from '../util/codePoints';
 import type { TelegramChatQueue } from './telegramSendQueue';
 
 type Fetch = typeof fetch;
@@ -47,7 +48,11 @@ export async function sendTelegramPhoto(
   const post = async (method: 'sendPhoto' | 'sendDocument'): Promise<Response> => {
     const form = new FormData();
     form.append('chat_id', chatId);
-    form.append('caption', caption.slice(0, MAX_CAPTION_CHARS));
+    // Trim in code points, not UTF-16 units: `.slice(0, 1024)` can cut an
+    // emoji pair and send a lone surrogate, which arrives as U+FFFD. The
+    // sender and `send_file`'s caption guard must count the same way
+    // (audit F5, 2026-10-03).
+    form.append('caption', sliceCodePoints(caption, MAX_CAPTION_CHARS));
     form.append(
       method === 'sendPhoto' ? 'photo' : 'document',
       new Blob([new Uint8Array(bytes)], { type }),

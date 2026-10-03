@@ -343,6 +343,112 @@ describe('ExternalModelServers', () => {
     expect(spawnImpl).not.toHaveBeenCalled();
   });
 
+  // Two requests to a down managed server used to both probe "not reachable"
+  // and both spawn start_command: two Strata launches racing one port and
+  // loading the model into VRAM twice (audit F2, 2026-10-03).
+  it('ensureStarted joins one in-flight start instead of spawning twice', async () => {
+    const config = makeConfig();
+    const strata = config.models.find((model) => model.name === 'strata')!;
+    strata.start_command = ['start-strata', 'hidden'];
+    const spawnImpl = vi.fn(() => ({ unref: vi.fn() }));
+    // Both callers probe "is it up?" and see it down; only the wait-loop probe
+    // sees it up, so both would otherwise reach the spawn.
+    probeHttpMock
+      .mockResolvedValueOnce({ reachable: false, ok: false })
+      .mockResolvedValueOnce({ reachable: false, ok: false })
+      .mockResolvedValue({ reachable: true, ok: true });
+    const servers = new ExternalModelServers(
+      () => config,
+      async () => undefined,
+      undefined,
+      spawnImpl,
+    );
+
+    const [first, second] = await Promise.all([
+      servers.ensureStarted('strata'),
+      servers.ensureStarted('strata'),
+    ]);
+
+    expect(first).toBeUndefined();
+    expect(second).toBeUndefined();
+    expect(spawnImpl).toHaveBeenCalledOnce();
+  });
+
+  it('ensureStarted allows a fresh start after the in-flight one fails', async () => {
+    vi.useFakeTimers();
+    try {
+      const config = makeConfig();
+      const strata = config.models.find((model) => model.name === 'strata')!;
+      strata.start_command = ['start-strata', 'hidden'];
+      const spawnImpl = vi.fn(() => ({ unref: vi.fn() }));
+      // Down forever: the first start times out, then a retry must be able to try.
+      probeHttpMock.mockResolvedValue({ reachable: false, ok: false });
+      const servers = new ExternalModelServers(
+        () => config,
+        async () => undefined,
+        undefined,
+        spawnImpl,
+      );
+
+      const first = servers.ensureStarted('strata');
+      first.catch(() => {});
+      await vi.advanceTimersByTimeAsync(START_TIMEOUT_MS + START_POLL_MS * 2);
+      await expect(first).rejects.toThrow(/did not become reachable/);
+      expect(spawnImpl).toHaveBeenCalledOnce();
+
+      const second = servers.ensureStarted('strata');
+      second.catch(() => {});
+      await vi.advanceTimersByTimeAsync(START_TIMEOUT_MS + START_POLL_MS * 2);
+      await expect(second).rejects.toThrow(/did not become reachable/);
+      expect(spawnImpl).toHaveBeenCalledTimes(2);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  // Codex review follow-up: joining must not mean only ONE caller learns the
+  // start failed. Both join the same promise, so both see the same failure,
+  // and the next request still gets a fresh attempt.
+  it('ensureStarted gives every joined caller the failure, then retries once', async () => {
+    vi.useFakeTimers();
+    try {
+      const config = makeConfig();
+      const strata = config.models.find((model) => model.name === 'strata')!;
+      strata.start_command = ['start-strata', 'hidden'];
+      const spawnImpl = vi.fn(() => ({ unref: vi.fn() }));
+      probeHttpMock.mockResolvedValue({ reachable: false, ok: false });
+      const servers = new ExternalModelServers(
+        () => config,
+        async () => undefined,
+        undefined,
+        spawnImpl,
+      );
+
+      const joined = Promise.allSettled([
+        servers.ensureStarted('strata'),
+        servers.ensureStarted('strata'),
+        servers.ensureStarted('strata'),
+      ]);
+      await vi.advanceTimersByTimeAsync(START_TIMEOUT_MS + START_POLL_MS * 2);
+      const outcomes = await joined;
+      expect(outcomes.map((outcome) => outcome.status)).toEqual(['rejected', 'rejected', 'rejected']);
+      for (const outcome of outcomes) {
+        expect((outcome as PromiseRejectedResult).reason.message).toMatch(
+          /did not become reachable/,
+        );
+      }
+      expect(spawnImpl).toHaveBeenCalledOnce();
+
+      const retry = servers.ensureStarted('strata');
+      retry.catch(() => {});
+      await vi.advanceTimersByTimeAsync(START_TIMEOUT_MS + START_POLL_MS * 2);
+      await expect(retry).rejects.toThrow(/did not become reachable/);
+      expect(spawnImpl).toHaveBeenCalledTimes(2);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it('ensureStarted throws an actionable error when down with no start_command', async () => {
     const config = makeConfig();
     const spawnImpl = vi.fn(() => ({ unref: vi.fn() }));

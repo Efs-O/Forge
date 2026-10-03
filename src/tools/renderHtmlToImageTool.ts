@@ -168,8 +168,8 @@ async function runRender(
   // browser, writes no PNG, and adds no Undo entry — the refusal costs nothing
   // (review NOTE, 2026-10-03). The `deliverFile` refusal below is still handled:
   // this is an early exit, not the enforcement point.
-  const remaining = deps.notifications.remainingFileDeliveries?.(context?.conversationId);
-  if (remaining !== undefined && remaining <= 0) {
+  const remaining = deps.notifications.remainingFileDeliveries(context?.conversationId);
+  if (remaining <= 0) {
     throw new Error(
       `render_html_to_image: the per-turn file delivery limit is already spent (${remaining} left). ` +
         'Nothing was rendered. Send fewer files this turn, or render it in a later turn.',

@@ -20,6 +20,16 @@ function event(file, line, text) {
 
 if (query === 'slow fixture') {
   setTimeout(() => process.stdout.write(`${event('slow.ts', 1, query)}\n`), 5_000);
+} else if (query === 'args fixture') {
+  // Echoes the scope-relevant argv back as the match text, so a test can assert
+  // the arguments the tool actually passed. The old fixture ignored them, which
+  // is how a search could drop every exclusion and still pass its own test
+  // (audit F1, 2026-10-03). Kept short on purpose: `capSnippetLine` truncates a
+  // match line at 400 chars, and the full argv is longer than that.
+  const scope = args.filter((a) => a === '--no-ignore-vcs' || a.startsWith('!'));
+  const firstGlob = args.indexOf('--glob');
+  if (firstGlob !== -1) scope.unshift(args[firstGlob], args[firstGlob + 1]);
+  process.stdout.write(`${event('argv.txt', 1, scope.join(' '))}\n`);
 } else if (target && path.isAbsolute(target)) {
   const resultPath = fs.statSync(target).isDirectory() ? path.join(target, 'match.py') : target;
   process.stdout.write(`${event(resultPath, 2, query)}\n`);

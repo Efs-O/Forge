@@ -26,11 +26,15 @@ vi.mock('vscode', () => ({ workspace: { workspaceFolders: undefined } }));
 
 import { makeRenderHtmlToImageTool } from '../../src/tools/renderHtmlToImageTool';
 import type { ForgeConfig } from '../../src/config/types';
-import type { UserNotificationService } from '../../src/sidebar/UserNotificationService';
+import {
+  FILE_DELIVERY_TURN_LIMIT,
+  type UserNotificationService,
+} from '../../src/sidebar/UserNotificationService';
 
 function deps() {
   const notifications = {
     deliverFile: async () => ({ kind: 'queued' as const, chats: 1 }),
+    remainingFileDeliveries: () => FILE_DELIVERY_TURN_LIMIT,
   } as unknown as UserNotificationService;
   return {
     getConfig: () =>

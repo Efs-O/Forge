@@ -72,7 +72,42 @@ export function namedExistingPath(glob: string, root: string): string | undefine
 export interface SearchCodeScope {
   target: string;
   glob?: string;
+  /** True only when the caller named a path in full: ripgrep gets `--no-ignore-vcs`. */
   explicitPath: boolean;
+  /**
+   * Whether `SEARCH_EXCLUDES` still applies. Only an explicitly named FILE
+   * skips it — see `rgScopeArgs`.
+   */
+  applyExcludes: boolean;
+}
+
+/**
+ * The ripgrep scope arguments for a resolved search. Split out because the
+ * `--no-ignore-vcs` decision and the exclusion decision are NOT the same
+ * decision, and conflating them is what let a named directory crawl
+ * `node_modules/` (audit F1, 2026-10-03).
+ *
+ * `--no-ignore-vcs` answers "the caller named this, so `.gitignore` must not
+ * hide it". That argument is about *ignore files*, and it belongs to every
+ * named path, file or directory. `SEARCH_EXCLUDES` answers "noise directories
+ * are not what a search is for", and it belongs to everything EXCEPT a single
+ * named file: naming `dist/bundle.js` in full is an explicit request for that
+ * file, and an exclusion glob would filter out the one file the caller asked
+ * for. A named *directory* keeps the exclusions, because a directory is where
+ * the noise lives.
+ */
+export function rgScopeArgs(scope: SearchCodeScope): string[] {
+  const args: string[] = [];
+  if (scope.explicitPath) args.push('--no-ignore-vcs');
+  // `scope.glob` is set exactly when the include was a pattern rather than a
+  // named path. A named path needs no glob: the path IS the search root, and
+  // `--glob <that path>` is matched against the paths *below* the root, so it
+  // would filter out every one of them.
+  if (scope.glob) args.push('--glob', scope.glob);
+  if (scope.applyExcludes) {
+    args.push(...SEARCH_EXCLUDES.flatMap((glob) => ['--glob', glob]));
+  }
+  return args;
 }
 
 /**
@@ -83,22 +118,41 @@ export function resolveSearchCodeScope(include: string, workspaceRoot: string): 
   if (!path.isAbsolute(include)) {
     const named = namedExistingPath(include, workspaceRoot);
     return named
-      ? { target: named, explicitPath: true }
-      : { target: '.', glob: include, explicitPath: false };
+      ? {
+          target: named,
+          explicitPath: true,
+          // A named FILE is the one case the exclusions must not apply to; a
+          // named DIRECTORY keeps them, because that is where the noise lives.
+          applyExcludes: isDirectory(path.resolve(workspaceRoot, named)),
+        }
+      : { target: '.', glob: include, explicitPath: false, applyExcludes: true };
   }
 
   const absolute = path.resolve(include);
   if (!/[*?[\]{}!]/u.test(absolute)) {
-    if (!fs.existsSync(absolute)) {
+    let stat: fs.Stats;
+    try {
+      stat = fs.statSync(absolute);
+    } catch {
       throw new Error(`search_code: absolute include path does not exist: ${absolute}`);
     }
-    return { target: absolute, explicitPath: true };
+    return { target: absolute, explicitPath: true, applyExcludes: stat.isDirectory() };
   }
 
   const parsed = path.parse(absolute);
   const segments = absolute.slice(parsed.root.length).split(path.sep);
   const wildcardIndex = segments.findIndex((segment) => /[*?[\]{}!]/u.test(segment));
   const target = path.join(parsed.root, ...segments.slice(0, wildcardIndex));
+  // A wildcard in the first segment would otherwise hand ripgrep the whole
+  // drive: `N:\*` derives the root `N:\`, and `--hidden` then crawls every
+  // mapped share on the machine (audit F1, 2026-10-03). Naming one directory
+  // below the root is the smallest scope that can still be a real request.
+  if (target === parsed.root) {
+    throw new Error(
+      `search_code: absolute include globs must name a directory below the drive root, ` +
+        `not the root itself: ${include} (use e.g. ${path.join(parsed.root, 'someDir', '**', '*.ts')})`,
+    );
+  }
   const glob = segments.slice(wildcardIndex).join('/');
   let targetStat: fs.Stats;
   try {
@@ -109,5 +163,14 @@ export function resolveSearchCodeScope(include: string, workspaceRoot: string): 
   if (!targetStat.isDirectory()) {
     throw new Error(`search_code: absolute include root is not a directory: ${target}`);
   }
-  return { target, glob, explicitPath: false };
+  return { target, glob, explicitPath: false, applyExcludes: true };
+}
+
+/** Best-effort "is this a directory"; a stat failure is treated as "not one". */
+function isDirectory(absolute: string): boolean {
+  try {
+    return fs.statSync(absolute).isDirectory();
+  } catch {
+    return false;
+  }
 }

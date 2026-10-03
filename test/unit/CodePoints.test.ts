@@ -12,6 +12,27 @@ describe('codePointLength', () => {
     expect(codePointLength('🖼 γεια 123')).toBe(10);
     expect(codePointLength('👨‍👩‍👧')).toBe(5);
   });
+
+  // The shipped implementation used `text.match(/./gu)?.length`, and `.` with
+  // the `u` flag never matches a line terminator: a multi-line caption
+  // under-counted and passed a limit it should have failed (audit F8).
+  it('counts line terminators, which `.` with /gu never matches', () => {
+    expect(codePointLength('a\nb')).toBe(3);
+    expect(codePointLength('\r\n')).toBe(2);
+    expect(codePointLength('\n'.repeat(5))).toBe(5);
+    expect(codePointLength('a\r\nb')).toBe(4);
+  });
+
+  it('splits exactly at the Telegram caption limit in code points', () => {
+    const atLimit = 'a'.repeat(1_021) + '\n\n\n'; // 1,024 including newlines
+    expect(codePointLength(atLimit)).toBe(1_024);
+    expect(codePointLength(`${atLimit}a`)).toBe(1_025);
+    const emoji = '🖼'.repeat(1_024);
+    // 2,048 UTF-16 units, but exactly 1,024 characters.
+    expect(emoji.length).toBe(2_048);
+    expect(codePointLength(emoji)).toBe(1_024);
+    expect(codePointLength(`${emoji}🖼`)).toBe(1_025);
+  });
 });
 
 describe('sliceCodePoints', () => {

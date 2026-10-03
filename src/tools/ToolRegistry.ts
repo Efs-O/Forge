@@ -110,10 +110,18 @@ type DeclaredProperty = { type?: unknown; items?: unknown };
  * bare array" sent `["", ""]` — valid JSON, an array, and still useless to the
  * handler. The top-level array check alone cannot see it.
  *
- * Only the element TYPE is judged, never the keys inside an element: tools that
- * own a nested structure (`apply_line_edits`) already refuse with an
- * operation-numbered message that beats anything generic here, and a refusal
- * raised at the registry would pre-empt the better one.
+ * Only the element TYPE is judged, never the keys inside an element: a
+ * half-built OBJECT still reaches the handler, which owns the field-level
+ * message (`apply_line_edits` names the operation and the missing field).
+ * For an entry that is not an object at all, THIS refusal is the one the model
+ * sees — `invalidArgs` runs before the handler (`ToolDispatch.ts:225`, handler
+ * at `:293`) — and it is the better of the two: it names the field, the entry
+ * index and the type, where the handler's own `operation N must be an object`
+ * would name only the index. The handler keeps that branch for callers that
+ * dispatch without this pre-check (`contactWebTools`, the benchmark tool host).
+ * An earlier version of this comment claimed the opposite, which made the
+ * ordering look like a bug when it is the intended precedence (audit F3,
+ * 2026-10-03).
  */
 function invalidArrayItems(
   name: string,

@@ -51,6 +51,14 @@ export class ExternalModelServers {
   private readonly residency = new Map<string, Residency>();
   /** Incremented before each request so a late unload completion cannot erase it. */
   private readonly activityGeneration = new Map<string, number>();
+  /**
+   * One in-flight start per model. Without it, two concurrent requests to a
+   * down managed server both probe "not reachable" and both spawn
+   * `start_command` — two Strata processes racing one port and loading the
+   * model into VRAM twice, with the loser then polling the full
+   * `START_TIMEOUT_MS` before reporting failure (audit F2, 2026-10-03).
+   */
+  private readonly starting = new Map<string, Promise<void>>();
 
   constructor(
     private readonly getConfig: () => ForgeConfig,
@@ -139,6 +147,18 @@ export class ExternalModelServers {
    * from `prepareExternal` after local models are freed, so VRAM is available.
    */
   async ensureStarted(name: string): Promise<void> {
+    const pending = this.starting.get(name);
+    if (pending) return pending;
+    const start = this.startOnce(name).finally(() => {
+      // Only drop OUR entry: a retry that began while this one unwound owns
+      // the map by then, and deleting it would let a third caller double-start.
+      if (this.starting.get(name) === start) this.starting.delete(name);
+    });
+    this.starting.set(name, start);
+    return start;
+  }
+
+  private async startOnce(name: string): Promise<void> {
     const model = this.managed(name);
     if (!model?.endpoint) return;
     if ((await probeHttp(model.endpoint)).reachable) return; // already up
