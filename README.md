@@ -33,6 +33,12 @@ available only when you explicitly configure them.
 - **Bring the runtime you prefer.** Use direct GGUF loading, local or
   daemon-routed Ollama, an explicitly configured OpenAI-compatible provider, or
   an already-authenticated Claude Code or Codex CLI.
+- **Local and frontier agents working together.** The agent mesh connects
+  Forge to Claude Code, Codex and Copilot sessions on the same machine, each
+  signed in with its own CLI login. Your local model can ask the Codex or Claude
+  session you already have open (with its project context) and get the answer
+  back, and those sessions can message, check on, or steer Forge in return. See
+  [the agent mesh](#the-agent-mesh).
 - **Depth, not a chat box.** Background execution, LSP-backed code
   intelligence, terminal awareness in both directions, git, vision, and durable
   memory — see [what the agent can do](#what-the-agent-can-do).
@@ -72,6 +78,7 @@ telemetry, analytics, or auto-update pings.
 - Ollama local and Ollama cloud routing through the local daemon
 - Optional cloud or self-hosted providers: `xai`, `openrouter`, `openai`, `openai-compatible`
 - External CLI agents (`provider: cli` — Claude Code, Codex) as full-rights agents — both in direct chat and as `ask_local_agent` delegation targets, where they can read and edit the workspace with their own tools — using each CLI's own authentication. See [delegation](docs/DELEGATION.md) for which runs Keep/Undo covers
+- Agent mesh: two-way messaging between Forge and live Claude Code, Codex and Copilot sessions (`ask_live_session`, `tell_live_session`, `forge.sh say`/`steer`/`who`)
 - Localhost control server for external orchestrators and shared model lifecycle
 - Reasoning token display and optional thinking-channel stripping
 - Optional Tavily or Brave web search with keys stored in VS Code SecretStorage
@@ -154,6 +161,9 @@ Its operation values are `status`, `log`, `diff`, `blame` and `show`.
 CLI agent; `list_delegation_targets` lists them on demand instead of spending
 schema on every turn. Local and cloud targets get the task and context files
 only. Claude Code and Codex run with their own tools and can edit files.
+`ask_live_session` and `tell_live_session` reach a Claude Code, Codex or
+Copilot session that is *already running* and knows the current work — see
+[the agent mesh](#the-agent-mesh).
 
 **Images.** `generate_image` appears only when an `image_generation:` backend
 is configured; every call asks for approval because each image is billed.
@@ -254,6 +264,7 @@ WhatsApp exists as a separately opt-in experimental linked-device adapter.
   - an already-running OpenAI-compatible server
   - an explicitly configured cloud provider model
   - an authenticated Claude Code or Codex CLI for `provider: cli`
+  - an authenticated Claude Code, Codex or Copilot CLI for the agent mesh
 
 ### Optional: ffmpeg, for `view_video`
 
@@ -611,6 +622,34 @@ with its OWN tools — Forge does not inject its registry or run its tool loop f
 it. Authentication is the CLI's own login, never a key held by Forge, and a
 full-access CLI chat is still covered by Forge's checkpoint engine so Keep/Undo
 can roll it back.
+
+## The agent mesh
+
+`ask_local_agent` starts a new, empty session. The mesh is for sessions that
+already know what you are doing: the Claude Code or Codex you have open in a
+terminal, or a Copilot session Forge started for you. Turn on
+`control_server.enabled` and `agent_bus.enabled` (setup above).
+
+- **Forge → them.** `ask_live_session` asks `claude`, `codex` or `copilot` a
+  question and waits for the answer, or, with `notify_on_answer`, keeps
+  working and receives the answer later as a message in the chat.
+  `tell_live_session` is a one-way note that does not wait.
+- **Them → Forge.** From any terminal, `~/.forge/agent-bus/forge.sh` lets a
+  session `say` something to Forge, `steer` (interrupt) its running turn,
+  check its `status`, `view` its last answers, and see `who` is in the mesh
+  and what each member is doing.
+- **No open window needed.** Run `forge.sh join codex` (or `join claude`) once
+  in your session. After that, Forge can reach it even with no window open: it
+  resumes that thread in the background, answers, and shuts it down again.
+  Copilot always runs as a Forge-owned session.
+- **Cost control.** `agent_bus.codex_model`/`codex_effort`,
+  `claude_model`/`claude_effort` and `copilot_model` pick the model per CLI.
+  Copilot defaults to `auto` so it does not use a premium model on every call.
+
+A typical hybrid loop: Codex plans with file paths and checks → sends the plan
+to Forge → your local model implements → it asks Codex to review the diff →
+Codex steers the fixes. Every file change, including the CLI agents', is
+covered by Keep/Undo.
 
 [Delegation and CLI agents in detail](docs/DELEGATION.md) covers warm-process
 lifecycle, cancellation, capacity limits, and the checkpoint settings.

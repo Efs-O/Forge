@@ -1,5 +1,18 @@
 # Forge — Recent Changes
 
+## 0.16.78
+
+### Tool-call recovery messages stay brief
+
+- An unknown tool name gets a short suggestion only when it uniquely prefixes
+  an eligible tool. An unloaded tool group is named with its load instruction;
+  unavailable tools are not suggested.
+- Invalid JSON booleans such as `"True"` get a concrete unquoted correction.
+  `apply_line_edits` now names a missing operation field instead of reporting
+  that an absent value has the wrong type. Strict validation remains in place.
+- These messages appear only after rejected calls. Tool descriptions and the
+  normal prompt are unchanged. The README now documents the agent mesh.
+
 ## 0.16.77
 
 ### Forge can start a managed external server (Strata) before the first request
