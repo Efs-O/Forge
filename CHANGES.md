@@ -1,5 +1,19 @@
 # Forge — Recent Changes
 
+## 0.16.79
+
+### image_search now defaults to Yandex
+
+- The default `engine` is `yandex`, not `google_lens`. Yandex answers in about
+  5 seconds against Lens's 18-60 seconds, and it kept returning matches on
+  2026-10-03 while Lens answered HTTP 200 with zero results.
+- The tool description states which engine to choose instead of implying Lens is
+  the default: Yandex for the pages carrying an image, its largest copies, faces
+  and non-Western sites; `google_lens` when you need what the image shows —
+  identification, knowledge, products — or when Yandex returns no matches.
+- `type` (`exact_matches` / `visual_matches`) still applies to `google_lens`
+  only, so the default call takes no `type`.
+
 ## 0.16.78
 
 ### Image-search photos share the per-turn file limit
