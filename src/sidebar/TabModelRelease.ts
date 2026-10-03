@@ -102,7 +102,9 @@ export class TabModelRelease {
    * the same base loses it too — they share one backend. Throws on a refusal so
    * each surface words the failure itself.
    */
-  async unloadModelOf(convId: string): Promise<{ model: string; wasLoaded: boolean }> {
+  async unloadModelOf(
+    convId: string,
+  ): Promise<{ model: string; wasLoaded: boolean; serverStopped?: boolean }> {
     const sidebar = this.deps.getSidebar();
     const conv = sidebar.conversations.find((c) => c.id === convId);
     if (!conv) throw new Error('conversation not found');
@@ -110,20 +112,22 @@ export class TabModelRelease {
     const base = this.deps.baseOf(model);
     if (!model || !base) throw new Error('this chat has no model selected');
     await this.deps.agentLoop.waitForCancelledTurns();
-    if (!this.deps.pool.isLoaded(base)) return { model: base, wasLoaded: false };
+    const wasLoaded = this.deps.pool.isLoaded(base);
     if (this.streamingHolder(model, convId)) {
       throw new Error(`a turn is still running on "${base}" — stop it first`);
     }
-    await this.deps.pool.release(base);
+    await this.deps.pool.release(base, true);
+    const configured = this.deps.getConfig().models.find((entry) => entry.name === base);
+    const serverStopped = !!configured?.unload_path && !!configured.stop_command;
     log.info(`[TabModelRelease] unloaded "${base}" for conversation ${convId}`);
     this.deps.events.onBackendStopped?.(base);
     if (convId === sidebar.activeConversationId) {
       this.deps.post({
         type: 'backendDown',
-        message: `${base} unloaded. Send a prompt to load it again.`,
+        message: `${base} unloaded.${serverStopped ? ' Server stopped.' : ''} Send a prompt to load it again.`,
       });
     }
-    return { model: base, wasLoaded: true };
+    return { model: base, wasLoaded, ...(serverStopped ? { serverStopped: true } : {}) };
   }
 
   /** The closed tab may have been the last user of a model still holding VRAM. */

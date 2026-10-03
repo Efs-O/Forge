@@ -63,7 +63,7 @@ Notes:
 
 • /model lists the configured models, and /model <number-or-name> pins one to this chat; /restart restarts the running backend
 
-• /unload releases only this chat's model and frees its memory, exactly like /unload in the sidebar; /unloadall releases every loaded model. Unlike /reload both refuse while a turn is running
+• /unload releases this chat's model and stops its configured server; /unloadall releases every loaded model and stops configured servers. Both refuse while a turn is running
 
 • /compact summarises the conversation in place to win back context; the chat and its queue survive it
 

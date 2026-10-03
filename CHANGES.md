@@ -1,5 +1,16 @@
 # Forge — Recent Changes
 
+## 0.16.80
+
+### Explicit unload stops a configured external server
+
+- `/unloadModel` and `/unloadAll` now POST the managed server's `unload_path`,
+  then run its configured `stop_command` immediately and wait for its endpoint
+  to close. A server that refuses unload as busy is never stopped.
+- Ordinary model switches and VRAM eviction still unload the model without
+  stopping the server process. Strata starts again with the current `num_ctx`
+  on the next prompt.
+
 ## 0.16.79
 
 ### A managed server's start command can take its context from the model

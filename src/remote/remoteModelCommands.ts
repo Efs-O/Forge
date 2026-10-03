@@ -82,10 +82,12 @@ export async function handleRemoteModelCommand(
     if (!binding) {
       return { kind: 'rejected', reason: 'this chat has no conversation; use /unloadall' };
     }
-    const { model, wasLoaded } = await context.host.unloadConversationModel(binding.conversationId);
+    const { model, wasLoaded, serverStopped } = await context.host.unloadConversationModel(
+      binding.conversationId,
+    );
     const text = wasLoaded
-      ? `Forge: ${model} unloaded, memory released. Other loaded models stay; /unloadall frees them too.`
-      : `Forge: ${model} was not loaded.`;
+      ? `Forge: ${model} unloaded, memory released${serverStopped ? ', server stopped' : ''}. Other loaded models stay; /unloadall frees them too.`
+      : `Forge: ${model} was not loaded${serverStopped ? ', server stopped' : ''}.`;
     await context.channel.send(event.chatId, text, { signal: context.signal });
     return { kind: 'handled' };
   }

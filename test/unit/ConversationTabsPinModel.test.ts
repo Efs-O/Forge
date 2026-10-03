@@ -521,18 +521,47 @@ describe('ConversationTabs.unloadModelOf', () => {
     await expect(tabs.unloadModelOf('tab0')).resolves.toEqual({ model: '27b', wasLoaded: true });
 
     expect(release).toHaveBeenCalledTimes(1);
-    expect(release).toHaveBeenCalledWith('27b');
+    expect(release).toHaveBeenCalledWith('27b', true);
     expect(posted).toContainEqual({
       type: 'backendDown',
       message: '27b unloaded. Send a prompt to load it again.',
     });
   });
 
-  it('reports a model that was not loaded without releasing anything', async () => {
+  it('reports a model that was not loaded and still checks for a managed server to stop', async () => {
     const { tabs, release } = harness({ tabs: ['27b'], loaded: ['12b'] });
 
     await expect(tabs.unloadModelOf('tab0')).resolves.toEqual({ model: '27b', wasLoaded: false });
-    expect(release).not.toHaveBeenCalled();
+    expect(release).toHaveBeenCalledWith('27b', true);
+  });
+
+  it('reports that an explicit Strata unload also stopped its server', async () => {
+    const { tabs, release, posted } = harness({ tabs: ['strata'], loaded: ['strata'] });
+    const deps = (tabs as unknown as { deps: ConversationTabsDeps }).deps;
+    deps.getConfig = () => ({
+      ...config(),
+      models: [
+        ...config().models,
+        {
+          name: 'strata',
+          provider: 'openai-compatible',
+          endpoint: 'http://127.0.0.1:8090',
+          unload_path: '/unload',
+          stop_command: ['stop-strata'],
+        },
+      ],
+    });
+
+    await expect(tabs.unloadModelOf('tab0')).resolves.toEqual({
+      model: 'strata',
+      wasLoaded: true,
+      serverStopped: true,
+    });
+    expect(release).toHaveBeenCalledWith('strata', true);
+    expect(posted).toContainEqual({
+      type: 'backendDown',
+      message: 'strata unloaded. Server stopped. Send a prompt to load it again.',
+    });
   });
 
   it('refuses while a turn is running on that model', async () => {
@@ -547,7 +576,7 @@ describe('ConversationTabs.unloadModelOf', () => {
 
     await tabs.unloadModelOf('tab1');
 
-    expect(release).toHaveBeenCalledWith('12b');
+    expect(release).toHaveBeenCalledWith('12b', true);
     expect(posted.some((m) => m.type === 'backendDown')).toBe(false);
   });
 });

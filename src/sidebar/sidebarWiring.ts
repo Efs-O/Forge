@@ -77,7 +77,7 @@ export interface SidebarHost {
   rememberClankerMode: (on: boolean) => void;
   /** Sole owner of the unload sequence; the slash command routes through it. */
   unloadModels: () => Promise<void>;
-  unloadActiveModel: () => Promise<{ model: string; wasLoaded: boolean }>;
+  unloadActiveModel: () => Promise<{ model: string; wasLoaded: boolean; serverStopped?: boolean }>;
   isConversationQueued: (id: string) => boolean | undefined;
   /**
    * Whether remote state (a chat binding, queued remote messages) pins this

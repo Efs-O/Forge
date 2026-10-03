@@ -97,6 +97,21 @@ describe('remote /unload vs /unloadall', () => {
     await controller.stop();
   });
 
+  it('/unload reports when the bound Strata server stopped', async () => {
+    const { channel, host, controller } = await start(true);
+    vi.mocked(host.unloadConversationModel).mockResolvedValueOnce({
+      model: 'strata',
+      wasLoaded: true,
+      serverStopped: true,
+    });
+
+    await expect(channel.emit(text('/unload', 'u4'))).resolves.toEqual({ kind: 'handled' });
+
+    expect(host.unloadConversationModel).toHaveBeenCalledWith('c1');
+    expect(channel.sent.at(-1)?.text).toContain('strata unloaded, memory released, server stopped');
+    await controller.stop();
+  });
+
   it('/unloadall still releases every model', async () => {
     const { channel, host, controller } = await start(true);
 

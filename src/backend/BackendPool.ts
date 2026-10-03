@@ -19,6 +19,7 @@ import {
   stopAllSlots,
 } from './poolAcquisition';
 import { claimPort, freeSlot, mostRecentSlot } from './poolSlots';
+import { anyBackendReady, backendResidencySignature } from './poolReadiness';
 import {
   changedStructuralSettings,
   readStructuralSettings,
@@ -174,15 +175,16 @@ export class BackendPool implements IBackendPool {
     return this.startSlot(key, this.claimPort(allowEvict));
   }
 
-  async release(modelName: string): Promise<void> {
+  async release(modelName: string, stopExternal = false): Promise<void> {
     const key = this.poolKey(modelName);
     const existingRelease = this.releasing.get(key);
     if (existingRelease) {
       await existingRelease;
+      if (stopExternal) return this.release(modelName, true);
       return;
     }
 
-    const release = this.releaseKey(key);
+    const release = this.releaseKey(key, stopExternal);
     this.releasing.set(key, release);
     try {
       await release;
@@ -190,12 +192,12 @@ export class BackendPool implements IBackendPool {
       if (this.releasing.get(key) === release) this.releasing.delete(key);
     }
   }
-
-  private async releaseKey(key: string): Promise<void> {
+  private async releaseKey(key: string, stopExternal = false): Promise<void> {
     if (this.gate.isPinned(key)) {
       throw new Error(`Cannot release "${key}": an active delegation hold is using it.`);
     }
-    if (this.external?.isManaged(key)) return this.external.unload(key);
+    if (this.external?.isManaged(key))
+      return stopExternal ? this.external.unloadAndStop(key) : this.external.unload(key);
     if (this.isOllamaModel(key)) {
       const backend = this.ollamaSlots.get(key);
       if (backend) {
@@ -255,8 +257,11 @@ export class BackendPool implements IBackendPool {
   }
 
   /** Every local model AND every managed external server. */
-  async stopAll(): Promise<void> {
-    await settleAll([this.stopLocal(), this.external?.unloadAll()]);
+  async stopAll(stopExternal = false): Promise<void> {
+    await settleAll([
+      this.stopLocal(),
+      stopExternal ? this.external?.unloadAllAndStop() : this.external?.unloadAll(),
+    ]);
   }
 
   /**
@@ -316,19 +321,12 @@ export class BackendPool implements IBackendPool {
     }
   }
 
-  /**
-   * Is ANY endpoint healthy and able to serve a request right now?
-   *
-   * Callers use this to gate sending work and to drive the status bar, so a
-   * runtime borrowed from another Forge window counts: it is a usable endpoint
-   * even though this window owns neither the process nor a port slot.
-   * Distinct from `isLoaded` (residency) — do not conflate the two.
-   */
+  /** Readiness across owned, borrowed, and Ollama backends. */
   isAnyReady(): boolean {
-    return (
-      [...this.slots.values()].some((s) => s.backend.isReady()) ||
-      [...this.sharedSlots.values()].some((s) => s.backend.isReady()) ||
-      [...this.ollamaSlots.values()].some((b) => b.isReady())
+    return anyBackendReady(
+      this.slots.values(),
+      this.sharedSlots.values(),
+      this.ollamaSlots.values(),
     );
   }
 
@@ -386,10 +384,7 @@ export class BackendPool implements IBackendPool {
    */
   residencySignature(): string {
     const keys = [...this.slots.keys(), ...this.sharedSlots.keys(), ...this.ollamaSlots.keys()];
-    return keys
-      .sort()
-      .map((key) => `${key}:${this.backendFor(key)?.isReady() ? 'r' : 's'}`)
-      .join(',');
+    return backendResidencySignature(keys, (key) => this.backendFor(key));
   }
 
   /** The backend behind an already-resolved pool key, wherever it lives. */

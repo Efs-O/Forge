@@ -29,7 +29,7 @@ export interface SlashCommandDeps extends CompactionDeps {
   events: SidebarProviderEvents;
   /** Owned by SidebarProvider. Both throw on failure; this handler reports it. */
   unloadModels: () => Promise<void>;
-  unloadActiveModel: () => Promise<{ model: string; wasLoaded: boolean }>;
+  unloadActiveModel: () => Promise<{ model: string; wasLoaded: boolean; serverStopped?: boolean }>;
   reindexCodebase: () => Promise<void>;
   newConversation: () => Promise<void>;
   clearMessages: () => void;
@@ -80,8 +80,8 @@ export class SlashCommandHandler {
     switch (commandId) {
       case 'unloadModel': // only the active tab's model
         return this.runUnload(async () => {
-          const { model, wasLoaded } = await deps.unloadActiveModel();
-          return `Forge: ${model} ${wasLoaded ? 'unloaded' : 'was not loaded'}.`;
+          const { model, wasLoaded, serverStopped } = await deps.unloadActiveModel();
+          return `Forge: ${model} ${wasLoaded ? 'unloaded' : 'was not loaded'}${serverStopped ? '; server stopped' : ''}.`;
         });
       case 'unloadAll':
         return this.runUnload(() => deps.unloadModels().then(() => 'Forge: all models unloaded.'));

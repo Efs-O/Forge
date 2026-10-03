@@ -139,12 +139,12 @@ export const SLASH_COMMANDS: SlashCommand[] = [
     id: 'unloadModel',
     trigger: 'unload',
     title: 'Unload Model',
-    description: "Release only this chat's model from memory; other loaded models stay.",
+    description: "Release this chat's model and stop its configured server; other models stay.",
   },
   {
     id: 'unloadAll',
     trigger: 'unloadall',
     title: 'Unload All Models',
-    description: 'Stop every loaded model in this window and free all their memory.',
+    description: 'Unload every model and stop configured servers in this window.',
   },
 ];

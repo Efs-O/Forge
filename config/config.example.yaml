@@ -862,6 +862,8 @@ models:
   # "Forge - <display_name> log" output channel (View > Output), new lines only.
   # For a managed server, an exact "{num_ctx}" argv item in start_command is
   # replaced with the model's num_ctx value.
+  # An explicit /unloadModel or /unloadAll also runs stop_command after unload;
+  # automatic model switching still only unloads the model.
   - name: strata-flashnext-iq3s
     display_name: "Qwen Flash-Next (Strata)"
     provider: openai-compatible

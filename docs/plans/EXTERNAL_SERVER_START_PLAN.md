@@ -17,7 +17,8 @@ to make the prompt "just work" without starting the server by hand.
 ## Design
 
 - **`start_command`** (optional, model field, `openai-compatible` only): an argv
-  array, exactly like `stop_command`. Never a shell string, never interpreted.
+  array, exactly like `stop_command`. Never a shell string. An exact `{num_ctx}`
+  argv item resolves to the configured model context before launch.
   Its presence + `unload_path` marks the model as a managed server Forge may
   start.
 - **When it runs:** in `BackendPool.prepareExternal`, which already runs before
@@ -45,13 +46,13 @@ to make the prompt "just work" without starting the server by hand.
   model at startup when started without `--lazy`), `START_POLL_MS = 2000`.
 - **Config (Strata):**
   ```yaml
-  start_command: ["cmd.exe", "/c", "N:/Strata/start-strata.bat", "hidden"]
+  start_command: ["wscript.exe", "N:/Strata/start-strata-hidden.vbs", "{num_ctx}"]
+  num_ctx: 100000
   ```
-  The `hidden` arg is load-bearing: `start-strata.bat` ends with
-  `if /i not "%~1"=="hidden" pause` — without it, a hidden spawn would block on
-  `pause` forever. `cmd` launches `python.exe` and exits; Windows does not kill
-  the orphaned `python.exe`, so the server keeps running (the same mechanism
-  `start-strata-hidden.vbs` already relies on).
+  The VBS passes `hidden` and the context to `start-strata.bat`. The local Python
+  launcher forwards it as Strata's `--max-context` CLI override; a direct batch
+  start with no context argument reads the same Forge YAML. Strata replaces the
+  JSON config's context for that server start.
 
 ## State × lifecycle ledger
 
@@ -88,7 +89,12 @@ to make the prompt "just work" without starting the server by hand.
 - [x] `prepareExternal` frees local models **before** `ensureStarted`, so VRAM
   is free when the server loads.
 - [x] Configs without `start_command` behave exactly as before.
+- [x] `{num_ctx}` in `start_command` reaches the launcher; Strata's CLI override
+  replaces its JSON context without changing the JSON (`ExternalModelServers.test.ts`,
+  `serve.test_server.ContextOverride`). A direct local batch start also reads
+  `num_ctx` from Forge YAML when no argument is supplied (`start_strata.context_size`).
 - [x] `npm run ci` is green.
 
-The live "send a prompt to a dead Strata and it comes up" check is left to the
-user: it requires the ~30 GB model to actually load on this box.
+The live "send a prompt to a dead Strata and it comes up with the configured
+context" check remains pending: the currently running server reports 154624,
+and the new 100000 value takes effect only after its next start.

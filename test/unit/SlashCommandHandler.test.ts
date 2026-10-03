@@ -109,6 +109,31 @@ describe('SlashCommandHandler', () => {
     await handler.handle(commandId);
 
     expect(emitted).toEqual([{ text, ephemeral: true }]);
+    if (commandId === 'unloadModel') {
+      expect(deps.unloadActiveModel).toHaveBeenCalledOnce();
+      expect(deps.unloadModels).not.toHaveBeenCalled();
+    } else {
+      expect(deps.unloadModels).toHaveBeenCalledOnce();
+      expect(deps.unloadActiveModel).not.toHaveBeenCalled();
+    }
+  });
+
+  it('reports a stopped configured server after /unload', async () => {
+    const emitted: HostActivityEvent[] = [];
+    const deps = {
+      unloadActiveModel: vi.fn(async () => ({
+        model: 'strata',
+        wasLoaded: true,
+        serverStopped: true,
+      })),
+      post: vi.fn(),
+    } as unknown as SlashCommandDeps;
+    const handler = new SlashCommandHandler(deps);
+    handler.onHostActivity((event) => emitted.push(event));
+
+    await handler.handle('unloadModel');
+
+    expect(emitted).toEqual([{ text: 'Forge: strata unloaded; server stopped.', ephemeral: true }]);
   });
 
   it('leaves other window-scoped broadcasts non-ephemeral', async () => {

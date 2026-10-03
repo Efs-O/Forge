@@ -404,7 +404,9 @@ export class ConversationTabs {
   }
 
   /** `/unloadModel` for one tab — see `TabModelRelease.unloadModelOf`. */
-  unloadModelOf(convId: string): Promise<{ model: string; wasLoaded: boolean }> {
+  unloadModelOf(
+    convId: string,
+  ): Promise<{ model: string; wasLoaded: boolean; serverStopped?: boolean }> {
     return this.release.unloadModelOf(convId);
   }
 }

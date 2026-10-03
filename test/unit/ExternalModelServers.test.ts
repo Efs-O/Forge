@@ -254,6 +254,78 @@ describe('ExternalModelServers', () => {
     expect(kill).not.toHaveBeenCalled();
   });
 
+  it('stops a managed server only for an explicit unload, after its unload POST', async () => {
+    const config = makeConfig();
+    config.models[1].stop_command = ['stop-strata'];
+    const order: string[] = [];
+    const spawnImpl = vi.fn(() => {
+      order.push('stop');
+      return { unref: vi.fn() };
+    });
+    const fetchImpl = vi.fn(async () => {
+      order.push('unload');
+      return new Response('{}', { status: 200 });
+    });
+    const servers = new ExternalModelServers(
+      () => config,
+      async () => undefined,
+      fetchImpl as unknown as typeof fetch,
+      spawnImpl,
+    );
+    const pool = new BackendPool(config, undefined, servers);
+
+    await pool.release('strata'); // model switch: free VRAM, keep the server up
+    expect(spawnImpl).not.toHaveBeenCalled();
+    probeHttpMock
+      .mockResolvedValueOnce({ reachable: true, ok: true })
+      .mockResolvedValue({ reachable: false, ok: false });
+    await pool.release('strata', true); // /unload, even if already unloaded
+
+    expect(order).toEqual(['unload', 'unload', 'stop']);
+    expect(spawnImpl).toHaveBeenCalledWith('stop-strata', [], {
+      detached: true,
+      windowsHide: true,
+      stdio: 'ignore',
+    });
+  });
+
+  it('never stops a managed server when it refuses unload as busy', async () => {
+    const config = makeConfig();
+    config.models[1].stop_command = ['stop-strata'];
+    const spawnImpl = vi.fn(() => ({ unref: vi.fn() }));
+    const servers = new ExternalModelServers(
+      () => config,
+      async () => undefined,
+      async () => new Response('{}', { status: 409 }),
+      spawnImpl,
+    );
+    const pool = new BackendPool(config, undefined, servers);
+
+    await expect(pool.release('strata', true)).rejects.toThrow(/still running/);
+    expect(spawnImpl).not.toHaveBeenCalled();
+  });
+
+  it('/unloadall stops a configured server even after it was unloaded before', async () => {
+    const config = makeConfig();
+    config.models[1].stop_command = ['stop-strata'];
+    const spawnImpl = vi.fn(() => ({ unref: vi.fn() }));
+    probeHttpMock
+      .mockResolvedValueOnce({ reachable: true, ok: true })
+      .mockResolvedValue({ reachable: false, ok: false });
+    const servers = new ExternalModelServers(
+      () => config,
+      async () => undefined,
+      async () => new Response('{}', { status: 200 }),
+      spawnImpl,
+    );
+    const pool = new BackendPool(config, undefined, servers);
+    await servers.unload('strata');
+
+    await pool.stopAll(true);
+
+    expect(spawnImpl).toHaveBeenCalledOnce();
+  });
+
   it('ensureStarted returns immediately when the server is already reachable', async () => {
     const config = makeConfig();
     const strata = config.models.find((model) => model.name === 'strata')!;

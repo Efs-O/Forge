@@ -295,7 +295,7 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
   }
 
   async unloadModels(): Promise<void> {
-    await this.pool.stopAll();
+    await this.pool.stopAll(true);
     this.events.onBackendStopped?.(this.config.active_model);
     this.post({
       type: 'backendDown',
@@ -304,7 +304,9 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
   }
 
   /** Unload only one chat's model (default: the active tab). Throws on refusal. */
-  unloadConversationModel(conversationId?: string): Promise<{ model: string; wasLoaded: boolean }> {
+  unloadConversationModel(
+    conversationId?: string,
+  ): Promise<{ model: string; wasLoaded: boolean; serverStopped?: boolean }> {
     return this.tabs.unloadModelOf(conversationId ?? this.getActive().id);
   }
 

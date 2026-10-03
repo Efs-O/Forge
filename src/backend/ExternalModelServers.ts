@@ -9,6 +9,8 @@ const log = getLogger();
 
 /** How long an unload POST may take; Strata answers once the GPU is free. */
 const UNLOAD_TIMEOUT_MS = 60_000;
+/** An explicit stop waits for the server to leave its port before reporting success. */
+export const STOP_TIMEOUT_MS = 90_000;
 /** How long to wait for a started server to accept connections before giving up. */
 export const START_TIMEOUT_MS = 240_000;
 /** How often to probe while waiting for a started server. */
@@ -41,7 +43,8 @@ export class ExternalServerBusyError extends Error {}
 
 /**
  * Local model servers Forge does not spawn but can unload (Strata): an
- * `openai-compatible` model with `unload_path`. The server process stays up;
+ * `openai-compatible` model with `unload_path`. A normal release keeps the
+ * server up; explicit unload commands also run its configured stop command.
  * POSTing the path frees its GPU/RAM and it reloads on its next request. The
  * pool treats each one as a resident model, so every unload command reaches it
  * and it never shares VRAM with a llama.cpp/Ollama model this window loads.
@@ -137,6 +140,55 @@ export class ExternalModelServers {
     }
     this.markUnloadedUnlessReused(name, generation);
     log.info(`[ExternalModelServers] unloaded "${name}"`);
+  }
+
+  /** Explicit /unload: free the model, then stop its configured server process. */
+  async unloadAndStop(name: string): Promise<void> {
+    await this.unload(name); // A busy server (409) must never be stopped.
+    await this.stopAfterUnload(name);
+  }
+
+  /** Explicit /unloadall also stops configured servers that were already unloaded. */
+  async unloadAllAndStop(): Promise<void> {
+    await this.unloadAll();
+    for (const model of this.getConfig().models) {
+      if (this.isManaged(model.name)) await this.stopAfterUnload(model.name);
+    }
+  }
+
+  private async stopAfterUnload(name: string): Promise<void> {
+    const model = this.managed(name);
+    if (!model?.stop_command || !model.endpoint) return;
+    if (!(await probeHttp(model.endpoint)).reachable) return;
+    const [command, ...args] = model.stop_command;
+    let launchError: Error | undefined;
+    try {
+      const child = this.spawnImpl(command, args, {
+        detached: true,
+        windowsHide: true,
+        stdio: 'ignore',
+      });
+      child.once?.('error', (error) => {
+        launchError = error;
+      });
+      child.unref();
+    } catch (error) {
+      throw new Error(`Could not stop "${name}": ${describe(error)}`);
+    }
+    const deadline = Date.now() + STOP_TIMEOUT_MS;
+    for (;;) {
+      if (launchError) throw new Error(`Could not stop "${name}": ${launchError.message}`);
+      if (!(await probeHttp(model.endpoint)).reachable) {
+        log.info(`[ExternalModelServers] stopped "${name}" after explicit unload`);
+        return;
+      }
+      if (Date.now() >= deadline) {
+        throw new Error(
+          `"${name}" was unloaded but its server did not stop within ${STOP_TIMEOUT_MS / 1000}s`,
+        );
+      }
+      await new Promise((resolve) => setTimeout(resolve, START_POLL_MS));
+    }
   }
 
   /**

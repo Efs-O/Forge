@@ -23,8 +23,8 @@ export interface IBackendPool {
   acquireForDelegation(primaryModel: string, targetModel: string): Promise<DelegationHold>;
   parallelCapacity(modelName: string): number;
   /** Stop and remove a single model's backend, freeing its VRAM / port slot. */
-  release(modelName: string): Promise<void>;
-  stopAll(): Promise<void>;
+  release(modelName: string, stopExternal?: boolean): Promise<void>;
+  stopAll(stopExternal?: boolean): Promise<void>;
   applyForgeConfig(next: ForgeConfig): void;
   showConsole(modelName?: string): void;
   /** Is ANY endpoint healthy and able to serve a request — owned, borrowed from
