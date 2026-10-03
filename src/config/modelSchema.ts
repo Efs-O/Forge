@@ -72,6 +72,16 @@ export const ModelConfigSchema = z.object({
     )
     .min(1)
     .optional(),
+  // Executable plus argv launched (detached) before a request when the managed
+  // server is down. argv only: never a shell command string, never interpreted.
+  start_command: z
+    .array(
+      z
+        .string()
+        .refine((value) => value.trim().length > 0, 'start_command entries must not be empty'),
+    )
+    .min(1)
+    .optional(),
   // Omitted = disabled. No implicit default, and YAML `null` is rejected rather
   // than silently meaning "off" — opting in is explicit.
   image_retention_turns: z.number().int().nonnegative().optional(),

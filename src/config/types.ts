@@ -148,6 +148,8 @@ export interface ModelConfig {
   stop_on_exit?: boolean;
   /** Executable plus argv; spawned directly, never interpreted as a shell string. */
   stop_command?: string[];
+  /** Executable plus argv launched (detached) before a request when the server is down. */
+  start_command?: string[];
   /** Base URL for Ollama or OpenAI-compatible HTTP providers. */
   endpoint?: string;
   /** Per-model GPU layer override. Falls back to LlamaServerConfig.n_gpu_layers. */

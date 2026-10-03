@@ -271,6 +271,7 @@ export class BackendPool implements IBackendPool {
       busy: (m) => (this.turnPins.get(m) ?? 0) > 0 || this.gate.isPinned(m),
       stopLocal: () => this.stopLocal(),
     });
+    await this.external.ensureStarted(key);
     this.external.markInUse(key);
   }
 

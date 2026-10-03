@@ -2,6 +2,20 @@
 
 ## 0.16.77
 
+### Forge can start a managed external server (Strata) before the first request
+
+A managed external server (`openai-compatible` + `unload_path`) is one Forge
+does not spawn — it only unloads and stops it. If it was down, the first
+request failed with a bare `ECONNREFUSED`. New opt-in model field
+`start_command` (an argv array, like `stop_command`): before a request, if the
+server is not reachable, Forge launches it detached (hidden, unref'd, so it
+survives the extension host) and waits up to 4 min until it accepts
+connections. Local models are freed first, so VRAM is available when it loads.
+A server that is down with no `start_command` now says so explicitly instead of
+failing with `ECONNREFUSED`. Strata's entry sets
+`start_command: ["cmd.exe", "/c", "N:/Strata/start-strata.bat", "hidden"]` —
+the `hidden` arg skips the batch file's trailing `pause`.
+
 ### Two new media tools: `render_html_to_image` and `send_file`
 
 Anything the model makes as a file could only reach a phone through

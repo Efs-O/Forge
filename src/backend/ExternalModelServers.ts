@@ -3,11 +3,16 @@ import type { ForgeConfig, ModelConfig } from '../config/types';
 import { mergeGroupsIntoModel } from '../config/ConfigResolver';
 import { getLogger } from '../util/logger';
 import { deferredStopInvocation, STOP_GRACE_MS } from './deferredStop';
+import { probeHttp } from './HealthCheck';
 
 const log = getLogger();
 
 /** How long an unload POST may take; Strata answers once the GPU is free. */
 const UNLOAD_TIMEOUT_MS = 60_000;
+/** How long to wait for a started server to accept connections before giving up. */
+export const START_TIMEOUT_MS = 240_000;
+/** How often to probe while waiting for a started server. */
+export const START_POLL_MS = 2_000;
 
 type Residency = 'unknown' | 'loaded' | 'unloaded';
 
@@ -124,6 +129,63 @@ export class ExternalModelServers {
     }
     this.markUnloadedUnlessReused(name, generation);
     log.info(`[ExternalModelServers] unloaded "${name}"`);
+  }
+
+  /**
+   * Make sure the managed server is reachable before a request. If it is down
+   * and the model has a `start_command`, launch it (detached, hidden, unref'd
+   * so it survives the extension host) and wait until it accepts connections.
+   * If it is down with no `start_command`, throw an actionable error. Called
+   * from `prepareExternal` after local models are freed, so VRAM is available.
+   */
+  async ensureStarted(name: string): Promise<void> {
+    const model = this.managed(name);
+    if (!model?.endpoint) return;
+    if ((await probeHttp(model.endpoint)).reachable) return; // already up
+    if (!model.start_command?.length) {
+      throw new Error(
+        `"${name}" is not running (nothing is listening at ${model.endpoint}). ` +
+          'Start it manually, or set start_command so Forge can start it.',
+      );
+    }
+    this.launchStart(model);
+    const ready = await this.waitReachable(model.endpoint);
+    if (!ready) {
+      throw new Error(
+        `"${name}" was started but did not become reachable at ${model.endpoint} ` +
+          `within ${START_TIMEOUT_MS / 1000}s. It may still be starting — retry.`,
+      );
+    }
+    log.info(`[ExternalModelServers] started "${name}"`);
+  }
+
+  /** Launch `start_command` detached so it survives the extension host. */
+  private launchStart(model: ModelConfig): void {
+    const [command, ...args] = model.start_command!;
+    try {
+      const child = this.spawnImpl(command, args, {
+        detached: true,
+        windowsHide: true,
+        stdio: 'ignore',
+      });
+      child.once?.('error', (error) =>
+        log.error(`[ExternalModelServers] start command failed for "${model.name}"`, error),
+      );
+      child.unref();
+      log.info(`[ExternalModelServers] launched start command for "${model.name}"`);
+    } catch (error) {
+      throw new Error(`Could not launch start command for "${model.name}": ${describe(error)}`);
+    }
+  }
+
+  /** Poll the endpoint until it accepts connections or the timeout is reached. */
+  private async waitReachable(endpoint: string): Promise<boolean> {
+    const deadline = Date.now() + START_TIMEOUT_MS;
+    for (;;) {
+      if ((await probeHttp(endpoint)).reachable) return true;
+      if (Date.now() >= deadline) return false;
+      await new Promise((resolve) => setTimeout(resolve, START_POLL_MS));
+    }
   }
 
   /** Unload every managed server that may hold memory; reports every failure. */

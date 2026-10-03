@@ -8,6 +8,8 @@ import {
   ExternalModelServers,
   beforeExternalRequest,
   setExternalRequestHook,
+  START_TIMEOUT_MS,
+  START_POLL_MS,
 } from '../../src/backend/ExternalModelServers';
 import { deferredStopInvocation, STOP_GRACE_MS } from '../../src/backend/deferredStop';
 import { freeLocalForExternal } from '../../src/backend/poolAcquisition';
@@ -54,6 +56,14 @@ vi.mock('../../src/backend/DirectBackend', () => {
     onUnexpectedExit(): void {}
   }
   return { DirectBackend: FakeDirectBackend };
+});
+
+const probeHttpMock = vi.hoisted(() =>
+  vi.fn(async () => ({ reachable: false, ok: false })),
+);
+vi.mock('../../src/backend/HealthCheck', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('../../src/backend/HealthCheck')>();
+  return { ...actual, probeHttp: probeHttpMock };
 });
 
 function makeConfig(): ForgeConfig {
@@ -103,6 +113,7 @@ const ok = async (): Promise<Response> => new Response('{"status":"unloaded"}', 
 describe('ExternalModelServers', () => {
   beforeEach(() => {
     events.length = 0;
+    probeHttpMock.mockReset();
   });
 
   it('counts an unknown server as loaded, and an unload POST marks it unloaded', async () => {
@@ -242,6 +253,88 @@ describe('ExternalModelServers', () => {
     expect(spawnImpl).toHaveBeenCalledOnce();
     expect(kill).not.toHaveBeenCalled();
   });
+
+  it('ensureStarted returns immediately when the server is already reachable', async () => {
+    const config = makeConfig();
+    const strata = config.models.find((model) => model.name === 'strata')!;
+    strata.start_command = ['start-strata', 'hidden'];
+    const spawnImpl = vi.fn(() => ({ unref: vi.fn() }));
+    probeHttpMock.mockResolvedValue({ reachable: true, ok: true });
+    const servers = new ExternalModelServers(
+      () => config,
+      async () => undefined,
+      undefined,
+      spawnImpl,
+    );
+    await servers.ensureStarted('strata');
+    expect(spawnImpl).not.toHaveBeenCalled();
+  });
+
+  it('ensureStarted launches start_command when down, then waits until reachable', async () => {
+    const config = makeConfig();
+    const strata = config.models.find((model) => model.name === 'strata')!;
+    strata.start_command = ['start-strata', 'hidden'];
+    const unref = vi.fn();
+    const spawnImpl = vi.fn(() => ({ unref }));
+    // "is it up?" probe → down; first wait-loop probe → up (no polling delay).
+    probeHttpMock
+      .mockResolvedValueOnce({ reachable: false, ok: false })
+      .mockResolvedValue({ reachable: true, ok: true });
+    const servers = new ExternalModelServers(
+      () => config,
+      async () => undefined,
+      undefined,
+      spawnImpl,
+    );
+    await servers.ensureStarted('strata');
+    expect(spawnImpl).toHaveBeenCalledTimes(1);
+    expect(spawnImpl).toHaveBeenCalledWith('start-strata', ['hidden'], {
+      detached: true,
+      windowsHide: true,
+      stdio: 'ignore',
+    });
+    expect(unref).toHaveBeenCalledOnce();
+  });
+
+  it('ensureStarted throws an actionable error when down with no start_command', async () => {
+    const config = makeConfig();
+    const spawnImpl = vi.fn(() => ({ unref: vi.fn() }));
+    probeHttpMock.mockResolvedValue({ reachable: false, ok: false });
+    const servers = new ExternalModelServers(
+      () => config,
+      async () => undefined,
+      undefined,
+      spawnImpl,
+    );
+    await expect(servers.ensureStarted('strata')).rejects.toThrow(/not running/);
+    expect(spawnImpl).not.toHaveBeenCalled();
+  });
+
+  it('ensureStarted times out if the server never becomes reachable', async () => {
+    vi.useFakeTimers();
+    try {
+      const config = makeConfig();
+      const strata = config.models.find((model) => model.name === 'strata')!;
+      strata.start_command = ['start-strata', 'hidden'];
+      const spawnImpl = vi.fn(() => ({ unref: vi.fn() }));
+      probeHttpMock.mockResolvedValue({ reachable: false, ok: false });
+      const servers = new ExternalModelServers(
+        () => config,
+        async () => undefined,
+        undefined,
+        spawnImpl,
+      );
+      const promise = servers.ensureStarted('strata');
+      // Attach a no-op handler immediately so the rejection (fired by the fake
+      // timers below) is never unhandled; the assertion still sees it.
+      promise.catch(() => {});
+      await vi.advanceTimersByTimeAsync(START_TIMEOUT_MS + START_POLL_MS * 2);
+      await expect(promise).rejects.toThrow(/did not become reachable/);
+      expect(spawnImpl).toHaveBeenCalledOnce();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
 });
 
 describe('deferred stop watcher', () => {
@@ -285,6 +378,9 @@ describe('deferred stop watcher', () => {
 describe('BackendPool with a managed external server', () => {
   beforeEach(() => {
     events.length = 0;
+    // These tests exercise local-model freeing, not starting: keep the external
+    // server "up" so prepareExternal's ensureStarted returns without spawning.
+    probeHttpMock.mockResolvedValue({ reachable: true, ok: true });
   });
 
   it('stopAll and release reach the external server', async () => {
@@ -340,6 +436,37 @@ describe('BackendPool with a managed external server', () => {
       setExternalRequestHook(undefined);
     }
   });
+
+  it('frees local models before starting the external server (VRAM order)', async () => {
+    const config = makeConfig();
+    const strata = config.models.find((m) => m.name === 'strata')!;
+    strata.start_command = ['start-strata', 'hidden'];
+    // Mock the unload POST (acquire unloads the external server first) so no
+    // real network call is made; record the start spawn into the shared events.
+    const fetchImpl = (async () =>
+      new Response('{"status":"unloaded"}', { status: 200 })) as unknown as typeof fetch;
+    const spawnImpl = vi.fn(() => {
+      events.push('ensureStarted:spawn');
+      return { unref: vi.fn() };
+    });
+    // "is it up?" probe → down (so ensureStarted spawns); wait-loop probe → up.
+    probeHttpMock
+      .mockResolvedValueOnce({ reachable: false, ok: false })
+      .mockResolvedValue({ reachable: true, ok: true });
+    const servers = new ExternalModelServers(
+      () => config,
+      async () => undefined,
+      fetchImpl,
+      spawnImpl,
+    );
+    const pool = new BackendPool(config, undefined, servers);
+    await pool.acquire('llama');
+    events.length = 0;
+    await pool.prepareExternal('strata');
+    // The local stop must precede the start spawn: Strata cannot load into VRAM
+    // a local model still holds, so the order is load-bearing, not cosmetic.
+    expect(events).toEqual(['stop:9100', 'ensureStarted:spawn']);
+  });
 });
 
 describe('unload_path config', () => {
@@ -388,5 +515,55 @@ describe('unload_path config', () => {
       models: [{ ...model, unload_path: '/unload', stop_command: ['cmd.exe', '/c', 'stop.bat'] }],
     });
     expect(valid.success).toBe(true);
+  });
+});
+
+describe('start_command config', () => {
+  const base = {
+    active_model: 'm',
+    llama_server: { binary: '/bin/llama-server' },
+  };
+
+  it('is accepted on openai-compatible with unload_path', () => {
+    const good = ForgeConfigSchema.safeParse({
+      ...base,
+      models: [
+        {
+          name: 'm',
+          provider: 'openai-compatible',
+          endpoint: 'http://127.0.0.1:8080',
+          api_key_secret: 's',
+          unload_path: '/unload',
+          start_command: ['cmd.exe', '/c', 'start.bat', 'hidden'],
+        },
+      ],
+    });
+    expect(good.success).toBe(true);
+  });
+
+  it('is refused on a non-openai-compatible provider', () => {
+    const bad = ForgeConfigSchema.safeParse({
+      ...base,
+      models: [{ name: 'm', gguf_path: '/m.gguf', start_command: ['x'] }],
+    });
+    expect(bad.success).toBe(false);
+    expect(JSON.stringify(bad.error?.issues)).toContain('only for provider: openai-compatible');
+  });
+
+  it('requires unload_path', () => {
+    const bad = ForgeConfigSchema.safeParse({
+      ...base,
+      models: [
+        {
+          name: 'm',
+          provider: 'openai-compatible',
+          endpoint: 'http://127.0.0.1:8080',
+          api_key_secret: 's',
+          start_command: ['x'],
+        },
+      ],
+    });
+    expect(bad.success).toBe(false);
+    expect(JSON.stringify(bad.error?.issues)).toContain('start_command requires unload_path');
   });
 });

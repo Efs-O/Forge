@@ -273,6 +273,20 @@ export const ForgeConfigSchema = z
           message: `stop_on_exit and stop_command are only for provider: openai-compatible (got ${provider})`,
         });
       }
+      if (model.start_command && provider !== 'openai-compatible') {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          path: ['models', index, 'start_command'],
+          message: `start_command is only for provider: openai-compatible (got ${provider})`,
+        });
+      }
+      if (model.start_command && !model.unload_path) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          path: ['models', index, 'start_command'],
+          message: 'start_command requires unload_path (a managed server Forge can also start)',
+        });
+      }
       if (model.stop_on_exit === true && !model.stop_command) {
         ctx.addIssue({
           code: z.ZodIssueCode.custom,
