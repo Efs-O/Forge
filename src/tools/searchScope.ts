@@ -68,3 +68,46 @@ export function namedExistingPath(glob: string, root: string): string | undefine
   // would make every result in that one case absolute too.
   return inside.replace(/\\/gu, '/');
 }
+
+export interface SearchCodeScope {
+  target: string;
+  glob?: string;
+  explicitPath: boolean;
+}
+
+/**
+ * Resolve the ripgrep root and optional glob for search_code. Relative patterns
+ * remain workspace-scoped; absolute paths explicitly name an external target.
+ */
+export function resolveSearchCodeScope(include: string, workspaceRoot: string): SearchCodeScope {
+  if (!path.isAbsolute(include)) {
+    const named = namedExistingPath(include, workspaceRoot);
+    return named
+      ? { target: named, explicitPath: true }
+      : { target: '.', glob: include, explicitPath: false };
+  }
+
+  const absolute = path.resolve(include);
+  if (!/[*?[\]{}!]/u.test(absolute)) {
+    if (!fs.existsSync(absolute)) {
+      throw new Error(`search_code: absolute include path does not exist: ${absolute}`);
+    }
+    return { target: absolute, explicitPath: true };
+  }
+
+  const parsed = path.parse(absolute);
+  const segments = absolute.slice(parsed.root.length).split(path.sep);
+  const wildcardIndex = segments.findIndex((segment) => /[*?[\]{}!]/u.test(segment));
+  const target = path.join(parsed.root, ...segments.slice(0, wildcardIndex));
+  const glob = segments.slice(wildcardIndex).join('/');
+  let targetStat: fs.Stats;
+  try {
+    targetStat = fs.statSync(target);
+  } catch {
+    throw new Error(`search_code: absolute include root does not exist: ${target}`);
+  }
+  if (!targetStat.isDirectory()) {
+    throw new Error(`search_code: absolute include root is not a directory: ${target}`);
+  }
+  return { target, glob, explicitPath: false };
+}

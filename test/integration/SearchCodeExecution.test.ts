@@ -44,6 +44,33 @@ describe('isolated search_code process execution', () => {
     expect(result).toContain('> 2: --new');
   });
 
+  it('searches an explicitly named absolute file outside the workspace', async () => {
+    const externalRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'forge-search-external-'));
+    const externalFile = path.join(externalRoot, 'server.py');
+    fs.writeFileSync(externalFile, 'fixture');
+    try {
+      const result = await tool().handler({ query: 'needle', include: externalFile });
+      expect(result).toContain(`=== ${externalFile.replace(/\\/g, '/')} ===`);
+      expect(result).toContain('> 2: needle');
+    } finally {
+      fs.rmSync(externalRoot, { recursive: true, force: true });
+    }
+  });
+
+  it('searches an absolute glob under its external static directory', async () => {
+    const externalRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'forge-search-external-'));
+    try {
+      const result = await tool().handler({
+        query: 'needle',
+        include: path.join(externalRoot, '**', '*.py'),
+      });
+      expect(result).toContain(`=== ${path.join(externalRoot, 'match.py').replace(/\\/g, '/')} ===`);
+      expect(result).toContain('> 2: needle');
+    } finally {
+      fs.rmSync(externalRoot, { recursive: true, force: true });
+    }
+  });
+
   it('kills the spawned search and reports caller cancellation', async () => {
     const controller = new AbortController();
     const pending = tool().handler(

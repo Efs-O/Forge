@@ -1,10 +1,11 @@
 import { spawn } from 'child_process';
+import * as path from 'path';
 import * as vscode from 'vscode';
 import type { RegisteredTool } from './ToolRegistry';
 import { resolveRipgrep, type RipgrepResolution } from './RipgrepResolver';
 import { capResultText } from './resultCap';
 import { capSnippetLine, MAX_SEARCH_RESULT_CHARS } from './searchSnippet';
-import { SEARCH_EXCLUDES, namedExistingPath } from './searchScope';
+import { SEARCH_EXCLUDES, namedExistingPath, resolveSearchCodeScope } from './searchScope';
 
 const OUTPUT_LINE_LIMIT = 50;
 const CONTEXT_LINES = 2;
@@ -69,10 +70,7 @@ function isContextEvent(
  */
 export function gitignoredNote(glob: string): string {
   if (!/[*?[\]{}!]/u.test(glob)) return '';
-  return (
-    ' Globs skip gitignored files (for example everything under .forge/); ' +
-    'pass the exact file or folder path, such as ".forge/config.yaml", to search it.'
-  );
+  return ' Globs skip gitignored files; pass an exact file or folder path to search it.';
 }
 
 /**
@@ -233,7 +231,7 @@ export function makeSearchCodeTool(
       function: {
         name: 'search_code',
         description:
-          'Search for a string/pattern across workspace files. Returns matching file paths and surrounding context lines.',
+          'Search for a string/pattern across workspace files or an explicitly named absolute path, folder, or glob outside the workspace. Relative includes are rooted at the workspace; absolute globs are rooted at the path before the first wildcard. Returns matching file paths and surrounding context lines.',
         parameters: {
           type: 'object',
           properties: {
@@ -242,8 +240,9 @@ export function makeSearchCodeTool(
               type: 'string',
               description:
                 'Glob pattern of files to include, e.g. "**/*.ts". Defaults to "**/*". ' +
-                'Anchored at the workspace root, so a path-bearing glob must start there: ' +
-                'use "subproject/src/**/*.ts", or "**/src/**/*.ts" to match at any depth.',
+                'Relative patterns are anchored at the workspace root. An absolute path, ' +
+                'folder, or glob can target outside the workspace, e.g. ' +
+                '"N:\\Strata\\serve\\server.py" or "N:\\Strata\\serve\\**\\*.py".',
             },
             max_results: {
               type: 'integer',
@@ -274,10 +273,12 @@ export function makeSearchCodeTool(
       // identically to a term that is genuinely absent, leaving the model to
       // re-guess the term rather than the syntax.
       if (matches.length === 0) {
+        const scopeNote = path.isAbsolute(include)
+          ? ' (absolute include paths are searched from their named path)'
+          : ' (relative include globs are anchored at the workspace root)';
         return (
           `No matches found for "${query}" in ${include} ` +
-          `(literal text search — regular-expression syntax is not interpreted, ` +
-          `and the include glob is anchored at the workspace root).` +
+          `(literal text search — regular-expression syntax is not interpreted${scopeNote}).` +
           gitignoredNote(include)
         );
       }
@@ -313,7 +314,7 @@ async function searchWorkspaceText(
   const folder = vscode.workspace.workspaceFolders?.[0];
   if (!folder) throw new Error('No workspace folder open.');
 
-  const named = namedExistingPath(include, folder.uri.fsPath);
+  const scope = resolveSearchCodeScope(include, folder.uri.fsPath);
   const args = [
     '--json',
     '--fixed-strings',
@@ -322,13 +323,13 @@ async function searchWorkspaceText(
     '--context',
     String(CONTEXT_LINES),
     '--hidden',
-    ...(named
+    ...(scope.explicitPath
       ? ['--no-ignore-vcs']
-      : ['--glob', include, ...SEARCH_EXCLUDES.flatMap((glob) => ['--glob', glob])]),
+      : ['--glob', scope.glob ?? include, ...SEARCH_EXCLUDES.flatMap((glob) => ['--glob', glob])]),
     // Behind --regexp, so a query like `--new` is the pattern, not a flag rg refuses.
     '--regexp',
     query,
-    named ?? '.',
+    scope.target,
   ];
 
   return new Promise<SearchCodeMatch[]>((resolve, reject) => {

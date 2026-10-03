@@ -408,7 +408,8 @@ Required installed-VSIX smoke cases:
 - coordinator calls `list_worker_models`, then dispatches an exact local model;
 - read-only worker reviews a file with no writable paths;
 - write worker edits one exact file and Keep/Undo restores it;
-- worker `find_files` and `search_code` stay inside the workspace;
+- worker `find_files` stays inside the workspace; `search_code` may also target
+  an explicitly named absolute path, folder, or glob outside it;
 - missing ripgrep fails clearly without hanging;
 - Stop during search, model startup, worker generation, approval, and review;
 - cloud catalog filtering and dangerous approval;

@@ -1,6 +1,12 @@
 import { describe, expect, it } from 'vitest';
+import * as fs from 'fs';
+import * as os from 'os';
 import * as path from 'path';
-import { SEARCH_EXCLUDES, namedExistingPath } from '../../src/tools/searchScope';
+import {
+  SEARCH_EXCLUDES,
+  namedExistingPath,
+  resolveSearchCodeScope,
+} from '../../src/tools/searchScope';
 import { SNIPPETS_PER_FILE_LIMIT } from '../../src/tools/dirTools';
 
 describe('search_code excludes', () => {
@@ -63,5 +69,61 @@ describe('namedExistingPath', () => {
 
   it('reports workspace-relative with forward slashes', () => {
     expect(namedExistingPath('src/tools/searchScope.ts', root)).toBe('src/tools/searchScope.ts');
+  });
+});
+
+describe('resolveSearchCodeScope', () => {
+  const root = path.resolve(__dirname, '..', '..');
+
+  it('keeps relative globs rooted at the workspace', () => {
+    expect(resolveSearchCodeScope('src/**/*.ts', root)).toEqual({
+      target: '.',
+      glob: 'src/**/*.ts',
+      explicitPath: false,
+    });
+  });
+
+  it('allows an explicitly named absolute file outside the workspace', () => {
+    const externalFile = path.join(os.tmpdir(), `forge-search-${process.pid}.txt`);
+    fs.writeFileSync(externalFile, 'needle');
+    try {
+      expect(resolveSearchCodeScope(externalFile, root)).toEqual({
+        target: externalFile,
+        explicitPath: true,
+      });
+    } finally {
+      fs.rmSync(externalFile, { force: true });
+    }
+  });
+
+  it('allows an explicitly named absolute directory outside the workspace', () => {
+    const externalRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'forge-search-scope-'));
+    try {
+      expect(resolveSearchCodeScope(externalRoot, root)).toEqual({
+        target: externalRoot,
+        explicitPath: true,
+      });
+    } finally {
+      fs.rmSync(externalRoot, { recursive: true, force: true });
+    }
+  });
+
+  it('roots absolute globs at their static directory prefix', () => {
+    const externalRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'forge-search-scope-'));
+    try {
+      expect(resolveSearchCodeScope(path.join(externalRoot, '**', '*.py'), root)).toEqual({
+        target: externalRoot,
+        glob: '**/*.py',
+        explicitPath: false,
+      });
+    } finally {
+      fs.rmSync(externalRoot, { recursive: true, force: true });
+    }
+  });
+
+  it('does not fall back to the workspace for a missing absolute target', () => {
+    expect(() =>
+      resolveSearchCodeScope(path.join(os.tmpdir(), `missing-${process.pid}.py`), root),
+    ).toThrow('search_code: absolute include path does not exist');
   });
 });
