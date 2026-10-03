@@ -79,7 +79,7 @@ export function makeSendFileTool(deps: SendFileDeps): RegisteredTool {
       function: {
         name: 'send_file',
         description:
-          "Send a file from the workspace (or this conversation's screenshot directory) to the remote chat watching this turn. Use for files produced by other means: Pillow composites, browser screenshots, reports, PDFs, markdown. render_html_to_image and generate_image deliver their own output automatically — use send_file for anything else. Send only files you created or the user asked for; the copy persists on Telegram's servers, so never send credentials, keys, or config.",
+          "Send a file from the workspace (or this conversation's screenshot directory) to the remote chat watching this turn. Use for files produced by other means: Pillow composites, browser screenshots, reports, PDFs, markdown. render_html_to_image and generate_image deliver their own output automatically — use send_file for anything else. Send only files you created or the user asked for; the copy persists on Telegram's servers, so never send credentials, keys, or config. Requires the `media` tool group to be loaded via `load_tool_group` first.",
         parameters: {
           type: 'object',
           properties: {
