@@ -95,6 +95,80 @@ describe('ToolRegistry.invalidArgs boolean refusal (Fix B)', () => {
   });
 });
 
+describe('ToolRegistry.invalidArgs array-item refusal (Fix D)', () => {
+  const registry = new ToolRegistry();
+  // Mirrors ask_user's `questions`: an array whose entries must be objects.
+  const askTool = makeBoolTool('ask_user', {
+    prompt: { type: 'string' },
+    questions: {
+      type: 'array',
+      items: { type: 'object', properties: { prompt: { type: 'string' } }, required: ['prompt'] },
+    },
+  } as never);
+
+  it('names the field and the offending entry when a string is sent where an object belongs', () => {
+    const message = registry.invalidArgs(askTool, {
+      prompt: 'Which?',
+      questions: ['', ''],
+    });
+    expect(message).toBe(
+      'Error: ask_user "questions" entries must be objects, not entry 1 (string), entry 2 (string). ' +
+        'Resend each entry as an object with the fields the schema declares.',
+    );
+    expect(message?.length).toBeLessThanOrEqual(200);
+  });
+
+  it('accepts well-formed object entries, including ones missing a key', () => {
+    // A half-built OBJECT still reaches the handler, which owns the better
+    // message; only entries that are not objects at all are refused here.
+    expect(
+      registry.invalidArgs(askTool, { prompt: 'Which?', questions: [{ nope: 1 }] }),
+    ).toBeUndefined();
+  });
+
+  it('refuses null and nested-array entries and numbers them', () => {
+    const message = registry.invalidArgs(askTool, {
+      prompt: 'Which?',
+      questions: [{ prompt: 'a' }, [''], null],
+    });
+    expect(message).toContain('entry 2 (array)');
+    expect(message).toContain('entry 3 (null)');
+  });
+
+  it('caps the entry list at three and counts the rest', () => {
+    const message = registry.invalidArgs(askTool, {
+      prompt: 'Which?',
+      questions: ['a', 'b', 'c', 'd', 'e'],
+    });
+    expect(message).toContain('entry 3 (string) and 2 more');
+    expect(message).not.toContain('entry 4');
+    expect(message?.length).toBeLessThanOrEqual(200);
+  });
+
+  it('stays within 200 characters for a long tool and field name', () => {
+    const long = makeBoolTool('y'.repeat(190), {
+      a_really_long_array_field_name: {
+        type: 'array',
+        items: { type: 'object', properties: {}, required: [] },
+      },
+    } as never);
+    const message = registry.invalidArgs(long, {
+      a_really_long_array_field_name: ['x'],
+    });
+    expect(message?.length).toBeLessThanOrEqual(200);
+    // A 190-char tool name plus a 30-char field name cannot fit even the short
+    // form, so the refusal falls all the way back to the generic.
+    expect(message).toBe('Error: invalid array argument; its entries must be objects.');
+  });
+
+  it('leaves an array of scalars alone when the schema declares scalar items', () => {
+    const stage = makeBoolTool('stage', {
+      paths: { type: 'array', items: { type: 'string' } },
+    } as never);
+    expect(registry.invalidArgs(stage, { paths: ['a.ts', 'b.ts'] })).toBeUndefined();
+  });
+});
+
 describe('apply_line_edits missing nested field (Fix C)', () => {
   function withSampleFile<T>(fn: (relativePath: string) => Promise<T>): Promise<T> {
     const dir = fs.mkdtempSync(path.join(process.cwd(), '.forge-fixc-test-'));

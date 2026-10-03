@@ -100,6 +100,59 @@ export interface RegisteredTool {
   requiresVision?: (modelName: string) => string;
 }
 
+/** A declared property, narrowed to the two fields the refusals read. */
+type DeclaredProperty = { type?: unknown; items?: unknown };
+
+/**
+ * Refusal text when an array argument is well-formed at the top level but its
+ * ELEMENTS are the wrong kind: `ask_user` takes `questions` as an array of
+ * `{prompt, options}` objects, and an agent that had just been told to send "a
+ * bare array" sent `["", ""]` — valid JSON, an array, and still useless to the
+ * handler. The top-level array check alone cannot see it.
+ *
+ * Only the element TYPE is judged, never the keys inside an element: tools that
+ * own a nested structure (`apply_line_edits`) already refuse with an
+ * operation-numbered message that beats anything generic here, and a refusal
+ * raised at the registry would pre-empt the better one.
+ */
+function invalidArrayItems(
+  name: string,
+  declared: Array<[string, DeclaredProperty]>,
+  present: Record<string, unknown>,
+): string | undefined {
+  for (const [key, schema] of declared) {
+    if (schema?.type !== 'array') continue;
+    const value = present[key];
+    if (!Array.isArray(value)) continue;
+    const itemSchema =
+      schema.items && typeof schema.items === 'object' && !Array.isArray(schema.items)
+        ? (schema.items as { type?: unknown })
+        : undefined;
+    if (itemSchema?.type !== 'object') continue;
+    const bad = value
+      .map((item, index) => ({ item, index }))
+      .filter(({ item }) => item === null || typeof item !== 'object' || Array.isArray(item));
+    if (bad.length === 0) continue;
+    const where = bad
+      .slice(0, 3)
+      .map(
+        ({ item, index }) =>
+          `entry ${index + 1} (${item === null ? 'null' : Array.isArray(item) ? 'array' : typeof item})`,
+      )
+      .join(', ');
+    const more = bad.length > 3 ? ` and ${bad.length - 3} more` : '';
+    const message = `Error: ${name} "${key}" entries must be objects, not ${where}${more}. Resend each entry as an object with the fields the schema declares.`;
+    if (message.length <= 200) return message;
+    const shorter = `Error: ${name} "${key}" has entries that are not objects. Resend each entry as an object.`;
+    // Same three-tier bound as the boolean refusal: name the field when it fits,
+    // else a generic that still names the tool and the fix.
+    return shorter.length <= 200
+      ? shorter
+      : 'Error: invalid array argument; its entries must be objects.';
+  }
+  return undefined;
+}
+
 /**
  * Central catalog of available tools.
  * Tools are registered with a permission tier and a strict JSON Schema.
@@ -144,7 +197,7 @@ export class ToolRegistry {
     }
     const properties = parameters.properties;
     if (typeof properties !== 'object' || properties === null) return undefined;
-    const declared = Object.entries(properties as Record<string, { type?: unknown }>).filter(
+    const declared = Object.entries(properties as Record<string, DeclaredProperty>).filter(
       ([key]) => present[key] !== undefined,
     );
     const notBoolean = declared
@@ -173,8 +226,10 @@ export class ToolRegistry {
     const notArray = declared
       .filter(([key, schema]) => schema?.type === 'array' && !Array.isArray(present[key]))
       .map(([key]) => `"${key}" (got ${typeof present[key]})`);
-    if (notArray.length === 0) return undefined;
-    return `Error: ${name} needs a JSON array for ${notArray.join(', ')}, not a string holding one. Resend it as a bare array, e.g. ["a", "b"].`;
+    if (notArray.length > 0) {
+      return `Error: ${name} needs a JSON array for ${notArray.join(', ')}, not a string holding one. Resend it as a bare array, e.g. ["a", "b"].`;
+    }
+    return invalidArrayItems(name, declared, present);
   }
 
   get(name: string): RegisteredTool | undefined {
