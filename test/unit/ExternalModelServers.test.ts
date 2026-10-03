@@ -114,7 +114,14 @@ describe('ExternalModelServers', () => {
     await servers.unload('strata');
     expect(calls[0].url).toBe('http://127.0.0.1:8080/unload');
     expect(calls[0].init.method).toBe('POST');
-    expect(calls[0].init.headers).toEqual({ Authorization: 'Bearer token-strata' });
+    // Strata's /unload 415s a non-JSON POST (server.py _own_page), so the control
+    // POST must declare Content-Type: application/json (with a JSON body), or the
+    // unload silently fails and the server keeps holding its VRAM.
+    expect(calls[0].init.headers).toEqual({
+      'Content-Type': 'application/json',
+      Authorization: 'Bearer token-strata',
+    });
+    expect(calls[0].init.body).toEqual('{}');
     expect(servers.isLoaded('strata')).toBe(false);
 
     servers.markInUse('strata');

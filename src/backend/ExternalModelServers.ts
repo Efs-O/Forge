@@ -96,7 +96,14 @@ export class ExternalModelServers {
     try {
       response = await this.fetchImpl(url, {
         method: 'POST',
-        headers: token ? { Authorization: `Bearer ${token}` } : {},
+        // Strata's /unload (and /load, /settings) reject a non-JSON POST with 415
+        // "send application/json" — a CSRF/rebinding guard (server.py _own_page).
+        // A fire-and-forget control POST still has to declare itself as JSON.
+        headers: {
+          'Content-Type': 'application/json',
+          ...(token ? { Authorization: `Bearer ${token}` } : {}),
+        },
+        body: '{}',
         signal: AbortSignal.timeout(UNLOAD_TIMEOUT_MS),
       });
     } catch (err) {
