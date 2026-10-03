@@ -149,9 +149,24 @@ export class ToolRegistry {
     );
     const notBoolean = declared
       .filter(([key, schema]) => schema?.type === 'boolean' && typeof present[key] !== 'boolean')
-      .map(([key]) => `"${key}" (got ${JSON.stringify(present[key])})`);
+      .map(([key]) => {
+        const value = present[key];
+        // "True"/"False" are the observed Python-style spellings: show the
+        // unquoted JSON boolean beside the field so the retry is unambiguous.
+        const unquoted = value === 'True' ? 'true' : value === 'False' ? 'false' : undefined;
+        const correction =
+          unquoted !== undefined ? `use ${unquoted}` : 'use true or false without quotes';
+        return `${key}=${JSON.stringify(value)}: ${correction}`;
+      });
     if (notBoolean.length > 0) {
-      return `Error: ${name} needs JSON true or false, not a string or number, for ${notBoolean.join(', ')}. Resend the call with a bare boolean.`;
+      const message = `Error: ${name} ${notBoolean.join(', ')}`;
+      // Hard 200-char cap on the refusal; a pathological field list falls back
+      // to a short generic that still names the tool and the fix.
+      if (message.length <= 200) return message;
+      const fallback = `Error: ${name} needs JSON true or false, not a string or number. Resend with bare booleans.`;
+      return fallback.length <= 200
+        ? fallback
+        : 'Error: invalid boolean argument; use unquoted JSON true or false.';
     }
     // Strata sent exec_command `args` as one JSON-encoded string; the handler
     // died on `args.findIndex is not a function`, naming neither field nor fix.

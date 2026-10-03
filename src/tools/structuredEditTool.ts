@@ -8,6 +8,12 @@ const MAX_LINES_PER_OPERATION = 500;
 const MAX_LINE_CHARS = 4_000;
 const MAX_EXPECTED_CHARS = 64_000;
 const MAX_REPLACEMENT_CHARS = 64_000;
+const OPERATION_REQUIRED_FIELDS = [
+  'start_line',
+  'end_line',
+  'expected_lines',
+  'replacement_lines',
+] as const;
 
 export interface LineEditOperation {
   start_line: number;
@@ -108,7 +114,7 @@ export function makeApplyLineEditsTool(): RegisteredTool {
                   expected_lines: lineArraySchema(1),
                   replacement_lines: lineArraySchema(0),
                 },
-                required: ['start_line', 'end_line', 'expected_lines', 'replacement_lines'],
+                required: [...OPERATION_REQUIRED_FIELDS],
                 additionalProperties: false,
               },
             },
@@ -171,6 +177,12 @@ function parseOperations(value: unknown): LineEditOperation[] {
       throw new Error(`apply_line_edits: operation ${index + 1} must be an object`);
     }
     const record = entry as Record<string, unknown>;
+    // Distinguish an absent required field from a present wrong-type value:
+    // a missing start_line is "missing start_line", not "must be an integer".
+    const missing = OPERATION_REQUIRED_FIELDS.find((field) => record[field] === undefined);
+    if (missing !== undefined) {
+      throw new Error(`apply_line_edits: operation ${index + 1} is missing ${missing}`);
+    }
     return {
       start_line: requireInteger(record['start_line'], `operation ${index + 1} start_line`),
       end_line: requireInteger(record['end_line'], `operation ${index + 1} end_line`),

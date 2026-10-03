@@ -256,7 +256,7 @@ describe('ToolDispatch', () => {
 
     expect(handler).not.toHaveBeenCalled();
     expect(messages[0]?.content).toBe(
-      'Error: exec_command needs JSON true or false, not a string or number, for "background" (got "True"). Resend the call with a bare boolean.',
+      'Error: exec_command background="True": use true',
     );
     expect(failureTracker.record).toHaveBeenCalledWith('conv-a');
   });

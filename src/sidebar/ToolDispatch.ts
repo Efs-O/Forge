@@ -22,7 +22,8 @@ import { isFailureResult, readPathArg, resultLabel } from './toolResultView';
 import type { PlanItem } from './sessionTypes';
 import { getLogger } from '../util/logger';
 import { ToolApprovalPolicyDenied } from './ToolApprovalService';
-import { isLazyGroupActive, lazyGroupForTool } from '../tools/lazyToolGroups';
+import { isLazyGroupActive, lazyGroupForTool, lazyGroupNames } from '../tools/lazyToolGroups';
+import { filterVisionGated, visionGatedNames } from './visionGate';
 
 const log = getLogger();
 /** A directory has no text to diff, and `readFileSync` on one throws EISDIR. */
@@ -83,6 +84,53 @@ function toolResultText(result: ToolHandlerResult): string {
 
 function toolResultContent(result: ToolHandlerResult): ChatMessage['content'] {
   return typeof result === 'string' ? result : result.content;
+}
+
+const UNKNOWN_TOOL_HINT_MAX_CHARS = 200;
+const UNKNOWN_TOOL_HINT_MIN_PREFIX_CHARS = 5;
+
+function unknownToolResult(
+  name: string,
+  registry: ToolRegistry,
+  allowed: Set<ToolPermission>,
+  budget: ToolBudget | undefined,
+  convId: string | undefined,
+  modelContext: { modelName: string; isVisionModel: boolean } | undefined,
+  unavailableTools: ReadonlyMap<string, string> | undefined,
+): string {
+  const result = `Error: unknown tool "${name}"`;
+  if (name.length < UNKNOWN_TOOL_HINT_MIN_PREFIX_CHARS) return result;
+
+  const definitions = filterVisionGated(
+    registry.definitions(allowed),
+    modelContext?.isVisionModel !== false,
+    visionGatedNames(registry),
+  ).filter((definition) => !unavailableTools?.has(definition.function.name));
+  const eligible = budget?.filterDefinitions(definitions) ?? definitions;
+  const matches = eligible.filter(
+    (definition) => definition.function.name !== name && definition.function.name.startsWith(name),
+  );
+  if (matches.length !== 1) return result;
+
+  const candidate = matches[0]?.function.name;
+  if (!candidate) return result;
+  const group = lazyGroupForTool(candidate);
+  const groupUnloaded =
+    group !== undefined &&
+    (!convId || (!isLazyGroupActive(convId, group) && !budget?.isExplicitlyAllowed(candidate)));
+  let hint: string;
+  if (groupUnloaded && group) {
+    const canLoadGroup =
+      convId !== undefined &&
+      lazyGroupNames().includes(group) &&
+      eligible.some((definition) => definition.function.name === 'load_tool_group');
+    if (!canLoadGroup) return result;
+    hint = `; group "${group}" is unloaded; call load_tool_group with "${group}" first to use "${candidate}"`;
+  } else {
+    hint = `; did you mean "${candidate}"?`;
+  }
+  const withHint = `${result}${hint}`;
+  return withHint.length <= UNKNOWN_TOOL_HINT_MAX_CHARS ? withHint : result;
 }
 
 /** How a transcript file reference should be revealed in the editor. */
@@ -161,7 +209,15 @@ export class ToolDispatch {
 
         const reg = this.toolRegistry.get(tc.function.name);
         if (!reg) {
-          result = `Error: unknown tool "${tc.function.name}"`;
+          result = unknownToolResult(
+            tc.function.name,
+            this.toolRegistry,
+            allowed,
+            budget,
+            convId,
+            modelContext,
+            unavailableTools,
+          );
           this.postResult(tc, toolResultText(result), undefined, convId);
           messages.push(this.toolMessage(tc, toolResultContent(result), startedAt));
           continue;
