@@ -860,6 +860,8 @@ models:
   # A local server you start yourself (here Strata). Forge does not spawn it, so
   # it cannot see its output - server_log mirrors the server's log file into the
   # "Forge - <display_name> log" output channel (View > Output), new lines only.
+  # For a managed server, an exact "{num_ctx}" argv item in start_command is
+  # replaced with the model's num_ctx value.
   - name: strata-flashnext-iq3s
     display_name: "Qwen Flash-Next (Strata)"
     provider: openai-compatible

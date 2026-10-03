@@ -163,7 +163,17 @@ export class ExternalModelServers {
   private launchStart(model: ModelConfig): void {
     const [command, ...args] = model.start_command!;
     try {
-      const child = this.spawnImpl(command, args, {
+      const resolvedArgs = args.map((arg) => {
+        if (arg !== '{num_ctx}') return arg;
+        const numCtx = model.num_ctx;
+        if (numCtx === undefined || !Number.isInteger(numCtx) || numCtx <= 0) {
+          throw new Error(
+            `start_command uses "{num_ctx}", but "${model.name}" has no valid num_ctx`,
+          );
+        }
+        return String(numCtx);
+      });
+      const child = this.spawnImpl(command, resolvedArgs, {
         detached: true,
         windowsHide: true,
         stdio: 'ignore',

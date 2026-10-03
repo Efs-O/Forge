@@ -296,6 +296,53 @@ describe('ExternalModelServers', () => {
     expect(unref).toHaveBeenCalledOnce();
   });
 
+  it('passes the configured model context through an exact start_command placeholder', async () => {
+    const config = makeConfig();
+    const strata = config.models.find((model) => model.name === 'strata')!;
+    strata.num_ctx = 154624;
+    strata.start_command = ['start-strata', '--max-context', '{num_ctx}'];
+    const spawnImpl = vi.fn(() => ({ unref: vi.fn() }));
+    probeHttpMock
+      .mockResolvedValueOnce({ reachable: false, ok: false })
+      .mockResolvedValue({ reachable: true, ok: true });
+    const servers = new ExternalModelServers(
+      () => config,
+      async () => undefined,
+      undefined,
+      spawnImpl,
+    );
+
+    await servers.ensureStarted('strata');
+
+    expect(spawnImpl).toHaveBeenCalledWith('start-strata', ['--max-context', '154624'], {
+      detached: true,
+      windowsHide: true,
+      stdio: 'ignore',
+    });
+  });
+
+  it('surfaces a missing model context when the start command requests it', async () => {
+    const config = makeConfig();
+    const strata = config.models.find((model) => model.name === 'strata')!;
+    delete strata.num_ctx;
+    strata.start_command = ['start-strata', '{num_ctx}'];
+    const spawnImpl = vi.fn(() => ({ unref: vi.fn() }));
+    probeHttpMock
+      .mockResolvedValueOnce({ reachable: false, ok: false })
+      .mockResolvedValue({ reachable: true, ok: true });
+    const servers = new ExternalModelServers(
+      () => config,
+      async () => undefined,
+      undefined,
+      spawnImpl,
+    );
+
+    await expect(servers.ensureStarted('strata')).rejects.toThrow(
+      'start_command uses "{num_ctx}", but "strata" has no valid num_ctx',
+    );
+    expect(spawnImpl).not.toHaveBeenCalled();
+  });
+
   it('ensureStarted throws an actionable error when down with no start_command', async () => {
     const config = makeConfig();
     const spawnImpl = vi.fn(() => ({ unref: vi.fn() }));

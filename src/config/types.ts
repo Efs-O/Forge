@@ -148,7 +148,8 @@ export interface ModelConfig {
   stop_on_exit?: boolean;
   /** Executable plus argv; spawned directly, never interpreted as a shell string. */
   stop_command?: string[];
-  /** Executable plus argv launched (detached) before a request when the server is down. */
+  /** Executable plus argv launched (detached) before a request when the server is down.
+   *  An argv item equal to `{num_ctx}` is replaced with this model's configured context. */
   start_command?: string[];
   /** Base URL for Ollama or OpenAI-compatible HTTP providers. */
   endpoint?: string;

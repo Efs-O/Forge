@@ -2,6 +2,13 @@
 
 ## 0.16.79
 
+### A managed server's start command can take its context from the model
+
+- In `start_command`, an argv item equal to `{num_ctx}` is replaced with that
+  model's configured `num_ctx`, so a launcher script no longer needs the context
+  duplicated in two places. A `{num_ctx}` item on a model with no valid
+  `num_ctx` is refused before the server is spawned, with the model named.
+
 ### image_search now defaults to Yandex
 
 - The default `engine` is `yandex`, not `google_lens`. Yandex answers in about
