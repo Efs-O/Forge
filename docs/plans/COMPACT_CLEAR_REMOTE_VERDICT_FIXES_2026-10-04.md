@@ -7,6 +7,12 @@ Findings and evidence: `docs/reports/DEEP_AUDIT_2026-10-04_FINDINGS.md`.
 Baseline HEAD `b0abd8b`. Green baseline 147 tests (CompactionPolicy 8, ConversationOps 32,
 SendPipeline 31, CompactionService 62, MidTurnCompaction 14).
 
+Implementation progress: phase 0 is committed as `8cdab83`; phase 1 direct-send
+implementation is complete pending its scoped CI-green commit and Codex review.
+The CLI-to-route test exercises bearer authentication through `forge.sh`, while
+the runtime fake-channel test verifies exact bytes, bound-chat delivery, refusal
+gates, and ambiguous-send handling without creating a model turn.
+
 ## Scope
 
 | # | Finding | Change |

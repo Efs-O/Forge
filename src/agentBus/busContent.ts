@@ -54,6 +54,23 @@ work with \`send <name> forge\`; \`send\` to another agent remains a relay.
 Messages routed to an existing Forge chat print its id and title in the 202
 response.
 
+## Sending a file to Telegram without a model turn
+
+\`forge.sh send-file <your-name> --to <conversationId> <workspace-relative-path>
+[--caption-file <file>]\` sends one existing workspace file directly through the
+active Telegram transport. It does not enter Forge's inbox, start a model turn,
+or change conversation context. The named conversation must be the sender's
+established Forge chat and have exactly one Telegram binding in this workspace;
+the client cannot choose a Telegram chat id. The path must resolve to a regular
+file inside this workspace, between 1 byte and 50 MB. The optional caption file
+is limited to 1,024 Unicode code points.
+
+Telegram acceptance is reported as \`sent\`; a timeout or lost response is
+\`unknown\`, not success. There is no automatic retry because a manual retry
+after an ambiguous outcome may deliver a duplicate. Send only files the owner
+explicitly requested: delivered copies remain on Telegram's servers, so never
+send credentials, API keys, or config files.
+
 A \`--new\` needs a free chat tab. If that window is at its chat cap and nothing
 can be archived, \`say --new\` exits non-zero with a 409 naming what is holding
 every tab, and the message is **not** queued — send it again after a chat is
@@ -180,7 +197,7 @@ export function copilotMeshPreamble(): string {
     `[Forge agent bus — mesh identity]\n` +
     `You are "copilot", a Forge-owned agent-mesh peer (alongside "claude" and "codex").\n` +
     `To message Forge or another agent, use the forge.sh client in the agent-bus folder;\n` +
-    `its usage header lists the current commands (say, send, steer, who, status, view, wait).\n` +
+    `its usage header lists the current commands (say, send, send-file, steer, who, status, view, wait).\n` +
     `Forge reads your final message in this turn as your answer.\n\n`
   );
 }

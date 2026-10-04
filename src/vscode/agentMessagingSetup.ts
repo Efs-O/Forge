@@ -24,6 +24,7 @@ import { BusTurnWatch } from '../agentBus/busTurnWatch';
 import { awaitedAnswers } from '../agentBus/awaitedAnswers';
 import { renderBusStatus, renderBusView } from '../agentBus/busStatusView';
 import { MAX_VIEW_COUNT, parseViewCount } from '../remote/RemoteTranscriptView';
+import type { RemoteRuntime } from '../remote/RemoteRuntime';
 
 /** The conversation a bus message from `from` belongs in. */
 function busTarget(
@@ -196,6 +197,7 @@ export function setupAgentMessaging(
   getSidebar: () => { getHostFacade(): ForgeHostFacade; readonly tellDrain: MidTurnTellDrain },
   getConfig: () => ForgeConfig,
   workspaceRoot: string,
+  getRemoteRuntime: () => RemoteRuntime | undefined = () => undefined,
 ): AgentRoutes {
   const mesh = setupAgentMesh(context, getSidebar, getConfig, workspaceRoot);
   const watch = new BusTurnWatch();
@@ -371,6 +373,24 @@ export function setupAgentMessaging(
           streaming: target.status.streamingConversationIds.includes(target.id),
         }),
       };
+    },
+    sendFile: async (from, conversationId, filePath, caption) => {
+      const target = readTarget(from);
+      if (!target.ok) return { kind: 'refused', error: target.error };
+      if (target.id !== conversationId) {
+        return {
+          kind: 'refused',
+          error: `The selected conversation does not match ${from}'s established Forge chat.`,
+        };
+      }
+      const runtime = getRemoteRuntime();
+      if (!runtime) {
+        return {
+          kind: 'refused',
+          error: 'The active remote runtime is not available in this VS Code window.',
+        };
+      }
+      return runtime.sendFileToConversation(conversationId, filePath, caption);
     },
     // §8/P3: a `to: forge` message that parses as a typed lifecycle command is
     // dispatched (standby/wake/close/steer/say/handoff) and the reply returned

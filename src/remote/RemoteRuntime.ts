@@ -28,8 +28,10 @@ import type { WorkspaceArrival } from './RemoteWorkspaceHandoff';
 import { RemoteCompactionNoticeBuffers } from './compactionNoticeBuffer';
 import { voiceRuntimeSignature } from './voiceRuntimeSignature';
 import { buildRemoteValidationStatus } from './remoteValidationStatus';
+import { sendRemoteWorkspaceFile } from './remoteFileDelivery';
 import {
   type RemoteRuntimeOptions,
+  type RemoteFileSendResult,
   type RemoteValidationStatus,
   type RemoteChannelFactory,
   type RemoteChannelFactoryContext,
@@ -118,9 +120,12 @@ export class RemoteRuntime {
   }
 
   /** Serializes operations that touch the active transport map. */
-  private enqueue(task: () => Promise<void>): Promise<void> {
+  private enqueue<T>(task: () => Promise<T>): Promise<T> {
     const operation = this.lifecycleTail.then(task);
-    this.lifecycleTail = operation.catch(() => undefined);
+    this.lifecycleTail = operation.then(
+      () => undefined,
+      () => undefined,
+    );
     return operation;
   }
 
@@ -199,6 +204,30 @@ export class RemoteRuntime {
 
   activeTransports(): string[] {
     return this.manager.names();
+  }
+
+  /**
+   * Resolves the conversation's unique Telegram binding and sends under its active lease.
+   */
+  sendFileToConversation(
+    conversationId: string,
+    requestedPath: string,
+    caption: string,
+  ): Promise<RemoteFileSendResult> {
+    return this.enqueue(() =>
+      sendRemoteWorkspaceFile({
+        conversationId,
+        requestedPath,
+        caption,
+        workspaceId: this.options.workspaceId,
+        ...(this.options.workspaceRoot ? { workspaceRoot: this.options.workspaceRoot } : {}),
+        isDisposed: () => this.disposed,
+        isEnabled: () => this.appliedConfig?.remote?.enabled === true,
+        manager: this.manager,
+        store: this.store,
+        auth: this.auth,
+      }),
+    );
   }
 
   /**

@@ -118,6 +118,11 @@ export interface RemoteBinding {
   announcedConversationId?: string | undefined;
 }
 
+export type RemoteFileSendResult =
+  | { kind: 'sent' }
+  | { kind: 'refused'; error: string }
+  | { kind: 'unknown'; error: string };
+
 export interface RemoteRequestRecord {
   id: string;
   dedupKey: string;

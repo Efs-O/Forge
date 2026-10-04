@@ -3,11 +3,11 @@ import * as os from 'os';
 import * as path from 'path';
 import type { UserNotificationService } from '../sidebar/UserNotificationService';
 import { codePointLength } from '../util/codePoints';
+import { fileDeliveryRefusal, inspectFileForDelivery } from '../util/fileDeliveryValidation';
 import { isPathInside } from '../util/pathContainment';
 import { resolveRealWorkspacePath } from '../util/WorkspacePaths';
 import type { RegisteredTool, ToolHandlerContext } from './ToolRegistry';
 
-const MAX_FILE_BYTES = 50 * 1024 * 1024;
 const PATH_REFUSAL =
   "Error: path must be in the workspace or this conversation's screenshot directory.";
 
@@ -65,13 +65,6 @@ async function resolveFilePath(
   }
 }
 
-function refusalForSize(size: number): string {
-  return (
-    `Error: file is too large (${size.toLocaleString()} bytes; maximum is ` +
-    `${MAX_FILE_BYTES.toLocaleString()} bytes).`
-  );
-}
-
 export function makeSendFileTool(deps: SendFileDeps): RegisteredTool {
   return {
     definition: {
@@ -120,15 +113,11 @@ export function makeSendFileTool(deps: SendFileDeps): RegisteredTool {
       const absolute = await resolveFilePath(requestedPath, context?.conversationId);
       if (!absolute) return PATH_REFUSAL;
 
-      let stat: Awaited<ReturnType<typeof fs.stat>>;
-      try {
-        stat = await fs.stat(absolute);
-      } catch {
-        return PATH_REFUSAL;
+      const inspected = await inspectFileForDelivery(absolute);
+      if (!inspected.ok) {
+        if (inspected.reason === 'path') return PATH_REFUSAL;
+        return `Error: ${fileDeliveryRefusal(inspected)}.`;
       }
-      if (!stat.isFile()) return PATH_REFUSAL;
-      if (stat.size === 0) return 'Error: cannot send an empty file.';
-      if (stat.size > MAX_FILE_BYTES) return refusalForSize(stat.size);
 
       const result = await deps.notifications.deliverFile({
         ...(context?.conversationId ? { conversationId: context.conversationId } : {}),

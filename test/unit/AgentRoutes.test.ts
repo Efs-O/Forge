@@ -4,7 +4,7 @@ import * as http from 'http';
 import type { AddressInfo } from 'net';
 import * as os from 'os';
 import * as path from 'path';
-import { afterEach, beforeAll, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import {
   busPaths,
   clearExchange,
@@ -427,14 +427,16 @@ describe('forge.sh against the routes', () => {
     const probe = path.join(os.tmpdir(), `forge-bash-probe-${process.pid}`);
     fs.writeFileSync(probe, '');
     const bash = TEST_BASH;
-    usable = !!bash && await new Promise<boolean>((resolve) =>
-      execFile(
-        bash,
-        ['-c', 'test -f "$1" && command -v curl >/dev/null', '_', probe.replace(/\\/g, '/')],
-        { timeout: 10_000 },
-        (err) => resolve(!err),
-      ),
-    );
+    usable =
+      !!bash &&
+      (await new Promise<boolean>((resolve) =>
+        execFile(
+          bash,
+          ['-c', 'test -f "$1" && command -v curl >/dev/null', '_', probe.replace(/\\/g, '/')],
+          { timeout: 10_000 },
+          (err) => resolve(!err),
+        ),
+      ));
     fs.rmSync(probe, { force: true });
   });
 
@@ -460,6 +462,96 @@ describe('forge.sh against the routes', () => {
     expect(replied.out).toContain('"delivered":true');
     await expect(waitForReply(paths, 'fg2-abc', 1_000, undefined, 10)).resolves.toBe('pong\n');
   }, 30_000);
+
+  it('send-file uses the authenticated CLI route without accepting a Forge inbox turn', async (ctx) => {
+    if (!usable) ctx.skip();
+    const validateFrom = vi.fn(async (from: string) =>
+      from === 'codex' ? { ok: true as const } : { ok: false as const, error: 'unknown sender' },
+    );
+    const sendFile = vi.fn(async () => ({ kind: 'sent' as const }));
+    installClientRoutes({
+      paths: () => paths,
+      inbox: stubInbox(),
+      token: TOKEN,
+      validateFrom,
+      sendFile,
+    });
+    const source = path.join(home, 'plan with spaces.md');
+    const caption = path.join(home, 'caption with spaces.txt');
+    fs.writeFileSync(source, '# approved plan\n');
+    fs.writeFileSync(caption, 'owner-approved caption 📎\n');
+
+    const sent = await runClient(
+      [
+        'send-file',
+        'codex',
+        '--to',
+        'sender-chat',
+        'plan with spaces.md',
+        '--caption-file',
+        caption,
+      ],
+      '',
+    );
+
+    expect(sent.code).toBe(0);
+    expect(sent.out).toContain('"sent":true');
+    expect(validateFrom).toHaveBeenCalledWith('codex');
+    expect(sendFile).toHaveBeenCalledWith(
+      'codex',
+      'sender-chat',
+      'plan with spaces.md',
+      'owner-approved caption 📎\n',
+    );
+    expect(accepted).toEqual([]);
+  }, 30_000);
+
+  it('send-file refuses invalid sender, caption, extra fields, and query parameters before upload', async () => {
+    const sendFile = vi.fn(async () => ({ kind: 'sent' as const }));
+    installClientRoutes({
+      paths: () => paths,
+      inbox: stubInbox(),
+      token: TOKEN,
+      validateFrom: (from) =>
+        from === 'codex' ? { ok: true } : { ok: false, error: 'unknown sender' },
+      sendFile,
+    });
+    const request = (fields: Record<string, unknown>, query = '') =>
+      post(`/agent/send-file${query}`, JSON.stringify(fields), { type: 'application/json' });
+
+    expect(
+      (
+        await post(
+          '/agent/send-file',
+          JSON.stringify({ from: 'codex', conversation_id: 'c1', path: 'plan.md' }),
+          { token: 'wrong-token', type: 'application/json' },
+        )
+      ).status,
+    ).toBe(401);
+    expect(
+      (await request({ from: 'mallory', conversation_id: 'c1', path: 'plan.md' })).status,
+    ).toBe(400);
+    expect(
+      (
+        await request({
+          from: 'codex',
+          conversation_id: 'c1',
+          path: 'plan.md',
+          caption: '📎'.repeat(1025),
+        })
+      ).status,
+    ).toBe(400);
+    expect(
+      (await request({ from: 'codex', conversation_id: 'c1', path: 'plan.md', chat_id: 'x' }))
+        .status,
+    ).toBe(400);
+    expect(
+      (await request({ from: 'codex', conversation_id: 'c1', path: 'plan.md' }, '?chat_id=x'))
+        .status,
+    ).toBe(400);
+    expect(sendFile).not.toHaveBeenCalled();
+    expect(accepted).toEqual([]);
+  });
 
   it('say parses --model and --new into the generated request', async (ctx) => {
     if (!usable) ctx.skip();
@@ -1050,14 +1142,16 @@ describe('forge.sh who against the routes (§11)', () => {
     const probe = path.join(os.tmpdir(), `forge-bash-who-${process.pid}`);
     fs.writeFileSync(probe, '');
     const bash = TEST_BASH;
-    usable = !!bash && await new Promise<boolean>((resolve) =>
-      execFile(
-        bash,
-        ['-c', 'test -f "$1" && command -v curl >/dev/null', '_', probe.replace(/\\/g, '/')],
-        { timeout: 10_000 },
-        (err) => resolve(!err),
-      ),
-    );
+    usable =
+      !!bash &&
+      (await new Promise<boolean>((resolve) =>
+        execFile(
+          bash,
+          ['-c', 'test -f "$1" && command -v curl >/dev/null', '_', probe.replace(/\\/g, '/')],
+          { timeout: 10_000 },
+          (err) => resolve(!err),
+        ),
+      ));
     fs.rmSync(probe, { force: true });
   });
 

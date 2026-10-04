@@ -13,13 +13,18 @@ import type {
   InboxMessageOptions,
 } from '../agentBus/agentInbox';
 import { sendJson, sendText } from './controlHttp';
+import { handleAgentFileRoute } from './agentFileRoute';
+import {
+  AgentRouteHttpError as HttpError,
+  readAgentRouteFields as readFields,
+  type AgentRouteFields as Fields,
+} from './agentRouteFields';
 import { getLogger } from '../util/logger';
 
 const log = getLogger();
 
 /** An answer may be longer than a new message: it is what Forge asked for. */
 export const MAX_REPLY_CHARS = 32_000;
-const MAX_BODY_BYTES = 256 * 1024;
 const FROM_PATTERN = /^[A-Za-z0-9][A-Za-z0-9 ._-]{0,39}$/;
 
 export type BusReadResult =
@@ -105,6 +110,15 @@ export interface AgentRoutesDeps {
   /** Read-only view of the sender's chat; absent means the route is 404. */
   status?: (from: string) => BusReadResult | Promise<BusReadResult>;
   view?: (from: string, count: string | undefined) => BusReadResult | Promise<BusReadResult>;
+  /** Direct, model-free delivery of a workspace file to the sender's bound chat. */
+  sendFile?: (
+    from: string,
+    conversationId: string,
+    workspaceRelativePath: string,
+    caption: string,
+  ) => Promise<
+    { kind: 'sent' } | { kind: 'refused'; error: string } | { kind: 'unknown'; error: string }
+  >;
   /** Valid model ids for an inbound message, `model@profile` forms included. */
   configuredModels?: () => readonly string[];
   /**
@@ -115,10 +129,6 @@ export interface AgentRoutesDeps {
    * Absent ⇒ no pre-flight (the failure is only reported afterwards).
    */
   chatCapBlockers?: (options?: { activate?: boolean }) => string[];
-}
-
-interface Fields {
-  [key: string]: unknown;
 }
 
 const AgentMessageOptionsSchema = z
@@ -135,57 +145,6 @@ const AgentMessageOptionsSchema = z
       !(options.new_chat && (options.conversation_id || options.to_running)),
     'choose one Forge chat target; new_chat cannot be combined with a target',
   );
-
-class HttpError extends Error {
-  constructor(
-    readonly status: number,
-    message: string,
-  ) {
-    super(message);
-  }
-}
-
-function readBody(req: http.IncomingMessage): Promise<string> {
-  return new Promise((resolve, reject) => {
-    const chunks: Buffer[] = [];
-    let size = 0;
-    req.on('data', (chunk: Buffer) => {
-      size += chunk.length;
-      if (size > MAX_BODY_BYTES) {
-        req.destroy();
-        reject(new HttpError(413, `body over ${MAX_BODY_BYTES} bytes`));
-        return;
-      }
-      chunks.push(chunk);
-    });
-    req.on('end', () => resolve(Buffer.concat(chunks).toString('utf8')));
-    req.on('error', reject);
-  });
-}
-
-/** Plain text with the fields in the query (what `forge.sh` sends), or JSON. */
-async function readFields(req: http.IncomingMessage, url: URL): Promise<Fields> {
-  const body = await readBody(req);
-  if ((req.headers['content-type'] ?? '').includes('application/json')) {
-    let parsed: unknown;
-    try {
-      parsed = JSON.parse(body);
-    } catch {
-      throw new HttpError(400, 'invalid JSON body');
-    }
-    if (typeof parsed !== 'object' || parsed === null)
-      throw new HttpError(400, 'body must be an object');
-    return parsed as Fields;
-  }
-  const fields: Fields = { ...Object.fromEntries(url.searchParams), text: body };
-  if (fields['new_chat'] === 'true') fields['new_chat'] = true;
-  if (fields['new_chat'] === 'false') fields['new_chat'] = false;
-  if (fields['reply_in_chat'] === 'true') fields['reply_in_chat'] = true;
-  if (fields['reply_in_chat'] === 'false') fields['reply_in_chat'] = false;
-  if (fields['to_running'] === 'true') fields['to_running'] = true;
-  if (fields['to_running'] === 'false') fields['to_running'] = false;
-  return fields;
-}
 
 function requireText(fields: Fields, max: number): string {
   const text = typeof fields['text'] === 'string' ? fields['text'] : undefined;
@@ -264,7 +223,8 @@ export class AgentRoutes {
       (route === '/agent/join' && !!this.deps.join) ||
       (route === '/agent/who' && !!this.deps.who) ||
       (route === '/agent/status' && !!this.deps.status) ||
-      (route === '/agent/view' && !!this.deps.view);
+      (route === '/agent/view' && !!this.deps.view) ||
+      (route === '/agent/send-file' && !!this.deps.sendFile && !!this.deps.validateFrom);
     if (!this.enabled || !known) {
       return sendJson(res, 404, { error: `no route for ${req.method ?? 'GET'} ${route}` });
     }
@@ -302,6 +262,19 @@ export class AgentRoutes {
     if (req.method !== 'POST') return sendJson(res, 405, { error: 'POST only' });
     try {
       const fields = await readFields(req, url);
+      if (route === '/agent/send-file') {
+        if (url.searchParams.size > 0)
+          throw new HttpError(400, 'send-file fields must be in the request body');
+        const { validateFrom, sendFile } = this.deps;
+        if (!validateFrom || !sendFile) {
+          return sendJson(res, 404, { error: 'no route for POST /agent/send-file' });
+        }
+        const result = await handleAgentFileRoute(fields, {
+          validateFrom,
+          sendFile,
+        });
+        return sendJson(res, result.status, result.body);
+      }
       if (route === '/agent/join' && this.deps.join) {
         const alias = (typeof fields['alias'] === 'string' ? fields['alias'] : '')
           .trim()

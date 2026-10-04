@@ -66,6 +66,7 @@ describe('CLIENT_SCRIPT usage block', () => {
       'reply',
       'say',
       'send',
+      'send-file',
       'steer',
       'cancel',
       'join',

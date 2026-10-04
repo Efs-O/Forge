@@ -191,6 +191,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
       () => sidebarProvider,
       () => config,
       workspaceRoot,
+      () => activeRemoteRuntime,
     ),
     chatProxy: buildControlChatProxy(() => config, context.secrets),
     ...(registry ? { registry } : {}),

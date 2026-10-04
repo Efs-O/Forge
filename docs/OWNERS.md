@@ -160,6 +160,7 @@ overlaps with an existing owner, extend the owner instead.
 | Concern                                       | Owner                                           |
 | --------------------------------------------- | ----------------------------------------------- |
 | Extension-scoped transport lifecycle          | `src/remote/RemoteRuntime.ts`                   |
+| Bound-chat workspace file delivery            | `src/remote/remoteFileDelivery.ts`              |
 | Remote transport validation status projection | `src/remote/remoteValidationStatus.ts`          |
 | Inbound admission, queue drain, notifications | `src/remote/RemoteController.ts`                |
 | Remote command dependency assembly             | `src/remote/remoteCommandDeps.ts`               |
@@ -340,6 +341,8 @@ overlaps with an existing owner, extend the owner instead.
 | Built-in tools + active-editor access      | `src/tools/builtinTools.ts`           |
 | Single-write size ceiling + chunk advice   | `src/tools/writeChunking.ts`          |
 | File read/write tools                      | `src/tools/fileEditTools.ts`          |
+| Shared workspace file delivery validation  | `src/util/fileDeliveryValidation.ts` |
+| `send_file` tool                           | `src/tools/sendFileTool.ts`           |
 | `edit_file` tool                           | `src/tools/editFileTool.ts`           |
 | `old_str` matching + line-ending handling  | `src/tools/editMatch.ts`              |
 | Structured line-edit validation + tool     | `src/tools/structuredEditTool.ts`     |
@@ -565,6 +568,8 @@ the configured override stays the existing `video.ffmpeg_path` key.
 | Inbound agent messages → Forge turns (queue)               | `src/agentBus/agentInbox.ts`                                   |
 | Which chat an inbound bus message lands in (sender affinity) | `src/agentBus/busTarget.ts`                                    |
 | `/agent/message` + `/agent/reply` routes, endpoint.json    | `src/backend/agentRoutes.ts`                                   |
+| Authenticated `/agent/send-file` route                    | `src/backend/agentFileRoute.ts`                                |
+| Agent-route request body parsing                           | `src/backend/agentRouteFields.ts`                              |
 | Agent-messaging activation wiring (routes + inbox)         | `src/vscode/agentMessagingSetup.ts`                            |
 | Agent-bus delivery to an open Codex (`codex queue`)        | `src/agentBus/codexDelivery.ts`                                |
 | `agent_bus:` config schema                                 | `src/config/agentBusSchema.ts`                                 |

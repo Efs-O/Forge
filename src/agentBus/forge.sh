@@ -2,6 +2,7 @@
 #   forge.sh reply <id> [file]        answer a question Forge is waiting on
 #   forge.sh say <your-name> [--model <name>] [--new] [--reply-in-chat] [--to <conversationId>|--to-running] [file]  message Forge
 #   forge.sh send <your-name> <to> [--to <conversationId>|--to-running] [file]  relay, or target a Forge chat when <to> is forge
+#   forge.sh send-file <your-name> --to <conversationId> <workspace-relative-path> [--caption-file <file>]  send a file directly to its Telegram chat (no Forge model turn)
 #   forge.sh steer <your-name> <to> [file] interrupt <to>'s running turn (forge/claude/codex/copilot); runs next
 #   forge.sh cancel <your-name> <id|all>  withdraw your queued message(s) to Forge not yet started
 #   forge.sh join claude|codex        this interactive session becomes that mesh alias
@@ -28,7 +29,7 @@ if [ -n "${WSL_DISTRO_NAME:-}" ] && command -v curl.exe >/dev/null 2>&1; then
   curl() {
     local a out=()
     for a in "$@"; do
-      case "$a" in @/*) out+=("@$(wslpath -w "${a#@}")");; *) out+=("$a");; esac
+      case "$a" in @/*) out+=("@$(wslpath -w "${a#@}")");; caption@/*) out+=("caption@$(wslpath -w "${a#caption@}")");; *) out+=("$a");; esac
     done
     curl.exe "${out[@]}"
   }
@@ -128,6 +129,48 @@ if [ "$VERB" = "wait" ]; then
     fi
     sleep "$POLL"
   done
+fi
+if [ "$VERB" = "send-file" ]; then
+  NAME="${2:-}"
+  [ $# -ge 5 ] || usage
+  case "$NAME" in ""|*[!A-Za-z0-9._-]*) echo "forge.sh: a name is letters, digits, . _ - only" >&2; exit 2;; esac
+  shift 2
+  [ "$1" = "--to" ] || usage
+  CONVERSATION_ID="${2:-}"
+  FILE_PATH="${3:-}"
+  case "$CONVERSATION_ID" in ""|*[!A-Za-z0-9._-]*) echo "forge.sh: bad conversation id" >&2; exit 2;; esac
+  [ -n "$FILE_PATH" ] || usage
+  shift 3
+  CAPTION_FILE=""
+  while [ $# -gt 0 ]; do
+    case "$1" in
+      --caption-file)
+        [ $# -ge 2 ] && [ -z "$CAPTION_FILE" ] || usage
+        CAPTION_FILE="$2"; shift 2;;
+      *) usage;;
+    esac
+  done
+  if [ -n "$CAPTION_FILE" ] && [ ! -f "$CAPTION_FILE" ]; then
+    echo "forge.sh: caption file does not exist or is not a regular file" >&2
+    exit 2
+  fi
+  [ -f "$EP" ] || { echo "forge.sh: not reachable: open Forge with control_server and agent_bus enabled" >&2; exit 1; }
+  URL="$(grep '"url"' "$EP" | cut -d'"' -f4)"
+  TOKEN="$(grep '"token"' "$EP" | cut -d'"' -f4)"
+  SEND_ARGS=(
+    -sS --fail-with-body -X POST
+    -H "Authorization: Bearer $TOKEN"
+    --data-urlencode "from=$NAME"
+    --data-urlencode "conversation_id=$CONVERSATION_ID"
+    --data-urlencode "path=$FILE_PATH"
+  )
+  if [ -n "$CAPTION_FILE" ]; then
+    SEND_ARGS+=(--data-urlencode "caption@$CAPTION_FILE")
+  fi
+  curl "${SEND_ARGS[@]}" "$URL/agent/send-file" \
+    || { echo "forge.sh: file send was not confirmed; no automatic retry was attempted." >&2; exit 1; }
+  echo
+  exit 0
 fi
 [ $# -ge 2 ] || usage
 ARG=""; SRC="-"; MODEL=""; NEW_CHAT=""; REPLY_IN_CHAT=""; CONVERSATION_ID=""; TO_RUNNING=""
