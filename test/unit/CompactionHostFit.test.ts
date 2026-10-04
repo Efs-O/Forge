@@ -102,7 +102,7 @@ describe('A24: constructed 200k host block at P=170,000', () => {
           kind,
           key: `rg -n --glob *.ts auto_compact src #${n}`,
           outcome: 'ok',
-          line: `- ran \`rg -n -C 8 --glob *.ts compactMidTurn|evaluateAfterTurn src #${n} ${'x'.repeat(300)}\` → exit 0`,
+          line: `- ran \`rg -n -C 8 --glob *.ts compactMidTurn|evaluateAfterTurn src #${n} ${'x'.repeat(n === 0 ? 273 : n === 39 ? 272 : 278)}\` → exit 0`,
           toolCallId: `call_${n}`,
         };
 
@@ -139,7 +139,9 @@ describe('A24: constructed 200k host block at P=170,000', () => {
     await expect(runCompaction(h.deps, 'c1', { auto: true })).resolves.toBe('failed');
     expect(h.runPrompt).not.toHaveBeenCalled();
     expect(h.conv.compaction).toEqual(before);
-    expect(h.posted.find((m) => m.type === 'error')?.message).toMatch(/largest component/u);
+    expect(h.posted.find((m) => m.type === 'error')?.message).toMatch(
+      /need an estimated 20674 characters/u,
+    );
   });
 
   it('positive case: smaller host facts at the same P still compact', async () => {

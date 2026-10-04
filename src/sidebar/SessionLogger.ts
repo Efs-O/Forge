@@ -71,6 +71,10 @@ export interface CompactionAttemptLogEntry {
   calls?: number;
   usedTokens: number;
   maxTokens: number;
+  /** Estimated characters of the window being compacted (known at start). */
+  windowChars?: number;
+  /** Estimated characters of the replacement window; unknown until a candidate exists. */
+  candidateChars?: number;
 }
 
 export interface SessionContext {
@@ -228,20 +232,28 @@ export class SessionLogger {
    */
   logCompactionAttempt(entry: CompactionAttemptLogEntry, model: string): void {
     this.ensureHeader(model);
-    this.append({
-      type: 'compaction_attempt',
-      attempt_id: entry.attemptId,
-      phase: entry.phase,
-      trigger: entry.trigger,
-      ...(entry.outcome !== undefined ? { outcome: entry.outcome } : {}),
-      ...(entry.category !== undefined ? { category: entry.category } : {}),
-      ...(entry.finishReason !== undefined ? { finish_reason: entry.finishReason } : {}),
-      ...(entry.calls !== undefined ? { calls: entry.calls } : {}),
-      used_tokens: entry.usedTokens,
-      max_tokens: entry.maxTokens,
-      timestamp_ms: Date.now(),
-      model,
-    });
+    // Not `append`: a write failure here must reach the caller so it can warn,
+    // since an unrecorded attempt is exactly what this row exists to prevent.
+    fs.appendFileSync(
+      this.filePath,
+      JSON.stringify({
+        type: 'compaction_attempt',
+        attempt_id: entry.attemptId,
+        phase: entry.phase,
+        trigger: entry.trigger,
+        ...(entry.outcome !== undefined ? { outcome: entry.outcome } : {}),
+        ...(entry.category !== undefined ? { category: entry.category } : {}),
+        ...(entry.finishReason !== undefined ? { finish_reason: entry.finishReason } : {}),
+        ...(entry.calls !== undefined ? { calls: entry.calls } : {}),
+        used_tokens: entry.usedTokens,
+        max_tokens: entry.maxTokens,
+        ...(entry.windowChars !== undefined ? { window_chars: entry.windowChars } : {}),
+        ...(entry.candidateChars !== undefined ? { candidate_chars: entry.candidateChars } : {}),
+        timestamp_ms: Date.now(),
+        model,
+      }) + '\n',
+      'utf8',
+    );
   }
 
   /**

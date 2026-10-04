@@ -26,7 +26,7 @@ import type { ModelConfig } from '../config/types';
 import type { RequestChainLifecycle } from './RequestChainLifecycle';
 import type { RequestChainContext } from './RequestChainLifecycle';
 import { toRequestOutcome, type ForgeRequestOutcome, type ForgeTurnOutcome } from './turnOutcome';
-import type { ContextThresholdAction } from './ContextBudgetPublisher';
+import type { AdmissionDecision, ContextThresholdAction } from './ContextBudgetPublisher';
 import { isContextExhaustionReason } from '../agent/truncationRecovery';
 import type { ChatAttachmentStore } from './ChatAttachmentStore';
 import type { ChatAttachmentRef } from '../llm/types';
@@ -74,7 +74,7 @@ export interface SendPipelineDeps {
   ) => Promise<ContextThresholdAction | undefined>;
   resetContextWarning: (conversationId: string) => void;
   /** Enforces auto_compact.at on prior history before a new prompt runs. */
-  evaluateAtAdmission?: (conv: ConversationRuntime) => Promise<void>;
+  evaluateAtAdmission?: (conv: ConversationRuntime) => Promise<AdmissionDecision>;
   /** Absent in tests and in a host with no globalStorage; attachments then
    *  behave exactly as before, minus the transcript thumbnails. */
   attachmentStore?: ChatAttachmentStore | undefined;
@@ -249,10 +249,20 @@ export class SendPipeline {
           ? { ...(promptOptions ?? {}), attachmentRefs }
           : promptOptions;
         if (!promptOptions?.internal && deps.evaluateAtAdmission) {
+          let decision: AdmissionDecision = { kind: 'proceed' };
           try {
-            await deps.evaluateAtAdmission(conv);
+            decision = await deps.evaluateAtAdmission(conv);
           } catch (err) {
-            log.warn(`[SendPipeline] admission compaction check failed: ${(err as Error).message}`);
+            // The threshold-aware path reports its own failures as `blocked`; a
+            // throw here is a defect in the check, not evidence of an over-full window.
+            log.warn(`[SendPipeline] admission check failed: ${(err as Error).message}`);
+          }
+          if (decision.kind === 'blocked') {
+            // The prompt never reached conv.messages; hand it back so it is not lost.
+            deps.post({ type: 'error', message: decision.reason, conversationId: conv.id });
+            deps.post({ type: 'setInput', text, conversationId: conv.id });
+            deps.post({ type: 'done', finishReason: 'stop', conversationId: conv.id });
+            return { kind: 'failed', error: decision.reason };
           }
         }
         for (;;) {

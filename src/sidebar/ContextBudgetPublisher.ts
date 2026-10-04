@@ -27,6 +27,10 @@ import { getLogger } from '../util/logger';
 import { isContextExhaustionReason } from '../agent/truncationRecovery';
 import type { RequestChainContext } from './RequestChainLifecycle';
 import type { UserPromptOptions } from './transcriptMutations';
+import type { CompactionOutcome } from './compactionServiceTypes';
+
+/** Result of the pre-turn context check; `blocked` means no model request may be made. */
+export type AdmissionDecision = { kind: 'proceed' } | { kind: 'blocked'; reason: string };
 
 const log = getLogger();
 
@@ -69,7 +73,7 @@ export interface ContextBudgetDeps {
   /** Runs a user-accepted `/compact` from the 85% warning. */
   manualCompact: () => void;
   /** Compacts prior history before a new user prompt is admitted. */
-  admissionCompact?: (conv: ConversationRuntime) => Promise<unknown>;
+  admissionCompact?: (conv: ConversationRuntime) => Promise<CompactionOutcome>;
   /** A preflight context failure can need compaction even when the last server
    * usage frame was still below the normal threshold. */
   incompleteTurnReason?: (convId: string) => string | undefined;
@@ -172,18 +176,36 @@ export class ContextBudgetPublisher {
    * configured threshold is enforced here instead. The prompt is not yet in
    * `conv.messages`, so only prior history is compacted, and no resume is run.
    */
-  async evaluateAtAdmission(conv: ConversationRuntime): Promise<void> {
+  async evaluateAtAdmission(conv: ConversationRuntime): Promise<AdmissionDecision> {
     const config = this.deps.getConfig();
     const auto = config.auto_compact;
-    if (auto?.enabled !== true || !this.deps.admissionCompact) return;
+    if (auto?.enabled !== true || !this.deps.admissionCompact) return { kind: 'proceed' };
     const selection = conv.active_model ?? config.active_model;
     const model = this.resolveModel(config, this.deps.baseOf(selection));
     const max = model ? perSlotContext(model, config.llama_server) : 0;
-    if (max <= 0) return;
+    if (max <= 0) return { kind: 'proceed' };
     const fraction = reportedContextTokens(conv) / max;
-    if (fraction < (auto.at ?? DEFAULT_AUTO_COMPACT_AT)) return;
-    log.info(`[auto-compact] context at ${Math.round(fraction * 100)}% at admission — compacting`);
-    await this.deps.admissionCompact(conv);
+    if (fraction < (auto.at ?? DEFAULT_AUTO_COMPACT_AT)) return { kind: 'proceed' };
+    const percent = Math.round(fraction * 100);
+    log.info(`[auto-compact] context at ${percent}% at admission — compacting`);
+    let outcome: CompactionOutcome | 'threw';
+    try {
+      outcome = await this.deps.admissionCompact(conv);
+    } catch (err) {
+      log.warn(`[auto-compact] admission compaction threw — ${(err as Error).message}`);
+      outcome = 'threw';
+    }
+    if (outcome === 'compacted') return { kind: 'proceed' };
+    const why =
+      outcome === 'skipped'
+        ? 'automatic compaction did not run (it is on hold after a recent failure, or there is too little history to compact)'
+        : 'automatic compaction failed';
+    return {
+      kind: 'blocked',
+      reason:
+        `Forge: context is ${percent}% full and ${why}, so your message was not sent. ` +
+        'It is back in the input box. Run /compact (a successful manual compaction lifts the hold), then send it again, or start a new chat.',
+    };
   }
 
   /** Evaluate the completed conversation even when another tab is active. */

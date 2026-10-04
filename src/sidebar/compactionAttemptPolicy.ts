@@ -1,5 +1,7 @@
 import type { ConversationRuntime } from './sessionTypes';
 import { randomUUID } from 'node:crypto';
+import * as vscode from 'vscode';
+import type { CompactionAttemptLogEntry } from './SessionLogger';
 import type { CompactionDeps, CompactionOptions, CompactionOutcome } from './CompactionService';
 import type { CompactionFailureCategory } from './compactionFailure';
 import { getLogger } from '../util/logger';
@@ -55,6 +57,26 @@ function mayRearm(
   return now - state.failedAt >= retryDelay(state.failures - 1);
 }
 
+/**
+ * Writes one attempt row. A sink failure never changes the compaction result,
+ * but is surfaced locally rather than lost.
+ */
+export function logAttemptSafely(
+  deps: CompactionDeps,
+  conv: ConversationRuntime,
+  entry: CompactionAttemptLogEntry,
+): void {
+  try {
+    deps.logCompactionAttempt?.(conv, entry);
+  } catch (err) {
+    const message = (err as Error).message;
+    log.warn(`[compact] attempt log write failed — ${message}`);
+    void vscode.window.showWarningMessage(
+      `Forge: could not record the compaction attempt in the session log (${message}). Compaction itself was not affected.`,
+    );
+  }
+}
+
 export async function runCompactionWithPolicy(
   deps: CompactionDeps,
   conversationId: string,
@@ -79,18 +101,14 @@ export async function runCompactionWithPolicy(
       `[auto-compact] suppressed after ${state.failureCategory}; ` +
         `next transient retry after ${retryDelay(state.failures - 1)}ms or ${contextGrowthThreshold(modelMaxTokens || state.modelMaxTokens)} context tokens`,
     );
-    try {
-      deps.logCompactionAttempt?.(conv, {
-        attemptId: randomUUID(),
-        phase: 'suppressed',
-        trigger: options.trigger ?? 'sidebar',
-        category: state.failureCategory,
-        usedTokens: contextTokens,
-        maxTokens: modelMaxTokens,
-      });
-    } catch (err) {
-      log.info(`[auto-compact] suppression log failed — ${(err as Error).message}`);
-    }
+    logAttemptSafely(deps, conv, {
+      attemptId: randomUUID(),
+      phase: 'suppressed',
+      trigger: options.trigger ?? 'sidebar',
+      category: state.failureCategory,
+      usedTokens: contextTokens,
+      maxTokens: modelMaxTokens,
+    });
     return 'skipped';
   }
 

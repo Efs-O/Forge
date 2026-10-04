@@ -12,7 +12,7 @@ vi.mock('../../src/sidebar/SessionLogger', () => ({
 }));
 
 import { SendPipeline, type SendPipelineDeps } from '../../src/sidebar/SendPipeline';
-import { ContextBudgetPublisher } from '../../src/sidebar/ContextBudgetPublisher';
+import { ContextBudgetPublisher, type AdmissionDecision } from '../../src/sidebar/ContextBudgetPublisher';
 import type { ForgeConfig } from '../../src/config/types';
 import type { ConversationRuntime, SidebarRuntime } from '../../src/sidebar/sessionTypes';
 import { RequestChainLifecycle } from '../../src/sidebar/RequestChainLifecycle';
@@ -30,9 +30,13 @@ function conv(): ConversationRuntime {
   } as ConversationRuntime;
 }
 
-function pipeline(turn: Record<string, unknown>) {
+function pipeline(
+  turn: Record<string, unknown>,
+  decision: AdmissionDecision = { kind: 'proceed' },
+) {
   const c = conv();
   const order: string[] = [];
+  const posted: Array<Record<string, unknown>> = [];
   const config = { active_model: 'qwen', models: [{ name: 'qwen' }] } as ForgeConfig;
   const deps: SendPipelineDeps = {
     getConfig: () => config,
@@ -49,17 +53,18 @@ function pipeline(turn: Record<string, unknown>) {
     } as unknown as SendPipelineDeps['agentLoop'],
     requestChains: new RequestChainLifecycle(),
     events: { onBackendError: vi.fn() },
-    post: vi.fn(),
+    post: vi.fn((m) => posted.push(m as Record<string, unknown>)),
     persistSession: vi.fn(),
     postSessionSync: vi.fn(),
     evaluateAfterTurn: vi.fn(async () => undefined),
     evaluateAtAdmission: vi.fn(async () => {
       order.push('admission');
+      return decision;
     }),
     resetContextWarning: vi.fn(),
     midTurnInbox: new MidTurnInbox(),
   };
-  return { send: new SendPipeline(deps), deps, order };
+  return { send: new SendPipeline(deps), deps, order, posted };
 }
 
 describe('admission compaction (A47)', () => {
@@ -80,7 +85,24 @@ describe('admission compaction (A47)', () => {
     expect(h.deps.evaluateAtAdmission).not.toHaveBeenCalled();
   });
 
-  it('a failing admission check does not block the prompt', async () => {
+  it('a blocked admission makes no model request, restores the prompt and reports failure', async () => {
+    const h = pipeline(
+      { kind: 'completed', finalText: 'ok', finishReason: 'stop' },
+      { kind: 'blocked', reason: 'Forge: context is 90% full' },
+    );
+    const outcome = await h.send.send('my unsent prompt');
+    expect(h.order).toEqual(['admission']);
+    expect(h.deps.agentLoop.runTurn).not.toHaveBeenCalled();
+    expect(h.deps.evaluateAfterTurn).not.toHaveBeenCalled();
+    expect(outcome).toMatchObject({ kind: 'failed' });
+    expect(h.posted).toContainEqual(
+      expect.objectContaining({ type: 'setInput', text: 'my unsent prompt' }),
+    );
+    expect(h.posted).toContainEqual(expect.objectContaining({ type: 'error' }));
+    expect(h.posted).toContainEqual(expect.objectContaining({ type: 'done' }));
+  });
+
+  it('a defect-throwing check does not brick sending when no over-threshold fact is known', async () => {
     const h = pipeline({ kind: 'completed', finalText: 'ok', finishReason: 'stop' });
     vi.mocked(h.deps.evaluateAtAdmission!).mockRejectedValueOnce(new Error('boom'));
     await h.send.send('next request');
@@ -89,10 +111,14 @@ describe('admission compaction (A47)', () => {
 });
 
 describe('ContextBudgetPublisher.evaluateAtAdmission', () => {
-  function publisher(used: number, enabled: boolean) {
+  function publisher(
+    used: number,
+    enabled: boolean,
+    compact: () => Promise<'compacted' | 'failed' | 'skipped'> = async () => 'compacted',
+  ) {
     const c = conv();
     c.last_input_tokens = used;
-    const admissionCompact = vi.fn(async () => 'compacted');
+    const admissionCompact = vi.fn(compact);
     const config = {
       active_model: 'qwen',
       models: [{ name: 'qwen', num_ctx: 100_000 }],
@@ -110,17 +136,34 @@ describe('ContextBudgetPublisher.evaluateAtAdmission', () => {
     return { p, c, admissionCompact };
   }
 
-  it('compacts at or above the configured threshold', async () => {
+  it('compacts at or above the configured threshold and proceeds on success', async () => {
     const h = publisher(90_000, true);
-    await h.p.evaluateAtAdmission(h.c);
+    await expect(h.p.evaluateAtAdmission(h.c)).resolves.toEqual({ kind: 'proceed' });
     expect(h.admissionCompact).toHaveBeenCalledTimes(1);
   });
 
-  it('does nothing below the threshold or when auto-compact is off', async () => {
+  it.each([
+    ['failed', async () => 'failed' as const],
+    ['skipped', async () => 'skipped' as const],
+    [
+      'throw',
+      async (): Promise<'failed'> => {
+        throw new Error('boom');
+      },
+    ],
+  ])('blocks over threshold when compaction %s, once, with an actionable reason', async (_n, run) => {
+    const h = publisher(90_000, true, run);
+    const decision = await h.p.evaluateAtAdmission(h.c);
+    expect(decision.kind).toBe('blocked');
+    if (decision.kind === 'blocked') expect(decision.reason).toMatch(/\/compact/u);
+    expect(h.admissionCompact).toHaveBeenCalledTimes(1);
+  });
+
+  it('allows the turn below the threshold or when auto-compact is off', async () => {
     const low = publisher(10_000, true);
-    await low.p.evaluateAtAdmission(low.c);
-    const off = publisher(95_000, false);
-    await off.p.evaluateAtAdmission(off.c);
+    const off = publisher(95_000, false, async () => 'failed');
+    await expect(low.p.evaluateAtAdmission(low.c)).resolves.toEqual({ kind: 'proceed' });
+    await expect(off.p.evaluateAtAdmission(off.c)).resolves.toEqual({ kind: 'proceed' });
     expect(low.admissionCompact).not.toHaveBeenCalled();
     expect(off.admissionCompact).not.toHaveBeenCalled();
   });

@@ -1,4 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
+import * as vscode from 'vscode';
 import { runCompaction, type CompactionDeps } from '../../src/sidebar/CompactionService';
 import { PromptIncompleteError } from '../../src/sidebar/PromptRun';
 import { compactionRefusalNotice } from '../../src/sidebar/compactionRefusal';
@@ -53,7 +54,29 @@ describe('compaction attempt rows (A48)', () => {
     );
     expect(h.rows.map((r) => r.phase)).toEqual(['start', 'finished']);
     expect(h.rows[0]!.attemptId).toBe(h.rows[1]!.attemptId);
-    expect(h.rows[1]).toMatchObject({ outcome: 'compacted', calls: 1, trigger: 'auto' });
+    expect(h.rows[1]).toMatchObject({
+      outcome: 'compacted',
+      calls: 1,
+      trigger: 'auto',
+      finishReason: 'stop',
+    });
+    expect(h.rows[0]!.windowChars).toBeGreaterThan(0);
+    expect(h.rows[0]!.candidateChars).toBeUndefined();
+    expect(h.rows[1]!.candidateChars).toBeGreaterThan(0);
+  });
+
+  it('a reloaded conversation is re-admitted: the in-memory hold does not survive', async () => {
+    const h = setup(async () => {
+      throw new PromptIncompleteError('length');
+    });
+    await runCompaction(h.deps, 'c1', { auto: true });
+    await expect(runCompaction(h.deps, 'c1', { auto: true })).resolves.toBe('skipped');
+    // A reload rebuilds the conversation object; the hold is keyed by the old one.
+    const reloaded = { ...h.conv, messages: [...h.conv.messages] };
+    h.deps.getConversation = () => reloaded;
+    const before = h.rows.length;
+    await runCompaction(h.deps, 'c1', { auto: true });
+    expect(h.rows.slice(before).map((r) => r.phase)).toEqual(['start', 'finished']);
   });
 
   it('a length stop is logged with its category and finish reason', async () => {
@@ -89,13 +112,16 @@ describe('compaction attempt rows (A48)', () => {
     expect(JSON.stringify(h.rows)).not.toContain('detail.');
   });
 
-  it('a throwing log sink does not break compaction', async () => {
+  it('a throwing log sink does not break compaction but surfaces a warning', async () => {
+    const warn = vi.spyOn(vscode.window, 'showWarningMessage');
     const h = setup(good);
     h.deps.logCompactionAttempt = () => {
       throw new Error('disk full');
     };
     await expect(runCompaction(h.deps, 'c1', { auto: false })).resolves.toBe('compacted');
     expect(h.conv.compaction).toBeDefined();
+    expect(warn).toHaveBeenCalledWith(expect.stringContaining('disk full'));
+    warn.mockRestore();
   });
 });
 

@@ -15,7 +15,7 @@ import type {
   CompactionOutcome,
   CompactionTrigger,
 } from './compactionServiceTypes';
-import { runCompactionWithPolicy } from './compactionAttemptPolicy';
+import { logAttemptSafely, runCompactionWithPolicy } from './compactionAttemptPolicy';
 import { compactionRefusalNotice } from './compactionRefusal';
 import { capSummary, isUsableSummary } from './compactionPrompt';
 import { COMPACTION_CHARS_PER_TOKEN, compactionBudget } from './compactionBudget';
@@ -109,6 +109,7 @@ async function compactOnce(
   let attemptCategory: CompactionFailureCategory | undefined;
   let attemptCalls: number | undefined;
   let attemptFinish: string | undefined;
+  let attemptCandidateChars: number | undefined;
   options = {
     ...options,
     onFailureCategory: (category) => {
@@ -229,19 +230,15 @@ async function compactOnce(
   const usedAtStart = reportedContextTokens(conv);
   const logAttempt = (
     entry: Pick<CompactionAttemptLogEntry, 'phase'> & Partial<CompactionAttemptLogEntry>,
-  ): void => {
-    try {
-      deps.logCompactionAttempt?.(conv, {
-        attemptId,
-        trigger,
-        usedTokens: usedAtStart,
-        maxTokens: modelMax,
-        ...entry,
-      });
-    } catch (err) {
-      log.info(`[compact] attempt log failed — ${(err as Error).message}`);
-    }
-  };
+  ): void =>
+    logAttemptSafely(deps, conv, {
+      attemptId,
+      trigger,
+      usedTokens: usedAtStart,
+      maxTokens: modelMax,
+      windowChars: beforeChars,
+      ...entry,
+    });
   logAttempt({ phase: 'start' });
   let summary = '';
   let summaryPrompt = '';
@@ -381,6 +378,7 @@ async function compactOnce(
     //
     // The returned summary can be long enough to undo the estimated reduction.
     const afterChars = compactionWindowChars(conv.messages, candidate);
+    attemptCandidateChars = afterChars;
     if (afterChars > budget.replacementMaxChars) {
       throw new CompactionFailure(
         'budget-refusal',
@@ -445,6 +443,7 @@ async function compactOnce(
       );
     }
     outcome = 'compacted';
+    attemptFinish = 'stop';
     deactivateLazyGroups(conversationId);
     return outcome;
   } catch (err) {
@@ -467,6 +466,7 @@ async function compactOnce(
       ...(attemptCategory ? { category: attemptCategory } : {}),
       ...(attemptCalls !== undefined ? { calls: attemptCalls } : {}),
       ...(attemptFinish ? { finishReason: attemptFinish } : {}),
+      ...(attemptCandidateChars !== undefined ? { candidateChars: attemptCandidateChars } : {}),
     });
     deps.emitCompactionEvent?.({
       conversationId: conv.id,
