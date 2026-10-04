@@ -8,10 +8,11 @@ Baseline HEAD `b0abd8b`. Green baseline 147 tests (CompactionPolicy 8, Conversat
 SendPipeline 31, CompactionService 62, MidTurnCompaction 14).
 
 Implementation progress: phase 0 is committed as `8cdab83`; phase 1 direct-send
-implementation is complete pending its scoped CI-green commit and Codex review.
-The CLI-to-route test exercises bearer authentication through `forge.sh`, while
-the runtime fake-channel test verifies exact bytes, bound-chat delivery, refusal
-gates, and ambiguous-send handling without creating a model turn.
+is committed as `c7be4e9`. Phase 2's bounded retry policy and recovery-path tests
+are implemented and awaiting its full-CI-gated commit. Phase 1's CLI-to-route
+test exercises bearer authentication through `forge.sh`, while the runtime
+fake-channel test verifies exact bytes, bound-chat delivery, refusal gates, and
+ambiguous-send handling without creating a model turn.
 
 ## Scope
 

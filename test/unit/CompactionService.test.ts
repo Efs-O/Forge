@@ -405,7 +405,7 @@ describe('runCompaction after an automatic failure', () => {
     { role: 'user', content: 'second task' },
   ];
 
-  it('does not retry automatically until the user sends another message', async () => {
+  it('retries once after failure, ignores internal nudges, then waits for a visible user message', async () => {
     const c = conv(history());
     let calls = 0;
     const h = harness(c, async () => {
@@ -414,17 +414,16 @@ describe('runCompaction after an automatic failure', () => {
     });
 
     await expect(runCompaction(h.deps, c.id, { auto: true })).resolves.toBe('failed');
-    // Mid-turn rounds and the post-turn check all land here; none may re-summarize.
-    await expect(runCompaction(h.deps, c.id, { auto: true, midTurn: true })).resolves.toBe(
-      'skipped',
-    );
     c.messages.push({ role: 'user', content: 'nudge', internal: true } as ChatMessage);
+    await expect(runCompaction(h.deps, c.id, { auto: true, midTurn: true })).resolves.toBe(
+      'failed',
+    );
     await expect(runCompaction(h.deps, c.id, { auto: true })).resolves.toBe('skipped');
-    expect(calls).toBe(1);
+    expect(calls).toBe(2);
 
     c.messages.push({ role: 'assistant', content: 'ok' }, { role: 'user', content: 'go on' });
     await runCompaction(h.deps, c.id, { auto: true });
-    expect(calls).toBe(2);
+    expect(calls).toBe(3);
   });
 
   it('never holds back an explicit /compact', async () => {
@@ -437,6 +436,52 @@ describe('runCompaction after an automatic failure', () => {
 
     await runCompaction(h.deps, c.id, { auto: true });
     await expect(runCompaction(h.deps, c.id, { auto: false })).resolves.toBe('compacted');
+    expect(calls).toBe(2);
+  });
+});
+
+describe('runCompaction recovery after automatic failures', () => {
+  const recoveryHistory = (): ChatMessage[] => [
+    { role: 'user', content: 'first task' },
+    { role: 'assistant', content: 'did the first task' },
+    { role: 'user', content: 'second task' },
+    { role: 'assistant', content: 'working on it' },
+  ];
+
+  it.each([
+    ['manual', { auto: false, trigger: 'sidebar' as const }],
+    ['remote', { auto: false, trigger: 'remote' as const }],
+  ])('a successful %s compaction clears the automatic failure limit', async (_name, options) => {
+    const c = conv(recoveryHistory());
+    let calls = 0;
+    const h = harness(c, async () => {
+      calls++;
+      return calls === 1 ? 'x'.repeat(9_000) : long('recovered');
+    });
+
+    await expect(runCompaction(h.deps, c.id, { auto: true, trigger: 'auto' })).resolves.toBe(
+      'failed',
+    );
+    await expect(runCompaction(h.deps, c.id, options)).resolves.toBe('compacted');
+    await expect(runCompaction(h.deps, c.id, { auto: true, trigger: 'auto' })).resolves.toBe(
+      'compacted',
+    );
+    expect(calls).toBe(3);
+  });
+
+  it('bounds repeated deterministic failures to two attempts per visible-user turn', async () => {
+    const c = conv(recoveryHistory());
+    let calls = 0;
+    const h = harness(c, async () => {
+      calls++;
+      return 'x'.repeat(9_000);
+    });
+
+    await runCompaction(h.deps, c.id, { auto: true, trigger: 'auto' });
+    await runCompaction(h.deps, c.id, { auto: true, trigger: 'auto', midTurn: true });
+    await expect(runCompaction(h.deps, c.id, { auto: true, trigger: 'auto' })).resolves.toBe(
+      'skipped',
+    );
     expect(calls).toBe(2);
   });
 });
