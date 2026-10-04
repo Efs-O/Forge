@@ -95,6 +95,7 @@ export class RemoteTransportManager {
       );
       return;
     }
+    await this.store.reconcileDeadClaims();
     const lease = await RemoteTransportLease.acquire({
       directory: path.join(this.options.storageDirectory, 'remote-leases'),
       key: channelName,
@@ -109,6 +110,7 @@ export class RemoteTransportManager {
         );
       },
     });
+    this.store.setClaimOwner(channelName, lease.claimIdentity());
     let voice: VoiceBridgeBundle | undefined;
     try {
       const channel = await factory({
@@ -199,6 +201,7 @@ export class RemoteTransportManager {
         throw err;
       }
     } catch (err) {
+      this.store.setClaimOwner(channelName, undefined);
       await lease.release();
       throw err;
     }
@@ -220,8 +223,15 @@ export class RemoteTransportManager {
     this.onTransportStopped(transport.controller);
     transport.jobOutboxWatcher?.stop();
     await transport.voice?.dispose();
-    await transport.controller.stop();
-    await transport.lease.release();
+    try {
+      await transport.controller.stop();
+    } finally {
+      try {
+        await transport.lease.release();
+      } finally {
+        this.store.setClaimOwner(name as 'telegram' | 'whatsapp', undefined);
+      }
+    }
   }
 
   async stopActive(): Promise<void> {

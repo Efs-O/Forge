@@ -23,6 +23,7 @@ import type { HostToWebview } from '../../src/sidebar/messageBridge';
 import type { CompactionLogEntry } from '../../src/sidebar/SessionLogger';
 import type { PromptRunOptions } from '../../src/sidebar/PromptRun';
 import { CompactionFailure } from '../../src/sidebar/compactionFailure';
+import { opClearMessages } from '../../src/sidebar/ConversationOps';
 import {
   activateLazyGroup,
   isLazyGroupActive,
@@ -943,6 +944,41 @@ describe('runCompaction', () => {
     expect(prompt).toContain('second task');
     expect(prompt).not.toContain('third task');
     expect(c.compaction?.fromIndex).toBe(4);
+  });
+
+  it('after Clear Chat, a new compaction reads only the new conversation', async () => {
+    const c = conv([...base]);
+    c.compaction = { summary: 'stale secret summary', fromIndex: 20, generation: 1 };
+    opClearMessages(c);
+    c.messages = [...base];
+    let prompt = '';
+    const h = harness(c, async () => long('fresh summary'));
+    h.deps.runPromptToMarkdown = async (text) => {
+      prompt = text;
+      return long('fresh summary');
+    };
+
+    await expect(runCompaction(h.deps, c.id, { auto: false })).resolves.toBe('compacted');
+    expect(prompt).toContain('first task');
+    expect(prompt).not.toContain('stale secret summary');
+    expect(c.compaction?.generation).toBe(1);
+  });
+
+  it('shares one attempt across simultaneous admission, mid-turn and post-turn triggers', async () => {
+    const c = conv([...base]);
+    const h = harness(c, async () => long('summary'));
+    let release!: (summary: string) => void;
+    const pending = new Promise<string>((resolve) => { release = resolve; });
+    const runPrompt = vi.fn(() => pending);
+    h.deps.runPromptToMarkdown = runPrompt;
+    const admission = runCompaction(h.deps, c.id, { auto: true, trigger: 'auto' });
+    const midTurn = runCompaction(h.deps, c.id, { auto: true, trigger: 'auto', midTurn: true });
+    const postTurn = runCompaction(h.deps, c.id, { auto: true, trigger: 'auto' });
+    release(long('summary'));
+    await expect(Promise.all([admission, midTurn, postTurn])).resolves.toEqual([
+      'compacted', 'compacted', 'compacted',
+    ]);
+    expect(runPrompt).toHaveBeenCalledTimes(1);
   });
 
   it('records the agent’s last reply when the split could afford no tail', async () => {

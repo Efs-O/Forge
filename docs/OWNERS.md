@@ -177,12 +177,14 @@ overlaps with an existing owner, extend the owner instead.
 | Ephemeral remote message cleanup policy       | `src/remote/RemoteEphemeralMessages.ts`         |
 | Durable normal prompt admission               | `src/remote/RemotePromptAdmission.ts`           |
 | Durable queue execution + terminal outcome    | `src/remote/RemoteQueueDrain.ts`                |
+| Retry a failed remote claim settlement         | `src/remote/remoteClaimSettle.ts`               |
 | Pairing + session-auth facade                 | `src/remote/RemoteAuth.ts`                      |
 | TOTP session state + enrollment boundary      | `src/remote/RemoteSessionAuth.ts`               |
 | Prompt held across a TOTP challenge           | `src/remote/RemotePendingPrompt.ts`             |
 | Agent question presented in the remote chat   | `src/remote/RemoteQuestionBridge.ts`            |
 | RFC 6238 generation/verification              | `src/remote/RemoteTotp.ts`                      |
 | Durable requests, bindings, cursors, outbox   | `src/remote/RemoteRequestStore.ts`              |
+| Host outbox notification draft mutation        | `src/remote/remoteOutboxDraft.ts`               |
 | Pure request and outbox health queries        | `src/remote/remoteStoreQueries.ts`              |
 | Remote owner command behavior                 | `src/remote/RemoteCommandHandler.ts`            |
 | Command argument → id, and miss messages      | `src/remote/remoteCommandSelectors.ts`          |
@@ -192,6 +194,7 @@ overlaps with an existing owner, extend the owner instead.
 | Shared helpers: busy check, progress edit     | `src/remote/remoteCommandShared.ts`               |
 | /sleep, /wake, sleep confirmation state       | `src/remote/RemotePowerCommands.ts`             |
 | Queue order, promote/cancel/claim rules       | `src/remote/remoteQueueOrdering.ts`             |
+| Lease owner liveness and claim recovery        | `src/remote/remoteClaimLiveness.ts`             |
 | Claim a queued request as a mid-turn tell     | `src/remote/RemoteMidTurnTells.ts`              |
 | Turn outcome echoed to bound chats            | `src/sidebar/turnMirrorWiring.ts`               |
 | Live progress message for a sidebar turn      | `src/remote/remoteHostProgress.ts`              |
@@ -608,6 +611,8 @@ the configured override stays the existing `video.ffmpeg_path` key.
 | Agent-mesh activation wiring (orchestrator + recovery)   | `src/vscode/agentMeshSetup.ts`              |
 | Agent-mesh recovery and idle maintenance                 | `src/vscode/meshMaintenance.ts`             |
 | Agent-mesh non-observing verdict polling                | `src/vscode/meshVerdictPoll.ts`             |
+| Full verdict artifact retention and acknowledgment     | `src/agentMesh/verdictArtifact.ts`          |
+| Authenticated verdict read/ack HTTP handlers            | `src/backend/agentVerdictRoute.ts`          |
 | Agent-mesh observational-command rendering              | `src/vscode/meshObservation.ts`             |
 
 ## Build / packaging

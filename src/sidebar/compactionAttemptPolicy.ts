@@ -23,6 +23,8 @@ interface AutoFailureState {
 
 /** In-memory by design; a reload discards a stale hold and rechecks context. */
 const autoFailures = new WeakMap<ConversationRuntime, AutoFailureState>();
+/** One summarizer attempt per conversation, shared by all trigger paths. */
+const inFlight = new WeakMap<ConversationRuntime, Promise<CompactionOutcome>>();
 const log = getLogger();
 
 function userMessageCount(conv: ConversationRuntime): number {
@@ -89,6 +91,8 @@ export async function runCompactionWithPolicy(
 ): Promise<CompactionOutcome> {
   const conv = deps.getConversation(conversationId);
   if (!conv) return compactOnce(deps, conversationId, options);
+  const joined = inFlight.get(conv);
+  if (joined) return joined;
   const at = userMessageCount(conv);
   const now = Date.now();
   const contextTokens = reportedContextTokens(conv);
@@ -112,32 +116,40 @@ export async function runCompactionWithPolicy(
     return 'skipped';
   }
 
-  let outcome: CompactionOutcome = 'failed';
-  let failureCategory: CompactionFailureCategory = 'unknown';
-  const attemptOptions: CompactionOptions = options.auto
-    ? {
-        ...options,
-        onFailureCategory: (category) => {
-          failureCategory = category;
-        },
+  const attempt = (async (): Promise<CompactionOutcome> => {
+    let outcome: CompactionOutcome = 'failed';
+    let failureCategory: CompactionFailureCategory = 'unknown';
+    const attemptOptions: CompactionOptions = options.auto
+      ? {
+          ...options,
+          onFailureCategory: (category) => {
+            failureCategory = category;
+          },
+        }
+      : options;
+    try {
+      outcome = await compactOnce(deps, conversationId, attemptOptions);
+      return outcome;
+    } finally {
+      if (outcome === 'compacted') {
+        // Manual and remote success also recover the automatic path.
+        autoFailures.delete(conv);
+      } else if (options.auto && outcome === 'failed') {
+        autoFailures.set(conv, {
+          userMessageCount: at,
+          failures: (state?.failures ?? 0) + 1,
+          failureCategory,
+          failedAt: Date.now(),
+          contextTokens: reportedContextTokens(conv),
+          modelMaxTokens: deps.compactionMetrics?.(conv)?.max ?? modelMaxTokens,
+        });
       }
-    : options;
-  try {
-    outcome = await compactOnce(deps, conversationId, attemptOptions);
-    return outcome;
-  } finally {
-    if (outcome === 'compacted') {
-      // Manual and remote success also recover the automatic path.
-      autoFailures.delete(conv);
-    } else if (options.auto && outcome === 'failed') {
-      autoFailures.set(conv, {
-        userMessageCount: at,
-        failures: (state?.failures ?? 0) + 1,
-        failureCategory,
-        failedAt: Date.now(),
-        contextTokens: reportedContextTokens(conv),
-        modelMaxTokens: deps.compactionMetrics?.(conv)?.max ?? modelMaxTokens,
-      });
     }
+  })();
+  inFlight.set(conv, attempt);
+  try {
+    return await attempt;
+  } finally {
+    if (inFlight.get(conv) === attempt) inFlight.delete(conv);
   }
 }

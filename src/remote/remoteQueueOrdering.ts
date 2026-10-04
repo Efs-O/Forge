@@ -1,4 +1,4 @@
-import type { RemoteRequestRecord } from './types';
+import type { RemoteExecutionState, RemoteRequestRecord } from './types';
 
 /**
  * Queue order for one conversation, and the draft mutations that depend on it.
@@ -40,6 +40,30 @@ export function cancelQueuedInDraft(
   return selected.length;
 }
 
+export function markRunningInDraft(
+  requests: RemoteRequestRecord[],
+  id: string,
+  owner?: RemoteRequestRecord['claimOwner'],
+): void {
+  const request = requests.find((item) => item.id === id);
+  if (!request) throw new Error(`Forge: remote request ${id} is missing.`);
+  request.state = 'running';
+  request.claimOwner = owner;
+  request.updatedAt = Date.now();
+}
+
+export function setRequestStateInDraft(
+  requests: RemoteRequestRecord[],
+  id: string,
+  state: RemoteExecutionState,
+): void {
+  const request = requests.find((item) => item.id === id);
+  if (!request) throw new Error(`Forge: remote request ${id} is missing.`);
+  request.state = state;
+  if (state !== 'running') delete request.claimOwner;
+  request.updatedAt = Date.now();
+}
+
 /**
  * Claim the next queued prompt for a conversation, or nothing.
  *
@@ -50,6 +74,7 @@ export function claimNextInDraft(
   requests: RemoteRequestRecord[],
   conversationId: string,
   channel: RemoteRequestRecord['channel'],
+  owner?: RemoteRequestRecord['claimOwner'],
 ): string | undefined {
   if (requests.some((item) => item.conversationId === conversationId && item.state === 'running')) {
     return undefined;
@@ -57,6 +82,7 @@ export function claimNextInDraft(
   const next = queuedFor(requests, conversationId).sort(compareQueuedRequests)[0];
   if (!next || next.channel !== channel) return undefined;
   next.state = 'running';
+  if (owner) next.claimOwner = owner;
   next.updatedAt = Date.now();
   return next.id;
 }
@@ -72,10 +98,12 @@ export function claimNextInDraft(
 export function claimMidTurnTellInDraft(
   requests: RemoteRequestRecord[],
   requestId: string,
+  owner?: RemoteRequestRecord['claimOwner'],
 ): RemoteRequestRecord | undefined {
   const request = requests.find((item) => item.id === requestId);
   if (!request || request.state !== 'queued') return undefined;
   request.state = 'running';
+  if (owner) request.claimOwner = owner;
   request.updatedAt = Date.now();
   return structuredClone(request);
 }

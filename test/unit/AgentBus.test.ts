@@ -67,6 +67,8 @@ describe('CLIENT_SCRIPT usage block', () => {
       'say',
       'send',
       'send-file',
+      'read-verdict',
+      'ack-verdict',
       'steer',
       'cancel',
       'join',
@@ -82,6 +84,7 @@ describe('CLIENT_SCRIPT usage block', () => {
     expect(usage).toContain('The text comes from the file, or from stdin');
     expect(usage).toContain('--to <conversationId>|--to-running');
     expect(BUS_README).toContain('say <name> --to-running');
+    expect(BUS_README).toContain('read-verdict <name> <exchangeId>');
     // Implementation comments below the block are for maintainers, not users.
     expect(usage).not.toContain('usage prints');
   });

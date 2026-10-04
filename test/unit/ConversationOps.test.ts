@@ -11,6 +11,7 @@ import {
 } from '../../src/sidebar/ConversationOps';
 import type { SidebarRuntime } from '../../src/sidebar/sessionTypes';
 import { UNTITLED_TITLE } from '../../src/sidebar/sessionTypes';
+import { applyCompactionWindow } from '../../src/sidebar/compactionWindow';
 import {
   evictionBlockers,
   isConversationEvictable,
@@ -260,6 +261,25 @@ describe('opClearMessages', () => {
     expect(conv.messages).toEqual([]);
     expect(conv.active_model).toBe('claude');
     expect(conv.contextTrimState).toEqual({ reasoningDropped: 0, excerpts: new Map() });
+  });
+
+  it('clears the old compaction window so new requests reach the model', () => {
+    const conv = sidebar().conversations[0]!;
+    conv.compaction = {
+      summary: 'old summary',
+      fromIndex: 8,
+      generation: 1,
+    };
+    conv.last_input_tokens = 195_000;
+    conv.last_output_tokens = 1_000;
+
+    opClearMessages(conv);
+    conv.messages.push({ role: 'user', content: 'first new request' });
+    expect(conv.compaction).toBeUndefined();
+    expect(conv.last_input_tokens).toBeUndefined();
+    expect(conv.last_output_tokens).toBeUndefined();
+    expect(applyCompactionWindow(conv.messages, conv.compaction)).toEqual(conv.messages);
+    expect(conv.active_model).toBe('claude');
   });
 });
 

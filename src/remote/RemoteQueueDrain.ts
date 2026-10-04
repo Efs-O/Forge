@@ -6,6 +6,7 @@ import type { RemoteAttachmentStore } from './RemoteAttachmentStore';
 import type { RemoteAuth } from './RemoteAuth';
 import type { RemoteOutboxDelivery } from './RemoteOutboxDelivery';
 import { withConversationIdentity } from './RemoteReplyIdentity';
+import { settleRemoteClaim } from './remoteClaimSettle';
 import type { RemoteRequestStore } from './RemoteRequestStore';
 import type { RemoteChannel } from './types';
 
@@ -23,6 +24,7 @@ export interface RemoteQueueDrainDeps {
   activeConversations: Set<string>;
   attachmentStore: () => RemoteAttachmentStore | undefined;
   isBusy: (conversationId: string) => boolean;
+  onError?: (message: string) => void;
 }
 
 /** Execute one transport's durable queue until it is empty, locked, or stopped. */
@@ -30,6 +32,11 @@ export async function drainRemoteQueue(
   conversationId: string,
   deps: RemoteQueueDrainDeps,
 ): Promise<void> {
+  const persistResult = (write: () => Promise<void>): Promise<boolean> =>
+    settleRemoteClaim(write, deps.signal, (message) => {
+      log.warn(message);
+      deps.onError?.(message);
+    });
   while (!deps.signal.aborted) {
     if (deps.isBusy(conversationId)) {
       await delay(250, deps.signal);
@@ -45,11 +52,11 @@ export async function drainRemoteQueue(
       continue;
     }
     if (deps.signal.aborted) {
-      await deps.store.requeue(next.id);
+      await persistResult(() => deps.store.requeue(next.id));
       return;
     }
     if (!(await deps.auth.canDeliver(next.channel, next.chatId))) {
-      await deps.store.requeue(next.id);
+      await persistResult(() => deps.store.requeue(next.id));
       return;
     }
 
@@ -84,36 +91,56 @@ export async function drainRemoteQueue(
           next,
           outcome.finalText,
         );
-        await deps.store.finish(next.id, 'completed', {
-          finalText: outcome.finalText,
-          notification: notification ?? 'Forge request completed.',
-          ...(notification ? { announceConversationId: next.conversationId } : {}),
-        });
+        if (
+          !(await persistResult(() =>
+            deps.store.finish(next.id, 'completed', {
+              finalText: outcome.finalText,
+              notification: notification ?? 'Forge request completed.',
+              ...(notification ? { announceConversationId: next.conversationId } : {}),
+            }),
+          ))
+        )
+          return;
       } else if (outcome.kind === 'cancelled' || outcome.kind === 'interrupted') {
         progressOutcome = 'cancelled';
-        await deps.store.finish(next.id, 'cancelled', {
-          ...(outcome.finalText ? { finalText: outcome.finalText } : {}),
-          notification: outcome.finalText || 'Forge request cancelled.',
-        });
+        if (
+          !(await persistResult(() =>
+            deps.store.finish(next.id, 'cancelled', {
+              ...(outcome.finalText ? { finalText: outcome.finalText } : {}),
+              notification: outcome.finalText || 'Forge request cancelled.',
+            }),
+          ))
+        )
+          return;
       } else if (outcome.error === CONVERSATION_BUSY_ERROR) {
         progressOutcome = 'queued';
-        await deps.store.requeue(next.id);
+        if (!(await persistResult(() => deps.store.requeue(next.id)))) return;
         await delay(250, deps.signal);
         continue;
       } else {
-        await deps.store.finish(next.id, 'failed', {
-          error: outcome.error,
-          ...(outcome.finalText ? { finalText: outcome.finalText } : {}),
-          notification: `Forge request failed: ${outcome.error}`,
-        });
+        if (
+          !(await persistResult(() =>
+            deps.store.finish(next.id, 'failed', {
+              error: outcome.error,
+              ...(outcome.finalText ? { finalText: outcome.finalText } : {}),
+              notification: `Forge request failed: ${outcome.error}`,
+            }),
+          ))
+        )
+          return;
       }
     } catch (err) {
       progressOutcome = 'failed';
       const error = err instanceof Error ? err.message : String(err);
-      await deps.store.finish(next.id, 'failed', {
-        error,
-        notification: `Forge request failed: ${error}`,
-      });
+      if (
+        !(await persistResult(() =>
+          deps.store.finish(next.id, 'failed', {
+            error,
+            notification: `Forge request failed: ${error}`,
+          }),
+        ))
+      )
+        return;
     } finally {
       if (progressId) {
         await deps.progress.finish(conversationId, progressTerminalText(progressOutcome));

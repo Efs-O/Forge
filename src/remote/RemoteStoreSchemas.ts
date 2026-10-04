@@ -29,6 +29,13 @@ export const RequestSchema = z.object({
   receivedAt: z.number(),
   admittedAt: z.number().optional(),
   state: z.enum(['queued', 'running', 'completed', 'failed', 'cancelled', 'unknown']),
+  claimOwner: z
+    .object({
+      token: z.string().uuid(),
+      pid: z.number().int().positive(),
+      startedAt: z.number().int().nonnegative(),
+    })
+    .optional(),
   updatedAt: z.number(),
   finalText: z.string().optional(),
   error: z.string().optional(),

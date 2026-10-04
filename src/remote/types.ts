@@ -137,6 +137,8 @@ export interface RemoteRequestRecord {
   receivedAt: number;
   admittedAt?: number | undefined;
   state: RemoteExecutionState;
+  /** Lease epoch and process identity for a running claim. Older records omit it. */
+  claimOwner?: { token: string; pid: number; startedAt: number } | undefined;
   updatedAt: number;
   finalText?: string | undefined;
   error?: string | undefined;

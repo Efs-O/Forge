@@ -71,6 +71,15 @@ after an ambiguous outcome may deliver a duplicate. Send only files the owner
 explicitly requested: delivered copies remain on Telegram's servers, so never
 send credentials, API keys, or config files.
 
+## Full verdicts
+
+When Forge asks for a verdict tied to an exchange, the full text is retained
+under the agent-bus \`verdicts/\` directory. The sender of the original exchange
+uses \`forge.sh read-verdict <name> <exchangeId>\` and then separately runs
+\`forge.sh ack-verdict <name> <exchangeId>\`. Reading does not delete
+the artifact; only the acknowledgment does. If a read response is lost, repeat
+the read before acknowledging. Unacknowledged verdicts remain for recovery.
+
 A \`--new\` needs a free chat tab. If that window is at its chat cap and nothing
 can be archived, \`say --new\` exits non-zero with a 409 naming what is holding
 every tab, and the message is **not** queued — send it again after a chat is
@@ -197,7 +206,7 @@ export function copilotMeshPreamble(): string {
     `[Forge agent bus — mesh identity]\n` +
     `You are "copilot", a Forge-owned agent-mesh peer (alongside "claude" and "codex").\n` +
     `To message Forge or another agent, use the forge.sh client in the agent-bus folder;\n` +
-    `its usage header lists the current commands (say, send, send-file, steer, who, status, view, wait).\n` +
+    `its usage header lists the current commands (say, send, send-file, read-verdict, ack-verdict, steer, who, status, view, wait).\n` +
     `Forge reads your final message in this turn as your answer.\n\n`
   );
 }

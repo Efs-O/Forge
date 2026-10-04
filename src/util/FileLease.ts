@@ -1,5 +1,5 @@
 import * as fs from 'fs/promises';
-import { renameSync } from 'fs';
+import { readFileSync, renameSync } from 'fs';
 import * as path from 'path';
 import { randomUUID } from 'crypto';
 import { z } from 'zod';
@@ -107,6 +107,31 @@ export class FileLease {
 
   isLost(): boolean {
     return this.lost;
+  }
+
+  /** Stable epoch used to fence durable work claimed by this transport. */
+  claimIdentity(): { token: string; pid: number; startedAt: number } {
+    return {
+      token: this.record.token,
+      pid: this.record.pid,
+      startedAt: this.record.processStartedAt,
+    };
+  }
+
+  /** Read the current epoch for crash recovery; an unreadable lease proves no owner. */
+  static currentClaimIdentity(
+    directory: string,
+    key: string,
+  ): { token: string; pid: number; startedAt: number } | 'unreadable' | undefined {
+    try {
+      const safeKey = key.replace(/[^a-zA-Z0-9._-]/g, '_');
+      const record = LeaseSchema.parse(
+        JSON.parse(readFileSync(path.join(directory, `${safeKey}.lease.json`), 'utf8')),
+      );
+      return { token: record.token, pid: record.pid, startedAt: record.processStartedAt };
+    } catch (err) {
+      return (err as NodeJS.ErrnoException).code === 'ENOENT' ? undefined : 'unreadable';
+    }
   }
 
   async verify(): Promise<boolean> {

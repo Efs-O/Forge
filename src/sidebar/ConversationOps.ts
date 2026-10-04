@@ -245,6 +245,7 @@ export function opRestoreConversation(
  */
 export function opClearMessages(conv: ConversationRuntime): void {
   conv.messages = [];
+  delete conv.compaction;
   conv.displayDiffs = [];
   conv.title = UNTITLED_TITLE;
   conv.updatedAt = Date.now();

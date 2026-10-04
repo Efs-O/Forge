@@ -14,6 +14,7 @@ import type {
 } from '../agentBus/agentInbox';
 import { sendJson, sendText } from './controlHttp';
 import { handleAgentFileRoute } from './agentFileRoute';
+import { handleVerdictAck, handleVerdictRead } from './agentVerdictRoute';
 import {
   AgentRouteHttpError as HttpError,
   readAgentRouteFields as readFields,
@@ -224,7 +225,9 @@ export class AgentRoutes {
       (route === '/agent/who' && !!this.deps.who) ||
       (route === '/agent/status' && !!this.deps.status) ||
       (route === '/agent/view' && !!this.deps.view) ||
-      (route === '/agent/send-file' && !!this.deps.sendFile && !!this.deps.validateFrom);
+      (route === '/agent/send-file' && !!this.deps.sendFile && !!this.deps.validateFrom) ||
+      ((route === '/agent/read-verdict' || route === '/agent/ack-verdict') &&
+        !!this.deps.validateFrom);
     if (!this.enabled || !known) {
       return sendJson(res, 404, { error: `no route for ${req.method ?? 'GET'} ${route}` });
     }
@@ -259,9 +262,15 @@ export class AgentRoutes {
       if (result.ok) return sendText(res, 200, result.text);
       return sendJson(res, result.status, { error: result.error });
     }
+    if (route === '/agent/read-verdict') {
+      return handleVerdictRead(req, res, url, this.deps);
+    }
     if (req.method !== 'POST') return sendJson(res, 405, { error: 'POST only' });
     try {
       const fields = await readFields(req, url);
+      if (route === '/agent/ack-verdict') {
+        return handleVerdictAck(res, url, fields, this.deps);
+      }
       if (route === '/agent/send-file') {
         if (url.searchParams.size > 0)
           throw new HttpError(400, 'send-file fields must be in the request body');

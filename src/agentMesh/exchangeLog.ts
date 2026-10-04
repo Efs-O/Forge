@@ -178,13 +178,16 @@ export function appendEvent(
   paths: ExchangeLogPaths,
   event: Omit<ExchangeEvent, 'seq'>,
   deps: ExchangeLogDeps = {},
-): Promise<void> {
+): Promise<boolean> {
   return enqueue(async () => {
     const holder = getHostIdentity(deps);
     const deadline = Date.now() + (deps.lockTimeoutMs ?? 5_000);
     acquireLock(paths.lock, holder, deps, deadline);
     try {
       const existing = readEvents(paths.log);
+      // A recovered verdict and a second window may submit the same event.
+      // Deduplicate under the interprocess lock, before checking terminality.
+      if (existing.some((e) => e.eventId === event.eventId)) return false;
       // F-03: a terminal state is FINAL. A new event for an exchange that has
       // already reached a terminal state (a `completed` that arrives after the
       // non-terminal deadline wrote `timeout`, a duplicate completion) is an
@@ -199,7 +202,7 @@ export function appendEvent(
       const prior = existing.filter((e) => e.exchangeId === event.exchangeId);
       if (prior.length > 0) {
         const current = deriveLatestState(prior) as ExchangeState;
-        if (isTerminal(current)) return; // orphan: the exchange is already over
+        if (isTerminal(current)) return false; // orphan: the exchange is already over
         // A `verdict` event completes a non-observing exchange that honestly
         // stays at `accepted`/`observed` until the agent writes its verdict
         // (F-03). That is an exchange-correlated completion, not a transport
@@ -221,6 +224,7 @@ export function appendEvent(
       const full: ExchangeEvent = { ...event, seq };
       fs.mkdirSync(path.dirname(paths.log), { recursive: true });
       await fs.promises.appendFile(paths.log, `${JSON.stringify(full)}\n`, 'utf8');
+      return true;
     } finally {
       releaseLock(paths.lock, holder);
     }
@@ -327,6 +331,15 @@ export function compact(
       // non-terminal. Non-terminal exchanges are always kept.
       const keepAll = new Set(keep);
       for (const [id, s] of allStates) if (!isTerminal(s)) keepAll.add(id);
+      // An unacknowledged full verdict needs its exchange's sender/scope row
+      // for authenticated reads. Do not age that exchange out of the board log.
+      for (const [id] of allStates) {
+        if (
+          /^[A-Za-z0-9][A-Za-z0-9_-]{0,127}$/u.test(id) &&
+          fs.existsSync(path.join(path.dirname(paths.log), 'verdicts', `${id}.md`))
+        )
+          keepAll.add(id);
+      }
 
       const keptEvents = allEvents.filter((e) => keepAll.has(e.exchangeId));
       const removedEvents = allEvents.length - keptEvents.length;

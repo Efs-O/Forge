@@ -3,6 +3,8 @@
 #   forge.sh say <your-name> [--model <name>] [--new] [--reply-in-chat] [--to <conversationId>|--to-running] [file]  message Forge
 #   forge.sh send <your-name> <to> [--to <conversationId>|--to-running] [file]  relay, or target a Forge chat when <to> is forge
 #   forge.sh send-file <your-name> --to <conversationId> <workspace-relative-path> [--caption-file <file>]  send a file directly to its Telegram chat (no Forge model turn)
+#   forge.sh read-verdict <your-name> <exchangeId>  read the full retained verdict without consuming it
+#   forge.sh ack-verdict <your-name> <exchangeId>   acknowledge a read verdict and remove its retained copy
 #   forge.sh steer <your-name> <to> [file] interrupt <to>'s running turn (forge/claude/codex/copilot); runs next
 #   forge.sh cancel <your-name> <id|all>  withdraw your queued message(s) to Forge not yet started
 #   forge.sh join claude|codex        this interactive session becomes that mesh alias
@@ -62,6 +64,26 @@ if [ "$VERB" = "status" ] || [ "$VERB" = "view" ]; then
   TOKEN="$(grep '"token"' "$EP" | cut -d'"' -f4)"
   curl -sS --fail-with-body -X GET -H "Authorization: Bearer $TOKEN" "$URL/agent/$VERB?$QUERY" \
     || { echo "forge.sh: Forge's endpoint did not accept it (see above)." >&2; exit 1; }
+  exit 0
+fi
+if [ "$VERB" = "read-verdict" ] || [ "$VERB" = "ack-verdict" ]; then
+  [ $# -eq 3 ] || usage
+  NAME="$2"; EXCHANGE_ID="$3"
+  case "$NAME" in ""|*[!A-Za-z0-9._-]*) echo "forge.sh: invalid sender" >&2; exit 2;; esac
+  case "$EXCHANGE_ID" in ""|*[!A-Za-z0-9_-]*) echo "forge.sh: invalid exchange id" >&2; exit 2;; esac
+  [ -f "$EP" ] || { echo "forge.sh: not reachable: open Forge with control_server and agent_bus enabled" >&2; exit 1; }
+  URL="$(grep '"url"' "$EP" | cut -d'"' -f4)"
+  TOKEN="$(grep '"token"' "$EP" | cut -d'"' -f4)"
+  if [ "$VERB" = "read-verdict" ]; then
+    curl -sS --fail-with-body -G -H "Authorization: Bearer $TOKEN" \
+      --data-urlencode "from=$NAME" --data-urlencode "id=$EXCHANGE_ID" \
+      "$URL/agent/read-verdict" || { echo "forge.sh: verdict read failed" >&2; exit 1; }
+  else
+    curl -sS --fail-with-body -X POST -H "Authorization: Bearer $TOKEN" \
+      --data-urlencode "from=$NAME" --data-urlencode "id=$EXCHANGE_ID" \
+      "$URL/agent/ack-verdict" || { echo "forge.sh: verdict acknowledgment failed" >&2; exit 1; }
+    echo
+  fi
   exit 0
 fi
 if [ "$VERB" = "wait" ]; then

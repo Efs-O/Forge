@@ -408,6 +408,7 @@ export class RemoteController {
       activeConversations: this.activeConversations,
       attachmentStore: () => this.options.attachmentStore,
       isBusy: (id) => this.isBusy(id),
+      ...(this.options.onError ? { onError: this.options.onError } : {}),
     })
       .catch((err) =>
         this.options.onError?.(

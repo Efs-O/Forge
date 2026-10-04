@@ -1,5 +1,20 @@
 # Forge — Recent Changes
 
+## 0.16.82
+
+### Compaction recovery and durable agent handoffs
+
+- Automatic compaction now retries recoverable failures, uses staged summaries
+  when one response cannot safely fit, preserves required task evidence, and
+  checks a full window before admitting the next turn. Attempt failures are
+  recorded with their stop reason and estimated sizes.
+- Clear Chat removes old compaction state. Simultaneous compaction triggers
+  share one attempt.
+- Agents can send a workspace file directly to a bound Telegram chat without a
+  Forge model turn. Full mesh verdicts stay readable until acknowledged.
+- Remote requests keep their transport owner while running, recover after a
+  proven owner loss, and retry a failed settlement before taking the next job.
+
 ## 0.16.81
 
 ### Compaction handoff, memory cleanup, and bundled ripgrep

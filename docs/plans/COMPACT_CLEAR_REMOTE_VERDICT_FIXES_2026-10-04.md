@@ -7,12 +7,25 @@ Findings and evidence: `docs/reports/DEEP_AUDIT_2026-10-04_FINDINGS.md`.
 Baseline HEAD `b0abd8b`. Green baseline 147 tests (CompactionPolicy 8, ConversationOps 32,
 SendPipeline 31, CompactionService 62, MidTurnCompaction 14).
 
-Implementation progress: phase 0 is committed as `8cdab83`; phase 1 direct-send
-is committed as `c7be4e9`. Phase 2's bounded retry policy and recovery-path tests
-are implemented and awaiting its full-CI-gated commit. Phase 1's CLI-to-route
-test exercises bearer authentication through `forge.sh`, while the runtime
-fake-channel test verifies exact bytes, bound-chat delivery, refusal gates, and
-ambiguous-send handling without creating a model turn.
+Implementation progress: phases 0–5 are committed as `8cdab83`, `c7be4e9`,
+`3191e85`, `0148514` (+ `50d865b`), `00761bb`, and `13f9f05` (+ `c0be7e8`).
+Phases 7–10 are implemented in the subsequent scoped release commit. The phase 1
+CLI-to-route test exercises bearer authentication through `forge.sh`; the
+fake-channel test verifies exact bytes, bound-chat delivery, refusal gates and
+ambiguous-send handling without creating a model turn. Recovery VSIX packaging
+and installation are the release gate. A live 400k model is unavailable.
+
+Acceptance evidence for phases 7–10: `ConversationOps.test.ts` and
+`CompactionService.test.ts` cover Clear Chat and a fresh compaction; the latter
+also covers simultaneous admission/mid-turn/post-turn compaction calls.
+`MeshVerdictPoll.test.ts` and `AgentVerdictRoutes.test.ts` cover full verdict
+retention, crash recovery, competing pollers, authenticated read, retry and
+acknowledgment, including keeping the sender row while an artifact is unacknowledged.
+`RemoteClaimRecovery.test.ts` covers a live claim in another window, legacy
+ownerless state, proven-dead recovery and an injected settle failure followed
+by the next queued request in order. Four `ZZ_scratch_*` repros were replaced by
+permanent tests. The audit report now states the historical F13/F10 causal
+uncertainty and the unresolved cause of the first ripgrep timeout.
 
 Retry-policy contract (supersedes the flat two-failures limit): one transient
 failure (`model-error`/`unknown`) allows an immediate second attempt; after that
@@ -244,12 +257,12 @@ Each row maps to a test or a named manual step. Invariants first, then edge case
 
 | # | Invariant / edge case | Verification |
 |---|---|---|
-| A1 | A verdict longer than 500 chars survives polling in full | `test/unit/MeshVerdictPoll.test.ts` "preserves a verdict longer than the event-detail cap" |
-| A2 | The sole full copy is never deleted before an authenticated recipient reads and acknowledges it | same file plus `AgentRoutes.test.ts`, "read verdict then acknowledge" |
-| A3 | Two windows polling one verdict: exactly one terminal event and one readable full artifact | same file, "duplicate polling" |
+| A1 | A verdict longer than 500 chars survives polling in full | `test/unit/MeshVerdictPoll.test.ts` "retains a verdict longer than the board detail" |
+| A2 | The sole full copy is never deleted before an authenticated recipient reads and acknowledges it | `MeshVerdictPoll.test.ts` and `AgentVerdictRoutes.test.ts`, repeated read then separate acknowledgment |
+| A3 | Two windows polling one verdict: exactly one terminal event and one readable full artifact | `MeshVerdictPoll.test.ts`, competing pollers with deterministic event id |
 | A4 | A verdict file removed between listing and reading is skipped, not fatal | same file, "unreadable verdict" |
 | A5 | An orphan verdict (unknown/terminal exchange) is discarded with the existing warning | same file, "orphan verdict" |
-| A6 | Exchange-log event detail stays bounded; a crash after artifact rename and before event append is recovered once | same file, pointer bound and restart injection tests |
+| A6 | Exchange-log event detail stays bounded; a crash after artifact rename and before event append is recovered once | `MeshVerdictPoll.test.ts`, pointer bound, retained artifact recovery and compaction retention |
 | A7 | Clear Chat removes `compaction` and the reported-context counters | `ConversationOps.test.ts` "clear chat also clears compaction state" |
 | A8 | Clear Chat preserves the pinned `active_model` and Keep/Undo semantics | same file, existing pinned-model rows still green |
 | A9 | The first new user message after Clear Chat reaches the model | new test through `prepareModelTurnMessages`/`applyCompactionWindow` with a non-zero old `fromIndex` |
@@ -270,10 +283,10 @@ Each row maps to a test or a named manual step. Invariants first, then edge case
 | A24 | A constructed 20,674-char host block at P=170,000 refuses and leaves the old state intact | new 200k regression with real `RecordedCompactionAction` objects, repo state, memory keys |
 | A25 | A case that must compact does so without losing required facts (user requests, actions, Next) | paired positive regression with a smaller host-fact fixture than A24; do not claim the impossible A24 fixture fits |
 | A26 | Persisted compaction schema stays backward compatible | `compactionPersisted`/persistence tests unchanged and green |
-| A27 | A failed settle leaves the record recoverable, not permanently `running` | `RemoteRequestStore`/`RemoteQueueDrain` test with an injected settle failure |
-| A28 | Later queued work for the same conversation proceeds in order after a failed settle | same test asserts the next queued record is claimed and its order |
-| A29 | A legitimately long active request in another window is not stolen, including during `load()` | new ownership/liveness test; no fixed-age expiry of `running` |
-| A30 | Restart recovers a stranded `running` record after its owner is proven dead | existing `load()` behaviour test extended to the injected-failure case and the live-owner countercase |
+| A27 | A failed settle leaves the record recoverable, not permanently `running` | `RemoteClaimRecovery.test.ts`, injected settle failure and lease-owner recovery |
+| A28 | Later queued work for the same conversation proceeds in order after a failed settle | same file asserts settle-one before send-two |
+| A29 | A legitimately long active request in another window is not stolen, including during `load()` | `RemoteClaimRecovery.test.ts`, live FileLease across two store instances |
+| A30 | Restart recovers a stranded `running` record after its owner is proven dead | `RemoteClaimRecovery.test.ts`, release lease then load and claim successor |
 | A31 | Duplicate delivery stays bounded by the existing at-least-once contract | existing outbox/abandoned tests unchanged and green |
 | A32 | Disposition-before-ack/cursor ordering preserved | existing ordering tests unchanged and green |
 | A33 | No `.ts` file exceeds 500 lines; nothing above 350 is left unsplit at a real seam | `npx eslint <file>` per changed file |
@@ -294,8 +307,8 @@ Each row maps to a test or a named manual step. Invariants first, then edge case
 | A48 | Every attempted compaction has start and terminal diagnostic rows under one ID, including length stop and refusal; a crash leaves a recognizable unmatched start, and a policy hold is a distinct decision | `SessionLogger` and `CompactionService` tests; no source text or secrets, old session rows still parse, log-write failure cannot corrupt `conv.compaction` |
 | A49 | A multi-chunk source has no uncovered gap or forgotten first/last chunk; exhausted call/chunk bound refuses without mutation | staged-summarizer fixtures at 200k with sentinel findings in first, middle and final chunks, plus bounded-failure case |
 | A50 | Mid-turn shrink refusal gives an accurate active-turn notice | `CompactionService.test.ts` automatic mid-turn refusal test, plus manual/post-turn variants |
-| A51 | An older remote-state file without claim-owner fields loads and migrates without stealing a live claim | `RemoteRequestStore` schema/migration tests across two windows |
-| A52 | `read-verdict` returns the full body without deleting it; only a separate authenticated `ack-verdict` permits cleanup | `AgentRoutes.test.ts` with lost response, retry, wrong token/sender, duplicate read and crash-before-ack cases; `AgentBus.test.ts` documents both verbs |
+| A51 | An older remote-state file without claim-owner fields loads and migrates without stealing a live claim | `RemoteClaimRecovery.test.ts`, ownerless row and live legacy lease |
+| A52 | `read-verdict` returns the full body without deleting it; only a separate authenticated `ack-verdict` permits cleanup | `AgentVerdictRoutes.test.ts` with lost response, retry, wrong token/sender; `AgentBus.test.ts` documents both verbs |
 | A53 | A null/unknown summarizer finish reason is never assumed complete, and admission/mid-turn/post-turn cannot start duplicate compactions | `PromptRun`, `CompactionService`, `SendPipeline` and policy-lock tests |
 | A54 | At a simulated 400k per-conversation slot, the 85% trigger is 340k and the whole replacement fits <=34k estimated tokens without one generation needing to produce it all | synthetic budget/staged-summarizer tests with a source spanning first, middle and final chunks, thinking-heavy finishes and required facts in each; live 400k validation deferred because this model is unavailable |
 | A55 | A 400k server allocation with two parallel slots is treated as 200k per conversation, with a 170k trigger and <=17k replacement | per-slot policy and staged-summarizer regression; no 340k trigger on either chat |

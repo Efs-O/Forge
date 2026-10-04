@@ -30,6 +30,8 @@ import {
   cancelQueuedInDraft,
   claimMidTurnTellInDraft,
   claimNextInDraft,
+  markRunningInDraft,
+  setRequestStateInDraft,
   compareQueuedRequests,
 } from './remoteQueueOrdering';
 import {
@@ -39,6 +41,8 @@ import {
   replaceSelection,
 } from './RemoteSelectionState';
 import { pruneRemoteState } from './remoteStateRetention';
+import { appendHostNotification } from './remoteOutboxDraft';
+import { recoverDeadClaims, recoverInterruptedRemoteState } from './remoteClaimLiveness';
 import {
   outboxHealth as queryOutboxHealth,
   pendingOutbox as queryPendingOutbox,
@@ -54,6 +58,10 @@ export class RemoteRequestStore {
   private state: RemoteStoreState = structuredClone(EMPTY_REMOTE_STATE);
   private mutationTail: Promise<void> = Promise.resolve();
   private loaded = false;
+  private readonly claimOwners = new Map<
+    RemoteRequestRecord['channel'],
+    NonNullable<RemoteRequestRecord['claimOwner']>
+  >();
 
   constructor(
     private readonly filePath: string,
@@ -68,26 +76,21 @@ export class RemoteRequestStore {
       if ((err as NodeJS.ErrnoException).code !== 'ENOENT') throw err;
       await this.importLegacyOrCreate();
     }
-    await this.mutate((draft) => {
-      const now = Date.now();
-      for (const request of draft.requests) {
-        if (request.state === 'running') {
-          request.state = 'unknown';
-          request.updatedAt = now;
-        }
-      }
-      for (const item of draft.outbox) {
-        if (item.state === 'sending') item.state = 'pending';
-      }
-      for (const receipt of draft.controlReceipts) {
-        if (receipt.state === 'pending') receipt.state = 'unknown';
-      }
-    });
+    await this.mutate((draft) => recoverInterruptedRemoteState(draft, this.filePath));
     this.loaded = true;
   }
 
   isLoaded(): boolean {
     return this.loaded;
+  }
+
+  /** Registered by the transport that holds the channel's current lease. */
+  setClaimOwner(
+    channel: RemoteRequestRecord['channel'],
+    owner: NonNullable<RemoteRequestRecord['claimOwner']> | undefined,
+  ): void {
+    if (owner) this.claimOwners.set(channel, owner);
+    else this.claimOwners.delete(channel);
   }
 
   blocksConversationEviction(conversationId: string): boolean {
@@ -170,21 +173,9 @@ export class RemoteRequestStore {
     text: string,
     options?: { ephemeral?: boolean },
   ): Promise<void> {
-    await this.mutate((draft) => {
-      draft.outbox.push({
-        id: randomUUID(),
-        requestId: `host-${randomUUID()}`,
-        channel,
-        chatId,
-        text,
-        state: 'pending',
-        attempts: 0,
-        updatedAt: Date.now(),
-        // Only store the flag when set, so a plain notification record is
-        // byte-identical to what was written before this field existed.
-        ...(options?.ephemeral ? { ephemeral: true } : {}),
-      });
-    });
+    await this.mutate((draft) =>
+      appendHostNotification(draft, channel, chatId, text, options?.ephemeral),
+    );
   }
 
   async setBinding(binding: RemoteBinding): Promise<void> {
@@ -301,7 +292,10 @@ export class RemoteRequestStore {
   }
 
   async markRunning(id: string): Promise<void> {
-    await this.setRequestState(id, 'running');
+    const channel = this.getRequest(id)?.channel;
+    await this.mutate((draft) =>
+      markRunningInDraft(draft.requests, id, channel ? this.claimOwners.get(channel) : undefined),
+    );
   }
 
   async claimNext(
@@ -310,9 +304,19 @@ export class RemoteRequestStore {
   ): Promise<RemoteRequestRecord | undefined> {
     let claimedId: string | undefined;
     await this.mutate((draft) => {
-      claimedId = claimNextInDraft(draft.requests, conversationId, channel);
+      claimedId = claimNextInDraft(
+        draft.requests,
+        conversationId,
+        channel,
+        this.claimOwners.get(channel),
+      );
     });
     return claimedId ? this.getRequest(claimedId) : undefined;
+  }
+
+  /** Reconcile before a new transport lease is acquired, under the state lock. */
+  async reconcileDeadClaims(): Promise<void> {
+    await this.mutate((draft) => recoverDeadClaims(draft, this.filePath));
   }
 
   async requeue(id: string): Promise<void> {
@@ -322,7 +326,14 @@ export class RemoteRequestStore {
   /** Atomically claim one queued request as a mid-turn tell (Phase 3); see `claimMidTurnTellInDraft`. */
   async claimMidTurnTell(id: string): Promise<RemoteRequestRecord | undefined> {
     let claimed: RemoteRequestRecord | undefined;
-    await this.mutate((draft) => (claimed = claimMidTurnTellInDraft(draft.requests, id)));
+    await this.mutate((draft) => {
+      const channel = draft.requests.find((item) => item.id === id)?.channel;
+      claimed = claimMidTurnTellInDraft(
+        draft.requests,
+        id,
+        channel ? this.claimOwners.get(channel) : undefined,
+      );
+    });
     return claimed;
   }
 
@@ -351,6 +362,7 @@ export class RemoteRequestStore {
       const request = draft.requests.find((item) => item.id === id);
       if (!request) throw new Error(`Forge: remote request ${id} is missing.`);
       request.state = state;
+      delete request.claimOwner;
       request.updatedAt = Date.now();
       if (payload.finalText) request.finalText = payload.finalText;
       if (payload.error) request.error = payload.error;
@@ -425,12 +437,7 @@ export class RemoteRequestStore {
   }
 
   private async setRequestState(id: string, state: RemoteExecutionState): Promise<void> {
-    await this.mutate((draft) => {
-      const request = draft.requests.find((item) => item.id === id);
-      if (!request) throw new Error(`Forge: remote request ${id} is missing.`);
-      request.state = state;
-      request.updatedAt = Date.now();
-    });
+    await this.mutate((draft) => setRequestStateInDraft(draft.requests, id, state));
   }
 
   async refresh(): Promise<void> {
@@ -487,7 +494,6 @@ export class RemoteRequestStore {
       await this.persist(this.state);
     });
   }
-
   private persist(state: RemoteStoreState): Promise<void> {
     return writeRemoteStateFile(this.filePath, JSON.stringify(state));
   }

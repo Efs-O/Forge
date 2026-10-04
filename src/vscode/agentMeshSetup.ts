@@ -144,6 +144,7 @@ export function setupAgentMesh(
   // awaits the append so the accepted state is on disk before the caller is
   // told the exchange exists — a crash after the return cannot lose it.
   const onEvent: (e: {
+    eventId?: string;
     exchangeId: string;
     from: string;
     to?: string;
@@ -166,10 +167,10 @@ export function setupAgentMesh(
         : scope());
     if (!existing) exchangeScope.set(e.exchangeId, { scope: s, firstEventAt: Date.now() });
     try {
-      await appendEvent(
+      const appended = await appendEvent(
         exchangePaths,
         {
-          eventId: newEventId(),
+          eventId: e.eventId ?? newEventId(),
           ts: Date.now(),
           exchangeId: e.exchangeId,
           workspace: s.workspace,
@@ -182,6 +183,7 @@ export function setupAgentMesh(
         },
         {},
       );
+      if (!appended) return;
     } catch (err) {
       vscode.window.showErrorMessage(`[agent mesh] could not write a board event: ${String(err)}`);
       throw err;
