@@ -173,6 +173,26 @@ describe('thinking-heavy summarization through the real PromptRun', () => {
 });
 
 describe('staged evidence manifest', () => {
+  it('accepts standalone section headings and identifies a genuinely missing section', async () => {
+    const standalone = note('live model format').replace(
+      /^(Goal|State|Next|Files|Constraints|Errors):/gmu,
+      '$1\n',
+    );
+    const result = await summarizeInStages({
+      ...input('cloud', 0, 32_768),
+      runPrompt: async () => standalone,
+    });
+    expect(result.sourceChunks).toBe(1);
+    expect(result.summary).toContain('Goal\n');
+
+    await expect(
+      summarizeInStages({
+        ...input('cloud', 0, 32_768),
+        runPrompt: async () => standalone.replace(/^Errors\n/gmu, ''),
+      }),
+    ).rejects.toThrow(/lost required summary sections \(Errors\)/u);
+  });
+
   it('tells the model the exact character allocation enforced for its note', async () => {
     let advertisedLimit = 0;
     let failure: unknown;

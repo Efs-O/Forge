@@ -4,6 +4,20 @@ Status: approved by the owner for Copilot implementation and Codex supervision o
 The finding-level fix list is in
 `C:/Users/efso office/.forge/agent-bus/audit-2026-10-04-fix-spec.md`.
 Findings and evidence: `docs/reports/DEEP_AUDIT_2026-10-04_FINDINGS.md`.
+
+Post-release live check (0.16.84): a manual compaction at 187,658/200,000
+tokens failed because staged note 1/5 used standalone `Goal`, `State`, `Next`,
+`Files`, `Constraints`, and `Errors` lines while the validator required colons.
+The real Strata response was 3,741 characters within its 5,108-character
+allocation and finished with `stop`. The validator now accepts standalone
+plain/Markdown headings and colon headings, while still rejecting a missing
+section. A 200k-slot smoke test used 481,281 source characters reconstructed
+from the affected session: replaying that first live note and generating four
+further notes through Forge's configured `/chat` route completed all five
+stages in 632.49 seconds. The five notes were 3,741, 4,302, 3,651, 3,212,
+and 3,990 characters, each with six sections. This exercises the production
+staged summary builder and live model; persistence in the original Forge chat
+still requires a post-install manual compaction check.
 Baseline HEAD `b0abd8b`. Green baseline 147 tests (CompactionPolicy 8, ConversationOps 32,
 SendPipeline 31, CompactionService 62, MidTurnCompaction 14).
 

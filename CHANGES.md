@@ -1,5 +1,13 @@
 # Forge — Recent Changes
 
+## 0.16.84
+
+### Accept valid staged compaction headings
+
+- Staged compaction accepts section headings on their own lines as well as
+  headings followed by a colon. A live 200k-slot Strata smoke test completed a
+  five-note handoff from the affected long conversation.
+
 ## 0.16.83
 
 ### Staged compaction note limit

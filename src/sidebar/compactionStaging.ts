@@ -101,9 +101,15 @@ function userRequestManifest(messages: ChatMessage[]): string[] {
     });
 }
 
-function containsRequiredHeadings(note: string): boolean {
-  return ['Goal', 'State', 'Next', 'Files', 'Constraints', 'Errors'].every((heading) =>
-    new RegExp(`\\b${heading}\\s*:`, 'iu').test(note),
+const REQUIRED_NOTE_HEADINGS = ['Goal', 'State', 'Next', 'Files', 'Constraints', 'Errors'] as const;
+
+function missingRequiredHeadings(note: string): string[] {
+  return REQUIRED_NOTE_HEADINGS.filter(
+    (heading) =>
+      !new RegExp(
+        `^[ \\t]{0,3}(?:#{1,6}[ \\t]+)?(?:\\*\\*)?${heading}(?:\\*\\*)?(?:[ \\t]*:[^\\r\\n]*|[ \\t]*)$`,
+        'imu',
+      ).test(note),
   );
 }
 
@@ -252,9 +258,10 @@ export async function summarizeInStages(
         'invalid-summary',
       );
     }
-    if (!containsRequiredHeadings(trimmed)) {
+    const missingHeadings = missingRequiredHeadings(trimmed);
+    if (missingHeadings.length > 0) {
       refuse(
-        `Staged note ${index + 1}/${chunks.length} lost a required summary section; previous context kept.`,
+        `Staged note ${index + 1}/${chunks.length} lost required summary sections (${missingHeadings.join(', ')}); previous context kept.`,
         'invalid-summary',
       );
     }
