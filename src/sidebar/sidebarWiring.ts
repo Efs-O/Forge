@@ -186,6 +186,8 @@ export function wireSidebar(host: SidebarHost, parts: SidebarParts): SidebarRunt
     getSidebar: host.getSidebar,
     post: host.post,
     baseOf: host.baseOf,
+    admissionCompact: (conv) =>
+      slashHandler.compactConversation(conv.id, { auto: true, trigger: 'admission' }),
     autoCompact: (conv, chain) =>
       runAddressedAutoCompact(
         {
@@ -216,6 +218,7 @@ export function wireSidebar(host: SidebarHost, parts: SidebarParts): SidebarRunt
     // `send` is constructed below; this closure only runs after a compaction,
     // which cannot happen before the pipeline exists.
     logCompaction: (conv, entry) => send.logCompaction(conv.id, entry),
+    logCompactionAttempt: (conv, entry) => send.logCompactionAttempt(conv.id, entry),
     compactionMetrics: (conv) => {
       const { max } = budget.snapshot(conv);
       const config = host.getConfig();
@@ -312,6 +315,7 @@ export function wireSidebar(host: SidebarHost, parts: SidebarParts): SidebarRunt
     persistSession: host.persistSession,
     postSessionSync: host.postSessionSync,
     evaluateAfterTurn: (conv, chain) => budget.evaluateAfterTurn(conv, chain),
+    evaluateAtAdmission: (conv) => budget.evaluateAtAdmission(conv),
     resetContextWarning: (conversationId) => budget.resetWarning(conversationId),
     attachmentStore: parts.attachmentStore,
     midTurnInbox,

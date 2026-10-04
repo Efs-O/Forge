@@ -22,6 +22,23 @@ or a 30 s cooldown (doubling, 5 min cap) elapses. Deterministic categories
 only, so they cannot retry-storm. Success of any trigger clears the hold. Phase 5
 persists the same categories in `SessionLogger`.
 
+Phase 5 (F11/F12/F17, A24, A46–A50): every compaction attempt writes a
+`compaction_attempt` row (`start`, then `finished` or — for a policy hold —
+`suppressed`) sharing one `attemptId`, with trigger, category, call count, finish
+reason and context size, and never any source or summary text; an unmatched
+`start` identifies a crash. Holds are in-memory by design, so a reload re-admits
+automatic compaction. F11: `ContextBudgetPublisher.evaluateAtAdmission` enforces
+`auto_compact.at` on prior history before the next non-internal prompt runs
+(trigger `admission`, no resume), covering stopped, interrupted and reloaded
+turns; Stop itself never compacts. F17: a mid-turn refusal says the turn
+continues instead of advising a new chat. A24 regression: heavy recorded actions
+at P=170,000 refuse before any model call with `conv.compaction` unchanged (the
+fixture's exact size is whatever the real renderers produce; it does not
+reproduce the 20,674-character figure byte for byte). A46: `AGENTS.md` and
+`CLAUDE.md` carry the `send-file` text but are gitignored, so it cannot appear
+in a commit. Tests: `CompactionAttemptLog.test.ts`, `CompactionAdmission.test.ts`,
+`CompactionHostFit.test.ts`.
+
 Phase 4 (F1): `compactionHostFit.ts` sheds optional facts (repo state → memory keys →
 last reply) against the real rendered host block before refusing; required user
 requests and recorded actions are never shed, and a refusal names the largest

@@ -68,6 +68,8 @@ export interface ContextBudgetDeps {
   ) => Promise<ContextThresholdAction | undefined>;
   /** Runs a user-accepted `/compact` from the 85% warning. */
   manualCompact: () => void;
+  /** Compacts prior history before a new user prompt is admitted. */
+  admissionCompact?: (conv: ConversationRuntime) => Promise<unknown>;
   /** A preflight context failure can need compaction even when the last server
    * usage frame was still below the normal threshold. */
   incompleteTurnReason?: (convId: string) => string | undefined;
@@ -162,6 +164,26 @@ export class ContextBudgetPublisher {
     const model = this.resolveModel(config, this.deps.baseOf(selection));
     if (!model) return undefined;
     return { used: reportedContextTokens(conv), max: perSlotContext(model, config.llama_server) };
+  }
+
+  /**
+   * Before a new user prompt joins the transcript: a turn that was stopped,
+   * interrupted, or cut by a reload never reaches the post-turn check, so the
+   * configured threshold is enforced here instead. The prompt is not yet in
+   * `conv.messages`, so only prior history is compacted, and no resume is run.
+   */
+  async evaluateAtAdmission(conv: ConversationRuntime): Promise<void> {
+    const config = this.deps.getConfig();
+    const auto = config.auto_compact;
+    if (auto?.enabled !== true || !this.deps.admissionCompact) return;
+    const selection = conv.active_model ?? config.active_model;
+    const model = this.resolveModel(config, this.deps.baseOf(selection));
+    const max = model ? perSlotContext(model, config.llama_server) : 0;
+    if (max <= 0) return;
+    const fraction = reportedContextTokens(conv) / max;
+    if (fraction < (auto.at ?? DEFAULT_AUTO_COMPACT_AT)) return;
+    log.info(`[auto-compact] context at ${Math.round(fraction * 100)}% at admission — compacting`);
+    await this.deps.admissionCompact(conv);
   }
 
   /** Evaluate the completed conversation even when another tab is active. */

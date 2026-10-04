@@ -2,7 +2,7 @@ import type { HostToWebview } from './messageBridge';
 import type { ConversationRuntime } from './sessionTypes';
 import type { CompactionFailureCategory } from './compactionFailure';
 import type { PromptRunOptions } from './PromptRun';
-import type { CompactionLogEntry } from './SessionLogger';
+import type { CompactionAttemptLogEntry, CompactionLogEntry } from './SessionLogger';
 
 export interface CompactionDeps {
   post: (msg: HostToWebview) => void;
@@ -20,6 +20,8 @@ export interface CompactionDeps {
    * the call site rather than inside the sink.
    */
   logCompaction?: (conv: ConversationRuntime, entry: CompactionLogEntry) => void;
+  /** Start / terminal / suppressed rows for one attempt; carries no source text. */
+  logCompactionAttempt?: (conv: ConversationRuntime, entry: CompactionAttemptLogEntry) => void;
   /** Per-slot window and the configured auto-compaction threshold, for the log row. */
   compactionMetrics?: (conv: ConversationRuntime) => {
     max: number;
@@ -55,7 +57,7 @@ export interface CompactionDeps {
   emitCompactionEvent?: (event: CompactionEvent) => void;
 }
 
-export type CompactionTrigger = 'auto' | 'sidebar' | 'remote';
+export type CompactionTrigger = 'auto' | 'sidebar' | 'remote' | 'admission';
 
 export interface CompactionEvent {
   conversationId: string;
@@ -83,4 +85,6 @@ export interface CompactionOptions {
   midTurn?: boolean;
   /** Internal policy signal shared with the attempt hold and durable diagnostics. */
   onFailureCategory?: (category: CompactionFailureCategory) => void;
+  /** Internal: summarizer call count and provider finish reason for the attempt record. */
+  onAttemptInfo?: (info: { calls?: number; finishReason?: string }) => void;
 }

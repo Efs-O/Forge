@@ -7,6 +7,8 @@
  */
 
 import * as vscode from 'vscode';
+import { randomUUID } from 'node:crypto';
+import type { CompactionAttemptLogEntry } from './SessionLogger';
 import type {
   CompactionDeps,
   CompactionOptions,
@@ -17,7 +19,11 @@ import { runCompactionWithPolicy } from './compactionAttemptPolicy';
 import { compactionRefusalNotice } from './compactionRefusal';
 import { capSummary, isUsableSummary } from './compactionPrompt';
 import { COMPACTION_CHARS_PER_TOKEN, compactionBudget } from './compactionBudget';
-import { CompactionFailure, compactionFailureCategory } from './compactionFailure';
+import {
+  CompactionFailure,
+  compactionFailureCategory,
+  type CompactionFailureCategory,
+} from './compactionFailure';
 import {
   refuseHostFacts,
   shedOptionalHostFacts,
@@ -99,6 +105,17 @@ async function compactOnce(
   options: CompactionOptions,
 ): Promise<CompactionOutcome> {
   const trigger: CompactionTrigger = options.trigger ?? 'sidebar';
+  const callerCategory = options.onFailureCategory;
+  let attemptCategory: CompactionFailureCategory | undefined;
+  let attemptCalls: number | undefined;
+  let attemptFinish: string | undefined;
+  options = {
+    ...options,
+    onFailureCategory: (category) => {
+      attemptCategory = category;
+      callerCategory?.(category);
+    },
+  };
   const remoteOrigin = options.trigger === 'remote' ? options.remoteOrigin : undefined;
   const midTurn = options.midTurn === true;
   if (!midTurn && deps.isStreaming(conversationId)) {
@@ -208,6 +225,24 @@ async function compactOnce(
     trigger,
     ...(remoteOrigin ? { remoteOrigin } : {}),
   });
+  const attemptId = randomUUID();
+  const usedAtStart = reportedContextTokens(conv);
+  const logAttempt = (
+    entry: Pick<CompactionAttemptLogEntry, 'phase'> & Partial<CompactionAttemptLogEntry>,
+  ): void => {
+    try {
+      deps.logCompactionAttempt?.(conv, {
+        attemptId,
+        trigger,
+        usedTokens: usedAtStart,
+        maxTokens: modelMax,
+        ...entry,
+      });
+    } catch (err) {
+      log.info(`[compact] attempt log failed — ${(err as Error).message}`);
+    }
+  };
+  logAttempt({ phase: 'start' });
   let summary = '';
   let summaryPrompt = '';
   let groupsNote = '';
@@ -252,7 +287,7 @@ async function compactOnce(
         );
         deps.post({
           type: 'notice',
-          message: compactionRefusalNotice(floorChars, beforeChars),
+          message: compactionRefusalNotice(floorChars, beforeChars, midTurn),
           conversationId: conv.id,
         });
         options.onFailureCategory?.('budget-refusal');
@@ -286,7 +321,18 @@ async function compactOnce(
         budget,
         maximumSummaryChars: summaryAllowance,
         conversationId: conv.id,
-        runPrompt: deps.runPromptToMarkdown,
+        runPrompt: async (text, id, promptOptions) => {
+          try {
+            return await deps.runPromptToMarkdown(text, id, promptOptions);
+          } catch (err) {
+            // The summarizer may recover from a cut-off call; keep the reason.
+            if (err instanceof PromptIncompleteError) attemptFinish = err.finishReason ?? 'none';
+            throw err;
+          }
+        },
+        onCalls: (issued) => {
+          attemptCalls = issued;
+        },
       });
       summaryPrompt = summaryRun.prompt;
       summary = summaryRun.summary;
@@ -347,7 +393,7 @@ async function compactOnce(
       );
       deps.post({
         type: 'notice',
-        message: compactionRefusalNotice(afterChars, beforeChars),
+        message: compactionRefusalNotice(afterChars, beforeChars, midTurn),
         conversationId: conv.id,
       });
       options.onFailureCategory?.('budget-refusal');
@@ -404,6 +450,7 @@ async function compactOnce(
   } catch (err) {
     const category =
       err instanceof PromptIncompleteError ? 'incomplete-output' : compactionFailureCategory(err);
+    if (err instanceof PromptIncompleteError) attemptFinish = err.finishReason ?? 'none';
     options.onFailureCategory?.(category);
     deps.post({
       type: 'error',
@@ -414,6 +461,13 @@ async function compactOnce(
   } finally {
     // Every started compaction has one terminal event, including failures while
     // applying or persisting an otherwise usable summary.
+    logAttempt({
+      phase: 'finished',
+      outcome,
+      ...(attemptCategory ? { category: attemptCategory } : {}),
+      ...(attemptCalls !== undefined ? { calls: attemptCalls } : {}),
+      ...(attemptFinish ? { finishReason: attemptFinish } : {}),
+    });
     deps.emitCompactionEvent?.({
       conversationId: conv.id,
       phase: 'finished',

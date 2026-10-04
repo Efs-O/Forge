@@ -12,7 +12,11 @@ import type { ForgeConfig } from '../config/types';
 import type { AttachmentData, HostToWebview } from './messageBridge';
 import type { ConversationRuntime, SidebarRuntime } from './sessionTypes';
 import type { AgentLoop, SidebarProviderEvents } from './AgentLoop';
-import { SessionLogger, type CompactionLogEntry } from './SessionLogger';
+import {
+  SessionLogger,
+  type CompactionAttemptLogEntry,
+  type CompactionLogEntry,
+} from './SessionLogger';
 import { resolveRequestModel } from '../config/ConfigResolver';
 import { deriveStaticCapabilities } from '../config/ConfigResolver';
 import { getLogger } from '../util/logger';
@@ -69,6 +73,8 @@ export interface SendPipelineDeps {
     turn: ForgeTurnOutcome,
   ) => Promise<ContextThresholdAction | undefined>;
   resetContextWarning: (conversationId: string) => void;
+  /** Enforces auto_compact.at on prior history before a new prompt runs. */
+  evaluateAtAdmission?: (conv: ConversationRuntime) => Promise<void>;
   /** Absent in tests and in a host with no globalStorage; attachments then
    *  behave exactly as before, minus the transcript thumbnails. */
   attachmentStore?: ChatAttachmentStore | undefined;
@@ -242,6 +248,13 @@ export class SendPipeline {
         let nextOptions = attachmentRefs.length
           ? { ...(promptOptions ?? {}), attachmentRefs }
           : promptOptions;
+        if (!promptOptions?.internal && deps.evaluateAtAdmission) {
+          try {
+            await deps.evaluateAtAdmission(conv);
+          } catch (err) {
+            log.warn(`[SendPipeline] admission compaction check failed: ${(err as Error).message}`);
+          }
+        }
         for (;;) {
           let turn: ForgeTurnOutcome;
           try {
@@ -401,6 +414,13 @@ export class SendPipeline {
     const logger = this.loggerFor(conv);
     logger.updateTitle(conv.title);
     logger.logCompaction(entry, conv.active_model ?? '');
+  }
+
+  /** Start, terminal and suppressed rows for one compaction attempt. */
+  logCompactionAttempt(convId: string, entry: CompactionAttemptLogEntry): void {
+    const conv = this.deps.getSidebar().conversations.find((c) => c.id === convId);
+    if (!conv) return;
+    this.loggerFor(conv).logCompactionAttempt(entry, conv.active_model ?? '');
   }
 
   /** Records why a turn stopped, next to the rows it produced before stopping. */

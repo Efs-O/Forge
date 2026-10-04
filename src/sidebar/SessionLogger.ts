@@ -59,6 +59,20 @@ export interface CompactionLogEntry {
   threshold?: number;
 }
 
+export interface CompactionAttemptLogEntry {
+  /** Shared by the start row and its terminal row; an unmatched start means a crash. */
+  attemptId: string;
+  phase: 'start' | 'finished' | 'suppressed';
+  trigger: string;
+  outcome?: string;
+  /** CompactionFailureCategory, on a failed attempt or the category behind a suppression. */
+  category?: string;
+  finishReason?: string;
+  calls?: number;
+  usedTokens: number;
+  maxTokens: number;
+}
+
 export interface SessionContext {
   workspaceName?: string;
   workspacePath?: string;
@@ -202,6 +216,29 @@ export class SessionLogger {
       summary: entry.summary,
       trigger: entry.trigger,
       ...(entry.threshold !== undefined ? { threshold: entry.threshold } : {}),
+      timestamp_ms: Date.now(),
+      model,
+    });
+  }
+
+  /**
+   * One row per phase of a compaction attempt. Deliberately free of summary or
+   * source text: the `compaction` row owns the summary, and a failed attempt
+   * must be diagnosable without copying conversation content a second time.
+   */
+  logCompactionAttempt(entry: CompactionAttemptLogEntry, model: string): void {
+    this.ensureHeader(model);
+    this.append({
+      type: 'compaction_attempt',
+      attempt_id: entry.attemptId,
+      phase: entry.phase,
+      trigger: entry.trigger,
+      ...(entry.outcome !== undefined ? { outcome: entry.outcome } : {}),
+      ...(entry.category !== undefined ? { category: entry.category } : {}),
+      ...(entry.finishReason !== undefined ? { finish_reason: entry.finishReason } : {}),
+      ...(entry.calls !== undefined ? { calls: entry.calls } : {}),
+      used_tokens: entry.usedTokens,
+      max_tokens: entry.maxTokens,
       timestamp_ms: Date.now(),
       model,
     });

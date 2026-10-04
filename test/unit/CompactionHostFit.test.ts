@@ -7,6 +7,8 @@ import {
 } from '../../src/sidebar/compactionHostFit';
 import type { ConversationRuntime } from '../../src/sidebar/sessionTypes';
 import type { ChatMessage } from '../../src/llm/types';
+import { compactionBudget } from '../../src/sidebar/compactionBudget';
+import type { RecordedCompactionAction } from '../../src/sidebar/compactionTypes';
 
 const summary = `Goal: complete the request.\n\nState: recorded. Next: continue. ${'detail. '.repeat(40)}`;
 
@@ -83,6 +85,66 @@ describe('host-fact budgeting', () => {
     const h = setup(100, 'r'.repeat(500), 2_000);
     await expect(runCompaction(h.deps, 'c1', { auto: true })).resolves.toBe('compacted');
     expect(h.conv.compaction?.repoState).toBe('r'.repeat(500));
+  });
+});
+
+describe('A24: constructed 200k host block at P=170,000', () => {
+  const action = (kind: 'file' | 'command', n: number): RecordedCompactionAction =>
+    kind === 'file'
+      ? {
+          kind,
+          key: `src/sidebar/module${n}.ts`,
+          outcome: 'ok',
+          line: `edit_file n:/vs code apps/Forge/src/sidebar/module${n}.ts (id call_aaa${n})`,
+          toolCallId: `call_bbb${n}`,
+        }
+      : {
+          kind,
+          key: `rg -n --glob *.ts auto_compact src #${n}`,
+          outcome: 'ok',
+          line: `- ran \`rg -n -C 8 --glob *.ts compactMidTurn|evaluateAfterTurn src #${n} ${'x'.repeat(300)}\` → exit 0`,
+          toolCallId: `call_${n}`,
+        };
+
+  function heavy(userChars: number) {
+    const h = setup(userChars, 'r'.repeat(2_000), 170_000);
+    h.conv.messages.splice(
+      2,
+      0,
+      { role: 'assistant', content: 'ok' },
+      { role: 'user', content: 'c'.repeat(userChars) },
+      { role: 'assistant', content: 'ok' },
+      { role: 'user', content: 'd'.repeat(userChars) },
+    );
+    const recordedActions = [
+      ...Array.from({ length: 60 }, (_, i) => action('file', i)),
+      ...Array.from({ length: 40 }, (_, i) => action('command', i)),
+    ];
+    h.conv.compaction = {
+      summary: 'previous summary '.repeat(20),
+      fromIndex: 0,
+      generation: 1,
+      recordedActions,
+      memoryKeys: Array.from({ length: 40 }, (_, i) => `audit-memory-key-number-${i}`),
+    };
+    h.deps.listMemoryKeys = () => h.conv.compaction?.memoryKeys ?? [];
+    return h;
+  }
+
+  it('refuses when required host facts exceed the 14,875-char budget and leaves state intact', async () => {
+    const h = heavy(6_000);
+    const hostMax = compactionBudget(170_000, 170_000 * 2.5, 200_000, 0).hostMaxChars;
+    expect(hostMax).toBe(14_875);
+    const before = structuredClone(h.conv.compaction);
+    await expect(runCompaction(h.deps, 'c1', { auto: true })).resolves.toBe('failed');
+    expect(h.runPrompt).not.toHaveBeenCalled();
+    expect(h.conv.compaction).toEqual(before);
+    expect(h.posted.find((m) => m.type === 'error')?.message).toMatch(/largest component/u);
+  });
+
+  it('positive case: smaller host facts at the same P still compact', async () => {
+    const h = setup(200, 'r'.repeat(500), 170_000);
+    await expect(runCompaction(h.deps, 'c1', { auto: true })).resolves.toBe('compacted');
   });
 });
 

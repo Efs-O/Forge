@@ -32,6 +32,8 @@ export interface CompactionSummaryInput {
   maximumSummaryChars: number;
   conversationId: string;
   runPrompt: (text: string, conversationId: string, options: PromptRunOptions) => Promise<string>;
+  /** Called with the running count each time a summarizer call is issued. */
+  onCalls?: (issued: number) => void;
 }
 
 export interface CompactionSummaryResult {
@@ -98,6 +100,24 @@ async function runOneShot(
 }
 
 export async function summarizeCompaction(
+  original: CompactionSummaryInput,
+): Promise<CompactionSummaryResult> {
+  // Counted at the single choke point, so a call that fails still shows up in
+  // the attempt's durable record.
+  let issued = 0;
+  const input: CompactionSummaryInput = {
+    ...original,
+    runPrompt: (text, conversationId, options) => {
+      issued += 1;
+      original.onCalls?.(issued);
+      return original.runPrompt(text, conversationId, options);
+    },
+  };
+  const result = await summarizeCompactionCounted(input);
+  return { ...result, calls: issued };
+}
+
+async function summarizeCompactionCounted(
   input: CompactionSummaryInput,
 ): Promise<CompactionSummaryResult> {
   const outputTokens = visibleOutputLimit(input);

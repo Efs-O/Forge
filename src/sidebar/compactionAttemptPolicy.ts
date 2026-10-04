@@ -1,4 +1,5 @@
 import type { ConversationRuntime } from './sessionTypes';
+import { randomUUID } from 'node:crypto';
 import type { CompactionDeps, CompactionOptions, CompactionOutcome } from './CompactionService';
 import type { CompactionFailureCategory } from './compactionFailure';
 import { getLogger } from '../util/logger';
@@ -78,6 +79,18 @@ export async function runCompactionWithPolicy(
       `[auto-compact] suppressed after ${state.failureCategory}; ` +
         `next transient retry after ${retryDelay(state.failures - 1)}ms or ${contextGrowthThreshold(modelMaxTokens || state.modelMaxTokens)} context tokens`,
     );
+    try {
+      deps.logCompactionAttempt?.(conv, {
+        attemptId: randomUUID(),
+        phase: 'suppressed',
+        trigger: options.trigger ?? 'sidebar',
+        category: state.failureCategory,
+        usedTokens: contextTokens,
+        maxTokens: modelMaxTokens,
+      });
+    } catch (err) {
+      log.info(`[auto-compact] suppression log failed — ${(err as Error).message}`);
+    }
     return 'skipped';
   }
 
