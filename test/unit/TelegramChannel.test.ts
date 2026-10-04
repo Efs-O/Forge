@@ -12,7 +12,7 @@ import {
   telegramSelectionKeyboard,
 } from '../../src/remote/TelegramSelectionPagination';
 import { RemoteAttachmentStore } from '../../src/remote/RemoteAttachmentStore';
-import { HELP_TEXT } from '../../src/remote/remoteHelpText';
+import { HELP_SECTIONS, HELP_TEXT } from '../../src/remote/remoteHelpText';
 import type { RemoteInboundDisposition, RemoteInboundEvent } from '../../src/remote/types';
 
 function response(result: unknown): Response {
@@ -58,6 +58,45 @@ describe('TelegramChannel', () => {
     expect(HELP_TEXT).toContain('3 images');
     expect(HELP_TEXT).toContain('10 MiB');
     expect(HELP_TEXT).toContain('25 MiB');
+  });
+
+  /**
+   * Phase 5: the three session commands must be reachable from the phone, both
+   * as native menu entries and in /help. A command nobody can discover is a
+   * command that does not exist, and the menu is the only place the alias
+   * spelling is shown next to its meaning.
+   */
+  it('offers /claude, /codex and /copilot in the native command menu', () => {
+    for (const command of ['claude', 'codex', 'copilot']) {
+      expect(TELEGRAM_BOT_COMMANDS).toContainEqual(
+        expect.objectContaining({
+          command,
+          description: expect.stringContaining('one-way note'),
+        }),
+      );
+    }
+    // Telegram caps the menu at 100 commands and sorts them for display; the
+    // list is kept alphabetical so a phone user can scan it.
+    const names = TELEGRAM_BOT_COMMANDS.map((entry) => entry.command);
+    expect(names).toEqual([...names].sort());
+    expect(names).toHaveLength(new Set(names).size);
+  });
+
+  /** `/help` must show them as a Sessions group and explain the contract. */
+  it('documents the session commands in /help under a Sessions section', () => {
+    expect(HELP_SECTIONS.has('Sessions')).toBe(true);
+    const sessionsLine = HELP_TEXT.split('\n').find((line) => line.startsWith('Sessions:'));
+    expect(sessionsLine).toBeDefined();
+    expect(sessionsLine).toContain('/claude <msg>');
+    expect(sessionsLine).toContain('/codex <msg>');
+    expect(sessionsLine).toContain('/copilot <msg>');
+    // The note is queued, not answered — the help must not imply a reply, and
+    // must not promise more than "accepted".
+    const note = HELP_TEXT.split('\n').find((line) => line.includes('/claude, /codex and /copilot'));
+    expect(note).toContain('queued to that session');
+    expect(note).toContain('not answered here');
+    expect(note).toContain('accepted');
+    expect(note).not.toMatch(/will reply|answers here/iu);
   });
 
   it('validates Bot API authentication without exposing the token', async () => {

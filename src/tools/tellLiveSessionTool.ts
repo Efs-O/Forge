@@ -21,7 +21,11 @@ import { unattendedCliRefusal } from '../jobs/cliAgentGate';
  * turn.
  */
 
-const MAX_MESSAGE_CHARS = 4000;
+/**
+ * Exported so the Telegram `/claude`/`/codex`/`/copilot` commands enforce the
+ * same ceiling as this tool instead of restating it — two doors, one limit.
+ */
+export const MAX_TELL_MESSAGE_CHARS = 4000;
 
 export interface TellLiveSessionDeps {
   getConfig: () => ForgeConfig;
@@ -56,7 +60,7 @@ export function makeTellLiveSessionTool(deps: TellLiveSessionDeps): RegisteredTo
             },
             message: {
               type: 'string',
-              maxLength: MAX_MESSAGE_CHARS,
+              maxLength: MAX_TELL_MESSAGE_CHARS,
               description:
                 'The note. One or a few lines of state, not a question. It is shown in ' +
                 'that session and recorded on the agent board.',
@@ -92,9 +96,9 @@ export function makeTellLiveSessionTool(deps: TellLiveSessionDeps): RegisteredTo
       if (typeof message !== 'string' || message.trim() === '') {
         throw new Error('tell_live_session: "message" is required.');
       }
-      if (message.length > MAX_MESSAGE_CHARS) {
+      if (message.length > MAX_TELL_MESSAGE_CHARS) {
         throw new Error(
-          `tell_live_session: "message" is ${message.length} chars; the limit is ${MAX_MESSAGE_CHARS}.`,
+          `tell_live_session: "message" is ${message.length} chars; the limit is ${MAX_TELL_MESSAGE_CHARS}.`,
         );
       }
       const toArg = args['to'];

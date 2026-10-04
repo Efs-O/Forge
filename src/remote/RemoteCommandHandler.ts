@@ -13,6 +13,7 @@ import type { JobStore } from '../jobs/JobStore';
 import { switchWorkspaceCommand } from './remoteWorkspaceCommand';
 import { handleRemoteSettingsCommand } from './remoteSettingsCommands';
 import { handleRemoteModelCommand } from './remoteModelCommands';
+import { handleRemoteSessionTellCommand } from './remoteSessionTellCommands';
 import { editProgress } from './remoteCommandShared';
 import { resolveConversationSelection, shortId } from './remoteCommandSelectors';
 
@@ -45,6 +46,15 @@ export interface RemoteCommandContext {
   /** Per-chat turn-echo toggle, backed the same way. Separate from notifyMute
    *  because the two carry very different volumes — see RemoteController. */
   mirrorToggle?: { get: (chatId: string) => boolean; set: (chatId: string, on: boolean) => void };
+  /**
+   * Surfaces a failure that has already been absorbed — a delivery that must
+   * not become a `retry` because the work it reports on is already done. Used
+   * by the session-tell commands: after the mesh durably accepts a note, a
+   * failed acknowledgement is logged here rather than thrown, because a throw
+   * discards the control receipt and the redelivered update would enqueue the
+   * same note twice.
+   */
+  onError?: (message: string) => void;
   /**
    * Global spoken-reply toggle. Unlike notifyMute/mirrorToggle it is not
    * per-chat (buildSpeechDelivery is built once per transport, not per chat)
@@ -143,6 +153,11 @@ async function executeRemoteCommand(
   }
   const settingsCommand = await handleRemoteSettingsCommand(command, argument, event, context);
   if (settingsCommand) return settingsCommand;
+  // Before the unknown-command fallback, and after the reserved namespaces:
+  // `/claude`, `/codex` and `/copilot` are the mesh aliases, and a bare token
+  // still belongs to this handler so it answers with its own usage line.
+  const tellCommand = await handleRemoteSessionTellCommand(command, operands, event, context);
+  if (tellCommand) return tellCommand;
   if (command === '/compact') {
     const binding = context.store.binding(event.channel, event.chatId);
     if (!binding) return { kind: 'rejected', reason: 'no conversation is bound' };

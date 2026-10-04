@@ -104,7 +104,18 @@ describe('remote command map', () => {
     // Contact onboarding is intentionally not an owner command/menu entry.
     '/start',
   ]);
-  const EXTRA_IMPLEMENTED = ['/contact', '/contacts', '/send'];
+  const EXTRA_IMPLEMENTED = [
+    '/contact',
+    '/contacts',
+    '/send',
+    // Phase 5: these three are dispatched through an alias map (one entry per
+    // mesh alias), not a `command === '/x'` literal, so the regex above cannot
+    // see them. Named here so the correspondence below still holds: the menu
+    // offers them, the handler answers them, and /help documents them.
+    '/claude',
+    '/codex',
+    '/copilot',
+  ];
 
   const implemented = new Set(
     SOURCES.flatMap((file) =>

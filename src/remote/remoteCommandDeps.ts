@@ -50,6 +50,10 @@ export function buildRemoteCommandDeps(
     workspaceId: options.workspaceId,
     signal: deps.signal,
     commandCleanup: deps.commandCleanup,
+    // Read through deps.options() rather than the `options` captured above, so
+    // a command running after a config reload reports through the current
+    // options object — the same reason every other option here is read live.
+    onError: (message) => deps.options().onError?.(message),
     inactivityTimeoutMinutes: options.inactivityTimeoutMinutes ?? 30,
     rateLimitPerMinute: options.rateLimitPerMinute,
     modelEntries: options.modelEntries,

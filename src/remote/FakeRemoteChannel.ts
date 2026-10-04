@@ -20,6 +20,12 @@ export class FakeRemoteChannel implements RemoteChannel {
   }> = [];
   /** When set, the resolved-keyboard edit fails with this message. */
   resolveKeyboardError?: string;
+  /**
+   * When set, `send` throws this message. Opt-in because the failure it models
+   * is the interesting one: a command whose real work is already durable must
+   * absorb a failed acknowledgement instead of throwing into the retry path.
+   */
+  sendError?: string;
   /** Records command auto-cleanup deletes so tests can assert they fired. */
   readonly deleted: Array<{ chatId: string; messageId: string }> = [];
   readonly photos: Array<{ chatId: string; filePath: string; caption: string }> = [];
@@ -120,6 +126,7 @@ export class FakeRemoteChannel implements RemoteChannel {
     text: string,
     options?: { correlationId?: string; signal?: AbortSignal },
   ): Promise<string[]> {
+    if (this.sendError) throw new Error(this.sendError);
     this.sent.push({ chatId, text, ...(options?.correlationId ? options : {}) });
     // Addressable like Telegram, so reply cleanup has an id to delete.
     return [`sent-${this.sent.length}`];

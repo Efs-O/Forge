@@ -10,6 +10,7 @@
 /** Section labels that head a command group, bolded when the transport allows. */
 export const HELP_SECTIONS = new Set([
   'Session',
+  'Sessions',
   'Workspace',
   'Queue',
   'Models',
@@ -22,6 +23,8 @@ export const HELP_SECTIONS = new Set([
 export const HELP_TEXT = `Forge commands:
 
 Session: /chat <n-or-name> · /chats [page] · /context · /help · /mirror on|off · /new · /notify on|off · /resume · /status · /stop · /view [n] · /voice on|off
+
+Sessions: /claude <msg> · /codex <msg> · /copilot <msg>
 
 Workspace: /workspace · /workspace <n-or-alias>
 
@@ -54,6 +57,8 @@ Notes:
 • You can send up to 3 images in one message (send them as a photo album). Each image is capped at 10 MiB and 25 MiB total; send more than 3 and I keep the first 3 and tell you
 
 • /notify off silences agent notify_user messages for this chat until the window reloads
+
+• /claude, /codex and /copilot send a one-way note to a live Claude Code, Codex, or Copilot session. The whole message after the command is the note. It is queued to that session — it is not answered here, so nothing waits for a reply. The reply says "accepted" because that is all this can promise: the note is durably queued, not yet run. If the session is not live, or its queue is full, the note is refused and the reason says which
 
 • /mirror off stops answers typed in the Forge window being echoed here (on by default)
 
