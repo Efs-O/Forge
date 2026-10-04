@@ -22,6 +22,15 @@ or a 30 s cooldown (doubling, 5 min cap) elapses. Deterministic categories
 only, so they cannot retry-storm. Success of any trigger clears the hold. Phase 5
 persists the same categories in `SessionLogger`.
 
+Phase 4 (F1): `compactionHostFit.ts` sheds optional facts (repo state → memory keys →
+last reply) against the real rendered host block before refusing; required user
+requests and recorded actions are never shed, and a refusal names the largest
+component before any model call or mutation. Staged summaries also pin every
+file identifier from the recorded facts and an ordered user-request manifest, or
+refuse. Tests: `CompactionHostFit.test.ts`, `CompactionStaged.test.ts`.
+`CompactionService.ts` contract types moved to `compactionServiceTypes.ts`
+(re-exported) to stay under the 500-line limit.
+
 Phase 3 output contract: request `max_tokens` = visible target + reasoning reserve
 (thinking and prose share one budget), bounded by the provider cap and counted once
 in request-fit checks (`planOutput`). Length-stopped output is never stored; it

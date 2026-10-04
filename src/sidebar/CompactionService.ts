@@ -7,15 +7,24 @@
  */
 
 import * as vscode from 'vscode';
-import type { HostToWebview } from './messageBridge';
-import type { ConversationRuntime } from './sessionTypes';
+import type {
+  CompactionDeps,
+  CompactionOptions,
+  CompactionOutcome,
+  CompactionTrigger,
+} from './compactionServiceTypes';
 import { runCompactionWithPolicy } from './compactionAttemptPolicy';
 import { compactionRefusalNotice } from './compactionRefusal';
 import { capSummary, isUsableSummary } from './compactionPrompt';
 import { COMPACTION_CHARS_PER_TOKEN, compactionBudget } from './compactionBudget';
 import { CompactionFailure, compactionFailureCategory } from './compactionFailure';
+import {
+  refuseHostFacts,
+  shedOptionalHostFacts,
+  type OptionalHostFacts,
+} from './compactionHostFit';
 import { summarizeCompaction } from './compactionSummaryRunner';
-import { PromptIncompleteError, type PromptRunOptions } from './PromptRun';
+import { PromptIncompleteError } from './PromptRun';
 import {
   collectRecordedActions,
   mergeRecordedActions,
@@ -28,7 +37,6 @@ import {
 import { getLogger } from '../util/logger';
 import { collectLastReply, toolActivityFollowedLastReply } from './compactionLastReply';
 import { selectCompactionSplit } from './compactionSplit';
-import type { CompactionLogEntry } from './SessionLogger';
 import { reportedContextTokens } from '../util/contextBudget';
 import { boundMemoryKeys, compactionWindowChars, messageCostChars } from './compactionWindow';
 import type { CompactionState } from './compactionTypes';
@@ -37,71 +45,13 @@ import { resetContextTrimState } from '../agent/toolResultContext';
 
 const log = getLogger();
 
-export interface CompactionDeps {
-  post: (msg: HostToWebview) => void;
-  getConversation: (conversationId: string) => ConversationRuntime | undefined;
-  persistSession: () => void;
-  postSessionSync: () => void;
-  invalidateExactTokenBudget: (conv: ConversationRuntime) => void;
-  postTokenBudget: (conv: ConversationRuntime) => void;
-  /**
-   * Records the completed compaction on the session transcript.
-   *
-   * Optional: sidebar-only callers and tests omit it, and a compaction must
-   * never fail because nothing is listening. `usedTokens` has to be read before
-   * `invalidateExactTokenBudget` clears the counters, so the reading happens at
-   * the call site rather than inside the sink.
-   */
-  logCompaction?: (conv: ConversationRuntime, entry: CompactionLogEntry) => void;
-  /** Per-slot window and the configured auto-compaction threshold, for the log row. */
-  compactionMetrics?: (conv: ConversationRuntime) => {
-    max: number;
-    threshold?: number;
-    reasoningReserve?: number;
-    outputLimitTokens?: number;
-  };
-  runPromptToMarkdown: (
-    text: string,
-    conversationId?: string,
-    options?: PromptRunOptions,
-  ) => Promise<string>;
-  isStreaming: (conversationId: string) => boolean;
-  /** Marks the conversation busy for the duration of the summarization call.
-   *  Returns the release. */
-  beginCompaction: (convId: string) => () => void;
-  /**
-   * Working-tree state to append to the summary, so a resumed agent can check
-   * the recorded ledger against the repo without spending a tool call.
-   *
-   * Injected rather than imported so the git/process dependency stays out of
-   * this file's tests, and optional so a caller that cannot supply one still
-   * compacts — the block is evidence, never a precondition.
-   */
-  snapshotRepoState?: () => Promise<string>;
-  /** Keys stored with `remember`, listed after the cut so `recall` has one to ask for. */
-  listMemoryKeys?: () => readonly string[];
-  /**
-   * Host-originated compaction progress, consumed by the remote layer so a
-   * Telegram/WhatsApp user sees "compacting…" for work they did not start.
-   * Optional: sidebar-only callers (and tests) omit it.
-   */
-  emitCompactionEvent?: (event: CompactionEvent) => void;
-}
-
-export type CompactionTrigger = 'auto' | 'sidebar' | 'remote';
-
-export interface CompactionEvent {
-  conversationId: string;
-  phase: 'started' | 'finished';
-  /** Set on 'finished' only — the true terminal outcome. */
-  outcome?: CompactionOutcome;
-  /** Which path started this compaction; drives remote delivery policy. */
-  trigger: CompactionTrigger;
-  /** Set when trigger === 'remote' so the origin chat is identifiable. */
-  remoteOrigin?: { channel: string; chatId: string };
-}
-
-export type CompactionOutcome = 'compacted' | 'skipped' | 'failed';
+export type {
+  CompactionDeps,
+  CompactionEvent,
+  CompactionOptions,
+  CompactionOutcome,
+  CompactionTrigger,
+} from './compactionServiceTypes';
 
 /** Neutral user-role trigger. Task state lives in the replacement context;
  * references to a "checkpoint" or a possibly absent section caused prior
@@ -127,21 +77,6 @@ export function runCompaction(
   options: CompactionOptions = { auto: false },
 ): Promise<CompactionOutcome> {
   return runCompactionWithPolicy(deps, conversationId, options, compactOnce);
-}
-
-export interface CompactionOptions {
-  auto: boolean;
-  trigger?: CompactionTrigger;
-  remoteOrigin?: { channel: string; chatId: string };
-  /**
-   * Called by the tool loop between two rounds of a turn that is still
-   * running. The turn owns the streaming state, so this skips the streaming
-   * guard, `beginCompaction` (whose release would clear the TURN's streaming
-   * flag) and the generationStarted/done posts (which would end its bubble).
-   */
-  midTurn?: boolean;
-  /** Internal policy signal shared with the attempt hold and durable diagnostics. */
-  onFailureCategory?: (category: import('./compactionFailure').CompactionFailureCategory) => void;
 }
 
 function userText(message: { content: unknown }): string {
@@ -229,17 +164,19 @@ async function compactOnce(
   // carries them needs no copy; a tail that is empty, or is a user turn whose
   // answer had not started yet, leaves the summarizer's paraphrase as the sole
   // account of what the user was last told.
-  const lastReply = collectLastReply(pending.slice(split.tailStart))
-    ? undefined
-    : collectLastReply(split.summarize);
+  const optional: OptionalHostFacts = {
+    repoState: '',
+    memoryKeys: boundMemoryKeys(deps.listMemoryKeys?.() ?? []),
+    lastReply: collectLastReply(pending.slice(split.tailStart))
+      ? undefined
+      : collectLastReply(split.summarize),
+  };
   // Recorded with the reply, because the transcript it was derived from is not
   // available when the block is rendered on a later turn. The retained tail
   // counts too: a tail of tool calls with no text of its own ran after the reply.
-  const lastReplyFollowedByTools = lastReply
+  const lastReplyFollowedByTools = optional.lastReply
     ? toolActivityFollowedLastReply([...split.summarize, ...pending.slice(split.tailStart)])
     : false;
-
-  const memoryKeys = boundMemoryKeys(deps.listMemoryKeys?.() ?? []);
 
   // Everything the candidate state will carry except the summary itself. Built
   // here so the floor check below can run BEFORE the summarization request.
@@ -250,10 +187,10 @@ async function compactOnce(
     ...(userMessages.length > 0 ? { userMessages } : {}),
     ...(recordedActions.length > 0 ? { recordedActions } : {}),
     ...(omittedActions.file > 0 || omittedActions.command > 0 ? { omittedActions } : {}),
-    ...(repoState ? { repoState } : {}),
-    ...(memoryKeys.length > 0 ? { memoryKeys } : {}),
-    ...(lastReply ? { lastReply } : {}),
-    ...(lastReply && lastReplyFollowedByTools ? { lastReplyFollowedByTools } : {}),
+    ...(optional.repoState ? { repoState: optional.repoState } : {}),
+    ...(optional.memoryKeys.length > 0 ? { memoryKeys: optional.memoryKeys } : {}),
+    ...(optional.lastReply ? { lastReply: optional.lastReply } : {}),
+    ...(optional.lastReply && lastReplyFollowedByTools ? { lastReplyFollowedByTools } : {}),
   });
 
   deps.post({ type: 'notice', message: 'Compacting conversation…', conversationId: conv.id });
@@ -274,16 +211,18 @@ async function compactOnce(
   let summary = '';
   let summaryPrompt = '';
   let groupsNote = '';
-  let repoState = '';
   let outcome: CompactionOutcome = 'failed';
   try {
     try {
       // Keep the conversation busy while the bounded snapshot runs. Awaiting it
       // before beginCompaction left a window in which a new turn could start and
       // invalidate the cut point we just selected.
+      const tailChars = pending
+        .slice(split.tailStart)
+        .reduce((sum, message) => sum + messageCostChars(message), 0);
       if (deps.snapshotRepoState) {
         try {
-          repoState = await deps.snapshotRepoState();
+          optional.repoState = await deps.snapshotRepoState();
         } catch (err) {
           // Evidence is optional even when an injected implementation is faulty.
           // The real snapshotter already catches its own git errors; this guard
@@ -292,16 +231,20 @@ async function compactOnce(
         }
       }
       // If even an empty summary cannot shrink this window, skip the model call.
+      const measureHost = (): number =>
+        compactionWindowChars(conv.messages, candidateWithSummary('')) - tailChars;
+      const shed = shedOptionalHostFacts(optional, measureHost, budget.hostMaxChars);
+      if (shed.length > 0)
+        log.info(`[compact] shed optional host facts to fit: ${shed.join(', ')}`);
       const floorChars = compactionWindowChars(conv.messages, candidateWithSummary(''));
-      const tailChars = pending
-        .slice(split.tailStart)
-        .reduce((sum, message) => sum + messageCostChars(message), 0);
       const hostChars = floorChars - tailChars;
       if (hostChars > budget.hostMaxChars) {
-        throw new CompactionFailure(
-          'budget-refusal',
-          `Host-preserved compaction facts need an estimated ${hostChars} characters, above the ${budget.hostMaxChars}-character budget; previous context kept.`,
-        );
+        refuseHostFacts(hostChars, budget.hostMaxChars, {
+          'user requests': userContext.length,
+          'recorded actions': recordedActionsText.length,
+          'repo state': optional.repoState.length,
+          'last reply': optional.lastReply?.length ?? 0,
+        });
       }
       if (beforeChars >= MIN_WINDOW_CHARS_FOR_FIT_GUARD && floorChars >= beforeChars) {
         log.info(
@@ -330,10 +273,10 @@ async function compactOnce(
       const summaryRun = await summarizeCompaction({
         messages: split.summarize,
         ...(conv.compaction?.summary ? { previousSummary: conv.compaction.summary } : {}),
-        recordedFacts: recordedActionsText + repoState,
+        recordedFacts: recordedActionsText + optional.repoState,
         userContext,
         ...(conv.plan?.items ? { plan: conv.plan.items } : {}),
-        pinnedFacts: recordedActionsText + repoState + userContext,
+        pinnedFacts: recordedActionsText + optional.repoState + userContext,
         originalRequest: originalRequest ? userText(originalRequest) : '',
         exactPendingAction: exactPendingAction ? userText(exactPendingAction) : '',
         ...(conv.active_model ? { modelName: conv.active_model } : {}),

@@ -68,6 +68,8 @@ overlaps with an existing owner, extend the owner instead.
 | Summary prompt text + summary validation             | `src/sidebar/compactionPrompt.ts`        |
 | Compaction attempt hold/rearm (context growth, timed cooldown) | `src/sidebar/compactionAttemptPolicy.ts` |
 | Compaction failure categories                        | `src/sidebar/compactionFailure.ts`       |
+| Host-fact fit (shed optional, refuse required)       | `src/sidebar/compactionHostFit.ts`       |
+| Compaction service contract types (deps/options)     | `src/sidebar/compactionServiceTypes.ts`  |
 | One-shot vs staged summary run, output cap           | `src/sidebar/compactionSummaryRunner.ts` |
 | Bounded staged (chunked) compaction                  | `src/sidebar/compactionStaging.ts`       |
 | Compaction budget math, `planOutput`, prompt fit     | `src/sidebar/compactionBudget.ts`        |
