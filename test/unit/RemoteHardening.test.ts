@@ -286,6 +286,9 @@ describe('remote owner commands', () => {
     sink?.requested(approval as never);
     await vi.waitFor(() => expect(channel.sent.at(-1)?.correlationId).toBeDefined());
     const prompt = channel.sent.at(-1);
+    // FakeRemoteChannel addresses its sends in order, so this is the id of the
+    // message that carried the keyboard.
+    const promptMessageId = `sent-${channel.sent.length}`;
     expect(prompt?.correlationId).not.toBe(approvalId);
     expect(prompt?.correlationId?.length).toBeLessThanOrEqual(62);
 
@@ -305,10 +308,17 @@ describe('remote owner commands', () => {
 
     sink?.resolved({ ...approval, approved: true, reason: 'remote' } as never);
     await vi.waitFor(() =>
-      expect(channel.retracted).toEqual([
-        { chatId: 'chat-raw-id', correlationId: prompt!.correlationId! },
+      expect(channel.resolvedKeyboards).toEqual([
+        {
+          chatId: 'chat-raw-id',
+          correlationId: prompt!.correlationId!,
+          keyboardMessageIds: [promptMessageId],
+          approved: true,
+        },
       ]),
     );
+    // The old blank-keyboard path is not used once the channel can grey a button out.
+    expect(channel.retracted).toEqual([]);
     const confirmation = channel.sent.at(-1);
     expect(confirmation?.text).toContain('approved');
     // A correlationId here would hang a second live keyboard on the notice.

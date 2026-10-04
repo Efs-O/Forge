@@ -356,6 +356,161 @@ describe('TelegramChannel', () => {
     expect(fetchMock).not.toHaveBeenCalled();
   });
 
+  /**
+   * Phase 1: a resolved approval leaves its row visible as one disabled button
+   * naming the outcome, instead of the row vanishing.
+   */
+  /**
+   * The retract path is deliberately unchanged: an unresolved retraction still
+   * blanks the keyboard rather than claiming an outcome nobody chose.
+   */
+  it('retracts an unresolved prompt with an empty keyboard', async () => {
+    const calls: Array<{ method: string; body: Record<string, unknown> }> = [];
+    const channel = new TelegramChannel({
+      token: 'secret-token',
+      getCursor: () => undefined,
+      setCursor: async () => undefined,
+      fetch: (async (url: string | URL | Request, init?: RequestInit) => {
+        calls.push({
+          method: String(url).split('/').at(-1)!,
+          body: JSON.parse(String(init?.body)) as Record<string, unknown>,
+        });
+        return response({ message_id: 31 });
+      }) as typeof fetch,
+    });
+
+    await channel.send('chat', 'approval prompt', { correlationId: 'action-3' });
+    await channel.retractPrompt('chat', 'action-3');
+    expect(calls.at(-1)).toEqual({
+      method: 'editMessageReplyMarkup',
+      body: { chat_id: 'chat', message_id: 31, reply_markup: { inline_keyboard: [] } },
+    });
+  });
+
+  it('greys a resolved approval button in place of removing the keyboard', async () => {
+    const calls: Array<{ method: string; body: Record<string, unknown> }> = [];
+    const channel = new TelegramChannel({
+      token: 'secret-token',
+      getCursor: () => undefined,
+      setCursor: async () => undefined,
+      fetch: (async (url: string | URL | Request, init?: RequestInit) => {
+        calls.push({
+          method: String(url).split('/').at(-1)!,
+          body: JSON.parse(String(init?.body)) as Record<string, unknown>,
+        });
+        return response({ message_id: 77 });
+      }) as typeof fetch,
+    });
+
+    await channel.resolvePromptKeyboard('chat', 'action-1', ['77'], true);
+    expect(calls).toEqual([
+      {
+        method: 'editMessageReplyMarkup',
+        body: {
+          chat_id: 'chat',
+          message_id: 77,
+          reply_markup: { inline_keyboard: [[{ text: 'Approved ✓', disabled: {} }]] },
+        },
+      },
+    ]);
+  });
+
+  it('shows a denied outcome and updates every keyboard message of a republished gate', async () => {
+    const calls: Array<{ method: string; body: Record<string, unknown> }> = [];
+    const channel = new TelegramChannel({
+      token: 'secret-token',
+      getCursor: () => undefined,
+      setCursor: async () => undefined,
+      fetch: (async (url: string | URL | Request, init?: RequestInit) => {
+        calls.push({
+          method: String(url).split('/').at(-1)!,
+          body: JSON.parse(String(init?.body)) as Record<string, unknown>,
+        });
+        return response({ message_id: 1 });
+      }) as typeof fetch,
+    });
+
+    await channel.resolvePromptKeyboard('chat', 'action-1', ['11', '12'], false);
+    expect(calls.map((call) => (call.body.reply_markup as { inline_keyboard: unknown[] })
+      .inline_keyboard)).toEqual([
+      [[{ text: 'Denied ✗', disabled: {} }]],
+      [[{ text: 'Denied ✗', disabled: {} }]],
+    ]);
+    expect(calls.map((call) => call.body.message_id)).toEqual([11, 12]);
+  });
+
+  it('greys the keyboard message the transport remembered, even if the bridge lost it', async () => {
+    const calls: Array<{ method: string; body: Record<string, unknown> }> = [];
+    const channel = new TelegramChannel({
+      token: 'secret-token',
+      getCursor: () => undefined,
+      setCursor: async () => undefined,
+      fetch: (async (url: string | URL | Request, init?: RequestInit) => {
+        calls.push({
+          method: String(url).split('/').at(-1)!,
+          body: JSON.parse(String(init?.body)) as Record<string, unknown>,
+        });
+        return response({ message_id: 55 });
+      }) as typeof fetch,
+    });
+
+    // The prompt send is what teaches the transport the message id for a
+    // correlation id; the bridge may have lost track of it across a republish.
+    await channel.send('chat', 'approval prompt', { correlationId: 'action-9' });
+    await channel.resolvePromptKeyboard('chat', 'action-9', [], true);
+    expect(calls.at(-1)).toMatchObject({
+      method: 'editMessageReplyMarkup',
+      body: { message_id: 55 },
+    });
+  });
+
+  it('falls back to clearing the keyboard and reports both failures', async () => {
+    const calls: string[] = [];
+    const channel = new TelegramChannel({
+      token: 'secret-token',
+      getCursor: () => undefined,
+      setCursor: async () => undefined,
+      fetch: (async (url: string | URL | Request, init?: RequestInit) => {
+        const method = String(url).split('/').at(-1)!;
+        calls.push(method);
+        return { ok: false, status: 500, json: async () => ({ ok: false }) } as Response;
+      }) as typeof fetch,
+    });
+
+    await expect(channel.resolvePromptKeyboard('chat', 'action-1', ['5'], true)).rejects.toThrow(
+      /could not be set on message 5.*could not be cleared either/s,
+    );
+    // Both the resolved edit and the empty-keyboard fallback were attempted.
+    expect(calls).toEqual(['editMessageReplyMarkup', 'editMessageReplyMarkup']);
+  });
+
+  it('clears the keyboard when only the disabled edit fails', async () => {
+    const calls: Array<{ method: string; body: Record<string, unknown> }> = [];
+    const channel = new TelegramChannel({
+      token: 'secret-token',
+      getCursor: () => undefined,
+      setCursor: async () => undefined,
+      fetch: (async (url: string | URL | Request, init?: RequestInit) => {
+        const method = String(url).split('/').at(-1)!;
+        const body = JSON.parse(String(init?.body)) as Record<string, unknown>;
+        calls.push({ method, body });
+        const keyboard = body.reply_markup as { inline_keyboard: unknown[] };
+        if (keyboard.inline_keyboard.length > 0) {
+          return { ok: false, status: 400, json: async () => ({ ok: false }) } as Response;
+        }
+        return response(true);
+      }) as typeof fetch,
+    });
+
+    await expect(channel.resolvePromptKeyboard('chat', 'action-1', ['9'], false)).rejects.toThrow(
+      /keyboard cleared instead/,
+    );
+    expect(calls.map((call) => call.body.reply_markup)).toEqual([
+      { inline_keyboard: [[{ text: 'Denied ✗', disabled: {} }]] },
+      { inline_keyboard: [] },
+    ]);
+  });
+
   it('sends, edits, and deletes paginated selection messages', async () => {
     const calls: Array<{ method: string; body: Record<string, unknown> }> = [];
     const channel = new TelegramChannel({

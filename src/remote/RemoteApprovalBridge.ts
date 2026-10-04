@@ -18,6 +18,16 @@ interface RemoteApprovalEntry {
   resolving?: boolean;
   /** The messages that showed the gate; a voice reply to one resolves it. */
   messageIds?: string[];
+  /**
+   * The one message per publish that actually carries the Approve/Deny keyboard.
+   *
+   * `messageIds` records every chunk of every republished prompt, but only the
+   * first chunk of a send gets buttons, and `promptMessages` on the transport
+   * only remembers the most recent correlation id. Resolving a gate therefore
+   * has to know each keyboard-bearing message it ever put up, or a republished
+   * prompt leaves a live Approve button behind.
+   */
+  keyboardMessageIds?: string[];
   /** When the gate opened. Half of the §22A R1 recording-window rule. */
   openedAt: number;
 }
@@ -222,7 +232,11 @@ export class RemoteApprovalBridge {
         { correlationId: pending.actionId, signal: this.signal },
       );
       // A republish shows the gate again; a reply to either message names it.
-      if (sent) pending.messageIds = [...(pending.messageIds ?? []), ...sent];
+      if (sent) {
+        pending.messageIds = [...(pending.messageIds ?? []), ...sent];
+        // Only the first chunk of a send carries the keyboard.
+        if (sent[0]) pending.keyboardMessageIds = [...(pending.keyboardMessageIds ?? []), sent[0]];
+      }
     } catch (err) {
       this.onError?.(
         `Forge remote approval delivery failed: ${err instanceof Error ? err.message : String(err)}`,
@@ -235,9 +249,32 @@ export class RemoteApprovalBridge {
     event: ToolApprovalResolvedEvent,
   ): Promise<void> {
     if (!(await this.auth.canDeliver(this.channel.name, pending.chatId))) return;
-    await this.channel
-      .retractPrompt?.(pending.chatId, pending.actionId ?? event.id, this.signal)
-      .catch(() => undefined);
+    const correlationId = pending.actionId ?? event.id;
+    if (this.channel.resolvePromptKeyboard) {
+      // Grey the row out rather than remove it, so the chat keeps a visible
+      // record of which gate was answered and how. The transport already tried
+      // the empty-keyboard fallback for any message it could not disable, so
+      // all that is left here is to say so out loud.
+      try {
+        await this.channel.resolvePromptKeyboard(
+          pending.chatId,
+          correlationId,
+          pending.keyboardMessageIds ?? [],
+          event.approved,
+          { signal: this.signal },
+        );
+      } catch (err) {
+        this.onError?.(
+          `Forge Telegram approval buttons could not be resolved: ${
+            err instanceof Error ? err.message : String(err)
+          }`,
+        );
+      }
+    } else {
+      await this.channel
+        .retractPrompt?.(pending.chatId, correlationId, this.signal)
+        .catch(() => undefined);
+    }
     try {
       const sent = await this.channel.send(
         pending.chatId,

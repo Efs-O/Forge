@@ -193,6 +193,9 @@ export class TelegramChannel implements RemoteChannel {
   retractPrompt(...args: Parameters<TelegramOutbound['retractPrompt']>) {
     return this.outbound.retractPrompt(...args);
   }
+  resolvePromptKeyboard(...args: Parameters<TelegramOutbound['resolvePromptKeyboard']>) {
+    return this.outbound.resolvePromptKeyboard(...args);
+  }
 
   async healthCheck(): Promise<{ ok: boolean; detail: string }> {
     const abort = new AbortController();

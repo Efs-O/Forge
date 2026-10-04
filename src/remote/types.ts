@@ -1,95 +1,22 @@
-import { z } from 'zod';
 import type * as vscode from 'vscode';
 import type { ForgeHostFacade } from '../sidebar/ForgeHostFacade';
 import type { RemoteRequestStore } from './RemoteRequestStore';
+import type { RemoteInboundAttachment, RemoteInboundEvent } from './remoteInboundSchema';
 
-const InboundBaseSchema = z.object({
-  channel: z.enum(['fake', 'telegram', 'whatsapp']),
-  providerMessageId: z.string().min(1).max(256),
-  senderId: z.string().min(1).max(256),
-  chatId: z.string().min(1).max(256),
-  chatType: z.enum(['private', 'group', 'channel']),
-  receivedAt: z.number().int().nonnegative(),
-  chatTitle: z.string().trim().max(256).optional(),
-});
-
-export const RemoteInboundAttachmentSchema = z.object({
-  name: z.string().min(1).max(255),
-  mediaType: z.string().min(1).max(128),
-  /** Base64 for binary input, UTF-8 for text. Never persisted in remote state. */
-  data: z
-    .string()
-    .min(1)
-    .max(14 * 1024 * 1024)
-    .optional(),
-  providerFileId: z.string().min(1).max(256).optional(),
-});
-
-export type RemoteInboundAttachment = z.infer<typeof RemoteInboundAttachmentSchema>;
-
-export const RemoteInboundEventSchema = z.discriminatedUnion('kind', [
-  InboundBaseSchema.extend({
-    kind: z.literal('text'),
-    text: z.string(),
-    attachments: z.array(RemoteInboundAttachmentSchema).max(10).optional(),
-  }),
-  /**
-   * A voice note. Deliberately NOT a `text` event with an audio attachment:
-   * `RemoteInboundAttachment.data` is a string, and putting audio through it
-   * would base64-inflate it against a 14 MB cap and then be written back out to
-   * a temp file two steps later anyway (§9.2). Only the file id crosses here;
-   * the bytes go straight to disk via `downloadAttachmentToFile`.
-   */
-  InboundBaseSchema.extend({
-    kind: z.literal('voice'),
-    providerFileId: z.string().min(1).max(256),
-    mediaType: z.string().min(1).max(128),
-    /**
-     * Client-reported clip length. Load-bearing twice over: it rejects an
-     * over-long note before a byte is downloaded, and with `receivedAt` it
-     * defines the recording window that correlates a spoken command to one
-     * pending approval (§22A R1-revised).
-     */
-    durationMs: z.number().int().nonnegative(),
-    /** Set when the note was sent as a reply; wins over the timing heuristic. */
-    replyToMessageId: z.string().min(1).max(256).optional(),
-  }),
-  InboundBaseSchema.extend({
-    kind: z.literal('action'),
-    action: z.enum(['approve', 'deny']),
-    correlationId: z.string().min(1).max(256),
-  }),
-  InboundBaseSchema.extend({
-    kind: z.literal('contact_action'),
-    action: z.enum(['send', 'cancel']),
-    correlationId: z.string().regex(/^[A-Za-z0-9_-]{16,48}$/),
-    messageId: z.string().min(1).max(256),
-  }),
-  InboundBaseSchema.extend({
-    kind: z.literal('question_action'),
-    action: z.enum(['select', 'other']),
-    questionId: z.string().regex(/^[A-Za-z0-9_-]{1,48}$/),
-    choice: z.number().int().min(0).max(99).optional(),
-    messageId: z.string().min(1).max(256),
-  }),
-  InboundBaseSchema.extend({
-    kind: z.literal('help_action'),
-    action: z.literal('close'),
-    helpToken: z.literal('x'),
-    messageId: z.string().min(1).max(256),
-  }),
-  InboundBaseSchema.extend({
-    kind: z.literal('selection'),
-    selectionKind: z.enum(['models', 'conversations', 'workspaces']),
-    selectionToken: z.string().regex(/^[A-Za-z0-9_-]{12}$/),
-    action: z.enum(['show', 'close', 'select']),
-    page: z.number().int().min(0).max(9).optional(),
-    choice: z.number().int().min(0).max(99).optional(),
-    messageId: z.string().min(1).max(256),
-  }),
-]);
-
-export type RemoteInboundEvent = z.infer<typeof RemoteInboundEventSchema>;
+/**
+ * The inbound event contract lives in `remoteInboundSchema.ts` and is
+ * re-exported here, so `types.ts` stays the one import site for the remote
+ * surface. It moved out because this barrel had reached the lint line limit and
+ * the keyboard-resolution affordance below (plus the media variants the next
+ * phase adds) needed the room. The type-only import above is what lets the rest
+ * of this file keep naming those types locally.
+ */
+export {
+  RemoteInboundAttachmentSchema,
+  RemoteInboundEventSchema,
+  type RemoteInboundAttachment,
+  type RemoteInboundEvent,
+} from './remoteInboundSchema';
 
 export type RemoteInboundDisposition =
   | { kind: 'accepted'; requestId: string }
@@ -406,6 +333,23 @@ export interface RemoteChannel {
    * affordance simply do not implement it.
    */
   retractPrompt?(chatId: string, correlationId: string, signal?: AbortSignal): Promise<void>;
+  /**
+   * Replace a resolved approval's buttons with one disabled button naming the
+   * outcome, for every message that carried a keyboard for that correlation id.
+   *
+   * Telegram keeps an inline keyboard on a message until the message is edited,
+   * so an Approve/Deny row that simply vanishes leaves no trace of the decision
+   * the user just made. Optional: channels with no such affordance fall back to
+   * `retractPrompt`. Rejects when a button could not be resolved — the caller
+   * reports it, because a keyboard left pressable is worth a visible complaint.
+   */
+  resolvePromptKeyboard?(
+    chatId: string,
+    correlationId: string,
+    keyboardMessageIds: readonly string[],
+    approved: boolean,
+    options?: { signal?: AbortSignal },
+  ): Promise<void>;
   start(signal: AbortSignal): Promise<void>;
   requestPairingCode?(phoneNumber: string): Promise<string>;
   unlink?(): Promise<void>;

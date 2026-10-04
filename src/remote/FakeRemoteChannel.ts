@@ -11,6 +11,15 @@ export class FakeRemoteChannel implements RemoteChannel {
   readonly name: RemoteChannel['name'];
   readonly sent: Array<{ chatId: string; text: string; correlationId?: string }> = [];
   readonly retracted: Array<{ chatId: string; correlationId: string }> = [];
+  /** Records resolved-approval keyboard edits so tests can assert the outcome button. */
+  readonly resolvedKeyboards: Array<{
+    chatId: string;
+    correlationId: string;
+    keyboardMessageIds: readonly string[];
+    approved: boolean;
+  }> = [];
+  /** When set, the resolved-keyboard edit fails with this message. */
+  resolveKeyboardError?: string;
   /** Records command auto-cleanup deletes so tests can assert they fired. */
   readonly deleted: Array<{ chatId: string; messageId: string }> = [];
   readonly photos: Array<{ chatId: string; filePath: string; caption: string }> = [];
@@ -118,6 +127,16 @@ export class FakeRemoteChannel implements RemoteChannel {
 
   async retractPrompt(chatId: string, correlationId: string): Promise<void> {
     this.retracted.push({ chatId, correlationId });
+  }
+
+  async resolvePromptKeyboard(
+    chatId: string,
+    correlationId: string,
+    keyboardMessageIds: readonly string[],
+    approved: boolean,
+  ): Promise<void> {
+    if (this.resolveKeyboardError) throw new Error(this.resolveKeyboardError);
+    this.resolvedKeyboards.push({ chatId, correlationId, keyboardMessageIds, approved });
   }
 
   async deleteMessage(chatId: string, messageId: string): Promise<void> {
