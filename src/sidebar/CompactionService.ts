@@ -9,6 +9,8 @@
 import * as vscode from 'vscode';
 import type { HostToWebview } from './messageBridge';
 import type { ConversationRuntime } from './sessionTypes';
+import { runCompactionWithPolicy } from './compactionAttemptPolicy';
+import { compactionRefusalNotice } from './compactionRefusal';
 import { buildSummaryPrompt, capSummary, isUsableSummary } from './compactionPrompt';
 import {
   COMPACTION_CHARS_PER_TOKEN,
@@ -114,61 +116,22 @@ export const MAX_CONSECUTIVE_AUTO_CONTINUES = 2;
 /** Small manual compactions may grow; only a substantial window risks a loop. */
 export const MIN_WINDOW_CHARS_FOR_FIT_GUARD = 24000;
 
-/** The one wording for a refused compaction, whichever check refused it. */
-function refusalNotice(afterChars: number, beforeChars: number): string {
-  return (
-    'Forge: compaction would not have reduced the context ' +
-    `(estimated ~${afterChars.toLocaleString()} vs ~${beforeChars.toLocaleString()} characters), ` +
-    'so the previous state was kept. Start a new chat, or remove large attachments, if this repeats.'
-  );
-}
-
-/**
- * The conversation's user-message count at its last failed AUTOMATIC compaction.
- *
- * A failure that is caused by config (an output budget too small for the
- * model's thinking, a window no summary can shrink) repeats identically, and
- * both triggers re-fire on every check: mid-turn every round, then post-turn
- * as soon as the turn ends. On 2026-09-22 that was seven summarizations in two
- * minutes, each one a warning and a paid cloud call. After a failure, automatic
- * compaction waits for the user's next message; /compact is never held back.
- */
-const failedAutoAt = new WeakMap<ConversationRuntime, number>();
-
-function userMessageCount(conv: ConversationRuntime): number {
-  return conv.messages.filter((m) => m.role === 'user' && m.internal !== true).length;
-}
-
 /**
  * Runs one compaction against the active conversation.
  *
  * `auto` changes the messaging (an automatic compaction the user did not ask
- * for should not pop modal-ish information toasts) and applies the
- * retry-after-failure hold described at `failedAutoAt`.
+ * for should not pop modal-ish information toasts) and applies the automatic
+ * retry-after-failure policy.
  */
-export async function runCompaction(
+export function runCompaction(
   deps: CompactionDeps,
   conversationId: string,
   options: CompactionOptions = { auto: false },
 ): Promise<CompactionOutcome> {
-  const conv = deps.getConversation(conversationId);
-  if (!options.auto || !conv) return compactOnce(deps, conversationId, options);
-  const at = userMessageCount(conv);
-  if (failedAutoAt.get(conv) === at) {
-    log.info('[auto-compact] skipped — the last attempt failed and no new user message since');
-    return 'skipped';
-  }
-  let outcome: CompactionOutcome = 'failed';
-  try {
-    outcome = await compactOnce(deps, conversationId, options);
-    return outcome;
-  } finally {
-    if (outcome === 'failed') failedAutoAt.set(conv, at);
-    else failedAutoAt.delete(conv);
-  }
+  return runCompactionWithPolicy(deps, conversationId, options, compactOnce);
 }
 
-interface CompactionOptions {
+export interface CompactionOptions {
   auto: boolean;
   trigger?: CompactionTrigger;
   remoteOrigin?: { channel: string; chatId: string };
@@ -330,7 +293,7 @@ async function compactOnce(
         );
         deps.post({
           type: 'notice',
-          message: refusalNotice(floorChars, beforeChars),
+          message: compactionRefusalNotice(floorChars, beforeChars),
           conversationId: conv.id,
         });
         return 'failed';
@@ -417,7 +380,7 @@ async function compactOnce(
       );
       deps.post({
         type: 'notice',
-        message: refusalNotice(afterChars, beforeChars),
+        message: compactionRefusalNotice(afterChars, beforeChars),
         conversationId: conv.id,
       });
       return 'failed';
