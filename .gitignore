@@ -39,6 +39,12 @@ docs/*
 !docs/plans/**
 !docs/reports/
 !docs/reports/**
+# Local investigation documents kept on disk for follow-up work.
+/docs/plans/TELEGRAM_BOT_API_UPGRADE_PLAN.md
+/docs/reports/ASK_USER_WEBVIEW_STATE_LOSS_2026-10-03.md
+/docs/reports/COMPACTION_RESEARCH_COMPARISON_2026-10-04.md
+/docs/reports/RG_STDIN_TIMEOUT_NOTE_2026-10-04.md
+/docs/reports/TELEGRAM_BOT_API_CAPABILITY_REPORT_2026-10-04.md
 # Design references a plan points at - mockups meant to be opened in a browser.
 !docs/design/
 !docs/design/**
