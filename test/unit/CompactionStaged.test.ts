@@ -142,8 +142,7 @@ describe('thinking-heavy summarization through the real PromptRun', () => {
     });
 
     expect(run.method).toBe('staged');
-    expect(run.calls).toBe(1);
-    expect(run.summary).toContain('Next: Now add the test.');
+    expect(run.calls).toBe(2); // the failed one-shot counts too
     for (const request of requests) {
       // Thinking alone can never consume the whole request.
       expect(request.max_tokens ?? 0).toBeGreaterThan(8_192 + 128);
@@ -170,6 +169,30 @@ describe('thinking-heavy summarization through the real PromptRun', () => {
     const result = await summarizeInStages(input('cloud', 0, 32_768));
     expect(result.calls).toBe(1);
     expect(requests[0]?.max_tokens).toBe(32_768);
+  });
+});
+
+describe('staged evidence manifest', () => {
+  it('pins every recorded file identifier and every user request, or refuses', async () => {
+    const result = await summarizeInStages({
+      ...input('cloud', 0, 32_768),
+      pinnedFacts: 'Files changed: src/importer.ts, test/importer.test.ts, package.json',
+      runPrompt: async () => note('n'),
+    });
+    for (const id of ['src/importer.ts', 'test/importer.test.ts', 'package.json']) {
+      expect(result.summary).toContain(id);
+    }
+    expect(result.summary).toContain('User request 1: Fix the importer.');
+    expect(result.summary).toContain('User request 2: Now add the test.');
+
+    await expect(
+      summarizeInStages({
+        ...input('cloud', 0, 32_768),
+        maximumSummaryChars: 1_500,
+        pinnedFacts: Array.from({ length: 80 }, (_, i) => `src/module${i}/file${i}.ts`).join(' '),
+        runPrompt: async () => note('n'),
+      }),
+    ).rejects.toThrow(/previous context kept/u);
   });
 });
 

@@ -107,10 +107,12 @@ export async function summarizeCompaction(
     renderStagedSource(input.messages).length > input.budget.sourceMaxChars;
   let prompt = '';
   let oneShot = '';
+  let oneShotCalls = 0;
   if (!useStagingFirst) {
     try {
       const fit = oneShotPrompt(input, outputTokens);
       prompt = fit.prompt;
+      oneShotCalls = 1;
       oneShot = (await runOneShot(input, prompt, outputTokens)).trim();
     } catch (error) {
       if (!(error instanceof PromptIncompleteError) && !(error instanceof SummaryPromptFitError)) {
@@ -152,7 +154,7 @@ export async function summarizeCompaction(
     summary: staged.summary,
     prompt,
     method: 'staged',
-    calls: staged.calls + (oneShot ? 1 : 0),
+    calls: staged.calls + oneShotCalls,
     outputTokens,
   };
 }

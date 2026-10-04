@@ -80,6 +80,27 @@ export function renderStagedSource(messages: ChatMessage[]): string {
     .join('\n\n');
 }
 
+const IDENTIFIER_PATTERN = /[\w.-]+(?:[\\/][\w.-]+)+|[\w-]+\.[A-Za-z]{1,5}\b/gu;
+const USER_REQUEST_PREFIX_CHARS = 160;
+
+/** File/state identifiers named by the host's recorded facts; each must survive. */
+export function requiredIdentifiers(pinnedFacts: string): string[] {
+  return [...new Set(pinnedFacts.match(IDENTIFIER_PATTERN) ?? [])];
+}
+
+function userRequestManifest(messages: ChatMessage[]): string[] {
+  return messages
+    .filter((message) => message.role === 'user' && message.internal !== true)
+    .map((message, i) => {
+      const text = contentText(message.content).replace(/\s+/gu, ' ').trim();
+      return `- User request ${i + 1}: ${
+        text.length > USER_REQUEST_PREFIX_CHARS
+          ? `${text.slice(0, USER_REQUEST_PREFIX_CHARS)}… [truncated]`
+          : text
+      }`;
+    });
+}
+
 function containsRequiredHeadings(note: string): boolean {
   return ['Goal', 'State', 'Next', 'Files', 'Constraints', 'Errors'].every((heading) =>
     new RegExp(`\\b${heading}\\s*:`, 'iu').test(note),
@@ -140,6 +161,8 @@ function makeChunks(
       SUMMARY_FRAME_CHARS +
       input.originalRequest.length +
       input.exactPendingAction.length +
+      requiredIdentifiers(input.pinnedFacts).join(', ').length +
+      userRequestManifest(input.messages).join('\n').length +
       chunks.length * PER_CHUNK_INDEX_CHARS;
     const noteChars = Math.floor((input.maximumSummaryChars - frame) / chunks.length);
     if (noteChars < 400) {
@@ -239,13 +262,23 @@ export async function summarizeInStages(
           .reduce((total, part) => total + part.length, 0)}`,
     )
     .join('\n');
+  const identifiers = requiredIdentifiers(input.pinnedFacts);
   const summary = [
     `Goal: ${input.originalRequest}`,
     `State:\n${notes.map((note, i) => `Chunk ${i + 1}:\n${note}`).join('\n\n')}`,
     `Next: ${input.exactPendingAction}`,
-    `Files, Constraints, and Errors: See the ordered source notes and pinned host facts above.`,
+    `Files, Constraints, and Errors: see the ordered source notes; identifiers pinned below.`,
+    `Pinned identifiers: ${identifiers.join(', ') || 'none recorded'}`,
+    `User requests (in order):\n${userRequestManifest(input.messages).join('\n') || '- none'}`,
     `Cross-chunk index:\n${index}`,
   ].join('\n\n');
+  const missing = identifiers.filter((id) => !summary.includes(id));
+  if (missing.length > 0) {
+    refuse(
+      `Staged summary lost required identifiers (${missing.slice(0, 5).join(', ')}); previous context kept.`,
+      'invalid-summary',
+    );
+  }
   if (summary.length > input.maximumSummaryChars) {
     refuse(
       `Staged summary needs ${summary.length} characters, above its ${input.maximumSummaryChars}-character allowance; previous context kept.`,
