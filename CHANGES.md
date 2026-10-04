@@ -1,5 +1,12 @@
 # Forge — Recent Changes
 
+## 0.16.83
+
+### Staged compaction note limit
+
+- Staged compaction now tells the summarizer the exact character limit for each
+  note before generation, matching the limit enforced when the note returns.
+
 ## 0.16.82
 
 ### Compaction recovery and durable agent handoffs

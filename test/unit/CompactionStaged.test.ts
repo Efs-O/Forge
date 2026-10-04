@@ -173,6 +173,29 @@ describe('thinking-heavy summarization through the real PromptRun', () => {
 });
 
 describe('staged evidence manifest', () => {
+  it('tells the model the exact character allocation enforced for its note', async () => {
+    let advertisedLimit = 0;
+    let failure: unknown;
+    try {
+      await summarizeInStages({
+        ...input('cloud', 0, 32_768),
+        runPrompt: async (prompt) => {
+          const match = prompt.match(/HARD LIMIT: write between 200 and (\d+) characters total/u);
+          expect(match).not.toBeNull();
+          advertisedLimit = Number(match?.[1]);
+          expect(prompt).toContain('including headings and newlines');
+          return note('x'.repeat(advertisedLimit));
+        },
+      });
+    } catch (error) {
+      failure = error;
+    }
+    expect(advertisedLimit).toBeGreaterThan(200);
+    expect(String(failure)).toContain(
+      `Staged note 1/1 is incomplete or exceeds its ${advertisedLimit}-character allocation`,
+    );
+  });
+
   it('pins every recorded file identifier and every user request, or refuses', async () => {
     const result = await summarizeInStages({
       ...input('cloud', 0, 32_768),

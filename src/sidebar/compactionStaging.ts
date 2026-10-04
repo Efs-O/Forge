@@ -125,9 +125,17 @@ function sliceContiguous(source: string, chunkChars: number): string[] {
   return chunks;
 }
 
-function extractionPrompt(context: string, index: number, count: number, chunk: string): string {
+function extractionPrompt(
+  context: string,
+  index: number,
+  count: number,
+  chunk: string,
+  noteChars: number,
+): string {
   return [
     'Extract a compact but complete note from this exact source interval.',
+    `HARD LIMIT: write between 200 and ${noteChars} characters total, including headings and newlines.`,
+    'The character limit overrides requests for more detail. Use concise wording within each section.',
     'Do not infer that omitted context is unimportant. Preserve decisions, blockers, outcomes,',
     'file paths, identifiers, constraints, and the next action present in this interval.',
     'Use all six headings: Goal, State, Next, Files, Constraints, Errors. Write "none in this',
@@ -187,6 +195,7 @@ function makeChunks(
       chunks.length - 1,
       chunks.length,
       'x'.repeat(largestChunk),
+      noteChars,
     ).length;
     const inputTokens = Math.ceil(promptChars / COMPACTION_CHARS_PER_TOKEN);
     // requestCap already contains the reasoning reserve; count it once.
@@ -225,7 +234,7 @@ export async function summarizeInStages(
     const chunk = chunks[index];
     if (chunk === undefined) refuse('Staged compaction source interval is missing.');
     const note = await input.runPrompt(
-      extractionPrompt(pinnedContext, index, chunks.length, chunk),
+      extractionPrompt(pinnedContext, index, chunks.length, chunk, noteChars),
       input.conversationId,
       {
         ...(input.modelName ? { modelName: input.modelName } : {}),
