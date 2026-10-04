@@ -85,20 +85,6 @@ export function runCompaction(
   return runCompactionWithPolicy(deps, conversationId, options, compactOnce);
 }
 
-function userText(message: { content: unknown }): string {
-  if (typeof message.content === 'string') return message.content;
-  if (!Array.isArray(message.content)) return '';
-  return message.content
-    .map((part) =>
-      typeof part === 'object' && part !== null && 'text' in part && typeof part.text === 'string'
-        ? part.text
-        : '',
-    )
-    .filter(Boolean)
-    .join('\n')
-    .trim();
-}
-
 async function compactOnce(
   deps: CompactionDeps,
   conversationId: string,
@@ -295,12 +281,6 @@ async function compactOnce(
       const summaryAllowance =
         Math.min(budget.summaryCeilingChars, budget.replacementMaxChars - floorChars) -
         (groupsNote?.length ?? 0);
-      const exactPendingAction = [...pending]
-        .reverse()
-        .find((message) => message.role === 'user' && message.internal !== true);
-      const originalRequest = split.summarize.find(
-        (message) => message.role === 'user' && message.internal !== true,
-      );
       const outputLimitTokens = metrics?.outputLimitTokens ?? 0;
       const summaryRun = await summarizeCompaction({
         messages: split.summarize,
@@ -308,9 +288,6 @@ async function compactOnce(
         recordedFacts: recordedActionsText + optional.repoState,
         userContext,
         ...(conv.plan?.items ? { plan: conv.plan.items } : {}),
-        pinnedFacts: recordedActionsText + optional.repoState + userContext,
-        originalRequest: originalRequest ? userText(originalRequest) : '',
-        exactPendingAction: exactPendingAction ? userText(exactPendingAction) : '',
         ...(conv.active_model ? { modelName: conv.active_model } : {}),
         modelMaxTokens: modelMax,
         outputLimitTokens,
@@ -322,7 +299,7 @@ async function compactOnce(
           try {
             return await deps.runPromptToMarkdown(text, id, promptOptions);
           } catch (err) {
-            // The summarizer may recover from a cut-off call; keep the reason.
+            // Preserve the finish reason in the durable attempt record.
             if (err instanceof PromptIncompleteError) attemptFinish = err.finishReason ?? 'none';
             throw err;
           }

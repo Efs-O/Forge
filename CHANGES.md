@@ -1,5 +1,17 @@
 # Forge — Recent Changes
 
+## 0.16.85
+
+### One-request compaction
+
+- Compaction uses one low-reasoning summarizer request for Q6 and Strata. An
+  incomplete, oversized, or invalid note fails without a staged retry, leaving
+  the previous context intact. Normal coding reasoning settings are unchanged.
+- The model-written summary target is 6% of observed context and the complete
+  replacement limit is 12%. Large tool results retain their beginning and final
+  status in the summarizer source. The prompt scopes historical restrictions to
+  the task they governed and requires all six handoff sections.
+
 ## 0.16.84
 
 ### Accept valid staged compaction headings

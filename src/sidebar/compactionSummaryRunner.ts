@@ -1,16 +1,13 @@
 import type { ChatMessage } from '../llm/types';
 import type { PromptRunOptions } from './PromptRun';
-import { PromptIncompleteError } from './PromptRun';
 import {
   COMPACTION_CHARS_PER_TOKEN,
   fitSummaryPrompt,
   planOutput,
-  SummaryPromptFitError,
   type CompactionBudget,
 } from './compactionBudget';
 import { buildSummaryPrompt, isUsableSummary } from './compactionPrompt';
 import { CompactionFailure } from './compactionFailure';
-import { renderStagedSource, summarizeInStages } from './compactionStaging';
 import type { PlanItem } from './sessionTypes';
 
 const REPLACEMENT_DELIMITER_RESERVE_CHARS = 256;
@@ -21,9 +18,6 @@ export interface CompactionSummaryInput {
   recordedFacts: string;
   userContext: string;
   plan?: readonly PlanItem[];
-  pinnedFacts: string;
-  originalRequest: string;
-  exactPendingAction: string;
   modelName?: string;
   modelMaxTokens: number;
   outputLimitTokens: number;
@@ -39,7 +33,7 @@ export interface CompactionSummaryInput {
 export interface CompactionSummaryResult {
   summary: string;
   prompt: string;
-  method: 'one-shot' | 'staged';
+  method: 'one-shot';
   calls: number;
   outputTokens: number;
 }
@@ -96,6 +90,7 @@ async function runOneShot(
     strictOutputTokens: true,
     alwaysStripThinking: true,
     requireComplete: true,
+    reasoningEffort: 'low',
   });
 }
 
@@ -121,60 +116,28 @@ async function summarizeCompactionCounted(
   input: CompactionSummaryInput,
 ): Promise<CompactionSummaryResult> {
   const outputTokens = visibleOutputLimit(input);
-  const useStagingFirst =
-    input.modelMaxTokens > 0 &&
-    input.budget.policyTokens >= input.modelMaxTokens * 0.75 &&
-    renderStagedSource(input.messages).length > input.budget.sourceMaxChars;
-  let prompt = '';
-  let oneShot = '';
-  let oneShotCalls = 0;
-  if (!useStagingFirst) {
-    try {
-      const fit = oneShotPrompt(input, outputTokens);
-      prompt = fit.prompt;
-      oneShotCalls = 1;
-      oneShot = (await runOneShot(input, prompt, outputTokens)).trim();
-    } catch (error) {
-      if (!(error instanceof PromptIncompleteError) && !(error instanceof SummaryPromptFitError)) {
-        throw error;
-      }
-    }
-    if (oneShot && oneShot.length <= input.maximumSummaryChars) {
-      if (!isUsableSummary(oneShot)) {
-        throw new CompactionFailure(
-          'invalid-summary',
-          'The summarizer returned no usable summary; previous context kept.',
-        );
-      }
-      return { summary: oneShot, prompt, method: 'one-shot', calls: 1, outputTokens };
-    }
-  }
-
-  const staged = await summarizeInStages({
-    messages: input.messages,
-    ...(input.previousSummary ? { previousSummary: input.previousSummary } : {}),
-    pinnedFacts: input.pinnedFacts,
-    originalRequest: input.originalRequest,
-    exactPendingAction: input.exactPendingAction,
-    ...(input.modelName ? { modelName: input.modelName } : {}),
-    modelMaxTokens: input.modelMaxTokens,
-    outputLimitTokens: input.outputLimitTokens,
-    reasoningTokens: input.reasoningTokens,
-    maximumSummaryChars: input.maximumSummaryChars,
-    conversationId: input.conversationId,
-    runPrompt: input.runPrompt,
-  });
-  if (!isUsableSummary(staged.summary)) {
+  const { prompt } = oneShotPrompt(input, outputTokens);
+  const summary = (await runOneShot(input, prompt, outputTokens)).trim();
+  if (summary.length > input.maximumSummaryChars) {
     throw new CompactionFailure(
-      'invalid-summary',
-      'The staged summarizer returned no usable summary; previous context kept.',
+      'budget-refusal',
+      `Summary exceeds its ${input.maximumSummaryChars}-character allocation; previous context kept.`,
     );
   }
-  return {
-    summary: staged.summary,
-    prompt,
-    method: 'staged',
-    calls: staged.calls + oneShotCalls,
-    outputTokens,
-  };
+  if (!isUsableSummary(summary)) {
+    throw new CompactionFailure(
+      'invalid-summary',
+      'The summarizer returned no usable summary; previous context kept.',
+    );
+  }
+  const missing = ['Goal', 'State', 'Next', 'Files', 'Constraints', 'Errors'].filter(
+    (heading) => !new RegExp(`(?:^|\\n)\\s*#{0,6}\\s*(?:\\*\\*)?${heading}\\b`, 'iu').test(summary),
+  );
+  if (missing.length > 0) {
+    throw new CompactionFailure(
+      'invalid-summary',
+      `Summary is missing required sections: ${missing.join(', ')}; previous context kept.`,
+    );
+  }
+  return { summary, prompt, method: 'one-shot', calls: 1, outputTokens };
 }

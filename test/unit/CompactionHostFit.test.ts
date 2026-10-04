@@ -10,7 +10,7 @@ import type { ChatMessage } from '../../src/llm/types';
 import { compactionBudget } from '../../src/sidebar/compactionBudget';
 import type { RecordedCompactionAction } from '../../src/sidebar/compactionTypes';
 
-const summary = `Goal: complete the request.\n\nState: recorded. Next: continue. ${'detail. '.repeat(40)}`;
+const summary = `Goal: complete the request.\nState: recorded. ${'detail. '.repeat(40)}\nNext: continue.\nFiles: src/a.ts.\nConstraints: none.\nErrors: none.`;
 
 function setup(userChars: number, repoState: string, lastInputTokens: number) {
   const messages: ChatMessage[] = [

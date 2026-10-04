@@ -31,6 +31,17 @@ const baseRequest: ChatCompletionRequest = {
 };
 
 describe('normalizeRequestForModel', () => {
+  it('uses a one-request low effort for llama.cpp without changing the model default', () => {
+    const model: ModelConfig = {
+      name: 'qwen38',
+      provider: 'llama.cpp',
+      think: true,
+      reasoning_effort: 'xhigh',
+    };
+    const normalized = normalizeRequestForModel({ ...baseRequest, reasoning_effort: 'low' }, model);
+    expect(normalized.chat_template_kwargs?.reasoning_effort).toBe('low');
+    expect(model.reasoning_effort).toBe('xhigh');
+  });
   it('preserves recovery thinking suppression for native Ollama', () => {
     const model: ModelConfig = { name: 'qwen', provider: 'ollama', think: true };
     const request = buildRoundRequest({
@@ -89,9 +100,9 @@ describe('normalizeRequestForModel', () => {
       gguf_path: 'C:/models/local.gguf',
     };
 
-    expect(normalizeRequestForModel({ ...baseRequest, cache_prompt: false }, model).cache_prompt).toBe(
-      false,
-    );
+    expect(
+      normalizeRequestForModel({ ...baseRequest, cache_prompt: false }, model).cache_prompt,
+    ).toBe(false);
   });
 
   it('passes a direct llama.cpp reasoning effort into template kwargs', () => {

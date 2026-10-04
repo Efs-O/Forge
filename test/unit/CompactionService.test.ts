@@ -86,9 +86,12 @@ function harness(
  * have become the conversation's working context.
  */
 const long = (label: string): string =>
-  `${label}
-
-State: recorded. Next: continue. Files: src/a.ts. ${'detail. '.repeat(30)}`.trim();
+  `Goal: ${label}
+State: recorded. ${'detail. '.repeat(30)}
+Next: continue.
+Files: src/a.ts.
+Constraints: none recorded.
+Errors: none recorded.`;
 
 describe('selectCompactionSplit', () => {
   it('keeps the last user turn verbatim and summarizes only what precedes it', () => {
@@ -497,8 +500,9 @@ describe('runCompaction recovery after automatic failures', () => {
     );
     expect(calls).toBe(1);
     c.last_input_tokens = 2_000;
-    await expect(runCompaction(h.deps, c.id, { auto: true, trigger: 'auto', midTurn: true }))
-      .resolves.toBe('failed');
+    await expect(
+      runCompaction(h.deps, c.id, { auto: true, trigger: 'auto', midTurn: true }),
+    ).resolves.toBe('failed');
     await expect(runCompaction(h.deps, c.id, { auto: true, trigger: 'auto' })).resolves.toBe(
       'skipped',
     );
@@ -968,7 +972,9 @@ describe('runCompaction', () => {
     const c = conv([...base]);
     const h = harness(c, async () => long('summary'));
     let release!: (summary: string) => void;
-    const pending = new Promise<string>((resolve) => { release = resolve; });
+    const pending = new Promise<string>((resolve) => {
+      release = resolve;
+    });
     const runPrompt = vi.fn(() => pending);
     h.deps.runPromptToMarkdown = runPrompt;
     const admission = runCompaction(h.deps, c.id, { auto: true, trigger: 'auto' });
@@ -976,7 +982,9 @@ describe('runCompaction', () => {
     const postTurn = runCompaction(h.deps, c.id, { auto: true, trigger: 'auto' });
     release(long('summary'));
     await expect(Promise.all([admission, midTurn, postTurn])).resolves.toEqual([
-      'compacted', 'compacted', 'compacted',
+      'compacted',
+      'compacted',
+      'compacted',
     ]);
     expect(runPrompt).toHaveBeenCalledTimes(1);
   });

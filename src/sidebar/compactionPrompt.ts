@@ -33,6 +33,15 @@ function truncateText(text: string, limit: number): string {
   return text.length <= limit ? text : `${text.slice(0, limit)}\n…[truncated]`;
 }
 
+/** Bound re-fetchable tool output while retaining its start and final status. */
+function compactToolOutput(text: string, limit: number): string {
+  if (text.length <= limit) return text;
+  const marker = '\n…[middle omitted; retrieve exact evidence with read_tool_result]…\n';
+  const room = limit - marker.length;
+  const head = Math.ceil(room * 0.6);
+  return `${text.slice(0, head)}${marker}${text.slice(-Math.floor(room * 0.4))}`;
+}
+
 function formatToolCalls(message: ChatMessage): string {
   if (!message.tool_calls?.length) return '';
   const details = message.tool_calls
@@ -50,7 +59,10 @@ function formatSummaryMessage(message: ChatMessage, sourceMaxChars: number): str
         : '[non-text content]';
   const body =
     message.role === 'tool'
-      ? truncateText(content, Math.max(TOOL_RESULT_MAX_CHARS, Math.floor(sourceMaxChars * 0.015)))
+      ? compactToolOutput(
+          content,
+          Math.max(TOOL_RESULT_MAX_CHARS, Math.floor(sourceMaxChars * 0.015)),
+        )
       : content;
   const reasoning = message.reasoning
     ? `\nReasoning note: ${truncateText(message.reasoning, 600)}`
@@ -195,7 +207,7 @@ export function buildSummaryPrompt(
     (budget
       ? `Aim for about ${budget.summaryTargetTokens} visible tokens; do not exceed ${budget.summaryCeilingTokens}. `
       : '') +
-    'Use these labels: Goal, State, Next, Files, Constraints, Errors. ' +
+    'Use all six headings: Goal, State, Next, Files, Constraints, Errors. ' +
     // Without this, State became a narrative of the conversation and the
     // conclusions of finished investigations were lost, so the resumed agent
     // re-ran the reads and searches that had produced them.
@@ -211,7 +223,10 @@ export function buildSummaryPrompt(
     'user has not answered yet, or write "nothing pending - the task is ' +
     'complete" when there is none. Do not list work the recorded outcomes ' +
     'already show finished. ' +
-    'Omit any OTHER section that would be empty. Do not retell the conversation.\n\n' +
+    'Write "none recorded" for an empty section. Do not retell the conversation. ' +
+    'Historical Next and PAUSE instructions must be labeled historical. For each ' +
+    'earlier restriction, name the task it governed; apply it to the latest ' +
+    'request only if that request continues the same task.\n\n' +
     `${verbatimUserContext}${previous}${facts}${planSnapshotBlock(plan)}` +
     `${anchorRequest(messages)}Conversation:\n${transcript}`
   );

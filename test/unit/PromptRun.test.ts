@@ -195,6 +195,24 @@ describe('runPromptToMarkdown options', () => {
     expect(sent.reasoning_effort).toBe('xhigh');
   });
 
+  it('overrides Strata to low for one isolated compaction request', async () => {
+    const strata: PromptRunContext = {
+      ...ctx(),
+      secrets: { get: async () => 'test-key' } as never,
+    };
+    await runPromptToMarkdown(strata, 'summarize', 'c1', {
+      modelName: 'strata',
+      outputTokens: 12_500,
+      strictOutputTokens: true,
+      reasoningEffort: 'low',
+    });
+    expect(sent.reasoning_effort).toBe('low');
+    expect(sent.max_tokens).toBe(12_500);
+    expect(config().models.find((model) => model.name === 'strata')?.reasoning_effort).toBe(
+      'xhigh',
+    );
+  });
+
   it('names the budget when a reply is all thinking and no answer', async () => {
     streamModelChatCompletion.mockImplementation(
       (_u: string, request: ChatCompletionRequest, _m: unknown, handlers: any) => {

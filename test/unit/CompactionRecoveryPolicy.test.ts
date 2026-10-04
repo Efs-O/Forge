@@ -7,7 +7,7 @@ import type { ConversationRuntime } from '../../src/sidebar/sessionTypes';
 import type { RequestChainContext } from '../../src/sidebar/RequestChainLifecycle';
 
 const successfulSummary =
-  `Goal: complete the request.\n\nState: recorded. Next: continue. ` + 'detail. '.repeat(40);
+  `Goal: complete the request.\nState: recorded. ${'detail. '.repeat(40)}\nNext: continue.\nFiles: src/a.ts.\nConstraints: none.\nErrors: none.`;
 
 function setup() {
   const conversation: ConversationRuntime = {

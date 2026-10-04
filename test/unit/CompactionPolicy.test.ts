@@ -1,8 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import {
-  compactionBudget,
-  fitSummaryPrompt,
-} from '../../src/sidebar/compactionBudget';
+import { compactionBudget, fitSummaryPrompt } from '../../src/sidebar/compactionBudget';
 import { buildSummaryPrompt, capSummary } from '../../src/sidebar/compactionPrompt';
 import type { ChatMessage } from '../../src/llm/types';
 
@@ -10,10 +7,10 @@ describe('percentage compaction policy', () => {
   it('budgets the 170k trigger against P rather than the 200k maximum', () => {
     const budget = compactionBudget(170_000, 100_000, 200_000);
     expect(budget.policyTokens).toBe(170_000);
-    expect(budget.summaryTargetTokens).toBe(6_800);
-    expect(budget.summaryCeilingTokens).toBe(17_000);
+    expect(budget.summaryTargetTokens).toBe(10_200);
+    expect(budget.summaryCeilingTokens).toBe(20_400);
     expect(budget.tailMaxChars).toBe(6_375);
-    expect(budget.replacementMaxChars).toBe(42_500);
+    expect(budget.replacementMaxChars).toBe(51_000);
     expect(budget.sourceMaxChars).toBe(340_000);
     expect(budget.estimated).toBe(false);
   });
@@ -32,9 +29,7 @@ describe('percentage compaction policy', () => {
       'x'.repeat(sourceChars + 20_000),
     );
     expect(fit.sourceMaxChars).toBeLessThan(budget.sourceMaxChars);
-    expect(fit.estimatedTokens + budget.summaryCeilingTokens + 6_000).toBeLessThanOrEqual(
-      150_000,
-    );
+    expect(fit.estimatedTokens + budget.summaryCeilingTokens + 6_000).toBeLessThanOrEqual(150_000);
   });
 
   it('fits the dynamic output allowance, reasoning reserve, and margin in the model window', () => {

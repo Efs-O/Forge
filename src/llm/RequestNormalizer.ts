@@ -42,7 +42,10 @@ export function normalizeRequestForModel(
       : cachedRequest.chat_template_kwargs;
     // Qwen 3.8's GGUF Jinja template defaults to xhigh unless this kwarg is
     // present. llama-server forwards chat_template_kwargs directly to it.
-    if (model.think !== true || model.reasoning_effort === undefined) {
+    if (
+      model.think !== true ||
+      (model.reasoning_effort === undefined && request.reasoning_effort === undefined)
+    ) {
       if (chatTemplateKwargs === undefined) return cachedRequest;
       return { ...cachedRequest, chat_template_kwargs: chatTemplateKwargs };
     }
@@ -50,7 +53,7 @@ export function normalizeRequestForModel(
       ...cachedRequest,
       chat_template_kwargs: {
         ...chatTemplateKwargs,
-        reasoning_effort: model.reasoning_effort,
+        reasoning_effort: request.reasoning_effort ?? model.reasoning_effort,
       },
     };
   }

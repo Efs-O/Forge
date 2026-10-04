@@ -44,7 +44,7 @@ function setup(runPrompt: CompactionDeps['runPromptToMarkdown'], tokens = 2_000)
 }
 
 const good = async (): Promise<string> =>
-  `Goal: complete the request.\n\nState: recorded. Next: continue. ${'detail. '.repeat(40)}`;
+  `Goal: complete the request.\nState: recorded. ${'detail. '.repeat(40)}\nNext: continue.\nFiles: src/a.ts.\nConstraints: none.\nErrors: none.`;
 
 describe('compaction attempt rows (A48)', () => {
   it('start and terminal rows share one attempt id and carry the call count', async () => {

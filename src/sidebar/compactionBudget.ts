@@ -4,7 +4,6 @@ import { CHARS_PER_TOKEN } from '../util/contextBudget';
 
 /** Pessimistic conversion for a proposal that has not been tokenized yet. */
 export const COMPACTION_CHARS_PER_TOKEN = 2.5;
-export const COMPACTION_REQUEST_OUTPUT_TOKENS = 16_384;
 const SMALL_WINDOW_FLOOR_TOKENS = 20_000;
 
 export class SummaryPromptFitError extends Error {
@@ -39,8 +38,8 @@ export function compactionBudget(
   const policyTokens = Math.max(SMALL_WINDOW_FLOOR_TOKENS, observedTokens);
   const chars = (fraction: number): number =>
     Math.floor(policyTokens * fraction * COMPACTION_CHARS_PER_TOKEN);
-  const summaryTargetTokens = Math.max(3_072, Math.floor(policyTokens * 0.04));
-  const summaryCeilingTokens = Math.max(summaryTargetTokens, Math.floor(policyTokens * 0.1));
+  const summaryTargetTokens = Math.max(3_072, Math.floor(policyTokens * 0.06));
+  const summaryCeilingTokens = Math.max(summaryTargetTokens, Math.floor(policyTokens * 0.12));
   const sourceByPolicy = chars(0.8);
   // Leave the complete replacement allowance, reasoning reserve, and request margin.
   const sourceByModel =
@@ -60,10 +59,10 @@ export function compactionBudget(
     sourceMaxChars: Math.max(24_000, Math.min(sourceByPolicy, sourceByModel)),
     summaryTargetTokens,
     summaryCeilingTokens,
-    summaryCeilingChars: Math.max(12_000, chars(0.1)),
+    summaryCeilingChars: Math.max(12_000, chars(0.12)),
     tailMaxChars: chars(0.015),
     hostMaxChars: Math.max(6_000, chars(0.035)),
-    replacementMaxChars: Math.max(12_000, chars(0.1)),
+    replacementMaxChars: Math.max(12_000, chars(0.12)),
   };
 }
 
@@ -76,10 +75,10 @@ export interface OutputPlan {
 
 /**
  * Plans one request's output. Thinking and prose share `max_tokens`, so a model
- * with a configured reserve gets visible + reserve (PromptRun adds the reserve),
- * and a model with no reserve gets the whole provider cap because its thinking
- * is unbounded. Returns undefined when the provider cap cannot hold the reserve
- * plus a useful answer.
+ * with a configured reserve gets visible + reserve (PromptRun adds the reserve).
+ * An unbounded-thinking model is still limited to the visible allowance; an
+ * incomplete response fails instead of inviting an oversize replacement.
+ * Returns undefined when the provider cap cannot hold a useful answer.
  */
 export function planOutput(
   visibleTokens: number,
@@ -94,9 +93,8 @@ export function planOutput(
       : undefined;
   }
   if (providerCap > 0) {
-    return providerCap >= 128 && visibleTokens >= 128
-      ? { outputTokens: providerCap, requestCap: providerCap }
-      : undefined;
+    const outputTokens = Math.min(visibleTokens, providerCap);
+    return outputTokens >= 128 ? { outputTokens, requestCap: outputTokens } : undefined;
   }
   return visibleTokens >= 128
     ? { outputTokens: visibleTokens, requestCap: visibleTokens }

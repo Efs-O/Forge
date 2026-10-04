@@ -52,8 +52,8 @@ export interface PromptRunContext {
  * recall against the agent persona's 0.81, with zero fabricated paths and no
  * run-to-run variance (docs/plans/COMPACTION_SUMMARIZER_REQUEST_PLAN.md).
  *
- * There is deliberately no `disableThinking`: the same measurement put thinking
- * at ~0.40 recall on this task. Do not add one.
+ * Compaction can choose low reasoning for this isolated request without
+ * changing the model's normal coding effort.
  */
 export interface PromptRunOptions {
   /** Model to serve this run. Defaults to `config.active_model`. */
@@ -73,6 +73,8 @@ export interface PromptRunOptions {
   alwaysStripThinking?: boolean;
   /** Require an explicit stop finish before returning generated prose. */
   requireComplete?: boolean;
+  /** Per-request reasoning level; leaves the model's configured default intact. */
+  reasoningEffort?: ChatCompletionRequest['reasoning_effort'];
   /** Already-held backend for host-owned non-evicting runs. */
   backend?: BackendController;
   /** Narrow, caller-owned tools for an isolated prompt. */
@@ -223,6 +225,9 @@ export async function runPromptToMarkdown(
                 options.strictOutputTokens,
               ),
             }
+          : {}),
+        ...(options.reasoningEffort !== undefined
+          ? { reasoning_effort: options.reasoningEffort }
           : {}),
         ...(options.contactTools && options.dispatchContactTool
           ? { tools: [...options.contactTools] }
