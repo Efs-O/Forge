@@ -8,7 +8,10 @@ type TelegramCall = (
   body: Record<string, unknown>,
   signal?: AbortSignal,
 ) => Promise<unknown>;
-type TextOrVoiceEvent = Extract<RemoteInboundEvent, { kind: 'text' | 'voice' }>;
+type TextOrVoiceEvent = Extract<
+  RemoteInboundEvent,
+  { kind: 'text' | 'voice' | 'unsupported_media' }
+>;
 
 export interface TelegramPollingDependencies {
   call: TelegramCall;
@@ -107,7 +110,13 @@ export async function pollTelegramUpdates(
         retryingUpdateId = undefined;
         retryAttempts = 0;
       }
-      if (event && (event.kind === 'text' || event.kind === 'voice')) {
+      // A rejection for an unsupported media type is the whole point of that
+      // update, so it goes through the same acknowledgement path as a text or
+      // voice rejection and gets armed for transient deletion.
+      if (
+        event &&
+        (event.kind === 'text' || event.kind === 'voice' || event.kind === 'unsupported_media')
+      ) {
         await dependencies.acknowledge(event, disposition, signal);
       }
       if (update.callback_query) {

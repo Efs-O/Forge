@@ -59,6 +59,31 @@ export const TelegramUpdateSchema = z.object({
         .optional(),
       /** An explicit reply always wins over the recording-window heuristic. */
       reply_to_message: z.object({ message_id: z.number().int() }).optional(),
+      /**
+       * Media Forge does not handle, named explicitly so their presence is
+       * detectable. Zod strips unknown keys, so a field absent from this schema
+       * is invisible — which is exactly how every one of these used to be
+       * dropped silently while the cursor still advanced. `contact` is the
+       * shared-contact attachment, not the sender's identity.
+       */
+      live_photo: z.object({ file_id: z.string() }).optional(),
+      video: z.object({ file_id: z.string() }).optional(),
+      video_note: z.object({ file_id: z.string() }).optional(),
+      animation: z.object({ file_id: z.string() }).optional(),
+      sticker: z.object({ file_id: z.string() }).optional(),
+      audio: z.object({ file_id: z.string() }).optional(),
+      location: z.object({ latitude: z.number(), longitude: z.number() }).optional(),
+      contact: z
+        .object({
+          phone_number: z.string(),
+          first_name: z.string(),
+          last_name: z.string().optional(),
+          user_id: z.number().int().optional(),
+        })
+        .optional(),
+      poll: z
+        .object({ poll_id: z.string().optional(), question: z.string().optional() })
+        .optional(),
       chat: z.object({
         id: z.union([z.number(), z.string()]),
         type: z.string(),
@@ -131,6 +156,14 @@ export function telegramChatType(value: string): RemoteInboundEvent['chatType'] 
  * than letting each become its own queued request. A single photo with no group
  * id is NOT an album and keeps flowing through `telegramUpdateToEvent`
  * untouched, so this helper never changes single-photo behaviour.
+ *
+ * A message that also carries unsupported media is declined, even when it has a
+ * `media_group_id`. `TelegramPolling` asks the album coordinator before it asks
+ * the mapper, so anything accepted here never reaches the `unsupported_media`
+ * branch — and Telegram's own `live_photo` sets `photo` alongside it for
+ * backward compatibility, which would otherwise let a live photo in an album be
+ * admitted as an ordinary still image while a lone live photo gets the notice.
+ * Declining hands the update to `telegramUpdateToEvent`, which rejects it.
  */
 export function albumPhotoFromUpdate(
   update: z.infer<typeof TelegramUpdateSchema>,
@@ -138,13 +171,81 @@ export function albumPhotoFromUpdate(
   const message = update.message;
   const photo = message?.photo?.at(-1);
   if (!message?.from || !photo || !message.media_group_id) return undefined;
+  if (unsupportedUserMedia(message)) return undefined;
   return { name: 'telegram-photo.jpg', mediaType: 'image/jpeg', providerFileId: photo.file_id };
+}
+
+/**
+ * The user media Forge cannot handle, in the order they are checked. Ordered
+ * and closed rather than a free string: the name is echoed back to the sender,
+ * and a bounded set is what keeps the notice honest about what the transport
+ * can actually receive.
+ */
+const UNSUPPORTED_USER_MEDIA = [
+  ['live_photo', 'live_photo'],
+  ['video', 'video'],
+  ['video_note', 'video_note'],
+  ['animation', 'animation'],
+  ['sticker', 'sticker'],
+  ['audio', 'audio'],
+  ['location', 'location'],
+  ['contact', 'contact'],
+  ['poll', 'poll'],
+] as const satisfies ReadonlyArray<readonly [string, RemoteUnsupportedMediaEvent['mediaType']]>;
+
+export type RemoteUnsupportedMediaEvent = Extract<
+  RemoteInboundEvent,
+  { kind: 'unsupported_media' }
+>;
+
+/**
+ * Which unhandled media a message carries, or `undefined` if it carries none.
+ *
+ * Deliberately keyed off the named fields only: a service message
+ * (`new_chat_members`, `pinned_message`, a giveaway) sets none of them, so it
+ * cannot be mislabeled as media the user should be told about, and an ordinary
+ * empty message is not media either.
+ *
+ * Also consulted by `albumPhotoFromUpdate`, because the album path is asked
+ * before the mapper and `live_photo` arrives with `photo` set beside it.
+ */
+function unsupportedUserMedia(
+  message: NonNullable<z.infer<typeof TelegramUpdateSchema>['message']>,
+): RemoteUnsupportedMediaEvent['mediaType'] | undefined {
+  for (const [field, mediaType] of UNSUPPORTED_USER_MEDIA) {
+    if (message[field as keyof typeof message] !== undefined) return mediaType;
+  }
+  return undefined;
 }
 
 export function telegramUpdateToEvent(
   update: z.infer<typeof TelegramUpdateSchema>,
 ): RemoteInboundEvent | undefined {
   const message = update.message;
+  /**
+   * Unsupported media is checked before the text/caption branch on purpose.
+   * A video with a caption would otherwise satisfy the text condition and be
+   * admitted as a text-only prompt, silently discarding the media the user
+   * actually sent; the sender would then watch Forge answer a question about a
+   * video it never saw. `from` is required so a channel post or service message
+   * cannot produce a rejection aimed at a user who is not there.
+   */
+  if (message && message.from) {
+    const mediaType = unsupportedUserMedia(message);
+    if (mediaType) {
+      return {
+        channel: 'telegram',
+        kind: 'unsupported_media',
+        mediaType,
+        providerMessageId: String(message.message_id),
+        senderId: String(message.from.id),
+        chatId: String(message.chat.id),
+        chatType: telegramChatType(message.chat.type),
+        receivedAt: message.date * 1000,
+        ...(message.chat.title ? { chatTitle: message.chat.title } : {}),
+      };
+    }
+  }
   // Before the text branch: a voice note carries no `text`, so it would
   // otherwise fall through and be dropped while the cursor still advanced.
   if (message && message.from && message.voice) {

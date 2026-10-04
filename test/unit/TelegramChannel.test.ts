@@ -511,6 +511,129 @@ describe('TelegramChannel', () => {
     ]);
   });
 
+  /**
+   * Phase 3 end to end: an unsupported media update must produce a visible
+   * private-chat notice that is armed for transient deletion, and the cursor
+   * must still advance (the rejection is the disposition — there is nothing to
+   * retry forever).
+   */
+  it('answers an unsupported media type with an ephemeral notice', async () => {
+    const abort = new AbortController();
+    let delivered = false;
+    const sent: Array<Record<string, unknown>> = [];
+    const armed: Array<{ chatId: string; messageIds: string[]; kind: string }> = [];
+    const setCursor = vi.fn(async () => undefined);
+    const channel = new TelegramChannel({
+      token: 'secret-token',
+      getCursor: () => undefined,
+      setCursor,
+      fetch: (async (url: string | URL | Request, init?: RequestInit) => {
+        const method = String(url).split('/').at(-1);
+        if (method === 'setMyCommands') return response(true);
+        if (method === 'sendMessage') {
+          sent.push(JSON.parse(String(init?.body)) as Record<string, unknown>);
+          abort.abort();
+          return response({ message_id: 12 });
+        }
+        if (method === 'getUpdates' && !delivered) {
+          delivered = true;
+          return response([
+            {
+              update_id: 95,
+              message: {
+                message_id: 8,
+                date: 1_700_000_000,
+                chat: { id: 99, type: 'private' },
+                from: { id: 123 },
+                live_photo: { file_id: 'live-1' },
+              },
+            },
+          ]);
+        }
+        return new Promise<Response>((_resolve, reject) => {
+          init?.signal?.addEventListener('abort', () => reject(new Error('aborted')), {
+            once: true,
+          });
+        });
+      }) as typeof fetch,
+    });
+    const seen: RemoteInboundEvent[] = [];
+    channel.setEphemeralMessageHandler((chatId, messageIds, kind) => {
+      armed.push({ chatId, messageIds, kind });
+    });
+    channel.onEvent(async (event) => {
+      seen.push(event);
+      return {
+        kind: 'rejected',
+        reason: "This media type isn't supported yet: live_photo.",
+        ephemeral: true,
+      };
+    });
+
+    await channel.start(abort.signal);
+    await vi.waitFor(() => expect(sent).toHaveLength(1));
+    expect(seen[0]).toMatchObject({ kind: 'unsupported_media', mediaType: 'live_photo' });
+    expect(sent[0]).toMatchObject({
+      chat_id: '99',
+      // The apostrophe arrives HTML-escaped: the notice is sent with
+      // parse_mode HTML, so any quote in a reason must be escaped or it would
+      // break the markup.
+      text: "<blockquote>ℹ️ Forge: This media type isn&#39;t supported yet: live_photo.</blockquote>",
+      parse_mode: 'HTML',
+    });
+    expect(armed).toEqual([{ chatId: '99', messageIds: ['12'], kind: 'transient' }]);
+  });
+
+  /**
+   * The cursor must still advance for a rejected unsupported-media update: the
+   * notice is the final disposition, so redelivering it would re-notify forever.
+   */
+  it('advances the cursor past a rejected unsupported media update', async () => {
+    const abort = new AbortController();
+    let polls = 0;
+    const setCursor = vi.fn(async () => undefined);
+    const channel = new TelegramChannel({
+      token: 'secret-token',
+      getCursor: () => undefined,
+      setCursor,
+      fetch: (async (url: string | URL | Request, init?: RequestInit) => {
+        const method = String(url).split('/').at(-1);
+        if (method === 'setMyCommands') return response(true);
+        if (method === 'sendMessage') return response({ message_id: 1 });
+        if (method === 'getUpdates' && polls++ === 0) {
+          return response([
+            {
+              update_id: 96,
+              message: {
+                message_id: 9,
+                date: 1_700_000_000,
+                chat: { id: 99, type: 'private' },
+                from: { id: 123 },
+                sticker: { file_id: 'sticker-1' },
+              },
+            },
+          ]);
+        }
+        return new Promise<Response>((_resolve, reject) => {
+          init?.signal?.addEventListener('abort', () => reject(new Error('aborted')), {
+            once: true,
+          });
+        });
+      }) as typeof fetch,
+    });
+    channel.onEvent(async () => ({
+      kind: 'rejected',
+      reason: "This media type isn't supported yet: sticker.",
+      ephemeral: true,
+    }));
+
+    await channel.start(abort.signal);
+    await vi.waitFor(() =>
+      expect(setCursor).toHaveBeenCalledWith('telegram:update-offset', '97'),
+    );
+    abort.abort();
+  });
+
   it('sends, edits, and deletes paginated selection messages', async () => {
     const calls: Array<{ method: string; body: Record<string, unknown> }> = [];
     const channel = new TelegramChannel({
@@ -1035,6 +1158,28 @@ describe('TelegramChannel photo albums', () => {
   }
 
   /**
+   * A live photo inside an album, shaped the way Telegram actually sends it:
+   * `live_photo` set AND `photo` set for backward compatibility, sharing the
+   * album's `media_group_id`. That combination is what used to slip past the
+   * unsupported-media branch, because the album coordinator is consulted first
+   * and it keyed only off `photo`.
+   */
+  function livePhotoUpdate(updateId: number, messageId: number, groupId: string) {
+    return {
+      update_id: updateId,
+      message: {
+        message_id: messageId,
+        date: 1_700_000_000,
+        chat: { id: 99, type: 'private' },
+        from: { id: 123 },
+        live_photo: { file_id: `live-${messageId}` },
+        photo: [{ file_id: `still-${messageId}`, file_size: 100 }],
+        ...(groupId ? { media_group_id: groupId } : {}),
+      },
+    };
+  }
+
+  /**
    * Feeds `batches` one `getUpdates` result at a time (in order), returns one
    * empty result so a buffered album can settle, then hangs the long poll.
    * Captures the events the handler sees and every `sendMessage` body the
@@ -1050,7 +1195,11 @@ describe('TelegramChannel photo albums', () => {
     const events: RemoteInboundEvent[] = [];
     const sent: Array<Record<string, unknown>> = [];
     const armed: Array<{ chatId: string; messageIds: string[]; kind: string }> = [];
-    const setCursor = vi.fn(async () => undefined);
+    /** Ordered record of what happened, to prove disposition-before-cursor. */
+    const log: string[] = [];
+    const setCursor = vi.fn(async () => {
+      log.push('setCursor');
+    });
     const channel = new TelegramChannel({
       token: 'secret-token',
       getCursor: () => undefined,
@@ -1059,6 +1208,7 @@ describe('TelegramChannel photo albums', () => {
         const method = String(url).split('/').at(-1)!;
         if (method === 'setMyCommands') return response(true);
         if (method === 'sendMessage') {
+          log.push('sendMessage');
           sent.push(JSON.parse(String(init?.body)) as Record<string, unknown>);
           return response({ message_id: 1 });
         }
@@ -1086,7 +1236,7 @@ describe('TelegramChannel photo albums', () => {
       return handler(event);
     });
     await channel.start(abort.signal);
-    return { abort, events, sent, setCursor, armed };
+    return { abort, events, sent, setCursor, armed, log };
   }
 
   it('maps a single non-album photo to one event (existing behaviour)', async () => {
@@ -1227,6 +1377,75 @@ describe('TelegramChannel photo albums', () => {
     // The cursor commits only after the combined event is handled.
     expect(h.setCursor).toHaveBeenCalledTimes(1);
     expect(h.setCursor).toHaveBeenLastCalledWith('telegram:update-offset', '4');
+  });
+
+  /**
+   * Phase 3 blocker, through the real polling + album path rather than the
+   * mapper alone. Telegram sends a live photo with `photo` set beside
+   * `live_photo` for backward compatibility, and an album update is offered to
+   * the album coordinator BEFORE it is mapped. If the coordinator accepted this
+   * update, the live photo would be admitted as an ordinary still image and the
+   * unsupported_media branch would never run — so a live photo sent alone would
+   * get a notice while the same one sent in an album would silently succeed.
+   */
+  it('rejects an album live_photo as unsupported media instead of a photo attachment', async () => {
+    const h = await runAlbums([[livePhotoUpdate(1, 1, 'g1')]], async (event) =>
+      event.kind === 'unsupported_media'
+        ? {
+            kind: 'rejected' as const,
+            reason: "This media type isn't supported yet: live_photo.",
+            ephemeral: true,
+          }
+        : ({ kind: 'accepted' as const, requestId: 'r' }),
+    );
+    await vi.waitFor(() => expect(h.events).toHaveLength(1));
+    await vi.waitFor(() => expect(h.sent).toHaveLength(1));
+    h.abort.abort();
+    expect(h.events[0]).toMatchObject({ kind: 'unsupported_media', mediaType: 'live_photo' });
+    // Not buffered as an album attachment: nothing reached the handler as text.
+    expect(h.events.some((event) => event.kind === 'text')).toBe(false);
+    expect(String(h.sent[0]!.text)).toContain('live_photo');
+    expect(h.armed).toEqual([{ chatId: '99', messageIds: ['1'], kind: 'transient' }]);
+    // Disposition before cursor: the notice went out before the offset advanced.
+    expect(h.log).toEqual(['sendMessage', 'setCursor']);
+    expect(h.setCursor).toHaveBeenLastCalledWith('telegram:update-offset', '2');
+  });
+
+  /**
+   * Documented limit: a mixed album is not rejected as a whole. Ordinary photo
+   * members keep working as attachments, and the live-photo member gets its own
+   * notice. The album is therefore split around the unsupported member rather
+   * than becoming one prompt with the live photo's still frame in it.
+   */
+  it('handles ordinary album photos while rejecting the live-photo member separately', async () => {
+    const h = await runAlbums(
+      [[photoUpdate(1, 1, 'f1', 'g1'), livePhotoUpdate(2, 2, 'g1'), photoUpdate(3, 3, 'f3', 'g1')]],
+      async (event) =>
+        event.kind === 'unsupported_media'
+          ? {
+              kind: 'rejected' as const,
+              reason: "This media type isn't supported yet: live_photo.",
+              ephemeral: true,
+            }
+          : ({ kind: 'accepted' as const, requestId: 'r' }),
+    );
+    await vi.waitFor(() => expect(h.events).toHaveLength(3));
+    h.abort.abort();
+    expect(h.events[0]).toMatchObject({
+      kind: 'text',
+      providerMessageId: '1',
+      attachments: [{ providerFileId: 'f1' }],
+    });
+    expect(h.events[1]).toMatchObject({ kind: 'unsupported_media', mediaType: 'live_photo' });
+    expect(h.events[2]).toMatchObject({
+      kind: 'text',
+      providerMessageId: '3',
+      attachments: [{ providerFileId: 'f3' }],
+    });
+    // Only the live-photo member produced a notice, and every update disposed
+    // before its cursor commit.
+    expect(h.sent).toHaveLength(1);
+    expect(h.log).toEqual(['setCursor', 'sendMessage', 'setCursor', 'setCursor']);
   });
 
   it('merges an album split across poll batches', async () => {

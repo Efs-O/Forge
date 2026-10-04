@@ -305,6 +305,14 @@ export class RemoteController {
         }
       );
     }
+    if (event.kind === 'unsupported_media') {
+      // An explicit answer beats silence. The old behaviour was to drop the
+      // update while the cursor advanced, so sending a video looked like Forge
+      // being offline. The rejection is ephemeral: it is a notice about a
+      // message that is already gone from the conversation's point of view, and
+      // `ephemeral: true` is what arms its deletion in the acknowledgement path.
+      return ephemeralRejection(`This media type isn't supported yet: ${event.mediaType}.`);
+    }
     if (event.kind === 'voice') {
       if (!this.voice) {
         return ephemeralRejection('voice input is disabled (set voice.enabled in config)');

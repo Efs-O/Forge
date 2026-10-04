@@ -66,6 +66,30 @@ export const RemoteInboundEventSchema = z.discriminatedUnion('kind', [
     action: z.enum(['approve', 'deny']),
     correlationId: z.string().min(1).max(256),
   }),
+  /**
+   * A media type Forge does not handle — a video, sticker, live photo, poll.
+   *
+   * Before this, such a message matched no branch of the Telegram mapping, so
+   * it produced no event while the polling cursor still advanced: the update
+   * was consumed and the sender saw nothing (the same failure shape the voice
+   * note had before it was mapped). The type is a closed enum rather than a
+   * free string because it is echoed back to the sender in the rejection text,
+   * and only names the transport can actually produce belong there.
+   */
+  InboundBaseSchema.extend({
+    kind: z.literal('unsupported_media'),
+    mediaType: z.enum([
+      'live_photo',
+      'video',
+      'video_note',
+      'animation',
+      'sticker',
+      'audio',
+      'location',
+      'contact',
+      'poll',
+    ]),
+  }),
   InboundBaseSchema.extend({
     kind: z.literal('contact_action'),
     action: z.enum(['send', 'cancel']),

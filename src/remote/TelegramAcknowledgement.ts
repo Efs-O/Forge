@@ -1,6 +1,18 @@
 import type { EphemeralKind, RemoteInboundDisposition, RemoteInboundEvent } from './types';
 
-type TelegramTextOrVoiceEvent = Extract<RemoteInboundEvent, { kind: 'text' | 'voice' }>;
+/**
+ * Which inbound kinds get a disposition notice.
+ *
+ * `unsupported_media` belongs here: a rejection computed for it would otherwise
+ * be discarded by the transport and the sender would still see nothing, which
+ * is the exact silence Phase 3 exists to remove. `queued` never happens for it
+ * (it admits no prompt), so only the rejection arm of the function can fire.
+ */
+type TelegramNoticeEvent = Extract<
+  RemoteInboundEvent,
+  { kind: 'text' | 'voice' | 'unsupported_media' }
+>;
+type TelegramTextOrVoiceEvent = TelegramNoticeEvent;
 type SendTelegramText = (
   chatId: string,
   text: string,
@@ -32,6 +44,8 @@ export async function acknowledgeTelegramDisposition(
   if (event.chatType !== 'private') return;
   let text: string | undefined;
   if (disposition.kind === 'queued') {
+    // Only a text event can be queued, so the attachment check stays guarded
+    // even though the parameter now admits other kinds.
     const hasAttachments = event.kind === 'text' && (event.attachments?.length ?? 0) > 0;
     text = hasAttachments
       ? `Forge: got it — attachments wait, so this runs when the current turn ends. /drop ${disposition.position} to cancel.`

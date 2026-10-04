@@ -984,6 +984,122 @@ describe('RemoteController with fake channel', () => {
   });
 });
 
+describe('unsupported inbound media (Phase 3)', () => {
+  /** Minimal host for handler-level tests, which never start a turn. */
+  function hostFacade(): ForgeHostFacade {
+    return {
+      createConversation: vi.fn(async () => ({
+        id: 'c1',
+        title: 'Remote',
+        activeModel: 'local',
+        archived: false,
+      })),
+      restoreConversation: vi.fn(),
+      send: vi.fn(async () => ({ kind: 'completed' as const, finalText: 'x' })),
+      cancel: vi.fn(),
+      addApprovalSink: () => ({ dispose: () => undefined }),
+      addQuestionSink: () => ({ dispose: () => undefined }),
+      answerQuestion: () => false,
+      status: () => ({
+        activeConversationId: 'c1',
+        conversations: [],
+        requestChains: [],
+        streamingConversationIds: [],
+      }),
+    } as unknown as ForgeHostFacade;
+  }
+
+  async function fixture(ownerId: string | undefined) {
+    const state = await store();
+    const secrets = new MemorySecrets();
+    if (ownerId) secrets.values.set('forge.remote.fake.ownerId', ownerId);
+    const auth = new RemoteAuth(secrets as unknown as vscode.SecretStorage);
+    const channel = new FakeRemoteChannel();
+    const host = hostFacade();
+    const controller = new RemoteController(channel, state, auth, host, {
+      workspaceId: 'workspace',
+      queueLimit: 5,
+      maxMessageChars: 12_000,
+      rateLimitPerMinute: 30,
+    });
+    await controller.start();
+    return { state, channel, auth, host, controller };
+  }
+
+  /**
+   * Phase 3: an unsupported attachment gets an explicit, ephemeral answer
+   * instead of silence. `ephemeral: true` is the flag the Telegram
+   * acknowledgement path needs to arm the notice for deletion.
+   */
+  it('rejects an unsupported media type with an ephemeral notice naming it', async () => {
+    const { state, channel, auth, host, controller } = await fixture(undefined);
+    const code = auth.beginPairing('fake');
+    const base = {
+      channel: 'fake' as const,
+      senderId: 'owner-stable-id',
+      chatId: 'private-chat',
+      chatType: 'private' as const,
+      receivedAt: Date.now(),
+    };
+    await expect(
+      channel.emit({ ...base, kind: 'text', providerMessageId: 'pair', text: `/pair ${code}` }),
+    ).resolves.toEqual({ kind: 'handled' });
+
+    await expect(
+      channel.emit({
+        ...base,
+        kind: 'unsupported_media',
+        mediaType: 'video',
+        providerMessageId: 'vid',
+      }),
+    ).resolves.toEqual({
+      kind: 'rejected',
+      reason: "This media type isn't supported yet: video.",
+      ephemeral: true,
+    });
+    // Nothing was admitted: the notice is the whole response.
+    expect(state.queued('c1')).toHaveLength(0);
+    expect(host.send).not.toHaveBeenCalled();
+    await controller.stop();
+  });
+
+  /** Auth comes first: a stranger must not learn anything about media handling. */
+  it('holds an unsupported media event behind the auth gate', async () => {
+    const { channel, controller } = await fixture('someone-else');
+    await expect(
+      channel.emit({
+        channel: 'fake',
+        kind: 'unsupported_media',
+        mediaType: 'sticker',
+        providerMessageId: 'stick',
+        senderId: 'stranger',
+        chatId: 'private-chat',
+        chatType: 'private',
+        receivedAt: Date.now(),
+      }),
+    ).resolves.toMatchObject({ kind: 'rejected', reason: 'sender is not paired' });
+    await controller.stop();
+  });
+
+  /** A group's unsupported media stays "private chats only", as for any event. */
+  it('refuses unsupported media in a group chat', async () => {
+    const { channel, controller } = await fixture('owner');
+    await expect(
+      channel.emit({
+        channel: 'fake',
+        kind: 'unsupported_media',
+        mediaType: 'poll',
+        providerMessageId: 'poll-1',
+        senderId: 'owner',
+        chatId: 'group-chat',
+        chatType: 'group',
+        receivedAt: Date.now(),
+      }),
+    ).resolves.toMatchObject({ kind: 'rejected', reason: 'private chats only' });
+    await controller.stop();
+  });
+});
+
 describe('remote compaction progress notifications', () => {
   function authFixture(): RemoteAuth {
     const secrets = new MemorySecrets();
