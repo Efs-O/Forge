@@ -21,6 +21,8 @@ import type { ChatMessage } from '../../src/llm/types';
 import type { ConversationRuntime } from '../../src/sidebar/sessionTypes';
 import type { HostToWebview } from '../../src/sidebar/messageBridge';
 import type { CompactionLogEntry } from '../../src/sidebar/SessionLogger';
+import type { PromptRunOptions } from '../../src/sidebar/PromptRun';
+import { COMPACTION_REQUEST_OUTPUT_TOKENS } from '../../src/sidebar/compactionBudget';
 import {
   activateLazyGroup,
   isLazyGroupActive,
@@ -36,6 +38,7 @@ interface Harness {
   posted: HostToWebview[];
   busyDuringSummary: boolean;
   released: boolean;
+  promptOptions?: PromptRunOptions;
 }
 
 function harness(
@@ -65,8 +68,9 @@ function harness(
         state.released = true;
       };
     },
-    runPromptToMarkdown: async () => {
+    runPromptToMarkdown: async (_text, _conversationId, options) => {
       state.busyDuringSummary = busy;
+      state.promptOptions = options;
       return summarize({ released: () => state.released });
     },
   };
@@ -296,6 +300,22 @@ describe('runCompaction repo snapshot', () => {
     { role: 'assistant', content: 'did the first task' },
     { role: 'user', content: 'second task' },
   ];
+
+  it('uses the 16K request cap while preserving the summary target and model reasoning', async () => {
+    const c = conv([...messages]);
+    c.active_model = 'strata';
+    const h = harness(c, async () => long('summary'));
+
+    await expect(runCompaction(h.deps, c.id, { auto: true })).resolves.toBe('compacted');
+
+    expect(COMPACTION_REQUEST_OUTPUT_TOKENS).toBe(16_384);
+    expect(h.promptOptions).toMatchObject({
+      modelName: 'strata',
+      outputTokens: 16_384,
+      strictOutputTokens: true,
+      alwaysStripThinking: true,
+    });
+  });
 
   it('keeps the current working-tree snapshot outside the model summary', async () => {
     const c = conv([...messages]);

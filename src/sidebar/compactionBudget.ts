@@ -4,6 +4,7 @@ import { CHARS_PER_TOKEN } from '../util/contextBudget';
 
 /** Pessimistic conversion for a proposal that has not been tokenized yet. */
 export const COMPACTION_CHARS_PER_TOKEN = 2.5;
+export const COMPACTION_REQUEST_OUTPUT_TOKENS = 16_384;
 const SMALL_WINDOW_FLOOR_TOKENS = 20_000;
 
 export interface CompactionBudget {
@@ -34,13 +35,13 @@ export function compactionBudget(
   const summaryTargetTokens = Math.max(3_072, Math.floor(policyTokens * 0.04));
   const summaryCeilingTokens = Math.max(summaryTargetTokens, Math.floor(policyTokens * 0.05));
   const sourceByPolicy = chars(0.8);
-  // Leave visible output, request scaffolding and a margin in the target slot.
+  // Leave the full generation ceiling, reasoning reserve, and request margin.
   const sourceByModel =
     modelMaxTokens > 0
       ? Math.max(
           0,
           Math.floor(
-            (modelMaxTokens - summaryTargetTokens - reasoningTokens - 6_000) *
+            (modelMaxTokens - COMPACTION_REQUEST_OUTPUT_TOKENS - reasoningTokens - 6_000) *
               COMPACTION_CHARS_PER_TOKEN,
           ),
         )
@@ -72,7 +73,7 @@ export function fitSummaryPrompt(
     const estimatedTokens = Math.ceil(prompt.length / COMPACTION_CHARS_PER_TOKEN);
     if (
       modelMaxTokens <= 0 ||
-      estimatedTokens + budget.summaryTargetTokens + reasoningTokens + 6_000 <= modelMaxTokens
+      estimatedTokens + COMPACTION_REQUEST_OUTPUT_TOKENS + reasoningTokens + 6_000 <= modelMaxTokens
     ) {
       return { prompt, estimatedTokens, sourceMaxChars };
     }

@@ -10,7 +10,12 @@ import * as vscode from 'vscode';
 import type { HostToWebview } from './messageBridge';
 import type { ConversationRuntime } from './sessionTypes';
 import { buildSummaryPrompt, capSummary, isUsableSummary } from './compactionPrompt';
-import { COMPACTION_CHARS_PER_TOKEN, compactionBudget, fitSummaryPrompt } from './compactionBudget';
+import {
+  COMPACTION_CHARS_PER_TOKEN,
+  COMPACTION_REQUEST_OUTPUT_TOKENS,
+  compactionBudget,
+  fitSummaryPrompt,
+} from './compactionBudget';
 import {
   collectRecordedActions,
   mergeRecordedActions,
@@ -352,7 +357,7 @@ async function compactOnce(
       );
       summaryPrompt = fit.prompt;
       log.info(
-        `[compact] budget P=${budget.policyTokens} (${budget.estimated ? 'estimated' : 'reported'}), source~${fit.estimatedTokens} tokens, host~${Math.ceil(hostChars / COMPACTION_CHARS_PER_TOKEN)}, tail~${Math.ceil(tailChars / COMPACTION_CHARS_PER_TOKEN)}, output=${budget.summaryTargetTokens}`,
+        `[compact] budget P=${budget.policyTokens} (${budget.estimated ? 'estimated' : 'reported'}), source~${fit.estimatedTokens} tokens, host~${Math.ceil(hostChars / COMPACTION_CHARS_PER_TOKEN)}, tail~${Math.ceil(tailChars / COMPACTION_CHARS_PER_TOKEN)}, output_cap=${COMPACTION_REQUEST_OUTPUT_TOKENS}, summary_target=${budget.summaryTargetTokens}`,
       );
       summary = await deps.runPromptToMarkdown(summaryPrompt, conv.id, {
         // The conversation's OWN model, not the picker's global default: a
@@ -360,7 +365,7 @@ async function compactOnce(
         // selected elsewhere.
         ...(conv.active_model ? { modelName: conv.active_model } : {}),
         systemPromptTemplate: 'summarize',
-        outputTokens: budget.summaryTargetTokens,
+        outputTokens: COMPACTION_REQUEST_OUTPUT_TOKENS,
         strictOutputTokens: true,
         alwaysStripThinking: true,
       });

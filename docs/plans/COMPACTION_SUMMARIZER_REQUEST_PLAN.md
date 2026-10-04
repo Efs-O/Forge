@@ -613,3 +613,31 @@ writtenFileRecall. Do not adopt on the strength of the dry run alone.
 
 Do not implement any of the three from this document alone. Each needs its arm,
 its three runs, and its numbers written back here.
+
+## Follow-up: 16K compaction output-cap test (2026-10-04)
+
+Thinking stays enabled, consistent with the measured results above. For the
+Strata compaction test, the request output cap is 16,384 tokens while the
+summary's visible target and ceiling remain governed by the existing percentage
+policy. The prompt fitter reserves the full 16,384-token cap, any configured
+reasoning reserve, and the existing 6,000-token margin before sending the
+request. If the source cannot be shortened enough to fit, compaction fails
+without replacing the current context.
+
+This changes no durable-state lifecycle; it only adjusts the budget for the
+existing compaction summary request. Unit coverage is in
+`test/unit/CompactionPolicy.test.ts`, `test/unit/PromptRun.test.ts`, and
+`test/unit/CompactionService.test.ts`. A live Strata run is still needed to
+measure whether 16,384 tokens is enough for the model to finish reasoning and
+write the summary.
+
+## Acceptance criteria
+
+- Strata compaction sends `max_tokens: 16384` and retains its configured
+  `reasoning_effort: xhigh`.
+- Prompt fitting reserves the same output cap plus any configured reasoning
+  reserve and the safety margin within the model context window.
+- The summary target/ceiling and post-compaction conversation state remain
+  unchanged.
+- If the live Strata run still exhausts the cap, the previous conversation
+  context remains intact and the failure is surfaced.

@@ -58,6 +58,14 @@ const config = (): ForgeConfig =>
         api_key_secret: 'cerebras',
         sampling: { max_tokens: 32768 },
       },
+      {
+        name: 'strata',
+        provider: 'openai-compatible',
+        endpoint: 'http://127.0.0.1:8090',
+        api_key_secret: 'strata',
+        reasoning_effort: 'xhigh',
+        sampling: { max_tokens: 32768 },
+      },
     ],
   }) as unknown as ForgeConfig;
 
@@ -169,6 +177,22 @@ describe('runPromptToMarkdown options', () => {
 
     // A cloud model has no --reasoning-budget; 3072 alone was all spent thinking.
     expect(sent.max_tokens).toBe(32768);
+  });
+
+  it('keeps Strata thinking enabled while honoring the strict 16K compaction cap', async () => {
+    const strata: PromptRunContext = {
+      ...ctx(),
+      secrets: { get: async () => 'test-key' } as never,
+    };
+
+    await runPromptToMarkdown(strata, 'summarize', 'c1', {
+      modelName: 'strata',
+      outputTokens: 16_384,
+      strictOutputTokens: true,
+    });
+
+    expect(sent.max_tokens).toBe(16_384);
+    expect(sent.reasoning_effort).toBe('xhigh');
   });
 
   it('names the budget when a reply is all thinking and no answer', async () => {

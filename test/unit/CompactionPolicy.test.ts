@@ -1,5 +1,9 @@
 import { describe, expect, it } from 'vitest';
-import { compactionBudget, fitSummaryPrompt } from '../../src/sidebar/compactionBudget';
+import {
+  COMPACTION_REQUEST_OUTPUT_TOKENS,
+  compactionBudget,
+  fitSummaryPrompt,
+} from '../../src/sidebar/compactionBudget';
 import { buildSummaryPrompt, capSummary } from '../../src/sidebar/compactionPrompt';
 import type { ChatMessage } from '../../src/llm/types';
 
@@ -29,15 +33,18 @@ describe('percentage compaction policy', () => {
       'x'.repeat(sourceChars + 20_000),
     );
     expect(fit.sourceMaxChars).toBeLessThan(budget.sourceMaxChars);
-    expect(fit.estimatedTokens + budget.summaryTargetTokens + 6_000).toBeLessThanOrEqual(150_000);
+    expect(
+      fit.estimatedTokens + COMPACTION_REQUEST_OUTPUT_TOKENS + 6_000,
+    ).toBeLessThanOrEqual(150_000);
   });
 
-  it('reserves the configured thinking budget as well as visible output', () => {
+  it('fits the full 16K request cap, reasoning reserve, and margin in the model window', () => {
     const budget = compactionBudget(170_000, 100_000, 150_000, 8_192);
     const fit = fitSummaryPrompt(budget, 150_000, (sourceChars) => 'x'.repeat(sourceChars), 8_192);
-    expect(fit.estimatedTokens + budget.summaryTargetTokens + 8_192 + 6_000).toBeLessThanOrEqual(
-      150_000,
-    );
+    expect(COMPACTION_REQUEST_OUTPUT_TOKENS).toBe(16_384);
+    expect(
+      fit.estimatedTokens + COMPACTION_REQUEST_OUTPUT_TOKENS + 8_192 + 6_000,
+    ).toBeLessThanOrEqual(150_000);
   });
 
   it('keeps a finding in the middle while omitting routine tool dumps', () => {
