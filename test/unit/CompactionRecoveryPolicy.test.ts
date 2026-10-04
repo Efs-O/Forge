@@ -32,8 +32,10 @@ function setup() {
     postTokenBudget: vi.fn(),
     isStreaming: () => false,
     beginCompaction: () => () => undefined,
-    runPromptToMarkdown: async () =>
-      ++calls === 1 ? 'x'.repeat(9_000) : successfulSummary,
+    runPromptToMarkdown: async () => {
+      if (++calls === 1) throw new Error('provider hiccup');
+      return successfulSummary;
+    },
   };
   return { conversation, calls: () => calls, compact: (midTurn: boolean) =>
     runCompaction(deps, conversation.id, { auto: true, trigger: 'auto', midTurn }) };

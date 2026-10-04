@@ -22,7 +22,7 @@ import type { ConversationRuntime } from '../../src/sidebar/sessionTypes';
 import type { HostToWebview } from '../../src/sidebar/messageBridge';
 import type { CompactionLogEntry } from '../../src/sidebar/SessionLogger';
 import type { PromptRunOptions } from '../../src/sidebar/PromptRun';
-import { COMPACTION_REQUEST_OUTPUT_TOKENS } from '../../src/sidebar/compactionBudget';
+import { CompactionFailure } from '../../src/sidebar/compactionFailure';
 import {
   activateLazyGroup,
   isLazyGroupActive,
@@ -301,20 +301,21 @@ describe('runCompaction repo snapshot', () => {
     { role: 'user', content: 'second task' },
   ];
 
-  it('uses the 16K request cap while preserving the summary target and model reasoning', async () => {
+  it('derives the request cap from the available replacement budget', async () => {
     const c = conv([...messages]);
     c.active_model = 'strata';
     const h = harness(c, async () => long('summary'));
 
     await expect(runCompaction(h.deps, c.id, { auto: true })).resolves.toBe('compacted');
 
-    expect(COMPACTION_REQUEST_OUTPUT_TOKENS).toBe(16_384);
     expect(h.promptOptions).toMatchObject({
       modelName: 'strata',
-      outputTokens: 16_384,
       strictOutputTokens: true,
       alwaysStripThinking: true,
+      requireComplete: true,
     });
+    expect(h.promptOptions?.outputTokens).toBeGreaterThan(0);
+    expect(h.promptOptions?.outputTokens).toBeLessThan(16_384);
   });
 
   it('keeps the current working-tree snapshot outside the model summary', async () => {
@@ -405,25 +406,31 @@ describe('runCompaction after an automatic failure', () => {
     { role: 'user', content: 'second task' },
   ];
 
-  it('retries once after failure, ignores internal nudges, then waits for a visible user message', async () => {
+  it('rearms a transient failure after a cooldown without counting internal nudges', async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date('2026-10-04T12:00:00Z'));
     const c = conv(history());
     let calls = 0;
     const h = harness(c, async () => {
       calls++;
-      return '';
+      if (calls <= 2) throw new Error('temporary provider connection failure');
+      return long('recovered');
     });
 
-    await expect(runCompaction(h.deps, c.id, { auto: true })).resolves.toBe('failed');
-    c.messages.push({ role: 'user', content: 'nudge', internal: true } as ChatMessage);
-    await expect(runCompaction(h.deps, c.id, { auto: true, midTurn: true })).resolves.toBe(
-      'failed',
-    );
-    await expect(runCompaction(h.deps, c.id, { auto: true })).resolves.toBe('skipped');
-    expect(calls).toBe(2);
-
-    c.messages.push({ role: 'assistant', content: 'ok' }, { role: 'user', content: 'go on' });
-    await runCompaction(h.deps, c.id, { auto: true });
-    expect(calls).toBe(3);
+    try {
+      await expect(runCompaction(h.deps, c.id, { auto: true })).resolves.toBe('failed');
+      await expect(runCompaction(h.deps, c.id, { auto: true })).resolves.toBe('failed');
+      c.messages.push({ role: 'user', content: 'nudge', internal: true } as ChatMessage);
+      await expect(runCompaction(h.deps, c.id, { auto: true, midTurn: true })).resolves.toBe(
+        'skipped',
+      );
+      expect(calls).toBe(2);
+      await vi.advanceTimersByTimeAsync(30_000);
+      await expect(runCompaction(h.deps, c.id, { auto: true })).resolves.toBe('compacted');
+      expect(calls).toBe(3);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it('never holds back an explicit /compact', async () => {
@@ -456,7 +463,10 @@ describe('runCompaction recovery after automatic failures', () => {
     let calls = 0;
     const h = harness(c, async () => {
       calls++;
-      return calls === 1 ? 'x'.repeat(9_000) : long('recovered');
+      if (calls === 1) {
+        throw new CompactionFailure('budget-refusal', 'host facts exceed available budget');
+      }
+      return long('recovered');
     });
 
     await expect(runCompaction(h.deps, c.id, { auto: true, trigger: 'auto' })).resolves.toBe(
@@ -469,16 +479,25 @@ describe('runCompaction recovery after automatic failures', () => {
     expect(calls).toBe(3);
   });
 
-  it('bounds repeated deterministic failures to two attempts per visible-user turn', async () => {
+  it('suppresses deterministic refusal until context grows, then permits one bounded retry', async () => {
     const c = conv(recoveryHistory());
     let calls = 0;
     const h = harness(c, async () => {
       calls++;
-      return 'x'.repeat(9_000);
+      throw new CompactionFailure('budget-refusal', 'required facts do not fit');
     });
+    h.deps.compactionMetrics = () => ({ max: 50_000 });
 
-    await runCompaction(h.deps, c.id, { auto: true, trigger: 'auto' });
-    await runCompaction(h.deps, c.id, { auto: true, trigger: 'auto', midTurn: true });
+    await expect(runCompaction(h.deps, c.id, { auto: true, trigger: 'auto' })).resolves.toBe(
+      'failed',
+    );
+    await expect(runCompaction(h.deps, c.id, { auto: true, trigger: 'auto' })).resolves.toBe(
+      'skipped',
+    );
+    expect(calls).toBe(1);
+    c.last_input_tokens = 2_000;
+    await expect(runCompaction(h.deps, c.id, { auto: true, trigger: 'auto', midTurn: true }))
+      .resolves.toBe('failed');
     await expect(runCompaction(h.deps, c.id, { auto: true, trigger: 'auto' })).resolves.toBe(
       'skipped',
     );
@@ -743,7 +762,7 @@ describe('runCompaction', () => {
 
   it('rejects an oversized summary instead of silently cutting task evidence', async () => {
     const c = conv([...base]);
-    const h = harness(c, async () => 'x'.repeat(COMPACTION_SUMMARY_MAX_CHARS + 100));
+    const h = harness(c, async () => 'x'.repeat(13_000));
 
     expect(await runCompaction(h.deps, c.id, { auto: true })).toBe('failed');
     expect(c.compaction).toBeUndefined();

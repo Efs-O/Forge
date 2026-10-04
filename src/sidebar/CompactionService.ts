@@ -11,13 +11,11 @@ import type { HostToWebview } from './messageBridge';
 import type { ConversationRuntime } from './sessionTypes';
 import { runCompactionWithPolicy } from './compactionAttemptPolicy';
 import { compactionRefusalNotice } from './compactionRefusal';
-import { buildSummaryPrompt, capSummary, isUsableSummary } from './compactionPrompt';
-import {
-  COMPACTION_CHARS_PER_TOKEN,
-  COMPACTION_REQUEST_OUTPUT_TOKENS,
-  compactionBudget,
-  fitSummaryPrompt,
-} from './compactionBudget';
+import { capSummary, isUsableSummary } from './compactionPrompt';
+import { COMPACTION_CHARS_PER_TOKEN, compactionBudget } from './compactionBudget';
+import { CompactionFailure, compactionFailureCategory } from './compactionFailure';
+import { summarizeCompaction } from './compactionSummaryRunner';
+import { PromptIncompleteError, type PromptRunOptions } from './PromptRun';
 import {
   collectRecordedActions,
   mergeRecordedActions,
@@ -27,7 +25,6 @@ import {
   collectCompactionUserMessages,
   renderCompactionUserMessages,
 } from './compactionUserContext';
-import type { PromptRunOptions } from './PromptRun';
 import { getLogger } from '../util/logger';
 import { collectLastReply, toolActivityFollowedLastReply } from './compactionLastReply';
 import { selectCompactionSplit } from './compactionSplit';
@@ -61,6 +58,7 @@ export interface CompactionDeps {
     max: number;
     threshold?: number;
     reasoningReserve?: number;
+    outputLimitTokens?: number;
   };
   runPromptToMarkdown: (
     text: string,
@@ -142,6 +140,22 @@ export interface CompactionOptions {
    * flag) and the generationStarted/done posts (which would end its bubble).
    */
   midTurn?: boolean;
+  /** Internal policy signal shared with the attempt hold and durable diagnostics. */
+  onFailureCategory?: (category: import('./compactionFailure').CompactionFailureCategory) => void;
+}
+
+function userText(message: { content: unknown }): string {
+  if (typeof message.content === 'string') return message.content;
+  if (!Array.isArray(message.content)) return '';
+  return message.content
+    .map((part) =>
+      typeof part === 'object' && part !== null && 'text' in part && typeof part.text === 'string'
+        ? part.text
+        : '',
+    )
+    .filter(Boolean)
+    .join('\n')
+    .trim();
 }
 
 async function compactOnce(
@@ -259,6 +273,7 @@ async function compactOnce(
   });
   let summary = '';
   let summaryPrompt = '';
+  let groupsNote = '';
   let repoState = '';
   let outcome: CompactionOutcome = 'failed';
   try {
@@ -283,7 +298,8 @@ async function compactOnce(
         .reduce((sum, message) => sum + messageCostChars(message), 0);
       const hostChars = floorChars - tailChars;
       if (hostChars > budget.hostMaxChars) {
-        throw new Error(
+        throw new CompactionFailure(
+          'budget-refusal',
           `Host-preserved compaction facts need an estimated ${hostChars} characters, above the ${budget.hostMaxChars}-character budget; previous context kept.`,
         );
       }
@@ -296,57 +312,64 @@ async function compactOnce(
           message: compactionRefusalNotice(floorChars, beforeChars),
           conversationId: conv.id,
         });
+        options.onFailureCategory?.('budget-refusal');
         return 'failed';
       }
 
-      // Supply the deterministic ledger to the summarizer as well as pinning it
-      // below. A long tool dump used to hide an already-completed download from
-      // the model that wrote the summary, leaving only an earlier "next" step.
-      const fit = fitSummaryPrompt(
-        budget,
-        modelMax,
-        (sourceMaxChars) =>
-          buildSummaryPrompt(
-            conv.compaction?.summary,
-            split.summarize,
-            recordedActionsText + repoState,
-            userContext,
-            // The agent's own plan, which the summarization request did not carry
-            // before. Supplied as intent, not evidence — see planSnapshotBlock.
-            conv.plan?.items,
-            { ...budget, sourceMaxChars },
-          ),
-        thinkingTokens,
+      groupsNote = lazyGroupSummaryNote(conversationId);
+      const summaryAllowance =
+        Math.min(budget.summaryCeilingChars, budget.replacementMaxChars - floorChars) -
+        (groupsNote?.length ?? 0);
+      const exactPendingAction = [...pending]
+        .reverse()
+        .find((message) => message.role === 'user' && message.internal !== true);
+      const originalRequest = split.summarize.find(
+        (message) => message.role === 'user' && message.internal !== true,
       );
-      summaryPrompt = fit.prompt;
-      log.info(
-        `[compact] budget P=${budget.policyTokens} (${budget.estimated ? 'estimated' : 'reported'}), source~${fit.estimatedTokens} tokens, host~${Math.ceil(hostChars / COMPACTION_CHARS_PER_TOKEN)}, tail~${Math.ceil(tailChars / COMPACTION_CHARS_PER_TOKEN)}, output_cap=${COMPACTION_REQUEST_OUTPUT_TOKENS}, summary_target=${budget.summaryTargetTokens}`,
-      );
-      summary = await deps.runPromptToMarkdown(summaryPrompt, conv.id, {
-        // The conversation's OWN model, not the picker's global default: a
-        // pinned conversation was being summarized by whatever was last
-        // selected elsewhere.
+      const outputLimitTokens = metrics?.outputLimitTokens ?? 0;
+      const summaryRun = await summarizeCompaction({
+        messages: split.summarize,
+        ...(conv.compaction?.summary ? { previousSummary: conv.compaction.summary } : {}),
+        recordedFacts: recordedActionsText + repoState,
+        userContext,
+        ...(conv.plan?.items ? { plan: conv.plan.items } : {}),
+        pinnedFacts: recordedActionsText + repoState + userContext,
+        originalRequest: originalRequest ? userText(originalRequest) : '',
+        exactPendingAction: exactPendingAction ? userText(exactPendingAction) : '',
         ...(conv.active_model ? { modelName: conv.active_model } : {}),
-        systemPromptTemplate: 'summarize',
-        outputTokens: COMPACTION_REQUEST_OUTPUT_TOKENS,
-        strictOutputTokens: true,
-        alwaysStripThinking: true,
+        modelMaxTokens: modelMax,
+        outputLimitTokens,
+        reasoningTokens: thinkingTokens,
+        budget,
+        maximumSummaryChars: summaryAllowance,
+        conversationId: conv.id,
+        runPrompt: deps.runPromptToMarkdown,
       });
+      summaryPrompt = summaryRun.prompt;
+      summary = summaryRun.summary;
+      log.info(
+        `[compact] budget P=${budget.policyTokens} (${budget.estimated ? 'estimated' : 'reported'}), host~${Math.ceil(hostChars / COMPACTION_CHARS_PER_TOKEN)}, tail~${Math.ceil(tailChars / COMPACTION_CHARS_PER_TOKEN)}, output_cap=${summaryRun.outputTokens}, summary_target=${budget.summaryTargetTokens}, method=${summaryRun.method}, calls=${summaryRun.calls}`,
+      );
     } finally {
       release();
       if (!midTurn) deps.post({ type: 'done', finishReason: 'stop', conversationId: conv.id });
     }
 
-    const groupsNote = lazyGroupSummaryNote(conversationId);
     const proposed = groupsNote ? `${summary.trim()}\n\n${groupsNote}` : summary.trim();
-    if (proposed.length > budget.summaryCeilingChars) {
-      throw new Error(
-        `Summary exceeds the estimated ${budget.summaryCeilingChars}-character ceiling; previous context kept.`,
+    const summaryAllowance = Math.min(
+      budget.summaryCeilingChars,
+      budget.replacementMaxChars - compactionWindowChars(conv.messages, candidateWithSummary('')),
+    );
+    if (proposed.length > summaryAllowance) {
+      throw new CompactionFailure(
+        'budget-refusal',
+        `Summary exceeds its ${summaryAllowance}-character allocation within the whole-replacement budget; previous context kept.`,
       );
     }
-    const trimmed = capSummary(proposed, budget.summaryCeilingChars);
+    const trimmed = capSummary(proposed, summaryAllowance);
     if (!isUsableSummary(trimmed)) {
       log.info(`[compact] rejected unusable summary (${trimmed.length} chars)`);
+      options.onFailureCategory?.('invalid-summary');
       void vscode.window.showWarningMessage(
         trimmed
           ? 'Forge: compaction produced no usable summary — context is unchanged.'
@@ -370,7 +393,8 @@ async function compactOnce(
     // The returned summary can be long enough to undo the estimated reduction.
     const afterChars = compactionWindowChars(conv.messages, candidate);
     if (afterChars > budget.replacementMaxChars) {
-      throw new Error(
+      throw new CompactionFailure(
+        'budget-refusal',
         `Replacement context needs an estimated ${afterChars} characters, above its ${budget.replacementMaxChars}-character budget; previous context kept.`,
       );
     }
@@ -383,6 +407,7 @@ async function compactOnce(
         message: compactionRefusalNotice(afterChars, beforeChars),
         conversationId: conv.id,
       });
+      options.onFailureCategory?.('budget-refusal');
       return 'failed';
     }
     log.info(
@@ -395,7 +420,6 @@ async function compactOnce(
     conv.updatedAt = Date.now();
     // Before invalidateExactTokenBudget below: that deletes the very counters
     // this row exists to preserve.
-    const metrics = deps.compactionMetrics?.(conv);
     const usedBefore = reportedContextTokens(conv);
     deps.logCompaction?.(conv, {
       generation,
@@ -435,6 +459,9 @@ async function compactOnce(
     deactivateLazyGroups(conversationId);
     return outcome;
   } catch (err) {
+    const category =
+      err instanceof PromptIncompleteError ? 'incomplete-output' : compactionFailureCategory(err);
+    options.onFailureCategory?.(category);
     deps.post({
       type: 'error',
       message: `Forge: compaction failed — ${(err as Error).message}`,

@@ -66,6 +66,11 @@ overlaps with an existing owner, extend the owner instead.
 | Compaction: cut point, run, resume                   | `src/sidebar/CompactionService.ts`       |
 | Compaction between rounds of a running turn (policy) | `src/sidebar/midTurnCompaction.ts`       |
 | Summary prompt text + summary validation             | `src/sidebar/compactionPrompt.ts`        |
+| Compaction attempt hold/rearm (context growth, timed cooldown) | `src/sidebar/compactionAttemptPolicy.ts` |
+| Compaction failure categories                        | `src/sidebar/compactionFailure.ts`       |
+| One-shot vs staged summary run, output cap           | `src/sidebar/compactionSummaryRunner.ts` |
+| Bounded staged (chunked) compaction                  | `src/sidebar/compactionStaging.ts`       |
+| Compaction budget math, `planOutput`, prompt fit     | `src/sidebar/compactionBudget.ts`        |
 | Applying the compaction window to a request          | `src/sidebar/compactionWindow.ts`        |
 | Host-recorded summary facts (from messages)          | `src/sidebar/compactionLedger.ts`        |
 | Ledger merge, retention cap, omission count          | `src/sidebar/compactionRecordedState.ts` |

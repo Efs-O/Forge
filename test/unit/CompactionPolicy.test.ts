@@ -1,6 +1,5 @@
 import { describe, expect, it } from 'vitest';
 import {
-  COMPACTION_REQUEST_OUTPUT_TOKENS,
   compactionBudget,
   fitSummaryPrompt,
 } from '../../src/sidebar/compactionBudget';
@@ -12,7 +11,7 @@ describe('percentage compaction policy', () => {
     const budget = compactionBudget(170_000, 100_000, 200_000);
     expect(budget.policyTokens).toBe(170_000);
     expect(budget.summaryTargetTokens).toBe(6_800);
-    expect(budget.summaryCeilingTokens).toBe(8_500);
+    expect(budget.summaryCeilingTokens).toBe(17_000);
     expect(budget.tailMaxChars).toBe(6_375);
     expect(budget.replacementMaxChars).toBe(42_500);
     expect(budget.sourceMaxChars).toBe(340_000);
@@ -23,7 +22,7 @@ describe('percentage compaction policy', () => {
     const budget = compactionBudget(0, 500, 200_000);
     expect(budget.estimated).toBe(true);
     expect(budget.policyTokens).toBe(20_000);
-    expect(budget.summaryCeilingChars).toBe(8_000);
+    expect(budget.summaryCeilingChars).toBe(12_000);
     expect(budget.sourceMaxChars).toBeGreaterThan(24_000);
   });
 
@@ -33,18 +32,22 @@ describe('percentage compaction policy', () => {
       'x'.repeat(sourceChars + 20_000),
     );
     expect(fit.sourceMaxChars).toBeLessThan(budget.sourceMaxChars);
-    expect(
-      fit.estimatedTokens + COMPACTION_REQUEST_OUTPUT_TOKENS + 6_000,
-    ).toBeLessThanOrEqual(150_000);
+    expect(fit.estimatedTokens + budget.summaryCeilingTokens + 6_000).toBeLessThanOrEqual(
+      150_000,
+    );
   });
 
-  it('fits the full 16K request cap, reasoning reserve, and margin in the model window', () => {
+  it('fits the dynamic output allowance, reasoning reserve, and margin in the model window', () => {
     const budget = compactionBudget(170_000, 100_000, 150_000, 8_192);
-    const fit = fitSummaryPrompt(budget, 150_000, (sourceChars) => 'x'.repeat(sourceChars), 8_192);
-    expect(COMPACTION_REQUEST_OUTPUT_TOKENS).toBe(16_384);
-    expect(
-      fit.estimatedTokens + COMPACTION_REQUEST_OUTPUT_TOKENS + 8_192 + 6_000,
-    ).toBeLessThanOrEqual(150_000);
+    const outputTokens = Math.floor(7_000 / 2.5);
+    const fit = fitSummaryPrompt(
+      budget,
+      150_000,
+      (sourceChars) => 'x'.repeat(sourceChars),
+      8_192,
+      outputTokens,
+    );
+    expect(fit.estimatedTokens + outputTokens + 8_192 + 6_000).toBeLessThanOrEqual(150_000);
   });
 
   it('keeps a finding in the middle while omitting routine tool dumps', () => {
@@ -99,9 +102,7 @@ describe('percentage compaction policy', () => {
     ).toThrow(/cannot retain all user decisions and assistant findings/u);
   });
 
-  it('caps a visible summary inside the complete estimated ceiling', () => {
-    const text = capSummary('a'.repeat(30_000), 21_250);
-    expect(text.length).toBe(21_250);
-    expect(text).toContain('…[truncated]');
+  it('refuses an oversized visible summary instead of cutting off findings or Next', () => {
+    expect(() => capSummary('a'.repeat(30_000), 21_250)).toThrow(/exceeding/u);
   });
 });

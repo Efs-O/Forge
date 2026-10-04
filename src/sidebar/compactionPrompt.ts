@@ -219,9 +219,12 @@ export function buildSummaryPrompt(
 
 export function capSummary(summary: string, maxChars = COMPACTION_SUMMARY_MAX_CHARS): string {
   const text = summary.trim();
-  if (text.length <= maxChars) return text;
-  const marker = '\n…[truncated]';
-  return text.slice(0, Math.max(0, maxChars - marker.length)) + marker;
+  if (text.length > maxChars) {
+    throw new Error(
+      `Summary has ${text.length} characters, exceeding its ${maxChars}-character allocation.`,
+    );
+  }
+  return text;
 }
 
 /**

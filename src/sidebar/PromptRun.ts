@@ -71,6 +71,8 @@ export interface PromptRunOptions {
   /** Strip thinking channels regardless of `model.think`. A `<think>` block
    *  arriving as `content` would otherwise be stored verbatim. */
   alwaysStripThinking?: boolean;
+  /** Require an explicit stop finish before returning generated prose. */
+  requireComplete?: boolean;
   /** Already-held backend for host-owned non-evicting runs. */
   backend?: BackendController;
   /** Narrow, caller-owned tools for an isolated prompt. */
@@ -79,6 +81,17 @@ export interface PromptRunOptions {
   dispatchContactTool?: (name: string, args: Record<string, unknown>) => Promise<string>;
   /** Maximum tool rounds for an isolated prompt. Defaults to three. */
   maxContactToolRounds?: number;
+}
+
+export class PromptIncompleteError extends Error {
+  constructor(readonly finishReason: string | null) {
+    super(
+      finishReason
+        ? `Summarization ended with finish_reason=${finishReason}; generated text is incomplete.`
+        : 'Summarization ended without a trustworthy finish reason; generated text is incomplete.',
+    );
+    this.name = 'PromptIncompleteError';
+  }
 }
 
 /**
@@ -251,6 +264,13 @@ export async function runPromptToMarkdown(
         );
       });
       ctx.events.onGenerationFinished?.(target.loadedModel);
+      if (
+        options.requireComplete === true &&
+        (toolCalls.length === 0 || !options.contactTools || !options.dispatchContactTool) &&
+        finishReason !== 'stop'
+      ) {
+        throw new PromptIncompleteError(finishReason);
+      }
       if (!content.trim() && reasoningChars > 0 && finishReason === 'length') {
         // An empty answer otherwise reaches the caller as "no summary", which
         // names neither the cause nor the fix; retrying just repeats it.

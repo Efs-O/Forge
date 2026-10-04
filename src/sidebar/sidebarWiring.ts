@@ -221,8 +221,14 @@ export function wireSidebar(host: SidebarHost, parts: SidebarParts): SidebarRunt
       const config = host.getConfig();
       const at = config.auto_compact?.at;
       const modelName = conv.active_model ?? config.active_model;
-      const reserve = modelName ? reasoningReserve(resolveRequestModel(config, modelName)) : 0;
-      return { max, reasoningReserve: reserve, ...(at !== undefined ? { threshold: at } : {}) };
+      const model = modelName ? resolveRequestModel(config, modelName) : undefined;
+      const reserve = model ? reasoningReserve(model) : 0;
+      return {
+        max,
+        reasoningReserve: reserve,
+        outputLimitTokens: model?.sampling?.max_tokens ?? 0,
+        ...(at !== undefined ? { threshold: at } : {}),
+      };
     },
     runPromptToMarkdown: (text, conversationId, options) =>
       agentLoop.runPromptToMarkdown(text, conversationId, options),

@@ -7,6 +7,13 @@ export const COMPACTION_CHARS_PER_TOKEN = 2.5;
 export const COMPACTION_REQUEST_OUTPUT_TOKENS = 16_384;
 const SMALL_WINDOW_FLOOR_TOKENS = 20_000;
 
+export class SummaryPromptFitError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = 'SummaryPromptFitError';
+  }
+}
+
 export interface CompactionBudget {
   /** Provider usage when available; otherwise an estimate of the active window. */
   observedTokens: number;
@@ -33,15 +40,15 @@ export function compactionBudget(
   const chars = (fraction: number): number =>
     Math.floor(policyTokens * fraction * COMPACTION_CHARS_PER_TOKEN);
   const summaryTargetTokens = Math.max(3_072, Math.floor(policyTokens * 0.04));
-  const summaryCeilingTokens = Math.max(summaryTargetTokens, Math.floor(policyTokens * 0.05));
+  const summaryCeilingTokens = Math.max(summaryTargetTokens, Math.floor(policyTokens * 0.1));
   const sourceByPolicy = chars(0.8);
-  // Leave the full generation ceiling, reasoning reserve, and request margin.
+  // Leave the complete replacement allowance, reasoning reserve, and request margin.
   const sourceByModel =
     modelMaxTokens > 0
       ? Math.max(
           0,
           Math.floor(
-            (modelMaxTokens - COMPACTION_REQUEST_OUTPUT_TOKENS - reasoningTokens - 6_000) *
+            (modelMaxTokens - summaryCeilingTokens - reasoningTokens - 6_000) *
               COMPACTION_CHARS_PER_TOKEN,
           ),
         )
@@ -53,11 +60,47 @@ export function compactionBudget(
     sourceMaxChars: Math.max(24_000, Math.min(sourceByPolicy, sourceByModel)),
     summaryTargetTokens,
     summaryCeilingTokens,
-    summaryCeilingChars: Math.max(8_000, chars(0.05)),
+    summaryCeilingChars: Math.max(12_000, chars(0.1)),
     tailMaxChars: chars(0.015),
     hostMaxChars: Math.max(6_000, chars(0.035)),
     replacementMaxChars: Math.max(12_000, chars(0.1)),
   };
+}
+
+export interface OutputPlan {
+  /** Value for `PromptRunOptions.outputTokens`; PromptRun adds the reserve on top. */
+  outputTokens: number;
+  /** The `max_tokens` the request will actually carry: thinking + visible, counted once. */
+  requestCap: number;
+}
+
+/**
+ * Plans one request's output. Thinking and prose share `max_tokens`, so a model
+ * with a configured reserve gets visible + reserve (PromptRun adds the reserve),
+ * and a model with no reserve gets the whole provider cap because its thinking
+ * is unbounded. Returns undefined when the provider cap cannot hold the reserve
+ * plus a useful answer.
+ */
+export function planOutput(
+  visibleTokens: number,
+  reasoningTokens: number,
+  providerCap: number,
+): OutputPlan | undefined {
+  if (reasoningTokens > 0) {
+    const room = providerCap > 0 ? providerCap - reasoningTokens : visibleTokens;
+    const outputTokens = Math.min(visibleTokens, room);
+    return outputTokens >= 128
+      ? { outputTokens, requestCap: outputTokens + reasoningTokens }
+      : undefined;
+  }
+  if (providerCap > 0) {
+    return providerCap >= 128 && visibleTokens >= 128
+      ? { outputTokens: providerCap, requestCap: providerCap }
+      : undefined;
+  }
+  return visibleTokens >= 128
+    ? { outputTokens: visibleTokens, requestCap: visibleTokens }
+    : undefined;
 }
 
 /** Reduce lossy source room until the complete summarizer request fits. */
@@ -66,6 +109,7 @@ export function fitSummaryPrompt(
   modelMaxTokens: number,
   build: (sourceMaxChars: number) => string,
   reasoningTokens = 0,
+  outputTokens = budget.summaryCeilingTokens,
 ): { prompt: string; estimatedTokens: number; sourceMaxChars: number } {
   let sourceMaxChars = budget.sourceMaxChars;
   for (let attempt = 0; attempt < 8; attempt++) {
@@ -73,13 +117,13 @@ export function fitSummaryPrompt(
     const estimatedTokens = Math.ceil(prompt.length / COMPACTION_CHARS_PER_TOKEN);
     if (
       modelMaxTokens <= 0 ||
-      estimatedTokens + COMPACTION_REQUEST_OUTPUT_TOKENS + reasoningTokens + 6_000 <= modelMaxTokens
+      estimatedTokens + outputTokens + reasoningTokens + 6_000 <= modelMaxTokens
     ) {
       return { prompt, estimatedTokens, sourceMaxChars };
     }
     sourceMaxChars = Math.floor(sourceMaxChars * 0.75);
   }
-  throw new Error(
+  throw new SummaryPromptFitError(
     'Summarization request cannot fit the model window without dropping required task evidence; previous context kept.',
   );
 }

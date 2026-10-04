@@ -14,6 +14,21 @@ test exercises bearer authentication through `forge.sh`, while the runtime
 fake-channel test verifies exact bytes, bound-chat delivery, refusal gates, and
 ambiguous-send handling without creating a model turn.
 
+Retry-policy contract (supersedes the flat two-failures limit): one transient
+failure (`model-error`/`unknown`) allows an immediate second attempt; after that
+automatic compaction is held until context grows by `max(1024, 2% of slot)` tokens
+or a 30 s cooldown (doubling, 5 min cap) elapses. Deterministic categories
+(`budget-refusal`, `invalid-summary`, `incomplete-output`) rearm on context growth
+only, so they cannot retry-storm. Success of any trigger clears the hold. Phase 5
+persists the same categories in `SessionLogger`.
+
+Phase 3 output contract: request `max_tokens` = visible target + reasoning reserve
+(thinking and prose share one budget), bounded by the provider cap and counted once
+in request-fit checks (`planOutput`). Length-stopped output is never stored; it
+falls back to staged compression. Staged note size is derived from the whole summary
+budget over the chunk count. Coverage: `test/unit/CompactionStaged.test.ts`
+(synthetic 400k/200k only; **no live 400k verification**).
+
 ## Scope
 
 | # | Finding | Change |

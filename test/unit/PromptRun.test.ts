@@ -209,6 +209,25 @@ describe('runPromptToMarkdown options', () => {
     ).rejects.toThrow(/spent its whole 5120-token output budget thinking/);
   });
 
+  it('rejects nonempty prose stopped at length when the caller requires a complete result', async () => {
+    streamModelChatCompletion.mockImplementation(
+      (_u: string, _request: ChatCompletionRequest, _m: unknown, handlers: any) => {
+        handlers.onToken('partial but plausible summary');
+        handlers.onDone('length');
+      },
+    );
+
+    await expect(
+      runPromptToMarkdown(ctx(), 'summarize', 'c1', { requireComplete: true }),
+    ).rejects.toMatchObject({ name: 'PromptIncompleteError', finishReason: 'length' });
+  });
+
+  it('does not treat a missing finish reason as a complete compaction result', async () => {
+    await expect(
+      runPromptToMarkdown(ctx(), 'summarize', 'c1', { requireComplete: true }),
+    ).rejects.toMatchObject({ name: 'PromptIncompleteError' });
+  });
+
   it('serves the run from the requested model, not the picker default', async () => {
     await runPromptToMarkdown(ctx(), 'summarize', 'c1', {
       modelName: 'pinned',
