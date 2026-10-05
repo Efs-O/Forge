@@ -1,5 +1,64 @@
 # Forge — Recent Changes
 
+## 0.16.87
+
+### Browser and desktop tools do what they report
+
+A test report on this Windows host found the browser and desktop tools reporting
+success for things that had not happened. Six fixes, each with a regression test
+that fails on the old code:
+
+- `browser_inspect` had never worked — it threw `Cannot read properties of
+  undefined` on every page, which is what forced models to guess CSS selectors.
+  It now returns numbered elements with role, text, a re-selectable selector, and
+  a bounding box; an empty page returns an empty list instead of an error.
+- Index actions (`browser_click`/`type`/`hover` by `index`) are bound to the last
+  inspection **of that tab** and to the exact DOM node it showed. If the page
+  changed underneath — a page-script mutation with no navigation, an identical
+  sibling inserted before the target, a navigation, a closed tab — Forge refuses
+  and says to inspect again, rather than acting on whatever now holds that number.
+- A coordinate `browser_click` outside the viewport used to report success while
+  doing nothing. Coordinates are now checked against the page's real viewport
+  before anything is dispatched, and the refusal names the point and the size.
+- Selector and index actions are bounded at **5 seconds** instead of Playwright's
+  30-second default, and the failure names the tool, the action, and the selector
+  while keeping the original cause. Navigation keeps its own 30 seconds.
+- `desktop_windows` listed every window as `(0,0 0×0)`. Real rects are reported
+  now, including valid negative origins; a window whose geometry cannot be decoded
+  is dropped and **named** as a protocol error rather than shown as a plausible
+  zero. `desktop_capture` with `monitor: N` captures exactly one display and says
+  which one (index, count, and Win32 device name), reporting the physical captured
+  region separately from the returned image size; an out-of-range index returns the
+  available range instead of quietly capturing every screen.
+- Text typed into a window arrived corrupted (`café` → `caf?`, CJK → replacement
+  characters) because the driver decoded its input using the console code page. It
+  now reads UTF-8 strictly: bytes that are not valid UTF-8 are refused with a named
+  error instead of being typed as U+FFFD. Verified live with accents, Greek, CJK,
+  and an emoji read back from a real window.
+
+### Controlling VS Code is now an explicit opt-in
+
+Forge refused to control VS Code at all, because the agent runs inside that editor.
+`permissions.desktop.allow_vscode: true` (with `permissions.desktop.enabled: true`)
+now allows the ordinary `code` process deliberately. It stays narrow: it matches
+the process name only — never a window title, never the `Chrome_WidgetWin_1`
+class, never a fork (`Code - Insiders`, Cursor, Windsurf, VSCodium, `devenv`,
+which remain refused whatever you set). Every one of the six desktop input tools
+asks for confirmation **on each call** when its target is a VS Code window, naming
+that window and the action, and this still applies to the normally auto-approved
+`desktop_move_mouse` and `desktop_scroll`. The policy is re-read before every
+input, including one arriving through a `capture_id` taken earlier; turning it
+back off drops the VS Code approval and that window's captures immediately without
+touching any other window's.
+
+### Visible background GUI launches
+
+`exec_command` gained `show_window: true` (background launches on Windows only).
+A background GUI app launched this way is actually on screen instead of hidden —
+previously there was no way to drive one. The default stays hidden, and the tool
+says plainly that the execution tracks the process it started, not a child GUI app
+that program opens.
+
 ## 0.16.86
 
 ### A remote turn you can watch and stop from Telegram
