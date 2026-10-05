@@ -41,7 +41,11 @@ ever. Shape (Zod schema in the new module, exported for tests):
   day. They are the forensic record and cover every Forge window, not just the one serving the port.
 - **Counting rules:**
   - `turns` = `user` rows;
-  - `requests` = `usage` rows;
+  - `requests`, `input_tokens`, `output_tokens` = the delta of each `usage` row from the previous `usage` row in the
+    same file (any day; 0 before the first). `usage` rows are session-to-date totals (`SessionUsage`), not
+    per-request counts — summing them read 74.9 billion input tokens on 2026-10-05. A total that goes backwards
+    restarted, so its own value is the delta. `last_request.input_tokens` is the input delta of the newest row
+    whose `model_request_count` delta is exactly 1; a multi-request flush is a sum, not one prompt's size;
   - `compactions` = `compaction` rows;
   - `compaction_attempts_failed` = `compaction_attempt` rows with `phase: "finished"` and an `outcome` other than
     `"compacted"` (verified against real logs 2026-10-05: attempts carry `attempt_id` + `phase`

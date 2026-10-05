@@ -58,6 +58,29 @@ function finiteNumber(value: unknown): number {
   return typeof value === 'number' && Number.isFinite(value) ? value : 0;
 }
 
+interface UsageTotals {
+  requests: number;
+  input: number;
+  output: number;
+}
+
+function usageTotals(row: Record<string, unknown>): UsageTotals {
+  return {
+    requests: finiteNumber(row['model_request_count']),
+    input: finiteNumber(row['input_tokens']),
+    output: finiteNumber(row['output_tokens']),
+  };
+}
+
+function usageDelta(previous: UsageTotals, current: UsageTotals): UsageTotals {
+  if (current.requests < previous.requests || current.input < previous.input) return current;
+  return {
+    requests: current.requests - previous.requests,
+    input: current.input - previous.input,
+    output: Math.max(0, current.output - previous.output),
+  };
+}
+
 /** Builds a counts-only summary; persisted row text is never copied to the reply. */
 export class ControlStatsBuilder {
   private readonly fileCache = new Map<string, FileCacheEntry>();
@@ -119,11 +142,18 @@ export class ControlStatsBuilder {
       // files such as voice.jsonl without relying on a filename convention.
       if (!rows.some((row) => row['type'] === 'session_start')) continue;
 
+      // `usage` rows are session-to-date totals (SessionUsage), so today's share
+      // is the delta from the previous usage row in the same file, whatever day
+      // that row was written. A total that went backwards restarted from zero.
+      let previousUsage = { requests: 0, input: 0, output: 0 };
       for (const row of rows) {
         const timestampMs = row['timestamp_ms'];
         if (typeof timestampMs !== 'number' || !Number.isFinite(timestampMs)) continue;
-        if (localDay(timestampMs) !== day) continue;
         const type = row['type'];
+        if (localDay(timestampMs) !== day) {
+          if (type === 'usage') previousUsage = usageTotals(row);
+          continue;
+        }
         if (row['role'] === 'user') result.today.turns += 1;
         if (row['role'] === 'tool') {
           result.today.tool_calls += 1;
@@ -132,15 +162,20 @@ export class ControlStatsBuilder {
           }
         }
         if (type === 'usage') {
-          result.today.requests += 1;
-          result.today.input_tokens += finiteNumber(row['input_tokens']);
-          result.today.output_tokens += finiteNumber(row['output_tokens']);
+          const totals = usageTotals(row);
+          const delta = usageDelta(previousUsage, totals);
+          previousUsage = totals;
+          result.today.requests += delta.requests;
+          result.today.input_tokens += delta.input;
+          result.today.output_tokens += delta.output;
+          // Only a single-request delta is one prompt's size; a flush covering
+          // several requests holds their sum, which is not a context reading.
           const model = typeof row['model'] === 'string' ? row['model'] : '';
-          if (timestampMs > lastRequestAtMs) {
+          if (delta.requests === 1 && timestampMs > lastRequestAtMs) {
             lastRequestAtMs = timestampMs;
             result.last_request = {
               model,
-              input_tokens: finiteNumber(row['input_tokens']),
+              input_tokens: delta.input,
               context_limit: model ? this.options.contextLimitFor(model) : null,
               at: Math.floor(timestampMs / 1_000),
             };

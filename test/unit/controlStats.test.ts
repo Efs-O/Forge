@@ -59,13 +59,15 @@ describe('control stats', () => {
         model: 'model-a',
         input_tokens: 12,
         output_tokens: 3,
+        model_request_count: 1,
       },
       {
         type: 'usage',
         timestamp_ms: FIXED_NOW + 3,
         model: 'unknown',
-        input_tokens: 20,
-        output_tokens: 7,
+        input_tokens: 32,
+        output_tokens: 10,
+        model_request_count: 2,
       },
       { type: 'compaction', timestamp_ms: FIXED_NOW },
       { type: 'compaction_attempt', phase: 'finished', outcome: 'failed', timestamp_ms: FIXED_NOW },
@@ -101,6 +103,44 @@ describe('control stats', () => {
       at: Math.floor((FIXED_NOW + 3) / 1_000),
     });
     expect(controlStatsSchema.parse(result)).toEqual(result);
+  });
+
+  it('counts usage as deltas of session-to-date totals', () => {
+    const env = setup();
+    const yesterday = FIXED_NOW - 24 * 60 * 60 * 1_000;
+    const usage = (at: number, requests: number, input: number, output: number) => ({
+      type: 'usage',
+      timestamp_ms: at,
+      model: 'model-a',
+      model_request_count: requests,
+      input_tokens: input,
+      output_tokens: output,
+    });
+    env.write('session.jsonl', [
+      { type: 'session_start', timestamp_ms: yesterday },
+      usage(yesterday, 10, 1_000_000, 5_000),
+      usage(FIXED_NOW, 11, 1_100_000, 5_200),
+      // One flush covering three requests: counted, but not a prompt size.
+      usage(FIXED_NOW + 1, 14, 1_400_000, 6_000),
+    ]);
+    env.write('restarted.jsonl', [
+      { type: 'session_start', timestamp_ms: FIXED_NOW },
+      usage(FIXED_NOW, 50, 900_000, 900),
+      // A total that went backwards restarted from zero.
+      usage(FIXED_NOW + 2, 1, 7_000, 70),
+    ]);
+    const result = builder(env.dir).build();
+    expect(result.today).toMatchObject({
+      requests: 4 + 50 + 1,
+      input_tokens: 400_000 + 900_000 + 7_000,
+      output_tokens: 1_000 + 900 + 70,
+    });
+    expect(result.last_request).toEqual({
+      model: 'model-a',
+      input_tokens: 7_000,
+      context_limit: 8192,
+      at: Math.floor((FIXED_NOW + 2) / 1_000),
+    });
   });
 
   it('counts replayed session rows once', () => {
