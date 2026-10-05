@@ -45,6 +45,7 @@ function setup(userChars: number, repoState: string, lastInputTokens: number) {
     isStreaming: () => false,
     beginCompaction: () => () => undefined,
     runPromptToMarkdown: runPrompt,
+    currentLocalTime: () => 'test local time',
     snapshotRepoState: async () => repoState,
   };
   return { conv, deps, posted, runPrompt };

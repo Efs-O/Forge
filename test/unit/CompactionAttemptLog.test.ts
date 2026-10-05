@@ -42,6 +42,7 @@ function setup(runPrompt: CompactionDeps['runPromptToMarkdown'], tokens = 2_000)
     isStreaming: () => false,
     beginCompaction: () => () => undefined,
     runPromptToMarkdown: runPrompt,
+    currentLocalTime: () => 'test local time',
     logCompactionAttempt: (_c, entry) => rows.push(entry),
   };
   return { conv, deps, rows, posted };

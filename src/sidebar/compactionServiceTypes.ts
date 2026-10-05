@@ -40,6 +40,8 @@ export interface CompactionDeps {
     conversationId?: string,
     options?: PromptRunOptions,
   ) => Promise<string>;
+  /** Current local date and time, formatted by the sidebar caller per compaction. */
+  currentLocalTime: () => string;
   isStreaming: (conversationId: string) => boolean;
   /** Marks the conversation busy for the duration of the summarization call.
    *  Returns the release. */

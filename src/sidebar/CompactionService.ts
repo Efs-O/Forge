@@ -25,7 +25,11 @@ import {
   type CompactionFailureCategory,
 } from './compactionFailure';
 import { fitCompactionHostBlock } from './compactionHostFit';
-import { summarizeCompaction } from './compactionSummaryRunner';
+import {
+  compactionResumeNote,
+  compactionSummaryAllowance,
+  summarizeCompaction,
+} from './compactionSummaryRunner';
 import { PromptIncompleteError } from './PromptRun';
 import { getLogger } from '../util/logger';
 import { selectCompactionSplit } from './compactionSplit';
@@ -248,16 +252,23 @@ async function compactOnce(
         return 'failed';
       }
 
-      groupsNote = lazyGroupSummaryNote(conversationId);
-      const summaryAllowance =
-        Math.min(budget.summaryCeilingChars, budget.replacementMaxChars - floorChars) -
-        (groupsNote?.length ?? 0);
+      groupsNote = compactionResumeNote(
+        lazyGroupSummaryNote(conversationId),
+        Boolean(conv.plan?.items?.length),
+      );
+      const summaryAllowance = compactionSummaryAllowance(
+        budget.summaryCeilingChars,
+        budget.replacementMaxChars,
+        floorChars,
+        groupsNote,
+      );
       const outputLimitTokens = metrics?.outputLimitTokens ?? 0;
       const summaryRun = await summarizeCompaction({
         messages: split.summarize,
         ...(conv.compaction?.summary ? { previousSummary: conv.compaction.summary } : {}),
         recordedFacts: hostContext.recordedFactsText,
         userContext: hostContext.userContextText,
+        currentLocalTime: deps.currentLocalTime(),
         ...(conv.plan?.items ? { plan: conv.plan.items } : {}),
         ...(conv.active_model ? { modelName: conv.active_model } : {}),
         modelMaxTokens: modelMax,

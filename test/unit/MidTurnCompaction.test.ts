@@ -349,6 +349,7 @@ describe('runCompaction midTurn', () => {
       isStreaming: () => streaming,
       beginCompaction,
       runPromptToMarkdown: async () => summary,
+      currentLocalTime: () => 'test local time',
     };
     return { deps, posted, beginCompaction, conversation };
   }

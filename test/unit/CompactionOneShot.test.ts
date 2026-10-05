@@ -19,6 +19,7 @@ function input(
 ) {
   return {
     messages,
+    currentLocalTime: 'test local time',
     recordedFacts: 'Command completed successfully.',
     userContext: 'Audit the code.\nLater correction: implement the approved fix.',
     modelName: 'strata',
@@ -47,6 +48,7 @@ describe('one-shot compaction', () => {
     expect(runPrompt).toHaveBeenCalledTimes(1);
     const [prompt, , options] = runPrompt.mock.calls[0]!;
     expect(prompt).toContain('Later correction: implement the approved fix.');
+    expect(prompt).toContain('Current local time: test local time.');
     expect(prompt).toContain('final status: failed');
     expect(prompt).toContain('For each earlier restriction, name the task it governed');
     expect(options).toMatchObject({ reasoningEffort: 'low', requireComplete: true });

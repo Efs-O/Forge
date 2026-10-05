@@ -244,6 +244,7 @@ export function wireSidebar(host: SidebarHost, parts: SidebarParts): SidebarRunt
     countTokens: compactionCounter.count,
     runPromptToMarkdown: (text, conversationId, options) =>
       agentLoop.runPromptToMarkdown(text, conversationId, options),
+    currentLocalTime: () => new Date().toLocaleString(),
     isStreaming: (conversationId) => agentLoop.isStreamingConv(conversationId),
     beginCompaction: (convId) => agentLoop.beginBackgroundWork(convId),
     snapshotRepoState,
