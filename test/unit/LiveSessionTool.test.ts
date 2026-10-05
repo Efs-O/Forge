@@ -100,7 +100,7 @@ function answerNextQuestion(text: string): void {
   }, 20);
 }
 
-const ask = { subject: 'Does X hold?', question: 'Check X.', wait_minutes: 1 };
+const ask = { subject: 'Does X hold?', question: 'Check X.', target: 'claude', wait_minutes: 1 };
 
 /** A fake orchestrator whose `ask` runs the adapter, as the alias FIFO does. */
 let asked: string[] = [];
@@ -141,10 +141,9 @@ describe('ask_live_session', () => {
     const got: { id: string; text: string; conversationId: string }[] = [];
     const sub = liveAnswerNotices.onAnswer((n) => got.push(n));
     try {
-      const result = await tool().handler(
-        { ...ask, notify_on_answer: true },
-        { conversationId: 'c1' } as never,
-      );
+      const result = await tool().handler({ ...ask, notify_on_answer: true }, {
+        conversationId: 'c1',
+      } as never);
       expect(result).toContain('without waiting');
       expect(result).toContain('[Forge notice]');
       expect(sent).toHaveLength(1);
@@ -317,7 +316,9 @@ describe('ask_live_session', () => {
       });
       const result = await tool().handler(askCodex);
       expect(messages).toHaveLength(1);
-      expect(messages[0]).toMatch(/^\[Forge agent bus, question .+\] Does X hold\?\n\nCheck X\.\n\n/);
+      expect(messages[0]).toMatch(
+        /^\[Forge agent bus, question .+\] Does X hold\?\n\nCheck X\.\n\n/,
+      );
       // Its final message IS the answer: no forge.sh (a bare bash is WSL on Windows).
       expect(messages[0]).toContain('Your final message in this turn is the answer');
       expect(messages[0]).not.toContain('reply.md');
@@ -394,6 +395,11 @@ describe('ask_live_session', () => {
 
     it('rejects an unknown target', async () => {
       await expect(tool().handler({ ...ask, target: 'gpt' })).rejects.toThrow(/target/);
+      // No default recipient: a missing target once sent Codex's review round to Claude.
+      const { target: _omit, ...untargeted } = ask;
+      await expect(tool().handler(untargeted)).rejects.toThrow(
+        /"target" is required.*nothing was sent/,
+      );
     });
   });
 });

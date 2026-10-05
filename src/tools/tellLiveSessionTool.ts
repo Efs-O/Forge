@@ -56,7 +56,7 @@ export function makeTellLiveSessionTool(deps: TellLiveSessionDeps): RegisteredTo
               type: 'string',
               enum: ['claude', 'codex', 'copilot'],
               description:
-                'Which live session to notify: "claude" (default), "codex", or "copilot".',
+                'Which live session to notify: "claude", "codex", or "copilot". Required.',
             },
             message: {
               type: 'string',
@@ -73,7 +73,7 @@ export function makeTellLiveSessionTool(deps: TellLiveSessionDeps): RegisteredTo
                 'Forge-originated sends; a relay of a relay is refused.',
             },
           },
-          required: ['message'],
+          required: ['target', 'message'],
           additionalProperties: false,
         },
       },
@@ -105,9 +105,13 @@ export function makeTellLiveSessionTool(deps: TellLiveSessionDeps): RegisteredTo
       if (toArg !== undefined && (typeof toArg !== 'string' || toArg.trim() === '')) {
         throw new Error('tell_live_session: "to" must be a non-empty alias.');
       }
-      const target: unknown = args['target'] ?? 'claude';
+      // No default (see ask_live_session): a note must not land on the wrong session.
+      // An explicit `to` names the recipient itself, so target is then unused.
+      const target: unknown = args['target'] ?? (toArg !== undefined ? 'claude' : undefined);
       if (target !== 'claude' && target !== 'codex' && target !== 'copilot') {
-        throw new Error('tell_live_session: "target" must be "claude", "codex", or "copilot".');
+        throw new Error(
+          'tell_live_session: "target" is required: "claude", "codex", or "copilot"; nothing was sent.',
+        );
       }
       const alias = (typeof toArg === 'string' && toArg.trim() ? toArg : target)
         .trim()

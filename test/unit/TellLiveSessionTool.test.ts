@@ -90,4 +90,9 @@ describe('tell_live_session (§1)', () => {
     const text = typeof result === 'string' ? result : result.text;
     expect(text).toContain('unknown recipient');
   });
+
+  it('refuses a note with no recipient instead of defaulting to claude', async () => {
+    const tool = makeTool();
+    await expect(tool.handler({ message: 'hi' }, {})).rejects.toThrow(/"target" is required/);
+  });
 });

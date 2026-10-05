@@ -213,7 +213,8 @@ export function makeLiveSessionTool(deps: LiveSessionDeps): RegisteredTool {
               type: 'string',
               enum: ['claude', 'codex', 'copilot'],
               description:
-                'Which live session: "claude" (default), "codex", or "copilot". Resolved ' +
+                'Which live session: "claude", "codex", or "copilot". Required: name the ' +
+                'session this conversation is working with. Resolved ' +
                 'by alias; a Forge-owned session is created with one-time consent, and the ' +
                 'config thread/session value is a deprecated pin (the alias wins).',
             },
@@ -238,7 +239,7 @@ export function makeLiveSessionTool(deps: LiveSessionDeps): RegisteredTool {
               description: `How long to wait for the answer, 1 to ${MAX_WAIT_MINUTES} (default ${MAX_WAIT_MINUTES}). Returns as soon as it lands.`,
             },
           },
-          required: ['subject', 'question'],
+          required: ['subject', 'question', 'target'],
           additionalProperties: false,
         },
       },
@@ -278,9 +279,14 @@ export function makeLiveSessionTool(deps: LiveSessionDeps): RegisteredTool {
           throw new Error(`ask_live_session: ${reason(err)}`);
         }
       }
-      const target: unknown = args['target'] ?? 'claude';
+      // No default: a missing target once sent a Codex review round to Claude,
+      // which answered GO in Codex's place.
+      const target: unknown = args['target'];
       if (target !== 'claude' && target !== 'codex' && target !== 'copilot') {
-        throw new Error('ask_live_session: "target" must be "claude", "codex", or "copilot".');
+        throw new Error(
+          'ask_live_session: "target" is required: "claude", "codex", or "copilot". Use the ' +
+            'session this conversation has been asking; nothing was sent.',
+        );
       }
 
       const refusal = unattendedCliRefusal(deps.getConfig(), context?.conversationId);
