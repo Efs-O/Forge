@@ -60,10 +60,21 @@ The plain edited bubble keeps that rule and still never shows streamed words.
 `sendRichMessage` (the final status) stays in the chat lane: it is a real
 message and must keep its order relative to the narrations.
 
+**The preview text is append-only (follow-up, same day).** The first build
+sent the full progress render as the draft: headline, then the words, then
+`⏱ … last activity N s ago`. Live, the preview never got past `Forge:`.
+Telegram re-types a draft from its first changed character, and that clock
+line, along with the headline and tool name above the words, changed on every
+1 s update, so each update restarted the typing. `renderRemoteDraft` now sends
+just the streamed words while the model writes, so each update only appends.
+With nothing streaming, it sends a short status with no clock. The clock
+remains on the plain bubble and is not needed on a preview.
+
 ## Limits
 
-- `MAX_STREAM_CHARS` (3,000) bounds the buffer; the render keeps the tail, so
-  a long answer scrolls in the preview. The full text is always in the final
+- `MAX_STREAM_CHARS` (3,000) bounds the buffer. Past it the preview stops
+  growing and ends in `…` instead of scrolling: dropping the head would make
+  every update re-type the whole text. The full text is always in the final
   message.
 - Reasoning tokens never enter the draft (`reasoning` carries no text by
   contract).
@@ -85,4 +96,6 @@ remote-state file or the outbox.
 - [x] `sendRichMessageDraft` bypasses the chat queue and is not retried on 429;
       a 429 pauses updates for that chat for `retry_after`.
 - [x] `finish` waits for an in-flight draft update before finalizing.
+- [x] Successive stream updates are prefixes of one another, and a draft never
+      carries the ticking clock line.
 - [x] `npm run ci` passes.

@@ -51,6 +51,25 @@ export function renderRemoteProgress(
   return keepTailWithPrefix(sections.join('\n\n'), maximum, `${state.headline}\n\n`);
 }
 
+/**
+ * A draft preview's text. Telegram re-types a draft from the first character
+ * that changed, so anything that differs on every update (the clock line's
+ * "last activity N s ago", a tool name above the words) restarts the animation
+ * each second and the reader never sees more than "Forge:". While the model
+ * writes, the preview is therefore the words alone, which only ever grow; with
+ * nothing streaming it is a short status without the ticking clock.
+ */
+export function renderRemoteDraft(state: RemoteProgressRenderState, maximum: number): string {
+  const stream = state.stream?.trim();
+  if (stream) return stream.slice(0, maximum);
+  const sections = [state.headline];
+  if (state.warnings.length) {
+    sections.push(state.warnings.map((warning) => `⚠ ${warning}`).join('\n'));
+  }
+  if (state.milestone) sections.push(state.milestone);
+  return keepTailWithPrefix(sections.join('\n\n'), maximum, `${state.headline}\n\n`);
+}
+
 function keepTailWithPrefix(value: string, maximum: number, prefix: string): string {
   if (value.length <= maximum) return value;
   const room = Math.max(1, maximum - prefix.length);

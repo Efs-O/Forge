@@ -3,7 +3,7 @@ import type { RemoteChannel } from './types';
 import { QUEUED_ACK_DELETE_SECONDS } from './TelegramAcknowledgement';
 import { DRAFT_HEARTBEAT_MS } from './telegramRichDraft';
 import type { RemoteDraftRegistry } from './RemoteDraftRegistry';
-import { renderRemoteProgress } from './remoteProgressRender';
+import { renderRemoteDraft, renderRemoteProgress } from './remoteProgressRender';
 import { keepTail, sanitize, sanitizeToolName } from './remoteProgressText';
 import {
   appendStream,
@@ -421,12 +421,14 @@ export class RemoteAgentProgress {
   }
 
   private queueEdit(conversationId: string, state: ActiveProgress): void {
-    const text = renderRemoteProgress(state, this.maxMessageChars, Date.now());
-    if (text === state.lastText || text === state.queuedText) return;
     if (state.draftLane) {
-      state.draftLane.request();
+      if (renderRemoteDraft(state, this.maxMessageChars) !== state.lastText) {
+        state.draftLane.request();
+      }
       return;
     }
+    const text = renderRemoteProgress(state, this.maxMessageChars, Date.now());
+    if (text === state.lastText || text === state.queuedText) return;
     state.queuedText = text;
     state.tail = state.tail
       .then(async () => {
@@ -455,7 +457,7 @@ export class RemoteAgentProgress {
     if (!rich || state.draftId === undefined) return;
     if (state.closed || this.signal.aborted || this.active.get(conversationId) !== state) return;
     if (!(await this.safeCanDeliver(state.chatId))) return;
-    const text = renderRemoteProgress(state, this.maxMessageChars, Date.now());
+    const text = renderRemoteDraft(state, this.maxMessageChars);
     await rich.updateDraft(state.chatId, state.draftId, text, { signal: this.signal });
     state.lastText = text;
   }

@@ -261,7 +261,7 @@ describe('RemoteAgentProgress on the rich-draft lane', () => {
     expect(armAfter).not.toHaveBeenCalled();
   });
 
-  it('refreshes the clock on a draft-only transport that cannot edit messages', async () => {
+  it('keeps a draft-only transport alive on the heartbeat without a ticking clock', async () => {
     vi.useFakeTimers();
     vi.setSystemTime(0);
     const { richDraft, updates } = draftTransport();
@@ -298,8 +298,30 @@ describe('RemoteAgentProgress on the rich-draft lane', () => {
     progress.handle({ conversationId: 'c1', kind: 'tool', toolName: 'run_build' });
     await vi.advanceTimersByTimeAsync(1_000_000);
     expect(updates.at(-1)?.text).toContain('Running run_build\u2026');
-    expect(updates.at(-1)?.text).toContain('\u23F1');
+    // No clock line: Telegram re-types a draft from its first changed
+    // character, and a line that changes every update kept it re-typing.
+    expect(updates.at(-1)?.text).not.toContain('\u23F1');
     expect(channel.edits).toEqual([]);
+  });
+
+  it('sends the streamed words alone, so the preview only ever grows', async () => {
+    vi.useFakeTimers();
+    const { richDraft, updates } = draftTransport();
+    const progress = new RemoteAgentProgress(
+      channelWithDrafts(richDraft),
+      new AbortController().signal,
+      () => true,
+      3_900,
+      1_000,
+    );
+    progress.begin('c1', 'chat-a', 'draft-42', 'remote', 42);
+    progress.handle({ conversationId: 'c1', kind: 'tool', toolName: 'read_file' });
+    progress.handle({ conversationId: 'c1', kind: 'commentary', text: 'The guard ' });
+    await vi.advanceTimersByTimeAsync(1_000);
+    progress.handle({ conversationId: 'c1', kind: 'commentary', text: 'module is fine.' });
+    await vi.advanceTimersByTimeAsync(5_000);
+    const texts = updates.map((u) => u.text).filter((t) => t.startsWith('The guard'));
+    expect(texts).toEqual(['The guard', 'The guard module is fine.']);
   });
 
   it('forgets the draft when the conversation is replaced or disposed', async () => {

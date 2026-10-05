@@ -1,5 +1,5 @@
 import { describeError } from '../util/describeError';
-import { keepTail, sanitize } from './remoteProgressText';
+import { sanitize } from './remoteProgressText';
 import type { RichDraftTransport } from './telegramRichDraft';
 
 /**
@@ -10,16 +10,20 @@ import type { RichDraftTransport } from './telegramRichDraft';
 export const DRAFT_STREAM_INTERVAL_MS = 1_000;
 
 /**
- * The streamed text a preview keeps. The render keeps the tail, so a long
- * answer scrolls inside the preview; the whole answer is always in the final
- * message, which this buffer never feeds.
+ * The streamed text a preview shows. Past it the preview stops growing rather
+ * than scrolling: Telegram re-types a draft from its first changed character,
+ * so dropping the head would re-type the whole text every second. The whole
+ * answer is always in the final message, which this buffer never feeds.
  */
 export const MAX_STREAM_CHARS = 3_000;
 
 /** Append one streamed delta to a preview's buffer, scrubbed and bounded. */
 export function appendStream(buffer: string, delta: string): string {
+  if (buffer.length >= MAX_STREAM_CHARS) return buffer;
   const clean = sanitize(delta);
-  return clean ? keepTail(buffer + clean, MAX_STREAM_CHARS) : buffer;
+  if (!clean) return buffer;
+  const next = buffer + clean;
+  return next.length > MAX_STREAM_CHARS ? `${next.slice(0, MAX_STREAM_CHARS - 1)}…` : next;
 }
 
 /**
