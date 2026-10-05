@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 #   forge.sh reply <id> [file]        answer a question Forge is waiting on
 #   forge.sh say <your-name> [--model <name>] [--new] [--reply-in-chat] [--to <conversationId>|--to-running] [file]  message Forge
-#   forge.sh send <your-name> <to> [--to <conversationId>|--to-running] [file]  relay, or target a Forge chat when <to> is forge
+#   forge.sh send <your-name> <to> [--to <conversationId>|--to-running] [file]  relay (does not wake the sender), or target a Forge chat when <to> is forge
 #   forge.sh send-file <your-name> --to <conversationId> <workspace-relative-path> [--caption-file <file>]  send a file directly to its Telegram chat (no Forge model turn)
 #   forge.sh read-verdict <your-name> <exchangeId>  read the full retained verdict without consuming it
 #   forge.sh ack-verdict <your-name> <exchangeId>   acknowledge a read verdict and remove its retained copy

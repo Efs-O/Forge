@@ -30,10 +30,12 @@ describe('interactive Codex join', () => {
     const adapter = codexQueueAdapter({
       ownedCodex: undefined,
       busRoot: root,
+      workspace: '/ws',
       getConfig: () => ({ agent_bus: { codex_cli: 'codex' } }) as ForgeConfig,
       queueCodex,
     });
     expect(adapter?.observesTurns).toBe(false);
+    expect(adapter?.deliveredTo).toBe('codex = session thread-7 (queued)');
     await adapter?.send('wake supervisor');
     expect(queueCodex).toHaveBeenCalledWith('codex', 'thread-7', 'wake supervisor', undefined);
   });
@@ -46,22 +48,22 @@ describe('interactive Codex join', () => {
     // it. A live window holds the thread, so the resume hits the writer conflict
     // and the stand-in falls back to the non-observing queue adapter (CODEX
     // _STAND_IN_PLAN Phase 3) — the factory IS called, unlike the old direct path.
-    const createOwned = vi.fn(async () =>
-      ({
-        ensureStarted: async () => {
-          throw new Error('thread thread-7 already has an active writer');
-        },
-        send: async () => ({ status: 'completed', finalText: 'x' }),
-        interrupt: () => {},
-        dispose: async () => {
-          disposed = true;
-        },
-      }) as never,
+    const createOwned = vi.fn(
+      async () =>
+        ({
+          ensureStarted: async () => {
+            throw new Error('thread thread-7 already has an active writer');
+          },
+          send: async () => ({ status: 'completed', finalText: 'x' }),
+          interrupt: () => {},
+          dispose: async () => {
+            disposed = true;
+          },
+        }) as never,
     );
     const provider = new MeshSessionProvider({
       busRoot: root,
-      getConfig: () =>
-        ({ agent_bus: { enabled: true, codex_cli: 'codex' } }) as ForgeConfig,
+      getConfig: () => ({ agent_bus: { enabled: true, codex_cli: 'codex' } }) as ForgeConfig,
       workspaceRoots: () => ['/ws'],
       queueCodex,
       codexFactory: { create: createOwned },

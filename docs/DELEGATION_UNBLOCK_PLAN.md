@@ -205,3 +205,8 @@ Windows sandbox cannot execute a Store-only `pwsh`, which requires an MSI
 PowerShell 7 on the host. See `archive/validation/DELEGATION_LIVE_VALIDATION.md` for the full
 diagnosis, including why `winget --scope machine` must not be used for it.
 Both layers were required — F1 alone still failed at the shell spawn.
+
+## Supervisor message size
+
+Ask for each phase report in `.forge/tmp/phase-N-report.md` and keep the supervisor message to at
+most 1,500 characters. Include the verdict needed, the CI result line, and the report path.

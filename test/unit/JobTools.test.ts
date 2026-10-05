@@ -261,7 +261,7 @@ describe('manage_jobs — create', () => {
           on_change: { kind: 'notify' },
         },
       }),
-    ).rejects.toThrow(/invalid job definition/);
+    ).rejects.toThrow(/invalid job definition.*use `wait`.*ask_live_session/s);
   });
 });
 

@@ -104,6 +104,11 @@ export class AliasFifo {
     return this.adapter.key;
   }
 
+  /** Concrete session resolved by this FIFO's adapter. */
+  get deliveredTo(): string | undefined {
+    return this.adapter.deliveredTo;
+  }
+
   /** The adapter's stand-in note, if any (so a tell need not re-resolve). */
   get note(): string | undefined {
     return this.adapter.note;

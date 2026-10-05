@@ -15,16 +15,34 @@ export interface CliProcessExit {
   error?: Error;
 }
 
+export interface CliProcessInvocation {
+  file: string;
+  args: string[];
+  windowsCmdWrapped: boolean;
+}
+
+/** Builds the exact argv used by {@link spawnCliProcess}. Exported so a
+ *  caller can check cmd.exe's command-length ceiling before starting a shim. */
+export function buildCliProcessInvocation(
+  options: SpawnCliProcessOptions,
+  platform: NodeJS.Platform = process.platform,
+): CliProcessInvocation {
+  const wrap = platform === 'win32' && needsWindowsCmdShellWrap(options.executable);
+  const invocation = wrap
+    ? buildWindowsCmdShellInvocation(options.executable, [...options.args])
+    : { file: options.executable, args: [...options.args] };
+  return { ...invocation, windowsCmdWrapped: wrap };
+}
+
 /**
  * Spawns an already-resolved CLI executable. npm-installed CLI `.cmd` shims
  * require an explicit cmd.exe invocation on Windows; real executables are
  * spawned directly.
  */
-export function spawnCliProcess(options: SpawnCliProcessOptions): ChildProcess {
-  const wrap = process.platform === 'win32' && needsWindowsCmdShellWrap(options.executable);
-  const invocation = wrap
-    ? buildWindowsCmdShellInvocation(options.executable, [...options.args])
-    : { file: options.executable, args: [...options.args] };
+export function spawnCliProcess(
+  options: SpawnCliProcessOptions,
+  invocation: CliProcessInvocation = buildCliProcessInvocation(options),
+): ChildProcess {
   return spawn(invocation.file, invocation.args, {
     cwd: options.cwd,
     ...(options.env ? { env: { ...process.env, ...options.env } } : {}),
@@ -36,7 +54,7 @@ export function spawnCliProcess(options: SpawnCliProcessOptions): ChildProcess {
     // child is killed. Windows kills via a taskkill /T job instead, so detached
     // is irrelevant there.
     ...(process.platform !== 'win32' ? { detached: true } : {}),
-    ...(wrap ? { windowsVerbatimArguments: true } : {}),
+    ...(invocation.windowsCmdWrapped ? { windowsVerbatimArguments: true } : {}),
   });
 }
 

@@ -285,7 +285,11 @@ export function setupAgentMesh(
   const relay: AgentMesh['relay'] = async (from, to, text) => {
     const result = await orchestrator.relay(from, to, text);
     if ('error' in result) return { ok: false, error: result.error };
-    return { ok: true, exchangeId: result.exchangeId };
+    return {
+      ok: true,
+      exchangeId: result.exchangeId,
+      ...(result.deliveredTo ? { deliveredTo: result.deliveredTo } : {}),
+    };
   };
 
   // F-06: a `priority=steer` relay interrupts the recipient's active turn.

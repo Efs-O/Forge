@@ -3,7 +3,7 @@ import type { ForgeConfig } from '../config/types';
 import { resolveCliExecutable } from '../agents/resolveCliExecutable';
 import type { CodexAppServerSession } from '../agents/CodexAppServerSession';
 import type { AliasRecord } from './aliasRegistry';
-import { CodexOwnedAdapter } from './adapters';
+import { CodexOwnedAdapter, standInDeliveryLabel } from './adapters';
 import { defaultCodexFactory, type OwnedCodexFactory } from './creationPreamble';
 import type { MeshAdapter } from './meshAdapter';
 
@@ -123,6 +123,7 @@ export class CodexStandIn {
   private async createStandIn(aliasRec: AliasRecord): Promise<MeshAdapter | undefined> {
     const threadId = aliasRec.session_id || undefined;
     const bus = this.deps.getConfig().agent_bus;
+    const cwd = this.deps.workspaceRoots()[0] ?? os.homedir();
     let session: CodexAppServerSession;
     try {
       // Injected factories are test doubles; see createOwnedCodex.
@@ -133,7 +134,7 @@ export class CodexStandIn {
         alias: 'codex',
         threadId,
         executable,
-        cwd: this.deps.workspaceRoots()[0] ?? os.homedir(),
+        cwd,
       });
     } catch (err) {
       const why = err instanceof Error ? err.message : String(err);
@@ -195,6 +196,7 @@ export class CodexStandIn {
       observesTurns: true,
       key: `codex-stand-in:${threadId ?? 'blank'}:${++this.seq}`,
       note: codexStandInNote(threadId),
+      deliveredTo: standInDeliveryLabel('codex', threadId, this.deps.workspaceRoots()[0]),
       send: (message, options) => {
         // First real use: the FIFO now owns the lifetime (onIdle), so the
         // standby safety net no longer applies.

@@ -55,6 +55,7 @@ overlaps with an existing owner, extend the owner instead.
 | Agent notification: toast + remote fan-out           | `src/sidebar/UserNotificationService.ts` |
 | Model residency polling timer                        | `src/sidebar/ResidencyPoller.ts`         |
 | Timed pause for the agent loop                       | `src/tools/waitTool.ts`                  |
+| Live-session question ceiling and report handoff      | `src/agentBus/liveSessionLimit.ts`       |
 | LSP read operations + strict `code_intel` dispatch   | `src/tools/codeIntelTool.ts`             |
 | LSP code-action read/write handler                   | `src/tools/codeActionTools.ts`            |
 | Filesystem-miss error text for tools                 | `src/tools/pathErrorHint.ts`             |

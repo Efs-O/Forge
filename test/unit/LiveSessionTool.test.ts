@@ -118,6 +118,23 @@ function installMeshAdapter(adapter: MeshAdapter, alias = 'codex'): void {
 }
 
 describe('ask_live_session', () => {
+  it('advertises the 6,000-character ceiling and file handoff guidance', () => {
+    const description = tool().definition.function.parameters.properties.question.description;
+    expect(description).toContain('6,000 characters');
+    expect(description).toContain(
+      'write it to a file and send the path plus at most 1,500 characters',
+    );
+  });
+
+  it.each(['claude', 'codex', 'copilot'] as const)(
+    'refuses a 6,001-character question for %s with file handoff guidance',
+    async (target) => {
+      await expect(tool().handler({ ...ask, target, question: 'x'.repeat(6001) })).rejects.toThrow(
+        /\.forge\/tmp\/.*1,500.*6000/,
+      );
+    },
+  );
+
   it('is not advertised, and refuses, while agent_bus is disabled', async () => {
     enabled = false;
     const t = tool();
@@ -141,10 +158,9 @@ describe('ask_live_session', () => {
     const got: { id: string; text: string; conversationId: string }[] = [];
     const sub = liveAnswerNotices.onAnswer((n) => got.push(n));
     try {
-      const result = await tool().handler(
-        { ...ask, notify_on_answer: true },
-        { conversationId: 'c1' } as never,
-      );
+      const result = await tool().handler({ ...ask, notify_on_answer: true }, {
+        conversationId: 'c1',
+      } as never);
       expect(result).toContain('without waiting');
       expect(result).toContain('[Forge notice]');
       expect(sent).toHaveLength(1);
@@ -317,7 +333,9 @@ describe('ask_live_session', () => {
       });
       const result = await tool().handler(askCodex);
       expect(messages).toHaveLength(1);
-      expect(messages[0]).toMatch(/^\[Forge agent bus, question .+\] Does X hold\?\n\nCheck X\.\n\n/);
+      expect(messages[0]).toMatch(
+        /^\[Forge agent bus, question .+\] Does X hold\?\n\nCheck X\.\n\n/,
+      );
       // Its final message IS the answer: no forge.sh (a bare bash is WSL on Windows).
       expect(messages[0]).toContain('Your final message in this turn is the answer');
       expect(messages[0]).not.toContain('reply.md');

@@ -33,6 +33,7 @@ export interface PendingMeshMessage {
 
 export interface RelayOutcome extends TellOutcome {
   relayed: true;
+  deliveredTo?: string;
 }
 
 export interface OrchestratorDeps extends HostLivenessDeps {

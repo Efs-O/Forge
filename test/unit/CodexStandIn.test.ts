@@ -62,7 +62,7 @@ function makeProvider() {
     onStandIn: (_alias, note) => notices.push(note),
     codexFactory: {
       create: async ({ threadId }) => {
-        const session = new FakeCodexSession(threadId, outcome);
+        const session = new FakeCodexSession(threadId ?? 'owned-thread', outcome);
         created.push({ threadId, session });
         return session as never;
       },
@@ -93,6 +93,13 @@ afterEach(async () => {
 });
 
 describe('Codex stand-in for a dead user-joined session (through the provider)', () => {
+  it('reports the resolved id and workspace for an owned Codex session', async () => {
+    const { provider } = makeProvider();
+    const adapter = await provider.resolveAdapter('codex');
+    expect(adapter?.deliveredTo).toBe('codex = session owned-thread (owned, workspace /ws)');
+    await provider.dispose();
+  });
+
   // Invariant 2 + C4: a stand-in is never an owned session and writes no record.
   it('resumes the alias thread headless, writes no ownership, and leaves the alias untouched', async () => {
     joinUserCodex('thread-7');
@@ -102,6 +109,7 @@ describe('Codex stand-in for a dead user-joined session (through the provider)',
     expect(adapter?.observesTurns).toBe(true);
     expect(created.map((c) => c.threadId)).toEqual(['thread-7']);
     expect(adapter?.note).toBe(codexStandInNote('thread-7'));
+    expect(adapter?.deliveredTo).toBe('codex = stand-in for thread-7 (workspace /ws)');
     expect(notices).toEqual([codexStandInUserNote('thread-7')]);
     expect(fs.existsSync(ownershipPath(root, 'codex'))).toBe(false);
     expect(fs.readFileSync(path.join(root, 'aliases.json'), 'utf8')).toBe(aliasBefore);

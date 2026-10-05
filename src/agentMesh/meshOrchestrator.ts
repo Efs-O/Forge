@@ -291,6 +291,7 @@ export class MeshOrchestrator {
       exchangeId,
       to: recipient,
       observing: this.deps.provider.isOwned(recipient),
+      ...(fifo.deliveredTo ? { deliveredTo: fifo.deliveredTo } : {}),
       relayed: true,
     };
   }

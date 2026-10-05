@@ -595,7 +595,11 @@ describe('forge.sh against the routes', () => {
       ),
       relay: async (from, to, text) => (
         relays.push([from, to, text]),
-        { ok: true, exchangeId: 'x1' }
+        {
+          ok: true,
+          exchangeId: 'x1',
+          deliveredTo: 'claude = session 7b39fb6e (joined, workspace n:\\vs code apps\\Forge)',
+        }
       ),
     });
     routes.setEnabled(true);
@@ -611,7 +615,14 @@ describe('forge.sh against the routes', () => {
       ['codex', 0, 'thread-7'],
     ]);
     const sent = await runClient(['send', 'claude', 'codex'], 'plan ready\n');
-    expect(sent.out).toContain('"relayed":true');
+    expect(JSON.parse(sent.out.trim())).toMatchObject({
+      relayed: true,
+      exchangeId: 'x1',
+      delivered_to: 'claude = session 7b39fb6e (joined, workspace n:\\vs code apps\\Forge)',
+      message:
+        'Sent as exchange x1. The verdict does NOT start a turn in your chat by itself. Use ' +
+        '`ask_live_session` with `notify_on_answer`, or `wait` and then `read-verdict`.',
+    });
     expect(relays).toEqual([['claude', 'codex', 'plan ready\n']]);
   }, 30_000);
 

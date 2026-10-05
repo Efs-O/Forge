@@ -49,7 +49,9 @@ export interface AgentRoutesDeps {
     from: string,
     to: string,
     text: string,
-  ) => Promise<{ ok: true; exchangeId: string } | { ok: false; error: string }>;
+  ) => Promise<
+    { ok: true; exchangeId: string; deliveredTo?: string } | { ok: false; error: string }
+  >;
   /**
    * F-06: a `priority=steer` message to another agent interrupts its active
    * turn and runs the steer next. Absent ⇒ `priority=steer` is treated as an
@@ -59,7 +61,9 @@ export interface AgentRoutesDeps {
     from: string,
     to: string,
     text: string,
-  ) => Promise<{ ok: true; exchangeId: string } | { ok: false; error: string }>;
+  ) => Promise<
+    { ok: true; exchangeId: string; deliveredTo?: string } | { ok: false; error: string }
+  >;
   /**
    * Validate an inbound `from` against live aliases (M6/§4). An unknown or
    * forged sender is rejected with the live list. Absent ⇒ shape check only.
@@ -345,7 +349,19 @@ export class AgentRoutes {
         }
         const result = await deliver(from, to, text);
         if (!result.ok) throw new HttpError(400, result.error);
-        return sendJson(res, 202, { relayed: true, exchangeId: result.exchangeId });
+        return sendJson(res, 202, {
+          relayed: true,
+          exchangeId: result.exchangeId,
+          ...(!isSteer
+            ? {
+                message:
+                  `Sent as exchange ${result.exchangeId}. The verdict does NOT start a turn in ` +
+                  'your chat by itself. Use `ask_live_session` with `notify_on_answer`, or ' +
+                  '`wait` and then `read-verdict`.',
+              }
+            : {}),
+          ...(result.deliveredTo ? { delivered_to: result.deliveredTo } : {}),
+        });
       }
       // §8/P3: a `to: forge` message that parses as a typed lifecycle command
       // is dispatched, not queued as a prompt. The reply goes to the sender.

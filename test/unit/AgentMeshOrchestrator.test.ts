@@ -331,11 +331,16 @@ describe('orchestrator: host-side relay (M6)', () => {
 
   it('forwards with two hop events sharing one exchange id, zero model turns', async () => {
     const adapter = new FakeAdapter(true);
+    (adapter as FakeAdapter & { deliveredTo?: string }).deliveredTo =
+      'claude = session 7b39fb6e (joined, workspace n:\\vs code apps\\Forge)';
     const orch = makeOrchestrator({ adapters: { claude: adapter }, owned: new Set(['claude']) });
     const out = await orch.relay('codex', 'claude', 'pass this on');
     expect('error' in out).toBe(false);
     if (!('error' in out)) {
       expect(out.relayed).toBe(true);
+      expect(out.deliveredTo).toBe(
+        'claude = session 7b39fb6e (joined, workspace n:\\vs code apps\\Forge)',
+      );
       // Two relay hop events share the exchange id.
       const hops = board.filter((e) => e.type === 'relay' && e.exchangeId === out.exchangeId);
       expect(hops).toHaveLength(2);

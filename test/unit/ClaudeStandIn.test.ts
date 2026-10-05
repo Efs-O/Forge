@@ -101,6 +101,7 @@ describe('Claude stand-in for a dead joined session', () => {
     await adapter?.send('what did we decide?');
     expect(created.map((c) => c.sessionId)).toEqual(['conv-1']);
     expect(adapter?.note).toBe(claudeStandInNote('conv-1'));
+    expect(adapter?.deliveredTo).toContain('stand-in for conv-1');
     expect(fs.existsSync(ownershipFile)).toBe(false);
     expect(fs.readFileSync(path.join(root, 'aliases.json'), 'utf8')).toBe(aliasBefore);
     expect(p.isOwned('claude')).toBe(false);
@@ -135,6 +136,7 @@ describe('Claude stand-in for a dead joined session', () => {
     sessions = [livePanel(500)];
     const live = await p.resolveAdapter('claude');
     expect(live?.key).toBe('claude-peer:500');
+    expect(live?.deliveredTo).toBe('claude = session conv-1 (joined, workspace /ws)');
     expect(created[0]?.session.disposed).toBe(true);
     await p.dispose();
   });

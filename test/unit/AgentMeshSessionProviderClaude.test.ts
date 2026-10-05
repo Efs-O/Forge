@@ -88,6 +88,7 @@ describe('MeshSessionProvider: owned Claude path (P4)', () => {
     const adapter = await p.resolveAdapter('claude');
     expect(adapter).toBeDefined();
     expect(adapter?.observesTurns).toBe(true);
+    expect(adapter?.deliveredTo).toBe('claude = session owned-id (owned, workspace /ws)');
     expect(p.isOwned('claude')).toBe(true);
     await p.dispose();
   });

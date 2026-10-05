@@ -3,11 +3,7 @@ import * as os from 'os';
 import * as path from 'path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { MeshSessionProvider } from '../../src/agentMesh/sessionProvider';
-import {
-  claimCreation,
-  readOwnership,
-  writeOwnership,
-} from '../../src/agentMesh/ownership';
+import { claimCreation, readOwnership, writeOwnership } from '../../src/agentMesh/ownership';
 import { getAlias, registerAlias } from '../../src/agentMesh/aliasRegistry';
 import { copilotMeshPreamble } from '../../src/agentBus/busContent';
 import type { ForgeConfig } from '../../src/config/types';
@@ -96,6 +92,7 @@ describe('MeshSessionProvider: owned Copilot path (P2)', () => {
     expect(created).toBeDefined();
     expect(created?.observesTurns).toBe(true);
     expect(created?.kind).toBe('copilot');
+    expect(created?.deliveredTo).toBe('copilot = session owned-id (owned, workspace /ws)');
     expect(p.isOwned('copilot')).toBe(true);
     await p.dispose();
   });
