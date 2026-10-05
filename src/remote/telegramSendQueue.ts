@@ -16,6 +16,15 @@ const RATE_LIMIT_STATUS = 429;
 /** Bounded: a chat being throttled indefinitely must surface, not stall forever. */
 const MAX_RATE_LIMIT_RETRIES = 3;
 const MAX_RETRY_AFTER_MS = 60_000;
+/**
+ * A call that has not answered by then is on a dead connection, not a slow
+ * server. Without a bound, a socket that dropped silently held `getUpdates`
+ * for minutes (2026-10-05, 17:02-17:06): nothing the user sent, Stop
+ * included, reached Forge until the OS gave up on it.
+ */
+export const TELEGRAM_CALL_TIMEOUT_MS = 30_000;
+/** A long poll is answered after its own `timeout`; this is the margin past it. */
+export const TELEGRAM_LONG_POLL_GRACE_MS = 10_000;
 
 type Fetch = typeof fetch;
 
@@ -81,17 +90,31 @@ export async function postTelegram(
   method: string,
   body: Record<string, unknown>,
   signal?: AbortSignal,
-  options?: { retryRateLimit?: boolean },
+  options?: { retryRateLimit?: boolean; timeoutMs?: number },
 ): Promise<unknown> {
   const retries = options?.retryRateLimit === false ? 0 : MAX_RATE_LIMIT_RETRIES;
+  const timeoutMs = options?.timeoutMs ?? callTimeoutMs(body);
   for (let attempt = 0; ; attempt += 1) {
-    const response = await fetchImpl(`https://api.telegram.org/bot${token}/${method}`, {
-      method: 'POST',
-      headers: { 'content-type': 'application/json' },
-      body: JSON.stringify(body),
-      ...(signal ? { signal } : {}),
-    });
-    const parsed = safeParse(await readJson(response));
+    const deadline = AbortSignal.timeout(timeoutMs);
+    const callSignal = signal ? AbortSignal.any([signal, deadline]) : deadline;
+    let response: Response;
+    let parsed: z.infer<typeof TelegramResponseSchema> | undefined;
+    try {
+      response = await fetchImpl(`https://api.telegram.org/bot${token}/${method}`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify(body),
+        signal: callSignal,
+      });
+      parsed = safeParse(await readJson(response, callSignal));
+    } catch (err) {
+      if (deadline.aborted && !signal?.aborted) {
+        throw new Error(
+          `Telegram Bot API ${method} got no answer in ${timeoutMs / 1_000} s; the connection was likely lost.`,
+        );
+      }
+      throw err;
+    }
     if (response.status === RATE_LIMIT_STATUS) {
       const retryAfterMs = Math.min(
         Math.max(parsed?.parameters?.retry_after ?? 1, 1) * 1_000,
@@ -125,12 +148,22 @@ export class TelegramRateLimitError extends Error {
 
 /** A throttled or failed call can carry a non-JSON body; that is not an error
  *  worth masking the HTTP status with. */
-async function readJson(response: Response): Promise<unknown> {
+async function readJson(response: Response, signal: AbortSignal): Promise<unknown> {
   try {
     return await response.json();
-  } catch {
+  } catch (err) {
+    // A body cut off by the deadline is a lost connection, not a bad payload.
+    if (signal.aborted) throw err;
     return undefined;
   }
+}
+
+/** `getUpdates` carries its own long-poll `timeout` in seconds; others none. */
+function callTimeoutMs(body: Record<string, unknown>): number {
+  const longPoll = body.timeout;
+  return typeof longPoll === 'number' && longPoll > 0
+    ? longPoll * 1_000 + TELEGRAM_LONG_POLL_GRACE_MS
+    : TELEGRAM_CALL_TIMEOUT_MS;
 }
 
 function safeParse(payload: unknown): z.infer<typeof TelegramResponseSchema> | undefined {

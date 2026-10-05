@@ -74,6 +74,29 @@ describe('TelegramChatQueue', () => {
 });
 
 describe('postTelegram', () => {
+  /** A connection that dropped silently: the request never answers on its own. */
+  const hangingFetch = (async (_url: string | URL | Request, init?: RequestInit) =>
+    new Promise<Response>((_resolve, reject) => {
+      init?.signal?.addEventListener('abort', () => reject(init.signal?.reason));
+    })) as typeof fetch;
+
+  it('gives up on a call that never answers instead of waiting forever', async () => {
+    // 2026-10-05: a dead socket held getUpdates for four minutes, so no
+    // message -- Stop included -- reached Forge.
+    await expect(
+      postTelegram(hangingFetch, 'token', 'getUpdates', { timeout: 25 }, undefined, {
+        timeoutMs: 20,
+      }),
+    ).rejects.toThrow('getUpdates got no answer in 0.02 s');
+  });
+
+  it('reports a caller abort as the abort, not as a lost connection', async () => {
+    const abort = new AbortController();
+    const call = postTelegram(hangingFetch, 'token', 'sendMessage', { chat_id: '1' }, abort.signal);
+    abort.abort(new Error('window closing'));
+    await expect(call).rejects.toThrow('window closing');
+  });
+
   it('waits the interval Telegram names on a 429, then delivers the same message', async () => {
     vi.useFakeTimers();
     try {
@@ -83,7 +106,10 @@ describe('postTelegram', () => {
         bodies.push(String(init?.body));
         attempts += 1;
         return attempts === 1
-          ? jsonResponse({ ok: false, description: 'Too Many Requests', parameters: { retry_after: 5 } }, 429)
+          ? jsonResponse(
+              { ok: false, description: 'Too Many Requests', parameters: { retry_after: 5 } },
+              429,
+            )
           : jsonResponse({ ok: true, result: { message_id: 7 } });
       }) as typeof fetch;
 
