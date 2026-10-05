@@ -198,7 +198,7 @@ export class PowerShellDesktopDriver implements DesktopDriver {
         // future phase makes it a term in any calculation, it must move to a
         // validating reader in driverProtocol.ts first.
         // Informational only — see the window-capture note above.
-      dpiScale: num(r['dpi_scale']),
+        dpiScale: num(r['dpi_scale']),
         origin: { x: frame.originX, y: frame.originY },
         approvedHwnd: approved.hwnd,
         approvedPid: approved.pid,
