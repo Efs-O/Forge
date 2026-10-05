@@ -7,6 +7,7 @@ import type { RemoteAuth } from './RemoteAuth';
 import type { RemoteOutboxDelivery } from './RemoteOutboxDelivery';
 import { withConversationIdentity } from './RemoteReplyIdentity';
 import { settleRemoteClaim } from './remoteClaimSettle';
+import { openProgressBubble } from './telegramRichDraft';
 import type { RemoteRequestStore } from './RemoteRequestStore';
 import type { RemoteChannel } from './types';
 
@@ -67,10 +68,32 @@ export async function drainRemoteQueue(
           deps.host.contextBudget?.(next.conversationId),
         )}`,
     );
-    const progressId = await deps.channel
-      .sendProgress?.(next.chatId, 'Forge: working…', { signal: deps.signal })
-      .catch(() => undefined);
-    if (progressId) deps.progress.begin(conversationId, next.chatId, progressId);
+    // Rich draft where the transport has one, plain bubble otherwise. The
+    // shared helper is what keeps the two openers' fallback rule identical: a
+    // definitive refusal retries this turn on the plain path, an ambiguous one
+    // stops rather than risk a second progress bubble next to a live preview.
+    const bubble = await openProgressBubble(
+      deps.channel,
+      next.chatId,
+      'Forge: working…',
+      deps.signal,
+    );
+    if (bubble.kind === 'draft') {
+      deps.progress.begin(
+        conversationId,
+        next.chatId,
+        `draft-${bubble.draftId}`,
+        'remote',
+        bubble.draftId,
+      );
+    } else if (bubble.kind === 'plain') {
+      deps.progress.begin(conversationId, next.chatId, bubble.messageId);
+    } else if (bubble.error) {
+      // Only a real fault is worth a warning. A transport that offers no
+      // progress affordance at all is normal (and was silent before this
+      // phase), so reporting it per request would flood the log.
+      deps.onError?.(`Forge remote progress could not be opened: ${bubble.error}`);
+    }
     let progressOutcome: ProgressOutcome = 'failed';
     try {
       const attachmentStore = deps.attachmentStore();
@@ -142,7 +165,7 @@ export async function drainRemoteQueue(
       )
         return;
     } finally {
-      if (progressId) {
+      if (bubble.kind !== 'declined') {
         await deps.progress.finish(conversationId, progressTerminalText(progressOutcome));
       }
       deps.activeConversations.delete(conversationId);

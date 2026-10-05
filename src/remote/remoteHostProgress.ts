@@ -1,6 +1,7 @@
 import type { AgentProgressEvent } from '../sidebar/AgentProgress';
 import type { RemoteAgentProgress } from './RemoteAgentProgress';
 import type { RemoteChannel } from './types';
+import { openProgressBubble } from './telegramRichDraft';
 
 /**
  * Events held while the opening message is in flight.
@@ -83,7 +84,9 @@ export class HostProgressOpener {
       if (buffered.length < MAX_BUFFERED_EVENTS) buffered.push(event);
       return;
     }
-    if (!this.deps.channel.sendProgress || !this.deps.channel.editMessage) return;
+    // Either lane can carry the bubble, so the guard asks for a lane rather than
+    // for `editMessage` specifically — a draft transport has no message to edit.
+    if (!this.deps.channel.sendProgress && !this.deps.channel.richDraft) return;
     const chatId = this.deps.target(conversationId);
     if (!chatId) return;
     this.opening.set(conversationId, [event]);
@@ -98,17 +101,40 @@ export class HostProgressOpener {
 
   private async open(conversationId: string, chatId: string): Promise<void> {
     try {
-      const messageId = await this.deps.channel.sendProgress?.(chatId, 'Forge: working…', {
-        signal: this.deps.signal,
-      });
+      const bubble = await openProgressBubble(
+        this.deps.channel,
+        chatId,
+        'Forge: working…',
+        this.deps.signal,
+      );
       // Re-checked after the await: the turn can end, or a chat-originated
       // prompt can claim the conversation, while the send is in flight.
-      if (!messageId) {
+      if (bubble.kind === 'declined') {
         this.declined.add(conversationId);
+        if (bubble.error) {
+          this.deps.onError?.(`Forge remote progress could not be opened: ${bubble.error}`);
+        }
         return;
       }
-      if (this.deps.signal.aborted || this.deps.progress.has(conversationId)) return;
-      this.deps.progress.begin(conversationId, chatId, messageId, 'host');
+      if (this.deps.signal.aborted || this.deps.progress.has(conversationId)) {
+        // A bubble opened for a turn that is no longer ours to report. A draft
+        // needs no cleanup (it expires on Telegram's side); a plain bubble is
+        // not deleted here because the existing policy never deleted a progress
+        // message it did not finish, and inventing a delete path here would be
+        // a new behaviour this phase does not need.
+        return;
+      }
+      if (bubble.kind === 'draft') {
+        this.deps.progress.begin(
+          conversationId,
+          chatId,
+          `draft-${bubble.draftId}`,
+          'host',
+          bubble.draftId,
+        );
+      } else {
+        this.deps.progress.begin(conversationId, chatId, bubble.messageId, 'host');
+      }
       for (const held of this.opening.get(conversationId) ?? []) {
         this.deps.progress.handle(held);
       }

@@ -1,4 +1,5 @@
 import type { ForgeHostFacade } from '../sidebar/ForgeHostFacade';
+import { describeError } from '../util/describeError';
 import type { RemoteAuth } from './RemoteAuth';
 import type { RemoteRequestStore } from './RemoteRequestStore';
 import { remoteDedupKey } from './RemoteRequestStore';
@@ -23,7 +24,8 @@ import { applyRemoteAuthGate } from './remoteAuthGate';
 import { RemoteApprovalBridge } from './RemoteApprovalBridge';
 import { RemoteQuestionBridge } from './RemoteQuestionBridge';
 import { CommandCleanupScheduler } from './CommandCleanupScheduler';
-import { RemoteAgentProgress } from './RemoteAgentProgress';
+import { RemoteAgentProgress, CLOCK_INTERVAL_MS } from './RemoteAgentProgress';
+import { RemoteDraftRegistry } from './RemoteDraftRegistry';
 import { HostProgressOpener } from './remoteHostProgress';
 import { RemoteNotificationFanout } from './RemoteNotificationFanout';
 import {
@@ -57,6 +59,12 @@ export class RemoteController {
   private readonly approvals: RemoteApprovalBridge;
   private readonly questions: RemoteQuestionBridge;
   private readonly progress: RemoteAgentProgress;
+  /**
+   * Live rich-draft previews, shared between the progress lifecycle (which
+   * registers them) and the Stop handler (which resolves one back to a
+   * conversation). In-memory by design — see `RemoteDraftRegistry`.
+   */
+  private readonly drafts = new RemoteDraftRegistry();
   private readonly hostProgress: HostProgressOpener;
   private readonly pending = new RemotePendingPrompt();
   /** Best-effort deletion of processed owner commands from Telegram. */
@@ -139,6 +147,8 @@ export class RemoteController {
       options.onError,
       (chatId, messageIds, delaySeconds) =>
         this.commandCleanup.armAfter(chatId, messageIds, delaySeconds),
+      CLOCK_INTERVAL_MS,
+      this.drafts,
     );
     this.fanout = new RemoteNotificationFanout({
       store,
@@ -305,6 +315,7 @@ export class RemoteController {
         }
       );
     }
+    if (event.kind === 'generation_stopped') return this.handleGenerationStopped(event);
     if (event.kind === 'unsupported_media') {
       // An explicit answer beats silence. The old behaviour was to drop the
       // update while the cursor advanced, so sending a video looked like Forge
@@ -395,6 +406,47 @@ export class RemoteController {
     if (result.kind !== 'rejected' && result.kind !== 'retry') this.auth.touch(event);
     return result;
   }
+  /**
+   * Telegram's native Stop button on a rich-draft preview.
+   *
+   * The update names only a chat and a draft id, so the whole job here is
+   * matching: an id that is not one of this window's live drafts is stale or
+   * belongs to another transport, and must do nothing. Cancelling on a mismatch
+   * would stop a turn the user never pressed Stop on.
+   *
+   * It reaches this point only after the ordinary owner gate, which is what
+   * makes the derived `senderId` (see the mapping) safe: the gate compares it
+   * against the paired owner id, and pairing itself requires a `/pair` *text*
+   * event, so a Stop update cannot establish authority for a chat that has none.
+   */
+  private async handleGenerationStopped(
+    event: Extract<RemoteInboundEvent, { kind: 'generation_stopped' }>,
+  ): Promise<RemoteInboundDisposition> {
+    // Claimed before anything is awaited, so two Stop deliveries cannot both
+    // see the same entry and both cancel.
+    const draft = this.drafts.take(event.chatId, event.draftId);
+    if (!draft) {
+      // Stale, foreign, or already finalized. Acknowledged rather than retried:
+      // retrying would redeliver the same update and the cursor would never
+      // advance past a Stop nobody can answer.
+      return { kind: 'handled' };
+    }
+    // The same action `/stop` takes, reached directly. No synthesized text event:
+    // this update has no sender and no message id to build one from. Awaited the
+    // same way, so a host that answers with nothing cannot turn a `.catch` on a
+    // non-Promise into a failed disposition.
+    try {
+      await this.host.cancel(draft.conversationId);
+    } catch (err) {
+      // Reported, not swallowed. The update is still acknowledged — a Stop the
+      // user meant must not be retried into a loop — but a cancel that failed
+      // means the turn is still running, and silence would hide that.
+      this.options.onError?.(`Forge remote Stop could not cancel the turn: ${describeError(err)}`);
+    }
+    this.auth.touch(event);
+    return { kind: 'handled' };
+  }
+
   private isBusy(conversationId: string): boolean {
     const status = this.host.status();
     return (

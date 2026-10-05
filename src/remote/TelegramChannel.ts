@@ -6,6 +6,7 @@ export { splitTelegramText } from './TelegramText';
 import type { RemoteChannel, RemoteInboundDisposition, RemoteInboundEvent } from './types';
 import { createTelegramSelectionPages } from './TelegramSelectionPagination';
 import { postTelegram, TelegramChatQueue } from './telegramSendQueue';
+import { TelegramRichDrafts } from './telegramRichDraft';
 import { TelegramOutbound } from './TelegramOutbound';
 
 type Fetch = typeof fetch;
@@ -196,6 +197,17 @@ export class TelegramChannel implements RemoteChannel {
   retractPrompt(...args: Parameters<TelegramOutbound['retractPrompt']>) {
     return this.outbound.retractPrompt(...args);
   }
+
+  /**
+   * Telegram's rich-draft progress lane, exposed as the `RemoteChannel`
+   * capability. It goes through the same `call`, so draft sends are serialized
+   * in the chat's lane by `TelegramChatQueue` and cannot overtake the
+   * narrations and the final status around them.
+   */
+  readonly richDraft = new TelegramRichDrafts((method, body, signal) =>
+    this.call(method, body, signal),
+  );
+
   resolvePromptKeyboard(...args: Parameters<TelegramOutbound['resolvePromptKeyboard']>) {
     return this.outbound.resolvePromptKeyboard(...args);
   }

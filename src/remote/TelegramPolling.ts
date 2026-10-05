@@ -49,7 +49,7 @@ export async function pollTelegramUpdates(
           // Give a photo group a short chance to deliver its next update.
           // Telegram may split one album across long-poll responses.
           timeout: dependencies.albumCoordinator.hasPending ? 1 : 25,
-          allowed_updates: ['message', 'callback_query'],
+          allowed_updates: ['message', 'callback_query', 'stopped_message_generation'],
         },
         signal,
       );

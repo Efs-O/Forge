@@ -186,6 +186,15 @@ describe('redelivered Telegram updates (audit A6)', () => {
     const event = textEvent('20', 'hello', GROUP_ID, 'msg-7');
     await value.service.handleGroup(event);
     await value.service.handleGroup({ ...event });
+    // `boot` passes burstWindowMs 0, so the burst timer fires on setTimeout(0)
+    // and reaching runContactPrompt still costs two file-IO awaits
+    // (setDisposition + instructions.load). A fixed 50 ms sleep therefore
+    // races the scheduler under suite load and intermittently sees zero calls.
+    // Wait for the prompt to run, then assert the count is still exactly one —
+    // which is the dedup invariant this test exists for.
+    await vi.waitFor(() => expect(value.host.runContactPrompt).toHaveBeenCalled());
+    // Then give a hypothetical second prompt the same grace the old sleep
+    // gave it, so "exactly once" still means what it meant before.
     await settle();
     expect(value.host.runContactPrompt).toHaveBeenCalledOnce();
   });

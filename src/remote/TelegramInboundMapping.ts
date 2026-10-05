@@ -109,6 +109,21 @@ export const TelegramUpdateSchema = z.object({
         .optional(),
     })
     .optional(),
+  /**
+   * The user pressed Stop on a rich-draft preview. `chat` and `draft_id` are
+   * all there is — there is no `from` and no message id, which is why this
+   * becomes its own event kind instead of a synthesized `/stop`.
+   */
+  stopped_message_generation: z
+    .object({
+      chat: z.object({
+        id: z.union([z.number(), z.string()]),
+        type: z.string(),
+        title: z.string().optional(),
+      }),
+      draft_id: z.number().int(),
+    })
+    .optional(),
 });
 
 /**
@@ -221,6 +236,29 @@ function unsupportedUserMedia(
 export function telegramUpdateToEvent(
   update: z.infer<typeof TelegramUpdateSchema>,
 ): RemoteInboundEvent | undefined {
+  /**
+   * Checked first, and deliberately before every `message` branch: this update
+   * has no message at all, so nothing else here could match it. The identity it
+   * carries is the Telegram `update_id` — the only stable id this update has —
+   * which is what makes a redelivered Stop deduplicate instead of cancelling
+   * twice. `senderId` is derived from the chat id because Telegram sends no
+   * `from`: in a private chat the chat and the user are the same principal, and
+   * the owner gate still has to pass on that derived id.
+   */
+  const stopped = update.stopped_message_generation;
+  if (stopped) {
+    return {
+      channel: 'telegram',
+      kind: 'generation_stopped',
+      providerMessageId: String(update.update_id),
+      senderId: String(stopped.chat.id),
+      chatId: String(stopped.chat.id),
+      chatType: telegramChatType(stopped.chat.type),
+      receivedAt: Date.now(),
+      ...(stopped.chat.title ? { chatTitle: stopped.chat.title } : {}),
+      draftId: stopped.draft_id,
+    };
+  }
   const message = update.message;
   /**
    * Unsupported media is checked before the text/caption branch on purpose.

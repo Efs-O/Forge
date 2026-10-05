@@ -1,6 +1,7 @@
 import type * as vscode from 'vscode';
 import type { ForgeHostFacade } from '../sidebar/ForgeHostFacade';
 import type { RemoteRequestStore } from './RemoteRequestStore';
+import type { RichDraftTransport } from './telegramRichDraft';
 import type { RemoteInboundAttachment, RemoteInboundEvent } from './remoteInboundSchema';
 
 /**
@@ -273,6 +274,12 @@ export interface RemoteChannel {
     text: string,
     options?: { signal?: AbortSignal },
   ): Promise<string | undefined>;
+  /**
+   * Telegram-only rich-draft progress with Telegram's native Stop button.
+   * Present only on transports that can stream a preview and finalize it; the
+   * progress lifecycle falls back to `sendProgress` + `editMessage` without it.
+   */
+  richDraft?: RichDraftTransport;
   /** Best-effort presentation only; a reload may lose the provider message id. */
   editMessage?(
     chatId: string,

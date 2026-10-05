@@ -1,12 +1,14 @@
 import type { AgentProgressEvent } from '../sidebar/AgentProgress';
 import type { RemoteChannel } from './types';
 import { QUEUED_ACK_DELETE_SECONDS } from './TelegramAcknowledgement';
+import { DRAFT_HEARTBEAT_MS } from './telegramRichDraft';
+import type { RemoteDraftRegistry } from './RemoteDraftRegistry';
 import { renderRemoteProgress } from './remoteProgressRender';
+import { keepTail, sanitize, sanitizeToolName } from './remoteProgressText';
 
 const DEFAULT_EDIT_INTERVAL_MS = 1_500;
 export const CLOCK_INTERVAL_MS = 60_000;
 const MAX_STATUS_CHARS = 500;
-const MAX_TOOL_NAME_CHARS = 80;
 const MAX_NOTICE_CHARS = 300;
 /** Warnings latch, so the tail is bounded rather than the whole turn's worth. */
 const MAX_LATCHED_WARNINGS = 4;
@@ -42,6 +44,13 @@ interface ActiveProgress {
   origin: ProgressOrigin;
   chatId: string;
   messageId: string;
+  /**
+   * Set when the bubble is a rich draft preview rather than a real message.
+   * A draft has no message id at all, and Telegram's Stop update names it by
+   * draft id — so this is what that update must match, and what every later
+   * update must reuse for the change to animate in place instead of replacing.
+   */
+  draftId?: number | undefined;
   headline: string;
   milestone?: string;
   /**
@@ -121,6 +130,12 @@ export class RemoteAgentProgress {
       delaySeconds: number,
     ) => void,
     private readonly clockIntervalMs = CLOCK_INTERVAL_MS,
+    /**
+     * Live draft previews this progress owns, shared with the controller so a
+     * Telegram Stop update can resolve a draft id back to a conversation.
+     * Absent for transports with no rich drafts.
+     */
+    private readonly drafts?: RemoteDraftRegistry | undefined,
   ) {}
 
   updateMaxMessageChars(maxMessageChars: number): void {
@@ -132,6 +147,7 @@ export class RemoteAgentProgress {
     chatId: string,
     messageId: string,
     origin: ProgressOrigin = 'remote',
+    draftId?: number | undefined,
   ): void {
     this.drop(conversationId);
     const now = Date.now();
@@ -139,6 +155,7 @@ export class RemoteAgentProgress {
       origin,
       chatId,
       messageId,
+      ...(draftId === undefined ? {} : { draftId }),
       headline: DEFAULT_HEADLINE,
       warnings: [],
       lastText: DEFAULT_HEADLINE,
@@ -150,8 +167,24 @@ export class RemoteAgentProgress {
       closed: false,
     });
     const state = this.active.get(conversationId)!;
-    if (this.channel.editMessage) {
-      state.clock = setInterval(() => this.queueEdit(conversationId, state), this.clockIntervalMs);
+    if (draftId !== undefined) this.drafts?.register({ chatId, conversationId, draftId });
+    // The 60s clock keeps the elapsed-time line honest on a quiet turn. A
+    // draft lane counts as updatable too: without it a draft-only transport
+    // would never refresh its own clock.
+    if (this.channel.editMessage || this.channel.richDraft) {
+      // A draft is a ~30-second preview on Telegram's side, so the draft lane
+      // must re-send faster than the clock needs: on a quiet turn a 60s cadence
+      // would let the preview — and its Stop button — expire mid-turn. The
+      // heartbeat rides the same coalesced, per-chat-serialized path as any
+      // other update, so it cannot overtake a narration or reorder the lane.
+      const intervalMs =
+        state.draftId === undefined
+          ? this.clockIntervalMs
+          : Math.min(this.clockIntervalMs, DRAFT_HEARTBEAT_MS);
+      state.clock = setInterval(
+        () => this.queueEdit(conversationId, state, { heartbeat: state.draftId !== undefined }),
+        intervalMs,
+      );
     }
   }
 
@@ -192,7 +225,7 @@ export class RemoteAgentProgress {
 
   handle(event: AgentProgressEvent): void {
     const state = this.active.get(event.conversationId);
-    if (!state || state.closed || !this.channel.editMessage) return;
+    if (!state || state.closed || !(this.channel.editMessage || this.channel.richDraft)) return;
     if (event.kind === 'end') {
       // Only the lazily-opened kind. A remote request's message is closed by
       // RemoteQueueDrain with the request's own outcome, which knows the two
@@ -278,8 +311,35 @@ export class RemoteAgentProgress {
     await state.tail;
     // Only this state: a new message may have begun for the conversation
     // while the tail settled, and it is not this call's to delete.
-    if (this.active.get(conversationId) === state) this.active.delete(conversationId);
-    if (this.signal.aborted || !this.channel.editMessage) return;
+    if (this.active.get(conversationId) === state) {
+      this.active.delete(conversationId);
+      if (state.draftId !== undefined) this.drafts?.forgetConversation(conversationId);
+    }
+    if (this.signal.aborted) return;
+    if (state.draftId !== undefined) {
+      // The preview is a 30-second thing. Telegram keeps nothing unless the
+      // bot sends the final message, so this is the step that makes the turn's
+      // status visible after the preview expires — and it carries status only,
+      // never the answer, which is always its own message.
+      if (!this.channel.richDraft) return;
+      if (!(await this.safeCanDeliver(state.chatId))) return;
+      const finalized = await this.channel.richDraft
+        .finalizeStatus(state.chatId, terminalText.slice(0, this.maxMessageChars), {
+          signal: this.signal,
+        })
+        .then((messageId) => ({ messageId }))
+        .catch((err: unknown) => {
+          // A failed final send is reported, not swallowed quietly: the preview
+          // is about to expire and there is no status left in the chat.
+          this.reportFinalizeFailure(err);
+          return undefined;
+        });
+      if (finalized?.messageId) {
+        this.armAfter?.(state.chatId, [finalized.messageId], QUEUED_ACK_DELETE_SECONDS);
+      }
+      return;
+    }
+    if (!this.channel.editMessage) return;
     if (!(await this.safeCanDeliver(state.chatId))) return;
     await this.channel
       .editMessage(state.chatId, state.messageId, terminalText.slice(0, this.maxMessageChars), {
@@ -296,6 +356,7 @@ export class RemoteAgentProgress {
       this.clearTimers(state);
       pending.push(state.tail);
       this.active.delete(conversationId);
+      if (state.draftId !== undefined) this.drafts?.forgetConversation(conversationId);
     }
     await Promise.allSettled(pending);
   }
@@ -340,14 +401,34 @@ export class RemoteAgentProgress {
     }, this.editIntervalMs);
   }
 
-  private queueEdit(conversationId: string, state: ActiveProgress): void {
+  private queueEdit(
+    conversationId: string,
+    state: ActiveProgress,
+    options?: { heartbeat?: boolean },
+  ): void {
     const text = renderRemoteProgress(state, this.maxMessageChars, Date.now());
-    if (text === state.lastText || text === state.queuedText) return;
+    // A heartbeat must re-send even when nothing changed: Telegram expires a
+    // draft that has not been re-sent within ~30 seconds, so suppressing the
+    // identical text would let a quiet turn lose its preview and its Stop
+    // button. The unchanged-text guard only suppresses ordinary updates.
+    const heartbeat = options?.heartbeat === true && state.draftId !== undefined;
+    if (!heartbeat && (text === state.lastText || text === state.queuedText)) return;
     state.queuedText = text;
     state.tail = state.tail
       .then(async () => {
-        if (state.closed || this.signal.aborted || !this.channel.editMessage) return;
+        if (state.closed || this.signal.aborted) return;
         if (this.active.get(conversationId) !== state) return;
+        if (state.draftId !== undefined) {
+          // Same draft id every time: Telegram animates changes to a draft that
+          // shares an identifier and replaces the others without animation.
+          const rich = this.channel.richDraft;
+          if (!rich) return;
+          if (!(await this.safeCanDeliver(state.chatId))) return;
+          await rich.updateDraft(state.chatId, state.draftId, text, { signal: this.signal });
+          state.lastText = text;
+          return;
+        }
+        if (!this.channel.editMessage) return;
         if (!(await this.safeCanDeliver(state.chatId))) return;
         await this.channel.editMessage(state.chatId, state.messageId, text, {
           signal: this.signal,
@@ -366,6 +447,7 @@ export class RemoteAgentProgress {
     previous.closed = true;
     this.clearTimers(previous);
     this.active.delete(conversationId);
+    if (previous.draftId !== undefined) this.drafts?.forgetConversation(conversationId);
   }
 
   private clearTimers(state: ActiveProgress): void {
@@ -381,6 +463,20 @@ export class RemoteAgentProgress {
     );
   }
 
+  /**
+   * Named separately from `report` on purpose. A failed draft *update* costs the
+   * chat one stale line; a failed *finalize* means the preview expires and the
+   * turn leaves no status behind, which is a different complaint and needs a
+   * different sentence to be actionable.
+   */
+  private reportFinalizeFailure(err: unknown): void {
+    this.onError?.(
+      `Forge remote status could not be finalized: ${
+        err instanceof Error ? err.message : String(err)
+      }`,
+    );
+  }
+
   private async safeCanDeliver(chatId: string): Promise<boolean> {
     try {
       return await this.canDeliver(chatId);
@@ -389,23 +485,4 @@ export class RemoteAgentProgress {
       return false;
     }
   }
-}
-
-function sanitize(value: string): string {
-  let output = '';
-  for (const character of value) {
-    const code = character.charCodeAt(0);
-    if (code === 9 || code === 10 || code === 13 || (code >= 32 && code !== 127)) {
-      output += character;
-    }
-  }
-  return output;
-}
-
-function sanitizeToolName(value: string): string {
-  return (value.match(/^[a-zA-Z0-9_.:-]+/)?.[0] ?? '').slice(0, MAX_TOOL_NAME_CHARS);
-}
-
-function keepTail(value: string, maximum: number): string {
-  return value.length <= maximum ? value : `…${value.slice(-(maximum - 1))}`;
 }
