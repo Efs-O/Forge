@@ -29,7 +29,17 @@ import type {
   DesktopDriver,
   DesktopPoint,
   DesktopWindow,
+  WindowListing,
 } from './DesktopDriver';
+import { assertMonitorIndex } from './DesktopDriver';
+import {
+  num,
+  optNum,
+  readCaptureFrame,
+  readMonitorMetadata,
+  readWindowRect,
+  str,
+} from './driverProtocol';
 import { PowerShellTransport, type DesktopTransport } from './PowerShellTransport';
 
 // Re-export so existing imports (e.g. the unit test) keep working.
@@ -41,10 +51,6 @@ interface CaptureRecord {
   kind: 'window' | 'monitor';
   approved?: ApprovedWindow;
 }
-
-const num = (v: unknown): number => (typeof v === 'number' ? v : 0);
-const str = (v: unknown): string => (typeof v === 'string' ? v : '');
-const optNum = (v: unknown): number | undefined => (typeof v === 'number' ? v : undefined);
 
 /**
  * System chords that are never AUTO-approved (B2): any `win` key, `alt+f4`, or
@@ -74,14 +80,34 @@ export class PowerShellDesktopDriver implements DesktopDriver {
 
   constructor(private readonly transport: DesktopTransport = new PowerShellTransport()) {}
 
-  async listWindows(): Promise<DesktopWindow[]> {
+  async listWindows(): Promise<WindowListing> {
     const r = await this.transport.send({ op: 'list_windows' });
-    const windows = Array.isArray(r['windows']) ? (r['windows'] as Record<string, unknown>[]) : [];
-    return windows.map((w) => ({
-      id: str(w['id']),
-      title: str(w['title']),
-      rect: { x: num(w['x']), y: num(w['y']), width: num(w['width']), height: num(w['height']) },
-    }));
+    if (!Array.isArray(r['windows'])) {
+      // A missing/renamed field is a protocol break, not an empty desktop.
+      // Reporting "no visible windows" would send the model off to relaunch
+      // something that is already on screen.
+      throw new Error(
+        'desktop_windows: the desktop driver returned no window list (protocol mismatch); ' +
+          'retry, and if it persists the bundled driver does not match this build',
+      );
+    }
+    const windows = r['windows'] as Record<string, unknown>[];
+    const out: DesktopWindow[] = [];
+    const skipped: string[] = [];
+    for (const w of windows) {
+      const id = str(w['id']);
+      const title = str(w['title']);
+      if (id === '' || title === '') continue; // no title => not a usable target (driver's own filter)
+      const rect = readWindowRect(w['rect']);
+      // A malformed item is NAMED IN THE RESULT, not merely logged: a list that
+      // quietly lost a window is a quieter version of the 0×0 row it replaces.
+      if (!rect) {
+        skipped.push(`"${title}" (HWND ${id}) had malformed geometry and was skipped`);
+        continue;
+      }
+      out.push({ id, title, rect });
+    }
+    return { windows: out, skipped };
   }
 
   /**
@@ -99,36 +125,47 @@ export class PowerShellDesktopDriver implements DesktopDriver {
     target: { kind: 'window'; title: string } | { kind: 'monitor'; index: number },
     opts: { allowNewApproval?: boolean } = {},
   ): Promise<DesktopCapture> {
+    // Enforced here as well as at the tool layer: a direct driver call must not
+    // be able to reach the transport with `0.5` or `-1` and let PowerShell's
+    // `[int]` cast pick a different display than the caller (and the user who
+    // approved a capture) intended.
+    if (target.kind === 'monitor') assertMonitorIndex(target.index);
     const op =
       target.kind === 'window'
         ? { op: 'capture', kind: 'window', title: target.title }
         : { op: 'capture', kind: 'monitor', index: target.index };
     const r = await this.transport.send(op);
-    const frame: CaptureFrame = {
-      captureWidth: num(r['capture_width']),
-      captureHeight: num(r['capture_height']),
-      imageWidth: num(r['image_width']),
-      imageHeight: num(r['image_height']),
-      originX: num((r['origin'] as { x?: number })?.x),
-      originY: num((r['origin'] as { y?: number })?.y),
-    };
+    const frame = readCaptureFrame(r);
     const png = Buffer.from(str(r['png_base64']), 'base64');
+    // Checked only AFTER the target-identity refusals below: a VS Code fork, a
+    // UAC window, or a different HWND must still be named as the reason, even
+    // when the driver also failed to produce pixels. A payload defect must never
+    // mask a security refusal.
+    const requireImage = (): void => {
+      if (png.length === 0) {
+        throw new Error(
+          `desktop_capture: the driver returned an empty image for a ${target.kind} capture`,
+        );
+      }
+    };
     const captureId = `cap-${++this.captureCounter}`;
     if (target.kind === 'window') {
       const startTime = optNum(r['process_start_time']);
       this.requireReadableStartTime(startTime, str(r['title']));
+      const windowRect = readWindowRect(r['rect']);
+      if (!windowRect) {
+        throw new Error(
+          `desktop_capture: the driver returned malformed geometry for "${str(r['title'])}"; ` +
+            'cannot bind a control target whose rect is unknown',
+        );
+      }
       const approved: ApprovedWindow = {
         hwnd: str(r['hwnd']),
         pid: num(r['pid']),
         title: str(r['title']),
         className: str(r['class']),
         processName: str(r['process_name']),
-        rect: {
-          x: num((r['rect'] as { x?: number })?.x),
-          y: num((r['rect'] as { y?: number })?.y),
-          width: num((r['rect'] as { width?: number })?.width),
-          height: num((r['rect'] as { height?: number })?.height),
-        },
+        rect: windowRect,
         ...(startTime !== undefined ? { processStartTime: startTime } : {}),
       };
       // B2: the hard refusal (VS Code / UAC / taskbar) happens here, even though
@@ -143,6 +180,7 @@ export class PowerShellDesktopDriver implements DesktopDriver {
       }
       const gateResult = this.gate.approve(approved);
       if (!gateResult.ok) throw new Error(gateResult.reason);
+      requireImage();
       this.approved = approved;
       this.captures.set(captureId, { frame, kind: 'window', approved });
       return {
@@ -151,13 +189,27 @@ export class PowerShellDesktopDriver implements DesktopDriver {
         png,
         width: frame.imageWidth,
         height: frame.imageHeight,
-        dpiScale: num(r['dpi_scale']),
+        captureWidth: frame.captureWidth,
+        captureHeight: frame.captureHeight,
+        // `dpi_scale` is the one driver number that is NOT validated: it is
+        // informational only. The coordinate transform uses the capture frame
+        // (capture/image sizes + origin), never this value (B6), so a defaulted
+        // 0 cannot misplace input — it would only print `dpi_scale=0`. If a
+        // future phase makes it a term in any calculation, it must move to a
+        // validating reader in driverProtocol.ts first.
+        // Informational only — see the window-capture note above.
+      dpiScale: num(r['dpi_scale']),
         origin: { x: frame.originX, y: frame.originY },
         approvedHwnd: approved.hwnd,
         approvedPid: approved.pid,
         title: approved.title,
       };
     }
+    // Past the window branch `target` is a monitor request, so the metadata is
+    // read unconditionally: a monitor capture that cannot name its display is a
+    // refusal, never a frame with unknown identity.
+    const monitor = readMonitorMetadata(r, target.index, str(r['monitor_device']));
+    requireImage();
     this.captures.set(captureId, { frame, kind: 'monitor' });
     return {
       captureId,
@@ -165,8 +217,13 @@ export class PowerShellDesktopDriver implements DesktopDriver {
       png,
       width: frame.imageWidth,
       height: frame.imageHeight,
+      captureWidth: frame.captureWidth,
+      captureHeight: frame.captureHeight,
       dpiScale: num(r['dpi_scale']),
       origin: { x: frame.originX, y: frame.originY },
+      monitorIndex: monitor.index,
+      monitorCount: monitor.count,
+      monitorDevice: monitor.device,
     };
   }
 
@@ -179,21 +236,27 @@ export class PowerShellDesktopDriver implements DesktopDriver {
         : { op: 'focus_window', window_id: target.id };
     const r = await this.transport.send(op);
     const w = (r['window'] ?? r) as Record<string, unknown>;
-    const rect = (w['rect'] ?? {}) as Record<string, unknown>;
     const startTime = optNum(w['process_start_time']);
     this.requireReadableStartTime(startTime, str(w['title']));
+    // Same nested-rect shape as list_windows. The gate below compares input
+    // points against it, so a defaulted 0×0 rect would bind a target whose every
+    // point is "outside the approved window" — a real window, an unfalsifiable
+    // refusal, and no hint that the driver never described its geometry.
+    const rect =
+      readWindowRect(w['rect']) ??
+      (() => {
+        throw new Error(
+          `desktop_focus_window: the driver returned malformed geometry for "${str(w['title'])}"; ` +
+            'cannot bind a target whose rect is unknown',
+        );
+      })();
     const approved: ApprovedWindow = {
       hwnd: str(w['id']),
       pid: num(w['pid']),
       title: str(w['title']),
       className: str(w['class']),
       processName: str(w['process_name']),
-      rect: {
-        x: num(rect['x']),
-        y: num(rect['y']),
-        width: num(rect['width']),
-        height: num(rect['height']),
-      },
+      rect,
       ...(startTime !== undefined ? { processStartTime: startTime } : {}),
     };
     const gateResult = this.gate.approve(approved);

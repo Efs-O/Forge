@@ -1,12 +1,24 @@
 import type { Browser, BrowserContext, Page } from 'playwright-core';
-
-/**
- * The configured system browser channel (plan §4.1). Used as-is — no silent
- * fallback (Claude condition 2): if the configured channel's browser is not
- * installed, `launch` throws naming the alternative. `chromium` (Playwright's
- * downloaded build) is a last resort requiring a manual user-run install.
- */
-export type BrowserChannel = 'chrome' | 'msedge' | 'chromium';
+import { InspectionStore } from './browserInspectionStore';
+import type { BrowserElement, IndexTarget } from './browserInspect';
+import { getPlaywright, pngDimensions } from './browserPrimitives';
+import type { BrowserChannel, BrowserScreenshot } from './browserPrimitives';
+export {
+  DEFAULT_INSPECT_MAX,
+  MAX_INSPECT_ELEMENTS,
+  clampInspectMax,
+  type BrowserElement,
+} from './browserInspect';
+// Re-exported so existing import sites — `renderEngine`, `renderHtmlToImageTool`,
+// `browserTools`, and the `vi.mock` seam the render tests use on THIS module —
+// keep working after the primitives moved to `browserPrimitives.ts`.
+export {
+  getPlaywright,
+  pngDimensions,
+  webOriginOf,
+  type BrowserChannel,
+  type BrowserScreenshot,
+} from './browserPrimitives';
 
 export interface BrowserSessionOptions {
   channel: BrowserChannel;
@@ -22,22 +34,8 @@ export interface BrowserTab {
   active: boolean;
 }
 
-/** A raw screenshot: PNG bytes plus its true dimensions (for the text). */
-export interface BrowserScreenshot {
-  png: Buffer;
-  width: number;
-  height: number;
-}
-
-/** A numbered interactive element from `browser_inspect` (heuristic, not the a11y tree). */
-export interface BrowserElement {
-  index: number;
-  role: string;
-  text: string;
-  bbox: { x: number; y: number; width: number; height: number };
-  /** A CSS selector that re-selects this element (best-effort, DOM-stable). */
-  selector: string;
-}
+/** A numbered interactive element from `browser_inspect` (heuristic, not the a11y tree)
+ *  is declared once, in `browserInspect.ts`, and re-exported at the top of this file. */
 
 /**
  * Bounded capture size. `deviceScaleFactor: 1` makes CSS px == device px, so a
@@ -47,70 +45,6 @@ export interface BrowserElement {
 const VIEWPORT_WIDTH = 1280;
 const VIEWPORT_HEIGHT = 800;
 const MAX_SCREENSHOT_BYTES = 10 * 1024 * 1024;
-
-/**
- * Heuristic interactive-element selector for `browser_inspect` (plan §4.2): a
- * numbered target list, NOT the full accessibility tree (a non-goal).
- */
-const INTERACTIVE_SELECTOR = [
-  'a[href]',
-  'button',
-  'input',
-  'select',
-  'textarea',
-  '[role="button"]',
-  '[role="link"]',
-  '[role="checkbox"]',
-  '[role="radio"]',
-  '[role="tab"]',
-  '[role="menuitem"]',
-  '[onclick]',
-  '[contenteditable="true"]',
-  'summary',
-].join(',');
-
-/**
- * Lazily load playwright-core. It is 12.8 MB and external (shipped intact in
- * dist/node_modules, NOT inlined by esbuild — B4: inlining breaks its runtime
- * file lookups). Requiring it at module top would load it on every activation,
- * even for users who never enable the browser; it loads only when a session is
- * launched. Node caches the require, so repeat calls are cheap.
- *
- * Exported because `render_html_to_image` needs the same lazy require without
- * duplicating the 12.8 MB import rule — a second copy is a second place to get
- * B4 wrong. It does NOT imply the `permissions.browser.enabled` gate: that gate
- * is for interactive browsing, and the render tool is exempt by owner decision
- * (docs/plans/SEND_FILE_AND_RENDER_HTML_PLAN.md).
- */
-export function getPlaywright(): typeof import('playwright-core') {
-  // Deliberate lazy require: playwright-core is external (shipped intact in
-  // dist/node_modules) and must not load at module top (12.8 MB on every
-  // activation). See B4.
-  // eslint-disable-next-line @typescript-eslint/no-var-requires
-  return require('playwright-core') as typeof import('playwright-core');
-}
-
-/** A real web origin (http/https) — the only kind that has an exfil surface. */
-export function webOriginOf(url: string): string | undefined {
-  try {
-    const u = new URL(url);
-    if (u.protocol === 'http:' || u.protocol === 'https:') return u.origin;
-    return undefined; // about:blank, data:, chrome:, file:, …
-  } catch {
-    return undefined;
-  }
-}
-
-/**
- * True PNG dimensions from the IHDR box (no full decode needed). Exported for
- * `render_html_to_image`, which reports the size of the PNG it just made and
- * caps a `full_page` capture by its real height; a second copy of this reader
- * is a second place to get the IHDR offset wrong.
- */
-export function pngDimensions(buf: Buffer): { width: number; height: number } {
-  if (buf.length < 24) return { width: 0, height: 0 };
-  return { width: buf.readUInt32BE(16), height: buf.readUInt32BE(20) };
-}
 
 /**
  * Owns the one explicit browser session (plan §4.5): a fresh ephemeral
@@ -130,6 +64,15 @@ export class BrowserSessionManager {
   private nextTab = 1;
   private activePage: Page | null = null;
   private readonly approvedOrigins = new Set<string>();
+  /**
+   * The last inspection of each tab (fix plan Phase 1). `browser_click`,
+   * `browser_type`, and `browser_hover` must act on the node the user was shown,
+   * not on whatever re-enumeration happens to put at that number now. The
+   * manager is its only owner; the store holds no session state of its own.
+   */
+  private readonly inspections = new InspectionStore();
+  /** Pages whose main-frame navigation listener is already installed. */
+  private readonly frameListeners = new WeakSet<Page>();
 
   constructor(preApprovedOrigins: readonly string[] = []) {
     for (const origin of preApprovedOrigins) this.approvedOrigins.add(origin);
@@ -187,6 +130,7 @@ export class BrowserSessionManager {
     this.activePage = null;
     this.tabIds.clear();
     this.nextTab = 1;
+    this.inspections.dropAll();
     await browser.close();
   }
 
@@ -195,8 +139,18 @@ export class BrowserSessionManager {
       this.tabIds.set(page, `t${this.nextTab++}`);
       if (!this.activePage) this.activePage = page;
     }
+    // A main-frame navigation is a new document: every retained node in this
+    // tab's snapshot is gone, so the snapshot must go with it rather than
+    // linger and match a same-URL coincidence.
+    if (!this.frameListeners.has(page)) {
+      this.frameListeners.add(page);
+      page.on('framenavigated', (frame) => {
+        if (frame === page.mainFrame()) this.inspections.drop(page);
+      });
+    }
     page.on('close', () => {
       this.tabIds.delete(page);
+      this.inspections.drop(page);
       if (this.activePage === page) {
         const remaining = this.context?.pages() ?? [];
         this.activePage = remaining[remaining.length - 1] ?? null;
@@ -291,35 +245,40 @@ export class BrowserSessionManager {
     return { png, ...pngDimensions(png) };
   }
 
-  /** Numbered interactive elements with bboxes + a re-selectable selector. */
-  async inspect(tabId: string | undefined, max: number): Promise<BrowserElement[]> {
+  /**
+   * Numbered interactive elements with bboxes + a re-selectable selector, and
+   * the snapshot the index actions are bound to. An empty page returns `[]`; an
+   * unexpected non-array result is a named error, never a silent empty list.
+   */
+  async inspect(tabId: string | undefined, max: unknown): Promise<BrowserElement[]> {
     const page = await this.resolvePage(tabId);
-    // String-based evaluate: the body runs in the browser (DOM globals like
-    // document/CSS) but is type-checked against the Node lib here, which has no
-    // DOM. A string sidesteps that. page.evaluate takes one arg, so pass an object.
-    return page.evaluate<BrowserElement[]>(
-      `(obj) => {
-        const els = Array.from(document.querySelectorAll(obj.selector));
-        return els.slice(0, obj.limit).map((el, index) => {
-          const rect = el.getBoundingClientRect();
-          const role = el.getAttribute('role') ?? (el.tagName === 'A' ? 'link' : el.tagName === 'INPUT' ? (el.getAttribute('type') ?? 'input') : el.tagName.toLowerCase());
-          const text = (el.getAttribute('aria-label') ?? el.getAttribute('title') ?? el.textContent ?? el.getAttribute('placeholder') ?? el.getAttribute('value') ?? '').trim().slice(0, 80);
-          let sel;
-          if (el.id) sel = '#' + CSS.escape(el.id);
-          else {
-            const tag = el.tagName.toLowerCase();
-            let n = 1;
-            for (let sib = el.previousElementSibling; sib; sib = sib.previousElementSibling) { if (sib.tagName === el.tagName) n++; }
-            sel = tag + ':nth-of-type(' + n + ')';
-          }
-          return { index, role, text, bbox: { x: rect.x, y: rect.y, width: rect.width, height: rect.height }, selector: sel };
-        });
-      }`,
-      { selector: INTERACTIVE_SELECTOR, limit: max },
-    );
+    return this.inspections.capture(page, max);
   }
 
-  /** Click by selector, by inspect index (re-resolved), or by viewport coords. */
+  /** Resolve an inspect index to the same, still-live node it named. */
+  private async indexTarget(page: Page, index: number, action: string): Promise<IndexTarget> {
+    return this.inspections.resolve(page, index, action);
+  }
+
+  /**
+   * TEST SEAM ONLY — no tool calls this. Integration tests need to set up and
+   * read page state (inject a sibling, count a click handler, read a value)
+   * without a production tool whose job is to run arbitrary page script.
+   * Resolves the tab like every other action and forwards to `page.evaluate`.
+   * The callback is serialized into the page exactly as a real one would be.
+   */
+  async pageEvalForTest<Arg = void, R = unknown>(
+    pageFunction: ((arg: Arg) => R) | (() => R),
+    arg?: Arg,
+  ): Promise<R> {
+    const page = await this.resolvePage(undefined);
+    // Cast away the generic: this seam only forwards to `page.evaluate`, and
+    // Playwright's `Unboxed<Arg>` parameter type cannot be satisfied by an
+    // arbitrary caller-supplied generic.
+    return page.evaluate(pageFunction as never, arg as never);
+  }
+
+  /** Click by selector, by inspect index (same node, rechecked), or by viewport coords. */
   async click(
     tabId: string | undefined,
     target: {
@@ -335,20 +294,37 @@ export class BrowserSessionManager {
       return `clicked "${target.selector}"`;
     }
     if (target.index !== undefined) {
-      const els = await this.inspect(tabId, target.index + 1);
-      const el = els[target.index];
-      if (!el)
-        throw new Error(`browser_click: no element at index ${target.index} (see browser_inspect)`);
-      const x = el.bbox.x + el.bbox.width / 2;
-      const y = el.bbox.y + el.bbox.height / 2;
-      await page.mouse.click(x, y);
-      return `clicked element ${target.index} ("${el.text || el.role}") at ${Math.round(x)},${Math.round(y)}`;
+      const el = await this.indexTarget(page, target.index, 'click');
+      await el.handle.click();
+      return `clicked element ${target.index} ("${el.text || el.role}")`;
     }
     if (target.x !== undefined && target.y !== undefined) {
+      this.requireViewportPoint(page, target.x, target.y, 'browser_click');
       await page.mouse.click(target.x, target.y);
       return `clicked at ${target.x},${target.y} (viewport px)`;
     }
     throw new Error('browser_click: provide selector, index, or x+y');
+  }
+
+  /**
+   * Refuse a coordinate the viewport cannot receive, BEFORE dispatching it.
+   * `page.mouse` accepts any number and reports success, so an out-of-viewport
+   * point used to be a silent no-op with a success message (report §3.8).
+   */
+  private requireViewportPoint(page: Page, x: number, y: number, action: string): void {
+    const vp = page.viewportSize() ?? { width: VIEWPORT_WIDTH, height: VIEWPORT_HEIGHT };
+    const inBounds =
+      Number.isFinite(x) && Number.isFinite(y) && x >= 0 && y >= 0 && x < vp.width && y < vp.height;
+    if (!inBounds) {
+      throw new Error(
+        `${action}: (${x},${y}) is outside the ${vp.width}×${vp.height} viewport ` +
+          '(valid x: 0-' +
+          (vp.width - 1) +
+          ', y: 0-' +
+          (vp.height - 1) +
+          '). Use browser_inspect for an element target, or a point inside a browser_screenshot.',
+      );
+    }
   }
 
   async type(
@@ -362,14 +338,17 @@ export class BrowserSessionManager {
       return `typed into "${target.selector}"`;
     }
     if (target.index !== undefined) {
-      const els = await this.inspect(tabId, target.index + 1);
-      const el = els[target.index];
-      if (!el)
-        throw new Error(`browser_type: no element at index ${target.index} (see browser_inspect)`);
-      const x = el.bbox.x + el.bbox.width / 2;
-      const y = el.bbox.y + el.bbox.height / 2;
-      await page.mouse.click(x, y);
-      await page.keyboard.type(text);
+      const el = await this.indexTarget(page, target.index, 'type');
+      if (!el.editable) {
+        throw new Error(
+          `browser_type: the element at index ${target.index} ("${el.text || el.role}") is not ` +
+            'editable (no text input, textarea, select, or contenteditable). Use browser_click for ' +
+            'a button or link, or browser_inspect to pick a text field',
+        );
+      }
+      // `fill` targets the node itself; a click-then-keyboard-type could land on
+      // whatever the click actually hit.
+      await el.handle.fill(text);
       return `typed into element ${target.index} ("${el.text || el.role}")`;
     }
     throw new Error('browser_type: provide selector or index');
@@ -401,6 +380,7 @@ export class BrowserSessionManager {
     }
     const x = target.x ?? VIEWPORT_WIDTH / 2;
     const y = target.y ?? VIEWPORT_HEIGHT / 2;
+    this.requireViewportPoint(page, x, y, 'browser_scroll');
     await page.mouse.move(x, y);
     await page.mouse.wheel(deltaX, deltaY);
     return `scrolled by ${deltaX},${deltaY} at ${x},${y}`;
@@ -421,15 +401,14 @@ export class BrowserSessionManager {
       return `hovered "${target.selector}"`;
     }
     if (target.x !== undefined && target.y !== undefined) {
+      this.requireViewportPoint(page, target.x, target.y, 'browser_hover');
       await page.mouse.move(target.x, target.y);
       return `hovered at ${target.x},${target.y}`;
     }
     if (target.index !== undefined) {
-      const els = await this.inspect(tabId, target.index + 1);
-      const el = els[target.index];
-      if (!el) throw new Error(`browser_hover: no element at index ${target.index}`);
-      await page.mouse.move(el.bbox.x + el.bbox.width / 2, el.bbox.y + el.bbox.height / 2);
-      return `hovered element ${target.index}`;
+      const el = await this.indexTarget(page, target.index, 'hover');
+      await el.handle.hover();
+      return `hovered element ${target.index} ("${el.text || el.role}")`;
     }
     throw new Error('browser_hover: provide selector, index, or x+y');
   }
@@ -440,6 +419,8 @@ export class BrowserSessionManager {
     to: { x: number; y: number },
   ): Promise<string> {
     const page = await this.resolvePage(tabId);
+    this.requireViewportPoint(page, from.x, from.y, 'browser_drag');
+    this.requireViewportPoint(page, to.x, to.y, 'browser_drag');
     await page.mouse.move(from.x, from.y);
     await page.mouse.down();
     await page.mouse.move(to.x, to.y, { steps: 10 });

@@ -27,6 +27,17 @@ export function cloudMonitorApproval(
       args.kind === 'monitor' ||
       (args.kind === undefined && !args.window_title && typeof args.monitor === 'number');
     if (!isMonitor) return undefined;
+    // Name the scope the user is approving: one display, not "the screen".
+    // `monitor: 0` is the primary; the driver refuses an index past the last
+    // display rather than widening to every monitor. Only a value the handler
+    // can actually act on is named — for `0.5` or `-1` the prompt says "a
+    // monitor" rather than promising a scope the call will be refused for.
+    const requested = args.monitor;
+    const named =
+      typeof requested === 'number' && Number.isSafeInteger(requested) && requested >= 0;
+    const scope = named
+      ? `monitor ${String(requested)}${requested === 0 ? ' (the primary display)' : ''}`
+      : 'a monitor';
     const config = getConfig();
     const modelId = config.active_model;
     if (!modelId) return undefined;
@@ -36,7 +47,7 @@ export function cloudMonitorApproval(
         const name = getProviderDisplayName(model);
         return {
           dangerous: true,
-          detail: `Full-screen capture will be sent to ${name} (cloud model). Confirm to proceed.`,
+          detail: `A full ${scope} capture will be sent to ${name} (cloud model). Confirm to proceed.`,
         };
       }
     } catch (err) {
@@ -44,7 +55,7 @@ export function cloudMonitorApproval(
       // provider, so the user confirms instead of the screen leaving silently.
       return {
         dangerous: true,
-        detail: `Full-screen capture; could not resolve the active model (${err instanceof Error ? err.message : String(err)}). Confirm to proceed.`,
+        detail: `A full ${scope} capture; could not resolve the active model (${err instanceof Error ? err.message : String(err)}). Confirm to proceed.`,
       };
     }
     return undefined;

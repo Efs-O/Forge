@@ -36,10 +36,27 @@ Add-Type -AssemblyName System.Drawing
 Add-Type -TypeDefinition @'
 namespace Forge {
 using System;
+using System.Collections.Generic;
 using System.Runtime.InteropServices;
 
 [StructLayout(LayoutKind.Sequential)]
 public struct RECT { public int Left, Top, Right, Bottom; }
+
+[StructLayout(LayoutKind.Sequential, CharSet = CharSet.Unicode)]
+public struct MONITORINFOEX {
+  public int cbSize;
+  public RECT rcMonitor;
+  public RECT rcWork;
+  public uint dwFlags;
+  [MarshalAs(UnmanagedType.ByValTStr, SizeConst = 32)] public string szDevice;
+}
+
+/** One display, in PHYSICAL pixels (the process is per-monitor-aware v2). */
+public class MonitorInfo {
+  public int left, top, right, bottom;
+  public bool primary;
+  public string device;
+}
 
 [StructLayout(LayoutKind.Sequential)]
 public struct POINT { public int x, y; }
@@ -120,8 +137,6 @@ public static class Win32 {
   [DllImport("user32.dll")] public static extern IntPtr GetSystemMetrics(int index);
   [DllImport("user32.dll")] public static extern IntPtr GetDC(IntPtr hWnd);
   [DllImport("user32.dll")] public static extern int ReleaseDC(IntPtr hWnd, IntPtr hdc);
-  [DllImport("user32.dll")] public static extern bool BitBlt(IntPtr hdc, int x, int y, int w, int h,
-    IntPtr hdcSrc, int xSrc, int ySrc, uint rop);
   [DllImport("user32.dll")] public static extern bool GetCursorPos(out POINT p);
   [DllImport("user32.dll")] public static extern uint GetDpiForSystem();
   [DllImport("user32.dll")] public static extern bool IsWindow(IntPtr hWnd);
@@ -137,10 +152,53 @@ public static class Win32 {
   [DllImport("gdi32.dll")] public static extern IntPtr SelectObject(IntPtr hdc, IntPtr obj);
   [DllImport("gdi32.dll")] public static extern bool DeleteObject(IntPtr obj);
   [DllImport("gdi32.dll")] public static extern bool DeleteDC(IntPtr hdc);
+  // BitBlt is GDI (gdi32.dll), NOT user32. Declared against user32 it resolved to
+  // no entry point, which killed every `kind:"monitor"` capture while window
+  // capture (PrintWindow, user32) kept working (report §3.7).
+  [DllImport("gdi32.dll", SetLastError = true)] public static extern bool BitBlt(IntPtr hdc, int x, int y, int w, int h,
+    IntPtr hdcSrc, int xSrc, int ySrc, uint rop);
   [DllImport("user32.dll")] public static extern bool BringWindowToTop(IntPtr h);
   [DllImport("user32.dll")] public static extern bool AttachThreadInput(uint a, uint b, bool attach);
   [DllImport("kernel32.dll")] public static extern uint GetCurrentThreadId();
   [DllImport("user32.dll", SetLastError = true)] public static extern bool GetGUIThreadInfo(uint tid, ref GUITHREADINFO gi);
+
+  // ── Monitor enumeration (fix plan Phase 1, item 6) ──
+  // Done in C#, not PowerShell: EnumDisplayMonitors hands the callback a `ref
+  // RECT`, which a PowerShell scriptblock delegate cannot receive.
+  [DllImport("user32.dll")] public static extern bool EnumDisplayMonitors(IntPtr hdc, IntPtr clip, MonitorEnumProc cb, IntPtr data);
+  public delegate bool MonitorEnumProc(IntPtr hMonitor, IntPtr hdcMonitor, ref RECT lprc, IntPtr data);
+  [DllImport("user32.dll", CharSet = CharSet.Unicode)] public static extern bool GetMonitorInfo(IntPtr hMonitor, ref MONITORINFOEX lpmi);
+
+  public static List<MonitorInfo> Monitors() {
+    _monitors = new List<MonitorInfo>();
+    EnumDisplayMonitors(IntPtr.Zero, IntPtr.Zero, new MonitorEnumProc(AddMonitor), IntPtr.Zero);
+    List<MonitorInfo> outp = _monitors;
+    _monitors = null;
+    // Deterministic order: primary first (that is what `monitor: 0` means), then
+    // by physical left, top, and device name. A layout change re-enumerates.
+    outp.Sort(delegate(MonitorInfo a, MonitorInfo b) {
+      if (a.primary != b.primary) return a.primary ? -1 : 1;
+      if (a.left != b.left) return a.left.CompareTo(b.left);
+      if (a.top != b.top) return a.top.CompareTo(b.top);
+      return string.Compare(a.device, b.device, StringComparison.Ordinal);
+    });
+    return outp;
+  }
+
+  private static List<MonitorInfo> _monitors;
+  private static bool AddMonitor(IntPtr hMonitor, IntPtr hdcMonitor, ref RECT lprc, IntPtr data) {
+    if (_monitors == null) return true;
+    MONITORINFOEX mi = new MONITORINFOEX();
+    mi.cbSize = Marshal.SizeOf(typeof(MONITORINFOEX));
+    if (!GetMonitorInfo(hMonitor, ref mi)) return true;
+    MonitorInfo m = new MonitorInfo();
+    m.left = mi.rcMonitor.Left; m.top = mi.rcMonitor.Top;
+    m.right = mi.rcMonitor.Right; m.bottom = mi.rcMonitor.Bottom;
+    m.primary = (mi.dwFlags & 1) != 0;   // MONITORINFOF_PRIMARY
+    m.device = mi.szDevice ?? string.Empty;
+    _monitors.Add(m);
+    return true;
+  }
 }
 }
 '@
@@ -332,6 +390,7 @@ function Capture-Window([IntPtr]$h) {
   $w = $rect.Right - $rect.Left; $hgt = $rect.Bottom - $rect.Top
   if ($w -le 0 -or $hgt -le 0) { throw 'window has zero size' }
   $screenDC = [Forge.Win32]::GetDC([IntPtr]::Zero)
+  $memDC = [IntPtr]::Zero; $bmp = [IntPtr]::Zero; $old = [IntPtr]::Zero; $img = $null
   try {
     $memDC = [Forge.Win32]::CreateCompatibleDC($screenDC)
     $bmp = [Forge.Win32]::CreateCompatibleBitmap($screenDC, $w, $hgt)
@@ -341,30 +400,74 @@ function Capture-Window([IntPtr]$h) {
     if (-not $ok) { throw 'PrintWindow failed for this window' }
     $img = [System.Drawing.Bitmap]::FromHbitmap($bmp)
     $resized = New-ResizedPng $img $MAX_EDGE
-    $img.Dispose()
-    [void][Forge.Win32]::DeleteObject($bmp)
-    [void][Forge.Win32]::DeleteDC($memDC)
     return @{ png_base64 = [Convert]::ToBase64String($resized.png); capture_width = $w; capture_height = $hgt; image_width = $resized.width; image_height = $resized.height; origin = @{ x = $rect.Left; y = $rect.Top }; dpi_scale = [math]::Round([Forge.Win32]::GetDpiForSystem() / 96.0, 2) }
-  } finally { [void][Forge.Win32]::ReleaseDC([IntPtr]::Zero, $screenDC) }
+  } finally {
+    if ($img) { $img.Dispose() }
+    if ($bmp -ne [IntPtr]::Zero) { [void][Forge.Win32]::DeleteObject($bmp) }
+    if ($memDC -ne [IntPtr]::Zero) { [void][Forge.Win32]::DeleteDC($memDC) }
+    [void][Forge.Win32]::ReleaseDC([IntPtr]::Zero, $screenDC)
+  }
+}
+function Capture-Region([int]$srcX, [int]$srcY, [int]$w, [int]$hgt) {
+  # One screen region -> PNG, in physical pixels. Shared by the monitor and
+  # virtual-desktop paths. GDI objects are released in `finally` so a failed
+  # capture cannot leak a DC or a bitmap handle, and a BitBlt that returns false
+  # is an error — never a blank image reported as a success.
+  if ($w -le 0 -or $hgt -le 0) { throw 'capture region has zero size' }
+  $screenDC = [Forge.Win32]::GetDC([IntPtr]::Zero)
+  $memDC = [IntPtr]::Zero; $bmp = [IntPtr]::Zero; $old = [IntPtr]::Zero; $img = $null
+  try {
+    $memDC = [Forge.Win32]::CreateCompatibleDC($screenDC)
+    if ($memDC -eq [IntPtr]::Zero) { throw 'CreateCompatibleDC failed' }
+    $bmp = [Forge.Win32]::CreateCompatibleBitmap($screenDC, $w, $hgt)
+    if ($bmp -eq [IntPtr]::Zero) { throw 'CreateCompatibleBitmap failed' }
+    $old = [Forge.Win32]::SelectObject($memDC, $bmp)
+    # xSrc/ySrc are the region's physical origin: a monitor left of the primary
+    # has a negative left, and BitBlt reads from the screen DC in the same
+    # virtual-screen space GetSystemMetrics/EnumDisplayMonitors report.
+    $ok = [Forge.Win32]::BitBlt($memDC, 0, 0, $w, $hgt, $screenDC, $srcX, $srcY, [Forge.Win32]::SRCCOPY)
+    [void][Forge.Win32]::SelectObject($memDC, $old)
+    if (-not $ok) { throw "BitBlt failed for region ($srcX,$srcY ${w}x${hgt}) (Win32 error $([System.Runtime.InteropServices.Marshal]::GetLastWin32Error()))" }
+    $img = [System.Drawing.Bitmap]::FromHbitmap($bmp)
+    $resized = New-ResizedPng $img $MAX_EDGE
+    return @{ png_base64 = [Convert]::ToBase64String($resized.png); capture_width = $w; capture_height = $hgt; image_width = $resized.width; image_height = $resized.height; origin = @{ x = $srcX; y = $srcY }; dpi_scale = [math]::Round([Forge.Win32]::GetDpiForSystem() / 96.0, 2) }
+  } finally {
+    if ($img) { $img.Dispose() }
+    if ($bmp -ne [IntPtr]::Zero) { [void][Forge.Win32]::DeleteObject($bmp) }
+    if ($memDC -ne [IntPtr]::Zero) { [void][Forge.Win32]::DeleteDC($memDC) }
+    [void][Forge.Win32]::ReleaseDC([IntPtr]::Zero, $screenDC)
+  }
+}
+function Get-Monitors {
+  # Physical rects + primary flag, in the documented order: primary first, then
+  # left, top, device name. Re-enumerated per request, so a layout change moves
+  # the indices with it rather than leaving a stale mapping.
+  return ,([Forge.Win32]::Monitors())
+}
+function Get-MonitorCapture([int]$index) {
+  # `monitor: 0` is the PRIMARY display, not the whole virtual desktop — the
+  # previous code ignored the index and captured every screen while calling the
+  # result "monitor" (fix plan Phase 1, item 6). An out-of-range index names the
+  # available range instead of silently substituting a different region.
+  if ($index -lt 0) { throw "monitor index must be 0 or greater (got $index)" }
+  $mons = Get-Monitors
+  if ($mons.Count -eq 0) { throw 'no display is attached' }
+  if ($index -ge $mons.Count) {
+    throw "monitor $index does not exist: $([string]::Join(', ', (0..($mons.Count - 1)))) are available ($($mons.Count) display(s))"
+  }
+  $m = $mons[$index]
+  $cap = Capture-Region $m.left $m.top ($m.right - $m.left) ($m.bottom - $m.top)
+  $cap.monitor_index = $index
+  $cap.monitor_count = $mons.Count
+  $cap.monitor_device = $m.device
+  $cap.title = "monitor $index ($($m.device))"
+  return $cap
 }
 function Capture-VirtualDesktop {
   $vx = [int][Forge.Win32]::GetSystemMetrics(76); $vy = [int][Forge.Win32]::GetSystemMetrics(77)
   $vw = [int][Forge.Win32]::GetSystemMetrics(78); $vh = [int][Forge.Win32]::GetSystemMetrics(79)
   if ($vw -le 0 -or $vh -le 0) { throw 'no display' }
-  $screenDC = [Forge.Win32]::GetDC([IntPtr]::Zero)
-  try {
-    $memDC = [Forge.Win32]::CreateCompatibleDC($screenDC)
-    $bmp = [Forge.Win32]::CreateCompatibleBitmap($screenDC, $vw, $vh)
-    $old = [Forge.Win32]::SelectObject($memDC, $bmp)
-    [void][Forge.Win32]::BitBlt($memDC, 0, 0, $vw, $vh, $screenDC, $vx, $vy, [Forge.Win32]::SRCCOPY)
-    [void][Forge.Win32]::SelectObject($memDC, $old)
-    $img = [System.Drawing.Bitmap]::FromHbitmap($bmp)
-    $resized = New-ResizedPng $img $MAX_EDGE
-    $img.Dispose()
-    [void][Forge.Win32]::DeleteObject($bmp)
-    [void][Forge.Win32]::DeleteDC($memDC)
-    return @{ png_base64 = [Convert]::ToBase64String($resized.png); capture_width = $vw; capture_height = $vh; image_width = $resized.width; image_height = $resized.height; origin = @{ x = $vx; y = $vy }; dpi_scale = [math]::Round([Forge.Win32]::GetDpiForSystem() / 96.0, 2) }
-  } finally { [void][Forge.Win32]::ReleaseDC([IntPtr]::Zero, $screenDC) }
+  return Capture-Region $vx $vy $vw $vh
 }
 function Test-Target($expectedHwnd, $expectedPid, $expectedStartTime, $point) {
   $expectedPtr = [IntPtr]$expectedHwnd
@@ -456,10 +559,12 @@ function Invoke-Op($req) {
           origin = $cap.origin; dpi_scale = $cap.dpi_scale; hwnd = $w.id; pid = $info.pid; rect = $info.rect
           process_start_time = $info.process_start_time; title = $w.title; class = $w.class; process_name = $info.process_name }
       }
-      $cap = Capture-VirtualDesktop
+      $cap = Get-MonitorCapture ([int]$req.index)
       return @{ ok = $true; png_base64 = $cap.png_base64; capture_width = $cap.capture_width; capture_height = $cap.capture_height; image_width = $cap.image_width; image_height = $cap.image_height
-        origin = $cap.origin; dpi_scale = $cap.dpi_scale; hwnd = $null; pid = $null; process_start_time = $null
-        title = 'monitor'; class = ''; process_name = '' }
+        origin = $cap.origin; dpi_scale = $cap.dpi_scale; monitor_index = $cap.monitor_index
+        monitor_count = $cap.monitor_count; monitor_device = $cap.monitor_device
+        hwnd = $null; pid = $null; process_start_time = $null
+        title = $cap.title; class = ''; process_name = '' }
     }
     default {
       $exp = Get-Exp $req

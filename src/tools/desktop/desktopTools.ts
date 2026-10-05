@@ -13,6 +13,7 @@ import type { ContentPart } from '../../llm/types';
 import type { MultimodalToolResult, RegisteredTool } from '../ToolRegistry';
 import { saveScreenshot, visionRefusal } from '../browser/browserTools';
 import { getDesktopDriver } from './PowerShellDesktopDriver';
+import { assertMonitorIndex } from './DesktopDriver';
 import {
   captureApproval,
   cloudMonitorApproval,
@@ -54,10 +55,12 @@ export function makeDesktopTools(getConfig: GetConfig): RegisteredTool[] {
         function: {
           name: 'desktop_capture',
           description:
-            'Capture a window (by title) or a full monitor as an image and return it inline. ' +
+            'Capture a window (by title) or one monitor as an image and return it inline. ' +
             'A window capture binds the approved control target (HWND+pid) and returns a capture_id ' +
-            'that coordinate actions reference. A monitor capture is read-only (no coordinate actions). ' +
-            'The text states the actual image size, DPI scale, origin, and coord_space.',
+            'that coordinate actions reference. A monitor capture is read-only (no coordinate actions) ' +
+            'and captures exactly ONE display: monitor 0 is the primary, higher indices the other ' +
+            'displays in left-to-right order; an index past the last display is refused. ' +
+            'The text states the image size, the physical captured region, DPI scale, origin, and coord_space.',
           parameters: {
             type: 'object',
             properties: {
@@ -66,9 +69,10 @@ export function makeDesktopTools(getConfig: GetConfig): RegisteredTool[] {
                 description: 'Title of the window to capture (exact or substring match).',
               },
               monitor: {
-                type: 'number',
+                type: 'integer',
+                minimum: 0,
                 description:
-                  'Monitor index (0 = primary) for a full-screen capture. Requires approval on cloud models.',
+                  'Display index for a single-monitor capture: 0 = primary, 1+ = the other displays sorted left-to-right. A whole number 0 or greater — not a pixel offset, and never the whole virtual desktop. Requires approval on cloud models.',
               },
               kind: {
                 type: 'string',
@@ -88,30 +92,39 @@ export function makeDesktopTools(getConfig: GetConfig): RegisteredTool[] {
       approval: captureApproval(driver, monitorApproval),
       handler: async (args, toolCtx): Promise<MultimodalToolResult> => {
         const title = str(args, 'window_title');
-        const monitorIdx = num(args, 'monitor');
+        // Read the raw value, not `num()`: the index selects WHICH display gets
+        // captured and approved, so `0.5`/`-1`/`Infinity` must be refused here
+        // rather than reach PowerShell's `[int]` cast (which turns `0.5` into 0
+        // and captures the primary after the user approved "a monitor").
+        const monitorArg = args.monitor;
+        const hasMonitor = monitorArg !== undefined && monitorArg !== null;
         const kind =
-          (args.kind as string) ??
-          (title ? 'window' : monitorIdx !== undefined ? 'monitor' : 'window');
+          (args.kind as string) ?? (title ? 'window' : hasMonitor ? 'monitor' : 'window');
         if (kind === 'window' && !title)
           throw new Error('desktop_capture: window_title is required for a window capture');
-        if (kind === 'monitor' && monitorIdx === undefined)
+        if (kind === 'monitor' && !hasMonitor)
           throw new Error('desktop_capture: monitor index is required for a monitor capture');
         const target =
           kind === 'window'
             ? { kind: 'window' as const, title: title! }
-            : { kind: 'monitor' as const, index: monitorIdx ?? 0 };
+            : { kind: 'monitor' as const, index: assertMonitorIndex(monitorArg) };
         const cap = await driver.capture(target, {
           allowNewApproval: title !== undefined && !driver.coversTitle(title),
         });
         const saved = await saveScreenshot(toolCtx?.conversationId, cap.png);
         const originNote = `origin=(${cap.origin.x},${cap.origin.y})`;
+        const regionNote = `captured region ${cap.captureWidth}×${cap.captureHeight} physical px`;
+        // The monitor branch of the union carries these as required, so a
+        // capture that could not name its display never reaches this line —
+        // rendering `?` for a missing index would report a successful capture of
+        // an unidentified region.
         const kindNote =
           cap.kind === 'window'
             ? `window "${cap.title}" approved (HWND ${cap.approvedHwnd}, pid ${cap.approvedPid})`
-            : 'monitor (read-only; coordinate actions require a window capture)';
+            : `monitor ${cap.monitorIndex} of ${cap.monitorCount} (${cap.monitorDevice}; read-only — coordinate actions require a window capture)`;
         const text =
-          `Desktop capture: ${kindNote}, ${cap.width}×${cap.height} px, ` +
-          `dpi_scale=${cap.dpiScale}, ${originNote}, coord_space=image_px. ` +
+          `Desktop capture: ${kindNote}, image ${cap.width}×${cap.height} px, ` +
+          `${regionNote}, dpi_scale=${cap.dpiScale}, ${originNote}, coord_space=image_px. ` +
           `capture_id=${cap.captureId}. Saved to ${saved}.`;
         const content: ContentPart[] = [
           { type: 'text', text },
@@ -131,7 +144,7 @@ export function makeDesktopTools(getConfig: GetConfig): RegisteredTool[] {
         function: {
           name: 'desktop_windows',
           description:
-            'List top-level windows as {id, title, rect} (physical pixels). Use the title in desktop_focus_window or desktop_capture.',
+            'List top-level windows as {id, title, rect} in PHYSICAL pixels (origins can be negative on a monitor left of the primary). Use the title in desktop_focus_window or desktop_capture.',
           parameters: { type: 'object', properties: {}, additionalProperties: false },
         },
       },
@@ -139,14 +152,23 @@ export function makeDesktopTools(getConfig: GetConfig): RegisteredTool[] {
       autoApprove: true,
       advertise: isWin,
       handler: async () => {
-        const windows = await driver.listWindows();
-        if (windows.length === 0) return 'No visible windows found.';
-        return windows
-          .map(
-            (w) =>
-              `${w.id}: "${w.title}" (${w.rect.x},${w.rect.y} ${w.rect.width}×${w.rect.height})`,
-          )
-          .join('\n');
+        const { windows, skipped } = await driver.listWindows();
+        if (windows.length === 0 && skipped.length === 0) return 'No visible windows found.';
+        const lines = windows.map(
+          (w) => `${w.id}: "${w.title}" (${w.rect.x},${w.rect.y} ${w.rect.width}×${w.rect.height})`,
+        );
+        if (skipped.length > 0) {
+          // Named as a protocol error for those HWNDs, not a generic NOTE: the
+          // driver described a window it could not give geometry for, and the
+          // model needs to know that is a driver/tool defect rather than a
+          // property of the window.
+          lines.push(
+            `desktop_windows protocol error for ${skipped.length} window(s): ` +
+              skipped.join('; ') +
+              '. They are on screen but cannot be targeted until the driver reports their rect.',
+          );
+        }
+        return lines.join('\n');
       },
     },
 

@@ -1,5 +1,6 @@
 import type { ContentPart } from '../../llm/types';
 import type { MultimodalToolResult, RegisteredTool } from '../ToolRegistry';
+import { DEFAULT_INSPECT_MAX, MAX_INSPECT_ELEMENTS } from './browserInspect';
 import { saveScreenshot, tabLabel, visionRefusal, type BrowserToolContext } from './browserTools';
 
 /**
@@ -70,12 +71,17 @@ export function makeBrowserActionTools(ctx: BrowserToolContext): RegisteredTool[
           description:
             'List the interactive elements (links, buttons, inputs, …) on the active/named ' +
             'tab as a numbered list with {index, role, text, selector, bbox}. Use the index or ' +
-            'selector in browser_click / browser_type / browser_hover.',
+            'selector in browser_click / browser_type / browser_hover. The list is a snapshot of ' +
+            'this tab: an index is valid for the NEXT action on these elements, and a stale, ' +
+            'changed, hidden, or disabled one is refused with an instruction to inspect again.',
           parameters: {
             type: 'object',
             properties: {
               tab_id: { type: 'string', description: 'Optional tab id (default: active tab).' },
-              max: { type: 'number', description: 'Maximum elements to list (default 50).' },
+              max: {
+                type: 'number',
+                description: `Maximum elements to list (default ${DEFAULT_INSPECT_MAX}, capped at ${MAX_INSPECT_ELEMENTS}).`,
+              },
             },
             additionalProperties: false,
           },
@@ -84,8 +90,9 @@ export function makeBrowserActionTools(ctx: BrowserToolContext): RegisteredTool[
       permission: 'browser',
       autoApprove: true,
       handler: async (args) => {
-        const max = typeof args.max === 'number' && args.max > 0 ? Math.floor(args.max) : 50;
-        const els = await ctx.mgr.inspect(ctx.str(args, 'tab_id'), max);
+        // The clamp lives in one place (`clampInspectMax`) so an explicit `max`
+        // cannot ask for an unbounded enumeration of a huge page.
+        const els = await ctx.mgr.inspect(ctx.str(args, 'tab_id'), args.max);
         if (els.length === 0) return 'No interactive elements found on this page.';
         return els
           .map(
@@ -103,6 +110,9 @@ export function makeBrowserActionTools(ctx: BrowserToolContext): RegisteredTool[
           name: 'browser_click',
           description:
             'Click on the active/named tab by selector, by inspect index, or by viewport x,y. ' +
+            'An index acts on the exact element browser_inspect listed, and is refused if that ' +
+            'element is gone, hidden, or changed. An x,y outside the viewport is refused rather ' +
+            'than silently dropped. ' +
             'Set consequential=true if the click submits a form, makes a purchase, sends a ' +
             'message, or deletes data.',
           parameters: {

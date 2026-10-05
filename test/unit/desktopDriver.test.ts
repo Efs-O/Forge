@@ -153,6 +153,7 @@ describe('PowerShellDesktopDriver B2 gate', () => {
       process_name: '',
       process_start_time: null,
       rect: { x: 0, y: 0, width: 1920, height: 1080 },
+      monitor_index: 0, monitor_count: 1, monitor_device: '\\\\.\\DISPLAY1',
     });
     await driver.capture({ kind: 'monitor', index: 0 });
 
@@ -374,5 +375,220 @@ describe('PowerShellDesktopDriver capture approval binding', () => {
     await driver.scroll(10, 10, { x: -2, y: -3 }, cap.captureId);
     const op = transport.sent.find((o) => o['op'] === 'scroll');
     expect(op).toMatchObject({ delta_x: -2, delta_y: -3 });
+  });
+});
+
+/**
+ * Report §3.1: `Get-WindowInfo` emits geometry nested under `rect`, but the old
+ * TS reader looked for top-level `x`/`y`/`width`/`height` and `num()` defaulted
+ * every missing field to `0` — so `desktop_windows` listed every window as
+ * `(0,0 0×0)`. These tests pin the nested mapping and the validation that turns
+ * a malformed item into a named skip instead of a plausible zero.
+ */
+describe('PowerShellDesktopDriver list_windows rect mapping (report §3.1)', () => {
+  function driverWithWindows(windows: unknown[]): PowerShellDesktopDriver {
+    const transport = new FakeTransport();
+    transport.on('list_windows', { ok: true, windows });
+    return new PowerShellDesktopDriver(transport);
+  }
+
+  it('maps the nested rect, keeping a valid negative origin', async () => {
+    const driver = driverWithWindows([
+      { id: '0x1', title: 'Left monitor app', rect: { x: -1920, y: 0, width: 800, height: 600 } },
+      { id: '0x2', title: 'Maximized app', rect: { x: -8, y: -8, width: 3856, height: 1616 } },
+    ]);
+    const listing = await driver.listWindows();
+    expect(listing.windows).toEqual([
+      { id: '0x1', title: 'Left monitor app', rect: { x: -1920, y: 0, width: 800, height: 600 } },
+      { id: '0x2', title: 'Maximized app', rect: { x: -8, y: -8, width: 3856, height: 1616 } },
+    ]);
+    expect(listing.skipped).toEqual([]);
+  });
+
+  it('skips a malformed rect instead of reporting a 0×0 row, and says so', async () => {
+    const driver = driverWithWindows([
+      // The old shape the TS reader expected: no nested rect at all.
+      { id: '0x1', title: 'Old-shape window', x: 10, y: 20, width: 300, height: 200 },
+      // Zero/negative size is never real geometry.
+      { id: '0x2', title: 'Zero size', rect: { x: 0, y: 0, width: 0, height: 0 } },
+      { id: '0x3', title: 'Negative size', rect: { x: 0, y: 0, width: -5, height: 10 } },
+      // Non-finite values from a corrupted protocol line.
+      { id: '0x4', title: 'NaN size', rect: { x: 0, y: 0, width: NaN, height: 10 } },
+      // Strings are not numbers — a JSON/encoding break must not pass.
+      { id: '0x5', title: 'String rect', rect: { x: '0', y: '0', width: '10', height: '10' } },
+      // Valid, so the skips above cannot be mistaken for "everything is dropped".
+      { id: '0x6', title: 'Good window', rect: { x: 5, y: 6, width: 7, height: 8 } },
+    ]);
+    const listing = await driver.listWindows();
+    expect(listing.windows).toEqual([
+      { id: '0x6', title: 'Good window', rect: { x: 5, y: 6, width: 7, height: 8 } },
+    ]);
+    // Every skip is NAMED IN THE RESULT. A list that quietly lost a window is a
+    // quieter version of the 0×0 row it replaces, and the model never sees the
+    // log channel — so the reason has to travel with the data.
+    expect(listing.skipped.length).toBe(5);
+    for (const title of ['Old-shape window', 'Zero size', 'Negative size', 'NaN size', 'String rect']) {
+      expect(listing.skipped.join('\n')).toContain(title);
+    }
+  });
+
+  it('raises a named protocol error when the window list itself is missing', async () => {
+    const transport = new FakeTransport();
+    transport.on('list_windows', { ok: true, wins: [] }); // renamed field
+    const driver = new PowerShellDesktopDriver(transport);
+    await expect(driver.listWindows()).rejects.toThrow(/no window list \(protocol mismatch\)/);
+  });
+
+  it('binds focus_window to the nested rect, never a defaulted 0×0', async () => {
+    const transport = new FakeTransport();
+    transport.on('focus_window', {
+      ok: true,
+      window: { id: '0x1', title: 'Test Window', pid: 1, class: 'C', process_name: 'p',
+        process_start_time: 1700000000000, rect: { x: 0, y: 0, width: 0, height: 0 } },
+    });
+    const driver = new PowerShellDesktopDriver(transport);
+    // Pre-fix, this resolved successfully with rect {0,0,0,0}: `inRect` then
+    // refused EVERY point (x >= 0 && x < 0 is never true), so the user saw a
+    // misleading "point is outside the approved window's rect" for a window the
+    // driver had never described. A bound-but-wrong rect is refused outright.
+    await expect(driver.focusWindow({ kind: 'windowId', id: '0x1' })).rejects.toThrow(
+      /malformed geometry.*cannot bind a target whose rect is unknown/s,
+    );
+  });
+
+  it('refuses to bind a control target from a capture with malformed geometry', async () => {
+    const transport = new FakeTransport();
+    transport.on('capture', {
+      ok: true, png_base64: Buffer.from('fake').toString('base64'),
+      capture_width: 800, capture_height: 600, image_width: 800, image_height: 600,
+      origin: { x: 100, y: 100 }, dpi_scale: 1, hwnd: '0x1', pid: 1, title: 'Test Window',
+      class: 'C', process_name: 'p', process_start_time: 1700000000000,
+      rect: { x: 100, y: 100 }, // width/height missing
+    });
+    const driver = new PowerShellDesktopDriver(transport);
+    await expect(
+      driver.capture({ kind: 'window', title: 'Test Window' }, { allowNewApproval: true }),
+    ).rejects.toThrow(/malformed geometry.*cannot bind a control target/s);
+  });
+});
+
+describe('PowerShellDesktopDriver capture frame validation', () => {
+  const baseCapture = {
+    ok: true, png_base64: Buffer.from('fake').toString('base64'),
+    capture_width: 1920, capture_height: 1080, image_width: 1920, image_height: 1080,
+    origin: { x: 0, y: 0 }, dpi_scale: 1,
+  };
+
+  it('reports capture size separately from the downscaled PNG size', async () => {
+    const transport = new FakeTransport();
+    transport.on('capture', {
+      ...baseCapture, kind: 'monitor',
+      capture_width: 3840, capture_height: 1600, image_width: 1344, image_height: 560,
+      origin: { x: 0, y: 0 }, monitor_index: 0, monitor_count: 1, monitor_device: '\\\\.\\DISPLAY9',
+    });
+    const driver = new PowerShellDesktopDriver(transport);
+    const cap = await driver.capture({ kind: 'monitor', index: 0 });
+    expect(cap.width).toBe(1344);
+    expect(cap.height).toBe(560);
+    expect(cap.captureWidth).toBe(3840);
+    expect(cap.captureHeight).toBe(1600);
+    expect(cap.origin).toEqual({ x: 0, y: 0 });
+    expect(cap.monitorIndex).toBe(0);
+    expect(cap.monitorCount).toBe(1);
+    expect(cap.monitorDevice).toBe('\\\\.\\DISPLAY9');
+    // The request carries the index, so the driver cannot substitute another display.
+    expect(transport.sent.find((o) => o['op'] === 'capture')).toMatchObject({ index: 0 });
+  });
+
+  it('refuses a monitor capture whose response omits the monitor metadata', async () => {
+    // The old driver shape (no monitor_index/count/device) used to resolve with
+    // the fields absent, so the tool rendered "monitor ? of ?" and reported a
+    // successful capture of a display nobody could identify. A monitor capture
+    // that cannot say WHICH display it took is now a protocol refusal.
+    const transport = new FakeTransport();
+    transport.on('capture', { ...baseCapture });
+    const driver = new PowerShellDesktopDriver(transport);
+    await expect(driver.capture({ kind: 'monitor', index: 0 })).rejects.toThrow(
+      /unusable monitor metadata \(monitor_index missing or not a whole number\)/,
+    );
+  });
+
+  it('refuses a monitor capture that names a different display than requested', async () => {
+    const transport = new FakeTransport();
+    transport.on('capture', {
+      ...baseCapture,
+      monitor_index: 1, monitor_count: 2, monitor_device: '\\\\.\\DISPLAY2',
+    });
+    const driver = new PowerShellDesktopDriver(transport);
+    await expect(driver.capture({ kind: 'monitor', index: 0 })).rejects.toThrow(
+      /monitor_index 1 is not the requested display 0/,
+    );
+  });
+
+  it('refuses monitor metadata whose count does not contain the index', async () => {
+    const transport = new FakeTransport();
+    transport.on('capture', {
+      ...baseCapture,
+      monitor_index: 2, monitor_count: 2, monitor_device: '\\\\.\\DISPLAY3',
+    });
+    const driver = new PowerShellDesktopDriver(transport);
+    await expect(driver.capture({ kind: 'monitor', index: 2 })).rejects.toThrow(
+      /monitor_index 2 is outside the reported range of 2 display\(s\)/,
+    );
+  });
+
+  it('refuses monitor metadata with an empty device name', async () => {
+    const transport = new FakeTransport();
+    transport.on('capture', {
+      ...baseCapture,
+      monitor_index: 0, monitor_count: 1, monitor_device: '',
+    });
+    const driver = new PowerShellDesktopDriver(transport);
+    await expect(driver.capture({ kind: 'monitor', index: 0 })).rejects.toThrow(
+      /monitor_device is empty/,
+    );
+  });
+
+  it('refuses a fractional, negative, or non-finite monitor index before any request', async () => {
+    // The schema declares integer/minimum 0, but schema validation is offline
+    // only — a model can still send 0.5. PowerShell casts request values to
+    // [int], so an unvalidated 0.5 would capture monitor 0 after the user
+    // approved "a monitor", and -1 would wrap to an unintended display. The
+    // refusal must happen BEFORE the transport sees anything.
+    for (const bad of [0.5, -1, -0.5, Number.NaN, Number.POSITIVE_INFINITY]) {
+      const transport = new FakeTransport();
+      transport.on('capture', { ...baseCapture, monitor_index: 0, monitor_count: 1, monitor_device: '\\\\.\\DISPLAY1' });
+      const driver = new PowerShellDesktopDriver(transport);
+      await expect(driver.capture({ kind: 'monitor', index: bad })).rejects.toThrow(
+        /monitor must be a whole number 0 or greater/,
+      );
+      expect(transport.sent.filter((o) => o['op'] === 'capture')).toEqual([]);
+    }
+  });
+
+  it('refuses a capture whose frame size or origin is missing', async () => {
+    for (const broken of [
+      { capture_width: undefined },
+      { image_height: 0 },
+      { origin: { x: 0 } },
+      { origin: undefined },
+    ]) {
+      const transport = new FakeTransport();
+      transport.on('capture', { ...baseCapture, ...broken });
+      const driver = new PowerShellDesktopDriver(transport);
+      await expect(driver.capture({ kind: 'monitor', index: 0 })).rejects.toThrow(
+        /incomplete capture frame/,
+      );
+    }
+  });
+
+  it('refuses an empty PNG rather than reporting a successful capture', async () => {
+    const transport = new FakeTransport();
+    transport.on('capture', {
+      ...baseCapture, png_base64: '',
+      monitor_index: 0, monitor_count: 1, monitor_device: '\\\\.\\DISPLAY1',
+    });
+    const driver = new PowerShellDesktopDriver(transport);
+    await expect(driver.capture({ kind: 'monitor', index: 0 })).rejects.toThrow(/empty image/);
   });
 });
