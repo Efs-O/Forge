@@ -1,5 +1,17 @@
 # Forge — Recent Changes
 
+## 0.16.88
+
+### Telegram answers from live sessions return to the same chat
+
+- `/claude`, `/codex`, and `/copilot` now queue a question for the named live session and deliver its final answer or failure to the paired Telegram chat. The request is deduplicated by Telegram message id; a window reload does not silently ask the session again.
+- A session can send an interim update with `forge.sh remote-notify` or ask the owner a question with `forge.sh remote-ask`. Both commands use the originating exchange id, so they cannot choose a different chat. The owner answers with `/answer <question-id> <text>`; `/tell <agent> <message>` remains available for one-way notes.
+- Late verdicts left by a crashed window are reconciled into the remote outbox. If no result appears within twenty minutes, the chat receives an explicit unknown-outcome notice. Existing outbox retries still apply to Telegram delivery.
+
+### Browser dropdowns accept a selected option
+
+- `browser_type` now selects a real `<select>` option by exact label or value and verifies the result. The inspected element records whether it supports text entry, selection, or neither, so the guard and action use the same decision. An unavailable option is refused with a list of choices instead of a raw Playwright timeout.
+
 ## 0.16.87
 
 ### Browser and desktop tools do what they report
