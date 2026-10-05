@@ -22,7 +22,14 @@ import {
   type CoordSpace,
   type PhysicalPoint,
 } from './coordinateTransform';
-import { TargetWindowGate, type ApprovedWindow } from './targetWindowGate';
+import {
+  DENY_VSCODE,
+  TargetWindowGate,
+  policyRefusalFor,
+  revokeRefusedCodeTargets,
+  type ApprovedWindow,
+  type DesktopPolicy,
+} from './targetWindowGate';
 import type {
   DesktopCapture,
   DesktopClickOptions,
@@ -52,24 +59,19 @@ interface CaptureRecord {
   approved?: ApprovedWindow;
 }
 
-/**
- * System chords that are never AUTO-approved (B2): any `win` key, `alt+f4`, or
- * any `ctrl+alt+*` chord. The tool layer returns a `dangerous` approval for
- * these so the user must explicitly confirm; the driver itself does not refuse
- * them — an explicitly approved system chord on the approved target window is
- * allowed (the B2 target-window gate is the real protection).
- */
-export function isSystemChord(keys: readonly string[]): boolean {
-  const set = new Set(keys.map((k) => k.toLowerCase()));
-  if (set.has('win')) return true;
-  if (set.has('alt') && set.has('f4')) return true;
-  if (set.has('ctrl') && set.has('alt')) return true;
-  return false;
-}
+// Re-export so existing imports (the tool layer, and the gate/chord tests that
+// sign against them) keep working after these pure rules moved to the contract.
+export { isSystemChord } from './DesktopDriver';
 
 /**
  * The desktop driver. Owns the B2 gate (approval + per-input check) and the
  * coordinate transform; the transport does the Windows calls.
+ *
+ * The desktop POLICY (plan Phase 3) arrives as a getter, never as a captured
+ * Boolean: `permissions.desktop.allow_vscode` can change while the extension
+ * host runs, and an input that lands after the change must see it. The driver
+ * is the only owner of the approval and the capture records, so revocation is
+ * reconciled here rather than in a second gate.
  */
 export class PowerShellDesktopDriver implements DesktopDriver {
   private readonly gate = new TargetWindowGate();
@@ -77,8 +79,58 @@ export class PowerShellDesktopDriver implements DesktopDriver {
   private captureCounter = 0;
   /** The currently approved control target (set by focus/capture). */
   private approved: ApprovedWindow | undefined;
+  /** Live policy source. Deny-by-default when nothing is bound (no config read here). */
+  private policyGetter: () => DesktopPolicy;
 
-  constructor(private readonly transport: DesktopTransport = new PowerShellTransport()) {}
+  constructor(
+    private readonly transport: DesktopTransport = new PowerShellTransport(),
+    policy: () => DesktopPolicy = () => DENY_VSCODE,
+  ) {
+    this.policyGetter = policy;
+  }
+
+  /** Bind (or rebind) the live policy source. Never stores a Boolean. */
+  setPolicySource(policy: () => DesktopPolicy): void {
+    this.policyGetter = policy;
+  }
+
+  /**
+   * Read the live policy and reconcile the held state against it: the Code
+   * approval and capture records it now refuses are dropped, nothing else
+   * (`revokeRefusedCodeTargets` holds the rule and its reasons).
+   */
+  private currentPolicy(): DesktopPolicy {
+    const policy = this.policyGetter();
+    if (revokeRefusedCodeTargets(this.approved, this.captures, policy)) {
+      this.approved = undefined;
+      this.gate.clear();
+    }
+    return policy;
+  }
+
+  /**
+   * Read-only view of the approved target, for the tool-layer approval
+   * predicates. They must ask the driver rather than keep their own copy of
+   * gate state, or the prompt and the gate can disagree.
+   *
+   * Reconciles the live policy first, so a confirmation prompt can never name a
+   * window the gate would refuse a moment later.
+   */
+  approvedTarget(): ApprovedWindow | undefined {
+    this.currentPolicy();
+    return this.approved;
+  }
+
+  /**
+   * Read-only view of the target a `capture_id` is bound to (undefined for a
+   * monitor capture, which has no target). The coordinate tools' confirmation
+   * prompt names THIS window — the one the call will act on — not whatever
+   * happens to be approved now.
+   */
+  captureTarget(captureId: string): ApprovedWindow | undefined {
+    this.currentPolicy();
+    return this.captures.get(captureId)?.approved;
+  }
 
   async listWindows(): Promise<WindowListing> {
     const r = await this.transport.send({ op: 'list_windows' });
@@ -117,6 +169,7 @@ export class PowerShellDesktopDriver implements DesktopDriver {
    * unless the caller says the user approved a new target.
    */
   coversTitle(title: string): boolean {
+    this.currentPolicy();
     const t = title.toLowerCase();
     return this.approved !== undefined && t !== '' && this.approved.title.toLowerCase().includes(t);
   }
@@ -178,7 +231,7 @@ export class PowerShellDesktopDriver implements DesktopDriver {
           `"${approved.title}" is not the approved target window; approve it first (desktop_focus_window)`,
         );
       }
-      const gateResult = this.gate.approve(approved);
+      const gateResult = this.gate.approve(approved, this.currentPolicy());
       if (!gateResult.ok) throw new Error(gateResult.reason);
       requireImage();
       this.approved = approved;
@@ -259,7 +312,7 @@ export class PowerShellDesktopDriver implements DesktopDriver {
       rect,
       ...(startTime !== undefined ? { processStartTime: startTime } : {}),
     };
-    const gateResult = this.gate.approve(approved);
+    const gateResult = this.gate.approve(approved, this.currentPolicy());
     if (!gateResult.ok) throw new Error(gateResult.reason);
     this.approved = approved;
     return { id: approved.hwnd, title: approved.title, rect: approved.rect };
@@ -272,7 +325,12 @@ export class PowerShellDesktopDriver implements DesktopDriver {
     cy: number,
   ): Promise<{ physical: PhysicalPoint; approved: ApprovedWindow }> {
     const record = this.captures.get(captureId);
-    if (!record) throw new Error(`unknown capture_id "${captureId}"; call desktop_capture first`);
+    if (!record) {
+      throw new Error(
+        `unknown capture_id "${captureId}"; call desktop_capture first (a capture for a target the ` +
+          'policy no longer allows is dropped, so a stale id can also mean the target was revoked)',
+      );
+    }
     if (record.kind === 'monitor' || !record.approved) {
       throw new Error(
         'coordinate actions require a window capture; capture the target window first',
@@ -280,7 +338,16 @@ export class PowerShellDesktopDriver implements DesktopDriver {
     }
     const physical = toPhysical(record.frame, coordSpace ?? 'image_px', cx, cy);
     const fg = await this.transport.send({ op: 'foreground' });
-    const gateResult = this.gate.checkAgainst(record.approved, str(fg['hwnd']), physical);
+    // Policy re-checked per input (plan Phase 3 item 3): a capture taken while
+    // the editor opt-in was on must not survive its revocation. `record.approved`
+    // is the window THIS capture bound, so the check is against that window even
+    // when it is no longer the last-approved one.
+    const gateResult = this.gate.checkAgainst(
+      record.approved,
+      str(fg['hwnd']),
+      physical,
+      this.currentPolicy(),
+    );
     if (!gateResult.ok) throw new Error(gateResult.reason);
     return { physical, approved: record.approved };
   }
@@ -370,12 +437,20 @@ export class PowerShellDesktopDriver implements DesktopDriver {
   }
 
   private requireApproved(): ApprovedWindow {
-    if (!this.approved) {
+    const target = this.approved;
+    if (!target) {
       throw new Error(
         'no approved target window; call desktop_focus_window or desktop_capture first',
       );
     }
-    return this.approved;
+    // The current-target path (type/press) re-applies the live policy too:
+    // approval alone is not proof the target is still allowed. The local copy is
+    // checked, not `this.approved`, because reading the policy may itself drop
+    // the approval — the caller still gets the reason naming the refused window,
+    // not a bare "no approved target" that hides what was revoked.
+    const reason = policyRefusalFor(target, this.currentPolicy());
+    if (reason) throw new Error(reason);
+    return target;
   }
 
   /**
@@ -405,8 +480,16 @@ export class PowerShellDesktopDriver implements DesktopDriver {
 
 let singleton: PowerShellDesktopDriver | undefined;
 
-/** The extension-host singleton (the PowerControl pattern). */
-export function getDesktopDriver(): PowerShellDesktopDriver {
+/**
+ * The extension-host singleton (the PowerControl pattern).
+ *
+ * `policy` is a getter, not a value: `makeDesktopTools` binds it to the live
+ * config on every registration, and the driver calls it per input. Passing it
+ * here (rather than reading config inside the driver) keeps the driver free of
+ * `vscode` and of `.forge/config.yaml`, and keeps exactly one gate.
+ */
+export function getDesktopDriver(policy?: () => DesktopPolicy): PowerShellDesktopDriver {
   if (!singleton) singleton = new PowerShellDesktopDriver();
+  if (policy) singleton.setPolicySource(policy);
   return singleton;
 }

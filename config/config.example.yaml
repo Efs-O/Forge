@@ -57,6 +57,22 @@ permissions:
   net:
     search: true
     fetch: true
+  # Browser and desktop control are NOT enabled by this example — both default
+  # to `enabled: false`. Uncomment to grant them.
+  # browser:
+  #   enabled: true
+  # desktop:
+  #   enabled: true
+  #   # Opt in to controlling the ordinary VS Code `code` process. Off by
+  #   # default, and inert while `enabled` is false. Deliberately narrow: this
+  #   # matches the `code`/`code.exe` PROCESS name only — never a window title,
+  #   # never the Chrome_WidgetWin_1 class, and never a fork (Code - Insiders,
+  #   # Cursor, Windsurf, VSCodium, devenv), which stay refused whatever you set
+  #   # here. Every input into a VS Code window still asks for confirmation on
+  #   # each call, so this alone cannot drive Forge's own chat. Turning it off
+  #   # again drops the VS Code approval and its captures immediately; other
+  #   # windows keep theirs.
+  #   allow_vscode: false
 
 # Persistent agent jobs (docs/JOBS.md). Opt-in: set `enabled: true` to start
 # the scheduler. With no jobs defined it is inert, but it is off by default.

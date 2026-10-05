@@ -447,7 +447,13 @@ export interface ForgeConfig {
     git?: { read?: boolean; write?: boolean };
     agents?: { delegate?: boolean; cloud_workers?: boolean };
     browser?: { enabled?: boolean };
-    desktop?: { enabled?: boolean };
+    /**
+     * `allow_vscode` (default false) opts in to controlling the ordinary VS Code
+     * `code`/`code.exe` PROCESS — not a fork, not a title match, not the
+     * `Chrome_WidgetWin_1` class. Inert while `enabled` is false, and each input
+     * to a Code window still asks separately. See src/tools/desktop/targetWindowGate.ts.
+     */
+    desktop?: { enabled?: boolean; allow_vscode?: boolean };
   };
   /** Non-permission browser knobs (channel, headless, allowed_origins). */
   browser?: {

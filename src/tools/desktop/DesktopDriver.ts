@@ -71,6 +71,24 @@ export function assertMonitorIndex(index: unknown): number {
 }
 
 /**
+ * System chords that are never AUTO-approved (B2): any `win` key, `alt+f4`, or
+ * any `ctrl+alt+*` chord. The tool layer returns a `dangerous` approval for
+ * these so the user must explicitly confirm; the driver itself does not refuse
+ * them — an explicitly approved system chord on the approved target window is
+ * allowed (the B2 target-window gate is the real protection).
+ *
+ * Lives on the contract module beside `assertMonitorIndex` for the same reason:
+ * a pure rule both the tool layer and the driver need, with one implementation.
+ */
+export function isSystemChord(keys: readonly string[]): boolean {
+  const set = new Set(keys.map((k) => k.toLowerCase()));
+  if (set.has('win')) return true;
+  if (set.has('alt') && set.has('f4')) return true;
+  if (set.has('ctrl') && set.has('alt')) return true;
+  return false;
+}
+
+/**
  * A capture frame: the explicit pixel space a coordinate action references.
  * `captureId` binds the size, DPI scale, origin offset, AND the approved
  * HWND+pid (B2). There is no implicit global screen.

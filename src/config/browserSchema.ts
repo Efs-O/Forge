@@ -15,6 +15,16 @@ export const BrowserPermissionSchema = z
 export const DesktopPermissionSchema = z
   .object({
     enabled: z.boolean().default(false),
+    /**
+     * Opt in to controlling the ordinary VS Code `code` process (plan Phase 3).
+     * No effect while `enabled` is false. Deliberately narrow: it names the
+     * `code`/`code.exe` PROCESS only — never a title match, never the
+     * `Chrome_WidgetWin_1` window class, and never a fork (`Code - Insiders`,
+     * `cursor`, `windsurf`, `codium`, `vscodium`, `devenv`), which stay
+     * unconditionally refused. Every input to a Code window still needs its own
+     * explicit confirmation, so the opt-in alone cannot drive Forge's chat.
+     */
+    allow_vscode: z.boolean().default(false),
   })
   .optional();
 

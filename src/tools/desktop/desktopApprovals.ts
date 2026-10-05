@@ -7,6 +7,7 @@ import { resolveRequestModel } from '../../config/ConfigResolver';
 import { isCloudProvider, getProviderDisplayName } from '../../llm/CloudProviders';
 import type { ToolApprovalMetadata } from '../ToolRegistry';
 import { isSystemChord, type PowerShellDesktopDriver } from './PowerShellDesktopDriver';
+import { isVsCodeTarget } from './targetWindowGate';
 
 type Approval = (args: Record<string, unknown>) => ToolApprovalMetadata | undefined;
 
@@ -92,6 +93,68 @@ export function consequentialApproval(
       return { dangerous: true, detail: `Consequential ${toolName} — confirm before proceeding` };
     }
     return undefined;
+  };
+}
+
+/**
+ * Combine several approval predicates for one tool (plan Phase 3 item 4).
+ *
+ * A Code-target confirmation and a consequential / system-chord warning can
+ * both apply to the same call. Composing them keeps the STRONGER warning — the
+ * result is `dangerous` if any part is — and shows every reason, so confirming
+ * a `ctrl+alt+delete` into a VS Code window names both the chord and the
+ * window. Returning only the first match would let the Code prompt mask the
+ * chord warning, or the reverse.
+ */
+export function composeApprovals(...approvals: readonly Approval[]): Approval {
+  return (args) => {
+    const fired = approvals
+      .map((approve) => approve(args))
+      .filter((meta): meta is ToolApprovalMetadata => meta !== undefined);
+    if (fired.length === 0) return undefined;
+    const details = fired
+      .map((meta) => meta.detail)
+      .filter((detail): detail is string => typeof detail === 'string' && detail !== '');
+    return {
+      ...(fired.some((meta) => meta.dangerous === true) ? { dangerous: true } : {}),
+      ...(details.length > 0 ? { detail: details.join('\n') } : {}),
+    };
+  };
+}
+
+/**
+ * Per-call confirmation for input aimed at a VS Code window (plan Phase 3 item
+ * 4). The `allow_vscode` opt-in makes a Code window APPROVABLE; it must not make
+ * it silently TYPEABLE — otherwise the opt-in alone would let a model drive
+ * Forge's own chat input, one keystroke at a time, on the strength of a capture
+ * taken minutes earlier.
+ *
+ * So every one of the six input tools asks again, per call, when its target is
+ * Code — even the two that are `autoApprove: true` (`desktop_move_mouse`,
+ * `desktop_scroll`) and `desktop_drag`, which no write-permission rule catches
+ * because `desktop` is not a write permission. The binding approval from
+ * `desktop_focus_window` / `desktop_capture` is NOT a substitute.
+ *
+ * The target is resolved the way the handler will resolve it: a coordinate tool
+ * from its `capture_id`, type/press from the current approved target. The driver
+ * is the only source — these predicates must not keep their own copy of gate
+ * state, or the prompt and the gate can disagree about which window is meant.
+ */
+export function codeInputApproval(
+  driver: Pick<PowerShellDesktopDriver, 'approvedTarget' | 'captureTarget'>,
+  action: string,
+): Approval {
+  return (args) => {
+    const captureId = typeof args.capture_id === 'string' ? args.capture_id : undefined;
+    const target = captureId ? driver.captureTarget(captureId) : driver.approvedTarget();
+    if (!target || !isVsCodeTarget(target)) return undefined;
+    return {
+      dangerous: true,
+      detail:
+        `${action} in the VS Code window "${target.title}" (HWND ${target.hwnd}) — this is the ` +
+        'editor Forge itself runs in. Confirm this call: permissions.desktop.allow_vscode does ' +
+        'not pre-approve input.',
+    };
   };
 }
 

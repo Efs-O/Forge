@@ -9,6 +9,9 @@ permissions:
     enabled: true
   desktop:
     enabled: true
+    # Optional: allow control of the ordinary VS Code `code` process. Off by
+    # default; see "Controlling VS Code" below.
+    allow_vscode: false
 
 browser:
   channel: chrome # chrome, msedge, or chromium
@@ -59,6 +62,41 @@ size, logical DPI-scaled size, and physical-pixel size are identical.
 Desktop coordinate actions require the `capture_id` returned by
 `desktop_capture`; there is no implicit "current screen" target.
 
+### Browser element targets and action latency
+
+`browser_inspect` returns numbered interactive elements with bounding boxes and
+a re-selectable selector. Those numbers are bound to the last inspection of that
+tab and to the exact DOM node it showed, not to a re-count:
+
+- `browser_click`, `browser_type`, and `browser_hover` with an `index` act on
+  that same node. Before acting, Forge re-checks that it is still attached,
+  visible, and unchanged in role and text. If the page changed underneath you —
+  including a page-script mutation with no navigation, or an identical sibling
+  inserted before the target — Forge refuses and tells you to inspect again
+  rather than acting on whatever now occupies that number.
+- A main-frame navigation, a closed tab, or a closed browser drops the
+  inspection for that tab, so an index from a previous page cannot resolve
+  against a same-URL coincidence.
+- `browser_type` uses `fill` on the node itself and reports a clear refusal when
+  the target is not editable, instead of typing at whatever a click happened to
+  hit.
+
+Coordinate arguments to `browser_click`, `browser_hover`, `browser_scroll`, and
+`browser_drag` must be inside the viewport. Forge refuses a point outside it
+before dispatching anything, and names the point and the viewport size — a
+coordinate `browser_click` outside the viewport used to report success while
+doing nothing.
+
+Selector and index actions are bounded at **5 seconds** each. A selector that
+matches nothing, or an element that never becomes actionable, fails in about
+five seconds with the tool, action, and target named, instead of waiting
+Playwright's default 30 seconds. Navigation keeps its own 30-second timeout, and
+a timed-out action is never retried automatically and never reported as success.
+
+`browser_press` sends keys to the page or to a selector inside it. It does not
+operate browser chrome, and it does not open or drive DevTools —
+`browser_inspect` is the supported way to inspect a page.
+
 ## Approvals and action safety
 
 Browser and desktop controls use different structural approval gates:
@@ -72,9 +110,46 @@ Browser and desktop controls use different structural approval gates:
   approved window is still foreground and that the input point is within it.
   If that check fails, capture or focus the intended window again.
 
-Forge always refuses desktop control of VS Code windows, the secure desktop or
-UAC prompts, and the taskbar. System key chords such as `win+*`, `alt+f4`, and
-`ctrl+alt+*` are never automatically approved.
+Forge refuses desktop control of the secure desktop or UAC prompts and the
+taskbar, and of every editor except the ordinary VS Code process. System key
+chords such as `win+*`, `alt+f4`, and `ctrl+alt+*` are never automatically
+approved.
+
+### Controlling VS Code
+
+By default Forge refuses to control VS Code at all, because the agent runs
+inside that editor and could otherwise type into its own chat input. If you want
+it to drive VS Code deliberately, set both switches:
+
+```yaml
+permissions:
+  desktop:
+    enabled: true
+    allow_vscode: true
+```
+
+What that opt-in does and does not allow:
+
+- It matches the **process name** `code` / `code.exe` only. It never matches a
+  window title, never the `Chrome_WidgetWin_1` window class, and never a fork —
+  `Code - Insiders`, Cursor, Windsurf, VSCodium, and `devenv` stay refused no
+  matter what you set.
+- Every one of the six input tools — `desktop_move_mouse`, `desktop_click`,
+  `desktop_drag`, `desktop_scroll`, `desktop_type`, `desktop_press` — asks for
+  an explicit confirmation **on each call** when its target is a VS Code window,
+  naming that window and the action. Approving the window with
+  `desktop_focus_window` or `desktop_capture` is not a substitute, and neither
+  is the tool being normally auto-approved. A consequential click or a system
+  chord keeps its own stronger warning alongside the VS Code one.
+- The policy is re-read before every input, including an input that arrives
+  through a `capture_id` taken earlier. Turning `allow_vscode` back off drops
+  the VS Code approval and that window's captures immediately, without touching
+  approvals or captures for any other window. Re-enabling it does not resurrect
+  the old approval: focus or capture the window again to bind a new one.
+
+A manual smoke test of this path should use a disposable VS Code window and
+harmless text — never the live Forge chat input, and never a command that
+reloads the extension host.
 
 Some browser and desktop input tools also accept `consequential: true`. This
 marks an action such as submitting a form, purchasing, sending a message, or
@@ -113,9 +188,18 @@ invalid UTF-8 is refused instead of being typed as replacement characters.
 
 - Desktop tools are available only on Windows. On other platforms Forge reports
   that desktop tools are unsupported instead of attempting a partial action.
-- With a vision-capable cloud model, capturing an entire monitor requires an
-  explicit `monitor` argument and an approval that names the cloud provider.
-  Window capture follows the normal target-window approval flow.
+- With a vision-capable cloud model, capturing a monitor requires an explicit
+  `monitor` argument and an approval that names the cloud provider. Window
+  capture follows the normal target-window approval flow.
+- `desktop_capture` with `monitor: N` captures exactly **one** display: index 0
+  is the primary, and higher indices are the other displays in a deterministic
+  order (physical left, then top, then device name), re-enumerated per request.
+  An index past the last display is refused with the available range; Forge does
+  not quietly widen the capture to the whole virtual desktop instead. The result
+  names the display it took (index, count, and Win32 device name) and reports
+  the physical captured region separately from the returned image size, so a
+  downscaled image is never mistaken for the captured area. Monitor captures are
+  read-only — a coordinate action needs a window capture.
 - Screenshots are stored under
   `~/.forge/screenshots/<conversation-id>/`, outside the workspace. This keeps
   potentially sensitive desktop captures out of project directories and source

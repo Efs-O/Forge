@@ -381,6 +381,94 @@ describe('browser tools: inspect, index identity, coordinate bounds (Phase 1)', 
     );
   }, 60000);
 
+  it('bounds a selector action at 5s: missing, hidden, and late-appearing targets', async (t) => {
+    requireBrowser(t);
+    // Fix-plan Phase 3 item 1 (report §3.5): a bad selector used to cost
+    // Playwright's full 30 s default. Three cases, one shared bound:
+    //   - a selector that matches nothing fails fast and names the target;
+    //   - an element that is permanently hidden fails fast (actionability waits);
+    //   - an element that appears after a short delay still succeeds, so the
+    //     bound is not so tight that a slow-but-valid page breaks.
+    await call('browser_navigate', { url: RICH_PAGE });
+
+    const missingAt = Date.now();
+    await expect(call('browser_click', { selector: '#definitely-not-here' })).rejects.toThrow(
+      /browser_click: selector "#definitely-not-here" failed within 5000 ms/,
+    );
+    const missingMs = Date.now() - missingAt;
+    // Under 10 s proves the 5 s bound is in force, with room for a slow host.
+    expect(missingMs).toBeLessThan(10000);
+    // The Playwright cause is preserved inside the named wrapper, not swallowed.
+    await expect(call('browser_click', { selector: '#definitely-not-here' })).rejects.toThrow(
+      /Timeout 5000ms|Timeout exceeded/s,
+    );
+
+    // A permanently hidden element: present in the DOM, never actionable.
+    const hiddenAt = Date.now();
+    await expect(call('browser_click', { selector: '#hiddenBtn' })).rejects.toThrow(
+      /browser_click: selector "#hiddenBtn" failed within 5000 ms/,
+    );
+    expect(Date.now() - hiddenAt).toBeLessThan(10000);
+
+    // The bound applies to the other selector actions too, and names each one.
+    await expect(call('browser_type', { selector: '#nope', text: 'x' })).rejects.toThrow(
+      /browser_type: selector "#nope" failed within 5000 ms/,
+    );
+    await expect(call('browser_hover', { selector: '#nope' })).rejects.toThrow(
+      /browser_hover: selector "#nope" failed within 5000 ms/,
+    );
+    await expect(call('browser_press', { key: 'Enter', selector: '#nope' })).rejects.toThrow(
+      /browser_press: selector "#nope" failed within 5000 ms/,
+    );
+    await expect(
+      call('browser_scroll', { selector: '#nope', delta_x: 0, delta_y: 10 }),
+    ).rejects.toThrow(/browser_scroll: selector "#nope" failed within 5000 ms/);
+
+    // A valid element that appears 1.2 s later must still be reachable — the
+    // bound shortens the wait for a dead selector, it does not shorten the wait
+    // for a slow page.
+    await call('browser_navigate', {
+      url:
+        'data:text/html,' +
+        encodeURIComponent(
+          '<html><body><h1 id="h">waiting</h1><script>setTimeout(function(){' +
+            'var b=document.createElement("button");b.id="late";' +
+            'b.textContent="Late";b.onclick=function(){document.getElementById("h").textContent="LATE"};' +
+            'document.body.appendChild(b);},1200);</script></body></html>',
+        ),
+    });
+    const lateAt = Date.now();
+    expect(await callText('browser_click', { selector: '#late' })).toMatch(/clicked "#late"/);
+    const lateMs = Date.now() - lateAt;
+    expect(lateMs).toBeGreaterThan(1000);
+    expect(lateMs).toBeLessThan(5000);
+
+    // …and the click really landed on it.
+    const heading = await mgr.pageEvalForTest<string>(
+      () => document.getElementById('h')?.textContent ?? '',
+    );
+    expect(heading).toBe('LATE');
+
+    // An index action on a node hidden after inspection is refused FAST, and by
+    // the Phase 1 identity recheck rather than by the locator bound: the
+    // recheck runs first, so the 5 s timeout behind it is belt-and-braces and
+    // the 30 s default is never reached either way. Asserted here so a future
+    // change that drops the recheck cannot silently restore the long wait.
+    await call('browser_navigate', { url: RICH_PAGE });
+    const listed = parseInspect(await callText('browser_inspect'));
+    const plain = listed.find((e) => e.text === 'Plain');
+    expect(plain).toBeDefined();
+    await mgr.pageEvalForTest(() => {
+      const el = document.getElementById('plain');
+      if (el) el.style.display = 'none';
+    });
+    const idxAt = Date.now();
+    await expect(call('browser_click', { index: plain!.index })).rejects.toThrow(
+      /browser_click: the element at index .* is not visible/,
+    );
+    expect(Date.now() - idxAt).toBeLessThan(5000);
+  }, 120000);
+
   it('closes the session', async (t) => {
     requireBrowser(t);
     expect(await callText('browser_close')).toMatch(/Browser closed/);

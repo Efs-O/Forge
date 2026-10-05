@@ -2,6 +2,11 @@ import type { Browser, BrowserContext, Page } from 'playwright-core';
 import { InspectionStore } from './browserInspectionStore';
 import type { BrowserElement, IndexTarget } from './browserInspect';
 import { getPlaywright, pngDimensions } from './browserPrimitives';
+import {
+  LOCATOR_ACTION_TIMEOUT_MS,
+  requireViewportPoint,
+  withLocatorActionTimeout,
+} from './browserActionGuards';
 import type { BrowserChannel, BrowserScreenshot } from './browserPrimitives';
 export {
   DEFAULT_INSPECT_MAX,
@@ -290,12 +295,18 @@ export class BrowserSessionManager {
   ): Promise<string> {
     const page = await this.resolvePage(tabId);
     if (target.selector) {
-      await page.locator(target.selector).first().click();
+      await withLocatorActionTimeout('click', `selector "${target.selector}"`, () =>
+        page.locator(target.selector!).first().click({ timeout: LOCATOR_ACTION_TIMEOUT_MS }),
+      );
       return `clicked "${target.selector}"`;
     }
     if (target.index !== undefined) {
       const el = await this.indexTarget(page, target.index, 'click');
-      await el.handle.click();
+      await withLocatorActionTimeout(
+        'click',
+        `element ${target.index} ("${el.text || el.role}")`,
+        () => el.handle.click({ timeout: LOCATOR_ACTION_TIMEOUT_MS }),
+      );
       return `clicked element ${target.index} ("${el.text || el.role}")`;
     }
     if (target.x !== undefined && target.y !== undefined) {
@@ -307,24 +318,14 @@ export class BrowserSessionManager {
   }
 
   /**
-   * Refuse a coordinate the viewport cannot receive, BEFORE dispatching it.
-   * `page.mouse` accepts any number and reports success, so an out-of-viewport
-   * point used to be a silent no-op with a success message (report §3.8).
+   * Viewport check for a coordinate action. The rule itself lives in
+   * `browserActionGuards` (stateless, and unit-testable without a browser);
+   * this only supplies the page's own viewport so a resized context is checked
+   * against its real size, not the launch constant.
    */
   private requireViewportPoint(page: Page, x: number, y: number, action: string): void {
     const vp = page.viewportSize() ?? { width: VIEWPORT_WIDTH, height: VIEWPORT_HEIGHT };
-    const inBounds =
-      Number.isFinite(x) && Number.isFinite(y) && x >= 0 && y >= 0 && x < vp.width && y < vp.height;
-    if (!inBounds) {
-      throw new Error(
-        `${action}: (${x},${y}) is outside the ${vp.width}×${vp.height} viewport ` +
-          '(valid x: 0-' +
-          (vp.width - 1) +
-          ', y: 0-' +
-          (vp.height - 1) +
-          '). Use browser_inspect for an element target, or a point inside a browser_screenshot.',
-      );
-    }
+    requireViewportPoint(vp, x, y, action);
   }
 
   async type(
@@ -334,7 +335,9 @@ export class BrowserSessionManager {
   ): Promise<string> {
     const page = await this.resolvePage(tabId);
     if (target.selector) {
-      await page.locator(target.selector).first().fill(text);
+      await withLocatorActionTimeout('type', `selector "${target.selector}"`, () =>
+        page.locator(target.selector!).first().fill(text, { timeout: LOCATOR_ACTION_TIMEOUT_MS }),
+      );
       return `typed into "${target.selector}"`;
     }
     if (target.index !== undefined) {
@@ -348,7 +351,11 @@ export class BrowserSessionManager {
       }
       // `fill` targets the node itself; a click-then-keyboard-type could land on
       // whatever the click actually hit.
-      await el.handle.fill(text);
+      await withLocatorActionTimeout(
+        'type',
+        `element ${target.index} ("${el.text || el.role}")`,
+        () => el.handle.fill(text, { timeout: LOCATOR_ACTION_TIMEOUT_MS }),
+      );
       return `typed into element ${target.index} ("${el.text || el.role}")`;
     }
     throw new Error('browser_type: provide selector or index');
@@ -357,7 +364,11 @@ export class BrowserSessionManager {
   async press(tabId: string | undefined, key: string, selector?: string): Promise<string> {
     const page = await this.resolvePage(tabId);
     if (selector) {
-      await page.locator(selector).first().press(key);
+      // Selector-scoped press only: a bare keyboard press has no element to wait
+      // on, so there is nothing to bound and no locator timeout to apply.
+      await withLocatorActionTimeout('press', `selector "${selector}"`, () =>
+        page.locator(selector).first().press(key, { timeout: LOCATOR_ACTION_TIMEOUT_MS }),
+      );
       return `pressed "${key}" on "${selector}"`;
     }
     await page.keyboard.press(key);
@@ -372,10 +383,15 @@ export class BrowserSessionManager {
   ): Promise<string> {
     const page = await this.resolvePage(tabId);
     if (target.selector) {
-      await page
-        .locator(target.selector)
-        .first()
-        .evaluate('(el, d) => { el.scrollBy(d.dx, d.dy); }', { dx: deltaX, dy: deltaY });
+      await withLocatorActionTimeout('scroll', `selector "${target.selector}"`, () =>
+        page.locator(target.selector!).first().evaluate(
+          '(el, d) => { el.scrollBy(d.dx, d.dy); }',
+          { dx: deltaX, dy: deltaY },
+          {
+            timeout: LOCATOR_ACTION_TIMEOUT_MS,
+          },
+        ),
+      );
       return `scrolled "${target.selector}" by ${deltaX},${deltaY}`;
     }
     const x = target.x ?? VIEWPORT_WIDTH / 2;
@@ -397,7 +413,9 @@ export class BrowserSessionManager {
   ): Promise<string> {
     const page = await this.resolvePage(tabId);
     if (target.selector) {
-      await page.locator(target.selector).first().hover();
+      await withLocatorActionTimeout('hover', `selector "${target.selector}"`, () =>
+        page.locator(target.selector!).first().hover({ timeout: LOCATOR_ACTION_TIMEOUT_MS }),
+      );
       return `hovered "${target.selector}"`;
     }
     if (target.x !== undefined && target.y !== undefined) {
@@ -407,7 +425,11 @@ export class BrowserSessionManager {
     }
     if (target.index !== undefined) {
       const el = await this.indexTarget(page, target.index, 'hover');
-      await el.handle.hover();
+      await withLocatorActionTimeout(
+        'hover',
+        `element ${target.index} ("${el.text || el.role}")`,
+        () => el.handle.hover({ timeout: LOCATOR_ACTION_TIMEOUT_MS }),
+      );
       return `hovered element ${target.index} ("${el.text || el.role}")`;
     }
     throw new Error('browser_hover: provide selector, index, or x+y');

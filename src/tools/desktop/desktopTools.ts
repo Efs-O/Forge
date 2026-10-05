@@ -17,6 +17,8 @@ import { assertMonitorIndex } from './DesktopDriver';
 import {
   captureApproval,
   cloudMonitorApproval,
+  codeInputApproval,
+  composeApprovals,
   consequentialApproval,
   systemChordApproval,
 } from './desktopApprovals';
@@ -39,13 +41,29 @@ const coordSpace = (args: Record<string, unknown>): CoordSpace | undefined => {
  * Factory for the whole desktop tool family (plan §4.2). One
  * `PowerShellDesktopDriver` (the singleton) is shared by every tool.
  * `advertise: isWin` keeps the family invisible on non-Windows platforms (B7).
+ *
+ * `getConfig` is passed to the driver as a live getter, not read once: the
+ * `permissions.desktop.allow_vscode` opt-in must take effect on the next input,
+ * including one through a capture taken before the change (plan Phase 3).
  */
 export function makeDesktopTools(getConfig: GetConfig): RegisteredTool[] {
-  const driver = getDesktopDriver();
+  const driver = getDesktopDriver(() => ({
+    allowVsCode: getConfig().permissions?.desktop?.allow_vscode ?? false,
+  }));
   const monitorApproval = cloudMonitorApproval(getConfig);
   const chordApproval = systemChordApproval();
   const clickApproval = consequentialApproval('desktop_click');
   const typeApproval = consequentialApproval('desktop_type');
+  // Every input tool asks again, per call, when its target is a VS Code window
+  // (plan Phase 3 item 4) — including the auto-approved move/scroll and the
+  // never-write-permission-caught drag. Composed, so a consequential click or a
+  // system chord keeps its own stronger warning alongside the Code one.
+  const codeMove = codeInputApproval(driver, 'Move the mouse');
+  const codeClick = codeInputApproval(driver, 'Click');
+  const codeDrag = codeInputApproval(driver, 'Drag');
+  const codeScroll = codeInputApproval(driver, 'Scroll');
+  const codeType = codeInputApproval(driver, 'Type text');
+  const codePress = codeInputApproval(driver, 'Press keys');
 
   return [
     // ── desktop_capture ──────────────────────────────────────────────────────
@@ -181,7 +199,9 @@ export function makeDesktopTools(getConfig: GetConfig): RegisteredTool[] {
           description:
             'Focus a window by title or id and approve it as the control target. ' +
             'Subsequent input actions are foreground-checked against this window. ' +
-            'Always refuses VS Code, UAC/secure desktop, and the taskbar.',
+            'Refuses the secure desktop/UAC and the taskbar always, and every editor except the ' +
+            'ordinary VS Code `code` process; VS Code needs permissions.desktop.allow_vscode and ' +
+            'still confirms each input separately.',
           parameters: {
             type: 'object',
             properties: {
@@ -245,6 +265,7 @@ export function makeDesktopTools(getConfig: GetConfig): RegisteredTool[] {
       permission: 'desktop',
       autoApprove: true,
       advertise: isWin,
+      approval: codeMove,
       handler: async (args) => {
         const x = num(args, 'x')!;
         const y = num(args, 'y')!;
@@ -289,7 +310,7 @@ export function makeDesktopTools(getConfig: GetConfig): RegisteredTool[] {
       },
       permission: 'desktop',
       advertise: isWin,
-      approval: clickApproval,
+      approval: composeApprovals(clickApproval, codeClick),
       handler: async (args) => {
         const x = num(args, 'x')!;
         const y = num(args, 'y')!;
@@ -333,6 +354,7 @@ export function makeDesktopTools(getConfig: GetConfig): RegisteredTool[] {
       },
       permission: 'desktop',
       advertise: isWin,
+      approval: codeDrag,
       handler: async (args) => {
         const from = { x: num(args, 'from_x')!, y: num(args, 'from_y')! };
         const to = { x: num(args, 'to_x')!, y: num(args, 'to_y')! };
@@ -369,6 +391,7 @@ export function makeDesktopTools(getConfig: GetConfig): RegisteredTool[] {
       permission: 'desktop',
       autoApprove: true,
       advertise: isWin,
+      approval: codeScroll,
       handler: async (args) => {
         const x = num(args, 'x')!;
         const y = num(args, 'y')!;
@@ -404,7 +427,7 @@ export function makeDesktopTools(getConfig: GetConfig): RegisteredTool[] {
       },
       permission: 'desktop',
       advertise: isWin,
-      approval: typeApproval,
+      approval: composeApprovals(typeApproval, codeType),
       handler: async (args) => {
         const text = str(args, 'text')!;
         await driver.typeText(text);
@@ -440,7 +463,7 @@ export function makeDesktopTools(getConfig: GetConfig): RegisteredTool[] {
       },
       permission: 'desktop',
       advertise: isWin,
-      approval: chordApproval,
+      approval: composeApprovals(chordApproval, codePress),
       handler: async (args) => {
         const keys = Array.isArray(args.keys) ? (args.keys as string[]) : [];
         if (keys.length === 0) throw new Error('desktop_press: keys array is required');

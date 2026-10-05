@@ -171,10 +171,15 @@ Observation tools are `autoApprove: true`. Screenshot tools carry `requiresVisio
 **Target-window gate (B2):** `desktop_focus_window` / `desktop_capture(window)` asks the user once:
 "Forge may control '<title>'". That approval binds to the window's **HWND + process id**. Before
 **every** input call the driver checks the **foreground window is that HWND** and the point is inside
-its rect; otherwise it refuses and names the fix (re-capture, or re-focus the target). It **always
-refuses**: any VS Code window, the secure desktop / UAC, and the taskbar. `desktop_press` is never
-auto-approved for system chords. This is what stops the model clicking its own Allow dialog, typing
-into the VS Code terminal, or pressing `win+r`/`alt+f4`.
+its rect; otherwise it refuses and names the fix (re-capture, or re-focus the target). It refuses
+the secure desktop / UAC, the taskbar, and every editor except the ordinary VS Code `code` process.
+VS Code is refused **unless** `permissions.desktop.allow_vscode: true` (added by
+`docs/plans/DESKTOP_BROWSER_TOOL_FIX_PLAN.md` Phase 3): the opt-in matches the `code`/`code.exe`
+process name only — never a title, the `Chrome_WidgetWin_1` class, or a fork — and every input into
+a VS Code window still confirms per call. The policy is re-checked before every input, including one
+through an older `capture_id`. `desktop_press` is never auto-approved for system chords. This is what
+stops the model clicking its own Allow dialog, typing into the VS Code terminal, or pressing
+`win+r`/`alt+f4`.
 
 ### 4.3 Multimodal screenshot path + coordinate space
 
@@ -337,7 +342,9 @@ blind or injected action. (This resolves Claude's design disagreement #1.)
   origin` → physical px; DPI scale is information only. Key-up/button-up in the driver's `finally`;
   "release all" on abort/driver death (B3).
 - Target-window gate (B2): approval binds HWND+pid; foreground + in-rect check before every input;
-  always refuse VS Code / UAC / taskbar; `desktop_press` never auto-approves system chords.
+  refuse UAC / taskbar and every editor except ordinary VS Code, which needs
+  `permissions.desktop.allow_vscode` plus per-call input confirmation (policy re-checked per input);
+  `desktop_press` never auto-approves system chords.
 - Implement all desktop tools (§4.2). `desktop_capture` returns `MultimodalToolResult` + `capture_id`.
 - Cloud-model capture gate (§4.7).
 - **Gate:** unit test for the DPI/coordinate transform (non-zero origin / second monitor at negative x,
@@ -495,7 +502,15 @@ Each maps to a test or a named validation step. "Verified" requires code-path ev
 **Desktop loop (deterministic + unit)**
 - [ ] The image-px → physical-pixel transform is correct at 100% and 150% scale, with a non-zero origin (second monitor at negative x) and a downscaled image. → unit (pure, no mouse).
 - [ ] The target-window gate: input to a window that is not the approved HWND, or a point outside its rect, is refused and names the fix. → unit (mock driver).
-- [ ] VS Code / UAC / taskbar windows are always refused; `desktop_press` system chords (`win+*`, `alt+f4`) are never auto-approved. → unit (mock driver).
+- [ ] UAC / taskbar windows, and every editor except ordinary VS Code, are refused in both
+  configurations; `desktop_press` system chords (`win+*`, `alt+f4`) are never auto-approved. → unit (mock driver).
+- [ ] VS Code is refused by default and approvable only with `permissions.desktop.allow_vscode: true`;
+  forks (`Code - Insiders`, Cursor, Windsurf, VSCodium, `devenv`) stay refused either way. Revoking the
+  opt-in drops the VS Code approval and its captures only, and an input through an older `capture_id`
+  is refused. → unit (`targetWindowGate`, mock driver).
+- [ ] Each of the six desktop input tools asks for confirmation per call against a VS Code target
+  (including the auto-approved move/scroll and `desktop_drag`), while a non-Code target keeps its
+  existing behavior and consequential / system-chord warnings stay dangerous. → unit (tool layer).
 - [ ] **Abort mid-drag sends the button-up** (no key/button left held). → unit (mock driver, B3).
 - [ ] `desktop_capture` returns an image + `capture_id` + size + DPI scale + mapping + origin. → `test/live` (real capture) / unit (mapping only).
 - [ ] `desktop_capture` → `desktop_click`/`desktop_type` into the approved window → `desktop_capture` shows the change. → `test/live` (real, controlled target; not in `npm run ci`).
