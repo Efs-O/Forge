@@ -8,10 +8,9 @@ import type { CompactionState } from './compactionTypes';
 import { compactionWindowChars, replacementHostMessages } from './compactionWindow';
 import { boundCompactionUserMessages, USER_CONTEXT_MAX_CHARS } from './compactionUserContext';
 
-/** Optional host facts. Required facts (user requests, recorded actions) are never shed. */
+/** Optional host facts. User requests, recorded actions and memory keys are never shed. */
 export interface OptionalHostFacts {
   repoState: string;
-  memoryKeys: string[];
   lastReply: string | undefined;
 }
 
@@ -34,14 +33,6 @@ export function shedOptionalHostFacts(
       () => {
         if (!optional.repoState || optional.repoState === REPO_STATE_SHED_MARKER) return false;
         optional.repoState = REPO_STATE_SHED_MARKER;
-        return true;
-      },
-    ],
-    [
-      'memory keys',
-      () => {
-        if (optional.memoryKeys.length === 0) return false;
-        optional.memoryKeys = [];
         return true;
       },
     ],
@@ -102,10 +93,7 @@ export function fitUserMessagesToHostBudget(options: {
       maxChars: USER_CONTEXT_MAX_CHARS,
     };
   }
-  const optionalChars =
-    optional.repoState.length +
-    optional.memoryKeys.reduce((total, key) => total + key.length, 0) +
-    (optional.lastReply?.length ?? 0);
+  const optionalChars = optional.repoState.length + (optional.lastReply?.length ?? 0);
   const fixedHostChars = hostChars - userContextChars - optionalChars;
   const maxChars = Math.max(4_000, hostMaxChars - fixedHostChars);
   const bounded = boundCompactionUserMessages(userMessages, maxChars);

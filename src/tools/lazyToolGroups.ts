@@ -66,7 +66,6 @@ const NATIVE_GROUP_BY_TOOL: ReadonlyMap<string, string> = new Map([
   ...['install_llamacpp', 'get_power_info', 'schedule_wake', 'sleep_computer'].map(
     (name) => [name, 'system'] as const,
   ),
-  ...['remember', 'recall', 'list_memories', 'forget'].map((name) => [name, 'memory'] as const),
   ...['read_notebook', 'edit_notebook_cell'].map((name) => [name, 'notebook'] as const),
 ]);
 

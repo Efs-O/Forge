@@ -30,7 +30,7 @@ export const FORGE_MD = 'FORGE.md';
  * what makes the number mean something — at the cost of the delimiters
  * themselves consuming a little of it.
  */
-export const MAX_INSTRUCTION_BYTES = 25000;
+export const MAX_INSTRUCTION_BYTES = 32_000;
 
 /** Below this, a block is not worth a header; the file is marked omitted. */
 const MIN_CONTENT_BYTES = 200;
@@ -139,13 +139,23 @@ export function renderInstructionChain(
   const omitted: string[] = [];
   const unreadable: string[] = [];
 
-  // A lone file keeps exactly its previous shape: raw content, one cap, no
-  // delimiters spending budget that the content could have used.
+  // A lone file has no delimiter cost, but still needs the same truncation
+  // signal and bounded output as one member of a longer chain.
   if (present.length === 1 && !present[0].readError) {
     const only = present[0];
-    const clamped = clampUtf8(only.content ?? '', maxBytes);
+    const content = only.content ?? '';
+    const clamped = clampUtf8(content, maxBytes);
     if (clamped.truncated) truncated.push(only.displayPath);
-    return { text: clamped.text, truncated, omitted, unreadable };
+    const text = clamped.truncated
+      ? clampUtf8(content, Math.max(0, maxBytes - byteLength(TRUNCATION_MARKER))).text +
+        TRUNCATION_MARKER
+      : clamped.text;
+    return {
+      text,
+      truncated,
+      omitted,
+      unreadable,
+    };
   }
 
   const blocks: string[] = [PRECEDENCE_NOTE];

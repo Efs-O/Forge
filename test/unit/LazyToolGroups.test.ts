@@ -8,6 +8,7 @@ import {
   lazyGroupForTool,
   lazyGroupNames,
   lazyGroupForServer,
+  recordNativeLazyTool,
   recordLazyGroupTool,
   resetLazyToolGroups,
 } from '../../src/tools/lazyToolGroups';
@@ -169,6 +170,7 @@ describe('lazy tool groups', () => {
         permission: 'read',
         handler: async () => 'ok',
       });
+      recordNativeLazyTool(name);
     }
     bridge(registry, 'halluscribe', HALLUSCRIBE_TOOLS);
 
@@ -177,7 +179,6 @@ describe('lazy tool groups', () => {
       'editor_ui',
       'halluscribe',
       'media',
-      'memory',
       'notebook',
       'system',
     ]);
@@ -190,6 +191,8 @@ describe('lazy tool groups', () => {
       lazyGroupForTool('install_llamacpp'),
       lazyGroupForTool('get_power_info'),
       lazyGroupForTool('remember'),
+      lazyGroupForTool('recall'),
+      lazyGroupForTool('list_memories'),
       lazyGroupForTool('forget'),
       lazyGroupForTool('read_notebook'),
       lazyGroupForTool('search_sessions'),
@@ -201,8 +204,10 @@ describe('lazy tool groups', () => {
       'editor_ui',
       'system',
       'system',
-      'memory',
-      'memory',
+      undefined,
+      undefined,
+      undefined,
+      undefined,
       'notebook',
       'halluscribe',
     ]);
@@ -240,6 +245,10 @@ describe('lazy tool groups', () => {
     expect(loader?.function.parameters).toMatchObject({
       properties: { group: { enum: lazyGroupNames() } },
     });
+    expect(loader?.function.parameters).not.toMatchObject({
+      properties: { group: { enum: expect.arrayContaining(['memory']) } },
+    });
+    expect(loader?.function.description).not.toContain('memory:');
     expect(loader?.function.description).toContain(
       'computer_use: control browser tabs and the desktop; tools: desktop_capture',
     );
@@ -289,22 +298,33 @@ describe('lazy tool groups', () => {
     );
   });
 
-  it('eagerly advertises configured native tools from the lazy groups', () => {
+  it('eagerly advertises configured memory tools without a group activation', () => {
     const registry = new ToolRegistry();
-    registry.register({
-      definition: {
-        type: 'function',
-        function: { name: 'remember', description: '', parameters: { type: 'object' } },
-      },
-      permission: 'read',
-      handler: async () => 'ok',
-    });
-    const budget = new ToolBudget({ tools: ['remember'] });
-    const hidden = hiddenLazyToolNames('conv-a', new Set(['remember']));
+    const memoryTools = ['remember', 'recall', 'list_memories', 'forget'];
+    for (const name of memoryTools) {
+      registry.register({
+        definition: {
+          type: 'function',
+          function: { name, description: '', parameters: { type: 'object' } },
+        },
+        permission: 'read',
+        handler: async () => 'ok',
+      });
+      recordNativeLazyTool(name);
+    }
+    const budget = new ToolBudget({ tools: memoryTools });
+    const hidden = hiddenLazyToolNames('conv-a', new Set(memoryTools));
     const advertised = budget.filterDefinitions(
       registry.definitions(ALL_PERMISSIONS).filter((d) => !hidden.has(d.function.name)),
     );
-    expect(advertised.map((definition) => definition.function.name)).toContain('remember');
+    expect(advertised.map((definition) => definition.function.name)).toEqual(memoryTools);
+    expect(memoryTools.map((name) => lazyGroupForTool(name))).toEqual([
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+    ]);
+    expect(hiddenLazyToolNames('conv-a', new Set(memoryTools))).toEqual(new Set());
   });
 
   it('appends the loaded schemas after the existing prefix, leaving it byte-identical', () => {

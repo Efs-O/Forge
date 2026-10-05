@@ -22,6 +22,7 @@ export class CompactionHostContext {
   readonly omittedActions: { file: number; command: number };
   readonly recordedActionsText: string;
   readonly optional: OptionalHostFacts;
+  readonly memoryKeys: string[];
   readonly lastReplyFollowedByTools: boolean;
   private userMessages: string[];
   private userContext: string;
@@ -52,9 +53,9 @@ export class CompactionHostContext {
     );
     this.userMessages = collectCompactionUserMessages(previous?.userMessages, summarize);
     this.userContext = renderCompactionUserMessages(this.userMessages);
+    this.memoryKeys = boundMemoryKeys(memoryKeys);
     this.optional = {
       repoState: '',
-      memoryKeys: boundMemoryKeys(memoryKeys),
       // Only when the retained tail has no words of the agent's own. A tail that
       // carries them needs no copy; a tail that is empty, or is a user turn whose
       // answer had not started yet, leaves the summarizer's paraphrase as the sole
@@ -91,7 +92,7 @@ export class CompactionHostContext {
         ? { omittedActions: this.omittedActions }
         : {}),
       ...(this.optional.repoState ? { repoState: this.optional.repoState } : {}),
-      ...(this.optional.memoryKeys.length > 0 ? { memoryKeys: this.optional.memoryKeys } : {}),
+      ...(this.memoryKeys.length > 0 ? { memoryKeys: this.memoryKeys } : {}),
       ...(this.optional.lastReply ? { lastReply: this.optional.lastReply } : {}),
       ...(this.optional.lastReply && this.lastReplyFollowedByTools
         ? { lastReplyFollowedByTools: this.lastReplyFollowedByTools }
@@ -107,6 +108,7 @@ export class CompactionHostContext {
       components: {
         'user requests': this.userContext.length,
         'recorded actions': this.recordedActionsText.length,
+        'memory keys': this.memoryKeys.join(', ').length,
         'repo state': this.optional.repoState.length,
         'last reply': this.optional.lastReply?.length ?? 0,
       },

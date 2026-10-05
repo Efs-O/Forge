@@ -525,7 +525,8 @@ wake or delivers one from a window that does not own the chat.
     the verdict lands, with no owner prompt. Repeat once each for Claude and Copilot.
 - **Phase 3:**
   - Tests 1–5 pass.
-  - The real FORGE.md (25,144 bytes) renders in full, with no marker and with the 90% warning.
+  - The audited FORGE.md (25,144 bytes) renders in full with no marker. It is below 90% of the
+    raised 32,000-byte budget, so the warning starts at 28,800 bytes.
   - After a compaction in a session that used `remember`, the key list is present in the host facts.
 - **Phase 4:**
   - Tests 1–2 pass.

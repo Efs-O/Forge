@@ -88,18 +88,33 @@ describe('ForgeInstructionsLoader', () => {
     loader.dispose();
   });
 
-  it('truncates oversized instructions at 25,000 bytes without changing the file', () => {
+  it('warns once when a rendered instruction file reaches 90% of the byte budget', () => {
     const root = makeRoot();
     const file = path.join(root, 'FORGE.md');
-    const content = `${'a'.repeat(25000)}TAIL`;
+    const content = 'a'.repeat(29_000);
     fs.writeFileSync(file, content, 'utf8');
     const loader = new ForgeInstructionsLoader(root);
 
-    expect(loader.instructions).toBe('a'.repeat(25000));
+    expect(loader.instructions).toBe(content);
+    expect(loader.instructions).toBe(content);
     expect(fs.readFileSync(file, 'utf8')).toBe(content);
+    expect(vscode.window.showWarningMessage).toHaveBeenCalledTimes(1);
     expect(vscode.window.showWarningMessage).toHaveBeenCalledWith(
-      'Forge: FORGE.md was truncated to fit the 25000-byte project-instruction budget.',
+      expect.stringContaining('FORGE.md'),
     );
+    expect(vscode.window.showWarningMessage).toHaveBeenCalledWith(
+      expect.stringContaining('29,000 of 32,000 bytes'),
+    );
+    loader.dispose();
+  });
+
+  it('does not warn below 90% of the byte budget', () => {
+    const root = makeRoot();
+    fs.writeFileSync(path.join(root, 'FORGE.md'), 'a'.repeat(28_000), 'utf8');
+    const loader = new ForgeInstructionsLoader(root);
+
+    expect(loader.instructions).toHaveLength(28_000);
+    expect(vscode.window.showWarningMessage).not.toHaveBeenCalled();
     loader.dispose();
   });
 });

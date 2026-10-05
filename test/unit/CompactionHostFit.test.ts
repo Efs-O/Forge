@@ -12,6 +12,7 @@ import { compactionBudget } from '../../src/sidebar/compactionBudget';
 import type { RecordedCompactionAction } from '../../src/sidebar/compactionTypes';
 import { renderCompactionHostBlock } from '../../src/sidebar/compactionHostFit';
 import { replacementHostMessages } from '../../src/sidebar/compactionWindow';
+import { CompactionHostContext } from '../../src/sidebar/compactionHostContext';
 
 const summary = `Goal: complete the request.\nState: recorded. ${'detail. '.repeat(40)}\nNext: continue.\nFiles: src/a.ts.\nConstraints: none.\nErrors: none.`;
 
@@ -75,6 +76,27 @@ describe('host-fact budgeting', () => {
     expect(shed).toContain('repo state');
   });
 
+  it('keeps required memory keys while shedding repo state to fit the user requests', async () => {
+    const h = setup(2_800, 'r'.repeat(2_500), 60_000);
+    const keys = ['release-plan', 'api-compatibility'];
+    h.deps.listMemoryKeys = () => keys;
+    let shed: string[] = [];
+    h.deps.logCompactionAttempt = (_conv, entry) => {
+      if (entry.phase === 'finished') shed = entry.shed ?? [];
+    };
+    (h.deps as CompactionDeps & { countTokens: (text: string) => Promise<number> }).countTokens =
+      async (text) => Math.ceil(text.length / 3.5);
+
+    await expect(runCompaction(h.deps, 'c1', { auto: true })).resolves.toBe('compacted');
+
+    expect(h.conv.compaction?.userMessages).toContain('a'.repeat(2_800));
+    expect(h.conv.compaction?.userMessages).toContain('b'.repeat(2_800));
+    expect(h.conv.compaction?.memoryKeys).toEqual(keys);
+    expect(h.conv.compaction?.repoState).toBe(REPO_STATE_SHED_MARKER);
+    expect(shed).toContain('repo state');
+    expect(shed).not.toContain('memory keys');
+  });
+
   it('refuses before any model call when required user requests alone exceed the budget, naming them', async () => {
     const h = setup(3_900, '', 2_000);
     await expect(runCompaction(h.deps, 'c1', { auto: true })).resolves.toBe('failed');
@@ -83,6 +105,19 @@ describe('host-fact budgeting', () => {
     expect(h.posted.find((m) => m.type === 'error')?.message).toMatch(
       /largest component: user requests/u,
     );
+  });
+
+  it('includes required memory keys in the host refusal component map', () => {
+    const host = new CompactionHostContext({
+      previous: undefined,
+      pending: [],
+      summarize: [{ role: 'user', content: 'request' }],
+      tailStart: 0,
+      fromIndex: 0,
+      memoryKeys: ['release-plan'],
+    });
+
+    expect(host.render([], 0).components['memory keys']).toBeGreaterThan(0);
   });
 
   it.each([
@@ -182,7 +217,7 @@ describe('A24: constructed 200k host block at P=170,000', () => {
     expect(h.runPrompt).not.toHaveBeenCalled();
     expect(h.conv.compaction).toEqual(before);
     expect(h.posted.find((m) => m.type === 'error')?.message).toMatch(
-      /need an estimated 16117 characters/u,
+      /need an estimated 17369 characters/u,
     );
   });
 
@@ -196,24 +231,17 @@ describe('shedOptionalHostFacts', () => {
   it('sheds least valuable first and stops as soon as the block fits', () => {
     const optional: OptionalHostFacts = {
       repoState: 'x'.repeat(100),
-      memoryKeys: ['k'],
       lastReply: 'reply',
     };
-    const measure = (): number =>
-      (optional.repoState.length > 99 ? 100 : 10) + optional.memoryKeys.length * 5;
+    const measure = (): number => optional.repoState.length > 99 ? 100 : 10;
     const shed = shedOptionalHostFacts(optional, measure, 20);
     expect(shed).toEqual(['repo state']);
-    expect(optional.memoryKeys).toEqual(['k']);
     expect(optional.lastReply).toBe('reply');
   });
 
-  it('sheds everything optional when still over, never touching required facts', () => {
-    const optional: OptionalHostFacts = { repoState: 'x', memoryKeys: ['k'], lastReply: 'r' };
-    expect(shedOptionalHostFacts(optional, () => 999, 1)).toEqual([
-      'repo state',
-      'memory keys',
-      'last reply',
-    ]);
+  it('sheds only repo state and last reply, never required facts', () => {
+    const optional: OptionalHostFacts = { repoState: 'x', lastReply: 'r' };
+    expect(shedOptionalHostFacts(optional, () => 999, 1)).toEqual(['repo state', 'last reply']);
   });
 });
 
@@ -247,7 +275,7 @@ describe('replacement host-block token measurement', () => {
     };
 
     await fitCompactionHostBlock({
-      optional: { repoState: '', memoryKeys: [], lastReply: undefined },
+      optional: { repoState: '', lastReply: undefined },
       budget: compactionBudget(20_000, 10_000, 20_000, 0),
       budgetForCharsPerToken: (ratio) => {
         measuredRatio = ratio;
@@ -276,7 +304,7 @@ describe('replacement host-block token measurement', () => {
     };
     await expect(
       fitCompactionHostBlock({
-        optional: { repoState: '', memoryKeys: [], lastReply: undefined },
+        optional: { repoState: '', lastReply: undefined },
         budget: compactionBudget(20_000, 10_000, 20_000, 0),
         budgetForCharsPerToken: () => compactionBudget(20_000, 10_000, 20_000, 0),
         render: () => ({ hostChars: 1, floorChars: 1, hostBlock: 'host', components: {} }),
