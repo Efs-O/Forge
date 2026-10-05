@@ -48,7 +48,23 @@ export class PowerShellTransport implements DesktopTransport {
   constructor(
     private readonly scriptSource: string = driverScript,
     private readonly requestTimeoutMs: number = REQUEST_TIMEOUT_MS,
+    /**
+     * Test-only pin for the engine, so the Windows PowerShell 5.1 fallback can be
+     * exercised on a host where `pwsh` IS installed (the stdin encoding differs
+     * per engine, per report §3.10). Production leaves it undefined and gets
+     * pwsh-with-5.1-fallback. `undefined` means "prefer pwsh, fall back to 5.1".
+     */
+    private readonly preferredExecutable: 'pwsh' | 'powershell' | undefined = undefined,
   ) {}
+
+  /**
+   * Which engine is actually serving requests. The UTF-8 stdin boundary behaves
+   * differently per engine, so a caller (or a test report) must be able to name
+   * the one that ran rather than assume pwsh.
+   */
+  get driverExecutable(): string {
+    return this.executable;
+  }
 
   private async ensureStarted(): Promise<void> {
     if (this.disposed) throw new Error('desktop driver is disposed');
@@ -83,16 +99,24 @@ export class PowerShellTransport implements DesktopTransport {
       await fs.writeFile(this.scriptPath, this.scriptSource, 'utf8');
     }
     let child: ChildProcess;
-    try {
-      child = await this.spawnStarted('pwsh', this.args());
-      this.executable = 'pwsh';
-    } catch (err) {
-      // `pwsh` (PowerShell 7) absent -> fall back to Windows PowerShell 5.1.
-      if ((err as NodeJS.ErrnoException).code !== 'ENOENT') {
-        throw new Error(`desktop driver spawn failed: ${(err as Error).message}`);
-      }
+    if (this.preferredExecutable === 'powershell') {
+      // Pinned to the 5.1 fallback: no pwsh attempt, and no silent substitution
+      // if 5.1 is missing — a test that asked for 5.1 must fail, not quietly
+      // measure pwsh instead.
       child = await this.spawnStarted('powershell', this.args());
       this.executable = 'powershell';
+    } else {
+      try {
+        child = await this.spawnStarted('pwsh', this.args());
+        this.executable = 'pwsh';
+      } catch (err) {
+        // `pwsh` (PowerShell 7) absent -> fall back to Windows PowerShell 5.1.
+        if ((err as NodeJS.ErrnoException).code !== 'ENOENT') {
+          throw new Error(`desktop driver spawn failed: ${(err as Error).message}`);
+        }
+        child = await this.spawnStarted('powershell', this.args());
+        this.executable = 'powershell';
+      }
     }
     this.child = child;
     this.stderrTail = '';

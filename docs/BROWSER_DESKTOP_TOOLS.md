@@ -83,6 +83,32 @@ action confirmation. It is a helpful hint, not the security boundary: the
 origin and target-window gates are the controls that enforce where an action
 can occur.
 
+## Visible background GUI launches
+
+`exec_command` normally starts a background process with no window. Add
+`show_window: true` when the point of launching it is to put a GUI on screen and
+then drive it with the desktop tools:
+
+```json
+{ "command": "notepad.exe", "args": [], "background": true, "show_window": true }
+```
+
+- It requires `background: true` and Windows, and it must be a real boolean. A
+  request that violates either is refused before anything is spawned.
+- Console helpers keep the existing hidden default; the flag is never inferred
+  from the program name.
+- It changes visibility only. It grants no desktop target approval — focusing or
+  capturing the window is still what asks for that.
+- The execution ID tracks the process Forge started, not any window or child GUI
+  app it opens. A launcher such as `write.exe` can report `completed` while its
+  GUI stays open, and `stop` will not close that GUI. The tool result says this
+  whenever a visible launch is used.
+
+Desktop text input is UTF-8 end to end. Text sent to `desktop_type` is decoded
+explicitly by the desktop driver, so accents, Greek, CJK, and emoji arrive as the
+characters you sent rather than as code-page mojibake, and a request containing
+invalid UTF-8 is refused instead of being typed as replacement characters.
+
 ## Limitations and screenshot storage
 
 - Desktop tools are available only on Windows. On other platforms Forge reports

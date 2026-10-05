@@ -146,6 +146,11 @@ export function makeExecCommandTool(
               type: 'boolean',
               description: NOTIFY_ON_EXIT_DESCRIPTION,
             },
+            show_window: {
+              type: 'boolean',
+              description:
+                'Start the background process with a VISIBLE window instead of hidden. Requires background: true and Windows. For a GUI app you want to see and then drive with the desktop tools; the default stays hidden. Visibility only — it grants no desktop target approval, and the execution tracks the process you started, not any child GUI app a launcher opens.',
+            },
           },
           required: ['command', 'args'],
           additionalProperties: false,
@@ -167,6 +172,26 @@ export function makeExecCommandTool(
       }
       if (notifyOnExit && !context?.conversationId) {
         throw new Error('notify_on_exit requires a conversation; start this job from a chat.');
+      }
+      // `show_window` is validated here, at the boundary, BEFORE any spawn: a
+      // visible window is a change to what appears on the user's desktop, so a
+      // malformed request must be refused rather than started and then ignored.
+      // Strictly `=== true` — a string like "false" must not become visible.
+      const showWindow = args['show_window'] === true;
+      if (args['show_window'] !== undefined && typeof args['show_window'] !== 'boolean') {
+        throw new Error(
+          'exec_command: show_window must be a boolean (true or false), not a string or number.',
+        );
+      }
+      if (showWindow && args['background'] !== true) {
+        throw new Error(
+          'exec_command: show_window requires background: true. The foreground route does not set a window flag, so visibility is only meaningful for a background job.',
+        );
+      }
+      if (showWindow && process.platform !== 'win32') {
+        throw new Error(
+          `exec_command: show_window is Windows-only (this host is ${process.platform}); windowsHide has no effect elsewhere.`,
+        );
       }
       const cwd = resolveExecCwd(args['cwd'] as string | undefined);
       const shellScripts = shellScriptsEnabled();
@@ -236,14 +261,35 @@ export function makeExecCommandTool(
             cwd,
             timeoutMs: requestedTimeoutMs,
             env: envCheck.env,
+            ...(showWindow ? { showWindow: true } : {}),
             ...(notifyOnExit ? { notifyConversationId: context!.conversationId! } : {}),
           });
           // spawn reports a failed launch on the next tick, so observing
           // immediately would report "running" for a process already dead.
           await new Promise((resolve) => setImmediate(resolve));
           const observation = await backgroundExecutionManager.observe(started.id, 0, 0, 0);
-          return formatBackgroundObservation(observation, 0, outputOptions);
+          const formatted = formatBackgroundObservation(observation, 0, outputOptions);
+          if (showWindow) {
+            // The launcher/child distinction the plan requires (item 4): a
+            // `write.exe`-style launcher exits as soon as its GUI app is up, so
+            // this id can report "completed" while the window is still open, and
+            // stop cannot reach that unowned child. Saying so prevents the model
+            // from concluding the GUI closed, or believing it can close it here.
+            const tracked = String(spawned.command);
+            return (
+              `${formatted}\nNOTE: launched with a visible window. This execution tracks the ` +
+              `process started here (${tracked}), not any window or child GUI app it opens. ` +
+              'If that program is a launcher, it may report completed while its GUI stays open, ' +
+              'and stop will not close that GUI.'
+            );
+          }
+          return formatted;
         }
+        // The FOREGROUND route. It is a separate path from the background spawn
+        // above and deliberately has no window flag: `spawnAndWait` does not set
+        // `windowsHide` at all, so report §3.3 ("GUI apps are hidden") was proven
+        // for the background route only. `show_window` is therefore refused here
+        // rather than quietly doing nothing.
         const result = await spawnAndWait(
           spawned.command,
           spawned.args,

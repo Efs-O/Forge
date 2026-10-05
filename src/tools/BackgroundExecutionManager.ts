@@ -101,6 +101,17 @@ export interface BackgroundExecutionStartOptions {
    */
   env?: NodeJS.ProcessEnv;
   notifyConversationId?: string;
+  /**
+   * Show the child's window instead of spawning it hidden. Default false
+   * (`windowsHide: true`), which is correct for every console helper and is what
+   * the tool layer passes unless the caller explicitly asks for a visible GUI
+   * launch (plan Phase 2 item 3, report §3.3).
+   *
+   * Visibility ONLY. It grants no desktop target approval, and it does not make
+   * the manager the owner of any window the child opens: a launcher that exits
+   * after starting its GUI app leaves that app untracked and unstoppable here.
+   */
+  showWindow?: boolean;
 }
 
 export interface BackgroundExecutionExitNotice {
@@ -145,7 +156,11 @@ export class BackgroundExecutionManager {
       shell: false,
       cwd,
       stdio: ['ignore', 'pipe', 'pipe'],
-      windowsHide: true,
+      // One spawn site, one flag (plan Phase 2 item 3): the default stays hidden
+      // so console helpers behave exactly as before, and a visible launch happens
+      // only when the tool layer validated `show_window: true` for a background
+      // job on Windows. Do not infer GUI-ness from the executable name.
+      windowsHide: options.showWindow !== true,
       // The user env is spread before NO_COLOR/FORCE_COLOR so those still win
       // over a caller-supplied value, matching the foreground path.
       env: { ...globalThis.process.env, ...options.env, NO_COLOR: '1', FORCE_COLOR: '0' },

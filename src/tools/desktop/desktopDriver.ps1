@@ -218,6 +218,15 @@ $VK = @{
 # Letters and digits: their VK codes equal the uppercase ASCII code.
 foreach ($c in [char[]]'abcdefghijklmnopqrstuvwxyz0123456789') { $VK[[string]$c] = [int][char]::ToUpper($c) }
 
+function Get-CodePoints([string]$s) {
+  # Comma-joined UTF-16 code units, so a test can name the exact code points that
+  # arrived instead of comparing a string that may differ only in invisible ways.
+  # Returned as a string because ConvertTo-Json in 5.1 can collapse a
+  # single-element array into a scalar.
+  if ($null -eq $s -or $s.Length -eq 0) { return '' }
+  $units = for ($i = 0; $i -lt $s.Length; $i++) { [int][char]$s[$i] }
+  return ($units -join ',')
+}
 function Write-Response($obj) {
   [Console]::Out.WriteLine(($obj | ConvertTo-Json -Compress -Depth 8))
   [Console]::Out.Flush()
@@ -543,6 +552,15 @@ function Invoke-Op($req) {
       return @{ ok = $true; focus = $focusResult; window = (Get-WindowInfo $h) }
     }
     'sleep' { Start-Sleep -Milliseconds ([int]$req.ms); return @{ ok = $true } }
+    # Diagnostic only (plan Phase 2 item 1): proves the stdin bytes survived
+    # decoding WITHOUT any OS input, so the UTF-8 boundary is testable on a
+    # machine with no desktop interaction. It never reaches SendInput and needs
+    # no approved target, which is why it sits above the target-checked default
+    # branch. It exists to fail loudly if the encoding fix regresses.
+    'echo' {
+      $text = if ($null -eq $req.text) { '' } else { "$($req.text)" }
+      return @{ ok = $true; text = $text; utf16_length = $text.Length; codepoints = (Get-CodePoints $text) }
+    }
     'release_all' { Send-ReleaseAll; return @{ ok = $true } }
     'dispose' { Send-ReleaseAll; return @{ ok = $true; dispose = $true } }
     'foreground' {
@@ -660,18 +678,47 @@ function Invoke-Op($req) {
 }
 # One-shot release-all mode (B3 backstop): the TS wrapper spawns this after a
 # kill if the long-lived driver was unresponsive, so a held button/key is
-# released system-wide even though the owning process is gone.
+# released system-wide even though the owning process is gone. Kept BEFORE the
+# stdin reader is constructed, so one-shot mode never opens the input stream.
 if ($args -contains '-ReleaseAll') { Send-ReleaseAll; exit 0 }
-while (($line = [Console]::In.ReadLine()) -ne $null) {
-  if ([string]::IsNullOrWhiteSpace($line)) { continue }
-  $req = $null
-  try { $req = $line | ConvertFrom-Json } catch {
-    Write-Response @{ id = 'unknown'; ok = $false; error = "bad JSON: $($_.Exception.Message)" }
-    continue
+
+# --- stdin: strict UTF-8 decoding (plan Phase 2 item 1; report §3.10) ---
+# [Console]::In decodes a REDIRECTED pipe using the console's input code page,
+# which on Windows PowerShell 5.1 is the OEM page (437/932/1253 ...), not UTF-8,
+# and this script never set an input decoder at all. The TS wrapper writes UTF-8
+# bytes, so every non-ASCII character in a `type` request arrived as mojibake --
+# the corruption §3.10 measured on the live desktop, which no amount of
+# SendInput correctness could fix because the text was already wrong by then.
+# Reading the raw stream through an explicit StreamReader built with
+# UTF8Encoding($false, $true) fixes the decode at the boundary and makes
+# INVALID UTF-8 an exception rather than a silent U+FFFD, so a broken request is
+# refused instead of typed as replacement characters.
+$StdinReader = New-Object System.IO.StreamReader(
+  [Console]::OpenStandardInput(),
+  (New-Object System.Text.UTF8Encoding($false, $true)))
+
+$stdinBroken = $false
+try {
+  while (($line = $StdinReader.ReadLine()) -ne $null) {
+    if ([string]::IsNullOrWhiteSpace($line)) { continue }
+    $req = $null
+    try { $req = $line | ConvertFrom-Json } catch {
+      Write-Response @{ id = 'unknown'; ok = $false; error = "bad JSON: $($_.Exception.Message)" }
+      continue
+    }
+    try { Write-Response (@{ id = $req.id } + (Invoke-Op $req)) } catch {
+      Write-Response @{ id = $req.id; ok = $false; error = $_.Exception.Message }
+    }
   }
-  try { Write-Response (@{ id = $req.id } + (Invoke-Op $req)) } catch {
-    Write-Response @{ id = $req.id; ok = $false; error = $_.Exception.Message }
-  }
+} catch {
+  # A strict decode failure means the byte stream cannot be read at all, so the
+  # line framing is untrustworthy and no request can be answered. Say so on
+  # stderr (the TS transport keeps the tail and names it in the exit error),
+  # then fall through to release-all: an undecodable stream may have arrived
+  # mid-input, and leaving a key or button held is the worse failure.
+  $stdinBroken = $true
+  [Console]::Error.WriteLine("desktop driver: stdin is not valid UTF-8 ($($_.Exception.Message))")
 }
 Send-ReleaseAll
+if ($stdinBroken) { exit 4 }
 exit 0

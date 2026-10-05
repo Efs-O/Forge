@@ -45,6 +45,122 @@ describe.skipIf(process.platform !== 'win32')('PowerShellTransport (real child)'
 });
 
 /**
+ * UTF-8 stdin boundary (plan Phase 2 item 1; report §3.10). The `echo` op is
+ * diagnostic-only: it returns the text the driver actually decoded, so the
+ * request path is proven WITHOUT any OS input and without an approved target.
+ * Code points are asserted, not just strings — a mojibake round trip can look
+ * "the same" to a casual comparison while typing the wrong characters.
+ *
+ * Both engines are exercised because the corruption was engine-dependent in
+ * mechanism: `[Console]::In` decodes a redirected pipe with the console input
+ * code page, and the driver set no input decoder at all. The probe on this host
+ * showed `café` arriving as U+233C U+03C3 under BOTH pwsh 7.6 and Windows
+ * PowerShell 5.1 (a CP437 decode of the UTF-8 bytes), and the explicit
+ * strict-UTF8 StreamReader returning exact code points on both.
+ */
+const ECHO_CASES: ReadonlyArray<[string, string]> = [
+  ['ascii', 'hello world'],
+  ['accents', 'café'],
+  ['greek', 'Γειά σου'],
+  ['cjk', '你好'],
+  ['emoji', '🚀'],
+  ['mixed', 'a€中😀b'],
+];
+
+/** UTF-16 code units, the same thing the driver reports via `[int][char]$s[$i]`. */
+function utf16Units(s: string): string[] {
+  const units: string[] = [];
+  for (let i = 0; i < s.length; i++) units.push(String(s.charCodeAt(i)));
+  return units;
+}
+
+function echoSuite(engine: 'pwsh' | 'powershell' | undefined, label: string): void {
+  describe.skipIf(process.platform !== 'win32')(`desktop driver stdin UTF-8 (${label})`, () => {
+    let t: PowerShellTransport | undefined;
+    let ran = 'unknown';
+
+    beforeAll(async () => {
+      t = new PowerShellTransport(undefined, 30_000, engine);
+      // Warm the child once so every case shares one process (each spawn is
+      // ~1s and this suite already runs many PowerShell children).
+      await t.send({ op: 'echo', text: 'warm' });
+      ran = t.driverExecutable;
+    }, 60_000);
+
+    afterAll(async () => {
+      await t?.dispose();
+    });
+
+    it(`round-trips every payload exactly through the ${label} child`, async () => {
+      const transport = t as PowerShellTransport;
+      for (const [name, text] of ECHO_CASES) {
+        const r = await transport.send({ op: 'echo', text });
+        expect(r['ok'], `${name}: driver refused`).toBe(true);
+        // Exact string equality AND exact UTF-16 units, so a decomposition or a
+        // replacement character cannot pass as "close enough". The driver
+        // reports its own units too, which catches a decode that happened on
+        // only one side of the pipe.
+        expect(r['text'], `${name}: text`).toBe(text);
+        const expectedUnits = utf16Units(text);
+        expect(utf16Units(r['text'] as string).join(','), `${name}: UTF-16 units`).toBe(
+          expectedUnits.join(','),
+        );
+        expect(String(r['codepoints']), `${name}: driver-reported code units`).toBe(
+          expectedUnits.join(','),
+        );
+        expect(Number(r['utf16_length']), `${name}: length`).toBe(expectedUnits.length);
+      }
+    }, 60_000);
+
+    it('keeps decoder state and line framing across sequential requests', async () => {
+      // Two requests on ONE child: a per-request decoder would pass this while a
+      // stream decoder that loses state after a multi-byte sequence would not.
+      const transport = t as PowerShellTransport;
+      const a = await transport.send({ op: 'echo', text: 'first café' });
+      const b = await transport.send({ op: 'echo', text: 'then 你好 🚀' });
+      expect(a['text']).toBe('first café');
+      expect(b['text']).toBe('then 你好 🚀');
+    }, 60_000);
+
+    it(`ran on the engine it claims (${label})`, () => {
+      // Reported, not assumed: the plan requires naming which engine actually ran.
+      expect(['pwsh', 'powershell']).toContain(ran);
+      if (engine) expect(ran).toBe(engine);
+    });
+  });
+}
+
+echoSuite(undefined, 'default: pwsh with 5.1 fallback');
+echoSuite('powershell', 'Windows PowerShell 5.1 fallback pinned');
+
+describe.skipIf(process.platform !== 'win32')('desktop driver strict UTF-8 stdin', () => {
+  it('refuses invalid UTF-8 instead of typing replacement characters', async () => {
+    // Strict decoding (UTF8Encoding($false, $true)) must THROW on malformed
+    // bytes. A lenient decoder would hand the driver U+FFFD and `desktop_type`
+    // would happily type garbage into the user's window — the exact class of
+    // silent corruption §3.10 reported.
+    const t = new PowerShellTransport();
+    try {
+      await t.send({ op: 'echo', text: 'ok' });
+      const child = (t as unknown as { child: { stdin: NodeJS.WritableStream } }).child;
+      // `{"op":"sleep","ms":1500}` keeps the driver busy, so it is guaranteed to
+      // read the malformed line only while this request is still pending.
+      // Without that, the child's exit and the next send race and a freshly
+      // respawned child would answer the follow-up happily.
+      const pending = t.send({ op: 'sleep', ms: 1500 });
+      // `{"text":"<0xC3 0x28>"}` — 0xC3 followed by '(' is an invalid UTF-8
+      // sequence (a 2-byte lead byte with a non-continuation second byte).
+      child.stdin.write(Buffer.from('7b2274657874223a22c328227d0a', 'hex'));
+      // The pending request is rejected by the transport's exit handler, which
+      // carries the driver's stderr tail — so the failure is named, not silent.
+      await expect(pending).rejects.toThrow(/exited \(code 4\)[\s\S]*not valid UTF-8/i);
+    } finally {
+      await t.dispose();
+    }
+  }, 60_000);
+});
+
+/**
  * The real driver, read-only, through the real transport (Windows only).
  * These are the live counterparts to the fake-transport unit tests: they prove
  * the bundled `desktopDriver.ps1` actually emits the nested `rect` the TS
