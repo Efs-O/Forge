@@ -75,6 +75,7 @@ overlaps with an existing owner, extend the owner instead.
 | One-shot vs staged summary run, output cap           | `src/sidebar/compactionSummaryRunner.ts` |
 | Bounded staged (chunked) compaction                  | `src/sidebar/compactionStaging.ts`       |
 | Compaction budget math, `planOutput`, prompt fit     | `src/sidebar/compactionBudget.ts`        |
+| Compaction tokenizer selection and per-model counter cache | `src/sidebar/compactionCounter.ts` |
 | Applying the compaction window to a request          | `src/sidebar/compactionWindow.ts`        |
 | Host-recorded summary facts (from messages)          | `src/sidebar/compactionLedger.ts`        |
 | Ledger merge, retention cap, omission count          | `src/sidebar/compactionRecordedState.ts` |

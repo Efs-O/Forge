@@ -75,6 +75,12 @@ export interface CompactionAttemptLogEntry {
   windowChars?: number;
   /** Estimated characters of the replacement window; unknown until a candidate exists. */
   candidateChars?: number;
+  hostChars?: number;
+  hostMaxChars?: number;
+  charsPerToken?: number;
+  counter?: 'tokenize' | 'count_tokens' | 'estimate';
+  components?: Record<string, number>;
+  shed?: string[];
 }
 
 export interface SessionContext {
@@ -249,6 +255,12 @@ export class SessionLogger {
         max_tokens: entry.maxTokens,
         ...(entry.windowChars !== undefined ? { window_chars: entry.windowChars } : {}),
         ...(entry.candidateChars !== undefined ? { candidate_chars: entry.candidateChars } : {}),
+        ...(entry.hostChars !== undefined ? { host_chars: entry.hostChars } : {}),
+        ...(entry.hostMaxChars !== undefined ? { host_max_chars: entry.hostMaxChars } : {}),
+        ...(entry.charsPerToken !== undefined ? { chars_per_token: entry.charsPerToken } : {}),
+        ...(entry.counter !== undefined ? { counter: entry.counter } : {}),
+        ...(entry.components !== undefined ? { components: entry.components } : {}),
+        ...(entry.shed !== undefined ? { shed: entry.shed } : {}),
         timestamp_ms: Date.now(),
         model,
       }) + '\n',

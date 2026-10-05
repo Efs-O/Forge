@@ -1,5 +1,8 @@
 import { createHash } from 'crypto';
+import { z } from 'zod';
 import type { TokenCounter } from './embeddingBudget';
+
+const CountTokensResponseSchema = z.object({ input_tokens: z.number().int().nonnegative() });
 
 /**
  * Measures token counts via llama-server's `/tokenize` endpoint, which uses the
@@ -24,7 +27,10 @@ export class ServerTokenCounter implements TokenCounter {
   private readonly cache = new Map<string, number>();
   private static readonly CACHE_LIMIT = 5000;
 
-  constructor(private readonly baseUrlProvider: () => string) {}
+  constructor(
+    private readonly baseUrlProvider: () => string,
+    private readonly options: { timeoutMs?: number } = {},
+  ) {}
 
   async count(text: string): Promise<number> {
     const key = createHash('sha1').update(text).digest('hex');
@@ -35,6 +41,9 @@ export class ServerTokenCounter implements TokenCounter {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify({ content: text, add_special: true, parse_special: true }),
+      ...(this.options.timeoutMs !== undefined
+        ? { signal: AbortSignal.timeout(this.options.timeoutMs) }
+        : {}),
     });
     if (!response.ok) {
       const detail = await response.text().catch(() => '');
@@ -55,5 +64,45 @@ export class ServerTokenCounter implements TokenCounter {
     }
     this.cache.set(key, n);
     return n;
+  }
+}
+
+/** Measures OpenAI-compatible servers that expose Anthropic's count_tokens route. */
+export class CountTokensCounter implements TokenCounter {
+  constructor(
+    private readonly endpointProvider: () => string,
+    private readonly modelProvider: () => string,
+    private readonly options: {
+      apiKeyProvider?: () => string | undefined | Promise<string | undefined>;
+      timeoutMs?: number;
+    } = {},
+  ) {}
+
+  async count(text: string): Promise<number> {
+    const endpoint = this.endpointProvider().replace(/\/+$/u, '');
+    const apiKey = await this.options.apiKeyProvider?.();
+    const response = await fetch(`${endpoint}/v1/messages/count_tokens`, {
+      method: 'POST',
+      headers: {
+        'content-type': 'application/json',
+        ...(apiKey ? { authorization: `Bearer ${apiKey}` } : {}),
+      },
+      body: JSON.stringify({
+        model: this.modelProvider(),
+        messages: [{ role: 'user', content: text }],
+      }),
+      signal: AbortSignal.timeout(this.options.timeoutMs ?? 10_000),
+    });
+    if (!response.ok) {
+      const detail = await response.text().catch(() => '');
+      throw new Error(
+        `count_tokens failed at ${endpoint}: HTTP ${response.status}${detail ? ` - ${detail}` : ''}`,
+      );
+    }
+    const parsed = CountTokensResponseSchema.safeParse(await response.json());
+    if (!parsed.success) {
+      throw new Error(`count_tokens response from ${endpoint} had no valid input_tokens integer.`);
+    }
+    return parsed.data.input_tokens;
   }
 }

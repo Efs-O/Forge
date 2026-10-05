@@ -76,4 +76,21 @@ describe('compaction user context', () => {
     expect(renderCompactionUserMessages([])).toBe('');
     expect(renderCompactionUserMessages(undefined)).toBe('');
   });
+
+  it('trims the rendered block to the host budget while keeping the per-message ceiling', () => {
+    const rendered = renderCompactionUserMessages(
+      ['first '.repeat(700), 'latest '.repeat(700)],
+      5_000,
+    );
+    expect(rendered.length).toBeLessThanOrEqual(5_000);
+    expect(rendered).toContain('VERBATIM USER REQUESTS');
+    expect(rendered).toContain('[user message truncated]');
+  });
+
+  it('keeps a short newest request whole when the first request is long', () => {
+    const newest = 'latest correction: keep the current fix';
+    const rendered = renderCompactionUserMessages(['first '.repeat(1_000), newest], 5_000);
+
+    expect(rendered).toContain(`[2] ${newest}`);
+  });
 });

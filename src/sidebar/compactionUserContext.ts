@@ -66,6 +66,40 @@ export function collectCompactionUserMessages(
   return unique.filter((_, index) => kept.has(index));
 }
 
+/** Keep the original and newest request within a rendered host-block ceiling. */
+export function boundCompactionUserMessages(
+  messages: readonly string[],
+  maxChars: number,
+): string[] {
+  if (renderUserMessagesText(messages).length <= maxChars) return [...messages];
+  const first = messages[0] ?? '';
+  const latest = messages.at(-1) ?? first;
+  const marker = '\n…[user message truncated]';
+  const singleOverhead = renderUserMessagesText(['']).length;
+  if (first === latest) {
+    const room = Math.max(0, maxChars - singleOverhead - marker.length);
+    return [first.length > room ? `${first.slice(0, room)}${marker}` : first];
+  }
+  const available = Math.max(0, maxChars - renderUserMessagesText(['', '']).length);
+  let firstRoom = first.length;
+  let latestRoom = latest.length;
+  const size = (): number =>
+    firstRoom +
+    latestRoom +
+    (firstRoom < first.length ? marker.length : 0) +
+    (latestRoom < latest.length ? marker.length : 0);
+  while (size() > available && firstRoom > 0) firstRoom -= 1;
+  while (size() > available && latestRoom > 0) latestRoom -= 1;
+  if (size() > available) {
+    latestRoom = 0;
+    firstRoom = Math.max(0, available - marker.length);
+  }
+  return [
+    firstRoom < first.length ? `${first.slice(0, firstRoom)}${marker}` : first,
+    latestRoom < latest.length ? `${latest.slice(0, latestRoom)}${marker}` : latest,
+  ];
+}
+
 /**
  * Nothing here is news.
  *
@@ -86,21 +120,42 @@ export function collectCompactionUserMessages(
  * still in progress, and telling the agent that one was completed would end the
  * task early — the opposite failure, bought at the same price.
  */
-export function renderCompactionUserMessages(messages: readonly string[] | undefined): string {
-  if (!messages?.length) return '';
+function renderUserMessagesText(messages: readonly string[]): string {
+  if (!messages.length) return '';
+  const prefix = 'VERBATIM USER REQUESTS AND DECISIONS ALREADY RECEIVED';
   const rows = messages.map((message, index) => `[${index + 1}] ${message}`).join('\n\n');
   const latest =
     messages.length > 1
       ? ` [${messages.length}] is the most recent of them, NOT a new request — it was received earlier too.`
       : '';
-  return (
-    'VERBATIM USER REQUESTS AND DECISIONS ALREADY RECEIVED (recorded by Forge; ' +
+  const rendered =
+    `${prefix} (recorded by Forge; ` +
     'history, kept so the task and its corrections survive in the user’s own words). ' +
     'Every entry below arrived earlier in this same conversation and has already been ' +
     'worked on; later entries refine earlier ones.' +
     latest +
     ' None of them is news arriving now — for what is still open, and how far it got, ' +
     'read the State and Next of the summary that follows.\n' +
-    rows
-  );
+    rows;
+  return rendered;
+}
+
+export function renderCompactionUserMessages(
+  messages: readonly string[] | undefined,
+  maxChars = USER_CONTEXT_MAX_CHARS,
+): string {
+  if (!messages?.length) return '';
+  const rendered = renderUserMessagesText(messages);
+  if (rendered.length <= maxChars) return rendered;
+
+  // Bound the messages first so any unavoidable render-level truncation
+  // preserves the newest request wherever it can fit intact.
+  const bounded = boundCompactionUserMessages(messages, maxChars);
+  const boundedText = renderUserMessagesText(bounded);
+  if (boundedText.length <= maxChars) return boundedText;
+
+  const newestOnly = renderUserMessagesText([bounded.at(-1) ?? '']);
+  if (newestOnly.length <= maxChars) return newestOnly;
+  const marker = '\n…[user message truncated]';
+  return `${newestOnly.slice(0, Math.max(0, maxChars - marker.length))}${marker}`;
 }

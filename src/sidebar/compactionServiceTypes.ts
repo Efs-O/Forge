@@ -3,6 +3,7 @@ import type { ConversationRuntime } from './sessionTypes';
 import type { CompactionFailureCategory } from './compactionFailure';
 import type { PromptRunOptions } from './PromptRun';
 import type { CompactionAttemptLogEntry, CompactionLogEntry } from './SessionLogger';
+import type { CompactionCounterName } from './compactionHostFit';
 
 export interface CompactionDeps {
   post: (msg: HostToWebview) => void;
@@ -29,6 +30,11 @@ export interface CompactionDeps {
     reasoningReserve?: number;
     outputLimitTokens?: number;
   };
+  /** Counter choice for this conversation. Missing means the compatibility estimator. */
+  tokenCountMode?: (conv: ConversationRuntime) => CompactionCounterName;
+  /** One host-block count; configured failures refuse compaction. */
+  countTokens?: (text: string, conv: ConversationRuntime) => Promise<number>;
+  tokenCountEndpoint?: (conv: ConversationRuntime) => string | undefined;
   runPromptToMarkdown: (
     text: string,
     conversationId?: string,

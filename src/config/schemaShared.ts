@@ -56,6 +56,7 @@ export const SpawnSchema = z.object({
 // `group`/`groups`. See docs/plans/CONFIG_OVERHAUL_PLAN.md §2.1.
 export const GroupSchema = z.object({
   provider: ProviderSchema.optional(),
+  token_count: z.enum(['tokenize', 'count_tokens', 'estimate']).optional(),
   endpoint: z.string().url().optional(),
   spawn: SpawnSchema.optional(),
   sampling: SamplingSchema.optional(),

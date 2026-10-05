@@ -25,8 +25,9 @@ import {
   type CompactionFailureCategory,
 } from './compactionFailure';
 import {
-  refuseHostFacts,
-  shedOptionalHostFacts,
+  fitCompactionHostBlock,
+  fitUserMessagesToHostBudget,
+  renderCompactionHostBlock,
   type OptionalHostFacts,
 } from './compactionHostFit';
 import { summarizeCompaction } from './compactionSummaryRunner';
@@ -96,6 +97,7 @@ async function compactOnce(
   let attemptCalls: number | undefined;
   let attemptFinish: string | undefined;
   let attemptCandidateChars: number | undefined;
+  let attemptHostFields: Partial<CompactionAttemptLogEntry> = {};
   options = {
     ...options,
     onFailureCategory: (category) => {
@@ -128,12 +130,7 @@ async function compactOnce(
   const metrics = deps.compactionMetrics?.(conv);
   const modelMax = metrics?.max ?? 0;
   const thinkingTokens = metrics?.reasoningReserve ?? 0;
-  const budget = compactionBudget(
-    reportedContextTokens(conv),
-    beforeChars,
-    modelMax,
-    thinkingTokens,
-  );
+  let budget = compactionBudget(reportedContextTokens(conv), beforeChars, modelMax, thinkingTokens);
   const split = selectCompactionSplit(pending, budget.tailMaxChars);
   if (!split) {
     if (!options.auto) {
@@ -159,11 +156,8 @@ async function compactOnce(
   const recordedActions = merged.actions;
   const omittedActions = merged.omitted;
   const recordedActionsText = renderRecordedActionsBlock(recordedActions, omittedActions);
-  const userMessages = collectCompactionUserMessages(
-    conv.compaction?.userMessages,
-    split.summarize,
-  );
-  const userContext = renderCompactionUserMessages(userMessages);
+  let userMessages = collectCompactionUserMessages(conv.compaction?.userMessages, split.summarize);
+  let userContext = renderCompactionUserMessages(userMessages);
   // Only when the retained tail has no words of the agent's own. A tail that
   // carries them needs no copy; a tail that is empty, or is a user turn whose
   // answer had not started yet, leaves the summarizer's paraphrase as the sole
@@ -249,21 +243,64 @@ async function compactOnce(
         }
       }
       // If even an empty summary cannot shrink this window, skip the model call.
-      const measureHost = (): number =>
-        compactionWindowChars(conv.messages, candidateWithSummary('')) - tailChars;
-      const shed = shedOptionalHostFacts(optional, measureHost, budget.hostMaxChars);
+      const counter =
+        deps.tokenCountMode?.(conv) ?? (deps.countTokens ? 'count_tokens' : 'estimate');
+      const tokenCountEndpoint = deps.tokenCountEndpoint?.(conv);
+      const renderHostBlock = () =>
+        renderCompactionHostBlock({
+          messages: conv.messages,
+          candidate: candidateWithSummary(''),
+          tailChars,
+          components: {
+            'user requests': userContext.length,
+            'recorded actions': recordedActionsText.length,
+            'repo state': optional.repoState.length,
+            'last reply': optional.lastReply?.length ?? 0,
+          },
+        });
+      const hostFit = await fitCompactionHostBlock({
+        optional,
+        budget,
+        budgetForCharsPerToken: (ratio) =>
+          compactionBudget(
+            reportedContextTokens(conv),
+            beforeChars,
+            modelMax,
+            thinkingTokens,
+            ratio,
+          ),
+        counter,
+        ...(deps.countTokens ? { countTokens: deps.countTokens } : {}),
+        ...(tokenCountEndpoint ? { endpoint: tokenCountEndpoint } : {}),
+        conv,
+        onHostBudget: (hostMaxChars) => {
+          const fitted = fitUserMessagesToHostBudget({
+            budget,
+            hostMaxChars,
+            hostChars: renderHostBlock().hostChars,
+            userContextChars: userContext.length,
+            optional,
+            userMessages,
+          });
+          userMessages = fitted.userMessages;
+          userContext = renderCompactionUserMessages(userMessages, fitted.maxChars);
+        },
+        render: renderHostBlock,
+      });
+      budget = { ...budget, hostMaxChars: hostFit.hostMaxChars };
+      attemptHostFields = {
+        hostChars: hostFit.hostChars,
+        hostMaxChars: hostFit.hostMaxChars,
+        charsPerToken: hostFit.charsPerToken,
+        counter: hostFit.counter,
+        components: hostFit.components,
+        shed: hostFit.shed,
+      };
+      const shed = hostFit.shed;
       if (shed.length > 0)
         log.info(`[compact] shed optional host facts to fit: ${shed.join(', ')}`);
-      const floorChars = compactionWindowChars(conv.messages, candidateWithSummary(''));
-      const hostChars = floorChars - tailChars;
-      if (hostChars > budget.hostMaxChars) {
-        refuseHostFacts(hostChars, budget.hostMaxChars, {
-          'user requests': userContext.length,
-          'recorded actions': recordedActionsText.length,
-          'repo state': optional.repoState.length,
-          'last reply': optional.lastReply?.length ?? 0,
-        });
-      }
+      const floorChars = hostFit.floorChars;
+      const hostChars = hostFit.hostChars;
       if (beforeChars >= MIN_WINDOW_CHARS_FOR_FIT_GUARD && floorChars >= beforeChars) {
         log.info(
           `[compact] no summary could shrink this window (~${floorChars} vs ~${beforeChars} chars before the summary) — not summarizing`,
@@ -444,6 +481,7 @@ async function compactOnce(
       ...(attemptCalls !== undefined ? { calls: attemptCalls } : {}),
       ...(attemptFinish ? { finishReason: attemptFinish } : {}),
       ...(attemptCandidateChars !== undefined ? { candidateChars: attemptCandidateChars } : {}),
+      ...attemptHostFields,
     });
     deps.emitCompactionEvent?.({
       conversationId: conv.id,
