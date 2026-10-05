@@ -27,6 +27,30 @@ export const controlStatsSchema = z.object({
       at: z.number(),
     })
     .nullable(),
+  session: z
+    .object({
+      conversation_id: z.string(),
+      turns: z.number(),
+      requests: z.number(),
+      compactions: z.number(),
+      compaction_attempts_failed: z.number(),
+      compactions_suppressed: z.number(),
+      tool_calls: z.number(),
+      tool_failures: z.number(),
+      input_tokens: z.number(),
+      output_tokens: z.number(),
+      turn_errors: z.number(),
+      started_at: z.number().nullable(),
+      last_request: z
+        .object({
+          model: z.string(),
+          input_tokens: z.number(),
+          context_limit: z.number().nullable(),
+          at: z.number(),
+        })
+        .nullable(),
+    })
+    .nullable(),
   computed_at: z.number(),
   skipped_files: z.number(),
 });
@@ -44,6 +68,7 @@ export interface ControlStatsOptions {
   now: () => number;
   contextLimitFor: (model: string) => number | null;
   forgeVersion: string;
+  activeConversationId?: () => string | undefined;
 }
 
 function localDay(epochMs: number): string {
@@ -62,6 +87,96 @@ interface UsageTotals {
   requests: number;
   input: number;
   output: number;
+}
+
+interface CountedRows {
+  turns: number;
+  requests: number;
+  compactions: number;
+  compaction_attempts_failed: number;
+  compactions_suppressed: number;
+  tool_calls: number;
+  tool_failures: number;
+  input_tokens: number;
+  output_tokens: number;
+  turn_errors: number;
+  last_request: ControlStats['last_request'];
+}
+
+function emptyCounts(): CountedRows {
+  return {
+    turns: 0,
+    requests: 0,
+    compactions: 0,
+    compaction_attempts_failed: 0,
+    compactions_suppressed: 0,
+    tool_calls: 0,
+    tool_failures: 0,
+    input_tokens: 0,
+    output_tokens: 0,
+    turn_errors: 0,
+    last_request: null,
+  };
+}
+
+function countRows(
+  rows: Array<Record<string, unknown>>,
+  day: string | undefined,
+  contextLimitFor: (model: string) => number | null,
+): [CountedRows, number] {
+  const counts = emptyCounts();
+  // `usage` rows are session-to-date totals (SessionUsage), so each row's share
+  // is the delta from the previous usage row in the same file, whatever day
+  // that row was written. A total that went backwards restarted from zero.
+  let previousUsage = { requests: 0, input: 0, output: 0 };
+  let lastRequestAtMs = -1;
+  for (const row of rows) {
+    const timestampMs = row['timestamp_ms'];
+    if (typeof timestampMs !== 'number' || !Number.isFinite(timestampMs)) continue;
+    const type = row['type'];
+    const inDay = day === undefined || localDay(timestampMs) === day;
+    if (!inDay) {
+      if (type === 'usage') previousUsage = usageTotals(row);
+      continue;
+    }
+    if (row['role'] === 'user') counts.turns += 1;
+    if (row['role'] === 'tool') {
+      counts.tool_calls += 1;
+      if (typeof row['content'] === 'string' && isFailureResult(row['content'])) {
+        counts.tool_failures += 1;
+      }
+    }
+    if (type === 'usage') {
+      const totals = usageTotals(row);
+      const delta = usageDelta(previousUsage, totals);
+      previousUsage = totals;
+      counts.requests += delta.requests;
+      counts.input_tokens += delta.input;
+      counts.output_tokens += delta.output;
+      // Only a single-request delta is one prompt's size; a flush covering
+      // several requests holds their sum, which is not a context reading.
+      const model = typeof row['model'] === 'string' ? row['model'] : '';
+      if (delta.requests === 1 && timestampMs > lastRequestAtMs) {
+        lastRequestAtMs = timestampMs;
+        counts.last_request = {
+          model,
+          input_tokens: delta.input,
+          context_limit: model ? contextLimitFor(model) : null,
+          at: Math.floor(timestampMs / 1_000),
+        };
+      }
+    } else if (type === 'compaction') {
+      counts.compactions += 1;
+    } else if (type === 'compaction_attempt') {
+      if (row['phase'] === 'suppressed') counts.compactions_suppressed += 1;
+      else if (row['phase'] === 'finished' && row['outcome'] !== 'compacted') {
+        counts.compaction_attempts_failed += 1;
+      }
+    } else if (type === 'turn_error') {
+      counts.turn_errors += 1;
+    }
+  }
+  return [counts, lastRequestAtMs];
 }
 
 function usageTotals(row: Record<string, unknown>): UsageTotals {
@@ -86,14 +201,17 @@ export class ControlStatsBuilder {
   private readonly fileCache = new Map<string, FileCacheEntry>();
   private cachedReply: ControlStats | undefined;
   private cachedAtMs = 0;
+  private cachedActiveId: string | undefined;
 
   constructor(private readonly options: ControlStatsOptions) {}
 
   build(): ControlStats {
     const nowMs = this.options.now();
     const day = localDay(nowMs);
+    const activeId = this.options.activeConversationId?.();
     if (
       this.cachedReply?.day === day &&
+      activeId === this.cachedActiveId &&
       nowMs >= this.cachedAtMs &&
       nowMs - this.cachedAtMs < 3_000
     ) {
@@ -101,7 +219,9 @@ export class ControlStatsBuilder {
     }
 
     const files = this.filesForDay(day);
+    const activeFile = this.activeFile(activeId);
     const todayPaths = new Set(files.map((file) => file.path));
+    if (activeFile) todayPaths.add(activeFile.path);
     for (const cachedPath of this.fileCache.keys()) {
       if (!todayPaths.has(cachedPath)) this.fileCache.delete(cachedPath);
     }
@@ -122,11 +242,11 @@ export class ControlStatsBuilder {
         turn_errors: 0,
       },
       last_request: null,
+      session: activeFile ? this.emptySession(activeId!) : null,
       computed_at: Math.floor(nowMs / 1_000),
       skipped_files: 0,
     };
     let lastRequestAtMs = -1;
-
     for (const file of files) {
       let rows: Array<Record<string, unknown>>;
       try {
@@ -142,60 +262,69 @@ export class ControlStatsBuilder {
       // files such as voice.jsonl without relying on a filename convention.
       if (!rows.some((row) => row['type'] === 'session_start')) continue;
 
-      // `usage` rows are session-to-date totals (SessionUsage), so today's share
-      // is the delta from the previous usage row in the same file, whatever day
-      // that row was written. A total that went backwards restarted from zero.
-      let previousUsage = { requests: 0, input: 0, output: 0 };
-      for (const row of rows) {
-        const timestampMs = row['timestamp_ms'];
-        if (typeof timestampMs !== 'number' || !Number.isFinite(timestampMs)) continue;
-        const type = row['type'];
-        if (localDay(timestampMs) !== day) {
-          if (type === 'usage') previousUsage = usageTotals(row);
-          continue;
-        }
-        if (row['role'] === 'user') result.today.turns += 1;
-        if (row['role'] === 'tool') {
-          result.today.tool_calls += 1;
-          if (typeof row['content'] === 'string' && isFailureResult(row['content'])) {
-            result.today.tool_failures += 1;
-          }
-        }
-        if (type === 'usage') {
-          const totals = usageTotals(row);
-          const delta = usageDelta(previousUsage, totals);
-          previousUsage = totals;
-          result.today.requests += delta.requests;
-          result.today.input_tokens += delta.input;
-          result.today.output_tokens += delta.output;
-          // Only a single-request delta is one prompt's size; a flush covering
-          // several requests holds their sum, which is not a context reading.
-          const model = typeof row['model'] === 'string' ? row['model'] : '';
-          if (delta.requests === 1 && timestampMs > lastRequestAtMs) {
-            lastRequestAtMs = timestampMs;
-            result.last_request = {
-              model,
-              input_tokens: delta.input,
-              context_limit: model ? this.options.contextLimitFor(model) : null,
-              at: Math.floor(timestampMs / 1_000),
-            };
-          }
-        } else if (type === 'compaction') {
-          result.today.compactions += 1;
-        } else if (type === 'compaction_attempt') {
-          if (row['phase'] === 'suppressed') result.today.compactions_suppressed += 1;
-          else if (row['phase'] === 'finished' && row['outcome'] !== 'compacted') {
-            result.today.compaction_attempts_failed += 1;
-          }
-        } else if (type === 'turn_error') {
-          result.today.turn_errors += 1;
-        }
+      const [counted, requestAtMs] = countRows(rows, day, this.options.contextLimitFor);
+      for (const key of Object.keys(result.today) as Array<keyof typeof result.today>) {
+        result.today[key] += counted[key];
+      }
+      if (counted.last_request && requestAtMs > lastRequestAtMs) {
+        lastRequestAtMs = requestAtMs;
+        result.last_request = counted.last_request;
       }
     }
 
+    if (activeFile && result.session) this.readActiveSession(activeFile, result, activeId!);
+
     this.cachedAtMs = nowMs;
+    this.cachedActiveId = activeId;
     this.cachedReply = controlStatsSchema.parse(result);
     return this.cachedReply;
+  }
+
+  private emptySession(conversationId: string): NonNullable<ControlStats['session']> {
+    return { conversation_id: conversationId, ...emptyCounts(), started_at: null };
+  }
+
+  private activeFile(
+    id: string | undefined,
+  ): { path: string; size: number; mtimeMs: number; missing?: boolean } | null {
+    if (!id || !/^[A-Za-z0-9_-]+$/.test(id)) return null;
+    const filePath = path.join(this.options.sessionsDir, `${id}.jsonl`);
+    try {
+      const stat = fs.statSync(filePath);
+      return stat.isFile()
+        ? { path: filePath, size: stat.size, mtimeMs: stat.mtimeMs }
+        : { path: filePath, size: -1, mtimeMs: -1, missing: true };
+    } catch (error) {
+      const missing = (error as NodeJS.ErrnoException).code === 'ENOENT';
+      return { path: filePath, size: -1, mtimeMs: -1, missing };
+    }
+  }
+
+  private readActiveSession(
+    file: { path: string; size: number; mtimeMs: number; missing?: boolean },
+    result: ControlStats,
+    activeId: string,
+  ): void {
+    const session = result.session;
+    if (!session) return;
+    if (file.size < 0) {
+      if (!file.missing) result.skipped_files += 1;
+      return;
+    }
+    try {
+      const rows = this.rowsForFile(file.path, file.size, file.mtimeMs);
+      if (!rows.some((row) => row['type'] === 'session_start')) return;
+      const firstTimestamp = rows[0]?.['timestamp_ms'];
+      session.started_at =
+        typeof firstTimestamp === 'number' && Number.isFinite(firstTimestamp)
+          ? Math.floor(firstTimestamp / 1_000)
+          : null;
+      const [counts] = countRows(rows, undefined, this.options.contextLimitFor);
+      Object.assign(session, counts, { conversation_id: activeId });
+    } catch {
+      result.skipped_files += 1;
+      this.fileCache.delete(file.path);
+    }
   }
 
   private filesForDay(day: string): Array<{ path: string; size: number; mtimeMs: number }> {

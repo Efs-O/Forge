@@ -49,6 +49,8 @@ export interface ControlServerDeps {
   registry?: IControlServerRegistry;
   version?: string;
   stats?: ControlStatsBuilder;
+  /** Active chat in the window that owns the control-server port. */
+  activeConversationId?: () => string | undefined;
   /** The token-guarded `/agent/*` routes (agentRoutes.ts). Absent ⇒ 404. */
   agentRoutes?: AgentRoutes;
 }
@@ -76,7 +78,8 @@ export interface ControlStatus {
  *
  * Routes:
  *   GET  /healthz         → { ok: true }
- *   GET  /stats            → counts-only local session statistics
+ *   GET  /stats            → counts-only local session statistics; the active
+ *                           chat is from the one window that owns this port
  *   GET  /models           → { models: [{ name, backend, loaded }] }
  *   POST /ensure  {model} → { baseUrl, model, backend }  (loads/swaps as needed)
  *   POST /release {model} → { released: boolean }        (hold bookkeeping only)
@@ -125,6 +128,7 @@ export class ControlServer implements vscode.Disposable {
         sessionsDir: sessionsDirectory(),
         now: Date.now,
         forgeVersion: this.version,
+        ...(deps.activeConversationId ? { activeConversationId: deps.activeConversationId } : {}),
         contextLimitFor: (model) => {
           try {
             return perSlotContext(

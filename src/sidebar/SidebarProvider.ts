@@ -231,12 +231,13 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
   }
 
   // ── Public API ────────────────────────────────────────────────────────────
-
+  getActiveConversationId(): string {
+    return this.sidebar.activeConversationId;
+  }
   setRemoteStatus(status: { transports: string[]; paired: boolean }): void {
     this.remoteStatus = { transports: [...status.transports], paired: status.paired };
     this.post({ type: 'remoteStatus', ...this.remoteStatus });
   }
-
   /** Opens the active turn's changes in VS Code's native diff editor. */
   async reviewCheckpoint(): Promise<void> {
     await this.review.open(this.checkpoints.pendingSnapshots(this.sidebar.activeConversationId));
@@ -260,7 +261,6 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
   canUndo(): boolean {
     return this.checkpoints.canUndo(this.sidebar.activeConversationId);
   }
-
   async newConversation(): Promise<void> {
     this.tabs.create();
   }
