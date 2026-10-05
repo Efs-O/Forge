@@ -50,6 +50,13 @@ export class ExternalServerBusyError extends Error {}
  * and it never shares VRAM with a llama.cpp/Ollama model this window loads.
  * See docs/plans/EXTERNAL_SERVER_UNLOAD_PLAN.md.
  */
+/** A managed external server: openai-compatible with an `unload_path` (Strata). */
+export function isManagedExternalModel(
+  model: Pick<ModelConfig, 'provider' | 'unload_path'>,
+): boolean {
+  return model.provider === 'openai-compatible' && !!model.unload_path;
+}
+
 export class ExternalModelServers {
   private readonly residency = new Map<string, Residency>();
   /** Incremented before each request so a late unload completion cannot erase it. */
@@ -77,7 +84,7 @@ export class ExternalModelServers {
     const raw = config.models.find((m) => m.name === name);
     if (!raw) return undefined;
     const model = mergeGroupsIntoModel(config, raw);
-    return model.provider === 'openai-compatible' && model.unload_path ? model : undefined;
+    return isManagedExternalModel(model) ? model : undefined;
   }
 
   isManaged(name: string): boolean {
@@ -87,6 +94,15 @@ export class ExternalModelServers {
   /** Unknown counts as loaded: a server started by hand may hold VRAM. */
   isLoaded(name: string): boolean {
     return this.isManaged(name) && this.residency.get(name) !== 'unloaded';
+  }
+
+  /**
+   * Loaded as far as this window has seen: a request went to it and no unload
+   * has run since. Unlike `isLoaded`, unknown is NOT loaded -- the selector's
+   * green dot must not claim a server nobody has used yet holds a model.
+   */
+  isConfirmedLoaded(name: string): boolean {
+    return this.isManaged(name) && this.residency.get(name) === 'loaded';
   }
 
   loadedNames(): string[] {

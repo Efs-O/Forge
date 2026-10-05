@@ -360,7 +360,8 @@ export class BackendPool implements IBackendPool {
    * weights before it can serve.
    */
   isModelReady(modelName: string): boolean {
-    return this.backendFor(this.poolKey(modelName))?.isReady() ?? false;
+    const key = this.poolKey(modelName);
+    return this.backendFor(key)?.isReady() ?? this.external?.isConfirmedLoaded(key) ?? false;
   }
 
   /**
@@ -384,7 +385,8 @@ export class BackendPool implements IBackendPool {
    */
   residencySignature(): string {
     const keys = [...this.slots.keys(), ...this.sharedSlots.keys(), ...this.ollamaSlots.keys()];
-    return backendResidencySignature(keys, (key) => this.backendFor(key));
+    const external = this.config.models.filter((m) => this.external?.isConfirmedLoaded(m.name));
+    return `${backendResidencySignature(keys, (key) => this.backendFor(key))}|${external.map((m) => m.name).join(',')}`;
   }
 
   /** The backend behind an already-resolved pool key, wherever it lives. */

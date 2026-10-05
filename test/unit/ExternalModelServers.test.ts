@@ -139,6 +139,16 @@ describe('ExternalModelServers', () => {
     expect(servers.isLoaded('strata')).toBe(true);
   });
 
+  it('confirms loaded only after a request, not while residency is unknown', async () => {
+    const { servers } = makeServers(async () => new Response('{"status":"unloaded"}'));
+    expect(servers.isLoaded('strata')).toBe(true);
+    expect(servers.isConfirmedLoaded('strata')).toBe(false);
+    servers.markInUse('strata');
+    expect(servers.isConfirmedLoaded('strata')).toBe(true);
+    await servers.unload('strata');
+    expect(servers.isConfirmedLoaded('strata')).toBe(false);
+  });
+
   it('does not let a late unload completion erase a concurrent request', async () => {
     let finishUnload: ((response: Response) => void) | undefined;
     const response = new Promise<Response>((resolve) => {
@@ -617,6 +627,24 @@ describe('BackendPool with a managed external server', () => {
     await pool.release('strata');
     expect(calls).toHaveLength(2);
     expect(pool.isLoaded('strata')).toBe(false);
+  });
+
+  it('reports a used external server ready and moves the signature with it', async () => {
+    // The sidebar re-posts the selector only when this signature changes, so
+    // Strata loading or unloading must move it or the dot never updates.
+    const { servers } = makeServers(ok);
+    const pool = new BackendPool(makeConfig(), undefined, servers);
+    const before = pool.residencySignature();
+    expect(pool.isModelReady('strata')).toBe(false);
+
+    servers.markInUse('strata');
+    expect(pool.isModelReady('strata')).toBe(true);
+    const loaded = pool.residencySignature();
+    expect(loaded).not.toBe(before);
+
+    await pool.release('strata');
+    expect(pool.isModelReady('strata')).toBe(false);
+    expect(pool.residencySignature()).not.toBe(loaded);
   });
 
   it('unloads the external server before spawning a local model', async () => {

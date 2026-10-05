@@ -58,6 +58,7 @@ function harness(
   let state = sidebar(options.tabs ?? ['12b']);
   const release = vi.fn(async () => {});
   const posted: HostToWebview[] = [];
+  const postModels = vi.fn();
   const loaded = new Set(options.loaded ?? ['12b']);
   const streamingIds = new Set(options.streamingIds ?? []);
   const deps = {
@@ -70,7 +71,7 @@ function harness(
     },
     setActiveModel: () => {},
     persistSession: () => {},
-    postModels: () => {},
+    postModels,
     postSessionSync: () => {},
     pool: { release, isLoaded: (name: string) => loaded.has(name) },
     agentLoop: {
@@ -98,7 +99,7 @@ function harness(
     isConversationEvictable: () => options.evictable ?? false,
     evictionBlockers: options.blockers ?? (() => (options.evictable ? [] : ['running a turn'])),
   } as unknown as ConversationTabsDeps;
-  return { tabs: new ConversationTabs(deps), release, posted };
+  return { tabs: new ConversationTabs(deps), release, posted, postModels };
 }
 
 describe('ConversationTabs capacity', () => {
@@ -409,6 +410,17 @@ describe('ConversationTabs failure streak', () => {
     tabs.switch('tab1');
 
     expect(reset).not.toHaveBeenCalled();
+  });
+});
+
+describe('ConversationTabs.setModelById', () => {
+  it('re-sends the selector only when the pinned chat is the one on screen', () => {
+    const { tabs, postModels } = harness({ tabs: ['12b', '12b'] });
+
+    expect(tabs.setModelById('tab1', '27b')).toBe(true);
+    expect(postModels).not.toHaveBeenCalled();
+    expect(tabs.setModelById('tab0', '27b')).toBe(true);
+    expect(postModels).toHaveBeenCalledOnce();
   });
 });
 

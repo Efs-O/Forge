@@ -12,6 +12,7 @@ import type { ArchivedSessionMeta } from './ArchivedSessions';
 import { availableProfilesFor, mergeGroupsIntoModel } from '../config/ConfigResolver';
 import type { HostToWebview, ModelResidency, SessionSyncMsg } from './messageBridge';
 import { classifyModelRoute } from '../llm/ModelRouteClassifier';
+import { isManagedExternalModel } from '../backend/ExternalModelServers';
 import type { ConversationRuntime, SidebarRuntime } from './sessionTypes';
 import {
   historyMetasFromSession,
@@ -39,6 +40,9 @@ function residencyOf(
   pool: ModelResidencySource | undefined,
 ): ModelResidency | undefined {
   if (!pool) return undefined;
+  // Strata-style servers are openai-compatible, so they route as cloud, but
+  // Forge loads and unloads them: ready once used, cold after an unload.
+  if (isManagedExternalModel(model)) return pool.isModelReady(model.name) ? 'ready' : 'cold';
   const route = classifyModelRoute(model);
   if (route !== 'local-llama' && route !== 'local-ollama') return undefined;
   if (!pool.isLoaded(model.name)) return 'cold';

@@ -87,6 +87,22 @@ describe('buildModelsMessage', () => {
     }
   });
 
+  it('gives a managed external server (Strata) a dot: ready once used, cold otherwise', () => {
+    // openai-compatible routes as cloud, but an unload_path means Forge loads
+    // and unloads it; without this its dot stayed grey while it served.
+    const config = {
+      active_model: 's',
+      models: [{ name: 's', provider: 'openai-compatible', unload_path: '/unload' }],
+    } as ForgeConfig;
+    const at = (ready: boolean): ModelEntry | undefined =>
+      (buildModelsMessage(config, { isLoaded: () => true, isModelReady: () => ready }) as {
+        models: ModelEntry[];
+      }).models[0];
+
+    expect(at(true)?.residency).toBe('ready');
+    expect(at(false)?.residency).toBe('cold');
+  });
+
   it('still reports residency for a local Ollama model', () => {
     const msg = buildModelsMessage(
       {

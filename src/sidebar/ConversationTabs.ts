@@ -175,6 +175,7 @@ export class ConversationTabs {
     if (!updated) return false;
     this.deps.persistSession();
     this.deps.postSessionSync();
+    if (id === this.deps.getSidebar().activeConversationId) this.deps.postModels();
     return true;
   }
 
