@@ -2,6 +2,12 @@ import { z } from 'zod';
 import { MAX_TELEGRAM_UPDATE_RETRIES, TelegramAlbumCoordinator } from './TelegramAlbumBuffer';
 import { TelegramUpdateSchema, telegramUpdateToEvent } from './TelegramInboundMapping';
 import type { RemoteInboundDisposition, RemoteInboundEvent } from './types';
+import { getLogger } from '../util/logger';
+
+const log = getLogger();
+
+/** A message older than this on arrival is logged: the poll, not the turn, was slow. */
+const LATE_DELIVERY_MS = 3_000;
 
 type TelegramCall = (
   method: string,
@@ -80,6 +86,7 @@ export async function pollTelegramUpdates(
       if (dependencies.albumCoordinator.hasPending) {
         await dependencies.albumCoordinator.flush(signal);
       }
+      logLateDelivery(update);
       const event = telegramUpdateToEvent(update);
       let disposition: RemoteInboundDisposition = event
         ? { kind: 'retry', reason: 'remote event handler is unavailable' }
@@ -150,4 +157,18 @@ function abortableDelay(ms: number, signal: AbortSignal): Promise<void> {
       { once: true },
     );
   });
+}
+
+/**
+ * Logs a message that reached Forge late, measured from Telegram's own send
+ * time (`date`, whole seconds). A Stop update carries no date, so a typed
+ * `/stop` is how its delivery delay is told from a slow cancel.
+ */
+function logLateDelivery(update: z.infer<typeof TelegramUpdateSchema>): void {
+  const date = update.message?.date;
+  if (date === undefined) return;
+  const lagMs = Date.now() - date * 1_000;
+  if (lagMs >= LATE_DELIVERY_MS) {
+    log.info(`[remote:telegram] update ${update.update_id} arrived ${lagMs} ms after it was sent`);
+  }
 }

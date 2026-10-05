@@ -21,15 +21,19 @@ describe('RemoteDraftRegistry', () => {
     expect(registry.find('chat-1', 5)).toBeUndefined();
   });
 
-  it('keeps one live draft per conversation, replacing the earlier id', () => {
+  it("keeps every preview of a live turn, and one claim drops them all", () => {
+    // A turn opens a new preview after a quiet stretch while Telegram may still
+    // show the old one's Stop: replacing the old id made that press a no-op.
     const registry = new RemoteDraftRegistry();
     registry.register({ chatId: 'chat-1', conversationId: 'c1', draftId: 1 });
     registry.register({ chatId: 'chat-1', conversationId: 'c1', draftId: 2 });
+    registry.register({ chatId: 'chat-1', conversationId: 'c2', draftId: 3 });
 
-    expect(registry.size).toBe(1);
-    // The abandoned id must stop being a cancel path for the live turn.
-    expect(registry.find('chat-1', 1)).toBeUndefined();
-    expect(registry.find('chat-1', 2)?.conversationId).toBe('c1');
+    expect(registry.find('chat-1', 1)?.conversationId).toBe('c1');
+    expect(registry.take('chat-1', 1)?.conversationId).toBe('c1');
+    // A press on the turn's other preview must not cancel it a second time.
+    expect(registry.take('chat-1', 2)).toBeUndefined();
+    expect(registry.find('chat-1', 3)?.conversationId).toBe('c2');
   });
 
   it('drops every entry for a conversation once the turn ends', () => {

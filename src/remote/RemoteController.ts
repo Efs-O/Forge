@@ -1,5 +1,6 @@
 import type { ForgeHostFacade } from '../sidebar/ForgeHostFacade';
 import { describeError } from '../util/describeError';
+import { getLogger } from '../util/logger';
 import type { RemoteAuth } from './RemoteAuth';
 import type { RemoteRequestStore } from './RemoteRequestStore';
 import { remoteDedupKey } from './RemoteRequestStore';
@@ -45,6 +46,7 @@ import { handleRemoteSelectionAction } from './RemoteSelectionPager';
 import type { RemoteControllerOptions } from './remoteControllerOptions';
 import type { TelegramContactService } from './TelegramContactService';
 export type { RemoteControllerOptions };
+const log = getLogger();
 /** Durable transport-independent admission, FIFO execution, and notification. */
 export class RemoteController {
   private readonly abort = new AbortController();
@@ -430,6 +432,10 @@ export class RemoteController {
     // Claimed before anything is awaited, so two Stop deliveries cannot both
     // see the same entry and both cancel.
     const draft = this.drafts.take(event.chatId, event.draftId);
+    log.info(
+      `[remote:telegram] Stop on draft ${event.draftId}: ` +
+        (draft ? `cancelling ${draft.conversationId}` : 'no live preview, ignored'),
+    );
     if (!draft) {
       // Stale, foreign, or already finalized. Acknowledged rather than retried:
       // retrying would redeliver the same update and the cursor would never

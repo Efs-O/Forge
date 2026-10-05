@@ -10,7 +10,8 @@
  *
  * Keyed by `chatId:draftId`, not by draft id alone. A Stop update carries the
  * chat, and requiring both halves to match is what makes a stale or foreign
- * draft id a no-op instead of a cancellation of somebody else's turn. Ids come
+ * draft id a no-op instead of a cancellation of somebody else's turn. A turn
+ * may hold several ids (one per preview it opened). Ids come
  * from `TelegramRichDrafts`: random-start, then monotonic, and never reused
  * within an instance — so an id from a finished turn is never the id of a
  * later one, including across a restart (which is why the start is not 1).
@@ -33,13 +34,15 @@ export class RemoteDraftRegistry {
   private generation = 0;
 
   /**
-   * One draft per conversation. A turn that somehow opens twice must not leave
-   * two live ids: the second press would then be ambiguous about which preview
-   * the user meant, and the first id would linger as a cancel path for a turn
-   * nobody is watching.
+   * Adds a preview to its turn; earlier previews of the same turn stay.
+   *
+   * A turn opens a new preview after every quiet stretch, and Telegram can
+   * still show the previous one's Stop button when it does. Replacing the
+   * earlier id made that press a silent no-op (2026-10-05), so every preview
+   * of a live turn is a Stop path until `forgetConversation` at turn end.
+   * Ids are never reused, so none of them can name a later turn.
    */
   register(draft: ActiveDraft): void {
-    this.forgetConversation(draft.conversationId);
     this.byKey.set(this.key(draft.chatId, draft.draftId), draft);
   }
 
@@ -55,12 +58,12 @@ export class RemoteDraftRegistry {
    * separate `forget` leaves a window across the await, and two Stop updates
    * delivered back to back would both see the entry and both cancel — the
    * single-threaded event loop does not help when the check and the removal are
-   * separated by an await.
+   * separated by an await. The claim drops the turn's other previews too, so a
+   * press on a second preview of the same turn cannot cancel it twice.
    */
   take(chatId: string, draftId: number): ActiveDraft | undefined {
-    const key = this.key(chatId, draftId);
-    const draft = this.byKey.get(key);
-    if (draft) this.byKey.delete(key);
+    const draft = this.byKey.get(this.key(chatId, draftId));
+    if (draft) this.forgetConversation(draft.conversationId);
     return draft;
   }
 

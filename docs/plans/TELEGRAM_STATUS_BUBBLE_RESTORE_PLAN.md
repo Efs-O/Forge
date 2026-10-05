@@ -57,6 +57,16 @@ nicely").
   Other…; typed text answers the sub-question on screen. The settled answer is
   `formatGroupAnswer`'s labelled lines, the same the sidebar dialog sends.
 
+- **Stop felt slow (~10 s), and some presses did nothing.** The 21:27 Stop
+  reached Forge at 18:27:40.278Z (audit `inbound`) and the stream aborted
+  0.4 s later, so the delay was before delivery, not in the cancel. Separately,
+  `RemoteDraftRegistry.register` replaced a turn's earlier preview id, so a
+  Stop on a preview still on screen after a newer one opened was dropped
+  without a trace. The registry now keeps every preview of a live turn (one
+  claim drops them all), each Stop is logged as cancelling or ignored, and a
+  message update arriving 3 s or more after Telegram's `date` is logged, so a
+  typed `/stop` measures the delivery delay directly.
+
 ## Investigated, not a Forge defect
 
 - **Prompts disappearing.** `remote-audit-v1.json` records every prompt as
@@ -96,5 +106,7 @@ unpair. Nothing is written to disk or config.
       one with only the new words (`RemoteAgentProgressDraft`).
 - [x] Telegram sub-questions arrive as one keyboard each and settle as labelled
       lines; a stale first-step tap is rejected (`UserQuestion`).
+- [x] A Stop on any preview of a live turn cancels it once; later presses
+      find nothing (`RemoteDraftRegistry`, `RemoteAgentProgressDraft`).
 - [ ] Live check on Telegram: the status never animates, words stream, no
       duplicate after Stop.

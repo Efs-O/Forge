@@ -225,7 +225,9 @@ describe('RemoteAgentProgress: plain status bubble plus a words-only preview', (
     progress.handle({ conversationId: 'c1', kind: 'commentary', text: 'Now writing.' });
     await vi.advanceTimersByTimeAsync(1_000);
     expect(opens).toEqual(['Thinking it over.', 'Now writing.']);
-    expect(drafts.size).toBe(1);
+    // The first preview may still be on screen, so its Stop still finds the turn.
+    expect(drafts.find('chat-a', 42)?.conversationId).toBe('c1');
+    expect(drafts.find('chat-a', 43)?.conversationId).toBe('c1');
     await progress.dispose();
   });
 

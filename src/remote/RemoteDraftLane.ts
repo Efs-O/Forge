@@ -201,7 +201,7 @@ export class RemoteWordsDraft {
     this.shown = text;
     this.sentAt = Date.now();
     if (!this.deps.live()) return;
-    // Replaces the previous preview's registration, if this turn had one.
+    // Joins this turn's earlier previews: any of them still on screen may Stop it.
     if (epoch === undefined || drafts?.isCurrent(epoch)) {
       drafts?.register({ chatId, conversationId, draftId: outcome.draftId });
     }
