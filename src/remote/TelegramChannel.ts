@@ -208,11 +208,10 @@ export class TelegramChannel implements RemoteChannel {
    * to three minutes. A preview is replaced by the next one, so dropping it
    * costs nothing.
    */
-  readonly richDraft = new TelegramRichDrafts(
-    (method, body, signal) =>
-      postTelegram(this.fetchImpl, this.options.token, method, body, signal, {
-        retryRateLimit: false,
-      }),
+  readonly richDraft = new TelegramRichDrafts((method, body, signal) =>
+    postTelegram(this.fetchImpl, this.options.token, method, body, signal, {
+      retryRateLimit: false,
+    }),
   );
 
   resolvePromptKeyboard(...args: Parameters<TelegramOutbound['resolvePromptKeyboard']>) {

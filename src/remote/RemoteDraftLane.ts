@@ -1,4 +1,7 @@
 import { sanitize } from './remoteProgressText';
+import { describeError } from '../util/describeError';
+import type { RemoteDraftRegistry } from './RemoteDraftRegistry';
+import type { RichDraftTransport } from './telegramRichDraft';
 
 /**
  * How often streamed words reach a draft preview. Faster than the 1.5s edit
@@ -71,5 +74,123 @@ export class RemoteDraftLane {
       }
     } while (this.pending);
     this.inFlight = undefined;
+  }
+}
+
+export interface WordsDraftDeps {
+  rich: RichDraftTransport;
+  chatId: string;
+  conversationId: string;
+  signal: AbortSignal;
+  /** Live draft previews, so Telegram's Stop on this one finds the turn. */
+  drafts?: RemoteDraftRegistry | undefined;
+  /** False once the owning turn closed or was replaced. */
+  live: () => boolean;
+  canDeliver: () => Promise<boolean>;
+  maxChars: () => number;
+  streamIntervalMs: number;
+  heartbeatMs: number;
+  report: (err: unknown) => void;
+}
+
+/**
+ * One turn's words preview: a rich draft carrying only the model's streamed
+ * words, opened on the first word and never carrying status.
+ *
+ * A status in a draft is re-typed letter by letter on every change, which is
+ * what made "Forge: working…" crawl, so the status stays in the plain bubble
+ * and this owns nothing else. Every update reuses one draft id so Telegram
+ * animates only the appended words; Telegram's Stop update names that id.
+ */
+export class RemoteWordsDraft {
+  /** `off` once the transport refused a draft: the turn streams nothing more. */
+  private phase: 'none' | 'opening' | 'open' | 'off' = 'none';
+  private draftId: number | undefined;
+  /** The turn's streamed words, append-only, so Telegram never re-types them. */
+  private words = '';
+  /** What the preview last showed. */
+  private shown = '';
+  private timer: ReturnType<typeof setTimeout> | undefined;
+  private heartbeat: ReturnType<typeof setInterval> | undefined;
+  private readonly lane: RemoteDraftLane;
+
+  constructor(private readonly deps: WordsDraftDeps) {
+    this.lane = new RemoteDraftLane(() => this.send(), deps.report);
+  }
+
+  /** Whether a preview was opened, and so may be registered for Stop. */
+  get opened(): boolean {
+    return this.draftId !== undefined;
+  }
+
+  /** Adds streamed words; false once this turn streams nothing more. */
+  append(delta: string): boolean {
+    if (this.phase === 'off') return false;
+    const next = appendStream(this.words, delta);
+    if (next === this.words || this.timer) {
+      this.words = next;
+      return true;
+    }
+    this.words = next;
+    this.timer = setTimeout(() => {
+      this.timer = undefined;
+      if (this.text() !== this.shown) this.lane.request();
+    }, this.deps.streamIntervalMs);
+    return true;
+  }
+
+  /** Stops the timers now; settles when no send is in flight. */
+  close(): Promise<void> {
+    if (this.timer) clearTimeout(this.timer);
+    if (this.heartbeat) clearInterval(this.heartbeat);
+    this.timer = undefined;
+    this.heartbeat = undefined;
+    return this.lane.idle();
+  }
+
+  private text(): string {
+    return this.words.trim().slice(0, this.deps.maxChars());
+  }
+
+  /**
+   * One preview send, rendered when it is actually sent so a coalesced request
+   * carries the newest words. The first send opens the draft.
+   */
+  private async send(): Promise<void> {
+    const { rich, chatId, conversationId, signal, drafts } = this.deps;
+    if (this.phase === 'off' || this.phase === 'opening') return;
+    if (signal.aborted || !this.deps.live()) return;
+    const text = this.text();
+    if (!text) return;
+    if (!(await this.deps.canDeliver())) return;
+    if (this.draftId !== undefined) {
+      await rich.updateDraft(chatId, this.draftId, text, { signal });
+      this.shown = text;
+      return;
+    }
+    // Read before the await: an unpair during the open must not leave this
+    // preview registered as a Stop path for the revoked pairing.
+    const epoch = drafts?.epoch();
+    this.phase = 'opening';
+    const outcome = await rich
+      .beginDraft(chatId, text, { signal })
+      .catch((err: unknown) => ({ kind: 'unknown' as const, error: describeError(err) }));
+    if (outcome.kind !== 'open') {
+      // Refused or unknown: stream nothing more this turn rather than risk a
+      // second preview. The bubble and the narrations still report the turn.
+      this.phase = 'off';
+      if (outcome.kind === 'unknown') this.deps.report(new Error(outcome.error));
+      return;
+    }
+    this.phase = 'open';
+    this.draftId = outcome.draftId;
+    this.shown = text;
+    if (!this.deps.live()) return;
+    if (epoch === undefined || drafts?.isCurrent(epoch)) {
+      drafts?.register({ chatId, conversationId, draftId: outcome.draftId });
+    }
+    // A preview expires after ~30 s without an update, taking its Stop button
+    // with it, so a quiet stretch of the turn re-sends the same words.
+    this.heartbeat = setInterval(() => this.lane.request(), this.deps.heartbeatMs);
   }
 }
