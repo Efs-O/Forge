@@ -7,6 +7,7 @@ import {
   requireViewportPoint,
   withLocatorActionTimeout,
 } from './browserActionGuards';
+import { typeIntoLocator, typeIntoTarget } from './browserTextInput';
 import type { BrowserChannel, BrowserScreenshot } from './browserPrimitives';
 export {
   DEFAULT_INSPECT_MAX,
@@ -335,28 +336,15 @@ export class BrowserSessionManager {
   ): Promise<string> {
     const page = await this.resolvePage(tabId);
     if (target.selector) {
-      await withLocatorActionTimeout('type', `selector "${target.selector}"`, () =>
-        page.locator(target.selector!).first().fill(text, { timeout: LOCATOR_ACTION_TIMEOUT_MS }),
-      );
-      return `typed into "${target.selector}"`;
+      // The mode decision lives in `browserTextInput`, not here: a `<select>`
+      // addressed by selector needs option selection, and `fill` refuses it.
+      return typeIntoLocator(page.locator(target.selector), text, target.selector);
     }
     if (target.index !== undefined) {
       const el = await this.indexTarget(page, target.index, 'type');
-      if (!el.editable) {
-        throw new Error(
-          `browser_type: the element at index ${target.index} ("${el.text || el.role}") is not ` +
-            'editable (no text input, textarea, select, or contenteditable). Use browser_click for ' +
-            'a button or link, or browser_inspect to pick a text field',
-        );
-      }
       // `fill` targets the node itself; a click-then-keyboard-type could land on
-      // whatever the click actually hit.
-      await withLocatorActionTimeout(
-        'type',
-        `element ${target.index} ("${el.text || el.role}")`,
-        () => el.handle.fill(text, { timeout: LOCATOR_ACTION_TIMEOUT_MS }),
-      );
-      return `typed into element ${target.index} ("${el.text || el.role}")`;
+      // whatever the click actually hit. A dropdown takes the option path.
+      return typeIntoTarget(el, text, target.index);
     }
     throw new Error('browser_type: provide selector or index');
   }

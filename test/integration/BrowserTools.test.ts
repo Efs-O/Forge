@@ -1,12 +1,6 @@
 import { afterAll, describe, expect, it } from 'vitest';
-import type { ForgeConfig } from '../../src/config/types';
-import { BrowserSessionManager } from '../../src/tools/browser/BrowserSessionManager';
-import { makeBrowserActionTools } from '../../src/tools/browser/browserActionTools';
-import {
-  buildBrowserToolContext,
-  makeBrowserSessionTools,
-} from '../../src/tools/browser/browserTools';
-import type { MultimodalToolResult, RegisteredTool } from '../../src/tools/ToolRegistry';
+import type { MultimodalToolResult } from '../../src/tools/ToolRegistry';
+import { EMPTY_PAGE, PAGE, RICH_PAGE, createBrowserHarness } from '../support/browserHarness';
 
 /**
  * Browser tool integration gates. Runs real headless Chrome on the configured
@@ -28,117 +22,32 @@ import type { MultimodalToolResult, RegisteredTool } from '../../src/tools/ToolR
  *  - an out-of-viewport coordinate is refused and never reaches the page
  *    (report §3.8), while an in-viewport one does.
  *
- * A `data:` URL is used so the origin-approval gate never fires (a data: URL has
- * no origin), keeping the loop deterministic. The screenshot lands in the real
- * `~/.forge/screenshots/<conv>/` path by design (plan §4.3).
+ * The fixtures and the tool-invocation harness live in
+ * `test/support/browserHarness.ts`, shared with `BrowserSelectInput.test.ts`, so
+ * both files assert against ONE copy of each fixture and of `parseInspect`.
+ *
+ * A `data:` URL is used for every fixture so the origin-approval gate never
+ * fires (a data: URL has no origin), keeping the loop deterministic. The
+ * screenshot lands in the real `~/.forge/screenshots/<conv>/` path by design
+ * (plan §4.3).
  */
-const PAGE =
-  'data:text/html,' +
-  encodeURIComponent(
-    '<html><body style="font:28px sans-serif;padding:24px">' +
-      '<h1 id="h">Before click</h1>' +
-      '<button id="btn" onclick="document.getElementById(\'h\').textContent=\'After click\'">Click me</button>' +
-      '</body></html>',
-  );
-
-/**
- * A fixture page with the shapes that break a naive selector: a duplicate `id`
- * used on three different elements, repeated identical siblings, a nested
- * target, a hidden button, a disabled button, and a text input. Every element
- * records its own click so an action can be attributed to a specific node.
- */
-const RICH_HTML =
-  '<html><body style="font:16px sans-serif;padding:16px">' +
-  '<h1 id="h">idle</h1>' +
-  // Three elements share id="dup": `#dup` is therefore ambiguous and must not be
-  // used as an entry's selector.
-  '<div id="dup">' +
-  '<button data-who="original" onclick="document.getElementById(\'h\').textContent=\'ORIGINAL\'">Dup</button>' +
-  '<button id="dup" onclick="document.getElementById(\'h\').textContent=\'SECOND\'">Second dup</button>' +
-  '</div>' +
-  // Nested target with a genuinely unique id.
-  '<section><div><div><button id="nested" title="Nested target" onclick="document.getElementById(\'h\').textContent=\'NESTED\'">Go</button></div></div></section>' +
-  '<a id="dup" href="#x">Link dup</a>' +
-  '<input id="q" type="text" placeholder="Search">' +
-  '<button id="hiddenBtn" style="display:none">Hidden</button>' +
-  '<button id="disabledBtn" disabled>Disabled</button>' +
-  '<button id="plain" onclick="document.getElementById(\'h\').textContent=\'PLAIN\'">Plain</button>' +
-  '<div id="bg" style="width:200px;height:120px;background:#eee" onclick="window.__bg=(window.__bg||0)+1"></div>' +
-  '<script>window.__clicks=[];document.addEventListener(\'click\',e=>{window.__clicks.push([e.clientX,e.clientY])});' +
-  // A page timer that mutates the DOM without navigating: any index action must
-  // survive (or refuse) against a document that is not the one inspected.
-  'window.__mutate=()=>{const b=document.querySelector(\'#dup button\');if(b){b.textContent=\'Dup (mutated)\';}};' +
-  '</script>' +
-  '</body></html>';
-const RICH_PAGE = 'data:text/html,' + encodeURIComponent(RICH_HTML);
-
-const EMPTY_PAGE = 'data:text/html,' + encodeURIComponent('<html><body><p>Nothing here.</p></body></html>');
-
-type HandlerCtx = Parameters<RegisteredTool['handler']>[1];
-const toolCtx = { conversationId: 'browser-integration-test' } as unknown as HandlerCtx;
-
-const getConfig = (): ForgeConfig =>
-  ({
-    active_model: 'primary',
-    llama_server: {},
-    models: [{ name: 'primary', gguf_path: '/primary.gguf' }],
-    browser: { channel: 'chrome', headless: true },
-  }) as ForgeConfig;
 
 /** One shared session: the tests below are ordered and build on each other. */
-const mgr = new BrowserSessionManager();
-const ctx = buildBrowserToolContext(getConfig, mgr);
-const tools = new Map<string, RegisteredTool>(
-  [...makeBrowserSessionTools(ctx), ...makeBrowserActionTools(ctx)].map((t) => [
-    t.definition.function.name,
-    t,
-  ]),
-);
-
-const call = async (name: string, args: Record<string, unknown> = {}): Promise<unknown> =>
-  tools.get(name)!.handler(args, toolCtx);
-
-const callText = async (name: string, args: Record<string, unknown> = {}): Promise<string> =>
-  (await call(name, args)) as string;
-
-const pngFromShot = (shot: MultimodalToolResult): Buffer => {
-  const img = shot.content!.find((p) => p.type === 'image_url') as { image_url: { url: string } };
-  return Buffer.from(img.image_url.url.split('base64,')[1], 'base64');
-};
-
-/** Parse a `browser_inspect` text block into its entries. */
-const parseInspect = (text: string): { index: number; role: string; text: string; selector: string }[] =>
-  text
-    .split('\n')
-    .filter((line) => line.startsWith('['))
-    .map((line) => {
-      // The selector may contain spaces (`html > body:nth-of-type(1) > …`), so it
-      // is everything between the em dash and the trailing bbox parenthesis.
-      const m = line.match(/^\[(\d+)\]\s+(\S+)\s+"([^"]*)"\s+—\s+(.+?)\s+\([^)]*\)$/);
-      if (!m) throw new Error(`unparsable inspect line: ${line}`);
-      return { index: Number(m[1]), role: m[2], text: m[3], selector: m[4] };
-    });
-
-/** True when the browser can be launched on this host at all. */
-let opened = false;
-let skipReason = '';
-
-const requireBrowser = (t: { skip(message?: string): void }): void => {
-  if (!opened) t.skip(skipReason || 'no browser on this host');
-};
+const h = createBrowserHarness('browser-integration-test');
+const { mgr, call, callText, pngFromShot, parseInspect, requireBrowser } = h;
 
 describe('browser tools: inspect, index identity, coordinate bounds (Phase 1)', () => {
   afterAll(async () => {
-    await mgr.close().catch(() => undefined);
+    await h.close();
   });
 
   it('drives headless Chrome through the screenshot → click → screenshot loop', async (t) => {
     let openRes: string;
     try {
       openRes = (await call('browser_open', { url: PAGE })) as string;
-      opened = true;
+      h.opened = true;
     } catch (err) {
-      skipReason = `browser_open failed (no Chrome on this host?): ${(err as Error).message}`;
+      h.skipReason = `browser_open failed (no Chrome on this host?): ${(err as Error).message}`;
       t.skip(skipReason);
       return;
     }

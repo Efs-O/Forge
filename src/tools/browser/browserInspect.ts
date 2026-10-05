@@ -124,8 +124,8 @@ export interface IndexTarget {
   text: string;
   /** The retained node itself — the caller acts on this, never on a selector. */
   handle: ElementHandle;
-  /** Whether `browser_type` may put text into it. */
-  editable: boolean;
+  /** How `browser_type` may put text into it: fill it, or choose an option. */
+  mode: InputMode;
 }
 
 /** What the stored entry claimed, and who is asking (for the refusal text). */
@@ -139,7 +139,7 @@ export interface RecheckExpected {
 
 /** The verdict of comparing a live recheck against what the snapshot stored. */
 export type RecheckVerdict =
-  | { ok: true; editable: boolean; role: string; text: string }
+  | { ok: true; mode: InputMode; role: string; text: string }
   | { ok: false; message: string };
 
 /** What the live DOM node behind a snapshot entry still reports. */
@@ -188,22 +188,33 @@ export function textFromFacts(f: ElementFacts): string {
 }
 
 /**
- * True when `browser_type` can put text into this element. Mirrors what
- * Playwright's `fill` accepts: a text-like input, a textarea, a
- * `contenteditable` node, or a `select`.
+ * How `browser_type` can put text into a node — decided in exactly ONE place.
+ *
+ * `fill` is Playwright's text-entry primitive and it refuses a `<select>`
+ * outright, so "can this take text?" is not one question but two: a text field
+ * to fill, or a dropdown whose value is chosen from its options. Collapsing them
+ * (the original bug) let the guard wave a `<select>` through and then fail 5
+ * seconds later inside `fill` with Playwright's own wording.
  */
-export function fillableFromFacts(f: ElementFacts): boolean {
-  if (f.disabled) return false;
-  if (f.tag === 'select') return true;
+export type InputMode = 'fill' | 'select' | 'none';
+
+/**
+ * True when `browser_type` can put text into this element. Mirrors what
+ * Playwright's `fill` accepts: a text-like input, a textarea, or a
+ * `contenteditable` node.
+ */
+export function inputModeFor(f: ElementFacts): InputMode {
+  if (f.disabled) return 'none';
+  if (f.tag === 'select') return 'select';
   const ce = f.contentEditable;
-  if (ce === '' || ce === 'true') return true;
-  if (ce === 'false') return false;
-  if (f.tag === 'textarea') return !f.readOnly;
+  if (ce === '' || ce === 'true') return 'fill';
+  if (ce === 'false') return 'none';
+  if (f.tag === 'textarea') return f.readOnly ? 'none' : 'fill';
   if (f.tag === 'input') {
-    if (f.readOnly) return false;
-    return !NON_FILLABLE_INPUT_TYPES.includes((f.type ?? 'text').toLowerCase());
+    if (f.readOnly) return 'none';
+    return NON_FILLABLE_INPUT_TYPES.includes((f.type ?? 'text').toLowerCase()) ? 'none' : 'fill';
   }
-  return false;
+  return 'none';
 }
 
 /**
@@ -256,7 +267,7 @@ export function verdictForRecheck(v: NodeRecheck, e: RecheckExpected): RecheckVe
         'close the overlay, then call browser_inspect again',
     };
   }
-  return { ok: true, editable: fillableFromFacts(facts), role, text };
+  return { ok: true, mode: inputModeFor(facts), role, text };
 }
 
 /** The minimal page-side DOM shape the callbacks below use. */

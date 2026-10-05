@@ -139,6 +139,7 @@ Each phase is one commit; only that phase's files were staged, by name. `npm run
 | 1 — truthful read and input results | `565c2b4` (prettier correction `318cf17`) | §3.2 inspect throws; §3.1 `0×0` rects; §3.7 `BitBlt` from `user32.dll`; ignored `monitor` index; §3.8 out-of-viewport success; index-identity race found in review | `test/integration/BrowserTools.test.ts` inspect/identity/coordinate cases; `desktopDriver` listWindows fake-transport tests; monitor capture tests | exit 0 |
 | 2 — desktop text and visible GUI launch | `8881b18` | §3.10 Unicode corruption on stdin; §3.3 hidden background GUI launches | `test/integration/DesktopTransport.test.ts` echo round trips on both engines; `test/unit/execShowWindow.test.ts` (10 tests); `test/live/DesktopGuiInput.live.test.ts` (3 tests, env-gated) ran live 3/3 on 2026-10-05 | exit 0 — 414 passed / 7 skipped files, 4289 passed / 44 skipped tests |
 | Release (version + `CHANGES.md`) | `89cae66` | n/a (release preparation) | `npm run ci` **on that commit**: exit 0 — 427 passed / 7 skipped files, 4409 passed / 41 skipped tests, 43.16 s; `build` and `check:bundle` report `forge-llm@0.16.87` | exit 0 |
+| 3-follow-up — `browser_type` on a `<select>` (found in live verification, 2026-10-06) | the `fix(browser): type into a <select> …` commit on `main`, child of `c3391e5` (hash reported to Codex and the owner rather than pasted here, so this row cannot go stale) | §Phase 1 item 4's "use `fill` where supported" was implemented as an editability **guess** from inspected facts, which claimed a `<select>` was fillable; Playwright's `fill()` rejects it, so the call died as a raw 5 s timeout with no usable reason | `test/unit/BrowserSelectInput.test.ts` (17), `test/integration/BrowserSelectInput.test.ts` (6, real headless Chrome), `test/unit/BrowserInspectRules.test.ts` (mode instead of editable) | **exit 0** with the complete source/test change in the tree — 431 passed / 7 skipped files, **4445 passed / 41 skipped** tests (4486), 40.18 s, 02:28–02:29 local; `build` and `check:bundle` clean. The only edit after that run is this docs row. |
 | 3 — selector latency and optional VS Code control | `4b744b8` | §3.5 30 s bad-selector wait; §4 VS Code policy change; per-input policy revalidation; per-call Code input confirmation | `test/unit/browserActionGuards.test.ts` (10), `test/unit/targetWindowGate.test.ts` (26), `test/unit/desktopVsCodePolicy.test.ts` (8), `test/unit/desktopCodeInputApproval.test.ts` (9), `test/unit/desktopTools.test.ts` (9), `test/unit/desktopApprovals.test.ts` (6) = 68; `test/integration/BrowserTools.test.ts` 5 s-bound case (9 tests, 38.4 s, real headless Chrome) | exit 0 at `782b0d3` — 427 passed / 7 skipped files, **4409 passed / 41 skipped** tests |
 
 Phase 3 review notes (independent re-read against items 1–6 at `782b0d3`, 2026-10-06): all six items are
@@ -236,6 +237,41 @@ env-gated harness only after the user has cleared it, since that harness snapsho
 | Not done | No Reload Window, no push, no tag, no publish — each needs its own GO. The running window still executes the pre-reload build, so 0.16.87's behaviour is **not yet live-verified in this session** |
 
 **Package-guard limitation.** The `.vsix` was built at 00:29:56, after the last source, version, and `CHANGES.md` edit, and `docs/**` is excluded from the package by `.vscodeignore`. The docs commits that follow therefore do not change the artifact, and the same-version `.vsix` must **not** be rebuilt or overwritten after the final docs edit — doing so would replace the exact bytes that were hashed and installed with no version change to tell them apart. Any further source edit after this point requires a new version and a fresh package gate.
+
+## Post-release finding: `browser_type` refused every dropdown (2026-10-06)
+
+Found while answering the owner's question "what about the browser properties — is it working", not by the
+smoke matrix above. `browser_type` against a `<select>` (VS Code's Settings page is the obvious case) failed.
+
+**Root cause.** Phase 1 item 4 says "use `fill` where supported and surface a clear noneditable-target error".
+What shipped was a boolean `fillableFromFacts` computed from the *inspected* role/tag/text, and it classified
+`<select>` (and `[contenteditable]`-styled roles) as fillable. The action then called `handle.fill()`, which
+Playwright rejects for a non-text input. The user saw the Playwright error after the 5 s action bound — no
+reason Forge owned, and no way to recover. The guard and the action disagreed about the same element, and the
+guard was the optimistic one.
+
+**Fix.** One decision, computed once, carried in the snapshot instead of re-derived:
+
+- `browserInspect.ts` now exports `inputModeFor()` returning `'fill' | 'select' | 'none'`; `IndexTarget.mode`
+  replaces `IndexTarget.editable`. The inspection verdict and the action can no longer disagree, because the
+  action reads the mode the inspection stored.
+- New module `src/tools/browser/browserTextInput.ts` owns the routing: `'fill'` → `handle.fill()`;
+  `'select'` → read the option list page-side, match **exact label then exact value**, `selectOption({index})`,
+  then read the selection back and report what is selected now; `'none'` → named refusal that lists the
+  available options for a dropdown.
+- The selector (non-index) path in `BrowserSessionManager.type()` routes through `typeIntoLocator()` and
+  bounds its tag-read `evaluate` at 5 s, so it cannot reintroduce the 30 s default this plan removed.
+
+**Verification.** `npx vitest run` on the eight browser files: 78 passed. Full `npm test`: exit 0 — 431 files
+passed / 7 skipped, **4444 tests passed / 41 skipped**. `npx eslint src/tools/browser/...` exit 0; line counts
+under the 500 gate. `npm run ci` result recorded in the row added to the table above.
+
+**Not verified live.** The dropdown path is covered against real headless Chrome in
+`test/integration/BrowserSelectInput.test.ts`, but the original report's own scenario — VS Code's Settings
+page, which is a webview Forge does not control — was not re-run. `browser_inspect` on a VS Code Settings
+page still returns nothing usable, because Playwright cannot see that webview; that is a pre-existing scope
+limit of the browser tools, unchanged by this fix, and it is why "the browser properties" are still not
+readable through these tools.
 
 ## Limitations and unverified live cases
 

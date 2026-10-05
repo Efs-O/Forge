@@ -77,9 +77,16 @@ tab and to the exact DOM node it showed, not to a re-count:
 - A main-frame navigation, a closed tab, or a closed browser drops the
   inspection for that tab, so an index from a previous page cannot resolve
   against a same-URL coincidence.
-- `browser_type` uses `fill` on the node itself and reports a clear refusal when
-  the target is not editable, instead of typing at whatever a click happened to
-  hit.
+- `browser_type` puts text into the node itself rather than into whatever a
+  click happened to hit, and the method follows the element's own properties: a
+  text input, textarea, or `contenteditable` node is filled, while a `<select>`
+  is **chosen into** — the text you pass must equal one option's visible label
+  or its value exactly, and the label wins when both could match. A dropdown
+  that offers no such option is refused immediately, and the refusal lists the
+  options it does have. Nothing is matched by substring or case-insensitively,
+  because that silently picks the wrong option. A multi-select takes the one
+  choice you named and says so. A target that accepts neither — a button, a
+  checkbox, a range slider — is refused with that reason named.
 
 Coordinate arguments to `browser_click`, `browser_hover`, `browser_scroll`, and
 `browser_drag` must be inside the viewport. Forge refuses a point outside it
@@ -92,6 +99,9 @@ matches nothing, or an element that never becomes actionable, fails in about
 five seconds with the tool, action, and target named, instead of waiting
 Playwright's default 30 seconds. Navigation keeps its own 30-second timeout, and
 a timed-out action is never retried automatically and never reported as success.
+Choosing a dropdown option counts as **one** action: reading its options and
+applying the choice share a single 5-second budget rather than each getting a
+fresh one.
 
 `browser_press` sends keys to the page or to a selector inside it. It does not
 operate browser chrome, and it does not open or drive DevTools —

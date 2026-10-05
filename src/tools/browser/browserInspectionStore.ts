@@ -158,7 +158,7 @@ export class InspectionStore {
     }
     const checked = verdictForRecheck(verdict, expected);
     if (!checked.ok) throw new Error(checked.message);
-    return { role: entry.role, text: entry.text, handle: entry.handle, editable: checked.editable };
+    return { role: entry.role, text: entry.text, handle: entry.handle, mode: checked.mode };
   }
 
   /** Dispose a tab's retained handles and forget its snapshot. Fire-and-forget. */

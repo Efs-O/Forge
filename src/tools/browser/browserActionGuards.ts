@@ -13,7 +13,8 @@
 
 /**
  * The bound on a selector/index locator action: `click`, `fill`, `hover`,
- * `press`, and selector-scoped `scroll`/`evaluate` (Phase 3 item 1).
+ * `press`, `selectOption`, and selector-scoped `scroll`/`evaluate` (Phase 3
+ * item 1).
  *
  * Playwright's own default action timeout is 30 s, which is what made a typo in
  * a selector cost half a minute per attempt (report §3.5). Five seconds is long
@@ -59,6 +60,61 @@ export function requireViewportPoint(
       ', y: 0-' +
       (viewport.height - 1) +
       '). Use browser_inspect for an element target, or a point inside a browser_screenshot.',
+  );
+}
+
+/**
+ * Time left before a shared deadline, for the NEXT attempt of one action.
+ *
+ * A `<select>` may need two attempts (match the option by value, then by visible
+ * label). Naively giving each attempt the full bound would let one `browser_type`
+ * wait 10 s while the docs promise 5, so the attempts share one deadline and this
+ * says how much of it remains. `null` means the budget is spent: do not start a
+ * third attempt.
+ */
+export function remainingActionTimeout(deadlineMs: number, nowMs: number): number | null {
+  const left = deadlineMs - nowMs;
+  return left > 0 ? left : null;
+}
+
+/** One `<option>` as the page reports it, for a refusal that lists the choices. */
+export interface SelectOptionFact {
+  value: string;
+  label: string;
+}
+
+/** How many options a refusal will list before saying "and more". */
+export const MAX_LISTED_OPTIONS = 12;
+
+/**
+ * Refuse a `browser_type` choice the dropdown does not offer, listing its real
+ * options. A bare Playwright "does not match any option" leaves the model with
+ * no way to retry correctly. `who` names the element the way the calling path
+ * names it (an index for an index action, a selector for a selector action).
+ * `cause` is the Playwright error when one was produced; the read-options path
+ * refuses before ever calling Playwright, so it passes `null` and the message
+ * says so rather than quoting `null`.
+ */
+export function selectOptionRefusal(
+  who: string,
+  text: string,
+  options: SelectOptionFact[],
+  cause: unknown,
+): string {
+  const shown = options
+    .slice(0, MAX_LISTED_OPTIONS)
+    .map((o) => (o.value === o.label ? o.label : `${o.label} (value: ${o.value})`));
+  const list = options.length
+    ? ` Its options are: ${shown.join(', ')}${options.length > MAX_LISTED_OPTIONS ? `, +${options.length - MAX_LISTED_OPTIONS} more` : ''}.`
+    : ' It has no options at all.';
+  const why =
+    cause === null || cause === undefined
+      ? ''
+      : ` (Playwright: ${cause instanceof Error ? cause.message : String(cause)})`;
+  return (
+    `browser_type: element ${who} is a dropdown and "${text}" matches no option — ` +
+    `no value or label equals it.${list} Type an option's exact label or value, or ` +
+    `browser_click to open it.${why}`
   );
 }
 

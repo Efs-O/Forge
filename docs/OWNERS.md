@@ -431,6 +431,7 @@ overlaps with an existing owner, extend the owner instead.
 | ffmpeg/ffprobe executable discovery        | `src/tools/ffmpegLocate.ts`           |
 | Browser session lifecycle (system channel, lazy playwright-core) | `src/tools/browser/BrowserSessionManager.ts` |
 | Browser input-action guards (coordinate bounds, locator timeout, failure naming) | `src/tools/browser/browserActionGuards.ts` |
+| Browser text-input mode for an inspected node (fill vs dropdown option) | `src/tools/browser/browserTextInput.ts` |
 | Desktop driver contract (SendInput/GDI impl lands Phase 2) | `src/tools/desktop/DesktopDriver.ts` |
 | Desktop tool approval predicates (window-capture binding, cloud monitor gate, system chords, consequential) | `src/tools/desktop/desktopApprovals.ts` |
 | Desktop B2 target-window gate (refused windows, foreground + rect check, `allow_vscode` revocation) | `src/tools/desktop/targetWindowGate.ts` |

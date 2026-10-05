@@ -1,8 +1,8 @@
 /**
  * Unit tests for the pure rules behind `browser_inspect` and index actions
  * (docs/plans/DESKTOP_BROWSER_TOOL_FIX_PLAN.md Phase 1). These are the decisions
- * that turn the page callback's raw facts into a label, a fillability answer, or
- * an index refusal — testable with no browser, which is the point of keeping the
+ * that turn the page callback's raw facts into a label, an input mode, or an
+ * index refusal — testable with no browser, which is the point of keeping the
  * page callbacks fact-only.
  */
 import { describe, expect, it } from 'vitest';
@@ -10,7 +10,7 @@ import {
   DEFAULT_INSPECT_MAX,
   MAX_INSPECT_ELEMENTS,
   clampInspectMax,
-  fillableFromFacts,
+  inputModeFor,
   roleFromFacts,
   textFromFacts,
   verdictForRecheck,
@@ -122,41 +122,57 @@ describe('textFromFacts', () => {
   });
 });
 
-describe('fillableFromFacts', () => {
-  it('accepts text-like inputs, textareas, selects, and contenteditable', () => {
-    expect(fillableFromFacts(facts({ tag: 'input', type: 'text' }))).toBe(true);
-    expect(fillableFromFacts(facts({ tag: 'input', type: null }))).toBe(true);
-    expect(fillableFromFacts(facts({ tag: 'input', type: 'SEARCH' }))).toBe(true);
-    expect(fillableFromFacts(facts({ tag: 'textarea' }))).toBe(true);
-    expect(fillableFromFacts(facts({ tag: 'select' }))).toBe(true);
-    expect(fillableFromFacts(facts({ tag: 'div', contentEditable: 'true' }))).toBe(true);
+describe('inputModeFor', () => {
+  it('fills text-like inputs, textareas, and contenteditable', () => {
+    expect(inputModeFor(facts({ tag: 'input', type: 'text' }))).toBe('fill');
+    expect(inputModeFor(facts({ tag: 'input', type: null }))).toBe('fill');
+    expect(inputModeFor(facts({ tag: 'input', type: 'SEARCH' }))).toBe('fill');
+    expect(inputModeFor(facts({ tag: 'textarea' }))).toBe('fill');
+    expect(inputModeFor(facts({ tag: 'div', contentEditable: 'true' }))).toBe('fill');
     // An empty contenteditable attribute is valid HTML for "true".
-    expect(fillableFromFacts(facts({ tag: 'div', contentEditable: '' }))).toBe(true);
+    expect(inputModeFor(facts({ tag: 'div', contentEditable: '' }))).toBe('fill');
+  });
+
+  it('routes a <select> to option selection, NOT to fill', () => {
+    // The regression this whole change exists for: a <select> used to be reported
+    // as fillable, and Playwright's `fill` then refused it 5 s later with its own
+    // wording. "Can take text" and "can be filled" are two different answers.
+    expect(inputModeFor(facts({ tag: 'select' }))).toBe('select');
   });
 
   it('refuses buttons, non-text inputs, readonly fields, and disabled fields', () => {
-    expect(fillableFromFacts(facts())).toBe(false);
+    expect(inputModeFor(facts())).toBe('none');
     for (const type of ['button', 'submit', 'reset', 'checkbox', 'radio', 'file', 'image', 'color', 'range']) {
-      expect(fillableFromFacts(facts({ tag: 'input', type }))).toBe(false);
+      expect(inputModeFor(facts({ tag: 'input', type }))).toBe('none');
     }
-    expect(fillableFromFacts(facts({ tag: 'input', type: 'text', readOnly: true }))).toBe(false);
-    expect(fillableFromFacts(facts({ tag: 'textarea', readOnly: true }))).toBe(false);
-    expect(fillableFromFacts(facts({ tag: 'div', contentEditable: 'false' }))).toBe(false);
-    expect(fillableFromFacts(facts({ tag: 'input', type: 'text', disabled: true }))).toBe(false);
+    expect(inputModeFor(facts({ tag: 'input', type: 'text', readOnly: true }))).toBe('none');
+    expect(inputModeFor(facts({ tag: 'textarea', readOnly: true }))).toBe('none');
+    expect(inputModeFor(facts({ tag: 'div', contentEditable: 'false' }))).toBe('none');
+    expect(inputModeFor(facts({ tag: 'input', type: 'text', disabled: true }))).toBe('none');
+    // A disabled dropdown is refused too — the mode is not a licence to act.
+    expect(inputModeFor(facts({ tag: 'select', disabled: true }))).toBe('none');
   });
 });
 
 describe('verdictForRecheck', () => {
-  it('accepts the same live node and reports its fillability', () => {
+  it('accepts the same live node and reports its input mode', () => {
     const v = verdictForRecheck(live(), expected());
     expect(v.ok).toBe(true);
-    if (v.ok) expect(v.editable).toBe(false);
+    if (v.ok) expect(v.mode).toBe('none');
     const fill = verdictForRecheck(
       live({ facts: facts({ tag: 'input', type: 'text', textContent: 'Click me' }) }),
       expected({ role: 'text' }),
     );
     expect(fill.ok).toBe(true);
-    if (fill.ok) expect(fill.editable).toBe(true);
+    if (fill.ok) expect(fill.mode).toBe('fill');
+    // A dropdown survives the recheck with the dropdown mode, so the action
+    // path can choose an option instead of calling fill.
+    const dropdown = verdictForRecheck(
+      live({ facts: facts({ tag: 'select', textContent: 'OneTwo' }) }),
+      expected({ role: 'select', text: 'OneTwo', tag: 'select' }),
+    );
+    expect(dropdown.ok).toBe(true);
+    if (dropdown.ok) expect(dropdown.mode).toBe('select');
   });
 
   it('refuses a detached node', () => {
