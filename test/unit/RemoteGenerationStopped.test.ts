@@ -10,6 +10,10 @@ import { RemoteRequestStore } from '../../src/remote/RemoteRequestStore';
 import type { RichDraftTransport } from '../../src/remote/telegramRichDraft';
 import type { ForgeHostFacade } from '../../src/sidebar/ForgeHostFacade';
 import type {
+  ToolApprovalRequestEvent,
+  ToolApprovalResolvedEvent,
+} from '../../src/sidebar/ToolApprovalService';
+import type {
   UserQuestionAnsweredEvent,
   UserQuestionRequestEvent,
 } from '../../src/sidebar/UserQuestionService';
@@ -66,16 +70,21 @@ const base = {
 interface Fixture {
   channel: FakeRemoteChannel;
   controller: RemoteController;
+  auth: RemoteAuth;
   host: ForgeHostFacade;
   sent: ForgeHostFacade['send'];
   cancel: ForgeHostFacade['cancel'];
   finalizes: Array<{ chatId: string; text: string }>;
   release: () => void;
+  /** Resolves the gated draft open with the id Telegram would have returned. */
+  releaseOpen: (draftId: number) => void;
   /** Resolves when the drain has written this turn's final status. */
   drainDone: Promise<void>;
   /** Raises an ask_user gate for the live turn, as the host question service would. */
   askQuestion: (event: UserQuestionRequestEvent) => void;
   answerQuestion: ReturnType<typeof vi.fn>;
+  /** Raises a tool-approval gate for the live turn, as AgentLoop would. */
+  askApproval: (event: ToolApprovalRequestEvent) => void;
   /** Messages the controller reported through its onError option. */
   errors: string[];
 }
@@ -85,15 +94,24 @@ interface Fixture {
  * rich draft for it, and `host.send` blocks so the turn is still live while the
  * Stop updates arrive.
  */
-async function liveTurnDraft(): Promise<Fixture> {
+async function liveTurnDraft(options: { gateOpen?: boolean } = {}): Promise<Fixture> {
   const state = await store();
   const secrets = new MemorySecrets();
   const auth = new RemoteAuth(secrets as unknown as vscode.SecretStorage);
   const channel = new FakeRemoteChannel('telegram');
 
   const finalizes: Array<{ chatId: string; text: string }> = [];
+  // Optional gate on the draft open, to model an unpair landing *inside* the
+  // await that opens the preview.
+  let releaseOpen!: (draftId: number) => void;
+  const openGate = new Promise<number>((resolve) => (releaseOpen = resolve));
+  let openStarted = false;
   const richDraft: RichDraftTransport = {
-    beginDraft: async () => ({ kind: 'open', draftId: 42 }),
+    beginDraft: async () => {
+      if (!options.gateOpen) return { kind: 'open', draftId: 42 };
+      openStarted = true;
+      return { kind: 'open', draftId: await openGate };
+    },
     updateDraft: async () => undefined,
     finalizeStatus: async (chatId, text) => {
       finalizes.push({ chatId, text });
@@ -108,9 +126,20 @@ async function liveTurnDraft(): Promise<Fixture> {
   const errors: string[] = [];
   let drainDone!: () => void;
   const drainFinished = new Promise<void>((resolve) => (drainDone = resolve));
-  const cancel = vi.fn();
   const answerQuestion = vi.fn(() => true);
   let ask!: (event: UserQuestionRequestEvent) => void;
+  let askApproval!: (event: ToolApprovalRequestEvent) => void;
+  let resolveApprovalSink!: (event: ToolApprovalResolvedEvent) => void;
+  // host.cancel must settle a pending approval the way AgentLoop.cancel does:
+  // cancel -> approvals.cancelConversation -> emitResolved(..., 'cancelled').
+  // Modelling that here is what makes the Phase 1 x Phase 2 seam testable.
+  const pendingApprovals = new Map<string, ToolApprovalRequestEvent>();
+  const cancel = vi.fn(async () => {
+    for (const event of [...pendingApprovals.values()]) {
+      pendingApprovals.delete(event.id);
+      resolveApprovalSink({ ...event, approved: false, reason: 'cancelled' });
+    }
+  });
   const host = {
     createConversation: vi.fn(async () => ({
       id: 'c1',
@@ -124,7 +153,23 @@ async function liveTurnDraft(): Promise<Fixture> {
       return { kind: 'cancelled' as const, finalText: '' };
     }),
     cancel,
-    addApprovalSink: () => ({ dispose: () => undefined }),
+    addApprovalSink: (sink: {
+      requested(event: ToolApprovalRequestEvent): void;
+      resolved(event: ToolApprovalResolvedEvent): void;
+    }) => {
+      askApproval = (event) => {
+        pendingApprovals.set(event.id, event);
+        sink.requested(event);
+      };
+      resolveApprovalSink = (event) => sink.resolved(event);
+      return { dispose: () => undefined };
+    },
+    resolveApproval: vi.fn((id: string, approved: boolean) => {
+      const event = pendingApprovals.get(id);
+      if (!event) return;
+      pendingApprovals.delete(id);
+      resolveApprovalSink({ ...event, approved, reason: 'resolved' as const });
+    }),
     addQuestionSink: (sink: {
       asked(event: UserQuestionRequestEvent): void;
       answered(event: UserQuestionAnsweredEvent): void;
@@ -153,21 +198,30 @@ async function liveTurnDraft(): Promise<Fixture> {
   const code = auth.beginPairing('telegram');
   await channel.emit({ ...base, kind: 'text', providerMessageId: 'pair', text: `/pair ${code}` });
   await channel.emit({ ...base, kind: 'text', providerMessageId: 'go', text: 'hello' });
-  // The drain registers the draft before it starts the turn, so once send has
-  // been called the draft is live and the turn is blocked on the gate.
-  await vi.waitFor(() => expect(host.send).toHaveBeenCalled());
+  if (options.gateOpen) {
+    // The drain is parked inside the draft open: the preview does not exist yet
+    // and the turn has not started.
+    await vi.waitFor(() => expect(openStarted).toBe(true));
+  } else {
+    // The drain registers the draft before it starts the turn, so once send has
+    // been called the draft is live and the turn is blocked on the gate.
+    await vi.waitFor(() => expect(host.send).toHaveBeenCalled());
+  }
 
   return {
     channel,
     controller,
+    auth,
     host,
     sent: host.send,
     cancel,
     finalizes,
     release,
+    releaseOpen,
     drainDone: drainFinished,
     askQuestion: (event) => ask(event),
     answerQuestion,
+    askApproval: (event) => askApproval(event),
     errors,
   };
 }
@@ -341,6 +395,8 @@ describe('remote generation_stopped (Phase 2 native Stop)', () => {
       options: ['debug', 'release'],
       conversationId: 'c1',
     });
+    // Flat choices are offered as Telegram buttons, so the gate reaches the
+    // chat as an inline keyboard rather than as plain text.
     await vi.waitFor(() => expect(f.channel.inlineKeyboards).toHaveLength(1));
 
     await expect(f.channel.emit(stopped(42, 'stop-while-question'))).resolves.toEqual({
@@ -384,6 +440,77 @@ describe('remote generation_stopped (Phase 2 native Stop)', () => {
     await f.controller.stop();
   });
 
+  it('settles a pending approval keyboard when a Stop cancels the turn (Phase 1 x Phase 2)', async () => {
+    const f = await liveTurnDraft();
+
+    // The cross-phase seam: a turn blocked on a tool-approval gate, then
+    // stopped with the native button. AgentLoop.cancel settles the approval as
+    // cancelled, and Phase 1's contract is that the Approve/Deny keyboard is
+    // greyed out rather than deleted — otherwise the chat keeps two live
+    // buttons for a gate that no longer exists, and tapping one later is the
+    // stale-callback path.
+    f.askApproval({
+      id: 'confirm-1',
+      toolName: 'exec_command',
+      detail: 'run a build',
+      dangerous: false,
+      conversationId: 'c1',
+    });
+    // An approval gate is delivered as a `send` carrying a correlationId; the
+    // Telegram transport attaches the Approve/Deny keyboard itself, so the fake
+    // channel records the prompt under `sent`, not `inlineKeyboards`.
+    await vi.waitFor(() =>
+      expect(f.channel.sent.some((m) => m.text.startsWith('Forge approval'))).toBe(true),
+    );
+
+    await expect(f.channel.emit(stopped(42, 'stop-during-approval'))).resolves.toEqual({
+      kind: 'handled',
+    });
+    expect(f.cancel).toHaveBeenCalledWith('c1');
+
+    // Phase 1's disabled-button path, not a retraction: the keyboard message is
+    // resolved as denied, and the outcome sentence names the reason the host
+    // settled it — 'cancelled', not 'resolved'.
+    await vi.waitFor(() => expect(f.channel.resolvedKeyboards).toHaveLength(1));
+    expect(f.channel.resolvedKeyboards[0]).toMatchObject({ chatId: 'chat-1', approved: false });
+    // The keyboard message it greyed out is the one the approval prompt sent.
+    const prompt = f.channel.sent.find((m) => m.text.startsWith('Forge approval'))!;
+    expect(f.channel.resolvedKeyboards[0]?.keyboardMessageIds).toEqual([
+      ...(prompt ? [`sent-${f.channel.sent.indexOf(prompt) + 1}`] : []),
+    ]);
+    expect(f.channel.clearedKeyboards).toEqual([]);
+    await vi.waitFor(() =>
+      expect(f.channel.sent.map((m) => m.text)).toContain('Forge approval denied (cancelled).'),
+    );
+
+    f.release();
+    await f.drainDone;
+    await f.controller.stop();
+  });
+
+  it('leaves no claimable draft once the channel has been forgotten', async () => {
+    const f = await liveTurnDraft();
+
+    // `forgetChannel` is what RemoteRuntime.unpair calls on the controller. It
+    // clears held prompts, and must clear live drafts too: the preview is
+    // Telegram-side and lasts ~30s, so a Stop can outlive the unpair, and the
+    // previous owner's conversation must not be cancellable afterwards.
+    //
+    // Auth is deliberately left intact here, so the auth gate still passes on
+    // the Stop below — the only thing that can make it cancel is a leftover
+    // registry entry, which is the hole this wiring closes.
+    f.controller.forgetChannel('telegram');
+
+    await expect(f.channel.emit(stopped(42, 'stop-after-forget'))).resolves.toEqual({
+      kind: 'handled',
+    });
+    expect(f.cancel).not.toHaveBeenCalled();
+
+    f.release();
+    await f.drainDone;
+    await f.controller.stop();
+  });
+
   it('finalizes a persistent status on cancellation, separate from the answer', async () => {
     const f = await liveTurnDraft();
 
@@ -397,5 +524,44 @@ describe('remote generation_stopped (Phase 2 native Stop)', () => {
     // The answer/notification travels its own path, not the status message.
     expect(f.channel.sent.map((m) => m.text)).not.toContain('Forge: cancelled.');
     await f.controller.stop();
+  });
+
+  it('cannot be cancelled through a draft that opened during an unpair, after re-pairing', async () => {
+    // The deferred-open race, end to end. The drain is parked inside the draft
+    // open when the owner unpairs; the open then returns an id *after* the
+    // registry was cleared. Registering it would hand a live preview to the next
+    // pairing of the same chat, so a Stop pressed on the old preview would cancel
+    // a turn the new owner never opened. `forgetChannel` alone cannot close this:
+    // it runs before the id exists.
+    const f = await liveTurnDraft({ gateOpen: true });
+
+    // Exactly what RemoteRuntime.unpair does.
+    await f.auth.unpair('telegram');
+    f.controller.forgetChannel('telegram');
+
+    // The preview lands after the revocation.
+    f.releaseOpen(42);
+    await vi.waitFor(() => expect(f.sent).toHaveBeenCalled());
+
+    // Re-pair the same private chat: a different pairing, same sender id, so the
+    // ordinary auth gate on the Stop below still passes — only the registry can
+    // decide this one.
+    const code = f.auth.beginPairing('telegram');
+    await f.channel.emit({ ...base, kind: 'text', providerMessageId: 're-pair', text: `/pair ${code}` });
+
+    await expect(f.channel.emit(stopped(42, 'stop-stale-draft'))).resolves.toEqual({
+      kind: 'handled',
+    });
+    // The assertion that matters, and the one that fails without the epoch
+    // guard: the Stop resolved to nothing.
+    expect(f.cancel).not.toHaveBeenCalled();
+
+    // No status send either: the lifecycle never adopted a preview, so there is
+    // nothing to finalize — the answer still travels the outbox on its own.
+    // `drainDone` is deliberately not awaited here; it only fires from a draft
+    // finalization, which this turn no longer has.
+    f.release();
+    await f.controller.stop();
+    expect(f.finalizes).toEqual([]);
   });
 });

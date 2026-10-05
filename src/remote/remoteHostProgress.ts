@@ -1,7 +1,7 @@
 import type { AgentProgressEvent } from '../sidebar/AgentProgress';
 import type { RemoteAgentProgress } from './RemoteAgentProgress';
 import type { RemoteChannel } from './types';
-import { openProgressBubble } from './telegramRichDraft';
+import { openProgressBubble, type DraftEpoch } from './telegramRichDraft';
 
 /**
  * Events held while the opening message is in flight.
@@ -26,6 +26,12 @@ export interface HostProgressOpenerDeps {
    * caller: this module decides nothing about who hears what.
    */
   target: (conversationId: string) => string | undefined;
+  /**
+   * Ownership epoch of the live draft registry, passed to `openProgressBubble`
+   * so a mirrored bubble that finishes opening after an unpair is not
+   * registered. Absent for transports with no rich drafts.
+   */
+  draftEpoch?: DraftEpoch | undefined;
   onError?: (message: string) => void;
 }
 
@@ -106,9 +112,16 @@ export class HostProgressOpener {
         chatId,
         'Forge: working…',
         this.deps.signal,
+        this.deps.draftEpoch,
       );
       // Re-checked after the await: the turn can end, or a chat-originated
       // prompt can claim the conversation, while the send is in flight.
+      if (bubble.kind === 'revoked') {
+        // Unpaired mid-open. Not latched as `declined`: pairing is re-checked on
+        // every event, so a chat paired again later in the turn gets its own
+        // bubble. The preview belongs to nobody and is left to expire.
+        return;
+      }
       if (bubble.kind === 'declined') {
         this.declined.add(conversationId);
         if (bubble.error) {

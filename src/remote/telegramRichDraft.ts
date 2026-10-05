@@ -276,6 +276,14 @@ export function draftChatId(chatId: string): number {
 export type ProgressOpen =
   | { kind: 'plain'; messageId: string }
   | { kind: 'draft'; draftId: number }
+  /**
+   * The pairing that asked for this bubble was revoked while the open was in
+   * flight, so the preview belongs to no turn and nothing is registered. Not
+   * `declined`: that says the transport refused and ends the progress channel
+   * for the turn, while a revoke says nothing about the transport — a chat
+   * paired again later in the same turn can still get its own bubble.
+   */
+  | { kind: 'revoked' }
   | { kind: 'declined'; error?: string | undefined };
 
 /**
@@ -294,6 +302,18 @@ export interface ProgressCapableChannel {
 }
 
 /**
+ * The ownership-epoch slice of `RemoteDraftRegistry` the opener needs.
+ *
+ * Declared structurally, like `ProgressCapableChannel` above: this module must
+ * not come to depend on the registry, which is owned by the controller and the
+ * progress lifecycle.
+ */
+export interface DraftEpoch {
+  epoch(): number;
+  isCurrent(epoch: number): boolean;
+}
+
+/**
  * Open one turn's progress bubble, rich where the transport supports it.
  *
  * Shared by both openers (chat-queued drain and sidebar-started mirror) so the
@@ -305,22 +325,52 @@ export interface ProgressCapableChannel {
  * failure escaping here would abandon a claimed request without settling it —
  * which is worse than having no progress bubble at all. Every transport fault
  * therefore becomes a reported `declined` and the queue keeps running.
+ *
+ * `drafts` is what closes the unpair race. Opening a bubble is an await, and an
+ * unpair during that await has already emptied the registry by the time the open
+ * returns — so registering the returned id would put a live preview back into a
+ * registry a revocation deliberately cleared, and a Stop pressed on it would
+ * cancel the previous owner's turn. The epoch is read *before* the await and
+ * compared after it, and the caller's registration follows that await with no
+ * await of its own, so no revocation can slip between the check and the
+ * registration. It is checked on both exits: adopting a draft id, *and* before
+ * the unsupported-draft fallback, because a plain bubble is a brand-new message
+ * and sending one into a chat that just lost its owner is a worse leak than the
+ * preview it replaces. Enforced here rather than in each caller so the two
+ * openers cannot drift apart, and deliberately not by clearing after the await:
+ * that would leave the lifecycle unable to say which turn owns the preview.
  */
 export async function openProgressBubble(
   channel: ProgressCapableChannel,
   chatId: string,
   text: string,
   signal: AbortSignal,
+  drafts?: DraftEpoch,
 ): Promise<ProgressOpen> {
+  const epoch = drafts?.epoch() ?? 0;
+  // One predicate, checked before anything is adopted. For a plain-only channel
+  // this runs with no await between the read and the check, so the answer is
+  // always current and the existing plain path is unchanged.
+  const revoked = () => drafts !== undefined && !drafts.isCurrent(epoch);
   const rich = channel.richDraft;
   if (rich) {
     const outcome = await rich
       .beginDraft(chatId, text, { signal })
       .catch((err: unknown) => ({ kind: 'unknown' as const, error: describeError(err) }));
-    if (outcome.kind === 'open') return { kind: 'draft', draftId: outcome.draftId };
+    if (outcome.kind === 'open') {
+      // A preview that outlived the pairing which opened it is nobody's to stop.
+      if (revoked()) return { kind: 'revoked' };
+      return { kind: 'draft', draftId: outcome.draftId };
+    }
     if (outcome.kind === 'unknown') return { kind: 'declined', error: outcome.error };
     // 'unsupported': fall through to the plain bubble for this turn.
   }
+  // Checked again before the fallback, not just before adopting a draft. The
+  // draft round trip is itself an await, so a pairing can be revoked between the
+  // refusal and this point — and a plain bubble is a brand-new message, so
+  // sending it here would put a fresh progress line into a chat that no longer
+  // has an owner, which is a worse leak than the preview it replaces.
+  if (revoked()) return { kind: 'revoked' };
   if (!channel.sendProgress) return { kind: 'declined' };
   try {
     const messageId = await channel.sendProgress(chatId, text, { signal });

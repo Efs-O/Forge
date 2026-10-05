@@ -7,7 +7,7 @@ import type { RemoteAuth } from './RemoteAuth';
 import type { RemoteOutboxDelivery } from './RemoteOutboxDelivery';
 import { withConversationIdentity } from './RemoteReplyIdentity';
 import { settleRemoteClaim } from './remoteClaimSettle';
-import { openProgressBubble } from './telegramRichDraft';
+import { openProgressBubble, type DraftEpoch } from './telegramRichDraft';
 import type { RemoteRequestStore } from './RemoteRequestStore';
 import type { RemoteChannel } from './types';
 
@@ -25,6 +25,12 @@ export interface RemoteQueueDrainDeps {
   activeConversations: Set<string>;
   attachmentStore: () => RemoteAttachmentStore | undefined;
   isBusy: (conversationId: string) => boolean;
+  /**
+   * Ownership epoch of the live draft registry, passed to `openProgressBubble`
+   * so a draft that finishes opening after an unpair is not registered. Absent
+   * for transports with no rich drafts.
+   */
+  draftEpoch?: DraftEpoch | undefined;
   onError?: (message: string) => void;
 }
 
@@ -77,8 +83,18 @@ export async function drainRemoteQueue(
       next.chatId,
       'Forge: working…',
       deps.signal,
+      deps.draftEpoch,
     );
-    if (bubble.kind === 'draft') {
+    if (bubble.kind === 'revoked') {
+      // Unpaired while the preview was in flight. The preview is still live on
+      // Telegram's side, but it is registered to nobody, so a Stop pressed on it
+      // resolves to nothing. Only the registration is skipped: the request was
+      // already claimed, and returning here would abandon it unsettled — the
+      // turn continues, and its delivery remains gated by the ordinary auth
+      // checks. No plain bubble is opened as a fallback either, because that
+      // would put two progress messages on one turn beside a preview that may
+      // still be visible.
+    } else if (bubble.kind === 'draft') {
       deps.progress.begin(
         conversationId,
         next.chatId,

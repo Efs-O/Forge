@@ -44,16 +44,20 @@ describe('RemoteDraftRegistry', () => {
     expect(registry.find('chat-3', 3)?.conversationId).toBe('c2');
   });
 
-  it('drops every entry for a chat when that chat is unpaired or reset', () => {
+  it('drops every live draft when the channel is unpaired', () => {
+    // Unpairing revokes the owner for the whole channel, so no live draft on it
+    // is answerable any more. The preview itself is Telegram-side and lasts
+    // ~30s, so an entry left behind is a Stop that could still name the
+    // previous owner's conversation inside that window.
     const registry = new RemoteDraftRegistry();
     registry.register({ chatId: 'chat-1', conversationId: 'c1', draftId: 1 });
-    registry.register({ chatId: 'chat-1', conversationId: 'c2', draftId: 2 });
-    registry.register({ chatId: 'chat-9', conversationId: 'c3', draftId: 3 });
+    registry.register({ chatId: 'chat-2', conversationId: 'c2', draftId: 2 });
 
-    registry.forgetChat('chat-1');
+    registry.forgetAll();
 
-    expect(registry.size).toBe(1);
-    expect(registry.find('chat-9', 3)?.conversationId).toBe('c3');
+    expect(registry.size).toBe(0);
+    expect(registry.find('chat-1', 1)).toBeUndefined();
+    expect(registry.find('chat-2', 2)).toBeUndefined();
   });
 
   it('claims a draft atomically, so a second claim of the same draft finds nothing', () => {
@@ -81,5 +85,24 @@ describe('RemoteDraftRegistry', () => {
     expect(registry.take('chat-2', 4)).toBeUndefined();
     expect(registry.take('chat-1', 5)).toBeUndefined();
     expect(registry.find('chat-1', 4)?.conversationId).toBe('c1');
+  });
+
+  it('advances the epoch only on a revocation, so an open can be checked', () => {
+    // An opener awaits the draft send. If the pairing is revoked during that
+    // await, the returned id must not be registered — the epoch is what lets it
+    // tell that apart from an ordinary open.
+    const registry = new RemoteDraftRegistry();
+    const before = registry.epoch();
+    expect(registry.isCurrent(before)).toBe(true);
+
+    // Ordinary turn bookkeeping is not a revocation: a turn ending or a second
+    // draft replacing the first must not invalidate an open already in flight.
+    registry.register({ chatId: 'chat-1', conversationId: 'c1', draftId: 1 });
+    registry.forgetConversation('c1');
+    expect(registry.isCurrent(before)).toBe(true);
+
+    registry.forgetAll();
+    expect(registry.isCurrent(before)).toBe(false);
+    expect(registry.isCurrent(registry.epoch())).toBe(true);
   });
 });

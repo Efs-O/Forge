@@ -23,6 +23,14 @@ export interface ActiveDraft {
 
 export class RemoteDraftRegistry {
   private readonly byKey = new Map<string, ActiveDraft>();
+  /**
+   * Ownership epoch: advanced every time the pairing that could answer a Stop
+   * is revoked. A draft open is an await, so the pairing in force when the open
+   * started may be gone by the time it returns; the epoch is what lets the
+   * opener tell "this preview is mine to register" from "this preview belongs
+   * to a pairing that has already been revoked."
+   */
+  private generation = 0;
 
   /**
    * One draft per conversation. A turn that somehow opens twice must not leave
@@ -63,11 +71,38 @@ export class RemoteDraftRegistry {
     }
   }
 
-  /** Drops every entry for a chat, used when a chat is unpaired or reset. */
-  forgetChat(chatId: string): void {
-    for (const [key, draft] of this.byKey) {
-      if (draft.chatId === chatId) this.byKey.delete(key);
-    }
+  /**
+   * Drops every entry, used when a channel is unpaired.
+   *
+   * Unpairing revokes the owner for the whole channel, so no live draft on it
+   * is answerable any more. Leaving the entries behind would keep a stale
+   * chat+id pair claimable inside the same window — and a re-paired chat is a
+   * different principal, so an entry inherited across an unpair is not the
+   * user's own Stop.
+   */
+  forgetAll(): void {
+    this.generation += 1;
+    this.byKey.clear();
+  }
+
+  /**
+   * The pairing generation a draft open should be checked against, captured
+   * *before* the open is awaited. Reading it after the await would always match
+   * and prove nothing.
+   */
+  epoch(): number {
+    return this.generation;
+  }
+
+  /**
+   * Whether an epoch captured before an await is still the current one.
+   *
+   * Callers must act on a true answer without awaiting first: the check and the
+   * registration it guards are only atomic with respect to `forgetAll` if no
+   * await separates them.
+   */
+  isCurrent(epoch: number): boolean {
+    return epoch === this.generation;
   }
 
   get size(): number {

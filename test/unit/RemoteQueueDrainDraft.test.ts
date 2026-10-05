@@ -224,6 +224,79 @@ describe('queue drain finalizes the rich draft (Phase 2)', () => {
     expect(order).toEqual(['draft-open', 'finalize']);
   });
 
+  it('opens no plain bubble for a chat whose pairing was revoked during an unsupported draft open', async () => {
+    // The fallback branch of the same race. A draft refusal is not a transport
+    // verdict that survives a revocation: the round trip that produced it is an
+    // await, and a plain bubble is a brand-new message. Sending one after the
+    // unpair would put a fresh progress line into a chat that has no owner —
+    // worse than the preview it replaces, because it does not expire.
+    const state = await store();
+    await state.enqueue(request());
+    const channel = new FakeRemoteChannel('telegram');
+    const drafts = new RemoteDraftRegistry();
+
+    let resolveUnsupported!: () => void;
+    const unsupportedGate = new Promise<void>((resolve) => (resolveUnsupported = resolve));
+    let openStarted = false;
+    channel.richDraft = {
+      beginDraft: async () => {
+        openStarted = true;
+        await unsupportedGate;
+        return { kind: 'unsupported' };
+      },
+      updateDraft: async () => undefined,
+      finalizeStatus: async () => 'final-1',
+    };
+
+    const progress = new RemoteAgentProgress(
+      channel,
+      new AbortController().signal,
+      () => true,
+      3_900,
+      1_000,
+      undefined,
+      undefined,
+      CLOCK_INTERVAL_MS,
+      drafts,
+    );
+    const host = {
+      send: vi.fn(async () => ({ kind: 'completed' as const, finalText: 'done' })),
+      cancel: vi.fn(),
+      status: () => ({
+        activeConversationId: 'c1',
+        conversations: [],
+        requestChains: [],
+        streamingConversationIds: [],
+      }),
+    } as unknown as ForgeHostFacade;
+
+    const drain = drainRemoteQueue('c1', {
+      signal: new AbortController().signal,
+      channel,
+      store: state,
+      auth: { canDeliver: async () => true },
+      host,
+      progress,
+      outbox: { kick: () => undefined },
+      activeConversations: new Set<string>(),
+      attachmentStore: () => undefined,
+      isBusy: () => false,
+      draftEpoch: drafts,
+    } as unknown as RemoteQueueDrainDeps);
+
+    await vi.waitFor(() => expect(openStarted).toBe(true));
+    drafts.forgetAll();
+    resolveUnsupported();
+    await drain;
+
+    // No plain bubble for the revoked chat.
+    expect(channel.progress).toEqual([]);
+    expect(progress.has('c1')).toBe(false);
+    // And the already-claimed request still settled normally.
+    expect(host.send).toHaveBeenCalledTimes(1);
+    expect(state.pendingOutbox()).toHaveLength(1);
+  });
+
   it('keeps the plain bubble path for a channel without rich-draft support', async () => {
     const { channel, finalizes } = await drainWithDraft(
       { kind: 'completed', finalText: 'done' },
@@ -236,5 +309,95 @@ describe('queue drain finalizes the rich draft (Phase 2)', () => {
       messageId: '1',
       text: 'Forge: completed.',
     });
+  });
+
+  it('does not register a draft that finishes opening after the channel was forgotten', async () => {
+    // The unpair race. `openProgressBubble` is an await, and unpair can land
+    // inside it: the registry is already empty when the open returns, so a naive
+    // registration would put a live preview back into a registry a revocation
+    // deliberately cleared — and a Stop pressed on that preview would cancel the
+    // previous owner's turn. Only the registration may be skipped: the request
+    // was already claimed, so abandoning the turn here would leave it unsettled.
+    const state = await store();
+    await state.enqueue(request());
+    const channel = new FakeRemoteChannel('telegram');
+    const drafts = new RemoteDraftRegistry();
+
+    let openDraft!: (draftId: number) => void;
+    const openGate = new Promise<number>((resolve) => (openDraft = resolve));
+    let openStarted = false;
+    let midTurnDraft: { conversationId: string } | undefined;
+    let midTurnAdopted = false;
+    channel.richDraft = {
+      beginDraft: async () => {
+        openStarted = true;
+        return { kind: 'open', draftId: await openGate };
+      },
+      updateDraft: async () => undefined,
+      finalizeStatus: async () => 'final-1',
+    };
+
+    const progress = new RemoteAgentProgress(
+      channel,
+      new AbortController().signal,
+      () => true,
+      3_900,
+      1_000,
+      undefined,
+      undefined,
+      CLOCK_INTERVAL_MS,
+      drafts,
+    );
+    const host = {
+      send: vi.fn(async () => {
+        // Observed mid-turn, before the turn's own cleanup can hide it: under the
+        // bug the revoked preview would be live and adopted here.
+        midTurnDraft = drafts.find('chat-1', 42);
+        midTurnAdopted = progress.has('c1');
+        return { kind: 'completed' as const, finalText: 'done' };
+      }),
+      cancel: vi.fn(),
+      status: () => ({
+        activeConversationId: 'c1',
+        conversations: [],
+        requestChains: [],
+        streamingConversationIds: [],
+      }),
+    } as unknown as ForgeHostFacade;
+
+    const drain = drainRemoteQueue('c1', {
+      signal: new AbortController().signal,
+      channel,
+      store: state,
+      auth: { canDeliver: async () => true },
+      host,
+      progress,
+      outbox: { kick: () => undefined },
+      activeConversations: new Set<string>(),
+      attachmentStore: () => undefined,
+      isBusy: () => false,
+      draftEpoch: drafts,
+    } as unknown as RemoteQueueDrainDeps);
+
+    // The open is in flight — the epoch has been read — and now the pairing
+    // that asked for it is revoked.
+    await vi.waitFor(() => expect(openStarted).toBe(true));
+    drafts.forgetAll();
+    openDraft(42);
+    await drain;
+
+    // The preview returned, but it belongs to nobody: not addressable, and the
+    // progress lifecycle never adopted it either. Asserted mid-turn, because by
+    // the time the drain finishes the turn's own cleanup has cleared both.
+    expect(midTurnDraft).toBeUndefined();
+    expect(midTurnAdopted).toBe(false);
+    expect(drafts.size).toBe(0);
+    expect(drafts.find('chat-1', 42)).toBeUndefined();
+    expect(progress.has('c1')).toBe(false);
+    // No fallback plain bubble beside a preview that may still be visible.
+    expect(channel.progress).toEqual([]);
+    // And the claimed request was still settled normally.
+    expect(host.send).toHaveBeenCalledTimes(1);
+    expect(state.pendingOutbox()).toHaveLength(1);
   });
 });

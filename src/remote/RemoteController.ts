@@ -162,6 +162,7 @@ export class RemoteController {
       signal: this.abort.signal,
       progress: this.progress,
       target: (conversationId) => this.fanout.mirrorTarget(conversationId),
+      draftEpoch: this.drafts,
       ...(options.onError ? { onError: options.onError } : {}),
     });
   }
@@ -192,6 +193,11 @@ export class RemoteController {
   /** Drops held prompts on unpair so a new owner cannot inherit the old owner's queued work. */
   forgetChannel(channel: RemoteInboundEvent['channel']): void {
     this.pending.clearChannel(channel);
+    // A live draft preview outlives the pairing that opened it: the preview is
+    // Telegram-side and lasts ~30s. Clearing the registry means a Stop arriving
+    // during that window after an unpair resolves to nothing instead of to the
+    // previous owner's conversation.
+    this.drafts.forgetAll();
   }
   async stop(): Promise<void> {
     this.accepting = false;
@@ -468,6 +474,7 @@ export class RemoteController {
       activeConversations: this.activeConversations,
       attachmentStore: () => this.options.attachmentStore,
       isBusy: (id) => this.isBusy(id),
+      draftEpoch: this.drafts,
       ...(this.options.onError ? { onError: this.options.onError } : {}),
     })
       .catch((err) =>

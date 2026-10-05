@@ -1,5 +1,75 @@
 # Forge — Recent Changes
 
+## 0.16.86
+
+### A remote turn you can watch and stop from Telegram
+
+- A queued Telegram prompt now reports progress in a native rich-draft preview
+  instead of an edited plain message, and the preview carries Telegram's own
+  Stop button — so stopping a turn from a phone no longer requires typing
+  `/stop`. Pressing it cancels the turn even while the agent is waiting on an
+  `ask_user` question, and a Stop never reads as an answer to one.
+- The preview is re-sent every 20 seconds, because Telegram keeps a draft for
+  only about 30: at the old 60-second clock a quiet turn would have lost both
+  the status line and its Stop button mid-turn. When the turn ends, the preview
+  is replaced by a status message (completed, cancelled, or failed), which is
+  deleted after the same fixed delay the old plain progress bubble always was —
+  the answer itself is always a separate message.
+- A draft the server refused outright falls back to the plain progress bubble.
+  A draft whose response was merely lost does not: a 429, a 5xx or a dropped
+  connection says nothing about support, and falling back there would leave two
+  progress bubbles in one chat. Draft ids are not reused within a session, and a
+  new session starts its ids at a random point rather than at 1, so a Stop aimed
+  at a previous window's preview is very unlikely to name a current turn.
+
+### Clearer answers for the things Forge cannot do yet
+
+- Sending a video, sticker, or any other unsupported attachment now gets an
+  explicit "This media type isn't supported yet" reply that is deleted after the
+  usual reply delay, instead of silence that looked like Forge being offline. A
+  live photo inside a photo album is named as unsupported too, rather than being
+  admitted as an ordinary photo. (Telegram sets `photo` beside `live_photo` for
+  backward compatibility, which is what made the album path accept it.)
+
+### Approval buttons now record the decision
+
+- After an approval is answered, the Approve/Deny keyboard is greyed out in
+  place — "Approved ✓" or "Denied ✗" — rather than removed, so the chat keeps a
+  permanent record of which gate was answered and how. A republished prompt could
+  previously leave a live Approve button behind on the older message.
+
+### Live-session notes from your phone
+
+- `/claude`, `/codex` and `/copilot` send a one-way note to a running Claude
+  Code, Codex, or Copilot session from a bound chat, with no reply expected. A
+  receipt confirms the note was accepted into the delivery queue — not that the
+  session has seen it — and a note that could not be queued is refused with a
+  reason instead of being silently dropped.
+
+### Fixes found while building the above
+
+- Contended access to the shared remote-state file could surface as a raw
+  `EPERM` from a store write instead of waiting: the lock loop retried only
+  `EEXIST`, while the atomic rename a few lines below already retried the
+  `EPERM`/`EBUSY`/`EACCES` set Windows reports for the same contention. Both
+  paths now share one predicate, and the helper has tests for the first time.
+- Unpairing a remote channel left live draft previews claimable for about 30
+  seconds. The preview is Telegram-side and outlives the pairing that opened it,
+  so after a re-pair of the same chat — or any other change of ownership — a
+  Stop pressed on that stale preview resolved to the previous owner's
+  conversation and cancelled it. The sender cleared the ordinary auth gate in
+  that case; it was the leftover draft association that should not have existed.
+  Unpairing now clears live drafts.
+- The same hole through the other door: opening a preview is a network round
+  trip, and an unpair landing inside it cleared the registry *before* the id came
+  back, so the freshly returned preview was registered again afterwards and was
+  stoppable by the next pairing of that chat. The open is now checked against an
+  ownership epoch captured before it, on both the queued-prompt and the
+  mirrored-turn path, and a preview that outlived its pairing belongs to nobody.
+  A chat revoked during that round trip also no longer gets a plain progress
+  bubble as a fallback — unlike a preview, that message would have stayed in the
+  chat indefinitely.
+
 ## 0.16.85
 
 ### One-request compaction

@@ -1,6 +1,7 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import { FakeRemoteChannel } from '../../src/remote/FakeRemoteChannel';
-import { RemoteAgentProgress } from '../../src/remote/RemoteAgentProgress';
+import { RemoteAgentProgress, CLOCK_INTERVAL_MS } from '../../src/remote/RemoteAgentProgress';
+import { RemoteDraftRegistry } from '../../src/remote/RemoteDraftRegistry';
 import { HostProgressOpener } from '../../src/remote/remoteHostProgress';
 import type { AgentProgressEvent } from '../../src/sidebar/AgentProgress';
 
@@ -175,5 +176,152 @@ describe('HostProgressOpener', () => {
     expect(channel.progress.map((sent) => sent.chatId)).toEqual(['chat-1', 'chat-2']);
     expect(channel.edits.at(-1)?.chatId).toBe('chat-2');
     expect(channel.edits.at(-1)?.text).toContain('Running build…');
+  });
+
+  it('does not adopt a mirrored draft that opens after the pairing was revoked', async () => {
+    // The same unpair race on the mirror lane: a sidebar-started turn opens its
+    // preview over an await, and the pairing can be revoked inside it. The
+    // returned id must not reach the registry, or a Stop on that preview would
+    // cancel a turn the revoked owner no longer has any claim on.
+    const channel = new FakeRemoteChannel();
+    const signal = new AbortController().signal;
+    const drafts = new RemoteDraftRegistry();
+    const progress = new RemoteAgentProgress(
+      channel,
+      signal,
+      () => true,
+      3_900,
+      0,
+      undefined,
+      undefined,
+      CLOCK_INTERVAL_MS,
+      drafts,
+    );
+    let openDraft!: (draftId: number) => void;
+    const openGate = new Promise<number>((resolve) => (openDraft = resolve));
+    let openStarted = false;
+    let opens = 0;
+    channel.richDraft = {
+      beginDraft: async () => {
+        opens += 1;
+        if (opens === 1) openStarted = true;
+        // Telegram hands out a fresh id per preview, so a later open is never
+        // the revoked one arriving again.
+        return { kind: 'open', draftId: opens === 1 ? await openGate : 78 };
+      },
+      updateDraft: async () => undefined,
+      finalizeStatus: async () => 'final-1',
+    };
+    const opener = new HostProgressOpener({
+      channel,
+      signal,
+      progress,
+      target: () => 'chat-1',
+      draftEpoch: drafts,
+    });
+
+    opener.handle(status('Running tests…'));
+    await vi.waitFor(() => expect(openStarted).toBe(true));
+    drafts.forgetAll();
+    openDraft(77);
+    await settle();
+
+    expect(drafts.size).toBe(0);
+    expect(drafts.find('chat-1', 77)).toBeUndefined();
+    expect(progress.has('c1')).toBe(false);
+    // Not latched as declined: pairing is re-checked per event, so a chat paired
+    // again later in the turn must still get a bubble of its own.
+    opener.handle(status('Still running…'));
+    await settle();
+    expect(progress.has('c1')).toBe(true);
+    // The revoked id stays unclaimed; the fresh preview is the only live one.
+    expect(drafts.find('chat-1', 77)).toBeUndefined();
+    expect(drafts.find('chat-1', 78)?.conversationId).toBe('c1');
+    expect(drafts.size).toBe(1);
+  });
+
+  it('opens no plain bubble for a revoked pairing whose draft came back unsupported', async () => {
+    // Same fallback branch on the mirror lane. The draft refusal arrives after
+    // the revocation, so falling through to `sendProgress` would create a new
+    // progress message in a chat that no longer has an owner. Unlike a preview,
+    // a plain bubble never expires on its own.
+    const channel = new FakeRemoteChannel();
+    const signal = new AbortController().signal;
+    const drafts = new RemoteDraftRegistry();
+    const progress = new RemoteAgentProgress(
+      channel,
+      signal,
+      () => true,
+      3_900,
+      0,
+      undefined,
+      undefined,
+      CLOCK_INTERVAL_MS,
+      drafts,
+    );
+    let resolveUnsupported!: () => void;
+    const unsupportedGate = new Promise<void>((resolve) => (resolveUnsupported = resolve));
+    let openStarted = false;
+    channel.richDraft = {
+      beginDraft: async () => {
+        openStarted = true;
+        await unsupportedGate;
+        return { kind: 'unsupported' };
+      },
+      updateDraft: async () => undefined,
+      finalizeStatus: async () => 'final-1',
+    };
+    const opener = new HostProgressOpener({
+      channel,
+      signal,
+      progress,
+      target: () => 'chat-1',
+      draftEpoch: drafts,
+    });
+
+    opener.handle(status('Running tests…'));
+    await vi.waitFor(() => expect(openStarted).toBe(true));
+    drafts.forgetAll();
+    resolveUnsupported();
+    await settle();
+
+    expect(channel.progress).toEqual([]);
+    expect(progress.has('c1')).toBe(false);
+    expect(drafts.size).toBe(0);
+  });
+
+  it('still falls back to a plain bubble when the draft is unsupported and nothing was revoked', async () => {
+    // The guard must not swallow the ordinary fallback: with an epoch-aware
+    // opener but no revocation, an unsupported draft still gets exactly one
+    // plain progress bubble.
+    const channel = new FakeRemoteChannel();
+    const signal = new AbortController().signal;
+    const drafts = new RemoteDraftRegistry();
+    const progress = new RemoteAgentProgress(
+      channel,
+      signal,
+      () => true,
+      3_900,
+      0,
+      undefined,
+      undefined,
+      CLOCK_INTERVAL_MS,
+      drafts,
+    );
+    channel.richDraft = {
+      beginDraft: async () => ({ kind: 'unsupported' }),
+      updateDraft: async () => undefined,
+      finalizeStatus: async () => 'final-1',
+    };
+    const opener = new HostProgressOpener({
+      channel,
+      signal,
+      progress,
+      target: () => 'chat-1',
+      draftEpoch: drafts,
+    });
+    opener.handle(status('Running tests…'));
+    await settle();
+    expect(channel.progress).toEqual([{ chatId: 'chat-1', text: 'Forge: working…' }]);
   });
 });
