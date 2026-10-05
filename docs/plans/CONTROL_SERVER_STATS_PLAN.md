@@ -25,6 +25,7 @@ ever. Shape (Zod schema in the new module, exported for tests):
     "requests": 512,
     "compactions": 2,
     "compaction_attempts_failed": 1,
+    "compactions_suppressed": 4,
     "tool_calls": 486,
     "tool_failures": 23,
     "input_tokens": 9120345,
@@ -42,17 +43,20 @@ ever. Shape (Zod schema in the new module, exported for tests):
   - `turns` = `user` rows;
   - `requests` = `usage` rows;
   - `compactions` = `compaction` rows;
-  - `compaction_attempts_failed` = `compaction_attempt` rows not followed by a `compaction` of the same generation;
+  - `compaction_attempts_failed` = `compaction_attempt` rows with `phase: "finished"` and an `outcome` other than
+    `"compacted"` (verified against real logs 2026-10-05: attempts carry `attempt_id` + `phase`
+    `start`/`finished`/`suppressed`, not a generation; today's logs held 9 `compacted`, 8 `failed`, 55 `suppressed`).
+    `suppressed` rows (a compaction that was never tried, e.g. a budget refusal) are reported separately as
+    `compactions_suppressed`, not as failures;
   - `tool_calls` = `tool` rows;
   - `tool_failures` = tool rows whose result is a failure;
   - `turn_errors` = `turn_error` rows.
   Rows are counted only when their `timestamp_ms` (or the cursor-derived position) falls on today.
-- **Tool failure classification:** use the classification the agent loop already uses (`ToolFailureTracker` or the
-  tool result shape it reads), never a new regex. If no reusable classifier exists, extract one in phase 1 and use it
-  from both places. Do not fork the logic.
-- **Deduplication:** reuse `ArchivedSessions`' replay-aware row reader (`readLogRows`, currently private). Extract it
-  into its own module (it is the single owner of "how to read a session log") and make both call it. Add the new row
-  to `docs/OWNERS.md`.
+- **Tool failure classification:** `isFailureResult(content)` from `src/sidebar/toolResultView.ts`, the same
+  function `ToolDispatch` uses (phase 1 finding). Persisted `tool` rows carry the result text in `content`. Never a
+  new regex.
+- **Deduplication:** `readSessionLogRows` in `src/sessions/sessionLogRows.ts` (extracted in phase 1 from
+  `ArchivedSessions`).
 - **`context_limit`:** from the resolved model's per-slot context, via `perSlotContext()` in
   `src/util/contextBudget.ts`. Never raw `num_ctx`. `null` when the model is not in the catalog.
 - **Cost control:** in-memory cache per file keyed by `(size, mtimeMs)`. An unchanged file is not re-read, and a
