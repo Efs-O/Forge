@@ -41,6 +41,8 @@ export interface ExchangeEvent {
   workspace: string;
   /** Conversation id, when one is bound. Absent → sidebar-only, never Telegram (M9). */
   conversation?: string;
+  /** Forge chat that sent a relayed request, used only for the verdict wake. */
+  originConversation?: string;
   /** Sender alias. */
   from: string;
   /** Recipient alias, when present. */
@@ -202,7 +204,11 @@ export function appendEvent(
       const prior = existing.filter((e) => e.exchangeId === event.exchangeId);
       if (prior.length > 0) {
         const current = deriveLatestState(prior) as ExchangeState;
-        if (isTerminal(current)) return false; // orphan: the exchange is already over
+        const isWakeAfterVerdict =
+          event.type === 'wake' &&
+          event.eventId === `wake-${event.exchangeId}` &&
+          event.state === current;
+        if (isTerminal(current) && !isWakeAfterVerdict) return false; // terminal except its wake row
         // A `verdict` event completes a non-observing exchange that honestly
         // stays at `accepted`/`observed` until the agent writes its verdict
         // (F-03). That is an exchange-correlated completion, not a transport

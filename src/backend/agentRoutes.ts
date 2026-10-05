@@ -1,7 +1,6 @@
 import * as fs from 'fs';
 import type * as http from 'http';
 import { randomBytes, timingSafeEqual } from 'crypto';
-import { z } from 'zod';
 import { BUS_ID_PATTERN, ensureBus, writeReply, type BusPaths } from '../agentBus/agentBus';
 import { MAX_INBOUND_CHARS, forgeInboundPrompt } from '../agentBus/busContent';
 import { parseMeshCommand } from '../agentMesh/meshCommands';
@@ -21,6 +20,7 @@ import {
   type AgentRouteFields as Fields,
 } from './agentRouteFields';
 import { getLogger } from '../util/logger';
+import { parseAgentMessageOptions, parseOriginConversation } from './agentMessageOptions';
 
 const log = getLogger();
 
@@ -49,6 +49,7 @@ export interface AgentRoutesDeps {
     from: string,
     to: string,
     text: string,
+    originConversation?: string,
   ) => Promise<
     { ok: true; exchangeId: string; deliveredTo?: string } | { ok: false; error: string }
   >;
@@ -136,33 +137,12 @@ export interface AgentRoutesDeps {
   chatCapBlockers?: (options?: { activate?: boolean }) => string[];
 }
 
-const AgentMessageOptionsSchema = z
-  .object({
-    model: z.string().trim().min(1).optional(),
-    new_chat: z.boolean().optional(),
-    reply_in_chat: z.boolean().optional(),
-    conversation_id: z.string().trim().min(1).max(128).optional(),
-    to_running: z.boolean().optional(),
-  })
-  .refine(
-    (options) =>
-      !(options.conversation_id && options.to_running) &&
-      !(options.new_chat && (options.conversation_id || options.to_running)),
-    'choose one Forge chat target; new_chat cannot be combined with a target',
-  );
-
 function requireText(fields: Fields, max: number): string {
   const text = typeof fields['text'] === 'string' ? fields['text'] : undefined;
   if (!text || !text.trim()) throw new HttpError(400, 'text is required');
   if (text.length > max)
     throw new HttpError(400, `text is ${text.length} chars; the limit is ${max}`);
   return text;
-}
-
-function zodMessage(error: z.ZodError): string {
-  return error.issues
-    .map((issue) => `${issue.path.join('.') || 'message'}: ${issue.message}`)
-    .join('; ');
 }
 
 /**
@@ -332,6 +312,12 @@ export class AgentRoutes {
       // Forge inbox (which would treat a message meant for another agent as a
       // prompt for itself).
       const to = (typeof fields['to'] === 'string' ? fields['to'] : '').trim();
+      if (fields['origin_conversation'] !== undefined && (!to || to.toLowerCase() === 'forge')) {
+        throw new HttpError(
+          400,
+          'origin_conversation requires a relay recipient (to other than forge)',
+        );
+      }
       if (to && to.toLowerCase() !== 'forge') {
         if (fields['conversation_id'] !== undefined || fields['to_running'] !== undefined) {
           throw new HttpError(400, 'Forge chat targeting requires to=forge');
@@ -343,11 +329,15 @@ export class AgentRoutes {
           (typeof fields['priority'] === 'string' ? fields['priority'] : '')
             .trim()
             .toLowerCase() === 'steer';
+        if (isSteer && fields['origin_conversation'] !== undefined) {
+          throw new HttpError(400, 'origin_conversation is only valid for relay sends');
+        }
         const deliver = isSteer && this.deps.steer ? this.deps.steer : this.deps.relay;
         if (!deliver) {
           throw new HttpError(400, `no relay available to deliver to "${to}"`);
         }
-        const result = await deliver(from, to, text);
+        const relayOrigin = isSteer ? undefined : parseOriginConversation(fields);
+        const result = await deliver(from, to, text, relayOrigin);
         if (!result.ok) throw new HttpError(400, result.error);
         return sendJson(res, 202, {
           relayed: true,
@@ -355,9 +345,9 @@ export class AgentRoutes {
           ...(!isSteer
             ? {
                 message:
-                  `Sent as exchange ${result.exchangeId}. The verdict does NOT start a turn in ` +
-                  'your chat by itself. Use `ask_live_session` with `notify_on_answer`, or ' +
-                  '`wait` and then `read-verdict`.',
+                  `Sent as exchange ${result.exchangeId}. The verdict wakes the sending Forge chat ` +
+                  'when it is open (when the send came from a Forge chat). Use `wait` and then ' +
+                  '`read-verdict` for the full response.',
               }
             : {}),
           ...(result.deliveredTo ? { delivered_to: result.deliveredTo } : {}),
@@ -441,33 +431,15 @@ export class AgentRoutes {
   }
 
   private messageOptions(fields: Fields): InboxMessageOptions {
-    const parsed = AgentMessageOptionsSchema.safeParse({
-      model: fields['model'],
-      new_chat: fields['new_chat'],
-      reply_in_chat: fields['reply_in_chat'],
-      conversation_id: fields['conversation_id'],
-      to_running: fields['to_running'],
-    });
-    if (!parsed.success) throw new HttpError(400, zodMessage(parsed.error));
-
+    const parsed = parseAgentMessageOptions(fields);
     const validModels = [...(this.deps.configuredModels?.() ?? [])];
-    if (parsed.data.model && !validModels.includes(parsed.data.model)) {
+    if (parsed.model && !validModels.includes(parsed.model)) {
       throw new HttpError(
         400,
-        `model: unknown model "${parsed.data.model}"; valid models: ${validModels.join(', ') || '(none configured)'}`,
+        `model: unknown model "${parsed.model}"; valid models: ${validModels.join(', ') || '(none configured)'}`,
       );
     }
-    return {
-      ...(parsed.data.model !== undefined ? { model: parsed.data.model } : {}),
-      ...(parsed.data.new_chat !== undefined ? { newChat: parsed.data.new_chat } : {}),
-      ...(parsed.data.reply_in_chat !== undefined
-        ? { replyInChat: parsed.data.reply_in_chat }
-        : {}),
-      ...(parsed.data.conversation_id !== undefined
-        ? { conversationId: parsed.data.conversation_id }
-        : {}),
-      ...(parsed.data.to_running !== undefined ? { toRunning: parsed.data.to_running } : {}),
-    };
+    return parsed;
   }
 
   private authorized(header: string | undefined): boolean {

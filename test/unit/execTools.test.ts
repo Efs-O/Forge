@@ -1,8 +1,9 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
 import { makeExecCommandTool } from '../../src/tools/execTools';
+import * as vscode from 'vscode';
 import {
   makeListExecutionsTool,
   makeMonitorExecutionTool,
@@ -11,6 +12,48 @@ import {
 import { TEST_BASH } from '../support/bash';
 
 describe('exec_command safety policy', () => {
+  it('refuses a model-supplied chat id and gives the Forge-owned chat id to both child paths', async () => {
+    const previousFolders = [...(vscode.workspace.workspaceFolders ?? [])];
+    vscode.workspace.workspaceFolders?.splice(0, Infinity, { uri: vscode.Uri.file(process.cwd()) });
+    try {
+      await expect(makeExecCommandTool().handler({
+        command: process.execPath,
+        args: ['-e', 'process.exit(0)'],
+        env: { FORGE_CONVERSATION_ID: 'model-value' },
+      }, { beforeMutate: () => {}, conversationId: 'real-chat' })).rejects.toThrow(
+        'FORGE_CONVERSATION_ID',
+      );
+
+      const foreground = JSON.parse(await makeExecCommandTool().handler({
+      command: process.execPath,
+      args: ['-e', 'process.stdout.write(process.env.FORGE_CONVERSATION_ID ?? "missing")'],
+      cwd: process.cwd(),
+    }, { beforeMutate: () => {}, conversationId: 'real-chat' }) as string) as { stdout: string };
+      expect(foreground.stdout).toBe('real-chat');
+
+      const { backgroundExecutionManager } = await import('../../src/tools/BackgroundExecutionManager');
+      const spy = vi.spyOn(backgroundExecutionManager, 'start').mockReturnValue({
+      id: 'exec-env', status: 'running', pid: 1, startedAt: Date.now(),
+    });
+      const observe = vi.spyOn(backgroundExecutionManager, 'observe').mockResolvedValue({
+      id: 'exec-env', command: process.execPath, status: 'running', pid: 1,
+      startedAt: Date.now(), finishedAt: undefined, exitCode: null, error: undefined,
+      stdout: '', stderr: '', stdoutStart: 0, stderrStart: 0, stdoutEnd: 0, stderrEnd: 0,
+      stdoutOldest: 0, stderrOldest: 0, stdoutDropped: 0, stderrDropped: 0,
+    });
+      await makeExecCommandTool().handler({
+        command: process.execPath, args: ['-e', ''], background: true,
+      }, { beforeMutate: () => {}, conversationId: 'background-chat' });
+      expect(spy.mock.calls[0]?.[0].env).toMatchObject({
+        FORGE_CONVERSATION_ID: 'background-chat',
+      });
+      spy.mockRestore();
+      observe.mockRestore();
+    } finally {
+      vscode.workspace.workspaceFolders?.splice(0, Infinity, ...previousFolders);
+    }
+  });
+
   it('reads the shell script permission getter on every dispatch', async () => {
     let enabled = false;
     let reads = 0;

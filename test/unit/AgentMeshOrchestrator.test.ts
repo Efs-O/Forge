@@ -334,21 +334,25 @@ describe('orchestrator: host-side relay (M6)', () => {
     (adapter as FakeAdapter & { deliveredTo?: string }).deliveredTo =
       'claude = session 7b39fb6e (joined, workspace n:\\vs code apps\\Forge)';
     const orch = makeOrchestrator({ adapters: { claude: adapter }, owned: new Set(['claude']) });
-    const out = await orch.relay('codex', 'claude', 'pass this on');
+    const out = await orch.relay('codex', 'claude', 'pass this on', 0, 'origin-chat');
     expect('error' in out).toBe(false);
     if (!('error' in out)) {
       expect(out.relayed).toBe(true);
       expect(out.deliveredTo).toBe(
         'claude = session 7b39fb6e (joined, workspace n:\\vs code apps\\Forge)',
       );
-      // Two relay hop events share the exchange id.
-      const hops = board.filter((e) => e.type === 'relay' && e.exchangeId === out.exchangeId);
+      // Two accepted relay hops share the exchange id, after its created row.
+      const hops = board.filter(
+        (e) => e.type === 'relay' && e.state === 'accepted' && e.exchangeId === out.exchangeId,
+      );
       expect(hops).toHaveLength(2);
       // Hop 1: codex → forge (inbound). Hop 2: forge → claude (forward).
       expect(hops[0].from).toBe('codex');
       expect(hops[0].to).toBe('forge');
       expect(hops[1].from).toBe('forge');
       expect(hops[1].to).toBe('claude');
+      expect(board.find((event) => event.exchangeId === out.exchangeId && event.state === 'created'))
+        .toMatchObject({ originConversation: 'origin-chat', from: 'codex', to: 'claude' });
     }
     await flush();
     expect(adapter.sends).toEqual(['pass this on']);

@@ -47,6 +47,7 @@ export interface OrchestratorDeps extends HostLivenessDeps {
     type: string;
     state: ExchangeState;
     detail?: string;
+    originConversation?: string;
   }) => Promise<void> | void;
   knownAliases: () => string[];
   verdictDir?: string;

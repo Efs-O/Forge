@@ -77,6 +77,8 @@ const BLOCKED_ENV_NAMES = new Set<string>([
   'git_dir',
   'git_work_tree',
   'npm_execpath',
+  // Forge owns the originating chat identity and injects it after validation.
+  'forge_conversation_id',
 ]);
 
 /**

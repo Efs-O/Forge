@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 #   forge.sh reply <id> [file]        answer a question Forge is waiting on
 #   forge.sh say <your-name> [--model <name>] [--new] [--reply-in-chat] [--to <conversationId>|--to-running] [file]  message Forge
-#   forge.sh send <your-name> <to> [--to <conversationId>|--to-running] [file]  relay (does not wake the sender), or target a Forge chat when <to> is forge
+#   forge.sh send <your-name> <to> [--to <conversationId>|--to-running] [file]  relay (the verdict wakes the sending Forge chat when it is open), or target a Forge chat when <to> is forge
 #   forge.sh send-file <your-name> --to <conversationId> <workspace-relative-path> [--caption-file <file>]  send a file directly to its Telegram chat (no Forge model turn)
 #   forge.sh read-verdict <your-name> <exchangeId>  read the full retained verdict without consuming it
 #   forge.sh ack-verdict <your-name> <exchangeId>   acknowledge a read verdict and remove its retained copy
@@ -195,7 +195,7 @@ if [ "$VERB" = "send-file" ]; then
   exit 0
 fi
 [ $# -ge 2 ] || usage
-ARG=""; SRC="-"; MODEL=""; NEW_CHAT=""; REPLY_IN_CHAT=""; CONVERSATION_ID=""; TO_RUNNING=""
+ARG=""; SRC="-"; MODEL=""; NEW_CHAT=""; REPLY_IN_CHAT=""; CONVERSATION_ID=""; TO_RUNNING=""; ORIGIN_CONVERSATION=""
 if [ "$VERB" = "say" ]; then
   shift
   while [ $# -gt 0 ]; do
@@ -223,6 +223,12 @@ elif [ "$VERB" = "send" ] || [ "$VERB" = "steer" ]; then
     esac
   done
   case "$TO" in ""|*[!A-Za-z0-9._-]*) echo "forge.sh: bad recipient '$TO'" >&2; exit 2;; esac
+  if [ "$VERB" = "send" ] && [ -n "${FORGE_CONVERSATION_ID:-}" ]; then
+    case "$FORGE_CONVERSATION_ID" in
+      *[!A-Za-z0-9._-]*) echo "forge.sh: invalid FORGE_CONVERSATION_ID; origin_conversation was not forwarded" >&2;;
+      *) ORIGIN_CONVERSATION="$FORGE_CONVERSATION_ID";;
+    esac
+  fi
 elif [ $# -ge 2 ]; then
   ARG="$2"
   [ $# -ge 3 ] && SRC="$3"
@@ -238,7 +244,7 @@ case "$VERB" in
   send)  case "$ARG" in ""|*[!A-Za-z0-9._-]*) echo "forge.sh: a name is letters, digits, . _ - only" >&2; exit 2;; esac
          case "$CONVERSATION_ID" in ""|*[!A-Za-z0-9._-]*) [ -z "$CONVERSATION_ID" ] || { echo "forge.sh: bad conversation id '$CONVERSATION_ID'" >&2; exit 2; };; esac
          [ -z "$CONVERSATION_ID" ] || [ -z "$TO_RUNNING" ] || usage
-         ROUTE=message; QUERY="from=$ARG&to=$TO"; [ -n "$CONVERSATION_ID" ] && QUERY="$QUERY&conversation_id=$CONVERSATION_ID"; [ -n "$TO_RUNNING" ] && QUERY="$QUERY&to_running=true" ;;
+         ROUTE=message; QUERY="from=$ARG&to=$TO"; [ -n "$CONVERSATION_ID" ] && QUERY="$QUERY&conversation_id=$CONVERSATION_ID"; [ -n "$TO_RUNNING" ] && QUERY="$QUERY&to_running=true"; [ -n "$ORIGIN_CONVERSATION" ] && [ "$TO" != "forge" ] && QUERY="$QUERY&origin_conversation=$ORIGIN_CONVERSATION" ;;
   steer) case "$ARG" in ""|*[!A-Za-z0-9._-]*) echo "forge.sh: a name is letters, digits, . _ - only" >&2; exit 2;; esac
          ROUTE=message; QUERY="from=$ARG&to=$TO&priority=steer" ;;
   cancel) case "$ARG" in ""|*[!A-Za-z0-9._-]*) echo "forge.sh: a name is letters, digits, . _ - only" >&2; exit 2;; esac

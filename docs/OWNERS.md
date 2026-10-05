@@ -267,6 +267,7 @@ overlaps with an existing owner, extend the owner instead.
 | Localhost model-control HTTP API                  | `src/backend/ControlServer.ts`         |
 | Control-server load/capacity/unload               | `src/backend/ControlModelLifecycle.ts` |
 | Control-server HTTP/serialization helpers         | `src/backend/controlHttp.ts`           |
+| `/agent/message` option and origin-chat validation | `src/backend/agentMessageOptions.ts`    |
 | `/models` catalog contract + availability         | `src/backend/ControlModelCatalog.ts`   |
 | Control-server discovery records (LOCALAPPDATA)   | `src/backend/ControlServerRegistry.ts` |
 | Machine-wide llama.cpp runtime discovery + leases | `src/backend/SharedRuntimeRegistry.ts` |

@@ -91,10 +91,10 @@ describe('CLIENT_SCRIPT usage block', () => {
 });
 
 describe('forge.sh source usage block', () => {
-  it('warns that a relay send does not wake the sending chat', () => {
+  it('says a verdict wakes the sending Forge chat when it is open', () => {
     const source = fs.readFileSync(path.resolve(process.cwd(), 'src/agentBus/forge.sh'), 'utf8');
     const sendLine = source.split(/\r?\n/).find((line) => line.includes('forge.sh send '));
-    expect(sendLine).toContain('does not wake the sender');
+    expect(sendLine).toContain('verdict wakes the sending Forge chat when it is open');
   });
 });
 

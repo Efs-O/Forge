@@ -186,6 +186,10 @@ export function makeExecCommandTool(
       if (!envCheck.ok) {
         throw new ExecCommandError('policy_refusal', command, envCheck.error ?? 'invalid env');
       }
+      const childEnv = {
+        ...envCheck.env,
+        ...(context?.conversationId ? { FORGE_CONVERSATION_ID: context.conversationId } : {}),
+      };
       try {
         const denied = checkDenyList(command, cmdArgs, getBuiltinDenyList());
         if (denied) {
@@ -235,7 +239,7 @@ export function makeExecCommandTool(
             args: spawned.args,
             cwd,
             timeoutMs: requestedTimeoutMs,
-            env: envCheck.env,
+            env: childEnv,
             ...(notifyOnExit ? { notifyConversationId: context!.conversationId! } : {}),
           });
           // spawn reports a failed launch on the next tick, so observing
@@ -249,7 +253,7 @@ export function makeExecCommandTool(
           spawned.args,
           cwd,
           timeoutMs,
-          envCheck.env,
+          childEnv,
           context?.abortSignal,
         );
         return formatExecCommandOutput(command, result, outputOptions);
