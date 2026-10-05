@@ -7,7 +7,12 @@ import type { CommandCleanupScheduler } from './CommandCleanupScheduler';
 import type { RemoteAuth } from './RemoteAuth';
 import type { RemoteRequestStore } from './RemoteRequestStore';
 import type { RemoteChannel, RemoteInboundDisposition, RemoteInboundEvent } from './types';
-import { renderQuestionAsText } from '../util/questionAnswers';
+import {
+  formatGroupAnswer,
+  renderQuestionAsText,
+  resolveAnswerText,
+  type QuestionGroup,
+} from '../util/questionAnswers';
 import { telegramQuestionButtons } from './TelegramQuestionButtons';
 
 interface RemoteQuestionEntry {
@@ -19,6 +24,17 @@ interface RemoteQuestionEntry {
   textPromptIds?: string[];
   /** False until the chat has been shown it; a locked chat is shown it on unlock. */
   delivered: boolean;
+  /**
+   * Sub-questions asked one keyboard at a time (Telegram only). A keyboard
+   * answers one list, so several lists become several messages in turn.
+   */
+  steps?: readonly QuestionGroup[];
+  /** Answers given so far, one per step; its length is the current step. */
+  picks?: string[];
+  /** The step whose keyboard is on screen, so a step is never shown twice. */
+  shownStep?: number;
+  /** Serialises step keyboards: two quick replies must not race two sends. */
+  sending?: Promise<void>;
 }
 
 type QuestionActionEvent = Extract<RemoteInboundEvent, { kind: 'question_action' }>;
@@ -88,6 +104,11 @@ export class RemoteQuestionBridge {
   answerText(chatId: string, text: string): boolean {
     for (const [id, entry] of this.questions) {
       if (entry.chatId !== chatId) continue;
+      if (entry.steps) {
+        // Typed text answers the sub-question on screen; a bare number picks its option.
+        const group = entry.steps[entry.picks?.length ?? 0];
+        return this.takeAnswer(entry, resolveAnswerText(text, group?.options));
+      }
       const accepted = this.host.answerQuestion(id, text);
       if (accepted) {
         this.questions.delete(id);
@@ -107,30 +128,77 @@ export class RemoteQuestionBridge {
     if (!pending || pending.chatId !== event.chatId) {
       return { kind: 'rejected', reason: 'question is stale or not owned by this chat' };
     }
-    if (pending.messageId && pending.messageId !== event.messageId) {
+    // A stepped question clears each keyboard before the next one is sent, so
+    // an absent message id there means "between steps", not "not yet known".
+    if ((pending.messageId || pending.steps) && pending.messageId !== event.messageId) {
       return { kind: 'rejected', reason: 'question button is stale' };
     }
-    if (!pending.event.options?.length || pending.event.questions?.length) {
+    const options = this.currentOptions(pending);
+    if (!options) {
       return { kind: 'rejected', reason: 'question does not have a Telegram choice list' };
     }
     if (event.action === 'other') {
       if (pending.freeTextMode) return { kind: 'handled' };
       pending.freeTextMode = true;
       await this.clearKeyboard(pending);
-      const ids = await this.sendNotice(pending.chatId, 'Forge: send your answer as text.');
+      const step = pending.steps ? ` to question ${(pending.picks?.length ?? 0) + 1}` : '';
+      const ids = await this.sendNotice(pending.chatId, `Forge: send your answer${step} as text.`);
       if (ids?.length) pending.textPromptIds = ids;
       return { kind: 'handled' };
     }
     if (event.choice === undefined) {
       return { kind: 'rejected', reason: 'question choice is missing' };
     }
-    const answer = pending.event.options[event.choice];
+    const answer = options[event.choice];
     if (answer === undefined) return { kind: 'rejected', reason: 'question choice is invalid' };
+    if (pending.steps) {
+      // Cleared before the next step is sent, so a double tap finds no keyboard.
+      await this.clearKeyboard(pending);
+      if (!this.takeAnswer(pending, answer)) {
+        return { kind: 'rejected', reason: 'question is already settled' };
+      }
+      await pending.sending;
+      return { kind: 'handled' };
+    }
     const accepted = this.host.answerQuestion(event.questionId, answer);
     if (!accepted) return { kind: 'rejected', reason: 'question is already settled' };
     this.questions.delete(event.questionId);
     await this.clearKeyboard(pending);
     return { kind: 'handled' };
+  }
+
+  /** The choice list on screen: the flat options, or the current step's. */
+  private currentOptions(pending: RemoteQuestionEntry): readonly string[] | undefined {
+    if (pending.steps) return pending.steps[pending.picks?.length ?? 0]?.options;
+    if (pending.event.questions?.length) return undefined;
+    return pending.event.options?.length ? pending.event.options : undefined;
+  }
+
+  /**
+   * Records one step's answer, then shows the next step or settles the whole
+   * question with the same labelled lines the sidebar dialog sends.
+   */
+  private takeAnswer(pending: RemoteQuestionEntry, answer: string): boolean {
+    const steps = pending.steps!;
+    const picks = [...(pending.picks ?? []), answer];
+    if (picks.length >= steps.length) {
+      return this.host.answerQuestion(pending.event.id, formatGroupAnswer(steps, picks));
+    }
+    pending.picks = picks;
+    pending.freeTextMode = false;
+    void this.deleteTextPrompt(pending);
+    void this.showStep(pending);
+    return true;
+  }
+
+  private showStep(pending: RemoteQuestionEntry): Promise<void> {
+    pending.sending = (pending.sending ?? Promise.resolve()).then(async () => {
+      const step = pending.picks?.length ?? 0;
+      if (this.questions.get(pending.event.id) !== pending || pending.shownStep === step) return;
+      await this.clearKeyboard(pending);
+      await this.sendKeyboard(pending);
+    });
+    return pending.sending;
   }
 
   private onAsked(event: UserQuestionRequestEvent): void {
@@ -139,7 +207,14 @@ export class RemoteQuestionBridge {
     if (!event.conversationId) return;
     const chatId = this.chatFor(event.conversationId);
     if (!chatId) return;
-    this.questions.set(event.id, { chatId, event, freeTextMode: false, delivered: false });
+    const steps = this.channel.name === 'telegram' ? event.questions : undefined;
+    this.questions.set(event.id, {
+      chatId,
+      event,
+      freeTextMode: false,
+      delivered: false,
+      ...(steps?.length ? { steps } : {}),
+    });
     void this.publish(event.id);
   }
 
@@ -183,6 +258,10 @@ export class RemoteQuestionBridge {
     if (!(await this.auth.canDeliver(this.channel.name, pending.chatId))) return;
     // A sidebar answer may have won while the session check was awaiting.
     if (this.questions.get(id) !== pending) return;
+    if (this.channel.name === 'telegram' && this.currentOptions(pending)) {
+      await this.showStep(pending);
+      return;
+    }
     // Rendered by the shared owner so a "1 2" typed here means exactly what
     // it means clicked in the sidebar -- the numbering is the contract.
     const body = renderQuestionAsText(
@@ -190,32 +269,6 @@ export class RemoteQuestionBridge {
       pending.event.options,
       pending.event.questions,
     );
-    const flatChoices = pending.event.options?.length && !pending.event.questions?.length;
-    if (this.channel.name === 'telegram' && flatChoices) {
-      const sendInlineKeyboard = this.channel.sendInlineKeyboard;
-      if (!sendInlineKeyboard) {
-        await this.failDelivery(pending, 'Telegram inline choices are unavailable.');
-        return;
-      }
-      try {
-        const messageId = await sendInlineKeyboard.call(
-          this.channel,
-          pending.chatId,
-          `Forge asks: ${body}`.slice(0, this.maxMessageChars),
-          telegramQuestionButtons(pending.event.id, pending.event.options!),
-          { signal: this.signal },
-        );
-        pending.delivered = true;
-        if (this.questions.get(id) === pending) {
-          if (messageId) pending.messageId = messageId;
-        } else if (messageId) {
-          await this.clearKeyboard({ ...pending, messageId });
-        }
-      } catch (err) {
-        await this.failDelivery(pending, err instanceof Error ? err.message : String(err));
-      }
-      return;
-    }
     try {
       await this.channel.send(
         pending.chatId,
@@ -227,6 +280,38 @@ export class RemoteQuestionBridge {
       this.onError?.(
         `Forge remote question delivery failed: ${err instanceof Error ? err.message : String(err)}`,
       );
+    }
+  }
+
+  /** Sends the keyboard for the flat choice list, or for the current step. */
+  private async sendKeyboard(pending: RemoteQuestionEntry): Promise<void> {
+    const sendInlineKeyboard = this.channel.sendInlineKeyboard;
+    if (!sendInlineKeyboard) {
+      await this.failDelivery(pending, 'Telegram inline choices are unavailable.');
+      return;
+    }
+    const step = pending.picks?.length ?? 0;
+    const group = pending.steps?.[step];
+    const text = group
+      ? `Forge asks: ${pending.event.prompt}\n\nQuestion ${step + 1} of ${pending.steps!.length}: ${group.prompt}`
+      : `Forge asks: ${renderQuestionAsText(pending.event.prompt, pending.event.options)}`;
+    try {
+      const messageId = await sendInlineKeyboard.call(
+        this.channel,
+        pending.chatId,
+        text.slice(0, this.maxMessageChars),
+        telegramQuestionButtons(pending.event.id, group?.options ?? pending.event.options!),
+        { signal: this.signal },
+      );
+      pending.delivered = true;
+      pending.shownStep = step;
+      if (this.questions.get(pending.event.id) === pending) {
+        if (messageId) pending.messageId = messageId;
+      } else if (messageId) {
+        await this.clearKeyboard({ ...pending, messageId });
+      }
+    } catch (err) {
+      await this.failDelivery(pending, err instanceof Error ? err.message : String(err));
     }
   }
 

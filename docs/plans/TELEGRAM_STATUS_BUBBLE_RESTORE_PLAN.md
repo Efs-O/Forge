@@ -34,7 +34,7 @@ nicely").
 - **Words-only draft.** `RemoteAgentProgress` opens a separate draft lazily on
   the turn's first `commentary` event. It carries the model's words only,
   append-only, reusing one `draft_id`, through `RemoteDraftLane` (1 s
-  coalesce; heartbeat `min(clock, 20 s)` once open). It is registered in
+  coalesce, no keep-alive -- see "Follow-up" below). It is registered in
   `RemoteDraftRegistry` so its native Stop cancels the turn, with the epoch
   check against unpair races. Milestones never touch it. On finish it is left
   to expire. An `unsupported`/`unknown` open turns drafts off for that turn;
@@ -42,6 +42,20 @@ nicely").
 - **No duplicate after Stop.** `finalAnswer` in `turnMirrorWiring` returns
   nothing when the last assistant message carries `tool_calls`: that round was
   already narrated live, and the turn has no final answer.
+
+## Follow-up from the live test (2026-10-05)
+
+- **Words replayed during a slow step.** The draft's 20 s heartbeat re-sent
+  unchanged words, and Telegram re-types a draft on every send: during a 59 s
+  cold prefill (`load_tool_group` changes the tool list) "I'll create a small
+  markdown file…" was typed out again twice. The heartbeat is gone. A preview
+  quiet for `DRAFT_LIFETIME_MS` (25 s) is let go, and the next words open a new
+  draft holding only themselves, registered for Stop in place of the old one.
+- **Multi-question `ask_user` arrived as text.** Telegram buttons were offered
+  only for a flat choice list. `RemoteQuestionBridge` now asks Telegram
+  sub-questions one keyboard at a time ("Question k of n"), each with its own
+  Other…; typed text answers the sub-question on screen. The settled answer is
+  `formatGroupAnswer`'s labelled lines, the same the sidebar dialog sends.
 
 ## Investigated, not a Forge defect
 
@@ -56,6 +70,8 @@ nicely").
 
 - The words draft still expires about 30 s after the model stops talking, with
   Telegram's own animation. The answer always arrives as a normal message.
+- With no keep-alive, the draft's native Stop button goes with it during a
+  quiet stretch; `/stop` works throughout, and the next words bring it back.
 - Tool names still appear in the plain bubble's single status line.
 
 ## State × lifecycle ledger
@@ -76,5 +92,9 @@ unpair. Nothing is written to disk or config.
       not register it (`RemoteGenerationStopped`).
 - [x] A stopped turn with only narrated tool rounds sends no answer
       (`RemoteOutboundActivity`).
+- [x] Unchanged words are never re-sent; a quiet preview is replaced by a new
+      one with only the new words (`RemoteAgentProgressDraft`).
+- [x] Telegram sub-questions arrive as one keyboard each and settle as labelled
+      lines; a stale first-step tap is rejected (`UserQuestion`).
 - [ ] Live check on Telegram: the status never animates, words stream, no
       duplicate after Stop.

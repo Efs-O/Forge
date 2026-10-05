@@ -1,7 +1,7 @@
 import type { AgentProgressEvent } from '../sidebar/AgentProgress';
 import type { RemoteChannel } from './types';
 import { QUEUED_ACK_DELETE_SECONDS } from './TelegramAcknowledgement';
-import { DRAFT_HEARTBEAT_MS } from './telegramRichDraft';
+import { DRAFT_LIFETIME_MS } from './telegramRichDraft';
 import type { RemoteDraftRegistry } from './RemoteDraftRegistry';
 import { renderRemoteProgress } from './remoteProgressRender';
 import { keepTail, sanitize, sanitizeToolName } from './remoteProgressText';
@@ -170,7 +170,7 @@ export class RemoteAgentProgress {
         canDeliver: () => this.safeCanDeliver(chatId),
         maxChars: () => this.maxMessageChars,
         streamIntervalMs: Math.min(this.editIntervalMs, DRAFT_STREAM_INTERVAL_MS),
-        heartbeatMs: Math.min(this.clockIntervalMs, DRAFT_HEARTBEAT_MS),
+        lifetimeMs: DRAFT_LIFETIME_MS,
         report: (err) => this.report(err),
       });
     }
@@ -313,8 +313,8 @@ export class RemoteAgentProgress {
       if (state.words?.opened) this.drafts?.forgetConversation(conversationId);
     }
     if (this.signal.aborted) return;
-    // The words preview is left to expire on Telegram's side (~30 s with no
-    // heartbeat); the answer and every narration are already real messages.
+    // The words preview is left to expire on Telegram's side (~30 s without
+    // an update); the answer and every narration are already real messages.
     if (!this.channel.editMessage) return;
     if (!(await this.safeCanDeliver(state.chatId))) return;
     await this.channel

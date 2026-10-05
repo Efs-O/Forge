@@ -89,7 +89,8 @@ export interface WordsDraftDeps {
   canDeliver: () => Promise<boolean>;
   maxChars: () => number;
   streamIntervalMs: number;
-  heartbeatMs: number;
+  /** After this long without a send the preview is treated as gone. */
+  lifetimeMs: number;
   report: (err: unknown) => void;
 }
 
@@ -101,6 +102,12 @@ export interface WordsDraftDeps {
  * what made "Forge: working…" crawl, so the status stays in the plain bubble
  * and this owns nothing else. Every update reuses one draft id so Telegram
  * animates only the appended words; Telegram's Stop update names that id.
+ *
+ * There is no keep-alive. Re-sending unchanged words to hold a preview open
+ * made Telegram re-type them on every beat, so a slow step replayed the same
+ * sentence twice (2026-10-05, a 59 s cold prefill after `load_tool_group`).
+ * A preview quiet past its lifetime is let go, and the next words open a new
+ * one holding only themselves.
  */
 export class RemoteWordsDraft {
   /** `off` once the transport refused a draft: the turn streams nothing more. */
@@ -111,7 +118,8 @@ export class RemoteWordsDraft {
   /** What the preview last showed. */
   private shown = '';
   private timer: ReturnType<typeof setTimeout> | undefined;
-  private heartbeat: ReturnType<typeof setInterval> | undefined;
+  /** When the open preview was last sent, to tell when Telegram dropped it. */
+  private sentAt = 0;
   private readonly lane: RemoteDraftLane;
 
   constructor(private readonly deps: WordsDraftDeps) {
@@ -126,6 +134,13 @@ export class RemoteWordsDraft {
   /** Adds streamed words; false once this turn streams nothing more. */
   append(delta: string): boolean {
     if (this.phase === 'off') return false;
+    if (this.phase === 'open' && Date.now() - this.sentAt > this.deps.lifetimeMs) {
+      // The old preview is gone; starting from its words would re-type them.
+      this.phase = 'none';
+      this.draftId = undefined;
+      this.words = '';
+      this.shown = '';
+    }
     const next = appendStream(this.words, delta);
     if (next === this.words || this.timer) {
       this.words = next;
@@ -142,9 +157,7 @@ export class RemoteWordsDraft {
   /** Stops the timers now; settles when no send is in flight. */
   close(): Promise<void> {
     if (this.timer) clearTimeout(this.timer);
-    if (this.heartbeat) clearInterval(this.heartbeat);
     this.timer = undefined;
-    this.heartbeat = undefined;
     return this.lane.idle();
   }
 
@@ -166,6 +179,7 @@ export class RemoteWordsDraft {
     if (this.draftId !== undefined) {
       await rich.updateDraft(chatId, this.draftId, text, { signal });
       this.shown = text;
+      this.sentAt = Date.now();
       return;
     }
     // Read before the await: an unpair during the open must not leave this
@@ -185,12 +199,11 @@ export class RemoteWordsDraft {
     this.phase = 'open';
     this.draftId = outcome.draftId;
     this.shown = text;
+    this.sentAt = Date.now();
     if (!this.deps.live()) return;
+    // Replaces the previous preview's registration, if this turn had one.
     if (epoch === undefined || drafts?.isCurrent(epoch)) {
       drafts?.register({ chatId, conversationId, draftId: outcome.draftId });
     }
-    // A preview expires after ~30 s without an update, taking its Stop button
-    // with it, so a quiet stretch of the turn re-sends the same words.
-    this.heartbeat = setInterval(() => this.lane.request(), this.deps.heartbeatMs);
   }
 }

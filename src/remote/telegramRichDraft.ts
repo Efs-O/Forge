@@ -41,14 +41,13 @@ const MIN_DRAFT_ID = 1;
 const DRAFT_ID_CEILING = 2 ** 45;
 
 /**
- * How often a draft must be re-sent to stay alive.
+ * How long a draft is trusted to still be on screen without a send.
  *
- * Telegram's preview expires after roughly 30 seconds of no draft for that id,
- * while the progress clock line only needs refreshing every 60. A quiet turn
- * would therefore lose both the preview and its Stop button mid-turn, so the
- * draft lane keeps its own, shorter heartbeat.
+ * Telegram's preview expires after roughly 30 seconds of no draft for that id.
+ * It is not kept alive -- a re-send re-types the same words -- so after this
+ * long the words lane opens a fresh preview for the next words instead.
  */
-export const DRAFT_HEARTBEAT_MS = 20_000;
+export const DRAFT_LIFETIME_MS = 25_000;
 
 /**
  * Whether a failed draft call means "this transport cannot do rich drafts" or

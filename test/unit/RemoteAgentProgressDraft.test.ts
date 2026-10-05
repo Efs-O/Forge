@@ -24,10 +24,12 @@ interface DraftCall {
   text: string;
 }
 
-function draftTransport(open: () => Promise<DraftOpenOutcome> = async () => ({
-  kind: 'open',
-  draftId: 42,
-})) {
+function draftTransport(
+  open: () => Promise<DraftOpenOutcome> = async () => ({
+    kind: 'open',
+    draftId: 42,
+  }),
+) {
   const opens: string[] = [];
   const updates: DraftCall[] = [];
   const richDraft: RichDraftTransport = {
@@ -201,18 +203,30 @@ describe('RemoteAgentProgress: plain status bubble plus a words-only preview', (
     expect(channel.edits.at(-1)?.text).toContain('Running read_file…');
   });
 
-  it('keeps an open preview alive on the heartbeat with the same words', async () => {
+  it('never re-sends unchanged words, and opens a fresh preview after a quiet stretch', async () => {
     vi.useFakeTimers();
-    const { richDraft, updates } = draftTransport();
-    const progress = progressFor(channelWithDrafts(richDraft));
+    let nextId = 41;
+    const { richDraft, opens, updates } = draftTransport(async () => ({
+      kind: 'open',
+      draftId: ++nextId,
+    }));
+    const drafts = new RemoteDraftRegistry();
+    const progress = progressFor(channelWithDrafts(richDraft), { drafts });
     progress.begin('c1', 'chat-a', 'm1');
 
     progress.handle({ conversationId: 'c1', kind: 'commentary', text: 'Thinking it over.' });
     await vi.advanceTimersByTimeAsync(1_000);
-    // A preview lives ~30 s on Telegram's side; a quiet stretch must re-send.
-    await vi.advanceTimersByTimeAsync(45_000);
-    expect(updates.length).toBeGreaterThanOrEqual(2);
-    expect(updates.every((u) => u.text === 'Thinking it over.')).toBe(true);
+    // A re-send re-types the same words on the phone (the 2026-10-05 replay).
+    await vi.advanceTimersByTimeAsync(60_000);
+    expect(opens).toEqual(['Thinking it over.']);
+    expect(updates).toEqual([]);
+
+    // Telegram dropped that preview; the next words stand alone in a new one.
+    progress.handle({ conversationId: 'c1', kind: 'commentary', text: 'Now writing.' });
+    await vi.advanceTimersByTimeAsync(1_000);
+    expect(opens).toEqual(['Thinking it over.', 'Now writing.']);
+    expect(drafts.size).toBe(1);
+    await progress.dispose();
   });
 
   it('closes the turn on the bubble, forgets the preview and stops its timers', async () => {

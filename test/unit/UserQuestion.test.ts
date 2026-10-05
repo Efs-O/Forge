@@ -28,7 +28,6 @@ function currentInput() {
 }
 
 describe('UserQuestionService', () => {
-
   it('does not raise the VS Code box when a sink presents the question locally', async () => {
     const service = new UserQuestionService();
     const asked: string[] = [];
@@ -438,6 +437,52 @@ describe('RemoteQuestionBridge', () => {
     expect(text).toContain('or send free text instead');
   });
 
+  it('asks Telegram sub-questions one keyboard at a time and settles with labelled lines', async () => {
+    const { bridge, channel, service } = bridgeRig({ channelName: 'telegram' });
+    const asked = vi.fn();
+    service.addSink({ asked, answered: () => undefined });
+    const pending = service.ask({
+      prompt: 'Two decisions:',
+      questions: [
+        { prompt: 'Version', options: ['bump', 'keep'] },
+        { prompt: 'Install', options: ['open', 'skip'] },
+        { prompt: 'Notes', options: ['short', 'long'] },
+      ],
+      conversationId: 'c1',
+    });
+    await vi.waitFor(() => expect(channel.inlineKeyboards).toHaveLength(1));
+    const questionId = asked.mock.calls[0]?.[0].id as string;
+    expect(channel.inlineKeyboards[0]?.text).toContain('Question 1 of 3: Version');
+    expect(channel.inlineKeyboards[0]?.buttons.flat().map((b) => b.text)).toEqual([
+      'bump',
+      'keep',
+      'Other…',
+    ]);
+
+    await expect(
+      bridge.handleAction(questionAction(questionId, 'select', 'keyboard-1', 1)),
+    ).resolves.toEqual({ kind: 'handled' });
+    expect(channel.inlineKeyboards).toHaveLength(2);
+    expect(channel.inlineKeyboards[1]?.text).toContain('Question 2 of 3: Install');
+    // The first keyboard is gone, so a second tap on it is stale, not step 2's answer.
+    await expect(
+      bridge.handleAction(questionAction(questionId, 'select', 'keyboard-1', 0)),
+    ).resolves.toEqual({ kind: 'rejected', reason: 'question button is stale' });
+
+    // Typed text answers the step on screen; a bare number picks its option.
+    expect(bridge.answerText('chat-1', '2')).toBe(true);
+    await vi.waitFor(() => expect(channel.inlineKeyboards).toHaveLength(3));
+    expect(channel.inlineKeyboards[2]?.text).toContain('Question 3 of 3: Notes');
+
+    await expect(
+      bridge.handleAction(questionAction(questionId, 'other', 'keyboard-3')),
+    ).resolves.toEqual({ kind: 'handled' });
+    expect(channel.sent.at(-1)?.text).toContain('send your answer to question 3 as text');
+    expect(bridge.answerText('chat-1', 'just a line')).toBe(true);
+    await expect(pending).resolves.toBe('Version: keep\nInstall: skip\nNotes: just a line');
+    expect(bridge.hasPending('chat-1')).toBe(false);
+  });
+
   it('passes free text through verbatim when a sub-question is answered in prose', async () => {
     const { bridge, service } = bridgeRig();
     const pending = service.ask({
@@ -628,7 +673,9 @@ describe('RemoteController question routing', () => {
   it('routes the next reply into the question instead of queueing a new prompt', async () => {
     const { channel, service, send, cleanup } = await controllerRig();
     const pending = service.ask({ prompt: 'Which file?', conversationId: 'c1' });
-    await vi.waitFor(() => expect(channel.sent.some((i) => i.text.includes('Forge asks'))).toBe(true));
+    await vi.waitFor(() =>
+      expect(channel.sent.some((i) => i.text.includes('Forge asks'))).toBe(true),
+    );
 
     await expect(channel.emit(chatEvent('src/index.ts', 'answer'))).resolves.toEqual({
       kind: 'handled',
@@ -642,7 +689,9 @@ describe('RemoteController question routing', () => {
   it('still runs commands while a question waits, so the chat is never stranded', async () => {
     const { channel, service, cleanup } = await controllerRig();
     const pending = service.ask({ prompt: 'Which file?', conversationId: 'c1' });
-    await vi.waitFor(() => expect(channel.sent.some((i) => i.text.includes('Forge asks'))).toBe(true));
+    await vi.waitFor(() =>
+      expect(channel.sent.some((i) => i.text.includes('Forge asks'))).toBe(true),
+    );
 
     await channel.emit(chatEvent('/status', 'status'));
     // The command ran as a command: the question is still outstanding.
