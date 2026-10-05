@@ -189,6 +189,22 @@ cannot predict them, and the file-plus-path strategy is the real fix for all thr
    - The real ceiling is argv: `queueToCodex` passes the message on the command line, and a `.cmd`
      shim goes through cmd.exe's 8,191-char limit, with about 550 chars of wrapper.
    - Do **not** unify it with `forge.sh`'s 8,000. That limit is a different path.
+   - **Worst case, measured 2026-10-05 (Codex):**
+     - `quoteWindowsArg()` doubles every `"`.
+     - The rest of the real `codex queue` command (the fixed part) is 846 chars.
+     - An all-quote 6,000-char body is therefore 12,846 chars. That is over the limit, and
+       so is today's 4,000 (8,846).
+     - The largest all-quote body that fits is 3,672 chars.
+   - **Decision:** keep 6,000 as the character cap for ordinary text, and add a second, exact check.
+     - Before spawning, any transport that passes the message as argv through cmd.exe computes the
+       real encoded command length. It uses the same `quoteWindowsArg` and the same argv that
+       `spawnCliProcess` will build.
+     - If that length passes 8,191, it refuses with the encoded length and the limit, using the same
+       "write a file, send the path" error as item 3.
+     - The encoded-length check is the real guarantee; 6,000 is the advertised figure. Ordinary prose
+       (846 + about 6,100) fits.
+     - Rejected: unwrapping the npm `.cmd` shim to launch `codex.exe` directly. It changes the
+       shared `cliProcess` path that delegation uses.
 2. Put the limit in the `question` field's description, with: "For a longer report, write it to a
    file and send the path plus at most 1,500 characters."
 3. Rewrite the over-limit error. It should say:
@@ -309,9 +325,12 @@ Design:
 
 2a:
 
-1. **A worst-case 6,000-char question fits the cmd.exe limit.** A 6,000-char question of
-   characters that cmd escapes, wrapped by `codexMessage()` and passed through
-   `buildWindowsCmdShellInvocation`, stays under 8,191 chars.
+1. **The cmd.exe encoded-length check.** Through `codexMessage()` and the real cmd.exe invocation:
+   - a 6,000-char prose question (no quotes) is accepted, and its encoded command is at most 8,191;
+   - a 4,000-char all-quote question is refused before spawning, with the encoded length in the
+     error;
+   - the computed length equals the length of the command that `spawnCliProcess` actually builds.
+     Assert it against the same builder, not a copy.
 2. **The new error is returned for every target.** A 6,001-char question gets the new error text,
    which contains a `.forge/tmp/` path suggestion and the number 6000. Parameterise the test over
    all three targets.
