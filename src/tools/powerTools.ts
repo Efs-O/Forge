@@ -80,15 +80,13 @@ export function makeSleepComputerTool(power: PowerControl): RegisteredTool {
       dangerous: true,
       detail:
         `${args['hibernate'] === true ? 'Hibernate' : 'Sleep'} this machine in ` +
-        `${args['delay_seconds'] ?? DEFAULT_SLEEP_DELAY_SECONDS}s. Everything stops until it is ` +
+        `${sleepDelaySeconds(args['delay_seconds'])}s. Everything stops until it is ` +
         'woken by a magic packet or a wake timer.',
     }),
     handler: async (args) => {
       const requested = args['delay_seconds'];
-      const delaySeconds =
-        typeof requested === 'number' && Number.isFinite(requested)
-          ? Math.min(Math.max(0, Math.round(requested)), MAX_SLEEP_DELAY_SECONDS)
-          : DEFAULT_SLEEP_DELAY_SECONDS;
+      const delaySeconds = sleepDelaySeconds(requested);
+      const clamped = typeof requested === 'number' && requested > MAX_SLEEP_DELAY_SECONDS;
       const hibernate = args['hibernate'] === true;
 
       // Preflighted before the timer is set, so a machine that cannot suspend
@@ -112,9 +110,18 @@ export function makeSleepComputerTool(power: PowerControl): RegisteredTool {
         requested: hibernate ? 'hibernate' : 'sleep',
         hibernationEnabled: info.availableStates.some((state) => /hibernate/i.test(state)),
       };
-      return `${describeSuspend(result, delaySeconds)}${armed}`;
+      const clampNote = clamped
+        ? ` delay_seconds clamped to ${String(MAX_SLEEP_DELAY_SECONDS)}.`
+        : '';
+      return `${describeSuspend(result, delaySeconds)}${clampNote}${armed}`;
     },
   };
+}
+
+function sleepDelaySeconds(requested: unknown): number {
+  return typeof requested === 'number' && Number.isFinite(requested)
+    ? Math.min(Math.max(0, Math.round(requested)), MAX_SLEEP_DELAY_SECONDS)
+    : DEFAULT_SLEEP_DELAY_SECONDS;
 }
 
 export function makeScheduleWakeTool(power: PowerControl): RegisteredTool {

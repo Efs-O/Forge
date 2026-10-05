@@ -370,6 +370,7 @@ overlaps with an existing owner, extend the owner instead.
 | Exec child-process helpers                 | `src/tools/execHelpers.ts`            |
 | Exec script-file denylist scan              | `src/tools/execScriptScanner.ts`      |
 | exec_command program resolution            | `src/tools/execProgramResolver.ts`    |
+| exec_command result hints                   | `src/tools/execHints.ts`              |
 | Git tools (status, diff, commit)           | `src/tools/gitTools.ts`               |
 | Strict `git_read` operation schema/dispatch | `src/tools/gitReadTool.ts`           |
 | Git read-operation handlers                 | `src/tools/gitReadTools.ts`          |

@@ -5,6 +5,7 @@ import {
   checkPowerShellBan,
   MAX_EXEC_STORED_CHARS,
   MAX_OUTPUT_CHARS,
+  parseExecOutputOptions,
   spawnAndWait,
   stripAnsi,
 } from '../../src/tools/execHelpers';
@@ -28,6 +29,12 @@ describe('stripAnsi', () => {
 });
 
 describe('structured exec_command outcomes', () => {
+  it('keeps oversized text output limits as a refusal with a file alternative', () => {
+    expect(() => parseExecOutputOptions({ max_output_chars: MAX_OUTPUT_CHARS + 1 })).toThrow(
+      /redirect.*file/iu,
+    );
+  });
+
   it('distinguishes success from non-zero exit', () => {
     expect(
       JSON.parse(formatExecCommandOutput('tool', { stdout: 'ok', stderr: '', exitCode: 0 })),

@@ -212,6 +212,12 @@ export function makeWebFetchTool(dependencies: WebFetchDependencies = {}): Regis
               type: 'boolean',
               description: 'Reject non-HTTPS redirect targets. Used by restricted capabilities.',
             },
+            find: {
+              type: 'string',
+              maxLength: 200,
+              description:
+                'Optional case-insensitive text to find. Returns a max_chars window around its first match.',
+            },
           },
           required: ['url'],
           additionalProperties: false,
@@ -223,6 +229,7 @@ export function makeWebFetchTool(dependencies: WebFetchDependencies = {}): Regis
       const url = args['url'] as string;
       const maxChars = (args['max_chars'] as number | undefined) ?? 30000;
       const httpsOnly = args['https_only'] === true;
+      const find = args['find'] as string | undefined;
 
       const blocked = ssrfCheck(url);
       if (blocked) {
@@ -256,9 +263,36 @@ export function makeWebFetchTool(dependencies: WebFetchDependencies = {}): Regis
         text = htmlToText(html);
       }
 
-      const truncated = text.slice(0, maxChars);
-      return `<UNTRUSTED_CONTENT>\n${truncated}\n</UNTRUSTED_CONTENT>`;
+      if (find === undefined) {
+        return `<UNTRUSTED_CONTENT>\n${text.slice(0, maxChars)}\n</UNTRUSTED_CONTENT>`;
+      }
+      const excerpt = findWindow(text, find, maxChars);
+      return `<UNTRUSTED_CONTENT>\n${excerpt.header}\n${excerpt.text}\n</UNTRUSTED_CONTENT>`;
     },
+  };
+}
+
+function findWindow(
+  text: string,
+  find: string,
+  maxChars: number,
+): { header: string; text: string } {
+  const escaped = find.replace(/[.*+?^${}()|[\]\\]/gu, '\\$&');
+  const match = new RegExp(escaped, 'iu').exec(text);
+  if (!match) {
+    return {
+      header: `No match for ${JSON.stringify(find)}; returned the first ${String(maxChars)} characters.`,
+      text: text.slice(0, maxChars),
+    };
+  }
+  const matchCenter = match.index + Math.floor(match[0].length / 2);
+  const start = Math.max(
+    0,
+    Math.min(matchCenter - Math.floor(maxChars / 2), text.length - maxChars),
+  );
+  return {
+    header: `Match offset ${String(match.index)}; total length ${String(text.length)} characters.`,
+    text: text.slice(start, start + maxChars),
   };
 }
 

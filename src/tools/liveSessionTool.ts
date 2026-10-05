@@ -263,15 +263,19 @@ export function makeLiveSessionTool(deps: LiveSessionDeps): RegisteredTool {
       if (/[\r\n]/.test(subject)) throw new Error('ask_live_session: "subject" must be one line.');
       const question = stringArg(args, 'question', MAX_QUESTION_CHARS);
       const sessionArg = optionalString(args, 'session', MAX_SESSION_CHARS);
-      const requested = args['wait_minutes'] ?? MAX_WAIT_MINUTES;
+      const requestedWaitMinutes = args['wait_minutes'] ?? MAX_WAIT_MINUTES;
       if (
-        typeof requested !== 'number' ||
-        !Number.isInteger(requested) ||
-        requested < 1 ||
-        requested > MAX_WAIT_MINUTES
+        typeof requestedWaitMinutes !== 'number' ||
+        !Number.isInteger(requestedWaitMinutes) ||
+        requestedWaitMinutes < 1
       ) {
         throw new Error(`ask_live_session: "wait_minutes" must be 1 to ${MAX_WAIT_MINUTES}.`);
       }
+      const requested = Math.min(requestedWaitMinutes, MAX_WAIT_MINUTES);
+      const waitClampNote =
+        requestedWaitMinutes > MAX_WAIT_MINUTES
+          ? `wait_minutes clamped to ${String(MAX_WAIT_MINUTES)}. `
+          : '';
       const notifyOnAnswer = args['notify_on_answer'] === true;
       if (notifyOnAnswer && !context?.conversationId) {
         throw new Error(
@@ -336,6 +340,7 @@ ${turn}`
         };
         if (notifyOnAnswer) {
           return (
+            waitClampNote +
             late +
             deferAnswer(conversationId, id, who, subject, requested, settle, {
               abortAfterMs: requested * 60_000,
@@ -343,7 +348,9 @@ ${turn}`
             })
           );
         }
-        return late + (await awaitedAnswers.during(target, id, () => settle(signal)));
+        return (
+          waitClampNote + late + (await awaitedAnswers.during(target, id, () => settle(signal)))
+        );
       }
 
       let deliver: () => Promise<void>;
@@ -441,9 +448,11 @@ ${turn}`
         return `${timeoutText(who, requested, id, subject)}${hint}`;
       };
       if (notifyOnAnswer) {
-        return late + deferAnswer(conversationId, id, who, subject, requested, settle);
+        return (
+          waitClampNote + late + deferAnswer(conversationId, id, who, subject, requested, settle)
+        );
       }
-      return late + (await awaitedAnswers.during(target, id, () => settle(signal)));
+      return waitClampNote + late + (await awaitedAnswers.during(target, id, () => settle(signal)));
     },
   };
 }

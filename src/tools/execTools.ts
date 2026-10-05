@@ -28,6 +28,12 @@ import {
   NOTIFY_ON_EXIT_DESCRIPTION,
 } from './backgroundExecutionTools';
 import { terminalCommandTracker } from './TerminalCommandTracker';
+import {
+  describeForgeToolProgram,
+  describeMissingExecutable,
+  describeWindowsShimSpawnFailure,
+  inlineScriptWriteHint,
+} from './execHints';
 
 // ── run_terminal ───────────────────────────────────────────────────────────────
 
@@ -82,6 +88,7 @@ export function makeRunTerminalTool(): RegisteredTool {
 
 export function makeExecCommandTool(
   shellScriptsEnabled: () => boolean = () => false,
+  registeredToolNames: () => readonly string[] = () => [],
 ): RegisteredTool {
   return {
     definition: {
@@ -170,6 +177,10 @@ export function makeExecCommandTool(
       }
       const cwd = resolveExecCwd(args['cwd'] as string | undefined);
       const shellScripts = shellScriptsEnabled();
+      const forgeToolHint = describeForgeToolProgram(command, registeredToolNames());
+      if (forgeToolHint) {
+        throw new ExecCommandError('policy_refusal', command, forgeToolHint);
+      }
       try {
         checkShellOperators(cmdArgs, shellScripts ? inlineScriptStart(command, cmdArgs) : -1);
       } catch (error) {
@@ -246,7 +257,8 @@ export function makeExecCommandTool(
           // immediately would report "running" for a process already dead.
           await new Promise((resolve) => setImmediate(resolve));
           const observation = await backgroundExecutionManager.observe(started.id, 0, 0, 0);
-          return formatBackgroundObservation(observation, 0, outputOptions);
+          const formatted = formatBackgroundObservation(observation, 0, outputOptions);
+          return addExecCommandNote(formatted, inlineScriptWriteHint(command, cmdArgs));
         }
         const result = await spawnAndWait(
           spawned.command,
@@ -256,7 +268,10 @@ export function makeExecCommandTool(
           childEnv,
           context?.abortSignal,
         );
-        return formatExecCommandOutput(command, result, outputOptions);
+        return addExecCommandNote(
+          formatExecCommandOutput(command, result, outputOptions),
+          inlineScriptWriteHint(command, cmdArgs),
+        );
       } catch (error) {
         // spawn reports a cmd.exe builtin and a genuinely absent program the
         // same way: missing. True, and useless — a bare ENOENT names nothing
@@ -270,13 +285,22 @@ export function makeExecCommandTool(
           throw new ExecCommandError(
             'missing_executable',
             command,
-            `"${command}" is not available here: exec_command runs without a shell, ` +
-              `so shell builtins have no executable image and Unix utilities are not on ` +
-              `this PATH. ${alternative}`,
+            describeMissingExecutable(command, alternative) ?? error.message,
           );
+        }
+        const shimHint = describeWindowsShimSpawnFailure(command, error);
+        if (shimHint) {
+          throw new ExecCommandError('spawn_error', command, shimHint);
         }
         throw error;
       }
     },
   };
+}
+
+function addExecCommandNote(result: string, note: string | undefined): string {
+  if (!note) return result;
+  const parsed = JSON.parse(result) as Record<string, unknown>;
+  parsed['note'] = note;
+  return JSON.stringify(parsed);
 }

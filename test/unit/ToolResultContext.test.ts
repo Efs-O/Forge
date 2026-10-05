@@ -114,7 +114,7 @@ describe('read_tool_result', () => {
     ).join('');
     const tool = makeReadToolResultTool();
     const result = await tool.handler(
-      { tool_call_id: 'old', offset: 123, max_chars: MAX_TOOL_RESULT_READ_CHARS + 1 },
+      { tool_call_id: 'old', offset: 123, max_chars: MAX_TOOL_RESULT_READ_CHARS },
       {
         beforeMutate: () => undefined,
         conversationMessages: [{ role: 'tool', tool_call_id: 'old', name: 'run_tests', content: raw }],
@@ -122,6 +122,22 @@ describe('read_tool_result', () => {
     );
     expect(result).toContain(raw.slice(123, 123 + MAX_TOOL_RESULT_READ_CHARS));
     expect(result).not.toContain(raw.slice(123 + MAX_TOOL_RESULT_READ_CHARS));
+  });
+
+  it('clamps an oversized text window and points to offset paging', async () => {
+    const raw = 'data'.repeat(MAX_TOOL_RESULT_READ_CHARS);
+    const result = await makeReadToolResultTool().handler(
+      { tool_call_id: 'old', max_chars: MAX_TOOL_RESULT_READ_CHARS + 1 },
+      {
+        beforeMutate: () => undefined,
+        conversationMessages: [
+          { role: 'tool', tool_call_id: 'old', name: 'exec_command', content: raw },
+        ],
+      },
+    );
+    expect(result).toContain(`max_chars clamped to ${MAX_TOOL_RESULT_READ_CHARS}`);
+    expect(result).toContain('use offset to page further');
+    expect(result).toContain(raw.slice(0, MAX_TOOL_RESULT_READ_CHARS));
   });
 
   it('does not expose a result from another conversation', async () => {

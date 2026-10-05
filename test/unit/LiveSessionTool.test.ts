@@ -270,9 +270,15 @@ describe('ask_live_session', () => {
     expect(again).not.toContain('late answer');
   });
 
-  it('rejects a multi-line subject, an out-of-range wait and an empty session', async () => {
+  it('rejects a multi-line subject and empty session, and reports an overlong wait clamp', async () => {
     await expect(tool().handler({ ...ask, subject: 'a\nb' })).rejects.toThrow(/one line/);
-    await expect(tool().handler({ ...ask, wait_minutes: 21 })).rejects.toThrow(/wait_minutes/);
+    const controller = new AbortController();
+    controller.abort();
+    const clamped = await tool().handler(
+      { ...ask, wait_minutes: 21 },
+      { abortSignal: controller.signal },
+    );
+    expect(clamped).toContain('wait_minutes clamped to 20');
     await expect(tool().handler({ ...ask, session: ' ' })).rejects.toThrow(/session/);
   });
 

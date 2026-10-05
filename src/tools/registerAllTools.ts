@@ -192,7 +192,10 @@ export function registerAllTools(
   // v0.7 exec + git
   registry.register(makeRunTerminalTool());
   registry.register(
-    makeExecCommandTool(() => getConfig?.().permissions?.exec?.shell_scripts === true),
+    makeExecCommandTool(
+      () => getConfig?.().permissions?.exec?.shell_scripts === true,
+      () => registry.names(),
+    ),
   );
   registry.register(makeMonitorExecutionTool());
   registry.register(makeStopExecutionTool());

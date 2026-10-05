@@ -38,14 +38,15 @@ describe('wait tool', () => {
     expect(result).toContain('Wait cancelled');
   });
 
-  it('rejects a duration outside the allowed range', async () => {
+  it('rejects invalid values and clamps an overlong wait with a visible note', async () => {
     await expect(tool.handler({ seconds: 0 }, ctx())).rejects.toThrow(
       new RegExp(`1 to ${MAX_WAIT_SECONDS}`, 'u'),
     );
-    await expect(tool.handler({ seconds: MAX_WAIT_SECONDS + 1 }, ctx())).rejects.toThrow(
-      new RegExp(`1 to ${MAX_WAIT_SECONDS}`, 'u'),
-    );
     await expect(tool.handler({ seconds: 1.5 }, ctx())).rejects.toThrow(/whole number/u);
+    const controller = new AbortController();
+    const pending = tool.handler({ seconds: MAX_WAIT_SECONDS + 1 }, ctx(controller.signal));
+    controller.abort();
+    await expect(pending).resolves.toContain(`seconds clamped to ${MAX_WAIT_SECONDS}`);
   });
 
   it('takes no free-form blob arg', () => {

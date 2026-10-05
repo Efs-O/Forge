@@ -86,4 +86,30 @@ describe('web_fetch DNS SSRF protection', () => {
       expect.anything(),
     );
   });
+
+  it('centres the max_chars window on the first match and reports no-match windows', async () => {
+    const lookup = vi.fn(async () => [{ address: '8.8.8.8', family: 4 }]);
+    const fetch = vi.fn(async () =>
+      new Response('0123456789NeedleABCDEFGHIJ', {
+        headers: { 'content-type': 'text/plain' },
+      }),
+    );
+    const tool = makeWebFetchTool({ lookup, fetch });
+    const matched = await tool.handler({
+      url: 'https://public.example.test/',
+      find: 'needle',
+      max_chars: 10,
+    });
+    expect(matched).toMatch(/match offset 10/iu);
+    expect(matched).toContain('total length 26');
+    expect(matched).toContain('89NeedleAB');
+
+    const absent = await tool.handler({
+      url: 'https://public.example.test/',
+      find: 'missing',
+      max_chars: 4,
+    });
+    expect(absent).toMatch(/no match/iu);
+    expect(absent).toContain('0123');
+  });
 });
