@@ -220,6 +220,7 @@ overlaps with an existing owner, extend the owner instead.
 | Telegram group-contact workflow (link, /owner) | `src/remote/TelegramGroupContacts.ts`          |
 | Telegram command-text parsing helpers         | `src/remote/telegramContactText.ts`             |
 | Telegram outbound sends, edits, and media | `src/remote/TelegramOutbound.ts`                   |
+| Telegram status-bubble ⏹ Stop button (keyboard + callback codec) | `src/remote/TelegramStopButton.ts` |
 | Telegram photo send + document fallback       | `src/remote/TelegramPhoto.ts`                   |
 | Per-chat send ordering + Bot API 429 retry    | `src/remote/telegramSendQueue.ts`               |
 | Telegram HTML escaping + line markup helpers  | `src/remote/telegramHtml.ts`                    |

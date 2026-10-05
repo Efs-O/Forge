@@ -10,7 +10,7 @@ import {
  *
  * The mistakes this file exists to prevent are the specific ones the Bot API
  * shape invites: reading `sendRichMessageDraft`'s `True` return as an id,
- * dropping `can_stop` on a later update, treating a throttled or 5xx response
+ * reviving `can_stop` (it flashed the chat's Send button into Stop), treating a throttled or 5xx response
  * as "unsupported" (which would put a second progress bubble next to a draft
  * the user may be looking at), and allocating draft ids that restart at 1.
  */
@@ -75,17 +75,17 @@ describe('TelegramRichDrafts — draft identity', () => {
     expect(draftChatId('-100200')).toBe(-100200);
   });
 
-  it('passes can_stop: true on every draft send, and never sets keep_on_stop', async () => {
+  it('never sets can_stop or keep_on_stop on a draft send', async () => {
     const { calls, call } = recording(true);
     const drafts = new TelegramRichDrafts(call);
     await drafts.beginDraft('99', 'Forge: working…');
     await drafts.updateDraft('99', 5, 'Forge: working… one');
     await drafts.updateDraft('99', 5, 'Forge: working… two');
 
-    // Each send replaces the preview, so an update without the flag would take
-    // the Stop button away mid-turn.
+    // can_stop swapped the chat's Send button for Stop while a preview lived;
+    // the turn's Stop is the status bubble's button.
     expect(calls).toHaveLength(3);
-    expect(calls.every((c) => c.body.can_stop === true)).toBe(true);
+    expect(calls.every((c) => !('can_stop' in c.body))).toBe(true);
     // keep_on_stop keeps the preview briefly and preserves nothing. Reading it
     // as durability would leave a status that silently vanishes.
     expect(calls.every((c) => !('keep_on_stop' in c.body))).toBe(true);

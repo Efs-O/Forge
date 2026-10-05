@@ -220,6 +220,16 @@ export interface RemoteSelectionPages {
   close(chatId: string, messageId: string, options?: { signal?: AbortSignal }): Promise<void>;
 }
 
+/**
+ * Options for the status bubble's send and edits. `stopButton` attaches the
+ * turn's Stop button; an edit without it removes the button, which is how the
+ * terminal edit takes it away.
+ */
+export interface ProgressMessageOptions {
+  signal?: AbortSignal;
+  stopButton?: boolean;
+}
+
 export interface RemoteChannel {
   readonly name: RemoteInboundEvent['channel'];
   onEvent(handler: (event: RemoteInboundEvent) => Promise<RemoteInboundDisposition>): {
@@ -272,7 +282,7 @@ export interface RemoteChannel {
   sendProgress?(
     chatId: string,
     text: string,
-    options?: { signal?: AbortSignal },
+    options?: ProgressMessageOptions,
   ): Promise<string | undefined>;
   /**
    * Telegram-only rich-draft progress with Telegram's native Stop button.
@@ -285,7 +295,7 @@ export interface RemoteChannel {
     chatId: string,
     messageId: string,
     text: string,
-    options?: { signal?: AbortSignal },
+    options?: ProgressMessageOptions,
   ): Promise<void>;
   /**
    * Delete a previously sent message. Optional: channels with no such

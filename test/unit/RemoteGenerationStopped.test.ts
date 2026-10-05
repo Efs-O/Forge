@@ -568,3 +568,64 @@ describe('remote generation_stopped (Phase 2 native Stop)', () => {
     await f.controller.stop();
   });
 });
+
+/**
+ * The ⏹ Stop under the status bubble, which replaced the native Stop above.
+ * The tap names the bubble's message id, and only the turn that owns that
+ * bubble may be cancelled.
+ */
+describe('remote stop_action (status bubble Stop button)', () => {
+  function bubbleId(channel: FakeRemoteChannel): string {
+    const index = channel.progress.findIndex((p) => p.text.startsWith('Forge: working'));
+    expect(index).toBeGreaterThanOrEqual(0);
+    return String(index + 1);
+  }
+
+  function tap(messageId: string, providerMessageId: string, overrides = {}): unknown {
+    return { ...base, ...overrides, kind: 'stop_action', messageId, providerMessageId };
+  }
+
+  it('shows the button for the turn, cancels it on a tap, and drops it at the end', async () => {
+    const f = await liveTurnDraft();
+    const bubble = bubbleId(f.channel);
+    expect(f.channel.stopButtons.has(bubble)).toBe(true);
+
+    await expect(f.channel.emit(tap(bubble, 'cb-1'))).resolves.toEqual({ kind: 'handled' });
+    expect(f.cancel).toHaveBeenCalledWith('c1');
+
+    f.release();
+    await f.drainDone();
+    // The terminal edit takes the button away with the turn.
+    expect(f.channel.stopButtons.has(bubble)).toBe(false);
+    await f.controller.stop();
+  });
+
+  it('ignores a tap on another message or in another chat', async () => {
+    const f = await liveTurnDraft();
+    const bubble = bubbleId(f.channel);
+
+    const foreign = await f.channel.emit(tap('999', 'cb-foreign'));
+    expect(foreign.kind).toBe('rejected');
+    const otherChat = await f.channel.emit(tap(bubble, 'cb-chat', { chatId: 'chat-2' }));
+    expect(otherChat.kind).toBe('rejected');
+    expect(f.cancel).not.toHaveBeenCalled();
+
+    f.release();
+    await f.drainDone();
+    await f.controller.stop();
+  });
+
+  it("does nothing for a finished turn's old bubble", async () => {
+    const f = await liveTurnDraft();
+    const bubble = bubbleId(f.channel);
+    f.release();
+    await f.drainDone();
+
+    await expect(f.channel.emit(tap(bubble, 'cb-late'))).resolves.toEqual({
+      kind: 'rejected',
+      reason: 'This turn has already ended.',
+    });
+    expect(f.cancel).not.toHaveBeenCalled();
+    await f.controller.stop();
+  });
+});

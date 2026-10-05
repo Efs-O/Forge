@@ -135,6 +135,14 @@ export const RemoteInboundEventSchema = z.discriminatedUnion('kind', [
     kind: z.literal('generation_stopped'),
     draftId: z.number().int().positive(),
   }),
+  /**
+   * The ⏹ Stop button under a turn's status bubble. `messageId` is the tapped
+   * bubble; the controller cancels only the turn that bubble belongs to.
+   */
+  InboundBaseSchema.extend({
+    kind: z.literal('stop_action'),
+    messageId: z.string().min(1).max(256),
+  }),
 ]);
 
 export type RemoteInboundEvent = z.infer<typeof RemoteInboundEventSchema>;

@@ -268,3 +268,36 @@ describe('Telegram inbound mapping — stopped message generation', () => {
     expect(telegramUpdateToEvent(parsed)).toMatchObject({ kind: 'generation_stopped' });
   });
 });
+
+describe('Telegram inbound mapping — status bubble Stop button', () => {
+  function tap(data: string): unknown {
+    return {
+      update_id: 78,
+      callback_query: {
+        id: 'cb-1',
+        from: { id: 123 },
+        data,
+        message: { message_id: 55, date: 1_700_000_000, chat: { id: 99, type: 'private' } },
+      },
+    };
+  }
+
+  it('maps the ⏹ Stop tap to a stop_action naming the tapped bubble', () => {
+    const parsed = TelegramUpdateSchema.parse(tap('x'));
+    expect(telegramUpdateToEvent(parsed)).toEqual({
+      channel: 'telegram',
+      kind: 'stop_action',
+      providerMessageId: 'cb-1',
+      senderId: '123',
+      chatId: '99',
+      chatType: 'private',
+      receivedAt: expect.any(Number),
+      messageId: '55',
+    });
+  });
+
+  it('does not read a longer callback that starts with x as Stop', () => {
+    const parsed = TelegramUpdateSchema.parse(tap('xy'));
+    expect(telegramUpdateToEvent(parsed)?.kind).not.toBe('stop_action');
+  });
+});

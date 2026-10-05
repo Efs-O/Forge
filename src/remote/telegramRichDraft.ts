@@ -225,14 +225,15 @@ export class TelegramRichDrafts implements RichDraftTransport {
   }
 
   /**
-   * One body for both draft calls, so the Stop button cannot be dropped by one
-   * of them.
+   * One body for both draft calls.
    *
-   * `can_stop` has to ride every `sendRichMessageDraft`, not just the first:
-   * each send replaces the preview, and an update without the flag would take
-   * the Stop button away from a turn the user is still entitled to stop.
+   * `can_stop` is deliberately NOT set (2026-10-05). With it, Telegram turned
+   * the chat's Send button into Stop for as long as a preview lived, so it
+   * flashed between the two around every stretch of words, and the Stop update
+   * could reach Forge seconds late. The turn's Stop is the status bubble's
+   * inline button instead (`TelegramStopButton.ts`).
    *
-   * `keep_on_stop` is deliberately NOT set. It only keeps the preview briefly —
+   * `keep_on_stop` is deliberately NOT set either. It only keeps the preview briefly —
    * Telegram still drops it shortly after, and the docs are explicit that
    * preserving the partial output requires sending it as a new message.
    * Reading it as durability would leave the user with a status that silently
@@ -243,9 +244,6 @@ export class TelegramRichDrafts implements RichDraftTransport {
       chat_id: draftChatId(chatId),
       draft_id: draftId,
       rich_message: renderRichProgressBlocks(text),
-      // The native Stop button is the whole point of the draft path: it is what
-      // gives a phone a way to stop a turn without typing /stop.
-      can_stop: true,
     };
   }
 }
@@ -290,7 +288,7 @@ export interface ProgressCapableChannel {
   sendProgress?(
     chatId: string,
     text: string,
-    options?: { signal?: AbortSignal },
+    options?: { signal?: AbortSignal; stopButton?: boolean },
   ): Promise<string | undefined>;
 }
 
@@ -310,7 +308,7 @@ export async function openProgressBubble(
 ): Promise<ProgressOpen> {
   if (!channel.sendProgress) return { kind: 'declined' };
   try {
-    const messageId = await channel.sendProgress(chatId, text, { signal });
+    const messageId = await channel.sendProgress(chatId, text, { signal, stopButton: true });
     return messageId ? { kind: 'plain', messageId } : { kind: 'declined' };
   } catch (err) {
     return { kind: 'declined', error: describeError(err) };

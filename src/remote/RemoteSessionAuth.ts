@@ -62,6 +62,7 @@ const ACTIONABLE_WHEN_AUTHENTICATED = new Set<RemoteInboundEvent['kind']>([
   'question_action',
   'help_action',
   'selection',
+  'stop_action',
   'text',
   'voice',
 ]);

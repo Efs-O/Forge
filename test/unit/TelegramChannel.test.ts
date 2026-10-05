@@ -1819,7 +1819,7 @@ describe('TelegramChannel — rich draft transport', () => {
     }
   });
 
-  it('opens a draft with can_stop and a generated draft_id over the wire', async () => {
+  it('opens a draft with a generated draft_id and no native Stop over the wire', async () => {
     const abort = new AbortController();
     const bodies: Array<{ method: string; body: Record<string, unknown> }> = [];
     const channel = new TelegramChannel({
@@ -1844,8 +1844,10 @@ describe('TelegramChannel — rich draft transport', () => {
     expect(call?.body).toMatchObject({
       chat_id: Number(CHAT),
       draft_id: (opened as { draftId: number }).draftId,
-      can_stop: true,
     });
+    // can_stop swapped the chat's Send button for Stop while a preview lived;
+    // the turn's Stop is the status bubble's inline button instead.
+    expect(call?.body).not.toHaveProperty('can_stop');
     // The Bot API types this chat_id as Integer, not "Integer or String".
     expect(typeof (call?.body as { chat_id: unknown }).chat_id).toBe('number');
     expect(call?.body).not.toHaveProperty('keep_on_stop');
@@ -1861,12 +1863,14 @@ describe('TelegramChannel — rich draft transport', () => {
     // plain message edited in place, and only the model's words are a draft.
     const abort = new AbortController();
     const methods: string[] = [];
+    const bodies: Record<string, unknown>[] = [];
     const channel = new TelegramChannel({
       token: 'secret-token',
       getCursor: () => undefined,
       setCursor: async () => undefined,
-      fetch: (async (url: string | URL | Request) => {
+      fetch: (async (url: string | URL | Request, init?: RequestInit) => {
         methods.push(String(url).split('/').at(-1)!);
+        bodies.push(JSON.parse(String(init?.body ?? '{}')) as Record<string, unknown>);
         return response({ message_id: 4 });
       }) as typeof fetch,
     });
@@ -1877,6 +1881,35 @@ describe('TelegramChannel — rich draft transport', () => {
     expect(bubble).toEqual({ kind: 'plain', messageId: '4' });
     expect(methods).toContain('sendMessage');
     expect(methods).not.toContain('sendRichMessageDraft');
+    // The bubble carries the turn's Stop for its whole life.
+    expect(bodies[methods.indexOf('sendMessage')]).toMatchObject({
+      reply_markup: { inline_keyboard: [[{ text: '⏹ Stop', callback_data: 'x' }]] },
+    });
+    abort.abort();
+  });
+
+  it('keeps the Stop button on an edit only when asked, so the last edit drops it', async () => {
+    // editMessageText without reply_markup removes the keyboard.
+    const abort = new AbortController();
+    const edits: Record<string, unknown>[] = [];
+    const channel = new TelegramChannel({
+      token: 'secret-token',
+      getCursor: () => undefined,
+      setCursor: async () => undefined,
+      fetch: (async (url: string | URL | Request, init?: RequestInit) => {
+        if (String(url).endsWith('/editMessageText')) {
+          edits.push(JSON.parse(String(init?.body)) as Record<string, unknown>);
+        }
+        return response(true);
+      }) as typeof fetch,
+    });
+    await channel.start(abort.signal);
+
+    await channel.editMessage(CHAT, '4', 'Forge: working… ⏱', { stopButton: true });
+    await channel.editMessage(CHAT, '4', 'Forge: completed.');
+
+    expect(edits[0]).toMatchObject({ reply_markup: { inline_keyboard: [[{ callback_data: 'x' }]] } });
+    expect(edits[1]).not.toHaveProperty('reply_markup');
     abort.abort();
   });
 });

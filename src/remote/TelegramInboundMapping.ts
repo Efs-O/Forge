@@ -4,6 +4,7 @@ import type { RemoteInboundEvent } from './types';
 import { parseTelegramSelectionCallback } from './TelegramSelectionPagination';
 import { parseTelegramQuestionCallback } from './TelegramQuestionButtons';
 import { parseTelegramHelpCallback } from './TelegramHelpButtons';
+import { isTelegramStopCallback } from './TelegramStopButton';
 
 /**
  * Bot API update -> `RemoteInboundEvent`, and the media-type guesses that go
@@ -381,6 +382,18 @@ export function telegramUpdateToEvent(
       receivedAt: Date.now(),
       action: 'close',
       helpToken: help.token,
+      messageId: String(callback.message.message_id),
+    };
+  }
+  if (isTelegramStopCallback(callback.data)) {
+    return {
+      channel: 'telegram',
+      kind: 'stop_action',
+      providerMessageId: callback.id,
+      senderId: String(callback.from.id),
+      chatId: String(callback.message.chat.id),
+      chatType: telegramChatType(callback.message.chat.type),
+      receivedAt: Date.now(),
       messageId: String(callback.message.message_id),
     };
   }

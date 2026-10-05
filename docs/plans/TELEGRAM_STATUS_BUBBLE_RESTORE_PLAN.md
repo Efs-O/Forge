@@ -67,6 +67,31 @@ nicely").
   message update arriving 3 s or more after Telegram's `date` is logged, so a
   typed `/stop` measures the delivery delay directly.
 
+## Stop moves to the status bubble (2026-10-05, evening)
+
+The user asked what the Send button's brief flip to Stop was. It was
+`can_stop`: while a words preview lives, Telegram replaces the chat's Send
+button with Stop, so it flashed around every stretch of words and vanished
+during tool calls and quiet stretches. It also could not be timed, because the
+`stopped_message_generation` update carries no date.
+
+- Drafts no longer set `can_stop`. The words still stream through the same
+  preview; the Send button stays Send.
+- The status bubble carries an inline **⏹ Stop** button (`callback_data` `x`,
+  `TelegramStopButton.ts`) from `openProgressBubble` through every in-turn
+  edit. `editMessageText` without `reply_markup` removes a keyboard, so
+  `RemoteAgentProgress.queueEdit` re-sends it and `finish`'s terminal edit
+  drops it.
+- A tap maps to a `stop_action` event naming the tapped message.
+  `RemoteController.stopTurn` cancels the turn whose live bubble that is
+  (`RemoteAgentProgress.conversationForBubble`), the same action `/stop` takes.
+  A tap on a finished or foreign bubble is answered "This turn has already
+  ended." and cancels nothing. Every press is logged.
+- `/stop` is unchanged.
+- The native Stop path (`RemoteDraftRegistry`, the `generation_stopped`
+  mapping) is dormant, not removed, so restoring `can_stop` is a one-line
+  revert if the user prefers it.
+
 ## Investigated, not a Forge defect
 
 - **Prompts disappearing.** `remote-audit-v1.json` records every prompt as
@@ -80,15 +105,16 @@ nicely").
 
 - The words draft still expires about 30 s after the model stops talking, with
   Telegram's own animation. The answer always arrives as a normal message.
-- With no keep-alive, the draft's native Stop button goes with it during a
-  quiet stretch; `/stop` works throughout, and the next words bring it back.
+- The ⏹ Stop sits on the status bubble, which may be scrolled above the
+  streamed words and narrations; `/stop` works throughout.
 - Tool names still appear in the plain bubble's single status line.
 
 ## State × lifecycle ledger
 
-No durable state. The status bubble and the words draft live only for the
-turn; the registry entry is in-memory and forgotten on finish, dispose and
-unpair. Nothing is written to disk or config.
+No durable state. The status bubble, its Stop button and the words draft live
+only for the turn; the registry entry is in-memory and forgotten on finish,
+dispose and unpair. A Stop button left on a bubble by a failed terminal edit
+resolves to no live turn and does nothing. Nothing is written to disk or config.
 
 ## Acceptance criteria
 
@@ -108,5 +134,13 @@ unpair. Nothing is written to disk or config.
       lines; a stale first-step tap is rejected (`UserQuestion`).
 - [x] A Stop on any preview of a live turn cancels it once; later presses
       find nothing (`RemoteDraftRegistry`, `RemoteAgentProgressDraft`).
+- [x] Drafts never set `can_stop` (`TelegramRichDraft`, `TelegramChannel`).
+- [x] The status bubble opens with the ⏹ Stop button, keeps it through in-turn
+      edits, and loses it on the terminal edit (`TelegramChannel`,
+      `RemoteGenerationStopped` stop_action).
+- [x] A tap maps to `stop_action` (`TelegramInboundMapping`) and cancels only
+      the turn owning that live bubble; a foreign, other-chat or finished
+      bubble cancels nothing (`RemoteGenerationStopped`).
 - [ ] Live check on Telegram: the status never animates, words stream, no
-      duplicate after Stop.
+      duplicate after Stop, the Send button never flips to Stop, and the
+      bubble's ⏹ Stop ends the turn within a second or two.

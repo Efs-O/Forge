@@ -299,6 +299,19 @@ export class RemoteAgentProgress {
     return 1;
   }
 
+  /**
+   * The live turn whose status bubble this is, for the bubble's Stop button.
+   * A finished turn has left `active`, so a tap on its old bubble finds nothing.
+   */
+  conversationForBubble(chatId: string, messageId: string): string | undefined {
+    for (const [conversationId, state] of this.active) {
+      if (!state.closed && state.chatId === chatId && state.messageId === messageId) {
+        return conversationId;
+      }
+    }
+    return undefined;
+  }
+
   async finish(conversationId: string, terminalText: string): Promise<void> {
     const state = this.active.get(conversationId);
     if (!state) return;
@@ -388,8 +401,11 @@ export class RemoteAgentProgress {
         if (this.active.get(conversationId) !== state) return;
         if (!this.channel.editMessage) return;
         if (!(await this.safeCanDeliver(state.chatId))) return;
+        // An edit without the keyboard removes it, so every in-turn edit
+        // re-sends the Stop button; only `finish`'s terminal edit drops it.
         await this.channel.editMessage(state.chatId, state.messageId, text, {
           signal: this.signal,
+          stopButton: true,
         });
         state.lastText = text;
       })

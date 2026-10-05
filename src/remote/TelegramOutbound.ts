@@ -7,7 +7,8 @@ import { plainTelegramText, splitTelegramText } from './TelegramText';
 import { sendTelegramVoice } from './TelegramVoice';
 import { styleTelegramNotice } from './telegramNoticeStyle';
 import type { TelegramChatQueue } from './telegramSendQueue';
-import type { RemoteContactButton, RemoteInboundAttachment } from './types';
+import { telegramStopKeyboard as stopKeyboard } from './TelegramStopButton';
+import type { ProgressMessageOptions, RemoteContactButton, RemoteInboundAttachment } from './types';
 
 const TelegramSentMessageSchema = z.object({ message_id: z.number().int() });
 const PROMPT_MESSAGE_LIMIT = 256;
@@ -113,9 +114,13 @@ export class TelegramOutbound {
   async sendProgress(
     chatId: string,
     text: string,
-    options?: { signal?: AbortSignal },
+    options?: ProgressMessageOptions,
   ): Promise<string | undefined> {
-    const sent = await this.call('sendMessage', { chat_id: chatId, text }, options?.signal);
+    const sent = await this.call(
+      'sendMessage',
+      { chat_id: chatId, text, ...stopKeyboard(options) },
+      options?.signal,
+    );
     const parsed = TelegramSentMessageSchema.safeParse(sent);
     return parsed.success ? String(parsed.data.message_id) : undefined;
   }
@@ -263,11 +268,11 @@ export class TelegramOutbound {
     chatId: string,
     messageId: string,
     text: string,
-    options?: { signal?: AbortSignal },
+    options?: ProgressMessageOptions,
   ): Promise<void> {
     await this.call(
       'editMessageText',
-      { chat_id: chatId, message_id: Number(messageId), text },
+      { chat_id: chatId, message_id: Number(messageId), text, ...stopKeyboard(options) },
       options?.signal,
     );
   }

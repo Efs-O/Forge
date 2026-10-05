@@ -30,6 +30,8 @@ export class FakeRemoteChannel implements RemoteChannel {
   readonly deleted: Array<{ chatId: string; messageId: string }> = [];
   readonly photos: Array<{ chatId: string; filePath: string; caption: string }> = [];
   readonly progress: Array<{ chatId: string; text: string }> = [];
+  /** Message ids currently showing the turn's ⏹ Stop button. */
+  readonly stopButtons = new Set<string>();
   readonly inlineKeyboards: Array<{
     chatId: string;
     text: string;
@@ -158,9 +160,15 @@ export class FakeRemoteChannel implements RemoteChannel {
     this.photos.push({ chatId, filePath, caption });
   }
 
-  async sendProgress(chatId: string, text: string): Promise<string> {
+  async sendProgress(
+    chatId: string,
+    text: string,
+    options?: { stopButton?: boolean },
+  ): Promise<string> {
     this.progress.push({ chatId, text });
-    return String(this.progress.length);
+    const messageId = String(this.progress.length);
+    if (options?.stopButton) this.stopButtons.add(messageId);
+    return messageId;
   }
 
   async sendInlineKeyboard(
@@ -181,8 +189,16 @@ export class FakeRemoteChannel implements RemoteChannel {
     this.clearedKeyboards.push({ chatId, messageId });
   }
 
-  async editMessage(chatId: string, messageId: string, text: string): Promise<void> {
+  async editMessage(
+    chatId: string,
+    messageId: string,
+    text: string,
+    options?: { stopButton?: boolean },
+  ): Promise<void> {
     this.edits.push({ chatId, messageId, text });
+    // Like Telegram: an edit without the keyboard removes it.
+    if (options?.stopButton) this.stopButtons.add(messageId);
+    else this.stopButtons.delete(messageId);
   }
 }
 
