@@ -1,6 +1,6 @@
 # Telegram replies from live agent sessions
 
-Status: implemented and repository CI passed; release packaging awaits a new version after the concurrent browser phase settles. This plan closes the gap where `/codex hello` appeared in the Codex window and its answer never returned to Telegram. The same path applies to `/claude` and `/copilot`.
+Status: implemented in `c3391e5`, released with the concurrent browser fix in `0.16.88` (`409296d`), packaged and installed locally. The running VS Code window needs Reload Window to load the installed build. This plan closes the gap where `/codex hello` appeared in the Codex window and its answer never returned to Telegram. The same path applies to `/claude` and `/copilot`.
 
 ## Contract
 
@@ -28,7 +28,7 @@ Status: implemented and repository CI passed; release packaging awaits a new ver
 - [x] `/answer` is bound to the original private chat, persists its result, and does not overwrite it on redelivery in tests.
 - [x] Restart reconciliation never reasks the agent and does not lose a late verdict in tests.
 - [x] Help and Telegram menu distinguish reply-capable commands from one-way `/tell`.
-- [ ] Type check, lint, meaningful tests, build, and package pass after the last edit.
+- [x] Release CI passed on `409296d`: 431 test files passed, 7 skipped; 4,445 tests passed, 41 skipped. `npm run package` passed and produced `forge-llm-0.16.88.vsix` (12,275,608 bytes, SHA-256 `F706782C2E9F0FDFC32D7A4B7154629E41452DE2E0F94AF16C67EF6858879005`). The local VS Code CLI installed `efsoo.forge-llm@0.16.88`. This plan-only status edit followed packaging; `docs/**` is excluded from the VSIX, so the existing same-version package must not be rebuilt or overwritten.
 
 ## Limits to verify live
 
