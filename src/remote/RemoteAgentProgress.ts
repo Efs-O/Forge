@@ -6,6 +6,7 @@ import type { RemoteDraftRegistry } from './RemoteDraftRegistry';
 import { renderRemoteDraft, renderRemoteProgress } from './remoteProgressRender';
 import { keepTail, sanitize, sanitizeToolName } from './remoteProgressText';
 import {
+  appendDraftLine,
   appendStream,
   DRAFT_STREAM_INTERVAL_MS,
   finalizeDraftStatus,
@@ -163,7 +164,7 @@ export class RemoteAgentProgress {
       messageId,
       ...(draftId === undefined ? {} : { draftId }),
       headline: DEFAULT_HEADLINE,
-      stream: '',
+      stream: draftId === undefined ? '' : `${DEFAULT_HEADLINE}\n\n`,
       warnings: [],
       lastText: DEFAULT_HEADLINE,
       narrations: [],
@@ -241,12 +242,8 @@ export class RemoteAgentProgress {
     }
     state.lastActivityAt = Date.now();
     if (event.kind === 'narration') {
-      // The round's words now go out as their own message, so the preview
-      // drops back to status instead of showing them a second time.
-      if (state.draftLane && state.stream) {
-        state.stream = '';
-        this.schedule(event.conversationId, state);
-      }
+      // The words stay in the preview's log: clearing them would re-type the
+      // whole draft, and the preview is retired by Telegram anyway.
       this.queueNarration(event.conversationId, state, event.text);
       return;
     }
@@ -261,6 +258,7 @@ export class RemoteAgentProgress {
       return;
     }
     if (event.kind === 'commentary' || event.kind === 'reasoning') return;
+    const milestoneBefore = state.milestone;
     if (event.kind === 'phase') {
       const headline = keepTail(sanitize(event.text ?? '').trim(), MAX_HEADLINE_CHARS);
       const next = headline || DEFAULT_HEADLINE;
@@ -294,6 +292,10 @@ export class RemoteAgentProgress {
       const status = sanitize(event.text).trim();
       if (!status) return;
       state.milestone = keepTail(status, MAX_STATUS_CHARS);
+    }
+    // A preview appends each new milestone to its log instead of replacing a line.
+    if (state.draftLane && state.milestone !== milestoneBefore && state.milestone) {
+      state.stream = appendDraftLine(state.stream, state.milestone);
     }
     this.schedule(event.conversationId, state);
   }

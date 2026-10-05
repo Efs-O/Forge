@@ -10,20 +10,30 @@ import type { RichDraftTransport } from './telegramRichDraft';
 export const DRAFT_STREAM_INTERVAL_MS = 1_000;
 
 /**
- * The streamed text a preview shows. Past it the preview stops growing rather
- * than scrolling: Telegram re-types a draft from its first changed character,
- * so dropping the head would re-type the whole text every second. The whole
- * answer is always in the final message, which this buffer never feeds.
+ * How much a preview's log holds before it starts over. Telegram re-types a
+ * draft from its first changed character, so the log only ever appends; when
+ * it is full it restarts from the newest entry (one short re-type) rather than
+ * dropping its head, which would re-type the whole text on every update. The
+ * whole answer is always in the final message, which this log never feeds.
  */
 export const MAX_STREAM_CHARS = 3_000;
 
-/** Append one streamed delta to a preview's buffer, scrubbed and bounded. */
+/** Append one streamed delta to a preview's log, scrubbed and bounded. */
 export function appendStream(buffer: string, delta: string): string {
-  if (buffer.length >= MAX_STREAM_CHARS) return buffer;
   const clean = sanitize(delta);
   if (!clean) return buffer;
   const next = buffer + clean;
-  return next.length > MAX_STREAM_CHARS ? `${next.slice(0, MAX_STREAM_CHARS - 1)}…` : next;
+  return next.length > MAX_STREAM_CHARS ? clean.trimStart().slice(-MAX_STREAM_CHARS) : next;
+}
+
+/** Append a status line (a tool, a notice) to a preview's log as its own paragraph. */
+export function appendDraftLine(buffer: string, line: string): string {
+  const clean = sanitize(line).trim();
+  if (!clean) return buffer;
+  const body = buffer.trimEnd();
+  // A status repeated on consecutive events adds nothing to the log.
+  if (body.endsWith(clean)) return buffer;
+  return appendStream(body, `${body ? '\n\n' : ''}${clean}\n\n`);
 }
 
 /**

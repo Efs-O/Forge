@@ -91,7 +91,8 @@ describe('RemoteAgentProgress on the rich-draft lane', () => {
     await vi.advanceTimersByTimeAsync(1);
     expect(updates).toHaveLength(1);
     expect(updates[0]).toMatchObject({ draftId: 42 });
-    expect(updates[0]?.text).toContain('Running write_file…');
+    // Appended, never replaced: both tools stay in the preview's log.
+    expect(updates[0]?.text).toContain('Running read_file…\n\nRunning write_file…');
 
     progress.handle({ conversationId: 'c1', kind: 'status', text: 'Running tests…' });
     await vi.advanceTimersByTimeAsync(1_000);
@@ -147,7 +148,7 @@ describe('RemoteAgentProgress on the rich-draft lane', () => {
     expect(finished).toBe(true);
   });
 
-  it('streams commentary into the draft and clears it when the round narrates', async () => {
+  it('streams commentary into the draft and keeps it there when the round narrates', async () => {
     vi.useFakeTimers();
     const { richDraft, updates } = draftTransport();
     const channel = channelWithDrafts(richDraft);
@@ -172,9 +173,10 @@ describe('RemoteAgentProgress on the rich-draft lane', () => {
       text: 'Let me look at the config.',
     });
     await vi.advanceTimersByTimeAsync(1_000);
-    // Sent once as a message, and gone from the preview.
+    // Sent once as a message. The preview keeps it: clearing would re-type the
+    // whole draft, and Telegram retires the preview on its own.
     expect(channel.sent.map((m) => m.text)).toEqual(['Let me look at the config.']);
-    expect(updates.at(-1)?.text).not.toContain('Let me look');
+    expect(updates.at(-1)?.text).toContain('Let me look');
 
     // Reasoning never carries text into the preview.
     progress.handle({ conversationId: 'c1', kind: 'reasoning' });
@@ -304,7 +306,7 @@ describe('RemoteAgentProgress on the rich-draft lane', () => {
     expect(channel.edits).toEqual([]);
   });
 
-  it('sends the streamed words alone, so the preview only ever grows', async () => {
+  it('only ever appends to the preview, so Telegram never re-types it', async () => {
     vi.useFakeTimers();
     const { richDraft, updates } = draftTransport();
     const progress = new RemoteAgentProgress(
@@ -320,8 +322,17 @@ describe('RemoteAgentProgress on the rich-draft lane', () => {
     await vi.advanceTimersByTimeAsync(1_000);
     progress.handle({ conversationId: 'c1', kind: 'commentary', text: 'module is fine.' });
     await vi.advanceTimersByTimeAsync(5_000);
-    const texts = updates.map((u) => u.text).filter((t) => t.startsWith('The guard'));
-    expect(texts).toEqual(['The guard', 'The guard module is fine.']);
+    progress.handle({ conversationId: 'c1', kind: 'tool', toolName: 'edit_file' });
+    progress.handle({ conversationId: 'c1', kind: 'status', text: 'Waiting for approval' });
+    await vi.advanceTimersByTimeAsync(5_000);
+    const texts = updates.map((u) => u.text);
+    expect(texts.at(-1)).toBe(
+      'Forge: working…\n\nRunning read_file…\n\nThe guard module is fine.\n\n' +
+        'Running edit_file…\n\nWaiting for approval',
+    );
+    for (let i = 1; i < texts.length; i += 1) {
+      expect(texts[i]!.startsWith(texts[i - 1]!)).toBe(true);
+    }
   });
 
   it('forgets the draft when the conversation is replaced or disposed', async () => {

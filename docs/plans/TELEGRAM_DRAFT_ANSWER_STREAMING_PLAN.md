@@ -70,12 +70,21 @@ just the streamed words while the model writes, so each update only appends.
 With nothing streaming, it sends a short status with no clock. The clock
 remains on the plain bubble and is not needed on a preview.
 
+That fixed the words but left the status re-typing. Each tool replaced the
+`Running …` line, and a narration cleared the words. So the draft became one
+**append-only log per turn**: the opening headline, then each new milestone
+(`Running read_file…`, a status, a notice) and the streamed words, in arrival
+order. A narration no longer clears it. Live timing on 2026-10-05 showed every
+inbound message admitted within 1 s of its Telegram timestamp. The
+multi-minute lag the user saw was model time on a 140K-token context, plus a
+plain-text "Stop" (no slash) being queued as a prompt.
+
 ## Limits
 
-- `MAX_STREAM_CHARS` (3,000) bounds the buffer. Past it the preview stops
-  growing and ends in `…` instead of scrolling: dropping the head would make
-  every update re-type the whole text. The full text is always in the final
-  message.
+- `MAX_STREAM_CHARS` (3,000) bounds the log. When it fills up, the log starts
+  over from the newest entry: one short re-type. Dropping the head instead
+  would re-type the whole text on every update. The full text is always in the
+  final message.
 - Reasoning tokens never enter the draft (`reasoning` carries no text by
   contract).
 
@@ -89,7 +98,7 @@ remote-state file or the outbox.
 
 ## Acceptance criteria
 
-- [x] `commentary` deltas appear in the draft text; a `narration` clears them.
+- [x] `commentary` deltas appear in the draft text and stay there after a `narration`.
 - [x] A plain (non-draft) bubble still ignores `commentary`.
 - [x] A pending draft update does not delay a narration send (test with a
       draft call that never resolves).
