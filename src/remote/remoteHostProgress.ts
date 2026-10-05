@@ -1,7 +1,7 @@
 import type { AgentProgressEvent } from '../sidebar/AgentProgress';
 import type { RemoteAgentProgress } from './RemoteAgentProgress';
 import type { RemoteChannel } from './types';
-import { openProgressBubble, type DraftEpoch } from './telegramRichDraft';
+import { openProgressBubble } from './telegramRichDraft';
 
 /**
  * Events held while the opening message is in flight.
@@ -26,12 +26,6 @@ export interface HostProgressOpenerDeps {
    * caller: this module decides nothing about who hears what.
    */
   target: (conversationId: string) => string | undefined;
-  /**
-   * Ownership epoch of the live draft registry, passed to `openProgressBubble`
-   * so a mirrored bubble that finishes opening after an unpair is not
-   * registered. Absent for transports with no rich drafts.
-   */
-  draftEpoch?: DraftEpoch | undefined;
   onError?: (message: string) => void;
 }
 
@@ -90,9 +84,7 @@ export class HostProgressOpener {
       if (buffered.length < MAX_BUFFERED_EVENTS) buffered.push(event);
       return;
     }
-    // Either lane can carry the bubble, so the guard asks for a lane rather than
-    // for `editMessage` specifically — a draft transport has no message to edit.
-    if (!this.deps.channel.sendProgress && !this.deps.channel.richDraft) return;
+    if (!this.deps.channel.sendProgress) return;
     const chatId = this.deps.target(conversationId);
     if (!chatId) return;
     this.opening.set(conversationId, [event]);
@@ -112,16 +104,9 @@ export class HostProgressOpener {
         chatId,
         'Forge: working…',
         this.deps.signal,
-        this.deps.draftEpoch,
       );
       // Re-checked after the await: the turn can end, or a chat-originated
       // prompt can claim the conversation, while the send is in flight.
-      if (bubble.kind === 'revoked') {
-        // Unpaired mid-open. Not latched as `declined`: pairing is re-checked on
-        // every event, so a chat paired again later in the turn gets its own
-        // bubble. The preview belongs to nobody and is left to expire.
-        return;
-      }
       if (bubble.kind === 'declined') {
         this.declined.add(conversationId);
         if (bubble.error) {
@@ -130,24 +115,13 @@ export class HostProgressOpener {
         return;
       }
       if (this.deps.signal.aborted || this.deps.progress.has(conversationId)) {
-        // A bubble opened for a turn that is no longer ours to report. A draft
-        // needs no cleanup (it expires on Telegram's side); a plain bubble is
+        // A bubble opened for a turn that is no longer ours to report. It is
         // not deleted here because the existing policy never deleted a progress
         // message it did not finish, and inventing a delete path here would be
         // a new behaviour this phase does not need.
         return;
       }
-      if (bubble.kind === 'draft') {
-        this.deps.progress.begin(
-          conversationId,
-          chatId,
-          `draft-${bubble.draftId}`,
-          'host',
-          bubble.draftId,
-        );
-      } else {
-        this.deps.progress.begin(conversationId, chatId, bubble.messageId, 'host');
-      }
+      this.deps.progress.begin(conversationId, chatId, bubble.messageId, 'host');
       for (const held of this.opening.get(conversationId) ?? []) {
         this.deps.progress.handle(held);
       }

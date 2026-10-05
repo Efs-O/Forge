@@ -162,7 +162,6 @@ export class RemoteController {
       signal: this.abort.signal,
       progress: this.progress,
       target: (conversationId) => this.fanout.mirrorTarget(conversationId),
-      draftEpoch: this.drafts,
       ...(options.onError ? { onError: options.onError } : {}),
     });
   }
@@ -474,7 +473,6 @@ export class RemoteController {
       activeConversations: this.activeConversations,
       attachmentStore: () => this.options.attachmentStore,
       isBusy: (id) => this.isBusy(id),
-      draftEpoch: this.drafts,
       ...(this.options.onError ? { onError: this.options.onError } : {}),
     })
       .catch((err) =>

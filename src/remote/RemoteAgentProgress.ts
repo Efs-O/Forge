@@ -1,17 +1,12 @@
 import type { AgentProgressEvent } from '../sidebar/AgentProgress';
 import type { RemoteChannel } from './types';
+import { describeError } from '../util/describeError';
 import { QUEUED_ACK_DELETE_SECONDS } from './TelegramAcknowledgement';
 import { DRAFT_HEARTBEAT_MS } from './telegramRichDraft';
 import type { RemoteDraftRegistry } from './RemoteDraftRegistry';
-import { renderRemoteDraft, renderRemoteProgress } from './remoteProgressRender';
+import { renderRemoteProgress } from './remoteProgressRender';
 import { keepTail, sanitize, sanitizeToolName } from './remoteProgressText';
-import {
-  appendDraftLine,
-  appendStream,
-  DRAFT_STREAM_INTERVAL_MS,
-  finalizeDraftStatus,
-  RemoteDraftLane,
-} from './RemoteDraftLane';
+import { appendStream, DRAFT_STREAM_INTERVAL_MS, RemoteDraftLane } from './RemoteDraftLane';
 
 const DEFAULT_EDIT_INTERVAL_MS = 1_500;
 export const CLOCK_INTERVAL_MS = 60_000;
@@ -50,18 +45,24 @@ export type ProgressOrigin = 'remote' | 'host';
 interface ActiveProgress {
   origin: ProgressOrigin;
   chatId: string;
+  /** The status bubble: a plain message, edited in place. */
   messageId: string;
   /**
-   * Set when the bubble is a rich draft preview rather than a real message.
-   * A draft has no message id at all, and Telegram's Stop update names it by
-   * draft id — so this is what that update must match, and what every later
-   * update must reuse for the change to animate in place instead of replacing.
+   * The words preview: a rich draft carrying only the model's streamed words,
+   * opened on the first word and never carrying status. Telegram's Stop update
+   * names it by draft id, and every update reuses the id so it animates.
    */
   draftId?: number | undefined;
-  /** The draft's own send lane, beside `tail` rather than on it. Draft only. */
+  /** `off` once the transport refused a draft: the turn streams nothing more. */
+  draftPhase: 'none' | 'opening' | 'open' | 'off';
+  /** The draft's own send lane, beside `tail` rather than on it. */
   draftLane?: RemoteDraftLane;
-  /** Streamed words since the last narration. Only a draft ever shows them. */
-  stream: string;
+  draftTimer?: ReturnType<typeof setTimeout>;
+  heartbeat?: ReturnType<typeof setInterval>;
+  /** The turn's streamed words, append-only, so Telegram never re-types them. */
+  words: string;
+  /** What the preview last showed. */
+  draftText: string;
   headline: string;
   milestone?: string;
   /**
@@ -107,11 +108,12 @@ interface ActiveProgress {
  * stays silent on edits — so the in-place edit is exactly what keeps a long
  * turn from spamming the phone with a notification per progress tick.
  *
- * A plain bubble carries status only, never the model's streamed words: it
- * is permanent, so streaming into it showed every thought twice (`4dcb826`).
- * A rich draft preview does stream them — Telegram retires the preview, so
- * each piece of text is still recorded once, as its own message. See
- * `RemoteDraftLane` and docs/plans/TELEGRAM_DRAFT_ANSWER_STREAMING_PLAN.md.
+ * The bubble carries status only, never the model's streamed words: it is
+ * permanent, so streaming into it showed every thought twice (`4dcb826`).
+ * The words go to a separate rich draft preview that carries nothing else —
+ * a status in a draft is re-typed letter by letter on every change, which is
+ * what made "Forge: working…" crawl. See `RemoteDraftLane` and
+ * docs/plans/TELEGRAM_STATUS_BUBBLE_RESTORE_PLAN.md.
  */
 export class RemoteAgentProgress {
   private readonly active = new Map<string, ActiveProgress>();
@@ -154,7 +156,6 @@ export class RemoteAgentProgress {
     chatId: string,
     messageId: string,
     origin: ProgressOrigin = 'remote',
-    draftId?: number | undefined,
   ): void {
     this.drop(conversationId);
     const now = Date.now();
@@ -162,9 +163,10 @@ export class RemoteAgentProgress {
       origin,
       chatId,
       messageId,
-      ...(draftId === undefined ? {} : { draftId }),
+      draftPhase: this.channel.richDraft ? 'none' : 'off',
+      words: '',
+      draftText: '',
       headline: DEFAULT_HEADLINE,
-      stream: draftId === undefined ? '' : `${DEFAULT_HEADLINE}\n\n`,
       warnings: [],
       lastText: DEFAULT_HEADLINE,
       narrations: [],
@@ -175,19 +177,13 @@ export class RemoteAgentProgress {
       closed: false,
     });
     const state = this.active.get(conversationId)!;
-    if (draftId !== undefined) {
-      this.drafts?.register({ chatId, conversationId, draftId });
-      const lane = new RemoteDraftLane(
+    if (state.draftPhase !== 'off') {
+      state.draftLane = new RemoteDraftLane(
         () => this.sendDraft(conversationId, state),
         (err) => this.report(err),
       );
-      state.draftLane = lane;
-      // A draft is a ~30-second preview, so it is re-sent on its own heartbeat
-      // even when nothing changed: the 60s clock would let the preview — and
-      // its Stop button — expire on a quiet turn.
-      const heartbeatMs = Math.min(this.clockIntervalMs, DRAFT_HEARTBEAT_MS);
-      state.clock = setInterval(() => lane.request(), heartbeatMs);
-    } else if (this.channel.editMessage) {
+    }
+    if (this.channel.editMessage) {
       // The 60s clock keeps the elapsed-time line honest on a quiet turn.
       state.clock = setInterval(() => this.queueEdit(conversationId, state), this.clockIntervalMs);
     }
@@ -242,23 +238,22 @@ export class RemoteAgentProgress {
     }
     state.lastActivityAt = Date.now();
     if (event.kind === 'narration') {
-      // The words stay in the preview's log: clearing them would re-type the
-      // whole draft, and the preview is retired by Telegram anyway.
+      // The words stay in the preview: clearing them would re-type the whole
+      // draft, and the preview is retired by Telegram anyway.
       this.queueNarration(event.conversationId, state, event.text);
       return;
     }
-    // Streamed tokens reach a draft preview only: it is retired by Telegram,
-    // so the words appear once as a record. A plain bubble is permanent and
-    // keeps them out (see the class comment).
-    if (event.kind === 'commentary' && state.draftLane) {
-      const next = appendStream(state.stream, event.text);
-      if (next === state.stream) return;
-      state.stream = next;
-      this.schedule(event.conversationId, state);
+    // Streamed tokens reach the words preview only: it is retired by Telegram,
+    // so the words appear once as a record. The bubble is permanent and keeps
+    // them out (see the class comment).
+    if (event.kind === 'commentary' && state.draftLane && state.draftPhase !== 'off') {
+      const next = appendStream(state.words, event.text);
+      if (next === state.words) return;
+      state.words = next;
+      this.scheduleDraft(state);
       return;
     }
     if (event.kind === 'commentary' || event.kind === 'reasoning') return;
-    const milestoneBefore = state.milestone;
     if (event.kind === 'phase') {
       const headline = keepTail(sanitize(event.text ?? '').trim(), MAX_HEADLINE_CHARS);
       const next = headline || DEFAULT_HEADLINE;
@@ -292,10 +287,6 @@ export class RemoteAgentProgress {
       const status = sanitize(event.text).trim();
       if (!status) return;
       state.milestone = keepTail(status, MAX_STATUS_CHARS);
-    }
-    // A preview appends each new milestone to its log instead of replacing a line.
-    if (state.draftLane && state.milestone !== milestoneBefore && state.milestone) {
-      state.stream = appendDraftLine(state.stream, state.milestone);
     }
     this.schedule(event.conversationId, state);
   }
@@ -337,23 +328,8 @@ export class RemoteAgentProgress {
       if (state.draftId !== undefined) this.drafts?.forgetConversation(conversationId);
     }
     if (this.signal.aborted) return;
-    if (state.draftId !== undefined) {
-      // The preview is a 30-second thing. Telegram keeps nothing unless the
-      // bot sends the final message, so this is the step that makes the turn's
-      // status visible after the preview expires — and it carries status only,
-      // never the answer, which is always its own message.
-      if (!this.channel.richDraft) return;
-      if (!(await this.safeCanDeliver(state.chatId))) return;
-      const messageId = await finalizeDraftStatus(
-        this.channel.richDraft,
-        state.chatId,
-        terminalText.slice(0, this.maxMessageChars),
-        this.signal,
-        this.onError,
-      );
-      if (messageId) this.armAfter?.(state.chatId, [messageId], QUEUED_ACK_DELETE_SECONDS);
-      return;
-    }
+    // The words preview is left to expire on Telegram's side (~30 s with no
+    // heartbeat); the answer and every narration are already real messages.
     if (!this.channel.editMessage) return;
     if (!(await this.safeCanDeliver(state.chatId))) return;
     await this.channel
@@ -411,24 +387,24 @@ export class RemoteAgentProgress {
 
   private schedule(conversationId: string, state: ActiveProgress): void {
     if (state.timer) return;
-    state.timer = setTimeout(
+    state.timer = setTimeout(() => {
+      delete state.timer;
+      this.queueEdit(conversationId, state);
+    }, this.editIntervalMs);
+  }
+
+  private scheduleDraft(state: ActiveProgress): void {
+    if (state.draftTimer) return;
+    state.draftTimer = setTimeout(
       () => {
-        delete state.timer;
-        this.queueEdit(conversationId, state);
+        delete state.draftTimer;
+        if (this.draftText(state) !== state.draftText) state.draftLane?.request();
       },
-      state.draftLane
-        ? Math.min(this.editIntervalMs, DRAFT_STREAM_INTERVAL_MS)
-        : this.editIntervalMs,
+      Math.min(this.editIntervalMs, DRAFT_STREAM_INTERVAL_MS),
     );
   }
 
   private queueEdit(conversationId: string, state: ActiveProgress): void {
-    if (state.draftLane) {
-      if (renderRemoteDraft(state, this.maxMessageChars) !== state.lastText) {
-        state.draftLane.request();
-      }
-      return;
-    }
     const text = renderRemoteProgress(state, this.maxMessageChars, Date.now());
     if (text === state.lastText || text === state.queuedText) return;
     state.queuedText = text;
@@ -449,19 +425,55 @@ export class RemoteAgentProgress {
       });
   }
 
+  private draftText(state: ActiveProgress): string {
+    return state.words.trim().slice(0, this.maxMessageChars);
+  }
+
   /**
-   * One draft update, rendered when it is actually sent so a coalesced
-   * request carries the newest state. Same draft id every time: Telegram
-   * animates changes to a draft that shares an identifier.
+   * One words-preview send, rendered when it is actually sent so a coalesced
+   * request carries the newest words. The first send opens the draft; later
+   * ones reuse its id so Telegram animates only the appended words.
    */
   private async sendDraft(conversationId: string, state: ActiveProgress): Promise<void> {
     const rich = this.channel.richDraft;
-    if (!rich || state.draftId === undefined) return;
+    if (!rich || state.draftPhase === 'off' || state.draftPhase === 'opening') return;
     if (state.closed || this.signal.aborted || this.active.get(conversationId) !== state) return;
+    const text = this.draftText(state);
+    if (!text) return;
     if (!(await this.safeCanDeliver(state.chatId))) return;
-    const text = renderRemoteDraft(state, this.maxMessageChars);
-    await rich.updateDraft(state.chatId, state.draftId, text, { signal: this.signal });
-    state.lastText = text;
+    if (state.draftId !== undefined) {
+      await rich.updateDraft(state.chatId, state.draftId, text, { signal: this.signal });
+      state.draftText = text;
+      return;
+    }
+    // Read before the await: an unpair during the open must not leave this
+    // preview registered as a Stop path for the revoked pairing.
+    const epoch = this.drafts?.epoch();
+    state.draftPhase = 'opening';
+    const outcome = await rich
+      .beginDraft(state.chatId, text, { signal: this.signal })
+      .catch((err: unknown) => ({ kind: 'unknown' as const, error: describeError(err) }));
+    if (outcome.kind !== 'open') {
+      // Refused or unknown: stream nothing more this turn rather than risk a
+      // second preview. The bubble and the narrations still report the turn.
+      state.draftPhase = 'off';
+      if (outcome.kind === 'unknown') this.report(new Error(outcome.error));
+      return;
+    }
+    state.draftPhase = 'open';
+    state.draftId = outcome.draftId;
+    state.draftText = text;
+    if (state.closed || this.active.get(conversationId) !== state) return;
+    if (epoch === undefined || this.drafts?.isCurrent(epoch)) {
+      this.drafts?.register({ chatId: state.chatId, conversationId, draftId: outcome.draftId });
+    }
+    // A preview expires after ~30 s without an update, taking its Stop button
+    // with it, so a quiet stretch of the turn re-sends the same words.
+    const lane = state.draftLane;
+    state.heartbeat = setInterval(
+      () => lane?.request(),
+      Math.min(this.clockIntervalMs, DRAFT_HEARTBEAT_MS),
+    );
   }
 
   private drop(conversationId: string): void {
@@ -475,9 +487,13 @@ export class RemoteAgentProgress {
 
   private clearTimers(state: ActiveProgress): void {
     if (state.timer) clearTimeout(state.timer);
+    if (state.draftTimer) clearTimeout(state.draftTimer);
     if (state.clock) clearInterval(state.clock);
+    if (state.heartbeat) clearInterval(state.heartbeat);
     delete state.timer;
+    delete state.draftTimer;
     delete state.clock;
+    delete state.heartbeat;
   }
 
   private report(err: unknown): void {

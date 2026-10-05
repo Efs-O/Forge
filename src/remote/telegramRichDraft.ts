@@ -7,12 +7,11 @@ import { TelegramRateLimitError } from './telegramSendQueue';
  *
  * A draft is a *preview*, never the message: Telegram documents it as a
  * temporary 30-second preview, and the finalized output only exists once
- * `sendRichMessage` is called. So this module owns three distinct things that
+ * `sendRichMessage` is called. So this module owns two distinct things that
  * are easy to conflate:
  *
  * - `beginDraft`  — opens the preview with the native Stop button.
  * - `updateDraft` — reuses the same `draft_id` so changes animate in place.
- * - `finalizeStatus` — the persistent, status-only message that replaces it.
  *
  * The bot allocates `draft_id` itself (non-zero, and the same id animates
  * changes), and the method returns `True` — not an id. Treating the return
@@ -131,13 +130,6 @@ export interface RichDraftTransport {
     text: string,
     options?: { signal?: AbortSignal },
   ): Promise<void>;
-  /**
-   * The persistent status that replaces the preview. Resolves to the provider
-   * id so the caller can arm its deletion under the existing bubble policy;
-   * throws when the send failed *or* when the response carried no usable
-   * message id, because neither may be reported as a finalized turn.
-   */
-  finalizeStatus(chatId: string, text: string, options?: { signal?: AbortSignal }): Promise<string>;
 }
 
 type TelegramCall = (
@@ -163,15 +155,10 @@ export class TelegramRichDrafts implements RichDraftTransport {
   private readonly pausedUntil = new Map<string, number>();
 
   /**
-   * `draftCall` carries the two preview calls and defaults to `call`. The
-   * channel passes one that bypasses its chat queue and does not wait out a
-   * 429 in place (see `TelegramChannel.richDraft`); `finalizeStatus` is a real
-   * message and always uses `call`.
+   * The channel passes a call that bypasses its chat queue and does not wait
+   * out a 429 in place (see `TelegramChannel.richDraft`).
    */
-  constructor(
-    private readonly call: TelegramCall,
-    private readonly draftCall: TelegramCall = call,
-  ) {}
+  constructor(private readonly draftCall: TelegramCall) {}
 
   async beginDraft(
     chatId: string,
@@ -238,28 +225,6 @@ export class TelegramRichDrafts implements RichDraftTransport {
     }
   }
 
-  async finalizeStatus(
-    chatId: string,
-    text: string,
-    options?: { signal?: AbortSignal },
-  ): Promise<string> {
-    // `sendRichMessage` documents chat_id as Integer *or* String, so unlike the
-    // draft lane it takes the internal id as-is.
-    const sent = await this.call(
-      'sendRichMessage',
-      { chat_id: chatId, rich_message: renderRichProgressBlocks(text) },
-      options?.signal,
-    );
-    const messageId = (sent as { message_id?: unknown } | undefined)?.message_id;
-    // A 2xx with no usable id is an unknown outcome, not a finalized turn: the
-    // caller would otherwise arm deletion of a message that does not exist and
-    // report a status the chat may never have received.
-    if (typeof messageId !== 'number' || !Number.isSafeInteger(messageId) || messageId <= 0) {
-      throw new Error('Telegram sendRichMessage returned no usable message_id.');
-    }
-    return String(messageId);
-  }
-
   /**
    * One body for both draft calls, so the Stop button cannot be dropped by one
    * of them.
@@ -303,24 +268,17 @@ export function draftChatId(chatId: string): number {
 }
 
 /**
- * What the progress lifecycle decided when it opened this turn's bubble.
+ * What the progress lifecycle decided when it opened this turn's status bubble.
  *
- * `declined` is the only one that ends the progress channel for the turn, and
- * the reason matters: an ambiguous draft outcome declines *without* falling
- * back, because a plain bubble beside a live draft is two progress messages for
- * one turn.
+ * The status bubble is always a plain message edited in place. It used to open
+ * as a rich draft, and that was the regression: Telegram animates every change
+ * to a draft, so a status line that is rewritten (a tool name, the clock) was
+ * re-typed letter by letter on every update. A draft now carries only the
+ * model's streamed words (`RemoteAgentProgress`), opened lazily beside this
+ * bubble. See docs/plans/TELEGRAM_STATUS_BUBBLE_RESTORE_PLAN.md.
  */
 export type ProgressOpen =
   | { kind: 'plain'; messageId: string }
-  | { kind: 'draft'; draftId: number }
-  /**
-   * The pairing that asked for this bubble was revoked while the open was in
-   * flight, so the preview belongs to no turn and nothing is registered. Not
-   * `declined`: that says the transport refused and ends the progress channel
-   * for the turn, while a revoke says nothing about the transport — a chat
-   * paired again later in the same turn can still get its own bubble.
-   */
-  | { kind: 'revoked' }
   | { kind: 'declined'; error?: string | undefined };
 
 /**
@@ -335,79 +293,22 @@ export interface ProgressCapableChannel {
     text: string,
     options?: { signal?: AbortSignal },
   ): Promise<string | undefined>;
-  richDraft?: RichDraftTransport;
 }
 
 /**
- * The ownership-epoch slice of `RemoteDraftRegistry` the opener needs.
+ * Open one turn's status bubble.
  *
- * Declared structurally, like `ProgressCapableChannel` above: this module must
- * not come to depend on the registry, which is owned by the controller and the
- * progress lifecycle.
- */
-export interface DraftEpoch {
-  epoch(): number;
-  isCurrent(epoch: number): boolean;
-}
-
-/**
- * Open one turn's progress bubble, rich where the transport supports it.
- *
- * Shared by both openers (chat-queued drain and sidebar-started mirror) so the
- * fallback rule cannot drift between them: a definitive refusal retries the same
- * turn on the plain path, an unknown one stops there rather than adding a second
- * progress bubble next to a draft that may be live.
- *
- * Nothing here throws. The drain calls this *before* its try/finally, so a
- * failure escaping here would abandon a claimed request without settling it —
- * which is worse than having no progress bubble at all. Every transport fault
- * therefore becomes a reported `declined` and the queue keeps running.
- *
- * `drafts` is what closes the unpair race. Opening a bubble is an await, and an
- * unpair during that await has already emptied the registry by the time the open
- * returns — so registering the returned id would put a live preview back into a
- * registry a revocation deliberately cleared, and a Stop pressed on it would
- * cancel the previous owner's turn. The epoch is read *before* the await and
- * compared after it, and the caller's registration follows that await with no
- * await of its own, so no revocation can slip between the check and the
- * registration. It is checked on both exits: adopting a draft id, *and* before
- * the unsupported-draft fallback, because a plain bubble is a brand-new message
- * and sending one into a chat that just lost its owner is a worse leak than the
- * preview it replaces. Enforced here rather than in each caller so the two
- * openers cannot drift apart, and deliberately not by clearing after the await:
- * that would leave the lifecycle unable to say which turn owns the preview.
+ * Shared by both openers (chat-queued drain and sidebar-started mirror) so they
+ * cannot drift. Nothing here throws: the drain calls this *before* its
+ * try/finally, so a failure escaping here would abandon a claimed request
+ * without settling it, which is worse than having no progress bubble at all.
  */
 export async function openProgressBubble(
   channel: ProgressCapableChannel,
   chatId: string,
   text: string,
   signal: AbortSignal,
-  drafts?: DraftEpoch,
 ): Promise<ProgressOpen> {
-  const epoch = drafts?.epoch() ?? 0;
-  // One predicate, checked before anything is adopted. For a plain-only channel
-  // this runs with no await between the read and the check, so the answer is
-  // always current and the existing plain path is unchanged.
-  const revoked = () => drafts !== undefined && !drafts.isCurrent(epoch);
-  const rich = channel.richDraft;
-  if (rich) {
-    const outcome = await rich
-      .beginDraft(chatId, text, { signal })
-      .catch((err: unknown) => ({ kind: 'unknown' as const, error: describeError(err) }));
-    if (outcome.kind === 'open') {
-      // A preview that outlived the pairing which opened it is nobody's to stop.
-      if (revoked()) return { kind: 'revoked' };
-      return { kind: 'draft', draftId: outcome.draftId };
-    }
-    if (outcome.kind === 'unknown') return { kind: 'declined', error: outcome.error };
-    // 'unsupported': fall through to the plain bubble for this turn.
-  }
-  // Checked again before the fallback, not just before adopting a draft. The
-  // draft round trip is itself an await, so a pairing can be revoked between the
-  // refusal and this point — and a plain bubble is a brand-new message, so
-  // sending it here would put a fresh progress line into a chat that no longer
-  // has an owner, which is a worse leak than the preview it replaces.
-  if (revoked()) return { kind: 'revoked' };
   if (!channel.sendProgress) return { kind: 'declined' };
   try {
     const messageId = await channel.sendProgress(chatId, text, { signal });

@@ -1,6 +1,9 @@
 # Telegram draft answer streaming
 
 **Status:** implemented 2026-10-05 (after 0.16.86; ships in the next release).
+**Superseded in part (2026-10-05):** the status is no longer a draft. See
+`TELEGRAM_STATUS_BUBBLE_RESTORE_PLAN.md`: the status is a plain edited bubble
+again, and only the model's words stream in a draft.
 **Follows:** `TELEGRAM_BOT_API_UPGRADE_PLAN.md` Phase 2 (`ed3edf9`), which put the
 status bubble into a `sendRichMessageDraft` preview but deliberately left the
 model's words out of it ("Actual token-by-token answer streaming requires a

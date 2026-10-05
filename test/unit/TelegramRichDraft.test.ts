@@ -2,10 +2,7 @@ import { describe, expect, it, vi } from 'vitest';
 import {
   draftChatId,
   isDefinitiveDraftRejection,
-  openProgressBubble,
-  renderRichProgressBlocks,
   TelegramRichDrafts,
-  type RichDraftTransport,
 } from '../../src/remote/telegramRichDraft';
 
 /**
@@ -64,13 +61,6 @@ describe('TelegramRichDrafts — draft identity', () => {
     // chat"), unlike the usual "Integer or String".
     expect(calls.map((c) => c.body.chat_id)).toEqual([99, 99]);
     expect(calls.every((c) => typeof c.body.chat_id === 'number')).toBe(true);
-  });
-
-  it('sends chat_id as the internal string on sendRichMessage, which accepts either', async () => {
-    const { calls, call } = recording({ message_id: 7 });
-    const drafts = new TelegramRichDrafts(call);
-    await drafts.finalizeStatus('99', 'Forge: completed.');
-    expect(calls[0]?.body.chat_id).toBe('99');
   });
 
   it('refuses a non-numeric chat id rather than sending a value that reads as unsupported', async () => {
@@ -151,43 +141,6 @@ describe('TelegramRichDrafts — response acceptance', () => {
     }
   });
 
-  it('finalizes with sendRichMessage and returns the persistent message id', async () => {
-    const { calls, call } = recording({ message_id: 512 });
-    const drafts = new TelegramRichDrafts(call);
-
-    const messageId = await drafts.finalizeStatus('99', 'Forge: completed.');
-
-    expect(messageId).toBe('512');
-    expect(calls[0]?.method).toBe('sendRichMessage');
-    // A final status carries no Stop button — there is nothing left to stop.
-    expect(calls[0]?.body).not.toHaveProperty('can_stop');
-    expect(calls[0]?.body).not.toHaveProperty('draft_id');
-  });
-
-  it('throws when a successful response carries no usable message_id', async () => {
-    for (const result of [
-      undefined,
-      null,
-      {},
-      { message_id: 0 },
-      { message_id: -3 },
-      { message_id: 1.5 },
-      { message_id: '42' },
-      { message_id: Number.MAX_SAFE_INTEGER + 1 },
-    ]) {
-      const drafts = new TelegramRichDrafts(vi.fn(async () => result));
-      // A 2xx without an id is an unknown outcome, not a finalized turn: the
-      // caller would otherwise arm deletion of a message that does not exist.
-      await expect(drafts.finalizeStatus('99', 'Forge: completed.')).rejects.toThrow(
-        'no usable message_id',
-      );
-    }
-  });
-
-  it('throws on a send error rather than reporting a finalized turn', async () => {
-    const drafts = new TelegramRichDrafts(failingWith('Telegram Bot API HTTP 502.'));
-    await expect(drafts.finalizeStatus('99', 'Forge: completed.')).rejects.toThrow('502');
-  });
 });
 
 describe('TelegramRichDrafts — fallback classification', () => {

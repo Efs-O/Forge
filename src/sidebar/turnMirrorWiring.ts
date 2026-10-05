@@ -131,7 +131,12 @@ function finalAnswer(conv: ConversationRuntime | undefined): string | undefined 
   for (let index = conv.messages.length - 1; index >= 0; index -= 1) {
     const message = conv.messages[index]!;
     if (message.role === 'user') return undefined;
-    if (message.role !== 'assistant' || typeof message.content !== 'string') continue;
+    if (message.role !== 'assistant') continue;
+    // A round that ended in tool calls was narrated as it happened. When the
+    // last such round is all a turn has (the user stopped it), echoing it here
+    // delivered the same paragraph twice; that turn has no final answer.
+    if (message.tool_calls?.length) return undefined;
+    if (typeof message.content !== 'string') continue;
     const text = message.content.trim();
     if (!text) continue;
     return text.length > MAX_MIRRORED_CHARS

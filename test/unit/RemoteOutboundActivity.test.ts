@@ -196,6 +196,24 @@ describe('turn mirroring', () => {
     expect(inner).toHaveBeenCalledWith('m', 'conv-1', undefined);
   });
 
+  it('does not re-send a narrated tool round when a stopped turn has no final answer', () => {
+    const { events, emitted } = wire(
+      conversation([
+        { role: 'user', content: 'hi' },
+        {
+          role: 'assistant',
+          content: 'Let me check the guard module.',
+          tool_calls: [
+            { id: 't1', type: 'function', function: { name: 'read_file', arguments: '{}' } },
+          ],
+        },
+        { role: 'tool', tool_call_id: 't1', content: 'file text' },
+      ]),
+    );
+    events.onGenerationFinished?.('m', 'conv-1', '');
+    expect(emitted).toEqual([]);
+  });
+
   it('uses the provider final text when a cold restart changes the transcript tail', () => {
     const { events, emitted } = wire(conversation([{ role: 'user', content: 'hi' }]));
     events.onGenerationFinished?.('m', 'conv-1', 'the freshly completed answer');

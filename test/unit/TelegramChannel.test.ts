@@ -1856,24 +1856,17 @@ describe('TelegramChannel — rich draft transport', () => {
     abort.abort();
   });
 
-  it('falls back to the plain bubble when the server refuses the draft method', async () => {
+  it('opens the status bubble as a plain message, never a draft', async () => {
+    // A draft status re-typed itself on every edit and crawled; the status is a
+    // plain message edited in place, and only the model's words are a draft.
     const abort = new AbortController();
     const methods: string[] = [];
     const channel = new TelegramChannel({
       token: 'secret-token',
       getCursor: () => undefined,
       setCursor: async () => undefined,
-      fetch: (async (url: string | URL | Request, init?: RequestInit) => {
-        const method = String(url).split('/').at(-1)!;
-        methods.push(method);
-        if (method === 'sendRichMessageDraft') {
-          // A Bot API older than 10.2 answers an unknown method with 404.
-          return {
-            ok: false,
-            status: 404,
-            json: async () => ({ ok: false, description: 'Not Found' }),
-          } as Response;
-        }
+      fetch: (async (url: string | URL | Request) => {
+        methods.push(String(url).split('/').at(-1)!);
         return response({ message_id: 4 });
       }) as typeof fetch,
     });
@@ -1882,36 +1875,8 @@ describe('TelegramChannel — rich draft transport', () => {
     const bubble = await openProgressBubble(channel, CHAT, 'Forge: working…', abort.signal);
 
     expect(bubble).toEqual({ kind: 'plain', messageId: '4' });
-    expect(methods.filter((m) => m === 'sendRichMessageDraft' || m === 'sendMessage')).toEqual([
-      'sendRichMessageDraft',
-      'sendMessage',
-    ]);
-    abort.abort();
-  });
-
-  it('does not open a plain bubble when the draft response is simply lost', async () => {
-    const abort = new AbortController();
-    const methods: string[] = [];
-    const channel = new TelegramChannel({
-      token: 'secret-token',
-      getCursor: () => undefined,
-      setCursor: async () => undefined,
-      fetch: (async (url: string | URL | Request) => {
-        const method = String(url).split('/').at(-1)!;
-        methods.push(method);
-        if (method === 'sendRichMessageDraft') throw new Error('fetch failed');
-        return response({ message_id: 5 });
-      }) as typeof fetch,
-    });
-    await channel.start(abort.signal);
-
-    const bubble = await openProgressBubble(channel, CHAT, 'Forge: working…', abort.signal);
-
-    expect(bubble.kind).toBe('declined');
-    // The whole point of the ambiguous case: no second progress bubble is
-    // created for a draft the user may be looking at.
-    expect(methods).toContain('sendRichMessageDraft');
-    expect(methods.filter((m) => m === 'sendMessage')).toEqual([]);
+    expect(methods).toContain('sendMessage');
+    expect(methods).not.toContain('sendRichMessageDraft');
     abort.abort();
   });
 });

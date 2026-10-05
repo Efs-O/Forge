@@ -8,6 +8,7 @@ import { RemoteAuth } from '../../src/remote/RemoteAuth';
 import { RemoteController } from '../../src/remote/RemoteController';
 import { RemoteRequestStore } from '../../src/remote/RemoteRequestStore';
 import type { RichDraftTransport } from '../../src/remote/telegramRichDraft';
+import type { AgentProgressEvent } from '../../src/sidebar/AgentProgress';
 import type { ForgeHostFacade } from '../../src/sidebar/ForgeHostFacade';
 import type {
   ToolApprovalRequestEvent,
@@ -74,12 +75,11 @@ interface Fixture {
   host: ForgeHostFacade;
   sent: ForgeHostFacade['send'];
   cancel: ForgeHostFacade['cancel'];
-  finalizes: Array<{ chatId: string; text: string }>;
   release: () => void;
   /** Resolves the gated draft open with the id Telegram would have returned. */
   releaseOpen: (draftId: number) => void;
-  /** Resolves when the drain has written this turn's final status. */
-  drainDone: Promise<void>;
+  /** Resolves once the drain has edited the bubble to this turn's final status. */
+  drainDone: () => Promise<void>;
   /** Raises an ask_user gate for the live turn, as the host question service would. */
   askQuestion: (event: UserQuestionRequestEvent) => void;
   answerQuestion: ReturnType<typeof vi.fn>;
@@ -91,8 +91,8 @@ interface Fixture {
 
 /**
  * One fixture, one live draft: a paired owner sends a prompt, the drain opens a
- * rich draft for it, and `host.send` blocks so the turn is still live while the
- * Stop updates arrive.
+ * plain status bubble, the model's first words open the words draft, and
+ * `host.send` blocks so the turn is still live while the Stop updates arrive.
  */
 async function liveTurnDraft(options: { gateOpen?: boolean } = {}): Promise<Fixture> {
   const state = await store();
@@ -100,7 +100,6 @@ async function liveTurnDraft(options: { gateOpen?: boolean } = {}): Promise<Fixt
   const auth = new RemoteAuth(secrets as unknown as vscode.SecretStorage);
   const channel = new FakeRemoteChannel('telegram');
 
-  const finalizes: Array<{ chatId: string; text: string }> = [];
   // Optional gate on the draft open, to model an unpair landing *inside* the
   // await that opens the preview.
   let releaseOpen!: (draftId: number) => void;
@@ -113,19 +112,13 @@ async function liveTurnDraft(options: { gateOpen?: boolean } = {}): Promise<Fixt
       return { kind: 'open', draftId: await openGate };
     },
     updateDraft: async () => undefined,
-    finalizeStatus: async (chatId, text) => {
-      finalizes.push({ chatId, text });
-      drainDone();
-      return 'final-1';
-    },
   };
   channel.richDraft = richDraft;
 
   let release!: () => void;
   const gate = new Promise<void>((resolve) => (release = resolve));
   const errors: string[] = [];
-  let drainDone!: () => void;
-  const drainFinished = new Promise<void>((resolve) => (drainDone = resolve));
+  let progressListener: ((event: AgentProgressEvent) => void) | undefined;
   const answerQuestion = vi.fn(() => true);
   let ask!: (event: UserQuestionRequestEvent) => void;
   let askApproval!: (event: ToolApprovalRequestEvent) => void;
@@ -153,6 +146,10 @@ async function liveTurnDraft(options: { gateOpen?: boolean } = {}): Promise<Fixt
       return { kind: 'cancelled' as const, finalText: '' };
     }),
     cancel,
+    onAgentProgress: (listener: (event: AgentProgressEvent) => void) => {
+      progressListener = listener;
+      return { dispose: () => undefined };
+    },
     addApprovalSink: (sink: {
       requested(event: ToolApprovalRequestEvent): void;
       resolved(event: ToolApprovalResolvedEvent): void;
@@ -198,14 +195,17 @@ async function liveTurnDraft(options: { gateOpen?: boolean } = {}): Promise<Fixt
   const code = auth.beginPairing('telegram');
   await channel.emit({ ...base, kind: 'text', providerMessageId: 'pair', text: `/pair ${code}` });
   await channel.emit({ ...base, kind: 'text', providerMessageId: 'go', text: 'hello' });
+  await vi.waitFor(() => expect(host.send).toHaveBeenCalled());
+  // The model's first words open the words draft beside the status bubble.
+  progressListener?.({ kind: 'commentary', conversationId: 'c1', text: 'Looking at it' });
   if (options.gateOpen) {
-    // The drain is parked inside the draft open: the preview does not exist yet
-    // and the turn has not started.
-    await vi.waitFor(() => expect(openStarted).toBe(true));
+    // Parked inside the draft open: the preview does not exist yet.
+    await vi.waitFor(() => expect(openStarted).toBe(true), { timeout: 3_000 });
   } else {
-    // The drain registers the draft before it starts the turn, so once send has
-    // been called the draft is live and the turn is blocked on the gate.
-    await vi.waitFor(() => expect(host.send).toHaveBeenCalled());
+    await vi.waitFor(
+      () => expect(draftRegistered(controller)).toBe(true),
+      { timeout: 3_000 },
+    );
   }
 
   return {
@@ -215,15 +215,22 @@ async function liveTurnDraft(options: { gateOpen?: boolean } = {}): Promise<Fixt
     host,
     sent: host.send,
     cancel,
-    finalizes,
     release,
     releaseOpen,
-    drainDone: drainFinished,
+    drainDone: () =>
+      vi.waitFor(() =>
+        expect(channel.edits.map((edit) => edit.text)).toContain('Forge: cancelled.'),
+      ),
     askQuestion: (event) => ask(event),
     answerQuestion,
     askApproval: (event) => askApproval(event),
     errors,
   };
+}
+
+/** Whether the controller's draft registry holds the words preview yet. */
+function draftRegistered(controller: RemoteController): boolean {
+  return (controller as unknown as { drafts: { size: number } }).drafts.size > 0;
 }
 
 function stopped(draftId: number, providerMessageId: string, overrides = {}): unknown {
@@ -244,7 +251,7 @@ describe('remote generation_stopped (Phase 2 native Stop)', () => {
     expect(f.cancel).toHaveBeenCalledWith('c1');
 
     f.release();
-    await f.drainDone;
+    await f.drainDone();
     await f.controller.stop();
   });
 
@@ -259,7 +266,7 @@ describe('remote generation_stopped (Phase 2 native Stop)', () => {
     expect(f.cancel).not.toHaveBeenCalled();
 
     f.release();
-    await f.drainDone;
+    await f.drainDone();
     await f.controller.stop();
   });
 
@@ -275,7 +282,7 @@ describe('remote generation_stopped (Phase 2 native Stop)', () => {
     expect(f.cancel).not.toHaveBeenCalled();
 
     f.release();
-    await f.drainDone;
+    await f.drainDone();
     await f.controller.stop();
   });
 
@@ -289,7 +296,7 @@ describe('remote generation_stopped (Phase 2 native Stop)', () => {
     expect(f.cancel).toHaveBeenCalledTimes(1);
 
     f.release();
-    await f.drainDone;
+    await f.drainDone();
     await f.controller.stop();
   });
 
@@ -302,7 +309,7 @@ describe('remote generation_stopped (Phase 2 native Stop)', () => {
     expect(f.cancel).toHaveBeenCalledTimes(1);
 
     f.release();
-    await f.drainDone;
+    await f.drainDone();
     await f.controller.stop();
   });
 
@@ -364,7 +371,7 @@ describe('remote generation_stopped (Phase 2 native Stop)', () => {
     expect(f.cancel).not.toHaveBeenCalled();
 
     f.release();
-    await f.drainDone;
+    await f.drainDone();
     await f.controller.stop();
   });
 
@@ -378,7 +385,7 @@ describe('remote generation_stopped (Phase 2 native Stop)', () => {
     expect(f.cancel).not.toHaveBeenCalled();
 
     f.release();
-    await f.drainDone;
+    await f.drainDone();
     await f.controller.stop();
   });
 
@@ -413,7 +420,7 @@ describe('remote generation_stopped (Phase 2 native Stop)', () => {
     expect(f.answerQuestion).toHaveBeenCalledWith('q1', 'debug');
 
     f.release();
-    await f.drainDone;
+    await f.drainDone();
     await f.controller.stop();
   });
 
@@ -436,7 +443,7 @@ describe('remote generation_stopped (Phase 2 native Stop)', () => {
     expect(f.errors[0]).toContain('host busy');
 
     f.release();
-    await f.drainDone;
+    await f.drainDone();
     await f.controller.stop();
   });
 
@@ -484,7 +491,7 @@ describe('remote generation_stopped (Phase 2 native Stop)', () => {
     );
 
     f.release();
-    await f.drainDone;
+    await f.drainDone();
     await f.controller.stop();
   });
 
@@ -507,28 +514,28 @@ describe('remote generation_stopped (Phase 2 native Stop)', () => {
     expect(f.cancel).not.toHaveBeenCalled();
 
     f.release();
-    await f.drainDone;
+    await f.drainDone();
     await f.controller.stop();
   });
 
-  it('finalizes a persistent status on cancellation, separate from the answer', async () => {
+  it('reports cancellation by editing the status bubble, separate from the answer', async () => {
     const f = await liveTurnDraft();
 
     await f.channel.emit(stopped(42, 'stop-1'));
     f.release();
-    await f.drainDone;
+    await f.drainDone();
 
-    // The preview expires on Telegram's side, so this send is what leaves the
-    // turn's outcome visible — and it is status only, never the answer.
-    expect(f.finalizes).toEqual([{ chatId: 'chat-1', text: 'Forge: cancelled.' }]);
+    // The status is the plain bubble, edited in place; the words preview
+    // carries no status and simply expires on Telegram's side.
+    expect(f.channel.progress).toEqual([{ chatId: 'chat-1', text: 'Forge: working…' }]);
     // The answer/notification travels its own path, not the status message.
     expect(f.channel.sent.map((m) => m.text)).not.toContain('Forge: cancelled.');
     await f.controller.stop();
   });
 
   it('cannot be cancelled through a draft that opened during an unpair, after re-pairing', async () => {
-    // The deferred-open race, end to end. The drain is parked inside the draft
-    // open when the owner unpairs; the open then returns an id *after* the
+    // The deferred-open race, end to end. The words preview is parked inside
+    // its open when the owner unpairs; the open then returns an id *after* the
     // registry was cleared. Registering it would hand a live preview to the next
     // pairing of the same chat, so a Stop pressed on the old preview would cancel
     // a turn the new owner never opened. `forgetChannel` alone cannot close this:
@@ -556,12 +563,8 @@ describe('remote generation_stopped (Phase 2 native Stop)', () => {
     // guard: the Stop resolved to nothing.
     expect(f.cancel).not.toHaveBeenCalled();
 
-    // No status send either: the lifecycle never adopted a preview, so there is
-    // nothing to finalize — the answer still travels the outbox on its own.
-    // `drainDone` is deliberately not awaited here; it only fires from a draft
-    // finalization, which this turn no longer has.
     f.release();
+    await f.drainDone();
     await f.controller.stop();
-    expect(f.finalizes).toEqual([]);
   });
 });
