@@ -208,6 +208,17 @@ cannot predict them, and the file-plus-path strategy is the real fix for all thr
 5. **The `manage_jobs` interval refusal points to `wait`.** The message is the Zod message in
    `src/jobs/jobSchema.ts` (`interval must be at least 15 minutes`). It adds: "To wait for a reply,
    use `wait` (ends early on a new message) or `ask_live_session` with `notify_on_answer`."
+6. **The send result names who received the message.** On 2026-10-05 a Codex chat sent to
+   `claude`, meaning the Claude that wrote this plan. The alias was held by a different Claude
+   session (joined via `forge.sh join claude`), which answered instead. Nothing in the reply showed
+   the mismatch.
+   - The `/agent/message` relay response gains `delivered_to`, a single line such as
+     `claude = session 7b39fb6e (joined, workspace n:\vs code apps\Forge)`.
+   - It uses what the route already resolved: for a joined peer, `claude_session_id` and the attachment
+     from `aliases.json`; for an owned session, its session id and workspace.
+   - When a live stand-in answers for a dead joined peer, the result says `stand-in for <id>`.
+   - `forge.sh send` prints the response as it already does, with no script change.
+   - No new aliases or routing. The point is to make a wrong recipient visible at send time.
 
 Dropped: a `report_path` field on `ask_live_session`. Writing a file plus sending the path already
 works with no schema change. Revisit only if the new error text does not stop the loop.
@@ -307,6 +318,11 @@ Design:
 3. **The `send` header line** in `src/agentBus/forge.sh` contains "does not wake" (before 2b) or the
    matching 2b wording.
 4. **The jobs refusal** contains `wait`.
+4b. **`delivered_to`.**
+    - A relay send to a joined `claude` peer returns `delivered_to` with that peer's
+      `claude_session_id`.
+    - A send to an owned `codex` session returns its session id.
+    - A send that falls to a stand-in says `stand-in for`.
 
 2b:
 
@@ -502,7 +518,7 @@ wake or delivers one from a window that does not own the chat.
     a session that reaches 85% compacts on the first attempt, and the attempt row shows
     `counter: count_tokens` with a `charsPerToken` between 3 and 4.
   - With `estimate`, `hostMaxChars` is unchanged (test 3).
-- **Phase 2a:** tests 1–4 pass.
+- **Phase 2a:** tests 1–4 and 4b pass.
 - **Phase 2b:**
   - Tests 5–10 pass.
   - Live check after merge: a `forge.sh send` to Codex from an idle Forge chat wakes that chat when
