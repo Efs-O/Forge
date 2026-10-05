@@ -24,7 +24,7 @@ export const HELP_TEXT = `Forge commands:
 
 Session: /chat <n-or-name> · /chats [page] · /context · /help · /mirror on|off · /new · /notify on|off · /resume · /status · /stop · /view [n] · /voice on|off
 
-Sessions: /claude <msg> · /codex <msg> · /copilot <msg>
+Sessions: /answer <question-id> <text> · /claude <msg> · /codex <msg> · /copilot <msg> · /tell <agent> <msg>
 
 Workspace: /workspace · /workspace <n-or-alias>
 
@@ -58,7 +58,7 @@ Notes:
 
 • /notify off silences agent notify_user messages for this chat until the window reloads
 
-• /claude, /codex and /copilot send a one-way note to a live Claude Code, Codex, or Copilot session. The whole message after the command is the note. It is queued to that session — it is not answered here, so nothing waits for a reply. The reply says "accepted" because that is all this can promise: the note is durably queued, not yet run. If the session is not live, or its queue is full, the note is refused and the reason says which
+• /claude, /codex and /copilot ask a live session. Forge acknowledges the request and sends that session's final answer here. The session may send updates or ask you a question; answer with /answer <question-id> <text>. /tell <agent> <msg> remains a one-way note with no answer expected
 
 • /mirror off stops answers typed in the Forge window being echoed here (on by default)
 

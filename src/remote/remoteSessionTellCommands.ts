@@ -4,7 +4,7 @@ import { getMeshOrchestrator } from '../agentMesh/meshContext';
 import { MAX_TELL_MESSAGE_CHARS } from '../tools/tellLiveSessionTool';
 
 /**
- * Phase 5: `/claude <msg>`, `/codex <msg>`, `/copilot <msg>` — a one-way note
+ * `/tell <agent> <msg>` — a one-way note
  * from Telegram into a live session's FIFO, through the same door
  * `tell_live_session` uses.
  *
@@ -33,6 +33,15 @@ export const SESSION_TELL_ALIASES = {
   '/copilot': 'copilot',
 } as const;
 
+/** Exact Telegram command parsing. A prefixed token such as /codexy is not a session. */
+export function remoteSessionAskFromText(
+  text: string,
+): { target: 'claude' | 'codex' | 'copilot'; message: string } | undefined {
+  const [command, ...words] = text.trim().split(/\s+/u);
+  if (!command || !isSessionTellCommand(command)) return undefined;
+  return { target: SESSION_TELL_ALIASES[command], message: words.join(' ').trim() };
+}
+
 function isSessionTellCommand(command: string): command is keyof typeof SESSION_TELL_ALIASES {
   return Object.hasOwn(SESSION_TELL_ALIASES, command);
 }
@@ -43,15 +52,22 @@ export async function handleRemoteSessionTellCommand(
   event: Extract<RemoteInboundEvent, { kind: 'text' }>,
   context: RemoteCommandContext,
 ): Promise<RemoteInboundDisposition | undefined> {
-  if (!isSessionTellCommand(command)) return undefined;
-  const alias = SESSION_TELL_ALIASES[command];
+  if (command !== '/tell') return undefined;
+  const chosen = operands[0];
+  if (chosen !== 'claude' && chosen !== 'codex' && chosen !== 'copilot') {
+    return { kind: 'rejected', reason: 'usage: /tell <claude|codex|copilot> <message>' };
+  }
+  const alias = chosen;
 
   // The whole remainder is the message: a note about a build reads
   // "build 2 failed on linux", and splitting on the first space would send
   // "build" and silently drop the rest.
-  const message = operands.join(' ').trim();
+  const message = operands.slice(1).join(' ').trim();
   if (message === '') {
-    return { kind: 'rejected', reason: `usage: ${command} <message>` };
+    return {
+      kind: 'rejected',
+      reason: 'usage: /tell <claude|codex|copilot> <message>',
+    };
   }
   // Same ceiling as `tell_live_session`, read from that module rather than
   // restated, so the two doors cannot drift apart on a limit change.

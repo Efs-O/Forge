@@ -10,6 +10,7 @@ export const RequestSchema = z.object({
   providerMessageId: z.string(),
   conversationId: z.string(),
   text: z.string(),
+  sessionTarget: z.enum(['claude', 'codex', 'copilot']).optional(),
   priority: z.literal('steer').optional(),
   attachments: z
     .array(
@@ -171,6 +172,18 @@ export const LegacyRemoteStateSchema = z.object({
 export const RemoteStateSchema = z.object({
   version: z.literal(2),
   requests: z.array(RequestSchema),
+  sessionQuestions: z
+    .array(
+      z.object({
+        id: z.string().uuid(),
+        requestId: z.string().uuid(),
+        channel: ChannelSchema,
+        chatId: z.string(),
+        expiresAt: z.number().int().nonnegative(),
+        answerText: z.string().optional(),
+      }),
+    )
+    .default([]),
   outbox: z.array(OutboxSchema),
   bindings: z.array(BindingSchema),
   cursors: z.record(z.string(), z.string()),
@@ -191,6 +204,7 @@ export type WorkspaceHandoff = z.infer<typeof WorkspaceHandoffSchema>;
 export const EMPTY_REMOTE_STATE: RemoteStoreState = {
   version: 2,
   requests: [],
+  sessionQuestions: [],
   outbox: [],
   bindings: [],
   cursors: {},
@@ -218,6 +232,7 @@ export function migrateLegacyState(
   return {
     version: 2,
     requests: legacy.requests,
+    sessionQuestions: [],
     outbox: legacy.outbox,
     bindings: legacy.bindings,
     cursors: legacy.cursors,

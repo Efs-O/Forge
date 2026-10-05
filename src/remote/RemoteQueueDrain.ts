@@ -8,6 +8,7 @@ import type { RemoteOutboxDelivery } from './RemoteOutboxDelivery';
 import { withConversationIdentity } from './RemoteReplyIdentity';
 import { settleRemoteClaim } from './remoteClaimSettle';
 import { openProgressBubble } from './telegramRichDraft';
+import { askRemoteSession } from './RemoteSessionAsk';
 import type { RemoteRequestStore } from './RemoteRequestStore';
 import type { RemoteChannel } from './types';
 
@@ -68,6 +69,37 @@ export async function drainRemoteQueue(
           deps.host.contextBudget?.(next.conversationId),
         )}`,
     );
+    if (next.sessionTarget) {
+      const name = next.sessionTarget[0]!.toUpperCase() + next.sessionTarget.slice(1);
+      try {
+        const answer = await askRemoteSession(next.sessionTarget, next.text, next.id, deps.signal);
+        if (
+          !(await persistResult(() =>
+            deps.store.finish(next.id, 'completed', {
+              finalText: answer,
+              notification: `${name} says:\n\n${answer}`,
+            }),
+          ))
+        )
+          return;
+      } catch (err) {
+        if (deps.signal.aborted) return;
+        const error = err instanceof Error ? err.message : String(err);
+        if (
+          !(await persistResult(() =>
+            deps.store.finish(next.id, 'failed', {
+              error,
+              notification: `${name} could not answer: ${error}`,
+            }),
+          ))
+        )
+          return;
+      } finally {
+        deps.activeConversations.delete(conversationId);
+      }
+      deps.outbox.kick();
+      continue;
+    }
     // Always a plain bubble edited in place; the model's words stream into a
     // separate draft opened by RemoteAgentProgress (see openProgressBubble).
     const bubble = await openProgressBubble(

@@ -34,6 +34,8 @@ import {
   isRemoteCommand,
   type RemotePromptAdmissionDeps,
 } from './RemotePromptAdmission';
+import { admitRemoteSessionCommand } from './remoteSessionAdmission';
+import { startRemoteSessionRecovery } from './RemoteSessionRecovery';
 import { drainRemoteQueue } from './RemoteQueueDrain';
 import { RemotePendingPrompt } from './RemotePendingPrompt';
 import {
@@ -61,11 +63,7 @@ export class RemoteController {
   private readonly approvals: RemoteApprovalBridge;
   private readonly questions: RemoteQuestionBridge;
   private readonly progress: RemoteAgentProgress;
-  /**
-   * Live rich-draft previews, shared between the progress lifecycle (which
-   * registers them) and the Stop handler (which resolves one back to a
-   * conversation). In-memory by design — see `RemoteDraftRegistry`.
-   */
+  /** Live draft previews shared by progress and Stop. */
   private readonly drafts = new RemoteDraftRegistry();
   private readonly hostProgress: HostProgressOpener;
   private readonly pending = new RemotePendingPrompt();
@@ -125,9 +123,7 @@ export class RemoteController {
       speech,
       commandCleanup: this.commandCleanup,
     });
-    // The two bridges take the same eight dependencies by design -- both turn
-    // one host-side prompt into a chat round-trip. Naming that shape once means
-    // a change to it cannot reach only one of them.
+    // Both bridges share the same chat round-trip dependencies.
     const bridgeDeps = [
       channel,
       store,
@@ -170,6 +166,13 @@ export class RemoteController {
 
   async start(): Promise<void> {
     await this.store.load();
+    startRemoteSessionRecovery(
+      this.store,
+      this.channel.name,
+      this.outbox,
+      this.abort.signal,
+      this.options.onError,
+    );
     this.accepting = true;
     this.subscription = this.channel.onEvent((event) => this.handle(event));
     this.approvals.start();
@@ -194,10 +197,7 @@ export class RemoteController {
   /** Drops held prompts on unpair so a new owner cannot inherit the old owner's queued work. */
   forgetChannel(channel: RemoteInboundEvent['channel']): void {
     this.pending.clearChannel(channel);
-    // A live draft preview outlives the pairing that opened it: the preview is
-    // Telegram-side and lasts ~30s. Clearing the registry means a Stop arriving
-    // during that window after an unpair resolves to nothing instead of to the
-    // previous owner's conversation.
+    // A Telegram draft can outlive pairing; its Stop must no longer cancel a turn.
     this.drafts.forgetAll();
   }
   async stop(): Promise<void> {
@@ -359,17 +359,12 @@ export class RemoteController {
     if (event.text.length > this.options.maxMessageChars) {
       return ephemeralRejection('message exceeds configured limit');
     }
-    // An outstanding question owns the chat's next plain text: the agent is
-    // blocked on it, so admitting the reply as a new prompt would both strand
-    // the turn and queue work the user never asked for. Commands stay commands,
-    // or a pending question would leave the chat with no way out.
+    // An outstanding question owns the next plain text; commands stay available.
     if (!event.text.startsWith('/') && this.questions.answerText(event.chatId, event.text)) {
       this.auth.touch(event);
       return { kind: 'handled' };
     }
-    // After the question bridge, deliberately: a pending question is blocking a
-    // running turn, while a draft is blocking nothing. Ordering them the other
-    // way would let an unconfirmed transcript strand a live agent.
+    // Questions take priority over voice drafts.
     const draftResult = this.voice
       ? await resolveVoiceDraft(event, this.voice, {
           touch: () => this.auth.touch(event),
@@ -382,6 +377,17 @@ export class RemoteController {
       : undefined;
     if (draftResult) return draftResult;
     const key = remoteDedupKey(event.channel, event.chatId, event.providerMessageId);
+    const sessionAsk = await admitRemoteSessionCommand(
+      event,
+      key,
+      this.promptDeps,
+      this.sendTransientMessage,
+      this.options.onError,
+    );
+    if (sessionAsk) {
+      if (sessionAsk.kind !== 'rejected' && sessionAsk.kind !== 'retry') this.auth.touch(event);
+      return sessionAsk;
+    }
     if (isRemoteCommand(event.text)) {
       const result = await handleRemoteCommand(
         event,

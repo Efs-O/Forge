@@ -62,7 +62,7 @@ describe('TelegramChannel', () => {
   });
 
   /**
-   * Phase 5: the three session commands must be reachable from the phone, both
+   * The session commands must be reachable from the phone, both
    * as native menu entries and in /help. A command nobody can discover is a
    * command that does not exist, and the menu is the only place the alias
    * spelling is shown next to its meaning.
@@ -72,10 +72,12 @@ describe('TelegramChannel', () => {
       expect(TELEGRAM_BOT_COMMANDS).toContainEqual(
         expect.objectContaining({
           command,
-          description: expect.stringContaining('one-way note'),
+          description: expect.stringContaining('answer returns here'),
         }),
       );
     }
+    expect(TELEGRAM_BOT_COMMANDS).toContainEqual(expect.objectContaining({ command: 'tell', description: expect.stringContaining('one-way') }));
+    expect(TELEGRAM_BOT_COMMANDS).toContainEqual(expect.objectContaining({ command: 'answer' }));
     // Telegram caps the menu at 100 commands and sorts them for display; the
     // list is kept alphabetical so a phone user can scan it.
     const names = TELEGRAM_BOT_COMMANDS.map((entry) => entry.command);
@@ -91,15 +93,13 @@ describe('TelegramChannel', () => {
     expect(sessionsLine).toContain('/claude <msg>');
     expect(sessionsLine).toContain('/codex <msg>');
     expect(sessionsLine).toContain('/copilot <msg>');
-    // The note is queued, not answered — the help must not imply a reply, and
-    // must not promise more than "accepted".
+    expect(sessionsLine).toContain('/tell <agent> <msg>');
+    expect(sessionsLine).toContain('/answer <question-id> <text>');
     const note = HELP_TEXT.split('\n').find((line) =>
       line.includes('/claude, /codex and /copilot'),
     );
-    expect(note).toContain('queued to that session');
-    expect(note).toContain('not answered here');
-    expect(note).toContain('accepted');
-    expect(note).not.toMatch(/will reply|answers here/iu);
+    expect(note).toContain("final answer here");
+    expect(note).toContain('one-way note');
   });
 
   it('validates Bot API authentication without exposing the token', async () => {

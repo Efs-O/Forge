@@ -392,6 +392,12 @@ export function setupAgentMessaging(
       }
       return runtime.sendFileToConversation(conversationId, filePath, caption);
     },
+    remoteSession: async (from, id, action, text) => {
+      const runtime = getRemoteRuntime();
+      return runtime
+        ? runtime.remoteSessionAction(from, id, action, text)
+        : { kind: 'refused', error: 'the remote runtime is unavailable' };
+    },
     // §8/P3: a `to: forge` message that parses as a typed lifecycle command is
     // dispatched (standby/wake/close/steer/say/handoff) and the reply returned
     // to the caller's `forge.sh cmd` call. Ordinary text falls through to the inbox.

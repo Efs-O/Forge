@@ -3,6 +3,8 @@
 #   forge.sh say <your-name> [--model <name>] [--new] [--reply-in-chat] [--to <conversationId>|--to-running] [file]  message Forge
 #   forge.sh send <your-name> <to> [--to <conversationId>|--to-running] [file]  relay (the verdict wakes the sending Forge chat when it is open), or target a Forge chat when <to> is forge
 #   forge.sh send-file <your-name> --to <conversationId> <workspace-relative-path> [--caption-file <file>]  send a file directly to its Telegram chat (no Forge model turn)
+#   forge.sh remote-notify <claude|codex|copilot> <exchangeId> [file]  notify the Telegram chat that opened this exchange
+#   forge.sh remote-ask <claude|codex|copilot> <exchangeId> [file]  ask that chat and wait up to 20 minutes for /answer
 #   forge.sh read-verdict <your-name> <exchangeId>  read the full retained verdict without consuming it
 #   forge.sh ack-verdict <your-name> <exchangeId>   acknowledge a read verdict and remove its retained copy
 #   forge.sh steer <your-name> <to> [file] interrupt <to>'s running turn (forge/claude/codex/copilot); runs next
@@ -49,6 +51,36 @@ if [ "$VERB" = "who" ]; then
     printf "%-8s  %-9s  %-9s  %s\n", a, att, act, det
   }'
   exit 0
+fi
+if [ "$VERB" = "remote-notify" ] || [ "$VERB" = "remote-ask" ]; then
+  [ $# -ge 3 ] && [ $# -le 4 ] || usage
+  NAME="$2"; EXCHANGE_ID="$3"; SRC="${4:--}"
+  case "$NAME" in claude|codex|copilot) ;; *) echo "forge.sh: expected claude, codex or copilot" >&2; exit 2;; esac
+  case "$EXCHANGE_ID" in ""|*[!a-f0-9-]*) echo "forge.sh: invalid exchange id" >&2; exit 2;; esac
+  TMP="$(mktemp)"; trap 'rm -f "$TMP"' EXIT
+  if [ "$SRC" = "-" ]; then cat > "$TMP"; else cp "$SRC" "$TMP" || exit 2; fi
+  [ -f "$EP" ] || { echo "forge.sh: Forge is not reachable" >&2; exit 1; }
+  URL="$(grep '"url"' "$EP" | cut -d'"' -f4)"
+  TOKEN="$(grep '"token"' "$EP" | cut -d'"' -f4)"
+  if [ "$VERB" = "remote-ask" ]; then ROUTE=remote-ask; else ROUTE=remote-notify; fi
+  RESULT="$(curl -sS --fail-with-body -X POST -H "Authorization: Bearer $TOKEN" \
+    -H "Content-Type: text/plain; charset=utf-8" --data-binary "@$TMP" \
+    "$URL/agent/$ROUTE?from=$NAME&exchange_id=$EXCHANGE_ID")" \
+    || { echo "forge.sh: remote delivery was not confirmed; do not retry blindly" >&2; exit 1; }
+  if [ "$VERB" = "remote-notify" ]; then printf '%s\n' "$RESULT"; exit 0; fi
+  QUESTION_ID="$RESULT"
+  case "$QUESTION_ID" in ""|*[!a-f0-9-]*) echo "forge.sh: invalid question id from Forge" >&2; exit 1;; esac
+  ATTEMPT=0
+  while [ "$ATTEMPT" -lt 1200 ]; do
+    if [ -f "$ROOT/remote-answers/$QUESTION_ID.md" ]; then
+      cat "$ROOT/remote-answers/$QUESTION_ID.md"
+      exit 0
+    fi
+    sleep 1
+    ATTEMPT=$((ATTEMPT + 1))
+  done
+  echo "forge.sh: no Telegram answer within 20 minutes (question $QUESTION_ID)" >&2
+  exit 124
 fi
 if [ "$VERB" = "status" ] || [ "$VERB" = "view" ]; then
   NAME="${2:-}"; COUNT="${3:-}"

@@ -9,10 +9,11 @@ export function appendHostNotification(
   chatId: string,
   text: string,
   ephemeral = false,
+  requestId = `host-${randomUUID()}`,
 ): void {
   draft.outbox.push({
     id: randomUUID(),
-    requestId: `host-${randomUUID()}`,
+    requestId,
     channel,
     chatId,
     text,

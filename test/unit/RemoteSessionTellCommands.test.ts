@@ -30,7 +30,7 @@ class MemorySecrets {
 }
 
 /**
- * Phase 5: `/claude`, `/codex`, `/copilot` — a one-way note from a remote chat
+ * `/tell <agent>` — a one-way note from a remote chat
  * into a live session's FIFO.
  *
  * The invariants that matter here are about what the user is TOLD and what
@@ -121,8 +121,8 @@ describe('remote session tell commands (Phase 5)', () => {
       await fs.rm(directory, { recursive: true, force: true });
   });
 
-  /** The three commands map to the three aliases, whole remainder included. */
-  it('routes /claude, /codex and /copilot to their aliases with the whole remainder', async () => {
+  /** The target operand maps to a live alias; the whole remainder is the note. */
+  it('routes /tell to all three aliases with the whole remainder', async () => {
     const { orchestrator, calls } = fakeOrchestrator(async () => ({
       exchangeId: 'ex-1',
       to: 'x',
@@ -132,13 +132,13 @@ describe('remote session tell commands (Phase 5)', () => {
     const { context, channel } = await fixture(orchestrator);
 
     await expect(
-      handleRemoteCommand(textEvent('/claude build 2 failed on linux'), context, 'd1'),
+      handleRemoteCommand(textEvent('/tell claude build 2 failed on linux'), context, 'd1'),
     ).resolves.toEqual({ kind: 'handled' });
-    await expect(handleRemoteCommand(textEvent('/codex still broken'), context, 'd2')).resolves.toEqual(
+    await expect(handleRemoteCommand(textEvent('/tell codex still broken'), context, 'd2')).resolves.toEqual(
       { kind: 'handled' },
     );
     await expect(
-      handleRemoteCommand(textEvent('/copilot  look at this  '), context, 'd3'),
+      handleRemoteCommand(textEvent('/tell copilot  look at this  '), context, 'd3'),
     ).resolves.toEqual({ kind: 'handled' });
 
     expect(calls).toEqual([
@@ -164,13 +164,13 @@ describe('remote session tell commands (Phase 5)', () => {
     setMeshOrchestrator(orchestrator);
     const { context, channel } = await fixture(orchestrator);
 
-    await expect(handleRemoteCommand(textEvent('/claude'), context, 'd4')).resolves.toEqual({
+    await expect(handleRemoteCommand(textEvent('/tell'), context, 'd4')).resolves.toEqual({
       kind: 'rejected',
-      reason: 'usage: /claude <message>',
+      reason: 'usage: /tell <claude|codex|copilot> <message>',
     });
-    await expect(handleRemoteCommand(textEvent('/codex    '), context, 'd5')).resolves.toEqual({
+    await expect(handleRemoteCommand(textEvent('/tell codex    '), context, 'd5')).resolves.toEqual({
       kind: 'rejected',
-      reason: 'usage: /codex <message>',
+      reason: 'usage: /tell <claude|codex|copilot> <message>',
     });
     expect(calls).toEqual([]);
     expect(channel.sent).toEqual([]);
@@ -179,7 +179,7 @@ describe('remote session tell commands (Phase 5)', () => {
   /** The single gate: no orchestrator means no mesh, for either cause. */
   it('rejects when the agent mesh is not up in this window', async () => {
     const { context, channel } = await fixture(undefined);
-    await expect(handleRemoteCommand(textEvent('/claude hello'), context, 'd6')).resolves.toEqual({
+    await expect(handleRemoteCommand(textEvent('/tell claude hello'), context, 'd6')).resolves.toEqual({
       kind: 'rejected',
       reason: 'the agent mesh is not up in this window',
     });
@@ -195,7 +195,7 @@ describe('remote session tell commands (Phase 5)', () => {
     const { context, channel } = await fixture(orchestrator);
 
     await expect(
-      handleRemoteCommand(textEvent('/codex are you there'), context, 'd7'),
+      handleRemoteCommand(textEvent('/tell codex are you there'), context, 'd7'),
     ).resolves.toEqual({
       kind: 'rejected',
       reason: 'no live session for "codex" (no alias, no live pin, no owned session)',
@@ -216,7 +216,7 @@ describe('remote session tell commands (Phase 5)', () => {
     setMeshOrchestrator(orchestrator);
     const { context, channel } = await fixture(orchestrator);
 
-    await expect(handleRemoteCommand(textEvent('/claude go'), context, 'd8')).resolves.toEqual({
+    await expect(handleRemoteCommand(textEvent('/tell claude go'), context, 'd8')).resolves.toEqual({
       kind: 'handled',
     });
     const text = channel.sent[0]!.text;
@@ -245,14 +245,14 @@ describe('remote session tell commands (Phase 5)', () => {
     });
 
     await expect(
-      handleRemoteCommand(textEvent('/claude ship it'), context, 'd9'),
+      handleRemoteCommand(textEvent('/tell claude ship it'), context, 'd9'),
     ).resolves.toEqual({ kind: 'handled' });
     expect(calls).toHaveLength(1);
     expect(channel.sent).toEqual([]);
     expect(onError).toHaveBeenCalledTimes(1);
     expect(String(onError.mock.calls[0]![0])).toContain('telegram transport is down');
     // The receipt is completed, so the redelivered update cannot re-enqueue.
-    await expect(handleRemoteCommand(textEvent('/claude ship it'), context, 'd9')).resolves.toEqual(
+    await expect(handleRemoteCommand(textEvent('/tell claude ship it'), context, 'd9')).resolves.toEqual(
       { kind: 'handled' },
     );
     expect(calls).toHaveLength(1);
@@ -274,7 +274,7 @@ describe('remote session tell commands (Phase 5)', () => {
     });
     const fallbackLog = vi.spyOn(console, 'error').mockImplementation(() => undefined);
     try {
-      await expect(handleRemoteCommand(textEvent('/claude once'), context, 'log-failure')).resolves.toEqual({ kind: 'handled' });
+      await expect(handleRemoteCommand(textEvent('/tell claude once'), context, 'log-failure')).resolves.toEqual({ kind: 'handled' });
       expect(await state.beginControlEvent('log-failure')).toBe('completed');
       expect(calls).toHaveLength(1);
       expect(fallbackLog).toHaveBeenCalledOnce();
@@ -293,10 +293,10 @@ describe('remote session tell commands (Phase 5)', () => {
     setMeshOrchestrator(orchestrator);
     const { context, channel } = await fixture(orchestrator);
 
-    await expect(handleRemoteCommand(textEvent('/claude once'), context, 'dup')).resolves.toEqual({
+    await expect(handleRemoteCommand(textEvent('/tell claude once'), context, 'dup')).resolves.toEqual({
       kind: 'handled',
     });
-    await expect(handleRemoteCommand(textEvent('/claude once'), context, 'dup')).resolves.toEqual({
+    await expect(handleRemoteCommand(textEvent('/tell claude once'), context, 'dup')).resolves.toEqual({
       kind: 'handled',
     });
     expect(calls).toHaveLength(1);
@@ -319,7 +319,7 @@ describe('remote session tell commands (Phase 5)', () => {
     // Model the crash: the receipt was written pending and never finished.
     expect(await state.beginControlEvent('crashed')).toBe('admitted');
     await expect(
-      handleRemoteCommand(textEvent('/claude do not double'), context, 'crashed'),
+      handleRemoteCommand(textEvent('/tell claude do not double'), context, 'crashed'),
     ).resolves.toEqual({
       kind: 'rejected',
       reason: 'previous command outcome is unknown; resend it',
@@ -339,10 +339,10 @@ describe('remote session tell commands (Phase 5)', () => {
     const tooLong = 'x'.repeat(4001);
 
     await expect(
-      handleRemoteCommand(textEvent(`/claude ${tooLong}`), context, 'd10'),
+      handleRemoteCommand(textEvent(`/tell claude ${tooLong}`), context, 'd10'),
     ).resolves.toEqual({
       kind: 'rejected',
-      reason: '/claude message is 4001 chars; the limit is 4000.',
+      reason: '/tell message is 4001 chars; the limit is 4000.',
     });
     // Refused before the mesh was asked — nothing was queued.
     expect(calls).toEqual([]);
@@ -350,7 +350,7 @@ describe('remote session tell commands (Phase 5)', () => {
     // Exactly at the ceiling is accepted: the limit is 4000, not 3999.
     const atLimit = 'y'.repeat(4000);
     await expect(
-      handleRemoteCommand(textEvent(`/claude ${atLimit}`), context, 'd10b'),
+      handleRemoteCommand(textEvent(`/tell claude ${atLimit}`), context, 'd10b'),
     ).resolves.toEqual({ kind: 'handled' });
     expect(calls).toEqual([{ alias: 'claude', message: atLimit, expectsReply: false }]);
   });
@@ -429,7 +429,7 @@ describe('remote session tell commands (Phase 5)', () => {
           chatId: 'private-chat',
           chatType: 'private',
           receivedAt: Date.now(),
-          text: '/claude do something',
+          text: '/tell claude do something',
         } as RemoteInboundEvent),
       ).resolves.toMatchObject({ kind: 'rejected', reason: 'sender is not paired' });
       // Nothing reached the mesh: the refusal is the whole response.

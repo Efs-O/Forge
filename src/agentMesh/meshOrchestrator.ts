@@ -128,8 +128,11 @@ export class MeshOrchestrator {
   async tell(
     to: string,
     message: string,
-    options: { expectsReply?: boolean } = {},
+    options: { expectsReply?: boolean; exchangeId?: string } = {},
   ): Promise<TellOutcome | { error: string }> {
+    if (options.exchangeId && !/^[A-Za-z0-9][A-Za-z0-9_-]{0,127}$/u.test(options.exchangeId)) {
+      return { error: 'invalid exchange id' };
+    }
     const alias = to.trim().toLowerCase();
     if (!this.isKnownAlias(alias)) {
       return {
@@ -143,7 +146,7 @@ export class MeshOrchestrator {
     if (!fifo) {
       return { error: `no live session for "${to}" (no alias, no live pin, no owned session)` };
     }
-    const exchangeId = newEventId();
+    const exchangeId = options.exchangeId ?? newEventId();
     // F-03: a non-observing recipient cannot be observed directly, so the
     // exchange id is bound into the message: the agent's verdict file is
     // `<exchangeId>.verdict.md`, which the wiring polls to complete the exchange.

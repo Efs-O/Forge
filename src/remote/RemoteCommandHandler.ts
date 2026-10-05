@@ -153,9 +153,8 @@ async function executeRemoteCommand(
   }
   const settingsCommand = await handleRemoteSettingsCommand(command, argument, event, context);
   if (settingsCommand) return settingsCommand;
-  // Before the unknown-command fallback, and after the reserved namespaces:
-  // `/claude`, `/codex` and `/copilot` are the mesh aliases, and a bare token
-  // still belongs to this handler so it answers with its own usage line.
+  // The one-way /tell command remains a control receipt; reply-capable session
+  // commands are admitted to the durable queue earlier by RemoteController.
   const tellCommand = await handleRemoteSessionTellCommand(command, operands, event, context);
   if (tellCommand) return tellCommand;
   if (command === '/compact') {

@@ -11,6 +11,7 @@ export function pruneRemoteState(draft: RemoteStoreState, now = Date.now()): voi
   draft.requests = draft.requests.filter(
     (item) => item.updatedAt >= cutoff || item.state === 'queued' || item.state === 'running',
   );
+  draft.sessionQuestions = draft.sessionQuestions.filter((item) => item.expiresAt >= now);
   draft.outbox = draft.outbox
     .filter(
       (item) => item.updatedAt >= cutoff || item.state === 'pending' || item.state === 'sending',

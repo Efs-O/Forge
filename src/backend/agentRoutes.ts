@@ -21,6 +21,8 @@ import {
 } from './agentRouteFields';
 import { getLogger } from '../util/logger';
 import { parseAgentMessageOptions, parseOriginConversation } from './agentMessageOptions';
+import { handleAgentRemoteSessionRoute } from './agentRemoteSessionRoute';
+import type { RemoteSessionActionResult } from '../remote/RemoteSessionBridge';
 
 const log = getLogger();
 
@@ -125,6 +127,12 @@ export interface AgentRoutesDeps {
   ) => Promise<
     { kind: 'sent' } | { kind: 'refused'; error: string } | { kind: 'unknown'; error: string }
   >;
+  remoteSession?: (
+    from: string,
+    id: string,
+    action: 'ask' | 'notify',
+    text: string,
+  ) => Promise<RemoteSessionActionResult>;
   /** Valid model ids for an inbound message, `model@profile` forms included. */
   configuredModels?: () => readonly string[];
   /**
@@ -210,6 +218,9 @@ export class AgentRoutes {
       (route === '/agent/status' && !!this.deps.status) ||
       (route === '/agent/view' && !!this.deps.view) ||
       (route === '/agent/send-file' && !!this.deps.sendFile && !!this.deps.validateFrom) ||
+      ((route === '/agent/remote-ask' || route === '/agent/remote-notify') &&
+        !!this.deps.remoteSession &&
+        !!this.deps.validateFrom) ||
       ((route === '/agent/read-verdict' || route === '/agent/ack-verdict') &&
         !!this.deps.validateFrom);
     if (!this.enabled || !known) {
@@ -267,6 +278,16 @@ export class AgentRoutes {
           sendFile,
         });
         return sendJson(res, result.status, result.body);
+      }
+      if (route === '/agent/remote-ask' || route === '/agent/remote-notify') {
+        const result = await handleAgentRemoteSessionRoute(
+          fields,
+          route === '/agent/remote-ask' ? 'ask' : 'notify',
+          { validateFrom: this.deps.validateFrom!, dispatch: this.deps.remoteSession! },
+        );
+        return result.kind === 'asked'
+          ? sendText(res, 200, result.questionId)
+          : sendJson(res, 200, { queued: true });
       }
       if (route === '/agent/join' && this.deps.join) {
         const alias = (typeof fields['alias'] === 'string' ? fields['alias'] : '')

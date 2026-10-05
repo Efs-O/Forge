@@ -5,6 +5,7 @@ import { setNestedField } from '../config/ConfigWriterHelpers';
 import type { ForgeConfig } from '../config/types';
 import { RemoteAuth } from './RemoteAuth';
 import { RemoteRequestStore } from './RemoteRequestStore';
+import { remoteSessionAction, type RemoteSessionActionResult } from './RemoteSessionBridge';
 import { claimRemoteMidTurnTell } from './RemoteMidTurnTells';
 import type { MidTurnDrainResult } from '../agent/MidTurnInbox';
 import { RemoteLeaseError } from './RemoteTransportLease';
@@ -38,9 +39,6 @@ import {
   type RemoteStatus,
 } from './types';
 
-// Re-exported so existing importers of these types from this module keep
-// working after the split. They are declared in ./types (not here) so the
-// transport manager can import them without importing the runtime back.
 export type {
   RemoteRuntimeOptions,
   RemoteValidationStatus,
@@ -60,9 +58,7 @@ export class RemoteRuntime {
   private lifecycleTail: Promise<void> = Promise.resolve();
   private disposed = false;
   private appliedConfig: ForgeConfig | undefined;
-  /** The config this window was last asked to run, kept separately from
-   *  `appliedConfig` so a startup that failed on a contended transport lease
-   *  still knows what to start when a handoff later arrives here. */
+  /** Retained even if transport startup fails, for later handoff recovery. */
   private requestedConfig: ForgeConfig | undefined;
 
   constructor(private readonly options: RemoteRuntimeOptions) {
@@ -228,6 +224,24 @@ export class RemoteRuntime {
         auth: this.auth,
       }),
     );
+  }
+
+  remoteSessionAction(
+    from: string,
+    exchangeId: string,
+    action: 'ask' | 'notify',
+    text: string,
+  ): Promise<RemoteSessionActionResult> {
+    return remoteSessionAction({
+      from,
+      exchangeId,
+      action,
+      text,
+      store: this.store,
+      auth: this.auth,
+      available: (channel) => this.manager.get(channel) !== undefined,
+      kick: (channel) => this.manager.get(channel)?.controller.outbox.kick(),
+    });
   }
 
   /**
@@ -414,12 +428,7 @@ export class RemoteRuntime {
     return this.enqueue(() => this.manager.stopActive());
   }
 
-  /**
-   * Moves one chat to another project's window: record the departure, stop
-   * this window's transports so the target can take the lease, then open the
-   * folder. Public because the runtime owns the whole move, not just the half
-   * the controller can reach.
-   */
+  /** Move one chat to another project's window with a rollback on failure. */
   async switchWorkspace(
     config: ForgeConfig,
     alias: string,
@@ -460,11 +469,7 @@ export class RemoteRuntime {
     }
   }
 
-  /**
-   * What the sidebar chip shows. Sorted so two reads of an unchanged runtime
-   * produce an identical value, which is what lets the webview treat a repeated
-   * message as a no-op.
-   */
+  /** Current transport and pairing status for the sidebar chip. */
   async status(): Promise<RemoteStatus> {
     const transports = this.manager.names() as RemoteStatus['transports'];
     const owned = await Promise.all(transports.map((name) => this.auth.hasOwner(name)));
@@ -475,11 +480,7 @@ export class RemoteRuntime {
     this.options.onStatusChanged?.();
   }
 
-  /**
-   * Built once; the callbacks close over live runtime state (the applied
-   * config for the voice toggle, the handoff path) rather than a config
-   * snapshot, so values like `voice.output.enabled` are read at call time.
-   */
+  /** Callbacks read live runtime state rather than a config snapshot. */
   private controllerOptionsDeps(): RemoteControllerOptionsDeps {
     return {
       workspaceId: this.options.workspaceId,

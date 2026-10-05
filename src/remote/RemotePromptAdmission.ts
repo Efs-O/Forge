@@ -9,6 +9,7 @@ import type {
   RemoteInboundEvent,
   RemoteRequestRecord,
 } from './types';
+import type { RemoteSessionTarget } from './RemoteSessionAsk';
 
 export interface RemotePromptAdmissionOptions {
   workspaceId: string;
@@ -46,6 +47,7 @@ export async function admitRemotePrompt(
   text: string,
   dedupKey: string,
   deps: RemotePromptAdmissionDeps,
+  sessionTarget?: RemoteSessionTarget,
 ): Promise<RemoteInboundDisposition> {
   const duplicate = deps.store.getByDedupKey(dedupKey);
   if (duplicate) {
@@ -85,6 +87,7 @@ export async function admitRemotePrompt(
     providerMessageId: event.providerMessageId,
     conversationId: binding.conversationId,
     text,
+    ...(sessionTarget ? { sessionTarget } : {}),
     ...(attachments ? { attachments } : {}),
     receivedAt: event.receivedAt,
     admittedAt: Date.now(),

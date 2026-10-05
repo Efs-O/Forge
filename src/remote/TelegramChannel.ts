@@ -14,16 +14,17 @@ export const TELEGRAM_BOT_TOKEN_SECRET = 'forge.remote.telegram.botToken';
 
 /** Native Telegram command menu. Parsing remains transport-independent. */
 export const TELEGRAM_BOT_COMMANDS = [
+  { command: 'answer', description: 'Answer a live session question by id' },
   { command: 'chat', description: 'Switch to an existing conversation by number or name' },
   { command: 'chats', description: 'List recent conversations' },
   { command: 'clanker', description: 'Set approval-gate mode' },
-  { command: 'claude', description: 'Send a one-way note to a live Claude session' },
-  { command: 'codex', description: 'Send a one-way note to a live Codex session' },
+  { command: 'claude', description: 'Ask a live Claude session; answer returns here' },
+  { command: 'codex', description: 'Ask a live Codex session; answer returns here' },
   { command: 'compact', description: 'Compact the conversation' },
   { command: 'contact', description: 'Approve, link, or disable a contact' },
   { command: 'contacts', description: 'List pending or active contacts' },
   { command: 'context', description: 'Context usage and tokens' },
-  { command: 'copilot', description: 'Send a one-way note to a live Copilot session' },
+  { command: 'copilot', description: 'Ask a live Copilot session; answer returns here' },
   { command: 'drop', description: 'Drop queued prompt or all' },
   { command: 'help', description: 'Show all Forge commands' },
   {
@@ -46,6 +47,7 @@ export const TELEGRAM_BOT_COMMANDS = [
   { command: 'status', description: 'Session, model, queue' },
   { command: 'stop', description: 'Stop the current request' },
   { command: 'system', description: 'GPU, VRAM by process, RAM, drives' },
+  { command: 'tell', description: 'Send a one-way note to claude, codex or copilot' },
   { command: 'timeout', description: 'Show/set session timeout' },
   { command: 'unload', description: "Free memory: release this chat's model" },
   { command: 'unloadall', description: 'Free memory: release every model' },

@@ -115,6 +115,8 @@ describe('remote command map', () => {
     '/claude',
     '/codex',
     '/copilot',
+    '/answer',
+    '/tell',
   ];
 
   const implemented = new Set(

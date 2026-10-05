@@ -22,8 +22,8 @@ import { unattendedCliRefusal } from '../jobs/cliAgentGate';
  */
 
 /**
- * Exported so the Telegram `/claude`/`/codex`/`/copilot` commands enforce the
- * same ceiling as this tool instead of restating it — two doors, one limit.
+ * Exported so Telegram's session commands enforce the same input ceiling as
+ * this tool instead of restating it — two doors, one limit.
  */
 export const MAX_TELL_MESSAGE_CHARS = 4000;
 
