@@ -268,6 +268,7 @@ overlaps with an existing owner, extend the owner instead.
 | Unloading local servers Forge does not spawn (`unload_path`, Strata) | `src/backend/ExternalModelServers.ts` |
 | Deferred `stop_on_exit` watcher (reload vs close) | `src/backend/deferredStop.ts` |
 | Localhost model-control HTTP API                  | `src/backend/ControlServer.ts`         |
+| Localhost control-server session statistics (`GET /stats`) | `src/backend/controlStats.ts`          |
 | Control-server load/capacity/unload               | `src/backend/ControlModelLifecycle.ts` |
 | Control-server HTTP/serialization helpers         | `src/backend/controlHttp.ts`           |
 | `/agent/message` option and origin-chat validation | `src/backend/agentMessageOptions.ts`    |

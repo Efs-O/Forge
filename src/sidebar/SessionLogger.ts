@@ -6,6 +6,11 @@ import type { ChatMessage } from '../llm/types';
 
 const SESSIONS_DIR = path.join(os.homedir(), '.forge', 'sessions');
 
+/** Canonical location shared by the session writer and local readers. */
+export function sessionsDirectory(): string {
+  return SESSIONS_DIR;
+}
+
 /**
  * Session-to-date token totals, as accumulated on the conversation by
  * `applyUsage`. Cumulative rather than per-turn: they survive a window reload
@@ -151,11 +156,11 @@ export class SessionLogger {
     private readonly context: SessionContext = {},
   ) {
     try {
-      fs.mkdirSync(SESSIONS_DIR, { recursive: true });
+      fs.mkdirSync(sessionsDirectory(), { recursive: true });
     } catch {
       /* non-fatal */
     }
-    this.filePath = path.join(SESSIONS_DIR, `${sessionId}.jsonl`);
+    this.filePath = path.join(sessionsDirectory(), `${sessionId}.jsonl`);
     // A reload builds a fresh logger over the *same* file, since the path comes
     // from the persisted conversation id. With the cursor living only in
     // memory, `messages.slice(0)` then re-appended the entire conversation on

@@ -6,9 +6,13 @@ import {
   expandAlias,
   splitModelProfile,
   resolveModelName,
+  resolveRequestModel,
   AmbiguousModelError,
 } from '../config/ConfigResolver';
 import { probeHealthy } from './HealthCheck';
+import { createControlStatsBuilder, type ControlStatsBuilder } from './controlStats';
+import { perSlotContext } from '../util/contextBudget';
+import { sessionsDirectory } from '../sidebar/SessionLogger';
 // prettier-ignore
 import { sendJson, requireModel, readJson, handleChat, CHAT_BODY_BYTES } from './controlHttp';
 import type { ChatProxyFn } from '../llm/ControlChatProxy';
@@ -44,6 +48,7 @@ export interface ControlServerDeps {
   chatProxy?: ChatProxyFn;
   registry?: IControlServerRegistry;
   version?: string;
+  stats?: ControlStatsBuilder;
   /** The token-guarded `/agent/*` routes (agentRoutes.ts). Absent ⇒ 404. */
   agentRoutes?: AgentRoutes;
 }
@@ -71,7 +76,8 @@ export interface ControlStatus {
  *
  * Routes:
  *   GET  /healthz         → { ok: true }
- *   GET  /models          → { models: [{ name, backend, loaded }] }
+ *   GET  /stats            → counts-only local session statistics
+ *   GET  /models           → { models: [{ name, backend, loaded }] }
  *   POST /ensure  {model} → { baseUrl, model, backend }  (loads/swaps as needed)
  *   POST /release {model} → { released: boolean }        (hold bookkeeping only)
  *   POST /unload  {model} → { unloaded: boolean }        (eager teardown; 409 if held)
@@ -96,6 +102,7 @@ export class ControlServer implements vscode.Disposable {
   private readonly chatProxy?: ChatProxyFn;
   private readonly registry?: IControlServerRegistry;
   private readonly version: string;
+  private readonly stats: ControlStatsBuilder;
   private readonly agentRoutes?: AgentRoutes;
   private listeningPort: number | undefined;
 
@@ -112,6 +119,23 @@ export class ControlServer implements vscode.Disposable {
     if (deps.chatProxy) this.chatProxy = deps.chatProxy;
     if (deps.registry) this.registry = deps.registry;
     this.version = deps.version ?? 'unknown';
+    this.stats =
+      deps.stats ??
+      createControlStatsBuilder({
+        sessionsDir: sessionsDirectory(),
+        now: Date.now,
+        forgeVersion: this.version,
+        contextLimitFor: (model) => {
+          try {
+            return perSlotContext(
+              resolveRequestModel(this.config, model),
+              this.config.llama_server,
+            );
+          } catch {
+            return null;
+          }
+        },
+      });
     if (deps.agentRoutes) this.agentRoutes = deps.agentRoutes;
     this.agentRoutes?.setEnabled(config.agent_bus?.enabled === true);
   }
@@ -234,6 +258,9 @@ export class ControlServer implements vscode.Disposable {
       }
       if (method === 'GET' && path === '/healthz') {
         return sendJson(res, 200, { ok: true });
+      }
+      if (method === 'GET' && path === '/stats') {
+        return sendJson(res, 200, this.stats.build());
       }
       if (method === 'GET' && path === '/models') {
         return sendJson(res, 200, this.modelCatalog());
