@@ -103,11 +103,16 @@ export class MeshSessionProvider implements SessionProvider {
    * reaper's clock). Called when a message is sent to an owned session, so a
    * busy session is never reaped while in use. Parked sessions are exempt from
    * the TTL (park-but-warm), so this is a no-op for them.
+   *
+   * Only this window's own record is touched. The bus root is shared by every
+   * workspace, and a message to a joined session also lands here: refreshing
+   * a record nobody owns made a stale session (one from another workspace)
+   * look active indefinitely.
    */
   touchActivity(alias: string): void {
     const a = alias.trim().toLowerCase();
     const rec = readOwnership(this.deps.busRoot, a);
-    if (!rec) return;
+    if (!rec?.owner_host || !isOwnerOf(this.deps, rec.owner_host)) return;
     writeOwnership(this.deps.busRoot, { ...rec, last_activity: Date.now() });
   }
 

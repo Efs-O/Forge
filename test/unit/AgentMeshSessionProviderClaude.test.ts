@@ -258,6 +258,22 @@ describe('MeshSessionProvider: owned Claude path (P4)', () => {
     expect(rec?.owner_host).toBeNull();
     expect(rec?.session_id).toBe('owned-id');
   });
+
+  it('touchActivity refreshes only a record this window owns', async () => {
+    const p = makeProvider();
+    await p.ensureOwnedClaude('claude');
+    const owned = readOwnership(root, 'claude');
+    writeOwnership(root, { ...owned!, last_activity: 1 });
+    p.touchActivity('claude');
+    expect(readOwnership(root, 'claude')?.last_activity).toBeGreaterThan(1);
+
+    // An unowned record (a closed session, or one left by another workspace)
+    // must not look active because a message went to the joined session.
+    writeOwnership(root, { ...owned!, owner_host: null, last_activity: 1 });
+    p.touchActivity('claude');
+    expect(readOwnership(root, 'claude')?.last_activity).toBe(1);
+    await p.dispose();
+  });
 });
 
 describe('owned session id is saved once the first turn confirms it', () => {
