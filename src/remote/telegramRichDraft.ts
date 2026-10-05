@@ -1,5 +1,6 @@
 import { randomInt } from 'node:crypto';
 import { describeError } from '../util/describeError';
+import { TelegramRateLimitError } from './telegramSendQueue';
 
 /**
  * Telegram rich-draft progress (Bot API 10.2/10.3).
@@ -153,8 +154,24 @@ export class TelegramRichDrafts implements RichDraftTransport {
    * restart, which is why the start is random rather than 1.
    */
   private nextDraftId = randomInt(MIN_DRAFT_ID, DRAFT_ID_CEILING);
+  /**
+   * chatId -> epoch ms before which draft updates are skipped, from a 429's
+   * `retry_after`. Skipping is safe because every update renders the whole
+   * state: the first one after the pause carries everything the skipped ones
+   * would have.
+   */
+  private readonly pausedUntil = new Map<string, number>();
 
-  constructor(private readonly call: TelegramCall) {}
+  /**
+   * `draftCall` carries the two preview calls and defaults to `call`. The
+   * channel passes one that bypasses its chat queue and does not wait out a
+   * 429 in place (see `TelegramChannel.richDraft`); `finalizeStatus` is a real
+   * message and always uses `call`.
+   */
+  constructor(
+    private readonly call: TelegramCall,
+    private readonly draftCall: TelegramCall = call,
+  ) {}
 
   async beginDraft(
     chatId: string,
@@ -172,7 +189,7 @@ export class TelegramRichDrafts implements RichDraftTransport {
       return { kind: 'unknown', error: describeError(err) };
     }
     try {
-      const result = await this.call('sendRichMessageDraft', body, options?.signal);
+      const result = await this.draftCall('sendRichMessageDraft', body, options?.signal);
       // The method returns True and nothing else. Anything that is not `true`
       // is not confirmation that a preview exists, so it is unknown rather than
       // an opened draft — the caller must not go on animating a draft Telegram
@@ -198,7 +215,27 @@ export class TelegramRichDrafts implements RichDraftTransport {
     text: string,
     options?: { signal?: AbortSignal },
   ): Promise<void> {
-    await this.call('sendRichMessageDraft', this.draftBody(chatId, draftId, text), options?.signal);
+    const paused = this.pausedUntil.get(chatId);
+    if (paused !== undefined) {
+      if (Date.now() < paused) return;
+      this.pausedUntil.delete(chatId);
+    }
+    try {
+      await this.draftCall(
+        'sendRichMessageDraft',
+        this.draftBody(chatId, draftId, text),
+        options?.signal,
+      );
+    } catch (err) {
+      // A throttled preview is skipped, not reported: the next update replaces
+      // it anyway, and reporting every 429 of a streaming turn would bury the
+      // failures that matter.
+      if (err instanceof TelegramRateLimitError) {
+        this.pausedUntil.set(chatId, Date.now() + err.retryAfterMs);
+        return;
+      }
+      throw err;
+    }
   }
 
   async finalizeStatus(

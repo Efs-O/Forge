@@ -93,7 +93,9 @@ describe('TelegramChannel', () => {
     expect(sessionsLine).toContain('/copilot <msg>');
     // The note is queued, not answered — the help must not imply a reply, and
     // must not promise more than "accepted".
-    const note = HELP_TEXT.split('\n').find((line) => line.includes('/claude, /codex and /copilot'));
+    const note = HELP_TEXT.split('\n').find((line) =>
+      line.includes('/claude, /codex and /copilot'),
+    );
     expect(note).toContain('queued to that session');
     expect(note).toContain('not answered here');
     expect(note).toContain('accepted');
@@ -471,11 +473,11 @@ describe('TelegramChannel', () => {
     });
 
     await channel.resolvePromptKeyboard('chat', 'action-1', ['11', '12'], false);
-    expect(calls.map((call) => (call.body.reply_markup as { inline_keyboard: unknown[] })
-      .inline_keyboard)).toEqual([
-      [[{ text: 'Denied ✗', disabled: {} }]],
-      [[{ text: 'Denied ✗', disabled: {} }]],
-    ]);
+    expect(
+      calls.map(
+        (call) => (call.body.reply_markup as { inline_keyboard: unknown[] }).inline_keyboard,
+      ),
+    ).toEqual([[[{ text: 'Denied ✗', disabled: {} }]], [[{ text: 'Denied ✗', disabled: {} }]]]);
     expect(calls.map((call) => call.body.message_id)).toEqual([11, 12]);
   });
 
@@ -618,7 +620,7 @@ describe('TelegramChannel', () => {
       // The apostrophe arrives HTML-escaped: the notice is sent with
       // parse_mode HTML, so any quote in a reason must be escaped or it would
       // break the markup.
-      text: "<blockquote>ℹ️ Forge: This media type isn&#39;t supported yet: live_photo.</blockquote>",
+      text: '<blockquote>ℹ️ Forge: This media type isn&#39;t supported yet: live_photo.</blockquote>',
       parse_mode: 'HTML',
     });
     expect(armed).toEqual([{ chatId: '99', messageIds: ['12'], kind: 'transient' }]);
@@ -668,9 +670,7 @@ describe('TelegramChannel', () => {
     }));
 
     await channel.start(abort.signal);
-    await vi.waitFor(() =>
-      expect(setCursor).toHaveBeenCalledWith('telegram:update-offset', '97'),
-    );
+    await vi.waitFor(() => expect(setCursor).toHaveBeenCalledWith('telegram:update-offset', '97'));
     abort.abort();
   });
 
@@ -735,9 +735,7 @@ describe('TelegramChannel', () => {
     });
 
     await channel.deleteMessage('chat', '42');
-    expect(calls).toEqual([
-      { method: 'deleteMessage', body: { chat_id: 'chat', message_id: 42 } },
-    ]);
+    expect(calls).toEqual([{ method: 'deleteMessage', body: { chat_id: 'chat', message_id: 42 } }]);
   });
 
   it('encodes and strictly parses selection callbacks within Telegram limits', () => {
@@ -1436,7 +1434,7 @@ describe('TelegramChannel photo albums', () => {
             reason: "This media type isn't supported yet: live_photo.",
             ephemeral: true,
           }
-        : ({ kind: 'accepted' as const, requestId: 'r' }),
+        : { kind: 'accepted' as const, requestId: 'r' },
     );
     await vi.waitFor(() => expect(h.events).toHaveLength(1));
     await vi.waitFor(() => expect(h.sent).toHaveLength(1));
@@ -1467,7 +1465,7 @@ describe('TelegramChannel photo albums', () => {
               reason: "This media type isn't supported yet: live_photo.",
               ephemeral: true,
             }
-          : ({ kind: 'accepted' as const, requestId: 'r' }),
+          : { kind: 'accepted' as const, requestId: 'r' },
     );
     await vi.waitFor(() => expect(h.events).toHaveLength(3));
     h.abort.abort();
@@ -1504,10 +1502,10 @@ describe('TelegramChannel photo albums', () => {
   });
 
   it('rejects an album after repeated handler failures before committing its cursor', async () => {
-    const h = await runAlbums(
-      [[photoUpdate(1, 1, 'f1', 'g1')]],
-      async () => ({ kind: 'retry', reason: 'album handler failed' }),
-    );
+    const h = await runAlbums([[photoUpdate(1, 1, 'f1', 'g1')]], async () => ({
+      kind: 'retry',
+      reason: 'album handler failed',
+    }));
     await vi.waitFor(() => expect(h.sent).toHaveLength(1));
     h.abort.abort();
     expect(h.events).toHaveLength(3);
@@ -1540,11 +1538,9 @@ describe('TelegramChannel photo albums', () => {
           if (batch === 0) return response([photoUpdate(1, 1, 'f1', 'g1')]);
           if (batch === 1) return response([]);
           return new Promise<Response>((_resolve, reject) => {
-            init?.signal?.addEventListener(
-              'abort',
-              () => reject(new Error('aborted')),
-              { once: true },
-            );
+            init?.signal?.addEventListener('abort', () => reject(new Error('aborted')), {
+              once: true,
+            });
           });
         }
         return response(true);
@@ -1756,7 +1752,7 @@ describe('TelegramChannel — stopped_message_generation polling', () => {
 describe('TelegramChannel — rich draft transport', () => {
   const CHAT = '700000001';
 
-  it('runs draft calls in the chat lane, behind an in-flight send', async () => {
+  it('sends draft previews outside the chat lane, never behind an in-flight send', async () => {
     const abort = new AbortController();
     const methods: string[] = [];
     let releaseSend!: () => void;
@@ -1766,7 +1762,7 @@ describe('TelegramChannel — rich draft transport', () => {
       token: 'secret-token',
       getCursor: () => undefined,
       setCursor: async () => undefined,
-      fetch: (async (url: string | URL | Request, init?: RequestInit) => {
+      fetch: (async (url: string | URL | Request) => {
         const method = String(url).split('/').at(-1)!;
         methods.push(method);
         if (method === 'setMyCommands') return response(true);
@@ -1774,27 +1770,53 @@ describe('TelegramChannel — rich draft transport', () => {
           await sendBlocked;
           return response({ message_id: 1 });
         }
-        return response({ message_id: 2 });
+        return response(true);
       }) as typeof fetch,
     });
     await channel.start(abort.signal);
 
     const send = channel.send(CHAT, 'a narration');
-    // Same chat, issued while the send is still in flight.
-    const draft = channel.richDraft.updateDraft(CHAT, 42, 'Forge: working…');
-    await new Promise((resolve) => setTimeout(resolve, 0));
-    expect(methods).toContain('sendMessage');
-    expect(methods).not.toContain('sendRichMessageDraft');
+    // Same chat, issued while the send is still in flight: a preview is
+    // replaceable and must not queue, and nothing may queue behind it.
+    await channel.richDraft.updateDraft(CHAT, 42, 'Forge: working…');
+    expect(methods).toContain('sendRichMessageDraft');
 
     releaseSend();
-    await Promise.all([send, draft]);
-    // Per-chat order is preserved: the draft update follows the send that
-    // preceded it instead of racing past it.
-    expect(methods.filter((m) => m === 'sendMessage' || m === 'sendRichMessageDraft')).toEqual([
-      'sendMessage',
-      'sendRichMessageDraft',
-    ]);
+    await send;
     abort.abort();
+  });
+
+  it('skips draft previews for retry_after on a 429 instead of waiting in place', async () => {
+    let draftCalls = 0;
+    let now = 1_000_000;
+    const clock = vi.spyOn(Date, 'now').mockImplementation(() => now);
+    const channel = new TelegramChannel({
+      token: 'secret-token',
+      getCursor: () => undefined,
+      setCursor: async () => undefined,
+      fetch: (async (url: string | URL | Request) => {
+        const method = String(url).split('/').at(-1)!;
+        if (method !== 'sendRichMessageDraft') return response(true);
+        draftCalls += 1;
+        return new Response(JSON.stringify({ ok: false, parameters: { retry_after: 5 } }), {
+          status: 429,
+          headers: { 'content-type': 'application/json' },
+        });
+      }) as typeof fetch,
+    });
+
+    try {
+      // Resolves at once: no 5 s sleep in place, and no throw.
+      await channel.richDraft.updateDraft(CHAT, 42, 'one');
+      expect(draftCalls).toBe(1);
+      await channel.richDraft.updateDraft(CHAT, 42, 'two');
+      expect(draftCalls).toBe(1);
+      now += 5_000;
+      await channel.richDraft.updateDraft(CHAT, 42, 'three');
+      expect(draftCalls).toBe(2);
+    } finally {
+      clock.mockRestore();
+    }
   });
 
   it('opens a draft with can_stop and a generated draft_id over the wire', async () => {
@@ -1860,9 +1882,10 @@ describe('TelegramChannel — rich draft transport', () => {
     const bubble = await openProgressBubble(channel, CHAT, 'Forge: working…', abort.signal);
 
     expect(bubble).toEqual({ kind: 'plain', messageId: '4' });
-    expect(
-      methods.filter((m) => m === 'sendRichMessageDraft' || m === 'sendMessage'),
-    ).toEqual(['sendRichMessageDraft', 'sendMessage']);
+    expect(methods.filter((m) => m === 'sendRichMessageDraft' || m === 'sendMessage')).toEqual([
+      'sendRichMessageDraft',
+      'sendMessage',
+    ]);
     abort.abort();
   });
 

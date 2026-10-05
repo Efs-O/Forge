@@ -1,5 +1,11 @@
 export interface RemoteProgressRenderState {
   headline: string;
+  /**
+   * The model's words as they stream. Only a draft preview carries any (see
+   * `RemoteDraftLane`); a plain edited bubble is permanent, and streaming into
+   * it showed every thought twice.
+   */
+  stream?: string;
   warnings: string[];
   milestone?: string;
   startedAt: number;
@@ -26,6 +32,8 @@ export function renderRemoteProgress(
   now: number,
 ): string {
   const sections = [state.headline];
+  const stream = state.stream?.trim();
+  if (stream) sections.push(stream);
   // Warnings sit below the headline and above the live milestone: they are
   // the part of the message the reader most needs and the part most likely to
   // be trimmed, so they are never the first thing the tail cut reaches. The

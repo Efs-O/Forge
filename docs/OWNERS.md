@@ -203,6 +203,7 @@ overlaps with an existing owner, extend the owner instead.
 | Turn outcome echoed to bound chats            | `src/sidebar/turnMirrorWiring.ts`               |
 | Live progress message for a sidebar turn      | `src/remote/remoteHostProgress.ts`              |
 | Remote progress bubble and pure liveness clock rendering | `src/remote/RemoteAgentProgress.ts`, `src/remote/remoteProgressRender.ts` |
+| Telegram draft preview send lane (coalesced, never on the narration tail), streamed-text buffer, final draft status | `src/remote/RemoteDraftLane.ts` |
 | `/view` transcript replay rendering           | `src/remote/RemoteTranscriptView.ts`            |
 | Paged /list, /models, /workspace selections   | `src/remote/RemoteSelectionPager.ts`            |
 | Selection list identity, token, expiry        | `src/remote/RemoteSelectionState.ts`            |

@@ -81,7 +81,9 @@ export async function postTelegram(
   method: string,
   body: Record<string, unknown>,
   signal?: AbortSignal,
+  options?: { retryRateLimit?: boolean },
 ): Promise<unknown> {
+  const retries = options?.retryRateLimit === false ? 0 : MAX_RATE_LIMIT_RETRIES;
   for (let attempt = 0; ; attempt += 1) {
     const response = await fetchImpl(`https://api.telegram.org/bot${token}/${method}`, {
       method: 'POST',
@@ -90,11 +92,12 @@ export async function postTelegram(
       ...(signal ? { signal } : {}),
     });
     const parsed = safeParse(await readJson(response));
-    if (response.status === RATE_LIMIT_STATUS && attempt < MAX_RATE_LIMIT_RETRIES) {
+    if (response.status === RATE_LIMIT_STATUS) {
       const retryAfterMs = Math.min(
         Math.max(parsed?.parameters?.retry_after ?? 1, 1) * 1_000,
         MAX_RETRY_AFTER_MS,
       );
+      if (attempt >= retries) throw new TelegramRateLimitError(retryAfterMs);
       await sleep(retryAfterMs, signal);
       continue;
     }
@@ -102,6 +105,21 @@ export async function postTelegram(
     if (!parsed) throw new Error(`Telegram Bot API returned an unreadable ${method} response.`);
     if (!parsed.ok) throw new Error(`Telegram Bot API rejected ${method}.`);
     return parsed.result;
+  }
+}
+
+/**
+ * A 429 the caller chose not to (or could no longer) wait out in place.
+ *
+ * The message keeps the `Telegram Bot API HTTP 429.` shape every other HTTP
+ * failure has, so a classifier reading the status (`isDefinitiveDraftRejection`)
+ * still sees "unknown", while a caller that can use the interval -- the draft
+ * lane, which skips updates rather than queueing them -- reads `retryAfterMs`.
+ */
+export class TelegramRateLimitError extends Error {
+  constructor(readonly retryAfterMs: number) {
+    super(`Telegram Bot API HTTP ${RATE_LIMIT_STATUS}.`);
+    this.name = 'TelegramRateLimitError';
   }
 }
 

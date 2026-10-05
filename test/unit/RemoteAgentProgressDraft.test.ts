@@ -101,7 +101,7 @@ describe('RemoteAgentProgress on the rich-draft lane', () => {
     expect(channel.edits).toEqual([]);
   });
 
-  it('does not let a narration overtake a draft update already in flight', async () => {
+  it('never holds a narration behind a draft update that is still in flight', async () => {
     vi.useFakeTimers();
     const order: string[] = [];
     let release: (() => void) | undefined;
@@ -112,7 +112,7 @@ describe('RemoteAgentProgress on the rich-draft lane', () => {
         order.push('draft');
         await blocked;
       },
-      finalizeStatus: async () => undefined,
+      finalizeStatus: async () => 'final-1',
     };
     const channel = channelWithDrafts(richDraft);
     channel.send = async (chatId: string, text: string): Promise<string[]> => {
@@ -131,17 +131,74 @@ describe('RemoteAgentProgress on the rich-draft lane', () => {
 
     progress.handle({ conversationId: 'c1', kind: 'tool', toolName: 'read_file' });
     await vi.advanceTimersByTimeAsync(1_000);
-    // The draft update is now in flight and unresolved.
+    // The draft update is now in flight and unresolved -- the shape a 429'd or
+    // slow preview has. The narration is a real message and must not wait.
     progress.handle({ conversationId: 'c1', kind: 'narration', text: 'Reading it now.' });
-    await vi.advanceTimersByTimeAsync(1_000);
-    expect(order).toEqual(['draft']);
-
-    release?.();
     await vi.advanceTimersByTimeAsync(0);
-
-    // Same tail, so the narration waits its turn instead of jumping ahead of
-    // the bubble update that preceded it.
     expect(order).toEqual(['draft', 'narration']);
+
+    // finish waits for the in-flight preview before finalizing.
+    let finished = false;
+    const finishing = progress.finish('c1', 'Forge: completed.').then(() => (finished = true));
+    await vi.advanceTimersByTimeAsync(0);
+    expect(finished).toBe(false);
+    release?.();
+    await finishing;
+    expect(finished).toBe(true);
+  });
+
+  it('streams commentary into the draft and clears it when the round narrates', async () => {
+    vi.useFakeTimers();
+    const { richDraft, updates } = draftTransport();
+    const channel = channelWithDrafts(richDraft);
+    const progress = new RemoteAgentProgress(
+      channel,
+      new AbortController().signal,
+      () => true,
+      3_900,
+      1_500,
+    );
+    progress.begin('c1', 'chat-a', 'draft-42', 'remote', 42);
+
+    progress.handle({ conversationId: 'c1', kind: 'commentary', text: 'Let me look ' });
+    progress.handle({ conversationId: 'c1', kind: 'commentary', text: 'at the config.' });
+    // Streaming coalesces at 1s even when the edit cadence is slower.
+    await vi.advanceTimersByTimeAsync(1_000);
+    expect(updates.at(-1)?.text).toContain('Let me look at the config.');
+
+    progress.handle({
+      conversationId: 'c1',
+      kind: 'narration',
+      text: 'Let me look at the config.',
+    });
+    await vi.advanceTimersByTimeAsync(1_000);
+    // Sent once as a message, and gone from the preview.
+    expect(channel.sent.map((m) => m.text)).toEqual(['Let me look at the config.']);
+    expect(updates.at(-1)?.text).not.toContain('Let me look');
+
+    // Reasoning never carries text into the preview.
+    progress.handle({ conversationId: 'c1', kind: 'reasoning' });
+    progress.handle({ conversationId: 'c1', kind: 'commentary', text: 'Final answer.' });
+    await vi.advanceTimersByTimeAsync(1_000);
+    expect(updates.at(-1)?.text).toContain('Final answer.');
+  });
+
+  it('keeps streamed commentary out of a plain edited bubble', async () => {
+    vi.useFakeTimers();
+    const channel = new FakeRemoteChannel();
+    const progress = new RemoteAgentProgress(
+      channel,
+      new AbortController().signal,
+      () => true,
+      3_900,
+      1_000,
+    );
+    progress.begin('c1', 'chat-a', 'm1');
+    progress.handle({ conversationId: 'c1', kind: 'commentary', text: 'secret draft words' });
+    progress.handle({ conversationId: 'c1', kind: 'tool', toolName: 'read_file' });
+    await vi.advanceTimersByTimeAsync(1_000);
+    expect(channel.edits.length).toBeGreaterThan(0);
+    expect(channel.edits.map((e) => e.text).join('\n')).not.toContain('secret draft words');
   });
 
   it('finalizes with a persistent status message and arms its deletion', async () => {

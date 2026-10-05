@@ -200,12 +200,22 @@ export class TelegramChannel implements RemoteChannel {
 
   /**
    * Telegram's rich-draft progress lane, exposed as the `RemoteChannel`
-   * capability. It goes through the same `call`, so draft sends are serialized
-   * in the chat's lane by `TelegramChatQueue` and cannot overtake the
-   * narrations and the final status around them.
+   * capability.
+   *
+   * Two calls on purpose. The draft preview (`sendRichMessageDraft`) goes out
+   * of the chat queue with no in-place 429 wait: drafts are throttled far
+   * harder than messages, and a throttled preview parked in the FIFO held
+   * every narration behind it for up to three minutes. A preview is replaced
+   * by the next one, so dropping it costs nothing. The final status
+   * (`sendRichMessage`) is a real message and stays in the lane, ordered with
+   * the narrations around it.
    */
-  readonly richDraft = new TelegramRichDrafts((method, body, signal) =>
-    this.call(method, body, signal),
+  readonly richDraft = new TelegramRichDrafts(
+    (method, body, signal) => this.call(method, body, signal),
+    (method, body, signal) =>
+      postTelegram(this.fetchImpl, this.options.token, method, body, signal, {
+        retryRateLimit: false,
+      }),
   );
 
   resolvePromptKeyboard(...args: Parameters<TelegramOutbound['resolvePromptKeyboard']>) {
