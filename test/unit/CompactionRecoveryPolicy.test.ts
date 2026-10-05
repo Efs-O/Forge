@@ -36,6 +36,7 @@ function setup() {
       if (++calls === 1) throw new Error('provider hiccup');
       return successfulSummary;
     },
+    currentLocalTime: () => 'test local time',
   };
   return { conversation, calls: () => calls, compact: (midTurn: boolean) =>
     runCompaction(deps, conversation.id, { auto: true, trigger: 'auto', midTurn }) };

@@ -232,6 +232,7 @@ export class MeshOrchestrator {
     to: string,
     message: string,
     hops = 0,
+    originConversation?: string,
   ): Promise<RelayOutcome | { error: string }> {
     if (hops >= 2) {
       return { error: 'refusing to relay a relay (hop count exceeded)' };
@@ -250,6 +251,15 @@ export class MeshOrchestrator {
     // Hop 1: the inbound message, as received. F-03: durable before the relay
     // result is returned. A failed durable write throws; surface it cleanly.
     try {
+      await this.deps.onEvent({
+        exchangeId,
+        from,
+        to: recipient,
+        type: 'relay',
+        state: 'created',
+        detail: 'inbound bus message',
+        ...(originConversation ? { originConversation } : {}),
+      });
       await this.deps.onEvent({
         exchangeId,
         from,
@@ -291,6 +301,7 @@ export class MeshOrchestrator {
       exchangeId,
       to: recipient,
       observing: this.deps.provider.isOwned(recipient),
+      ...(fifo.deliveredTo ? { deliveredTo: fifo.deliveredTo } : {}),
       relayed: true,
     };
   }

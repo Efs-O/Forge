@@ -13,6 +13,9 @@
 # Forge never falls back silently: a wrong path is reported, not guessed.
 # API keys are NEVER stored here — use "Forge: Set Cloud Provider Token"; this
 # file only names the secret (`api_key_secret`).
+# Compaction token counting defaults to `tokenize` for llama.cpp and `estimate`
+# for other providers. `openai-compatible` may opt into `tokenize` or `count_tokens`;
+# other providers may explicitly set `token_count: estimate`.
 #
 # Precedence — request time: defaults < group < model < profile.
 #              spawn time:   group.spawn < model.spawn.
@@ -868,6 +871,7 @@ models:
     display_name: "Qwen Flash-Next (Strata)"
     provider: openai-compatible
     endpoint: http://127.0.0.1:8080
+    token_count: count_tokens
     api_key_secret: strata
     model: qwen3.8-flash-next-iq3_s
     server_log: "xxxx/Strata/strata-iq3_s-2gpu.log"

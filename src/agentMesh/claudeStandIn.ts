@@ -4,7 +4,12 @@ import { resolveCliExecutable } from '../agents/resolveCliExecutable';
 import type { ClaudeOwnedSession } from '../agents/ClaudeOwnedSession';
 import { pickClaudePeer, readClaudeSessions, type ClaudeSession } from '../agentBus/claudePeer';
 import { getAlias, joinedPeer, type AliasRecord } from './aliasRegistry';
-import { ClaudeOwnedAdapter, ClaudePeerAdapter } from './adapters';
+import {
+  ClaudeOwnedAdapter,
+  ClaudePeerAdapter,
+  resolvedDeliveryLabel,
+  standInDeliveryLabel,
+} from './adapters';
 import {
   defaultClaudeFactory,
   defaultSendClaude,
@@ -91,7 +96,16 @@ export class JoinedClaude {
     );
     if ('error' in picked) return undefined;
     const send = this.deps.sendClaude ?? defaultSendClaude(bus);
-    return new ClaudePeerAdapter(picked.session, send);
+    return new ClaudePeerAdapter(
+      picked.session,
+      send,
+      resolvedDeliveryLabel(
+        'claude',
+        joined?.sessionId ?? picked.session.sessionId ?? picked.session.name,
+        joined ? 'joined' : 'peer',
+        picked.session.cwd,
+      ),
+    );
   }
 
   /** A joined alias: the live peer while it runs, else a stand-in resuming its conversation. */
@@ -120,11 +134,12 @@ export class JoinedClaude {
       const executable = this.deps.claudeFactory
         ? (bus?.claude_cli ?? 'claude')
         : await resolveCliExecutable(bus?.claude_cli ?? 'claude', 'claude');
+      const cwd = this.deps.workspaceRoots()[0] ?? os.homedir();
       session = await (this.deps.claudeFactory ?? defaultClaudeFactory()).create({
         alias: 'claude',
         sessionId: resumeId,
         executable,
-        cwd: this.deps.workspaceRoots()[0] ?? os.homedir(),
+        cwd,
       });
     } catch (err) {
       const why = err instanceof Error ? err.message : String(err);
@@ -148,6 +163,11 @@ export class JoinedClaude {
       observesTurns: true,
       key: `claude-stand-in:${resumeId ?? 'blank'}:${++this.seq}`,
       note: claudeStandInNote(resumeId),
+      deliveredTo: standInDeliveryLabel(
+        'claude',
+        resumeId ?? session.confirmedSessionId,
+        this.deps.workspaceRoots()[0],
+      ),
       send: (message, options) => inner.send(message, options),
       interrupt: () => inner.interrupt(),
       onIdle: () =>

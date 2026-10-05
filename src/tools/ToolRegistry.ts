@@ -1,6 +1,7 @@
 import type { ChatMessage, ContentPart, ToolDefinition } from '../llm/types';
 import type { PlanItem } from '../sidebar/sessionTypes';
 import { recordNativeLazyTool } from './lazyToolGroups';
+import { describeMisplacedExecArgs } from './execHints';
 
 export type ToolPermission =
   | 'read'
@@ -204,6 +205,8 @@ export class ToolRegistry {
     const { name, parameters } = tool.definition.function;
     // JSON.parse can hand back `null` for a call whose arguments were "null".
     const present: Record<string, unknown> = typeof args === 'object' && args !== null ? args : {};
+    const misplacedExecArgs = describeMisplacedExecArgs(name, Object.keys(present));
+    if (misplacedExecArgs) return misplacedExecArgs;
     const required = Array.isArray(parameters.required) ? parameters.required : [];
     const missing = required.filter(
       (key): key is string => typeof key === 'string' && present[key] === undefined,

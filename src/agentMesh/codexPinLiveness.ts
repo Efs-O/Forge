@@ -7,6 +7,7 @@ import { CodexOwnedAdapter, CodexQueueAdapter } from './adapters';
 import type { MeshAdapter } from './meshAdapter';
 import { CodexDiscovery } from './codexDiscovery';
 import { resolveCliExecutable } from '../agents/resolveCliExecutable';
+import { resolvedDeliveryLabel } from './adapters';
 
 /**
  * F-05: is a Codex config pin a LIVE user-opened thread?
@@ -48,6 +49,7 @@ export interface CodexPinContext {
   ownedCodex: CodexAppServerSession | undefined;
   getConfig: () => ForgeConfig;
   busRoot: string;
+  workspace: string;
   queueCodex?: (
     cli: string,
     thread: string,
@@ -63,7 +65,12 @@ export interface CodexPinContext {
  */
 export function codexQueueAdapter(ctx: CodexPinContext): MeshAdapter | undefined {
   if (ctx.ownedCodex) {
-    return new CodexOwnedAdapter(ctx.ownedCodex);
+    return new CodexOwnedAdapter(
+      ctx.ownedCodex,
+      undefined,
+      undefined,
+      resolvedDeliveryLabel('codex', ctx.ownedCodex.confirmedSessionId, 'owned', ctx.workspace),
+    );
   }
   const bus = ctx.getConfig().agent_bus;
   const identity = resolveSessionIdentity(ctx.busRoot, 'codex', bus?.codex_thread);

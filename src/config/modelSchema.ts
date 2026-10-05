@@ -43,7 +43,9 @@ export const ProfileSchema = z.object({
 
 export const ModelConfigSchema = z.object({
   name: z.string().min(1),
+  model: z.string().min(1).optional(),
   provider: ProviderSchema.optional(),
+  token_count: z.enum(['tokenize', 'count_tokens', 'estimate']).optional(),
   cli: z.string().min(1).optional(),
   cli_model: z.string().min(1).optional(),
   gguf_path: z.string().min(1).optional(),
@@ -133,7 +135,7 @@ type ModelConfigLike = z.infer<typeof ModelConfigSchema>;
 
 /** Last group in the model's `group`/`groups` list that defines `field`
  *  wins — matches ConfigResolver.mergeGroupsIntoModel's merge order. */
-export function effectiveGroupField<K extends 'provider' | 'endpoint'>(
+export function effectiveGroupField<K extends 'provider' | 'endpoint' | 'token_count'>(
   model: ModelConfigLike,
   groups: Record<string, z.infer<typeof GroupSchema>> | undefined,
   field: K,

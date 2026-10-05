@@ -235,6 +235,7 @@ export const ForgeConfigSchema = z
       const provider =
         model.provider ?? effectiveGroupField(model, cfg.groups, 'provider') ?? 'llama.cpp';
       const endpoint = model.endpoint ?? effectiveGroupField(model, cfg.groups, 'endpoint');
+      const tokenCount = model.token_count ?? effectiveGroupField(model, cfg.groups, 'token_count');
       if (provider === 'llama.cpp' && !model.gguf_path) {
         ctx.addIssue({
           code: z.ZodIssueCode.custom,
@@ -247,6 +248,44 @@ export const ForgeConfigSchema = z
           code: z.ZodIssueCode.custom,
           path: ['models', index, 'cli'],
           message: 'cli is required for provider: cli',
+        });
+      }
+      if (
+        tokenCount &&
+        provider === 'llama.cpp' &&
+        tokenCount !== 'tokenize' &&
+        tokenCount !== 'estimate'
+      ) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          path: ['models', index, 'token_count'],
+          message: 'token_count for provider: llama.cpp must be tokenize or estimate',
+        });
+      }
+      if (
+        tokenCount &&
+        provider === 'openai-compatible' &&
+        tokenCount !== 'tokenize' &&
+        tokenCount !== 'count_tokens' &&
+        tokenCount !== 'estimate'
+      ) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          path: ['models', index, 'token_count'],
+          message:
+            'token_count for provider: openai-compatible must be tokenize, count_tokens, or estimate',
+        });
+      }
+      if (
+        tokenCount &&
+        provider !== 'llama.cpp' &&
+        provider !== 'openai-compatible' &&
+        tokenCount !== 'estimate'
+      ) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          path: ['models', index, 'token_count'],
+          message: `token_count for provider: ${provider} must be estimate`,
         });
       }
       if ((provider === 'ollama' || provider === 'openai-compatible') && !endpoint) {

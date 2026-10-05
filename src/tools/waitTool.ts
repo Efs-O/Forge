@@ -61,10 +61,15 @@ export function makeWaitTool(): RegisteredTool {
     },
     permission: 'read',
     handler: async (args, context) => {
-      const seconds = args['seconds'] as number;
-      if (!Number.isInteger(seconds) || seconds < 1 || seconds > MAX_WAIT_SECONDS) {
+      const requestedSeconds = args['seconds'] as number;
+      if (!Number.isInteger(requestedSeconds) || requestedSeconds < 1) {
         throw new Error(`wait: seconds must be a whole number from 1 to ${MAX_WAIT_SECONDS}.`);
       }
+      const seconds = Math.min(requestedSeconds, MAX_WAIT_SECONDS);
+      const clampNote =
+        requestedSeconds > MAX_WAIT_SECONDS
+          ? ` seconds clamped to ${String(MAX_WAIT_SECONDS)}.`
+          : '';
       const signal = context?.abortSignal;
       const startedAt = Date.now();
       const outcome = await new Promise<'timer' | 'abort' | 'message'>((resolve) => {
@@ -98,12 +103,12 @@ export function makeWaitTool(): RegisteredTool {
       // appended past everything cached, so a value that ticks costs nothing.
       const clock = `Local time is now ${localTimeOfDay()}.`;
       if (outcome === 'abort') {
-        return `Wait cancelled after ${elapsedSeconds}s of the ${seconds}s requested. ${clock} The turn is stopping -- do not start further work.`;
+        return `Wait cancelled after ${elapsedSeconds}s of the ${seconds}s requested.${clampNote} ${clock} The turn is stopping -- do not start further work.`;
       }
       if (outcome === 'message') {
-        return `Wait ended after ${elapsedSeconds}s of the ${seconds}s requested because a new message arrived. ${clock}`;
+        return `Wait ended after ${elapsedSeconds}s of the ${seconds}s requested because a new message arrived.${clampNote} ${clock}`;
       }
-      return `Waited ${elapsedSeconds}s. ${clock}`;
+      return `Waited ${elapsedSeconds}s.${clampNote} ${clock}`;
     },
   };
 }

@@ -90,6 +90,14 @@ describe('CLIENT_SCRIPT usage block', () => {
   });
 });
 
+describe('forge.sh source usage block', () => {
+  it('says a verdict wakes the sending Forge chat when it is open', () => {
+    const source = fs.readFileSync(path.resolve(process.cwd(), 'src/agentBus/forge.sh'), 'utf8');
+    const sendLine = source.split(/\r?\n/).find((line) => line.includes('forge.sh send '));
+    expect(sendLine).toContain('verdict wakes the sending Forge chat when it is open');
+  });
+});
+
 describe('ensureBus', () => {
   it('creates the folders and the shipped files in an empty home', () => {
     ensureBus(paths);

@@ -33,6 +33,7 @@ export interface PendingMeshMessage {
 
 export interface RelayOutcome extends TellOutcome {
   relayed: true;
+  deliveredTo?: string;
 }
 
 export interface OrchestratorDeps extends HostLivenessDeps {
@@ -46,6 +47,7 @@ export interface OrchestratorDeps extends HostLivenessDeps {
     type: string;
     state: ExchangeState;
     detail?: string;
+    originConversation?: string;
   }) => Promise<void> | void;
   knownAliases: () => string[];
   verdictDir?: string;

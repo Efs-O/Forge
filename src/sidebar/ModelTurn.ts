@@ -95,6 +95,7 @@ export interface ModelTurnContext {
   warnOnce: (key: string, message: string) => void;
   onContextChanged?: (convId: string) => void;
   onUsage?: (conv: ConversationRuntime, inputTokens: number, outputTokens: number) => void;
+  onToolsOffered?: (conversationId: string, names: readonly string[]) => void;
   onTranscriptChanged?: (conv: ConversationRuntime) => void;
   emitAgentProgress: (event: AgentProgressEvent) => void;
   streamMeter?: LiveStreamMeter;
@@ -278,6 +279,7 @@ export async function runModelTurn(
       model,
       messages: conv.messages,
       getToolDefinitions: buildToolDefinitions,
+      onToolsOffered: (names) => ctx.onToolsOffered?.(conv.id, names),
       signal: ctrl.signal,
       maxRounds,
       nativeTools,

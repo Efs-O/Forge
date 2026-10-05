@@ -21,7 +21,6 @@ const GROUP_PURPOSE: Readonly<Record<string, string>> = {
   halluscribe:
     'search previous AI coding sessions and historical workspace/user context: past implementation decisions, the exact wording of an earlier error or command, prior project history, the user profile/digest',
   media: 'view images and video, or generate and search for images',
-  memory: 'save and recall durable project and user memories',
   notebook: 'read and edit notebook cells',
   system: 'install llama.cpp and inspect or control computer power',
 };

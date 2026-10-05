@@ -75,10 +75,11 @@ export function makeMonitorExecutionTool(): RegisteredTool {
     permission: 'headless',
     autoApprove: true,
     handler: async (args, context) => {
-      const waitMs = args['wait_ms'] === undefined ? 10_000 : (args['wait_ms'] as number);
-      if (!Number.isInteger(waitMs) || waitMs < 0 || waitMs > 60_000) {
-        throw new Error('monitor_execution: wait_ms must be an integer from 0 to 60000.');
+      const requestedWaitMs = args['wait_ms'] === undefined ? 10_000 : (args['wait_ms'] as number);
+      if (!Number.isInteger(requestedWaitMs) || requestedWaitMs < 0) {
+        throw new Error('monitor_execution: wait_ms must be a non-negative integer.');
       }
+      const waitMs = Math.min(requestedWaitMs, MAX_MONITOR_WAIT_MS);
       const outputOptions = parseExecOutputOptions(args);
       // Measured, not requested. The wait resolves the moment the process
       // finishes or the turn is cancelled, so echoing wait_ms back reported a
@@ -91,12 +92,16 @@ export function makeMonitorExecutionTool(): RegisteredTool {
         (args['stderr_cursor'] as number | undefined) ?? 0,
         context?.abortSignal,
       );
-      return formatBackgroundObservation(
+      const formatted = formatBackgroundObservation(
         observation,
         Date.now() - startedWaitingAt,
         outputOptions,
         waitMs,
       );
+      if (requestedWaitMs <= MAX_MONITOR_WAIT_MS) return formatted;
+      const result = JSON.parse(formatted) as Record<string, unknown>;
+      result['note'] = `wait_ms clamped to ${String(MAX_MONITOR_WAIT_MS)}`;
+      return JSON.stringify(result);
     },
   };
 }

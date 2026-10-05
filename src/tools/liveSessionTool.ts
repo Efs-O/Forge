@@ -30,9 +30,10 @@ import {
 } from '../agentBus/claudePeer';
 import { relayToClaude } from '../agentBus/claudeRelay';
 import { unattendedCliRefusal } from '../jobs/cliAgentGate';
+import { MAX_QUESTION_CHARS, questionSizeRefusal } from '../agentBus/liveSessionLimit';
+export { MAX_QUESTION_CHARS };
 
 export const MAX_SUBJECT_CHARS = 160;
-export const MAX_QUESTION_CHARS = 4000;
 export const MAX_WAIT_MINUTES = 20;
 const MAX_SESSION_CHARS = 60;
 const ORPHANS_PER_CALL = 3;
@@ -84,6 +85,11 @@ function stringArg(args: Record<string, unknown>, key: string, max: number): str
     throw new Error(`ask_live_session: "${key}" is required.`);
   }
   if (value.length > max) {
+    if (key === 'question') {
+      throw new Error(
+        questionSizeRefusal(`the question is ${value.length} characters; the limit is ${max}.`),
+      );
+    }
     throw new Error(`ask_live_session: "${key}" is ${value.length} chars; the limit is ${max}.`);
   }
   return value.trim();
@@ -206,8 +212,10 @@ export function makeLiveSessionTool(deps: LiveSessionDeps): RegisteredTool {
               type: 'string',
               maxLength: MAX_QUESTION_CHARS,
               description:
-                'The question. Say what you need and which files you own. The other ' +
-                'session can read the repo itself, so name files; do not paste them.',
+                `The question, at most ${MAX_QUESTION_CHARS.toLocaleString('en-US')} characters. ` +
+                'For a longer report, write it to a file and send the path plus at most 1,500 ' +
+                'characters. Say what you need and which files you own; the other session can ' +
+                'read the repo, so name files instead of pasting them.',
             },
             target: {
               type: 'string',
@@ -256,15 +264,19 @@ export function makeLiveSessionTool(deps: LiveSessionDeps): RegisteredTool {
       if (/[\r\n]/.test(subject)) throw new Error('ask_live_session: "subject" must be one line.');
       const question = stringArg(args, 'question', MAX_QUESTION_CHARS);
       const sessionArg = optionalString(args, 'session', MAX_SESSION_CHARS);
-      const requested = args['wait_minutes'] ?? MAX_WAIT_MINUTES;
+      const requestedWaitMinutes = args['wait_minutes'] ?? MAX_WAIT_MINUTES;
       if (
-        typeof requested !== 'number' ||
-        !Number.isInteger(requested) ||
-        requested < 1 ||
-        requested > MAX_WAIT_MINUTES
+        typeof requestedWaitMinutes !== 'number' ||
+        !Number.isInteger(requestedWaitMinutes) ||
+        requestedWaitMinutes < 1
       ) {
         throw new Error(`ask_live_session: "wait_minutes" must be 1 to ${MAX_WAIT_MINUTES}.`);
       }
+      const requested = Math.min(requestedWaitMinutes, MAX_WAIT_MINUTES);
+      const waitClampNote =
+        requestedWaitMinutes > MAX_WAIT_MINUTES
+          ? `wait_minutes clamped to ${String(MAX_WAIT_MINUTES)}. `
+          : '';
       const notifyOnAnswer = args['notify_on_answer'] === true;
       if (notifyOnAnswer && !context?.conversationId) {
         throw new Error(
@@ -334,6 +346,7 @@ ${turn}`
         };
         if (notifyOnAnswer) {
           return (
+            waitClampNote +
             late +
             deferAnswer(conversationId, id, who, subject, requested, settle, {
               abortAfterMs: requested * 60_000,
@@ -341,7 +354,9 @@ ${turn}`
             })
           );
         }
-        return late + (await awaitedAnswers.during(target, id, () => settle(signal)));
+        return (
+          waitClampNote + late + (await awaitedAnswers.during(target, id, () => settle(signal)))
+        );
       }
 
       let deliver: () => Promise<void>;
@@ -439,9 +454,11 @@ ${turn}`
         return `${timeoutText(who, requested, id, subject)}${hint}`;
       };
       if (notifyOnAnswer) {
-        return late + deferAnswer(conversationId, id, who, subject, requested, settle);
+        return (
+          waitClampNote + late + deferAnswer(conversationId, id, who, subject, requested, settle)
+        );
       }
-      return late + (await awaitedAnswers.during(target, id, () => settle(signal)));
+      return waitClampNote + late + (await awaitedAnswers.during(target, id, () => settle(signal)));
     },
   };
 }

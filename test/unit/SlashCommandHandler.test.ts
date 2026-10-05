@@ -175,6 +175,7 @@ describe('SlashCommandHandler', () => {
       // rejects a short candidate as an unusable summary.
       runPromptToMarkdown: async () =>
         'Goal: continue the second task.\nState: the first task is done and the second is in progress.\nNext: finish it.\nFiles: src/a.ts, src/b.ts.\nConstraints: none recorded.\nErrors: none. This body exists only to clear the plausibility floor that rejects tool-call-shaped summaries.',
+      currentLocalTime: () => 'test local time',
       isStreaming: () => false,
       beginCompaction: () => () => undefined,
       incompleteTurnReason: () => 'the reply was cut off by the output limit',
@@ -223,6 +224,7 @@ describe('SlashCommandHandler', () => {
       post: () => undefined,
       runPromptToMarkdown: async () =>
         'Goal: retain the completed task.\nState: all requested work is finished.\nNext: wait for the user.\nFiles: src/a.ts, src/b.ts.\nConstraints: none recorded.\nErrors: none. This body exists only to clear the plausibility floor that rejects tool-call-shaped summaries.',
+      currentLocalTime: () => 'test local time',
       isStreaming: () => false,
       beginCompaction: () => () => undefined,
       incompleteTurnReason: () => undefined,

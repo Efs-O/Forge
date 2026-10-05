@@ -584,7 +584,7 @@ describe('forge.sh against the routes', () => {
   it('join sends the interactive Claude pid or Codex thread; send relays with a `to` (§10)', async (ctx) => {
     if (!usable) ctx.skip();
     const joins: [string, number, string][] = [];
-    const relays: [string, string, string][] = [];
+    const relays: [string, string, string, string | undefined][] = [];
     routes = new AgentRoutes({
       paths: () => paths,
       inbox: { accept: () => ({ position: 1, id: 'm1' }), cancel: () => 0 },
@@ -593,9 +593,13 @@ describe('forge.sh against the routes', () => {
         joins.push([alias, pid, thread]),
         { ok: true, reply: 'joined' }
       ),
-      relay: async (from, to, text) => (
-        relays.push([from, to, text]),
-        { ok: true, exchangeId: 'x1' }
+      relay: async (from, to, text, originConversation) => (
+        relays.push([from, to, text, originConversation]),
+        {
+          ok: true,
+          exchangeId: 'x1',
+          deliveredTo: 'claude = session 7b39fb6e (joined, workspace n:\\vs code apps\\Forge)',
+        }
       ),
     });
     routes.setEnabled(true);
@@ -610,9 +614,25 @@ describe('forge.sh against the routes', () => {
       ['claude', 4242, ''],
       ['codex', 0, 'thread-7'],
     ]);
-    const sent = await runClient(['send', 'claude', 'codex'], 'plan ready\n');
-    expect(sent.out).toContain('"relayed":true');
-    expect(relays).toEqual([['claude', 'codex', 'plan ready\n']]);
+    const sent = await runClient(['send', 'claude', 'codex'], 'plan ready\n', {
+      FORGE_CONVERSATION_ID: 'origin-chat-7',
+    });
+    expect(JSON.parse(sent.out.trim())).toMatchObject({
+      relayed: true,
+      exchangeId: 'x1',
+      delivered_to: 'claude = session 7b39fb6e (joined, workspace n:\\vs code apps\\Forge)',
+      message:
+        'Sent as exchange x1. The verdict wakes the sending Forge chat when it is open ' +
+        '(when the send came from a Forge chat). Use `wait` and then `read-verdict` for the full response.',
+    });
+    expect(relays).toEqual([['claude', 'codex', 'plan ready\n', 'origin-chat-7']]);
+
+    const invalid = await runClient(['send', 'claude', 'codex'], 'still sent\n', {
+      FORGE_CONVERSATION_ID: 'bad/id',
+    });
+    expect(invalid.code).toBe(0);
+    expect(invalid.out.match(/invalid FORGE_CONVERSATION_ID/g)).toHaveLength(1);
+    expect(relays[1]).toEqual(['claude', 'codex', 'still sent\n', undefined]);
   }, 30_000);
 
   it('steer to forge queues at the front and interrupts the running turn (§6)', async (ctx) => {
@@ -980,6 +1000,38 @@ describe('typed lifecycle command dispatch (§8, P3)', () => {
     expect(status).toBe(400);
     expect(body.error).toContain('no session to park');
     expect(accepted).toEqual([]);
+  });
+});
+
+describe('relay origin conversation (2b)', () => {
+  it('passes origin_conversation to the relay and rejects it for to=forge', async () => {
+    routes.dispose();
+    const relay = vi.fn(async (_from: string, _to: string, _text: string, _origin?: string) => ({
+      ok: true as const, exchangeId: 'exchange-1',
+    }));
+    routes = new AgentRoutes({
+      paths: () => paths,
+      inbox: stubInbox(),
+      token: TOKEN,
+      validateFrom: () => ({ ok: true }),
+      relay,
+    });
+    routes.setEnabled(true);
+    routes.onListening(base);
+
+    const relayed = await post(
+      '/agent/message?from=codex&to=claude&origin_conversation=chat-7',
+      'review this',
+    );
+    expect(relayed.status).toBe(202);
+    expect(relay).toHaveBeenCalledWith('codex', 'claude', 'review this', 'chat-7');
+
+    const forge = await post(
+      '/agent/message?from=codex&to=forge&origin_conversation=chat-7',
+      'review this',
+    );
+    expect(forge.status).toBe(400);
+    expect(forge.body.error).toContain('origin_conversation');
   });
 });
 

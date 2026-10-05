@@ -38,7 +38,7 @@ function textContent(content: ChatMessage['content']): string {
 
 function rangeOptions(
   args: Record<string, unknown>,
-): { offset: number; maxChars: number } | string {
+): { offset: number; maxChars: number; clamped: boolean } | string {
   const offset = args['offset'] ?? 0;
   const maxChars = args['max_chars'] ?? MAX_TOOL_RESULT_READ_CHARS;
   if (!Number.isInteger(offset) || (offset as number) < 0) {
@@ -52,6 +52,7 @@ function rangeOptions(
   return {
     offset: offset as number,
     maxChars: Math.min(maxChars as number, MAX_TOOL_RESULT_READ_CHARS),
+    clamped: (maxChars as number) > MAX_TOOL_RESULT_READ_CHARS,
   };
 }
 
@@ -66,11 +67,14 @@ function readRange(args: Record<string, unknown>, context?: ToolHandlerContext):
   if (text === undefined) {
     return `Error: no text tool result with call ID "${toolCallId}" exists in this conversation.`;
   }
+  const clampNote = range.clamped
+    ? `max_chars clamped to ${String(MAX_TOOL_RESULT_READ_CHARS)}; use offset to page further.\n`
+    : '';
   if (range.offset >= text.length) {
-    return `Tool result ${toolCallId}: requested offset ${range.offset} is beyond its ${text.length} characters.`;
+    return `${clampNote}Tool result ${toolCallId}: requested offset ${range.offset} is beyond its ${text.length} characters.`;
   }
   const end = Math.min(text.length, range.offset + range.maxChars);
-  return `Tool result ${toolCallId}, chars ${range.offset}-${end} of ${text.length}:\n${text.slice(range.offset, end)}`;
+  return `${clampNote}Tool result ${toolCallId}, chars ${range.offset}-${end} of ${text.length}:\n${text.slice(range.offset, end)}`;
 }
 
 function readMessage(args: Record<string, unknown>, messages: readonly ChatMessage[]): string {

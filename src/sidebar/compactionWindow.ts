@@ -90,6 +90,14 @@ function replacementAssistantContext(compaction: CompactionState): string {
   );
 }
 
+/** The two host-authored messages prepended to every replacement window. */
+export function replacementHostMessages(compaction: CompactionState): ChatMessage[] {
+  return [
+    { role: 'user', content: replacementUserContext(compaction) },
+    { role: 'assistant', content: replacementAssistantContext(compaction) },
+  ];
+}
+
 /**
  * Returns `summary` + `messages.slice(fromIndex)`, or the input untouched when
  * no compaction is recorded.
@@ -129,11 +137,7 @@ function buildCompactionWindow(
   let start = 0;
   while (start < tail.length && tail[start]?.role === 'tool') start += 1;
 
-  return [
-    { role: 'user', content: replacementUserContext(compaction) },
-    { role: 'assistant', content: replacementAssistantContext(compaction) },
-    ...tail.slice(start),
-  ];
+  return [...replacementHostMessages(compaction), ...tail.slice(start)];
 }
 
 /**

@@ -6,6 +6,10 @@ import { compactionRefusalNotice } from '../../src/sidebar/compactionRefusal';
 import type { CompactionAttemptLogEntry } from '../../src/sidebar/SessionLogger';
 import type { ConversationRuntime } from '../../src/sidebar/sessionTypes';
 import type { ChatMessage } from '../../src/llm/types';
+import {
+  renderCompactionUserMessages,
+  USER_CONTEXT_MAX_CHARS,
+} from '../../src/sidebar/compactionUserContext';
 
 const SECRET = 'SECRET-SOURCE-TEXT-DO-NOT-LOG';
 
@@ -38,6 +42,7 @@ function setup(runPrompt: CompactionDeps['runPromptToMarkdown'], tokens = 2_000)
     isStreaming: () => false,
     beginCompaction: () => () => undefined,
     runPromptToMarkdown: runPrompt,
+    currentLocalTime: () => 'test local time',
     logCompactionAttempt: (_c, entry) => rows.push(entry),
   };
   return { conv, deps, rows, posted };
@@ -63,6 +68,70 @@ describe('compaction attempt rows (A48)', () => {
     expect(h.rows[0]!.windowChars).toBeGreaterThan(0);
     expect(h.rows[0]!.candidateChars).toBeUndefined();
     expect(h.rows[1]!.candidateChars).toBeGreaterThan(0);
+  });
+
+  it('records host measurements, counter mode, components, and shed facts', async () => {
+    const h = setup(good);
+    (h.deps as CompactionDeps & { countTokens: (text: string) => Promise<number> }).countTokens =
+      async (text) => Math.ceil(text.length / 3.5);
+    await runCompaction(h.deps, 'c1', { auto: true });
+    expect(h.rows[1]).toMatchObject({
+      hostChars: expect.any(Number),
+      hostMaxChars: expect.any(Number),
+      charsPerToken: expect.any(Number),
+      counter: 'count_tokens',
+      components: expect.any(Object),
+      shed: expect.any(Array),
+    });
+  });
+
+  it('refuses a configured counter error with its endpoint and never asks for a summary', async () => {
+    const runPrompt = vi.fn(good);
+    const h = setup(runPrompt);
+    const deps = h.deps as CompactionDeps & {
+      countTokens: (text: string) => Promise<number>;
+      tokenCountEndpoint: () => string;
+    };
+    deps.countTokens = async () => {
+      throw new Error('counter unreachable');
+    };
+    deps.tokenCountEndpoint = () => 'http://127.0.0.1:8090';
+    await expect(runCompaction(h.deps, 'c1', { auto: true })).resolves.toBe('failed');
+    expect(runPrompt).not.toHaveBeenCalled();
+    expect(h.posted.find((entry) => entry.type === 'error')?.message).toContain(
+      'http://127.0.0.1:8090',
+    );
+  });
+
+  it('keeps the existing host budget when configured to estimate', async () => {
+    const h = setup(good, 170_000);
+    (h.deps as CompactionDeps & { tokenCountMode: () => 'estimate' }).tokenCountMode = () =>
+      'estimate';
+    await runCompaction(h.deps, 'c1', { auto: true });
+    expect(h.rows[1]!.hostMaxChars).toBe(14_875);
+    expect(h.rows[1]!.counter).toBe('estimate');
+  });
+
+  it('admits manual compaction at 60K used and trims the persisted user block to its budget', async () => {
+    const h = setup(good, 60_000);
+    h.conv.messages = [
+      { role: 'user', content: 'first request ' + 'a'.repeat(5_000) },
+      { role: 'assistant', content: 'answer one' },
+      { role: 'user', content: 'latest correction ' + 'b'.repeat(5_000) },
+      { role: 'assistant', content: 'working' },
+    ] satisfies ChatMessage[];
+    (h.deps as CompactionDeps & { countTokens: (text: string) => Promise<number> }).countTokens =
+      async (text) => Math.ceil(text.length / 3.5);
+    await expect(runCompaction(h.deps, 'c1', { auto: false })).resolves.toBe('compacted');
+    const userBlock = renderCompactionUserMessages(h.conv.compaction?.userMessages);
+    expect(userBlock.length).toBeLessThan(USER_CONTEXT_MAX_CHARS);
+    const terminal = h.rows[1]!;
+    const components = terminal.components as Record<string, number>;
+    expect(userBlock.length).toBeLessThanOrEqual(
+      Math.max(4_000, terminal.hostMaxChars! - components['recorded actions']!),
+    );
+    expect(userBlock).toContain('latest correction');
+    expect(userBlock).toContain('[user message truncated]');
   });
 
   it('a reloaded conversation is re-admitted: the in-memory hold does not survive', async () => {

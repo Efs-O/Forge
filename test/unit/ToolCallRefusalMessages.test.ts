@@ -3,6 +3,7 @@ import * as path from 'path';
 import { describe, expect, it, vi } from 'vitest';
 import { ToolRegistry, type RegisteredTool } from '../../src/tools/ToolRegistry';
 import { makeApplyLineEditsTool } from '../../src/tools/structuredEditTool';
+import { makeExecCommandTool } from '../../src/tools/execTools';
 
 vi.mock('vscode', () => ({
   workspace: { workspaceFolders: [{ uri: { fsPath: process.cwd() } }] },
@@ -92,6 +93,17 @@ describe('ToolRegistry.invalidArgs boolean refusal (Fix B)', () => {
     const message = registry.invalidArgs(tool, { background: 'True' });
     expect(message).toBe('Error: invalid boolean argument; use unquoted JSON true or false.');
     expect(message?.length).toBeLessThanOrEqual(200);
+  });
+});
+
+describe('ToolRegistry invalid exec arguments', () => {
+  it('recognises monitor_execution fields before the missing-command refusal', () => {
+    const registry = new ToolRegistry();
+    const message = registry.invalidArgs(makeExecCommandTool(), {
+      execution_id: 'exec-1',
+      wait_ms: 1000,
+    });
+    expect(message).toContain('these are `monitor_execution` arguments; call that tool');
   });
 });
 

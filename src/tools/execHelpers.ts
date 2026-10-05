@@ -43,7 +43,13 @@ export function parseExecOutputOptions(args: Record<string, unknown>): ExecOutpu
     const value = args[key];
     if (value === undefined) return undefined;
     if (!Number.isInteger(value) || (value as number) < 1 || (value as number) > max) {
-      throw new Error(`exec_command: ${key} must be an integer from 1 to ${max}.`);
+      const fileAlternative =
+        key === 'max_output_chars'
+          ? ' Redirect command output to a file and read it with read_file for a larger text result.'
+          : '';
+      throw new Error(
+        `exec_command: ${key} must be an integer from 1 to ${max}.${fileAlternative}`,
+      );
     }
     return value as number;
   };

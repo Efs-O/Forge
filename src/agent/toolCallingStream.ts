@@ -20,8 +20,10 @@ export async function streamOnce(
   request: ChatCompletionRequest,
   onToken: (token: string) => void,
   onReasoning: (token: string) => void,
+  offeredToolNames: readonly string[],
 ): Promise<{ finishReason: string | null; toolCalls: ToolCall[] | null }> {
   const baseUrl = await options.resolveBaseUrl();
+  options.onToolsOffered?.(offeredToolNames);
   return new Promise((resolve, reject) => {
     let capturedToolCalls: ToolCall[] | null = null;
     void streamModelChatCompletion(

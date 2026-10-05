@@ -39,6 +39,7 @@ import { opResetReportedContext } from './ConversationOps';
 import { snapshotRepoState } from './repoSnapshot';
 import { listMemoryKeys } from '../tools/memoryTools';
 import { resolveRequestModel } from '../config/ConfigResolver';
+import { createCompactionCounter } from './compactionCounter';
 import { reasoningReserve } from '../util/contextBudget';
 import { RequestChainLifecycle } from './RequestChainLifecycle';
 import { MidTurnInbox } from '../agent/MidTurnInbox';
@@ -130,6 +131,11 @@ export interface SidebarRuntimeParts {
 export function wireSidebar(host: SidebarHost, parts: SidebarParts): SidebarRuntimeParts {
   const { pool, checkpoints, toolRegistry, failureTracker, events, workspaceState } = parts;
   const requestChains = new RequestChainLifecycle();
+  const compactionCounter = createCompactionCounter({
+    getConfig: host.getConfig,
+    pool,
+    secrets: parts.secrets,
+  });
   const midTurnInbox = new MidTurnInbox();
   // One composer for every door. The sidebar inbox registers first so its tells
   // drain ahead of any remote claim; the remote source is added by extension.ts
@@ -233,8 +239,12 @@ export function wireSidebar(host: SidebarHost, parts: SidebarParts): SidebarRunt
         ...(at !== undefined ? { threshold: at } : {}),
       };
     },
+    tokenCountMode: compactionCounter.mode,
+    tokenCountEndpoint: compactionCounter.endpoint,
+    countTokens: compactionCounter.count,
     runPromptToMarkdown: (text, conversationId, options) =>
       agentLoop.runPromptToMarkdown(text, conversationId, options),
+    currentLocalTime: () => new Date().toLocaleString(),
     isStreaming: (conversationId) => agentLoop.isStreamingConv(conversationId),
     beginCompaction: (convId) => agentLoop.beginBackgroundWork(convId),
     snapshotRepoState,
@@ -320,6 +330,9 @@ export function wireSidebar(host: SidebarHost, parts: SidebarParts): SidebarRunt
     attachmentStore: parts.attachmentStore,
     midTurnInbox,
   });
+  agentLoop.setToolsOfferedListener((conversationId, names) =>
+    send.logToolsOffered(conversationId, names),
+  );
 
   // One reading of the eviction gate, shared by the yes/no decision and the
   // explanation of a refusal. Both come from the same object so a reason can

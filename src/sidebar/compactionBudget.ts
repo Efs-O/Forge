@@ -32,6 +32,7 @@ export function compactionBudget(
   activeWindowChars: number,
   modelMaxTokens = 0,
   reasoningTokens = 0,
+  charsPerToken = COMPACTION_CHARS_PER_TOKEN,
 ): CompactionBudget {
   const estimatedWindow = Math.ceil(activeWindowChars / CHARS_PER_TOKEN);
   const observedTokens = reportedTokens > 0 ? reportedTokens : estimatedWindow;
@@ -61,7 +62,9 @@ export function compactionBudget(
     summaryCeilingTokens,
     summaryCeilingChars: Math.max(12_000, chars(0.12)),
     tailMaxChars: chars(0.015),
-    hostMaxChars: Math.max(6_000, chars(0.035)),
+    // Only the host block uses a measured ratio in Phase 1. Other allowances
+    // intentionally keep the historical conservative conversion.
+    hostMaxChars: Math.max(6_000, Math.floor(policyTokens * 0.035 * charsPerToken)),
     replacementMaxChars: Math.max(12_000, chars(0.12)),
   };
 }

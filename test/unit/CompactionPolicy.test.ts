@@ -63,7 +63,7 @@ describe('percentage compaction policy', () => {
       ),
       { role: 'assistant', content: 'Next: fix F2 and rerun its concurrency test.' },
     ];
-    const prompt = buildSummaryPrompt(undefined, messages, '', '', undefined, budget);
+    const prompt = buildSummaryPrompt('test local time', undefined, messages, '', '', undefined, budget);
     expect(prompt).toContain('commit abc123 causes two Strata starts');
     expect(prompt).toContain('Next: fix F2');
     expect(prompt).toContain('tool results omitted for space');
@@ -73,6 +73,7 @@ describe('percentage compaction policy', () => {
   it('keeps a complete long assistant finding instead of silently cutting its evidence', () => {
     const finding = `Commit list: ${'abcdef012345 '.repeat(600)}`;
     const prompt = buildSummaryPrompt(
+      'test local time',
       undefined,
       [{ role: 'assistant', content: finding }],
       '',
@@ -89,7 +90,7 @@ describe('percentage compaction policy', () => {
       content: `finding ${i}: ${'a'.repeat(3_000)}`,
     }));
     expect(() =>
-      buildSummaryPrompt(undefined, messages, '', '', undefined, {
+      buildSummaryPrompt('test local time', undefined, messages, '', '', undefined, {
         sourceMaxChars: 4_000,
         summaryTargetTokens: 1_000,
         summaryCeilingTokens: 1_250,

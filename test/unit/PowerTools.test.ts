@@ -149,6 +149,7 @@ describe('sleep_computer', () => {
     const power = fakePower();
     const result = await makeSleepComputerTool(power.control).handler({ delay_seconds: 99_999 });
     expect(String(result)).toContain('in 600 seconds');
+    expect(String(result)).toContain('delay_seconds clamped to 600');
     await vi.advanceTimersByTimeAsync(600_000);
     expect(power.suspended).toHaveLength(1);
   });

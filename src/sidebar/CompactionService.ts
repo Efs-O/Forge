@@ -24,28 +24,18 @@ import {
   compactionFailureCategory,
   type CompactionFailureCategory,
 } from './compactionFailure';
+import { fitCompactionHostBlock } from './compactionHostFit';
 import {
-  refuseHostFacts,
-  shedOptionalHostFacts,
-  type OptionalHostFacts,
-} from './compactionHostFit';
-import { summarizeCompaction } from './compactionSummaryRunner';
+  compactionResumeNote,
+  compactionSummaryAllowance,
+  summarizeCompaction,
+} from './compactionSummaryRunner';
 import { PromptIncompleteError } from './PromptRun';
-import {
-  collectRecordedActions,
-  mergeRecordedActions,
-  renderRecordedActionsBlock,
-} from './compactionLedger';
-import {
-  collectCompactionUserMessages,
-  renderCompactionUserMessages,
-} from './compactionUserContext';
 import { getLogger } from '../util/logger';
-import { collectLastReply, toolActivityFollowedLastReply } from './compactionLastReply';
 import { selectCompactionSplit } from './compactionSplit';
 import { reportedContextTokens } from '../util/contextBudget';
-import { boundMemoryKeys, compactionWindowChars, messageCostChars } from './compactionWindow';
-import type { CompactionState } from './compactionTypes';
+import { compactionWindowChars, messageCostChars } from './compactionWindow';
+import { CompactionHostContext } from './compactionHostContext';
 import { deactivateLazyGroups, lazyGroupSummaryNote } from '../tools/lazyToolGroups';
 import { resetContextTrimState } from '../agent/toolResultContext';
 
@@ -96,6 +86,7 @@ async function compactOnce(
   let attemptCalls: number | undefined;
   let attemptFinish: string | undefined;
   let attemptCandidateChars: number | undefined;
+  let attemptHostFields: Partial<CompactionAttemptLogEntry> = {};
   options = {
     ...options,
     onFailureCategory: (category) => {
@@ -128,12 +119,7 @@ async function compactOnce(
   const metrics = deps.compactionMetrics?.(conv);
   const modelMax = metrics?.max ?? 0;
   const thinkingTokens = metrics?.reasoningReserve ?? 0;
-  const budget = compactionBudget(
-    reportedContextTokens(conv),
-    beforeChars,
-    modelMax,
-    thinkingTokens,
-  );
+  let budget = compactionBudget(reportedContextTokens(conv), beforeChars, modelMax, thinkingTokens);
   const split = selectCompactionSplit(pending, budget.tailMaxChars);
   if (!split) {
     if (!options.auto) {
@@ -150,51 +136,13 @@ async function compactOnce(
   // and sliced away by applyCompactionWindow — visible in the transcript,
   // invisible to the model.
   const fromIndex = from + split.tailStart;
-  const currentActions = collectRecordedActions(split.summarize);
-  const merged = mergeRecordedActions(
-    conv.compaction?.recordedActions,
-    currentActions,
-    conv.compaction?.omittedActions,
-  );
-  const recordedActions = merged.actions;
-  const omittedActions = merged.omitted;
-  const recordedActionsText = renderRecordedActionsBlock(recordedActions, omittedActions);
-  const userMessages = collectCompactionUserMessages(
-    conv.compaction?.userMessages,
-    split.summarize,
-  );
-  const userContext = renderCompactionUserMessages(userMessages);
-  // Only when the retained tail has no words of the agent's own. A tail that
-  // carries them needs no copy; a tail that is empty, or is a user turn whose
-  // answer had not started yet, leaves the summarizer's paraphrase as the sole
-  // account of what the user was last told.
-  const optional: OptionalHostFacts = {
-    repoState: '',
-    memoryKeys: boundMemoryKeys(deps.listMemoryKeys?.() ?? []),
-    lastReply: collectLastReply(pending.slice(split.tailStart))
-      ? undefined
-      : collectLastReply(split.summarize),
-  };
-  // Recorded with the reply, because the transcript it was derived from is not
-  // available when the block is rendered on a later turn. The retained tail
-  // counts too: a tail of tool calls with no text of its own ran after the reply.
-  const lastReplyFollowedByTools = optional.lastReply
-    ? toolActivityFollowedLastReply([...split.summarize, ...pending.slice(split.tailStart)])
-    : false;
-
-  // Everything the candidate state will carry except the summary itself. Built
-  // here so the floor check below can run BEFORE the summarization request.
-  const candidateWithSummary = (summaryText: string): CompactionState => ({
-    summary: summaryText,
+  const hostContext = new CompactionHostContext({
+    previous: conv.compaction,
+    pending,
+    summarize: split.summarize,
+    tailStart: split.tailStart,
     fromIndex,
-    generation: (conv.compaction?.generation ?? 0) + 1,
-    ...(userMessages.length > 0 ? { userMessages } : {}),
-    ...(recordedActions.length > 0 ? { recordedActions } : {}),
-    ...(omittedActions.file > 0 || omittedActions.command > 0 ? { omittedActions } : {}),
-    ...(optional.repoState ? { repoState: optional.repoState } : {}),
-    ...(optional.memoryKeys.length > 0 ? { memoryKeys: optional.memoryKeys } : {}),
-    ...(optional.lastReply ? { lastReply: optional.lastReply } : {}),
-    ...(optional.lastReply && lastReplyFollowedByTools ? { lastReplyFollowedByTools } : {}),
+    memoryKeys: deps.listMemoryKeys?.() ?? [],
   });
 
   deps.post({ type: 'notice', message: 'Compacting conversation…', conversationId: conv.id });
@@ -240,7 +188,7 @@ async function compactOnce(
         .reduce((sum, message) => sum + messageCostChars(message), 0);
       if (deps.snapshotRepoState) {
         try {
-          optional.repoState = await deps.snapshotRepoState();
+          hostContext.optional.repoState = await deps.snapshotRepoState();
         } catch (err) {
           // Evidence is optional even when an injected implementation is faulty.
           // The real snapshotter already catches its own git errors; this guard
@@ -249,21 +197,48 @@ async function compactOnce(
         }
       }
       // If even an empty summary cannot shrink this window, skip the model call.
-      const measureHost = (): number =>
-        compactionWindowChars(conv.messages, candidateWithSummary('')) - tailChars;
-      const shed = shedOptionalHostFacts(optional, measureHost, budget.hostMaxChars);
+      const counter =
+        deps.tokenCountMode?.(conv) ?? (deps.countTokens ? 'count_tokens' : 'estimate');
+      const tokenCountEndpoint = deps.tokenCountEndpoint?.(conv);
+      const renderHostBlock = () => hostContext.render(conv.messages, tailChars);
+      const hostFit = await fitCompactionHostBlock({
+        optional: hostContext.optional,
+        budget,
+        budgetForCharsPerToken: (ratio) =>
+          compactionBudget(
+            reportedContextTokens(conv),
+            beforeChars,
+            modelMax,
+            thinkingTokens,
+            ratio,
+          ),
+        counter,
+        ...(deps.countTokens ? { countTokens: deps.countTokens } : {}),
+        ...(tokenCountEndpoint ? { endpoint: tokenCountEndpoint } : {}),
+        conv,
+        onHostBudget: (hostMaxChars) =>
+          hostContext.fitUserContext({
+            budget,
+            hostMaxChars,
+            conversationMessages: conv.messages,
+            tailChars,
+          }),
+        render: renderHostBlock,
+      });
+      budget = { ...budget, hostMaxChars: hostFit.hostMaxChars };
+      attemptHostFields = {
+        hostChars: hostFit.hostChars,
+        hostMaxChars: hostFit.hostMaxChars,
+        charsPerToken: hostFit.charsPerToken,
+        counter: hostFit.counter,
+        components: hostFit.components,
+        shed: hostFit.shed,
+      };
+      const shed = hostFit.shed;
       if (shed.length > 0)
         log.info(`[compact] shed optional host facts to fit: ${shed.join(', ')}`);
-      const floorChars = compactionWindowChars(conv.messages, candidateWithSummary(''));
-      const hostChars = floorChars - tailChars;
-      if (hostChars > budget.hostMaxChars) {
-        refuseHostFacts(hostChars, budget.hostMaxChars, {
-          'user requests': userContext.length,
-          'recorded actions': recordedActionsText.length,
-          'repo state': optional.repoState.length,
-          'last reply': optional.lastReply?.length ?? 0,
-        });
-      }
+      const floorChars = hostFit.floorChars;
+      const hostChars = hostFit.hostChars;
       if (beforeChars >= MIN_WINDOW_CHARS_FOR_FIT_GUARD && floorChars >= beforeChars) {
         log.info(
           `[compact] no summary could shrink this window (~${floorChars} vs ~${beforeChars} chars before the summary) — not summarizing`,
@@ -277,16 +252,23 @@ async function compactOnce(
         return 'failed';
       }
 
-      groupsNote = lazyGroupSummaryNote(conversationId);
-      const summaryAllowance =
-        Math.min(budget.summaryCeilingChars, budget.replacementMaxChars - floorChars) -
-        (groupsNote?.length ?? 0);
+      groupsNote = compactionResumeNote(
+        lazyGroupSummaryNote(conversationId),
+        Boolean(conv.plan?.items?.length),
+      );
+      const summaryAllowance = compactionSummaryAllowance(
+        budget.summaryCeilingChars,
+        budget.replacementMaxChars,
+        floorChars,
+        groupsNote,
+      );
       const outputLimitTokens = metrics?.outputLimitTokens ?? 0;
       const summaryRun = await summarizeCompaction({
         messages: split.summarize,
         ...(conv.compaction?.summary ? { previousSummary: conv.compaction.summary } : {}),
-        recordedFacts: recordedActionsText + optional.repoState,
-        userContext,
+        recordedFacts: hostContext.recordedFactsText,
+        userContext: hostContext.userContextText,
+        currentLocalTime: deps.currentLocalTime(),
         ...(conv.plan?.items ? { plan: conv.plan.items } : {}),
         ...(conv.active_model ? { modelName: conv.active_model } : {}),
         modelMaxTokens: modelMax,
@@ -321,7 +303,7 @@ async function compactOnce(
     const proposed = groupsNote ? `${summary.trim()}\n\n${groupsNote}` : summary.trim();
     const summaryAllowance = Math.min(
       budget.summaryCeilingChars,
-      budget.replacementMaxChars - compactionWindowChars(conv.messages, candidateWithSummary('')),
+      budget.replacementMaxChars - compactionWindowChars(conv.messages, hostContext.candidate('')),
     );
     if (proposed.length > summaryAllowance) {
       throw new CompactionFailure(
@@ -349,7 +331,7 @@ async function compactOnce(
     // with the log row so the two can never disagree about which generation
     // this was.
     const generation = (conv.compaction?.generation ?? 0) + 1;
-    const candidate = candidateWithSummary(trimmed);
+    const candidate = hostContext.candidate(trimmed);
 
     // Does the candidate actually shrink the window?
     //
@@ -444,6 +426,7 @@ async function compactOnce(
       ...(attemptCalls !== undefined ? { calls: attemptCalls } : {}),
       ...(attemptFinish ? { finishReason: attemptFinish } : {}),
       ...(attemptCandidateChars !== undefined ? { candidateChars: attemptCandidateChars } : {}),
+      ...attemptHostFields,
     });
     deps.emitCompactionEvent?.({
       conversationId: conv.id,

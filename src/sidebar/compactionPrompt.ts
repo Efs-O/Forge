@@ -175,6 +175,7 @@ function planSnapshotBlock(plan: readonly PlanItem[] | undefined): string {
 }
 
 export function buildSummaryPrompt(
+  currentLocalTime: string,
   previousSummary: string | undefined,
   messages: ChatMessage[],
   recordedFacts = '',
@@ -213,8 +214,11 @@ export function buildSummaryPrompt(
     // re-ran the reads and searches that had produced them.
     'In State, record what is already DONE and what investigation already ' +
     'concluded, naming the file, command or tool result that establishes each. ' +
-    'In Errors, separate blockers that are still unresolved from failures that ' +
-    'were later fixed; say which is which. ' +
+    'In Errors, list blockers that are still unresolved; for failures that were ' +
+    'fixed, keep only the lesson, stated once as a rule (merge any lesson the ' +
+    'earlier summary already has), with no history of fixed typos. ' +
+    'Put a hit limit under Constraints with its number and tool. ' +
+    `Current local time: ${currentLocalTime}. Drop a time-bound constraint once that time has passed. ` +
     // Next is the one section RESUME_PROMPT points the next turn at, so it must
     // always exist. Telling the model to "omit empty sections" without this
     // exception produced a summary with no Next, and the resumed agent went

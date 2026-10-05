@@ -70,6 +70,7 @@ export type ModelProvider =
  */
 export interface GroupConfig {
   provider?: ModelProvider;
+  token_count?: 'tokenize' | 'count_tokens' | 'estimate';
   endpoint?: string;
   spawn?: SpawnConfig;
   sampling?: SamplingConfig;
@@ -107,8 +108,12 @@ export interface ProfileConfig {
 export interface ModelConfig {
   /** Display name shown in the sidebar model picker. */
   name: string;
+  /** Server-side model identifier sent in OpenAI-compatible requests. */
+  model?: string;
   /** Runtime provider for this model entry. */
   provider?: ModelProvider;
+  /** Host-block tokenizer choice used by compaction admission. */
+  token_count?: 'tokenize' | 'count_tokens' | 'estimate';
   /** Executable name or absolute path for provider: cli (e.g. `claude`, `codex`). */
   cli?: string;
   /** Model name or alias passed directly to the external CLI (e.g. `opus`). */

@@ -16,6 +16,11 @@ export function verdictEventId(exchangeId: string): string {
   return `verdict-${exchangeId}`;
 }
 
+export function wakeEventId(exchangeId: string): string {
+  if (!EXCHANGE_ID.test(exchangeId)) throw new Error('invalid exchange id');
+  return `wake-${exchangeId}`;
+}
+
 /**
  * The writer has already renamed its .tmp to .verdict.md. Moving that complete
  * file into the artifact directory is atomic on the same filesystem. If the

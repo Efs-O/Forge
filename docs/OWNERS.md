@@ -43,6 +43,7 @@ overlaps with an existing owner, extend the owner instead.
 | Model-facing message preparation for a turn (window, images, system prompt, turn context, tool-result excerpts) | `src/sidebar/prepareModelTurnMessages.ts` |
 | Context-trim policy and per-conversation hysteresis state | `src/agent/toolResultContext.ts` |
 | Per-round chat request assembly (native vs fallback tools, thinking kwargs, sampling, output cap) | `src/agent/buildRoundRequest.ts` |
+| Tool-calling loop input and result contracts | `src/agent/toolCallingLoopTypes.ts` |
 | Cloud target / local backend startup                 | `src/sidebar/ProviderTurn.ts`            |
 | Turn served by a local CLI agent                     | `src/sidebar/CliTurn.ts`                 |
 | One-shot prompt (compaction, /review)                | `src/sidebar/PromptRun.ts`               |
@@ -55,6 +56,7 @@ overlaps with an existing owner, extend the owner instead.
 | Agent notification: toast + remote fan-out           | `src/sidebar/UserNotificationService.ts` |
 | Model residency polling timer                        | `src/sidebar/ResidencyPoller.ts`         |
 | Timed pause for the agent loop                       | `src/tools/waitTool.ts`                  |
+| Live-session question ceiling and report handoff      | `src/agentBus/liveSessionLimit.ts`       |
 | LSP read operations + strict `code_intel` dispatch   | `src/tools/codeIntelTool.ts`             |
 | LSP code-action read/write handler                   | `src/tools/codeActionTools.ts`            |
 | Filesystem-miss error text for tools                 | `src/tools/pathErrorHint.ts`             |
@@ -64,6 +66,7 @@ overlaps with an existing owner, extend the owner instead.
 | Slash command dispatch                               | `src/sidebar/SlashCommandHandler.ts`     |
 | `/initForge` workspace scan and instruction generation | `src/sidebar/initForgeCommand.ts`      |
 | Compaction: cut point, run, resume                   | `src/sidebar/CompactionService.ts`       |
+| Compaction host-context assembly (preserved facts + candidate state) | `src/sidebar/compactionHostContext.ts` |
 | Compaction between rounds of a running turn (policy) | `src/sidebar/midTurnCompaction.ts`       |
 | Summary prompt text + summary validation             | `src/sidebar/compactionPrompt.ts`        |
 | Compaction attempt hold/rearm + suppressed-attempt log row | `src/sidebar/compactionAttemptPolicy.ts` |
@@ -75,6 +78,7 @@ overlaps with an existing owner, extend the owner instead.
 | One-shot vs staged summary run, output cap           | `src/sidebar/compactionSummaryRunner.ts` |
 | Bounded staged (chunked) compaction                  | `src/sidebar/compactionStaging.ts`       |
 | Compaction budget math, `planOutput`, prompt fit     | `src/sidebar/compactionBudget.ts`        |
+| Compaction tokenizer selection and per-model counter cache | `src/sidebar/compactionCounter.ts` |
 | Applying the compaction window to a request          | `src/sidebar/compactionWindow.ts`        |
 | Host-recorded summary facts (from messages)          | `src/sidebar/compactionLedger.ts`        |
 | Ledger merge, retention cap, omission count          | `src/sidebar/compactionRecordedState.ts` |
@@ -264,6 +268,7 @@ overlaps with an existing owner, extend the owner instead.
 | Localhost model-control HTTP API                  | `src/backend/ControlServer.ts`         |
 | Control-server load/capacity/unload               | `src/backend/ControlModelLifecycle.ts` |
 | Control-server HTTP/serialization helpers         | `src/backend/controlHttp.ts`           |
+| `/agent/message` option and origin-chat validation | `src/backend/agentMessageOptions.ts`    |
 | `/models` catalog contract + availability         | `src/backend/ControlModelCatalog.ts`   |
 | Control-server discovery records (LOCALAPPDATA)   | `src/backend/ControlServerRegistry.ts` |
 | Machine-wide llama.cpp runtime discovery + leases | `src/backend/SharedRuntimeRegistry.ts` |
@@ -366,6 +371,7 @@ overlaps with an existing owner, extend the owner instead.
 | Exec child-process helpers                 | `src/tools/execHelpers.ts`            |
 | Exec script-file denylist scan              | `src/tools/execScriptScanner.ts`      |
 | exec_command program resolution            | `src/tools/execProgramResolver.ts`    |
+| exec_command result hints                   | `src/tools/execHints.ts`              |
 | Git tools (status, diff, commit)           | `src/tools/gitTools.ts`               |
 | Strict `git_read` operation schema/dispatch | `src/tools/gitReadTool.ts`           |
 | Git read-operation handlers                 | `src/tools/gitReadTools.ts`          |

@@ -2,13 +2,25 @@ import * as fs from 'fs';
 import * as path from 'path';
 import * as vscode from 'vscode';
 import { isTerminal, type ExchangeState } from '../agentMesh/deliveryState';
-import { latestStates, readEvents, type ExchangeLogPaths } from '../agentMesh/exchangeLog';
+import {
+  appendEvent,
+  groupByExchange,
+  latestStates,
+  readEvents,
+  type ExchangeLogPaths,
+} from '../agentMesh/exchangeLog';
 import {
   pendingVerdictArtifacts,
+  wakeEventId,
   retainVerdict,
   verdictArtifactPath,
   verdictEventId,
 } from '../agentMesh/verdictArtifact';
+import {
+  canRouteInternalLiveAnswer,
+  formatMeshVerdictWake,
+  routeInternalLiveAnswer,
+} from '../agentBus/liveAnswerNotices';
 import { MESH_MAINTENANCE_INTERVAL_MS } from './meshMaintenance';
 
 export interface MeshVerdictPoll {
@@ -99,6 +111,7 @@ export function createMeshVerdictPoll(deps: {
         detail: `Full verdict retained: forge.sh read-verdict <your-name> ${exchangeId}; acknowledge separately after reading.`,
       });
     }
+    await deliverVerdictWakes(deps.exchangePaths, root);
   };
   return {
     pollOnce,
@@ -116,4 +129,40 @@ export function createMeshVerdictPoll(deps: {
       timer = undefined;
     },
   };
+}
+
+async function deliverVerdictWakes(exchangePaths: ExchangeLogPaths, root: string): Promise<void> {
+  const events = readEvents(exchangePaths.log);
+  for (const [exchangeId, exchange] of groupByExchange(events)) {
+    const created = exchange.find((event) => event.state === 'created');
+    if (!created?.originConversation || !created.to) continue;
+    const verdict = exchange.find((event) => event.eventId === verdictEventId(exchangeId));
+    if (!verdict || exchange.some((event) => event.eventId === wakeEventId(exchangeId))) continue;
+    if (!canRouteInternalLiveAnswer(created.originConversation)) continue;
+
+    let body: string;
+    try {
+      body = fs.readFileSync(verdictArtifactPath(root, exchangeId), 'utf8');
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code === 'ENOENT') continue;
+      throw error;
+    }
+    const appended = await appendEvent(exchangePaths, {
+      eventId: wakeEventId(exchangeId),
+      ts: Date.now(),
+      exchangeId,
+      workspace: created.workspace,
+      ...(created.conversation ? { conversation: created.conversation } : {}),
+      from: created.from,
+      to: 'forge',
+      type: 'wake',
+      state: verdict.state,
+      detail: `wake routed to origin conversation ${created.originConversation}`,
+    });
+    if (!appended) continue;
+    routeInternalLiveAnswer(
+      formatMeshVerdictWake(created.to, exchangeId, created.from, body),
+      created.originConversation,
+    );
+  }
 }

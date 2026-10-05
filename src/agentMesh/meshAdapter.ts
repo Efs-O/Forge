@@ -41,6 +41,8 @@ export interface MeshAdapter {
    * so a session that joined, died or was replaced is not written to forever.
    */
   readonly key?: string;
+  /** Concrete recipient selected when this adapter was resolved. */
+  readonly deliveredTo?: string | undefined;
   /** Shown to the user with the result: set on a stand-in for a dead joined session. */
   note?: string;
   /**

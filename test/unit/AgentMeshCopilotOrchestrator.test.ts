@@ -172,15 +172,19 @@ describe('orchestrator: copilot as a mesh peer (P2)', () => {
     expect(claude.sends).toEqual(['from copilot']);
     expect(copilot.sends).toEqual(['from claude']);
 
-    // Each relay is two hop events sharing one exchange id.
+    // Each relay is two accepted hop events after its created row.
     for (const out of [a, b]) {
       if ('error' in out) continue;
-      const hops = board.filter((e) => e.type === 'relay' && e.exchangeId === out.exchangeId);
+      const hops = board.filter(
+        (e) => e.type === 'relay' && e.state === 'accepted' && e.exchangeId === out.exchangeId,
+      );
       expect(hops).toHaveLength(2);
     }
     // The copilot -> claude relay: hop1 copilot->forge, hop2 forge->claude.
     if (!('error' in a)) {
-      const hops = board.filter((e) => e.type === 'relay' && e.exchangeId === a.exchangeId);
+      const hops = board.filter(
+        (e) => e.type === 'relay' && e.state === 'accepted' && e.exchangeId === a.exchangeId,
+      );
       expect(hops[0].from).toBe('copilot');
       expect(hops[0].to).toBe('forge');
       expect(hops[1].from).toBe('forge');

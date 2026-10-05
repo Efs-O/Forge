@@ -12,7 +12,7 @@ import {
 const RELOAD_DEBOUNCE_MS = 150;
 const STARTER_CONTENT = `# Project Instructions
 
-Keep this file concise (under 25,000 bytes). Forge includes it in every native local-agent prompt.
+Keep this file concise (under 32,000 bytes). Forge includes it in every native local-agent prompt.
 
 ## Project facts
 - Purpose and important architecture decisions:
@@ -106,7 +106,15 @@ export class ForgeInstructionsLoader implements vscode.Disposable {
     const rendered = renderInstructionChain(files, MAX_INSTRUCTION_BYTES);
     const text = rendered?.text;
     this.chainByKey.set(key, text);
-    if (rendered) this.reportBudget(rendered.truncated, rendered.omitted, rendered.unreadable);
+    if (rendered) {
+      this.reportBudget(
+        rendered.truncated,
+        rendered.omitted,
+        rendered.unreadable,
+        Buffer.byteLength(rendered.text, 'utf8'),
+        files.at(-1)?.displayPath,
+      );
+    }
     return text;
   }
 
@@ -139,7 +147,13 @@ export class ForgeInstructionsLoader implements vscode.Disposable {
    * Silence here would be the worst outcome: instructions the user wrote would
    * simply not reach the model, and nothing in the chat would say so.
    */
-  private reportBudget(truncated: string[], omitted: string[], unreadable: string[]): void {
+  private reportBudget(
+    truncated: string[],
+    omitted: string[],
+    unreadable: string[],
+    renderedBytes: number,
+    displayPath: string | undefined,
+  ): void {
     const notify = (paths: string[], message: (p: string) => string): void => {
       for (const displayPath of paths) {
         if (this.budgetWarnings.has(displayPath)) continue;
@@ -157,6 +171,16 @@ export class ForgeInstructionsLoader implements vscode.Disposable {
       (p) => `Forge: ${p} was omitted; the project-instruction budget was already exhausted.`,
     );
     notify(unreadable, (p) => `Forge: ${p} exists but could not be read.`);
+    if (
+      displayPath &&
+      renderedBytes >= MAX_INSTRUCTION_BYTES * 0.9 &&
+      !this.budgetWarnings.has(displayPath)
+    ) {
+      this.budgetWarnings.add(displayPath);
+      void vscode.window.showWarningMessage(
+        `Forge: ${displayPath} brings rendered project instructions to ${renderedBytes.toLocaleString('en-US')} of ${MAX_INSTRUCTION_BYTES.toLocaleString('en-US')} bytes.`,
+      );
+    }
   }
 
   private watch(): void {

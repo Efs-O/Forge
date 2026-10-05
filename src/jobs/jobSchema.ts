@@ -36,7 +36,14 @@ export type Weekday = z.infer<typeof WeekdaySchema>;
 export const ScheduleSchema = z.discriminatedUnion('kind', [
   z.object({
     kind: z.literal('interval'),
-    minutes: z.number().int().min(15, 'interval must be at least 15 minutes'),
+    minutes: z
+      .number()
+      .int()
+      .min(
+        15,
+        'interval must be at least 15 minutes. To wait for a reply, use `wait` ' +
+          '(ends early on a new message) or `ask_live_session` with `notify_on_answer`.',
+      ),
   }),
   z.object({
     kind: z.literal('daily'),

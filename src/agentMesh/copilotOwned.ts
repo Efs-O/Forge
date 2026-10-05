@@ -5,7 +5,7 @@ import type { CopilotAcpSession } from '../agents/CopilotAcpSession';
 import { copilotMeshPreamble } from '../agentBus/busContent';
 import { resolveCliExecutable } from '../agents/resolveCliExecutable';
 import { registerAlias } from './aliasRegistry';
-import { CopilotOwnedAdapter } from './adapters';
+import { CopilotOwnedAdapter, resolvedDeliveryLabel } from './adapters';
 import { beginCreation, defaultCopilotFactory, type OwnedCopilotFactory } from './creationPreamble';
 import type { MeshAdapter } from './meshAdapter';
 import type { HostLivenessDeps } from './hostIdentity';
@@ -137,6 +137,12 @@ export class CopilotOwnedSessions {
       s,
       () => recordConfirmedId(this.deps.busRoot, alias, s.confirmedSessionId, this.deps),
       () => this.takePreamble(s),
+      resolvedDeliveryLabel(
+        alias,
+        s.confirmedSessionId,
+        'owned',
+        this.deps.workspaceRoots()[0] ?? os.homedir(),
+      ),
     );
   }
 

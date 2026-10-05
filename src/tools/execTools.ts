@@ -28,6 +28,12 @@ import {
   NOTIFY_ON_EXIT_DESCRIPTION,
 } from './backgroundExecutionTools';
 import { terminalCommandTracker } from './TerminalCommandTracker';
+import {
+  describeForgeToolProgram,
+  describeMissingExecutable,
+  describeWindowsShimSpawnFailure,
+  inlineScriptWriteHint,
+} from './execHints';
 
 // ── run_terminal ───────────────────────────────────────────────────────────────
 
@@ -82,6 +88,7 @@ export function makeRunTerminalTool(): RegisteredTool {
 
 export function makeExecCommandTool(
   shellScriptsEnabled: () => boolean = () => false,
+  registeredToolNames: () => readonly string[] = () => [],
 ): RegisteredTool {
   return {
     definition: {
@@ -195,6 +202,10 @@ export function makeExecCommandTool(
       }
       const cwd = resolveExecCwd(args['cwd'] as string | undefined);
       const shellScripts = shellScriptsEnabled();
+      const forgeToolHint = describeForgeToolProgram(command, registeredToolNames());
+      if (forgeToolHint) {
+        throw new ExecCommandError('policy_refusal', command, forgeToolHint);
+      }
       try {
         checkShellOperators(cmdArgs, shellScripts ? inlineScriptStart(command, cmdArgs) : -1);
       } catch (error) {
@@ -211,6 +222,10 @@ export function makeExecCommandTool(
       if (!envCheck.ok) {
         throw new ExecCommandError('policy_refusal', command, envCheck.error ?? 'invalid env');
       }
+      const childEnv = {
+        ...envCheck.env,
+        ...(context?.conversationId ? { FORGE_CONVERSATION_ID: context.conversationId } : {}),
+      };
       try {
         const denied = checkDenyList(command, cmdArgs, getBuiltinDenyList());
         if (denied) {
@@ -260,7 +275,7 @@ export function makeExecCommandTool(
             args: spawned.args,
             cwd,
             timeoutMs: requestedTimeoutMs,
-            env: envCheck.env,
+            env: childEnv,
             ...(showWindow ? { showWindow: true } : {}),
             ...(notifyOnExit ? { notifyConversationId: context!.conversationId! } : {}),
           });
@@ -269,6 +284,7 @@ export function makeExecCommandTool(
           await new Promise((resolve) => setImmediate(resolve));
           const observation = await backgroundExecutionManager.observe(started.id, 0, 0, 0);
           const formatted = formatBackgroundObservation(observation, 0, outputOptions);
+          const noted = addExecCommandNote(formatted, inlineScriptWriteHint(command, cmdArgs));
           if (showWindow) {
             // The launcher/child distinction the plan requires (item 4): a
             // `write.exe`-style launcher exits as soon as its GUI app is up, so
@@ -277,13 +293,13 @@ export function makeExecCommandTool(
             // from concluding the GUI closed, or believing it can close it here.
             const tracked = String(spawned.command);
             return (
-              `${formatted}\nNOTE: launched with a visible window. This execution tracks the ` +
+              `${noted}\nNOTE: launched with a visible window. This execution tracks the ` +
               `process started here (${tracked}), not any window or child GUI app it opens. ` +
               'If that program is a launcher, it may report completed while its GUI stays open, ' +
               'and stop will not close that GUI.'
             );
           }
-          return formatted;
+          return noted;
         }
         // The FOREGROUND route. It is a separate path from the background spawn
         // above and deliberately has no window flag: `spawnAndWait` does not set
@@ -295,10 +311,13 @@ export function makeExecCommandTool(
           spawned.args,
           cwd,
           timeoutMs,
-          envCheck.env,
+          childEnv,
           context?.abortSignal,
         );
-        return formatExecCommandOutput(command, result, outputOptions);
+        return addExecCommandNote(
+          formatExecCommandOutput(command, result, outputOptions),
+          inlineScriptWriteHint(command, cmdArgs),
+        );
       } catch (error) {
         // spawn reports a cmd.exe builtin and a genuinely absent program the
         // same way: missing. True, and useless — a bare ENOENT names nothing
@@ -312,13 +331,22 @@ export function makeExecCommandTool(
           throw new ExecCommandError(
             'missing_executable',
             command,
-            `"${command}" is not available here: exec_command runs without a shell, ` +
-              `so shell builtins have no executable image and Unix utilities are not on ` +
-              `this PATH. ${alternative}`,
+            describeMissingExecutable(command, alternative) ?? error.message,
           );
+        }
+        const shimHint = describeWindowsShimSpawnFailure(command, error);
+        if (shimHint) {
+          throw new ExecCommandError('spawn_error', command, shimHint);
         }
         throw error;
       }
     },
   };
+}
+
+function addExecCommandNote(result: string, note: string | undefined): string {
+  if (!note) return result;
+  const parsed = JSON.parse(result) as Record<string, unknown>;
+  parsed['note'] = note;
+  return JSON.stringify(parsed);
 }

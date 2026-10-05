@@ -82,15 +82,36 @@ describe('renderInstructionChain budget', () => {
     expect(rendered?.text).toBe('root rules');
   });
 
+  it('marks a lone oversized file within the byte budget without splitting UTF-8', () => {
+    const marker = '\n[... truncated to fit the project-instruction budget ...]';
+    const content = `${'a'.repeat(MAX_INSTRUCTION_BYTES - Buffer.byteLength(marker) - 2)}${'🙂'.repeat(20)}`;
+
+    const rendered = renderInstructionChain([file('FORGE.md', '', content)]);
+
+    expect(rendered?.text.endsWith(marker)).toBe(true);
+    expect(Buffer.byteLength(rendered?.text ?? '', 'utf8')).toBeLessThanOrEqual(
+      MAX_INSTRUCTION_BYTES,
+    );
+    expect(rendered?.text).not.toContain('\uFFFD');
+  });
+
+  it('does not append a marker to a lone file that is within the byte budget', () => {
+    const content = 'a'.repeat(MAX_INSTRUCTION_BYTES - 10);
+    const rendered = renderInstructionChain([file('FORGE.md', '', content)]);
+
+    expect(rendered?.text).toBe(content);
+    expect(rendered?.truncated).toEqual([]);
+  });
+
   it('allocates root-first, truncating the leaf rather than dropping the root', () => {
     const rendered = renderInstructionChain(
       [
-        file('FORGE.md', '', 'R'.repeat(24000)),
-        file('packages/api/FORGE.md', 'packages/api', 'L'.repeat(4000)),
+        file('FORGE.md', '', 'R'.repeat(28_000)),
+        file('packages/api/FORGE.md', 'packages/api', 'L'.repeat(8_000)),
       ],
       MAX_INSTRUCTION_BYTES,
     );
-    expect(rendered?.text).toContain('R'.repeat(24000));
+    expect(rendered?.text).toContain('R'.repeat(28_000));
     expect(rendered?.truncated).toEqual(['packages/api/FORGE.md']);
     expect(Buffer.byteLength(rendered?.text ?? '', 'utf8')).toBeLessThanOrEqual(
       MAX_INSTRUCTION_BYTES,
@@ -100,7 +121,7 @@ describe('renderInstructionChain budget', () => {
   it('marks a leaf omitted, rather than silently dropping it, when nothing fits', () => {
     const rendered = renderInstructionChain(
       [
-        file('FORGE.md', '', 'R'.repeat(24900)),
+        file('FORGE.md', '', 'R'.repeat(31_200)),
         file('packages/api/FORGE.md', 'packages/api', 'L'.repeat(4000)),
       ],
       MAX_INSTRUCTION_BYTES,
@@ -245,14 +266,14 @@ describe('ForgeInstructionsLoader chain assembly', () => {
     fs.mkdirSync(path.join(root, '.git'));
     // Big root file: in the deep chain it is truncated to make room for a
     // header; on its own it must still arrive at its full length.
-    write(root, 'FORGE.md', 'R'.repeat(24990));
+    write(root, 'FORGE.md', 'R'.repeat(31_500));
     write(root, 'pkg/FORGE.md', 'P'.repeat(600));
     const loader = new ForgeInstructionsLoader(root);
 
     const deep = loader.instructionsFor('pkg/a.ts') ?? '';
     expect(deep).toContain('Omitted, project-instruction budget exhausted');
     const shallow = loader.instructionsFor('a.ts') ?? '';
-    expect(shallow).toBe('R'.repeat(24990));
+    expect(shallow).toBe('R'.repeat(31_500));
     loader.dispose();
   });
 });

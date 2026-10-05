@@ -74,6 +74,7 @@ function harness(
       state.promptOptions = options;
       return summarize({ released: () => state.released });
     },
+    currentLocalTime: () => 'test local time',
   };
   return state;
 }
@@ -158,7 +159,7 @@ describe('selectCompactionSplit', () => {
   });
 
   it('keeps assistant tool-call turns available to the summary', () => {
-    const prompt = buildSummaryPrompt(undefined, [
+    const prompt = buildSummaryPrompt('test local time', undefined, [
       {
         role: 'assistant',
         content: null,
@@ -211,7 +212,7 @@ describe('isUsableSummary', () => {
 
 describe('summary prompt anchoring', () => {
   it('always asks for Next, so RESUME_PROMPT cannot point at a missing section', () => {
-    const prompt = buildSummaryPrompt(undefined, [{ role: 'user', content: 'do the thing' }]);
+    const prompt = buildSummaryPrompt('test local time', undefined, [{ role: 'user', content: 'do the thing' }]);
 
     expect(prompt).toContain('ALWAYS include Next');
     expect(prompt).toContain('nothing pending');
@@ -229,7 +230,7 @@ describe('summary prompt anchoring', () => {
       { role: 'user', content: 'still broken' },
     ];
 
-    const prompt = buildSummaryPrompt(undefined, messages);
+    const prompt = buildSummaryPrompt('test local time', undefined, messages);
 
     expect(prompt).toContain('ORIGINAL REQUEST');
     expect(prompt).toContain(goal);
@@ -237,6 +238,7 @@ describe('summary prompt anchoring', () => {
 
   it('puts host-recorded command evidence ahead of an oversized transcript', () => {
     const prompt = buildSummaryPrompt(
+      'test local time',
       undefined,
       [{ role: 'tool', content: 'x'.repeat(60000) }],
       '**Commands run (recorded by Forge, not written by the model):**\n- ran `download krea2` → exit 0; output evidence: Downloaded krea2_turbo_fp8_scaled.safetensors',
@@ -1150,25 +1152,26 @@ describe('summary prompt continuation fidelity', () => {
   ];
 
   it('asks for completed work and concluded investigation in State', () => {
-    const prompt = buildSummaryPrompt(undefined, base);
+    const prompt = buildSummaryPrompt('test local time', undefined, base);
     expect(prompt).toContain('record what is already DONE');
     expect(prompt).toContain('naming the file, command or tool result');
   });
 
-  it('asks Errors to separate unresolved blockers from failures already fixed', () => {
-    expect(buildSummaryPrompt(undefined, base)).toContain(
-      'separate blockers that are still unresolved',
-    );
+  it('keeps only one lesson for each fixed failure in Errors', () => {
+    const prompt = buildSummaryPrompt('test local time', undefined, base);
+    expect(prompt).toContain('list blockers that are still unresolved');
+    expect(prompt).toContain('for failures that were fixed, keep only the lesson');
+    expect(prompt).toContain('with no history of fixed typos');
   });
 
   it('asks Next for the pending action or the unanswered question', () => {
-    const prompt = buildSummaryPrompt(undefined, base);
+    const prompt = buildSummaryPrompt('test local time', undefined, base);
     expect(prompt).toContain('the question the user has not answered yet');
     expect(prompt).toContain('Do not list work the recorded outcomes already show finished');
   });
 
   it('supplies the agent’s plan, labelled as intent rather than evidence', () => {
-    const prompt = buildSummaryPrompt(undefined, base, '', '', [
+    const prompt = buildSummaryPrompt('test local time', undefined, base, '', '', [
       { text: 'ship the fix', status: 'pending' },
       { text: 'write the test', status: 'done' },
     ]);
@@ -1178,7 +1181,7 @@ describe('summary prompt continuation fidelity', () => {
   });
 
   it('omits the plan block entirely when there is no plan', () => {
-    expect(buildSummaryPrompt(undefined, base)).not.toContain('AGENT-MAINTAINED PLAN');
+    expect(buildSummaryPrompt('test local time', undefined, base)).not.toContain('AGENT-MAINTAINED PLAN');
   });
 
   it('cuts the source to whole messages and says how many were dropped', () => {
@@ -1190,7 +1193,7 @@ describe('summary prompt continuation fidelity', () => {
       ),
       { role: 'assistant', content: 'FINAL: the build is green and the fix is committed.' },
     ];
-    const prompt = buildSummaryPrompt(undefined, messages);
+    const prompt = buildSummaryPrompt('test local time', undefined, messages);
 
     // The most recent message survives intact — it is the completion report.
     expect(prompt).toContain('FINAL: the build is green and the fix is committed.');

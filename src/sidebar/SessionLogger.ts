@@ -1,6 +1,7 @@
 import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
+import { createHash } from 'crypto';
 import type { ChatMessage } from '../llm/types';
 
 const SESSIONS_DIR = path.join(os.homedir(), '.forge', 'sessions');
@@ -75,6 +76,12 @@ export interface CompactionAttemptLogEntry {
   windowChars?: number;
   /** Estimated characters of the replacement window; unknown until a candidate exists. */
   candidateChars?: number;
+  hostChars?: number;
+  hostMaxChars?: number;
+  charsPerToken?: number;
+  counter?: 'tokenize' | 'count_tokens' | 'estimate';
+  components?: Record<string, number>;
+  shed?: string[];
 }
 
 export interface SessionContext {
@@ -135,6 +142,7 @@ export class SessionLogger {
   private writtenCount: number;
   private headerWritten = false;
   private lastUsage: SessionUsage | null = null;
+  private lastToolsOfferedHash: string | undefined;
 
   constructor(
     private readonly sessionId: string,
@@ -249,11 +257,33 @@ export class SessionLogger {
         max_tokens: entry.maxTokens,
         ...(entry.windowChars !== undefined ? { window_chars: entry.windowChars } : {}),
         ...(entry.candidateChars !== undefined ? { candidate_chars: entry.candidateChars } : {}),
+        ...(entry.hostChars !== undefined ? { host_chars: entry.hostChars } : {}),
+        ...(entry.hostMaxChars !== undefined ? { host_max_chars: entry.hostMaxChars } : {}),
+        ...(entry.charsPerToken !== undefined ? { chars_per_token: entry.charsPerToken } : {}),
+        ...(entry.counter !== undefined ? { counter: entry.counter } : {}),
+        ...(entry.components !== undefined ? { components: entry.components } : {}),
+        ...(entry.shed !== undefined ? { shed: entry.shed } : {}),
         timestamp_ms: Date.now(),
         model,
       }) + '\n',
       'utf8',
     );
+  }
+
+  /** Record the model-facing tools only when this run's advertised set changes. */
+  logToolsOffered(names: readonly string[], model: string): void {
+    const sortedNames = [...names].sort();
+    const hash = createHash('sha256').update(sortedNames.join('\n')).digest('hex').slice(0, 12);
+    if (hash === this.lastToolsOfferedHash) return;
+    this.ensureHeader(model);
+    this.append({
+      type: 'tools_offered',
+      names: sortedNames,
+      hash,
+      timestamp_ms: Date.now(),
+      model,
+    });
+    this.lastToolsOfferedHash = hash;
   }
 
   /**
@@ -347,6 +377,7 @@ export class SessionLogger {
         model,
       };
       if (msg.reasoning) line['reasoning'] = msg.reasoning;
+      if (msg.role === 'user' && msg.internal === true) line['internal'] = true;
       if (msg.role === 'tool' && msg.tool_call_id) line['tool_call_id'] = msg.tool_call_id;
       if (msg.role === 'tool' && msg.name) line['name'] = msg.name;
       if (msg.role === 'user' && typeof msg.turnContext === 'string') {

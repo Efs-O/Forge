@@ -61,6 +61,7 @@ describe('validateExecEnv', () => {
       'GIT_DIR',
       'GIT_WORK_TREE',
       'NPM_EXECPATH',
+      'FORGE_CONVERSATION_ID',
     ];
 
     it.each(blocked)('refuses %s', (name) => {

@@ -6,7 +6,7 @@
 //
 // Requires a vision-capable Qwen3.8 model, browser/desktop permissions, and the
 // real HalluScribe MCP server from .forge/config.yaml. Set FORGE_LIVE_MODEL to a
-// vision model; checks dispatch real tool schemas from all seven groups.
+// vision model; checks dispatch real schemas from the six lazy groups (memory is eager).
 //
 //   FORGE_LIVE_LAZY_TOOLS=1 npx vitest run test/live/LazyToolGroups.live.test.ts
 //
@@ -74,11 +74,6 @@ const NATIVE_GROUP_TASKS = [
     group: 'system',
     tool: 'get_power_info',
     prompt: 'Report the computer power and wake-on-LAN information without changing anything.',
-  },
-  {
-    group: 'memory',
-    tool: 'list_memories',
-    prompt: 'List the saved Forge memories so I can review them.',
   },
   {
     group: 'notebook',
@@ -160,9 +155,9 @@ describe.runIf(LIVE)('lazy tool groups against a live Qwen3.8', () => {
     }
     vscode.env.appRoot = appRoot;
     await buildRegistry();
-    // A green run here without all seven groups registered would prove nothing.
+    // Memory is eager; the remaining lazy groups must all be registered.
     for (const group of [
-      'computer_use', 'media', 'editor_ui', 'system', 'memory', 'notebook', 'halluscribe',
+      'computer_use', 'media', 'editor_ui', 'system', 'notebook', 'halluscribe',
     ]) expect(isLazyGroupAvailable(group)).toBe(true);
     const names = registry.definitions(READ_ONLY_PERMISSIONS).map((d) => d.function.name);
     expect(names).toContain('load_tool_group');
@@ -170,7 +165,7 @@ describe.runIf(LIVE)('lazy tool groups against a live Qwen3.8', () => {
     expect(loader?.function.parameters).toMatchObject({
       properties: {
         group: {
-          enum: ['computer_use', 'editor_ui', 'halluscribe', 'media', 'memory', 'notebook', 'system'],
+          enum: ['computer_use', 'editor_ui', 'halluscribe', 'media', 'notebook', 'system'],
         },
       },
     });

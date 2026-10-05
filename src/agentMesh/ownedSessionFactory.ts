@@ -5,7 +5,7 @@ import type { CodexAppServerSession } from '../agents/CodexAppServerSession';
 import type { ClaudeOwnedSession } from '../agents/ClaudeOwnedSession';
 import { queueToCodex } from '../agentBus/codexDelivery';
 import { registerAlias } from './aliasRegistry';
-import { ClaudeOwnedAdapter, CodexOwnedAdapter } from './adapters';
+import { ClaudeOwnedAdapter, CodexOwnedAdapter, resolvedDeliveryLabel } from './adapters';
 import { CodexIdleRelease } from './codexIdleRelease';
 import { codexQueueAdapterIfLive } from './codexPinLiveness';
 import {
@@ -79,12 +79,25 @@ export class OwnedSessionFactory {
       s,
       () => recordConfirmedId(this.deps.busRoot, alias, s.confirmedSessionId, this.deps),
       () => this.releaseCodexWhenIdle(alias, s),
+      resolvedDeliveryLabel(
+        alias,
+        s.confirmedSessionId,
+        'owned',
+        this.deps.workspaceRoots()[0] ?? os.homedir(),
+      ),
     );
   }
 
   claudeOwnedAdapter(alias: string, s: ClaudeOwnedSession): ClaudeOwnedAdapter {
-    return new ClaudeOwnedAdapter(s, () =>
-      recordConfirmedId(this.deps.busRoot, alias, s.confirmedSessionId, this.deps),
+    return new ClaudeOwnedAdapter(
+      s,
+      () => recordConfirmedId(this.deps.busRoot, alias, s.confirmedSessionId, this.deps),
+      resolvedDeliveryLabel(
+        alias,
+        s.confirmedSessionId,
+        'owned',
+        this.deps.workspaceRoots()[0] ?? os.homedir(),
+      ),
     );
   }
 
@@ -99,6 +112,7 @@ export class OwnedSessionFactory {
       ownedCodex: this.owned.get('codex'),
       getConfig: this.deps.getConfig,
       busRoot: this.deps.busRoot,
+      workspace: this.deps.workspaceRoots()[0] ?? os.homedir(),
       ...(this.deps.queueCodex ? { queueCodex: this.deps.queueCodex } : {}),
     };
   }

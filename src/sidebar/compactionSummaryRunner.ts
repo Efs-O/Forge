@@ -14,6 +14,7 @@ const REPLACEMENT_DELIMITER_RESERVE_CHARS = 256;
 
 export interface CompactionSummaryInput {
   messages: ChatMessage[];
+  currentLocalTime: string;
   previousSummary?: string;
   recordedFacts: string;
   userContext: string;
@@ -28,6 +29,24 @@ export interface CompactionSummaryInput {
   runPrompt: (text: string, conversationId: string, options: PromptRunOptions) => Promise<string>;
   /** Called with the running count each time a summarizer call is issued. */
   onCalls?: (issued: number) => void;
+}
+
+const PLAN_REFRESH_NOTE =
+  'If a plan is shown, check it against the State section and update it with `update_plan` before continuing.';
+
+/** Combine the existing tool-group handoff with instructions for the resumed turn. */
+export function compactionResumeNote(groupsNote: string, hasPlan: boolean): string {
+  return [groupsNote, ...(hasPlan ? [PLAN_REFRESH_NOTE] : [])].filter(Boolean).join('\n\n');
+}
+
+/** Reserve the resume note from the summary's replacement-window allowance. */
+export function compactionSummaryAllowance(
+  summaryCeilingChars: number,
+  replacementMaxChars: number,
+  floorChars: number,
+  resumeNote: string,
+): number {
+  return Math.min(summaryCeilingChars, replacementMaxChars - floorChars) - resumeNote.length;
 }
 
 export interface CompactionSummaryResult {
@@ -66,6 +85,7 @@ function oneShotPrompt(input: CompactionSummaryInput, outputTokens: number) {
     input.modelMaxTokens,
     (sourceMaxChars) =>
       buildSummaryPrompt(
+        input.currentLocalTime,
         input.previousSummary,
         input.messages,
         input.recordedFacts,

@@ -48,6 +48,7 @@ export interface AgentMesh {
     from: string,
     to: string,
     text: string,
+    originConversation?: string,
   ) => Promise<{ ok: true; exchangeId: string } | { ok: false; error: string }>;
   /** F-06: a `priority=steer` relay (interrupts the active turn). */
   steer: (
@@ -151,6 +152,7 @@ export function setupAgentMesh(
     type: string;
     state: ExchangeState;
     detail?: string;
+    originConversation?: string;
   }) => Promise<void> = async (e) => {
     sweepStaleScopes();
     const existing = exchangeScope.get(e.exchangeId);
@@ -180,6 +182,7 @@ export function setupAgentMesh(
           type: e.type,
           state: e.state,
           ...(e.detail ? { detail: e.detail } : {}),
+          ...(e.originConversation ? { originConversation: e.originConversation } : {}),
         },
         {},
       );
@@ -282,10 +285,14 @@ export function setupAgentMesh(
   maintenance.start();
   verdictPoll.start();
 
-  const relay: AgentMesh['relay'] = async (from, to, text) => {
-    const result = await orchestrator.relay(from, to, text);
+  const relay: AgentMesh['relay'] = async (from, to, text, originConversation) => {
+    const result = await orchestrator.relay(from, to, text, 0, originConversation);
     if ('error' in result) return { ok: false, error: result.error };
-    return { ok: true, exchangeId: result.exchangeId };
+    return {
+      ok: true,
+      exchangeId: result.exchangeId,
+      ...(result.deliveredTo ? { deliveredTo: result.deliveredTo } : {}),
+    };
   };
 
   // F-06: a `priority=steer` relay interrupts the recipient's active turn.

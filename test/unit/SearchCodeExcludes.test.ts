@@ -197,7 +197,7 @@ describe('rgScopeArgs', () => {
   });
 
   it('drops the exclusions only for a named FILE, which is the point of naming it', () => {
-    const args = rgScopeArgs(resolveSearchCodeScope('.forge/config.yaml', root));
+    const args = rgScopeArgs(resolveSearchCodeScope('config/config.example.yaml', root));
     expect(args).toEqual(['--no-ignore-vcs']);
   });
 

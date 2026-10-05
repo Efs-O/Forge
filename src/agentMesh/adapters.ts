@@ -27,6 +27,25 @@ function copilotAdapterKey(session: CopilotAcpSession): string {
   return key;
 }
 
+export function resolvedDeliveryLabel(
+  alias: string,
+  sessionId: string | undefined,
+  attachment: 'joined' | 'owned' | 'queued' | 'peer',
+  workspace?: string,
+): string {
+  const workspacePart = workspace ? `, workspace ${workspace}` : '';
+  return `${alias} = session ${sessionId ?? 'pending id'} (${attachment}${workspacePart})`;
+}
+
+export function standInDeliveryLabel(
+  alias: string,
+  sessionId: string | undefined,
+  workspace?: string,
+): string {
+  const workspacePart = workspace ? ` (workspace ${workspace})` : '';
+  return `${alias} = stand-in for ${sessionId ?? 'new session'}${workspacePart}`;
+}
+
 /**
  * The agent-mesh delivery adapters (AGENT_MESH_PLAN §1, §2).
  *
@@ -45,6 +64,7 @@ export class CodexOwnedAdapter implements MeshAdapter {
   readonly kind = 'codex' as const;
   readonly observesTurns = true;
   readonly key: string;
+  readonly deliveredTo: string | undefined;
 
   /** `onTurnEnd`: a fresh thread's id exists only after its first turn; the
    *  provider records it then, or a reload has nothing to resume. */
@@ -52,8 +72,10 @@ export class CodexOwnedAdapter implements MeshAdapter {
     private readonly session: CodexAppServerSession,
     private readonly onTurnEnd?: () => void,
     private readonly onFifoIdle?: () => void,
+    deliveredTo?: string,
   ) {
     this.key = codexAdapterKey(session);
+    this.deliveredTo = deliveredTo;
   }
 
   async send(message: string, options?: MeshSendOptions): Promise<TurnResult> {
@@ -86,12 +108,16 @@ export class ClaudeOwnedAdapter implements MeshAdapter {
   readonly kind = 'claude' as const;
   readonly observesTurns = true;
   readonly key = 'claude-owned';
+  readonly deliveredTo: string | undefined;
 
   /** `onTurnEnd`: see `CodexOwnedAdapter`. */
   constructor(
     private readonly session: ClaudeOwnedSession,
     private readonly onTurnEnd?: () => void,
-  ) {}
+    deliveredTo?: string,
+  ) {
+    this.deliveredTo = deliveredTo;
+  }
 
   async send(message: string, options?: MeshSendOptions): Promise<TurnResult> {
     const result = await this.session
@@ -119,6 +145,7 @@ export class CopilotOwnedAdapter implements MeshAdapter {
   readonly kind = 'copilot' as const;
   readonly observesTurns = true;
   readonly key: string;
+  readonly deliveredTo: string | undefined;
 
   /** `onTurnEnd`: see `CodexOwnedAdapter`. `takePreamble`: the one-time
    *  creation prompt (identifies the agent as `copilot`, points to the
@@ -127,8 +154,10 @@ export class CopilotOwnedAdapter implements MeshAdapter {
     private readonly session: CopilotAcpSession,
     private readonly onTurnEnd?: () => void,
     private readonly takePreamble?: () => string | undefined,
+    deliveredTo?: string,
   ) {
     this.key = copilotAdapterKey(session);
+    this.deliveredTo = deliveredTo;
   }
 
   async send(message: string, options?: MeshSendOptions): Promise<TurnResult> {
@@ -152,6 +181,7 @@ export class CopilotOwnedAdapter implements MeshAdapter {
 export class ClaudePeerAdapter implements MeshAdapter {
   readonly kind = 'claude' as const;
   readonly observesTurns = false;
+  readonly deliveredTo: string | undefined;
   get key(): string {
     return `claude-peer:${this.session.pid}`;
   }
@@ -163,7 +193,10 @@ export class ClaudePeerAdapter implements MeshAdapter {
       message: string,
       signal?: AbortSignal,
     ) => Promise<void>,
-  ) {}
+    deliveredTo?: string,
+  ) {
+    this.deliveredTo = deliveredTo;
+  }
 
   async send(message: string, options?: MeshSendOptions): Promise<TurnResult> {
     await this.sendClaude(this.session, message, options?.signal);
@@ -177,6 +210,9 @@ export class ClaudePeerAdapter implements MeshAdapter {
 export class CodexQueueAdapter implements MeshAdapter {
   readonly kind = 'codex' as const;
   readonly observesTurns = false;
+  get deliveredTo(): string {
+    return resolvedDeliveryLabel('codex', this.thread, 'queued');
+  }
   get key(): string {
     return `codex-queue:${this.thread}`;
   }
