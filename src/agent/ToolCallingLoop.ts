@@ -1,8 +1,6 @@
-import type { ModelConfig } from '../config/types';
-import type { UsageHandler } from '../llm/OpenAIClient';
 import { HtmlDocumentBoilerplateStripper } from '../llm/HtmlDocumentBoilerplateStripper';
 import { ThinkingChannelStripper } from '../llm/ThinkingChannelStripper';
-import type { ChatMessage, ToolCall, ToolDefinition } from '../llm/types';
+import type { ToolCall } from '../llm/types';
 import { StructuredOutputStripper } from '../tools/StructuredOutputParser';
 import { extractFallbackToolCalls } from '../tools/ToolCallFallback';
 import { MIN_ROUND_HEADROOM_TOKENS, reasoningReserve } from '../util/contextBudget';
@@ -13,9 +11,11 @@ import {
   ToolLoopGuard,
 } from './ToolLoopGuard';
 import { StreamedAssistantTurn } from './StreamedAssistantTurn';
-import type { ToolResultContextResult } from './toolResultContext';
 import { buildRoundRequest } from './buildRoundRequest';
 import { sanitizeText, streamOnce } from './toolCallingStream';
+import type { ToolCallingLoopOptions, ToolCallingLoopResult } from './toolCallingLoopTypes';
+
+export type { ToolCallingLoopOptions, ToolCallingLoopResult } from './toolCallingLoopTypes';
 import {
   asTruncation,
   CONTEXT_INPUT_EXHAUSTED_MESSAGE,
@@ -43,106 +43,6 @@ export {
   isTurnCutOffError,
   ROUND_CAP_INCOMPLETE_PREFIX,
 } from './truncationRecovery';
-
-export interface ToolCallingLoopOptions {
-  /**
-   * The endpoint to call, resolved on EVERY round rather than captured once,
-   * for the same reason `getToolDefinitions` is: the answer changes mid-turn.
-   *
-   * Forge's pool hands out a rotating port, and anything that unloads a model
-   * — a `/unload`, the benchmark freeing VRAM, an eviction — brings it back on
-   * the next free one behind a NEW controller. A turn holding the old string
-   * then dials a dead port and fails in ~11ms with "fetch failed", which is
-   * what silently killed a two-hour monitoring loop on 2026-09-05. Resolving
-   * through the pool also means a round that arrives mid-restart WAITS for the
-   * reload instead of failing instantly.
-   */
-  resolveBaseUrl: () => Promise<string>;
-  model: ModelConfig;
-  messages: ChatMessage[];
-  /**
-   * The model-facing tool list, re-read on EVERY round rather than snapshotted
-   * once per turn. A demand-loaded tool group (`load_tool_group`) activates
-   * mid-turn, and a tool that reports itself enabled while the next request
-   * still omits its schemas is a tool that lies.
-   */
-  getToolDefinitions: () => ToolDefinition[];
-  dispatchToolCalls: (calls: ToolCall[], messages: ChatMessage[]) => Promise<void>;
-  prepareMessages?: (messages: ChatMessage[]) => ChatMessage[] | ToolResultContextResult;
-  signal: AbortSignal;
-  apiKey?: string;
-  maxRounds: number;
-  maxOutputTokens?: number;
-  nativeTools: boolean;
-  stripAllTools?: boolean;
-  canUseThinkingKwargs?: boolean;
-  stripThinkingChannels?: boolean;
-  onToken?: (text: string) => void;
-  onReasoning?: (text: string) => void;
-  onDone?: (finishReason: string | null) => void;
-  onRepeatedCall?: () => void;
-  onNativeFallback?: () => void;
-  /** Called as soon as a transcript entry is appended, before the turn ends. */
-  onMessagesChanged?: () => void;
-  /**
-   * The text a round produced before calling tools — the model narrating what
-   * it is about to do, on a turn that is not over.
-   *
-   * Distinct from `onToken`, which fires per token and is only ever a live
-   * trace: this fires once per round with the finished paragraph, so a surface
-   * that delivers messages rather than editing one in place has a whole thought
-   * to deliver. Never fires for the round that ends the turn — that text is the
-   * answer, and the answer has its own path.
-   */
-  onRoundNarration?: (text: string) => void;
-  /** Request the provider's exact execution-side usage in the final stream frame. */
-  includeUsage?: boolean;
-  onUsage?: UsageHandler;
-  /**
-   * Claims messages waiting for the next safe gap after a completed tool round.
-   * Returns the messages to inject plus an optional settle step that runs only
-   * after they have been pushed and persisted — the remote transport uses it to
-   * finish the claimed request once the session is durable.
-   */
-  drainTells?: () => Promise<{
-    messages: ChatMessage[];
-    settle?: () => Promise<void>;
-  }>;
-  /** Fired when a tool call was cut off and the loop is asking for it in chunks. */
-  onTruncatedToolCall?: (info: { toolName: string | undefined; approxBytes: number }) => void;
-  /**
-   * Tokens the model may still generate for these messages — thinking and
-   * answer together, since llama.cpp spends both from one budget. Becomes
-   * `max_tokens`, and sizes the ceiling offered to a truncated call's retry.
-   */
-  getOutputRoom?: (messages: ChatMessage[]) => number | undefined;
-  isMutatingTool?: (name: string) => boolean;
-  /** Compacts between rounds; `exhausted` means the next round cannot fit. */
-  compactMidTurn?: (request: {
-    exhausted: boolean;
-    rawUsed?: number | undefined;
-    trimAdvanced?: boolean;
-  }) => Promise<boolean>;
-}
-
-export interface ToolCallingLoopResult {
-  finishReason: string | null;
-  finalText: string;
-  rounds: number;
-  repeatedCall: boolean;
-  /**
-   * The loop stopped because it ran out of rounds, not because the model was
-   * done. Returned rather than thrown: the rounds already spent did real work —
-   * files written, tests run — and throwing discarded `finalText` along with any
-   * account of it, leaving the user an error where a partial answer belonged.
-   */
-  hitRoundCap: boolean;
-  /**
-   * The model ended generation (`stop`, not `length`) while still inside its
-   * thinking block: no answer, no tool call. The turn is unfinished.
-   */
-  stoppedWhileReasoning?: boolean;
-}
 
 export async function runToolCallingLoop(
   options: ToolCallingLoopOptions,
@@ -218,6 +118,7 @@ export async function runToolCallingLoop(
     // byte. Spending the whole budget on the write is the point of the retry.
     const suppressThinking = suppressesThinking;
     const toolDefinitions = options.getToolDefinitions();
+    const offeredToolNames = toolDefinitions.map((definition) => definition.function.name);
     const built = buildRoundRequest({
       model: options.model,
       prepared,
@@ -253,7 +154,13 @@ export async function runToolCallingLoop(
 
     let streamed: { finishReason: string | null; toolCalls: ToolCall[] | null };
     try {
-      streamed = await streamOnce(options, request, tokenHandler, reasoningHandler);
+      streamed = await streamOnce(
+        options,
+        request,
+        tokenHandler,
+        reasoningHandler,
+        offeredToolNames,
+      );
     } catch (err) {
       // Estimates deliberately err on the safe side, but the server tokenizer
       // remains authoritative. Convert its 400 into Forge's recoverable path
@@ -306,7 +213,13 @@ export async function runToolCallingLoop(
       structured = new StructuredOutputStripper();
       html = new HtmlDocumentBoilerplateStripper();
       const fallbackRequest = built.fallbackRequest;
-      streamed = await streamOnce(options, fallbackRequest, tokenHandler, reasoningHandler);
+      streamed = await streamOnce(
+        options,
+        fallbackRequest,
+        tokenHandler,
+        reasoningHandler,
+        offeredToolNames,
+      );
     }
     // Only reached when the round streamed to completion — the truncation path
     // above continues. Recoveries are consecutive, so a good round clears them.

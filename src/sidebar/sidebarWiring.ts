@@ -330,6 +330,9 @@ export function wireSidebar(host: SidebarHost, parts: SidebarParts): SidebarRunt
     attachmentStore: parts.attachmentStore,
     midTurnInbox,
   });
+  agentLoop.setToolsOfferedListener((conversationId, names) =>
+    send.logToolsOffered(conversationId, names),
+  );
 
   // One reading of the eviction gate, shared by the yes/no decision and the
   // explanation of a refusal. Both come from the same object so a reason can

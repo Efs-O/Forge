@@ -289,6 +289,7 @@ export class ArchivedSessions {
           ...(toolCallId ? { tool_call_id: toolCallId } : {}),
           ...(this.stringField(row, 'name') ? { name: this.stringField(row, 'name') } : {}),
           ...(reasoning ? { reasoning } : {}),
+          ...(typeof row['internal'] === 'boolean' ? { internal: row['internal'] } : {}),
           ...(tool_calls.length ? { tool_calls } : {}),
         },
       ];

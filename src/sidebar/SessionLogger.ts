@@ -1,6 +1,7 @@
 import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
+import { createHash } from 'crypto';
 import type { ChatMessage } from '../llm/types';
 
 const SESSIONS_DIR = path.join(os.homedir(), '.forge', 'sessions');
@@ -141,6 +142,7 @@ export class SessionLogger {
   private writtenCount: number;
   private headerWritten = false;
   private lastUsage: SessionUsage | null = null;
+  private lastToolsOfferedHash: string | undefined;
 
   constructor(
     private readonly sessionId: string,
@@ -268,6 +270,22 @@ export class SessionLogger {
     );
   }
 
+  /** Record the model-facing tools only when this run's advertised set changes. */
+  logToolsOffered(names: readonly string[], model: string): void {
+    const sortedNames = [...names].sort();
+    const hash = createHash('sha256').update(sortedNames.join('\n')).digest('hex').slice(0, 12);
+    if (hash === this.lastToolsOfferedHash) return;
+    this.ensureHeader(model);
+    this.append({
+      type: 'tools_offered',
+      names: sortedNames,
+      hash,
+      timestamp_ms: Date.now(),
+      model,
+    });
+    this.lastToolsOfferedHash = hash;
+  }
+
   /**
    * Records a turn that ended in an error.
    *
@@ -359,6 +377,7 @@ export class SessionLogger {
         model,
       };
       if (msg.reasoning) line['reasoning'] = msg.reasoning;
+      if (msg.role === 'user' && msg.internal === true) line['internal'] = true;
       if (msg.role === 'tool' && msg.tool_call_id) line['tool_call_id'] = msg.tool_call_id;
       if (msg.role === 'tool' && msg.name) line['name'] = msg.name;
       if (msg.role === 'user' && typeof msg.turnContext === 'string') {

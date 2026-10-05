@@ -43,6 +43,7 @@ overlaps with an existing owner, extend the owner instead.
 | Model-facing message preparation for a turn (window, images, system prompt, turn context, tool-result excerpts) | `src/sidebar/prepareModelTurnMessages.ts` |
 | Context-trim policy and per-conversation hysteresis state | `src/agent/toolResultContext.ts` |
 | Per-round chat request assembly (native vs fallback tools, thinking kwargs, sampling, output cap) | `src/agent/buildRoundRequest.ts` |
+| Tool-calling loop input and result contracts | `src/agent/toolCallingLoopTypes.ts` |
 | Cloud target / local backend startup                 | `src/sidebar/ProviderTurn.ts`            |
 | Turn served by a local CLI agent                     | `src/sidebar/CliTurn.ts`                 |
 | One-shot prompt (compaction, /review)                | `src/sidebar/PromptRun.ts`               |

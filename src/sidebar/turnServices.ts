@@ -53,6 +53,7 @@ export interface TurnServices {
   warnOnce: (key: string, message: string) => void;
   onContextChanged: (convId: string) => void;
   onUsage: (conv: ConversationRuntime, inputTokens: number, outputTokens: number) => void;
+  onToolsOffered?: (convId: string, names: readonly string[]) => void;
   /** Persists a transcript mutation immediately, including an in-flight turn. */
   onTranscriptChanged: (conv: ConversationRuntime) => void;
   /** Streamed-so-far estimate per conversation, for the status bar. */

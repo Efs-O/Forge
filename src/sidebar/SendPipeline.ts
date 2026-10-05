@@ -433,6 +433,15 @@ export class SendPipeline {
     this.loggerFor(conv).logCompactionAttempt(entry, conv.active_model ?? '');
   }
 
+  /** Records the tool names exposed on a model request through its session log. */
+  logToolsOffered(convId: string, names: readonly string[]): void {
+    const conv = this.deps.getSidebar().conversations.find((c) => c.id === convId);
+    if (!conv) return;
+    const logger = this.loggerFor(conv);
+    logger.updateTitle(conv.title);
+    logger.logToolsOffered(names, conv.active_model ?? '');
+  }
+
   /** Records why a turn stopped, next to the rows it produced before stopping. */
   private logTurnError(convId: string, message: string): void {
     const conv = this.deps.getSidebar().conversations.find((c) => c.id === convId);

@@ -69,6 +69,7 @@ export class AgentLoop {
   private midTurnCompactor?: TurnServices['compactMidTurn'];
   private midTurnTells?: MidTurnTellServices;
   private onTranscriptChanged?: (convId: string) => void;
+  private onToolsOffered?: (convId: string, names: readonly string[]) => void;
   private readonly progress = new AgentProgressBus();
 
   /**
@@ -118,6 +119,10 @@ export class AgentLoop {
   /** Snapshots transcript mutations while a turn is still in progress. */
   setTranscriptChangedListener(listener: (convId: string) => void): void {
     this.onTranscriptChanged = listener;
+  }
+
+  setToolsOfferedListener(listener: (convId: string, names: readonly string[]) => void): void {
+    this.onToolsOffered = listener;
   }
 
   onAgentProgress(listener: AgentProgressListener): { dispose(): void } {
@@ -215,6 +220,7 @@ export class AgentLoop {
       ...(cliDriver ? { cliDriver } : {}),
       ...(this.getConfigPath ? { getConfigPath: this.getConfigPath } : {}),
       getOnContextChanged: () => this.onContextChanged,
+      getToolsOfferedListener: () => this.onToolsOffered,
       getRemoteReach: () => this.remoteReach,
       getMidTurnCompactor: () => this.midTurnCompactor,
       getMidTurnTells: () => this.midTurnTells,
