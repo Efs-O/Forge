@@ -502,18 +502,44 @@ Each maps to a test or a named validation step. "Verified" requires code-path ev
 **Desktop loop (deterministic + unit)**
 - [ ] The image-px → physical-pixel transform is correct at 100% and 150% scale, with a non-zero origin (second monitor at negative x) and a downscaled image. → unit (pure, no mouse).
 - [ ] The target-window gate: input to a window that is not the approved HWND, or a point outside its rect, is refused and names the fix. → unit (mock driver).
-- [ ] UAC / taskbar windows, and every editor except ordinary VS Code, are refused in both
+- [x] UAC / taskbar windows, and every editor except ordinary VS Code, are refused in both
   configurations; `desktop_press` system chords (`win+*`, `alt+f4`) are never auto-approved. → unit (mock driver).
-- [ ] VS Code is refused by default and approvable only with `permissions.desktop.allow_vscode: true`;
+  **VERIFIED 2026-10-05** (`4b744b8`): `test/unit/targetWindowGate.test.ts` — per-fork refusal in both
+  configurations (`Code - Insiders`, `codium`, `vscodium`, `cursor`, `windsurf`, `devenv`), UAC + taskbar in
+  both; chord approvals in `test/unit/desktopApprovals.test.ts`.
+- [x] VS Code is refused by default and approvable only with `permissions.desktop.allow_vscode: true`;
   forks (`Code - Insiders`, Cursor, Windsurf, VSCodium, `devenv`) stay refused either way. Revoking the
   opt-in drops the VS Code approval and its captures only, and an input through an older `capture_id`
   is refused. → unit (`targetWindowGate`, mock driver).
-- [ ] Each of the six desktop input tools asks for confirmation per call against a VS Code target
+  **VERIFIED 2026-10-05** (`4b744b8`): `test/unit/targetWindowGate.test.ts` (default refusal names the
+  switch; `.exe` spelling; never matches title or `Chrome_WidgetWin_1`) and `test/unit/desktopVsCodePolicy.test.ts`
+  (policy read per input, old `capture_id` refused after revocation, re-enable does not resurrect the
+  approval, unrelated approvals and their captures survive). Live default-off refusal re-confirmed on this
+  host 2026-10-06; the opt-in itself was **not** exercised live (see the fix plan's limitations).
+- [x] Each of the six desktop input tools asks for confirmation per call against a VS Code target
   (including the auto-approved move/scroll and `desktop_drag`), while a non-Code target keeps its
   existing behavior and consequential / system-chord warnings stay dangerous. → unit (tool layer).
+  **VERIFIED 2026-10-05** (`4b744b8`): `test/unit/desktopCodeInputApproval.test.ts` (9 tests) — all six
+  tools, composition with consequential/system-chord warnings, target derived from `capture_id` rather
+  than the newest approval, no invented prompt for an unknown id, and a live policy getter bound to the
+  driver singleton rather than a captured Boolean.
 - [ ] **Abort mid-drag sends the button-up** (no key/button left held). → unit (mock driver, B3).
-- [ ] `desktop_capture` returns an image + `capture_id` + size + DPI scale + mapping + origin. → `test/live` (real capture) / unit (mapping only).
-- [ ] `desktop_capture` → `desktop_click`/`desktop_type` into the approved window → `desktop_capture` shows the change. → `test/live` (real, controlled target; not in `npm run ci`).
+- [x] `desktop_capture` returns an image + `capture_id` + size + DPI scale + mapping + origin. → `test/live` (real capture) / unit (mapping only).
+  **Verified 2026-10-06 by manual live smoke** on this host: a monitor capture reported
+  `monitor 0 of 1 (\\.\DISPLAY9)`, image 1344×560 vs captured region 3840×1600 physical, `dpi_scale=1`,
+  `origin=(0,0)`, `capture_id`; a window capture reported 1344×763 vs 1620×920 physical,
+  `origin=(1680,351)`. This was the manual tool path, not the env-gated `test/live` harness. The harness
+  itself refused on 2026-10-06 (clipboard preflight), so the `test/live` leg of this row is **not**
+  re-passed this cycle — it passed on 2026-10-05 (Phase 2 record). Single-display host: second-monitor
+  and non-1.0-DPI combinations remain unverified live.
+- [x] `desktop_capture` → `desktop_click`/`desktop_type` into the approved window → `desktop_capture` shows the change. → `test/live` (real, controlled target; not in `npm run ci`).
+  **Verified 2026-10-06 by manual live smoke** on a test-owned fixture Notepad window launched with
+  `show_window:true`: `desktop_type` of `café Γειά 你好 😀 tail` was read back exactly in the following
+  capture. **Separate prior evidence:** the env-gated `test/live/DesktopGuiInput.live.test.ts` harness
+  passed 3/3 live on **2026-10-05**; on 2026-10-06 it **refused** (clipboard held unrestorable bitmap
+  formats) and is recorded as skipped, not passed. The manual smoke did not use the clipboard for
+  verification — but see the clipboard note in the fix plan: a later Tier 3 `Ctrl+C` **did** overwrite
+  the user's clipboard and was not restored.
 
 **Consequential confirmation**
 - [ ] Setting `consequential: true` on `browser_click`/`desktop_click`/`browser_type`/`desktop_type` routes through `requestApproval` with `dangerous: true`; declining returns "User declined". → unit/integration.

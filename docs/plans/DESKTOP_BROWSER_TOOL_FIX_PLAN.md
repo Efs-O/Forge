@@ -1,7 +1,7 @@
 # Desktop and browser tool repair plan
 
 **Source:** `docs/DESKTOP_BROWSER_TOOL_TEST_REPORT.md` (2026-10-04)
-**Status:** Telegram Bot API upgrade released as 0.16.86 and installed; preparation and Phase 1 committed, Phase 2 implemented and under Codex review, later phases not started
+**Status:** All three phases implemented and committed — Phase 1 `565c2b4` (format correction `318cf17`), Phase 2 `8881b18`, Phase 3 `4b744b8`. The four-tier smoke sequence was re-run on this Windows host on 2026-10-06 (§ "Four-tier smoke re-run"). Release 0.16.87 is committed as `89cae66` (`chore(release): 0.16.87`) with `npm run ci` green on that commit, and the matching VSIX is **installed** (Codex GO, 2026-10-06 00:52) — see § "Package and install record". The running VS Code window still executes the pre-reload build until a Reload Window. Live cases that could not be run here are listed as unverified in § "Limitations and unverified live cases" — none of them is claimed as passed.
 **Pass rule:** a capability succeeds on its first attempt, or at worst its second, with an observable effect or a clear refusal.
 
 **Implementation owner:** Strata, supervised by Codex. Start this as a new Forge conversation only after the Telegram upgrade, final review, build, VSIX install, and clean-worktree handoff are complete. Before Phase 1, Codex commits this currently untracked plan as a separate preparation commit and verifies `git status` is clean; do not fold it into a Telegram commit or leave it untracked. Work in the existing owners named below. One implementation phase is one commit with `npm run ci` green; stage only phase files by name. Forge reports after each phase, Codex reviews and gives the commit go, and Forge performs the final review before the release go. Record the commit hash and test result for each phase. Do not modify the user's live `.forge/config.yaml` or their already-open windows. This plan is the scope of the delegated work; an unverified live claim stays marked unverified.
@@ -79,6 +79,36 @@ The live observations in the report are evidence from one Windows 11 machine. Th
 5. Update `test/unit/targetWindowGate.test.ts` for default refusal, ordinary Code approval when opted in, fork/devenv/UAC/taskbar refusal in both configurations, and policy revocation after an existing approval. Add tool-layer tests that each of the six Code-target inputs requests confirmation, including the currently auto-approved move/scroll paths; a non-Code target retains its existing approval behavior; consequential/system-chord warnings remain dangerous; and an old capture cannot act after revocation or re-enable. A manual smoke test may use a disposable VS Code window and harmless text, never the live Forge chat input or a command that reloads the extension host.
 6. Update `docs/BROWSER_DESKTOP_TOOLS.md`, the tool descriptions, and the original `docs/plans/BROWSER_DESKTOP_USE_TOOLS_PLAN.md` status/acceptance entries that currently say VS Code is **always** refused. Document the explicit opt-in, per-action confirmation, visible GUI launch, monitor-index meaning, coordinate bounds, and inspect/index snapshot behavior. Do not promise that `browser_press` operates browser chrome or DevTools.
 
+**Implemented shape (Phase 3, deliberate):**
+
+- The 5 s bound is a per-call `{ timeout: LOCATOR_ACTION_TIMEOUT_MS }` on each locator action plus a
+  `withLocatorActionTimeout` wrapper that names the tool, action, and target and keeps the Playwright
+  cause on `cause` **and** quoted in the message. Navigation keeps its own 30 s. A bare keyboard
+  `browser_press` (no selector) is deliberately not wrapped: there is no element to wait on, so there is
+  nothing to bound. The bound lives in a new stateless owner, `src/tools/browser/browserActionGuards.ts`,
+  alongside `requireViewportPoint` (the Phase 1 coordinate rule, moved out of the manager so the rule is
+  unit-testable without a browser and has one implementation). `BrowserSessionManager` stays the sole owner
+  of sessions, tabs, origins, and inspection snapshots; the guard module calls no transport.
+- `allow_vscode` is threaded as a **getter** (`getDesktopDriver(policy?)` → `setPolicySource`), never a
+  captured Boolean, and `PowerShellDesktopDriver.currentPolicy()` reconciles held state on every read.
+  `revokeRefusedCodeTargets` lives in `targetWindowGate.ts` (not the driver) so the driver stays under the
+  500-line gate; it drops **every** capture record bound to a refused Code window, including ones a
+  superseded approval still left addressable, and leaves unrelated windows' approvals and captures alone.
+- The per-input policy re-check is applied on **both** paths — `requireApproved` (type/press) and
+  `checkAgainst` (capture-bound coordinates) — via one shared `policyRefusalFor`, so the approve-time
+  refusal and the recheck cannot drift. `requireApproved` checks its local copy of the target so the
+  refusal still names the revoked window instead of reporting a bare "no approved target". The
+  unknown-`capture_id` refusal also says a revoked target's captures are dropped, so a stale id after
+  revocation is not mistaken for a typo.
+- The six Code confirmations are composed with the existing consequential / system-chord predicates by
+  `composeApprovals`, which keeps `dangerous` if any part is dangerous and shows **every** reason, so a
+  `win+r` into a Code window names both. `ToolDispatch` asks whenever `approval()` returns anything, so
+  the two `autoApprove: true` tools are gated too — pinned by a test rather than assumed. Coordinate tools
+  declare `capture_id` as required, so the prompt always names the window the call will act on, and an
+  unknown `capture_id` gets no invented prompt.
+- `isSystemChord` moved from `PowerShellDesktopDriver.ts` to the `DesktopDriver.ts` contract (re-exported
+  for existing importers) purely to keep the driver under 500 lines with one implementation of the rule.
+
 ## State × lifecycle ledger
 
 | State | Creation and owner | Reload/restart behavior | Failure and cleanup |
@@ -98,3 +128,139 @@ The live observations in the report are evidence from one Windows 11 machine. Th
 - Keep the user's existing Notepad and other non-test windows untouched. Close only windows and processes created by the retest.
 - Start only from a clean worktree after the Telegram release. Keep this plan's preparation commit separate, inspect `git status --short --untracked-files=all` before every phase commit, stage only owned files, and finish with no modified or untracked repository files.
 - Before the final package gate, bump `package.json` to the next unused release version and add the matching `CHANGES.md` heading/entry; `CHANGELOG.md` is generated, not the source of truth. The existing same-version VSIX guard must not be bypassed or its artifact overwritten. Run `npm run ci`, `npm run package`, `git diff --check`, and inspect `git status` after the last source, test, changelog, or plan edit. Record exact exit results, test counts, skipped live tests, and remaining live-system risk.
+
+## Phase commit and test record
+
+Each phase is one commit; only that phase's files were staged, by name. `npm run ci` was green before each commit.
+
+| Phase | Commit | Source findings resolved | Test evidence | `npm run ci` |
+| --- | --- | --- | --- | --- |
+| Preparation (plan committed) | `5e108ef` | plan was untracked | n/a (docs only) | n/a |
+| 1 — truthful read and input results | `565c2b4` (prettier correction `318cf17`) | §3.2 inspect throws; §3.1 `0×0` rects; §3.7 `BitBlt` from `user32.dll`; ignored `monitor` index; §3.8 out-of-viewport success; index-identity race found in review | `test/integration/BrowserTools.test.ts` inspect/identity/coordinate cases; `desktopDriver` listWindows fake-transport tests; monitor capture tests | exit 0 |
+| 2 — desktop text and visible GUI launch | `8881b18` | §3.10 Unicode corruption on stdin; §3.3 hidden background GUI launches | `test/integration/DesktopTransport.test.ts` echo round trips on both engines; `test/unit/execShowWindow.test.ts` (10 tests); `test/live/DesktopGuiInput.live.test.ts` (3 tests, env-gated) ran live 3/3 on 2026-10-05 | exit 0 — 414 passed / 7 skipped files, 4289 passed / 44 skipped tests |
+| Release (version + `CHANGES.md`) | `89cae66` | n/a (release preparation) | `npm run ci` **on that commit**: exit 0 — 427 passed / 7 skipped files, 4409 passed / 41 skipped tests, 43.16 s; `build` and `check:bundle` report `forge-llm@0.16.87` | exit 0 |
+| 3 — selector latency and optional VS Code control | `4b744b8` | §3.5 30 s bad-selector wait; §4 VS Code policy change; per-input policy revalidation; per-call Code input confirmation | `test/unit/browserActionGuards.test.ts` (10), `test/unit/targetWindowGate.test.ts` (26), `test/unit/desktopVsCodePolicy.test.ts` (8), `test/unit/desktopCodeInputApproval.test.ts` (9), `test/unit/desktopTools.test.ts` (9), `test/unit/desktopApprovals.test.ts` (6) = 68; `test/integration/BrowserTools.test.ts` 5 s-bound case (9 tests, 38.4 s, real headless Chrome) | exit 0 at `782b0d3` — 427 passed / 7 skipped files, **4409 passed / 41 skipped** tests |
+
+Phase 3 review notes (independent re-read against items 1–6 at `782b0d3`, 2026-10-06): all six items are
+implemented, documented, and tested; **no substantive defect found**. Two points confirmed rather than assumed:
+`ToolDispatch` (`approvalMetadata !== undefined || (!reg.autoApprove && …)`) forces the prompt for the two
+`autoApprove: true` input tools, and `desktop_*` coordinate tools declare `capture_id` as **required**, so
+the Code prompt always resolves the window the call will actually act on. The four commits after `4b744b8`
+touch no Phase 3 file, so the review at HEAD is the review of the shipped code.
+
+## Four-tier smoke re-run (this Windows host, 2026-10-06)
+
+Re-run of `docs/DESKTOP_BROWSER_TOOL_TEST_REPORT.md` § 2 on the current build. Attempt numbering is per
+capability. "Effect verified" means a screenshot, a clipboard read, or a refusal that demonstrably
+prevented the effect — not a success string.
+
+### Tier 1 — read-only
+
+| Call | Attempt | Result | Effect / evidence |
+| --- | --- | --- | --- |
+| `desktop_windows` | 1 | ✅ pass | 9 windows with **real** rects (VS Code `-8,-8 3856×1616`, Chrome `130,0 1693×1533`). §3.1 `0×0` is gone. |
+| `browser_open` | 1 | ✅ pass | Ephemeral Chrome, tab `t1`. |
+| `browser_inspect` (blank page) | 1 | ✅ pass | "No interactive elements found on this page." — the empty-page contract, not the old `undefined.length` throw. |
+| `browser_inspect` (5 controls) | 1 | ✅ pass | 5 numbered `{index,role,text,selector,bbox}` entries; unique selectors (`#q`, `#go`, `html > body:nth-of-type(1) > a:nth-of-type(1)`, `#s`, `#ta`). |
+| `desktop_capture monitor:0` | 1 | ✅ pass | Names its display: `monitor 0 of 1 (\\.\DISPLAY9)`, captured region `3840×1600` physical vs image `1344×560`, `dpi_scale=1`, read-only note. |
+| `desktop_focus_window` (VS Code, live config) | 1 | ✅ pass (refusal) | `refusing to control a VS Code window (…) … set permissions.desktop.allow_vscode: true`. Default-off confirmed against the real config. |
+
+### Tier 2 — typing round-trip
+
+| Call | Attempt | Result | Effect / evidence |
+| --- | --- | --- | --- |
+| `browser_type` by index, `T2OK 🚀你好 café` | 1 | ✅ pass | `browser_screenshot` shows all glyphs in the input; typed into element 0 by identity, not by re-count. |
+| `exec_command notepad … show_window:true` (background) | 1 | ⚠️ my misuse | I passed `notepad.exe` as both command and `args[0]`, so Notepad opened an "Untitled" document. Killed only that test-owned pid (`26672`). |
+| same, correctly | 2 | ✅ pass | Launched visibly and found in `desktop_windows` as a fixture-named window; the launcher/child caveat was reported by the tool. |
+| `desktop_focus_window` (fixture window) | 1 | ✅ pass | Bound HWND 10750346. The report's "Windows refused to focus (focus lock)" blocker did **not** recur on this host. |
+| `desktop_type` `café Γειά 你好 😀 tail` | 1 | ✅ pass | Window capture shows the exact text. §3.10 corruption is gone. (The tool's "20 character(s)" counts UTF-16 units; the emoji is one code point.) |
+| `browser_click` bad selector `#definitely-not-here` | 1 | ✅ pass | Refused in **≈5 s** (wall clock 00:04:56 → 00:05:xx), naming tool/action/selector and preserving the Playwright cause. §3.5's 30 s is gone. |
+| `browser_click (1500,400)` out of viewport | 1 | ✅ pass | Instant refusal naming the point and the `1280×800` viewport; no click dispatched. §3.8 confirmed fixed. |
+
+### Tier 3 — geometry
+
+| Call | Attempt | Result | Effect / evidence |
+| --- | --- | --- | --- |
+| `browser_press Control+A` → `Control+C` | 1 | ✅ pass | Accepted on the focused input. **This wrote the user's clipboard — see the clipboard note below.** |
+| `read_clipboard` | 1 | ✅ pass | Returned `T2OK 🚀你好 café` byte-exact — the round trip the report needed a screenshot for. |
+
+### Tier 4 — self-referential + browser loop
+
+| Call | Attempt | Result | Effect / evidence |
+| --- | --- | --- | --- |
+| `browser_new_tab` / `browser_tabs` | 1 | ✅ pass | `t2` opened; active-tab marker on `t2`. |
+| `browser_click index:1` on the **uninspected** tab `t2` | 1 | ✅ pass (refusal) | `no inspection for this tab; call browser_inspect first` — indices are per-tab, not global. |
+| `browser_click index:1` on `t1` **after navigation** | 1 | ✅ pass (refusal) | Same refusal: the snapshot was dropped by the main-frame navigation, so an old index cannot resolve against a new page. |
+| `desktop_focus_window` VS Code | 1 | ✅ pass (refusal) | Refused under the live config (see Tier 1) — the §4 guard still holds by default. |
+| `browser_close` | 1 | ✅ pass | Session closed. |
+
+**Cleanup:** browser session closed; the fixture Notepad pid (`26676`) and the misopened one (`26672`) killed
+via `taskkill`; the fixture file `%TEMP%\forge_phase2_smoke_20261006.txt` removed. No user window was
+captured, focused, typed into, or closed. Screenshots went to `~/.forge/screenshots/<conversation-id>/`,
+outside the workspace.
+
+### Clipboard: the Tier 3 round trip overwrote the user's clipboard — not restored
+
+The Tier 3 copy round trip **was** a write to the user's clipboard, and its previous content is gone.
+Exact order, from tool timestamps:
+
+| Time | Event | Clipboard state |
+| --- | --- | --- |
+| 23:58 | `Get-Clipboard -Raw` probe | Returned an **empty string** — no *text* present. |
+| 23:59:57 | `test/live/DesktopGuiInput.live.test.ts` preflight | Found **`Bitmap, DeviceIndependentBitmap, Format17`** and refused before touching anything. A non-text payload was already on the clipboard, before any copy I issued. |
+| 00:07 | my `browser_press Control+C` (Tier 3) | **Replaced that clipboard content with text.** |
+| 00:10 | `read_clipboard` | Returned `T2OK 🚀你好 café`. |
+
+No snapshot of the original clipboard was taken and nothing was restored, so the image that was there
+**cannot be restored from a snapshot made in this run — no snapshot was taken**. Two things follow,
+stated rather than glossed:
+
+- The user's clipboard was **not** left untouched. The Tier 3 result is still a valid observation (the
+  bytes round-tripped exactly), but it cost the user a clipboard image to obtain.
+- "No Forge code calls `Set-Clipboard`" is **not** a safety argument. `Set-Clipboard` / `SetImage` appear
+  nowhere in `src/`, but the input tools can drive `Ctrl+C` in a focused app, and that writes the
+  clipboard. Any future clipboard round trip must snapshot and restore first — which is exactly what the
+  live harness's preflight does, and why it refused here.
+
+For a retest: prefer a verification that does not touch the clipboard (a window screenshot), or run the
+env-gated harness only after the user has cleared it, since that harness snapshots and restores.
+
+## Package and install record (2026-10-06)
+
+| Item | Value |
+| --- | --- |
+| Release commit | `89cae66` — `chore(release): 0.16.87`; staged by name (`package.json`, `CHANGES.md`), `git diff --cached --check` clean, nothing pushed, no tag |
+| `npm run ci` on `89cae66` | **exit 0** — 427 files passed / 7 skipped, 4409 tests passed / 41 skipped (4450), 43.16 s, 00:52–00:53 local; `build` and `check:bundle` report `forge-llm@0.16.87` |
+| Artifact | `forge-llm-0.16.87.vsix` — 12,274,964 bytes, 135 files, built 00:29:56, SHA-256 `5180D001E0E9FA7E674E8507BB549A653824FBC12772BDEA105237439E9E6430` (re-verified 00:52 before install) |
+| Install | **Installed** 00:52:23 via the local VS Code CLI: `Code.exe <commitHash>\resources\app\out\cli.js --install-extension forge-llm-0.16.87.vsix` with `ELECTRON_RUN_AS_NODE=1`; exit 0, `Extension 'forge-llm-0.16.87.vsix' was successfully installed.` (the `url.parse()` DeprecationWarning is benign). `~/.vscode/extensions` now holds `efsoo.forge-llm-0.16.87` alongside `efsoo.forge-llm-0.16.86` |
+| Not done | No Reload Window, no push, no tag, no publish — each needs its own GO. The running window still executes the pre-reload build, so 0.16.87's behaviour is **not yet live-verified in this session** |
+
+**Package-guard limitation.** The `.vsix` was built at 00:29:56, after the last source, version, and `CHANGES.md` edit, and `docs/**` is excluded from the package by `.vscodeignore`. The docs commits that follow therefore do not change the artifact, and the same-version `.vsix` must **not** be rebuilt or overwritten after the final docs edit — doing so would replace the exact bytes that were hashed and installed with no version change to tell them apart. Any further source edit after this point requires a new version and a fresh package gate.
+
+## Limitations and unverified live cases
+
+These were **not** run. They are recorded as unverified, not as passing.
+
+1. **The env-gated live GUI harness refused on this host.** `FORGE_LIVE_DESKTOP_GUI=1 npx vitest run
+   test/live/DesktopGuiInput.live.test.ts` exits 1 with 3 tests skipped: its own clipboard preflight found
+   `Bitmap, DeviceIndependentBitmap, Format17` — formats it cannot restore — so it refused before touching
+   anything. That is the guard working as designed. I did **not** clear the user's clipboard to force it.
+   `npm run ci` reports those 3 tests as skipped. The same payload was verified live by window screenshot
+   instead, which observes the same effect but is not the harness's assertion and is not a CI pass. That
+   harness did pass 3/3 live on 2026-10-05 (Phase 2 record above) — the 2026-10-06 refusal is a host-state
+   condition, not a regression. Separately, my own Tier 3 `Ctrl+C` **did** overwrite that clipboard content
+   with no snapshot or restore — see "Clipboard: the Tier 3 round trip overwrote the user's clipboard" above.
+2. **Mixed-DPI multi-monitor capture is unverified on this host.** It reports exactly one display
+   (`monitor 0 of 1`, `\\.\DISPLAY9`, 3840×1600, `dpi_scale=1`). So the second-monitor ordering, the
+   out-of-range refusal, and a non-1.0 DPI scale in the monitor path have unit/driver coverage only. The
+   report's single-DPI observation is still the only live DPI evidence.
+3. **The `allow_vscode: true` opt-in was never exercised live.** Exercising it means editing the user's live
+   `.forge/config.yaml`, which this plan forbids. The live config has `desktop.enabled: true` and **no**
+   `allow_vscode` key, so the default-off path is what ran. Approving a real Code window and the six
+   per-call confirmations rest on the 43 unit/driver tests plus the live default-off refusal.
+4. **The optional manual disposable-VS Code-window smoke (item 5) was not run**, for the same reason, and
+   because a wrong keystroke there lands in the editor Forge itself runs in.
+5. **`show_window` was verified for a GUI app only.** Console helpers staying hidden is covered by
+   `test/unit/execShowWindow.test.ts`, not by a live A/B this session.
+6. **DevTools/browser-chrome keys remain unsupported by design** (report §7): no fix, and the docs now say
+   `browser_press` does not drive browser chrome.
