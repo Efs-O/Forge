@@ -315,16 +315,37 @@ export class RemoteQuestionBridge {
     }
   }
 
+  /**
+   * The buttons could not be drawn (a choice past Telegram's 64-byte label
+   * limit, or no inline keyboard): ask the same step as numbered text, which
+   * `answerText` already resolves. Never dismiss -- the question is open in the
+   * sidebar too, and cancelling it because the phone could not draw buttons
+   * closed that dialog under the user mid-read.
+   */
   private async failDelivery(pending: RemoteQuestionEntry, detail: string): Promise<void> {
-    this.onError?.(`Forge remote question delivery failed: ${detail}`);
     if (this.questions.get(pending.event.id) !== pending) return;
-    const accepted = this.host.dismissQuestion(pending.event.id);
-    if (!accepted) return;
-    this.questions.delete(pending.event.id);
-    await this.sendNotice(
-      pending.chatId,
-      'Forge: I could not present that choice question with Telegram buttons, so the question was cancelled.',
-    );
+    const step = pending.picks?.length ?? 0;
+    const group = pending.steps?.[step];
+    const body = group
+      ? `${pending.event.prompt}
+
+Question ${step + 1} of ${pending.steps!.length}: ${renderQuestionAsText(group.prompt, group.options)}`
+      : renderQuestionAsText(pending.event.prompt, pending.event.options);
+    try {
+      await this.channel.send(
+        pending.chatId,
+        `Forge asks: ${body}`.slice(0, this.maxMessageChars),
+        {
+          signal: this.signal,
+        },
+      );
+      pending.delivered = true;
+      pending.shownStep = step;
+    } catch (err) {
+      this.onError?.(
+        `Forge remote question delivery failed: ${detail}; text fallback: ${err instanceof Error ? err.message : String(err)}`,
+      );
+    }
   }
 
   private async sendNotice(chatId: string, text: string): Promise<string[] | undefined> {

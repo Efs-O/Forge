@@ -381,19 +381,22 @@ describe('RemoteQuestionBridge', () => {
     });
   });
 
-  it('cancels the host question and reports a strict Telegram delivery failure', async () => {
+  it('falls back to numbered text when buttons fail, leaving the question open', async () => {
+    // A choice past the 64-byte button limit used to cancel the question
+    // everywhere, closing the sidebar dialog the user was reading.
     const { bridge, channel, service } = bridgeRig({ channelName: 'telegram' });
+    const long = 'x'.repeat(80);
     const pending = service.ask({
       prompt: 'Which backend?',
-      options: ['llama.cpp', 'ollama'],
+      options: ['llama.cpp', long],
       conversationId: 'c1',
     });
-    vi.spyOn(channel, 'sendInlineKeyboard').mockRejectedValue(new Error('Telegram unavailable'));
     await vi.waitFor(() =>
-      expect(channel.sent.some((item) => item.text.includes('question was cancelled'))).toBe(true),
+      expect(channel.sent.some((item) => item.text.includes(`2. ${long}`))).toBe(true),
     );
-    await expect(pending).resolves.toBeUndefined();
-    expect(service.hasPending('c1')).toBe(false);
+    expect(service.hasPending('c1')).toBe(true);
+    expect(bridge.answerText('chat-1', '2')).toBe(true);
+    await expect(pending).resolves.toBe(long);
   });
 
   it('does not report cancellation when another surface wins during button delivery', async () => {
