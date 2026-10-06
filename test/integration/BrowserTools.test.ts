@@ -346,11 +346,19 @@ describe('browser tools: inspect, index identity, coordinate bounds (Phase 1)', 
             'document.body.appendChild(b);},1200);</script></body></html>',
         ),
     });
+    // The page's timer starts during navigate, so a wall-clock lower bound
+    // measured from here races a slow runner. Absence before the click is
+    // what proves the click had to wait.
+    const lateExists = await mgr.pageEvalForTest(
+      () =>
+        (
+          globalThis.document as unknown as { getElementById(id: string): unknown }
+        ).getElementById('late') !== null,
+    );
+    expect(lateExists).toBe(false);
     const lateAt = Date.now();
     expect(await callText('browser_click', { selector: '#late' })).toMatch(/clicked "#late"/);
-    const lateMs = Date.now() - lateAt;
-    expect(lateMs).toBeGreaterThan(1000);
-    expect(lateMs).toBeLessThan(5000);
+    expect(Date.now() - lateAt).toBeLessThan(5000);
 
     // …and the click really landed on it.
     const heading = await mgr.pageEvalForTest<string>(

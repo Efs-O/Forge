@@ -22,8 +22,10 @@ less wall time?
   run.
 - **Grading:** a check script the model never sees, run after the harness
   says it is done.
-- **Model settings:** the same for both. Context 200K, output cap about 32K
-  (Forge 32768, OpenCode 32000), reasoning effort `xhigh`. Task 5 changes
+- **Model settings:** the same for both. Context 200000, output cap 32000
+  per response, reasoning effort `xhigh`. OpenCode cannot ask for more than
+  32000, so Forge's Strata entry is pinned to 32000 too (the starter's
+  `defaults.max_tokens` of 200000 is a ceiling the entry overrides). Task 5 changes
   this for both: context 64K, output cap 16K.
 - **Out-of-the-box setup:** each harness is used as a new user would get it.
   - **Forge** runs on the starter config a new install writes (0.16.90 or later:
@@ -37,7 +39,9 @@ less wall time?
     compaction or sampling. It gets the auto-created starter `FORGE.md` and no
     project `FORGE.md`.
   - **OpenCode** runs with its defaults plus a provider config, passed through
-    `OPENCODE_CONFIG`, that only names Strata. It gets the `AGENTS.md` that its
+    `OPENCODE_CONFIG`, that only names Strata (also as `small_model`, so its
+    title request stays local) and denies `webfetch`, matching Forge's fetch
+    being off. It gets the `AGENTS.md` that its
     own `/init` produces, generated once and copied into every run, as a user
     following OpenCode's docs would have.
   - Neither gets extra prompting. Forge's shipped tuning counts, because it is
@@ -91,9 +95,16 @@ and a skeptic will say so. A **third-party set** answers that.
 
 Ten exercises from the Aider polyglot benchmark (Exercism problems with their
 own tests). They are picked by a rule fixed before any run: the first ten
-TypeScript exercises in alphabetical order. The prompt is the same for each:
-"Make the tests in this folder pass without changing them." The grade is the
-exercise's own test suite. Neither of us chose which ones.
+JavaScript exercises in alphabetical order (the set has no TypeScript track),
+from `Aider-AI/polyglot-benchmark@7e0611e`. They sit on their own branch
+`pg-start` of the bench repo, one folder each, sharing one jest install. Each
+exercise's `.meta/` (which holds the reference solution) is removed, and
+`xtest` is turned into `test` so every case counts. Every exercise fails all
+its tests untouched and passes all of them with its reference solution, which
+the grader keeps outside the bench repo. The prompt is the same for each:
+"Make the tests in the `<exercise>` folder pass without changing them." The
+grade is the exercise's own test suite, plus a check that the spec file is
+unchanged. Neither of us chose which ones.
 
 ### Our set
 
