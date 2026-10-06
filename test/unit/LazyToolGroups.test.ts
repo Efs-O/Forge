@@ -175,10 +175,12 @@ describe('lazy tool groups', () => {
     bridge(registry, 'halluscribe', HALLUSCRIBE_TOOLS);
 
     expect(lazyGroupNames()).toEqual([
+      'agents',
       'computer_use',
       'editor_ui',
       'halluscribe',
       'media',
+      'memory',
       'notebook',
       'system',
     ]);
@@ -204,26 +206,26 @@ describe('lazy tool groups', () => {
       'editor_ui',
       'system',
       'system',
-      undefined,
-      undefined,
-      undefined,
-      undefined,
+      'memory',
+      'memory',
+      'memory',
+      'memory',
       'notebook',
       'halluscribe',
     ]);
     for (const name of [
-      'ask_live_session',
-      'manage_jobs',
-      'notify_user',
-      'ask_local_agent',
-      'ask_user',
-      'tell_live_session',
-      'list_delegation_targets',
-      'get_system_status',
+      'ask_live_session', 'manage_jobs', 'notify_user', 'ask_local_agent',
+      'tell_live_session', 'list_delegation_targets',
     ]) {
-      expect(lazyGroupForTool(name)).toBeUndefined();
-      expect(hiddenLazyToolNames('conv-a')).not.toContain(name);
+      expect(lazyGroupForTool(name)).toBe('agents');
     }
+    expect(hiddenLazyToolNames('conv-a')).toContain('ask_live_session');
+    expect(hiddenLazyToolNames('conv-a')).toContain('notify_user');
+    expect(hiddenLazyToolNames('conv-a')).not.toContain('manage_jobs');
+    expect(lazyGroupForTool('ask_user')).toBeUndefined();
+    expect(hiddenLazyToolNames('conv-a')).not.toContain('ask_user');
+    expect(lazyGroupForTool('get_system_status')).toBe('system');
+    expect(hiddenLazyToolNames('conv-a')).toContain('get_system_status');
     // send_file and render_html_to_image are in media, and media is never
     // vision-gated: a model with no projector can still deliver a file it never
     // rendered, and rendering HTML needs no vision at all. Only computer_use
@@ -245,19 +247,11 @@ describe('lazy tool groups', () => {
     expect(loader?.function.parameters).toMatchObject({
       properties: { group: { enum: lazyGroupNames() } },
     });
-    expect(loader?.function.parameters).not.toMatchObject({
-      properties: { group: { enum: expect.arrayContaining(['memory']) } },
+    expect(loader?.function.parameters).toMatchObject({
+      properties: { group: { enum: expect.arrayContaining(['memory', 'agents']) } },
     });
-    expect(loader?.function.description).not.toContain('memory:');
-    expect(loader?.function.description).toContain(
-      'computer_use: control browser tabs and the desktop; tools: desktop_capture',
-    );
-    expect(loader?.function.description).toContain(
-      'system: install llama.cpp and inspect or control computer power; tools: get_power_info',
-    );
-    expect(loader?.function.description).toContain(
-      'search previous AI coding sessions and historical workspace/user context',
-    );
+    expect(loader?.function.description).toContain('memory: remember');
+    expect(loader?.function.description).toContain('system: get_power_info');
     expect(loader?.function.description.split(/\s+/).length).toBeLessThanOrEqual(350);
     const staticDefinition = makeLoadToolGroupTool().definition;
     expect(staticDefinition.function.parameters).toMatchObject({
@@ -298,7 +292,7 @@ describe('lazy tool groups', () => {
     );
   });
 
-  it('eagerly advertises configured memory tools without a group activation', () => {
+  it('eagerly advertises a configured group without adding it to the active group map', () => {
     const registry = new ToolRegistry();
     const memoryTools = ['remember', 'recall', 'list_memories', 'forget'];
     for (const name of memoryTools) {
@@ -313,18 +307,33 @@ describe('lazy tool groups', () => {
       recordNativeLazyTool(name);
     }
     const budget = new ToolBudget({ tools: memoryTools });
-    const hidden = hiddenLazyToolNames('conv-a', new Set(memoryTools));
+    const hidden = hiddenLazyToolNames('conv-a', new Set(), true, new Set(['memory']));
     const advertised = budget.filterDefinitions(
       registry.definitions(ALL_PERMISSIONS).filter((d) => !hidden.has(d.function.name)),
     );
     expect(advertised.map((definition) => definition.function.name)).toEqual(memoryTools);
     expect(memoryTools.map((name) => lazyGroupForTool(name))).toEqual([
-      undefined,
-      undefined,
-      undefined,
-      undefined,
+      'memory', 'memory', 'memory', 'memory',
     ]);
-    expect(hiddenLazyToolNames('conv-a', new Set(memoryTools))).toEqual(new Set());
+    expect(isLazyGroupActive('conv-a', 'memory')).toBe(false);
+    deactivateLazyGroups('conv-a');
+    expect(isLazyGroupActive('conv-a', 'memory')).toBe(false);
+    expect(hiddenLazyToolNames('conv-a', new Set(), true, new Set(['memory']))).toEqual(new Set());
+  });
+
+  it('describes available groups with their registered member names', () => {
+    const registry = new ToolRegistry();
+    registry.register(makeLoadToolGroupTool());
+    for (const name of ['delete_file', 'move_file']) {
+      registry.register({
+        definition: { type: 'function', function: { name, description: '', parameters: { type: 'object' } } },
+        permission: 'read',
+        handler: async () => 'ok',
+      });
+    }
+    const description = registry.get('load_tool_group')?.describe?.().function.description;
+    expect(description).toContain('files:');
+    expect(description).toContain('files: delete_file, move_file');
   });
 
   it('appends the loaded schemas after the existing prefix, leaving it byte-identical', () => {

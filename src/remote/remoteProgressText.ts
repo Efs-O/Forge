@@ -33,7 +33,7 @@ export function sanitize(value: string): string {
 /**
  * The leading identifier of a tool name, nothing more.
  *
- * `run_terminal` can be handed `rm -rf / --no-preserve-root`; echoing it into a
+ * A shell command can contain destructive input; echoing it into a
  * progress line would put a shell command on the user's phone as if Forge had
  * run it. Matching the identifier prefix also survives the argument lists that
  * used to make the bubble unreadable.

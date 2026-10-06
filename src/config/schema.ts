@@ -18,6 +18,8 @@ import {
   effectiveGroupField,
 } from './modelSchema';
 import { RemoteConfigSchema } from './remoteSchema';
+import { NATIVE_LAZY_GROUP_NAMES } from './toolGroupNames';
+import { ToolGroupsSchema } from './schemaShared';
 
 const ToolPermissionSchema = z.enum(
   [
@@ -152,7 +154,9 @@ export const ForgeConfigSchema = z
     // F7 addition
     groups: z.record(z.string(), GroupSchema).optional(),
     // F6 additions
-    defaults: ProfileSchema.partial().optional(),
+    defaults: ProfileSchema.partial()
+      .extend({ tool_groups: ToolGroupsSchema.optional() })
+      .optional(),
     profiles: z.record(z.string(), ProfileSchema).optional(),
     aliases: z.record(z.string(), z.string().min(1)).optional(),
     llama_server: LlamaServerConfigSchema.default({}),
@@ -217,6 +221,27 @@ export const ForgeConfigSchema = z
       .optional(),
   })
   .superRefine((cfg, ctx) => {
+    const validGroups = NATIVE_LAZY_GROUP_NAMES.join(', ');
+    const validateEagerGroups = (
+      value: { eager: string[] } | undefined,
+      path: (string | number)[],
+    ) => {
+      for (const [index, group] of (value?.eager ?? []).entries()) {
+        if ((NATIVE_LAZY_GROUP_NAMES as readonly string[]).includes(group)) continue;
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          path: [...path, 'eager', index],
+          message: `Unknown native tool group "${group}". Valid groups: ${validGroups}`,
+        });
+      }
+    };
+    validateEagerGroups(cfg.defaults?.tool_groups, ['defaults', 'tool_groups']);
+    for (const [name, group] of Object.entries(cfg.groups ?? {})) {
+      validateEagerGroups(group.tool_groups, ['groups', name, 'tool_groups']);
+    }
+    cfg.models.forEach((model, index) =>
+      validateEagerGroups(model.tool_groups, ['models', index, 'tool_groups']),
+    );
     if (cfg.permissions?.exec?.shell_scripts && !cfg.permissions.exec.headless) {
       ctx.addIssue({
         code: z.ZodIssueCode.custom,

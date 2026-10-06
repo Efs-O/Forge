@@ -79,7 +79,7 @@ describe('collectWriteActions', () => {
 
   it('never reports a failed write as a completed one', () => {
     const actions = collectWriteActions([
-      call('a', 'edit_file', { filepath: 'src/foo.ts' }),
+      call('a', 'edit_file', { path: 'src/foo.ts' }),
       result('a', 'Error: no match for the search text'),
     ]);
     expect(actions[0]?.outcome).toBe('failed');
@@ -463,7 +463,7 @@ describe('recordedActionsBlock', () => {
 describe('collectWrittenFiles', () => {
   it('still reports every path a write tool named, regardless of outcome', () => {
     const files = collectWrittenFiles([
-      call('a', 'edit_file', { filepath: 'src\\win.ts' }),
+      call('a', 'edit_file', { path: 'src\\win.ts' }),
       call('b', 'move_file', { source: 'a.ts', destination: 'b.ts' }),
     ]);
     expect(files).toEqual(['src/win.ts', 'a.ts', 'b.ts']);

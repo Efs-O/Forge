@@ -16,7 +16,6 @@ import { makeListDirectoryTool } from './listDirectoryTool';
 import { makeCodeIntelTool } from './codeIntelTool';
 import { makeApplyCodeActionTool } from './codeActionTools';
 import { makeEditNotebookCellTool, makeReadNotebookTool } from './notebookTools';
-import { makeListWorkspaceTasksTool, makeRunWorkspaceTaskTool } from './taskTools';
 import {
   makeShowDiffTool,
   makeOpenFileTool,
@@ -45,7 +44,7 @@ import {
   makeFormatFileTool,
   makeRenameSymbolTool,
 } from './fileEditTools';
-import { makeRunTerminalTool, makeExecCommandTool } from './execTools';
+import { makeExecCommandTool } from './execTools';
 import { makeSafePowerShellTool } from './safePowerShellTool';
 import { makeSystemStatusTool } from './systemStatusTool';
 import type { BackendProcess } from '../system/SystemReport';
@@ -152,7 +151,6 @@ export function registerAllTools(
   registry.register(makeSearchCodebaseTool(indexManager));
   registry.register(makeCodeIntelTool());
   registry.register(makeReadNotebookTool());
-  registry.register(makeListWorkspaceTasksTool());
   registry.register(makeShowDiffTool());
   registry.register(makeOpenFileTool());
   registry.register(makeAskUserTool(questions));
@@ -190,7 +188,6 @@ export function registerAllTools(
   registry.register(makeEditNotebookCellTool());
 
   // v0.7 exec + git
-  registry.register(makeRunTerminalTool());
   registry.register(
     makeExecCommandTool(
       () => getConfig?.().permissions?.exec?.shell_scripts === true,
@@ -202,7 +199,6 @@ export function registerAllTools(
   registry.register(makeListExecutionsTool());
   registry.register(makeSafePowerShellTool());
   registry.register(makeSystemStatusTool(backendProcesses ? { backendProcesses } : {}));
-  registry.register(makeRunWorkspaceTaskTool());
   registry.register(makeGitReadTool());
   registry.register(makeCreateBranchTool());
   registry.register(makeSwitchBranchTool());

@@ -11,7 +11,7 @@
  * Argument keys across Forge's tools that carry a path.
  *
  * Derived from the tool schemas in `src/tools/`, not guessed: `edit_file` uses
- * `filepath` (one word, no underscore) while every other tool uses `path`, and
+ * the legacy `filepath` key while every current tool uses `path`, and
  * missing that spelling silently zeroed the write-recall metric on a session
  * with 106 edits in it.
  */

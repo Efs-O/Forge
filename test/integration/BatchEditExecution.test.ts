@@ -25,10 +25,17 @@ describe('edit_file batch form', () => {
 
   const read = (): string => fs.readFileSync(path.join(root, file), 'utf8');
 
+  it('declares path as the only file-path argument', () => {
+    const definition = makeEditFileTool().definition.function;
+    expect(definition.parameters.required).toContain('path');
+    expect(definition.parameters.properties).toHaveProperty('path');
+    expect(definition.parameters.properties).not.toHaveProperty('filepath');
+  });
+
   it('applies several edits in one call', async () => {
     // The whole point: three edits, one round.
     const result = await makeEditFileTool().handler({
-      filepath: file,
+      path: file,
       edits: [
         { old_str: 'const a = 1;', new_str: 'const a = 10;' },
         { old_str: 'const b = 2;', new_str: 'const b = 20;' },
@@ -41,7 +48,7 @@ describe('edit_file batch form', () => {
 
   it('sees earlier edits when matching later ones', async () => {
     await makeEditFileTool().handler({
-      filepath: file,
+      path: file,
       edits: [
         { old_str: 'const a = 1;', new_str: 'const a = 99;' },
         { old_str: 'const a = 99;', new_str: 'const a = 100;' },
@@ -54,7 +61,7 @@ describe('edit_file batch form', () => {
     // A partial write would leave the file in a state neither side has read.
     await expect(
       makeEditFileTool().handler({
-        filepath: file,
+        path: file,
         edits: [
           { old_str: 'const a = 1;', new_str: 'const a = 10;' },
           { old_str: 'const MISSING = 0;', new_str: 'x' },
@@ -66,7 +73,7 @@ describe('edit_file batch form', () => {
 
   it('still supports the single-edit form', async () => {
     const result = await makeEditFileTool().handler({
-      filepath: file,
+      path: file,
       old_str: 'const b = 2;',
       new_str: 'const b = 22;',
     });
@@ -75,7 +82,7 @@ describe('edit_file batch form', () => {
   });
 
   it('rejects a call with neither form', async () => {
-    await expect(makeEditFileTool().handler({ filepath: file })).rejects.toThrow(
+    await expect(makeEditFileTool().handler({ path: file })).rejects.toThrow(
       'either edits[], or both old_str and new_str',
     );
   });

@@ -40,6 +40,10 @@ export const ProviderSchema = z.enum([
 
 export const ToolCallLimitsSchema = z.record(z.string().min(1), z.number().int().min(0));
 
+export const ToolGroupsSchema = z.object({
+  eager: z.array(z.string().min(1)).default([]),
+});
+
 // Spawn-time facts (F6). All optional — present-block overrides flat fields.
 export const SpawnSchema = z.object({
   num_ctx: z.number().int().positive().optional(),
@@ -70,6 +74,7 @@ export const GroupSchema = z.object({
   capabilities: CapabilitiesSchema.optional(),
   max_output_tokens: z.number().int().positive().optional(),
   max_tool_rounds: z.number().int().positive().optional(),
+  tool_groups: ToolGroupsSchema.optional(),
   tools: z.array(z.string().min(1)).optional(),
   tool_call_limits: ToolCallLimitsSchema.optional(),
 });

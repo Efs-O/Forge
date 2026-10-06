@@ -7,6 +7,7 @@ import { UserQuestionService } from '../../src/sidebar/UserQuestionService';
 import { UserNotificationService } from '../../src/sidebar/UserNotificationService';
 import { registerAllTools } from '../../src/tools/registerAllTools';
 import { ToolRegistry, type ToolPermission } from '../../src/tools/ToolRegistry';
+import { lazyGroupForTool } from '../../src/tools/lazyToolGroups';
 
 const ALL_PERMISSIONS = new Set<ToolPermission>([
   'read',
@@ -77,7 +78,6 @@ const EXPECTED_NATIVE_NAMES = [
   'list_directory',
   'list_executions',
   'list_memories',
-  'list_workspace_tasks',
   'load_tool_group',
   'monitor_execution',
   'move_file',
@@ -95,8 +95,6 @@ const EXPECTED_NATIVE_NAMES = [
   'render_html_to_image',
   'replace_selection',
   'restore_file',
-  'run_terminal',
-  'run_workspace_task',
   'schedule_wake',
   'search_code',
   'search_codebase',
@@ -115,6 +113,12 @@ const EXPECTED_NATIVE_NAMES = [
   'web_fetch',
   'web_search',
   'write_file',
+];
+
+const CORE_TOOL_NAMES = [
+  'read_file', 'edit_file', 'write_file', 'search_code', 'find_files', 'list_directory',
+  'shell', 'monitor_execution', 'update_plan', 'read_tool_result', 'ask_user',
+  'web_fetch', 'web_search', 'load_tool_group',
 ];
 
 function makeRegistry(
@@ -169,6 +173,13 @@ describe('registerAllTools canonical coordinator catalog', () => {
   it('exposes the exact native catalog when all optional wiring is present', () => {
     const registry = makeRegistry({ search: true, delegation: true });
     expect(registry.names().sort()).toEqual(EXPECTED_NATIVE_NAMES);
+    for (const removed of ['run_terminal', 'run_workspace_task', 'list_workspace_tasks']) {
+      expect(registry.names()).not.toContain(removed);
+    }
+    const edit = registry.get('edit_file')!.definition.function;
+    expect(edit.parameters.required).toContain('path');
+    expect(edit.parameters.properties).toHaveProperty('path');
+    expect(edit.parameters.properties).not.toHaveProperty('filepath');
     // load_tool_group is advertised for registered native groups; generate_image while config.yaml
     // has no image_generation block, install_llamacpp while it sets no
     // llama_server.binary, and ask_live_session while it has no
@@ -199,6 +210,27 @@ describe('registerAllTools canonical coordinator catalog', () => {
     );
   });
 
+  it('advertises every core tool present in this worktree and groups optional tools', () => {
+    const registry = makeRegistry({ search: true, delegation: true });
+    const names = registry.definitions(ALL_PERMISSIONS).map((tool) => tool.function.name);
+    expect(names.filter((name) => CORE_TOOL_NAMES.includes(name)).sort()).toEqual(
+      CORE_TOOL_NAMES.filter((name) => registry.names().includes(name)).sort(),
+    );
+    expect(CORE_TOOL_NAMES).toContain('shell');
+    const groups: Record<string, string[]> = {
+      files: ['delete_file', 'move_file', 'create_directory', 'append_file', 'apply_line_edits', 'restore_file'],
+      git: ['git_read', 'stage', 'commit', 'create_branch', 'switch_branch'],
+      code_intel: ['code_intel', 'rename_symbol', 'apply_code_action', 'format_file', 'search_codebase'],
+      memory: ['remember', 'recall', 'list_memories', 'forget'],
+      background: ['stop_execution', 'list_executions', 'wait'],
+      agents: ['ask_live_session', 'tell_live_session', 'ask_local_agent', 'list_delegation_targets', 'manage_jobs', 'notify_user'],
+    };
+    for (const [group, members] of Object.entries(groups)) {
+      for (const member of members) expect(lazyGroupForTool(member)).toBe(group);
+    }
+    expect(lazyGroupForTool('get_system_status')).toBe('system');
+  });
+
   it('advertises generate_image once image_generation is configured', () => {
     const registry = makeRegistry({ delegation: true, images: true });
     const names = registry.definitions(ALL_PERMISSIONS).map((tool) => tool.function.name);
@@ -210,7 +242,7 @@ describe('registerAllTools canonical coordinator catalog', () => {
     expect(names).not.toContain('web_search');
     expect(names).not.toContain('ask_local_agent');
     expect(names).not.toContain('list_delegation_targets');
-    expect(names).toHaveLength(60);
+    expect(names).toHaveLength(57);
   });
 
   // send_file's only outbound step is api.telegram.org, so a profile with

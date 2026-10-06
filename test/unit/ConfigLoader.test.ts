@@ -58,6 +58,25 @@ models:
     expect(config.active_model).toBe('z-cloud');
   });
 
+  it('rejects eager tool groups outside the static native group list', () => {
+    const dir = mkTempDir();
+    fs.writeFileSync(
+      path.join(dir, 'config.yaml'),
+      `active_model: local
+models:
+  - name: local
+    provider: ollama
+    endpoint: http://127.0.0.1:11434
+defaults:
+  tool_groups:
+    eager: [made_up]
+`,
+      'utf8',
+    );
+
+    expect(() => loadConfig(dir)).toThrow(/Unknown native tool group "made_up".*agents/u);
+  });
+
   it('loads explicit image retention values and leaves omission disabled', () => {
     const dir = mkTempDir();
     fs.writeFileSync(

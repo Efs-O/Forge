@@ -43,7 +43,7 @@ const EXAMPLE_ARGS = {
   forget: { key: 'tool-test' },
   list_memories: {},
   edit_file: {
-    filepath: '.forge/tool-test-write.txt',
+    path: '.forge/tool-test-write.txt',
     old_str: 'Forge tool-call smoke test',
     new_str: 'Forge tool-call smoke test updated',
   },
@@ -60,7 +60,7 @@ const EXAMPLE_ARGS = {
     character: 13,
     new_name: 'ToolRegistryRenamedForTest',
   },
-  run_terminal: { command: 'npm run type-check', cwd: '.' },
+  shell: { command: 'npm run type-check', cwd: '.' },
   exec_command: { command: 'node', args: ['--version'], cwd: '.', timeout_ms: 10000 },
   run_tests: { pattern: 'test/unit/ToolCallFallback.test.ts', reporter: 'verbose' },
   run_build: { script: 'build' },

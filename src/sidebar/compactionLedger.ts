@@ -25,9 +25,8 @@ import { TOOL_INTERRUPTED_RESULT } from './sessionPersistence';
 /**
  * Tools that MODIFY a file, and the argument keys that carry the path.
  *
- * Taken from the schemas in `src/tools/`, not guessed: `edit_file` spells it
- * `filepath` while everything else uses `path`, and missing that spelling
- * silently zeroed this list on a session with 106 edits in it.
+ * Taken from the schemas in `src/tools/`, not guessed. `filepath` remains in
+ * PATH_KEYS only to read pre-0.17 transcripts that used the old edit_file key.
  */
 const WRITE_TOOLS = new Set([
   'write_file',
@@ -117,39 +116,6 @@ function parseArgs(raw: string): Record<string, unknown> | undefined {
   } catch {
     return undefined;
   }
-}
-
-/** A command Forge pasted for the user to run manually. Its outcome is unknown. */
-export interface PastedTerminalCommand {
-  command: string;
-  cwd?: string | undefined;
-}
-
-/**
- * The newest `run_terminal` call is durable conversation state, not an
- * inference from prose. Keep this beside the command ledger so every reader
- * gets the same exact call-derived fact.
- */
-export function latestPastedTerminalCommand(
-  messages: readonly ChatMessage[],
-): PastedTerminalCommand | undefined {
-  for (let messageIndex = messages.length - 1; messageIndex >= 0; messageIndex -= 1) {
-    const calls = messages[messageIndex]?.tool_calls;
-    if (!calls) continue;
-    for (let callIndex = calls.length - 1; callIndex >= 0; callIndex -= 1) {
-      const call = calls[callIndex];
-      if (call?.function.name !== 'run_terminal') continue;
-      const args = parseArgs(call.function.arguments);
-      const command = args?.['command'];
-      if (typeof command !== 'string' || !command.trim()) continue;
-      const cwd = args?.['cwd'];
-      return {
-        command: command.trim(),
-        ...(typeof cwd === 'string' && cwd.trim() ? { cwd: cwd.trim() } : {}),
-      };
-    }
-  }
-  return undefined;
 }
 
 function truncate(text: string, limit: number): string {

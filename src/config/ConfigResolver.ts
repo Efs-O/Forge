@@ -1,5 +1,6 @@
 import type {
   ForgeConfig,
+  DefaultsConfig,
   GroupConfig,
   ModelConfig,
   ProfileConfig,
@@ -242,7 +243,7 @@ export function resolveRequestModel(
   const { base, profile } = splitModelProfile(expanded);
   const model = findBase(config, base);
 
-  const d: ProfileConfig = config.defaults ?? {};
+  const d: DefaultsConfig = config.defaults ?? {};
   let p: ProfileConfig = {};
   if (profile !== undefined) {
     if (model.profiles && !model.profiles.includes(profile)) {
@@ -271,6 +272,7 @@ export function resolveRequestModel(
     ),
     capabilities: pick(d.capabilities, model.capabilities, p.capabilities),
     max_tool_rounds: pick(d.max_tool_rounds, model.max_tool_rounds, p.max_tool_rounds),
+    tool_groups: pick(d.tool_groups, model.tool_groups) ?? { eager: [] },
   });
 }
 

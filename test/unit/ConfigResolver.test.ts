@@ -103,6 +103,7 @@ describe('resolveRequestModel', () => {
     expect(m.think).toBe(true); // profile
     expect(m.reasoning_effort).toBe('medium'); // profile
     expect(m.sampling).toMatchObject({ temperature: 0.6, top_p: 0.95 }); // from defaults, no profile sampling
+    expect(m.tool_groups).toEqual({ eager: [] });
   });
 
   it('merges sampling across layers with profile winning per key', () => {
@@ -125,6 +126,21 @@ describe('resolveRequestModel', () => {
     const m = resolveRequestModel(cfg, 'gemma4-26b-iq3s');
     expect(m.system_prompt).toBe('default prompt');
     expect(m.think).toBe(false);
+  });
+
+  it('resolves eager tool groups as defaults < group < model', () => {
+    const cfg: ForgeConfig = {
+      models: [{ name: 'm', provider: 'ollama', group: 'coding', tool_groups: { eager: ['memory'] } }],
+      active_model: 'm',
+      defaults: { tool_groups: { eager: ['files'] } },
+      groups: { coding: { tool_groups: { eager: ['git'] } } },
+      llama_server: {},
+    };
+    expect(resolveRequestModel(cfg, 'm').tool_groups).toEqual({ eager: ['memory'] });
+    delete cfg.models[0]!.tool_groups;
+    expect(resolveRequestModel(cfg, 'm').tool_groups).toEqual({ eager: ['git'] });
+    cfg.groups = {};
+    expect(resolveRequestModel(cfg, 'm').tool_groups).toEqual({ eager: ['files'] });
   });
 
   it('throws on unknown profile', () => {
@@ -237,7 +253,7 @@ describe('groups ("boards") — F7', () => {
         workers: {
           think: false,
           tools: ['read_file', 'search_code'],
-          tool_call_limits: { run_terminal: 0 },
+          tool_call_limits: { shell: 0 },
           max_output_tokens: 8192,
         },
       },
@@ -257,7 +273,7 @@ describe('groups ("boards") — F7', () => {
           num_ctx: 32768,
           think: false,
           tools: ['read_file', 'search_code'],
-          tool_call_limits: { run_terminal: 0 },
+          tool_call_limits: { shell: 0 },
           max_output_tokens: 8192,
         },
       ],
@@ -290,7 +306,7 @@ describe('groups ("boards") — F7', () => {
     expect(merged.num_ctx).toBe(32768);
     expect(merged.think).toBe(false); // from 'workers' group
     expect(merged.tools).toEqual(['read_file', 'search_code']);
-    expect(merged.tool_call_limits).toEqual({ run_terminal: 0 });
+    expect(merged.tool_call_limits).toEqual({ shell: 0 });
     expect(merged.max_output_tokens).toBe(8192);
   });
 

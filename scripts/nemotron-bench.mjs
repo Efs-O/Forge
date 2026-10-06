@@ -204,8 +204,8 @@ function scenarios() {
     scenario('tool-write-file', 'write_file', strict('write_file', { path: 'out.txt', content: 'written\n' })),
     scenario('tool-append-file', 'append_file', strict('append_file', { path: 'seed.txt', content: 'append\n' })),
     scenario('tool-edit-file', 'edit_file', strict('edit_file', { path: 'seed.txt', old_text: 'seed', new_text: 'edited' })),
-    scenario('tool-run-terminal', 'run_terminal', strict('run_terminal', { command: 'echo forge', timeout_seconds: 5 })),
-    scenario('tool-run-tests', 'run_tests', strict('run_tests', { command: 'node --version', timeout_seconds: 5 })),
+    scenario('tool-run-terminal', 'shell', strict('shell', { command: 'echo forge', timeout_ms: 5000 })),
+    scenario('tool-run-tests', 'run_tests', strict('run_tests', { command: 'node --version', timeout_ms: 5000 })),
     scenario(
       'coding-write-module',
       'write_file',
@@ -227,7 +227,7 @@ function scenarios() {
     scenario(
       'coding-run-test',
       'run_tests',
-      strict('run_tests', { command: 'node -e "process.exit(0)"', timeout_seconds: 5 }),
+      strict('run_tests', { command: 'node -e "process.exit(0)"', timeout_ms: 5000 }),
       (args) => args.command === 'node -e "process.exit(0)"' && args.timeout_seconds === 5,
     ),
   ];

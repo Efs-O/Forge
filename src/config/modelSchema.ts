@@ -8,6 +8,7 @@ import {
   SamplingSchema,
   SpawnSchema,
   ToolCallLimitsSchema,
+  ToolGroupsSchema,
 } from './schemaShared';
 
 /**
@@ -123,6 +124,7 @@ export const ModelConfigSchema = z.object({
   tool_call_limits: ToolCallLimitsSchema.optional(),
   max_output_tokens: z.number().int().positive().optional(),
   max_tool_rounds: z.number().int().positive().optional(),
+  tool_groups: ToolGroupsSchema.optional(),
 });
 
 // Provider-requiredness checks (gguf_path/cli/endpoint/api_key_secret) live at

@@ -304,14 +304,14 @@ describe('ToolDispatch', () => {
     toolRegistry.register({
       definition: {
         type: 'function',
-        function: { name: 'run_terminal', description: 'Run', parameters: { type: 'object' } },
+        function: { name: 'budget_test_tool', description: 'Run', parameters: { type: 'object' } },
       },
       permission: 'terminal',
       handler: vi.fn().mockResolvedValue('should not run'),
     });
 
     const messages: ChatMessage[] = [];
-    await dispatch.dispatch([makeToolCall('run_terminal', { command: 'ls' })], allowed, messages, 'conv-a');
+    await dispatch.dispatch([makeToolCall('budget_test_tool', { command: 'ls' })], allowed, messages, 'conv-a');
 
     expect(messages[0]?.content).toContain('User declined');
     expect(failureTracker.reset).not.toHaveBeenCalled();
@@ -572,7 +572,7 @@ describe('ToolDispatch', () => {
       definition: {
         type: 'function',
         function: {
-          name: 'run_terminal',
+          name: 'budget_test_tool',
           description: 'Run in terminal',
           parameters: { type: 'object' },
         },
@@ -583,12 +583,12 @@ describe('ToolDispatch', () => {
 
     const messages: Array<{ role: string; content: string; tool_call_id?: string; name?: string }> =
       [];
-    const toolCalls = [makeToolCall('run_terminal', { command: 'echo hello' })];
+    const toolCalls = [makeToolCall('budget_test_tool', { command: 'echo hello' })];
 
     await dispatch.dispatch(toolCalls, allowed, messages as never);
 
     expect(requestApproval).toHaveBeenCalledWith(
-      'run_terminal',
+      'budget_test_tool',
       expect.any(String),
       false,
       undefined,
@@ -949,7 +949,7 @@ describe('ToolDispatch', () => {
         definition: {
           type: 'function',
           function: {
-            name: 'run_terminal',
+            name: 'budget_test_tool',
             description: 'Run in terminal',
             parameters: { type: 'object' },
           },
@@ -969,11 +969,11 @@ describe('ToolDispatch', () => {
 
     it('returns a structured error and never calls the handler for a non-allowlisted tool', async () => {
       const budget = new ToolBudget({ tools: ['read_file'] });
-      const handler = toolRegistry.get('run_terminal')?.handler;
+      const handler = toolRegistry.get('budget_test_tool')?.handler;
       const messages: Array<{ role: string; content: string }> = [];
 
       await dispatch.dispatch(
-        [makeToolCall('run_terminal', { command: 'echo hi' })],
+        [makeToolCall('budget_test_tool', { command: 'echo hi' })],
         allowed,
         messages as never,
         undefined,
@@ -983,16 +983,16 @@ describe('ToolDispatch', () => {
       );
 
       expect(handler).not.toHaveBeenCalled();
-      expect(messages[0]?.content).toBe('Tool run_terminal is not available for this model.');
+      expect(messages[0]?.content).toBe('Tool budget_test_tool is not available for this model.');
     });
 
     it('still enforces the permission gate even when the allowlist would allow the tool', async () => {
-      const budget = new ToolBudget({ tools: ['run_terminal'] });
+      const budget = new ToolBudget({ tools: ['budget_test_tool'] });
       const noTerminalPermission = new Set(['read', 'write'] as const);
       const messages: Array<{ role: string; content: string }> = [];
 
       await dispatch.dispatch(
-        [makeToolCall('run_terminal', { command: 'echo hi' })],
+        [makeToolCall('budget_test_tool', { command: 'echo hi' })],
         noTerminalPermission,
         messages as never,
         undefined,
@@ -1005,12 +1005,12 @@ describe('ToolDispatch', () => {
     });
 
     it('returns the wrap-up message once a per-tool budget is exhausted, without crashing the turn', async () => {
-      const budget = new ToolBudget({ tool_call_limits: { run_terminal: 1 } });
-      const handler = toolRegistry.get('run_terminal')?.handler;
+      const budget = new ToolBudget({ tool_call_limits: { budget_test_tool: 1 } });
+      const handler = toolRegistry.get('budget_test_tool')?.handler;
       const messages: Array<{ role: string; content: string }> = [];
 
       await dispatch.dispatch(
-        [makeToolCall('run_terminal', { command: 'echo one' })],
+        [makeToolCall('budget_test_tool', { command: 'echo one' })],
         allowed,
         messages as never,
         undefined,
@@ -1019,7 +1019,7 @@ describe('ToolDispatch', () => {
         budget,
       );
       await dispatch.dispatch(
-        [makeToolCall('run_terminal', { command: 'echo two' })],
+        [makeToolCall('budget_test_tool', { command: 'echo two' })],
         allowed,
         messages as never,
         undefined,
@@ -1031,7 +1031,7 @@ describe('ToolDispatch', () => {
       expect(handler).toHaveBeenCalledOnce();
       expect(messages[0]?.content).toBe('ran');
       expect(messages[1]?.content).toBe(
-        'Budget exhausted: run_terminal was limited to 1 calls this turn (1 used). ' +
+        'Budget exhausted: budget_test_tool was limited to 1 calls this turn (1 used). ' +
           'Do not call it again; wrap up with what you have.',
       );
     });

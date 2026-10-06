@@ -1,5 +1,4 @@
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import * as fs from 'node:fs';
 import type * as vscode from 'vscode';
 import type { ForgeConfig } from '../../src/config/types';
 import type { LocalDelegationService } from '../../src/delegation/LocalDelegationService';
@@ -9,7 +8,11 @@ import { UserQuestionService } from '../../src/sidebar/UserQuestionService';
 import { UserNotificationService } from '../../src/sidebar/UserNotificationService';
 import { registerAllTools } from '../../src/tools/registerAllTools';
 import { ToolRegistry, type ToolPermission } from '../../src/tools/ToolRegistry';
-import { recordLazyGroupTool, resetLazyToolGroups } from '../../src/tools/lazyToolGroups';
+import {
+  recordLazyGroupTool,
+  recordNativeLazyTool,
+  resetLazyToolGroups,
+} from '../../src/tools/lazyToolGroups';
 
 /**
  * CI token budget for the native tool schema (TOOL_SCHEMA_GROWTH_PLAN.md, Step 1).
@@ -119,9 +122,10 @@ function makeMaximalRegistry(): ToolRegistry {
   // load_tool_group advertises only once a lazy group is bridged in. Record one
   // so the maximally-advertised set includes it, matching a config that has
   // HalluScribe configured (the worst case for schema size).
-  resetLazyToolGroups();
-  recordLazyGroupTool('halluscribe', 'search_sessions');
-  return registry;
+    resetLazyToolGroups();
+    recordLazyGroupTool('halluscribe', 'search_sessions');
+    for (const name of registry.names()) recordNativeLazyTool(name);
+    return registry;
 }
 
 function advertisedChars(registry: ToolRegistry): number {
@@ -137,10 +141,10 @@ describe('tool schema CI budget (TOOL_SCHEMA_GROWTH_PLAN.md Step 1)', () => {
     Object.defineProperty(process, 'platform', { value: realPlatform, configurable: true }),
   );
 
-  it('advertises the full 68-tool set under the maximal config', () => {
+  it('advertises the full 65-tool set under the maximal config', () => {
     const registry = makeMaximalRegistry();
     const names = registry.definitions(ALL_PERMISSIONS).map((d) => d.function.name).sort();
-    expect(names).toHaveLength(68);
+    expect(names).toHaveLength(65);
     // Spot-check the five self-suppressing tools that only appear when their
     // config block is present — these are the ones a bare config would drop.
     for (const name of [
@@ -154,15 +158,17 @@ describe('tool schema CI budget (TOOL_SCHEMA_GROWTH_PLAN.md Step 1)', () => {
     }
   });
 
+  it('keeps load_tool_group discovery under 450 estimated tokens', () => {
+    const registry = makeMaximalRegistry();
+    const description = registry.get('load_tool_group')?.describe?.().function.description ?? '';
+    // CI has no model tokenizer. Use the measured ~4.62 chars/token ratio
+    // above, rounding up so this remains a conservative character gate.
+    expect(Math.ceil(description.length / 4.62)).toBeLessThanOrEqual(450);
+  });
+
   it('keeps the maximally-advertised schema under the character budget', () => {
     const registry = makeMaximalRegistry();
-    const defs = registry.definitions(ALL_PERMISSIONS);
     const chars = advertisedChars(registry);
-    // eslint-disable-next-line no-console
-    console.log('MEASURED CHARS =', chars);
-    // TEMP: dump for one-off tokenization; removed before commit.
-    fs.mkdirSync('.forge', { recursive: true });
-    fs.writeFileSync('.forge/_budget_defs.json', JSON.stringify(defs));
     expect(
       {
         chars,

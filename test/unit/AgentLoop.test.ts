@@ -620,7 +620,7 @@ describe('AgentLoop', () => {
     registry.register({
       definition: {
         type: 'function',
-        function: { name: 'run_terminal', description: 'exec', parameters: { type: 'object' } },
+        function: { name: 'budget_test_tool', description: 'exec', parameters: { type: 'object' } },
       },
       permission: 'terminal',
       handler: vi.fn().mockResolvedValue('ran'),
@@ -655,7 +655,7 @@ describe('AgentLoop', () => {
             {
               id: `call-${round}`,
               type: 'function',
-              function: { name: 'run_terminal', arguments: '{}' },
+              function: { name: 'budget_test_tool', arguments: '{}' },
             },
           ]);
           handlers.onDone('tool_calls');
@@ -671,14 +671,14 @@ describe('AgentLoop', () => {
     registry.register({
       definition: {
         type: 'function',
-        function: { name: 'run_terminal', description: 'exec', parameters: { type: 'object' } },
+        function: { name: 'budget_test_tool', description: 'exec', parameters: { type: 'object' } },
       },
       permission: 'terminal',
       handler: vi.fn().mockResolvedValue('ran'),
     });
 
     const conv = makeConversation();
-    const config = makeConfig({ tool_call_limits: { run_terminal: 1 } });
+    const config = makeConfig({ tool_call_limits: { budget_test_tool: 1 } });
     const loop = makeLoop(makePool(), config, vi.fn(), registry);
     loop.setClankerMode(true); // bypass the confirm-UI gate; unrelated to the budget under test
 
@@ -688,7 +688,7 @@ describe('AgentLoop', () => {
     expect(toolMessages).toHaveLength(2);
     expect(toolMessages[0]?.content).toBe('ran');
     expect(toolMessages[1]?.content).toBe(
-      'Budget exhausted: run_terminal was limited to 1 calls this turn (1 used). ' +
+      'Budget exhausted: budget_test_tool was limited to 1 calls this turn (1 used). ' +
         'Do not call it again; wrap up with what you have.',
     );
   });

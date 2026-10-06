@@ -34,7 +34,7 @@ describe('every file-writing tool honours extra_file_roots', () => {
     const file = path.join(extra, 'note.txt');
     await makeWriteFileTool(roots).handler({ path: file, content: 'alpha\n' });
     await makeAppendFileTool(roots).handler({ path: file, content: 'beta\n' });
-    await makeEditFileTool(roots).handler({ filepath: file, old_str: 'alpha', new_str: 'first' });
+    await makeEditFileTool(roots).handler({ path: file, old_str: 'alpha', new_str: 'first' });
     await makeApplyLineEditsTool(roots).handler({
       path: file,
       operations: [

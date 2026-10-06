@@ -11,26 +11,11 @@ import {
 /**
  * `load_tool_group` flips one per-conversation flag; the real schemas arrive
  * through the normal `tools` array on the next round, so this tool must never
- * restate them. Its permanent description is the group's discovery surface.
- * Keep HalluScribe's measured history cue close to its original wording: Qwen
- * found that group unprompted with the longer phrase.
+ * restate them. Its compact description is the group's discovery surface.
  */
-const GROUP_PURPOSE: Readonly<Record<string, string>> = {
-  computer_use: 'control browser tabs and the desktop',
-  editor_ui: 'inspect and navigate editor files, selection, and clipboard',
-  halluscribe:
-    'search previous AI coding sessions and historical workspace/user context: past implementation decisions, the exact wording of an earlier error or command, prior project history, the user profile/digest',
-  media: 'view images and video, or generate and search for images',
-  notebook: 'read and edit notebook cells',
-  system: 'install llama.cpp and inspect or control computer power',
-};
-
 function describeGroups(): string {
   return lazyGroupNames()
-    .map(
-      (group) =>
-        `${group}: ${GROUP_PURPOSE[group] ?? 'use these tools'}; tools: ${lazyGroupMembers(group).join(', ')}`,
-    )
+    .map((group) => `${group}: ${lazyGroupMembers(group).join(', ')}`)
     .join('\n');
 }
 
@@ -45,8 +30,7 @@ function buildDefinition(groups?: string[]): ToolDefinition {
     function: {
       name: 'load_tool_group',
       description:
-        'Load an optional tool group for this conversation. Each group description gives its purpose and tools. ' +
-        'After loading, its tools appear on the next step. Available groups and tools:\n' +
+        'Load a tool group; its tools appear on the next step. Available groups and members:\n' +
         describeGroups(),
       parameters: {
         type: 'object',

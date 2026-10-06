@@ -117,7 +117,7 @@ describe.runIf(linkSupported)('symlink escape is refused by every write/move/del
 
   it('refuses edit_file through the link', async () => {
     await expect(
-      makeEditFileTool().handler({ filepath: 'link/evil.txt', old_str: 'a', new_str: 'b' }),
+      makeEditFileTool().handler({ path: 'link/evil.txt', old_str: 'a', new_str: 'b' }),
     ).rejects.toThrow(/outside the workspace/);
   });
 

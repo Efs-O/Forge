@@ -256,12 +256,12 @@ describe('recorded file facts', () => {
     function: { name, arguments: JSON.stringify(args) },
   });
 
-  it("reads every changed file off the tool calls, including edit_file's filepath", () => {
+  it("reads every changed file off the tool calls, including edit_file's path", () => {
     const messages: ChatMessage[] = [
       {
         role: 'assistant',
         content: null,
-        tool_calls: [call('edit_file', { filepath: 'js/a.js' })],
+        tool_calls: [call('edit_file', { path: 'js/a.js' })],
       },
       {
         role: 'assistant',
@@ -287,7 +287,7 @@ describe('recorded file facts', () => {
         content: null,
         tool_calls: [
           { id: 'x', type: 'function', function: { name: 'edit_file', arguments: '{ truncated' } },
-          call('edit_file', { filepath: 'js/b.js' }),
+          call('edit_file', { path: 'js/b.js' }),
         ],
       },
     ];
@@ -696,7 +696,7 @@ describe('runCompaction', () => {
           {
             id: '1',
             type: 'function',
-            function: { name: 'edit_file', arguments: JSON.stringify({ filepath: 'index.html' }) },
+            function: { name: 'edit_file', arguments: JSON.stringify({ path: 'index.html' }) },
           },
         ],
       },

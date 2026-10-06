@@ -68,7 +68,7 @@ export function makeEditFileTool(extraRoots: () => readonly string[] = () => [])
         parameters: {
           type: 'object',
           properties: {
-            filepath: {
+            path: {
               type: 'string',
               description: 'File path (absolute or workspace-relative).',
             },
@@ -98,15 +98,15 @@ export function makeEditFileTool(extraRoots: () => readonly string[] = () => [])
               },
             },
           },
-          required: ['filepath'],
+          required: ['path'],
           additionalProperties: false,
         },
       },
     },
     permission: 'write',
-    mutation: { paths: (args) => [args['filepath'] as string], showDiff: true },
+    mutation: { paths: (args) => [args['path'] as string], showDiff: true },
     handler: async (args) => {
-      const filepath = await resolveRealWorkspacePath(args['filepath'] as string, undefined, {
+      const filepath = await resolveRealWorkspacePath(args['path'] as string, undefined, {
         allowMissing: true,
         extraRoots: extraRoots(),
       });
@@ -154,7 +154,7 @@ export function makeEditFileTool(extraRoots: () => readonly string[] = () => [])
           updated.slice(match.index + match.length);
       }
       writeFileAtomicSync(filepath, updated, fileState);
-      const suppliedPath = args['filepath'] as string;
+      const suppliedPath = args['path'] as string;
       return edits.length === 1
         ? `Replaced in ${suppliedPath}`
         : `Replaced ${edits.length} occurrences in ${suppliedPath}`;

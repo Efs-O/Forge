@@ -20,7 +20,7 @@ export const BENCHMARK_TOOL_NAMES = [
   'write_file',
   'append_file',
   'edit_file',
-  'run_terminal',
+  'shell',
   'run_tests',
 ] as const;
 
@@ -306,7 +306,7 @@ export function createBenchmarkToolHost(root: string): BenchmarkToolHost {
 
   registerBenchmarkTerminalTools(registry, root);
 
-  const allowed = new Set<ToolPermission>(['read', 'write', 'terminal']);
+  const allowed = new Set<ToolPermission>(['read', 'write', 'terminal', 'headless']);
   const definitions = (): ToolDefinition[] => {
     const current = registry.definitions(allowed);
     const names = current.map((definition) => definition.function.name);

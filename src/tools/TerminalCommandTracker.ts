@@ -8,6 +8,17 @@ const MAX_USER_COMMANDS = 5;
 const ESC = String.fromCharCode(27);
 const BEL = String.fromCharCode(7);
 
+/** A command the user typed themselves, in any terminal. */
+export interface UserTerminalCommand {
+  command: string;
+  terminalName: string;
+  status: 'running' | 'completed';
+  cwd?: string | undefined;
+  exitCode?: number | undefined;
+  output?: string | undefined;
+  outputTruncated: boolean;
+}
+
 export type TerminalCommandStatus = 'waiting' | 'running' | 'completed';
 
 export interface TerminalCommandObservation {
@@ -15,17 +26,6 @@ export interface TerminalCommandObservation {
   intendedCwd: string;
   status: TerminalCommandStatus;
   actualCwd?: string | undefined;
-  exitCode?: number | undefined;
-  output?: string | undefined;
-  outputTruncated: boolean;
-}
-
-/** A command the user typed themselves, in any terminal. */
-export interface UserTerminalCommand {
-  command: string;
-  terminalName: string;
-  status: 'running' | 'completed';
-  cwd?: string | undefined;
   exitCode?: number | undefined;
   output?: string | undefined;
   outputTruncated: boolean;
@@ -80,9 +80,7 @@ function stripTerminalEscapes(text: string): string {
 }
 
 /**
- * Captures two things from VS Code's shell-integration events: the outcome of
- * commands Forge pasted into terminals it created, and — so the agent can
- * correct a command that just failed — the commands the user ran themselves.
+ * Captures commands the user ran themselves from VS Code shell-integration.
  *
  * Only executions that start after activation are seen; no scrollback or
  * terminal history is ever read, and the user's own commands are captured only
@@ -162,8 +160,6 @@ export class TerminalCommandTracker implements vscode.Disposable {
       tracked.readTask = this.readOutput(tracked, event.execution, MAX_OUTPUT_CHARS);
       return;
     }
-    // Anything else in this terminal is something the user ran themselves —
-    // including a command they typed into a terminal Forge created.
     this.captureUserStarted(event);
   }
 

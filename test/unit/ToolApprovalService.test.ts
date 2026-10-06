@@ -18,11 +18,11 @@ describe('ToolApprovalService', () => {
     );
     service.setClankerMode(true);
     await expect(service.request('write_file', 'safe')).resolves.toBe(true);
-    const pending = service.request('run_terminal', 'cloud egress', true, 'conv');
+    const pending = service.request('budget_test_tool', 'cloud egress', true, 'conv');
     const request = posted.find((message) => message.type === 'confirmRequest');
     expect(request).toMatchObject({
       type: 'confirmRequest',
-      toolName: 'run_terminal',
+      toolName: 'budget_test_tool',
       isDangerous: true,
     });
     if (request?.type !== 'confirmRequest') throw new Error('confirmation was not posted');

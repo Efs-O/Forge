@@ -37,7 +37,6 @@ import { applyToolCalls } from './transcriptMutations';
 import { mirrorLiveSessionAnswers } from './liveSessionMirror';
 import { extractToolDetail } from './toolSummary';
 import { freezeTurnContext, type TurnContextState } from './turnContext';
-import { latestPastedTerminalCommand } from './compactionLedger';
 import { terminalCommandTracker } from '../tools/TerminalCommandTracker';
 import { formatPromptCacheStats, readPromptCacheStats } from '../llm/promptCacheStats';
 import { getLogger } from '../util/logger';
@@ -213,7 +212,12 @@ export async function runModelTurn(
   // group activates mid-turn via `load_tool_group`, and its schemas have to
   // reach the request that immediately follows.
   const buildToolDefinitions = (): ToolDefinition[] => {
-    const hiddenLazyTools = hiddenLazyToolNames(conv.id, new Set(model.tools ?? []), isVisionModel);
+    const hiddenLazyTools = hiddenLazyToolNames(
+      conv.id,
+      new Set(model.tools ?? []),
+      isVisionModel,
+      new Set(model.tool_groups?.eager ?? []),
+    );
     const advertised = filterVisionGated(
       ctx.toolRegistry.definitions(allowed),
       isVisionModel,
@@ -246,20 +250,10 @@ export async function runModelTurn(
   // extended anyway. `items` is copied so a later in-place mutation of
   // conv.plan cannot reach back into this turn's prompt.
   const remoteChats = ctx.remoteReach?.(conv.id) ?? 0;
-  const pastedTerminalCommand = latestPastedTerminalCommand(conv.messages);
-  const terminalCommandResult = terminalCommandTracker.latestForConversation(conv.id);
   const userTerminalCommands = terminalCommandTracker.recentUserCommands();
-  const terminalCwd =
-    pastedTerminalCommand || terminalCommandResult || userTerminalCommands.length > 0
-      ? activeTerminalCwd()
-      : undefined;
+  const terminalCwd = userTerminalCommands.length > 0 ? activeTerminalCwd() : undefined;
   const turnContext: TurnContextState = {
     activeFile,
-    ...(terminalCommandResult
-      ? { terminalCommandResult }
-      : pastedTerminalCommand
-        ? { pastedTerminalCommand }
-        : {}),
     ...(userTerminalCommands.length > 0 ? { userTerminalCommands } : {}),
     ...(terminalCwd ? { activeTerminalCwd: terminalCwd } : {}),
     ...(conv.plan ? { plan: { items: [...conv.plan.items], updatedAt: conv.plan.updatedAt } } : {}),

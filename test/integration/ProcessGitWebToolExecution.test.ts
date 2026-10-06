@@ -4,7 +4,7 @@ import * as os from 'os';
 import * as path from 'path';
 import * as vscode from 'vscode';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { makeExecCommandTool, makeRunTerminalTool } from '../../src/tools/execTools';
+import { makeExecCommandTool } from '../../src/tools/execTools';
 import { makeWebFetchTool } from '../../src/tools/fetchTool';
 
 /**
@@ -70,17 +70,6 @@ describe('isolated process, Git, and web tool execution', () => {
       makeExecCommandTool().handler({ command: process.execPath, args: ['&&', 'bad'] }),
     ).rejects.toThrow('Shell operator');
   }, 15_000);
-
-  it('pastes terminal commands without executing them', async () => {
-    const sendText = vi.fn();
-    const show = vi.fn();
-    vi.spyOn(vscode.window, 'createTerminal').mockReturnValue({ sendText, show } as never);
-    await expect(
-      makeRunTerminalTool().handler({ command: 'echo fixture', cwd: '.' }),
-    ).resolves.toBe('Command pasted to terminal — press Enter to run.');
-    expect(show).toHaveBeenCalledWith(false);
-    expect(sendText).toHaveBeenCalledWith('echo fixture', false);
-  });
 
   it('executes every Git handler through CLI discovery, with no Git extension present', async () => {
     const gitRead = makeGitReadTool();

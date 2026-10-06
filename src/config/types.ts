@@ -85,6 +85,7 @@ export interface GroupConfig {
   max_output_tokens?: number;
   /** Tool rounds per sidebar turn for models in this group. See ModelConfig. */
   max_tool_rounds?: number;
+  tool_groups?: { eager: string[] };
   /** Tool-name allowlist for models in this group. */
   tools?: string[];
   /** Per-tool max invocations per turn for models in this group. */
@@ -103,6 +104,10 @@ export interface ProfileConfig {
   capabilities?: ('tool-call' | 'vision' | 'long-context')[];
   /** Tool rounds per sidebar turn. Set on `defaults` to cover every model. */
   max_tool_rounds?: number;
+}
+
+export interface DefaultsConfig extends ProfileConfig {
+  tool_groups?: { eager: string[] };
 }
 
 export interface ModelConfig {
@@ -246,6 +251,8 @@ export interface ModelConfig {
    * mid-refactor with the remaining edits unmade.
    */
   max_tool_rounds?: number;
+  /** Lazy native tool groups advertised from the first request. */
+  tool_groups?: { eager: string[] };
 }
 
 export interface LlamaServerConfig {
@@ -336,7 +343,7 @@ export interface ForgeConfig {
   /** Named shared config bundles ("boards") models opt into via `group`/`groups`. */
   groups?: Record<string, GroupConfig>;
   /** Shared request-time defaults applied beneath base facts and profiles (F6). */
-  defaults?: ProfileConfig;
+  defaults?: DefaultsConfig;
   /** Named request-time role presets (F6). Referenced via `model@profile`. */
   profiles?: Record<string, ProfileConfig>;
   /** Migration shim: old suffixed model name → `base@profile` (F6). */

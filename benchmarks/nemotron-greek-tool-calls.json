@@ -5,6 +5,6 @@
   {"id":"greek-write-file","prompt":"Γράψε ακριβώς το κείμενο γραμμή στο αρχείο out.txt.","expected_tool":"write_file","expected_args":{"path":"out.txt","content":"γραμμή\n"}},
   {"id":"greek-append-file","prompt":"Πρόσθεσε ακριβώς τη γραμμή τέλος στο seed.txt.","expected_tool":"append_file","expected_args":{"path":"seed.txt","content":"τέλος\n"}},
   {"id":"greek-edit-file","prompt":"Στο seed.txt αντικατάστησε το seed με έτοιμο.","expected_tool":"edit_file","expected_args":{"path":"seed.txt","old_text":"seed","new_text":"έτοιμο"}},
-  {"id":"greek-run-terminal","prompt":"Εκτέλεσε μόνο την εντολή echo forge με όριο 5 δευτερολέπτων.","expected_tool":"run_terminal","expected_args":{"command":"echo forge","timeout_seconds":5}},
+  {"id":"greek-shell","prompt":"Εκτέλεσε μόνο την εντολή echo forge με όριο 5000 χιλιοστών του δευτερολέπτου.","expected_tool":"shell","expected_args":{"command":"echo forge","timeout_ms":5000}},
   {"id":"greek-run-tests","prompt":"Τρέξε μόνο node --version με όριο 5 δευτερολέπτων.","expected_tool":"run_tests","expected_args":{"command":"node --version","timeout_seconds":5}}
 ]

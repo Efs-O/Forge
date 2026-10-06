@@ -58,6 +58,7 @@ export function extractToolDefinitions() {
     );
     visit(sourceFile, (node) => {
       if (!ts.isPropertyAssignment(node) || propertyName(node.name) !== 'definition') return;
+      if (findFactoryName(node) !== constructorName) return;
       const value = expressionToValue(node.initializer);
       if (!isToolDefinition(value)) return;
       const owner = ts.isObjectLiteralExpression(node.parent) ? node.parent : undefined;

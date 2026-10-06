@@ -98,7 +98,7 @@ describe('isolated file and directory tool execution', () => {
     // one without waiting on a process that prints nothing.
     expect(listed).toMatch(/\[file\] source\.txt \(11 B, \d+s ago\)/u);
     await makeEditFileTool().handler({
-      filepath: 'work/source.txt',
+      path: 'work/source.txt',
       old_str: 'alpha',
       new_str: 'first',
     });

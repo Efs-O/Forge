@@ -107,6 +107,14 @@ x_shared:
 
 defaults:
   max_tool_rounds: 1000
+  # Groups can be loaded on demand. Each eager group adds its tool schemas to
+  # every request, increasing the prompt's prefill cost. Groups are files
+  # (delete/move/append/structured edits), git (read/stage/commit/branch),
+  # code_intel (LSP actions/search), memory, background (stop/list/wait),
+  # agents (delegation/live sessions/jobs/notifications), media (image/video),
+  # editor_ui, computer_use, notebook, system, and halluscribe (history search).
+  tool_groups:
+    eager: []
   system_prompt: |
     You are Forge, an autonomous software-engineering agent operating inside VS Code.
 

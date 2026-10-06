@@ -67,6 +67,31 @@ const NATIVE_GROUP_BY_TOOL: ReadonlyMap<string, string> = new Map([
     (name) => [name, 'system'] as const,
   ),
   ...['read_notebook', 'edit_notebook_cell'].map((name) => [name, 'notebook'] as const),
+  ...[
+    'delete_file',
+    'move_file',
+    'create_directory',
+    'append_file',
+    'apply_line_edits',
+    'restore_file',
+  ].map((name) => [name, 'files'] as const),
+  ...['git_read', 'stage', 'commit', 'create_branch', 'switch_branch'].map(
+    (name) => [name, 'git'] as const,
+  ),
+  ...['code_intel', 'rename_symbol', 'apply_code_action', 'format_file', 'search_codebase'].map(
+    (name) => [name, 'code_intel'] as const,
+  ),
+  ...['remember', 'recall', 'list_memories', 'forget'].map((name) => [name, 'memory'] as const),
+  ...['stop_execution', 'list_executions', 'wait'].map((name) => [name, 'background'] as const),
+  ...[
+    'ask_live_session',
+    'tell_live_session',
+    'ask_local_agent',
+    'list_delegation_targets',
+    'manage_jobs',
+    'notify_user',
+  ].map((name) => [name, 'agents'] as const),
+  ['get_system_status', 'system'],
 ]);
 
 /** Tools actually registered or bridged in, per group. */
@@ -142,11 +167,16 @@ export function hiddenLazyToolNames(
   conversationId: string | undefined,
   eagerNames: ReadonlySet<string> = new Set(),
   isVisionModel = true,
+  eagerGroups: ReadonlySet<string> = new Set(),
 ): ReadonlySet<string> {
   const hidden = new Set<string>();
   for (const [group, members] of membersByGroup) {
     const unavailable = group === 'computer_use' && !isVisionModel;
-    if (!unavailable && conversationId !== undefined && isLazyGroupActive(conversationId, group))
+    if (
+      !unavailable &&
+      (eagerGroups.has(group) ||
+        (conversationId !== undefined && isLazyGroupActive(conversationId, group)))
+    )
       continue;
     for (const name of members) {
       if (!eagerNames.has(name) || unavailable) hidden.add(name);
