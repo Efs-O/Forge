@@ -79,7 +79,7 @@ const READ_ONLY_PS = new Set([
 ]);
 const READ_ONLY_BOTH = new Set(['rg', 'git', 'node', 'npm']);
 
-function parseCommand(command: string): ParsedCommand {
+function parseCommand(command: string, shell: ShellKind): ParsedCommand {
   const statements: string[][] = [[]];
   const separators: Array<'pipe' | 'other'> = [];
   let token = '';
@@ -112,7 +112,8 @@ function parseCommand(command: string): ParsedCommand {
     }
     if (quote === 'double') {
       if (char === '"') quote = undefined;
-      else if (char === '$' && next === '(') disqualifiesReadOnly = true;
+      else if ((char === '$' && next === '(') || (shell === 'bash' && char === '`'))
+        disqualifiesReadOnly = true;
       else token += char;
       continue;
     }
@@ -130,8 +131,12 @@ function parseCommand(command: string): ParsedCommand {
       continue;
     }
     if (char === '`') {
-      if (next === '(') disqualifiesReadOnly = true;
-      else quote = 'backtick';
+      // bash: command substitution, classified separately by nestedShellCommands.
+      if (shell === 'bash' || next === '(') disqualifiesReadOnly = true;
+      if (shell === 'bash') {
+        token += char;
+        continue;
+      } else quote = 'backtick';
       continue;
     }
     if (char === '$' && next === '(') {
@@ -194,6 +199,7 @@ function isReadOnly(tokens: readonly string[], shell: ShellKind): boolean {
     if (program === 'node' || program === 'npm')
       return args.length === 1 && args[0] === '--version';
     if (program === 'git') {
+      if (!gitArgsReadOnly(tokens.slice(1))) return false;
       const [subcommand, ...rest] = args;
       if (
         [
@@ -215,33 +221,85 @@ function isReadOnly(tokens: readonly string[], shell: ShellKind): boolean {
       if (subcommand === 'config') return rest[0] === '--get';
       return false;
     }
-    return true;
+    return unixArgsReadOnly(program, args, tokens.slice(1));
   }
   if (shell === 'bash') {
     if (!READ_ONLY_UNIX.has(program)) return false;
-    if (
-      program === 'find' &&
-      args.some((arg) => ['-delete', '-exec', '-execdir', '-ok'].includes(arg))
-    )
-      return false;
-    if (program === 'sed' && args.some((arg) => arg === '-i' || arg.startsWith('-i'))) return false;
-    return true;
+    return unixArgsReadOnly(program, args, tokens.slice(1));
   }
-  if (['foreach-object', 'where-object'].includes(program)) {
-    const source = tokens.slice(1).join(' ');
-    const blocks = [...source.matchAll(/\{([^{}]*)\}/gu)].map((match) => match[1] ?? '');
-    if (blocks.length === 0) return false;
-    return blocks.every((block) => {
-      if (/^\s*\$[\w_]+(?:\.[\w]+)*(?:\s|$)/u.test(block)) return true;
-      const nested = parseCommand(block);
-      return (
-        !nested.redirection &&
-        !nested.disqualifiesReadOnly &&
-        nested.statements.every((part) => isReadOnly(part, shell))
-      );
-    });
-  }
+  // Script-block cmdlets are read-only only with a block; the blocks themselves
+  // are checked by classifyShellCommand's nested pass (`% Delete` calls a method).
+  if (SCRIPT_BLOCK_PS.has(program)) return tokens.slice(1).some((token) => token.includes('{'));
   return READ_ONLY_PS.has(program);
+}
+
+const SCRIPT_BLOCK_PS = new Set(['foreach-object', 'where-object', '%', '?', 'foreach']);
+
+/** sed scripts that only print/delete lines or substitute without the `w`/`e` flags. */
+const SAFE_SED = /^(?:(?:\d+|\$)(?:,(?:\d+|\$))?[pd]|\d*p|s(.).*\1.*\1[gip\d]*)$/u;
+
+/** Arguments that make an otherwise read-only Unix program write files or run commands. */
+function unixArgsReadOnly(program: string, args: string[], raw: string[]): boolean {
+  switch (program) {
+    case 'find':
+      return !args.some((arg) =>
+        [
+          '-delete',
+          '-exec',
+          '-execdir',
+          '-ok',
+          '-okdir',
+          '-fprint',
+          '-fprint0',
+          '-fprintf',
+          '-fls',
+        ].includes(arg),
+      );
+    case 'sed': {
+      if (args.some((arg) => /^-[a-z]*i/u.test(arg) || arg.startsWith('--in-place'))) return false;
+      // Scripts follow -e; without -e the first operand is the script.
+      const scripts = raw.flatMap((arg, index) => (raw[index - 1] === '-e' ? [arg] : []));
+      if (scripts.length === 0) scripts.push(raw.find((arg) => !arg.startsWith('-')) ?? '');
+      return scripts.every((script) =>
+        script.split(';').every((part) => SAFE_SED.test(part.trim())),
+      );
+    }
+    case 'awk':
+      // `system()`, pipes and `print > file` run or write; comparisons like `$3 > 9` stay read-only.
+      return !raw.some((arg) => /system\s*\(|\||\bprintf?\b[^;}]*>|getline/u.test(arg));
+    case 'rg':
+      return !args.some((arg) => arg.startsWith('--pre'));
+    case 'sort':
+      return !args.some(
+        (arg) => arg === '-o' || arg.startsWith('--output') || /^-[a-z]*o/u.test(arg),
+      );
+    case 'uniq':
+      return raw.filter((arg) => !arg.startsWith('-')).length <= 1;
+    case 'date':
+      return !args.some((arg) => arg === '-s' || arg.startsWith('--set'));
+    default:
+      return true;
+  }
+}
+
+/** git flags that write a file or run a configured program (case-sensitive: `-O` is the pager). */
+function gitArgsReadOnly(raw: string[]): boolean {
+  return !raw.some(
+    (arg) =>
+      arg.startsWith('--output') ||
+      arg.startsWith('--open-files-in-pager') ||
+      arg.startsWith('-O') ||
+      arg === '--ext-diff',
+  );
+}
+
+/**
+ * A PowerShell block that is only an expression over `$` variables, such as
+ * `$_.Name -eq "node"`: no calls, assignments, pipes or nested blocks.
+ */
+function isPureExpression(block: string): boolean {
+  const unquoted = block.replace(/'[^']*'|"[^"$`]*"/gu, '""').trim();
+  return /^\$/u.test(unquoted) && !/[()=;|&{}[\]`]/u.test(unquoted);
 }
 
 function precedence(classification: ShellClass): number {
@@ -291,6 +349,17 @@ function nestedShellCommands(command: string, shell: ShellKind): string[] {
       escaped = false;
       continue;
     }
+    if (quote === '"' && char === '$' && next === '(') {
+      // `"$(...)"` still runs its command in both shells.
+      const block = findBalanced(command, index + 1, '(', ')', shell);
+      if (block) (nested.push(block.value), (index = block.end));
+      continue;
+    }
+    if (shell === 'bash' && char === '`' && quote !== "'") {
+      const end = command.indexOf('`', index + 1);
+      if (end > index) (nested.push(command.slice(index + 1, end)), (index = end));
+      continue;
+    }
     if (quote) {
       if (shell === 'bash' && char === '\\') escaped = true;
       else if (char === quote) quote = undefined;
@@ -300,6 +369,8 @@ function nestedShellCommands(command: string, shell: ShellKind): string[] {
       quote = char;
       continue;
     }
+    // bash: `${VAR}` and `{a,b}` expand words; only `{ cmd; }` groups commands.
+    if (shell === 'bash' && char === '{' && !/\s/u.test(next)) continue;
     let opener = char;
     let offset = index;
     if (shell !== 'bash' && char === '$' && next === '(') {
@@ -321,7 +392,7 @@ function nestedShellCommands(command: string, shell: ShellKind): string[] {
 }
 
 export function classifyShellCommand(command: string, shell: ShellKind): ShellClassification {
-  const parsed = parseCommand(command);
+  const parsed = parseCommand(command, shell);
   const rules = getBuiltinDenyList();
   const downloaders = new Set(['curl', 'wget', 'iwr', 'invoke-webrequest']);
   const shellPrograms = new Set(['sh', 'bash', 'iex', 'invoke-expression']);
@@ -341,11 +412,12 @@ export function classifyShellCommand(command: string, shell: ShellKind): ShellCl
   let strongest: ShellClassification = { classification: 'read_only' };
   const nestedCommands = nestedShellCommands(command, shell);
   for (const nestedCommand of nestedCommands) {
+    // A block that only compares `$_` properties stays read-only; any other
+    // nested command (a call, an assignment) ranks like a top-level one.
+    if (shell !== 'bash' && isPureExpression(nestedCommand)) continue;
     const nested = classifyShellCommand(nestedCommand, shell);
-    if (nested.classification === 'dangerous' || nested.classification === 'refused') {
-      if (precedence(nested.classification) > precedence(strongest.classification))
-        strongest = nested;
-    }
+    if (precedence(nested.classification) > precedence(strongest.classification))
+      strongest = nested;
   }
   for (const statement of parsed.statements) {
     const rule = rules.find((candidate) => candidate.match(statement));
