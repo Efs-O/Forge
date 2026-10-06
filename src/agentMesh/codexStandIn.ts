@@ -59,10 +59,12 @@ export function codexStandInNote(threadId: string | undefined): string {
 /** The same event, addressed to the user (VS Code, Telegram) rather than to the agent. */
 export function codexStandInUserNote(threadId: string | undefined): string {
   return threadId
-    ? `⚠️ Your Codex session was closed, so Forge answered for it headless. The answer is ` +
-        `in that session's history; reopening its window continues it.`
-    : `⚠️ Your Codex session was closed, so a separate Forge-owned Codex answered without ` +
-        `its context. Reopen that window and run \`forge.sh join codex\` there to reconnect it.`;
+    ? `⚠️ A message was routed to Codex, but the Codex session joined with \`forge.sh join codex\` ` +
+        `is not running, so Forge resumed that session headless to answer it. The answer is in ` +
+        `that session's history; reopening its window continues it.`
+    : `⚠️ A message was routed to Codex, but the Codex session joined with \`forge.sh join codex\` ` +
+        `is not running, so a separate Forge-owned Codex answered without its context. Reopen ` +
+        `that window and run \`forge.sh join codex\` there to reconnect it.`;
 }
 
 export interface CodexStandInDeps {

@@ -65,10 +65,12 @@ export function claudeStandInNote(resumeId: string | undefined): string {
 /** The same event, addressed to the user (VS Code, Telegram) rather than to the agent. */
 export function claudeStandInUserNote(resumeId: string | undefined): string {
   return resumeId
-    ? `⚠️ Your Claude session was closed, so Forge answered for it headless. The answer is ` +
-        `in that session's history; reopening its panel continues it.`
-    : `⚠️ Your Claude session was closed, so a separate Forge-owned Claude answered without ` +
-        `its context. Reopen that panel and run \`forge.sh join claude\` there to reconnect it.`;
+    ? `⚠️ A message was routed to Claude, but the Claude session joined with \`forge.sh join claude\` ` +
+        `is not running, so Forge resumed that session headless to answer it. The answer is in ` +
+        `that session's history; reopening its panel continues it.`
+    : `⚠️ A message was routed to Claude, but the Claude session joined with \`forge.sh join claude\` ` +
+        `is not running, so a separate Forge-owned Claude answered without its context. Reopen ` +
+        `that panel and run \`forge.sh join claude\` there to reconnect it.`;
 }
 
 export class JoinedClaude {
