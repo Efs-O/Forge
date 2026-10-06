@@ -1,5 +1,18 @@
 # Forge — Recent Changes
 
+## 0.16.89
+
+### Telegram bubbles: each text block gets its own, status rides the newest
+
+- A new bubble no longer flashes the previous bubble's text before it shows its own. Each text block streams into a bubble of its own, and an edit meant for an older bubble can only land on that bubble.
+- The separate status message is gone. The newest bubble carries the status as a footer (`⏳ Running X… · 1 min · 3 tool calls · last activity 1 s ago`) with the ⏹ Stop button. An older bubble keeps only its words. A warning or image sent mid-turn moves the footer below it. Long text splits into a new bubble before Telegram's limit. When the turn ends, every footer and keyboard is removed.
+- Edits are limited to about one per second per chat. On a rate limit, Forge waits as Telegram asks and then sends the newest text, never the refused text.
+- Telegram's native draft Stop and the draft preview it belonged to have been removed. Use the bubble's ⏹ Stop or `/stop`.
+
+### Telegram session questions
+
+- A question from a live session can be answered by replying to it directly. Images a remote turn produces are shown live. `/help` notes are grouped under their sections.
+
 ## 0.16.88
 
 ### Telegram answers from live sessions return to the same chat
