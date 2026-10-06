@@ -301,3 +301,15 @@ describe('Telegram inbound mapping — status bubble Stop button', () => {
     expect(telegramUpdateToEvent(parsed)?.kind).not.toBe('stop_action');
   });
 });
+
+/** A reply to a session question is how a phone answers it without the question id. */
+describe('Telegram inbound mapping — replies', () => {
+  it('keeps the replied-to message id on a text message, and omits it otherwise', () => {
+    const reply = telegramUpdateToEvent(
+      TelegramUpdateSchema.parse(message({ text: 'yes', reply_to_message: { message_id: 7 } })),
+    );
+    expect(reply).toMatchObject({ kind: 'text', text: 'yes', replyToMessageId: '7' });
+    const plain = telegramUpdateToEvent(TelegramUpdateSchema.parse(message({ text: 'yes' })));
+    expect(plain).not.toHaveProperty('replyToMessageId');
+  });
+});

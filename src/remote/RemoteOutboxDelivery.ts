@@ -4,6 +4,7 @@ import type { RemoteAuth } from './RemoteAuth';
 import type { RemoteSpeechDelivery } from './RemoteSpeechDelivery';
 import type { RemoteControllerOptions } from './remoteControllerOptions';
 import type { CommandCleanupScheduler } from './CommandCleanupScheduler';
+import { recordSessionQuestionMessages } from './RemoteSessionBridge';
 
 const MAX_ATTEMPTS = 10;
 type CanDeliver = (chatId: string) => boolean | Promise<boolean>;
@@ -112,6 +113,10 @@ export class RemoteOutboxDelivery {
         );
         return;
       }
+      // Same rule: a failed record only costs reply-to-answer; /answer <id> still works.
+      await recordSessionQuestionMessages(this.store, item.id, sentIds ?? []).catch((err) =>
+        this.onError?.(`Forge could not record a session question's messages: ${String(err)}`),
+      );
       // Best-effort, and OUTSIDE the try that owns delivery state: an
       // already-delivered item must never be requeued because arming its
       // ephemeral cleanup failed.

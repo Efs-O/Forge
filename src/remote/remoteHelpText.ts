@@ -46,7 +46,7 @@ Queue: /drop <n|all> · /queue
 
 Sessions: /answer <question-id> <text> · /claude <msg> · /codex <msg> · /copilot <msg> · /tell <agent> <msg>
 
-• /claude, /codex and /copilot ask a live session. Forge acknowledges the request and sends that session's final answer here. The session may send updates or ask you a question; answer with /answer <question-id> <text>. /tell <agent> <msg> remains a one-way note with no answer expected
+• /claude, /codex and /copilot ask a live session. Forge acknowledges the request and sends that session's final answer here. The session may send updates or ask you a question; answer it by replying to the question message, or with /answer <question-id> <text>. /tell <agent> <msg> remains a one-way note with no answer expected
 
 Models: /model [n-or-name] · /restart · /unload · /unloadall
 

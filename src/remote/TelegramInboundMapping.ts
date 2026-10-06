@@ -332,6 +332,9 @@ export function telegramUpdateToEvent(
       ...(message.chat.title ? { chatTitle: message.chat.title } : {}),
       text: message.text ?? message.caption ?? '',
       ...(attachment ? { attachments: [attachment] } : {}),
+      ...(message.reply_to_message
+        ? { replyToMessageId: String(message.reply_to_message.message_id) }
+        : {}),
     };
   }
   const callback = update.callback_query;

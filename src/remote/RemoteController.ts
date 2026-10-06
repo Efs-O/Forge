@@ -34,7 +34,7 @@ import {
   isRemoteCommand,
   type RemotePromptAdmissionDeps,
 } from './RemotePromptAdmission';
-import { admitRemoteSessionCommand } from './remoteSessionAdmission';
+import { admitRemoteSessionCommand, admitRemoteSessionReply } from './remoteSessionAdmission';
 import { startRemoteSessionRecovery } from './RemoteSessionRecovery';
 import { drainRemoteQueue } from './RemoteQueueDrain';
 import { RemotePendingPrompt } from './RemotePendingPrompt';
@@ -359,7 +359,9 @@ export class RemoteController {
     if (event.text.length > this.options.maxMessageChars) {
       return ephemeralRejection('message exceeds configured limit');
     }
-    // An outstanding question owns the next plain text; commands stay available.
+    // A reply to a session question answers it; else an open question owns plain text.
+    const reply = await admitRemoteSessionReply(event, this.promptDeps, this.sendTransientMessage);
+    if (reply) return reply;
     if (!event.text.startsWith('/') && this.questions.answerText(event.chatId, event.text)) {
       this.auth.touch(event);
       return { kind: 'handled' };

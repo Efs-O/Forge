@@ -1,5 +1,6 @@
 import { useCallback, useState } from 'react';
 import type { AttachmentData } from '../../../src/sidebar/messageBridge';
+import type { MessageAttachment } from '../messageOps';
 import {
   attachmentKind,
   attachmentLimitBytes,
@@ -29,6 +30,19 @@ export function attachmentBytes(item: AttachmentData): number {
     return Math.floor((item.data.length * 3) / 4) - padding;
   }
   return new Blob([item.data]).size;
+}
+
+/**
+ * Bubble thumbnails from bytes still in hand, so the image appears with the
+ * prompt rather than after the host has stored it and synced back.
+ */
+export function toMessageAttachments(items: readonly AttachmentData[]): MessageAttachment[] {
+  return items.map((item) => ({
+    name: item.name,
+    mediaType: item.mediaType,
+    bytes: attachmentBytes(item),
+    src: `data:${item.mediaType};base64,${item.data}`,
+  }));
 }
 
 function mib(bytes: number): string {

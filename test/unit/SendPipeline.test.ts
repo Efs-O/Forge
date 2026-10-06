@@ -120,6 +120,18 @@ describe('SendPipeline.send', () => {
     expect(echo).toBeLessThan(started);
   });
 
+  it('echoes the files sent with a remote prompt, so the bubble shows them', async () => {
+    const h = harness();
+    const file = { name: 'notes.txt', mediaType: 'text/plain', data: 'hi' };
+    await h.pipeline.send('look at this', [file], 'conv-1', undefined, { echoPrompt: true });
+    // The webview keeps its local bubble while the turn streams, so an echo
+    // without the files left a captioned photo looking like text alone.
+    expect(h.posted.find((msg) => msg.type === 'userPrompt')).toMatchObject({
+      text: 'look at this',
+      attachments: [file],
+    });
+  });
+
   it('does not echo a prompt the webview typed itself', async () => {
     const h = harness();
     await h.pipeline.send('typed here');

@@ -2,7 +2,7 @@ import { randomUUID } from 'crypto';
 import type { RemoteOutboxRecord } from './types';
 import type { RemoteStoreState } from './RemoteStoreSchemas';
 
-/** Add a host notice to the durable outbox in the store's locked draft. */
+/** Add a host notice to the durable outbox in the store's locked draft; returns its id. */
 export function appendHostNotification(
   draft: RemoteStoreState,
   channel: RemoteOutboxRecord['channel'],
@@ -10,9 +10,10 @@ export function appendHostNotification(
   text: string,
   ephemeral = false,
   requestId = `host-${randomUUID()}`,
-): void {
+): string {
+  const id = randomUUID();
   draft.outbox.push({
-    id: randomUUID(),
+    id,
     requestId,
     channel,
     chatId,
@@ -22,4 +23,5 @@ export function appendHostNotification(
     updatedAt: Date.now(),
     ...(ephemeral ? { ephemeral: true } : {}),
   });
+  return id;
 }

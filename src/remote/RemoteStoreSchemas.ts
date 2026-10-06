@@ -181,6 +181,10 @@ export const RemoteStateSchema = z.object({
         chatId: z.string(),
         expiresAt: z.number().int().nonnegative(),
         answerText: z.string().optional(),
+        /** The outbox item carrying the question; absent on records written before replies. */
+        outboxId: z.string().optional(),
+        /** Provider message ids the question arrived as; a reply to one answers it. */
+        messageIds: z.array(z.string()).max(20).optional(),
       }),
     )
     .default([]),

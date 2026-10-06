@@ -223,7 +223,12 @@ export class SendPipeline {
     // transcript reads in the order it happened, and only when the caller asks
     // -- a webview send would otherwise render its prompt twice.
     if (metadata?.echoPrompt) {
-      deps.post({ type: 'userPrompt', text, conversationId: conv.id });
+      deps.post({
+        type: 'userPrompt',
+        text,
+        conversationId: conv.id,
+        ...(attachments?.length ? { attachments } : {}),
+      });
     }
     deps.post({ type: 'generationStarted', conversationId: conv.id });
     // Saved before the turn, so the reference is already on the user message the

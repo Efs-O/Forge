@@ -22,6 +22,7 @@ import { TranscriptPanes } from './components/TranscriptPanes';
 import { CheckpointBar } from './components/CheckpointBar';
 import { diffStats } from './components/DiffBlock';
 import { InputRow } from './components/InputRow';
+import { toMessageAttachments } from './components/useAttachments';
 import { ConfirmationDialog } from './components/ConfirmationDialog';
 import { QuestionDialog } from './components/QuestionDialog';
 import { useAgentDialogs } from './useAgentDialogs';
@@ -103,7 +104,14 @@ export function App(): React.ReactElement {
           // performs the same stale-diff and stale-error stripping a typed one
           // does -- the bubble is identical because the action is.
           clearTellPrompts(msg.conversationId);
-          dispatch({ type: 'USER_SEND', text: msg.text, convId: msg.conversationId });
+          dispatch({
+            type: 'USER_SEND',
+            text: msg.text,
+            convId: msg.conversationId,
+            ...(msg.attachments?.length
+              ? { attachments: toMessageAttachments(msg.attachments) }
+              : {}),
+          });
           break;
         case 'token':
           dispatch({ type: 'TOKEN', text: msg.text, convId: msg.conversationId });

@@ -60,6 +60,17 @@ export async function remoteSessionAction(input: {
       refusal = 'a question from this exchange is already waiting for an answer';
       return;
     }
+    const outboxId = appendHostNotification(
+      draft,
+      current.channel,
+      current.chatId,
+      questionId
+        ? `${from} asks: ${text}\n\nReply to this message with your answer ` +
+            `(or send /answer ${questionId} <your answer>).`
+        : `${from}: ${text}`,
+      false,
+      exchangeId,
+    );
     if (questionId) {
       draft.sessionQuestions.push({
         id: questionId,
@@ -67,18 +78,9 @@ export async function remoteSessionAction(input: {
         channel: current.channel,
         chatId: current.chatId,
         expiresAt: Date.now() + QUESTION_MS,
+        outboxId,
       });
     }
-    appendHostNotification(
-      draft,
-      current.channel,
-      current.chatId,
-      questionId
-        ? `${from} asks: ${text}\n\nReply: /answer ${questionId} <your answer>`
-        : `${from}: ${text}`,
-      false,
-      exchangeId,
-    );
     accepted = true;
   });
   if (!accepted) return { kind: 'refused', error: refusal };
@@ -115,6 +117,38 @@ export async function answerRemoteSessionQuestion(
     if (current && !current.answerText) current.answerText = saved.text;
   });
   return saved.fresh ? 'answered' : 'duplicate';
+}
+
+/** The question in this chat that was delivered as provider message `replyTo`. */
+export function sessionQuestionForReply(
+  store: RemoteRequestStore,
+  channel: RemoteInboundEvent['channel'],
+  chatId: string,
+  replyTo: string,
+): string | undefined {
+  return store.contactRead(
+    (state) =>
+      state.sessionQuestions.find(
+        (item) =>
+          item.channel === channel && item.chatId === chatId && item.messageIds?.includes(replyTo),
+      )?.id,
+  );
+}
+
+/** Record the provider messages a question was delivered as, so replying to one answers it. */
+export async function recordSessionQuestionMessages(
+  store: RemoteRequestStore,
+  outboxId: string,
+  messageIds: readonly string[],
+): Promise<void> {
+  const carries = (item: { outboxId?: string | undefined }): boolean => item.outboxId === outboxId;
+  // Read first: every delivered notice passes through here, and only questions need a write.
+  if (messageIds.length === 0 || !store.contactRead((s) => s.sessionQuestions.some(carries)))
+    return;
+  await store.contactMutate((draft) => {
+    const question = draft.sessionQuestions.find(carries);
+    if (question) question.messageIds = messageIds.slice(0, 20);
+  });
 }
 
 export function remoteSessionAnswerPath(questionId: string, busRoot = busPaths().root): string {

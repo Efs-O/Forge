@@ -1,8 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import type { AttachmentData, SessionSyncMsg } from '../../src/sidebar/messageBridge';
 import type { Action } from './reducer';
-import { attachmentBytes } from './components/useAttachments';
-import type { MessageAttachment } from './messageOps';
+import { toMessageAttachments } from './components/useAttachments';
 import { vscode } from './vscode';
 
 export interface QueuedPrompt {
@@ -42,19 +41,11 @@ export function usePendingPrompts({
   const postPrompt = useCallback(
     (prompt: QueuedPrompt) => {
       if (!prompt.tell) {
-        // The bytes are in hand right now, so the thumbnail appears with the
-        // bubble rather than after the host has written the file and synced back.
-        const attachments: MessageAttachment[] = prompt.attachments.map((attachment) => ({
-          name: attachment.name,
-          mediaType: attachment.mediaType,
-          bytes: attachmentBytes(attachment),
-          src: `data:${attachment.mediaType};base64,${attachment.data}`,
-        }));
         dispatch({
           type: 'USER_SEND',
           text: prompt.text,
           convId: prompt.conversationId,
-          attachments,
+          attachments: toMessageAttachments(prompt.attachments),
         });
       }
       vscode.postMessage({

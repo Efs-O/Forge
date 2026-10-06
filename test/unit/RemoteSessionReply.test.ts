@@ -5,8 +5,9 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import { setBoardContext, setMeshOrchestrator } from '../../src/agentMesh/meshContext';
 import type { MeshOrchestrator } from '../../src/agentMesh/meshOrchestrator';
 import { askRemoteSession, waitForRemoteVerdict } from '../../src/remote/RemoteSessionAsk';
-import { remoteSessionAction, answerRemoteSessionQuestion, remoteSessionAnswerPath } from '../../src/remote/RemoteSessionBridge';
-import { admitRemoteSessionCommand } from '../../src/remote/remoteSessionAdmission';
+import { remoteSessionAction, answerRemoteSessionQuestion, remoteSessionAnswerPath, sessionQuestionForReply } from '../../src/remote/RemoteSessionBridge';
+import { admitRemoteSessionCommand, admitRemoteSessionReply } from '../../src/remote/remoteSessionAdmission';
+import { RemoteOutboxDelivery } from '../../src/remote/RemoteOutboxDelivery';
 import { FakeRemoteChannel } from '../../src/remote/FakeRemoteChannel';
 import { drainRemoteQueue, type RemoteQueueDrainDeps } from '../../src/remote/RemoteQueueDrain';
 import { RemoteAgentProgress, CLOCK_INTERVAL_MS } from '../../src/remote/RemoteAgentProgress';
@@ -113,6 +114,37 @@ describe('Telegram session reply route', () => {
     await expect(fs.readFile(remoteSessionAnswerPath(asked.questionId, dir), 'utf8')).resolves.toBe('src/a.ts');
     await expect(answerRemoteSessionQuestion(store, 'fake', 'chat-a', asked.questionId, 'different', dir)).resolves.toBe('duplicate');
     expect(kick).toHaveBeenCalledTimes(2);
+  });
+
+  it('answers a question by a reply to the message it was delivered as', async () => {
+    const { store } = await fixture();
+    const id = '8e395649-705e-47f9-b499-03a36e908f52';
+    await store.enqueue(request(id));
+    const auth = { canDeliver: async () => true } as never;
+    const asked = await remoteSessionAction({ from: 'codex', exchangeId: id, action: 'ask', text: 'Keep the shim?', store, auth, available: () => true, kick: vi.fn() });
+    if (asked.kind !== 'asked') throw new Error('question was not accepted');
+    const channel = new FakeRemoteChannel();
+    const delivery = new RemoteOutboxDelivery(channel, store, 4000, new AbortController().signal, 0);
+    delivery.start();
+    await vi.waitFor(() => expect(sessionQuestionForReply(store, 'fake', 'chat-a', 'sent-1')).toBe(asked.questionId));
+    await delivery.stop();
+    expect(channel.sent[0]!.text).toContain('Reply to this message with your answer');
+    // Another chat, another message, or a command never resolve to the question.
+    expect(sessionQuestionForReply(store, 'fake', 'other-chat', 'sent-1')).toBeUndefined();
+    expect(sessionQuestionForReply(store, 'fake', 'chat-a', 'sent-9')).toBeUndefined();
+    const event = {
+      kind: 'text', channel: 'fake', chatId: 'chat-a', senderId: 'owner',
+      providerMessageId: 'm2', chatType: 'private', receivedAt: Date.now(),
+      text: 'yes', replyToMessageId: 'sent-9',
+    } as Extract<RemoteInboundEvent, { kind: 'text' }>;
+    const deps = { store } as never;
+    const ack = vi.fn(async () => undefined);
+    await expect(admitRemoteSessionReply(event, deps, ack)).resolves.toBeUndefined();
+    await expect(admitRemoteSessionReply({ ...event, replyToMessageId: 'sent-1', text: '/status' }, deps, ack)).resolves.toBeUndefined();
+    await expect(
+      admitRemoteSessionReply({ ...event, replyToMessageId: 'sent-1', attachments: [{ name: 'a.jpg', mediaType: 'image/jpeg', data: 'eA==' }] }, deps, ack),
+    ).resolves.toMatchObject({ kind: 'rejected' });
+    expect(ack).not.toHaveBeenCalled();
   });
 
   it.each(['claude', 'codex', 'copilot'] as const)(

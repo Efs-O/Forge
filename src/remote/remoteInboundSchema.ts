@@ -39,6 +39,8 @@ export const RemoteInboundEventSchema = z.discriminatedUnion('kind', [
     kind: z.literal('text'),
     text: z.string(),
     attachments: z.array(RemoteInboundAttachmentSchema).max(10).optional(),
+    /** Set when the message replies to another; a reply to a session question answers it. */
+    replyToMessageId: z.string().min(1).max(256).optional(),
   }),
   /**
    * A voice note. Deliberately NOT a `text` event with an audio attachment:
