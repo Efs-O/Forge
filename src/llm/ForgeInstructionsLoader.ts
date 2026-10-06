@@ -28,10 +28,8 @@ Fill in the blanks below; delete any rule that does not fit this project.
 
 ## How to work efficiently
 - Every response is a round, and each round costs seconds before the first token. Put calls that do not depend on each other (reads, searches, listings) in ONE response. Read the file you need instead of listing its folder first.
-- Do not re-check what a tool result already confirmed: a write that returned success was written, a delete that returned success is gone.
 - A refusal is an answer, not an obstacle. Read its message: if it names an alternative, use it; if a path or command is refused, another spelling or a script that does the same thing is not the fix. Stop and ask the user.
 - Waiting on a long command: run it in the background and wait once, for as long as it needs, instead of polling in short steps. Ask only for the output you need (the tail, or one stream).
-- A finished result that needs no answer is a message, not a question: a question blocks you until someone replies.
 
 ## Before calling a change done
 - Run the full gate above after the last edit and report its exact result. A subset of tests is not the gate.

@@ -217,6 +217,26 @@ describe('exec_command safety policy', () => {
     expect(JSON.parse(repeated as string).stdout).toBe('');
   });
 
+  it('monitor_execution keeps the tail_lines a background job was started with', async () => {
+    // A live CI run started with tail_lines 200 came back as its first 16,000
+    // characters, and the agent paged twice to reach the summary at the end.
+    const start = await makeExecCommandTool().handler({
+      command: process.execPath,
+      args: ['-e', "for (let i = 1; i <= 3000; i++) console.log('line ' + i)"],
+      cwd: process.cwd(),
+      background: true,
+      tail_lines: 2,
+    });
+    const started = JSON.parse(start as string) as { execution_id: string };
+    const result = await makeMonitorExecutionTool().handler({
+      execution_id: started.execution_id,
+      wait_ms: 5_000,
+    });
+    const observed = JSON.parse(result as string) as { status: string; stdout: string };
+    expect(observed.status).toBe('completed');
+    expect(observed.stdout.trim().split(/\r?\n/u)).toEqual(['line 2999', 'line 3000']);
+  });
+
   it('reports an unknown execution when stop is requested', async () => {
     await expect(
       makeStopExecutionTool().handler({ execution_id: 'exec-does-not-exist' }),

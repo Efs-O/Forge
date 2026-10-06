@@ -276,6 +276,7 @@ export function makeExecCommandTool(
             cwd,
             timeoutMs: requestedTimeoutMs,
             env: childEnv,
+            outputOptions,
             ...(showWindow ? { showWindow: true } : {}),
             ...(notifyOnExit ? { notifyConversationId: context!.conversationId! } : {}),
           });

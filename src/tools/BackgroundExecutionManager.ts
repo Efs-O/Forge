@@ -3,6 +3,7 @@ import { spawn, type ChildProcessByStdio } from 'child_process';
 import type { Readable } from 'stream';
 import { terminateCliProcessTree } from '../agents/cliProcess';
 import { normalizeSpawnCwd } from '../util/processSpawn';
+import type { ExecOutputOptions } from './execHelpers';
 
 export const MAX_BACKGROUND_OUTPUT_CHARS = 200_000;
 export const MAX_BACKGROUND_EXECUTIONS = 32;
@@ -31,6 +32,7 @@ interface BackgroundExecution {
   timeoutTimer: NodeJS.Timeout | undefined;
   readonly waiters: Set<() => void>;
   readonly notifyConversationId: string | undefined;
+  readonly outputOptions: ExecOutputOptions | undefined;
   terminalObserved: boolean;
 }
 
@@ -81,6 +83,8 @@ export interface BackgroundExecutionObservation {
   /** Characters between the caller's cursor and the window — lost for good. */
   stdoutDropped: number;
   stderrDropped: number;
+  /** The output options exec_command started the job with, if any. */
+  outputOptions: ExecOutputOptions | undefined;
 }
 
 export interface BackgroundExecutionStartOptions {
@@ -112,6 +116,13 @@ export interface BackgroundExecutionStartOptions {
    * after starting its GUI app leaves that app untracked and unstoppable here.
    */
   showWindow?: boolean;
+  /**
+   * exec_command's output options (tail_lines and so on). monitor_execution
+   * applies them when its own call names none: CI started with tail_lines 200
+   * used to come back as its first 16,000 characters, and the agent paged twice
+   * to reach the test counts at the end.
+   */
+  outputOptions?: ExecOutputOptions;
 }
 
 export interface BackgroundExecutionExitNotice {
@@ -186,6 +197,7 @@ export class BackgroundExecutionManager {
       timeoutTimer: undefined,
       waiters: new Set(),
       notifyConversationId: options.notifyConversationId,
+      outputOptions: options.outputOptions,
       terminalObserved: false,
     };
     this.executions.set(execution.id, execution);
@@ -384,6 +396,7 @@ export class BackgroundExecutionManager {
       stderrOldest: execution.stderrBase,
       stdoutDropped: stdout.dropped,
       stderrDropped: stderr.dropped,
+      outputOptions: execution.outputOptions,
     };
   }
 

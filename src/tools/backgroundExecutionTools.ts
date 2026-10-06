@@ -80,7 +80,7 @@ export function makeMonitorExecutionTool(): RegisteredTool {
         throw new Error('monitor_execution: wait_ms must be a non-negative integer.');
       }
       const waitMs = Math.min(requestedWaitMs, MAX_MONITOR_WAIT_MS);
-      const outputOptions = parseExecOutputOptions(args);
+      const requested = parseExecOutputOptions(args);
       // Measured, not requested. The wait resolves the moment the process
       // finishes or the turn is cancelled, so echoing wait_ms back reported a
       // full-length wait for a call that returned in a fraction of it.
@@ -95,7 +95,7 @@ export function makeMonitorExecutionTool(): RegisteredTool {
       const formatted = formatBackgroundObservation(
         observation,
         Date.now() - startedWaitingAt,
-        outputOptions,
+        namesOutputOptions(args) ? requested : (observation.outputOptions ?? requested),
         waitMs,
       );
       if (requestedWaitMs <= MAX_MONITOR_WAIT_MS) return formatted;
@@ -330,6 +330,13 @@ function shapeBackgroundOutput(
     truncated: consumed.length < text.length,
     nextCursor: start + consumed.length,
   };
+}
+
+/** True when a monitor call shapes its own output instead of inheriting the start's. */
+function namesOutputOptions(args: Record<string, unknown>): boolean {
+  return ['head_lines', 'tail_lines', 'max_output_chars', 'output_stream'].some(
+    (key) => args[key] !== undefined,
+  );
 }
 
 function splitLines(text: string): string[] {
