@@ -2,6 +2,11 @@
 
 ## 0.16.90
 
+### A new install can run builds and tests
+
+- The starter config a new install writes now turns on command execution (`exec.terminal`, `exec.headless`), file deletes and git writes. A coding agent that cannot run `npm test` was crippled out of the box. Every such action still asks first unless `/clanker` is on. Existing configs are unchanged.
+- Web search, fetch, the browser and desktop tools, shell scripts and CLI-agent delegation stay off until you enable them: they need a key, reach the network, control your machine, or spend another subscription.
+
 ### `generate_image` can edit a picture you give it
 
 - `reference_paths` (1-4 image paths) conditions a local render on those pictures — "make this sketch a 3D render", "keep this character, change the pose". This needs `image_generation.backends.<name>.vision_encoder` pointing at the mmproj; without it the call is refused with that setting named and a cloud backend offered instead.

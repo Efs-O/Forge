@@ -7,11 +7,14 @@ export interface StarterLlamaCppModel {
   suggestion: ModelSuggestion;
 }
 
+// A coding agent needs to run builds and tests, so a new install can; every
+// such action still goes through the confirmation gate. Search, fetch,
+// browser, desktop, shell scripts and delegation stay opt-in.
 const DEFAULT_PERMISSIONS: NonNullable<ForgeConfig['permissions']> = {
-  fs: { read: true, write: true, delete: false },
+  fs: { read: true, write: true, delete: true },
   net: { search: false, fetch: false },
-  exec: { terminal: false, headless: false },
-  git: { read: true, write: false },
+  exec: { terminal: true, headless: true },
+  git: { read: true, write: true },
 };
 
 /** Builds a schema-valid starter config for selected direct llama.cpp models. */

@@ -10,7 +10,9 @@ models:
     num_ctx: 32768
 
 permissions:
-  fs: { read: true, write: true, delete: false }
+  # A coding agent needs to run builds and tests. Every write, delete, command
+  # and git action still asks for confirmation unless /clanker is on.
+  fs: { read: true, write: true, delete: true }
   net: { search: false, fetch: false }
-  exec: { terminal: false, headless: false }
-  git: { read: true, write: false }
+  exec: { terminal: true, headless: true }
+  git: { read: true, write: true }

@@ -718,16 +718,19 @@ what each one does and does not cover:
 - **A best-effort command denylist** for destructive git and shell operations.
   It is pattern-matching, not a sandbox; interpreters that were never banned,
   such as `node -e` and `python -c`, can already do what a shell script can.
-- **Deny-by-default tool permissions** you opt out of in `config.yaml`.
+- **Tool permissions in `config.yaml`.** A new install's starter config grants
+  file edits and deletes, command execution and git writes, each behind the
+  confirmation gate above. Web search, fetch, the browser and desktop tools,
+  shell scripts and CLI-agent delegation stay off until you turn them on.
 - **An SSRF-guarded, GET-only fetch** and no outbound traffic beyond the
   endpoints you configure.
 
 None of this makes an agent safe to point at work you cannot afford to lose.
 A model can misread an instruction, a path can resolve somewhere you did not
 expect, and content fetched from the web or read out of a repository can carry
-prompt injection that redirects the agent. Granting `exec.headless`,
-`fs.delete`, or `git.write` hands real capability to a process that will
-sometimes be wrong. **Use version control, commit before large agent runs, and
+prompt injection that redirects the agent. `exec.headless`, `fs.delete` and
+`git.write`, which the starter config turns on, hand real capability to a
+process that will sometimes be wrong. **Use version control, commit before large agent runs, and
 keep backups of anything that matters.**
 
 ## Privacy
