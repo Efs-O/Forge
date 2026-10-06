@@ -115,20 +115,16 @@ interface RigOptions {
 
 function rig(options: RigOptions = {}) {
   const config = options.config ?? localConfig();
-  const job = vi.fn(
-    options.job ?? (async (request: SdcppJobRequest) => jobResult(request.seed)),
-  );
-  const generateLocal = vi.fn(
-    async (request: SdcppImageRequest & { seed?: () => number }) => ({
-      bytes: PNG,
-      mime: 'image/png',
-      // The shipped sync path receives a seed thunk; echo it so the result's
-      // reported seed is the one that was actually asked for.
-      seed: request.seed ? request.seed() : 1111,
-      width: 1024,
-      height: 1024,
-    }),
-  );
+  const job = vi.fn(options.job ?? (async (request: SdcppJobRequest) => jobResult(request.seed)));
+  const generateLocal = vi.fn(async (request: SdcppImageRequest & { seed?: () => number }) => ({
+    bytes: PNG,
+    mime: 'image/png',
+    // The shipped sync path receives a seed thunk; echo it so the result's
+    // reported seed is the one that was actually asked for.
+    seed: request.seed ? request.seed() : 1111,
+    width: 1024,
+    height: 1024,
+  }));
   const ffmpeg = fakeFfmpeg();
   const spawns: string[][] = [];
   const server = {
@@ -205,21 +201,28 @@ describe('reference_paths at the tool layer (A2, A8, A15, A22, A26)', () => {
     expect(request.referenceImages).toHaveLength(1);
     expect(request.width).toBe(1328);
     expect(request.height).toBe(1328);
-    expect(result).toContain('Rendered locally through img_gen(ref_images) with 1 reference image(s).');
+    expect(result).toContain(
+      'Rendered locally through img_gen(ref_images) with 1 reference image(s).',
+    );
   });
 
   it('reports the downscale it performed, so a resized reference is never silent (A8, A26)', async () => {
     const { tool } = rig();
     const reference = writeReference('sketch.png');
     const result = await tool.handler({ prompt: 'x', reference_paths: [reference] }, noSnapshot);
-    expect(result).toContain('reference sketch.png: 1280x1253 downscaled to 768x736 (long edge cap)');
+    expect(result).toContain(
+      'reference sketch.png: 1280x1253 downscaled to 768x736 (long edge cap)',
+    );
   });
 
   it('de-duplicates reference paths at the tool layer and says so (A24)', async () => {
     const { tool, job } = rig();
     const reference = writeReference('sketch.png');
+    // Another casing is the same file only on Windows; on Linux it is a
+    // different (missing) file, so repeat the exact path there.
+    const respelled = process.platform === 'win32' ? reference.toUpperCase() : reference;
     const result = await tool.handler(
-      { prompt: 'x', reference_paths: [reference, reference.toUpperCase(), reference] },
+      { prompt: 'x', reference_paths: [reference, respelled, reference] },
       noSnapshot,
     );
     expect((job.mock.calls[0]?.[0] as SdcppJobRequest).referenceImages).toHaveLength(1);

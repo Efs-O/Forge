@@ -129,6 +129,9 @@ function request(overrides: Partial<SdcppJobRequest> = {}): SdcppJobRequest {
     referenceImages: [PNG.toString('base64')],
     alternatives: ['grok-imagine'],
     fetchImpl: fetchFor({}),
+    // Never the real nvidia-smi: the ubuntu runner has none, and on a dev box
+    // the result would hang on how busy the real card happens to be.
+    probe: async () => [gpu(0)],
     ...overrides,
   };
 }
@@ -173,11 +176,11 @@ describe('the async reference-edit job (A15)', () => {
 
   it('reports a job the server failed, with the server reason', async () => {
     const fetchImpl = fetchFor({
-      polls: [{ status: 200, body: { id: 'job_1', status: 'failed', error: 'out of memory in vae' } }],
+      polls: [
+        { status: 200, body: { id: 'job_1', status: 'failed', error: 'out of memory in vae' } },
+      ],
     });
-    await expect(
-      runSdcppImageJob(request({ fetchImpl, pollIntervalMs: 5 })),
-    ).rejects.toThrow(
+    await expect(runSdcppImageJob(request({ fetchImpl, pollIntervalMs: 5 }))).rejects.toThrow(
       /qwen-local: the \/sdcpp\/v1\/img_gen job job_1 failed: out of memory in vae/,
     );
   });
@@ -226,9 +229,7 @@ describe('the async reference-edit job (A15)', () => {
     });
     controller.abort();
     await expect(
-      runSdcppImageJob(
-        request({ server: server.handle, signal: controller.signal, fetchImpl }),
-      ),
+      runSdcppImageJob(request({ server: server.handle, signal: controller.signal, fetchImpl })),
     ).rejects.toThrow(/the turn was cancelled while.*Forge stopped its own sd-server/s);
     expect(server.stopCalls()).toBe(1);
   });
@@ -290,9 +291,7 @@ describe('the async reference-edit job (A15)', () => {
         }),
       );
     }) as SdcppFetch;
-    await runSdcppImageJob(
-      request({ server: server.handle, fetchImpl, pollIntervalMs: 5 }),
-    );
+    await runSdcppImageJob(request({ server: server.handle, fetchImpl, pollIntervalMs: 5 }));
     expect(activeDuringPolls).toEqual([1]);
     expect(server.activeUses()).toBe(0);
   });
@@ -316,9 +315,7 @@ describe('the async reference-edit job (A15)', () => {
     const fetchImpl = fetchFor({
       polls: [{ status: 200, body: { id: 'job_1', status: 'completed', result: { images: [] } } }],
     });
-    await expect(
-      runSdcppImageJob(request({ fetchImpl, pollIntervalMs: 5 })),
-    ).rejects.toThrow(
+    await expect(runSdcppImageJob(request({ fetchImpl, pollIntervalMs: 5 }))).rejects.toThrow(
       /reported job job_1 complete but put no image in result\.images\[0\]/,
     );
   });
@@ -336,9 +333,9 @@ describe('the async reference-edit job (A15)', () => {
         },
       ],
     });
-    await expect(
-      runSdcppImageJob(request({ fetchImpl, pollIntervalMs: 5 })),
-    ).rejects.toThrow(/not a PNG, JPEG, GIF, BMP or WebP image/);
+    await expect(runSdcppImageJob(request({ fetchImpl, pollIntervalMs: 5 }))).rejects.toThrow(
+      /not a PNG, JPEG, GIF, BMP or WebP image/,
+    );
   });
 });
 

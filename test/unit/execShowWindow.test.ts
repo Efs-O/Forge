@@ -112,25 +112,30 @@ describe('exec_command show_window (spawn visibility)', () => {
     expect(props['show_window']?.['type']).toBe('boolean');
   });
 
-  it('passes show_window through to the single spawn site', async () => {
-    const result = (await tool().handler({
-      command: process.execPath,
-      args: ['-e', 'setInterval(() => {}, 1000)'],
-      cwd: process.cwd(),
-      background: true,
-      show_window: true,
-    })) as string;
-    // One spawn only: the flag must not introduce a second launch path.
-    expect(h.calls).toHaveLength(1);
-    expect(lastSpawn().options.windowsHide).toBe(false);
-    // And the result names the launcher/child limit (item 4).
-    expect(result).toMatch(/tracks the process started here/);
-    expect(result).toMatch(/may report completed while its GUI stays open/);
-    const id = /exec-[0-9a-f-]+/.exec(result)?.[0];
-    if (!id) throw new Error('no execution id in the result');
-    // The job lives on the singleton; stop it by the id the tool reported.
-    await backgroundExecutionManager.stop(id);
-  });
+  // show_window is refused off Windows before it reaches the spawn or the
+  // denylist; that refusal has its own platform-aware case below.
+  it.runIf(process.platform === 'win32')(
+    'passes show_window through to the single spawn site',
+    async () => {
+      const result = (await tool().handler({
+        command: process.execPath,
+        args: ['-e', 'setInterval(() => {}, 1000)'],
+        cwd: process.cwd(),
+        background: true,
+        show_window: true,
+      })) as string;
+      // One spawn only: the flag must not introduce a second launch path.
+      expect(h.calls).toHaveLength(1);
+      expect(lastSpawn().options.windowsHide).toBe(false);
+      // And the result names the launcher/child limit (item 4).
+      expect(result).toMatch(/tracks the process started here/);
+      expect(result).toMatch(/may report completed while its GUI stays open/);
+      const id = /exec-[0-9a-f-]+/.exec(result)?.[0];
+      if (!id) throw new Error('no execution id in the result');
+      // The job lives on the singleton; stop it by the id the tool reported.
+      await backgroundExecutionManager.stop(id);
+    },
+  );
 
   it('defaults to hidden through the tool when show_window is omitted', async () => {
     await tool().handler({
@@ -190,19 +195,22 @@ describe('exec_command show_window (spawn visibility)', () => {
     }
   });
 
-  it('keeps the denylist ahead of the visibility flag', async () => {
-    // A visible window must not become a way to run a refused command.
-    await expect(
-      tool().handler({
-        command: 'cmd',
-        args: ['/c', 'rd /s x'],
-        cwd: process.cwd(),
-        background: true,
-        show_window: true,
-      }),
-    ).rejects.toThrow(/denylist pattern/);
-    expect(h.calls).toEqual([]);
-  });
+  it.runIf(process.platform === 'win32')(
+    'keeps the denylist ahead of the visibility flag',
+    async () => {
+      // A visible window must not become a way to run a refused command.
+      await expect(
+        tool().handler({
+          command: 'cmd',
+          args: ['/c', 'rd /s x'],
+          cwd: process.cwd(),
+          background: true,
+          show_window: true,
+        }),
+      ).rejects.toThrow(/denylist pattern/);
+      expect(h.calls).toEqual([]);
+    },
+  );
 
   it('reports a launcher stub exit without claiming its GUI child died', async () => {
     // The plan's item-4 requirement: a launcher that exits immediately is

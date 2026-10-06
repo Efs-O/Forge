@@ -17,27 +17,31 @@ describe('exec_command result hints', () => {
     ).rejects.toThrow(/no executable at .*grep\.exe.*search_code/s);
   });
 
-  it('explains EINVAL for a .cmd shim and gives a working cmd /c route', async () => {
-    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'forge-cmd-shim-'));
-    const shim = path.join(dir, 'shim.cmd');
-    fs.writeFileSync(shim, '@echo off\r\necho shim-ok\r\n');
-    try {
-      await expect(
-        makeExecCommandTool().handler({ command: shim, args: [], cwd: dir }),
-      ).rejects.toThrow(/Node cannot launch.*\.cmd.*cmd.*\/c/i);
-      const route = JSON.parse(
-        (await makeExecCommandTool(() => true).handler({
-          command: 'cmd',
-          args: ['/c', 'echo forge-ok'],
-          cwd: dir,
-        })) as string,
-      ) as { stdout: string; exitCode: number };
-      expect(route.exitCode).toBe(0);
-      expect(route.stdout.toLowerCase()).toContain('forge-ok');
-    } finally {
-      fs.rmSync(dir, { recursive: true, force: true });
-    }
-  });
+  // .cmd shims and cmd /c exist on Windows only.
+  it.runIf(process.platform === 'win32')(
+    'explains EINVAL for a .cmd shim and gives a working cmd /c route',
+    async () => {
+      const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'forge-cmd-shim-'));
+      const shim = path.join(dir, 'shim.cmd');
+      fs.writeFileSync(shim, '@echo off\r\necho shim-ok\r\n');
+      try {
+        await expect(
+          makeExecCommandTool().handler({ command: shim, args: [], cwd: dir }),
+        ).rejects.toThrow(/Node cannot launch.*\.cmd.*cmd.*\/c/i);
+        const route = JSON.parse(
+          (await makeExecCommandTool(() => true).handler({
+            command: 'cmd',
+            args: ['/c', 'echo forge-ok'],
+            cwd: dir,
+          })) as string,
+        ) as { stdout: string; exitCode: number };
+        expect(route.exitCode).toBe(0);
+        expect(route.stdout.toLowerCase()).toContain('forge-ok');
+      } finally {
+        fs.rmSync(dir, { recursive: true, force: true });
+      }
+    },
+  );
 
   it('adds an inline-script checkpoint warning without blocking the command', async () => {
     const result = JSON.parse(

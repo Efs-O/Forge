@@ -40,7 +40,11 @@ let root: string;
 const tools: FfmpegTools = { ffmpeg: 'ffmpeg.exe', ffprobe: 'ffprobe.exe' };
 
 function fakeRun(
-  responses: { dimensions?: { width: number; height: number }; code?: number; stderr?: string } = {},
+  responses: {
+    dimensions?: { width: number; height: number };
+    code?: number;
+    stderr?: string;
+  } = {},
 ): RunFfmpeg & { calls: { bin: string; argv: string[] }[] } {
   const calls: { bin: string; argv: string[] }[] = [];
   const run = (async (bin: string, argv: string[]) => {
@@ -231,20 +235,23 @@ describe('prepareReferences validation (A8, A13, A14, A28)', () => {
   it.each([
     ['HEIC', HEIC, 'heic'],
     ['a text file', Buffer.from('not an image at all, definitely not bytes'), 'txt'],
-  ])('refuses an unsupported format (%s) before spawning anything (A14)', async (_label, bytes, name) => {
-    const file = write(`bad-${name}`, bytes);
-    const run = fakeRun();
-    await expect(
-      prepareReferences([file], 'qwen-local', { maxEdgePx: 768, tools, run }),
-    ).rejects.toThrow(
-      new RegExp(
-        `qwen-local: generate_image refused a reference image.*Accepted formats: ${ACCEPTED_REFERENCE_FORMATS.join(', ')}`,
-        's',
-      ),
-    );
-    // Refused before any decode, so no process was spawned for it at all.
-    expect(run.calls).toHaveLength(0);
-  });
+  ])(
+    'refuses an unsupported format (%s) before spawning anything (A14)',
+    async (_label, bytes, name) => {
+      const file = write(`bad-${name}`, bytes);
+      const run = fakeRun();
+      await expect(
+        prepareReferences([file], 'qwen-local', { maxEdgePx: 768, tools, run }),
+      ).rejects.toThrow(
+        new RegExp(
+          `qwen-local: generate_image refused a reference image.*Accepted formats: ${ACCEPTED_REFERENCE_FORMATS.join(', ')}`,
+          's',
+        ),
+      );
+      // Refused before any decode, so no process was spawned for it at all.
+      expect(run.calls).toHaveLength(0);
+    },
+  );
 
   it('refuses a file over the byte cap before spawning anything (A14)', async () => {
     const file = path.join(root, 'huge.png');
@@ -276,7 +283,11 @@ describe('prepareReferences validation (A8, A13, A14, A28)', () => {
     const file = write('sketch.jpg', JPEG);
     const run: RunFfmpeg = async (bin) =>
       bin === 'ffprobe.exe'
-        ? { code: 0, stdout: JSON.stringify({ streams: [{ width: 800, height: 600 }] }), stderr: '' }
+        ? {
+            code: 0,
+            stdout: JSON.stringify({ streams: [{ width: 800, height: 600 }] }),
+            stderr: '',
+          }
         : { code: 222, stdout: '', stderr: 'vp8: Invalid data found' };
     await expect(
       prepareReferences([file], 'qwen-local', { maxEdgePx: 768, tools, run }),
@@ -330,7 +341,11 @@ describe('reference path rules (A9, A24)', () => {
     );
   });
 
-  it('de-duplicates case-insensitively and says so (A24)', () => {
+  // Paths compare case-insensitively on Windows only (keyOf): on Linux
+  // Sketch.JPG and sketch.jpg are two files, so these cases are win32 cases.
+  const onWindows = process.platform === 'win32';
+
+  it.runIf(onWindows)('de-duplicates case-insensitively and says so (A24)', () => {
     const { paths, note } = resolveReferencePaths(
       [path.join(root, 'Sketch.JPG'), path.join(root, 'sketch.jpg'), path.join(root, 'other.png')],
       sdcppConfig(),
@@ -340,26 +355,46 @@ describe('reference path rules (A9, A24)', () => {
     expect(note).toBe('2 reference image(s), 1 duplicate path removed.');
   });
 
+  it.runIf(!onWindows)(
+    'keeps paths that differ only in case apart on a case-sensitive platform',
+    () => {
+      const { paths, note } = resolveReferencePaths(
+        [path.join(root, 'Sketch.JPG'), path.join(root, 'sketch.jpg')],
+        sdcppConfig(),
+        root,
+      );
+      expect(paths).toHaveLength(2);
+      expect(note).toBeUndefined();
+    },
+  );
+
   it('applies the cap after de-duplication (A24)', () => {
     const five = [
       path.join(root, 'a.png'),
-      path.join(root, 'A.PNG'),
+      path.join(root, 'a.png'),
       path.join(root, 'b.png'),
       path.join(root, 'c.png'),
       path.join(root, 'd.png'),
     ];
     const { paths } = resolveReferencePaths(five, sdcppConfig(), root);
     expect(paths).toHaveLength(4);
-    expect(() => resolveReferencePaths([...five, path.join(root, 'e.png')], sdcppConfig(), root)).toThrow(
-      /at most 4 reference images/,
-    );
+    expect(() =>
+      resolveReferencePaths([...five, path.join(root, 'e.png')], sdcppConfig(), root),
+    ).toThrow(/at most 4 reference images/);
   });
 
-  it('refuses an output that resolves to a reference, case-insensitively (A22)', () => {
-    const reference = path.join(root, 'Sketch.JPG');
-    expect(outputCollidesWithReference(path.join(root, 'sketch.png'), [reference])).toBe(reference);
-    expect(outputCollidesWithReference(path.join(root, 'other.png'), [reference])).toBeUndefined();
-    // A path with no extension at all still collides.
-    expect(outputCollidesWithReference(path.join(root, 'sketch'), [reference])).toBe(reference);
-  });
+  it.runIf(onWindows)(
+    'refuses an output that resolves to a reference, case-insensitively (A22)',
+    () => {
+      const reference = path.join(root, 'Sketch.JPG');
+      expect(outputCollidesWithReference(path.join(root, 'sketch.png'), [reference])).toBe(
+        reference,
+      );
+      expect(
+        outputCollidesWithReference(path.join(root, 'other.png'), [reference]),
+      ).toBeUndefined();
+      // A path with no extension at all still collides.
+      expect(outputCollidesWithReference(path.join(root, 'sketch'), [reference])).toBe(reference);
+    },
+  );
 });
