@@ -10,9 +10,13 @@ import {
 } from './forgeInstructionsChain';
 
 const RELOAD_DEBOUNCE_MS = 150;
+// The starter carries the general rules that measurably saved rounds and
+// failed calls in audited local-agent sessions. Rules already in the built-in
+// system prompt (execute.njk) stay out: every line here is paid on every turn.
 const STARTER_CONTENT = `# Project Instructions
 
 Keep this file concise (under 32,000 bytes). Forge includes it in every native local-agent prompt.
+Fill in the blanks below; delete any rule that does not fit this project.
 
 ## Project facts
 - Purpose and important architecture decisions:
@@ -20,9 +24,24 @@ Keep this file concise (under 32,000 bytes). Forge includes it in every native l
 ## Commands
 - Build:
 - Test:
+- Full gate (run before calling any change done):
+
+## How to work efficiently
+- Every response is a round, and each round costs seconds before the first token. Put calls that do not depend on each other (reads, searches, listings) in ONE response. Read the file you need instead of listing its folder first.
+- Do not re-check what a tool result already confirmed: a write that returned success was written, a delete that returned success is gone.
+- A refusal is an answer, not an obstacle. Read its message: if it names an alternative, use it; if a path or command is refused, another spelling or a script that does the same thing is not the fix. Stop and ask the user.
+- Waiting on a long command: run it in the background and wait once, for as long as it needs, instead of polling in short steps. Ask only for the output you need (the tail, or one stream).
+- A finished result that needs no answer is a message, not a question: a question blocks you until someone replies.
+
+## Before calling a change done
+- Run the full gate above after the last edit and report its exact result. A subset of tests is not the gate.
+- A new regression test must fail with the fix reverted; prove it before claiming it.
+- A fake of an external program returns what the real one returns (binary output, real error text), never what your code expects.
+- For stateful, queued or retried work, test failure, retry, restart and duplicate delivery, not only the happy path.
+- Keep defects you introduced separate from ones that were already there.
 
 ## Working rules
-- Add durable conventions and safety constraints here.
+- Add durable conventions, safety constraints, and facts you had to discover the hard way here, so the next session does not rediscover them.
 `;
 
 export type ForgeInstructionsBootstrapResult =
@@ -35,7 +54,7 @@ export function preferredProjectInstructionsPath(repositoryRoot: string): string
 }
 
 /**
- * Creates the deliberately small starter only when a workspace has no project
+ * Creates the starter only when a workspace has no project
  * instructions. It never replaces user-authored content.
  */
 export function ensureForgeInstructionsFile(

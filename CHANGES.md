@@ -22,6 +22,7 @@
 - A path outside the workspace is now refused with a sentence saying every path under that folder is refused the same way. An audited session spent about a dozen tool rounds retrying one refused folder with other spellings and file names.
 - `write_file`, `append_file`, `edit_file`, `apply_line_edits` and `move_file` now accept a folder listed under `extra_file_roots`. Only `create_directory` and `delete_file` used to, so `write_file` refused a configured folder, told the agent to add it to `extra_file_roots` (where it already was), and the agent wrote a PowerShell script to do the write instead. That refused folder is also what the audited session above kept retrying.
 - `forge.sh say --to` given an exchange id (the name of a verdict file) now says which chat that exchange belongs to. It used to answer "no longer open", which reads like a closed chat.
+- The FORGE.md a new workspace gets (with `forge_instructions.auto_create`) now carries the general working rules that saved rounds and failed calls in audited sessions: batch independent calls, do not re-check a confirmed result, treat a refusal as an answer, wait once instead of polling, and prove a change with the full gate. It used to be a blank outline.
 
 ## 0.16.89
 
