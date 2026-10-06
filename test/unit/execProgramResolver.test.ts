@@ -59,7 +59,8 @@ describe('resolveExecInvocation', () => {
       '@vscode',
       'ripgrep-universal',
       'bin',
-      'win32-x64',
+      // The resolver picks the folder by process.arch; the macOS runner is arm64.
+      `win32-${process.arch}`,
       'rg.exe',
     );
     const probe = probeFor([bundled], {});
