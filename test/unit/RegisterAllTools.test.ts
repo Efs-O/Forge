@@ -62,7 +62,6 @@ const EXPECTED_NATIVE_NAMES = [
   'desktop_windows',
   'edit_file',
   'edit_notebook_cell',
-  'exec_command',
   'find_files',
   'forget',
   'format_file',
@@ -84,7 +83,6 @@ const EXPECTED_NATIVE_NAMES = [
   'notify_user',
   'open_file',
   'open_url_in_browser',
-  'query_powershell',
   'read_clipboard',
   'read_file',
   'read_notebook',
@@ -99,6 +97,7 @@ const EXPECTED_NATIVE_NAMES = [
   'search_code',
   'search_codebase',
   'send_file',
+  'shell',
   'show_diff',
   'show_notification',
   'sleep_computer',
@@ -196,8 +195,6 @@ describe('registerAllTools canonical coordinator catalog', () => {
           name !== 'generate_image' &&
           name !== 'image_search' &&
           name !== 'install_llamacpp' &&
-          // query_powershell spawns powershell.exe, so it is advertised on Windows only.
-          (process.platform === 'win32' || name !== 'query_powershell') &&
           name !== 'ask_live_session' &&
           name !== 'tell_live_session' &&
           // browser_* tools require the 'browser' permission, which this
@@ -242,7 +239,7 @@ describe('registerAllTools canonical coordinator catalog', () => {
     expect(names).not.toContain('web_search');
     expect(names).not.toContain('ask_local_agent');
     expect(names).not.toContain('list_delegation_targets');
-    expect(names).toHaveLength(57);
+    expect(names).toHaveLength(56);
   });
 
   // send_file's only outbound step is api.telegram.org, so a profile with

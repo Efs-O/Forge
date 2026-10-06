@@ -1,7 +1,6 @@
 import type { ChatMessage, ContentPart, ToolDefinition } from '../llm/types';
 import type { PlanItem } from '../sidebar/sessionTypes';
 import { recordNativeLazyTool } from './lazyToolGroups';
-import { describeMisplacedExecArgs } from './execHints';
 
 export type ToolPermission =
   | 'read'
@@ -41,6 +40,8 @@ export interface ToolHandlerContext {
   /** Conversation the call belongs to. ask_local_agent keys warm CLI agent
    *  sessions on it so repeat delegations reuse one process. */
   conversationId?: string;
+  /** Current call id, used by shell spill files. */
+  toolCallId?: string;
   /** Resolved model name, used by model-specific tool-group refusals. */
   modelName?: string;
   /** Whether the resolved model accepts image input. */
@@ -84,6 +85,8 @@ export interface RegisteredTool {
    * general shell or a mutable operation.
    */
   autoApprove?: boolean;
+  /** Per-call auto approval for narrowly classified inputs such as read-only shell commands. */
+  autoApproveIf?: (args: Record<string, unknown>) => boolean;
   /** When present, called during definitions() to suppress advertisement without removing the tool. */
   advertise?: () => boolean;
   /**
@@ -195,18 +198,14 @@ export class ToolRegistry {
    * Refusal text when `args` omits a property the tool's schema requires, or
    * sends a declared boolean or array as anything else; else undefined.
    * llama-server's grammar makes such a call impossible, but not every backend
-   * constrains decoding. Strata sent `exec_command` without `command`, and the
-   * handler died on `undefined.toLowerCase()` — an error that names neither the
-   * tool nor the field. It also sent `background: "True"`; handlers test
-   * `=== true`, so the job ran in the foreground and hit the 30 s default
-   * deadline with nothing saying why.
+   * constrains decoding. A missing required field can otherwise fail inside
+   * the handler without naming the field. A malformed `background` boolean
+   * also used to silently select the foreground path.
    */
   invalidArgs(tool: RegisteredTool, args: Record<string, unknown>): string | undefined {
     const { name, parameters } = tool.definition.function;
     // JSON.parse can hand back `null` for a call whose arguments were "null".
     const present: Record<string, unknown> = typeof args === 'object' && args !== null ? args : {};
-    const misplacedExecArgs = describeMisplacedExecArgs(name, Object.keys(present));
-    if (misplacedExecArgs) return misplacedExecArgs;
     const required = Array.isArray(parameters.required) ? parameters.required : [];
     const missing = required.filter(
       (key): key is string => typeof key === 'string' && present[key] === undefined,
@@ -241,8 +240,7 @@ export class ToolRegistry {
         ? fallback
         : 'Error: invalid boolean argument; use unquoted JSON true or false.';
     }
-    // Strata sent exec_command `args` as one JSON-encoded string; the handler
-    // died on `args.findIndex is not a function`, naming neither field nor fix.
+    // Structured arguments must arrive as arrays, not a JSON string inside one.
     const notArray = declared
       .filter(([key, schema]) => schema?.type === 'array' && !Array.isArray(present[key]))
       .map(([key]) => `"${key}" (got ${typeof present[key]})`);

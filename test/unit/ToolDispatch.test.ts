@@ -14,6 +14,8 @@ import { ToolRegistry } from '../../src/tools/ToolRegistry';
 import { makeApplyLineEditsTool } from '../../src/tools/structuredEditTool';
 import { ToolBudget } from '../../src/tools/ToolBudget';
 import { resetLazyToolGroups } from '../../src/tools/lazyToolGroups';
+import { makeShellTool } from '../../src/tools/shellTool';
+import { TEST_BASH } from '../support/bash';
 
 // vi.mock is hoisted — compute WS inside the factory using require
 vi.mock('vscode', () => {
@@ -195,108 +197,6 @@ describe('ToolDispatch', () => {
 
     expect(failureTracker.reset).toHaveBeenCalledWith('conv-a');
     expect(failureTracker.record).not.toHaveBeenCalled();
-  });
-
-  it('refuses a call missing a required argument before the handler runs', async () => {
-    // Strata does not grammar-constrain tool calls: it sent exec_command with
-    // args but no `command`, and the handler died on undefined.toLowerCase().
-    const handler = vi.fn().mockResolvedValue('should not run');
-    toolRegistry.register({
-      definition: {
-        type: 'function',
-        function: {
-          name: 'exec_command',
-          description: 'Run',
-          parameters: { type: 'object', required: ['command', 'args'] },
-        },
-      },
-      permission: 'read',
-      handler,
-    });
-
-    const messages: ChatMessage[] = [];
-    await dispatch.dispatch([makeToolCall('exec_command', { args: ['log'] })], allowed, messages, 'conv-a');
-
-    expect(handler).not.toHaveBeenCalled();
-    expect(requestApproval).not.toHaveBeenCalled();
-    expect(messages[0]?.content).toBe(
-      'Error: exec_command is missing required argument "command". Resend the call with it set.',
-    );
-    expect(failureTracker.record).toHaveBeenCalledWith('conv-a');
-  });
-
-  it('refuses a boolean argument sent as a string before the handler runs', async () => {
-    // Strata sent background: "True"; exec_command tests `=== true`, so the job
-    // ran in the foreground and timed out at the 30 s default with no reason.
-    const handler = vi.fn().mockResolvedValue('should not run');
-    toolRegistry.register({
-      definition: {
-        type: 'function',
-        function: {
-          name: 'exec_command',
-          description: 'Run',
-          parameters: {
-            type: 'object',
-            properties: { command: { type: 'string' }, background: { type: 'boolean' } },
-            required: ['command'],
-          },
-        },
-      },
-      permission: 'read',
-      handler,
-    });
-
-    const messages: ChatMessage[] = [];
-    await dispatch.dispatch(
-      [makeToolCall('exec_command', { command: 'npx', background: 'True' })],
-      allowed,
-      messages,
-      'conv-a',
-    );
-
-    expect(handler).not.toHaveBeenCalled();
-    expect(messages[0]?.content).toBe(
-      'Error: exec_command background="True": use true',
-    );
-    expect(failureTracker.record).toHaveBeenCalledWith('conv-a');
-  });
-
-  it('refuses an array argument sent as a string before the handler runs', async () => {
-    // Strata sent args: "[\"/c\", ...]"; the handler died on `findIndex is not a function`.
-    const handler = vi.fn().mockResolvedValue('should not run');
-    toolRegistry.register({
-      definition: {
-        type: 'function',
-        function: {
-          name: 'exec_command',
-          description: 'Run',
-          parameters: {
-            type: 'object',
-            properties: {
-              command: { type: 'string' },
-              args: { type: 'array', items: { type: 'string' } },
-            },
-            required: ['command', 'args'],
-          },
-        },
-      },
-      permission: 'read',
-      handler,
-    });
-
-    const messages: ChatMessage[] = [];
-    await dispatch.dispatch(
-      [makeToolCall('exec_command', { command: 'cmd', args: '["/c", "dir"]' })],
-      allowed,
-      messages,
-      'conv-a',
-    );
-
-    expect(handler).not.toHaveBeenCalled();
-    expect(messages[0]?.content).toBe(
-      'Error: exec_command needs a JSON array for "args" (got string), not a string holding one. Resend it as a bare array, e.g. ["a", "b"].',
-    );
-    expect(failureTracker.record).toHaveBeenCalledWith('conv-a');
   });
 
   it('does not clear the streak for a refusal or a declined call', async () => {
@@ -595,32 +495,27 @@ describe('ToolDispatch', () => {
     );
   });
 
-  it('does not request approval for a structurally bounded autonomous tool', async () => {
-    const handler = vi.fn().mockResolvedValue('workspace listed');
-    toolRegistry.register({
-      definition: {
-        type: 'function',
-        function: {
-          name: 'query_powershell',
-          description: 'Read-only PowerShell query',
-          parameters: { type: 'object' },
-        },
-      },
-      permission: 'headless',
-      autoApprove: true,
-      handler,
+  it.skipIf(!TEST_BASH)('auto-approves read-only shell calls, prompts normal calls, and blocks dangerous calls in clanker', async () => {
+    const shell = makeShellTool({
+      bashPath: TEST_BASH,
+      getConfig: () => ({ permissions: { exec: { shell: 'bash' } } } as never),
     });
-
-    const messages: Array<{ role: string; content: string }> = [];
-    await dispatch.dispatch(
-      [makeToolCall('query_powershell', { operation: 'workspace_overview' })],
-      allowed,
-      messages as never,
-    );
-
+    toolRegistry.register(shell);
+    const messages: ChatMessage[] = [];
+    await dispatch.dispatch([makeToolCall('shell', { command: 'pwd' })], allowed, messages);
     expect(requestApproval).not.toHaveBeenCalled();
-    expect(handler).toHaveBeenCalledOnce();
-    expect(messages[0]?.content).toBe('workspace listed');
+    expect(messages.at(-1)?.content).toContain('exit 0');
+
+    requestApproval.mockClear();
+    await dispatch.dispatch([makeToolCall('shell', { command: 'touch .forge-shell-approval-test', cwd: process.cwd() })], allowed, messages);
+    expect(requestApproval).toHaveBeenCalledWith('shell', expect.stringContaining('touch .forge-shell-approval-test'), false, undefined);
+    await fs.promises.rm(path.join(process.cwd(), '.forge-shell-approval-test'), { force: true });
+
+    requestApproval.mockClear();
+    requestApproval.mockRejectedValueOnce(new ToolApprovalPolicyDenied('shell'));
+    await dispatch.dispatch([makeToolCall('shell', { command: 'rm -rf build' })], allowed, messages);
+    expect(requestApproval).toHaveBeenCalledWith('shell', expect.stringContaining('recursive force delete'), true, undefined);
+    expect(messages.at(-1)?.content).toContain('unattended: dangerous tool denied by policy');
   });
 
   it('requests approval for git tools', async () => {

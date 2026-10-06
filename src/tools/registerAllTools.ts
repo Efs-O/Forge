@@ -44,8 +44,7 @@ import {
   makeFormatFileTool,
   makeRenameSymbolTool,
 } from './fileEditTools';
-import { makeExecCommandTool } from './execTools';
-import { makeSafePowerShellTool } from './safePowerShellTool';
+import { makeShellTool } from './shellTool';
 import { makeSystemStatusTool } from './systemStatusTool';
 import type { BackendProcess } from '../system/SystemReport';
 import { makeLoadToolGroupTool } from './toolGroupTools';
@@ -188,16 +187,10 @@ export function registerAllTools(
   registry.register(makeEditNotebookCellTool());
 
   // v0.7 exec + git
-  registry.register(
-    makeExecCommandTool(
-      () => getConfig?.().permissions?.exec?.shell_scripts === true,
-      () => registry.names(),
-    ),
-  );
+  registry.register(makeShellTool(getConfig ? { getConfig } : {}));
   registry.register(makeMonitorExecutionTool());
   registry.register(makeStopExecutionTool());
   registry.register(makeListExecutionsTool());
-  registry.register(makeSafePowerShellTool());
   registry.register(makeSystemStatusTool(backendProcesses ? { backendProcesses } : {}));
   registry.register(makeGitReadTool());
   registry.register(makeCreateBranchTool());

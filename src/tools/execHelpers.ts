@@ -11,7 +11,7 @@ export const MAX_EXEC_OUTPUT_LINES = 2_000;
  * There is no separate "shown" copy: what this function returns is what the
  * round carries. The excerptor in `toolResultContext` shrinks it further only
  * when the window is actually tight, so this bound is the real worst case a
- * single `exec_command` can add — both streams at once, which at ~4 chars per
+ * single `background execution` can add — both streams at once, which at ~4 chars per
  * token is roughly 30k tokens. It was 120_000 per stream, i.e. twice that,
  * which is more than a 128k window should ever spend on one command.
  *
@@ -34,7 +34,7 @@ export interface ExecOutputOptions {
 }
 
 /**
- * Validates the bounded output-shaping controls accepted by `exec_command`.
+ * Validates the bounded output-shaping controls accepted by `background execution`.
  * They intentionally affect only what returns to the model, never what is
  * executed, so they cover common pipe use cases without granting a shell.
  */
@@ -48,7 +48,7 @@ export function parseExecOutputOptions(args: Record<string, unknown>): ExecOutpu
           ? ' Redirect command output to a file and read it with read_file for a larger text result.'
           : '';
       throw new Error(
-        `exec_command: ${key} must be an integer from 1 to ${max}.${fileAlternative}`,
+        `background execution: ${key} must be an integer from 1 to ${max}.${fileAlternative}`,
       );
     }
     return value as number;
@@ -57,7 +57,7 @@ export function parseExecOutputOptions(args: Record<string, unknown>): ExecOutpu
   const headLines = readBoundedInt('head_lines', MAX_EXEC_OUTPUT_LINES);
   const tailLines = readBoundedInt('tail_lines', MAX_EXEC_OUTPUT_LINES);
   if (headLines !== undefined && tailLines !== undefined) {
-    throw new Error('exec_command: head_lines and tail_lines cannot be used together.');
+    throw new Error('background execution: head_lines and tail_lines cannot be used together.');
   }
   const maxChars = readBoundedInt('max_output_chars', MAX_OUTPUT_CHARS);
   const rawStream = args['output_stream'];
@@ -67,7 +67,7 @@ export function parseExecOutputOptions(args: Record<string, unknown>): ExecOutpu
     rawStream !== 'stdout' &&
     rawStream !== 'stderr'
   ) {
-    throw new Error('exec_command: output_stream must be "both", "stdout", or "stderr".');
+    throw new Error('background execution: output_stream must be "both", "stdout", or "stderr".');
   }
   return {
     ...(headLines !== undefined ? { headLines } : {}),
@@ -91,130 +91,6 @@ export function resolveExecCwd(cwd: string | undefined): string {
   if (!cwd) return normalizeSpawnCwd(getWorkspaceRoot());
   if (path.isAbsolute(cwd)) return normalizeSpawnCwd(cwd);
   return normalizeSpawnCwd(path.join(getWorkspaceRoot(), cwd));
-}
-
-// ── Shell-operator guard ───────────────────────────────────────────────────────
-
-/**
- * Tokens that are shell operators when they stand alone as one argument.
- *
- * Matched WHOLE, never as substrings. Commands are spawned with `shell: false`,
- * so an operator character *inside* an argument is passed verbatim to the
- * program and no shell ever sees it — there is nothing to escape and no
- * injection to prevent. Substring matching therefore protected nothing and
- * blocked a great deal: `for(let i=0;i<50;i++)console.log(i)` was refused for
- * containing `;` and `<`, which rules out most `node -e` one-liners, every
- * arrow function, and every comparison. Backticks were the worst of it — a JS
- * template literal could not be passed at all.
- *
- * What is worth catching is the model writing a shell *line* and handing the
- * pieces over as argv, e.g. args: ["-e", "...", "&&", "node", ...]. That shows
- * up as a bare operator token, and it is what this now looks for.
- */
-const SHELL_OPERATOR_TOKENS = new Set([
-  '&&',
-  '||',
-  '|',
-  '&',
-  ';',
-  '>',
-  '>>',
-  '<',
-  '<<',
-  '2>',
-  '2>&1',
-]);
-
-export function checkShellOperators(args: string[], allowScriptArgsFrom = -1): void {
-  for (const [index, arg] of args.entries()) {
-    if (allowScriptArgsFrom >= 0 && index >= allowScriptArgsFrom) continue;
-    if (SHELL_OPERATOR_TOKENS.has(arg.trim())) {
-      throw new Error(
-        `Shell operators are not permitted in arguments ("${arg.trim()}" is one). ` +
-          'There is no shell — split this into separate exec_command calls, and use ' +
-          'tail_lines, head_lines, max_output_chars, or output_stream instead of piping.',
-      );
-    }
-  }
-}
-
-// ── PowerShell ban ─────────────────────────────────────────────────────────────
-
-// Lowercase, and compared against a lowercased arg: PowerShell flags are
-// case-insensitive, and the documented abbreviations -c / -e / -ec resolve to
-// -Command / -EncodedCommand just like the full spellings (Codex review,
-// audit 2026-09-26 §3.1). `-w` is NOT banned: it abbreviates -WindowStyle,
-// not a script/evaluation flag.
-const PS_DANGEROUS_FLAGS = ['-command', '-encodedcommand', '-enc', '-ec', '-e', '-c'];
-/**
- * Every shell that runs a model-authored script string.
- *
- * `pwsh` is PowerShell 7 and was missing here, so `pwsh -Command <script>`
- * walked straight past a ban whose whole rationale is that such a script
- * cannot be checked by the denylist. Matching the launcher name is the point:
- * a new PowerShell binary is a new hole, not a variant of an old one.
- */
-export const PS_LAUNCHERS = ['powershell.exe', 'powershell', 'pwsh.exe', 'pwsh'];
-export const SCRIPT_LAUNCHERS = ['bash', 'sh', 'zsh', 'dash', 'cmd', 'cmd.exe', 'busybox'];
-const SCRIPT_FLAGS = ['-c', '/c'];
-
-/** Return the first argument occupied by an inline script, or -1. */
-export function inlineScriptStart(command: string, args: string[]): number {
-  const cmd = (command.split(/[\\/]/).pop() ?? command).toLowerCase();
-  if (![...PS_LAUNCHERS, ...SCRIPT_LAUNCHERS].includes(cmd)) return -1;
-  const index = args.findIndex((arg) => ['-command', '-c', '/c'].includes(arg.toLowerCase()));
-  return index < 0 ? -1 : index + 1;
-}
-
-export function checkPowerShellBan(command: string, args: string[], shellScripts = false): void {
-  // By basename: `/bin/bash` and a full `...\System32\cmd.exe` path are the same launchers.
-  const cmd = (command.split(/[\\/]/).pop() ?? command).toLowerCase();
-  if (PS_LAUNCHERS.includes(cmd)) {
-    const encoded = args.find((arg) =>
-      ['-encodedcommand', '-enc', '-ec', '-e'].includes(arg.toLowerCase()),
-    );
-    if (encoded) {
-      throw new Error(
-        `PowerShell flag "${encoded}" is always banned because its script is base64 and cannot be checked. ` +
-          'Use exec_command with a script file that can be scanned, or the dedicated tools instead.',
-      );
-    }
-  }
-  if (SCRIPT_LAUNCHERS.includes(cmd)) {
-    const flagIndex = args.findIndex((arg) => SCRIPT_FLAGS.includes(arg.toLowerCase()));
-    if (flagIndex !== -1 && !shellScripts) {
-      throw new Error(
-        'Shell script flags are banned while permissions.exec.shell_scripts is false. ' +
-          'Enable permissions.exec.shell_scripts in config.yaml to allow scripts, or use a real executable with an args array or the dedicated tools.',
-      );
-    }
-  }
-  if (PS_LAUNCHERS.includes(cmd)) {
-    for (const arg of args) {
-      if (arg.toLowerCase() === '-command' || arg.toLowerCase() === '-c') {
-        if (shellScripts) return;
-      }
-      if (PS_DANGEROUS_FLAGS.includes(arg.toLowerCase())) {
-        // Name the route that works. "Use a non-shell binary instead" told the
-        // model what to stop doing and nothing about what to do, so it kept
-        // hunting for another shell rather than reaching for the tool that
-        // already does the job. The list named only READ tools, so a blocked
-        // `Move-Item` sent the model to `robocopy /MOVE` instead of move_file —
-        // every write route has to be named too.
-        throw new Error(
-          `PowerShell flag "${arg}" is banned — a model-authored script cannot be checked ` +
-            'by the denylist, so it is never run. Set permissions.exec.shell_scripts in config.yaml to enable checked scripts, or use the dedicated tools instead: ' +
-            'wait to pause for a number of seconds, list_directory to list files, ' +
-            'read_file to read them, search_code to search, query_powershell for a ' +
-            'read-only workspace overview or a file hash; to change the filesystem, ' +
-            'write_file to create or overwrite a file, edit_file to modify one, ' +
-            'move_file to move or rename a file or directory, create_directory to make ' +
-            'one, delete_file to remove one; or exec_command with a real executable and ' +
-            'an args array.',
-        );
-      }
-    }
-  }
 }
 
 // ── Core spawn helper ──────────────────────────────────────────────────────────

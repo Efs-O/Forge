@@ -133,7 +133,7 @@ function advertisedChars(registry: ToolRegistry): number {
 }
 
 describe('tool schema CI budget (TOOL_SCHEMA_GROWTH_PLAN.md Step 1)', () => {
-  // Windows advertises the most (query_powershell, install_llamacpp), so the
+  // Windows advertises the most (shell, install_llamacpp), so the
   // worst case is measured as Windows whatever the CI host is.
   const realPlatform = process.platform;
   beforeEach(() => Object.defineProperty(process, 'platform', { value: 'win32', configurable: true }));
@@ -141,10 +141,10 @@ describe('tool schema CI budget (TOOL_SCHEMA_GROWTH_PLAN.md Step 1)', () => {
     Object.defineProperty(process, 'platform', { value: realPlatform, configurable: true }),
   );
 
-  it('advertises the full 65-tool set under the maximal config', () => {
+  it('advertises the full 64-tool set under the maximal config', () => {
     const registry = makeMaximalRegistry();
     const names = registry.definitions(ALL_PERMISSIONS).map((d) => d.function.name).sort();
-    expect(names).toHaveLength(65);
+    expect(names).toHaveLength(64);
     // Spot-check the five self-suppressing tools that only appear when their
     // config block is present — these are the ones a bare config would drop.
     for (const name of [

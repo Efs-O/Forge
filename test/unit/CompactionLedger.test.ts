@@ -140,6 +140,22 @@ describe('collectWriteActions', () => {
 });
 
 describe('collectCommandActions', () => {
+  it('records shell commands from their plain-text status line', () => {
+    const actions = collectCommandActions([
+      call('shell-id', 'shell', { command: 'npm test', cwd: 'packages/app' }),
+      result('shell-id', 'exit 7 · 1.2 s\nfailed tests'),
+    ]);
+    expect(actions).toEqual([
+      {
+        kind: 'command',
+        key: 'command:shell|packages/app|command=npm test',
+        outcome: 'failed',
+        line: '- ran `npm test` → exit 7 (FAILED)',
+        toolCallId: 'shell-id',
+      },
+    ]);
+  });
+
   it('records an exit code of zero', () => {
     const actions = collectCommandActions([
       call('a', 'exec_command', { command: 'npm', args: ['run', 'ci'] }),

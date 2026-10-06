@@ -27,7 +27,6 @@ import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
 import { backgroundExecutionManager } from '../../src/tools/BackgroundExecutionManager';
-import { makeExecCommandTool } from '../../src/tools/execTools';
 import { PowerShellDesktopDriver } from '../../src/tools/desktop/PowerShellDesktopDriver';
 import { PowerShellTransport } from '../../src/tools/desktop/PowerShellTransport';
 import type { DesktopWindow } from '../../src/tools/desktop/DesktopDriver';
@@ -200,7 +199,7 @@ describe.skipIf(!LIVE || !WIN)('live desktop text round trip (Notepad, manual ga
   let fixtureName = '';
   let secondPath = '';
   let secondName = '';
-  // Each entry is a job THIS test started through the exec_command tool, which
+  // Each entry is a job THIS test started through the process manager, which
   // runs on the module singleton. Cleanup must go through that same singleton.
   const owned: { id: string; pid: number | undefined; windowName: string }[] = [];
   let fixture: DesktopWindow | undefined;
@@ -258,21 +257,16 @@ describe.skipIf(!LIVE || !WIN)('live desktop text round trip (Notepad, manual ga
    */
   async function launchVisible(
     filePath: string,
-  ): Promise<{ id: string; pid: number | undefined; result: string }> {
-    const result = (await makeExecCommandTool().handler({
-      command: 'notepad.exe',
-      args: [filePath],
-      cwd: process.cwd(),
-      background: true,
-      show_window: true,
-    })) as string;
-    const id = /exec-[0-9a-f-]+/.exec(result)?.[0];
-    if (!id) throw new Error(`no execution id in the tool result: ${result}`);
+  ): Promise<{ id: string; pid: number | undefined }> {
+    const started = backgroundExecutionManager.start({
+      command: 'notepad.exe', args: [filePath], cwd: process.cwd(),
+    });
+    const id = started.id;
     const job = { id, pid: undefined as number | undefined, windowName: path.basename(filePath) };
     owned.push(job);
     const observation = await backgroundExecutionManager.observe(id, 0, 0, 0);
     job.pid = observation.pid;
-    return { id, pid: observation.pid, result };
+    return { id, pid: observation.pid };
   }
 
   beforeAll(async () => {
@@ -395,12 +389,8 @@ describe.skipIf(!LIVE || !WIN)('live desktop text round trip (Notepad, manual ga
     }
   });
 
-  it('launches a visible GUI through exec_command show_window, and finds it in desktop_windows', async () => {
+  it('launches a visible GUI process and finds it in desktop_windows', async () => {
     const launched = await launchVisible(fixturePath);
-    // The launcher/child note must be present on the real route, not just in the
-    // unit test: the model has to be told what this id does NOT track.
-    expect(launched.result).toMatch(/launched with a visible window/);
-    expect(launched.result).toMatch(/tracks the process started here/);
     const observation = await backgroundExecutionManager.observe(launched.id, 0, 0, 0);
     expect(observation.status, 'the launched process should still be running').toBe('running');
 
@@ -408,7 +398,7 @@ describe.skipIf(!LIVE || !WIN)('live desktop text round trip (Notepad, manual ga
     if (!fixture) {
       throw new Error(
         `the launched Notepad window never appeared in desktop_windows (looked for "${fixtureName}")` +
-          ' — either show_window did not make it visible, or this session has no interactive desktop',
+          ' — either the process did not create a visible window, or this session has no interactive desktop',
       );
     }
     // A visible window has a real rect; a hidden/never-shown process has no row

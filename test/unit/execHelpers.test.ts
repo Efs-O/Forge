@@ -2,7 +2,6 @@ import { describe, expect, it } from 'vitest';
 import {
   ExecCommandError,
   formatExecCommandOutput,
-  checkPowerShellBan,
   MAX_EXEC_STORED_CHARS,
   MAX_OUTPUT_CHARS,
   parseExecOutputOptions,
@@ -28,7 +27,7 @@ describe('stripAnsi', () => {
   });
 });
 
-describe('structured exec_command outcomes', () => {
+describe('background output helpers', () => {
   it('keeps oversized text output limits as a refusal with a file alternative', () => {
     expect(() => parseExecOutputOptions({ max_output_chars: MAX_OUTPUT_CHARS + 1 })).toThrow(
       /redirect.*file/iu,
@@ -126,7 +125,7 @@ describe('structured exec_command outcomes', () => {
       expect(output.stdout).toContain('characters dropped');
     });
 
-    // The bound is the real worst case one exec_command can add to a round:
+    // The bound is the real worst case one retained output stream can add:
     // the excerptor downstream only cuts when the window is already tight.
     it('bounds a both-streams result to twice the retention bound', () => {
       const huge = 'x'.repeat(MAX_EXEC_STORED_CHARS * 3);
@@ -155,45 +154,5 @@ describe('structured exec_command outcomes', () => {
       expect(output.stdout).toBe('short');
       expect(output).not.toHaveProperty('stdout_truncated');
     });
-  });
-});
-
-describe('checkPowerShellBan', () => {
-  it('recognises a launcher named by its full path', () => {
-    expect(() => checkPowerShellBan('/bin/bash', ['-c', 'rm -rf x'])).toThrow('Shell script flags');
-    expect(() => checkPowerShellBan('C:\\Windows\\System32\\cmd.exe', ['/C', 'del x'])).toThrow(
-      'Shell script flags',
-    );
-    expect(() =>
-      checkPowerShellBan('C:\\Program Files\\PowerShell\\7\\pwsh.exe', ['-Command', 'x']),
-    ).toThrow();
-    expect(() => checkPowerShellBan('/usr/bin/git', ['-c', 'x=y', 'status'])).not.toThrow();
-  });
-
-  it('bans case-insensitive spellings and the documented abbreviations', () => {
-    // The ban was exact-spelling only until the 2026-09-26 audit: 'pwsh -command'
-    // and 'pwsh -c' walked straight past it.
-    expect(() => checkPowerShellBan('pwsh', ['-command', 'Get-Process'])).toThrow('PowerShell flag');
-    expect(() => checkPowerShellBan('pwsh', ['-COMMAND', 'x'])).toThrow('PowerShell flag');
-    expect(() => checkPowerShellBan('pwsh', ['-c', 'x'])).toThrow('PowerShell flag');
-    expect(() => checkPowerShellBan('pwsh', ['-e', 'x'])).toThrow('PowerShell flag');
-    expect(() => checkPowerShellBan('pwsh', ['-ec', 'x'])).toThrow('PowerShell flag');
-    // -w is -WindowStyle, not an evaluation flag: not banned.
-    expect(() => checkPowerShellBan('pwsh', ['-w', 'Hidden', '-File', 'watch.ps1'])).not.toThrow();
-    // The sanctioned -File route stays open (BackgroundExitNotify.test.ts).
-    expect(() => checkPowerShellBan('pwsh', ['-NoProfile', '-File', 'watch.ps1'])).not.toThrow();
-  });
-
-  it('allows checked script launchers only when opted in and always refuses encoded PowerShell', () => {
-    expect(() => checkPowerShellBan('pwsh', ['-Command', 'Get-Process'])).toThrow(
-      'permissions.exec.shell_scripts',
-    );
-    expect(() => checkPowerShellBan('pwsh', ['-Command', 'Get-Process'], true)).not.toThrow();
-    expect(() => checkPowerShellBan('cmd', ['/c', 'echo ready'], true)).not.toThrow();
-    expect(() => checkPowerShellBan('bash', ['-c', 'echo ready'], true)).not.toThrow();
-    for (const flag of ['-EncodedCommand', '-enc', '-ec', '-e']) {
-      expect(() => checkPowerShellBan('pwsh', [flag, 'YQ=='], true)).toThrow('always banned');
-      expect(() => checkPowerShellBan('pwsh', [flag, 'YQ=='])).toThrow('always banned');
-    }
   });
 });

@@ -45,7 +45,7 @@ describe('isolated file and directory tool execution', () => {
   });
 
   // Refusing reads outside the workspace bought nothing: list_directory and
-  // exec_command read the same files, and Strata spent ~15 calls getting there.
+  // shell read the same files, and Strata spent ~15 calls getting there.
   it('reads outside the workspace, but still writes only inside it', async () => {
     const outside = fs.mkdtempSync(path.join(os.tmpdir(), 'forge-read-outside-'));
     try {

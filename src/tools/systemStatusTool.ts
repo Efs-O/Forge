@@ -8,8 +8,8 @@ import { formatSystemReport } from '../system/formatSystemReport';
  * The agent can already reach these numbers by shelling out, but it takes
  * several rounds to get there and lands on `nvidia-smi --query-compute-apps`,
  * which reports `[N/A]` per process on WDDM. One call that answers correctly is
- * cheaper than three that answer wrongly — the `query_powershell list_processes`
- * precedent in CLAUDE.md.
+ * cheaper than three that answer wrongly — get_system_status uses fixed probes
+ * for that reason.
  *
  * The result is the rendered table rather than JSON: it carries every field of
  * the struct in about a quarter of the tokens, and the tool exists to save

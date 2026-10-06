@@ -120,8 +120,13 @@ const PermissionsSchema = z
       .object({ search: z.boolean().default(false), fetch: z.boolean().default(false) })
       .optional(),
     exec: z
-      .object({ terminal: z.boolean().default(false), headless: z.boolean().default(false) })
-      .extend({ shell_scripts: z.boolean().default(false) })
+      .object({
+        terminal: z.boolean().default(false),
+        headless: z.boolean().default(false),
+        shell: z.enum(['pwsh', 'powershell', 'bash']).optional(),
+        /** @deprecated Accepted for config compatibility; grants no capability. */
+        shell_scripts: z.boolean().default(false),
+      })
       .optional(),
     git: z
       .object({ read: z.boolean().default(true), write: z.boolean().default(false) })
@@ -242,13 +247,6 @@ export const ForgeConfigSchema = z
     cfg.models.forEach((model, index) =>
       validateEagerGroups(model.tool_groups, ['models', index, 'tool_groups']),
     );
-    if (cfg.permissions?.exec?.shell_scripts && !cfg.permissions.exec.headless) {
-      ctx.addIssue({
-        code: z.ZodIssueCode.custom,
-        path: ['permissions', 'exec', 'shell_scripts'],
-        message: 'permissions.exec.shell_scripts requires permissions.exec.headless: true',
-      });
-    }
     if (cfg.models.length === 0) {
       ctx.addIssue({
         code: z.ZodIssueCode.custom,

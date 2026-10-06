@@ -4,7 +4,8 @@ import * as os from 'os';
 import * as path from 'path';
 import * as vscode from 'vscode';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { makeExecCommandTool } from '../../src/tools/execTools';
+import { makeShellTool } from '../../src/tools/shellTool';
+import { TEST_BASH } from '../support/bash';
 import { makeWebFetchTool } from '../../src/tools/fetchTool';
 
 /**
@@ -41,7 +42,7 @@ describe('isolated process, Git, and web tool execution', () => {
     fs.rmSync(root, { recursive: true, force: true });
   });
 
-  it('executes headless commands and project scripts in the temporary workspace', async () => {
+  it.skipIf(!TEST_BASH)('executes shell pipelines and project scripts in the temporary workspace', async () => {
     fs.writeFileSync(
       path.join(root, 'package.json'),
       JSON.stringify({
@@ -53,22 +54,16 @@ describe('isolated process, Git, and web tool execution', () => {
       'utf8',
     );
     await expect(
-      makeExecCommandTool().handler({
-        command: process.execPath,
-        args: ['-e', "process.stdout.write('fixture command')"],
-        cwd: '.',
-        timeout_ms: 10_000,
-      }),
+      makeShellTool({ bashPath: TEST_BASH, getConfig: () => ({ permissions: { exec: { shell: 'bash' } } } as never) }).handler({
+        command: `node -e "process.stdout.write('fixture command')"`, cwd: '.', timeout_ms: 10_000,
+      }, { beforeMutate: () => {} }),
     ).resolves.toContain('fixture command');
     await expect(
-      makeExecCommandTool().handler({ command: 'npm', args: ['test'] }),
+      makeShellTool({ bashPath: TEST_BASH }).handler({ command: 'npm test', cwd: '.' }, { beforeMutate: () => {} }),
     ).resolves.toContain('fixture tests passed');
     await expect(
-      makeExecCommandTool().handler({ command: 'npm', args: ['run', 'build'] }),
+      makeShellTool({ bashPath: TEST_BASH }).handler({ command: 'npm run build', cwd: '.' }, { beforeMutate: () => {} }),
     ).resolves.toContain('fixture build passed');
-    await expect(
-      makeExecCommandTool().handler({ command: process.execPath, args: ['&&', 'bad'] }),
-    ).rejects.toThrow('Shell operator');
   }, 15_000);
 
   it('executes every Git handler through CLI discovery, with no Git extension present', async () => {

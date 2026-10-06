@@ -2,7 +2,6 @@ import { describe, expect, it } from 'vitest';
 import type { ForgeConfig } from '../../src/config/types';
 import { ForgeConfigSchema } from '../../src/config/schema';
 import { makeOllamaStarterConfig } from '../../src/config/StarterConfig';
-import { makeExecCommandTool } from '../../src/tools/execTools';
 import {
   permissionsSuppressedByBlock,
   resolveToolPermissions,
@@ -18,46 +17,41 @@ function configWith(permissions?: ForgeConfig['permissions']): ForgeConfig {
 }
 
 describe('resolveToolPermissions', () => {
-  it('keeps shell scripts opt-in across defaults, starter config, and legacy permissions', async () => {
+  it('leaves the shell unset so the call site selects the platform default', () => {
     const parsed = ForgeConfigSchema.parse({
       models: [{ name: 'test', provider: 'ollama', endpoint: 'http://127.0.0.1:11434' }],
       active_model: 'test',
       llama_server: {},
-      permissions: { exec: { headless: true } },
     });
-    expect(parsed.permissions?.exec?.shell_scripts).toBe(false);
+    expect(parsed.permissions?.exec?.shell).toBeUndefined();
+  });
+
+  it('accepts the shell choice and inert legacy shell_scripts key', () => {
+    const parsed = ForgeConfigSchema.parse({
+      models: [{ name: 'test', provider: 'ollama', endpoint: 'http://127.0.0.1:11434' }],
+      active_model: 'test',
+      llama_server: {},
+      permissions: { exec: { headless: true, shell: 'bash', shell_scripts: true } },
+    });
+    expect(parsed.permissions?.exec?.shell).toBe('bash');
+    expect(parsed.permissions?.exec?.shell_scripts).toBe(true);
 
     const starter = ForgeConfigSchema.parse(makeOllamaStarterConfig('http://127.0.0.1:11434', ['test']));
-    expect(starter.permissions?.exec?.shell_scripts).toBe(false);
+    expect(starter.permissions?.exec).toEqual({ terminal: false, headless: true, shell_scripts: false });
 
     const legacyConfig = configWith();
     expect(legacyConfig.permissions?.exec?.shell_scripts === true).toBe(false);
     expect(resolveToolPermissions(legacyConfig).has('headless')).toBe(true);
-    await expect(
-      makeExecCommandTool(() => legacyConfig.permissions?.exec?.shell_scripts === true).handler({
-        command: 'pwsh',
-        args: ['-Command', 'Get-Process'],
-        cwd: process.cwd(),
-      }),
-    ).rejects.toThrow('permissions.exec.shell_scripts');
   });
 
-  it('requires headless execution before shell scripts can be enabled', () => {
+  it('accepts legacy shell_scripts without requiring headless', () => {
     const result = ForgeConfigSchema.safeParse({
       models: [{ name: 'test', provider: 'ollama', endpoint: 'http://127.0.0.1:11434' }],
       active_model: 'test',
       llama_server: {},
       permissions: { exec: { shell_scripts: true } },
     });
-    expect(result.success).toBe(false);
-    if (!result.success) {
-      expect(result.error.issues.map((issue) => issue.message).join(' ')).toContain(
-        'permissions.exec.shell_scripts',
-      );
-      expect(result.error.issues.map((issue) => issue.message).join(' ')).toContain(
-        'permissions.exec.headless',
-      );
-    }
+    expect(result.success).toBe(true);
   });
 
   it('preserves legacy access when the permissions block is omitted', () => {

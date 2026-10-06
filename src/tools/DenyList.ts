@@ -1,198 +1,212 @@
-/**
- * Platform-aware command denylist.
- * Checked before any exec_command or run_terminal dispatch.
- */
+/** Whole-token destructive and refused shell rules. */
 
-export interface DenyListEntry {
-  /** Matched against the whole command line. Omit when `match` is supplied. */
-  pattern?: RegExp;
-  /**
-   * Precise predicate for rules a regex cannot express safely.
-   *
-   * A denylist that refuses the wrong thing is not "extra safe" — it teaches the
-   * agent that a legitimate command is forbidden, and it goes looking for a way
-   * around the block. Rules that need to reason about flags belong here.
-   */
-  match?: (fullCommand: string) => boolean;
+export interface ShellTokenRule {
+  match(tokens: readonly string[]): boolean;
   description: string;
-  /** Appended to the refusal so the agent is told what to do instead. */
-  alternative?: string;
+  alternative: string;
+  class: 'dangerous' | 'refused';
 }
 
-/** Command words that may precede a subcommand, e.g. `sudo rm`, `git rm`. */
-const COMMAND_PREFIXES = new Set(['sudo', 'git', 'npx', 'pnpm', 'yarn', 'npm', 'run', 'exec']);
+const PREFIXES = new Set(['sudo', 'doas', 'command', 'env']);
+const lower = (tokens: readonly string[]) => tokens.map((token) => token.toLowerCase());
 
-/**
- * True when the command line is a recursive *and* forced delete.
- *
- * Replaces `/\brm\b.*-[rR].*-?[fF]/`, whose trailing `-?[fF]` made the hyphen
- * optional — so any bare "r" in a later filename satisfied it. Measured:
- * `git rm -f README.md` was refused (the "r" in README) while
- * `git rm -f notes.txt` was allowed. The agent needed the former to clean up
- * five temp files it had created, and the refusal read as policy rather than as
- * the accident it was.
- *
- * Recursion and force must BOTH be present, as real flags — combined (`-rf`),
- * separate (`-r -f`), or long (`--recursive --force`).
- */
-export function isRecursiveForceDelete(fullCommand: string): boolean {
-  const tokens = fullCommand.split(/\s+/u).filter(Boolean);
-  for (let i = 0; i < tokens.length; i += 1) {
-    if (tokens[i] !== 'rm') continue;
-    // `rm` must be the command itself, or the subcommand of a known wrapper —
-    // not a substring of a path that happened to tokenize alone.
-    const previous = tokens[i - 1]?.replace(/\.(cmd|exe|bat)$/iu, '').toLowerCase();
-    if (previous !== undefined && !COMMAND_PREFIXES.has(previous)) continue;
-    let recursive = false;
-    let force = false;
-    for (const token of tokens.slice(i + 1)) {
-      if (!token.startsWith('-')) continue;
-      if (token.startsWith('--')) {
-        if (token === '--recursive') recursive = true;
-        if (token === '--force') force = true;
-        continue;
-      }
-      // Short flags cluster: -rf, -fr, -r, -f are all one token's letters.
-      const letters = token.slice(1);
-      if (/[rR]/u.test(letters)) recursive = true;
-      if (/[fF]/u.test(letters)) force = true;
-    }
-    if (recursive && force) return true;
-  }
-  return false;
+function commandIndexes(tokens: readonly string[], names: readonly string[]): number[] {
+  const normalized = lower(tokens);
+  let index = 0;
+  while (index < normalized.length && PREFIXES.has(normalized[index] ?? '')) index += 1;
+  if (normalized[index] === '&') index += 1;
+  const program = (normalized[index] ?? '').replace(/\.(cmd|exe|bat)$/u, '');
+  if (names.includes(program)) return [index];
+  if (program === 'git' && names.includes(normalized[index + 1] ?? '')) return [index + 1];
+  return [];
 }
 
-/**
- * True for a `git checkout` / `git restore` that throws away working-tree
- * changes, rather than one that just moves between branches.
- *
- * `git checkout -- .` and `git restore .` delete uncommitted work with no
- * confirmation and no reflog entry to recover from — the one genuinely
- * unrecoverable thing in everyday git. `git reset --hard` also destroys
- * uncommitted working-tree changes; the reflog can restore commits, not those
- * discarded changes, so it remains refused.
- *
- * `git checkout <branch>` stays allowed: git refuses it when it would clobber
- * local modifications, so it is not the hazard. `git restore --staged <path>`
- * only unstages and is likewise left alone.
- */
-export function isDestructiveGitCheckout(fullCommand: string): boolean {
-  const tokens = fullCommand.split(/\s+/u).filter(Boolean);
-  const git = tokens.indexOf('git');
-  if (git === -1) return false;
-  const sub = tokens[git + 1];
-  const rest = tokens.slice(git + 2);
-  if (sub === 'restore') {
-    // Only `--staged`/`--cached` restores leave the working tree alone.
-    return !rest.some((t) => t === '--staged' || t === '--cached');
-  }
-  if (sub !== 'checkout') return false;
-  // `--` introduces pathspecs: everything after it is a file to overwrite.
-  if (rest.includes('--')) return true;
-  // `git checkout .` / `git checkout src/` — a pathspec with no branch.
-  return rest.some((t) => t === '.' || t.endsWith('/'));
+function flags(tokens: readonly string[]): string[] {
+  return tokens.filter((token) => token.startsWith('-') || token.startsWith('/'));
 }
 
-/**
- * True for a `git push` that can destroy commits on the remote: force
- * (`-f`, `--force`, `--force-with-lease`, `--force-if-includes`, a `+refspec`),
- * deletion (`-d`, `--delete`, a `:ref` refspec), `--mirror` or `--prune`.
- * A fast-forward push is allowed. Matches whole tokens, never substrings.
- */
-export function isDestructiveGitPush(fullCommand: string): boolean {
-  const tokens = fullCommand.split(/\s+/u).filter(Boolean);
-  const git = tokens.indexOf('git');
-  if (git === -1 || tokens[git + 1] !== 'push') return false;
-  return tokens
-    .slice(git + 2)
-    .some(
-      (t) =>
-        /^--(force|force-with-lease|force-if-includes|delete|mirror|prune)(=|$)/u.test(t) ||
-        /^-[a-zA-Z]*[fd][a-zA-Z]*$/u.test(t) ||
-        t.startsWith('+') ||
-        (t.startsWith(':') && t.length > 1),
+export function isRecursiveForceDelete(tokens: readonly string[]): boolean {
+  return commandIndexes(tokens, ['rm']).some((index) => {
+    const previous = tokens[index - 1]?.toLowerCase();
+    if (previous && !PREFIXES.has(previous) && previous !== 'git') return false;
+    const switches = flags(tokens.slice(index + 1)).map((token) => token.toLowerCase());
+    const recursive = switches.some((flag) => flag === '--recursive' || /^-[^-]*r/u.test(flag));
+    const force = switches.some((flag) => flag === '--force' || /^-[^-]*f/u.test(flag));
+    return recursive && force;
+  });
+}
+
+function isRecursiveDelete(tokens: readonly string[]): boolean {
+  return commandIndexes(tokens, ['rm']).some((index) =>
+    flags(tokens.slice(index + 1)).some((flag) => {
+      const value = flag.toLowerCase();
+      return value === '--recursive' || /^-[^-]*r/u.test(value);
+    }),
+  );
+}
+
+export function isDestructiveGitCheckout(tokens: readonly string[]): boolean {
+  const index = commandIndexes(tokens, ['git'])[0];
+  if (index === undefined) return false;
+  const [subcommand, ...rest] = lower(tokens.slice(index + 1));
+  if (subcommand === 'restore')
+    return !rest.some((token) => token === '--staged' || token === '--cached');
+  if (subcommand !== 'checkout') return false;
+  const separator = rest.indexOf('--');
+  if (separator >= 0) return rest.length > separator + 1;
+  return rest.some((token) => token === '.' || token.endsWith('/'));
+}
+
+export function isDestructiveGitPush(tokens: readonly string[]): boolean {
+  const index = commandIndexes(tokens, ['git'])[0];
+  if (index === undefined || lower(tokens[index + 1] ? [tokens[index + 1]] : [])[0] !== 'push')
+    return false;
+  return tokens.slice(index + 2).some((token) => {
+    const value = token.toLowerCase();
+    return (
+      /^--(force|force-with-lease|force-if-includes|delete|mirror|prune)(=|$)/u.test(value) ||
+      /^-[a-z]*[fd][a-z]*$/u.test(value) ||
+      value.startsWith('+') ||
+      (value.startsWith(':') && value.length > 1)
     );
+  });
 }
 
-/** Returns the built-in denylist covering common destructive commands. */
-export function getBuiltinDenyList(): DenyListEntry[] {
+export function getBuiltinDenyList(): ShellTokenRule[] {
+  const dangerous = (
+    description: string,
+    alternative: string,
+    match: ShellTokenRule['match'],
+  ): ShellTokenRule => ({ class: 'dangerous', description, alternative, match });
+  const refused = (
+    description: string,
+    alternative: string,
+    match: ShellTokenRule['match'],
+  ): ShellTokenRule => ({ class: 'refused', description, alternative, match });
   return [
-    // ── Unix / cross-platform ────────────────────────────────────────────────
-    // Order-agnostic: catches rm -rf, rm -r -f, rm -fr, rm -f -r, etc.
-    {
-      match: isRecursiveForceDelete,
-      description: 'rm -rf (recursive force delete)',
-      alternative:
-        'To remove a path, use the delete_file tool (recursive: true for a directory). ' +
-        'It moves the target to the recycle bin unless you pass to_trash: false.',
-    },
-    {
-      pattern: /\bgit\s+reset\s+--hard\b/,
-      description: 'git reset --hard (discards working-tree changes)',
-      alternative: 'Use restore_file for tracked file restoration.',
-    },
-    {
-      pattern: /git\s+clean\s+-[fFdDxX]/,
-      description: 'git clean -f',
-      alternative: 'To remove specific files, use the delete_file tool on each path.',
-    },
-    {
-      match: isDestructiveGitCheckout,
-      description: 'git checkout/restore discarding working-tree changes',
-      alternative:
-        'This deletes uncommitted work unrecoverably. To put a file back to its ' +
-        'committed content — including one a commit deleted — use the restore_file ' +
-        'tool, which asks first: restore_file({"paths": ["<path>"], "ref": "HEAD~1"}). ' +
-        'To move between branches use switch_branch; to inspect a file at a ref use git_read with operation "show".',
-    },
-    // A plain push is allowed — exec_command's terminal approval gate is the
-    // check on it. Only pushes that overwrite or delete remote history stay out.
-    {
-      match: isDestructiveGitPush,
-      description: 'git push --force/--delete/--mirror (overwrites remote history)',
-      alternative:
-        'Push without force — if the remote has diverged, fetch and merge first. ' +
-        "Rewriting or deleting remote refs is the user's call.",
-    },
-    { pattern: /\bgit\s+rebase\b/, description: 'git rebase (rewrites history)' },
-    { pattern: /\bgit\s+branch\s+-[dD]\b/, description: 'git branch -d/-D (deletes a branch)' },
-    { pattern: /\bgit\s+stash\s+(drop|clear)\b/, description: 'git stash drop/clear' },
-    { pattern: /\bgit\s+filter-branch\b/, description: 'git filter-branch (rewrites history)' },
-    { pattern: /\bgit\s+reflog\s+expire\b/, description: 'git reflog expire (destroys recovery)' },
-    { pattern: /DROP\s+(TABLE|DATABASE|SCHEMA)/i, description: 'SQL DROP' },
-    { pattern: /\b(shutdown|reboot|halt|poweroff)\b/, description: 'system power command' },
-    { pattern: /curl\s+.+\|\s*(ba)?sh/, description: 'curl pipe to shell' },
-    { pattern: /wget\s+.+-O\s*-.*\|/, description: 'wget pipe' },
-
-    // ── Windows ───────────────────────────────────────────────────────────────
-    { pattern: /del\s+\/[fFsS]/i, description: 'del /f /s' },
-    { pattern: /rd\s+\/[sS]/i, description: 'rd /s' },
-    { pattern: /rmdir\s+\/[sS]/i, description: 'rmdir /s' },
-    { pattern: /format\s+[a-zA-Z]:/, description: 'disk format' },
-    // Both flag orderings: -Recurse -Force and -Force -Recurse
-    { pattern: /Remove-Item.*-Recurse.*-Force/i, description: 'PowerShell recursive force delete' },
-    { pattern: /Remove-Item.*-Force.*-Recurse/i, description: 'PowerShell recursive force delete' },
-    { pattern: /Invoke-Expression|^\s*iex\s/i, description: 'PowerShell eval' },
-    { pattern: /-EncodedCommand|-enc\s/i, description: 'PowerShell base64 eval' },
-    { pattern: /diskpart\b/i, description: 'diskpart' },
+    dangerous(
+      'recursive force delete',
+      'Use delete_file for a specific path.',
+      isRecursiveForceDelete,
+    ),
+    dangerous('git reset --hard', 'Use restore_file for tracked file restoration.', (t) =>
+      commandIndexes(t, ['git']).some(
+        (i) => lower(t.slice(i + 1, i + 3)).join(' ') === 'reset --hard',
+      ),
+    ),
+    dangerous('git clean -f', 'Use delete_file for specific paths.', (t) =>
+      commandIndexes(t, ['git']).some((i) => {
+        const rest = lower(t.slice(i + 1));
+        return rest[0] === 'clean' && rest.slice(1).some((flag) => /^-[^-]*f/u.test(flag));
+      }),
+    ),
+    dangerous(
+      'git checkout/restore discarding work',
+      'Use restore_file to restore tracked paths.',
+      isDestructiveGitCheckout,
+    ),
+    dangerous(
+      'destructive git push',
+      'Push without force; remote history changes need explicit user intent.',
+      isDestructiveGitPush,
+    ),
+    dangerous(
+      'git rebase rewrites history',
+      'Use merge when preserving history is required.',
+      (t) =>
+        commandIndexes(t, ['git']).some((i) => lower(t[i + 1] ? [t[i + 1]] : [])[0] === 'rebase'),
+    ),
+    dangerous(
+      'git branch -d/-D deletes a branch',
+      'Use switch_branch and confirm the intended branch first.',
+      (t) =>
+        commandIndexes(t, ['git']).some((i) => {
+          const rest = lower(t.slice(i + 1));
+          return rest[0] === 'branch' && rest.slice(1).some((flag) => /^-[^-]*d/u.test(flag));
+        }),
+    ),
+    dangerous('git stash drop/clear', 'Inspect the stash before removing it.', (t) =>
+      commandIndexes(t, ['git']).some((i) =>
+        ['drop', 'clear'].includes(lower(t.slice(i + 1, i + 3))[1] ?? ''),
+      ),
+    ),
+    dangerous('git filter-branch rewrites history', 'Use a reviewed git history migration.', (t) =>
+      lower(t).includes('filter-branch'),
+    ),
+    dangerous(
+      'git reflog expire removes recovery history',
+      'Keep the reflog unless the user explicitly requests cleanup.',
+      (t) =>
+        commandIndexes(t, ['git']).some(
+          (i) => lower(t.slice(i + 1, i + 3)).join(' ') === 'reflog expire',
+        ),
+    ),
+    dangerous(
+      'SQL DROP',
+      'Use a reviewed migration with a backup.',
+      (t) =>
+        t.some((token) => /\bdrop\s+(table|database|schema)\b/iu.test(token)) ||
+        lower(t).some(
+          (word, i) =>
+            word === 'drop' && ['table', 'database', 'schema'].includes(lower(t)[i + 1] ?? ''),
+        ),
+    ),
+    dangerous('recursive Remove-Item', 'Use delete_file for a specific path.', (t) =>
+      commandIndexes(t, ['remove-item', 'ri', 'rm']).some(
+        (i) => lower(t.slice(i + 1)).includes('-recurse') || lower(t.slice(i + 1)).includes('-r'),
+      ),
+    ),
+    dangerous(
+      'process termination',
+      'Use stop_execution for Forge jobs; identify other processes before stopping them.',
+      (t) => commandIndexes(t, ['stop-process', 'taskkill', 'kill', 'pkill']).length > 0,
+    ),
+    dangerous(
+      'PowerShell expression evaluation',
+      'Use a reviewed local script file.',
+      (t) => commandIndexes(t, ['invoke-expression', 'iex']).length > 0,
+    ),
+    dangerous(
+      'recursive delete',
+      'Use delete_file for a specific path.',
+      (t) =>
+        commandIndexes(t, ['rd', 'rmdir', 'del']).some((i) =>
+          lower(t.slice(i + 1)).some((v) => ['/s', '-s', '/q', '-r'].includes(v)),
+        ) ||
+        commandIndexes(t, ['remove-item']).some((i) => lower(t.slice(i + 1)).includes('-recurse')),
+    ),
+    dangerous('recursive rm delete', 'Use delete_file for a specific path.', isRecursiveDelete),
+    refused(
+      'disk format',
+      'Use the operating system disk management UI after confirming the target.',
+      (t) => commandIndexes(t, ['format', 'diskpart']).length > 0,
+    ),
+    refused(
+      'system power command',
+      'Use sleep_computer for a supported sleep request.',
+      (t) =>
+        commandIndexes(t, [
+          'shutdown',
+          'reboot',
+          'halt',
+          'poweroff',
+          'restart-computer',
+          'stop-computer',
+        ]).length > 0,
+    ),
+    refused('encoded PowerShell command', 'Pass a readable command or script instead.', (t) =>
+      commandIndexes(t, ['pwsh', 'powershell']).some((i) =>
+        lower(t.slice(i + 1)).some((v) => ['-encodedcommand', '-enc', '-ec'].includes(v)),
+      ),
+    ),
+    refused(
+      'download piped to a shell',
+      'Download and inspect the script before running it.',
+      (t) =>
+        lower(t).some(
+          (v, i) =>
+            v === '|' && ['sh', 'bash', 'iex', 'invoke-expression'].includes(lower(t)[i + 1] ?? ''),
+        ),
+    ),
   ];
-}
-
-/**
- * Checks a command + args array against the denylist entries.
- * Returns the first matching entry, or null if none match.
- */
-export function checkDenyList(
-  command: string,
-  args: string[],
-  entries: DenyListEntry[],
-): DenyListEntry | null {
-  const fullCommand = [command, ...args].join(' ');
-  for (const entry of entries) {
-    const denied = entry.match
-      ? entry.match(fullCommand)
-      : (entry.pattern?.test(fullCommand) ?? false);
-    if (denied) return entry;
-  }
-  return null;
 }

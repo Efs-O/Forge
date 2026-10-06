@@ -413,7 +413,7 @@ describe('remote stop_action through the controller', () => {
     // for a gate that no longer exists.
     f.askApproval({
       id: 'confirm-1',
-      toolName: 'exec_command',
+      toolName: 'shell',
       detail: 'run a build',
       dangerous: false,
       conversationId: 'c1',

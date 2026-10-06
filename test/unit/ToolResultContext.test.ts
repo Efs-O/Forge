@@ -131,7 +131,7 @@ describe('read_tool_result', () => {
       {
         beforeMutate: () => undefined,
         conversationMessages: [
-          { role: 'tool', tool_call_id: 'old', name: 'exec_command', content: raw },
+          { role: 'tool', tool_call_id: 'old', name: 'shell', content: raw },
         ],
       },
     );
@@ -155,7 +155,7 @@ describe('read_tool_result', () => {
       {
         role: 'tool',
         tool_call_id: 'needle-tool-id',
-        name: 'exec_command',
+        name: 'shell',
         content: [{ type: 'text', text: 'Earlier Needle output.' }],
       },
       { role: 'user', content: 'After the cut.' },

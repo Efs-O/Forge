@@ -3,7 +3,6 @@ import * as path from 'path';
 import { describe, expect, it, vi } from 'vitest';
 import { ToolRegistry, type RegisteredTool } from '../../src/tools/ToolRegistry';
 import { makeApplyLineEditsTool } from '../../src/tools/structuredEditTool';
-import { makeExecCommandTool } from '../../src/tools/execTools';
 
 vi.mock('vscode', () => ({
   workspace: { workspaceFolders: [{ uri: { fsPath: process.cwd() } }] },
@@ -29,7 +28,7 @@ function makeBoolTool(
 
 describe('ToolRegistry.invalidArgs boolean refusal (Fix B)', () => {
   const registry = new ToolRegistry();
-  const execTool = makeBoolTool('exec_command', {
+  const execTool = makeBoolTool('shell', {
     command: { type: 'string' },
     background: { type: 'boolean' },
     notify_on_exit: { type: 'boolean' },
@@ -37,26 +36,26 @@ describe('ToolRegistry.invalidArgs boolean refusal (Fix B)', () => {
 
   it('names the field and shows the unquoted JSON boolean for "True"', () => {
     const message = registry.invalidArgs(execTool, { command: 'npx', background: 'True' });
-    expect(message).toBe('Error: exec_command background="True": use true');
+    expect(message).toBe('Error: shell background="True": use true');
     expect(message?.length).toBeLessThanOrEqual(200);
   });
 
   it('names the field and shows the unquoted JSON boolean for "False"', () => {
     const message = registry.invalidArgs(execTool, { command: 'npx', background: 'False' });
-    expect(message).toBe('Error: exec_command background="False": use false');
+    expect(message).toBe('Error: shell background="False": use false');
   });
 
   it('uses a short generic instruction for a non-True/False string', () => {
     const message = registry.invalidArgs(execTool, { command: 'npx', background: 'yes' });
     expect(message).toBe(
-      'Error: exec_command background="yes": use true or false without quotes',
+      'Error: shell background="yes": use true or false without quotes',
     );
   });
 
   it('uses a short generic instruction for a number', () => {
     const message = registry.invalidArgs(execTool, { command: 'npx', background: 1 });
     expect(message).toBe(
-      'Error: exec_command background=1: use true or false without quotes',
+      'Error: shell background=1: use true or false without quotes',
     );
   });
 
@@ -67,7 +66,7 @@ describe('ToolRegistry.invalidArgs boolean refusal (Fix B)', () => {
       notify_on_exit: 'False',
     });
     expect(message).toBe(
-      'Error: exec_command background="True": use true, notify_on_exit="False": use false',
+      'Error: shell background="True": use true, notify_on_exit="False": use false',
     );
     expect(message?.length).toBeLessThanOrEqual(200);
   });
@@ -93,17 +92,6 @@ describe('ToolRegistry.invalidArgs boolean refusal (Fix B)', () => {
     const message = registry.invalidArgs(tool, { background: 'True' });
     expect(message).toBe('Error: invalid boolean argument; use unquoted JSON true or false.');
     expect(message?.length).toBeLessThanOrEqual(200);
-  });
-});
-
-describe('ToolRegistry invalid exec arguments', () => {
-  it('recognises monitor_execution fields before the missing-command refusal', () => {
-    const registry = new ToolRegistry();
-    const message = registry.invalidArgs(makeExecCommandTool(), {
-      execution_id: 'exec-1',
-      wait_ms: 1000,
-    });
-    expect(message).toContain('these are `monitor_execution` arguments; call that tool');
   });
 });
 

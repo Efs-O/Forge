@@ -1,332 +1,38 @@
-import * as child_process from 'child_process';
+import * as childProcess from 'child_process';
 import * as fs from 'fs';
 import * as path from 'path';
-import { resolveRipgrep } from './RipgrepResolver';
 
-/**
- * Single owner of "what does `exec_command` actually spawn". Commands run with
- * `shell: false`, so anything that is not a real executable image has to be
- * translated here or it cannot run at all.
- */
-
-export interface PackageRunnerInvocation {
-  command: string;
-  argsPrefix: string[];
-}
-
-export interface ExecInvocation {
-  command: string;
-  args: string[];
-}
-
-export type PackageRunner = 'npm' | 'npx';
-
-/** Injectable seam so the Windows resolution rules are testable off Windows. */
+/** Injectable PATH probe for locating Git Bash without ever resolving System32\bash.exe. */
 export interface RunnerProbe {
-  /** Every match for a program name on PATH, in PATH order. */
   which(program: string): string[];
   exists(candidate: string): boolean;
 }
 
-function whichAll(program: string): string[] {
-  const lookup = child_process.spawnSync('where.exe', [program], { encoding: 'utf8' });
-  return (lookup.stdout ?? '')
-    .split(/\r?\n/u)
-    .map((entry) => entry.trim())
-    .filter((entry) => entry.length > 0);
+function systemProbe(): RunnerProbe {
+  return {
+    which: (program) => {
+      const lookup = childProcess.spawnSync('where.exe', [program], { encoding: 'utf8' });
+      return (lookup.stdout ?? '')
+        .split(/\r?\n/u)
+        .map((entry) => entry.trim())
+        .filter(Boolean);
+    },
+    exists: fs.existsSync,
+  };
 }
 
-const SYSTEM_PROBE: RunnerProbe = {
-  which: whichAll,
-  exists: (candidate) => fs.existsSync(candidate),
-};
-
-/**
- * npm and npx are .cmd shims on Windows, which cannot be passed to spawn with
- * shell:false. Resolve the shim to a node.exe and the npm CLI script so project
- * scripts remain shell-free and user arguments cannot become shell syntax.
- *
- * A shim does NOT have to sit beside a node.exe. `npm install -g npm` puts a
- * second shim in the npm prefix directory — on Windows that is %APPDATA%\npm,
- * which carries node_modules/npm but no node.exe — and the prefix usually
- * precedes the Node install on PATH. The real .cmd handles that case itself
- * (`IF EXIST %dp0%\node.exe ... ELSE SET _prog=node`); requiring an adjacent
- * node.exe instead made every `npm run <script>` fail outright with "expected
- * node executable and CLI beside the resolved shim". So: prefer a shim that is
- * self-contained, and otherwise pair its CLI with node resolved from PATH.
- */
-export function resolvePackageRunnerInvocation(
-  runner: PackageRunner,
-  platform: NodeJS.Platform = process.platform,
-  probe: RunnerProbe = SYSTEM_PROBE,
-): PackageRunnerInvocation {
-  if (platform !== 'win32') return { command: runner, argsPrefix: [] };
-
-  const shims = probe
-    .which(`${runner}.cmd`)
-    .filter((entry) => entry.toLowerCase().endsWith(`${runner}.cmd`));
-  if (shims.length === 0) throw new Error(`${runner}: Windows command shim was not found on PATH`);
-
-  const candidates = shims.map((shim) => {
-    const installRoot = path.dirname(shim);
-    return {
-      installRoot,
-      node: path.join(installRoot, 'node.exe'),
-      cli: path.join(installRoot, 'node_modules', 'npm', 'bin', `${runner}-cli.js`),
-    };
-  });
-
-  const selfContained = candidates.find((c) => probe.exists(c.node) && probe.exists(c.cli));
-  if (selfContained) return { command: selfContained.node, argsPrefix: [selfContained.cli] };
-
-  const withCli = candidates.find((c) => probe.exists(c.cli));
-  const node = probe.which('node.exe')[0];
-  if (withCli && node) return { command: node, argsPrefix: [withCli.cli] };
-
-  const roots = candidates.map((c) => c.installRoot).join(', ');
-  throw new Error(
-    withCli
-      ? `${runner}: found ${withCli.cli} but no node.exe on PATH to run it with`
-      : `${runner}: no ${runner}-cli.js beside any shim on PATH (looked in ${roots})`,
-  );
-}
-
-/**
- * Recognises the package runners in the two forms a model writes them: bare
- * (`npm`), and with the Windows extension it reaches for after the bare name
- * fails with ENOENT (`npm.cmd`).
- *
- * Deliberately NOT an absolute path to a shim. Canonicalising one would mean
- * re-resolving through PATH and possibly running a different npm than the path
- * named, and it would let a path spelling reach a runner the denylist inspects
- * by bare name.
- */
-export function matchPackageRunner(command: string): PackageRunner | undefined {
-  const base = command.toLowerCase();
-  const stem = base.endsWith('.cmd') ? base.slice(0, -4) : base;
-  return stem === 'npm' || stem === 'npx' ? stem : undefined;
-}
-
-/**
- * The name the guards must inspect. `npm.cmd` and `npm` are the same program,
- * so the denylist has to see one spelling — `COMMAND_PREFIXES` there knows
- * `npm`, and would wave `npm.cmd rm -rf .` straight through otherwise.
- * Canonicalise BEFORE any guard runs, never after.
- */
-export function canonicalizeExecCommand(command: string): string {
-  return matchPackageRunner(command) ?? command;
-}
-
-/** Named twice over, so the wording cannot drift between spellings of grep. */
-const SEARCH_ALTERNATIVE =
-  'Use search_code for literal or regex matches (bundled ripgrep), ' +
-  'or search_codebase for a conceptual query.';
-
-/**
- * Programs `exec_command` cannot run here, and the tool that does the job.
- *
- * Two populations, one cure. cmd.exe builtins have no executable image, so
- * `spawn` reports them missing — confusing, since the model can see the
- * command work in its own terminal. The Unix text utilities are simply absent
- * from a Windows PATH: `grep` lives inside Git Bash and nowhere a shell-free
- * spawn can reach it, so the model gets a bare `spawn grep ENOENT` naming
- * nothing it could use instead. That is the shape that left `delete_file`
- * uncalled for ~3,000 tool calls — a refusal the agent reads as "the
- * capability does not exist", after which it goes looking for a workaround.
- *
- * Ripgrep ships with VS Code and already backs `search_code` and `find_files`,
- * so there is nothing to install here; there is only something to say.
- */
-const UNAVAILABLE_PROGRAM_ALTERNATIVES: ReadonlyMap<string, string> = new Map([
-  ['dir', 'Use the list_directory tool.'],
-  ['ls', 'Use the list_directory tool.'],
-  ['cd', 'Pass the cwd argument to exec_command instead.'],
-  ['copy', 'Use read_file and write_file.'],
-  ['move', 'Use read_file, write_file, and delete_file.'],
-  ['del', 'Use the delete_file tool.'],
-  ['erase', 'Use the delete_file tool.'],
-  ['rd', 'Use delete_file with recursive: true.'],
-  ['rmdir', 'Use delete_file with recursive: true.'],
-  ['md', 'Use the create_directory tool.'],
-  ['mkdir', 'Use the create_directory tool.'],
-  ['type', 'Use the read_file tool.'],
-  ['echo', 'Use write_file to create file content.'],
-  ['set', 'Environment variables cannot be set for exec_command.'],
-  ['cls', 'There is no terminal to clear.'],
-  // Unix text utilities. Absent from the Windows PATH, and each one has a tool
-  // that returns structured results rather than text to re-parse.
-  ['grep', SEARCH_ALTERNATIVE],
-  ['egrep', SEARCH_ALTERNATIVE],
-  ['fgrep', SEARCH_ALTERNATIVE],
-  ['ripgrep', SEARCH_ALTERNATIVE],
-  ['ack', SEARCH_ALTERNATIVE],
-  // `find` and `findstr` are deliberately absent: both are real programs on
-  // Windows and would spawn successfully, so this map never sees them. Adding
-  // them would mean refusing a command that works, which teaches the agent a
-  // capability does not exist — the opposite of the problem being fixed here.
-  ['cat', 'Use the read_file tool.'],
-  ['head', 'Use read_file, which takes a line range.'],
-  ['tail', 'Use read_file, which takes a line range.'],
-  ['less', 'Use read_file, which takes a line range.'],
-  ['sed', 'Use edit_file (batched edits[]) or apply_line_edits.'],
-  ['awk', 'Use search_code to select lines, then read_file to read them.'],
-  ['wc', 'Use read_file and count what it returns.'],
-  ['touch', 'Use write_file with empty content.'],
-  ['which', 'Use find_files, or exec_command the program directly.'],
-]);
-
-/**
- * `find` is two different programs wearing one name, and only on Windows.
- *
- * The map above cannot help: Windows ships a real `find.exe` in System32, so a
- * model writing Unix `find . -name "*.ts"` spawns successfully and gets back
- * `FIND: Parameter format not correct` — a message about a program it did not
- * think it was running. Redirecting every `find` would be worse, because
- * `find /c "needle" file.txt` is a working command and refusing it teaches the
- * agent a capability does not exist.
- *
- * So distinguish by argv, which is unambiguous: Windows `find` takes `/V /C /N
- * /I /OFF` switches and a quoted string, and accepts no `-` predicate at all.
- * Any of the Unix predicates below therefore means Unix `find` and nothing
- * else. Whole tokens only — a substring test is what made the `rm -rf`
- * denylist refuse `git rm -f README.md`.
- */
-const UNIX_FIND_PREDICATES: ReadonlySet<string> = new Set([
-  '-name',
-  '-iname',
-  '-path',
-  '-ipath',
-  '-regex',
-  '-type',
-  '-maxdepth',
-  '-mindepth',
-  '-mtime',
-  '-mmin',
-  '-newer',
-  '-size',
-  '-empty',
-  '-delete',
-  '-exec',
-  '-execdir',
-  '-print',
-  '-print0',
-  '-prune',
-]);
-
-/**
- * Names the tool for a command that would spawn the wrong program, rather than
- * the missing-program path `describeShellBuiltin` covers. Returns undefined
- * whenever the command as written would do what the caller meant — including
- * every `find` on a platform where `find` *is* the Unix one.
- */
-export function describeWrongPlatformProgram(
-  command: string,
-  args: readonly string[],
-  platform: NodeJS.Platform = process.platform,
-): string | undefined {
-  if (platform !== 'win32') return undefined;
-  // A path the caller spelled out (Git for Windows' usr\bin\find.exe) is the
-  // program they meant; only a bare name resolves to System32's find.exe.
-  if (/[\\/]/u.test(command) && !/[\\/]system32[\\/]/iu.test(command)) return undefined;
-  const base = programBaseName(command);
-  if (base !== 'find') return undefined;
-  if (!args.some((arg) => UNIX_FIND_PREDICATES.has(arg.toLowerCase()))) return undefined;
-  return (
-    '"find" on Windows is a text search utility, not the Unix file finder: it ' +
-    'would reject these arguments rather than match paths. Use the find_files ' +
-    'tool to match paths by glob, or search_code to search file contents.'
-  );
-}
-
-/**
- * Lower-cased basename with any executable extension stripped. `win32.basename`
- * splits on both `\` and `/` on every host; the posix one keeps a Windows path
- * whole, which made the `C:\...\grep.exe` spelling match only on Windows.
- */
-function programBaseName(command: string): string {
-  return path.win32
-    .basename(command)
-    .toLowerCase()
-    .replace(/\.(exe|cmd|bat|com)$/u, '');
-}
-
-/**
- * Matched on the basename with any executable extension stripped, so
- * `C:\Program Files\Git\usr\bin\grep.exe` and a bare `grep` reach the same
- * entry. Whole names only — a substring match is what made the `rm -rf`
- * denylist refuse `git rm -f README.md`.
- */
-export function describeShellBuiltin(command: string): string | undefined {
-  const base = programBaseName(command);
-  return UNAVAILABLE_PROGRAM_ALTERNATIVES.get(base);
-}
-
-/**
- * Translates a model-supplied command+args into what actually gets spawned.
- * Everything else passes through untouched — this deliberately resolves a
- * known, closed set rather than searching PATHEXT for arbitrary shims, because
- * a general .cmd/.bat launcher would hand back the shell that `shell: false`
- * exists to withhold.
- */
-export function resolveExecInvocation(
-  command: string,
-  args: string[],
-  platform: NodeJS.Platform = process.platform,
-  probe?: RunnerProbe,
-  appRoot?: string,
-): ExecInvocation {
-  if (command.toLowerCase() === 'rg' || command.toLowerCase() === 'rg.exe') {
-    const resolution = resolveRipgrep(
-      appRoot,
-      (candidate) => (probe ?? SYSTEM_PROBE).exists(candidate),
-      platform,
-    );
-    if (resolution.command === 'rg') {
-      throw new Error(
-        'rg: VS Code bundled ripgrep was not found; search_code is also unavailable until the bundled executable is installed.',
-      );
-    }
-    return { command: resolution.command, args };
-  }
-  if (platform === 'win32' && isBareBash(command)) {
-    return { command: resolveGitBash(probe ?? SYSTEM_PROBE), args };
-  }
-  const runner = matchPackageRunner(command);
-  if (!runner) return { command, args };
-
-  const invocation = resolvePackageRunnerInvocation(runner, platform, probe);
-  return { command: invocation.command, args: [...invocation.argsPrefix, ...args] };
-}
-
-function isBareBash(command: string): boolean {
-  const base = command.toLowerCase();
-  return base === 'bash' || base === 'bash.exe';
-}
-
-/**
- * On Windows a bare `bash` resolves to `System32\bash.exe`, the WSL launcher,
- * because System32 precedes Git on PATH. That is never the bash the agent
- * means: WSL cannot read the Windows paths every tool hands out, cold-starts a
- * VM, and an abandoned launch crashes its Interop server (microsoft/WSL#41592)
- * until `wsl --terminate`. So bare `bash` is Git Bash, found by location, and
- * a machine without it gets an error naming the fix rather than a silent WSL.
- * WSL stays reachable on purpose through `wsl` or a full path.
- */
-export function resolveGitBash(probe: RunnerProbe, env: NodeJS.ProcessEnv = process.env): string {
+export function resolveGitBash(
+  probe: RunnerProbe = systemProbe(),
+  env: NodeJS.ProcessEnv = process.env,
+): string {
   const roots = [env.ProgramW6432, env.ProgramFiles]
     .filter((dir): dir is string => Boolean(dir))
     .map((dir) => path.win32.join(dir, 'Git'));
   if (env.LOCALAPPDATA) roots.push(path.win32.join(env.LOCALAPPDATA, 'Programs', 'Git'));
-  // Git installed anywhere else: git.exe sits in `<root>\cmd` or `<root>\bin`.
   for (const git of probe.which('git.exe')) roots.push(path.win32.dirname(path.win32.dirname(git)));
-  const bash = roots
-    .map((root) => path.win32.join(root, 'bin', 'bash.exe'))
-    .find((candidate) => probe.exists(candidate));
+  const bash = roots.map((root) => path.win32.join(root, 'bin', 'bash.exe')).find(probe.exists);
   if (bash) return bash;
   throw new Error(
-    'bash: Git Bash was not found (looked for bin\\bash.exe under ' +
-      `${[...new Set(roots)].join(', ') || 'no Git install'}). A bare bash here would be the WSL ` +
-      'launcher, which cannot read Windows paths. Install Git for Windows, or run `wsl` explicitly ' +
-      'if WSL is what you want.',
+    'bash: Git Bash was not found. A bare bash here would launch WSL. Install Git for Windows to use shell: bash.',
   );
 }

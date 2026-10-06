@@ -14,7 +14,7 @@ permissions:
   # and git action still asks for confirmation unless /clanker is on.
   fs: { read: true, write: true, delete: true }
   net: { search: false, fetch: false }
-  exec: { terminal: true, headless: true }
+  exec: { headless: true }
   git: { read: true, write: true }
 
 # The tested agent setup. Auto-compaction and the auto-created FORGE.md are

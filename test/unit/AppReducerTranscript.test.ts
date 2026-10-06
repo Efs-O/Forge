@@ -119,13 +119,13 @@ describe('webview App reducer — transcript rows', () => {
       const command = `npm run test -- --grep ${'x'.repeat(120)}`;
       const started = appModule.reducer(appModule.initialState, {
         type: 'TOOL_ACTIVITY',
-        toolName: 'exec_command',
+        toolName: 'shell',
         detail: command,
         convId: 'tab-1',
       });
       const finished = appModule.reducer(started, {
         type: 'TOOL_RESULT',
-        toolName: 'exec_command',
+        toolName: 'shell',
         label: 'success',
         text: 'ok',
         totalChars: 2,

@@ -22,7 +22,7 @@ describe('neutralizeMediaMarkers', () => {
           {
             id: 'c1',
             type: 'function',
-            function: { name: 'exec_command', arguments: JSON.stringify({ args: [RANDOM] }) },
+            function: { name: 'shell', arguments: JSON.stringify({ args: [RANDOM] }) },
           },
         ],
       },

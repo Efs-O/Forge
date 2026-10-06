@@ -268,10 +268,16 @@ export function watchForgeConfigPaths(
 function warnOnDeprecatedKeys(parsed: Record<string, unknown>): void {
   const permissions = parsed['permissions'] as Record<string, unknown> | undefined;
   const agents = permissions?.['agents'] as Record<string, unknown> | undefined;
+  const exec = permissions?.['exec'] as Record<string, unknown> | undefined;
   if (agents && 'cloud_workers' in agents) {
     void vscode.window.showWarningMessage(
       'Forge: permissions.agents.cloud_workers is deprecated and has no effect — ' +
         'worker dispatch was removed. You can delete it from config.yaml.',
+    );
+  }
+  if (exec && 'shell_scripts' in exec) {
+    void vscode.window.showWarningMessage(
+      'Forge: permissions.exec.shell_scripts is deprecated and has no effect — shell scripts are no longer separately gated. You can delete it from config.yaml.',
     );
   }
 }

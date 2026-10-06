@@ -135,7 +135,7 @@ export function describeProbeFailure(err: unknown): string {
 // ── Windows performance counters + CIM ────────────────────────────────────────
 
 /**
- * Source-controlled and fixed, exactly like `safePowerShellTool`'s script: no
+ * Source-controlled and fixed: no
  * value from a model or a user is ever spliced into it. The one input is a
  * numeric byte threshold, and it travels as an environment variable.
  *
@@ -170,7 +170,7 @@ const SYSTEM_PROBE_SCRIPT = [
   '$processes = @()',
   'if ($wanted.Count -gt 0) {',
   // `-contains` against the collected ids compares VALUES; a WQL -Filter would
-  // have meant building query source out of them. Same rule as query_powershell.
+  // have meant building query source out of them.
   '  $processes = @(Get-CimInstance Win32_Process |',
   '    Where-Object { $wanted -contains [int] $_.ProcessId } |',
   '    ForEach-Object { [pscustomobject]@{ pid = [int] $_.ProcessId; name = [string] $_.Name } })',

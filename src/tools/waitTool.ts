@@ -17,7 +17,7 @@ export const MAX_WAIT_SECONDS = 900;
 /**
  * A plain timed pause.
  *
- * Forge already had a way to wait for a *process* -- exec_command with
+ * Forge already had a way to wait for a *process* -- shell with
  * background plus monitor_execution -- but nothing that produces a delay on
  * its own; that wait resolves the instant the process exits. Asked to ping on
  * an interval, the agent went looking for a sleep binary and burned two rounds

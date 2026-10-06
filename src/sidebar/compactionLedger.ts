@@ -43,14 +43,11 @@ const WRITE_TOOLS = new Set([
 const PATH_KEYS = ['path', 'filepath', 'file_path', 'source', 'destination'];
 
 /**
- * Tools that run something. `query_powershell` is the registered name — there
- * is no `safe_powershell`. `run_tests`/`run_build` were retired in favour of
- * `exec_command` (Phase 2, TOOL_SURFACE_AND_SHELL_ACCESS_PLAN.md) and can no
- * longer be called, but existing saved conversations still contain tool calls
- * under those names — keep recognising them so compacting an OLD chat still
- * classifies and labels those calls correctly.
+ * Tools that run something. Keep the retired names so saved pre-0.17
+ * conversations still classify and label those calls correctly.
  */
 const COMMAND_TOOLS = new Set([
+  'shell',
   'exec_command',
   'run_tests',
   'run_build',
@@ -210,7 +207,7 @@ export function collectWriteActions(messages: readonly ChatMessage[]): Action[] 
 
 /** A readable command label from the call's own arguments. */
 function commandLabel(tool: string, args: Record<string, unknown>): string {
-  if (tool === 'exec_command' || tool === 'run_terminal') {
+  if (tool === 'shell' || tool === 'exec_command' || tool === 'run_terminal') {
     const command = typeof args['command'] === 'string' ? args['command'] : tool;
     const extra = Array.isArray(args['args'])
       ? args['args'].filter((a): a is string => typeof a === 'string').join(' ')
@@ -234,9 +231,9 @@ function commandLabel(tool: string, args: Record<string, unknown>): string {
 }
 
 /**
- * `exec_command` and `query_powershell` answer with `formatExecCommandOutput`'s
- * JSON object, which carries `exitCode` as a field rather than the bracketed
- * suffix. Reading only the suffix recorded every one of them as "no exit code".
+ * Retired exec tools returned a JSON object with `exitCode`; shell returns its
+ * exit code in a plain-text status line. Keep both formats readable for saved
+ * conversations and current tool results.
  */
 function structuredExec(result: string): { exit: string; text: string } | undefined {
   if (!result.trimStart().startsWith('{')) return undefined;
@@ -251,6 +248,8 @@ function structuredExec(result: string): { exit: string; text: string } | undefi
 }
 
 function lastExitCode(result: string): string | undefined {
+  const shellStatus = /^exit (\d+|null)\b/u.exec(result.trimStart());
+  if (shellStatus) return shellStatus[1];
   const structured = structuredExec(result);
   if (structured) return structured.exit;
   EXIT_CODE.lastIndex = 0;

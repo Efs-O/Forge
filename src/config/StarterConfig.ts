@@ -13,7 +13,7 @@ export interface StarterLlamaCppModel {
 const DEFAULT_PERMISSIONS: NonNullable<ForgeConfig['permissions']> = {
   fs: { read: true, write: true, delete: true },
   net: { search: false, fetch: false },
-  exec: { terminal: true, headless: true },
+  exec: { headless: true },
   git: { read: true, write: true },
 };
 

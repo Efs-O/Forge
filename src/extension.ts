@@ -52,6 +52,7 @@ import { ModelManagerPanel } from './sidebar/modelManager/ModelManagerPanel';
 import { registerSidebarCommands } from './vscode/sidebarCommands';
 import { flushPendingModelUsage } from './sidebar/modelManager/usageTracker';
 import { backgroundExecutionManager } from './tools/BackgroundExecutionManager';
+import { sweepShellOutput } from './tools/shellOutput';
 import { terminalCommandTracker } from './tools/TerminalCommandTracker';
 import type { RemoteRuntime } from './remote/RemoteRuntime';
 import { workspaceIdFor } from './remote/RemoteWorkspaceHandoff';
@@ -75,6 +76,11 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
   initLogger(context);
   const log = getLogger();
   log.info('Forge activating');
+  void sweepShellOutput().catch((error: unknown) =>
+    log.warn(
+      `Shell output spill sweep failed: ${error instanceof Error ? error.message : String(error)}`,
+    ),
+  );
 
   const storagePath = context.globalStorageUri.fsPath;
   const statusBar = new BackendStatusBar();

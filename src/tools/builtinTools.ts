@@ -42,7 +42,7 @@ function capRead(text: string): string {
 }
 
 /** `read_file`. Reads any path on disk: refusing outside the workspace bought
- *  nothing, because list_directory and exec_command already read anywhere —
+ *  nothing, because list_directory and shell already read anywhere —
  *  Strata spent ~15 calls on `Get-Content` workarounds after a refusal. Writes
  *  and deletes stay workspace-scoped; checkpoints only cover the workspace. */
 export function makeReadFileTool(): RegisteredTool {

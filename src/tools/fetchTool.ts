@@ -146,7 +146,7 @@ function authHint(url: string, status: number): string {
     return '';
   }
   if (host !== 'api.github.com') return '';
-  return ' — web_fetch sends no credentials. Use exec_command with `gh api <path>` or `gh search code <query>`, which run under the gh login.';
+  return ' — web_fetch sends no credentials. Use shell with `gh api <path>` or `gh search code <query>`, which run under the gh login.';
 }
 
 /**

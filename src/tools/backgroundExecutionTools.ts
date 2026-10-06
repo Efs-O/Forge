@@ -13,7 +13,7 @@ export const DEFAULT_MONITOR_WAIT_MS = 10_000;
 export const MAX_MONITOR_WAIT_MS = 60_000;
 
 /**
- * Shared between exec_command's background-run schema and monitor_execution's
+ * Shared between shell's background-run schema and monitor_execution's
  * description, so the schema budget counts one copy, not two. The negative
  * cases are the point: a model that expects a notice which never comes waits
  * forever, so it must know exactly when none is sent.
@@ -31,13 +31,13 @@ export function makeMonitorExecutionTool(): RegisteredTool {
       function: {
         name: 'monitor_execution',
         description:
-          'Wait for a background exec_command and return new output plus status. Use it when the result is needed in this turn; otherwise prefer notify_on_exit. Reuse the returned cursors and suggested_next_wait_ms; *_dropped_chars means that output is gone. A running job with no output may be silent: inspect its artifact, including nearby or nested .part/.tmp files, instead of polling rapidly.',
+          'Wait for a background shell command and return new output plus status. Use it when the result is needed in this turn; otherwise prefer notify_on_exit. Reuse the returned cursors and suggested_next_wait_ms; *_dropped_chars means that output is gone. A running job with no output may be silent: inspect its artifact, including nearby or nested .part/.tmp files, instead of polling rapidly.',
         parameters: {
           type: 'object',
           properties: {
             execution_id: {
               type: 'string',
-              description: 'ID returned by exec_command with background=true.',
+              description: 'ID returned by shell with background=true.',
             },
             wait_ms: {
               type: 'integer',
@@ -118,7 +118,7 @@ export function makeStopExecutionTool(): RegisteredTool {
           properties: {
             execution_id: {
               type: 'string',
-              description: 'ID returned by exec_command with background=true.',
+              description: 'ID returned by shell with background=true.',
             },
           },
           required: ['execution_id'],

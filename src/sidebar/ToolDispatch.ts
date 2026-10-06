@@ -256,9 +256,10 @@ export class ToolDispatch {
 
         const requiredPermissions = this.toolRegistry.requiredPermissions(reg, args);
         const approvalMetadata = reg.approval?.(args);
+        const autoApproved = reg.autoApprove === true || reg.autoApproveIf?.(args) === true;
         const needsConfirm =
           approvalMetadata !== undefined ||
-          (!reg.autoApprove &&
+          (!autoApproved &&
             requiredPermissions.some(
               (permission) =>
                 WRITE_PERMISSIONS.has(permission) ||
@@ -297,6 +298,7 @@ export class ToolDispatch {
           },
           ...(signal !== undefined ? { abortSignal: signal } : {}),
           ...(convId !== undefined ? { conversationId: convId } : {}),
+          toolCallId: tc.id,
           ...(modelContext ?? {}),
           conversationMessages: messages,
           ...(setPlan !== undefined ? { setPlan } : {}),
