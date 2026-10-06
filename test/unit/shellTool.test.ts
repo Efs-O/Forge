@@ -4,7 +4,7 @@ import * as os from 'os';
 import * as path from 'path';
 import * as vscode from 'vscode';
 import { describe, expect, it, vi } from 'vitest';
-import { makeShellTool, withPathEntry, gitBashDir } from '../../src/tools/shellTool';
+import { makeShellTool, withPathEntry, gitBashDir, posixIdioms } from '../../src/tools/shellTool';
 import { BackgroundExecutionManager } from '../../src/tools/BackgroundExecutionManager';
 import { TEST_BASH } from '../support/bash';
 
@@ -166,6 +166,20 @@ describe('withPathEntry', () => {
     });
     const first = { PATH: `git${sep}sys` };
     expect(withPathEntry(first, 'git', 'prepend')).toBe(first);
+  });
+
+  it('posixIdioms names bash-isms by whole token, as smoke item 4 wrote them', () => {
+    expect(posixIdioms('cd logs && rg -i "dead" *.log | wc -l')).toEqual([
+      'rg with a bare glob',
+      'wc',
+    ]);
+    expect(posixIdioms("rg -o 'x' . | sort | uniq -c | sort -rn")).toEqual(['uniq', 'sort -rn']);
+    expect(posixIdioms('for f in logs/a.log logs/b.log; do printf "%s" "$f"; done')).toEqual([
+      'a for … in loop',
+    ]);
+    expect(posixIdioms('Get-ChildItem *.log | Sort-Object Length')).toEqual([]);
+    expect(posixIdioms('rg "a*b" src')).toEqual([]);
+    expect(posixIdioms('git headroom')).toEqual([]);
   });
 
   it('gitBashDir takes the configured bash folder', () => {

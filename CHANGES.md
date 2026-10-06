@@ -23,6 +23,7 @@
 
 - Tool arguments a local model quotes by mistake are repaired before validation: `"true"`/`"False"`, `"5"`, and a JSON array sent as a string. Only conversions with one possible reading are made; anything else is still refused with the field named.
 - `git_read` output over 30K characters is capped like `shell` output, so a whole-repo diff no longer floods the context.
+- When a PowerShell command fails and it was written in bash syntax (`sort -rn`, `wc`, a bare `*.log` glob, a `for … in` loop), the result says so and says to rerun it with `shell: "bash"`. On the bench, models spent two rounds per task finding this out.
 - When `web_fetch` truncates a page, it now says how much it showed and suggests `find`.
 - `/init` writes only lasting facts. It writes the build and test gate as one chained command, run only after code changes, and proves a regression test by running it before the fix.
 

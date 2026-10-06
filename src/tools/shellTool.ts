@@ -215,6 +215,47 @@ function formatResult(
   return `exit ${code ?? 'null'} · ${seconds.toFixed(1)} s${timedOut ? ' · timed out' : ''}\n${text}`;
 }
 
+const POSIX_ONLY = new Set([
+  'head',
+  'tail',
+  'wc',
+  'sed',
+  'awk',
+  'uniq',
+  'xargs',
+  'cut',
+  'tr',
+  'grep',
+]);
+const GLOB_TAKERS = new Set(['rg', 'grep', 'cat', 'wc', 'head', 'tail']);
+
+/**
+ * Names the POSIX idioms in a command that failed under PowerShell, where
+ * native tools get globs unexpanded and `sort -rn` hits Sort-Object. Whole
+ * tokens only; quoted arguments are not inspected.
+ */
+export function posixIdioms(command: string): string[] {
+  const found = new Set<string>();
+  for (const segment of command.split(/\||&&|;/u)) {
+    const tokens = segment.trim().split(/\s+/u).filter(Boolean);
+    const [head, flag] = tokens;
+    if (!head) continue;
+    if (POSIX_ONLY.has(head)) found.add(head);
+    if (head === 'sort' && flag?.startsWith('-')) found.add(`sort ${flag}`);
+    if (head === 'for' && tokens[2] === 'in') found.add('a for … in loop');
+    if (GLOB_TAKERS.has(head) && tokens.slice(1).some((t) => t.includes('*') && !/^['"-]/u.test(t)))
+      found.add(`${head} with a bare glob`);
+  }
+  return [...found];
+}
+
+function pwshHint(shell: ShellKind, code: number | null, command: string): string {
+  if ((shell !== 'pwsh' && shell !== 'powershell') || code === 0) return '';
+  const idioms = posixIdioms(command);
+  if (!idioms.length) return '';
+  return `\nThis ran in PowerShell, but the command uses POSIX syntax (${idioms.join(', ')}). Rerun it with shell: "bash".`;
+}
+
 async function runForeground(
   executable: string,
   args: string[],
@@ -407,7 +448,10 @@ export function makeShellTool(options: ShellToolOptions = {}): RegisteredTool {
           context?.conversationId ?? 'unknown',
           context?.toolCallId ?? 'unknown',
         );
-        return formatResult(result.code, result.seconds, result.timedOut, capped.text);
+        return (
+          formatResult(result.code, result.seconds, result.timedOut, capped.text) +
+          pwshHint(shell, result.code, command)
+        );
       } catch (error) {
         if ((error as NodeJS.ErrnoException).code === 'ENOENT' && shell === 'pwsh') {
           throw new Error(
