@@ -25,7 +25,11 @@ import { ToolBudget } from '../src/tools/ToolBudget';
 import { UserQuestionService } from '../src/sidebar/UserQuestionService';
 import { UserNotificationService } from '../src/sidebar/UserNotificationService';
 import { registerAllTools } from '../src/tools/registerAllTools';
-import { recordLazyGroupTool, resetLazyToolGroups } from '../src/tools/lazyToolGroups';
+import {
+  hiddenLazyToolNames,
+  recordLazyGroupTool,
+  resetLazyToolGroups,
+} from '../src/tools/lazyToolGroups';
 import type { LocalDelegationService } from '../src/delegation/LocalDelegationService';
 import type { IndexManager } from '../src/search/IndexManager';
 import type { ToolPermission } from '../src/tools/ToolRegistry';
@@ -33,7 +37,18 @@ import type { ToolPermission } from '../src/tools/ToolRegistry';
 const ROOT = path.resolve(__dirname, '..');
 const WORKSPACE = 'n:\\vs code apps\\Forge';
 const GGUF = 'N:/QWEN GGUF/Qwen3.8-27B/Qwen3.8-27B-UD-Q3_K_XL.gguf';
-const TOKENIZE_EXE = 'C:\\Program Files (x86)\\Llamacpp\\llama.cpp-b10673\\llama-tokenize.exe';
+// Newest Forge-installed llama.cpp build (install_llamacpp puts them here).
+const TOKENIZE_EXE = ((): string => {
+  const base = path.join(process.env['LOCALAPPDATA'] ?? '', 'Forge');
+  const builds = fs.existsSync(base)
+    ? fs.readdirSync(base).filter((name) => /^llama\.cpp-b\d+$/u.test(name))
+    : [];
+  builds.sort(
+    (a, b) => Number(a.slice('llama.cpp-b'.length)) - Number(b.slice('llama.cpp-b'.length)),
+  );
+  const newest = builds[builds.length - 1];
+  return newest ? path.join(base, newest, 'llama-tokenize.exe') : '';
+})();
 
 const ALL_PERMISSIONS = new Set<ToolPermission>([
   'read',
@@ -137,8 +152,18 @@ describe('prompt context measurement', () => {
       () => config,
     );
     const budget = new ToolBudget(model);
+    // Same withholding as ModelTurn.buildToolDefinitions on a fresh conversation:
+    // native lazy groups stay hidden unless the model config makes them eager.
+    const hidden = hiddenLazyToolNames(
+      undefined,
+      new Set(model.tools ?? []),
+      true,
+      new Set(model.tool_groups?.eager ?? []),
+    );
     const nativeDefinitions = budget.filterDefinitions(
-      registry.definitions(ALL_PERMISSIONS).filter((d) => !VISION_ONLY.has(d.function.name)),
+      registry
+        .definitions(ALL_PERMISSIONS)
+        .filter((d) => !VISION_ONLY.has(d.function.name) && !hidden.has(d.function.name)),
     );
 
     const mcpDefs = budget.filterDefinitions(
