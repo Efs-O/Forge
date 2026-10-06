@@ -341,10 +341,8 @@ export const ForgeConfigSchema = z
         });
       }
       if (
-        (provider === 'xai' ||
-          provider === 'openrouter' ||
-          provider === 'openai' ||
-          provider === 'openai-compatible') &&
+        // openai-compatible may omit it: local servers usually take no key.
+        (provider === 'xai' || provider === 'openrouter' || provider === 'openai') &&
         !model.api_key_secret
       ) {
         ctx.addIssue({

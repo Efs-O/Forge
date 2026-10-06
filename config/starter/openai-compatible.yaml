@@ -1,6 +1,8 @@
 # Forge starter config — OpenAI-compatible provider
 # Replace the endpoint and model name. Store the token with
-# "Forge: Set Cloud Provider Token" using the secret name below.
+# "Forge: Set Cloud Provider Token" using the secret name below. A local
+# server that takes no key (Strata, LM Studio, vLLM): delete the
+# api_key_secret line and Forge sends no Authorization header.
 
 active_model: provider-model-name
 

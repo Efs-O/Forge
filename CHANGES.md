@@ -13,6 +13,10 @@
   - temperature 0.6, top_p 0.95 and a 200K output ceiling (each request is still clamped to the room the context leaves), with each llama.cpp model's family sampling on top.
 - The setup wizard and the copy-ready `config/starter/*.yaml` templates now produce the same setup, and a test keeps them identical.
 
+### A local OpenAI-compatible server needs no made-up token
+
+- An `openai-compatible` model may now omit `api_key_secret`; Forge then sends no `Authorization` header. Strata, LM Studio and vLLM usually take no key, and the user previously had to store a fake one before the first request. A configured key that is missing from SecretStorage is still an error, and xAI, OpenRouter and OpenAI still require one.
+
 ### `generate_image` can edit a picture you give it
 
 - `reference_paths` (1-4 image paths) conditions a local render on those pictures — "make this sketch a 3D render", "keep this character, change the pose". This needs `image_generation.backends.<name>.vision_encoder` pointing at the mmproj; without it the call is refused with that setting named and a cloud backend offered instead.

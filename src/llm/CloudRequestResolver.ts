@@ -21,6 +21,13 @@ export async function resolveCloudRequestTarget(
     return { baseUrl, apiKey: await resolveXaiToken(model.api_key_secret, secrets) };
   }
   const keyName = model.api_key_secret;
+  // A local OpenAI-compatible server (Strata, LM Studio, vLLM) usually takes no
+  // key. No api_key_secret means no Authorization header; a configured key
+  // that is missing from SecretStorage is still an error below.
+  if (model.provider === 'openai-compatible' && !keyName) {
+    await beforeExternalRequest(model);
+    return { baseUrl, apiKey: '' };
+  }
   const apiKey = keyName ? await secrets?.get(keyName) : undefined;
   if (!apiKey) {
     throw new Error(
