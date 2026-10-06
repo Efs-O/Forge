@@ -19,6 +19,7 @@
 
 - A `/claude`, `/codex` or `/copilot` ask sent from Telegram while a Forge turn was running was injected into that turn as a plain user message with the command stripped, so the named session never received it. It now stays queued for the queue drain, which routes it to that session.
 - A monitor capture no longer asks for approval when the active model is an `openai-compatible` server on this machine (Strata at `127.0.0.1:8090`). The provider type names the wire protocol, not where the screen goes, and gating it made every capture a dangerous prompt that clanker mode cannot skip. A real cloud endpoint and a LAN endpoint still prompt.
+- A path outside the workspace is now refused with a sentence saying every path under that folder is refused the same way. An audited session spent about a dozen tool rounds retrying one refused folder with other spellings and file names.
 
 ## 0.16.89
 

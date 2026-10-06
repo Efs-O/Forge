@@ -47,11 +47,15 @@ export function resolveWorkspacePath(
     if (!inExtra) {
       if (!root) throw new Error('No workspace folder open');
       if (!isPathInside(root, resolved))
+        // The audited agent retried one refused folder a dozen times with other
+        // spellings and file names, a round each: say the refusal is the folder's.
         throw new Error(
           `Path is outside the workspace: ${filePath}` +
             (extra.length > 0
               ? ` (and outside extra_file_roots: ${extra.join(', ')})`
-              : ' (add its folder to extra_file_roots in config.yaml to allow it)'),
+              : ' (add its folder to extra_file_roots in config.yaml to allow it)') +
+            `. Every path under ${path.dirname(resolved)} is refused the same way, whatever ` +
+            'the spelling or file name: ask the user to allow the folder, or work inside the workspace.',
         );
     }
   }

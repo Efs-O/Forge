@@ -21,6 +21,16 @@ describe('workspace path containment', () => {
     ).toThrow(/outside the workspace/i);
   });
 
+  it('says the refusal covers the whole folder, so another spelling is not worth a round', () => {
+    const outside = path.join(base, 'outside');
+    expect(() =>
+      resolveWorkspacePath(path.join(outside, 'scratch.txt'), {
+        workspaceRoot: workspace,
+        mustBeInsideWorkspace: true,
+      }),
+    ).toThrow(`Every path under ${outside} is refused the same way`);
+  });
+
   it('allows absolute paths that are inside the active workspace', () => {
     const target = path.join(workspace, 'src', 'index.ts');
     expect(resolveWorkspacePath(target, { workspaceRoot: workspace })).toBe(target);
