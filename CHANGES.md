@@ -1,5 +1,20 @@
 # Forge — Recent Changes
 
+## 0.16.90
+
+### `generate_image` can edit a picture you give it
+
+- `reference_paths` (1-4 image paths) conditions a local render on those pictures — "make this sketch a 3D render", "keep this character, change the pose". This needs `image_generation.backends.<name>.vision_encoder` pointing at the mmproj; without it the call is refused with that setting named and a cloud backend offered instead.
+- Paths outside the workspace are accepted, because that is where phone uploads and model-folder sketches live. Each reference is downscaled automatically to a 768 px long edge (both sides a multiple of 32) and the result says what it changed. Skipping that step is what turned a 3-minute edit into a 20-minute one.
+- An edit never overwrites its own source: an output path that resolves to one of the references is refused before any GPU work.
+- `count` (1-2) produces that many variations of one prompt, each with its own reported seed and its own file (`name-1`, `name-2`). If the second one fails, the result names the file that was saved and says the second was not produced.
+- Reference edits go through the server's async job endpoint, because that is the only shape measured to actually condition on a reference — `txt2img` accepts the field and silently discards it. A job that outlives `request_timeout_ms` is reported, not silently resumed, and the message says the render may still hold the GPU.
+
+### The image server now starts in the faster mode
+
+- `--auto-fit` is now `on` by default (measured 410s vs 549s for the same picture). New settings `auto_fit`, `max_vram_gib` and `max_reference_edge_px` are available per backend, and `vision_encoder` is verified at start like the other model paths.
+- These settings are part of the server's signature, so after an upgrade an already-running `sd-server` is disposed (same window) or refused (another window). The refusal now says the **configuration** differs rather than blaming the model, which was misleading when both windows share a model.
+
 ## 0.16.89
 
 ### Telegram bubbles: each text block gets its own, status rides the newest

@@ -19,6 +19,14 @@ export interface SdcppImageBackendConfig {
   vae: string;
   cuda_device: number;
   text_encoder_on_cpu: boolean;
+  /** Vision tower (mmproj GGUF) enabling reference-conditioned edits. Absent = no editing. */
+  vision_encoder?: string;
+  /** `--auto-fit on|off`; true is the measured fast mode. */
+  auto_fit: boolean;
+  /** GiB budget for sd-server's managed weights under auto-fit. Absent = flag not passed. */
+  max_vram_gib?: number;
+  /** Longest edge a reference image is downscaled to before being sent. */
+  max_reference_edge_px: number;
   port: number;
   min_free_vram_mb: number;
   idle_timeout_ms: number;

@@ -8,6 +8,7 @@ import type { ChildProcess } from 'child_process';
 import {
   SdServerBackend,
   composeSdServerArgs,
+  sdServerSignature,
   type SdServerBackendDeps,
 } from '../../src/backend/SdServerBackend';
 import {
@@ -206,6 +207,9 @@ describe('sdcpp image_generation schema', () => {
 });
 
 describe('SdServerBackend startup and lifecycle', () => {
+  // A1: an explicit argv snapshot for a config carrying NONE of the new keys.
+  // "Existing cases pass untouched" cannot fail if those cases never asserted
+  // the args, so the shipped defaults are pinned here rather than inferred.
   it('isolates the CUDA device and uses the required loopback, auto-fit, and backend args', async () => {
     const server = rig();
     expect(server.backend.startApproval()?.detail).toContain('7 GB free VRAM');
@@ -217,15 +221,57 @@ describe('SdServerBackend startup and lifecycle', () => {
       CUDA_VISIBLE_DEVICES: '2',
     });
     expect(args).toContain('--auto-fit');
-    expect(args[args.indexOf('--auto-fit') + 1]).toBe('off');
+    // Phase 1: auto-fit on is the shipped default (measured 410s vs 549s for the
+    // same render), and it can only place work on the isolated card or in RAM.
+    expect(args[args.indexOf('--auto-fit') + 1]).toBe('on');
     expect(args).toContain('--listen-ip');
     expect(args[args.indexOf('--listen-ip') + 1]).toBe('127.0.0.1');
     expect(args).toContain('--fa');
     expect(args[args.indexOf('--backend') + 1]).toBe('te=cpu,diffusion=cuda0,vae=cuda0');
     expect(args.slice(-2)).toEqual(['--extra-option', 'value']);
+    // Absent config keys mean the flags are absent, not defaulted to a number:
+    // sd-server keeps its own budget and no vision tower.
+    expect(args).not.toContain('--max-vram');
+    expect(args).not.toContain('--llm_vision');
     expect(composeSdServerArgs({ ...server.config, text_encoder_on_cpu: false })).toContain(
       'te=cuda0,diffusion=cuda0,vae=cuda0',
     );
+  });
+
+  // A3 + A5: the new keys reach the spawn args, and changing them changes the
+  // signature so a server started under the old ones is never adopted.
+  it('emits --auto-fit off, --max-vram and --llm_vision only when configured, and changes the signature', () => {
+    const base = rig().config;
+    const plain = composeSdServerArgs(base);
+    expect(plain).not.toContain('--max-vram');
+    expect(plain).not.toContain('--llm_vision');
+
+    const tuned = {
+      ...base,
+      auto_fit: false,
+      max_vram_gib: 11,
+      vision_encoder: path.join(root, 'mmproj.gguf'),
+    };
+    const tunedArgs = composeSdServerArgs(tuned);
+    expect(tunedArgs[tunedArgs.indexOf('--auto-fit') + 1]).toBe('off');
+    expect(tunedArgs[tunedArgs.indexOf('--max-vram') + 1]).toBe('11');
+    expect(tunedArgs[tunedArgs.indexOf('--llm_vision') + 1]).toBe(path.join(root, 'mmproj.gguf'));
+
+    expect(sdServerSignature(tuned)).not.toBe(sdServerSignature(base));
+    expect(sdServerSignature({ ...base, auto_fit: false })).not.toBe(sdServerSignature(base));
+    expect(sdServerSignature({ ...base, max_vram_gib: 9 })).not.toBe(
+      sdServerSignature({ ...base, max_vram_gib: 11 }),
+    );
+  });
+
+  // A4 (missing-path half): an optional key that IS set must be verified, or a
+  // typo surfaces at the first reference edit instead of at start.
+  it('names vision_encoder when the configured vision tower is missing', async () => {
+    const server = rig(localConfig({ vision_encoder: path.join(root, 'mmproj-typo.gguf') }));
+    await expect(server.backend.start()).rejects.toThrow(
+      /vision_encoder.*mmproj-typo\.gguf.*unavailable/s,
+    );
+    expect(server.spawn).not.toHaveBeenCalled();
   });
 
   it('deduplicates concurrent starts and holds the process while activity is in flight', async () => {
@@ -478,6 +524,29 @@ describe('SdServerBackend orphan reaping and adoption', () => {
         `port 8093.*${first.config.diffusion_model.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}`,
       ),
     );
+    expect(second.spawn).not.toHaveBeenCalled();
+  });
+
+  // A6 (b): the ledger's misleading-refusal case. Both windows share the model
+  // and differ only in vision_encoder — the old wording blamed the model.
+  it('says the configuration differs when only vision_encoder differs, not the model', async () => {
+    const first = rig();
+    await first.backend.start();
+    fs.writeFileSync(path.join(root, 'mmproj.gguf'), 'vision tower');
+    const second = rig(localConfig({ vision_encoder: path.join(root, 'mmproj.gguf') }), {
+      ownerPid: 101,
+      processes: first.processes,
+      fetch: (async () =>
+        new Response(
+          JSON.stringify({ model: { path: first.config.diffusion_model } }),
+        )) as typeof fetch,
+    });
+    await expect(second.backend.start()).rejects.toThrow(
+      /configuration differs from this one.*Stop that backend here or in the other window/s,
+    );
+    // It must not blame the model: both windows use the same GGUF, so naming it
+    // as the difference is the misdirection this row exists to prevent.
+    await expect(second.backend.start()).rejects.not.toThrow(/using model/);
     expect(second.spawn).not.toHaveBeenCalled();
   });
 });

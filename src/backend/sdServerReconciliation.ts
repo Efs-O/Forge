@@ -78,9 +78,17 @@ export async function reconcileSdServerRecord(
     return undefined;
   }
   if (ownerAlive && record.signature !== signature) {
+    // The plan's ledger row (b): this refusal must name the real cause. The old
+    // text said "using model X", which is wrong — and actively misleading — when
+    // both windows share a model and differ only in `vision_encoder`, `auto_fit`
+    // or `max_vram_gib`, because it tells the user to change something that is
+    // already identical. The model is still quoted: it is the one field a user
+    // can compare at a glance.
     throw new Error(
-      `sdcpp port ${record.port} is owned by another Forge window using model ` +
-        `"${record.diffusionModel}". Stop that backend or configure another port/model.`,
+      `sdcpp port ${record.port} is owned by another Forge window whose sd-server configuration ` +
+        `differs from this one (that server's model: "${record.diffusionModel}"; the two configs ` +
+        'differ in model, vision encoder, auto-fit, VRAM cap, or another server argument). Stop ' +
+        'that backend here or in the other window, or configure another port.',
     );
   }
   if (!ownerAlive) {

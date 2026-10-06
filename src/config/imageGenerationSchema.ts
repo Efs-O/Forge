@@ -38,6 +38,36 @@ const SdcppImageBackendSchema = z.object({
   vae: z.string().min(1),
   cuda_device: z.number().int().nonnegative(),
   text_encoder_on_cpu: z.boolean(),
+  /**
+   * Vision tower (mmproj GGUF) that lets a reference image condition the
+   * render. Optional on purpose: text-to-image works without it, an existing
+   * config keeps working, and `reference_paths` refuses with this key named
+   * when it is absent. `sd-server` validates the tower against the diffusion
+   * model's metadata at start (probe 0.8: a wrong GGUF exits 1 in ~5s), so a
+   * bad path is loud rather than silently garbage.
+   */
+  vision_encoder: z.string().min(1).optional(),
+  /**
+   * `--auto-fit on|off`. `true` is the measured fast mode: 410s vs 549s for the
+   * same 768x1280 render. Only ever places work on the card named by
+   * `cuda_device` (the spawn sets `CUDA_VISIBLE_DEVICES`) or in system RAM.
+   */
+  auto_fit: z.boolean().default(true),
+  /**
+   * Per-device GiB budget `sd-server` gives its managed weights and runner
+   * buffers under auto-fit. Absent means the flag is not passed at all, which
+   * is the pre-0.16 behaviour on every card. Raise it when a multi-reference
+   * render drops the prefix cache (`insufficient memory for prefix caching`);
+   * 9 was enough for one reference and 11 for two on a 12 GB card.
+   */
+  max_vram_gib: z.number().int().min(1).max(64).optional(),
+  /**
+   * Longest edge, in pixels, a reference image is downscaled to before it is
+   * sent. The dominant cost in an edit: two full-size references took 20 min
+   * where one at 768px took 3. Being a config field is why no fallback literal
+   * for it exists in `sdcppReferenceInput.ts`.
+   */
+  max_reference_edge_px: z.number().int().min(256).max(1536).default(768),
   port: z.number().int().min(1).max(65535),
   min_free_vram_mb: z.number().int().positive(),
   idle_timeout_ms: z.number().int().positive(),
@@ -55,6 +85,13 @@ const SdcppImageBackendSchema = z.object({
   confirm_on_start: z.boolean(),
   confirm_each: z.boolean(),
 });
+
+/** Reference images an edit may carry. Cap enforced, not advisory: each one is
+ *  a conditioning pass and a share of the VRAM the prefix cache needs. */
+export const MAX_REFERENCE_IMAGES = 4;
+
+/** Variations one call may produce. Each is a full render, so 2 is already minutes. */
+export const MAX_IMAGE_VARIATIONS = 2;
 
 const ImageBackendSchema = z
   .discriminatedUnion('provider', [CloudImageBackendSchema, SdcppImageBackendSchema])

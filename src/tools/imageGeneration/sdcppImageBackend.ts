@@ -1,10 +1,11 @@
-import * as path from 'path';
 import type { SdcppImageBackendConfig } from '../../config/types';
 import { localLlamaFetch } from '../../llm/localLlamaFetch';
-import { describeProbeFailure, probeGpus, type GpuInfo } from '../../system/systemProbes';
+import type { GpuInfo } from '../../system/systemProbes';
 import { withDescribedCause } from '../../util/describeError';
 import { mimeFromHeader } from '../imageTool';
 import { MAX_GENERATED_IMAGE_BYTES, type GeneratedImage } from './cloudImageBackend';
+import { alternativeText, describeHttpFailure } from './sdcppErrors';
+import { assertVramAvailable } from './sdcppVramGate';
 
 /**
  * The `size` argument: Qwen-Image's native training resolutions (about 1.7 MP). Owned here so the tool's enum and
@@ -85,8 +86,6 @@ interface Txt2ImgResponse {
   images?: unknown;
 }
 
-const MAX_ERROR_BODY_CHARS = 400;
-
 /**
  * One image from the local `sd-server`, over `POST /sdapi/v1/txt2img` — the
  * endpoint Phase 0b chose because it honours `seed`, `width`/`height`, `steps`
@@ -136,11 +135,20 @@ export async function generateSdcppImage(request: SdcppImageRequest): Promise<Sd
           signal,
         });
         if (!response.ok) {
-          throw new Error(await describeHttpFailure(backend, response, request.alternatives));
+          throw new Error(
+            await describeHttpFailure(backend, response, request.alternatives, '/sdapi/v1/txt2img'),
+          );
         }
         return (await response.json()) as Txt2ImgResponse;
       },
-      { beforeSpawn: () => assertVramAvailable(request) },
+      {
+        beforeSpawn: () =>
+          assertVramAvailable({
+            backend,
+            alternatives: request.alternatives,
+            ...(request.probe ? { probe: request.probe } : {}),
+          }),
+      },
     );
   } catch (error) {
     if (turnSignal?.aborted) {
@@ -189,51 +197,10 @@ export async function generateSdcppImage(request: SdcppImageRequest): Promise<Sd
 }
 
 /**
- * Refuse before anything is loaded when the configured card cannot hold the
- * model. Fails closed: a probe that cannot see the GPU never waves a render
- * through — the same rule `JOB_GPU_GATE_PLAN.md` states for scheduled jobs.
+ * The shipped abort rule (A12): dropping the HTTP connection does not cancel a
+ * render, so `stopAfterAbort()` decides whether the owned server is stopped and
+ * returns the sentence the user sees. A failed stop is reported with the cause.
  */
-async function assertVramAvailable(request: SdcppImageRequest): Promise<void> {
-  const { backend, alternatives } = request;
-  const key = `image_generation.backends.${backend.name}`;
-  let gpus: GpuInfo[];
-  try {
-    gpus = await (request.probe ?? probeGpus)();
-  } catch (error) {
-    throw new Error(
-      `${backend.name}: could not check free VRAM on CUDA device ${backend.cuda_device} ` +
-        `(${describeProbeFailure(error)}), so no image was generated. Fix the probe, or use ` +
-        `${alternativeText(alternatives)}.`,
-    );
-  }
-  const gpu = gpus.find((entry) => entry.index === backend.cuda_device);
-  if (!gpu) {
-    const seen =
-      gpus.map((entry) => `${entry.index} (${entry.name})`).join(', ') || 'no GPUs at all';
-    throw new Error(
-      `${backend.name}: nvidia-smi reported ${seen}, so there is no GPU at index ` +
-        `${backend.cuda_device}. Set ${key}.cuda_device to one of them, or use ` +
-        `${alternativeText(alternatives)}.`,
-    );
-  }
-  if (gpu.memoryTotalMb === null || gpu.memoryUsedMb === null) {
-    throw new Error(
-      `${backend.name}: nvidia-smi gave no memory figures for GPU ${gpu.index} (${gpu.name}), so Forge ` +
-        `cannot tell whether ${backend.min_free_vram_mb.toLocaleString()} MB is free. No image was ` +
-        `generated; use ${alternativeText(alternatives)}.`,
-    );
-  }
-  const free = gpu.memoryTotalMb - gpu.memoryUsedMb;
-  if (free < backend.min_free_vram_mb) {
-    throw new Error(
-      `${backend.name}: only ${free.toLocaleString()} MB free on GPU ${gpu.index} (${gpu.name}); ` +
-        `${backend.min_free_vram_mb.toLocaleString()} MB is required to load ` +
-        `"${path.win32.basename(backend.diffusion_model)}". Stop whatever holds that card (whisper, a ` +
-        `mmproj, another server) or use ${alternativeText(alternatives)}.`,
-    );
-  }
-}
-
 async function abortAndDescribe(request: SdcppImageRequest, cause: unknown): Promise<string> {
   try {
     return await request.server.stopAfterAbort();
@@ -243,32 +210,6 @@ async function abortAndDescribe(request: SdcppImageRequest, cause: unknown): Pro
       `generate_image: ${request.backend.name} render was cancelled and stopping the server failed too.`,
     );
   }
-}
-
-function describeHttpFailure(
-  backend: SdcppImageBackendConfig,
-  response: Response,
-  alternatives: readonly string[],
-): Promise<string> {
-  return response.text().then((raw) => {
-    const detail = raw.slice(0, MAX_ERROR_BODY_CHARS).trim();
-    if (/out of memory|\bOOM\b|cannot allocate|allocation failed/i.test(detail)) {
-      return (
-        `${backend.name}: out of memory on GPU ${backend.cuda_device} — something else is using it ` +
-        `(whisper, a mmproj); retry, or use ${alternativeText(alternatives)}.` +
-        `${detail ? ` The server said: ${detail}` : ''}`
-      );
-    }
-    return (
-      `${backend.name}: sd-server returned HTTP ${response.status} for /sdapi/v1/txt2img` +
-      `${detail ? `: ${detail}` : ''}. See the "Forge - image server" output channel, or use ` +
-      `${alternativeText(alternatives)}.`
-    );
-  });
-}
-
-function alternativeText(alternatives: readonly string[]): string {
-  return alternatives.length ? `backend ${alternatives.join(' or ')}` : 'a cloud image backend';
 }
 
 function randomSeed(): number {

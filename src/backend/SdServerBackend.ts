@@ -1,5 +1,4 @@
 import { type ChildProcess } from 'child_process';
-import * as fs from 'fs/promises';
 import * as path from 'path';
 import * as vscode from 'vscode';
 import type { SdcppImageBackendConfig } from '../config/types';
@@ -7,6 +6,7 @@ import { touchAdoptedSdServerRecord } from './sdServerAdoption';
 import { composeSdServerArgs, sdServerSignature } from './sdServerArgs';
 import { spawnLlamaServer, killLlamaProcess } from './llamaProcess';
 import { createSdServerRecord, reconcileSdServerRecord } from './sdServerReconciliation';
+import { verifyConfiguredPaths } from './sdServerPaths';
 import { isConnectionRefused, SdServerReadiness } from './sdServerReadiness';
 import {
   deleteSdServerRecord,
@@ -19,7 +19,7 @@ import {
   type SdServerOwnerRecord,
 } from './sdServerOwnerRecord';
 
-export { composeSdServerArgs } from './sdServerArgs';
+export { composeSdServerArgs, sdServerSignature } from './sdServerArgs';
 
 export interface SdStartOptions {
   /**
@@ -339,23 +339,7 @@ export class SdServerBackend {
   }
 
   private async verifyConfiguredPaths(): Promise<void> {
-    const entries = [
-      ['binary', this.config.binary],
-      ['diffusion_model', this.config.diffusion_model],
-      ['text_encoder', this.config.text_encoder],
-      ['vae', this.config.vae],
-    ] as const;
-    for (const [key, configuredPath] of entries) {
-      try {
-        await fs.access(configuredPath);
-      } catch (error) {
-        throw new Error(
-          `image_generation.backends.${this.config.name}.${key}: configured path ` +
-            `"${configuredPath}" is unavailable (${error instanceof Error ? error.message : String(error)}); ` +
-            'correct this path in config.yaml or install the configured file.',
-        );
-      }
-    }
+    await verifyConfiguredPaths(this.config);
   }
 
   private scheduleIdleStop(): void {

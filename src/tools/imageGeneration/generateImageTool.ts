@@ -3,29 +3,33 @@ import * as path from 'path';
 import * as vscode from 'vscode';
 import type { SdServerBackend } from '../../backend/SdServerBackend';
 import type { ForgeConfig, ImageBackendConfig, ImageGenerationConfig } from '../../config/types';
-import type { ToolDefinition } from '../../llm/types';
 import type { UserNotificationService } from '../../sidebar/UserNotificationService';
 import { resolveRealWorkspacePath } from '../../util/WorkspacePaths';
+import type { FfmpegTools } from '../ffmpegLocate';
+import type { RunFfmpeg } from './sdcppReferenceInput';
 import { GENERATED_IMAGE_PREFIX } from '../../sidebar/toolResultView';
 import type { RegisteredTool, ToolHandlerContext } from '../ToolRegistry';
+import { MAX_IMAGE_VARIATIONS } from '../../config/imageGenerationSchema';
 import { generateCloudImage, type GeneratedImage } from './cloudImageBackend';
 import {
-  generateSdcppImage,
-  type SdcppGeneratedImage,
-  type SdcppImageRequest,
-} from './sdcppImageBackend';
+  backendCostTag,
+  describeWithBackends,
+  displayPath,
+  pickBackend,
+  targetPath,
+} from './generateImageToolFormat';
+import {
+  outputCollidesWithReference,
+  prepareLocalReferences,
+  renderLocalVariation,
+  resolveOutputForCollision,
+  type LocalRenderDeps,
+} from './generateImageToolLocal';
+import type { SdcppGeneratedImage, SdcppImageRequest } from './sdcppImageBackend';
+import type { runSdcppImageJob, SdcppJobResult } from './sdcppJobPoll';
 
 const MAX_PROMPT_CHARS = 4_000;
 const CAPTION_PROMPT_CHARS = 200;
-
-const EXTENSION_BY_MIME: Readonly<Record<string, string>> = {
-  'image/png': '.png',
-  'image/jpeg': '.jpg',
-  'image/gif': '.gif',
-  'image/bmp': '.bmp',
-  'image/webp': '.webp',
-};
-const IMAGE_EXTENSIONS = new Set(['.png', '.jpg', '.jpeg', '.gif', '.bmp', '.webp']);
 
 export interface GenerateImageDeps {
   getConfig: () => ForgeConfig;
@@ -37,9 +41,19 @@ export interface GenerateImageDeps {
   generate?: typeof generateCloudImage;
   /** Injectable for tests. */
   generateLocal?: (request: SdcppImageRequest) => Promise<SdcppGeneratedImage>;
+  /** Injectable for tests: the async reference-editing job path. */
+  generateJob?: (request: Parameters<typeof runSdcppImageJob>[0]) => Promise<SdcppJobResult>;
+  /** Injectable for tests: proves nothing was spawned for a refused reference. */
+  onReferenceSpawn?: (argv: string[]) => void;
+  /** Injectable for tests: a located ffmpeg pair, so a unit test never spawns ffmpeg. */
+  ffmpegTools?: FfmpegTools;
+  /** Injectable for tests: the ffmpeg/ffprobe spawn itself. */
+  runReference?: RunFfmpeg;
   /** Injectable for tests; production opens the saved file beside the chat. */
   reveal?: (filePath: string) => Promise<void>;
   now?: () => Date;
+  /** Injectable: the real seed is random, so a rerender is not a byte copy. */
+  seed?: () => number;
 }
 
 export function makeGenerateImageTool(deps: GenerateImageDeps): RegisteredTool {
@@ -78,6 +92,18 @@ export function makeGenerateImageTool(deps: GenerateImageDeps): RegisteredTool {
               enum: ['square', 'portrait', 'landscape'],
               description:
                 'Local backends only: 1328x1328, 928x1664, 1664x928. Cloud backends ignore it.',
+            },
+            reference_paths: {
+              type: 'array',
+              items: { type: 'string' },
+              description:
+                'Local backends only, and only when that backend sets vision_encoder: 1-4 image paths to condition the render on — an edit, a style, or a character to keep. Out-of-workspace paths are accepted (where phone uploads live). Each is downscaled to the configured long-edge cap; the result says so. Slow: ~175s per 768x768 image.',
+            },
+            count: {
+              type: 'integer',
+              minimum: 1,
+              maximum: 2,
+              description: `Variations from one prompt, 1-${MAX_IMAGE_VARIATIONS}. Each gets its own reported seed and its own file (-1/-2), and costs a full render.`,
             },
           },
           required: ['prompt'],
@@ -146,34 +172,101 @@ async function runGenerateImage(
     .filter((entry) => entry.name !== backend.name)
     .map((entry) => entry.name);
   const sizeRequested = typeof args['size'] === 'string' && args['size'].trim() !== '';
+  const count = parseCount(args['count']);
+  const now = (deps.now ?? (() => new Date()))();
 
-  const image =
-    backend.provider === 'sdcpp'
-      ? await generateLocal(deps, backend, prompt, args['size'], alternatives, context)
-      : await (deps.generate ?? generateCloudImage)({
-          backend,
-          prompt,
-          secrets: deps.secrets,
-          ...(context?.abortSignal ? { signal: context.abortSignal } : {}),
-        });
+  if (backend.provider === 'sdcpp') {
+    return runLocalVariations(
+      deps,
+      config,
+      backend,
+      prompt,
+      args,
+      alternatives,
+      count,
+      now,
+      context,
+    );
+  }
 
-  const target = targetPath(
-    config,
-    args['path'],
+  const image = await (deps.generate ?? generateCloudImage)({
+    backend,
     prompt,
-    image,
-    (deps.now ?? (() => new Date()))(),
+    secrets: deps.secrets,
+    ...(context?.abortSignal ? { signal: context.abortSignal } : {}),
+  });
+
+  const paid = ` (paid ${backend.provider} API)`;
+  const target = targetPath(config, args['path'], prompt, image, now);
+  const saved = await saveImage(
+    deps,
+    backend,
+    target,
+    image.bytes,
+    context,
+    captionFor(backend, prompt, paid),
   );
+  const lines = [
+    `${GENERATED_IMAGE_PREFIX}${saved.display} (${image.mime}, ${image.bytes.length.toLocaleString()} bytes) with backend ${backend.name}.`,
+    saved.deliveryLine,
+    `This was a paid ${backend.provider} API call, billed per image.`,
+  ];
+  if (sizeRequested) {
+    lines.push('The size argument applies to local backends only, so this backend ignored it.');
+  }
+  if (image.revisedPrompt) lines.push(`The provider rewrote the prompt as: ${image.revisedPrompt}`);
+  lines.push('To inspect it, call view_image on that path.');
+  return lines.join('\n');
+}
+
+function captionFor(
+  backend: ImageBackendConfig,
+  prompt: string,
+  paid = backend.provider === 'sdcpp' ? '' : ` (paid ${backend.provider} API)`,
+): string {
+  // A cloud render may run with no prompt (`confirm_each: false`), so the
+  // caption and the result are where the user learns it was billed.
+  return `🖼 ${backend.name}${paid}: ${prompt.slice(0, CAPTION_PROMPT_CHARS)}${prompt.length > CAPTION_PROMPT_CHARS ? '…' : ''}`;
+}
+
+/** `count` validated, not clamped: a silent clamp renders a different number of images than the caller asked for. */
+function parseCount(requested: unknown): number {
+  if (requested === undefined || requested === null) return 1;
+  const value = typeof requested === 'number' ? requested : Number(String(requested).trim());
+  if (!Number.isInteger(value) || value < 1 || value > MAX_IMAGE_VARIATIONS) {
+    throw new Error(
+      `generate_image: count must be an integer from 1 to ${MAX_IMAGE_VARIATIONS}; got ` +
+        `${String(requested)}. Each variation is a full render, so ask for at most ` +
+        `${MAX_IMAGE_VARIATIONS}.`,
+    );
+  }
+  return value;
+}
+
+interface SavedImage {
+  absolute: string;
+  display: string;
+  deliveryLine: string;
+}
+
+/**
+ * Write one image and queue it for the watching chats, with the shipped
+ * delivery rule: a `confirm_each` backend sends unbudgeted, anything else goes
+ * through the per-turn file budget.
+ */
+async function saveImage(
+  deps: GenerateImageDeps,
+  backend: ImageBackendConfig,
+  target: string,
+  bytes: Buffer,
+  context: ToolHandlerContext | undefined,
+  caption: string,
+): Promise<SavedImage> {
   const absolute = await resolveRealWorkspacePath(target, undefined, { allowMissing: true });
   context?.beforeMutate([absolute]);
   await fs.mkdir(path.dirname(absolute), { recursive: true });
-  await fs.writeFile(absolute, image.bytes);
-
+  await fs.writeFile(absolute, bytes);
   await (deps.reveal ?? revealBeside)(absolute).catch(() => undefined);
-  // A cloud render may run with no prompt (`confirm_each: false`), so the
-  // caption and the result are where the user learns it was billed.
-  const paid = backend.provider === 'sdcpp' ? '' : ` (paid ${backend.provider} API)`;
-  const caption = `🖼 ${backend.name}${paid}: ${prompt.slice(0, CAPTION_PROMPT_CHARS)}${prompt.length > CAPTION_PROMPT_CHARS ? '…' : ''}`;
   const deliveryEvent = {
     ...(context?.conversationId ? { conversationId: context.conversationId } : {}),
     text: caption,
@@ -186,48 +279,37 @@ async function runGenerateImage(
           chats: await deps.notifications.deliverImageUnbudgeted('confirm_each', deliveryEvent),
         }
       : await deps.notifications.deliverFile(deliveryEvent);
-
-  const lines = [
-    `${GENERATED_IMAGE_PREFIX}${displayPath(absolute)} (${image.mime}, ${image.bytes.length.toLocaleString()} bytes) with backend ${backend.name}.`,
+  return {
+    absolute,
+    display: displayPath(absolute),
     // "Queued", not "Sent": deliverImage returns the number of chats the send
     // was queued for on the turn's tail. The send runs later and can still
     // fail, so claiming it was sent overclaims — the same reason send_file and
     // render_html_to_image say Queued.
-    delivery.kind === 'refused'
-      ? `Saved to ${displayPath(absolute)}, not sent: per-turn file limit (${delivery.reason})`
-      : delivery.chats > 0
-        ? `Queued for ${delivery.chats} remote chat(s).`
-        : 'No remote chat is watching this turn, so nothing was sent to a phone.',
-  ];
-  if (paid) lines.push(`This was a paid ${backend.provider} API call, billed per image.`);
-  if (isLocalImage(image)) {
-    lines.push(`Rendered locally at ${image.width}x${image.height}, seed ${image.seed}.`);
-  } else if (sizeRequested) {
-    lines.push('The size argument applies to local backends only, so this backend ignored it.');
-  }
-  if (image.revisedPrompt) lines.push(`The provider rewrote the prompt as: ${image.revisedPrompt}`);
-  lines.push('To inspect it, call view_image on that path.');
-  return lines.join('\n');
+    deliveryLine:
+      delivery.kind === 'refused'
+        ? `Saved to ${displayPath(absolute)}, not sent: per-turn file limit (${delivery.reason})`
+        : delivery.chats > 0
+          ? `Queued for ${delivery.chats} remote chat(s).`
+          : 'No remote chat is watching this turn, so nothing was sent to a phone.',
+  };
 }
 
 /**
- * Only the local backend reports how it rendered. A predicate rather than
- * `'seed' in image`: `SdcppGeneratedImage` is an intersection, so `in` does not
- * pick it out of the union and `width`/`height` stay invisible to the compiler.
+ * Provider dispatch for the `sdcpp` half: references, then one render per
+ * variation, then save. No fallback: a local refusal is an error.
  */
-function isLocalImage(image: GeneratedImage | SdcppGeneratedImage): image is SdcppGeneratedImage {
-  return 'seed' in image;
-}
-
-/** Provider dispatch for the `sdcpp` half. No fallback: a local refusal is an error. */
-async function generateLocal(
+async function runLocalVariations(
   deps: GenerateImageDeps,
+  config: ImageGenerationConfig,
   backend: Extract<ImageBackendConfig, { provider: 'sdcpp' }>,
   prompt: string,
-  size: unknown,
+  args: Record<string, unknown>,
   alternatives: readonly string[],
+  count: number,
+  now: Date,
   context: ToolHandlerContext | undefined,
-): Promise<SdcppGeneratedImage> {
+): Promise<string> {
   const server = deps.sdServers?.().get(backend.name);
   if (!server) {
     throw new Error(
@@ -239,110 +321,157 @@ async function generateLocal(
         `${alternatives.length ? `backend ${alternatives.join(' or ')}` : 'a cloud image backend'}.`,
     );
   }
-  return (deps.generateLocal ?? generateSdcppImage)({
-    backend,
-    server,
-    prompt,
-    alternatives,
-    ...(size !== undefined ? { size } : {}),
-    ...(context?.abortSignal ? { signal: context.abortSignal } : {}),
-  });
-}
-
-/**
- * The saved path as the result states it: workspace-relative with `/`
- * separators, so the sidebar can turn it into a thumbnail URL. A model may pass
- * an absolute path inside the workspace; the result still reports it relative.
- */
-function displayPath(absolute: string): string {
-  const root = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
-  const relative = root ? path.relative(root, absolute) : absolute;
-  return relative.split(path.sep).join('/');
-}
-
-export function pickBackend(
-  config: ImageGenerationConfig,
-  requested: unknown,
-): ImageBackendConfig | undefined {
-  const name =
-    typeof requested === 'string' && requested.trim() ? requested.trim() : config.default;
-  if (name === undefined) return config.backends[0];
-  return config.backends.find((backend) => backend.name === name);
-}
-
-/**
- * The cost tag the model sees for each backend, derived from `provider` alone —
- * no new config field. An `sdcpp` entry has no `model`, so printing
- * `backend.model` here would advertise `undefined`.
- */
-export function backendCostTag(backend: ImageBackendConfig): string {
-  if (backend.provider === 'sdcpp') {
-    return `local · free · sdcpp · ${modelLabel(backend.diffusion_model)}`;
-  }
-  return `cloud · billed per image · ${backend.provider} · ${backend.model}`;
-}
-
-/** `V:/models/qwen_image_2.1-Q4_K.gguf` -> `qwen_image_2.1-Q4_K`. */
-function modelLabel(modelPath: string): string {
-  const base = path.win32.basename(modelPath);
-  const dot = base.lastIndexOf('.');
-  return dot > 0 ? base.slice(0, dot) : base;
-}
-
-/** Workspace-relative save path, with the extension taken from the real bytes. */
-export function targetPath(
-  config: ImageGenerationConfig,
-  requested: unknown,
-  prompt: string,
-  image: GeneratedImage,
-  now: Date,
-): string {
-  const extension = EXTENSION_BY_MIME[image.mime] ?? '.img';
-  if (typeof requested === 'string' && requested.trim()) {
-    const raw = requested.trim();
-    const current = path.extname(raw).toLowerCase();
-    return (IMAGE_EXTENSIONS.has(current) ? raw.slice(0, -current.length) : raw) + extension;
-  }
-  const stamp = now.toISOString().replace(/[-:]/g, '').replace('T', '-').slice(0, 15);
-  const slug =
-    prompt
-      .toLowerCase()
-      .replace(/[^a-z0-9]+/g, '-')
-      .replace(/^-+|-+$/g, '')
-      .slice(0, 40)
-      .replace(/-+$/, '') || 'image';
-  return path.posix.join(config.output_dir.replace(/\\/g, '/'), `${stamp}-${slug}${extension}`);
-}
-
-function describeWithBackends(
-  base: ToolDefinition,
-  config: ImageGenerationConfig | undefined,
-): ToolDefinition {
-  if (!config) return base;
-  const names = config.backends.map((backend) => backend.name);
-  const fallback = config.default ?? names[0];
-  const listing = config.backends
-    .map((backend) => `${backend.name} (${backendCostTag(backend)})`)
-    .join('; ');
-  const properties = base.function.parameters['properties'] as Record<string, unknown>;
-  return {
-    ...base,
-    function: {
-      ...base.function,
-      parameters: {
-        ...base.function.parameters,
-        properties: {
-          ...properties,
-          backend: {
-            type: 'string',
-            enum: names,
-            description: `Image backend. Omit for the default (${fallback}). Available: ${listing}.`,
-          },
-        },
-      },
-    },
+  const localDeps: LocalRenderDeps = {
+    ...(deps.generateLocal ? { generateLocal: deps.generateLocal } : {}),
+    ...(deps.generateJob ? { generateJob: deps.generateJob } : {}),
+    ...(deps.onReferenceSpawn ? { onReferenceSpawn: deps.onReferenceSpawn } : {}),
+    ...(deps.ffmpegTools ? { ffmpegTools: deps.ffmpegTools } : {}),
+    ...(deps.runReference ? { runReference: deps.runReference } : {}),
+    ffmpegPath: deps.getConfig().video?.ffmpeg_path ?? '',
   };
+  // References are read and downscaled BEFORE any GPU work, so a bad path, an
+  // unsupported format, or a missing ffmpeg costs no render.
+  const references = await prepareLocalReferences(
+    backend,
+    Array.isArray(args['reference_paths']) ? args['reference_paths'] : [],
+    {
+      deps: localDeps,
+      alternatives,
+      ...(context?.abortSignal ? { signal: context.abortSignal } : {}),
+    },
+  );
+
+  // Data-loss guard (A22): an edit must never write over the picture it reads.
+  // The real extension is only known after the render, so the comparison runs on
+  // the extension-stripped stem, here, before the first render. Both sides are
+  // made absolute first: `targetPath` answers workspace-relative while the
+  // references are absolute, and comparing the two spellings directly would miss
+  // the ordinary case of `path: "sketch.png"` against an absolute reference.
+  if (references) {
+    for (let index = 0; index < count; index += 1) {
+      const probe = targetPath(
+        config,
+        args['path'],
+        prompt,
+        PNG_PROBE,
+        now,
+        count > 1 ? index : undefined,
+      );
+      // Resolve the output exactly as `saveImage` will (realpath-aware), so a
+      // junction inside the workspace cannot slip a write onto a reference.
+      const realOutput = await resolveOutputForCollision(probe);
+      if (!realOutput) continue;
+      const collision = outputCollidesWithReference(realOutput, references.absolutePaths);
+      if (collision) {
+        throw new Error(
+          `generate_image: the output "${realOutput}" is the reference image "${collision}". An edit ` +
+            'cannot overwrite its own source — choose a different `path`, or leave it out.',
+        );
+      }
+    }
+  }
+
+  const seeds = distinctSeeds(count, deps.seed);
+  const saved: Array<
+    SavedImage & {
+      seed: number;
+      width: number;
+      height: number;
+      mime: string;
+      bytes: number;
+      mode: string;
+    }
+  > = [];
+  let partialNote: string | undefined;
+  for (let index = 0; index < count; index += 1) {
+    let image;
+    try {
+      image = await renderLocalVariation({
+        backend,
+        server,
+        prompt,
+        size: args['size'],
+        seed: seeds[index] as number,
+        alternatives,
+        ...(references ? { references } : {}),
+        deps: localDeps,
+        ...(context?.abortSignal ? { signal: context.abortSignal } : {}),
+      });
+    } catch (error) {
+      if (saved.length === 0) throw error;
+      // A25: an earlier variation is already on disk. Name what was saved and
+      // say plainly that the rest was not produced.
+      partialNote =
+        `Variation ${index + 1} of ${count} was not produced: ` +
+        `${error instanceof Error ? error.message : String(error)}`;
+      break;
+    }
+    const target = targetPath(
+      config,
+      args['path'],
+      prompt,
+      image,
+      now,
+      count > 1 ? index : undefined,
+    );
+    const entry = await saveImage(
+      deps,
+      backend,
+      target,
+      image.bytes,
+      context,
+      captionFor(backend, prompt, ''),
+    );
+    saved.push({
+      ...entry,
+      seed: image.seed,
+      width: image.width,
+      height: image.height,
+      mime: image.mime,
+      bytes: image.bytes.length,
+      mode: image.mode,
+    });
+  }
+
+  const lines = saved.map((entry) =>
+    [
+      `${GENERATED_IMAGE_PREFIX}${entry.display} (${entry.mime}, ${entry.bytes.toLocaleString()} bytes) ` +
+        `with backend ${backend.name}.`,
+      entry.deliveryLine,
+      `Rendered locally at ${entry.width}x${entry.height}, seed ${entry.seed}.`,
+    ].join('\n'),
+  );
+  lines.push(
+    `Rendered locally through ${saved[0]?.mode ?? 'txt2img'}` +
+      `${references ? ` with ${references.prepared.length} reference image(s)` : ''}.`,
+  );
+  for (const note of references?.notes ?? []) lines.push(note);
+  if (partialNote) lines.push(partialNote);
+  lines.push('To inspect it, call view_image on that path.');
+  return lines.join('\n');
 }
+
+/** A stand-in for the naming rules before the real format is known. */
+const PNG_PROBE: GeneratedImage = { bytes: Buffer.alloc(0), mime: 'image/png' };
+
+/** Distinct seeds, reported so a good one can be re-run exactly. */
+function distinctSeeds(count: number, seed: (() => number) | undefined): number[] {
+  const draw = seed ?? randomSeed;
+  const seeds = new Set<number>();
+  while (seeds.size < count) seeds.add(draw());
+  return [...seeds];
+}
+
+function randomSeed(): number {
+  return Math.floor(Math.random() * 2_147_483_647);
+}
+
+/**
+ * Naming and description helpers moved to `generateImageToolFormat.ts` (one
+ * implementation per concern) and re-exported here so existing importers and
+ * tests keep working unchanged.
+ */
+export { backendCostTag, pickBackend, targetPath } from './generateImageToolFormat';
 
 async function revealBeside(filePath: string): Promise<void> {
   await vscode.commands.executeCommand('vscode.open', vscode.Uri.file(filePath), {

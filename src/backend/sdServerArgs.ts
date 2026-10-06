@@ -16,7 +16,12 @@ export function composeSdServerArgs(config: SdcppImageBackendConfig): string[] {
     '--backend',
     `te=${config.text_encoder_on_cpu ? 'cpu' : 'cuda0'},diffusion=cuda0,vae=cuda0`,
     '--auto-fit',
-    'off',
+    config.auto_fit ? 'on' : 'off',
+    // Absent means sd-server chooses its own budget (the pre-0.16 behaviour).
+    // Passing it is a deliberate per-card tuning decision, so it is only ever
+    // emitted when the owner configured one.
+    ...(config.max_vram_gib ? ['--max-vram', String(config.max_vram_gib)] : []),
+    ...(config.vision_encoder ? ['--llm_vision', config.vision_encoder] : []),
     '--fa',
     '--steps',
     String(config.defaults.steps),
