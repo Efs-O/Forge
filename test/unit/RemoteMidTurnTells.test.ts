@@ -151,6 +151,19 @@ describe('claimRemoteMidTurnTell', () => {
     expect(store.records[1]?.state).toBe('running');
   });
 
+  it('leaves a /claude session ask queued for the drain instead of feeding it to the running turn', async () => {
+    const store = makeStore([
+      makeRecord({ id: 'req-claude', sessionTarget: 'claude', text: 'check the screenshot approval' }),
+      makeRecord({ id: 'req-normal', text: 'normal text' }),
+    ]);
+
+    const result = await claimRemoteMidTurnTell(store, deliverAll, 'conv-1');
+
+    expect(result.messages).toEqual([{ role: 'user', content: 'normal text', midTurn: true }]);
+    expect(store.records[0]?.state).toBe('queued'); // RemoteQueueDrain asks the session
+    expect(store.records[1]?.state).toBe('running');
+  });
+
   it('skips a record the drain already claimed and does not inject it', async () => {
     // The record starts queued (so it is a candidate) but is claimed by the
     // drain before the tell claim runs: the atomic re-check must skip it.

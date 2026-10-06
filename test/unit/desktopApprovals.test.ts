@@ -44,4 +44,25 @@ describe('cloudMonitorApproval', () => {
   it('ignores window captures', () => {
     expect(cloudMonitorApproval(unknownModel)({ window_title: 'x' })).toBeUndefined();
   });
+
+  const withModel = (endpoint: string) => () =>
+    ({
+      active_model: 'm',
+      models: [{ name: 'm', provider: 'openai-compatible', endpoint, model: 'x' }],
+    }) as unknown as ForgeConfig;
+
+  it('does not gate an openai-compatible server on a loopback endpoint (Strata)', () => {
+    for (const endpoint of ['http://127.0.0.1:8090', 'http://localhost:8090', 'http://[::1]:8090']) {
+      expect(cloudMonitorApproval(withModel(endpoint))({ kind: 'monitor', monitor: 0 })).toBeUndefined();
+    }
+  });
+
+  it('still gates an openai-compatible server elsewhere as dangerous', () => {
+    const gate = cloudMonitorApproval(withModel('https://api.cerebras.ai'));
+    expect(gate({ kind: 'monitor', monitor: 0 })).toMatchObject({ dangerous: true });
+    // A LAN box is off this machine: the screen leaves it, so it still asks.
+    expect(
+      cloudMonitorApproval(withModel('http://192.168.1.20:8090'))({ kind: 'monitor', monitor: 0 }),
+    ).toMatchObject({ dangerous: true });
+  });
 });

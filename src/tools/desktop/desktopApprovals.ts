@@ -4,6 +4,7 @@
  */
 import type { ForgeConfig } from '../../config/types';
 import { resolveRequestModel } from '../../config/ConfigResolver';
+import { usesLocalGpu } from '../../backend/ModelHeuristics';
 import { isCloudProvider, getProviderDisplayName } from '../../llm/CloudProviders';
 import type { ToolApprovalMetadata } from '../ToolRegistry';
 import { isSystemChord, type PowerShellDesktopDriver } from './PowerShellDesktopDriver';
@@ -16,7 +17,10 @@ type GetConfig = () => ForgeConfig;
 /**
  * Cloud-model monitor-capture gate (§4.7). Returns an approval metadata if the
  * active model is a cloud provider (the screen would be sent to that provider);
- * undefined for local models. Window captures go through
+ * undefined for local models, including an `openai-compatible` server on a
+ * loopback endpoint (Strata): the provider type names the wire protocol, not
+ * where the screen goes, and gating it made every capture a dangerous prompt
+ * that clanker mode cannot skip. Window captures go through
  * `windowCaptureApproval` instead.
  */
 export function cloudMonitorApproval(
@@ -44,7 +48,7 @@ export function cloudMonitorApproval(
     if (!modelId) return undefined;
     try {
       const model = resolveRequestModel(config, modelId);
-      if (isCloudProvider(model.provider)) {
+      if (isCloudProvider(model.provider) && !usesLocalGpu(model)) {
         const name = getProviderDisplayName(model);
         return {
           dangerous: true,

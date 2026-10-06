@@ -15,6 +15,11 @@
 - `--auto-fit` is now `on` by default (measured 410s vs 549s for the same picture). New settings `auto_fit`, `max_vram_gib` and `max_reference_edge_px` are available per backend, and `vision_encoder` is verified at start like the other model paths.
 - These settings are part of the server's signature, so after an upgrade an already-running `sd-server` is disposed (same window) or refused (another window). The refusal now says the **configuration** differs rather than blaming the model, which was misleading when both windows share a model.
 
+### A session ask stays a session ask, and a local server is not the cloud
+
+- A `/claude`, `/codex` or `/copilot` ask sent from Telegram while a Forge turn was running was injected into that turn as a plain user message with the command stripped, so the named session never received it. It now stays queued for the queue drain, which routes it to that session.
+- A monitor capture no longer asks for approval when the active model is an `openai-compatible` server on this machine (Strata at `127.0.0.1:8090`). The provider type names the wire protocol, not where the screen goes, and gating it made every capture a dangerous prompt that clanker mode cannot skip. A real cloud endpoint and a LAN endpoint still prompt.
+
 ## 0.16.89
 
 ### Telegram bubbles: each text block gets its own, status rides the newest

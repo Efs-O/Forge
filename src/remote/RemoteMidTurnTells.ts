@@ -23,7 +23,8 @@ export type KickOutbox = (channel: RemoteRequestRecord['channel']) => void;
 /**
  * Claim every queued, text-only, normal-priority request for a conversation
  * whose chat can be reached, in queue order, or nothing. A record the drain
- * already claimed (or that carries an attachment, or is a steer) is left
+ * already claimed (or that carries an attachment, is a steer, or is a session
+ * ask for claude/codex/copilot) is left
  * `queued` for the next turn. The returned `settle` finishes each claimed
  * record, in order, only after the injected messages have been persisted.
  */
@@ -37,6 +38,10 @@ export async function claimRemoteMidTurnTell(
   const claimed: RemoteRequestRecord[] = [];
   for (const candidate of candidates) {
     if (candidate.priority === 'steer') continue;
+    // A /claude, /codex or /copilot ask belongs to that session, not this turn:
+    // RemoteQueueDrain routes it. Injected here it reached the Forge model as a
+    // plain user message with the command stripped.
+    if (candidate.sessionTarget) continue;
     if (candidate.attachments?.length) continue;
     if (!(await canDeliver(candidate.channel, candidate.chatId))) continue;
     const taken = await store.claimMidTurnTell(candidate.id);
