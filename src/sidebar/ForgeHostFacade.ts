@@ -25,6 +25,11 @@ export interface ForgeConversationSummary {
    * compaction and is never reset — so it is the count, not a second counter.
    */
   compactCount: number;
+  /**
+   * Active agent time in ms, the status bar's timer: model work and tools,
+   * approval waits excluded, the running turn included.
+   */
+  activeMs: number;
 }
 
 export interface ForgeHostStatus {
@@ -192,6 +197,7 @@ export interface SidebarHostFacadeDeps {
   getArchivedConversations?: () => ConversationRuntime[];
   getRequestChains: () => RequestChainStatus[];
   getStreamingConversationIds: () => ReadonlySet<string>;
+  getSessionActiveMs: (conversation: ConversationRuntime) => number;
   /** Counts per reason a slot cannot be freed; empty when a slot can be. */
   capBlockers: (options?: { activate?: boolean }) => string[];
   clankerMode: () => boolean;
@@ -239,7 +245,11 @@ export class ChatCapacityError extends Error {
   }
 }
 
-function summarize(conv: ConversationRuntime, archived: boolean): ForgeConversationSummary {
+function summarize(
+  conv: ConversationRuntime,
+  archived: boolean,
+  activeMs: number,
+): ForgeConversationSummary {
   return {
     id: conv.id,
     title: conv.title,
@@ -249,6 +259,7 @@ function summarize(conv: ConversationRuntime, archived: boolean): ForgeConversat
     requestCount: conv.model_request_count ?? 0,
     toolCallCount: conv.tool_call_count ?? 0,
     compactCount: conv.compaction?.generation ?? 0,
+    activeMs,
   };
 }
 
@@ -264,7 +275,7 @@ export class SidebarHostFacade implements ForgeHostFacade {
       const reasons = this.deps.capBlockers(options);
       throw new ChatCapacityError(reasons, chatCapMessage(reasons));
     }
-    return summarize(conv, false);
+    return summarize(conv, false, this.deps.getSessionActiveMs(conv));
   }
 
   async restoreConversation(
@@ -281,7 +292,7 @@ export class SidebarHostFacade implements ForgeHostFacade {
       }
       throw new Error('Forge: conversation could not be restored.');
     }
-    return summarize(conv, false);
+    return summarize(conv, false, this.deps.getSessionActiveMs(conv));
   }
 
   chatCapBlockers(options: { activate?: boolean } = {}): string[] {
@@ -429,9 +440,13 @@ export class SidebarHostFacade implements ForgeHostFacade {
     return {
       activeConversationId: this.deps.getActiveConversationId(),
       conversations: [
-        ...this.deps.getOpenConversations().map((conversation) => summarize(conversation, false)),
+        ...this.deps
+          .getOpenConversations()
+          .map((conversation) =>
+            summarize(conversation, false, this.deps.getSessionActiveMs(conversation)),
+          ),
         ...(this.deps.getArchivedConversations?.() ?? []).map((conversation) =>
-          summarize(conversation, true),
+          summarize(conversation, true, this.deps.getSessionActiveMs(conversation)),
         ),
       ],
       requestChains: this.deps.getRequestChains(),

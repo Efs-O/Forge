@@ -43,6 +43,15 @@ describe('renderBusStatus', () => {
     ).toContain('Work: 2 model request(s), 3 tool call(s), 2 compaction(s) in this chat');
   });
 
+  it('adds the status bar active time under the Work line when known', () => {
+    const output = renderBusStatus(
+      base({ conversation: { id: 'c1', title: 'Chat', activeMs: 23_080_000 } }),
+    );
+    expect(output.split('\n').at(-1)).toBe(
+      'Active time: 6 h 24 min (model work and tools, approval waits excluded)',
+    );
+  });
+
   it('reports a running turn and its latest details', () => {
     const output = renderBusStatus(base({ streaming: true, turn: turn({ lastTool: 'read_file', lastNarration: 'I read it', phase: 'checking' }) }));
     expect(output).toContain('State: busy · turn running 1 min · last activity 50 s ago');

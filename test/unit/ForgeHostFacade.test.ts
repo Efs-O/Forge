@@ -26,7 +26,7 @@ describe('SidebarHostFacade', () => {
       addQuestionSink: () => ({ dispose: () => undefined }), answerQuestion: () => false,
       dismissQuestion: () => false, resolveApproval: vi.fn(), getPendingApproval: () => undefined,
       getActiveConversationId: () => 'c0', getOpenConversations: () => open,
-      getRequestChains: () => [], getStreamingConversationIds: () => new Set(), capBlockers,
+      getRequestChains: () => [], getStreamingConversationIds: () => new Set(), getSessionActiveMs: () => 0, capBlockers,
     });
     await expect(facade.createConversation()).resolves.toMatchObject({ id: 'created' });
     const failure = await facade.createConversation().catch((err: unknown) => err as Error);
@@ -63,7 +63,7 @@ describe('SidebarHostFacade', () => {
       getActiveConversationId: () => 'c0',
       getOpenConversations: () => open,
       getRequestChains: () => [],
-      getStreamingConversationIds: () => new Set(),
+      getStreamingConversationIds: () => new Set(), getSessionActiveMs: () => 0,
       capBlockers: () => ['12 running a turn'],
     });
     const failure = await facade
@@ -88,7 +88,7 @@ describe('SidebarHostFacade', () => {
       getActiveConversationId: () => 'c0',
       getOpenConversations: () => [conversation('c0')],
       getRequestChains: () => [],
-      getStreamingConversationIds: () => new Set(),
+      getStreamingConversationIds: () => new Set(), getSessionActiveMs: () => 0,
       capBlockers: () => [],
     });
     await expect(facade.restoreConversation('nope')).rejects.toThrow(
@@ -115,7 +115,7 @@ describe('SidebarHostFacade', () => {
       getActiveConversationId: () => 'visible',
       getOpenConversations: () => [created, restored],
       getRequestChains: () => [],
-      getStreamingConversationIds: () => new Set(),
+      getStreamingConversationIds: () => new Set(), getSessionActiveMs: () => 0,
       capBlockers: () => [],
     });
 
@@ -146,6 +146,7 @@ describe('SidebarHostFacade', () => {
       getOpenConversations: () => [conv],
       getRequestChains: () => [],
       getStreamingConversationIds: () => new Set(['c1']),
+      getSessionActiveMs: () => 125_000,
       capBlockers: () => [],
     });
 
@@ -157,7 +158,7 @@ describe('SidebarHostFacade', () => {
     expect(facade.status()).toMatchObject({
       activeConversationId: 'c1',
       streamingConversationIds: ['c1'],
-      conversations: [{ id: 'c1', activeModel: 'local', archived: false }],
+      conversations: [{ id: 'c1', activeModel: 'local', archived: false, activeMs: 125_000 }],
     });
   });
 
@@ -177,7 +178,7 @@ describe('SidebarHostFacade', () => {
       getActiveConversationId: () => 'c1',
       getOpenConversations: () => [conversation('c1')],
       getRequestChains: () => [],
-      getStreamingConversationIds: () => new Set(),
+      getStreamingConversationIds: () => new Set(), getSessionActiveMs: () => 0,
       capBlockers: () => [],
     };
     // Unwired sink: the count is 0, so the mesh buffer treats it as not ready.

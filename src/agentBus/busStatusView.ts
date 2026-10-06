@@ -1,7 +1,7 @@
 /** Plain-text status and transcript views for the agent bus. */
 
 import type { ForgeExchange } from '../sidebar/sessionProjections';
-import { describeBudget } from '../remote/RemoteSessionCommands';
+import { describeBudget, describeWork } from '../remote/RemoteSessionCommands';
 import { MAX_VIEW_COUNT, renderExchange } from '../remote/RemoteTranscriptView';
 import type { TurnSnapshot } from './busTurnWatch';
 
@@ -13,6 +13,7 @@ export interface BusStatusInput {
     requestCount?: number | undefined;
     toolCallCount?: number | undefined;
     compactCount?: number | undefined;
+    activeMs?: number | undefined;
   };
   streaming: boolean;
   queuedFromSender: number;
@@ -49,7 +50,7 @@ export function renderBusStatus(input: BusStatusInput): string {
   lines.push(
     `Context: ${describeBudget(input.budget)}`,
     `Queued from you: ${input.queuedFromSender}`,
-    `Work: ${conversation.requestCount ?? 0} model request(s), ${conversation.toolCallCount ?? 0} tool call(s), ${conversation.compactCount ?? 0} compaction(s) in this chat`,
+    describeWork(conversation),
   );
   return lines.join('\n');
 }

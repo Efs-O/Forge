@@ -7,6 +7,7 @@ import {
   sendRichText,
 } from './telegramHtml';
 import type { RemoteInboundDisposition, RemoteInboundEvent } from './types';
+import { formatElapsed } from './remoteProgressRender';
 import { MAX_VIEW_COUNT, parseViewCount, sendTranscriptView } from './RemoteTranscriptView';
 import { getBoardContext, getMeshOrchestrator } from '../agentMesh/meshContext';
 import { projectBoard, projectLiveSessions } from '../agentMesh/boardView';
@@ -29,6 +30,7 @@ const STATUS_LABELS = new Set([
   'Chat',
   'Model',
   'Work',
+  'Active time',
   'Forge',
   'Context',
   'Board',
@@ -119,12 +121,8 @@ export async function handleRemoteSessionCommand(
         `Forge: ${status.requestChains.length} active request(s), ${queued} queued here, ${status.streamingConversationIds.length} streaming, ${crashUnknown}, ${outbox.pending} notifications pending, ${outbox.abandoned} abandoned.\n` +
         `Context: ${describeBudget(binding && context.host.contextBudget(binding.conversationId))}\n` +
         // Sits under Context because it answers the same question: what this
-        // chat has spent. Tool calls are counted as dispatched, so a refused or
-        // failed one still shows — it cost a round either way, and a count of
-        // successes alone would understate exactly the turns worth looking at.
-        `Work: ${String(conversation?.requestCount ?? 0)} model request(s), ${String(
-          conversation?.toolCallCount ?? 0,
-        )} tool call(s), ${String(conversation?.compactCount ?? 0)} compaction(s) in this chat\n` +
+        // chat has spent.
+        `${describeWork(conversation)}\n` +
         (boardLines ? `${boardLines}\n` : '') +
         `Approvals: ${context.host.clankerMode() ? 'CLANKER — non-dangerous tools auto-approved' : 'gated'}`,
       (line) => boldLineLabel(line, STATUS_LABELS),
@@ -329,6 +327,29 @@ export async function handleRemoteSessionCommand(
     return { kind: 'handled' };
   }
   return undefined;
+}
+
+/**
+ * The Work and Active time lines, shared by `/status` and the agent bus status.
+ * Tool calls are counted as dispatched, so a refused or failed one still shows:
+ * it cost a round either way. Active time is the VS Code status bar's timer, so
+ * the phone, the bus and the bar agree.
+ */
+export function describeWork(
+  conversation:
+    | {
+        requestCount?: number | undefined;
+        toolCallCount?: number | undefined;
+        compactCount?: number | undefined;
+        activeMs?: number | undefined;
+      }
+    | undefined,
+): string {
+  const work = `Work: ${String(conversation?.requestCount ?? 0)} model request(s), ${String(
+    conversation?.toolCallCount ?? 0,
+  )} tool call(s), ${String(conversation?.compactCount ?? 0)} compaction(s) in this chat`;
+  if (conversation?.activeMs === undefined) return work;
+  return `${work}\nActive time: ${formatElapsed(conversation.activeMs)} (model work and tools, approval waits excluded)`;
 }
 
 /** `max` is the per-slot window; a model with no resolvable num_ctx reports none. */
