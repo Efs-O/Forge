@@ -2,6 +2,7 @@ import { describe, expect, it, vi } from 'vitest';
 import {
   busModelIds,
   interruptForgeForSender,
+  resolveBusMessageTarget,
   submitBusMessage,
 } from '../../src/vscode/agentMessagingSetup';
 import { forgeInboundPrompt } from '../../src/agentBus/busContent';
@@ -141,7 +142,7 @@ describe('a --new without --model follows the loaded backend', () => {
     return { facade, setConversationModel };
   };
 
-  it('opens a --new chat on the active conversation\'s model when no --model is given', async () => {
+  it("opens a --new chat on the active conversation's model when no --model is given", async () => {
     const { facade, setConversationModel } = makeFacade('tensor-vision');
     await submitBusMessage(facade, 'hello', { from: 'codex', newChat: true });
     expect(setConversationModel).toHaveBeenCalledWith('new-chat', 'tensor-vision');
@@ -170,5 +171,33 @@ describe('busModelIds', () => {
       aliases: { qwen: 'qwen-vision' },
     } as unknown as ForgeConfig;
     expect(busModelIds(config)).toEqual(['qwen-vision', 'qwen']);
+  });
+});
+
+describe('--to with an exchange id', () => {
+  const facade = {
+    status: () => ({
+      activeConversationId: 'chat-1',
+      streamingConversationIds: [],
+      conversations: [{ id: 'chat-1', title: 'Claude: test', updatedAt: 1 }],
+    }),
+    recentExchanges: () => [],
+  } as unknown as ForgeHostFacade;
+  const ledger = (id: string): string | undefined => (id === 'ex-9' ? 'chat-1' : undefined);
+
+  it('names the chat the exchange belongs to instead of "no longer open"', () => {
+    expect(resolveBusMessageTarget(facade, 'claude', { conversationId: 'ex-9' }, ledger)).toEqual({
+      ok: false,
+      status: 404,
+      error: '"ex-9" is an exchange id, not a chat id: its chat is --to chat-1',
+    });
+  });
+
+  it('still says "no longer open" for an id the ledger does not know', () => {
+    expect(resolveBusMessageTarget(facade, 'claude', { conversationId: 'gone' }, ledger)).toEqual({
+      ok: false,
+      status: 404,
+      error: 'Forge chat "gone" is no longer open',
+    });
   });
 });

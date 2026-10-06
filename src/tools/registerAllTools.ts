@@ -137,8 +137,8 @@ export function registerAllTools(
   // Registered unconditionally: getConfig is optional on this signature, and
   // gating on it would silently drop the tool wherever it is not supplied.
   registry.register(makeViewVideoTool(getConfig ? () => getConfig().video : undefined));
-  registry.register(makeWriteFileTool());
-  registry.register(makeAppendFileTool());
+  registry.register(makeWriteFileTool(extraRoots));
+  registry.register(makeAppendFileTool(extraRoots));
   registry.register(makeReplaceSelectionTool());
   registry.register(makeInsertCodeTool());
   registry.register(makeGetEditorContextTool());
@@ -179,10 +179,10 @@ export function registerAllTools(
   }
 
   // v0.6 write tools
-  registry.register(makeEditFileTool());
-  registry.register(makeApplyLineEditsTool());
+  registry.register(makeEditFileTool(extraRoots));
+  registry.register(makeApplyLineEditsTool(extraRoots));
   registry.register(makeCreateDirectoryTool(extraRoots));
-  registry.register(makeMoveFileTool());
+  registry.register(makeMoveFileTool(extraRoots));
   registry.register(makeDeleteFileTool(extraRoots));
   registry.register(makeFormatFileTool());
   registry.register(makeRenameSymbolTool());

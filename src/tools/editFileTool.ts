@@ -53,7 +53,7 @@ function parseEdits(args: Record<string, unknown>): StringEdit[] {
   });
 }
 
-export function makeEditFileTool(): RegisteredTool {
+export function makeEditFileTool(extraRoots: () => readonly string[] = () => []): RegisteredTool {
   return {
     definition: {
       type: 'function',
@@ -108,6 +108,7 @@ export function makeEditFileTool(): RegisteredTool {
     handler: async (args) => {
       const filepath = await resolveRealWorkspacePath(args['filepath'] as string, undefined, {
         allowMissing: true,
+        extraRoots: extraRoots(),
       });
       const edits = parseEdits(args);
 

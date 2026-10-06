@@ -31,8 +31,9 @@ async function trackedWarningFor(filePath: string): Promise<string> {
 
 // ── create_directory ───────────────────────────────────────────────────────────
 
-/** `extraRoots` (here and in `delete_file`) is config.yaml `extra_file_roots`:
- *  folders outside the workspace the tool may also change. */
+/** `extraRoots` (here and in every file-writing tool) is config.yaml `extra_file_roots`:
+ *  folders outside the workspace the tool may also change. Every writer must take
+ *  it: write_file once ignored it and refused a configured folder. */
 export function makeCreateDirectoryTool(
   extraRoots: () => readonly string[] = () => [],
 ): RegisteredTool {
@@ -73,7 +74,7 @@ export function makeCreateDirectoryTool(
 
 // ── move_file ──────────────────────────────────────────────────────────────────
 
-export function makeMoveFileTool(): RegisteredTool {
+export function makeMoveFileTool(extraRoots: () => readonly string[] = () => []): RegisteredTool {
   return {
     definition: {
       type: 'function',
@@ -107,9 +108,11 @@ export function makeMoveFileTool(): RegisteredTool {
     handler: async (args) => {
       const src = await resolveRealWorkspacePath(args['source'] as string, undefined, {
         allowMissing: true,
+        extraRoots: extraRoots(),
       });
       const dst = await resolveRealWorkspacePath(args['destination'] as string, undefined, {
         allowMissing: true,
+        extraRoots: extraRoots(),
       });
       fs.mkdirSync(path.dirname(dst), { recursive: true });
       fs.renameSync(src, dst);

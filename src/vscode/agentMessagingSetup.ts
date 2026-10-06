@@ -1,5 +1,7 @@
 import * as vscode from 'vscode';
+import * as path from 'path';
 import { busPaths } from '../agentBus/agentBus';
+import { EXCHANGES_LOG_NAME, readEvents } from '../agentMesh/exchangeLog';
 import {
   AgentInbox,
   busTurnEndLine,
@@ -38,11 +40,19 @@ function busTarget(
   );
 }
 
+/** The chat a bus exchange belongs to, from the exchange ledger. */
+export function exchangeConversationFromLedger(exchangeId: string): string | undefined {
+  const events = readEvents(path.join(busPaths().root, EXCHANGES_LOG_NAME));
+  return events.find((event) => event.exchangeId === exchangeId && event.conversation)
+    ?.conversation;
+}
+
 /** Resolve the chat a Forge-directed bus message will enter. */
 export function resolveBusMessageTarget(
   facade: ForgeHostFacade,
   from: string,
   selection: ChatTargetSelection,
+  exchangeConversation?: (id: string) => string | undefined,
 ):
   | { ok: true; conversationId: string; title: string }
   | { ok: false; status: 404 | 409; error: string } {
@@ -73,10 +83,18 @@ export function resolveBusMessageTarget(
   }
   const conversation = status.conversations.find((item) => item.id === conversationId);
   if (!conversation || conversation.archived) {
+    // A verdict file is named after the exchange, so its id is the one a peer
+    // has to hand; "no longer open" sent one to a fresh chat instead.
+    const owner =
+      !conversation && selection.conversationId
+        ? exchangeConversation?.(conversationId)
+        : undefined;
     return {
       ok: false,
       status: 404,
-      error: `Forge chat "${conversationId}" is no longer open`,
+      error: owner
+        ? `"${conversationId}" is an exchange id, not a chat id: its chat is --to ${owner}`
+        : `Forge chat "${conversationId}" is no longer open`,
     };
   }
   return { ok: true, conversationId, title: conversation.title };
@@ -90,9 +108,12 @@ export async function interruptForgeForSender(
 ): Promise<
   { steered: true; conversationId: string; title: string } | { steered: false; reason: string }
 > {
-  const target = resolveBusMessageTarget(facade, from, {
-    ...(targetConversationId ? { conversationId: targetConversationId } : {}),
-  });
+  const target = resolveBusMessageTarget(
+    facade,
+    from,
+    { ...(targetConversationId ? { conversationId: targetConversationId } : {}) },
+    exchangeConversationFromLedger,
+  );
   if (!target.ok) return { steered: false, reason: target.error };
   if (!facade.status().streamingConversationIds.includes(target.conversationId)) {
     return {
@@ -300,7 +321,12 @@ export function setupAgentMessaging(
     // last steer left since Telegram `/steer` was removed (MID_TURN_TELL
     // Phase 4). An idle chat has nothing to interrupt.
     resolveChatTarget: (from, selection) =>
-      resolveBusMessageTarget(getSidebar().getHostFacade(), from, selection),
+      resolveBusMessageTarget(
+        getSidebar().getHostFacade(),
+        from,
+        selection,
+        exchangeConversationFromLedger,
+      ),
     interruptForge: async (from, conversationId) => {
       const facade = getSidebar().getHostFacade();
       return interruptForgeForSender(facade, from, conversationId);

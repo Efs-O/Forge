@@ -139,7 +139,7 @@ export function makeReadFileTool(): RegisteredTool {
   };
 }
 
-export function makeWriteFileTool(): RegisteredTool {
+export function makeWriteFileTool(extraRoots: () => readonly string[] = () => []): RegisteredTool {
   return {
     definition: {
       type: 'function',
@@ -171,6 +171,7 @@ export function makeWriteFileTool(): RegisteredTool {
     handler: async (args) => {
       const filePath = await resolveRealWorkspacePath(args['path'] as string, undefined, {
         allowMissing: true,
+        extraRoots: extraRoots(),
       });
       const content = args['content'] as string;
       fs.mkdirSync(path.dirname(filePath), { recursive: true });
@@ -180,7 +181,7 @@ export function makeWriteFileTool(): RegisteredTool {
   };
 }
 
-export function makeAppendFileTool(): RegisteredTool {
+export function makeAppendFileTool(extraRoots: () => readonly string[] = () => []): RegisteredTool {
   return {
     definition: {
       type: 'function',
@@ -212,6 +213,7 @@ export function makeAppendFileTool(): RegisteredTool {
     handler: async (args) => {
       const filePath = await resolveRealWorkspacePath(args['path'] as string, undefined, {
         allowMissing: true,
+        extraRoots: extraRoots(),
       });
       const content = args['content'] as string;
       fs.mkdirSync(path.dirname(filePath), { recursive: true });

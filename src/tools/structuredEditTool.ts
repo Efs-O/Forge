@@ -90,7 +90,9 @@ export function applyLineEditsToContent(
   };
 }
 
-export function makeApplyLineEditsTool(): RegisteredTool {
+export function makeApplyLineEditsTool(
+  extraRoots: () => readonly string[] = () => [],
+): RegisteredTool {
   return {
     definition: {
       type: 'function',
@@ -131,6 +133,7 @@ export function makeApplyLineEditsTool(): RegisteredTool {
       const operations = parseOperations(args['operations']);
       const filePath = await resolveRealWorkspacePath(suppliedPath, undefined, {
         allowMissing: true,
+        extraRoots: extraRoots(),
       });
       let content: string;
       let fileState: { size: number; mtimeMs: number; ctimeMs: number };
