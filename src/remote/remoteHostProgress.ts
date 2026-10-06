@@ -1,7 +1,7 @@
 import type { AgentProgressEvent } from '../sidebar/AgentProgress';
 import type { RemoteAgentProgress } from './RemoteAgentProgress';
 import type { RemoteChannel } from './types';
-import { openProgressBubble } from './telegramRichDraft';
+import { openProgressBubble } from './remoteProgressOpen';
 
 /**
  * Events held while the opening message is in flight.

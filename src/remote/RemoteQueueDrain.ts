@@ -7,7 +7,7 @@ import type { RemoteAuth } from './RemoteAuth';
 import type { RemoteOutboxDelivery } from './RemoteOutboxDelivery';
 import { withConversationIdentity } from './RemoteReplyIdentity';
 import { settleRemoteClaim } from './remoteClaimSettle';
-import { openProgressBubble } from './telegramRichDraft';
+import { openProgressBubble } from './remoteProgressOpen';
 import { askRemoteSession } from './RemoteSessionAsk';
 import type { RemoteRequestStore } from './RemoteRequestStore';
 import type { RemoteChannel } from './types';

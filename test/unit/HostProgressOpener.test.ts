@@ -1,7 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { FakeRemoteChannel } from '../../src/remote/FakeRemoteChannel';
-import { RemoteAgentProgress, CLOCK_INTERVAL_MS } from '../../src/remote/RemoteAgentProgress';
-import { RemoteDraftRegistry } from '../../src/remote/RemoteDraftRegistry';
+import { RemoteAgentProgress } from '../../src/remote/RemoteAgentProgress';
 import { HostProgressOpener } from '../../src/remote/remoteHostProgress';
 import type { AgentProgressEvent } from '../../src/sidebar/AgentProgress';
 
@@ -43,9 +42,9 @@ describe('HostProgressOpener', () => {
     expect(channel.progress).toEqual([{ chatId: 'chat-1', text: 'Forge: working…' }]);
     opener.handle(status('Running tests…'));
     await settle();
-    expect(channel.edits.at(-1)?.text).toContain('Running tests…');
-    // Streamed words never enter the bubble; they arrive as their own message.
-    expect(channel.edits.at(-1)?.text).not.toContain('I have strong evidence');
+    // The words stream into the bubble, with the status as its footer.
+    expect(channel.edits.at(-1)?.text).toMatch(/^I have strong evidence\n\n⏳ Running tests… · /);
+    expect(channel.stopButtons.has('1')).toBe(true);
   });
 
   it('holds the events streamed before the message exists, rather than losing them', async () => {
@@ -176,40 +175,5 @@ describe('HostProgressOpener', () => {
     expect(channel.progress.map((sent) => sent.chatId)).toEqual(['chat-1', 'chat-2']);
     expect(channel.edits.at(-1)?.chatId).toBe('chat-2');
     expect(channel.edits.at(-1)?.text).toContain('Running build…');
-  });
-
-  it('opens a plain bubble even when the transport has rich drafts', async () => {
-    // The status is never a draft: a draft re-types on every change and showed
-    // tool lines. Only the model's words open a preview, and that happens in
-    // RemoteAgentProgress, never here.
-    const channel = new FakeRemoteChannel();
-    const signal = new AbortController().signal;
-    const drafts = new RemoteDraftRegistry();
-    const progress = new RemoteAgentProgress(
-      channel,
-      signal,
-      () => true,
-      3_900,
-      0,
-      undefined,
-      undefined,
-      CLOCK_INTERVAL_MS,
-      drafts,
-    );
-    let opens = 0;
-    channel.richDraft = {
-      beginDraft: async () => {
-        opens += 1;
-        return { kind: 'open', draftId: 77 };
-      },
-      updateDraft: async () => undefined,
-    };
-    const opener = new HostProgressOpener({ channel, signal, progress, target: () => 'chat-1' });
-    opener.handle(status('Running tests…'));
-    await settle();
-    expect(channel.progress).toEqual([{ chatId: 'chat-1', text: 'Forge: working…' }]);
-    expect(opens).toBe(0);
-    expect(drafts.size).toBe(0);
-    await progress.dispose();
   });
 });

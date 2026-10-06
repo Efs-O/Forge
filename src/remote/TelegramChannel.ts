@@ -6,7 +6,6 @@ export { splitTelegramText } from './TelegramText';
 import type { RemoteChannel, RemoteInboundDisposition, RemoteInboundEvent } from './types';
 import { createTelegramSelectionPages } from './TelegramSelectionPagination';
 import { postTelegram, TelegramChatQueue } from './telegramSendQueue';
-import { TelegramRichDrafts } from './telegramRichDraft';
 import { TelegramOutbound } from './TelegramOutbound';
 
 type Fetch = typeof fetch;
@@ -91,7 +90,7 @@ export class TelegramChannel implements RemoteChannel {
   constructor(private readonly options: TelegramChannelOptions) {
     this.fetchImpl = options.fetch ?? fetch;
     this.outbound = new TelegramOutbound(
-      (method, body, signal) => this.call(method, body, signal),
+      (method, body, signal, callOptions) => this.call(method, body, signal, callOptions),
       this.fetchImpl,
       options.token,
       this.sendQueue,
@@ -200,22 +199,6 @@ export class TelegramChannel implements RemoteChannel {
     return this.outbound.retractPrompt(...args);
   }
 
-  /**
-   * Telegram's rich-draft progress lane, exposed as the `RemoteChannel`
-   * capability.
-   *
-   * The draft preview (`sendRichMessageDraft`) goes out of the chat queue with
-   * no in-place 429 wait: drafts are throttled far harder than messages, and a
-   * throttled preview parked in the FIFO held every narration behind it for up
-   * to three minutes. A preview is replaced by the next one, so dropping it
-   * costs nothing.
-   */
-  readonly richDraft = new TelegramRichDrafts((method, body, signal) =>
-    postTelegram(this.fetchImpl, this.options.token, method, body, signal, {
-      retryRateLimit: false,
-    }),
-  );
-
   resolvePromptKeyboard(...args: Parameters<TelegramOutbound['resolvePromptKeyboard']>) {
     return this.outbound.resolvePromptKeyboard(...args);
   }
@@ -283,10 +266,11 @@ export class TelegramChannel implements RemoteChannel {
     method: string,
     body: Record<string, unknown>,
     signal?: AbortSignal,
+    callOptions?: { retryRateLimit?: boolean },
   ): Promise<unknown> {
     const chatId = body.chat_id === undefined ? undefined : String(body.chat_id);
     return this.sendQueue.run(chatId, () =>
-      postTelegram(this.fetchImpl, this.options.token, method, body, signal),
+      postTelegram(this.fetchImpl, this.options.token, method, body, signal, callOptions),
     );
   }
 }

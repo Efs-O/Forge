@@ -121,23 +121,6 @@ export const RemoteInboundEventSchema = z.discriminatedUnion('kind', [
     messageId: z.string().min(1).max(256),
   }),
   /**
-   * The user pressed Telegram's native Stop button on a rich-draft preview
-   * (`MessageGenerationStopped`, Bot API 10.3).
-   *
-   * Its own variant rather than a synthesized text `/stop`, because the update
-   * carries no `from` user and no message id — only the chat and the draft that
-   * was stopped. Inventing a `/stop` event would mean inventing a sender, and a
-   * fabricated `providerMessageId` would collide with the real message the draft
-   * belongs to. `senderId` is therefore derived from the chat id at the Telegram
-   * boundary (private chats only, where the two are the same principal) and then
-   * faces the same owner gate as every other event. `providerMessageId` is the
-   * Telegram `update_id`, which is the only identity this update actually has.
-   */
-  InboundBaseSchema.extend({
-    kind: z.literal('generation_stopped'),
-    draftId: z.number().int().positive(),
-  }),
-  /**
    * The ⏹ Stop button under a turn's status bubble. `messageId` is the tapped
    * bubble; the controller cancels only the turn that bubble belongs to.
    */

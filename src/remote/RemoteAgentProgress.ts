@@ -1,26 +1,23 @@
 import type { AgentProgressEvent } from '../sidebar/AgentProgress';
 import type { RemoteChannel } from './types';
 import { QUEUED_ACK_DELETE_SECONDS } from './TelegramAcknowledgement';
-import { DRAFT_LIFETIME_MS } from './telegramRichDraft';
-import type { RemoteDraftRegistry } from './RemoteDraftRegistry';
-import { renderRemoteProgress } from './remoteProgressRender';
+import { DEFAULT_STATUS, renderProgressFooter } from './remoteProgressRender';
 import { keepTail, sanitize, sanitizeToolName } from './remoteProgressText';
-import { DRAFT_STREAM_INTERVAL_MS, RemoteWordsDraft } from './RemoteDraftLane';
+import { RemoteLiveBubble } from './RemoteLiveBubble';
 
-const DEFAULT_EDIT_INTERVAL_MS = 1_500;
+/** Telegram allows about one edit per second per chat. */
+const DEFAULT_EDIT_INTERVAL_MS = 1_000;
 export const CLOCK_INTERVAL_MS = 60_000;
 const MAX_STATUS_CHARS = 500;
 const MAX_NOTICE_CHARS = 300;
 /** Warnings latch, so the tail is bounded rather than the whole turn's worth. */
 const MAX_LATCHED_WARNINGS = 4;
-const DEFAULT_HEADLINE = 'Forge: working…';
 const MAX_HEADLINE_CHARS = 160;
 /**
  * Bounds the per-turn narration seen-set. A turn that narrates more than this
- * many distinct thoughts has already overflowed the message long ago, so the
- * oldest entries are the ones least worth keeping; dropping them only means a
- * very old repeat could resurface, which is the pre-fix behaviour, not a
- * regression.
+ * many distinct thoughts has scrolled the oldest far out of view, so they are
+ * the ones least worth keeping; dropping them only means a very old repeat
+ * could resurface, which is the pre-fix behaviour, not a regression.
  */
 const MAX_SEEN_NARRATIONS = 32;
 
@@ -44,61 +41,50 @@ export type ProgressOrigin = 'remote' | 'host';
 interface ActiveProgress {
   origin: ProgressOrigin;
   chatId: string;
-  /** The status bubble: a plain message, edited in place. */
-  messageId: string;
-  /** The words preview, beside the bubble; absent without rich drafts. */
-  words?: RemoteWordsDraft;
-  headline: string;
+  /** The turn's words and status footer; absent on a transport that cannot edit. */
+  bubble?: RemoteLiveBubble;
+  /** Replaces the default status while the turn waits on something else. */
+  phase?: string;
   milestone?: string;
   /**
    * Warnings that must survive the next milestone.
    *
-   * `milestone` is overwritten by the following tool name ~1.5s later, which is
-   * fine for "Running read_file…" and wrong for "agent is repeating the same
-   * tool call". Those go here instead and stay for the rest of the turn.
+   * `milestone` is overwritten by the following tool name a moment later,
+   * which is fine for "Running read_file…" and wrong for "agent is repeating
+   * the same tool call". Those go here instead and stay for the rest of the turn.
    */
   warnings: string[];
-  lastText: string;
-  queuedText?: string;
   /**
-   * Every narration already delivered as its own message this turn.
+   * Every narration already delivered this turn.
    *
    * A model can repeat the same finished thought in two NON-adjacent rounds
-   * (X, Y, X): the middle round changes the text, so a guard that only compares
-   * against the immediately preceding narration lets the third one through and
-   * the phone gets the same paragraph twice. Remembering the whole turn's worth
-   * (bounded) closes that gap. Cleared by `begin`, so a later turn may say the
-   * same thing again.
+   * (X, Y, X): a guard that only compares against the preceding narration lets
+   * the third through and the phone gets the same paragraph twice. Only a
+   * narration that did not stream is checked -- a streamed one is already on
+   * screen and only replaces its own words. Cleared by `begin`.
    */
   narrations: string[];
   startedAt: number;
   lastActivityAt: number;
   toolCalls: number;
-  timer?: ReturnType<typeof setTimeout>;
   clock?: ReturnType<typeof setInterval>;
+  /** Out-of-band sends (warnings, images), in order. */
   tail: Promise<void>;
   closed: boolean;
 }
 
 /**
- * Coalesces visible turn progress into one rate-limited remote message edit.
+ * Mirrors a turn into the chat as it happens.
  *
- * The progress "bubble" is a single message opened via `sendProgress` and then
- * edited in place (`editMessageText`). Telegram does not let a message move to
- * the bottom of a chat — it keeps the position it was created at — so the
- * bubble stays at the top of the turn's activity while narrations and the
- * final answer are sent as separate messages and appear below it. That is the
- * intended layout, not a bug. Making the bubble "follow" the progress would
- * mean delete-and-resend on every update, and Telegram notifies on sends but
- * stays silent on edits — so the in-place edit is exactly what keeps a long
- * turn from spamming the phone with a notification per progress tick.
+ * The agent's words stream into real messages, one per text block, and the
+ * status footer with the ⏹ Stop button rides on the newest of them (see
+ * `RemoteLiveBubble`). A separate status message was tried first and failed:
+ * Telegram never moves a message, so it stayed where it was opened while every
+ * later bubble appeared below it and the live status scrolled out of view.
  *
- * The bubble carries status only, never the model's streamed words: it is
- * permanent, so streaming into it showed every thought twice (`4dcb826`).
- * The words go to a separate rich draft preview that carries nothing else —
- * a status in a draft is re-typed letter by letter on every change, which is
- * what made "Forge: working…" crawl. See `RemoteWordsDraft` and
- * docs/plans/TELEGRAM_STATUS_BUBBLE_RESTORE_PLAN.md.
+ * A new bubble per block is also what notifies the phone: Telegram raises a
+ * notification for a send and none for an edit, so a turn that only ever
+ * edited one message was silent until it ended.
  */
 export class RemoteAgentProgress {
   private readonly active = new Map<string, ActiveProgress>();
@@ -111,12 +97,10 @@ export class RemoteAgentProgress {
     private readonly editIntervalMs = DEFAULT_EDIT_INTERVAL_MS,
     private readonly onError?: (message: string) => void,
     /**
-     * Arms deletion of the finished progress bubble after the fixed queued-ack
-     * delay. The bubble is status only ("Forge: completed.", "Forge: failed.",
-     * a loop-guard warning) — the real answer is always a separate message
-     * (see the class comment), so deleting this one loses no conversation
-     * record; it just stops a purely transient status line from sitting in
-     * the chat forever like the real replies around it do not.
+     * Arms deletion of a finished bubble left holding status only ("Forge:
+     * completed.", "Forge: failed.") after the fixed queued-ack delay. Bubbles
+     * carrying the agent's words are kept; the final answer is a separate
+     * message, so deleting a status-only one loses no conversation record.
      */
     private readonly armAfter?: (
       chatId: string,
@@ -124,12 +108,6 @@ export class RemoteAgentProgress {
       delaySeconds: number,
     ) => void,
     private readonly clockIntervalMs = CLOCK_INTERVAL_MS,
-    /**
-     * Live draft previews this progress owns, shared with the controller so a
-     * Telegram Stop update can resolve a draft id back to a conversation.
-     * Absent for transports with no rich drafts.
-     */
-    private readonly drafts?: RemoteDraftRegistry | undefined,
   ) {}
 
   updateMaxMessageChars(maxMessageChars: number): void {
@@ -144,40 +122,34 @@ export class RemoteAgentProgress {
   ): void {
     this.drop(conversationId);
     const now = Date.now();
-    this.active.set(conversationId, {
+    const state: ActiveProgress = {
       origin,
       chatId,
-      messageId,
-      headline: DEFAULT_HEADLINE,
       warnings: [],
-      lastText: DEFAULT_HEADLINE,
       narrations: [],
       startedAt: now,
       lastActivityAt: now,
       toolCalls: 0,
       tail: Promise.resolve(),
       closed: false,
-    });
-    const state = this.active.get(conversationId)!;
-    if (this.channel.richDraft) {
-      state.words = new RemoteWordsDraft({
-        rich: this.channel.richDraft,
+    };
+    this.active.set(conversationId, state);
+    if (!this.channel.editMessage) return;
+    state.bubble = new RemoteLiveBubble(
+      {
+        channel: this.channel,
         chatId,
-        conversationId,
         signal: this.signal,
-        drafts: this.drafts,
-        live: () => !state.closed && this.active.get(conversationId) === state,
         canDeliver: () => this.safeCanDeliver(chatId),
         maxChars: () => this.maxMessageChars,
-        streamIntervalMs: Math.min(this.editIntervalMs, DRAFT_STREAM_INTERVAL_MS),
-        lifetimeMs: DRAFT_LIFETIME_MS,
+        footer: (maximum) => renderProgressFooter(state, maximum, Date.now()),
+        intervalMs: this.editIntervalMs,
         report: (err) => this.report(err),
-      });
-    }
-    if (this.channel.editMessage) {
-      // The 60s clock keeps the elapsed-time line honest on a quiet turn.
-      state.clock = setInterval(() => this.queueEdit(conversationId, state), this.clockIntervalMs);
-    }
+      },
+      messageId,
+    );
+    // The clock keeps the elapsed-time line honest on a quiet turn.
+    state.clock = setInterval(() => state.bubble?.request(), this.clockIntervalMs);
   }
 
   /**
@@ -217,7 +189,8 @@ export class RemoteAgentProgress {
 
   handle(event: AgentProgressEvent): void {
     const state = this.active.get(event.conversationId);
-    if (!state || state.closed || !(this.channel.editMessage || this.channel.richDraft)) return;
+    const bubble = state?.bubble;
+    if (!state || state.closed || !bubble) return;
     if (event.kind === 'end') {
       // Only the lazily-opened kind. A remote request's message is closed by
       // RemoteQueueDrain with the request's own outcome, which knows the two
@@ -228,43 +201,47 @@ export class RemoteAgentProgress {
       return;
     }
     state.lastActivityAt = Date.now();
-    if (event.kind === 'narration') {
-      // The words stay in the preview: clearing them would re-type the whole
-      // draft, and the preview is retired by Telegram anyway.
-      this.queueNarration(event.conversationId, state, event.text);
+    if (event.kind === 'commentary') {
+      bubble.append(sanitize(event.text));
       return;
     }
-    // Streamed tokens reach the words preview only: it is retired by Telegram,
-    // so the words appear once as a record. The bubble is permanent and keeps
-    // them out (see the class comment).
-    if (event.kind === 'commentary' && state.words?.append(event.text)) return;
-    if (event.kind === 'commentary' || event.kind === 'reasoning') return;
+    if (event.kind === 'reasoning') return;
+    if (event.kind === 'narration') {
+      const text = sanitize(event.text).trim();
+      if (!text || (!bubble.streaming && state.narrations.includes(text))) return;
+      state.narrations.push(text);
+      if (state.narrations.length > MAX_SEEN_NARRATIONS) state.narrations.shift();
+      bubble.narrate(text);
+      return;
+    }
     if (event.kind === 'phase') {
       const headline = keepTail(sanitize(event.text ?? '').trim(), MAX_HEADLINE_CHARS);
-      const next = headline || DEFAULT_HEADLINE;
-      if (next === state.headline) return;
-      state.headline = next;
+      const next = headline && headline !== DEFAULT_STATUS ? headline : undefined;
+      if (next === state.phase) return;
+      if (next === undefined) delete state.phase;
+      else state.phase = next;
     } else if (event.kind === 'notice') {
       const notice = keepTail(sanitize(event.text).trim(), MAX_NOTICE_CHARS);
       if (!notice) return;
       if (event.severity === 'warning') {
         // Deduplicated: a guard that fires on consecutive rounds would
-        // otherwise fill the message with copies of one sentence.
+        // otherwise fill the footer with copies of one sentence.
         if (state.warnings[state.warnings.length - 1] === notice) return;
         state.warnings.push(notice);
         if (state.warnings.length > MAX_LATCHED_WARNINGS) state.warnings.shift();
         // Sent as well as latched, and the two are not redundant. The latched
-        // line is the standing reminder a reader scrolling the bubble sees; the
-        // message is the only thing that actually reaches a phone, because
-        // Telegram raises no notification for an edit. "agent is repeating the
-        // same tool call -- stopping to avoid a loop" is precisely the sentence
-        // that must not wait for the turn to end to be read.
+        // line is the standing reminder in the footer; the message is what
+        // actually reaches a phone, because Telegram raises no notification
+        // for an edit. "agent is repeating the same tool call -- stopping to
+        // avoid a loop" must not wait for the turn to end to be read.
         this.queueOutbound(event.conversationId, state, `⚠ ${notice}`);
       } else {
         state.milestone = notice;
       }
     } else if (event.kind === 'tool') {
       state.toolCalls += 1;
+      // A tool call is a block boundary even when no narration came.
+      bubble.endBlock();
       const toolName = sanitizeToolName(event.toolName);
       if (!toolName) return;
       state.milestone = `Running ${toolName}…`;
@@ -273,12 +250,12 @@ export class RemoteAgentProgress {
       if (!status) return;
       state.milestone = keepTail(status, MAX_STATUS_CHARS);
     }
-    this.schedule(event.conversationId, state);
+    bubble.request();
   }
 
   /**
    * Send a generated image to the chat watching this turn, in order behind the
-   * pending edits and narrations.
+   * pending warnings.
    *
    * Returns how many chats it was queued to -- 0 or 1 -- because generate_image
    * reports that to the model: a live message for the turn is the only proof a
@@ -293,19 +270,22 @@ export class RemoteAgentProgress {
         if (state.closed || this.signal.aborted) return;
         if (this.active.get(conversationId) !== state) return;
         if (!(await this.safeCanDeliver(state.chatId))) return;
+        await state.bubble?.flushNow();
         await sendPhoto(state.chatId, filePath, caption, this.signal);
+        state.bubble?.strand();
       })
       .catch((err) => this.report(err));
     return 1;
   }
 
   /**
-   * The live turn whose status bubble this is, for the bubble's Stop button.
+   * The live turn one of whose bubbles this is, for the Stop button. Any of
+   * the turn's bubbles counts: a tap can land just before the button moves on.
    * A finished turn has left `active`, so a tap on its old bubble finds nothing.
    */
   conversationForBubble(chatId: string, messageId: string): string | undefined {
     for (const [conversationId, state] of this.active) {
-      if (!state.closed && state.chatId === chatId && state.messageId === messageId) {
+      if (!state.closed && state.chatId === chatId && state.bubble?.owns(messageId)) {
         return conversationId;
       }
     }
@@ -316,120 +296,56 @@ export class RemoteAgentProgress {
     const state = this.active.get(conversationId);
     if (!state) return;
     state.closed = true;
-    this.clearTimers(state);
+    if (state.clock) clearInterval(state.clock);
     await state.tail;
-    await state.words?.close();
     // Only this state: a new message may have begun for the conversation
     // while the tail settled, and it is not this call's to delete.
-    if (this.active.get(conversationId) === state) {
-      this.active.delete(conversationId);
-      if (state.words?.opened) this.drafts?.forgetConversation(conversationId);
-    }
-    if (this.signal.aborted) return;
-    // The words preview is left to expire on Telegram's side (~30 s without
-    // an update); the answer and every narration are already real messages.
-    if (!this.channel.editMessage) return;
-    if (!(await this.safeCanDeliver(state.chatId))) return;
-    await this.channel
-      .editMessage(state.chatId, state.messageId, terminalText.slice(0, this.maxMessageChars), {
-        signal: this.signal,
-      })
-      .catch((err) => this.report(err));
-    this.armAfter?.(state.chatId, [state.messageId], QUEUED_ACK_DELETE_SECONDS);
+    if (this.active.get(conversationId) === state) this.active.delete(conversationId);
+    if (!state.bubble || this.signal.aborted) return;
+    const statusOnly = await state.bubble.close(terminalText);
+    if (statusOnly.length > 0) this.armAfter?.(state.chatId, statusOnly, QUEUED_ACK_DELETE_SECONDS);
   }
 
   async dispose(): Promise<void> {
     const pending: Promise<void>[] = [];
     for (const [conversationId, state] of this.active) {
-      state.closed = true;
-      this.clearTimers(state);
+      this.abandon(state);
       pending.push(state.tail);
-      if (state.words) pending.push(state.words.close());
       this.active.delete(conversationId);
-      if (state.words?.opened) this.drafts?.forgetConversation(conversationId);
     }
     await Promise.allSettled(pending);
   }
 
-  /**
-   * Deliver one finished mid-turn thought as a new message.
-   *
-   * A new message rather than an edit because that is the whole point: Telegram
-   * notifies on a send and stays silent on an edit, so a turn that only ever
-   * edited its bubble was invisible to a phone until it ended.
-   *
-   * Rides `state.tail` with the edits so a narration cannot overtake the bubble
-   * update that preceded it.
-   */
-  private queueNarration(conversationId: string, state: ActiveProgress, raw: string): void {
-    const text = sanitize(raw).trim();
-    if (!text || state.narrations.includes(text)) return;
-    state.narrations.push(text);
-    if (state.narrations.length > MAX_SEEN_NARRATIONS) state.narrations.shift();
-    this.queueOutbound(conversationId, state, text);
-  }
-
-  /** Send one line of its own into the chat, in order behind the pending edits. */
+  /** Send one line of its own into the chat, in order behind earlier ones. */
   private queueOutbound(conversationId: string, state: ActiveProgress, text: string): void {
     state.tail = state.tail
       .then(async () => {
         if (state.closed || this.signal.aborted) return;
         if (this.active.get(conversationId) !== state) return;
         if (!(await this.safeCanDeliver(state.chatId))) return;
+        await state.bubble?.flushNow();
         await this.channel.send(state.chatId, text.slice(0, this.maxMessageChars), {
           signal: this.signal,
         });
+        // The line now sits under the newest bubble; the footer moves below it.
+        state.bubble?.strand();
       })
       .catch((err) => this.report(err));
-  }
-
-  private schedule(conversationId: string, state: ActiveProgress): void {
-    if (state.timer) return;
-    state.timer = setTimeout(() => {
-      delete state.timer;
-      this.queueEdit(conversationId, state);
-    }, this.editIntervalMs);
-  }
-
-  private queueEdit(conversationId: string, state: ActiveProgress): void {
-    const text = renderRemoteProgress(state, this.maxMessageChars, Date.now());
-    if (text === state.lastText || text === state.queuedText) return;
-    state.queuedText = text;
-    state.tail = state.tail
-      .then(async () => {
-        if (state.closed || this.signal.aborted) return;
-        if (this.active.get(conversationId) !== state) return;
-        if (!this.channel.editMessage) return;
-        if (!(await this.safeCanDeliver(state.chatId))) return;
-        // An edit without the keyboard removes it, so every in-turn edit
-        // re-sends the Stop button; only `finish`'s terminal edit drops it.
-        await this.channel.editMessage(state.chatId, state.messageId, text, {
-          signal: this.signal,
-          stopButton: true,
-        });
-        state.lastText = text;
-      })
-      .catch((err) => this.report(err))
-      .finally(() => {
-        if (state.queuedText === text) delete state.queuedText;
-      });
   }
 
   private drop(conversationId: string): void {
     const previous = this.active.get(conversationId);
     if (!previous) return;
-    previous.closed = true;
-    this.clearTimers(previous);
+    this.abandon(previous);
     this.active.delete(conversationId);
-    if (previous.words?.opened) this.drafts?.forgetConversation(conversationId);
   }
 
-  private clearTimers(state: ActiveProgress): void {
-    if (state.timer) clearTimeout(state.timer);
+  /** Stops a turn's timers without a final edit: a replaced or disposed turn. */
+  private abandon(state: ActiveProgress): void {
+    state.closed = true;
     if (state.clock) clearInterval(state.clock);
-    void state.words?.close();
-    delete state.timer;
     delete state.clock;
+    state.bubble?.abandon();
   }
 
   private report(err: unknown): void {

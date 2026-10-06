@@ -1,7 +1,6 @@
 import type * as vscode from 'vscode';
 import type { ForgeHostFacade } from '../sidebar/ForgeHostFacade';
 import type { RemoteRequestStore } from './RemoteRequestStore';
-import type { RichDraftTransport } from './telegramRichDraft';
 import type { RemoteInboundAttachment, RemoteInboundEvent } from './remoteInboundSchema';
 
 /**
@@ -230,6 +229,12 @@ export interface RemoteSelectionPages {
 export interface ProgressMessageOptions {
   signal?: AbortSignal;
   stopButton?: boolean;
+  /**
+   * False: a 429 throws `TelegramRateLimitError` instead of re-sending the
+   * same body after `retry_after`. The live bubble sets it, because the body it
+   * would re-send is an old snapshot; it waits and renders the latest instead.
+   */
+  retryRateLimit?: boolean;
 }
 
 export interface RemoteChannel {
@@ -286,12 +291,6 @@ export interface RemoteChannel {
     text: string,
     options?: ProgressMessageOptions,
   ): Promise<string | undefined>;
-  /**
-   * Telegram-only rich-draft progress with Telegram's native Stop button.
-   * Present only on transports that can stream a preview and finalize it; the
-   * progress lifecycle falls back to `sendProgress` + `editMessage` without it.
-   */
-  richDraft?: RichDraftTransport;
   /** Best-effort presentation only; a reload may lose the provider message id. */
   editMessage?(
     chatId: string,

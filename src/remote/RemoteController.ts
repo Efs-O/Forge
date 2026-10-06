@@ -25,7 +25,6 @@ import { RemoteApprovalBridge } from './RemoteApprovalBridge';
 import { RemoteQuestionBridge } from './RemoteQuestionBridge';
 import { CommandCleanupScheduler } from './CommandCleanupScheduler';
 import { RemoteAgentProgress, CLOCK_INTERVAL_MS } from './RemoteAgentProgress';
-import { RemoteDraftRegistry } from './RemoteDraftRegistry';
 import { HostProgressOpener } from './remoteHostProgress';
 import { RemoteNotificationFanout } from './RemoteNotificationFanout';
 import type { RemotePromptAdmissionDeps } from './RemotePromptAdmission';
@@ -55,7 +54,6 @@ export class RemoteController {
   private readonly questions: RemoteQuestionBridge;
   private readonly progress: RemoteAgentProgress;
   /** Live draft previews shared by progress and Stop. */
-  private readonly drafts = new RemoteDraftRegistry();
   private readonly hostProgress: HostProgressOpener;
   private readonly pending = new RemotePendingPrompt();
   /** Best-effort deletion of processed owner commands from Telegram. */
@@ -132,12 +130,11 @@ export class RemoteController {
       this.abort.signal,
       (chatId) => this.auth.canDeliver(this.channel.name, chatId),
       Math.min(options.maxMessageChars, 3_900),
-      1_500,
+      1_000,
       options.onError,
       (chatId, messageIds, delaySeconds) =>
         this.commandCleanup.armAfter(chatId, messageIds, delaySeconds),
       CLOCK_INTERVAL_MS,
-      this.drafts,
     );
     this.fanout = new RemoteNotificationFanout({
       store,
@@ -188,8 +185,6 @@ export class RemoteController {
   /** Drops held prompts on unpair so a new owner cannot inherit the old owner's queued work. */
   forgetChannel(channel: RemoteInboundEvent['channel']): void {
     this.pending.clearChannel(channel);
-    // A Telegram draft can outlive pairing; its Stop must no longer cancel a turn.
-    this.drafts.forgetAll();
   }
   async stop(): Promise<void> {
     this.accepting = false;
@@ -313,11 +308,6 @@ export class RemoteController {
         }
       );
     }
-    if (event.kind === 'generation_stopped') {
-      // Claimed before anything is awaited, so two deliveries cannot both cancel.
-      const draft = this.drafts.take(event.chatId, event.draftId);
-      return this.stopTurn(event, `draft ${event.draftId}`, draft?.conversationId);
-    }
     if (event.kind === 'stop_action') {
       const owner = this.progress.conversationForBubble(event.chatId, event.messageId);
       return this.stopTurn(event, `bubble ${event.messageId}`, owner);
@@ -387,8 +377,7 @@ export class RemoteController {
     );
   }
   /**
-   * A Stop button: the status bubble's ⏹ Stop, or a words preview's native
-   * Stop (dormant since `can_stop` was dropped, kept for a revert).
+   * The ⏹ Stop button under the newest bubble of a turn.
    *
    * The caller resolved the tapped message to the live turn it belongs to; a
    * press that resolves to nothing is stale or foreign and must do nothing, or
@@ -396,7 +385,7 @@ export class RemoteController {
    * only after the owner gate, so it carries the paired owner's authority.
    */
   private async stopTurn(
-    event: Extract<RemoteInboundEvent, { kind: 'generation_stopped' | 'stop_action' }>,
+    event: Extract<RemoteInboundEvent, { kind: 'stop_action' }>,
     pressed: string,
     conversationId: string | undefined,
   ): Promise<RemoteInboundDisposition> {

@@ -29,7 +29,15 @@ type TelegramCall = (
   method: string,
   body: Record<string, unknown>,
   signal?: AbortSignal,
+  options?: { retryRateLimit?: boolean },
 ) => Promise<unknown>;
+
+/** Only the queue options a bubble call carries; the keyboard is separate. */
+function callOptions(options?: ProgressMessageOptions): { retryRateLimit?: boolean } | undefined {
+  return options?.retryRateLimit === undefined
+    ? undefined
+    : { retryRateLimit: options.retryRateLimit };
+}
 
 export class TelegramOutbound {
   private readonly promptMessages = new Map<string, number>();
@@ -120,6 +128,7 @@ export class TelegramOutbound {
       'sendMessage',
       { chat_id: chatId, text, ...stopKeyboard(options) },
       options?.signal,
+      callOptions(options),
     );
     const parsed = TelegramSentMessageSchema.safeParse(sent);
     return parsed.success ? String(parsed.data.message_id) : undefined;
@@ -274,6 +283,7 @@ export class TelegramOutbound {
       'editMessageText',
       { chat_id: chatId, message_id: Number(messageId), text, ...stopKeyboard(options) },
       options?.signal,
+      callOptions(options),
     );
   }
 

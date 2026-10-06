@@ -204,9 +204,9 @@ overlaps with an existing owner, extend the owner instead.
 | Claim a queued request as a mid-turn tell     | `src/remote/RemoteMidTurnTells.ts`              |
 | Turn outcome echoed to bound chats            | `src/sidebar/turnMirrorWiring.ts`               |
 | Live progress message for a sidebar turn      | `src/remote/remoteHostProgress.ts`              |
-| Remote progress bubble and pure liveness clock rendering | `src/remote/RemoteAgentProgress.ts`, `src/remote/remoteProgressRender.ts` |
-| Telegram words preview for one turn (open, append-only updates, fresh preview after a quiet stretch, Stop registration), its coalesced send lane and streamed-text buffer | `src/remote/RemoteDraftLane.ts` |
-| Telegram rich-draft transport (`sendRichMessageDraft`, draft ids, refusal classification) and the plain status-bubble opener | `src/remote/telegramRichDraft.ts` |
+| Remote turn progress (event routing, footer state, out-of-band sends) and pure status-footer rendering | `src/remote/RemoteAgentProgress.ts`, `src/remote/remoteProgressRender.ts` |
+| A turn's live chat bubbles: one per text block, status footer and Stop only on the newest, throttled coalesced edits, 429 re-render, 4096-char split | `src/remote/RemoteLiveBubble.ts` |
+| Opening a turn's first progress bubble, shared by the queue drain and the sidebar mirror | `src/remote/remoteProgressOpen.ts` |
 | `/view` transcript replay rendering           | `src/remote/RemoteTranscriptView.ts`            |
 | Paged /list, /models, /workspace selections   | `src/remote/RemoteSelectionPager.ts`            |
 | Selection list identity, token, expiry        | `src/remote/RemoteSelectionState.ts`            |

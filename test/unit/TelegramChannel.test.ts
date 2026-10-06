@@ -12,7 +12,7 @@ import {
   telegramSelectionKeyboard,
 } from '../../src/remote/TelegramSelectionPagination';
 import { RemoteAttachmentStore } from '../../src/remote/RemoteAttachmentStore';
-import { openProgressBubble } from '../../src/remote/telegramRichDraft';
+import { openProgressBubble } from '../../src/remote/remoteProgressOpen';
 import { HELP_SECTIONS, HELP_TEXT } from '../../src/remote/remoteHelpText';
 import type { RemoteInboundDisposition, RemoteInboundEvent } from '../../src/remote/types';
 
@@ -76,7 +76,9 @@ describe('TelegramChannel', () => {
         }),
       );
     }
-    expect(TELEGRAM_BOT_COMMANDS).toContainEqual(expect.objectContaining({ command: 'tell', description: expect.stringContaining('one-way') }));
+    expect(TELEGRAM_BOT_COMMANDS).toContainEqual(
+      expect.objectContaining({ command: 'tell', description: expect.stringContaining('one-way') }),
+    );
     expect(TELEGRAM_BOT_COMMANDS).toContainEqual(expect.objectContaining({ command: 'answer' }));
     // Telegram caps the menu at 100 commands and sorts them for display; the
     // list is kept alphabetical so a phone user can scan it.
@@ -98,7 +100,7 @@ describe('TelegramChannel', () => {
     const note = HELP_TEXT.split('\n').find((line) =>
       line.includes('/claude, /codex and /copilot'),
     );
-    expect(note).toContain("final answer here");
+    expect(note).toContain('final answer here');
     expect(note).toContain('one-way note');
   });
 
@@ -1578,289 +1580,13 @@ describe('RemoteAttachmentStore size limits', () => {
   });
 });
 
-/**
- * Phase 2: the polling loop's side of the native Stop button.
- *
- * Two invariants the mapper and controller cannot prove on their own: the bot
- * must actually ask Telegram for these updates (otherwise the button exists in
- * the UI and nothing ever arrives), and a Stop must be disposed before its
- * cursor commits (otherwise a crash between the two replays a Stop onto a turn
- * that has already moved on).
- */
-describe('TelegramChannel — stopped_message_generation polling', () => {
-  it('requests stopped_message_generation in allowed_updates', async () => {
-    const abort = new AbortController();
-    const bodies: Array<{ method: string; body: Record<string, unknown> }> = [];
-    const channel = new TelegramChannel({
-      token: 'secret-token',
-      getCursor: () => undefined,
-      setCursor: async () => undefined,
-      fetch: (async (url: string | URL | Request, init?: RequestInit) => {
-        const method = String(url).split('/').at(-1)!;
-        bodies.push({ method, body: JSON.parse(String(init?.body)) as Record<string, unknown> });
-        if (method === 'setMyCommands') return response(true);
-        return new Promise<Response>((_resolve, reject) => {
-          init?.signal?.addEventListener('abort', () => reject(new Error('aborted')), {
-            once: true,
-          });
-        });
-      }) as typeof fetch,
-    });
-
-    await channel.start(abort.signal);
-    await vi.waitFor(() => expect(bodies.some((b) => b.method === 'getUpdates')).toBe(true));
-    const getUpdates = bodies.find((b) => b.method === 'getUpdates');
-    expect(getUpdates?.body.allowed_updates).toEqual([
-      'message',
-      'callback_query',
-      'stopped_message_generation',
-    ]);
-    abort.abort();
-  });
-
-  it('delivers a stopped update to the handler and commits its cursor only after', async () => {
-    const abort = new AbortController();
-    const events: RemoteInboundEvent[] = [];
-    const log: string[] = [];
-    let polls = 0;
-    const setCursor = vi.fn(async () => {
-      log.push('setCursor');
-    });
-    const channel = new TelegramChannel({
-      token: 'secret-token',
-      getCursor: () => undefined,
-      setCursor,
-      fetch: (async (url: string | URL | Request, init?: RequestInit) => {
-        const method = String(url).split('/').at(-1)!;
-        if (method === 'setMyCommands') return response(true);
-        if (method === 'getUpdates') {
-          log.push('getUpdates');
-          // One batch only, then hang: a mock that replays the same update
-          // forever would loop the polling thread instead of proving ordering.
-          if (polls++ > 0) {
-            return new Promise<Response>((_resolve, reject) => {
-              init?.signal?.addEventListener('abort', () => reject(new Error('aborted')), {
-                once: true,
-              });
-            });
-          }
-          return response([
-            {
-              update_id: 60,
-              stopped_message_generation: {
-                chat: { id: 99, type: 'private' },
-                draft_id: 42,
-              },
-            },
-          ]);
-        }
-        return new Promise<Response>((_resolve, reject) => {
-          init?.signal?.addEventListener('abort', () => reject(new Error('aborted')), {
-            once: true,
-          });
-        });
-      }) as typeof fetch,
-    });
-    channel.onEvent(async (event) => {
-      events.push(event);
-      log.push('handler');
-      return { kind: 'handled' };
-    });
-
-    await channel.start(abort.signal);
-    await vi.waitFor(() => expect(setCursor).toHaveBeenCalledWith('telegram:update-offset', '61'));
-    abort.abort();
-
-    expect(events[0]).toMatchObject({
-      kind: 'generation_stopped',
-      providerMessageId: '60',
-      senderId: '99',
-      chatId: '99',
-      chatType: 'private',
-      draftId: 42,
-    });
-    // Disposition before cursor: the offset only advances once the Stop has
-    // been acted on. (A second long poll may already be in flight and hanging,
-    // which is why the trailing log entries are not asserted.)
-    expect(log.indexOf('handler')).toBeGreaterThanOrEqual(0);
-    expect(log.indexOf('handler')).toBeLessThan(log.indexOf('setCursor'));
-  });
-
-  it('leaves an un-disposed Stop replayable instead of advancing past it', async () => {
-    const abort = new AbortController();
-    const setCursor = vi.fn(async () => undefined);
-    let attempts = 0;
-    const channel = new TelegramChannel({
-      token: 'secret-token',
-      getCursor: () => undefined,
-      setCursor,
-      fetch: (async (url: string | URL | Request, init?: RequestInit) => {
-        const method = String(url).split('/').at(-1)!;
-        if (method === 'setMyCommands') return response(true);
-        if (method === 'getUpdates') {
-          if (attempts++ > 0) {
-            return new Promise<Response>((_resolve, reject) => {
-              init?.signal?.addEventListener('abort', () => reject(new Error('aborted')), {
-                once: true,
-              });
-            });
-          }
-          return response([
-            {
-              update_id: 61,
-              stopped_message_generation: {
-                chat: { id: 99, type: 'private' },
-                draft_id: 42,
-              },
-            },
-          ]);
-        }
-        return response(true);
-      }) as typeof fetch,
-    });
-    const seen: RemoteInboundEvent[] = [];
-    channel.onEvent(async (event) => {
-      seen.push(event);
-      abort.abort();
-      return { kind: 'retry', reason: 'handler is not ready' };
-    });
-
-    await channel.start(abort.signal);
-    await vi.waitFor(() => expect(seen).toHaveLength(1));
-    await new Promise((resolve) => setTimeout(resolve, 0));
-    // A Stop the handler could not take stays replayable, exactly as for a text
-    // message: advancing here would consume a Stop nobody acted on.
-    expect(setCursor).not.toHaveBeenCalled();
-  });
-});
-
-/**
- * Phase 2: the draft transport on the real channel.
- *
- * `richDraft` is wired through the channel's own `call`, which is what puts
- * every draft send and draft update in the same per-chat lane as the
- * narrations and the final status. Proving that here rather than at the queue
- * unit level matters: the serialization is a property of how the channel wires
- * its calls, and a future refactor that gave the draft transport its own fetch
- * would break per-chat ordering while every unit test still passed.
- *
- * These use a numeric chat id because that is what a Telegram private chat has:
- * `sendRichMessageDraft` types chat_id as an Integer, so a non-numeric fixture
- * would be refused locally before ever reaching the wire, and the test would
- * pass for the wrong reason.
- */
-describe('TelegramChannel — rich draft transport', () => {
+/** The turn's progress bubble on the real channel. */
+describe('TelegramChannel — progress bubble', () => {
   const CHAT = '700000001';
 
-  it('sends draft previews outside the chat lane, never behind an in-flight send', async () => {
-    const abort = new AbortController();
-    const methods: string[] = [];
-    let releaseSend!: () => void;
-    const sendBlocked = new Promise<void>((resolve) => (releaseSend = resolve));
-
-    const channel = new TelegramChannel({
-      token: 'secret-token',
-      getCursor: () => undefined,
-      setCursor: async () => undefined,
-      fetch: (async (url: string | URL | Request) => {
-        const method = String(url).split('/').at(-1)!;
-        methods.push(method);
-        if (method === 'setMyCommands') return response(true);
-        if (method === 'sendMessage') {
-          await sendBlocked;
-          return response({ message_id: 1 });
-        }
-        return response(true);
-      }) as typeof fetch,
-    });
-    await channel.start(abort.signal);
-
-    const send = channel.send(CHAT, 'a narration');
-    // Same chat, issued while the send is still in flight: a preview is
-    // replaceable and must not queue, and nothing may queue behind it.
-    await channel.richDraft.updateDraft(CHAT, 42, 'Forge: working…');
-    expect(methods).toContain('sendRichMessageDraft');
-
-    releaseSend();
-    await send;
-    abort.abort();
-  });
-
-  it('skips draft previews for retry_after on a 429 instead of waiting in place', async () => {
-    let draftCalls = 0;
-    let now = 1_000_000;
-    const clock = vi.spyOn(Date, 'now').mockImplementation(() => now);
-    const channel = new TelegramChannel({
-      token: 'secret-token',
-      getCursor: () => undefined,
-      setCursor: async () => undefined,
-      fetch: (async (url: string | URL | Request) => {
-        const method = String(url).split('/').at(-1)!;
-        if (method !== 'sendRichMessageDraft') return response(true);
-        draftCalls += 1;
-        return new Response(JSON.stringify({ ok: false, parameters: { retry_after: 5 } }), {
-          status: 429,
-          headers: { 'content-type': 'application/json' },
-        });
-      }) as typeof fetch,
-    });
-
-    try {
-      // Resolves at once: no 5 s sleep in place, and no throw.
-      await channel.richDraft.updateDraft(CHAT, 42, 'one');
-      expect(draftCalls).toBe(1);
-      await channel.richDraft.updateDraft(CHAT, 42, 'two');
-      expect(draftCalls).toBe(1);
-      now += 5_000;
-      await channel.richDraft.updateDraft(CHAT, 42, 'three');
-      expect(draftCalls).toBe(2);
-    } finally {
-      clock.mockRestore();
-    }
-  });
-
-  it('opens a draft with a generated draft_id and no native Stop over the wire', async () => {
-    const abort = new AbortController();
-    const bodies: Array<{ method: string; body: Record<string, unknown> }> = [];
-    const channel = new TelegramChannel({
-      token: 'secret-token',
-      getCursor: () => undefined,
-      setCursor: async () => undefined,
-      fetch: (async (url: string | URL | Request, init?: RequestInit) => {
-        const method = String(url).split('/').at(-1)!;
-        bodies.push({ method, body: JSON.parse(String(init?.body)) as Record<string, unknown> });
-        return response(method === 'sendRichMessageDraft' ? true : { message_id: 3 });
-      }) as typeof fetch,
-    });
-    await channel.start(abort.signal);
-
-    const opened = await channel.richDraft.beginDraft(
-      CHAT,
-      'Forge: working…\n\n⏱ <1 min · 0 tool calls · last activity 1 s ago',
-    );
-
-    expect(opened.kind).toBe('open');
-    const call = bodies.find((b) => b.method === 'sendRichMessageDraft');
-    expect(call?.body).toMatchObject({
-      chat_id: Number(CHAT),
-      draft_id: (opened as { draftId: number }).draftId,
-    });
-    // can_stop swapped the chat's Send button for Stop while a preview lived;
-    // the turn's Stop is the status bubble's inline button instead.
-    expect(call?.body).not.toHaveProperty('can_stop');
-    // The Bot API types this chat_id as Integer, not "Integer or String".
-    expect(typeof (call?.body as { chat_id: unknown }).chat_id).toBe('number');
-    expect(call?.body).not.toHaveProperty('keep_on_stop');
-    // Only block types the Bot API defines for an InputRichMessage.
-    const blocks = (call?.body as { rich_message: { blocks: Array<{ type: string }> } })
-      .rich_message.blocks;
-    expect(blocks.map((block) => block.type)).toEqual(['paragraph', 'footer']);
-    abort.abort();
-  });
-
   it('opens the status bubble as a plain message, never a draft', async () => {
-    // A draft status re-typed itself on every edit and crawled; the status is a
-    // plain message edited in place, and only the model's words are a draft.
+    // A draft status re-typed itself on every edit and crawled; every bubble
+    // is a plain message edited in place.
     const abort = new AbortController();
     const methods: string[] = [];
     const bodies: Record<string, unknown>[] = [];
@@ -1908,7 +1634,9 @@ describe('TelegramChannel — rich draft transport', () => {
     await channel.editMessage(CHAT, '4', 'Forge: working… ⏱', { stopButton: true });
     await channel.editMessage(CHAT, '4', 'Forge: completed.');
 
-    expect(edits[0]).toMatchObject({ reply_markup: { inline_keyboard: [[{ callback_data: 'x' }]] } });
+    expect(edits[0]).toMatchObject({
+      reply_markup: { inline_keyboard: [[{ callback_data: 'x' }]] },
+    });
     expect(edits[1]).not.toHaveProperty('reply_markup');
     abort.abort();
   });

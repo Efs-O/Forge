@@ -1,6 +1,8 @@
 # Telegram status bubble restore
 
 **Status:** implemented 2026-10-05 (after 0.16.86).
+**Superseded by:** `TELEGRAM_LIVE_BUBBLE_PLAN.md` (2026-10-06): the words
+draft and the standalone status bubble are gone.
 **Supersedes in part:** `TELEGRAM_DRAFT_ANSWER_STREAMING_PLAN.md` (the status
 draft) and `TELEGRAM_BOT_API_UPGRADE_PLAN.md` Phase 2 (status in a
 `sendRichMessageDraft` preview).

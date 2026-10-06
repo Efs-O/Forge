@@ -51,10 +51,10 @@ describe('RemoteAgentProgress.deliverImage', () => {
     vi.useFakeTimers();
     const { channel, progress } = progressRig();
     const order: string[] = [];
-    const send = channel.send.bind(channel);
-    channel.send = async (chatId, text, options) => {
-      order.push(`text:${text}`);
-      await send(chatId, text, options);
+    const edit = channel.editMessage.bind(channel);
+    channel.editMessage = async (chatId, messageId, text, options) => {
+      order.push(`edit:${messageId}:${text.split('\n')[0]}`);
+      await edit(chatId, messageId, text, options);
     };
     const sendPhoto = channel.sendPhoto.bind(channel);
     channel.sendPhoto = async (chatId, filePath, caption) => {
@@ -67,7 +67,11 @@ describe('RemoteAgentProgress.deliverImage', () => {
     expect(progress.deliverImage('c1', 'C:/img/fox.jpg', '🖼 grok-imagine: fox')).toBe(1);
     await vi.advanceTimersByTimeAsync(1_000);
 
-    expect(order).toEqual(['text:Drawing the fox now.', 'photo:🖼 grok-imagine: fox']);
+    // The narration lands in the bubble before the photo goes out under it.
+    expect(order.slice(0, 2)).toEqual([
+      'edit:message-1:Drawing the fox now.',
+      'photo:🖼 grok-imagine: fox',
+    ]);
     expect(channel.photos).toEqual([
       { chatId: 'chat-a', filePath: 'C:/img/fox.jpg', caption: '🖼 grok-imagine: fox' },
     ]);
@@ -131,10 +135,10 @@ describe('send_file through the remote delivery chain', () => {
       order.push(`photo:${path.basename(filePath)}:${caption}`);
       await sendPhoto(chatId, filePath, caption);
     };
-    const send = channel.send.bind(channel);
-    channel.send = async (chatId, text, options) => {
-      order.push(`text:${text}`);
-      await send(chatId, text, options);
+    const edit = channel.editMessage.bind(channel);
+    channel.editMessage = async (chatId, messageId, text, options) => {
+      order.push(`edit:${messageId}:${text.split('\n')[0]}`);
+      await edit(chatId, messageId, text, options);
     };
     progress.begin('c1', 'chat-a', 'message-1');
 
@@ -160,7 +164,10 @@ describe('send_file through the remote delivery chain', () => {
     await vi.advanceTimersByTimeAsync(1_000);
     // The seam this test exists for: the file send goes out AFTER the narration
     // that preceded it, because both ride the same per-turn tail.
-    expect(order).toEqual(['text:Sending the plan now.', 'photo:plan.md:the plan doc']);
+    expect(order.slice(0, 2)).toEqual([
+      'edit:message-1:Sending the plan now.',
+      'photo:plan.md:the plan doc',
+    ]);
     // Path identity, not just a name that happens to match: basename plus
     // existence would also pass if the sink had picked a DIFFERENT existing
     // plan.md. Windows hands back either the long-name or the 8.3 short-name

@@ -1,11 +1,15 @@
 export interface RemoteProgressRenderState {
-  headline: string;
+  /** Set only while the turn is stuck on something that is not the model. */
+  phase?: string;
   warnings: string[];
   milestone?: string;
   startedAt: number;
   lastActivityAt: number;
   toolCalls: number;
 }
+
+/** What the footer says when nothing more specific is happening. */
+export const DEFAULT_STATUS = 'Forge: working…';
 
 /** Pure formatting keeps the clock stable under fake time and reusable in tests. */
 export function formatElapsed(milliseconds: number): string {
@@ -20,31 +24,24 @@ export function formatLastActivity(milliseconds: number): string {
   return seconds < 60 ? `${seconds} s` : `${Math.floor(seconds / 60)} min`;
 }
 
-export function renderRemoteProgress(
+/**
+ * The status footer under the turn's newest bubble.
+ *
+ * One status line, with the turn's latched warnings above it: the warnings are
+ * the part the reader most needs, so when the footer is cut to its budget the
+ * head is what goes, never the line that says what the turn is doing now.
+ */
+export function renderProgressFooter(
   state: RemoteProgressRenderState,
   maximum: number,
   now: number,
 ): string {
-  const sections = [state.headline];
-  // Warnings sit below the headline and above the live milestone: they are
-  // the part of the message the reader most needs and the part most likely to
-  // be trimmed, so they are never the first thing the tail cut reaches. The
-  // clock goes last for the same reason in reverse: the tail cut keeps it.
-  if (state.warnings.length) {
-    sections.push(state.warnings.map((warning) => `⚠ ${warning}`).join('\n'));
-  }
-  if (state.milestone) sections.push(state.milestone);
+  const doing = [state.phase, state.milestone].filter(Boolean).join(' · ') || DEFAULT_STATUS;
   const calls = state.toolCalls === 1 ? '1 tool call' : `${state.toolCalls} tool calls`;
-  sections.push(
-    `⏱ ${formatElapsed(now - state.startedAt)} · ${calls} · last activity ${formatLastActivity(
-      now - state.lastActivityAt,
-    )} ago`,
-  );
-  return keepTailWithPrefix(sections.join('\n\n'), maximum, `${state.headline}\n\n`);
-}
-
-function keepTailWithPrefix(value: string, maximum: number, prefix: string): string {
-  if (value.length <= maximum) return value;
-  const room = Math.max(1, maximum - prefix.length);
-  return `${prefix}…${value.slice(-(room - 1))}`;
+  const line = `⏳ ${doing} · ${formatElapsed(now - state.startedAt)} · ${calls} · last activity ${formatLastActivity(
+    now - state.lastActivityAt,
+  )} ago`;
+  const lines = [...state.warnings.map((warning) => `⚠ ${warning}`), line].join('\n');
+  if (lines.length <= maximum) return lines;
+  return `…${lines.slice(-Math.max(1, maximum - 1))}`;
 }

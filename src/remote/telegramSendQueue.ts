@@ -124,6 +124,9 @@ export async function postTelegram(
       await sleep(retryAfterMs, signal);
       continue;
     }
+    // An edit that changes nothing is refused with a 400, but the message
+    // already shows what was asked for: there is nothing to fail.
+    if (isNotModified(parsed)) return parsed?.result ?? true;
     if (!response.ok) throw new Error(`Telegram Bot API HTTP ${response.status}.`);
     if (!parsed) throw new Error(`Telegram Bot API returned an unreadable ${method} response.`);
     if (!parsed.ok) throw new Error(`Telegram Bot API rejected ${method}.`);
@@ -135,9 +138,8 @@ export async function postTelegram(
  * A 429 the caller chose not to (or could no longer) wait out in place.
  *
  * The message keeps the `Telegram Bot API HTTP 429.` shape every other HTTP
- * failure has, so a classifier reading the status (`isDefinitiveDraftRejection`)
- * still sees "unknown", while a caller that can use the interval -- the draft
- * lane, which skips updates rather than queueing them -- reads `retryAfterMs`.
+ * failure has, while a caller that can use the interval -- the live bubble,
+ * which waits and then renders its newest state -- reads `retryAfterMs`.
  */
 export class TelegramRateLimitError extends Error {
   constructor(readonly retryAfterMs: number) {
@@ -164,6 +166,10 @@ function callTimeoutMs(body: Record<string, unknown>): number {
   return typeof longPoll === 'number' && longPoll > 0
     ? longPoll * 1_000 + TELEGRAM_LONG_POLL_GRACE_MS
     : TELEGRAM_CALL_TIMEOUT_MS;
+}
+
+function isNotModified(parsed: z.infer<typeof TelegramResponseSchema> | undefined): boolean {
+  return parsed?.ok === false && /message is not modified/i.test(parsed.description ?? '');
 }
 
 function safeParse(payload: unknown): z.infer<typeof TelegramResponseSchema> | undefined {

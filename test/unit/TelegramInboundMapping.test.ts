@@ -28,9 +28,7 @@ function message(overrides: Record<string, unknown>): unknown {
 describe('Telegram inbound mapping — unsupported media', () => {
   it('maps a video message to an unsupported_media event', () => {
     expect(
-      telegramUpdateToEvent(
-        TelegramUpdateSchema.parse(message({ video: { file_id: 'video-1' } })),
-      ),
+      telegramUpdateToEvent(TelegramUpdateSchema.parse(message({ video: { file_id: 'video-1' } }))),
     ).toMatchObject({
       channel: 'telegram',
       kind: 'unsupported_media',
@@ -137,9 +135,9 @@ describe('Telegram inbound mapping — unsupported media', () => {
 
   /** The handled set must keep flowing untouched — Phase 3 adds no regressions. */
   it('leaves text, photo, document, and voice handling unchanged', () => {
-    expect(telegramUpdateToEvent(TelegramUpdateSchema.parse(message({ text: 'hi' })))).toMatchObject(
-      { kind: 'text', text: 'hi' },
-    );
+    expect(
+      telegramUpdateToEvent(TelegramUpdateSchema.parse(message({ text: 'hi' }))),
+    ).toMatchObject({ kind: 'text', text: 'hi' });
     expect(
       telegramUpdateToEvent(
         TelegramUpdateSchema.parse(message({ photo: [{ file_id: 'p', file_size: 1 }] })),
@@ -147,7 +145,9 @@ describe('Telegram inbound mapping — unsupported media', () => {
     ).toMatchObject({ kind: 'text', attachments: [{ providerFileId: 'p' }] });
     expect(
       telegramUpdateToEvent(
-        TelegramUpdateSchema.parse(message({ document: { file_id: 'd', mime_type: 'text/plain' } })),
+        TelegramUpdateSchema.parse(
+          message({ document: { file_id: 'd', mime_type: 'text/plain' } }),
+        ),
       ),
     ).toMatchObject({ kind: 'text', attachments: [{ providerFileId: 'd' }] });
     expect(
@@ -199,73 +199,6 @@ describe('Telegram inbound mapping — unsupported media', () => {
       message({ photo: [{ file_id: 'p1', file_size: 1 }], media_group_id: 'g1' }),
     );
     expect(albumPhotoFromUpdate(parsed)).toMatchObject({ providerFileId: 'p1' });
-  });
-});
-
-/**
- * Phase 2: the native Stop button on a rich-draft preview.
- *
- * `stopped_message_generation` carries a chat and a draft id and nothing else —
- * no `from`, no `message_id`. So the mapping has to invent the least it can:
- * derive the private-chat identity from the chat id, and use the `update_id` as
- * the only stable id available for deduplication.
- */
-describe('Telegram inbound mapping — stopped message generation', () => {
-  function stoppedUpdate(overrides: Record<string, unknown> = {}): unknown {
-    return {
-      update_id: 77,
-      stopped_message_generation: {
-        chat: { id: 99, type: 'private' },
-        draft_id: 42,
-        ...overrides,
-      },
-    };
-  }
-
-  it('maps a stopped update to its own event kind, never a synthesized /stop', () => {
-    const parsed = TelegramUpdateSchema.parse(stoppedUpdate());
-    expect(telegramUpdateToEvent(parsed)).toEqual({
-      channel: 'telegram',
-      kind: 'generation_stopped',
-      // The update_id is the only stable id this update has, and reusing it is
-      // what makes a redelivered Stop deduplicate instead of cancelling twice.
-      providerMessageId: '77',
-      senderId: '99',
-      chatId: '99',
-      chatType: 'private',
-      receivedAt: expect.any(Number),
-      draftId: 42,
-    });
-  });
-
-  it('derives the sender from the chat id because Telegram sends no `from`', () => {
-    const event = telegramUpdateToEvent(TelegramUpdateSchema.parse(stoppedUpdate()));
-    expect(event).toMatchObject({ senderId: '99', chatId: '99' });
-    expect(event && 'text' in event).toBe(false);
-  });
-
-  it('carries a group chat type through so the group gate can refuse it', () => {
-    const event = telegramUpdateToEvent(
-      TelegramUpdateSchema.parse(
-        stoppedUpdate({ chat: { id: -100, type: 'group', title: 'Team' } }),
-      ),
-    );
-    expect(event).toMatchObject({ chatId: '-100', chatType: 'group', chatTitle: 'Team' });
-  });
-
-  it('accepts a draft id only as an integer', () => {
-    expect(() =>
-      TelegramUpdateSchema.parse(stoppedUpdate({ draft_id: '42' })),
-    ).toThrowError();
-  });
-
-  it('maps a stopped update before any message branch, since it has no message', () => {
-    const parsed = TelegramUpdateSchema.parse({
-      update_id: 78,
-      stopped_message_generation: { chat: { id: 5, type: 'private' }, draft_id: 1 },
-    });
-    expect(parsed.message).toBeUndefined();
-    expect(telegramUpdateToEvent(parsed)).toMatchObject({ kind: 'generation_stopped' });
   });
 });
 
