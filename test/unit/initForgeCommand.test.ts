@@ -46,6 +46,8 @@ describe('/init', () => {
     const prompt = submitPrompt.mock.calls[0][0] as string;
     expect(prompt).toContain('`FORGE.md`');
     expect(prompt).toMatch(/Run each command before you write it down/);
+    expect(prompt).toContain('next month');
+    expect(prompt).not.toContain('failure noted');
     expect(prompt).toMatch(/Never delete or rewrite text a person wrote/);
   });
 

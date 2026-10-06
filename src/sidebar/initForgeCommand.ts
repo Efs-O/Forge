@@ -38,7 +38,7 @@ export function buildInitPrompt(instructionsPath: string): string {
 Read the repository first: its README, its build and package files, its test setup and its main source folders. Then edit \`${instructionsPath}\` in place:
 
 - Fill the blank entries under "Project facts" and "Commands": what the project is, the important architecture decisions, and the exact build, test and full-gate commands.
-- Run each command before you write it down, and write only commands that worked. If one fails for a reason that is not yours to fix, write it with the failure noted.
+- Run each command before you write it down. Write down only facts that will still be true next month: never record test results, failing tests, the current branch, counts, dates or anything about the current working-tree state. If a command fails, find out why, and write it down only together with the permanent prerequisite it needs (for example "needs Docker running"); otherwise leave it out and say so in your reply.
 - Add only facts a future session would otherwise spend a round discovering: where the main code lives, conventions the code follows, traps you hit. Nothing a single file listing already shows.
 - Keep the existing working rules unless one plainly does not fit this project.
 - Never delete or rewrite text a person wrote. If the file already has project content, only add what is missing.

@@ -42,6 +42,7 @@ describe('ensureForgeInstructionsFile', () => {
     expect(result.status).toBe('created');
     const content = fs.readFileSync(path.join(root, 'FORGE.md'), 'utf8');
     expect(content).toContain('# Project Instructions');
+    expect(content).not.toContain('exec_command');
     expect(Buffer.byteLength(content, 'utf8')).toBeLessThan(25000);
   });
 
