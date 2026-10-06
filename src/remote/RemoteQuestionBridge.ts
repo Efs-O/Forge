@@ -104,19 +104,53 @@ export class RemoteQuestionBridge {
   answerText(chatId: string, text: string): boolean {
     for (const [id, entry] of this.questions) {
       if (entry.chatId !== chatId) continue;
+      if (this.buttonsOwnText(entry)) {
+        // Buttons are on screen (or the next step's are being sent) and Other…
+        // was not tapped: only an option's
+        // number or its exact label answers. Prose here is usually chat ("did
+        // you get my reply?"), and claiming it once handed the agent that line
+        // as a Plan C verdict.
+        const options = this.currentOptions(entry) ?? [];
+        const index = /^\s*([0-9]+)\s*$/.exec(text);
+        const typed = text.trim().toLowerCase();
+        const picked = index
+          ? options[Number(index[1]) - 1]
+          : options.find((option) => option.toLowerCase() === typed);
+        if (picked === undefined) {
+          void this.refuseProse(entry);
+          return true;
+        }
+        if (entry.steps) return this.takeAnswer(entry, picked);
+        return this.settle(id, entry, picked);
+      }
       if (entry.steps) {
         // Typed text answers the sub-question on screen; a bare number picks its option.
         const group = entry.steps[entry.picks?.length ?? 0];
         return this.takeAnswer(entry, resolveAnswerText(text, group?.options));
       }
-      const accepted = this.host.answerQuestion(id, text);
-      if (accepted) {
-        this.questions.delete(id);
-        void this.clearKeyboard(entry);
-      }
-      return accepted;
+      return this.settle(id, entry, text);
     }
     return false;
+  }
+
+  /**
+   * True while typed prose must not answer: a keyboard is up, or a stepped
+   * question is between keyboards. A text fallback (`failDelivery`) leaves no
+   * keyboard and sets `shownStep`, so prose still answers there.
+   */
+  private buttonsOwnText(entry: RemoteQuestionEntry): boolean {
+    if (entry.freeTextMode) return false;
+    if (entry.messageId) return true;
+    return !!entry.steps && entry.shownStep !== (entry.picks?.length ?? 0);
+  }
+
+  private settle(id: string, entry: RemoteQuestionEntry, text: string): boolean {
+    const accepted = this.host.answerQuestion(id, text);
+    if (accepted) {
+      this.questions.delete(id);
+      void this.clearKeyboard(entry);
+    }
+    return accepted;
   }
 
   /** Settles a Telegram button action only against its exact pending question. */
@@ -348,6 +382,19 @@ Question ${step + 1} of ${pending.steps!.length}: ${renderQuestionAsText(group.p
     }
   }
 
+  /** Says why a typed message was held back instead of answering or reaching the agent. */
+  private async refuseProse(pending: RemoteQuestionEntry): Promise<void> {
+    const step = pending.steps
+      ? ` question ${(pending.picks?.length ?? 0) + 1} of ${pending.steps.length}`
+      : ' a question';
+    const ids = await this.sendNotice(
+      pending.chatId,
+      `Forge is waiting on${step}. Tap a button, or Other… to type an answer — ` +
+        'your message was not sent to the agent.',
+    );
+    this.cleanup?.armEphemeral(pending.chatId, ids ?? []);
+  }
+
   private async sendNotice(chatId: string, text: string): Promise<string[] | undefined> {
     try {
       const sent = await this.channel.send(chatId, text.slice(0, this.maxMessageChars), {
@@ -397,7 +444,8 @@ Question ${step + 1} of ${pending.steps!.length}: ${renderQuestionAsText(group.p
     if (!(await this.auth.canDeliver(this.channel.name, pending.chatId))) return;
     const text =
       event.reason === 'answered'
-        ? `Forge: answered — "${(event.answer ?? '').slice(0, 120)}"`
+        ? // Whole answer, so a wrong sub-answer is visible, not cut off after the first.
+          `Forge: answered — "${(event.answer ?? '').slice(0, 800)}"`
         : 'Forge: the question was dismissed without an answer.';
     try {
       const sent = await this.channel.send(pending.chatId, text, { signal: this.signal });

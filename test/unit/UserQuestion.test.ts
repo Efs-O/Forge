@@ -486,6 +486,37 @@ describe('RemoteQuestionBridge', () => {
     expect(bridge.hasPending('chat-1')).toBe(false);
   });
 
+  it('holds back prose sent while a step keyboard waits, instead of answering with it', async () => {
+    // A follow-up "Have you received my reply?" once became the Plan C answer.
+    const { bridge, channel, service } = bridgeRig({ channelName: 'telegram' });
+    const asked = vi.fn();
+    service.addSink({ asked, answered: () => undefined });
+    const pending = service.ask({
+      prompt: 'Two decisions:',
+      questions: [
+        { prompt: 'Template', options: ['poses', 'buildings'] },
+        { prompt: 'Plan C', options: ['approve', 'hold'] },
+      ],
+      conversationId: 'c1',
+    });
+    await vi.waitFor(() => expect(channel.inlineKeyboards).toHaveLength(1));
+    const questionId = asked.mock.calls[0]?.[0].id as string;
+    await bridge.handleAction(questionAction(questionId, 'other', 'keyboard-1'));
+    expect(bridge.answerText('chat-1', 'build both, then implement')).toBe(true);
+    await vi.waitFor(() => expect(channel.inlineKeyboards).toHaveLength(2));
+
+    expect(bridge.answerText('chat-1', 'Have you received my reply?')).toBe(true);
+    await vi.waitFor(() =>
+      expect(channel.sent.at(-1)?.text).toContain('waiting on question 2 of 2'),
+    );
+    expect(service.hasPending('c1')).toBe(true);
+    expect(bridge.answerText('chat-1', '7')).toBe(true);
+    expect(service.hasPending('c1')).toBe(true);
+
+    expect(bridge.answerText('chat-1', '1')).toBe(true);
+    await expect(pending).resolves.toBe('Template: build both, then implement\nPlan C: approve');
+  });
+
   it('passes free text through verbatim when a sub-question is answered in prose', async () => {
     const { bridge, service } = bridgeRig();
     const pending = service.ask({
