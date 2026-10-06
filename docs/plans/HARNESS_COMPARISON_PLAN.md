@@ -149,6 +149,47 @@ full schedule runs is decided with the user from the pilot's results. The only
 arm is each harness as shipped plus its own `/init` file; arms without `/init`,
 or with our personal setup, are not run.
 
+### Round 2: harder tasks (draft, not approved to run)
+
+The pilot showed the easy items sit at the ceiling: task 1 and task 2 passed
+on both harnesses in one to four minutes, so they measure nothing. The user
+dropped them and the ten polyglot exercises (2026-10-06, mid-pilot; the pilot
+finished items 3-5 only). Round 2 replaces them with tasks where the harness,
+not the model, decides the outcome.
+
+The rule that keeps this fair: every task is picked by **kind of everyday
+work**, not by which harness has a tool for it, and each is written down here,
+with its grader proven on a reference solution, **before either harness runs
+it**. No task is added or dropped after seeing a result.
+
+6. **Signature refactor across many call sites.** Change a function's
+   parameters to an options object where it is called from 10+ places across
+   the source and the tests; all tests and the type check stay green. Why: the
+   most common multi-file change in real code. Graded by `npm test`, `tsc`, and
+   a check that no old-style call is left.
+7. **Failure buried in large output.** A suite of a few hundred tests where
+   three fail, one of them only through a misleading downstream assertion; the
+   full output is far larger than one tool result. "Make `npm test` pass; fix
+   the cause, not the tests." Why: reading a long CI or test log is daily work.
+   Graded by `npm test` and the tests being unchanged.
+8. **Feature across six or more files.** Thread a new option (for example job
+   priority) through config, store, queue, CLI, README and tests. Why: a normal
+   feature request. Graded by a hidden test, `npm test` and `tsc`.
+9. **Long task with forced compaction.** Task 8 at a context small enough that
+   compaction must fire mid-task on both harnesses (size set from a dry
+   measurement of task 8's peak prompt, then fixed). The first message carries
+   two constraints (a file not to touch, a naming rule). Graded on the result
+   and on whether both constraints survived compaction. A run where a harness
+   never compacted still counts for pass/fail, but is reported as "no
+   compaction" and not as compaction evidence; each harness's own transcript
+   proves which happened.
+
+Task 6-8 need a bigger repo than the 15-file bench, so round 2 either grows
+the bench repo on a new branch or uses a third-party TypeScript project pinned
+at a commit, chosen by a rule fixed here before any run. Tasks 3, 4 and 5 stay
+if the pilot shows they separate the harnesses. Every round 2 task runs five
+times per harness, alternating which goes first.
+
 ## What is measured
 
 Both harnesses are measured from **Strata's own request log**, so the same
@@ -205,6 +246,7 @@ lines for every run.
 | Bench Forge config (`forge-bench-config.yaml`, copied to `hb-runs/forge/.forge/config.yaml`) | Phase 0, from the starter config; copied before every Forge run | With the grader dir; the copy goes with the worktree. Our own `config.yaml` is never written | N/A: only the bench window reads it | Re-copied whole before the next run | N/A | None |
 | Bench VS Code profile (`vscode-profile/`, `vscode-ext/` in the grader dir) | Phase 0, with the release VSIX installed | With the grader dir after phase 3 | Close the bench window | Reinstall the VSIX | Bench window crash: the run is a pipe failure and is repeated and listed | None |
 | Fixed Forge clone `hb-runs/forge` | `reset-forge-run.sh`, first Forge run | Deleted after the last Forge run | Left as-is; the next run resets it | Reset by the next run's `checkout -f` + `clean -fdx` | Same as crash | Removed at the end of phase 2 |
+| Round 2 bench branch or pinned third-party repo, with its graders and reference solutions | Before any round 2 run, with each grader proven pass-on-reference, fail-on-untouched | With the bench repo / grader dir after phase 3 | N/A: inert files | Rebuilt from git history | N/A: no process owns it | None |
 | Polyglot exercise copies | Phase 1, copied into the bench repo at a fixed commit | With the bench repo | N/A: inert files | Re-copied | N/A | None |
 | OpenCode session store (its own data dir) | OpenCode, on every run | Left in place. It belongs to OpenCode, and `opencode export` reads from it | N/A | OpenCode's concern | OpenCode's concern | OpenCode's policy |
 | Forge session JSONL for bench chats | Forge, as for any chat | Never deleted: it is the forensic record | N/A | Forge's existing cursor rows | Existing behaviour | None |
