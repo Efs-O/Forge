@@ -22,6 +22,7 @@ import { isFailureResult, readPathArg, resultLabel } from './toolResultView';
 import type { PlanItem } from './sessionTypes';
 import { getLogger } from '../util/logger';
 import { ToolApprovalPolicyDenied } from './ToolApprovalService';
+import { coerceToolArgs } from '../tools/argCoercion';
 import { isLazyGroupActive, lazyGroupForTool, lazyGroupNames } from '../tools/lazyToolGroups';
 import { filterVisionGated, visionGatedNames } from './visionGate';
 
@@ -222,6 +223,7 @@ export class ToolDispatch {
           messages.push(this.toolMessage(tc, toolResultContent(result), startedAt));
           continue;
         }
+        args = coerceToolArgs(reg.definition, args);
         const invalid = this.toolRegistry.invalidArgs(reg, args);
         if (invalid) {
           this.failureTracker.record(convId);

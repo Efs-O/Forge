@@ -264,7 +264,12 @@ export function makeWebFetchTool(dependencies: WebFetchDependencies = {}): Regis
       }
 
       if (find === undefined) {
-        return `<UNTRUSTED_CONTENT>\n${text.slice(0, maxChars)}\n</UNTRUSTED_CONTENT>`;
+        // Say when the page was cut, or the model takes the first window for the whole page.
+        const more =
+          text.length > maxChars
+            ? `\n[showing ${String(maxChars)} of ${String(text.length)} characters; pass find to jump to a phrase]`
+            : '';
+        return `<UNTRUSTED_CONTENT>\n${text.slice(0, maxChars)}${more}\n</UNTRUSTED_CONTENT>`;
       }
       const excerpt = findWindow(text, find, maxChars);
       return `<UNTRUSTED_CONTENT>\n${excerpt.header}\n${excerpt.text}\n</UNTRUSTED_CONTENT>`;

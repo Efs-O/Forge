@@ -135,8 +135,8 @@ export function describeProbeFailure(err: unknown): string {
 // ── Windows performance counters + CIM ────────────────────────────────────────
 
 /**
- * Source-controlled and fixed: no
- * value from a model or a user is ever spliced into it. The one input is a
+ * Source-controlled and fixed: no value from a model or a user is ever
+ * spliced into it. The one input is a
  * numeric byte threshold, and it travels as an environment variable.
  *
  * `Get-Counter` paths are localised by Windows, so on a non-English install the

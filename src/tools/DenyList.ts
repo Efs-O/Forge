@@ -122,7 +122,10 @@ export function getBuiltinDenyList(): ShellTokenRule[] {
       (t) =>
         commandIndexes(t, ['git']).some((i) => {
           const rest = lower(t.slice(i + 1));
-          return rest[0] === 'branch' && rest.slice(1).some((flag) => /^-[^-]*d/u.test(flag));
+          return (
+            rest[0] === 'branch' &&
+            rest.slice(1).some((flag) => flag === '--delete' || /^-[^-]*d/u.test(flag))
+          );
         }),
     ),
     dangerous('git stash drop/clear', 'Inspect the stash before removing it.', (t) =>
@@ -171,7 +174,7 @@ export function getBuiltinDenyList(): ShellTokenRule[] {
       'Use delete_file for a specific path.',
       (t) =>
         commandIndexes(t, ['rd', 'rmdir', 'del']).some((i) =>
-          lower(t.slice(i + 1)).some((v) => ['/s', '-s', '/q', '-r'].includes(v)),
+          lower(t.slice(i + 1)).some((v) => ['/s', '-s', '-r'].includes(v)),
         ) ||
         commandIndexes(t, ['remove-item']).some((i) => lower(t.slice(i + 1)).includes('-recurse')),
     ),

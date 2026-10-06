@@ -100,14 +100,14 @@ export interface BackgroundExecutionStartOptions {
   /**
    * Optional validated env for the child, merged over the inherited env. The
    * foreground path (`spawnAndWait`) already takes `extraEnv`; without this the
-   * background path would silently drop a validated `env` and the two paths of
-   * the foreground shell path would disagree.
+   * background path would silently drop a validated `env` and the foreground
+   * and background shell paths would disagree.
    */
   env?: NodeJS.ProcessEnv;
   notifyConversationId?: string;
   /**
-   * monitor_execution's output options (tail_lines and so on). It
-   * applies them when its own call names none: CI started with tail_lines 200
+   * Output options (tail_lines and so on) given when the job started.
+   * monitor_execution applies them when its own call names none: CI started with tail_lines 200
    * used to come back as its first 16,000 characters, and the agent paged twice
    * to reach the test counts at the end.
    */

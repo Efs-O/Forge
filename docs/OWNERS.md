@@ -373,11 +373,12 @@ overlaps with an existing owner, extend the owner instead.
 | Search scope: excludes + named-path rule   | `src/tools/searchScope.ts`            |
 | search_code snippet/result size bounds     | `src/tools/searchSnippet.ts`          |
 | list_directory + size/age formatting       | `src/tools/listDirectoryTool.ts`      |
-| Terminal + headless exec tools             | `src/tools/execTools.ts`              |
+| `shell` tool (spawn, approval, background)  | `src/tools/shellTool.ts`              |
+| Shell command classification (read-only/normal/dangerous/refused) | `src/tools/shellPolicy.ts` |
+| Shell/git output cap + spill files          | `src/tools/shellOutput.ts`            |
 | Exec child-process helpers                 | `src/tools/execHelpers.ts`            |
-| Exec script-file denylist scan              | `src/tools/execScriptScanner.ts`      |
-| exec_command program resolution            | `src/tools/execProgramResolver.ts`    |
-| exec_command result hints                   | `src/tools/execHints.ts`              |
+| Git Bash / program resolution              | `src/tools/execProgramResolver.ts`    |
+| Lossless tool-argument coercion             | `src/tools/argCoercion.ts`            |
 | Git tools (status, diff, commit)           | `src/tools/gitTools.ts`               |
 | Strict `git_read` operation schema/dispatch | `src/tools/gitReadTool.ts`           |
 | Git read-operation handlers                 | `src/tools/gitReadTools.ts`          |

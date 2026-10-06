@@ -1,5 +1,31 @@
 # Forge — Recent Changes
 
+## 0.17.0
+
+### One `shell` tool replaces four
+
+- `exec_command`, `query_powershell`, `run_terminal`, `run_workspace_task` and `list_workspace_tasks` are gone. One `shell` tool runs a command line in your configured shell (`permissions.exec.shell`: pwsh by default on Windows, bash elsewhere), in the foreground or, with `background: true`, as a tracked background process (`monitor_execution`, `stop_execution` and `notify_on_exit` work as before).
+- Every command is classified before it runs. Reads such as `git status`, `rg`, `ls`, `Get-Content` and `sed -n` run without asking, even with `/clanker` off. Ordinary commands ask unless `/clanker` is on. Destructive ones always ask, and a few are refused.
+- Nested commands are classified too: `` `...` ``, `$(...)` (also inside double quotes) and PowerShell script blocks. A read-only-looking wrapper no longer hides a write, e.g. `echo $(rm -rf x)`, `find -delete`, `sed -i`, `awk 'system(...)'`, `sort -o`, `rg --pre`, `git diff --output=` or `gci | % Delete`.
+- On Windows, `bash` (as the shell, or typed inside a pwsh command line) is always Git Bash and never WSL. Git Bash's folder goes first on the command's PATH.
+- VS Code's bundled `rg` is on the command's PATH, so `rg` works where it is not installed.
+- Output over 30K characters keeps its first 10K and last 20K. The full text goes to `~/.forge/shell-output/` (deleted after 24 hours), and the result names the file.
+- `permissions.exec.shell_scripts` no longer does anything; a config that still sets it gets a warning.
+- Commands need only `permissions.exec.headless`. `exec.terminal` now gates just the sleep and wake tools, so a new install's starter config no longer turns it on. Existing configs are unchanged.
+
+### Smaller default tool list
+
+- Rarely used tools (files, git writes, code intelligence, memory, background, agents and others) move into groups. A group's schemas are sent only once the agent loads it, or when `tool_groups.eager` lists it at the defaults, group or model level. Everything stays dispatchable.
+- `edit_file` takes `path`, like every other file tool.
+- The system prompt is shorter.
+
+### Fewer wasted rounds
+
+- Tool arguments a local model quotes by mistake are repaired before validation: `"true"`/`"False"`, `"5"`, and a JSON array sent as a string. Only conversions with one possible reading are made; anything else is still refused with the field named.
+- `git_read` output over 30K characters is capped like `shell` output, so a whole-repo diff no longer floods the context.
+- When `web_fetch` truncates a page, it now says how much it showed and suggests `find`.
+- `/init` writes only lasting facts. It writes the build and test gate as one chained command, run only after code changes, and proves a regression test by running it before the fix.
+
 ## 0.16.91
 
 ### `/init` lets the agent fill in FORGE.md

@@ -28,6 +28,8 @@ const cases: Array<[string, string, 'read_only' | 'normal' | 'dangerous' | 'refu
   ['git commit -m done', 'bash', 'normal'], ['Start-Process notepad', 'pwsh', 'normal'],
   ['Invoke-Command { Get-Process }', 'pwsh', 'normal'], ['bash -c true', 'bash', 'normal'],
   ['rm -rf build', 'bash', 'dangerous'], ['rm -r -f build', 'bash', 'dangerous'],
+  ['git branch --delete topic', 'bash', 'dangerous'], ['del /q notes.txt', 'pwsh', 'normal'],
+  ['rd /s /q build', 'pwsh', 'dangerous'],
   ['rm -r build', 'bash', 'dangerous'], ['git clean -fdx', 'bash', 'dangerous'],
   ['Remove-Item -Recurse build', 'pwsh', 'dangerous'], ['git branch -D feature', 'bash', 'dangerous'],
   ['git reset --hard', 'bash', 'dangerous'], ['git push --force', 'bash', 'dangerous'],

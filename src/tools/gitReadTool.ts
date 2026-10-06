@@ -1,4 +1,5 @@
 import type { RegisteredTool } from './ToolRegistry';
+import { capShellOutput } from './shellOutput';
 import {
   makeGitBlameTool,
   makeGitDiffTool,
@@ -74,7 +75,15 @@ export function makeGitReadTool(): RegisteredTool {
     handler: async (args, context) => {
       const operation = args['operation'] as Operation;
       requireParams(operation, args);
-      return handlers[operation](args, context);
+      const result = await handlers[operation](args, context);
+      if (typeof result !== 'string') return result;
+      // A whole-repo diff or show can be megabytes: keep head and tail, spill the rest.
+      const capped = await capShellOutput(
+        result,
+        context?.conversationId ?? 'unknown',
+        context?.toolCallId ?? 'unknown',
+      );
+      return capped.text;
     },
   };
 }

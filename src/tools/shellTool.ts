@@ -22,6 +22,61 @@ export interface ShellToolOptions {
   env?: NodeJS.ProcessEnv;
   /** Test seam; production resolves Git Bash by location. */
   bashPath?: string;
+  /**
+   * Folder appended to the child's PATH: `registerAllTools` passes VS Code's
+   * bundled `rg`, since most machines have none on PATH.
+   */
+  ripgrepDir?: () => string | undefined;
+}
+
+/**
+ * Adds `dir` to PATH (key case varies on Windows). Appending lets a
+ * user-installed program win; prepending makes `dir` win.
+ */
+export function withPathEntry(
+  env: NodeJS.ProcessEnv,
+  dir: string | undefined,
+  position: 'append' | 'prepend' = 'append',
+): NodeJS.ProcessEnv {
+  if (!dir) return env;
+  const key = Object.keys(env).find((name) => name.toUpperCase() === 'PATH') ?? 'PATH';
+  const entries = (env[key] ?? '').split(path.delimiter).filter(Boolean);
+  if (position === 'append') {
+    if (entries.includes(dir)) return env;
+    return { ...env, [key]: [...entries, dir].join(path.delimiter) };
+  }
+  if (entries[0] === dir) return env;
+  return { ...env, [key]: [dir, ...entries.filter((entry) => entry !== dir)].join(path.delimiter) };
+}
+
+function windowsProbe(): { which: (name: string) => string[]; exists: (p: string) => boolean } {
+  return {
+    which: (name: string) => {
+      const result = spawnSync('where.exe', [name], { encoding: 'utf8' });
+      return (result.stdout ?? '')
+        .split(/\r?\n/u)
+        .map((value) => value.trim())
+        .filter(Boolean);
+    },
+    exists: (candidate: string) => fs.existsSync(candidate),
+  };
+}
+
+/**
+ * Git Bash's folder, put FIRST on a Windows child's PATH: `bash x.sh` inside a
+ * pwsh command line would otherwise resolve System32's WSL launcher, the
+ * WSL#41592 crash path.
+ */
+export function gitBashDir(
+  options: Pick<ShellToolOptions, 'bashPath' | 'env'>,
+): string | undefined {
+  if (options.bashPath) return path.win32.dirname(options.bashPath);
+  try {
+    return path.win32.dirname(resolveGitBash(windowsProbe(), options.env ?? process.env));
+  } catch {
+    // No Git for Windows: nothing to put first; `shell: bash` itself still refuses.
+    return undefined;
+  }
 }
 
 const NOTIFY_ON_EXIT_DESCRIPTION =
@@ -87,17 +142,7 @@ function resolveShell(
   if (platform === 'win32') {
     if (options.bashPath)
       return { command: options.bashPath, args: ['--noprofile', '--norc', '-c'] };
-    const probe = {
-      which: (name: string) => {
-        const result = spawnSync('where.exe', [name], { encoding: 'utf8' });
-        return (result.stdout ?? '')
-          .split(/\r?\n/u)
-          .map((value) => value.trim())
-          .filter(Boolean);
-      },
-      exists: (candidate: string) => fs.existsSync(candidate),
-    };
-    return { command: resolveGitBash(probe, env), args: ['--noprofile', '--norc', '-c'] };
+    return { command: resolveGitBash(windowsProbe(), env), args: ['--noprofile', '--norc', '-c'] };
   }
   return { command: fs.existsSync('/bin/bash') ? '/bin/bash' : 'bash', args: ['-c'] };
 }
@@ -150,7 +195,7 @@ function definition(windows: boolean): ToolDefinition {
     function: {
       name: 'shell',
       description:
-        'Run one command line in the configured shell. Destructive commands require approval; unsafe commands are refused.',
+        'Run one command line in the configured shell; rg is available. Search or filter many files in ONE command (rg, globs, pipes), not one call per file. Destructive commands require approval; unsafe commands are refused.',
       parameters: {
         type: 'object',
         additionalProperties: false,
@@ -231,13 +276,16 @@ async function runForeground(
 export function makeShellTool(options: ShellToolOptions = {}): RegisteredTool {
   const platform = options.platform ?? process.platform;
   const manager = options.manager ?? backgroundExecutionManager;
+  let bashDir: string | undefined;
   const tool: RegisteredTool = {
+    // A literal on purpose: scripts/tool-audit-catalog.mjs reads it from source.
+    // describe() is what is advertised, with the Windows-only `shell` override.
     definition: {
       type: 'function',
       function: {
         name: 'shell',
         description:
-          'Run one command line in the configured shell. Destructive commands require approval; unsafe commands are refused.',
+          'Run one command line in the configured shell; rg is available. Search or filter many files in ONE command (rg, globs, pipes), not one call per file. Destructive commands require approval; unsafe commands are refused.',
         parameters: {
           type: 'object',
           additionalProperties: false,
@@ -324,7 +372,11 @@ export function makeShellTool(options: ShellToolOptions = {}): RegisteredTool {
       const timeout = typeof args['timeout_ms'] === 'number' ? args['timeout_ms'] : 120_000;
       const resolved = invocation(shell, command, options);
       const environment = {
-        ...(options.env ?? process.env),
+        ...withPathEntry(
+          withPathEntry(options.env ?? process.env, options.ripgrepDir?.()),
+          platform === 'win32' ? (bashDir ??= gitBashDir(options)) : undefined,
+          'prepend',
+        ),
         ...(context?.conversationId ? { FORGE_CONVERSATION_ID: context.conversationId } : {}),
         GIT_TERMINAL_PROMPT: '0',
       };

@@ -135,20 +135,24 @@ Its operation values are `diagnostics`, `document_symbols`, `workspace_symbols`,
 cannot disagree), plus `search_codebase` for local semantic search over your
 own embeddings.
 
-**Background execution.** `exec_command` starts a long-running command and
-returns immediately; `monitor_execution` reads its output as it accumulates,
+**Shell.** One `shell` tool runs a command line in your configured shell
+(`permissions.exec.shell`: pwsh by default on Windows, bash elsewhere; a single
+call can pick `bash`, which on Windows is always Git Bash, never WSL). Every
+command is classified first: reads (`git status`, `rg`, `Get-Content`, `ls`)
+run without asking, ordinary commands ask unless `/clanker` is on, destructive
+ones always ask, and a few are refused outright. Output over 30K characters
+keeps its head and tail and spills the full text to a file the agent can read.
+
+**Background execution.** `shell` with `background: true` starts a
+long-running command and returns immediately; `monitor_execution` reads its output as it accumulates,
 `list_executions` recovers an id the agent lost, `stop_execution` ends it. Also
 `wait`, for the gap nothing else covers: giving a dev server you just launched
 or a file you just wrote a moment to become observable, instead of retrying a
 check that cannot succeed yet.
 
-**Terminal awareness, in both directions.** `run_terminal` pastes into your
-real terminal and reports how it turned out via shell integration. The agent
-also _sees the commands you run yourself_ — including the ones that failed — so
-it corrects them in chat instead of asking you to paste output it already has.
-`query_powershell` and `run_workspace_task` /
-`list_workspace_tasks` cover the structured cases; `exec_command` runs `npm
-test` / `npm run <script>` directly (no shell needed).
+**Terminal awareness.** The agent _sees the commands you run yourself_ in VS
+Code's terminal — including the ones that failed — so it corrects them in chat
+instead of asking you to paste output it already has.
 
 **Git.** `git_read` handles status, diff, log, blame and show (including a file
 at any past commit). `restore_file` (brings a path back from a commit,
@@ -708,13 +712,14 @@ what each one does and does not cover:
   turns these off for the session — recursive deletes still ask.
 - **Per-turn checkpoints** with Keep/Undo. Undo restores the paths a turn
   mutated; it is not a backup. Keep/Undo covers Forge's file tools only.
-  Changes made by a command or script — `exec_command`, `run_terminal`, shell
-  scripts, or a build — are not captured; git is the only way back. External
+  Changes made by a command — anything run through `shell`, or a build — are
+  not captured; git is the only way back. External
   CLI turns are only covered when checkpoint preparation succeeds.
-- **`permissions.exec.shell_scripts`** lets the agent run PowerShell, `cmd` and
-  `bash` scripts. The denylist still reads every script, but it is
-  pattern-matching, not a sandbox: a script can do anything your user account
-  can. **Off by default. Leave it off unless you commit before every agent run.**
+- **Shell commands are classified, not sandboxed.** The classifier decides
+  whether a command asks first; it does not limit what an approved command or
+  script can do. Commit before letting the agent run commands you have not
+  read. (`permissions.exec.shell_scripts` is gone; a config that still sets it
+  gets a warning and nothing else.)
 - **A best-effort command denylist** for destructive git and shell operations.
   It is pattern-matching, not a sandbox; interpreters that were never banned,
   such as `node -e` and `python -c`, can already do what a shell script can.

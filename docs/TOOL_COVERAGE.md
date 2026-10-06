@@ -1,6 +1,6 @@
 # Forge Tool Coverage Matrix
 
-Generated: 2026-09-30T07:53:07.865Z
+Generated: 2026-10-06T22:32:11.352Z
 
 The inventory and permissions come from the constructors registered by `registerAllTools.ts`. “Harness” means schema emission is available but not executed by default.
 
@@ -20,8 +20,8 @@ The inventory and permissions come from the constructors registered by `register
 | delete_file | native | delete | yes | harness | automated | opt-in | delete |
 | edit_file | native | write | yes | harness | automated | opt-in | write |
 | edit_notebook_cell | native | write | yes | harness | automated | opt-in | write |
-| exec_command | native | headless | yes | harness | automated | opt-in | headless |
 | find_files | native | read | yes | harness | automated | opt-in | read-only |
+| forget | native | delete | yes | harness | automated | opt-in | delete |
 | format_file | native | write | yes | harness | automated | opt-in | write |
 | generate_image | native | fetch | yes | harness | automated | opt-in | fetch |
 | get_editor_context | native | read | yes | harness | automated | opt-in | read-only |
@@ -35,7 +35,6 @@ The inventory and permissions come from the constructors registered by `register
 | list_directory | native | read | yes | harness | automated | opt-in | read-only |
 | list_executions | native | headless | yes | harness | automated | opt-in | headless |
 | list_memories | native | read | yes | harness | automated | opt-in | read-only |
-| list_workspace_tasks | native | read | yes | harness | automated | opt-in | read-only |
 | load_tool_group | native | read | yes | harness | automated | opt-in | read-only |
 | manage_jobs | native | read | yes | harness | automated | opt-in | read-only |
 | monitor_execution | native | headless | yes | harness | automated | opt-in | headless |
@@ -43,7 +42,6 @@ The inventory and permissions come from the constructors registered by `register
 | notify_user | native | read | yes | harness | automated | opt-in | read-only |
 | open_file | native | read | yes | harness | automated | opt-in | read-only |
 | open_url_in_browser | native | read | yes | harness | automated | opt-in | read-only |
-| query_powershell | native | headless | yes | harness | automated | opt-in | headless |
 | read_clipboard | native | read | yes | harness | automated | opt-in | read-only |
 | read_file | native | read | yes | harness | automated | opt-in | read-only |
 | read_notebook | native | read | yes | harness | automated | opt-in | read-only |
@@ -51,13 +49,14 @@ The inventory and permissions come from the constructors registered by `register
 | recall | native | read | yes | harness | automated | opt-in | read-only |
 | remember | native | read | yes | harness | automated | opt-in | read-only |
 | rename_symbol | native | write | yes | harness | automated | opt-in | write |
+| render_html_to_image | native | fetch | yes | harness | automated | opt-in | fetch |
 | replace_selection | native | write | yes | harness | automated | opt-in | write |
 | restore_file | native | write | yes | harness | automated | opt-in | write |
-| run_terminal | native | terminal | yes | harness | automated | opt-in | terminal |
-| run_workspace_task | native | headless | yes | harness | automated | opt-in | headless |
 | schedule_wake | native | terminal | yes | harness | automated | opt-in | terminal |
 | search_code | native | read | yes | harness | automated | opt-in | read-only |
 | search_codebase | native | read | yes | harness | automated | opt-in | read-only |
+| send_file | native | fetch | yes | harness | automated | opt-in | fetch |
+| shell | native | headless | yes | harness | automated | opt-in | headless |
 | show_diff | native | read | yes | harness | automated | opt-in | read-only |
 | show_notification | native | read | yes | harness | automated | opt-in | read-only |
 | sleep_computer | native | terminal | yes | harness | automated | opt-in | terminal |

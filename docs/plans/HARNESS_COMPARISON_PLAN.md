@@ -183,6 +183,13 @@ it**. No task is added or dropped after seeing a result.
    never compacted still counts for pass/fail, but is reported as "no
    compaction" and not as compaction evidence; each harness's own transcript
    proves which happened.
+10. **Background process.** Start the bench's dev server (or a watcher), make a
+   change it must pick up, prove it did through the running process (an HTTP
+   response or the watcher's output), then stop it. Why: a long-running
+   process is everyday work, and it is where a harness's background handling
+   is tested rather than its file tools. Graded by a grader request against
+   the fixed behaviour, and by no process left running after the session
+   (the grader checks the port and the process list).
 
 Task 6-8 need a bigger repo than the 15-file bench, so round 2 either grows
 the bench repo on a new branch or uses a third-party TypeScript project pinned

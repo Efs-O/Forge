@@ -11,11 +11,23 @@ import {
 /**
  * `load_tool_group` flips one per-conversation flag; the real schemas arrive
  * through the normal `tools` array on the next round, so this tool must never
- * restate them. Its compact description is the group's discovery surface.
+ * restate them. Its compact description is the group's discovery surface:
+ * member names only, except where the names do not say when to reach for the
+ * group. Keep HalluScribe's measured history cue close to its original wording:
+ * Qwen found that group unprompted with the longer phrase.
  */
+const GROUP_PURPOSE: Readonly<Record<string, string>> = {
+  halluscribe:
+    'search previous AI coding sessions and historical workspace/user context: past implementation decisions, the exact wording of an earlier error or command, prior project history, the user profile/digest',
+};
+
 function describeGroups(): string {
   return lazyGroupNames()
-    .map((group) => `${group}: ${lazyGroupMembers(group).join(', ')}`)
+    .map((group) => {
+      const purpose = GROUP_PURPOSE[group];
+      const members = lazyGroupMembers(group).join(', ');
+      return purpose ? `${group}: ${purpose}; tools: ${members}` : `${group}: ${members}`;
+    })
     .join('\n');
 }
 

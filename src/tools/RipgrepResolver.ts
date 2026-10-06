@@ -65,3 +65,9 @@ export function resolveRipgrepBinary(
 ): string {
   return resolveRipgrep(appRoot, exists, platform, arch).command;
 }
+
+/** Folder of VS Code's bundled `rg`, or undefined when only a bare `rg` was found. */
+export function bundledRipgrepDir(appRoot: string | undefined): string | undefined {
+  const { command } = resolveRipgrep(appRoot);
+  return path.isAbsolute(command) ? path.dirname(command) : undefined;
+}

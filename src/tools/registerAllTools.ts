@@ -44,6 +44,7 @@ import {
   makeFormatFileTool,
   makeRenameSymbolTool,
 } from './fileEditTools';
+import { bundledRipgrepDir } from './RipgrepResolver';
 import { makeShellTool } from './shellTool';
 import { makeSystemStatusTool } from './systemStatusTool';
 import type { BackendProcess } from '../system/SystemReport';
@@ -187,7 +188,12 @@ export function registerAllTools(
   registry.register(makeEditNotebookCellTool());
 
   // v0.7 exec + git
-  registry.register(makeShellTool(getConfig ? { getConfig } : {}));
+  registry.register(
+    makeShellTool({
+      ...(getConfig ? { getConfig } : {}),
+      ripgrepDir: () => bundledRipgrepDir(vscode.env.appRoot),
+    }),
+  );
   registry.register(makeMonitorExecutionTool());
   registry.register(makeStopExecutionTool());
   registry.register(makeListExecutionsTool());

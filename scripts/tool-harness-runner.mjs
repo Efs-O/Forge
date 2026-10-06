@@ -61,7 +61,6 @@ const EXAMPLE_ARGS = {
     new_name: 'ToolRegistryRenamedForTest',
   },
   shell: { command: 'npm run type-check', cwd: '.' },
-  exec_command: { command: 'node', args: ['--version'], cwd: '.', timeout_ms: 10000 },
   run_tests: { pattern: 'test/unit/ToolCallFallback.test.ts', reporter: 'verbose' },
   run_build: { script: 'build' },
   git_status: {},
