@@ -4,7 +4,7 @@
 
 ### One `shell` tool replaces four
 
-- `exec_command`, `query_powershell`, `run_terminal`, `run_workspace_task` and `list_workspace_tasks` are gone. One `shell` tool runs a command line in your configured shell (`permissions.exec.shell`: pwsh by default on Windows, bash elsewhere), in the foreground or, with `background: true`, as a tracked background process (`monitor_execution`, `stop_execution` and `notify_on_exit` work as before).
+- `exec_command`, `query_powershell`, `run_terminal`, `run_workspace_task` and `list_workspace_tasks` are gone. One `shell` tool runs a command line in your configured shell (`permissions.exec.shell`: bash by default, which on Windows is Git Bash; pwsh on Windows without Git for Windows), in the foreground or, with `background: true`, as a tracked background process (`monitor_execution`, `stop_execution` and `notify_on_exit` work as before).
 - Every command is classified before it runs. Reads such as `git status`, `rg`, `ls`, `Get-Content` and `sed -n` run without asking, even with `/clanker` off. Ordinary commands ask unless `/clanker` is on. Destructive ones always ask, and a few are refused.
 - Nested commands are classified too: `` `...` ``, `$(...)` (also inside double quotes) and PowerShell script blocks. A read-only-looking wrapper no longer hides a write, e.g. `echo $(rm -rf x)`, `find -delete`, `sed -i`, `awk 'system(...)'`, `sort -o`, `rg --pre`, `git diff --output=` or `gci | % Delete`.
 - On Windows, `bash` (as the shell, or typed inside a pwsh command line) is always Git Bash and never WSL. Git Bash's folder goes first on the command's PATH.
@@ -23,6 +23,7 @@
 
 - Tool arguments a local model quotes by mistake are repaired before validation: `"true"`/`"False"`, `"5"`, and a JSON array sent as a string. Only conversions with one possible reading are made; anything else is still refused with the field named.
 - `git_read` output over 30K characters is capped like `shell` output, so a whole-repo diff no longer floods the context.
+- On Windows the default shell is now bash (Git Bash) when Git for Windows is installed, and the tool's description names the active shell. Local models write bash: on the bench, every failed shell call was bash syntax run under pwsh. Set `permissions.exec.shell: pwsh` to keep PowerShell.
 - When a PowerShell command fails and it was written in bash syntax (`sort -rn`, `wc`, a bare `*.log` glob, a `for … in` loop), the result says so and says to rerun it with `shell: "bash"`. On the bench, models spent two rounds per task finding this out.
 - When `web_fetch` truncates a page, it now says how much it showed and suggests `find`.
 - `/init` writes only lasting facts. It writes the build and test gate as one chained command, run only after code changes, and proves a regression test by running it before the fix.

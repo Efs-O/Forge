@@ -91,12 +91,29 @@ function getClassification(args: Record<string, unknown>, shell: ShellKind): She
   return value;
 }
 
-function configuredShell(options: ShellToolOptions, requested?: unknown): ShellKind {
+/**
+ * Unset `permissions.exec.shell` means bash everywhere Git Bash exists: local
+ * models write bash, and on pwsh they lost rounds to `sort -rn` and unexpanded
+ * globs. Windows without Git for Windows gets pwsh, and the tool's description
+ * names whichever shell is active.
+ */
+function configuredShell(
+  options: ShellToolOptions,
+  requested: unknown,
+  hasGitBash: () => boolean,
+): ShellKind {
   if (requested === 'pwsh' || requested === 'bash') return requested;
   const configured = options.getConfig?.().permissions?.exec?.shell;
   if (configured) return configured === 'powershell' ? 'powershell' : configured;
-  return (options.platform ?? process.platform) === 'win32' ? 'pwsh' : 'bash';
+  if ((options.platform ?? process.platform) !== 'win32') return 'bash';
+  return hasGitBash() ? 'bash' : 'pwsh';
 }
+
+const SHELL_NAMES: Record<ShellKind, string> = {
+  bash: 'bash',
+  pwsh: 'PowerShell 7 (pwsh)',
+  powershell: 'Windows PowerShell',
+};
 
 function findOnPath(name: string, env: NodeJS.ProcessEnv): string | undefined {
   const extensions =
@@ -160,12 +177,12 @@ function invocation(
   return resolved;
 }
 
-function definition(windows: boolean): ToolDefinition {
+function definition(windows: boolean, shell: ShellKind): ToolDefinition {
+  const name = SHELL_NAMES[shell];
   const properties: Record<string, unknown> = {
     command: {
       type: 'string',
-      description:
-        'One command line for the configured shell. Pipes, &&, globs and redirection work.',
+      description: `One ${name} command line. Pipes, &&, globs and redirection work.`,
     },
     cwd: {
       type: 'string',
@@ -188,14 +205,15 @@ function definition(windows: boolean): ToolDefinition {
     properties['shell'] = {
       type: 'string',
       enum: ['pwsh', 'bash'],
-      description: 'Windows only: override the configured shell for this call.',
+      description: `Windows only: run this call in another shell (default ${shell}).`,
     };
   return {
     type: 'function',
     function: {
       name: 'shell',
       description:
-        'Run one command line in the configured shell; rg is available. Search or filter many files in ONE command (rg, globs, pipes), not one call per file. Destructive commands require approval; unsafe commands are refused.',
+        `Run one command line in ${name}${windows ? ' on Windows' : ''}; rg is available.` +
+        ' Search or filter many files in ONE command (rg, globs, pipes), not one call per file. Destructive commands require approval; unsafe commands are refused.',
       parameters: {
         type: 'object',
         additionalProperties: false,
@@ -317,7 +335,12 @@ async function runForeground(
 export function makeShellTool(options: ShellToolOptions = {}): RegisteredTool {
   const platform = options.platform ?? process.platform;
   const manager = options.manager ?? backgroundExecutionManager;
-  let bashDir: string | undefined;
+  // undefined = not probed yet; null = probed, no Git for Windows.
+  let bashDir: string | null | undefined;
+  const gitBash = (): string | undefined =>
+    (bashDir === undefined ? (bashDir = gitBashDir(options) ?? null) : bashDir) ?? undefined;
+  const shellFor = (requested: unknown): ShellKind =>
+    configuredShell(options, requested, () => gitBash() !== undefined);
   const tool: RegisteredTool = {
     // A literal on purpose: scripts/tool-audit-catalog.mjs reads it from source.
     // describe() is what is advertised, with the Windows-only `shell` override.
@@ -326,7 +349,7 @@ export function makeShellTool(options: ShellToolOptions = {}): RegisteredTool {
       function: {
         name: 'shell',
         description:
-          'Run one command line in the configured shell; rg is available. Search or filter many files in ONE command (rg, globs, pipes), not one call per file. Destructive commands require approval; unsafe commands are refused.',
+          'Run one command line in bash (PowerShell on Windows without Git for Windows); rg is available. Search or filter many files in ONE command (rg, globs, pipes), not one call per file. Destructive commands require approval; unsafe commands are refused.',
         parameters: {
           type: 'object',
           additionalProperties: false,
@@ -335,7 +358,7 @@ export function makeShellTool(options: ShellToolOptions = {}): RegisteredTool {
             command: {
               type: 'string',
               description:
-                'One command line for the configured shell. Pipes, &&, globs and redirection work.',
+                'One command line for the active shell. Pipes, &&, globs and redirection work.',
             },
             cwd: {
               type: 'string',
@@ -357,10 +380,10 @@ export function makeShellTool(options: ShellToolOptions = {}): RegisteredTool {
         },
       },
     },
-    describe: () => definition(platform === 'win32'),
+    describe: () => definition(platform === 'win32', shellFor(undefined)),
     permission: 'headless',
     approval: (args) => {
-      const shell = configuredShell(options, args['shell']);
+      const shell = shellFor(args['shell']);
       const result = getClassification(args, shell);
       if (result.classification === 'normal')
         return {
@@ -375,7 +398,7 @@ export function makeShellTool(options: ShellToolOptions = {}): RegisteredTool {
     },
     autoApproveIf: (args) =>
       ['read_only', 'refused'].includes(
-        getClassification(args, configuredShell(options, args['shell'])).classification,
+        getClassification(args, shellFor(args['shell'])).classification,
       ),
     handler: async (args, context) => {
       if (typeof args['command'] !== 'string' || args['command'].length === 0)
@@ -397,7 +420,7 @@ export function makeShellTool(options: ShellToolOptions = {}): RegisteredTool {
         throw new Error('shell: shell can be pwsh or bash on Windows only.');
       }
       const command = args['command'];
-      const shell = configuredShell(options, args['shell']);
+      const shell = shellFor(args['shell']);
       const classified = getClassification(args, shell);
       if (classified.classification === 'refused') {
         throw new Error(
@@ -415,7 +438,7 @@ export function makeShellTool(options: ShellToolOptions = {}): RegisteredTool {
       const environment = {
         ...withPathEntry(
           withPathEntry(options.env ?? process.env, options.ripgrepDir?.()),
-          platform === 'win32' ? (bashDir ??= gitBashDir(options)) : undefined,
+          platform === 'win32' ? gitBash() : undefined,
           'prepend',
         ),
         ...(context?.conversationId ? { FORGE_CONVERSATION_ID: context.conversationId } : {}),

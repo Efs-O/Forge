@@ -136,8 +136,9 @@ cannot disagree), plus `search_codebase` for local semantic search over your
 own embeddings.
 
 **Shell.** One `shell` tool runs a command line in your configured shell
-(`permissions.exec.shell`: pwsh by default on Windows, bash elsewhere; a single
-call can pick `bash`, which on Windows is always Git Bash, never WSL). Every
+(`permissions.exec.shell`; unset means bash, which on Windows is always Git
+Bash and never WSL, or pwsh on a Windows machine without Git for Windows; a
+single call can pick the other). Every
 command is classified first: reads (`git status`, `rg`, `Get-Content`, `ls`)
 run without asking, ordinary commands ask unless `/clanker` is on, destructive
 ones always ask, and a few are refused outright. Output over 30K characters

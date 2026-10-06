@@ -7,7 +7,9 @@ import { describe, expect, it, vi } from 'vitest';
 import { makeShellTool, withPathEntry, gitBashDir, posixIdioms } from '../../src/tools/shellTool';
 import { BackgroundExecutionManager } from '../../src/tools/BackgroundExecutionManager';
 import { TEST_BASH } from '../support/bash';
+import type { ForgeConfig } from '../../src/config/types';
 
+const pwshConfig = { permissions: { exec: { shell: 'pwsh' } } } as unknown as ForgeConfig;
 const context = (extra: Record<string, unknown> = {}) => ({ beforeMutate: () => {}, ...extra });
 const bashArgs = (command: string) => ({
   command,
@@ -82,10 +84,11 @@ describe('shell tool validation and PowerShell', () => {
     vscode.workspace.workspaceFolders?.splice(0, Infinity, { uri: vscode.Uri.file(root) });
     try {
       await expect(
-        makeShellTool({ platform: 'win32', env: { PATH: '' } }).handler(
-          { command: 'Get-Date' },
-          context(),
-        ),
+        makeShellTool({
+          platform: 'win32',
+          env: { PATH: '' },
+          getConfig: () => pwshConfig,
+        }).handler({ command: 'Get-Date' }, context()),
       ).rejects.toThrow(/Install PowerShell 7.*permissions\.exec\.shell: powershell/u);
     } finally {
       vscode.workspace.workspaceFolders?.splice(0, Infinity, ...previous);
@@ -100,7 +103,7 @@ describe('shell tool validation and PowerShell', () => {
       const previous = [...(vscode.workspace.workspaceFolders ?? [])];
       vscode.workspace.workspaceFolders?.splice(0, Infinity, { uri: vscode.Uri.file(root) });
       try {
-        const result = await makeShellTool().handler(
+        const result = await makeShellTool({ getConfig: () => pwshConfig }).handler(
           { command: "Write-Output 'one','two' | Select-Object -Last 1; exit 7" },
           context(),
         );
@@ -146,6 +149,28 @@ describe('shell tool validation and PowerShell', () => {
       vscode.workspace.workspaceFolders?.splice(0, Infinity, ...previous);
       fs.rmSync(root, { recursive: true, force: true });
     }
+  });
+});
+
+describe('default shell', () => {
+  const described = (options: Parameters<typeof makeShellTool>[0]) =>
+    makeShellTool(options).describe!().function.description;
+
+  it('is bash on Windows when Git Bash exists, and the description says so', () => {
+    expect(described({ platform: 'win32', bashPath: String.raw`C:\Git\bin\bash.exe` })).toMatch(
+      /^Run one command line in bash on Windows;/u,
+    );
+    expect(described({ platform: 'linux' })).toMatch(/^Run one command line in bash;/u);
+  });
+
+  it('a configured shell wins and is named', () => {
+    expect(
+      described({
+        platform: 'win32',
+        bashPath: String.raw`C:\Git\bin\bash.exe`,
+        getConfig: () => pwshConfig,
+      }),
+    ).toMatch(/^Run one command line in PowerShell 7 \(pwsh\) on Windows;/u);
   });
 });
 
