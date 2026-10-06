@@ -24,7 +24,7 @@ Fill in the blanks below; delete any rule that does not fit this project.
 ## Commands
 - Build:
 - Test:
-- Full gate (run before calling any change done):
+- Full gate, as ONE command line (run after changing code):
 
 ## How to work efficiently
 - Every response is a round, and each round costs seconds before the first token. Put calls that do not depend on each other (reads, searches, listings) in ONE response. Read the file you need instead of listing its folder first.
@@ -32,8 +32,8 @@ Fill in the blanks below; delete any rule that does not fit this project.
 - Waiting on a long command: run it with the shell tool's background: true and notify_on_exit, then end your turn, or wait once with monitor_execution for as long as it needs instead of polling in short steps; ask only for the output you need.
 
 ## Before calling a change done
-- Run the full gate above after the last edit and report its exact result. A subset of tests is not the gate.
-- A new regression test must fail with the fix reverted; prove it before claiming it.
+- After the last code edit, run the full gate above in one call and report its exact result. A subset of tests is not the gate. A task that changed no code (a report, an answer) needs no gate.
+- A new regression test must fail without the fix: write and run it before the fix, then fix. Do not revert a fix to prove it.
 - A fake of an external program returns what the real one returns (binary output, real error text), never what your code expects.
 - For stateful, queued or retried work, test failure, retry, restart and duplicate delivery, not only the happy path.
 - Keep defects you introduced separate from ones that were already there.
