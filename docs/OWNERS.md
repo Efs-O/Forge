@@ -177,6 +177,7 @@ overlaps with an existing owner, extend the owner instead.
 | Bound-chat workspace file delivery            | `src/remote/remoteFileDelivery.ts`              |
 | Remote transport validation status projection | `src/remote/remoteValidationStatus.ts`          |
 | Inbound admission, queue drain, notifications | `src/remote/RemoteController.ts`                |
+| Authenticated text routing priority order     | `src/remote/remoteTextRouting.ts`               |
 | Remote command dependency assembly             | `src/remote/remoteCommandDeps.ts`               |
 | Remote ownership/authentication gate           | `src/remote/remoteAuthGate.ts`                  |
 | Ephemeral remote message cleanup policy       | `src/remote/RemoteEphemeralMessages.ts`         |

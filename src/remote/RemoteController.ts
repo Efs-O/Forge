@@ -19,7 +19,6 @@ import {
   sendRemoteEphemeralMessage,
 } from './RemoteEphemeralMessages';
 import { createRemoteOutboxDelivery, RemoteOutboxDelivery } from './RemoteOutboxDelivery';
-import { handleRemoteCommand } from './RemoteCommandHandler';
 import { buildRemoteCommandDeps, workspaceContextOf } from './remoteCommandDeps';
 import { applyRemoteAuthGate } from './remoteAuthGate';
 import { RemoteApprovalBridge } from './RemoteApprovalBridge';
@@ -29,20 +28,12 @@ import { RemoteAgentProgress, CLOCK_INTERVAL_MS } from './RemoteAgentProgress';
 import { RemoteDraftRegistry } from './RemoteDraftRegistry';
 import { HostProgressOpener } from './remoteHostProgress';
 import { RemoteNotificationFanout } from './RemoteNotificationFanout';
-import {
-  admitRemoteText,
-  isRemoteCommand,
-  type RemotePromptAdmissionDeps,
-} from './RemotePromptAdmission';
-import { admitRemoteSessionCommand, admitRemoteSessionReply } from './remoteSessionAdmission';
+import type { RemotePromptAdmissionDeps } from './RemotePromptAdmission';
+import { routeRemoteText } from './remoteTextRouting';
 import { startRemoteSessionRecovery } from './RemoteSessionRecovery';
 import { drainRemoteQueue } from './RemoteQueueDrain';
 import { RemotePendingPrompt } from './RemotePendingPrompt';
-import {
-  buildSpokenGateContext,
-  resolveVoiceDraft,
-  type VoiceBridgeBundle,
-} from './RemoteVoiceBridge';
+import { buildSpokenGateContext, type VoiceBridgeBundle } from './RemoteVoiceBridge';
 import type { RemoteSpeechDelivery } from './RemoteSpeechDelivery';
 import { handleRemoteSelectionAction } from './RemoteSelectionPager';
 import type { RemoteControllerOptions } from './remoteControllerOptions';
@@ -356,78 +347,44 @@ export class RemoteController {
       if (result.kind !== 'rejected' && result.kind !== 'retry') this.auth.touch(event);
       return result;
     }
-    if (event.text.length > this.options.maxMessageChars) {
-      return ephemeralRejection('message exceeds configured limit');
-    }
-    // A reply to a session question answers it; else an open question owns plain text.
-    const reply = await admitRemoteSessionReply(event, this.promptDeps, this.sendTransientMessage);
-    if (reply) return reply;
-    if (!event.text.startsWith('/') && this.questions.answerText(event.chatId, event.text)) {
-      this.auth.touch(event);
-      return { kind: 'handled' };
-    }
-    // Questions take priority over voice drafts.
-    const draftResult = this.voice
-      ? await resolveVoiceDraft(event, this.voice, {
-          touch: () => this.auth.touch(event),
-          say: (text) =>
-            this.channel
-              .send(event.chatId, text, { signal: this.abort.signal })
-              .then(() => undefined),
-          rerun: (text) => this.handle({ ...event, text }),
-        })
-      : undefined;
-    if (draftResult) return draftResult;
-    const key = remoteDedupKey(event.channel, event.chatId, event.providerMessageId);
-    const sessionAsk = await admitRemoteSessionCommand(
+    return routeRemoteText(event, {
+      maxMessageChars: this.options.maxMessageChars,
+      promptDeps: this.promptDeps,
+      acknowledge: this.sendTransientMessage,
+      onError: this.options.onError,
+      answerQuestion: (chatId, text) => this.questions.answerText(chatId, text),
+      voice: this.voice,
+      say: (chatId, text) =>
+        this.channel.send(chatId, text, { signal: this.abort.signal }).then(() => undefined),
+      rerun: (next) => this.handle(next),
+      touch: (touched) => this.auth.touch(touched),
+      commandContext: (command) => this.commandContext(command),
+      scheduleCommandCleanup: (command) => this.commandCleanup.schedule(command),
+    });
+  }
+  private commandContext(event: Extract<RemoteInboundEvent, { kind: 'text' }>) {
+    return buildRemoteCommandDeps(
+      {
+        channel: this.channel,
+        store: this.store,
+        host: this.host,
+        signal: this.abort.signal,
+        commandCleanup: this.commandCleanup,
+        options: () => this.options,
+        totpEnrolled: () => this.auth.totpEnrolled(this.channel.name),
+        ...(this.contactService
+          ? { contactCommands: this.contactService.handleOwnerCommand.bind(this.contactService) }
+          : {}),
+      },
       event,
-      key,
-      this.promptDeps,
-      this.sendTransientMessage,
-      this.options.onError,
+      {
+        isNotifyOn: (chatId) => this.isNotifyOn(chatId),
+        setNotify: (chatId, on) => this.setNotify(chatId, on),
+        isMirrorOn: (chatId) => this.isMirrorOn(chatId),
+        setMirror: (chatId, on) => this.setMirror(chatId, on),
+        promptDeps: () => this.promptDeps,
+      },
     );
-    if (sessionAsk) {
-      if (sessionAsk.kind !== 'rejected' && sessionAsk.kind !== 'retry') this.auth.touch(event);
-      return sessionAsk;
-    }
-    if (isRemoteCommand(event.text)) {
-      const result = await handleRemoteCommand(
-        event,
-        buildRemoteCommandDeps(
-          {
-            channel: this.channel,
-            store: this.store,
-            host: this.host,
-            signal: this.abort.signal,
-            commandCleanup: this.commandCleanup,
-            options: () => this.options,
-            totpEnrolled: () => this.auth.totpEnrolled(this.channel.name),
-            ...(this.contactService
-              ? {
-                  contactCommands: this.contactService.handleOwnerCommand.bind(this.contactService),
-                }
-              : {}),
-          },
-          event,
-          {
-            isNotifyOn: (chatId) => this.isNotifyOn(chatId),
-            setNotify: (chatId, on) => this.setNotify(chatId, on),
-            isMirrorOn: (chatId) => this.isMirrorOn(chatId),
-            setMirror: (chatId, on) => this.setMirror(chatId, on),
-            promptDeps: () => this.promptDeps,
-          },
-        ),
-        key,
-      );
-      if (result.kind !== 'rejected' && result.kind !== 'retry') this.auth.touch(event);
-      if (result.kind === 'handled' || result.kind === 'rejected') {
-        this.commandCleanup.schedule(event);
-      }
-      return result;
-    }
-    const result = await admitRemoteText(event, key, this.promptDeps);
-    if (result.kind !== 'rejected' && result.kind !== 'retry') this.auth.touch(event);
-    return result;
   }
   /**
    * A Stop button: the status bubble's ⏹ Stop, or a words preview's native
