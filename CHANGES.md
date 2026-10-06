@@ -6,6 +6,12 @@
 
 - The starter config a new install writes now turns on command execution (`exec.terminal`, `exec.headless`), file deletes and git writes. A coding agent that cannot run `npm test` was crippled out of the box. Every such action still asks first unless `/clanker` is on. Existing configs are unchanged.
 - Web search, fetch, the browser and desktop tools, shell scripts and CLI-agent delegation stay off until you enable them: they need a key, reach the network, control your machine, or spend another subscription.
+- The starter also carries the agent setup Forge is tested on, which a new install previously did not get:
+  - auto-compaction at 85% of the context, resuming the task afterwards (it is off unless named);
+  - the auto-created repository `FORGE.md` (also off unless named);
+  - the tested agent guidance, appended to the built-in system prompt;
+  - temperature 0.6, top_p 0.95 and a 200K output ceiling (each request is still clamped to the room the context leaves), with each llama.cpp model's family sampling on top.
+- The setup wizard and the copy-ready `config/starter/*.yaml` templates now produce the same setup, and a test keeps them identical.
 
 ### `generate_image` can edit a picture you give it
 
