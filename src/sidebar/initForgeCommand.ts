@@ -1,196 +1,48 @@
-import * as fs from 'fs';
 import * as path from 'path';
 import * as vscode from 'vscode';
 import {
-  preferredProjectInstructionsPath,
+  ensureForgeInstructionsFile,
   resolveInstructionScopeRoot,
 } from '../llm/ForgeInstructionsLoader';
 import type { SlashCommandDeps } from './SlashCommandHandler';
 
+/**
+ * `/init` (alias `/initForge`): make sure FORGE.md exists, then hand the agent
+ * an ordinary turn to fill it in. The agent can run the commands it writes
+ * down, which a one-shot no-tools prompt never could, and its edits go
+ * through the confirmation gate and the turn checkpoint like any other.
+ */
 export async function runInitForgeCommand(deps: SlashCommandDeps): Promise<void> {
   const root = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
   if (!root) {
     void vscode.window.showWarningMessage(
-      'Forge: no workspace folder open — cannot generate FORGE.md.',
+      'Forge: no workspace folder open — cannot set up FORGE.md.',
     );
     return;
   }
   const activeFile = vscode.window.activeTextEditor?.document.uri.fsPath;
   const repositoryRoot = resolveInstructionScopeRoot(root, activeFile);
-  const instructionsPath = preferredProjectInstructionsPath(repositoryRoot);
-  const instructionsName = path.basename(instructionsPath);
-  if (fs.existsSync(instructionsPath)) {
-    const answer = await vscode.window.showWarningMessage(
-      `Forge: ${instructionsName} already exists. Overwrite it?`,
-      'Overwrite',
-      'Cancel',
-    );
-    if (answer !== 'Overwrite') return;
-  }
-
-  let content: string;
-  try {
-    content = await vscode.window.withProgress(
-      {
-        location: vscode.ProgressLocation.Notification,
-        title: `Forge: scanning workspace and generating ${instructionsName}…`,
-        cancellable: false,
-      },
-      async () => {
-        const context = collectWorkspaceContext(repositoryRoot);
-        return deps.runPromptToMarkdown(buildInitForgePrompt(repositoryRoot, context));
-      },
-    );
-  } catch (err) {
+  const result = ensureForgeInstructionsFile(repositoryRoot);
+  if (result.status === 'error') {
     void vscode.window.showErrorMessage(
-      `Forge: failed to generate ${instructionsName} — ${(err as Error).message}`,
+      `Forge: could not create ${result.path} — ${result.error.message}`,
     );
     return;
   }
-
-  const trimmed = extractMarkdownFromToolCall(content.trim());
-  if (!trimmed) {
-    void vscode.window.showWarningMessage(
-      `Forge: model returned empty content — ${instructionsName} not written.`,
-    );
-    return;
-  }
-
-  try {
-    await vscode.workspace.fs.writeFile(
-      vscode.Uri.file(instructionsPath),
-      new TextEncoder().encode(trimmed + '\n'),
-    );
-  } catch (err) {
-    void vscode.window.showErrorMessage(
-      `Forge: could not write ${instructionsName} — ${(err as Error).message}`,
-    );
-    return;
-  }
-
-  void vscode.window.showInformationMessage(
-    `Forge: ${instructionsName} created. The agent will use it from the next message.`,
-  );
+  await deps.submitPrompt(buildInitPrompt(path.relative(root, result.path) || result.path));
 }
 
-function extractMarkdownFromToolCall(raw: string): string {
-  // Strip outer markdown code fence if present (```json ... ``` or ``` ... ```)
-  const fenceMatch = raw.match(/^```(?:json)?\s*([\s\S]*?)```[\s\S]*$/);
-  const inner = fenceMatch ? fenceMatch[1].trim() : raw;
-  // Try to parse as a tool call JSON and extract arguments.content
-  try {
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const parsed = JSON.parse(inner) as Record<string, any>;
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const argContent = (parsed?.arguments as Record<string, any>)?.content;
-    if (typeof argContent === 'string' && argContent.trim()) {
-      return argContent.trim().replace(/\\n/g, '\n');
-    }
-  } catch {
-    /* not JSON — use as-is */
-  }
-  return inner;
-}
+export function buildInitPrompt(instructionsPath: string): string {
+  return `Set up \`${instructionsPath}\`, the instructions file Forge adds to every prompt in this repository.
 
-function collectWorkspaceContext(root: string): string {
-  const SKIP_DIRS = new Set([
-    'node_modules',
-    '.git',
-    'dist',
-    'build',
-    'out',
-    '.next',
-    '.turbo',
-    'coverage',
-    '__pycache__',
-    '.venv',
-    'venv',
-  ]);
-  const lines: string[] = [];
-  // Top-level directory listing
-  try {
-    const entries = fs.readdirSync(root, { withFileTypes: true });
-    const dirs = entries
-      .filter((e) => e.isDirectory() && !SKIP_DIRS.has(e.name))
-      .map((e) => e.name);
-    const files = entries.filter((e) => e.isFile()).map((e) => e.name);
-    lines.push(`Top-level dirs: ${dirs.join(', ') || '(none)'}`);
-    lines.push(`Top-level files: ${files.join(', ') || '(none)'}`);
-  } catch {
-    /* unreadable root */
-  }
-  // package.json — name, scripts keys, dependency names
-  const pkgPath = path.join(root, 'package.json');
-  if (fs.existsSync(pkgPath)) {
-    try {
-      const raw = fs.readFileSync(pkgPath, 'utf8').slice(0, 2000);
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      const pkg = JSON.parse(raw) as Record<string, any>;
-      lines.push(`package name: ${pkg.name ?? '(unnamed)'}`);
-      if (pkg.scripts) lines.push(`scripts: ${Object.keys(pkg.scripts as object).join(', ')}`);
-      const deps = Object.keys({ ...(pkg.dependencies ?? {}), ...(pkg.devDependencies ?? {}) });
-      if (deps.length)
-        lines.push(`dependencies: ${deps.slice(0, 30).join(', ')}${deps.length > 30 ? '…' : ''}`);
-    } catch {
-      /* malformed JSON */
-    }
-  }
-  // Detect common config files that indicate stack
-  const indicators = [
-    'tsconfig.json',
-    'pyproject.toml',
-    'Cargo.toml',
-    'go.mod',
-    'pom.xml',
-    'build.gradle',
-    '.eslintrc',
-    'vite.config.ts',
-    'webpack.config.js',
-  ];
-  const found = indicators.filter((f) => fs.existsSync(path.join(root, f)));
-  if (found.length) lines.push(`config files present: ${found.join(', ')}`);
-  // One level deeper into src/ if it exists
-  const srcPath = path.join(root, 'src');
-  if (fs.existsSync(srcPath)) {
-    try {
-      const srcEntries = fs.readdirSync(srcPath, { withFileTypes: true });
-      const srcDirs = srcEntries.filter((e) => e.isDirectory()).map((e) => e.name);
-      const srcFiles = srcEntries.filter((e) => e.isFile()).map((e) => e.name);
-      if (srcDirs.length) lines.push(`src/ subdirs: ${srcDirs.join(', ')}`);
-      if (srcFiles.length) lines.push(`src/ files: ${srcFiles.join(', ')}`);
-    } catch {
-      /* unreadable */
-    }
-  }
-  return lines.join('\n');
-}
+Read the repository first: its README, its build and package files, its test setup and its main source folders. Then edit \`${instructionsPath}\` in place:
 
-function buildInitForgePrompt(root: string, context: string): string {
-  return `Generate a FORGE.md repository instructions file. All information you need is provided below — do NOT call any tools or request more files.
+- Fill the blank entries under "Project facts" and "Commands": what the project is, the important architecture decisions, and the exact build, test and full-gate commands.
+- Run each command before you write it down, and write only commands that worked. If one fails for a reason that is not yours to fix, write it with the failure noted.
+- Add only facts a future session would otherwise spend a round discovering: where the main code lives, conventions the code follows, traps you hit. Nothing a single file listing already shows.
+- Keep the existing working rules unless one plainly does not fit this project.
+- Never delete or rewrite text a person wrote. If the file already has project content, only add what is missing.
+- Keep the whole file around 4 KB. It is paid on every turn.
 
-Workspace root: ${root}
-
-Workspace scan results:
-${context}
-
-Write the FORGE.md now. Use only the information above. Output raw markdown only — no preamble, no explanation, no code fences, no tool calls.
-
-Include these sections (skip any where you have no real information):
-
-## Stack
-Languages, frameworks, build tools — one or two lines.
-
-## Workspace Layout
-Key directories and what they contain (3-8 entries).
-
-## Key Files
-3-6 most important files: entry points, config, core modules.
-
-## Navigation Rules
-2-4 rules for where things live in this project.
-
-## Hard Stops
-1-3 dangerous operations that need explicit user confirmation before running.
-
-Be specific and factual. Do not invent paths or names not present in the scan results above.`;
+Change no other file. When done, reply with a short summary of what you added.`;
 }

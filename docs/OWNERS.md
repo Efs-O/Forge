@@ -64,7 +64,7 @@ overlaps with an existing owner, extend the owner instead.
 | Delete approval preview and bounded inventory        | `src/sidebar/deletePreview.ts`           |
 | Conversation CRUD pure ops                           | `src/sidebar/ConversationOps.ts`         |
 | Slash command dispatch                               | `src/sidebar/SlashCommandHandler.ts`     |
-| `/initForge` workspace scan and instruction generation | `src/sidebar/initForgeCommand.ts`      |
+| `/init` (`/initForge`) agent turn that fills in FORGE.md | `src/sidebar/initForgeCommand.ts`      |
 | Compaction: cut point, run, resume                   | `src/sidebar/CompactionService.ts`       |
 | Compaction host-context assembly (preserved facts + candidate state) | `src/sidebar/compactionHostContext.ts` |
 | Compaction between rounds of a running turn (policy) | `src/sidebar/midTurnCompaction.ts`       |

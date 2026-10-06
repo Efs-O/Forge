@@ -1,5 +1,13 @@
 # Forge — Recent Changes
 
+## 0.16.91
+
+### `/init` lets the agent fill in FORGE.md
+
+- `/init` (also still `/initForge`) now starts an ordinary agent turn that reads the repository, runs the build and test commands before writing them down, and fills in the blank sections of `FORGE.md`. Before, one tool-less request guessed the file from a folder listing and replaced the whole file.
+- An existing `FORGE.md` is never overwritten: the agent is told to add only what is missing and to keep text a person wrote. Its edit goes through the usual confirmation and checkpoint, so `/undo` reverts it.
+- The slash menu no longer says the command writes `AGENTS.md`.
+
 ## 0.16.90
 
 ### A new install can run builds and tests

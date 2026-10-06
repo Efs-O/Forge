@@ -675,7 +675,7 @@ Type `/` in chat to open the built-in command list. Forge also contributes comma
 | `/undo`       | Restore files from the last checkpoint           |
 | `/keep`       | Keep current checkpoint changes                  |
 | `/reload`     | Reload the VS Code window                        |
-| `/initForge`  | Generate the active repository's `FORGE.md`      |
+| `/init`       | Have the agent read the repo and fill in its `FORGE.md` (alias `/initForge`) |
 | `/clanker`    | Toggle full-auto mode for confirmations          |
 
 ## Checkpoints, Diffs, and Clanker Mode

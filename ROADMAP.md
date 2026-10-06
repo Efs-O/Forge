@@ -73,6 +73,5 @@ Kept here for one release so nobody re-adds them from an old review.
 | `format_file` depends on the active editor | Target-URI `executeFormatDocumentProvider` plus a version-checked `WorkspaceEdit` |
 | Git tools need the VS Code Git extension | `runGit` in `src/tools/gitRepo.ts` runs the `git` CLI; the extension only helps discovery |
 | FORGE.md hierarchy | `src/llm/forgeInstructionsChain.ts` (FORGE.md / AGENTS.md chain with a shared budget) |
-| `/initForge` for non-JS projects | `SlashCommandHandler` scans `pyproject.toml`, `Cargo.toml`, `go.mod` |
-| `/initForge` tool-call JSON output | `extractMarkdownFromToolCall` fallback |
+| `/init` for any project | `src/sidebar/initForgeCommand.ts` starts an agent turn that reads the repo and runs its commands, so no language needs a scanner |
 | Type while streaming | The prompt textarea is never disabled during a turn (`webview-ui/src/components/InputRow.tsx`) |
