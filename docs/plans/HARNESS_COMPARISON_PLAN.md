@@ -28,7 +28,7 @@ less wall time?
   `defaults.max_tokens` of 200000 is a ceiling the entry overrides). Task 5 changes
   this for both: context 64K, output cap 16K.
 - **Out-of-the-box setup:** each harness is used as a new user would get it.
-  - **Forge** runs on the starter config a new install writes (0.16.90 or later:
+  - **Forge** runs on the starter config a new install writes (0.16.91 or later:
     file edits and deletes, command execution and git writes on, all behind the
     confirmation gate), with only the Strata model entry added. It runs in a
     separate VS Code instance (`--user-data-dir` and `--extensions-dir` under
@@ -36,14 +36,25 @@ less wall time?
     config copied into the run workspace's `.forge/config.yaml`. Our own
     VS Code profile and `config.yaml` are never touched. That means no HalluScribe, no delegation to
     Claude Code or Codex, no search, browser or desktop tools, and no tuned
-    compaction or sampling. It gets the auto-created starter `FORGE.md` and no
-    project `FORGE.md`.
+    compaction or sampling. It gets the `FORGE.md` that its own `/init`
+    produces (0.16.91), generated once per start branch and copied into every
+    run, exactly as OpenCode gets its `AGENTS.md`. The bench window has no
+    slash-command route, so the `/init` prompt text is sent through the agent
+    bus, with the same prefix as the tasks.
   - **OpenCode** runs with its defaults plus a provider config, passed through
     `OPENCODE_CONFIG`, that only names Strata (also as `small_model`, so its
-    title request stays local) and denies `webfetch`, matching Forge's fetch
-    being off. It gets the `AGENTS.md` that its
-    own `/init` produces, generated once and copied into every run, as a user
-    following OpenCode's docs would have.
+    title request stays local), denies `webfetch` (matching Forge's fetch
+    being off) and denies `external_directory` (matching Forge's workspace
+    boundary, so a run cannot read or delete outside its folder). It is
+    launched with `OPENCODE_DISABLE_CLAUDE_CODE`, `_PROMPT`, `_SKILLS` and
+    `OPENCODE_DISABLE_EXTERNAL_SKILLS` set, because otherwise it loads our
+    personal `~/.claude` skills, which no other user has. It gets the
+    `AGENTS.md` that its own `/init` produces, generated once per start branch
+    and copied into every run, as a user following OpenCode's docs would have.
+  - **Both `/init` files are generated before task 1 is written.** OpenCode's
+    first `AGENTS.md` for the base branch quoted the answer to the original
+    task 1, so task 1 is replaced by a lookup whose answer appears in neither
+    harness's file. The results disclose this order.
   - Neither gets extra prompting. Forge's shipped tuning counts, because it is
     part of the product. Our personal 26 KB `FORGE.md` and `config.yaml` do not,
     because no other user has them.
@@ -75,11 +86,14 @@ pass only if OpenCode and Forge come out close.
 
 `N:\vs code apps\harness-bench` is a small TypeScript project of about 15
 files, with `npm test` (vitest). It is a separate git repo, not inside Forge,
-so no harness can read Forge's source or its `FORGE.md`. OpenCode runs use
-`git worktree add ../hb-runs/<run> <start>`, deleted after grading. Forge runs
-use the fixed worktree `hb-runs/forge`, reset with `checkout -f` and
-`clean -fdx` (keeping `node_modules`, the auto-created `FORGE.md` and
-`.forge/`) and given a fresh copy of the bench config before each run.
+so no harness can read Forge's source or its `FORGE.md`. Every run works in a
+standalone clone (`git clone --no-hardlinks`, origin removed), never a
+worktree, so nothing a run does can reach the bench repo's own `.git`.
+OpenCode runs use a new clone `hb-runs/<run>`, deleted after grading. Forge
+runs use the fixed clone `hb-runs/forge`, reset with a forced fetch,
+`checkout -f` and `clean -fdx` (keeping `node_modules` and `.forge/`), then
+given that branch's `/init` `FORGE.md` and a fresh copy of the bench config.
+The bench repo and grader were backed up (git bundle and tar) before any run.
 
 The seeded content includes:
 - a known bug that spans two files, with a failing test;
@@ -108,8 +122,9 @@ unchanged. Neither of us chose which ones.
 
 ### Our set
 
-1. **Lookup (read-only).** "Where is the retry delay computed, what is its
-   maximum, and which callers override it?" Graded against the known answer.
+1. **Lookup (read-only).** A question about the code whose answer appears in
+   neither harness's `/init` file (the original retry-delay question was
+   quoted by OpenCode's `AGENTS.md`). Graded against the known answer.
 2. **Bug fix across two files.** "`npm test` fails in `queue.test.ts`. Fix the
    cause, not the test." Graded by `npm test` passing and the check script
    confirming the test file is unchanged.
@@ -129,8 +144,10 @@ noise; five gives a median and a spread. The harness that goes first
 alternates from run to run.
 
 A **pilot** of one run per task per harness comes first. It checks that every
-pipe works and gives the time per run, so the full schedule can be planned
-before committing Strata for hours.
+pipe works and gives the time per run. Only the pilot is approved; whether the
+full schedule runs is decided with the user from the pilot's results. The only
+arm is each harness as shipped plus its own `/init` file; arms without `/init`,
+or with our personal setup, are not run.
 
 ## What is measured
 
@@ -180,32 +197,34 @@ lines for every run.
 | Artifact | Create | Delete | Pause / disable | Crash mid-write | Owner-process death | TTL / expiry |
 |---|---|---|---|---|---|---|
 | Bench repo `N:\vs code apps\harness-bench` | Phase 1, by hand | User decides after phase 3; kept by default as the reproducible record | N/A: inert files | Rebuilt from its own git history | N/A: no process owns it | None: kept until the user deletes it |
-| Per-run worktrees `hb-<harness>-<task>-<n>` | `git worktree add` before each run | `git worktree remove` after grading. Never `--force` on a path holding a junction | A paused run leaves its worktree; the next run uses a new name | Harness crash: the worktree is graded as-is (a fail) and then removed | Same as crash | Removed in the same phase it was created |
+| Per-run OpenCode clones `hb-runs/<run>` | `new-run.sh` (standalone clone, origin removed, `npm ci`) | `end-run.sh` after grading; it refuses a path without `.git` | A paused run leaves its clone; `new-run.sh` refuses to start while one exists | Harness crash: the clone is graded as-is (a fail) and then removed | Same as crash | Removed in the same phase it was created |
+| `/init` instruction files (Forge `FORGE.md`, OpenCode `AGENTS.md`, per start branch) | Generated once per harness and branch before task 1 is written; saved in the grader dir | With the grader dir | N/A: inert files | Regenerated whole | Regenerated whole | None |
+| Backup (`harness-bench-backup-<stamp>`: bundle + grader tar) | Before the first run | By the user after phase 3 | N/A | Re-made | N/A | None |
 | `results/results.md` | Appended after each graded run | Kept with the bench repo | N/A | A row is written only after grading, so a crash loses at most the current run's row, which is re-run | N/A | None |
 | Grader-side `opencode.json` (via `OPENCODE_CONFIG`) | Phase 0 | With the grader dir. The user-global OpenCode config is never written | Unset the env var | Re-written whole | N/A | None |
 | Bench Forge config (`forge-bench-config.yaml`, copied to `hb-runs/forge/.forge/config.yaml`) | Phase 0, from the starter config; copied before every Forge run | With the grader dir; the copy goes with the worktree. Our own `config.yaml` is never written | N/A: only the bench window reads it | Re-copied whole before the next run | N/A | None |
 | Bench VS Code profile (`vscode-profile/`, `vscode-ext/` in the grader dir) | Phase 0, with the release VSIX installed | With the grader dir after phase 3 | Close the bench window | Reinstall the VSIX | Bench window crash: the run is a pipe failure and is repeated and listed | None |
-| Fixed Forge worktree `hb-runs/forge` | First Forge run | `git worktree remove` after the last Forge run | Left as-is; the next run resets it | Reset by the next run's `checkout -f` + `clean -fdx` | Same as crash | Removed at the end of phase 2 |
+| Fixed Forge clone `hb-runs/forge` | `reset-forge-run.sh`, first Forge run | Deleted after the last Forge run | Left as-is; the next run resets it | Reset by the next run's `checkout -f` + `clean -fdx` | Same as crash | Removed at the end of phase 2 |
 | Polyglot exercise copies | Phase 1, copied into the bench repo at a fixed commit | With the bench repo | N/A: inert files | Re-copied | N/A | None |
 | OpenCode session store (its own data dir) | OpenCode, on every run | Left in place. It belongs to OpenCode, and `opencode export` reads from it | N/A | OpenCode's concern | OpenCode's concern | OpenCode's policy |
 | Forge session JSONL for bench chats | Forge, as for any chat | Never deleted: it is the forensic record | N/A | Forge's existing cursor rows | Existing behaviour | None |
 
-The cheapest check to make enforceable is the worktree row: the run script
-refuses to start a run while any `hb-*` worktree from an earlier run still
-exists.
+The cheapest check to make enforceable is the clone row: `new-run.sh` refuses
+to start a run while any OpenCode clone from an earlier run still exists.
 
 ## Acceptance criteria
 
-- The Forge runs used VSIX 0.16.90 or later, the version that ships the
-  starter setup being tested.
+- The Forge runs used VSIX 0.16.91 or later, the version that ships the
+  starter setup and the agent-turn `/init` being tested.
 - No Forge session JSONL from a counted run contains an `ask_live_session`
   call, or the run is flagged in `results.md`.
 - OpenCode completes a smoke prompt against Strata with at least one successful
   tool call, using no OpenCode credits.
 - Every check script fails on the untouched tree and passes on the reference
   solution.
-- The ten third-party exercises and the five tasks each have five graded runs
-  per harness, with every measured column filled.
+- The pilot: the ten third-party exercises and the five tasks each have one
+  graded run per harness, with every measured column filled. The full five-run
+  schedule happens only if the user approves it after the pilot.
 - The Forge runs used the starter config plus the Strata entry and nothing
   else; the OpenCode runs used defaults plus the provider entry. Both configs
   are published.
