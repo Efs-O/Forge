@@ -18,12 +18,19 @@ import type { ChatMessage } from '../llm/types';
  * stored reasoning, unmodified, so the rendered prefix matches what the server
  * already has cached.
  *
- * Cloud providers are never given it: `reasoning_content` on an input message
- * is a llama.cpp extension.
+ * The named cloud providers are never given it: `reasoning_content` on an
+ * input message is a llama.cpp extension. A generic `openai-compatible`
+ * endpoint gets it when the flag is set, because local servers such as Strata
+ * take it the same way (OpenCode sends it to Strata on every round). Without
+ * it, a 2026-10-07 bench run found the cause of a failure in round 13 and
+ * lost it again by round 16, generating 3.5x OpenCode's tokens.
  */
+const PRESERVING_PROVIDERS = new Set(['llama.cpp', 'openai-compatible']);
+
 export function preservesThinking(model: ModelConfig): boolean {
   return (
-    (model.provider ?? 'llama.cpp') === 'llama.cpp' && model.sampling?.preserve_thinking === true
+    PRESERVING_PROVIDERS.has(model.provider ?? 'llama.cpp') &&
+    model.sampling?.preserve_thinking === true
   );
 }
 

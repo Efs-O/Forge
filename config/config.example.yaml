@@ -903,6 +903,10 @@ models:
     # its default is xhigh). medium matched xhigh's result in less time; low
     # thought more, not less, on a coding task.
     reasoning_effort: medium
+    # Send the current task's thinking back each tool round (as reasoning_content).
+    # Without it the model forgets what it concluded a round ago and re-investigates.
+    sampling:
+      preserve_thinking: true
 
   - name: claude-code
     provider: cli

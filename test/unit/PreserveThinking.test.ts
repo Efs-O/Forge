@@ -37,6 +37,14 @@ function task(): ChatMessage[] {
 }
 
 describe('preserve_thinking', () => {
+  it('is on for a local openai-compatible endpoint with the flag, never for a named cloud', () => {
+    const at = (provider: string, flag?: boolean) =>
+      preservesThinking({ name: 'q', provider, sampling: { preserve_thinking: flag } } as never);
+    expect(at('openai-compatible', true)).toBe(true);
+    expect(at('openai-compatible')).toBe(false);
+    for (const cloud of ['xai', 'openrouter', 'openai', 'ollama']) expect(at(cloud, true)).toBe(false);
+  });
+
   it('is on only for a llama.cpp model with the flag explicitly true', () => {
     expect(preservesThinking({ name: 'q', sampling: { preserve_thinking: true } } as never)).toBe(true);
     expect(
