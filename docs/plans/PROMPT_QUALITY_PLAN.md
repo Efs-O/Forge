@@ -280,6 +280,38 @@ content moves this model at all:
 - One run per task finds only large effects; a null pilot is reported as
   "no large effect", not "no effect".
 
+### Pilot result (2026-10-07): stop — no large effect; OpenCode 2× faster
+
+One run per cell, Strata 0.1.39, 0.6 / 0.95, the same `/init` file per harness
+with answer leaks removed (`forge-init-FORGE.r2-start.md`,
+`opencode-init-AGENTS.r2-start.md`; raw copies kept beside them). A capture
+probe confirmed the C-all template reached the model.
+
+| Task | B | C-all | OpenCode |
+|---|---|---|---|
+| review | pass, 208 s | pass, 308 s | fail (missed default export), 61 s |
+| docs | fail (never read faq.md), 46 s | fail (same), 46 s | fail (same), 30 s |
+| ambiguous | fail (silent choice), 167 s | fail (silent choice), 288 s | pass (named the other reading), 91 s |
+| quickfix | pass, 66 s | pass, 77 s | pass, 70 s |
+| buried | pass, 379 s | pass, 329 s | pass, 156 s |
+| **Total** | 3/5, 866 s, 62 requests, 33.5K generated | 3/5, 1048 s, 67, 42.4K | 3/5, 408 s, 36, 11.8K |
+
+- **B vs C-all: stop.** No pass differs, C-all is 21% slower (under 25%), and
+  the read differs by about one point (C-all's final answers are better
+  structured). Under the decision rules C-all is not adopted: it costs time and
+  buys no pass. **Ship B.**
+- **The gap to OpenCode is speed, not passes:** same model, same 3/5, but
+  Forge takes 2.1× the wall time and generates 2.8× the tokens. That matches
+  the earlier bench finding (rounds and output length, not caching) and is
+  where the next work goes, not prompt wording.
+- **One real behaviour gap:** on the ambiguous task OpenCode built one reading
+  and named the other; both Forge arms chose silently, C-all's "anything the
+  user must decide" rule included. Worth a targeted variant before any wider
+  rewrite.
+- **Model limit, not harness:** all three missed the FAQ contradiction on docs.
+- **Grader fix:** `askedOrStated` passed C-all on a quoted FAQ heading's `?`;
+  tightened before the result was recorded, and all runs regraded under it.
+
 ## Runs
 
 - Three runs per task per variant, alternating which variant goes first.
