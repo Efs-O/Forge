@@ -30,6 +30,7 @@
 - `/init` writes only lasting facts. It writes the build and test gate as one chained command, run only after code changes, and proves a regression test by running it before the fix.
 - `delete_file` is in the default tool list again. It was the most-used grouped tool, and every refused `rm` points the agent to it. Loading the `files` group to reach it meant the whole conversation was read again from scratch.
 - `git_read` is in the default tool list too. It is called as often as `delete_file`, so loading the `git` group just to look at history or a diff cost the same full re-read.
+- The `shell` tool now says that a command with no `cwd` runs in the workspace root. In the audit bench the agent started every command with `cd "<workspace>" &&`, spending tokens on a directory it was already in.
 - Writing a file with a heredoc (`cat > f <<'EOF'`) is no longer refused because the file's text mentions `rm -rf` or `drop table`. The text is still checked as commands when it goes to a shell (`bash <<EOF`, `ssh host <<EOF`), or when an unquoted heredoc contains `$(` or backticks. A backslash at the end of a line now joins it to the next line, as bash does, so `rm ⏎-rf` is caught.
 
 ### Agent-bus turns nobody watches
