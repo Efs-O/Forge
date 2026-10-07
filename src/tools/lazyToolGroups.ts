@@ -17,7 +17,8 @@ const LAZY_GROUP_BY_SERVER: ReadonlyMap<string, string> = new Map([['halluscribe
  * joined the eager set on 2026-10-07: the most-called grouped tool since 09-30
  * (79 calls, 25 of 127 sessions), and the alternative every rm / Remove-Item
  * refusal names, so hiding it made the refusal point at a tool the model could
- * not see. Other grouped
+ * not see. git_read joined it the same day: 70 calls in 25 sessions, as often
+ * as delete_file, and the read side of every git question. Other grouped
  * tools each had at most 7 calls. Rare tools stay grouped to avoid paying their
  * schema cost on every conversation.
  */
@@ -74,9 +75,7 @@ const NATIVE_GROUP_BY_TOOL: ReadonlyMap<string, string> = new Map([
   ...['move_file', 'create_directory', 'append_file', 'apply_line_edits', 'restore_file'].map(
     (name) => [name, 'files'] as const,
   ),
-  ...['git_read', 'stage', 'commit', 'create_branch', 'switch_branch'].map(
-    (name) => [name, 'git'] as const,
-  ),
+  ...['stage', 'commit', 'create_branch', 'switch_branch'].map((name) => [name, 'git'] as const),
   ...['code_intel', 'rename_symbol', 'apply_code_action', 'format_file', 'search_codebase'].map(
     (name) => [name, 'code_intel'] as const,
   ),
