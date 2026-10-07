@@ -257,6 +257,29 @@ prove the model received the intended prompt.
     only if phase 1 finds Strata supports one, and only after C1-C3.
 - **OpenCode** runs every task as the reference arm, at 0.6 / 0.95.
 
+### Change before any run (2026-10-07): A dropped, pilot first
+
+The user dropped A: it carries the known contradiction and nobody would ship
+it, so a night measuring it buys nothing. **B is the baseline**, OpenCode the
+outside reference, each C judged against B. Accepted cost: nothing measures
+whether the move alone changed behaviour.
+
+Before reserving the PC for the full study, a **pilot** checks whether prompt
+content moves this model at all:
+
+- **Arms:** B (`tplB+noprompt+bash`) and **C-all** (`tplCall+noprompt+bash`):
+  B plus C1, C2 and C3 together, the largest difference the candidates allow.
+  Both templates live in `harness-bench-grader/templates/`.
+- **Tasks, one run each:** review, docs, ambiguous, quickfix, buried: the
+  rules most likely to matter (answer-only tasks against "ALWAYS use tools",
+  a judgement call, root cause against symptom).
+- **Go on to the full study** if any task's pass differs between the arms,
+  or the read rubric items differ by 2 or more points in total, or the summed
+  wall time differs by 25% or more. Otherwise stop: the prompt is not the
+  lever for this model, and the result is written up as that.
+- One run per task finds only large effects; a null pilot is reported as
+  "no large effect", not "no effect".
+
 ## Runs
 
 - Three runs per task per variant, alternating which variant goes first.
