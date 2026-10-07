@@ -82,6 +82,11 @@ const cases: Array<[string, string, 'read_only' | 'normal' | 'dangerous' | 'refu
   ['mysql -e "DROP DATABASE x"', 'bash', 'dangerous'],
   ['sqlcmd -Q "DROP TABLE x"', 'bash', 'dangerous'],
   ['Invoke-Sqlcmd -Query "DROP TABLE x"', 'pwsh', 'dangerous'],
+  ['psql -c "BEGIN; DROP TABLE users; COMMIT"', 'bash', 'dangerous'],
+  ['mysql -e "USE app; DROP DATABASE app"', 'bash', 'dangerous'],
+  // A global git option nobody listed still must not hide the subcommand.
+  ['git --exec-path=/x reset --hard', 'bash', 'dangerous'],
+  ['git --no-advice push --force', 'bash', 'dangerous'],
   ['taskkill /PID 123', 'pwsh', 'dangerous'],
   ['git checkout -- file.txt', 'bash', 'dangerous'],
   ['format D:', 'pwsh', 'refused'],
@@ -123,6 +128,7 @@ const cases: Array<[string, string, 'read_only' | 'normal' | 'dangerous' | 'refu
   ['git -c core.pager=x log', 'bash', 'normal'],
   ['git -ccore.pager=x log', 'bash', 'normal'],
   ['git --config-env=core.pager=X log', 'bash', 'normal'],
+  ['git --exec-path=/x log', 'bash', 'normal'],
   ['gci | ForEach-Object { $_.FullName }', 'pwsh', 'read_only'],
   [
     'Get-ChildItem logs\\*.log | Select-String error | Where-Object { $_.Line -match "x" }',

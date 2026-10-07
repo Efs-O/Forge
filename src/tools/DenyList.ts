@@ -147,7 +147,8 @@ export function getBuiltinDenyList(): ShellTokenRule[] {
         ),
     ),
     dangerous('SQL DROP', 'Use a reviewed migration with a backup.', (t) => {
-      const sqlStart = /^drop\s+(?:table|database|schema)\b/iu;
+      // Anywhere in the argument: a client is often handed several statements (`BEGIN; DROP ...`).
+      const sqlStart = /\bdrop\s+(?:table|database|schema)\b/iu;
       const objectTypes = ['table', 'database', 'schema'];
       const isSplitStatement = (words: readonly string[], index: number): boolean =>
         words[index]?.toLowerCase() === 'drop' &&

@@ -32,6 +32,8 @@ export interface PrepareModelTurnMessagesInput {
   config: ForgeConfig;
   forgeLoader: ForgeInstructionsLoader | undefined;
   activeFile: string | undefined;
+  /** Turn-start snapshot, so the system prompt stays byte-identical across rounds. */
+  workspaceIsProjectRoot: boolean;
   turnContext: TurnContextState;
   getToolDefinitions: () => ToolDefinition[];
 }
@@ -60,7 +62,12 @@ export function prepareModelTurnMessages(
   const injected = injectSystemPrompt(
     visible,
     input.templateEngine,
-    buildTemplateContext(input.config, input.forgeLoader, input.activeFile),
+    buildTemplateContext(
+      input.config,
+      input.forgeLoader,
+      input.activeFile,
+      input.workspaceIsProjectRoot,
+    ),
     input.model.system_prompt,
     input.model.system_prompt_mode,
   );

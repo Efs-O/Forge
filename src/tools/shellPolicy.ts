@@ -1,6 +1,6 @@
 import { getBuiltinDenyList, type ShellTokenRule } from './DenyList';
 import { extractHeredocs, feedsHeredocToShell } from './shellHeredoc';
-import { baseProgram, gitCommandTokens } from './shellCommandTokens';
+import { baseProgram, splitGitGlobals } from './shellCommandTokens';
 
 export type ShellClass = 'read_only' | 'normal' | 'dangerous' | 'refused';
 export type ShellKind = 'pwsh' | 'powershell' | 'bash';
@@ -214,9 +214,10 @@ function isReadOnly(tokens: readonly string[], shell: ShellKind): boolean {
       return args.length === 1 && args[0] === '--version';
     if (program === 'git') {
       if (!gitArgsReadOnly(tokens.slice(1))) return false;
-      const command = gitCommandTokens(tokens);
-      // `-c core.pager=<cmd>` (or an alias, or core.sshCommand) makes any subcommand run a program.
-      const globals = tokens.slice(1, tokens.length - command.length + 1);
+      const { command, globals, unknownGlobal } = splitGitGlobals(tokens);
+      // `-c core.pager=<cmd>` (or an alias, or core.sshCommand) makes any subcommand run a
+      // program, and so can a global this check does not know (`--exec-path=<dir>`).
+      if (unknownGlobal) return false;
       if (globals.some((token) => /^(?:-c|--config-env)/u.test(token))) return false;
       const [subcommand, ...rest] = command.slice(1).map((token) => token.toLowerCase());
       if (

@@ -48,7 +48,7 @@ import {
   runToolCallingLoop,
   type ToolCallingLoopResult,
 } from '../agent/ToolCallingLoop';
-import { canUseThinkingKwargs, shouldStripThinking } from './turnModelBehavior';
+import { canUseThinkingKwargs, isProjectRoot, shouldStripThinking } from './turnModelBehavior';
 import type { AgentProgressEvent } from './AgentProgress';
 import type { LiveStreamMeter } from './LiveStreamMeter';
 
@@ -269,6 +269,9 @@ export async function runModelTurn(
     ...(unattended ? { unattended } : {}),
   };
   freezeTurnContext(conv.messages, turnContext);
+  const workspaceIsProjectRoot = ctx.forgeLoader?.root
+    ? isProjectRoot(ctx.forgeLoader.root)
+    : false;
 
   const compactor = ctx.compactMidTurn;
   // Unscaled estimate of the request in flight, compared with its reported prompt.
@@ -300,6 +303,7 @@ export async function runModelTurn(
           config,
           forgeLoader: ctx.forgeLoader,
           activeFile,
+          workspaceIsProjectRoot,
           turnContext,
           getToolDefinitions: buildToolDefinitions,
         });

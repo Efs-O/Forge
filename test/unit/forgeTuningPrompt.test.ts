@@ -38,6 +38,17 @@ describe('workspace root line', () => {
     }
   });
 
+  it('uses the turn-start snapshot over the disk, so a mid-turn git init changes nothing', () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'forge-root-'));
+    try {
+      fs.writeFileSync(path.join(dir, 'package.json'), '{}');
+      const context = buildTemplateContext({} as ForgeConfig, loaderFor(dir), undefined, false);
+      expect(context['workspaceIsProjectRoot']).toBeUndefined();
+    } finally {
+      fs.rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
   it('keeps the nested-prefix instruction for a workspace holding a nested project', () => {
     const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'forge-root-'));
     try {

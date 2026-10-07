@@ -43,6 +43,8 @@ export function buildTemplateContext(
   config: ForgeConfig,
   forgeLoader: ForgeInstructionsLoader | undefined,
   activeFile: string | undefined,
+  /** A full turn passes its turn-start snapshot; omitted, it is read now. */
+  projectRoot?: boolean,
 ): Record<string, string> {
   const ctx: Record<string, string> = {};
   // `activeFile` is deliberately NOT a template variable any more. Rendering it
@@ -55,7 +57,7 @@ export function buildTemplateContext(
   if (config.custom_instructions) ctx['customInstructions'] = config.custom_instructions;
   if (forgeLoader?.root) {
     ctx['workspaceRoot'] = forgeLoader.root;
-    if (isProjectRoot(forgeLoader.root)) ctx['workspaceIsProjectRoot'] = 'true';
+    if (projectRoot ?? isProjectRoot(forgeLoader.root)) ctx['workspaceIsProjectRoot'] = 'true';
   }
   const projectInstructions = forgeLoader?.instructionsFor(activeFile);
   if (projectInstructions) ctx['forgeInstructions'] = projectInstructions;
@@ -65,8 +67,10 @@ export function buildTemplateContext(
 /**
  * The nested-directory warning in the system prompt is for a workspace that
  * holds a repo below its root. Said to a workspace that IS the project, it sent
- * the model looking for a prefix that does not exist.
+ * the model looking for a prefix that does not exist. A turn reads it once: the
+ * agent running `git init` mid-turn must not change the system prompt between
+ * rounds and cost a cold prefill.
  */
-function isProjectRoot(root: string): boolean {
+export function isProjectRoot(root: string): boolean {
   return ['.git', 'package.json'].some((marker) => fs.existsSync(path.join(root, marker)));
 }
