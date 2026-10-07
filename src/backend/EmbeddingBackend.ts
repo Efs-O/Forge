@@ -25,11 +25,28 @@ export class EmbeddingBackend implements vscode.Disposable {
   private activeUses = 0;
   private output: vscode.OutputChannel | null = null;
   private currentSignature: string | null = null;
+  private reconfigurePromise: Promise<void> | null = null;
+  private lastExitMessage: string | null = null;
 
   constructor(private config: ForgeConfig) {}
 
   applyForgeConfig(next: ForgeConfig): void {
+    const nextSignature = embeddingServerSignature(next);
+    const shouldRestart = this.currentSignature !== null && this.currentSignature !== nextSignature;
     this.config = next;
+    if (!shouldRestart) return;
+
+    // A server adopted from another owner cannot be stopped by this window,
+    // but its cached readiness still needs revalidation against the new config.
+    if (!this.proc || !this.ownsProcess) {
+      this.ready = false;
+      this.currentSignature = null;
+      return;
+    }
+
+    this.reconfigurePromise = this.stop().finally(() => {
+      this.reconfigurePromise = null;
+    });
   }
 
   isConfigured(): boolean {
@@ -61,6 +78,15 @@ export class EmbeddingBackend implements vscode.Disposable {
     this.clearIdleTimer();
     try {
       return await operation();
+    } catch (err) {
+      if (this.lastExitMessage) {
+        const cause = err instanceof Error ? err.message : String(err);
+        throw new Error(
+          `Forge: the embedding server ${this.lastExitMessage}; it will restart automatically on the next semantic search. ` +
+            `Request failed: ${cause}`,
+        );
+      }
+      throw err;
     } finally {
       this.activeUses--;
       this.scheduleIdleStop();
@@ -79,6 +105,7 @@ export class EmbeddingBackend implements vscode.Disposable {
   }
 
   async start(): Promise<void> {
+    if (this.reconfigurePromise) await this.reconfigurePromise;
     if (this.startPromise) return this.startPromise;
     const promise = this.startInternal();
     this.startPromise = promise;
@@ -104,8 +131,13 @@ export class EmbeddingBackend implements vscode.Disposable {
       throw new Error('Forge: llama_server.binary is required when embeddings are enabled.');
     }
 
-    const signature = `${path.resolve(cfg.model_path)}|${this.baseUrl()}`;
-    if (this.ready && this.currentSignature === signature) return;
+    const signature = embeddingServerSignature(this.config);
+    if (this.ready && this.currentSignature === signature) {
+      // An adopted server has no child to watch for exit, so recheck it is still up.
+      if (this.proc || (await probeHealthy(this.baseUrl()))) return;
+      this.ready = false;
+      this.currentSignature = null;
+    }
     if (this.proc || this.currentSignature !== signature) {
       await this.stop();
     }
@@ -142,12 +174,40 @@ export class EmbeddingBackend implements vscode.Disposable {
     this.output.appendLine(`> ${binary} ${args.join(' ')}`);
     this.output.appendLine('');
 
+    // Record the launch configuration immediately so a hot reload during
+    // startup can still cancel this process when its arguments change.
+    this.currentSignature = signature;
     this.proc = spawnLlamaServer(binary, args);
+    const proc = this.proc;
     this.ownsProcess = true;
-    this.proc.stdout?.on('data', (chunk: Buffer) => this.output?.append(chunk.toString()));
-    this.proc.stderr?.on('data', (chunk: Buffer) => this.output?.append(chunk.toString()));
+    proc.once('exit', (code, signal) => {
+      if (this.proc !== proc) return;
+      this.proc = null;
+      this.ready = false;
+      this.ownsProcess = false;
+      this.currentSignature = null;
+      this.clearIdleTimer();
+      this.lastExitMessage = `exited (code ${code ?? 'unknown'}${signal ? `, signal ${signal}` : ''})`;
+      this.output?.appendLine(
+        `[Forge] Embedding server ${this.lastExitMessage}. It will restart on the next semantic search.`,
+      );
+    });
+    proc.once('error', (err) => {
+      if (this.proc !== proc) return;
+      this.proc = null;
+      this.ready = false;
+      this.ownsProcess = false;
+      this.currentSignature = null;
+      this.clearIdleTimer();
+      this.lastExitMessage = `failed (${err.message})`;
+      this.output?.appendLine(
+        `[Forge] Embedding server ${this.lastExitMessage}. It will restart on the next semantic search.`,
+      );
+    });
+    proc.stdout?.on('data', (chunk: Buffer) => this.output?.append(chunk.toString()));
+    proc.stderr?.on('data', (chunk: Buffer) => this.output?.append(chunk.toString()));
 
-    const result = await waitForHealthy({ baseUrl }, this.proc, this.startAbort.signal);
+    const result = await waitForHealthy({ baseUrl }, proc, this.startAbort.signal);
     if (!result.ok) {
       await this.stop();
       throw new Error(`Embedding server failed to start: ${result.message}`);
@@ -155,6 +215,7 @@ export class EmbeddingBackend implements vscode.Disposable {
 
     this.ready = true;
     this.currentSignature = signature;
+    this.lastExitMessage = null;
     this.scheduleIdleStop();
   }
 
@@ -208,6 +269,12 @@ export class EmbeddingBackend implements vscode.Disposable {
     this.output?.dispose();
     this.output = null;
   }
+}
+
+function embeddingServerSignature(config: ForgeConfig): string | null {
+  const binary = config.llama_server.binary;
+  if (!config.embeddings?.enabled || !config.embeddings.model_path || !binary) return null;
+  return JSON.stringify([path.resolve(binary), composeEmbeddingServerArgs(config)]);
 }
 
 export function composeEmbeddingServerArgs(config: ForgeConfig): string[] {

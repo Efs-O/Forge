@@ -1,10 +1,46 @@
-import { describe, expect, it } from 'vitest';
+import { EventEmitter } from 'node:events';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
+import type { ChildProcess } from 'node:child_process';
 import {
   composeEmbeddingServerArgs,
   EmbeddingBackend,
   embeddingModelMatches,
 } from '../../src/backend/EmbeddingBackend';
 import type { ForgeConfig } from '../../src/config/types';
+
+const { spawnLlamaServer, killLlamaProcess, waitForHealthy, probeHealthy, probeServedModel } =
+  vi.hoisted(() => ({
+    spawnLlamaServer: vi.fn(),
+    killLlamaProcess: vi.fn(),
+    waitForHealthy: vi.fn(),
+    probeHealthy: vi.fn(),
+    probeServedModel: vi.fn(),
+  }));
+
+vi.mock('../../src/backend/llamaProcess', () => ({ spawnLlamaServer, killLlamaProcess }));
+vi.mock('../../src/backend/HealthCheck', () => ({ waitForHealthy, probeHealthy, probeServedModel }));
+vi.mock('vscode', () => ({
+  window: {
+    createOutputChannel: () => ({
+      append: vi.fn(), appendLine: vi.fn(), clear: vi.fn(), show: vi.fn(), dispose: vi.fn(),
+    }),
+  },
+}));
+
+function fakeProcess(): ChildProcess {
+  const child = new EventEmitter() as ChildProcess;
+  Object.assign(child, { stdout: null, stderr: null, exitCode: null, signalCode: null, pid: 123 });
+  return child;
+}
+
+beforeEach(() => {
+  vi.clearAllMocks();
+  spawnLlamaServer.mockImplementation(() => fakeProcess());
+  killLlamaProcess.mockResolvedValue(undefined);
+  waitForHealthy.mockResolvedValue({ ok: true });
+  probeHealthy.mockResolvedValue(false);
+  probeServedModel.mockResolvedValue(null);
+});
 
 function makeConfig(overrides: Partial<ForgeConfig> = {}): ForgeConfig {
   return {
@@ -112,5 +148,63 @@ describe('EmbeddingBackend cold-start approval', () => {
     }));
 
     expect(backend.startApproval()).toBeUndefined();
+  });
+});
+
+describe('EmbeddingBackend process lifecycle', () => {
+  it('clears stale readiness after child exit and respawns on the next start', async () => {
+    const backend = new EmbeddingBackend(makeConfig());
+    await backend.start();
+    expect(backend.isReady()).toBe(true);
+    const firstProcess = spawnLlamaServer.mock.results[0]?.value as ChildProcess;
+
+    firstProcess.emit('exit', 137, 'SIGKILL');
+
+    expect(backend.isReady()).toBe(false);
+    await backend.start();
+    expect(spawnLlamaServer).toHaveBeenCalledTimes(2);
+    expect(backend.isReady()).toBe(true);
+    await backend.stop();
+  });
+
+  it('restarts an owned server when changed config alters spawn arguments', async () => {
+    const backend = new EmbeddingBackend(makeConfig());
+    await backend.start();
+    const updated = makeConfig({
+      embeddings: { enabled: true, model_path: '/models/embeddinggemma-300m.gguf', device: 'CUDA2' },
+    });
+
+    backend.applyForgeConfig(updated);
+    await backend.start();
+
+    expect(killLlamaProcess).toHaveBeenCalledTimes(1);
+    expect(spawnLlamaServer).toHaveBeenCalledTimes(2);
+    expect((spawnLlamaServer.mock.calls[1]?.[1] as string[])).toContain('CUDA2');
+    await backend.stop();
+  });
+
+  it('drops an adopted server that stopped answering and spawns its own', async () => {
+    probeHealthy.mockResolvedValueOnce(true);
+    probeServedModel.mockResolvedValueOnce('/models/embeddinggemma-300m.gguf');
+    const backend = new EmbeddingBackend(makeConfig());
+    await backend.start();
+    expect(spawnLlamaServer).not.toHaveBeenCalled();
+
+    await backend.start();
+
+    expect(spawnLlamaServer).toHaveBeenCalledTimes(1);
+    expect(backend.isReady()).toBe(true);
+    await backend.stop();
+  });
+
+  it('explains an in-flight request failure after child exit and says the next call restarts', async () => {
+    const backend = new EmbeddingBackend(makeConfig());
+    await backend.start();
+    const child = spawnLlamaServer.mock.results[0]?.value as ChildProcess;
+    child.emit('exit', 137, 'SIGKILL');
+
+    await expect(backend.withActivity(async () => { throw new TypeError('fetch failed'); }))
+      .rejects.toThrow(/embedding server exited.*restart automatically on the next semantic search.*fetch failed/i);
+    await backend.stop();
   });
 });
