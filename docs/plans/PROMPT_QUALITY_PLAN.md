@@ -191,6 +191,32 @@ proven pass-on-reference and fail-on-untouched **before any variant runs it**.
 Web research is left out: live search results differ between runs, so they
 measure the web, not the prompt.
 
+## Where the rules live (checked 2026-10-07)
+
+Every place that puts instructions in front of the model, checked before any
+run, so a variant cannot miss a second owner of the rule it changes.
+
+| Place | What it holds | In scope |
+|---|---|---|
+| `config/templates/builtin/execute.njk` | Forge's rules; the system message | Yes: B and C change it |
+| `STARTER_SYSTEM_PROMPT` in `src/config/StarterConfig.ts` | the five starter lines, appended after `execute.njk` | Yes: B moves them out |
+| `SYSTEM_PROMPT` in `src/llm/SystemPromptInjector.ts` | a hard-coded older copy of the rules, sent silently when the template fails to render | Yes: shipping B deletes it or makes a render failure loud; on the bench the captured-request check catches it |
+| `system_prompt` per group/model in the user's `.forge/config.yaml` | group-level: the old 25-line prompt (line 73); model-level: Qwopus rules, a Greek `replace` persona | No: the user's own; recommended, never edited |
+| `system_prompt` in `forge-bench-config.yaml` | the 25-line prompt, overwritten by every variant | Bench only |
+| FORGE.md (`/init` output) | repository facts | No: held fixed per branch |
+| Tool descriptions and result strings (`src/tools/`) | how each tool is used; failure guidance | No: the tool contract has its own audits |
+| `buildFallbackToolInstructions` in `src/tools/FallbackToolPrompt.ts` | the JSON tool-call format, added only without native tool calls | No; but `execute.njk` repeats it on every turn (C1 candidate) |
+| `config/templates/builtin/summarize.njk` | the compaction summary prompt | No |
+| Turn context (`src/sidebar/turnContext.ts`), `PLAN_GUIDANCE` | terminal commands, the plan, its guidance | No |
+| Loop nudges (`loopRecoveryNudge`, `reasoningStopRetryNudge`, `truncationRecovery.ts`) | mid-turn recovery messages | No |
+| The GGUF chat template | message and tool formatting only, no rules | No |
+
+Found by the check and added to C1's candidates: "ALWAYS use tools to act —
+never describe or show code in your response without writing it with
+write_file" tells the model to write a file on tasks that ask only for an
+answer (review, docs, plan, ambiguous); and the always-on JSON fallback line
+duplicates `FallbackToolPrompt`, which adds it only when it is needed.
+
 ## Variants
 
 Each variant is one change, applied to the bench config only, through
