@@ -6,7 +6,7 @@
 
 - `exec_command`, `query_powershell`, `run_terminal`, `run_workspace_task` and `list_workspace_tasks` are gone. One `shell` tool runs a command line in your configured shell (`permissions.exec.shell`: bash by default, which on Windows is Git Bash; pwsh on Windows without Git for Windows), in the foreground or, with `background: true`, as a tracked background process (`monitor_execution`, `stop_execution` and `notify_on_exit` work as before).
 - Every command is classified before it runs. Reads such as `git status`, `rg`, `ls`, `Get-Content` and `sed -n` run without asking, even with `/clanker` off. Ordinary commands ask unless `/clanker` is on. Destructive ones always ask, and a few are refused.
-- Shell classification now catches destructive commands invoked by path or with Git global options, while SQL DROP prompts only for SQL statements and client arguments.
+- Shell classification now catches destructive commands invoked by path or with Git global options, while SQL DROP prompts only for SQL statements and client arguments. A git command that sets config with `-c` or `--config-env` is never treated as read-only, because that config can name a program for git to run.
 - Nested commands are classified too: `` `...` ``, `$(...)` (also inside double quotes) and PowerShell script blocks. A read-only-looking wrapper no longer hides a write, e.g. `echo $(rm -rf x)`, `find -delete`, `sed -i`, `awk 'system(...)'`, `sort -o`, `rg --pre`, `git diff --output=` or `gci | % Delete`.
 - On Windows, `bash` (as the shell, or typed inside a pwsh command line) is always Git Bash and never WSL. Git Bash's folder goes first on the command's PATH.
 - VS Code's bundled `rg` is on the command's PATH, so `rg` works where it is not installed.

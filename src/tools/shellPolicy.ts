@@ -214,9 +214,11 @@ function isReadOnly(tokens: readonly string[], shell: ShellKind): boolean {
       return args.length === 1 && args[0] === '--version';
     if (program === 'git') {
       if (!gitArgsReadOnly(tokens.slice(1))) return false;
-      const [subcommand, ...rest] = gitCommandTokens(tokens)
-        .slice(1)
-        .map((token) => token.toLowerCase());
+      const command = gitCommandTokens(tokens);
+      // `-c core.pager=<cmd>` (or an alias, or core.sshCommand) makes any subcommand run a program.
+      const globals = tokens.slice(1, tokens.length - command.length + 1);
+      if (globals.some((token) => /^(?:-c|--config-env)/u.test(token))) return false;
+      const [subcommand, ...rest] = command.slice(1).map((token) => token.toLowerCase());
       if (
         [
           'status',

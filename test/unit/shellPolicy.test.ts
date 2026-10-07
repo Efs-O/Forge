@@ -119,6 +119,10 @@ const cases: Array<[string, string, 'read_only' | 'normal' | 'dangerous' | 'refu
   ['git log --oneline -5', 'bash', 'read_only'],
   ['git -C repo status', 'bash', 'read_only'],
   ['git --no-pager log -5', 'bash', 'read_only'],
+  // Config set on the command line can name a program git runs (pager, alias, sshCommand).
+  ['git -c core.pager=x log', 'bash', 'normal'],
+  ['git -ccore.pager=x log', 'bash', 'normal'],
+  ['git --config-env=core.pager=X log', 'bash', 'normal'],
   ['gci | ForEach-Object { $_.FullName }', 'pwsh', 'read_only'],
   [
     'Get-ChildItem logs\\*.log | Select-String error | Where-Object { $_.Line -match "x" }',
