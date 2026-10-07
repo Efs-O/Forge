@@ -36,7 +36,6 @@ import { selectCompactionSplit } from './compactionSplit';
 import { reportedContextTokens } from '../util/contextBudget';
 import { compactionWindowChars, messageCostChars } from './compactionWindow';
 import { CompactionHostContext } from './compactionHostContext';
-import { deactivateLazyGroups, lazyGroupSummaryNote } from '../tools/lazyToolGroups';
 import { resetContextTrimState } from '../agent/toolResultContext';
 
 const log = getLogger();
@@ -252,10 +251,7 @@ async function compactOnce(
         return 'failed';
       }
 
-      groupsNote = compactionResumeNote(
-        lazyGroupSummaryNote(conversationId),
-        Boolean(conv.plan?.items?.length),
-      );
+      groupsNote = compactionResumeNote('', Boolean(conv.plan?.items?.length));
       const summaryAllowance = compactionSummaryAllowance(
         budget.summaryCeilingChars,
         budget.replacementMaxChars,
@@ -403,7 +399,6 @@ async function compactOnce(
     }
     outcome = 'compacted';
     attemptFinish = 'stop';
-    deactivateLazyGroups(conversationId);
     return outcome;
   } catch (err) {
     const category =

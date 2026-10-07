@@ -150,7 +150,7 @@ async function summarizeCompactionCounted(
       'The summarizer returned no usable summary; previous context kept.',
     );
   }
-  const missing = ['Goal', 'State', 'Next', 'Files', 'Constraints', 'Errors'].filter(
+  const missing = ['Goal', 'State', 'Next', 'Files', 'Constraints', 'Errors', 'Reference'].filter(
     (heading) => !new RegExp(`(?:^|\\n)\\s*#{0,6}\\s*(?:\\*\\*)?${heading}\\b`, 'iu').test(summary),
   );
   if (missing.length > 0) {

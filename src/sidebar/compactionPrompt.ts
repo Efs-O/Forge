@@ -208,7 +208,7 @@ export function buildSummaryPrompt(
     (budget
       ? `Aim for about ${budget.summaryTargetTokens} visible tokens; do not exceed ${budget.summaryCeilingTokens}. `
       : '') +
-    'Use all six headings: Goal, State, Next, Files, Constraints, Errors. ' +
+    'Use all seven headings: Goal, State, Next, Files, Constraints, Errors, Reference. ' +
     // Without this, State became a narrative of the conversation and the
     // conclusions of finished investigations were lost, so the resumed agent
     // re-ran the reads and searches that had produced them.
@@ -227,6 +227,12 @@ export function buildSummaryPrompt(
     'user has not answered yet, or write "nothing pending - the task is ' +
     'complete" when there is none. Do not list work the recorded outcomes ' +
     'already show finished. ' +
+    'In Reference, copy concrete data from the conversation exactly when the ' +
+    'Next step depends on it, such as signatures, identifiers, file paths with ' +
+    'line numbers, or command results. Use the room up to the target for ' +
+    'Reference material Next actually needs; never pad it or copy whole files. ' +
+    'The summary ceiling remains a hard limit. Write "none recorded" when Next ' +
+    'needs no reference material. ' +
     'Write "none recorded" for an empty section. Do not retell the conversation. ' +
     'Historical Next and PAUSE instructions must be labeled historical. For each ' +
     'earlier restriction, name the task it governed; apply it to the latest ' +
@@ -245,13 +251,6 @@ export function capSummary(summary: string, maxChars = COMPACTION_SUMMARY_MAX_CH
   }
   return text;
 }
-
-/**
- * Room for the summary itself, ON TOP of whatever the model reserves for
- * thinking. COMPACTION_SUMMARY_MAX_CHARS is ~2600 tokens at 3.1 chars/token;
- * 3072 leaves room for a detailed, structured implementation handoff.
- */
-export const SUMMARY_OUTPUT_TOKENS = 3072;
 
 /** Below this a "summary" cannot be one — the shortest measured good run was
  *  several thousand characters, the failures were 117 and 150. */

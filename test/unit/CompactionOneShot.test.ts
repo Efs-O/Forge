@@ -10,7 +10,8 @@ State: the earlier finding was corrected with evidence.
 Next: continue the approved task.
 Files: src/a.ts.
 Constraints: the prior pause applied to the audit only.
-Errors: none unresolved. ${'Evidence. '.repeat(30)}`;
+Errors: none unresolved.
+Reference: function signature is copied exactly. ${'Evidence. '.repeat(30)}`;
 
 function input(
   messages: ChatMessage[],
@@ -72,6 +73,13 @@ describe('one-shot compaction', () => {
       /missing required sections/u,
     );
     expect(runPrompt).toHaveBeenCalledTimes(1);
+  });
+
+  it('requires the Reference heading on a complete summary', async () => {
+    const withoutReference = note.replace('Reference: function signature is copied exactly. ', '');
+    await expect(
+      summarizeCompaction(input(messages, async () => withoutReference)),
+    ).rejects.toThrow(/Reference/u);
   });
 
   it('budgets 200k and synthetic 400k slots at 6% target and 12% replacement', () => {

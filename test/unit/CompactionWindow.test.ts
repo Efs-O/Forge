@@ -30,6 +30,7 @@ describe('applyCompactionWindow', () => {
     expect(SUMMARY_PREAMBLE).toContain(
       'Earlier conversation text is still stored; use `read_tool_result` with `query` to search it.',
     );
+    expect(SUMMARY_PREAMBLE).toContain('using Reference for concrete data it needs');
   });
 
   it('returns the transcript untouched when nothing is compacted', () => {

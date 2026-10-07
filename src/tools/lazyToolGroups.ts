@@ -148,16 +148,9 @@ export function isLazyGroupActive(conversationId: string, group: string): boolea
   return activeByConversation.get(conversationId)?.has(group) === true;
 }
 
-/** Clears loaded schemas after compaction and returns the note to preserve in its summary. */
+/** Clears loaded schemas when their conversation is cleared or deleted. */
 export function deactivateLazyGroups(conversationId: string): void {
   activeByConversation.delete(conversationId);
-}
-
-export function lazyGroupSummaryNote(conversationId: string): string {
-  const groups = [...(activeByConversation.get(conversationId) ?? [])].sort();
-  return groups.length
-    ? `Loaded optional tool groups before compaction: ${groups.join(', ')}. Reload with load_tool_group if needed.`
-    : '';
 }
 
 /** Hidden names omit explicitly allowlisted tools: config is an eager opt-in. */

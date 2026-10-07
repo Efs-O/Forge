@@ -92,7 +92,8 @@ State: recorded. ${'detail. '.repeat(30)}
 Next: continue.
 Files: src/a.ts.
 Constraints: none recorded.
-Errors: none recorded.`;
+Errors: none recorded.
+Reference: none recorded.`;
 
 describe('selectCompactionSplit', () => {
   it('keeps the last user turn verbatim and summarizes only what precedes it', () => {
@@ -216,6 +217,11 @@ describe('summary prompt anchoring', () => {
 
     expect(prompt).toContain('ALWAYS include Next');
     expect(prompt).toContain('nothing pending');
+    expect(prompt).toContain(
+      'Use all seven headings: Goal, State, Next, Files, Constraints, Errors, Reference.',
+    );
+    expect(prompt).toContain('In Reference, copy concrete data from the conversation exactly');
+    expect(prompt).toContain('never pad it or copy whole files');
     // The blanket "omit empty sections" is what removed Next from a finished
     // task's summary and sent the resumed agent hunting for it.
     expect(prompt).not.toContain('omit empty sections');
@@ -513,7 +519,7 @@ describe('runCompaction recovery after automatic failures', () => {
 });
 
 describe('runCompaction', () => {
-  it('records loaded lazy groups in the summary and clears them after compaction', async () => {
+  it('keeps loaded lazy groups active after compaction', async () => {
     resetLazyToolGroups();
     const c = conv([
       { role: 'user', content: 'first task' },
@@ -525,8 +531,8 @@ describe('runCompaction', () => {
 
     await expect(runCompaction(h.deps, c.id, { auto: true })).resolves.toBe('compacted');
 
-    expect(c.compaction?.summary).toContain('Loaded optional tool groups before compaction: media');
-    expect(isLazyGroupActive(c.id, 'media')).toBe(false);
+    expect(c.compaction?.summary).not.toContain('Loaded optional tool groups');
+    expect(isLazyGroupActive(c.id, 'media')).toBe(true);
     resetLazyToolGroups();
   });
 

@@ -30,7 +30,8 @@ import {
  */
 const SUMMARY_PREAMBLE =
   'Compacted replacement context. Continue the same conversation and active task from ' +
-  'this state, starting from what Next names. The recorded actions below are what ' +
+  'this state, starting from what Next names and using Reference for concrete data it ' +
+  'needs. The recorded actions below are what ' +
   'Forge observed; do not redo an operation recorded as completed merely because this ' +
   'compaction happened. Where something is recorded as unknown, is contradicted by a ' +
   'later fact, or is needed and missing, verify that one thing specifically rather than ' +

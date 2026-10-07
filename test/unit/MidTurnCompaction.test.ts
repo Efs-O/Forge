@@ -322,7 +322,7 @@ describe('compactMidTurn policy', () => {
 });
 
 describe('runCompaction midTurn', () => {
-  const summary = `Goal: continue the request.\nState: summary recorded. ${'detail. '.repeat(30)}\nNext: continue.\nFiles: src/a.ts.\nConstraints: none.\nErrors: none.`;
+  const summary = `Goal: continue the request.\nState: summary recorded. ${'detail. '.repeat(30)}\nNext: continue.\nFiles: src/a.ts.\nConstraints: none.\nErrors: none.\nReference: none recorded.`;
 
   function harness(streaming: boolean) {
     const posted: HostToWebview[] = [];

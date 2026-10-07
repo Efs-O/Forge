@@ -9,6 +9,7 @@ import type { ForgeConfig } from '../../src/config/types';
 import type { HostToWebview } from '../../src/sidebar/messageBridge';
 import type { SidebarRuntime } from '../../src/sidebar/sessionTypes';
 import { MAX_CONVERSATIONS } from '../../src/sidebar/sessionTypes';
+import { activateLazyGroup, isLazyGroupActive, resetLazyToolGroups } from '../../src/tools/lazyToolGroups';
 
 const flush = (): Promise<void> => new Promise((resolve) => setTimeout(resolve, 0));
 
@@ -350,8 +351,12 @@ describe('ConversationTabs checkpoint survival', () => {
       const { tabs } = harness();
       const deps = (tabs as unknown as { deps: ConversationTabsDeps }).deps;
       const dispose = vi.spyOn(deps.checkpoints, 'disposeConversation');
+      resetLazyToolGroups();
+      activateLazyGroup('tab0', 'media');
       await tabs.deleteConversation('tab0');
       expect(dispose).toHaveBeenCalledWith('tab0');
+      expect(isLazyGroupActive('tab0', 'media')).toBe(false);
+      resetLazyToolGroups();
     } finally {
       confirm.mockRestore();
     }
@@ -384,11 +389,15 @@ describe('ConversationTabs failure streak', () => {
     const { tabs } = harness({ tabs: ['12b', '27b'] });
     const deps = (tabs as unknown as { deps: ConversationTabsDeps }).deps;
     const reset = vi.spyOn(deps.failureTracker, 'reset');
+    resetLazyToolGroups();
+    activateLazyGroup('tab0', 'media');
 
     tabs.clearActive();
 
     expect(reset).toHaveBeenCalledWith('tab0');
     expect(reset).not.toHaveBeenCalledWith(undefined);
+    expect(isLazyGroupActive('tab0', 'media')).toBe(false);
+    resetLazyToolGroups();
   });
 
   it('clears the closed chat streak by its id when a tab is closed', async () => {

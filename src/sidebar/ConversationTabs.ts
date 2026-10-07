@@ -39,6 +39,7 @@ import type { ArchivedSessions } from './ArchivedSessions';
 import { persistedToRuntime } from './sessionPersistence';
 import { TabModelRelease } from './TabModelRelease';
 import { retainLiveMemoryKeys } from './compactionWindow';
+import { deactivateLazyGroups } from '../tools/lazyToolGroups';
 
 const log = getLogger();
 
@@ -147,6 +148,7 @@ export class ConversationTabs {
     // bar and the HalluMeter bridge fall back to 0 rather than describing a
     // transcript that no longer exists.
     opClearMessages(conv);
+    deactivateLazyGroups(conv.id);
     this.deps.failureTracker.reset(conv.id);
     this.deps.refreshUi();
   }
@@ -279,6 +281,7 @@ export class ConversationTabs {
     const result = opDeleteConversation(sidebar, id);
     if (!('ok' in result)) return;
     this.deps.archivedSessions?.purge(id);
+    deactivateLazyGroups(id);
     this.deps.setSidebar(result.sidebar);
     this.deps.failureTracker.reset(id);
     const nextActive = this.deps

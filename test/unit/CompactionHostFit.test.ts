@@ -14,7 +14,7 @@ import { renderCompactionHostBlock } from '../../src/sidebar/compactionHostFit';
 import { replacementHostMessages } from '../../src/sidebar/compactionWindow';
 import { CompactionHostContext } from '../../src/sidebar/compactionHostContext';
 
-const summary = `Goal: complete the request.\nState: recorded. ${'detail. '.repeat(40)}\nNext: continue.\nFiles: src/a.ts.\nConstraints: none.\nErrors: none.`;
+const summary = `Goal: complete the request.\nState: recorded. ${'detail. '.repeat(40)}\nNext: continue.\nFiles: src/a.ts.\nConstraints: none.\nErrors: none.\nReference: none recorded.`;
 
 function setup(userChars: number, repoState: string, lastInputTokens: number) {
   const messages: ChatMessage[] = [
@@ -218,7 +218,7 @@ describe('A24: constructed 200k host block at P=170,000', () => {
     expect(h.runPrompt).not.toHaveBeenCalled();
     expect(h.conv.compaction).toEqual(before);
     expect(h.posted.find((m) => m.type === 'error')?.message).toMatch(
-      /need an estimated 17369 characters/u,
+      /need an estimated 17416 characters/u,
     );
   });
 
