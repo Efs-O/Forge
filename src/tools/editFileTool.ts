@@ -157,7 +157,7 @@ export function makeEditFileTool(extraRoots: () => readonly string[] = () => [])
       const suppliedPath = args['path'] as string;
       return edits.length === 1
         ? `Replaced in ${suppliedPath}`
-        : `Replaced ${edits.length} occurrences in ${suppliedPath}`;
+        : `Applied ${edits.length} edits to ${suppliedPath}`;
     },
   };
 }

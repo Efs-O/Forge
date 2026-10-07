@@ -46,6 +46,29 @@ describe('every file-writing tool honours extra_file_roots', () => {
     expect(fs.readFileSync(moved, 'utf8')).toBe('first\nsecond\n');
   });
 
+  it('reports the number of edits for a multi-edit call', async () => {
+    const file = path.join(extra, 'multi-edit.txt');
+    fs.writeFileSync(file, 'alpha beta');
+    await expect(
+      makeEditFileTool(roots).handler({
+        path: file,
+        edits: [
+          { old_str: 'alpha', new_str: 'first' },
+          { old_str: 'beta', new_str: 'second' },
+        ],
+      }),
+    ).resolves.toBe(`Applied 2 edits to ${file}`);
+    expect(fs.readFileSync(file, 'utf8')).toBe('first second');
+  });
+
+  it('keeps the single-edit result unchanged', async () => {
+    const file = path.join(extra, 'single-edit.txt');
+    fs.writeFileSync(file, 'before');
+    await expect(
+      makeEditFileTool(roots).handler({ path: file, old_str: 'before', new_str: 'after' }),
+    ).resolves.toBe('Replaced in ' + file);
+  });
+
   it('still refuses a folder that is in neither the workspace nor an extra root', async () => {
     const elsewhere = path.join(os.tmpdir(), 'forge-extra-elsewhere', 'x.txt');
     await expect(

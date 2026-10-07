@@ -116,9 +116,21 @@ const EXPECTED_NATIVE_NAMES = [
 ];
 
 const CORE_TOOL_NAMES = [
-  'read_file', 'edit_file', 'write_file', 'search_code', 'find_files', 'list_directory',
-  'shell', 'monitor_execution', 'update_plan', 'read_tool_result', 'ask_user',
-  'web_fetch', 'web_search', 'load_tool_group',
+  'read_file',
+  'edit_file',
+  'write_file',
+  'append_file',
+  'search_code',
+  'find_files',
+  'list_directory',
+  'shell',
+  'monitor_execution',
+  'update_plan',
+  'read_tool_result',
+  'ask_user',
+  'web_fetch',
+  'web_search',
+  'load_tool_group',
 ];
 
 function makeRegistry(
@@ -228,12 +240,25 @@ describe('registerAllTools canonical coordinator catalog', () => {
     );
     expect(CORE_TOOL_NAMES).toContain('shell');
     const groups: Record<string, string[]> = {
-      files: ['move_file', 'create_directory', 'append_file', 'apply_line_edits', 'restore_file'],
+      files: ['move_file', 'create_directory', 'apply_line_edits', 'restore_file'],
       git: ['stage', 'commit', 'create_branch', 'switch_branch'],
-      code_intel: ['code_intel', 'rename_symbol', 'apply_code_action', 'format_file', 'search_codebase'],
+      code_intel: [
+        'code_intel',
+        'rename_symbol',
+        'apply_code_action',
+        'format_file',
+        'search_codebase',
+      ],
       memory: ['remember', 'recall', 'list_memories', 'forget'],
       background: ['stop_execution', 'list_executions', 'wait'],
-      agents: ['ask_live_session', 'tell_live_session', 'ask_local_agent', 'list_delegation_targets', 'manage_jobs', 'notify_user'],
+      agents: [
+        'ask_live_session',
+        'tell_live_session',
+        'ask_local_agent',
+        'list_delegation_targets',
+        'manage_jobs',
+        'notify_user',
+      ],
     };
     for (const [group, members] of Object.entries(groups)) {
       for (const member of members) expect(lazyGroupForTool(member)).toBe(group);
@@ -242,6 +267,8 @@ describe('registerAllTools canonical coordinator catalog', () => {
     // Eager: the two most-called grouped tools; delete_file is also the alternative every rm refusal names.
     expect(lazyGroupForTool('delete_file')).toBeUndefined();
     expect(lazyGroupForTool('git_read')).toBeUndefined();
+    expect(lazyGroupForTool('append_file')).toBeUndefined();
+    expect(names).toContain('append_file');
   });
 
   it('advertises generate_image once image_generation is configured', () => {

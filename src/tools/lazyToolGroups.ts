@@ -72,7 +72,7 @@ const NATIVE_GROUP_BY_TOOL: ReadonlyMap<string, string> = new Map([
     (name) => [name, 'system'] as const,
   ),
   ...['read_notebook', 'edit_notebook_cell'].map((name) => [name, 'notebook'] as const),
-  ...['move_file', 'create_directory', 'append_file', 'apply_line_edits', 'restore_file'].map(
+  ...['move_file', 'create_directory', 'apply_line_edits', 'restore_file'].map(
     (name) => [name, 'files'] as const,
   ),
   ...['stage', 'commit', 'create_branch', 'switch_branch'].map((name) => [name, 'git'] as const),

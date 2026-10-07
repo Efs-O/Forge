@@ -8,9 +8,9 @@ import {
   type ToolPermission,
 } from '../tools/ToolRegistry';
 import type { ToolCall, ToolDefinition } from '../llm/types';
+import { MAX_SINGLE_WRITE_CHARS } from '../tools/writeChunking';
 
 const MAX_RESULT_CHARS = 12_000;
-const MAX_WRITE_CHARS = 6_000;
 const EXCLUDED = new Set(['.git', 'node_modules', '.venv', '__pycache__', 'dist', 'build']);
 
 export const BENCHMARK_TOOL_NAMES = [
@@ -218,11 +218,13 @@ export function createBenchmarkToolHost(root: string): BenchmarkToolHost {
 
   const write = fileTool(
     'write_file',
-    'Write a UTF-8 file. Keep each call under 6000 characters; append_file builds larger files.',
+    `Write a UTF-8 file. Keep each call under ${MAX_SINGLE_WRITE_CHARS} characters; append_file builds larger files.`,
     async (args) => {
       const content = stringArg(args, 'content');
-      if (content.length > MAX_WRITE_CHARS)
-        throw new Error(`content is limited to ${MAX_WRITE_CHARS} characters; use append_file.`);
+      if (content.length > MAX_SINGLE_WRITE_CHARS)
+        throw new Error(
+          `content is limited to ${MAX_SINGLE_WRITE_CHARS} characters; use append_file.`,
+        );
       const target = filePath(args, root);
       fs.mkdirSync(path.dirname(target), { recursive: true });
       fs.writeFileSync(target, content, 'utf8');
@@ -235,7 +237,7 @@ export function createBenchmarkToolHost(root: string): BenchmarkToolHost {
     type: 'object',
     properties: {
       path: { type: 'string' },
-      content: { type: 'string', maxLength: MAX_WRITE_CHARS },
+      content: { type: 'string', maxLength: MAX_SINGLE_WRITE_CHARS },
     },
     required: ['path', 'content'],
     additionalProperties: false,
@@ -243,11 +245,11 @@ export function createBenchmarkToolHost(root: string): BenchmarkToolHost {
   registry.register(write);
   const append = fileTool(
     'append_file',
-    'Append a UTF-8 chunk to a file, under 6000 characters per call.',
+    `Append a UTF-8 chunk to a file, under ${MAX_SINGLE_WRITE_CHARS} characters per call.`,
     async (args) => {
       const content = stringArg(args, 'content');
-      if (content.length > MAX_WRITE_CHARS)
-        throw new Error(`content is limited to ${MAX_WRITE_CHARS} characters.`);
+      if (content.length > MAX_SINGLE_WRITE_CHARS)
+        throw new Error(`content is limited to ${MAX_SINGLE_WRITE_CHARS} characters.`);
       const target = filePath(args, root);
       fs.mkdirSync(path.dirname(target), { recursive: true });
       fs.appendFileSync(target, content, 'utf8');
@@ -260,7 +262,7 @@ export function createBenchmarkToolHost(root: string): BenchmarkToolHost {
     type: 'object',
     properties: {
       path: { type: 'string' },
-      content: { type: 'string', maxLength: MAX_WRITE_CHARS },
+      content: { type: 'string', maxLength: MAX_SINGLE_WRITE_CHARS },
     },
     required: ['path', 'content'],
     additionalProperties: false,
