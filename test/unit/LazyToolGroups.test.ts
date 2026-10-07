@@ -324,7 +324,7 @@ describe('lazy tool groups', () => {
   it('describes available groups with their registered member names', () => {
     const registry = new ToolRegistry();
     registry.register(makeLoadToolGroupTool());
-    for (const name of ['delete_file', 'move_file']) {
+    for (const name of ['create_directory', 'move_file']) {
       registry.register({
         definition: { type: 'function', function: { name, description: '', parameters: { type: 'object' } } },
         permission: 'read',
@@ -333,7 +333,7 @@ describe('lazy tool groups', () => {
     }
     const description = registry.get('load_tool_group')?.describe?.().function.description;
     expect(description).toContain('files:');
-    expect(description).toContain('files: delete_file, move_file');
+    expect(description).toContain('files: create_directory, move_file');
   });
 
   it('appends the loaded schemas after the existing prefix, leaving it byte-identical', () => {

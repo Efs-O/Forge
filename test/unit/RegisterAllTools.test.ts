@@ -215,7 +215,7 @@ describe('registerAllTools canonical coordinator catalog', () => {
     );
     expect(CORE_TOOL_NAMES).toContain('shell');
     const groups: Record<string, string[]> = {
-      files: ['delete_file', 'move_file', 'create_directory', 'append_file', 'apply_line_edits', 'restore_file'],
+      files: ['move_file', 'create_directory', 'append_file', 'apply_line_edits', 'restore_file'],
       git: ['git_read', 'stage', 'commit', 'create_branch', 'switch_branch'],
       code_intel: ['code_intel', 'rename_symbol', 'apply_code_action', 'format_file', 'search_codebase'],
       memory: ['remember', 'recall', 'list_memories', 'forget'],
@@ -226,6 +226,8 @@ describe('registerAllTools canonical coordinator catalog', () => {
       for (const member of members) expect(lazyGroupForTool(member)).toBe(group);
     }
     expect(lazyGroupForTool('get_system_status')).toBe('system');
+    // Eager: the most-called grouped tool, and the alternative every rm refusal names.
+    expect(lazyGroupForTool('delete_file')).toBeUndefined();
   });
 
   it('advertises generate_image once image_generation is configured', () => {

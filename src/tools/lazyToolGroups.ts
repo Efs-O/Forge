@@ -13,7 +13,11 @@ const LAZY_GROUP_BY_SERVER: ReadonlyMap<string, string> = new Map([['halluscribe
  * manage_jobs 73, notify_user 67, ask_local_agent 56, ask_user 34,
  * tell_live_session 21, list_delegation_targets 14, get_system_status 11.
  * view_image (17) is the exception: it stays in media because it works only on
- * vision models and most calls came from image-review sessions. Other grouped
+ * vision models and most calls came from image-review sessions. delete_file
+ * joined the eager set on 2026-10-07: the most-called grouped tool since 09-30
+ * (79 calls, 25 of 127 sessions), and the alternative every rm / Remove-Item
+ * refusal names, so hiding it made the refusal point at a tool the model could
+ * not see. Other grouped
  * tools each had at most 7 calls. Rare tools stay grouped to avoid paying their
  * schema cost on every conversation.
  */
@@ -67,14 +71,9 @@ const NATIVE_GROUP_BY_TOOL: ReadonlyMap<string, string> = new Map([
     (name) => [name, 'system'] as const,
   ),
   ...['read_notebook', 'edit_notebook_cell'].map((name) => [name, 'notebook'] as const),
-  ...[
-    'delete_file',
-    'move_file',
-    'create_directory',
-    'append_file',
-    'apply_line_edits',
-    'restore_file',
-  ].map((name) => [name, 'files'] as const),
+  ...['move_file', 'create_directory', 'append_file', 'apply_line_edits', 'restore_file'].map(
+    (name) => [name, 'files'] as const,
+  ),
   ...['git_read', 'stage', 'commit', 'create_branch', 'switch_branch'].map(
     (name) => [name, 'git'] as const,
   ),

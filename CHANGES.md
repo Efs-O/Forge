@@ -28,6 +28,8 @@
 - New installs get a five-line agent prompt (be brief, batch calls, stop when done, run the narrowest check, claim only what a tool showed) instead of the 25-line one. On the bench's two log-analysis tasks, the old prompt took 909 s of wall time and the new one averaged 539 s over three runs, with the same results. Existing configs keep their own `system_prompt`.
 - When `web_fetch` truncates a page, it now says how much it showed and suggests `find`.
 - `/init` writes only lasting facts. It writes the build and test gate as one chained command, run only after code changes, and proves a regression test by running it before the fix.
+- `delete_file` is in the default tool list again. It was the most-used grouped tool, and every refused `rm` points the agent to it. Loading the `files` group to reach it meant the whole conversation was read again from scratch.
+- Writing a file with a heredoc (`cat > f <<'EOF'`) is no longer refused because the file's text mentions `rm -rf` or `drop table`. The text is still checked as commands when it goes to a shell (`bash <<EOF`, `ssh host <<EOF`), or when an unquoted heredoc contains `$(` or backticks. A backslash at the end of a line now joins it to the next line, as bash does, so `rm ⏎-rf` is caught.
 
 ### Agent-bus turns nobody watches
 

@@ -77,3 +77,32 @@ describe('shell command classification', () => {
     expect(result.rule?.alternative).toContain('delete_file');
   });
 });
+
+// Found in the 2026-10-07 audit bench: writing a probe test through a heredoc
+// was refused because its text mentioned `drop table`, costing the agent a round.
+const heredocCases: Array<[string, string, string]> = [
+  ['body is data', "cat > t.test.ts <<'EOF'\nconst cases = ['rm -rf /', 'git push --force', 'drop table users'];\nEOF", 'normal'],
+  ['unquoted body without expansion is data', 'cat > notes.txt <<EOF\nrm -rf /\nEOF', 'normal'],
+  ['<<- strips tabs from the terminator', 'cat > f <<-EOF\n\trm -rf /\n\tEOF\nls', 'normal'],
+  ['command after the terminator still counts', "cat > f <<'EOF'\nhello\nEOF\nrm -rf /", 'dangerous'],
+  ['command on the opening line still counts', "cat <<'EOF' > f && rm -rf build\nhello\nEOF", 'dangerous'],
+  ['a body fed to bash is commands', 'bash <<EOF\nrm -rf /\nEOF', 'dangerous'],
+  ['a body fed to sudo sh is commands', "sudo sh <<'EOF'\nrm -rf /\nEOF", 'dangerous'],
+  ['a body fed to ssh is commands', 'ssh host <<EOF\nrm -rf /\nEOF', 'dangerous'],
+  ['an unquoted body expands $(...)', 'cat > f <<EOF\n$(rm -rf /)\nEOF', 'dangerous'],
+  ['a quoted body does not expand', "cat > f <<'EOF'\n$(rm -rf /)\nEOF", 'normal'],
+  ['<<< is a here-string, not a heredoc', 'cat <<< x\nrm -rf /', 'dangerous'],
+  ['<< inside quotes opens nothing', "echo '<<EOF'\nrm -rf /", 'dangerous'],
+  ['an unterminated body runs to the end', "cat > f <<'EOF'\nrm -rf /", 'normal'],
+];
+
+describe('heredoc bodies (bash)', () => {
+  it.each(heredocCases)('%s', (_name, command, expected) => {
+    expect(classifyShellCommand(command, 'bash').classification).toBe(expected);
+  });
+
+  it('treats backslash-newline as a line continuation', () => {
+    expect(classifyShellCommand('rm \\\n-rf build', 'bash').classification).toBe('dangerous');
+    expect(classifyShellCommand('git push \\\n  --force', 'bash').classification).toBe('dangerous');
+  });
+});

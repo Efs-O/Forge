@@ -1,4 +1,5 @@
 import { getBuiltinDenyList, type ShellTokenRule } from './DenyList';
+import { extractHeredocs, feedsHeredocToShell } from './shellHeredoc';
 
 export type ShellClass = 'read_only' | 'normal' | 'dangerous' | 'refused';
 export type ShellKind = 'pwsh' | 'powershell' | 'bash';
@@ -101,7 +102,8 @@ function parseCommand(command: string, shell: ShellKind): ParsedCommand {
     const char = command[i] ?? '';
     const next = command[i + 1] ?? '';
     if (escaped) {
-      token += char;
+      // bash: backslash-newline is a line continuation, not a character.
+      if (char !== '\n') token += char;
       escaped = false;
       continue;
     }
@@ -407,6 +409,9 @@ function nestedShellCommands(command: string, shell: ShellKind): string[] {
 }
 
 export function classifyShellCommand(command: string, shell: ShellKind): ShellClassification {
+  // A here-document body is stdin, not commands, unless a shell reads it or bash expands `$(` in it.
+  const heredocs = shell === 'bash' ? extractHeredocs(command) : { command, bodies: [] };
+  command = heredocs.command;
   const parsed = parseCommand(command, shell);
   const rules = getBuiltinDenyList();
   const downloaders = new Set(['curl', 'wget', 'iwr', 'invoke-webrequest']);
@@ -425,7 +430,13 @@ export function classifyShellCommand(command: string, shell: ShellKind): ShellCl
     if (rule) return { classification: 'refused', rule };
   }
   let strongest: ShellClassification = { classification: 'read_only' };
-  const nestedCommands = nestedShellCommands(command, shell);
+  const shellReadsHeredoc = parsed.statements.some((statement) =>
+    feedsHeredocToShell(statement, baseProgram),
+  );
+  const nestedCommands = [
+    ...heredocs.bodies.filter((body) => shellReadsHeredoc || body.expands).map((body) => body.text),
+    ...nestedShellCommands(command, shell),
+  ];
   for (const nestedCommand of nestedCommands) {
     // A block that only compares `$_` properties stays read-only; any other
     // nested command (a call, an assignment) ranks like a top-level one.
