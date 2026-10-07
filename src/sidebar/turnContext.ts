@@ -41,6 +41,8 @@ export interface TurnContextState {
   userTerminalCommands?: UserTerminalCommand[] | undefined;
   /** Remote chats bound to this conversation; 0 when nothing is listening. */
   remoteChats?: number | undefined;
+  /** Nobody is present: a job run or an unattended agent-bus turn. */
+  unattended?: boolean | undefined;
 }
 
 /**
@@ -51,6 +53,7 @@ export interface TurnContextState {
 function renderTurnContext(state: TurnContextState): string | undefined {
   const parts: string[] = [];
   if (state.activeFile) parts.push(`Active file: ${state.activeFile}`);
+  if (state.unattended) parts.push(UNATTENDED_NOTE);
   const remote = renderRemoteReach(state.remoteChats);
   if (remote) parts.push(remote);
   const userTerminal = renderUserTerminalCommands(state.userTerminalCommands);
@@ -97,6 +100,16 @@ function renderRemoteReach(chats: number | undefined): string | undefined {
     'Do not block a long unattended run on ask_user: it waits with no timeout.'
   );
 }
+
+/**
+ * An unattended turn learned the gate by failing: it tried `rm -rf` on its own
+ * scratch files, was denied, and spent rounds working out the alternative.
+ */
+const UNATTENDED_NOTE =
+  'Unattended: nobody is present this turn. Dangerous commands (recursive deletes, ' +
+  '`git reset --hard`, force push, killing processes) are denied, not sent for approval. ' +
+  'So is delete_file with recursive: true. Remove files you created one by one with ' +
+  'delete_file, several calls in one round.';
 
 /** Newest command always; earlier ones only when they failed. */
 function renderUserTerminalCommands(

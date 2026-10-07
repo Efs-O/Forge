@@ -33,10 +33,16 @@
 - `git_read` is in the default tool list too. It is called as often as `delete_file`, so loading the `git` group just to look at history or a diff cost the same full re-read.
 - The `shell` tool now says that a command with no `cwd` runs in the workspace root. In the audit bench the agent started every command with `cd "<workspace>" &&`, spending tokens on a directory it was already in.
 - Writing a file with a heredoc (`cat > f <<'EOF'`) is no longer refused because the file's text mentions `rm -rf` or `drop table`. The text is still checked as commands when it goes to a shell (`bash <<EOF`, `ssh host <<EOF`), or when an unquoted heredoc contains `$(` or backticks. A backslash at the end of a line now joins it to the next line, as bash does, so `rm ⏎-rf` is caught.
+- The system prompt no longer warns about a nested project directory when the workspace root is the project (it holds `.git` or `package.json`); it says so instead. The warning sent the agent looking for a path prefix that did not exist.
+- A review or audit answer follows the format the user asked for, instead of the one-line-per-finding default.
+- `read_file` says to pass `numbered: true` when the answer will cite line numbers, so citing a finding no longer takes a second search for its line.
+- The `shell` tool says its `rg` is the same one the search tools use. With bash on Windows, it also says bash's `/tmp` is not the `/tmp` node or Windows programs see.
+- Two system-prompt lines that repeated guidance Forge already adds when it applies (the fallback tool-call format, and the user's terminal commands) are gone, as is a machine-specific path in `search_code`'s description.
 
 ### Agent-bus turns nobody watches
 
 - `forge.sh say --unattended` runs the turn the way a job runs: a destructive command is refused at once instead of opening an approval dialog that nobody will answer, and other confirmations are approved. The refusal tells the agent to carry on another way. The chat is attended again after that turn.
+- An unattended turn is told up front that destructive commands and a recursive `delete_file` will be refused, so it cleans up file by file instead of learning the rule from a refusal. `ask_user` is not offered, because nobody can answer it; a call to it is refused with that reason.
 
 ## 0.16.91
 

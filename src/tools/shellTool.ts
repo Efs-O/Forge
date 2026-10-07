@@ -212,8 +212,11 @@ function definition(windows: boolean, shell: ShellKind): ToolDefinition {
     function: {
       name: 'shell',
       description:
-        `Run one command line in ${name}${windows ? ' on Windows' : ''}; rg is available.` +
-        ' Search or filter many files in ONE command (rg, globs, pipes), not one call per file. Destructive commands require approval; unsafe commands are refused.',
+        `Run one command line in ${name}${windows ? ' on Windows' : ''}; rg on PATH is the binary search_code and find_files use.` +
+        ' Search or filter many files in ONE command (rg, globs, pipes), not one call per file. Destructive commands require approval; unsafe commands are refused.' +
+        (windows && shell === 'bash'
+          ? " bash's /tmp is not where node or other Windows programs look for /tmp: put scratch files in a workspace-relative directory."
+          : ''),
       parameters: {
         type: 'object',
         additionalProperties: false,
@@ -349,7 +352,7 @@ export function makeShellTool(options: ShellToolOptions = {}): RegisteredTool {
       function: {
         name: 'shell',
         description:
-          'Run one command line in bash (PowerShell on Windows without Git for Windows); rg is available. Search or filter many files in ONE command (rg, globs, pipes), not one call per file. Destructive commands require approval; unsafe commands are refused.',
+          'Run one command line in bash (PowerShell on Windows without Git for Windows); rg on PATH is the binary search_code and find_files use. Search or filter many files in ONE command (rg, globs, pipes), not one call per file. Destructive commands require approval; unsafe commands are refused.',
         parameters: {
           type: 'object',
           additionalProperties: false,

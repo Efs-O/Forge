@@ -6,6 +6,8 @@ import { localDate } from '../util/localClock';
 export interface TemplateContext {
   workspaceName?: string;
   workspaceRoot?: string;
+  /** Set when the root holds `.git` or `package.json`, i.e. no nested project. */
+  workspaceIsProjectRoot?: string;
   activeFile?: string;
   selection?: string;
   customInstructions?: string;

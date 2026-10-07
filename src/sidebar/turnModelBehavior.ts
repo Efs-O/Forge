@@ -4,6 +4,8 @@
  * the visible text, and the template context every request is rendered with.
  */
 
+import * as fs from 'fs';
+import * as path from 'path';
 import type { ForgeConfig, ModelConfig } from '../config/types';
 import type { RuntimeModelCapabilities } from '../backend/ModelCapabilities';
 import type { ForgeInstructionsLoader } from '../llm/ForgeInstructionsLoader';
@@ -51,8 +53,20 @@ export function buildTemplateContext(
   // it below -- that lookup is semantically load-bearing and keeps its place.
   // See docs/plans/PROMPT_PREFIX_STABILITY_PLAN.md.
   if (config.custom_instructions) ctx['customInstructions'] = config.custom_instructions;
-  if (forgeLoader?.root) ctx['workspaceRoot'] = forgeLoader.root;
+  if (forgeLoader?.root) {
+    ctx['workspaceRoot'] = forgeLoader.root;
+    if (isProjectRoot(forgeLoader.root)) ctx['workspaceIsProjectRoot'] = 'true';
+  }
   const projectInstructions = forgeLoader?.instructionsFor(activeFile);
   if (projectInstructions) ctx['forgeInstructions'] = projectInstructions;
   return ctx;
+}
+
+/**
+ * The nested-directory warning in the system prompt is for a workspace that
+ * holds a repo below its root. Said to a workspace that IS the project, it sent
+ * the model looking for a prefix that does not exist.
+ */
+function isProjectRoot(root: string): boolean {
+  return ['.git', 'package.json'].some((marker) => fs.existsSync(path.join(root, marker)));
 }

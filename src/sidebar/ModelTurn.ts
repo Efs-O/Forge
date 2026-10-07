@@ -41,6 +41,7 @@ import { terminalCommandTracker } from '../tools/TerminalCommandTracker';
 import { formatPromptCacheStats, readPromptCacheStats } from '../llm/promptCacheStats';
 import { getLogger } from '../util/logger';
 import { buildVisionRefusals, filterVisionGated, visionGatedNames } from './visionGate';
+import { unattendedConversations, withUnattendedRefusals } from './unattendedConversations';
 import {
   isTurnCutOffError,
   ROUND_CAP_INCOMPLETE_PREFIX,
@@ -205,9 +206,11 @@ export async function runModelTurn(
   // registry and a model that calls it blind would ship base64 to a backend
   // with no projector. Refuse it at dispatch, with the reason.
   const visionGated = visionGatedNames(ctx.toolRegistry);
-  const unavailableTools = isVisionModel
-    ? undefined
-    : buildVisionRefusals(ctx.toolRegistry, model.name);
+  const unattended = unattendedConversations.has(conv.id);
+  const unavailableTools = withUnattendedRefusals(
+    isVisionModel ? undefined : buildVisionRefusals(ctx.toolRegistry, model.name),
+    unattended,
+  );
   // Rebuilt on every round rather than snapshotted once per turn: a lazy tool
   // group activates mid-turn via `load_tool_group`, and its schemas have to
   // reach the request that immediately follows.
@@ -222,7 +225,9 @@ export async function runModelTurn(
       ctx.toolRegistry.definitions(allowed),
       isVisionModel,
       visionGated,
-    ).filter((definition) => !hiddenLazyTools.has(definition.function.name));
+    ).filter(
+      ({ function: { name } }) => !hiddenLazyTools.has(name) && !unavailableTools?.has(name),
+    );
     return budget.filterDefinitions(advertised);
   };
   const nativeTools = runtimeCaps?.likelySupportsTools !== false;
@@ -261,6 +266,7 @@ export async function runModelTurn(
     // mid-turn must not rewrite the prompt near the head and cost this turn's
     // own tool rounds.
     ...(remoteChats > 0 ? { remoteChats } : {}),
+    ...(unattended ? { unattended } : {}),
   };
   freezeTurnContext(conv.messages, turnContext);
 

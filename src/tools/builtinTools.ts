@@ -76,7 +76,8 @@ export function makeReadFileTool(): RegisteredTool {
             numbered: {
               type: 'boolean',
               description:
-                'Prefix each line with its number as "  12|text", e.g. for apply_line_edits. ' +
+                'Prefix each line with its number as "  12|text". Pass it when your answer will ' +
+                'cite line numbers (a review, an audit) or for apply_line_edits. ' +
                 'The line starts right after the first "|": never copy the prefix into ' +
                 'old_str or expected_lines.',
             },

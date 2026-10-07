@@ -247,8 +247,7 @@ export function makeSearchCodeTool(
               description:
                 'Glob pattern of files to include, e.g. "**/*.ts". Defaults to "**/*". ' +
                 'Relative patterns are anchored at the workspace root. An absolute path, ' +
-                'folder, or glob can target outside the workspace, e.g. ' +
-                '"N:\\Strata\\serve\\server.py" or "N:\\Strata\\serve\\**\\*.py".',
+                'folder, or glob can target outside the workspace.',
             },
             max_results: {
               type: 'integer',
