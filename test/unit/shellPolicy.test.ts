@@ -87,6 +87,11 @@ const cases: Array<[string, string, 'read_only' | 'normal' | 'dangerous' | 'refu
   // A global git option nobody listed still must not hide the subcommand.
   ['git --exec-path=/x reset --hard', 'bash', 'dangerous'],
   ['git --no-advice push --force', 'bash', 'dangerous'],
+  ['git stash drop', 'bash', 'dangerous'],
+  ['git stash clear', 'bash', 'dangerous'],
+  // The stash rule must check the subcommand: a path named `drop` is not a stash.
+  ['git show drop', 'bash', 'read_only'],
+  ['git add drop', 'bash', 'normal'],
   ['taskkill /PID 123', 'pwsh', 'dangerous'],
   ['git checkout -- file.txt', 'bash', 'dangerous'],
   ['format D:', 'pwsh', 'refused'],

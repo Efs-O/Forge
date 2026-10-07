@@ -33,6 +33,7 @@
 - `git_read` is in the default tool list too. It is called as often as `delete_file`, so loading the `git` group just to look at history or a diff cost the same full re-read.
 - The `shell` tool now says that a command with no `cwd` runs in the workspace root. In the audit bench the agent started every command with `cd "<workspace>" &&`, spending tokens on a directory it was already in.
 - Writing a file with a heredoc (`cat > f <<'EOF'`) is no longer refused because the file's text mentions `rm -rf` or `drop table`. The text is still checked as commands when it goes to a shell (`bash <<EOF`, `ssh host <<EOF`), or when an unquoted heredoc contains `$(` or backticks. A backslash at the end of a line now joins it to the next line, as bash does, so `rm ⏎-rf` is caught.
+- `git show drop`, `git add drop` and any other git command whose second word is `drop` or `clear` are no longer treated as `git stash drop`. The rule now checks that the subcommand is `stash`.
 - The system prompt no longer warns about a nested project directory when the workspace root is the project (it holds `.git` or `package.json`); it says so instead. The warning sent the agent looking for a path prefix that did not exist.
 - A review or audit answer follows the format the user asked for, instead of the one-line-per-finding default.
 - `read_file` says to pass `numbered: true` when the answer will cite line numbers, so citing a finding no longer takes a second search for its line.

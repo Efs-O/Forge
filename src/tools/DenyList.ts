@@ -131,9 +131,10 @@ export function getBuiltinDenyList(): ShellTokenRule[] {
         }),
     ),
     dangerous('git stash drop/clear', 'Inspect the stash before removing it.', (t) =>
-      commandIndexes(t, ['git']).some((i) =>
-        ['drop', 'clear'].includes(lower(t.slice(i + 1, i + 3))[1] ?? ''),
-      ),
+      commandIndexes(t, ['git']).some((i) => {
+        const [subcommand, action] = lower(t.slice(i + 1, i + 3));
+        return subcommand === 'stash' && ['drop', 'clear'].includes(action ?? '');
+      }),
     ),
     dangerous('git filter-branch rewrites history', 'Use a reviewed git history migration.', (t) =>
       commandIndexes(t, ['git']).some((i) => t[i + 1]?.toLowerCase() === 'filter-branch'),
