@@ -25,6 +25,7 @@
 - `git_read` output over 30K characters is capped like `shell` output, so a whole-repo diff no longer floods the context.
 - On Windows the default shell is now bash (Git Bash) when Git for Windows is installed, and the tool's description names the active shell. Local models write bash: on the bench, every failed shell call was bash syntax run under pwsh. Set `permissions.exec.shell: pwsh` to keep PowerShell.
 - When a PowerShell command fails and it was written in bash syntax (`sort -rn`, `wc`, a bare `*.log` glob, a `for … in` loop), the result says so and says to rerun it with `shell: "bash"`. On the bench, models spent two rounds per task finding this out.
+- New installs get a five-line agent prompt (be brief, batch calls, stop when done, run the narrowest check, claim only what a tool showed) instead of the 25-line one. On the bench's two log-analysis tasks, the old prompt took 909 s of wall time and the new one averaged 539 s over three runs, with the same results. Existing configs keep their own `system_prompt`.
 - When `web_fetch` truncates a page, it now says how much it showed and suggests `find`.
 - `/init` writes only lasting facts. It writes the build and test gate as one chained command, run only after code changes, and proves a regression test by running it before the fix.
 

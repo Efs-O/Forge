@@ -72,7 +72,8 @@ describe.skipIf(!TEST_BASH)('shell bash execution', () => {
       await expect(running).resolves.toContain('exit');
     } finally {
       vscode.workspace.workspaceFolders?.splice(0, Infinity, ...previous);
-      fs.rmSync(root, { recursive: true, force: true });
+      // A just-killed child can hold the folder as its cwd for a moment (EPERM on Windows).
+      fs.rmSync(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 200 });
     }
   }, 15_000);
 });
