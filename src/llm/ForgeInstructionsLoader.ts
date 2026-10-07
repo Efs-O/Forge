@@ -33,7 +33,7 @@ Fill in the blanks below; delete any rule that does not fit this project.
 
 ## Before calling a change done
 - After the last code edit, run the full gate above in one call and report its exact result. A subset of tests is not the gate. A task that changed no code (a report, an answer) needs no gate.
-- A new regression test must fail without the fix: write and run it before the fix, then fix. Do not revert a fix to prove it.
+- When you change behaviour, a new regression test must fail without the fix: write and run it before the fix, then fix. Do not revert a fix to prove it.
 - A fake of an external program returns what the real one returns (binary output, real error text), never what your code expects.
 - For stateful, queued or retried work, test failure, retry, restart and duplicate delivery, not only the happy path.
 - Keep defects you introduced separate from ones that were already there.

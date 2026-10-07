@@ -342,6 +342,50 @@ proxy capture. One run per cell, Forge then OpenCode per task.
 - Buried also spent a round on an unasked `FORGE.md` edit, prompted by the
   `/init` file's "add durable conventions … here" line.
 
+### Isolation runs and replays (2026-10-07): no single rule; ship Bb + clean
+
+Three variants on top of B + pt, one run each. **Bb**: the final-answer line
+capped at 8 lines, with the reading of an ambiguous request stated first.
+**Bc**: no `read_file numbered`/`apply_line_edits` line, no
+`search_codebase`, no "search related code, callers… before reviewing or
+editing". **factsinit**: the starter `FORGE.md` without "How to work
+efficiently" and "Before calling a change done".
+
+| Task | B + pt | Bb | factsinit | Bc | OpenCode 0.6 |
+|---|---|---|---|---|---|
+| buried | 258 s, 10.3K | 318 s, 12.0K | 178 s, 5.8K | **107 s, 3.2K** | 165 s, 5.2K |
+| review | 106 s, 4.3K | 116 s, 4.8K | 116 s, 4.1K | 127 s, 5.4K | 73 s, 2.7K |
+| ambiguous | 127 s, 4.6K | 106 s, 3.5K | **fail** (no reading stated), 5.0K | 136 s, 5.3K | 92 s, 2.4K |
+
+Only buried moved, and buried's variance is wide (Bb's 318 s is the same
+task). To get past one-run noise, three replays sent single review rounds
+straight to Strata, swapping one request part at a time (grader
+`replay-r2.mjs`, `replay-final.mjs`, `replay-mid.mjs`):
+
+- **Round 2 (diff in hand), 3 reps:** Forge's system prompt generated 176–331
+  tokens per cell, OpenCode's 1,294–1,529. Tools and the bench's
+  "claude says" wrapper made no difference. Forge's prompt makes each step
+  *shorter*, not longer.
+- **Final answer (all evidence in hand), 3 reps:** Forge ~2,280 tokens;
+  OpenCode's prompt ~1,870; Forge plus OpenCode's "fewer than 4 lines" ~1,790;
+  Forge without its "report how it was verified" rules ~2,330. The answer is
+  long because the transcript holds more findings, not because of wording.
+- **The step where Forge ran node to prove the off-by-one:** Forge 4/4 ran
+  code, without "Do not claim…" 3/4, without the verify rules 3/3, factsinit
+  2/3, no `FORGE.md` at all 1/3, OpenCode 0/4. No one rule switches it; the
+  whole prompt adds up to "prove it". The model's own preserved thinking cited
+  the starter's "A new regression test must fail without the fix" during a
+  review that changes nothing.
+
+What the extra review cost buys: Forge's review proved the off-by-one by running
+it and found a real defect OpenCode missed (a clock that goes backwards keeps
+entries forever), at three times the length and with two weak findings.
+That is thoroughness, which this plan weighs as highly as speed, so it stays.
+
+**Shipped:** `execute.njk` = Bb with Bc's removals; the starter's regression
+rule now reads "When you change behaviour, …". Next: every task three times,
+Forge only, to confirm the buried gain.
+
 ## Runs
 
 - Three runs per task per variant, alternating which variant goes first.
