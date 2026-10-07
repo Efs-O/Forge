@@ -110,6 +110,15 @@ export function rgScopeArgs(scope: SearchCodeScope): string[] {
   return args;
 }
 
+/** Build the shared scope for an existing named path (file or directory). */
+export function namedPathScope(named: string, workspaceRoot: string): SearchCodeScope {
+  return {
+    target: named,
+    explicitPath: true,
+    applyExcludes: isDirectory(path.resolve(workspaceRoot, named)),
+  };
+}
+
 /**
  * Resolve the ripgrep root and optional glob for search_code. Relative patterns
  * remain workspace-scoped; absolute paths explicitly name an external target.
@@ -118,13 +127,7 @@ export function resolveSearchCodeScope(include: string, workspaceRoot: string): 
   if (!path.isAbsolute(include)) {
     const named = namedExistingPath(include, workspaceRoot);
     return named
-      ? {
-          target: named,
-          explicitPath: true,
-          // A named FILE is the one case the exclusions must not apply to; a
-          // named DIRECTORY keeps them, because that is where the noise lives.
-          applyExcludes: isDirectory(path.resolve(workspaceRoot, named)),
-        }
+      ? namedPathScope(named, workspaceRoot)
       : { target: '.', glob: include, explicitPath: false, applyExcludes: true };
   }
 

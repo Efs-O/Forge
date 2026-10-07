@@ -15,9 +15,12 @@ import { makeFindFilesTool } from '../../src/tools/dirTools';
  */
 let scriptDir: string;
 
-function stubRipgrep(lines: string[]) {
+function stubRipgrep(lines: string[], captureArgs = false) {
   const file = path.join(scriptDir, `stub-${Math.random().toString(36).slice(2)}.js`);
-  fs.writeFileSync(file, `process.stdout.write(${JSON.stringify(lines.join('\n'))});`, 'utf8');
+  const output = captureArgs
+    ? 'JSON.stringify(process.argv.slice(2))'
+    : JSON.stringify(lines.join('\n'));
+  fs.writeFileSync(file, `process.stdout.write(${output});`, 'utf8');
   return () => ({ command: process.execPath, argsPrefix: [file], candidates: [] as string[] });
 }
 
@@ -44,6 +47,15 @@ describe('find_files backed by ripgrep', () => {
     const tool = makeFindFilesTool(stubRipgrep(['a.ts', 'b.ts', 'c.ts', 'd.ts']));
     const out = await tool.handler({ pattern: '**/*.ts', max_results: 2 }, undefined);
     expect(String(out).split('\n')).toHaveLength(2);
+  });
+
+  it('keeps search exclusions when the named path is a directory', async () => {
+    const tool = makeFindFilesTool(stubRipgrep([], true));
+    const out = await tool.handler({ pattern: 'src' }, undefined);
+    const args = JSON.parse(String(out)) as string[];
+    for (const dir of ['.git', 'node_modules', 'dist', 'out']) {
+      expect(args).toContain(`!**/${dir}/**`);
+    }
   });
 
   it('explains the anchoring when nothing matches', async () => {

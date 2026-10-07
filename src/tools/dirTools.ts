@@ -6,8 +6,8 @@ import { resolveRipgrep, type RipgrepResolution } from './RipgrepResolver';
 import { capResultText } from './resultCap';
 import { capSnippetLine, MAX_SEARCH_RESULT_CHARS } from './searchSnippet';
 import {
-  SEARCH_EXCLUDES,
   namedExistingPath,
+  namedPathScope,
   resolveSearchCodeScope,
   rgScopeArgs,
 } from './searchScope';
@@ -105,9 +105,10 @@ async function listWorkspaceFiles(
   // all; ignore files still filter them, which is the behaviour that keeps
   // node_modules out.
   const named = namedExistingPath(pattern, folder.uri.fsPath);
-  const args = named
-    ? ['--files', '--hidden', '--no-ignore-vcs', named]
-    : ['--files', '--hidden', '--glob', pattern, ...SEARCH_EXCLUDES.flatMap((g) => ['--glob', g])];
+  const scope = named
+    ? namedPathScope(named, folder.uri.fsPath)
+    : { target: '.', glob: pattern, explicitPath: false, applyExcludes: true };
+  const args = ['--files', '--hidden', ...rgScopeArgs(scope), scope.target];
 
   return new Promise<string[]>((resolve, reject) => {
     const found: string[] = [];

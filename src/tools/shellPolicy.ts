@@ -112,9 +112,16 @@ function parseCommand(command: string, shell: ShellKind): ParsedCommand {
     }
     if (quote === 'double') {
       if (char === '"') quote = undefined;
-      else if ((char === '$' && next === '(') || (shell === 'bash' && char === '`'))
+      else if (
+        shell === 'bash' &&
+        char === '\\' &&
+        (next === '$' || next === '`' || next === '"' || next === '\\' || next === '\n')
+      ) {
+        if (next === '\n') i += 1;
+        else escaped = true;
+      } else if ((char === '$' && next === '(') || (shell === 'bash' && char === '`')) {
         disqualifiesReadOnly = true;
-      else token += char;
+      } else token += char;
       continue;
     }
     if (quote === 'backtick') {
@@ -139,6 +146,10 @@ function parseCommand(command: string, shell: ShellKind): ParsedCommand {
       } else quote = 'backtick';
       continue;
     }
+    if (shell === 'bash' && char === '\\') {
+      escaped = true;
+      continue;
+    }
     if (char === '$' && next === '(') {
       disqualifiesReadOnly = true;
       token += '$(';
@@ -149,6 +160,10 @@ function parseCommand(command: string, shell: ShellKind): ParsedCommand {
       if (next === '&') {
         pushStatement('other');
         i += 1;
+        continue;
+      }
+      if (shell === 'bash') {
+        pushStatement('other');
         continue;
       }
       disqualifiesReadOnly = true;
