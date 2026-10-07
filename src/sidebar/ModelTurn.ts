@@ -51,6 +51,7 @@ import {
 import { canUseThinkingKwargs, isProjectRoot, shouldStripThinking } from './turnModelBehavior';
 import type { AgentProgressEvent } from './AgentProgress';
 import type { LiveStreamMeter } from './LiveStreamMeter';
+import { withWriteChunkLimit, writeChunkLimit } from '../tools/writeChunking';
 
 const log = getLogger();
 
@@ -211,6 +212,9 @@ export async function runModelTurn(
     isVisionModel ? undefined : buildVisionRefusals(ctx.toolRegistry, model.name),
     unattended,
   );
+  // Config-derived, never per round: a per-round value would change the tool
+  // list mid-turn and cost a cold prefill each time.
+  const writeLimit = writeChunkLimit(model, config.llama_server, config.auto_compact);
   // Rebuilt on every round rather than snapshotted once per turn: a lazy tool
   // group activates mid-turn via `load_tool_group`, and its schemas have to
   // reach the request that immediately follows.
@@ -228,7 +232,7 @@ export async function runModelTurn(
     ).filter(
       ({ function: { name } }) => !hiddenLazyTools.has(name) && !unavailableTools?.has(name),
     );
-    return budget.filterDefinitions(advertised);
+    return budget.filterDefinitions(withWriteChunkLimit(advertised, writeLimit));
   };
   const nativeTools = runtimeCaps?.likelySupportsTools !== false;
   if (buildToolDefinitions().length > 0 && !nativeTools) {
@@ -285,6 +289,7 @@ export async function runModelTurn(
       onToolsOffered: (names) => ctx.onToolsOffered?.(conv.id, names),
       signal: ctrl.signal,
       maxRounds,
+      writeChunkLimit: writeLimit,
       nativeTools,
       stripAllTools: useStrip || model.strip_tools === true,
       includeUsage: true,

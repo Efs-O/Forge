@@ -16,6 +16,8 @@ export interface ToolCallingLoopOptions {
   signal: AbortSignal;
   apiKey?: string;
   maxRounds: number;
+  /** The model's `writeChunkLimit`; truncation recovery stays under it. */
+  writeChunkLimit?: number;
   maxOutputTokens?: number;
   nativeTools: boolean;
   stripAllTools?: boolean;

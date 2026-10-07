@@ -9,7 +9,7 @@
  */
 
 import type { ChatCompletionRequest, ChatMessage } from '../llm/types';
-import { CHUNKED_WRITE_ADVICE, MAX_SINGLE_WRITE_CHARS } from '../tools/writeChunking';
+import { MAX_SINGLE_WRITE_CHARS, chunkedWriteAdvice } from '../tools/writeChunking';
 import {
   ToolCallTruncatedError,
   isToolCallTruncatedError,
@@ -46,6 +46,8 @@ export function asTruncation(err: unknown): ToolCallTruncatedError | undefined {
 export function truncationGuidance(
   err: ToolCallTruncatedError,
   outputRoom: number | undefined,
+  /** The model's `writeChunkLimit`, so the retry never exceeds what the tools advertise. */
+  writeLimit: number = MAX_SINGLE_WRITE_CHARS,
 ): string {
   const target = err.toolName ? `Your ${err.toolName} call` : 'Your last tool call';
   // A generic "use smaller chunks" loses to the user's own earlier "write the
@@ -56,8 +58,8 @@ export function truncationGuidance(
   // to the write. ~2 chars per token for escaped code, minus slack.
   const ceiling =
     outputRoom !== undefined && outputRoom > 0
-      ? Math.max(1000, Math.min(MAX_SINGLE_WRITE_CHARS, Math.floor(outputRoom * 2) - 1000))
-      : MAX_SINGLE_WRITE_CHARS;
+      ? Math.max(1000, Math.min(writeLimit, Math.floor(outputRoom * 2) - 1000))
+      : writeLimit;
   return (
     `${target} was cut off after ${err.approxBytes} bytes of arguments and was NOT executed — ` +
     `nothing was written. This is an output-size limit, not a formatting mistake, and repeating ` +
@@ -65,7 +67,7 @@ export function truncationGuidance(
     `HARD LIMIT for your next call: the "content" argument must be at most ${ceiling} characters. ` +
     `This overrides any earlier instruction to write the whole file in one go — the file still ` +
     `ends up complete, just written across several calls.\n` +
-    `Do this now: ${CHUNKED_WRITE_ADVICE} Keep thinking short; it spends the same budget as the write.`
+    `Do this now: ${chunkedWriteAdvice(ceiling)} Keep thinking short; it spends the same budget as the write.`
   );
 }
 

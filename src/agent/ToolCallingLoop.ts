@@ -200,7 +200,10 @@ export async function runToolCallingLoop(
           approxBytes: truncation.approxBytes,
         });
         options.messages.push(
-          ...truncationRecoveryMessages(truncation, truncationGuidance(truncation, outputRoom)),
+          ...truncationRecoveryMessages(
+            truncation,
+            truncationGuidance(truncation, outputRoom, options.writeChunkLimit),
+          ),
         );
         options.onMessagesChanged?.();
         continue;
