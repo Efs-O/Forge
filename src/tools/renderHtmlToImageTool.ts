@@ -7,15 +7,19 @@ import { writeFileAtomicSync } from '../util/atomicWrite';
 import type { UserNotificationService } from '../sidebar/UserNotificationService';
 import { resolveRealWorkspacePath } from '../util/WorkspacePaths';
 import { pngDimensions } from './browser/BrowserSessionManager';
+import {
+  MAX_VIEWPORT_PX,
+  MIN_VIEWPORT_PX,
+  checkHtmlBytes,
+  readHtmlFile,
+  readViewportPx,
+} from './renderHtml/htmlInput';
+import { DEFAULT_PREVIEW_WAIT_MS, MAX_PREVIEW_WAIT_MS, runPreview } from './renderHtml/previewMode';
 import { renderPng } from './renderHtml/renderEngine';
-import type { RegisteredTool, ToolHandlerContext } from './ToolRegistry';
+import type { RegisteredTool, ToolHandlerContext, ToolHandlerResult } from './ToolRegistry';
 
-/** Guards against a pathological input rather than a plausible one. */
-const MAX_HTML_BYTES = 10 * 1024 * 1024;
 /** A PNG past this is already enormous; refusing beats shipping it to Telegram. */
 const MAX_PNG_BYTES = 10 * 1024 * 1024;
-const MIN_VIEWPORT_PX = 1;
-const MAX_VIEWPORT_PX = 8_192;
 /**
  * Ceiling for a `full_page` capture. Telegram's `sendPhoto` rejects an aspect
  * ratio past 20, and a runaway layout would otherwise produce a PNG Chromium
@@ -54,23 +58,31 @@ export function makeRenderHtmlToImageTool(deps: RenderHtmlDeps): RegisteredTool 
       function: {
         name: 'render_html_to_image',
         description:
-          'Render an HTML/CSS/SVG page to a PNG image and send it to the remote chat watching ' +
-          'this turn. Use for text-heavy graphics: posters, cards, invites, diagrams, ' +
-          'infographics, or anything needing exact text, fonts, and layout. JavaScript and ' +
-          'external resources are not supported — inline everything (system fonts, base64 ' +
-          'images). Use generate_image for photographs and painterly scenes.',
+          'Render an HTML page. mode "preview": check that a page you wrote (canvas, WebGL, ' +
+          'three.js, animation, any UI) actually renders before you call it done — runs its ' +
+          'scripts, returns page errors and a screenshot to you only; nothing is saved or sent. ' +
+          'mode "image" (default): render an HTML/CSS/SVG page to a PNG and send it to the ' +
+          'remote chat watching this turn — for posters, cards, invites, diagrams, infographics; ' +
+          'image mode runs no JavaScript and loads nothing external, so inline everything ' +
+          '(system fonts, base64 images). Use generate_image for photographs and painterly scenes.',
         parameters: {
           type: 'object',
           properties: {
+            mode: {
+              type: 'string',
+              enum: ['image', 'preview'],
+              description:
+                'image (default): save a PNG and send it to the remote chat. preview: screenshot + page errors for you, nothing saved or sent; requires path.',
+            },
             html: {
               type: 'string',
               description:
-                'Inline HTML — a full document or a fragment. Provide exactly one of html or path.',
+                'Inline HTML — a full document or a fragment. Image mode only. Provide exactly one of html or path.',
             },
             path: {
               type: 'string',
               description:
-                'Workspace-relative .html file to render. Provide exactly one of html or path.',
+                'Workspace-relative .html file to render (resolves against the workspace root). Provide exactly one of html or path; preview mode requires path. Relative assets in the page (./tex.png) do not load.',
             },
             width: {
               type: 'integer',
@@ -83,7 +95,11 @@ export function makeRenderHtmlToImageTool(deps: RenderHtmlDeps): RegisteredTool 
             full_page: {
               type: 'boolean',
               description:
-                'If true, the height is the content height (the poster case) instead of clipping to height. Default false.',
+                'Image mode only. If true, the height is the content height (the poster case) instead of clipping to height. Default false.',
+            },
+            wait_ms: {
+              type: 'integer',
+              description: `Preview only: wait after the page loads before the screenshot, so scripts can draw (default ${DEFAULT_PREVIEW_WAIT_MS}). 0–${MAX_PREVIEW_WAIT_MS}.`,
             },
           },
           required: [],
@@ -91,8 +107,10 @@ export function makeRenderHtmlToImageTool(deps: RenderHtmlDeps): RegisteredTool 
         },
       },
     },
-    // Writes a PNG into the workspace AND sends it to api.telegram.org, so a
-    // profile with fetch off must not be able to push files out through it.
+    // Image mode writes a PNG into the workspace AND sends it to
+    // api.telegram.org, so a profile with fetch off must not be able to push
+    // files out through it. Preview writes nothing, but fetches CDN scripts —
+    // fetch-class traffic under the same gate.
     permission: 'fetch',
     additionalPermissions: ['write'],
     // The output path is minted inside the handler (`<timestamp>-<slug>.png`),
@@ -100,9 +118,35 @@ export function makeRenderHtmlToImageTool(deps: RenderHtmlDeps): RegisteredTool 
     // wrong file. The handler calls beforeMutate itself — that is the real
     // checkpoint mechanism (same reasoning as generate_image).
     mutation: { paths: () => [], showDiff: false },
-    handler: (args, context) => runRender(deps, args, context),
+    handler: (args, context) => dispatch(deps, args, context),
   };
   return tool;
+}
+
+async function dispatch(
+  deps: RenderHtmlDeps,
+  args: Record<string, unknown>,
+  context: ToolHandlerContext | undefined,
+): Promise<ToolHandlerResult> {
+  const mode = args['mode'] ?? 'image';
+  if (mode === 'preview') {
+    return runPreview(args, context, {
+      channel: deps.getConfig?.().browser?.channel ?? DEFAULT_BROWSER_CHANNEL,
+      baseTimeoutMs: deps.renderTimeoutMs ?? RENDER_TIMEOUT_MS,
+      now: () => Date.now(),
+    });
+  }
+  if (mode !== 'image') {
+    throw new Error(
+      `render_html_to_image: mode must be "image" or "preview", not ${JSON.stringify(mode)}.`,
+    );
+  }
+  if (args['wait_ms'] !== undefined) {
+    throw new Error(
+      'render_html_to_image: wait_ms applies to mode "preview" only; image mode runs no scripts.',
+    );
+  }
+  return runRender(deps, args, context);
 }
 
 async function runRender(
@@ -132,33 +176,9 @@ async function runRender(
   let html: string;
   if (hasHtml) {
     html = rawHtml as string;
-    if (Buffer.byteLength(html, 'utf8') > MAX_HTML_BYTES) {
-      throw new Error(
-        `render_html_to_image: html is ${Buffer.byteLength(html, 'utf8').toLocaleString()} bytes; the limit is ${MAX_HTML_BYTES.toLocaleString()}.`,
-      );
-    }
+    checkHtmlBytes(html, 'html');
   } else {
-    const file = await resolveRealWorkspacePath(rawPath as string);
-    const stat = await fs.stat(file);
-    if (!stat.isFile()) {
-      throw new Error(`render_html_to_image: not a file: ${String(rawPath)}`);
-    }
-    if (stat.size > MAX_HTML_BYTES) {
-      throw new Error(
-        `render_html_to_image: html file is ${stat.size.toLocaleString()} bytes; the limit is ${MAX_HTML_BYTES.toLocaleString()}.`,
-      );
-    }
-    html = await fs.readFile(file, 'utf8');
-    // Re-check after the read: `stat` is a snapshot, and a file that grew (or
-    // was swapped for a symlink target) between `stat` and `readFile` would
-    // otherwise slip past the cap. The byte length of the decoded string is what
-    // Chrome will actually be handed.
-    const readBytes = Buffer.byteLength(html, 'utf8');
-    if (readBytes > MAX_HTML_BYTES) {
-      throw new Error(
-        `render_html_to_image: html file grew to ${readBytes.toLocaleString()} bytes while being read; the limit is ${MAX_HTML_BYTES.toLocaleString()}.`,
-      );
-    }
+    html = await readHtmlFile(rawPath as string);
   }
 
   // Refuse a spent budget BEFORE spending anything. The budget is shared with
@@ -320,19 +340,6 @@ async function releaseClaim(absolute: string): Promise<void> {
   } catch {
     // Best-effort: a leftover reservation blocks only its own second-stamped name.
   }
-}
-
-function readViewportPx(value: unknown, fallback: number, name: string): number {
-  if (value === undefined) return fallback;
-  if (typeof value !== 'number' || !Number.isInteger(value)) {
-    throw new Error(`render_html_to_image: ${name} must be an integer.`);
-  }
-  if (value < MIN_VIEWPORT_PX || value > MAX_VIEWPORT_PX) {
-    throw new Error(
-      `render_html_to_image: ${name} is ${value}; the range is ${MIN_VIEWPORT_PX}–${MAX_VIEWPORT_PX}.`,
-    );
-  }
-  return value;
 }
 
 function checkPng(png: Buffer, fullPage: boolean): void {

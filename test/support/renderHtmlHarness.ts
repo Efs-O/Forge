@@ -19,6 +19,17 @@ export interface RenderFake {
   launchCalls: Array<{ channel: string; headless: boolean; args: string[] }>;
   contextCalls: Array<Record<string, unknown>>;
   routeSelectors: string[];
+  /** The handlers registered with each route, so a test can feed it requests. */
+  routeHandlers: Array<(route: FakeRoute) => void>;
+  /** `waitForTimeout` arguments (preview's settle wait). */
+  waitCalls: number[];
+  /** Emitted as `pageerror` / console `error` events during setContent. */
+  pageErrors: string[];
+  consoleErrors: string[];
+  /** Requests the fake page issues through the routes during setContent. */
+  pageRequests: Array<{ url: string; method: string }>;
+  /** What the routes decided for each of `pageRequests`. */
+  routeOutcomes: Array<{ url: string; outcome: 'continue' | 'abort' }>;
   setContentCalls: string[];
   gotoCalls: number;
   screenshotCalls: Array<Record<string, unknown>>;
@@ -43,10 +54,22 @@ export interface RenderFake {
   screenshotError: string | undefined;
 }
 
+export interface FakeRoute {
+  request: () => { url: () => string; method: () => string };
+  continue: () => Promise<void>;
+  abort: () => Promise<void>;
+}
+
 export const renderFake: RenderFake = {
   launchCalls: [],
   contextCalls: [],
   routeSelectors: [],
+  routeHandlers: [],
+  waitCalls: [],
+  pageErrors: [],
+  consoleErrors: [],
+  pageRequests: [],
+  routeOutcomes: [],
   setContentCalls: [],
   gotoCalls: 0,
   screenshotCalls: [],
@@ -66,6 +89,12 @@ export function resetRenderFake(): void {
   renderFake.launchCalls = [];
   renderFake.contextCalls = [];
   renderFake.routeSelectors = [];
+  renderFake.routeHandlers = [];
+  renderFake.waitCalls = [];
+  renderFake.pageErrors = [];
+  renderFake.consoleErrors = [];
+  renderFake.pageRequests = [];
+  renderFake.routeOutcomes = [];
   renderFake.setContentCalls = [];
   renderFake.gotoCalls = 0;
   renderFake.screenshotCalls = [];
@@ -98,13 +127,43 @@ export function fakePlaywright(): {
           version: () => 'fake',
           newContext: async (contextOptions: Record<string, unknown>) => {
             renderFake.contextCalls.push(contextOptions);
+            const listeners = new Map<string, Array<(payload: unknown) => void>>();
+            const emit = (event: string, payload: unknown): void => {
+              for (const listener of listeners.get(event) ?? []) listener(payload);
+            };
             return {
-              route: async (selector: string) => {
+              route: async (selector: string, handler?: (route: FakeRoute) => void) => {
                 renderFake.routeSelectors.push(selector);
+                if (handler) renderFake.routeHandlers.push(handler);
               },
               newPage: async () => ({
+                on: (event: string, listener: (payload: unknown) => void) => {
+                  listeners.set(event, [...(listeners.get(event) ?? []), listener]);
+                },
                 setContent: async (html: string) => {
                   renderFake.setContentCalls.push(html);
+                  for (const request of renderFake.pageRequests) {
+                    for (const handler of renderFake.routeHandlers) {
+                      handler({
+                        request: () => ({ url: () => request.url, method: () => request.method }),
+                        continue: async () => {
+                          renderFake.routeOutcomes.push({ url: request.url, outcome: 'continue' });
+                        },
+                        abort: async () => {
+                          renderFake.routeOutcomes.push({ url: request.url, outcome: 'abort' });
+                        },
+                      });
+                    }
+                  }
+                  for (const message of renderFake.pageErrors) emit('pageerror', new Error(message));
+                  for (const text of renderFake.consoleErrors) {
+                    emit('console', { type: () => 'error', text: () => text });
+                  }
+                  // A non-error console line must not be reported as an error.
+                  emit('console', { type: () => 'log', text: () => 'scene ready' });
+                },
+                waitForTimeout: async (ms: number) => {
+                  renderFake.waitCalls.push(ms);
                 },
                 // The tool measures the document before a full_page capture.
                 // The real page evaluates in the page's own context; here it

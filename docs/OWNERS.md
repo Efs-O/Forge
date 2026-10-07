@@ -417,8 +417,10 @@ overlaps with an existing owner, extend the owner instead.
 | Plan rendering + `PLAN_GUIDANCE`           | `src/tools/planTools.ts`              |
 | `view_image` tool                          | `src/tools/imageTool.ts`              |
 | `send_file` tool (workspace + screenshot-dir delivery) | `src/tools/sendFileTool.ts` |
-| `render_html_to_image` tool (schema, naming, delivery) | `src/tools/renderHtmlToImageTool.ts` |
-| HTML→PNG render engine (launch hardening, abort/timeout cleanup) | `src/tools/renderHtml/renderEngine.ts` |
+| `render_html_to_image` tool (schema, mode dispatch, image-mode naming and delivery) | `src/tools/renderHtmlToImageTool.ts` |
+| HTML→PNG render engine (launch hardening, preview CDN allowlist, abort/timeout cleanup) | `src/tools/renderHtml/renderEngine.ts` |
+| `render_html_to_image` input validation (HTML size cap, workspace file read, viewport bounds) | `src/tools/renderHtml/htmlInput.ts` |
+| `render_html_to_image` preview mode (result text, vision-gated image part; saves and sends nothing) | `src/tools/renderHtml/previewMode.ts` |
 | Code-point length counting (schema/Telegram char limits) | `src/util/codePoints.ts` |
 | `generate_image` tool + save/deliver       | `src/tools/imageGeneration/generateImageTool.ts` |
 | Cloud `/v1/images/generations` backend     | `src/tools/imageGeneration/cloudImageBackend.ts` |

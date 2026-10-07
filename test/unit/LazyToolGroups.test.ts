@@ -188,7 +188,6 @@ describe('lazy tool groups', () => {
       lazyGroupForTool('desktop_capture'),
       lazyGroupForTool('view_image'),
       lazyGroupForTool('send_file'),
-      lazyGroupForTool('render_html_to_image'),
       lazyGroupForTool('get_editor_context'),
       lazyGroupForTool('install_llamacpp'),
       lazyGroupForTool('get_power_info'),
@@ -200,7 +199,6 @@ describe('lazy tool groups', () => {
       lazyGroupForTool('search_sessions'),
     ]).toEqual([
       'computer_use',
-      'media',
       'media',
       'media',
       'editor_ui',
@@ -226,19 +224,20 @@ describe('lazy tool groups', () => {
     expect(hiddenLazyToolNames('conv-a')).not.toContain('ask_user');
     expect(lazyGroupForTool('get_system_status')).toBe('system');
     expect(hiddenLazyToolNames('conv-a')).toContain('get_system_status');
-    // send_file and render_html_to_image are in media, and media is never
-    // vision-gated: a model with no projector can still deliver a file it never
-    // rendered, and rendering HTML needs no vision at all. Only computer_use
-    // hides for a non-vision model, so both must be hidden/visible identically
-    // in both states.
+    // send_file is in media, and media is never vision-gated: a model with no
+    // projector can still deliver a file it never rendered. Only computer_use
+    // hides for a non-vision model, so it must be hidden/visible identically in
+    // both states. render_html_to_image is eager — its preview mode is how the
+    // agent checks a page it wrote, and a hidden tool is never called
+    // (RENDER_PREVIEW_PLAN.md) — so no group or vision state hides it.
+    expect(lazyGroupForTool('render_html_to_image')).toBeUndefined();
     for (const isVisionModel of [true, false]) {
-      for (const name of ['send_file', 'render_html_to_image']) {
-        expect(hiddenLazyToolNames('conv-a', new Set(), isVisionModel)).toContain(name);
-      }
+      expect(hiddenLazyToolNames('conv-a', new Set(), isVisionModel)).toContain('send_file');
+      expect(hiddenLazyToolNames('conv-a', new Set(), isVisionModel)).not.toContain(
+        'render_html_to_image',
+      );
       activateLazyGroup('conv-a', 'media');
-      for (const name of ['send_file', 'render_html_to_image']) {
-        expect(hiddenLazyToolNames('conv-a', new Set(), isVisionModel)).not.toContain(name);
-      }
+      expect(hiddenLazyToolNames('conv-a', new Set(), isVisionModel)).not.toContain('send_file');
       deactivateLazyGroups('conv-a');
     }
     const loader = registry

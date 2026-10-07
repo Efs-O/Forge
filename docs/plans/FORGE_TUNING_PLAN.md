@@ -64,6 +64,50 @@ Quality comes first: no item here may trade a found bug for speed.
 - One probe file / running existing tests early (behaviour change).
 - Per-finding scoring and more reps in the grader (bench tooling, not Forge).
 
+## Open checklist (2026-10-07)
+
+### Before installing 0.17 in the user's main window
+
+- [ ] Add `tool_groups: { eager: [agents] }` under `defaults` in
+      `.forge/config.yaml`. `SHELL_TOOL_AND_CORE_GROUP_PLAN.md` grouped
+      `ask_live_session`, `tell_live_session`, `ask_local_agent`,
+      `list_delegation_targets`, `manage_jobs` and `notify_user` on the
+      assumption this key would keep them eager in real use (264 / 100 / 95 /
+      56 historical calls); the config never got it. Without it, every remote
+      conversation pays one extra round plus a full re-prefill to load the
+      group. Add it only after 0.17 is installed: 0.16 may reject the unknown key.
+- [ ] Leave the bench config without it, so the bench keeps the lean first
+      request.
+- [x] Fix the header comment in `src/tools/lazyToolGroups.ts`: it still says the
+      high-use tools "stay eager", but the same change moved them into `agents`.
+      Say they are grouped and kept eager through `tool_groups.eager`.
+
+### Grouping rule: a hidden tool's zero calls is not evidence
+
+The "10+ calls stays eager" rule in `lazyToolGroups.ts` cannot promote a tool
+that was never visible: its call count is zero by construction. The
+`render_html_to_image` case showed it — grouped, and described as not
+supporting JavaScript, so a JS page could never reach it. Cheapest first:
+
+- [ ] **Count calls only while visible.** The audit divides calls by sessions
+      whose `tools_offered` row lists the tool. A tool never offered reports
+      "unmeasured", not 0, and an unmeasured tool cannot be cited to keep it
+      grouped. Write this into the rule comment and the tool-audit method.
+- [ ] **Count workarounds.** An audit script maps shell commands to the hidden
+      tool they stand in for (`npm i three` / `puppeteer` / `playwright` → page
+      preview; `git commit` → `commit`; …). A bench run installed `three` into
+      Node and counted meshes to "check" a page — a homemade preview, because no
+      real one was visible. A tool that is often worked around is promoted with
+      zero calls.
+- [ ] **Purpose lines for groups.** `load_tool_group` describes groups by member
+      names only, except `halluscribe`. Add a short job description per group
+      (`GROUP_PURPOSE` in `src/tools/toolGroupTools.ts`), so a grouped tool is
+      found by what it does. A few tokens per turn.
+- [ ] **Exclude self-ruled-out tools.** A tool whose own description says it
+      does not apply to the case (e.g. "JavaScript not supported") is not
+      counted for that case; its count says nothing about demand. The audit
+      notes such descriptions instead of counting them.
+
 ## Out of scope
 
 Anything that reduces verification or caps rounds.

@@ -8,11 +8,14 @@ const LAZY_GROUP_BY_SERVER: ReadonlyMap<string, string> = new Map([['halluscribe
 
 /**
  * Membership follows the 2026-09-30 audit of 15,676 Qwen calls across 86+
- * sessions: tools called at least 10 times stay eager because first use costs
- * a full conversation re-read (~100 s at 70K). Counts: ask_live_session 152,
- * manage_jobs 73, notify_user 67, ask_local_agent 56, ask_user 34,
- * tell_live_session 21, list_delegation_targets 14, get_system_status 11.
- * view_image (17) is the exception: it stays in media because it works only on
+ * sessions: first use of a grouped tool costs a full conversation re-read
+ * (~100 s at 70K). Counts: ask_live_session 152, manage_jobs 73, notify_user
+ * 67, ask_local_agent 56, ask_user 34, tell_live_session 21,
+ * list_delegation_targets 14, get_system_status 11. The agent tools among them
+ * are grouped anyway, in `agents`, because they matter to remote-control
+ * conversations, not coding ones: a profile that uses them keeps them eager
+ * through `tool_groups.eager: [agents]` instead of every coding turn paying
+ * their schemas. ask_user is ungrouped. view_image (17) is the exception: it stays in media because it works only on
  * vision models and most calls came from image-review sessions. delete_file
  * joined the eager set on 2026-10-07: the most-called grouped tool since 09-30
  * (79 calls, 25 of 127 sessions), and the alternative every rm / Remove-Item
@@ -21,6 +24,13 @@ const LAZY_GROUP_BY_SERVER: ReadonlyMap<string, string> = new Map([['halluscribe
  * as delete_file, and the read side of every git question. Other grouped
  * tools each had at most 7 calls. Rare tools stay grouped to avoid paying their
  * schema cost on every conversation.
+ *
+ * A grouped tool's call count measures demand only while it was visible: a
+ * tool hidden in a group, or one whose description rules itself out for the
+ * case, scores zero by construction. render_html_to_image left media on
+ * 2026-10-07 for that reason: its preview mode is how the agent checks a page
+ * it wrote, and the tool had been both hidden and described as unable to run
+ * JavaScript, so its zero said nothing (RENDER_PREVIEW_PLAN.md).
  */
 const NATIVE_GROUP_BY_TOOL: ReadonlyMap<string, string> = new Map([
   ...[
@@ -49,14 +59,9 @@ const NATIVE_GROUP_BY_TOOL: ReadonlyMap<string, string> = new Map([
     'desktop_type',
     'desktop_press',
   ].map((name) => [name, 'computer_use'] as const),
-  ...[
-    'view_image',
-    'view_video',
-    'generate_image',
-    'image_search',
-    'send_file',
-    'render_html_to_image',
-  ].map((name) => [name, 'media'] as const),
+  ...['view_image', 'view_video', 'generate_image', 'image_search', 'send_file'].map(
+    (name) => [name, 'media'] as const,
+  ),
   ...[
     'get_editor_context',
     'replace_selection',

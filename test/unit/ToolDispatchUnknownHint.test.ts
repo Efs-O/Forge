@@ -75,8 +75,10 @@ function createDispatch(registry: ToolRegistry): ToolDispatch {
   );
 }
 
+// generate_image stands in for any tool hidden in a lazy group: it is in
+// media. (render_html_to_image was the example until it went eager.)
 function registerMedia(registry: ToolRegistry, imageHandler = vi.fn(async () => 'image')): void {
-  registry.register(tool('render_html_to_image', {}, imageHandler));
+  registry.register(tool('generate_image', {}, imageHandler));
   registry.register(tool('load_tool_group', { advertise: hasAvailableLazyGroup }));
 }
 
@@ -123,10 +125,10 @@ describe('unknown tool name hints', () => {
     const handler = vi.fn(async () => 'rendered');
     registerMedia(registry, handler);
 
-    const result = await dispatchUnknown({ name: 'render_html', registry });
+    const result = await dispatchUnknown({ name: 'generate_im', registry });
 
     expect(result).toBe(
-      'Error: unknown tool "render_html"; group "media" is unloaded; call load_tool_group with "media" first to use "render_html_to_image"',
+      'Error: unknown tool "generate_im"; group "media" is unloaded; call load_tool_group with "media" first to use "generate_image"',
     );
     expect(handler).not.toHaveBeenCalled();
   });
@@ -136,18 +138,18 @@ describe('unknown tool name hints', () => {
     registerMedia(registry);
     activateLazyGroup('conv-a', 'media');
 
-    const result = await dispatchUnknown({ name: 'render_html', registry });
+    const result = await dispatchUnknown({ name: 'generate_im', registry });
 
-    expect(result).toBe('Error: unknown tool "render_html"; did you mean "render_html_to_image"?');
+    expect(result).toBe('Error: unknown tool "generate_im"; did you mean "generate_image"?');
   });
 
   it('keeps the bare refusal for ambiguous prefixes', async () => {
     const registry = new ToolRegistry();
     registerMedia(registry);
-    registry.register(tool('render_html_to_text'));
+    registry.register(tool('generate_image_hd'));
 
-    expect(await dispatchUnknown({ name: 'render_html', registry })).toBe(
-      'Error: unknown tool "render_html"',
+    expect(await dispatchUnknown({ name: 'generate_im', registry })).toBe(
+      'Error: unknown tool "generate_im"',
     );
   });
 
@@ -205,8 +207,8 @@ describe('unknown tool name hints', () => {
     registerMedia(registry);
     const budget = new ToolBudget({ tool_call_limits: { load_tool_group: 0 } });
 
-    expect(await dispatchUnknown({ name: 'render_html', registry, budget })).toBe(
-      'Error: unknown tool "render_html"',
+    expect(await dispatchUnknown({ name: 'generate_im', registry, budget })).toBe(
+      'Error: unknown tool "generate_im"',
     );
   });
 
