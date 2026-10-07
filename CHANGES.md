@@ -39,6 +39,15 @@
 - A review or audit answer follows the format the user asked for, instead of the one-line-per-finding default.
 - `read_file` says to pass `numbered: true` when the answer will cite line numbers, so citing a finding no longer takes a second search for its line.
 - The `shell` tool says its `rg` is the same one the search tools use. With bash on Windows, it also says bash's `/tmp` is not the `/tmp` node or Windows programs see.
+- `search_code`, `read_tool_result`, `shell` and background command output limits now scale with the model's context window instead of being fixed. A 200K single-slot model sees up to 200 search lines (was 50), 20,000-character result pages (was 6,000), 50,000 characters of shell output (was 30,000) and 30,000 characters of background output (was 16,000). Small, multi-slot and cloud models, and configs with `auto_compact` off, keep the old limits. Tool definitions are the same for every model, so switching models does not reread the conversation.
+- When `search_code` drops matches to stay under its limit, the result now says how many lines and files it left out, and how many more matches each cut file had.
+- `append_file` is in the default tool list. `write_file` tells the model to use it for large files, and loading the `files` group to reach it cost a round in every large-file run on the bench.
+- A multi-edit `edit_file` call now reports `Applied N edits`, not `Replaced N occurrences`, which read as one string replaced N times.
+- When one edit in a multi-edit `edit_file` call does not match, the error now says which of the other edits matched. None of them are written, so the model resends the call with the one edit fixed instead of rereading the whole region.
+- When `old_str` differs from the file partway through a line (`6.283` where the file has `6.28`), the error now names the closest line and the character where they differ, so the model does not need a search to find the line.
+- Compaction summaries have a seventh section, `Reference`, which holds the exact data the next step needs: signatures, identifiers, paths with line numbers, command results.
+- Tool groups the model loaded stay loaded after compaction. Before, compaction unloaded them, and loading one again meant rereading the whole conversation. Clearing or deleting a conversation still unloads them.
+- When a conversation is too long to summarise in the model's context window (a long, tool-heavy turn on a small window), compaction now says so and gives both sizes. It used to fail with an error that did not say why.
 - Two system-prompt lines that repeated guidance Forge already adds when it applies (the fallback tool-call format, and the user's terminal commands) are gone, as is a machine-specific path in `search_code`'s description.
 
 ### Agent-bus turns nobody watches

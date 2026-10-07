@@ -102,8 +102,44 @@ export function describeEditMiss(content: string, oldStr: string): string {
         'that region with read_file and copy it verbatim.'
       );
     }
+    const closest = closestLine(lines, firstLine);
+    if (closest) return closest;
   }
   return ' Re-read the file with read_file and copy the target text verbatim.';
+}
+
+/**
+ * The line sharing the longest prefix with old_str's first line, and where the
+ * two part. A one-character slip mid-line (`6.283` for `6.28`) defeats both the
+ * exact and the substring search above, and a bare "re-read the file" then
+ * costs a grep round just to find the line again.
+ */
+function closestLine(lines: string[], firstLine: string): string | undefined {
+  let best = -1;
+  let bestLength = 0;
+  for (const [index, line] of lines.entries()) {
+    const trimmed = line.trim();
+    let shared = 0;
+    while (
+      shared < trimmed.length &&
+      shared < firstLine.length &&
+      trimmed[shared] === firstLine[shared]
+    )
+      shared++;
+    if (shared > bestLength) {
+      best = index;
+      bestLength = shared;
+    }
+  }
+  // Below this a shared prefix is boilerplate (`const `, `  if (`), not a sighting.
+  if (best === -1 || bestLength < Math.max(12, firstLine.length / 3)) return undefined;
+  const text = lines[best]!.trim();
+  const from = Math.max(0, bestLength - 20);
+  return (
+    ` The closest line is ${best + 1}; old_str's first line departs from it at character ` +
+    `${bestLength + 1}: the file has "${text.slice(from, bestLength + 40)}" where old_str has ` +
+    `"${firstLine.slice(from, bestLength + 40)}". Copy that line from the file verbatim.`
+  );
 }
 
 /**

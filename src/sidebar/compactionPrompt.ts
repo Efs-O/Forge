@@ -11,6 +11,7 @@
 
 import type { ChatMessage } from '../llm/types';
 import type { PlanItem } from './sessionTypes';
+import { CompactionFailure } from './compactionFailure';
 
 /** Small direct-call defaults; the service supplies percentage budgets. */
 const TOOL_RESULT_MAX_CHARS = 2000;
@@ -104,8 +105,13 @@ function capSummarySource(
     used += entry.length + 2;
   });
   if (used + 120 > maxChars) {
-    throw new Error(
-      'Compaction source cannot retain all user decisions and assistant findings within the estimated prompt budget.',
+    // Typed so the attempt record says budget-refusal, not unknown: a long
+    // tool-heavy turn on a small window lands here, and that is a size limit.
+    throw new CompactionFailure(
+      'budget-refusal',
+      `The conversation's user requests and assistant replies alone need ~${used} characters, ` +
+        `above the ~${maxChars}-character summary prompt this model's context window allows; ` +
+        'previous context kept. Start a new chat, or use a model with a larger context window.',
     );
   }
   const toolIndexes = formatted

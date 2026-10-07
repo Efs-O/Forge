@@ -1,10 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import {
-  applyEol,
-  describeEditMiss,
-  dominantEol,
-  findEditMatch,
-} from '../../src/tools/editMatch';
+import { applyEol, describeEditMiss, dominantEol, findEditMatch } from '../../src/tools/editMatch';
 
 describe('findEditMatch', () => {
   it('finds an exact match and reports its own length', () => {
@@ -27,7 +22,8 @@ describe('findEditMatch', () => {
   });
 
   it('matches across a file with mixed endings — the README case', () => {
-    const content = 'intro\r\n\r\nTo run the tests:\r\n\r\n```bash\nnpm test\n```\r\n\r\n## Next\r\n';
+    const content =
+      'intro\r\n\r\nTo run the tests:\r\n\r\n```bash\nnpm test\n```\r\n\r\n## Next\r\n';
     const match = findEditMatch(content, 'To run the tests:\n\n```bash\nnpm test\n```');
     expect(match).toBeDefined();
     expect(content.slice(match!.index, match!.index + match!.length)).toContain('npm test');
@@ -46,8 +42,7 @@ describe('findEditMatch', () => {
   it('splices correctly using the returned original offsets', () => {
     const content = 'a\r\nb\r\nc\r\n';
     const match = findEditMatch(content, 'b\nc')!;
-    const updated =
-      content.slice(0, match.index) + 'X' + content.slice(match.index + match.length);
+    const updated = content.slice(0, match.index) + 'X' + content.slice(match.index + match.length);
     expect(updated).toBe('a\r\nX\r\n');
   });
 });
@@ -91,6 +86,17 @@ describe('describeEditMiss', () => {
     expect(describeEditMiss(content, 'const value')).toContain('const value = 1;');
   });
 
+  it('names the closest line and where a mid-line slip departs from it', () => {
+    const content = 'koi.push({ cx:POND.cx, ph:rf(0,6.28), y:2 });\n';
+    const hint = describeEditMiss(content, 'koi.push({ cx:POND.cx, ph:rf(0,6.283), y:2 });');
+    expect(hint).toContain('closest line is 1');
+    expect(hint).toContain('character 36');
+  });
+
+  it('does not call a shared boilerplate prefix the closest line', () => {
+    expect(describeEditMiss('const alpha = 1;\n', 'const omega = 2;')).not.toContain('closest');
+  });
+
   it('falls back to a re-read instruction with no usable anchor', () => {
     expect(describeEditMiss('abc\n', 'zz')).toContain('read_file');
   });
@@ -119,9 +125,7 @@ describe('describeEditMiss — the uniform indent shift', () => {
   });
 
   it('still blames a later line when the content genuinely differs', () => {
-    expect(describeEditMiss(yaml, '  num_ctx: 100000\n  n_batch: 4096')).toContain(
-      'a later line',
-    );
+    expect(describeEditMiss(yaml, '  num_ctx: 100000\n  n_batch: 4096')).toContain('a later line');
   });
 
   it('says nothing about indentation for a block that matches outright', () => {

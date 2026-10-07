@@ -114,6 +114,16 @@ is not wrong on a large model.
   reads as "one string replaced N times". Report
   `Applied N edits to <path>` instead (single edit: unchanged
   `Replaced in <path>`). Update any test that pins the old text.
+- **A failed batch hides which edits were fine.** `edits[]` is atomic, so one
+  bad `old_str` discards the rest, and the error named only the failing index.
+  The wl1 run's call #11 (edit 2 of 4 missed) answered with a read plus an
+  `apply_line_edits` rewrite of the whole region. The error now lists which
+  other edits matched and which also missed, so the model resends one fix.
+- **A mid-line slip got no location.** Call #34's single-line `old_str` had
+  `6.283` where the file had `6.28`; neither the exact first-line nor the
+  substring hint fires, so the model spent a `grep` round to find the line.
+  `describeEditMiss` now names the line with the longest shared prefix (at least
+  12 characters and a third of the line) and the character where they part.
 
 ### 6. Compaction on 0.17
 
@@ -208,5 +218,11 @@ moving the threshold cannot orphan spill files.
 - The summary prompt names seven headings including `Reference` and asks for
   the data Next depends on; tests updated. Compaction no longer clears loaded
   lazy groups (unit-tested); clearing/deleting a conversation still does.
+- A failed multi-edit `edit_file` names the other edits that matched; a
+  mid-line `old_str` slip names the closest line and the departing character.
+  Unit-tested, including a boilerplate-prefix negative.
+- When the user requests and assistant replies alone overflow the summary
+  prompt (a long tool-heavy turn on a small window — the 24K pagoda chat), the
+  attempt is a typed `budget-refusal` naming both sizes, not `unknown`.
 - `docs/OWNERS.md` has the new row; `CHANGES.md` has a bullet.
 - `npm run ci` is green.

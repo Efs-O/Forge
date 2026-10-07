@@ -61,6 +61,23 @@ describe('every file-writing tool honours extra_file_roots', () => {
     expect(fs.readFileSync(file, 'utf8')).toBe('first second');
   });
 
+  it('names which other edits of a failed batch matched', async () => {
+    const file = path.join(extra, 'partial-batch.txt');
+    fs.writeFileSync(file, 'alpha beta gamma');
+    await expect(
+      makeEditFileTool(roots).handler({
+        path: file,
+        edits: [
+          { old_str: 'alpha', new_str: 'a' },
+          { old_str: 'BETA', new_str: 'b' },
+          { old_str: 'gamma', new_str: 'g' },
+          { old_str: 'delta', new_str: 'd' },
+        ],
+      }),
+    ).rejects.toThrow(/\(edit 2 of 4\).*edit\(s\) 1, 3 matched; edit\(s\) 4 also did not match/su);
+    expect(fs.readFileSync(file, 'utf8')).toBe('alpha beta gamma');
+  });
+
   it('keeps the single-edit result unchanged', async () => {
     const file = path.join(extra, 'single-edit.txt');
     fs.writeFileSync(file, 'before');

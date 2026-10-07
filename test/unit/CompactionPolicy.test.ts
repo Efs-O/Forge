@@ -63,7 +63,15 @@ describe('percentage compaction policy', () => {
       ),
       { role: 'assistant', content: 'Next: fix F2 and rerun its concurrency test.' },
     ];
-    const prompt = buildSummaryPrompt('test local time', undefined, messages, '', '', undefined, budget);
+    const prompt = buildSummaryPrompt(
+      'test local time',
+      undefined,
+      messages,
+      '',
+      '',
+      undefined,
+      budget,
+    );
     expect(prompt).toContain('commit abc123 causes two Strata starts');
     expect(prompt).toContain('Next: fix F2');
     expect(prompt).toContain('tool results omitted for space');
@@ -95,7 +103,12 @@ describe('percentage compaction policy', () => {
         summaryTargetTokens: 1_000,
         summaryCeilingTokens: 1_250,
       }),
-    ).toThrow(/cannot retain all user decisions and assistant findings/u);
+    ).toThrow(
+      expect.objectContaining({
+        category: 'budget-refusal',
+        message: expect.stringMatching(/user requests and assistant replies alone need/u),
+      }),
+    );
   });
 
   it('refuses an oversized visible summary instead of cutting off findings or Next', () => {

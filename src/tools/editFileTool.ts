@@ -145,7 +145,8 @@ export function makeEditFileTool(extraRoots: () => readonly string[] = () => [])
           throw new Error(
             `edit_file: old_str not found in file${which} — the text must match exactly, ` +
               'apart from line endings, which are ignored. No changes were written.' +
-              describeEditMiss(updated, edit.oldStr),
+              describeEditMiss(updated, edit.oldStr) +
+              describeOtherEdits(updated, edits, index),
           );
         }
         updated =
@@ -160,4 +161,29 @@ export function makeEditFileTool(extraRoots: () => readonly string[] = () => [])
         : `Applied ${edits.length} edits to ${suppliedPath}`;
     },
   };
+}
+
+/**
+ * Names the batch's other edits that would have matched. The batch is atomic, so
+ * one miss discards them all, and without this the model cannot tell one bad
+ * anchor from four: it re-reads the whole region rather than fixing one edit.
+ * Edits before the miss were checked against the text as earlier edits left it;
+ * later ones against the text at the miss, so this is a guide, not a promise.
+ */
+function describeOtherEdits(content: string, edits: StringEdit[], failed: number): string {
+  if (edits.length === 1) return '';
+  const matched: number[] = [];
+  const missed: number[] = [];
+  for (const [index, edit] of edits.entries()) {
+    if (index === failed) continue;
+    if (index < failed || findEditMatch(content, edit.oldStr)) matched.push(index + 1);
+    else missed.push(index + 1);
+  }
+  const parts: string[] = [];
+  if (matched.length > 0) parts.push(`edit(s) ${matched.join(', ')} matched`);
+  if (missed.length > 0) parts.push(`edit(s) ${missed.join(', ')} also did not match`);
+  return (
+    ` Of the other edits in this call, ${parts.join('; ')}. Re-send the call with the ` +
+    'failing edit(s) corrected — the matched ones were not written either.'
+  );
 }
