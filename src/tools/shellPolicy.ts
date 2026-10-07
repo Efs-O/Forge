@@ -1,5 +1,6 @@
 import { getBuiltinDenyList, type ShellTokenRule } from './DenyList';
 import { extractHeredocs, feedsHeredocToShell } from './shellHeredoc';
+import { baseProgram, gitCommandTokens } from './shellCommandTokens';
 
 export type ShellClass = 'read_only' | 'normal' | 'dangerous' | 'refused';
 export type ShellKind = 'pwsh' | 'powershell' | 'bash';
@@ -204,10 +205,6 @@ function parseCommand(command: string, shell: ShellKind): ParsedCommand {
   };
 }
 
-function baseProgram(value: string): string {
-  return (value.split(/[\\/]/u).pop() ?? value).replace(/\.(exe|cmd|bat)$/iu, '').toLowerCase();
-}
-
 function isReadOnly(tokens: readonly string[], shell: ShellKind): boolean {
   if (tokens.length === 0) return true;
   const program = baseProgram(tokens[0] ?? '');
@@ -217,7 +214,9 @@ function isReadOnly(tokens: readonly string[], shell: ShellKind): boolean {
       return args.length === 1 && args[0] === '--version';
     if (program === 'git') {
       if (!gitArgsReadOnly(tokens.slice(1))) return false;
-      const [subcommand, ...rest] = args;
+      const [subcommand, ...rest] = gitCommandTokens(tokens)
+        .slice(1)
+        .map((token) => token.toLowerCase());
       if (
         [
           'status',
@@ -430,9 +429,7 @@ export function classifyShellCommand(command: string, shell: ShellKind): ShellCl
     if (rule) return { classification: 'refused', rule };
   }
   let strongest: ShellClassification = { classification: 'read_only' };
-  const shellReadsHeredoc = parsed.statements.some((statement) =>
-    feedsHeredocToShell(statement, baseProgram),
-  );
+  const shellReadsHeredoc = parsed.statements.some((statement) => feedsHeredocToShell(statement));
   const nestedCommands = [
     ...heredocs.bodies.filter((body) => shellReadsHeredoc || body.expands).map((body) => body.text),
     ...nestedShellCommands(command, shell),

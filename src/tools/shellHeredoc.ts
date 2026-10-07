@@ -1,3 +1,5 @@
+import { baseProgram } from './shellCommandTokens';
+
 /**
  * Bash here-documents for `shellPolicy`: a body is the text after the line that
  * opens it, up to its delimiter line. It is stdin for the command, not a
@@ -33,10 +35,7 @@ const HEREDOC_RUNNERS = new Set([
 ]);
 
 /** True when a statement hands its stdin to a shell (`bash <<EOF`, `sudo sh <<EOF`, `ssh host <<EOF`). */
-export function feedsHeredocToShell(
-  statement: readonly string[],
-  baseProgram: (token: string) => string,
-): boolean {
+export function feedsHeredocToShell(statement: readonly string[]): boolean {
   return statement.some((token) => HEREDOC_RUNNERS.has(baseProgram(token)));
 }
 

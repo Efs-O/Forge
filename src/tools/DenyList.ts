@@ -1,5 +1,7 @@
 /** Whole-token destructive and refused shell rules. */
 
+import { baseProgram, gitCommandTokens } from './shellCommandTokens';
+
 export interface ShellTokenRule {
   match(tokens: readonly string[]): boolean;
   description: string;
@@ -15,7 +17,7 @@ function commandIndexes(tokens: readonly string[], names: readonly string[]): nu
   let index = 0;
   while (index < normalized.length && PREFIXES.has(normalized[index] ?? '')) index += 1;
   if (normalized[index] === '&') index += 1;
-  const program = (normalized[index] ?? '').replace(/\.(cmd|exe|bat)$/u, '');
+  const program = baseProgram(tokens[index] ?? '');
   if (names.includes(program)) return [index];
   if (program === 'git' && names.includes(normalized[index + 1] ?? '')) return [index + 1];
   return [];
@@ -134,7 +136,7 @@ export function getBuiltinDenyList(): ShellTokenRule[] {
       ),
     ),
     dangerous('git filter-branch rewrites history', 'Use a reviewed git history migration.', (t) =>
-      lower(t).includes('filter-branch'),
+      commandIndexes(t, ['git']).some((i) => t[i + 1]?.toLowerCase() === 'filter-branch'),
     ),
     dangerous(
       'git reflog expire removes recovery history',
@@ -144,16 +146,20 @@ export function getBuiltinDenyList(): ShellTokenRule[] {
           (i) => lower(t.slice(i + 1, i + 3)).join(' ') === 'reflog expire',
         ),
     ),
-    dangerous(
-      'SQL DROP',
-      'Use a reviewed migration with a backup.',
-      (t) =>
-        t.some((token) => /\bdrop\s+(table|database|schema)\b/iu.test(token)) ||
-        lower(t).some(
-          (word, i) =>
-            word === 'drop' && ['table', 'database', 'schema'].includes(lower(t)[i + 1] ?? ''),
-        ),
-    ),
+    dangerous('SQL DROP', 'Use a reviewed migration with a backup.', (t) => {
+      const sqlStart = /^drop\s+(?:table|database|schema)\b/iu;
+      const objectTypes = ['table', 'database', 'schema'];
+      const isSplitStatement = (words: readonly string[], index: number): boolean =>
+        words[index]?.toLowerCase() === 'drop' &&
+        objectTypes.includes(words[index + 1]?.toLowerCase() ?? '');
+      if (isSplitStatement(t, 0)) return true;
+      const clients = ['psql', 'sqlite3', 'mysql', 'sqlcmd', 'invoke-sqlcmd'];
+      return commandIndexes(t, clients).some((index) =>
+        t
+          .slice(index + 1)
+          .some((arg, offset) => sqlStart.test(arg) || isSplitStatement(t, index + 1 + offset)),
+      );
+    }),
     dangerous('recursive Remove-Item', 'Use delete_file for a specific path.', (t) =>
       commandIndexes(t, ['remove-item', 'ri', 'rm']).some(
         (i) => lower(t.slice(i + 1)).includes('-recurse') || lower(t.slice(i + 1)).includes('-r'),
@@ -211,5 +217,8 @@ export function getBuiltinDenyList(): ShellTokenRule[] {
             v === '|' && ['sh', 'bash', 'iex', 'invoke-expression'].includes(lower(t)[i + 1] ?? ''),
         ),
     ),
-  ];
+  ].map((rule) => ({
+    ...rule,
+    match: (tokens: readonly string[]) => rule.match(gitCommandTokens(tokens)),
+  }));
 }

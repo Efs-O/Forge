@@ -375,6 +375,7 @@ overlaps with an existing owner, extend the owner instead.
 | list_directory + size/age formatting       | `src/tools/listDirectoryTool.ts`      |
 | `shell` tool (spawn, approval, background)  | `src/tools/shellTool.ts`              |
 | Shell command classification (read-only/normal/dangerous/refused) | `src/tools/shellPolicy.ts` |
+| Shell program names and Git global-option tokens | `src/tools/shellCommandTokens.ts` |
 | Bash heredoc bodies split out before shell classification | `src/tools/shellHeredoc.ts` |
 | Shell/git output cap + spill files          | `src/tools/shellOutput.ts`            |
 | Exec child-process helpers                 | `src/tools/execHelpers.ts`            |
