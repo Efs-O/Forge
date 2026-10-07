@@ -111,6 +111,7 @@ overlaps with an existing owner, extend the owner instead.
 | Diff computation + unified-diff parsing              | `src/sidebar/DiffUtils.ts`               |
 | Session transcript logging (~/.forge)                | `src/sidebar/SessionLogger.ts`           |
 | Replay-aware session-log row reading                 | `src/sessions/sessionLogRows.ts`         |
+| Tool visibility and shell-workaround audit           | `scripts/tool-visibility-audit.mjs`       |
 | Tool-call argument summary labels                    | `src/sidebar/toolSummary.ts`             |
 | Runtime capability memo + warn-once ledger           | `src/sidebar/CapabilityCache.ts`         |
 

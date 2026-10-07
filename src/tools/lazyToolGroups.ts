@@ -25,12 +25,9 @@ const LAZY_GROUP_BY_SERVER: ReadonlyMap<string, string> = new Map([['halluscribe
  * tools each had at most 7 calls. Rare tools stay grouped to avoid paying their
  * schema cost on every conversation.
  *
- * A grouped tool's call count measures demand only while it was visible: a
- * tool hidden in a group, or one whose description rules itself out for the
- * case, scores zero by construction. render_html_to_image left media on
- * 2026-10-07 for that reason: its preview mode is how the agent checks a page
- * it wrote, and the tool had been both hidden and described as unable to run
- * JavaScript, so its zero said nothing (RENDER_PREVIEW_PLAN.md).
+ * Count calls only while offered; a never-offered tool is unmeasured, not 0.
+ * Shell workarounds count as demand for hidden tools. Exclude cases ruled out
+ * by the tool's own description. See scripts/tool-visibility-audit.mjs.
  */
 const NATIVE_GROUP_BY_TOOL: ReadonlyMap<string, string> = new Map([
   ...[

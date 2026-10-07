@@ -127,26 +127,44 @@ that was never visible: its call count is zero by construction. The
 `render_html_to_image` case showed it — grouped, and described as not
 supporting JavaScript, so a JS page could never reach it. Cheapest first:
 
-- [ ] **Count calls only while visible.** The audit divides calls by sessions
+- [x] **Count calls only while visible.** The audit divides calls by sessions
       whose `tools_offered` row lists the tool. A tool never offered reports
       "unmeasured", not 0, and an unmeasured tool cannot be cited to keep it
       grouped. Write this into the rule comment and the tool-audit method.
-- [ ] **Count workarounds.** An audit script maps shell commands to the hidden
+      Done: `tool-visibility-audit.mjs` uses `tools_offered` for the denominator.
+- [x] **Count workarounds.** An audit script maps shell commands to the hidden
       tool they stand in for (`npm i three` / `puppeteer` / `playwright` → page
       preview; `git commit` → `commit`; …). A bench run installed `three` into
       Node and counted meshes to "check" a page — a homemade preview, because no
       real one was visible. A tool that is often worked around is promoted with
       zero calls.
+      Done: whole-token shell and logged Node-script matches count hidden-session demand.
 - [x] **Purpose lines for groups.** `load_tool_group` describes groups by member
       names only, except `halluscribe`. Add a short job description per group
       (`GROUP_PURPOSE` in `src/tools/toolGroupTools.ts`), so a grouped tool is
       found by what it does. A few tokens per turn. Done: typed by
       `NATIVE_LAZY_GROUP_NAMES`, so a group without one fails to compile;
       about 130 tokens, inside the 450-token discovery budget.
-- [ ] **Exclude self-ruled-out tools.** A tool whose own description says it
+- [x] **Exclude self-ruled-out tools.** A tool whose own description says it
       does not apply to the case (e.g. "JavaScript not supported") is not
       counted for that case; its count says nothing about demand. The audit
       notes such descriptions instead of counting them.
+      Done: restrictive description sentences appear as notes, separate from counts.
+
+### Visibility audit (2026-10-08)
+
+`node scripts/tool-visibility-audit.mjs --since 2026-10-01`: 118 sessions with activity; calls count only while offered, and workaround counts exclude sessions that offered the target tool.
+
+| Tool | Sessions offered | Sessions called | Calls | Failures | Hidden workaround calls (sessions) |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| `create_directory` | 32 | 1 | 5 | 2 | 12 (5) |
+| `move_file` | 32 | 1 | 1 | 1 | 10 (5) |
+| `delete_file` | 36 | 15 | 52 | 3 | 7 (7) |
+| `commit` | 25 | 3 | 5 | 0 | 6 (3) |
+| `render_html_to_image` | 1 | 0 | 0 | 0 | 1 (1) |
+| Background wait (no dedicated tool) | unmeasured | unmeasured | unmeasured | unmeasured | 2 (2) |
+
+The renderer's image mode says it runs no JavaScript; that mode constraint is a note, not a demand count.
 
 ## Out of scope
 

@@ -2,6 +2,8 @@
 
 ## 0.17.0
 
+- Added a session-log visibility audit that reports tool calls only when offered, hidden shell workarounds, and description exclusions.
+
 ### One `shell` tool replaces four
 
 - `exec_command`, `query_powershell`, `run_terminal`, `run_workspace_task` and `list_workspace_tasks` are gone. One `shell` tool runs a command line in your configured shell (`permissions.exec.shell`: bash by default, which on Windows is Git Bash; pwsh on Windows without Git for Windows), in the foreground or, with `background: true`, as a tracked background process (`monitor_execution`, `stop_execution` and `notify_on_exit` work as before).
