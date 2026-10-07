@@ -15,8 +15,10 @@ Forge has a renderer, but it cannot show such a page:
   blocked. A canvas/WebGL page renders blank.
 - Its description says "JavaScript and external resources are not supported",
   so a model with a JS page correctly concludes the tool does not apply.
-- It sits in the lazy `media` group. Across every bench session the model loaded
-  `files` 6 times, `agents` once, `media` never. The group menu shows tool names
+- It sits in the lazy `media` group. Across the bench sessions audited before
+  this plan the model loaded `files` 6 times, `agents` once, `media` never. (The
+  0.16.90 baseline run, which ended after this was written, loaded `media` once —
+  for `view_image`, not this tool; see Phase 3.) The group menu shows tool names
   only, and nothing in the name says "check my page".
 - It requires `permissions.net.fetch`; the bench config has it off, so the tool
   was not even advertised there.
@@ -103,8 +105,9 @@ boundary, and a config field would make "allow everything" one edit away.
 - No approval: same as today. The allowlist plus DNS mapping is what makes that
   safe, and it is what the new tests pin.
 - No vision gate on the tool; the handler omits the image part for a non-vision
-  model. If `ToolContext` has no vision flag today, add one from the same source
-  `ToolRegistry`'s `requiresVision` gate uses — do not re-derive it.
+  model. It reads `ToolHandlerContext.isVisionModel`, which already exists and
+  is set from the same source as `ToolRegistry`'s `requiresVision` gate — no new
+  flag, no re-derivation.
 
 ### Advertising
 
@@ -112,7 +115,9 @@ boundary, and a config field would make "allow everything" one edit away.
   with a comment in `lazyToolGroups.ts` like the `delete_file` / `git_read`
   ones. Rationale: the "10+ calls" promotion rule cannot promote a tool that was
   hidden and described as not applying; its zero is a measurement of the hiding.
-  Cost: ~300 schema tokens per turn, and one cold re-prefill when the tool list
+  Cost: the definition as shipped (description plus the `mode` and `wait_ms`
+  params) is about 2.7 KB of source, roughly 500 schema tokens per turn — more
+  than the ~300 first estimated — and one cold re-prefill when the tool list
   changes at upgrade.
 - Description gains one routing line: use `mode: "preview"` to check that a
   page you wrote (canvas, WebGL, three.js, animation) actually renders before
@@ -140,15 +145,18 @@ section must say "preview mode may fetch scripts from these three CDNs", not
 | `src/tools/renderHtmlToImageTool.ts` | `mode` / `wait_ms` schema, mode dispatch, description |
 | `src/tools/lazyToolGroups.ts` | remove from `media`, comment |
 | `CLAUDE.md` | network section: preview-mode exception |
-| `test/unit/RenderHtmlToImageTool.test.ts` | preview args/route/no-delivery/no-write cases; image-mode cases unchanged |
-| `test/integration/RenderHtmlLive.test.ts` | real-Chrome preview cases (below) |
+| `docs/OWNERS.md` | rows for `previewMode.ts` and `htmlInput.ts` |
+| `test/unit/RenderHtmlPreview.test.ts` (new) | preview args/route/inputs/result cases and the no-durable-state row; image-mode suites untouched |
+| `test/integration/RenderHtmlPreviewLive.test.ts` (new) | real-Chrome preview cases (below) |
+| `test/support/renderHtmlHarness.ts` | fake Playwright gains routes, page/console errors, `waitForTimeout` |
 | `test/unit/LazyToolGroups.test.ts` | membership update |
+| `test/unit/ToolDispatchUnknownHint.test.ts` | its hidden-tool example was `render_html_to_image`; now `generate_image` |
 
 The preview branch would have pushed `renderHtmlToImageTool.ts` past 450
 lines, so it split on the seam named here before implementation: "deliver a
 saved PNG" (the tool file) versus "return a preview" (`previewMode.ts`), with
 the input checks both use in `htmlInput.ts`. Two `docs/OWNERS.md` rows added.
-The tool file stays at ~375 lines because image mode's policy (name claim,
+The tool file stays at 381 lines because image mode's policy (name claim,
 atomic write, delivery) is one concern.
 
 ## Phases
@@ -191,12 +199,14 @@ creates is transient:
 
 | Artifact | Create | Delete | Pause/disable | Crash mid-write | Owner-process death | TTL/expiry |
 |---|---|---|---|---|---|---|
-| Headless browser process (preview call) | `render_html_to_image` handler, per call | `browser.close()` in the existing `finally` | n/a — nothing to pause; the call is one render | Nothing is written; a crash mid-render leaves no file | Playwright pipe close ends the child, as for `image` mode; a hard kill can orphan it, accepted as in the existing ledger | Bounded by the existing render timeout, which must cover `wait_ms` + load (15 s max wait) |
+| Headless browser process (preview call) | `render_html_to_image` handler, per call | `browser.close()` in the existing `finally` | n/a — nothing to pause; the call is one render | Nothing is written; a crash mid-render leaves no file | Playwright pipe close ends the child, as for `image` mode; a hard kill can orphan it, accepted as in the existing ledger | Bounded by the render timeout plus `wait_ms` (the handler adds the wait to the base timeout; 15 s max wait) |
 | Preview result (text + image part) | Returned from the handler into the turn | Ends with the conversation/compaction like any tool result | n/a | n/a — in memory | Lost with the host, like any in-flight tool result | None |
 
 **CI-enforced row:** a unit test calls preview mode and asserts zero
-`beforeMutate` calls, zero filesystem writes under the output dir, zero
-`deliverImage`/`deliverFile` calls, and an unchanged file budget. A later change
+`beforeMutate` calls, an unchanged recursive listing of the whole workspace (so
+nothing written under `generated-images/` or anywhere else), zero `deliverFile`
+calls, and zero `remainingFileDeliveries` calls (the file budget is never
+consulted). A later change
 that starts saving or sending previews fails it.
 
 ## Acceptance criteria

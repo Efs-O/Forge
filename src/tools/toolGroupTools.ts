@@ -1,3 +1,4 @@
+import type { NATIVE_LAZY_GROUP_NAMES } from '../config/toolGroupNames';
 import type { ToolDefinition } from '../llm/types';
 import type { RegisteredTool } from './ToolRegistry';
 import {
@@ -11,20 +12,33 @@ import {
 /**
  * `load_tool_group` flips one per-conversation flag; the real schemas arrive
  * through the normal `tools` array on the next round, so this tool must never
- * restate them. Its compact description is the group's discovery surface:
- * member names only, except where the names do not say when to reach for the
- * group. Keep HalluScribe's measured history cue close to its original wording:
- * Qwen found that group unprompted with the longer phrase.
+ * restate them. Its compact description is the group's discovery surface, so
+ * every group carries a short job line next to its member names: a model looks
+ * for what it needs to do, and a tool name does not always say that. Keyed by
+ * `NATIVE_LAZY_GROUP_NAMES`, so a new group without one fails to compile.
+ * Keep HalluScribe's measured history cue close to its original wording: Qwen
+ * found that group unprompted with the longer phrase.
  */
-const GROUP_PURPOSE: Readonly<Record<string, string>> = {
+const GROUP_PURPOSE: Readonly<Record<(typeof NATIVE_LAZY_GROUP_NAMES)[number], string>> = {
+  agents: 'other agents, scheduled jobs, notify the user',
+  background: 'list or stop background jobs, timed wait',
+  code_intel: 'definitions, references, renames, semantic search',
+  computer_use: 'drive a browser or the desktop (vision)',
+  editor_ui: "the user's open editor, selection, clipboard, diffs",
+  files: 'move, mkdir, line-number edits, restore a file',
+  git: 'git writes as tools (the shell runs git too)',
   halluscribe:
     'search previous AI coding sessions and historical workspace/user context: past implementation decisions, the exact wording of an earlier error or command, prior project history, the user profile/digest',
+  media: 'view/generate images, image search, send files',
+  memory: 'notes kept across conversations',
+  notebook: 'Jupyter notebook cells',
+  system: 'this PC: power, sleep/wake, status, llama.cpp',
 };
 
 function describeGroups(): string {
   return lazyGroupNames()
     .map((group) => {
-      const purpose = GROUP_PURPOSE[group];
+      const purpose = (GROUP_PURPOSE as Readonly<Record<string, string>>)[group];
       const members = lazyGroupMembers(group).join(', ');
       return purpose ? `${group}: ${purpose}; tools: ${members}` : `${group}: ${members}`;
     })

@@ -5,6 +5,11 @@ Source: round-by-round reading of Forge's own session logs from two audit runs
 rounds and prompt tokens that buy nothing, **without** cutting verification.
 Quality comes first: no item here may trade a found bug for speed.
 
+**Status:** findings 1–7 shipped in `4dcc72d` (unit tests in
+`test/unit/forgeTuningPrompt.test.ts`; the bench template matches the builtin
+byte for byte). The lazy-groups header comment shipped in `6ee34e9`. Still open:
+the rest of the checklist below.
+
 ## Findings and decisions
 
 0. **Foreign reasoning in two rounds of run 2** (rounds 16 and 36: "the user
@@ -63,12 +68,23 @@ Quality comes first: no item here may trade a found bug for speed.
 - Reading every named file in the first round (behaviour change).
 - One probe file / running existing tests early (behaviour change).
 - Per-finding scoring and more reps in the grader (bench tooling, not Forge).
+- **`update_plan` nudge.** The tool is eager and unchanged since 0.16.90, and
+  the prompt has never asked for it; only its description does. On 2026-10-07
+  the 0.17.0 sessions planned on larger tasks (7–8 items, about three updates
+  each) and skipped it on small ones. Its value is surviving compaction: the
+  plan is re-sent in the turn context every round and the resumed agent is told
+  to check it. Its cost is a round per call. Nobody has compared planned and
+  unplanned runs, so nothing changes yet: record `update_plan` calls per bench
+  run alongside the grade. Only if planned runs clearly grade better, add one
+  sentence to the tool's description ("call it first when the task has 3+
+  steps"), not to the template, so the cost lands only where it applies.
 
 ## Open checklist (2026-10-07)
 
 ### Before installing 0.17 in the user's main window
 
-- [ ] Add `tool_groups: { eager: [agents] }` under `defaults` in
+- [ ] Add `tool_groups: { eager: [agents] }` (consider `media` and `memory` too,
+      per the group-load audit below) under `defaults` in
       `.forge/config.yaml`. `SHELL_TOOL_AND_CORE_GROUP_PLAN.md` grouped
       `ask_live_session`, `tell_live_session`, `ask_local_agent`,
       `list_delegation_targets`, `manage_jobs` and `notify_user` on the
@@ -81,6 +97,28 @@ Quality comes first: no item here may trade a found bug for speed.
 - [x] Fix the header comment in `src/tools/lazyToolGroups.ts`: it still says the
       high-use tools "stay eager", but the same change moved them into `agents`.
       Say they are grouped and kept eager through `tool_groups.eager`.
+
+### Group-load audit (2026-10-07, 69 session files since the grouping commit)
+
+- **`files`:** loaded in 7 sessions. None of the loads was wasted. Every
+  session used `delete_file` or `append_file` from it, and both have since
+  been made eager (16:27 and 21:44 the same day). On the current build,
+  `apply_line_edits` is the only reason left to load it. After a deliberate
+  load it succeeded 4 of 4 times. In the 0.16.90 baseline, where it was eager,
+  it succeeded 1 of 4 (two stale `expected_lines`, one array sent as a string).
+  Decision: keep it grouped. It costs a load in about 1 session in 20, and
+  having it always visible did not make it work better.
+- **`git` / `background`:** grouped on purpose (`SHELL_TOOL_AND_CORE_GROUP_PLAN.md`:
+  `shell` replaces the git tools; waiting goes through `monitor_execution` and
+  shell background). Neither group has been loaded since, while the shell ran
+  14 git write commands in 6 sessions, 20 sleeps, and 18 `monitor_execution`
+  calls. The shell covers both, so no change.
+- **`media` / `memory` / `agents`:** loaded in 3 sessions each, all from the
+  user's own workflow (Telegram images, memory, live sessions), none on the
+  bench. For the main window, put them under `tool_groups.eager`, not in code.
+- No load in the window was speculative, so purpose lines are about
+  *discovery* (a tool the model never knew to look for), not about cutting
+  wasted loads.
 
 ### Grouping rule: a hidden tool's zero calls is not evidence
 
@@ -99,10 +137,12 @@ supporting JavaScript, so a JS page could never reach it. Cheapest first:
       Node and counted meshes to "check" a page — a homemade preview, because no
       real one was visible. A tool that is often worked around is promoted with
       zero calls.
-- [ ] **Purpose lines for groups.** `load_tool_group` describes groups by member
+- [x] **Purpose lines for groups.** `load_tool_group` describes groups by member
       names only, except `halluscribe`. Add a short job description per group
       (`GROUP_PURPOSE` in `src/tools/toolGroupTools.ts`), so a grouped tool is
-      found by what it does. A few tokens per turn.
+      found by what it does. A few tokens per turn. Done: typed by
+      `NATIVE_LAZY_GROUP_NAMES`, so a group without one fails to compile;
+      about 130 tokens, inside the 450-token discovery budget.
 - [ ] **Exclude self-ruled-out tools.** A tool whose own description says it
       does not apply to the case (e.g. "JavaScript not supported") is not
       counted for that case; its count says nothing about demand. The audit
@@ -116,7 +156,10 @@ Anything that reduces verification or caps rounds.
 
 No durable state: every change is prompt text, a tool description, or a
 per-turn in-memory decision (`workspaceIsProjectRoot`, the unattended flag read
-from the existing in-memory registry).
+from the existing in-memory registry). The checklist's `tool_groups.eager`
+entry is a value in the user's own config under a key that already exists
+(`SHELL_TOOL_AND_CORE_GROUP_PLAN.md` owns it), not a new artifact; the audit
+changes are scripts and comments. Nothing here outlives a turn.
 
 ## Acceptance criteria
 
@@ -136,4 +179,10 @@ from the existing in-memory registry).
   bash warns about `/tmp`.
 - The bench template (`templates/S/execute.njk`, outside this repo) mirrors the
   builtin template.
-- `npm run ci` is green.
+- Checklist: every lazy group has a `GROUP_PURPOSE` line, and the
+  `load_tool_group` description test asserts it, so a new group without one
+  fails CI.
+- Checklist: the grouping-rule comment in `lazyToolGroups.ts` and the
+  tool-audit method say a never-offered tool is "unmeasured", not 0, and that
+  workarounds and self-ruled-out descriptions are counted as described above.
+- `npm run ci` and `npm run package` are green.

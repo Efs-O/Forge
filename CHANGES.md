@@ -19,6 +19,13 @@
 - Rarely used tools (files, git writes, code intelligence, memory, background, agents and others) move into groups. A group's schemas are sent only once the agent loads it, or when `tool_groups.eager` lists it at the defaults, group or model level. Everything stays dispatchable.
 - `edit_file` takes `path`, like every other file tool.
 - The system prompt is shorter.
+- `load_tool_group` describes each group by what it is for as well as its tool names (e.g. `memory: notes kept across conversations`), so the agent can find a grouped tool it did not know by name.
+
+### The agent can look at a page it wrote
+
+- `render_html_to_image` has a `preview` mode: it runs the page's scripts in headless Chrome or Edge, waits `wait_ms` (default 3 s), and returns the page's errors and a screenshot to the agent only. Nothing is saved or sent to a remote chat, and no file budget is spent. A model without vision gets the error list.
+- The page may load scripts from `cdn.jsdelivr.net`, `cdnjs.cloudflare.com` and `unpkg.com` only. Every other request, local files and WebRTC traffic are blocked. Preview takes `path`, a workspace file; relative assets in the page do not load.
+- `render_html_to_image` is now always offered rather than in the `media` group. Its default `image` mode is unchanged.
 
 ### Fewer wasted rounds
 

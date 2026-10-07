@@ -212,8 +212,12 @@ describe('lazy tool groups', () => {
       'halluscribe',
     ]);
     for (const name of [
-      'ask_live_session', 'manage_jobs', 'notify_user', 'ask_local_agent',
-      'tell_live_session', 'list_delegation_targets',
+      'ask_live_session',
+      'manage_jobs',
+      'notify_user',
+      'ask_local_agent',
+      'tell_live_session',
+      'list_delegation_targets',
     ]) {
       expect(lazyGroupForTool(name)).toBe('agents');
     }
@@ -249,8 +253,12 @@ describe('lazy tool groups', () => {
     expect(loader?.function.parameters).toMatchObject({
       properties: { group: { enum: expect.arrayContaining(['memory', 'agents']) } },
     });
-    expect(loader?.function.description).toContain('memory: remember');
-    expect(loader?.function.description).toContain('system: get_power_info');
+    expect(loader?.function.description).toContain(
+      'memory: notes kept across conversations; tools: remember',
+    );
+    expect(loader?.function.description).toContain(
+      'system: this PC: power, sleep/wake, status, llama.cpp; tools: get_power_info',
+    );
     expect(loader?.function.description.split(/\s+/).length).toBeLessThanOrEqual(350);
     const staticDefinition = makeLoadToolGroupTool().definition;
     expect(staticDefinition.function.parameters).toMatchObject({
@@ -312,7 +320,10 @@ describe('lazy tool groups', () => {
     );
     expect(advertised.map((definition) => definition.function.name)).toEqual(memoryTools);
     expect(memoryTools.map((name) => lazyGroupForTool(name))).toEqual([
-      'memory', 'memory', 'memory', 'memory',
+      'memory',
+      'memory',
+      'memory',
+      'memory',
     ]);
     expect(isLazyGroupActive('conv-a', 'memory')).toBe(false);
     deactivateLazyGroups('conv-a');
@@ -325,14 +336,41 @@ describe('lazy tool groups', () => {
     registry.register(makeLoadToolGroupTool());
     for (const name of ['create_directory', 'move_file']) {
       registry.register({
-        definition: { type: 'function', function: { name, description: '', parameters: { type: 'object' } } },
+        definition: {
+          type: 'function',
+          function: { name, description: '', parameters: { type: 'object' } },
+        },
         permission: 'read',
         handler: async () => 'ok',
       });
     }
     const description = registry.get('load_tool_group')?.describe?.().function.description;
     expect(description).toContain('files:');
-    expect(description).toContain('files: create_directory, move_file');
+    expect(description).toContain(
+      'files: move, mkdir, line-number edits, restore a file; tools: create_directory, move_file',
+    );
+  });
+
+  it('gives every available group a purpose line, not only its member names', () => {
+    // A model looks for what it needs to do; render_html_to_image sat unfound
+    // in a group described by tool names alone (FORGE_TUNING_PLAN.md).
+    const registry = new ToolRegistry();
+    registry.register(makeLoadToolGroupTool());
+    for (const name of ['move_file', 'commit', 'wait', 'recall', 'view_image', 'read_notebook']) {
+      registry.register({
+        definition: {
+          type: 'function',
+          function: { name, description: '', parameters: { type: 'object' } },
+        },
+        permission: 'read',
+        handler: async () => 'ok',
+      });
+    }
+    const lines = (registry.get('load_tool_group')?.describe?.().function.description ?? '')
+      .split('\n')
+      .slice(1);
+    expect(lines).toHaveLength(6);
+    for (const line of lines) expect(line).toMatch(/^[a-z_]+: [^;]+; tools: /);
   });
 
   it('appends the loaded schemas after the existing prefix, leaving it byte-identical', () => {
