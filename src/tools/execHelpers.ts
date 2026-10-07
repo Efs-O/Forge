@@ -2,6 +2,7 @@ import * as path from 'path';
 import * as vscode from 'vscode';
 
 export const MAX_OUTPUT_CHARS = 16_000;
+export const MAX_OUTPUT_CHARS_CEILING = 32_000;
 export const MAX_EXEC_OUTPUT_LINES = 2_000;
 
 /**
@@ -31,6 +32,10 @@ export interface ExecOutputOptions {
   maxChars?: number;
   /** Limit returned data to stdout, stderr, or both streams. */
   stream?: ExecOutputStream;
+  /** Whether maxChars came from the request rather than the model default. */
+  maxCharsExplicit?: boolean;
+  /** Whether a request exceeded the model-scaled output bound. */
+  maxCharsClamped?: boolean;
 }
 
 /**
@@ -38,7 +43,10 @@ export interface ExecOutputOptions {
  * They intentionally affect only what returns to the model, never what is
  * executed, so they cover common pipe use cases without granting a shell.
  */
-export function parseExecOutputOptions(args: Record<string, unknown>): ExecOutputOptions {
+export function parseExecOutputOptions(
+  args: Record<string, unknown>,
+  outputLimit = MAX_OUTPUT_CHARS,
+): ExecOutputOptions {
   const readBoundedInt = (key: string, max: number): number | undefined => {
     const value = args[key];
     if (value === undefined) return undefined;
@@ -59,7 +67,8 @@ export function parseExecOutputOptions(args: Record<string, unknown>): ExecOutpu
   if (headLines !== undefined && tailLines !== undefined) {
     throw new Error('background execution: head_lines and tail_lines cannot be used together.');
   }
-  const maxChars = readBoundedInt('max_output_chars', MAX_OUTPUT_CHARS);
+  const maxChars = readBoundedInt('max_output_chars', MAX_OUTPUT_CHARS_CEILING);
+  const explicitMax = maxChars !== undefined;
   const rawStream = args['output_stream'];
   if (
     rawStream !== undefined &&
@@ -72,7 +81,9 @@ export function parseExecOutputOptions(args: Record<string, unknown>): ExecOutpu
   return {
     ...(headLines !== undefined ? { headLines } : {}),
     ...(tailLines !== undefined ? { tailLines } : {}),
-    ...(maxChars !== undefined ? { maxChars } : {}),
+    maxChars: Math.min(maxChars ?? outputLimit, outputLimit),
+    maxCharsExplicit: explicitMax,
+    ...(maxChars !== undefined && maxChars > outputLimit ? { maxCharsClamped: true } : {}),
     ...(rawStream !== undefined ? { stream: rawStream } : {}),
   };
 }
@@ -193,7 +204,7 @@ export function formatExecCommandOutput(
   // gets returned. Without one, the whole stream is returned, bounded by
   // `max_output_chars` when given and by the retention bound otherwise.
   const lineWindow = options.headLines !== undefined || options.tailLines !== undefined;
-  const explicitLimit = options.maxChars !== undefined;
+  const explicitLimit = options.maxCharsExplicit ?? options.maxChars !== undefined;
   const limit = options.maxChars ?? MAX_EXEC_STORED_CHARS;
   const out: Record<string, unknown> = {
     kind: result.exitCode === 0 ? 'success' : 'non_zero_exit',

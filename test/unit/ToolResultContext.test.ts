@@ -140,6 +140,27 @@ describe('read_tool_result', () => {
     expect(result).toContain(raw.slice(0, MAX_TOOL_RESULT_READ_CHARS));
   });
 
+  it('uses the model-scaled page bound and names the runtime clamp', async () => {
+    const raw = 'scaled'.repeat(4_000);
+    const result = await makeReadToolResultTool().handler(
+      { tool_call_id: 'scaled', max_chars: 20_000 },
+      {
+        beforeMutate: () => undefined,
+        conversationMessages: [
+          { role: 'tool', tool_call_id: 'scaled', name: 'shell', content: raw },
+        ],
+        outputLimits: {
+          searchLines: 50,
+          resultPageChars: 10_000,
+          shellInlineChars: 30_000,
+          execOutputChars: 16_000,
+        },
+      },
+    );
+    expect(result).toContain('max_chars clamped to 10000');
+    expect(result.endsWith(raw.slice(0, 10_000))).toBe(true);
+  });
+
   it('does not expose a result from another conversation', async () => {
     const result = await makeReadToolResultTool().handler(
       { tool_call_id: 'missing' },

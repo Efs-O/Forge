@@ -39,6 +39,7 @@ import { extractToolDetail } from './toolSummary';
 import { freezeTurnContext, type TurnContextState } from './turnContext';
 import { terminalCommandTracker } from '../tools/TerminalCommandTracker';
 import { formatPromptCacheStats, readPromptCacheStats } from '../llm/promptCacheStats';
+import { toolOutputLimits } from '../tools/toolOutputLimits';
 import { getLogger } from '../util/logger';
 import { buildVisionRefusals, filterVisionGated, visionGatedNames } from './visionGate';
 import { unattendedConversations, withUnattendedRefusals } from './unattendedConversations';
@@ -215,6 +216,7 @@ export async function runModelTurn(
   // Config-derived, never per round: a per-round value would change the tool
   // list mid-turn and cost a cold prefill each time.
   const writeLimit = writeChunkLimit(model, config.llama_server, config.auto_compact);
+  const outputLimits = toolOutputLimits(model, config.llama_server, config.auto_compact);
   // Rebuilt on every round rather than snapshotted once per turn: a lazy tool
   // group activates mid-turn via `load_tool_group`, and its schemas have to
   // reach the request that immediately follows.
@@ -351,7 +353,7 @@ export async function runModelTurn(
             ctx.onTranscriptChanged?.(conv);
           },
           ctx.onTellArrived ? (callback) => ctx.onTellArrived!(conv.id, callback) : undefined,
-          { modelName: model.name, isVisionModel },
+          { modelName: model.name, isVisionModel, outputLimits },
         );
         mirrorLiveSessionAnswers(conv.id, toolCalls, messages, ctx.emitAgentProgress);
         // Token bar ticks in `onUsage`: a tool result moves no measured context.

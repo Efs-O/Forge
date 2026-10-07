@@ -1,6 +1,7 @@
 import type { ChatMessage, ContentPart, ToolDefinition } from '../llm/types';
 import type { PlanItem } from '../sidebar/sessionTypes';
 import { recordNativeLazyTool } from './lazyToolGroups';
+import type { ToolOutputLimits } from './toolOutputLimits';
 
 export type ToolPermission =
   | 'read'
@@ -46,6 +47,8 @@ export interface ToolHandlerContext {
   modelName?: string;
   /** Whether the resolved model accepts image input. */
   isVisionModel?: boolean;
+  /** Stable, configuration-derived output bounds for the selected model. */
+  outputLimits?: ToolOutputLimits;
   /** Full raw transcript for the current conversation. Read-only tools may use
    * this to recover an earlier result without widening the model prompt. */
   conversationMessages?: readonly ChatMessage[];

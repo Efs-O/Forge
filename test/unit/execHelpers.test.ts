@@ -4,6 +4,7 @@ import {
   formatExecCommandOutput,
   MAX_EXEC_STORED_CHARS,
   MAX_OUTPUT_CHARS,
+  MAX_OUTPUT_CHARS_CEILING,
   parseExecOutputOptions,
   spawnAndWait,
   stripAnsi,
@@ -29,7 +30,7 @@ describe('stripAnsi', () => {
 
 describe('background output helpers', () => {
   it('keeps oversized text output limits as a refusal with a file alternative', () => {
-    expect(() => parseExecOutputOptions({ max_output_chars: MAX_OUTPUT_CHARS + 1 })).toThrow(
+    expect(() => parseExecOutputOptions({ max_output_chars: MAX_OUTPUT_CHARS_CEILING + 1 })).toThrow(
       /redirect.*file/iu,
     );
   });

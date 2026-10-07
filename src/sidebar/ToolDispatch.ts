@@ -20,6 +20,7 @@ import { capDisplayText } from '../tools/resultCap';
 import { describeDelete } from './deletePreview';
 import { isFailureResult, readPathArg, resultLabel } from './toolResultView';
 import type { PlanItem } from './sessionTypes';
+import type { ToolOutputLimits } from '../tools/toolOutputLimits';
 import { getLogger } from '../util/logger';
 import { ToolApprovalPolicyDenied } from './ToolApprovalService';
 import { coerceToolArgs } from '../tools/argCoercion';
@@ -170,7 +171,7 @@ export class ToolDispatch {
     unavailableTools?: ReadonlyMap<string, string>,
     setPlan?: (items: PlanItem[]) => void,
     tellArrived?: (callback: () => void) => () => void,
-    modelContext?: { modelName: string; isVisionModel: boolean },
+    modelContext?: { modelName: string; isVisionModel: boolean; outputLimits?: ToolOutputLimits },
   ): Promise<void> {
     for (const tc of toolCalls) {
       // Every exit from this iteration pushes exactly one tool message, so the

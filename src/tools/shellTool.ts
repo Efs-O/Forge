@@ -13,6 +13,7 @@ import { resolveExecCwd } from './execHelpers';
 import { resolveGitBash } from './execProgramResolver';
 import { classifyShellCommand, type ShellClassification, type ShellKind } from './shellPolicy';
 import { capShellOutput } from './shellOutput';
+import { DEFAULT_TOOL_OUTPUT_LIMITS } from './toolOutputLimits';
 import type { RegisteredTool } from './ToolRegistry';
 
 export interface ShellToolOptions {
@@ -473,6 +474,7 @@ export function makeShellTool(options: ShellToolOptions = {}): RegisteredTool {
           result.output,
           context?.conversationId ?? 'unknown',
           context?.toolCallId ?? 'unknown',
+          context?.outputLimits?.shellInlineChars ?? DEFAULT_TOOL_OUTPUT_LIMITS.shellInlineChars,
         );
         return (
           formatResult(result.code, result.seconds, result.timedOut, capped.text) +

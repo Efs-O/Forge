@@ -2,6 +2,8 @@ import { spawn } from 'child_process';
 import * as path from 'path';
 import * as vscode from 'vscode';
 import type { RegisteredTool } from './ToolRegistry';
+import { DEFAULT_TOOL_OUTPUT_LIMITS } from './toolOutputLimits';
+import { renderSearchCodeMatches, type SearchCodeMatch } from './searchCodeOutput';
 import { resolveRipgrep, type RipgrepResolution } from './RipgrepResolver';
 import { capResultText } from './resultCap';
 import { capSnippetLine, MAX_SEARCH_RESULT_CHARS } from './searchSnippet';
@@ -12,7 +14,6 @@ import {
   rgScopeArgs,
 } from './searchScope';
 
-const OUTPUT_LINE_LIMIT = 50;
 const CONTEXT_LINES = 2;
 /**
  * Per-file snippet cap.
@@ -25,11 +26,6 @@ const CONTEXT_LINES = 2;
  * the actual sources. The tool looked broken while working.
  */
 export const SNIPPETS_PER_FILE_LIMIT = 8;
-interface SearchCodeMatch {
-  path: string;
-  snippets: string[];
-}
-
 interface RipgrepLineData {
   text?: string;
 }
@@ -288,18 +284,11 @@ export function makeSearchCodeTool(
         );
       }
 
-      const outputLines: string[] = [];
-      for (const match of matches) {
-        if (outputLines.length >= OUTPUT_LINE_LIMIT) break;
-        outputLines.push(`\n=== ${match.path} ===`);
-        for (const snippet of match.snippets) {
-          outputLines.push(snippet);
-          if (outputLines.length >= OUTPUT_LINE_LIMIT) break;
-        }
-      }
-
       return capResultText(
-        outputLines.join('\n'),
+        renderSearchCodeMatches(
+          matches,
+          context?.outputLimits?.searchLines ?? DEFAULT_TOOL_OUTPUT_LIMITS.searchLines,
+        ),
         MAX_SEARCH_RESULT_CHARS,
         'search_code',
         'Narrow the search with a more specific query or an `include` glob.',
@@ -387,11 +376,13 @@ async function searchWorkspaceText(
           stopIfEnoughMatches();
           return;
         }
-        entry = { path: normalizedPath, snippets: [] };
+        entry = { path: normalizedPath, snippets: [], snippetMatches: [], omittedSnippets: 0 };
         matches.set(normalizedPath, entry);
       }
 
+      const isMatchingLine = isMatchEvent(event);
       if (entry.snippets.length >= SNIPPETS_PER_FILE_LIMIT) {
+        if (isMatchingLine) entry.omittedSnippets += 1;
         stopIfEnoughMatches();
         return;
       }
@@ -403,7 +394,10 @@ async function searchWorkspaceText(
         isMatchEvent(event) ? event.data.submatches?.[0]?.start : undefined,
       );
       const snippet = `${marker} ${lineNumber}: ${text}`;
-      if (!entry.snippets.includes(snippet)) entry.snippets.push(snippet);
+      if (!entry.snippets.includes(snippet)) {
+        entry.snippets.push(snippet);
+        entry.snippetMatches.push(isMatchingLine);
+      }
       stopIfEnoughMatches();
     };
 

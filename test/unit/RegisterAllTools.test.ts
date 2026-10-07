@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type * as vscode from 'vscode';
-import type { ForgeConfig } from '../../src/config/types';
+import type { ForgeConfig, ModelConfig } from '../../src/config/types';
 import type { LocalDelegationService } from '../../src/delegation/LocalDelegationService';
 import type { IndexManager } from '../../src/search/IndexManager';
 import { UserQuestionService } from '../../src/sidebar/UserQuestionService';
@@ -8,6 +8,7 @@ import { UserNotificationService } from '../../src/sidebar/UserNotificationServi
 import { registerAllTools } from '../../src/tools/registerAllTools';
 import { ToolRegistry, type ToolPermission } from '../../src/tools/ToolRegistry';
 import { lazyGroupForTool } from '../../src/tools/lazyToolGroups';
+import { withWriteChunkLimit, writeChunkLimit } from '../../src/tools/writeChunking';
 
 const ALL_PERMISSIONS = new Set<ToolPermission>([
   'read',
@@ -169,6 +170,18 @@ function makeRegistry(
 }
 
 describe('registerAllTools canonical coordinator catalog', () => {
+  it('keeps registered definitions byte-identical across 24K and 200K windows except write advice', () => {
+    const definitions = makeRegistry({ search: true, delegation: true }).definitions(ALL_PERMISSIONS);
+    const compact = { enabled: true, at: 0.85 };
+    const small = { name: 'small', num_ctx: 24_576 } as unknown as ModelConfig;
+    const large = { name: 'large', num_ctx: 200_000 } as unknown as ModelConfig;
+    const forLimit = (model: ModelConfig) =>
+      withWriteChunkLimit(definitions, writeChunkLimit(model, undefined, compact));
+    const withoutWriteTools = (items: typeof definitions): string =>
+      JSON.stringify(items.filter((item) => !['write_file', 'append_file'].includes(item.function.name)));
+    expect(withoutWriteTools(forLimit(small))).toBe(withoutWriteTools(forLimit(large)));
+  });
+
   it('exposes the exact native catalog when all optional wiring is present', () => {
     const registry = makeRegistry({ search: true, delegation: true });
     expect(registry.names().sort()).toEqual(EXPECTED_NATIVE_NAMES);

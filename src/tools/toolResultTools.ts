@@ -1,8 +1,10 @@
 import type { ChatMessage, ContentPart } from '../llm/types';
 import type { RegisteredTool, ToolHandlerContext } from './ToolRegistry';
+import { DEFAULT_TOOL_OUTPUT_LIMITS } from './toolOutputLimits';
 
 /** A bounded range keeps recovery from recreating the original context spike. */
 export const MAX_TOOL_RESULT_READ_CHARS = 6_000;
+export const MAX_TOOL_RESULT_READ_CEILING = 24_000;
 
 const MODE_GUIDANCE =
   'Use exactly one mode: tool_call_id for an exact tool result, query to search, or message_index for an exact user/assistant message.';
@@ -38,21 +40,20 @@ function textContent(content: ChatMessage['content']): string {
 
 function rangeOptions(
   args: Record<string, unknown>,
+  limit: number,
 ): { offset: number; maxChars: number; clamped: boolean } | string {
   const offset = args['offset'] ?? 0;
-  const maxChars = args['max_chars'] ?? MAX_TOOL_RESULT_READ_CHARS;
+  const maxChars = args['max_chars'] ?? limit;
   if (!Number.isInteger(offset) || (offset as number) < 0) {
     return modeError('The offset must be a non-negative integer.');
   }
   if (!Number.isInteger(maxChars) || (maxChars as number) < 1) {
-    return modeError(
-      `max_chars must be a positive integer, capped at ${MAX_TOOL_RESULT_READ_CHARS}.`,
-    );
+    return modeError(`max_chars must be a positive integer, capped at ${limit}.`);
   }
   return {
     offset: offset as number,
-    maxChars: Math.min(maxChars as number, MAX_TOOL_RESULT_READ_CHARS),
-    clamped: (maxChars as number) > MAX_TOOL_RESULT_READ_CHARS,
+    maxChars: Math.min(maxChars as number, limit),
+    clamped: (maxChars as number) > limit,
   };
 }
 
@@ -61,14 +62,16 @@ function readRange(args: Record<string, unknown>, context?: ToolHandlerContext):
   if (typeof toolCallId !== 'string' || toolCallId.length === 0) {
     return modeError('tool_call_id must be a non-empty string.');
   }
-  const range = rangeOptions(args);
+  const limit =
+    context?.outputLimits?.resultPageChars ?? DEFAULT_TOOL_OUTPUT_LIMITS.resultPageChars;
+  const range = rangeOptions(args, limit);
   if (typeof range === 'string') return range;
   const text = rawResult(context?.conversationMessages, toolCallId);
   if (text === undefined) {
     return `Error: no text tool result with call ID "${toolCallId}" exists in this conversation.`;
   }
   const clampNote = range.clamped
-    ? `max_chars clamped to ${String(MAX_TOOL_RESULT_READ_CHARS)}; use offset to page further.\n`
+    ? `max_chars clamped to ${String(limit)}; use offset to page further.\n`
     : '';
   if (range.offset >= text.length) {
     return `${clampNote}Tool result ${toolCallId}: requested offset ${range.offset} is beyond its ${text.length} characters.`;
@@ -77,7 +80,11 @@ function readRange(args: Record<string, unknown>, context?: ToolHandlerContext):
   return `${clampNote}Tool result ${toolCallId}, chars ${range.offset}-${end} of ${text.length}:\n${text.slice(range.offset, end)}`;
 }
 
-function readMessage(args: Record<string, unknown>, messages: readonly ChatMessage[]): string {
+function readMessage(
+  args: Record<string, unknown>,
+  messages: readonly ChatMessage[],
+  limit: number,
+): string {
   const index = args['message_index'];
   if (!Number.isInteger(index) || (index as number) < 0) {
     return modeError('message_index must be a non-negative integer.');
@@ -93,7 +100,7 @@ function readMessage(args: Record<string, unknown>, messages: readonly ChatMessa
   if (message.role !== 'user' && message.role !== 'assistant') {
     return modeError(`message_index ${messageIndex} is not a user or assistant message.`);
   }
-  const range = rangeOptions(args);
+  const range = rangeOptions(args, limit);
   if (typeof range === 'string') return range;
   const text = textContent(message.content);
   if (range.offset >= text.length) {
@@ -167,7 +174,11 @@ function renderHit(hit: SearchHit): string {
   return `[${hit.role} message_index ${hit.messageIndex}${toolId}, character offset ${hit.offset}]\n${hit.excerpt}`;
 }
 
-function readSearch(args: Record<string, unknown>, messages: readonly ChatMessage[]): string {
+function readSearch(
+  args: Record<string, unknown>,
+  messages: readonly ChatMessage[],
+  limit: number,
+): string {
   const query = args['query'];
   if (typeof query !== 'string' || query.length < 2 || query.length > 200) {
     return modeError('query must contain between 2 and 200 characters.');
@@ -191,7 +202,7 @@ function readSearch(args: Record<string, unknown>, messages: readonly ChatMessag
         : '';
     return `${base}\n${selected.map(renderHit).join('\n\n')}${notice}`;
   };
-  while (selected.length > 0 && render().length > MAX_TOOL_RESULT_READ_CHARS) {
+  while (selected.length > 0 && render().length > limit) {
     selected = selected.slice(0, -1);
   }
   if (selected.length === 0) {
@@ -206,13 +217,15 @@ function readToolResult(args: Record<string, unknown>, context?: ToolHandlerCont
     return modeError(`Received ${modes.length} modes;`);
   }
   const messages = context?.conversationMessages ?? [];
+  const limit =
+    context?.outputLimits?.resultPageChars ?? DEFAULT_TOOL_OUTPUT_LIMITS.resultPageChars;
   switch (modes[0]) {
     case 'tool_call_id':
       return readRange(args, context);
     case 'query':
-      return readSearch(args, messages);
+      return readSearch(args, messages, limit);
     case 'message_index':
-      return readMessage(args, messages);
+      return readMessage(args, messages, limit);
     default:
       return modeError('No supported mode was selected.');
   }
@@ -261,8 +274,9 @@ export function makeReadToolResultTool(): RegisteredTool {
             max_chars: {
               type: 'integer',
               minimum: 1,
-              maximum: MAX_TOOL_RESULT_READ_CHARS,
-              description: 'Exact-mode characters to return, capped at 6000.',
+              maximum: MAX_TOOL_RESULT_READ_CEILING,
+              description:
+                "Exact-mode characters to return; the default scales with the model's context.",
             },
           },
           additionalProperties: false,

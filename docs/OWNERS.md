@@ -359,6 +359,8 @@ overlaps with an existing owner, extend the owner instead.
 | Concern                                    | Owner                                 |
 | ------------------------------------------ | ------------------------------------- |
 | Tool dispatch + capability/permission gate | `src/tools/ToolRegistry.ts`           |
+| Per-model tool output limits               | `src/tools/toolOutputLimits.ts`        |
+| search_code capped result rendering        | `src/tools/searchCodeOutput.ts`        |
 | Config-to-tool permission resolution       | `src/tools/PermissionResolver.ts`     |
 | Tool registration entry point              | `src/tools/registerAllTools.ts`       |
 | Built-in tools + active-editor access      | `src/tools/builtinTools.ts`           |

@@ -21,13 +21,16 @@ export async function capShellOutput(
   output: string,
   conversationId: string,
   toolCallId: string,
+  cap = SHELL_OUTPUT_CAP,
   root = shellOutputRoot(),
 ): Promise<CappedShellOutput> {
-  if (output.length <= SHELL_OUTPUT_CAP) return { text: output };
+  if (output.length <= cap) return { text: output };
+  const head = Math.floor(cap / 3);
+  const tail = cap - head;
   const safeConversation = conversationId.replace(/[^a-zA-Z0-9_-]/gu, '_');
   const safeCall = toolCallId.replace(/[^a-zA-Z0-9_-]/gu, '_');
   const spillPath = path.join(root, safeConversation, `${safeCall}.log`);
-  const omitted = output.length - SHELL_OUTPUT_HEAD - SHELL_OUTPUT_TAIL;
+  const omitted = output.length - head - tail;
   let spillError: string | undefined;
   try {
     await fs.mkdir(path.dirname(spillPath), { recursive: true });
@@ -39,7 +42,7 @@ export async function capShellOutput(
     ? `full output could not be saved: ${spillError}`
     : `Full output: ${spillPath} — search it with the shell (Select-String / rg / tail) instead of rerunning the command`;
   return {
-    text: `${output.slice(0, SHELL_OUTPUT_HEAD)}\n[… ${omitted} characters omitted. ${hint}]\n${output.slice(-SHELL_OUTPUT_TAIL)}`,
+    text: `${output.slice(0, head)}\n[… ${omitted} characters omitted. ${hint}]\n${output.slice(-tail)}`,
     ...(spillError ? { spillError } : { spillPath }),
   };
 }

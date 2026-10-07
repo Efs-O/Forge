@@ -1,6 +1,12 @@
 import type { RegisteredTool } from './ToolRegistry';
 import { localTimeOfDay } from '../util/localClock';
-import { MAX_OUTPUT_CHARS, parseExecOutputOptions, stripAnsi } from './execHelpers';
+import {
+  MAX_OUTPUT_CHARS,
+  MAX_OUTPUT_CHARS_CEILING,
+  parseExecOutputOptions,
+  stripAnsi,
+} from './execHelpers';
+import { DEFAULT_TOOL_OUTPUT_LIMITS } from './toolOutputLimits';
 import {
   backgroundExecutionManager,
   MAX_BACKGROUND_OUTPUT_CHARS,
@@ -58,8 +64,9 @@ export function makeMonitorExecutionTool(): RegisteredTool {
             max_output_chars: {
               type: 'integer',
               minimum: 1,
-              maximum: MAX_OUTPUT_CHARS,
-              description: `Maximum new characters per returned stream. Default ${String(MAX_OUTPUT_CHARS)}.`,
+              maximum: MAX_OUTPUT_CHARS_CEILING,
+              description:
+                "Maximum new characters per returned stream. Default scales with the model's context.",
             },
             output_stream: {
               type: 'string',
@@ -80,7 +87,10 @@ export function makeMonitorExecutionTool(): RegisteredTool {
         throw new Error('monitor_execution: wait_ms must be a non-negative integer.');
       }
       const waitMs = Math.min(requestedWaitMs, MAX_MONITOR_WAIT_MS);
-      const requested = parseExecOutputOptions(args);
+      const requested = parseExecOutputOptions(
+        args,
+        context?.outputLimits?.execOutputChars ?? DEFAULT_TOOL_OUTPUT_LIMITS.execOutputChars,
+      );
       // Measured, not requested. The wait resolves the moment the process
       // finishes or the turn is cancelled, so echoing wait_ms back reported a
       // full-length wait for a call that returned in a fraction of it.
@@ -240,6 +250,10 @@ export function formatBackgroundObservation(
     describeStream(result, 'stderr', stderr.nextCursor, observation.stderrEnd, observation);
   }
   if (observation.error !== undefined) result['error'] = observation.error;
+  if (outputOptions.maxCharsClamped) {
+    result['note'] =
+      `max_output_chars clamped to ${String(outputOptions.maxChars)} for this model's context.`;
+  }
   if (requestedWaitMs !== undefined && observation.status === 'running') {
     const sawNewOutput =
       stdout.nextCursor > observation.stdoutStart || stderr.nextCursor > observation.stderrStart;

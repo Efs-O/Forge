@@ -1,5 +1,6 @@
 import type { RegisteredTool } from './ToolRegistry';
 import { capShellOutput } from './shellOutput';
+import { DEFAULT_TOOL_OUTPUT_LIMITS } from './toolOutputLimits';
 import {
   makeGitBlameTool,
   makeGitDiffTool,
@@ -82,6 +83,7 @@ export function makeGitReadTool(): RegisteredTool {
         result,
         context?.conversationId ?? 'unknown',
         context?.toolCallId ?? 'unknown',
+        context?.outputLimits?.shellInlineChars ?? DEFAULT_TOOL_OUTPUT_LIMITS.shellInlineChars,
       );
       return capped.text;
     },
