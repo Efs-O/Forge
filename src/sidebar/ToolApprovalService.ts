@@ -25,10 +25,15 @@ export interface ToolApprovalSink {
 
 /** A tool was refused by unattended policy, rather than by a human. */
 export class ToolApprovalPolicyDenied extends Error {
-  constructor(toolName: string) {
+  /** `job` is false for an unattended bus turn, which has no RESULT contract. */
+  constructor(toolName: string, job = true) {
     super(
       `unattended: dangerous tool denied by policy: "${toolName}". ` +
-        'Stop and report RESULT: failed naming the action you needed.',
+        (job
+          ? 'Stop and report RESULT: failed naming the action you needed.'
+          : 'Nobody is present to approve it, so do not retry it. Continue with a ' +
+            'non-destructive alternative (delete_file for a file, a fresh directory ' +
+            'instead of clearing one), or report the step as not done.'),
     );
     this.name = 'ToolApprovalPolicyDenied';
   }
@@ -116,7 +121,10 @@ export class ToolApprovalService {
   ): Promise<boolean> {
     if (signal?.aborted) return Promise.resolve(false);
     if (conversationId && this.unattended.has(conversationId)) {
-      if (dangerous) return Promise.reject(new ToolApprovalPolicyDenied(toolName));
+      if (dangerous) {
+        const job = this.unattended.jobMeta(conversationId) !== undefined;
+        return Promise.reject(new ToolApprovalPolicyDenied(toolName, job));
+      }
       return Promise.resolve(true);
     }
     if (this.clankerMode && !dangerous) return Promise.resolve(true);

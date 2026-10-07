@@ -328,6 +328,12 @@ describe('routes', () => {
     expect(accepted[1]).toContain('call `ask_live_session` with `target: "claude"`');
   });
 
+  it('passes --unattended through as an inbox option', async () => {
+    const response = await post('/agent/message?from=codex&unattended=true', 'audit');
+    expect(response.status).toBe(202);
+    expect(acceptedOptions[0]).toEqual({ unattended: true });
+  });
+
   it('rejects an unknown model with the configured valid names', async () => {
     const response = await post('/agent/message?from=codex&model=missing', 'nope');
     expect(response.status).toBe(400);

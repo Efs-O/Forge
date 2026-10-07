@@ -36,7 +36,7 @@ describe('ToolApprovalService', () => {
       (message) => posted.push(message),
       () => ({}) as never,
     );
-    const marker = unattendedConversations.mark('job-conversation');
+    const marker = unattendedConversations.mark('job-conversation', { jobId: 'j1', jobName: 'Job' });
     try {
       service.setClankerMode(true);
       await expect(
@@ -48,6 +48,20 @@ describe('ToolApprovalService', () => {
       expect(posted.some((message) => message.type === 'confirmRequest')).toBe(false);
       expect(service.getClankerMode()).toBe(true);
       expect(new ToolApprovalPolicyDenied('x').message).toContain('policy');
+    } finally {
+      marker.dispose();
+    }
+  });
+
+  it('tells an unattended bus turn to carry on rather than report a job RESULT', async () => {
+    const service = new ToolApprovalService(() => undefined, () => ({}) as never);
+    const marker = unattendedConversations.mark('bus-conversation');
+    try {
+      const denied = service.request('shell', 'rm -rf build', true, 'bus-conversation');
+      await expect(denied).rejects.toMatchObject({ name: 'ToolApprovalPolicyDenied' });
+      const message = await denied.catch((err: Error) => err.message);
+      expect(message).toContain('do not retry it');
+      expect(message).not.toContain('RESULT');
     } finally {
       marker.dispose();
     }

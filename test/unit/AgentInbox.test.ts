@@ -328,12 +328,13 @@ describe('AgentInbox', () => {
     inbox.accept('new chat', 'claude', false, { newChat: true });
     inbox.accept('switch model', 'claude', false, { model: 'm' });
     inbox.accept('steer', 'claude', true);
+    inbox.accept('unattended', 'claude', false, { unattended: true });
     const target = (options?: { from?: string }): string =>
       options?.from === 'claude' ? 'A' : 'B';
     // A turn that never ends would starve these; the next tool-round gap takes them.
     expect(inbox.claimMidTurn('A', target)).toEqual(['for A']);
     expect(inbox.claimMidTurn('A', target)).toEqual([]);
-    expect(inbox.pending).toBe(4);
+    expect(inbox.pending).toBe(5);
     expect(inbox.claimMidTurn('B', target)).toEqual(['for B']);
     await tick();
     expect(h.submitted).toEqual([]); // claimed messages never also start a turn

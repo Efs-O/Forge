@@ -8,6 +8,7 @@ import {
 import { forgeInboundPrompt } from '../../src/agentBus/busContent';
 import type { ForgeConfig } from '../../src/config/types';
 import type { ForgeHostFacade } from '../../src/sidebar/ForgeHostFacade';
+import { unattendedConversations } from '../../src/sidebar/unattendedConversations';
 
 describe('agent bus conversation targeting', () => {
   it('steers the sender conversation, not the currently visible conversation', async () => {
@@ -152,6 +153,27 @@ describe('a --new without --model follows the loaded backend', () => {
     const { facade, setConversationModel } = makeFacade(null);
     await submitBusMessage(facade, 'hello', { from: 'codex', newChat: true });
     expect(setConversationModel).not.toHaveBeenCalled();
+  });
+});
+
+describe('--unattended', () => {
+  const makeFacade = (seen: boolean[]) =>
+    ({
+      status: () => ({ activeConversationId: 'visible', conversations: [{ id: 'visible', title: 'V' }] }),
+      recentExchanges: () => [],
+      restoreConversation: vi.fn(async () => ({})),
+      send: vi.fn(async (id: string) => {
+        seen.push(unattendedConversations.has(id));
+        return { kind: 'completed' as const };
+      }),
+    }) as unknown as ForgeHostFacade;
+
+  it('marks the chat unattended for exactly its own turn', async () => {
+    const seen: boolean[] = [];
+    await submitBusMessage(makeFacade(seen), 'audit', { from: 'codex', targetConversationId: 'visible', unattended: true });
+    expect(unattendedConversations.has('visible')).toBe(false);
+    await submitBusMessage(makeFacade(seen), 'hello', { from: 'codex', targetConversationId: 'visible' });
+    expect(seen).toEqual([true, false]);
   });
 });
 

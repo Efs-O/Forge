@@ -67,5 +67,7 @@ export async function readAgentRouteFields(
   if (fields['reply_in_chat'] === 'false') fields['reply_in_chat'] = false;
   if (fields['to_running'] === 'true') fields['to_running'] = true;
   if (fields['to_running'] === 'false') fields['to_running'] = false;
+  if (fields['unattended'] === 'true') fields['unattended'] = true;
+  if (fields['unattended'] === 'false') fields['unattended'] = false;
   return fields;
 }

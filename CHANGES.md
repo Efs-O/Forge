@@ -29,6 +29,10 @@
 - When `web_fetch` truncates a page, it now says how much it showed and suggests `find`.
 - `/init` writes only lasting facts. It writes the build and test gate as one chained command, run only after code changes, and proves a regression test by running it before the fix.
 
+### Agent-bus turns nobody watches
+
+- `forge.sh say --unattended` runs the turn the way a job runs: a destructive command is refused at once instead of opening an approval dialog that nobody will answer, and other confirmations are approved. The refusal tells the agent to carry on another way. The chat is attended again after that turn.
+
 ## 0.16.91
 
 ### `/init` lets the agent fill in FORGE.md

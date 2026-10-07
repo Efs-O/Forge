@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 #   forge.sh reply <id> [file]        answer a question Forge is waiting on
-#   forge.sh say <your-name> [--model <name>] [--new] [--reply-in-chat] [--to <conversationId>|--to-running] [file]  message Forge
+#   forge.sh say <your-name> [--model <name>] [--new] [--reply-in-chat] [--unattended] [--to <conversationId>|--to-running] [file]  message Forge
 #   forge.sh send <your-name> <to> [--to <conversationId>|--to-running] [file]  relay (the verdict wakes the sending Forge chat when it is open), or target a Forge chat when <to> is forge
 #   forge.sh send-file <your-name> --to <conversationId> <workspace-relative-path> [--caption-file <file>]  send a file directly to its Telegram chat (no Forge model turn)
 #   forge.sh remote-notify <claude|codex|copilot> <exchangeId> [file]  notify the Telegram chat that opened this exchange
@@ -227,7 +227,7 @@ if [ "$VERB" = "send-file" ]; then
   exit 0
 fi
 [ $# -ge 2 ] || usage
-ARG=""; SRC="-"; MODEL=""; NEW_CHAT=""; REPLY_IN_CHAT=""; CONVERSATION_ID=""; TO_RUNNING=""; ORIGIN_CONVERSATION=""
+ARG=""; SRC="-"; MODEL=""; NEW_CHAT=""; REPLY_IN_CHAT=""; UNATTENDED=""; CONVERSATION_ID=""; TO_RUNNING=""; ORIGIN_CONVERSATION=""
 if [ "$VERB" = "say" ]; then
   shift
   while [ $# -gt 0 ]; do
@@ -235,6 +235,7 @@ if [ "$VERB" = "say" ]; then
       --model) [ $# -ge 2 ] || usage; MODEL="$2"; shift 2;;
       --new) NEW_CHAT=true; shift;;
       --reply-in-chat) REPLY_IN_CHAT=true; shift;;
+      --unattended) UNATTENDED=true; shift;;
       --to) [ $# -ge 2 ] || usage; CONVERSATION_ID="$2"; shift 2;;
       --to-running) TO_RUNNING=true; shift;;
       --*) usage;;
@@ -272,7 +273,7 @@ case "$VERB" in
          case "$CONVERSATION_ID" in ""|*[!A-Za-z0-9._-]*) [ -z "$CONVERSATION_ID" ] || { echo "forge.sh: bad conversation id '$CONVERSATION_ID'" >&2; exit 2; };; esac
          [ -z "$CONVERSATION_ID" ] || [ -z "$TO_RUNNING" ] || usage
          [ -z "$NEW_CHAT" ] || { [ -z "$CONVERSATION_ID" ] && [ -z "$TO_RUNNING" ]; } || usage
-         ROUTE=message; QUERY="from=$ARG"; [ -n "$MODEL" ] && QUERY="$QUERY&model=$MODEL"; [ -n "$NEW_CHAT" ] && QUERY="$QUERY&new_chat=true"; [ -n "$REPLY_IN_CHAT" ] && QUERY="$QUERY&reply_in_chat=true"; [ -n "$CONVERSATION_ID" ] && QUERY="$QUERY&conversation_id=$CONVERSATION_ID"; [ -n "$TO_RUNNING" ] && QUERY="$QUERY&to_running=true" ;;
+         ROUTE=message; QUERY="from=$ARG"; [ -n "$MODEL" ] && QUERY="$QUERY&model=$MODEL"; [ -n "$NEW_CHAT" ] && QUERY="$QUERY&new_chat=true"; [ -n "$REPLY_IN_CHAT" ] && QUERY="$QUERY&reply_in_chat=true"; [ -n "$UNATTENDED" ] && QUERY="$QUERY&unattended=true"; [ -n "$CONVERSATION_ID" ] && QUERY="$QUERY&conversation_id=$CONVERSATION_ID"; [ -n "$TO_RUNNING" ] && QUERY="$QUERY&to_running=true" ;;
   send)  case "$ARG" in ""|*[!A-Za-z0-9._-]*) echo "forge.sh: a name is letters, digits, . _ - only" >&2; exit 2;; esac
          case "$CONVERSATION_ID" in ""|*[!A-Za-z0-9._-]*) [ -z "$CONVERSATION_ID" ] || { echo "forge.sh: bad conversation id '$CONVERSATION_ID'" >&2; exit 2; };; esac
          [ -z "$CONVERSATION_ID" ] || [ -z "$TO_RUNNING" ] || usage

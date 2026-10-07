@@ -19,6 +19,12 @@ export interface InboxMessageOptions {
   toRunning?: boolean;
   /** A sender-selected conversation before host-side resolution. */
   conversationId?: string;
+  /**
+   * Nobody is watching this turn: dangerous tools are refused at once instead
+   * of raising an approval dialog that would hang it, and other confirmations
+   * are auto-approved — the same policy a job run gets.
+   */
+  unattended?: boolean;
 }
 
 export interface ChatTargetSelection {
@@ -213,8 +219,8 @@ export class AgentInbox {
    * tool-round gap. Waiting for the turn to end starved a long agentic turn:
    * a refactor ran for hours as one turn and a message sat queued throughout,
    * while a Telegram or typed message reached it at the next round. A steer,
-   * `--new` or `--model` message still needs a turn of its own and keeps
-   * waiting. `targetOf` resolves the chat a message belongs in.
+   * `--new`, `--model` or `--unattended` message still needs a turn of its own
+   * and keeps waiting. `targetOf` resolves the chat a message belongs in.
    */
   claimMidTurn(
     conversationId: string,
@@ -223,7 +229,9 @@ export class AgentInbox {
     const claimed: string[] = [];
     for (let i = 0; i < this.queue.length; i++) {
       const item = this.queue[i] as QueuedMessage;
-      if (item.steer || item.options?.newChat || item.options?.model) continue;
+      if (item.steer || item.options?.newChat || item.options?.model || item.options?.unattended) {
+        continue;
+      }
       if (targetOf(hostOptions(item)) !== conversationId) continue;
       claimed.push(deliveredPrompt(item, Date.now()));
       this.queue.splice(i--, 1);

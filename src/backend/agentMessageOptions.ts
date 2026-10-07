@@ -11,6 +11,7 @@ const AgentMessageOptionsSchema = z
     reply_in_chat: z.boolean().optional(),
     conversation_id: ConversationIdSchema.optional(),
     to_running: z.boolean().optional(),
+    unattended: z.boolean().optional(),
   })
   .refine(
     (options) =>
@@ -33,6 +34,7 @@ export function parseAgentMessageOptions(fields: AgentRouteFields): InboxMessage
     reply_in_chat: fields['reply_in_chat'],
     conversation_id: fields['conversation_id'],
     to_running: fields['to_running'],
+    unattended: fields['unattended'],
   });
   if (!parsed.success) throw new AgentRouteHttpError(400, zodMessage(parsed.error));
   return {
@@ -43,6 +45,7 @@ export function parseAgentMessageOptions(fields: AgentRouteFields): InboxMessage
       ? { conversationId: parsed.data.conversation_id }
       : {}),
     ...(parsed.data.to_running !== undefined ? { toRunning: parsed.data.to_running } : {}),
+    ...(parsed.data.unattended !== undefined ? { unattended: parsed.data.unattended } : {}),
   };
 }
 

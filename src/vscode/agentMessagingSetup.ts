@@ -27,6 +27,7 @@ import { awaitedAnswers } from '../agentBus/awaitedAnswers';
 import { renderBusStatus, renderBusView } from '../agentBus/busStatusView';
 import { MAX_VIEW_COUNT, parseViewCount } from '../remote/RemoteTranscriptView';
 import type { RemoteRuntime } from '../remote/RemoteRuntime';
+import { unattendedConversations } from '../sidebar/unattendedConversations';
 
 /** The conversation a bus message from `from` belongs in. */
 function busTarget(
@@ -191,7 +192,15 @@ export async function submitBusMessage(
       text: `Forge: ${inbound.from} says:\n\n${inbound.text}`,
     });
   }
-  const outcome = await facade.send(conversationId, prompt);
+  // The marker lasts exactly this turn, like a job's: the conversation is
+  // attended again for whoever writes in it next.
+  const marker = options?.unattended ? unattendedConversations.mark(conversationId) : undefined;
+  let outcome: Awaited<ReturnType<ForgeHostFacade['send']>>;
+  try {
+    outcome = await facade.send(conversationId, prompt);
+  } finally {
+    marker?.dispose();
+  }
   return outcome.kind === 'failed'
     ? { kind: 'failed', error: outcome.error }
     : { kind: outcome.kind };
