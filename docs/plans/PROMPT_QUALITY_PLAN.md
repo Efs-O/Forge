@@ -311,6 +311,36 @@ probe confirmed the C-all template reached the model.
 - **Model limit, not harness:** all three missed the FAQ contradiction on docs.
 - **Grader fix:** `askedOrStated` passed C-all on a quoted FAQ heading's `?`;
   tightened before the result was recorded, and all runs regraded under it.
+- **Correction:** the OpenCode column ran greedy, not 0.6 / 0.95 —
+  `opencode.json` sets no temperature and Strata's default is greedy. The
+  parity rerun below fixes that.
+
+### Parity rerun (2026-10-07): thinking round-trip fixed, OpenCode at 0.6
+
+The transcripts showed the speed gap's cause: Forge never sent a round's
+reasoning back to Strata (`preservesThinking()` honoured the flag for
+`llama.cpp` only; Strata is `openai-compatible`), while OpenCode sends it as
+`reasoning_content` every round. On buried B found the bug in round 13 and lost
+it by round 16. Fixed in 19912dd; a direct probe confirmed Strata reads a
+sent-back `reasoning_content`. Rerun: B plus `preserve_thinking` (variant `pt`)
+against OpenCode with `opencode-t06.json`, whose 0.6 / 0.95 was confirmed by a
+proxy capture. One run per cell, Forge then OpenCode per task.
+
+| Task | B + pt | OpenCode 0.6 |
+|---|---|---|
+| buried | pass, 258 s, 20 req, 10.3K | pass, 165 s, 16 req, 5.2K |
+| review | pass, 106 s, 5, 4.3K | pass, 73 s, 5, 2.7K |
+| ambiguous | pass, 127 s, 9, 4.6K | pass, 92 s, 12, 2.4K |
+| quickfix | pass, 76 s, 10, 2.1K | pass, 78 s, 10, 1.6K |
+| docs | fail, 46 s, 4, 1.0K | fail, 28 s, 3, 0.4K |
+| **Total** | 4/5, 613 s, 48 req, 22.3K | 4/5, 436 s, 46 req, 12.4K |
+
+- Wall time ratio 2.1× → 1.4×; request count is now level (48 vs 46). B's own
+  total fell from 866 s to 613 s.
+- What is left is tokens per round, not rounds. Part of it is the final answer:
+  on review Forge's ran 4,266 characters against OpenCode's 1,526.
+- Buried also spent a round on an unasked `FORGE.md` edit, prompted by the
+  `/init` file's "add durable conventions … here" line.
 
 ## Runs
 
