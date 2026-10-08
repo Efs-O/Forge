@@ -292,6 +292,7 @@ export async function runModelTurn(
       signal: ctrl.signal,
       maxRounds,
       writeChunkLimit: writeLimit,
+      offerAfterTruncation: ['append_file'],
       nativeTools,
       stripAllTools: useStrip || model.strip_tools === true,
       includeUsage: true,

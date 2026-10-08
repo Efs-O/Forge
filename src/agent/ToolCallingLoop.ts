@@ -51,6 +51,8 @@ export async function runToolCallingLoop(
   let loopGuard = new ToolLoopGuard();
   let loopRecoveries = 0;
   let truncationRecoveries = 0;
+  // Sticky for the turn: the recovery's write + append chunks span several rounds.
+  let truncatedThisTurn = false;
   let reasoningStopRetries = 0;
   let midTurnCompactions = 0;
   let lastCompactionRound = 0;
@@ -117,7 +119,13 @@ export async function runToolCallingLoop(
     // LESS room than the attempt that just failed, and cut at the identical
     // byte. Spending the whole budget on the write is the point of the retry.
     const suppressThinking = suppressesThinking;
-    const toolDefinitions = options.getToolDefinitions();
+    // Unlocking mid-turn costs one cold re-prefill, paid only on a cut-off turn.
+    const toolDefinitions = options
+      .getToolDefinitions()
+      .filter(
+        ({ function: { name } }) =>
+          truncatedThisTurn || !options.offerAfterTruncation?.includes(name),
+      );
     const offeredToolNames = toolDefinitions.map((definition) => definition.function.name);
     const built = buildRoundRequest({
       model: options.model,
@@ -184,6 +192,7 @@ export async function runToolCallingLoop(
       // oversized output — the retry that turned one lost call into a lost turn.
       const truncation = asTruncation(err);
       if (truncation) {
+        truncatedThisTurn = true;
         if (++truncationRecoveries > MAX_TRUNCATION_RECOVERIES) {
           // Retrying in the same space failed; only more space can help. Let
           // the next round compact first, or fail there if it cannot.

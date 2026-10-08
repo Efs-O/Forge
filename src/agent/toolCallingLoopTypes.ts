@@ -18,6 +18,13 @@ export interface ToolCallingLoopOptions {
   maxRounds: number;
   /** The model's `writeChunkLimit`; truncation recovery stays under it. */
   writeChunkLimit?: number;
+  /**
+   * Tools held back until a tool call is cut off this turn. Offering
+   * `append_file` up front made the model split new files into write + append
+   * calls it did not need (5/5 runs on one task), each a separate request; with
+   * no append tool on offer, the same model wrote them in one call.
+   */
+  offerAfterTruncation?: readonly string[];
   maxOutputTokens?: number;
   nativeTools: boolean;
   stripAllTools?: boolean;

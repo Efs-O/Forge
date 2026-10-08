@@ -141,6 +141,60 @@ describe('truncated tool calls', () => {
     expect(round).toBe(3);
   });
 
+  it('holds append_file back until a call is cut off, then keeps offering it', async () => {
+    const offered: string[][] = [];
+    let round = 0;
+    streamModelChatCompletion.mockImplementation(
+      async (
+        _url: string,
+        req: { tools?: { function: { name: string } }[] },
+        _m: unknown,
+        h: Handlers,
+      ) => {
+        offered.push((req.tools ?? []).map((t) => t.function.name));
+        round += 1;
+        if (round === 2) {
+          h.onError(
+            new ToolCallTruncatedError({
+              toolName: 'write_file',
+              toolCallId: 'call_cut',
+              approxBytes: 9000,
+              finishReason: 'length',
+            }),
+          );
+          return;
+        }
+        if (round < 4) {
+          h.onToolCalls([
+            {
+              id: `c${round}`,
+              type: 'function',
+              function: { name: 'write_file', arguments: '{}' },
+            },
+          ]);
+          h.onDone('tool_calls');
+          return;
+        }
+        h.onToken('done');
+        h.onDone('stop');
+      },
+    );
+
+    await runToolCallingLoop(
+      runOptions([{ role: 'user', content: 'go' }], {
+        getToolDefinitions: () =>
+          ['write_file', 'append_file'].map((name) => ({ type: 'function', function: { name } })),
+        offerAfterTruncation: ['append_file'],
+      }) as never,
+    );
+    expect(offered).toEqual([
+      ['write_file'],
+      ['write_file'],
+      ['write_file', 'append_file'],
+      ['write_file', 'append_file'],
+    ]);
+  });
+
   it('fails the turn once recoveries are exhausted', async () => {
     streamModelChatCompletion.mockImplementation(
       async (_url: string, _req: unknown, _model: unknown, h: Handlers) => {
