@@ -96,7 +96,8 @@ describe('builtin execute template', () => {
     expect(prompt).toContain('write code into files with write_file or edit_file');
     expect(prompt).toContain('Final answer: at most 8 lines, no headings');
     expect(prompt).toContain('Verify the change before calling it done');
-    expect(prompt).toContain('when `render_html_to_image` is available');
+    // When to preview is the agent's call; the tool description says what preview shows.
+    expect(prompt).not.toContain('render_html_to_image');
     expect(prompt).toContain('a preview result is a tool result');
   });
 
