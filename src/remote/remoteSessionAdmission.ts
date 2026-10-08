@@ -1,8 +1,10 @@
 import type { RemoteInboundDisposition, RemoteInboundEvent } from './types';
 import type { RemotePromptAdmissionDeps } from './RemotePromptAdmission';
 import { admitRemotePrompt } from './RemotePromptAdmission';
-import { remoteSessionAskFromText } from './remoteSessionTellCommands';
-import { MAX_TELL_MESSAGE_CHARS } from '../tools/tellLiveSessionTool';
+import {
+  MAX_AGENT_SESSION_MESSAGE_CHARS,
+  remoteSessionAskFromText,
+} from './remoteSessionTellCommands';
 import { ephemeralRejection } from './RemoteEphemeralMessages';
 import { answerRemoteSessionQuestion, sessionQuestionForReply } from './RemoteSessionBridge';
 import { agentDisplayName } from '../agentLinks/chatAgentLinks';
@@ -35,11 +37,11 @@ export async function admitRemoteSessionCommand(
         ? 'usage: /tell <claude|codex|copilot> <message>'
         : `usage: /${ask.target} <message>`,
     );
-  if (ask.message.length > MAX_TELL_MESSAGE_CHARS) {
+  if (ask.message.length > MAX_AGENT_SESSION_MESSAGE_CHARS) {
     return ephemeralRejection(
       ask.tell
-        ? `/tell message is ${ask.message.length} chars; the limit is ${MAX_TELL_MESSAGE_CHARS}.`
-        : `/${ask.target} message exceeds ${MAX_TELL_MESSAGE_CHARS} characters`,
+        ? `/tell message is ${ask.message.length} chars; the limit is ${MAX_AGENT_SESSION_MESSAGE_CHARS}.`
+        : `/${ask.target} message exceeds ${MAX_AGENT_SESSION_MESSAGE_CHARS} characters`,
     );
   }
   if (event.attachments?.length) return ephemeralRejection('session commands accept text only');
@@ -100,8 +102,8 @@ async function answerSessionQuestion(
   acknowledge: (chatId: string, text: string) => Promise<void>,
   onError?: (message: string) => void,
 ): Promise<RemoteInboundDisposition> {
-  if (answer.trim().length > MAX_TELL_MESSAGE_CHARS) {
-    return ephemeralRejection(`answer exceeds ${MAX_TELL_MESSAGE_CHARS} characters`);
+  if (answer.trim().length > MAX_AGENT_SESSION_MESSAGE_CHARS) {
+    return ephemeralRejection(`answer exceeds ${MAX_AGENT_SESSION_MESSAGE_CHARS} characters`);
   }
   const outcome = await answerRemoteSessionQuestion(
     deps.store,

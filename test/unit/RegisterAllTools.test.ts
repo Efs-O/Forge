@@ -272,8 +272,6 @@ describe('registerAllTools canonical coordinator catalog', () => {
       .map((tool) => tool.function.name)
       .filter((name) => !hidden.has(name));
     expect(names).toContain('ask_agent');
-    expect(names).not.toContain('ask_live_session');
-    expect(names).not.toContain('tell_live_session');
   });
 
   it('lets search and delegation wiring control only their documented tools', () => {

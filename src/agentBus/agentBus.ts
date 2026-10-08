@@ -3,6 +3,7 @@ import * as os from 'os';
 import * as path from 'path';
 import { randomBytes } from 'crypto';
 import { BUS_README, CLIENT_SCRIPT } from './busContent';
+import { getLogger } from '../util/logger';
 
 /**
  * The agent-bus files (docs/plans/AGENT_MESSAGING_PLAN.md). Every artifact
@@ -36,6 +37,7 @@ const LEGACY_FILES = ['watch.sh', 'listening'];
  * session instead of the one we asked.
  */
 const PENDING_SUFFIX = '-forge.pending';
+const log = getLogger();
 
 /** The bus lives under the OS profile, never the workspace: a
  *  `workspaceFolders[0]` that is not the repo root cannot move it. */
@@ -81,6 +83,62 @@ export function ensureBus(paths: BusPaths): void {
       // Best effort: a leftover must never block a question. Retried next call.
     }
   }
+}
+
+/** Remove the pre-link alias ownership records once during extension activation. */
+export function removeLegacyAliasFiles(
+  paths: BusPaths,
+  showWarning: (message: string) => void,
+): string[] {
+  const ownershipDir = path.join(paths.root, 'ownership');
+  let names: string[] = [];
+  try {
+    names = fs.readdirSync(ownershipDir);
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code !== 'ENOENT') {
+      const message = `Could not inspect legacy agent ownership files: ${String(error)}`;
+      log.error(message);
+      showWarning(message);
+      return [];
+    }
+  }
+  let rootNames: string[] = [];
+  try {
+    rootNames = fs.readdirSync(paths.root);
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code !== 'ENOENT') {
+      const message = `Could not inspect legacy agent ownership files: ${String(error)}`;
+      log.error(message);
+      showWarning(message);
+      return [];
+    }
+  }
+  const files = [
+    ...names
+      .filter((name) => name.endsWith('.json') || name.endsWith('.claim'))
+      .map((name) => path.join(ownershipDir, name)),
+    ...rootNames
+      .filter((name) => name.endsWith('.claim'))
+      .map((name) => path.join(paths.root, name)),
+  ];
+  const removed: string[] = [];
+  const failures: string[] = [];
+  for (const file of files) {
+    try {
+      fs.unlinkSync(file);
+      removed.push(file);
+      log.info(`Removed legacy agent ownership file: ${file}`);
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code === 'ENOENT') continue;
+      failures.push(`${file}: ${String(error)}`);
+    }
+  }
+  if (failures.length > 0) {
+    const message = `Could not remove legacy agent ownership files: ${failures.join('; ')}`;
+    log.error(message);
+    showWarning(message);
+  }
+  return removed;
 }
 
 export function newBusId(now: number = Date.now(), random: () => string = randomHex): string {

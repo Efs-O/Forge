@@ -11,30 +11,7 @@ import type { ForgeHostFacade } from '../../src/sidebar/ForgeHostFacade';
 import { unattendedConversations } from '../../src/sidebar/unattendedConversations';
 
 describe('agent bus conversation targeting', () => {
-  it('steers the sender conversation, not the currently visible conversation', async () => {
-    const interrupt = vi.fn(async () => {});
-    const facade = {
-      status: () => ({
-        activeConversationId: 'visible',
-        streamingConversationIds: ['sender-chat'],
-        conversations: [
-          { id: 'visible', title: 'Visible', updatedAt: 2 },
-          { id: 'sender-chat', title: 'Codex: task', updatedAt: 1 },
-        ],
-      }),
-      recentExchanges: () => [],
-      interrupt,
-    } as unknown as ForgeHostFacade;
-
-    await expect(interruptForgeForSender(facade, 'codex')).resolves.toEqual({
-      steered: true,
-      conversationId: 'sender-chat',
-      title: 'Codex: task',
-    });
-    expect(interrupt).toHaveBeenCalledExactlyOnceWith('sender-chat');
-  });
-
-  it('reports that no turn was stopped when the sender conversation is idle', async () => {
+  it('steers the active conversation for an agent sender', async () => {
     const interrupt = vi.fn(async () => {});
     const facade = {
       status: () => ({
@@ -49,6 +26,26 @@ describe('agent bus conversation targeting', () => {
       interrupt,
     } as unknown as ForgeHostFacade;
 
+    await expect(interruptForgeForSender(facade, 'codex')).resolves.toEqual({
+      steered: true,
+      conversationId: 'visible',
+      title: 'Visible',
+    });
+    expect(interrupt).toHaveBeenCalledExactlyOnceWith('visible');
+  });
+
+  it('reports that no turn was stopped when the sender conversation is idle', async () => {
+    const interrupt = vi.fn(async () => {});
+    const facade = {
+      status: () => ({
+        activeConversationId: 'visible',
+        streamingConversationIds: [],
+        conversations: [{ id: 'visible', title: 'Visible', updatedAt: 2 }],
+      }),
+      recentExchanges: () => [],
+      interrupt,
+    } as unknown as ForgeHostFacade;
+
     await expect(interruptForgeForSender(facade, 'codex')).resolves.toMatchObject({
       steered: false,
       reason: expect.stringContaining('not streaming'),
@@ -57,7 +54,7 @@ describe('agent bus conversation targeting', () => {
   });
 
   it.each([
-    { options: { from: 'codex' }, conversationId: 'sender-chat', creates: 0, restores: 1 },
+    { options: { from: 'codex' }, conversationId: 'visible', creates: 0, restores: 0 },
     {
       options: { from: 'codex', newChat: true },
       conversationId: 'new-chat',
@@ -89,17 +86,17 @@ describe('agent bus conversation targeting', () => {
       expect(createConversation).toHaveBeenCalledTimes(creates);
       expect(restoreConversation).toHaveBeenCalledTimes(restores);
       if ('newChat' in options) expect(createConversation).toHaveBeenCalledWith({ activate: true });
-      else expect(restoreConversation).toHaveBeenCalledWith('sender-chat', { activate: false });
+      else expect(restoreConversation).not.toHaveBeenCalled();
       expect(send).toHaveBeenCalledWith(conversationId, 'hello');
     },
   );
 
-  it('mirrors an inbound agent message to the addressed host activity chat', async () => {
+  it('mirrors an inbound agent message to the active host activity chat', async () => {
     const emitHostActivity = vi.fn();
     const facade = {
       status: () => ({
         activeConversationId: 'visible',
-        conversations: [{ id: 'sender-chat', title: 'Codex: task', updatedAt: 1 }],
+        conversations: [{ id: 'visible', title: 'Visible', updatedAt: 1 }],
       }),
       recentExchanges: () => [],
       restoreConversation: vi.fn(async () => ({}) as never),
@@ -112,7 +109,7 @@ describe('agent bus conversation targeting', () => {
     });
 
     expect(emitHostActivity).toHaveBeenCalledWith({
-      conversationId: 'sender-chat',
+      conversationId: 'visible',
       text: 'Forge: codex says:\n\nPlease review the patch.',
     });
   });

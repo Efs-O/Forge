@@ -12,7 +12,7 @@ import { remoteSessionAskFromText } from '../../src/remote/remoteSessionTellComm
 import { handleRemoteCommand } from '../../src/remote/RemoteCommandHandler';
 import { drainRemoteQueue, type RemoteQueueDrainDeps } from '../../src/remote/RemoteQueueDrain';
 import { RemoteAgentProgress, CLOCK_INTERVAL_MS } from '../../src/remote/RemoteAgentProgress';
-import { MAX_TELL_MESSAGE_CHARS } from '../../src/tools/tellLiveSessionTool';
+import { MAX_AGENT_SESSION_MESSAGE_CHARS } from '../../src/remote/remoteSessionTellCommands';
 import type { AskAgentResult } from '../../src/agentLinks/askAgentService';
 import type { AgentLink } from '../../src/agentLinks/chatAgentLinks';
 import type { RemoteInboundEvent } from '../../src/remote/types';
@@ -187,10 +187,10 @@ describe('Telegram linked-agent asks', () => {
       kind: 'rejected',
       reason: 'usage: /tell <claude|codex|copilot> <message>',
     });
-    const tooLong = 'x'.repeat(MAX_TELL_MESSAGE_CHARS + 1);
+    const tooLong = 'x'.repeat(MAX_AGENT_SESSION_MESSAGE_CHARS + 1);
     await expect(admit(state, `/tell claude ${tooLong}`, 'too-long')).resolves.toMatchObject({
       kind: 'rejected',
-      reason: expect.stringContaining(String(MAX_TELL_MESSAGE_CHARS + 1)),
+      reason: expect.stringContaining(String(MAX_AGENT_SESSION_MESSAGE_CHARS + 1)),
     });
     expect(state.store.queued()).toEqual([]);
   });

@@ -44,9 +44,9 @@ describe('busTargetConversation', () => {
     ],
   };
 
-  it('follows the sender to its latest chat, not the active tab', () => {
-    expect(busTargetConversation('codex', status, exchanges)).toBe('release');
-    expect(busTargetConversation('Codex', status, exchanges)).toBe('release');
+  it('does not route agent senders by their display name', () => {
+    expect(busTargetConversation('codex', status, exchanges)).toBe('mine');
+    expect(busTargetConversation('Codex', status, exchanges)).toBe('mine');
   });
 
   it('falls back to the active chat for a new sender or no sender', () => {
@@ -58,12 +58,12 @@ describe('busTargetConversation', () => {
     expect(busTargetConversation('claude', status, exchanges)).toBe('mine');
   });
 
-  it('recognises a sender-started chat by title after compaction', () => {
+  it('keeps a non-agent sender on its latest chat after compaction', () => {
     const compacted = {
       ...status,
-      conversations: [...status.conversations, conv('compacted', 4, { title: 'codex: push' })],
+      conversations: [...status.conversations, conv('compacted', 4, { title: 'gemini: push' })],
     };
-    expect(busTargetConversation('codex', compacted, exchanges)).toBe('compacted');
+    expect(busTargetConversation('gemini', compacted, exchanges)).toBe('compacted');
   });
 });
 

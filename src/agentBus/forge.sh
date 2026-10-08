@@ -9,8 +9,7 @@
 #   forge.sh ack-verdict <your-name> <exchangeId>   acknowledge a read verdict and remove its retained copy
 #   forge.sh steer <your-name> <to> [file] interrupt <to>'s running turn (forge/claude/codex/copilot); runs next
 #   forge.sh cancel <your-name> <id|all>  withdraw your queued message(s) to Forge not yet started
-#   forge.sh join claude|codex        this interactive session becomes that mesh alias
-#   forge.sh who                      who is in the mesh, and what each is doing
+#   forge.sh who                      linked agent sessions held by Forge windows
 #   forge.sh status <your-name>       what your chat with Forge is doing now (tool, last words, context)
 #   forge.sh view <your-name> [n]     the last n answers in your chat (default 3, max 10)
 #   forge.sh wait <your-name> [minutes]  block until your chat is idle with nothing queued (default 60 min, exit 124 on timeout)
@@ -53,7 +52,7 @@ if [ -n "${WSL_DISTRO_NAME:-}" ] && command -v curl.exe >/dev/null 2>&1; then
     curl.exe "${out[@]}"
   }
 fi
-# who is a GET with no body: it prints the mesh and exits before the body logic.
+# who is a GET with no body: it prints linked sessions and exits before the body logic.
 if [ "$VERB" = "who" ]; then
   [ $# -le 1 ] || usage
   [ -f "$EP" ] || { echo "forge.sh: not reachable: open Forge with control_server and agent_bus enabled" >&2; exit 1; }
@@ -61,9 +60,9 @@ if [ "$VERB" = "who" ]; then
   TOKEN="$(grep '"token"' "$EP" | cut -d'"' -f4)"
   BODY="$(curl -sS --fail-with-body -X GET -H "Authorization: Bearer $TOKEN" "$URL/agent/who")" || { echo "forge.sh: Forge's endpoint did not accept it." >&2; exit 1; }
   printf '%s\n' "$BODY" | sed 's/.*\[/[/;s/\].*//' | sed 's/},{/}\n{/g' | awk -F'"' '{
-    a="";att="";act="";det=""
-    for(i=1;i<=NF;i++){ if($i=="alias")a=$(i+2); else if($i=="attachment")att=$(i+2); else if($i=="activity")act=$(i+2); else if($i=="detail")det=$(i+2) }
-    printf "%-8s  %-9s  %-9s  %s\n", a, att, act, det
+    s="";att="";act="";det=""
+    for(i=1;i<=NF;i++){ if($i=="session")s=$(i+2); else if($i=="attachment")att=$(i+2); else if($i=="activity")act=$(i+2); else if($i=="detail")det=$(i+2) }
+    printf "%-8s  %-9s  %-9s  %s\n", s, att, act, det
   }'
   exit 0
 fi
@@ -211,6 +210,8 @@ if [ "$VERB" = "send-file" ]; then
   NAME="${2:-}"
   [ $# -ge 5 ] || usage
   case "$NAME" in ""|*[!A-Za-z0-9._-]*) echo "forge.sh: a name is letters, digits, . _ - only" >&2; exit 2;; esac
+  set_sender_identity "$NAME"
+  [ -n "$SENDER_KIND" ] || { echo "forge.sh: send-file requires an agent session identity" >&2; exit 2; }
   shift 2
   [ "$1" = "--to" ] || usage
   CONVERSATION_ID="${2:-}"
@@ -238,6 +239,8 @@ if [ "$VERB" = "send-file" ]; then
     -sS --fail-with-body -X POST
     -H "Authorization: Bearer $TOKEN"
     --data-urlencode "from=$NAME"
+    --data-urlencode "sender_kind=$SENDER_KIND"
+    --data-urlencode "sender_session_id=$SENDER_ID"
     --data-urlencode "conversation_id=$CONVERSATION_ID"
     --data-urlencode "path=$FILE_PATH"
   )
@@ -311,14 +314,6 @@ case "$VERB" in
          [ $# -eq 3 ] || usage
          case "$3" in ""|*[!A-Za-z0-9_-]*) echo "forge.sh: bad id '$3' (the id say printed, or all)" >&2; exit 2;; esac
          ROUTE=cancel; QUERY="from=$ARG&id=$3"; SRC=/dev/null ;;
-  join)  case "$ARG" in
-           claude) case "$CLAUDE_PID" in ""|*[!0-9]*) echo "forge.sh: CLAUDE_PID is not set: run this from inside a Claude Code session" >&2; exit 2;; esac
-                   QUERY="alias=$ARG&pid=$CLAUDE_PID" ;;
-           codex) case "${CODEX_THREAD_ID:-}" in ""|*[!A-Za-z0-9._-]*) echo "forge.sh: CODEX_THREAD_ID is not set: run this from inside a Codex session" >&2; exit 2;; esac
-                  QUERY="alias=$ARG&thread=$CODEX_THREAD_ID" ;;
-           *) echo "forge.sh: join accepts only 'claude' or 'codex'" >&2; exit 2 ;;
-         esac
-         ROUTE=join; SRC=/dev/null ;;
   *) usage ;;
 esac
 TMP="$(mktemp)"; trap 'rm -f "$TMP"' EXIT

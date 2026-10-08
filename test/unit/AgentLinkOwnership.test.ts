@@ -81,6 +81,15 @@ describe('chat agent link ownership', () => {
     expect(violations).toEqual([]);
   });
 
+  it('keeps the deleted alias ownership layer out of source', () => {
+    const sourceRoot = path.resolve('src');
+    const obsolete = /ownershipPath|aliasRegistry/u;
+    const violations = sourceFiles(sourceRoot).filter((file) =>
+      obsolete.test(fs.readFileSync(file, 'utf8')),
+    );
+    expect(violations).toEqual([]);
+  });
+
   it('links, unlinks, and rebuilds the reverse index', () => {
     const first = conversation('first');
     const second = conversation('second');

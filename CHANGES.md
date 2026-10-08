@@ -2,6 +2,8 @@
 
 ## 0.17.0
 
+- Agent sessions can be linked to individual chats. `ask_agent` uses that link, and messages sent by an agent session arrive in the chat for that session with Forge's reply delivered back automatically; the old inbound prompt footer is gone. Telegram now has `/agents` and link-based `/claude`, `/codex`, `/copilot`, and `/tell` commands.
+- Removed `forge.sh join`, `--reply-in-chat`, `ask_live_session`, `tell_live_session`, and the global agent aliases. Agent-to-agent messages now resolve through the sender chat's links.
 - Added a session-log visibility audit that reports tool calls only when offered, hidden shell workarounds, and description exclusions.
 
 ### One `shell` tool replaces four

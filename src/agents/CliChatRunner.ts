@@ -9,7 +9,7 @@ import { inferCliAgentName, type CliAgentName, type CliAgentRunResult } from './
 import { snapshotWorkspaceBefore } from './WorkspaceCheckpoint';
 
 export interface PreparedCliChatAgent {
-  /** Copilot is excluded: it runs as an owned ACP session, not a warm CLI chat. */
+  /** The direct CLI chat runner currently supports Claude and Codex. */
   cliName: Exclude<CliAgentName, 'copilot'>;
   executable: string;
 }
@@ -88,9 +88,7 @@ export async function prepareCliChatAgent(
   }
   const cliName = inferCliAgentName(model.cli);
   if (cliName === 'copilot') {
-    throw new Error(
-      'Forge: Copilot is not a warm CLI chat agent — it runs as an owned ACP session (CopilotAcpSession), not through the one-shot driver.',
-    );
+    throw new Error('Forge: Copilot is not supported as a selected CLI chat model.');
   }
   return { cliName, executable: await resolveCliExecutable(model.cli, cliName) };
 }

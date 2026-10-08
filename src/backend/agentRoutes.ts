@@ -2,7 +2,6 @@ import type * as http from 'http';
 import { timingSafeEqual } from 'crypto';
 import { BUS_ID_PATTERN, writeReply, type BusPaths } from '../agentBus/agentBus';
 import { MAX_INBOUND_CHARS, forgeInboundPrompt } from '../agentBus/busContent';
-import { parseMeshCommand } from '../agentMesh/meshCommands';
 import type {
   AgentInbox,
   ChatTargetResult,
@@ -57,10 +56,8 @@ export interface AgentRoutesDeps {
   recordPendingAccepted?: (record: PendingAgentReply) => Promise<void>;
   isChatBusy?: (conversationId: string) => boolean;
   /**
-   * The host-side relay (AGENT_MESH_PLAN M6). When an inbound message names a
-   * `to` that is not Forge, the host forwards it through the recipient's
-   * adapter with zero Forge model turns. Absent ⇒ a non-Forge `to` is rejected
-   * (not silently delivered to the Forge inbox).
+   * Relay for non-agent senders that name a recipient. Agent senders use their
+   * session links through `relayAgent`. Absent ⇒ a non-Forge `to` is rejected.
    */
   relay?: (
     from: string,
@@ -79,9 +76,8 @@ export interface AgentRoutesDeps {
     { ok: true; exchangeId?: string; deliveredTo?: string } | { ok: false; error: string }
   >;
   /**
-   * F-06: a `priority=steer` message to another agent interrupts its active
-   * turn and runs the steer next. Absent ⇒ `priority=steer` is treated as an
-   * ordinary relay (the field is ignored).
+   * A `priority=steer` message to another named recipient interrupts its
+   * active turn and runs the steer next. Absent ⇒ it is an ordinary relay.
    */
   steer?: (
     from: string,
@@ -91,8 +87,8 @@ export interface AgentRoutesDeps {
     { ok: true; exchangeId: string; deliveredTo?: string } | { ok: false; error: string }
   >;
   /**
-   * Validate an inbound `from` against live aliases (M6/§4). An unknown or
-   * forged sender is rejected with the live list. Absent ⇒ shape check only.
+   * Validate a non-agent sender name against the configured sender set.
+   * Agent identities are validated by session id in `validateAgentSender`.
    */
   validateFrom?: (
     from: string,
@@ -100,42 +96,14 @@ export interface AgentRoutesDeps {
     | { ok: true }
     | { ok: false; error: string }
     | Promise<{ ok: true } | { ok: false; error: string }>;
-  /**
-   * Dispatch a typed lifecycle command (§8, P3). When an inbound `to: forge`
-   * message parses as a mesh command (`standby codex`, `close codex`, …), it is
-   * dispatched here and the reply is written to the sender's inbox — not queued
-   * as an ordinary prompt. Absent ⇒ the text is treated as an ordinary message.
-   */
-  handleCommand?: (
-    text: string,
-  ) => Promise<{ ok: true; reply: string } | { ok: false; error: string }>;
-  /**
-   * §10: a user-opened Claude/Codex session registers itself as an alias.
-   * Claude identifies by pid; Codex identifies by thread id.
-   */
+  validateAgentSender?: (sender: AgentSender) => { ok: true } | { ok: false; error: string };
   /** Interrupt Forge's addressed chat and report whether it was streaming. */
   interruptForge?: (from: string, conversationId: string | undefined) => Promise<ForgeSteerResult>;
   /** Resolve the Forge chat that will receive an accepted agent message. */
   resolveChatTarget?: (from: string, selection: ChatTargetSelection) => ChatTargetResult;
   /**
-   * The question Forge's turn is blocked on `from` answering, if any. A queued
-   * message from that sender would run only after the answer and read as newer
-   * than it, so it is refused with the reply command instead. Steers pass.
-   */
-  awaitingAnswerFrom?: (from: string) => string | undefined;
-  join?: (
-    alias: string,
-    pid: number,
-    thread: string,
-  ) =>
-    | { ok: true; reply: string }
-    | { ok: false; error: string }
-    | Promise<{ ok: true; reply: string } | { ok: false; error: string }>;
-  /**
-   * §11: `forge.sh who` — read-only projection of every mesh participant and
-   * its state (attachment × activity). The host owns the truth (it reads the
-   * alias table, ownership records and the in-memory FIFO); the client only
-   * formats. Absent ⇒ `GET /agent/who` is 404.
+   * `forge.sh who` — read-only projection of agent sessions linked to chats.
+   * Absent ⇒ `GET /agent/who` is 404.
    */
   who?: () => Promise<unknown> | unknown;
   /** Read-only view of the sender's chat; absent means the route is 404. */
@@ -218,11 +186,10 @@ export class AgentRoutes {
       route === '/agent/holds-link' ||
       route === '/agent/reply' ||
       route === '/agent/cancel' ||
-      (route === '/agent/join' && !!this.deps.join) ||
       (route === '/agent/who' && !!this.deps.who) ||
       (route === '/agent/status' && !!this.deps.status) ||
       (route === '/agent/view' && !!this.deps.view) ||
-      (route === '/agent/send-file' && !!this.deps.sendFile && !!this.deps.validateFrom) ||
+      (route === '/agent/send-file' && !!this.deps.sendFile && !!this.deps.validateAgentSender) ||
       ((route === '/agent/remote-ask' || route === '/agent/remote-notify') &&
         !!this.deps.remoteSession) ||
       ((route === '/agent/read-verdict' || route === '/agent/ack-verdict') &&
@@ -281,23 +248,21 @@ export class AgentRoutes {
     if (req.method !== 'POST') return sendJson(res, 405, { error: 'POST only' });
     try {
       const fields = await readFields(req, url);
-      if (fields['reply_in_chat'] !== undefined)
-        throw new HttpError(
-          400,
-          'reply_in_chat was removed; Forge always delivers the final answer',
-        );
       if (route === '/agent/ack-verdict') {
         return handleVerdictAck(res, url, fields, this.deps);
       }
       if (route === '/agent/send-file') {
         if (url.searchParams.size > 0)
           throw new HttpError(400, 'send-file fields must be in the request body');
-        const { validateFrom, sendFile } = this.deps;
-        if (!validateFrom || !sendFile) {
+        const { validateAgentSender, sendFile } = this.deps;
+        if (!validateAgentSender || !sendFile) {
           return sendJson(res, 404, { error: 'no route for POST /agent/send-file' });
         }
         const result = await handleAgentFileRoute(fields, {
-          validateFrom,
+          validateSender: (from, sender) =>
+            from === sender.kind
+              ? validateAgentSender(sender)
+              : { ok: false, error: 'sender kind must match from' },
           sendFile,
         });
         return sendJson(res, result.status, result.body);
@@ -311,16 +276,6 @@ export class AgentRoutes {
         return result.kind === 'asked'
           ? sendText(res, 200, result.questionId)
           : sendJson(res, 200, { queued: true });
-      }
-      if (route === '/agent/join' && this.deps.join) {
-        const alias = (typeof fields['alias'] === 'string' ? fields['alias'] : '')
-          .trim()
-          .toLowerCase();
-        const pid = Number(fields['pid'] ?? '');
-        const thread = typeof fields['thread'] === 'string' ? fields['thread'].trim() : '';
-        const joined = await this.deps.join(alias, pid, thread);
-        if (!joined.ok) throw new HttpError(400, joined.error);
-        return sendJson(res, 200, { joined: true, reply: joined.reply });
       }
       if (route === '/agent/reply') {
         const id = typeof fields['id'] === 'string' ? fields['id'] : '';
@@ -404,29 +359,10 @@ export class AgentRoutes {
           ...(result.deliveredTo ? { delivered_to: result.deliveredTo } : {}),
         });
       }
-      // §8/P3: a `to: forge` message that parses as a typed lifecycle command
-      // is dispatched, not queued as a prompt. The reply goes to the sender.
       const text = requireText(fields, MAX_INBOUND_CHARS);
-      if (this.deps.handleCommand) {
-        const cmd = parseMeshCommand(text);
-        if (cmd) {
-          const result = await this.deps.handleCommand(text);
-          if (!result.ok) throw new HttpError(400, result.error);
-          return sendJson(res, 200, { command: cmd.verb, reply: result.reply });
-        }
-      }
       const steerForge =
         (typeof fields['priority'] === 'string' ? fields['priority'] : '').trim().toLowerCase() ===
           'steer' && !!this.deps.interruptForge;
-      const awaited = steerForge ? undefined : this.deps.awaitingAnswerFrom?.(from);
-      if (awaited) {
-        throw new HttpError(
-          409,
-          `Forge is blocked waiting for your answer to question ${awaited}, so this message would ` +
-            `only reach it after that answer and read as newer. Put it in your answer instead: ` +
-            `forge.sh reply ${awaited} <file>. To stop Forge's turn, send it as a steer.`,
-        );
-      }
       const admission = await admitInboundMessage({
         from,
         ...(declaredSender ? { sender: declaredSender } : {}),

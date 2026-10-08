@@ -50,5 +50,11 @@ export function busTargetConversation(
   exchanges: (conversationId: string) => ForgeExchange[],
 ): string {
   if (!from) return status.activeConversationId;
+  if (isAgentKindName(from)) return status.activeConversationId;
   return senderConversation(from, status, exchanges) ?? status.activeConversationId;
+}
+
+function isAgentKindName(from: string): boolean {
+  const kind = from.trim().toLowerCase();
+  return kind === 'claude' || kind === 'codex' || kind === 'copilot';
 }

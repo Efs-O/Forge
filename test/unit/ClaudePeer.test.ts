@@ -6,7 +6,6 @@ import * as path from 'path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import {
   peerKeyFile,
-  pickClaudeSession,
   readClaudeSessions,
   sendPeerMessage,
   type ClaudeSession,
@@ -79,26 +78,6 @@ describe('readClaudeSessions', () => {
 
   it('is empty when Claude Code never ran', () => {
     expect(readClaudeSessions(path.join(dir, 'missing'))).toEqual([]);
-  });
-});
-
-describe('pickClaudeSession', () => {
-  const root = path.resolve('/work/forge');
-
-  it('takes a session in a subfolder of the workspace', () => {
-    const s = live('a', 'p', { cwd: path.join(root, 'pkg') });
-    expect(pickClaudeSession([s], undefined, [root])).toEqual({ session: s });
-  });
-
-  it('does not take a folder that only shares a prefix', () => {
-    const s = live('a', 'p', { cwd: `${root}-old` });
-    const picked = pickClaudeSession([s], undefined, [root]);
-    expect('error' in picked && picked.error).toContain('other folders');
-  });
-
-  it('refuses two sessions with the same name', () => {
-    const picked = pickClaudeSession([live('a', 'p'), live('A', 'q')], 'a', [root]);
-    expect('error' in picked && picked.error).toContain('Several live Claude sessions are named');
   });
 });
 

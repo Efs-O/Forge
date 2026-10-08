@@ -13,7 +13,6 @@ import type { ChatCompletionRequest } from '../llm/types';
 import type { StreamHandlers } from '../llm/OpenAIClient';
 import { capResultText } from '../tools/resultCap';
 import { CliAgentDriver } from '../agents/CliAgentDriver';
-import type { CliSessionRegistry } from '../agents/CliSessionRegistry';
 import { runCliDelegation } from './CliDelegationRunner';
 import { resolveDelegationTarget, type DelegationTarget } from './eligibility';
 import {
@@ -38,8 +37,7 @@ export interface LocalDelegationRequest {
   focus?: string;
   maxOutputTokens?: number;
   signal?: AbortSignal;
-  /** Warm-session scope for `provider: cli` targets. Without it every
-   *  delegation spawns a cold CLI process; see CliDelegationRunner. */
+  /** Retained for callers that scope other delegation state; CLI runs are one-shot. */
   conversationId?: string;
 }
 
@@ -63,10 +61,6 @@ export interface LocalDelegationServiceDeps {
   makeTimeoutSignal?: (timeoutMs: number) => AbortSignal;
   /** Test-only injection point for the `provider: cli` branch. */
   cliDriver?: CliAgentDriver;
-  /** Shared with AgentLoop so delegation and CLI chat draw on the same warm
-   *  process pool, the same max_cli_agents cap, and the same per-conversation
-   *  disposal. Absent in tests and when no conversation context exists. */
-  cliSessions?: CliSessionRegistry;
   /** Needed only for cloud targets — the bearer token lives in SecretStorage,
    *  never in config.yaml. Absent in tests and in local-only deployments; a
    *  cloud delegation then fails with the resolver's own missing-key message. */
@@ -164,7 +158,6 @@ export class LocalDelegationService {
     );
 
     if (target.model.provider === 'cli') {
-      const registry = this.deps.cliSessions;
       try {
         return await runCliDelegation(
           request,
@@ -172,9 +165,6 @@ export class LocalDelegationService {
           this.cliDriver,
           this.deps.workspaceRoot,
           signal,
-          registry && request.conversationId
-            ? { registry, conversationId: request.conversationId }
-            : undefined,
         );
       } catch (err) {
         if (signal.aborted) {

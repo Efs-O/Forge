@@ -1,7 +1,7 @@
 /**
  * `/tell <agent> <msg>` — a one-way note
  * from Telegram into a live session's FIFO, through the same door
- * `tell_live_session` uses.
+ * `ask_agent` uses.
  *
  * It is deliberately a **tell**, never an ask: a notification has no expected
  * answer, no correlation id, and no reply contract. The wording of every
@@ -11,9 +11,7 @@
  * run yet, so it is not reported either — a remote user who is told "started"
  * will wait for an answer that this command never promised.
  *
- * Gating is `getMeshOrchestrator() !== undefined`, the single guard that
- * subsumes `agent_bus.enabled`: the orchestrator exists only when the bus is
- * up. The unattended-CLI gate is NOT applied here — it exists for unattended
+ * The unattended-CLI gate is NOT applied here — it exists for unattended
  * turns, and a command a person typed into Telegram is attended.
  */
 
@@ -23,6 +21,11 @@ const SESSION_ASK_COMMANDS = {
   '/codex': 'codex',
   '/copilot': 'copilot',
 } as const;
+
+export type RemoteSessionTarget = 'claude' | 'codex' | 'copilot';
+
+/** Maximum text accepted by session-bound Telegram agent commands. */
+export const MAX_AGENT_SESSION_MESSAGE_CHARS = 4000;
 
 /** Exact Telegram parsing; a prefixed token such as /codexy stays an ordinary command. */
 export function remoteSessionAskFromText(

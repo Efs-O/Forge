@@ -5,7 +5,7 @@ import { busPaths } from '../agentBus/agentBus';
 import type { RemoteAuth } from './RemoteAuth';
 import { appendHostNotification } from './remoteOutboxDraft';
 import type { RemoteRequestStore } from './RemoteRequestStore';
-import type { RemoteSessionTarget } from './RemoteSessionAsk';
+import type { RemoteSessionTarget } from './remoteSessionTellCommands';
 import type { RemoteInboundEvent } from './types';
 
 const QUESTION_MS = 20 * 60_000;

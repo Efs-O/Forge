@@ -1,6 +1,4 @@
 import type { CliAgentDriver } from '../agents/CliAgentDriver';
-import type { CliAgentSessionOptions } from '../agents/CliAgentSession';
-import type { CliSessionKey, CliSessionRegistry } from '../agents/CliSessionRegistry';
 import { resolveCliExecutable } from '../agents/resolveCliExecutable';
 import { inferCliAgentName, type CliAgentRunResult } from '../agents/types';
 import { capResultText } from '../tools/resultCap';
@@ -13,20 +11,6 @@ import type { DelegationTarget } from './eligibility';
 import type { LocalDelegationRequest, LocalDelegationResult } from './LocalDelegationService';
 
 /**
- * Warm delegation sessions are keyed separately from the chat sessions the
- * sidebar opens for the same (conversation, model) pair: a delegation is an
- * independent question and must not inherit or pollute the chat transcript.
- */
-export function delegationSessionKey(conversationId: string, resolvedId: string): CliSessionKey {
-  return { conversationId, modelName: `${resolvedId}#delegate` };
-}
-
-export interface CliDelegationSessionDeps {
-  registry: CliSessionRegistry;
-  conversationId: string;
-}
-
-/**
  * ask_local_agent for a `provider: cli` target (docs/plans/CONFIG_OVERHAUL_PLAN.md §2.4/§4
  * step 7): a task run by the external CLI's OWN tools — it reads and edits
  * files itself (unlike a regular delegated model, which only gets the task +
@@ -34,11 +18,8 @@ export interface CliDelegationSessionDeps {
  * spawn their own process. Throws plain Error; LocalDelegationService.ask()
  * wraps it as DelegationError.
  *
- * When a registry and a conversation are available the run reuses a warm CLI
- * process: a second review in the same conversation resumes the same session
- * instead of re-paying the cold-start (system prompt, tool schemas, CLAUDE.md,
- * MCP definitions) as a prompt-cache miss. The one-shot `driver.run` path
- * remains for callers with no conversation to key a session on.
+ * Every delegation is an independent one-shot run; selected CLI chat models
+ * use CliSessionRegistry through CliTurn and keep their conversation session.
  */
 export async function runCliDelegation(
   request: LocalDelegationRequest,
@@ -46,7 +27,6 @@ export async function runCliDelegation(
   driver: CliAgentDriver,
   workspaceRoot: string,
   signal: AbortSignal,
-  session?: CliDelegationSessionDeps,
 ): Promise<LocalDelegationResult> {
   if (!target.model.cli) {
     throw new Error(
@@ -55,9 +35,7 @@ export async function runCliDelegation(
   }
   const cliName = inferCliAgentName(target.model.cli);
   if (cliName === 'copilot') {
-    throw new Error(
-      'Copilot is not a one-shot CLI delegation target — it runs as an owned ACP session (CopilotAcpSession), not through the one-shot driver.',
-    );
+    throw new Error('Copilot is not supported as a CLI delegation target.');
   }
   const executable = await resolveCliExecutable(target.model.cli, cliName);
 
@@ -74,34 +52,15 @@ export async function runCliDelegation(
     .join('\n\n');
 
   const cliModel = target.model.cli_model;
-  let result: CliAgentRunResult;
-  if (session) {
-    const key = delegationSessionKey(session.conversationId, target.resolvedId);
-    const confirmedId = session.registry.getConfirmedSessionId(key);
-    const sessionOptions: CliAgentSessionOptions = {
-      cliName,
-      executable,
-      cwd: workspaceRoot,
-      timeoutMs: CLI_DELEGATION_TIMEOUT_MS,
-      ...(cliModel ? { model: cliModel } : {}),
-      ...(confirmedId ? { confirmedSessionId: confirmedId } : {}),
-    };
-    // Every delegation sends its complete, self-contained task. Unlike chat
-    // turns — which send only the latest message because the warm session
-    // already holds the transcript — delegations are independent questions
-    // that merely share a process.
-    result = await session.registry.run(key, sessionOptions, task, { signal });
-  } else {
-    result = await driver.run({
-      cliName,
-      executable,
-      task,
-      cwd: workspaceRoot,
-      timeoutMs: CLI_DELEGATION_TIMEOUT_MS,
-      ...(cliModel ? { model: cliModel } : {}),
-      signal,
-    });
-  }
+  const result: CliAgentRunResult = await driver.run({
+    cliName,
+    executable,
+    task,
+    cwd: workspaceRoot,
+    timeoutMs: CLI_DELEGATION_TIMEOUT_MS,
+    ...(cliModel ? { model: cliModel } : {}),
+    signal,
+  });
   if (result.status !== 'completed') {
     // Do not discard what the agent produced. A CLI delegate runs unrestricted
     // against the real workspace, so a run that timed out has very likely

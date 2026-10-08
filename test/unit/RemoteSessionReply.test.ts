@@ -2,9 +2,7 @@ import * as fs from 'fs/promises';
 import * as os from 'os';
 import * as path from 'path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { setBoardContext, setMeshOrchestrator } from '../../src/agentMesh/meshContext';
-import type { MeshOrchestrator } from '../../src/agentMesh/meshOrchestrator';
-import { askRemoteSession, waitForRemoteVerdict } from '../../src/remote/RemoteSessionAsk';
+import { setBoardContext } from '../../src/agentMesh/meshContext';
 import {
   remoteSessionAction,
   answerRemoteSessionQuestion,
@@ -26,7 +24,6 @@ import type { RemoteInboundEvent, RemoteRequestRecord } from '../../src/remote/t
 
 const dirs: string[] = [];
 afterEach(async () => {
-  setMeshOrchestrator(undefined);
   setBoardContext(undefined);
   for (const dir of dirs.splice(0)) await fs.rm(dir, { recursive: true, force: true });
 });
@@ -58,59 +55,6 @@ function request(id: string): RemoteRequestRecord {
 }
 
 describe('Telegram session reply route', () => {
-  it('observes an owned Claude turn and passes its final text to the outbox caller', async () => {
-    const ask = vi.fn(async () => ({
-      status: 'completed' as const,
-      finalText: 'Hello from Claude',
-    }));
-    setMeshOrchestrator({
-      resolveAdapter: async () => ({ observesTurns: true }),
-      ask,
-    } as unknown as MeshOrchestrator);
-    const answer = await askRemoteSession(
-      'claude',
-      'hello',
-      'request-1',
-      new AbortController().signal,
-    );
-    expect(answer).toBe('Hello from Claude');
-    expect(ask.mock.calls[0]![1]).toContain('remote-notify claude request-1');
-    expect(ask.mock.calls[0]![1]).toContain('remote-ask claude request-1');
-  });
-
-  it.each(['codex', 'claude'] as const)(
-    'uses the remote request id for a user-opened %s verdict',
-    async (target) => {
-      const { dir } = await fixture();
-      await fs.mkdir(path.join(dir, 'verdicts'));
-      const tell = vi.fn(async (_to: string, _message: string, options: { exchangeId: string }) => {
-        await fs.writeFile(path.join(dir, 'verdicts', `${options.exchangeId}.md`), 'Codex answer');
-        return { exchangeId: options.exchangeId, to: target, observing: false };
-      });
-      setBoardContext({ root: dir, workspace: dir, log: path.join(dir, 'exchanges.jsonl') });
-      setMeshOrchestrator({
-        resolveAdapter: async () => ({ observesTurns: false }),
-        tell,
-      } as unknown as MeshOrchestrator);
-      await expect(
-        askRemoteSession(target, 'hello', 'request-2', new AbortController().signal),
-      ).resolves.toBe('Codex answer');
-      expect(tell.mock.calls[0]![2]).toEqual({ expectsReply: true, exchangeId: 'request-2' });
-    },
-  );
-
-  it('does not claim success on a missing verdict or an aborted wait', async () => {
-    const { dir } = await fixture();
-    await expect(
-      waitForRemoteVerdict(dir, 'missing', new AbortController().signal, 1),
-    ).rejects.toThrow('no answer');
-    const aborted = new AbortController();
-    aborted.abort();
-    await expect(waitForRemoteVerdict(dir, 'missing', aborted.signal, 1)).rejects.toThrow(
-      'interrupted',
-    );
-  });
-
   it('admits an exact /codex command once and retains its Telegram origin', async () => {
     const { store } = await fixture();
     await store.setBinding({

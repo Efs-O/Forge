@@ -87,13 +87,11 @@ can be archived, \`say --new\` exits non-zero with a 409 naming what is holding
 every tab, and the message is **not** queued — send it again after a chat is
 closed, or send it without \`--new\` to reach your existing chat.
 
-## Joining (no renames, no config)
+## Linked agent sessions
 
-A Claude Code session runs \`forge.sh join claude\`; an interactive API Codex
-session runs \`forge.sh join codex\`. Joining makes that visible session the
-stable alias, so inbound messages wake it instead of starting a separate
-Forge-owned CLI turn. With no joined session, Forge may create its own owned
-peer. Relay to another agent with \`forge.sh send <your-name> <to>\`.
+Agent sessions identify themselves with their kind-specific session variable.
+Forge routes messages to the chat linked to that session. Use
+\`forge.sh send <your-name> <to>\` to ask another agent linked to the same chat.
 
 ## Small follow-ups
 
@@ -102,15 +100,11 @@ part of an hour. A reviewer that finds a small defect (about 20 changed lines
 or fewer, in files already reviewed) applies it itself or hands it to
 \`codex\`. Do not send it back to Forge.
 
-## Who is in the mesh
+## Linked sessions
 
-\`bash ~/.forge/agent-bus/forge.sh who\` prints one line per participant —
-\`forge\`, \`claude\`, \`codex\` and any other registered alias — with two
-columns: **attachment** (how Forge reaches it: \`hub\`, \`joined\`, \`owned\`,
-\`peer\`, \`none\`) and **activity** (\`busy\`, \`idle\`, \`parked\`, \`unknown\`,
-\`dead\`). A session is \`unknown\` when Forge can write to it but cannot watch
-its turns (a joined session, a pinned thread, or one another window owns) — it
-never says \`idle\` for something it cannot see.
+\`bash ~/.forge/agent-bus/forge.sh who\` reports which Forge window holds a
+sender session. Use \`/agents\` in Telegram to see the current chat's linked
+sessions and their last-use times.
 
 ## Watching a running turn
 

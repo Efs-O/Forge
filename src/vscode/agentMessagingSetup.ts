@@ -1,29 +1,22 @@
 import * as vscode from 'vscode';
 import * as path from 'path';
-import { busPaths } from '../agentBus/agentBus';
+import { busPaths, removeLegacyAliasFiles } from '../agentBus/agentBus';
 import { EXCHANGES_LOG_NAME, readEvents } from '../agentMesh/exchangeLog';
+import { setBoardContext } from '../agentMesh/meshContext';
 import {
   AgentInbox,
-  busTurnEndLine,
-  type ChatTargetSelection,
   type BusTurnEnd,
+  type ChatTargetSelection,
   type InboxMessageOptions,
 } from '../agentBus/agentInbox';
 import { AgentRoutes } from '../backend/agentRoutes';
-import { joinClaude } from '../agentMesh/claudeJoin';
-import { joinCodex } from '../agentMesh/codexJoin';
 import { availableProfilesFor, expandAlias } from '../config/ConfigResolver';
 import type { ForgeConfig } from '../config/types';
 import type { ForgeHostFacade } from '../sidebar/ForgeHostFacade';
 import type { MidTurnTellDrain } from '../agent/MidTurnTellDrain';
-import { parseMeshCommand } from '../agentMesh/meshCommands';
-import { projectWho } from '../agentMesh/meshWho';
-import { readClaudeSessions } from '../agentBus/claudePeer';
 import { parseForgeInboundPrompt } from '../agentBus/busContent';
-import { setupAgentMesh } from './agentMeshSetup';
 import { BUS_TARGET_SCAN, busTargetConversation, senderConversation } from '../agentBus/busTarget';
 import { BusTurnWatch } from '../agentBus/busTurnWatch';
-import { awaitedAnswers } from '../agentBus/awaitedAnswers';
 import { renderBusStatus, renderBusView } from '../agentBus/busStatusView';
 import { MAX_VIEW_COUNT, parseViewCount } from '../remote/RemoteTranscriptView';
 import type { RemoteRuntime } from '../remote/RemoteRuntime';
@@ -38,6 +31,7 @@ import {
 } from '../agentLinks/agentReplyLifecycle';
 import { agentDisplayName } from '../agentLinks/chatAgentLinks';
 import { makeAgentToAgentRelay } from '../agentLinks/agentToAgentRelay';
+import { isAskAgentRunning } from '../agentLinks/askAgentService';
 
 /** The conversation a bus message from `from` belongs in. */
 function busTarget(
@@ -220,8 +214,8 @@ export async function submitBusMessage(
 }
 
 /**
- * Mounts inbound messaging routes and the inbox, and initializes the mesh
- * orchestrator used by `ask_agent` and host-side relays. The sidebar is lazy:
+ * Mounts inbound messaging routes and the inbox, and connects session links
+ * to `ask_agent` and host-side relays. The sidebar is lazy:
  * activation may start the control server before its provider exists, so the
  * inbox waits until `getSidebar` can resolve the target chat.
  */
@@ -232,7 +226,15 @@ export function setupAgentMessaging(
   workspaceRoot: string,
   getRemoteRuntime: () => RemoteRuntime | undefined = () => undefined,
 ): AgentRoutes {
-  const mesh = setupAgentMesh(context, getSidebar, getConfig, workspaceRoot);
+  const paths = busPaths();
+  removeLegacyAliasFiles(paths, (message) => {
+    void vscode.window.showWarningMessage(message);
+  });
+  setBoardContext({
+    root: paths.root,
+    workspace: workspaceRoot,
+    log: path.join(paths.root, EXCHANGES_LOG_NAME),
+  });
   const pendingReplies = new PendingAgentReplies(busPaths().root);
   const askRuntime: AskAgentRuntime = makeAskAgentRuntime({ getConfig });
   const replyLifecycle = makeAgentReplyLifecycle({
@@ -245,6 +247,15 @@ export function setupAgentMessaging(
       void vscode.window.showWarningMessage(message);
     },
   });
+  const linkedAgentOwner = (
+    sender: import('../agentLinks/chatAgentLinks').AgentSender,
+  ): string | undefined => {
+    const owner = findBySession(sender.sessionId);
+    return owner &&
+      getSidebar().getHostFacade().getAgentLink(owner, sender.kind)?.sessionId === sender.sessionId
+      ? owner
+      : undefined;
+  };
   const watch = new BusTurnWatch();
   const inbox = new AgentInbox({
     isBusy: (options?: InboxMessageOptions) => {
@@ -268,27 +279,14 @@ export function setupAgentMessaging(
     warn: (message) => void vscode.window.showWarningMessage(message),
     // F-08: a bus-started turn began — write its durable status file so a
     // crashed turn can be detected at the next window's startup.
-    onBusTurnStarted: (turnId) => {
-      mesh.markTurnStarted(turnId);
-    },
     // F-08: a bus-started turn ended (success OR failure) — clear its status
     // file. The inbox calls this in a `finally`, so a normal finish never
     // leaves a stale "running" record; only a crash does, and the startup
     // sweep detects that.
-    onBusTurnStatusCleared: (turnId) => {
-      mesh.markTurnFinished(turnId);
-    },
     // §9 (P1): a bus-started turn just ended — successfully, or as a failure the
     // inbox is telling about. The sender gets one `finished`/`failed` line via
     // tell (which writes the board event), so there are no silent stalls. A
     // user-typed turn has no bus sender, so this never fires for it.
-    onBusTurnFinished: (from, durationMs, end) => {
-      void mesh.orchestrator
-        .tell(from, busTurnEndLine(end, durationMs), { expectsReply: false })
-        .catch((err) =>
-          vscode.window.showWarningMessage(`[agent mesh] finished notice failed: ${String(err)}`),
-        );
-    },
     ...replyLifecycle,
   });
   context.subscriptions.push(inbox);
@@ -343,12 +341,7 @@ export function setupAgentMessaging(
     isChatBusy: (conversationId) =>
       getSidebar().getHostFacade().status().streamingConversationIds.includes(conversationId),
     holdsLink: (sender) => {
-      const owner = findBySession(sender.sessionId);
-      return (
-        owner !== undefined &&
-        getSidebar().getHostFacade().getAgentLink(owner, sender.kind)?.sessionId ===
-          sender.sessionId
-      );
+      return linkedAgentOwner(sender) !== undefined;
     },
     resolveInboundAgent: (sender, selection) =>
       getSidebar().getHostFacade().routeInboundAgent(sender, selection),
@@ -356,15 +349,17 @@ export function setupAgentMessaging(
       getSidebar().getHostFacade().showConversationNotice(conversationId, message),
     isFocused: () => vscode.window.state.focused,
     configuredModels: () => busModelIds(getConfig()),
-    relay: mesh.relay,
     relayAgent: makeAgentToAgentRelay(
       () => getSidebar().getHostFacade(),
       busPaths().root,
       workspaceRoot,
       askRuntime,
     ),
+    validateAgentSender: (sender) =>
+      linkedAgentOwner(sender)
+        ? { ok: true }
+        : { ok: false, error: 'sender session is not linked to an open Forge chat' },
     // F-06: a `priority=steer` message interrupts the recipient's active turn.
-    steer: mesh.steer,
     // §6: a steer to Forge itself interrupts Forge's running turn. It is the
     // last steer left since Telegram `/steer` was removed (MID_TURN_TELL
     // Phase 4). An idle chat has nothing to interrupt.
@@ -379,44 +374,29 @@ export function setupAgentMessaging(
       const facade = getSidebar().getHostFacade();
       return interruptForgeForSender(facade, from, conversationId);
     },
-    awaitingAnswerFrom: (from) => awaitedAnswers.pendingFor(from),
     // A `--new` message needs a tab to exist. Ask the sidebar NOW whether one
     // could be opened, so the route can answer 409 with the reasons instead of
     // answering 202 and dropping the message in `drain()`.
     chatCapBlockers: (options) => getSidebar().getHostFacade().chatCapBlockers(options),
-    validateFrom: mesh.validateFrom,
-    // §10: an interactive Claude/Codex session supersedes a Forge-owned peer.
-    join: async (alias, pid, thread) => {
-      if (alias === 'claude') return joinClaude(busPaths().root, alias, pid);
-      if (alias !== 'codex') return { ok: false, error: `cannot join as "${alias}"` };
-      if (!thread || !/^[A-Za-z0-9._-]+$/.test(thread)) {
-        return { ok: false, error: 'thread must be a non-empty Codex thread id' };
-      }
-      if (mesh.orchestrator.isBusy('codex')) {
-        return { ok: false, error: 'the owned codex turn is busy; join again when it is idle' };
-      }
-      if (!(await mesh.provider.releaseForCodexJoin())) {
-        return { ok: false, error: 'another Forge window owns the codex session' };
-      }
-      return joinCodex(busPaths().root, alias, thread);
+    who: () => {
+      const facade = getSidebar().getHostFacade();
+      const status = facade.status();
+      return status.conversations.flatMap((conversation) =>
+        (['claude', 'codex', 'copilot'] as const).flatMap((kind) => {
+          const linked = facade.getAgentLink(conversation.id, kind);
+          return linked
+            ? [
+                {
+                  session: `${kind} · ${linked.title}`,
+                  attachment: 'linked',
+                  activity: isAskAgentRunning(conversation.id) ? 'busy' : 'idle',
+                  detail: conversation.title,
+                },
+              ]
+            : [];
+        }),
+      );
     },
-    // §11: `forge.sh who` — read-only projection of every participant and its
-    // state. The host owns the truth: it reads the alias table, ownership
-    // records and its own in-memory FIFO, plus the sidebar's streaming state
-    // and the inbox depth. The client only formats the returned JSON.
-    who: () =>
-      projectWho({
-        busRoot: busPaths().root,
-        knownAliases: () => mesh.orchestrator.aliases(),
-        isOwner: (alias) => mesh.provider.isOwner(alias),
-        isBusy: (alias) => mesh.orchestrator.isBusy(alias),
-        forgeBusy: () => {
-          const status = getSidebar().getHostFacade().status();
-          return status.streamingConversationIds.includes(status.activeConversationId);
-        },
-        forgeInboxDepth: () => inbox.pending,
-        claudeSessions: () => readClaudeSessions(),
-      }),
     status: (from) => {
       const target = readTarget(from);
       if (!target.ok) return target;
@@ -475,16 +455,6 @@ export function setupAgentMessaging(
     // §8/P3: a `to: forge` message that parses as a typed lifecycle command is
     // dispatched (standby/wake/close/steer/say/handoff) and the reply returned
     // to the caller's `forge.sh cmd` call. Ordinary text falls through to the inbox.
-    handleCommand: async (text) => {
-      const cmd = parseMeshCommand(text);
-      if (!cmd) return { ok: false as const, error: 'not a recognised mesh command' };
-      try {
-        const reply = await mesh.orchestrator.handleCommand(cmd);
-        return { ok: true as const, reply };
-      } catch (err) {
-        return { ok: false as const, error: err instanceof Error ? err.message : String(err) };
-      }
-    },
   });
   context.subscriptions.push(
     vscode.window.onDidChangeWindowState((state) => {

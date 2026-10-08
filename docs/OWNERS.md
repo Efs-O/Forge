@@ -56,7 +56,7 @@ overlaps with an existing owner, extend the owner instead.
 | Agent notification: toast + remote fan-out           | `src/sidebar/UserNotificationService.ts` |
 | Model residency polling timer                        | `src/sidebar/ResidencyPoller.ts`         |
 | Timed pause for the agent loop                       | `src/tools/waitTool.ts`                  |
-| Live-session question ceiling and report handoff      | `src/agentBus/liveSessionLimit.ts`       |
+| Linked-agent question ceiling and report handoff      | `src/agentBus/liveSessionLimit.ts`       |
 | LSP read operations + strict `code_intel` dispatch   | `src/tools/codeIntelTool.ts`             |
 | LSP code-action read/write handler                   | `src/tools/codeActionTools.ts`            |
 | Filesystem-miss error text for tools                 | `src/tools/pathErrorHint.ts`             |
@@ -101,7 +101,7 @@ overlaps with an existing owner, extend the owner instead.
 | Per-window agent-bus endpoint files | `src/agentBus/windowEndpoints.ts` |
 | Agent endpoint publication lifecycle | `src/backend/agentWindowEndpointRegistry.ts` |
 | Inbound agent message routing/admission | `src/backend/agentInboundAdmission.ts` |
-| Agent relay routing between linked chats and mesh aliases | `src/backend/agentRelayDispatch.ts` |
+| Agent relay routing between linked chats | `src/backend/agentRelayDispatch.ts` |
 | Inbound session identity validation | `src/backend/agentSenderParsing.ts` |
 | Sidebar link-routing facade dependencies | `src/sidebar/agentLinkFacadeDeps.ts` |
 | `ask_agent` strict tool boundary | `src/tools/askAgentTool.ts` |
@@ -613,8 +613,6 @@ the configured override stays the existing `video.ffmpeg_path` key.
 | Outbox watcher (drains the outbox to the owner chat)       | `src/remote/JobOutboxWatcher.ts`                               |
 | Agent-bus files (ids, wait, replies, orphans, TTL)         | `src/agentBus/agentBus.ts`                                     |
 | Agent-bus shipped text (README, message bodies)            | `src/agentBus/busContent.ts`                                   |
-| Deferred live-session answers (`notify_on_answer` notices)  | `src/agentBus/liveAnswerNotices.ts`                            |
-| Agents Forge's turn is blocked on (refuses their queued messages) | `src/agentBus/awaitedAnswers.ts` |
 | Agent-bus client script (`~/.forge/agent-bus/forge.sh`)    | `src/agentBus/forge.sh` (bundled as text by busContent.ts)     |
 | Claude session registry + peer-pipe delivery               | `src/agentBus/claudePeer.ts`                                   |
 | Claude delivery via a `claude -p` relay (opt-in)           | `src/agentBus/claudeRelay.ts`                                  |
@@ -626,35 +624,19 @@ the configured override stays the existing `video.ffmpeg_path` key.
 | Agent-messaging activation wiring (routes + inbox)         | `src/vscode/agentMessagingSetup.ts`                            |
 | Agent-bus delivery to an open Codex (`codex queue`)        | `src/agentBus/codexDelivery.ts`                                |
 | `agent_bus:` config schema                                 | `src/config/agentBusSchema.ts`                                 |
-| `ask_live_session` tool                                    | `src/tools/liveSessionTool.ts`                                 |
-| "Show Live Claude Sessions" command                        | `src/vscode/agentBusCommands.ts`                               |
+| Live Claude session-id picker for `/link`                  | `src/vscode/agentBusCommands.ts`                               |
 
-## Agent mesh (plan: `docs/plans/AGENT_MESH_PLAN.md`)
+## Agent-bus exchange records
 
-| Concern                                                  | Owner                                       |
-| -------------------------------------------------------- | ------------------------------------------- |
-| Host identity + liveness (M1/M2 staleness primitive)     | `src/agentMesh/hostIdentity.ts`             |
-| Delivery state machine (§2)                              | `src/agentMesh/deliveryState.ts`            |
-| Exchange event log + interprocess lock + compaction (M1/M8) | `src/agentMesh/exchangeLog.ts`           |
-| Alias registry + deprecated-pin resolution (§0/§4)       | `src/agentMesh/aliasRegistry.ts`            |
-| Per-alias ownership + creation lease + recovery (M2/M3)  | `src/agentMesh/ownership.ts`                |
-| Per-alias host-side FIFO (M5)                            | `src/agentMesh/aliasFifo.ts`                |
-| Delivery adapters (owned Codex / Claude peer / Codex queue) | `src/agentMesh/adapters.ts`            |
-| Headless Codex stand-in for a joined Codex with no window | `src/agentMesh/codexStandIn.ts`        |
-| Session provider (owned-session lifecycle, M2/M3)        | `src/agentMesh/sessionProvider.ts`          |
-| Joined Claude peer + dead-join stand-in (resume, notice) | `src/agentMesh/claudeStandIn.ts`            |
-| Mesh orchestrator (tell + host-side relay M6)            | `src/agentMesh/meshOrchestrator.ts`         |
-| Mesh orchestrator contracts                              | `src/agentMesh/meshTypes.ts`                |
-| Mesh lifecycle-command dispatch                          | `src/agentMesh/meshCommandDispatch.ts`      |
-| Claude self-join as the `claude` alias (§11)             | `src/agentMesh/claudeJoin.ts`               |
-| Process-wide orchestrator handle                         | `src/agentMesh/meshContext.ts`              |
-| `tell_live_session` tool (§1)                            | `src/tools/tellLiveSessionTool.ts`          |
-| Agent-mesh activation wiring (orchestrator + recovery)   | `src/vscode/agentMeshSetup.ts`              |
-| Agent-mesh recovery and idle maintenance                 | `src/vscode/meshMaintenance.ts`             |
-| Agent-mesh non-observing verdict polling                | `src/vscode/meshVerdictPoll.ts`             |
-| Full verdict artifact retention and acknowledgment     | `src/agentMesh/verdictArtifact.ts`          |
-| Authenticated verdict read/ack HTTP handlers            | `src/backend/agentVerdictRoute.ts`          |
-| Agent-mesh observational-command rendering              | `src/vscode/meshObservation.ts`             |
+| Concern                                         | Owner                              |
+| ----------------------------------------------- | ---------------------------------- |
+| Host identity + process liveness                | `src/agentMesh/hostIdentity.ts`    |
+| Exchange state transitions                      | `src/agentMesh/deliveryState.ts`  |
+| Durable exchange event log and interprocess lock | `src/agentMesh/exchangeLog.ts`    |
+| Exchange file lock                              | `src/agentMesh/lock.ts`           |
+| Full verdict retention and acknowledgment        | `src/agentMesh/verdictArtifact.ts`|
+| Codex thread liveness for a linked session       | `src/agentLinks/codexThreadLiveness.ts` |
+| Authenticated verdict read/ack HTTP handlers     | `src/backend/agentVerdictRoute.ts`|
 
 ## Build / packaging
 

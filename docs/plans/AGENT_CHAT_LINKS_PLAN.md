@@ -1,6 +1,6 @@
 # One Forge chat, one Claude / Codex / Copilot session — for good
 
-Status: **approved 2026-10-08; phase 0 done (findings below), phase 1 next.**
+Status: **implemented; commits: phase 1 `92219b3`, phase 2 `4c2be22`, phase 3 `1f6ae00`, phase 4 `13ef7de`, phase 5 (deletions) the commit that follows `13ef7de`.**
 Final review pass 2026-10-08 — see "Review corrections" at the end. Supersedes the
 routing half of `AGENT_BUS_CHAT_AFFINITY_PLAN.md` (sender-name routing) and the
 alias resolution in `REMOTE_SESSION_REPLY_PLAN.md`; both stay valid for the
@@ -198,8 +198,9 @@ agent supports one (phase 0(h)).
   Forge window also writes `endpoints/<windowId>.json` (same shape: url,
   token, pid) on activation and deletes it on deactivate. For an agent
   sender, `forge.sh` asks each live endpoint `GET /agent/holds-link?kind=&sessionId=`
-  (pid alive check first; dead pid → file removed by the next Forge
-  activation, ignored by `forge.sh`) and posts to the one that holds the
+  (bounded `curl --connect-timeout 1 --max-time 3`; an unreachable window
+  is skipped — `kill -0` cannot see Windows pids from Git Bash or WSL; dead-pid
+  files are removed by the next Forge activation) and posts to the one that holds the
   link; none holds it → `endpoint.json` (the focused window, which may link
   it per the rules above). No window-to-window forwarding. If the window that
   holds the link is closed, the link is simply not found in any live window —
@@ -213,9 +214,9 @@ agent supports one (phase 0(h)).
   answer goes to the sender session (live → into it, appearing as an incoming
   message; not live → kept as the exchange verdict, readable with
   `forge.sh view` / `read-verdict`, and the Forge chat says it was not seen
-  live). Live delivery exists for Claude (peer pipe) and for Forge-owned Codex
-  and Copilot sessions; a Codex or Copilot session the *user* opened outside
-  Forge gets the verdict path — phase 0 checks whether a better path exists.
+  live). Live delivery exists for Claude (peer pipe) and Codex (`codex queue` into
+  the linked thread); Copilot replies take the verdict path (Copilot is
+  headless-only, phase 0(e)).
 - **The footer goes.** Instead of `_(Agent-bus message. …)_` the model sees one
   line: `From Claude session "<title>". Your final answer is delivered to it automatically.`
   `replyInChat`, `inboundHint` and the `target:` alias hint are deleted.
@@ -302,9 +303,9 @@ Agent-originated turns are not gated on "did a chat start this turn" (the
 - `busTarget`'s sender-name rule (§3 replaces it for agents).
 
 Kept: `forge.sh` (by session), steer, `send-file`, `read-verdict` /
-`ack-verdict`, the owned Codex app-server and Copilot ACP sessions as live
-paths (now per link instead of per alias), parallel work across kinds and
-across chats.
+`ack-verdict`, the selected CLI chat-model Codex app-server path, parallel work
+across kinds and across chats. Copilot linked asks currently use the headless
+CLI path; the old alias-owned ACP path was removed with its callers in phase 5.
 
 ## Phases
 
@@ -421,9 +422,9 @@ delete"), Codex `01a11aba-3b34-…`.
 | Exchange verdict (existing `verdictArtifact`) | reply to a sender that is not live | `ack-verdict` | unchanged | existing atomic write | survives; read on demand | existing mesh retention |
 | Remote binding (existing, per chat) | unchanged | unchanged | unchanged | unchanged | lease holder only sends; another window takes over by lease | unchanged |
 | Telegram mirror lines (outbox items) | each ask / receipt / reply event | marked delivered | `canDeliver` false → not queued | existing outbox resume | pending items resume on startup | existing outbox policy |
-| `endpoints/<windowId>.json` (agent-bus dir) | window activation, temp + rename | window deactivate; files whose pid is dead are removed by any Forge activation | bus disabled → not written, and deleted if present | temp + rename — a torn file never appears; `forge.sh` ignores an unparseable file | stale file stays until the next activation sweeps it; `forge.sh` checks the pid and skips it meanwhile | none beyond the pid check |
+| `endpoints/<windowId>.json` (agent-bus dir) | window activation, temp + rename | window deactivate; files whose pid is dead are removed by any Forge activation | bus disabled → not written, and deleted if present | temp + rename — a torn file never appears; `forge.sh` ignores an unparseable file | stale file stays until the next activation sweeps it; `forge.sh` skips it when its holds-link call fails to connect | none beyond the activation sweep |
 | Workspace checkpoint per ask (existing `WorkspaceCheckpoint`) | before every ask, live or headless | existing Keep/Undo | not taken when the ask is refused | existing behaviour | existing behaviour | existing behaviour |
-| Legacy `ownership/<alias>.json` and `.claim` | **never again** after phase 5 | deleted on activation (phase 5) | n/a — deletion runs regardless | deletion is idempotent; a half-deleted dir is finished next activation | next activation finishes it | gone after the first activation of the new build |
+| Legacy `ownership/*.json` and `.claim` files | created only by pre-phase-5 builds | deleted on extension activation; failures are logged and shown as a warning | cleanup runs regardless of bus configuration | deletion is idempotent; remaining files are retried next activation | next activation retries any remaining files | gone after successful cleanup on activation |
 | The session itself (Claude jsonl / Codex thread / Copilot session) | the agent's CLI, on first ask | the user, in that tool — Forge never deletes it | not Forge's | not Forge's write | not Forge's process | none; detected missing on next use |
 
 **CI-enforced row:** `agentLinks` writes. `test/unit/AgentLinkOwnership.test.ts`
@@ -431,7 +432,8 @@ fails if any file in `src/` other than `chatAgentLinks.ts` assigns
 `agentLinks`, asserts deleting a conversation leaves no link in the history
 file, and asserts one session is never linked to two chats. A second check
 fails the build if any source still references `ownershipPath` or
-`aliasRegistry` after phase 5.
+`aliasRegistry` after phase 5. `LegacyAliasCleanup.test.ts` pins the ownership
+file cleanup behavior to this ledger row.
 
 ## Acceptance criteria
 
@@ -514,3 +516,7 @@ accepted; the cursor moving into an opened Codex/Claude session is accepted.
   the files it touches listed; phase 5 lists the alias-layer files.
 - Phase test sessions from phase 0 (Claude `2a2bffa1-…`, Codex
   `01a11aba-3b34-…`) are the owner's to delete; Forge never deletes sessions.
+- Phase 5 removed the alias-keyed Copilot ACP owner with its callers. Linked
+  Copilot asks currently run headless through the CLI adapter; connecting an
+  existing ACP-owned session by chat link remains a follow-up before claiming
+  live Copilot parity.

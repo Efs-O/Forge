@@ -9,7 +9,7 @@ import type {
   RemoteInboundEvent,
   RemoteRequestRecord,
 } from './types';
-import type { RemoteSessionTarget } from './RemoteSessionAsk';
+import type { RemoteSessionTarget } from './remoteSessionTellCommands';
 
 export interface RemotePromptAdmissionOptions {
   workspaceId: string;

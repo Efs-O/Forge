@@ -123,8 +123,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
   context.subscriptions.push(embeddingBackend);
   const indexManager = new IndexManager(config, embeddingBackend);
   const workspaceRoot = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath ?? '';
-  // One registry for the whole extension: delegation and the sidebar's CLI chat
-  // share it, so a repeat `ask_local_agent` resumes the warm process.
+  // Selected CLI chat models own resumable sessions; CLI delegation is one-shot.
   const cliSessions = new CliSessionRegistry(
     config.max_cli_agents ?? DEFAULT_MAX_CLI_AGENTS,
     config.cli_idle_timeout_ms ?? DEFAULT_CLI_IDLE_TIMEOUT_MS,
@@ -133,7 +132,6 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
     getConfig: () => config,
     backendPool: pool,
     workspaceRoot,
-    cliSessions,
     secrets: context.secrets,
   });
   const toolRegistry = new ToolRegistry();

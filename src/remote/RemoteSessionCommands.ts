@@ -9,8 +9,8 @@ import {
 import type { RemoteInboundDisposition, RemoteInboundEvent } from './types';
 import { formatElapsed } from './remoteProgressRender';
 import { MAX_VIEW_COUNT, parseViewCount, sendTranscriptView } from './RemoteTranscriptView';
-import { getBoardContext, getMeshOrchestrator } from '../agentMesh/meshContext';
-import { projectBoard, projectLiveSessions } from '../agentMesh/boardView';
+import { getBoardContext } from '../agentMesh/meshContext';
+import { readEvents, type ExchangeEvent } from '../agentMesh/exchangeLog';
 import { isAskAgentRunning } from '../agentLinks/askAgentService';
 
 type TextEvent = Extract<RemoteInboundEvent, { kind: 'text' }>;
@@ -43,31 +43,22 @@ const STATUS_LABELS = new Set([
 const CONTEXT_LABELS = new Set(['Forge context', 'Remaining']);
 
 /**
- * The agent board lines for `/status` (AGENT_MESH_PLAN §3, P2). Scoped to the
- * calling chat's conversation (M9): an unbound chat gets no board line. Absent
- * when the agent bus is not up (`getBoardContext()` undefined) — `/status`
- * never invents a board. The board is bounded (last 3 exchanges, newest first);
- * the live-session line is one line.
+ * Recent exchange lines for `/status`, scoped to the bound chat.
  */
 export function describeAgentBoard(conversation: string | undefined): string | undefined {
   const ctx = getBoardContext();
   if (!ctx) return undefined;
-  const sessions = projectLiveSessions(ctx.root);
-  const sessionsLine =
-    sessions.length === 0
-      ? 'Sessions: none'
-      : `Sessions: ${sessions.map((s) => `${s.alias} ${s.state}`).join(', ')}`;
-  if (conversation === undefined) {
-    // Unbound: no per-conversation board (M9), but the live-session line is
-    // workspace-scoped and still useful.
-    return sessionsLine;
+  if (conversation === undefined) return undefined;
+  const latest = new Map<string, ExchangeEvent>();
+  for (const event of readEvents(ctx.log)) {
+    if (event.workspace !== ctx.workspace || event.conversation !== conversation) continue;
+    const prior = latest.get(event.exchangeId);
+    if (!prior || event.seq > prior.seq) latest.set(event.exchangeId, event);
   }
-  const rows = projectBoard(ctx.log, ctx.workspace, conversation, 3);
-  const boardLine =
-    rows.length === 0
-      ? 'Board: none'
-      : `Board: ${rows.map((r) => `${r.from}${r.to ? `→${r.to}` : ''} ${r.label}`).join(', ')}`;
-  return `${boardLine}\n${sessionsLine}`;
+  const rows = [...latest.values()].sort((left, right) => right.seq - left.seq).slice(0, 3);
+  return rows.length === 0
+    ? 'Exchanges: none'
+    : `Exchanges: ${rows.map((row) => `${row.from}${row.to ? `→${row.to}` : ''} ${row.state}`).join(', ')}`;
 }
 
 /** Queue/session commands split from model, workspace, and lifecycle controls. */
@@ -289,23 +280,14 @@ export async function handleRemoteSessionCommand(
     const binding = context.store.binding(event.channel, event.chatId);
     if (!binding) return { kind: 'rejected', reason: 'no conversation is bound' };
     const queued = ownQueue(event, context, binding.conversationId);
-    const busQueued = getMeshOrchestrator()?.pendingMessages() ?? [];
-    const entries = [
-      ...queued.map(
-        (item) => `${item.priority === 'steer' ? '[steer] ' : ''}${truncate(item.text, 160)}`,
-      ),
-      ...busQueued.map(
-        (item) => `agent-bus ${item.alias}: ${truncate(firstLine(item.message), 160)}`,
-      ),
-    ];
+    const entries = queued.map(
+      (item) => `${item.priority === 'steer' ? '[steer] ' : ''}${truncate(item.text, 160)}`,
+    );
     const notes = [
       ...(queued.length > 0
         ? [
             'Text reaches Forge at the next step of the running turn; items with attachments run in order once it ends. Use /drop <number|all> to cancel.',
           ]
-        : []),
-      ...(busQueued.length > 0
-        ? ['Agent-bus items are shown for visibility; manage them with mesh lifecycle commands.']
         : []),
     ];
     await sendRichText(
@@ -396,8 +378,4 @@ function ownQueue(event: TextEvent, context: RemoteCommandContext, conversationI
 
 function truncate(value: string, maximum: number): string {
   return value.length > maximum ? `${value.slice(0, maximum - 1)}…` : value;
-}
-
-function firstLine(value: string): string {
-  return value.split(/\r?\n/u, 1)[0]?.trim() || '(empty)';
 }

@@ -108,7 +108,7 @@ interface QueuedMessage {
   /** Returned to the sender so it can withdraw the message (`/agent/cancel`). */
   id: string;
   prompt: string;
-  /** The bus sender alias, when the message came through the agent bus. */
+  /** The sender name, when the message came through the agent bus. */
   from?: string;
   options?: InboxMessageOptions;
   /** A steer interrupts the turn and runs as its own; never claimed mid-turn. */
@@ -276,7 +276,7 @@ export class AgentInbox {
         const item = this.queue.shift() as QueuedMessage;
         const startedAt = Date.now();
         // F-08: a stable turn id for the status file (start writes it, finish
-        // clears it). Only bus turns (a `from` alias) get one; user-typed
+        // clears it). Only bus turns (a `from` sender name) get one; user-typed
         // prompts have no bus sender and no status file.
         const turnId = item.from ? `bus-${item.from}-${startedAt}` : undefined;
         if (turnId && this.host.onBusTurnStarted) {

@@ -2,9 +2,7 @@ import * as vscode from 'vscode';
 import { readClaudeSessions } from '../agentBus/claudePeer';
 
 /**
- * "Forge: Show Live Claude Sessions": the sessions `ask_live_session` can
- * reach, as the registry sees them. Picking one copies its name, for
- * `agent_bus.claude_session` or for telling the agent which one to ask.
+ * Copies the selected live Claude session id for use with `/link`.
  */
 export function registerAgentBusCommands(context: vscode.ExtensionContext): void {
   context.subscriptions.push(
@@ -18,11 +16,11 @@ export function registerAgentBusCommands(context: vscode.ExtensionContext): void
       }
       const pick = await vscode.window.showQuickPick(
         sessions.map((s) => ({
-          label: s.name,
-          description: `${s.status}${s.sdk ? ' · SDK' : ''}`,
+          label: s.sessionId ?? s.name,
+          description: `${s.name} · ${s.status}${s.sdk ? ' · SDK' : ''}`,
           detail: s.cwd,
         })),
-        { title: 'Live Claude Code sessions', placeHolder: 'Pick one to copy its name' },
+        { title: 'Live Claude Code sessions', placeHolder: 'Pick one to copy its session id' },
       );
       if (!pick) return;
       await vscode.env.clipboard.writeText(pick.label);

@@ -346,12 +346,6 @@ describe('routes', () => {
     });
   });
 
-  it('rejects the removed reply_in_chat request field', async () => {
-    const response = await post('/agent/message?from=codex&reply_in_chat=true', 'question');
-    expect(response.status).toBe(400);
-    expect(accepted).toEqual([]);
-  });
-
   it('passes --unattended through as an inbox option', async () => {
     const response = await post('/agent/message?from=codex&unattended=true', 'audit');
     expect(response.status).toBe(202);
@@ -368,12 +362,6 @@ describe('routes', () => {
 
   it('validates new_chat as a boolean', async () => {
     const response = await post('/agent/message?from=codex&new_chat=maybe', 'nope');
-    expect(response.status).toBe(400);
-    expect(accepted).toEqual([]);
-  });
-
-  it('rejects the removed reply_in_chat field regardless of value', async () => {
-    const response = await post('/agent/message?from=codex&reply_in_chat=maybe', 'nope');
     expect(response.status).toBe(400);
     expect(accepted).toEqual([]);
   });
@@ -496,15 +484,17 @@ describe('forge.sh against the routes', () => {
 
   it('send-file uses the authenticated CLI route without accepting a Forge inbox turn', async (ctx) => {
     if (!usable) ctx.skip();
-    const validateFrom = vi.fn(async (from: string) =>
-      from === 'codex' ? { ok: true as const } : { ok: false as const, error: 'unknown sender' },
+    const validateAgentSender = vi.fn((sender: { kind: string; sessionId: string }) =>
+      sender.kind === 'codex' && sender.sessionId === '00000000-0000-4000-8000-000000000001'
+        ? { ok: true as const }
+        : { ok: false as const, error: 'unknown linked sender' },
     );
     const sendFile = vi.fn(async () => ({ kind: 'sent' as const }));
     installClientRoutes({
       paths: () => paths,
       inbox: stubInbox(),
       token: TOKEN,
-      validateFrom,
+      validateAgentSender,
       sendFile,
     });
     const source = path.join(home, 'plan with spaces.md');
@@ -523,11 +513,15 @@ describe('forge.sh against the routes', () => {
         caption,
       ],
       '',
+      { CODEX_SESSION_ID: '00000000-0000-4000-8000-000000000001' },
     );
 
     expect(sent.code).toBe(0);
     expect(sent.out).toContain('"sent":true');
-    expect(validateFrom).toHaveBeenCalledWith('codex');
+    expect(validateAgentSender).toHaveBeenCalledWith({
+      kind: 'codex',
+      sessionId: '00000000-0000-4000-8000-000000000001',
+    });
     expect(sendFile).toHaveBeenCalledWith(
       'codex',
       'sender-chat',
@@ -543,12 +537,15 @@ describe('forge.sh against the routes', () => {
       paths: () => paths,
       inbox: stubInbox(),
       token: TOKEN,
-      validateFrom: (from) =>
-        from === 'codex' ? { ok: true } : { ok: false, error: 'unknown sender' },
+      validateAgentSender: (sender) =>
+        sender.kind === 'codex' && sender.sessionId === '00000000-0000-4000-8000-000000000001'
+          ? { ok: true }
+          : { ok: false, error: 'unknown linked sender' },
       sendFile,
     });
+    const identity = { sender_kind: 'codex', sender_session_id: '00000000-0000-4000-8000-000000000001' };
     const request = (fields: Record<string, unknown>, query = '') =>
-      post(`/agent/send-file${query}`, JSON.stringify(fields), { type: 'application/json' });
+      post(`/agent/send-file${query}`, JSON.stringify({ ...identity, ...fields }), { type: 'application/json' });
 
     expect(
       (
@@ -742,27 +739,13 @@ describe('forge.sh against the routes', () => {
     expect(said.out).toContain('not reachable');
   }, 30_000);
 
-  it('join sends the interactive Claude pid or Codex thread; send relays with a `to` (§10)', async (ctx) => {
+  it('agent send relays by linked session kind', async (ctx) => {
     if (!usable) ctx.skip();
-    const joins: [string, number, string][] = [];
-    const relays: [string, string, string, string | undefined][] = [];
     const agentRelays: [string, string, string][] = [];
     routes = new AgentRoutes({
       paths: () => paths,
       inbox: { accept: () => ({ position: 1, id: 'm1' }), cancel: () => 0 },
       token: TOKEN,
-      join: (alias, pid, thread) => (
-        joins.push([alias, pid, thread]),
-        { ok: true, reply: 'joined' }
-      ),
-      relay: async (from, to, text, originConversation) => (
-        relays.push([from, to, text, originConversation]),
-        {
-          ok: true,
-          exchangeId: 'x1',
-          deliveredTo: 'claude = session 7b39fb6e (joined, workspace n:\\vs code apps\\Forge)',
-        }
-      ),
       relayAgent: async (sender, to, text) => (
         agentRelays.push([sender.kind, to, text]),
         { ok: true, exchangeId: 'agent-x1', deliveredTo: 'Codex linked chat' }
@@ -770,16 +753,6 @@ describe('forge.sh against the routes', () => {
     });
     routes.setEnabled(true);
     routes.onListening(base);
-    const noPid = await runClient(['join', 'claude'], '', { CLAUDE_PID: '' });
-    expect(noPid.code).toBe(2);
-    const joined = await runClient(['join', 'claude'], '', { CLAUDE_PID: '4242' });
-    expect(joined.out).toContain('"joined":true');
-    const joinedCodex = await runClient(['join', 'codex'], '', { CODEX_THREAD_ID: 'thread-7' });
-    expect(joinedCodex.out).toContain('"joined":true');
-    expect(joins).toEqual([
-      ['claude', 4242, ''],
-      ['codex', 0, 'thread-7'],
-    ]);
     const sent = await runClient(['send', 'claude', 'codex'], 'plan ready\n', {
       FORGE_CONVERSATION_ID: 'origin-chat-7',
       CLAUDE_CODE_SESSION_ID: '8e395649-705e-47f9-b499-03a36e908f50',
@@ -876,65 +849,6 @@ describe('forge.sh against the routes', () => {
       expect.objectContaining({ targetConversationId: 'sender-chat' }),
       expect.objectContaining({ toRunning: true, targetConversationId: 'running-chat' }),
     ]);
-  }, 30_000);
-
-  it('refuses a queued message from the agent Forge is blocked on, for any sender', async (ctx) => {
-    if (!usable) ctx.skip();
-    const calls: string[] = [];
-    const awaited: Record<string, string> = { claude: 'fg1-aaaa', codex: 'fg2-bbbb' };
-    routes = new AgentRoutes({
-      paths: () => paths,
-      inbox: {
-        accept: (_prompt, from, front) => (
-          calls.push(`${String(from)} front=${String(front)}`),
-          { position: 1, id: 'm1' }
-        ),
-        cancel: () => 0,
-      },
-      token: TOKEN,
-      pendingReplies: new PendingAgentReplies(paths.root),
-      workspaceRoot: '/workspace',
-      resolveInboundAgent: async (sender) => ({
-        conversationId: 'sender-chat',
-        title: 'Codex: task',
-        sender: { ...sender, title: 'sender session' },
-        link: {
-          ...sender,
-          cwd: '/workspace',
-          title: 'sender session',
-          linkedAt: 1,
-          lastUsedAt: 1,
-          origin: 'first-inbound',
-        },
-      }),
-      interruptForge: async () => {
-        calls.push('interrupt');
-        return { steered: true, conversationId: 'sender-chat', title: 'Codex: task' };
-      },
-      awaitingAnswerFrom: (from) => awaited[from],
-    });
-    routes.setEnabled(true);
-    routes.onListening(base);
-    for (const sender of ['claude', 'codex']) {
-      const identity =
-        sender === 'claude'
-          ? { CLAUDE_CODE_SESSION_ID: '00000000-0000-4000-8000-000000000091' }
-          : { CODEX_SESSION_ID: '00000000-0000-4000-8000-000000000092' };
-      const said = await runClient(['say', sender], 'redo 70K', identity);
-      expect(said.code).not.toBe(0);
-      expect(said.out).toContain(`forge.sh reply ${awaited[sender]}`);
-    }
-    expect(calls).toEqual([]);
-    // A steer is the explicit stop and still gets through; others still queue.
-    expect(
-      (
-        await runClient(['steer', 'codex', 'forge'], 'stop', {
-          CODEX_SESSION_ID: '00000000-0000-4000-8000-000000000092',
-        })
-      ).out,
-    ).toContain('"steered":true');
-    expect((await runClient(['say', 'copilot-peer'], 'plain')).out).toContain('"queued"');
-    expect(calls).toEqual(['codex front=true', 'interrupt', 'copilot-peer front=false']);
   }, 30_000);
 
   it('refuses a bad id or name before sending anything', async (ctx) => {
@@ -1148,60 +1062,6 @@ describe('sender validation and relay gating (M6/§4)', () => {
   });
 });
 
-describe('typed lifecycle command dispatch (§8, P3)', () => {
-  function install(deps: ConstructorParameters<typeof AgentRoutes>[0]): void {
-    routes = new AgentRoutes(deps);
-    routes.setEnabled(true);
-    routes.onListening(base);
-  }
-
-  it('dispatches a `to: forge` mesh command, not the inbox', async () => {
-    let got: string | undefined;
-    install({
-      paths: () => paths,
-      inbox: stubInbox(),
-      token: TOKEN,
-      validateFrom: () => ({ ok: true }),
-      handleCommand: async (text) => {
-        got = text;
-        return { ok: true, reply: 'codex parked' };
-      },
-    });
-    const { status, body } = await post('/agent/message?from=codex', 'standby codex');
-    expect(status).toBe(200);
-    expect(body).toEqual({ command: 'standby', reply: 'codex parked' });
-    expect(got).toBe('standby codex');
-    expect(accepted).toEqual([]); // not queued as a prompt
-  });
-
-  it('treats ordinary `to: forge` text as a prompt, not a command', async () => {
-    install({
-      paths: () => paths,
-      inbox: stubInbox(),
-      token: TOKEN,
-      validateFrom: () => ({ ok: true }),
-      handleCommand: async () => ({ ok: true, reply: 'should not be called' }),
-    });
-    const { status } = await post('/agent/message?from=codex', 'please review the plan');
-    expect(status).toBe(202);
-    expect(accepted).toHaveLength(1);
-  });
-
-  it('a command that fails to dispatch is a 400, not a queued prompt', async () => {
-    install({
-      paths: () => paths,
-      inbox: stubInbox(),
-      token: TOKEN,
-      validateFrom: () => ({ ok: true }),
-      handleCommand: async () => ({ ok: false, error: 'no session to park' }),
-    });
-    const { status, body } = await post('/agent/message?from=codex', 'standby ghost');
-    expect(status).toBe(400);
-    expect(body.error).toContain('no session to park');
-    expect(accepted).toEqual([]);
-  });
-});
-
 describe('relay origin conversation (2b)', () => {
   it('passes origin_conversation to the relay and rejects it for to=forge', async () => {
     routes.dispose();
@@ -1235,7 +1095,7 @@ describe('relay origin conversation (2b)', () => {
   });
 });
 
-describe('GET /agent/who (§11)', () => {
+describe('GET /agent/who', () => {
   function install(deps: ConstructorParameters<typeof AgentRoutes>[0]): void {
     routes = new AgentRoutes(deps);
     routes.setEnabled(true);
@@ -1252,8 +1112,8 @@ describe('GET /agent/who (§11)', () => {
       inbox: stubInbox(),
       token: TOKEN,
       who: () => [
-        { alias: 'forge', attachment: 'hub', activity: 'idle' },
-        { alias: 'codex', attachment: 'owned', activity: 'parked', detail: 'warm' },
+        { session: 'claude · Review', attachment: 'linked', activity: 'idle' },
+        { session: 'codex · Build', attachment: 'linked', activity: 'busy', detail: 'Build chat' },
       ],
     });
     expect((await get('/agent/who', null)).status).toBe(401);
@@ -1265,7 +1125,7 @@ describe('GET /agent/who (§11)', () => {
     expect(ok.status).toBe(200);
     const body = (await ok.json()) as { participants: unknown[] };
     expect(body.participants).toHaveLength(2);
-    expect((body.participants[1] as { alias: string }).alias).toBe('codex');
+    expect((body.participants[1] as { session: string }).session).toBe('codex · Build');
   });
 
   it('is a GET-only route: a POST to /agent/who is 405', async () => {
@@ -1288,7 +1148,7 @@ describe('GET /agent/who (§11)', () => {
       paths: () => paths,
       inbox: stubInbox(),
       token: TOKEN,
-      who: () => [{ alias: 'forge', attachment: 'hub', activity: 'idle' }],
+      who: () => [{ session: 'claude · Review', attachment: 'linked', activity: 'idle' }],
     });
     expect((await get('/agent/who')).status).toBe(200);
     expect(fs.readdirSync(paths.root).sort()).toEqual([
@@ -1414,27 +1274,24 @@ describe('forge.sh who against the routes (§11)', () => {
     routes.onListening(base);
   }
 
-  it("A7: prints one line per participant from the route's JSON", async (ctx) => {
+  it('prints one line per linked session from the route JSON', async (ctx) => {
     if (!usable) ctx.skip();
     install({
       paths: () => paths,
       inbox: stubInbox(),
       token: TOKEN,
       who: () => [
-        { alias: 'forge', attachment: 'hub', activity: 'busy', detail: 'inbox 1' },
-        { alias: 'claude', attachment: 'joined', activity: 'unknown', detail: 'pid 33396' },
-        { alias: 'codex', attachment: 'owned', activity: 'parked', detail: 'warm' },
+        { session: 'claude · Review', attachment: 'linked', activity: 'idle', detail: 'Review chat' },
+        { session: 'codex · Build', attachment: 'linked', activity: 'busy', detail: 'Build chat' },
       ],
     });
     const res = await runClient(['who'], '');
     expect(res.code).toBe(0);
-    expect(res.out).toContain('forge');
-    expect(res.out).toContain('hub');
     expect(res.out).toContain('claude');
-    expect(res.out).toContain('joined');
     expect(res.out).toContain('codex');
-    expect(res.out).toContain('parked');
-    expect(res.out).toContain('33396');
+    expect(res.out).toContain('linked');
+    expect(res.out).toContain('busy');
+    expect(res.out).toContain('Build chat');
   }, 30_000);
 
   it('A9: who takes no arguments (an extra arg is a usage error)', async (ctx) => {

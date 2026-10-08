@@ -1,10 +1,13 @@
 import { z } from 'zod';
 import { codePointLength } from '../util/codePoints';
 import type { RemoteFileSendResult } from '../remote/types';
+import { agentSenderSchema, type AgentSender } from '../agentLinks/chatAgentLinks';
 
 const AgentFileRequestSchema = z
   .object({
     from: z.string().trim().min(1).max(40),
+    sender_kind: agentSenderSchema.shape.kind,
+    sender_session_id: agentSenderSchema.shape.sessionId,
     conversation_id: z.string().trim().min(1).max(128),
     path: z
       .string()
@@ -19,12 +22,10 @@ const AgentFileRequestSchema = z
   .strict();
 
 export interface AgentFileRouteDeps {
-  validateFrom: (
+  validateSender: (
     from: string,
-  ) =>
-    | { ok: true }
-    | { ok: false; error: string }
-    | Promise<{ ok: true } | { ok: false; error: string }>;
+    sender: AgentSender,
+  ) => { ok: true } | { ok: false; error: string };
   sendFile: (
     from: string,
     conversationId: string,
@@ -45,7 +46,13 @@ export async function handleAgentFileRoute(
     return { status: 400, body: { error } };
   }
   const request = parsed.data;
-  const sender = await deps.validateFrom(request.from);
+  const senderIdentity = agentSenderSchema.parse({
+    kind: request.sender_kind,
+    sessionId: request.sender_session_id,
+  });
+  if (senderIdentity.kind !== request.from)
+    return { status: 400, body: { error: 'sender kind must match from' } };
+  const sender = deps.validateSender(request.from, senderIdentity);
   if (!sender.ok) return { status: 400, body: { error: sender.error } };
 
   let result: RemoteFileSendResult;

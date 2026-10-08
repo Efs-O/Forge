@@ -71,7 +71,6 @@ describe('CLIENT_SCRIPT usage block', () => {
       'ack-verdict',
       'steer',
       'cancel',
-      'join',
       'who',
       'status',
       'view',

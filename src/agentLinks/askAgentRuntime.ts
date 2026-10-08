@@ -1,7 +1,7 @@
 import * as vscode from 'vscode';
 import { resolveCliExecutable } from '../agents/resolveCliExecutable';
 import { CliAgentDriver } from '../agents/CliAgentDriver';
-import { getMeshOrchestrator } from '../agentMesh/meshContext';
+import { codexThreadIsLive } from './codexThreadLiveness';
 import { readClaudeSessions, sendPeerMessage } from '../agentBus/claudePeer';
 import { queueToCodex } from '../agentBus/codexDelivery';
 import {
@@ -16,7 +16,6 @@ import {
 } from '../agentBus/agentBus';
 import { claudeQuestion } from '../agentBus/busContent';
 import { codexMessage } from '../agentBus/codexDelivery';
-import { codexPinIsLive } from '../agentMesh/codexPinLiveness';
 import type { ForgeConfig } from '../config/types';
 import type { AgentKind, AgentLink } from './chatAgentLinks';
 import type { AskAgentRunResult, AskAgentRuntime } from './askAgentService';
@@ -141,12 +140,11 @@ export function makeAskAgentRuntime(options: {
   return {
     openPanel: open,
     isLive: async (agent, link) => {
-      if (getMeshOrchestrator()?.adapterForSession(agent, link.sessionId)) return true;
       if (agent === 'claude')
         return readClaudeSessions().some((session) => session.sessionId === link.sessionId);
       if (agent === 'codex') {
         const codexCli = busConfig(options.getConfig()).codex_cli;
-        return codexPinIsLive(link.sessionId, {
+        return codexThreadIsLive(link.sessionId, {
           ...(codexCli ? { codexCli } : {}),
           cwd: link.cwd,
           timeoutMs: 2_000,
@@ -155,32 +153,16 @@ export function makeAskAgentRuntime(options: {
       return false;
     },
     sendLive: async (agent, link, prompt, signal, purpose = 'ask', onAccepted) => {
-      const adapter = getMeshOrchestrator()?.adapterForSession(agent, link.sessionId);
       if (agent === 'codex') {
         if (purpose === 'reply') return queueCodexReply(options.getConfig, link, prompt, signal);
-        if (!adapter || !adapter.observesTurns)
-          return sendToPanelOwnedCodex(
-            options.getConfig,
-            link,
-            prompt,
-            signal,
-            adapter
-              ? 'The panel-owned Codex thread did not reply before the wait limit.'
-              : 'The linked Codex thread did not reply before the wait limit.',
-            onAccepted,
-          );
-      }
-      if (adapter) {
-        const pending = adapter.send(prompt, { signal });
-        onAccepted?.();
-        const result = await pending;
-        return {
-          status: result.status,
-          finalText: result.finalText ?? '',
-          ...(result.status === 'failed'
-            ? { error: 'The live session did not return a reply.' }
-            : {}),
-        };
+        return sendToPanelOwnedCodex(
+          options.getConfig,
+          link,
+          prompt,
+          signal,
+          'The linked Codex thread did not reply before the wait limit.',
+          onAccepted,
+        );
       }
       const session =
         agent === 'claude'

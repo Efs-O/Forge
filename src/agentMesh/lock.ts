@@ -5,9 +5,9 @@ import { getHostIdentity, isHostAlive } from './hostIdentity';
 
 /**
  * The M1 interprocess lock, shared by every durable bus artifact that does a
- * read-modify-write (the exchanges log and the alias registry). Two extension
- * hosts share `~/.forge/agent-bus/`, so a whole-file rename (the alias table,
- * F-14) must be serialized the same way a log append is: hold a lock file whose
+ * read-modify-write (the exchanges log). Two extension hosts share
+ * `~/.forge/agent-bus/`, so a whole-file rename must be serialized the same
+ * way a log append is: hold a lock file whose
  * name is the host that holds it, and reclaim it only when that host is proven
  * dead (pid gone, or the pid was recycled — its start time no longer matches).
  * Age alone never makes a readable holder stale, so a slow-but-live holder is
@@ -190,7 +190,7 @@ export function releaseLock(lockPath: string, holder: HostId): void {
 /**
  * Run `fn` while holding `lockPath`. The holder is the calling host (or
  * `deps.selfPid`). Used to serialize a read-modify-write of a whole durable
- * file (the alias table, F-14) against another extension host.
+ * file against another extension host.
  */
 export function withLock<T>(
   lockPath: string,
