@@ -65,7 +65,8 @@ export function makeRenderHtmlToImageTool(deps: RenderHtmlDeps): RegisteredTool 
         description:
           'Render an HTML page. mode "preview": shows you how a page you wrote (canvas, WebGL, ' +
           'three.js, animation, any UI) renders — runs its ' +
-          'scripts headless (no window opens) and can load libraries from public hosts. ' +
+          'scripts headless and can load libraries from public hosts. It opens nothing for the ' +
+          'user: it renders off-screen inside Forge, and only you see the result. ' +
           'console.log from the page is how to read a value out. Returns page errors, console ' +
           'output and screenshots to you only; nothing is saved or sent. ' +
           'mode "image" (default): render an HTML/CSS/SVG page to a PNG and send it to the ' +
