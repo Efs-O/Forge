@@ -11,6 +11,8 @@ const BLOCKED_SCHEMES = ['file://', 'data:', 'javascript:'];
 const MAX_REDIRECT_HOPS = 3;
 const REQUEST_TIMEOUT_MS = 10_000;
 const USER_AGENT = 'Forge-VSCode/0.16 (local-llm assistant)';
+const DEFAULT_MAX_CHARS = 30_000;
+const MAX_MAX_CHARS = 100_000;
 
 interface ResolvedAddress {
   address: string;
@@ -20,7 +22,9 @@ interface ResolvedAddress {
 interface RequestInitWithSignal {
   redirect: 'manual';
   signal: AbortSignal;
-  headers: { 'User-Agent': string };
+  method: string;
+  body?: Uint8Array;
+  headers: Record<string, string>;
 }
 
 type PinnedFetch = (
@@ -113,6 +117,15 @@ function blockedAddress(address: string): boolean {
   if (groups.slice(0, 7).every((group) => group === 0) && groups[7] === 1) return true;
   if ((groups[0] as number) >= 0xfc00 && (groups[0] as number) <= 0xfdff) return true;
   if ((groups[0] as number) >= 0xfe80 && (groups[0] as number) <= 0xfebf) return true;
+  if (groups.slice(0, 6).every((group) => group === 0)) {
+    const compatibleIpv4 = [
+      ((groups[6] as number) >> 8) & 0xff,
+      (groups[6] as number) & 0xff,
+      ((groups[7] as number) >> 8) & 0xff,
+      (groups[7] as number) & 0xff,
+    ].join('.');
+    return blockedIpv4(compatibleIpv4);
+  }
   if (groups.slice(0, 5).every((group) => group === 0) && groups[5] === 0xffff) {
     const mappedIpv4 = [
       ((groups[6] as number) >> 8) & 0xff,
@@ -206,6 +219,8 @@ export function makeWebFetchTool(dependencies: WebFetchDependencies = {}): Regis
             url: { type: 'string', description: 'URL to fetch (must be https:// or http://).' },
             max_chars: {
               type: 'integer',
+              minimum: 1,
+              maximum: MAX_MAX_CHARS,
               description: 'Maximum characters of content to return. Defaults to 30000.',
             },
             https_only: {
@@ -227,7 +242,19 @@ export function makeWebFetchTool(dependencies: WebFetchDependencies = {}): Regis
     permission: 'fetch',
     handler: async (args) => {
       const url = args['url'] as string;
-      const maxChars = (args['max_chars'] as number | undefined) ?? 30000;
+      const requestedMaxChars = args['max_chars'];
+      if (
+        requestedMaxChars !== undefined &&
+        (typeof requestedMaxChars !== 'number' ||
+          !Number.isInteger(requestedMaxChars) ||
+          requestedMaxChars < 1 ||
+          requestedMaxChars > MAX_MAX_CHARS)
+      ) {
+        throw new ToolError(
+          `web_fetch: max_chars must be an integer from 1 to ${MAX_MAX_CHARS}; received ${String(requestedMaxChars)}.`,
+        );
+      }
+      const maxChars = (requestedMaxChars as number | undefined) ?? DEFAULT_MAX_CHARS;
       const httpsOnly = args['https_only'] === true;
       const find = args['find'] as string | undefined;
 
@@ -275,6 +302,102 @@ export function makeWebFetchTool(dependencies: WebFetchDependencies = {}): Regis
       return `<UNTRUSTED_CONTENT>\n${excerpt.header}\n${excerpt.text}\n</UNTRUSTED_CONTENT>`;
     },
   };
+}
+
+/** Host-side preview transport; redirects are routed separately, without browser credentials. */
+export async function guardedFetchResource(
+  url: string,
+  options: {
+    method: string;
+    body?: Buffer;
+    headers?: Record<string, string>;
+    maxBytes: number;
+  },
+  dependencies: WebFetchDependencies = {},
+): Promise<{ status: number; statusText: string; headers: Record<string, string>; body: Buffer }> {
+  const blocked = ssrfCheck(url);
+  if (blocked) throw new ToolError(`web_fetch: ${blocked}`);
+  if (!['GET', 'POST'].includes(options.method)) {
+    throw new ToolError(`web_fetch: method ${options.method} is not supported by preview.`);
+  }
+  const parsed = parseFetchUrl(url);
+  if (typeof parsed === 'string') throw new ToolError(`web_fetch: ${parsed}`);
+  const hostname = normalizedHostname(parsed);
+  const lookup = dependencies.lookup ?? ((host) => dnsLookup(host, { all: true }));
+  const addresses = await lookup(hostname);
+  if (addresses.length === 0)
+    throw new ToolError(`web_fetch: DNS lookup returned no addresses for ${hostname}.`);
+  for (const address of addresses) {
+    const reason = blockedResolvedAddress(address);
+    if (reason) throw new ToolError(`web_fetch: ${reason}`);
+  }
+  const pinned = addresses[0] as ResolvedAddress;
+  const agent = new Agent({
+    connect: {
+      lookup: (host, lookupOptions, callback) => {
+        if (host.toLowerCase() !== hostname) {
+          callback(new Error(`No vetted address for ${host}`), '', 0);
+          return;
+        }
+        if (lookupOptions.all) callback(null, [{ address: pinned.address, family: pinned.family }]);
+        else callback(null, pinned.address, pinned.family);
+      },
+    },
+  });
+  try {
+    const response = await (dependencies.fetch ?? defaultPinnedFetch)(
+      url,
+      pinned,
+      {
+        redirect: 'manual',
+        signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
+        method: options.method,
+        ...(options.body ? { body: options.body } : {}),
+        headers: { 'User-Agent': USER_AGENT, ...options.headers },
+      },
+      agent,
+    );
+    const body = await readResponseBytes(response, options.maxBytes);
+    const headers: Record<string, string> = {};
+    response.headers.forEach((value, key) => {
+      if (
+        ![
+          'set-cookie',
+          'connection',
+          'transfer-encoding',
+          'content-encoding',
+          'content-length',
+        ].includes(key.toLowerCase())
+      ) {
+        headers[key] = value;
+      }
+    });
+    return { status: response.status, statusText: response.statusText, headers, body };
+  } finally {
+    await agent.close();
+  }
+}
+
+async function readResponseBytes(response: Response, maxBytes: number): Promise<Buffer> {
+  const reader = response.body?.getReader();
+  if (!reader) return Buffer.alloc(0);
+  const chunks: Uint8Array[] = [];
+  let size = 0;
+  try {
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      size += value.byteLength;
+      if (size > maxBytes) {
+        await reader.cancel();
+        throw new ToolError(`web_fetch: response exceeds the ${maxBytes} byte limit.`);
+      }
+      chunks.push(value);
+    }
+  } finally {
+    reader.releaseLock();
+  }
+  return Buffer.concat(chunks.map((chunk) => Buffer.from(chunk)));
 }
 
 function findWindow(
@@ -356,6 +479,7 @@ async function fetchPublicPage(
         {
           redirect: 'manual',
           signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
+          method: 'GET',
           headers: { 'User-Agent': USER_AGENT },
         },
         agent,

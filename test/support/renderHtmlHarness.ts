@@ -26,10 +26,13 @@ export interface RenderFake {
   /** Emitted as `pageerror` / console `error` events during setContent. */
   pageErrors: string[];
   consoleErrors: string[];
+  consoleMessages: Array<{ type: 'log' | 'info' | 'warn'; text: string }>;
   /** Requests the fake page issues through the routes during setContent. */
   pageRequests: Array<{ url: string; method: string }>;
   /** What the routes decided for each of `pageRequests`. */
-  routeOutcomes: Array<{ url: string; outcome: 'continue' | 'abort' }>;
+  routeOutcomes: Array<{ url: string; outcome: 'continue' | 'abort' | 'fulfill' }>;
+  fulfillments: Array<Record<string, unknown>>;
+  keyPresses: Array<{ key: string; delay: number }>;
   setContentCalls: string[];
   gotoCalls: number;
   screenshotCalls: Array<Record<string, unknown>>;
@@ -55,9 +58,10 @@ export interface RenderFake {
 }
 
 export interface FakeRoute {
-  request: () => { url: () => string; method: () => string };
+  request: () => { url: () => string; method: () => string; postDataBuffer: () => Buffer | null; headers: () => Record<string, string> };
   continue: () => Promise<void>;
   abort: () => Promise<void>;
+  fulfill: (response: Record<string, unknown>) => Promise<void>;
 }
 
 export const renderFake: RenderFake = {
@@ -68,8 +72,11 @@ export const renderFake: RenderFake = {
   waitCalls: [],
   pageErrors: [],
   consoleErrors: [],
+  consoleMessages: [],
   pageRequests: [],
   routeOutcomes: [],
+  fulfillments: [],
+  keyPresses: [],
   setContentCalls: [],
   gotoCalls: 0,
   screenshotCalls: [],
@@ -93,8 +100,11 @@ export function resetRenderFake(): void {
   renderFake.waitCalls = [];
   renderFake.pageErrors = [];
   renderFake.consoleErrors = [];
+  renderFake.consoleMessages = [];
   renderFake.pageRequests = [];
   renderFake.routeOutcomes = [];
+  renderFake.fulfillments = [];
+  renderFake.keyPresses = [];
   renderFake.setContentCalls = [];
   renderFake.gotoCalls = 0;
   renderFake.screenshotCalls = [];
@@ -136,6 +146,7 @@ export function fakePlaywright(): {
                 renderFake.routeSelectors.push(selector);
                 if (handler) renderFake.routeHandlers.push(handler);
               },
+              routeWebSocket: async () => undefined,
               newPage: async () => ({
                 on: (event: string, listener: (payload: unknown) => void) => {
                   listeners.set(event, [...(listeners.get(event) ?? []), listener]);
@@ -145,12 +156,21 @@ export function fakePlaywright(): {
                   for (const request of renderFake.pageRequests) {
                     for (const handler of renderFake.routeHandlers) {
                       handler({
-                        request: () => ({ url: () => request.url, method: () => request.method }),
+                        request: () => ({
+                          url: () => request.url,
+                          method: () => request.method,
+                          postDataBuffer: () => null,
+                          headers: () => ({}),
+                        }),
                         continue: async () => {
                           renderFake.routeOutcomes.push({ url: request.url, outcome: 'continue' });
                         },
                         abort: async () => {
                           renderFake.routeOutcomes.push({ url: request.url, outcome: 'abort' });
+                        },
+                        fulfill: async (response) => {
+                          renderFake.routeOutcomes.push({ url: request.url, outcome: 'fulfill' });
+                          renderFake.fulfillments.push(response);
                         },
                       });
                     }
@@ -159,11 +179,20 @@ export function fakePlaywright(): {
                   for (const text of renderFake.consoleErrors) {
                     emit('console', { type: () => 'error', text: () => text });
                   }
-                  // A non-error console line must not be reported as an error.
-                  emit('console', { type: () => 'log', text: () => 'scene ready' });
+                  for (const message of renderFake.consoleMessages) {
+                    emit('console', { type: () => message.type, text: () => message.text });
+                  }
+                  if (renderFake.consoleMessages.length === 0) {
+                    emit('console', { type: () => 'log', text: () => 'scene ready' });
+                  }
                 },
                 waitForTimeout: async (ms: number) => {
                   renderFake.waitCalls.push(ms);
+                },
+                keyboard: {
+                  press: async (key: string, options: { delay: number }) => {
+                    renderFake.keyPresses.push({ key, delay: options.delay });
+                  },
                 },
                 // The tool measures the document before a full_page capture.
                 // The real page evaluates in the page's own context; here it

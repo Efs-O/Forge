@@ -13,6 +13,27 @@ import { renderPreview } from './renderEngine';
 
 export const DEFAULT_PREVIEW_WAIT_MS = 3_000;
 export const MAX_PREVIEW_WAIT_MS = 15_000;
+export const PREVIEW_KEY_NAMES = [
+  ...'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789',
+  'ArrowUp',
+  'ArrowDown',
+  'ArrowLeft',
+  'ArrowRight',
+  'Space',
+  'Enter',
+  'Escape',
+  'Shift',
+  'Control',
+  'Alt',
+  'Tab',
+  'Backspace',
+  'Delete',
+  'Home',
+  'End',
+  'PageUp',
+  'PageDown',
+  ' ',
+] as const;
 
 export interface PreviewOptions {
   channel: BrowserChannel;
@@ -44,7 +65,9 @@ export async function runPreview(
   }
   const width = readViewportPx(args['width'], 1024, 'width');
   const height = readViewportPx(args['height'], 1024, 'height');
-  const waitMs = readWaitMs(args['wait_ms']);
+  const frames = readFrames(args['frames'], args['wait_ms']);
+  const keys = readKeys(args['keys']);
+  const waitMs = frames.at(-1) ?? DEFAULT_PREVIEW_WAIT_MS;
   const html = await readHtmlFile(rawPath);
 
   const started = options.now();
@@ -54,16 +77,17 @@ export async function runPreview(
       width,
       height,
       channel: options.channel,
-      timeoutMs: options.baseTimeoutMs + waitMs,
-      settleMs: waitMs,
+      timeoutMs: options.baseTimeoutMs + waitMs + keys.reduce((sum, k) => sum + k.holdMs, 0),
+      frames,
+      keys,
     },
     context?.abortSignal,
   );
   const elapsedS = ((options.now() - started) / 1000).toFixed(1);
-  const dims = pngDimensions(result.png);
+  const dims = pngDimensions(result.frames[0]!.png);
 
   const lines = [
-    `Preview of ${rawPath} at ${dims.width}x${dims.height}, screenshot taken ${waitMs} ms after load (${elapsedS} s total). Nothing was saved or sent.`,
+    `Preview of ${rawPath} at ${dims.width}x${dims.height}, ${result.frames.length} frame(s) captured (${elapsedS} s total). Nothing was saved or sent.`,
   ];
   if (result.errorCount === 0) {
     lines.push('Page errors: none.');
@@ -74,16 +98,23 @@ export async function runPreview(
   }
   if (result.blocked.length > 0) {
     lines.push(
-      `Blocked requests (preview allows only https GETs to cdn.jsdelivr.net, cdnjs.cloudflare.com, unpkg.com; relative and local assets do not load): ${result.blocked.join(', ')}`,
+      `Blocked requests (only public HTTP(S) GET and POST requests are fetched; local and non-HTTP(S) requests are refused): ${result.blocked.join(', ')}`,
     );
   }
+  lines.push(
+    `Console output (${result.consoleLines.length} lines, capped at 4000 characters):`,
+    ...(result.consoleLines.length ? result.consoleLines.map((line) => `- ${line}`) : ['- none']),
+  );
+  if (result.consoleDropped > 0)
+    lines.push(`- … ${result.consoleDropped} older console lines dropped`);
   if (!context?.isVisionModel) {
     lines.push(
       'No screenshot attached: the active model has no vision input. Only the error list above is available.',
     );
     return lines.join('\n');
   }
-  lines.push('Screenshot attached.');
+  lines.push('Frames attached:');
+  for (const frame of result.frames) lines.push(`- ${frame.timeMs} ms`);
   const text = lines.join('\n');
   return {
     text,
@@ -91,8 +122,12 @@ export async function runPreview(
       { type: 'text', text },
       {
         type: 'image_url',
-        image_url: { url: `data:image/png;base64,${result.png.toString('base64')}` },
+        image_url: { url: `data:image/png;base64,${result.frames[0]!.png.toString('base64')}` },
       },
+      ...result.frames.slice(1).map((frame) => ({
+        type: 'image_url' as const,
+        image_url: { url: `data:image/png;base64,${frame.png.toString('base64')}` },
+      })),
     ],
   };
 }
@@ -108,4 +143,54 @@ function readWaitMs(value: unknown): number {
     );
   }
   return value;
+}
+
+function readFrames(value: unknown, waitMs: unknown): number[] {
+  if (value === undefined) return [readWaitMs(waitMs)];
+  if (waitMs !== undefined)
+    throw new Error('render_html_to_image: frames replaces wait_ms; provide only one.');
+  if (!Array.isArray(value) || value.length < 1 || value.length > 4) {
+    throw new Error('render_html_to_image: frames must contain 1–4 capture times.');
+  }
+  let previous = -1;
+  return value.map((time, index) => {
+    if (typeof time !== 'number' || !Number.isInteger(time)) {
+      throw new Error(`render_html_to_image: frames[${index}] must be an integer.`);
+    }
+    if (time < 0 || time > MAX_PREVIEW_WAIT_MS) {
+      throw new Error(
+        `render_html_to_image: frames[${index}] is ${time}; the range is 0–${MAX_PREVIEW_WAIT_MS}.`,
+      );
+    }
+    if (time <= previous)
+      throw new Error('render_html_to_image: frames must be strictly ascending.');
+    previous = time;
+    return time;
+  });
+}
+
+function readKeys(value: unknown): Array<{ key: string; holdMs: number }> {
+  if (value === undefined) return [];
+  if (!Array.isArray(value) || value.length > 8) {
+    throw new Error('render_html_to_image: keys must contain at most 8 key actions.');
+  }
+  return value.map((entry, index) => {
+    if (entry === null || typeof entry !== 'object' || Array.isArray(entry)) {
+      throw new Error(`render_html_to_image: keys[${index}] must contain key and hold_ms.`);
+    }
+    const item = entry as Record<string, unknown>;
+    const key = item['key'];
+    const holdMs = item['hold_ms'];
+    if (typeof key !== 'string' || !(PREVIEW_KEY_NAMES as readonly string[]).includes(key)) {
+      throw new Error(
+        `render_html_to_image: keys[${index}].key must be a supported Playwright key name.`,
+      );
+    }
+    if (typeof holdMs !== 'number' || !Number.isInteger(holdMs) || holdMs < 0 || holdMs > 3_000) {
+      throw new Error(
+        `render_html_to_image: keys[${index}].hold_ms must be an integer from 0 to 3000.`,
+      );
+    }
+    return { key, holdMs };
+  });
 }

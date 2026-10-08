@@ -97,6 +97,11 @@ wait_ms: integer            (preview only; default 3000, 0–15000)
 The allowlist is a constant in `renderEngine.ts`, not config: it is a security
 boundary, and a config field would make "allow everything" one edit away.
 
+**Network policy update:** the CDN-only route was replaced by host-side,
+SSRF-guarded fetches for public HTTP(S) requests. See
+`docs/plans/PAGE_TASK_TOOL_FIXES_PLAN.md` § F2 for the owner decision and
+implementation contract.
+
 ### Gating
 
 - Permission: unchanged, `fetch` + `write`. Preview mode's only outbound

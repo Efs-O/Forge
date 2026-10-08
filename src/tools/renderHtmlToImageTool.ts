@@ -14,7 +14,12 @@ import {
   readHtmlFile,
   readViewportPx,
 } from './renderHtml/htmlInput';
-import { DEFAULT_PREVIEW_WAIT_MS, MAX_PREVIEW_WAIT_MS, runPreview } from './renderHtml/previewMode';
+import {
+  DEFAULT_PREVIEW_WAIT_MS,
+  MAX_PREVIEW_WAIT_MS,
+  PREVIEW_KEY_NAMES,
+  runPreview,
+} from './renderHtml/previewMode';
 import { renderPng } from './renderHtml/renderEngine';
 import type { RegisteredTool, ToolHandlerContext, ToolHandlerResult } from './ToolRegistry';
 
@@ -60,7 +65,9 @@ export function makeRenderHtmlToImageTool(deps: RenderHtmlDeps): RegisteredTool 
         description:
           'Render an HTML page. mode "preview": check that a page you wrote (canvas, WebGL, ' +
           'three.js, animation, any UI) actually renders before you call it done — runs its ' +
-          'scripts, returns page errors and a screenshot to you only; nothing is saved or sent. ' +
+          'scripts headless (no window opens) and can load libraries from public hosts. ' +
+          'console.log from the page is how to read a value out. Returns page errors, console ' +
+          'output and screenshots to you only; nothing is saved or sent. ' +
           'mode "image" (default): render an HTML/CSS/SVG page to a PNG and send it to the ' +
           'remote chat watching this turn — for posters, cards, invites, diagrams, infographics; ' +
           'image mode runs no JavaScript and loads nothing external, so inline everything ' +
@@ -99,7 +106,32 @@ export function makeRenderHtmlToImageTool(deps: RenderHtmlDeps): RegisteredTool 
             },
             wait_ms: {
               type: 'integer',
+              minimum: 0,
+              maximum: MAX_PREVIEW_WAIT_MS,
               description: `Preview only: wait after the page loads before the screenshot, so scripts can draw (default ${DEFAULT_PREVIEW_WAIT_MS}). 0–${MAX_PREVIEW_WAIT_MS}.`,
+            },
+            frames: {
+              type: 'array',
+              minItems: 1,
+              maxItems: 4,
+              items: { type: 'integer', minimum: 0, maximum: MAX_PREVIEW_WAIT_MS },
+              description:
+                'Preview only: 1–4 strictly ascending capture times in ms. Replaces wait_ms.',
+            },
+            keys: {
+              type: 'array',
+              maxItems: 8,
+              items: {
+                type: 'object',
+                properties: {
+                  key: { type: 'string', enum: [...PREVIEW_KEY_NAMES] },
+                  hold_ms: { type: 'integer', minimum: 0, maximum: 3000 },
+                },
+                required: ['key', 'hold_ms'],
+                additionalProperties: false,
+              },
+              description:
+                'Preview only: press these keys in order after load and before the first frame.',
             },
           },
           required: [],

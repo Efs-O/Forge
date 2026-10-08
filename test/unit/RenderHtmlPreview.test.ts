@@ -13,10 +13,21 @@ vi.mock('../../src/tools/browser/BrowserSessionManager', async (importOriginal) 
 });
 
 vi.mock('vscode', () => ({ workspace: { workspaceFolders: undefined } }));
+vi.mock('../../src/tools/fetchTool', () => ({
+  guardedFetchResource: vi.fn(async (resourceUrl: string) => {
+    if (new URL(resourceUrl).hostname === '127.0.0.1') throw new Error('private address refused');
+    return {
+      status: 200,
+      statusText: 'OK',
+      headers: { 'content-type': 'text/javascript' },
+      body: Buffer.from('ok'),
+    };
+  }),
+}));
 
 import {
-  PREVIEW_ALLOWED_HOSTS,
   isPreviewRequestAllowed,
+  PREVIEW_LAUNCH_ARGS,
 } from '../../src/tools/renderHtml/renderEngine';
 import { makeRenderHtmlToImageTool } from '../../src/tools/renderHtmlToImageTool';
 import type { MultimodalToolResult } from '../../src/tools/ToolRegistry';
@@ -55,7 +66,7 @@ afterEach(async () => {
 });
 
 describe('render_html_to_image preview: launch hardening', () => {
-  it('opens DNS for the allowlist only, disables WebRTC UDP, and turns scripts on', async () => {
+  it('keeps Chrome DNS blocked, disables WebRTC UDP, and turns scripts on', async () => {
     const { tool } = rig();
     await tool.handler({ mode: 'preview', path: await writePage() }, context());
 
@@ -65,7 +76,7 @@ describe('render_html_to_image preview: launch hardening', () => {
       '--disable-background-networking',
       '--disable-component-update',
       '--no-pings',
-      '--host-resolver-rules=MAP * ~NOTFOUND, EXCLUDE cdn.jsdelivr.net, EXCLUDE cdnjs.cloudflare.com, EXCLUDE unpkg.com',
+      '--host-resolver-rules=MAP * ~NOTFOUND',
       '--webrtc-ip-handling-policy=disable_non_proxied_udp',
     ]);
     // No hole to Forge's own control server, and no shell quoting in an argv.
@@ -75,46 +86,41 @@ describe('render_html_to_image preview: launch hardening', () => {
     expect(renderFake.setContentCalls).toEqual([PAGE]);
   });
 
-  it('routes only https GETs to the three CDNs through', async () => {
+  it('fetches public HTTP(S) requests through the host guard and refuses local and non-web URLs', async () => {
     renderFake.pageRequests = [
       { url: 'https://cdn.jsdelivr.net/npm/three@0.160.1/build/three.module.js', method: 'GET' },
-      { url: 'https://unpkg.com/three/examples/jsm/controls/OrbitControls.js', method: 'GET' },
-      { url: 'https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js', method: 'GET' },
-      { url: 'https://cdn.jsdelivr.net/npm/x', method: 'POST' },
-      { url: 'http://cdn.jsdelivr.net/npm/three', method: 'GET' },
+      { url: 'https://public.example.test/script.js', method: 'GET' },
+      { url: 'http://public.example.test/api', method: 'POST' },
       { url: 'https://example.com/?leak=1', method: 'GET' },
       { url: 'http://127.0.0.1:8799/', method: 'GET' },
       { url: 'file:///C:/Windows/win.ini', method: 'GET' },
-      { url: 'https://cdn.jsdelivr.net.evil.example/x', method: 'GET' },
+      { url: 'javascript:alert(1)', method: 'GET' },
     ];
     const { tool } = rig();
     const result = await tool.handler({ mode: 'preview', path: await writePage() }, context());
 
     expect(renderFake.routeSelectors).toEqual(['**/*']);
-    expect(renderFake.routeOutcomes.map((o) => o.outcome)).toEqual([
-      'continue',
-      'continue',
-      'continue',
-      'abort',
-      'abort',
-      'abort',
-      'abort',
-      'abort',
-      'abort',
-    ]);
-    expect(String(result)).toContain('https://example.com');
+    expect(Object.fromEntries(renderFake.routeOutcomes.map((o) => [o.url, o.outcome]))).toEqual({
+      'https://cdn.jsdelivr.net/npm/three@0.160.1/build/three.module.js': 'fulfill',
+      'https://public.example.test/script.js': 'fulfill',
+      'http://public.example.test/api': 'fulfill',
+      'https://example.com/?leak=1': 'fulfill',
+      'http://127.0.0.1:8799/': 'abort',
+      'file:///C:/Windows/win.ini': 'abort',
+      'javascript:alert(1)': 'abort',
+    });
+    expect(renderFake.fulfillments).toHaveLength(4);
+    expect(String(result)).not.toContain('https://example.com');
     expect(String(result)).toContain('http://127.0.0.1:8799');
     expect(String(result)).toContain('file:');
   });
 
-  it('keeps the allowlist to exactly the three script CDNs', () => {
-    expect([...PREVIEW_ALLOWED_HOSTS]).toEqual([
-      'cdn.jsdelivr.net',
-      'cdnjs.cloudflare.com',
-      'unpkg.com',
-    ]);
+  it('allows public web request shapes and uses the unchanged Chrome DNS wall', () => {
+    expect(PREVIEW_LAUNCH_ARGS).toContain('--host-resolver-rules=MAP * ~NOTFOUND');
     expect(isPreviewRequestAllowed('not a url', 'GET')).toBe(false);
-    expect(isPreviewRequestAllowed('https://CDN.JSDELIVR.NET/npm/x', 'GET')).toBe(true);
+    expect(isPreviewRequestAllowed('https://public.example.test/script.js', 'GET')).toBe(true);
+    expect(isPreviewRequestAllowed('http://public.example.test/api', 'POST')).toBe(true);
+    expect(isPreviewRequestAllowed('https://public.example.test/api', 'PUT')).toBe(false);
   });
 });
 
@@ -156,10 +162,33 @@ describe('render_html_to_image preview: inputs', () => {
       tool.handler({ mode: 'preview', path: page, wait_ms: 1.5 }, context()),
     ).rejects.toThrow(/wait_ms must be an integer/);
   });
+
+  it('captures ascending frames and presses bounded keys before the first capture', async () => {
+    const { tool } = rig();
+    const result = await tool.handler({
+      mode: 'preview', path: await writePage(), frames: [0, 500, 1500],
+      keys: [{ key: 'w', hold_ms: 100 }, { key: 'Space', hold_ms: 0 }],
+    }, context({ isVisionModel: true }));
+    expect(renderFake.waitCalls).toEqual([500, 1000]);
+    expect(renderFake.keyPresses).toEqual([{ key: 'w', delay: 100 }, { key: 'Space', delay: 0 }]);
+    expect((result as MultimodalToolResult).content.filter((part) => part.type === 'image_url')).toHaveLength(3);
+    expect((result as MultimodalToolResult).text).toContain('0 ms');
+    expect((result as MultimodalToolResult).text).toContain('500 ms');
+    expect((result as MultimodalToolResult).text).toContain('1500 ms');
+  });
+
+  it('rejects invalid frames, wait_ms with frames, and unsupported keys', async () => {
+    const { tool } = rig();
+    const page = await writePage();
+    await expect(tool.handler({ mode: 'preview', path: page, frames: [500, 400] }, context())).rejects.toThrow(/strictly ascending/);
+    await expect(tool.handler({ mode: 'preview', path: page, frames: [1], wait_ms: 2 }, context())).rejects.toThrow(/replaces wait_ms/);
+    await expect(tool.handler({ mode: 'preview', path: page, keys: [{ key: 'F12', hold_ms: 0 }] }, context())).rejects.toThrow(/supported Playwright key/);
+    await expect(tool.handler({ mode: 'preview', path: page, frames: [15_001] }, context())).rejects.toThrow(/frames\[0\] is 15001; the range is 0–15000/);
+  });
 });
 
 describe('render_html_to_image preview: result', () => {
-  it('returns page and console errors, not console logs, capped at 10', async () => {
+  it('returns errors and capped console output', async () => {
     renderFake.pageErrors = ['ReferenceError: THREE is not defined'];
     renderFake.consoleErrors = Array.from({ length: 11 }, (_, i) => `console failure ${i}`);
     const { tool } = rig();
@@ -170,7 +199,25 @@ describe('render_html_to_image preview: result', () => {
     expect(result).toContain('- console failure 8');
     expect(result).not.toContain('console failure 9');
     expect(result).toContain('2 more not shown');
-    expect(result).not.toContain('scene ready');
+    expect(result).toContain('log: scene ready');
+    expect(result).toContain('Console output (1 lines, capped at 4000 characters):');
+  });
+
+  it('caps console output at 40 lines and 4000 characters, dropping oldest lines', async () => {
+    renderFake.consoleMessages = Array.from({ length: 45 }, (_, i) => ({ type: 'info' as const, text: `line-${i}` }));
+    const { tool } = rig();
+    const result = String(await tool.handler({ mode: 'preview', path: await writePage() }, context()));
+    expect(result).toContain('40 lines, capped at 4000 characters');
+    expect(result).toContain('5 older console lines dropped');
+    expect(result).not.toContain('info: line-0');
+    expect(result).toContain('info: line-44');
+
+    renderFake.consoleMessages = [{ type: 'warn', text: 'y'.repeat(4100) }];
+    const oversized = String(await tool.handler({ mode: 'preview', path: await writePage() }, context()));
+    // One oversized line keeps its start, cut to the 4000-character cap.
+    expect(oversized).not.toContain('older console lines dropped');
+    expect(oversized).toContain(`warn: ${'y'.repeat(100)}`);
+    expect(oversized).not.toContain('y'.repeat(4000));
   });
 
   it('gives a non-vision model text only, saying why there is no image', async () => {
@@ -191,7 +238,7 @@ describe('render_html_to_image preview: result', () => {
       context({ isVisionModel: true }),
     )) as MultimodalToolResult;
     expect(result.text).toContain('Preview of scene.html at 1024x1024');
-    expect(result.text).toContain('Screenshot attached.');
+    expect(result.text).toContain('Frames attached:');
     const images = result.content.filter((part) => part.type === 'image_url');
     expect(images).toHaveLength(1);
     expect(JSON.stringify(images[0])).toContain(

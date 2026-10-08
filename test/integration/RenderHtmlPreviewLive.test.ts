@@ -1,4 +1,5 @@
 import * as dgram from 'dgram';
+import { lookup as dnsLookup } from 'dns/promises';
 import * as fs from 'fs/promises';
 import * as https from 'https';
 import * as net from 'net';
@@ -117,7 +118,9 @@ describe('render_html_to_image preview against real Chrome', () => {
             `const t='127.0.0.1:${port}', l='localhost:${port}';` +
             "const tryIt=(f)=>{try{f()}catch(e){}};" +
             "tryIt(()=>fetch('http://'+t+'/f',{mode:'no-cors'}).catch(()=>{}));" +
+            "tryIt(()=>fetch('http://'+t+'/post',{method:'POST',body:'x'}).catch(()=>{}));" +
             "tryIt(()=>fetch('http://'+l+'/f',{mode:'no-cors'}).catch(()=>{}));" +
+            `tryIt(()=>{const s=document.createElement('script');s.src='http://'+t+'/script';document.head.appendChild(s)});` +
             "tryIt(()=>{new Image().src='http://'+t+'/img'});" +
             "tryIt(()=>new WebSocket('ws://'+t+'/ws'));" +
             "tryIt(()=>new WebSocket('ws://'+l+'/ws'));" +
@@ -135,10 +138,77 @@ describe('render_html_to_image preview against real Chrome', () => {
       expect(tcp).toBe(0);
       expect(udp).toBe(0);
       expect(deliveries).toBe(0);
+      // Image mode remains inert and must issue no request either.
+      await fs.writeFile(path.join(root, 'image.html'),
+        `<img src="http://127.0.0.1:${port}/image"><script>fetch('http://127.0.0.1:${port}/fetch')</script>`,
+        'utf8');
+      await tool.handler(
+        { mode: 'image', path: 'image.html' },
+        { beforeMutate: () => undefined, isVisionModel: false },
+      );
+      expect(tcp).toBe(0);
+      expect(udp).toBe(0);
     } finally {
       await new Promise<void>((resolve) => server.close(() => resolve()));
       udpSocket.close();
     }
+  }, 90_000);
+
+  it('loads scripts from a CDN and a public non-CDN host', async (ctx) => {
+    if (!(await cdnReachable())) {
+      ctx.skip('cdn.jsdelivr.net is not reachable from this host (offline?)');
+      return;
+    }
+    let nonCdnAddress: string;
+    try {
+      nonCdnAddress = (await dnsLookup('example.com')).address;
+    } catch {
+      ctx.skip('public DNS is not reachable from this host (offline?)');
+      return;
+    }
+    if (nonCdnAddress.startsWith('127.') || nonCdnAddress.startsWith('10.')) {
+      ctx.skip('example.com does not resolve to a public address on this host');
+      return;
+    }
+    let result: string | MultimodalToolResult;
+    try {
+      result = await preview(
+        '<html><body><script src="https://cdn.jsdelivr.net/npm/three@0.160.1/build/three.min.js"></script>' +
+          '<script src="https://example.com/" onload="console.log(\'non-cdn-loaded\')"></script>' +
+          '<script>console.log("cdn="+typeof THREE)</script>' +
+          '</body></html>',
+        { wait_ms: 2_000, width: 400, height: 300 },
+      );
+    } catch (err) {
+      return skipIfNoBrowser(ctx, err);
+    }
+    expect(String(result)).toContain('non-cdn-loaded');
+    expect(String(result)).toContain('cdn=object');
+  }, 90_000);
+
+  it('refuses a public hostname that resolves to loopback', async (ctx) => {
+    let addresses: Array<{ address: string; family: number }>;
+    try {
+      addresses = await dnsLookup('localtest.me', { all: true });
+    } catch {
+      ctx.skip('localtest.me DNS is not reachable; DNS pinning is covered with an injected resolver in unit tests');
+      return;
+    }
+    if (!addresses.some((item) => item.address === '127.0.0.1' || item.address === '::1')) {
+      ctx.skip('localtest.me did not resolve to loopback here; DNS pinning is covered with an injected resolver in unit tests');
+      return;
+    }
+    let result: string | MultimodalToolResult;
+    try {
+      result = await preview(
+        '<script>fetch("http://localtest.me:8799/").catch(()=>console.log("refused"))</script>',
+        { wait_ms: 500, width: 300, height: 200 },
+      );
+    } catch (err) {
+      return skipIfNoBrowser(ctx, err);
+    }
+    expect(String(result)).toContain('refused');
+    expect(String(result)).toContain('localtest.me');
   }, 90_000);
 
   it('reads nothing from the local disk', async (ctx) => {

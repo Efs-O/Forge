@@ -1,4 +1,5 @@
 import { getPlaywright, type BrowserChannel } from '../browser/BrowserSessionManager';
+import { guardedFetchResource } from '../fetchTool';
 
 /**
  * The render half of `render_html_to_image`: launch a headless browser,
@@ -27,33 +28,14 @@ const HARDENED_LAUNCH_ARGS = [
   '--host-resolver-rules=MAP * ~NOTFOUND',
 ] as const;
 
-/**
- * Preview mode's only reachable hosts: the script CDNs a single-file page pulls
- * three.js and friends from. A constant, not config — it is a security
- * boundary, and a config field would make "allow everything" one edit away
- * (RENDER_PREVIEW_PLAN.md).
- */
-export const PREVIEW_ALLOWED_HOSTS = [
-  'cdn.jsdelivr.net',
-  'cdnjs.cloudflare.com',
-  'unpkg.com',
-] as const;
-
-/**
- * The image-mode args with the DNS wall opened for the allowlist only, plus a
- * WebRTC policy. With scripts on, `context.route` is the first wall and DNS the
- * second; WebRTC's STUN traffic is UDP that neither sees. Measured 2026-10-07:
- * `stun:127.0.0.1:<port>` delivered 5 UDP packets to a loopback socket without
- * the policy and 0 with it; WebSocket, EventSource and sendBeacon to 127.0.0.1
- * and localhost opened 0 TCP connections either way.
- */
+/** Chrome resolves nothing itself; the extension host fetches every routed URL after DNS pinning. */
 export const PREVIEW_LAUNCH_ARGS = [
   ...HARDENED_LAUNCH_ARGS.filter((arg) => !arg.startsWith('--host-resolver-rules=')),
-  `--host-resolver-rules=MAP * ~NOTFOUND, ${PREVIEW_ALLOWED_HOSTS.map((h) => `EXCLUDE ${h}`).join(', ')}`,
+  '--host-resolver-rules=MAP * ~NOTFOUND',
   '--webrtc-ip-handling-policy=disable_non_proxied_udp',
 ] as const;
 
-/** Preview requests that may leave the browser: GET over https to the allowlist. */
+/** Preview URLs must be public HTTP(S); the host-side fetch guard checks DNS results. */
 export function isPreviewRequestAllowed(url: string, method: string): boolean {
   let parsed: URL;
   try {
@@ -62,9 +44,8 @@ export function isPreviewRequestAllowed(url: string, method: string): boolean {
     return false;
   }
   return (
-    method === 'GET' &&
-    parsed.protocol === 'https:' &&
-    (PREVIEW_ALLOWED_HOSTS as readonly string[]).includes(parsed.hostname)
+    ['GET', 'POST'].includes(method) &&
+    (parsed.protocol === 'https:' || parsed.protocol === 'http:')
   );
 }
 
@@ -72,6 +53,9 @@ export function isPreviewRequestAllowed(url: string, method: string): boolean {
 const MAX_PREVIEW_ERRORS = 10;
 /** One error line's cap — a minified stack is otherwise one huge line. */
 const MAX_PREVIEW_ERROR_CHARS = 300;
+const MAX_PREVIEW_RESPONSE_BYTES = 10 * 1024 * 1024;
+const MAX_PREVIEW_CONSOLE_LINES = 40;
+const MAX_PREVIEW_CONSOLE_CHARS = 4_000;
 
 export interface RenderRequest {
   html: string;
@@ -94,18 +78,20 @@ export interface PreviewRequest {
   height: number;
   channel: BrowserChannel;
   timeoutMs: number;
-  /** Wait after `load` before the screenshot, for scripts that build the scene. */
-  settleMs: number;
+  frames: number[];
+  keys: Array<{ key: string; holdMs: number }>;
 }
 
 export interface PreviewResult {
-  png: Buffer;
+  frames: Array<{ timeMs: number; png: Buffer }>;
   /** Page exceptions and console errors, first {@link MAX_PREVIEW_ERRORS}. */
   errors: string[];
   /** All errors seen, including the ones not listed. */
   errorCount: number;
   /** `scheme://host` of every request the route refused, de-duplicated. */
   blocked: string[];
+  consoleLines: string[];
+  consoleDropped: number;
 }
 
 /**
@@ -307,10 +293,10 @@ export async function renderPng(
 /**
  * Preview mode: the page's own scripts run, so a canvas/WebGL scene the agent
  * wrote actually draws. Still `setContent` (no `file://` origin, no disk
- * reads); requests leave only as GETs to {@link PREVIEW_ALLOWED_HOSTS}, with
- * DNS for every other host mapped to NOTFOUND behind the route. Errors the page
- * raises are returned with the PNG — a boot crash is the most common reason a
- * scene is blank.
+ * reads). Chrome resolves no host itself (DNS mapped to NOTFOUND); every
+ * request is fetched by the extension host through `guardedFetchResource`,
+ * which refuses non-public addresses after resolving. Errors the page
+ * raises and console output are returned with one or more PNGs.
  */
 export async function renderPreview(
   request: PreviewRequest,
@@ -326,14 +312,31 @@ export async function renderPreview(
         javaScriptEnabled: true,
       });
       const blocked = new Set<string>();
-      await context.route('**/*', (route) => {
+      await context.route('**/*', async (route) => {
         const req = route.request();
-        if (isPreviewRequestAllowed(req.url(), req.method())) return void route.continue();
-        blocked.add(originLabel(req.url()));
-        return void route.abort();
+        if (!isPreviewRequestAllowed(req.url(), req.method())) {
+          blocked.add(originLabel(req.url()));
+          return void route.abort();
+        }
+        try {
+          const body = req.postDataBuffer();
+          const response = await guardedFetchResource(req.url(), {
+            method: req.method(),
+            ...(body ? { body } : {}),
+            headers: safePreviewHeaders(req.headers()),
+            maxBytes: MAX_PREVIEW_RESPONSE_BYTES,
+          });
+          await route.fulfill(response);
+        } catch {
+          blocked.add(originLabel(req.url()));
+          await route.abort();
+        }
       });
+      context.routeWebSocket('**/*', (socket) => socket.close());
       const errors: string[] = [];
       let errorCount = 0;
+      const consoleLines: string[] = [];
+      let consoleDropped = 0;
       const record = (text: string): void => {
         errorCount += 1;
         if (errors.length < MAX_PREVIEW_ERRORS) {
@@ -348,17 +351,63 @@ export async function renderPreview(
         const page = await context.newPage();
         page.on('pageerror', (err) => record(err.message || String(err)));
         page.on('console', (msg) => {
-          if (msg.type() === 'error') record(msg.text());
+          const type = msg.type();
+          if (type === 'error') record(msg.text());
+          if (['log', 'info', 'warn'].includes(type)) {
+            // Capped as lines arrive: a page logging every frame for 15 s
+            // would otherwise hold every line until the capture ends.
+            consoleLines.push(`${type}: ${msg.text()}`.slice(0, MAX_PREVIEW_CONSOLE_CHARS));
+            if (consoleLines.length > MAX_PREVIEW_CONSOLE_LINES) {
+              consoleLines.shift();
+              consoleDropped += 1;
+            }
+          }
         });
         await page.setContent(request.html, { waitUntil: 'load' });
-        if (request.settleMs > 0) await page.waitForTimeout(request.settleMs);
-        const png = await page.screenshot({ type: 'png' });
-        return { png, errors, errorCount, blocked: [...blocked] };
+        for (const { key, holdMs } of request.keys)
+          await page.keyboard.press(key, { delay: holdMs });
+        const frames: PreviewResult['frames'] = [];
+        let elapsed = 0;
+        for (const timeMs of request.frames) {
+          const wait = Math.max(0, timeMs - elapsed);
+          if (wait > 0) await page.waitForTimeout(wait);
+          frames.push({ timeMs, png: await page.screenshot({ type: 'png' }) });
+          elapsed = timeMs;
+        }
+        const trimmed = capConsoleLines(consoleLines);
+        return {
+          frames,
+          errors,
+          errorCount,
+          blocked: [...blocked],
+          consoleLines: trimmed.consoleLines,
+          consoleDropped: consoleDropped + trimmed.consoleDropped,
+        };
       } finally {
         await context.close().catch(() => undefined);
       }
     },
   );
+}
+
+function safePreviewHeaders(headers: Record<string, string>): Record<string, string> {
+  const allowed = ['accept', 'content-type', 'origin'];
+  return Object.fromEntries(
+    Object.entries(headers).filter(([key]) => allowed.includes(key.toLowerCase())),
+  );
+}
+
+function capConsoleLines(lines: string[]): { consoleLines: string[]; consoleDropped: number } {
+  const kept = [...lines];
+  let chars = kept.reduce((sum, line) => sum + line.length, 0);
+  let dropped = 0;
+  while (kept.length > MAX_PREVIEW_CONSOLE_LINES || chars > MAX_PREVIEW_CONSOLE_CHARS) {
+    const first = kept.shift();
+    if (first === undefined) break;
+    chars -= first.length;
+    dropped += 1;
+  }
+  return { consoleLines: kept, consoleDropped: dropped };
 }
 
 /** `scheme://host` for the blocked list; the raw string when it is not a URL. */
