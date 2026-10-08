@@ -1,7 +1,6 @@
-import * as fs from 'fs';
 import type * as http from 'http';
-import { randomBytes, timingSafeEqual } from 'crypto';
-import { BUS_ID_PATTERN, ensureBus, writeReply, type BusPaths } from '../agentBus/agentBus';
+import { timingSafeEqual } from 'crypto';
+import { BUS_ID_PATTERN, writeReply, type BusPaths } from '../agentBus/agentBus';
 import { MAX_INBOUND_CHARS, forgeInboundPrompt } from '../agentBus/busContent';
 import { parseMeshCommand } from '../agentMesh/meshCommands';
 import type {
@@ -19,12 +18,16 @@ import {
   readAgentRouteFields as readFields,
   type AgentRouteFields as Fields,
 } from './agentRouteFields';
-import { getLogger } from '../util/logger';
 import { parseAgentMessageOptions, parseOriginConversation } from './agentMessageOptions';
 import { handleAgentRemoteSessionRoute } from './agentRemoteSessionRoute';
 import type { RemoteSessionActionResult } from '../remote/RemoteSessionBridge';
-
-const log = getLogger();
+import type { AgentSender } from '../agentLinks/chatAgentLinks';
+import type { InboundAgentSelection, InboundAgentTarget } from '../agentLinks/inboundAgentRouting';
+import { PendingAgentReplies } from '../agentLinks/pendingAgentReplies';
+import { AgentWindowEndpointRegistry } from './agentWindowEndpointRegistry';
+import { admitInboundMessage } from './agentInboundAdmission';
+import { parseAgentSender, parseOptionalAgentSender } from './agentSenderParsing';
+import type { PendingAgentReply } from '../agentLinks/pendingAgentReplies';
 
 /** An answer may be longer than a new message: it is what Forge asked for. */
 export const MAX_REPLY_CHARS = 32_000;
@@ -41,6 +44,17 @@ export interface AgentRoutesDeps {
   isFocused?: () => boolean;
   /** Injected by tests; production mints one per activation. */
   token?: string;
+  windowId?: string;
+  holdsLink?: (sender: AgentSender) => boolean;
+  resolveInboundAgent?: (
+    sender: AgentSender,
+    selection: InboundAgentSelection,
+  ) => Promise<InboundAgentTarget>;
+  showMovedNotice?: (conversationId: string, message: string) => void;
+  pendingReplies?: PendingAgentReplies;
+  workspaceRoot?: string;
+  recordPendingAccepted?: (record: PendingAgentReply) => Promise<void>;
+  isChatBusy?: (conversationId: string) => boolean;
   /**
    * The host-side relay (AGENT_MESH_PLAN M6). When an inbound message names a
    * `to` that is not Forge, the host forwards it through the recipient's
@@ -158,7 +172,7 @@ function requireText(fields: Fields, max: number): string {
  * the control server:
  *   POST /agent/message {from, text}  → 202 {queued, id}  (a visible Forge turn)
  *   POST /agent/cancel  {from, id}    → 200 {cancelled} (withdraw a queued message)
- *   POST /agent/reply   {id, text}    → 200 {delivered} (answers ask_live_session)
+ *   POST /agent/reply   {id, text}    → 200 {delivered} (answers a waiting Forge ask)
  *   POST /agent/join    {alias, pid}  → 200 {joined}    (AGENT_MESH_PLAN §10)
  *   GET /agent/status   ?from         → 200 text (the sender's chat, now)
  *   GET /agent/view     ?from&count   → 200 text (its last answers)
@@ -167,43 +181,37 @@ function requireText(fields: Fields, max: number): string {
  */
 export class AgentRoutes {
   readonly token: string;
-  private url: string | undefined;
-  /** `agent_bus.enabled`, pushed by the control server that owns the config. */
-  private enabled = false;
+  readonly windowId: string;
+  private readonly endpoints: AgentWindowEndpointRegistry;
 
   constructor(private readonly deps: AgentRoutesDeps) {
-    this.token = deps.token ?? randomBytes(32).toString('hex');
+    this.endpoints = new AgentWindowEndpointRegistry(
+      deps.paths,
+      () => deps.isFocused?.() ?? true,
+      deps.token,
+      deps.windowId,
+    );
+    this.token = this.endpoints.token;
+    this.windowId = this.endpoints.windowId;
   }
 
   /** The control server is listening at `url`: publish the endpoint. */
   onListening(url: string): void {
-    this.url = url;
-    this.refresh();
+    this.endpoints.onListening(url);
   }
 
   /** Follow `agent_bus.enabled`: publish or withdraw endpoint.json. */
   setEnabled(on: boolean): void {
-    this.enabled = on;
-    this.refresh();
+    this.endpoints.setEnabled(on);
   }
 
   /** Reclaim the client endpoint when this VS Code window gains focus. */
   claim(): void {
-    this.refresh();
-  }
-
-  private refresh(): void {
-    try {
-      if (!this.url || !this.enabled) this.withdraw();
-      else if (this.deps.isFocused?.() ?? true) this.publish(this.url);
-    } catch (err) {
-      log.error('[agentRoutes] could not update endpoint.json', err);
-    }
+    this.endpoints.claim();
   }
 
   dispose(): void {
-    this.url = undefined;
-    this.withdraw();
+    this.endpoints.dispose();
   }
 
   async handle(req: http.IncomingMessage, res: http.ServerResponse): Promise<void> {
@@ -211,6 +219,7 @@ export class AgentRoutes {
     const route = url.pathname;
     const known =
       route === '/agent/message' ||
+      route === '/agent/holds-link' ||
       route === '/agent/reply' ||
       route === '/agent/cancel' ||
       (route === '/agent/join' && !!this.deps.join) ||
@@ -223,7 +232,7 @@ export class AgentRoutes {
         !!this.deps.validateFrom) ||
       ((route === '/agent/read-verdict' || route === '/agent/ack-verdict') &&
         !!this.deps.validateFrom);
-    if (!this.enabled || !known) {
+    if (!this.endpoints.isEnabled() || !known) {
       return sendJson(res, 404, { error: `no route for ${req.method ?? 'GET'} ${route}` });
     }
     if (!this.authorized(req.headers.authorization)) {
@@ -231,6 +240,20 @@ export class AgentRoutes {
         error:
           'missing or stale token: read it from endpoint.json (it changes when Forge restarts)',
       });
+    }
+    if (route === '/agent/holds-link') {
+      if (req.method !== 'GET') return sendJson(res, 405, { error: 'GET only' });
+      try {
+        const sender = parseAgentSender({
+          kind: url.searchParams.get('kind'),
+          sessionId: url.searchParams.get('sessionId'),
+        });
+        return sendJson(res, 200, { holdsLink: this.deps.holdsLink?.(sender) === true });
+      } catch (error) {
+        if (error instanceof HttpError)
+          return sendJson(res, error.status, { error: error.message });
+        throw error;
+      }
     }
     // §11: the one GET route. Read-only: it returns the participant projection
     // and touches no other route's state.
@@ -263,6 +286,11 @@ export class AgentRoutes {
     if (req.method !== 'POST') return sendJson(res, 405, { error: 'POST only' });
     try {
       const fields = await readFields(req, url);
+      if (fields['reply_in_chat'] !== undefined)
+        throw new HttpError(
+          400,
+          'reply_in_chat was removed; Forge always delivers the final answer',
+        );
       if (route === '/agent/ack-verdict') {
         return handleVerdictAck(res, url, fields, this.deps);
       }
@@ -309,8 +337,11 @@ export class AgentRoutes {
       if (!FROM_PATTERN.test(from)) {
         throw new HttpError(400, 'from must be 1-40 chars: letters, digits, space . _ -');
       }
+      const declaredSender = parseOptionalAgentSender(fields['sender']);
+      if (declaredSender && declaredSender.kind !== from)
+        throw new HttpError(400, 'sender.kind must match from');
       // M6/§4: an unknown or forged sender is rejected with the live list.
-      const sender = await this.deps.validateFrom?.(from);
+      const sender = declaredSender ? undefined : await this.deps.validateFrom?.(from);
       if (sender && !sender.ok) throw new HttpError(400, sender.error);
       if (route === '/agent/cancel') {
         const id = (typeof fields['id'] === 'string' ? fields['id'] : '').trim();
@@ -397,41 +428,32 @@ export class AgentRoutes {
             `forge.sh reply ${awaited} <file>. To stop Forge's turn, send it as a steer.`,
         );
       }
-      let options = this.messageOptions(fields);
-      let target: Extract<ChatTargetResult, { ok: true }> | undefined;
-      if (this.deps.resolveChatTarget && !options.newChat) {
-        const resolved = this.deps.resolveChatTarget(from, {
-          ...(options.conversationId ? { conversationId: options.conversationId } : {}),
-          ...(options.toRunning ? { toRunning: true } : {}),
-        });
-        if (!resolved.ok) throw new HttpError(resolved.status ?? 404, resolved.error);
-        target = resolved;
-        options = { ...options, targetConversationId: target.conversationId };
-      } else if (options.conversationId || options.toRunning) {
-        throw new HttpError(400, 'Forge chat targeting is unavailable in this window');
-      }
-      // A `--new` needs a tab to exist, so it is the one message the cap can
-      // make undeliverable. Refuse it here, with the reasons, rather than
-      // accepting it and losing it: `drain()` can only report after the 202.
-      if (options.newChat && this.deps.chatCapBlockers) {
-        const blockers = this.deps.chatCapBlockers({ activate: true });
-        if (blockers.length > 0) {
-          throw new HttpError(
-            409,
-            `Forge cannot open a new chat — ${blockers.join(', ')}. ` +
-              'Close or archive a chat in that window, then send again. ' +
-              'This message was not queued.',
-          );
-        }
-      }
-      const accepted = this.deps.inbox.accept(
-        forgeInboundPrompt(from, text, options.replyInChat === true),
+      const admission = await admitInboundMessage({
         from,
-        steerForge,
-        options,
-      );
-      if (accepted === undefined)
+        ...(declaredSender ? { sender: declaredSender } : {}),
+        messageOptions: this.messageOptions(fields),
+        deps: this.deps,
+      });
+      const options = admission.messageOptions;
+      const target = admission.target;
+      const pendingReplyId = admission.pendingReplyId;
+      const queuedBehindRunningTurn = admission.queuedBehindRunningTurn ?? false;
+      let accepted: ReturnType<AgentInbox['accept']>;
+      try {
+        accepted = this.deps.inbox.accept(
+          forgeInboundPrompt(from, text, options.sender),
+          from,
+          steerForge,
+          options,
+        );
+      } catch (error) {
+        if (pendingReplyId) this.deps.pendingReplies?.remove(pendingReplyId);
+        throw error;
+      }
+      if (accepted === undefined) {
+        if (pendingReplyId) this.deps.pendingReplies?.remove(pendingReplyId);
         throw new HttpError(429, 'Forge has too many unread agent messages');
+      }
       const { position: queued, id } = accepted;
       if (steerForge) {
         const outcome = (await this.deps.interruptForge?.(from, target?.conversationId)) ?? {
@@ -444,6 +466,12 @@ export class AgentRoutes {
         queued,
         id,
         ...(target ? { conversationId: target.conversationId, title: target.title } : {}),
+        ...(pendingReplyId ? { exchangeId: pendingReplyId } : {}),
+        ...(pendingReplyId && target
+          ? {
+              receipt: `Forge received your message (chat "${target.title}")${queuedBehindRunningTurn ? ' — queued behind the running turn' : ''}`,
+            }
+          : {}),
       });
     } catch (err) {
       if (err instanceof HttpError) return sendJson(res, err.status, { error: err.message });
@@ -467,25 +495,5 @@ export class AgentRoutes {
     const given = Buffer.from((header ?? '').replace(/^Bearer\s+/i, ''));
     const want = Buffer.from(this.token);
     return given.length === want.length && timingSafeEqual(given, want);
-  }
-
-  private publish(url: string): void {
-    const paths = this.deps.paths();
-    ensureBus(paths);
-    const tmp = `${paths.endpoint}.tmp`;
-    const text = `${JSON.stringify({ url, token: this.token, pid: process.pid }, null, 2)}\n`;
-    fs.writeFileSync(tmp, text, { encoding: 'utf8', mode: 0o600 });
-    fs.renameSync(tmp, paths.endpoint);
-  }
-
-  /** Delete endpoint.json only if it is ours: another window may own it now. */
-  private withdraw(): void {
-    const file = this.deps.paths().endpoint;
-    try {
-      const current = JSON.parse(fs.readFileSync(file, 'utf8')) as { token?: unknown };
-      if (current.token === this.token) fs.unlinkSync(file);
-    } catch {
-      // Absent or unreadable: nothing of ours to remove.
-    }
   }
 }

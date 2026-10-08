@@ -92,6 +92,14 @@ overlaps with an existing owner, extend the owner instead.
 | Per-chat agent links + session reverse index (sole `agentLinks` writer) | `src/agentLinks/chatAgentLinks.ts` |
 | Linked-agent ask lifecycle and delivery policy | `src/agentLinks/askAgentService.ts` |
 | VS Code panel opening + linked-agent runtime | `src/agentLinks/askAgentRuntime.ts` |
+| Inbound linked-agent reply and crash recovery | `src/agentLinks/agentReplyLifecycle.ts` |
+| Durable inbound pending-reply records | `src/agentLinks/pendingAgentReplies.ts` |
+| Inbound session-to-chat routing | `src/agentLinks/inboundAgentRouting.ts` |
+| Per-window agent-bus endpoint files | `src/agentBus/windowEndpoints.ts` |
+| Agent endpoint publication lifecycle | `src/backend/agentWindowEndpointRegistry.ts` |
+| Inbound agent message routing/admission | `src/backend/agentInboundAdmission.ts` |
+| Inbound session identity validation | `src/backend/agentSenderParsing.ts` |
+| Sidebar link-routing facade dependencies | `src/sidebar/agentLinkFacadeDeps.ts` |
 | `ask_agent` strict tool boundary | `src/tools/askAgentTool.ts` |
 | Copilot one-shot CLI argv and output parsing | `src/agents/adapters/copilotAdapter.ts` |
 | Conversation titles: placeholder + derive            | `src/sidebar/conversationTitle.ts`       |

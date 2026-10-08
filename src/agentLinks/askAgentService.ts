@@ -25,6 +25,7 @@ export interface AskAgentRuntime {
     link: AgentLink,
     prompt: string,
     signal: AbortSignal,
+    purpose?: 'ask' | 'reply',
   ): Promise<AskAgentRunResult>;
   runHeadless(options: {
     agent: AgentKind;
@@ -35,6 +36,21 @@ export interface AskAgentRuntime {
     signal: AbortSignal;
     onSessionId(sessionId: string): void;
   }): Promise<AskAgentRunResult>;
+}
+
+/** Deliver an inbound answer through the same live transport used by ask_agent. */
+export async function deliverAgentReply(
+  runtime: AskAgentRuntime,
+  agent: AgentKind,
+  link: AgentLink,
+  text: string,
+  signal: AbortSignal,
+): Promise<boolean> {
+  if (!(await runtime.isLive(agent, link))) return false;
+  const result = await runtime.sendLive(agent, link, text, signal, 'reply');
+  if (result.status !== 'completed')
+    throw new Error(result.error ?? `Live ${agent} session did not accept Forge's reply.`);
+  return true;
 }
 
 export interface AskAgentContext {

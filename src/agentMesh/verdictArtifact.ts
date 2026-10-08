@@ -50,26 +50,43 @@ export function pendingVerdictArtifacts(root: string): string[] {
   }
 }
 
-function authorizeRecipient(paths: BusPaths, exchangeId: string, from: string): void {
+function authorizeRecipient(
+  paths: BusPaths,
+  exchangeId: string,
+  from: string,
+  senderSessionId?: string,
+): void {
   verdictArtifactPath(paths.root, exchangeId);
   const events = readEvents(path.join(paths.root, 'exchanges.jsonl'));
   const first = events.find((event) => event.exchangeId === exchangeId);
   if (!first || first.from.toLowerCase() !== from.toLowerCase()) {
     throw new Error('no verdict for this sender and exchange');
   }
+  if (senderSessionId !== undefined && first.senderSessionId !== senderSessionId)
+    throw new Error('no verdict for this session and exchange');
   if (!events.some((event) => event.eventId === verdictEventId(exchangeId))) {
     throw new Error('the verdict is not yet recorded for this exchange');
   }
 }
 
 /** Read never consumes the only full copy. */
-export function readVerdictArtifact(paths: BusPaths, exchangeId: string, from: string): string {
-  authorizeRecipient(paths, exchangeId, from);
+export function readVerdictArtifact(
+  paths: BusPaths,
+  exchangeId: string,
+  from: string,
+  senderSessionId?: string,
+): string {
+  authorizeRecipient(paths, exchangeId, from, senderSessionId);
   return fs.readFileSync(verdictArtifactPath(paths.root, exchangeId), 'utf8');
 }
 
 /** Acknowledgment is separate so a lost read response is safely retryable. */
-export function acknowledgeVerdict(paths: BusPaths, exchangeId: string, from: string): void {
-  authorizeRecipient(paths, exchangeId, from);
+export function acknowledgeVerdict(
+  paths: BusPaths,
+  exchangeId: string,
+  from: string,
+  senderSessionId?: string,
+): void {
+  authorizeRecipient(paths, exchangeId, from, senderSessionId);
   fs.unlinkSync(verdictArtifactPath(paths.root, exchangeId));
 }

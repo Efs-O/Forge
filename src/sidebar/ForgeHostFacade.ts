@@ -8,6 +8,8 @@ import type { ToolApprovalRequestEvent, ToolApprovalSink } from './ToolApprovalS
 import type { AgentProgressEvent } from './AgentProgress';
 import type { BackendProcess } from '../system/SystemReport';
 import { recentExchanges, type ForgeExchange } from './sessionProjections';
+import type { AgentKind, AgentLink, AgentSender } from '../agentLinks/chatAgentLinks';
+import type { InboundAgentSelection, InboundAgentTarget } from '../agentLinks/inboundAgentRouting';
 
 export interface ForgeConversationSummary {
   id: string;
@@ -58,11 +60,20 @@ export interface ForgeHostFacade {
    * visible chat.
    */
   chatCapBlockers(options?: { activate?: boolean }): string[];
+  routeInboundAgent(
+    sender: AgentSender,
+    selection: InboundAgentSelection,
+  ): Promise<InboundAgentTarget>;
+  getAgentLink(conversationId: string, kind: AgentKind): AgentLink | undefined;
+  showConversationNotice(conversationId: string, message: string): void;
   send(
     conversationId: string,
     text: string,
     attachments?: AttachmentData[],
-    options?: { remoteRequestId?: string },
+    options?: {
+      remoteRequestId?: string;
+      sender?: import('../agentLinks/chatAgentLinks').AgentSenderMetadata;
+    },
   ): Promise<ForgeRequestOutcome>;
   /** Isolated, no-tools contact generation on a currently ready model slot. */
   runContactPrompt?(
@@ -175,7 +186,10 @@ export interface SidebarHostFacadeDeps {
     conversationId: string,
     text: string,
     attachments?: AttachmentData[],
-    options?: { remoteRequestId?: string },
+    options?: {
+      remoteRequestId?: string;
+      sender?: import('../agentLinks/chatAgentLinks').AgentSenderMetadata;
+    },
   ) => Promise<ForgeRequestOutcome>;
   runContactPrompt?: (
     text: string,
@@ -200,6 +214,12 @@ export interface SidebarHostFacadeDeps {
   getSessionActiveMs: (conversation: ConversationRuntime) => number;
   /** Counts per reason a slot cannot be freed; empty when a slot can be. */
   capBlockers: (options?: { activate?: boolean }) => string[];
+  routeInboundAgent: (
+    sender: AgentSender,
+    selection: InboundAgentSelection,
+  ) => Promise<InboundAgentTarget>;
+  getAgentLink: (conversationId: string, kind: AgentKind) => AgentLink | undefined;
+  showConversationNotice: (conversationId: string, message: string) => void;
   clankerMode: () => boolean;
   setClankerMode: (on: boolean) => void;
   contextBudget: (conversationId: string) => { used: number; max: number } | undefined;
@@ -297,6 +317,21 @@ export class SidebarHostFacade implements ForgeHostFacade {
 
   chatCapBlockers(options: { activate?: boolean } = {}): string[] {
     return this.deps.capBlockers(options);
+  }
+
+  routeInboundAgent(
+    sender: AgentSender,
+    selection: InboundAgentSelection,
+  ): Promise<InboundAgentTarget> {
+    return this.deps.routeInboundAgent(sender, selection);
+  }
+
+  getAgentLink(conversationId: string, kind: AgentKind): AgentLink | undefined {
+    return this.deps.getAgentLink(conversationId, kind);
+  }
+
+  showConversationNotice(conversationId: string, message: string): void {
+    this.deps.showConversationNotice(conversationId, message);
   }
 
   send(

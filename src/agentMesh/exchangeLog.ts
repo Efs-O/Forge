@@ -45,6 +45,8 @@ export interface ExchangeEvent {
   originConversation?: string;
   /** Sender alias. */
   from: string;
+  /** Kind-specific session id for session-bound inbound replies. */
+  senderSessionId?: string;
   /** Recipient alias, when present. */
   to?: string;
   /** What kind of event: 'message' | 'state' | 'relay' | 'notice'. */

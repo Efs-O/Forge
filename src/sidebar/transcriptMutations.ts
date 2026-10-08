@@ -11,6 +11,7 @@ import type { ConversationRuntime } from './sessionTypes';
 import { buildUserContent } from './ConversationOps';
 import { deriveTitle } from './sessionTypes';
 import { parseForgeInboundPrompt } from '../agentBus/busContent';
+import type { AgentSenderMetadata } from '../agentLinks/chatAgentLinks';
 
 /** Presentation metadata for a prompt injected by Forge rather than authored by the user. */
 export interface UserPromptOptions {
@@ -21,6 +22,7 @@ export interface UserPromptOptions {
    * transcript; `ChatAttachmentStore` holds them.
    */
   attachmentRefs?: ChatAttachmentRef[];
+  sender?: AgentSenderMetadata;
 }
 
 /** Append the user's message, titling the conversation from its first one. */
@@ -36,6 +38,7 @@ export function appendUserPrompt(
     content: buildUserContent(text, attachments),
     ...(options?.internal ? { internal: true } : {}),
     ...(options?.attachmentRefs?.length ? { attachments: options.attachmentRefs } : {}),
+    ...(options?.sender ? { agentSender: options.sender } : {}),
   });
   if (priorUserCount === 0) conv.title = deriveTitle(titleLine(text));
 }

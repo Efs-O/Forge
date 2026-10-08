@@ -201,6 +201,7 @@ function MessageView({
   streaming,
   preformatted,
   attachments,
+  agentSender,
 }: MessageProps): React.ReactElement {
   const [thinkingOpen, setThinkingOpen] = useState(false);
   const [copied, setCopied] = useState(false);
@@ -233,6 +234,12 @@ function MessageView({
   return (
     <div className="msg-wrapper">
       <div className={`msg ${role}`}>
+        {role === 'user' && agentSender && (
+          <div className="agent-sender-badge">
+            From {agentSender.kind[0]!.toUpperCase() + agentSender.kind.slice(1)} ·{' '}
+            {agentSender.title}
+          </div>
+        )}
         {role === 'assistant' && reasoning && (
           <div className={`thinking-bubble${thinkingOpen ? ' thinking-bubble-open' : ''}`}>
             <button

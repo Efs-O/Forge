@@ -12,6 +12,8 @@ import type { SidebarRuntimeParts } from './sidebarWiring';
 import type { UserQuestionService } from './UserQuestionService';
 import type { UserNotificationService } from './UserNotificationService';
 import { SidebarHostFacade, type ForgeHostFacade } from './ForgeHostFacade';
+import { get } from '../agentLinks/chatAgentLinks';
+import { resolveInboundAgentTarget } from '../agentLinks/inboundAgentRouting';
 
 export interface SidebarFacadeDeps {
   runtime: SidebarRuntimeParts;
@@ -23,6 +25,10 @@ export interface SidebarFacadeDeps {
   interrupt: (conversationId: string) => Promise<void>;
   unloadModels: () => Promise<void>;
   restartModel: (modelName: string) => Promise<void>;
+  workspaceRoot: string | undefined;
+  persistSession: () => void;
+  postSessionSync: () => void;
+  postConversationNotice: (conversationId: string, message: string) => void;
 }
 
 export function createSidebarHostFacade(deps: SidebarFacadeDeps): ForgeHostFacade {
@@ -35,7 +41,16 @@ export function createSidebarHostFacade(deps: SidebarFacadeDeps): ForgeHostFacad
     // -- a paired chat, or another extension -- so its prompt has no bubble
     // unless the pipeline draws one.
     send: (conversationId, text, attachments, options) =>
-      send.send(text, attachments, conversationId, undefined, { ...options, echoPrompt: true }),
+      send.send(
+        text,
+        attachments,
+        conversationId,
+        options?.sender ? { sender: options.sender } : undefined,
+        {
+          ...(options?.remoteRequestId ? { remoteRequestId: options.remoteRequestId } : {}),
+          echoPrompt: true,
+        },
+      ),
     runContactPrompt: (text, systemPromptText, options) =>
       agentLoop.runContactPrompt(text, systemPromptText, options),
     cancelContactPrompts: () => agentLoop.cancelContactPrompts(),
@@ -61,6 +76,27 @@ export function createSidebarHostFacade(deps: SidebarFacadeDeps): ForgeHostFacad
     // the agent bus pre-flights a `--new` message against this so a sender gets
     // a real refusal instead of a 202 and silence.
     capBlockers: (options) => tabs.capBlockers(options),
+    routeInboundAgent: async (sender, selection) => {
+      const result = resolveInboundAgentTarget({
+        sidebar: deps.getSidebar(),
+        sender,
+        selection,
+        ...(deps.workspaceRoot ? { workspaceRoot: deps.workspaceRoot } : {}),
+        createChat: () => tabs.create({ activate: true }),
+        restoreChat: (id) => tabs.restore(id, { activate: true }),
+        persist: deps.persistSession,
+      });
+      deps.postSessionSync();
+      return result;
+    },
+    getAgentLink: (conversationId, kind) => {
+      const state = deps.getSidebar();
+      const chat = [...state.conversations, ...state.history].find(
+        (item) => item.id === conversationId,
+      );
+      return chat ? get(chat, kind) : undefined;
+    },
+    showConversationNotice: deps.postConversationNotice,
     clankerMode: () => agentLoop.getClankerMode(),
     // Remote and sidebar arming persist identically, to workspaceState. The
     // asymmetry that used to live here — remote ON in memory only, so it died at

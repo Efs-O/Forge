@@ -1,4 +1,5 @@
 import type { ChatAttachmentRef, DiffHunk } from '../../src/sidebar/messageBridge';
+import type { AgentSenderMetadata } from '../../src/agentLinks/chatAgentLinks';
 
 /**
  * One file shown under a message bubble.
@@ -50,6 +51,7 @@ export interface AppMessage {
   toolMs?: number;
   /** Files the user's prompt carried, rendered under the bubble. */
   attachments?: MessageAttachment[];
+  agentSender?: AgentSenderMetadata;
 }
 
 export type PersistedRow =
@@ -60,6 +62,7 @@ export type PersistedRow =
       reasoningMs?: number | undefined;
       midTurn?: boolean | undefined;
       attachments?: ChatAttachmentRef[] | undefined;
+      agentSender?: AgentSenderMetadata | undefined;
     }
   | {
       role: 'tool';
@@ -127,6 +130,9 @@ export function mergeSyncedMessages(
       ? { reasoningMs: m.reasoningMs }
       : {}),
     ...((m.role === 'user' || m.role === 'assistant') && m.midTurn ? { midTurn: true } : {}),
+    ...((m.role === 'user' || m.role === 'assistant') && m.agentSender
+      ? { agentSender: m.agentSender }
+      : {}),
     ...((m.role === 'user' || m.role === 'assistant') && m.attachments?.length
       ? { attachments: m.attachments.map((ref) => restoredAttachment(ref, attachmentsRoot)) }
       : {}),

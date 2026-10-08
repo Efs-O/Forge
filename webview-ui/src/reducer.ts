@@ -131,6 +131,7 @@ export function reducer(state: State, action: Action): State {
               id: mkId(),
               role: 'user',
               content: action.text,
+              ...(action.sender ? { agentSender: action.sender } : {}),
               ...(action.attachments?.length ? { attachments: action.attachments } : {}),
             },
           ],

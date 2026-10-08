@@ -108,6 +108,7 @@ export function App(): React.ReactElement {
             type: 'USER_SEND',
             text: msg.text,
             convId: msg.conversationId,
+            ...(msg.sender ? { sender: msg.sender } : {}),
             ...(msg.attachments?.length
               ? { attachments: toMessageAttachments(msg.attachments) }
               : {}),

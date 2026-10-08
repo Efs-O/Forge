@@ -13,6 +13,8 @@ import {
   type BusPaths,
 } from '../../src/agentBus/agentBus';
 import { AgentRoutes } from '../../src/backend/agentRoutes';
+import { PendingAgentReplies } from '../../src/agentLinks/pendingAgentReplies';
+import { windowEndpointPath } from '../../src/agentBus/windowEndpoints';
 import { TEST_BASH } from '../support/bash';
 
 const TOKEN = 'f'.repeat(64);
@@ -98,11 +100,38 @@ describe('endpoint.json', () => {
   it('is published with the url and token, and removed on dispose', () => {
     const ep = JSON.parse(fs.readFileSync(paths.endpoint, 'utf8'));
     expect(ep).toMatchObject({ url: base, token: TOKEN });
+    expect(fs.existsSync(windowEndpointPath(paths.root, routes.windowId))).toBe(true);
     if (process.platform !== 'win32') {
       expect(fs.statSync(paths.endpoint).mode & 0o777).toBe(0o600);
     }
     routes.dispose();
     expect(fs.existsSync(paths.endpoint)).toBe(false);
+    expect(fs.existsSync(windowEndpointPath(paths.root, routes.windowId))).toBe(false);
+  });
+
+  it('answers holds-link only for a valid kind-specific session id', async () => {
+    const held = new AgentRoutes({
+      paths: () => paths,
+      token: TOKEN,
+      inbox: stubInbox(),
+      holdsLink: (sender) => sender.kind === 'codex',
+    });
+    held.setEnabled(true);
+    held.onListening(base);
+    routes = held;
+    try {
+      const good = await fetch(
+        `${base}/agent/holds-link?kind=codex&sessionId=00000000-0000-4000-8000-000000000071`,
+        { headers: { Authorization: `Bearer ${TOKEN}` } },
+      );
+      expect(await good.json()).toEqual({ holdsLink: true });
+      const bad = await fetch(`${base}/agent/holds-link?kind=codex&sessionId=bad`, {
+        headers: { Authorization: `Bearer ${TOKEN}` },
+      });
+      expect(bad.status).toBe(400);
+    } finally {
+      held.dispose();
+    }
   });
 
   it("is never removed when another window's token is in it", () => {
@@ -317,15 +346,10 @@ describe('routes', () => {
     });
   });
 
-  it('keeps an explicit chat reply in Forge without changing ordinary Claude replies', async () => {
-    const codex = await post('/agent/message?from=codex&reply_in_chat=true', 'question');
-    expect(codex.status).toBe(202);
-    expect(accepted[0]).toContain('Answer in this Forge chat');
-    expect(acceptedOptions[0]).toEqual({ replyInChat: true });
-
-    const claude = await post('/agent/message?from=claude', 'question');
-    expect(claude.status).toBe(202);
-    expect(accepted[1]).toContain('call `ask_agent` with `agent: "claude"`');
+  it('rejects the removed reply_in_chat request field', async () => {
+    const response = await post('/agent/message?from=codex&reply_in_chat=true', 'question');
+    expect(response.status).toBe(400);
+    expect(accepted).toEqual([]);
   });
 
   it('passes --unattended through as an inbox option', async () => {
@@ -348,7 +372,7 @@ describe('routes', () => {
     expect(accepted).toEqual([]);
   });
 
-  it('validates reply_in_chat as a boolean', async () => {
+  it('rejects the removed reply_in_chat field regardless of value', async () => {
     const response = await post('/agent/message?from=codex&reply_in_chat=maybe', 'nope');
     expect(response.status).toBe(400);
     expect(accepted).toEqual([]);
@@ -387,6 +411,7 @@ describe('routes', () => {
     expect(fs.readdirSync(paths.root).sort()).toEqual([
       'README.md',
       'endpoint.json',
+      'endpoints',
       'forge.sh',
       'inbox',
       'outbox',
@@ -561,17 +586,147 @@ describe('forge.sh against the routes', () => {
 
   it('say parses --model and --new into the generated request', async (ctx) => {
     if (!usable) ctx.skip();
-    const said = await runClient(['say', '--model', 'alpha', '--new', 'claude'], 'new chat\n');
+    const said = await runClient(
+      ['say', '--model', 'alpha', '--new', 'claude-review'],
+      'new chat\n',
+    );
     expect(said.code).toBe(0);
     expect(acceptedOptions[0]).toEqual({ model: 'alpha', newChat: true });
   }, 30_000);
 
-  it('say parses --reply-in-chat without changing the default', async (ctx) => {
+  it('requires the declared kind session variable before an agent say', async (ctx) => {
     if (!usable) ctx.skip();
-    const said = await runClient(['say', 'codex', '--reply-in-chat'], 'question\n');
-    expect(said.code).toBe(0);
-    expect(accepted[0]).toContain('Answer in this Forge chat');
-    expect(acceptedOptions[0]).toEqual({ replyInChat: true });
+    const said = await runClient(['say', 'codex'], 'message\n', { CODEX_SESSION_ID: '' });
+    expect(said.code).toBe(2);
+    expect(said.out).toContain('CODEX_SESSION_ID');
+    expect(accepted).toEqual([]);
+  }, 30_000);
+
+  it('skips an unreachable window endpoint and posts to the endpoint that holds the session', async (ctx) => {
+    if (!usable) ctx.skip();
+    const pending = new PendingAgentReplies(paths.root);
+    installClientRoutes({
+      paths: () => paths,
+      inbox: stubInbox(),
+      token: TOKEN,
+      pendingReplies: pending,
+      workspaceRoot: '/workspace',
+      holdsLink: () => true,
+      resolveInboundAgent: async (sender) => ({
+        conversationId: 'holder-chat',
+        title: 'Holder chat',
+        sender: { ...sender, title: 'Codex session' },
+        link: {
+          ...sender,
+          cwd: '/workspace',
+          title: 'Codex session',
+          linkedAt: 1,
+          lastUsedAt: 1,
+          origin: 'first-inbound',
+        },
+      }),
+    });
+    fs.rmSync(path.join(paths.root, 'endpoints'), { recursive: true, force: true });
+    fs.mkdirSync(path.join(paths.root, 'endpoints'), { recursive: true });
+    const endpoint = (windowId: string, url: string) => ({
+      windowId,
+      url,
+      token: TOKEN,
+      pid: 2_000_000_000,
+    });
+    fs.writeFileSync(
+      path.join(paths.root, 'endpoints', '00000000-0000-4000-8000-000000000001.json'),
+      JSON.stringify(
+        endpoint('00000000-0000-4000-8000-000000000001', 'http://127.0.0.1:1'),
+        null,
+        2,
+      ),
+    );
+    fs.writeFileSync(
+      path.join(paths.root, 'endpoints', '00000000-0000-4000-8000-000000000002.json'),
+      JSON.stringify(endpoint('00000000-0000-4000-8000-000000000002', base), null, 2),
+    );
+    fs.writeFileSync(
+      paths.endpoint,
+      JSON.stringify(
+        endpoint('00000000-0000-4000-8000-000000000003', 'http://127.0.0.1:1'),
+        null,
+        2,
+      ),
+    );
+
+    const said = await runClient(['say', 'codex'], 'check holder routing\n', {
+      CODEX_SESSION_ID: '00000000-0000-4000-8000-000000000099',
+    });
+    expect(said.code, said.out).toBe(0);
+    expect(accepted).toHaveLength(1);
+    expect(accepted[0]).toContain('check holder routing');
+    expect(said.out).toContain(
+      '"receipt":"Forge received your message (chat \\\"Holder chat\\\")"',
+    );
+  }, 30_000);
+
+  it('writes a durable pending reply before accepting an agent turn', async () => {
+    const pending = new PendingAgentReplies(paths.root);
+    let acceptedWithPending = false;
+    routes.dispose();
+    routes = new AgentRoutes({
+      paths: () => paths,
+      inbox: {
+        accept: () => {
+          acceptedWithPending = pending.list().length === 1;
+          return { position: 1, id: 'm-agent' };
+        },
+        cancel: () => 0,
+      },
+      token: TOKEN,
+      pendingReplies: pending,
+      workspaceRoot: '/workspace',
+      isChatBusy: () => true,
+      recordPendingAccepted: async (record) => {
+        expect(pending.list()).toContainEqual(record);
+        expect(acceptedWithPending).toBe(false);
+      },
+      resolveInboundAgent: async (sender) => ({
+        conversationId: 'chat-agent',
+        title: 'Inbound chat',
+        sender: { ...sender, title: 'Codex session' },
+        link: {
+          ...sender,
+          cwd: '/workspace',
+          title: 'Codex session',
+          linkedAt: 1,
+          lastUsedAt: 1,
+          origin: 'first-inbound',
+        },
+      }),
+    });
+    routes.setEnabled(true);
+    routes.onListening(base);
+    const sender = encodeURIComponent(
+      JSON.stringify({
+        kind: 'codex',
+        sessionId: '00000000-0000-4000-8000-000000000061',
+      }),
+    );
+    const response = await post(`/agent/message?from=codex&sender=${sender}`, 'Review the patch');
+    expect(response.status).toBe(202);
+    expect(acceptedWithPending).toBe(true);
+    expect(pending.list()[0]).toMatchObject({
+      conversationId: 'chat-agent',
+      workspace: '/workspace',
+      state: 'admitted',
+    });
+    expect(response.body.receipt).toBe(
+      'Forge received your message (chat "Inbound chat") — queued behind the running turn',
+    );
+  });
+
+  it('does not retain the removed reply-in-chat option', async (ctx) => {
+    if (!usable) ctx.skip();
+    const said = await runClient(['say', 'claude-review', '--reply-in-chat'], 'question\n');
+    expect(said.code).toBe(2);
+    expect(accepted).toEqual([]);
   }, 30_000);
 
   it('a reply still lands through the outbox file when Forge is gone; a message does not', async (ctx) => {
@@ -661,7 +816,7 @@ describe('forge.sh against the routes', () => {
     });
     routes.setEnabled(true);
     routes.onListening(base);
-    const steered = await runClient(['steer', 'claude', 'forge'], 'use ask_agent');
+    const steered = await runClient(['steer', 'claude-review', 'forge'], 'use ask_agent');
     expect(JSON.parse(steered.out.trim())).toMatchObject({
       queued: expect.any(Number),
       id: expect.any(String),
@@ -670,7 +825,7 @@ describe('forge.sh against the routes', () => {
       title: 'Codex: task',
     });
     expect(calls).toEqual(['accept front=true', 'interrupt']);
-    const said = await runClient(['say', 'claude'], 'plain');
+    const said = await runClient(['say', 'claude-review'], 'plain');
     expect(said.out).toContain('"queued"');
     expect(calls.slice(2)).toEqual(['accept front=false']);
   }, 30_000);
@@ -697,8 +852,14 @@ describe('forge.sh against the routes', () => {
     routes.setEnabled(true);
     routes.onListening(base);
 
-    const said = await runClient(['say', 'codex', '--to', 'sender-chat'], 'direct follow-up\n');
-    const sent = await runClient(['send', 'codex', 'forge', '--to-running'], 'interrupt context\n');
+    const said = await runClient(
+      ['say', 'codex-peer', '--to', 'sender-chat'],
+      'direct follow-up\n',
+    );
+    const sent = await runClient(
+      ['send', 'codex-peer', 'forge', '--to-running'],
+      'interrupt context\n',
+    );
 
     expect(said.code).toBe(0);
     expect(said.out).toContain('"conversationId":"sender-chat"');
@@ -724,6 +885,21 @@ describe('forge.sh against the routes', () => {
         cancel: () => 0,
       },
       token: TOKEN,
+      pendingReplies: new PendingAgentReplies(paths.root),
+      workspaceRoot: '/workspace',
+      resolveInboundAgent: async (sender) => ({
+        conversationId: 'sender-chat',
+        title: 'Codex: task',
+        sender: { ...sender, title: 'sender session' },
+        link: {
+          ...sender,
+          cwd: '/workspace',
+          title: 'sender session',
+          linkedAt: 1,
+          lastUsedAt: 1,
+          origin: 'first-inbound',
+        },
+      }),
       interruptForge: async () => {
         calls.push('interrupt');
         return { steered: true, conversationId: 'sender-chat', title: 'Codex: task' };
@@ -733,15 +909,25 @@ describe('forge.sh against the routes', () => {
     routes.setEnabled(true);
     routes.onListening(base);
     for (const sender of ['claude', 'codex']) {
-      const said = await runClient(['say', sender], 'redo 70K');
+      const identity =
+        sender === 'claude'
+          ? { CLAUDE_CODE_SESSION_ID: '00000000-0000-4000-8000-000000000091' }
+          : { CODEX_SESSION_ID: '00000000-0000-4000-8000-000000000092' };
+      const said = await runClient(['say', sender], 'redo 70K', identity);
       expect(said.code).not.toBe(0);
       expect(said.out).toContain(`forge.sh reply ${awaited[sender]}`);
     }
     expect(calls).toEqual([]);
     // A steer is the explicit stop and still gets through; others still queue.
-    expect((await runClient(['steer', 'codex', 'forge'], 'stop')).out).toContain('"steered":true');
-    expect((await runClient(['say', 'copilot'], 'plain')).out).toContain('"queued"');
-    expect(calls).toEqual(['codex front=true', 'interrupt', 'copilot front=false']);
+    expect(
+      (
+        await runClient(['steer', 'codex', 'forge'], 'stop', {
+          CODEX_SESSION_ID: '00000000-0000-4000-8000-000000000092',
+        })
+      ).out,
+    ).toContain('"steered":true');
+    expect((await runClient(['say', 'copilot-peer'], 'plain')).out).toContain('"queued"');
+    expect(calls).toEqual(['codex front=true', 'interrupt', 'copilot-peer front=false']);
   }, 30_000);
 
   it('refuses a bad id or name before sending anything', async (ctx) => {
@@ -1013,7 +1199,8 @@ describe('relay origin conversation (2b)', () => {
   it('passes origin_conversation to the relay and rejects it for to=forge', async () => {
     routes.dispose();
     const relay = vi.fn(async (_from: string, _to: string, _text: string, _origin?: string) => ({
-      ok: true as const, exchangeId: 'exchange-1',
+      ok: true as const,
+      exchangeId: 'exchange-1',
     }));
     routes = new AgentRoutes({
       paths: () => paths,
@@ -1100,6 +1287,7 @@ describe('GET /agent/who (§11)', () => {
     expect(fs.readdirSync(paths.root).sort()).toEqual([
       'README.md',
       'endpoint.json',
+      'endpoints',
       'forge.sh',
       'inbox',
       'outbox',

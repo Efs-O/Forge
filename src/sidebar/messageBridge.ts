@@ -1,6 +1,7 @@
 import type { QuestionGroup } from '../util/questionAnswers';
 import type { ChatAttachmentRef } from '../llm/types';
 import type { AgentLinks } from '../agentLinks/chatAgentLinks';
+import type { AgentSenderMetadata } from '../agentLinks/chatAgentLinks';
 export type { ChatAttachmentRef };
 
 /** Tab row mirrored for host + webview. */
@@ -96,6 +97,7 @@ export interface UserPromptMsg {
   midTurn?: boolean;
   /** Files sent with a prompt from outside the webview (a paired chat), for its bubble. */
   attachments?: AttachmentData[];
+  sender?: AgentSenderMetadata;
 }
 export interface DoneMsg {
   type: 'done';
@@ -280,6 +282,7 @@ export interface SessionSyncMsg {
           reasoning?: string | undefined;
           reasoningMs?: number | undefined;
           midTurn?: boolean | undefined;
+          agentSender?: AgentSenderMetadata | undefined;
           attachments?: ChatAttachmentRef[] | undefined;
         }
       | {

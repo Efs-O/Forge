@@ -40,6 +40,7 @@ import type { SessionTimeSnapshot } from '../vscode/SessionTimeStatusBar';
 import type { RequestChainLifecycle } from './RequestChainLifecycle';
 import type { ForgeHostFacade } from './ForgeHostFacade';
 import { createSidebarHostFacade } from './sidebarFacadeWiring';
+import { agentLinkFacadeDeps } from './agentLinkFacadeDeps';
 import { statusRowProgress } from './turnMirrorWiring';
 import { ResidencyPoller } from './ResidencyPoller';
 import type { UserQuestionService } from './UserQuestionService';
@@ -104,11 +105,9 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
     private readonly workspaceRoot?: string,
     getConfigPath?: () => string,
     cliSessions?: CliSessionRegistry,
-    // Absent in tests and in any host without globalStorage; prompts then send
-    // exactly as before, minus the transcript thumbnails.
+    // Without globalStorage, prompts keep their previous behavior, minus thumbnails.
     private readonly attachmentStore?: ChatAttachmentStore,
-    // Archived conversations live in a file, not workspaceState; absent (no
-    // folder open, or tests), they stay in the memento as before.
+    // Archived conversations use files; without a workspace, the memento remains authoritative.
     private readonly historyArchive?: HistoryArchive,
   ) {
     this.sidebar = loadSidebarSession(
@@ -146,9 +145,7 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
         unloadModels: () => this.unloadModels(),
         unloadActiveModel: () => this.unloadConversationModel(),
         isConversationQueued: (id) => this.webviewQueue.isQueued(id),
-        // Passed through as-is: it was once reduced to "clear", which the gate
-        // then read as "blocks", so every unbound chat was pinned and the cap
-        // could never make room, while an unloaded store failed open.
+        // Preserve the original policy: a "clear" value means no blocker.
         remoteEvictionBlocks: (id) =>
           this.remoteEvictionQuery ? this.remoteEvictionQuery(id) : false,
       },
@@ -199,9 +196,14 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
       interrupt: (conversationId) => this.interruptForSteering(conversationId),
       unloadModels: () => this.unloadModels(),
       restartModel: (modelName) => this.restartModel(modelName),
+      ...agentLinkFacadeDeps(
+        this.workspaceRoot,
+        () => this.persistSession(),
+        () => this.postSessionSync(),
+        (conversationId, message) => this.post({ type: 'notice', message, conversationId }),
+      ),
     });
-    // wireSidebar registered the conversation lookup, so unfinished intervals
-    // from a previous session can now fold into the persisted totals.
+    // Fold unfinished intervals from the previous session into persisted totals.
     this.agentLoop.restoreSessionTimers(this.sidebar);
     this.persistSession();
   }
@@ -427,11 +429,7 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
     return this.tabs.active();
   }
 
-  /**
-   * Metrics for the followed chat while it is still open, else the active one.
-   * A followed chat other than the active one is named, so the bar never shows
-   * one chat's numbers as if they were the visible chat's.
-   */
+  /** Metrics for the followed open chat, else active; names disambiguate background chats. */
   getSessionMetrics(followedId: string | undefined): SessionTimeSnapshot {
     const active = this.getActive();
     // Open chats only: an archived one has stopped, and its numbers are not news.

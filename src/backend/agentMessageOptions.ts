@@ -8,7 +8,6 @@ const AgentMessageOptionsSchema = z
   .object({
     model: z.string().trim().min(1).optional(),
     new_chat: z.boolean().optional(),
-    reply_in_chat: z.boolean().optional(),
     conversation_id: ConversationIdSchema.optional(),
     to_running: z.boolean().optional(),
     unattended: z.boolean().optional(),
@@ -31,7 +30,6 @@ export function parseAgentMessageOptions(fields: AgentRouteFields): InboxMessage
   const parsed = AgentMessageOptionsSchema.safeParse({
     model: fields['model'],
     new_chat: fields['new_chat'],
-    reply_in_chat: fields['reply_in_chat'],
     conversation_id: fields['conversation_id'],
     to_running: fields['to_running'],
     unattended: fields['unattended'],
@@ -40,7 +38,6 @@ export function parseAgentMessageOptions(fields: AgentRouteFields): InboxMessage
   return {
     ...(parsed.data.model !== undefined ? { model: parsed.data.model } : {}),
     ...(parsed.data.new_chat !== undefined ? { newChat: parsed.data.new_chat } : {}),
-    ...(parsed.data.reply_in_chat !== undefined ? { replyInChat: parsed.data.reply_in_chat } : {}),
     ...(parsed.data.conversation_id !== undefined
       ? { conversationId: parsed.data.conversation_id }
       : {}),

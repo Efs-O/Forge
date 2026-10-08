@@ -5,7 +5,12 @@
 import { z } from 'zod';
 import type { CompactionState } from './compactionTypes';
 import type { ContextTrimState } from '../agent/toolResultContext';
-import { agentLinksSchema, type AgentLinks } from '../agentLinks/chatAgentLinks';
+import {
+  agentLinksSchema,
+  agentSenderMetadataSchema,
+  type AgentLinks,
+  type AgentSenderMetadata,
+} from '../agentLinks/chatAgentLinks';
 import { compactionPersistedSchema } from './compactionPersistedSchema';
 export {
   createDefaultSession,
@@ -98,6 +103,7 @@ const slimMsgSchema = z.object({
   name: z.string().optional(),
   internal: z.boolean().optional(),
   midTurn: z.boolean().optional(),
+  agentSender: agentSenderMetadataSchema.optional(),
   attachments: z.array(attachmentRefSchema).optional(),
   turnContext: z.string().optional(),
 });
@@ -111,6 +117,7 @@ export type DisplayPersistMessage =
       reasoning?: string;
       reasoningMs?: number;
       midTurn?: boolean;
+      agentSender?: AgentSenderMetadata;
       attachments?: ChatAttachmentRef[];
     }
   | {
@@ -369,6 +376,7 @@ export function slimPersistMessages(messages: ChatMessage[]): SlimPersistMessage
       ...(typeof m.name === 'string' ? { name: m.name } : {}),
       ...(m.internal ? { internal: true } : {}),
       ...(m.midTurn ? { midTurn: true } : {}),
+      ...(m.agentSender ? { agentSender: m.agentSender } : {}),
       ...(m.attachments?.length ? { attachments: m.attachments } : {}),
     });
   }
@@ -390,6 +398,7 @@ export function chatMessagesFromSlim(slim: SlimPersistMessage[]): ChatMessage[] 
     ...(typeof m.name === 'string' ? { name: m.name } : {}),
     ...(m.internal ? { internal: true } : {}),
     ...(m.midTurn ? { midTurn: true } : {}),
+    ...(m.agentSender ? { agentSender: m.agentSender } : {}),
     ...(m.attachments?.length ? { attachments: m.attachments } : {}),
   }));
 }

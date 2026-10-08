@@ -1,5 +1,6 @@
 import { randomBytes } from 'crypto';
 import { getLogger } from '../util/logger';
+import type { AgentSenderMetadata } from '../agentLinks/chatAgentLinks';
 
 const log = getLogger();
 
@@ -9,8 +10,8 @@ const BUSY_POLL_MS = 2_000;
 export interface InboxMessageOptions {
   model?: string;
   newChat?: boolean;
-  /** Reply in Forge's chat so a sender without a live mesh session can read it. */
-  replyInChat?: boolean;
+  sender?: AgentSenderMetadata;
+  pendingReplyId?: string;
   /** The bus sender; the host routes its message to the chat it last wrote in. */
   from?: string;
   /** A sender-selected Forge conversation, resolved by the host before queuing. */
@@ -49,6 +50,7 @@ export interface BusTurnEnd {
   kind: 'completed' | 'failed' | 'cancelled' | 'interrupted';
   /** The failure, for `failed`. */
   error?: string;
+  finalText?: string;
 }
 
 /** The sender's one line for how its turn ended. Only `completed` says finished. */
@@ -97,6 +99,9 @@ export interface InboxHost {
    * a stale "running" status record, even when the sender is only told it failed.
    */
   onBusTurnStatusCleared?(turnId: string): void;
+  onAgentTurnStarted?(options: InboxMessageOptions): void | Promise<void>;
+  onAgentTurnFinished?(options: InboxMessageOptions, end: BusTurnEnd): void | Promise<void>;
+  onAgentTurnCancelled?(options: InboxMessageOptions): void;
 }
 
 interface QueuedMessage {
@@ -147,9 +152,9 @@ function hostOptions(item: QueuedMessage | undefined): InboxMessageOptions | und
 /**
  * Messages other agents send Forge (`POST /agent/message`). An idle chat gets
  * one at once; a busy one gets it when its turn ends, one turn per message.
- * Memory only, by design: a message is a prompt, and a prompt replayed after a
- * reload the user never saw would act on stale intent. The ledger records the
- * loss ("best effort while busy").
+ * Queued prompts stay in memory so a reload never replays stale intent. A
+ * session-bound message separately has a durable pending-reply record for
+ * crash recovery; the exchange ledger records ordinary queue outcomes.
  */
 export class AgentInbox {
   private readonly queue: QueuedMessage[] = [];
@@ -200,6 +205,7 @@ export class AgentInbox {
       const item = this.queue[i] as QueuedMessage;
       if (item.from !== from || (id !== 'all' && item.id !== id)) continue;
       this.queue.splice(i, 1);
+      if (item.options?.sender) this.host.onAgentTurnCancelled?.(item.options);
       removed++;
     }
     return removed;
@@ -229,7 +235,13 @@ export class AgentInbox {
     const claimed: string[] = [];
     for (let i = 0; i < this.queue.length; i++) {
       const item = this.queue[i] as QueuedMessage;
-      if (item.steer || item.options?.newChat || item.options?.model || item.options?.unattended) {
+      if (
+        item.steer ||
+        item.options?.newChat ||
+        item.options?.model ||
+        item.options?.unattended ||
+        item.options?.sender
+      ) {
         continue;
       }
       if (targetOf(hostOptions(item)) !== conversationId) continue;
@@ -275,11 +287,14 @@ export class AgentInbox {
           }
         }
         try {
-          const end = await this.host.submit(deliveredPrompt(item, startedAt), hostOptions(item));
+          const options = hostOptions(item);
+          if (options?.sender) await this.host.onAgentTurnStarted?.(options);
+          const end = await this.host.submit(deliveredPrompt(item, startedAt), options);
+          if (options?.sender) await this.host.onAgentTurnFinished?.(options, end);
           // §9: a bus-started turn just ended — the sender gets one line saying
           // how (finished, failed, cancelled) + a board event. A user-typed turn
           // has no `from`, so this fires only for agent messages.
-          if (item.from && this.host.onBusTurnFinished) {
+          if (item.from && !options?.sender && this.host.onBusTurnFinished) {
             try {
               this.host.onBusTurnFinished(item.from, Date.now() - startedAt, end);
             } catch (notifyErr) {
@@ -294,13 +309,26 @@ export class AgentInbox {
             const why = err instanceof Error ? err.message : String(err);
             log.error(`[agentInbox] could not deliver an agent message: ${why}`);
             this.host.warn(`Forge: an agent message could not be shown: ${why}`);
+            if (item.options?.sender) {
+              try {
+                await this.host.onAgentTurnFinished?.(item.options, {
+                  kind: 'failed',
+                  error: why,
+                });
+              } catch (deliveryError) {
+                const detail =
+                  deliveryError instanceof Error ? deliveryError.message : String(deliveryError);
+                log.error(`[agentInbox] durable agent reply remains pending: ${detail}`);
+                this.host.warn(`Forge: agent reply delivery failed: ${detail}`);
+              }
+            }
             // The item is still dropped — a prompt replayed after the user
             // fixes the cap is stale intent — but the sender is told, in the
             // same shape it is told for every other failed turn. Without this
             // the route's earlier 202 is the only thing the sender ever sees:
             // `submit` never resolved, so no `onBusTurnFinished` ran and the
             // message vanished with only a window-modal toast as evidence.
-            if (item.from && this.host.onBusTurnFinished) {
+            if (item.from && !item.options?.sender && this.host.onBusTurnFinished) {
               try {
                 this.host.onBusTurnFinished(item.from, Date.now() - startedAt, {
                   kind: 'failed',

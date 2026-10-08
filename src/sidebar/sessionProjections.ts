@@ -110,6 +110,7 @@ export function displayPersistMessages(
       content,
       ...(reasoning ? { reasoning, ...reasoningMs } : {}),
       ...(m.role === 'user' && m.midTurn ? { midTurn: true } : {}),
+      ...(m.role === 'user' && m.agentSender ? { agentSender: m.agentSender } : {}),
       ...(m.attachments?.length ? { attachments: m.attachments } : {}),
     });
   }

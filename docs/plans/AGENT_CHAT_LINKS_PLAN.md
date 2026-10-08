@@ -223,9 +223,9 @@ agent supports one (phase 0(h)).
   `sender {kind, sessionId, title}`; sidebar and Telegram render a badge from
   it. `parseForgeInboundPrompt` stays only to read chats saved before this.
   The affinity plan's title rule (`codex: <text>`) stays.
-- **Confirmations.** The sender receives `Forge received your message (chat
-  "<title>")` when the turn starts; the sidebar shows `✓ delivered to Claude ·
-  <title>` or the reason it failed.
+- **Confirmations.** The admission response returns `Forge received your message
+  (chat "<title>")` immediately so `say` stays non-blocking; the sidebar shows
+  `✓ delivered to Claude · <title>` or the reason it failed.
 
 ### 4. Agent to agent
 
@@ -417,7 +417,7 @@ delete"), Codex `01a11aba-3b34-…`.
 |---|---|---|---|---|---|---|
 | `Conversation.agentLinks[kind]` (history file) | `chatAgentLinks.link()` when a new session reports its id, on first inbound from an unlinked kind, on "Link to…", or on `--new` (move) | with the chat; "Unlink"; replaced on relink, on move, or when the session is found gone | `agent_bus.enabled: false` or CLI agents disabled → kept, unused; `ask_agent` errors naming the setting | `writeFileAtomicSync` — old or new, never torn. Claude/Copilot: link saved before spawn (`--session-id`), so no unlinked session exists. Codex: a crash between the first event and the save leaves an orphan thread; the next ask creates a new session and says so | link is saved before (Claude/Copilot) or at first event (Codex), so the next ask after a window death resumes it | none — never expires; a gone session is detected on use |
 | Reverse index `sessionId → conversationId` | built on activation from the history file | dropped on deactivate | not built while the bus is disabled | in memory only — nothing to tear | rebuilt on next activation | none |
-| Pending reply (`exchangeId`, sender `{kind, sessionId}`, `conversationId`) under the agent-bus dir | inbound admission, before the Forge turn starts | after the reply is delivered or stored as a verdict | bus disabled → inbound refused, nothing written | temp + rename; a torn file is treated as absent, the answer stays in the chat with a visible "reply not delivered" notice | on next activation: turn finished → deliver; turn never finished → deliver "Forge restarted before answering" | 24 h, then removed with a notice in the chat |
+| Pending reply (`exchangeId`, sender `{kind, sessionId}`, `conversationId`, `workspace`) under the agent-bus dir | inbound admission, before the Forge turn starts | after the reply is delivered or stored as a verdict | bus disabled → inbound refused, nothing written | temp + rename; a torn file is treated as absent, the answer stays in the chat with a visible "reply not delivered" notice | on next activation in the same workspace and with a known conversation: turn finished → deliver; turn never finished → deliver "Forge restarted before answering"; other windows skip the record | 24 h, then removed with a notice in the known chat; other workspaces/windows leave it untouched |
 | Exchange verdict (existing `verdictArtifact`) | reply to a sender that is not live | `ack-verdict` | unchanged | existing atomic write | survives; read on demand | existing mesh retention |
 | Remote binding (existing, per chat) | unchanged | unchanged | unchanged | unchanged | lease holder only sends; another window takes over by lease | unchanged |
 | Telegram mirror lines (outbox items) | each ask / receipt / reply event | marked delivered | `canDeliver` false → not queued | existing outbox resume | pending items resume on startup | existing outbox policy |

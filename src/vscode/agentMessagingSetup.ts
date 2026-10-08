@@ -28,6 +28,15 @@ import { renderBusStatus, renderBusView } from '../agentBus/busStatusView';
 import { MAX_VIEW_COUNT, parseViewCount } from '../remote/RemoteTranscriptView';
 import type { RemoteRuntime } from '../remote/RemoteRuntime';
 import { unattendedConversations } from '../sidebar/unattendedConversations';
+import { PendingAgentReplies } from '../agentLinks/pendingAgentReplies';
+import { makeAskAgentRuntime } from '../agentLinks/askAgentRuntime';
+import type { AskAgentRuntime } from '../agentLinks/askAgentService';
+import { findBySession } from '../agentLinks/chatAgentLinks';
+import {
+  makeAgentReplyLifecycle,
+  recordAcceptedInboundReply,
+} from '../agentLinks/agentReplyLifecycle';
+import { agentDisplayName } from '../agentLinks/chatAgentLinks';
 
 /** The conversation a bus message from `from` belongs in. */
 function busTarget(
@@ -183,13 +192,15 @@ export async function submitBusMessage(
     await facade.setConversationModel(conversationId, current);
   }
   const inbound = parseForgeInboundPrompt(prompt);
-  if (inbound) {
+  if (inbound || options?.sender) {
     // The agent-bus sender cannot see the user's Telegram chat. Reuse the
     // normal host-activity subscription so the already-addressed conversation
     // is durably mirrored to its bound remote chats before the Forge turn runs.
     facade.emitHostActivity?.({
       conversationId,
-      text: `Forge: ${inbound.from} says:\n\n${inbound.text}`,
+      text: options?.sender
+        ? `Forge: message from ${agentDisplayName(options.sender.kind)} session "${options.sender.title}"`
+        : `Forge: ${inbound?.from} says:\n\n${inbound?.text}`,
     });
   }
   // The marker lasts exactly this turn, like a job's: the conversation is
@@ -197,30 +208,26 @@ export async function submitBusMessage(
   const marker = options?.unattended ? unattendedConversations.mark(conversationId) : undefined;
   let outcome: Awaited<ReturnType<ForgeHostFacade['send']>>;
   try {
-    outcome = await facade.send(conversationId, prompt);
+    outcome = options?.sender
+      ? await facade.send(conversationId, prompt, undefined, { sender: options.sender })
+      : await facade.send(conversationId, prompt);
   } finally {
     marker?.dispose();
   }
   return outcome.kind === 'failed'
-    ? { kind: 'failed', error: outcome.error }
-    : { kind: outcome.kind };
+    ? {
+        kind: 'failed',
+        error: outcome.error,
+        ...(outcome.finalText ? { finalText: outcome.finalText } : {}),
+      }
+    : { kind: outcome.kind, ...(outcome.finalText ? { finalText: outcome.finalText } : {}) };
 }
 
 /**
- * Agent messaging, inbound (docs/plans/AGENT_MESSAGING_PLAN.md): the
- * `/agent/*` routes the control server mounts, and the inbox that turns each
- * message into a visible turn, one at a time, in the chat its sender last
- * wrote in (the active one for a first message).
- *
- * It also sets up the agent mesh (AGENT_MESH_PLAN P0): the orchestrator the
- * `tell_live_session` tool and the host-side relay (M6) both use. Creating it
- * here keeps `extension.ts` unchanged in shape — the mesh is an inbound concern,
- * and `setupAgentMesh` registers the orchestrator in the process-wide context
- * holder the tool reads.
- *
- * `getSidebar` is called lazily: activation creates the control server before
- * the sidebar exists. Until it does, the inbox reads the chat as busy and
- * waits. The control server pushes `agent_bus.enabled` into the routes.
+ * Mounts inbound messaging routes and the inbox, and initializes the mesh
+ * orchestrator used by `ask_agent` and host-side relays. The sidebar is lazy:
+ * activation may start the control server before its provider exists, so the
+ * inbox waits until `getSidebar` can resolve the target chat.
  */
 export function setupAgentMessaging(
   context: vscode.ExtensionContext,
@@ -230,6 +237,18 @@ export function setupAgentMessaging(
   getRemoteRuntime: () => RemoteRuntime | undefined = () => undefined,
 ): AgentRoutes {
   const mesh = setupAgentMesh(context, getSidebar, getConfig, workspaceRoot);
+  const pendingReplies = new PendingAgentReplies(busPaths().root);
+  const askRuntime: AskAgentRuntime = makeAskAgentRuntime({ getConfig });
+  const replyLifecycle = makeAgentReplyLifecycle({
+    root: busPaths().root,
+    workspaceRoot,
+    pending: pendingReplies,
+    runtime: askRuntime,
+    getFacade: () => getSidebar().getHostFacade(),
+    showWarning: (message) => {
+      void vscode.window.showWarningMessage(message);
+    },
+  });
   const watch = new BusTurnWatch();
   const inbox = new AgentInbox({
     isBusy: (options?: InboxMessageOptions) => {
@@ -274,6 +293,7 @@ export function setupAgentMessaging(
           vscode.window.showWarningMessage(`[agent mesh] finished notice failed: ${String(err)}`),
         );
     },
+    ...replyLifecycle,
   });
   context.subscriptions.push(inbox);
   context.subscriptions.push(watch);
@@ -321,6 +341,23 @@ export function setupAgentMessaging(
   const routes = new AgentRoutes({
     paths: () => busPaths(),
     inbox,
+    pendingReplies,
+    workspaceRoot,
+    recordPendingAccepted: (record) => recordAcceptedInboundReply(busPaths().root, record),
+    isChatBusy: (conversationId) =>
+      getSidebar().getHostFacade().status().streamingConversationIds.includes(conversationId),
+    holdsLink: (sender) => {
+      const owner = findBySession(sender.sessionId);
+      return (
+        owner !== undefined &&
+        getSidebar().getHostFacade().getAgentLink(owner, sender.kind)?.sessionId ===
+          sender.sessionId
+      );
+    },
+    resolveInboundAgent: (sender, selection) =>
+      getSidebar().getHostFacade().routeInboundAgent(sender, selection),
+    showMovedNotice: (conversationId, message) =>
+      getSidebar().getHostFacade().showConversationNotice(conversationId, message),
     isFocused: () => vscode.window.state.focused,
     configuredModels: () => busModelIds(getConfig()),
     relay: mesh.relay,
@@ -452,5 +489,10 @@ export function setupAgentMessaging(
       if (state.focused) routes.claim();
     }),
   );
+  void replyLifecycle.recover().catch((error: unknown) => {
+    void vscode.window.showWarningMessage(
+      `Forge could not recover pending agent replies: ${String(error)}`,
+    );
+  });
   return routes;
 }

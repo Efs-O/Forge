@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 #   forge.sh reply <id> [file]        answer a question Forge is waiting on
-#   forge.sh say <your-name> [--model <name>] [--new] [--reply-in-chat] [--unattended] [--to <conversationId>|--to-running] [file]  message Forge
+#   forge.sh say <your-name> [--model <name>] [--new] [--unattended] [--to <conversationId>|--to-running] [file]  message Forge
 #   forge.sh send <your-name> <to> [--to <conversationId>|--to-running] [file]  relay (the verdict wakes the sending Forge chat when it is open), or target a Forge chat when <to> is forge
 #   forge.sh send-file <your-name> --to <conversationId> <workspace-relative-path> [--caption-file <file>]  send a file directly to its Telegram chat (no Forge model turn)
 #   forge.sh remote-notify <claude|codex|copilot> <exchangeId> [file]  notify the Telegram chat that opened this exchange
@@ -14,7 +14,7 @@
 #   forge.sh status <your-name>       what your chat with Forge is doing now (tool, last words, context)
 #   forge.sh view <your-name> [n]     the last n answers in your chat (default 3, max 10)
 #   forge.sh wait <your-name> [minutes]  block until your chat is idle with nothing queued (default 60 min, exit 124 on timeout)
-#   API Codex: join codex once, then use say codex --reply-in-chat and status/view
+#   Agent sessions identify themselves from their kind-specific session environment variable.
 # The text comes from the file, or from stdin when no file is given.
 # Written by Forge on every start; edits are overwritten.
 
@@ -26,6 +26,21 @@ usage() { awk 'NR==1{next} /^#/{print;next} {exit}' "$0" >&2; exit 2; }
 VERB="${1:-}"; [ -n "$VERB" ] || usage
 ROOT="$(cd "$(dirname "$0")" && pwd)"
 EP="$ROOT/endpoint.json"
+SENDER_QUERY=""; SENDER_KIND=""; SENDER_ID=""
+set_sender_identity() {
+  case "$1" in
+    claude) SENDER_KIND=claude; SENDER_VAR=CLAUDE_CODE_SESSION_ID; SENDER_ID="${CLAUDE_CODE_SESSION_ID:-}";;
+    codex) SENDER_KIND=codex; SENDER_VAR=CODEX_SESSION_ID; SENDER_ID="${CODEX_SESSION_ID:-}";;
+    copilot) SENDER_KIND=copilot; SENDER_VAR=COPILOT_AGENT_SESSION_ID; SENDER_ID="${COPILOT_AGENT_SESSION_ID:-}";;
+    *) return;;
+  esac
+  [ -n "$SENDER_ID" ] || { echo "forge.sh: $SENDER_VAR is not set; refusing to send as $SENDER_KIND" >&2; exit 2; }
+  case "$SENDER_KIND:$SENDER_ID" in
+    claude:*|codex:*) echo "$SENDER_ID" | grep -Eq '^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$' || { echo "forge.sh: invalid $SENDER_VAR session id" >&2; exit 2; };;
+    copilot:*) case "$SENDER_ID" in *[!A-Za-z0-9._:-]*|'') echo "forge.sh: invalid $SENDER_VAR session id" >&2; exit 2;; esac;;
+  esac
+  SENDER_QUERY="&sender=%7B%22kind%22%3A%22$SENDER_KIND%22%2C%22sessionId%22%3A%22$SENDER_ID%22%7D"
+}
 # Under WSL2 (NAT on Windows 10) 127.0.0.1 is the Linux VM, not Windows where
 # Forge listens; Windows' curl.exe (via interop) reaches Windows' loopback.
 # It cannot read /tmp, so @file bodies are translated with wslpath -w.
@@ -103,16 +118,23 @@ if [ "$VERB" = "read-verdict" ] || [ "$VERB" = "ack-verdict" ]; then
   NAME="$2"; EXCHANGE_ID="$3"
   case "$NAME" in ""|*[!A-Za-z0-9._-]*) echo "forge.sh: invalid sender" >&2; exit 2;; esac
   case "$EXCHANGE_ID" in ""|*[!A-Za-z0-9_-]*) echo "forge.sh: invalid exchange id" >&2; exit 2;; esac
+  set_sender_identity "$NAME"
   [ -f "$EP" ] || { echo "forge.sh: not reachable: open Forge with control_server and agent_bus enabled" >&2; exit 1; }
   URL="$(grep '"url"' "$EP" | cut -d'"' -f4)"
   TOKEN="$(grep '"token"' "$EP" | cut -d'"' -f4)"
+  IDENTITY_ARGS=()
+  if [ -n "$SENDER_KIND" ]; then
+    IDENTITY_ARGS+=(--data-urlencode "kind=$SENDER_KIND" --data-urlencode "sessionId=$SENDER_ID")
+  fi
   if [ "$VERB" = "read-verdict" ]; then
     curl -sS --fail-with-body -G -H "Authorization: Bearer $TOKEN" \
       --data-urlencode "from=$NAME" --data-urlencode "id=$EXCHANGE_ID" \
+      "${IDENTITY_ARGS[@]}" \
       "$URL/agent/read-verdict" || { echo "forge.sh: verdict read failed" >&2; exit 1; }
   else
     curl -sS --fail-with-body -X POST -H "Authorization: Bearer $TOKEN" \
       --data-urlencode "from=$NAME" --data-urlencode "id=$EXCHANGE_ID" \
+      "${IDENTITY_ARGS[@]}" \
       "$URL/agent/ack-verdict" || { echo "forge.sh: verdict acknowledgment failed" >&2; exit 1; }
     echo
   fi
@@ -227,14 +249,13 @@ if [ "$VERB" = "send-file" ]; then
   exit 0
 fi
 [ $# -ge 2 ] || usage
-ARG=""; SRC="-"; MODEL=""; NEW_CHAT=""; REPLY_IN_CHAT=""; UNATTENDED=""; CONVERSATION_ID=""; TO_RUNNING=""; ORIGIN_CONVERSATION=""
+ARG=""; SRC="-"; MODEL=""; NEW_CHAT=""; UNATTENDED=""; CONVERSATION_ID=""; TO_RUNNING=""; ORIGIN_CONVERSATION=""
 if [ "$VERB" = "say" ]; then
   shift
   while [ $# -gt 0 ]; do
     case "$1" in
       --model) [ $# -ge 2 ] || usage; MODEL="$2"; shift 2;;
       --new) NEW_CHAT=true; shift;;
-      --reply-in-chat) REPLY_IN_CHAT=true; shift;;
       --unattended) UNATTENDED=true; shift;;
       --to) [ $# -ge 2 ] || usage; CONVERSATION_ID="$2"; shift 2;;
       --to-running) TO_RUNNING=true; shift;;
@@ -243,6 +264,7 @@ if [ "$VERB" = "say" ]; then
     esac
   done
   [ -n "$ARG" ] || usage
+  set_sender_identity "$ARG"
 elif [ "$VERB" = "send" ] || [ "$VERB" = "steer" ]; then
   ARG="$2"
   [ $# -ge 3 ] || usage
@@ -256,6 +278,9 @@ elif [ "$VERB" = "send" ] || [ "$VERB" = "steer" ]; then
     esac
   done
   case "$TO" in ""|*[!A-Za-z0-9._-]*) echo "forge.sh: bad recipient '$TO'" >&2; exit 2;; esac
+  if [ "$TO" = "forge" ]; then
+    set_sender_identity "$ARG"
+  fi
   if [ "$VERB" = "send" ] && [ -n "${FORGE_CONVERSATION_ID:-}" ]; then
     case "$FORGE_CONVERSATION_ID" in
       *[!A-Za-z0-9._-]*) echo "forge.sh: invalid FORGE_CONVERSATION_ID; origin_conversation was not forwarded" >&2;;
@@ -273,13 +298,13 @@ case "$VERB" in
          case "$CONVERSATION_ID" in ""|*[!A-Za-z0-9._-]*) [ -z "$CONVERSATION_ID" ] || { echo "forge.sh: bad conversation id '$CONVERSATION_ID'" >&2; exit 2; };; esac
          [ -z "$CONVERSATION_ID" ] || [ -z "$TO_RUNNING" ] || usage
          [ -z "$NEW_CHAT" ] || { [ -z "$CONVERSATION_ID" ] && [ -z "$TO_RUNNING" ]; } || usage
-         ROUTE=message; QUERY="from=$ARG"; [ -n "$MODEL" ] && QUERY="$QUERY&model=$MODEL"; [ -n "$NEW_CHAT" ] && QUERY="$QUERY&new_chat=true"; [ -n "$REPLY_IN_CHAT" ] && QUERY="$QUERY&reply_in_chat=true"; [ -n "$UNATTENDED" ] && QUERY="$QUERY&unattended=true"; [ -n "$CONVERSATION_ID" ] && QUERY="$QUERY&conversation_id=$CONVERSATION_ID"; [ -n "$TO_RUNNING" ] && QUERY="$QUERY&to_running=true" ;;
+         ROUTE=message; QUERY="from=$ARG$SENDER_QUERY"; [ -n "$MODEL" ] && QUERY="$QUERY&model=$MODEL"; [ -n "$NEW_CHAT" ] && QUERY="$QUERY&new_chat=true"; [ -n "$UNATTENDED" ] && QUERY="$QUERY&unattended=true"; [ -n "$CONVERSATION_ID" ] && QUERY="$QUERY&conversation_id=$CONVERSATION_ID"; [ -n "$TO_RUNNING" ] && QUERY="$QUERY&to_running=true" ;;
   send)  case "$ARG" in ""|*[!A-Za-z0-9._-]*) echo "forge.sh: a name is letters, digits, . _ - only" >&2; exit 2;; esac
          case "$CONVERSATION_ID" in ""|*[!A-Za-z0-9._-]*) [ -z "$CONVERSATION_ID" ] || { echo "forge.sh: bad conversation id '$CONVERSATION_ID'" >&2; exit 2; };; esac
          [ -z "$CONVERSATION_ID" ] || [ -z "$TO_RUNNING" ] || usage
-         ROUTE=message; QUERY="from=$ARG&to=$TO"; [ -n "$CONVERSATION_ID" ] && QUERY="$QUERY&conversation_id=$CONVERSATION_ID"; [ -n "$TO_RUNNING" ] && QUERY="$QUERY&to_running=true"; [ -n "$ORIGIN_CONVERSATION" ] && [ "$TO" != "forge" ] && QUERY="$QUERY&origin_conversation=$ORIGIN_CONVERSATION" ;;
+         ROUTE=message; QUERY="from=$ARG&to=$TO$SENDER_QUERY"; [ -n "$CONVERSATION_ID" ] && QUERY="$QUERY&conversation_id=$CONVERSATION_ID"; [ -n "$TO_RUNNING" ] && QUERY="$QUERY&to_running=true"; [ -n "$ORIGIN_CONVERSATION" ] && [ "$TO" != "forge" ] && QUERY="$QUERY&origin_conversation=$ORIGIN_CONVERSATION" ;;
   steer) case "$ARG" in ""|*[!A-Za-z0-9._-]*) echo "forge.sh: a name is letters, digits, . _ - only" >&2; exit 2;; esac
-         ROUTE=message; QUERY="from=$ARG&to=$TO&priority=steer" ;;
+         ROUTE=message; QUERY="from=$ARG&to=$TO$SENDER_QUERY&priority=steer" ;;
   cancel) case "$ARG" in ""|*[!A-Za-z0-9._-]*) echo "forge.sh: a name is letters, digits, . _ - only" >&2; exit 2;; esac
          [ $# -eq 3 ] || usage
          case "$3" in ""|*[!A-Za-z0-9_-]*) echo "forge.sh: bad id '$3' (the id say printed, or all)" >&2; exit 2;; esac
@@ -296,13 +321,30 @@ case "$VERB" in
 esac
 TMP="$(mktemp)"; trap 'rm -f "$TMP"' EXIT
 if [ "$SRC" = "-" ]; then cat > "$TMP"; else cp "$SRC" "$TMP" || exit 2; fi
+if [ -n "$SENDER_KIND" ]; then
+  HOLDER=""
+  for WINDOW_EP in "$ROOT"/endpoints/*.json; do
+    [ -f "$WINDOW_EP" ] || continue
+    WINDOW_URL="$(grep '"url"' "$WINDOW_EP" | cut -d'"' -f4)"
+    WINDOW_TOKEN="$(grep '"token"' "$WINDOW_EP" | cut -d'"' -f4)"
+    [ -n "$WINDOW_URL" ] && [ -n "$WINDOW_TOKEN" ] || continue
+    HELD="$(curl -sS --connect-timeout 1 --max-time 3 -G -H "Authorization: Bearer $WINDOW_TOKEN" --data-urlencode "kind=$SENDER_KIND" --data-urlencode "sessionId=$SENDER_ID" "$WINDOW_URL/agent/holds-link" 2>/dev/null)" || continue
+    case "$HELD" in *'"holdsLink":true'*)
+      [ -z "$HOLDER" ] || { echo "forge.sh: more than one live Forge window claims this session" >&2; exit 1; }
+      HOLDER="$WINDOW_EP";;
+    esac
+  done
+  [ -z "$HOLDER" ] || EP="$HOLDER"
+fi
 if [ -f "$EP" ]; then
   URL="$(grep '"url"' "$EP" | cut -d'"' -f4)"
   TOKEN="$(grep '"token"' "$EP" | cut -d'"' -f4)"
-  if curl -sS --fail-with-body -X POST -H "Authorization: Bearer $TOKEN" \
-      -H "Content-Type: text/plain; charset=utf-8" --data-binary "@$TMP" "$URL/agent/$ROUTE?$QUERY"; then
-    echo; exit 0
+  if RESULT="$(curl -sS --fail-with-body -X POST -H "Authorization: Bearer $TOKEN" \
+      -H "Content-Type: text/plain; charset=utf-8" --data-binary "@$TMP" "$URL/agent/$ROUTE?$QUERY")"; then
+    printf '%s\n' "$RESULT"
+    exit 0
   fi
+  [ -z "${RESULT:-}" ] || printf '%s\n' "$RESULT" >&2
   echo "forge.sh: Forge's endpoint did not accept it (see above)." >&2
   WHY="Forge refused it"
 else

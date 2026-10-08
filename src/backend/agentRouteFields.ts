@@ -63,8 +63,6 @@ export async function readAgentRouteFields(
   const fields: AgentRouteFields = { ...Object.fromEntries(url.searchParams), text: body };
   if (fields['new_chat'] === 'true') fields['new_chat'] = true;
   if (fields['new_chat'] === 'false') fields['new_chat'] = false;
-  if (fields['reply_in_chat'] === 'true') fields['reply_in_chat'] = true;
-  if (fields['reply_in_chat'] === 'false') fields['reply_in_chat'] = false;
   if (fields['to_running'] === 'true') fields['to_running'] = true;
   if (fields['to_running'] === 'false') fields['to_running'] = false;
   if (fields['unattended'] === 'true') fields['unattended'] = true;

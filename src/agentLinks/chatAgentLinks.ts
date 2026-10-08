@@ -7,6 +7,45 @@ const log = getLogger();
 export const agentKindSchema = z.enum(['claude', 'codex', 'copilot']);
 export type AgentKind = z.infer<typeof agentKindSchema>;
 
+export function agentDisplayName(kind: AgentKind): string {
+  return { claude: 'Claude', codex: 'Codex', copilot: 'Copilot' }[kind];
+}
+
+const agentSenderShape = z
+  .object({
+    kind: agentKindSchema,
+    sessionId: z.string().min(1),
+  })
+  .strict();
+
+function checkSessionId<T extends { kind: AgentKind; sessionId: string }>(
+  sender: T,
+  context: z.RefinementCtx,
+): void {
+  if (!sessionIdSchemas[sender.kind].safeParse(sender.sessionId).success) {
+    context.addIssue({
+      code: 'custom',
+      path: ['sessionId'],
+      message: 'Invalid session id shape',
+    });
+  }
+}
+
+export const agentSenderSchema = agentSenderShape.superRefine(checkSessionId);
+export type AgentSender = z.infer<typeof agentSenderSchema>;
+
+export const agentSenderMetadataSchema = agentSenderShape
+  .extend({
+    title: z
+      .string()
+      .min(1)
+      .max(200)
+      .refine((title) => !/[\r\n]/u.test(title)),
+  })
+  .strict()
+  .superRefine(checkSessionId);
+export type AgentSenderMetadata = z.infer<typeof agentSenderMetadataSchema>;
+
 const sessionIdSchemas = {
   claude: z.string().uuid(),
   codex: z.string().uuid(),
@@ -172,6 +211,23 @@ export function touch(
   const current = get(conversation, kind);
   if (!current) throw new Error(`Chat "${conversation.title}" has no linked ${kind} session.`);
   return link(conversation, { ...current, lastUsedAt }, [conversation]);
+}
+
+export function findBySession(sessionId: string): string | undefined {
+  return reverseIndex.get(sessionId);
+}
+
+export function move(
+  from: ConversationRuntime,
+  to: ConversationRuntime,
+  kind: AgentKind,
+  conversations: readonly Pick<ConversationRuntime, 'id' | 'title'>[],
+): AgentLink {
+  if (from.id === to.id) throw new Error('Cannot move a session link to the same chat.');
+  const current = get(from, kind);
+  if (!current) throw new Error(`Chat "${from.title}" has no linked ${kind} session.`);
+  unlink(from, kind);
+  return link(to, current, conversations);
 }
 
 export function forgetConversation(conversationId: string): void {

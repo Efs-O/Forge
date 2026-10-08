@@ -5,6 +5,7 @@ import type {
   ModelEntry,
 } from '../../src/sidebar/messageBridge';
 import type { AppMessage, MessageAttachment, PersistedRow } from './messageOps';
+import type { AgentSenderMetadata } from '../../src/agentLinks/chatAgentLinks';
 
 export interface State {
   messagesById: Record<string, AppMessage[]>;
@@ -93,6 +94,7 @@ export type Action =
       /** Shown immediately from the bytes still in hand; the next sync replaces
        *  them with the host's stored references. */
       attachments?: MessageAttachment[];
+      sender?: AgentSenderMetadata;
     }
   | { type: 'MID_TURN_TELL'; text: string; convId?: string }
   | { type: 'SET_MODEL'; name: string | null }

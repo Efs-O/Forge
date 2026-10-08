@@ -1,4 +1,5 @@
 export type Role = 'system' | 'user' | 'assistant' | 'tool';
+import type { AgentSenderMetadata } from '../agentLinks/chatAgentLinks';
 
 export interface ContentPartText {
   type: 'text';
@@ -61,6 +62,8 @@ export interface ChatMessage {
   internal?: boolean;
   /** A user message delivered at a tool-round gap, labelled only on the wire. */
   midTurn?: boolean;
+  /** Session identity for a prompt received from an agent. */
+  agentSender?: AgentSenderMetadata;
   /** The Layer C block this user turn was sent with, rendered once at turn start. */
   turnContext?: string;
 }

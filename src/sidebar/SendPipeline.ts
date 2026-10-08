@@ -227,6 +227,7 @@ export class SendPipeline {
         type: 'userPrompt',
         text,
         conversationId: conv.id,
+        ...(promptOptions?.sender ? { sender: promptOptions.sender } : {}),
         ...(attachments?.length ? { attachments } : {}),
       });
     }

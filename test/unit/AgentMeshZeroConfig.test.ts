@@ -217,10 +217,18 @@ describe('joinClaude (§10)', () => {
   });
 });
 
-describe('inbound hint', () => {
-  it('uses ask_agent for a linked sender and tells other senders to link first', () => {
-    expect(forgeInboundPrompt('claude', 'hi')).toContain('ask_agent` with `agent: "claude"');
-    expect(forgeInboundPrompt('codex', 'hi')).toContain('ask_agent` with `agent: "codex"');
-    expect(forgeInboundPrompt('forge-dd', 'hi')).toContain('link the sender first');
+describe('inbound sender metadata', () => {
+  it('adds the automatic reply footer only for a linked agent session', () => {
+    for (const kind of ['claude', 'codex'] as const) {
+      const prompt = forgeInboundPrompt(kind, 'hi', {
+        kind,
+        sessionId: kind === 'claude'
+          ? '00000000-0000-4000-8000-000000000111'
+          : '00000000-0000-4000-8000-000000000112',
+        title: 'Linked chat',
+      });
+      expect(prompt).toContain('Your final answer is delivered to it automatically.');
+    }
+    expect(forgeInboundPrompt('forge-dd', 'hi')).toBe('**forge-dd says:**\n\nhi');
   });
 });

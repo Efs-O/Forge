@@ -7,6 +7,8 @@
  */
 
 import clientScriptSource from './forge.sh';
+import type { AgentSenderMetadata } from '../agentLinks/chatAgentLinks';
+import { agentDisplayName } from '../agentLinks/chatAgentLinks';
 
 /** Longest text a single message into Forge may carry. */
 export const MAX_INBOUND_CHARS = 8000;
@@ -163,10 +165,10 @@ Forge's agent is blocked until the answer lands, then shows it to its user.
     your message
     FORGE_MSG
 
-An API Codex session first runs \`join codex\`, then can use
-\`say codex --reply-in-chat\`. Forge answers in that chat; use \`status codex\`
-to see when the turn ends and \`view codex\` to read its answer. Ordinary
-\`say\` keeps the live-session reply hint used by other reachable agents.
+An agent session runs \`say claude\`, \`say codex\` or \`say copilot\` from its
+own shell. Forge identifies it from that kind's session environment variable
+and delivers the final answer to the session automatically. Use \`status\` and
+\`view\` to inspect the linked Forge chat.
 
 PowerShell:
 
@@ -237,20 +239,19 @@ export function claudeQuestion(
 }
 
 /** The prompt an inbound message becomes in Forge's chat. */
-/** Reply hint for a session linked to the current chat. */
-function inboundHint(from: string): string {
-  const alias = from.trim().toLowerCase();
-  if (alias === 'claude' || alias === 'codex' || alias === 'copilot') {
-    return `\`agent: "${alias}"\``;
-  }
-  return 'The chat must link the sender first, then use `agent: "claude"`.';
-}
-
-export function forgeInboundPrompt(from: string, text: string, replyInChat = false): string {
-  const hint = replyInChat
-    ? 'Answer in this Forge chat. The sender will read your answer with `forge.sh view`. Do not call `ask_agent` for this reply.'
-    : `To answer, call \`ask_agent\` with ${inboundHint(from)}.`;
-  return `**${from} says:**\n\n${text.trim()}\n\n` + `_(Agent-bus message. ${hint})_`;
+/** Sender attribution and automatic-reply footer for a linked session. */
+export function forgeInboundPrompt(
+  from: string,
+  text: string,
+  sender?: AgentSenderMetadata,
+): string {
+  if (!sender) return `**${from} says:**\n\n${text.trim()}`;
+  const label = agentDisplayName(sender.kind);
+  const title = sender.title.replaceAll('"', '\\"');
+  return (
+    `**${label} says:**\n\n${text.trim()}\n\n` +
+    `From ${label} session "${title}". Your final answer is delivered to it automatically.`
+  );
 }
 
 /**

@@ -113,6 +113,16 @@ async function sendToPanelOwnedCodex(
   }
 }
 
+async function queueCodexReply(
+  config: () => ForgeConfig,
+  link: AgentLink,
+  prompt: string,
+  signal: AbortSignal,
+): Promise<AskAgentRunResult> {
+  await queueToCodex(busConfig(config()).codex_cli, link.sessionId, prompt, signal);
+  return { status: 'completed', finalText: '' };
+}
+
 export function makeAskAgentRuntime(options: {
   getConfig: () => ForgeConfig;
   driver?: CliAgentDriver;
@@ -142,17 +152,22 @@ export function makeAskAgentRuntime(options: {
       }
       return false;
     },
-    sendLive: async (agent, link, prompt, signal) => {
+    sendLive: async (agent, link, prompt, signal, purpose = 'ask') => {
       const adapter = getMeshOrchestrator()?.adapterForSession(agent, link.sessionId);
-      if (adapter) {
-        if (!adapter.observesTurns && agent === 'codex')
+      if (agent === 'codex') {
+        if (purpose === 'reply') return queueCodexReply(options.getConfig, link, prompt, signal);
+        if (!adapter || !adapter.observesTurns)
           return sendToPanelOwnedCodex(
             options.getConfig,
             link,
             prompt,
             signal,
-            'The panel-owned Codex thread did not reply before the wait limit.',
+            adapter
+              ? 'The panel-owned Codex thread did not reply before the wait limit.'
+              : 'The linked Codex thread did not reply before the wait limit.',
           );
+      }
+      if (adapter) {
         const result = await adapter.send(prompt, { signal });
         return {
           status: result.status,
@@ -162,19 +177,15 @@ export function makeAskAgentRuntime(options: {
             : {}),
         };
       }
-      if (agent === 'codex')
-        return sendToPanelOwnedCodex(
-          options.getConfig,
-          link,
-          prompt,
-          signal,
-          'The linked Codex thread did not reply before the wait limit.',
-        );
       const session =
         agent === 'claude'
           ? readClaudeSessions().find((item) => item.sessionId === link.sessionId)
           : undefined;
       if (session) {
+        if (purpose === 'reply') {
+          await sendPeerMessage(session, 'Forge', prompt);
+          return { status: 'completed', finalText: '' };
+        }
         const paths = busPaths();
         ensureBus(paths);
         const id = newBusId();

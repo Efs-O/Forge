@@ -272,13 +272,15 @@ describe('messages', () => {
     expect(msg).toContain('body');
   });
 
-  it('an inbound message names its sender and how to answer', () => {
+  it('an inbound message names its sender, with linked-session metadata as a footer', () => {
     const prompt = forgeInboundPrompt('forge-dd', '  hi  ');
-    expect(prompt.startsWith('**forge-dd says:**\n\nhi\n')).toBe(true);
-    expect(prompt).toContain('link the sender first');
-    const chatReply = forgeInboundPrompt('codex', 'hi', true);
-    expect(chatReply).toContain('Answer in this Forge chat');
-    expect(chatReply).toContain('Do not call `ask_agent` for this reply');
+    expect(prompt).toBe('**forge-dd says:**\n\nhi');
+    const linked = forgeInboundPrompt('codex', 'hi', {
+      kind: 'codex',
+      sessionId: '00000000-0000-4000-8000-000000000081',
+      title: 'Build review',
+    });
+    expect(linked).toContain('From Codex session "Build review". Your final answer is delivered to it automatically.');
   });
 
   it('a Codex question carries the reply contract with a forward-slash path', () => {
