@@ -20,6 +20,34 @@ export interface ConversationEvictionSignals {
   remoteIntakeQueue: boolean;
 }
 
+/**
+ * What the host knows about prompts queued in the sidebar webview. The queue
+ * is unpersisted React state, so with no view resolved (a headless window
+ * after reload, or after the view is disposed) it is known empty. Only a view
+ * that exists but has not reported yet is unknown — reading the no-view state
+ * as unknown too pinned every chat and refused every `say --new` at the cap.
+ */
+export class WebviewQueueState {
+  private ids: ReadonlySet<string> | undefined = new Set();
+
+  viewResolved(): void {
+    this.ids = undefined;
+  }
+
+  viewDisposed(): void {
+    this.ids = new Set();
+  }
+
+  report(ids: readonly string[]): void {
+    this.ids = new Set(ids);
+  }
+
+  /** `undefined` while a resolved view has not reported. */
+  isQueued(id: string): boolean | undefined {
+    return this.ids?.has(id);
+  }
+}
+
 export function isConversationEvictable(signals: ConversationEvictionSignals): boolean {
   return !Object.values(signals).some((signal) => signal === true || signal === undefined);
 }

@@ -61,6 +61,13 @@ dist/_*
 # Vitest --reporter=json debug dump written to the workspace root. A 1 MB
 # .ci-failures.json rode along inside a 0.16.58 VSIX until this line existed.
 .ci-failures.json
+# Any root JSON or text file other than the manifest and the licence is a local
+# dump: flaky-*.json, test-run-*.json and flaky-log-*.txt rode along in a 0.17.0
+# VSIX. Like `*.md`, these patterns match the root only.
+*.json
+!package.json
+*.txt
+!LICENSE.txt
 .coordination/**
 smoke3d/**
 prodtest-md2html/**

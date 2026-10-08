@@ -77,6 +77,7 @@
 
 - `forge.sh say --unattended` runs the turn the way a job runs: a destructive command is refused at once instead of opening an approval dialog that nobody will answer, and other confirmations are approved. The refusal tells the agent to carry on another way. The chat is attended again after that turn.
 - An unattended turn is told up front that destructive commands and a recursive `delete_file` will be refused, so it cleans up file by file instead of learning the rule from a refusal. `ask_user` is not offered, because nobody can answer it; a call to it is refused with that reason.
+- A window whose sidebar was never opened after a reload no longer refuses `say --new` at the 12-chat limit. Forge used to treat every chat's queued-prompt state as unknown until the sidebar reported it. That state lives only inside the sidebar, so with no sidebar it is known to be empty, and the oldest finished chat is archived as usual. The refusal no longer counts the same chats twice ("12 with messages queued, 12 not yet reporting a queue").
 
 ## 0.16.91
 

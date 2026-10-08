@@ -50,6 +50,7 @@ import type { SidebarPromptRouter } from './backgroundExitNotice';
 import { attachmentsRootUri, openAttachment } from './attachmentAccess';
 import { listMemoryKeys } from '../tools/memoryTools';
 import { retainSessionMemoryKeys } from './memorySnapshotLifecycle';
+import { WebviewQueueState } from './evictionGate';
 
 export type { SidebarProviderEvents };
 /** Residency refresh while visible: cheap, but fast enough to avoid a stale dot. */
@@ -144,7 +145,7 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
         rememberClankerMode: (on) => void this.workspaceState.update('forge.clankerMode', on),
         unloadModels: () => this.unloadModels(),
         unloadActiveModel: () => this.unloadConversationModel(),
-        isConversationQueued: (id) => this.queuedConversationIds?.has(id),
+        isConversationQueued: (id) => this.webviewQueue.isQueued(id),
         // Passed through as-is: it was once reduced to "clear", which the gate
         // then read as "blocks", so every unbound chat was pinned and the cap
         // could never make room, while an unloaded store failed open.
@@ -211,6 +212,7 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
     _token: vscode.CancellationToken,
   ): void {
     this.view = webviewView;
+    this.webviewQueue.viewResolved();
     webviewView.webview.options = {
       enableScripts: true,
       localResourceRoots: webviewResourceRoots(this.extensionUri, this.attachmentStore?.rootPath),
@@ -224,7 +226,10 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
       this.hiddenChatAlerts.seen();
     });
     webviewView.onDidDispose(() => {
-      if (this.view === webviewView) this.view = undefined;
+      if (this.view === webviewView) {
+        this.view = undefined;
+        this.webviewQueue.viewDisposed();
+      }
       this.residency.stop();
     });
     this.residency.sync(this.view?.visible ?? false);
@@ -268,11 +273,6 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
   /** Stable addressed seam for the extension-scoped remote runtime. */
   getHostFacade(): ForgeHostFacade {
     return this.hostFacade;
-  }
-
-  /** @deprecated Use newConversation — kept for command registration compatibility. */
-  newChat(): void {
-    void this.newConversation();
   }
 
   clearChat(): void {
@@ -347,7 +347,7 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
     transports: [],
     paired: false,
   };
-  private queuedConversationIds?: Set<string>;
+  private readonly webviewQueue = new WebviewQueueState();
 
   private post(msg: HostToWebview): void {
     this.view?.webview.postMessage(msg);
@@ -482,7 +482,7 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
           openAttachment({ store: this.attachmentStore, view: () => this.view }, relativePath),
         resolveConfirmation: (id, approved) => this.agentLoop.resolveConfirmation(id, approved),
         recordWebviewDiagnostic: (message) => logWebviewDiagnostic(message),
-        queuedConversationIds: (ids) => (this.queuedConversationIds = new Set(ids)),
+        queuedConversationIds: (ids) => this.webviewQueue.report(ids),
       },
       msg,
     );

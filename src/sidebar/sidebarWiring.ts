@@ -354,7 +354,9 @@ export function wireSidebar(host: SidebarHost, parts: SidebarParts): SidebarRunt
       pendingApprovalQueued: approvals.has(id),
       pendingQuestion: parts.questions.hasPending(id),
       unattributedRequest: approvals.has('') || questions.has(''),
-      hostQueue: queued,
+      // An unreported queue is `beforeWebviewQueueReport` alone; passing the
+      // undefined here too made a refusal claim "12 with messages queued".
+      hostQueue: queued === true,
       webviewQueue: queued === true,
       beforeWebviewQueueReport: queued === undefined,
       ...remoteEvictionSignals(remote),

@@ -16,6 +16,7 @@ import {
   evictionBlockers,
   isConversationEvictable,
   remoteEvictionSignals,
+  WebviewQueueState,
   type ConversationEvictionSignals,
 } from '../../src/sidebar/evictionGate';
 
@@ -213,8 +214,8 @@ describe('conversation eviction ledger', () => {
     ]);
     expect(evictionBlockers({ ...clear, remoteBinding: true })).toEqual(['bound to a remote chat']);
     // An unreadable queue state blocks, and says so, rather than reading as
-    // free. In production `hostQueue === undefined` always arrives together
-    // with `beforeWebviewQueueReport: true`, so the refusal names both labels.
+    // free. Production reports it through `beforeWebviewQueueReport` alone;
+    // an undefined `hostQueue` still fails closed in the pure function.
     expect(evictionBlockers({ ...clear, beforeWebviewQueueReport: true })).toEqual([
       'not yet reporting a queue',
     ]);
@@ -223,14 +224,30 @@ describe('conversation eviction ledger', () => {
     ).toEqual(['with messages queued', 'not yet reporting a queue']);
     // Two signals sharing a label collapse to one count, so the sentence does
     // not report the same chat twice.
-    expect(evictionBlockers({ ...clear, pendingApprovalActive: true, pendingApprovalQueued: true }))
-      .toEqual(['waiting on a tool approval']);
+    expect(
+      evictionBlockers({ ...clear, pendingApprovalActive: true, pendingApprovalQueued: true }),
+    ).toEqual(['waiting on a tool approval']);
+  });
+
+  it('reads the webview queue as empty with no view, unknown only before its first report', () => {
+    // A headless bench window never opens the sidebar after a reload. Reading
+    // "no view" as unknown pinned all 12 chats and refused every `say --new`.
+    const queue = new WebviewQueueState();
+    expect(queue.isQueued('a')).toBe(false);
+    queue.viewResolved();
+    expect(queue.isQueued('a')).toBeUndefined();
+    queue.report(['a']);
+    expect(queue.isQueued('a')).toBe(true);
+    expect(queue.isQueued('b')).toBe(false);
+    queue.viewDisposed();
+    expect(queue.isQueued('a')).toBe(false);
   });
 
   it('names every signal in the gate, so an added one cannot go unexplained', () => {
     for (const signal of signals) {
-      expect(evictionBlockers({ ...clear, [signal]: true } as ConversationEvictionSignals)).not
-        .toEqual([]);
+      expect(
+        evictionBlockers({ ...clear, [signal]: true } as ConversationEvictionSignals),
+      ).not.toEqual([]);
     }
   });
 
