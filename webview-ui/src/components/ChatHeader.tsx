@@ -66,15 +66,6 @@ export function ChatHeader({
       )}
       <div id="chats-toolbar-actions">
         <button
-          id="tab-new-btn"
-          type="button"
-          title="New chat"
-          aria-label="New chat"
-          onClick={onNew}
-        >
-          ＋
-        </button>
-        <button
           id="history-toolbar-btn"
           type="button"
           aria-label="Conversation history"
@@ -83,6 +74,15 @@ export function ChatHeader({
           onClick={onToggleHistory}
         >
           ◷
+        </button>
+        <button
+          id="tab-new-btn"
+          type="button"
+          title="New chat"
+          aria-label="New chat"
+          onClick={onNew}
+        >
+          ＋
         </button>
       </div>
     </header>
