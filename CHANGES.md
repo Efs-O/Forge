@@ -39,8 +39,8 @@
 ### The agent can look at a page it wrote
 
 - `render_html_to_image` has a `preview` mode: it runs the page's scripts in headless Chrome or Edge, waits `wait_ms` (default 3 s), and returns the page's errors, its `console.log`/`info`/`warn` output (last 40 lines, 4,000 characters) and a screenshot to the agent only. Nothing is saved or sent to a remote chat, and no file budget is spent. A model without vision gets the text.
-- `frames` (1–4 ascending times up to 15 s) captures one screenshot per time instead of `wait_ms`, and `keys` (up to 8, each held 0–3 s) presses keys after load, before the first frame, for animations and games.
-- The page may load from any public `http(s)` host. Forge fetches every request itself and refuses loopback, private and link-local addresses, after resolving the name, so a public name pointing at 127.0.0.1 is refused too. The browser itself resolves no hostnames, WebSockets are closed and WebRTC UDP is blocked. Preview takes `path`, a workspace file; relative assets in the page do not load.
+- `frames` (1–4 ascending times up to 15 s) captures one screenshot per time instead of `wait_ms`, and `keys` (up to 8, each held 0–3 s) presses keys after load, before the first frame, for animations and games. The page's first canvas is focused before the first key, so a game listening on its canvas receives them.
+- The page may load from any public `http(s)` host. Forge fetches every request itself and refuses loopback, private and link-local addresses, after resolving the name, so a public name pointing at 127.0.0.1 is refused too. Redirects are followed by Forge with the same check on every hop, so a library behind a redirect (an unpkg version range) loads, and a redirect to a local address is refused. The browser itself resolves no hostnames, WebSockets are closed and WebRTC UDP is blocked. Preview takes `path`, a workspace file; relative assets in the page do not load.
 - `render_html_to_image` is now always offered rather than in the `media` group. Its default `image` mode is unchanged.
 
 ### Fewer wasted rounds

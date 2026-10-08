@@ -392,7 +392,7 @@ overlaps with an existing owner, extend the owner instead.
 | Git tracked/ignored state of a path        | `src/tools/gitTrackedStatus.ts`       |
 | git log argv, framing and parsing          | `src/tools/gitLog.ts`                 |
 | Search (Tavily / Brave)                    | `src/tools/searchTool.ts`             |
-| URL fetch tool and pinned resource fetch (SSRF-guarded) | `src/tools/fetchTool.ts`              |
+| URL fetch tool and the SSRF guard (URL, DNS and address checks, pinned fetch) | `src/tools/fetchTool.ts` |
 | LSP provider handlers dispatched by `code_intel` | `src/tools/lspTools.ts`          |
 | In-memory workspace memory tool            | `src/tools/memoryTools.ts`            |
 | UX tools (show_diff, open_file)            | `src/tools/uxTools.ts`                |
@@ -420,6 +420,7 @@ overlaps with an existing owner, extend the owner instead.
 | `send_file` tool (workspace + screenshot-dir delivery) | `src/tools/sendFileTool.ts` |
 | `render_html_to_image` tool (schema, mode dispatch, image-mode naming and delivery) | `src/tools/renderHtmlToImageTool.ts` |
 | HTML→PNG render engine (launch hardening, SSRF-guarded preview routing, abort/timeout cleanup) | `src/tools/renderHtml/renderEngine.ts` |
+| Preview resource transport (host-side fetch of routed requests, redirects re-checked per hop, byte cap) | `src/tools/renderHtml/previewFetch.ts` |
 | `render_html_to_image` input validation (HTML size cap, workspace file read, viewport bounds) | `src/tools/renderHtml/htmlInput.ts` |
 | `render_html_to_image` preview mode (result text, vision-gated image part; saves and sends nothing) | `src/tools/renderHtml/previewMode.ts` |
 | Code-point length counting (schema/Telegram char limits) | `src/util/codePoints.ts` |

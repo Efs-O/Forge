@@ -5,16 +5,16 @@ import { Agent, fetch as undiciFetch } from 'undici';
 
 // ── SSRF guard ────────────────────────────────────────────────────────────────
 
-class ToolError extends Error {}
+export class ToolError extends Error {}
 
 const BLOCKED_SCHEMES = ['file://', 'data:', 'javascript:'];
-const MAX_REDIRECT_HOPS = 3;
-const REQUEST_TIMEOUT_MS = 10_000;
-const USER_AGENT = 'Forge-VSCode/0.16 (local-llm assistant)';
+export const MAX_REDIRECT_HOPS = 3;
+export const REQUEST_TIMEOUT_MS = 10_000;
+export const USER_AGENT = 'Forge-VSCode/0.16 (local-llm assistant)';
 const DEFAULT_MAX_CHARS = 30_000;
 const MAX_MAX_CHARS = 100_000;
 
-interface ResolvedAddress {
+export interface ResolvedAddress {
   address: string;
   family: number;
 }
@@ -34,12 +34,12 @@ type PinnedFetch = (
   agent: Agent,
 ) => Promise<Response>;
 
-interface WebFetchDependencies {
+export interface WebFetchDependencies {
   lookup?: (hostname: string) => Promise<ResolvedAddress[]>;
   fetch?: PinnedFetch;
 }
 
-function parseFetchUrl(value: string): URL | string {
+export function parseFetchUrl(value: string): URL | string {
   for (const scheme of BLOCKED_SCHEMES) {
     if (value.toLowerCase().startsWith(scheme)) return `Blocked scheme: ${scheme}`;
   }
@@ -58,7 +58,7 @@ function parseFetchUrl(value: string): URL | string {
   return url;
 }
 
-function normalizedHostname(url: URL): string {
+export function normalizedHostname(url: URL): string {
   return url.hostname.toLowerCase().replace(/^\[|\]$/g, '');
 }
 
@@ -138,7 +138,7 @@ function blockedAddress(address: string): boolean {
   return false;
 }
 
-function blockedResolvedAddress(address: ResolvedAddress): string | undefined {
+export function blockedResolvedAddress(address: ResolvedAddress): string | undefined {
   if (address.family !== isIP(address.address) || blockedAddress(address.address)) {
     return `Blocked private, loopback, or reserved address: ${address.address}`;
   }
@@ -166,12 +166,12 @@ function authHint(url: string, status: number): string {
  * Validate the URL's shape before DNS resolution. Resolved addresses are
  * checked separately immediately before each connection.
  */
-function ssrfCheck(url: string): string | null {
+export function ssrfCheck(url: string): string | null {
   const parsed = parseFetchUrl(url);
   return typeof parsed === 'string' ? parsed : null;
 }
 
-function defaultPinnedFetch(
+export function defaultPinnedFetch(
   url: string,
   _address: ResolvedAddress,
   init: RequestInitWithSignal,
@@ -302,102 +302,6 @@ export function makeWebFetchTool(dependencies: WebFetchDependencies = {}): Regis
       return `<UNTRUSTED_CONTENT>\n${excerpt.header}\n${excerpt.text}\n</UNTRUSTED_CONTENT>`;
     },
   };
-}
-
-/** Host-side preview transport; redirects are routed separately, without browser credentials. */
-export async function guardedFetchResource(
-  url: string,
-  options: {
-    method: string;
-    body?: Buffer;
-    headers?: Record<string, string>;
-    maxBytes: number;
-  },
-  dependencies: WebFetchDependencies = {},
-): Promise<{ status: number; statusText: string; headers: Record<string, string>; body: Buffer }> {
-  const blocked = ssrfCheck(url);
-  if (blocked) throw new ToolError(`web_fetch: ${blocked}`);
-  if (!['GET', 'POST'].includes(options.method)) {
-    throw new ToolError(`web_fetch: method ${options.method} is not supported by preview.`);
-  }
-  const parsed = parseFetchUrl(url);
-  if (typeof parsed === 'string') throw new ToolError(`web_fetch: ${parsed}`);
-  const hostname = normalizedHostname(parsed);
-  const lookup = dependencies.lookup ?? ((host) => dnsLookup(host, { all: true }));
-  const addresses = await lookup(hostname);
-  if (addresses.length === 0)
-    throw new ToolError(`web_fetch: DNS lookup returned no addresses for ${hostname}.`);
-  for (const address of addresses) {
-    const reason = blockedResolvedAddress(address);
-    if (reason) throw new ToolError(`web_fetch: ${reason}`);
-  }
-  const pinned = addresses[0] as ResolvedAddress;
-  const agent = new Agent({
-    connect: {
-      lookup: (host, lookupOptions, callback) => {
-        if (host.toLowerCase() !== hostname) {
-          callback(new Error(`No vetted address for ${host}`), '', 0);
-          return;
-        }
-        if (lookupOptions.all) callback(null, [{ address: pinned.address, family: pinned.family }]);
-        else callback(null, pinned.address, pinned.family);
-      },
-    },
-  });
-  try {
-    const response = await (dependencies.fetch ?? defaultPinnedFetch)(
-      url,
-      pinned,
-      {
-        redirect: 'manual',
-        signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
-        method: options.method,
-        ...(options.body ? { body: options.body } : {}),
-        headers: { 'User-Agent': USER_AGENT, ...options.headers },
-      },
-      agent,
-    );
-    const body = await readResponseBytes(response, options.maxBytes);
-    const headers: Record<string, string> = {};
-    response.headers.forEach((value, key) => {
-      if (
-        ![
-          'set-cookie',
-          'connection',
-          'transfer-encoding',
-          'content-encoding',
-          'content-length',
-        ].includes(key.toLowerCase())
-      ) {
-        headers[key] = value;
-      }
-    });
-    return { status: response.status, statusText: response.statusText, headers, body };
-  } finally {
-    await agent.close();
-  }
-}
-
-async function readResponseBytes(response: Response, maxBytes: number): Promise<Buffer> {
-  const reader = response.body?.getReader();
-  if (!reader) return Buffer.alloc(0);
-  const chunks: Uint8Array[] = [];
-  let size = 0;
-  try {
-    while (true) {
-      const { done, value } = await reader.read();
-      if (done) break;
-      size += value.byteLength;
-      if (size > maxBytes) {
-        await reader.cancel();
-        throw new ToolError(`web_fetch: response exceeds the ${maxBytes} byte limit.`);
-      }
-      chunks.push(value);
-    }
-  } finally {
-    reader.releaseLock();
-  }
-  return Buffer.concat(chunks.map((chunk) => Buffer.from(chunk)));
 }
 
 function findWindow(

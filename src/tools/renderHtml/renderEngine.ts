@@ -1,5 +1,5 @@
 import { getPlaywright, type BrowserChannel } from '../browser/BrowserSessionManager';
-import { guardedFetchResource } from '../fetchTool';
+import { guardedFetchResource } from './previewFetch';
 
 /**
  * The render half of `render_html_to_image`: launch a headless browser,
@@ -368,6 +368,11 @@ export async function renderPreview(
           }
         });
         await page.setContent(request.html, { waitUntil: 'load' });
+        // Keys go to the focused element, and after setContent nothing has
+        // focus: a game listening on its canvas heard none of them (measured
+        // 2026-10-08). Focus what a player would click; window listeners
+        // still receive the events as they bubble.
+        if (request.keys.length > 0) await page.evaluate(FOCUS_GAME_TARGET);
         for (const { key, holdMs } of request.keys)
           await page.keyboard.press(key, { delay: holdMs });
         const frames: PreviewResult['frames'] = [];
@@ -393,6 +398,15 @@ export async function renderPreview(
     },
   );
 }
+
+/** Page-side: focus the first canvas or tab-focusable element, unless the page focused one. */
+const FOCUS_GAME_TARGET = `(() => {
+  if (document.activeElement && document.activeElement !== document.body) return;
+  const target = document.querySelector('canvas, [tabindex]:not([tabindex="-1"])');
+  if (!target) return;
+  if (target instanceof HTMLCanvasElement && !target.hasAttribute('tabindex')) target.tabIndex = -1;
+  target.focus();
+})()`;
 
 function safePreviewHeaders(headers: Record<string, string>): Record<string, string> {
   const allowed = ['accept', 'content-type', 'origin'];

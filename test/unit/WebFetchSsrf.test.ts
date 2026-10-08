@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { guardedFetchResource, makeWebFetchTool } from '../../src/tools/fetchTool';
+import { makeWebFetchTool } from '../../src/tools/fetchTool';
+import { guardedFetchResource } from '../../src/tools/renderHtml/previewFetch';
 
 describe('web_fetch DNS SSRF protection', () => {
   afterEach(() => vi.unstubAllGlobals());
@@ -90,10 +91,11 @@ describe('web_fetch DNS SSRF protection', () => {
 
   it('centres the max_chars window on the first match and reports no-match windows', async () => {
     const lookup = vi.fn(async () => [{ address: '8.8.8.8', family: 4 }]);
-    const fetch = vi.fn(async () =>
-      new Response('0123456789NeedleABCDEFGHIJ', {
-        headers: { 'content-type': 'text/plain' },
-      }),
+    const fetch = vi.fn(
+      async () =>
+        new Response('0123456789NeedleABCDEFGHIJ', {
+          headers: { 'content-type': 'text/plain' },
+        }),
     );
     const tool = makeWebFetchTool({ lookup, fetch });
     const matched = await tool.handler({
@@ -122,21 +124,32 @@ describe('web_fetch DNS SSRF protection', () => {
     });
     const defaultResult = String(await tool.handler({ url: 'https://public.example.test/' }));
     expect(defaultResult).toContain('showing 30000 of 110000 characters');
-    const expanded = String(await tool.handler({ url: 'https://public.example.test/', max_chars: 100_000 }));
+    const expanded = String(
+      await tool.handler({ url: 'https://public.example.test/', max_chars: 100_000 }),
+    );
     expect(expanded).toContain('showing 100000 of 110000 characters');
     expect(expanded.match(/x/g)).toHaveLength(100_000);
-    expect(tool.definition.function.parameters.properties.max_chars).toMatchObject({ maximum: 100_000 });
-    await expect(tool.handler({ url: 'https://public.example.test/', max_chars: 100_001 })).rejects.toThrow(
-      /max_chars must be an integer from 1 to 100000; received 100001/,
-    );
+    expect(tool.definition.function.parameters.properties.max_chars).toMatchObject({
+      maximum: 100_000,
+    });
+    await expect(
+      tool.handler({ url: 'https://public.example.test/', max_chars: 100_001 }),
+    ).rejects.toThrow(/max_chars must be an integer from 1 to 100000; received 100001/);
   });
 
   it('uses the same DNS guard for routed preview resources, including rebinding names', async () => {
     const lookup = vi.fn(async () => [{ address: '127.0.0.1', family: 4 }]);
     const fetch = vi.fn(async () => new Response('must not connect'));
-    await expect(guardedFetchResource('https://public.example.test/script.js', {
-      method: 'GET', maxBytes: 1024,
-    }, { lookup, fetch })).rejects.toThrow(/blocked.*127\.0\.0\.1/i);
+    await expect(
+      guardedFetchResource(
+        'https://public.example.test/script.js',
+        {
+          method: 'GET',
+          maxBytes: 1024,
+        },
+        { lookup, fetch },
+      ),
+    ).rejects.toThrow(/blocked.*127\.0\.0\.1/i);
     expect(fetch).not.toHaveBeenCalled();
   });
 
@@ -147,15 +160,71 @@ describe('web_fetch DNS SSRF protection', () => {
         _address: { address: string; family: number },
         init: { method: string; body?: Uint8Array },
       ) => {
-      expect(init.method).toBe('POST');
-      expect(init.body).toEqual(Buffer.from('payload'));
-      return new Response('too large');
+        expect(init.method).toBe('POST');
+        expect(init.body).toEqual(Buffer.from('payload'));
+        return new Response('too large');
       },
     );
     const options = { lookup: async () => [{ address: '8.8.8.8', family: 4 }], fetch };
-    await expect(guardedFetchResource('https://public.example.test/api', {
-      method: 'POST', body: Buffer.from('payload'), maxBytes: 4,
-    }, options)).rejects.toThrow(/response exceeds the 4 byte limit/);
+    await expect(
+      guardedFetchResource(
+        'https://public.example.test/api',
+        {
+          method: 'POST',
+          body: Buffer.from('payload'),
+          maxBytes: 4,
+        },
+        options,
+      ),
+    ).rejects.toThrow(/response exceeds the 4 byte limit/);
     expect(fetch).toHaveBeenCalledOnce();
+  });
+  it('follows a preview redirect host-side and re-checks every hop', async () => {
+    // Handed back to Chrome, a 3xx was followed outside the route and died at
+    // the DNS wall, so every redirected library failed to load.
+    const lookup = vi.fn(async (host: string) =>
+      host === 'inside.example.test'
+        ? [{ address: '10.0.0.5', family: 4 }]
+        : [{ address: '8.8.8.8', family: 4 }],
+    );
+    const fetch = vi.fn(
+      async (url: string, _address: unknown, init: { method: string; body?: Uint8Array }) => {
+        if (url.endsWith('/range')) {
+          expect(init.method).toBe('POST');
+          return new Response(null, { status: 302, headers: { location: '/exact' } });
+        }
+        if (url.endsWith('/exact')) {
+          // A 302 after POST continues as a body-less GET.
+          expect(init.method).toBe('GET');
+          expect(init.body).toBeUndefined();
+          return new Response('lib', { headers: { 'content-type': 'text/javascript' } });
+        }
+        return new Response(null, {
+          status: 301,
+          headers: { location: 'https://inside.example.test/secret' },
+        });
+      },
+    );
+    const followed = await guardedFetchResource(
+      'https://public.example.test/range',
+      { method: 'POST', body: Buffer.from('x'), maxBytes: 1024 },
+      { lookup, fetch },
+    );
+    expect(followed.status).toBe(200);
+    expect(followed.body.toString()).toBe('lib');
+
+    await expect(
+      guardedFetchResource(
+        'https://public.example.test/hop',
+        { method: 'GET', maxBytes: 1024 },
+        {
+          lookup,
+          fetch,
+        },
+      ),
+    ).rejects.toThrow(/redirect to https:\/\/inside\.example\.test\/secret refused: .*10\.0\.0\.5/);
+    expect(fetch.mock.calls.map(([url]) => url)).not.toContain(
+      'https://inside.example.test/secret',
+    );
   });
 });

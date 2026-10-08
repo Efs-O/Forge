@@ -116,7 +116,7 @@ describe('render_html_to_image preview against real Chrome', () => {
         result = await preview(
           '<html><body><script>' +
             `const t='127.0.0.1:${port}', l='localhost:${port}';` +
-            "const tryIt=(f)=>{try{f()}catch(e){}};" +
+            'const tryIt=(f)=>{try{f()}catch(e){}};' +
             "tryIt(()=>fetch('http://'+t+'/f',{mode:'no-cors'}).catch(()=>{}));" +
             "tryIt(()=>fetch('http://'+t+'/post',{method:'POST',body:'x'}).catch(()=>{}));" +
             "tryIt(()=>fetch('http://'+l+'/f',{mode:'no-cors'}).catch(()=>{}));" +
@@ -139,9 +139,11 @@ describe('render_html_to_image preview against real Chrome', () => {
       expect(udp).toBe(0);
       expect(deliveries).toBe(0);
       // Image mode remains inert and must issue no request either.
-      await fs.writeFile(path.join(root, 'image.html'),
+      await fs.writeFile(
+        path.join(root, 'image.html'),
         `<img src="http://127.0.0.1:${port}/image"><script>fetch('http://127.0.0.1:${port}/fetch')</script>`,
-        'utf8');
+        'utf8',
+      );
       await tool.handler(
         { mode: 'image', path: 'image.html' },
         { beforeMutate: () => undefined, isVisionModel: false },
@@ -191,11 +193,15 @@ describe('render_html_to_image preview against real Chrome', () => {
     try {
       addresses = await dnsLookup('localtest.me', { all: true });
     } catch {
-      ctx.skip('localtest.me DNS is not reachable; DNS pinning is covered with an injected resolver in unit tests');
+      ctx.skip(
+        'localtest.me DNS is not reachable; DNS pinning is covered with an injected resolver in unit tests',
+      );
       return;
     }
     if (!addresses.some((item) => item.address === '127.0.0.1' || item.address === '::1')) {
-      ctx.skip('localtest.me did not resolve to loopback here; DNS pinning is covered with an injected resolver in unit tests');
+      ctx.skip(
+        'localtest.me did not resolve to loopback here; DNS pinning is covered with an injected resolver in unit tests',
+      );
       return;
     }
     let result: string | MultimodalToolResult;
@@ -282,5 +288,122 @@ describe('render_html_to_image preview against real Chrome', () => {
     expect(multimodal.content.filter((part) => part.type === 'image_url')).toHaveLength(1);
     expect(deliveries).toBe(0);
     expect(await fs.readdir(root)).toEqual(['page.html']);
+  }, 90_000);
+  it('follows a public redirect: unpkg sends a version range to the exact version', async (ctx) => {
+    let result: string | MultimodalToolResult;
+    try {
+      result = await preview(
+        '<html><body><script src="https://unpkg.com/three@0.160/build/three.min.js"></script>' +
+          '<script>console.log("three="+typeof THREE)</script></body></html>',
+        { wait_ms: 1_000, width: 300, height: 200 },
+      );
+    } catch (err) {
+      return skipIfNoBrowser(ctx, err);
+    }
+    if (String(result).includes('unpkg.com (fetch failed')) {
+      ctx.skip('unpkg.com is not reachable from this host (offline?)');
+      return;
+    }
+    expect(String(result)).toContain('three=object');
+  }, 90_000);
+
+  it('refuses a public redirect that points at loopback, before any connection', async (ctx) => {
+    let tcp = 0;
+    const server = net.createServer((socket) => {
+      tcp += 1;
+      socket.destroy();
+    });
+    await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve));
+    const port = (server.address() as net.AddressInfo).port;
+    const target = encodeURIComponent(`http://127.0.0.1:${port}/steal.js`);
+    try {
+      let result: string | MultimodalToolResult;
+      try {
+        result = await preview(
+          `<script src="https://httpbin.org/redirect-to?url=${target}" ` +
+            'onerror="console.log(\'redirect-refused\')" onload="console.log(\'redirect-loaded\')"></script>',
+          { wait_ms: 1_000, width: 300, height: 200 },
+        );
+      } catch (err) {
+        return skipIfNoBrowser(ctx, err);
+      }
+      if (/httpbin\.org \((?!redirect to)/.test(String(result))) {
+        ctx.skip('httpbin.org is not reachable from this host (offline?)');
+        return;
+      }
+      expect(String(result)).toContain('redirect-refused');
+      expect(String(result)).not.toContain('redirect-loaded');
+      expect(String(result)).toContain(`redirect to http://127.0.0.1:${port}/steal.js refused`);
+      expect(tcp).toBe(0);
+    } finally {
+      await new Promise<void>((resolve) => server.close(() => resolve()));
+    }
+  }, 90_000);
+
+  // A game that steers while a key is held: window listeners, per-frame state.
+  const GAME =
+    '<canvas id="c" width="300" height="100"></canvas><script>' +
+    'let x=10,right=false;const g=document.getElementById("c").getContext("2d");' +
+    'LISTEN.addEventListener("keydown",e=>{if(e.key==="ArrowRight"){right=true;console.log("down")}});' +
+    'LISTEN.addEventListener("keyup",e=>{if(e.key==="ArrowRight"){right=false;console.log("up x="+Math.round(x))}});' +
+    '(function f(){if(right)x+=2;g.fillStyle="#fff";g.fillRect(0,0,300,100);' +
+    'g.fillStyle="#f00";g.fillRect(x,40,20,20);requestAnimationFrame(f)})();' +
+    '</script>';
+
+  it('a held key reaches a game listening on window', async (ctx) => {
+    let result: string | MultimodalToolResult;
+    try {
+      result = await preview(GAME.replace(/LISTEN/g, 'window'), {
+        keys: [{ key: 'ArrowRight', hold_ms: 1_000 }],
+        frames: [0],
+        width: 300,
+        height: 100,
+      });
+    } catch (err) {
+      return skipIfNoBrowser(ctx, err);
+    }
+    expect(String(result)).toContain('log: down');
+    const moved = Number(/up x=(\d+)/.exec(String(result))?.[1]);
+    expect(moved).toBeGreaterThan(30);
+  }, 90_000);
+
+  it('a held key reaches a game listening on its canvas', async (ctx) => {
+    let result: string | MultimodalToolResult;
+    try {
+      result = await preview(
+        GAME.replace('<canvas id="c"', '<canvas id="c" tabindex="0"').replace(
+          /LISTEN/g,
+          'document.getElementById("c")',
+        ),
+        { keys: [{ key: 'ArrowRight', hold_ms: 500 }], frames: [0], width: 300, height: 100 },
+      );
+    } catch (err) {
+      return skipIfNoBrowser(ctx, err);
+    }
+    expect(String(result)).toContain('log: down');
+  }, 90_000);
+
+  it('frames capture an animation at different moments', async (ctx) => {
+    let result: string | MultimodalToolResult;
+    try {
+      result = await preview(
+        '<canvas id="c" width="300" height="100"></canvas><script>' +
+          'const g=document.getElementById("c").getContext("2d");const t0=performance.now();' +
+          '(function f(){const x=((performance.now()-t0)/5)%280;g.fillStyle="#fff";' +
+          'g.fillRect(0,0,300,100);g.fillStyle="#f00";g.fillRect(x,40,20,20);requestAnimationFrame(f)})();' +
+          '</script>',
+        { frames: [100, 600, 1100], width: 300, height: 100 },
+        true,
+      );
+    } catch (err) {
+      return skipIfNoBrowser(ctx, err);
+    }
+    const multimodal = result as MultimodalToolResult;
+    const images = multimodal.content.flatMap((part) =>
+      part.type === 'image_url' ? [part.image_url.url] : [],
+    );
+    expect(images).toHaveLength(3);
+    expect(new Set(images).size).toBe(3);
+    expect(multimodal.text).toMatch(/- 100 ms\n- 600 ms\n- 1100 ms/);
   }, 90_000);
 });

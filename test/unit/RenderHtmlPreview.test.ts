@@ -13,7 +13,7 @@ vi.mock('../../src/tools/browser/BrowserSessionManager', async (importOriginal) 
 });
 
 vi.mock('vscode', () => ({ workspace: { workspaceFolders: undefined } }));
-vi.mock('../../src/tools/fetchTool', () => ({
+vi.mock('../../src/tools/renderHtml/previewFetch', () => ({
   guardedFetchResource: vi.fn(async (resourceUrl: string) => {
     if (new URL(resourceUrl).hostname === '127.0.0.1') throw new Error('private address refused');
     return {

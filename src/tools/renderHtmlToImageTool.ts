@@ -131,7 +131,7 @@ export function makeRenderHtmlToImageTool(deps: RenderHtmlDeps): RegisteredTool 
                 additionalProperties: false,
               },
               description:
-                'Preview only: press these keys in order after load and before the first frame.',
+                'Preview only: press these keys in order after load and before the first frame. Before the first key, the first canvas (or focusable element) is focused, as a click would.',
             },
           },
           required: [],
