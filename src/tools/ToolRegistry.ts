@@ -170,6 +170,55 @@ function invalidArrayItems(
   return undefined;
 }
 
+function updatePlanFieldError(args: Record<string, unknown>): string | undefined {
+  const unexpectedTopLevel = Object.keys(args).find((key) => key !== 'items');
+  if (unexpectedTopLevel) {
+    return `Error: update_plan has unexpected top-level field "${unexpectedTopLevel}"; remove it.`;
+  }
+  if (args['items'] === undefined) {
+    return 'Error: update_plan is missing required "items" at the top level.';
+  }
+  if (!Array.isArray(args['items'])) return undefined;
+  for (const [index, item] of args['items'].entries()) {
+    if (item === null || typeof item !== 'object' || Array.isArray(item)) continue;
+    const entry = item as Record<string, unknown>;
+    const unexpected = Object.keys(entry).find((key) => key !== 'text' && key !== 'status');
+    if (unexpected) {
+      return `Error: update_plan has unexpected field "${unexpected}" at items[${index}]; remove it.`;
+    }
+    const missing = ['text', 'status'].filter((key) => entry[key] === undefined);
+    if (missing.length > 0) {
+      return `Error: update_plan is missing required field${missing.length > 1 ? 's' : ''} ${missing.map((key) => `"${key}"`).join(', ')} at items[${index}].`;
+    }
+  }
+  return undefined;
+}
+
+function editFileStringArrayError(args: Record<string, unknown>): string | undefined {
+  if (typeof args['edits'] !== 'string') return undefined;
+  let invalidJson = false;
+  try {
+    JSON.parse(args['edits']);
+  } catch {
+    invalidJson = true;
+  }
+  const pathMissing = args['path'] === undefined;
+  const pathIssue = pathMissing ? 'missing required `path`. ' : '';
+  const jsonIssue = invalidJson ? ' and is not valid JSON' : '';
+  const shape = pathMissing
+    ? ' Accepted shape: { "path": "...", "edits": [{ "old_str": "...", "new_str": "..." }] }.'
+    : ' Send `edits` as a JSON array of { "old_str": "...", "new_str": "..." } objects.';
+  return `Error: ${pathIssue}\`edits\` arrived as a string, not an array${jsonIssue}.${shape}`;
+}
+
+function missingPathError(name: string): string {
+  const shape =
+    name === 'edit_file'
+      ? 'Accepted shape: { "path": "...", "edits": [{ "old_str": "...", "new_str": "..." }] } or { "path": "...", "old_str": "...", "new_str": "..." }.'
+      : `Accepted shape: { "path": "...", "content": "..." }.`;
+  return `Error: missing required \`path\`. ${shape}`;
+}
+
 /**
  * Central catalog of available tools.
  * Tools are registered with a permission tier and a strict JSON Schema.
@@ -209,11 +258,22 @@ export class ToolRegistry {
     const { name, parameters } = tool.definition.function;
     // JSON.parse can hand back `null` for a call whose arguments were "null".
     const present: Record<string, unknown> = typeof args === 'object' && args !== null ? args : {};
+    if (name === 'edit_file') {
+      const stringArrayError = editFileStringArrayError(present);
+      if (stringArrayError) return stringArrayError;
+    }
+    if (name === 'update_plan') {
+      const fieldError = updatePlanFieldError(present);
+      if (fieldError) return fieldError;
+    }
     const required = Array.isArray(parameters.required) ? parameters.required : [];
     const missing = required.filter(
       (key): key is string => typeof key === 'string' && present[key] === undefined,
     );
     if (missing.length > 0) {
+      if (missing.includes('path') && ['append_file', 'edit_file', 'write_file'].includes(name)) {
+        return missingPathError(name);
+      }
       const names = missing.map((key) => `"${key}"`).join(', ');
       return `Error: ${name} is missing required argument${missing.length > 1 ? 's' : ''} ${names}. Resend the call with ${missing.length > 1 ? 'them' : 'it'} set.`;
     }

@@ -92,20 +92,41 @@ export function describeEditMiss(content: string, oldStr: string): string {
     if (near !== -1) {
       return (
         ` Its first line WAS found at line ${near + 1}, so a later line of old_str is what ` +
-        'differs — re-read that region with read_file and copy it verbatim.'
+        'differs — copy the current region below and retry.' +
+        describeCurrentRegion(lines, near)
       );
     }
     const loose = lines.findIndex((line) => line.includes(firstLine));
     if (loose !== -1) {
       return (
-        ` The nearest line is ${loose + 1}: "${lines[loose].trim().slice(0, 120)}" — re-read ` +
-        'that region with read_file and copy it verbatim.'
+        ` The nearest line is ${loose + 1}: "${lines[loose].trim().slice(0, 120)}" — ` +
+        'copy the current region below and retry.' +
+        describeCurrentRegion(lines, loose)
       );
     }
     const closest = closestLine(lines, firstLine);
-    if (closest) return closest;
+    if (closest) {
+      const lineNumber = Number(closest.match(/closest line is (\d+)/u)?.[1]);
+      return `${closest}${describeCurrentRegion(lines, lineNumber - 1)}`;
+    }
   }
   return ' Re-read the file with read_file and copy the target text verbatim.';
+}
+
+/** Read-file style context for a named miss line, bounded for batch failures. */
+function describeCurrentRegion(lines: string[], index: number): string {
+  if (!Number.isInteger(index) || index < 0 || index >= lines.length) return '';
+  const displayLines = [...lines];
+  if (displayLines.length > 1 && displayLines.at(-1) === '') displayLines.pop();
+  const start = Math.max(0, index - 3);
+  const end = Math.min(displayLines.length, index + 4);
+  const width = String(displayLines.length).length;
+  const numbered = displayLines
+    .slice(start, end)
+    .map((line, offset) => `${String(start + offset + 1).padStart(width, ' ')}|${line}`)
+    .join('\n');
+  const prefix = ` Current text (lines ${start + 1}-${end}):\n`;
+  return `${prefix}${numbered.slice(0, Math.max(0, 1200 - prefix.length))}`;
 }
 
 /**
@@ -179,7 +200,8 @@ function describeIndentShift(content: string, oldStr: string): string | undefine
       `file indents that block with ${describeWidth(wanted)} where old_str has ` +
       `${describeWidth(given)}. Re-send old_str with the file's own indentation — if you ` +
       'built it from a numbered read, the prefix ends at the "|" and the next character is ' +
-      'already column 1, so do not add a space after it.'
+      'already column 1, so do not add a space after it.' +
+      describeCurrentRegion(lines, start)
     );
   }
   return undefined;

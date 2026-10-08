@@ -91,6 +91,26 @@ describe('describeEditMiss', () => {
     const hint = describeEditMiss(content, 'koi.push({ cx:POND.cx, ph:rf(0,6.283), y:2 });');
     expect(hint).toContain('closest line is 1');
     expect(hint).toContain('character 36');
+    expect(hint).toContain('Current text (lines 1-1):\n1|koi.push');
+  });
+
+  it('includes the closest line plus three numbered lines on each side', () => {
+    const content = Array.from(
+      { length: 10 },
+      (_, index) => `const value${index} = ${index};`,
+    ).join('\n');
+    const hint = describeEditMiss(content, 'const value5 = 500;');
+    expect(hint).toContain('Current text (lines 3-9):');
+    expect(hint).toContain('3|const value2 = 2;');
+    expect(hint).toContain('9|const value8 = 8;');
+    expect(hint).not.toContain('2|const value1');
+  });
+
+  it('caps the numbered context at 1200 characters', () => {
+    const content = Array.from({ length: 7 }, () => 'x'.repeat(500)).join('\n');
+    const hint = describeEditMiss(content, `${'x'.repeat(500)}!`);
+    const context = hint.slice(hint.indexOf('Current text'));
+    expect(context.length).toBeLessThanOrEqual(1200);
   });
 
   it('does not call a shared boilerplate prefix the closest line', () => {

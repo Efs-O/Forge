@@ -8,10 +8,7 @@ vi.mock('vscode', () => ({
   workspace: { workspaceFolders: [{ uri: { fsPath: process.cwd() } }] },
 }));
 
-function makeBoolTool(
-  name: string,
-  properties: Record<string, { type: string }>,
-): RegisteredTool {
+function makeBoolTool(name: string, properties: Record<string, { type: string }>): RegisteredTool {
   return {
     definition: {
       type: 'function',
@@ -19,6 +16,21 @@ function makeBoolTool(
         name,
         description: 'test tool',
         parameters: { type: 'object', properties, required: [] },
+      },
+    },
+    permission: 'read',
+    handler: async () => 'should not run',
+  };
+}
+
+function makeRequiredTool(name: string, required: string[]): RegisteredTool {
+  return {
+    definition: {
+      type: 'function',
+      function: {
+        name,
+        description: 'test tool',
+        parameters: { type: 'object', properties: {}, required },
       },
     },
     permission: 'read',
@@ -47,16 +59,12 @@ describe('ToolRegistry.invalidArgs boolean refusal (Fix B)', () => {
 
   it('uses a short generic instruction for a non-True/False string', () => {
     const message = registry.invalidArgs(execTool, { command: 'npx', background: 'yes' });
-    expect(message).toBe(
-      'Error: shell background="yes": use true or false without quotes',
-    );
+    expect(message).toBe('Error: shell background="yes": use true or false without quotes');
   });
 
   it('uses a short generic instruction for a number', () => {
     const message = registry.invalidArgs(execTool, { command: 'npx', background: 1 });
-    expect(message).toBe(
-      'Error: shell background=1: use true or false without quotes',
-    );
+    expect(message).toBe('Error: shell background=1: use true or false without quotes');
   });
 
   it('names each offending field when several booleans are wrong', () => {
@@ -166,6 +174,73 @@ describe('ToolRegistry.invalidArgs array-item refusal (Fix D)', () => {
       paths: { type: 'array', items: { type: 'string' } },
     } as never);
     expect(registry.invalidArgs(stage, { paths: ['a.ts', 'b.ts'] })).toBeUndefined();
+  });
+});
+
+describe('tool argument field locations (PTF F5)', () => {
+  const registry = new ToolRegistry();
+
+  it('names the missing path first and shows accepted shapes for file writers', () => {
+    for (const tool of [
+      makeRequiredTool('append_file', ['path', 'content']),
+      makeRequiredTool('write_file', ['path', 'content']),
+    ]) {
+      const message = registry.invalidArgs(tool, { content: 'x' });
+      expect(message).toMatch(/^Error: missing required `path`\./u);
+      expect(message).toContain('Accepted shape: { "path": "...", "content": "..." }');
+    }
+  });
+
+  it('names missing edit_file path and shows both accepted edit shapes', () => {
+    const message = registry.invalidArgs(makeRequiredTool('edit_file', ['path']), {
+      old_str: 'a',
+      new_str: 'b',
+    });
+    expect(message).toMatch(/^Error: missing required `path`\./u);
+    expect(message).toContain('"edits"');
+    expect(message).toContain('"old_str"');
+  });
+
+  it('reports a string edits value and missing path together, adding malformed JSON status', () => {
+    const message = registry.invalidArgs(makeRequiredTool('edit_file', ['path']), {
+      edits: '{"old_str"',
+    });
+    expect(message).toContain('missing required `path`');
+    expect(message).toContain('`edits` arrived as a string, not an array and is not valid JSON');
+    expect(message).toContain('Accepted shape:');
+  });
+
+  it('rejects valid JSON strings for edits without coercing them into arrays', () => {
+    const message = registry.invalidArgs(makeRequiredTool('edit_file', ['path']), {
+      path: 'a.txt',
+      edits: '[]',
+    });
+    expect(message).toContain('`edits` arrived as a string, not an array.');
+    expect(message).not.toContain('not valid JSON');
+  });
+
+  it('names unexpected top-level update_plan keys and their location', () => {
+    const message = registry.invalidArgs(makeRequiredTool('update_plan', ['items']), {
+      items: [{ text: 'x', status: 'pending' }],
+      status: 'active',
+    });
+    expect(message).toContain('unexpected top-level field "status"');
+  });
+
+  it('names a missing update_plan key and its top-level location', () => {
+    expect(registry.invalidArgs(makeRequiredTool('update_plan', ['items']), {})).toContain(
+      'missing required "items" at the top level',
+    );
+  });
+
+  it('names unexpected and missing update_plan item keys with their items index', () => {
+    const tool = makeRequiredTool('update_plan', ['items']);
+    expect(
+      registry.invalidArgs(tool, { items: [{ text: 'x', status: 'pending', note: 'y' }] }),
+    ).toContain('unexpected field "note" at items[0]');
+    expect(registry.invalidArgs(tool, { items: [{ text: 'x' }] })).toContain(
+      'missing required field "status" at items[0]',
+    );
   });
 });
 
