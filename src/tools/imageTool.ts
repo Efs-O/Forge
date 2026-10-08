@@ -98,7 +98,7 @@ export function makeViewImageTool(): RegisteredTool {
       function: {
         name: 'view_image',
         description:
-          'Load and inspect an image file from the workspace. Use this when the user asks you to view, inspect, or describe a workspace image. The path must be workspace-relative or absolute inside the workspace. Supported formats: PNG, JPEG, GIF, BMP, and WebP. Maximum file size is 10 MB.',
+          'Load an image file from the workspace so you can see it. The path must be workspace-relative or absolute inside the workspace. Supported formats: PNG, JPEG, GIF, BMP, and WebP. Maximum file size is 10 MB.',
         parameters: {
           type: 'object',
           properties: {

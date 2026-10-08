@@ -20,6 +20,7 @@
 
 - Rarely used tools (files, git writes, code intelligence, memory, background, agents and others) move into groups. A group's schemas are sent only once the agent loads it, or when `tool_groups.eager` lists it at the defaults, group or model level. Everything stays dispatchable.
 - `edit_file` takes `path`, like every other file tool.
+- `view_image` no longer limits itself to images the user asks about, so the agent can look at one it generated or saved. `list_directory` states each entry's size and age without prescribing a polling routine.
 - The system prompt no longer tells the agent when to preview a page; `render_html_to_image` describes what preview shows and the agent decides. Told to "use preview as the check", it previewed one page 11 times, all without errors; told "one preview", it rationed it and rebuilt the scene as ASCII views in node instead.
 - `append_file` is offered only after a tool call is cut off, and from then on for the rest of that turn. Offered from the start, it led the model to split new files into a write plus several appends, one request each. The tool still runs if the agent calls it.
 - The system prompt is shorter.

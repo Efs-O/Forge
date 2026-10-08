@@ -20,7 +20,7 @@ export function makeListDirectoryTool(): RegisteredTool {
       function: {
         name: 'list_directory',
         description:
-          'List entries in a directory. Returns each entry prefixed with [file] or [dir], with its size and how long ago it was modified. Use the size and age to tell whether a long-running job is still making progress: call this twice and compare, rather than waiting on a process that prints nothing. Directories over ' +
+          'List entries in a directory. Returns each entry prefixed with [file] or [dir], with its size and how long ago it was modified. Directories over ' +
           `${String(STAT_ENTRY_LIMIT)} entries are listed without size or age.`,
         parameters: {
           type: 'object',
