@@ -80,6 +80,13 @@ export const SLASH_COMMANDS: SlashCommand[] = [
     description: 'Dismiss pending checkpoint and keep edits.',
   },
   {
+    id: 'linkAgent',
+    trigger: 'link',
+    title: 'Link Agent Session',
+    description: 'Link an existing agent session to this chat.',
+    availableWhileStreaming: true,
+  },
+  {
     id: 'logs',
     trigger: 'logs',
     title: 'Show Logs',

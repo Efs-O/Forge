@@ -176,6 +176,7 @@ export function tabMetasFromSession(
       updatedAt: c.updatedAt,
       messageCount: countDisplayMessages(c.messages, c.displayDiffs),
       ...(c.active_model !== undefined ? { active_model: c.active_model } : {}),
+      ...(c.agentLinks !== undefined ? { agentLinks: { ...c.agentLinks } } : {}),
       active_time_ms: getActiveTimeMs?.(c) ?? c.active_time_ms ?? 0,
       ...(streamingIds?.has(c.id) ? { streaming: true } : {}),
     };

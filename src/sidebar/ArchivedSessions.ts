@@ -8,6 +8,7 @@ import { getLogger } from '../util/logger';
 import { readSessionLogRows } from '../sessions/sessionLogRows';
 import { deriveTitle } from './conversationTitle';
 import { conversationPersistedSchema, type ConversationPersisted } from './sessionTypes';
+import { agentLinksSchema } from '../agentLinks/chatAgentLinks';
 
 const indexSchema = z.array(
   z.object({
@@ -17,6 +18,7 @@ const indexSchema = z.array(
     updatedAt: z.number(),
     messageCount: z.number(),
     active_model: z.string().optional(),
+    agentLinks: agentLinksSchema.optional(),
     source: z.enum(['body', 'log']).optional(),
   }),
 );
@@ -103,6 +105,7 @@ export class ArchivedSessions {
         updatedAt: orphan.updatedAt,
         messageCount: orphan.messages.length,
         ...(orphan.active_model ? { active_model: orphan.active_model } : {}),
+        ...(orphan.agentLinks ? { agentLinks: orphan.agentLinks } : {}),
         source: 'body',
       });
       changed = true;
@@ -159,6 +162,7 @@ export class ArchivedSessions {
       updatedAt: conversation.updatedAt,
       messageCount: conversation.messages.length,
       ...(conversation.active_model ? { active_model: conversation.active_model } : {}),
+      ...(conversation.agentLinks ? { agentLinks: conversation.agentLinks } : {}),
       source: 'body',
     });
     writeFileAtomicSync(this.indexPath, JSON.stringify(rows));

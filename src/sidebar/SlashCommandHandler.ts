@@ -20,10 +20,16 @@ import {
 import { deriveTitle, isUntitled, type ConversationRuntime } from './sessionTypes';
 import { collectSystemReport } from '../system/SystemReport';
 import { formatSystemReport } from '../system/formatSystemReport';
+import { agentKindSchema, link, parseAgentIdentity, unlink } from '../agentLinks/chatAgentLinks';
+
+function errorMessage(error: unknown): string {
+  return error instanceof Error ? error.message : String(error);
+}
 
 export interface SlashCommandDeps extends CompactionDeps {
   /** UI-only commands still target the selected tab. */
   getActiveConv: () => ConversationRuntime;
+  getConversations: () => ConversationRuntime[];
   getConfig: () => ForgeConfig;
   pool: IBackendPool;
   events: SidebarProviderEvents;
@@ -75,7 +81,10 @@ export class SlashCommandHandler {
     for (const listener of this.activityListeners) listener(event);
   }
 
-  async handle(commandId: ForgeSlashCommandId): Promise<void> {
+  async handle(
+    commandId: ForgeSlashCommandId,
+    agent?: { agentKind?: string; sessionId?: string },
+  ): Promise<void> {
     const { deps } = this;
     switch (commandId) {
       case 'unloadModel': // only the active tab's model
@@ -123,6 +132,26 @@ export class SlashCommandHandler {
 
       case 'rename':
         await this.renameConversation();
+        return;
+
+      case 'linkAgent':
+        await this.linkAgent(agent);
+        return;
+
+      case 'unlinkAgent':
+        if (!agent?.agentKind) {
+          deps.post({ type: 'error', message: 'Choose an agent kind to unlink.' });
+          return;
+        }
+        try {
+          const kind = agentKindSchema.parse(agent.agentKind);
+          if (unlink(deps.getActiveConv(), kind)) {
+            deps.persistSession();
+            deps.postSessionSync();
+          }
+        } catch (error) {
+          deps.post({ type: 'error', message: `Could not unlink session: ${errorMessage(error)}` });
+        }
         return;
 
       case 'context':
@@ -219,6 +248,55 @@ export class SlashCommandHandler {
         });
         return;
       }
+    }
+  }
+
+  private async linkAgent(input?: { agentKind?: string; sessionId?: string }): Promise<void> {
+    try {
+      let kind: unknown = input?.agentKind;
+      let sessionId: unknown = input?.sessionId;
+      if (kind === undefined && sessionId === undefined) {
+        const picked = await vscode.window.showQuickPick(['claude', 'codex', 'copilot'] as const, {
+          title: 'Link an agent session',
+          placeHolder: 'Choose the session kind',
+        });
+        if (!picked) return;
+        kind = picked;
+        sessionId = await vscode.window.showInputBox({
+          title: `Link ${picked} session`,
+          prompt: 'Enter the session id',
+          validateInput: (value) => {
+            try {
+              parseAgentIdentity(picked, value);
+              return undefined;
+            } catch {
+              return `Enter a valid ${picked} session id.`;
+            }
+          },
+        });
+        if (sessionId === undefined) return;
+      }
+      const identity = parseAgentIdentity(kind, sessionId);
+      const conversation = this.deps.getActiveConv();
+      const cwd = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
+      if (!cwd) throw new Error('Open a workspace folder before linking a session.');
+      const now = Date.now();
+      link(
+        conversation,
+        {
+          ...identity,
+          cwd,
+          title: identity.sessionId,
+          linkedAt: now,
+          lastUsedAt: now,
+          origin: 'user-set',
+        },
+        this.deps.getConversations(),
+      );
+      this.deps.persistSession();
+      this.deps.postSessionSync();
+    } catch (error) {
+      this.deps.post({ type: 'error', message: `Could not link session: ${errorMessage(error)}` });
     }
   }
 

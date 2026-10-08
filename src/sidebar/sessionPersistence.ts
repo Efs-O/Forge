@@ -11,6 +11,7 @@ import type { Memento } from 'vscode';
 import { getLogger } from '../util/logger';
 import type { ChatMessage } from '../llm/types';
 import type { CompactionState } from './compactionTypes';
+import { rebuildIndex, type AgentLinkConflict } from '../agentLinks/chatAgentLinks';
 import type { HistoryArchive } from './HistoryArchive';
 import {
   ACTIVE_ID_KEY,
@@ -136,6 +137,7 @@ export function persistedToRuntime(p: ConversationPersisted): ConversationRuntim
     createdAt: p.createdAt,
     updatedAt: p.updatedAt,
     messages: repairInterruptedToolCalls(chatMessagesFromSlim(p.messages)),
+    ...(p.agentLinks !== undefined ? { agentLinks: { ...p.agentLinks } } : {}),
     ...(p.active_model !== undefined ? { active_model: p.active_model } : {}),
     ...(p.cli_sessions !== undefined ? { cli_sessions: { ...p.cli_sessions } } : {}),
     ...(p.compaction !== undefined ? { compaction: copyCompaction(p.compaction) } : {}),
@@ -205,6 +207,7 @@ function conversationToPersisted(c: ConversationRuntime): ConversationPersisted 
     createdAt: c.createdAt,
     updatedAt: c.updatedAt,
     messages: slimPersistMessages(c.messages),
+    ...(c.agentLinks !== undefined ? { agentLinks: { ...c.agentLinks } } : {}),
     ...(c.active_model !== undefined ? { active_model: c.active_model } : {}),
     ...(c.cli_sessions !== undefined ? { cli_sessions: { ...c.cli_sessions } } : {}),
     ...(c.compaction !== undefined ? { compaction: copyCompaction(c.compaction) } : {}),
@@ -293,6 +296,7 @@ function migrateLegacyHistory(
 export function loadSidebarSession(
   workspaceState: Memento,
   archive?: HistoryArchive,
+  notifyWarning?: (message: string) => void,
 ): SidebarRuntime {
   const rawV1 = workspaceState.get<unknown>(SESSION_KEY_V1);
   const parsedV1 = sidebarSessionPersistedSchema.safeParse(rawV1);
@@ -317,16 +321,20 @@ export function loadSidebarSession(
       ...d.conversations.map((conversation) => conversation.id),
       ...(d.history ?? []).map((conversation) => conversation.id),
     ]);
-    return {
-      activeConversationId: activeId,
-      conversations: d.conversations.map(persistedToRuntime),
-      // A close can persist the archive file before the open-session memento.
-      // If the host crashes between those writes, the open copy is authoritative
-      // and the duplicate archive entry must not be shown or restored twice.
-      history: loadHistory(d, archive)
-        .filter((entry) => !d.conversations.some((open) => open.id === entry.id))
-        .map(persistedToRuntime),
-    };
+    return indexSession(
+      {
+        activeConversationId: activeId,
+        conversations: d.conversations.map(persistedToRuntime),
+        // A close can persist the archive file before the open-session memento.
+        // If the host crashes between those writes, the open copy is authoritative
+        // and the duplicate archive entry must not be shown or restored twice.
+        history: loadHistory(d, archive)
+          .filter((entry) => !d.conversations.some((open) => open.id === entry.id))
+          .map(persistedToRuntime),
+      },
+      archive,
+      notifyWarning,
+    );
   }
 
   if (rawV1 !== undefined && !parsedV1.success) {
@@ -348,11 +356,44 @@ export function loadSidebarSession(
     // here could erase the only durable copy when the replacement hits quota.
     persistMemento(workspaceState, SESSION_KEY_V1, runtimeToPersisted(migrated));
     archive?.overflow.list(migrated.conversations.map((conversation) => conversation.id));
-    return migrated;
+    return indexSession(migrated, archive, notifyWarning);
   }
 
   archive?.overflow.list();
-  return createDefaultSession();
+  return indexSession(createDefaultSession(), archive, notifyWarning);
+}
+
+function indexSession(
+  session: SidebarRuntime,
+  archive?: HistoryArchive,
+  notifyWarning?: (message: string) => void,
+): SidebarRuntime {
+  const conflicts = rebuildIndex(agentLinkRecords(session, archive));
+  for (const conflict of conflicts) notifyWarning?.(conflictWarning(conflict));
+  return session;
+}
+
+function conflictWarning(conflict: AgentLinkConflict): string {
+  return `Forge: agent session ${conflict.sessionId} is linked to chats "${conflict.firstChat}" and "${conflict.secondChat}"; keeping it with "${conflict.keptChat}" (newest last used).`;
+}
+
+function agentLinkRecords(
+  session: SidebarRuntime,
+  archive?: HistoryArchive,
+): Array<{ id: string; title?: string; agentLinks?: ConversationRuntime['agentLinks'] }> {
+  const records = [...session.conversations, ...session.history];
+  for (const row of archive?.overflow.list(records.map((item) => item.id)) ?? []) {
+    if (row.agentLinks)
+      records.push({
+        id: row.id,
+        title: row.title,
+        createdAt: row.createdAt,
+        updatedAt: row.updatedAt,
+        messages: [],
+        agentLinks: row.agentLinks,
+      });
+  }
+  return records;
 }
 
 /**

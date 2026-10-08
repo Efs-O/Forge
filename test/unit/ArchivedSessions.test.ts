@@ -7,15 +7,22 @@ import { persistedToRuntime, TOOL_INTERRUPTED_RESULT } from '../../src/sidebar/s
 
 describe('ArchivedSessions', () => {
   let root: string;
-  afterEach(() => { if (root) fs.rmSync(root, { recursive: true, force: true }); });
+  afterEach(() => {
+    if (root) fs.rmSync(root, { recursive: true, force: true });
+  });
 
   it('keeps the oldest of 41 archived chats readable by id', () => {
     root = fs.mkdtempSync(path.join(os.tmpdir(), 'forge-archived-'));
     const archive = new ArchivedSessions(root);
     for (let i = 0; i < 41; i += 1) {
       const id = `chat-${i}`;
-      archive.put({ id, title: id, createdAt: i, updatedAt: i,
-        messages: [{ role: 'user', content: `message ${i}` }] });
+      archive.put({
+        id,
+        title: id,
+        createdAt: i,
+        updatedAt: i,
+        messages: [{ role: 'user', content: `message ${i}` }],
+      });
     }
     expect(archive.list()).toHaveLength(41);
     expect(archive.read('chat-0')?.messages[0]?.content).toBe('message 0');
@@ -32,17 +39,62 @@ describe('ArchivedSessions', () => {
     expect(fs.existsSync(path.join(root, 'archive', 'chat.json'))).toBe(false);
   });
 
+  it('stores agent links in the index row written with a body', () => {
+    root = fs.mkdtempSync(path.join(os.tmpdir(), 'forge-archived-'));
+    const archive = new ArchivedSessions(root);
+    const agentLinks = {
+      claude: {
+        kind: 'claude' as const,
+        sessionId: '00000000-0000-4000-8000-000000000001',
+        cwd: '/workspace',
+        title: 'Claude session',
+        linkedAt: 1,
+        lastUsedAt: 2,
+        origin: 'user-set' as const,
+      },
+    };
+    archive.put({
+      id: 'linked',
+      title: 'Linked',
+      createdAt: 1,
+      updatedAt: 2,
+      messages: [],
+      agentLinks,
+    });
+
+    expect(archive.list()[0]?.agentLinks).toEqual(agentLinks);
+  });
+
   it('reindexes a body left behind by a crash before its index write', () => {
     root = fs.mkdtempSync(path.join(os.tmpdir(), 'forge-archived-'));
     const directory = path.join(root, 'archive');
     fs.mkdirSync(directory);
     fs.writeFileSync(path.join(directory, 'index.json'), '[]');
-    fs.writeFileSync(path.join(directory, 'orphan.json'), JSON.stringify({
-      id: 'orphan', title: 'Recovered body', createdAt: 1, updatedAt: 2,
-      messages: [{ role: 'user', content: 'kept' }],
-    }));
+    const agentLinks = {
+      copilot: {
+        kind: 'copilot',
+        sessionId: 'copilot-session',
+        cwd: '/workspace',
+        title: 'Copilot session',
+        linkedAt: 1,
+        lastUsedAt: 2,
+        origin: 'user-set',
+      },
+    };
+    fs.writeFileSync(
+      path.join(directory, 'orphan.json'),
+      JSON.stringify({
+        id: 'orphan',
+        title: 'Recovered body',
+        createdAt: 1,
+        updatedAt: 2,
+        messages: [{ role: 'user', content: 'kept' }],
+        agentLinks,
+      }),
+    );
     const archive = new ArchivedSessions(root);
     expect(archive.list().map((row) => row.id)).toEqual(['orphan']);
+    expect(archive.list()[0]?.agentLinks).toEqual(agentLinks);
     expect(archive.read('orphan')?.messages[0]?.content).toBe('kept');
   });
 
@@ -54,10 +106,17 @@ describe('ArchivedSessions', () => {
     fs.writeFileSync(path.join(directory, 'index.json'), '[{"id": "kept", "tit');
 
     expect(archive.list().map((row) => row.id)).toEqual(['kept']);
-    expect(fs.readdirSync(directory).some((name) => name.startsWith('index.json.corrupt-'))).toBe(true);
+    expect(fs.readdirSync(directory).some((name) => name.startsWith('index.json.corrupt-'))).toBe(
+      true,
+    );
     // The save path keeps working on the rebuilt index.
     archive.put({ id: 'next', title: 'Next', createdAt: 2, updatedAt: 2, messages: [] });
-    expect(archive.list().map((row) => row.id).sort()).toEqual(['kept', 'next']);
+    expect(
+      archive
+        .list()
+        .map((row) => row.id)
+        .sort(),
+    ).toEqual(['kept', 'next']);
   });
 
   it('skips an unreadable or badly named body instead of failing every list', () => {
@@ -67,7 +126,10 @@ describe('ArchivedSessions', () => {
     fs.writeFileSync(path.join(directory, 'index.json'), '[]');
     fs.writeFileSync(path.join(directory, 'torn.json'), '{"id": "torn", "mess');
     const body = { title: 'Copy', createdAt: 1, updatedAt: 1, messages: [] };
-    fs.writeFileSync(path.join(directory, 'chat (copy).json'), JSON.stringify({ id: 'x', ...body }));
+    fs.writeFileSync(
+      path.join(directory, 'chat (copy).json'),
+      JSON.stringify({ id: 'x', ...body }),
+    );
     const archive = new ArchivedSessions(root);
 
     expect(archive.list()).toEqual([]);
@@ -80,21 +142,51 @@ describe('ArchivedSessions', () => {
     const logs = path.join(root, 'logs');
     fs.mkdirSync(logs);
     const rows = [
-      { type: 'session_start', session_id: 'from-log', title: 'Untitled chat', timestamp_ms: 10, workspace_path: 'C:/repo', model: 'm' },
+      {
+        type: 'session_start',
+        session_id: 'from-log',
+        title: 'Untitled chat',
+        timestamp_ms: 10,
+        workspace_path: 'C:/repo',
+        model: 'm',
+      },
       { role: 'user', content: 'question', timestamp_ms: 11 },
       { role: 'assistant', content: 'answer', timestamp_ms: 12 },
       { role: 'tool', content: 'tool result', timestamp_ms: 13 },
     ];
-    fs.writeFileSync(path.join(logs, 'from-log.jsonl'), [...rows, ...rows.map((row) => ({ ...row, timestamp_ms: Number(row.timestamp_ms) + 100 }))].map((row) => JSON.stringify(row)).join('\n') + '\n{"role":"assist');
-    fs.writeFileSync(path.join(logs, 'other.jsonl'), JSON.stringify({ type: 'session_start', title: 'Other', timestamp_ms: 1, workspace_path: 'C:/elsewhere' }));
-    fs.writeFileSync(path.join(logs, 'current.jsonl'), JSON.stringify({ ...rows[0], session_id: 'current' }));
-    fs.writeFileSync(path.join(logs, 'unknown.jsonl'), JSON.stringify({ type: 'session_start', title: 'Unknown', timestamp_ms: 1 }));
+    fs.writeFileSync(
+      path.join(logs, 'from-log.jsonl'),
+      [...rows, ...rows.map((row) => ({ ...row, timestamp_ms: Number(row.timestamp_ms) + 100 }))]
+        .map((row) => JSON.stringify(row))
+        .join('\n') + '\n{"role":"assist',
+    );
+    fs.writeFileSync(
+      path.join(logs, 'other.jsonl'),
+      JSON.stringify({
+        type: 'session_start',
+        title: 'Other',
+        timestamp_ms: 1,
+        workspace_path: 'C:/elsewhere',
+      }),
+    );
+    fs.writeFileSync(
+      path.join(logs, 'current.jsonl'),
+      JSON.stringify({ ...rows[0], session_id: 'current' }),
+    );
+    fs.writeFileSync(
+      path.join(logs, 'unknown.jsonl'),
+      JSON.stringify({ type: 'session_start', title: 'Unknown', timestamp_ms: 1 }),
+    );
     const archive = new ArchivedSessions(path.join(root, 'storage'), 'C:/repo', logs);
     expect(archive.list(['current']).map((row) => row.id)).toEqual(['from-log']);
     const restored = archive.read('from-log');
     // Named from the first user message, not session_start's placeholder; the torn last line is skipped.
     expect(restored?.title).toBe('question');
-    expect(restored?.messages.map((message) => message.role)).toEqual(['user', 'assistant', 'tool']);
+    expect(restored?.messages.map((message) => message.role)).toEqual([
+      'user',
+      'assistant',
+      'tool',
+    ]);
   });
 
   it('a permanent delete removes the log so a rebuilt index cannot bring the chat back', () => {
@@ -117,22 +209,33 @@ describe('ArchivedSessions', () => {
     const logs = path.join(root, 'logs');
     fs.mkdirSync(logs);
     const start = { type: 'session_start', timestamp_ms: 1, workspace_path: 'C:/repo' };
-    const assistant = (id?: string) => ({ role: 'assistant', content: null, tool_calls: [
-      { ...(id ? { id } : {}), name: 'read_file', input: { path: 'a' } },
-    ] });
-    const tool = (id?: string) => ({ role: 'tool', content: 'result', ...(id ? { tool_call_id: id } : {}) });
+    const assistant = (id?: string) => ({
+      role: 'assistant',
+      content: null,
+      tool_calls: [{ ...(id ? { id } : {}), name: 'read_file', input: { path: 'a' } }],
+    });
+    const tool = (id?: string) => ({
+      role: 'tool',
+      content: 'result',
+      ...(id ? { tool_call_id: id } : {}),
+    });
     for (const [name, rows] of [
       ['legacy', [start, assistant(), tool()]],
       ['modern', [start, assistant('call-modern'), tool('call-modern')]],
     ] as const) {
-      fs.writeFileSync(path.join(logs, `${name}.jsonl`), rows.map((row) => JSON.stringify(row)).join('\n'));
+      fs.writeFileSync(
+        path.join(logs, `${name}.jsonl`),
+        rows.map((row) => JSON.stringify(row)).join('\n'),
+      );
     }
     const archive = new ArchivedSessions(path.join(root, 'storage'), 'C:/repo', logs);
     for (const id of ['legacy', 'modern']) {
       const stored = archive.read(id);
       expect(stored).toBeDefined();
       const runtime = persistedToRuntime(stored!);
-      const calls = runtime.messages.flatMap((m) => m.role === 'assistant' ? (m.tool_calls ?? []) : []);
+      const calls = runtime.messages.flatMap((m) =>
+        m.role === 'assistant' ? (m.tool_calls ?? []) : [],
+      );
       const results = runtime.messages.filter((m) => m.role === 'tool');
       expect(calls).toHaveLength(1);
       expect(results).toHaveLength(1);
@@ -152,9 +255,16 @@ describe('ArchivedSessions', () => {
       { role: 'assistant', content: 'ok', timestamp_ms: 4 },
     ];
     const replay = block.map((row) => ({ ...row, timestamp_ms: Number(row.timestamp_ms) + 100 }));
-    fs.writeFileSync(path.join(logs, 'replay.jsonl'), [...block, ...replay].map((row) => JSON.stringify(row)).join('\n'));
+    fs.writeFileSync(
+      path.join(logs, 'replay.jsonl'),
+      [...block, ...replay].map((row) => JSON.stringify(row)).join('\n'),
+    );
     const archive = new ArchivedSessions(path.join(root, 'storage'), 'C:/repo', logs);
-    expect(archive.read('replay')?.messages.map((m) => m.content)).toEqual(['continue', 'continue', 'ok']);
+    expect(archive.read('replay')?.messages.map((m) => m.content)).toEqual([
+      'continue',
+      'continue',
+      'ok',
+    ]);
   });
 
   it('skips cursor-position rows replayed after the cursor', () => {
@@ -162,15 +272,28 @@ describe('ArchivedSessions', () => {
     const logs = path.join(root, 'logs');
     fs.mkdirSync(logs);
     const block = [
-      { type: 'session_start', session_id: 'cursor-replay', timestamp_ms: 1, workspace_path: 'C:/repo' },
+      {
+        type: 'session_start',
+        session_id: 'cursor-replay',
+        timestamp_ms: 1,
+        workspace_path: 'C:/repo',
+      },
       { role: 'user', content: 'continue', timestamp_ms: 2 },
       { role: 'assistant', content: 'ok', timestamp_ms: 3 },
     ];
-    const replay = block.slice(1).map((row) => ({ ...row, timestamp_ms: Number(row.timestamp_ms) + 100 }));
+    const replay = block
+      .slice(1)
+      .map((row) => ({ ...row, timestamp_ms: Number(row.timestamp_ms) + 100 }));
     const rows = [...block, { type: 'cursor', written_count: 2 }, ...replay];
-    fs.writeFileSync(path.join(logs, 'cursor-replay.jsonl'), rows.map((row) => JSON.stringify(row)).join('\n'));
+    fs.writeFileSync(
+      path.join(logs, 'cursor-replay.jsonl'),
+      rows.map((row) => JSON.stringify(row)).join('\n'),
+    );
     const archive = new ArchivedSessions(path.join(root, 'storage'), 'C:/repo', logs);
-    expect(archive.read('cursor-replay')?.messages.map((m) => m.content)).toEqual(['continue', 'ok']);
+    expect(archive.read('cursor-replay')?.messages.map((m) => m.content)).toEqual([
+      'continue',
+      'ok',
+    ]);
   });
 
   it('a cached listing hands out copies and still sees a removed log', () => {
@@ -182,18 +305,31 @@ describe('ArchivedSessions', () => {
     fs.writeFileSync(path.join(logs, 'lost.jsonl'), JSON.stringify(start));
     const archive = new ArchivedSessions(path.join(root, 'storage'), 'C:/repo', logs);
     archive.put({ id: 'body', title: 'Body', createdAt: 1, updatedAt: 1, messages: [] });
-    expect(archive.list().map((row) => row.id).sort()).toEqual(['body', 'kept', 'lost']);
+    expect(
+      archive
+        .list()
+        .map((row) => row.id)
+        .sort(),
+    ).toEqual(['body', 'kept', 'lost']);
     archive.list()[0]!.title = 'mutated by a caller';
     expect(archive.list().map((row) => row.title)).not.toContain('mutated by a caller');
     fs.rmSync(path.join(logs, 'lost.jsonl'));
-    expect(archive.list().map((row) => row.id).sort()).toEqual(['body', 'kept']);
+    expect(
+      archive
+        .list()
+        .map((row) => row.id)
+        .sort(),
+    ).toEqual(['body', 'kept']);
   });
 
   it.runIf(process.platform === 'win32')('matches a log whose drive letter is lower-cased', () => {
     root = fs.mkdtempSync(path.join(os.tmpdir(), 'forge-archived-'));
     const logs = path.join(root, 'logs');
     fs.mkdirSync(logs);
-    fs.writeFileSync(path.join(logs, 'lower.jsonl'), JSON.stringify({ type: 'session_start', timestamp_ms: 1, workspace_path: 'n:\\repo' }));
+    fs.writeFileSync(
+      path.join(logs, 'lower.jsonl'),
+      JSON.stringify({ type: 'session_start', timestamp_ms: 1, workspace_path: 'n:\\repo' }),
+    );
     const archive = new ArchivedSessions(path.join(root, 'storage'), 'N:\\repo', logs);
     expect(archive.list().map((row) => row.id)).toEqual(['lower']);
   });

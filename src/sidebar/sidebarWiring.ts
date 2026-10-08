@@ -268,6 +268,10 @@ export function wireSidebar(host: SidebarHost, parts: SidebarParts): SidebarRunt
     undo: host.undo,
     keep: host.keep,
     getActiveConv: host.getActive,
+    getConversations: () => {
+      const sidebar = host.getSidebar();
+      return [...sidebar.conversations, ...sidebar.history];
+    },
     incompleteTurnReason: (conversationId) => agentLoop.incompleteTurnReason(conversationId),
     resumeAfterManualCompact: (conversationId, reason) =>
       runManualCompactResume(

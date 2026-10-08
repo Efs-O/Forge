@@ -5,6 +5,7 @@ import type { HostActivityEvent } from '../../src/sidebar/HostActivity';
 import type { ForgeConfig } from '../../src/config/types';
 import type { IBackendPool } from '../../src/backend/BackendPool';
 import type { ConversationRuntime } from '../../src/sidebar/sessionTypes';
+import { rebuildIndex } from '../../src/agentLinks/chatAgentLinks';
 
 vi.mock('vscode', () => ({
   window: {
@@ -16,6 +17,7 @@ vi.mock('vscode', () => ({
   commands: {
     executeCommand: vi.fn(),
   },
+  workspace: { workspaceFolders: [{ uri: { fsPath: '/workspace' } }] },
 }));
 
 describe('SlashCommandHandler', () => {
@@ -91,32 +93,74 @@ describe('SlashCommandHandler', () => {
     expect(persistSession).not.toHaveBeenCalled();
   });
 
+  it('links and unlinks a validated user-selected session from the active chat', async () => {
+    rebuildIndex([]);
+    const conversation: ConversationRuntime = {
+      id: 'conversation-link',
+      title: 'Link test',
+      createdAt: 0,
+      updatedAt: 0,
+      messages: [],
+    };
+    const persistSession = vi.fn();
+    const postSessionSync = vi.fn();
+    const deps = {
+      getActiveConv: () => conversation,
+      getConversations: () => [conversation],
+      persistSession,
+      postSessionSync,
+      post: vi.fn(),
+    } as unknown as SlashCommandDeps;
+    const handler = new SlashCommandHandler(deps);
+
+    await handler.handle('linkAgent', {
+      agentKind: 'claude',
+      sessionId: '00000000-0000-4000-8000-000000000004',
+    });
+
+    expect(conversation.agentLinks?.claude).toMatchObject({
+      sessionId: '00000000-0000-4000-8000-000000000004',
+      origin: 'user-set',
+      cwd: '/workspace',
+    });
+    expect(persistSession).toHaveBeenCalledOnce();
+    expect(postSessionSync).toHaveBeenCalledOnce();
+
+    await handler.handle('unlinkAgent', { agentKind: 'claude' });
+    expect(conversation.agentLinks).toBeUndefined();
+    expect(persistSession).toHaveBeenCalledTimes(2);
+    expect(postSessionSync).toHaveBeenCalledTimes(2);
+  });
+
   // A "model unloaded" line is transient status, not a record: the flag is
   // what makes the transport delete it after the command-reply delay.
   it.each([
     ['unloadModel', 'Forge: qwen unloaded.'],
     ['unloadAll', 'Forge: all models unloaded.'],
-  ] as const)('marks the /%s broadcast ephemeral so the transport deletes it', async (commandId, text) => {
-    const emitted: HostActivityEvent[] = [];
-    const deps = {
-      unloadActiveModel: vi.fn(async () => ({ model: 'qwen', wasLoaded: true })),
-      unloadModels: vi.fn(async () => undefined),
-      post: vi.fn(),
-    } as unknown as SlashCommandDeps;
-    const handler = new SlashCommandHandler(deps);
-    handler.onHostActivity((event) => emitted.push(event));
+  ] as const)(
+    'marks the /%s broadcast ephemeral so the transport deletes it',
+    async (commandId, text) => {
+      const emitted: HostActivityEvent[] = [];
+      const deps = {
+        unloadActiveModel: vi.fn(async () => ({ model: 'qwen', wasLoaded: true })),
+        unloadModels: vi.fn(async () => undefined),
+        post: vi.fn(),
+      } as unknown as SlashCommandDeps;
+      const handler = new SlashCommandHandler(deps);
+      handler.onHostActivity((event) => emitted.push(event));
 
-    await handler.handle(commandId);
+      await handler.handle(commandId);
 
-    expect(emitted).toEqual([{ text, ephemeral: true }]);
-    if (commandId === 'unloadModel') {
-      expect(deps.unloadActiveModel).toHaveBeenCalledOnce();
-      expect(deps.unloadModels).not.toHaveBeenCalled();
-    } else {
-      expect(deps.unloadModels).toHaveBeenCalledOnce();
-      expect(deps.unloadActiveModel).not.toHaveBeenCalled();
-    }
-  });
+      expect(emitted).toEqual([{ text, ephemeral: true }]);
+      if (commandId === 'unloadModel') {
+        expect(deps.unloadActiveModel).toHaveBeenCalledOnce();
+        expect(deps.unloadModels).not.toHaveBeenCalled();
+      } else {
+        expect(deps.unloadModels).toHaveBeenCalledOnce();
+        expect(deps.unloadActiveModel).not.toHaveBeenCalled();
+      }
+    },
+  );
 
   it('reports a stopped configured server after /unload', async () => {
     const emitted: HostActivityEvent[] = [];

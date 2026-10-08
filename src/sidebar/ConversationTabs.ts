@@ -40,6 +40,7 @@ import { persistedToRuntime } from './sessionPersistence';
 import { TabModelRelease } from './TabModelRelease';
 import { retainLiveMemoryKeys } from './compactionWindow';
 import { deactivateLazyGroups } from '../tools/lazyToolGroups';
+import { forgetConversation } from '../agentLinks/chatAgentLinks';
 
 const log = getLogger();
 
@@ -284,6 +285,7 @@ export class ConversationTabs {
     deactivateLazyGroups(id);
     this.deps.setSidebar(result.sidebar);
     this.deps.failureTracker.reset(id);
+    forgetConversation(id);
     const nextActive = this.deps
       .getSidebar()
       .conversations.find((c) => c.id === result.newActiveId);

@@ -19,7 +19,7 @@ const log = getLogger();
 export const HISTORY_ARCHIVE_FILE = 'conversation-history.json';
 
 function signatureOf(conversation: ConversationRuntime): string {
-  return `${conversation.updatedAt}:${conversation.title}:${conversation.messages.length}`;
+  return `${conversation.updatedAt}:${conversation.title}:${conversation.messages.length}:${JSON.stringify(conversation.agentLinks ?? {})}`;
 }
 
 function detailOf(error: unknown): string {
@@ -245,6 +245,6 @@ export class HistoryArchive {
   }
 
   private signatureOfPersisted(conversation: ConversationPersisted): string {
-    return `${conversation.updatedAt}:${conversation.title}:${conversation.messages.length}`;
+    return `${conversation.updatedAt}:${conversation.title}:${conversation.messages.length}:${JSON.stringify(conversation.agentLinks ?? {})}`;
   }
 }

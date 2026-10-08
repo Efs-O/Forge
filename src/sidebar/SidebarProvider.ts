@@ -89,12 +89,9 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
     private readonly checkpoints: CheckpointStack,
     toolRegistry: ToolRegistry,
     private readonly indexManager: IndexManager,
-    // Required, and deliberately not defaulted: a defaulted instance would let a
-    // caller silently own a second service, and ask_user's questions would then
-    // never reach the facade the remote bridge subscribes to.
+    // Required: a defaulted instance would bypass the facade the remote bridge subscribes to.
     private readonly questions: UserQuestionService,
-    // Same reasoning as `questions`: one owner, so notify_user and the remote
-    // bridge share a single fan-out.
+    // One owner keeps notify_user and the remote bridge on a single fan-out.
     notifications: UserNotificationService,
     private readonly workspaceState: vscode.Memento,
     private readonly codeLens: KeepUndoCodeLensProvider,
@@ -103,8 +100,7 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
     private readonly events: SidebarProviderEvents = {},
     forgeLoader?: ForgeInstructionsLoader,
     secrets?: vscode.SecretStorage,
-    // Kept as a field so `postWorkspaceInfo` can tell a live root apart from
-    // the one every by-value consumer was constructed with.
+    // By-value consumers keep their original root; this field tracks live roots.
     private readonly workspaceRoot?: string,
     getConfigPath?: () => string,
     cliSessions?: CliSessionRegistry,
@@ -115,7 +111,11 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
     // folder open, or tests), they stay in the memento as before.
     private readonly historyArchive?: HistoryArchive,
   ) {
-    this.sidebar = loadSidebarSession(workspaceState, historyArchive);
+    this.sidebar = loadSidebarSession(
+      workspaceState,
+      historyArchive,
+      vscode.window.showWarningMessage,
+    );
     retainSessionMemoryKeys(this.sidebar, listMemoryKeys(workspaceState));
     const runtime = wireSidebar(
       {
@@ -476,7 +476,7 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
         restoreConversation: (id) => this.tabs.restore(id),
         deleteConversation: (id) => void this.tabs.deleteConversation(id),
         renameConversation: (id, title) => this.tabs.rename(id, title),
-        runSlashCommand: (id) => void this.slashHandler.handle(id),
+        runSlashCommand: (id, agent) => void this.slashHandler.handle(id, agent),
         openFile: (path, line, beside) => this.agentLoop.openFile(path, { line, beside }),
         openAttachment: (relativePath) =>
           openAttachment({ store: this.attachmentStore, view: () => this.view }, relativePath),

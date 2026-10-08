@@ -102,3 +102,43 @@ button#chat-header-title:hover {
 #tab-new-btn {
   border-color: var(--forge-border);
 }
+
+#agent-links-strip {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  padding: 0 0 4px;
+  color: var(--vscode-descriptionForeground);
+  font-size: 11px;
+}
+
+.agent-link-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.agent-link-label {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  flex: 1;
+}
+
+.agent-link-row button,
+#agent-link-new {
+  flex-shrink: 0;
+  padding: 1px 5px;
+  color: var(--vscode-descriptionForeground);
+  background: transparent;
+  border: 1px solid var(--forge-border);
+  border-radius: var(--forge-radius-sm);
+  cursor: pointer;
+}
+
+.agent-link-row button:hover,
+#agent-link-new:hover {
+  color: var(--vscode-foreground);
+  border-color: var(--forge-accent);
+}

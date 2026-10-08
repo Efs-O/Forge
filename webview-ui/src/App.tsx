@@ -295,6 +295,32 @@ export function App(): React.ReactElement {
   const handleRunSlashCommand = useCallback((commandId: ForgeSlashCommandId) => {
     vscode.postMessage({ type: 'runSlashCommand', commandId });
   }, []);
+  const handleComposerSend = useCallback(
+    (text: string, attachments: Parameters<typeof handleSend>[1]) => {
+      const trimmed = text.trim();
+      if (/^\/link(?:\s|$)/u.test(trimmed)) {
+        const words = trimmed.split(/\s+/u).slice(1);
+        vscode.postMessage({
+          type: 'runSlashCommand',
+          commandId: 'linkAgent',
+          ...(words[0] ? { agentKind: words[0] } : {}),
+          ...(words.length > 1 ? { sessionId: words.slice(1).join(' ') } : {}),
+        });
+        return;
+      }
+      handleSend(text, attachments);
+    },
+    [handleSend],
+  );
+  const handleLinkAgent = useCallback(
+    () => handleRunSlashCommand('linkAgent'),
+    [handleRunSlashCommand],
+  );
+  const handleUnlinkAgent = useCallback(
+    (agentKind: import('../../src/agentLinks/chatAgentLinks').AgentKind) =>
+      vscode.postMessage({ type: 'runSlashCommand', commandId: 'unlinkAgent', agentKind }),
+    [],
+  );
   const handlePrefillConsumed = useCallback(() => setPrefillText(null), []);
 
   // Unused tab/history types satisfy TS — keep them aligned with SessionSyncMsg shape
@@ -380,6 +406,11 @@ export function App(): React.ReactElement {
                   state.tabs.find((tab) => tab.id === state.activeConversationId)?.title ?? 'Chat'
                 }
                 historyExpanded={historyExpanded}
+                agentLinks={
+                  state.tabs.find((tab) => tab.id === state.activeConversationId)?.agentLinks
+                }
+                onLinkAgent={handleLinkAgent}
+                onUnlinkAgent={handleUnlinkAgent}
                 onNew={handleNewConversation}
                 onToggleHistory={() => setHistoryExpanded((expanded) => !expanded)}
                 onRename={
@@ -426,7 +457,7 @@ export function App(): React.ReactElement {
           removed={checkpointStats.removed}
         />
         <InputRow
-          onSend={handleSend}
+          onSend={handleComposerSend}
           onCancel={handleCancel}
           streaming={streaming}
           backendReady={state.backendReady}

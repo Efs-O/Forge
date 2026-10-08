@@ -1,5 +1,6 @@
 import type { QuestionGroup } from '../util/questionAnswers';
 import type { ChatAttachmentRef } from '../llm/types';
+import type { AgentLinks } from '../agentLinks/chatAgentLinks';
 export type { ChatAttachmentRef };
 
 /** Tab row mirrored for host + webview. */
@@ -14,6 +15,7 @@ export interface SessionTabMeta {
   streaming?: boolean;
   /** Accumulated active-agent time for the tab badge. */
   active_time_ms?: number;
+  agentLinks?: AgentLinks;
 }
 
 export interface SessionHistoryMeta {
@@ -46,7 +48,9 @@ export type ForgeSlashCommandId =
   | 'reloadWindow'
   | 'initForge'
   | 'clanker'
-  | 'system';
+  | 'system'
+  | 'linkAgent'
+  | 'unlinkAgent';
 
 // ── Host → Webview ────────────────────────────────────────────────────────────
 export interface TokenMsg {
@@ -454,6 +458,8 @@ export interface QuestionResponseMsg {
 export interface RunSlashCommandMsg {
   type: 'runSlashCommand';
   commandId: ForgeSlashCommandId;
+  agentKind?: string;
+  sessionId?: string;
 }
 
 export type { OpenFileMsg, OpenAttachmentMsg } from './openMessages';

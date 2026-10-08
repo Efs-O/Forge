@@ -1,4 +1,5 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
+import type { AgentKind, AgentLinks } from '../../../src/agentLinks/chatAgentLinks';
 
 interface Props {
   title: string;
@@ -7,6 +8,9 @@ interface Props {
   onToggleHistory: () => void;
   /** Absent when there is no conversation to rename; the title is then plain text. */
   onRename?: (title: string) => void;
+  agentLinks?: AgentLinks;
+  onLinkAgent: () => void;
+  onUnlinkAgent: (kind: AgentKind) => void;
 }
 
 export function ChatHeader({
@@ -15,6 +19,9 @@ export function ChatHeader({
   onNew,
   onToggleHistory,
   onRename,
+  agentLinks,
+  onLinkAgent,
+  onUnlinkAgent,
 }: Props): React.ReactElement {
   const [editing, setEditing] = useState(false);
   const inputRef = useRef<HTMLInputElement>(null);
@@ -31,60 +38,86 @@ export function ChatHeader({
   }, [onRename, title]);
 
   return (
-    <header id="chat-header" aria-label="Current conversation">
-      {editing ? (
-        <input
-          ref={inputRef}
-          id="chat-header-title-input"
-          defaultValue={title}
-          aria-label="Conversation title"
-          autoFocus
-          onBlur={commit}
-          onKeyDown={(e) => {
-            if (e.key === 'Enter') {
-              e.preventDefault();
-              commit();
-            } else if (e.key === 'Escape') {
-              e.preventDefault();
-              setEditing(false);
-            }
-          }}
-        />
-      ) : onRename ? (
-        <button
-          id="chat-header-title"
-          type="button"
-          title={`${title}\nClick to rename`}
-          onClick={() => setEditing(true)}
-        >
-          {title}
-        </button>
-      ) : (
-        <span id="chat-header-title" title={title}>
-          {title}
-        </span>
-      )}
-      <div id="chats-toolbar-actions">
-        <button
-          id="history-toolbar-btn"
-          type="button"
-          aria-label="Conversation history"
-          aria-expanded={historyExpanded}
-          title="History"
-          onClick={onToggleHistory}
-        >
-          ◷
-        </button>
-        <button
-          id="tab-new-btn"
-          type="button"
-          title="New chat"
-          aria-label="New chat"
-          onClick={onNew}
-        >
-          ＋
+    <>
+      <header id="chat-header" aria-label="Current conversation">
+        {editing ? (
+          <input
+            ref={inputRef}
+            id="chat-header-title-input"
+            defaultValue={title}
+            aria-label="Conversation title"
+            autoFocus
+            onBlur={commit}
+            onKeyDown={(e) => {
+              if (e.key === 'Enter') {
+                e.preventDefault();
+                commit();
+              } else if (e.key === 'Escape') {
+                e.preventDefault();
+                setEditing(false);
+              }
+            }}
+          />
+        ) : onRename ? (
+          <button
+            id="chat-header-title"
+            type="button"
+            title={`${title}\nClick to rename`}
+            onClick={() => setEditing(true)}
+          >
+            {title}
+          </button>
+        ) : (
+          <span id="chat-header-title" title={title}>
+            {title}
+          </span>
+        )}
+        <div id="chats-toolbar-actions">
+          <button
+            id="history-toolbar-btn"
+            type="button"
+            aria-label="Conversation history"
+            aria-expanded={historyExpanded}
+            title="History"
+            onClick={onToggleHistory}
+          >
+            ◷
+          </button>
+          <button
+            id="tab-new-btn"
+            type="button"
+            title="New chat"
+            aria-label="New chat"
+            onClick={onNew}
+          >
+            ＋
+          </button>
+        </div>
+      </header>
+      <div id="agent-links-strip" aria-label="Linked agent sessions">
+        {Object.values(agentLinks ?? {})
+          .filter((item) => item !== undefined)
+          .map((item) => (
+            <div className="agent-link-row" key={item.kind}>
+              <span
+                className="agent-link-label"
+                title={`${item.title}\nLast used ${new Date(item.lastUsedAt).toLocaleString()}`}
+              >
+                {item.kind} · {item.title} · Last used {new Date(item.lastUsedAt).toLocaleString()}
+              </span>
+              <button
+                type="button"
+                title={`Unlink ${item.kind}`}
+                onClick={() => onUnlinkAgent(item.kind)}
+              >
+                Unlink
+              </button>
+            </div>
+          ))}
+        <button id="agent-link-new" type="button" onClick={onLinkAgent}>
+          Link to…
         </button>
       </div>
-    </header>
+    </>
   );
 }

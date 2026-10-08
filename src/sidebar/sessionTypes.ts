@@ -5,6 +5,7 @@
 import { z } from 'zod';
 import type { CompactionState } from './compactionTypes';
 import type { ContextTrimState } from '../agent/toolResultContext';
+import { agentLinksSchema, type AgentLinks } from '../agentLinks/chatAgentLinks';
 import { compactionPersistedSchema } from './compactionPersistedSchema';
 export {
   createDefaultSession,
@@ -193,6 +194,7 @@ export const conversationPersistedSchema = z.object({
   createdAt: z.number(),
   updatedAt: z.number(),
   messages: z.array(slimMsgSchema),
+  agentLinks: agentLinksSchema.optional(),
   active_model: z.string().optional(),
   cli_sessions: z.record(z.string(), z.string().min(1)).optional(),
   // Optional, so records written before compaction existed still parse.
@@ -236,6 +238,8 @@ export interface ConversationRuntime {
   createdAt: number;
   updatedAt: number;
   messages: ChatMessage[];
+  /** Per-chat agent session links; only chatAgentLinks.ts mutates this field. */
+  agentLinks?: AgentLinks;
   active_model?: string;
   /** Persistent external CLI sessions keyed by configured Forge model name. */
   cli_sessions?: Record<string, string>;
