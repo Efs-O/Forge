@@ -4,7 +4,7 @@ import * as path from 'path';
 import * as vscode from 'vscode';
 import { afterAll, afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { makeAppendFileTool, makeWriteFileTool } from '../../src/tools/builtinTools';
-import { makeMoveFileTool } from '../../src/tools/fileEditTools';
+import { makeDeleteFileTool, makeMoveFileTool } from '../../src/tools/fileEditTools';
 import { makeEditFileTool } from '../../src/tools/editFileTool';
 import { makeApplyLineEditsTool } from '../../src/tools/structuredEditTool';
 
@@ -91,5 +91,37 @@ describe('every file-writing tool honours extra_file_roots', () => {
     await expect(
       makeWriteFileTool(roots).handler({ path: elsewhere, content: 'x' }),
     ).rejects.toThrow(/outside extra_file_roots/);
+  });
+
+  it('deletes paths independently and keeps the trash default for each path', async () => {
+    const first = path.join(root, 'first.txt');
+    const fromExtra = path.join(extra, 'extra.txt');
+    fs.writeFileSync(first, 'one');
+    fs.writeFileSync(fromExtra, 'two');
+
+    const result = await makeDeleteFileTool(roots).handler({
+      paths: [first, path.join(root, 'missing.txt'), path.join(os.tmpdir(), 'outside.txt'), fromExtra],
+    });
+
+    expect(result).toContain(`Moved to recycle bin: ${first}`);
+    expect(result).toContain(`Missing: ${path.join(root, 'missing.txt')}`);
+    expect(result).toContain(`Failed: ${path.join(os.tmpdir(), 'outside.txt')}:`);
+    expect(result).toContain(`Moved to recycle bin: ${fromExtra}`);
+    expect(vscode.workspace.fs.lastDeleteOptions).toEqual({ recursive: false, useTrash: true });
+    expect(fs.existsSync(first)).toBe(false);
+    expect(fs.existsSync(fromExtra)).toBe(false);
+  });
+
+  it('requires exactly one of path and paths and bounds path batches to 50', async () => {
+    const tool = makeDeleteFileTool(roots);
+    await expect(tool.handler({})).rejects.toThrow(/exactly one/);
+    await expect(tool.handler({ path: 'a', paths: ['b'] })).rejects.toThrow(/exactly one/);
+    await expect(tool.handler({ paths: Array.from({ length: 51 }, () => 'a') })).rejects.toThrow(
+      /1–50 strings/,
+    );
+    // A batch that deleted nothing is a failed call, not a success string.
+    await expect(
+      tool.handler({ paths: [path.join(root, 'gone-1.txt'), path.join(root, 'gone-2.txt')] }),
+    ).rejects.toThrow(/Missing: .*gone-1\.txt[\s\S]*Missing: .*gone-2\.txt/);
   });
 });

@@ -130,9 +130,10 @@ export function makeDeleteFileTool(extraRoots: () => readonly string[] = () => [
       function: {
         name: 'delete_file',
         description:
-          'Delete a file or directory. By default the target is moved to the OS recycle bin / ' +
-          'trash so it can be restored; set to_trash=false to delete it permanently. ' +
-          'Set recursive=true to delete a non-empty directory.',
+          'Delete exactly one path or provide paths to delete 1–50 files or directories. Each ' +
+          'path must be in the workspace or inside extra_file_roots. By default targets are ' +
+          'moved to the OS recycle bin / trash so they can be restored; set to_trash=false to ' +
+          'delete them permanently. Set recursive=true to delete non-empty directories.',
         parameters: {
           type: 'object',
           properties: {
@@ -141,6 +142,16 @@ export function makeDeleteFileTool(extraRoots: () => readonly string[] = () => [
               description:
                 'Path to delete (absolute or workspace-relative). Outside the workspace only ' +
                 'inside a folder listed under extra_file_roots in config.yaml.',
+            },
+            paths: {
+              type: 'array',
+              items: { type: 'string' },
+              minItems: 1,
+              maxItems: 50,
+              description:
+                '1–50 paths to delete (absolute or workspace-relative). Each path must be ' +
+                'inside the workspace or a folder listed under extra_file_roots in config.yaml. ' +
+                'Provide exactly one of path or paths.',
             },
             recursive: {
               type: 'boolean',
@@ -154,43 +165,80 @@ export function makeDeleteFileTool(extraRoots: () => readonly string[] = () => [
                 'with no recycle bin (network shares, most remote/WSL paths).',
             },
           },
-          required: ['path'],
+          // Exactly one of path/paths, checked in the handler: a top-level
+          // oneOf is a shape grammar converters and strict schemas handle badly.
+          required: [],
           additionalProperties: false,
         },
       },
     },
     permission: 'delete',
-    mutation: { paths: (args) => [args['path'] as string], showDiff: true },
+    mutation: {
+      paths: (args) =>
+        Array.isArray(args['paths']) ? (args['paths'] as string[]) : [args['path'] as string],
+      showDiff: true,
+    },
     handler: async (args) => {
-      const filePath = args['path'] as string;
-      const resolved = await resolveRealWorkspacePath(filePath, undefined, {
-        allowMissing: true,
-        extraRoots: extraRoots(),
-      });
+      const hasPath = typeof args['path'] === 'string';
+      const hasPaths = Array.isArray(args['paths']);
+      if (hasPath === hasPaths) {
+        throw new Error('delete_file requires exactly one of "path" or "paths".');
+      }
+      const filePaths = hasPaths ? (args['paths'] as string[]) : [args['path'] as string];
+      if (
+        filePaths.length < 1 ||
+        filePaths.length > 50 ||
+        filePaths.some((item) => typeof item !== 'string')
+      ) {
+        throw new Error('delete_file "paths" must contain 1–50 strings.');
+      }
       const recursive = args['recursive'] === true;
-      // Asked before the delete: afterwards the path is gone from the working
-      // tree and `ls-files` can no longer distinguish "was never tracked" from
-      // "tracked, and you just removed it".
-      const warning = await trackedWarningFor(filePath);
+      const results: string[] = [];
+      let deleted = 0;
+      for (const filePath of filePaths) {
+        try {
+          const resolved = await resolveRealWorkspacePath(filePath, undefined, {
+            allowMissing: true,
+            extraRoots: extraRoots(),
+          });
+          if (!fs.existsSync(resolved)) {
+            results.push(`Missing: ${filePath}`);
+            continue;
+          }
+          // Asked before the delete: afterwards the path is gone from the
+          // working tree and `ls-files` cannot distinguish absent from deleted.
+          const warning = await trackedWarningFor(filePath);
 
-      if (args['to_trash'] === false) {
-        fs.rmSync(resolved, { recursive });
-        return withWarning(`Permanently deleted: ${filePath}`, warning);
+          if (args['to_trash'] === false) {
+            fs.rmSync(resolved, { recursive });
+            results.push(withWarning(`Permanently deleted: ${filePath}`, warning));
+            deleted++;
+            continue;
+          }
+          try {
+            await vscode.workspace.fs.delete(vscode.Uri.file(resolved), {
+              recursive,
+              useTrash: true,
+            });
+          } catch (err) {
+            const reason = err instanceof Error ? err.message : String(err);
+            throw new Error(
+              `could not move it to the recycle bin: ${reason}. ` +
+                'Filesystems such as network shares have no recycle bin — ' +
+                'call delete_file again with to_trash: false to delete it permanently.',
+            );
+          }
+          results.push(withWarning(`Moved to recycle bin: ${filePath}`, warning));
+          deleted++;
+        } catch (err) {
+          const reason = err instanceof Error ? err.message : String(err);
+          results.push(`Failed: ${filePath}: ${reason}`);
+        }
       }
-      try {
-        await vscode.workspace.fs.delete(vscode.Uri.file(resolved), {
-          recursive,
-          useTrash: true,
-        });
-      } catch (err) {
-        const reason = err instanceof Error ? err.message : String(err);
-        throw new Error(
-          `Could not move ${filePath} to the recycle bin: ${reason}. ` +
-            'Filesystems such as network shares have no recycle bin — ' +
-            'call delete_file again with to_trash: false to delete it permanently.',
-        );
-      }
-      return withWarning(`Moved to recycle bin: ${filePath}`, warning);
+      // Nothing deleted is a failed call, so the failure tracker and the model
+      // both see it as one; a partial batch reports each path's outcome.
+      if (deleted === 0) throw new Error(results.join('\n'));
+      return results.join('\n');
     },
   };
 }

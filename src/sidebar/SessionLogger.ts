@@ -339,6 +339,7 @@ export class SessionLogger {
           tool_calls: msg.tool_calls.map((tc) => ({
             id: tc.id,
             name: tc.function.name,
+            raw_arguments: tc.function.arguments,
             input: (() => {
               try {
                 return JSON.parse(tc.function.arguments) as unknown;

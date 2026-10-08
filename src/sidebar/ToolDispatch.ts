@@ -192,8 +192,16 @@ export class ToolDispatch {
         try {
           args = JSON.parse(tc.function.arguments) as Record<string, unknown>;
         } catch {
+          const rawArguments = tc.function.arguments;
+          tc.function.arguments = '{}';
           this.failureTracker.record(convId);
-          result = `Error: malformed tool arguments (invalid JSON)`;
+          const registered = this.toolRegistry.get(tc.function.name);
+          const required = registered?.definition.function.parameters.required;
+          const fields =
+            Array.isArray(required) && required.length ? required.join(', ') : '(none declared)';
+          result =
+            `Error: ${tc.function.name} received malformed tool arguments (invalid JSON): ` +
+            `${JSON.stringify(rawArguments.slice(0, 200))}. Required fields: ${fields}.`;
           this.postResult(tc, toolResultText(result), undefined, convId);
           messages.push(this.toolMessage(tc, toolResultContent(result), startedAt));
           continue;

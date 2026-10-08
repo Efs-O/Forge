@@ -632,21 +632,37 @@ describe('ToolDispatch', () => {
     expect(failureTracker.record).not.toHaveBeenCalled();
   });
 
-  it('handles malformed JSON arguments', async () => {
-    const messages: Array<{ role: string; content: string; tool_call_id?: string; name?: string }> =
-      [];
-    const toolCalls: ToolCall[] = [
-      {
-        id: 'call-bad',
+  it('sanitizes malformed arguments for replay and reports the raw prefix and required fields', async () => {
+    toolRegistry.register({
+      definition: {
         type: 'function',
-        function: { name: 'read_file', arguments: 'not json' },
+        function: {
+          name: 'read_file',
+          description: 'Read a file',
+          parameters: { type: 'object', required: ['path', 'encoding'] },
+        },
       },
+      permission: 'read',
+      handler: vi.fn().mockResolvedValue('contents'),
+    });
+    const raw = '{broken'.padEnd(210, 'x');
+    const call: ToolCall = {
+      id: 'call-bad',
+      type: 'function',
+      function: { name: 'read_file', arguments: raw },
+    };
+    const transcript: ChatMessage[] = [
+      { role: 'assistant', content: null, tool_calls: [call] },
     ];
 
-    await dispatch.dispatch(toolCalls, allowed, messages as never);
+    await dispatch.dispatch([call], allowed, transcript);
 
     expect(failureTracker.record).toHaveBeenCalled();
-    expect(messages[0].content).toMatch(/malformed/);
+    expect(call.function.arguments).toBe('{}');
+    expect(transcript[0]?.tool_calls?.[0]?.function.arguments).toBe('{}');
+    expect(transcript[1]?.content).toContain('read_file');
+    expect(transcript[1]?.content).toContain(JSON.stringify(raw.slice(0, 200)));
+    expect(transcript[1]?.content).toContain('Required fields: path, encoding');
   });
 
   it('handles unknown tools gracefully', async () => {
