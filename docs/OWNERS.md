@@ -427,6 +427,7 @@ overlaps with an existing owner, extend the owner instead.
 | MCP client bridge (external MCP servers)   | `src/tools/mcpBridge.ts`              |
 | Demand-loaded native and MCP tool groups  | `src/tools/lazyToolGroups.ts`         |
 | `load_tool_group` discovery tool           | `src/tools/toolGroupTools.ts`         |
+| Static native lazy group names             | `src/config/toolGroupNames.ts`        |
 | Tool-result size capping                   | `src/tools/resultCap.ts`              |
 | Bundled ripgrep executable resolution      | `src/tools/RipgrepResolver.ts`        |
 | Local agent delegation tool                | `src/tools/localAgentTool.ts`         |

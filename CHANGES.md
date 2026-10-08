@@ -5,6 +5,8 @@
 - Agent sessions can be linked to individual chats. `ask_agent` uses that link, and messages sent by an agent session arrive in the chat for that session with Forge's reply delivered back automatically; the old inbound prompt footer is gone. Telegram now has `/agents` and link-based `/claude`, `/codex`, `/copilot`, and `/tell` commands.
 - Removed `forge.sh join`, `--reply-in-chat`, `ask_live_session`, `tell_live_session`, and the global agent aliases. Agent-to-agent messages now resolve through the sender chat's links.
 - Added a session-log visibility audit that reports tool calls only when offered, hidden shell workarounds, and description exclusions.
+- Opening a chat from history no longer rewrites the whole history file. Each history conversation is stored in its own file, so a save writes only the conversations that changed. In a workspace with 58 MB of history, every open used to block the extension host for about 0.6 s. The old single file is read once and removed after the first clean save.
+- The history button sits left of New chat in the chat header.
 
 ### One `shell` tool replaces four
 
