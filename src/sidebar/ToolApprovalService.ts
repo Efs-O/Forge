@@ -32,7 +32,7 @@ export class ToolApprovalPolicyDenied extends Error {
         (job
           ? 'Stop and report RESULT: failed naming the action you needed.'
           : 'Nobody is present to approve it, so do not retry it. Continue with a ' +
-            'non-destructive alternative (delete_file for a file, a fresh directory ' +
+            'non-destructive alternative (delete_file with paths for files you created, a fresh directory ' +
             'instead of clearing one), or report the step as not done.'),
     );
     this.name = 'ToolApprovalPolicyDenied';

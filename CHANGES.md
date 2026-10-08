@@ -23,10 +23,24 @@
 - The system prompt is shorter.
 - `load_tool_group` describes each group by what it is for as well as its tool names (e.g. `memory: notes kept across conversations`), so the agent can find a grouped tool it did not know by name.
 
+### Tool fixes and fewer prompt restrictions
+
+- A tool call with arguments that are not valid JSON no longer ends the turn. The agent gets an error that names the tool, shows the start of what it sent and lists the required fields; the session log keeps the raw text.
+- `delete_file` takes `paths` (up to 50) and reports each one. A call that deleted nothing is an error.
+- When `edit_file`'s `old_str` does not match, the error includes the current numbered lines around the closest match, so the agent can retry without reading the file again.
+- Argument errors name the field: a missing `path` on `write_file`, `append_file` and `edit_file`, `edits` sent as a string instead of an array, and an unexpected or missing `update_plan` field at the top level or at `items[n]`.
+- `web_fetch` `max_chars` goes up to 100,000 (default still 30,000).
+- `write_file` and `append_file` no longer tell the agent to split content over 6,000–24,000 characters. Only a write that was actually cut off gets a character limit for the retry.
+- The `files` and `background` tool groups are always loaded, and so is `media` when the model has vision.
+- The system prompt drops rules that held the agent back: "local, offline, no external APIs", "never rewrite whole files", "stop and ask after 3 failures", "never repeat a call" (the loop guard enforces it), "be brief, think only as long as needed" and "prefer the read tools over the shell". It keeps: read before editing (unless a tool result already shows the file), batch edits and independent calls, search before adding to an existing codebase, verify before calling a change done (a page with `render_html_to_image` preview), and claim nothing a tool result has not shown.
+- New starter configs no longer add their own `system_prompt`; the built-in rules cover it.
+- Unattended turns are told to delete the files they made in one `delete_file` call, not one by one. A recorded plan is "your record of this task's requirements", to keep current with `update_plan`, instead of an untouchable specification.
+
 ### The agent can look at a page it wrote
 
-- `render_html_to_image` has a `preview` mode: it runs the page's scripts in headless Chrome or Edge, waits `wait_ms` (default 3 s), and returns the page's errors and a screenshot to the agent only. Nothing is saved or sent to a remote chat, and no file budget is spent. A model without vision gets the error list.
-- The page may load scripts from `cdn.jsdelivr.net`, `cdnjs.cloudflare.com` and `unpkg.com` only. Every other request, local files and WebRTC traffic are blocked. Preview takes `path`, a workspace file; relative assets in the page do not load.
+- `render_html_to_image` has a `preview` mode: it runs the page's scripts in headless Chrome or Edge, waits `wait_ms` (default 3 s), and returns the page's errors, its `console.log`/`info`/`warn` output (last 40 lines, 4,000 characters) and a screenshot to the agent only. Nothing is saved or sent to a remote chat, and no file budget is spent. A model without vision gets the text.
+- `frames` (1–4 ascending times up to 15 s) captures one screenshot per time instead of `wait_ms`, and `keys` (up to 8, each held 0–3 s) presses keys after load, before the first frame, for animations and games.
+- The page may load from any public `http(s)` host. Forge fetches every request itself and refuses loopback, private and link-local addresses, after resolving the name, so a public name pointing at 127.0.0.1 is refused too. The browser itself resolves no hostnames, WebSockets are closed and WebRTC UDP is blocked. Preview takes `path`, a workspace file; relative assets in the page do not load.
 - `render_html_to_image` is now always offered rather than in the `media` group. Its default `image` mode is unchanged.
 
 ### Fewer wasted rounds

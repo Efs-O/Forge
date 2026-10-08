@@ -52,7 +52,7 @@ import {
 import { canUseThinkingKwargs, isProjectRoot, shouldStripThinking } from './turnModelBehavior';
 import type { AgentProgressEvent } from './AgentProgress';
 import type { LiveStreamMeter } from './LiveStreamMeter';
-import { withWriteChunkLimit, writeChunkLimit } from '../tools/writeChunking';
+import { writeChunkLimit } from '../tools/writeChunking';
 
 const log = getLogger();
 
@@ -234,7 +234,7 @@ export async function runModelTurn(
     ).filter(
       ({ function: { name } }) => !hiddenLazyTools.has(name) && !unavailableTools?.has(name),
     );
-    return budget.filterDefinitions(withWriteChunkLimit(advertised, writeLimit));
+    return budget.filterDefinitions(advertised);
   };
   const nativeTools = runtimeCaps?.likelySupportsTools !== false;
   if (buildToolDefinitions().length > 0 && !nativeTools) {

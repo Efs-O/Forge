@@ -165,9 +165,12 @@ export function hiddenLazyToolNames(
   const hidden = new Set<string>();
   for (const [group, members] of membersByGroup) {
     const unavailable = group === 'computer_use' && !isVisionModel;
+    const eagerByDefault =
+      group === 'files' || group === 'background' || (group === 'media' && isVisionModel);
     if (
       !unavailable &&
-      (eagerGroups.has(group) ||
+      (eagerByDefault ||
+        eagerGroups.has(group) ||
         (conversationId !== undefined && isLazyGroupActive(conversationId, group)))
     )
       continue;

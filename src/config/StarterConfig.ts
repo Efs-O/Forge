@@ -18,18 +18,6 @@ const DEFAULT_PERMISSIONS: NonNullable<ForgeConfig['permissions']> = {
 };
 
 /**
- * Agent guidance appended to the built-in template. Kept short: the 25-line
- * version it replaced roughly doubled decode time on the harness bench
- * (docs/plans/HARNESS_COMPARISON_PLAN.md) without changing results. `test/unit/StarterConfig.test.ts` keeps the copy-ready
- * `config/starter/*.yaml` templates identical to this text.
- */
-export const STARTER_SYSTEM_PROMPT = `Be brief. Think only as long as the next action needs; do not re-verify what a tool result already showed.
-Batch independent tool calls in one response. Search many files in one command, not one call per file.
-When the task is done and the evidence is in hand, stop and give a short answer.
-Before you call a change done, run the narrowest check that proves it (the relevant test, build or a re-read of the edited lines); report what you ran and what it showed.
-Do not claim anything you have not seen in a tool result.`;
-
-/**
  * Settings every starter carries: the tested agent setup, not just a model
  * list. Auto-compaction and the auto-created FORGE.md are off in the schema,
  * so a config without these lines silently runs without either. The 200K
@@ -40,7 +28,6 @@ const STARTER_AGENT_SETTINGS = {
   forge_instructions: { auto_create: true },
   auto_compact: { enabled: true, at: 0.85, resume: true },
   defaults: {
-    system_prompt: STARTER_SYSTEM_PROMPT,
     sampling: { temperature: 0.6, top_p: 0.95, max_tokens: 200000 },
   },
 } satisfies Partial<ForgeConfig>;

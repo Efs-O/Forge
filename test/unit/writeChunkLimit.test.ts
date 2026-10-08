@@ -3,14 +3,7 @@ import type { ModelConfig } from '../../src/config/types';
 import { ToolCallTruncatedError } from '../../src/llm/ToolCallTruncatedError';
 import { truncationGuidance } from '../../src/agent/truncationRecovery';
 import { makeAppendFileTool, makeWriteFileTool } from '../../src/tools/builtinTools';
-import {
-  CHUNKED_WRITE_ADVICE,
-  MAX_SINGLE_WRITE_CHARS,
-  MAX_WRITE_CHUNK_CHARS,
-  chunkedWriteAdvice,
-  withWriteChunkLimit,
-  writeChunkLimit,
-} from '../../src/tools/writeChunking';
+import { MAX_SINGLE_WRITE_CHARS, writeChunkLimit } from '../../src/tools/writeChunking';
 
 // docs/plans/WRITE_CHUNK_LIMIT_PLAN.md
 
@@ -22,8 +15,8 @@ const strata = {
 } as unknown as ModelConfig;
 
 describe('writeChunkLimit', () => {
-  it('gives a large single-slot window the cap', () => {
-    expect(writeChunkLimit(strata, undefined, compact)).toBe(MAX_WRITE_CHUNK_CHARS);
+  it('keeps the full computed recovery ceiling for a large single-slot window', () => {
+    expect(writeChunkLimit(strata, undefined, compact)).toBe(36000);
   });
 
   it('keeps 6000 for a multi-slot llama.cpp entry', () => {
@@ -50,23 +43,14 @@ describe('writeChunkLimit', () => {
   });
 });
 
-describe('advertised write advice', () => {
+describe('write tool descriptions', () => {
   const definitions = [makeWriteFileTool().definition, makeAppendFileTool().definition];
 
-  it('is registered with the default advice, so the substitution has something to match', () => {
+  it('contains no proactive size or chunking advice', () => {
     for (const definition of definitions) {
-      expect(JSON.stringify(definition)).toContain(CHUNKED_WRITE_ADVICE);
-    }
-  });
-
-  it('restates every occurrence for the model limit and leaves the default untouched', () => {
-    const restated = withWriteChunkLimit(definitions, 24000);
-    for (const definition of restated) {
       const json = JSON.stringify(definition);
-      expect(json).not.toContain(CHUNKED_WRITE_ADVICE);
-      expect(json).toContain(chunkedWriteAdvice(24000));
+      expect(json).not.toMatch(/characters? should be split|chunk|size limit/i);
     }
-    expect(withWriteChunkLimit(definitions, MAX_SINGLE_WRITE_CHARS)).toBe(definitions);
   });
 });
 
@@ -74,7 +58,7 @@ describe('truncation guidance', () => {
   const err = new ToolCallTruncatedError({ finishReason: 'length', message: 'cut' });
 
   it('never states a ceiling above the model limit', () => {
-    expect(truncationGuidance(err, 100000, 24000)).toContain('at most 24000 characters');
+    expect(truncationGuidance(err, 100000, 36000)).toContain('at most 36000 characters');
     expect(truncationGuidance(err, 100000)).toContain(
       `at most ${MAX_SINGLE_WRITE_CHARS} characters`,
     );

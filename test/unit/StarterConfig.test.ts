@@ -6,7 +6,6 @@ import { ForgeConfigSchema } from '../../src/config/schema';
 import {
   makeLlamaCppStarterConfig,
   makeOllamaStarterConfig,
-  STARTER_SYSTEM_PROMPT,
   withCliAgents,
 } from '../../src/config/StarterConfig';
 
@@ -111,7 +110,8 @@ describe('starter config generation', () => {
     });
     expect(wizard.auto_compact).toEqual({ enabled: true, at: 0.85, resume: true });
     expect(wizard.forge_instructions).toEqual({ auto_create: true });
-    expect(wizard.defaults?.system_prompt).toBe(STARTER_SYSTEM_PROMPT);
+    // The built-in template carries the agent rules; a starter adds none.
+    expect(wizard.defaults?.system_prompt).toBeUndefined();
     const dir = path.join(__dirname, '../../config/starter');
     for (const file of ['llama-cpp.yaml', 'ollama.yaml', 'openai-compatible.yaml']) {
       const template = parseYaml(fs.readFileSync(path.join(dir, file), 'utf8')) as Record<
@@ -119,9 +119,6 @@ describe('starter config generation', () => {
         unknown
       >;
       const parsed = pick(template);
-      // A block scalar keeps one trailing newline.
-      const defaults = parsed.defaults as { system_prompt: string };
-      defaults.system_prompt = defaults.system_prompt.trimEnd();
       expect(parsed, file).toEqual(pick(wizard as unknown as Record<string, unknown>));
     }
   });

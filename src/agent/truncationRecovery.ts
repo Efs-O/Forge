@@ -9,7 +9,7 @@
  */
 
 import type { ChatCompletionRequest, ChatMessage } from '../llm/types';
-import { MAX_SINGLE_WRITE_CHARS, chunkedWriteAdvice } from '../tools/writeChunking';
+import { MAX_SINGLE_WRITE_CHARS } from '../tools/writeChunking';
 import {
   ToolCallTruncatedError,
   isToolCallTruncatedError,
@@ -46,7 +46,7 @@ export function asTruncation(err: unknown): ToolCallTruncatedError | undefined {
 export function truncationGuidance(
   err: ToolCallTruncatedError,
   outputRoom: number | undefined,
-  /** The model's `writeChunkLimit`, so the retry never exceeds what the tools advertise. */
+  /** The model's `writeChunkLimit`, used as the recovery ceiling after a cutoff. */
   writeLimit: number = MAX_SINGLE_WRITE_CHARS,
 ): string {
   const target = err.toolName ? `Your ${err.toolName} call` : 'Your last tool call';
@@ -67,7 +67,8 @@ export function truncationGuidance(
     `HARD LIMIT for your next call: the "content" argument must be at most ${ceiling} characters. ` +
     `This overrides any earlier instruction to write the whole file in one go — the file still ` +
     `ends up complete, just written across several calls.\n` +
-    `Do this now: ${chunkedWriteAdvice(ceiling)} Keep thinking short; it spends the same budget as the write.`
+    `Do this now: write the first ${ceiling} characters or fewer, then append_file the rest, ` +
+    `one call per chunk. Keep thinking short; it spends the same budget as the write.`
   );
 }
 

@@ -365,7 +365,7 @@ overlaps with an existing owner, extend the owner instead.
 | Config-to-tool permission resolution       | `src/tools/PermissionResolver.ts`     |
 | Tool registration entry point              | `src/tools/registerAllTools.ts`       |
 | Built-in tools + active-editor access      | `src/tools/builtinTools.ts`           |
-| Single-write size ceiling + chunk advice   | `src/tools/writeChunking.ts`          |
+| Truncation-recovery write ceiling           | `src/tools/writeChunking.ts`          |
 | File read/write tools                      | `src/tools/fileEditTools.ts`          |
 | Shared workspace file delivery validation  | `src/util/fileDeliveryValidation.ts` |
 | `send_file` tool                           | `src/tools/sendFileTool.ts`           |
@@ -392,7 +392,7 @@ overlaps with an existing owner, extend the owner instead.
 | Git tracked/ignored state of a path        | `src/tools/gitTrackedStatus.ts`       |
 | git log argv, framing and parsing          | `src/tools/gitLog.ts`                 |
 | Search (Tavily / Brave)                    | `src/tools/searchTool.ts`             |
-| URL fetch tool (SSRF-guarded)              | `src/tools/fetchTool.ts`              |
+| URL fetch tool and pinned resource fetch (SSRF-guarded) | `src/tools/fetchTool.ts`              |
 | LSP provider handlers dispatched by `code_intel` | `src/tools/lspTools.ts`          |
 | In-memory workspace memory tool            | `src/tools/memoryTools.ts`            |
 | UX tools (show_diff, open_file)            | `src/tools/uxTools.ts`                |
@@ -419,7 +419,7 @@ overlaps with an existing owner, extend the owner instead.
 | `view_image` tool                          | `src/tools/imageTool.ts`              |
 | `send_file` tool (workspace + screenshot-dir delivery) | `src/tools/sendFileTool.ts` |
 | `render_html_to_image` tool (schema, mode dispatch, image-mode naming and delivery) | `src/tools/renderHtmlToImageTool.ts` |
-| HTML→PNG render engine (launch hardening, preview CDN allowlist, abort/timeout cleanup) | `src/tools/renderHtml/renderEngine.ts` |
+| HTML→PNG render engine (launch hardening, SSRF-guarded preview routing, abort/timeout cleanup) | `src/tools/renderHtml/renderEngine.ts` |
 | `render_html_to_image` input validation (HTML size cap, workspace file read, viewport bounds) | `src/tools/renderHtml/htmlInput.ts` |
 | `render_html_to_image` preview mode (result text, vision-gated image part; saves and sends nothing) | `src/tools/renderHtml/previewMode.ts` |
 | Code-point length counting (schema/Telegram char limits) | `src/util/codePoints.ts` |

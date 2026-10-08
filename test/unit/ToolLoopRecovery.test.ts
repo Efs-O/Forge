@@ -87,7 +87,7 @@ describe('ToolCallingLoop loop-guard recovery', () => {
     // Only the final, unrecovered stop is reported — the two absorbed ones are silent.
     expect(onRepeatedCall).toHaveBeenCalledTimes(1);
     const nudges = messages.filter(
-      (m) => m.role === 'user' && typeof m.content === 'string' && m.content.includes('continuing this turn automatically'),
+      (m) => m.role === 'user' && typeof m.content === 'string' && m.content.includes('The turn continues'),
     );
     expect(nudges).toHaveLength(2);
     expect(nudges[0]?.content).toContain('1 more automatic retry left');

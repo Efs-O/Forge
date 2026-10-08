@@ -3,7 +3,6 @@ import * as path from 'path';
 import * as vscode from 'vscode';
 import type { RegisteredTool } from './ToolRegistry';
 import { resolveRealWorkspacePath, resolveWorkspacePath } from '../util/WorkspacePaths';
-import { CHUNKED_WRITE_ADVICE } from './writeChunking';
 import { mimeFromHeader } from './imageTool';
 import { MAX_READ_FILE_CHARS, capResultText } from './resultCap';
 import { describePathMiss } from './pathErrorHint';
@@ -148,7 +147,7 @@ export function makeWriteFileTool(extraRoots: () => readonly string[] = () => []
         name: 'write_file',
         description:
           'Write content to a file, creating it (and any missing directories) if needed. ' +
-          `Overwrites any existing content. ${CHUNKED_WRITE_ADVICE}`,
+          'Overwrites any existing content.',
         parameters: {
           type: 'object',
           properties: {
@@ -159,7 +158,7 @@ export function makeWriteFileTool(extraRoots: () => readonly string[] = () => []
             },
             content: {
               type: 'string',
-              description: `File content to write. ${CHUNKED_WRITE_ADVICE}`,
+              description: 'File content to write.',
             },
           },
           required: ['path', 'content'],
@@ -190,7 +189,7 @@ export function makeAppendFileTool(extraRoots: () => readonly string[] = () => [
         name: 'append_file',
         description:
           'Append content to the end of a file, creating it (and any missing directories) ' +
-          `if it does not exist. Use this to build a large file across several calls: ${CHUNKED_WRITE_ADVICE}`,
+          'if it does not exist.',
         parameters: {
           type: 'object',
           properties: {

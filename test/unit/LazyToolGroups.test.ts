@@ -36,8 +36,12 @@ const OTHER_MCP_TOOLS = ['fetch_page', 'list_repos'];
  * composes it: everything the registry advertises, minus the lazy tools this
  * conversation has not activated.
  */
-function modelFacingTools(registry: ToolRegistry, conversationId: string | undefined): string[] {
-  const hidden = hiddenLazyToolNames(conversationId);
+function modelFacingTools(
+  registry: ToolRegistry,
+  conversationId: string | undefined,
+  isVisionModel = true,
+): string[] {
+  const hidden = hiddenLazyToolNames(conversationId, new Set(), isVisionModel);
   return registry
     .definitions(ALL_PERMISSIONS)
     .map((definition) => definition.function.name)
@@ -67,6 +71,56 @@ function registryWithHalluscribe(): ToolRegistry {
 
 describe('lazy tool groups', () => {
   beforeEach(() => resetLazyToolGroups());
+
+  it('offers media to vision models and files/background on the first request', () => {
+    const registry = new ToolRegistry();
+    const names = [
+      'view_image',
+      'view_video',
+      'generate_image',
+      'image_search',
+      'send_file',
+      'move_file',
+      'create_directory',
+      'apply_line_edits',
+      'restore_file',
+      'stop_execution',
+      'list_executions',
+      'wait',
+    ];
+    for (const name of names) {
+      registry.register({
+        definition: {
+          type: 'function',
+          function: {
+            name,
+            parameters: { type: 'object', properties: {}, additionalProperties: false },
+          },
+        },
+        permission: 'read',
+        handler: async () => 'ok',
+      });
+      recordNativeLazyTool(name);
+    }
+
+    const firstVisionRequest = modelFacingTools(registry, 'fresh-conversation', true);
+    expect(firstVisionRequest).toEqual(expect.arrayContaining(names));
+    const firstNonVisionRequest = modelFacingTools(registry, 'fresh-conversation', false);
+    expect(firstNonVisionRequest).toEqual(
+      expect.arrayContaining([
+        'move_file',
+        'create_directory',
+        'apply_line_edits',
+        'restore_file',
+        'stop_execution',
+        'list_executions',
+        'wait',
+      ]),
+    );
+    for (const name of ['view_image', 'view_video', 'generate_image', 'image_search', 'send_file']) {
+      expect(firstNonVisionRequest).not.toContain(name);
+    }
+  });
 
   it('withholds every halluscribe schema from a fresh conversation but advertises the loader', () => {
     const tools = modelFacingTools(registryWithHalluscribe(), 'conv-a');
@@ -228,22 +282,15 @@ describe('lazy tool groups', () => {
     expect(hiddenLazyToolNames('conv-a')).not.toContain('ask_user');
     expect(lazyGroupForTool('get_system_status')).toBe('system');
     expect(hiddenLazyToolNames('conv-a')).toContain('get_system_status');
-    // send_file is in media, and media is never vision-gated: a model with no
-    // projector can still deliver a file it never rendered. Only computer_use
-    // hides for a non-vision model, so it must be hidden/visible identically in
-    // both states. render_html_to_image is eager — its preview mode is how the
-    // agent checks a page it wrote, and a hidden tool is never called
-    // (RENDER_PREVIEW_PLAN.md) — so no group or vision state hides it.
+    // Media is eager for vision models and lazy for models without vision.
+    // render_html_to_image is outside the media group and always eager.
     expect(lazyGroupForTool('render_html_to_image')).toBeUndefined();
-    for (const isVisionModel of [true, false]) {
-      expect(hiddenLazyToolNames('conv-a', new Set(), isVisionModel)).toContain('send_file');
-      expect(hiddenLazyToolNames('conv-a', new Set(), isVisionModel)).not.toContain(
-        'render_html_to_image',
-      );
-      activateLazyGroup('conv-a', 'media');
-      expect(hiddenLazyToolNames('conv-a', new Set(), isVisionModel)).not.toContain('send_file');
-      deactivateLazyGroups('conv-a');
-    }
+    expect(hiddenLazyToolNames('conv-a', new Set(), true)).not.toContain('send_file');
+    expect(hiddenLazyToolNames('conv-a', new Set(), false)).toContain('send_file');
+    expect(hiddenLazyToolNames('conv-a', new Set(), true)).not.toContain('render_html_to_image');
+    activateLazyGroup('conv-a', 'media');
+    expect(hiddenLazyToolNames('conv-a', new Set(), false)).not.toContain('send_file');
+    deactivateLazyGroups('conv-a');
     const loader = registry
       .definitions(ALL_PERMISSIONS)
       .find((d) => d.function.name === 'load_tool_group');

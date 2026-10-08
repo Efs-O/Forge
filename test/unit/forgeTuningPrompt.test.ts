@@ -8,6 +8,7 @@ import type { ForgeInstructionsLoader } from '../../src/llm/ForgeInstructionsLoa
 import { buildTemplateContext } from '../../src/sidebar/turnModelBehavior';
 import { injectTurnContext } from '../../src/sidebar/turnContext';
 import { withUnattendedRefusals } from '../../src/sidebar/unattendedConversations';
+import { PLAN_GUIDANCE } from '../../src/tools/planTools';
 
 // docs/plans/FORGE_TUNING_PLAN.md: prompt text that cost rounds and bought nothing.
 
@@ -64,6 +65,41 @@ describe('workspace root line', () => {
 describe('builtin execute template', () => {
   const prompt = new TemplateEngine(builtinDir).render('execute', {});
 
+  it('applies the P1-P13 owner decisions', () => {
+    for (const removed of [
+      'local AI coding assistant running entirely on the user',
+      'Use edit_file with exact old_str matches',
+      'Stop and ask after 3 failed attempts',
+      'considered a hypothesis twice',
+      'Never suggest cloud services or external APIs',
+      'Prefer search_code/find_files/read_file for reading code',
+      'use search_code/find_files/read_file for reading code',
+      'Be brief. Think only as long as the next action needs',
+      'Before you call a change done, run the narrowest check',
+      // Injected-text fixes: the destructive-command outcome is the turn
+      // context's to state (approval, or denial when unattended).
+      'always require the user',
+      'Search many files in one command',
+      'Always read a file before editing it',
+    ]) {
+      expect(prompt).not.toContain(removed);
+    }
+    expect(prompt).toContain("a coding assistant running in the user's VS Code");
+    expect(prompt).toContain(
+      'Read a file before editing it, unless its current content is already in a recent tool result',
+    );
+    expect(prompt).toContain('To locate code, use search_code');
+    expect(prompt).toContain(
+      'Before adding a function, module or dependency to an existing codebase, search for one that already does it.',
+    );
+    expect(prompt).toContain('Never run destructive commands');
+    expect(prompt).toContain('write code into files with write_file or edit_file');
+    expect(prompt).toContain('Final answer: at most 8 lines, no headings');
+    expect(prompt).toContain('Verify the change before calling it done');
+    expect(prompt).toContain('when `render_html_to_image` is available');
+    expect(prompt).toContain('a preview result is a tool result');
+  });
+
   it('lets a user-specified answer format win', () => {
     expect(prompt).toContain('If the user specified a format, follow theirs exactly');
   });
@@ -83,7 +119,16 @@ describe('unattended turns', () => {
     const content = String(injectTurnContext(user, { unattended: true })[0]?.content);
     expect(content).toContain('denied, not sent for approval');
     expect(content).toContain('delete_file');
+    // One call with paths, not one call per file (minecraft r1: 19 deletes).
+    expect(content).toContain("one delete_file call's paths");
+    expect(content).not.toContain('one by one');
     expect(injectTurnContext(user, {})).toEqual(user);
+  });
+
+  it("does not call the model's own plan notes an authoritative specification", () => {
+    expect(PLAN_GUIDANCE).not.toContain('authoritative specification');
+    expect(PLAN_GUIDANCE).toContain("your record of this task's requirements");
+    expect(PLAN_GUIDANCE).toContain('change it with update_plan');
   });
 
   it('withholds ask_user, keeping any other refusal', () => {

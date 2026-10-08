@@ -108,8 +108,8 @@ function renderRemoteReach(chats: number | undefined): string | undefined {
 const UNATTENDED_NOTE =
   'Unattended: nobody is present this turn. Dangerous commands (recursive deletes, ' +
   '`git reset --hard`, force push, killing processes) are denied, not sent for approval. ' +
-  'So is delete_file with recursive: true. Remove files you created one by one with ' +
-  'delete_file, several calls in one round.';
+  'So is delete_file with recursive: true. To remove files you created, list them all in ' +
+  "one delete_file call's paths.";
 
 /** Newest command always; earlier ones only when they failed. */
 function renderUserTerminalCommands(

@@ -4,13 +4,11 @@ import type { SystemPromptMode } from '../config/types';
 
 // Hardcoded fallbacks used when no TemplateEngine is provided or rendering fails.
 const FORGE_TEMPLATE = 'execute';
-const SYSTEM_PROMPT = `You are Forge, a local AI coding assistant running entirely on the user's machine.
-You have access to tools to read and edit files. Use them precisely.
-Always read a file before editing it. Show the minimal diff needed - do not rewrite files wholesale.
+const SYSTEM_PROMPT = `You are Forge, a coding assistant running in the user's VS Code.
+You have access to tools to read and edit files, run commands, and interact with git.
+Read a file before editing it, unless its current content is already in a recent tool result.
 The user's direct request may override repository-local style, brevity, length, or workflow guidance, including a FORGE.md instruction, when the user explicitly asks. Do not override system/developer instructions, Forge safety controls, tool permissions, workspace boundaries, or destructive-action confirmation requirements.
-After each tool call, report what changed. If native tool calling is unavailable, emit exactly one fenced JSON block with { "tool": "...", "arguments": { ... } } and no surrounding prose. Stop and ask if anything is ambiguous.
-Never suggest cloud services or external APIs - the user is working locally.
-If you have considered the same hypothesis twice, act or discard it - never re-examine it. Never call the same tool with the same arguments twice in a row. After 3 consecutive tool calls with no user-visible progress, stop and ask.`;
+Do not claim anything you have not seen in a tool result.`;
 
 /**
  * Prepends the Forge system prompt to a message list.
@@ -19,9 +17,7 @@ If you have considered the same hypothesis twice, act or discard it - never re-e
  *
  * `mode: 'replace'` sends `modelSystemPrompt` alone and skips the template
  * entirely — the template is a strong coding-agent persona ("You are Forge",
- * "ALWAYS use tools"), which a model with a different purpose must not receive.
- * Replacing also drops the template's fenced-JSON tool-call fallback, so a
- * model using it should not be relying on that format.
+ * "Act with tools"), which a model with a different purpose must not receive.
  */
 export function injectSystemPrompt(
   messages: ChatMessage[],

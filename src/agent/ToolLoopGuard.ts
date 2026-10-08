@@ -36,10 +36,9 @@ export const MAX_LOOP_RECOVERIES = 2;
 /** User-role nudge sent when a loop-guard stop is retried automatically instead of ending the turn. */
 export function loopRecoveryNudge(reason: string, attemptsLeft: number): string {
   return (
-    `${reason} Forge is continuing this turn automatically instead of stopping, so nobody has to be ` +
-    `watching (${attemptsLeft} more automatic ${attemptsLeft === 1 ? 'retry' : 'retries'} left after this). ` +
-    "Whatever you decide to do next, it can't be that same call again — you already have its result. " +
-    'Use your own judgment about what actually moves the task forward from here.'
+    `${reason} The turn continues (${attemptsLeft} more automatic ` +
+    `${attemptsLeft === 1 ? 'retry' : 'retries'} left after this). Your next step can't be that ` +
+    'same call again — you already have its result. Take the step that moves the task forward.'
   );
 }
 

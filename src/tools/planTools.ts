@@ -67,17 +67,16 @@ export function renderPlan(items: readonly PlanItem[]): string {
  * Deterministic and constant, so it costs no cache churn between rounds.
  */
 export const PLAN_GUIDANCE =
-  'The plan above is the authoritative specification for this work. ' +
-  'Conversation summaries, tool-limit continuations, and test failures are ' +
-  'navigation aids only — they do not replace its invariants or acceptance ' +
-  'criteria. Re-read it after any compaction or forced continuation and before ' +
-  'declaring the work done. Do not let the shape of existing code override an ' +
-  'explicit plan constraint: when the plan calls for a different lifetime, ' +
-  'ordering, error boundary, or ownership model, restructure the code and test ' +
-  'that distinction directly. A green test suite is necessary but is not proof ' +
-  'of conformance — check every requirement and edge case against a test or a ' +
-  'named manual step, including the failure paths that are easy to omit when ' +
-  'following the happy path.';
+  "The plan above is your record of this task's requirements. Conversation " +
+  'summaries, tool-limit continuations, and test failures do not replace it: ' +
+  're-read it after any compaction or forced continuation and before declaring ' +
+  'the work done. Keep it current — when an item turns out to be wrong, change ' +
+  'it with update_plan instead of working around it. A requirement the user gave ' +
+  'is not overridden by the shape of existing code: when it calls for a different ' +
+  'lifetime, ordering, error boundary, or ownership model, restructure the code ' +
+  'and test that distinction directly. A green test suite is not proof of ' +
+  'conformance — check every requirement and edge case, including the failure ' +
+  'paths, against a test or a named manual step.';
 
 export function makeUpdatePlanTool(): RegisteredTool {
   return {

@@ -30,9 +30,3 @@ auto_compact:
 
 defaults:
   sampling: { temperature: 0.6, top_p: 0.95, max_tokens: 200000 }
-  system_prompt: |
-    Be brief. Think only as long as the next action needs; do not re-verify what a tool result already showed.
-    Batch independent tool calls in one response. Search many files in one command, not one call per file.
-    When the task is done and the evidence is in hand, stop and give a short answer.
-    Before you call a change done, run the narrowest check that proves it (the relevant test, build or a re-read of the edited lines); report what you ran and what it showed.
-    Do not claim anything you have not seen in a tool result.
