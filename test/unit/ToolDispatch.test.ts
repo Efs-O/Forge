@@ -416,6 +416,44 @@ describe('ToolDispatch', () => {
     }
   });
 
+  it("draws each diff card against the file before that call, not the turn's checkpoint", async () => {
+    // A write then two appends in one turn rendered NEW +3, NEW +5, NEW +6:
+    // running totals badged as new files. Each card is that call's change.
+    const target = path.join(WS, `tool-dispatch-percall-${Date.now()}.txt`);
+    fs.mkdirSync(path.dirname(target), { recursive: true });
+    fs.rmSync(target, { force: true });
+    (checkpoints.readSnapshotContent as ReturnType<typeof vi.fn>).mockReturnValue(null);
+    const writes = ['a\nb\nc\n', 'd\ne\n', 'f\n'];
+    let call = 0;
+    toolRegistry.register({
+      definition: {
+        type: 'function',
+        function: { name: 'append_file', description: 'Append', parameters: { type: 'object' } },
+      },
+      permission: 'write',
+      mutation: { paths: () => [target], showDiff: true },
+      handler: vi.fn(async () => {
+        fs.appendFileSync(target, writes[call++]!);
+        return 'ok';
+      }),
+    });
+
+    try {
+      for (let i = 0; i < writes.length; i++) {
+        await dispatch.dispatch([makeToolCall('append_file', { path: target })], allowed, [] as never);
+      }
+    } finally {
+      fs.rmSync(target, { force: true });
+    }
+
+    const cards = post.mock.calls
+      .map(([msg]) => msg as { type: string; isNew: boolean; hunks: Array<{ lines: Array<{ kind: string }> }> })
+      .filter((msg) => msg.type === 'fileDiff');
+    const added = cards.map((c) => c.hunks.flatMap((h) => h.lines).filter((l) => l.kind === 'added').length);
+    expect(cards.map((c) => c.isNew)).toEqual([true, false, false]);
+    expect(added).toEqual([3, 2, 1]);
+  });
+
   it('reports a directory move as success instead of the diff render EISDIR', async () => {
     // `move_file` renames directories fine, but the post-mutation diff read the
     // destination with readFileSync and threw EISDIR, which the dispatcher

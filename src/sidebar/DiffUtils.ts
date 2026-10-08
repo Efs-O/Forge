@@ -5,13 +5,23 @@ const CONTEXT_SIZE = 3;
 export const MAX_LINES = 500;
 
 /**
+ * A file's lines. The newline that ends the last line does not start another:
+ * a plain split counted a phantom empty line, so a new 298-line file showed
+ * +299 here while the `git diff` path (files over MAX_LINES) showed +298.
+ */
+function splitLines(text: string): string[] {
+  if (text === '') return [];
+  return (text.endsWith('\n') ? text.slice(0, -1) : text).split('\n');
+}
+
+/**
  * Compute a structured line-level diff between two strings.
  * Returns null when either input exceeds MAX_LINES (too large to diff inline).
  * Returns an empty array when the files are identical.
  */
 export function computeDiff(before: string, after: string): DiffHunk[] | null {
-  const a = before === '' ? [] : before.split('\n');
-  const b = after === '' ? [] : after.split('\n');
+  const a = splitLines(before);
+  const b = splitLines(after);
 
   if (a.length > MAX_LINES || b.length > MAX_LINES) return null;
 

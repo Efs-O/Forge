@@ -26,6 +26,8 @@
 
 ### Tool fixes and fewer prompt restrictions
 
+- A file-change card shows what that one call changed. A file written and then appended to twice in one turn showed `NEW +299`, `NEW +709`, `NEW +880`: running totals since the turn began, each marked as a new file. Now only the first card is NEW, and each card counts the lines that call added or removed. Keep/Undo still covers the whole turn.
+- A new file's line count no longer includes an extra line for its final newline (a 298-line file showed +299).
 - A tool call with arguments that are not valid JSON no longer ends the turn. The agent gets an error that names the tool, shows the start of what it sent and lists the required fields and the length of what it sent; the session log keeps the raw text.
 - `delete_file` takes `paths` (up to 50) and reports each one. A call that deleted nothing is an error, and the approval dialog lists every target.
 - When `edit_file`'s `old_str` does not match, the error includes the current numbered lines around the closest match, so the agent can retry without reading the file again.

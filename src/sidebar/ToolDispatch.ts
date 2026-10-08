@@ -5,6 +5,7 @@ import { spawnSync } from 'child_process';
 import * as vscode from 'vscode';
 import type { HostToWebview } from './messageBridge';
 import { computeDiff, parseUnifiedDiff } from './DiffUtils';
+import { readCallDiffBase } from './callDiffBase';
 import type { DiffHunk } from './messageBridge';
 import type { ChatMessage, ToolCall } from '../llm/types';
 import type { CheckpointStack } from '../checkpoint/CheckpointStack';
@@ -302,6 +303,7 @@ export class ToolDispatch {
         const rawMutationPaths = reg.mutation?.paths(args) ?? [];
         const mutationPaths = rawMutationPaths.map((p) => resolveToolPath(p));
         this.snapshotPaths(mutationPaths, checkpoint);
+        const callBase = reg.mutation?.showDiff ? readCallDiffBase(mutationPaths) : undefined;
 
         result = await this.toolRegistry.dispatch(tc.function.name, args, allowed, {
           beforeMutate: (paths) => {
@@ -328,7 +330,7 @@ export class ToolDispatch {
             for (const resolved of mutationPaths) {
               try {
                 this.applyDiffDecorations(resolved, checkpoint);
-                this.postFileDiff(resolved, convId, checkpoint, tc.id, recordFileDiff);
+                this.postFileDiff(resolved, callBase, convId, checkpoint, tc.id, recordFileDiff);
               } catch (err) {
                 log.error(`[ToolDispatch] diff render failed for ${resolved}: ${String(err)}`);
               }
@@ -402,8 +404,10 @@ export class ToolDispatch {
     }
   }
 
+  /** The card shows this call's change: against `callBase`, not the turn checkpoint (see callDiffBase.ts). */
   private postFileDiff(
     resolvedPath: string,
+    callBase: Map<string, string | null> | undefined,
     convId?: string,
     checkpoint?: CheckpointSession,
     toolCallId?: string,
@@ -414,12 +418,13 @@ export class ToolDispatch {
       : this.checkpoints.readSnapshotContent(resolvedPath);
     if (beforeContent === undefined) return;
     if (isExistingDirectory(resolvedPath)) return;
+    const base = callBase?.has(resolvedPath) ? (callBase.get(resolvedPath) ?? null) : beforeContent;
 
     const isDeleted = !fs.existsSync(resolvedPath);
     const afterContent = isDeleted ? '' : fs.readFileSync(resolvedPath, 'utf8');
-    const isNew = beforeContent === null;
-    let hunks = !isDeleted ? computeDiff(beforeContent ?? '', afterContent) : null;
-    if (hunks === null && !isDeleted) hunks = gitDiffLarge(beforeContent ?? '', afterContent);
+    const isNew = base === null;
+    let hunks = !isDeleted ? computeDiff(base ?? '', afterContent) : null;
+    if (hunks === null && !isDeleted) hunks = gitDiffLarge(base ?? '', afterContent);
     const relPath = vscode.workspace.asRelativePath(resolvedPath);
     if (toolCallId) {
       recordFileDiff?.({ toolCallId, filePath: relPath, hunks, isNew, isDeleted });

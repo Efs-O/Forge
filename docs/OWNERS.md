@@ -109,6 +109,7 @@ overlaps with an existing owner, extend the owner instead.
 | Chat attachment bytes on disk (thumbnails)           | `src/sidebar/ChatAttachmentStore.ts`     |
 | In-editor green/red diff decorations                 | `src/sidebar/DiffDecorations.ts`         |
 | Diff computation + unified-diff parsing              | `src/sidebar/DiffUtils.ts`               |
+| Per-call diff-card base (file before one tool call) | `src/sidebar/callDiffBase.ts`            |
 | Session transcript logging (~/.forge)                | `src/sidebar/SessionLogger.ts`           |
 | Replay-aware session-log row reading                 | `src/sessions/sessionLogRows.ts`         |
 | Tool visibility and shell-workaround audit           | `scripts/tool-visibility-audit.mjs`       |
