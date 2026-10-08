@@ -211,7 +211,7 @@ describe('lazy tool groups', () => {
       'get_power_info',
       'remember',
       'read_notebook',
-      'ask_live_session',
+      'ask_agent',
       'ask_user',
       'notify_user',
       'get_system_status',
@@ -266,16 +266,15 @@ describe('lazy tool groups', () => {
       'halluscribe',
     ]);
     for (const name of [
-      'ask_live_session',
+      'ask_agent',
       'manage_jobs',
       'notify_user',
       'ask_local_agent',
-      'tell_live_session',
       'list_delegation_targets',
     ]) {
       expect(lazyGroupForTool(name)).toBe('agents');
     }
-    expect(hiddenLazyToolNames('conv-a')).toContain('ask_live_session');
+    expect(hiddenLazyToolNames('conv-a')).toContain('ask_agent');
     expect(hiddenLazyToolNames('conv-a')).toContain('notify_user');
     expect(hiddenLazyToolNames('conv-a')).not.toContain('manage_jobs');
     expect(lazyGroupForTool('ask_user')).toBeUndefined();

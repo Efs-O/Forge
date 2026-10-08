@@ -83,6 +83,14 @@ export class MeshSessionProvider implements SessionProvider {
     return this.factory.getOwnedCodex(alias);
   }
 
+  adapterForSession(
+    kind: 'claude' | 'codex' | 'copilot',
+    sessionId: string,
+  ): MeshAdapter | undefined {
+    if (kind === 'copilot') return this.copilotOwned.adapterForSession(sessionId);
+    return this.factory.adapterForSession(kind, sessionId);
+  }
+
   isOwned(alias: string): boolean {
     return this.factory.isOwned(alias) || this.copilotOwned.isOwned(alias);
   }

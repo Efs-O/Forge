@@ -4,7 +4,7 @@ import { CacheTypeSchema, GroupSchema } from './schemaShared';
 import { VoiceConfigSchema } from './voiceSchema';
 import { ImageGenerationConfigSchema } from './imageGenerationSchema';
 import { JobsConfigSchema } from './jobsSchema';
-import { AgentBusConfigSchema } from './agentBusSchema';
+import { AgentBusConfigSchema, AgentLinksConfigSchema } from './agentBusSchema';
 import { ImageSearchConfigSchema } from './imageSearchSchema';
 import {
   BrowserPermissionSchema,
@@ -173,6 +173,10 @@ export const ForgeConfigSchema = z
     image_generation: ImageGenerationConfigSchema,
     jobs: JobsConfigSchema,
     agent_bus: AgentBusConfigSchema,
+    agent_links: AgentLinksConfigSchema.default({
+      open_panel: 'every_ask',
+      panel_live_timeout_ms: 20_000,
+    }),
     image_search: ImageSearchConfigSchema,
     log_level: z.enum(['trace', 'debug', 'info', 'warn', 'error']).optional(),
     // v0.3 additions

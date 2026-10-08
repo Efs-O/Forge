@@ -25,6 +25,7 @@ const DEFAULT_PERMISSIONS: NonNullable<ForgeConfig['permissions']> = {
  * context leaves.
  */
 const STARTER_AGENT_SETTINGS = {
+  agent_links: { open_panel: 'every_ask', panel_live_timeout_ms: 20_000 },
   forge_instructions: { auto_create: true },
   auto_compact: { enabled: true, at: 0.85, resume: true },
   defaults: {

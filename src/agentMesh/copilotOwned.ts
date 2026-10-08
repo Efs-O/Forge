@@ -59,6 +59,13 @@ export class CopilotOwnedSessions {
     return this.owned.has(alias.trim().toLowerCase());
   }
 
+  adapterForSession(sessionId: string): MeshAdapter | undefined {
+    for (const [alias, session] of this.owned) {
+      if (session.confirmedSessionId === sessionId) return this.adapter(alias, session);
+    }
+    return undefined;
+  }
+
   /**
    * Resolve the adapter for an alias: an in-memory owned session, else a
    * resume/creation (M3). A session another LIVE window owns is never

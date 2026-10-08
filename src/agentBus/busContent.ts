@@ -38,7 +38,7 @@ Codex message each other, each message shown in the receiving window.
 ## Doors
 
 - **A Claude Code session**: its own peer pipe. Claude sessions use
-  SendMessage; Forge's \`ask_live_session\` writes to the pipe directly. A
+  SendMessage; Forge's \`ask_agent\` writes to the pipe directly. A
   session in bypass-permissions mode holds a Forge message for approval unless
   \`"crossSessionInbound": "accept"\` is set in ~/.claude/settings.json.
 - **Codex**: \`codex queue --thread <id> --message <text>\`.
@@ -211,7 +211,7 @@ export function copilotMeshPreamble(): string {
   );
 }
 
-/** What a Claude session receives for one `ask_live_session` question. */
+/** What a Claude session receives for one `ask_agent` question. */
 export function claudeQuestion(
   scriptPath: string,
   id: string,
@@ -237,19 +237,19 @@ export function claudeQuestion(
 }
 
 /** The prompt an inbound message becomes in Forge's chat. */
-/** Default live-session reply hint: alias target or named Claude session. */
+/** Reply hint for a session linked to the current chat. */
 function inboundHint(from: string): string {
   const alias = from.trim().toLowerCase();
   if (alias === 'claude' || alias === 'codex' || alias === 'copilot') {
-    return `\`target: "${alias}"\``;
+    return `\`agent: "${alias}"\``;
   }
-  return `\`session: "${from}"\` (a Claude session)`;
+  return 'The chat must link the sender first, then use `agent: "claude"`.';
 }
 
 export function forgeInboundPrompt(from: string, text: string, replyInChat = false): string {
   const hint = replyInChat
-    ? 'Answer in this Forge chat. The sender will read your answer with `forge.sh view`. Do not call `ask_live_session` for this reply.'
-    : `To answer, call \`ask_live_session\` with ${inboundHint(from)}.`;
+    ? 'Answer in this Forge chat. The sender will read your answer with `forge.sh view`. Do not call `ask_agent` for this reply.'
+    : `To answer, call \`ask_agent\` with ${inboundHint(from)}.`;
   return `**${from} says:**\n\n${text.trim()}\n\n` + `_(Agent-bus message. ${hint})_`;
 }
 

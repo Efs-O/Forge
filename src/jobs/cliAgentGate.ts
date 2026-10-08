@@ -13,8 +13,7 @@ import type { RunRow } from './jobSchema';
  * automated Codex. So it is off until the user consents once: the consent is
  * the approval card on `manage_jobs create/update`, which writes the flag.
  * Three doors, one rule: creating such a job, running one, and a job's turn
- * delegating to a CLI agent (`ask_local_agent`, `ask_live_session`,
- * `tell_live_session`). Attended chat is never gated.
+ * delegating through `ask_agent`. Attended chat is never gated.
  */
 
 export const CLI_AGENT_CONSENT_DETAIL =

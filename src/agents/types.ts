@@ -28,12 +28,15 @@ export interface CliParseContext {
   emitText(text: string): void;
   emitStatus(text: string): void;
   setFinal(text: string): void;
+  appendFinal(text: string): void;
   setError(text: string): void;
   setSessionId(sessionId: string): void;
 }
 
 export interface CliInvocationOptions {
   sessionId?: string;
+  createSessionId?: string;
+  sessionTitle?: string;
   model?: string;
 }
 

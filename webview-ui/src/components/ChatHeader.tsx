@@ -74,6 +74,15 @@ export function ChatHeader({
         )}
         <div id="chats-toolbar-actions">
           <button
+            id="agent-link-toolbar-btn"
+            type="button"
+            aria-label="Link an agent session"
+            title="Link to…"
+            onClick={onLinkAgent}
+          >
+            🔗
+          </button>
+          <button
             id="history-toolbar-btn"
             type="button"
             aria-label="Conversation history"
@@ -94,30 +103,30 @@ export function ChatHeader({
           </button>
         </div>
       </header>
-      <div id="agent-links-strip" aria-label="Linked agent sessions">
-        {Object.values(agentLinks ?? {})
-          .filter((item) => item !== undefined)
-          .map((item) => (
-            <div className="agent-link-row" key={item.kind}>
-              <span
-                className="agent-link-label"
-                title={`${item.title}\nLast used ${new Date(item.lastUsedAt).toLocaleString()}`}
-              >
-                {item.kind} · {item.title} · Last used {new Date(item.lastUsedAt).toLocaleString()}
-              </span>
-              <button
-                type="button"
-                title={`Unlink ${item.kind}`}
-                onClick={() => onUnlinkAgent(item.kind)}
-              >
-                Unlink
-              </button>
-            </div>
-          ))}
-        <button id="agent-link-new" type="button" onClick={onLinkAgent}>
-          Link to…
-        </button>
-      </div>
+      {Object.values(agentLinks ?? {}).some((item) => item !== undefined) && (
+        <div id="agent-links-strip" aria-label="Linked agent sessions">
+          {Object.values(agentLinks ?? {})
+            .filter((item) => item !== undefined)
+            .map((item) => (
+              <div className="agent-link-row" key={item.kind}>
+                <span
+                  className="agent-link-label"
+                  title={`${item.title}\nLast used ${new Date(item.lastUsedAt).toLocaleString()}`}
+                >
+                  {item.kind} · {item.title} · Last used{' '}
+                  {new Date(item.lastUsedAt).toLocaleString()}
+                </span>
+                <button
+                  type="button"
+                  title={`Unlink ${item.kind}`}
+                  onClick={() => onUnlinkAgent(item.kind)}
+                >
+                  Unlink
+                </button>
+              </div>
+            ))}
+        </div>
+      )}
     </>
   );
 }

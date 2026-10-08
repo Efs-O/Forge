@@ -354,7 +354,14 @@ export async function runModelTurn(
             ctx.onTranscriptChanged?.(conv);
           },
           ctx.onTellArrived ? (callback) => ctx.onTellArrived!(conv.id, callback) : undefined,
-          { modelName: model.name, isVisionModel, outputLimits },
+          {
+            modelName: model.name,
+            isVisionModel,
+            outputLimits,
+            conversation: conv,
+            ...(checkpoint ? { checkpoint } : {}),
+            persistConversation: () => ctx.onTranscriptChanged?.(conv),
+          },
         );
         mirrorLiveSessionAnswers(conv.id, toolCalls, messages, ctx.emitAgentProgress);
         // Token bar ticks in `onUsage`: a tool result moves no measured context.

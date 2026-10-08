@@ -16,7 +16,7 @@ export type {
 
 import type { ToolPermission } from '../tools/ToolRegistry';
 import type { EmbeddingPromptStyle } from '../search/embeddingPrompts';
-import type { AgentBusConfig } from './agentBusSchema';
+import type { AgentBusConfig, AgentLinksConfig } from './agentBusSchema';
 import type { RemoteContactsConfig } from './RemoteContactsConfig';
 /** Sampling parameter overrides shared by models, profiles, and defaults. */
 export interface SamplingConfig {
@@ -362,6 +362,7 @@ export interface ForgeConfig {
   /** Persistent agent jobs. Absent means no scheduler, no lease, no tool. */
   jobs?: JobsConfig;
   agent_bus?: AgentBusConfig;
+  agent_links: AgentLinksConfig;
   /** Reverse image search. Absent means `image_search` is not advertised. */
   image_search?: ImageSearchConfig;
   log_level?: 'trace' | 'debug' | 'info' | 'warn' | 'error';

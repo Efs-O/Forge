@@ -158,7 +158,7 @@ describe('ask_local_agent schema', () => {
   it('states that delegation does not require terminal permission', () => {
     const { service } = makeMockService();
     const tool = makeLocalAgentTool(service, () => localConfig);
-    expect(tool.definition.function.description).toContain('only the delegate permission');
+    expect(tool.definition.function.description).toContain('delegate permission');
   });
 });
 
@@ -384,18 +384,16 @@ describe('describeDelegationTargets', () => {
     expect(describeDelegationTargets(cfg)).toContain('"qwen/qwen3.8-max" (cloud)');
   });
 
-  it('flags cli agents as carrying their own tools', () => {
+  it('does not expose CLI targets through local delegation discovery', () => {
     const cfg = makeConfig([{ name: 'claude-code', provider: 'cli', cli: 'claude' }]);
-    expect(describeDelegationTargets(cfg)).toContain('"claude-code" (CLI agent, has its own tools)');
+    expect(describeDelegationTargets(cfg)).not.toContain('claude-code');
   });
 
   it('omits ineligible targets and returns empty when none are eligible', () => {
     expect(describeDelegationTargets(ineligibleConfig)).toBe('');
   });
 
-  // The whole list used to live in the schema on every turn. Only the CLI
-  // agents are named there now; the rest is one list_delegation_targets away.
-  it('names only the cli agents in the model arg description ToolRegistry advertises', () => {
+  it('keeps CLI targets out of the local and cloud tool description', () => {
     const { service } = makeMockService();
     const registry = new ToolRegistry();
     registry.register(makeLocalAgentTool(service, () => mixedConfig));
@@ -405,15 +403,15 @@ describe('describeDelegationTargets', () => {
     const params = def?.function.parameters as {
       properties: { model: { description: string } };
     };
-    expect(params.properties.model.description).toContain('"claude-code"');
+    expect(params.properties.model.description).not.toContain('"claude-code"');
     expect(params.properties.model.description).toContain('list_delegation_targets');
     expect(params.properties.model.description).not.toContain('"llama"');
-    expect(params.properties.model.description).toContain('do NOT read');
+    expect(params.properties.model.description).toContain('Do NOT read');
   });
 
-  it('ranks cli agents above cloud above local, and warns on the local section', () => {
+  it('ranks cloud above local and warns on the local section', () => {
     const listed = describeDelegationTargets(mixedConfig);
-    expect(listed.indexOf('"claude-code"')).toBeLessThan(listed.indexOf('"openrouter-model"'));
+    expect(listed).not.toContain('"claude-code"');
     expect(listed.indexOf('"openrouter-model"')).toBeLessThan(listed.indexOf('"llama"'));
     expect(listed).toContain('VRAM');
   });
@@ -440,9 +438,7 @@ describe('describeDelegationTargets', () => {
     expect(params.properties.model.description).not.toContain('"llama" (local)');
   });
 
-  // ToolRegistry.definitions() re-reads `definition` every turn; a config
-  // reload must show up without re-registering the tool.
-  it('refreshes when the config changes', () => {
+  it('does not add CLI agent names to the local and cloud schema on config reload', () => {
     const { service } = makeMockService();
     let cfg = mixedConfig;
     const tool = makeLocalAgentTool(service, () => cfg);
@@ -452,7 +448,7 @@ describe('describeDelegationTargets', () => {
           properties: { model: { description: string } };
         }
       ).properties.model.description;
-    expect(read()).toContain('"claude-code"');
+    expect(read()).not.toContain('"claude-code"');
     cfg = cloudOnlyConfig;
     expect(read()).not.toContain('"claude-code"');
   });
@@ -463,7 +459,7 @@ describe('describeDelegationTargets', () => {
 describe('list_delegation_targets', () => {
   it('returns the ranked list, and says so when there is nothing to list', async () => {
     const listed = await makeListDelegationTargetsTool(() => mixedConfig).handler({});
-    expect(listed).toContain('"claude-code"');
+    expect(listed).not.toContain('"claude-code"');
     expect(listed).toContain('"llama"');
     expect(await makeListDelegationTargetsTool(() => ineligibleConfig).handler({})).toContain(
       'No delegation targets',
@@ -491,9 +487,8 @@ describe('ask_local_agent approval', () => {
     expect(approvalFor('openrouter-model')).toBeUndefined();
   });
 
-  // A CLI agent runs with full access and none of its edits pass Forge's gate.
-  it('asks before a cli target, naming its full access', () => {
-    expect(approvalFor('claude-code')?.detail).toContain('full access');
+  it('directs CLI targets to ask_agent', () => {
+    expect(approvalFor('claude-code')?.detail).toContain('ask_agent');
   });
 
   // A fuzzy alias or `model@profile` still resolves in the handler, so an

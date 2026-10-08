@@ -51,8 +51,8 @@ import type { BackendProcess } from '../system/SystemReport';
 import { makeLoadToolGroupTool } from './toolGroupTools';
 import { makeInstallLlamacppTool } from './llamacppInstallTool';
 import { makeManageJobsTool } from './jobTools';
-import { makeLiveSessionTool } from './liveSessionTool';
-import { makeTellLiveSessionTool } from './tellLiveSessionTool';
+import { makeAskAgentTool } from './askAgentTool';
+import { makeAskAgentRuntime } from '../agentLinks/askAgentRuntime';
 import { makeReadToolResultTool } from './toolResultTools';
 import { makeUpdatePlanTool } from './planTools';
 import { makeGitReadTool } from './gitReadTool';
@@ -267,13 +267,12 @@ export function registerAllTools(
   // without it keeps the tool list unchanged.
   if (getConfig) {
     registry.register(
-      makeLiveSessionTool({
+      makeAskAgentTool({
         getConfig,
-        workspaceRoots: () => (vscode.workspace.workspaceFolders ?? []).map((f) => f.uri.fsPath),
+        runtime: makeAskAgentRuntime({ getConfig }),
+        workspaceRoot: () => vscode.workspace.workspaceFolders?.[0]?.uri.fsPath ?? '',
       }),
     );
-    // The one-way push (P0): a distinct typed primitive, not ask with wait:false.
-    registry.register(makeTellLiveSessionTool({ getConfig }));
   }
 
   // Browser tools (plan §4.2): registered when a config getter exists; the

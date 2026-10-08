@@ -2,6 +2,8 @@ import type { ChatMessage, ContentPart, ToolDefinition } from '../llm/types';
 import type { PlanItem } from '../sidebar/sessionTypes';
 import { recordNativeLazyTool } from './lazyToolGroups';
 import type { ToolOutputLimits } from './toolOutputLimits';
+import type { ConversationRuntime } from '../sidebar/sessionTypes';
+import type { CheckpointSession } from '../checkpoint/CheckpointStack';
 
 export type ToolPermission =
   | 'read'
@@ -36,10 +38,9 @@ export interface ToolHandler {
 
 export interface ToolHandlerContext {
   beforeMutate(paths: string[]): void;
-  /** Caller's AbortSignal, threaded through for long-running tools (e.g. ask_local_agent). */
+  /** Caller's AbortSignal, threaded through for long-running tools. */
   abortSignal?: AbortSignal;
-  /** Conversation the call belongs to. ask_local_agent keys warm CLI agent
-   *  sessions on it so repeat delegations reuse one process. */
+  /** Conversation the call belongs to. */
   conversationId?: string;
   /** Current call id, used by shell spill files. */
   toolCallId?: string;
@@ -62,6 +63,10 @@ export interface ToolHandlerContext {
    */
   setPlan?: (items: PlanItem[]) => void;
   tellArrived?: (callback: () => void) => () => void;
+  /** Active chat/checkpoint supplied by ModelTurn for session-scoped agent tools. */
+  conversation?: ConversationRuntime;
+  checkpoint?: CheckpointSession;
+  persistConversation?: () => void;
 }
 
 export interface ToolMutation {

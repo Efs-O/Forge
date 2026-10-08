@@ -90,6 +90,10 @@ overlaps with an existing owner, extend the owner instead.
 | Webview HTML builder                                 | `src/sidebar/WebviewBuilder.ts`          |
 | Multi-conversation session types + persist           | `src/sidebar/sessionTypes.ts`            |
 | Per-chat agent links + session reverse index (sole `agentLinks` writer) | `src/agentLinks/chatAgentLinks.ts` |
+| Linked-agent ask lifecycle and delivery policy | `src/agentLinks/askAgentService.ts` |
+| VS Code panel opening + linked-agent runtime | `src/agentLinks/askAgentRuntime.ts` |
+| `ask_agent` strict tool boundary | `src/tools/askAgentTool.ts` |
+| Copilot one-shot CLI argv and output parsing | `src/agents/adapters/copilotAdapter.ts` |
 | Conversation titles: placeholder + derive            | `src/sidebar/conversationTitle.ts`       |
 | Image content parts: count/strip/age out             | `src/sidebar/imageParts.ts`              |
 | Missing-image notices to the user                    | `src/sidebar/imageNotices.ts`            |

@@ -9,8 +9,8 @@ const LAZY_GROUP_BY_SERVER: ReadonlyMap<string, string> = new Map([['halluscribe
 /**
  * Membership follows the 2026-09-30 audit of 15,676 Qwen calls across 86+
  * sessions: first use of a grouped tool costs a full conversation re-read
- * (~100 s at 70K). Counts: ask_live_session 152, manage_jobs 73, notify_user
- * 67, ask_local_agent 56, ask_user 34, tell_live_session 21,
+ * (~100 s at 70K). Counts: ask_agent 152, manage_jobs 73, notify_user
+ * 67, ask_local_agent 56, ask_user 34,
  * list_delegation_targets 14, get_system_status 11. The agent tools among them
  * are grouped anyway, in `agents`, because they matter to remote-control
  * conversations, not coding ones: a profile that uses them keeps them eager
@@ -83,14 +83,9 @@ const NATIVE_GROUP_BY_TOOL: ReadonlyMap<string, string> = new Map([
   ),
   ...['remember', 'recall', 'list_memories', 'forget'].map((name) => [name, 'memory'] as const),
   ...['stop_execution', 'list_executions', 'wait'].map((name) => [name, 'background'] as const),
-  ...[
-    'ask_live_session',
-    'tell_live_session',
-    'ask_local_agent',
-    'list_delegation_targets',
-    'manage_jobs',
-    'notify_user',
-  ].map((name) => [name, 'agents'] as const),
+  ...['ask_agent', 'ask_local_agent', 'list_delegation_targets', 'manage_jobs', 'notify_user'].map(
+    (name) => [name, 'agents'] as const,
+  ),
   ['get_system_status', 'system'],
 ]);
 

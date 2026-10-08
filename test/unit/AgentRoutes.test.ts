@@ -325,7 +325,7 @@ describe('routes', () => {
 
     const claude = await post('/agent/message?from=claude', 'question');
     expect(claude.status).toBe(202);
-    expect(accepted[1]).toContain('call `ask_live_session` with `target: "claude"`');
+    expect(accepted[1]).toContain('call `ask_agent` with `agent: "claude"`');
   });
 
   it('passes --unattended through as an inbox option', async () => {
@@ -661,7 +661,7 @@ describe('forge.sh against the routes', () => {
     });
     routes.setEnabled(true);
     routes.onListening(base);
-    const steered = await runClient(['steer', 'claude', 'forge'], 'use ask_live_session');
+    const steered = await runClient(['steer', 'claude', 'forge'], 'use ask_agent');
     expect(JSON.parse(steered.out.trim())).toMatchObject({
       queued: expect.any(Number),
       id: expect.any(String),

@@ -19,6 +19,8 @@ export interface CliAgentRunOptions {
   argsPrefix?: string[];
   task: string;
   sessionId?: string;
+  createSessionId?: string;
+  sessionTitle?: string;
   model?: string;
   cwd: string;
   timeoutMs?: number;
@@ -27,6 +29,7 @@ export interface CliAgentRunOptions {
   /** Raw protocol capture for headless integrations; the adapter still owns parsing. */
   onStdoutLine?: (line: string) => void;
   onStderr?: (text: string) => void;
+  onSessionId?: (sessionId: string) => void;
 }
 
 /**
@@ -41,7 +44,7 @@ export class CliAgentDriver {
     const adapter = getCliAdapter(options.cliName);
     let finalText: string | undefined;
     let errorText: string | undefined;
-    let sessionId: string | undefined;
+    let sessionId: string | undefined = options.sessionId ?? options.createSessionId;
     const stderrChunks: string[] = [];
     let protocolError: string | undefined;
 
@@ -51,11 +54,15 @@ export class CliAgentDriver {
       setFinal: (text) => {
         finalText = text;
       },
+      appendFinal: (text) => {
+        finalText = finalText ? `${finalText}\n${text}` : text;
+      },
       setError: (text) => {
         errorText = text;
       },
       setSessionId: (value) => {
         sessionId = value;
+        options.onSessionId?.(value);
       },
     };
 
@@ -63,6 +70,8 @@ export class CliAgentDriver {
       ...(options.argsPrefix ?? []),
       ...adapter.buildArgs(options.task, {
         ...(options.sessionId ? { sessionId: options.sessionId } : {}),
+        ...(options.createSessionId ? { createSessionId: options.createSessionId } : {}),
+        ...(options.sessionTitle ? { sessionTitle: options.sessionTitle } : {}),
         ...(options.model ? { model: options.model } : {}),
       }),
     ];

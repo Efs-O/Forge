@@ -275,10 +275,10 @@ describe('messages', () => {
   it('an inbound message names its sender and how to answer', () => {
     const prompt = forgeInboundPrompt('forge-dd', '  hi  ');
     expect(prompt.startsWith('**forge-dd says:**\n\nhi\n')).toBe(true);
-    expect(prompt).toContain('session: "forge-dd"');
+    expect(prompt).toContain('link the sender first');
     const chatReply = forgeInboundPrompt('codex', 'hi', true);
     expect(chatReply).toContain('Answer in this Forge chat');
-    expect(chatReply).toContain('Do not call `ask_live_session` for this reply');
+    expect(chatReply).toContain('Do not call `ask_agent` for this reply');
   });
 
   it('a Codex question carries the reply contract with a forward-slash path', () => {

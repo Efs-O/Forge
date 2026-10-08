@@ -6,6 +6,7 @@ import type { MeshMessageAcceptedSink } from './meshMessageAccepted';
 
 export interface SessionProvider {
   resolveAdapter(alias: string): Promise<MeshAdapter | undefined>;
+  adapterForSession(kind: AgentKind, sessionId: string): MeshAdapter | undefined;
   isOwned(alias: string): boolean;
   touchActivity(alias: string): void;
   park(alias: string): boolean;

@@ -43,6 +43,8 @@ export const claudeAdapter: CliAdapter = {
       'bypassPermissions',
     ];
     if (options?.sessionId) args.push('--resume', options.sessionId);
+    else if (options?.createSessionId) args.push('--session-id', options.createSessionId);
+    if (!options?.sessionId && options?.sessionTitle) args.push('-n', options.sessionTitle);
     if (options?.model) args.push('--model', options.model);
     return args;
   },

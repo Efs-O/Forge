@@ -42,7 +42,7 @@ export const ScheduleSchema = z.discriminatedUnion('kind', [
       .min(
         15,
         'interval must be at least 15 minutes. To wait for a reply, use `wait` ' +
-          '(ends early on a new message) or `ask_live_session` with `notify_on_answer`.',
+          '(ends early on a new message).',
       ),
   }),
   z.object({

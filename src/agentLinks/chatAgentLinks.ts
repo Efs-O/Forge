@@ -156,6 +156,24 @@ export function unlink(conversation: ConversationRuntime, kind: AgentKind): Agen
   return previous;
 }
 
+export function get(
+  conversation: Pick<ConversationRuntime, 'agentLinks'>,
+  kind: AgentKind,
+): AgentLink | undefined {
+  const value = conversation.agentLinks?.[agentKindSchema.parse(kind)];
+  return value ? agentLinkSchema.parse(value) : undefined;
+}
+
+export function touch(
+  conversation: ConversationRuntime,
+  kind: AgentKind,
+  lastUsedAt = Date.now(),
+): AgentLink {
+  const current = get(conversation, kind);
+  if (!current) throw new Error(`Chat "${conversation.title}" has no linked ${kind} session.`);
+  return link(conversation, { ...current, lastUsedAt }, [conversation]);
+}
+
 export function forgetConversation(conversationId: string): void {
   for (const [sessionId, owner] of reverseIndex) {
     if (owner === conversationId) reverseIndex.delete(sessionId);

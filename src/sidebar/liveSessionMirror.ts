@@ -1,10 +1,10 @@
 import type { ChatMessage, ToolCall } from '../llm/types';
 import type { AgentProgressEvent } from './AgentProgress';
 
-const TOOL = 'ask_live_session';
+const TOOL = 'ask_agent';
 
 /**
- * Mirror every `ask_live_session` exchange of one tool round to the remote
+ * Mirror every `ask_agent` exchange of one tool round to the remote
  * progress channel, each as a message of its own.
  *
  * A mesh run is one long Forge turn whose substance, the answers Codex and
@@ -37,7 +37,7 @@ function header(call: ToolCall): string {
   } catch {
     // Arguments the tool itself refused; the result text says why.
   }
-  const target = typeof args['target'] === 'string' ? args['target'] : 'live session';
+  const target = typeof args['agent'] === 'string' ? args['agent'] : 'linked session';
   const subject = typeof args['subject'] === 'string' ? ` · ${args['subject']}` : '';
   return `🔁 Forge ↔ ${target}${subject}`;
 }

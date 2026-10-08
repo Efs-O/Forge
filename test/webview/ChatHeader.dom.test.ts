@@ -6,6 +6,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 (globalThis as unknown as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 
 const { ChatHeader } = await import('../../webview-ui/src/components/ChatHeader');
+import type { AgentLinks } from '../../src/agentLinks/chatAgentLinks';
 const React = await import('react');
 
 let container: HTMLDivElement;
@@ -22,7 +23,7 @@ afterEach(() => {
   container.remove();
 });
 
-function render(onRename?: (title: string) => void): void {
+function render(onRename?: (title: string) => void, agentLinks?: AgentLinks): void {
   act(() => {
     root.render(
       React.createElement(ChatHeader, {
@@ -30,6 +31,9 @@ function render(onRename?: (title: string) => void): void {
         historyExpanded: false,
         onNew: vi.fn(),
         onToggleHistory: vi.fn(),
+        onLinkAgent: vi.fn(),
+        onUnlinkAgent: vi.fn(),
+        agentLinks,
         onRename,
       }),
     );
@@ -74,5 +78,28 @@ describe('ChatHeader title rename', () => {
     expect(title()!.tagName).toBe('SPAN');
     act(() => title()!.click());
     expect(input()).toBeNull();
+  });
+
+  it('keeps Link in the toolbar and hides the link strip until a session exists', () => {
+    render(undefined);
+    expect(container.querySelector('#agent-link-toolbar-btn')).not.toBeNull();
+    expect(container.querySelector('#agent-links-strip')).toBeNull();
+  });
+
+  it('shows the linked session row with its kind, title and last-used time', () => {
+    render(undefined, {
+      claude: {
+        kind: 'claude',
+        sessionId: '11111111-1111-4111-8111-111111111111',
+        cwd: 'C:/repo',
+        title: 'Forge · hello man',
+        linkedAt: 1,
+        lastUsedAt: 1,
+        origin: 'forge-created',
+      },
+    });
+    expect(container.querySelector('#agent-links-strip')?.textContent).toContain('claude');
+    expect(container.querySelector('#agent-links-strip')?.textContent).toContain('Forge · hello man');
+    expect(container.querySelector('#agent-links-strip')?.textContent).toContain('Last used');
   });
 });

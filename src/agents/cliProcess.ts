@@ -21,6 +21,22 @@ export interface CliProcessInvocation {
   windowsCmdWrapped: boolean;
 }
 
+const inheritedSessionVariables = [
+  'CLAUDE_CODE_SESSION_ID',
+  'CODEX_SESSION_ID',
+  'COPILOT_AGENT_SESSION_ID',
+] as const;
+
+/** The one child environment builder; agent identity never crosses Forge's boundary. */
+export function buildCliSpawnEnvironment(
+  inherited: NodeJS.ProcessEnv = process.env,
+  overrides: Readonly<Record<string, string>> = {},
+): NodeJS.ProcessEnv {
+  const environment = { ...inherited, ...overrides };
+  for (const name of inheritedSessionVariables) delete environment[name];
+  return environment;
+}
+
 /** Builds the exact argv used by {@link spawnCliProcess}. Exported so a
  *  caller can check cmd.exe's command-length ceiling before starting a shim. */
 export function buildCliProcessInvocation(
@@ -45,7 +61,7 @@ export function spawnCliProcess(
 ): ChildProcess {
   return spawn(invocation.file, invocation.args, {
     cwd: options.cwd,
-    ...(options.env ? { env: { ...process.env, ...options.env } } : {}),
+    env: buildCliSpawnEnvironment(process.env, options.env),
     stdio: [options.stdin ?? 'ignore', 'pipe', 'pipe'],
     windowsHide: true,
     // POSIX: make the child a process-group leader so terminateProcessTree can

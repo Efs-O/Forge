@@ -86,6 +86,7 @@ function maximalConfig(): ForgeConfig {
     },
     jobs: { enabled: true },
     agent_bus: { enabled: true },
+    agent_links: { open_panel: 'every_ask', panel_live_timeout_ms: 20_000 },
   };
 }
 
@@ -151,7 +152,7 @@ describe('tool schema CI budget (TOOL_SCHEMA_GROWTH_PLAN.md Step 1)', () => {
       'generate_image',
       'image_search',
       'manage_jobs',
-      'ask_live_session',
+      'ask_agent',
       'install_llamacpp',
     ]) {
       expect(names).toContain(name);

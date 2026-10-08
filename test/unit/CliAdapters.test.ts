@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { claudeAdapter } from '../../src/agents/adapters/claudeAdapter';
 import { codexAdapter } from '../../src/agents/adapters/codexAdapter';
+import { copilotAdapter } from '../../src/agents/adapters/copilotAdapter';
 import { inferCliAgentName } from '../../src/agents/types';
 import type { CliParseContext } from '../../src/agents/types';
 
@@ -15,6 +16,9 @@ function fakeContext() {
     emitStatus: (t) => status.push(t),
     setFinal: (t) => {
       final = t;
+    },
+    appendFinal: (t) => {
+      final = final ? `${final}\n${t}` : t;
     },
     setError: (t) => {
       error = t;
@@ -55,6 +59,17 @@ describe('claudeAdapter', () => {
     expect(args).toContain('session-1');
     expect(args).toContain('--model');
     expect(args).toContain('opus');
+  });
+
+  it('uses the requested persistent id and chat title for a new linked session', () => {
+    const args = claudeAdapter.buildArgs('first ask', {
+      createSessionId: 'uuid-1',
+      sessionTitle: 'Forge · Design chat',
+    });
+    expect(args).toContain('--session-id');
+    expect(args).toContain('uuid-1');
+    expect(args).toContain('-n');
+    expect(args).toContain('Forge · Design chat');
   });
 
   it('captures the persistent session id', () => {
@@ -163,6 +178,56 @@ describe('codexAdapter', () => {
       state.ctx,
     );
     expect(state.error()).toBe('request failed');
+  });
+});
+
+describe('copilotAdapter', () => {
+  it('creates chat-linked sessions with the supplied title, model, and permissions', () => {
+    expect(
+      copilotAdapter.buildArgs('first ask', {
+        createSessionId: 'uuid-2',
+        sessionTitle: 'Forge · Design chat',
+        model: 'auto',
+      }),
+    ).toEqual([
+      '-p',
+      'first ask',
+      '--silent',
+      '--no-remote',
+      '--disable-builtin-mcps',
+      '--allow-all',
+      '--session-id',
+      'uuid-2',
+      '-n',
+      'Forge · Design chat',
+      '--model',
+      'auto',
+    ]);
+  });
+
+  it('resumes chat-linked sessions with the configured model and permissions', () => {
+    expect(
+      copilotAdapter.buildArgs('continue', { sessionId: 'session-2', model: 'model-x' }),
+    ).toEqual([
+      '-p',
+      'continue',
+      '--silent',
+      '--no-remote',
+      '--disable-builtin-mcps',
+      '--allow-all',
+      '--resume',
+      'session-2',
+      '--model',
+      'model-x',
+    ]);
+  });
+
+  it('accumulates the complete multiline reply', () => {
+    const state = fakeContext();
+    copilotAdapter.handleLine('first line', state.ctx);
+    copilotAdapter.handleLine('second line', state.ctx);
+    expect(state.final()).toBe('first line\nsecond line');
+    expect(state.text).toEqual(['first line\n', 'second line\n']);
   });
 });
 

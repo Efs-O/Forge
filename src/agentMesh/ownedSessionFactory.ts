@@ -64,6 +64,20 @@ export class OwnedSessionFactory {
     return this.claudeOwned.get(alias.trim().toLowerCase());
   }
 
+  adapterForSession(kind: 'claude' | 'codex', sessionId: string): MeshAdapter | undefined {
+    if (kind === 'claude') {
+      for (const [alias, session] of this.claudeOwned) {
+        if (session.confirmedSessionId === sessionId)
+          return this.claudeOwnedAdapter(alias, session);
+      }
+    } else {
+      for (const [alias, session] of this.owned) {
+        if (session.confirmedSessionId === sessionId) return this.codexOwnedAdapter(alias, session);
+      }
+    }
+    return undefined;
+  }
+
   isOwned(alias: string): boolean {
     const a = alias.trim().toLowerCase();
     return this.owned.has(a) || this.claudeOwned.has(a);

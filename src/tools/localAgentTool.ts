@@ -2,14 +2,13 @@ import type { RegisteredTool } from './ToolRegistry';
 import type { ToolDefinition } from '../llm/types';
 import type { LocalDelegationService } from '../delegation/LocalDelegationService';
 import type { ForgeConfig } from '../config/types';
-import { listEligibleDelegationTargets, resolveDelegationTarget } from '../delegation/eligibility';
+import { listEligibleDelegationTargets } from '../delegation/eligibility';
 import type { EligibleDelegationTarget } from '../delegation/eligibility';
 import {
   MAX_DELEGATION_TASK_CHARS,
   MAX_DELEGATION_CONTEXT_FILES,
   HARD_MAX_DELEGATION_OUTPUT_TOKENS,
 } from '../delegation/limits';
-import { unattendedCliRefusal } from '../jobs/cliAgentGate';
 
 const FOCUS_VALUES = [
   'correctness',
@@ -27,17 +26,13 @@ const KIND_LABELS: Record<EligibleDelegationTarget['provider'], string> = {
   cli: 'CLI agent, has its own tools',
 };
 
+function localOrCloudTargets(config: ForgeConfig): EligibleDelegationTarget[] {
+  return listEligibleDelegationTargets(config).filter((target) => target.provider !== 'cli');
+}
+
 /** Returns true when at least one configured model can accept a delegation. */
 export function hasEligibleDelegationTargets(config: ForgeConfig): boolean {
-  for (const model of config.models) {
-    try {
-      resolveDelegationTarget(config, model.name);
-      return true;
-    } catch {
-      // model is not eligible
-    }
-  }
-  return false;
+  return localOrCloudTargets(config).length > 0;
 }
 
 /**
@@ -62,7 +57,7 @@ export function hasEligibleDelegationTargets(config: ForgeConfig): boolean {
  * one of them. This is a hint, and the handler stays the real gate.
  */
 export function describeDelegationTargets(config: ForgeConfig): string {
-  const targets = listEligibleDelegationTargets(config);
+  const targets = localOrCloudTargets(config);
   if (targets.length === 0) return '';
   const section = (label: string, matching: readonly EligibleDelegationTarget[]): string =>
     matching.length === 0
@@ -70,16 +65,9 @@ export function describeDelegationTargets(config: ForgeConfig): string {
       : [label, ...matching.map((t) => `  "${t.name}" (${KIND_LABELS[t.provider]})`), ''].join(
           '\n',
         );
-  const cli = targets.filter((target) => target.provider === 'cli');
-  const cloud = targets.filter((target) => !target.localWeights && target.provider !== 'cli');
+  const cloud = targets.filter((target) => !target.localWeights);
   const local = targets.filter((target) => target.localWeights);
   return (
-    section(
-      'PREFER — CLI agents. Their own tools, their own process, no VRAM. They ' +
-        'run unrestricted: they can read AND edit files themselves, so delegate ' +
-        'implementation to them, not just review:',
-      cli,
-    ) +
     section('Cloud. A request, no VRAM:', cloud) +
     section(
       'Local. Loads weights into local VRAM — the user is asked before any of ' +
@@ -107,35 +95,8 @@ const MODEL_ARG_DESCRIPTION =
   'Model to delegate to. Do NOT read config.yaml to find one, and do not guess a ' +
   'name: call list_delegation_targets.';
 
-function describeWithTargets(base: ToolDefinition, config: ForgeConfig): ToolDefinition {
-  const cliTargets = listEligibleDelegationTargets(config).filter(
-    (target) => target.provider === 'cli',
-  );
-  if (cliTargets.length === 0) return base;
-  const named = cliTargets.map((target) => `"${target.name}"`).join(' and ');
-  const params = base.function.parameters as {
-    properties: { model: { description: string } };
-  };
-  return {
-    ...base,
-    function: {
-      ...base.function,
-      parameters: {
-        ...base.function.parameters,
-        properties: {
-          ...params.properties,
-          model: {
-            ...params.properties.model,
-            description:
-              `Model to delegate to. Prefer ${named} — CLI agents that read the ` +
-              'repository with their own tools and use no VRAM. Other local and cloud ' +
-              'models are also accepted: call list_delegation_targets to see them, and ' +
-              'do NOT read config.yaml or guess a name.',
-          },
-        },
-      },
-    },
-  };
+function describeWithTargets(base: ToolDefinition, _config: ForgeConfig): ToolDefinition {
+  return base;
 }
 
 /**
@@ -151,7 +112,7 @@ export function makeListDelegationTargetsTool(getConfig: () => ForgeConfig): Reg
       function: {
         name: 'list_delegation_targets',
         description:
-          'List the models and CLI agents ask_local_agent can delegate to, ranked by ' +
+          'List the local and cloud models ask_local_agent can delegate to, ranked by ' +
           'what each costs to call. Use this instead of reading config.yaml or guessing a name.',
         parameters: { type: 'object', properties: {}, required: [], additionalProperties: false },
       },
@@ -160,7 +121,7 @@ export function makeListDelegationTargetsTool(getConfig: () => ForgeConfig): Reg
     // Reading a list from config that the caller already holds the permission
     // to act on. Gating it would only cost a confirmation before the real one.
     autoApprove: true,
-    advertise: () => hasEligibleDelegationTargets(getConfig()),
+    advertise: () => localOrCloudTargets(getConfig()).length > 0,
     handler: async () => {
       const listed = describeDelegationTargets(getConfig());
       return listed === '' ? 'No delegation targets are configured. Do the work yourself.' : listed;
@@ -184,7 +145,7 @@ export function makeLocalAgentTool(
       function: {
         name: 'ask_local_agent',
         description:
-          'Delegate a task to a configured model or CLI agent in a NEW, empty session that knows nothing of the current work (for a session already running, use ask_live_session). Local/cloud targets get only the task and context files; CLI targets (claude, codex) run unrestricted and can edit files. Use for independent review or to hand off an implementation. A CLI target ends with a `REPORT: <path>` line for long detail: read that file. A run that errors or times out may still have edited files: check `git status` before retrying. Requires only the delegate permission.',
+          'Delegate a task to a configured local or cloud model. It starts a new, empty session and knows nothing of the current work. Use for independent review or analysis that benefits from another model. Requires the delegate permission.',
         parameters: {
           type: 'object',
           properties: {
@@ -220,8 +181,6 @@ export function makeLocalAgentTool(
         },
       },
     },
-    // ToolRegistry.definitions() runs every agent turn, so a CLI agent added to
-    // config.yaml shows up in the advertised target list without a reload.
     describe: () => describeWithTargets(tool.definition, getConfig()),
     permission: 'delegate',
     // Confirm before a delegation loads weights into local VRAM. DelegationGate
@@ -234,21 +193,11 @@ export function makeLocalAgentTool(
     approval: (args) => {
       const requested = args['model'];
       if (typeof requested !== 'string') return undefined;
-      const target = listEligibleDelegationTargets(getConfig()).find(
-        (item) => item.name === requested,
+      const target = localOrCloudTargets(getConfig()).find((item) => item.name === requested);
+      const cliTarget = listEligibleDelegationTargets(getConfig()).find(
+        (item) => item.name === requested && item.provider === 'cli',
       );
-      // A CLI agent runs with full access and its own tools: none of its edits
-      // or commands pass Forge's approval, so the delegation itself is the gate
-      // (a write_file needs a click; "have codex write it" must too).
-      if (target?.provider === 'cli') {
-        const task = typeof args['task'] === 'string' ? args['task'] : '';
-        return {
-          detail:
-            `Delegate to the "${requested}" CLI agent. It runs with full access to ` +
-            "this machine's files and commands, and Forge cannot approve its " +
-            `individual edits.\n\nTask: ${task.length > 400 ? `${task.slice(0, 400)}…` : task}`,
-        };
-      }
+      if (cliTarget) return { detail: 'Use ask_agent for linked CLI sessions.' };
       // An unmatched name is a fuzzy alias/short_name/`model@profile` the
       // handler still resolves. Confirm it: unknown-to-us must not mean ungated.
       if (target && !target.localWeights) return undefined;
@@ -259,21 +208,20 @@ export function makeLocalAgentTool(
           'room for both.',
       };
     },
-    advertise: () => hasEligibleDelegationTargets(getConfig()),
+    advertise: () => localOrCloudTargets(getConfig()).length > 0,
     handler: async (args, context) => {
-      if (!hasEligibleDelegationTargets(getConfig())) {
+      if (localOrCloudTargets(getConfig()).length === 0) {
         throw new Error(
           'ask_local_agent: no eligible delegation targets are configured. ' +
-            'Add a local llama.cpp or Ollama model, a configured cloud model, or a ' +
-            'provider: cli agent to config.yaml.',
+            'Add a local llama.cpp or Ollama model, or a configured cloud model.',
         );
       }
       const config = getConfig();
       const cliTarget = listEligibleDelegationTargets(config).find(
         (item) => item.name === args['model'] && item.provider === 'cli',
       );
-      const refusal = cliTarget && unattendedCliRefusal(config, context?.conversationId);
-      if (refusal) return `ask_local_agent: ${refusal}`;
+      if (cliTarget)
+        return 'Error: CLI agents are contacted with ask_agent; ask_local_agent accepts local and cloud models.';
       const primaryModel = config.active_model ?? '';
       const contextFiles = args['context_files'] as string[] | undefined;
       const focus = args['focus'] as string | undefined;

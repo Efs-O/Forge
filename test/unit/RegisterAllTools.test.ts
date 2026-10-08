@@ -7,7 +7,7 @@ import { UserQuestionService } from '../../src/sidebar/UserQuestionService';
 import { UserNotificationService } from '../../src/sidebar/UserNotificationService';
 import { registerAllTools } from '../../src/tools/registerAllTools';
 import { ToolRegistry, type ToolPermission } from '../../src/tools/ToolRegistry';
-import { lazyGroupForTool } from '../../src/tools/lazyToolGroups';
+import { activateLazyGroup, hiddenLazyToolNames, lazyGroupForTool } from '../../src/tools/lazyToolGroups';
 
 const ALL_PERMISSIONS = new Set<ToolPermission>([
   'read',
@@ -27,7 +27,7 @@ const EXPECTED_NATIVE_NAMES = [
   'append_file',
   'apply_code_action',
   'apply_line_edits',
-  'ask_live_session',
+  'ask_agent',
   'ask_local_agent',
   'ask_user',
   'browser_click',
@@ -104,7 +104,6 @@ const EXPECTED_NATIVE_NAMES = [
   'stage',
   'stop_execution',
   'switch_branch',
-  'tell_live_session',
   'update_plan',
   'view_image',
   'view_video',
@@ -133,7 +132,7 @@ const CORE_TOOL_NAMES = [
 ];
 
 function makeRegistry(
-  options: { search?: boolean; delegation?: boolean; images?: boolean } = {},
+  options: { search?: boolean; delegation?: boolean; images?: boolean; agentBus?: boolean } = {},
 ): ToolRegistry {
   const registry = new ToolRegistry();
   const workspaceState = {
@@ -149,6 +148,7 @@ function makeRegistry(
       { name: 'primary', gguf_path: '/primary.gguf' },
       { name: 'worker', gguf_path: '/worker.gguf' },
     ],
+    ...(options.agentBus ? { agent_bus: { enabled: true } } : {}),
     ...(options.images
       ? {
           image_generation: {
@@ -193,7 +193,7 @@ describe('registerAllTools canonical coordinator catalog', () => {
     expect(edit.parameters.properties).not.toHaveProperty('filepath');
     // load_tool_group is advertised for registered native groups; generate_image while config.yaml
     // has no image_generation block, install_llamacpp while it sets no
-    // llama_server.binary, and ask_live_session while it has no
+    // llama_server.binary, and ask_agent while it has no
     // enabled agent_bus block, so the tools the model actually sees are
     // unchanged for a config that uses neither.
     expect(
@@ -207,8 +207,7 @@ describe('registerAllTools canonical coordinator catalog', () => {
           name !== 'generate_image' &&
           name !== 'image_search' &&
           name !== 'install_llamacpp' &&
-          name !== 'ask_live_session' &&
-          name !== 'tell_live_session' &&
+          name !== 'ask_agent' &&
           // browser_* tools require the 'browser' permission, which this
           // "all permissions" set does not grant, so none are advertised here.
           !name.startsWith('browser_') &&
@@ -239,8 +238,7 @@ describe('registerAllTools canonical coordinator catalog', () => {
       memory: ['remember', 'recall', 'list_memories', 'forget'],
       background: ['stop_execution', 'list_executions', 'wait'],
       agents: [
-        'ask_live_session',
-        'tell_live_session',
+        'ask_agent',
         'ask_local_agent',
         'list_delegation_targets',
         'manage_jobs',
@@ -262,6 +260,20 @@ describe('registerAllTools canonical coordinator catalog', () => {
     const registry = makeRegistry({ delegation: true, images: true });
     const names = registry.definitions(ALL_PERMISSIONS).map((tool) => tool.function.name);
     expect(names).toContain('generate_image');
+  });
+
+  it('offers ask_agent and omits the retired ask and tell tools when the bus is enabled', () => {
+    const registry = makeRegistry({ delegation: true, agentBus: true });
+    const conversationId = 'ask-agent-contract';
+    activateLazyGroup(conversationId, 'agents');
+    const hidden = hiddenLazyToolNames(conversationId);
+    const names = registry
+      .definitions(ALL_PERMISSIONS)
+      .map((tool) => tool.function.name)
+      .filter((name) => !hidden.has(name));
+    expect(names).toContain('ask_agent');
+    expect(names).not.toContain('ask_live_session');
+    expect(names).not.toContain('tell_live_session');
   });
 
   it('lets search and delegation wiring control only their documented tools', () => {

@@ -3,7 +3,7 @@ import { z } from 'zod';
 /**
  * `agent_bus:` — messaging between Forge and the Claude Code / Codex sessions
  * already running (docs/plans/AGENT_MESSAGING_PLAN.md). Absent or disabled
- * means no `ask_live_session` tool and no `/agent/*` routes, so a config
+ * means no `ask_agent` tool and no `/agent/*` routes, so a config
  * without it keeps the tool list, and with it the KV prefix, unchanged.
  */
 /** `agent_bus.copilot_model` default; also used when there is no `agent_bus` block. */
@@ -25,7 +25,7 @@ export const AgentBusConfigSchema = z
     relay_model: z.string().min(1).default('haiku'),
     /** Thread id of an open Codex session (`codex resume <id>` in a terminal,
      *  with a writable sandbox that includes the bus folder). Needed only for
-     *  `ask_live_session` with `target: codex`. */
+     *  `ask_agent` with `agent: codex`. */
     codex_thread: z.string().min(1).optional(),
     /** Codex executable: a bare name on PATH or an absolute path. */
     codex_cli: z.string().min(1).default('codex'),
@@ -53,3 +53,9 @@ export const AgentBusConfigSchema = z
 
 /** `agent_bus:` block (validated by agentBusSchema.ts). */
 export type AgentBusConfig = NonNullable<z.infer<typeof AgentBusConfigSchema>>;
+
+export const AgentLinksConfigSchema = z.object({
+  open_panel: z.enum(['every_ask', 'never']).default('every_ask'),
+  panel_live_timeout_ms: z.number().int().positive().default(20_000),
+});
+export type AgentLinksConfig = z.infer<typeof AgentLinksConfigSchema>;

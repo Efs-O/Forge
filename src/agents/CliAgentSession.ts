@@ -155,6 +155,9 @@ export class CliAgentSession {
         turn.finalText = text;
         this.finishTurn('completed');
       },
+      appendFinal: (text) => {
+        turn.finalText = turn.finalText ? `${turn.finalText}\n${text}` : text;
+      },
       setError: (text) => {
         turn.errorText = text;
         this.finishTurn('failed');

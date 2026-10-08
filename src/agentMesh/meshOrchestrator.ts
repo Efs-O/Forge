@@ -35,6 +35,10 @@ export class MeshOrchestrator {
     return this.deps.provider.resolveAdapter(alias);
   }
 
+  adapterForSession(kind: AgentKind, sessionId: string): MeshAdapter | undefined {
+    return this.deps.provider.adapterForSession(kind, sessionId);
+  }
+
   /**
    * Ask an agent and wait for the turn to end (`ask_live_session`). Through the
    * alias FIFO like every other send (M5): a direct `send()` throws while a

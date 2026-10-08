@@ -9,13 +9,13 @@ const call = (id: string, name: string, args: unknown) => ({
 });
 
 describe('mirrorLiveSessionAnswers', () => {
-  it('sends each ask_live_session answer in full as its own narration', () => {
+  it('sends each ask_agent answer in full as its own narration', () => {
     const events: AgentProgressEvent[] = [];
     const answer = 'x'.repeat(2_000);
     mirrorLiveSessionAnswers(
       'c1',
       [
-        call('a', 'ask_live_session', { target: 'codex', subject: 'who verb', question: 'q' }),
+        call('a', 'ask_agent', { agent: 'codex', subject: 'who verb', question: 'q' }),
         call('b', 'read_file', { path: 'x' }),
       ],
       [
@@ -33,12 +33,12 @@ describe('mirrorLiveSessionAnswers', () => {
     const events: AgentProgressEvent[] = [];
     mirrorLiveSessionAnswers(
       'c1',
-      [{ id: 'a', type: 'function', function: { name: 'ask_live_session', arguments: '{' } }],
+      [{ id: 'a', type: 'function', function: { name: 'ask_agent', arguments: '{' } }],
       [{ role: 'tool', tool_call_id: 'a', content: 'Could not deliver to codex' }],
       (e) => events.push(e),
     );
     expect(events[0]).toMatchObject({
-      text: '🔁 Forge ↔ live session\n\nCould not deliver to codex',
+      text: '🔁 Forge ↔ linked session\n\nCould not deliver to codex',
     });
   });
 
@@ -46,7 +46,7 @@ describe('mirrorLiveSessionAnswers', () => {
     const events: AgentProgressEvent[] = [];
     mirrorLiveSessionAnswers(
       'c1',
-      [call('a', 'ask_live_session', { target: 'claude', subject: 'review' })],
+      [call('a', 'ask_agent', { agent: 'claude', subject: 'review' })],
       [{ role: 'tool', tool_call_id: 'a', content: 'The session answered.' }],
       (event) => events.push(event),
     );

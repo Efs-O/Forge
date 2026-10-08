@@ -172,11 +172,17 @@ export class ToolDispatch {
     unavailableTools?: ReadonlyMap<string, string>,
     setPlan?: (items: PlanItem[]) => void,
     tellArrived?: (callback: () => void) => () => void,
-    modelContext?: { modelName: string; isVisionModel: boolean; outputLimits?: ToolOutputLimits },
+    modelContext?: {
+      modelName: string;
+      isVisionModel: boolean;
+      outputLimits?: ToolOutputLimits;
+      conversation: import('./sessionTypes').ConversationRuntime;
+      checkpoint?: CheckpointSession;
+      persistConversation: () => void;
+    },
   ): Promise<void> {
     for (const tc of toolCalls) {
-      // Every exit from this iteration pushes exactly one tool message, so the
-      // span is stamped once here and read by `toolMessage` on whichever branch
+      // The span is stamped once here and read by `toolMessage` on whichever branch
       // wins. The early refusals (declined, unknown tool, budget) are timed too:
       // they are near-instant and fall under the display floor, so they simply
       // render without a duration rather than needing a special case.

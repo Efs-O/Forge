@@ -217,10 +217,10 @@ describe('joinClaude (§10)', () => {
   });
 });
 
-describe('inbound hint (§10)', () => {
-  it('answers an alias by target, a named session by session', () => {
-    expect(forgeInboundPrompt('claude', 'hi')).toContain('target: "claude"');
-    expect(forgeInboundPrompt('codex', 'hi')).toContain('target: "codex"');
-    expect(forgeInboundPrompt('forge-dd', 'hi')).toContain('session: "forge-dd"');
+describe('inbound hint', () => {
+  it('uses ask_agent for a linked sender and tells other senders to link first', () => {
+    expect(forgeInboundPrompt('claude', 'hi')).toContain('ask_agent` with `agent: "claude"');
+    expect(forgeInboundPrompt('codex', 'hi')).toContain('ask_agent` with `agent: "codex"');
+    expect(forgeInboundPrompt('forge-dd', 'hi')).toContain('link the sender first');
   });
 });
