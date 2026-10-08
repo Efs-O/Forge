@@ -88,7 +88,7 @@ export interface PreviewResult {
   errors: string[];
   /** All errors seen, including the ones not listed. */
   errorCount: number;
-  /** `scheme://host` of every request the route refused, de-duplicated. */
+  /** `scheme://host (reason)` of every request that did not load, one per origin. */
   blocked: string[];
   consoleLines: string[];
   consoleDropped: number;
@@ -311,11 +311,15 @@ export async function renderPreview(
         deviceScaleFactor: 1,
         javaScriptEnabled: true,
       });
-      const blocked = new Set<string>();
+      // origin -> why: a public host that timed out must not read as refused.
+      const blocked = new Map<string, string>();
       await context.route('**/*', async (route) => {
         const req = route.request();
         if (!isPreviewRequestAllowed(req.url(), req.method())) {
-          blocked.add(originLabel(req.url()));
+          blocked.set(
+            originLabel(req.url()),
+            `refused: ${req.method()} is not an HTTP(S) GET or POST`,
+          );
           return void route.abort();
         }
         try {
@@ -327,12 +331,12 @@ export async function renderPreview(
             maxBytes: MAX_PREVIEW_RESPONSE_BYTES,
           });
           await route.fulfill(response);
-        } catch {
-          blocked.add(originLabel(req.url()));
+        } catch (err) {
+          blocked.set(originLabel(req.url()), err instanceof Error ? err.message : String(err));
           await route.abort();
         }
       });
-      context.routeWebSocket('**/*', (socket) => socket.close());
+      await context.routeWebSocket('**/*', (socket) => socket.close());
       const errors: string[] = [];
       let errorCount = 0;
       const consoleLines: string[] = [];
@@ -379,7 +383,7 @@ export async function renderPreview(
           frames,
           errors,
           errorCount,
-          blocked: [...blocked],
+          blocked: [...blocked].map(([origin, reason]) => `${origin} (${reason})`),
           consoleLines: trimmed.consoleLines,
           consoleDropped: consoleDropped + trimmed.consoleDropped,
         };

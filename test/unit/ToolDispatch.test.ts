@@ -170,13 +170,22 @@ describe('ToolDispatch', () => {
     // so one bad model disabled tool calling in tabs it never touched.
     const messages: ChatMessage[] = [];
     await dispatch.dispatch(
-      [{ id: 'call-bad', type: 'function', function: { name: 'read_file', arguments: '{"path":' } }],
+      [
+        {
+          id: 'call-bad',
+          type: 'function',
+          function: { name: 'read_file', arguments: '{"path":' },
+        },
+      ],
       allowed,
       messages,
       'conv-a',
     );
 
     expect(messages[0]?.content).toContain('malformed tool arguments');
+    // The length tells two cut-off calls with the same opening apart, so the
+    // loop guard does not read them as one repeated call.
+    expect(messages[0]?.content).toContain('"{\\"path\\":" (8 chars)');
     expect(failureTracker.record).toHaveBeenCalledWith('conv-a');
   });
 
@@ -193,7 +202,12 @@ describe('ToolDispatch', () => {
     });
 
     const messages: ChatMessage[] = [];
-    await dispatch.dispatch([makeToolCall('read_file', { path: 'test.txt' })], allowed, messages, 'conv-a');
+    await dispatch.dispatch(
+      [makeToolCall('read_file', { path: 'test.txt' })],
+      allowed,
+      messages,
+      'conv-a',
+    );
 
     expect(failureTracker.reset).toHaveBeenCalledWith('conv-a');
     expect(failureTracker.record).not.toHaveBeenCalled();
@@ -211,7 +225,12 @@ describe('ToolDispatch', () => {
     });
 
     const messages: ChatMessage[] = [];
-    await dispatch.dispatch([makeToolCall('budget_test_tool', { command: 'ls' })], allowed, messages, 'conv-a');
+    await dispatch.dispatch(
+      [makeToolCall('budget_test_tool', { command: 'ls' })],
+      allowed,
+      messages,
+      'conv-a',
+    );
 
     expect(messages[0]?.content).toContain('User declined');
     expect(failureTracker.reset).not.toHaveBeenCalled();
@@ -229,14 +248,22 @@ describe('ToolDispatch', () => {
     toolRegistry.register({
       definition: {
         type: 'function',
-        function: { name: 'view_image', description: 'View an image', parameters: { type: 'object' } },
+        function: {
+          name: 'view_image',
+          description: 'View an image',
+          parameters: { type: 'object' },
+        },
       },
       permission: 'read',
       handler: vi.fn().mockResolvedValue({ text: 'Loaded image assets/diagram.png.', content }),
     });
 
     const messages: ChatMessage[] = [];
-    await dispatch.dispatch([makeToolCall('view_image', { path: 'assets/diagram.png' })], allowed, messages);
+    await dispatch.dispatch(
+      [makeToolCall('view_image', { path: 'assets/diagram.png' })],
+      allowed,
+      messages,
+    );
 
     expect(messages[0]?.content).toEqual(content);
     expect(post).toHaveBeenCalledWith(
@@ -252,7 +279,11 @@ describe('ToolDispatch', () => {
     toolRegistry.register({
       definition: {
         type: 'function',
-        function: { name: 'view_image', description: 'View an image', parameters: { type: 'object' } },
+        function: {
+          name: 'view_image',
+          description: 'View an image',
+          parameters: { type: 'object' },
+        },
       },
       permission: 'read',
       handler,
@@ -295,7 +326,9 @@ describe('ToolDispatch', () => {
     );
 
     expect(handler).not.toHaveBeenCalled();
-    expect(messages[0]?.content).toContain('`view_image` is in group `media` — call `load_tool_group` first');
+    expect(messages[0]?.content).toContain(
+      '`view_image` is in group `media` — call `load_tool_group` first',
+    );
   });
 
   it('requests approval for write tools', async () => {
@@ -336,14 +369,22 @@ describe('ToolDispatch', () => {
     toolRegistry.register({
       definition: {
         type: 'function',
-        function: { name: 'write_file', description: 'Write a file', parameters: { type: 'object' } },
+        function: {
+          name: 'write_file',
+          description: 'Write a file',
+          parameters: { type: 'object' },
+        },
       },
       permission: 'write',
       mutation: { paths: (args) => [args['path'] as string], showDiff: true },
       handler: vi.fn().mockResolvedValue('written'),
     });
 
-    await dispatch.dispatch([makeToolCall('write_file', { path: 'test.txt' })], allowed, [] as never);
+    await dispatch.dispatch(
+      [makeToolCall('write_file', { path: 'test.txt' })],
+      allowed,
+      [] as never,
+    );
 
     expect(vscode.window.showTextDocument).not.toHaveBeenCalled();
   });
@@ -356,7 +397,11 @@ describe('ToolDispatch', () => {
     toolRegistry.register({
       definition: {
         type: 'function',
-        function: { name: 'write_file', description: 'Write a file', parameters: { type: 'object' } },
+        function: {
+          name: 'write_file',
+          description: 'Write a file',
+          parameters: { type: 'object' },
+        },
       },
       permission: 'write',
       mutation: { paths: () => [target], showDiff: true },
@@ -495,28 +540,54 @@ describe('ToolDispatch', () => {
     );
   });
 
-  it.skipIf(!TEST_BASH)('auto-approves read-only shell calls, prompts normal calls, and blocks dangerous calls in clanker', async () => {
-    const shell = makeShellTool({
-      bashPath: TEST_BASH,
-      getConfig: () => ({ permissions: { exec: { shell: 'bash' } } } as never),
-    });
-    toolRegistry.register(shell);
-    const messages: ChatMessage[] = [];
-    await dispatch.dispatch([makeToolCall('shell', { command: 'pwd' })], allowed, messages);
-    expect(requestApproval).not.toHaveBeenCalled();
-    expect(messages.at(-1)?.content).toContain('exit 0');
+  it.skipIf(!TEST_BASH)(
+    'auto-approves read-only shell calls, prompts normal calls, and blocks dangerous calls in clanker',
+    async () => {
+      const shell = makeShellTool({
+        bashPath: TEST_BASH,
+        getConfig: () => ({ permissions: { exec: { shell: 'bash' } } }) as never,
+      });
+      toolRegistry.register(shell);
+      const messages: ChatMessage[] = [];
+      await dispatch.dispatch([makeToolCall('shell', { command: 'pwd' })], allowed, messages);
+      expect(requestApproval).not.toHaveBeenCalled();
+      expect(messages.at(-1)?.content).toContain('exit 0');
 
-    requestApproval.mockClear();
-    await dispatch.dispatch([makeToolCall('shell', { command: 'touch .forge-shell-approval-test', cwd: process.cwd() })], allowed, messages);
-    expect(requestApproval).toHaveBeenCalledWith('shell', expect.stringContaining('touch .forge-shell-approval-test'), false, undefined);
-    await fs.promises.rm(path.join(process.cwd(), '.forge-shell-approval-test'), { force: true });
+      requestApproval.mockClear();
+      await dispatch.dispatch(
+        [
+          makeToolCall('shell', {
+            command: 'touch .forge-shell-approval-test',
+            cwd: process.cwd(),
+          }),
+        ],
+        allowed,
+        messages,
+      );
+      expect(requestApproval).toHaveBeenCalledWith(
+        'shell',
+        expect.stringContaining('touch .forge-shell-approval-test'),
+        false,
+        undefined,
+      );
+      await fs.promises.rm(path.join(process.cwd(), '.forge-shell-approval-test'), { force: true });
 
-    requestApproval.mockClear();
-    requestApproval.mockRejectedValueOnce(new ToolApprovalPolicyDenied('shell'));
-    await dispatch.dispatch([makeToolCall('shell', { command: 'rm -rf build' })], allowed, messages);
-    expect(requestApproval).toHaveBeenCalledWith('shell', expect.stringContaining('recursive force delete'), true, undefined);
-    expect(messages.at(-1)?.content).toContain('unattended: dangerous tool denied by policy');
-  });
+      requestApproval.mockClear();
+      requestApproval.mockRejectedValueOnce(new ToolApprovalPolicyDenied('shell'));
+      await dispatch.dispatch(
+        [makeToolCall('shell', { command: 'rm -rf build' })],
+        allowed,
+        messages,
+      );
+      expect(requestApproval).toHaveBeenCalledWith(
+        'shell',
+        expect.stringContaining('recursive force delete'),
+        true,
+        undefined,
+      );
+      expect(messages.at(-1)?.content).toContain('unattended: dangerous tool denied by policy');
+    },
+  );
 
   it('requests approval for git tools', async () => {
     toolRegistry.register({
@@ -610,7 +681,11 @@ describe('ToolDispatch', () => {
     toolRegistry.register({
       definition: {
         type: 'function',
-        function: { name: 'write_file', description: 'Write a file', parameters: { type: 'object' } },
+        function: {
+          name: 'write_file',
+          description: 'Write a file',
+          parameters: { type: 'object' },
+        },
       },
       permission: 'write',
       mutation: { paths: (args) => [args['path'] as string], showDiff: true },
@@ -651,9 +726,7 @@ describe('ToolDispatch', () => {
       type: 'function',
       function: { name: 'read_file', arguments: raw },
     };
-    const transcript: ChatMessage[] = [
-      { role: 'assistant', content: null, tool_calls: [call] },
-    ];
+    const transcript: ChatMessage[] = [{ role: 'assistant', content: null, tool_calls: [call] }];
 
     await dispatch.dispatch([call], allowed, transcript);
 
@@ -838,11 +911,7 @@ describe('ToolDispatch', () => {
     });
 
     const messages: Array<{ role: string; content: string }> = [];
-    await dispatch.dispatch(
-      [makeToolCall('delegate_to_agent', {})],
-      allowed,
-      messages as never,
-    );
+    await dispatch.dispatch([makeToolCall('delegate_to_agent', {})], allowed, messages as never);
 
     const posted = post.mock.calls
       .map((call) => call[0] as { type: string; text?: string; label?: string })
@@ -871,7 +940,11 @@ describe('ToolDispatch', () => {
       toolRegistry.register({
         definition: {
           type: 'function',
-          function: { name: 'read_file', description: 'Read a file', parameters: { type: 'object' } },
+          function: {
+            name: 'read_file',
+            description: 'Read a file',
+            parameters: { type: 'object' },
+          },
         },
         permission: 'read',
         handler: vi.fn().mockResolvedValue('contents'),

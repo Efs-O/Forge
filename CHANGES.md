@@ -25,8 +25,8 @@
 
 ### Tool fixes and fewer prompt restrictions
 
-- A tool call with arguments that are not valid JSON no longer ends the turn. The agent gets an error that names the tool, shows the start of what it sent and lists the required fields; the session log keeps the raw text.
-- `delete_file` takes `paths` (up to 50) and reports each one. A call that deleted nothing is an error.
+- A tool call with arguments that are not valid JSON no longer ends the turn. The agent gets an error that names the tool, shows the start of what it sent and lists the required fields and the length of what it sent; the session log keeps the raw text.
+- `delete_file` takes `paths` (up to 50) and reports each one. A call that deleted nothing is an error, and the approval dialog lists every target.
 - When `edit_file`'s `old_str` does not match, the error includes the current numbered lines around the closest match, so the agent can retry without reading the file again.
 - Argument errors name the field: a missing `path` on `write_file`, `append_file` and `edit_file`, `edits` sent as a string instead of an array, and an unexpected or missing `update_plan` field at the top level or at `items[n]`.
 - `web_fetch` `max_chars` goes up to 100,000 (default still 30,000).

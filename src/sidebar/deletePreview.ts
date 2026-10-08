@@ -20,13 +20,33 @@ interface DeleteInventory {
  * even when a model targets a very large generated directory.
  */
 export async function describeDelete(args: Record<string, unknown>): Promise<string> {
-  const requestedPath = typeof args['path'] === 'string' ? args['path'] : '(invalid path)';
+  const targets = Array.isArray(args['paths'])
+    ? args['paths'].map((item: unknown) => (typeof item === 'string' ? item : '(invalid path)'))
+    : [typeof args['path'] === 'string' ? args['path'] : '(invalid path)'];
   const recursive = args['recursive'] === true;
   const toTrash = args['to_trash'] !== false;
+  const verb = toTrash ? 'move to the recycle bin' : 'permanently delete';
   const lines = [
-    toTrash ? 'About to move to the recycle bin:' : 'About to permanently delete:',
-    `Target: ${requestedPath}`,
+    targets.length === 1 ? `About to ${verb}:` : `About to ${verb} ${targets.length} targets:`,
   ];
+  // Every target is shown: a batch approved on its first path alone would be
+  // approving deletes the user never saw.
+  for (const [index, requestedPath] of targets.entries()) {
+    if (index > 0) lines.push('');
+    lines.push(...(await describeTarget(requestedPath, recursive)));
+  }
+  lines.push(
+    toTrash
+      ? "Recoverable from the recycle bin. Forge will also create this turn's Undo " +
+          'checkpoint immediately before deletion.'
+      : "Not recoverable from the recycle bin. Forge will create this turn's Undo " +
+          'checkpoint immediately before deletion.',
+  );
+  return lines.join('\n');
+}
+
+async function describeTarget(requestedPath: string, recursive: boolean): Promise<string[]> {
+  const lines = [`Target: ${requestedPath}`];
 
   try {
     const target = resolveWorkspacePath(requestedPath);
@@ -68,15 +88,7 @@ export async function describeDelete(args: Record<string, unknown>): Promise<str
   // a committed file is making a different decision from one approving a
   // generated artifact, and until now both looked identical here.
   lines.push(`Git: ${await describeGitLineForDelete(requestedPath)}`);
-
-  lines.push(
-    toTrash
-      ? "Recoverable from the recycle bin. Forge will also create this turn's Undo " +
-          'checkpoint immediately before deletion.'
-      : "Not recoverable from the recycle bin. Forge will create this turn's Undo " +
-          'checkpoint immediately before deletion.',
-  );
-  return lines.join('\n');
+  return lines;
 }
 
 function inspectDeleteDirectory(root: string): DeleteInventory {

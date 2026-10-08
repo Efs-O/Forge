@@ -278,7 +278,7 @@ describe('render_html_to_image preview against real Chrome', () => {
     }
     const multimodal = result as MultimodalToolResult;
     expect(multimodal.text).toContain('centre=255,0,0');
-    expect(multimodal.text).not.toContain('Blocked requests');
+    expect(multimodal.text).not.toContain('Requests that did not load');
     expect(multimodal.content.filter((part) => part.type === 'image_url')).toHaveLength(1);
     expect(deliveries).toBe(0);
     expect(await fs.readdir(root)).toEqual(['page.html']);

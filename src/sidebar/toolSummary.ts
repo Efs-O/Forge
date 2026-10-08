@@ -9,6 +9,11 @@ export function extractToolDetail(argsJson: string): string {
     }
     const path = args['path'] ?? args['file_path'] ?? args['directory'];
     if (typeof path === 'string') return path.split(/[\\/]/).pop() ?? path;
+    const paths = args['paths'];
+    if (Array.isArray(paths) && typeof paths[0] === 'string') {
+      const first = paths[0].split(/[\\/]/).pop() ?? paths[0];
+      return paths.length > 1 ? `${first} +${paths.length - 1} more` : first;
+    }
     const cmd = args['command'];
     if (typeof cmd === 'string') {
       const rawArgs = args['args'];

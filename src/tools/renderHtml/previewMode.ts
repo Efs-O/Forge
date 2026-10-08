@@ -97,9 +97,7 @@ export async function runPreview(
     if (more > 0) lines.push(`- … ${more} more not shown`);
   }
   if (result.blocked.length > 0) {
-    lines.push(
-      `Blocked requests (only public HTTP(S) GET and POST requests are fetched; local and non-HTTP(S) requests are refused): ${result.blocked.join(', ')}`,
-    );
+    lines.push(`Requests that did not load: ${result.blocked.join('; ')}`);
   }
   lines.push(
     `Console output (${result.consoleLines.length} lines, capped at 4000 characters):`,
@@ -109,7 +107,7 @@ export async function runPreview(
     lines.push(`- … ${result.consoleDropped} older console lines dropped`);
   if (!context?.isVisionModel) {
     lines.push(
-      'No screenshot attached: the active model has no vision input. Only the error list above is available.',
+      'No screenshot attached: the active model has no vision input. Only the text above is available.',
     );
     return lines.join('\n');
   }

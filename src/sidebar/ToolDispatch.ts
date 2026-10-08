@@ -201,7 +201,8 @@ export class ToolDispatch {
             Array.isArray(required) && required.length ? required.join(', ') : '(none declared)';
           result =
             `Error: ${tc.function.name} received malformed tool arguments (invalid JSON): ` +
-            `${JSON.stringify(rawArguments.slice(0, 200))}. Required fields: ${fields}.`;
+            `${JSON.stringify(rawArguments.slice(0, 200))} (${rawArguments.length} chars). ` +
+            `Required fields: ${fields}.`;
           this.postResult(tc, toolResultText(result), undefined, convId);
           messages.push(this.toolMessage(tc, toolResultContent(result), startedAt));
           continue;
