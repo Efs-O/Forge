@@ -1,21 +1,13 @@
 /**
- * The archived-conversation list, kept in its own file instead of workspaceState.
- *
- * VS Code's Memento ships an extension's WHOLE workspaceState to the renderer on
- * every `update()`, and Forge saves the session after every tool round, so 40
- * archived transcripts (45 MB in the workspace this was measured in) were being
- * re-sent and re-serialized by the workbench on each round — the whole window
- * lagged. The archive changes only when a tab is closed or cleared, so it lives
- * here and is rewritten only when it actually changed. See
- * `docs/plans/SESSION_HISTORY_FILE_PLAN.md`.
+ * Per-conversation history bodies, with the old list file read only for migration.
+ * See `docs/plans/HISTORY_PER_CONVERSATION_FILES_PLAN.md`.
  */
 
 import * as fs from 'fs';
 import * as path from 'path';
-import { z } from 'zod';
 import { writeFileAtomicSync } from '../util/atomicWrite';
-import { ArchivedSessions } from './ArchivedSessions';
 import { getLogger } from '../util/logger';
+import { ArchivedSessions, isSafeId } from './ArchivedSessions';
 import {
   conversationPersistedSchema,
   type ConversationPersisted,
@@ -23,23 +15,28 @@ import {
 } from './sessionTypes';
 
 const log = getLogger();
-const archiveSchema = z.array(conversationPersistedSchema);
 
 export const HISTORY_ARCHIVE_FILE = 'conversation-history.json';
 
-function signatureOf(history: readonly ConversationRuntime[]): string {
-  return history.map((c) => `${c.id}:${c.updatedAt}:${c.title}:${c.messages.length}`).join('|');
+function signatureOf(conversation: ConversationRuntime): string {
+  return `${conversation.updatedAt}:${conversation.title}:${conversation.messages.length}`;
+}
+
+function detailOf(error: unknown): string {
+  return error instanceof Error ? error.message : String(error);
 }
 
 export class HistoryArchive {
-  /** Signature of what the file holds, as far as this process knows. */
-  private writtenSignature: string | undefined;
-  /**
-   * Set when the file exists but could neither be read nor moved aside. Saves
-   * then refuse, so history stays in the memento instead of an empty list
-   * overwriting the only copy of the old one.
-   */
+  private readonly bodyDirectory: string;
+  private readonly written = new Map<string, string>();
+  private readonly pendingRemovals = new Set<string>();
+  /** Refuse writes if existing data could not be read or safely quarantined. */
   private blocked = false;
+  /**
+   * True until a save confirms the legacy list file is gone, so the delete is
+   * one syscall per process rather than one per tool-round save.
+   */
+  private legacyMayExist = true;
 
   readonly overflow: ArchivedSessions;
 
@@ -47,6 +44,7 @@ export class HistoryArchive {
     readonly filePath: string,
     workspacePath?: string,
   ) {
+    this.bodyDirectory = path.join(path.dirname(filePath), 'history');
     this.overflow = new ArchivedSessions(path.dirname(filePath), workspacePath);
   }
 
@@ -61,18 +59,134 @@ export class HistoryArchive {
   }
 
   /**
-   * The archived conversations, or `undefined` when there is no file yet.
-   * An unparsable file is renamed aside (never deleted) and reads as empty.
+   * Read all conversation bodies, unioning an old list file while it migrates.
+   * Returns undefined only when neither storage layout exists.
    */
   load(): ConversationPersisted[] | undefined {
+    let filenames: string[] | undefined;
+    try {
+      filenames = fs.readdirSync(this.bodyDirectory).filter((name) => name.endsWith('.json'));
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== 'ENOENT') {
+        log.error(`[HistoryArchive] could not list ${this.bodyDirectory}: ${detailOf(error)}`);
+        this.blocked = true;
+        return [];
+      }
+    }
+
+    this.written.clear();
+    const byId = new Map<string, ConversationPersisted>();
+    for (const filename of filenames ?? []) {
+      const id = filename.slice(0, -'.json'.length);
+      const body = this.readBody(filename, id);
+      if (!body) continue;
+      byId.set(id, body);
+      this.written.set(id, this.signatureOfPersisted(body));
+    }
+
+    const legacy = this.loadLegacy();
+    if (legacy === undefined && filenames === undefined && !this.blocked) return undefined;
+    for (const entry of legacy ?? []) {
+      const current = byId.get(entry.id);
+      if (!current || entry.updatedAt > current.updatedAt) byId.set(entry.id, entry);
+      // Legacy-only entries intentionally are not marked written; the first
+      // save must materialize them in the new directory before deleting legacy.
+    }
+
+    return [...byId.values()].sort((a, b) => b.updatedAt - a.updatedAt);
+  }
+
+  /** Write only changed bodies; a false result keeps the caller's memento copy. */
+  save(
+    history: readonly ConversationRuntime[],
+    build: (conversation: ConversationRuntime) => ConversationPersisted,
+  ): boolean {
+    if (this.blocked) return false;
+    try {
+      for (const conversation of history) {
+        if (!isSafeId(conversation.id))
+          throw new Error(`Invalid history conversation id: ${conversation.id}`);
+        const signature = signatureOf(conversation);
+        if (this.written.get(conversation.id) === signature) continue;
+        fs.mkdirSync(this.bodyDirectory, { recursive: true });
+        const persisted = build(conversation);
+        writeFileAtomicSync(this.bodyPath(conversation.id), JSON.stringify(persisted));
+        this.written.set(conversation.id, signature);
+      }
+    } catch (error) {
+      log.error(`[HistoryArchive] could not write history bodies: ${detailOf(error)}`);
+      return false;
+    }
+
+    const currentIds = new Set(history.map((conversation) => conversation.id));
+    for (const id of currentIds) this.pendingRemovals.delete(id);
+    for (const id of this.written.keys()) {
+      if (!currentIds.has(id)) this.pendingRemovals.add(id);
+    }
+
+    if (!this.legacyMayExist) return true;
+    try {
+      fs.unlinkSync(this.filePath);
+      this.legacyMayExist = false;
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code === 'ENOENT') {
+        this.legacyMayExist = false;
+        return true;
+      }
+      log.error(
+        `[HistoryArchive] could not remove migrated legacy file ${this.filePath}: ${detailOf(error)}`,
+      );
+      return false;
+    }
+    return true;
+  }
+
+  /** Remove bodies made redundant by a successful memento write. */
+  pruneRemoved(): void {
+    for (const id of this.pendingRemovals) {
+      try {
+        fs.unlinkSync(this.bodyPath(id));
+        this.pendingRemovals.delete(id);
+        this.written.delete(id);
+      } catch (error) {
+        if ((error as NodeJS.ErrnoException).code === 'ENOENT') {
+          this.pendingRemovals.delete(id);
+          this.written.delete(id);
+          continue;
+        }
+        log.error(`[HistoryArchive] could not remove history body ${id}: ${detailOf(error)}`);
+      }
+    }
+  }
+
+  private readBody(filename: string, expectedId: string): ConversationPersisted | undefined {
+    const target = path.join(this.bodyDirectory, filename);
+    try {
+      const parsed = conversationPersistedSchema.safeParse(
+        JSON.parse(fs.readFileSync(target, 'utf8')),
+      );
+      if (parsed.success && isSafeId(expectedId) && parsed.data.id === expectedId)
+        return parsed.data;
+      this.quarantineBody(
+        target,
+        expectedId,
+        parsed.success ? 'body id does not match filename' : parsed.error.message,
+      );
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code === 'ENOENT') return undefined;
+      this.quarantineBody(target, expectedId, detailOf(error));
+    }
+    return undefined;
+  }
+
+  private loadLegacy(): ConversationPersisted[] | undefined {
     let raw: string;
     try {
       raw = fs.readFileSync(this.filePath, 'utf8');
     } catch (error) {
       if ((error as NodeJS.ErrnoException).code === 'ENOENT') return undefined;
-      const detail = error instanceof Error ? error.message : String(error);
       log.error(
-        `[HistoryArchive] could not read ${this.filePath}; leaving it untouched: ${detail}`,
+        `[HistoryArchive] could not read ${this.filePath}; leaving it untouched: ${detailOf(error)}`,
       );
       this.blocked = true;
       return [];
@@ -81,53 +195,56 @@ export class HistoryArchive {
     try {
       json = JSON.parse(raw);
     } catch (error) {
-      this.quarantine(error instanceof Error ? error.message : String(error));
+      this.quarantineLegacy(detailOf(error));
       return [];
     }
-    const parsed = archiveSchema.safeParse(json);
-    if (!parsed.success) {
-      this.quarantine(parsed.error.message);
+    if (!Array.isArray(json)) {
+      this.quarantineLegacy('legacy archive must be an array');
       return [];
     }
-    return parsed.data;
+    const parsed = json.map((entry) => conversationPersistedSchema.safeParse(entry));
+    if (parsed.some((entry) => !entry.success)) {
+      const invalid = parsed.find((entry) => !entry.success);
+      this.quarantineLegacy(invalid && !invalid.success ? invalid.error.message : 'invalid entry');
+      return [];
+    }
+    return parsed.flatMap((entry) => (entry.success ? [entry.data] : []));
   }
 
-  /**
-   * Write `history` when it differs from what the file last held. `build` is
-   * called only then, so an unchanged archive costs one string compare.
-   * Returns false when the write failed; the caller must then keep the
-   * history somewhere else, because the file does not hold it.
-   */
-  save(history: readonly ConversationRuntime[], build: () => ConversationPersisted[]): boolean {
-    if (this.blocked) return false;
-    const signature = signatureOf(history);
-    if (signature === this.writtenSignature) return true;
+  private quarantineBody(target: string, id: string, detail: string): void {
+    const safeId = isSafeId(id) ? id : path.basename(target, '.json');
+    const aside = path.join(this.bodyDirectory, `${safeId}.corrupt-${Date.now()}.json.bad`);
     try {
-      fs.mkdirSync(path.dirname(this.filePath), { recursive: true });
-      writeFileAtomicSync(this.filePath, JSON.stringify(build()));
-      this.writtenSignature = signature;
-      return true;
+      fs.renameSync(target, aside);
+      log.error(`[HistoryArchive] unreadable body moved to ${aside}: ${detail}`);
     } catch (error) {
-      const detail = error instanceof Error ? error.message : String(error);
-      log.error(`[HistoryArchive] could not write ${this.filePath}: ${detail}`);
-      this.writtenSignature = undefined;
-      return false;
+      log.error(
+        `[HistoryArchive] unreadable body ${target} (${detail}); could not quarantine it: ${detailOf(error)}`,
+      );
+      this.blocked = true;
     }
   }
 
-  private quarantine(detail: string): void {
+  private quarantineLegacy(detail: string): void {
     const parsed = path.parse(this.filePath);
     const target = path.join(parsed.dir, `${parsed.name}.corrupt-${Date.now()}${parsed.ext}`);
     try {
       fs.renameSync(this.filePath, target);
-      log.error(`[HistoryArchive] unreadable archive moved to ${target}: ${detail}`);
+      log.error(`[HistoryArchive] unreadable legacy archive moved to ${target}: ${detail}`);
     } catch (error) {
-      const why = error instanceof Error ? error.message : String(error);
       log.error(
-        `[HistoryArchive] unreadable archive ${this.filePath} (${detail}); could not move it aside, leaving it untouched: ${why}`,
+        `[HistoryArchive] unreadable archive ${this.filePath} (${detail}); could not move it aside: ${detailOf(error)}`,
       );
       this.blocked = true;
     }
-    this.writtenSignature = undefined;
+  }
+
+  private bodyPath(id: string): string {
+    if (!isSafeId(id)) throw new Error(`Invalid history conversation id: ${id}`);
+    return path.join(this.bodyDirectory, `${id}.json`);
+  }
+
+  private signatureOfPersisted(conversation: ConversationPersisted): string {
+    return `${conversation.updatedAt}:${conversation.title}:${conversation.messages.length}`;
   }
 }

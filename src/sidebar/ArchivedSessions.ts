@@ -321,6 +321,6 @@ function samePath(logged: string | undefined, workspace: string): boolean {
   return process.platform === 'win32' ? a.toLowerCase() === b.toLowerCase() : a === b;
 }
 
-function isSafeId(id: string): boolean {
+export function isSafeId(id: string): boolean {
   return /^[\w-]+$/.test(id);
 }

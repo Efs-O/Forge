@@ -33,15 +33,27 @@ import {
 const log = getLogger();
 const pendingMementoWrites = new WeakMap<Memento, Promise<void>>();
 
-/** Serialize writes so a rejected quota write is visible and cannot race a later update. */
-function persistMemento(workspaceState: Memento, key: string, value: unknown): void {
+/**
+ * Serialize writes so a rejected quota write is visible and cannot race a later
+ * update. Resolves true once committed, false (already logged) when rejected —
+ * never rejects, because most callers do not await it.
+ */
+function persistMemento(workspaceState: Memento, key: string, value: unknown): Promise<boolean> {
   const previous = pendingMementoWrites.get(workspaceState) ?? Promise.resolve();
-  const pending = previous.catch(() => undefined).then(() => workspaceState.update(key, value));
-  pendingMementoWrites.set(workspaceState, pending);
-  void pending.catch((error: unknown) => {
-    const detail = error instanceof Error ? error.message : String(error);
-    log.error(`[sessionPersistence] failed to persist ${key}: ${detail}`);
-  });
+  const pending = previous.then(() => workspaceState.update(key, value));
+  const reported = pending.then(
+    () => true,
+    (error: unknown) => {
+      const detail = error instanceof Error ? error.message : String(error);
+      log.error(`[sessionPersistence] failed to persist ${key}: ${detail}`);
+      return false;
+    },
+  );
+  pendingMementoWrites.set(
+    workspaceState,
+    reported.then(() => undefined),
+  );
+  return reported;
 }
 
 function emptyConversation(id: string, now: number): ConversationRuntime {
@@ -354,7 +366,11 @@ function loadHistory(
   persisted: SidebarSessionPersisted,
   archive: HistoryArchive | undefined,
 ): ConversationPersisted[] {
-  if (!archive || (persisted.history?.length ?? 0) > 0) return persisted.history ?? [];
+  if (!archive) return persisted.history ?? [];
+  if ((persisted.history?.length ?? 0) > 0) {
+    archive.load();
+    return persisted.history ?? [];
+  }
   return archive.load() ?? persisted.history ?? [];
 }
 
@@ -375,12 +391,19 @@ export function saveSidebarSession(
     archive?.overflow.put(conversationToPersisted(conversation));
   }
   session.history = session.history.slice(0, MAX_HISTORY_CONVERSATIONS);
-  const inFile = archive?.save(session.history, () => session.history.map(conversationToPersisted));
-  persistMemento(
+  const inFile = archive?.save(session.history, conversationToPersisted);
+  const mementoWrite = persistMemento(
     workspaceState,
     SESSION_KEY_V1,
     runtimeToPersisted(session, { withHistory: inFile !== true }),
   );
+  if (inFile === true && archive) {
+    // persistMemento already logs a rejected write. Do not prune after failure;
+    // the body remains the only durable copy until the memento is committed.
+    void mementoWrite.then((committed) => {
+      if (committed) archive.pruneRemoved();
+    });
+  }
   // Keep the pointer in step so it is always the authoritative answer on load,
   // rather than a value that may be older than the blob beside it.
   persistMemento(workspaceState, ACTIVE_ID_KEY, session.activeConversationId);
