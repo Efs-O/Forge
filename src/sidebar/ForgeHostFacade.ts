@@ -10,6 +10,15 @@ import type { BackendProcess } from '../system/SystemReport';
 import { recentExchanges, type ForgeExchange } from './sessionProjections';
 import type { AgentKind, AgentLink, AgentSender } from '../agentLinks/chatAgentLinks';
 import type { InboundAgentSelection, InboundAgentTarget } from '../agentLinks/inboundAgentRouting';
+import type { AskAgentRequest, AskAgentResult } from '../agentLinks/askAgentService';
+
+type AskAgentFacadeHandler = (
+  conversationId: string,
+  request: AskAgentRequest,
+  signal: AbortSignal,
+  onSessionLinked?: (link: AgentLink) => void,
+  onAccepted?: (link: AgentLink) => void,
+) => Promise<AskAgentResult>;
 
 export interface ForgeConversationSummary {
   id: string;
@@ -65,6 +74,7 @@ export interface ForgeHostFacade {
     selection: InboundAgentSelection,
   ): Promise<InboundAgentTarget>;
   getAgentLink(conversationId: string, kind: AgentKind): AgentLink | undefined;
+  askAgent: AskAgentFacadeHandler;
   showConversationNotice(conversationId: string, message: string): void;
   send(
     conversationId: string,
@@ -117,12 +127,6 @@ export interface ForgeHostFacade {
     conversationId: string,
   ): Promise<{ model: string; wasLoaded: boolean; serverStopped?: boolean }>;
   restartModel(modelName: string): Promise<void>;
-  /**
-   * Model → pid for the llama-servers this window spawned, so a remote
-   * `/system` can name Forge's own VRAM consumers. Optional on the same terms
-   * as the subscriptions below: fakes that omit it keep compiling, and the
-   * caller falls back to an untagged process list rather than failing.
-   */
   backendProcesses?(): readonly BackendProcess[];
   /**
    * Subscribe to compaction progress events emitted by the sidebar.
@@ -219,6 +223,7 @@ export interface SidebarHostFacadeDeps {
     selection: InboundAgentSelection,
   ) => Promise<InboundAgentTarget>;
   getAgentLink: (conversationId: string, kind: AgentKind) => AgentLink | undefined;
+  askAgent: AskAgentFacadeHandler;
   showConversationNotice: (conversationId: string, message: string) => void;
   clankerMode: () => boolean;
   setClankerMode: (on: boolean) => void;
@@ -329,6 +334,8 @@ export class SidebarHostFacade implements ForgeHostFacade {
   getAgentLink(conversationId: string, kind: AgentKind): AgentLink | undefined {
     return this.deps.getAgentLink(conversationId, kind);
   }
+
+  askAgent: AskAgentFacadeHandler = (...args) => this.deps.askAgent(...args);
 
   showConversationNotice(conversationId: string, message: string): void {
     this.deps.showConversationNotice(conversationId, message);

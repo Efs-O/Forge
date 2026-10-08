@@ -1,6 +1,7 @@
 import * as fs from 'fs/promises';
 import * as path from 'path';
 import { getBoardContext } from '../agentMesh/meshContext';
+import { agentDisplayName } from '../agentLinks/chatAgentLinks';
 import { getLogger } from '../util/logger';
 import type { RemoteOutboxDelivery } from './RemoteOutboxDelivery';
 import type { RemoteRequestStore } from './RemoteRequestStore';
@@ -51,7 +52,7 @@ export function startRemoteSessionRecovery(
         }
         if (!answer && Date.now() - request.updatedAt < REPLY_DEADLINE_MS) continue;
         if (signal.aborted || store.getRequest(request.id)?.state !== 'unknown') continue;
-        const name = request.sessionTarget![0]!.toUpperCase() + request.sessionTarget!.slice(1);
+        const name = agentDisplayName(request.sessionTarget!);
         await store.finish(
           request.id,
           answer ? 'completed' : 'failed',

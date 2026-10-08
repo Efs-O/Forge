@@ -11,6 +11,7 @@ export const RequestSchema = z.object({
   conversationId: z.string(),
   text: z.string(),
   sessionTarget: z.enum(['claude', 'codex', 'copilot']).optional(),
+  senderSessionId: z.string().min(1).max(256).optional(),
   priority: z.literal('steer').optional(),
   attachments: z
     .array(

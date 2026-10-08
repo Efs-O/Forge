@@ -84,6 +84,7 @@ async function sendToPanelOwnedCodex(
   prompt: string,
   signal: AbortSignal,
   timeoutMessage: string,
+  onAccepted?: () => void,
 ): Promise<AskAgentRunResult> {
   const paths = busPaths();
   ensureBus(paths);
@@ -92,6 +93,7 @@ async function sendToPanelOwnedCodex(
   try {
     const message = codexMessage(replyFile(paths, id), id, link.title, prompt);
     await queueToCodex(busConfig(config()).codex_cli, link.sessionId, message, signal);
+    onAccepted?.();
     const reply = await waitForReply(paths, id, 20 * 60_000, signal);
     if (reply !== undefined) {
       clearExchange(paths, id);
@@ -152,7 +154,7 @@ export function makeAskAgentRuntime(options: {
       }
       return false;
     },
-    sendLive: async (agent, link, prompt, signal, purpose = 'ask') => {
+    sendLive: async (agent, link, prompt, signal, purpose = 'ask', onAccepted) => {
       const adapter = getMeshOrchestrator()?.adapterForSession(agent, link.sessionId);
       if (agent === 'codex') {
         if (purpose === 'reply') return queueCodexReply(options.getConfig, link, prompt, signal);
@@ -165,10 +167,13 @@ export function makeAskAgentRuntime(options: {
             adapter
               ? 'The panel-owned Codex thread did not reply before the wait limit.'
               : 'The linked Codex thread did not reply before the wait limit.',
+            onAccepted,
           );
       }
       if (adapter) {
-        const result = await adapter.send(prompt, { signal });
+        const pending = adapter.send(prompt, { signal });
+        onAccepted?.();
+        const result = await pending;
         return {
           status: result.status,
           finalText: result.finalText ?? '',
@@ -196,6 +201,7 @@ export function makeAskAgentRuntime(options: {
             'Forge',
             claudeQuestion(paths.script, id, link.title, prompt),
           );
+          onAccepted?.();
           const reply = await waitForReply(paths, id, 20 * 60_000, signal);
           if (reply !== undefined) {
             clearExchange(paths, id);
@@ -227,6 +233,7 @@ export function makeAskAgentRuntime(options: {
       createSessionId,
       sessionTitle,
       signal,
+      onAccepted,
       onSessionId,
     }) => {
       try {
@@ -246,6 +253,7 @@ export function makeAskAgentRuntime(options: {
           ...(createSessionId ? { createSessionId } : { sessionId: link.sessionId }),
           sessionTitle,
           signal,
+          ...(onAccepted ? { onSpawned: onAccepted } : {}),
           onSessionId,
           ...(model ? { model } : {}),
         });

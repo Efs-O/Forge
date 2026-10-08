@@ -6,7 +6,18 @@ import { snapshotWorkspaceBefore } from '../agents/WorkspaceCheckpoint';
 import { DEFAULT_MAX_CLI_AGENTS } from '../agents/CliSessionRegistry';
 import { unattendedCliRefusal } from '../jobs/cliAgentGate';
 import { MAX_QUESTION_CHARS, questionSizeRefusal } from '../agentBus/liveSessionLimit';
-import { get, link, touch, unlink, type AgentKind, type AgentLink } from './chatAgentLinks';
+import {
+  agentDisplayName,
+  get,
+  link,
+  touch,
+  unlink,
+  type AgentKind,
+  type AgentLink,
+} from './chatAgentLinks';
+import type { AskAgentResult } from './askAgentResult';
+export { renderAskAgentResult } from './askAgentResult';
+export type { AskAgentResult } from './askAgentResult';
 import type { ConversationRuntime } from '../sidebar/sessionTypes';
 
 export interface AskAgentRunResult {
@@ -26,6 +37,7 @@ export interface AskAgentRuntime {
     prompt: string,
     signal: AbortSignal,
     purpose?: 'ask' | 'reply',
+    onAccepted?: () => void,
   ): Promise<AskAgentRunResult>;
   runHeadless(options: {
     agent: AgentKind;
@@ -34,6 +46,7 @@ export interface AskAgentRuntime {
     createSessionId?: string;
     sessionTitle: string;
     signal: AbortSignal;
+    onAccepted?: () => void;
     onSessionId(sessionId: string): void;
   }): Promise<AskAgentRunResult>;
 }
@@ -59,6 +72,8 @@ export interface AskAgentContext {
   signal: AbortSignal;
   workspaceRoot: string;
   persistConversation(): void;
+  onSessionLinked?(link: AgentLink): void;
+  onAccepted?(link: AgentLink): void;
 }
 
 export interface AskAgentRequest {
@@ -77,6 +92,12 @@ export interface AskAgentServiceOptions {
 
 const LIVE_POLL_MS = 500;
 const MAX_SUBJECT_CHARS = 160;
+let activeAsks = 0;
+const activeConversations = new Map<string, number>();
+
+export function isAskAgentRunning(conversationId: string): boolean {
+  return (activeConversations.get(conversationId) ?? 0) > 0;
+}
 
 function description(request: AskAgentRequest, title: string): string {
   const heading = request.subject?.trim() || request.message.trim().split(/\r?\n/u, 1)[0] || title;
@@ -89,10 +110,6 @@ function promptFor(request: AskAgentRequest, link: AgentLink, firstCodexAsk: boo
   const body = subject ? `Subject: ${subject}\n\n${task}` : task;
   const titleLine = firstCodexAsk ? `${link.title}\n\n` : '';
   return `${titleLine}[Forge ask]\n\n${body}\n\nReturn a concise answer for the Forge chat.`;
-}
-
-function agentLabel(agent: AgentKind): string {
-  return agent === 'claude' ? 'Claude' : agent === 'codex' ? 'Codex' : 'Copilot';
 }
 
 function validateRequest(value: AskAgentRequest): AskAgentRequest {
@@ -151,23 +168,25 @@ async function waitForLive(
   return false;
 }
 
-function resultText(
-  label: string,
+function structuredResult(
+  agent: AgentKind,
   subject: string,
+  sessionTitle: string,
   result: AskAgentRunResult,
   live: boolean,
-): string {
-  if (result.status === 'cancelled') {
-    if (live && result.mayStillBeWorking)
-      return `Forge stopped waiting for ${label}; its session may still be working. The ask was not resumed elsewhere.`;
-    return `Stopped the ${label} ask before it returned a reply.`;
-  }
-  if (result.status !== 'completed')
-    return `Error: ${label} could not answer: ${result.error ?? (result.finalText || 'unknown failure')}`;
-  const note = live
-    ? '\n\nEdits this live session makes after its reply are outside this ask’s checkpoint.'
-    : '';
-  return `**Asked ${label}:** ${subject}\n\n**${label} says:**\n\n${result.finalText.trim()}${note}`;
+  notice?: string,
+): AskAgentResult {
+  return {
+    agent,
+    subject,
+    sessionTitle,
+    status: result.status,
+    finalText: result.finalText,
+    live,
+    ...(result.error ? { error: result.error } : {}),
+    ...(result.mayStillBeWorking ? { mayStillBeWorking: true } : {}),
+    ...(notice ? { notice } : {}),
+  };
 }
 
 function createLink(
@@ -189,32 +208,87 @@ function createLink(
 }
 
 export function makeAskAgentHandler(options: AskAgentServiceOptions) {
-  let active = 0;
   const createSessionId = options.createSessionId ?? randomUUID;
   const maxConcurrent = options.maxConcurrent ?? DEFAULT_MAX_CLI_AGENTS;
 
-  return async (raw: AskAgentRequest, context: AskAgentContext): Promise<string> => {
+  return async (raw: AskAgentRequest, context: AskAgentContext): Promise<AskAgentResult> => {
     const request = validateRequest(raw);
-    if (active >= maxConcurrent)
-      return `Error: Forge CLI agent capacity (${maxConcurrent}) is full; no session was contacted.`;
+    if (activeAsks >= maxConcurrent)
+      return structuredResult(
+        request.agent,
+        '',
+        '',
+        {
+          status: 'failed',
+          finalText: '',
+          error: `Forge CLI agent capacity (${maxConcurrent}) is full; no session was contacted.`,
+        },
+        false,
+      );
     const config = options.getConfig();
     if (config.agent_bus?.enabled !== true)
-      return 'Error: ask_agent is disabled. Set `agent_bus.enabled: true` in config.yaml.';
+      return structuredResult(
+        request.agent,
+        '',
+        '',
+        {
+          status: 'failed',
+          finalText: '',
+          error: 'ask_agent is disabled. Set `agent_bus.enabled: true` in config.yaml.',
+        },
+        false,
+      );
     const refusal = unattendedCliRefusal(config, context.conversation.id);
-    if (refusal) return `Error: ${refusal}`;
+    if (refusal)
+      return structuredResult(
+        request.agent,
+        '',
+        '',
+        { status: 'failed', finalText: '', error: refusal },
+        false,
+      );
     const workspaceRoot = get(context.conversation, request.agent)?.cwd ?? context.workspaceRoot;
     if (!workspaceRoot)
-      return 'Error: ask_agent requires an open workspace folder for its checkpoint.';
-    active += 1;
+      return structuredResult(
+        request.agent,
+        '',
+        '',
+        {
+          status: 'failed',
+          finalText: '',
+          error: 'ask_agent requires an open workspace folder for its checkpoint.',
+        },
+        false,
+      );
+    activeAsks += 1;
+    activeConversations.set(
+      context.conversation.id,
+      (activeConversations.get(context.conversation.id) ?? 0) + 1,
+    );
     let capture: Awaited<ReturnType<typeof snapshotWorkspaceBefore>> | undefined;
     try {
       capture = await snapshotWorkspaceBefore(context.checkpoint, workspaceRoot, context.signal);
       return await ask(request, context, options, createSessionId);
+    } catch (error) {
+      return structuredResult(
+        request.agent,
+        '',
+        '',
+        {
+          status: 'failed',
+          finalText: '',
+          error: error instanceof Error ? error.message : String(error),
+        },
+        false,
+      );
     } finally {
       try {
         await capture?.finish();
       } finally {
-        active -= 1;
+        activeAsks -= 1;
+        const remaining = (activeConversations.get(context.conversation.id) ?? 1) - 1;
+        if (remaining > 0) activeConversations.set(context.conversation.id, remaining);
+        else activeConversations.delete(context.conversation.id);
       }
     }
   };
@@ -225,18 +299,25 @@ async function ask(
   context: AskAgentContext,
   options: AskAgentServiceOptions,
   createSessionId: () => string,
-): Promise<string> {
+): Promise<AskAgentResult> {
   const agent = request.agent;
-  const label = agentLabel(agent);
+  const label = agentDisplayName(agent);
   const title = description(request, context.conversation.title);
   const panel = options.getLinkConfig().open_panel === 'every_ask' && agent !== 'copilot';
   let linked = get(context.conversation, agent);
   let sessionCwd = linked?.cwd ?? context.workspaceRoot;
   let lead = '';
+  let accepted = false;
+  const markAccepted = (target: AgentLink): void => {
+    if (accepted) return;
+    accepted = true;
+    context.onAccepted?.(target);
+  };
 
   if (linked) {
     linked = touch(context.conversation, agent);
     context.persistConversation();
+    context.onSessionLinked?.(linked);
     const live = await options.runtime.isLive(agent, linked);
     let liveResult: AskAgentRunResult | undefined;
     if (live) {
@@ -250,6 +331,8 @@ async function ask(
         linked,
         promptFor(request, linked, false),
         context.signal,
+        'ask',
+        () => markAccepted(linked!),
       );
     } else if (panel) {
       const opened = await options.runtime.openPanel(agent, linked.sessionId);
@@ -263,13 +346,25 @@ async function ask(
             context.signal,
           ))
         ) {
-          return `Error: the ${label} panel did not come up for session "${linked.title}"; the ask was not sent.`;
+          return structuredResult(
+            agent,
+            title,
+            linked.title,
+            {
+              status: 'failed',
+              finalText: '',
+              error: `the ${label} panel did not come up for session "${linked.title}"; the ask was not sent.`,
+            },
+            false,
+          );
         }
         liveResult = await options.runtime.sendLive(
           agent,
           linked,
           promptFor(request, linked, false),
           context.signal,
+          'ask',
+          () => markAccepted(linked!),
         );
       } else {
         lead = `${label} panel could not be opened; resumed headlessly. `;
@@ -277,7 +372,7 @@ async function ask(
     }
 
     if (liveResult && !liveResult.sessionGone)
-      return lead + resultText(label, title, liveResult, true);
+      return structuredResult(agent, title, linked.title, liveResult, true, lead || undefined);
     if (liveResult?.sessionGone) {
       const goneTitle = linked.title;
       sessionCwd = linked.cwd;
@@ -294,6 +389,7 @@ async function ask(
         prompt: promptFor(request, linked, false),
         sessionTitle: linked.title,
         signal: context.signal,
+        onAccepted: () => markAccepted(linked!),
         onSessionId: (sessionId) => {
           if (sessionId !== linked?.sessionId)
             throw new Error(
@@ -301,7 +397,8 @@ async function ask(
             );
         },
       });
-      if (!resumed.sessionGone) return lead + resultText(label, title, resumed, false);
+      if (!resumed.sessionGone)
+        return structuredResult(agent, title, linked.title, resumed, false, lead || undefined);
       const goneTitle = linked.title;
       sessionCwd = linked.cwd;
       unlink(context.conversation, agent);
@@ -318,6 +415,7 @@ async function ask(
   if (initial) {
     linked = link(context.conversation, initial, [context.conversation]);
     context.persistConversation();
+    context.onSessionLinked?.(linked);
   }
   const placeholder =
     initial ??
@@ -339,6 +437,7 @@ async function ask(
     ...(sessionId ? { createSessionId: sessionId } : {}),
     sessionTitle: placeholder.title,
     signal: context.signal,
+    onAccepted: () => markAccepted(linked ?? placeholder),
     onSessionId: (reportedId) => {
       if (initial) {
         if (reportedId !== initial.sessionId)
@@ -355,6 +454,7 @@ async function ask(
         acceptedId = saved.sessionId;
         linked = saved;
         context.persistConversation();
+        context.onSessionLinked?.(saved);
       }
     },
   });
@@ -369,7 +469,23 @@ async function ask(
     context.persistConversation();
   }
   if (result.status === 'completed' && !acceptedId)
-    return `Error: ${label} returned without reporting a session id; its reply was not accepted.`;
-  const success = resultText(label, title, result, false);
-  return lead + success;
+    return structuredResult(
+      agent,
+      title,
+      placeholder.title,
+      {
+        status: 'failed',
+        finalText: '',
+        error: `${label} returned without reporting a session id; its reply was not accepted.`,
+      },
+      false,
+    );
+  return structuredResult(
+    agent,
+    title,
+    linked?.title ?? placeholder.title,
+    result,
+    false,
+    lead || undefined,
+  );
 }

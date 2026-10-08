@@ -1,5 +1,9 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import { makeAskAgentHandler, type AskAgentRuntime } from '../../src/agentLinks/askAgentService';
+import {
+  makeAskAgentHandler,
+  renderAskAgentResult,
+  type AskAgentRuntime,
+} from '../../src/agentLinks/askAgentService';
 import { rebuildIndex, type AgentKind, type AgentLink } from '../../src/agentLinks/chatAgentLinks';
 import type { ForgeConfig } from '../../src/config/types';
 import type { ConversationRuntime } from '../../src/sidebar/sessionTypes';
@@ -72,7 +76,14 @@ describe('ask_agent session resolution', () => {
         persistConversation: state.persistConversation,
       },
     );
-    expect(result).toContain('reply');
+    expect(result).toMatchObject({
+      agent,
+      status: 'completed',
+      finalText: 'reply',
+      sessionTitle: 'Forge · Design chat',
+      live: true,
+    });
+    expect(renderAskAgentResult(result)).toContain('reply');
     expect(state.runtime.sendLive).toHaveBeenCalledOnce();
     expect(state.runtime.runHeadless).not.toHaveBeenCalled();
     expect(state.events[0]).toBe('checkpoint');
@@ -93,7 +104,7 @@ describe('ask_agent session resolution', () => {
         persistConversation: state.persistConversation,
       },
     );
-    expect(result).toContain('did not come up');
+    expect(renderAskAgentResult(result)).toContain('did not come up');
     expect(state.runtime.openPanel).toHaveBeenCalledWith('claude', otherId);
     expect(state.runtime.runHeadless).not.toHaveBeenCalled();
   });
@@ -113,7 +124,7 @@ describe('ask_agent session resolution', () => {
         persistConversation: state.persistConversation,
       },
     );
-    expect(result).toContain('reply');
+    expect(renderAskAgentResult(result)).toContain('reply');
     expect(state.runtime.openPanel).toHaveBeenCalledOnce();
     expect(state.runtime.sendLive).toHaveBeenCalledOnce();
     expect(state.runtime.runHeadless).not.toHaveBeenCalled();
@@ -136,7 +147,7 @@ describe('ask_agent session resolution', () => {
         persistConversation: state.persistConversation,
       },
     );
-    expect(result).toContain('resumed');
+    expect(renderAskAgentResult(result)).toContain('resumed');
     expect(state.runtime.runHeadless).toHaveBeenCalledWith(
       expect.objectContaining({
         agent: 'codex',
@@ -161,7 +172,7 @@ describe('ask_agent session resolution', () => {
         persistConversation: unavailable.persistConversation,
       },
     );
-    expect(fallback).toContain('panel could not be opened');
+    expect(renderAskAgentResult(fallback)).toContain('panel could not be opened');
     expect(unavailable.runtime.runHeadless).toHaveBeenCalledOnce();
   });
 
@@ -187,10 +198,33 @@ describe('ask_agent session resolution', () => {
           persistConversation: state.persistConversation,
         },
       );
-      expect(result).toContain('done');
+      expect(renderAskAgentResult(result)).toContain('done');
       expect(state.events.indexOf('checkpoint')).toBeLessThan(state.events.indexOf('persist'));
     },
   );
+
+  it('reports accepted only after the new headless process has started', async () => {
+    const state = setup({
+      runHeadless: vi.fn(async (options) => {
+        options.onAccepted?.();
+        options.onSessionId(otherId);
+        return { status: 'completed', finalText: 'done' };
+      }),
+    });
+    const onAccepted = vi.fn();
+    await state.handler(
+      { agent: 'claude', message: 'Review' },
+      {
+        conversation: state.conv,
+        checkpoint: state.checkpoint,
+        signal: new AbortController().signal,
+        workspaceRoot: 'C:/repo',
+        persistConversation: state.persistConversation,
+        onAccepted,
+      },
+    );
+    expect(onAccepted).toHaveBeenCalledWith(expect.objectContaining({ sessionId: otherId }));
+  });
 
   it('removes a pre-created Claude link when the first run fails before reporting a session', async () => {
     const state = setup({
@@ -210,7 +244,7 @@ describe('ask_agent session resolution', () => {
         persistConversation: state.persistConversation,
       },
     );
-    expect(result).toContain('CLI unavailable');
+    expect(renderAskAgentResult(result)).toContain('CLI unavailable');
     expect(state.conv.agentLinks?.claude).toBeUndefined();
     expect(state.persistConversation).toHaveBeenCalledTimes(2);
   });
@@ -229,7 +263,7 @@ describe('ask_agent session resolution', () => {
         persistConversation: state.persistConversation,
       },
     );
-    expect(result).toContain('auth failed');
+    expect(renderAskAgentResult(result)).toContain('auth failed');
     expect(state.conv.agentLinks?.copilot).toBeUndefined();
     expect(state.persistConversation).toHaveBeenCalledTimes(2);
   });
@@ -301,7 +335,7 @@ describe('ask_agent session resolution', () => {
         persistConversation: state.persistConversation,
       },
     );
-    expect(result).toContain('no longer exists; started a new one');
+    expect(renderAskAgentResult(result)).toContain('no longer exists; started a new one');
     expect(state.runtime.runHeadless).toHaveBeenCalledTimes(2);
   });
 
@@ -327,12 +361,14 @@ describe('ask_agent session resolution', () => {
         persistConversation: state.persistConversation,
       },
     );
-    expect(result).toContain('session may still be working');
+    expect(renderAskAgentResult(result)).toContain('session may still be working');
     expect(state.runtime.sendLive).toHaveBeenCalledWith(
       'claude',
       expect.objectContaining({ sessionId: otherId }),
       expect.any(String),
       controller.signal,
+      'ask',
+      expect.any(Function),
     );
   });
 
@@ -350,7 +386,7 @@ describe('ask_agent session resolution', () => {
           persistConversation: state.persistConversation,
         },
       );
-      expect(result).toContain('jobs.allow_cli_agents');
+      expect(renderAskAgentResult(result)).toContain('jobs.allow_cli_agents');
       expect(state.runtime.runHeadless).not.toHaveBeenCalled();
     } finally {
       marker.dispose();

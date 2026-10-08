@@ -1,406 +1,293 @@
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import * as fs from 'node:fs/promises';
 import * as os from 'node:os';
 import * as path from 'node:path';
 import type * as vscode from 'vscode';
-import { handleRemoteCommand } from '../../src/remote/RemoteCommandHandler';
-import { FakeRemoteChannel } from '../../src/remote/FakeRemoteChannel';
-import { RemoteAuth } from '../../src/remote/RemoteAuth';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import { RemoteController } from '../../src/remote/RemoteController';
+import { RemoteAuth } from '../../src/remote/RemoteAuth';
 import { RemoteRequestStore } from '../../src/remote/RemoteRequestStore';
-import { setMeshOrchestrator } from '../../src/agentMesh/meshContext';
-import type { MeshOrchestrator } from '../../src/agentMesh/meshOrchestrator';
+import { FakeRemoteChannel } from '../../src/remote/FakeRemoteChannel';
+import { admitRemoteSessionCommand } from '../../src/remote/remoteSessionAdmission';
+import { remoteSessionAskFromText } from '../../src/remote/remoteSessionTellCommands';
+import { handleRemoteCommand } from '../../src/remote/RemoteCommandHandler';
+import { drainRemoteQueue, type RemoteQueueDrainDeps } from '../../src/remote/RemoteQueueDrain';
+import { RemoteAgentProgress, CLOCK_INTERVAL_MS } from '../../src/remote/RemoteAgentProgress';
+import { MAX_TELL_MESSAGE_CHARS } from '../../src/tools/tellLiveSessionTool';
+import type { AskAgentResult } from '../../src/agentLinks/askAgentService';
+import type { AgentLink } from '../../src/agentLinks/chatAgentLinks';
 import type { RemoteInboundEvent } from '../../src/remote/types';
 
-/** In-memory SecretStorage, same shape the other remote tests use. */
-class MemorySecrets {
-  readonly values = new Map<string, string>();
-  get(key: string): Thenable<string | undefined> {
-    return Promise.resolve(this.values.get(key));
-  }
-  store(key: string, value: string): Thenable<void> {
-    this.values.set(key, value);
-    return Promise.resolve();
-  }
-  delete(key: string): Thenable<void> {
-    this.values.delete(key);
-    return Promise.resolve();
-  }
-  onDidChange = vi.fn();
-}
+const dirs: string[] = [];
+afterEach(async () => {
+  for (const dir of dirs.splice(0)) await fs.rm(dir, { recursive: true, force: true });
+});
 
-/**
- * `/tell <agent>` — a one-way note from a remote chat
- * into a live session's FIFO.
- *
- * The invariants that matter here are about what the user is TOLD and what
- * happens on a failure, because the mesh has already taken the message by the
- * time the transport is involved:
- *
- * - The acknowledgement says "accepted". Never "started" or "delivered": the
- *   mesh has queued the note, and nothing proves it has run.
- * - A failed acknowledgement must not throw. `handleRemoteCommand` turns a
- *   throw into a discarded control receipt and a `retry`, the poll loop
- *   redelivers the update, and the same note is enqueued a second time.
- * - The control-event receipt is what stops a redelivered Telegram update from
- *   enqueueing the same text twice, and an `unknown` receipt must refuse rather
- *   than guess.
- */
-
-const tempDirs: string[] = [];
-
-async function store(): Promise<RemoteRequestStore> {
-  const directory = await fs.mkdtemp(path.join(os.tmpdir(), 'forge-tell-test-'));
-  tempDirs.push(directory);
-  const result = new RemoteRequestStore(path.join(directory, 'state.json'));
-  await result.load();
-  return result;
-}
-
-/** The tell calls the fake orchestrator recorded. */
-interface TellCall {
-  alias: string;
-  message: string;
-  expectsReply: boolean | undefined;
-}
-
-function fakeOrchestrator(
-  tell: MeshOrchestrator['tell'],
-): { orchestrator: MeshOrchestrator; calls: TellCall[] } {
-  const calls: TellCall[] = [];
-  const orchestrator = {
-    tell: async (alias: string, message: string, options = {}) => {
-      calls.push({ alias, message, expectsReply: options.expectsReply });
-      return tell(alias, message, options);
-    },
-  } as unknown as MeshOrchestrator;
-  return { orchestrator, calls };
-}
-
-function textEvent(text: string): RemoteInboundEvent {
-  return {
-    channel: 'fake',
-    kind: 'text',
-    providerMessageId: `msg-${text.slice(1, 7)}`,
-    senderId: 'owner',
-    chatId: 'chat-a',
-    chatType: 'private',
-    receivedAt: 1,
-    text,
-  } as RemoteInboundEvent;
-}
-
-async function fixture(
-  orchestrator: MeshOrchestrator | undefined,
-  options: { sendError?: string; onError?: (message: string) => void } = {},
-) {
-  const state = await store();
+async function setup(options: { bound?: boolean; sendError?: string } = {}) {
+  const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'forge-remote-linked-ask-'));
+  dirs.push(dir);
+  const store = new RemoteRequestStore(path.join(dir, 'state.json'));
+  await store.load();
+  if (options.bound !== false)
+    await store.setBinding({
+      channel: 'fake',
+      chatId: 'chat-a',
+      workspaceId: 'workspace',
+      conversationId: 'c1',
+    });
   const channel = new FakeRemoteChannel();
-  if (options.sendError) channel.sendError = options.sendError;
-  const onError = options.onError ?? vi.fn();
-  const context = {
+  channel.sendError = options.sendError;
+  const links = new Map<string, AgentLink>();
+  const askAgent = vi.fn(
+    async (
+      conversationId: string,
+      request: { agent: 'claude' | 'codex' | 'copilot'; message: string },
+      _signal: AbortSignal,
+      onSessionLinked?: (link: AgentLink) => void,
+      onAccepted?: (link: AgentLink) => void,
+    ): Promise<AskAgentResult> => {
+      const link: AgentLink = {
+        kind: request.agent,
+        sessionId: `session-${request.agent}`,
+        cwd: 'C:/workspace',
+        title: 'Forge · Main',
+        linkedAt: 1,
+        lastUsedAt: 2,
+        origin: 'forge-created',
+      };
+      links.set(request.agent, link);
+      onSessionLinked?.(link);
+      onAccepted?.(link);
+      return {
+        agent: request.agent,
+        status: 'completed',
+        finalText: `${request.agent} reply`,
+        sessionTitle: link.title,
+        subject: request.message,
+        live: false,
+      };
+    },
+  );
+  const host = {
+    askAgent,
+    getAgentLink: (_conversationId: string, kind: string) => links.get(kind),
+    status: () => ({
+      conversations: [{ id: 'c1', title: 'Main' }],
+      requestChains: [],
+      streamingConversationIds: [],
+    }),
+  };
+  const onError = vi.fn();
+  const kickDrain = vi.fn();
+  const promptDeps = {
     channel,
-    store: state,
-    host: {},
-    workspaceId: 'workspace',
-    signal: new AbortController().signal,
-    inactivityTimeoutMinutes: 30,
-    rateLimitPerMinute: 30,
-    modelEntries: [],
-    workspaceAliases: {},
+    store,
+    host,
+    options: {
+      workspaceId: 'workspace',
+      queueLimit: 5,
+      attachmentsEnabled: false,
+      acceptPdfAttachments: false,
+    },
+    isBusy: () => false,
+    kickDrain,
     onError,
   };
-  return { state, channel, context: context as never, onError };
+  const event = (text: string, id = 'm1') =>
+    ({
+      kind: 'text',
+      channel: 'fake',
+      chatId: 'chat-a',
+      senderId: 'owner',
+      providerMessageId: id,
+      chatType: 'private',
+      receivedAt: Date.now(),
+      text,
+    }) as Extract<RemoteInboundEvent, { kind: 'text' }>;
+  const drain = async (conversationId = 'c1') => {
+    const signal = new AbortController().signal;
+    const progress = new RemoteAgentProgress(
+      channel,
+      signal,
+      () => true,
+      3900,
+      1000,
+      undefined,
+      undefined,
+      CLOCK_INTERVAL_MS,
+    );
+    await drainRemoteQueue(conversationId, {
+      signal,
+      channel,
+      store,
+      auth: { canDeliver: async () => true },
+      host,
+      progress,
+      outbox: { kick: vi.fn() },
+      activeConversations: new Set(),
+      attachmentStore: () => undefined,
+      isBusy: () => false,
+    } as unknown as RemoteQueueDrainDeps);
+  };
+  return { store, channel, links, askAgent, host, onError, promptDeps, event, drain, kickDrain };
 }
 
-describe('remote session tell commands (Phase 5)', () => {
-  beforeEach(() => setMeshOrchestrator(undefined));
-  afterEach(async () => {
-    setMeshOrchestrator(undefined);
-    for (const directory of tempDirs.splice(0))
-      await fs.rm(directory, { recursive: true, force: true });
-  });
+async function admit(state: Awaited<ReturnType<typeof setup>>, text: string, key = 'request-1') {
+  return admitRemoteSessionCommand(
+    state.event(text, key),
+    key,
+    state.promptDeps as never,
+    (chatId, message) => state.channel.send(chatId, message),
+    state.onError,
+  );
+}
 
-  /** The target operand maps to a live alias; the whole remainder is the note. */
-  it('routes /tell to all three aliases with the whole remainder', async () => {
-    const { orchestrator, calls } = fakeOrchestrator(async () => ({
-      exchangeId: 'ex-1',
-      to: 'x',
-      observing: false,
-    }));
-    setMeshOrchestrator(orchestrator);
-    const { context, channel } = await fixture(orchestrator);
-
-    await expect(
-      handleRemoteCommand(textEvent('/tell claude build 2 failed on linux'), context, 'd1'),
-    ).resolves.toEqual({ kind: 'handled' });
-    await expect(handleRemoteCommand(textEvent('/tell codex still broken'), context, 'd2')).resolves.toEqual(
-      { kind: 'handled' },
+describe('Telegram linked-agent asks', () => {
+  it('/tell admits a durable request and creates the missing bound-chat link when drained', async () => {
+    const state = await setup();
+    await expect(admit(state, '/tell codex build 2 failed')).resolves.toMatchObject({
+      kind: 'accepted',
+    });
+    expect(state.channel.sent[0]?.text).toBe('→ Codex (Forge · Main): build 2 failed');
+    expect(state.store.queued('c1')[0]).toMatchObject({
+      sessionTarget: 'codex',
+      text: 'build 2 failed',
+    });
+    expect(state.askAgent).not.toHaveBeenCalled();
+    await state.drain();
+    expect(state.askAgent).toHaveBeenCalledWith(
+      'c1',
+      { agent: 'codex', message: 'build 2 failed' },
+      expect.any(AbortSignal),
+      expect.any(Function),
+      expect.any(Function),
     );
-    await expect(
-      handleRemoteCommand(textEvent('/tell copilot  look at this  '), context, 'd3'),
-    ).resolves.toEqual({ kind: 'handled' });
-
-    expect(calls).toEqual([
-      { alias: 'claude', message: 'build 2 failed on linux', expectsReply: false },
-      { alias: 'codex', message: 'still broken', expectsReply: false },
-      { alias: 'copilot', message: 'look at this', expectsReply: false },
+    expect(state.links.get('codex')?.sessionId).toBe('session-codex');
+    expect(state.channel.sent.map((item) => item.text)).toEqual([
+      '→ Codex (Forge · Main): build 2 failed',
+      '✓ Codex received it',
     ]);
-    // One acknowledgement per command, and none of them echoes the note back:
-    // the user just typed it, and a Telegram echo of a long note costs a chunk.
-    expect(channel.sent).toHaveLength(3);
-    expect(channel.sent[0]!.text).toContain('claude');
-    expect(channel.sent[0]!.text).toContain('exchange ex-1');
-    expect(channel.sent.map((message) => message.text).join('\n')).not.toContain('linux');
-  });
-
-  /** A bare token is this command's, so it gets its own usage line. */
-  it('rejects an empty message with the usage line and enqueues nothing', async () => {
-    const { orchestrator, calls } = fakeOrchestrator(async () => ({
-      exchangeId: 'ex-2',
-      to: 'claude',
-      observing: false,
-    }));
-    setMeshOrchestrator(orchestrator);
-    const { context, channel } = await fixture(orchestrator);
-
-    await expect(handleRemoteCommand(textEvent('/tell'), context, 'd4')).resolves.toEqual({
-      kind: 'rejected',
-      reason: 'usage: /tell <claude|codex|copilot> <message>',
-    });
-    await expect(handleRemoteCommand(textEvent('/tell codex    '), context, 'd5')).resolves.toEqual({
-      kind: 'rejected',
-      reason: 'usage: /tell <claude|codex|copilot> <message>',
-    });
-    expect(calls).toEqual([]);
-    expect(channel.sent).toEqual([]);
-  });
-
-  /** The single gate: no orchestrator means no mesh, for either cause. */
-  it('rejects when the agent mesh is not up in this window', async () => {
-    const { context, channel } = await fixture(undefined);
-    await expect(handleRemoteCommand(textEvent('/tell claude hello'), context, 'd6')).resolves.toEqual({
-      kind: 'rejected',
-      reason: 'the agent mesh is not up in this window',
-    });
-    expect(channel.sent).toEqual([]);
-  });
-
-  /** The mesh's own reason is surfaced verbatim as a rejection. */
-  it('surfaces a tell error as a rejection, not a success', async () => {
-    const { orchestrator } = fakeOrchestrator(async (alias) => ({
-      error: `no live session for "${alias}" (no alias, no live pin, no owned session)`,
-    }));
-    setMeshOrchestrator(orchestrator);
-    const { context, channel } = await fixture(orchestrator);
-
-    await expect(
-      handleRemoteCommand(textEvent('/tell codex are you there'), context, 'd7'),
-    ).resolves.toEqual({
-      kind: 'rejected',
-      reason: 'no live session for "codex" (no alias, no live pin, no owned session)',
-    });
-    expect(channel.sent).toEqual([]);
-  });
-
-  /**
-   * `observing` describes session ownership, not proof of execution, so the
-   * acknowledgement must not read as "started" even for an owned session.
-   */
-  it('says accepted, never started or delivered, for an owned session', async () => {
-    const { orchestrator } = fakeOrchestrator(async () => ({
-      exchangeId: 'ex-3',
-      to: 'claude',
-      observing: true,
-    }));
-    setMeshOrchestrator(orchestrator);
-    const { context, channel } = await fixture(orchestrator);
-
-    await expect(handleRemoteCommand(textEvent('/tell claude go'), context, 'd8')).resolves.toEqual({
-      kind: 'handled',
-    });
-    const text = channel.sent[0]!.text;
-    expect(text).toContain('accepted');
-    expect(text).toContain('exchange ex-3');
-    expect(text).not.toMatch(/started|delivered|finished|answered/iu);
-    expect(text).toContain('not a question');
-  });
-
-  /**
-   * THE failure that matters: the note is durably queued, then the
-   * acknowledgement send fails. Throwing here would discard the control receipt
-   * and the redelivered update would enqueue the same note a second time.
-   */
-  it('keeps the command completed when the acknowledgement send fails', async () => {
-    const { orchestrator, calls } = fakeOrchestrator(async () => ({
-      exchangeId: 'ex-4',
-      to: 'claude',
-      observing: false,
-    }));
-    setMeshOrchestrator(orchestrator);
-    const onError = vi.fn();
-    const { context, channel, state } = await fixture(orchestrator, {
-      sendError: 'telegram transport is down',
-      onError,
-    });
-
-    await expect(
-      handleRemoteCommand(textEvent('/tell claude ship it'), context, 'd9'),
-    ).resolves.toEqual({ kind: 'handled' });
-    expect(calls).toHaveLength(1);
-    expect(channel.sent).toEqual([]);
-    expect(onError).toHaveBeenCalledTimes(1);
-    expect(String(onError.mock.calls[0]![0])).toContain('telegram transport is down');
-    // The receipt is completed, so the redelivered update cannot re-enqueue.
-    await expect(handleRemoteCommand(textEvent('/tell claude ship it'), context, 'd9')).resolves.toEqual(
-      { kind: 'handled' },
+    expect(state.store.pendingOutbox()[0]?.text).toContain(
+      'Codex (Forge · Main) says: codex reply',
     );
-    expect(calls).toHaveLength(1);
-    expect(await state.beginControlEvent('d9')).toBe('completed');
   });
 
-  it('keeps the receipt completed if reporting the failed acknowledgement also throws', async () => {
-    const { orchestrator, calls } = fakeOrchestrator(async () => ({
-      exchangeId: 'ex-log-failure',
-      to: 'claude',
-      observing: false,
-    }));
-    setMeshOrchestrator(orchestrator);
-    const { context, state } = await fixture(orchestrator, {
-      sendError: 'telegram transport is down',
-      onError: () => {
-        throw new Error('logger failed');
-      },
+  it('refuses /tell without a bound conversation', async () => {
+    const state = await setup({ bound: false });
+    await expect(admit(state, '/tell claude hello')).resolves.toMatchObject({
+      kind: 'rejected',
+      reason: 'no conversation is bound',
     });
-    const fallbackLog = vi.spyOn(console, 'error').mockImplementation(() => undefined);
-    try {
-      await expect(handleRemoteCommand(textEvent('/tell claude once'), context, 'log-failure')).resolves.toEqual({ kind: 'handled' });
-      expect(await state.beginControlEvent('log-failure')).toBe('completed');
-      expect(calls).toHaveLength(1);
-      expect(fallbackLog).toHaveBeenCalledOnce();
-    } finally {
-      fallbackLog.mockRestore();
-    }
+    expect(state.store.queued()).toEqual([]);
+    expect(state.askAgent).not.toHaveBeenCalled();
   });
 
-  /** A replayed Telegram update must not enqueue the same text twice. */
-  it('does not enqueue again for a duplicate control event', async () => {
-    const { orchestrator, calls } = fakeOrchestrator(async () => ({
-      exchangeId: 'ex-5',
-      to: 'claude',
-      observing: false,
-    }));
-    setMeshOrchestrator(orchestrator);
-    const { context, channel } = await fixture(orchestrator);
-
-    await expect(handleRemoteCommand(textEvent('/tell claude once'), context, 'dup')).resolves.toEqual({
-      kind: 'handled',
+  it('keeps empty-message and message-size usage refusals', async () => {
+    const state = await setup();
+    await expect(admit(state, '/tell codex')).resolves.toMatchObject({
+      kind: 'rejected',
+      reason: 'usage: /tell <claude|codex|copilot> <message>',
     });
-    await expect(handleRemoteCommand(textEvent('/tell claude once'), context, 'dup')).resolves.toEqual({
-      kind: 'handled',
+    const tooLong = 'x'.repeat(MAX_TELL_MESSAGE_CHARS + 1);
+    await expect(admit(state, `/tell claude ${tooLong}`, 'too-long')).resolves.toMatchObject({
+      kind: 'rejected',
+      reason: expect.stringContaining(String(MAX_TELL_MESSAGE_CHARS + 1)),
     });
-    expect(calls).toHaveLength(1);
-    expect(channel.sent).toHaveLength(1);
+    expect(state.store.queued()).toEqual([]);
   });
 
-  /**
-   * Crash between mesh acceptance and receipt completion: the receipt is
-   * `unknown`, and Forge must refuse rather than blindly send the note again.
-   */
-  it('refuses a replay whose control outcome is unknown', async () => {
-    const { orchestrator, calls } = fakeOrchestrator(async () => ({
-      exchangeId: 'ex-6',
-      to: 'claude',
-      observing: false,
-    }));
-    setMeshOrchestrator(orchestrator);
-    const { context, state } = await fixture(orchestrator);
+  it('reports a delivery failure as a new failure message and failed request', async () => {
+    const state = await setup();
+    state.askAgent.mockResolvedValueOnce({
+      agent: 'claude',
+      status: 'failed',
+      finalText: '',
+      error: 'authentication expired',
+      sessionTitle: 'Forge · Main',
+      subject: 'check',
+      live: false,
+    });
+    await admit(state, '/claude check auth', 'failure');
+    await state.drain();
+    expect(state.channel.sent.map((item) => item.text)).toContain('✗ authentication expired');
+    expect(state.store.getByDedupKey('failure')?.state).toBe('failed');
+  });
 
-    // Model the crash: the receipt was written pending and never finished.
-    expect(await state.beginControlEvent('crashed')).toBe('admitted');
+  it('keeps an admitted command completed when its arrow acknowledgement fails', async () => {
+    const state = await setup({ sendError: 'telegram transport is down' });
+    await expect(admit(state, '/tell claude ship it', 'ack-failure')).resolves.toMatchObject({
+      kind: 'accepted',
+    });
+    expect(state.onError).toHaveBeenCalledWith(
+      expect.stringContaining('telegram transport is down'),
+    );
+    await expect(admit(state, '/tell claude ship it', 'ack-failure')).resolves.toMatchObject({
+      kind: 'duplicate',
+    });
+    expect(state.store.queued('c1')).toHaveLength(1);
+    expect(state.kickDrain).toHaveBeenCalledOnce();
+  });
+
+  it('keeps durable admission when reporting an acknowledgement failure also fails', async () => {
+    const state = await setup({ sendError: 'telegram transport is down' });
+    state.onError.mockImplementation(() => {
+      throw new Error('logger failed');
+    });
+    await expect(admit(state, '/tell copilot once', 'report-failure')).resolves.toMatchObject({
+      kind: 'accepted',
+    });
+    expect(state.store.queued('c1')).toHaveLength(1);
+  });
+
+  it('does not enqueue a duplicate update id twice', async () => {
+    const state = await setup();
+    await admit(state, '/codex once', 'same-update');
+    await expect(admit(state, '/codex once', 'same-update')).resolves.toMatchObject({
+      kind: 'duplicate',
+    });
+    expect(state.store.queued('c1')).toHaveLength(1);
+    expect(state.kickDrain).toHaveBeenCalledOnce();
+  });
+
+  it('refuses an unknown control-event outcome instead of replaying it', async () => {
+    const state = await setup();
+    expect(await state.store.beginControlEvent('control-crash')).toBe('admitted');
     await expect(
-      handleRemoteCommand(textEvent('/tell claude do not double'), context, 'crashed'),
+      handleRemoteCommand(
+        state.event('/not-a-command'),
+        {
+          channel: state.channel,
+          store: state.store,
+          host: state.host,
+          signal: new AbortController().signal,
+        } as never,
+        'control-crash',
+      ),
     ).resolves.toEqual({
       kind: 'rejected',
       reason: 'previous command outcome is unknown; resend it',
     });
-    expect(calls).toEqual([]);
+    expect(state.askAgent).not.toHaveBeenCalled();
   });
 
-  /** The same ceiling as `tell_live_session`, refused before the mesh is called. */
-  it('refuses a note over the mesh message limit', async () => {
-    const { orchestrator, calls } = fakeOrchestrator(async () => ({
-      exchangeId: 'ex-7',
-      to: 'claude',
-      observing: false,
-    }));
-    setMeshOrchestrator(orchestrator);
-    const { context } = await fixture(orchestrator);
-    const tooLong = 'x'.repeat(4001);
-
-    await expect(
-      handleRemoteCommand(textEvent(`/tell claude ${tooLong}`), context, 'd10'),
-    ).resolves.toEqual({
-      kind: 'rejected',
-      reason: '/tell message is 4001 chars; the limit is 4000.',
-    });
-    // Refused before the mesh was asked — nothing was queued.
-    expect(calls).toEqual([]);
-
-    // Exactly at the ceiling is accepted: the limit is 4000, not 3999.
-    const atLimit = 'y'.repeat(4000);
-    await expect(
-      handleRemoteCommand(textEvent(`/tell claude ${atLimit}`), context, 'd10b'),
-    ).resolves.toEqual({ kind: 'handled' });
-    expect(calls).toEqual([{ alias: 'claude', message: atLimit, expectsReply: false }]);
+  it('leaves unrelated commands to the rest of the routing chain', async () => {
+    const state = await setup();
+    await expect(admit(state, '/status')).resolves.toBeUndefined();
+    expect(remoteSessionAskFromText('/codexy hi')).toBeUndefined();
   });
 
-  /**
-   * Prefix safety: `/claudeai` and `/codexy` are not aliases, and must not be
-   * captured by the tell branch. They fall through to the generic unknown
-   * command, which is what proves the match is exact rather than a startsWith.
-   */
-  it('leaves unrelated commands to the rest of the chain', async () => {
-    const { orchestrator, calls } = fakeOrchestrator(async () => ({
-      exchangeId: 'ex-8',
-      to: 'claude',
-      observing: false,
-    }));
-    setMeshOrchestrator(orchestrator);
-    const { context } = await fixture(orchestrator);
-    for (const text of ['/claudeai hi', '/codexy hi', '/copilotx hi']) {
-      await expect(handleRemoteCommand(textEvent(text), context, `d12-${text}`)).resolves.toEqual({
-        kind: 'rejected',
-        reason: 'unknown command',
-      });
-    }
-    expect(calls).toEqual([]);
-  });
-
-  /**
-   * The security edge: a tell injects a prompt into someone else's live
-   * session, so an unpaired sender must never reach it. Tested through the real
-   * controller rather than assumed — the auth gate lives in
-   * `RemoteController.handle`, upstream of the command dispatch this file
-   * otherwise exercises directly.
-   */
-  it('holds a session tell behind the owner auth gate', async () => {
-    const { orchestrator, calls } = fakeOrchestrator(async () => ({
-      exchangeId: 'ex-9',
-      to: 'claude',
-      observing: false,
-    }));
-    setMeshOrchestrator(orchestrator);
-
-    const state = await store();
-    const secrets = new MemorySecrets();
-    secrets.values.set('forge.remote.fake.ownerId', 'someone-else');
-    const auth = new RemoteAuth(secrets as unknown as vscode.SecretStorage);
-    const channel = new FakeRemoteChannel();
+  it('keeps session asks behind the owner authentication gate', async () => {
+    const state = await setup({ bound: false });
+    const secrets = {
+      get: async () => 'someone-else',
+      store: async () => undefined,
+      delete: async () => undefined,
+      onDidChange: vi.fn(),
+    } as unknown as vscode.SecretStorage;
+    const auth = new RemoteAuth(secrets);
     const host = {
       createConversation: vi.fn(async () => ({ id: 'c1', title: 'Remote' })),
       restoreConversation: vi.fn(),
-      send: vi.fn(async () => ({ kind: 'completed' as const, finalText: 'x' })),
+      send: vi.fn(),
       cancel: vi.fn(),
       addApprovalSink: () => ({ dispose: () => undefined }),
       addQuestionSink: () => ({ dispose: () => undefined }),
@@ -412,7 +299,7 @@ describe('remote session tell commands (Phase 5)', () => {
         streamingConversationIds: [],
       }),
     } as never;
-    const controller = new RemoteController(channel, state, auth, host, {
+    const controller = new RemoteController(state.channel, state.store, auth, host, {
       workspaceId: 'workspace',
       queueLimit: 5,
       maxMessageChars: 12_000,
@@ -421,19 +308,13 @@ describe('remote session tell commands (Phase 5)', () => {
     await controller.start();
     try {
       await expect(
-        channel.emit({
-          channel: 'fake',
-          kind: 'text',
-          providerMessageId: 'stranger-tell',
+        state.channel.emit({
+          ...state.event('/tell claude do something'),
           senderId: 'stranger',
           chatId: 'private-chat',
-          chatType: 'private',
-          receivedAt: Date.now(),
-          text: '/tell claude do something',
-        } as RemoteInboundEvent),
+        }),
       ).resolves.toMatchObject({ kind: 'rejected', reason: 'sender is not paired' });
-      // Nothing reached the mesh: the refusal is the whole response.
-      expect(calls).toEqual([]);
+      expect(state.store.queued()).toEqual([]);
     } finally {
       await controller.stop();
     }

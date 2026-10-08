@@ -1,4 +1,3 @@
-/** VS Code sidebar surface; turn and tab collaborators are built in wireSidebar. */
 import * as vscode from 'vscode';
 import type { IBackendPool } from '../backend/BackendPool';
 import type { ForgeConfig } from '../config/types';
@@ -45,6 +44,7 @@ import { statusRowProgress } from './turnMirrorWiring';
 import { ResidencyPoller } from './ResidencyPoller';
 import type { UserQuestionService } from './UserQuestionService';
 import type { UserNotificationService } from './UserNotificationService';
+import { createSidebarAgentAsk } from './sidebarAgentAsk';
 import type { MidTurnTellDrain } from '../agent/MidTurnTellDrain';
 import { HiddenChatAlerts } from './hiddenChatAlerts';
 import type { SidebarPromptRouter } from './backgroundExitNotice';
@@ -54,14 +54,12 @@ import { retainSessionMemoryKeys } from './memorySnapshotLifecycle';
 import { WebviewQueueState } from './evictionGate';
 
 export type { SidebarProviderEvents };
-/** Residency refresh while visible: cheap, but fast enough to avoid a stale dot. */
 const RESIDENCY_POLL_MS = 1500;
 
 export class SidebarProvider implements vscode.WebviewViewProvider {
   public static readonly viewId = 'forge.sidebar';
 
   private view: vscode.WebviewView | undefined;
-  /** Residency poll: see docs/plans/MODEL_READINESS_DOT_PLAN.md — why a tick, not an event; runs only while the sidebar is visible. */
   private sidebar: SidebarRuntime;
   private readonly failureTracker = new ToolFailureTracker();
   private readonly agentLoop: AgentLoop;
@@ -71,11 +69,11 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
   private readonly tabs: ConversationTabs;
   private readonly send: SendPipeline;
   private readonly requestChains: RequestChainLifecycle;
-  /** The mid-turn tell composer; the remote queue registers as a source. */
   public readonly tellDrain: MidTurnTellDrain;
   private readonly promptRouter: SidebarPromptRouter;
   private readonly hostFacade: ForgeHostFacade;
   private readonly hiddenChatAlerts: HiddenChatAlerts;
+  private readonly agentAsker: ReturnType<typeof createSidebarAgentAsk>;
   remoteEvictionQuery: ((conversationId: string) => boolean | undefined) | undefined;
   private readonly residency = new ResidencyPoller(
     () => this.pool.residencySignature(),
@@ -90,9 +88,7 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
     private readonly checkpoints: CheckpointStack,
     toolRegistry: ToolRegistry,
     private readonly indexManager: IndexManager,
-    // Required: a defaulted instance would bypass the facade the remote bridge subscribes to.
     private readonly questions: UserQuestionService,
-    // One owner keeps notify_user and the remote bridge on a single fan-out.
     notifications: UserNotificationService,
     private readonly workspaceState: vscode.Memento,
     private readonly codeLens: KeepUndoCodeLensProvider,
@@ -101,15 +97,19 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
     private readonly events: SidebarProviderEvents = {},
     forgeLoader?: ForgeInstructionsLoader,
     secrets?: vscode.SecretStorage,
-    // By-value consumers keep their original root; this field tracks live roots.
     private readonly workspaceRoot?: string,
     getConfigPath?: () => string,
     cliSessions?: CliSessionRegistry,
-    // Without globalStorage, prompts keep their previous behavior, minus thumbnails.
     private readonly attachmentStore?: ChatAttachmentStore,
-    // Archived conversations use files; without a workspace, the memento remains authoritative.
     private readonly historyArchive?: HistoryArchive,
   ) {
+    this.agentAsker = createSidebarAgentAsk({
+      getConfig: () => this.config,
+      getSidebar: () => this.sidebar,
+      checkpoints: this.checkpoints,
+      ...(this.workspaceRoot ? { workspaceRoot: this.workspaceRoot } : {}),
+      persist: () => this.persistSession(),
+    });
     this.sidebar = loadSidebarSession(
       workspaceState,
       historyArchive,
@@ -145,7 +145,6 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
         unloadModels: () => this.unloadModels(),
         unloadActiveModel: () => this.unloadConversationModel(),
         isConversationQueued: (id) => this.webviewQueue.isQueued(id),
-        // Preserve the original policy: a "clear" value means no blocker.
         remoteEvictionBlocks: (id) =>
           this.remoteEvictionQuery ? this.remoteEvictionQuery(id) : false,
       },
@@ -202,8 +201,10 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
         () => this.postSessionSync(),
         (conversationId, message) => this.post({ type: 'notice', message, conversationId }),
       ),
+      askAgent: (conversationId, request, signal, onSessionLinked, onAccepted) =>
+        this.agentAsker.ask(conversationId, request, signal, onSessionLinked, onAccepted),
+      cancelAgentAsk: (conversationId) => this.agentAsker.cancel(conversationId),
     });
-    // Fold unfinished intervals from the previous session into persisted totals.
     this.agentLoop.restoreSessionTimers(this.sidebar);
     this.persistSession();
   }

@@ -14,6 +14,8 @@ import type { UserNotificationService } from './UserNotificationService';
 import { SidebarHostFacade, type ForgeHostFacade } from './ForgeHostFacade';
 import { get } from '../agentLinks/chatAgentLinks';
 import { resolveInboundAgentTarget } from '../agentLinks/inboundAgentRouting';
+import type { AskAgentRequest, AskAgentResult } from '../agentLinks/askAgentService';
+import type { AgentLink } from '../agentLinks/chatAgentLinks';
 
 export interface SidebarFacadeDeps {
   runtime: SidebarRuntimeParts;
@@ -29,6 +31,14 @@ export interface SidebarFacadeDeps {
   persistSession: () => void;
   postSessionSync: () => void;
   postConversationNotice: (conversationId: string, message: string) => void;
+  askAgent: (
+    conversationId: string,
+    request: AskAgentRequest,
+    signal: AbortSignal,
+    onSessionLinked?: (link: AgentLink) => void,
+    onAccepted?: (link: AgentLink) => void,
+  ) => Promise<AskAgentResult>;
+  cancelAgentAsk?: (conversationId: string) => void;
 }
 
 export function createSidebarHostFacade(deps: SidebarFacadeDeps): ForgeHostFacade {
@@ -56,6 +66,7 @@ export function createSidebarHostFacade(deps: SidebarFacadeDeps): ForgeHostFacad
     cancelContactPrompts: () => agentLoop.cancelContactPrompts(),
     cancel: async (conversationId) => {
       requestChains.markCancelling(conversationId);
+      deps.cancelAgentAsk?.(conversationId);
       await agentLoop.cancel(conversationId);
     },
     interrupt: (conversationId) => deps.interrupt(conversationId),
@@ -96,6 +107,8 @@ export function createSidebarHostFacade(deps: SidebarFacadeDeps): ForgeHostFacad
       );
       return chat ? get(chat, kind) : undefined;
     },
+    askAgent: (conversationId, request, signal, onSessionLinked, onAccepted) =>
+      deps.askAgent(conversationId, request, signal, onSessionLinked, onAccepted),
     showConversationNotice: deps.postConversationNotice,
     clankerMode: () => agentLoop.getClankerMode(),
     // Remote and sidebar arming persist identically, to workspaceState. The

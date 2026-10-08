@@ -37,6 +37,7 @@ import {
   recordAcceptedInboundReply,
 } from '../agentLinks/agentReplyLifecycle';
 import { agentDisplayName } from '../agentLinks/chatAgentLinks';
+import { makeAgentToAgentRelay } from '../agentLinks/agentToAgentRelay';
 
 /** The conversation a bus message from `from` belongs in. */
 function busTarget(
@@ -150,13 +151,7 @@ export function busModelIds(config: ForgeConfig): string[] {
   ];
 }
 
-/**
- * The model the user is actually talking to: the active conversation's model.
- * The config-level active_model is only a fallback default and can be stale
- * (pointing at a model that is not the one loaded), so a `--new` without an
- * explicit --model follows this instead — otherwise it opens on the stale
- * default and loading it spawns a second server.
- */
+/** The loaded chat model; config.active_model can be stale while the sidebar is open. */
 function currentLoadedModel(facade: ForgeHostFacade): string | undefined {
   const status = facade.status();
   const active = status.conversations.find(
@@ -198,8 +193,9 @@ export async function submitBusMessage(
     // is durably mirrored to its bound remote chats before the Forge turn runs.
     facade.emitHostActivity?.({
       conversationId,
+      ...(options?.sender ? { suppressProgress: true } : {}),
       text: options?.sender
-        ? `Forge: message from ${agentDisplayName(options.sender.kind)} session "${options.sender.title}"`
+        ? `${agentDisplayName(options.sender.kind)} (${options.sender.title}) says: ${(inbound?.text ?? prompt).split(/\n\nFrom (?:Claude|Codex|Copilot) session /u)[0]!.trim()}`
         : `Forge: ${inbound?.from} says:\n\n${inbound?.text}`,
     });
   }
@@ -361,6 +357,12 @@ export function setupAgentMessaging(
     isFocused: () => vscode.window.state.focused,
     configuredModels: () => busModelIds(getConfig()),
     relay: mesh.relay,
+    relayAgent: makeAgentToAgentRelay(
+      () => getSidebar().getHostFacade(),
+      busPaths().root,
+      workspaceRoot,
+      askRuntime,
+    ),
     // F-06: a `priority=steer` message interrupts the recipient's active turn.
     steer: mesh.steer,
     // §6: a steer to Forge itself interrupts Forge's running turn. It is the
@@ -464,10 +466,10 @@ export function setupAgentMessaging(
       }
       return runtime.sendFileToConversation(conversationId, filePath, caption);
     },
-    remoteSession: async (from, id, action, text) => {
+    remoteSession: async (from, sessionId, id, action, text) => {
       const runtime = getRemoteRuntime();
       return runtime
-        ? runtime.remoteSessionAction(from, id, action, text)
+        ? runtime.remoteSessionAction(from, sessionId, id, action, text)
         : { kind: 'refused', error: 'the remote runtime is unavailable' };
     },
     // §8/P3: a `to: forge` message that parses as a typed lifecycle command is

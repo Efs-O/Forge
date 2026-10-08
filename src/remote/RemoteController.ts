@@ -56,6 +56,7 @@ export class RemoteController {
   /** Live draft previews shared by progress and Stop. */
   private readonly hostProgress: HostProgressOpener;
   private readonly pending = new RemotePendingPrompt();
+  private readonly agentOriginTurns = new Set<string>();
   /** Best-effort deletion of processed owner commands from Telegram. */
   private readonly commandCleanup: CommandCleanupScheduler;
   private readonly sendTransientMessage: (chatId: string, text: string) => Promise<void>;
@@ -147,7 +148,10 @@ export class RemoteController {
       channel,
       signal: this.abort.signal,
       progress: this.progress,
-      target: (conversationId) => this.fanout.mirrorTarget(conversationId),
+      target: (conversationId) =>
+        this.agentOriginTurns.has(conversationId)
+          ? undefined
+          : this.fanout.mirrorTarget(conversationId),
       ...(options.onError ? { onError: options.onError } : {}),
     });
   }
@@ -166,9 +170,10 @@ export class RemoteController {
     this.approvals.start();
     this.questions.start();
     await this.channel.start(this.abort.signal);
-    this.progressSubscription = this.host.onAgentProgress?.((event) =>
-      this.hostProgress.handle(event),
-    );
+    this.progressSubscription = this.host.onAgentProgress?.((event) => {
+      this.hostProgress.handle(event);
+      if (event.kind === 'end') this.agentOriginTurns.delete(event.conversationId);
+    });
     for (const request of this.store.queued(undefined, this.channel.name)) {
       this.kickDrain(request.conversationId);
     }
@@ -224,6 +229,9 @@ export class RemoteController {
   }
   async mirrorTurn(conversationId: string, text: string): Promise<number> {
     return this.fanout.mirrorTurn(conversationId, text);
+  }
+  suppressAgentOriginProgress(conversationId: string): void {
+    this.agentOriginTurns.add(conversationId);
   }
   async reportTurnFailure(conversationId: string, text: string): Promise<number> {
     return this.fanout.failureNotice(conversationId, text);

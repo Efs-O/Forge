@@ -33,6 +33,8 @@ export interface HostActivityEvent {
    * suppress the news that the work stopped.
    */
   kind?: 'turn' | 'failure';
+  /** This activity opens the agent-originated answer sequence; skip progress edits for that turn. */
+  suppressProgress?: boolean;
   /**
    * Transient status the user does not need to keep — a model unloaded, the
    * backend restarted. True means the transport deletes the delivered message

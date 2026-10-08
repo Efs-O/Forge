@@ -5,8 +5,16 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import { setBoardContext, setMeshOrchestrator } from '../../src/agentMesh/meshContext';
 import type { MeshOrchestrator } from '../../src/agentMesh/meshOrchestrator';
 import { askRemoteSession, waitForRemoteVerdict } from '../../src/remote/RemoteSessionAsk';
-import { remoteSessionAction, answerRemoteSessionQuestion, remoteSessionAnswerPath, sessionQuestionForReply } from '../../src/remote/RemoteSessionBridge';
-import { admitRemoteSessionCommand, admitRemoteSessionReply } from '../../src/remote/remoteSessionAdmission';
+import {
+  remoteSessionAction,
+  answerRemoteSessionQuestion,
+  remoteSessionAnswerPath,
+  sessionQuestionForReply,
+} from '../../src/remote/RemoteSessionBridge';
+import {
+  admitRemoteSessionCommand,
+  admitRemoteSessionReply,
+} from '../../src/remote/remoteSessionAdmission';
 import { RemoteOutboxDelivery } from '../../src/remote/RemoteOutboxDelivery';
 import { FakeRemoteChannel } from '../../src/remote/FakeRemoteChannel';
 import { drainRemoteQueue, type RemoteQueueDrainDeps } from '../../src/remote/RemoteQueueDrain';
@@ -33,62 +41,128 @@ async function fixture() {
 
 function request(id: string): RemoteRequestRecord {
   return {
-    id, dedupKey: id, channel: 'fake', chatId: 'chat-a', providerMessageId: 'm1',
-    conversationId: 'c1', text: 'hello', sessionTarget: 'codex', receivedAt: Date.now(),
-    admittedAt: Date.now(), state: 'running', updatedAt: Date.now(),
+    id,
+    dedupKey: id,
+    channel: 'fake',
+    chatId: 'chat-a',
+    providerMessageId: 'm1',
+    conversationId: 'c1',
+    text: 'hello',
+    sessionTarget: 'codex',
+    receivedAt: Date.now(),
+    senderSessionId: id,
+    admittedAt: Date.now(),
+    state: 'running',
+    updatedAt: Date.now(),
   };
 }
 
 describe('Telegram session reply route', () => {
   it('observes an owned Claude turn and passes its final text to the outbox caller', async () => {
-    const ask = vi.fn(async () => ({ status: 'completed' as const, finalText: 'Hello from Claude' }));
-    setMeshOrchestrator({ resolveAdapter: async () => ({ observesTurns: true }), ask } as unknown as MeshOrchestrator);
-    const answer = await askRemoteSession('claude', 'hello', 'request-1', new AbortController().signal);
+    const ask = vi.fn(async () => ({
+      status: 'completed' as const,
+      finalText: 'Hello from Claude',
+    }));
+    setMeshOrchestrator({
+      resolveAdapter: async () => ({ observesTurns: true }),
+      ask,
+    } as unknown as MeshOrchestrator);
+    const answer = await askRemoteSession(
+      'claude',
+      'hello',
+      'request-1',
+      new AbortController().signal,
+    );
     expect(answer).toBe('Hello from Claude');
     expect(ask.mock.calls[0]![1]).toContain('remote-notify claude request-1');
     expect(ask.mock.calls[0]![1]).toContain('remote-ask claude request-1');
   });
 
-  it.each(['codex', 'claude'] as const)('uses the remote request id for a user-opened %s verdict', async (target) => {
-    const { dir } = await fixture();
-    await fs.mkdir(path.join(dir, 'verdicts'));
-    const tell = vi.fn(async (_to: string, _message: string, options: { exchangeId: string }) => {
-      await fs.writeFile(path.join(dir, 'verdicts', `${options.exchangeId}.md`), 'Codex answer');
-      return { exchangeId: options.exchangeId, to: target, observing: false };
-    });
-    setBoardContext({ root: dir, workspace: dir, log: path.join(dir, 'exchanges.jsonl') });
-    setMeshOrchestrator({ resolveAdapter: async () => ({ observesTurns: false }), tell } as unknown as MeshOrchestrator);
-    await expect(askRemoteSession(target, 'hello', 'request-2', new AbortController().signal)).resolves.toBe('Codex answer');
-    expect(tell.mock.calls[0]![2]).toEqual({ expectsReply: true, exchangeId: 'request-2' });
-  });
+  it.each(['codex', 'claude'] as const)(
+    'uses the remote request id for a user-opened %s verdict',
+    async (target) => {
+      const { dir } = await fixture();
+      await fs.mkdir(path.join(dir, 'verdicts'));
+      const tell = vi.fn(async (_to: string, _message: string, options: { exchangeId: string }) => {
+        await fs.writeFile(path.join(dir, 'verdicts', `${options.exchangeId}.md`), 'Codex answer');
+        return { exchangeId: options.exchangeId, to: target, observing: false };
+      });
+      setBoardContext({ root: dir, workspace: dir, log: path.join(dir, 'exchanges.jsonl') });
+      setMeshOrchestrator({
+        resolveAdapter: async () => ({ observesTurns: false }),
+        tell,
+      } as unknown as MeshOrchestrator);
+      await expect(
+        askRemoteSession(target, 'hello', 'request-2', new AbortController().signal),
+      ).resolves.toBe('Codex answer');
+      expect(tell.mock.calls[0]![2]).toEqual({ expectsReply: true, exchangeId: 'request-2' });
+    },
+  );
 
   it('does not claim success on a missing verdict or an aborted wait', async () => {
     const { dir } = await fixture();
-    await expect(waitForRemoteVerdict(dir, 'missing', new AbortController().signal, 1)).rejects.toThrow('no answer');
+    await expect(
+      waitForRemoteVerdict(dir, 'missing', new AbortController().signal, 1),
+    ).rejects.toThrow('no answer');
     const aborted = new AbortController();
     aborted.abort();
-    await expect(waitForRemoteVerdict(dir, 'missing', aborted.signal, 1)).rejects.toThrow('interrupted');
+    await expect(waitForRemoteVerdict(dir, 'missing', aborted.signal, 1)).rejects.toThrow(
+      'interrupted',
+    );
   });
 
   it('admits an exact /codex command once and retains its Telegram origin', async () => {
     const { store } = await fixture();
+    await store.setBinding({
+      channel: 'fake',
+      chatId: 'chat-a',
+      workspaceId: 'w',
+      conversationId: 'c1',
+    });
     const channel = new FakeRemoteChannel();
     const event = {
-      kind: 'text', channel: 'fake', chatId: 'chat-a', senderId: 'owner',
-      providerMessageId: 'm1', chatType: 'private', receivedAt: Date.now(),
+      kind: 'text',
+      channel: 'fake',
+      chatId: 'chat-a',
+      senderId: 'owner',
+      providerMessageId: 'm1',
+      chatType: 'private',
+      receivedAt: Date.now(),
       text: '/codex hello from Telegram',
     } as Extract<RemoteInboundEvent, { kind: 'text' }>;
     const ack = vi.fn(async () => undefined);
     const deps = {
-      channel, store, host: { createConversation: async () => ({ id: 'c1' }) },
-      options: { workspaceId: 'w', queueLimit: 5, attachmentsEnabled: false, acceptPdfAttachments: false },
-      isBusy: () => false, kickDrain: () => undefined,
+      channel,
+      store,
+      host: {
+        createConversation: async () => ({ id: 'c1' }),
+        getAgentLink: () => undefined,
+        status: () => ({ conversations: [{ id: 'c1', title: 'Main' }] }),
+      },
+      options: {
+        workspaceId: 'w',
+        queueLimit: 5,
+        attachmentsEnabled: false,
+        acceptPdfAttachments: false,
+      },
+      isBusy: () => false,
+      kickDrain: () => undefined,
     } as never;
-    await expect(admitRemoteSessionCommand(event, 'dedup', deps, ack)).resolves.toMatchObject({ kind: 'accepted' });
-    expect(store.getByDedupKey('dedup')).toMatchObject({ chatId: 'chat-a', text: 'hello from Telegram', sessionTarget: 'codex' });
-    await expect(admitRemoteSessionCommand(event, 'dedup', deps, ack)).resolves.toMatchObject({ kind: 'duplicate' });
+    await expect(admitRemoteSessionCommand(event, 'dedup', deps, ack)).resolves.toMatchObject({
+      kind: 'accepted',
+    });
+    expect(store.getByDedupKey('dedup')).toMatchObject({
+      chatId: 'chat-a',
+      text: 'hello from Telegram',
+      sessionTarget: 'codex',
+    });
+    await expect(admitRemoteSessionCommand(event, 'dedup', deps, ack)).resolves.toMatchObject({
+      kind: 'duplicate',
+    });
     expect(ack).toHaveBeenCalledTimes(1);
-    await expect(admitRemoteSessionCommand({ ...event, text: '/codexy hello' }, 'other', deps, ack)).resolves.toBeUndefined();
+    await expect(
+      admitRemoteSessionCommand({ ...event, text: '/codexy hello' }, 'other', deps, ack),
+    ).resolves.toBeUndefined();
   });
 
   it('routes notify and ask only to the running exchange and authenticated origin', async () => {
@@ -98,21 +172,91 @@ describe('Telegram session reply route', () => {
     const auth = { canDeliver: async () => true } as never;
     const kick = vi.fn();
     const available = () => true;
-    await expect(remoteSessionAction({ from: 'claude', exchangeId: id, action: 'notify', text: 'wrong', store, auth, available, kick })).resolves.toMatchObject({ kind: 'refused' });
-    await expect(remoteSessionAction({ from: 'codex', exchangeId: id, action: 'notify', text: 'working', store, auth, available, kick })).resolves.toEqual({ kind: 'notified' });
-    const asked = await remoteSessionAction({ from: 'codex', exchangeId: id, action: 'ask', text: 'Which file?', store, auth, available, kick });
+    await expect(
+      remoteSessionAction({
+        from: 'claude',
+        sessionId: id,
+        exchangeId: id,
+        action: 'notify',
+        text: 'wrong',
+        store,
+        auth,
+        available,
+        kick,
+      }),
+    ).resolves.toMatchObject({ kind: 'refused' });
+    await expect(
+      remoteSessionAction({
+        from: 'codex',
+        sessionId: '8e395649-705e-47f9-b499-03a36e908f51',
+        exchangeId: id,
+        action: 'notify',
+        text: 'wrong session',
+        store,
+        auth,
+        available,
+        kick,
+      }),
+    ).resolves.toMatchObject({ kind: 'refused' });
+    await expect(
+      remoteSessionAction({
+        from: 'codex',
+        sessionId: id,
+        exchangeId: id,
+        action: 'notify',
+        text: 'working',
+        store,
+        auth,
+        available,
+        kick,
+      }),
+    ).resolves.toEqual({ kind: 'notified' });
+    const asked = await remoteSessionAction({
+      from: 'codex',
+      sessionId: id,
+      exchangeId: id,
+      action: 'ask',
+      text: 'Which file?',
+      store,
+      auth,
+      available,
+      kick,
+    });
     expect(asked.kind).toBe('asked');
     if (asked.kind !== 'asked') throw new Error('question was not accepted');
     expect(store.pendingOutbox().map((item) => item.chatId)).toEqual(['chat-a', 'chat-a']);
     expect(store.pendingOutbox()[1]!.text).toContain(`/answer ${asked.questionId}`);
-    await expect(remoteSessionAction({ from: 'codex', exchangeId: id, action: 'ask', text: 'Another?', store, auth, available, kick })).resolves.toMatchObject({ kind: 'refused', error: expect.stringContaining('already waiting') });
-    await expect(answerRemoteSessionQuestion(store, 'fake', 'other-chat', asked.questionId, 'x', dir)).resolves.toBe('missing');
+    await expect(
+      remoteSessionAction({
+        from: 'codex',
+        sessionId: id,
+        exchangeId: id,
+        action: 'ask',
+        text: 'Another?',
+        store,
+        auth,
+        available,
+        kick,
+      }),
+    ).resolves.toMatchObject({
+      kind: 'refused',
+      error: expect.stringContaining('already waiting'),
+    });
+    await expect(
+      answerRemoteSessionQuestion(store, 'fake', 'other-chat', asked.questionId, 'x', dir),
+    ).resolves.toBe('missing');
     const reopened = new RemoteRequestStore(path.join(dir, 'state.json'));
     await reopened.load();
     expect(reopened.getRequest(id)?.state).toBe('unknown');
-    await expect(answerRemoteSessionQuestion(reopened, 'fake', 'chat-a', asked.questionId, 'src/a.ts', dir)).resolves.toBe('answered');
-    await expect(fs.readFile(remoteSessionAnswerPath(asked.questionId, dir), 'utf8')).resolves.toBe('src/a.ts');
-    await expect(answerRemoteSessionQuestion(store, 'fake', 'chat-a', asked.questionId, 'different', dir)).resolves.toBe('duplicate');
+    await expect(
+      answerRemoteSessionQuestion(reopened, 'fake', 'chat-a', asked.questionId, 'src/a.ts', dir),
+    ).resolves.toBe('answered');
+    await expect(fs.readFile(remoteSessionAnswerPath(asked.questionId, dir), 'utf8')).resolves.toBe(
+      'src/a.ts',
+    );
+    await expect(
+      answerRemoteSessionQuestion(store, 'fake', 'chat-a', asked.questionId, 'different', dir),
+    ).resolves.toBe('duplicate');
     expect(kick).toHaveBeenCalledTimes(2);
   });
 
@@ -121,28 +265,62 @@ describe('Telegram session reply route', () => {
     const id = '8e395649-705e-47f9-b499-03a36e908f52';
     await store.enqueue(request(id));
     const auth = { canDeliver: async () => true } as never;
-    const asked = await remoteSessionAction({ from: 'codex', exchangeId: id, action: 'ask', text: 'Keep the shim?', store, auth, available: () => true, kick: vi.fn() });
+    const asked = await remoteSessionAction({
+      from: 'codex',
+      sessionId: id,
+      exchangeId: id,
+      action: 'ask',
+      text: 'Keep the shim?',
+      store,
+      auth,
+      available: () => true,
+      kick: vi.fn(),
+    });
     if (asked.kind !== 'asked') throw new Error('question was not accepted');
     const channel = new FakeRemoteChannel();
-    const delivery = new RemoteOutboxDelivery(channel, store, 4000, new AbortController().signal, 0);
+    const delivery = new RemoteOutboxDelivery(
+      channel,
+      store,
+      4000,
+      new AbortController().signal,
+      0,
+    );
     delivery.start();
-    await vi.waitFor(() => expect(sessionQuestionForReply(store, 'fake', 'chat-a', 'sent-1')).toBe(asked.questionId));
+    await vi.waitFor(() =>
+      expect(sessionQuestionForReply(store, 'fake', 'chat-a', 'sent-1')).toBe(asked.questionId),
+    );
     await delivery.stop();
     expect(channel.sent[0]!.text).toContain('Reply to this message with your answer');
     // Another chat, another message, or a command never resolve to the question.
     expect(sessionQuestionForReply(store, 'fake', 'other-chat', 'sent-1')).toBeUndefined();
     expect(sessionQuestionForReply(store, 'fake', 'chat-a', 'sent-9')).toBeUndefined();
     const event = {
-      kind: 'text', channel: 'fake', chatId: 'chat-a', senderId: 'owner',
-      providerMessageId: 'm2', chatType: 'private', receivedAt: Date.now(),
-      text: 'yes', replyToMessageId: 'sent-9',
+      kind: 'text',
+      channel: 'fake',
+      chatId: 'chat-a',
+      senderId: 'owner',
+      providerMessageId: 'm2',
+      chatType: 'private',
+      receivedAt: Date.now(),
+      text: 'yes',
+      replyToMessageId: 'sent-9',
     } as Extract<RemoteInboundEvent, { kind: 'text' }>;
     const deps = { store } as never;
     const ack = vi.fn(async () => undefined);
     await expect(admitRemoteSessionReply(event, deps, ack)).resolves.toBeUndefined();
-    await expect(admitRemoteSessionReply({ ...event, replyToMessageId: 'sent-1', text: '/status' }, deps, ack)).resolves.toBeUndefined();
     await expect(
-      admitRemoteSessionReply({ ...event, replyToMessageId: 'sent-1', attachments: [{ name: 'a.jpg', mediaType: 'image/jpeg', data: 'eA==' }] }, deps, ack),
+      admitRemoteSessionReply({ ...event, replyToMessageId: 'sent-1', text: '/status' }, deps, ack),
+    ).resolves.toBeUndefined();
+    await expect(
+      admitRemoteSessionReply(
+        {
+          ...event,
+          replyToMessageId: 'sent-1',
+          attachments: [{ name: 'a.jpg', mediaType: 'image/jpeg', data: 'eA==' }],
+        },
+        deps,
+        ack,
+      ),
     ).resolves.toMatchObject({ kind: 'rejected' });
     expect(ack).not.toHaveBeenCalled();
   });
@@ -154,18 +332,60 @@ describe('Telegram session reply route', () => {
       const id = '8e395649-705e-47f9-b499-03a36e908f51';
       await store.enqueue({ ...request(id), sessionTarget: target, state: 'queued' });
       const channel = new FakeRemoteChannel();
-      const host = { send: vi.fn(), status: () => ({ conversations: [], requestChains: [], streamingConversationIds: [] }) };
-      const ask = vi.fn(async () => ({ status: 'completed' as const, finalText: `${target} answered` }));
-      setMeshOrchestrator({ resolveAdapter: async () => ({ observesTurns: true }), ask } as unknown as MeshOrchestrator);
+      const label = target[0]!.toUpperCase() + target.slice(1);
+      const linked = { kind: target, sessionId: `session-${target}`, title: `Forge · Main` };
+      const ask = vi.fn(
+        async (
+          _conversationId: string,
+          request: { agent: string },
+          _signal: AbortSignal,
+          onLinked?: (link: typeof linked) => void,
+          onAccepted?: (link: typeof linked) => void,
+        ) => {
+          onLinked?.(linked);
+          onAccepted?.(linked);
+          return {
+            agent: target,
+            status: 'completed' as const,
+            finalText: `${request.agent} answered`,
+            sessionTitle: linked.title,
+            subject: 'hello',
+            live: false,
+          };
+        },
+      );
+      const host = {
+        send: vi.fn(),
+        askAgent: ask,
+        getAgentLink: () => linked,
+        status: () => ({ conversations: [], requestChains: [], streamingConversationIds: [] }),
+      };
       const signal = new AbortController().signal;
-      const progress = new RemoteAgentProgress(channel, signal, () => true, 3900, 1000, undefined, undefined, CLOCK_INTERVAL_MS);
+      const progress = new RemoteAgentProgress(
+        channel,
+        signal,
+        () => true,
+        3900,
+        1000,
+        undefined,
+        undefined,
+        CLOCK_INTERVAL_MS,
+      );
       await drainRemoteQueue('c1', {
-        signal, channel, store, auth: { canDeliver: async () => true }, host,
-        progress, outbox: { kick: vi.fn() }, activeConversations: new Set(),
-        attachmentStore: () => undefined, isBusy: () => false,
+        signal,
+        channel,
+        store,
+        auth: { canDeliver: async () => true },
+        host,
+        progress,
+        outbox: { kick: vi.fn() },
+        activeConversations: new Set(),
+        attachmentStore: () => undefined,
+        isBusy: () => false,
       } as unknown as RemoteQueueDrainDeps);
       expect(host.send).not.toHaveBeenCalled();
       expect(ask).toHaveBeenCalledTimes(1);
+      expect(channel.sent.map((item) => item.text)).toEqual(['✓ ' + label + ' received it']);
       expect(store.getRequest(id)?.state).toBe('completed');
       expect(store.pendingOutbox()).toHaveLength(1);
       expect(store.pendingOutbox()[0]!.text).toContain(`${target} answered`);
@@ -191,10 +411,22 @@ describe('Telegram session reply route', () => {
 
   it('refuses a forged sender or another exchange before dispatching a bus notification', async () => {
     const dispatch = vi.fn(async () => ({ kind: 'notified' as const }));
-    const deps = { validateFrom: async (from: string) =>
-      from === 'codex' ? { ok: true as const } : { ok: false as const, error: 'not joined' }, dispatch };
-    await expect(handleAgentRemoteSessionRoute({ from: 'claude', exchange_id: '8e395649-705e-47f9-b499-03a36e908f51', text: 'hi' }, 'notify', deps)).rejects.toThrow('not joined');
-    await expect(handleAgentRemoteSessionRoute({ from: 'codex', exchange_id: '../chat', text: 'hi' }, 'notify', deps)).rejects.toThrow('exchange_id');
+    const deps = { dispatch };
+    const sender = { kind: 'codex', sessionId: '8e395649-705e-47f9-b499-03a36e908f51' };
+    await expect(
+      handleAgentRemoteSessionRoute(
+        { from: 'claude', sender, exchange_id: '8e395649-705e-47f9-b499-03a36e908f51', text: 'hi' },
+        'notify',
+        deps,
+      ),
+    ).rejects.toThrow('sender');
+    await expect(
+      handleAgentRemoteSessionRoute(
+        { from: 'codex', sender, exchange_id: '../chat', text: 'hi' },
+        'notify',
+        deps,
+      ),
+    ).rejects.toThrow('exchange_id');
     expect(dispatch).not.toHaveBeenCalled();
   });
 });

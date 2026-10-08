@@ -211,15 +211,16 @@ export function appendEvent(
           event.eventId === `wake-${event.exchangeId}` &&
           event.state === current;
         if (isTerminal(current) && !isWakeAfterVerdict) return false; // terminal except its wake row
-        // A `verdict` event completes a non-observing exchange that honestly
-        // stays at `accepted`/`observed` until the agent writes its verdict
+        // A `verdict` event completes an exchange whose answer is supplied by
+        // an agent session, whether its progress reached started or stayed at
+        // accepted/observed until the agent writes its verdict
         // (F-03). That is an exchange-correlated completion, not a transport
         // exit, so it is the one case allowed to jump to `completed` from a
         // non-started state. Everything else must follow the strict table.
         const isVerdictCompletion =
           event.type === 'verdict' &&
           event.state === 'completed' &&
-          (current === 'accepted' || current === 'observed');
+          (current === 'accepted' || current === 'observed' || current === 'started');
         if (
           event.state !== current &&
           !isVerdictCompletion &&

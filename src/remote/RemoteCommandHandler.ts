@@ -13,7 +13,6 @@ import type { JobStore } from '../jobs/JobStore';
 import { switchWorkspaceCommand } from './remoteWorkspaceCommand';
 import { handleRemoteSettingsCommand } from './remoteSettingsCommands';
 import { handleRemoteModelCommand } from './remoteModelCommands';
-import { handleRemoteSessionTellCommand } from './remoteSessionTellCommands';
 import { editProgress } from './remoteCommandShared';
 import { resolveConversationSelection, shortId } from './remoteCommandSelectors';
 
@@ -153,10 +152,6 @@ async function executeRemoteCommand(
   }
   const settingsCommand = await handleRemoteSettingsCommand(command, argument, event, context);
   if (settingsCommand) return settingsCommand;
-  // The one-way /tell command remains a control receipt; reply-capable session
-  // commands are admitted to the durable queue earlier by RemoteController.
-  const tellCommand = await handleRemoteSessionTellCommand(command, operands, event, context);
-  if (tellCommand) return tellCommand;
   if (command === '/compact') {
     const binding = context.store.binding(event.channel, event.chatId);
     if (!binding) return { kind: 'rejected', reason: 'no conversation is bound' };

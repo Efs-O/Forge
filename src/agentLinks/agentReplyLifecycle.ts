@@ -114,6 +114,15 @@ export function makeAgentReplyLifecycle(options: {
           record.conversationId,
           'Forge reply was not seen live; it is available with forge.sh read-verdict.',
         );
+        facade.emitHostActivity?.({
+          conversationId: record.conversationId,
+          text: `Forge reply was not seen live by ${agentDisplayName(record.sender.kind)} (${record.sender.title}); it is available with forge.sh read-verdict.`,
+        });
+      } else {
+        facade.emitHostActivity?.({
+          conversationId: record.conversationId,
+          text: `✓ delivered to ${agentDisplayName(record.sender.kind)} (${record.sender.title})`,
+        });
       }
       await appendEvent(logPaths, {
         eventId: verdictEventId(record.exchangeId),

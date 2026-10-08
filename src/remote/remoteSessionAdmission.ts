@@ -5,6 +5,10 @@ import { remoteSessionAskFromText } from './remoteSessionTellCommands';
 import { MAX_TELL_MESSAGE_CHARS } from '../tools/tellLiveSessionTool';
 import { ephemeralRejection } from './RemoteEphemeralMessages';
 import { answerRemoteSessionQuestion, sessionQuestionForReply } from './RemoteSessionBridge';
+import { agentDisplayName } from '../agentLinks/chatAgentLinks';
+import { getLogger } from '../util/logger';
+
+const log = getLogger();
 
 /** Return undefined only when this is not an exact session command. */
 export async function admitRemoteSessionCommand(
@@ -20,20 +24,46 @@ export async function admitRemoteSessionCommand(
     return answerSessionQuestion(event, match[1]!, match[2]!, deps, acknowledge, onError);
   }
   const ask = remoteSessionAskFromText(event.text);
-  if (!ask) return undefined;
-  if (!ask.message) return ephemeralRejection(`usage: /${ask.target} <message>`);
+  if (!ask) {
+    if (/^\/tell(?:\s|$)/u.test(event.text))
+      return ephemeralRejection('usage: /tell <claude|codex|copilot> <message>');
+    return undefined;
+  }
+  if (!ask.message)
+    return ephemeralRejection(
+      ask.tell
+        ? 'usage: /tell <claude|codex|copilot> <message>'
+        : `usage: /${ask.target} <message>`,
+    );
   if (ask.message.length > MAX_TELL_MESSAGE_CHARS) {
     return ephemeralRejection(
-      `/${ask.target} message exceeds ${MAX_TELL_MESSAGE_CHARS} characters`,
+      ask.tell
+        ? `/tell message is ${ask.message.length} chars; the limit is ${MAX_TELL_MESSAGE_CHARS}.`
+        : `/${ask.target} message exceeds ${MAX_TELL_MESSAGE_CHARS} characters`,
     );
   }
   if (event.attachments?.length) return ephemeralRejection('session commands accept text only');
+  const binding = deps.store.binding(event.channel, event.chatId);
+  if (!binding) return ephemeralRejection('no conversation is bound');
   const result = await admitRemotePrompt(event, ask.message, key, deps, ask.target);
-  if (result.kind === 'accepted') {
+  if (result.kind === 'accepted' || result.kind === 'queued') {
+    const title =
+      deps.host.getAgentLink(binding.conversationId, ask.target)?.title ??
+      `Forge · ${deps.host.status().conversations.find((item) => item.id === binding.conversationId)?.title ?? binding.conversationId}`;
+    const firstLines = ask.message.split(/\r?\n/u).slice(0, 3).join('\n');
     try {
-      await acknowledge(event.chatId, `Forge: asking ${ask.target}; the answer will arrive here.`);
+      await acknowledge(
+        event.chatId,
+        `→ ${agentDisplayName(ask.target)} (${title}): ${firstLines}`,
+      );
     } catch (error) {
-      onError?.(`Forge session acknowledgement failed: ${String(error)}`);
+      const message = `Forge session ask notice failed: ${String(error)}`;
+      try {
+        if (onError) onError(message);
+        else log.warn(message);
+      } catch (reportError) {
+        log.error(`${message}; error reporter failed: ${String(reportError)}`);
+      }
     }
   }
   return result;

@@ -11,6 +11,7 @@ import { formatElapsed } from './remoteProgressRender';
 import { MAX_VIEW_COUNT, parseViewCount, sendTranscriptView } from './RemoteTranscriptView';
 import { getBoardContext, getMeshOrchestrator } from '../agentMesh/meshContext';
 import { projectBoard, projectLiveSessions } from '../agentMesh/boardView';
+import { isAskAgentRunning } from '../agentLinks/askAgentService';
 
 type TextEvent = Extract<RemoteInboundEvent, { kind: 'text' }>;
 
@@ -166,7 +167,25 @@ export async function handleRemoteSessionCommand(
     await context.host.cancel(binding.conversationId);
     await context.channel.send(
       event.chatId,
-      'Forge: current request stopped; queued requests remain queued.',
+      'Forge: current request and linked-agent ask stopped; queued requests remain queued.',
+      { signal: context.signal },
+    );
+    return { kind: 'handled' };
+  }
+  if (command === '/agents') {
+    const binding = context.store.binding(event.channel, event.chatId);
+    if (!binding) return { kind: 'rejected', reason: 'no conversation is bound' };
+    const links = (['claude', 'codex', 'copilot'] as const)
+      .map((kind) => {
+        const link = context.host.getAgentLink(binding.conversationId, kind);
+        return link
+          ? `${kind}: ${link.title} · last used ${new Date(link.lastUsedAt).toLocaleString()} · ${isAskAgentRunning(binding.conversationId) ? 'running' : 'idle'}`
+          : undefined;
+      })
+      .filter((line): line is string => line !== undefined);
+    await context.channel.send(
+      event.chatId,
+      links.length ? links.join('\n') : 'No agent sessions are linked to this chat.',
       { signal: context.signal },
     );
     return { kind: 'handled' };

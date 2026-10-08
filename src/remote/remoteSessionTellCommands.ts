@@ -1,8 +1,3 @@
-import type { RemoteCommandContext } from './RemoteCommandHandler';
-import type { RemoteInboundDisposition, RemoteInboundEvent } from './types';
-import { getMeshOrchestrator } from '../agentMesh/meshContext';
-import { MAX_TELL_MESSAGE_CHARS } from '../tools/tellLiveSessionTool';
-
 /**
  * `/tell <agent> <msg>` — a one-way note
  * from Telegram into a live session's FIFO, through the same door
@@ -22,99 +17,27 @@ import { MAX_TELL_MESSAGE_CHARS } from '../tools/tellLiveSessionTool';
  * turns, and a command a person typed into Telegram is attended.
  */
 
-/**
- * Command token → mesh alias. One entry per alias, matching the aliases.
- * `as const` so the keys stay literal: the type guard narrows `command` to
- * exactly these tokens, and `alias` is then known to be one of the three.
- */
-export const SESSION_TELL_ALIASES = {
+/** Telegram command token to the agent kind linked to the bound Forge chat. */
+const SESSION_ASK_COMMANDS = {
   '/claude': 'claude',
   '/codex': 'codex',
   '/copilot': 'copilot',
 } as const;
 
-/** Exact Telegram command parsing. A prefixed token such as /codexy is not a session. */
+/** Exact Telegram parsing; a prefixed token such as /codexy stays an ordinary command. */
 export function remoteSessionAskFromText(
   text: string,
-): { target: 'claude' | 'codex' | 'copilot'; message: string } | undefined {
+): { target: 'claude' | 'codex' | 'copilot'; message: string; tell: boolean } | undefined {
   const [command, ...words] = text.trim().split(/\s+/u);
-  if (!command || !isSessionTellCommand(command)) return undefined;
-  return { target: SESSION_TELL_ALIASES[command], message: words.join(' ').trim() };
+  if (command === '/tell') {
+    const [target, ...message] = words;
+    if (target !== 'claude' && target !== 'codex' && target !== 'copilot') return undefined;
+    return { target, message: message.join(' ').trim(), tell: true };
+  }
+  if (!command || !isSessionAskCommand(command)) return undefined;
+  return { target: SESSION_ASK_COMMANDS[command], message: words.join(' ').trim(), tell: false };
 }
 
-function isSessionTellCommand(command: string): command is keyof typeof SESSION_TELL_ALIASES {
-  return Object.hasOwn(SESSION_TELL_ALIASES, command);
-}
-
-export async function handleRemoteSessionTellCommand(
-  command: string,
-  operands: readonly string[],
-  event: Extract<RemoteInboundEvent, { kind: 'text' }>,
-  context: RemoteCommandContext,
-): Promise<RemoteInboundDisposition | undefined> {
-  if (command !== '/tell') return undefined;
-  const chosen = operands[0];
-  if (chosen !== 'claude' && chosen !== 'codex' && chosen !== 'copilot') {
-    return { kind: 'rejected', reason: 'usage: /tell <claude|codex|copilot> <message>' };
-  }
-  const alias = chosen;
-
-  // The whole remainder is the message: a note about a build reads
-  // "build 2 failed on linux", and splitting on the first space would send
-  // "build" and silently drop the rest.
-  const message = operands.slice(1).join(' ').trim();
-  if (message === '') {
-    return {
-      kind: 'rejected',
-      reason: 'usage: /tell <claude|codex|copilot> <message>',
-    };
-  }
-  // Same ceiling as `tell_live_session`, read from that module rather than
-  // restated, so the two doors cannot drift apart on a limit change.
-  if (message.length > MAX_TELL_MESSAGE_CHARS) {
-    return {
-      kind: 'rejected',
-      reason: `${command} message is ${message.length} chars; the limit is ${MAX_TELL_MESSAGE_CHARS}.`,
-    };
-  }
-
-  const orchestrator = getMeshOrchestrator();
-  if (!orchestrator) {
-    return { kind: 'rejected', reason: 'the agent mesh is not up in this window' };
-  }
-
-  // A non-observing session otherwise gets an appended verdict-file request.
-  // This command promises a one-way note, with no response expected.
-  const outcome = await orchestrator.tell(alias, message, { expectsReply: false });
-  if ('error' in outcome) {
-    // Verbatim: the mesh's own reasons ("no live session for …", "queue full
-    // for … (N); message rejected", "unknown recipient …") name what the user
-    // can do about it. Paraphrasing them would hide the live-alias list the
-    // unknown-recipient error carries.
-    return { kind: 'rejected', reason: outcome.error };
-  }
-
-  // Accepted, durably queued, and already recorded as an exchange. From here a
-  // failed acknowledgement must NOT throw: `handleRemoteCommand` turns a throw
-  // into a discarded receipt and a `retry`, the Telegram poll loop redelivers
-  // the update, and the same note is enqueued a second time. The mesh has the
-  // message; the only loss is the receipt the user never sees.
-  const acknowledgement =
-    `Forge: ${alias} accepted the note (exchange ${outcome.exchangeId}). ` +
-    'Queued to that session — it is not a question, so nothing is waiting here.';
-  try {
-    await context.channel.send(event.chatId, acknowledgement, { signal: context.signal });
-  } catch (err) {
-    const failure = `Forge ${command} acknowledgement could not be delivered: ${
-      err instanceof Error ? err.message : String(err)
-    }`;
-    try {
-      context.onError?.(failure);
-    } catch (reportError) {
-      // A logger failure must not discard the completed control receipt and
-      // enqueue the same durable note again on Telegram redelivery.
-      console.error(failure, reportError); // eslint-disable-line no-console -- emergency fallback when onError throws
-    }
-  }
-  return { kind: 'handled' };
+function isSessionAskCommand(command: string): command is keyof typeof SESSION_ASK_COMMANDS {
+  return Object.hasOwn(SESSION_ASK_COMMANDS, command);
 }

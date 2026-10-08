@@ -8,9 +8,9 @@ import type { RemoteOutboxDelivery } from './RemoteOutboxDelivery';
 import { withConversationIdentity } from './RemoteReplyIdentity';
 import { settleRemoteClaim } from './remoteClaimSettle';
 import { openProgressBubble } from './remoteProgressOpen';
-import { askRemoteSession } from './RemoteSessionAsk';
 import type { RemoteRequestStore } from './RemoteRequestStore';
 import type { RemoteChannel } from './types';
+import { agentDisplayName } from '../agentLinks/chatAgentLinks';
 
 const log = getLogger();
 type ProgressOutcome = 'completed' | 'cancelled' | 'failed' | 'queued';
@@ -70,14 +70,60 @@ export async function drainRemoteQueue(
         )}`,
     );
     if (next.sessionTarget) {
-      const name = next.sessionTarget[0]!.toUpperCase() + next.sessionTarget.slice(1);
+      const name = agentDisplayName(next.sessionTarget);
+      const linkedBefore = deps.host.getAgentLink(next.conversationId, next.sessionTarget);
+      const chatTitle =
+        deps.host.status().conversations.find((item) => item.id === next.conversationId)?.title ??
+        next.conversationId;
+      const sessionTitle = linkedBefore?.title ?? `Forge · ${chatTitle}`;
       try {
-        const answer = await askRemoteSession(next.sessionTarget, next.text, next.id, deps.signal);
+        let linkedSessionWrite: Promise<void> | undefined;
+        let acceptanceNotice: Promise<unknown> | undefined;
+        const result = await deps.host.askAgent(
+          next.conversationId,
+          { agent: next.sessionTarget, message: next.text },
+          deps.signal,
+          (link) => {
+            linkedSessionWrite = deps.store.setAgentSession(next.id, link.sessionId);
+            void linkedSessionWrite.catch((error: unknown) => {
+              const message = `Remote exchange ${next.id} could not persist its linked session: ${String(error)}`;
+              if (deps.onError) deps.onError(message);
+              else log.error(message);
+            });
+          },
+          () => {
+            acceptanceNotice = deps.channel
+              .send(next.chatId, `✓ ${name} received it`, { signal: deps.signal })
+              .catch((error: unknown) => {
+                const message = `Remote exchange ${next.id} receipt could not be sent: ${String(error)}`;
+                try {
+                  if (deps.onError) deps.onError(message);
+                  else log.error(message);
+                } catch (reportError) {
+                  log.error(`${message}; error reporter failed: ${String(reportError)}`);
+                }
+              });
+          },
+        );
+        await linkedSessionWrite;
+        await acceptanceNotice;
+        const answerText = result.status === 'completed' ? result.finalText.trim() : '';
+        if (!answerText)
+          await deps.channel.send(
+            next.chatId,
+            `✗ ${result.error ?? 'The linked session returned no answer.'}`.slice(0, 3_500),
+            { signal: deps.signal },
+          );
         if (
           !(await persistResult(() =>
-            deps.store.finish(next.id, 'completed', {
-              finalText: answer,
-              notification: `${name} says:\n\n${answer}`,
+            deps.store.finish(next.id, answerText ? 'completed' : 'failed', {
+              finalText: answerText,
+              ...(!answerText
+                ? { error: result.error ?? 'The linked session returned no answer.' }
+                : {}),
+              notification: answerText
+                ? `${name} (${result.sessionTitle || sessionTitle}) says: ${answerText}`
+                : `${name} could not answer: ${result.error ?? 'The linked session returned no answer.'}`,
             }),
           ))
         )
@@ -85,6 +131,7 @@ export async function drainRemoteQueue(
       } catch (err) {
         if (deps.signal.aborted) return;
         const error = err instanceof Error ? err.message : String(err);
+        await deps.channel.send(next.chatId, `✗ ${error.slice(0, 3_500)}`, { signal: deps.signal });
         if (
           !(await persistResult(() =>
             deps.store.finish(next.id, 'failed', {

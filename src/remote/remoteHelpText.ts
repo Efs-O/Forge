@@ -22,7 +22,7 @@ export const HELP_SECTIONS = new Set([
 
 export const HELP_TEXT = `Forge commands:
 
-Session: /chat <n-or-name> · /chats [page] · /context · /help · /mirror on|off · /new · /notify on|off · /resume · /status · /stop · /view [n] · /voice on|off
+Session: /agents · /chat <n-or-name> · /chats [page] · /context · /help · /mirror on|off · /new · /notify on|off · /resume · /status · /stop · /view [n] · /voice on|off
 
 • /status shows the model, the context used, and how many prompts are waiting; /context breaks the context window down on its own
 
@@ -42,11 +42,11 @@ Queue: /drop <n|all> · /queue
 
 • Anything you send while a turn is running waits its turn — it never interrupts. /queue numbers what is waiting
 
-• /stop cancels only the running request; everything queued stays queued. /drop <n|all> is what clears the queue
+• /stop cancels the running Forge request and any linked-agent ask; everything queued stays queued. /drop <n|all> is what clears the queue
 
-Sessions: /answer <question-id> <text> · /claude <msg> · /codex <msg> · /copilot <msg> · /tell <agent> <msg>
+Sessions: /agents · /answer <question-id> <text> · /claude <msg> · /codex <msg> · /copilot <msg> · /tell <agent> <msg>
 
-• /claude, /codex and /copilot ask a live session. Forge acknowledges the request and sends that session's final answer here. The session may send updates or ask you a question; answer it by replying to the question message, or with /answer <question-id> <text>. /tell <agent> <msg> remains a one-way note with no answer expected
+• /claude, /codex and /copilot ask the session linked to this chat, creating one if needed. /agents lists this chat's links. Forge sends the answer here. /tell <agent> <msg> sends a one-way note through the linked session
 
 Models: /model [n-or-name] · /restart · /unload · /unloadall
 

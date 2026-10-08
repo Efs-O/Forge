@@ -19,6 +19,7 @@ export type RemoteSessionActionResult =
 /** Local agents name an exchange, never a chat id or bot credential. */
 export async function remoteSessionAction(input: {
   from: string;
+  sessionId: string;
   exchangeId: string;
   action: 'notify' | 'ask';
   text: string;
@@ -27,13 +28,18 @@ export async function remoteSessionAction(input: {
   available: (channel: RemoteInboundEvent['channel']) => boolean;
   kick: (channel: RemoteInboundEvent['channel']) => void;
 }): Promise<RemoteSessionActionResult> {
-  const { from, exchangeId, action, text, store, auth, available, kick } = input;
+  const { from, sessionId, exchangeId, action, text, store, auth, available, kick } = input;
   if (!isTarget(from)) return { kind: 'refused', error: 'sender must be claude, codex or copilot' };
   if (!text.trim() || text.length > MAX_TEXT) {
     return { kind: 'refused', error: `text must be 1-${MAX_TEXT} characters` };
   }
   const request = store.getRequest(exchangeId);
-  if (!request || request.sessionTarget !== from || !activeRequest(request)) {
+  if (
+    !request ||
+    request.sessionTarget !== from ||
+    request.senderSessionId !== sessionId ||
+    !activeRequest(request)
+  ) {
     return { kind: 'refused', error: 'no active remote session exchange for this sender' };
   }
   if (!available(request.channel))
@@ -46,7 +52,13 @@ export async function remoteSessionAction(input: {
   let refusal = 'the exchange ended before delivery';
   await store.contactMutate((draft) => {
     const current = draft.requests.find((item) => item.id === exchangeId);
-    if (!current || current.sessionTarget !== from || !activeRequest(current)) return;
+    if (
+      !current ||
+      current.sessionTarget !== from ||
+      current.senderSessionId !== sessionId ||
+      !activeRequest(current)
+    )
+      return;
     if (draft.outbox.filter((item) => item.requestId === exchangeId).length >= 20) {
       refusal = 'this exchange has reached its 20-message limit';
       return;

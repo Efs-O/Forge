@@ -30,6 +30,7 @@ export interface CliAgentRunOptions {
   onStdoutLine?: (line: string) => void;
   onStderr?: (text: string) => void;
   onSessionId?: (sessionId: string) => void;
+  onSpawned?: () => void;
 }
 
 /**
@@ -82,6 +83,7 @@ export class CliAgentDriver {
       cwd: options.cwd,
       ...(adapter.spawnEnv ? { env: adapter.spawnEnv } : {}),
     });
+    options.onSpawned?.();
 
     child.stderr?.setEncoding('utf8');
     child.stderr?.on('data', (text: string) => {

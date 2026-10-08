@@ -13,17 +13,21 @@ export const TELEGRAM_BOT_TOKEN_SECRET = 'forge.remote.telegram.botToken';
 
 /** Native Telegram command menu. Parsing remains transport-independent. */
 export const TELEGRAM_BOT_COMMANDS = [
-  { command: 'answer', description: 'Answer a live session question by id' },
+  { command: 'agents', description: 'List sessions linked to this chat' },
+  { command: 'answer', description: 'Answer a linked session question by id' },
   { command: 'chat', description: 'Switch to an existing conversation by number or name' },
   { command: 'chats', description: 'List recent conversations' },
   { command: 'clanker', description: 'Set approval-gate mode' },
-  { command: 'claude', description: 'Ask a live Claude session; answer returns here' },
-  { command: 'codex', description: 'Ask a live Codex session; answer returns here' },
+  { command: 'claude', description: 'Ask this chat’s linked Claude session; answer returns here' },
+  { command: 'codex', description: 'Ask this chat’s linked Codex session; answer returns here' },
   { command: 'compact', description: 'Compact the conversation' },
   { command: 'contact', description: 'Approve, link, or disable a contact' },
   { command: 'contacts', description: 'List pending or active contacts' },
   { command: 'context', description: 'Context usage and tokens' },
-  { command: 'copilot', description: 'Ask a live Copilot session; answer returns here' },
+  {
+    command: 'copilot',
+    description: 'Ask this chat’s linked Copilot session; answer returns here',
+  },
   { command: 'drop', description: 'Drop queued prompt or all' },
   { command: 'help', description: 'Show all Forge commands' },
   {
@@ -44,7 +48,7 @@ export const TELEGRAM_BOT_COMMANDS = [
   { command: 'send', description: 'Prepare a confirmed message to a contact' },
   { command: 'sleep', description: 'Suspend this machine (needs /sleep confirm)' },
   { command: 'status', description: 'Session, model, queue' },
-  { command: 'stop', description: 'Stop the current request' },
+  { command: 'stop', description: 'Stop Forge and linked-agent ask' },
   { command: 'system', description: 'GPU, VRAM by process, RAM, drives' },
   { command: 'tell', description: 'Send a one-way note to claude, codex or copilot' },
   { command: 'timeout', description: 'Show/set session timeout' },

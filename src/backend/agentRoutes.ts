@@ -19,6 +19,7 @@ import {
   type AgentRouteFields as Fields,
 } from './agentRouteFields';
 import { parseAgentMessageOptions, parseOriginConversation } from './agentMessageOptions';
+import { dispatchAgentRelay } from './agentRelayDispatch';
 import { handleAgentRemoteSessionRoute } from './agentRemoteSessionRoute';
 import type { RemoteSessionActionResult } from '../remote/RemoteSessionBridge';
 import type { AgentSender } from '../agentLinks/chatAgentLinks';
@@ -68,6 +69,14 @@ export interface AgentRoutesDeps {
     originConversation?: string,
   ) => Promise<
     { ok: true; exchangeId: string; deliveredTo?: string } | { ok: false; error: string }
+  >;
+  relayAgent?: (
+    sender: AgentSender,
+    to: string,
+    text: string,
+    originConversation?: string,
+  ) => Promise<
+    { ok: true; exchangeId?: string; deliveredTo?: string } | { ok: false; error: string }
   >;
   /**
    * F-06: a `priority=steer` message to another agent interrupts its active
@@ -143,6 +152,7 @@ export interface AgentRoutesDeps {
   >;
   remoteSession?: (
     from: string,
+    sessionId: string,
     id: string,
     action: 'ask' | 'notify',
     text: string,
@@ -167,18 +177,6 @@ function requireText(fields: Fields, max: number): string {
   return text;
 }
 
-/**
- * The inbound half of agent messaging (docs/plans/AGENT_MESSAGING_PLAN.md), on
- * the control server:
- *   POST /agent/message {from, text}  → 202 {queued, id}  (a visible Forge turn)
- *   POST /agent/cancel  {from, id}    → 200 {cancelled} (withdraw a queued message)
- *   POST /agent/reply   {id, text}    → 200 {delivered} (answers a waiting Forge ask)
- *   POST /agent/join    {alias, pid}  → 200 {joined}    (AGENT_MESH_PLAN §10)
- *   GET /agent/status   ?from         → 200 text (the sender's chat, now)
- *   GET /agent/view     ?from&count   → 200 text (its last answers)
- * These are the first control routes that put text in front of the model, so
- * they need the bearer token from endpoint.json; the model routes do not.
- */
 export class AgentRoutes {
   readonly token: string;
   readonly windowId: string;
@@ -195,12 +193,10 @@ export class AgentRoutes {
     this.windowId = this.endpoints.windowId;
   }
 
-  /** The control server is listening at `url`: publish the endpoint. */
   onListening(url: string): void {
     this.endpoints.onListening(url);
   }
 
-  /** Follow `agent_bus.enabled`: publish or withdraw endpoint.json. */
   setEnabled(on: boolean): void {
     this.endpoints.setEnabled(on);
   }
@@ -228,8 +224,7 @@ export class AgentRoutes {
       (route === '/agent/view' && !!this.deps.view) ||
       (route === '/agent/send-file' && !!this.deps.sendFile && !!this.deps.validateFrom) ||
       ((route === '/agent/remote-ask' || route === '/agent/remote-notify') &&
-        !!this.deps.remoteSession &&
-        !!this.deps.validateFrom) ||
+        !!this.deps.remoteSession) ||
       ((route === '/agent/read-verdict' || route === '/agent/ack-verdict') &&
         !!this.deps.validateFrom);
     if (!this.endpoints.isEnabled() || !known) {
@@ -311,7 +306,7 @@ export class AgentRoutes {
         const result = await handleAgentRemoteSessionRoute(
           fields,
           route === '/agent/remote-ask' ? 'ask' : 'notify',
-          { validateFrom: this.deps.validateFrom!, dispatch: this.deps.remoteSession! },
+          { dispatch: this.deps.remoteSession! },
         );
         return result.kind === 'asked'
           ? sendText(res, 200, result.questionId)
@@ -384,16 +379,20 @@ export class AgentRoutes {
         if (isSteer && fields['origin_conversation'] !== undefined) {
           throw new HttpError(400, 'origin_conversation is only valid for relay sends');
         }
-        const deliver = isSteer && this.deps.steer ? this.deps.steer : this.deps.relay;
-        if (!deliver) {
-          throw new HttpError(400, `no relay available to deliver to "${to}"`);
-        }
         const relayOrigin = isSteer ? undefined : parseOriginConversation(fields);
-        const result = await deliver(from, to, text, relayOrigin);
+        const result = await dispatchAgentRelay({
+          ...(declaredSender ? { sender: declaredSender } : {}),
+          from,
+          to,
+          text,
+          isSteer,
+          ...(relayOrigin ? { originConversation: relayOrigin } : {}),
+          deps: this.deps,
+        });
         if (!result.ok) throw new HttpError(400, result.error);
         return sendJson(res, 202, {
           relayed: true,
-          exchangeId: result.exchangeId,
+          ...(result.exchangeId ? { exchangeId: result.exchangeId } : {}),
           ...(!isSteer
             ? {
                 message:

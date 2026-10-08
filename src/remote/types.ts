@@ -60,6 +60,8 @@ export interface RemoteRequestRecord {
   text: string;
   /** A Telegram command addressed to an existing CLI session. */
   sessionTarget?: 'claude' | 'codex' | 'copilot' | undefined;
+  /** Exact linked session captured when a remote agent ask starts. */
+  senderSessionId?: string | undefined;
   /** Steering prompts run before ordinary queued prompts, FIFO within each class. */
   priority?: 'steer' | undefined;
   attachments?: RemoteAttachmentReference[] | undefined;

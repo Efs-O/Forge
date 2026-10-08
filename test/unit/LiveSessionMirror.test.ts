@@ -9,55 +9,140 @@ const call = (id: string, name: string, args: unknown) => ({
 });
 
 describe('mirrorLiveSessionAnswers', () => {
-  it('sends each ask_agent answer in full as its own narration', () => {
+  it('mirrors ask, receipt and answer as separate messages', () => {
     const events: AgentProgressEvent[] = [];
     const answer = 'x'.repeat(2_000);
     mirrorLiveSessionAnswers(
       'c1',
       [
-        call('a', 'ask_agent', { agent: 'codex', subject: 'who verb', question: 'q' }),
-        call('b', 'read_file', { path: 'x' }),
+        call('a', 'ask_agent', {
+          agent: 'codex',
+          subject: 'who verb',
+          message: 'Inspect this\nthen answer.',
+        }),
       ],
       [
-        { role: 'tool', tool_call_id: 'a', content: answer },
-        { role: 'tool', tool_call_id: 'b', content: 'file body' },
+        {
+          role: 'tool',
+          tool_call_id: 'a',
+          content: `**Asked Codex (Forge · chat):** who verb\n\n**Codex says:**\n\n${answer}`,
+        },
       ],
-      (e) => events.push(e),
-    );
-    expect(events).toEqual([
-      { conversationId: 'c1', kind: 'narration', text: `🔁 Forge ↔ codex · who verb\n\n${answer}` },
-    ]);
-  });
-
-  it('mirrors a failure too, and tolerates unparseable arguments', () => {
-    const events: AgentProgressEvent[] = [];
-    mirrorLiveSessionAnswers(
-      'c1',
-      [{ id: 'a', type: 'function', function: { name: 'ask_agent', arguments: '{' } }],
-      [{ role: 'tool', tool_call_id: 'a', content: 'Could not deliver to codex' }],
-      (e) => events.push(e),
-    );
-    expect(events[0]).toMatchObject({
-      text: '🔁 Forge ↔ linked session\n\nCould not deliver to codex',
-    });
-  });
-
-  it('mirrors only the live-session tool result, never reasoning content', () => {
-    const events: AgentProgressEvent[] = [];
-    mirrorLiveSessionAnswers(
-      'c1',
-      [call('a', 'ask_agent', { agent: 'claude', subject: 'review' })],
-      [{ role: 'tool', tool_call_id: 'a', content: 'The session answered.' }],
       (event) => events.push(event),
     );
-
     expect(events).toEqual([
       {
         conversationId: 'c1',
         kind: 'narration',
-        text: '🔁 Forge ↔ claude · review\n\nThe session answered.',
+        text: '→ Codex (Forge · chat): Inspect this\nthen answer.',
       },
+      { conversationId: 'c1', kind: 'narration', text: '✓ Codex received it' },
+      { conversationId: 'c1', kind: 'narration', text: `Codex (Forge · chat) says: ${answer}` },
     ]);
-    expect(JSON.stringify(events)).not.toContain('reasoning');
+  });
+
+  it('reports a failed ask without fabricating a session identity', () => {
+    const events: AgentProgressEvent[] = [];
+    mirrorLiveSessionAnswers(
+      'c1',
+      [call('a', 'ask_agent', { agent: 'claude', message: 'Review this' })],
+      [{ role: 'tool', tool_call_id: 'a', content: 'Error: Could not deliver to Claude' }],
+      (event) => events.push(event),
+    );
+    expect(events.map((event) => (event.kind === 'narration' ? event.text : ''))).toEqual([
+      '→ Claude (Claude session): Review this',
+      '✗ Could not deliver to Claude',
+    ]);
+  });
+
+  it('ignores malformed and unrelated tool calls', () => {
+    const events: AgentProgressEvent[] = [];
+    mirrorLiveSessionAnswers(
+      'c1',
+      [
+        { id: 'a', type: 'function', function: { name: 'ask_agent', arguments: '{' } },
+        call('b', 'read_file', { path: 'x' }),
+      ],
+      [
+        { role: 'tool', tool_call_id: 'a', content: 'refused' },
+        { role: 'tool', tool_call_id: 'b', content: 'file body' },
+      ],
+      (event) => events.push(event),
+    );
+    expect(events).toEqual([]);
+  });
+
+  it('mirrors multiple asks independently and keeps each full reply', () => {
+    const events: AgentProgressEvent[] = [];
+    mirrorLiveSessionAnswers(
+      'c1',
+      [
+        call('a', 'ask_agent', { agent: 'claude', message: 'Review A' }),
+        call('b', 'ask_agent', { agent: 'copilot', message: 'Review B' }),
+      ],
+      [
+        {
+          role: 'tool',
+          tool_call_id: 'a',
+          content: '**Asked Claude (Claude · Review):** Review A\n\n**Claude says:**\n\nFull A',
+        },
+        {
+          role: 'tool',
+          tool_call_id: 'b',
+          content: '**Asked Copilot (Copilot · Review):** Review B\n\n**Copilot says:**\n\nFull B',
+        },
+      ],
+      (event) => events.push(event),
+    );
+    expect(events.filter((event) => event.kind === 'narration').map((event) => event.text)).toEqual(
+      [
+        '→ Claude (Claude · Review): Review A',
+        '✓ Claude received it',
+        'Claude (Claude · Review) says: Full A',
+        '→ Copilot (Copilot · Review): Review B',
+        '✓ Copilot received it',
+        'Copilot (Copilot · Review) says: Full B',
+      ],
+    );
+  });
+
+  it('mirrors a failed delivery with its reason and skips unrelated tool results', () => {
+    const events: AgentProgressEvent[] = [];
+    mirrorLiveSessionAnswers(
+      'c1',
+      [
+        call('a', 'ask_agent', { agent: 'codex', message: 'Inspect' }),
+        call('b', 'read_file', { path: 'secret' }),
+      ],
+      [
+        { role: 'tool', tool_call_id: 'a', content: 'Error: session not found' },
+        { role: 'tool', tool_call_id: 'b', content: 'unrelated body' },
+      ],
+      (event) => events.push(event),
+    );
+    expect(events.map((event) => (event.kind === 'narration' ? event.text : ''))).toEqual([
+      '→ Codex (Codex session): Inspect',
+      '✗ session not found',
+    ]);
+  });
+
+  it('uses only the tool result and does not mirror assistant reasoning', () => {
+    const events: AgentProgressEvent[] = [];
+    const answer = 'The result is grounded in the session reply.';
+    mirrorLiveSessionAnswers(
+      'c1',
+      [call('a', 'ask_agent', { agent: 'claude', message: 'Review' })],
+      [
+        { role: 'assistant', content: 'reasoning must not appear' },
+        {
+          role: 'tool',
+          tool_call_id: 'a',
+          content: `**Asked Claude (Claude):** Review\n\n**Claude says:**\n\n${answer}`,
+        },
+      ],
+      (event) => events.push(event),
+    );
+    expect(events.at(-1)).toMatchObject({ text: `Claude (Claude) says: ${answer}` });
+    expect(JSON.stringify(events)).not.toContain('reasoning must not appear');
   });
 });

@@ -9,6 +9,7 @@ import { FakeRemoteChannel } from '../../src/remote/FakeRemoteChannel';
 import { routeHostActivity } from '../../src/remote/remoteActivityRouting';
 import type { RemoteController } from '../../src/remote/RemoteController';
 import { wireTurnMirror } from '../../src/sidebar/turnMirrorWiring';
+import { HostProgressOpener } from '../../src/remote/remoteHostProgress';
 import type { HostActivityEvent } from '../../src/sidebar/HostActivity';
 import type { ConversationRuntime } from '../../src/sidebar/sessionTypes';
 import type { SidebarProviderEvents } from '../../src/sidebar/AgentLoop';
@@ -399,5 +400,21 @@ describe('progress ownership', () => {
     await tracker.finish('conv-1', 'done');
     // The next turn on this conversation may well come from the sidebar.
     expect(tracker.owns('conv-1')).toBe(false);
+  });
+
+  it('opens a mirror for an agent-originated turn without a remote chat-start claim', async () => {
+    const channel = new FakeRemoteChannel('telegram');
+    const signal = new AbortController().signal;
+    const tracker = new RemoteAgentProgress(channel, signal, () => true, 3_900, 1_000);
+    const opener = new HostProgressOpener({
+      channel,
+      signal,
+      progress: tracker,
+      target: () => 'chat-agent',
+    });
+    opener.handle({ conversationId: 'agent-chat', kind: 'narration', text: 'Claude (review) says: ready' });
+    await vi.waitFor(() => expect(channel.progress).toHaveLength(1));
+    expect(channel.progress[0]).toMatchObject({ chatId: 'chat-agent', text: 'Forge: working…' });
+    opener.dispose();
   });
 });

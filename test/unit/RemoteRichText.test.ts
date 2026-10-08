@@ -24,7 +24,7 @@ describe('remote rich text', () => {
   it('gives help one paragraph per group and per note, with the subject bolded', () => {
     const rendered = markupTelegramLines(HELP_TEXT, decorateHelpLine);
     expect(rendered.startsWith('<b>Forge commands:</b>')).toBe(true);
-    expect(rendered).toContain('<b>Session:</b> /chat');
+    expect(rendered).toContain('<b>Session:</b> /agents');
     expect(rendered).toContain('• <b>/stop</b> cancels');
     // Placeholders keep their angle brackets as text, or Telegram reads them
     // as an unknown tag and rejects the whole send.

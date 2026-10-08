@@ -71,6 +71,7 @@ if [ "$VERB" = "remote-notify" ] || [ "$VERB" = "remote-ask" ]; then
   [ $# -ge 3 ] && [ $# -le 4 ] || usage
   NAME="$2"; EXCHANGE_ID="$3"; SRC="${4:--}"
   case "$NAME" in claude|codex|copilot) ;; *) echo "forge.sh: expected claude, codex or copilot" >&2; exit 2;; esac
+  set_sender_identity "$NAME"
   case "$EXCHANGE_ID" in ""|*[!a-f0-9-]*) echo "forge.sh: invalid exchange id" >&2; exit 2;; esac
   TMP="$(mktemp)"; trap 'rm -f "$TMP"' EXIT
   if [ "$SRC" = "-" ]; then cat > "$TMP"; else cp "$SRC" "$TMP" || exit 2; fi
@@ -80,7 +81,7 @@ if [ "$VERB" = "remote-notify" ] || [ "$VERB" = "remote-ask" ]; then
   if [ "$VERB" = "remote-ask" ]; then ROUTE=remote-ask; else ROUTE=remote-notify; fi
   RESULT="$(curl -sS --fail-with-body -X POST -H "Authorization: Bearer $TOKEN" \
     -H "Content-Type: text/plain; charset=utf-8" --data-binary "@$TMP" \
-    "$URL/agent/$ROUTE?from=$NAME&exchange_id=$EXCHANGE_ID")" \
+    "$URL/agent/$ROUTE?from=$NAME&exchange_id=$EXCHANGE_ID$SENDER_QUERY")" \
     || { echo "forge.sh: remote delivery was not confirmed; do not retry blindly" >&2; exit 1; }
   if [ "$VERB" = "remote-notify" ]; then printf '%s\n' "$RESULT"; exit 0; fi
   QUESTION_ID="$RESULT"
@@ -278,6 +279,7 @@ elif [ "$VERB" = "send" ] || [ "$VERB" = "steer" ]; then
     esac
   done
   case "$TO" in ""|*[!A-Za-z0-9._-]*) echo "forge.sh: bad recipient '$TO'" >&2; exit 2;; esac
+  case "$TO" in claude|codex|copilot) set_sender_identity "$ARG";; esac
   if [ "$TO" = "forge" ]; then
     set_sender_identity "$ARG"
   fi

@@ -228,12 +228,14 @@ export class RemoteRuntime {
 
   remoteSessionAction(
     from: string,
+    sessionId: string,
     exchangeId: string,
     action: 'ask' | 'notify',
     text: string,
   ): Promise<RemoteSessionActionResult> {
     return remoteSessionAction({
       from,
+      sessionId,
       exchangeId,
       action,
       text,
@@ -244,11 +246,6 @@ export class RemoteRuntime {
     });
   }
 
-  /**
-   * Claim this conversation's next queued, text-only, normal-priority request as
-   * a mid-turn tell (Phase 3). Keeps `store` and `auth` private; the caller only
-   * gets the claim and its settle step.
-   */
   claimMidTurnTell(conversationId: string): Promise<MidTurnDrainResult> {
     return claimRemoteMidTurnTell(
       this.store,

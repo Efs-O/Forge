@@ -746,6 +746,7 @@ describe('forge.sh against the routes', () => {
     if (!usable) ctx.skip();
     const joins: [string, number, string][] = [];
     const relays: [string, string, string, string | undefined][] = [];
+    const agentRelays: [string, string, string][] = [];
     routes = new AgentRoutes({
       paths: () => paths,
       inbox: { accept: () => ({ position: 1, id: 'm1' }), cancel: () => 0 },
@@ -762,6 +763,10 @@ describe('forge.sh against the routes', () => {
           deliveredTo: 'claude = session 7b39fb6e (joined, workspace n:\\vs code apps\\Forge)',
         }
       ),
+      relayAgent: async (sender, to, text) => (
+        agentRelays.push([sender.kind, to, text]),
+        { ok: true, exchangeId: 'agent-x1', deliveredTo: 'Codex linked chat' }
+      ),
     });
     routes.setEnabled(true);
     routes.onListening(base);
@@ -777,23 +782,25 @@ describe('forge.sh against the routes', () => {
     ]);
     const sent = await runClient(['send', 'claude', 'codex'], 'plan ready\n', {
       FORGE_CONVERSATION_ID: 'origin-chat-7',
+      CLAUDE_CODE_SESSION_ID: '8e395649-705e-47f9-b499-03a36e908f50',
     });
     expect(JSON.parse(sent.out.trim())).toMatchObject({
       relayed: true,
-      exchangeId: 'x1',
-      delivered_to: 'claude = session 7b39fb6e (joined, workspace n:\\vs code apps\\Forge)',
+      exchangeId: 'agent-x1',
+      delivered_to: 'Codex linked chat',
       message:
-        'Sent as exchange x1. The verdict wakes the sending Forge chat when it is open ' +
+        'Sent as exchange agent-x1. The verdict wakes the sending Forge chat when it is open ' +
         '(when the send came from a Forge chat). Use `wait` and then `read-verdict` for the full response.',
     });
-    expect(relays).toEqual([['claude', 'codex', 'plan ready\n', 'origin-chat-7']]);
+    expect(agentRelays).toEqual([['claude', 'codex', 'plan ready\n']]);
 
     const invalid = await runClient(['send', 'claude', 'codex'], 'still sent\n', {
       FORGE_CONVERSATION_ID: 'bad/id',
+      CLAUDE_CODE_SESSION_ID: '8e395649-705e-47f9-b499-03a36e908f50',
     });
     expect(invalid.code).toBe(0);
     expect(invalid.out.match(/invalid FORGE_CONVERSATION_ID/g)).toHaveLength(1);
-    expect(relays[1]).toEqual(['claude', 'codex', 'still sent\n', undefined]);
+    expect(agentRelays[1]).toEqual(['claude', 'codex', 'still sent\n']);
   }, 30_000);
 
   it('steer to forge queues at the front and interrupts the running turn (§6)', async (ctx) => {

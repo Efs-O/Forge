@@ -91,6 +91,9 @@ overlaps with an existing owner, extend the owner instead.
 | Multi-conversation session types + persist           | `src/sidebar/sessionTypes.ts`            |
 | Per-chat agent links + session reverse index (sole `agentLinks` writer) | `src/agentLinks/chatAgentLinks.ts` |
 | Linked-agent ask lifecycle and delivery policy | `src/agentLinks/askAgentService.ts` |
+| Structured linked-agent outcomes + tool rendering | `src/agentLinks/askAgentResult.ts` |
+| Agent-to-agent send through linked chats | `src/agentLinks/agentToAgentRelay.ts` |
+| Sidebar-hosted linked-agent asks + checkpoint/cancel | `src/sidebar/sidebarAgentAsk.ts` |
 | VS Code panel opening + linked-agent runtime | `src/agentLinks/askAgentRuntime.ts` |
 | Inbound linked-agent reply and crash recovery | `src/agentLinks/agentReplyLifecycle.ts` |
 | Durable inbound pending-reply records | `src/agentLinks/pendingAgentReplies.ts` |
@@ -98,6 +101,7 @@ overlaps with an existing owner, extend the owner instead.
 | Per-window agent-bus endpoint files | `src/agentBus/windowEndpoints.ts` |
 | Agent endpoint publication lifecycle | `src/backend/agentWindowEndpointRegistry.ts` |
 | Inbound agent message routing/admission | `src/backend/agentInboundAdmission.ts` |
+| Agent relay routing between linked chats and mesh aliases | `src/backend/agentRelayDispatch.ts` |
 | Inbound session identity validation | `src/backend/agentSenderParsing.ts` |
 | Sidebar link-routing facade dependencies | `src/sidebar/agentLinkFacadeDeps.ts` |
 | `ask_agent` strict tool boundary | `src/tools/askAgentTool.ts` |

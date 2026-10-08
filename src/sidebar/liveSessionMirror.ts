@@ -1,5 +1,6 @@
 import type { ChatMessage, ToolCall } from '../llm/types';
 import type { AgentProgressEvent } from './AgentProgress';
+import { agentKindSchema, agentDisplayName } from '../agentLinks/chatAgentLinks';
 
 const TOOL = 'ask_agent';
 
@@ -24,20 +25,35 @@ export function mirrorLiveSessionAnswers(
     if (call.function.name !== TOOL) continue;
     const result = messages.find((m) => m.role === 'tool' && m.tool_call_id === call.id);
     const text = typeof result?.content === 'string' ? result.content.trim() : '';
-    if (!text) continue;
-    emit({ conversationId, kind: 'narration', text: `${header(call)}\n\n${text}` });
+    const details = argumentsOf(call.function.arguments);
+    const agent = agentKindSchema.safeParse(details['agent']);
+    if (!text || !agent.success) continue;
+    const name = agentDisplayName(agent.data);
+    const session = new RegExp(`\\*\\*Asked ${name} \\((.+)\\):\\*\\*`, 'u').exec(text)?.[1];
+    const title = session ?? `${name} session`;
+    const message = typeof details['message'] === 'string' ? details['message'] : '';
+    const firstLines = message.trim().split(/\r?\n/u).slice(0, 3).join('\n');
+    emit({ conversationId, kind: 'narration', text: `→ ${name} (${title}): ${firstLines}` });
+    const answer = new RegExp(`\\*\\*${name} says:\\*\\*\\s*([\\s\\S]*)`, 'u')
+      .exec(text)?.[1]
+      ?.trim();
+    if (!answer || text.startsWith('Error:')) {
+      const reason = text.replace(/^Error:\s*/u, '').slice(0, 3000);
+      emit({ conversationId, kind: 'narration', text: `✗ ${reason}` });
+      continue;
+    }
+    emit({ conversationId, kind: 'narration', text: `✓ ${name} received it` });
+    emit({ conversationId, kind: 'narration', text: `${name} (${title}) says: ${answer}` });
   }
 }
 
-function header(call: ToolCall): string {
-  let args: Record<string, unknown> = {};
+function argumentsOf(value: string): Record<string, unknown> {
   try {
-    const parsed: unknown = JSON.parse(call.function.arguments);
-    if (parsed && typeof parsed === 'object') args = parsed as Record<string, unknown>;
+    const parsed: unknown = JSON.parse(value);
+    if (parsed && typeof parsed === 'object' && !Array.isArray(parsed))
+      return parsed as Record<string, unknown>;
   } catch {
-    // Arguments the tool itself refused; the result text says why.
+    return {};
   }
-  const target = typeof args['agent'] === 'string' ? args['agent'] : 'linked session';
-  const subject = typeof args['subject'] === 'string' ? ` · ${args['subject']}` : '';
-  return `🔁 Forge ↔ ${target}${subject}`;
+  return {};
 }

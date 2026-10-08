@@ -100,7 +100,7 @@ describe('TelegramChannel', () => {
     const note = HELP_TEXT.split('\n').find((line) =>
       line.includes('/claude, /codex and /copilot'),
     );
-    expect(note).toContain('final answer here');
+    expect(note).toContain('answer here');
     expect(note).toContain('one-way note');
   });
 

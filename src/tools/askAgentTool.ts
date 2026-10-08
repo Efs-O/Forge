@@ -3,7 +3,11 @@ import type { RegisteredTool, ToolHandlerContext } from './ToolRegistry';
 import type { ForgeConfig } from '../config/types';
 import { AgentLinksConfigSchema } from '../config/agentBusSchema';
 import { agentKindSchema } from '../agentLinks/chatAgentLinks';
-import { makeAskAgentHandler, type AskAgentRuntime } from '../agentLinks/askAgentService';
+import {
+  makeAskAgentHandler,
+  renderAskAgentResult,
+  type AskAgentRuntime,
+} from '../agentLinks/askAgentService';
 
 const requestSchema = z
   .object({
@@ -53,7 +57,7 @@ export function makeAskAgentTool(options: {
         !context.persistConversation
       )
         return 'Error: ask_agent requires an active chat turn and checkpoint.';
-      return handler(
+      const result = await handler(
         {
           agent: parsed.agent,
           message: parsed.message,
@@ -67,6 +71,7 @@ export function makeAskAgentTool(options: {
           persistConversation: context.persistConversation,
         },
       );
+      return renderAskAgentResult(result);
     },
   };
 }

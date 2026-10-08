@@ -84,7 +84,6 @@ export class RemoteRequestStore {
     return this.loaded;
   }
 
-  /** Registered by the transport that holds the channel's current lease. */
   setClaimOwner(
     channel: RemoteRequestRecord['channel'],
     owner: NonNullable<RemoteRequestRecord['claimOwner']> | undefined,
@@ -106,6 +105,15 @@ export class RemoteRequestStore {
 
   getRequest(id: string): RemoteRequestRecord | undefined {
     return this.state.requests.find((request) => request.id === id);
+  }
+
+  setAgentSession(id: string, sessionId: string): Promise<void> {
+    const current = this.state.requests.find((item) => item.id === id);
+    if (current) current.senderSessionId = sessionId;
+    return this.mutate((draft) => {
+      const request = draft.requests.find((item) => item.id === id);
+      if (request) request.senderSessionId = sessionId;
+    });
   }
   contactRead<T>(reader: (state: RemoteStoreState) => T): T {
     return reader(this.state);
@@ -139,11 +147,6 @@ export class RemoteRequestStore {
     return queryRequestHealth(this.state);
   }
 
-  /**
-   * Per-conversation health (AGENT_MESH_PLAN §5, P1): the calling chat's
-   * counts, not the global total. Legacy records without conversation
-   * metadata are excluded (`unknown-scope`); `unknown` stays `unknown`.
-   */
   requestHealthForConversation(conversationId: string) {
     return queryRequestHealthForConversation(this.state, conversationId);
   }
@@ -152,7 +155,6 @@ export class RemoteRequestStore {
     return this.state.bindings.find((item) => item.channel === channel && item.chatId === chatId);
   }
 
-  /** Reverse of `binding()`. See remoteBindingQueries for both selectors. */
   bindingsForConversation(
     conversationId: string,
     channel?: RemoteBinding['channel'],
@@ -160,7 +162,6 @@ export class RemoteRequestStore {
     return bindingsForConversation(this.state.bindings, conversationId, channel);
   }
 
-  /** Every chat bound to this workspace, whatever conversation each is on. */
   bindingsForWorkspace(workspaceId: string, channel?: RemoteBinding['channel']): RemoteBinding[] {
     return bindingsForWorkspace(this.state.bindings, workspaceId, channel);
   }
@@ -337,7 +338,6 @@ export class RemoteRequestStore {
     return claimed;
   }
 
-  /** `/drop`: cancel queued prompts without deleting their audit record. */
   async cancelQueued(conversationId: string, requestIds?: ReadonlySet<string>): Promise<number> {
     let cancelled = 0;
     await this.mutate((draft) => {

@@ -63,6 +63,9 @@ export function subscribeHostToRemote(
     // prompt that came from a chat is not answered there twice.
     host.onHostActivity?.((event: HostActivityEvent) => {
       void (async () => {
+        if (event.suppressProgress && event.conversationId !== undefined) {
+          controller.suppressAgentOriginProgress(event.conversationId);
+        }
         if (event.conversationId !== undefined) {
           await handlers.onBeforeConversationNotify(controller, event.conversationId);
         }

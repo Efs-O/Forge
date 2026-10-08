@@ -9,18 +9,23 @@ const codexFixture = path.resolve(__dirname, '../fixtures/fake-codex-cli.mjs');
 describe('CliAgentDriver', () => {
   it('parses claude stream-json: text deltas, tool-use status, and the final result', async () => {
     const events: CliAgentEvent[] = [];
+    const lifecycle: string[] = [];
     const result = await new CliAgentDriver().run({
       cliName: 'claude',
       executable: process.execPath,
       argsPrefix: [claudeFixture],
       task: 'do the thing',
       cwd: process.cwd(),
+      onSpawned: () => lifecycle.push('spawned'),
+      onSessionId: () => lifecycle.push('session'),
       onEvent: (event) => events.push(event),
     });
     expect(result.status).toBe('completed');
     expect(result.finalText).toBe('Done: updated src/foo.ts');
     expect(events).toContainEqual({ kind: 'text', text: 'Looking at the repo. ' });
     expect(events).toContainEqual({ kind: 'status', text: '[claude: Edit src/foo.ts]' });
+    expect(lifecycle[0]).toBe('spawned');
+    expect(lifecycle).toEqual(['spawned']);
   });
 
   it('parses codex JSONL: text deltas, exec/patch status, and task_complete', async () => {
