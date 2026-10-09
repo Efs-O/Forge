@@ -120,9 +120,18 @@ function ActivityRowView({ step, streaming }: ActivityRowProps): React.ReactElem
         {step.diffs.length > 0 && (
           <span className="activity-row-edit" title="File changes">
             ✎
-            {edits.measured && (edits.added > 0 || edits.removed > 0)
-              ? ` +${edits.added} −${edits.removed}`
-              : ''}
+            {edits.measured && edits.added > 0 && (
+              <>
+                {' '}
+                <span className="diff-stat diff-stat-added">+{edits.added}</span>
+              </>
+            )}
+            {edits.measured && edits.removed > 0 && (
+              <>
+                {' '}
+                <span className="diff-stat diff-stat-removed">−{edits.removed}</span>
+              </>
+            )}
           </span>
         )}
         <span className="activity-row-name">{primary.toolName ?? name}</span>

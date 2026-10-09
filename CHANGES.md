@@ -2,6 +2,7 @@
 
 ## 0.17.0
 
+- Activity rows and group headers colour their `+N` / `−N` line counts green and red like the diff blocks do; they were plain grey text.
 - The session log keeps the text a model writes alongside a tool call ("Physics is now 11.6 ms. Moving to the renderer."). Tool-call rows were logged with `content: null`, so that narration showed in the sidebar and nowhere in `~/.forge/sessions/`.
 - Scrolling up while a reply streams now stops the transcript following new output at once. Within 80px of the bottom a small upward scroll used to count as "still at the bottom", so each streamed token pulled the view back down and the wheel could barely climb a growing thinking bubble.
 - Open/closed choices in the activity view now survive the rows being rebuilt while a turn streams. An opened reasoning bubble used to snap shut when the next tool call folded it into a step, and an opened step or diff closed when the step joined a group. A step that a running call holds open can now be collapsed by hand.

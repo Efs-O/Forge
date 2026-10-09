@@ -61,8 +61,18 @@ function ActivityGroupView({ items, live, streaming }: ActivityGroupProps): Reac
             {summary.editCount > 0 && (
               <span className="activity-group-edits">
                 · ✎ {summary.editCount} edits {summary.fileLabel}
-                {(summary.added > 0 || summary.removed > 0) &&
-                  ` +${summary.added} −${summary.removed}`}
+                {summary.added > 0 && (
+                  <>
+                    {' '}
+                    <span className="diff-stat diff-stat-added">+{summary.added}</span>
+                  </>
+                )}
+                {summary.removed > 0 && (
+                  <>
+                    {' '}
+                    <span className="diff-stat diff-stat-removed">−{summary.removed}</span>
+                  </>
+                )}
               </span>
             )}
             {summary.hasThinking && (
