@@ -60,6 +60,16 @@ export function truncationGuidance(
     outputRoom !== undefined && outputRoom > 0
       ? Math.max(1000, Math.min(writeLimit, Math.floor(outputRoom * 2) - 1000))
       : writeLimit;
+  if (err.toolName === 'edit_file') {
+    return (
+      `${target} was cut off after ${err.approxBytes} bytes of arguments and was NOT executed — ` +
+      `nothing was written. This is an output-size limit, not a formatting mistake, and repeating ` +
+      `the same call will fail the same way.\n` +
+      `HARD LIMIT for your next call: include fewer edits than in the call that was cut off. ` +
+      `This overrides any earlier instruction to apply every edit at once. Split the edit set ` +
+      `across several calls, with fewer edits in each.`
+    );
+  }
   return (
     `${target} was cut off after ${err.approxBytes} bytes of arguments and was NOT executed — ` +
     `nothing was written. This is an output-size limit, not a formatting mistake, and repeating ` +

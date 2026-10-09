@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from 'vitest';
 import type { ModelConfig } from '../../src/config/types';
 import { streamOllamaChatCompletion } from '../../src/llm/OllamaNativeClient';
+import { ToolCallTruncatedError } from '../../src/llm/ToolCallTruncatedError';
 import { StreamStallError } from '../../src/llm/streamWatchdog';
 import type { ChatCompletionRequest } from '../../src/llm/types';
 
@@ -47,7 +48,11 @@ describe('streamOllamaChatCompletion', () => {
       onToken: vi.fn(), onDone: vi.fn(), onError, onToolCalls,
     });
     expect(onToolCalls).not.toHaveBeenCalled();
-    expect(onError).toHaveBeenCalledWith(expect.objectContaining({ message: expect.stringMatching(/incomplete|ended/u) }));
+    expect(onError).toHaveBeenCalledWith(expect.any(ToolCallTruncatedError));
+    expect(onError.mock.calls[0]?.[0]).toMatchObject({
+      toolName: 'read_file',
+      partialArguments: '{"path":"a',
+    });
     vi.unstubAllGlobals();
   });
 

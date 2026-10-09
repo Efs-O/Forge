@@ -380,6 +380,34 @@ describe('truncated tool calls', () => {
     expect(guidance).toContain('overrides any earlier instruction');
   });
 
+  it('gives edit_file recovery advice in terms of fewer edits per call', async () => {
+    let round = 0;
+    streamModelChatCompletion.mockImplementation(
+      async (_url: string, _req: unknown, _model: unknown, h: Handlers) => {
+        round += 1;
+        if (round === 1) {
+          h.onError(
+            new ToolCallTruncatedError({
+              toolName: 'edit_file',
+              toolCallId: 'call_edit',
+              partialArguments: '{',
+              approxBytes: 1200,
+            }),
+          );
+          return;
+        }
+        h.onToken('done');
+        h.onDone('stop');
+      },
+    );
+    const messages: ChatMessage[] = [{ role: 'user', content: 'edit the whole batch' }];
+    await runToolCallingLoop(runOptions(messages) as never);
+    const guidance = messages.find((m) => m.role === 'tool')?.content as string;
+    expect(guidance).toContain('fewer edits than in the call that was cut off');
+    expect(guidance).toContain('overrides any earlier instruction');
+    expect(guidance).not.toContain('append_file');
+  });
+
   it('caps max_tokens to everything the model may still generate', async () => {
     const seen: number[] = [];
     streamModelChatCompletion.mockImplementation(

@@ -20,6 +20,7 @@
 
 ### Behaviour fixes from the forge-bench review
 
+- An incomplete tool call at stream EOF is now recovered as an output truncation instead of failing the turn. `edit_file` retries are told to send fewer edits per call, and truncation still does not count as a tool failure.
 - A grouped tool that is offered in the request now runs when called. Before, dispatch refused it until `load_tool_group` had been called, even when the tool was in the request (7 refusals in the session logs).
 - On a text-only model, `view_image`, `view_video`, `browser_screenshot` and `desktop_capture` are listed, with "needs a vision model" in their descriptions, and refuse when called with that reason. The `media` group is on by default for every model, and `computer_use` can be loaded on any model. Desktop coordinate actions say they need a capture from a vision model.
 - `write_file` says to write a large file in one call rather than in part-files joined with the shell.

@@ -4,7 +4,7 @@ import type { ChatCompletionRequest, ChatMessage, ContentPart, ToolCall } from '
 import { wireMessageContent, type StreamHandlers } from './OpenAIClient';
 import { StreamWatchdog } from './streamWatchdog';
 import { withDescribedCause } from '../util/describeError';
-import { argumentsAreIncomplete } from './ToolCallTruncatedError';
+import { ToolCallTruncatedError, argumentsAreIncomplete } from './ToolCallTruncatedError';
 
 interface OllamaToolCallChunk {
   function?: {
@@ -451,12 +451,17 @@ export async function streamOllamaChatCompletion(
       if (handled === 'terminal' || handled === 'error') return;
     }
     if (watchdog.stalled) return;
-    const incomplete = [...toolAccum.values()].find((acc) => argumentsAreIncomplete(acc.arguments));
+    const incomplete = [...toolAccum.entries()].find(([, acc]) =>
+      argumentsAreIncomplete(acc.arguments),
+    );
     if (incomplete) {
+      const [index, acc] = incomplete;
       handlers.onError(
-        new Error(
-          `Stream ended with incomplete tool call arguments for ${incomplete.name || 'unknown tool'}.`,
-        ),
+        new ToolCallTruncatedError({
+          toolName: acc.name,
+          toolCallId: `call_ollama_${index}`,
+          partialArguments: acc.arguments,
+        }),
       );
       return;
     }

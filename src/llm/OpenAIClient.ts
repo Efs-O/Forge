@@ -416,9 +416,11 @@ export async function streamChatCompletion(
     const incomplete = [...toolAccum.values()].find((acc) => argumentsAreIncomplete(acc.arguments));
     if (incomplete) {
       handlers.onError(
-        new Error(
-          `Stream ended with incomplete tool call arguments for ${incomplete.name || 'unknown tool'}.`,
-        ),
+        new ToolCallTruncatedError({
+          toolName: incomplete.name,
+          toolCallId: incomplete.id,
+          partialArguments: incomplete.arguments,
+        }),
       );
       return;
     }
