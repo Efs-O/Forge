@@ -1,6 +1,6 @@
 /* Compact activity step rows (ActivityRow.tsx, plan § Proposal A). */
 .activity-row {
-  margin: 2px 0;
+  margin: 3px 0;
   min-width: 0;
 }
 
@@ -10,14 +10,14 @@
   gap: 6px;
   width: 100%;
   min-width: 0;
-  padding: 2px 0;
+  padding: 5px 0;
   border: 0;
   background: transparent;
   color: var(--vscode-foreground);
   cursor: pointer;
   text-align: left;
   font-family: var(--vscode-editor-font-family, 'Cascadia Code', monospace);
-  font-size: 11px;
+  font-size: 13px;
 }
 
 .activity-row-header:hover { background: transparent; }
@@ -41,7 +41,7 @@
   color: var(--vscode-descriptionForeground);
   white-space: nowrap;
 }
-.activity-row-reasoning { margin-left: auto; font-size: 10px; }
+.activity-row-reasoning { margin-left: auto; font-size: 11.5px; }
 .activity-row-retry {
   flex: 0 0 auto;
   padding: 0 4px;
@@ -49,7 +49,7 @@
   background: color-mix(in srgb, #d7a600 18%, transparent);
   color: var(--vscode-editorWarning-foreground, #d7a600);
   font-family: var(--vscode-font-family);
-  font-size: 10px;
+  font-size: 11.5px;
   white-space: nowrap;
 }
 .activity-row.is-error .activity-row-name { color: var(--forge-tool-bad); }
