@@ -89,9 +89,6 @@ describe('activity row folding', () => {
     expect(toRows([message], 'full')).toEqual([{ kind: 'message', message, index: 0 }]);
   });
 
-  it.todo('compact mode will fold calls into step rows');
-  it.todo('grouped mode will fold adjacent steps into activity groups');
-
   it('accepts all current mode names in its public type contract', () => {
     const modes: ActivityViewMode[] = ['grouped', 'compact', 'full'];
     expect(modes.map((mode) => toRows([], mode))).toEqual([[], [], []]);

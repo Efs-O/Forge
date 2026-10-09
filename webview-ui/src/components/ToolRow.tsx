@@ -32,6 +32,64 @@ function formatSize(chars: number): string {
   return chars >= 1000 ? `${(chars / 1000).toFixed(1)}k chars` : `${chars} chars`;
 }
 
+/** Shared name/detail split for compact headers and the full tool row. */
+export function toolNameAndDetail(message: AppMessage): { name: string; detail: string } {
+  const arrow = message.content.indexOf(' → ');
+  return {
+    name: arrow !== -1 ? message.content.slice(0, arrow) : message.content,
+    detail: message.toolDetail ?? (arrow !== -1 ? message.content.slice(arrow + 3) : ''),
+  };
+}
+
+/** The one thumbnail renderer is shared by full tool rows and collapsed steps. */
+export function ToolRowThumbnails({ message }: { message: AppMessage }): React.ReactElement | null {
+  const [expanded, setExpanded] = useState<number | null>(null);
+  const closeExpanded = useCallback(() => setExpanded(null), []);
+  const rootUri = useContext(WorkspaceRootUriContext);
+  const result = message.toolResult ?? '';
+  const toolName = message.toolName ?? '';
+  const generated = generatedImagePath(toolName, result);
+  const listed = generated ? [{ path: generated }] : imageSearchThumbnails(toolName, result);
+  const images = rootUri
+    ? listed.map((entry) => ({
+        attachment: {
+          name: entry.path,
+          mediaType: 'image/*',
+          bytes: 0,
+          src: workspaceFileUri(rootUri, entry.path),
+        },
+        original: 'original' in entry ? entry.original : undefined,
+      }))
+    : [];
+  const openImage = expanded === null ? undefined : images[expanded];
+
+  if (images.length === 0) return null;
+  return (
+    <>
+      <div className={`tool-row-thumbs${images.length > 1 ? ' is-grid' : ''}`}>
+        {images.map(({ attachment }, index) => (
+          <button
+            key={attachment.name}
+            type="button"
+            className="tool-row-thumb"
+            title={`${attachment.name} — click to expand`}
+            onClick={() => setExpanded(index)}
+          >
+            <img src={attachment.src} alt={attachment.name} />
+          </button>
+        ))}
+      </div>
+      {openImage && (
+        <ImageLightbox
+          attachment={openImage.attachment}
+          onClose={closeExpanded}
+          {...(openImage.original ? { originalUrl: openImage.original } : {})}
+        />
+      )}
+    </>
+  );
+}
+
 /**
  * One line per tool call. A long result — a delegated agent's report, most of
  * all — stays behind a toggle and renders as markdown with its newlines intact,
@@ -39,14 +97,7 @@ function formatSize(chars: number): string {
  */
 export function ToolRow({ message }: { message: AppMessage }): React.ReactElement {
   const [open, setOpen] = useState(false);
-  // Index of the thumbnail open in the lightbox, or null.
-  const [expanded, setExpanded] = useState<number | null>(null);
-  const closeExpanded = useCallback(() => setExpanded(null), []);
-  const rootUri = useContext(WorkspaceRootUriContext);
-
-  const arrow = message.content.indexOf(' → ');
-  const name = arrow !== -1 ? message.content.slice(0, arrow) : message.content;
-  const detail = message.toolDetail ?? (arrow !== -1 ? message.content.slice(arrow + 3) : '');
+  const { name, detail } = toolNameAndDetail(message);
 
   const result = message.toolResult ?? '';
   const expandable = result.length >= EXPANDABLE_MIN_CHARS || detail.length >= EXPANDABLE_MIN_CHARS;
@@ -63,21 +114,6 @@ export function ToolRow({ message }: { message: AppMessage }): React.ReactElemen
       ? { className: 'is-ok', glyph: '✓', label: 'completed' }
       : { className: 'is-pending', glyph: '○', label: 'running' };
   const body = useMemo(() => normalizeMarkdownForRender(result), [result]);
-  const toolName = message.toolName ?? '';
-  const generated = generatedImagePath(toolName, result);
-  const listed = generated ? [{ path: generated }] : imageSearchThumbnails(toolName, result);
-  const images = rootUri
-    ? listed.map((entry) => ({
-        attachment: {
-          name: entry.path,
-          mediaType: 'image/*',
-          bytes: 0,
-          src: workspaceFileUri(rootUri, entry.path),
-        },
-        original: 'original' in entry ? entry.original : undefined,
-      }))
-    : [];
-  const openImage = expanded === null ? undefined : images[expanded];
 
   return (
     <div className={`msg-tool-row-wrap${message.toolIsError ? ' msg-tool-row-error' : ''}`}>
@@ -123,28 +159,7 @@ export function ToolRow({ message }: { message: AppMessage }): React.ReactElemen
           </button>
         )}
       </div>
-      {images.length > 0 && (
-        <div className={`tool-row-thumbs${images.length > 1 ? ' is-grid' : ''}`}>
-          {images.map(({ attachment }, index) => (
-            <button
-              key={attachment.name}
-              type="button"
-              className="tool-row-thumb"
-              title={`${attachment.name} — click to expand`}
-              onClick={() => setExpanded(index)}
-            >
-              <img src={attachment.src} alt={attachment.name} />
-            </button>
-          ))}
-        </div>
-      )}
-      {openImage && (
-        <ImageLightbox
-          attachment={openImage.attachment}
-          onClose={closeExpanded}
-          {...(openImage.original ? { originalUrl: openImage.original } : {})}
-        />
-      )}
+      <ToolRowThumbnails message={message} />
       {open && (
         <div className="tool-row-body">
           {detail && (

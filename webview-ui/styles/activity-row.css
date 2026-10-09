@@ -1,1 +1,62 @@
 /* Compact activity step rows (ActivityRow.tsx, plan § Proposal A). */
+.activity-row {
+  margin: 2px 0;
+  min-width: 0;
+}
+
+.activity-row-header {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  width: 100%;
+  min-width: 0;
+  padding: 2px 0;
+  border: 0;
+  background: transparent;
+  color: var(--vscode-foreground);
+  cursor: pointer;
+  text-align: left;
+  font-family: var(--vscode-editor-font-family, 'Cascadia Code', monospace);
+  font-size: 11px;
+}
+
+.activity-row-header:hover { background: transparent; }
+.activity-row-chevron {
+  width: 10px;
+  flex: 0 0 10px;
+  color: var(--vscode-descriptionForeground);
+}
+.activity-row-name { flex: 0 0 auto; white-space: nowrap; }
+.activity-row-detail {
+  min-width: 0;
+  overflow: hidden;
+  color: var(--vscode-descriptionForeground);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.activity-row-edit { color: var(--vscode-descriptionForeground); white-space: nowrap; }
+.activity-row-repeat,
+.activity-row-reasoning {
+  flex: 0 0 auto;
+  color: var(--vscode-descriptionForeground);
+  white-space: nowrap;
+}
+.activity-row-reasoning { margin-left: auto; font-size: 10px; }
+.activity-row-retry {
+  flex: 0 0 auto;
+  padding: 0 4px;
+  border-radius: 3px;
+  background: color-mix(in srgb, #d7a600 18%, transparent);
+  color: var(--vscode-editorWarning-foreground, #d7a600);
+  font-family: var(--vscode-font-family);
+  font-size: 10px;
+  white-space: nowrap;
+}
+.activity-row.is-error .activity-row-name { color: var(--forge-tool-bad); }
+.activity-row-collapsed-thumbnails { padding-left: 28px; }
+.activity-row-collapsed-thumbnails .tool-row-thumbs { margin: 2px 0; }
+.activity-row-body {
+  margin: 2px 0 5px 5px;
+  padding-left: 14px;
+  border-left: 1px solid var(--vscode-panel-border, #333);
+}

@@ -1,1 +1,65 @@
-/* Grouped activity rows (ActivityGroup.tsx, plan § Proposal B). */
+/* Grouped activity disclosure and its compact summary line. */
+.activity-group {
+  margin: 3px 0;
+}
+
+.activity-group-toggle {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 5px;
+  width: 100%;
+  padding: 3px 0;
+  border: 0;
+  background: transparent;
+  color: var(--vscode-descriptionForeground);
+  cursor: pointer;
+  text-align: left;
+  font-family: var(--vscode-editor-font-family, 'Cascadia Code', monospace);
+  font-size: 11px;
+}
+
+.activity-group-toggle:hover {
+  background: transparent;
+  text-decoration: underline;
+}
+
+.activity-group-chevron {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 10px;
+  flex: 0 0 10px;
+}
+
+.activity-group-status {
+  color: var(--forge-tool-ok);
+}
+
+.activity-group-status.is-failed,
+.activity-group-failed {
+  color: var(--forge-tool-bad);
+}
+
+.activity-group-retry {
+  color: var(--vscode-editorWarning-foreground, #cca700);
+}
+
+.activity-group-edits,
+.activity-group-thinking {
+  color: var(--vscode-descriptionForeground);
+}
+
+.activity-group-live {
+  color: var(--vscode-foreground);
+}
+
+.activity-group-live.has-failure {
+  color: var(--forge-tool-bad);
+}
+
+.activity-group-body {
+  margin: 2px 0 5px 5px;
+  padding-left: 14px;
+  border-left: 1px solid var(--vscode-panel-border, #333);
+}

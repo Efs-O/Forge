@@ -4,16 +4,23 @@ import { groupActivity } from './activityGroups';
 
 export type { ActivityViewMode };
 
+/** One call of a step, with the reasoning that led to it. */
+export interface StepAttempt {
+  /** Reasoning-only assistant messages just before this attempt, in order. */
+  thoughts: AppMessage[];
+  /** One round's tool rows: one for a single call, several for a parallel round. */
+  tools: AppMessage[];
+}
+
 /** One logical step of agent activity (compact view; plan § Proposal A). */
 export interface ActivityStep {
-  /** Reasoning-only assistant messages that preceded the call(s), in order. */
-  thoughts: AppMessage[];
   /**
-   * Attempts of the same call, oldest first. Each attempt is one round's tool
-   * rows: one row for a single call, several for a parallel round. More than
-   * one attempt means a retry or a plain repeat (×N).
+   * Attempts of the same call, oldest first. More than one means a retry or a
+   * plain repeat (×N). Thoughts sit on the attempt they preceded, so a retry's
+   * reasoning renders before the retry and the step's first message (its
+   * `rowKey`) never changes as attempts are appended.
    */
-  attempts: AppMessage[][];
+  attempts: StepAttempt[];
   /** Diff rows produced by this step's calls, matched by `toolCallId`. */
   diffs: AppMessage[];
 }
@@ -31,9 +38,19 @@ export type Row =
   | { kind: 'step'; step: ActivityStep }
   | { kind: 'activityGroup'; items: ActivityGroupItem[] };
 
-/** Every message in a step, in chronological order: thoughts, attempts, diffs. */
+/** Every message in a step, in chronological order: each attempt's thoughts then tools, then diffs. */
 export function stepMessages(step: ActivityStep): AppMessage[] {
-  return [...step.thoughts, ...step.attempts.flat(), ...step.diffs];
+  return [...step.attempts.flatMap((a) => [...a.thoughts, ...a.tools]), ...step.diffs];
+}
+
+/** All reasoning in a step, across attempts. */
+export function stepThoughts(step: ActivityStep): AppMessage[] {
+  return step.attempts.flatMap((a) => a.thoughts);
+}
+
+/** All tool rows in a step, across attempts. */
+export function stepTools(step: ActivityStep): AppMessage[] {
+  return step.attempts.flatMap((a) => a.tools);
 }
 
 /** Every message in a group, in order. */
@@ -79,11 +96,116 @@ export function toRows(messages: AppMessage[], mode: ActivityViewMode): Row[] {
 }
 
 /**
- * Compact rows (plan § Proposal A, rules 1-4). Phase 2 replaces this body;
- * until then it returns the full rows.
+ * Compact rows (plan § Proposal A, rules 1-4): each tool round becomes a step
+ * carrying the reasoning before it and the diffs it produced.
  */
 export function toCompactRows(messages: AppMessage[]): Row[] {
-  return toFullRows(messages);
+  const rows: Row[] = [];
+  const stepByCallId = new Map<string, ActivityStep>();
+  let thoughts: AppMessage[] = [];
+  let previousStep: ActivityStep | undefined;
+  let unmatchedDiffs: AppMessage[] = [];
+
+  const flushUnmatchedDiffs = (): void => {
+    if (unmatchedDiffs.length > 0) rows.push({ kind: 'diffGroup', diffs: unmatchedDiffs });
+    unmatchedDiffs = [];
+  };
+  const flushThoughts = (): void => {
+    if (thoughts.length > 0) rows.push({ kind: 'thinkingGroup', steps: thoughts });
+    thoughts = [];
+  };
+
+  for (let i = 0; i < messages.length; ) {
+    const message = messages[i]!;
+
+    if (isReasoningOnly(message)) {
+      flushUnmatchedDiffs();
+      thoughts.push(message);
+      i++;
+      continue;
+    }
+
+    if (message.role === 'tool') {
+      flushUnmatchedDiffs();
+      let end = i + 1;
+      while (end < messages.length && messages[end]!.role === 'tool') end++;
+      const round = messages.slice(i, end);
+      const last = previousStep?.attempts.at(-1)?.tools;
+      const canMerge =
+        round.length === 1 &&
+        last?.length === 1 &&
+        sameTarget(last[0]!, round[0]!) &&
+        (isFailed(last) ||
+          (!hasDiffForAttempt(previousStep!, last) && !hasDiffForRound(round, messages, end)));
+
+      const attempt: StepAttempt = { thoughts, tools: round };
+      if (canMerge) {
+        previousStep!.attempts.push(attempt);
+      } else {
+        previousStep = { attempts: [attempt], diffs: [] };
+        rows.push({ kind: 'step', step: previousStep });
+      }
+      for (const tool of round) {
+        if (tool.toolCallId) stepByCallId.set(tool.toolCallId, previousStep!);
+      }
+      thoughts = [];
+      i = end;
+      continue;
+    }
+
+    if (message.role === 'diff') {
+      const owner = message.toolCallId ? stepByCallId.get(message.toolCallId) : undefined;
+      if (owner) owner.diffs.push(message);
+      else unmatchedDiffs.push(message);
+      i++;
+      continue;
+    }
+
+    flushUnmatchedDiffs();
+    flushThoughts();
+    rows.push({ kind: 'message', message, index: i });
+    previousStep = undefined;
+    i++;
+  }
+
+  flushUnmatchedDiffs();
+  flushThoughts();
+  return rows;
+}
+
+function sameTarget(previous: AppMessage, next: AppMessage): boolean {
+  return (
+    previous.toolName === next.toolName &&
+    previous.toolTarget !== undefined &&
+    next.toolTarget !== undefined &&
+    previous.toolTarget === next.toolTarget
+  );
+}
+
+function isFailed(tools: AppMessage[]): boolean {
+  return tools.some((message) => message.toolIsError);
+}
+
+function hasDiffForAttempt(step: ActivityStep, attempt: AppMessage[]): boolean {
+  const ids = new Set(
+    attempt.map((message) => message.toolCallId).filter((id): id is string => Boolean(id)),
+  );
+  return step.diffs.some((diff) => Boolean(diff.toolCallId && ids.has(diff.toolCallId)));
+}
+
+function hasDiffForRound(round: AppMessage[], messages: AppMessage[], start: number): boolean {
+  const ids = new Set(
+    round.map((message) => message.toolCallId).filter((id): id is string => Boolean(id)),
+  );
+  for (let i = start; i < messages.length && messages[i]!.role === 'diff'; i++) {
+    if (messages[i]!.toolCallId && ids.has(messages[i]!.toolCallId!)) return true;
+  }
+  return false;
+}
+
+/** Shortens only the visible shell detail; ToolRow retains the original command. */
+export function displayDetail(detail: string): string {
+  return detail.replace(/^cd\s+.+?(?:&&|;)\s*/u, '');
 }
 
 /**
