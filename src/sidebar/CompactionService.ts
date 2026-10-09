@@ -18,7 +18,11 @@ import type {
 import { logAttemptSafely, runCompactionWithPolicy } from './compactionAttemptPolicy';
 import { compactionRefusalNotice } from './compactionRefusal';
 import { capSummary, isUsableSummary } from './compactionPrompt';
-import { COMPACTION_CHARS_PER_TOKEN, compactionBudget } from './compactionBudget';
+import {
+  COMPACTION_CHARS_PER_TOKEN,
+  compactionBudget,
+  withFirstRequestAllowance,
+} from './compactionBudget';
 import {
   CompactionFailure,
   compactionFailureCategory,
@@ -143,6 +147,8 @@ async function compactOnce(
     fromIndex,
     memoryKeys: deps.listMemoryKeys?.() ?? [],
   });
+  const firstRequestExtra = hostContext.firstRequestExtraChars;
+  budget = withFirstRequestAllowance(budget, firstRequestExtra);
 
   deps.post({ type: 'notice', message: 'Compacting conversation…', conversationId: conv.id });
   // The webview treats the conversation as streaming between these two, so a
@@ -204,12 +210,15 @@ async function compactOnce(
         optional: hostContext.optional,
         budget,
         budgetForCharsPerToken: (ratio) =>
-          compactionBudget(
-            reportedContextTokens(conv),
-            beforeChars,
-            modelMax,
-            thinkingTokens,
-            ratio,
+          withFirstRequestAllowance(
+            compactionBudget(
+              reportedContextTokens(conv),
+              beforeChars,
+              modelMax,
+              thinkingTokens,
+              ratio,
+            ),
+            firstRequestExtra,
           ),
         counter,
         ...(deps.countTokens ? { countTokens: deps.countTokens } : {}),

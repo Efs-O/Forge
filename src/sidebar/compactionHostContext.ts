@@ -11,6 +11,7 @@ import { fitUserMessagesToHostBudget, renderCompactionHostBlock } from './compac
 import { boundMemoryKeys } from './compactionWindow';
 import {
   collectCompactionUserMessages,
+  firstRequestExtraChars,
   renderCompactionUserMessages,
 } from './compactionUserContext';
 import type { CompactionBudget } from './compactionBudget';
@@ -70,6 +71,11 @@ export class CompactionHostContext {
     this.lastReplyFollowedByTools = this.optional.lastReply
       ? toolActivityFollowedLastReply([...summarize, ...pending.slice(tailStart)])
       : false;
+  }
+
+  /** The first request's own allowance in use; CompactionService adds it to the budget. */
+  get firstRequestExtraChars(): number {
+    return firstRequestExtraChars(this.userMessages);
   }
 
   get userContextText(): string {

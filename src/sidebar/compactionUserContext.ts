@@ -12,6 +12,14 @@ import type { ChatMessage } from '../llm/types';
 export const USER_CONTEXT_MAX_MESSAGES = 24;
 export const USER_CONTEXT_MESSAGE_MAX_CHARS = 4000;
 export const USER_CONTEXT_MAX_CHARS = 12000;
+/**
+ * The request that began the conversation is usually the whole specification,
+ * and the 4,000 cap every other message gets cut a 5,710-character task prompt
+ * mid-list (UI, sound, quality bar and "do not open a browser" lost). So it has
+ * its own allowance, outside USER_CONTEXT_MAX_CHARS: later messages keep all of
+ * theirs, and `withFirstRequestAllowance` grows the host budget by what it uses.
+ */
+export const FIRST_REQUEST_MAX_CHARS = 12000;
 
 function truncate(text: string, max: number): string {
   return text.length <= max ? text : `${text.slice(0, max)}\n…[user message truncated]`;
@@ -29,10 +37,15 @@ function userText(message: ChatMessage): string | undefined {
   return text || undefined;
 }
 
+/** Characters the first request holds beyond the per-message cap: its own allowance in use. */
+export function firstRequestExtraChars(messages: readonly string[]): number {
+  return Math.max(0, (messages[0]?.length ?? 0) - USER_CONTEXT_MESSAGE_MAX_CHARS);
+}
+
 /**
  * Merge earlier verbatim user context with newly summarized user turns.
  *
- * The first request is always retained. Remaining room is filled newest-first
+ * The first request is always retained, within its own allowance. Remaining room is filled newest-first
  * and then rendered in chronological order, so later corrections win the
  * space competition without erasing the task that began the conversation.
  */
@@ -43,7 +56,9 @@ export function collectCompactionUserMessages(
   const combined = [
     ...(previous ?? []),
     ...messages.map(userText).filter((text): text is string => text !== undefined),
-  ].map((text) => truncate(text.trim(), USER_CONTEXT_MESSAGE_MAX_CHARS));
+  ].map((text, index) =>
+    truncate(text.trim(), index === 0 ? FIRST_REQUEST_MAX_CHARS : USER_CONTEXT_MESSAGE_MAX_CHARS),
+  );
 
   const unique: string[] = [];
   const seen = new Set<string>();
@@ -55,7 +70,7 @@ export function collectCompactionUserMessages(
   if (unique.length === 0) return [];
 
   const kept = new Set<number>([0]);
-  let chars = unique[0]!.length;
+  let chars = 0; // the first request is outside USER_CONTEXT_MAX_CHARS
   for (let index = unique.length - 1; index > 0; index--) {
     if (kept.size >= USER_CONTEXT_MAX_MESSAGES) break;
     const text = unique[index]!;
@@ -142,7 +157,7 @@ function renderUserMessagesText(messages: readonly string[]): string {
 
 export function renderCompactionUserMessages(
   messages: readonly string[] | undefined,
-  maxChars = USER_CONTEXT_MAX_CHARS,
+  maxChars = USER_CONTEXT_MAX_CHARS + firstRequestExtraChars(messages ?? []),
 ): string {
   if (!messages?.length) return '';
   const rendered = renderUserMessagesText(messages);

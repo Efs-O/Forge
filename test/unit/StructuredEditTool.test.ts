@@ -60,6 +60,14 @@ describe('apply_line_edits', () => {
     ).toThrow('out-of-range');
   });
 
+  it('names the given and required line counts and the range when they disagree', () => {
+    expect(() =>
+      applyLineEditsToContent('a\nb\nc\nd\n', [
+        { start_line: 2, end_line: 4, expected_lines: ['b', 'c'], replacement_lines: ['B'] },
+      ]),
+    ).toThrow('operation 1 expected_lines has 2 line(s), but lines 2-4 are 3 line(s)');
+  });
+
   it('rejects no-op operations', () => {
     expect(() =>
       applyLineEditsToContent('same', [

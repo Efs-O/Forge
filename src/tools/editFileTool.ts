@@ -150,6 +150,7 @@ export function makeEditFileTool(extraRoots: () => readonly string[] = () => [])
       const applied: number[] = [];
       const misses: { number: number; diagnosis: string }[] = [];
       const shifted: string[] = [];
+      const joins: string[] = [];
       for (const [index, edit] of edits.entries()) {
         const exact = findEditMatch(updated, edit.oldStr);
         const match = exact
@@ -166,10 +167,15 @@ export function makeEditFileTool(extraRoots: () => readonly string[] = () => [])
           );
         }
         applied.push(index + 1);
+        const replaced = updated.slice(match.index, match.index + match.length);
+        const inserted = applyEol(match.newStr, eol);
         updated =
-          updated.slice(0, match.index) +
-          applyEol(match.newStr, eol) +
-          updated.slice(match.index + match.length);
+          updated.slice(0, match.index) + inserted + updated.slice(match.index + match.length);
+        const joinedLine = lineJoinedBy(updated, match.index, inserted.length, replaced);
+        if (joinedLine !== undefined) {
+          const which = edits.length === 1 ? '' : `edit ${index + 1}: `;
+          joins.push(`${which}line ${joinedLine}`);
+        }
       }
       if (applied.length === 0) {
         const which = edits.length === 1 ? '' : ` (all ${edits.length} edits)`;
@@ -182,19 +188,50 @@ export function makeEditFileTool(extraRoots: () => readonly string[] = () => [])
       writeFileAtomicSync(filepath, updated, fileState);
       const suppliedPath = args['path'] as string;
       const adjusted = shifted.length > 0 ? ` (${shifted.join('; ')})` : '';
+      const joined =
+        joins.length > 0
+          ? `\nWarning: the replacement removed a line break, so two lines are now one (${joins.join('; ')}). ` +
+            'If that was not intended, re-read that line and put the line break back.'
+          : '';
       if (misses.length === 0) {
         return edits.length === 1
-          ? `Replaced in ${suppliedPath}${adjusted}`
-          : `Applied ${edits.length} edits to ${suppliedPath}${adjusted}`;
+          ? `Replaced in ${suppliedPath}${adjusted}${joined}`
+          : `Applied ${edits.length} edits to ${suppliedPath}${adjusted}${joined}`;
       }
       return (
         `Partly applied: edit(s) ${applied.join(', ')} of ${edits.length} written to ${suppliedPath}` +
         `${adjusted}. Edit(s) ${misses.map((m) => m.number).join(', ')} not found — the applied edits ` +
         'are already in the file, so resend ONLY the missed edit(s), corrected.' +
-        describeMisses(misses, edits.length)
+        describeMisses(misses, edits.length) +
+        joined
       );
     },
   };
+}
+
+/**
+ * The 1-based line where an edit merged two lines, or undefined. That happens
+ * when the replaced text began or ended with a line break that the replacement
+ * dropped, and text sits on both sides of the seam: jelly-press joined two
+ * statements this way and found it 45 minutes later (2026-10-09). Deleting
+ * whole lines is not a join — the seam then still ends at a line break.
+ */
+function lineJoinedBy(
+  updated: string,
+  start: number,
+  insertedLength: number,
+  replaced: string,
+): number | undefined {
+  const end = start + insertedLength;
+  const isBreak = (char: string | undefined): boolean => char === '\n' || char === '\r';
+  const lineAt = (offset: number): number => updated.slice(0, offset).split('\n').length;
+  if (replaced.endsWith('\n') && end > 0 && end < updated.length) {
+    if (!isBreak(updated[end - 1]) && !isBreak(updated[end])) return lineAt(end);
+  }
+  if (/^\r?\n/.test(replaced) && start > 0 && start < updated.length) {
+    if (!isBreak(updated[start - 1]) && !isBreak(updated[start])) return lineAt(start);
+  }
+  return undefined;
 }
 
 /** Full diagnoses for the first misses; numbers only past that, to bound the result. */

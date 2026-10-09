@@ -1,10 +1,15 @@
 import { describe, expect, it } from 'vitest';
 import type { ChatMessage } from '../../src/llm/types';
+import { compactionBudget, withFirstRequestAllowance } from '../../src/sidebar/compactionBudget';
+import { compactionSummaryAllowance } from '../../src/sidebar/compactionSummaryRunner';
 import {
   collectCompactionUserMessages,
+  FIRST_REQUEST_MAX_CHARS,
+  firstRequestExtraChars,
   renderCompactionUserMessages,
   USER_CONTEXT_MAX_CHARS,
   USER_CONTEXT_MAX_MESSAGES,
+  USER_CONTEXT_MESSAGE_MAX_CHARS,
 } from '../../src/sidebar/compactionUserContext';
 
 describe('compaction user context', () => {
@@ -44,9 +49,10 @@ describe('compaction user context', () => {
     expect(collected[0]).toContain('0:');
     expect(collected.at(-1)).toContain('39:');
     expect(collected.length).toBeLessThanOrEqual(USER_CONTEXT_MAX_MESSAGES);
-    expect(collected.reduce((sum, message) => sum + message.length, 0)).toBeLessThanOrEqual(
-      USER_CONTEXT_MAX_CHARS,
-    );
+    // The first request has its own allowance; the rest share USER_CONTEXT_MAX_CHARS.
+    expect(
+      collected.slice(1).reduce((sum, message) => sum + message.length, 0),
+    ).toBeLessThanOrEqual(USER_CONTEXT_MAX_CHARS);
   });
 
   it('marks the block as answered history so the newest entry is not read as a new request', () => {
@@ -92,5 +98,58 @@ describe('compaction user context', () => {
     const rendered = renderCompactionUserMessages(['first '.repeat(1_000), newest], 5_000);
 
     expect(rendered).toContain(`[2] ${newest}`);
+  });
+
+  it('keeps a long first request whole up to its own allowance', () => {
+    // The jelly-press task prompt was 5,710 characters; the 4,000 cap cut its last third.
+    const first = `spec ${'s'.repeat(5_705)}`;
+    const collected = collectCompactionUserMessages(undefined, [
+      { role: 'user', content: first },
+      { role: 'user', content: 'later' },
+    ]);
+    expect(collected[0]).toBe(first);
+
+    const huge = collectCompactionUserMessages(undefined, [
+      { role: 'user', content: 'h'.repeat(20_000) },
+    ]);
+    expect(huge[0]!.startsWith('h'.repeat(FIRST_REQUEST_MAX_CHARS))).toBe(true);
+    expect(huge[0]!.length).toBeLessThan(FIRST_REQUEST_MAX_CHARS + 100);
+  });
+
+  it('gives later requests their full budget regardless of the first request', () => {
+    const later = (first: string): string[] =>
+      collectCompactionUserMessages(undefined, [
+        { role: 'user', content: first },
+        ...Array.from({ length: 10 }, (_, index) => ({
+          role: 'user' as const,
+          content: `${index}: ${'y'.repeat(1_500)}`,
+        })),
+      ]).slice(1);
+
+    const afterShort = later('short');
+    const afterLong = later('z'.repeat(FIRST_REQUEST_MAX_CHARS));
+    expect(afterLong).toEqual(afterShort);
+    expect(afterLong.reduce((sum, message) => sum + message.length, 0)).toBeGreaterThan(
+      USER_CONTEXT_MAX_CHARS - 1_600,
+    );
+    expect(renderCompactionUserMessages(['z'.repeat(FIRST_REQUEST_MAX_CHARS), ...afterLong])).toContain(
+      afterLong.at(-1)!,
+    );
+  });
+
+  it('grows the host and replacement budgets together, so the summary allowance is unchanged', () => {
+    const extra = firstRequestExtraChars(['f'.repeat(9_000), 'later']);
+    expect(extra).toBe(9_000 - USER_CONTEXT_MESSAGE_MAX_CHARS);
+    expect(firstRequestExtraChars(['short'])).toBe(0);
+
+    const base = compactionBudget(64_000, 400_000, 131_072, 4_096);
+    const grown = withFirstRequestAllowance(base, extra);
+    expect(grown.hostMaxChars).toBe(base.hostMaxChars + extra);
+    expect(grown.replacementMaxChars).toBe(base.replacementMaxChars + extra);
+    expect(grown.summaryCeilingChars).toBe(base.summaryCeilingChars);
+    const floor = 3_000;
+    expect(
+      compactionSummaryAllowance(grown.summaryCeilingChars, grown.replacementMaxChars, floor + extra, ''),
+    ).toBe(compactionSummaryAllowance(base.summaryCeilingChars, base.replacementMaxChars, floor, ''));
   });
 });

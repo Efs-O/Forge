@@ -6,7 +6,11 @@ import { getLogger } from '../util/logger';
 import type { ChatMessage } from '../llm/types';
 import type { CompactionState } from './compactionTypes';
 import { compactionWindowChars, replacementHostMessages } from './compactionWindow';
-import { boundCompactionUserMessages, USER_CONTEXT_MAX_CHARS } from './compactionUserContext';
+import {
+  boundCompactionUserMessages,
+  firstRequestExtraChars,
+  USER_CONTEXT_MAX_CHARS,
+} from './compactionUserContext';
 
 /** Optional host facts. User requests, recorded actions and memory keys are never shed. */
 export interface OptionalHostFacts {
@@ -90,7 +94,7 @@ export function fitUserMessagesToHostBudget(options: {
   if (budget.policyTokens > budget.observedTokens) {
     return {
       userMessages,
-      maxChars: USER_CONTEXT_MAX_CHARS,
+      maxChars: USER_CONTEXT_MAX_CHARS + firstRequestExtraChars(userMessages),
     };
   }
   const optionalChars = optional.repoState.length + (optional.lastReply?.length ?? 0);

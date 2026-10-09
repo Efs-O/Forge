@@ -230,7 +230,9 @@ function validateOperation(
   }
   if (operation.expected_lines.length !== expectedCount) {
     throw new Error(
-      `apply_line_edits: operation ${index + 1} expected_lines must contain ${expectedCount} lines`,
+      `apply_line_edits: operation ${index + 1} expected_lines has ${operation.expected_lines.length} ` +
+        `line(s), but lines ${operation.start_line}-${operation.end_line} are ${expectedCount} line(s). ` +
+        'expected_lines must be exactly the current text of start_line through end_line, one entry per line.',
     );
   }
   if (operation.replacement_lines.length > MAX_LINES_PER_OPERATION) {

@@ -69,6 +69,24 @@ export function compactionBudget(
   };
 }
 
+/**
+ * Adds the first request's own allowance on top of the policy budget. Both the
+ * host block and the replacement window grow by the same amount, so the extra
+ * text takes no room from later requests, recorded actions or the summary
+ * (the summary's allowance is replacementMaxChars minus the host floor).
+ */
+export function withFirstRequestAllowance(
+  budget: CompactionBudget,
+  extraChars: number,
+): CompactionBudget {
+  if (extraChars <= 0) return budget;
+  return {
+    ...budget,
+    hostMaxChars: budget.hostMaxChars + extraChars,
+    replacementMaxChars: budget.replacementMaxChars + extraChars,
+  };
+}
+
 export interface OutputPlan {
   /** Value for `PromptRunOptions.outputTokens`; PromptRun adds the reserve on top. */
   outputTokens: number;
