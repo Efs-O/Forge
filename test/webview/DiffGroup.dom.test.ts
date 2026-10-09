@@ -25,6 +25,7 @@ let posted: unknown[] = [];
 
 const { DiffGroup } = await import('../../webview-ui/src/components/DiffGroup');
 const React = await import('react');
+const { resetDisclosures } = await import('../../webview-ui/src/disclosureState');
 
 function hunk(added: number, removed: number): DiffHunk[] {
   const lines = [
@@ -49,6 +50,7 @@ let container: HTMLDivElement;
 let root: Root;
 
 beforeEach(() => {
+  resetDisclosures();
   posted = [];
   container = document.createElement('div');
   document.body.appendChild(container);

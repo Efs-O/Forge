@@ -238,6 +238,16 @@ The keys must stay stable as a step grows (a retry appends to an existing step;
 the first message id does not change), or the row would remount and lose its
 toggle mid-turn. A test pins this.
 
+**Amended 2026-10-09 after the live install.** A stable key was not enough:
+the same messages also change *component*. A trailing thinking row becomes a
+step when its call arrives, and a lone step moves inside an `ActivityGroup`
+when a second step lands. React remounts on both, so an opened reasoning bubble
+snapped shut. Manual choices now live in `webview-ui/src/disclosureState.ts`,
+an in-memory map keyed by kind and first message id (still not persisted). A
+step also opens if the reader had opened one of its thoughts before it folded,
+and a manual toggle now beats a running call's forced-open.
+`test/webview/DisclosureRemount.dom.test.ts` pins both moves.
+
 They must also survive the turn-end `SESSION_SYNC`. `mergeSyncedMessages` keeps
 a local row's id only when it matches a host row (`sameRenderableMessage`).
 Unmatched rows get a fresh `mkId()`, and their step or group remounts, losing a

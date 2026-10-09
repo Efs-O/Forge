@@ -46,6 +46,7 @@ function DiffGroupView({ diffs }: Props): React.ReactElement | null {
     const only = diffs[0]!;
     return (
       <DiffBlock
+        id={only.id}
         filePath={only.content}
         hunks={only.diffHunks}
         isNew={only.diffIsNew}
@@ -74,11 +75,11 @@ function DiffGroupView({ diffs }: Props): React.ReactElement | null {
           {diffs.map((msg) => (
             <DiffBlock
               key={msg.id}
+              id={msg.id}
               filePath={msg.content}
               hunks={msg.diffHunks}
               isNew={msg.diffIsNew}
               isDeleted={msg.diffIsDeleted}
-              defaultExpanded={false}
             />
           ))}
         </div>

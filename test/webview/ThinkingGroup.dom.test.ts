@@ -19,6 +19,7 @@ const { ThinkingGroup, isReasoningOnly } = await import(
   '../../webview-ui/src/components/ThinkingGroup'
 );
 const React = await import('react');
+const { resetDisclosures } = await import('../../webview-ui/src/disclosureState');
 
 function step(id: string, reasoning: string) {
   return { id, role: 'assistant' as const, content: '', reasoning };
@@ -28,6 +29,7 @@ let container: HTMLDivElement;
 let root: Root;
 
 beforeEach(() => {
+  resetDisclosures();
   container = document.createElement('div');
   document.body.appendChild(container);
   root = createRoot(container);

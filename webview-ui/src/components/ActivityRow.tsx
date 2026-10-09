@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React from 'react';
 import type { AppMessage } from '../reducer';
 import {
   displayDetail,
@@ -9,6 +9,7 @@ import {
 } from '../activityRows';
 import { formatDuration } from '../../../src/util/formatDuration';
 import { sameRowList } from '../messageOps';
+import { readDisclosure, useDisclosure } from '../disclosureState';
 import { DiffBlock, diffStats } from './DiffBlock';
 import { thinkingLabel, ThinkingRow } from './ThinkingGroup';
 import { ToolGroup } from './ToolGroup';
@@ -27,6 +28,12 @@ const Chevron = ({ open }: { open: boolean }): React.ReactElement => (
 
 function finalAttempt(step: ActivityStep): AppMessage[] {
   return step.attempts.at(-1)?.tools ?? [];
+}
+
+function openedThought(step: ActivityStep): boolean {
+  const thoughts = stepThoughts(step);
+  if (thoughts[0] && readDisclosure('thinkingGroup', thoughts[0].id)) return true;
+  return thoughts.some((thought) => readDisclosure('thinking', thought.id) === true);
 }
 
 function hasPendingCall(step: ActivityStep): boolean {
@@ -79,9 +86,11 @@ function editSummary(step: ActivityStep): { added: number; removed: number; meas
 }
 
 function ActivityRowView({ step, streaming }: ActivityRowProps): React.ReactElement | null {
-  const [manualOpen, setManualOpen] = useState<boolean | undefined>();
-  const forcedOpen = streaming && hasPendingCall(step);
-  const open = forcedOpen || (manualOpen ?? false);
+  const [manualOpen, setManualOpen] = useDisclosure('step', stepMessages(step)[0]!.id);
+  // The reader's own toggle wins. Otherwise a running call forces the step
+  // open, and so does a reasoning bubble the reader opened before it folded
+  // into this step (it was a standalone thinking row until the call arrived).
+  const open = manualOpen ?? ((streaming && hasPendingCall(step)) || openedThought(step));
   const final = finalAttempt(step);
   const primary = final[0];
   if (!primary) return null;
@@ -102,7 +111,7 @@ function ActivityRowView({ step, streaming }: ActivityRowProps): React.ReactElem
         type="button"
         className="activity-row-header"
         aria-expanded={open}
-        onClick={() => setManualOpen((value) => !value)}
+        onClick={() => setManualOpen(!open)}
       >
         <Chevron open={open} />
         <span className={`tool-row-status ${state.className}`} title={state.label}>
@@ -141,6 +150,7 @@ function ActivityRowView({ step, streaming }: ActivityRowProps): React.ReactElem
               {thoughts.map((thought) => (
                 <ThinkingRow
                   key={thought.id}
+                  id={thought.id}
                   label={thinkingLabel(thought.reasoningMs)}
                   reasoning={thought.reasoning ?? ''}
                 />
@@ -151,6 +161,7 @@ function ActivityRowView({ step, streaming }: ActivityRowProps): React.ReactElem
           {step.diffs.map((diff) => (
             <DiffBlock
               key={diff.id}
+              id={diff.id}
               filePath={diff.content}
               hunks={diff.diffHunks}
               isNew={diff.diffIsNew}

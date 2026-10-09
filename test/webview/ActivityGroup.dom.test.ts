@@ -11,6 +11,7 @@ import type { AppMessage } from '../../webview-ui/src/messageOps';
 
 const { ActivityGroup } = await import('../../webview-ui/src/components/ActivityGroup');
 const React = await import('react');
+const { resetDisclosures } = await import('../../webview-ui/src/disclosureState');
 
 function tool(id: string, extra: Partial<AppMessage> = {}): AppMessage {
   return { id, role: 'tool', content: 'edit_file', toolName: 'edit_file', toolResultTotal: 10, ...extra };
@@ -33,6 +34,7 @@ let container: HTMLDivElement;
 let root: Root;
 
 beforeEach(() => {
+  resetDisclosures();
   container = document.createElement('div');
   document.body.appendChild(container);
   root = createRoot(container);

@@ -2,6 +2,7 @@
 
 ## 0.17.0
 
+- Open/closed choices in the activity view now survive the rows being rebuilt while a turn streams. An opened reasoning bubble used to snap shut when the next tool call folded it into a step, and an opened step or diff closed when the step joined a group. A step that a running call holds open can now be collapsed by hand.
 - The "Remote active" chip is a muted forest green (`--forge-remote`) instead of the bright accent. The grouped header says `[N retries]` for more than one, and a step that ended in failure shows only its red ✕, without the amber retry chip.
 - Compact and grouped activity rows use a 13px font with more space between rows (5px padding, about 29px per row, up from 11px and about 19px).
 - Inside an opened compact or grouped step, each edited file now starts as a one-line diff header (name, `+N −M`); its toggle shows the hunks. They used to open expanded with the step.

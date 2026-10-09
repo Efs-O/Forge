@@ -1,8 +1,9 @@
-import React, { useState } from 'react';
+import React from 'react';
 import type { AppMessage } from '../reducer';
 import { isReasoningOnly } from '../activityRows';
 import { sameRowList } from '../messageOps';
 import { formatDuration } from '../../../src/util/formatDuration';
+import { useDisclosure } from '../disclosureState';
 
 const ChevronDown = (): React.ReactElement => (
   <svg width="10" height="6" viewBox="0 0 10 6" fill="currentColor" aria-hidden="true">
@@ -53,20 +54,24 @@ function totalReasoningMs(steps: AppMessage[]): number | undefined {
 }
 
 export function ThinkingRow({
+  id,
   label,
   reasoning,
 }: {
+  /** The reasoning message's id; keys the reader's open/closed choice. */
+  id: string;
   label: string;
   reasoning: string;
 }): React.ReactElement {
-  const [open, setOpen] = useState(false);
+  const [choice, setChoice] = useDisclosure('thinking', id);
+  const open = choice ?? false;
 
   return (
     <div className="thinking-row">
       <button
         className="thinking-row-toggle"
         type="button"
-        onClick={() => setOpen((v) => !v)}
+        onClick={() => setChoice(!open)}
         aria-expanded={open}
       >
         <span className="thinking-row-chevron">{open ? <ChevronDown /> : <ChevronRight />}</span>
@@ -87,13 +92,15 @@ interface Props {
 }
 
 function ThinkingGroupView({ steps }: Props): React.ReactElement | null {
-  const [expanded, setExpanded] = useState(false);
+  const [choice, setChoice] = useDisclosure('thinkingGroup', steps[0]?.id ?? '');
+  const expanded = choice ?? false;
 
   if (steps.length === 0) return null;
 
   if (steps.length === 1) {
     return (
       <ThinkingRow
+        id={steps[0]!.id}
         label={thinkingLabel(steps[0]!.reasoningMs)}
         reasoning={steps[0]!.reasoning ?? ''}
       />
@@ -105,7 +112,7 @@ function ThinkingGroupView({ steps }: Props): React.ReactElement | null {
       <button
         className="thinking-row-toggle"
         type="button"
-        onClick={() => setExpanded((v) => !v)}
+        onClick={() => setChoice(!expanded)}
         aria-expanded={expanded}
       >
         <span className="thinking-row-chevron">
@@ -120,6 +127,7 @@ function ThinkingGroupView({ steps }: Props): React.ReactElement | null {
           {steps.map((step, i) => (
             <ThinkingRow
               key={step.id}
+              id={step.id}
               label={stepLabel(`Step ${i + 1}`, step.reasoningMs)}
               reasoning={step.reasoning ?? ''}
             />

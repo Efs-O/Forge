@@ -1,4 +1,5 @@
-import React, { useState } from 'react';
+import React from 'react';
+import { useDisclosure } from '../disclosureState';
 import type { ActivityGroupItem } from '../activityRows';
 import { groupMessages, stepMessages } from '../activityRows';
 import { sameRowList } from '../messageOps';
@@ -31,7 +32,7 @@ function itemKey(item: ActivityGroupItem): string {
 }
 
 function ActivityGroupView({ items, live, streaming }: ActivityGroupProps): React.ReactElement {
-  const [manualExpanded, setManualExpanded] = useState<boolean | null>(null);
+  const [manualExpanded, setManualExpanded] = useDisclosure('group', groupMessages(items)[0]!.id);
   const summary = summarizeGroup(items);
   const expanded = manualExpanded ?? (live || (streaming && summary.pending) || summary.failed > 0);
   const status = summary.failed > 0 ? '✕' : streaming && summary.pending ? '○' : '✓';

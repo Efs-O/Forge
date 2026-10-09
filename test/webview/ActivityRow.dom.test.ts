@@ -12,6 +12,7 @@ import type { DiffHunk } from '../../src/sidebar/messageBridge';
 
 const { ActivityRow } = await import('../../webview-ui/src/components/ActivityRow');
 const React = await import('react');
+const { resetDisclosures } = await import('../../webview-ui/src/disclosureState');
 
 function tool(id: string, fields: Partial<AppMessage> = {}): AppMessage {
   return {
@@ -45,6 +46,7 @@ let container: HTMLDivElement;
 let root: Root;
 
 beforeEach(() => {
+  resetDisclosures();
   container = document.createElement('div');
   document.body.appendChild(container);
   root = createRoot(container);

@@ -1,29 +1,25 @@
-import React, { useMemo, useState } from 'react';
+import React, { useMemo } from 'react';
 import type { DiffHunk } from '../../../src/sidebar/messageBridge';
 import { vscode } from '../vscode';
+import { useDisclosure } from '../disclosureState';
 
 import { diffStats } from '../../../src/sidebar/diffMessages';
 export { diffStats, type DiffStats } from '../../../src/sidebar/diffMessages';
 
 interface Props {
+  /** The diff message's id; keys the reader's open/closed choice. Starts closed. */
+  id: string;
   filePath: string;
   hunks: DiffHunk[] | null | undefined;
   isNew?: boolean;
   isDeleted?: boolean;
-  /** Omitted, every file-edit preview starts closed. */
-  defaultExpanded?: boolean;
 }
 
-export function DiffBlock({
-  filePath,
-  hunks,
-  isNew,
-  isDeleted,
-  defaultExpanded,
-}: Props): React.ReactElement {
+export function DiffBlock({ id, filePath, hunks, isNew, isDeleted }: Props): React.ReactElement {
   const allLines = useMemo(() => hunks?.flatMap((h) => h.lines) ?? [], [hunks]);
   const { added, removed } = useMemo(() => diffStats(hunks), [hunks]);
-  const [expanded, setExpanded] = useState(defaultExpanded ?? false);
+  const [choice, setChoice] = useDisclosure('diff', id);
+  const expanded = choice ?? false;
 
   const badge = isDeleted ? 'deleted' : isNew ? 'new' : 'modified';
 
@@ -43,7 +39,7 @@ export function DiffBlock({
         {added > 0 && <span className="diff-stat diff-stat-added">+{added}</span>}
         {removed > 0 && <span className="diff-stat diff-stat-removed">−{removed}</span>}
         {allLines.length > 0 && (
-          <button className="diff-toggle" type="button" onClick={() => setExpanded((e) => !e)}>
+          <button className="diff-toggle" type="button" onClick={() => setChoice(!expanded)}>
             {expanded ? 'collapse' : `show ${allLines.length} lines`}
           </button>
         )}
