@@ -153,6 +153,8 @@ supporting JavaScript, so a JS page could never reach it. Cheapest first:
 
 ### Visibility audit (2026-10-08)
 
+(The script was replaced on 2026-10-09 by the `tool_usage` job check, `src/sessions/toolUsage.ts`, which writes the same counts daily to `~/.forge/tool-usage/`.)
+
 `node scripts/tool-visibility-audit.mjs --since 2026-10-01`: 118 sessions with activity; calls count only while offered, and workaround counts exclude sessions that offered the target tool.
 
 | Tool | Sessions offered | Sessions called | Calls | Failures | Hidden workaround calls (sessions) |

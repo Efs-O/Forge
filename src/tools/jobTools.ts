@@ -132,7 +132,7 @@ export function makeManageJobsTool(deps: ManageJobsDeps): RegisteredTool {
                 '`schedule` ({kind:interval,minutes} | {kind:daily,at:"HH:MM"} | {kind:weekly,days,at}), ' +
                 '`check` ({kind:github_release,repo,asset_pattern?} | {kind:github_issue,repo,issue_number} ' +
                 '| {kind:hf_discussion,repo,repo_type?,discussion_number} (needs huggingface.co in jobs.allowed_hosts) ' +
-                '| {kind:disk_space,path,min_free_gb} | {kind:none}), `on_change` ({kind:notify} | {kind:summarize,focus[]}), ' +
+                '| {kind:disk_space,path,min_free_gb} | {kind:tool_usage} (writes daily tool-usage files, never notifies) | {kind:none}), `on_change` ({kind:notify} | {kind:summarize,focus[]}), ' +
                 '`action` (null | {kind:llamacpp_update,mode,asset_pattern} | {kind:agent_task,task,model?,max_minutes?,report?}).',
             },
           },

@@ -27,7 +27,7 @@ const LAZY_GROUP_BY_SERVER: ReadonlyMap<string, string> = new Map([['halluscribe
  *
  * Count calls only while offered; a never-offered tool is unmeasured, not 0.
  * Shell workarounds count as demand for hidden tools. Exclude cases ruled out
- * by the tool's own description. See scripts/tool-visibility-audit.mjs.
+ * by the tool's own description. See src/sessions/toolUsage.ts.
  */
 const NATIVE_GROUP_BY_TOOL: ReadonlyMap<string, string> = new Map([
   ...[

@@ -129,7 +129,7 @@ overlaps with an existing owner, extend the owner instead.
 | Per-call diff-card base (file before one tool call) | `src/sidebar/callDiffBase.ts`            |
 | Session transcript logging (~/.forge)                | `src/sidebar/SessionLogger.ts`           |
 | Replay-aware session-log row reading                 | `src/sessions/sessionLogRows.ts`         |
-| Tool visibility and shell-workaround audit           | `scripts/tool-visibility-audit.mjs`       |
+| Tool visibility and shell-workaround audit (daily files in ~/.forge/tool-usage/) | `src/sessions/toolUsage.ts` |
 | Tool-call argument summary labels                    | `src/sidebar/toolSummary.ts`             |
 | Runtime capability memo + warn-once ledger           | `src/sidebar/CapabilityCache.ts`         |
 
@@ -595,6 +595,7 @@ the configured override stays the existing `video.ffmpeg_path` key.
 | Coalescing outbox (one pending message per job)            | `src/jobs/JobOutbox.ts`                                        |
 | Gated jobs network fetch (release API, binary download)    | `src/jobs/jobsFetch.ts`                                        |
 | Check kinds (github_release, github_issue, hf_discussion, disk_space, none) | `src/jobs/checks/github.ts`, `src/jobs/checks/huggingface.ts`, `src/jobs/checks/diskSpace.ts`  |
+| Check kind tool_usage (writes the daily tool-usage files, never notifies) | `src/jobs/checks/toolUsage.ts` |
 | Check dispatch + check context                             | `src/jobs/checks/runCheck.ts`                                |
 | Check context + result types                               | `src/jobs/checks/checkTypes.ts`                                |
 | Human-readable job description (for `/jobs`)               | `src/jobs/jobDescribe.ts`                                      |

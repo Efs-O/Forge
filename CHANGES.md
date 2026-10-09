@@ -21,6 +21,7 @@
 - A silent stream from a local server (localhost) is no longer cut off at 120 s while the server is still generating: Forge asks the server (`/slots`, or Strata's `/v1/status`) and keeps waiting, up to 15 minutes of silence. Cloud providers behave as before.
 - A stalled stream's `turn_error` row in the session log carries a `stall` field: the kind and time of the last delta, the idle time, and the probe's answer.
 - Background executions are stopped when Forge shuts down (it now waits up to 5 s for them), and ones left behind by a killed VS Code are stopped at the next start, only when the process ID and its start time both still match. At the end of a turn, a notice lists the chat's background executions that are still running.
+- New job check `{kind: tool_usage}`: a daily job writes per-tool usage counts (calls, failures, sessions offered, group loads, shell workarounds for hidden tools) by Forge version and model to `~/.forge/tool-usage/YYYY-MM-DD.json`, about 5 KB a day, backfilling up to 30 days. It reads only local session logs and never notifies. It replaces `scripts/tool-visibility-audit.mjs`.
 - Preview waits and frame times go up to 30 s (was 15 s), and keys accept Playwright codes such as `KeyW` and `Digit1`. An unknown key error lists the accepted keys.
 
 ### One `shell` tool replaces four

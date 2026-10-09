@@ -1,88 +1,179 @@
-import { describe, expect, it } from 'vitest';
-// Standalone audit code is plain ESM so Node and Vitest exercise the same functions.
-// @ts-expect-error -- the standalone script intentionally has no TypeScript declarations
-import { auditSessions, dedupeRows, pairCalls, workaroundTargets } from '../../scripts/tool-visibility-audit.mjs';
+import * as fs from 'fs';
+import * as os from 'os';
+import * as path from 'path';
+import { afterEach, describe, expect, it, vi } from 'vitest';
+import { computeToolUsageReports, writeToolUsageReports } from '../../src/sessions/toolUsage';
+import { toolUsageCheck } from '../../src/jobs/checks/toolUsage';
+import { CheckSchema } from '../../src/jobs/jobSchema';
 
-const at = (timestamp_ms: number, row: object) => ({ timestamp_ms, ...row });
-const offered = (timestamp_ms: number, names: string[]) => at(timestamp_ms, { type: 'tools_offered', names });
-const call = (timestamp_ms: number, id: string, name: string, input = {}) =>
-  at(timestamp_ms, { role: 'assistant', tool_calls: [{ id, name, input }] });
+vi.mock('fs', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('fs')>()),
+}));
 
-describe('tool visibility audit', () => {
-  it('collapses a cursor replay and pairs results by id even when result order differs', () => {
-    const first = call(10, 'first', 'read_file');
-    const second = call(11, 'second', 'shell');
-    const rows = dedupeRows([
-      first, second, at(12, { role: 'tool', tool_call_id: 'second', content: 'exit 0 · 0.1 s' }),
-      at(13, { role: 'tool', tool_call_id: 'first', content: 'Error: missing' }),
-      at(14, { type: 'cursor', written_count: 4 }),
-      at(20, { ...first, timestamp_ms: 20 }), at(21, { ...second, timestamp_ms: 21 }),
-      at(22, { role: 'tool', tool_call_id: 'second', content: 'exit 0 · 0.1 s' }),
-      at(23, { role: 'tool', tool_call_id: 'first', content: 'Error: missing' }),
+const roots: string[] = [];
+
+afterEach(() => {
+  for (const root of roots.splice(0)) fs.rmSync(root, { recursive: true, force: true });
+});
+
+function fixtureRoot(): { root: string; sessions: string; output: string } {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'forge-tool-usage-'));
+  roots.push(root);
+  const sessions = path.join(root, 'sessions');
+  const output = path.join(root, 'tool-usage');
+  fs.mkdirSync(sessions);
+  return { root, sessions, output };
+}
+
+function stamp(day: string, hour = 12): number {
+  const [year, month, date] = day.split('-').map(Number);
+  return new Date(year!, month! - 1, date!, hour).getTime();
+}
+
+function putSession(
+  directory: string,
+  filename: string,
+  rows: Array<Record<string, unknown>>,
+): string {
+  const file = path.join(directory, `${filename}.jsonl`);
+  fs.writeFileSync(file, `${rows.map((row) => JSON.stringify(row)).join('\n')}\n`, 'utf8');
+  return file;
+}
+
+describe('daily tool usage', () => {
+  it('accepts the local tool_usage check kind', () => {
+    expect(CheckSchema.parse({ kind: 'tool_usage' })).toEqual({ kind: 'tool_usage' });
+  });
+
+  it('skips session logs last written before the 30-day window', () => {
+    const { sessions } = fixtureRoot();
+    const day = '2026-10-08';
+    const rows = [
+      { type: 'session_start', timestamp_ms: stamp(day), forge_version: '0.17.0', model: 'm' },
+      {
+        role: 'assistant',
+        timestamp_ms: stamp(day),
+        tool_calls: [{ id: 'c1', name: 'read_file', input: { path: 'a' } }],
+      },
+    ];
+    putSession(sessions, 'recent', rows);
+    const stale = putSession(sessions, 'stale', rows);
+    const old = new Date(stamp('2026-08-01'));
+    fs.utimesSync(stale, old, old);
+
+    const report = computeToolUsageReports(sessions, day).at(-1)!;
+    expect(report.builds[0]!.models[0]!.sessions).toBe(1);
+  });
+
+  it('uses the replay-aware reader and groups counts by build and model', () => {
+    const { sessions } = fixtureRoot();
+    const day = '2026-10-08';
+    const call = {
+      role: 'assistant',
+      timestamp_ms: stamp(day),
+      tool_calls: [{ id: 'c1', name: 'shell', input: { command: 'git commit -m test' } }],
+    };
+    const result = {
+      role: 'tool',
+      timestamp_ms: stamp(day, 12) + 1,
+      tool_call_id: 'c1',
+      content: 'Error: refused',
+    };
+    putSession(sessions, 'fixture', [
+      {
+        type: 'session_start',
+        timestamp_ms: stamp(day),
+        forge_version: '0.17.0',
+        model: 'local-qwen',
+      },
+      { type: 'tools_offered', timestamp_ms: stamp(day), names: ['shell', 'load_tool_group'] },
+      call,
+      result,
+      { type: 'cursor', timestamp_ms: stamp(day, 12) + 2, written_count: 2 },
+      { ...call, timestamp_ms: stamp(day, 13) },
+      { ...result, timestamp_ms: stamp(day, 13) + 1 },
+      {
+        role: 'assistant',
+        timestamp_ms: stamp(day, 14),
+        tool_calls: [{ id: 'c2', name: 'load_tool_group', input: { group: 'media' } }],
+      },
     ]);
-    expect(pairCalls(rows)).toHaveLength(2);
-    expect(pairCalls(rows).map(({ result }: { result: { tool_call_id: string } }) => result.tool_call_id))
-      .toEqual(['first', 'second']);
+
+    const report = computeToolUsageReports(sessions, day).at(-1)!;
+    expect(report.builds).toHaveLength(1);
+    expect(report.builds[0]).toMatchObject({
+      forge_version: '0.17.0',
+      models: [{ model: 'local-qwen', sessions: 1 }],
+    });
+    expect(report.builds[0]!.models[0]!.tools).toEqual([
+      {
+        tool: 'load_tool_group',
+        calls: 1,
+        sessions: 1,
+        failures: 0,
+        offered_calls: 1,
+        hidden_calls: 0,
+      },
+      { tool: 'shell', calls: 1, sessions: 1, failures: 1, offered_calls: 1, hidden_calls: 0 },
+    ]);
+    expect(report.builds[0]!.models[0]!.lazy_groups).toEqual([{ group: 'media', loads: 1 }]);
+    expect(report.builds[0]!.models[0]!.shell_workarounds).toEqual([{ tool: 'commit', calls: 1 }]);
   });
 
-  it('collapses an older contiguous replay without erasing a lone repeated row', () => {
-    const user = at(1, { role: 'user', content: 'continue' });
-    const assistant = at(2, { role: 'assistant', content: 'done' });
-    expect(dedupeRows([user, assistant, at(3, user), at(4, assistant)]))
-      .toEqual([user, assistant]);
-    expect(dedupeRows([user, at(3, user)])).toHaveLength(2);
+  it('writes deterministic files atomically and backfills at most 30 days', () => {
+    const { sessions, output } = fixtureRoot();
+    const endDay = '2026-10-08';
+    putSession(sessions, 'old', [
+      {
+        type: 'session_start',
+        timestamp_ms: stamp('2026-07-01'),
+        forge_version: 'old',
+        model: 'm',
+      },
+    ]);
+    const first = writeToolUsageReports(sessions, output, endDay);
+    const target = path.join(output, `${endDay}.json`);
+    const bytes = fs.readFileSync(target);
+    const rerun = writeToolUsageReports(sessions, output, endDay);
+
+    expect(first).toHaveLength(30);
+    expect(rerun).toHaveLength(30);
+    expect(fs.readdirSync(output).filter((name) => name.endsWith('.json'))).toHaveLength(30);
+    expect(fs.readFileSync(target).equals(bytes)).toBe(true);
+
+    const realRename = fs.renameSync;
+    vi.spyOn(fs, 'renameSync').mockImplementation(() => {
+      throw new Error('simulated crash before replace');
+    });
+    expect(() => writeToolUsageReports(sessions, output, endDay)).toThrow(
+      'simulated crash before replace',
+    );
+    vi.mocked(fs.renameSync).mockRestore();
+    expect(fs.readFileSync(target).equals(bytes)).toBe(true);
+    expect(fs.renameSync).toBe(realRename);
   });
 
-  it('uses only offered sessions as the denominator and keeps never-offered tools unmeasured', () => {
-    const report = auditSessions([
-      { id: 'a', rows: [offered(1, ['shell']), call(2, 'a', 'shell', { command: 'git commit -m x' }),
-        at(3, { role: 'tool', tool_call_id: 'a', content: 'exit 0 · 0.1 s' })] },
-      { id: 'b', rows: [offered(1, ['commit']), call(2, 'b', 'commit'),
-        at(3, { role: 'tool', tool_call_id: 'b', content: 'Error: refused' })] },
-      { id: 'c', rows: [offered(1, ['shell']), call(2, 'c', 'shell', { command: 'git commit -m y' })] },
-    ], ['shell', 'commit', 'render_html_to_image'], 1);
-    const commit = report.tools.find((item: { tool: string }) => item.tool === 'commit');
-    expect(commit).toMatchObject({ sessionsOffered: 1, sessionsCalled: 1, calls: 1,
-      failures: 1, workaroundCalls: 2, workaroundSessions: 2 });
-    expect(report.tools.find((item: { tool: string }) => item.tool === 'render_html_to_image'))
-      .toMatchObject({ sessionsOffered: 'unmeasured', sessionsCalled: 'unmeasured',
-        calls: 'unmeasured', failures: 'unmeasured' });
-  });
+  it('writes through the tool_usage check and never reports a change', () => {
+    const { sessions, output } = fixtureRoot();
+    putSession(sessions, 'day', [
+      {
+        type: 'session_start',
+        timestamp_ms: stamp('2026-10-08'),
+        forge_version: '0.17.0',
+        model: 'm',
+      },
+    ]);
+    const result = toolUsageCheck(null, {
+      now: new Date(2026, 9, 9, 10),
+      sessionDirectory: sessions,
+      outputDirectory: output,
+    });
 
-  it('uses prior visibility after --since and excludes sessions that later offer the tool', () => {
-    const report = auditSessions([{ id: 'a', rows: [offered(1, ['shell']),
-      call(5, 'a', 'shell', { command: 'mkdir a' }),
-      offered(6, ['shell', 'create_directory']),
-      call(7, 'b', 'shell', { command: 'mkdir b' }),
-    ] }], ['shell', 'create_directory'], 5);
-    expect(report.tools.find((item: { tool: string }) => item.tool === 'create_directory'))
-      .toMatchObject({ sessionsOffered: 1, workaroundCalls: 0 });
-  });
-
-  it('matches workaround words as tokens, including logged Node script source', () => {
-    expect(workaroundTargets('npm i three')).toContain('render_html_to_image');
-    expect(workaroundTargets('npm install three@0.128.0 --no-save')).toContain('render_html_to_image');
-    expect(workaroundTargets('pnpm add playwright')).toContain('render_html_to_image');
-    expect(workaroundTargets('node scripts/preview.mjs', {
-      'scripts/preview.mjs': "import { chromium } from 'playwright';",
-    })).toContain('render_html_to_image');
-    expect(workaroundTargets('git mv a b')).toContain('move_file');
-    expect(workaroundTargets('New-Item foo -ItemType Directory')).toContain('create_directory');
-    expect(workaroundTargets('Start-Sleep -Seconds 3')).toContain('background wait');
-    expect(workaroundTargets('rm scratch.txt')).toContain('delete_file');
-    expect(workaroundTargets('git rm scratch.txt')).not.toContain('delete_file');
-    expect(workaroundTargets('npm i threesome')).not.toContain('render_html_to_image');
-    expect(workaroundTargets('git commitment')).not.toContain('commit');
-    expect(workaroundTargets('mkdirish foo')).not.toContain('create_directory');
-  });
-
-  it('recognizes a logged heredoc Node script without reading workspace files', () => {
-    const report = auditSessions([{ id: 'script', rows: [
-      offered(1, ['shell']),
-      call(2, 'write', 'shell', { command: "cat > preview.mjs <<'EOF'\nimport * as three from 'three';\nEOF" }),
-      call(3, 'run', 'shell', { command: 'node preview.mjs' }),
-    ] }], ['shell', 'render_html_to_image'], 1);
-    expect(report.tools.find((item: { tool: string }) => item.tool === 'render_html_to_image'))
-      .toMatchObject({ workaroundCalls: 1, workaroundSessions: 1 });
+    expect(result).toEqual({
+      observation: '2026-10-08',
+      changed: false,
+      summary: 'wrote through 2026-10-08: 1 session, 0 tool calls',
+    });
+    expect(fs.existsSync(path.join(output, '2026-10-08.json'))).toBe(true);
   });
 });

@@ -2,6 +2,7 @@ import { jobsFetch } from '../jobsFetch';
 import { githubIssueCheck, githubReleaseCheck } from './github';
 import { diskSpaceCheck } from './diskSpace';
 import { hfDiscussionCheck } from './huggingface';
+import { toolUsageCheck } from './toolUsage';
 import type { CheckContext } from './checkTypes';
 import type { CheckResult } from './checkTypes';
 import type { JobFile } from '../jobSchema';
@@ -24,6 +25,8 @@ export async function runCheck(job: JobFile, ctx: CheckContext): Promise<CheckRe
       return hfDiscussionCheck(def.check, lastObservation, ctx);
     case 'disk_space':
       return diskSpaceCheck(def.check, lastObservation, ctx);
+    case 'tool_usage':
+      return toolUsageCheck(lastObservation);
     case 'none':
       // No check: always reports a change with an empty observation.
       return { observation: '', changed: true, summary: 'no check (runs every tick)' };

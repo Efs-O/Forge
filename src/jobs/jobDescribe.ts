@@ -30,6 +30,8 @@ export function describeCheck(check: Job['check']): string {
       return `hf_discussion ${check.repo}#${check.discussion_number}`;
     case 'disk_space':
       return `disk_space ${check.path} (min ${check.min_free_gb} GB free)`;
+    case 'tool_usage':
+      return 'tool_usage (daily files in ~/.forge/tool-usage/, about 5 KB a day)';
     case 'none':
       return 'none (runs every tick)';
   }

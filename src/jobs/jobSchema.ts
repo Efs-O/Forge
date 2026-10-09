@@ -90,6 +90,10 @@ export const CheckSchema = z.discriminatedUnion('kind', [
     path: z.string().min(1),
     min_free_gb: z.number().positive(),
   }),
+  /** Local, file-only daily tool usage measurement. */
+  z.object({
+    kind: z.literal('tool_usage'),
+  }),
   /** No check: the job runs on every schedule tick. */
   z.object({
     kind: z.literal('none'),
@@ -100,6 +104,7 @@ export type GithubReleaseCheck = Extract<Check, { kind: 'github_release' }>;
 export type GithubIssueCheck = Extract<Check, { kind: 'github_issue' }>;
 export type HfDiscussionCheck = Extract<Check, { kind: 'hf_discussion' }>;
 export type DiskSpaceCheck = Extract<Check, { kind: 'disk_space' }>;
+export type ToolUsageCheck = Extract<Check, { kind: 'tool_usage' }>;
 
 /**
  * What a typed summarize focuses on. A fixed prompt is built from the job name,
