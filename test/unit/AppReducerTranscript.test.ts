@@ -1,5 +1,13 @@
 import { beforeAll, describe, expect, it } from 'vitest';
 
+interface CheckpointStatsShape {
+  fileCount: number;
+  added: number;
+  removed: number;
+  uncountedFiles: number;
+}
+const NO_STATS: CheckpointStatsShape = { fileCount: 0, added: 0, removed: 0, uncountedFiles: 0 };
+
 interface AppModule {
   initialState: {
     messagesById: Record<
@@ -22,7 +30,7 @@ interface AppModule {
     action:
       | { type: 'MODELS'; names: string[]; active: string | null }
       | { type: 'GENERATION_STARTED'; convId?: string }
-      | { type: 'CHECKPOINT_READY'; convId?: string }
+      | { type: 'CHECKPOINT_READY'; convId?: string; stats: CheckpointStatsShape }
       | { type: 'CHECKPOINT_DISMISSED'; convId?: string }
       | { type: 'TOOL_ACTIVITY'; toolName: string; toolCallId?: string; detail?: string; convId?: string }
       | {
@@ -69,6 +77,7 @@ interface AppModule {
         },
   ) => AppModule['initialState'];
   selectCheckpointPending: (state: AppModule['initialState']) => boolean;
+  selectCheckpointStats: (state: AppModule['initialState']) => CheckpointStatsShape | undefined;
 }
 
 let appModule: AppModule;
@@ -256,6 +265,19 @@ describe('webview App reducer — transcript rows', () => {
   });
 
   describe('checkpoint bar visibility', () => {
+    it('keeps the host net stats per conversation for the bar', () => {
+      const stats = { fileCount: 1, added: 2136, removed: 0, uncountedFiles: 0 };
+      let state = appModule.reducer(appModule.initialState, {
+        type: 'CHECKPOINT_READY',
+        convId: 'tab-1',
+        stats,
+      });
+      state = appModule.reducer(state, { type: 'CHECKPOINT_READY', convId: 'tab-2', stats: NO_STATS });
+
+      expect(appModule.selectCheckpointStats({ ...state, activeConversationId: 'tab-1' })).toEqual(stats);
+      expect(appModule.selectCheckpointStats({ ...state, activeConversationId: 'tab-2' })).toEqual(NO_STATS);
+    });
+
     function pendingIn(state: AppModule['initialState'], convId: string): boolean {
       return appModule.selectCheckpointPending({ ...state, activeConversationId: convId });
     }
@@ -264,6 +286,7 @@ describe('webview App reducer — transcript rows', () => {
       const ready = appModule.reducer(appModule.initialState, {
         type: 'CHECKPOINT_READY',
         convId: 'tab-1',
+        stats: NO_STATS,
       });
 
       expect(pendingIn(ready, 'tab-1')).toBe(true);
@@ -274,6 +297,7 @@ describe('webview App reducer — transcript rows', () => {
       const ready = appModule.reducer(appModule.initialState, {
         type: 'CHECKPOINT_READY',
         convId: 'tab-1',
+        stats: NO_STATS,
       });
       // Sending in a second tab must not dismiss the first tab's pending checkpoint.
       const otherTurn = appModule.reducer(ready, {
@@ -290,8 +314,9 @@ describe('webview App reducer — transcript rows', () => {
       let state = appModule.reducer(appModule.initialState, {
         type: 'CHECKPOINT_READY',
         convId: 'tab-1',
+        stats: NO_STATS,
       });
-      state = appModule.reducer(state, { type: 'CHECKPOINT_READY', convId: 'tab-2' });
+      state = appModule.reducer(state, { type: 'CHECKPOINT_READY', convId: 'tab-2', stats: NO_STATS });
       state = appModule.reducer(state, { type: 'CHECKPOINT_DISMISSED', convId: 'tab-1' });
 
       expect(pendingIn(state, 'tab-1')).toBe(false);
@@ -302,6 +327,7 @@ describe('webview App reducer — transcript rows', () => {
       const ready = appModule.reducer(appModule.initialState, {
         type: 'CHECKPOINT_READY',
         convId: 'tab-1',
+        stats: NO_STATS,
       });
       const nextTurn = appModule.reducer(ready, {
         type: 'USER_SEND',
@@ -316,8 +342,9 @@ describe('webview App reducer — transcript rows', () => {
       let state = appModule.reducer(appModule.initialState, {
         type: 'CHECKPOINT_READY',
         convId: 'tab-1',
+        stats: NO_STATS,
       });
-      state = appModule.reducer(state, { type: 'CHECKPOINT_READY', convId: 'tab-2' });
+      state = appModule.reducer(state, { type: 'CHECKPOINT_READY', convId: 'tab-2', stats: NO_STATS });
       const synced = appModule.reducer(state, {
         type: 'SESSION_SYNC',
         activeId: 'tab-1',

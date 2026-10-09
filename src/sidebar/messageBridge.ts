@@ -129,6 +129,8 @@ import type { ModelsMsg } from './modelMessages';
 export interface CheckpointReadyMsg {
   type: 'checkpointReady';
   conversationId?: string;
+  /** Net change of the pending checkpoint (`checkpointStats.ts`). */
+  stats: CheckpointStats;
 }
 export interface CheckpointDismissedMsg {
   type: 'checkpointDismissed';
@@ -215,8 +217,15 @@ export interface TokenBudgetMsg {
   max: number;
 }
 
-export type { DiffLineKind, DiffLine, DiffHunk, FileDiffMsg } from './diffMessages';
-import type { DiffHunk, FileDiffMsg } from './diffMessages';
+export type {
+  CheckpointStats,
+  DiffLineKind,
+  DiffLine,
+  DiffHunk,
+  DiffStats,
+  FileDiffMsg,
+} from './diffMessages';
+import type { CheckpointStats, DiffHunk, FileDiffMsg } from './diffMessages';
 
 export interface ClankerChangedMsg {
   type: 'clankerChanged';

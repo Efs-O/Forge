@@ -23,6 +23,7 @@ import { renderPlan } from '../tools/planTools';
 import { injectTurnContext } from './turnContext';
 import type { ForgeTurnOutcome } from './turnOutcome';
 import { summarizeCliProgress, type AgentProgressEvent } from './AgentProgress';
+import { checkpointReadyMessage } from './checkpointStats';
 
 const log = getLogger();
 
@@ -189,7 +190,8 @@ export async function runCliTurn(
     conv.updatedAt = Date.now();
     const depthBefore = ctx.checkpoints.depth(convId);
     ctx.checkpoints.commitTurn(checkpoint);
-    if (ctx.checkpoints.depth(convId) > depthBefore) postC({ type: 'checkpointReady' });
+    if (ctx.checkpoints.depth(convId) > depthBefore)
+      postC(checkpointReadyMessage(ctx.checkpoints, convId));
     if (generationStarted) {
       ctx.events.onGenerationFinished?.(model.name, convId, finalText);
     }

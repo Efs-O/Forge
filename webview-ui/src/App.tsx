@@ -15,12 +15,12 @@ import {
   selectStreaming,
   selectGenerating,
   selectCheckpointPending,
+  selectCheckpointStats,
 } from './reducer';
 export type { AppMessage } from './reducer';
 import { Header, type WorkspaceInfo } from './components/Header';
 import { TranscriptPanes } from './components/TranscriptPanes';
 import { CheckpointBar } from './components/CheckpointBar';
-import { diffStats } from './components/DiffBlock';
 import { InputRow } from './components/InputRow';
 import { toMessageAttachments } from './components/useAttachments';
 import { ConfirmationDialog } from './components/ConfirmationDialog';
@@ -297,21 +297,7 @@ export function App(): React.ReactElement {
     });
   }, [messages.length, prefillText, queuedPrompts.length, state.activeConversationId, streaming]);
 
-  // The bar reports the same edits the transcript's diff card shows.
-  const checkpointStats = useMemo(() => {
-    const diffs = messages.filter((m) => m.role === 'diff');
-    return diffs.reduce(
-      (acc, msg) => {
-        const { added, removed } = diffStats(msg.diffHunks);
-        return {
-          fileCount: acc.fileCount + 1,
-          added: acc.added + added,
-          removed: acc.removed + removed,
-        };
-      },
-      { fileCount: 0, added: 0, removed: 0 },
-    );
-  }, [messages]);
+  const checkpointStats = selectCheckpointStats(state);
 
   return (
     <WorkspaceRootUriContext.Provider value={workspace?.rootUri}>
@@ -376,12 +362,7 @@ export function App(): React.ReactElement {
           local={activeModelIsLocal}
           clanker={state.clankerMode}
         />
-        <CheckpointBar
-          visible={selectCheckpointPending(state)}
-          fileCount={checkpointStats.fileCount}
-          added={checkpointStats.added}
-          removed={checkpointStats.removed}
-        />
+        <CheckpointBar visible={selectCheckpointPending(state)} stats={checkpointStats} />
         <InputRow
           onSend={handleComposerSend}
           onCancel={handleCancel}

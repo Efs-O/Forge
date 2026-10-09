@@ -24,6 +24,7 @@ import type { ToolCallingLoopResult } from '../agent/ToolCallingLoop';
 import { abortedTurnOutcome, type ForgeTurnOutcome } from './turnOutcome';
 import type { AgentProgressEvent } from './AgentProgress';
 import { describeError } from '../util/describeError';
+import { checkpointReadyMessage } from './checkpointStats';
 
 const log = getLogger();
 
@@ -80,7 +81,8 @@ function finishTurn(
   conv.updatedAt = Date.now();
   const depthBefore = ctx.checkpoints.depth(convId);
   ctx.checkpoints.commitTurn(checkpoint);
-  if (ctx.checkpoints.depth(convId) > depthBefore) postC({ type: 'checkpointReady' });
+  if (ctx.checkpoints.depth(convId) > depthBefore)
+    postC(checkpointReadyMessage(ctx.checkpoints, convId));
   ctx.events.onGenerationFinished?.(model.name, convId, finalText);
   ctx.lifecycle.settle(convId);
 }

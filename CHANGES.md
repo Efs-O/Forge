@@ -4,6 +4,7 @@
 
 - Added `forge.sidebar.activityView` with grouped, compact, and full choices. The host validates changes and reports invalid values in the transcript; phase 0/1 currently render all three modes with the full row layout.
 - Tool activity and diff rows retain their tool-call links and display targets across live updates and transcript syncs.
+- The Keep/Undo bar's `+N −M` is now the net change of each file against its pre-turn snapshot, computed by the host. It used to add up every write's diff, so a new 2,136-line file edited a few times read +2,327, and its file count was really a write count.
 - Agent sessions can be linked to individual chats. `ask_agent` uses that link, and messages sent by an agent session arrive in the chat for that session with Forge's reply delivered back automatically; the old inbound prompt footer is gone. Telegram now has `/agents` and link-based `/claude`, `/codex`, `/copilot`, and `/tell` commands.
 - Removed `forge.sh join`, `--reply-in-chat`, `ask_live_session`, `tell_live_session`, and the global agent aliases. Agent-to-agent messages now resolve through the sender chat's links.
 - Added a session-log visibility audit that reports tool calls only when offered, hidden shell workarounds, and description exclusions.

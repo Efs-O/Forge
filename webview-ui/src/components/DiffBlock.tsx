@@ -2,18 +2,8 @@ import React, { useMemo, useState } from 'react';
 import type { DiffHunk } from '../../../src/sidebar/messageBridge';
 import { vscode } from '../vscode';
 
-export interface DiffStats {
-  added: number;
-  removed: number;
-}
-
-export function diffStats(hunks: DiffHunk[] | null | undefined): DiffStats {
-  const lines = hunks?.flatMap((h) => h.lines) ?? [];
-  return {
-    added: lines.filter((l) => l.kind === 'added').length,
-    removed: lines.filter((l) => l.kind === 'removed').length,
-  };
-}
+import { diffStats } from '../../../src/sidebar/diffMessages';
+export { diffStats, type DiffStats } from '../../../src/sidebar/diffMessages';
 
 interface Props {
   filePath: string;

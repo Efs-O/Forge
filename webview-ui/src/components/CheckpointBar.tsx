@@ -1,11 +1,11 @@
 import React from 'react';
+import type { CheckpointStats } from '../../../src/sidebar/diffMessages';
 import { vscode } from '../vscode';
 
 interface Props {
   visible: boolean;
-  fileCount: number;
-  added: number;
-  removed: number;
+  /** The host's net change against the checkpoint; absent, the bar shows no counts. */
+  stats: CheckpointStats | undefined;
 }
 
 /**
@@ -14,13 +14,12 @@ interface Props {
  * clears the in-editor decorations — a separate "Keep" button read as though the
  * changes were unsaved until pressed.
  */
-export function CheckpointBar({
-  visible,
-  fileCount,
-  added,
-  removed,
-}: Props): React.ReactElement | null {
+export function CheckpointBar({ visible, stats }: Props): React.ReactElement | null {
   if (!visible) return null;
+  const fileCount = stats?.fileCount ?? 0;
+  const added = stats?.added ?? 0;
+  const removed = stats?.removed ?? 0;
+  const uncounted = stats?.uncountedFiles ?? 0;
 
   const summary =
     fileCount > 0 ? `Edited ${fileCount} file${fileCount === 1 ? '' : 's'}` : 'Files changed';
@@ -30,6 +29,14 @@ export function CheckpointBar({
       <span id="checkpoint-label">{summary}</span>
       {added > 0 && <span className="diff-stat diff-stat-added">+{added}</span>}
       {removed > 0 && <span className="diff-stat diff-stat-removed">−{removed}</span>}
+      {uncounted > 0 && (
+        <span
+          className="diff-stat"
+          title="Line counts unavailable: git diff failed for these files"
+        >
+          {uncounted} uncounted
+        </span>
+      )}
       <button
         className="btn-undo"
         onClick={() => vscode.postMessage({ type: 'undo' })}

@@ -41,6 +41,7 @@ import { TabModelRelease } from './TabModelRelease';
 import { retainLiveMemoryKeys } from './compactionWindow';
 import { deactivateLazyGroups } from '../tools/lazyToolGroups';
 import { forgetConversation } from '../agentLinks/chatAgentLinks';
+import { checkpointReadyMessage } from './checkpointStats';
 
 const log = getLogger();
 
@@ -413,7 +414,7 @@ export class ConversationTabs {
    */
   private revivePendingCheckpoint(id: string): void {
     if (!this.deps.checkpoints.canUndo(id)) return;
-    this.deps.post({ type: 'checkpointReady', conversationId: id });
+    this.deps.post(checkpointReadyMessage(this.deps.checkpoints, id));
   }
 
   /** `/unloadModel` for one tab — see `TabModelRelease.unloadModelOf`. */

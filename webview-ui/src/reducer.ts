@@ -10,6 +10,7 @@ export {
   selectStreaming,
   selectGenerating,
   selectCheckpointPending,
+  selectCheckpointStats,
 } from './appState';
 
 function appendToConv(state: State, convId: string, msg: AppMessage): State {
@@ -372,6 +373,7 @@ export function reducer(state: State, action: Action): State {
       return {
         ...state,
         checkpointPendingIds: new Set([...state.checkpointPendingIds, cid]),
+        checkpointStatsById: new Map(state.checkpointStatsById).set(cid, action.stats),
       };
     }
 

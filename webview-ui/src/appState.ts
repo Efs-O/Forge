@@ -1,3 +1,4 @@
+import type { CheckpointStats } from '../../src/sidebar/diffMessages';
 import type {
   SessionTabMeta,
   SessionHistoryMeta,
@@ -21,6 +22,11 @@ export interface State {
    * pending checkpoint into every other tab.
    */
   checkpointPendingIds: Set<string>;
+  /**
+   * The host's net change for each conversation's newest checkpoint. Read only
+   * while the id is in `checkpointPendingIds`, so a dismissed entry is inert.
+   */
+  checkpointStatsById: Map<string, CheckpointStats>;
   /**
    * Conversation id -> its "Starting backend…" row, and when that row landed.
    *
@@ -54,6 +60,7 @@ export const initialState: State = {
   activeModel: null,
   backendReady: false,
   checkpointPendingIds: new Set(),
+  checkpointStatsById: new Map(),
   backendStartRowIds: new Map(),
   sessionHydrated: false,
   tabs: [],
@@ -78,6 +85,9 @@ export function selectGenerating(state: State): boolean {
 export function selectCheckpointPending(state: State): boolean {
   return state.checkpointPendingIds.has(state.activeConversationId);
 }
+export function selectCheckpointStats(state: State): CheckpointStats | undefined {
+  return state.checkpointStatsById.get(state.activeConversationId);
+}
 
 export type Action =
   | { type: 'TOKEN'; text: string; convId?: string }
@@ -101,7 +111,7 @@ export type Action =
     }
   | { type: 'MID_TURN_TELL'; text: string; convId?: string }
   | { type: 'SET_MODEL'; name: string | null }
-  | { type: 'CHECKPOINT_READY'; convId?: string }
+  | { type: 'CHECKPOINT_READY'; convId?: string; stats: CheckpointStats }
   | { type: 'CHECKPOINT_DISMISSED'; convId?: string }
   | {
       type: 'TOOL_ACTIVITY';

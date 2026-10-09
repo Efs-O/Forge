@@ -1,10 +1,7 @@
 import * as fs from 'fs';
-import * as os from 'os';
-import * as path from 'path';
-import { spawnSync } from 'child_process';
 import * as vscode from 'vscode';
 import type { HostToWebview } from './messageBridge';
-import { computeDiff, parseUnifiedDiff } from './DiffUtils';
+import { diffContents } from './DiffUtils';
 import { readCallDiffBase } from './callDiffBase';
 import type { DiffHunk } from './messageBridge';
 import type { ChatMessage, ToolCall } from '../llm/types';
@@ -37,38 +34,6 @@ function isExistingDirectory(target: string): boolean {
   }
 }
 const WRITE_PERMISSIONS = new Set<ToolPermission>(['write', 'delete']);
-/** Fall back to `git diff --no-index` for files that exceed the LCS line cap. */
-function gitDiffLarge(before: string, after: string): DiffHunk[] | null {
-  const stamp = `${Date.now()}-${Math.random().toString(36).slice(2)}`;
-  const beforePath = path.join(os.tmpdir(), `forge-diff-a-${stamp}.tmp`);
-  const afterPath = path.join(os.tmpdir(), `forge-diff-b-${stamp}.tmp`);
-  try {
-    fs.writeFileSync(beforePath, before, 'utf8');
-    fs.writeFileSync(afterPath, after, 'utf8');
-    const result = spawnSync(
-      'git',
-      ['diff', '--no-index', '--unified=3', '--', beforePath, afterPath],
-      { encoding: 'utf8', maxBuffer: 10 * 1024 * 1024 },
-    );
-    // exit 0 = identical, 1 = files differ (both are success cases here)
-    if (result.status !== 0 && result.status !== 1) return null;
-    return parseUnifiedDiff(result.stdout ?? '');
-  } catch {
-    return null;
-  } finally {
-    try {
-      fs.unlinkSync(beforePath);
-    } catch {
-      /* ignore */
-    }
-    try {
-      fs.unlinkSync(afterPath);
-    } catch {
-      /* ignore */
-    }
-  }
-}
-
 export type ResolveToolPathOptions = ResolveWorkspacePathOptions;
 export const resolveToolPath = resolveWorkspacePath;
 
@@ -406,8 +371,7 @@ export class ToolDispatch {
     const isDeleted = !fs.existsSync(resolvedPath);
     const afterContent = isDeleted ? '' : fs.readFileSync(resolvedPath, 'utf8');
     const isNew = base === null;
-    let hunks = !isDeleted ? computeDiff(base ?? '', afterContent) : null;
-    if (hunks === null && !isDeleted) hunks = gitDiffLarge(base ?? '', afterContent);
+    const hunks = isDeleted ? null : diffContents(base ?? '', afterContent);
     const relPath = vscode.workspace.asRelativePath(resolvedPath);
     if (toolCallId) {
       recordFileDiff?.({ toolCallId, filePath: relPath, hunks, isNew, isDeleted });

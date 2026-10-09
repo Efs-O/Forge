@@ -34,7 +34,7 @@ export function hostMessageToAction(msg: HostToWebview): Action | undefined {
     case 'models':
       return { type: 'MODELS', models: msg.models, active: msg.active };
     case 'checkpointReady':
-      return { type: 'CHECKPOINT_READY', convId: msg.conversationId };
+      return { type: 'CHECKPOINT_READY', convId: msg.conversationId, stats: msg.stats };
     case 'checkpointDismissed':
       return { type: 'CHECKPOINT_DISMISSED', convId: msg.conversationId };
     case 'toolActivity':

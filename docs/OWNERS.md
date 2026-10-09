@@ -128,7 +128,8 @@ overlaps with an existing owner, extend the owner instead.
 | Conversation-tab webview message shapes              | `src/sidebar/conversationMessages.ts`    |
 | "Open this in the editor" message shapes             | `src/sidebar/openMessages.ts`            |
 | Model-picker message shapes (labels, residency)      | `src/sidebar/modelMessages.ts`           |
-| File-diff preview message shapes (hunks, `fileDiff`) | `src/sidebar/diffMessages.ts`            |
+| Diff shapes, `fileDiff`, `diffStats`, checkpoint stats | `src/sidebar/diffMessages.ts`            |
+| Checkpoint bar net stats (snapshot vs disk)          | `src/sidebar/checkpointStats.ts`         |
 | Chat attachment bytes on disk (thumbnails)           | `src/sidebar/ChatAttachmentStore.ts`     |
 | In-editor green/red diff decorations                 | `src/sidebar/DiffDecorations.ts`         |
 | Diff computation + unified-diff parsing              | `src/sidebar/DiffUtils.ts`               |

@@ -1,3 +1,7 @@
+import * as fs from 'fs';
+import * as os from 'os';
+import * as path from 'path';
+import { spawnSync } from 'child_process';
 import type { DiffHunk } from './messageBridge';
 export type { DiffHunk, DiffLine, DiffLineKind } from './messageBridge';
 
@@ -115,4 +119,44 @@ export function parseUnifiedDiff(patch: string): DiffHunk[] {
   }
   if (hunk) hunks.push(hunk);
   return hunks;
+}
+
+/** Fall back to `git diff --no-index` for files that exceed the LCS line cap. */
+function gitDiffLarge(before: string, after: string): DiffHunk[] | null {
+  const stamp = `${Date.now()}-${Math.random().toString(36).slice(2)}`;
+  const beforePath = path.join(os.tmpdir(), `forge-diff-a-${stamp}.tmp`);
+  const afterPath = path.join(os.tmpdir(), `forge-diff-b-${stamp}.tmp`);
+  try {
+    fs.writeFileSync(beforePath, before, 'utf8');
+    fs.writeFileSync(afterPath, after, 'utf8');
+    const result = spawnSync(
+      'git',
+      ['diff', '--no-index', '--unified=3', '--', beforePath, afterPath],
+      { encoding: 'utf8', maxBuffer: 10 * 1024 * 1024 },
+    );
+    // exit 0 = identical, 1 = files differ (both are success cases here)
+    if (result.status !== 0 && result.status !== 1) return null;
+    return parseUnifiedDiff(result.stdout ?? '');
+  } catch {
+    return null;
+  } finally {
+    try {
+      fs.unlinkSync(beforePath);
+    } catch {
+      /* ignore */
+    }
+    try {
+      fs.unlinkSync(afterPath);
+    } catch {
+      /* ignore */
+    }
+  }
+}
+
+/**
+ * Line diff of two texts: the in-process LCS up to MAX_LINES, `git diff
+ * --no-index` above it. Null only when git is unavailable or fails.
+ */
+export function diffContents(before: string, after: string): DiffHunk[] | null {
+  return computeDiff(before, after) ?? gitDiffLarge(before, after);
 }

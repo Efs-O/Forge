@@ -317,7 +317,11 @@ describe('ConversationTabs checkpoint survival', () => {
     });
 
     expect(tabs.restore('restored')).toBeDefined();
-    expect(posted).toContainEqual({ type: 'checkpointReady', conversationId: 'restored' });
+    expect(posted).toContainEqual({
+      type: 'checkpointReady',
+      conversationId: 'restored',
+      stats: { fileCount: 0, added: 0, removed: 0, uncountedFiles: 0 },
+    });
   });
 
   it('restore posts nothing for a chat with no pending changes', async () => {
@@ -332,7 +336,7 @@ describe('ConversationTabs checkpoint survival', () => {
     });
 
     expect(tabs.restore('restored')).toBeDefined();
-    expect(posted).not.toContainEqual({ type: 'checkpointReady', conversationId: 'restored' });
+    expect(posted).not.toContainEqual(expect.objectContaining({ type: 'checkpointReady' }));
   });
 
   it('closing a tab with the ✕ still forfeits the checkpoint', async () => {
