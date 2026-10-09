@@ -91,6 +91,9 @@ export async function runPreview(
   const lines = [
     `Preview of ${rawPath} at ${dims.width}x${dims.height}, ${result.frames.length} frame(s) captured (${elapsedS} s total). Nothing was saved or sent.`,
   ];
+  if (args['frames'] !== undefined && args['wait_ms'] !== undefined) {
+    lines.push('wait_ms ignored: frames sets the capture times.');
+  }
   if (result.errorCount === 0) {
     lines.push('Page errors: none.');
   } else {
@@ -148,8 +151,6 @@ function readWaitMs(value: unknown): number {
 
 function readFrames(value: unknown, waitMs: unknown): number[] {
   if (value === undefined) return [readWaitMs(waitMs)];
-  if (waitMs !== undefined)
-    throw new Error('render_html_to_image: frames replaces wait_ms; provide only one.');
   if (!Array.isArray(value) || value.length < 1 || value.length > 4) {
     throw new Error('render_html_to_image: frames must contain 1–4 capture times.');
   }

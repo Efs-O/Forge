@@ -119,7 +119,7 @@ export function makeRenderHtmlToImageTool(deps: RenderHtmlDeps): RegisteredTool 
               maxItems: 4,
               items: { type: 'integer', minimum: 0, maximum: MAX_PREVIEW_WAIT_MS },
               description:
-                'Preview only: 1–4 strictly ascending capture times in ms, each 0–30000 ms. Replaces wait_ms.',
+                'Preview only: 1–4 strictly ascending capture times in ms, each 0–30000 ms. If wait_ms is also given, frames sets the capture times and the result says wait_ms was ignored.',
             },
             keys: {
               type: 'array',

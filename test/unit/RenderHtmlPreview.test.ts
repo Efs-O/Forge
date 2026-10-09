@@ -228,15 +228,29 @@ describe('render_html_to_image preview: inputs', () => {
     expect((result as MultimodalToolResult).text).toContain('30000 ms');
   });
 
-  it('rejects invalid frames, wait_ms with frames, and unsupported keys', async () => {
+  it('uses frames when wait_ms is also supplied and reports the ignored wait', async () => {
+    const { tool } = rig();
+    const result = String(
+      await tool.handler(
+        { mode: 'preview', path: await writePage(), frames: [0, 500], wait_ms: 6000 },
+        context(),
+      ),
+    );
+    expect(renderFake.waitCalls).toEqual([500]);
+    expect(result).toContain('2 frame(s) captured');
+    expect(result).toContain('wait_ms ignored: frames sets the capture times.');
+  });
+
+  it('rejects invalid frames and unsupported keys but accepts wait_ms with frames', async () => {
     const { tool } = rig();
     const page = await writePage();
     await expect(
       tool.handler({ mode: 'preview', path: page, frames: [500, 400] }, context()),
     ).rejects.toThrow(/strictly ascending/);
-    await expect(
-      tool.handler({ mode: 'preview', path: page, frames: [1], wait_ms: 2 }, context()),
-    ).rejects.toThrow(/replaces wait_ms/);
+    const both = String(
+      await tool.handler({ mode: 'preview', path: page, frames: [1], wait_ms: 2 }, context()),
+    );
+    expect(both).toContain('wait_ms ignored: frames sets the capture times.');
     await expect(
       tool.handler({ mode: 'preview', path: page, keys: [{ key: 'F12', hold_ms: 0 }] }, context()),
     ).rejects.toThrow(/KeyA–KeyZ/);
