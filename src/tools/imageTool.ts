@@ -85,7 +85,7 @@ async function resolveImagePath(requestedPath: string): Promise<{ root: string; 
  */
 export function visionUnavailableMessage(modelName: string): string {
   return (
-    `Error: view_image is not available because the active model "${modelName}" has no vision ` +
+    `Error: view_image needs a vision model; the active model "${modelName}" has no vision ` +
     'projector configured (mmproj_path). Do not try to read the image with another tool: ' +
     'report that you cannot see it and ask the user to switch to a vision-capable model.'
   );
@@ -98,7 +98,7 @@ export function makeViewImageTool(): RegisteredTool {
       function: {
         name: 'view_image',
         description:
-          'Load an image file from the workspace so you can see it. The path must be workspace-relative or absolute inside the workspace. Supported formats: PNG, JPEG, GIF, BMP, and WebP. Maximum file size is 10 MB.',
+          'Load an image file from the workspace so you can see it. Needs a vision model; on a text-only model report that you cannot see it and ask the user to switch models. The path must be workspace-relative or absolute inside the workspace. Supported formats: PNG, JPEG, GIF, BMP, and WebP. Maximum file size is 10 MB.',
         parameters: {
           type: 'object',
           properties: {

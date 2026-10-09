@@ -23,7 +23,7 @@ const GROUP_PURPOSE: Readonly<Record<(typeof NATIVE_LAZY_GROUP_NAMES)[number], s
   agents: 'other agents, scheduled jobs, notify the user',
   background: 'list or stop background jobs, timed wait',
   code_intel: 'definitions, references, renames, semantic search',
-  computer_use: 'drive a browser or the desktop (vision)',
+  computer_use: 'drive a browser or the desktop (screenshots need vision)',
   editor_ui: "the user's open editor, selection, clipboard, diffs",
   files: 'move, mkdir, line-number edits, restore a file',
   git: 'git writes as tools (the shell runs git too)',
@@ -113,13 +113,6 @@ export function makeLoadToolGroupTool(): RegisteredTool {
         throw new Error(
           `load_tool_group: group "${group}" is unavailable because ${why}; do not retry. ` +
             'Answer from the workspace and the conversation instead.',
-        );
-      }
-      if (group === 'computer_use' && context?.isVisionModel !== true) {
-        const model = context?.modelName ?? 'the current model';
-        throw new Error(
-          `load_tool_group: computer_use is unavailable on non-vision model "${model}"; ` +
-            'do not retry. Answer from the workspace and the conversation instead.',
         );
       }
       activateLazyGroup(conversationId, group);

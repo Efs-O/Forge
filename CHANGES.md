@@ -8,6 +8,15 @@
 - Opening a chat from history no longer rewrites the whole history file. Each history conversation is stored in its own file, so a save writes only the conversations that changed. In a workspace with 58 MB of history, every open used to block the extension host for about 0.6 s. The old single file is read once and removed after the first clean save.
 - The history button sits left of New chat in the chat header.
 
+### Behaviour fixes from the forge-bench review
+
+- A grouped tool that is offered in the request now runs when called. Before, dispatch refused it until `load_tool_group` had been called, even when the tool was in the request (7 refusals in the session logs).
+- On a text-only model, `view_image`, `view_video`, `browser_screenshot` and `desktop_capture` are listed, with "needs a vision model" in their descriptions, and refuse when called with that reason. The `media` group is on by default for every model, and `computer_use` can be loaded on any model. Desktop coordinate actions say they need a capture from a vision model.
+- `write_file` says to write a large file in one call rather than in part-files joined with the shell.
+- `edit_file` takes up to 200 edits in one call (was 40). The batch is still all-or-nothing.
+- `open_file` opens images, PDFs, archives, media and fonts in VS Code's own viewer instead of failing with "File seems to be binary".
+- An atomic file write retries a contended rename for up to 2.5 s (was about 75 ms), with growing waits.
+
 ### One `shell` tool replaces four
 
 - `exec_command`, `query_powershell`, `run_terminal`, `run_workspace_task` and `list_workspace_tasks` are gone. One `shell` tool runs a command line in your configured shell (`permissions.exec.shell`: bash by default, which on Windows is Git Bash; pwsh on Windows without Git for Windows), in the foreground or, with `background: true`, as a tracked background process (`monitor_execution`, `stop_execution` and `notify_on_exit` work as before).

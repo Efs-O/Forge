@@ -39,9 +39,8 @@ const OTHER_MCP_TOOLS = ['fetch_page', 'list_repos'];
 function modelFacingTools(
   registry: ToolRegistry,
   conversationId: string | undefined,
-  isVisionModel = true,
 ): string[] {
-  const hidden = hiddenLazyToolNames(conversationId, new Set(), isVisionModel);
+  const hidden = hiddenLazyToolNames(conversationId);
   return registry
     .definitions(ALL_PERMISSIONS)
     .map((definition) => definition.function.name)
@@ -103,9 +102,9 @@ describe('lazy tool groups', () => {
       recordNativeLazyTool(name);
     }
 
-    const firstVisionRequest = modelFacingTools(registry, 'fresh-conversation', true);
+    const firstVisionRequest = modelFacingTools(registry, 'fresh-conversation');
     expect(firstVisionRequest).toEqual(expect.arrayContaining(names));
-    const firstNonVisionRequest = modelFacingTools(registry, 'fresh-conversation', false);
+    const firstNonVisionRequest = modelFacingTools(registry, 'fresh-conversation');
     expect(firstNonVisionRequest).toEqual(
       expect.arrayContaining([
         'move_file',
@@ -117,9 +116,8 @@ describe('lazy tool groups', () => {
         'wait',
       ]),
     );
-    for (const name of ['view_image', 'view_video', 'generate_image', 'image_search', 'send_file']) {
-      expect(firstNonVisionRequest).not.toContain(name);
-    }
+    for (const name of ['view_image', 'view_video', 'generate_image', 'image_search', 'send_file'])
+      expect(firstNonVisionRequest).toContain(name);
   });
 
   it('withholds every halluscribe schema from a fresh conversation but advertises the loader', () => {
@@ -281,14 +279,13 @@ describe('lazy tool groups', () => {
     expect(hiddenLazyToolNames('conv-a')).not.toContain('ask_user');
     expect(lazyGroupForTool('get_system_status')).toBe('system');
     expect(hiddenLazyToolNames('conv-a')).toContain('get_system_status');
-    // Media is eager for vision models and lazy for models without vision.
+    // Media is eager for every model; computer_use stays a normal lazy group.
     // render_html_to_image is outside the media group and always eager.
     expect(lazyGroupForTool('render_html_to_image')).toBeUndefined();
-    expect(hiddenLazyToolNames('conv-a', new Set(), true)).not.toContain('send_file');
-    expect(hiddenLazyToolNames('conv-a', new Set(), false)).toContain('send_file');
-    expect(hiddenLazyToolNames('conv-a', new Set(), true)).not.toContain('render_html_to_image');
+    expect(hiddenLazyToolNames('conv-a')).not.toContain('send_file');
+    expect(hiddenLazyToolNames('conv-a')).not.toContain('render_html_to_image');
     activateLazyGroup('conv-a', 'media');
-    expect(hiddenLazyToolNames('conv-a', new Set(), false)).not.toContain('send_file');
+    expect(hiddenLazyToolNames('conv-a')).not.toContain('send_file');
     deactivateLazyGroups('conv-a');
     const loader = registry
       .definitions(ALL_PERMISSIONS)
@@ -316,7 +313,7 @@ describe('lazy tool groups', () => {
     ).toBeUndefined();
   });
 
-  it('refuses computer_use on a non-vision model and names that model', async () => {
+  it('loads computer_use on a non-vision model', async () => {
     const registry = new ToolRegistry();
     registry.register(makeLoadToolGroupTool());
     registry.register({
@@ -327,22 +324,16 @@ describe('lazy tool groups', () => {
       permission: 'read',
       handler: async () => 'should not run',
     });
-    activateLazyGroup('conv-a', 'computer_use');
-
-    await expect(
-      registry.dispatch('load_tool_group', { group: 'computer_use' }, ALL_PERMISSIONS, {
+    const result = await registry.dispatch('load_tool_group', { group: 'computer_use' }, ALL_PERMISSIONS, {
         beforeMutate: () => undefined,
         conversationId: 'conv-a',
         modelName: 'qwen38-no-vision',
         isVisionModel: false,
-      }),
-    ).rejects.toThrow(
-      'computer_use is unavailable on non-vision model "qwen38-no-vision"; do not retry. Answer from the workspace and the conversation instead.',
+      },
     );
+    expect(result).toContain('enabled');
     expect(isLazyGroupActive('conv-a', 'computer_use')).toBe(true);
-    expect(hiddenLazyToolNames('conv-a', new Set(['desktop_capture']), false)).toContain(
-      'desktop_capture',
-    );
+    expect(hiddenLazyToolNames('conv-a')).not.toContain('desktop_capture');
   });
 
   it('eagerly advertises a configured group without adding it to the active group map', () => {
@@ -360,7 +351,7 @@ describe('lazy tool groups', () => {
       recordNativeLazyTool(name);
     }
     const budget = new ToolBudget({ tools: memoryTools });
-    const hidden = hiddenLazyToolNames('conv-a', new Set(), true, new Set(['memory']));
+    const hidden = hiddenLazyToolNames('conv-a', new Set(), new Set(['memory']));
     const advertised = budget.filterDefinitions(
       registry.definitions(ALL_PERMISSIONS).filter((d) => !hidden.has(d.function.name)),
     );
@@ -374,7 +365,7 @@ describe('lazy tool groups', () => {
     expect(isLazyGroupActive('conv-a', 'memory')).toBe(false);
     deactivateLazyGroups('conv-a');
     expect(isLazyGroupActive('conv-a', 'memory')).toBe(false);
-    expect(hiddenLazyToolNames('conv-a', new Set(), true, new Set(['memory']))).toEqual(new Set());
+    expect(hiddenLazyToolNames('conv-a', new Set(), new Set(['memory']))).toEqual(new Set());
   });
 
   it('describes available groups with their registered member names', () => {

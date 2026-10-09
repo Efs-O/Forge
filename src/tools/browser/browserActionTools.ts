@@ -22,6 +22,7 @@ export function makeBrowserActionTools(ctx: BrowserToolContext): RegisteredTool[
           name: 'browser_screenshot',
           description:
             'Capture the active (or named) tab as an image and return it inline to you. ' +
+            'Needs a vision model; on a text-only model use render_html_to_image console output instead. ' +
             'full_page=true captures the whole scrollable page. Returns the image plus the ' +
             'saved path, actual dimensions, and the coordinate space.',
           parameters: {

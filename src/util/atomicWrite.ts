@@ -43,10 +43,10 @@ function syncFile(handle: number): void {
  * ever fire on Windows.
  */
 const CONTENDED = new Set(['EPERM', 'EBUSY', 'EACCES']);
-/** Total rename attempts before the last error is surfaced. */
-export const RENAME_ATTEMPTS = 6;
-/** First retry waits 5 ms, then 10, 15, … — well under a second in total. */
-const RENAME_BASE_BACKOFF_MS = 5;
+/** Maximum time spent retrying a contended rename. */
+export const RENAME_BUDGET_MS = 2_500;
+const RENAME_BASE_BACKOFF_MS = 25;
+const RENAME_MAX_BACKOFF_MS = 250;
 
 /**
  * Synchronous sleep. `writeFileAtomicSync` is sync, so a Promise/setTimeout
@@ -60,7 +60,8 @@ function sleepSync(ms: number): void {
 /**
  * Rename `temporary` over `target`, retrying the transient Windows
  * EPERM/EBUSY/EACCES a concurrent reader raises while it briefly still has the
- * destination open. Bounded and short (well under a second total). A genuine
+ * destination open. The synchronous sleep blocks the extension host only
+ * while the OS reports transient rename contention. A genuine
  * permission problem, or the last contended attempt, is surfaced — never
  * swallowed. `rename` is injectable so the retry can be tested without holding
  * a real file open across processes.
@@ -69,17 +70,28 @@ export function renameContendedSync(
   temporary: string,
   target: string,
   rename: (from: string, to: string) => void = fs.renameSync,
+  now: () => number = Date.now,
+  sleep: (ms: number) => void = sleepSync,
 ): void {
   let lastError: unknown;
-  for (let attempt = 0; attempt < RENAME_ATTEMPTS; attempt += 1) {
+  const startedAt = now();
+  let attempt = 0;
+  while (true) {
     try {
       rename(temporary, target);
       return;
     } catch (error) {
       lastError = error;
       if (!CONTENDED.has((error as NodeJS.ErrnoException).code ?? '')) throw error;
-      if (attempt === RENAME_ATTEMPTS - 1) break;
-      sleepSync(RENAME_BASE_BACKOFF_MS * (attempt + 1));
+      const elapsed = now() - startedAt;
+      if (elapsed >= RENAME_BUDGET_MS) break;
+      const delay = Math.min(
+        RENAME_MAX_BACKOFF_MS,
+        RENAME_BASE_BACKOFF_MS * 2 ** attempt,
+        RENAME_BUDGET_MS - elapsed,
+      );
+      sleep(delay);
+      attempt += 1;
     }
   }
   throw lastError;

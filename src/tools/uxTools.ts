@@ -1,4 +1,5 @@
 import { parseQuestionGroups } from '../util/questionAnswers';
+import * as path from 'path';
 import * as vscode from 'vscode';
 import type { RegisteredTool } from './ToolRegistry';
 import { resolveWorkspaceUri } from '../util/WorkspacePaths';
@@ -67,6 +68,41 @@ export function makeShowDiffTool(): RegisteredTool {
 
 // ── open_file ─────────────────────────────────────────────────────────────────
 
+/** Binary extensions are opened by VS Code's native binary editor command. */
+const BINARY_FILE_EXTENSIONS = new Set([
+  '.png',
+  '.jpg',
+  '.jpeg',
+  '.gif',
+  '.bmp',
+  '.webp',
+  '.ico',
+  '.tif',
+  '.tiff',
+  '.pdf',
+  '.zip',
+  '.gz',
+  '.7z',
+  '.rar',
+  '.exe',
+  '.dll',
+  '.so',
+  '.dylib',
+  '.bin',
+  '.dat',
+  '.mp3',
+  '.wav',
+  '.mp4',
+  '.webm',
+  '.mov',
+  '.mkv',
+  '.avi',
+  '.woff',
+  '.woff2',
+  '.ttf',
+  '.otf',
+]);
+
 /**
  * Show a file in the editor.
  *
@@ -119,6 +155,10 @@ export function makeOpenFileTool(): RegisteredTool {
     handler: async (args) => {
       const suppliedPath = args['path'] as string;
       const uri = resolveWorkspaceUri(suppliedPath);
+      if (BINARY_FILE_EXTENSIONS.has(path.extname(uri.fsPath).toLowerCase())) {
+        await vscode.commands.executeCommand('vscode.open', uri);
+        return `Opened ${suppliedPath} in the editor.`;
+      }
       let doc: vscode.TextDocument;
       try {
         doc = await vscode.workspace.openTextDocument(uri);

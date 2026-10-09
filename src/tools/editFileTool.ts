@@ -7,7 +7,7 @@ import { writeFileAtomicSync, type ExpectedFileState } from '../util/atomicWrite
 // ── edit_file ──────────────────────────────────────────────────────────────────
 
 /** Upper bound on edits in one `edit_file` call. */
-export const MAX_EDITS_PER_CALL = 40;
+export const MAX_EDITS_PER_CALL = 200;
 
 interface StringEdit {
   oldStr: string;
@@ -85,7 +85,7 @@ export function makeEditFileTool(extraRoots: () => readonly string[] = () => [])
               minItems: 1,
               maxItems: MAX_EDITS_PER_CALL,
               description:
-                'Several replacements applied in order to this one file. Each later old_str is ' +
+                'Up to 200 replacements applied in order to this one file. Each later old_str is ' +
                 'matched against the result of the earlier edits.',
               items: {
                 type: 'object',

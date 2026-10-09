@@ -42,9 +42,9 @@ export function tabLabel(tab: BrowserTab): string {
 /** The screenshot tools' refusal on a non-vision model (B8 single source). */
 export function visionRefusal(modelName: string): string {
   return (
-    `Error: this tool is not available because the active model "${modelName}" has no vision ` +
-    'projector configured (mmproj_path). Switch to a vision-capable model to capture and view ' +
-    'screenshots; do not try to read the image with another tool.'
+    `Error: this tool needs a vision model; the active model "${modelName}" has no vision ` +
+    'projector configured (mmproj_path). For webpage appearance, use render_html_to_image console output; ' +
+    'to inspect screenshots, ask the user to switch to a vision-capable model.'
   );
 }
 

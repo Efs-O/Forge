@@ -26,7 +26,6 @@ import { getLogger } from '../util/logger';
 import { ToolApprovalPolicyDenied } from './ToolApprovalService';
 import { coerceToolArgs } from '../tools/argCoercion';
 import { isLazyGroupActive, lazyGroupForTool, lazyGroupNames } from '../tools/lazyToolGroups';
-import { filterVisionGated, visionGatedNames } from './visionGate';
 
 const log = getLogger();
 /** A directory has no text to diff, and `readFileSync` on one throws EISDIR. */
@@ -98,17 +97,14 @@ function unknownToolResult(
   allowed: Set<ToolPermission>,
   budget: ToolBudget | undefined,
   convId: string | undefined,
-  modelContext: { modelName: string; isVisionModel: boolean } | undefined,
   unavailableTools: ReadonlyMap<string, string> | undefined,
 ): string {
   const result = `Error: unknown tool "${name}"`;
   if (name.length < UNKNOWN_TOOL_HINT_MIN_PREFIX_CHARS) return result;
 
-  const definitions = filterVisionGated(
-    registry.definitions(allowed),
-    modelContext?.isVisionModel !== false,
-    visionGatedNames(registry),
-  ).filter((definition) => !unavailableTools?.has(definition.function.name));
+  const definitions = registry
+    .definitions(allowed)
+    .filter((definition) => !unavailableTools?.has(definition.function.name));
   const eligible = budget?.filterDefinitions(definitions) ?? definitions;
   const matches = eligible.filter(
     (definition) => definition.function.name !== name && definition.function.name.startsWith(name),
@@ -233,7 +229,6 @@ export class ToolDispatch {
             allowed,
             budget,
             convId,
-            modelContext,
             unavailableTools,
           );
           this.postResult(tc, toolResultText(result), undefined, convId);
@@ -246,24 +241,6 @@ export class ToolDispatch {
           this.failureTracker.record(convId);
           this.postResult(tc, invalid, undefined, convId);
           messages.push(this.toolMessage(tc, invalid, startedAt));
-          continue;
-        }
-        const lazyGroup = lazyGroupForTool(tc.function.name);
-        if (lazyGroup === 'computer_use' && modelContext?.isVisionModel === false) {
-          result = `computer_use is unavailable on non-vision model "${modelContext.modelName}"; do not retry. Answer from the workspace and the conversation instead.`;
-          this.postResult(tc, result, undefined, convId);
-          messages.push(this.toolMessage(tc, toolResultContent(result), startedAt));
-          continue;
-        }
-        if (
-          lazyGroup &&
-          convId &&
-          !isLazyGroupActive(convId, lazyGroup) &&
-          !budget?.isExplicitlyAllowed(tc.function.name)
-        ) {
-          result = `\`${tc.function.name}\` is in group \`${lazyGroup}\` — call \`load_tool_group\` first`;
-          this.postResult(tc, result, undefined, convId);
-          messages.push(this.toolMessage(tc, toolResultContent(result), startedAt));
           continue;
         }
         const budgetBlock = budget?.check(tc.function.name);

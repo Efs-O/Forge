@@ -157,7 +157,6 @@ describe('prompt context measurement', () => {
     const hidden = hiddenLazyToolNames(
       undefined,
       new Set(model.tools ?? []),
-      true,
       new Set(model.tool_groups?.eager ?? []),
     );
     const nativeDefinitions = budget.filterDefinitions(

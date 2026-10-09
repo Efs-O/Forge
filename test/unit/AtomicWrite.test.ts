@@ -3,7 +3,7 @@ import * as os from 'os';
 import * as path from 'path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import {
-  RENAME_ATTEMPTS,
+  RENAME_BUDGET_MS,
   renameContendedSync,
   writeFileAtomicSync,
 } from '../../src/util/atomicWrite';
@@ -101,7 +101,7 @@ describe('renameContendedSync', () => {
     expect(attempts).toBe(1);
   });
 
-  it('surfaces the last EPERM after exhausting the bounded retries', () => {
+  it('surfaces the last EPERM after exhausting the time budget', () => {
     const root = fs.mkdtempSync(path.join(os.tmpdir(), 'forge-atomic-'));
     roots.push(root);
     const temporary = path.join(root, 'tmp');
@@ -109,14 +109,22 @@ describe('renameContendedSync', () => {
     fs.writeFileSync(temporary, 'new content');
 
     let attempts = 0;
+    let now = 0;
+    const sleeps: number[] = [];
     const always = () => {
       attempts += 1;
       throw errno('EPERM', 'rename: operation not permitted');
     };
 
-    expect(() => renameContendedSync(temporary, target, always)).toThrow(
+    expect(() => renameContendedSync(temporary, target, always, () => now, (ms) => {
+      sleeps.push(ms);
+      now += ms;
+    })).toThrow(
       /operation not permitted/,
     );
-    expect(attempts).toBe(RENAME_ATTEMPTS);
+    expect(now).toBe(RENAME_BUDGET_MS);
+    expect(attempts).toBe(sleeps.length + 1);
+    expect(attempts).toBeGreaterThan(6);
+    expect(Math.max(...sleeps)).toBeLessThanOrEqual(250);
   });
 });

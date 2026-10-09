@@ -11,7 +11,7 @@
 import type { ForgeConfig } from '../../config/types';
 import type { ContentPart } from '../../llm/types';
 import type { MultimodalToolResult, RegisteredTool } from '../ToolRegistry';
-import { saveScreenshot, visionRefusal } from '../browser/browserTools';
+import { saveScreenshot } from '../browser/browserTools';
 import { getDesktopDriver } from './PowerShellDesktopDriver';
 import { assertMonitorIndex } from './DesktopDriver';
 import {
@@ -73,7 +73,7 @@ export function makeDesktopTools(getConfig: GetConfig): RegisteredTool[] {
         function: {
           name: 'desktop_capture',
           description:
-            'Capture a window (by title) or one monitor as an image and return it inline. ' +
+            'Capture a window (by title) or one monitor as an image and return it inline. Needs a vision model; on a text-only model ask the user to switch models before inspecting the captured image. ' +
             'A window capture binds the approved control target (HWND+pid) and returns a capture_id ' +
             'that coordinate actions reference. A monitor capture is read-only (no coordinate actions) ' +
             'and captures exactly ONE display: monitor 0 is the primary, higher indices the other ' +
@@ -106,7 +106,8 @@ export function makeDesktopTools(getConfig: GetConfig): RegisteredTool[] {
       permission: 'desktop',
       autoApprove: true,
       advertise: isWin,
-      requiresVision: (name) => visionRefusal(name),
+      requiresVision: (name) =>
+        `Error: desktop_capture needs a vision model; the active model "${name}" has no vision projector configured (mmproj_path). Ask the user to switch to a vision-capable model before inspecting desktop captures.`,
       approval: captureApproval(driver, monitorApproval),
       handler: async (args, toolCtx): Promise<MultimodalToolResult> => {
         const title = str(args, 'window_title');
@@ -266,9 +267,13 @@ export function makeDesktopTools(getConfig: GetConfig): RegisteredTool[] {
       autoApprove: true,
       advertise: isWin,
       approval: codeMove,
-      handler: async (args) => {
+      handler: async (args, toolContext) => {
         const x = num(args, 'x')!;
         const y = num(args, 'y')!;
+        if (toolContext?.isVisionModel === false)
+          throw new Error(
+            'desktop_move_mouse requires a vision model because its capture_id comes from desktop_capture.',
+          );
         const capId = str(args, 'capture_id')!;
         await driver.moveMouse(x, y, capId, coordSpace(args));
         return `Moved cursor to (${x},${y}) in ${coordSpace(args) ?? 'image_px'}.`;
@@ -311,9 +316,13 @@ export function makeDesktopTools(getConfig: GetConfig): RegisteredTool[] {
       permission: 'desktop',
       advertise: isWin,
       approval: composeApprovals(clickApproval, codeClick),
-      handler: async (args) => {
+      handler: async (args, toolContext) => {
         const x = num(args, 'x')!;
         const y = num(args, 'y')!;
+        if (toolContext?.isVisionModel === false)
+          throw new Error(
+            'desktop_click requires a vision model because its capture_id comes from desktop_capture.',
+          );
         const capId = str(args, 'capture_id')!;
         const button = (args.button as string) ?? 'left';
         const clicks = num(args, 'clicks') ?? 1;
@@ -355,9 +364,13 @@ export function makeDesktopTools(getConfig: GetConfig): RegisteredTool[] {
       permission: 'desktop',
       advertise: isWin,
       approval: codeDrag,
-      handler: async (args) => {
+      handler: async (args, toolContext) => {
         const from = { x: num(args, 'from_x')!, y: num(args, 'from_y')! };
         const to = { x: num(args, 'to_x')!, y: num(args, 'to_y')! };
+        if (toolContext?.isVisionModel === false)
+          throw new Error(
+            'desktop_drag requires a vision model because its capture_id comes from desktop_capture.',
+          );
         const capId = str(args, 'capture_id')!;
         await driver.drag(from, to, capId, coordSpace(args));
         return `Dragged from (${from.x},${from.y}) to (${to.x},${to.y}) in ${coordSpace(args) ?? 'image_px'}.`;
@@ -392,10 +405,14 @@ export function makeDesktopTools(getConfig: GetConfig): RegisteredTool[] {
       autoApprove: true,
       advertise: isWin,
       approval: codeScroll,
-      handler: async (args) => {
+      handler: async (args, toolContext) => {
         const x = num(args, 'x')!;
         const y = num(args, 'y')!;
         const delta = { x: num(args, 'delta_x') ?? 0, y: num(args, 'delta_y') ?? 0 };
+        if (toolContext?.isVisionModel === false)
+          throw new Error(
+            'desktop_scroll requires a vision model because its capture_id comes from desktop_capture.',
+          );
         const capId = str(args, 'capture_id')!;
         await driver.scroll(x, y, delta, capId, coordSpace(args));
         return `Scrolled (${delta.x},${delta.y}) at (${x},${y}) in ${coordSpace(args) ?? 'image_px'}.`;

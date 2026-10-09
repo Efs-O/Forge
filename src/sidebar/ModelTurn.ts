@@ -41,7 +41,7 @@ import { terminalCommandTracker } from '../tools/TerminalCommandTracker';
 import { formatPromptCacheStats, readPromptCacheStats } from '../llm/promptCacheStats';
 import { toolOutputLimits } from '../tools/toolOutputLimits';
 import { getLogger } from '../util/logger';
-import { buildVisionRefusals, filterVisionGated, visionGatedNames } from './visionGate';
+import { buildVisionRefusals } from './visionGate';
 import { unattendedConversations, withUnattendedRefusals } from './unattendedConversations';
 import {
   isTurnCutOffError,
@@ -204,11 +204,10 @@ export async function runModelTurn(
   const isVisionModel = deriveStaticCapabilities(model).includes('vision');
   // Single source of truth for the vision gate (B8): both halves derive from
   // the registry's `requiresVision` tools, so they cannot drift apart.
-  // Withholding the definition is not enforcement: the tool stays in the
-  // registry and a model that calls it blind would ship base64 to a backend
-  // with no projector. Refuse it at dispatch, with the reason.
-  const visionGated = visionGatedNames(ctx.toolRegistry);
+  // Keep vision tools advertised but refuse them at dispatch on text-only
+  // models, so a call receives a clear capability explanation.
   const unattended = unattendedConversations.has(conv.id);
+  const unattendedRefusals = withUnattendedRefusals(undefined, unattended);
   const unavailableTools = withUnattendedRefusals(
     isVisionModel ? undefined : buildVisionRefusals(ctx.toolRegistry, model.name),
     unattended,
@@ -224,16 +223,13 @@ export async function runModelTurn(
     const hiddenLazyTools = hiddenLazyToolNames(
       conv.id,
       new Set(model.tools ?? []),
-      isVisionModel,
       new Set(model.tool_groups?.eager ?? []),
     );
-    const advertised = filterVisionGated(
-      ctx.toolRegistry.definitions(allowed),
-      isVisionModel,
-      visionGated,
-    ).filter(
-      ({ function: { name } }) => !hiddenLazyTools.has(name) && !unavailableTools?.has(name),
-    );
+    const advertised = ctx.toolRegistry
+      .definitions(allowed)
+      .filter(
+        ({ function: { name } }) => !hiddenLazyTools.has(name) && !unattendedRefusals?.has(name),
+      );
     return budget.filterDefinitions(advertised);
   };
   const nativeTools = runtimeCaps?.likelySupportsTools !== false;

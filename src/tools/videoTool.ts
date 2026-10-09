@@ -32,7 +32,7 @@ const VIDEO_EXTENSIONS = new Set(['.mp4', '.webm', '.mov', '.mkv', '.avi', '.m4v
  */
 export function videoUnavailableMessage(modelName: string): string {
   return (
-    `Error: view_video is not available because the active model "${modelName}" has no vision ` +
+    `Error: view_video needs a vision model; the active model "${modelName}" has no vision ` +
     'projector configured (mmproj_path). Do not try to read the video with another tool: ' +
     'report that you cannot see it and ask the user to switch to a vision-capable model.'
   );
@@ -149,7 +149,9 @@ export function makeViewVideoTool(getVideoConfig?: () => VideoConfig | undefined
         description:
           'Load and inspect a short video from the workspace. Returns a small set of still ' +
           'frames sampled evenly across the clip, in time order — you do NOT receive the video ' +
-          'itself, its motion, or its audio. The path must be workspace-relative or absolute ' +
+          'itself, its motion, or its audio. Needs a vision model; on a text-only model report ' +
+          'that you cannot inspect the frames and ask the user to switch models. The path must ' +
+          'be workspace-relative or absolute ' +
           'inside the workspace. Supported: MP4, WebM, MOV, MKV, AVI, M4V. Requires ffmpeg.',
         parameters: {
           type: 'object',

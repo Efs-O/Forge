@@ -154,23 +154,19 @@ export function deactivateLazyGroups(conversationId: string): void {
 export function hiddenLazyToolNames(
   conversationId: string | undefined,
   eagerNames: ReadonlySet<string> = new Set(),
-  isVisionModel = true,
   eagerGroups: ReadonlySet<string> = new Set(),
 ): ReadonlySet<string> {
   const hidden = new Set<string>();
   for (const [group, members] of membersByGroup) {
-    const unavailable = group === 'computer_use' && !isVisionModel;
-    const eagerByDefault =
-      group === 'files' || group === 'background' || (group === 'media' && isVisionModel);
+    const eagerByDefault = group === 'files' || group === 'background' || group === 'media';
     if (
-      !unavailable &&
-      (eagerByDefault ||
-        eagerGroups.has(group) ||
-        (conversationId !== undefined && isLazyGroupActive(conversationId, group)))
+      eagerByDefault ||
+      eagerGroups.has(group) ||
+      (conversationId !== undefined && isLazyGroupActive(conversationId, group))
     )
       continue;
     for (const name of members) {
-      if (!eagerNames.has(name) || unavailable) hidden.add(name);
+      if (!eagerNames.has(name)) hidden.add(name);
     }
   }
   return hidden;

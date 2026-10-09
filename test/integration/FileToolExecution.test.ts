@@ -67,9 +67,9 @@ describe('isolated file and directory tool execution', () => {
     const png = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0x00, 0x01]);
     fs.writeFileSync(path.join(root, 'shot.png'), png);
     await expect(makeReadFileTool().handler({ path: 'shot.png' })).rejects.toThrow('view_image');
-    // view_image is demand-loaded; "not available ⇒ no vision" would be a lie on a vision model.
+    // view_image is always advertised; on a model without vision it refuses and says so itself.
     await expect(makeReadFileTool().handler({ path: 'shot.png' })).rejects.toThrow(
-      'call load_tool_group with group "media"',
+      'view_image itself says so if the active model has no vision',
     );
   });
 

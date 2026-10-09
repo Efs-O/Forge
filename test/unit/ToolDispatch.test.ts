@@ -13,7 +13,12 @@ import type { ToolFailureTracker } from '../../src/tools/StripTools';
 import { ToolRegistry } from '../../src/tools/ToolRegistry';
 import { makeApplyLineEditsTool } from '../../src/tools/structuredEditTool';
 import { ToolBudget } from '../../src/tools/ToolBudget';
-import { resetLazyToolGroups } from '../../src/tools/lazyToolGroups';
+import {
+  hiddenLazyToolNames,
+  recordLazyGroupTool,
+  recordNativeLazyTool,
+  resetLazyToolGroups,
+} from '../../src/tools/lazyToolGroups';
 import { makeShellTool } from '../../src/tools/shellTool';
 import { TEST_BASH } from '../support/bash';
 
@@ -307,7 +312,7 @@ describe('ToolDispatch', () => {
     expect(messages[0]?.tool_call_id).toBe('call-view_image');
   });
 
-  it('refuses a registered hidden tool with its group and loader instruction', async () => {
+  it('dispatches a registered grouped tool when it was not advertised as loaded', async () => {
     const handler = vi.fn().mockResolvedValue('should not run');
     toolRegistry.register({
       definition: {
@@ -325,10 +330,50 @@ describe('ToolDispatch', () => {
       'hidden-conversation',
     );
 
-    expect(handler).not.toHaveBeenCalled();
-    expect(messages[0]?.content).toContain(
-      '`view_image` is in group `media` — call `load_tool_group` first',
-    );
+    expect(handler).toHaveBeenCalledOnce();
+    expect(messages[0]?.content).toContain('should not run');
+  });
+
+  it('never group-refuses an advertised native or MCP tool across model and eager settings', async () => {
+    const names = [
+      'browser_click', 'desktop_capture', 'view_image', 'open_file', 'get_power_info',
+      'read_notebook', 'move_file', 'stage', 'code_intel', 'remember', 'stop_execution',
+      'ask_agent', 'search_sessions',
+    ];
+    for (const name of names) {
+      const handler = vi.fn().mockResolvedValue('ok');
+      toolRegistry.register({
+        definition: { type: 'function', function: { name, description: name, parameters: { type: 'object' } } },
+        permission: 'read',
+        handler,
+      });
+      if (name === 'search_sessions') recordLazyGroupTool('halluscribe', name);
+      else recordNativeLazyTool(name);
+    }
+
+    const allGroups = new Set([
+      'agents', 'background', 'code_intel', 'computer_use', 'editor_ui', 'files',
+      'git', 'halluscribe', 'media', 'memory', 'notebook', 'system',
+    ]);
+    for (const isVisionModel of [true, false]) {
+      for (const eager of [new Set<string>(), allGroups]) {
+        for (const allowlistName of [undefined, ...names]) {
+          const allowlist = allowlistName ? new Set([allowlistName]) : new Set<string>();
+          const hidden = hiddenLazyToolNames('dispatch-contract', allowlist, eager);
+          const advertised = names.filter((name) => !hidden.has(name) && (!allowlistName || name === allowlistName));
+          const budget = allowlistName ? new ToolBudget({ tools: [allowlistName] }) : undefined;
+          for (const name of advertised) {
+            const messages: ChatMessage[] = [];
+            await dispatch.dispatch(
+              [makeToolCall(name, {})], allowed, messages, 'dispatch-contract', undefined,
+              undefined, budget, undefined, undefined, undefined, undefined,
+              { modelName: isVisionModel ? 'vision' : 'text-only', isVisionModel, conversation: {} as never, persistConversation: vi.fn() },
+            );
+            expect(messages[0]?.content).toBe('ok');
+          }
+        }
+      }
+    }
   });
 
   it('requests approval for write tools', async () => {

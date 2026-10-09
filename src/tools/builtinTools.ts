@@ -22,8 +22,7 @@ function binaryRefusal(bytes: Buffer, requestedPath: string): string | null {
   if (imageMime) {
     return (
       `read_file: ${requestedPath} is an image (${imageMime}), not text. Use view_image to look at it; ` +
-      'it is in the `media` tool group, so if you do not see it, call load_tool_group with ' +
-      'group "media" first. view_image itself says so if the active model has no vision.'
+      'view_image itself says so if the active model has no vision.'
     );
   }
   if (!bytes.subarray(0, BINARY_SNIFF_BYTES).includes(0)) return null;
@@ -147,7 +146,7 @@ export function makeWriteFileTool(extraRoots: () => readonly string[] = () => []
         name: 'write_file',
         description:
           'Write content to a file, creating it (and any missing directories) if needed. ' +
-          'Overwrites any existing content.',
+          'Overwrites any existing content. Write the whole file in one call, even when large; do not split it into part-files to join with the shell. If a call is cut off, Forge reports that and gives the retry size.',
         parameters: {
           type: 'object',
           properties: {
