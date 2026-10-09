@@ -100,7 +100,9 @@ describe('workspace memory lifecycle', () => {
     const registry = new ToolRegistry();
     const forget = makeForgetTool(m.state);
     registry.register(forget);
-    expect(() => registry.assertAllowed(forget, new Set(['read']))).toThrow(/delete/u);
+    expect(() => registry.assertAllowed(forget, new Set(['read']))).toThrow(
+      'is not available in this conversation',
+    );
     expect(() => registry.assertAllowed(forget, new Set(['delete']))).not.toThrow();
     expect(forget.mutation).toBeUndefined();
   });

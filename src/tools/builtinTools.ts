@@ -110,6 +110,11 @@ export function makeReadFileTool(): RegisteredTool {
       if (lines.length > 1 && lines[lines.length - 1] === '') lines.pop();
       const start = Math.max(1, startLine ?? 1);
       const end = Math.min(lines.length, endLine ?? lines.length);
+      if (start > lines.length) {
+        throw new Error(
+          `read_file: start_line ${start} is past the end of the file (${lines.length} lines).`,
+        );
+      }
       if (start > end) {
         throw new Error(
           `read_file: start_line ${start} is past end_line ${end} (file has ${lines.length} lines).`,

@@ -52,7 +52,8 @@ export function extractShaders(filePath: string, source: string): ExtractedShade
     if (code.includes('${')) {
       skipped.push({
         line: lineAt(source, offset + code.indexOf('${')),
-        reason: 'template literal has ${...} interpolation',
+        reason:
+          'template literal has ${...} interpolation; write the assembled shader to a .wgsl or .glsl file and run shader_check on it',
       });
       seen.add(offset);
       return;

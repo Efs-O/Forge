@@ -27,7 +27,11 @@ describe('shader extraction and source mapping', () => {
     const result = extractShaders('page.ts', source);
     expect(result.shaders).toEqual([]);
     expect(result.skipped).toEqual([
-      { line: 3, reason: 'template literal has ${...} interpolation' },
+      {
+        line: 3,
+        reason:
+          'template literal has ${...} interpolation; write the assembled shader to a .wgsl or .glsl file and run shader_check on it',
+      },
     ]);
   });
 

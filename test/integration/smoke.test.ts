@@ -437,7 +437,9 @@ describe('ToolRegistry — registration and dispatch', () => {
       handler: async () => 'ok',
     });
 
-    await expect(registry.dispatch('w', {}, new Set(['read']))).rejects.toThrow('permission');
+    await expect(registry.dispatch('w', {}, new Set(['read']))).rejects.toThrow(
+      'is not available in this conversation',
+    );
   });
 
   it('filters definitions by allowed permission set', () => {

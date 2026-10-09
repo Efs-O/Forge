@@ -260,6 +260,36 @@ describe('apply_line_edits reports invalid JSON array positions', () => {
   });
 });
 
+describe('unavailable tool refusals', () => {
+  const registry = new ToolRegistry();
+
+  it('says browser tools are unavailable and names render_html_to_image preview', () => {
+    const browserTool: RegisteredTool = {
+      definition: {
+        type: 'function',
+        function: {
+          name: 'browser_open',
+          description: 'open a page',
+          parameters: { type: 'object', properties: {}, required: [] },
+        },
+      },
+      permission: 'browser',
+      handler: async () => 'unused',
+    };
+    expect(() => registry.assertAllowed(browserTool, new Set(['read']))).toThrow(
+      'ToolRegistry: tool "browser_open" is not available in this conversation. Use render_html_to_image with mode: "preview".',
+    );
+  });
+
+  it('does not invent an alternative for another unavailable tool', () => {
+    const unavailable = makeRequiredTool('write_file', []);
+    const tool: RegisteredTool = { ...unavailable, permission: 'write' };
+    expect(() => registry.assertAllowed(tool, new Set(['read']))).toThrow(
+      'ToolRegistry: tool "write_file" is not available in this conversation.',
+    );
+  });
+});
+
 describe('apply_line_edits missing nested field (Fix C)', () => {
   function withSampleFile<T>(fn: (relativePath: string) => Promise<T>): Promise<T> {
     const dir = fs.mkdtempSync(path.join(process.cwd(), '.forge-fixc-test-'));

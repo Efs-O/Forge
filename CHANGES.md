@@ -20,6 +20,7 @@
 
 ### Behaviour fixes from the forge-bench review
 
+- Unavailable tools now say they are unavailable in the conversation; withheld `browser_*` calls name `render_html_to_image` preview. `shader_check` explains how to check an interpolated template by writing the assembled shader to a file, and `read_file` says plainly when `start_line` is beyond EOF.
 - `render_html_to_image` preview now accepts `frames` and `wait_ms` together; `frames` controls capture timing and the result reports the ignored `wait_ms`.
 - Preview errors now keep the first ten distinct messages, append repeat counts such as `(x363)`, and preserve the total number of error events.
 - Preview now captures WebGPU uncaptured errors and shader compilation diagnostics, including their line and column, which Chrome did not surface through page errors or console output.

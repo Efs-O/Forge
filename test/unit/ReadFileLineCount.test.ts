@@ -36,7 +36,9 @@ describe('read_file line count', () => {
   it('reports the real line count when a range runs past the end', async () => {
     const target = path.join(dir, 'three.ts');
     fs.writeFileSync(target, 'a\nb\nc\n');
-    await expect(read({ path: target, start_line: 4 })).rejects.toThrow('file has 3 lines');
+    await expect(read({ path: target, start_line: 4 })).rejects.toThrow(
+      'start_line 4 is past the end of the file (3 lines)',
+    );
   });
 
   it('counts a file without a final newline the same way', async () => {

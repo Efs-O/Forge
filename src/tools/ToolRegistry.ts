@@ -357,12 +357,12 @@ export class ToolRegistry {
       (permission) => !allowed.has(permission),
     );
     if (missing.length === 0) return;
-    const requirement =
-      missing.length === 1
-        ? `permission "${missing[0]}"`
-        : `permissions ${missing.map((permission) => `"${permission}"`).join(', ')}`;
+    const name = tool.definition.function.name;
+    const alternative = name.startsWith('browser_')
+      ? ' Use render_html_to_image with mode: "preview".'
+      : '';
     throw new Error(
-      `ToolRegistry: tool "${tool.definition.function.name}" requires ${requirement} which is not granted for this Forge turn`,
+      `ToolRegistry: tool "${name}" is not available in this conversation.${alternative}`,
     );
   }
 

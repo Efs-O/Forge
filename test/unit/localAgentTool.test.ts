@@ -237,7 +237,7 @@ describe('permission gating', () => {
         { model: 'llama', task: 'analyze this' },
         new Set(['read', 'write']),
       ),
-    ).rejects.toThrow(/permission "delegate"/);
+    ).rejects.toThrow('is not available in this conversation');
     expect(ask).not.toHaveBeenCalled();
   });
 
@@ -250,7 +250,7 @@ describe('permission gating', () => {
         { model: 'llama', task: 'review the diff' },
         new Set<'read'>(['read']),
       ),
-    ).rejects.toThrow(/permission "delegate"/);
+    ).rejects.toThrow('is not available in this conversation');
     expect(ask).not.toHaveBeenCalled();
   });
 });

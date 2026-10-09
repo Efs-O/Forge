@@ -125,7 +125,7 @@ describe('mcpToolToRegisteredTool', () => {
       expect.objectContaining({ function: expect.objectContaining({ name: 'dispatch_subagent' }) }),
     ]);
     await expect(registry.dispatch('dispatch_subagent', {}, new Set(['read']))).rejects.toThrow(
-      'requires permission "delegate"',
+      'is not available in this conversation',
     );
     await expect(registry.dispatch('dispatch_subagent', {}, new Set(['delegate']))).resolves.toBe(
       'delegated result',
@@ -142,7 +142,7 @@ describe('mcpToolToRegisteredTool', () => {
     expect(registry.definitions(new Set(['delegate']))).toEqual([]);
     await expect(
       registry.dispatch('search_sessions', { query: 'x' }, new Set(['delegate'])),
-    ).rejects.toThrow('requires permission "read"');
+    ).rejects.toThrow('is not available in this conversation');
     await expect(
       registry.dispatch('search_sessions', { query: 'x' }, new Set(['read'])),
     ).resolves.toBe('result');
@@ -166,7 +166,7 @@ describe('mcpToolToRegisteredTool', () => {
     try {
       expect(registry.definitions(new Set(['read']))).toEqual([]);
       await expect(registry.dispatch('dispatch_subagent', {}, new Set(['read']))).rejects.toThrow(
-        'requires permission "delegate"',
+        'is not available in this conversation',
       );
       await expect(registry.dispatch('dispatch_subagent', {}, new Set(['delegate']))).resolves.toBe(
         'delegated result',

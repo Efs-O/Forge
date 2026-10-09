@@ -1068,7 +1068,7 @@ describe('ToolDispatch', () => {
         budget,
       );
 
-      expect(messages[0]?.content).toMatch(/permission "terminal"/);
+      expect(messages[0]?.content).toContain('is not available in this conversation');
     });
 
     it('returns the wrap-up message once a per-tool budget is exhausted, without crashing the turn', async () => {

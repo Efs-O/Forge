@@ -41,7 +41,10 @@ describe('isolated file and directory tool execution', () => {
     ).resolves.toBe('two\nthree');
     await expect(
       makeReadFileTool().handler({ path: 'nested/example.txt', start_line: 4, end_line: 2 }),
-    ).rejects.toThrow('past end_line');
+    ).rejects.toThrow('start_line 4 is past the end of the file (3 lines)');
+    await expect(
+      makeReadFileTool().handler({ path: 'nested/example.txt', start_line: 4 }),
+    ).rejects.toThrow('start_line 4 is past the end of the file (3 lines)');
   });
 
   // Refusing reads outside the workspace bought nothing: list_directory and
