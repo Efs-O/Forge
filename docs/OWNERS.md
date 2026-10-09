@@ -21,6 +21,8 @@ overlaps with an existing owner, extend the owner instead.
 | Generation-event session timing                      | `src/sidebar/sessionTimerWiring.ts`      |
 | Pure transcript/usage mutations                      | `src/sidebar/transcriptMutations.ts`     |
 | Sidebar transcript activity row folding               | `webview-ui/src/activityRows.ts`          |
+| Folding back-to-back calls of one tool into a run row | `webview-ui/src/activityRuns.ts` (row: `components/ActivityRunRow.tsx`) |
+| Tool calls still being written (live progress rows)  | `webview-ui/src/pendingToolCalls.ts` (row: `components/PendingToolCallRow.tsx`; host message: `src/sidebar/toolCallProgress.ts`) |
 | Sidebar grouped activity view (step runs → groups)   | `webview-ui/src/activityGroups.ts`        |
 | Sidebar open/closed choices that survive remounts    | `webview-ui/src/disclosureState.ts`       |
 | Sidebar transcript follow-the-bottom decision         | `webview-ui/src/scrollFollow.ts`          |

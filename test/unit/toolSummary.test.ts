@@ -19,4 +19,10 @@ describe('extractToolDetail', () => {
       ),
     ).toBe('npm run test -- "a very long pattern"');
   });
+
+  it('shows a shell command line as typed, without re-quoting it', () => {
+    expect(
+      extractToolDetail(JSON.stringify({ command: 'cd "n:/a b" && grep -n "fn" f.html' })),
+    ).toBe('cd "n:/a b" && grep -n "fn" f.html');
+  });
 });

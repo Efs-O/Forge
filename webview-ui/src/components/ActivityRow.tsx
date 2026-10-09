@@ -8,12 +8,12 @@ import {
   type ActivityStep,
 } from '../activityRows';
 import { formatDuration } from '../../../src/util/formatDuration';
-import { sameRowList } from '../messageOps';
+import { sameRowList, toolNameAndDetail } from '../messageOps';
 import { readDisclosure, useDisclosure } from '../disclosureState';
 import { DiffBlock, diffStats } from './DiffBlock';
-import { thinkingLabel, ThinkingRow } from './ThinkingGroup';
+import { ThinkingLabel, ThinkingRow } from './ThinkingGroup';
 import { ToolGroup } from './ToolGroup';
-import { ToolRow, ToolRowThumbnails, toolNameAndDetail } from './ToolRow';
+import { ToolRow, ToolRowThumbnails } from './ToolRow';
 
 export interface ActivityRowProps {
   step: ActivityStep;
@@ -160,11 +160,20 @@ function ActivityRowView({ step, streaming }: ActivityRowProps): React.ReactElem
                 <ThinkingRow
                   key={thought.id}
                   id={thought.id}
-                  label={thinkingLabel(thought.reasoningMs)}
+                  label={
+                    <ThinkingLabel
+                      startedAt={thought.reasoningStartedAt}
+                      ms={thought.reasoningMs}
+                    />
+                  }
                   reasoning={thought.reasoning ?? ''}
                 />
               ))}
-              {tools.length > 1 ? <ToolGroup tools={tools} /> : <ToolRow message={tools[0]!} />}
+              {tools.length > 1 ? (
+                <ToolGroup tools={tools} />
+              ) : (
+                <ToolRow message={tools[0]!} nested />
+              )}
             </React.Fragment>
           ))}
           {step.diffs.map((diff) => (

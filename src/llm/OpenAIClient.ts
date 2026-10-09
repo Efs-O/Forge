@@ -80,6 +80,15 @@ export type ReasoningHandler = (token: string) => void;
 export type DoneHandler = (finishReason: string | null) => void;
 export type ErrorHandler = (err: Error) => void;
 export type ToolCallsHandler = (calls: ToolCall[]) => void;
+export interface ToolCallProgress {
+  index: number;
+  id: string;
+  name: string;
+  argChars: number;
+  argDeltas: number;
+  arguments: string;
+}
+export type ToolCallProgressHandler = (progress: ToolCallProgress) => void;
 export type UsageHandler = (usage: NonNullable<StreamChunk['usage']>) => void;
 
 export interface StreamHandlers {
@@ -89,6 +98,8 @@ export interface StreamHandlers {
   onError: ErrorHandler;
   /** Fired before onDone when streamed tool deltas completed (finish_reason tool_calls or stop). */
   onToolCalls?: ToolCallsHandler;
+  /** Argument-fragment progress, throttled per call with a final event on close. */
+  onToolCallProgress?: ToolCallProgressHandler;
   /** Exact usage emitted by servers when stream_options.include_usage is enabled. */
   onUsage?: UsageHandler;
 }
@@ -232,11 +243,36 @@ export async function streamChatCompletion(
     createStallProbe(baseUrl, fetchImpl),
   );
   // key = index, accumulates partial tool call fragments
-  const toolAccum = new Map<number, { id: string; name: string; arguments: string }>();
+  const toolAccum = new Map<
+    number,
+    {
+      id: string;
+      name: string;
+      arguments: string;
+      argDeltas: number;
+      lastProgressAt?: number;
+    }
+  >();
+  const reportProgress = (index: number, final = false): void => {
+    const acc = toolAccum.get(index);
+    if (!acc || !handlers.onToolCallProgress || acc.argDeltas === 0) return;
+    const now = Date.now();
+    if (!final && acc.lastProgressAt !== undefined && now - acc.lastProgressAt < 250) return;
+    acc.lastProgressAt = now;
+    handlers.onToolCallProgress({
+      index,
+      id: acc.id,
+      name: acc.name,
+      argChars: acc.arguments.length,
+      argDeltas: acc.argDeltas,
+      arguments: acc.arguments,
+    });
+  };
 
   const flushAccumulatedToolCalls = (): void => {
     if (toolCallsFlushed) return;
     toolCallsFlushed = true;
+    for (const index of toolAccum.keys()) reportProgress(index, true);
     if (!handlers.onToolCalls || toolAccum.size === 0) return;
     const calls: ToolCall[] = [...toolAccum.entries()]
       .sort(([a], [b]) => a - b)
@@ -359,7 +395,7 @@ export async function streamChatCompletion(
             toolDeltaCount += 1;
             const idx = tc.index ?? 0;
             if (!toolAccum.has(idx)) {
-              toolAccum.set(idx, { id: '', name: '', arguments: '' });
+              toolAccum.set(idx, { id: '', name: '', arguments: '', argDeltas: 0 });
             }
             const acc = toolAccum.get(idx)!;
             if (tc.id) acc.id = tc.id;
@@ -372,7 +408,11 @@ export async function streamChatCompletion(
             // is already accumulated is dropped.
             const incomingName = tc.function?.name;
             if (incomingName && !acc.name.includes(incomingName)) acc.name += incomingName;
-            if (tc.function?.arguments) acc.arguments += tc.function.arguments;
+            if (tc.function?.arguments) {
+              acc.arguments += tc.function.arguments;
+              acc.argDeltas += 1;
+              reportProgress(idx);
+            }
           }
         }
 

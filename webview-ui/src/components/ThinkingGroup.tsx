@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useEffect, useState } from 'react';
 import type { AppMessage } from '../reducer';
 import { isReasoningOnly } from '../activityRows';
 import { sameRowList } from '../messageOps';
@@ -40,6 +40,31 @@ export function thinkingLabel(ms: number | undefined): string {
   return elapsed ? `Thought for ${elapsed}` : 'Thinking';
 }
 
+/**
+ * The label of one reasoning span. While the span is still open (stamped by its
+ * first token, not yet sealed) it counts up, `Thinking… 42 s`, so a long think
+ * reads as work in progress instead of a frozen screen; once sealed it is the
+ * static `Thought for …`. The span is sealed on TOKEN, tool activity, DONE and
+ * ERROR, which is what stops the interval.
+ */
+export function ThinkingLabel({
+  startedAt,
+  ms,
+}: {
+  startedAt: number | undefined;
+  ms: number | undefined;
+}): React.ReactElement {
+  const live = startedAt !== undefined && ms === undefined;
+  const [now, setNow] = useState(() => Date.now());
+  useEffect(() => {
+    if (!live) return undefined;
+    const timer = setInterval(() => setNow(Date.now()), 1000);
+    return () => clearInterval(timer);
+  }, [live]);
+  if (!live) return <>{thinkingLabel(ms)}</>;
+  return <>{`Thinking… ${Math.max(0, Math.floor((now - startedAt) / 1000))} s`}</>;
+}
+
 /** `Step 2 · 1.8 s` inside an expanded group; bare when unmeasured. */
 function stepLabel(base: string, ms: number | undefined): string {
   const elapsed = formatDuration(ms);
@@ -60,7 +85,7 @@ export function ThinkingRow({
 }: {
   /** The reasoning message's id; keys the reader's open/closed choice. */
   id: string;
-  label: string;
+  label: React.ReactNode;
   reasoning: string;
 }): React.ReactElement {
   const [choice, setChoice] = useDisclosure('thinking', id);
@@ -101,7 +126,9 @@ function ThinkingGroupView({ steps }: Props): React.ReactElement | null {
     return (
       <ThinkingRow
         id={steps[0]!.id}
-        label={thinkingLabel(steps[0]!.reasoningMs)}
+        label={
+          <ThinkingLabel startedAt={steps[0]!.reasoningStartedAt} ms={steps[0]!.reasoningMs} />
+        }
         reasoning={steps[0]!.reasoning ?? ''}
       />
     );

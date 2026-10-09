@@ -26,7 +26,13 @@ function activityItems(options: { failed?: boolean; pending?: boolean } = {}): A
     : tool('completed', options.failed ? { toolIsError: true } : {});
   return [
     { kind: 'step', step: { attempts: [{ thoughts: [first], tools: [finalTool] }], diffs: [] } },
-    { kind: 'step', step: { attempts: [{ thoughts: [], tools: [tool('second')] }], diffs: [] } },
+    {
+      kind: 'step',
+      step: {
+        attempts: [{ thoughts: [], tools: [tool('second', { content: 'read_file', toolName: 'read_file' })] }],
+        diffs: [],
+      },
+    },
   ];
 }
 
@@ -54,6 +60,31 @@ function toggle(): void {
 }
 
 describe('ActivityGroup', () => {
+  it('folds back-to-back shell calls into one row that expands to each step', () => {
+    const shell = (id: string, command: string): ActivityGroupItem => ({
+      kind: 'step',
+      step: {
+        attempts: [
+          {
+            thoughts: [],
+            tools: [tool(id, { content: `shell → ${command}`, toolName: 'shell', toolTarget: command })],
+          },
+        ],
+        diffs: [],
+      },
+    });
+    render(
+      [shell('s1', 'cd "n:/a b" && grep -n x f'), shell('s2', 'sed -n 1p f'), shell('s3', 'grep y f')],
+      false,
+      false,
+    );
+    toggle();
+    const run = container.querySelector<HTMLButtonElement>('.activity-run .activity-row-header')!;
+    expect(run.textContent).toContain('shell×3· grep, sed');
+    act(() => run.click());
+    expect(container.querySelectorAll('.activity-run .activity-row-body .activity-row')).toHaveLength(3);
+  });
+
   it('starts open while live and shows the working header', () => {
     render(activityItems(), true, true);
     expect(container.querySelector('.activity-group-toggle')?.getAttribute('aria-expanded')).toBe('true');

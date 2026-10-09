@@ -54,6 +54,7 @@ import { runningBackgroundExecutionsNotice } from './backgroundExitNotice';
 import type { AgentProgressEvent } from './AgentProgress';
 import type { LiveStreamMeter } from './LiveStreamMeter';
 import { writeChunkLimit } from '../tools/writeChunking';
+import { toolCallProgressMsg } from './toolCallProgress';
 
 const log = getLogger();
 
@@ -375,12 +376,16 @@ export async function runModelTurn(
         postC({ type: 'reasoningToken', text });
         ctx.emitAgentProgress({ conversationId: conv.id, kind: 'reasoning' });
       },
+      onToolCallProgress: (progress) => {
+        const msg = toolCallProgressMsg(progress);
+        if (msg) postC(msg);
+      },
       // The round's own words, once it has finished saying them. Only remote
       // surfaces act on this: the sidebar already rendered every token of it.
       onRoundNarration: (text) =>
         ctx.emitAgentProgress({ conversationId: conv.id, kind: 'narration', text }),
       onDone: (finishReason) => {
-        postC({ type: 'done', finishReason });
+        postC({ type: 'done', finishReason: ctrl.signal.aborted ? 'cancelled' : finishReason });
       },
       onRepeatedCall: () =>
         postC({
@@ -447,10 +452,7 @@ export async function runModelTurn(
   // is unfinished even though the loop returned normally.
   if (result.finishReason === 'length') {
     ctx.lifecycle.markIncomplete(conv.id, 'the reply was cut off by the output limit');
-    // Name the cause and the knob, the way the round cap below does. A `length`
-    // stop that produced no text at all showed the user nothing whatsoever —
-    // the turn just ended — and the reason (thinking outgrew the remaining
-    // output budget) is not something they can infer from an empty bubble.
+    // An empty cut-off reply needs an explicit cause and recovery path.
     if (!result.finalText) {
       postC({
         type: 'notice',

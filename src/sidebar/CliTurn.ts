@@ -153,20 +153,24 @@ export async function runCliTurn(
       conv.messages.push({ role: 'assistant', content: result.assistantText });
       ctx.onTranscriptChanged(conv);
     }
-    if (result.status !== 'completed' && result.status !== 'cancelled') {
+    if (!ctrl.signal.aborted && result.status !== 'completed' && result.status !== 'cancelled') {
       postC({ type: 'error', message: result.error ?? `${model.name} failed.` });
     }
     postC({
       type: 'done',
-      finishReason: result.status === 'completed' ? 'stop' : result.status,
+      finishReason: ctrl.signal.aborted
+        ? 'cancelled'
+        : result.status === 'completed'
+          ? 'stop'
+          : result.status,
     });
-    if (result.status === 'completed') {
-      outcome = { kind: 'completed', finalText: result.finalText, finishReason: 'stop' };
-    } else if (result.status === 'cancelled') {
+    if (ctrl.signal.aborted || result.status === 'cancelled') {
       outcome =
         ctx.lifecycle.terminationKind(convId) === 'interrupted'
           ? { kind: 'interrupted', finalText: result.finalText }
           : { kind: 'cancelled', finalText: result.finalText };
+    } else if (result.status === 'completed') {
+      outcome = { kind: 'completed', finalText: result.finalText, finishReason: 'stop' };
     } else {
       outcome = {
         kind: 'failed',
@@ -177,9 +181,11 @@ export async function runCliTurn(
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
     log.error(`[AgentLoop] cli chat failed model=${model.name}: ${message}`);
-    ctx.events.onBackendError?.(message);
-    postC({ type: 'error', message });
-    postC({ type: 'done', finishReason: 'error' });
+    if (!ctrl.signal.aborted) {
+      ctx.events.onBackendError?.(message);
+      postC({ type: 'error', message });
+    }
+    postC({ type: 'done', finishReason: ctrl.signal.aborted ? 'cancelled' : 'error' });
     outcome = ctrl.signal.aborted
       ? ctx.lifecycle.terminationKind(convId) === 'interrupted'
         ? { kind: 'interrupted', finalText: '' }

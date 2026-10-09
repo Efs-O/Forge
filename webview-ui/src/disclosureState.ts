@@ -12,7 +12,7 @@ import { useCallback, useState } from 'react';
  */
 const choices = new Map<string, boolean>();
 
-export type DisclosureKind = 'thinking' | 'thinkingGroup' | 'step' | 'group' | 'diff';
+export type DisclosureKind = 'thinking' | 'thinkingGroup' | 'step' | 'run' | 'group' | 'diff';
 
 function keyOf(kind: DisclosureKind, id: string): string {
   return `${kind}:${id}`;

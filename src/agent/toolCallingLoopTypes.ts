@@ -1,5 +1,5 @@
 import type { ModelConfig } from '../config/types';
-import type { UsageHandler } from '../llm/OpenAIClient';
+import type { ToolCallProgressHandler, UsageHandler } from '../llm/OpenAIClient';
 import type { ChatMessage, ToolCall, ToolDefinition } from '../llm/types';
 import type { ToolResultContextResult } from './toolResultContext';
 
@@ -32,6 +32,7 @@ export interface ToolCallingLoopOptions {
   stripThinkingChannels?: boolean;
   onToken?: (text: string) => void;
   onReasoning?: (text: string) => void;
+  onToolCallProgress?: ToolCallProgressHandler;
   onDone?: (finishReason: string | null) => void;
   onRepeatedCall?: () => void;
   onNativeFallback?: () => void;

@@ -52,6 +52,22 @@ afterEach(() => {
 });
 
 describe('OpenAIClient truncation handling', () => {
+  it('throttles 20 argument deltas per call and sends the final count', async () => {
+    const progress = vi.fn();
+    vi.stubGlobal('fetch', vi.fn(async () => sseResponse([
+      chunk({ tool_calls: [{ index: 0, id: 'call-1', function: { name: 'write_file' } }] }),
+      ...Array.from({ length: 20 }, (_, index) => chunk({
+        tool_calls: [{ index: 0, function: { arguments: index === 0 ? '{"path":"a",' : index === 19 ? '"x":1}' : ' ' } }],
+      })),
+      chunk({}, 'tool_calls'),
+      'data: [DONE]',
+    ])));
+    const h = { ...handlers(), onToolCallProgress: progress };
+    await streamChatCompletion('http://127.0.0.1:8080', request, h);
+    expect(progress.mock.calls.length).toBeLessThanOrEqual(2);
+    expect(progress.mock.lastCall?.[0]).toMatchObject({ index: 0, id: 'call-1', name: 'write_file', argDeltas: 20 });
+    expect(h.onToolCalls).toHaveBeenCalledOnce();
+  });
   it('rejects incomplete tool arguments when the stream ends at EOF', async () => {
     vi.stubGlobal('fetch', vi.fn(async () => sseResponse([
       chunk({ tool_calls: [{ index: 0, id: 'call-1', function: { name: 'read_file', arguments: '{\"path\":\"a' } }] }),

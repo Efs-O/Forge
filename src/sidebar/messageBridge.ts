@@ -211,6 +211,15 @@ export interface ToolActivityMsg {
   detail?: string;
   conversationId?: string;
 }
+export interface ToolCallProgressMsg {
+  type: 'toolCallProgress';
+  conversationId?: string;
+  index: number;
+  toolCallId?: string;
+  toolName: string;
+  target?: string;
+  tokens: number;
+}
 export interface TokenBudgetMsg {
   type: 'tokenBudget';
   used: number;
@@ -232,11 +241,7 @@ export interface ClankerChangedMsg {
   enabled: boolean;
 }
 
-/**
- * Whether anything can reach this window from outside it. Sent on the
- * `webviewReady` handshake and again on every transport or pairing change, so a
- * reloaded webview never has to ask.
- */
+/** External reach, sent on handshake and transport or pairing changes. */
 export interface RemoteStatusMsg {
   type: 'remoteStatus';
   /** Running transports, sorted; empty when remote control is off. */
@@ -351,6 +356,7 @@ export type HostToWebview =
   | QuestionRequestMsg
   | QuestionResolvedMsg
   | ToolActivityMsg
+  | ToolCallProgressMsg
   | ToolResultMsg
   | TokenBudgetMsg
   | SetInputMsg

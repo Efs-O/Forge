@@ -20,7 +20,9 @@ export function extractToolDetail(argsJson: string): string {
       const commandArgs = Array.isArray(rawArgs)
         ? rawArgs.filter((arg): arg is string => typeof arg === 'string')
         : [];
-      return [cmd, ...commandArgs].map(displayArgument).join(' ');
+      // `command` is a whole command line for `shell`, so it is shown as typed;
+      // quoting it hid the `cd … &&` prefix from the webview's label shortener.
+      return [cmd, ...commandArgs.map(displayArgument)].join(' ');
     }
     const short =
       args['query'] ?? args['pattern'] ?? args['message'] ?? args['text'] ?? args['prompt'];

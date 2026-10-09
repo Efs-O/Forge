@@ -16,7 +16,9 @@ import type { IBackendPool } from '../backend/BackendPool';
 import type { TemplateEngine } from '../llm/TemplateEngine';
 import type { ForgeInstructionsLoader } from '../llm/ForgeInstructionsLoader';
 import type { SidebarProviderEvents } from './AgentLoop';
+import type { HostToWebview } from './messageBridge';
 import { streamModelChatCompletion } from '../llm/ChatClient';
+import { toolCallProgressMsg } from './toolCallProgress';
 import { injectSystemPrompt } from '../llm/SystemPromptInjector';
 import { mergeSampling } from '../llm/SamplingMerge';
 import { normalizeRequestForModel } from '../llm/RequestNormalizer';
@@ -41,6 +43,8 @@ export interface PromptRunContext {
   setController: (ctrl: AbortController, conversationId?: string) => void;
   /** Clears it again, but only if a later run has not already replaced it. */
   releaseController: (ctrl: AbortController) => void;
+  /** Conversation-owned prompt runs publish their cancelled terminal state. */
+  post?: (message: HostToWebview) => void;
 }
 
 /**
@@ -263,6 +267,12 @@ export async function runPromptToMarkdown(
             onToolCalls: (calls) => {
               toolCalls = calls;
             },
+            onToolCallProgress: (progress) => {
+              const msg = conversationId
+                ? toolCallProgressMsg(progress, conversationId)
+                : undefined;
+              if (msg) ctx.post?.(msg);
+            },
           },
           ctrl.signal,
           target.apiKey,
@@ -318,9 +328,12 @@ export async function runPromptToMarkdown(
       }
     }
   } catch (err) {
-    ctx.events.onBackendError?.((err as Error).message);
+    if (!ctrl.signal.aborted) ctx.events.onBackendError?.((err as Error).message);
     throw err;
   } finally {
+    if (ctrl.signal.aborted && conversationId) {
+      ctx.post?.({ type: 'done', conversationId, finishReason: 'cancelled' });
+    }
     ctx.releaseController(ctrl);
   }
 }

@@ -38,6 +38,7 @@ export async function streamOnce(
         onToolCalls: (calls) => {
           capturedToolCalls = calls;
         },
+        ...(options.onToolCallProgress ? { onToolCallProgress: options.onToolCallProgress } : {}),
         ...(options.onUsage ? { onUsage: options.onUsage } : {}),
       },
       options.signal,

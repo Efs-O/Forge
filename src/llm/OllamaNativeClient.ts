@@ -251,6 +251,8 @@ function freeSlotKey(toolAccum: Map<number, OllamaToolCallAccumulator>, from: nu
   return key;
 }
 
+// Ollama-native delivers whole tool arguments, so there are no argument deltas
+// to report through onToolCallProgress.
 function accumulateToolCalls(
   chunks: OllamaToolCallChunk[] | undefined,
   toolAccum: Map<number, OllamaToolCallAccumulator>,

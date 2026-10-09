@@ -66,6 +66,14 @@ function toggle(): void {
 }
 
 describe('ActivityRow', () => {
+  it('names the tool once when a single-call step is opened', () => {
+    render(step());
+    toggle();
+    expect(container.querySelectorAll('.activity-row-body .tool-row-name')[0]?.textContent).toBe('result');
+    expect(container.querySelector('.activity-row-body .tool-row-detail')).toBeNull();
+    expect(container.textContent?.match(/run_terminal/gu)).toHaveLength(1);
+  });
+
   it('forces a pending step open only while streaming', () => {
     const pending = step({ attempts: rounds([tool('pending', { toolResult: undefined, toolResultTotal: undefined })]) });
     render(pending, true);

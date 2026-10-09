@@ -1,4 +1,5 @@
 import { findPendingToolRow, mergeSyncedMessages, mkId, type AppMessage } from './messageOps';
+import { withoutCall, withoutConversation, withProgress } from './pendingToolCalls';
 import type { Action, State } from './appState';
 import { formatDuration } from '../../src/util/formatDuration';
 
@@ -213,11 +214,17 @@ export function reducer(state: State, action: Action): State {
       newGenerating.delete(cid);
       // A turn that ends on reasoning alone - cancelled, or cut off by the
       // output budget - still gets its span closed here rather than left open.
-      return {
+      const ended: State = {
         ...sealReasoningSpan(state, cid),
         streamingIds: newStreaming,
         generatingIds: newGenerating,
+        pendingToolCallsById: withoutConversation(state.pendingToolCallsById, cid),
       };
+      // A stopped turn otherwise ends on whatever bubble was last, which reads
+      // as a hang. Live only: a reload rebuilds rows from history without it.
+      return action.finishReason === 'cancelled' && state.streamingIds.has(cid)
+        ? appendToConv(ended, cid, { id: mkId(), role: 'system', content: 'Stopped.' })
+        : ended;
     }
 
     case 'ERROR': {
@@ -226,8 +233,14 @@ export function reducer(state: State, action: Action): State {
       const newGenerating = new Set(state.generatingIds);
       newStreaming.delete(cid);
       newGenerating.delete(cid);
+      // Seal like DONE: an open span would keep its live timer counting forever.
       return appendToConv(
-        { ...state, streamingIds: newStreaming, generatingIds: newGenerating },
+        {
+          ...sealReasoningSpan(state, cid),
+          streamingIds: newStreaming,
+          generatingIds: newGenerating,
+          pendingToolCallsById: withoutConversation(state.pendingToolCallsById, cid),
+        },
         cid,
         { id: mkId(), role: 'error', content: action.message },
       );
@@ -303,9 +316,28 @@ export function reducer(state: State, action: Action): State {
     case 'SET_MODEL':
       return { ...state, activeModel: action.name };
 
+    case 'TOOL_CALL_PROGRESS': {
+      const cid = resolveConvId(state, action.convId);
+      // Writing a call's arguments ends the thinking before it.
+      const sealed = sealReasoningSpan(state, cid);
+      const { index, toolCallId, toolName, target, tokens } = action;
+      const call = { index, toolName, tokens, ...(toolCallId ? { toolCallId } : {}) };
+      return {
+        ...sealed,
+        pendingToolCallsById: withProgress(sealed.pendingToolCallsById, cid, {
+          ...call,
+          ...(target ? { target } : {}),
+        }),
+      };
+    }
+
     case 'TOOL_ACTIVITY': {
       const cid = resolveConvId(state, action.convId);
-      return appendToConv(sealReasoningSpan(state, cid), cid, {
+      const landed: State = {
+        ...sealReasoningSpan(state, cid),
+        pendingToolCallsById: withoutCall(state.pendingToolCallsById, cid, action.toolCallId),
+      };
+      return appendToConv(landed, cid, {
         id: mkId(),
         role: 'tool' as const,
         content: action.detail ? `${action.toolName} → ${action.detail}` : action.toolName,

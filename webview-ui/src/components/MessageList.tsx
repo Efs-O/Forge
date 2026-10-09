@@ -8,6 +8,8 @@ import { ToolGroup } from './ToolGroup';
 import { ActivityRow } from './ActivityRow';
 import { ActivityGroup } from './ActivityGroup';
 import { QueuedPromptRow } from './QueuedPromptRow';
+import { PendingToolCallRow } from './PendingToolCallRow';
+import type { PendingToolCall } from '../pendingToolCalls';
 import { nextScrolledUp } from '../scrollFollow';
 
 interface Props {
@@ -34,6 +36,8 @@ interface Props {
    */
   active: boolean;
   activityView: ActivityViewMode;
+  /** Tool calls the model is still writing; shown below the rows until they land. */
+  pendingToolCalls?: readonly PendingToolCall[];
 }
 
 const WARM_ROW_THRESHOLD = 10; // rows arriving at once that justify a full measure pass
@@ -48,6 +52,7 @@ export function MessageList({
   resumedNote,
   active,
   activityView,
+  pendingToolCalls = [],
 }: Props): React.ReactElement {
   const containerRef = useRef<HTMLDivElement>(null);
   const userScrolledUp = useRef(false);
@@ -278,6 +283,9 @@ export function MessageList({
           />
         ),
       )}
+      {pendingToolCalls.map((call) => (
+        <PendingToolCallRow key={call.toolCallId ?? `pending-${call.index}`} call={call} />
+      ))}
       {resumedNote && (
         <div className="resumed-marker" role="separator">
           <span>{resumedNote}</span>

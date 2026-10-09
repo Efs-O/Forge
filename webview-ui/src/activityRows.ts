@@ -205,7 +205,7 @@ function hasDiffForRound(round: AppMessage[], messages: AppMessage[], start: num
 
 /** Shortens only the visible shell detail; ToolRow retains the original command. */
 export function displayDetail(detail: string): string {
-  return detail.replace(/^cd\s+.+?(?:&&|;)\s*/u, '');
+  return detail.replace(/^(?:cd\s+(?:"[^"]*"|'[^']*'|[^\s;&]+)\s*(?:&&|;)\s*)+/u, '');
 }
 
 /**

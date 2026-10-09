@@ -105,6 +105,41 @@ beforeEach(() => {
 });
 
 describe('runPromptToMarkdown options', () => {
+  it('posts cancelled done for a conversation-owned prompt run', async () => {
+    const post = vi.fn();
+    let active: AbortController | undefined;
+    streamModelChatCompletion.mockImplementation((
+      _url: string, _request: ChatCompletionRequest, _model: unknown,
+      handlers: { onDone: (reason: string) => void }, signal: AbortSignal,
+    ) => {
+      signal.addEventListener('abort', () => handlers.onDone('cancelled'), { once: true });
+    });
+    const run = runPromptToMarkdown({ ...ctx(), post, setController: (ctrl) => { active = ctrl; } }, 'summarize', 'conv-1');
+    await vi.waitFor(() => expect(active).toBeDefined());
+    active?.abort();
+    await run;
+    expect(post).toHaveBeenCalledOnce();
+    expect(post).toHaveBeenCalledWith({ type: 'done', conversationId: 'conv-1', finishReason: 'cancelled' });
+  });
+
+  it('forwards argument progress for a conversation-owned prompt run', async () => {
+    const post = vi.fn();
+    streamModelChatCompletion.mockImplementation((
+      _url: string, _request: ChatCompletionRequest, _model: unknown,
+      handlers: {
+        onToolCallProgress?: (progress: {
+          index: number; id: string; name: string; arguments: string; argDeltas: number;
+        }) => void;
+        onDone: (reason: string) => void;
+      },
+    ) => {
+      handlers.onToolCallProgress?.({ index: 0, id: 'call-1', name: 'read_file', arguments: '{"path":"src/a.ts"}', argDeltas: 9 });
+      handlers.onDone('stop');
+    });
+    await runPromptToMarkdown({ ...ctx(), post }, 'review', 'conv-1');
+    expect(post).toHaveBeenCalledWith({ type: 'toolCallProgress', conversationId: 'conv-1',
+      index: 0, toolCallId: 'call-1', toolName: 'read_file', target: 'src/a.ts', tokens: 9 });
+  });
   it('sends a cloud model to its provider with its key, never through the local pool', async () => {
     const acquire = vi.fn();
     let url = '';

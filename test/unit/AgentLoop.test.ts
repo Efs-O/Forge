@@ -9,6 +9,7 @@ import type { KeepUndoCodeLensProvider } from '../../src/sidebar/KeepUndoCodeLen
 import type { ToolFailureTracker } from '../../src/tools/StripTools';
 import type { DiffDecorations } from '../../src/sidebar/DiffDecorations';
 import { ToolRegistry } from '../../src/tools/ToolRegistry';
+import { partialToolPath } from '../../src/sidebar/toolCallProgress';
 import type { CliAgentDriver } from '../../src/agents/CliAgentDriver';
 import * as fs from 'fs';
 import * as os from 'os';
@@ -201,6 +202,11 @@ function completeTurnImmediately(): void {
 }
 
 describe('AgentLoop', () => {
+  it('extracts a path only after the partial JSON string closes', () => {
+    expect(partialToolPath('{"path":"src/a')).toBeUndefined();
+    expect(partialToolPath('{"other_path":"wrong","path":"src/a.ts","content":"x')).toBe('src/a.ts');
+    expect(partialToolPath('{"path":"a\\\"b.ts"}')).toBe('a"b.ts');
+  });
   afterEach(() => {
     vi.clearAllMocks();
   });
@@ -290,6 +296,27 @@ describe('AgentLoop', () => {
     }
   });
 
+  it('posts cancelled done when Stop arrives during local backend acquisition', async () => {
+    let release: (() => void) | undefined;
+    const held = new Promise<BackendController>((resolve) => {
+      release = () => resolve(makeBackend());
+    });
+    const config = makeConfig();
+    const conv = makeConversation();
+    const post = vi.fn();
+    const acquire = vi.fn(() => held);
+    const loop = makeLoop(makePool(acquire), config, post);
+    const turn = loop.runTurn(conv, config.models[0]!, 'cold prompt');
+    await vi.waitFor(() => expect(acquire).toHaveBeenCalledOnce());
+    const stop = loop.cancel(conv.id);
+    release?.();
+    await stop;
+    expect((await turn).kind).toBe('cancelled');
+    expect(post).toHaveBeenCalledWith(expect.objectContaining({
+      type: 'done', finishReason: 'cancelled', conversationId: conv.id,
+    }));
+  });
+
   it('waits for a cancelled turn to settle before allowing a new backend acquire', async () => {
     let finishTurn: (() => void) | undefined;
     streamModelChatCompletion.mockImplementation(
@@ -304,14 +331,15 @@ describe('AgentLoop', () => {
       ) => {
         finishTurn = () => {
           handlers.onToolCalls(null);
-          handlers.onDone('cancelled');
+          handlers.onDone('stop');
         };
         return Promise.resolve();
       },
     );
     const conv = makeConversation();
     const config = makeConfig();
-    const loop = makeLoop(makePool(), config);
+    const post = vi.fn();
+    const loop = makeLoop(makePool(), config, post);
 
     const firstTurn = loop.runTurn(conv, config.models[0]!, 'slow prompt');
     await vi.waitFor(() => expect(loop.isStreamingConv(conv.id)).toBe(true));
@@ -326,9 +354,10 @@ describe('AgentLoop', () => {
 
     finishTurn?.();
     await cancellation;
-    await firstTurn;
+    expect((await firstTurn).kind).toBe('cancelled');
     await barrier;
     expect(barrierPassed).toBe(true);
+    expect(post).toHaveBeenCalledWith(expect.objectContaining({ type: 'done', finishReason: 'cancelled', conversationId: conv.id }));
   });
 
   it('cancels a compaction prompt owned by the selected conversation', async () => {
@@ -350,6 +379,32 @@ describe('AgentLoop', () => {
     await vi.waitFor(() => expect(streamModelChatCompletion).toHaveBeenCalledOnce());
     await loop.cancel(conv.id);
     await expect(compact).resolves.toBe('');
+  });
+
+  it('forwards tool argument progress with the exact bridge fields', async () => {
+    streamModelChatCompletion.mockImplementation((
+      _url: string, _request: unknown, _model: ModelConfig,
+      handlers: {
+        onToolCallProgress?: (progress: {
+          index: number; id: string; name: string; arguments: string; argDeltas: number;
+        }) => void;
+        onDone: (reason: string) => void;
+      },
+    ) => {
+      handlers.onToolCallProgress?.({
+        index: 2, id: 'call-2', name: 'write_file',
+        arguments: '{"path":"src/a.ts","content":"unfinished', argDeltas: 17,
+      });
+      handlers.onDone('stop');
+    });
+    const config = makeConfig();
+    const post = vi.fn();
+    const loop = makeLoop(makePool(), config, post);
+    await loop.runTurn(makeConversation(), config.models[0]!, 'write');
+    expect(post).toHaveBeenCalledWith({
+      type: 'toolCallProgress', conversationId: 'conv-1', index: 2,
+      toolCallId: 'call-2', toolName: 'write_file', target: 'src/a.ts', tokens: 17,
+    });
   });
 
   it('commits a user prompt once the backend is ready and the turn begins', async () => {
@@ -421,6 +476,25 @@ describe('AgentLoop', () => {
     expect(post).toHaveBeenCalledWith(
       expect.objectContaining({ type: 'done', finishReason: 'stop' }),
     );
+  });
+
+  it('posts cancelled done when a CLI stop races with a completed driver result', async () => {
+    let finish: (() => void) | undefined;
+    const run = vi.fn(async () => {
+      await new Promise<void>((resolve) => { finish = resolve; });
+      return { status: 'completed' as const, finalText: '' };
+    });
+    const config = makeConfig({ provider: 'cli', cli: FAKE_CLAUDE_CLI });
+    const conv = makeConversation();
+    const post = vi.fn();
+    const loop = makeLoop(makePool(), config, post, new ToolRegistry(), { run } as unknown as CliAgentDriver);
+    const turn = loop.runTurn(conv, config.models[0]!, 'stop this');
+    await vi.waitFor(() => expect(run).toHaveBeenCalledOnce());
+    const stop = loop.cancel(conv.id);
+    finish?.();
+    await stop;
+    expect((await turn).kind).toBe('cancelled');
+    expect(post).toHaveBeenCalledWith(expect.objectContaining({ type: 'done', finishReason: 'cancelled', conversationId: conv.id }));
   });
 
   it('does not commit or launch a CLI prompt when rollback preparation fails', async () => {

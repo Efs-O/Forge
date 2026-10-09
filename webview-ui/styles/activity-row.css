@@ -42,6 +42,19 @@
   white-space: nowrap;
 }
 .activity-row-reasoning { margin-left: auto; font-size: 11.5px; }
+.activity-pending-progress {
+  flex: 0 0 auto;
+  color: var(--vscode-descriptionForeground);
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
+}
+/* A call still being written: dim, with a slow pulse on the ring so a long
+   write reads as work in progress. */
+.activity-pending .tool-row-status { animation: forge-pending-pulse 1.6s ease-in-out infinite; }
+@keyframes forge-pending-pulse { 50% { opacity: 0.35; } }
+@media (prefers-reduced-motion: reduce) {
+  .activity-pending .tool-row-status { animation: none; }
+}
 .activity-row-retry {
   flex: 0 0 auto;
   padding: 0 4px;

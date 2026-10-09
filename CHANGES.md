@@ -2,6 +2,12 @@
 
 ## 0.17.0
 
+- While the model writes a tool call's arguments, the transcript shows a live row (`○ write_file matchbox.html · writing… 4,210 tokens`) that the real row replaces when the call is complete. A large `write_file` used to leave the screen frozen after the thinking bubble for as long as the model kept writing.
+- An open thinking label counts up (`Thinking… 12 s`) instead of standing still until the span ends; an error now ends the span too.
+- A turn the user stops ends with a dim "Stopped." line instead of breaking off silently.
+- Back-to-back successful calls of one tool fold into one row (`✓ shell ×6 · grep, sed`) that opens to the individual steps. Edits, failures, retries and running calls keep their own rows.
+- An opened single-call step no longer repeats the tool name and target in its result row.
+- `shell` labels hide any leading `cd <dir> &&` again. The host quoted the whole command line, so the webview's prefix strip never matched.
 - Activity rows and group headers colour their `+N` / `−N` line counts green and red like the diff blocks do; they were plain grey text.
 - The session log keeps the text a model writes alongside a tool call ("Physics is now 11.6 ms. Moving to the renderer."). Tool-call rows were logged with `content: null`, so that narration showed in the sidebar and nowhere in `~/.forge/sessions/`.
 - Scrolling up while a reply streams now stops the transcript following new output at once. Within 80px of the bottom a small upward scroll used to count as "still at the bottom", so each streamed token pulled the view back down and the wheel could barely climb a growing thinking bubble.

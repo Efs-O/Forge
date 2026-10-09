@@ -9,7 +9,7 @@ import { FILE_LINK_SCHEME, linkifyForRender, parseFileLink } from '../linkify';
 // Same formatter the standalone reasoning rows use. Two renderers reached the
 // screen saying "Thinking" - this one, for a turn that reasoned *and* answered,
 // was the unmeasured one, so the rows that cost the most said the least.
-import { thinkingLabel } from './ThinkingGroup';
+import { ThinkingLabel } from './ThinkingGroup';
 import { MessageAttachments } from './MessageAttachments';
 
 const ChevronDown = (): React.ReactElement => (
@@ -198,6 +198,7 @@ function MessageView({
   content,
   reasoning,
   reasoningMs,
+  reasoningStartedAt,
   streaming,
   preformatted,
   attachments,
@@ -248,7 +249,9 @@ function MessageView({
               onClick={() => setThinkingOpen((open) => !open)}
               aria-expanded={thinkingOpen}
             >
-              <span>{thinkingLabel(reasoningMs)}</span>
+              <span>
+                <ThinkingLabel startedAt={reasoningStartedAt} ms={reasoningMs} />
+              </span>
               <span className="thinking-chevron">
                 {thinkingOpen ? <ChevronDown /> : <ChevronRight />}
               </span>

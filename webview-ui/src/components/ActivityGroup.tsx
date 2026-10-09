@@ -4,7 +4,9 @@ import type { ActivityGroupItem } from '../activityRows';
 import { groupMessages, stepMessages } from '../activityRows';
 import { sameRowList } from '../messageOps';
 import { summarizeGroup } from '../activityGroups';
+import { foldRuns, type FoldedItem } from '../activityRuns';
 import { ActivityRow } from './ActivityRow';
+import { ActivityRunRow } from './ActivityRunRow';
 import { ThinkingGroup } from './ThinkingGroup';
 
 export interface ActivityGroupProps {
@@ -27,8 +29,10 @@ const Chevron = ({ expanded }: { expanded: boolean }): React.ReactElement => (
   </svg>
 );
 
-function itemKey(item: ActivityGroupItem): string {
-  return item.kind === 'step' ? stepMessages(item.step)[0]!.id : item.steps[0]!.id;
+function itemKey(item: FoldedItem): string {
+  if (item.kind === 'step') return stepMessages(item.step)[0]!.id;
+  if (item.kind === 'run') return stepMessages(item.steps[0]!)[0]!.id;
+  return item.steps[0]!.id;
 }
 
 function ActivityGroupView({ items, live, streaming }: ActivityGroupProps): React.ReactElement {
@@ -93,9 +97,16 @@ function ActivityGroupView({ items, live, streaming }: ActivityGroupProps): Reac
       </button>
       {expanded && (
         <div className="activity-group-body">
-          {items.map((item) =>
+          {foldRuns(items).map((item) =>
             item.kind === 'step' ? (
               <ActivityRow key={itemKey(item)} step={item.step} streaming={streaming} />
+            ) : item.kind === 'run' ? (
+              <ActivityRunRow
+                key={itemKey(item)}
+                toolName={item.toolName}
+                steps={item.steps}
+                streaming={streaming}
+              />
             ) : (
               <ThinkingGroup key={itemKey(item)} steps={item.steps} />
             ),

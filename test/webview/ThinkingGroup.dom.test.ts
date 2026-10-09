@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 import { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 /**
  * DOM tests for the compact reasoning rows. A long agent turn opens one
@@ -114,5 +114,24 @@ describe('ThinkingRow live expansion', () => {
     expect(container.querySelector('.thinking-content')).toBe(pane);
     expect(pane.textContent).toBe(complete);
     expect(pane.getAttribute('data-inner-scroll')).toBe('false');
+  });
+});
+
+describe('live thinking label', () => {
+  afterEach(() => vi.useRealTimers());
+
+  it('counts up while the span is open and settles once it is sealed', () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(10_000);
+    const live = { ...step('live', 'hmm'), reasoningStartedAt: 10_000 };
+    act(() => root.render(React.createElement(ThinkingGroup, { steps: [live] })));
+    expect(container.textContent).toContain('Thinking… 0 s');
+    act(() => vi.advanceTimersByTime(3_000));
+    expect(container.textContent).toContain('Thinking… 3 s');
+    act(() =>
+      root.render(React.createElement(ThinkingGroup, { steps: [{ ...live, reasoningMs: 3_400 }] })),
+    );
+    expect(container.textContent).toContain('Thought for 3.4 s');
+    expect(vi.getTimerCount()).toBe(0);
   });
 });

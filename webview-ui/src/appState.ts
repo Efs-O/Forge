@@ -1,4 +1,5 @@
 import type { CheckpointStats } from '../../src/sidebar/diffMessages';
+import type { PendingToolCalls } from './pendingToolCalls';
 import type {
   SessionTabMeta,
   SessionHistoryMeta,
@@ -50,12 +51,15 @@ export interface State {
   /** Whether anything outside this window can drive it. Host-owned. */
   remote: { transports: string[]; paired: boolean };
   activityView: ActivityViewMode;
+  /** Tool calls still being written, per conversation (`pendingToolCalls.ts`). */
+  pendingToolCallsById: PendingToolCalls;
 }
 
 export const initialState: State = {
   messagesById: {},
   streamingIds: new Set(),
   generatingIds: new Set(),
+  pendingToolCallsById: new Map(),
   models: [],
   activeModel: null,
   backendReady: false,
@@ -94,7 +98,16 @@ export type Action =
   | { type: 'NOTICE'; message: string; convId?: string; preformatted?: boolean }
   | { type: 'REASONING_TOKEN'; text: string; convId?: string }
   | { type: 'GENERATION_STARTED'; convId?: string }
-  | { type: 'DONE'; convId?: string }
+  | { type: 'DONE'; convId?: string; finishReason?: string | null }
+  | {
+      type: 'TOOL_CALL_PROGRESS';
+      convId?: string;
+      index: number;
+      toolCallId?: string;
+      toolName: string;
+      target?: string;
+      tokens: number;
+    }
   | { type: 'ERROR'; message: string; convId?: string }
   | { type: 'READY'; convId?: string }
   | { type: 'BACKEND_STARTING'; message: string; convId?: string }

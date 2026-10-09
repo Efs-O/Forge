@@ -101,6 +101,11 @@ export async function runCloudProviderTurn(
     log.info(`[AgentLoop] ${model.provider} token resolved for model=${model.name}`);
   } catch (err) {
     const msg = (err as Error).message;
+    if (ctrl.signal.aborted) {
+      postC({ type: 'done', finishReason: 'cancelled' });
+      ctx.lifecycle.settle(convId);
+      return abortedTurnOutcome(ctx.lifecycle.terminationKind(convId));
+    }
     log.error(`[AgentLoop] ${model.provider} setup failed: ${msg}`);
     postC({ type: 'error', message: msg });
     ctx.lifecycle.settle(convId);
@@ -126,12 +131,14 @@ export async function runCloudProviderTurn(
       checkpoint,
     );
     const incompleteReason = ctx.lifecycle.incompleteReason(convId);
-    outcome = {
-      kind: 'completed',
-      finalText: result.finalText,
-      finishReason: result.finishReason,
-      ...(incompleteReason ? { incompleteReason } : {}),
-    };
+    outcome = ctrl.signal.aborted
+      ? abortedTurnOutcome(ctx.lifecycle.terminationKind(convId))
+      : {
+          kind: 'completed',
+          finalText: result.finalText,
+          finishReason: result.finishReason,
+          ...(incompleteReason ? { incompleteReason } : {}),
+        };
     finalText = result.finalText;
   } catch (err) {
     if (ctrl.signal.aborted) {
@@ -235,6 +242,7 @@ export async function runLocalProviderTurn(
       ctx.events.onBackendError?.(msg);
       ctx.events.onTurnFailed?.(convId, msg);
       postC({ type: 'backendDown', message: msg });
+      if (ctrl.signal.aborted) postC({ type: 'done', finishReason: 'cancelled' });
       ctx.lifecycle.settle(convId);
       return ctrl.signal.aborted
         ? abortedTurnOutcome(ctx.lifecycle.terminationKind(convId))
@@ -263,12 +271,14 @@ export async function runLocalProviderTurn(
         checkpoint,
       );
       const incompleteReason = ctx.lifecycle.incompleteReason(convId);
-      outcome = {
-        kind: 'completed',
-        finalText: result.finalText,
-        finishReason: result.finishReason,
-        ...(incompleteReason ? { incompleteReason } : {}),
-      };
+      outcome = ctrl.signal.aborted
+        ? abortedTurnOutcome(ctx.lifecycle.terminationKind(convId))
+        : {
+            kind: 'completed',
+            finalText: result.finalText,
+            finishReason: result.finishReason,
+            ...(incompleteReason ? { incompleteReason } : {}),
+          };
       finalText = result.finalText;
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);

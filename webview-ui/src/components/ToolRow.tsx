@@ -1,4 +1,5 @@
 import React, { useCallback, useContext, useMemo, useState } from 'react';
+import { toolNameAndDetail } from '../messageOps';
 import Markdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import type { AppMessage } from '../reducer';
@@ -30,15 +31,6 @@ const EXPANDABLE_MIN_CHARS = 100;
 
 function formatSize(chars: number): string {
   return chars >= 1000 ? `${(chars / 1000).toFixed(1)}k chars` : `${chars} chars`;
-}
-
-/** Shared name/detail split for compact headers and the full tool row. */
-export function toolNameAndDetail(message: AppMessage): { name: string; detail: string } {
-  const arrow = message.content.indexOf(' → ');
-  return {
-    name: arrow !== -1 ? message.content.slice(0, arrow) : message.content,
-    detail: message.toolDetail ?? (arrow !== -1 ? message.content.slice(arrow + 3) : ''),
-  };
 }
 
 /** The one thumbnail renderer is shared by full tool rows and collapsed steps. */
@@ -95,9 +87,20 @@ export function ToolRowThumbnails({ message }: { message: AppMessage }): React.R
  * all — stays behind a toggle and renders as markdown with its newlines intact,
  * instead of being flattened into a 600-char grey ribbon.
  */
-export function ToolRow({ message }: { message: AppMessage }): React.ReactElement {
+/**
+ * `nested`: the row sits under an activity step whose header already names the
+ * tool and its target, so it shows only what the header lacks (the result).
+ */
+export function ToolRow({
+  message,
+  nested = false,
+}: {
+  message: AppMessage;
+  nested?: boolean;
+}): React.ReactElement {
   const [open, setOpen] = useState(false);
-  const { name, detail } = toolNameAndDetail(message);
+  const { name: toolName, detail } = toolNameAndDetail(message);
+  const name = nested ? 'result' : toolName;
 
   const result = message.toolResult ?? '';
   const expandable = result.length >= EXPANDABLE_MIN_CHARS || detail.length >= EXPANDABLE_MIN_CHARS;
@@ -135,7 +138,7 @@ export function ToolRow({ message }: { message: AppMessage }): React.ReactElemen
         ) : (
           <span className="tool-row-name">{name}</span>
         )}
-        {detail && <span className="tool-row-detail">{detail}</span>}
+        {detail && !nested && <span className="tool-row-detail">{detail}</span>}
         {elapsed && <span className="tool-row-time">{elapsed}</span>}
         {expandable && (
           <span className="tool-row-size">

@@ -108,6 +108,8 @@ describe('compact activity rows', () => {
     expect(displayDetail('cd /workspace/project && npm test')).toBe('npm test');
     expect(displayDetail('cd /workspace/project; npm test')).toBe('npm test');
     expect(displayDetail('echo "cd /tmp && no"')).toBe('echo "cd /tmp && no"');
+    expect(displayDetail('cd "n:/vs code apps/hb-runs/forge" && grep -n x f')).toBe('grep -n x f');
+    expect(displayDetail("cd 'a b' && cd sub && sed -n 1p f")).toBe('sed -n 1p f');
   });
 
   it('renders the nine-call acceptance sequence as seven steps plus trailing thoughts', () => {

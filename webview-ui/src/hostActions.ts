@@ -22,7 +22,17 @@ export function hostMessageToAction(msg: HostToWebview): Action | undefined {
     case 'reasoningToken':
       return { type: 'REASONING_TOKEN', text: msg.text, convId: msg.conversationId };
     case 'done':
-      return { type: 'DONE', convId: msg.conversationId };
+      return { type: 'DONE', convId: msg.conversationId, finishReason: msg.finishReason };
+    case 'toolCallProgress':
+      return {
+        type: 'TOOL_CALL_PROGRESS',
+        convId: msg.conversationId,
+        index: msg.index,
+        toolName: msg.toolName,
+        tokens: msg.tokens,
+        ...(msg.toolCallId ? { toolCallId: msg.toolCallId } : {}),
+        ...(msg.target ? { target: msg.target } : {}),
+      };
     case 'error':
       return { type: 'ERROR', message: msg.message, convId: msg.conversationId };
     case 'ready':

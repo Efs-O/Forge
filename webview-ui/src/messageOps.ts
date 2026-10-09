@@ -326,3 +326,12 @@ export function sameRowList(a: readonly AppMessage[], b: readonly AppMessage[]):
   }
   return true;
 }
+
+/** Shared name/detail split for compact headers and the full tool row. */
+export function toolNameAndDetail(message: AppMessage): { name: string; detail: string } {
+  const arrow = message.content.indexOf(' → ');
+  return {
+    name: arrow !== -1 ? message.content.slice(0, arrow) : message.content,
+    detail: message.toolDetail ?? (arrow !== -1 ? message.content.slice(arrow + 3) : ''),
+  };
+}
