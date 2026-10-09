@@ -42,15 +42,30 @@ function coerceValue(type: unknown, value: string): unknown {
       return /^-?\d+(?:\.\d+)?$/u.test(text) ? Number(text) : undefined;
     case 'array': {
       if (!text.startsWith('[')) return undefined;
-      try {
-        const parsed: unknown = JSON.parse(text);
-        return Array.isArray(parsed) ? parsed : undefined;
-      } catch {
-        // Not a JSON array: invalidArgs names the field and the expected shape.
-        return undefined;
-      }
+      const parsed = parseJsonArray(text);
+      return parsed.ok ? parsed.value : undefined;
     }
     default:
       return undefined;
+  }
+}
+
+/** JSON.parse's zero-based position for an invalid string offered as an array. */
+export function invalidArrayJsonPosition(value: string): number | undefined {
+  const text = value.trim();
+  if (!text.startsWith('[')) return undefined;
+  const parsed = parseJsonArray(text);
+  return parsed.ok ? undefined : parsed.position;
+}
+
+function parseJsonArray(
+  text: string,
+): { ok: true; value: unknown[] } | { ok: false; position: number } {
+  try {
+    const parsed: unknown = JSON.parse(text);
+    return Array.isArray(parsed) ? { ok: true, value: parsed } : { ok: false, position: 0 };
+  } catch (error) {
+    const position = /position (\d+)/u.exec(error instanceof Error ? error.message : '')?.[1];
+    return { ok: false, position: position === undefined ? text.length : Number(position) };
   }
 }

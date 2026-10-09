@@ -8,12 +8,7 @@ const MAX_LINES_PER_OPERATION = 500;
 const MAX_LINE_CHARS = 4_000;
 const MAX_EXPECTED_CHARS = 64_000;
 const MAX_REPLACEMENT_CHARS = 64_000;
-const OPERATION_REQUIRED_FIELDS = [
-  'start_line',
-  'end_line',
-  'expected_lines',
-  'replacement_lines',
-] as const;
+const OPERATION_REQUIRED_FIELDS = ['expected_lines', 'replacement_lines'] as const;
 
 export interface LineEditOperation {
   start_line: number;
@@ -45,12 +40,21 @@ export function applyLineEditsToContent(
   const lines = normalized.split('\n');
   if (finalEol) lines.pop();
 
-  let previousEnd = 0;
+  const ordered = operations
+    .map((operation, index) => ({ operation, index: index + 1 }))
+    .sort((left, right) => left.operation.start_line - right.operation.start_line);
+  let previous: { operation: LineEditOperation; index: number } | undefined;
   let expectedChars = 0;
   let replacementChars = 0;
-  for (const [index, operation] of operations.entries()) {
-    validateOperation(operation, index, lines.length, previousEnd);
-    previousEnd = operation.end_line;
+  for (const { operation, index } of ordered) {
+    validateOperation(operation, index - 1, lines);
+    if (previous && operation.start_line <= previous.operation.end_line) {
+      throw new Error(
+        `apply_line_edits: operation ${previous.index} lines ${previous.operation.start_line}-${previous.operation.end_line} ` +
+          `overlaps operation ${index} lines ${operation.start_line}-${operation.end_line}`,
+      );
+    }
+    previous = { operation, index };
     expectedChars += operation.expected_lines.reduce((total, line) => total + line.length, 0);
     if (expectedChars > MAX_EXPECTED_CHARS) {
       throw new Error(`apply_line_edits: expected lines exceed ${MAX_EXPECTED_CHARS} characters`);
@@ -68,7 +72,7 @@ export function applyLineEditsToContent(
   }
 
   const updated = [...lines];
-  for (const operation of [...operations].reverse()) {
+  for (const { operation } of [...ordered].reverse()) {
     updated.splice(
       operation.start_line - 1,
       operation.end_line - operation.start_line + 1,
@@ -99,7 +103,7 @@ export function makeApplyLineEditsTool(
       function: {
         name: 'apply_line_edits',
         description:
-          'Atomically apply ordered, non-overlapping replacements to one file using one-based inclusive line ranges. Read the file first and copy the current lines exactly into expected_lines; stale or out-of-range edits are rejected.',
+          'Atomically apply non-overlapping replacements to one file using one-based inclusive line ranges; operations are applied in line order. Read the file first and copy the current lines exactly into expected_lines; stale or out-of-range edits are rejected.',
         parameters: {
           type: 'object',
           properties: {
@@ -186,10 +190,22 @@ function parseOperations(value: unknown): LineEditOperation[] {
     if (missing !== undefined) {
       throw new Error(`apply_line_edits: operation ${index + 1} is missing ${missing}`);
     }
+    const expectedLines = requireLines(record['expected_lines'], index, 'expected_lines');
+    const hasStart = record['start_line'] !== undefined;
+    const hasEnd = record['end_line'] !== undefined;
+    if (!hasStart && !hasEnd) {
+      throw new Error(`apply_line_edits: operation ${index + 1} is missing start_line or end_line`);
+    }
+    const suppliedStart = hasStart
+      ? requireInteger(record['start_line'], `operation ${index + 1} start_line`)
+      : undefined;
+    const suppliedEnd = hasEnd
+      ? requireInteger(record['end_line'], `operation ${index + 1} end_line`)
+      : undefined;
     return {
-      start_line: requireInteger(record['start_line'], `operation ${index + 1} start_line`),
-      end_line: requireInteger(record['end_line'], `operation ${index + 1} end_line`),
-      expected_lines: requireLines(record['expected_lines'], index, 'expected_lines'),
+      start_line: suppliedStart ?? suppliedEnd! - expectedLines.length + 1,
+      end_line: suppliedEnd ?? suppliedStart! + expectedLines.length - 1,
+      expected_lines: expectedLines,
       replacement_lines: requireLines(record['replacement_lines'], index, 'replacement_lines'),
     };
   });
@@ -209,9 +225,9 @@ function requireLines(value: unknown, index: number, field: string): string[] {
 function validateOperation(
   operation: LineEditOperation,
   index: number,
-  lineCount: number,
-  previousEnd: number,
+  lines: readonly string[],
 ): void {
+  const lineCount = lines.length;
   if (
     !Number.isInteger(operation.start_line) ||
     !Number.isInteger(operation.end_line) ||
@@ -221,19 +237,21 @@ function validateOperation(
   ) {
     throw new Error(`apply_line_edits: operation ${index + 1} has an out-of-range line span`);
   }
-  if (operation.start_line <= previousEnd) {
-    throw new Error('apply_line_edits: operations must be ordered and non-overlapping');
-  }
   const expectedCount = operation.end_line - operation.start_line + 1;
   if (!validLineArray(operation.expected_lines) || !validLineArray(operation.replacement_lines)) {
     throw new Error(`apply_line_edits: operation ${index + 1} contains invalid lines`);
   }
   if (operation.expected_lines.length !== expectedCount) {
-    throw new Error(
+    const current = lines
+      .slice(operation.start_line - 1, operation.end_line)
+      .map((line, offset) => `${operation.start_line + offset}|${line}`)
+      .join('\n');
+    const detail = ` Current file lines ${operation.start_line}-${operation.end_line}:\n${current}`;
+    const message =
       `apply_line_edits: operation ${index + 1} expected_lines has ${operation.expected_lines.length} ` +
-        `line(s), but lines ${operation.start_line}-${operation.end_line} are ${expectedCount} line(s). ` +
-        'expected_lines must be exactly the current text of start_line through end_line, one entry per line.',
-    );
+      `line(s), but lines ${operation.start_line}-${operation.end_line} are ${expectedCount} line(s). ` +
+      'expected_lines must be exactly the current text of start_line through end_line, one entry per line.';
+    throw new Error(message + detail.slice(0, Math.max(0, 1200 - message.length)));
   }
   if (operation.replacement_lines.length > MAX_LINES_PER_OPERATION) {
     throw new Error(`apply_line_edits: operation ${index + 1} has too many replacement lines`);

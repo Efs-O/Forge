@@ -1,6 +1,7 @@
 import type { ChatMessage, ContentPart, ToolDefinition } from '../llm/types';
 import type { PlanItem } from '../sidebar/sessionTypes';
 import { recordNativeLazyTool } from './lazyToolGroups';
+import { invalidArrayJsonPosition } from './argCoercion';
 import type { ToolOutputLimits } from './toolOutputLimits';
 import type { ConversationRuntime } from '../sidebar/sessionTypes';
 import type { CheckpointSession } from '../checkpoint/CheckpointStack';
@@ -313,6 +314,13 @@ export class ToolRegistry {
       .filter(([key, schema]) => schema?.type === 'array' && !Array.isArray(present[key]))
       .map(([key]) => `"${key}" (got ${typeof present[key]})`);
     if (notArray.length > 0) {
+      for (const [key, schema] of declared) {
+        if (schema?.type !== 'array' || typeof present[key] !== 'string') continue;
+        const position = invalidArrayJsonPosition(present[key]);
+        if (position !== undefined) {
+          return `Error: ${name} "${key}" is invalid JSON at position ${position}; correct the JSON array syntax.`;
+        }
+      }
       return `Error: ${name} needs a JSON array for ${notArray.join(', ')}, not a string holding one. Resend it as a bare array, e.g. ["a", "b"].`;
     }
     return invalidArrayItems(name, declared, present);

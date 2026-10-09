@@ -46,13 +46,19 @@ describe('apply_line_edits', () => {
     ).toThrow('is stale');
   });
 
-  it('rejects overlapping and out-of-range spans', () => {
+  it('sorts out-of-order operations and names overlapping operation ranges', () => {
+    expect(
+      applyLineEditsToContent('a\nb\nc', [
+        { start_line: 3, end_line: 3, expected_lines: ['c'], replacement_lines: ['C'] },
+        { start_line: 1, end_line: 1, expected_lines: ['a'], replacement_lines: ['A'] },
+      ]).content,
+    ).toBe('A\nb\nC');
     expect(() =>
       applyLineEditsToContent('a\nb\nc', [
         { start_line: 2, end_line: 2, expected_lines: ['b'], replacement_lines: ['B'] },
         { start_line: 2, end_line: 3, expected_lines: ['b', 'c'], replacement_lines: ['C'] },
       ]),
-    ).toThrow('ordered and non-overlapping');
+    ).toThrow('operation 1 lines 2-2 overlaps operation 2 lines 2-3');
     expect(() =>
       applyLineEditsToContent('a\n', [
         { start_line: 2, end_line: 2, expected_lines: [''], replacement_lines: ['b'] },
@@ -66,6 +72,40 @@ describe('apply_line_edits', () => {
         { start_line: 2, end_line: 4, expected_lines: ['b', 'c'], replacement_lines: ['B'] },
       ]),
     ).toThrow('operation 1 expected_lines has 2 line(s), but lines 2-4 are 3 line(s)');
+    expect(() =>
+      applyLineEditsToContent('a\nb\nc\nd\n', [
+        { start_line: 2, end_line: 4, expected_lines: ['b', 'c'], replacement_lines: ['B'] },
+      ]),
+    ).toThrow('Current file lines 2-4:\n2|b\n3|c\n4|d');
+  });
+
+  it('derives one omitted bound from expected_lines when dispatching the tool', async () => {
+    const directory = fs.mkdtempSync(path.join(process.cwd(), '.forge-line-edit-bounds-'));
+    const filePath = path.join(directory, 'sample.ts');
+    const relativePath = path.relative(process.cwd(), filePath);
+    fs.writeFileSync(filePath, 'one\ntwo\nthree\n', 'utf8');
+    const tool = makeApplyLineEditsTool();
+    try {
+      await expect(
+        tool.handler({
+          path: relativePath,
+          operations: [
+            { start_line: 2, expected_lines: ['two'], replacement_lines: ['TWO'] },
+          ],
+        }),
+      ).resolves.toContain('"operationsApplied":1');
+      await expect(
+        tool.handler({
+          path: relativePath,
+          operations: [
+            { end_line: 3, expected_lines: ['three'], replacement_lines: ['THREE'] },
+          ],
+        }),
+      ).resolves.toContain('"operationsApplied":1');
+      expect(fs.readFileSync(filePath, 'utf8')).toBe('one\nTWO\nTHREE\n');
+    } finally {
+      fs.rmSync(directory, { recursive: true, force: true });
+    }
   });
 
   it('rejects no-op operations', () => {

@@ -3,6 +3,7 @@ import * as path from 'path';
 import { describe, expect, it, vi } from 'vitest';
 import { ToolRegistry, type RegisteredTool } from '../../src/tools/ToolRegistry';
 import { makeApplyLineEditsTool } from '../../src/tools/structuredEditTool';
+import { coerceToolArgs } from '../../src/tools/argCoercion';
 
 vi.mock('vscode', () => ({
   workspace: { workspaceFolders: [{ uri: { fsPath: process.cwd() } }] },
@@ -244,6 +245,21 @@ describe('tool argument field locations (PTF F5)', () => {
   });
 });
 
+describe('apply_line_edits reports invalid JSON array positions', () => {
+  const registry = new ToolRegistry();
+  const tool = makeApplyLineEditsTool();
+
+  it.each([
+    // Trimmed from 5dd2e479: embedded source contains an unescaped quote.
+    '[{"end_line":52,"expected_lines":["bad "quote"]}]',
+    // Trimmed from 9e9e82dc: the session argument ended before its JSON value closed.
+    '[{"start_line":859,"end_line":923,"expected_lines":["/* ---- pelican',
+  ])('identifies a JSON.parse position in the operations string', (operations) => {
+    const args = coerceToolArgs(tool.definition, { path: 'scene.js', operations });
+    expect(registry.invalidArgs(tool, args)).toMatch(/invalid JSON at position \d+/u);
+  });
+});
+
 describe('apply_line_edits missing nested field (Fix C)', () => {
   function withSampleFile<T>(fn: (relativePath: string) => Promise<T>): Promise<T> {
     const dir = fs.mkdtempSync(path.join(process.cwd(), '.forge-fixc-test-'));
@@ -263,13 +279,12 @@ describe('apply_line_edits missing nested field (Fix C)', () => {
           path: relativePath,
           operations: [
             {
-              end_line: 1,
               expected_lines: ['const value = 1;'],
               replacement_lines: ['const value = 2;'],
             },
           ],
         }),
-      ).rejects.toThrow('apply_line_edits: operation 1 is missing start_line');
+      ).rejects.toThrow('apply_line_edits: operation 1 is missing start_line or end_line');
       expect(fs.readFileSync(path.join(process.cwd(), relativePath), 'utf8')).toBe(
         'const value = 1;\n',
       );
@@ -290,13 +305,12 @@ describe('apply_line_edits missing nested field (Fix C)', () => {
               replacement_lines: ['const value = 1;'],
             },
             {
-              start_line: 1,
               expected_lines: ['const value = 1;'],
               replacement_lines: ['x'],
             },
           ],
         }),
-      ).rejects.toThrow('apply_line_edits: operation 2 is missing end_line');
+      ).rejects.toThrow('apply_line_edits: operation 2 is missing start_line or end_line');
     });
   });
 
