@@ -442,6 +442,8 @@ overlaps with an existing owner, extend the owner instead.
 | Preview resource transport (host-side fetch of routed requests, redirects re-checked per hop, byte cap) | `src/tools/renderHtml/previewFetch.ts` |
 | `render_html_to_image` input validation (HTML size cap, workspace file read, viewport bounds) | `src/tools/renderHtml/htmlInput.ts` |
 | `render_html_to_image` preview mode (result text, vision-gated image part; saves and sends nothing) | `src/tools/renderHtml/previewMode.ts` |
+| Shader discovery in workspace files (WGSL/GLSL files, typed script blocks, string literals; source-line mapping) | `src/tools/renderHtml/shaderExtract.ts` |
+| `render_html_to_image` shader_check mode (isolated software-adapter compile, diagnostics with file locations) | `src/tools/renderHtml/shaderCheck.ts` |
 | Code-point length counting (schema/Telegram char limits) | `src/util/codePoints.ts` |
 | `generate_image` tool + save/deliver       | `src/tools/imageGeneration/generateImageTool.ts` |
 | Cloud `/v1/images/generations` backend     | `src/tools/imageGeneration/cloudImageBackend.ts` |

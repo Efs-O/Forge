@@ -156,6 +156,97 @@ describe('render_html_to_image preview against real Chrome', () => {
     }
   }, 90_000);
 
+  it('runs a shader check behind the socket walls without making local TCP or UDP connections', async (ctx) => {
+    let tcp = 0;
+    let udp = 0;
+    const server = net.createServer((socket) => {
+      tcp += 1;
+      socket.destroy();
+    });
+    await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve));
+    const udpSocket = dgram.createSocket('udp4');
+    udpSocket.on('message', () => {
+      udp += 1;
+    });
+    await new Promise<void>((resolve) => udpSocket.bind(0, '127.0.0.1', resolve));
+    try {
+      await fs.writeFile(
+        path.join(root, 'shader.wgsl'),
+        '@compute @workgroup_size(1) fn main() {}',
+        'utf8',
+      );
+      let result: string;
+      try {
+        result = String(
+          await tool.handler(
+            { mode: 'shader_check', path: 'shader.wgsl' },
+            { beforeMutate: () => undefined },
+          ),
+        );
+      } catch (err) {
+        return skipIfNoBrowser(ctx, err);
+      }
+      expect(result).toContain('shader 1: 0 compiler message(s)');
+      expect(tcp).toBe(0);
+      expect(udp).toBe(0);
+    } finally {
+      await new Promise<void>((resolve) => server.close(() => resolve()));
+      udpSocket.close();
+    }
+  }, 90_000);
+
+  it('maps WGSL and GLSL compiler errors back to workspace source lines', async (ctx) => {
+    await fs.writeFile(
+      path.join(root, 'embedded.js'),
+      'const shader = `\n@vertex fn main() -> @builtin(position) vec4f {\n  let ref = vec4f(0.0);\n  return ref;\n}`;\n',
+      'utf8',
+    );
+    await fs.writeFile(
+      path.join(root, 'broken.frag'),
+      '#version 300 es\nprecision highp float;\nout vec4 color;\nvoid main() {\n  color = vec4(1.0)\n  }\n',
+      'utf8',
+    );
+    try {
+      const wgsl = String(
+        await tool.handler(
+          { mode: 'shader_check', path: 'embedded.js' },
+          { beforeMutate: () => undefined },
+        ),
+      );
+      const glsl = String(
+        await tool.handler(
+          { mode: 'shader_check', path: 'broken.frag' },
+          { beforeMutate: () => undefined },
+        ),
+      );
+      expect(wgsl).toMatch(/embedded\.js:3:\d+:.*'ref'.*reserved keyword/i);
+      expect(glsl).toContain('broken.frag:6:3:');
+    } catch (err) {
+      return skipIfNoBrowser(ctx, err);
+    }
+  }, 90_000);
+
+  it('previews on the secure synthetic origin with WebGPU and refuses a relative asset', async (ctx) => {
+    let result: string | MultimodalToolResult;
+    try {
+      result = await preview(
+        '<img src="./texture.png" onerror="console.log(\'relative-refused\')">' +
+          '<script>console.log("secure="+isSecureContext);' +
+          'console.log("gpu="+typeof navigator.gpu);' +
+          'navigator.gpu.requestAdapter().then(adapter => console.log("adapter="+Boolean(adapter)))' +
+          '.catch(() => console.log("adapter=false"));</script>',
+        { wait_ms: 3_000, width: 300, height: 200 },
+      );
+    } catch (err) {
+      return skipIfNoBrowser(ctx, err);
+    }
+    expect(String(result)).toContain('gpu=object');
+    expect(String(result)).toContain('secure=true');
+    expect(String(result)).toMatch(/adapter=(true|false)/);
+    expect(String(result)).toContain('relative-refused');
+    expect(String(result)).toContain('refused: preview serves only the page itself');
+  }, 90_000);
+
   it('loads scripts from a CDN and a public non-CDN host', async (ctx) => {
     if (!(await cdnReachable())) {
       ctx.skip('cdn.jsdelivr.net is not reachable from this host (offline?)');

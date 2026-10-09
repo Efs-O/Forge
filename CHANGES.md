@@ -16,6 +16,9 @@
 - `edit_file` takes up to 200 edits in one call (was 40). The batch is still all-or-nothing.
 - `open_file` opens images, PDFs, archives, media and fonts in VS Code's own viewer instead of failing with "File seems to be binary".
 - An atomic file write retries a contended rename for up to 2.5 s (was about 75 ms), with growing waits.
+- `render_html_to_image` preview loads the page from a secure synthetic origin, so WebGPU is available, and runs on the real GPU (a local model on the same GPU may slow briefly while it runs). Relative asset requests are refused with a message saying preview serves only the page itself.
+- New `shader_check` mode: compiles the WGSL and GLSL in a workspace file (shader files, typed script blocks, string literals) with software adapters and reports compiler messages as `file:line:column`. It opens no workspace page and makes no network request.
+- Preview waits and frame times go up to 30 s (was 15 s), and keys accept Playwright codes such as `KeyW` and `Digit1`. An unknown key error lists the accepted keys.
 
 ### One `shell` tool replaces four
 

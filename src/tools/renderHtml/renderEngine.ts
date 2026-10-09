@@ -56,6 +56,7 @@ const MAX_PREVIEW_ERROR_CHARS = 300;
 const MAX_PREVIEW_RESPONSE_BYTES = 10 * 1024 * 1024;
 const MAX_PREVIEW_CONSOLE_LINES = 40;
 const MAX_PREVIEW_CONSOLE_CHARS = 4_000;
+export const PREVIEW_ORIGIN = 'https://forge-preview.invalid';
 
 export interface RenderRequest {
   html: string;
@@ -139,7 +140,7 @@ type RenderBrowser = Awaited<ReturnType<ReturnType<typeof getPlaywright>['chromi
  * An abort is additionally RACED, so cancelling during a stalled launch returns
  * at once instead of waiting for the deadline.
  */
-async function withRenderBrowser<T>(
+export async function withRenderBrowser<T>(
   launch: { channel: BrowserChannel; timeoutMs: number; args: readonly string[] },
   abortSignal: AbortSignal | undefined,
   use: (handle: RenderBrowser) => Promise<T>,
@@ -291,12 +292,11 @@ export async function renderPng(
 }
 
 /**
- * Preview mode: the page's own scripts run, so a canvas/WebGL scene the agent
- * wrote actually draws. Still `setContent` (no `file://` origin, no disk
- * reads). Chrome resolves no host itself (DNS mapped to NOTFOUND); every
- * request is fetched by the extension host through `guardedFetchResource`,
- * which refuses non-public addresses after resolving. Errors the page
- * raises and console output are returned with one or more PNGs.
+ * Preview mode: the page's own scripts run on a routed secure synthetic
+ * origin, so WebGPU is available. The host fulfills only the page itself;
+ * Chrome resolves no host itself (DNS mapped to NOTFOUND), and other public
+ * requests go through the extension host's SSRF guard. No file URL or disk
+ * access is exposed to the browser.
  */
 export async function renderPreview(
   request: PreviewRequest,
@@ -315,6 +315,20 @@ export async function renderPreview(
       const blocked = new Map<string, string>();
       await context.route('**/*', async (route) => {
         const req = route.request();
+        const requested = new URL(req.url());
+        if (requested.origin === PREVIEW_ORIGIN) {
+          if (requested.pathname === '/' && !requested.search && req.method() === 'GET') {
+            await route.fulfill({
+              status: 200,
+              contentType: 'text/html; charset=utf-8',
+              body: request.html,
+            });
+          } else {
+            blocked.set(originLabel(req.url()), 'refused: preview serves only the page itself');
+            await route.abort();
+          }
+          return;
+        }
         if (!isPreviewRequestAllowed(req.url(), req.method())) {
           blocked.set(
             originLabel(req.url()),
@@ -367,7 +381,7 @@ export async function renderPreview(
             }
           }
         });
-        await page.setContent(request.html, { waitUntil: 'load' });
+        await page.goto(`${PREVIEW_ORIGIN}/`, { waitUntil: 'load' });
         // Keys go to the focused element, and after setContent nothing has
         // focus: a game listening on its canvas heard none of them (measured
         // 2026-10-08). Focus what a player would click; window listeners

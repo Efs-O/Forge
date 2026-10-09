@@ -82,8 +82,9 @@ describe('render_html_to_image preview: launch hardening', () => {
     // No hole to Forge's own control server, and no shell quoting in an argv.
     expect(args.join(' ')).not.toMatch(/localhost|127\.0\.0\.1|["']/);
     expect(renderFake.contextCalls[0]).toMatchObject({ javaScriptEnabled: true });
-    expect(renderFake.gotoCalls).toBe(0);
-    expect(renderFake.setContentCalls).toEqual([PAGE]);
+    expect(renderFake.gotoCalls).toBe(1);
+    expect(renderFake.setContentCalls).toEqual([]);
+    expect(renderFake.fulfillments[0]).toMatchObject({ body: PAGE });
   });
 
   it('fetches public HTTP(S) requests through the host guard and refuses local and non-web URLs', async () => {
@@ -101,6 +102,7 @@ describe('render_html_to_image preview: launch hardening', () => {
 
     expect(renderFake.routeSelectors).toEqual(['**/*']);
     expect(Object.fromEntries(renderFake.routeOutcomes.map((o) => [o.url, o.outcome]))).toEqual({
+      'https://forge-preview.invalid/': 'fulfill',
       'https://cdn.jsdelivr.net/npm/three@0.160.1/build/three.module.js': 'fulfill',
       'https://public.example.test/script.js': 'fulfill',
       'http://public.example.test/api': 'fulfill',
@@ -109,10 +111,27 @@ describe('render_html_to_image preview: launch hardening', () => {
       'file:///C:/Windows/win.ini': 'abort',
       'javascript:alert(1)': 'abort',
     });
-    expect(renderFake.fulfillments).toHaveLength(4);
+    expect(renderFake.fulfillments).toHaveLength(5);
     expect(String(result)).not.toContain('https://example.com');
     expect(String(result)).toContain('http://127.0.0.1:8799');
     expect(String(result)).toContain('file:');
+  });
+
+  it('serves only the page at the synthetic secure origin and lists relative requests as refused', async () => {
+    renderFake.pageRequests = [
+      { url: 'https://forge-preview.invalid/assets/texture.png', method: 'GET' },
+    ];
+    const { tool } = rig();
+    const result = String(
+      await tool.handler({ mode: 'preview', path: await writePage() }, context()),
+    );
+    expect(renderFake.routeOutcomes).toEqual([
+      { url: 'https://forge-preview.invalid/', outcome: 'fulfill' },
+      { url: 'https://forge-preview.invalid/assets/texture.png', outcome: 'abort' },
+    ]);
+    expect(result).toContain(
+      'Requests that did not load: https://forge-preview.invalid (refused: preview serves only the page itself)',
+    );
   });
 
   it('allows public web request shapes and uses the unchanged Chrome DNS wall', () => {
@@ -148,16 +167,26 @@ describe('render_html_to_image preview: inputs', () => {
     expect(renderFake.launchCalls).toHaveLength(0);
   });
 
-  it('waits 3000 ms by default, honours wait_ms, and bounds it to 0–15000', async () => {
+  it('returns an explicit no-shaders result without launching a browser', async () => {
+    const { tool } = rig();
+    const page = await writePage();
+    await expect(tool.handler({ mode: 'shader_check', path: page }, context())).resolves.toBe(
+      'Shader check: No shaders found.',
+    );
+    expect(renderFake.launchCalls).toHaveLength(0);
+  });
+
+  it('waits 3000 ms by default, honours wait_ms, and bounds it to 0–30000', async () => {
     const { tool } = rig();
     const page = await writePage();
     await tool.handler({ mode: 'preview', path: page }, context());
     await tool.handler({ mode: 'preview', path: page, wait_ms: 0 }, context());
-    await tool.handler({ mode: 'preview', path: page, wait_ms: 15_000 }, context());
-    expect(renderFake.waitCalls).toEqual([3_000, 15_000]);
+    await tool.handler({ mode: 'preview', path: page, wait_ms: 30_000 }, context());
+    await tool.handler({ mode: 'preview', path: page, frames: [30_000] }, context());
+    expect(renderFake.waitCalls).toEqual([3_000, 30_000, 30_000]);
     await expect(
-      tool.handler({ mode: 'preview', path: page, wait_ms: 15_001 }, context()),
-    ).rejects.toThrow(/wait_ms is 15001; the range is 0–15000/);
+      tool.handler({ mode: 'preview', path: page, wait_ms: 30_001 }, context()),
+    ).rejects.toThrow(/wait_ms is 30001; the range is 0–30000/);
     await expect(
       tool.handler({ mode: 'preview', path: page, wait_ms: 1.5 }, context()),
     ).rejects.toThrow(/wait_ms must be an integer/);
@@ -165,25 +194,46 @@ describe('render_html_to_image preview: inputs', () => {
 
   it('captures ascending frames and presses bounded keys before the first capture', async () => {
     const { tool } = rig();
-    const result = await tool.handler({
-      mode: 'preview', path: await writePage(), frames: [0, 500, 1500],
-      keys: [{ key: 'w', hold_ms: 100 }, { key: 'Space', hold_ms: 0 }],
-    }, context({ isVisionModel: true }));
-    expect(renderFake.waitCalls).toEqual([500, 1000]);
-    expect(renderFake.keyPresses).toEqual([{ key: 'w', delay: 100 }, { key: 'Space', delay: 0 }]);
-    expect((result as MultimodalToolResult).content.filter((part) => part.type === 'image_url')).toHaveLength(3);
+    const result = await tool.handler(
+      {
+        mode: 'preview',
+        path: await writePage(),
+        frames: [0, 500, 30_000],
+        keys: [
+          { key: 'KeyW', hold_ms: 100 },
+          { key: 'Space', hold_ms: 0 },
+        ],
+      },
+      context({ isVisionModel: true }),
+    );
+    expect(renderFake.waitCalls).toEqual([500, 29_500]);
+    expect(renderFake.keyPresses).toEqual([
+      { key: 'w', delay: 100 },
+      { key: 'Space', delay: 0 },
+    ]);
+    expect(
+      (result as MultimodalToolResult).content.filter((part) => part.type === 'image_url'),
+    ).toHaveLength(3);
     expect((result as MultimodalToolResult).text).toContain('0 ms');
     expect((result as MultimodalToolResult).text).toContain('500 ms');
-    expect((result as MultimodalToolResult).text).toContain('1500 ms');
+    expect((result as MultimodalToolResult).text).toContain('30000 ms');
   });
 
   it('rejects invalid frames, wait_ms with frames, and unsupported keys', async () => {
     const { tool } = rig();
     const page = await writePage();
-    await expect(tool.handler({ mode: 'preview', path: page, frames: [500, 400] }, context())).rejects.toThrow(/strictly ascending/);
-    await expect(tool.handler({ mode: 'preview', path: page, frames: [1], wait_ms: 2 }, context())).rejects.toThrow(/replaces wait_ms/);
-    await expect(tool.handler({ mode: 'preview', path: page, keys: [{ key: 'F12', hold_ms: 0 }] }, context())).rejects.toThrow(/supported Playwright key/);
-    await expect(tool.handler({ mode: 'preview', path: page, frames: [15_001] }, context())).rejects.toThrow(/frames\[0\] is 15001; the range is 0–15000/);
+    await expect(
+      tool.handler({ mode: 'preview', path: page, frames: [500, 400] }, context()),
+    ).rejects.toThrow(/strictly ascending/);
+    await expect(
+      tool.handler({ mode: 'preview', path: page, frames: [1], wait_ms: 2 }, context()),
+    ).rejects.toThrow(/replaces wait_ms/);
+    await expect(
+      tool.handler({ mode: 'preview', path: page, keys: [{ key: 'F12', hold_ms: 0 }] }, context()),
+    ).rejects.toThrow(/KeyA–KeyZ/);
+    await expect(
+      tool.handler({ mode: 'preview', path: page, frames: [30_001] }, context()),
+    ).rejects.toThrow(/frames\[0\] is 30001; the range is 0–30000/);
   });
 });
 
@@ -192,7 +242,9 @@ describe('render_html_to_image preview: result', () => {
     renderFake.pageErrors = ['ReferenceError: THREE is not defined'];
     renderFake.consoleErrors = Array.from({ length: 11 }, (_, i) => `console failure ${i}`);
     const { tool } = rig();
-    const result = String(await tool.handler({ mode: 'preview', path: await writePage() }, context()));
+    const result = String(
+      await tool.handler({ mode: 'preview', path: await writePage() }, context()),
+    );
 
     expect(result).toContain('Page errors (12):');
     expect(result).toContain('- ReferenceError: THREE is not defined');
@@ -204,16 +256,23 @@ describe('render_html_to_image preview: result', () => {
   });
 
   it('caps console output at 40 lines and 4000 characters, dropping oldest lines', async () => {
-    renderFake.consoleMessages = Array.from({ length: 45 }, (_, i) => ({ type: 'info' as const, text: `line-${i}` }));
+    renderFake.consoleMessages = Array.from({ length: 45 }, (_, i) => ({
+      type: 'info' as const,
+      text: `line-${i}`,
+    }));
     const { tool } = rig();
-    const result = String(await tool.handler({ mode: 'preview', path: await writePage() }, context()));
+    const result = String(
+      await tool.handler({ mode: 'preview', path: await writePage() }, context()),
+    );
     expect(result).toContain('40 lines, capped at 4000 characters');
     expect(result).toContain('5 older console lines dropped');
     expect(result).not.toContain('info: line-0');
     expect(result).toContain('info: line-44');
 
     renderFake.consoleMessages = [{ type: 'warn', text: 'y'.repeat(4100) }];
-    const oversized = String(await tool.handler({ mode: 'preview', path: await writePage() }, context()));
+    const oversized = String(
+      await tool.handler({ mode: 'preview', path: await writePage() }, context()),
+    );
     // One oversized line keeps its start, cut to the 4000-character cap.
     expect(oversized).not.toContain('older console lines dropped');
     expect(oversized).toContain(`warn: ${'y'.repeat(100)}`);

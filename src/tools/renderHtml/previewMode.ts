@@ -12,9 +12,11 @@ import { renderPreview } from './renderEngine';
  */
 
 export const DEFAULT_PREVIEW_WAIT_MS = 3_000;
-export const MAX_PREVIEW_WAIT_MS = 15_000;
+export const MAX_PREVIEW_WAIT_MS = 30_000;
 export const PREVIEW_KEY_NAMES = [
   ...'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789',
+  ...'ABCDEFGHIJKLMNOPQRSTUVWXYZ'.split('').map((letter) => `Key${letter}`),
+  ...'0123456789'.split('').map((digit) => `Digit${digit}`),
   'ArrowUp',
   'ArrowDown',
   'ArrowLeft',
@@ -181,7 +183,9 @@ function readKeys(value: unknown): Array<{ key: string; holdMs: number }> {
     const holdMs = item['hold_ms'];
     if (typeof key !== 'string' || !(PREVIEW_KEY_NAMES as readonly string[]).includes(key)) {
       throw new Error(
-        `render_html_to_image: keys[${index}].key must be a supported Playwright key name.`,
+        `render_html_to_image: keys[${index}].key must be A–Z, a–z, 0–9, KeyA–KeyZ, Digit0–Digit9, ` +
+          'ArrowUp, ArrowDown, ArrowLeft, ArrowRight, Backspace, Delete, Home, End, PageUp, PageDown, ' +
+          'Space, Enter, Escape, Shift, Control, Alt, Tab, or a space character.',
       );
     }
     if (typeof holdMs !== 'number' || !Number.isInteger(holdMs) || holdMs < 0 || holdMs > 3_000) {
@@ -189,6 +193,12 @@ function readKeys(value: unknown): Array<{ key: string; holdMs: number }> {
         `render_html_to_image: keys[${index}].hold_ms must be an integer from 0 to 3000.`,
       );
     }
-    return { key, holdMs };
+    // Playwright maps lowercase w to physical code KeyW; accept those code names too.
+    const normalizedKey = /^Key[A-Z]$/.test(key)
+      ? key.slice(3).toLowerCase()
+      : /^Digit\d$/.test(key)
+        ? key.slice(5)
+        : key;
+    return { key: normalizedKey, holdMs };
   });
 }

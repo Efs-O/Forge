@@ -21,6 +21,7 @@ import {
   runPreview,
 } from './renderHtml/previewMode';
 import { renderPng } from './renderHtml/renderEngine';
+import { runShaderCheck } from './renderHtml/shaderCheck';
 import type { RegisteredTool, ToolHandlerContext, ToolHandlerResult } from './ToolRegistry';
 
 /** A PNG past this is already enormous; refusing beats shipping it to Telegram. */
@@ -65,7 +66,8 @@ export function makeRenderHtmlToImageTool(deps: RenderHtmlDeps): RegisteredTool 
         description:
           'Render an HTML page. mode "preview": shows you how a page you wrote (canvas, WebGL, ' +
           'three.js, animation, any UI) renders — runs its ' +
-          'scripts headless and can load libraries from public hosts. It opens nothing for the ' +
+          'scripts headless, uses the real GPU (which may briefly slow a local model on the same GPU), ' +
+          'and can load libraries from public hosts. It opens nothing for the ' +
           'user: it renders off-screen inside Forge, and only you see the result. ' +
           'console.log from the page is how to read a value out. Returns page errors, console ' +
           'output and screenshots to you only; nothing is saved or sent. ' +
@@ -78,9 +80,9 @@ export function makeRenderHtmlToImageTool(deps: RenderHtmlDeps): RegisteredTool 
           properties: {
             mode: {
               type: 'string',
-              enum: ['image', 'preview'],
+              enum: ['image', 'preview', 'shader_check'],
               description:
-                'image (default): save a PNG and send it to the remote chat. preview: screenshot + page errors for you, nothing saved or sent; requires path.',
+                'image (default): save a PNG and send it to the remote chat. preview: screenshot + page errors for you, nothing saved or sent; requires path. shader_check: compile shader text from a workspace file; no workspace page, network, or GPU.',
             },
             html: {
               type: 'string',
@@ -90,7 +92,7 @@ export function makeRenderHtmlToImageTool(deps: RenderHtmlDeps): RegisteredTool 
             path: {
               type: 'string',
               description:
-                'Workspace-relative .html file to render (resolves against the workspace root). Provide exactly one of html or path; preview mode requires path. Relative assets in the page (./tex.png) do not load.',
+                'Workspace-relative file to render or check (resolves against the workspace root). Provide exactly one of html or path; preview and shader_check require path. Relative preview assets (./tex.png) do not load.',
             },
             width: {
               type: 'integer',
@@ -109,7 +111,7 @@ export function makeRenderHtmlToImageTool(deps: RenderHtmlDeps): RegisteredTool 
               type: 'integer',
               minimum: 0,
               maximum: MAX_PREVIEW_WAIT_MS,
-              description: `Preview only: wait after the page loads before the screenshot, so scripts can draw (default ${DEFAULT_PREVIEW_WAIT_MS}). 0–${MAX_PREVIEW_WAIT_MS}.`,
+              description: `Preview only: wait after the page loads before the screenshot, so scripts can draw (default ${DEFAULT_PREVIEW_WAIT_MS}). 0–30000 ms.`,
             },
             frames: {
               type: 'array',
@@ -117,7 +119,7 @@ export function makeRenderHtmlToImageTool(deps: RenderHtmlDeps): RegisteredTool 
               maxItems: 4,
               items: { type: 'integer', minimum: 0, maximum: MAX_PREVIEW_WAIT_MS },
               description:
-                'Preview only: 1–4 strictly ascending capture times in ms. Replaces wait_ms.',
+                'Preview only: 1–4 strictly ascending capture times in ms, each 0–30000 ms. Replaces wait_ms.',
             },
             keys: {
               type: 'array',
@@ -162,6 +164,26 @@ async function dispatch(
   context: ToolHandlerContext | undefined,
 ): Promise<ToolHandlerResult> {
   const mode = args['mode'] ?? 'image';
+  if (mode === 'shader_check') {
+    if (typeof args['path'] !== 'string' || args['path'].trim() === '') {
+      throw new Error('render_html_to_image: shader_check mode requires path.');
+    }
+    if (
+      ['html', 'wait_ms', 'frames', 'keys', 'full_page', 'width', 'height'].some(
+        (key) => args[key] !== undefined,
+      )
+    ) {
+      throw new Error('render_html_to_image: shader_check accepts path only.');
+    }
+    return runShaderCheck(
+      args['path'],
+      {
+        channel: deps.getConfig?.().browser?.channel ?? DEFAULT_BROWSER_CHANNEL,
+        timeoutMs: deps.renderTimeoutMs ?? RENDER_TIMEOUT_MS,
+      },
+      context?.abortSignal,
+    );
+  }
   if (mode === 'preview') {
     return runPreview(args, context, {
       channel: deps.getConfig?.().browser?.channel ?? DEFAULT_BROWSER_CHANNEL,
