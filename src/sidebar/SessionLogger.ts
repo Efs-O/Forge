@@ -305,9 +305,21 @@ export class SessionLogger {
    */
   logTurnError(message: string, model: string): void {
     this.ensureHeader(model);
+    const marker = message.match(/\s+\[forge_stall=(\{[^\n]*\})\]$/u);
+    let stall: unknown;
+    let visibleMessage = message;
+    if (marker?.[1]) {
+      try {
+        stall = JSON.parse(marker[1]);
+        visibleMessage = message.slice(0, marker.index).trimEnd();
+      } catch {
+        // A malformed marker remains part of the message rather than being lost.
+      }
+    }
     this.append({
       type: 'turn_error',
-      message,
+      message: visibleMessage,
+      ...(stall !== undefined ? { stall } : {}),
       timestamp_ms: Date.now(),
       model,
     });

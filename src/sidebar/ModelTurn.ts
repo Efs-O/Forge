@@ -50,6 +50,7 @@ import {
   type ToolCallingLoopResult,
 } from '../agent/ToolCallingLoop';
 import { canUseThinkingKwargs, isProjectRoot, shouldStripThinking } from './turnModelBehavior';
+import { runningBackgroundExecutionsNotice } from './backgroundExitNotice';
 import type { AgentProgressEvent } from './AgentProgress';
 import type { LiveStreamMeter } from './LiveStreamMeter';
 import { writeChunkLimit } from '../tools/writeChunking';
@@ -490,5 +491,7 @@ export async function runModelTurn(
         `(or its group) if this task legitimately needs more.`,
     });
   }
+  const running = runningBackgroundExecutionsNotice(conv.id);
+  if (running) postC({ type: 'notice', message: running });
   return result;
 }

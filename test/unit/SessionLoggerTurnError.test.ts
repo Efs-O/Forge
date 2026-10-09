@@ -60,4 +60,21 @@ describe('SessionLogger turn errors', () => {
     expect(rows[0]?.['type']).toBe('session_start');
     expect(rows.at(-1)?.['type']).toBe('turn_error');
   });
+
+  it('records a stall as structured turn error data and keeps the readable message clean', () => {
+    const logger = new SessionLogger('c-stall', 'title', 'm1');
+    const stall = {
+      last_delta_kind: 'tool_args',
+      last_delta_ms: 12_345,
+      idle_ms: 120_000,
+      probe: 'alive',
+    };
+    logger.logTurnError(
+      `Stream stalled after 120s idle [forge_stall=${JSON.stringify(stall)}]`,
+      'm1',
+    );
+    const row = readRows('c-stall').at(-1);
+    expect(row?.['message']).toBe('Stream stalled after 120s idle');
+    expect(row?.['stall']).toEqual(stall);
+  });
 });

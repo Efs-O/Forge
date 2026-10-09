@@ -1,13 +1,36 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import * as vscode from 'vscode';
+import * as fs from 'fs';
+const { registryDir } = vi.hoisted(() => ({
+  registryDir: `${process.cwd()}/.test-tmp/background-notify`,
+}));
+vi.mock('../../src/tools/backgroundRegistry', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('../../src/tools/backgroundRegistry')>();
+  return {
+    ...actual,
+    backgroundRegistry: new actual.BackgroundRegistry(registryDir, {
+      isAlive: () => true,
+      processStartMsAsync: async () => 1234,
+      killTree: async () => {},
+      owner: { pid: process.pid, startedAt: 1234 },
+      error: () => {},
+      warn: () => {},
+      info: () => {},
+    }),
+  };
+});
 import { BackgroundExecutionManager, backgroundExecutionManager } from '../../src/tools/BackgroundExecutionManager';
 import { makeShellTool } from '../../src/tools/shellTool';
 import { makeListExecutionsTool, makeStopExecutionTool } from '../../src/tools/backgroundExecutionTools';
-import { deliverBackgroundExitNotice, routeSidebarPrompt } from '../../src/sidebar/backgroundExitNotice';
+import { runningBackgroundExecutionsNotice, deliverBackgroundExitNotice, routeSidebarPrompt } from '../../src/sidebar/backgroundExitNotice';
 
 describe('background shell exit notification', () => {
   const manager = new BackgroundExecutionManager();
-  afterEach(() => manager.dispose());
+  afterEach(async () => {
+    await manager.dispose();
+    await backgroundExecutionManager.dispose();
+    fs.rmSync(registryDir, { recursive: true, force: true });
+  });
 
   it('notifies once on natural exit with bounded tails', async () => {
     const listener = vi.fn();
@@ -65,6 +88,20 @@ describe('background shell exit notification', () => {
     deliverBackgroundExitNotice(notice, () => false, send, log);
     expect(send).toHaveBeenCalledTimes(1);
     expect(log).toHaveBeenCalledOnce();
+  });
+
+  it('lists only this chat’s running execution ids, commands, and elapsed times', () => {
+    const listRunningForConversation = vi.fn((id: string) => id === 'chat-a' ? [{
+      id: 'exec-abc', command: 'python', args: ['-m', 'http.server'], cwd: '.',
+      status: 'running' as const, pid: 40, startedAt: 10_000,
+      finishedAt: undefined, exitCode: null,
+    }] : []);
+    const fakeManager = { listRunningForConversation };
+
+    expect(runningBackgroundExecutionsNotice('chat-a', 135_000, fakeManager)).toContain(
+      'exec-abc: python -m http.server (running 2m 05s)',
+    );
+    expect(runningBackgroundExecutionsNotice('chat-b', 135_000, fakeManager)).toBeUndefined();
   });
 
   it('lists and stops background executions through their native tools', async () => {

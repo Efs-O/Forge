@@ -3,7 +3,9 @@ import { spawn, type ChildProcessByStdio } from 'child_process';
 import type { Readable } from 'stream';
 import { terminateCliProcessTree } from '../agents/cliProcess';
 import { normalizeSpawnCwd } from '../util/processSpawn';
+import { getLogger } from '../util/logger';
 import type { ExecOutputOptions } from './execHelpers';
+import { backgroundRegistry, type BackgroundRegistry } from './backgroundRegistry';
 
 export const MAX_BACKGROUND_OUTPUT_CHARS = 200_000;
 export const MAX_BACKGROUND_EXECUTIONS = 32;
@@ -32,6 +34,7 @@ interface BackgroundExecution {
   timeoutTimer: NodeJS.Timeout | undefined;
   readonly waiters: Set<() => void>;
   readonly notifyConversationId: string | undefined;
+  readonly conversationId: string | undefined;
   readonly outputOptions: ExecOutputOptions | undefined;
   terminalObserved: boolean;
 }
@@ -130,6 +133,9 @@ export interface BackgroundExecutionExitNotice {
 export class BackgroundExecutionManager {
   private readonly executions = new Map<string, BackgroundExecution>();
   private exitListener: ((notice: BackgroundExecutionExitNotice) => void) | undefined;
+  private disposing: Promise<void> | undefined;
+
+  constructor(private readonly registry: BackgroundRegistry = backgroundRegistry) {}
 
   onNotifiedExit(listener: (notice: BackgroundExecutionExitNotice) => void): { dispose(): void } {
     this.exitListener = listener;
@@ -183,6 +189,9 @@ export class BackgroundExecutionManager {
       timeoutTimer: undefined,
       waiters: new Set(),
       notifyConversationId: options.notifyConversationId,
+      // shellTool already passes the chat id in the child environment for every
+      // background command, including jobs without notify_on_exit.
+      conversationId: options.env?.FORGE_CONVERSATION_ID ?? options.notifyConversationId,
       outputOptions: options.outputOptions,
       terminalObserved: false,
     };
@@ -220,6 +229,22 @@ export class BackgroundExecutionManager {
         code,
       );
     });
+
+    if (execution.pid !== undefined) {
+      void this.registry.register(
+        {
+          id: execution.id,
+          pid: execution.pid,
+          command: execution.command,
+          args: [...execution.args],
+        },
+        () => execution.status === 'running' && !execution.stopRequested,
+      );
+    } else {
+      getLogger().error(
+        `[BackgroundExecutionManager] ${execution.id} has no PID; it will not be reaped if the extension host is killed.`,
+      );
+    }
 
     return {
       id: execution.id,
@@ -267,6 +292,15 @@ export class BackgroundExecutionManager {
       }));
   }
 
+  /** Running executions started by one chat, for its final turn notice. */
+  listRunningForConversation(conversationId: string): BackgroundExecutionSummary[] {
+    return this.list().filter(
+      (summary) =>
+        summary.status === 'running' &&
+        this.executions.get(summary.id)?.conversationId === conversationId,
+    );
+  }
+
   async stop(id: string): Promise<BackgroundExecutionObservation> {
     const execution = this.get(id);
     execution.terminalObserved = true;
@@ -278,7 +312,17 @@ export class BackgroundExecutionManager {
     return this.snapshot(execution, execution.stdoutBase, execution.stderrBase);
   }
 
-  dispose(): void {
+  dispose(): Promise<void> {
+    if (this.disposing) return this.disposing;
+    const disposing = this.disposeRunning().finally(() => {
+      this.disposing = undefined;
+    });
+    this.disposing = disposing;
+    return disposing;
+  }
+
+  private async disposeRunning(): Promise<void> {
+    const terminations: Promise<void>[] = [];
     for (const execution of this.executions.values()) {
       execution.terminalObserved = true;
       if (execution.timeoutTimer) {
@@ -287,8 +331,20 @@ export class BackgroundExecutionManager {
       }
       if (execution.status === 'running') {
         execution.stopRequested = true;
-        void terminateCliProcessTree(execution.process);
+        terminations.push(terminateCliProcessTree(execution.process));
       }
+    }
+    // All trees are signalled concurrently; the host has a fixed shutdown budget.
+    let timeout: NodeJS.Timeout | undefined;
+    try {
+      await Promise.race([
+        Promise.all(terminations),
+        new Promise<void>((resolve) => {
+          timeout = setTimeout(resolve, 5_000);
+        }),
+      ]);
+    } finally {
+      if (timeout) clearTimeout(timeout);
     }
     this.executions.clear();
   }
@@ -333,6 +389,8 @@ export class BackgroundExecutionManager {
     execution.status = status;
     execution.exitCode = exitCode;
     execution.finishedAt = Date.now();
+    if (execution.pid !== undefined)
+      this.registry.remove({ id: execution.id, ownerPid: process.pid });
     for (const waiter of execution.waiters) waiter();
     execution.waiters.clear();
     if (execution.notifyConversationId) {

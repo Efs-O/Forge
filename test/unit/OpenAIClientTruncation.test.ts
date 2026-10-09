@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { streamChatCompletion } from '../../src/llm/OpenAIClient';
 import { ToolCallTruncatedError } from '../../src/llm/ToolCallTruncatedError';
+import { StreamStallError } from '../../src/llm/streamWatchdog';
 
 const { logLines } = vi.hoisted(() => ({ logLines: [] as string[] }));
 
@@ -73,10 +74,14 @@ describe('OpenAIClient truncation handling', () => {
         push = (line) => controller.enqueue(encoder.encode(`${line}\n`));
       },
     });
-    vi.stubGlobal(
-      'fetch',
-      vi.fn(async () => new Response(body, { status: 200, headers: { 'Content-Type': 'text/event-stream' } })),
-    );
+    vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url.endsWith('/slots')) return new Response('[]', { status: 200 });
+      if (url.endsWith('/v1/status')) {
+        return new Response(JSON.stringify({ busy: false, generated: 0 }), { status: 200 });
+      }
+      return new Response(body, { status: 200, headers: { 'Content-Type': 'text/event-stream' } });
+    }));
     const h = handlers();
     const done = streamChatCompletion('http://127.0.0.1:8080', request, h);
     // A reasoning provider can be silent for minutes after its headers.
@@ -84,9 +89,12 @@ describe('OpenAIClient truncation handling', () => {
     expect(h.onError).not.toHaveBeenCalled();
     push?.(chunk({ content: 'thinking done' }));
     await vi.advanceTimersByTimeAsync(135_000);
-    expect(h.onError).toHaveBeenCalledWith(
-      expect.objectContaining({ message: 'Stream stalled after 120s idle' }),
-    );
+    expect(h.onError.mock.calls[0]?.[0]).toBeInstanceOf(StreamStallError);
+    expect((h.onError.mock.calls[0]?.[0] as StreamStallError).stall).toMatchObject({
+      last_delta_kind: 'content',
+      idle_ms: 120_000,
+      probe: 'not-alive',
+    });
     await done;
     vi.useRealTimers();
   });

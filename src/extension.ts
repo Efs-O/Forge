@@ -52,6 +52,7 @@ import { ModelManagerPanel } from './sidebar/modelManager/ModelManagerPanel';
 import { registerSidebarCommands } from './vscode/sidebarCommands';
 import { flushPendingModelUsage } from './sidebar/modelManager/usageTracker';
 import { backgroundExecutionManager } from './tools/BackgroundExecutionManager';
+import { backgroundRegistry } from './tools/backgroundRegistry';
 import { sweepShellOutput } from './tools/shellOutput';
 import { terminalCommandTracker } from './tools/TerminalCommandTracker';
 import type { RemoteRuntime } from './remote/RemoteRuntime';
@@ -76,6 +77,13 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
   initLogger(context);
   const log = getLogger();
   log.info('Forge activating');
+  try {
+    await backgroundRegistry.reap();
+  } catch (error) {
+    const message = `Could not reap orphaned Forge background executions: ${error instanceof Error ? error.message : String(error)}`;
+    log.error(message, error);
+    void vscode.window.showErrorMessage(message);
+  }
   void sweepShellOutput().catch((error: unknown) =>
     log.warn(
       `Shell output spill sweep failed: ${error instanceof Error ? error.message : String(error)}`,
@@ -403,18 +411,16 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
     getConfigPath: () => activeConfigPath,
   });
 
-  context.subscriptions.push(
-    {
-      dispose: () =>
-        sharedRegistry.releaseLease(EXTERNAL_LIFECYCLE_LEASE_KEY, externalLifecycleLeaseId),
-    },
-    { dispose: () => backgroundExecutionManager.dispose() },
-  );
+  context.subscriptions.push({
+    dispose: () =>
+      sharedRegistry.releaseLease(EXTERNAL_LIFECYCLE_LEASE_KEY, externalLifecycleLeaseId),
+  });
 
   log.info('Forge activated');
 }
 
 export async function deactivate(): Promise<void> {
+  await backgroundExecutionManager.dispose();
   const lifecycle = activeExternalLifecycle;
   activeExternalLifecycle = undefined;
   if (lifecycle) {

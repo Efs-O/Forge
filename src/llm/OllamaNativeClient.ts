@@ -390,6 +390,7 @@ export async function streamOllamaChatCompletion(
     streamSummary,
     () => void reader.cancel().catch(() => undefined),
     (err) => handlers.onError(err),
+    undefined,
   );
   const handleFrame = (raw: string): 'continue' | 'terminal' | 'error' => {
     let chunk: OllamaStreamChunk;
@@ -403,15 +404,20 @@ export async function streamOllamaChatCompletion(
       return 'error';
     }
     if (typeof chunk.message?.thinking === 'string' && chunk.message.thinking.length > 0) {
+      watchdog.delta('reasoning');
       reasoningChars += chunk.message.thinking.length;
       if (handlers.onReasoning) handlers.onReasoning(chunk.message.thinking);
       else handlers.onToken(chunk.message.thinking);
     }
     if (typeof chunk.message?.content === 'string' && chunk.message.content.length > 0) {
+      watchdog.delta('content');
       textChars += chunk.message.content.length;
       handlers.onToken(chunk.message.content);
     }
     toolDeltaCount += chunk.message?.tool_calls?.length ?? 0;
+    if (chunk.message?.tool_calls?.some((call) => Boolean(call.function?.arguments))) {
+      watchdog.delta('tool_args');
+    }
     accumulateToolCalls(chunk.message?.tool_calls, toolAccum);
     if (!chunk.done) return 'continue';
     flushToolCalls(toolAccum, handlers.onToolCalls);

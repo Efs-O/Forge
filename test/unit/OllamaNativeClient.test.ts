@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from 'vitest';
 import type { ModelConfig } from '../../src/config/types';
 import { streamOllamaChatCompletion } from '../../src/llm/OllamaNativeClient';
+import { StreamStallError } from '../../src/llm/streamWatchdog';
 import type { ChatCompletionRequest } from '../../src/llm/types';
 
 const baseModel: ModelConfig = {
@@ -367,9 +368,12 @@ describe('streamOllamaChatCompletion', () => {
 
     push?.(JSON.stringify({ message: { content: 'partial' }, done: false }));
     await vi.advanceTimersByTimeAsync(135_000);
-    expect(onError).toHaveBeenCalledWith(
-      expect.objectContaining({ message: 'Stream stalled after 120s idle' }),
-    );
+    expect(onError.mock.calls[0]?.[0]).toBeInstanceOf(StreamStallError);
+    expect((onError.mock.calls[0]?.[0] as StreamStallError).stall).toMatchObject({
+      last_delta_kind: 'content',
+      idle_ms: 120_000,
+      probe: 'skipped: no probe',
+    });
     // A stall is an error, never a silent completion of the turn.
     expect(done).not.toHaveBeenCalled();
     await running;

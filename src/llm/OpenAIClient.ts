@@ -9,6 +9,7 @@ import { imageUnsupportedMessage, isImageUnsupportedError } from './imageUnsuppo
 import { getLogger } from '../util/logger';
 import { withDescribedCause } from '../util/describeError';
 import { StreamWatchdog } from './streamWatchdog';
+import { createStallProbe } from './stallProbe';
 
 const log = getLogger();
 let requestSequence = 0;
@@ -228,6 +229,7 @@ export async function streamChatCompletion(
     streamSummary,
     () => void reader.cancel().catch(() => undefined),
     (err) => handlers.onError(err),
+    createStallProbe(baseUrl, fetchImpl),
   );
   // key = index, accumulates partial tool call fragments
   const toolAccum = new Map<number, { id: string; name: string; arguments: string }>();
@@ -324,16 +326,19 @@ export async function streamChatCompletion(
         const delta = choice.delta;
         const content = delta?.content;
         if (typeof content === 'string' && content.length > 0) {
+          watchdog.delta('content');
           textChars += content.length;
           handlers.onToken(content);
         } else if (
           typeof delta?.reasoning_content === 'string' &&
           delta.reasoning_content.length > 0
         ) {
+          watchdog.delta('reasoning');
           reasoningChars += delta.reasoning_content.length;
           if (handlers.onReasoning) handlers.onReasoning(delta.reasoning_content);
           else handlers.onToken(delta.reasoning_content);
         } else if (typeof delta?.reasoning === 'string' && delta.reasoning.length > 0) {
+          watchdog.delta('reasoning');
           reasoningChars += delta.reasoning.length;
           if (handlers.onReasoning) handlers.onReasoning(delta.reasoning);
           else handlers.onToken(delta.reasoning);
@@ -342,6 +347,14 @@ export async function streamChatCompletion(
         // Accumulate streamed tool_call fragments by index.
         const deltaToolCalls = (choice.delta as { tool_calls?: ToolCallDelta[] }).tool_calls;
         if (deltaToolCalls) {
+          if (
+            deltaToolCalls.some(
+              (call) =>
+                typeof call.function?.arguments === 'string' && call.function.arguments.length > 0,
+            )
+          ) {
+            watchdog.delta('tool_args');
+          }
           for (const tc of deltaToolCalls) {
             toolDeltaCount += 1;
             const idx = tc.index ?? 0;

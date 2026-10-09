@@ -1,6 +1,9 @@
-import { execFileSync } from 'child_process';
+import { execFile, execFileSync } from 'child_process';
 import * as fs from 'fs';
+import { promisify } from 'util';
 import { isProcessAlive } from '../util/processLiveness';
+
+const execFileAsync = promisify(execFile);
 
 /**
  * Host identity for the agent mesh (AGENT_MESH_PLAN M1/M2).
@@ -60,6 +63,21 @@ export function osProcessStartMs(pid: number): number | undefined {
   return posixProcessStartMs(pid);
 }
 
+/** Nonblocking Windows identity lookup for background execution registration and reaping. */
+export async function osProcessStartMsAsync(pid: number): Promise<number | undefined> {
+  if (process.platform !== 'win32') return posixProcessStartMs(pid);
+  try {
+    const { stdout } = await execFileAsync('powershell', windowsProcessStartArgs(pid), {
+      timeout: 5_000,
+      encoding: 'utf8',
+      windowsHide: true,
+    });
+    return parseProcessStartMs(stdout);
+  } catch {
+    return undefined;
+  }
+}
+
 function posixProcessStartMs(pid: number): number | undefined {
   let stat: string;
   let btime = 0;
@@ -94,23 +112,31 @@ function posixProcessStartMs(pid: number): number | undefined {
 
 function windowsProcessStartMs(pid: number): number | undefined {
   try {
-    const out = execFileSync(
-      'powershell',
-      [
-        '-NoProfile',
-        '-NonInteractive',
-        '-Command',
-        // Epoch ms, not the DateTime's string form: that is rendered in the
-        // user's locale (Greek here), which Date.parse cannot read.
-        `([DateTimeOffset](Get-CimInstance Win32_Process -Filter "ProcessId=${pid}").CreationDate).ToUnixTimeMilliseconds()`,
-      ],
-      { timeout: 5_000, encoding: 'utf8', windowsHide: true },
-    ).trim();
-    const ms = Number(out);
-    return out !== '' && Number.isFinite(ms) && ms > 0 ? ms : undefined;
+    const out = execFileSync('powershell', windowsProcessStartArgs(pid), {
+      timeout: 5_000,
+      encoding: 'utf8',
+      windowsHide: true,
+    });
+    return parseProcessStartMs(out);
   } catch {
     return undefined;
   }
+}
+
+function windowsProcessStartArgs(pid: number): string[] {
+  return [
+    '-NoProfile',
+    '-NonInteractive',
+    '-Command',
+    // Epoch ms, not the DateTime's locale-dependent string form.
+    `([DateTimeOffset](Get-CimInstance Win32_Process -Filter "ProcessId=${pid}").CreationDate).ToUnixTimeMilliseconds()`,
+  ];
+}
+
+function parseProcessStartMs(output: string): number | undefined {
+  const text = output.trim();
+  const ms = Number(text);
+  return text !== '' && Number.isFinite(ms) && ms > 0 ? ms : undefined;
 }
 
 /**

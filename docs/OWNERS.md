@@ -29,7 +29,7 @@ overlaps with an existing owner, extend the owner instead.
 | A tab's model VRAM release (switch, close, `/unloadModel`) | `src/sidebar/TabModelRelease.ts` |
 | Chat-cap refusal wording (`chatCapMessage`) | `src/sidebar/sessionTypes.ts` |
 | Hidden conversation notifications                    | `src/sidebar/hiddenChatAlerts.ts`        |
-| Background process exit notice text                  | `src/sidebar/backgroundExitNotice.ts`    |
+| Background process exit notice + end-of-turn still-running notice text | `src/sidebar/backgroundExitNotice.ts` |
 | Send guards, model resolution, turn logs             | `src/sidebar/SendPipeline.ts`            |
 | /reindex progress interaction                        | `src/sidebar/reindexCommand.ts`          |
 | Primary turn + streaming lifecycle                   | `src/sidebar/AgentLoop.ts`               |
@@ -354,6 +354,7 @@ overlaps with an existing owner, extend the owner instead.
 | FORGE.md chain assembly + byte budget        | `src/llm/forgeInstructionsChain.ts`          |
 | Streaming OpenAI-compat client               | `src/llm/OpenAIClient.ts`                    |
 | Stream idle watchdog + stall budgets         | `src/llm/streamWatchdog.ts`                  |
+| Local-server stall probe (/slots, /v1/status; loopback only) | `src/llm/stallProbe.ts` |
 | Local llama.cpp fetch (30 min headers wait)  | `src/llm/localLlamaFetch.ts`                 |
 | Cut-off tool call: type + classification     | `src/llm/ToolCallTruncatedError.ts`          |
 | No-projector backend error classification    | `src/llm/imageUnsupportedError.ts`           |
@@ -395,6 +396,7 @@ overlaps with an existing owner, extend the owner instead.
 | search_code snippet/result size bounds     | `src/tools/searchSnippet.ts`          |
 | list_directory + size/age formatting       | `src/tools/listDirectoryTool.ts`      |
 | `shell` tool (spawn, approval, background)  | `src/tools/shellTool.ts`              |
+| Background-execution registry (~/.forge/background-execs/, reaped after a killed host) | `src/tools/backgroundRegistry.ts` |
 | Shell command classification (read-only/normal/dangerous/refused) | `src/tools/shellPolicy.ts` |
 | Shell program names and Git global-option tokens | `src/tools/shellCommandTokens.ts` |
 | Bash heredoc bodies split out before shell classification | `src/tools/shellHeredoc.ts` |
