@@ -12,6 +12,7 @@ import {
 } from '../../src/agent/ToolCallingLoop';
 import { ToolCallTruncatedError } from '../../src/llm/ToolCallTruncatedError';
 import { ToolFailureTracker } from '../../src/tools/StripTools';
+import { truncationGuidance } from '../../src/agent/truncationRecovery';
 
 interface Handlers {
   onToken: (t: string) => void;
@@ -392,6 +393,7 @@ describe('truncated tool calls', () => {
               toolCallId: 'call_edit',
               partialArguments: '{',
               approxBytes: 1200,
+              finishReason: 'length',
             }),
           );
           return;
@@ -403,10 +405,24 @@ describe('truncated tool calls', () => {
     const messages: ChatMessage[] = [{ role: 'user', content: 'edit the whole batch' }];
     await runToolCallingLoop(runOptions(messages) as never);
     const guidance = messages.find((m) => m.role === 'tool')?.content as string;
-    expect(guidance).toContain('fewer edits than in the call that was cut off');
+    expect(guidance).toContain('total characters in the next edit_file call must be at most 6000');
     expect(guidance).toContain('overrides any earlier instruction');
     expect(guidance).not.toContain('append_file');
   });
+
+  it.each(['write_file', 'edit_file'])(
+    'does not claim an EOF %s cutoff was caused by the output-size limit',
+    (toolName) => {
+      const guidance = truncationGuidance(
+        new ToolCallTruncatedError({ toolName, approxBytes: 1200 }),
+        5000,
+      );
+      expect(guidance).toContain('cut off before it was complete');
+      expect(guidance).toContain('cause is unknown');
+      expect(guidance).toContain('nothing was executed');
+      expect(guidance).not.toContain('output-size limit');
+    },
+  );
 
   it('caps max_tokens to everything the model may still generate', async () => {
     const seen: number[] = [];

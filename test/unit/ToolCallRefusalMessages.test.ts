@@ -288,6 +288,17 @@ describe('unavailable tool refusals', () => {
       'ToolRegistry: tool "write_file" is not available in this conversation.',
     );
   });
+
+  it('names an argument-derived permission when the tool base permission is granted', () => {
+    const manageJobs: RegisteredTool = {
+      ...makeRequiredTool('manage_jobs', ['action']),
+      permission: 'read',
+      additionalPermissionsForArgs: (args) => (args['action'] === 'delete' ? ['delete'] : []),
+    };
+    expect(() => registry.assertAllowed(manageJobs, new Set(['read']), { action: 'delete' })).toThrow(
+      'ToolRegistry: manage_jobs action "delete" needs the "delete" permission, which this conversation does not have.',
+    );
+  });
 });
 
 describe('apply_line_edits missing nested field (Fix C)', () => {

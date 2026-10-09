@@ -353,11 +353,26 @@ export class ToolRegistry {
     allowed: ReadonlySet<ToolPermission>,
     args?: Record<string, unknown>,
   ): void {
-    const missing = this.requiredPermissions(tool, args).filter(
-      (permission) => !allowed.has(permission),
-    );
-    if (missing.length === 0) return;
+    const basePermissions = [tool.permission, ...(tool.additionalPermissions ?? [])];
+    const missingBase = basePermissions.filter((permission) => !allowed.has(permission));
+    const argumentPermissions = args ? (tool.additionalPermissionsForArgs?.(args) ?? []) : [];
+    const missingFromArgs = argumentPermissions.filter((permission) => !allowed.has(permission));
+    if (missingBase.length === 0 && missingFromArgs.length === 0) return;
     const name = tool.definition.function.name;
+    if (missingBase.length === 0 && args && missingFromArgs.length > 0) {
+      const action = args['action'];
+      const permissionText = missingFromArgs.map((permission) => `"${permission}"`).join(', ');
+      if (typeof action === 'string') {
+        throw new Error(
+          `ToolRegistry: ${name} action "${action}" needs the ${permissionText} permission, ` +
+            `which this conversation does not have.`,
+        );
+      }
+      throw new Error(
+        `ToolRegistry: ${name} arguments need the ${permissionText} permission, ` +
+          `which this conversation does not have.`,
+      );
+    }
     const alternative = name.startsWith('browser_')
       ? ' Use render_html_to_image with mode: "preview".'
       : '';

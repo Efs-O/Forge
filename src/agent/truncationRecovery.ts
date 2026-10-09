@@ -41,7 +41,7 @@ export function asTruncation(err: unknown): ToolCallTruncatedError | undefined {
 /**
  * What the model is told after a truncated call. It must convey three things
  * the old "malformed tool arguments" result did not: nothing was written, the
- * cause was size rather than syntax, and the concrete way to succeed on retry.
+ * concrete way to succeed on retry, and (when known) the cause.
  */
 export function truncationGuidance(
   err: ToolCallTruncatedError,
@@ -60,20 +60,22 @@ export function truncationGuidance(
     outputRoom !== undefined && outputRoom > 0
       ? Math.max(1000, Math.min(writeLimit, Math.floor(outputRoom * 2) - 1000))
       : writeLimit;
+  const cutoff =
+    err.finishReason === 'length'
+      ? `This is an output-size limit, not a formatting mistake, and repeating the same call will fail the same way.`
+      : `The call was cut off before it was complete. The cause is unknown, and nothing was executed.`;
   if (err.toolName === 'edit_file') {
     return (
       `${target} was cut off after ${err.approxBytes} bytes of arguments and was NOT executed — ` +
-      `nothing was written. This is an output-size limit, not a formatting mistake, and repeating ` +
-      `the same call will fail the same way.\n` +
-      `HARD LIMIT for your next call: include fewer edits than in the call that was cut off. ` +
-      `This overrides any earlier instruction to apply every edit at once. Split the edit set ` +
-      `across several calls, with fewer edits in each.`
+      `nothing was written. ${cutoff}\n` +
+      `HARD LIMIT for your next call: the total characters in the next edit_file call must be at ` +
+      `most ${ceiling}. This overrides any earlier instruction to apply every edit at once. ` +
+      `Split the edit set across several calls, with fewer edits in each.`
     );
   }
   return (
     `${target} was cut off after ${err.approxBytes} bytes of arguments and was NOT executed — ` +
-    `nothing was written. This is an output-size limit, not a formatting mistake, and repeating ` +
-    `the same call will fail the same way.\n` +
+    `nothing was written. ${cutoff}\n` +
     `HARD LIMIT for your next call: the "content" argument must be at most ${ceiling} characters. ` +
     `This overrides any earlier instruction to write the whole file in one go — the file still ` +
     `ends up complete, just written across several calls.\n` +
