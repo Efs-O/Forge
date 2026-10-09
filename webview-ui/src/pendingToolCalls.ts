@@ -11,6 +11,8 @@ export interface PendingToolCall {
   toolName: string;
   target?: string;
   tokens: number;
+  /** When the first progress event arrived; kept across refreshes. */
+  startedAt: number;
 }
 
 export type PendingToolCalls = Map<string, PendingToolCall[]>;
@@ -29,7 +31,10 @@ export function withProgress(
 ): PendingToolCalls {
   const calls = pending.get(cid) ?? [];
   const at = calls.findIndex((existing) => sameCall(existing, call));
-  const next = at === -1 ? [...calls, call] : calls.map((c, i) => (i === at ? call : c));
+  const next =
+    at === -1
+      ? [...calls, call]
+      : calls.map((c, i) => (i === at ? { ...call, startedAt: c.startedAt } : c));
   return new Map(pending).set(cid, next);
 }
 

@@ -1,4 +1,5 @@
-import React, { useEffect, useState } from 'react';
+import React from 'react';
+import { useSecondsSince } from '../useSecondsSince';
 import type { AppMessage } from '../reducer';
 import { isReasoningOnly } from '../activityRows';
 import { sameRowList } from '../messageOps';
@@ -55,14 +56,9 @@ export function ThinkingLabel({
   ms: number | undefined;
 }): React.ReactElement {
   const live = startedAt !== undefined && ms === undefined;
-  const [now, setNow] = useState(() => Date.now());
-  useEffect(() => {
-    if (!live) return undefined;
-    const timer = setInterval(() => setNow(Date.now()), 1000);
-    return () => clearInterval(timer);
-  }, [live]);
+  const seconds = useSecondsSince(startedAt, live);
   if (!live) return <>{thinkingLabel(ms)}</>;
-  return <>{`Thinking… ${Math.max(0, Math.floor((now - startedAt) / 1000))} s`}</>;
+  return <>{`Thinking… ${seconds} s`}</>;
 }
 
 /** `Step 2 · 1.8 s` inside an expanded group; bare when unmeasured. */

@@ -2,7 +2,7 @@
 
 ## 0.17.0
 
-- While the model writes a tool call's arguments, the transcript shows a live row (`○ write_file matchbox.html · writing… 4,210 tokens`) that the real row replaces when the call is complete. A large `write_file` used to leave the screen frozen after the thinking bubble for as long as the model kept writing.
+- While the model writes a tool call's arguments, the transcript shows a live row (`○ write_file matchbox.html · writing… 42 s · 4,210 tokens`) that the real row replaces when the call is complete. The timer always ticks; the count appears once arguments actually stream (Strata holds non-string arguments such as `edit_file`'s `edits` until they are complete). A large `write_file` used to leave the screen frozen after the thinking bubble for as long as the model kept writing.
 - An open thinking label counts up (`Thinking… 12 s`) instead of standing still until the span ends; an error now ends the span too.
 - A turn the user stops ends with a dim "Stopped." line instead of breaking off silently.
 - Back-to-back successful calls of one tool fold into one row (`✓ shell ×6 · grep, sed`) that opens to the individual steps. Edits, failures, retries and running calls keep their own rows.

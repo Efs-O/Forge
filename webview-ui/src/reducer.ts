@@ -321,7 +321,13 @@ export function reducer(state: State, action: Action): State {
       // Writing a call's arguments ends the thinking before it.
       const sealed = sealReasoningSpan(state, cid);
       const { index, toolCallId, toolName, target, tokens } = action;
-      const call = { index, toolName, tokens, ...(toolCallId ? { toolCallId } : {}) };
+      const call = {
+        index,
+        toolName,
+        tokens,
+        startedAt: Date.now(),
+        ...(toolCallId ? { toolCallId } : {}),
+      };
       return {
         ...sealed,
         pendingToolCallsById: withProgress(sealed.pendingToolCallsById, cid, {

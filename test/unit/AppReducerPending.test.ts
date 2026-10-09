@@ -38,9 +38,18 @@ function progress(tokens: number, toolCallId = 'call-a'): Action {
 
 describe('webview App reducer — pending tool calls', () => {
   it('refreshes one entry per call and drops it when the call row lands', () => {
-    let state = run([{ type: 'USER_SEND', text: 'go', convId: cid }, progress(10), progress(250)]);
+    let state = run([{ type: 'USER_SEND', text: 'go', convId: cid }, progress(10)]);
+    const startedAt = state.pendingToolCallsById.get(cid)![0]!.startedAt;
+    state = mod.reducer(state, progress(250));
     expect(state.pendingToolCallsById.get(cid)).toEqual([
-      { index: 0, toolCallId: 'call-a', toolName: 'write_file', target: 'matchbox.html', tokens: 250 },
+      {
+        index: 0,
+        toolCallId: 'call-a',
+        toolName: 'write_file',
+        target: 'matchbox.html',
+        tokens: 250,
+        startedAt, // the row's timer keeps counting from the first event
+      },
     ]);
     state = mod.reducer(state, {
       type: 'TOOL_ACTIVITY',
@@ -74,6 +83,16 @@ describe('webview App reducer — pending tool calls', () => {
     const last = state.messagesById[cid]!.at(-1)!;
     expect(last.reasoningStartedAt).toBeDefined();
     expect(last.reasoningMs).toBeDefined();
+  });
+});
+
+describe('pending tool call label', () => {
+  it('shows the timer alone while the count is only the opening brace', async () => {
+    const { pendingProgressLabel } = await import(
+      '../../webview-ui/src/components/PendingToolCallRow'
+    );
+    expect(pendingProgressLabel(42, 1)).toBe('writing… 42 s');
+    expect(pendingProgressLabel(42, 4210)).toBe('writing… 42 s · 4,210 tokens');
   });
 });
 
