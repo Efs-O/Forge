@@ -211,6 +211,10 @@ export function buildSummaryPrompt(
     // One name for one artifact, matching SUMMARY_PREAMBLE and RESUME_PROMPT.
     'Create a compact conversation summary for the same repository.\n\n' +
     'Use only facts present below. ' +
+    'Merge the earlier summary into this one and condense it on every compaction. ' +
+    'Completed work should shrink to one line per item; drop superseded decisions and resolved ' +
+    'errors. Keep open work and current file state detailed. Keep the summary target fixed across ' +
+    'compactions; do not carry earlier summary prose forward just because it was already summarized. ' +
     (budget
       ? `Aim for about ${budget.summaryTargetTokens} visible tokens; do not exceed ${budget.summaryCeilingTokens}. `
       : '') +

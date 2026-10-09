@@ -34,4 +34,29 @@ describe('compaction summary content', () => {
       Math.min(12_000, 14_000 - 2_000) - withPlan.length,
     );
   });
+
+  it('condenses a long earlier summary without changing the summary allowance', () => {
+    const previousSummary =
+      'Completed edit: file A changed. Superseded choice: use old API. Resolved error: missing import. '.repeat(
+        80,
+      );
+    const messages: ChatMessage[] = [{ role: 'user', content: 'Continue the task.' }];
+    const allowance = compactionSummaryAllowance(8_000, 12_000, 1_000, 'resume note');
+    const prompt = buildSummaryPrompt(
+      'Monday, October 5, 2026 at 14:05',
+      previousSummary,
+      messages,
+      '',
+      '',
+      undefined,
+      { sourceMaxChars: 10_000, summaryTargetTokens: 1_200, summaryCeilingTokens: 1_500 },
+    );
+
+    expect(prompt).toContain('Merge the earlier summary into this one and condense it on every compaction.');
+    expect(prompt).toContain('Completed work should shrink to one line per item');
+    expect(prompt).toContain('drop superseded decisions and resolved errors');
+    expect(prompt).toContain('Keep open work and current file state detailed.');
+    expect(prompt).toContain('Keep the summary target fixed across compactions');
+    expect(compactionSummaryAllowance(8_000, 12_000, 1_000, 'resume note')).toBe(allowance);
+  });
 });
