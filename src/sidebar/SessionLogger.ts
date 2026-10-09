@@ -347,7 +347,10 @@ export class SessionLogger {
       if (msg.tool_calls?.length) {
         const toolLine: Record<string, unknown> = {
           role: msg.role,
-          content: null,
+          // Text the model wrote before its calls ("Physics is now 11.6 ms.
+          // Moving to the renderer.") streamed to the chat and lives on this
+          // turn; a hardcoded null left it in the sidebar and nowhere else.
+          content: typeof msg.content === 'string' && msg.content ? msg.content : null,
           tool_calls: msg.tool_calls.map((tc) => ({
             id: tc.id,
             name: tc.function.name,

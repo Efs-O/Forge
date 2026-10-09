@@ -57,6 +57,20 @@ describe('SessionLogger reasoning capture', () => {
     expect(toolRow?.['reasoning']).toBe('I should read the file before editing it.');
   });
 
+  it('keeps the narration written alongside a tool call', () => {
+    const logger = new SessionLogger('s5', 't', 'm');
+    const call = { id: 'c1', type: 'function' as const, function: { name: 'shell', arguments: '{}' } };
+    logger.flush(
+      [
+        { role: 'assistant', content: 'Physics is done. Moving to the renderer.', tool_calls: [call] },
+        { role: 'assistant', content: null, tool_calls: [{ ...call, id: 'c2' }] },
+      ],
+      'm',
+    );
+    const rows = readRows('s5').filter((r) => r['tool_calls']);
+    expect(rows.map((r) => r['content'])).toEqual(['Physics is done. Moving to the renderer.', null]);
+  });
+
   it('keeps malformed tool arguments as raw text in the session log', () => {
     const raw = '{"path": "unfinished';
     const logger = new SessionLogger('s4', 't', 'm');
