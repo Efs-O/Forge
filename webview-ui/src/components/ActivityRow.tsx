@@ -153,7 +153,6 @@ function ActivityRowView({ step, streaming }: ActivityRowProps): React.ReactElem
               hunks={diff.diffHunks}
               isNew={diff.diffIsNew}
               isDeleted={diff.diffIsDeleted}
-              defaultExpanded
             />
           ))}
         </div>

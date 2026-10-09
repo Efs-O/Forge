@@ -2,6 +2,7 @@
 
 ## 0.17.0
 
+- Inside an opened compact or grouped step, each edited file now starts as a one-line diff header (name, `+N −M`); its toggle shows the hunks. They used to open expanded with the step.
 - `/stats`' `session` block is now the Forge run that made today's newest request, from any window or chat, instead of the chat open in the window that owns the control port. The Strata card showed a two-turn side chat's "0 compactions" while the real run had two. No request today ⇒ `session: null`.
 - Added `forge.sidebar.activityView` (`grouped` default, `compact`, `full`). The host validates changes and reports invalid values in the transcript. Compact folds each tool call's reasoning, retries, repeats and linked diff into one expandable step row (`◔ Ns`, `+N −M`, `×N`, an amber retry chip, and `cd <dir> &&` hidden from shell commands); grouped also collects adjacent steps behind one summary row that stays open while the agent works and collapses when the answer starts. `full` is the previous layout.
 - Tool activity and diff rows retain their tool-call links and display targets across live updates and transcript syncs.

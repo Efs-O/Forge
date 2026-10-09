@@ -73,13 +73,16 @@ describe('ActivityRow', () => {
     expect(container.querySelector('.activity-row-body')).toBeNull();
   });
 
-  it('shows diff counts and renders expanded hunks inside the expanded body', () => {
+  it('shows diff counts and keeps the hunks collapsed until the diff is opened', () => {
     const hunks: DiffHunk[] = [{ oldStart: 1, newStart: 1, lines: [
       { kind: 'added', text: 'new' }, { kind: 'removed', text: 'old' },
     ] }];
     render(step({ diffs: [diff('change', hunks)] }));
     expect(container.querySelector('.activity-row-edit')?.textContent).toContain('+1 −1');
     toggle();
+    expect(container.querySelector('.diff-block')).not.toBeNull();
+    expect(container.querySelectorAll('.diff-line')).toHaveLength(0);
+    act(() => container.querySelector<HTMLButtonElement>('.diff-toggle')!.click());
     expect(container.querySelectorAll('.diff-line')).toHaveLength(2);
   });
 

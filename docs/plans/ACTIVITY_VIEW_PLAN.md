@@ -361,6 +361,9 @@ the largest, at roughly 200 lines.
    the first release that ships B. Phase 2 (A alone) is not tagged on its own.
 2. ~~**The `MODIFIED` card's inline diff.**~~ **Decided 2026-10-09: already
    open.** Inside an opened step, `DiffBlock` renders with its hunks expanded.
+   **Reversed 2026-10-09 after the live install:** the hunks start collapsed;
+   the opened step shows one `DiffBlock` header per file (name, `+N −M`) and
+   its toggle opens the hunks. Opened steps with several edits were too long.
    Original question follows. Today, a single edit's `DiffBlock`
    shows its hunks on one click. Inside a compact row that becomes two clicks:
    the row, then the hunks. The plan proposes rendering the `DiffBlock` already
