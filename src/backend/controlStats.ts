@@ -68,7 +68,6 @@ export interface ControlStatsOptions {
   now: () => number;
   contextLimitFor: (model: string) => number | null;
   forgeVersion: string;
-  activeConversationId?: () => string | undefined;
 }
 
 function localDay(epochMs: number): string {
@@ -201,17 +200,14 @@ export class ControlStatsBuilder {
   private readonly fileCache = new Map<string, FileCacheEntry>();
   private cachedReply: ControlStats | undefined;
   private cachedAtMs = 0;
-  private cachedActiveId: string | undefined;
 
   constructor(private readonly options: ControlStatsOptions) {}
 
   build(): ControlStats {
     const nowMs = this.options.now();
     const day = localDay(nowMs);
-    const activeId = this.options.activeConversationId?.();
     if (
       this.cachedReply?.day === day &&
-      activeId === this.cachedActiveId &&
       nowMs >= this.cachedAtMs &&
       nowMs - this.cachedAtMs < 3_000
     ) {
@@ -219,9 +215,7 @@ export class ControlStatsBuilder {
     }
 
     const files = this.filesForDay(day);
-    const activeFile = this.activeFile(activeId);
     const todayPaths = new Set(files.map((file) => file.path));
-    if (activeFile) todayPaths.add(activeFile.path);
     for (const cachedPath of this.fileCache.keys()) {
       if (!todayPaths.has(cachedPath)) this.fileCache.delete(cachedPath);
     }
@@ -242,11 +236,12 @@ export class ControlStatsBuilder {
         turn_errors: 0,
       },
       last_request: null,
-      session: activeFile ? this.emptySession(activeId!) : null,
+      session: null,
       computed_at: Math.floor(nowMs / 1_000),
       skipped_files: 0,
     };
     let lastRequestAtMs = -1;
+    let lastRequestFile: { path: string; rows: Array<Record<string, unknown>> } | undefined;
     for (const file of files) {
       let rows: Array<Record<string, unknown>>;
       try {
@@ -269,62 +264,35 @@ export class ControlStatsBuilder {
       if (counted.last_request && requestAtMs > lastRequestAtMs) {
         lastRequestAtMs = requestAtMs;
         result.last_request = counted.last_request;
+        lastRequestFile = { path: file.path, rows };
       }
     }
 
-    if (activeFile && result.session) this.readActiveSession(activeFile, result, activeId!);
+    // `session` is the run that made today's newest request, whichever window
+    // or chat it came from: the "last Forge run" a monitor wants to show.
+    if (lastRequestFile)
+      result.session = this.sessionFor(lastRequestFile.path, lastRequestFile.rows);
 
     this.cachedAtMs = nowMs;
-    this.cachedActiveId = activeId;
     this.cachedReply = controlStatsSchema.parse(result);
     return this.cachedReply;
   }
 
-  private emptySession(conversationId: string): NonNullable<ControlStats['session']> {
-    return { conversation_id: conversationId, ...emptyCounts(), started_at: null };
-  }
-
-  private activeFile(
-    id: string | undefined,
-  ): { path: string; size: number; mtimeMs: number; missing?: boolean } | null {
-    if (!id || !/^[A-Za-z0-9_-]+$/.test(id)) return null;
-    const filePath = path.join(this.options.sessionsDir, `${id}.jsonl`);
-    try {
-      const stat = fs.statSync(filePath);
-      return stat.isFile()
-        ? { path: filePath, size: stat.size, mtimeMs: stat.mtimeMs }
-        : { path: filePath, size: -1, mtimeMs: -1, missing: true };
-    } catch (error) {
-      const missing = (error as NodeJS.ErrnoException).code === 'ENOENT';
-      return { path: filePath, size: -1, mtimeMs: -1, missing };
-    }
-  }
-
-  private readActiveSession(
-    file: { path: string; size: number; mtimeMs: number; missing?: boolean },
-    result: ControlStats,
-    activeId: string,
-  ): void {
-    const session = result.session;
-    if (!session) return;
-    if (file.size < 0) {
-      if (!file.missing) result.skipped_files += 1;
-      return;
-    }
-    try {
-      const rows = this.rowsForFile(file.path, file.size, file.mtimeMs);
-      if (!rows.some((row) => row['type'] === 'session_start')) return;
-      const firstTimestamp = rows[0]?.['timestamp_ms'];
-      session.started_at =
+  /** Whole-log counts (every day, not just today) for one session file. */
+  private sessionFor(
+    filePath: string,
+    rows: Array<Record<string, unknown>>,
+  ): NonNullable<ControlStats['session']> {
+    const firstTimestamp = rows[0]?.['timestamp_ms'];
+    const [counts] = countRows(rows, undefined, this.options.contextLimitFor);
+    return {
+      conversation_id: path.basename(filePath, '.jsonl'),
+      ...counts,
+      started_at:
         typeof firstTimestamp === 'number' && Number.isFinite(firstTimestamp)
           ? Math.floor(firstTimestamp / 1_000)
-          : null;
-      const [counts] = countRows(rows, undefined, this.options.contextLimitFor);
-      Object.assign(session, counts, { conversation_id: activeId });
-    } catch {
-      result.skipped_files += 1;
-      this.fileCache.delete(file.path);
-    }
+          : null,
+    };
   }
 
   private filesForDay(day: string): Array<{ path: string; size: number; mtimeMs: number }> {

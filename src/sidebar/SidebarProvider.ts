@@ -241,9 +241,6 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
   }
 
   // ── Public API ────────────────────────────────────────────────────────────
-  getActiveConversationId(): string {
-    return this.sidebar.activeConversationId;
-  }
   setRemoteStatus(status: { transports: string[]; paired: boolean }): void {
     this.remoteStatus = { transports: [...status.transports], paired: status.paired };
     this.post({ type: 'remoteStatus', ...this.remoteStatus });

@@ -38,17 +38,12 @@ describe('control stats', () => {
     };
   }
 
-  function builder(
-    dir: string,
-    now: () => number = () => FIXED_NOW,
-    activeConversationId?: () => string | undefined,
-  ) {
+  function builder(dir: string, now: () => number = () => FIXED_NOW) {
     return createControlStatsBuilder({
       sessionsDir: dir,
       now,
       forgeVersion: 'test-version',
       contextLimitFor: (model) => (model === 'model-a' ? 8192 : null),
-      ...(activeConversationId ? { activeConversationId } : {}),
     });
   }
 
@@ -242,18 +237,14 @@ describe('control stats', () => {
     expect(stats.build().today.turns).toBe(2);
   });
 
-  it('keeps only today files and the active older session across day rollover', () => {
+  it('keeps only today files in the file cache across day rollover', () => {
     const env = setup();
-    const activeFile = env.write('active.jsonl', [
+    env.write('old.jsonl', [
       { type: 'session_start', timestamp_ms: FIXED_NOW },
       { role: 'user', timestamp_ms: FIXED_NOW },
     ]);
-    env.write('inactive-old.jsonl', [
-      { type: 'session_start', timestamp_ms: FIXED_NOW },
-      { role: 'user', timestamp_ms: FIXED_NOW },
-    ]);
-    const stats = builder(env.dir, env.now, () => 'active');
-    expect(stats.build().session?.turns).toBe(1);
+    const stats = builder(env.dir, env.now);
+    expect(stats.build().today.turns).toBe(1);
 
     const todayFile = env.write(
       'today.jsonl',
@@ -266,29 +257,12 @@ describe('control stats', () => {
     env.setNow(FIXED_NOW + 86_400_000);
     expect(stats.build().today.turns).toBe(1);
     const fileCache = (stats as unknown as { fileCache: Map<string, unknown> }).fileCache;
-    expect([...fileCache.keys()].sort()).toEqual([activeFile, todayFile].sort());
-
-    // Same size and mtime: after the reply cache expires, the retained active
-    // file entry must still be used despite the log no longer counting as today.
-    const oldStat = fs.statSync(activeFile);
-    fs.writeFileSync(
-      activeFile,
-      [
-        JSON.stringify({ type: 'session_start', timestamp_ms: FIXED_NOW }),
-        JSON.stringify({ role: 'tool', timestamp_ms: FIXED_NOW }),
-        '',
-      ].join('\n'),
-    );
-    fs.utimesSync(activeFile, oldStat.atimeMs / 1_000, oldStat.mtimeMs / 1_000);
-    expect(fs.statSync(activeFile).mtimeMs).toBe(oldStat.mtimeMs);
-    env.setNow(FIXED_NOW + 86_400_000 + 4_000);
-    expect(stats.build().session?.turns).toBe(1);
-    expect([...fileCache.keys()].sort()).toEqual([activeFile, todayFile].sort());
+    expect([...fileCache.keys()]).toEqual([todayFile]);
   });
 
-  it('counts the active conversation across every day in its log', () => {
+  it("counts the session with today's newest request across every day in its log", () => {
     const env = setup();
-    env.write('active-id.jsonl', [
+    env.write('run-id.jsonl', [
       { type: 'session_start', timestamp_ms: yesterday },
       { role: 'user', timestamp_ms: yesterday },
       {
@@ -314,10 +288,10 @@ describe('control stats', () => {
       { role: 'tool', content: 'Error: failed', timestamp_ms: yesterday },
       { type: 'turn_error', timestamp_ms: yesterday },
     ]);
-    const result = builder(env.dir, env.now, () => 'active-id').build();
+    const result = builder(env.dir, env.now).build();
     expect(result.today.turns).toBe(1);
     expect(result.session).toMatchObject({
-      conversation_id: 'active-id',
+      conversation_id: 'run-id',
       turns: 2,
       requests: 3,
       compactions: 1,
@@ -332,69 +306,31 @@ describe('control stats', () => {
     });
   });
 
-  it('reflects an active-id switch before the three-second reply cache expires', () => {
+  it('picks the session that made the newest request, not the busiest or newest-written log', () => {
     const env = setup();
-    env.write('first.jsonl', [
-      { type: 'session_start', timestamp_ms: FIXED_NOW },
-      { role: 'user', timestamp_ms: FIXED_NOW },
-    ]);
-    env.write('second.jsonl', [
-      { type: 'session_start', timestamp_ms: FIXED_NOW },
-      { role: 'user', timestamp_ms: FIXED_NOW },
-      { role: 'user', timestamp_ms: FIXED_NOW + 1 },
-    ]);
-    let active = 'first';
-    const stats = builder(env.dir, env.now, () => active);
-    expect(stats.build().session?.turns).toBe(1);
-    active = 'second';
-    expect(stats.build().session).toMatchObject({ conversation_id: 'second', turns: 2 });
-  });
-
-  it('rejects unsafe active ids without opening a path outside the sessions directory', () => {
-    const env = setup();
-    const outsideId = `${path.basename(env.dir)}-outside`;
-    const outside = path.join(path.dirname(env.dir), `${outsideId}.jsonl`);
-    fs.writeFileSync(
-      outside,
-      `${JSON.stringify({ type: 'session_start', timestamp_ms: FIXED_NOW })}\n`,
+    env.write(
+      'busy.jsonl',
+      [
+        { type: 'session_start', timestamp_ms: FIXED_NOW },
+        { role: 'user', timestamp_ms: FIXED_NOW },
+        { role: 'user', timestamp_ms: FIXED_NOW + 1 },
+        { role: 'user', timestamp_ms: FIXED_NOW + 2 },
+        {
+          type: 'usage',
+          timestamp_ms: FIXED_NOW + 1,
+          model: 'model-a',
+          model_request_count: 1,
+          input_tokens: 20,
+          output_tokens: 1,
+        },
+        // A later non-request row (e.g. a turn opened in another chat).
+        { role: 'user', timestamp_ms: FIXED_NOW + 50 },
+      ],
+      FIXED_NOW + 50,
     );
-    try {
-      for (const id of [`../${outsideId}`, 'a/b', 'a\\b', '..']) {
-        expect(builder(env.dir, env.now, () => id).build().session).toBeNull();
-      }
-    } finally {
-      fs.rmSync(outside, { force: true });
-    }
-  });
-
-  it('returns null without an active dependency or active id and zero counts for an unlogged chat', () => {
-    const env = setup();
-    expect(builder(env.dir).build().session).toBeNull();
-    expect(builder(env.dir, env.now, () => undefined).build().session).toBeNull();
-    expect(builder(env.dir, env.now, () => 'new-chat').build().session).toMatchObject({
-      conversation_id: 'new-chat',
-      turns: 0,
-      requests: 0,
-      started_at: null,
-      last_request: null,
-    });
-  });
-
-  it("uses the active file's last request even when another session has a newer one", () => {
-    const env = setup();
-    env.write('active.jsonl', [
+    env.write('newest-request.jsonl', [
       { type: 'session_start', timestamp_ms: FIXED_NOW },
-      {
-        type: 'usage',
-        timestamp_ms: FIXED_NOW + 1,
-        model: 'model-a',
-        model_request_count: 1,
-        input_tokens: 20,
-        output_tokens: 1,
-      },
-    ]);
-    env.write('newer.jsonl', [
-      { type: 'session_start', timestamp_ms: FIXED_NOW },
+      { role: 'user', timestamp_ms: FIXED_NOW },
       {
         type: 'usage',
         timestamp_ms: FIXED_NOW + 20,
@@ -404,9 +340,34 @@ describe('control stats', () => {
         output_tokens: 2,
       },
     ]);
-    const result = builder(env.dir, env.now, () => 'active').build();
+    const result = builder(env.dir, env.now).build();
     expect(result.last_request?.model).toBe('model-b');
-    expect(result.session?.last_request).toMatchObject({ model: 'model-a', input_tokens: 20 });
+    expect(result.session).toMatchObject({
+      conversation_id: 'newest-request',
+      turns: 1,
+      last_request: { model: 'model-b', input_tokens: 99 },
+    });
+  });
+
+  it('returns a null session when no log made a request today', () => {
+    const env = setup();
+    expect(builder(env.dir).build().session).toBeNull();
+    env.write('chat-only.jsonl', [
+      { type: 'session_start', timestamp_ms: FIXED_NOW },
+      { role: 'user', timestamp_ms: FIXED_NOW },
+    ]);
+    env.write('yesterday.jsonl', [
+      { type: 'session_start', timestamp_ms: yesterday },
+      {
+        type: 'usage',
+        timestamp_ms: yesterday,
+        model: 'model-a',
+        model_request_count: 1,
+        input_tokens: 5,
+        output_tokens: 1,
+      },
+    ], FIXED_NOW);
+    expect(builder(env.dir).build().session).toBeNull();
   });
 
   it('never copies prompt, summary, reasoning, message, or tool arguments into the reply', () => {

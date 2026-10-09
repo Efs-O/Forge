@@ -198,12 +198,10 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
   const registry = registryPath ? new ControlServerRegistry(registryPath) : undefined;
   const packageVersion = context.extension.packageJSON['version'];
   // Declared early (closures here and above use it); assigned after CodeLens
-  // construction. /stats can arrive first, hence the optional call below.
+  // construction. An agent route can arrive first, so its getter may see it unset.
   // eslint-disable-next-line prefer-const
   let sidebarProvider: SidebarProvider;
   const controlServer = new ControlServer(pool, config, {
-    // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition -- unassigned until activation finishes
-    activeConversationId: () => sidebarProvider?.getActiveConversationId(),
     agentRoutes: setupAgentMessaging(
       context,
       () => sidebarProvider,

@@ -117,6 +117,29 @@ Strata side (local branch `local/cpu-sensors`, never pushed): the Forge card ren
 Phase 4 is one commit: builder + route deps + `extension.ts` wiring + tests, `npm run ci` green, then stop for
 review. The Strata card change is a second commit on the Strata branch.
 
+## Phase 5 — the last run, not the active chat (2026-10-09)
+
+Phase 4's "active chat in the window that owns the port" turned out to be the wrong question. The card showed
+"2 turns, 0 compactions" for a two-turn chat that happened to be open in the port-owning window, while the real
+Strata run (18 turns, 2 compactions, 512 tool calls) had been driven from elsewhere. The user wants the card to
+reflect the last Forge run.
+
+- **Which conversation:** the session log holding **today's newest request**: the same file that wins the
+  top-level `last_request`. It does not matter which window or chat sent it. No request today ⇒ `session: null`.
+- **Counts:** unchanged from phase 4: the whole file, every day.
+- **Removed:** the `activeConversationId` dependency (`ControlServerDeps`, `ControlStatsOptions`, the
+  `extension.ts` wiring and `SidebarProvider.getActiveConversationId`), the active-id path validation (the id is
+  now a file name read from the directory, never caller input), and the active-id reply-cache key.
+- **Cache:** the session file is one of today's files, so the per-file cache holds today's files only, as before
+  phase 4. The phase-4 ledger row below is gone with the dependency.
+- **Strata side:** the card label reads "Forge · last run", and `session: null` ⇒ "No Forge run today".
+
+Phase 5 tests:
+- the newest-request session's counts span every day in its log;
+- the session is the file with the newest request, not the one with the most turns or the newest write;
+- no request today (only chat rows, or a request dated yesterday) ⇒ `session: null`;
+- the day-rollover cache holds only today's files.
+
 ## State × lifecycle ledger
 
 No durable state: the endpoint only reads session logs that `SessionLogger` already owns, and its caches live in
@@ -127,12 +150,11 @@ memory.
 | Per-file parse cache (memory) | first `/stats` that reads the file | window/extension host exit | n/a, no setting; no callers → never built | a torn last line is skipped by the shared reader | gone with the process; rebuilt on demand | entry replaced when `(size, mtimeMs)` changes; entries for files not from today dropped on each build |
 | Whole-reply cache (memory) | each build | process exit | n/a | n/a, built then swapped in one assignment | gone with the process | 3 s |
 
-| Active-session file entry in the per-file cache (memory, phase 4) | first `/stats` while that chat is active | when another chat becomes active and the file is not from today | `activeConversationId` dep absent ⇒ never created | torn last line skipped by the shared reader | gone with the process | replaced when `(size, mtimeMs)` changes |
 
 CI-enforceable row: the per-file cache must drop entries for files that are not from today, or it grows without
 bound over a long-running window. Test: build on day 1 with 3 files, advance the injected clock to day 2, build →
-the cache holds only day-2 files. Phase 4 extends it: with an active chat whose file is from day 1, the day-2 cache
-holds the day-2 files plus that one file, and nothing else.
+the cache holds only day-2 files. (Phase 4 kept one extra day-1 file for the active chat; phase 5 removed that
+row, so the original rule holds again.)
 
 ## Acceptance criteria
 
