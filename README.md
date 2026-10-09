@@ -496,6 +496,8 @@ Click the Forge icon in the activity bar and send a prompt.
 
 If the config is missing or invalid, Forge will guide you through setup instead of silently failing.
 
+The agent's tool activity is grouped by default: each run of steps folds into one summary row (open while the agent works, collapsed when the answer starts), and every step and diff expands on click. `forge.sidebar.activityView` switches to `compact` (one row per step, no grouping) or `full` (every call, thought and diff as its own row).
+
 ## Coding benchmark smoke test
 
 Forge includes a one-task SWE-bench Verified smoke runner. Install the official
