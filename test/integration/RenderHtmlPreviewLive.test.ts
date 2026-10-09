@@ -346,6 +346,22 @@ describe('render_html_to_image preview against real Chrome', () => {
     expect(String(result)).toContain('the active model has no vision input');
   }, 90_000);
 
+  it('reports WGSL compilation errors raised by a page', async (ctx) => {
+    let result: string | MultimodalToolResult;
+    try {
+      result = await preview(
+        '<script>(async()=>{const a=await navigator.gpu.requestAdapter();' +
+          'if(!a){console.log("no-adapter");return}const d=await a.requestDevice();' +
+          'd.createShaderModule({code:"@compute @workgroup_size(1)\\nfn main() {\\n let x: f32 = \\\"bad\\\";\\n}"});' +
+          '})();</script>',
+        { wait_ms: 1_000, width: 300, height: 200 },
+      );
+    } catch (err) {
+      return skipIfNoBrowser(ctx, err);
+    }
+    expect(String(result)).toMatch(/Page errors \(\d+\):[\s\S]*webgpu: \d+:\d+:/i);
+  }, 90_000);
+
   it('draws a three.js WebGL scene loaded from cdn.jsdelivr.net', async (ctx) => {
     if (!(await cdnReachable())) {
       ctx.skip('cdn.jsdelivr.net is not reachable from this host (offline?)');

@@ -82,6 +82,7 @@ describe('render_html_to_image preview: launch hardening', () => {
     // No hole to Forge's own control server, and no shell quoting in an argv.
     expect(args.join(' ')).not.toMatch(/localhost|127\.0\.0\.1|["']/);
     expect(renderFake.contextCalls[0]).toMatchObject({ javaScriptEnabled: true });
+    expect(renderFake.initScripts[0]).toContain('GPUDevice.prototype.createShaderModule');
     expect(renderFake.gotoCalls).toBe(1);
     expect(renderFake.setContentCalls).toEqual([]);
     expect(renderFake.fulfillments[0]).toMatchObject({ body: PAGE });

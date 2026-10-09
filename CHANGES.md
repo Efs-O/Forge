@@ -20,6 +20,7 @@
 
 ### Behaviour fixes from the forge-bench review
 
+- Preview now captures WebGPU uncaptured errors and shader compilation diagnostics, including their line and column, which Chrome did not surface through page errors or console output.
 - `apply_line_edits` now explains the `JSON.parse` position when a string-wrapped operations array is malformed, derives one omitted line bound from `expected_lines`, sorts edits by line, names overlapping ranges, and includes the current numbered lines when the expected-line count is wrong.
 - An incomplete tool call at stream EOF is now recovered as an output truncation instead of failing the turn. `edit_file` retries are told to send fewer edits per call, and truncation still does not count as a tool failure.
 - A grouped tool that is offered in the request now runs when called. Before, dispatch refused it until `load_tool_group` had been called, even when the tool was in the request (7 refusals in the session logs).

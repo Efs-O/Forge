@@ -311,6 +311,7 @@ export async function renderPreview(
         deviceScaleFactor: 1,
         javaScriptEnabled: true,
       });
+      await context.addInitScript(WEBGPU_ERROR_CAPTURE);
       // origin -> why: a public host that timed out must not read as refused.
       const blocked = new Map<string, string>();
       await context.route('**/*', async (route) => {
@@ -420,6 +421,30 @@ const FOCUS_GAME_TARGET = `(() => {
   if (!target) return;
   if (target instanceof HTMLCanvasElement && !target.hasAttribute('tabindex')) target.tabIndex = -1;
   target.focus();
+})()`;
+
+/** Capture shader diagnostics browsers keep out of pageerror and console events. */
+const WEBGPU_ERROR_CAPTURE = `(() => {
+  if (typeof GPUAdapter === 'undefined' || typeof GPUDevice === 'undefined') return;
+  const requestDevice = GPUAdapter.prototype.requestDevice;
+  GPUAdapter.prototype.requestDevice = async function(...args) {
+    const device = await requestDevice.apply(this, args);
+    device.addEventListener('uncapturederror', event => {
+      console.error('webgpu: ' + event.error.message);
+    });
+    return device;
+  };
+  const createShaderModule = GPUDevice.prototype.createShaderModule;
+  GPUDevice.prototype.createShaderModule = function(descriptor) {
+    const module = createShaderModule.call(this, descriptor);
+    module.getCompilationInfo().then(info => {
+      for (const message of info.messages) {
+        if (message.type !== 'error') continue;
+        console.error('webgpu: ' + message.lineNum + ':' + message.linePos + ': ' + message.message);
+      }
+    });
+    return module;
+  };
 })()`;
 
 function safePreviewHeaders(headers: Record<string, string>): Record<string, string> {

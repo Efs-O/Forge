@@ -18,6 +18,7 @@
 export interface RenderFake {
   launchCalls: Array<{ channel: string; headless: boolean; args: string[] }>;
   contextCalls: Array<Record<string, unknown>>;
+  initScripts: string[];
   routeSelectors: string[];
   /** The handlers registered with each route, so a test can feed it requests. */
   routeHandlers: Array<(route: FakeRoute) => void | Promise<void>>;
@@ -72,6 +73,7 @@ export interface FakeRoute {
 export const renderFake: RenderFake = {
   launchCalls: [],
   contextCalls: [],
+  initScripts: [],
   routeSelectors: [],
   routeHandlers: [],
   waitCalls: [],
@@ -100,6 +102,7 @@ export const renderFake: RenderFake = {
 export function resetRenderFake(): void {
   renderFake.launchCalls = [];
   renderFake.contextCalls = [];
+  renderFake.initScripts = [];
   renderFake.routeSelectors = [];
   renderFake.routeHandlers = [];
   renderFake.waitCalls = [];
@@ -147,6 +150,9 @@ export function fakePlaywright(): {
               for (const listener of listeners.get(event) ?? []) listener(payload);
             };
             return {
+              addInitScript: async (script: string) => {
+                renderFake.initScripts.push(script);
+              },
               route: async (
                 selector: string,
                 handler?: (route: FakeRoute) => void | Promise<void>,
