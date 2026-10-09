@@ -414,6 +414,7 @@ export class ToolDispatch {
     }
     this.post({
       type: 'fileDiff',
+      ...(toolCallId ? { toolCallId } : {}),
       filePath: relPath,
       hunks,
       isNew,

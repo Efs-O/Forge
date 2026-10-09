@@ -139,6 +139,45 @@ describe('mergeSyncedMessages', () => {
     expect(mergeSyncedMessages([], rows).map((m) => m.content)).toEqual(['hello', 'hi']);
   });
 
+  it('hydrates call links and targets from synced rows when local state is empty', () => {
+    const rows: PersistedRow[] = [
+      {
+        role: 'tool', content: 'edit_file → a.ts', toolName: 'edit_file',
+        toolCallId: 'call-a', toolTarget: 'a.ts', toolResult: 'done', toolResultTotal: 4,
+      },
+      {
+        role: 'diff', content: 'src/a.ts', toolCallId: 'call-a',
+        diffHunks: null, diffIsNew: false, diffIsDeleted: false,
+      },
+    ];
+    expect(mergeSyncedMessages([], rows)).toMatchObject([
+      { role: 'tool', toolCallId: 'call-a', toolTarget: 'a.ts' },
+      { role: 'diff', toolCallId: 'call-a' },
+    ]);
+  });
+
+  it('keeps synced call links and targets during a mid-turn reconcile and preserves ids', () => {
+    const local = [
+      msg('tool', 'edit_file → a.ts', { toolName: 'edit_file', toolCallId: 'call-a', toolResult: 'done' }),
+      msg('diff', 'src/a.ts', { toolCallId: 'call-a' }),
+    ];
+    const rows: PersistedRow[] = [
+      {
+        role: 'tool', content: 'edit_file → a.ts', toolName: 'edit_file',
+        toolCallId: 'call-a', toolTarget: 'a.ts', toolResult: 'done', toolResultTotal: 4,
+      },
+      {
+        role: 'diff', content: 'src/a.ts', toolCallId: 'call-a',
+        diffHunks: null, diffIsNew: false, diffIsDeleted: false,
+      },
+    ];
+    const merged = mergeSyncedMessages(local, rows);
+    expect(merged).toMatchObject([
+      { role: 'tool', id: local[0]!.id, toolCallId: 'call-a', toolTarget: 'a.ts' },
+      { role: 'diff', id: local[1]!.id, toolCallId: 'call-a' },
+    ]);
+  });
+
   it('anchors local-only rows before the next matching host turn', () => {
     // The host can omit or replace intermediate renderable turns.
     const local: AppMessage[] = [

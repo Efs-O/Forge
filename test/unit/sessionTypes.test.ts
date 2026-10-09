@@ -169,10 +169,33 @@ describe('sessionTypes', () => {
         role: 'tool',
         content: 'tool → result',
         toolName: 'tool',
+        toolCallId: 'call_1',
         toolResult: 'result',
         toolResultTotal: 6,
       },
       { role: 'assistant', content: 'bye' },
+    ]);
+  });
+
+  it('links parallel tool rows and their diffs by call id and reuses the live detail label', () => {
+    const messages: ChatMessage[] = [
+      { role: 'assistant', content: null, tool_calls: [
+        { id: 'edit-a', type: 'function', function: { name: 'edit_file', arguments: '{"path":"src/a.ts"}' } },
+        { id: 'edit-b', type: 'function', function: { name: 'edit_file', arguments: '{"path":"docs/b.md"}' } },
+      ] },
+      { role: 'tool', content: 'edited a', tool_call_id: 'edit-a', name: 'edit_file' },
+      { role: 'tool', content: 'edited b', tool_call_id: 'edit-b', name: 'edit_file' },
+    ];
+    const diffs = [
+      { toolCallId: 'edit-a', filePath: 'src/a.ts', hunks: null, isNew: false, isDeleted: false },
+      { toolCallId: 'edit-b', filePath: 'docs/b.md', hunks: null, isNew: false, isDeleted: false },
+    ];
+
+    expect(displayPersistMessages(messages, diffs)).toMatchObject([
+      { role: 'tool', toolCallId: 'edit-a', toolTarget: 'a.ts' },
+      { role: 'diff', toolCallId: 'edit-a', content: 'src/a.ts' },
+      { role: 'tool', toolCallId: 'edit-b', toolTarget: 'b.md' },
+      { role: 'diff', toolCallId: 'edit-b', content: 'docs/b.md' },
     ]);
   });
 
@@ -241,12 +264,14 @@ describe('sessionTypes', () => {
         role: 'tool',
         content: 'write_file → Wrote src/app.ts',
         toolName: 'write_file',
+        toolCallId: 'call_1',
         toolResult: 'Wrote src/app.ts',
         toolResultTotal: 16,
       },
       {
         role: 'diff',
         content: 'src/app.ts',
+        toolCallId: 'call_1',
         diffHunks: [{ oldStart: 1, newStart: 1, lines: [{ kind: 'added', text: 'export {};' }] }],
         diffIsNew: false,
         diffIsDeleted: false,
@@ -272,6 +297,7 @@ describe('sessionTypes', () => {
         role: 'tool',
         content: 'tool → result',
         toolName: 'tool',
+        toolCallId: 'call_1',
         toolResult: 'result',
         toolResultTotal: 6,
       },

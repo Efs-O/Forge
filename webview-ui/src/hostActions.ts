@@ -1,0 +1,79 @@
+import type { HostToWebview } from '../../src/sidebar/messageBridge';
+import type { Action } from './appState';
+
+/**
+ * Host messages that map one-to-one onto a reducer action. Returns `undefined`
+ * for every message App handles itself (local state, side effects, or ignored
+ * legacy shapes), so App's switch only lists those.
+ */
+export function hostMessageToAction(msg: HostToWebview): Action | undefined {
+  switch (msg.type) {
+    case 'generationStarted':
+      return { type: 'GENERATION_STARTED', convId: msg.conversationId };
+    case 'token':
+      return { type: 'TOKEN', text: msg.text, convId: msg.conversationId };
+    case 'notice':
+      return {
+        type: 'NOTICE',
+        message: msg.message,
+        convId: msg.conversationId,
+        preformatted: msg.preformatted,
+      };
+    case 'reasoningToken':
+      return { type: 'REASONING_TOKEN', text: msg.text, convId: msg.conversationId };
+    case 'done':
+      return { type: 'DONE', convId: msg.conversationId };
+    case 'error':
+      return { type: 'ERROR', message: msg.message, convId: msg.conversationId };
+    case 'ready':
+      return { type: 'READY', convId: msg.conversationId };
+    case 'backendStarting':
+      return { type: 'BACKEND_STARTING', message: msg.message, convId: msg.conversationId };
+    case 'backendDown':
+      return { type: 'BACKEND_DOWN', message: msg.message, convId: msg.conversationId };
+    case 'models':
+      return { type: 'MODELS', models: msg.models, active: msg.active };
+    case 'checkpointReady':
+      return { type: 'CHECKPOINT_READY', convId: msg.conversationId };
+    case 'checkpointDismissed':
+      return { type: 'CHECKPOINT_DISMISSED', convId: msg.conversationId };
+    case 'toolActivity':
+      return {
+        type: 'TOOL_ACTIVITY',
+        toolName: msg.toolName,
+        toolCallId: msg.toolCallId,
+        detail: msg.detail,
+        convId: msg.conversationId,
+      };
+    case 'toolResult':
+      return {
+        type: 'TOOL_RESULT',
+        toolName: msg.toolName,
+        toolCallId: msg.toolCallId,
+        label: msg.label,
+        text: msg.text,
+        totalChars: msg.totalChars,
+        ...(msg.filePath ? { filePath: msg.filePath } : {}),
+        ...(msg.isError ? { isError: true } : {}),
+        convId: msg.conversationId,
+      };
+    case 'fileDiff':
+      return {
+        type: 'FILE_DIFF',
+        toolCallId: msg.toolCallId,
+        filePath: msg.filePath,
+        hunks: msg.hunks,
+        isNew: msg.isNew,
+        isDeleted: msg.isDeleted,
+        convId: msg.conversationId,
+      };
+    case 'clankerChanged':
+      return { type: 'CLANKER_CHANGED', enabled: msg.enabled };
+    case 'remoteStatus':
+      return { type: 'REMOTE_STATUS', transports: msg.transports, paired: msg.paired };
+    case 'activityView':
+      return { type: 'ACTIVITY_VIEW', mode: msg.mode };
+    default:
+      return undefined;
+  }
+}

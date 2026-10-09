@@ -35,6 +35,7 @@ import { SLASH_COMMANDS } from './slashCommands';
 import { webviewDiagnostics } from './WebviewDiagnostics';
 import { useHostCommands } from './hostCommands';
 import { usePendingPrompts } from './usePendingPrompts';
+import { hostMessageToAction } from './hostActions';
 export type { QueuedPrompt } from './usePendingPrompts';
 
 export function App(): React.ReactElement {
@@ -82,10 +83,12 @@ export function App(): React.ReactElement {
       // Consumes the approval/question messages and reports that it did, so the
       // switch below never has to know they exist.
       if (dialogs.handleHostMessage(msg)) return;
+      const action = hostMessageToAction(msg);
+      if (action) {
+        dispatch(action);
+        return;
+      }
       switch (msg.type) {
-        case 'generationStarted':
-          dispatch({ type: 'GENERATION_STARTED', convId: msg.conversationId });
-          break;
         case 'userPrompt':
           if (msg.midTurn) {
             // Retire the matching queued chip: the bubble below replaces it.
@@ -112,29 +115,6 @@ export function App(): React.ReactElement {
               : {}),
           });
           break;
-        case 'token':
-          dispatch({ type: 'TOKEN', text: msg.text, convId: msg.conversationId });
-          break;
-        case 'notice':
-          dispatch({
-            type: 'NOTICE',
-            message: msg.message,
-            convId: msg.conversationId,
-            preformatted: msg.preformatted,
-          });
-          break;
-        case 'reasoningToken':
-          dispatch({ type: 'REASONING_TOKEN', text: msg.text, convId: msg.conversationId });
-          break;
-        case 'done':
-          dispatch({ type: 'DONE', convId: msg.conversationId });
-          break;
-        case 'error':
-          dispatch({ type: 'ERROR', message: msg.message, convId: msg.conversationId });
-          break;
-        case 'ready':
-          dispatch({ type: 'READY', convId: msg.conversationId });
-          break;
         case 'workspaceInfo':
           setWorkspace({
             name: msg.name,
@@ -142,53 +122,6 @@ export function App(): React.ReactElement {
             extraRoots: msg.extraRoots,
             stale: msg.stale,
             ...(msg.rootUri ? { rootUri: msg.rootUri } : {}),
-          });
-          break;
-        case 'backendStarting':
-          dispatch({ type: 'BACKEND_STARTING', message: msg.message, convId: msg.conversationId });
-          break;
-        case 'backendDown':
-          dispatch({ type: 'BACKEND_DOWN', message: msg.message, convId: msg.conversationId });
-          break;
-        case 'models':
-          dispatch({ type: 'MODELS', models: msg.models, active: msg.active });
-          break;
-        case 'checkpointReady':
-          dispatch({ type: 'CHECKPOINT_READY', convId: msg.conversationId });
-          break;
-        case 'checkpointDismissed':
-          dispatch({ type: 'CHECKPOINT_DISMISSED', convId: msg.conversationId });
-          break;
-        case 'toolActivity':
-          dispatch({
-            type: 'TOOL_ACTIVITY',
-            toolName: msg.toolName,
-            toolCallId: msg.toolCallId,
-            detail: msg.detail,
-            convId: msg.conversationId,
-          });
-          break;
-        case 'toolResult':
-          dispatch({
-            type: 'TOOL_RESULT',
-            toolName: msg.toolName,
-            toolCallId: msg.toolCallId,
-            label: msg.label,
-            text: msg.text,
-            totalChars: msg.totalChars,
-            ...(msg.filePath ? { filePath: msg.filePath } : {}),
-            ...(msg.isError ? { isError: true } : {}),
-            convId: msg.conversationId,
-          });
-          break;
-        case 'fileDiff':
-          dispatch({
-            type: 'FILE_DIFF',
-            filePath: msg.filePath,
-            hunks: msg.hunks,
-            isNew: msg.isNew,
-            isDeleted: msg.isDeleted,
-            convId: msg.conversationId,
           });
           break;
         case 'sessionSync':
@@ -211,15 +144,6 @@ export function App(): React.ReactElement {
         case 'setInput':
           clearTellPrompts(msg.conversationId);
           setPrefillText(msg.text);
-          break;
-        case 'clankerChanged':
-          dispatch({ type: 'CLANKER_CHANGED', enabled: msg.enabled });
-          break;
-        case 'remoteStatus':
-          dispatch({ type: 'REMOTE_STATUS', transports: msg.transports, paired: msg.paired });
-          break;
-        case 'activityView':
-          dispatch({ type: 'ACTIVITY_VIEW', mode: msg.mode });
           break;
         case 'thread-stream-state-changed':
         case 'thread-read-state-changed':

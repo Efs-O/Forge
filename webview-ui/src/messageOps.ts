@@ -41,6 +41,7 @@ export interface AppMessage {
   /** Tool rows: set on activity, then filled in when the call returns. */
   toolName?: string;
   toolCallId?: string;
+  toolTarget?: string;
   toolDetail?: string;
   toolResult?: string;
   toolResultTotal?: number;
@@ -68,6 +69,8 @@ export type PersistedRow =
       role: 'tool';
       content: string;
       toolName: string;
+      toolCallId?: string;
+      toolTarget?: string;
       toolDetail?: string;
       toolResult: string;
       toolResultTotal: number;
@@ -77,6 +80,7 @@ export type PersistedRow =
   | {
       role: 'diff';
       content: string;
+      toolCallId?: string;
       diffHunks: DiffHunk[] | null;
       diffIsNew: boolean;
       diffIsDeleted: boolean;
@@ -139,6 +143,8 @@ export function mergeSyncedMessages(
     ...(m.role === 'tool'
       ? {
           toolName: m.toolName,
+          ...(m.toolCallId !== undefined ? { toolCallId: m.toolCallId } : {}),
+          ...(m.toolTarget !== undefined ? { toolTarget: m.toolTarget } : {}),
           ...(m.toolDetail !== undefined ? { toolDetail: m.toolDetail } : {}),
           toolResult: m.toolResult,
           toolResultTotal: m.toolResultTotal,
@@ -149,6 +155,7 @@ export function mergeSyncedMessages(
     ...(m.role === 'diff'
       ? {
           diffHunks: m.diffHunks,
+          ...(m.toolCallId !== undefined ? { toolCallId: m.toolCallId } : {}),
           diffIsNew: m.diffIsNew,
           diffIsDeleted: m.diffIsDeleted,
         }
@@ -190,6 +197,9 @@ export function mergeSyncedMessages(
     reconstructed[hostIndex]!.id = message.id;
     if (message.role === 'tool' && message.toolDetail !== undefined) {
       reconstructed[hostIndex]!.toolDetail = message.toolDetail;
+    }
+    if (message.role === 'tool' && message.toolTarget !== undefined) {
+      reconstructed[hostIndex]!.toolTarget = message.toolTarget;
     }
     // The host's span wins where it has one - it is the side that saw both ends
     // and the only side that survives a reload. The webview's live stamp fills

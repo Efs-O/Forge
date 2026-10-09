@@ -10,6 +10,7 @@
 import type { ChatMessage } from '../llm/types';
 import { capDisplayText } from '../tools/resultCap';
 import { isFailureResult, resultLabel } from './toolResultView';
+import { extractToolDetail } from './toolSummary';
 import { displayTitle } from './conversationTitle';
 import type { SessionHistoryMeta, SessionTabMeta } from './messageBridge';
 import type {
@@ -45,6 +46,7 @@ export function displayPersistMessages(
 ): DisplayPersistMessage[] {
   const out: DisplayPersistMessage[] = [];
   const diffsByToolCall = new Map<string, ConversationDisplayDiff[]>();
+  const toolDetailsByCall = new Map<string, string>();
   for (const diff of displayDiffs) {
     const current = diffsByToolCall.get(diff.toolCallId);
     if (current) current.push(diff);
@@ -52,6 +54,12 @@ export function displayPersistMessages(
   }
   for (const m of messages) {
     if (m.internal) continue;
+    if (m.role === 'assistant') {
+      for (const call of m.tool_calls ?? []) {
+        const detail = extractToolDetail(call.function.arguments);
+        if (detail) toolDetailsByCall.set(call.id, detail);
+      }
+    }
     const toolText = m.role === 'tool' ? textContent(m.content) : null;
     if (m.role === 'tool' && toolText !== null) {
       const toolName = m.name ?? 'tool';
@@ -60,6 +68,10 @@ export function displayPersistMessages(
         role: 'tool',
         content: `${toolName} → ${resultLabel(toolName, toolText, null)}`,
         toolName,
+        ...(m.tool_call_id ? { toolCallId: m.tool_call_id } : {}),
+        ...(toolDetailsByCall.get(m.tool_call_id ?? '')
+          ? { toolTarget: toolDetailsByCall.get(m.tool_call_id!)! }
+          : {}),
         toolResult,
         toolResultTotal,
         ...(isFailureResult(toolText) ? { toolIsError: true } : {}),
@@ -69,6 +81,7 @@ export function displayPersistMessages(
         out.push({
           role: 'diff',
           content: diff.filePath,
+          toolCallId: diff.toolCallId,
           diffHunks: diff.hunks,
           diffIsNew: diff.isNew,
           diffIsDeleted: diff.isDeleted,

@@ -123,6 +123,7 @@ export type Action =
     }
   | {
       type: 'FILE_DIFF';
+      toolCallId?: string;
       filePath: string;
       hunks: DiffHunk[] | null;
       isNew: boolean;

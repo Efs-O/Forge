@@ -311,6 +311,7 @@ export function reducer(state: State, action: Action): State {
         toolName: action.toolName,
         toolStartedAt: Date.now(),
         ...(action.detail ? { toolDetail: action.detail } : {}),
+        ...(action.detail ? { toolTarget: action.detail } : {}),
         ...(action.toolCallId ? { toolCallId: action.toolCallId } : {}),
       });
     }
@@ -359,6 +360,7 @@ export function reducer(state: State, action: Action): State {
         id: mkId(),
         role: 'diff' as const,
         content: action.filePath,
+        ...(action.toolCallId ? { toolCallId: action.toolCallId } : {}),
         diffHunks: action.hunks,
         diffIsNew: action.isNew,
         diffIsDeleted: action.isDeleted,

@@ -215,16 +215,8 @@ export interface TokenBudgetMsg {
   max: number;
 }
 
-export type DiffLineKind = 'context' | 'added' | 'removed';
-export interface DiffLine {
-  kind: DiffLineKind;
-  text: string;
-}
-export interface DiffHunk {
-  oldStart: number;
-  newStart: number;
-  lines: DiffLine[];
-}
+export type { DiffLineKind, DiffLine, DiffHunk, FileDiffMsg } from './diffMessages';
+import type { DiffHunk, FileDiffMsg } from './diffMessages';
 
 export interface ClankerChangedMsg {
   type: 'clankerChanged';
@@ -248,15 +240,6 @@ export interface ActivityViewMsg {
   type: 'activityView';
   mode: ActivityViewMode;
 }
-export interface FileDiffMsg {
-  type: 'fileDiff';
-  filePath: string;
-  hunks: DiffHunk[] | null;
-  isNew: boolean;
-  isDeleted: boolean;
-  conversationId?: string;
-}
-
 export type SetInputMsg = { type: 'setInput'; text: string; conversationId?: string };
 /** @deprecated Replaced by sessionSync on load. */
 export interface HistoryRestoreMsg {

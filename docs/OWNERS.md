@@ -125,6 +125,7 @@ overlaps with an existing owner, extend the owner instead.
 | Conversation-tab webview message shapes              | `src/sidebar/conversationMessages.ts`    |
 | "Open this in the editor" message shapes             | `src/sidebar/openMessages.ts`            |
 | Model-picker message shapes (labels, residency)      | `src/sidebar/modelMessages.ts`           |
+| File-diff preview message shapes (hunks, `fileDiff`) | `src/sidebar/diffMessages.ts`            |
 | Chat attachment bytes on disk (thumbnails)           | `src/sidebar/ChatAttachmentStore.ts`     |
 | In-editor green/red diff decorations                 | `src/sidebar/DiffDecorations.ts`         |
 | Diff computation + unified-diff parsing              | `src/sidebar/DiffUtils.ts`               |
@@ -143,6 +144,7 @@ overlaps with an existing owner, extend the owner instead.
 | Webview state reducer (per-conversation keying) | `webview-ui/src/reducer.ts`                     |
 | Pending prompts, queue flush, and mid-turn tells | `webview-ui/src/usePendingPrompts.ts`           |
 | Fire-and-forget webview→host commands           | `webview-ui/src/hostCommands.ts`                |
+| Host message → reducer action mapping           | `webview-ui/src/hostActions.ts`                 |
 | Approval + agent-question modal state           | `webview-ui/src/useAgentDialogs.ts`             |
 | Agent question dialog (ask_user in the sidebar) | `webview-ui/src/components/QuestionDialog.tsx`  |
 | Transcript row folding (diff / thinking runs)   | `webview-ui/src/components/MessageList.tsx`     |

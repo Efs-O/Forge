@@ -24,7 +24,7 @@ interface AppModule {
       | { type: 'GENERATION_STARTED'; convId?: string }
       | { type: 'CHECKPOINT_READY'; convId?: string }
       | { type: 'CHECKPOINT_DISMISSED'; convId?: string }
-      | { type: 'TOOL_ACTIVITY'; toolName: string; detail?: string; convId?: string }
+      | { type: 'TOOL_ACTIVITY'; toolName: string; toolCallId?: string; detail?: string; convId?: string }
       | {
           type: 'TOOL_RESULT';
           toolName: string;
@@ -40,6 +40,7 @@ interface AppModule {
       | { type: 'TOKEN'; text: string; convId?: string }
       | { type: 'DONE'; convId?: string }
       | { type: 'ERROR'; message: string; convId?: string }
+      | { type: 'FILE_DIFF'; toolCallId?: string; filePath: string; hunks: null; isNew: boolean; isDeleted: boolean; convId?: string }
       | { type: 'READY'; convId?: string }
       | { type: 'BACKEND_DOWN'; message: string; convId?: string }
       | {
@@ -92,6 +93,19 @@ beforeAll(async () => {
 
 describe('webview App reducer — transcript rows', () => {
   describe('tool rows', () => {
+    it('stores the announce detail as the target and links live tool and diff rows', () => {
+      let state = appModule.reducer(appModule.initialState, {
+        type: 'TOOL_ACTIVITY', toolName: 'edit_file', toolCallId: 'call-a', detail: 'a.ts', convId: 'tab-1',
+      });
+      state = appModule.reducer(state, {
+        type: 'FILE_DIFF', toolCallId: 'call-a', filePath: 'src/a.ts', hunks: null,
+        isNew: false, isDeleted: false, convId: 'tab-1',
+      });
+      expect(state.messagesById['tab-1']).toMatchObject([
+        { role: 'tool', toolCallId: 'call-a', toolTarget: 'a.ts' },
+        { role: 'diff', toolCallId: 'call-a' },
+      ]);
+    });
     it('fills the pending activity row in place instead of adding a second row', () => {
       const started = appModule.reducer(appModule.initialState, {
         type: 'TOOL_ACTIVITY',

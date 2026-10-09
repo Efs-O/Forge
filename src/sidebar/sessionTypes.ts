@@ -124,6 +124,8 @@ export type DisplayPersistMessage =
       role: 'tool';
       content: string;
       toolName: string;
+      toolCallId?: string;
+      toolTarget?: string;
       toolResult: string;
       toolResultTotal: number;
       toolIsError?: boolean;
@@ -133,6 +135,7 @@ export type DisplayPersistMessage =
   | {
       role: 'diff';
       content: string;
+      toolCallId?: string;
       diffHunks: DiffHunk[] | null;
       diffIsNew: boolean;
       diffIsDeleted: boolean;
