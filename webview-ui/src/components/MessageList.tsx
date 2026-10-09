@@ -8,6 +8,7 @@ import { ToolGroup } from './ToolGroup';
 import { ActivityRow } from './ActivityRow';
 import { ActivityGroup } from './ActivityGroup';
 import { QueuedPromptRow } from './QueuedPromptRow';
+import { nextScrolledUp } from '../scrollFollow';
 
 interface Props {
   messages: AppMessage[];
@@ -35,7 +36,6 @@ interface Props {
   activityView: ActivityViewMode;
 }
 
-const SCROLL_THRESHOLD = 80; // px from bottom — within this, auto-scroll is active
 const WARM_ROW_THRESHOLD = 10; // rows arriving at once that justify a full measure pass
 
 export function MessageList({
@@ -143,13 +143,11 @@ export function MessageList({
     let lastScrollTop = el.scrollTop;
     const onScroll = () => {
       const distFromBottom = el.scrollHeight - el.scrollTop - el.clientHeight;
-      // Only an upward move is the reader leaving the bottom. Distance alone is
-      // not: a smooth scroll that is still travelling, or a row that grew under
-      // the viewport (an image decoding, an off-screen row replacing its 60px
-      // estimate), also leaves us >80px short — and latching "scrolled up" there
-      // froze the view mid-row until the reader nudged it.
-      if (distFromBottom <= SCROLL_THRESHOLD) userScrolledUp.current = false;
-      else if (el.scrollTop < lastScrollTop - 1) userScrolledUp.current = true;
+      userScrolledUp.current = nextScrolledUp(userScrolledUp.current, {
+        scrollTop: el.scrollTop,
+        lastScrollTop,
+        distFromBottom,
+      });
       lastScrollTop = el.scrollTop;
       savedScrollTop.current = el.scrollTop;
     };
@@ -158,7 +156,13 @@ export function MessageList({
     const onLoad = () => {
       if (activeRef.current && !userScrolledUp.current) scrollToBottom();
     };
+    // A wheel turned up is intent before any pixel moves; latch on it so a token
+    // landing in the same frame cannot pin the view back down.
+    const onWheel = (event: WheelEvent) => {
+      if (event.deltaY < 0 && el.scrollHeight > el.clientHeight) userScrolledUp.current = true;
+    };
     el.addEventListener('scroll', onScroll, { passive: true });
+    el.addEventListener('wheel', onWheel, { passive: true });
     el.addEventListener('load', onLoad, true);
     // The pane is a flex child sharing the column with the streaming status line,
     // the checkpoint bar and the auto-growing composer. When any of those appears
@@ -173,6 +177,7 @@ export function MessageList({
     resize?.observe(el);
     return () => {
       el.removeEventListener('scroll', onScroll);
+      el.removeEventListener('wheel', onWheel);
       el.removeEventListener('load', onLoad, true);
       resize?.disconnect();
     };

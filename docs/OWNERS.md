@@ -23,6 +23,7 @@ overlaps with an existing owner, extend the owner instead.
 | Sidebar transcript activity row folding               | `webview-ui/src/activityRows.ts`          |
 | Sidebar grouped activity view (step runs → groups)   | `webview-ui/src/activityGroups.ts`        |
 | Sidebar open/closed choices that survive remounts    | `webview-ui/src/disclosureState.ts`       |
+| Sidebar transcript follow-the-bottom decision         | `webview-ui/src/scrollFollow.ts`          |
 | Compact activity step row component                  | `webview-ui/src/components/ActivityRow.tsx` |
 | Grouped activity row component                       | `webview-ui/src/components/ActivityGroup.tsx` |
 | Sidebar host->webview event contract                 | `src/sidebar/providerEvents.ts`          |

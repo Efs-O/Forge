@@ -2,6 +2,7 @@
 
 ## 0.17.0
 
+- Scrolling up while a reply streams now stops the transcript following new output at once. Within 80px of the bottom a small upward scroll used to count as "still at the bottom", so each streamed token pulled the view back down and the wheel could barely climb a growing thinking bubble.
 - Open/closed choices in the activity view now survive the rows being rebuilt while a turn streams. An opened reasoning bubble used to snap shut when the next tool call folded it into a step, and an opened step or diff closed when the step joined a group. A step that a running call holds open can now be collapsed by hand.
 - The "Remote active" chip is a muted forest green (`--forge-remote`) instead of the bright accent. The grouped header says `[N retries]` for more than one, and a step that ended in failure shows only its red ✕, without the amber retry chip.
 - Compact and grouped activity rows use a 13px font with more space between rows (5px padding, about 29px per row, up from 11px and about 19px).
