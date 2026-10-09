@@ -101,6 +101,12 @@ describe('ActivityRow', () => {
     render(step({ attempts: rounds([earlier]) }));
     expect(container.querySelector('.activity-row.is-error')).not.toBeNull();
     expect(container.querySelector('.tool-row-status')?.textContent).toBe('✕');
+
+    const again = tool('again', { toolCallId: 'third', toolIsError: true, toolResultTotal: 1 });
+    render(step({ attempts: rounds([earlier], [again]) }));
+    expect(container.querySelector('.activity-row.is-error')).not.toBeNull();
+    expect(container.querySelector('.activity-row-retry')).toBeNull();
+    expect(container.querySelector('.activity-row-repeat')).toBeNull();
   });
 
   it('shortens only the header detail and keeps the full command in the body', () => {

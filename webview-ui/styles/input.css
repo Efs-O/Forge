@@ -135,9 +135,9 @@
  * something to press.
  */
 #remote-chip {
-  border-color: var(--forge-accent);
-  background: color-mix(in srgb, var(--forge-accent) 10%, transparent);
-  color: var(--forge-accent);
+  border-color: var(--forge-remote);
+  background: color-mix(in srgb, var(--forge-remote) 10%, transparent);
+  color: var(--forge-remote);
   cursor: default;
   user-select: none;
 }

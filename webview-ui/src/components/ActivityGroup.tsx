@@ -75,7 +75,9 @@ function ActivityGroupView({ items, live, streaming }: ActivityGroupProps): Reac
           <span className="activity-group-failed">[{summary.failed} failed]</span>
         )}
         {summary.retries > 0 && (
-          <span className="activity-group-retry">[{summary.retries} retry]</span>
+          <span className="activity-group-retry">
+            [{summary.retries} {summary.retries === 1 ? 'retry' : 'retries'}]
+          </span>
         )}
       </button>
       {expanded && (

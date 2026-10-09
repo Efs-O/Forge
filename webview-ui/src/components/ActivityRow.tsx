@@ -90,7 +90,9 @@ function ActivityRowView({ step, streaming }: ActivityRowProps): React.ReactElem
   const target = primary.toolTarget ?? detail;
   const displayedTarget = target ? displayDetail(target) : '';
   const state = status(step);
-  const retries = retryCount(step);
+  const failedEarlier = retryCount(step);
+  // A step that ended red shows ✕ only; the amber chip means "recovered".
+  const retries = state.className === 'is-error' ? 0 : failedEarlier;
   const edits = editSummary(step);
   const reasoning = reasoningSummary(step);
 
@@ -116,7 +118,7 @@ function ActivityRowView({ step, streaming }: ActivityRowProps): React.ReactElem
         )}
         <span className="activity-row-name">{primary.toolName ?? name}</span>
         {displayedTarget && <span className="activity-row-detail">{displayedTarget}</span>}
-        {step.attempts.length > 1 && retries === 0 && (
+        {step.attempts.length > 1 && failedEarlier === 0 && (
           <span className="activity-row-repeat">×{step.attempts.length}</span>
         )}
         {retries > 0 && (

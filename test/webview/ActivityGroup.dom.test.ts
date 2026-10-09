@@ -88,4 +88,16 @@ describe('ActivityGroup', () => {
     expect(container.querySelector('.activity-group-toggle')?.getAttribute('aria-expanded')).toBe('true');
     expect(container.querySelector('.activity-group-status')?.textContent).toBe('○');
   });
+
+  it('counts recovered retries with the right plural', () => {
+    const failedTry = (id: string) => ({ thoughts: [], tools: [tool(id, { toolIsError: true })] });
+    const recovered = (n: number): ActivityGroupItem => ({ kind: 'step', step: {
+      attempts: [...Array.from({ length: n }, (_, i) => failedTry(`f${n}-${i}`)), { thoughts: [], tools: [tool(`ok${n}`)] }],
+      diffs: [],
+    } });
+    render([recovered(1), { kind: 'step', step: { attempts: [{ thoughts: [], tools: [tool('x')] }], diffs: [] } }], false, false);
+    expect(container.querySelector('.activity-group-retry')?.textContent).toBe('[1 retry]');
+    render([recovered(1), recovered(2)], false, false);
+    expect(container.querySelector('.activity-group-retry')?.textContent).toBe('[3 retries]');
+  });
 });

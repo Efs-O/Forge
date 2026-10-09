@@ -2,6 +2,7 @@
 
 ## 0.17.0
 
+- The "Remote active" chip is a muted forest green (`--forge-remote`) instead of the bright accent. The grouped header says `[N retries]` for more than one, and a step that ended in failure shows only its red ✕, without the amber retry chip.
 - Compact and grouped activity rows use a 13px font with more space between rows (5px padding, about 29px per row, up from 11px and about 19px).
 - Inside an opened compact or grouped step, each edited file now starts as a one-line diff header (name, `+N −M`); its toggle shows the hunks. They used to open expanded with the step.
 - `/stats`' `session` block is now the Forge run that made today's newest request, from any window or chat, instead of the chat open in the window that owns the control port. The Strata card showed a two-turn side chat's "0 compactions" while the real run had two. No request today ⇒ `session: null`.

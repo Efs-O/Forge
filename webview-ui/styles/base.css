@@ -21,6 +21,9 @@
   --forge-accent-fill-hover: var(--forge-green-hover);
   --forge-accent-fill-fg:    #ecfdf5;
   --forge-link:        #6ee7b7;
+  /* "Remote active" chip: a muted forest green. It stays lit for the whole
+     session, so the bright accent read as a glow. */
+  --forge-remote:      #3c8c5f;
   --forge-link-active: #a7f3d0;
   --forge-selection:   var(--forge-green-deep);
   --forge-surface-1: var(--vscode-editorWidget-background, #252526);
@@ -44,6 +47,7 @@
    out, so text-coloured accents drop to the deep end of the same hue. */
 body.vscode-light {
   --forge-accent:      #047857;
+  --forge-remote:      #2f6e4b;
   --forge-link:        #047857;
   --forge-link-active: #065f46;
   --forge-selection:   #d1fae5;
