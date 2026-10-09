@@ -20,6 +20,7 @@
 
 ### Behaviour fixes from the forge-bench review
 
+- Preview errors now keep the first ten distinct messages, append repeat counts such as `(x363)`, and preserve the total number of error events.
 - Preview now captures WebGPU uncaptured errors and shader compilation diagnostics, including their line and column, which Chrome did not surface through page errors or console output.
 - `apply_line_edits` now explains the `JSON.parse` position when a string-wrapped operations array is malformed, derives one omitted line bound from `expected_lines`, sorts edits by line, names overlapping ranges, and includes the current numbered lines when the expected-line count is wrong.
 - An incomplete tool call at stream EOF is now recovered as an output truncation instead of failing the turn. `edit_file` retries are told to send fewer edits per call, and truncation still does not count as a tool failure.

@@ -85,10 +85,12 @@ export interface PreviewRequest {
 
 export interface PreviewResult {
   frames: Array<{ timeMs: number; png: Buffer }>;
-  /** Page exceptions and console errors, first {@link MAX_PREVIEW_ERRORS}. */
+  /** First distinct page exceptions and console errors, with repeats counted. */
   errors: string[];
   /** All errors seen, including the ones not listed. */
   errorCount: number;
+  /** Error events beyond the displayed distinct-message cap. */
+  suppressedErrorCount: number;
   /** `scheme://host (reason)` of every request that did not load, one per origin. */
   blocked: string[];
   consoleLines: string[];
@@ -352,18 +354,24 @@ export async function renderPreview(
         }
       });
       await context.routeWebSocket('**/*', (socket) => socket.close());
-      const errors: string[] = [];
+      const errors = new Map<string, { message: string; count: number }>();
       let errorCount = 0;
+      let suppressedErrorCount = 0;
       const consoleLines: string[] = [];
       let consoleDropped = 0;
       const record = (text: string): void => {
         errorCount += 1;
-        if (errors.length < MAX_PREVIEW_ERRORS) {
-          errors.push(
-            text.length > MAX_PREVIEW_ERROR_CHARS
-              ? `${text.slice(0, MAX_PREVIEW_ERROR_CHARS)}…`
-              : text,
-          );
+        const message =
+          text.length > MAX_PREVIEW_ERROR_CHARS
+            ? `${text.slice(0, MAX_PREVIEW_ERROR_CHARS)}…`
+            : text;
+        const existing = errors.get(message);
+        if (existing) {
+          existing.count += 1;
+        } else if (errors.size < MAX_PREVIEW_ERRORS) {
+          errors.set(message, { message, count: 1 });
+        } else {
+          suppressedErrorCount += 1;
         }
       };
       try {
@@ -401,8 +409,11 @@ export async function renderPreview(
         const trimmed = capConsoleLines(consoleLines);
         return {
           frames,
-          errors,
+          errors: [...errors.values()].map(({ message, count }) =>
+            count > 1 ? `${message} (x${count})` : message,
+          ),
           errorCount,
+          suppressedErrorCount,
           blocked: [...blocked].map(([origin, reason]) => `${origin} (${reason})`),
           consoleLines: trimmed.consoleLines,
           consoleDropped: consoleDropped + trimmed.consoleDropped,

@@ -259,9 +259,27 @@ describe('render_html_to_image preview: result', () => {
     expect(result).toContain('- ReferenceError: THREE is not defined');
     expect(result).toContain('- console failure 8');
     expect(result).not.toContain('console failure 9');
-    expect(result).toContain('2 more not shown');
+    expect(result).toContain('2 more error event(s) not shown');
     expect(result).toContain('log: scene ready');
     expect(result).toContain('Console output (1 lines, capped at 4000 characters):');
+  });
+
+  it('deduplicates repeated errors while preserving the total event count', async () => {
+    renderFake.consoleErrors = [
+      ...Array.from({ length: 363 }, () => 'drawIndexed: index out of range'),
+      'pipeline layout mismatch',
+      'texture format unsupported',
+    ];
+    const { tool } = rig();
+    const result = String(
+      await tool.handler({ mode: 'preview', path: await writePage() }, context()),
+    );
+    expect(result).toContain('Page errors (365):');
+    const errorSection = result.split('Console output')[0] ?? '';
+    expect(errorSection.match(/^- /gmu)).toHaveLength(3);
+    expect(result).toContain('- drawIndexed: index out of range (x363)');
+    expect(result).toContain('- pipeline layout mismatch');
+    expect(result).toContain('- texture format unsupported');
   });
 
   it('caps console output at 40 lines and 4000 characters, dropping oldest lines', async () => {

@@ -94,9 +94,10 @@ export async function runPreview(
   if (result.errorCount === 0) {
     lines.push('Page errors: none.');
   } else {
-    const more = result.errorCount - result.errors.length;
     lines.push(`Page errors (${result.errorCount}):`, ...result.errors.map((e) => `- ${e}`));
-    if (more > 0) lines.push(`- … ${more} more not shown`);
+    if (result.suppressedErrorCount > 0) {
+      lines.push(`- … ${result.suppressedErrorCount} more error event(s) not shown`);
+    }
   }
   if (result.blocked.length > 0) {
     lines.push(`Requests that did not load: ${result.blocked.join('; ')}`);
