@@ -52,7 +52,7 @@ function totalReasoningMs(steps: AppMessage[]): number | undefined {
   return measured.reduce((sum, step) => sum + (step.reasoningMs ?? 0), 0);
 }
 
-function ThinkingRow({
+export function ThinkingRow({
   label,
   reasoning,
 }: {

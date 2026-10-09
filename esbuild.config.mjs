@@ -66,6 +66,8 @@ const CSS_PARTIALS = [
   'webview-ui/styles/messages.css',
   'webview-ui/styles/tool-rows.css',
   'webview-ui/styles/diff.css',
+  'webview-ui/styles/activity-row.css',
+  'webview-ui/styles/activity-group.css',
   'webview-ui/styles/highlight.css',
   'webview-ui/styles/input.css',
   'webview-ui/styles/attachments.css',

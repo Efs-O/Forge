@@ -1,10 +1,12 @@
 import React, { useCallback, useEffect, useMemo, useRef } from 'react';
 import type { AppMessage } from '../App';
-import { toRows, type ActivityViewMode } from '../activityRows';
+import { rowKey, toRows, type ActivityViewMode } from '../activityRows';
 import { Message } from './Message';
 import { DiffGroup } from './DiffGroup';
 import { ThinkingGroup } from './ThinkingGroup';
 import { ToolGroup } from './ToolGroup';
+import { ActivityRow } from './ActivityRow';
+import { ActivityGroup } from './ActivityGroup';
 import { QueuedPromptRow } from './QueuedPromptRow';
 
 interface Props {
@@ -245,16 +247,25 @@ export function MessageList({
       ref={containerRef}
     >
       {isEmpty && emptyState}
-      {rows.map((row) =>
+      {rows.map((row, rowIndex) =>
         row.kind === 'diffGroup' ? (
-          <DiffGroup key={row.diffs[0]!.id} diffs={row.diffs} />
+          <DiffGroup key={rowKey(row)} diffs={row.diffs} />
         ) : row.kind === 'thinkingGroup' ? (
-          <ThinkingGroup key={row.steps[0]!.id} steps={row.steps} />
+          <ThinkingGroup key={rowKey(row)} steps={row.steps} />
         ) : row.kind === 'toolGroup' ? (
-          <ToolGroup key={row.tools[0]!.id} tools={row.tools} />
+          <ToolGroup key={rowKey(row)} tools={row.tools} />
+        ) : row.kind === 'step' ? (
+          <ActivityRow key={rowKey(row)} step={row.step} streaming={streaming} />
+        ) : row.kind === 'activityGroup' ? (
+          <ActivityGroup
+            key={rowKey(row)}
+            items={row.items}
+            live={streaming && rowIndex === rows.length - 1}
+            streaming={streaming}
+          />
         ) : (
           <Message
-            key={row.message.id}
+            key={rowKey(row)}
             {...row.message}
             streaming={
               streaming && row.index === messages.length - 1 && row.message.role === 'assistant'

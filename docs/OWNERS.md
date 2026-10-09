@@ -21,6 +21,9 @@ overlaps with an existing owner, extend the owner instead.
 | Generation-event session timing                      | `src/sidebar/sessionTimerWiring.ts`      |
 | Pure transcript/usage mutations                      | `src/sidebar/transcriptMutations.ts`     |
 | Sidebar transcript activity row folding               | `webview-ui/src/activityRows.ts`          |
+| Sidebar grouped activity view (step runs → groups)   | `webview-ui/src/activityGroups.ts`        |
+| Compact activity step row component                  | `webview-ui/src/components/ActivityRow.tsx` |
+| Grouped activity row component                       | `webview-ui/src/components/ActivityGroup.tsx` |
 | Sidebar host->webview event contract                 | `src/sidebar/providerEvents.ts`          |
 | Sidebar collaborator construction                    | `src/sidebar/sidebarWiring.ts`           |
 | Conversation eviction gate (signals, refusal labels) | `src/sidebar/evictionGate.ts`            |
