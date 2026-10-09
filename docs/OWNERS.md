@@ -389,7 +389,7 @@ overlaps with an existing owner, extend the owner instead.
 | Shared workspace file delivery validation  | `src/util/fileDeliveryValidation.ts` |
 | `send_file` tool                           | `src/tools/sendFileTool.ts`           |
 | `edit_file` tool                           | `src/tools/editFileTool.ts`           |
-| `old_str` matching + line-ending handling  | `src/tools/editMatch.ts`              |
+| `old_str` matching + line-ending handling + uniform indent shift | `src/tools/editMatch.ts`              |
 | Structured line-edit validation + tool     | `src/tools/structuredEditTool.ts`     |
 | Code + file search tools (ripgrep)         | `src/tools/dirTools.ts`               |
 | Search scope: excludes + named-path rule   | `src/tools/searchScope.ts`            |

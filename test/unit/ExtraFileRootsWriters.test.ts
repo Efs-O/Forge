@@ -61,11 +61,11 @@ describe('every file-writing tool honours extra_file_roots', () => {
     expect(fs.readFileSync(file, 'utf8')).toBe('first second');
   });
 
-  it('names which other edits of a failed batch matched', async () => {
+  it('writes the matched edits of a batch and names the missed ones', async () => {
     const file = path.join(extra, 'partial-batch.txt');
     fs.writeFileSync(file, 'alpha beta gamma');
-    await expect(
-      makeEditFileTool(roots).handler({
+    const result = String(
+      await makeEditFileTool(roots).handler({
         path: file,
         edits: [
           { old_str: 'alpha', new_str: 'a' },
@@ -74,8 +74,10 @@ describe('every file-writing tool honours extra_file_roots', () => {
           { old_str: 'delta', new_str: 'd' },
         ],
       }),
-    ).rejects.toThrow(/\(edit 2 of 4\).*edit\(s\) 1, 3 matched; edit\(s\) 4 also did not match/su);
-    expect(fs.readFileSync(file, 'utf8')).toBe('alpha beta gamma');
+    );
+    expect(result).toMatch(/^Partly applied: edit\(s\) 1, 3 of 4 .*Edit\(s\) 2, 4 not found/su);
+    expect(result).toMatch(/\nEdit 2:.*\nEdit 4:/su);
+    expect(fs.readFileSync(file, 'utf8')).toBe('a beta g');
   });
 
   it('keeps the single-edit result unchanged', async () => {

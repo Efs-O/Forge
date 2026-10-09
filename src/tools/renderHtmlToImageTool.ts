@@ -196,9 +196,13 @@ async function dispatch(
       `render_html_to_image: mode must be "image" or "preview", not ${JSON.stringify(mode)}.`,
     );
   }
-  if (args['wait_ms'] !== undefined) {
+  // Refused, not ignored: a preview call that forgot `mode` once got a static,
+  // script-less PNG saved into the workspace with its frames and keys dropped.
+  const previewOnly = ['wait_ms', 'frames', 'keys'].filter((key) => args[key] !== undefined);
+  if (previewOnly.length > 0) {
     throw new Error(
-      'render_html_to_image: wait_ms applies to mode "preview" only; image mode runs no scripts.',
+      `render_html_to_image: ${previewOnly.join(', ')} apply to mode "preview" only; image mode ` +
+        'runs no scripts. Add mode: "preview" to see the page run.',
     );
   }
   return runRender(deps, args, context);

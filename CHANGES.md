@@ -13,7 +13,10 @@
 - A grouped tool that is offered in the request now runs when called. Before, dispatch refused it until `load_tool_group` had been called, even when the tool was in the request (7 refusals in the session logs).
 - On a text-only model, `view_image`, `view_video`, `browser_screenshot` and `desktop_capture` are listed, with "needs a vision model" in their descriptions, and refuse when called with that reason. The `media` group is on by default for every model, and `computer_use` can be loaded on any model. Desktop coordinate actions say they need a capture from a vision model.
 - `write_file` says to write a large file in one call rather than in part-files joined with the shell.
-- `edit_file` takes up to 200 edits in one call (was 40). The batch is still all-or-nothing.
+- `edit_file` takes up to 200 edits in one call (was 40).
+- `edit_file` writes the edits that match and reports the ones that miss, instead of discarding the whole batch for one bad `old_str`. The result starts with `Partly applied:`, names the missed edits with the usual diagnosis, and says to resend only those. When every edit misses, nothing is written, as before. In 3 days of session logs, 66 misses had forced 253 matching edits to be generated again.
+- `edit_file` finds an `old_str` that differs from the file only by one uniform indentation shift (same whitespace character, same count on every line, exactly one matching block) and shifts `new_str` by the same count. The result says `indentation adjusted`. Mixed tabs and spaces, a shift that varies by line, or several matching blocks are still misses.
+- `render_html_to_image` refuses `frames` and `keys` in image mode, as it already refused `wait_ms`. A preview call that left out `mode` used to drop them silently and save a static PNG into the workspace.
 - `open_file` opens images, PDFs, archives, media and fonts in VS Code's own viewer instead of failing with "File seems to be binary".
 - An atomic file write retries a contended rename for up to 2.5 s (was about 75 ms), with growing waits.
 - `render_html_to_image` preview loads the page from a secure synthetic origin, so WebGPU is available, and runs on the real GPU (a local model on the same GPU may slow briefly while it runs). Relative asset requests are refused with a message saying preview serves only the page itself.

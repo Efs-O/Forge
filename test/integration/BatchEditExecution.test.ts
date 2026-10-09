@@ -57,17 +57,32 @@ describe('edit_file batch form', () => {
     expect(read()).toContain('const a = 100;');
   });
 
-  it('writes nothing at all when one edit does not match', async () => {
-    // A partial write would leave the file in a state neither side has read.
-    await expect(
-      makeEditFileTool().handler({
+  it('writes the matching edits and reports the one that missed', async () => {
+    const result = String(
+      await makeEditFileTool().handler({
         path: file,
         edits: [
           { old_str: 'const a = 1;', new_str: 'const a = 10;' },
           { old_str: 'const MISSING = 0;', new_str: 'x' },
         ],
       }),
-    ).rejects.toThrow('edit 2 of 2');
+    );
+    expect(read()).toBe(original.replace('const a = 1;', 'const a = 10;'));
+    expect(result).toMatch(/^Partly applied: edit\(s\) 1 of 2 written/u);
+    expect(result).toContain('Edit(s) 2 not found');
+    expect(result).toContain('resend ONLY the missed edit(s)');
+  });
+
+  it('writes nothing when every edit misses', async () => {
+    await expect(
+      makeEditFileTool().handler({
+        path: file,
+        edits: [
+          { old_str: 'const MISSING = 0;', new_str: 'x' },
+          { old_str: 'const ALSO_MISSING = 0;', new_str: 'y' },
+        ],
+      }),
+    ).rejects.toThrow('(all 2 edits)');
     expect(read()).toBe(original);
   });
 

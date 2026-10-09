@@ -162,8 +162,16 @@ describe('render_html_to_image preview: inputs', () => {
       /mode must be "image" or "preview"/,
     );
     await expect(tool.handler({ html: PAGE, wait_ms: 500 }, context())).rejects.toThrow(
-      /wait_ms applies to mode "preview" only/,
+      /wait_ms apply to mode "preview" only/,
     );
+    // The pelican rerun (2026-10-09): frames and keys without mode were dropped
+    // silently and a static PNG was saved instead.
+    await expect(
+      tool.handler(
+        { path: await writePage(), frames: [5000], keys: [{ key: 'Enter', hold_ms: 200 }] },
+        context(),
+      ),
+    ).rejects.toThrow(/frames, keys apply to mode "preview" only/);
     expect(renderFake.launchCalls).toHaveLength(0);
   });
 

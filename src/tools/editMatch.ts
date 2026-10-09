@@ -63,6 +63,104 @@ export function findEditMatch(content: string, oldStr: string): EditMatch | unde
   return { index: start, length: end - start };
 }
 
+export interface IndentShiftedMatch extends EditMatch {
+  /** `new_str` with the same shift applied, ready to splice. */
+  newStr: string;
+  /** 1-based line where the block starts. */
+  line: number;
+  /** Positive adds indentation, negative removes it. */
+  shift: number;
+}
+
+/**
+ * Finds `oldStr` once its indentation is shifted by a uniform amount, and
+ * shifts `newStr` to match. Applied only when nothing can be ambiguous: one
+ * block of whole lines matches, every leading whitespace (file block, old_str,
+ * new_str) is one character kind, every non-blank line differs by the same
+ * count, and new_str can take that count. Anything else is a miss, reported by
+ * `describeEditMiss` as before. The shift keeps new_str's relative nesting, so
+ * a nesting change the model meant to make survives a Python or YAML edit.
+ */
+export function findIndentShiftedMatch(
+  content: string,
+  oldStr: string,
+  newStr: string,
+): IndentShiftedMatch | undefined {
+  let needle = oldStr.replace(/\r\n?/gu, '\n').split('\n');
+  const trailingNewline = needle.length > 1 && needle.at(-1) === '';
+  if (trailingNewline) needle = needle.slice(0, -1);
+  const stripped = needle.map((line) => line.replace(/^[ \t]+/u, ''));
+  if (!stripped.some((line) => line.length >= 3)) return undefined;
+
+  const spans = lineSpans(content);
+  const starts: number[] = [];
+  for (let start = 0; start + needle.length <= spans.length; start++) {
+    const window = spans.slice(start, start + needle.length);
+    if (window.every((span, i) => span.text.replace(/^[ \t]+/u, '') === stripped[i])) {
+      starts.push(start);
+      if (starts.length > 1) return undefined;
+    }
+  }
+  if (starts.length !== 1) return undefined;
+  const start = starts[0]!;
+  const window = spans.slice(start, start + needle.length);
+  if (trailingNewline && start + needle.length >= spans.length) return undefined;
+
+  const newLines = newStr.replace(/\r\n?/gu, '\n').split('\n');
+  const indents = [...window.map((span) => span.text), ...needle, ...newLines]
+    .map((line) => /^[ \t]*/u.exec(line)![0])
+    .join('');
+  const kind = indents[0];
+  if (kind !== undefined && [...indents].some((ch) => ch !== kind)) return undefined;
+
+  let shift: number | undefined;
+  for (const [i, line] of needle.entries()) {
+    if (stripped[i] === '') continue;
+    const delta = indentWidth(window[i]!.text) - indentWidth(line);
+    if (shift === undefined) shift = delta;
+    else if (delta !== shift) return undefined;
+  }
+  if (shift === undefined || shift === 0) return undefined;
+  if (shift < 0 && newLines.some((line) => line.trim() !== '' && indentWidth(line) < -shift)) {
+    return undefined;
+  }
+  const pad = (kind ?? ' ').repeat(Math.max(0, shift));
+  const shifted = newLines
+    .map((line) => {
+      if (line.trim() === '') return line.slice(0, Math.max(0, line.length + Math.min(0, shift!)));
+      return shift! > 0 ? pad + line : line.slice(-shift!);
+    })
+    .join('\n');
+
+  const index = window[0]!.start;
+  const end = trailingNewline ? spans[start + needle.length]!.start : window.at(-1)!.end;
+  return { index, length: end - index, newStr: shifted, line: start + 1, shift };
+}
+
+interface LineSpan {
+  text: string;
+  /** Offset of the line's first character in the original text. */
+  start: number;
+  /** Offset just past the line's last character, before its line ending. */
+  end: number;
+}
+
+function lineSpans(content: string): LineSpan[] {
+  const spans: LineSpan[] = [];
+  const eol = /\r\n|\r|\n/gu;
+  let start = 0;
+  for (let m = eol.exec(content); m; m = eol.exec(content)) {
+    spans.push({ text: content.slice(start, m.index), start, end: m.index });
+    start = m.index + m[0].length;
+  }
+  spans.push({ text: content.slice(start), start, end: content.length });
+  return spans;
+}
+
+function indentWidth(line: string): number {
+  return /^[ \t]*/u.exec(line)![0].length;
+}
+
 /** The line ending the file mostly uses, so inserted text matches its neighbours. */
 export function dominantEol(content: string): '\r\n' | '\n' {
   const crlf = (content.match(/\r\n/gu) ?? []).length;
@@ -176,8 +274,10 @@ function closestLine(lines: string[], firstLine: string): string | undefined {
  *
  * `read_file` no longer emits that space, but a model can still hand-indent a
  * block, and an off-by-one indent must not cost a turn to a message that points
- * somewhere else. Reported, never auto-applied: silently re-indenting a YAML or
- * Python block would change what the edit means.
+ * somewhere else. A uniform, unambiguous shift is applied by
+ * `findIndentShiftedMatch` before this runs (2026-10-09, user decision; it once
+ * was never auto-applied); this names the cases it refuses: mixed tabs and
+ * spaces, a shift that varies by line, or several matching blocks.
  */
 function describeIndentShift(content: string, oldStr: string): string | undefined {
   const needle = oldStr.replace(/\r\n?/gu, '\n').split('\n');

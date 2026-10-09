@@ -1,5 +1,11 @@
 import { describe, expect, it } from 'vitest';
-import { applyEol, describeEditMiss, dominantEol, findEditMatch } from '../../src/tools/editMatch';
+import {
+  applyEol,
+  describeEditMiss,
+  dominantEol,
+  findEditMatch,
+  findIndentShiftedMatch,
+} from '../../src/tools/editMatch';
 
 describe('findEditMatch', () => {
   it('finds an exact match and reports its own length', () => {
@@ -152,5 +158,66 @@ describe('describeEditMiss — the uniform indent shift', () => {
     // findEditMatch handles this; describeEditMiss is only ever called on a miss,
     // but a single short token must not be accused of an indent problem.
     expect(describeEditMiss(yaml, '   x')).not.toContain('leading whitespace');
+  });
+});
+
+describe('findIndentShiftedMatch', () => {
+  const splice = (content: string, m: { index: number; length: number; newStr: string }) =>
+    content.slice(0, m.index) + m.newStr + content.slice(m.index + m.length);
+
+  it('applies a uniform shift and shifts new_str by the same count', () => {
+    const content = 'function f() {\n  r.duckT = 0;\n  r.vy = 1;\n}\n';
+    const m = findIndentShiftedMatch(
+      content,
+      '    r.duckT = 0;\n    r.vy = 1;',
+      '    r.duckT = 2;\n    if (a) {\n      r.vy = 3;\n    }',
+    );
+    expect(m).toMatchObject({ line: 2, shift: -2 });
+    expect(splice(content, m!)).toBe(
+      'function f() {\n  r.duckT = 2;\n  if (a) {\n    r.vy = 3;\n  }\n}\n',
+    );
+  });
+
+  it('adds indentation when old_str has less', () => {
+    const content = 'if x:\n    y = 1\n    z = 2\n';
+    const m = findIndentShiftedMatch(content, 'y = 1\nz = 2', 'y = 10\nz = 20');
+    expect(m?.shift).toBe(4);
+    expect(splice(content, m!)).toBe('if x:\n    y = 10\n    z = 20\n');
+  });
+
+  it('refuses a Python block whose lines shift by different amounts', () => {
+    const content = 'if x:\n    y = 1\nz = 2\n';
+    // Applying this would move `z = 2` into the if block.
+    expect(findIndentShiftedMatch(content, '  y = 1\n  z = 2', '  y = 1\n  z = 3')).toBeUndefined();
+  });
+
+  it('refuses when two blocks match once indentation is ignored', () => {
+    const content = 'a:\n  value = 1\nb:\n    value = 1\n';
+    expect(findIndentShiftedMatch(content, '      value = 1', '      value = 2')).toBeUndefined();
+  });
+
+  it('refuses tabs in the file against spaces in old_str', () => {
+    const content = 'f() {\n\treturn value;\n}\n';
+    expect(
+      findIndentShiftedMatch(content, '    return value;', '    return other;'),
+    ).toBeUndefined();
+  });
+
+  it('refuses a removing shift new_str cannot take', () => {
+    const content = 'x {\n  keep = 1;\n}\n';
+    expect(
+      findIndentShiftedMatch(content, '    keep = 1;', '    keep = 2;\n outer = 3;'),
+    ).toBeUndefined();
+  });
+
+  it("keeps the file's CRLF ending around the shifted splice", () => {
+    const content = 'a {\r\n  b = 1;\r\n  c = 2;\r\n}\r\n';
+    const m = findIndentShiftedMatch(
+      content,
+      '    b = 1;\n    c = 2;\n',
+      '    b = 9;\n    c = 8;\n',
+    );
+    expect(content.slice(m!.index, m!.index + m!.length)).toBe('  b = 1;\r\n  c = 2;\r\n');
+    expect(m!.newStr).toBe('  b = 9;\n  c = 8;\n');
   });
 });

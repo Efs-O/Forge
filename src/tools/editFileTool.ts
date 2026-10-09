@@ -1,7 +1,13 @@
 import * as fs from 'fs';
 import type { RegisteredTool } from './ToolRegistry';
 import { resolveRealWorkspacePath } from '../util/WorkspacePaths';
-import { applyEol, describeEditMiss, dominantEol, findEditMatch } from './editMatch';
+import {
+  applyEol,
+  describeEditMiss,
+  dominantEol,
+  findEditMatch,
+  findIndentShiftedMatch,
+} from './editMatch';
 import { writeFileAtomicSync, type ExpectedFileState } from '../util/atomicWrite';
 
 // ── edit_file ──────────────────────────────────────────────────────────────────
@@ -61,10 +67,11 @@ export function makeEditFileTool(extraRoots: () => readonly string[] = () => [])
         name: 'edit_file',
         description:
           'Replace the FIRST occurrence of old_str with new_str in a file. old_str must be an ' +
-          'exact match including whitespace and indentation. Pass `edits` to apply several ' +
-          'replacements to the same file in ONE call — strongly preferred over one call per ' +
-          'edit. Edits apply in order and all-or-nothing: if any old_str is not found, the ' +
-          'file is left untouched.',
+          'exact match including whitespace (a block that differs only by one uniform indentation ' +
+          'shift is found and new_str is shifted to match; the result says so). Pass `edits` to ' +
+          'apply several replacements to the same file in ONE call — strongly preferred over one ' +
+          'call per edit. Edits apply in order; an edit whose old_str is not found is skipped and ' +
+          'reported while the others are written, so resend only the missed ones.',
         parameters: {
           type: 'object',
           properties: {
@@ -132,58 +139,75 @@ export function makeEditFileTool(extraRoots: () => readonly string[] = () => [])
         throw new Error(`edit_file: cannot read file — ${(err as Error).message}`);
       }
 
-      // Applied to a buffer and written once. A partial write would leave the
-      // file in a state neither side has read, which is worse than the failure.
-      // Inserted text takes the file's own line ending, so an edit never
-      // leaves a CRLF file with stray LF lines the next old_str must guess at.
+      // Applied to a buffer and written once. A missed edit is skipped, not
+      // fatal: all-or-nothing made the model regenerate every matched edit for
+      // one bad anchor (253 resent edits over 66 misses in 3 days, 2026-10-09).
+      // Edits apply in order, so one that needs a skipped edit's text misses
+      // too and is reported. Inserted text takes the file's own line ending, so
+      // an edit never leaves a CRLF file with stray LF lines.
       const eol = dominantEol(content);
       let updated = content;
+      const applied: number[] = [];
+      const misses: { number: number; diagnosis: string }[] = [];
+      const shifted: string[] = [];
       for (const [index, edit] of edits.entries()) {
-        const match = findEditMatch(updated, edit.oldStr);
+        const exact = findEditMatch(updated, edit.oldStr);
+        const match = exact
+          ? { ...exact, newStr: edit.newStr }
+          : findIndentShiftedMatch(updated, edit.oldStr, edit.newStr);
         if (!match) {
-          const which = edits.length === 1 ? '' : ` (edit ${index + 1} of ${edits.length})`;
-          throw new Error(
-            `edit_file: old_str not found in file${which} — the text must match exactly, ` +
-              'apart from line endings, which are ignored. No changes were written.' +
-              describeEditMiss(updated, edit.oldStr) +
-              describeOtherEdits(updated, edits, index),
+          misses.push({ number: index + 1, diagnosis: describeEditMiss(updated, edit.oldStr) });
+          continue;
+        }
+        if ('shift' in match) {
+          const which = edits.length === 1 ? '' : `edit ${index + 1}: `;
+          shifted.push(
+            `${which}indentation adjusted by ${match.shift > 0 ? '+' : ''}${match.shift} at line ${match.line}`,
           );
         }
+        applied.push(index + 1);
         updated =
           updated.slice(0, match.index) +
-          applyEol(edit.newStr, eol) +
+          applyEol(match.newStr, eol) +
           updated.slice(match.index + match.length);
+      }
+      if (applied.length === 0) {
+        const which = edits.length === 1 ? '' : ` (all ${edits.length} edits)`;
+        throw new Error(
+          `edit_file: old_str not found in file${which} — the text must match exactly, ` +
+            'apart from line endings, which are ignored. No changes were written.' +
+            describeMisses(misses, edits.length),
+        );
       }
       writeFileAtomicSync(filepath, updated, fileState);
       const suppliedPath = args['path'] as string;
-      return edits.length === 1
-        ? `Replaced in ${suppliedPath}`
-        : `Applied ${edits.length} edits to ${suppliedPath}`;
+      const adjusted = shifted.length > 0 ? ` (${shifted.join('; ')})` : '';
+      if (misses.length === 0) {
+        return edits.length === 1
+          ? `Replaced in ${suppliedPath}${adjusted}`
+          : `Applied ${edits.length} edits to ${suppliedPath}${adjusted}`;
+      }
+      return (
+        `Partly applied: edit(s) ${applied.join(', ')} of ${edits.length} written to ${suppliedPath}` +
+        `${adjusted}. Edit(s) ${misses.map((m) => m.number).join(', ')} not found — the applied edits ` +
+        'are already in the file, so resend ONLY the missed edit(s), corrected.' +
+        describeMisses(misses, edits.length)
+      );
     },
   };
 }
 
-/**
- * Names the batch's other edits that would have matched. The batch is atomic, so
- * one miss discards them all, and without this the model cannot tell one bad
- * anchor from four: it re-reads the whole region rather than fixing one edit.
- * Edits before the miss were checked against the text as earlier edits left it;
- * later ones against the text at the miss, so this is a guide, not a promise.
- */
-function describeOtherEdits(content: string, edits: StringEdit[], failed: number): string {
-  if (edits.length === 1) return '';
-  const matched: number[] = [];
-  const missed: number[] = [];
-  for (const [index, edit] of edits.entries()) {
-    if (index === failed) continue;
-    if (index < failed || findEditMatch(content, edit.oldStr)) matched.push(index + 1);
-    else missed.push(index + 1);
-  }
-  const parts: string[] = [];
-  if (matched.length > 0) parts.push(`edit(s) ${matched.join(', ')} matched`);
-  if (missed.length > 0) parts.push(`edit(s) ${missed.join(', ')} also did not match`);
-  return (
-    ` Of the other edits in this call, ${parts.join('; ')}. Re-send the call with the ` +
-    'failing edit(s) corrected — the matched ones were not written either.'
-  );
+/** Full diagnoses for the first misses; numbers only past that, to bound the result. */
+const DIAGNOSED_MISSES = 3;
+
+function describeMisses(misses: { number: number; diagnosis: string }[], total: number): string {
+  if (total === 1) return misses[0]?.diagnosis ?? '';
+  const detailed = misses
+    .slice(0, DIAGNOSED_MISSES)
+    .map((miss) => `\nEdit ${miss.number}:${miss.diagnosis}`)
+    .join('');
+  const rest = misses.slice(DIAGNOSED_MISSES).map((miss) => miss.number);
+  return rest.length > 0
+    ? `${detailed}\nEdit(s) ${rest.join(', ')} also missed; re-read their regions before resending.`
+    : detailed;
 }
