@@ -130,7 +130,7 @@
   padding: 0;
   background: none;
   border: none;
-  color: var(--vscode-textLink-foreground, #3794ff);
+  color: var(--forge-link);
   cursor: pointer;
   font-size: 10px;
 }

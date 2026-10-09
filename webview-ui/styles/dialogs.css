@@ -70,8 +70,8 @@
 }
 
 .confirm-btn-approve {
-  background: var(--vscode-button-background);
-  color: var(--vscode-button-foreground);
+  background: var(--forge-accent-fill);
+  color: var(--forge-accent-fill-fg);
   border: none;
   padding: 5px 16px;
   cursor: pointer;
@@ -81,7 +81,7 @@
   align-self: auto;
   font-weight: 500;
 }
-.confirm-btn-approve:hover { background: var(--vscode-button-hoverBackground); }
+.confirm-btn-approve:hover { background: var(--forge-accent-fill-hover); }
 
 .confirm-dialog--dangerous .confirm-btn-approve {
   background: var(--vscode-inputValidation-errorBorder, #be1100);
@@ -120,7 +120,7 @@
 }
 
 .question-icon {
-  color: var(--vscode-textLink-foreground, #3794ff);
+  color: var(--forge-link);
   flex-shrink: 0;
   display: inline-flex;
 }
@@ -157,7 +157,7 @@
   font-family: inherit;
 }
 .question-option:hover {
-  border-color: var(--vscode-focusBorder, #3794ff);
+  border-color: var(--forge-accent);
   background: var(--vscode-list-hoverBackground, #2a2d2e);
 }
 
@@ -210,21 +210,21 @@
 /* Selected, not hovered: with sub-questions a click sets a choice and waits for
    the rest, so the dialog has to show what is already picked. */
 .question-option-selected {
-  border-color: var(--vscode-focusBorder, #3794ff);
-  background: var(--vscode-list-activeSelectionBackground, #04395e);
+  border-color: var(--forge-accent);
+  background: var(--forge-selection);
 }
 
 .question-other {
   align-self: flex-start;
   background: transparent;
-  color: var(--vscode-textLink-foreground, #3794ff);
+  color: var(--forge-link);
   border: 0;
   padding: 4px 2px;
   cursor: pointer;
   font: inherit;
 }
 .question-other:hover {
-  color: var(--vscode-textLink-activeForeground, #4daafc);
+  color: var(--forge-link-active);
   text-decoration: underline;
 }
 
@@ -242,7 +242,7 @@
 }
 .question-input:focus {
   outline: none;
-  border-color: var(--vscode-focusBorder, #3794ff);
+  border-color: var(--forge-accent);
 }
 
 .confirm-btn-approve:disabled {

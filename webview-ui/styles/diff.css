@@ -54,7 +54,7 @@
 }
 .diff-filepath-link:hover {
   background: transparent;
-  color: var(--vscode-textLink-foreground, #4daafc);
+  color: var(--forge-link);
   text-decoration: underline;
 }
 
@@ -116,7 +116,7 @@
 .diff-toggle {
   background: transparent;
   border: none;
-  color: var(--vscode-textLink-foreground, #4daafc);
+  color: var(--forge-link);
   font-size: 10px;
   font-family: inherit;
   cursor: pointer;

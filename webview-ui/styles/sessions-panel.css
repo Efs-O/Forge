@@ -148,8 +148,8 @@
 }
 
 .history-menu-item:hover {
-  background: var(--vscode-menu-selectionBackground, #04395e);
-  color: var(--vscode-menu-selectionForeground, #fff);
+  background: var(--forge-selection);
+  color: var(--vscode-foreground);
 }
 
 .history-menu-item-danger {

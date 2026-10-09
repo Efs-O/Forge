@@ -233,7 +233,7 @@
 }
 
 .thinking-bubble-open {
-  background: color-mix(in srgb, var(--vscode-editorWidget-background, #252526) 94%, var(--vscode-textLink-foreground, #4daafc) 6%);
+  background: color-mix(in srgb, var(--vscode-editorWidget-background, #252526) 94%, var(--forge-link) 6%);
 }
 
 .thinking-toggle {
@@ -365,6 +365,6 @@
 }
 
 .tool-row-thumb:focus-visible {
-  outline: 1px solid var(--vscode-focusBorder);
+  outline: 1px solid var(--forge-accent);
   outline-offset: 1px;
 }

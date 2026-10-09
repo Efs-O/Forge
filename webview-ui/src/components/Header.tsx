@@ -16,11 +16,11 @@ interface Props {
 }
 
 function budgetColor(used: number, max: number): string {
-  if (max === 0) return 'var(--vscode-progressBar-background, #0e70c0)';
+  if (max === 0) return 'var(--forge-green)';
   const pct = used / max;
   if (pct >= 0.9) return 'var(--vscode-errorForeground, #f48771)';
   if (pct >= 0.7) return 'var(--vscode-editorWarning-foreground, #cca700)';
-  return 'var(--vscode-progressBar-background, #0e70c0)';
+  return 'var(--forge-green)';
 }
 
 /**

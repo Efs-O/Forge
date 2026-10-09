@@ -364,7 +364,7 @@
 .slash-trigger {
   grid-column: 1;
   grid-row: 1 / span 2;
-  color: var(--vscode-textLink-foreground, #4daafc);
+  color: var(--forge-link);
   font-family: var(--vscode-editor-font-family, 'Cascadia Code', monospace);
   font-size: 12px;
   display: flex;

@@ -8,7 +8,21 @@
   --forge-space-2: 8px;
   --forge-space-3: 12px;
   --forge-space-4: 16px;
-  --forge-accent:    var(--vscode-focusBorder, #0090ff);
+  /* Brand green, taken from the Efso publisher avatar. Replaces the theme's
+     blues (focusBorder, button, textLink, list selection, progressBar) so the
+     sidebar matches the avatar instead of the VS Code default. Every accent in
+     the webview reads one of these tokens - never a --vscode-* blue directly. */
+  --forge-green-deep:  #053b34;
+  --forge-green-dark:  #0b5b4e;
+  --forge-green-hover: #0f6e5e;
+  --forge-green:       #10b981;
+  --forge-accent:      #34d399;
+  --forge-accent-fill:       var(--forge-green-dark);
+  --forge-accent-fill-hover: var(--forge-green-hover);
+  --forge-accent-fill-fg:    #ecfdf5;
+  --forge-link:        #6ee7b7;
+  --forge-link-active: #a7f3d0;
+  --forge-selection:   var(--forge-green-deep);
   --forge-surface-1: var(--vscode-editorWidget-background, #252526);
   --forge-surface-2: var(--vscode-editor-inactiveSelectionBackground, #3a3a3a);
   --forge-border:    var(--vscode-widget-border, #444);
@@ -26,13 +40,22 @@
   --forge-tool-bad:  var(--vscode-errorForeground, #f48771);
 }
 
+/* The bright greens are tuned for a dark sidebar; on a light theme they wash
+   out, so text-coloured accents drop to the deep end of the same hue. */
+body.vscode-light {
+  --forge-accent:      #047857;
+  --forge-link:        #047857;
+  --forge-link-active: #065f46;
+  --forge-selection:   #d1fae5;
+}
+
 *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
 
 /* ── Global button baseline ──────────────────────────────────────────────── */
 
 button {
-  background: var(--vscode-button-background);
-  color: var(--vscode-button-foreground);
+  background: var(--forge-accent-fill);
+  color: var(--forge-accent-fill-fg);
   border: none;
   padding: 4px 10px;
   cursor: pointer;
@@ -41,7 +64,7 @@ button {
   border-radius: var(--forge-radius-sm);
   align-self: auto;
 }
-button:hover    { background: var(--vscode-button-hoverBackground); }
+button:hover    { background: var(--forge-accent-fill-hover); }
 button:disabled { opacity: 0.4; cursor: default; }
 
 /* Present for assistive tech, absent for the eye. */

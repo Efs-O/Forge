@@ -44,7 +44,7 @@
 }
 
 .ms-trigger:not(:disabled):hover {
-  border-color: var(--vscode-focusBorder, #0090ff);
+  border-color: var(--forge-accent);
 }
 
 .ms-trigger-name {
@@ -152,7 +152,7 @@
   max-width: min(340px, 90vw);
   z-index: 1000;
   background: var(--vscode-dropdown-background);
-  border: 1px solid var(--vscode-focusBorder, #0090ff);
+  border: 1px solid var(--forge-accent);
   border-radius: var(--forge-radius-sm);
   box-shadow: 0 6px 18px rgba(0, 0, 0, 0.35);
   max-height: 60vh;
@@ -200,8 +200,8 @@
 }
 
 .ms-item--active {
-  background: var(--vscode-list-activeSelectionBackground, #094771);
-  color: var(--vscode-list-activeSelectionForeground, #fff);
+  background: var(--forge-selection);
+  color: var(--vscode-foreground);
 }
 
 /* First ms-item (no-model placeholder) has less indent */

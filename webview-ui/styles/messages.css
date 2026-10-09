@@ -212,7 +212,7 @@
   border-radius: 4px;
 }
 .msg.assistant a {
-  color: var(--vscode-textLink-foreground, #4daafc);
+  color: var(--forge-link);
   text-decoration: none;
 }
 .msg.assistant a:hover { text-decoration: underline; }
@@ -229,7 +229,7 @@
   padding: 4px 8px;
   text-align: left;
 }
-.msg.assistant th { background: var(--vscode-editor-inactiveSelectionBackground, #333); }
+.msg.assistant th { background: var(--forge-selection); }
 .msg.assistant hr { display: none; }
 
 /* ── Linkified file references ──────────────────────────────────────────── */
@@ -237,7 +237,7 @@
 .msg.assistant a.forge-file-link {
   font-family: var(--vscode-editor-font-family, 'Cascadia Code', monospace);
   font-size: 12px;
-  border-bottom: 1px dotted var(--vscode-textLink-foreground, #4daafc);
+  border-bottom: 1px dotted var(--forge-link);
 }
 .msg.assistant a.forge-file-link:hover {
   text-decoration: none;
@@ -356,7 +356,7 @@
 
 .lightbox-original {
   font-size: 12px;
-  color: var(--vscode-textLink-foreground, #4daafc);
+  color: var(--forge-link);
   cursor: pointer;
 }
 
