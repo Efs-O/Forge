@@ -391,6 +391,17 @@
           "default": true,
           "description": "Keep webview state when sidebar is hidden"
         },
+        "forge.sidebar.activityView": {
+          "type": "string",
+          "enum": ["grouped", "compact", "full"],
+          "enumDescriptions": [
+            "Group consecutive tool steps into a collapsible activity row.",
+            "Show each tool step as a compact row that can be expanded.",
+            "Show the current full transcript layout, with separate reasoning, tool, and diff rows."
+          ],
+          "default": "grouped",
+          "description": "Choose how Forge displays tool activity in the sidebar. Changes apply immediately."
+        },
         "forge.terminal.watchUserCommands": {
           "type": "boolean",
           "default": true,

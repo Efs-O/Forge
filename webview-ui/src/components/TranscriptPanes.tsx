@@ -77,6 +77,7 @@ export function TranscriptPanes({
             conversationId={id}
             emptyState={emptyState}
             resumedNote={resumedNoteFor(tab, resumedIds, relativeTime)}
+            activityView={state.activityView}
             // A background tab may be on a different model than the picker
             // shows, and `active_model` is only set once a conversation picks
             // one explicitly.

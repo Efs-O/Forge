@@ -6,6 +6,7 @@ import type {
 } from '../../src/sidebar/messageBridge';
 import type { AppMessage, MessageAttachment, PersistedRow } from './messageOps';
 import type { AgentSenderMetadata } from '../../src/agentLinks/chatAgentLinks';
+import type { ActivityViewMode } from './activityRows';
 
 export interface State {
   messagesById: Record<string, AppMessage[]>;
@@ -42,6 +43,7 @@ export interface State {
   clankerMode: boolean;
   /** Whether anything outside this window can drive it. Host-owned. */
   remote: { transports: string[]; paired: boolean };
+  activityView: ActivityViewMode;
 }
 
 export const initialState: State = {
@@ -60,6 +62,7 @@ export const initialState: State = {
   activeConversationId: '',
   clankerMode: false,
   remote: { transports: [], paired: false },
+  activityView: 'full',
 };
 
 /** Derived view helpers — used by App.tsx */
@@ -128,6 +131,7 @@ export type Action =
     }
   | { type: 'CLANKER_CHANGED'; enabled: boolean }
   | { type: 'REMOTE_STATUS'; transports: string[]; paired: boolean }
+  | { type: 'ACTIVITY_VIEW'; mode: ActivityViewMode }
   | {
       type: 'SESSION_SYNC';
       activeId: string;

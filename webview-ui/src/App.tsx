@@ -65,7 +65,6 @@ export function App(): React.ReactElement {
       return next;
     });
   }, []);
-
   // Queued prompts belong in state so the user can see and cancel them before
   // Forge submits them to the extension host. Text-only entries become tells;
   // attachment entries retain the end-of-turn queue.
@@ -76,7 +75,6 @@ export function App(): React.ReactElement {
       streamingIds: state.streamingIds,
       clearResumed,
     });
-
   useEffect(() => {
     function handler(event: MessageEvent): void {
       const msg = event.data as HostToWebview;
@@ -219,6 +217,9 @@ export function App(): React.ReactElement {
           break;
         case 'remoteStatus':
           dispatch({ type: 'REMOTE_STATUS', transports: msg.transports, paired: msg.paired });
+          break;
+        case 'activityView':
+          dispatch({ type: 'ACTIVITY_VIEW', mode: msg.mode });
           break;
         case 'thread-stream-state-changed':
         case 'thread-read-state-changed':

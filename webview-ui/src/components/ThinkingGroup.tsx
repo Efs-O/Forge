@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
 import type { AppMessage } from '../reducer';
+import { isReasoningOnly } from '../activityRows';
 import { sameRowList } from '../messageOps';
 import { formatDuration } from '../../../src/util/formatDuration';
 
@@ -21,9 +22,7 @@ const ChevronRight = (): React.ReactElement => (
  * long turn produces one of these per round — rendered with the full role label
  * and bubble chrome they buried the actual work.
  */
-export function isReasoningOnly(msg: AppMessage): boolean {
-  return msg.role === 'assistant' && !msg.content && Boolean(msg.reasoning);
-}
+export { isReasoningOnly };
 
 /**
  * `Thought for 4.2 s`, or plain `Thinking` when there is no measurement.

@@ -19,6 +19,7 @@ export interface WebviewActions {
   post: (msg: HostToWebview) => void;
   postModels: () => void;
   postSessionSync: () => void;
+  postActivityView: () => string | undefined;
   postTokenBudget: () => void;
   postWorkspaceInfo: () => void;
   isBackendReady: () => boolean;
@@ -62,7 +63,11 @@ export function routeWebviewMessage(actions: WebviewActions, msg: WebviewToHost)
   switch (msg.type) {
     case 'webviewReady':
       actions.postModels();
-      actions.postSessionSync();
+      {
+        const activityViewNotice = actions.postActivityView();
+        actions.postSessionSync();
+        if (activityViewNotice) actions.post({ type: 'notice', message: activityViewNotice });
+      }
       // Without this the bar reads 0 until the next turn completes, and the
       // context warning cannot fire on the first turn after a window reload.
       actions.postTokenBudget();

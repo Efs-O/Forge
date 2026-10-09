@@ -16,6 +16,7 @@ interface AppModule {
     tabs: unknown[];
     history: unknown[];
     activeConversationId: string;
+    activityView: 'grouped' | 'compact' | 'full';
   };
   reducer: (
     state: AppModule['initialState'],
@@ -41,6 +42,7 @@ interface AppModule {
       | { type: 'READY'; convId?: string }
       | { type: 'BACKEND_STARTING'; message: string; convId?: string }
       | { type: 'BACKEND_DOWN'; message: string; convId?: string }
+      | { type: 'ACTIVITY_VIEW'; mode: 'grouped' | 'compact' | 'full' }
       | {
           type: 'SESSION_SYNC';
           activeId: string;
@@ -91,6 +93,15 @@ beforeAll(async () => {
 });
 
 describe('webview App reducer', () => {
+  it('stores the activity view mode received from the host', () => {
+    expect(appModule.initialState.activityView).toBe('full');
+    const next = appModule.reducer(appModule.initialState, {
+      type: 'ACTIVITY_VIEW',
+      mode: 'grouped',
+    });
+    expect(next.activityView).toBe('grouped');
+  });
+
   it('tracks command-started generation until completion', () => {
     const running = appModule.reducer(appModule.initialState, {
       type: 'GENERATION_STARTED',

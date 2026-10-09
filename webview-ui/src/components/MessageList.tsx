@@ -1,55 +1,11 @@
 import React, { useCallback, useEffect, useMemo, useRef } from 'react';
 import type { AppMessage } from '../App';
+import { toRows, type ActivityViewMode } from '../activityRows';
 import { Message } from './Message';
 import { DiffGroup } from './DiffGroup';
-import { ThinkingGroup, isReasoningOnly } from './ThinkingGroup';
+import { ThinkingGroup } from './ThinkingGroup';
 import { ToolGroup } from './ToolGroup';
 import { QueuedPromptRow } from './QueuedPromptRow';
-
-type Row =
-  | { kind: 'message'; message: AppMessage; index: number }
-  | { kind: 'diffGroup'; diffs: AppMessage[] }
-  | { kind: 'thinkingGroup'; steps: AppMessage[] }
-  | { kind: 'toolGroup'; tools: AppMessage[] };
-
-/**
- * Folds runs of adjacent same-kind messages into single rows: file edits and
- * tool calls become one card per turn, and per-round reasoning becomes one line.
- * Anything else passes through untouched.
- */
-function toRows(messages: AppMessage[]): Row[] {
-  const rows: Row[] = [];
-  for (let i = 0; i < messages.length; i++) {
-    const message = messages[i]!;
-
-    if (message.role === 'diff') {
-      const diffs: AppMessage[] = [];
-      while (i < messages.length && messages[i]!.role === 'diff') diffs.push(messages[i++]!);
-      i--;
-      rows.push({ kind: 'diffGroup', diffs });
-      continue;
-    }
-
-    if (isReasoningOnly(message)) {
-      const steps: AppMessage[] = [];
-      while (i < messages.length && isReasoningOnly(messages[i]!)) steps.push(messages[i++]!);
-      i--;
-      rows.push({ kind: 'thinkingGroup', steps });
-      continue;
-    }
-
-    if (message.role === 'tool') {
-      const tools: AppMessage[] = [];
-      while (i < messages.length && messages[i]!.role === 'tool') tools.push(messages[i++]!);
-      i--;
-      rows.push({ kind: 'toolGroup', tools });
-      continue;
-    }
-
-    rows.push({ kind: 'message', message, index: i });
-  }
-  return rows;
-}
 
 interface Props {
   messages: AppMessage[];
@@ -74,6 +30,7 @@ interface Props {
    * transcript. See `docs/plans/SIDEBAR_SWITCH_LATENCY_PLAN.md`.
    */
   active: boolean;
+  activityView: ActivityViewMode;
 }
 
 const SCROLL_THRESHOLD = 80; // px from bottom — within this, auto-scroll is active
@@ -88,6 +45,7 @@ export function MessageList({
   emptyState,
   resumedNote,
   active,
+  activityView,
 }: Props): React.ReactElement {
   const containerRef = useRef<HTMLDivElement>(null);
   const userScrolledUp = useRef(false);
@@ -97,7 +55,7 @@ export function MessageList({
   // back on deactivation, because by the time an effect cleanup runs the pane
   // is already hidden and the value is already gone.
   const savedScrollTop = useRef(0);
-  const rows = useMemo(() => toRows(messages), [messages]);
+  const rows = useMemo(() => toRows(messages, activityView), [messages, activityView]);
 
   // The MutationObserver is installed once; a ref is how its closure reads the
   // current `active` without re-subscribing on every switch.

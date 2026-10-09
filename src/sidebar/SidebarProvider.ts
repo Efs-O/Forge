@@ -52,6 +52,7 @@ import { attachmentsRootUri, openAttachment } from './attachmentAccess';
 import { listMemoryKeys } from '../tools/memoryTools';
 import { retainSessionMemoryKeys } from './memorySnapshotLifecycle';
 import { WebviewQueueState } from './evictionGate';
+import { postActivityViewSetting, watchActivityViewConfiguration } from './activityViewSetting';
 
 export type { SidebarProviderEvents };
 const RESIDENCY_POLL_MS = 1500;
@@ -224,6 +225,7 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
     webviewView.webview.onDidReceiveMessage((raw: unknown) => {
       this.handleMessage(raw as WebviewToHost);
     });
+    watchActivityViewConfiguration(webviewView, (message) => this.post(message));
     webviewView.onDidChangeVisibility(() => {
       this.residency.sync(this.view?.visible ?? false);
       this.hiddenChatAlerts.seen();
@@ -345,13 +347,11 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
       buildModelsMessage(this.config, this.pool, active?.active_model ?? this.config.active_model),
     );
   }
-
   private remoteStatus: { transports: string[]; paired: boolean } = {
     transports: [],
     paired: false,
   };
   private readonly webviewQueue = new WebviewQueueState();
-
   private post(msg: HostToWebview): void {
     this.view?.webview.postMessage(msg);
     const row = statusRowProgress(msg, (id) => this.agentLoop.isStreamingConv(id));
@@ -449,6 +449,7 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
         post: (out) => this.post(out),
         postModels: () => this.postModels(),
         postSessionSync: () => this.postSessionSync(),
+        postActivityView: () => postActivityViewSetting((message) => this.post(message)),
         postTokenBudget: () => this.postTokenBudget(),
         postWorkspaceInfo: () => this.postWorkspaceInfo(),
         isBackendReady: () => this.pool.isAnyReady(),

@@ -384,6 +384,9 @@ export function reducer(state: State, action: Action): State {
     case 'REMOTE_STATUS':
       return { ...state, remote: { transports: action.transports, paired: action.paired } };
 
+    case 'ACTIVITY_VIEW':
+      return state.activityView === action.mode ? state : { ...state, activityView: action.mode };
+
     case 'SESSION_SYNC': {
       const hostStreaming = action.tabs.filter((tab) => tab.streaming).map((tab) => tab.id);
       const liveConversationIds = new Set([...state.streamingIds, ...hostStreaming]);

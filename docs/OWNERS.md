@@ -14,11 +14,13 @@ overlaps with an existing owner, extend the owner instead.
 | Webview lifecycle + message bridge entry             | `src/sidebar/SidebarProvider.ts`         |
 | Webview message routing                              | `src/sidebar/webviewMessageRouter.ts`    |
 | Outbound webview payloads + status metrics           | `src/sidebar/sidebarPayloads.ts`         |
+| Activity-view setting parse + validation             | `src/sidebar/activityViewSetting.ts`     |
 | Active workspace root + folder-change watch          | `src/sidebar/workspaceInfo.ts`           |
 | Webview crash/diagnostic relay to host log           | `src/sidebar/webviewDiagnostics.ts`      |
 | Auto vs manual compaction resume policy              | `src/sidebar/compactionPolicy.ts`        |
 | Generation-event session timing                      | `src/sidebar/sessionTimerWiring.ts`      |
 | Pure transcript/usage mutations                      | `src/sidebar/transcriptMutations.ts`     |
+| Sidebar transcript activity row folding               | `webview-ui/src/activityRows.ts`          |
 | Sidebar host->webview event contract                 | `src/sidebar/providerEvents.ts`          |
 | Sidebar collaborator construction                    | `src/sidebar/sidebarWiring.ts`           |
 | Conversation eviction gate (signals, refusal labels) | `src/sidebar/evictionGate.ts`            |

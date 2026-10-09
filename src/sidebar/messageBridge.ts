@@ -2,6 +2,7 @@ import type { QuestionGroup } from '../util/questionAnswers';
 import type { ChatAttachmentRef } from '../llm/types';
 import type { AgentLinks } from '../agentLinks/chatAgentLinks';
 import type { AgentSenderMetadata } from '../agentLinks/chatAgentLinks';
+import type { ActivityViewMode } from './activityViewSetting';
 export type { ChatAttachmentRef };
 
 /** Tab row mirrored for host + webview. */
@@ -243,6 +244,10 @@ export interface RemoteStatusMsg {
   paired: boolean;
 }
 
+export interface ActivityViewMsg {
+  type: 'activityView';
+  mode: ActivityViewMode;
+}
 export interface FileDiffMsg {
   type: 'fileDiff';
   filePath: string;
@@ -364,6 +369,7 @@ export type HostToWebview =
   | FileDiffMsg
   | ClankerChangedMsg
   | RemoteStatusMsg
+  | ActivityViewMsg
   | WorkspaceInfoMsg;
 
 // ── Webview → Host ──────────────────────────────────────────────────────────
