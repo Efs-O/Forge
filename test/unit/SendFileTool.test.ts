@@ -201,12 +201,32 @@ describe('send_file', () => {
     expect(result).toContain('path must be in the workspace');
   });
 
-  it('refuses missing paths and directories', async () => {
+  it('names a missing workspace file and still refuses directories', async () => {
     const { tool } = makeTool();
     const missing = await tool.handler({ path: 'missing.txt' }, context('conv-a'));
     const directory = await tool.handler({ path: '.' }, context('conv-a'));
-    expect(missing).toContain('path must be in the workspace');
+    expect(missing).toBe('Error: no file at missing.txt');
     expect(directory).toContain('path must be in the workspace');
+  });
+
+  it('suggests the matching file in generated-images', async () => {
+    await writeFile(path.join(root, 'generated-images', 'preview.png'));
+    const { tool } = makeTool();
+
+    const result = await tool.handler({ path: 'preview.png' }, context('conv-a'));
+
+    expect(result).toBe(
+      'Error: no file at preview.png (did you mean generated-images/preview.png?)',
+    );
+  });
+
+  it('suggests the matching file in this conversation screenshot directory', async () => {
+    const screenshot = await fs.realpath(await screenshotPath('conv-a', 'capture.png'));
+    const { tool } = makeTool(vi.fn(async () => ({ kind: 'queued' as const, chats: 1 })));
+
+    const result = await tool.handler({ path: 'reports/capture.png' }, context('conv-a'));
+
+    expect(result).toBe(`Error: no file at reports/capture.png (did you mean ${screenshot}?)`);
   });
 
   it('refuses files over 50 MB and reports their actual size', async () => {

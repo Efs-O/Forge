@@ -1,6 +1,8 @@
 import * as fs from 'fs/promises';
 import * as os from 'os';
 import * as path from 'path';
+import * as vscode from 'vscode';
+import { DEFAULT_IMAGE_OUTPUT_DIR } from '../config/imageGenerationSchema';
 import type { UserNotificationService } from '../sidebar/UserNotificationService';
 import { codePointLength } from '../util/codePoints';
 import { fileDeliveryRefusal, inspectFileForDelivery } from '../util/fileDeliveryValidation';
@@ -22,22 +24,27 @@ async function resolveFilePath(
   try {
     return await resolveRealWorkspacePath(requestedPath);
   } catch {
-    if (!conversationId) return undefined;
+    return resolveScreenshotFile(requestedPath, conversationId);
   }
+}
 
+async function screenshotDirectory(
+  conversationId: string | undefined,
+): Promise<string | undefined> {
+  if (
+    !conversationId ||
+    conversationId.toLowerCase() === 'default' ||
+    conversationId === '.' ||
+    conversationId === '..' ||
+    /[\\/]/.test(conversationId)
+  ) {
+    return undefined;
+  }
   try {
     // `default` is the shared directory browserTools falls back to when a turn
     // has no conversation, so it is never a per-conversation root. Compared
     // case-insensitively: the filesystem is case-insensitive on Windows and
     // macOS, so `Default` is the same directory as `default`.
-    if (
-      conversationId.toLowerCase() === 'default' ||
-      conversationId === '.' ||
-      conversationId === '..' ||
-      /[\\/]/.test(conversationId)
-    ) {
-      return undefined;
-    }
     const screenshotBase = path.join(os.homedir(), '.forge', 'screenshots');
     const realScreenshotBase = await fs.realpath(screenshotBase);
     const screenshotDir = path.join(realScreenshotBase, conversationId);
@@ -55,11 +62,79 @@ async function resolveFilePath(
     // conv-a. Equality against the expected child path is what enforces "this
     // conversation only".
     if (realScreenshotDir !== screenshotDir) return undefined;
+    return realScreenshotDir;
+  } catch {
+    return undefined;
+  }
+}
+
+async function resolveScreenshotFile(
+  requestedPath: string,
+  conversationId: string | undefined,
+): Promise<string | undefined> {
+  const screenshotDir = await screenshotDirectory(conversationId);
+  if (!screenshotDir) return undefined;
+  try {
     const candidate = path.isAbsolute(requestedPath)
       ? path.resolve(requestedPath)
-      : path.resolve(realScreenshotDir, requestedPath);
+      : path.resolve(screenshotDir, requestedPath);
     const realCandidate = await fs.realpath(candidate);
-    return isPathInside(realScreenshotDir, realCandidate) ? realCandidate : undefined;
+    return isPathInside(screenshotDir, realCandidate) ? realCandidate : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+interface MissingWorkspaceFile {
+  relativePath: string;
+  suggestion?: string;
+}
+
+async function suggestExistingFile(
+  basename: string,
+  conversationId: string | undefined,
+): Promise<string | undefined> {
+  const generatedPath = path.posix.join(DEFAULT_IMAGE_OUTPUT_DIR, basename);
+  try {
+    const candidate = await resolveRealWorkspacePath(generatedPath);
+    if ((await fs.stat(candidate)).isFile()) return generatedPath;
+  } catch {
+    // A suggestion is useful only when a safe, existing regular file matches.
+  }
+  const screenshotDir = await screenshotDirectory(conversationId);
+  if (!screenshotDir) return undefined;
+  try {
+    const candidate = await fs.realpath(path.join(screenshotDir, basename));
+    if (isPathInside(screenshotDir, candidate) && (await fs.stat(candidate)).isFile()) {
+      return candidate;
+    }
+  } catch {
+    // No matching screenshot; the caller still gets the precise missing path.
+  }
+  return undefined;
+}
+
+async function missingWorkspaceFile(
+  requestedPath: string,
+  conversationId: string | undefined,
+): Promise<MissingWorkspaceFile | undefined> {
+  try {
+    const candidate = await resolveRealWorkspacePath(requestedPath, undefined, {
+      allowMissing: true,
+    });
+    try {
+      await fs.stat(candidate);
+      return undefined;
+    } catch (error) {
+      const code = (error as NodeJS.ErrnoException).code;
+      if (code !== 'ENOENT' && code !== 'ENOTDIR') return undefined;
+    }
+    const root = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
+    if (!root) return undefined;
+    const realRoot = await fs.realpath(root);
+    const relativePath = path.relative(realRoot, candidate).split(path.sep).join('/');
+    const suggestion = await suggestExistingFile(path.basename(candidate), conversationId);
+    return { relativePath, ...(suggestion ? { suggestion } : {}) };
   } catch {
     return undefined;
   }
@@ -111,7 +186,14 @@ export function makeSendFileTool(deps: SendFileDeps): RegisteredTool {
       }
 
       const absolute = await resolveFilePath(requestedPath, context?.conversationId);
-      if (!absolute) return PATH_REFUSAL;
+      if (!absolute) {
+        const missing = await missingWorkspaceFile(requestedPath, context?.conversationId);
+        if (!missing) return PATH_REFUSAL;
+        return (
+          `Error: no file at ${missing.relativePath}` +
+          (missing.suggestion ? ` (did you mean ${missing.suggestion}?)` : '')
+        );
+      }
 
       const inspected = await inspectFileForDelivery(absolute);
       if (!inspected.ok) {
