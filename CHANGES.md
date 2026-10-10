@@ -1,5 +1,22 @@
 # Forge — Recent Changes
 
+## 0.17.16
+
+- The built-in prompt's sections are wrapped in XML tags: `<rules>`, `<environment>` (date, workspace root), `<project_instructions>`, `<selected_code>` and `<custom_instructions>` replace the "Rules:" header, the "--- Project Instructions ---" markers and the "Selected code:" label. The verify rule goes back to 0.17.13's "review what you wrote once", so the bench compares tags against runs 25 and 28.
+
+## 0.17.15
+
+- The verify rule reads "First review what you wrote at least once against the request". On the pelican bench, 0.17.13 ("once") reviewed its code after writing and fixed a backwards crank arm (run 25); 0.17.14 (no "once") went straight to rendering (run 26). "At least once" keeps the review mandatory without capping it at one pass.
+
+## 0.17.14
+
+- The verify rule drops "once": "First review what you wrote against the request". 0.17.13 kept it; the two builds are benched against each other.
+
+## 0.17.13
+
+- The built-in prompt raises its bar: "do the work completely and very well", and when the model cannot test or iterate it should "choose the approach that is correct and best". The visual check now reads "look carefully at the rendered result for imperfections".
+- Final answer: at most 12 lines (was 8), and "no headings" is gone.
+
 ## 0.17.11
 
 - The built-in prompt's "Where a correct method exists, use it rather than an approximation." is now "When you cannot test or iterate, choose the approach that is correct, not the one easiest to get right blind, and work out its details (geometry, maths, timing) before writing." On the one-shot pelican bench the model's reasoning reached for "simplest robust approach" / "keep it simple" exactly where it dropped the knee joint (runs 9, 11, 12); the old sentence never fired because the model framed the choice as safety, not approximation.

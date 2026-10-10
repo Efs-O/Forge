@@ -97,25 +97,25 @@ describe('builtin execute template', () => {
     expect(prompt).not.toContain('narrowest check');
     expect(prompt).not.toContain('smallest change');
     expect(prompt).toContain(
-      'for code, run the tests that cover it; for anything visual, look at the rendered result.',
+      'for code, run the tests that cover it; for anything visual, look carefully at the rendered result for imperfections.',
     );
     // The scope guard read as "stay minimal" on one-shot builds (pelican run 5 vs 0.17.0).
     expect(prompt).not.toContain('Do not refactor, clean up');
-    expect(prompt).toContain('- Within the task, do the work completely and well.');
+    expect(prompt).toContain('- Within the task, do the work completely and very well.');
     expect(prompt).toContain(
       'After each result, determine what specific information or action is still required. If something necessary remains, continue.',
     );
     expect(prompt).toContain('Search the workspace or a named folder, never a whole drive.');
     // Review before the render: run 9 rendered, saw unattached legs, and the task's no-iterate rule blocked the fix.
     expect(prompt).toContain(
-      'First review what you wrote once against the request: every requested part present, every part connected to what it depends on; fix what it finds. Then, for code',
+      'First review what you wrote once against the request: every requested part present, every part connected to what it depends on; fix what you find. Then, for code',
     );
     // 2026 prompt-guide pass: positive phrasing, a reason on key rules, root cause over shortcuts.
     expect(prompt).not.toContain('You have access to tools');
     // Run 9 reasoned "To keep it simple: two leg groups rotating" — risk-aversion when it cannot iterate.
     expect(prompt).not.toContain('Where a correct method exists');
     expect(prompt).toContain(
-      'When you cannot test or iterate, choose the approach that is correct, not the one easiest to get right blind',
+      'When you cannot test or iterate, choose the approach that is correct and best, not the one easiest to get right blind',
     );
     expect(prompt).toContain('Fix the cause, not the symptom');
     expect(prompt).toContain('each round is a full model pass');
@@ -133,7 +133,7 @@ describe('builtin execute template', () => {
     );
     expect(prompt).toContain('Never run destructive commands');
     expect(prompt).toContain('write code into files with write_file or edit_file');
-    expect(prompt).toContain('Final answer: at most 8 lines, no headings');
+    expect(prompt).toContain('Final answer: at most 12 lines.');
     // When to preview is the agent's call; the tool description says what preview shows.
     expect(prompt).not.toContain('render_html_to_image');
     expect(prompt).toContain('a preview result is a tool result');
