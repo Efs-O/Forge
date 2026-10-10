@@ -364,7 +364,7 @@ describe('render_html_to_image cleanup', () => {
     for (const remaining of [1, 5, undefined]) {
       const { tool } = rig({ remaining });
       const result = await tool.handler({ html: '<title>Card</title>' }, context());
-      expect(result).toContain(`Rendered ${STAMP}-card.png`);
+      expect(result).toContain(`Rendered generated-images/${STAMP}-card.png`);
       await fs.rm(path.join(root, 'generated-images'), { recursive: true, force: true });
     }
   });

@@ -44,6 +44,7 @@ vi.mock('../../src/util/atomicWrite', async (importOriginal) => {
 vi.mock('vscode', () => ({ workspace: { workspaceFolders: undefined } }));
 
 import { makeRenderHtmlToImageTool } from '../../src/tools/renderHtmlToImageTool';
+import { makeSendFileTool } from '../../src/tools/sendFileTool';
 import { STAMP, pngWith, renderFake, resetRenderFake } from '../support/renderHtmlHarness';
 import {
   context,
@@ -154,8 +155,25 @@ describe('render_html_to_image output and delivery', () => {
     // the 'chrome' channel.
     const { tool } = rig({ noConfigGetter: true });
     const result = await tool.handler({ html: '<title>Card</title>' }, context());
-    expect(result).toContain(`Rendered ${STAMP}-card.png`);
+    expect(result).toContain(`Rendered generated-images/${STAMP}-card.png`);
     expect(await fs.readdir(path.join(root, 'generated-images'))).toEqual([`${STAMP}-card.png`]);
+  });
+
+  it('prints a workspace-relative path that send_file resolves', async () => {
+    const { tool } = rig();
+    const result = await tool.handler({ html: '<title>Card</title>' }, context());
+    const relativePath = `generated-images/${STAMP}-card.png`;
+    expect(result).toContain(`Rendered ${relativePath} (PNG, `);
+
+    const notifications = {
+      deliverFile: vi.fn(async () => ({ kind: 'queued' as const, chats: 1 })),
+    };
+    const sendFile = makeSendFileTool({
+      notifications: notifications as never,
+    });
+    await expect(
+      sendFile.handler({ path: relativePath }, context({ conversationId: 'conv-a' })),
+    ).resolves.toContain(`Queued ${STAMP}-card.png`);
   });
 
   it('gives a same-title second render its own name, so a queued upload is not replaced', async () => {
@@ -207,7 +225,7 @@ describe('render_html_to_image output and delivery', () => {
     renderFake.png = bytes;
     const { tool } = rig();
     const result = await tool.handler({ html: '<title>Card</title>' }, context());
-    expect(result).toContain(`Rendered ${STAMP}-card.png (PNG, `);
+    expect(result).toContain(`Rendered generated-images/${STAMP}-card.png (PNG, `);
     expect(result).toContain(' bytes) at 1024x768. Queued for 1 remote chat(s).');
     expect(result.replace(/[^\d]/g, '')).toContain(String(bytes.length));
     expect(result).not.toContain('Sent to');
@@ -225,7 +243,7 @@ describe('render_html_to_image output and delivery', () => {
       deliver: async () => ({ kind: 'refused' as const, spentThisTurn: 5, reason }),
     });
     const result = await tool.handler({ html: '<title>Card</title>' }, context());
-    expect(result).toContain(`Rendered ${STAMP}-card.png`);
+    expect(result).toContain(`Rendered generated-images/${STAMP}-card.png`);
     expect(result).toContain('File delivery limit reached: 5 of 5');
     expect(await fs.readdir(path.join(root, 'generated-images'))).toEqual([`${STAMP}-card.png`]);
   });

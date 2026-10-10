@@ -324,7 +324,8 @@ async function runRender(
     });
 
     const dims = pngDimensions(png);
-    const head = `Rendered ${path.basename(absolute)} (PNG, ${png.length.toLocaleString()} bytes) at ${dims.width}x${dims.height}.`;
+    const workspacePath = path.posix.join(outputDir.replace(/\\/g, '/'), path.basename(absolute));
+    const head = `Rendered ${workspacePath} (PNG, ${png.length.toLocaleString()} bytes) at ${dims.width}x${dims.height}.`;
     if (reached.kind === 'refused') return `${head}\n${reached.reason}`;
     return reached.chats > 0
       ? `${head} Queued for ${reached.chats} remote chat(s).`
