@@ -12,6 +12,8 @@ export interface TemplateContext {
   selection?: string;
   customInstructions?: string;
   forgeInstructions?: string;
+  /** Set when web_search or web_fetch is in the request's tools. */
+  webTools?: string;
   /** Filled in by `render`; callers do not pass it. */
   currentDate?: string;
 }

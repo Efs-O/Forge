@@ -20,7 +20,7 @@ import { applyCompactionWindow } from './compactionWindow';
 import { ageOutImageParts, stripImageParts } from './imageParts';
 import { injectSystemPrompt } from '../llm/SystemPromptInjector';
 import { injectTurnContext, type TurnContextState } from './turnContext';
-import { buildTemplateContext } from './turnModelBehavior';
+import { buildTemplateContext, hasWebTools } from './turnModelBehavior';
 import { attachCurrentTaskReasoning, preservesThinking } from '../agent/preserveThinking';
 
 export interface PrepareModelTurnMessagesInput {
@@ -64,12 +64,15 @@ export function prepareModelTurnMessages(
   const injected = injectSystemPrompt(
     visible,
     input.templateEngine,
-    buildTemplateContext(
-      input.config,
-      input.forgeLoader,
-      input.activeFile,
-      input.workspaceIsProjectRoot,
-    ),
+    {
+      ...buildTemplateContext(
+        input.config,
+        input.forgeLoader,
+        input.activeFile,
+        input.workspaceIsProjectRoot,
+      ),
+      ...(hasWebTools(input.getToolDefinitions()) ? { webTools: 'true' } : {}),
+    },
     input.model.system_prompt,
     input.model.system_prompt_mode,
   );

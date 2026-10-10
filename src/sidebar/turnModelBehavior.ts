@@ -9,6 +9,7 @@ import * as path from 'path';
 import type { ForgeConfig, ModelConfig } from '../config/types';
 import type { RuntimeModelCapabilities } from '../backend/ModelCapabilities';
 import type { ForgeInstructionsLoader } from '../llm/ForgeInstructionsLoader';
+import type { ToolDefinition } from '../llm/types';
 import { stripThinkingFromFullText } from '../llm/ThinkingChannelStripper';
 import { stripHtmlDocumentBoilerplateFromFullText } from '../llm/HtmlDocumentBoilerplateStripper';
 import { stripStructuredOutputFromFullText } from '../tools/StructuredOutputParser';
@@ -39,6 +40,17 @@ export function sanitizeText(
 }
 
 /** Variables the system-prompt template is rendered against. */
+/**
+ * The template's check-facts-online rule names web_search/web_fetch, so it is
+ * rendered only when one of them is offered. A tool-list change already costs
+ * a cold re-prefill, so tying this line to it adds none.
+ */
+export function hasWebTools(definitions: readonly ToolDefinition[]): boolean {
+  return definitions.some(
+    ({ function: { name } }) => name === 'web_search' || name === 'web_fetch',
+  );
+}
+
 export function buildTemplateContext(
   config: ForgeConfig,
   forgeLoader: ForgeInstructionsLoader | undefined,

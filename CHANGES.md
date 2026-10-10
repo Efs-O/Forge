@@ -1,5 +1,10 @@
 # Forge — Recent Changes
 
+## 0.17.3
+
+- The built-in prompt brings back two rules from the retired 25-line prompt: make the smallest change that does what was asked (no unrelated refactors, cleanups, behaviour changes or tests), and follow a path that code or config already contains or builds instead of searching the filesystem for it.
+- When `web_search` or `web_fetch` is offered, the prompt also asks the model to check facts that change between releases (APIs, CLI flags, versions) online, preferring official docs, release notes and source. Models without web tools do not get the line.
+
 ## 0.17.2
 
 - The built-in prompt now says the user's instructions override its rules and the project's FORGE.md where they conflict; tool permissions, approvals and the destructive-command rule never yield, and the final answer names anything left unverified. It also asks for the narrowest check that proves a change, never searching a whole drive, and stopping any server or background job the agent started unless the user asked to keep it.
