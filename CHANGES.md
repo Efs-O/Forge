@@ -1,5 +1,9 @@
 # Forge — Recent Changes
 
+## 0.17.7
+
+- The built-in prompt's scope rule ("Do not refactor, clean up, change behaviour or run unrelated tests outside what was asked") is gone; the line is now "Within the task, do the work completely and well." 0.17.0 had no scope rule, and on the one-shot pelican bench two 0.17.0 runs worked out real leg joints while the 0.17.6 run took a shortcut; the guard read as "stay minimal".
+
 ## 0.17.6
 
 - The built-in prompt's scope rule now ends "; within it, do the work completely and well." With "smallest change" gone (0.17.5), nothing in the prompt asked for quality; the new clause does, without widening the scope rule it qualifies.
