@@ -107,8 +107,10 @@ describe('builtin execute template', () => {
     );
     expect(prompt).toContain('Search the workspace or a named folder, never a whole drive.');
     // Review before the render: run 9 rendered, saw unattached legs, and the task's no-iterate rule blocked the fix.
+    // A trace at concrete inputs, not a re-read: runs 10 and 13 reviewed and caught typos only, never structure.
+    expect(prompt).not.toContain('every requested part present');
     expect(prompt).toContain(
-      'First review what you wrote once against the request: every requested part present, every part connected to what it depends on; fix what it finds. Then, for code',
+      'First check what you wrote once against the request: for each thing it asks for, trace how your code produces it at two or three concrete inputs or moments, and fix any step where the result would be wrong. Then, for code',
     );
     // 2026 prompt-guide pass: positive phrasing, a reason on key rules, root cause over shortcuts.
     expect(prompt).not.toContain('You have access to tools');

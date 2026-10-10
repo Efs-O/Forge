@@ -1,5 +1,9 @@
 # Forge — Recent Changes
 
+## 0.17.12
+
+- The verify rule's self-review is a trace, not a re-read: "First check what you wrote once against the request: for each thing it asks for, trace how your code produces it at two or three concrete inputs or moments, and fix any step where the result would be wrong." With the 0.17.10 wording ("every requested part present, every part connected to what it depends on") the pelican runs that reviewed at all caught broken colour tokens and nothing structural; a legs-not-on-the-pedals gap only shows when you work out where the foot and the pedal are at a given moment.
+
 ## 0.17.11
 
 - The built-in prompt's "Where a correct method exists, use it rather than an approximation." is now "When you cannot test or iterate, choose the approach that is correct, not the one easiest to get right blind, and work out its details (geometry, maths, timing) before writing." On the one-shot pelican bench the model's reasoning reached for "simplest robust approach" / "keep it simple" exactly where it dropped the knee joint (runs 9, 11, 12); the old sentence never fired because the model framed the choice as safety, not approximation.
