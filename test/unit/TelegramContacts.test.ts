@@ -13,6 +13,7 @@ import type { RemoteInboundEvent } from '../../src/remote/types';
 import type { ForgeHostFacade } from '../../src/sidebar/ForgeHostFacade';
 
 const tempDirs: string[] = [];
+const services: TelegramContactService[] = [];
 const GROUP_ID = '-100200';
 
 class MemorySecrets {
@@ -32,6 +33,9 @@ class MemorySecrets {
 }
 
 afterEach(async () => {
+  // A reply-burst timer still pending would write state.json after the folder
+  // is gone, recreating it.
+  for (const service of services.splice(0)) service.dispose();
   for (const directory of tempDirs.splice(0)) {
     // Retried: Windows can still hold a just-closed file (EBUSY).
     await fs.rm(directory, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 });
@@ -64,6 +68,7 @@ async function fixture(): Promise<{
     undefined,
     0,
   );
+  services.push(service);
   return { service, channel, contacts, host };
 }
 
@@ -83,6 +88,21 @@ function textEvent(
     receivedAt: Date.now(),
     text,
   };
+}
+
+/**
+ * Waits until no contact message is still pending or running. A reply is sent
+ * before its outcome is written, so a test that stops at the send would end
+ * with that write still in flight.
+ */
+async function settled(value: Awaited<ReturnType<typeof fixture>>): Promise<void> {
+  await vi.waitFor(() => {
+    const open = value.contacts
+      .contacts(true)
+      .flatMap((contact) => value.contacts.thread(contact.id, 20))
+      .filter((message) => message.disposition === 'pending' || message.disposition === 'running');
+    expect(open).toEqual([]);
+  });
 }
 
 async function approveAndBind(value: Awaited<ReturnType<typeof fixture>>): Promise<string> {
@@ -186,6 +206,7 @@ describe('Telegram contact service', () => {
         'assistant',
       );
     });
+    await settled(value);
     expect(value.host.runContactPrompt).toHaveBeenCalledOnce();
     expect(value.host.runContactPrompt).toHaveBeenCalledWith(
       expect.stringContaining('Πώς είσαι;'),
@@ -204,6 +225,7 @@ describe('Telegram contact service', () => {
       kind: 'handled',
     });
     await vi.waitFor(() => expect(value.host.runContactPrompt).toHaveBeenCalledOnce());
+    await settled(value);
     expect(value.host.runContactPrompt).toHaveBeenCalledWith(
       expect.stringContaining('Owner answer in the group'),
       expect.stringContaining('shared private Telegram group'),

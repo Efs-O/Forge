@@ -1,7 +1,7 @@
 import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterAll, afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { ToolCall } from '../../src/llm/types';
 
 const { fakeHome, streamModelChatCompletion } = vi.hoisted(() => {
@@ -37,6 +37,9 @@ function rows(): Array<Record<string, unknown>> {
     .filter(Boolean)
     .map((line) => JSON.parse(line) as Record<string, unknown>);
 }
+
+// The fake home is this file's own temp folder; nothing else removes it.
+afterAll(() => fs.rmSync(fakeHome.dir, { recursive: true, force: true }));
 
 describe('session log forensics', () => {
   beforeEach(() => {

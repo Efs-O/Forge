@@ -2,7 +2,7 @@ import * as path from 'path';
 import * as fs from 'fs';
 import * as os from 'os';
 import * as vscode from 'vscode';
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterAll, afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { ToolDispatch, resolveToolPath } from '../../src/sidebar/ToolDispatch';
 import { ToolApprovalPolicyDenied } from '../../src/sidebar/ToolApprovalService';
 import type { ChatMessage, ToolCall } from '../../src/llm/types';
@@ -56,6 +56,7 @@ vi.mock('vscode', () => {
 });
 
 const WS = path.join(os.tmpdir(), 'forge-tool-dispatch-workspace');
+afterAll(() => fs.rmSync(WS, { recursive: true, force: true }));
 
 function makeToolCall(name: string, args: Record<string, unknown>): ToolCall {
   return {

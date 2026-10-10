@@ -8,6 +8,13 @@ import type { CliAgentDriver } from '../../src/agents/CliAgentDriver';
 
 const roots: string[] = [];
 
+/** Checkpoint storage outside the workspace root, so the snapshot does not see it. */
+function checkpointRoot(): string {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'forge-cli-checkpoints-'));
+  roots.push(root);
+  return root;
+}
+
 afterEach(() => {
   for (const root of roots.splice(0)) fs.rmSync(root, { recursive: true, force: true });
 });
@@ -55,7 +62,7 @@ describe('CliChatRunner', () => {
     fs.writeFileSync(path.join(root, 'existing.txt'), 'before');
     fs.mkdirSync(path.join(root, '.forge'));
     fs.writeFileSync(path.join(root, '.forge', 'config.yaml'), 'live-config');
-    const stack = new CheckpointStack();
+    const stack = new CheckpointStack({ storageRoot: checkpointRoot() });
     const checkpoint = stack.beginTurn('turn-1');
     const onText = vi.fn();
     const onStatus = vi.fn();
@@ -98,7 +105,7 @@ describe('CliChatRunner', () => {
   it('forwards session and model selection to the CLI driver', async () => {
     const root = fs.mkdtempSync(path.join(os.tmpdir(), 'forge-cli-resume-'));
     roots.push(root);
-    const stack = new CheckpointStack();
+    const stack = new CheckpointStack({ storageRoot: checkpointRoot() });
     const checkpoint = stack.beginTurn('turn-resume');
     const run = vi.fn(async () => ({
       status: 'completed' as const,
@@ -139,6 +146,7 @@ describe('CliChatRunner', () => {
     const target = path.join(root, 'large.txt');
     fs.writeFileSync(target, '12345');
     const stack = new CheckpointStack({
+      storageRoot: checkpointRoot(),
       limits: { maxBytes: 4, maxFiles: 100 },
       externalCliRollbackEnabled: false,
     });

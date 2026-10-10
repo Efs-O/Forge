@@ -11,22 +11,9 @@ import type { DiffDecorations } from '../../src/sidebar/DiffDecorations';
 import { ToolRegistry } from '../../src/tools/ToolRegistry';
 import { partialToolPath } from '../../src/sidebar/toolCallProgress';
 import type { CliAgentDriver } from '../../src/agents/CliAgentDriver';
-import * as fs from 'fs';
-import * as os from 'os';
-import * as path from 'path';
+import { fakeClaudeCli } from '../support/fakeCli';
 
-/**
- * A hermetic fake CLI executable: a real file whose basename infers as
- * `claude`, so `inferCliAgentName` accepts it and `resolveCliExecutable`
- * returns it without a PATH lookup. (An ambiguous name like node.exe is now
- * rejected by inference, which is the behavior under test.)
- */
-const FAKE_CLAUDE_CLI = (() => {
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'forge-fake-cli-'));
-  const file = path.join(dir, process.platform === 'win32' ? 'claude.exe' : 'claude');
-  fs.writeFileSync(file, '');
-  return file;
-})();
+const FAKE_CLAUDE_CLI = fakeClaudeCli();
 
 const { streamModelChatCompletion, inspectRuntimeModelCapabilities } = vi.hoisted(() => ({
   streamModelChatCompletion: vi.fn(),

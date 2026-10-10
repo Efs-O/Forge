@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it } from 'vitest';
 import * as fs from 'fs/promises';
 import * as os from 'os';
 import * as path from 'path';
@@ -7,9 +7,17 @@ import { displayPersistMessages } from '../../src/sidebar/sessionProjections';
 import { chatMessagesFromSlim, slimPersistMessages } from '../../src/sidebar/sessionTypes';
 import type { ChatMessage } from '../../src/llm/types';
 
+const roots: string[] = [];
+
 async function tempRoot(): Promise<string> {
-  return fs.mkdtemp(path.join(os.tmpdir(), 'forge-attachments-'));
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), 'forge-attachments-'));
+  roots.push(root);
+  return root;
 }
+
+afterEach(async () => {
+  for (const root of roots.splice(0)) await fs.rm(root, { recursive: true, force: true });
+});
 
 describe('ChatAttachmentStore', () => {
   it('writes the bytes and returns a reference that resolves back to them', async () => {

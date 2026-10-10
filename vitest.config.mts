@@ -22,6 +22,9 @@ export default defineConfig({
   },
   test: {
     include: ['test/**/*.test.ts'],
+    // Temp-leak guard: per-run and per-file temp folders (docs/plans/TEMP_LEAK_PLAN.md).
+    globalSetup: ['test/support/tempGuard.global.ts'],
+    setupFiles: ['test/support/tempGuard.setup.ts'],
     coverage: {
       provider: 'v8',
       include: ['src/**/*.ts'],

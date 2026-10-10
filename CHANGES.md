@@ -7,6 +7,7 @@
 - `render_html_to_image` names the saved image using its workspace-relative `generated-images/<name>` path, which `send_file` and `view_image` can resolve.
 - `send_file` names a missing in-workspace path and suggests a matching image in `generated-images/` or the current conversation's screenshot directory. Outside paths keep the existing refusal.
 - Tests: the shell timeout test allows a killed child up to 10 seconds to release its working directory before cleanup. This makes its Windows `EPERM` cleanup failure under full CI load rarer; it is still seen occasionally.
+- Tests: each test run now keeps its temp files in its own folder and deletes it at the end, and a test file that leaves anything in its temp folder fails, naming the file. The 13 test files that left folders behind on every run now clean up.
 - A diff's expand button reads `show diff`. It said `show 23 lines` beside `+2 −3`, counting the unchanged context lines around each change.
 - A thinking row followed by answer text stops its `Thinking… N s` timer. The answer opened a new row without ending the thinking one, so its timer counted for the rest of the turn.
 - A grouped activity header counts a file the group created at its final size: a 494-line `write_file` followed by a +2 −3 edit reads `+493`, not `+496 −3`.

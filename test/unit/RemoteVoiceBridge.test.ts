@@ -255,19 +255,23 @@ describe('RemoteVoiceBridge draft resolution', () => {
 describe('VoiceAuditFileSink', () => {
   it('appends one JSON line per row, joinable by operation_id', async () => {
     const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'forge-voice-audit-'));
-    const sink = new VoiceAuditFileSink(dir);
-    const log = new VoiceAuditLog(sink);
-    log.started({
-      operation_id: 'v_1',
-      surface: 'telegram',
-      bytes: 10,
-      media_type: 'audio/ogg',
-    });
-    log.rejected({ operation_id: 'v_1', reason: 'empty', detail: 'silence' });
-    const lines = (await fs.readFile(path.join(dir, 'voice.jsonl'), 'utf8')).trim().split('\n');
-    expect(lines).toHaveLength(2);
-    expect(lines.map((line) => JSON.parse(line).operation_id)).toEqual(['v_1', 'v_1']);
-    expect(JSON.parse(lines[1]!).type).toBe('voice_ingress_rejected');
+    try {
+      const sink = new VoiceAuditFileSink(dir);
+      const log = new VoiceAuditLog(sink);
+      log.started({
+        operation_id: 'v_1',
+        surface: 'telegram',
+        bytes: 10,
+        media_type: 'audio/ogg',
+      });
+      log.rejected({ operation_id: 'v_1', reason: 'empty', detail: 'silence' });
+      const lines = (await fs.readFile(path.join(dir, 'voice.jsonl'), 'utf8')).trim().split('\n');
+      expect(lines).toHaveLength(2);
+      expect(lines.map((line) => JSON.parse(line).operation_id)).toEqual(['v_1', 'v_1']);
+      expect(JSON.parse(lines[1]!).type).toBe('voice_ingress_rejected');
+    } finally {
+      await fs.rm(dir, { recursive: true, force: true });
+    }
   });
 
   /**

@@ -1,6 +1,6 @@
 import * as fs from 'fs';
 import * as path from 'path';
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { ChatMessage } from '../../src/llm/types';
 
 // SESSIONS_DIR is computed at module load from os.homedir(), so the stub has to
@@ -17,6 +17,9 @@ vi.mock('os', async (importOriginal) => {
 });
 
 import { SessionLogger } from '../../src/sidebar/SessionLogger';
+
+// The fake home is this file's own temp folder; nothing else removes it.
+afterAll(() => fs.rmSync(fakeHome.dir, { recursive: true, force: true }));
 
 describe('SessionLogger resumes where the last run stopped', () => {
   const home = fakeHome.dir;
