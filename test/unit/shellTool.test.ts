@@ -98,6 +98,24 @@ describe('shell tool validation and PowerShell', () => {
     }
   });
 
+  it('reports a missing cwd before the pwsh missing-executable hint', async () => {
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), 'forge-shell-missing-cwd-'));
+    const previous = [...(vscode.workspace.workspaceFolders ?? [])];
+    vscode.workspace.workspaceFolders?.splice(0, Infinity, { uri: vscode.Uri.file(root) });
+    try {
+      await expect(
+        makeShellTool({
+          platform: 'win32',
+          env: { PATH: '' },
+          getConfig: () => pwshConfig,
+        }).handler({ command: 'Get-Date', cwd: 'not-created' }, context()),
+      ).rejects.toThrow(/cwd "not-created" does not exist/u);
+    } finally {
+      vscode.workspace.workspaceFolders?.splice(0, Infinity, ...previous);
+      fs.rmSync(root, { recursive: true, force: true });
+    }
+  });
+
   it.skipIf(spawnSync('pwsh', ['-NoLogo', '-NoProfile', '-Command', 'exit 0']).status !== 0)(
     'runs a pwsh pipeline and returns the native exit code',
     async () => {

@@ -3,6 +3,7 @@ import * as path from 'path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { BackgroundExecutionManager } from '../../src/tools/BackgroundExecutionManager';
 import { BackgroundRegistry, type BackgroundRegistryDeps } from '../../src/tools/backgroundRegistry';
+import { ExecCommandError } from '../../src/util/processSpawn';
 
 const root = path.join(process.cwd(), '.test-tmp', 'background-registry');
 const entries = (): string[] => {
@@ -28,6 +29,22 @@ function deps(overrides: Partial<BackgroundRegistryDeps> = {}): BackgroundRegist
 
 describe('background execution registry', () => {
   afterEach(() => fs.rmSync(root, { recursive: true, force: true }));
+
+  it('refuses to start a background process with a missing cwd', () => {
+    const manager = new BackgroundExecutionManager(new BackgroundRegistry(root, deps()));
+    let error: unknown;
+    try {
+      manager.start({
+        command: process.execPath,
+        args: [],
+        cwd: path.join(root, 'missing-cwd'),
+      });
+    } catch (caught) {
+      error = caught;
+    }
+    expect(error).toBeInstanceOf(ExecCommandError);
+    expect(error).toMatchObject<Partial<ExecCommandError>>({ kind: 'missing_cwd' });
+  });
 
   it('writes after asynchronous identity lookup, then removes on exit and stop', async () => {
     const identity = Promise.withResolvers<number | undefined>();

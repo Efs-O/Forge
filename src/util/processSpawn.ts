@@ -1,4 +1,5 @@
 import * as child_process from 'child_process';
+import * as fs from 'fs';
 import { terminateCliProcessTree } from '../agents/cliProcess';
 import { RollingOutputCap } from './outputCap';
 
@@ -19,6 +20,7 @@ export interface SpawnResult {
 }
 
 export type ExecCommandErrorKind =
+  | 'missing_cwd'
   | 'missing_executable'
   | 'timeout'
   | 'cancelled'
@@ -55,6 +57,31 @@ export class ExecCommandError extends Error {
 export function normalizeSpawnCwd(cwd: string): string {
   if (process.platform !== 'win32') return cwd;
   return /^[a-z]:/u.test(cwd) ? cwd[0].toUpperCase() + cwd.slice(1) : cwd;
+}
+
+/** Return a typed spawn failure when cwd is absent or is not a directory. */
+export function spawnCwdFailure(cwd: string, program: string): ExecCommandError | undefined {
+  let stat: fs.Stats;
+  try {
+    stat = fs.statSync(normalizeSpawnCwd(cwd));
+  } catch (error) {
+    const code = (error as NodeJS.ErrnoException).code;
+    if (code !== 'ENOENT' && code !== 'ENOTDIR') return undefined;
+    return new ExecCommandError('missing_cwd', program, `working directory does not exist: ${cwd}`);
+  }
+  if (!stat.isDirectory()) {
+    return new ExecCommandError(
+      'missing_cwd',
+      program,
+      `working directory is not a folder: ${cwd}`,
+    );
+  }
+  return undefined;
+}
+
+export function assertSpawnCwd(cwd: string, program: string): void {
+  const failure = spawnCwdFailure(cwd, program);
+  if (failure) throw failure;
 }
 
 export function spawnAndWait(
@@ -122,12 +149,14 @@ export function spawnAndWait(
     });
 
     proc.on('error', (err: NodeJS.ErrnoException) => {
+      const cwdFailure = err.code === 'ENOENT' ? spawnCwdFailure(cwd, command) : undefined;
       finish(
-        new ExecCommandError(
-          err.code === 'ENOENT' ? 'missing_executable' : 'spawn_error',
-          command,
-          err.message,
-        ),
+        cwdFailure ??
+          new ExecCommandError(
+            err.code === 'ENOENT' ? 'missing_executable' : 'spawn_error',
+            command,
+            err.message,
+          ),
       );
     });
 

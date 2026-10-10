@@ -2,7 +2,7 @@ import { randomUUID } from 'crypto';
 import { spawn, type ChildProcessByStdio } from 'child_process';
 import type { Readable } from 'stream';
 import { terminateCliProcessTree } from '../agents/cliProcess';
-import { normalizeSpawnCwd } from '../util/processSpawn';
+import { assertSpawnCwd, normalizeSpawnCwd } from '../util/processSpawn';
 import { getLogger } from '../util/logger';
 import type { ExecOutputOptions } from './execHelpers';
 import { backgroundRegistry, type BackgroundRegistry } from './backgroundRegistry';
@@ -158,6 +158,7 @@ export class BackgroundExecutionManager {
     }
 
     const cwd = normalizeSpawnCwd(options.cwd);
+    assertSpawnCwd(cwd, options.command);
     const process = spawn(options.command, [...options.args], {
       shell: false,
       cwd,

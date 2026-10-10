@@ -1,3 +1,4 @@
+import * as fs from 'fs';
 import * as path from 'path';
 import * as vscode from 'vscode';
 
@@ -99,9 +100,26 @@ export function getWorkspaceRoot(): string {
 export function resolveExecCwd(cwd: string | undefined): string {
   // normalizeSpawnCwd here as well as at the spawn, so the cwd reported back to
   // the model is the same spelling the process actually ran under.
-  if (!cwd) return normalizeSpawnCwd(getWorkspaceRoot());
-  if (path.isAbsolute(cwd)) return normalizeSpawnCwd(cwd);
-  return normalizeSpawnCwd(path.join(getWorkspaceRoot(), cwd));
+  const resolved = normalizeSpawnCwd(
+    !cwd ? getWorkspaceRoot() : path.isAbsolute(cwd) ? cwd : path.join(getWorkspaceRoot(), cwd),
+  );
+  let stat: fs.Stats;
+  try {
+    stat = fs.statSync(resolved);
+  } catch (error) {
+    const code = (error as NodeJS.ErrnoException).code;
+    if (code !== 'ENOENT' && code !== 'ENOTDIR') throw error;
+    throw new Error(
+      `shell: cwd ${JSON.stringify(cwd ?? resolved)} does not exist (resolved to ${resolved}). ` +
+        'Create it first (create_directory, or mkdir in the command) or leave cwd out.',
+    );
+  }
+  if (!stat.isDirectory()) {
+    throw new Error(
+      `shell: cwd ${JSON.stringify(cwd ?? resolved)} is not a folder (resolved to ${resolved}).`,
+    );
+  }
+  return resolved;
 }
 
 // ── Core spawn helper ──────────────────────────────────────────────────────────

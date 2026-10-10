@@ -1,4 +1,7 @@
 import { describe, expect, it } from 'vitest';
+import * as fs from 'fs';
+import * as os from 'os';
+import * as path from 'path';
 import {
   ExecCommandError,
   formatExecCommandOutput,
@@ -8,7 +11,9 @@ import {
   parseExecOutputOptions,
   spawnAndWait,
   stripAnsi,
+  resolveExecCwd,
 } from '../../src/tools/execHelpers';
+import * as vscode from 'vscode';
 
 const ESC = String.fromCharCode(27);
 
@@ -48,6 +53,37 @@ describe('background output helpers', () => {
     await expect(
       spawnAndWait('forge-definitely-missing-executable', [], process.cwd(), 1_000),
     ).rejects.toMatchObject<Partial<ExecCommandError>>({ kind: 'missing_executable' });
+  });
+
+  it('classifies a missing working directory separately from a missing executable', async () => {
+    const cwd = path.join(os.tmpdir(), `forge-missing-cwd-${Date.now()}`);
+    await expect(
+      spawnAndWait(process.execPath, [], cwd, 1_000),
+    ).rejects.toMatchObject<Partial<ExecCommandError>>({ kind: 'missing_cwd' });
+  });
+
+  it('resolves shell cwd only to an existing directory', () => {
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), 'forge-shell-cwd-'));
+    const folders = vscode.workspace.workspaceFolders;
+    const previous = folders ? [...folders] : undefined;
+    folders?.splice(0, Infinity, { uri: vscode.Uri.file(root) });
+    try {
+      let missingError: unknown;
+      try {
+        resolveExecCwd('build');
+      } catch (error) {
+        missingError = error;
+      }
+      expect(missingError).toBeInstanceOf(Error);
+      expect((missingError as Error).message).toContain('cwd "build" does not exist');
+      expect((missingError as Error).message).toContain(`resolved to ${root}`);
+      const file = path.join(root, 'not-a-folder');
+      fs.writeFileSync(file, '');
+      expect(() => resolveExecCwd('not-a-folder')).toThrow(/is not a folder/u);
+    } finally {
+      folders?.splice(0, Infinity, ...(previous ?? []));
+      fs.rmSync(root, { recursive: true, force: true });
+    }
   });
 
   it('classifies a timeout', async () => {
