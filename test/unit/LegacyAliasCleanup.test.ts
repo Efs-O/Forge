@@ -32,13 +32,15 @@ describe('legacy alias ownership cleanup', () => {
     expect(warning).not.toHaveBeenCalled();
   });
 
-  it('keeps the cleanup lifecycle row in the plan contract', () => {
-    const plan = fs.readFileSync(
-      path.resolve(__dirname, '../../docs/plans/AGENT_CHAT_LINKS_PLAN.md'),
-      'utf8',
-    );
-    const row = plan.split('\n').find((line) => line.includes('Legacy `ownership/*.json`'));
-    expect(row).toContain('deleted on extension activation');
-    expect(row).toContain('failures are logged and shown as a warning');
-  });
+  // docs/plans/ is gitignored (local only), so a clean checkout skips this.
+  const planFile = path.resolve(__dirname, '../../docs/plans/AGENT_CHAT_LINKS_PLAN.md');
+  it.skipIf(!fs.existsSync(planFile))(
+    'keeps the cleanup lifecycle row in the plan contract',
+    () => {
+      const plan = fs.readFileSync(planFile, 'utf8');
+      const row = plan.split('\n').find((line) => line.includes('Legacy `ownership/*.json`'));
+      expect(row).toContain('deleted on extension activation');
+      expect(row).toContain('failures are logged and shown as a warning');
+    },
+  );
 });

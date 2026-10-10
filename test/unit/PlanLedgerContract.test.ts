@@ -10,6 +10,9 @@
  * state is a decision someone wrote down, not a section someone forgot.
  * Plans written before this check are listed in plan-ledger-baseline.json; the
  * list may only shrink.
+ *
+ * docs/plans/ is gitignored (local only), so a clean checkout such as CI has
+ * no plans and this check runs on the owner's machine only.
  */
 import * as fs from 'fs';
 import * as path from 'path';
@@ -25,10 +28,12 @@ const HEADING = /^(#{2,4})[^\n]*State\s*×\s*lifecycle ledger[^\n]*$/gim;
 const NO_STATE = /no (new )?durable state/i;
 const DIVIDER = /^\|[\s:|-]+\|$/;
 
-const plans = fs
-  .readdirSync(plansDir)
-  .filter((name) => name.endsWith('.md'))
-  .sort();
+const plans = fs.existsSync(plansDir)
+  ? fs
+      .readdirSync(plansDir)
+      .filter((name) => name.endsWith('.md'))
+      .sort()
+  : [];
 
 /** The body of each ledger section: up to the next heading of the same or higher level. */
 function ledgerSections(text: string): string[] {

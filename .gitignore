@@ -31,20 +31,11 @@ fireworks.html
 # Internal planning docs — not user-facing.
 #
 # `docs/*` ignores every direct child, so anything meant to be tracked is
-# re-admitted by name below. Plans and reports moved out of the repo root live
-# in docs/plans/ and docs/reports/ and ARE tracked; docs/local/ is deliberately
-# left ignored and holds the machine-local scratch that used to sit at the root.
+# re-admitted by name below. docs/plans/ (implementation plans) and
+# docs/reports/ stay on disk but are not tracked or pushed (owner's call,
+# 2026-10-10); the copies committed before then remain in git history.
+# docs/local/ holds the machine-local scratch that used to sit at the root.
 docs/*
-!docs/plans/
-!docs/plans/**
-!docs/reports/
-!docs/reports/**
-# Local investigation documents kept on disk for follow-up work.
-/docs/plans/TELEGRAM_BOT_API_UPGRADE_PLAN.md
-/docs/reports/ASK_USER_WEBVIEW_STATE_LOSS_2026-10-03.md
-/docs/reports/COMPACTION_RESEARCH_COMPARISON_2026-10-04.md
-/docs/reports/RG_STDIN_TIMEOUT_NOTE_2026-10-04.md
-/docs/reports/TELEGRAM_BOT_API_CAPABILITY_REPORT_2026-10-04.md
 # Design references a plan points at - mockups meant to be opened in a browser.
 !docs/design/
 !docs/design/**
