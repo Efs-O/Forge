@@ -105,7 +105,13 @@ describe('builtin execute template', () => {
     expect(prompt).toContain(
       'After each result, determine what specific information or action is still required. If something necessary remains, continue.',
     );
-    expect(prompt).toContain('Never search a whole drive; search the workspace or a named folder.');
+    expect(prompt).toContain('Search the workspace or a named folder, never a whole drive.');
+    // 2026 prompt-guide pass: positive phrasing, a reason on key rules, root cause over shortcuts.
+    expect(prompt).not.toContain('You have access to tools');
+    expect(prompt).toContain('Where a correct method exists, use it rather than an approximation.');
+    expect(prompt).toContain('Fix the cause, not the symptom');
+    expect(prompt).toContain('each round is a full model pass');
+    expect(prompt).toContain('Base every claim on what you have seen in a tool result');
     expect(prompt).toContain("The user's instructions, in the first message or any later message");
     expect(prompt).toContain(
       'Tool permissions, approvals and the destructive-command rule never yield.',

@@ -1,5 +1,13 @@
 # Forge — Recent Changes
 
+## 0.17.9
+
+- The built-in prompt gets a pass against the 2026 OpenAI and Anthropic prompting guides:
+  - "You have access to tools to read and edit files…" is gone; the tools arrive in the request.
+  - Two rules now give their reason: read before editing ("edits against stale text fail"), and batch independent calls ("each round is a full model pass").
+  - Two "never/do not" rules are phrased as what to do: "Search the workspace or a named folder, never a whole drive." and "Base every claim on what you have seen in a tool result".
+  - New: "Where a correct method exists, use it rather than an approximation." (the 0.17.8 pelican run approximated its knee joints), and "Fix the cause, not the symptom: implement the real logic instead of hard-coding values, special-casing test inputs or weakening a test."
+
 ## 0.17.8
 
 - The built-in prompt gains, just above the stop rule: "After each result, determine what specific information or action is still required. If something necessary remains, continue." It comes from the older EXECUTION prompt; until now only the stop half of that pair was kept.
