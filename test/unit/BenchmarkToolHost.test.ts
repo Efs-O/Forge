@@ -42,3 +42,42 @@ describe('benchmark file write limits', () => {
     expect(result).toContain(`content is limited to ${MAX_SINGLE_WRITE_CHARS} characters`);
   });
 });
+
+describe('benchmark search_code contract', () => {
+  beforeEach(() => {
+    root = fs.mkdtempSync(path.join(os.tmpdir(), 'forge-benchmark-search-'));
+  });
+
+  afterEach(() => {
+    fs.rmSync(root, { recursive: true, force: true });
+  });
+
+  it('supports regex by default, literal searches and invalid-pattern guidance', async () => {
+    fs.writeFileSync(path.join(root, 'search.ts'), 'target.heal(value); call foo(value);');
+    const host = createBenchmarkToolHost(root);
+    const definition = host.definitions().find((item) => item.function.name === 'search_code');
+    expect(definition?.function.parameters.properties?.literal).toMatchObject({
+      type: 'boolean',
+    });
+
+    const call = (args: Record<string, unknown>) =>
+      host.dispatch(
+        {
+          id: 'search',
+          type: 'function',
+          function: { name: 'search_code', arguments: JSON.stringify(args) },
+        },
+        new AbortController().signal,
+      );
+
+    expect(await call({ query: String.raw`\.heal\(` })).toContain('target.heal(value)');
+    expect(await call({ query: 'foo(', literal: true })).toContain('target.heal(value)');
+    const invalid = await call({ query: '[' });
+    expect(invalid).toContain('regex parse error');
+    expect(invalid).toContain('literal: true');
+    expect(await call({ query: 'nothing-matches' })).toContain('(ripgrep-regex search)');
+    expect(await call({ query: 'nothing-matches', literal: true })).toContain(
+      '(plain-text search)',
+    );
+  });
+});

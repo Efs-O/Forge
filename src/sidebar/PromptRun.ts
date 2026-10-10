@@ -328,6 +328,7 @@ export async function runPromptToMarkdown(
       }
     }
   } catch (err) {
+    // Preserve setup/render failures for the caller's visible error path.
     if (!ctrl.signal.aborted) ctx.events.onBackendError?.((err as Error).message);
     throw err;
   } finally {

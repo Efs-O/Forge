@@ -233,11 +233,15 @@ export function makeSearchCodeTool(
       function: {
         name: 'search_code',
         description:
-          'Search for a string/pattern across workspace files or an explicitly named absolute path, folder, or glob outside the workspace. Relative includes are rooted at the workspace; absolute globs are rooted at the path before the first wildcard. Returns matching file paths and surrounding context lines.',
+          'Search for a ripgrep regex by default, or plain text when literal is true, across workspace files or an explicitly named absolute path, folder, or glob outside the workspace. Relative includes are rooted at the workspace; absolute globs are rooted at the path before the first wildcard. Returns matching file paths and surrounding context lines. Ripgrep regex does not support lookaround or backreferences.',
         parameters: {
           type: 'object',
           properties: {
-            query: { type: 'string', description: 'Text to search for (literal string).' },
+            query: { type: 'string', description: 'Text or ripgrep regex to search for.' },
+            literal: {
+              type: 'boolean',
+              description: 'Match the query as plain text (default false: ripgrep regex).',
+            },
             include: {
               type: 'string',
               description:
@@ -258,28 +262,35 @@ export function makeSearchCodeTool(
     permission: 'read',
     handler: async (args, context) => {
       const query = args['query'] as string;
+      const literal = args['literal'] === true;
       const include = (args['include'] as string | undefined) ?? '**/*';
       const maxResults = (args['max_results'] as number | undefined) ?? 20;
 
-      const matches = await searchWorkspaceText(
-        query,
-        include,
-        maxResults,
-        resolveCommand(),
-        context?.abortSignal,
-      );
-      // Name the search mode on the miss. The query is passed to ripgrep with
-      // --fixed-strings, so a regex like `\.heal\(` cannot match however much
-      // of it is present in the file — and a bare "no matches" reported that
-      // identically to a term that is genuinely absent, leaving the model to
-      // re-guess the term rather than the syntax.
+      let matches: SearchCodeMatch[];
+      try {
+        matches = await searchWorkspaceText(
+          query,
+          literal,
+          include,
+          maxResults,
+          resolveCommand(),
+          context?.abortSignal,
+        );
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
+        if (/regex parse error/iu.test(message)) {
+          return `${message}\nEscape the special characters, or retry with literal: true.`;
+        }
+        throw error;
+      }
       if (matches.length === 0) {
+        const mode = literal ? 'plain-text' : 'ripgrep-regex';
         const scopeNote = path.isAbsolute(include)
           ? ' (absolute include paths are searched from their named path)'
           : ' (relative include globs are anchored at the workspace root)';
         return (
           `No matches found for "${query}" in ${include} ` +
-          `(literal text search — regular-expression syntax is not interpreted${scopeNote}).` +
+          `(${mode} search${scopeNote}).` +
           gitignoredNote(include)
         );
       }
@@ -299,6 +310,7 @@ export function makeSearchCodeTool(
 
 async function searchWorkspaceText(
   query: string,
+  literal: boolean,
   include: string,
   maxResults: number,
   resolution: RipgrepResolution,
@@ -311,7 +323,7 @@ async function searchWorkspaceText(
   const scope = resolveSearchCodeScope(include, folder.uri.fsPath);
   const args = [
     '--json',
-    '--fixed-strings',
+    ...(literal ? ['--fixed-strings'] : []),
     '--line-number',
     '--with-filename',
     '--context',

@@ -2,22 +2,27 @@ import type { ChatMessage } from './types';
 import type { TemplateEngine, TemplateContext } from './TemplateEngine';
 import type { SystemPromptMode } from '../config/types';
 
-// Hardcoded fallbacks used when no TemplateEngine is provided or rendering fails.
 const FORGE_TEMPLATE = 'execute';
-const SYSTEM_PROMPT = `You are Forge, a coding assistant running in the user's VS Code.
-You have access to tools to read and edit files, run commands, and interact with git.
-Read a file before editing it, unless its current content is already in a recent tool result.
-The user's direct request may override repository-local style, brevity, length, or workflow guidance, including a FORGE.md instruction, when the user explicitly asks. Do not override system/developer instructions, Forge safety controls, tool permissions, workspace boundaries, or destructive-action confirmation requirements.
-Do not claim anything you have not seen in a tool result.`;
+
+export class SystemPromptRenderError extends Error {
+  constructor(
+    readonly templateName: string,
+    cause: unknown,
+  ) {
+    const detail = cause instanceof Error ? cause.message : String(cause);
+    super(`Forge: system prompt template '${templateName}' failed to render: ${detail}`);
+    this.name = 'SystemPromptRenderError';
+  }
+}
 
 /**
  * Prepends the Forge system prompt to a message list.
- * Uses TemplateEngine when provided; falls back to hardcoded strings.
+ * Renders the built-in template. Rendering failures are surfaced to the turn.
  * If messages already starts with a system message, it is replaced.
  *
  * `mode: 'replace'` sends `modelSystemPrompt` alone and skips the template
- * entirely — the template is a strong coding-agent persona ("You are Forge",
- * "Act with tools"), which a model with a different purpose must not receive.
+ * entirely — the built-in coding-agent persona is inappropriate for models
+ * with a different purpose.
  */
 export function injectSystemPrompt(
   messages: ChatMessage[],
@@ -37,17 +42,15 @@ export function injectSystemPrompt(
       : [systemMsg, ...messages];
   }
 
-  let content: string;
+  if (!templateEngine) {
+    throw new SystemPromptRenderError(FORGE_TEMPLATE, 'no template engine is available');
+  }
 
-  if (templateEngine) {
-    try {
-      content = templateEngine.render(FORGE_TEMPLATE, { ...context });
-    } catch {
-      // Template render failed - fall back to hardcoded prompt.
-      content = SYSTEM_PROMPT;
-    }
-  } else {
-    content = SYSTEM_PROMPT;
+  let content: string;
+  try {
+    content = templateEngine.render(FORGE_TEMPLATE, { ...context });
+  } catch (error) {
+    throw new SystemPromptRenderError(FORGE_TEMPLATE, error);
   }
 
   if (override) {

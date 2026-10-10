@@ -87,7 +87,7 @@ const ctx = (): PromptRunContext => ({
   events: {},
   templateEngine: {
     render: (name: string) =>
-      name === 'summarize' ? '  You compress a conversation.  ' : 'You are Forge, an agent.',
+      name === 'summarize' ? '  You compress a conversation.  ' : 'Forge coding persona.',
   } as unknown as PromptRunContext['templateEngine'],
   setController: () => undefined,
   releaseController: () => undefined,
@@ -182,7 +182,7 @@ describe('runPromptToMarkdown options', () => {
 
     expect(sent.model).toBe('picker-default');
     expect(sent.max_tokens).toBe(4096);
-    expect(sent.messages[0]?.content).toContain('You are Forge');
+    expect(sent.messages[0]?.content).toContain('Forge coding persona');
   });
 
   it('adds the reasoning reserve on top of the requested output room', async () => {

@@ -72,9 +72,11 @@ vi.mock('../../src/backend/DirectBackend', () => {
 
 import { runLocalProviderTurn, type ProviderTurnContext } from '../../src/sidebar/ProviderTurn';
 import { TurnLifecycle } from '../../src/sidebar/TurnLifecycle';
+import { SystemPromptRenderError } from '../../src/llm/SystemPromptInjector';
 import { BackendPool } from '../../src/backend/BackendPool';
 import type { ForgeConfig, ModelConfig } from '../../src/config/types';
 import type { ConversationRuntime } from '../../src/sidebar/sessionTypes';
+import type { HostToWebview } from '../../src/sidebar/messageBridge';
 
 function makeConfig(maxModels: number): ForgeConfig {
   return {
@@ -184,7 +186,11 @@ function countingPool(order?: string[]): ProviderTurnContext['pool'] {
   }) as unknown as ProviderTurnContext['pool'];
 }
 
-function runTurn(ctx: ProviderTurnContext, ctrl: AbortController) {
+function runTurn(
+  ctx: ProviderTurnContext,
+  ctrl: AbortController,
+  postC: (message: HostToWebview) => void = () => {},
+) {
   return runLocalProviderTurn(ctx, {
     conv: fakeConv(),
     model: fakeModel('A'),
@@ -192,7 +198,7 @@ function runTurn(ctx: ProviderTurnContext, ctrl: AbortController) {
     attachments: undefined,
     activeFile: undefined,
     ctrl,
-    postC: () => {},
+    postC,
   });
 }
 
@@ -229,6 +235,22 @@ describe('runLocalProviderTurn turn-lease release', () => {
 
     expect(outcome.kind).toBe('completed');
     expect((pool as unknown as { releases: number }).releases).toBe(1);
+  });
+
+  it('posts a template render failure as a visible failed turn', async () => {
+    const h = fakeHarness(countingPool());
+    const ctrl = new AbortController();
+    const message = new SystemPromptRenderError('execute', new Error('broken block')).message;
+    const post = vi.fn();
+    h.ctx.lifecycle.register('conv-1', ctrl);
+    h.ctx.runModelTurn = async () => {
+      throw new SystemPromptRenderError('execute', new Error('broken block'));
+    };
+
+    const outcome = await runTurn(h.ctx, ctrl, post);
+
+    expect(outcome).toMatchObject({ kind: 'failed', error: message });
+    expect(post).toHaveBeenCalledWith({ type: 'error', message });
   });
 
   it('releases the lease BEFORE settling when Stop lands during backend start', async () => {

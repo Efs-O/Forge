@@ -180,11 +180,15 @@ export function createBenchmarkToolHost(root: string): BenchmarkToolHost {
       type: 'function',
       function: {
         name: 'search_code',
-        description: 'Search literal text in workspace files.',
+        description: 'Search using ripgrep regex by default, or plain text when literal is true.',
         parameters: {
           type: 'object',
           properties: {
-            query: { type: 'string' },
+            query: { type: 'string', description: 'Text or ripgrep regex to search for.' },
+            literal: {
+              type: 'boolean',
+              description: 'Match the query as plain text (default false: ripgrep regex).',
+            },
             include: { type: 'string' },
             max_results: { type: 'integer', minimum: 1 },
           },
@@ -196,6 +200,16 @@ export function createBenchmarkToolHost(root: string): BenchmarkToolHost {
     permission: 'read',
     handler: async (args) => {
       const query = stringArg(args, 'query');
+      const literal = args.literal === true;
+      let regex: RegExp | undefined;
+      if (!literal) {
+        try {
+          regex = new RegExp(query, 'u');
+        } catch (error) {
+          const detail = error instanceof Error ? error.message : String(error);
+          return `regex parse error: ${detail}\nEscape the special characters, or retry with literal: true.`;
+        }
+      }
       const matcher = globRegex(
         typeof args.include === 'string' ? args.include.replace(/\\/gu, '/') : '**/*',
       );
@@ -206,13 +220,18 @@ export function createBenchmarkToolHost(root: string): BenchmarkToolHost {
         if (!matcher.test(file) || hits.length >= limit) continue;
         try {
           const content = fs.readFileSync(inside(root, file), 'utf8');
-          const line = content.split(/\r?\n/u).findIndex((entry) => entry.includes(query));
+          const line = content
+            .split(/\r?\n/u)
+            .findIndex((entry) => (literal ? entry.includes(query) : regex!.test(entry)));
           if (line >= 0) hits.push(`${file}:${line + 1}: ${content.split(/\r?\n/u)[line]}`);
         } catch {
           /* Binary and unreadable files are not search candidates. */
         }
       }
-      return hits.join('\n') || 'No matches found.';
+      return (
+        hits.join('\n') ||
+        `No matches found for "${query}" (${literal ? 'plain-text' : 'ripgrep-regex'} search).`
+      );
     },
   });
 

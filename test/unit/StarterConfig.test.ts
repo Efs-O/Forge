@@ -123,6 +123,20 @@ describe('starter config generation', () => {
     }
   });
 
+  it('keeps the shipped example free of the retired default prompt and profile', () => {
+    const retiredProfile = ['au', 'dit'].join('');
+    const example = parseYaml(
+      fs.readFileSync(path.join(__dirname, '../../config/config.example.yaml'), 'utf8'),
+    ) as {
+      defaults?: Record<string, unknown>;
+      profiles?: Record<string, unknown>;
+      models?: Array<{ profiles?: string[] }>;
+    };
+    expect(example.defaults?.['system_prompt']).toBeUndefined();
+    expect(Object.keys(example.profiles ?? {})).not.toContain(retiredProfile);
+    expect(example.models?.flatMap((model) => model.profiles ?? [])).not.toContain(retiredProfile);
+  });
+
   it('gives llama.cpp models their family sampling on top of the defaults', () => {
     const config = makeLlamaCppStarterConfig(
       [

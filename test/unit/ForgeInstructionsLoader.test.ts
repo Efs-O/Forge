@@ -43,6 +43,8 @@ describe('ensureForgeInstructionsFile', () => {
     const content = fs.readFileSync(path.join(root, 'FORGE.md'), 'utf8');
     expect(content).toContain('# Project Instructions');
     expect(content).not.toContain('exec_command');
+    expect(content).toContain('reusing its suggested_next_wait_ms (each call waits up to 60 s)');
+    expect(content).toContain('instead of polling in short steps');
     expect(Buffer.byteLength(content, 'utf8')).toBeLessThan(25000);
   });
 

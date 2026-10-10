@@ -1,6 +1,7 @@
 import type { ModelConfig } from '../config/types';
 import { runToolCallingLoop } from '../agent/ToolCallingLoop';
 import { injectSystemPrompt } from '../llm/SystemPromptInjector';
+import { TemplateEngine } from '../llm/TemplateEngine';
 import { mergeSampling } from '../llm/SamplingMerge';
 import type { ChatMessage, ToolCall, ToolDefinition } from '../llm/types';
 import { CliAgentDriver } from '../agents/CliAgentDriver';
@@ -208,6 +209,15 @@ export async function runQwenForge(
     capabilities: ['tool-call'],
     sampling: { ...(configuredModel?.sampling ?? {}) },
   };
+  // scripts/forge-bench.mjs bundles this file into a temp folder, so the
+  // template folder is injected at build time instead of found from __dirname.
+  const templateDir = process.env.FORGE_BENCH_TEMPLATE_DIR;
+  if (!templateDir) {
+    throw new Error(
+      'FORGE_BENCH_TEMPLATE_DIR is not set; run the benchmark via scripts/forge-bench.mjs.',
+    );
+  }
+  const templateEngine = new TemplateEngine(templateDir);
   try {
     const result = await runToolCallingLoop({
       resolveBaseUrl: async () => endpoint,
@@ -226,7 +236,7 @@ export async function runQwenForge(
       prepareMessages: (current) =>
         injectSystemPrompt(
           current,
-          undefined,
+          templateEngine,
           undefined,
           model.system_prompt,
           model.system_prompt_mode,

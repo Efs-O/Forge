@@ -1,5 +1,13 @@
 # Forge — Recent Changes
 
+## 0.17.2
+
+- The built-in prompt now says the user's instructions override its rules and the project's FORGE.md where they conflict; tool permissions, approvals and the destructive-command rule never yield, and the final answer names anything left unverified. It also asks for the narrowest check that proves a change, never searching a whole drive, and stopping any server or background job the agent started unless the user asked to keep it.
+- A system prompt template that fails to render now ends the turn with the error shown, instead of silently sending a different hardcoded prompt. The benchmark's Forge arm now sends the real built-in template.
+- `search_code` searches by ripgrep regex by default; `literal: true` matches plain text. An invalid pattern returns ripgrep's error with a hint instead of failing the tool.
+- The FORGE.md starter no longer says to wait once with `monitor_execution` "for as long as it needs" (each call waits at most 60 s); the path line names `find_files`' `pattern`.
+- `config.example.yaml` drops its old 25-line `defaults.system_prompt` (measured on 10-07 at nearly double the decode time with the same results) and the unused `subcoordinator` and `worker` profiles. A test keeps `defaults.system_prompt` out of the example.
+
 ## 0.17.1
 
 - A round that a model server ends with `finish_reason: length` while the model was still thinking (no answer, no tool call), well below the requested output limit, gets one retry, with thinking off where the server supports it. If it stops early again, Forge says the server stopped it, with both token counts. Stops near the output limit keep the exhausted-budget message. OpenAI-compatible and Ollama clients both provide the usage needed to distinguish these cases.

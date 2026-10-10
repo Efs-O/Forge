@@ -109,7 +109,9 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
   try {
     templateEngine = new TemplateEngine(builtinDir, userDirs);
   } catch (err) {
-    log.warn(`[TemplateEngine] init failed, using hardcoded prompts: ${(err as Error).message}`);
+    log.warn(
+      `[TemplateEngine] init failed; prompt-based turns will report the setup error: ${(err as Error).message}`,
+    );
   }
 
   // ── Backend pool ──────────────────────────────────────────────────────────

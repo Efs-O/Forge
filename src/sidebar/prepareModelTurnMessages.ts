@@ -59,6 +59,8 @@ export function prepareModelTurnMessages(
         reason: 'no-vision',
         modelName: input.model.name,
       });
+  // Let SystemPromptRenderError escape: the provider turn reports it in chat
+  // and records the failed turn, and ToolCallingLoop sends no request.
   const injected = injectSystemPrompt(
     visible,
     input.templateEngine,

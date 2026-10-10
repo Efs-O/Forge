@@ -32,6 +32,7 @@ describe('workspace root line', () => {
         fs.writeFileSync(path.join(dir, marker), '{}');
         const prompt = renderFor(dir);
         expect(prompt).toContain('It is the project root');
+        expect(prompt).toContain('find_files` `pattern` resolves from it');
         expect(prompt).not.toContain(NESTED);
       } finally {
         fs.rmSync(dir, { recursive: true, force: true });
@@ -89,13 +90,24 @@ describe('builtin execute template', () => {
       'Read a file before editing it, unless its current content is already in a recent tool result',
     );
     expect(prompt).toContain('To locate code, use search_code');
+    expect(prompt).toContain('ripgrep regex; `literal: true` for plain text');
+    expect(prompt).toContain('find_files` `pattern` resolves from this root');
+    expect(prompt).toContain('Verify the change with the narrowest check that proves it.');
+    expect(prompt).toContain('Never search a whole drive; search the workspace or a named folder.');
+    expect(prompt).toContain("The user's instructions, in the first message or any later message");
+    expect(prompt).toContain(
+      'Tool permissions, approvals and the destructive-command rule never yield.',
+    );
+    expect(prompt).toContain('If an instruction stopped you verifying, say in the final answer');
+    expect(prompt).toContain(
+      'Before finishing, stop any server or background job you started, unless the user asked to keep it.',
+    );
     expect(prompt).toContain(
       'Before adding a function, module or dependency to an existing codebase, search for one that already does it.',
     );
     expect(prompt).toContain('Never run destructive commands');
     expect(prompt).toContain('write code into files with write_file or edit_file');
     expect(prompt).toContain('Final answer: at most 8 lines, no headings');
-    expect(prompt).toContain('Verify the change before calling it done');
     // When to preview is the agent's call; the tool description says what preview shows.
     expect(prompt).not.toContain('render_html_to_image');
     expect(prompt).toContain('a preview result is a tool result');

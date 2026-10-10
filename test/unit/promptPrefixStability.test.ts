@@ -37,7 +37,7 @@ const ITEMS: PlanItem[] = [
 ];
 const PLAN: ConversationPlan = { items: ITEMS, updatedAt: 1_000 };
 
-const SYSTEM = 'You are Forge. Workspace root: /repo';
+const SYSTEM = 'Forge rules. Workspace root: /repo';
 
 function conversation(): ChatMessage[] {
   return [
@@ -410,7 +410,9 @@ describe('Fix A: annotateRereads prefix property', () => {
   function runChain(messages: ChatMessage[]): ChatMessage[] {
     const windowed = applyCompactionWindow(messages, undefined);
     const visible = ageOutImageParts(windowed, undefined);
-    const injected = injectSystemPrompt(visible);
+    const injected = injectSystemPrompt(visible, {
+      render: () => 'Forge rules. Workspace root: /repo',
+    } as never);
     const withTurnContext = injectTurnContext(injected, { activeFile: '/repo/a.ts' });
     const annotated = annotateRereads(withTurnContext);
     const nudged = nudgeTruncatedResults(annotated);

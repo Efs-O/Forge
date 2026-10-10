@@ -2,7 +2,7 @@
   "name": "forge-llm",
   "displayName": "Forge LLM",
   "description": "Run your own models in VS Code: full llama.cpp/GGUF control, 60+ agent tools, undo any turn, no telemetry.",
-  "version": "0.17.1",
+  "version": "0.17.2",
   "publisher": "Efsoo",
   "icon": "assets/publisher-logo.png",
   "galleryBanner": {
@@ -393,7 +393,11 @@
         },
         "forge.sidebar.activityView": {
           "type": "string",
-          "enum": ["grouped", "compact", "full"],
+          "enum": [
+            "grouped",
+            "compact",
+            "full"
+          ],
           "enumDescriptions": [
             "Group consecutive tool steps into a collapsible activity row.",
             "Show each tool step as a compact row that can be expanded.",

@@ -99,6 +99,11 @@ async function loadBenchmarkModule() {
     format: 'cjs',
     platform: 'node',
     target: 'node20',
+    define: {
+      'process.env.FORGE_BENCH_TEMPLATE_DIR': JSON.stringify(
+        resolve(ROOT, 'config/templates/builtin'),
+      ),
+    },
     plugins: [
       {
         name: 'benchmark-vscode-stub',

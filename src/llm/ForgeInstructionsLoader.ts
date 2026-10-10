@@ -29,7 +29,7 @@ Fill in the blanks below; delete any rule that does not fit this project.
 ## How to work efficiently
 - Every response is a round, and each round costs seconds before the first token. Put calls that do not depend on each other (reads, searches, listings) in ONE response. Read the file you need instead of listing its folder first.
 - A refusal is an answer, not an obstacle. Read its message: if it names an alternative, use it; if a path or command is refused, another spelling or a script that does the same thing is not the fix. Stop and ask the user.
-- Waiting on a long command: run it with the shell tool's background: true and notify_on_exit, then end your turn, or wait once with monitor_execution for as long as it needs instead of polling in short steps; ask only for the output you need.
+- Waiting on a long command: run it with the shell tool's background: true and notify_on_exit, then end your turn, or wait with monitor_execution, reusing its suggested_next_wait_ms (each call waits up to 60 s), instead of polling in short steps; ask only for the output you need.
 
 ## Before calling a change done
 - After the last code edit, run the full gate above in one call and report its exact result. A subset of tests is not the gate. A task that changed no code (a report, an answer) needs no gate.

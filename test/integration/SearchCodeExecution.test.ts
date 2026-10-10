@@ -66,7 +66,9 @@ describe('isolated search_code process execution', () => {
         query: 'needle',
         include: path.join(externalRoot, '**', '*.py'),
       });
-      expect(result).toContain(`=== ${path.join(externalRoot, 'match.py').replace(/\\/g, '/')} ===`);
+      expect(result).toContain(
+        `=== ${path.join(externalRoot, 'match.py').replace(/\\/g, '/')} ===`,
+      );
       expect(result).toContain('> 2: needle');
     } finally {
       fs.rmSync(externalRoot, { recursive: true, force: true });
@@ -175,5 +177,29 @@ describe.skipIf(realRg === undefined)('search_code against the bundled ripgrep',
     expect(result).toContain('keep.ts');
     expect(result).not.toContain('node_modules');
     expect(result).not.toContain('bundle.js');
+  });
+
+  it('matches ripgrep regex by default', async () => {
+    fs.writeFileSync(path.join(root, 'heal.ts'), 'target.heal(value);');
+    const result = await tool().handler({ query: String.raw`\.heal\(` });
+    expect(result).toContain('heal.ts');
+    expect(result).toContain('target.heal(value);');
+  });
+
+  it('matches punctuation literally when literal is true', async () => {
+    fs.writeFileSync(path.join(root, 'literal.ts'), 'call foo(value);');
+    const result = await tool().handler({ query: 'foo(', literal: true });
+    expect(result).toContain('literal.ts');
+  });
+
+  it('returns invalid regex guidance as a tool result', async () => {
+    const result = await tool().handler({ query: '[' });
+    expect(result).toContain('regex parse error');
+    expect(result).toContain('Escape the special characters, or retry with literal: true.');
+  });
+
+  it('names the regex mode in the no-match result', async () => {
+    const result = await tool().handler({ query: 'no-such-pattern' });
+    expect(result).toContain('(ripgrep-regex search');
   });
 });
