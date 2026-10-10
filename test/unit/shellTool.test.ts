@@ -73,7 +73,8 @@ describe.skipIf(!TEST_BASH)('shell bash execution', () => {
     } finally {
       vscode.workspace.workspaceFolders?.splice(0, Infinity, ...previous);
       // A just-killed child can hold the folder as its cwd for a moment (EPERM on Windows).
-      fs.rmSync(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 200 });
+      // Under a full CI run that moment exceeded 2 s, so allow up to 10 s.
+      fs.rmSync(root, { recursive: true, force: true, maxRetries: 50, retryDelay: 200 });
     }
   }, 15_000);
 });
