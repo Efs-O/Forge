@@ -120,6 +120,13 @@ describe('starter config generation', () => {
       >;
       const parsed = pick(template);
       expect(parsed, file).toEqual(pick(wizard as unknown as Record<string, unknown>));
+      // The 0.17.5 blocks: the wizard spells out schema defaults the templates
+      // leave implicit, so both sides are compared after parsing.
+      const full = ForgeConfigSchema.parse(template);
+      const wizardFull = ForgeConfigSchema.parse(wizard);
+      for (const key of ['control_server', 'agent_bus', 'remote', 'jobs'] as const) {
+        expect(full[key], `${file} ${key}`).toEqual(wizardFull[key]);
+      }
     }
   });
 

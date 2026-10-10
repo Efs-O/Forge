@@ -1,5 +1,19 @@
 # Forge — Recent Changes
 
+## 0.17.5
+
+- A new install's starter config turns on more by default:
+  - browser and desktop control. Each new browser origin still needs your approval once per session, and controlling VS Code itself stays off (`allow_vscode`);
+  - `web_fetch` (`net.fetch`);
+  - delegation to Claude Code and Codex (`agents.delegate`);
+  - the local control server and the agent bus;
+  - remote control (`remote.enabled`). No transport is enabled: Telegram and WhatsApp still need a bot token and pairing;
+  - agent jobs, including jobs that drive a CLI agent (`jobs.enabled`, `jobs.allow_cli_agents`). With no jobs defined the scheduler is inert.
+
+  The copy-ready templates in `config/starter/` carry the same settings, and a unit test keeps them in step with the wizard. Existing configs are unchanged: a config without these keys keeps them off. Web search, the visible terminal and shell scripts stay off.
+- The built-in prompt no longer asks for "the smallest change that does what was asked". On a task that builds something new, such as a one-shot page, "smallest" can read as "build the minimum". The scope rule stays: no unrelated refactors, cleanups, behaviour changes or tests.
+- The verify rule no longer asks for "the narrowest check that proves it", which a model could read as "look as little as possible" on visual work. It now says: for code, run the tests that cover the change; for anything visual, look at the rendered result.
+
 ## 0.17.4
 
 - `render_html_to_image`'s description now covers its third mode, `shader_check` (compile WGSL or GLSL from a workspace file and return the compiler errors), which only the `mode` parameter used to mention.

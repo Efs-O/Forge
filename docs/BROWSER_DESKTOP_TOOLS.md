@@ -1,7 +1,9 @@
 # Browser and desktop tools
 
-Forge's browser and desktop tools are disabled by default. Enable only the
-capabilities you intend to use in your Forge configuration:
+A new install gets the browser and desktop tools turned on: the setup wizard
+writes both into its starter config. A config that omits them keeps them off,
+so an existing configuration is unchanged until you add them. Set `enabled:
+false` to turn either one off:
 
 ```yaml
 permissions:

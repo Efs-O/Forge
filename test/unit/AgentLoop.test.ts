@@ -12,6 +12,8 @@ import { ToolRegistry } from '../../src/tools/ToolRegistry';
 import { partialToolPath } from '../../src/sidebar/toolCallProgress';
 import type { CliAgentDriver } from '../../src/agents/CliAgentDriver';
 import { fakeClaudeCli } from '../support/fakeCli';
+import * as path from 'path';
+import { TemplateEngine } from '../../src/llm/TemplateEngine';
 
 const FAKE_CLAUDE_CLI = fakeClaudeCli();
 
@@ -159,7 +161,7 @@ function makeLoop(
     events,
     post,
     () => undefined,
-    undefined,
+    new TemplateEngine(path.join(__dirname, '..', '..', 'config', 'templates', 'builtin')),
     undefined,
     undefined,
     process.cwd(),

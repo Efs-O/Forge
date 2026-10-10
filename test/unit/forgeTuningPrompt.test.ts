@@ -91,8 +91,14 @@ describe('builtin execute template', () => {
     );
     expect(prompt).toContain('To locate code, use search_code');
     expect(prompt).toContain('ripgrep regex; `literal: true` for plain text');
-    expect(prompt).toContain('find_files` `pattern` resolves from this root');
-    expect(prompt).toContain('Verify the change with the narrowest check that proves it.');
+    expect(
+      new TemplateEngine(builtinDir).render('execute', { workspaceRoot: 'N:/ws' }),
+    ).toContain('find_files` `pattern` resolves from this root');
+    expect(prompt).not.toContain('narrowest check');
+    expect(prompt).not.toContain('smallest change');
+    expect(prompt).toContain(
+      'for code, run the tests that cover it; for anything visual, look at the rendered result.',
+    );
     expect(prompt).toContain('Never search a whole drive; search the workspace or a named folder.');
     expect(prompt).toContain("The user's instructions, in the first message or any later message");
     expect(prompt).toContain(

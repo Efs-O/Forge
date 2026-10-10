@@ -44,14 +44,6 @@ describe('benchmark file write limits', () => {
 });
 
 describe('benchmark search_code contract', () => {
-  beforeEach(() => {
-    root = fs.mkdtempSync(path.join(os.tmpdir(), 'forge-benchmark-search-'));
-  });
-
-  afterEach(() => {
-    fs.rmSync(root, { recursive: true, force: true });
-  });
-
   it('supports regex by default, literal searches and invalid-pattern guidance', async () => {
     fs.writeFileSync(path.join(root, 'search.ts'), 'target.heal(value); call foo(value);');
     const host = createBenchmarkToolHost(root);

@@ -1,4 +1,6 @@
 import type { ModelSuggestion } from '../backend/ModelHeuristics';
+import { AgentBusConfigSchema } from './agentBusSchema';
+import { RemoteConfigSchema } from './remoteSchema';
 import type { ForgeConfig } from './types';
 
 export interface StarterLlamaCppModel {
@@ -8,14 +10,31 @@ export interface StarterLlamaCppModel {
 }
 
 // A coding agent needs to run builds and tests, so a new install can; every
-// such action still goes through the confirmation gate. Search, fetch,
-// browser, desktop, shell scripts and delegation stay opt-in.
+// such action still goes through the confirmation gate. Browser, desktop,
+// fetch and delegation are on for a new install (owner's call, 0.17.5): each
+// new browser origin is still approved per session, and desktop control of VS
+// Code itself stays off (`allow_vscode`). Search needs a key and stays off, as
+// do the visible terminal and shell scripts. Existing configs are unchanged:
+// an absent key still means off.
 const DEFAULT_PERMISSIONS: NonNullable<ForgeConfig['permissions']> = {
   fs: { read: true, write: true, delete: true },
-  net: { search: false, fetch: false },
+  net: { search: false, fetch: true },
   exec: { headless: true },
   git: { read: true, write: true },
+  agents: { delegate: true },
+  browser: { enabled: true },
+  desktop: { enabled: true },
 };
+
+/**
+ * Remote's schema defaults, with no transport enabled. `wake_relay` has no
+ * default and may parse to `undefined`, which the hand-written config type does
+ * not admit under exactOptionalPropertyTypes, so it is kept only when set.
+ */
+function starterRemote(): NonNullable<ForgeConfig['remote']> {
+  const { wake_relay, ...remote } = RemoteConfigSchema.unwrap().parse({ enabled: true });
+  return wake_relay ? { ...remote, wake_relay } : remote;
+}
 
 /**
  * Settings every starter carries: the tested agent setup, not just a model
@@ -26,6 +45,15 @@ const DEFAULT_PERMISSIONS: NonNullable<ForgeConfig['permissions']> = {
  */
 const STARTER_AGENT_SETTINGS = {
   agent_links: { open_panel: 'every_ask', panel_live_timeout_ms: 20_000 },
+  // On for a new install (owner's call, 0.17.5). The config types are the
+  // parsed shapes, so agent_bus and remote take their schema defaults here and
+  // the starter file spells them out. Remote is enabled with no transport:
+  // Telegram/WhatsApp still need a bot token and pairing. Jobs with none
+  // defined are inert.
+  control_server: { enabled: true },
+  agent_bus: AgentBusConfigSchema.unwrap().parse({ enabled: true }),
+  remote: starterRemote(),
+  jobs: { enabled: true, allowed_hosts: [], max_concurrent: 2, allow_cli_agents: true },
   forge_instructions: { auto_create: true },
   auto_compact: { enabled: true, at: 0.85, resume: true },
   defaults: {

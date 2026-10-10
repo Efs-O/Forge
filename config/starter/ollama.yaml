@@ -11,11 +11,29 @@ models:
 
 permissions:
   # A coding agent needs to run builds and tests. Every write, delete, command
-  # and git action still asks for confirmation unless /clanker is on.
+  # and git action still asks for confirmation unless /clanker is on. Each new
+  # browser origin is approved once per session; desktop control of VS Code
+  # itself stays off. Search needs a key, so it stays off.
   fs: { read: true, write: true, delete: true }
-  net: { search: false, fetch: false }
+  net: { search: false, fetch: true }
   exec: { headless: true }
   git: { read: true, write: true }
+  agents: { delegate: true }
+  browser: { enabled: true }
+  desktop: { enabled: true }
+
+# Local agents (Claude Code, Codex) can message this chat over the agent bus.
+# Remote control needs a transport (Telegram or WhatsApp) before it does
+# anything; scheduled jobs are inert until you define one.
+control_server:
+  enabled: true
+agent_bus:
+  enabled: true
+remote:
+  enabled: true
+jobs:
+  enabled: true
+  allow_cli_agents: true
 
 # The tested agent setup. Auto-compaction and the auto-created FORGE.md are
 # off unless named here. max_tokens is a ceiling: each request is clamped to

@@ -21,6 +21,8 @@ import {
   imageUnsupportedMessage,
   isImageUnsupportedError,
 } from '../../src/llm/imageUnsupportedError';
+import * as path from 'path';
+import { TemplateEngine } from '../../src/llm/TemplateEngine';
 
 const { streamModelChatCompletion, inspectRuntimeModelCapabilities } = vi.hoisted(() => ({
   streamModelChatCompletion: vi.fn(),
@@ -137,7 +139,7 @@ function makeLoop(
     events,
     post,
     () => undefined,
-    undefined,
+    new TemplateEngine(path.join(__dirname, '..', '..', 'config', 'templates', 'builtin')),
     undefined,
     undefined,
     process.cwd(),

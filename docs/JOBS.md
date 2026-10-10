@@ -15,7 +15,9 @@ in `prepare`, approved, then one `apply` run).
 
 ## 1. Turn the scheduler on
 
-Jobs are off unless you opt in. Add a `jobs:` block to your `config.yaml`
+The setup wizard turns the scheduler on for a new install, with
+`allow_cli_agents: true`. A config written before 0.17.5, or one without a
+`jobs:` block, has no scheduler until you add one to your `config.yaml`
 (`.forge/config.yaml` in the workspace, or the global one):
 
 ```yaml
@@ -29,8 +31,8 @@ jobs:
   # How many jobs may run at once. 1 is safe for a single GPU.
   max_concurrent: 2
   # May a job drive a CLI agent (Claude Code / Codex) on your subscription?
-  # Off by default; approving the card on a CLI-agent job sets it.
-  allow_cli_agents: false
+  # The wizard sets true; when false, approving the card on a CLI-agent job sets it.
+  allow_cli_agents: true
   # Model for agent tasks that name none (optional; else active_model).
   default_model: strata-flashnext-iq3s
 ```
@@ -42,9 +44,10 @@ jobs:
   `objects.githubusercontent.com` (the CDN the asset download 302-redirects
   to — the gate is re-checked at every redirect hop).
 - `max_concurrent` 1–8. The scheduler runs at most this many jobs per tick.
-- `allow_cli_agents` (default `false`) controls whether a job may run a CLI
-  agent (Claude Code / Codex) unattended, on your own subscription and its
-  usage limits. While it is off:
+- `allow_cli_agents` controls whether a job may run a CLI agent (Claude Code /
+  Codex) unattended, on your own subscription and its usage limits. The
+  setup wizard writes `true`; a `jobs:` block without the key means `false`.
+  While it is off:
   - creating or updating such a job shows a **dangerous** approval card, and
     approving it sets the flag for you;
   - a run of such a job is recorded as `skipped`;

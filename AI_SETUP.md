@@ -119,10 +119,11 @@ user has signed in with the Ollama CLI; Forge sends no key.
 - **Windows:** Codex needs PowerShell 7 installed from the **MSI**; the
   Microsoft Store package does not work.
 
-## Step 5 — Turn on the control server
+## Step 5 — Check the control server
 
-Add this to the config. It binds to `127.0.0.1` only and is how you check the
-setup (and it carries the agent mesh in step 7, which also needs
+The new starter config enables the control server. If an older config lacks it,
+add this. It binds to `127.0.0.1` only and is how you check the setup (and it
+carries the agent mesh in step 7, which also needs
 `agent_bus.enabled`):
 
 ```yaml
@@ -167,7 +168,8 @@ Forge installs its message client at `~/.forge/agent-bus/forge.sh` and its own
 notes in `~/.forge/agent-bus/README.md`; read that README rather than this
 section for the command set. Requirements:
 
-- the control server from step 5, and the bus itself, which is off by default:
+- the control server from step 5, and the bus itself (enabled in new starter
+  configs; add it to older configs if absent):
 
   ```yaml
   agent_bus:

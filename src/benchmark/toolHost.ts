@@ -69,7 +69,11 @@ function globRegex(pattern: string): RegExp {
   let source = '';
   for (let index = 0; index < pattern.length; index += 1) {
     const char = pattern[index];
-    if (char === '*' && pattern[index + 1] === '*') {
+    if (char === '*' && pattern[index + 1] === '*' && pattern[index + 2] === '/') {
+      // `**/` matches zero or more directories, so `**/*` covers root files too.
+      source += '(?:.*/)?';
+      index += 2;
+    } else if (char === '*' && pattern[index + 1] === '*') {
       source += '.*';
       index += 1;
     } else if (char === '*') source += '[^/]*';

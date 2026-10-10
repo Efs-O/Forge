@@ -38,8 +38,10 @@ forge_instructions:
 custom_instructions: >-
   Use the repository-specific FORGE.md injected by Forge. Keep it concise and update it only when the user explicitly asks to record durable project instructions.
 
-# WARNING: FULL PERMISSIONS. Every one of these is OFF by default; this example
-# turns them ALL ON, so the agent may delete files, run terminal and headless
+# WARNING: FULL PERMISSIONS. A config that omits a key leaves it off. The setup
+# wizard turns on file delete, headless commands, git writes, fetch, delegation,
+# browser and desktop for a new install; this example also turns on the
+# terminal and search, so the agent may delete files, run terminal and headless
 # commands, write to git, delegate to other agents, and search/fetch the web.
 # Writes, terminal and git actions still ask for confirmation — unless you turn
 # that off with /clanker. Review this block before your first session and set
@@ -57,27 +59,32 @@ permissions:
   net:
     search: true
     fetch: true
-  # Browser and desktop control are NOT enabled by this example — both default
-  # to `enabled: false`. Uncomment to grant them.
-  # browser:
-  #   enabled: true
-  # desktop:
-  #   enabled: true
-  #   # Opt in to controlling the ordinary VS Code `code` process. Off by
-  #   # default, and inert while `enabled` is false. Deliberately narrow: this
-  #   # matches the `code`/`code.exe` PROCESS name only — never a window title,
-  #   # never the Chrome_WidgetWin_1 class, and never a fork (Code - Insiders,
-  #   # Cursor, Windsurf, VSCodium, devenv), which stay refused whatever you set
-  #   # here. Every input into a VS Code window still asks for confirmation on
-  #   # each call, so this alone cannot drive Forge's own chat. Turning it off
-  #   # again drops the VS Code approval and its captures immediately; other
-  #   # windows keep theirs.
-  #   allow_vscode: false
+  # Browser and desktop control. The setup wizard turns both on for a new
+  # install; a config that omits them leaves them off. Each new browser origin
+  # still asks for approval once per session.
+  browser:
+    enabled: true
+  desktop:
+    enabled: true
+    # Opt in to controlling the ordinary VS Code `code` process. Off by
+    # default, and inert while `enabled` is false. Deliberately narrow: this
+    # matches the `code`/`code.exe` PROCESS name only — never a window title,
+    # never the Chrome_WidgetWin_1 class, and never a fork (Code - Insiders,
+    # Cursor, Windsurf, VSCodium, devenv), which stay refused whatever you set
+    # here. Every input into a VS Code window still asks for confirmation on
+    # each call, so this alone cannot drive Forge's own chat. Turning it off
+    # again drops the VS Code approval and its captures immediately; other
+    # windows keep theirs.
+    # allow_vscode: false
 
-# Persistent agent jobs (docs/JOBS.md). Opt-in: set `enabled: true` to start
-# the scheduler. With no jobs defined it is inert, but it is off by default.
+# Persistent agent jobs (docs/JOBS.md). The setup wizard turns the scheduler on
+# for a new install; a config without a `jobs:` block has no scheduler. With no
+# jobs defined it is inert.
 jobs:
-  enabled: false
+  enabled: true
+  # Let an unattended job drive a CLI agent (Claude Code / Codex) on your own
+  # subscription. The wizard turns this on; set false to require approval.
+  allow_cli_agents: true
   # Hosts a job may fetch from.
   allowed_hosts:
     - api.github.com
@@ -1014,8 +1021,10 @@ voice:
     voice_el: el_GR-joy-medium
     max_chars: 1200
 
+# Remote control. The setup wizard turns this on for a new install, with no
+# transport: Telegram and WhatsApp each still need a bot token and pairing.
 remote:
-  enabled: false
+  enabled: true
   queue_limit: 5
   max_message_chars: 20000
   rate_limit_per_minute: 30

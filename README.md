@@ -309,8 +309,8 @@ extensions, so:
    Microsoft Store package does not work), and the `~/.forge/agent-bus/forge.sh`
    client needs **Git Bash** — in PowerShell a bare `bash` is WSL.
 
-5. **For the agent mesh** (`forge.sh`), turn on both the control server and the
-   bus. Both are off by default:
+5. **For the agent mesh** (`forge.sh`), check that the control server and bus are
+   enabled. New starter configs enable both; older configs may need:
    ```yaml
    control_server:
      enabled: true
@@ -743,9 +743,11 @@ what each one does and does not cover:
   It is pattern-matching, not a sandbox; interpreters that were never banned,
   such as `node -e` and `python -c`, can already do what a shell script can.
 - **Tool permissions in `config.yaml`.** A new install's starter config grants
-  file edits and deletes, command execution and git writes, each behind the
-  confirmation gate above. Web search, fetch, the browser and desktop tools,
-  shell scripts and CLI-agent delegation stay off until you turn them on.
+  file edits and deletes, command execution, git writes, web fetch, CLI-agent
+  delegation and the browser and desktop tools, each behind the confirmation
+  gate above; every new browser origin is approved once per session. Web search
+  (needs a key), the visible terminal and shell scripts stay off until you turn
+  them on. A config that omits a permission keeps it off.
 - **An SSRF-guarded, GET-only fetch** and no outbound traffic beyond the
   endpoints you configure.
 
