@@ -78,7 +78,7 @@ telemetry, analytics, or auto-update pings.
 - Ollama local and Ollama cloud routing through the local daemon
 - Optional cloud or self-hosted providers: `xai`, `openrouter`, `openai`, `openai-compatible`
 - External CLI agents (`provider: cli` — Claude Code, Codex) as full-rights agents — both in direct chat and as `ask_local_agent` delegation targets, where they can read and edit the workspace with their own tools — using each CLI's own authentication. See [delegation](docs/DELEGATION.md) for which runs Keep/Undo covers
-- Agent mesh: two-way messaging between Forge and live Claude Code, Codex and Copilot sessions (`ask_live_session`, `tell_live_session`, `forge.sh say`/`steer`/`who`)
+- Agent mesh: two-way messaging between Forge and Claude Code, Codex and Copilot sessions (`ask_agent`, `forge.sh say`/`send`/`steer`/`who`)
 - Localhost control server for external orchestrators and shared model lifecycle
 - Reasoning token display and optional thinking-channel stripping
 - Optional Tavily or Brave web search with keys stored in VS Code SecretStorage
@@ -166,8 +166,8 @@ Its operation values are `status`, `log`, `diff`, `blame` and `show`.
 CLI agent; `list_delegation_targets` lists them on demand instead of spending
 schema on every turn. Local and cloud targets get the task and context files
 only. Claude Code and Codex run with their own tools and can edit files.
-`ask_live_session` and `tell_live_session` reach a Claude Code, Codex or
-Copilot session that is *already running* and knows the current work — see
+`ask_agent` reaches a Claude Code, Codex or Copilot session linked to the
+current Forge chat, or creates a Forge-owned session when none is linked — see
 [the agent mesh](#the-agent-mesh).
 
 **Images.** `generate_image` appears only when an `image_generation:` backend
@@ -318,14 +318,28 @@ extensions, so:
      enabled: true
    ```
 
-Nothing needs to go into Claude's memory or an `AGENTS.md`: Forge writes its own
-agent-bus notes to `~/.forge/agent-bus/`, and every message it sends carries its
-own reply instructions.
+Nothing needs to go into Claude's memory or a user's `AGENTS.md`: Forge writes
+its agent-bus notes to `~/.forge/agent-bus/`, and every question it sends carries
+reply instructions. Read the live `forge.sh` usage header before using it; there
+is no `join` command.
 
-**Model and effort for a Forge-owned Codex/Claude session.** With no joined
-session, Forge may create its own owned Codex or Claude CLI process (the
+For Codex or Claude Code to discover the mesh in every new session, a user may
+add this optional note to their own `AGENTS.md` or `CLAUDE.md`, respectively.
+Forge never edits either file:
+
+> When asked to message Forge or another agent, read
+> `~/.forge/agent-bus/README.md` and the leading usage header of
+> `~/.forge/agent-bus/forge.sh` first. Use your own agent name with `say` or
+> `send` (`claude` in Claude Code, `codex` in Codex). `send` to another agent
+> reaches only the recipient linked to your current Forge chat; check `who`
+> and the intended chat's links before sending. A 202 exchange id confirms
+> acceptance, not an answer; read the verdict or failure. There is no `join`
+> command.
+
+**Model and effort for a Forge-owned Codex/Claude session.** With no session
+linked to the chat, Forge may create its own Codex or Claude CLI process (the
 agent-bus mesh, above); by default it runs each CLI's own configured default
-model and effort. Four optional `agent_bus:` keys pick them instead:
+model and effort. These optional `agent_bus:` keys pick them instead:
 
 ```yaml
 agent_bus:
@@ -342,8 +356,7 @@ to a model name to pin one.
 
 Unset keys keep today's behaviour: Forge passes nothing and the CLI's own
 config decides. A change applies at the next owned-session creation, not to a
-session already running — restart `forge.sh`/the mesh (or reload the window)
-to pick it up. Codex/Claude reject an unknown model or effort value the same
+session already running. Codex/Claude reject an unknown model or effort value the same
 way they would from a terminal; Forge surfaces that error unchanged.
 
 ## Backend Modes
@@ -632,23 +645,26 @@ can roll it back.
 
 ## The agent mesh
 
-`ask_local_agent` starts a new, empty session. The mesh is for sessions that
-already know what you are doing: the Claude Code or Codex you have open in a
-terminal, or a Copilot session Forge started for you. Turn on
-`control_server.enabled` and `agent_bus.enabled` (setup above).
+`ask_local_agent` delegates a separate task. The mesh can reach a linked
+Claude Code or Codex session you already have open, or a Forge-owned session.
+Enable `control_server.enabled` and `agent_bus.enabled` (setup above).
 
-- **Forge → them.** `ask_live_session` asks `claude`, `codex` or `copilot` a
-  question and waits for the answer, or, with `notify_on_answer`, keeps
-  working and receives the answer later as a message in the chat.
-  `tell_live_session` is a one-way note that does not wait.
+- **Forge → them.** `ask_agent` asks the Claude, Codex or Copilot session linked
+  to the current chat and waits for its answer. If none is linked, Forge creates
+  a session for that chat. Use **Forge: Show Live Claude Sessions** to copy an
+  existing Claude session id, then `/link` in the intended Forge chat to bind it.
 - **Them → Forge.** From any terminal, `~/.forge/agent-bus/forge.sh` lets a
   session `say` something to Forge, `steer` (interrupt) its running turn,
   check its `status`, `view` its last answers, and see `who` is in the mesh
   and what each member is doing.
-- **No open window needed.** Run `forge.sh join codex` (or `join claude`) once
-  in your session. After that, Forge can reach it even with no window open: it
-  resumes that thread in the background, answers, and shuts it down again.
-  Copilot always runs as a Forge-owned session.
+- **Agent → agent.** `forge.sh send claude codex` and `forge.sh send codex claude`
+  (or either sender to `copilot`) reach only the recipient linked to the
+  sender's current Forge chat. Check the intended link first; the returned
+  exchange id confirms acceptance, not an answer. Read the verdict or failure
+  before reporting success. `--to <conversationId>` and `--to-running` select
+  a Forge chat only when addressing Forge.
+- **No `join` step.** The client identifies a Claude, Codex or Copilot session
+  from its session environment variable. Copilot runs as a Forge-owned session.
 - **Cost control.** `agent_bus.codex_model`/`codex_effort`,
   `claude_model`/`claude_effort` and `copilot_model` pick the model per CLI.
   Copilot defaults to `auto` so it does not use a premium model on every call.

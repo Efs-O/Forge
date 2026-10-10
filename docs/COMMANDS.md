@@ -19,7 +19,7 @@ These commands are currently contributed by the extension.
 | `Forge: Stop Backend`         | Stop the active backend              |
 | `Forge: Show Backend Console` | Reveal backend logs or console       |
 | `Forge: Restart Backend`      | Restart the managed backend          |
-| `Forge: Show Live Claude Sessions` | List the Claude Code sessions `ask_live_session` can reach; pick one to copy its name |
+| `Forge: Show Live Claude Sessions` | Copy a live Claude Code session id to link it to the intended Forge chat with `/link` |
 | `Forge: Open Config`          | Open the active config file          |
 | `Forge: Validate Config`      | Validate the active config           |
 | `Forge: Pick Model`           | Pick the active model                |
@@ -91,4 +91,3 @@ These commands are currently contributed by the extension.
 | `Forge: Pick Files For Context`           | Pick context files manually                  |
 | `Forge: Draft Plan In Scratch Document`   | Generate a planning scratch doc              |
 | `Forge: Draft Review In Scratch Document` | Generate a review scratch doc                |
-

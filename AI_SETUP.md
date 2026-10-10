@@ -182,7 +182,22 @@ section for the command set. Requirements:
   `"crossSessionInbound": "accept"` to `~/.claude/settings.json`, or messages
   from Forge wait for approval there. Ask first.
 
-**Check:** `forge.sh who` lists Forge.
+Forge does not add or edit the user's `AGENTS.md` or `CLAUDE.md` for the mesh.
+If they want future Codex or Claude Code sessions to discover it automatically,
+show them the optional note for those files in the README; add it only if they
+ask.
+Read the complete usage header of the installed `forge.sh`; there is no `join`
+command. `say` follows that agent's previously selected Forge chat, while
+`send` to Claude, Codex or Copilot reaches only a recipient linked to that same
+chat. Claude Code uses `say claude` and `send claude <recipient>`; Codex uses
+`say codex` and `send codex <recipient>`. A 202 exchange id confirms acceptance,
+not an answer; read the verdict or failure before reporting success.
+For a different Forge chat, use `say --to <conversationId>` or `--to-running`;
+for a specific live Claude session, use **Forge: Show Live Claude Sessions**
+to copy its id and `/link` in the intended Forge chat before `ask_agent`.
+
+**Check:** `forge.sh who` reports the linked agent sessions held by open Forge
+windows. An empty list is normal before any session is linked.
 
 ## Step 8 — Optional: Telegram remote control
 

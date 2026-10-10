@@ -29,8 +29,8 @@ export const CLIENT_SCRIPT = clientScriptSource.replace(/\r\n/g, '\n');
 
 export const BUS_README = `# Forge agent bus
 
-Written by Forge; edits are overwritten. Lets Forge, Claude Code sessions and
-Codex message each other, each message shown in the receiving window.
+Written by Forge; edits are overwritten. Lets Forge, Claude Code, Codex and
+Copilot sessions message each other, each message shown in the receiving window.
 
     endpoint.json   url + token of the last focused Forge window
     forge.sh        the client: answer Forge, or send Forge a message
@@ -54,7 +54,8 @@ Use \`say <name> --to <conversationId>\` to select a specific Forge chat, or
 \`say <name> --to-running\` to select the currently running chat. The same flags
 work with \`send <name> forge\`; \`send\` to another agent remains a relay.
 Messages routed to an existing Forge chat print its id and title in the 202
-response.
+response. There is no \`join\` command: an agent identifies itself from its
+session environment variable.
 
 ## Sending a file to Telegram without a model turn
 
@@ -92,6 +93,14 @@ closed, or send it without \`--new\` to reach your existing chat.
 Agent sessions identify themselves with their kind-specific session variable.
 Forge routes messages to the chat linked to that session. Use
 \`forge.sh send <your-name> <to>\` to ask another agent linked to the same chat.
+\`send\` and \`steer\` cannot select a different Claude or Copilot session by
+name or title; the \`--to\` and \`--to-running\` selectors apply only when
+addressing Forge. Check \`who\` and the intended chat's agent link before a
+relay. A 202 exchange id means accepted, not answered. Read its verdict or
+failure before reporting success. Do not repeat a failed relay through the
+same stale link. Forge's \`ask_agent\` reaches the agent linked to its current
+chat; use the Claude session picker and \`/link\` to bind a specific live
+Claude session to that chat.
 
 ## Small follow-ups
 
@@ -155,7 +164,7 @@ Forge's agent is blocked until the answer lands, then shows it to its user.
 
 ## Messaging Forge first
 
-    bash ~/.forge/agent-bus/forge.sh say claude-review <<'FORGE_MSG'
+    bash ~/.forge/agent-bus/forge.sh say claude <<'FORGE_MSG'
     your message
     FORGE_MSG
 
@@ -164,22 +173,31 @@ own shell. Forge identifies it from that kind's session environment variable
 and delivers the final answer to the session automatically. Use \`status\` and
 \`view\` to inspect the linked Forge chat.
 
-PowerShell:
+PowerShell on Windows (Git Bash, not a bare \`bash\` that may launch WSL):
 
-    $ep = Get-Content "$HOME/.forge/agent-bus/endpoint.json" | ConvertFrom-Json
-    Invoke-RestMethod -Method Post -Uri "$($ep.url)/agent/message?from=codex" \`
-      -Headers @{ Authorization = "Bearer $($ep.token)" } \`
-      -ContentType 'text/plain; charset=utf-8' -Body $text
+    $text = 'your message'
+    $text | & "$(git --exec-path)/../../../bin/bash.exe" "$HOME/.forge/agent-bus/forge.sh" say codex
 
-An answer is \`POST /agent/reply?id=<id>\` with the same headers. JSON bodies
-(\`{"from","text"}\`, \`{"id","text"}\`) work too. A message is at most
+Use \`forge.sh reply <id>\` to answer a Forge question; the client handles
+authentication and has an outbox fallback. A message is at most
 ${MAX_INBOUND_CHARS} characters.
+
+## Claude to Codex or Copilot
+
+Use \`forge.sh send claude codex\` or \`forge.sh send claude copilot\` only
+when the intended recipient is linked to Claude's current Forge chat. Check
+\`who\` and that chat's links first. An exchange id confirms acceptance, not
+an answer; read the verdict or failure before reporting success. Do not retry
+through a stale link. \`send claude forge\` starts a Forge model turn instead.
 
 ## Codex to Claude
 
-Codex has no peer tool. It can relay through
-\`claude -p --allowedTools SendMessage\`, which costs a model call (about
-$0.10 each).
+Use \`forge.sh send codex claude\` only when that Claude session is linked to
+Codex's current Forge chat. If the owner names a different running Claude
+session, identify its exact session id first; Forge's Claude peer connection
+and question/reply protocol can reach it without starting a new CLI process.
+Do not guess from a chat title or retry the chat-linked relay after it reaches
+the wrong session. Copilot has no separate peer-pipe path here.
 
 Never paste endpoint.json's token into a message. Files older than 24 hours
 are swept.
