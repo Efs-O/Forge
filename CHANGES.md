@@ -1,5 +1,9 @@
 # Forge — Recent Changes
 
+## 0.17.11
+
+- The built-in prompt's "Where a correct method exists, use it rather than an approximation." is now "When you cannot test or iterate, choose the approach that is correct, not the one easiest to get right blind, and work out its details (geometry, maths, timing) before writing." On the one-shot pelican bench the model's reasoning reached for "simplest robust approach" / "keep it simple" exactly where it dropped the knee joint (runs 9, 11, 12); the old sentence never fired because the model framed the choice as safety, not approximation.
+
 ## 0.17.10
 
 - The built-in prompt's verify rule now starts with a self-review: "First review what you wrote once against the request: every requested part present, every part connected to what it depends on; fix what it finds. Then, for code, run the tests that cover it; for anything visual, look at the rendered result." The review comes before the render because the render comes too late on a one-shot task: in pelican run 9 the model rendered, saw legs not attached to the pedals, and the task's no-iterate instruction kept it from fixing them. Reviewing your own source is not running it, so the review does not conflict with that instruction.

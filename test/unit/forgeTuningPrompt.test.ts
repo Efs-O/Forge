@@ -112,7 +112,11 @@ describe('builtin execute template', () => {
     );
     // 2026 prompt-guide pass: positive phrasing, a reason on key rules, root cause over shortcuts.
     expect(prompt).not.toContain('You have access to tools');
-    expect(prompt).toContain('Where a correct method exists, use it rather than an approximation.');
+    // Run 9 reasoned "To keep it simple: two leg groups rotating" — risk-aversion when it cannot iterate.
+    expect(prompt).not.toContain('Where a correct method exists');
+    expect(prompt).toContain(
+      'When you cannot test or iterate, choose the approach that is correct, not the one easiest to get right blind',
+    );
     expect(prompt).toContain('Fix the cause, not the symptom');
     expect(prompt).toContain('each round is a full model pass');
     expect(prompt).toContain('Base every claim on what you have seen in a tool result');
