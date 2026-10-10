@@ -56,6 +56,6 @@ describe('TemplateEngine currentDate', () => {
     const rendered = engine.render('execute', { workspaceRoot: '/w' });
     expect(rendered).toContain("Today's date is ");
     expect(rendered).toMatch(/Today's date is \d{4}-\d{2}-\d{2}\./u);
-    expect(fs.statSync(templatePath).size).toBeLessThanOrEqual(3_500);
+    expect(fs.statSync(templatePath).size).toBeLessThanOrEqual(4_000);
   });
 });

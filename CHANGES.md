@@ -1,5 +1,10 @@
 # Forge — Recent Changes
 
+## 0.17.4
+
+- `render_html_to_image`'s description now covers its third mode, `shader_check` (compile WGSL or GLSL from a workspace file and return the compiler errors), which only the `mode` parameter used to mention.
+- The built-in prompt's size gate is now 4,000 bytes, up from 3,500, so the 0.17.3 rules fit.
+
 ## 0.17.3
 
 - The built-in prompt brings back two rules from the retired 25-line prompt: make the smallest change that does what was asked (no unrelated refactors, cleanups, behaviour changes or tests), and follow a path that code or config already contains or builds instead of searching the filesystem for it.

@@ -74,7 +74,9 @@ export function makeRenderHtmlToImageTool(deps: RenderHtmlDeps): RegisteredTool 
           'mode "image" (default): render an HTML/CSS/SVG page to a PNG and send it to the ' +
           'remote chat watching this turn — for posters, cards, invites, diagrams, infographics; ' +
           'image mode runs no JavaScript and loads nothing external, so inline everything ' +
-          '(system fonts, base64 images). Use generate_image for photographs and painterly scenes.',
+          '(system fonts, base64 images). Use generate_image for photographs and painterly scenes. ' +
+          'mode "shader_check": compile WGSL or GLSL shader text from a workspace file and return ' +
+          'the compiler errors; it opens no page and uses no network or GPU.',
         parameters: {
           type: 'object',
           properties: {
