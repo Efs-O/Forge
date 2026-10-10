@@ -1,5 +1,9 @@
 # Forge — Recent Changes
 
+## 0.17.8
+
+- The built-in prompt gains, just above the stop rule: "After each result, determine what specific information or action is still required. If something necessary remains, continue." It comes from the older EXECUTION prompt; until now only the stop half of that pair was kept.
+
 ## 0.17.7
 
 - The built-in prompt's scope rule ("Do not refactor, clean up, change behaviour or run unrelated tests outside what was asked") is gone; the line is now "Within the task, do the work completely and well." 0.17.0 had no scope rule, and on the one-shot pelican bench two 0.17.0 runs worked out real leg joints while the 0.17.6 run took a shortcut; the guard read as "stay minimal".

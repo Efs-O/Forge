@@ -102,6 +102,9 @@ describe('builtin execute template', () => {
     // The scope guard read as "stay minimal" on one-shot builds (pelican run 5 vs 0.17.0).
     expect(prompt).not.toContain('Do not refactor, clean up');
     expect(prompt).toContain('- Within the task, do the work completely and well.');
+    expect(prompt).toContain(
+      'After each result, determine what specific information or action is still required. If something necessary remains, continue.',
+    );
     expect(prompt).toContain('Never search a whole drive; search the workspace or a named folder.');
     expect(prompt).toContain("The user's instructions, in the first message or any later message");
     expect(prompt).toContain(
