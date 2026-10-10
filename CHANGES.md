@@ -1,5 +1,13 @@
 # Forge — Recent Changes
 
+## 0.17.1
+
+- A model server that ends a round with `finish_reason: length` well before the requested output limit gets one retry with reasoning disabled. Stops near the output limit keep the exhausted-budget message. OpenAI-compatible and Ollama clients both provide the usage needed to distinguish these cases.
+- Shell commands that name a missing working directory now report that directory explicitly; a file supplied as the working directory is reported as “not a folder.”
+- `render_html_to_image` names the saved image using its workspace-relative `generated-images/<name>` path, which `send_file` and `view_image` can resolve.
+- `send_file` names a missing in-workspace path and suggests a matching image in `generated-images/` or the current conversation's screenshot directory. Outside paths keep the existing refusal.
+- The shell timeout test now allows a killed child up to 10 seconds to release its working directory before cleanup, preventing intermittent Windows `EPERM` failures under full CI load.
+
 ## 0.17.0
 
 - A diff's expand button reads `show diff`. It said `show 23 lines` beside `+2 −3`, counting the unchanged context lines around each change.
