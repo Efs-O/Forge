@@ -234,7 +234,13 @@ describe('render_html_to_image output and delivery', () => {
   it('says no chat is watching when the delivery reaches nobody', async () => {
     const { tool } = rig({ deliver: async () => ({ kind: 'queued' as const, chats: 0 }) });
     const result = await tool.handler({ html: '<title>Card</title>' }, context());
-    expect(result).toContain('No remote chat is watching this turn.');
+    expect(result).toContain(
+      'No remote chat is watching this turn, so the PNG is only saved in the workspace',
+    );
+    // The model reached for send_file after the bare notice; it shares the same remote chat.
+    expect(result).toContain('send_file cannot send it either');
+    expect(result).toContain('You have not seen it: view_image shows it to you');
+    expect(result).toContain('mode "preview" with frames');
   });
 
   it('keeps the PNG and names the refusal when the shared budget is spent', async () => {

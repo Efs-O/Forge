@@ -1,5 +1,10 @@
 # Forge — Recent Changes
 
+## 0.17.6
+
+- The built-in prompt's scope rule now ends "; within it, do the work completely and well." With "smallest change" gone (0.17.5), nothing in the prompt asked for quality; the new clause does, without widening the scope rule it qualifies.
+- When `render_html_to_image`'s image mode finds no remote chat watching the turn, its result now says the PNG is only saved in the workspace, that `send_file` cannot send it either, and that the model has not seen it: `view_image` shows the PNG, and `preview` mode with `frames` shows scripts or animation running. Given the bare "No remote chat is watching this turn.", a model called `send_file`, which fails for the same reason.
+
 ## 0.17.5
 
 - A new install's starter config turns on more by default:

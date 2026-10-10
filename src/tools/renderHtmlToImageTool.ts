@@ -333,7 +333,7 @@ async function runRender(
     if (reached.kind === 'refused') return `${head}\n${reached.reason}`;
     return reached.chats > 0
       ? `${head} Queued for ${reached.chats} remote chat(s).`
-      : `${head} No remote chat is watching this turn.`;
+      : `${head} No remote chat is watching this turn, so the PNG is only saved in the workspace; send_file cannot send it either. You have not seen it: view_image shows it to you, and for scripts or animation, mode "preview" with frames shows it running.`;
   } finally {
     // The file now exists, so the reservation has done its job; on a failure it
     // is freed so the next call gets the base name. Never throws.
