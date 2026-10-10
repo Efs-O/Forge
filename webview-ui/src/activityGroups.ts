@@ -25,6 +25,24 @@ function basename(path: string): string {
   return path.split(/[\\/]/).at(-1) ?? path;
 }
 
+interface FileChange {
+  added: number;
+  removed: number;
+  /** The group's first write to this file created it. */
+  created: boolean;
+}
+
+/**
+ * A file the group created is its final size, all added: a 494-line write
+ * then a +2 −3 edit is +493, not +496 −3 (nothing existed to remove). A file
+ * that already existed keeps the summed counts, which overstate only where a
+ * later edit rewrites lines an earlier one wrote.
+ */
+function netChange(file: FileChange): { added: number; removed: number } {
+  if (!file.created) return file;
+  return { added: Math.max(0, file.added - file.removed), removed: 0 };
+}
+
 /** Pure summary values used by the grouped header and its unit tests. */
 export function summarizeGroup(items: ActivityGroupItem[]): GroupSummary {
   let toolCalls = 0;
@@ -36,7 +54,7 @@ export function summarizeGroup(items: ActivityGroupItem[]): GroupSummary {
   let pending = false;
   let hasThinking = false;
   const reasoningTimes: number[] = [];
-  const files = new Set<string>();
+  const files = new Map<string, FileChange>();
 
   for (const item of items) {
     const thoughts = item.kind === 'step' ? stepThoughts(item.step) : item.steps;
@@ -57,18 +75,29 @@ export function summarizeGroup(items: ActivityGroupItem[]): GroupSummary {
 
     for (const diff of step.diffs) {
       editCount += 1;
-      files.add(diff.content);
       const stats = diffStats(diff.diffHunks);
-      added += stats.added;
-      removed += stats.removed;
+      const file = files.get(diff.content) ?? {
+        added: 0,
+        removed: 0,
+        created: Boolean(diff.diffIsNew),
+      };
+      file.added += stats.added;
+      file.removed += stats.removed;
+      files.set(diff.content, file);
     }
+  }
+  for (const file of files.values()) {
+    const net = netChange(file);
+    added += net.added;
+    removed += net.removed;
   }
 
   const seconds =
     reasoningTimes.length > 0
       ? (formatDuration(reasoningTimes.reduce((sum, ms) => sum + ms, 0)) ?? '')
       : '';
-  const fileLabel = files.size === 1 ? `to ${basename([...files][0]!)}` : `in ${files.size} files`;
+  const fileLabel =
+    files.size === 1 ? `to ${basename([...files.keys()][0]!)}` : `in ${files.size} files`;
 
   return {
     toolCalls,

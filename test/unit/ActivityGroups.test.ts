@@ -116,6 +116,23 @@ describe('summarizeGroup', () => {
     expect(multiple).toMatchObject({ editCount: 2, fileCount: 2, fileLabel: 'in 2 files', added: 0, removed: 0 });
   });
 
+  it('counts a file the group created at its final size, not the sum of its writes', () => {
+    const lines = (kind: 'added' | 'removed', n: number) =>
+      Array.from({ length: n }, (_, i) => ({ kind, text: `${kind} ${i}` }));
+    const summary = summarize([{
+      kind: 'step',
+      step: { attempts: attempts([message('tool', 'tool', 'write')]), diffs: [
+        message('w', 'diff', '.forge/tmp/invaders.html', {
+          diffIsNew: true, diffHunks: [{ lines: lines('added', 494) }],
+        }),
+        message('e', 'diff', '.forge/tmp/invaders.html', {
+          diffHunks: [{ lines: [...lines('removed', 3), ...lines('added', 2)] }],
+        }),
+      ] },
+    }]);
+    expect(summary).toMatchObject({ editCount: 2, added: 493, removed: 0 });
+  });
+
   it('distinguishes recovered retries from unrecovered failures', () => {
     const recovered = {
       kind: 'step' as const,

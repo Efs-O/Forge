@@ -2,6 +2,8 @@
 
 ## 0.17.0
 
+- A thinking row followed by answer text stops its `Thinking… N s` timer. The answer opened a new row without ending the thinking one, so its timer counted for the rest of the turn.
+- A grouped activity header counts a file the group created at its final size: a 494-line `write_file` followed by a +2 −3 edit reads `+493`, not `+496 −3`.
 - While the model writes a tool call's arguments, the transcript shows a live row (`○ write_file matchbox.html · writing… 42 s · 4,210 tokens`) that the real row replaces when the call is complete. The timer always ticks; the count appears once arguments actually stream (Strata holds non-string arguments such as `edit_file`'s `edits` until they are complete). A large `write_file` used to leave the screen frozen after the thinking bubble for as long as the model kept writing.
 - An open thinking label counts up (`Thinking… 12 s`) instead of standing still until the span ends; an error now ends the span too.
 - A turn the user stops ends with a dim "Stopped." line instead of breaking off silently.

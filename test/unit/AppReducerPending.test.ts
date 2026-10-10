@@ -86,6 +86,19 @@ describe('webview App reducer — pending tool calls', () => {
   });
 });
 
+describe('webview App reducer — thinking before the answer', () => {
+  it('ends the thinking row when answer text starts a new row', () => {
+    const state = run([
+      { type: 'USER_SEND', text: 'polish it', convId: cid },
+      { type: 'REASONING_TOKEN', text: 'plan', convId: cid },
+      { type: 'TOKEN', text: 'Polishing it', convId: cid },
+    ]);
+    const thought = state.messagesById[cid]!.find((m) => m.reasoning === 'plan')!;
+    expect(thought.reasoningMs).toBeDefined();
+    expect(state.messagesById[cid]!.at(-1)!.content).toBe('Polishing it');
+  });
+});
+
 describe('pending tool call label', () => {
   it('shows the timer alone while the count is only the opening brace', async () => {
     const { pendingProgressLabel } = await import(
