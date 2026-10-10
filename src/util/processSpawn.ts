@@ -59,17 +59,35 @@ export function normalizeSpawnCwd(cwd: string): string {
   return /^[a-z]:/u.test(cwd) ? cwd[0].toUpperCase() + cwd.slice(1) : cwd;
 }
 
-/** Return a typed spawn failure when cwd is absent or is not a directory. */
-export function spawnCwdFailure(cwd: string, program: string): ExecCommandError | undefined {
+/**
+ * Why cwd cannot be a working directory: absent, or not a folder. Any other
+ * stat error (EACCES, …) is thrown, so the caller decides whether it matters.
+ */
+export function cwdProblem(cwd: string): 'missing' | 'not_folder' | undefined {
   let stat: fs.Stats;
   try {
     stat = fs.statSync(normalizeSpawnCwd(cwd));
   } catch (error) {
     const code = (error as NodeJS.ErrnoException).code;
-    if (code !== 'ENOENT' && code !== 'ENOTDIR') return undefined;
+    if (code === 'ENOENT' || code === 'ENOTDIR') return 'missing';
+    throw error;
+  }
+  return stat.isDirectory() ? undefined : 'not_folder';
+}
+
+/** Return a typed spawn failure when cwd is absent or is not a directory. */
+export function spawnCwdFailure(cwd: string, program: string): ExecCommandError | undefined {
+  let problem: ReturnType<typeof cwdProblem>;
+  try {
+    problem = cwdProblem(cwd);
+  } catch {
+    // Not a missing-cwd case; the caller reports the spawn's own error.
+    return undefined;
+  }
+  if (problem === 'missing') {
     return new ExecCommandError('missing_cwd', program, `working directory does not exist: ${cwd}`);
   }
-  if (!stat.isDirectory()) {
+  if (problem === 'not_folder') {
     return new ExecCommandError(
       'missing_cwd',
       program,

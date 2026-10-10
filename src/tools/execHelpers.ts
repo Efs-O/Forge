@@ -1,4 +1,3 @@
-import * as fs from 'fs';
 import * as path from 'path';
 import * as vscode from 'vscode';
 
@@ -103,18 +102,14 @@ export function resolveExecCwd(cwd: string | undefined): string {
   const resolved = normalizeSpawnCwd(
     !cwd ? getWorkspaceRoot() : path.isAbsolute(cwd) ? cwd : path.join(getWorkspaceRoot(), cwd),
   );
-  let stat: fs.Stats;
-  try {
-    stat = fs.statSync(resolved);
-  } catch (error) {
-    const code = (error as NodeJS.ErrnoException).code;
-    if (code !== 'ENOENT' && code !== 'ENOTDIR') throw error;
+  const problem = cwdProblem(resolved);
+  if (problem === 'missing') {
     throw new Error(
       `shell: cwd ${JSON.stringify(cwd ?? resolved)} does not exist (resolved to ${resolved}). ` +
         'Create it first (create_directory, or mkdir in the command) or leave cwd out.',
     );
   }
-  if (!stat.isDirectory()) {
+  if (problem === 'not_folder') {
     throw new Error(
       `shell: cwd ${JSON.stringify(cwd ?? resolved)} is not a folder (resolved to ${resolved}).`,
     );
@@ -136,7 +131,7 @@ export {
   type ExecCommandErrorKind,
   type SpawnResult,
 } from '../util/processSpawn';
-import { normalizeSpawnCwd, type SpawnResult } from '../util/processSpawn';
+import { cwdProblem, normalizeSpawnCwd, type SpawnResult } from '../util/processSpawn';
 
 // ── ANSI stripping ───────────────────────────────────────────────────────────
 

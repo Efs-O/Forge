@@ -257,7 +257,8 @@ async function runRender(
 
   const outputDir = deps.getConfig?.().image_generation?.output_dir ?? DEFAULT_IMAGE_OUTPUT_DIR;
   const base = `${stamp((deps.now ?? (() => new Date()))())}-${slugFor(html)}`;
-  const target = path.posix.join(outputDir.replace(/\\/g, '/'), `${base}.png`);
+  const outputPosixDir = outputDir.replace(/\\/g, '/');
+  const target = path.posix.join(outputPosixDir, `${base}.png`);
   const wanted = await resolveRealWorkspacePath(target, undefined, { allowMissing: true });
   // The output directory may not exist yet, and the reservation file below has
   // to live inside it, so create it first. Resolution came first: mkdir on the
@@ -324,7 +325,8 @@ async function runRender(
     });
 
     const dims = pngDimensions(png);
-    const workspacePath = path.posix.join(outputDir.replace(/\\/g, '/'), path.basename(absolute));
+    // The claimed name, which may carry a `-2` suffix, so not `target`.
+    const workspacePath = path.posix.join(outputPosixDir, path.basename(absolute));
     const head = `Rendered ${workspacePath} (PNG, ${png.length.toLocaleString()} bytes) at ${dims.width}x${dims.height}.`;
     if (reached.kind === 'refused') return `${head}\n${reached.reason}`;
     return reached.chats > 0
