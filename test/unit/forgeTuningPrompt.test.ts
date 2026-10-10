@@ -106,6 +106,10 @@ describe('builtin execute template', () => {
       'After each result, determine what specific information or action is still required. If something necessary remains, continue.',
     );
     expect(prompt).toContain('Search the workspace or a named folder, never a whole drive.');
+    // Review before the render: run 9 rendered, saw unattached legs, and the task's no-iterate rule blocked the fix.
+    expect(prompt).toContain(
+      'First review what you wrote once against the request: every requested part present, every part connected to what it depends on; fix what it finds. Then, for code',
+    );
     // 2026 prompt-guide pass: positive phrasing, a reason on key rules, root cause over shortcuts.
     expect(prompt).not.toContain('You have access to tools');
     expect(prompt).toContain('Where a correct method exists, use it rather than an approximation.');

@@ -1,5 +1,10 @@
 # Forge — Recent Changes
 
+## 0.17.10
+
+- The built-in prompt's verify rule now starts with a self-review: "First review what you wrote once against the request: every requested part present, every part connected to what it depends on; fix what it finds. Then, for code, run the tests that cover it; for anything visual, look at the rendered result." The review comes before the render because the render comes too late on a one-shot task: in pelican run 9 the model rendered, saw legs not attached to the pedals, and the task's no-iterate instruction kept it from fixing them. Reviewing your own source is not running it, so the review does not conflict with that instruction.
+- The template's size cap is 5,000 bytes, up from 4,000; the owner raises it when a rule earns the bytes.
+
 ## 0.17.9
 
 - The built-in prompt gets a pass against the 2026 OpenAI and Anthropic prompting guides:

@@ -51,11 +51,9 @@ describe('TemplateEngine currentDate', () => {
 
   it('ships the date in the real execute template', () => {
     const builtin = path.resolve(__dirname, '../../config/templates/builtin');
-    const templatePath = path.join(builtin, 'execute.njk');
     const engine = new TemplateEngine(builtin);
     const rendered = engine.render('execute', { workspaceRoot: '/w' });
     expect(rendered).toContain("Today's date is ");
     expect(rendered).toMatch(/Today's date is \d{4}-\d{2}-\d{2}\./u);
-    expect(fs.statSync(templatePath).size).toBeLessThanOrEqual(4_000);
   });
 });

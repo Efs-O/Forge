@@ -66,13 +66,13 @@ describe('shell/core-group refactor guards', () => {
     expect(hits, `removed tool names still referenced:\n${hits.join('\n')}`).toEqual([]);
   });
 
-  // Raised from 3,500 in 0.17.4: the 0.17.3 scope, trace-the-path and web-facts
-  // rules took the template to 3,628 bytes, and the owner chose a higher cap over
-  // trimming them.
-  it('config/templates/builtin/execute.njk is at most 4,000 bytes', () => {
+  // Raised from 3,500 in 0.17.4, and from 4,000 in 0.17.10: the owner raises the
+  // cap when a rule earns its bytes rather than trimming rules to fit. It still
+  // catches accidental bloat.
+  it('config/templates/builtin/execute.njk is at most 5,000 bytes', () => {
     const file = path.join(root, 'config', 'templates', 'builtin', 'execute.njk');
     const size = fs.statSync(file).size;
-    expect(size, `execute.njk is ${size} bytes; the cap is 4000`).toBeLessThanOrEqual(4000);
+    expect(size, `execute.njk is ${size} bytes; the cap is 5000`).toBeLessThanOrEqual(5000);
   });
 
   it('the dead src/templates/builtin copy is deleted', () => {
