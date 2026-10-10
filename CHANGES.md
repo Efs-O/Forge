@@ -2,17 +2,17 @@
 
 ## 0.17.1
 
-- A model server that ends a round with `finish_reason: length` well before the requested output limit gets one retry with reasoning disabled. Stops near the output limit keep the exhausted-budget message. OpenAI-compatible and Ollama clients both provide the usage needed to distinguish these cases.
+- A round that a model server ends with `finish_reason: length` while the model was still thinking (no answer, no tool call), well below the requested output limit, gets one retry, with thinking off where the server supports it. If it stops early again, Forge says the server stopped it, with both token counts. Stops near the output limit keep the exhausted-budget message. OpenAI-compatible and Ollama clients both provide the usage needed to distinguish these cases.
 - Shell commands that name a missing working directory now report that directory explicitly; a file supplied as the working directory is reported as “not a folder.”
 - `render_html_to_image` names the saved image using its workspace-relative `generated-images/<name>` path, which `send_file` and `view_image` can resolve.
 - `send_file` names a missing in-workspace path and suggests a matching image in `generated-images/` or the current conversation's screenshot directory. Outside paths keep the existing refusal.
-- The shell timeout test now allows a killed child up to 10 seconds to release its working directory before cleanup, preventing intermittent Windows `EPERM` failures under full CI load.
-
-## 0.17.0
-
+- Tests: the shell timeout test allows a killed child up to 10 seconds to release its working directory before cleanup. This makes its Windows `EPERM` cleanup failure under full CI load rarer; it is still seen occasionally.
 - A diff's expand button reads `show diff`. It said `show 23 lines` beside `+2 −3`, counting the unchanged context lines around each change.
 - A thinking row followed by answer text stops its `Thinking… N s` timer. The answer opened a new row without ending the thinking one, so its timer counted for the rest of the turn.
 - A grouped activity header counts a file the group created at its final size: a 494-line `write_file` followed by a +2 −3 edit reads `+493`, not `+496 −3`.
+
+## 0.17.0
+
 - While the model writes a tool call's arguments, the transcript shows a live row (`○ write_file matchbox.html · writing… 42 s · 4,210 tokens`) that the real row replaces when the call is complete. The timer always ticks; the count appears once arguments actually stream (Strata holds non-string arguments such as `edit_file`'s `edits` until they are complete). A large `write_file` used to leave the screen frozen after the thinking bubble for as long as the model kept writing.
 - An open thinking label counts up (`Thinking… 12 s`) instead of standing still until the span ends; an error now ends the span too.
 - A turn the user stops ends with a dim "Stopped." line instead of breaking off silently.
