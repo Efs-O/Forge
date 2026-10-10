@@ -194,27 +194,33 @@ export function mergeSyncedMessages(
     }
     if (hostIndex < 0) continue;
     localToHost.set(localIndex, hostIndex);
-    reconstructed[hostIndex]!.id = message.id;
-    if (message.role === 'tool' && message.toolDetail !== undefined) {
-      reconstructed[hostIndex]!.toolDetail = message.toolDetail;
-    }
-    if (message.role === 'tool' && message.toolTarget !== undefined) {
-      reconstructed[hostIndex]!.toolTarget = message.toolTarget;
-    }
-    // The host's span wins where it has one - it is the side that saw both ends
-    // and the only side that survives a reload. The webview's live stamp fills
-    // the gap before the first sync, and permanently for the CLI-agent turns the
-    // host does not time. Without this carry-over a mid-session sync replaced
-    // every measured row with an unmeasured copy of itself, and the timings the
-    // reducer had just stamped disappeared from a running turn - which looked
-    // exactly like timing that had never been implemented.
-    if (reconstructed[hostIndex]!.reasoningMs === undefined && message.reasoningMs !== undefined) {
-      reconstructed[hostIndex]!.reasoningMs = message.reasoningMs;
-    }
-    if (reconstructed[hostIndex]!.toolMs === undefined && message.toolMs !== undefined) {
-      reconstructed[hostIndex]!.toolMs = message.toolMs;
-    }
+    adoptLocal(message, reconstructed[hostIndex]!);
     hostCursor = hostIndex + 1;
+  }
+
+  // The host stores the text its turn assembled, which can differ from what
+  // streamed (whitespace, stripped channels), so an exact match misses rows the
+  // reader is looking at. Unmatched, a row took a fresh id, and every bubble or
+  // step the reader had opened collapsed when the final sync landed. Pair the
+  // leftovers by shape, in order, within the gap between matched rows.
+  hostCursor = 0;
+  for (let localIndex = 0; localIndex < local.length; localIndex++) {
+    const message = local[localIndex]!;
+    const mapped = localToHost.get(localIndex);
+    if (mapped !== undefined) {
+      hostCursor = mapped + 1;
+      continue;
+    }
+    if (message.role === 'error' || message.role === 'system') continue;
+    const nextMapped = nearestMappedHost(localToHost, localIndex, 1, local.length);
+    const end = nextMapped ?? reconstructed.length;
+    for (let index = hostCursor; index < end; index++) {
+      if (!sameShape(message, reconstructed[index]!)) continue;
+      localToHost.set(localIndex, index);
+      adoptLocal(message, reconstructed[index]!);
+      hostCursor = index + 1;
+      break;
+    }
   }
 
   const before = new Map<number, AppMessage[]>();
@@ -249,6 +255,44 @@ function sameRenderableMessage(local: AppMessage, host: AppMessage): boolean {
   return (
     local.role === host.role && local.content === host.content && local.reasoning === host.reasoning
   );
+}
+
+/** Same kind of row, whatever its text: a thought, an answer, one tool's call. */
+function sameShape(local: AppMessage, host: AppMessage): boolean {
+  if (local.role !== host.role) return false;
+  if (local.role === 'tool') {
+    if (local.toolName !== host.toolName) return false;
+    return !local.toolCallId || !host.toolCallId || local.toolCallId === host.toolCallId;
+  }
+  if (local.role === 'diff') return local.content === host.content;
+  return (
+    Boolean(local.reasoning) === Boolean(host.reasoning) &&
+    Boolean(local.content) === Boolean(host.content)
+  );
+}
+
+/** The host row takes the live row's identity and the live facts it lacks. */
+function adoptLocal(message: AppMessage, host: AppMessage): void {
+  host.id = message.id;
+  if (message.role === 'tool' && message.toolDetail !== undefined) {
+    host.toolDetail = message.toolDetail;
+  }
+  if (message.role === 'tool' && message.toolTarget !== undefined) {
+    host.toolTarget = message.toolTarget;
+  }
+  // The host's span wins where it has one - it is the side that saw both ends
+  // and the only side that survives a reload. The webview's live stamp fills
+  // the gap before the first sync, and permanently for the CLI-agent turns the
+  // host does not time. Without this carry-over a mid-session sync replaced
+  // every measured row with an unmeasured copy of itself, and the timings the
+  // reducer had just stamped disappeared from a running turn - which looked
+  // exactly like timing that had never been implemented.
+  if (host.reasoningMs === undefined && message.reasoningMs !== undefined) {
+    host.reasoningMs = message.reasoningMs;
+  }
+  if (host.toolMs === undefined && message.toolMs !== undefined) {
+    host.toolMs = message.toolMs;
+  }
 }
 
 function nearestMappedHost(

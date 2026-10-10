@@ -131,6 +131,45 @@ describe('mergeSyncedMessages', () => {
     expect(merged[2]!.id).toBe(local[2]!.id);
   });
 
+  it('keeps the live ids when the host stored slightly different text', () => {
+    // The final sync after a report: the host's thought and narration differ by
+    // whitespace from what streamed. Fresh ids here collapsed every bubble and
+    // step the reader had opened.
+    const local: AppMessage[] = [
+      msg('user', 'go'),
+      msg('assistant', '', { id: 'think-1', reasoning: 'plan it\n' }),
+      msg('assistant', '\n\nReading it', { id: 'say-1' }),
+      msg('tool', 'read_file → a.ts', {
+        id: 'tool-1',
+        toolName: 'read_file',
+        toolCallId: 'c1',
+        toolResult: 'contents',
+        toolResultTotal: 8,
+      }),
+      msg('assistant', '', { id: 'think-2', reasoning: 'done\n' }),
+      msg('assistant', 'Report.', { id: 'report' }),
+    ];
+    const rows: PersistedRow[] = [
+      { role: 'user', content: 'go' },
+      { role: 'assistant', content: '', reasoning: 'plan it' },
+      { role: 'assistant', content: 'Reading it' },
+      {
+        role: 'tool',
+        content: 'read_file → a.ts',
+        toolName: 'read_file',
+        toolCallId: 'c1',
+        toolResult: 'contents',
+        toolResultTotal: 8,
+      },
+      { role: 'assistant', content: '', reasoning: 'done' },
+      { role: 'assistant', content: 'Report.' },
+    ];
+
+    const merged = mergeSyncedMessages(local, rows);
+    expect(merged.map((m) => m.id)).toEqual(local.map((m) => m.id));
+    expect(merged[1]!.reasoning).toBe('plan it');
+  });
+
   it('hydrates an empty conversation straight from the host', () => {
     const rows: PersistedRow[] = [
       { role: 'user', content: 'hello' },
@@ -142,12 +181,21 @@ describe('mergeSyncedMessages', () => {
   it('hydrates call links and targets from synced rows when local state is empty', () => {
     const rows: PersistedRow[] = [
       {
-        role: 'tool', content: 'edit_file → a.ts', toolName: 'edit_file',
-        toolCallId: 'call-a', toolTarget: 'a.ts', toolResult: 'done', toolResultTotal: 4,
+        role: 'tool',
+        content: 'edit_file → a.ts',
+        toolName: 'edit_file',
+        toolCallId: 'call-a',
+        toolTarget: 'a.ts',
+        toolResult: 'done',
+        toolResultTotal: 4,
       },
       {
-        role: 'diff', content: 'src/a.ts', toolCallId: 'call-a',
-        diffHunks: null, diffIsNew: false, diffIsDeleted: false,
+        role: 'diff',
+        content: 'src/a.ts',
+        toolCallId: 'call-a',
+        diffHunks: null,
+        diffIsNew: false,
+        diffIsDeleted: false,
       },
     ];
     expect(mergeSyncedMessages([], rows)).toMatchObject([
@@ -158,17 +206,30 @@ describe('mergeSyncedMessages', () => {
 
   it('keeps synced call links and targets during a mid-turn reconcile and preserves ids', () => {
     const local = [
-      msg('tool', 'edit_file → a.ts', { toolName: 'edit_file', toolCallId: 'call-a', toolResult: 'done' }),
+      msg('tool', 'edit_file → a.ts', {
+        toolName: 'edit_file',
+        toolCallId: 'call-a',
+        toolResult: 'done',
+      }),
       msg('diff', 'src/a.ts', { toolCallId: 'call-a' }),
     ];
     const rows: PersistedRow[] = [
       {
-        role: 'tool', content: 'edit_file → a.ts', toolName: 'edit_file',
-        toolCallId: 'call-a', toolTarget: 'a.ts', toolResult: 'done', toolResultTotal: 4,
+        role: 'tool',
+        content: 'edit_file → a.ts',
+        toolName: 'edit_file',
+        toolCallId: 'call-a',
+        toolTarget: 'a.ts',
+        toolResult: 'done',
+        toolResultTotal: 4,
       },
       {
-        role: 'diff', content: 'src/a.ts', toolCallId: 'call-a',
-        diffHunks: null, diffIsNew: false, diffIsDeleted: false,
+        role: 'diff',
+        content: 'src/a.ts',
+        toolCallId: 'call-a',
+        diffHunks: null,
+        diffIsNew: false,
+        diffIsDeleted: false,
       },
     ];
     const merged = mergeSyncedMessages(local, rows);
