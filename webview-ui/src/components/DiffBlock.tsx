@@ -40,7 +40,8 @@ export function DiffBlock({ id, filePath, hunks, isNew, isDeleted }: Props): Rea
         {removed > 0 && <span className="diff-stat diff-stat-removed">−{removed}</span>}
         {allLines.length > 0 && (
           <button className="diff-toggle" type="button" onClick={() => setChoice(!expanded)}>
-            {expanded ? 'collapse' : `show ${allLines.length} lines`}
+            {/* No count: one counting context lines read as a third size beside +N −M. */}
+            {expanded ? 'collapse' : 'show diff'}
           </button>
         )}
       </div>
