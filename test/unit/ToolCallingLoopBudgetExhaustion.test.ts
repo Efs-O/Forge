@@ -8,9 +8,11 @@ const { streamModelChatCompletion } = vi.hoisted(() => ({
 vi.mock('../../src/llm/ChatClient', () => ({ streamModelChatCompletion }));
 
 import { runToolCallingLoop } from '../../src/agent/ToolCallingLoop';
+import { ToolFailureTracker } from '../../src/tools/StripTools';
 import {
   CONTEXT_INPUT_EXHAUSTED_MESSAGE,
   OUTPUT_BUDGET_EXHAUSTED_NOTICE,
+  earlyServerLengthStopNotice,
   REASONING_ONLY_STOP_NOTICE,
   REASONING_STOP_RETRY_NUDGE,
   RETRY_REASONING_TAIL_CHARS,
@@ -22,6 +24,7 @@ interface Handlers {
   onReasoning: (t: string) => void;
   onDone: (finishReason: string | null) => void;
   onToolCalls: (calls: ToolCall[]) => void;
+  onUsage?: (usage: { prompt_tokens: number; completion_tokens: number; total_tokens: number }) => void;
 }
 
 const model = {
@@ -74,6 +77,85 @@ describe('a round that spends its whole budget thinking', () => {
     expect(notice).toHaveLength(1);
     // One attempt only: it must not silently loop on an unwinnable round.
     expect(streamModelChatCompletion).toHaveBeenCalledTimes(1);
+  });
+
+  it('retries a server length stop well below max_tokens with thinking off', async () => {
+    const requests: Array<{
+      max_tokens?: number;
+      chat_template_kwargs?: { enable_thinking?: boolean };
+    }> = [];
+    streamModelChatCompletion
+      .mockImplementationOnce(
+        async (_u: string, request: (typeof requests)[number], _m: unknown, h: Handlers) => {
+          requests.push(request);
+          h.onReasoning('The server stopped while I was thinking.');
+          h.onUsage?.({ prompt_tokens: 10, completion_tokens: 34_195, total_tokens: 34_205 });
+          h.onDone('length');
+        },
+      )
+      .mockImplementationOnce(
+        async (_u: string, request: (typeof requests)[number], _m: unknown, h: Handlers) => {
+          requests.push(request);
+          h.onToken('Completed the next concrete action.');
+          h.onDone('stop');
+        },
+      );
+    const messages: ChatMessage[] = [{ role: 'user', content: 'continue' }];
+    const tracker = new ToolFailureTracker();
+
+    const result = await runToolCallingLoop({
+      ...baseOptions(messages, 140_859),
+      maxOutputTokens: 140_347,
+      canUseThinkingKwargs: true,
+    } as never);
+
+    expect(result.finalText).toBe('Completed the next concrete action.');
+    expect(requests[0]?.max_tokens).toBe(140_347);
+    expect(requests[1]?.chat_template_kwargs?.enable_thinking).toBe(false);
+    expect(streamModelChatCompletion).toHaveBeenCalledTimes(2);
+    expect(tracker.shouldStrip()).toBe(false);
+  });
+
+  it('keeps a length stop at the output cap on the existing exhausted-budget path', async () => {
+    streamModelChatCompletion.mockImplementation(
+      async (_u: string, request: { max_tokens?: number }, _m: unknown, h: Handlers) => {
+        expect(request.max_tokens).toBe(140_347);
+        h.onReasoning('The output cap was reached.');
+        h.onUsage?.({ prompt_tokens: 10, completion_tokens: 139_000, total_tokens: 139_010 });
+        h.onDone('length');
+      },
+    );
+    const messages: ChatMessage[] = [{ role: 'user', content: 'continue' }];
+
+    await runToolCallingLoop({
+      ...baseOptions(messages, 140_859),
+      maxOutputTokens: 140_347,
+    } as never);
+
+    expect(messages.at(-1)).toEqual({ role: 'assistant', content: OUTPUT_BUDGET_EXHAUSTED_NOTICE });
+    expect(streamModelChatCompletion).toHaveBeenCalledTimes(1);
+  });
+
+  it('reports a second early length stop after the one reasoning retry', async () => {
+    streamModelChatCompletion.mockImplementation(
+      async (_u: string, _request: unknown, _m: unknown, h: Handlers) => {
+        h.onReasoning('still reasoning');
+        h.onUsage?.({ prompt_tokens: 10, completion_tokens: 34_195, total_tokens: 34_205 });
+        h.onDone('length');
+      },
+    );
+    const messages: ChatMessage[] = [{ role: 'user', content: 'continue' }];
+
+    await runToolCallingLoop({
+      ...baseOptions(messages, 140_859),
+      maxOutputTokens: 140_347,
+    } as never);
+
+    expect(messages.at(-1)).toEqual({
+      role: 'assistant',
+      content: earlyServerLengthStopNotice(34_195, 140_347),
+    });
+    expect(streamModelChatCompletion).toHaveBeenCalledTimes(2);
   });
 
   // Session 79db75af: the model emitted EOS right after the injected

@@ -4,6 +4,7 @@ import type { ToolCall } from '../llm/types';
 import { StructuredOutputStripper } from '../tools/StructuredOutputParser';
 import { extractFallbackToolCalls } from '../tools/ToolCallFallback';
 import { MIN_ROUND_HEADROOM_TOKENS, reasoningReserve } from '../util/contextBudget';
+import { getLogger } from '../util/logger';
 import {
   loopRecoveryNudge,
   MAX_LOOP_RECOVERIES,
@@ -28,6 +29,7 @@ import {
   MID_TURN_COMPACTION_RESET_ROUNDS,
   MAX_ROUNDS_MESSAGE_PREFIX,
   OUTPUT_BUDGET_EXHAUSTED_NOTICE,
+  earlyServerLengthStopNotice,
   MAX_REASONING_STOP_RETRIES,
   REASONING_ONLY_STOP_NOTICE,
   reasoningStopRetryNudge,
@@ -60,6 +62,7 @@ export async function runToolCallingLoop(
   let forceCompaction = false;
   // The room a server's own context 400 stated; caps the retry of that round.
   let serverRoom: number | undefined;
+  const logger = getLogger();
 
   for (let round = 0; round < options.maxRounds; round++) {
     options.signal.throwIfAborted();
@@ -160,7 +163,11 @@ export async function runToolCallingLoop(
       options.onReasoning?.(token);
     };
 
-    let streamed: { finishReason: string | null; toolCalls: ToolCall[] | null };
+    let streamed: {
+      finishReason: string | null;
+      toolCalls: ToolCall[] | null;
+      completionTokens?: number;
+    };
     try {
       streamed = await streamOnce(
         options,
@@ -255,6 +262,18 @@ export async function runToolCallingLoop(
       : toolDefinitions.length > 0 && rawAssistant
         ? extractFallbackToolCalls(rawAssistant, toolDefinitions)
         : null;
+    const maxTokens = request.max_tokens;
+    const earlyLengthStop =
+      streamed.finishReason === 'length' &&
+      typeof maxTokens === 'number' &&
+      streamed.completionTokens !== undefined &&
+      streamed.completionTokens < 0.9 * maxTokens;
+    if (earlyLengthStop) {
+      logger.info(
+        `finish_reason=length completion_tokens=${streamed.completionTokens} ` +
+          `max_tokens=${maxTokens} early=true`,
+      );
+    }
     if (calls?.length) {
       try {
         loopGuard.beforeRound(calls, options.isMutatingTool);
@@ -350,6 +369,7 @@ export async function runToolCallingLoop(
       !assistantContent.trim() &&
       rawReasoning.trim().length > 0 &&
       streamed.finishReason !== 'cancelled';
+    const earlyReasoningStop = earlyLengthStop && stoppedWhileReasoning;
     // A normal stop always leaves an answer or a tool call; this one left only
     // thinking, so retry it once with thinking off. The nudge quotes the tail of
     // that reasoning (it is not otherwise sent back), so the retry acts on what
@@ -357,7 +377,7 @@ export async function runToolCallingLoop(
     if (
       !assistantContent &&
       stoppedWhileReasoning &&
-      streamed.finishReason !== 'length' &&
+      (streamed.finishReason !== 'length' || earlyReasoningStop) &&
       reasoningStopRetries < MAX_REASONING_STOP_RETRIES
     ) {
       reasoningStopRetries++;
@@ -374,12 +394,15 @@ export async function runToolCallingLoop(
     }
     if (!assistantContent && (streamed.finishReason === 'length' || stoppedWhileReasoning)) {
       streamedAssistant.completeAnswer(assistantContent, assistantReasoning);
+      const stopNotice =
+        streamed.finishReason === 'length'
+          ? earlyReasoningStop
+            ? earlyServerLengthStopNotice(streamed.completionTokens!, maxTokens!)
+            : OUTPUT_BUDGET_EXHAUSTED_NOTICE
+          : REASONING_ONLY_STOP_NOTICE;
       options.messages.push({
         role: 'assistant',
-        content:
-          streamed.finishReason === 'length'
-            ? OUTPUT_BUDGET_EXHAUSTED_NOTICE
-            : REASONING_ONLY_STOP_NOTICE,
+        content: stopNotice,
       });
       options.onMessagesChanged?.();
       options.onDone?.(streamed.finishReason);

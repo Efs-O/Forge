@@ -21,11 +21,16 @@ export async function streamOnce(
   onToken: (token: string) => void,
   onReasoning: (token: string) => void,
   offeredToolNames: readonly string[],
-): Promise<{ finishReason: string | null; toolCalls: ToolCall[] | null }> {
+): Promise<{
+  finishReason: string | null;
+  toolCalls: ToolCall[] | null;
+  completionTokens?: number;
+}> {
   const baseUrl = await options.resolveBaseUrl();
   options.onToolsOffered?.(offeredToolNames);
   return new Promise((resolve, reject) => {
     let capturedToolCalls: ToolCall[] | null = null;
+    let completionTokens: number | undefined;
     void streamModelChatCompletion(
       baseUrl,
       request,
@@ -33,13 +38,21 @@ export async function streamOnce(
       {
         onToken,
         onReasoning,
-        onDone: (finishReason) => resolve({ finishReason, toolCalls: capturedToolCalls }),
+        onDone: (finishReason) =>
+          resolve({
+            finishReason,
+            toolCalls: capturedToolCalls,
+            ...(completionTokens !== undefined ? { completionTokens } : {}),
+          }),
         onError: reject,
         onToolCalls: (calls) => {
           capturedToolCalls = calls;
         },
         ...(options.onToolCallProgress ? { onToolCallProgress: options.onToolCallProgress } : {}),
-        ...(options.onUsage ? { onUsage: options.onUsage } : {}),
+        onUsage: (usage) => {
+          completionTokens = usage.completion_tokens;
+          options.onUsage?.(usage);
+        },
       },
       options.signal,
       options.apiKey,

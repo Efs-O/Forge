@@ -229,6 +229,15 @@ export const OUTPUT_BUDGET_EXHAUSTED_NOTICE =
   'answer and no tool call. The thinking above is unfinished. Take the next concrete ' +
   'action directly instead of re-deriving it.';
 
+/** Transcript marker for a server-side stop before the requested output cap. */
+export function earlyServerLengthStopNotice(completionTokens: number, maxTokens: number): string {
+  return (
+    `Forge: the server stopped this round at ${completionTokens} of ${maxTokens} tokens with ` +
+    '`length`, before the output limit; the cause is the server, not the budget. The thinking ' +
+    'above is unfinished. Take the next concrete action directly instead of re-deriving it.'
+  );
+}
+
 /**
  * Transcript marker for a round the model ended itself (`finish_reason: stop`)
  * while still inside the thinking block — typically right after llama-server
