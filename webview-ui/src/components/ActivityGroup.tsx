@@ -6,6 +6,7 @@ import { sameRowList, toolNameAndDetail } from '../messageOps';
 import { summarizeGroup } from '../activityGroups';
 import { ActivityRow } from './ActivityRow';
 import { ThinkingGroup } from './ThinkingGroup';
+import type { PendingToolCall } from '../pendingToolCalls';
 
 export interface ActivityGroupProps {
   items: ActivityGroupItem[];
@@ -13,6 +14,8 @@ export interface ActivityGroupProps {
   live: boolean;
   /** The conversation is streaming (passed through to each `ActivityRow`). */
   streaming: boolean;
+  /** Calls whose arguments are still streaming, before a transcript row exists. */
+  pendingCalls?: readonly PendingToolCall[];
 }
 
 const Chevron = ({ expanded }: { expanded: boolean }): React.ReactElement => (
@@ -32,8 +35,17 @@ function itemKey(item: ActivityGroupItem): string {
   return item.steps[0]!.id;
 }
 
-function ActivityGroupView({ items, live, streaming }: ActivityGroupProps): React.ReactElement {
-  const [choice, setChoice] = useDisclosure('group', groupMessages(items)[0]!.id);
+function ActivityGroupView({
+  items,
+  live,
+  streaming,
+  pendingCalls = [],
+}: ActivityGroupProps): React.ReactElement {
+  const firstId =
+    groupMessages(items)[0]?.id ??
+    pendingCalls[0]?.toolCallId ??
+    `pending-${pendingCalls[0]?.index ?? 0}`;
+  const [choice, setChoice] = useDisclosure('group', firstId);
   const summary = summarizeGroup(items);
   const openedStep = items.some(
     (item) =>
@@ -41,31 +53,42 @@ function ActivityGroupView({ items, live, streaming }: ActivityGroupProps): Reac
   );
   const expanded = choice ?? openedStep;
   const status = summary.failed > 0 ? '✕' : summary.pending ? '○' : '✓';
-  const pendingTools = live
+  const recordedTools = live
     ? items.flatMap((item) =>
-        item.kind === 'step'
-          ? item.step.attempts
-              .flatMap((attempt) => attempt.tools)
-              .filter((tool) => tool.toolResultTotal === undefined && !tool.toolIsError)
-          : [],
+        item.kind === 'step' ? item.step.attempts.flatMap((attempt) => attempt.tools) : [],
       )
     : [];
-  const pending = pendingTools.at(-1);
-  const pendingLabel = pending ? toolNameAndDetail(pending) : undefined;
-  const pendingTarget = pending
-    ? displayDetail(pending.toolTarget ?? pendingLabel?.detail ?? '')
-    : '';
+  const recorded =
+    recordedTools
+      .filter((tool) => tool.toolResultTotal === undefined && !tool.toolIsError)
+      .at(-1) ?? recordedTools.at(-1);
+  const writing = pendingCalls.at(-1);
+  const recordedLabel = recorded ? toolNameAndDetail(recorded) : undefined;
+  const activeCount = summary.toolCalls + pendingCalls.length;
+  const activeName = writing
+    ? pendingCalls.length > 1
+      ? `${pendingCalls.length} calls running`
+      : writing.toolName
+    : recordedLabel?.name;
+  const activeTarget = displayDetail(
+    writing?.target ?? recorded?.toolTarget ?? recordedLabel?.detail ?? '',
+  );
+  const activePending = Boolean(
+    writing || (recorded && recorded.toolResultTotal === undefined && !recorded.toolIsError),
+  );
+  const activeFailed = Boolean(!writing && recorded?.toolIsError);
 
   return (
     <section className={`activity-group${expanded ? ' activity-group-open' : ''}`}>
       <button
         className={`activity-group-toggle${summary.failed > 0 ? ' has-failure' : ''}`}
         type="button"
+        disabled={items.length === 0}
         onClick={() => setChoice(!expanded)}
         aria-expanded={expanded}
       >
         <span className="activity-group-chevron">
-          <Chevron expanded={expanded} />
+          {items.length > 0 && <Chevron expanded={expanded} />}
         </span>
         <span
           className={`activity-group-status${summary.failed > 0 ? ' is-failed' : live ? ' is-live' : ''}`}
@@ -76,7 +99,7 @@ function ActivityGroupView({ items, live, streaming }: ActivityGroupProps): Reac
           {live
             ? 'Working'
             : `${summary.toolCalls} tool ${summary.toolCalls === 1 ? 'call' : 'calls'}`}
-          {live && ` · ${summary.toolCalls} ${summary.toolCalls === 1 ? 'call' : 'calls'}`}
+          {live && ` · ${activeCount} ${activeCount === 1 ? 'call' : 'calls'}`}
         </span>
         {summary.editCount > 0 && (
           <>
@@ -105,17 +128,21 @@ function ActivityGroupView({ items, live, streaming }: ActivityGroupProps): Reac
             [{summary.retries} {summary.retries === 1 ? 'retry' : 'retries'}]
           </span>
         )}
-        <span className="activity-group-details">{expanded ? 'Hide details' : 'Details'}</span>
+        {items.length > 0 && (
+          <span className="activity-group-details">{expanded ? 'Hide details' : 'Details'}</span>
+        )}
       </button>
-      {!expanded && pending && (
+      {!expanded && live && activeName && (
         <div className="activity-group-pending" role="status">
-          <span className="tool-row-status is-pending">○</span>
-          <span className="activity-group-pending-name">
-            {pendingTools.length > 1 ? `${pendingTools.length} calls running` : pendingLabel?.name}
+          <span
+            className={`tool-row-status ${activePending ? 'is-pending' : activeFailed ? 'is-error' : 'is-ok'}`}
+          >
+            {activePending ? '○' : activeFailed ? '✕' : '✓'}
           </span>
-          {pendingTools.length === 1 && pendingTarget && (
-            <span className="activity-group-pending-target" title={pendingTarget}>
-              {pendingTarget}
+          <span className="activity-group-pending-name">{activeName}</span>
+          {pendingCalls.length <= 1 && activeTarget && (
+            <span className="activity-group-pending-target" title={activeTarget}>
+              {activeTarget}
             </span>
           )}
         </div>
@@ -141,5 +168,6 @@ export const ActivityGroup = React.memo(
   (a, b) =>
     a.live === b.live &&
     a.streaming === b.streaming &&
+    a.pendingCalls === b.pendingCalls &&
     sameRowList(groupMessages(a.items), groupMessages(b.items)),
 );

@@ -30,14 +30,16 @@ delivery, or persisted-session format changes are intended.
    `ActivityGroup`, default live and completed groups
    closed. Remove automatic disclosure writes so a live group does not remain
    open after completion. User-opened choices still survive remounts and turn
-   sync. Failures/retries/edits remain visible in the summary. Show a single
-   concise pending call below a closed live group, and avoid duplicating the
-   separate streamed-argument `PendingToolCallRow`. Keep exact underlying
-   commands/results in the second disclosure level. The summary and pending
-   line use actual recorded metadata; do not invent semantic descriptions.
-   The live summary also retains edit totals and failures. Streamed arguments
-   and a recorded pending call are two consecutive phases; keep one visible
-   concise progress line across the transition. Opening **Details** reveals
+   sync. Failures/retries/edits remain visible in the summary. Keep one
+   concise live-call line inside the closed group from argument streaming
+   through recorded execution and completion. Keep that line while further
+   calls accumulate, so each new call updates the card instead of appearing
+   below it and then collapsing into it. Before the first recorded tool row,
+   render the streamed call in a provisional group card. `full` and `compact`
+   keep their separate `PendingToolCallRow`. Keep exact underlying
+   commands/results in the second disclosure level. The summary and live-call
+   line use actual metadata; do not invent semantic descriptions. The live
+   summary also retains edit totals and failures. Opening **Details** reveals
    individual compact step rows, without another folded run. Opening a step
    reveals its thinking row, full command, and result; reasoning text and diff
    hunks may keep their own disclosures. `full` keeps its current row structure.
@@ -99,6 +101,10 @@ The palette review found bright green values in shared accents, diff additions,
 syntax highlighting, model indicators, and theme-driven success marks. Those
 webview-owned values now use muted dark and light theme tokens. The local queued
 prompt uses one right-aligned card for text, delivery state, and Cancel.
+After installation, the owner observed a visible row-to-card collapse on each
+new tool call. The grouped view now keeps the live call preview in the card
+across argument streaming, execution, and consecutive calls. A DOM transition
+test covers writing → recorded → accumulated calls.
 
 ## Review checklist
 

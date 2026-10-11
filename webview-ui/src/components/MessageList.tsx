@@ -36,7 +36,7 @@ interface Props {
    */
   active: boolean;
   activityView: ActivityViewMode;
-  /** Tool calls the model is still writing; shown below the rows until they land. */
+  /** Tool calls the model is still writing; grouped view keeps these in its live card. */
   pendingToolCalls?: readonly PendingToolCall[];
 }
 
@@ -247,7 +247,9 @@ export function MessageList({
     return settleToBottom();
   }, [active, settleToBottom]);
 
-  const isEmpty = rows.length === 0 && queuedPrompts.length === 0;
+  const isEmpty = rows.length === 0 && queuedPrompts.length === 0 && pendingToolCalls.length === 0;
+  const groupedPending = activityView === 'grouped' && pendingToolCalls.length > 0;
+  const pendingInLastGroup = groupedPending && rows.at(-1)?.kind === 'activityGroup';
 
   return (
     <div
@@ -272,6 +274,9 @@ export function MessageList({
             items={row.items}
             live={streaming && rowIndex === rows.length - 1}
             streaming={streaming}
+            pendingCalls={
+              pendingInLastGroup && rowIndex === rows.length - 1 ? pendingToolCalls : undefined
+            }
           />
         ) : (
           <Message
@@ -283,9 +288,13 @@ export function MessageList({
           />
         ),
       )}
-      {pendingToolCalls.map((call) => (
-        <PendingToolCallRow key={call.toolCallId ?? `pending-${call.index}`} call={call} />
-      ))}
+      {groupedPending && !pendingInLastGroup && (
+        <ActivityGroup items={[]} live streaming={streaming} pendingCalls={pendingToolCalls} />
+      )}
+      {!groupedPending &&
+        pendingToolCalls.map((call) => (
+          <PendingToolCallRow key={call.toolCallId ?? `pending-${call.index}`} call={call} />
+        ))}
       {resumedNote && (
         <div className="resumed-marker" role="separator">
           <span>{resumedNote}</span>

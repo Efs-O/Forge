@@ -20,9 +20,10 @@
   font-size: 13px;
 }
 
-.activity-group-toggle:hover {
+.activity-group-toggle:not(:disabled):hover {
   background: var(--vscode-list-hoverBackground, #2a2d2e);
 }
+.activity-group-toggle:disabled { cursor: default; }
 
 .activity-group-chevron {
   display: inline-flex;
