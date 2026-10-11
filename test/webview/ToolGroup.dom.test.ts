@@ -11,6 +11,7 @@ import type { AppMessage } from '../../webview-ui/src/messageOps';
 
 const { ToolGroup } = await import('../../webview-ui/src/components/ToolGroup');
 const React = await import('react');
+const { resetDisclosures } = await import('../../webview-ui/src/disclosureState');
 
 const tools: AppMessage[] = [
   { id: 'one', role: 'tool', content: 'read_file → src/a.ts', toolName: 'read_file' },
@@ -22,6 +23,7 @@ let container: HTMLDivElement;
 let root: Root;
 
 beforeEach(() => {
+  resetDisclosures();
   container = document.createElement('div');
   document.body.appendChild(container);
   root = createRoot(container);
@@ -48,5 +50,13 @@ describe('ToolGroup', () => {
     expect(
       [...container.querySelectorAll('.tool-row-name')].map((node) => node.textContent),
     ).toEqual(['read_file', 'search_code', 'read_file']);
+  });
+
+  it('keeps a manually opened tool group visible across a remount', () => {
+    act(() => root.render(React.createElement(ToolGroup, { tools })));
+    act(() => container.querySelector<HTMLButtonElement>('.tool-group-toggle')!.click());
+    act(() => root.render(React.createElement('div')));
+    act(() => root.render(React.createElement(ToolGroup, { tools })));
+    expect(container.querySelector('.tool-group-body')).not.toBeNull();
   });
 });

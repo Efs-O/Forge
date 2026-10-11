@@ -13,6 +13,7 @@ import {
 import { WorkspaceRootUriContext, workspaceFileUri } from '../workspaceRootUri';
 import { ImageLightbox } from './ImageLightbox';
 import { formatDuration } from '../../../src/util/formatDuration';
+import { useDisclosure } from '../disclosureState';
 
 const ChevronDown = (): React.ReactElement => (
   <svg width="10" height="6" viewBox="0 0 10 6" fill="currentColor" aria-hidden="true">
@@ -98,7 +99,8 @@ export function ToolRow({
   message: AppMessage;
   nested?: boolean;
 }): React.ReactElement {
-  const [open, setOpen] = useState(false);
+  const [choice, setChoice] = useDisclosure('tool', message.id);
+  const open = choice ?? false;
   const { name: toolName, detail } = toolNameAndDetail(message);
   const name = nested ? 'result' : toolName;
 
@@ -128,7 +130,7 @@ export function ToolRow({
           <button
             className="tool-row-toggle"
             type="button"
-            onClick={() => setOpen((v) => !v)}
+            onClick={() => setChoice(!open)}
             aria-expanded={open}
             title={open ? 'Hide result' : 'Show full result'}
           >

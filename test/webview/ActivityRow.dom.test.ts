@@ -74,12 +74,22 @@ describe('ActivityRow', () => {
     expect(container.textContent?.match(/run_terminal/gu)).toHaveLength(1);
   });
 
-  it('forces a pending step open only while streaming', () => {
+  it('keeps a running step open after it completes', () => {
     const pending = step({ attempts: rounds([tool('pending', { toolResult: undefined, toolResultTotal: undefined })]) });
     render(pending, true);
     expect(container.querySelector('.activity-row-body')).not.toBeNull();
     expect(container.querySelector('.tool-row-status')?.textContent).toBe('○');
-    render(pending, false);
+    const completed = step({ attempts: rounds([tool('pending', { toolResult: 'done', toolResultTotal: 4 })]) });
+    render(completed, false);
+    expect(container.querySelector('.activity-row-body')).not.toBeNull();
+    expect(container.querySelector('.tool-row-status')?.textContent).toBe('✓');
+  });
+
+  it('honours a manual close of a running step after completion', () => {
+    const pending = step({ attempts: rounds([tool('pending')]) });
+    render(pending, true);
+    toggle();
+    render(step({ attempts: rounds([tool('pending', { toolResult: 'done', toolResultTotal: 4 })]) }), false);
     expect(container.querySelector('.activity-row-body')).toBeNull();
   });
 

@@ -38,7 +38,7 @@ function itemKey(item: FoldedItem): string {
 function ActivityGroupView({ items, live, streaming }: ActivityGroupProps): React.ReactElement {
   const [manualExpanded, setManualExpanded] = useDisclosure('group', groupMessages(items)[0]!.id);
   const summary = summarizeGroup(items);
-  const expanded = manualExpanded ?? (live || (streaming && summary.pending) || summary.failed > 0);
+  const expanded = manualExpanded ?? true;
   const status = summary.failed > 0 ? '✕' : streaming && summary.pending ? '○' : '✓';
 
   return (

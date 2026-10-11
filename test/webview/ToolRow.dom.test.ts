@@ -24,6 +24,7 @@ let posted: unknown[] = [];
 
 const { ToolRow } = await import('../../webview-ui/src/components/ToolRow');
 const React = await import('react');
+const { resetDisclosures } = await import('../../webview-ui/src/disclosureState');
 
 const LONG_REPORT = ['# Report', '', 'First paragraph.', '', 'Second paragraph.'].join('\n') +
   '\n'.padEnd(400, 'x');
@@ -42,6 +43,7 @@ let container: HTMLDivElement;
 let root: Root;
 
 beforeEach(() => {
+  resetDisclosures();
   posted = [];
   container = document.createElement('div');
   document.body.appendChild(container);
@@ -74,6 +76,15 @@ describe('ToolRow', () => {
 
     expect(container.querySelector('.tool-row-body')).toBeNull();
     expect(container.querySelector('.tool-row-size')?.textContent).toBe('3.1k chars');
+  });
+
+  it('keeps an opened result visible across a row remount', () => {
+    const message = toolMessage({ toolResult: LONG_REPORT, toolResultTotal: 3100 });
+    render(message);
+    act(() => container.querySelector<HTMLButtonElement>('.tool-row-toggle')!.click());
+    act(() => root.render(React.createElement('div')));
+    render(message);
+    expect(container.querySelector('.tool-row-body')).not.toBeNull();
   });
 
   it('expands a prose result to the full report with its structure intact', () => {

@@ -103,4 +103,26 @@ describe('open/closed choices across remounts', () => {
     click('.activity-row-header');
     expect(container.querySelector('.activity-row-body')).toBeNull();
   });
+
+  it('keeps an automatically opened call visible when completed calls fold into a run', () => {
+    const completed = (id: string): ActivityStep => ({
+      attempts: [{ thoughts: [], tools: [tool(id, { toolResult: 'done', toolResultTotal: 4 })] }],
+      diffs: [],
+    });
+    const running: ActivityStep = {
+      attempts: [{ thoughts: [], tools: [tool('second', { toolResult: undefined, toolResultTotal: undefined })] }],
+      diffs: [],
+    };
+    show(React.createElement(ActivityRow, { step: running, streaming: true }));
+    expect(container.querySelector('.activity-row-body')).not.toBeNull();
+
+    const items: ActivityGroupItem[] = [
+      { kind: 'step', step: completed('first') },
+      { kind: 'step', step: completed('second') },
+    ];
+    show(React.createElement(ActivityGroup, { items, live: false, streaming: false }));
+    expect(container.querySelector('.activity-run .activity-row-header')?.getAttribute('aria-expanded')).toBe('true');
+    const steps = container.querySelectorAll('.activity-run .activity-row-body .activity-row-header');
+    expect(steps[1]?.getAttribute('aria-expanded')).toBe('true');
+  });
 });

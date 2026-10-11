@@ -1,7 +1,7 @@
 import React from 'react';
 import { stepMessages, type ActivityStep } from '../activityRows';
 import { runLabel } from '../activityRuns';
-import { useDisclosure } from '../disclosureState';
+import { readDisclosure, useDisclosure } from '../disclosureState';
 import { sameRowList } from '../messageOps';
 import { ActivityRow } from './ActivityRow';
 
@@ -18,7 +18,10 @@ function ActivityRunRowView({
   streaming,
 }: ActivityRunRowProps): React.ReactElement {
   const [manualOpen, setManualOpen] = useDisclosure('run', stepMessages(steps[0]!)[0]!.id);
-  const open = manualOpen ?? false;
+  // If a running step was visible before it joined this completed run, keep
+  // the run open so the step does not disappear at the fold boundary.
+  const open =
+    manualOpen ?? steps.some((step) => readDisclosure('step', stepMessages(step)[0]!.id) === true);
   const label = runLabel(toolName, steps);
 
   return (

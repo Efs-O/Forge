@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useEffect } from 'react';
 import type { AppMessage } from '../reducer';
 import {
   displayDetail,
@@ -87,10 +87,14 @@ function editSummary(step: ActivityStep): { added: number; removed: number; meas
 
 function ActivityRowView({ step, streaming }: ActivityRowProps): React.ReactElement | null {
   const [manualOpen, setManualOpen] = useDisclosure('step', stepMessages(step)[0]!.id);
-  // The reader's own toggle wins. Otherwise a running call forces the step
-  // open, and so does a reasoning bubble the reader opened before it folded
-  // into this step (it was a standalone thinking row until the call arrived).
-  const open = manualOpen ?? ((streaming && hasPendingCall(step)) || openedThought(step));
+  const pending = streaming && hasPendingCall(step);
+  // Remember an automatically opened call so completion or a remount into a
+  // folded run cannot hide it. A reader's explicit close still wins.
+  useEffect(() => {
+    if (pending && manualOpen === undefined) setManualOpen(true);
+  }, [pending, manualOpen, setManualOpen]);
+  // An opened reasoning bubble also reveals its step when it folds into a call.
+  const open = manualOpen ?? (pending || openedThought(step));
   const final = finalAttempt(step);
   const primary = final[0];
   if (!primary) return null;

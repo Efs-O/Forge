@@ -1,6 +1,7 @@
-import React, { useMemo, useState } from 'react';
+import React, { useMemo } from 'react';
 import type { AppMessage } from '../reducer';
 import { sameRowList } from '../messageOps';
+import { useDisclosure } from '../disclosureState';
 import { ToolRow } from './ToolRow';
 
 const ChevronDown = (): React.ReactElement => (
@@ -26,7 +27,8 @@ function summary(tools: readonly AppMessage[]): string {
 
 /** A compact, ordered view of the parallel tool calls issued in one agent step. */
 function ToolGroupView({ tools }: { tools: AppMessage[] }): React.ReactElement | null {
-  const [open, setOpen] = useState(false);
+  const [choice, setChoice] = useDisclosure('toolGroup', tools[0]?.id ?? '');
+  const open = choice ?? false;
   const label = useMemo(() => summary(tools), [tools]);
 
   if (tools.length < 2) return tools[0] ? <ToolRow message={tools[0]} /> : null;
@@ -36,7 +38,7 @@ function ToolGroupView({ tools }: { tools: AppMessage[] }): React.ReactElement |
       <button
         className="tool-group-toggle"
         type="button"
-        onClick={() => setOpen((value) => !value)}
+        onClick={() => setChoice(!open)}
         aria-expanded={open}
       >
         <span className="tool-group-chevron">{open ? <ChevronDown /> : <ChevronRight />}</span>

@@ -78,7 +78,6 @@ describe('ActivityGroup', () => {
       false,
       false,
     );
-    toggle();
     const run = container.querySelector<HTMLButtonElement>('.activity-run .activity-row-header')!;
     expect(run.textContent).toContain('shell×3· grep, sed');
     act(() => run.click());
@@ -92,12 +91,12 @@ describe('ActivityGroup', () => {
     expect(container.querySelectorAll('.activity-row')).toHaveLength(2);
   });
 
-  it('collapses when live ends if the reader did not toggle it', () => {
+  it('stays expanded when live ends if the reader did not toggle it', () => {
     const items = activityItems();
     render(items, true, true);
     render(items, false, false);
-    expect(container.querySelector('.activity-group-toggle')?.getAttribute('aria-expanded')).toBe('false');
-    expect(container.querySelector('.activity-group-body')).toBeNull();
+    expect(container.querySelector('.activity-group-toggle')?.getAttribute('aria-expanded')).toBe('true');
+    expect(container.querySelectorAll('.activity-row')).toHaveLength(2);
   });
 
   it('keeps a manual toggle across the live-to-not-live transition', () => {

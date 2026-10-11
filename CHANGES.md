@@ -1,5 +1,9 @@
 # Forge — Recent Changes
 
+## 0.17.18
+
+- Running tool rows and their results stay open when the call completes or folds into a run. Manually closed rows stay closed. Grouped tool activity stays expanded after the answer begins, and opened result panels survive row remounts.
+
 ## 0.17.17
 
 - `max_tokens` no longer overshoots the context. On a 200K-context llama-server, 100 of 571 requests in five recorded agent sessions were refused with "prompt + max tokens exceeds the context" and retried. The estimate now counts tool-call arguments on assistant messages that also carry text (they counted 0), counts each image part as 1,100 tokens (measured ceiling ~1,050; they counted 0), and, when the transcript only grew since the last request, starts from that request's reported `prompt_tokens + completion_tokens` and estimates only the new messages, with a safety margin equal to that estimate. Room is measured on the exact request sent, including the native-JSON fallback request. The server's own 400 remains the backstop.
