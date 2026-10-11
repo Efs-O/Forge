@@ -1,6 +1,6 @@
 import { HtmlDocumentBoilerplateStripper } from '../llm/HtmlDocumentBoilerplateStripper';
 import { ThinkingChannelStripper } from '../llm/ThinkingChannelStripper';
-import type { ToolCall } from '../llm/types';
+import type { ChatCompletionRequest, ToolCall } from '../llm/types';
 import { StructuredOutputStripper } from '../tools/StructuredOutputParser';
 import { extractFallbackToolCalls } from '../tools/ToolCallFallback';
 import { MIN_ROUND_HEADROOM_TOKENS, reasoningReserve } from '../util/contextBudget';
@@ -18,6 +18,7 @@ import type { ToolCallingLoopOptions, ToolCallingLoopResult } from './toolCallin
 
 export type { ToolCallingLoopOptions, ToolCallingLoopResult } from './toolCallingLoopTypes';
 import {
+  applyOutputCap,
   asTruncation,
   CONTEXT_INPUT_EXHAUSTED_MESSAGE,
   CONTEXT_EXHAUSTED_MESSAGE,
@@ -66,30 +67,59 @@ export async function runToolCallingLoop(
 
   for (let round = 0; round < options.maxRounds; round++) {
     options.signal.throwIfAborted();
-    const measure = () => {
-      const preparedResult = options.prepareMessages
-        ? options.prepareMessages([...options.messages])
-        : [...options.messages];
-      const messages = Array.isArray(preparedResult) ? preparedResult : preparedResult.messages;
-      const estimated = options.getOutputRoom?.(messages);
-      const outputRoom =
-        serverRoom === undefined ? estimated : Math.min(serverRoom, estimated ?? serverRoom);
-      return {
-        prepared: messages,
-        outputRoom,
-        ...(Array.isArray(preparedResult) ? {} : { rawUsed: preparedResult.rawUsed }),
-        trimAdvanced: !Array.isArray(preparedResult) && preparedResult.trimAdvanced,
-      };
-    };
-    let { prepared, outputRoom, rawUsed, trimAdvanced } = measure();
     // A recovery round runs with thinking off, so the reasoning reserve does
     // not apply to it — see `contextExhaustionReason` and `suppressThinking`.
     const suppressesThinking =
       (truncationRecoveries > 0 || reasoningStopRetries > 0) &&
       (options.canUseThinkingKwargs ?? false);
+    // Unlocking mid-turn costs one cold re-prefill, paid only on a cut-off turn.
+    const toolDefinitions = options
+      .getToolDefinitions()
+      .filter(
+        ({ function: { name } }) =>
+          truncatedThisTurn || !options.offerAfterTruncation?.includes(name),
+      );
+    const offeredToolNames = toolDefinitions.map((definition) => definition.function.name);
+    const measureOutput = (request: ChatCompletionRequest) => {
+      const budget = options.getOutputRoom?.(request.messages, request.tools ?? []);
+      const estimated = typeof budget === 'object' ? budget.outputRoom : budget;
+      return {
+        outputRoom:
+          serverRoom === undefined ? estimated : Math.min(serverRoom, estimated ?? serverRoom),
+        extraMarginTokens: typeof budget === 'object' ? budget.extraMarginTokens : 0,
+      };
+    };
+    const measure = () => {
+      const preparedResult = options.prepareMessages
+        ? options.prepareMessages([...options.messages])
+        : [...options.messages];
+      const messages = Array.isArray(preparedResult) ? preparedResult : preparedResult.messages;
+      // Measure the normalized messages/tools we will send, including fallback
+      // instructions, rather than the earlier prepared transcript.
+      const built = buildRoundRequest({
+        model: options.model,
+        prepared: messages,
+        toolDefinitions,
+        nativeTools: options.nativeTools,
+        stripAllTools: options.stripAllTools,
+        includeUsage: options.includeUsage,
+        maxOutputTokens: options.maxOutputTokens,
+        canUseThinkingKwargs: options.canUseThinkingKwargs,
+        suppressThinking: suppressesThinking,
+        outputRoom: undefined,
+      });
+      return {
+        built,
+        ...measureOutput(built.request),
+        ...(Array.isArray(preparedResult) ? {} : { rawUsed: preparedResult.rawUsed }),
+        trimAdvanced: !Array.isArray(preparedResult) && preparedResult.trimAdvanced,
+      };
+    };
+    let { built, outputRoom, extraMarginTokens, rawUsed, trimAdvanced } = measure();
     const exhaustion = (): string | undefined =>
       contextExhaustionReason({
         outputRoom,
+        extraMarginTokens,
         reasoningReserve: reasoningReserve(options.model),
         suppressesThinking,
         truncationRecoveries,
@@ -107,7 +137,7 @@ export async function runToolCallingLoop(
         truncationRecoveries = Math.min(truncationRecoveries, 1);
         options.onMessagesChanged?.();
         serverRoom = undefined;
-        ({ prepared, outputRoom, rawUsed, trimAdvanced } = measure());
+        ({ built, outputRoom, extraMarginTokens, rawUsed, trimAdvanced } = measure());
       } else if (forceCompaction) {
         throw new Error(CONTEXT_EXHAUSTED_MESSAGE);
       }
@@ -121,28 +151,7 @@ export async function runToolCallingLoop(
     // ~4k tokens before the tool call even began — so the retry started with
     // LESS room than the attempt that just failed, and cut at the identical
     // byte. Spending the whole budget on the write is the point of the retry.
-    const suppressThinking = suppressesThinking;
-    // Unlocking mid-turn costs one cold re-prefill, paid only on a cut-off turn.
-    const toolDefinitions = options
-      .getToolDefinitions()
-      .filter(
-        ({ function: { name } }) =>
-          truncatedThisTurn || !options.offerAfterTruncation?.includes(name),
-      );
-    const offeredToolNames = toolDefinitions.map((definition) => definition.function.name);
-    const built = buildRoundRequest({
-      model: options.model,
-      prepared,
-      toolDefinitions,
-      nativeTools: options.nativeTools,
-      stripAllTools: options.stripAllTools,
-      includeUsage: options.includeUsage,
-      maxOutputTokens: options.maxOutputTokens,
-      canUseThinkingKwargs: options.canUseThinkingKwargs,
-      suppressThinking,
-      outputRoom,
-    });
-    const request = built.request;
+    let request = applyOutputCap(built.request, outputRoom, extraMarginTokens);
     let rawAssistant = '';
     let rawReasoning = '';
     const streamedAssistant = new StreamedAssistantTurn(options.messages);
@@ -231,10 +240,13 @@ export async function runToolCallingLoop(
       thinking = options.stripThinkingChannels ? new ThinkingChannelStripper() : null;
       structured = new StructuredOutputStripper();
       html = new HtmlDocumentBoilerplateStripper();
-      const fallbackRequest = built.fallbackRequest;
+      ({ outputRoom, extraMarginTokens } = measureOutput(built.fallbackRequest));
+      const fallbackRefusal = exhaustion();
+      if (fallbackRefusal) throw new Error(fallbackRefusal);
+      request = applyOutputCap(built.fallbackRequest, outputRoom, extraMarginTokens);
       streamed = await streamOnce(
         options,
-        fallbackRequest,
+        request,
         tokenHandler,
         reasoningHandler,
         offeredToolNames,

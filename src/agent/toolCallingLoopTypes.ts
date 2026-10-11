@@ -2,6 +2,7 @@ import type { ModelConfig } from '../config/types';
 import type { ToolCallProgressHandler, UsageHandler } from '../llm/OpenAIClient';
 import type { ChatMessage, ToolCall, ToolDefinition } from '../llm/types';
 import type { ToolResultContextResult } from './toolResultContext';
+import type { OutputRoomBudget, PromptRequestSnapshot } from '../util/contextBudget';
 
 /** Inputs and outputs shared by the tool-calling loop and its turn adapter. */
 export interface ToolCallingLoopOptions {
@@ -44,7 +45,7 @@ export interface ToolCallingLoopOptions {
   onRoundNarration?: (text: string) => void;
   /** Request exact provider usage in the final stream frame. */
   includeUsage?: boolean;
-  onUsage?: UsageHandler;
+  onUsage?: (usage: Parameters<UsageHandler>[0], request: PromptRequestSnapshot) => void;
   /** Claim messages waiting for the next safe gap after a completed tool round. */
   drainTells?: () => Promise<{
     messages: ChatMessage[];
@@ -52,8 +53,11 @@ export interface ToolCallingLoopOptions {
   }>;
   /** Fired when a tool call was cut off and the loop asks for it in chunks. */
   onTruncatedToolCall?: (info: { toolName: string | undefined; approxBytes: number }) => void;
-  /** Output tokens the model may still generate for these messages. */
-  getOutputRoom?: (messages: ChatMessage[]) => number | undefined;
+  /** Output room and optional extra slack for the actual normalized request. */
+  getOutputRoom?: (
+    messages: ChatMessage[],
+    tools: ToolDefinition[],
+  ) => number | OutputRoomBudget | undefined;
   isMutatingTool?: (name: string) => boolean;
   /** Compacts between rounds; `exhausted` means the next round cannot fit. */
   compactMidTurn?: (request: {

@@ -1,5 +1,9 @@
 # Forge — Recent Changes
 
+## 0.17.17
+
+- `max_tokens` no longer overshoots the context. On a 200K-context llama-server, 100 of 571 requests in five recorded agent sessions were refused with "prompt + max tokens exceeds the context" and retried. The estimate now counts tool-call arguments on assistant messages that also carry text (they counted 0), counts each image part as 1,100 tokens (measured ceiling ~1,050; they counted 0), and, when the transcript only grew since the last request, starts from that request's reported `prompt_tokens + completion_tokens` and estimates only the new messages, with a safety margin equal to that estimate. Room is measured on the exact request sent, including the native-JSON fallback request. The server's own 400 remains the backstop.
+
 ## 0.17.16
 
 - The built-in prompt's sections are wrapped in XML tags: `<rules>`, `<environment>` (date, workspace root), `<project_instructions>`, `<selected_code>` and `<custom_instructions>` replace the "Rules:" header, the "--- Project Instructions ---" markers and the "Selected code:" label. The verify rule goes back to 0.17.13's "review what you wrote once", so the bench compares tags against runs 25 and 28.

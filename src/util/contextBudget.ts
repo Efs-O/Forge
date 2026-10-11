@@ -1,4 +1,4 @@
-import type { ChatMessage } from '../llm/types';
+import type { ChatCompletionRequest, ChatMessage, ToolDefinition } from '../llm/types';
 import type { ModelConfig, LlamaServerConfig } from '../config/types';
 
 /**
@@ -98,18 +98,26 @@ export const SYSTEM_AND_TEMPLATE_OVERHEAD = 900;
  */
 export const MIN_ROUND_HEADROOM_TOKENS = 4000;
 
-export function estimateTokens(messages: ChatMessage[]): number {
-  return messages.reduce((sum, m) => {
+/** Measured image ceiling (~1,050 tokens); 1,100 covers rounding/tokenizer variation. */
+export const IMAGE_PART_TOKENS = 1100;
+
+/** Chat-template delimiters for each message appended after a measured request. */
+const ADDED_MESSAGE_TOKENS = 16;
+
+function estimateTokenParts(messages: ChatMessage[]): { text: number; images: number } {
+  let text = 0;
+  let images = 0;
+  for (const m of messages) {
     let chars = 0;
     if (typeof m.content === 'string') {
       chars += m.content.length;
     } else if (Array.isArray(m.content)) {
       for (const part of m.content) {
         if (part.type === 'text') chars += part.text.length;
+        else if (part.type === 'image_url') images += IMAGE_PART_TOKENS;
       }
-    } else if (m.content === null && m.tool_calls?.length) {
-      chars += JSON.stringify(m.tool_calls).length;
     }
+    if (m.tool_calls?.length) chars += JSON.stringify(m.tool_calls).length;
     // `reasoning` is deliberately NOT counted: it is kept on the message for the
     // sidebar's thinking pane and is not what gets sent. Counting it inflated
     // the estimate by the whole turn's thinking, since ToolCallingLoop attaches
@@ -117,8 +125,14 @@ export function estimateTokens(messages: ChatMessage[]): number {
     // is `reasoning_content`, set only on the model-facing copy, so that counts.
     if (m.reasoning_content) chars += m.reasoning_content.length;
     const rate = m.role === 'tool' ? TOOL_RESULT_CHARS_PER_TOKEN : CHARS_PER_TOKEN;
-    return sum + Math.ceil(chars / rate);
-  }, 0);
+    text += Math.ceil(chars / rate);
+  }
+  return { text, images };
+}
+
+export function estimateTokens(messages: ChatMessage[]): number {
+  const { text, images } = estimateTokenParts(messages);
+  return text + images;
 }
 
 /** Token cost of the tool schemas, which the chat template renders into every prompt. */
@@ -206,8 +220,10 @@ export function perSlotContext(model: ModelConfig, server?: LlamaServerConfig): 
 }
 
 export interface ContextBudget {
-  /** Estimated prompt tokens: messages + tool schemas + template overhead. */
+  /** Prompt tokens, anchored to usage when possible, otherwise fully estimated. */
   used: number;
+  /** Additional slack for the estimated tail; applyOutputCap owns subtraction. */
+  extraMarginTokens: number;
   /** Per-slot context window. 0 when unknown. */
   max: number;
   /**
@@ -241,23 +257,134 @@ export function promptEstimateScale(estimated: number, reported: number): number
   return Math.min(MAX_ESTIMATE_SCALE, Math.max(1, reported / estimated));
 }
 
+/** Immutable snapshot taken before streaming, never a reference to mutable transcript rows. */
+export interface PromptRequestSnapshot {
+  messageCount: number;
+  prefix: string;
+  tools: string;
+  model: string;
+  estimatedPrompt: number;
+}
+
+export interface PromptAnchor extends PromptRequestSnapshot {
+  promptTokens: number;
+  completionTokens: number;
+}
+
+/** Structural runtime state: neither field belongs in conversation persistence. */
+interface PromptBudgetState {
+  promptEstimateScale?: number;
+  promptAnchor?: PromptAnchor;
+}
+
+export interface OutputRoomBudget {
+  /** Undefined only for an unknown window; zero means exhausted. */
+  outputRoom: number | undefined;
+  extraMarginTokens: number;
+}
+
+export function snapshotPromptRequest(request: ChatCompletionRequest): PromptRequestSnapshot {
+  return {
+    messageCount: request.messages.length,
+    prefix: JSON.stringify(request.messages),
+    tools: JSON.stringify(request.tools ?? []),
+    model: request.model,
+    estimatedPrompt:
+      estimateTokens(request.messages) +
+      estimateToolTokens(request.tools ?? []) +
+      SYSTEM_AND_TEMPLATE_OVERHEAD,
+  };
+}
+
+/** Keep request/usage bookkeeping out of the sidebar's turn orchestration. */
+export function createOutputBudgetTracker(
+  state: PromptBudgetState,
+  model: ModelConfig,
+  server?: LlamaServerConfig,
+): {
+  onUsage: (
+    usage: { prompt_tokens: number; completion_tokens: number },
+    request: PromptRequestSnapshot,
+  ) => void;
+  getOutputRoom: (messages: ChatMessage[], tools: ToolDefinition[]) => OutputRoomBudget;
+} {
+  return {
+    onUsage: (usage, request) => {
+      const scale = promptEstimateScale(request.estimatedPrompt, usage.prompt_tokens);
+      if (scale !== undefined) state.promptEstimateScale = scale;
+      if (
+        Number.isFinite(usage.prompt_tokens) &&
+        usage.prompt_tokens > 0 &&
+        Number.isFinite(usage.completion_tokens) &&
+        usage.completion_tokens >= 0
+      ) {
+        state.promptAnchor = {
+          ...request,
+          promptTokens: usage.prompt_tokens,
+          completionTokens: usage.completion_tokens,
+        };
+      } else {
+        delete state.promptAnchor;
+      }
+    },
+    getOutputRoom: (messages, tools) => {
+      const budget = computeContextBudget({
+        messages,
+        tools,
+        toolTokens: estimateToolTokens(tools),
+        model,
+        server,
+        estimateScale: state.promptEstimateScale,
+        anchor: state.promptAnchor,
+      });
+      return {
+        outputRoom: budget.max > 0 ? budget.outputRoom : undefined,
+        extraMarginTokens: budget.extraMarginTokens,
+      };
+    },
+  };
+}
+
 export function computeContextBudget(input: {
   messages: ChatMessage[];
   toolTokens?: number;
+  /** Actual offered schemas; changing them invalidates the measured prompt. */
+  tools?: ToolDefinition[];
+  anchor?: PromptAnchor | undefined;
   model: ModelConfig | undefined;
   server?: LlamaServerConfig | undefined;
   /** From `promptEstimateScale`; 1 when the server has not reported yet. */
-  estimateScale?: number;
+  estimateScale?: number | undefined;
 }): ContextBudget {
   const estimated =
     estimateTokens(input.messages) + (input.toolTokens ?? 0) + SYSTEM_AND_TEMPLATE_OVERHEAD;
-  const used = Math.ceil(estimated * (input.estimateScale ?? 1));
+  let used = Math.ceil(estimated * (input.estimateScale ?? 1));
+  let extraMarginTokens = 0;
+  const { anchor, messages } = input;
+  if (
+    anchor &&
+    anchor.model === input.model?.name &&
+    anchor.tools === JSON.stringify(input.tools ?? []) &&
+    messages.length > anchor.messageCount &&
+    messages[anchor.messageCount]?.role === 'assistant' &&
+    JSON.stringify(messages.slice(0, anchor.messageCount)) === anchor.prefix
+  ) {
+    // The generated assistant is already paid for by completion_tokens, including
+    // hidden thinking. Only later messages (tool results, user input) are estimated.
+    const tail = estimateTokenParts(messages.slice(anchor.messageCount + 1));
+    const estimatedNewPart =
+      Math.ceil(tail.text * Math.max(input.estimateScale ?? 1, 1)) +
+      tail.images +
+      ADDED_MESSAGE_TOKENS * (messages.length - anchor.messageCount);
+    used = anchor.promptTokens + anchor.completionTokens + estimatedNewPart;
+    extraMarginTokens = Math.ceil(1.0 * estimatedNewPart);
+  }
   const max = input.model ? perSlotContext(input.model, input.server) : 0;
-  if (max <= 0) return { used, max: 0, outputRoom: 0, headroom: 0 };
+  if (max <= 0) return { used, extraMarginTokens, max: 0, outputRoom: 0, headroom: 0 };
   const outputRoom = Math.max(0, max - used);
   const reserve = input.model ? reasoningReserve(input.model) : 0;
   // Subtracting the reserve from what we SEND would double-count it: the model
   // spends its thinking out of max_tokens, so capping at (room - reserve) and
   // then letting it think shrank the answer twice over.
-  return { used, max, outputRoom, headroom: Math.max(0, outputRoom - reserve) };
+  return { used, extraMarginTokens, max, outputRoom, headroom: Math.max(0, outputRoom - reserve) };
 }

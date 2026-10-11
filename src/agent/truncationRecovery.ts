@@ -123,7 +123,7 @@ export const MAX_TRUNCATION_RECOVERIES = 2;
 /** Slack left below the computed room, absorbing the crudeness of the token estimate. */
 const OUTPUT_CAP_MARGIN_TOKENS = 512;
 
-/** Never cap output below this, however tight the estimate looks. */
+/** Minimum useful cap; preflight refuses when the safety margin cannot leave this much. */
 const MIN_OUTPUT_CAP_TOKENS = 512;
 
 export const CONTEXT_EXHAUSTED_MESSAGE =
@@ -152,6 +152,7 @@ export const MID_TURN_COMPACTION_RESET_ROUNDS = 10;
  */
 export function contextExhaustionReason(state: {
   outputRoom: number | undefined;
+  extraMarginTokens?: number;
   reasoningReserve: number;
   suppressesThinking: boolean;
   truncationRecoveries: number;
@@ -162,19 +163,21 @@ export function contextExhaustionReason(state: {
   // No answer/tool-call room at all. The model-only tool-result window normally
   // prevents this; this covers transcripts that cannot be reduced further.
   if (outputRoom <= 0) return CONTEXT_INPUT_EXHAUSTED_MESSAGE;
+  const available = outputCap(outputRoom, state.extraMarginTokens);
+  if (available < MIN_OUTPUT_CAP_TOKENS) return CONTEXT_INPUT_EXHAUSTED_MESSAGE;
   // A round that cannot outlast the model's own reasoning budget cannot
   // succeed: llama.cpp spends thinking and answer from the one budget, so it
   // burns the whole of `max_tokens` inside the thinking block and returns
   // `finish_reason: length` with nothing. A recovery round runs with thinking
   // off, so the reserve does not apply to it. The round that proved this cost
   // 13.5 minutes and produced nothing.
-  if (outputRoom <= state.reasoningReserve && !state.suppressesThinking) {
+  if (available <= state.reasoningReserve && !state.suppressesThinking) {
     return CONTEXT_EXHAUSTED_MESSAGE;
   }
   // Only fail early once truncation has already happened this turn: with a
   // healthy turn a thin margin is still enough for a short reply. After a
   // cut-off call, a margin this thin means even a chunked retry cannot fit.
-  if (state.truncationRecoveries > 0 && outputRoom < state.minRoundHeadroom) {
+  if (state.truncationRecoveries > 0 && available < state.minRoundHeadroom) {
     return CONTEXT_EXHAUSTED_MESSAGE;
   }
   return undefined;
@@ -308,9 +311,15 @@ export function isTurnCutOffError(err: unknown): boolean {
 export function applyOutputCap(
   request: ChatCompletionRequest,
   outputRoom: number | undefined,
+  extraMarginTokens = 0,
 ): ChatCompletionRequest {
   if (outputRoom === undefined || outputRoom <= 0) return request;
-  const cap = Math.max(MIN_OUTPUT_CAP_TOKENS, outputRoom - OUTPUT_CAP_MARGIN_TOKENS);
+  const cap = outputCap(outputRoom, extraMarginTokens);
   if (request.max_tokens !== undefined && request.max_tokens <= cap) return request;
   return { ...request, max_tokens: cap };
+}
+
+/** One margin policy for the preflight and the request's max_tokens cap. */
+function outputCap(outputRoom: number, extraMarginTokens = 0): number {
+  return Math.max(0, outputRoom - OUTPUT_CAP_MARGIN_TOKENS - extraMarginTokens);
 }

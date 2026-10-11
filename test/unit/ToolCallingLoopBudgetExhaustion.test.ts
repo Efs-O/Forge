@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import type { ChatMessage, ToolCall } from '../../src/llm/types';
+import type { ChatCompletionRequest, ChatMessage, ToolCall } from '../../src/llm/types';
 import type { ModelConfig } from '../../src/config/types';
 
 const { streamModelChatCompletion } = vi.hoisted(() => ({
@@ -9,6 +9,7 @@ vi.mock('../../src/llm/ChatClient', () => ({ streamModelChatCompletion }));
 
 import { runToolCallingLoop } from '../../src/agent/ToolCallingLoop';
 import { ToolFailureTracker } from '../../src/tools/StripTools';
+import { createOutputBudgetTracker, type PromptAnchor } from '../../src/util/contextBudget';
 import {
   CONTEXT_INPUT_EXHAUSTED_MESSAGE,
   OUTPUT_BUDGET_EXHAUSTED_NOTICE,
@@ -24,7 +25,11 @@ interface Handlers {
   onReasoning: (t: string) => void;
   onDone: (finishReason: string | null) => void;
   onToolCalls: (calls: ToolCall[]) => void;
-  onUsage?: (usage: { prompt_tokens: number; completion_tokens: number; total_tokens: number }) => void;
+  onUsage?: (usage: {
+    prompt_tokens: number;
+    completion_tokens: number;
+    total_tokens: number;
+  }) => void;
 }
 
 const model = {
@@ -196,7 +201,9 @@ describe('a round that spends its whole budget thinking', () => {
     const reasoning = `${'x'.repeat(RETRY_REASONING_TAIL_CHARS)}DECIDED: edit foo.ts`;
     const nudge = reasoningStopRetryNudge(reasoning);
     expect(nudge).toContain('DECIDED: edit foo.ts');
-    expect(nudge.length).toBeLessThan(REASONING_STOP_RETRY_NUDGE.length + RETRY_REASONING_TAIL_CHARS + 100);
+    expect(nudge.length).toBeLessThan(
+      REASONING_STOP_RETRY_NUDGE.length + RETRY_REASONING_TAIL_CHARS + 100,
+    );
     expect(reasoningStopRetryNudge('  ')).toBe(REASONING_STOP_RETRY_NUDGE);
   });
 
@@ -225,7 +232,9 @@ describe('a round that spends its whole budget thinking', () => {
         h.onDone('length');
       },
     );
-    const result = await runToolCallingLoop(baseOptions([{ role: 'user', content: 'go' }]) as never);
+    const result = await runToolCallingLoop(
+      baseOptions([{ role: 'user', content: 'go' }]) as never,
+    );
     expect(result.stoppedWhileReasoning).toBe(false);
   });
 
@@ -234,9 +243,9 @@ describe('a round that spends its whole budget thinking', () => {
   // the outcome is decided before the first token.
   it('refuses to send a round with less output room than the reasoning budget', async () => {
     const messages: ChatMessage[] = [{ role: 'user', content: 'go' }];
-    await expect(
-      runToolCallingLoop(baseOptions(messages, 4000) as never),
-    ).rejects.toThrow(/context/i);
+    await expect(runToolCallingLoop(baseOptions(messages, 4000) as never)).rejects.toThrow(
+      /context/i,
+    );
     expect(streamModelChatCompletion).not.toHaveBeenCalled();
   });
 
@@ -292,5 +301,133 @@ describe('a server context 400 that states its own counts', () => {
       runToolCallingLoop({ ...baseOptions(messages, 40000), maxOutputTokens: 32768 } as never),
     ).rejects.toThrow(CONTEXT_INPUT_EXHAUSTED_MESSAGE);
     expect(streamModelChatCompletion).toHaveBeenCalledTimes(2);
+  });
+});
+
+describe('anchored output budgets across actual requests', () => {
+  beforeEach(() => {
+    streamModelChatCompletion.mockReset();
+  });
+
+  it('carries usage through a tool round and subtracts the proportional margin once', async () => {
+    const requests: ChatCompletionRequest[] = [];
+    const call: ToolCall = {
+      id: 'read-1',
+      type: 'function',
+      function: { name: 'wait', arguments: '{}' },
+    };
+    streamModelChatCompletion.mockImplementation(
+      async (_u: string, request: ChatCompletionRequest, _m: unknown, h: Handlers) => {
+        requests.push(request);
+        if (requests.length === 1) {
+          h.onReasoning('reasoning is already covered by completion tokens');
+          h.onUsage?.({ prompt_tokens: 150_000, completion_tokens: 4_000, total_tokens: 154_000 });
+          h.onToken('I will inspect the code.');
+          h.onToolCalls([call]);
+          h.onDone('tool_calls');
+        } else {
+          h.onToken('done');
+          h.onDone('stop');
+        }
+      },
+    );
+    const largeModel = { ...model, num_ctx: 200_000, spawn: { num_ctx: 200_000 } } as ModelConfig;
+    const state: { promptEstimateScale?: number; promptAnchor?: PromptAnchor } = {};
+    const tracker = createOutputBudgetTracker(state, largeModel);
+    const result = await runToolCallingLoop({
+      ...baseOptions([{ role: 'user', content: 'x'.repeat(465_000) }]),
+      model: largeModel,
+      maxOutputTokens: 200_000,
+      ...tracker,
+      dispatchToolCalls: async (_calls, messages) => {
+        messages.push({ role: 'tool', tool_call_id: call.id, content: 'x'.repeat(34_000) });
+      },
+    });
+    expect(result.finalText).toBe('done');
+    expect(requests).toHaveLength(2);
+    expect(state.promptAnchor?.messageCount).toBe(1);
+    // The prior assistant is paid for by the 4K completion; the 10K result
+    // and two new message delimiters are estimated and get equal extra slack.
+    const estimatedTail = 10_000 + 16 * 2;
+    expect(requests[1]?.max_tokens).toBe(200_000 - 154_000 - estimatedTail * 2 - 512);
+  });
+
+  it('measures the normalized fallback request and its actual offered schemas', async () => {
+    let measuredMessages: ChatMessage[] | undefined;
+    let measuredTools: unknown[] | undefined;
+    streamModelChatCompletion.mockImplementation(
+      async (_u: string, request: ChatCompletionRequest, _m: unknown, h: Handlers) => {
+        expect(measuredMessages).toEqual(request.messages);
+        expect(measuredTools).toEqual(request.tools ?? []);
+        expect(request.max_tokens).toBe(20_000 - 512 - 2_000);
+        h.onToken('done');
+        h.onDone('stop');
+      },
+    );
+    await runToolCallingLoop({
+      ...baseOptions([{ role: 'user', content: 'go' }]),
+      nativeTools: false,
+      maxOutputTokens: 65_000,
+      getOutputRoom: (messages, tools) => {
+        measuredMessages = messages;
+        measuredTools = tools;
+        return { outputRoom: 20_000, extraMarginTokens: 2_000 };
+      },
+    });
+    expect(measuredTools).toEqual([]);
+    expect(measuredMessages?.some((m) => m.role === 'system')).toBe(true);
+  });
+
+  it('checks the extra margin before starting an unwinnable reasoning round', async () => {
+    await expect(
+      runToolCallingLoop({
+        ...baseOptions([{ role: 'user', content: 'go' }]),
+        getOutputRoom: () => ({ outputRoom: 9_000, extraMarginTokens: 5_000 }),
+      }),
+    ).rejects.toThrow(/context/i);
+    expect(streamModelChatCompletion).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    { outputRoom: 100, extraMarginTokens: 0 },
+    { outputRoom: 4000, extraMarginTokens: 10_000 },
+  ])('refuses when the margin leaves no useful output: %j', async (budget) => {
+    await expect(
+      runToolCallingLoop({
+        ...baseOptions([{ role: 'user', content: 'go' }]),
+        model: { ...model, spawn: { num_ctx: 65_000 } } as ModelConfig,
+        getOutputRoom: () => budget,
+      }),
+    ).rejects.toThrow(CONTEXT_INPUT_EXHAUSTED_MESSAGE);
+    expect(streamModelChatCompletion).not.toHaveBeenCalled();
+  });
+
+  it('remeasures and caps the changed prompt after a native tool JSON failure', async () => {
+    const sent: ChatCompletionRequest[] = [];
+    const measured: ChatMessage[][] = [];
+    streamModelChatCompletion.mockImplementation(
+      async (_u: string, request: ChatCompletionRequest, _m: unknown, h: Handlers) => {
+        sent.push(request);
+        if (sent.length === 1)
+          throw new Error('Failed to parse tool call arguments as JSON: invalid token');
+        h.onToken('done');
+        h.onDone('stop');
+      },
+    );
+    await runToolCallingLoop({
+      ...baseOptions([{ role: 'user', content: 'go' }]),
+      maxOutputTokens: 65_000,
+      getOutputRoom: (messages, tools) => {
+        measured.push(messages);
+        return {
+          outputRoom: tools.length ? 20_000 : 15_000,
+          extraMarginTokens: tools.length ? 1000 : 0,
+        };
+      },
+    });
+    expect(sent.map((request) => request.max_tokens)).toEqual([18_488, 14_488]);
+    expect(measured).toEqual(sent.map((request) => request.messages));
+    expect(sent[1]?.tools).toBeUndefined();
+    expect(sent[1]?.messages).not.toEqual(sent[0]?.messages);
   });
 });

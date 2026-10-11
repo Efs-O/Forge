@@ -19,6 +19,9 @@ import type { ForgeHostFacade } from '../../src/sidebar/ForgeHostFacade';
  */
 
 const tempDirs: string[] = [];
+// Every booted service, disposed before its directory is removed: a service left
+// running keeps writing state.json, and that write re-creates the directory.
+const services: TelegramContactService[] = [];
 const GROUP_ID = '-100200';
 
 class MemorySecrets {
@@ -38,6 +41,8 @@ class MemorySecrets {
 }
 
 afterEach(async () => {
+  for (const service of services.splice(0)) service.dispose();
+  await settle(); // let writes already in flight land before the directory goes
   for (const directory of tempDirs.splice(0)) {
     // Retried: Windows can still hold a just-closed file (EBUSY).
     await fs.rm(directory, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 });
@@ -63,6 +68,7 @@ async function boot(directory: string, run: Run = async () => 'Γεια σου!'
     undefined,
     0,
   );
+  services.push(service);
   return { service, channel, contacts, host };
 }
 

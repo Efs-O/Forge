@@ -21,12 +21,7 @@ import { createContextTrimState } from '../agent/toolResultContext';
 import type { ToolDispatch } from './ToolDispatch';
 import type { ToolFailureTracker } from '../tools/StripTools';
 import type { TurnLifecycle } from './TurnLifecycle';
-import {
-  computeContextBudget,
-  estimateToolTokens,
-  perSlotContext,
-  promptEstimateScale,
-} from '../util/contextBudget';
+import { createOutputBudgetTracker, perSlotContext } from '../util/contextBudget';
 import { announceMissingImages } from './imageNotices';
 import { prepareModelTurnMessages } from './prepareModelTurnMessages';
 import { resolveToolPermissions } from '../tools/PermissionResolver';
@@ -278,8 +273,7 @@ export async function runModelTurn(
     : false;
 
   const compactor = ctx.compactMidTurn;
-  // Unscaled estimate of the request in flight, compared with its reported prompt.
-  let estimatedPrompt = 0;
+  const outputBudget = createOutputBudgetTracker(conv, model, config.llama_server);
   const result = await trackTurnCompletion(ctx.lifecycle, conv.id, () =>
     runToolCallingLoop({
       resolveBaseUrl,
@@ -398,15 +392,14 @@ export async function runModelTurn(
           `${model.name}:native-tool-json`,
           `Forge: llama-server rejected this model's native tool-call JSON. Retrying with Forge's JSON fallback tool format.`,
         ),
-      onUsage: (usage) => {
+      onUsage: (usage, request) => {
         // The server's own slot counters, covering prompt evaluation and
         // generation including hidden thinking. Every context display reads
         // what this writes, so publish the bar from here: an agentic turn
         // reports usage once per round and the bar stays live mid-turn.
         ctx.onUsage?.(conv, usage.prompt_tokens, usage.completion_tokens);
         ctx.streamMeter?.reset(conv.id);
-        const scale = promptEstimateScale(estimatedPrompt, usage.prompt_tokens);
-        if (scale !== undefined) conv.promptEstimateScale = scale;
+        outputBudget.onUsage(usage, request);
         ctx.onContextChanged?.(conv.id);
         // How much of the prompt llama-server served from its KV cache. A turn
         // that only grew should sit in the high 90s; a drop to 0 means
@@ -430,18 +423,7 @@ export async function runModelTurn(
           toolName: safeToolName,
         });
       },
-      getOutputRoom: (messages) => {
-        const scale = conv.promptEstimateScale ?? 1;
-        const budget = computeContextBudget({
-          messages,
-          toolTokens: estimateToolTokens(buildToolDefinitions()),
-          model,
-          server: config.llama_server,
-          estimateScale: scale,
-        });
-        estimatedPrompt = budget.used / scale;
-        return budget.outputRoom || undefined;
-      },
+      getOutputRoom: outputBudget.getOutputRoom,
       ...(compactor ? { compactMidTurn: (req) => compactor(conv, req) } : {}),
     }),
   );

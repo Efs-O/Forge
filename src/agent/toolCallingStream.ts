@@ -4,6 +4,7 @@ import { stripHtmlDocumentBoilerplateFromFullText } from '../llm/HtmlDocumentBoi
 import { stripThinkingFromFullText } from '../llm/ThinkingChannelStripper';
 import { stripStructuredOutputFromFullText } from '../tools/StructuredOutputParser';
 import type { ToolCallingLoopOptions } from './ToolCallingLoop';
+import { snapshotPromptRequest } from '../util/contextBudget';
 
 export function sanitizeText(
   text: string,
@@ -28,6 +29,7 @@ export async function streamOnce(
 }> {
   const baseUrl = await options.resolveBaseUrl();
   options.onToolsOffered?.(offeredToolNames);
+  const promptSnapshot = options.onUsage ? snapshotPromptRequest(request) : undefined;
   return new Promise((resolve, reject) => {
     let capturedToolCalls: ToolCall[] | null = null;
     let completionTokens: number | undefined;
@@ -51,7 +53,7 @@ export async function streamOnce(
         ...(options.onToolCallProgress ? { onToolCallProgress: options.onToolCallProgress } : {}),
         onUsage: (usage) => {
           completionTokens = usage.completion_tokens;
-          options.onUsage?.(usage);
+          if (promptSnapshot) options.onUsage?.(usage, promptSnapshot);
         },
       },
       options.signal,

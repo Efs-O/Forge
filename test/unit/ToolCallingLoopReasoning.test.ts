@@ -377,6 +377,9 @@ describe('ToolCallingLoop reasoning retention', () => {
   it('requests and forwards the provider usage for each model call', async () => {
     streamModelChatCompletion.mockImplementation(
       async (_url: string, _req: unknown, _model: unknown, h: Handlers) => {
+        // Reasoning appends an assistant row before usage arrives. The request
+        // snapshot must still contain only the messages that were sent.
+        h.onReasoning('thinking before usage');
         h.onUsage?.({ prompt_tokens: 123, completion_tokens: 4, total_tokens: 127 });
         h.onToken('done');
         h.onDone('stop');
@@ -398,10 +401,14 @@ describe('ToolCallingLoop reasoning retention', () => {
     expect(request.messages).toEqual([{ role: 'user', content: 'go' }]);
     expect(request.tools).toEqual(expect.any(Array));
     expect(request.stream_options).toEqual({ include_usage: true });
-    expect(onUsage).toHaveBeenCalledWith({
-      prompt_tokens: 123,
-      completion_tokens: 4,
-      total_tokens: 127,
-    });
+    expect(onUsage).toHaveBeenCalledWith(
+      { prompt_tokens: 123, completion_tokens: 4, total_tokens: 127 },
+      expect.objectContaining({
+        messageCount: 1,
+        prefix: JSON.stringify([{ role: 'user', content: 'go' }]),
+        tools: JSON.stringify(request.tools),
+        model: 'test-model',
+      }),
+    );
   });
 });

@@ -5,6 +5,7 @@
 import { z } from 'zod';
 import type { CompactionState } from './compactionTypes';
 import type { ContextTrimState } from '../agent/toolResultContext';
+import type { PromptAnchor } from '../util/contextBudget';
 import {
   agentLinksSchema,
   agentSenderMetadataSchema,
@@ -289,6 +290,8 @@ export interface ConversationRuntime {
    * server's own context 400 is the backstop (`serverReportedOutputRoom`).
    */
   promptEstimateScale?: number;
+  /** Last measured request prefix and completion; in-memory only, like the scale. */
+  promptAnchor?: PromptAnchor;
   /**
    * Accumulated active-agent time in milliseconds (model work + tool execution,
    * excluding approval waits). Set after each completed generation interval.

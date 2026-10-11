@@ -11,8 +11,8 @@ import { applyOutputCap } from './truncationRecovery';
  *
  * Builds the request the loop streams, and the native-JSON-parse fallback
  * request from the same `base`, so the two cannot drift. The fallback is
- * built from `base`, not from the sampled/capped request: that is how the
- * loop has always sent it.
+ * built from `base`, not from the sampled/capped request; the loop measures
+ * and caps its changed prompt separately if that fallback is needed.
  */
 export interface RoundRequestInput {
   model: ModelConfig;
