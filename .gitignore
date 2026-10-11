@@ -135,3 +135,6 @@ scripts/strata-bench/
 # Rebuildable browser bundle for the activity view screenshots.
 artifacts/activity-view-mockups/actual-entry.js
 artifacts/activity-view-mockups/actual-entry.css
+
+# Local test scratch directory.
+.test-tmp/
