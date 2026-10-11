@@ -395,8 +395,11 @@ export function makeShellTool(options: ShellToolOptions = {}): RegisteredTool {
         };
       if (result.classification === 'dangerous')
         return {
-          detail: `${String(args['command'])}\nMatched rule: ${result.rule?.description ?? 'destructive command'}`,
+          detail: `${String(args['command'])}\nMatched rule: ${result.rule?.description ?? 'destructive command'}${
+            result.rule?.alternative ? `\nSafer way: ${result.rule.alternative}` : ''
+          }`,
           dangerous: true,
+          ...(result.rule?.alternative ? { declineHint: result.rule.alternative } : {}),
         };
       return undefined;
     },

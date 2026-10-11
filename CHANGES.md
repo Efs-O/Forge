@@ -1,5 +1,17 @@
 # Forge — Recent Changes
 
+## Unreleased
+
+### A declined dangerous command names the safer way
+
+The shell classifier already stores a sanctioned alternative for every rule it
+matches (`Use restore_file to restore tracked paths.`), but that string was only
+shown for `refused` commands. A `dangerous` call showed "Matched rule: …" with no
+alternative, and after Deny the model got back `User declined: shell` and nothing
+else — so it often retried the same command. The approval dialog now reads
+"Safer way: …", and a declined call returns `use this instead: …`. No rule was
+loosened: `rm -rf`, `git reset --hard` and the rest are still gated.
+
 ## 0.17.19
 
 - Completed activity loaded from chat history starts collapsed again. Activity that was visible while an agent worked stays open when it finishes, including a running row that folds into a group. This prevents old chat activity from expanding at once and disrupting scrolling after a transcript refresh.

@@ -242,6 +242,11 @@ export class ToolDispatch {
             : await this.requestApproval(tc.function.name, detail, isDangerous, convId);
           if (!approved) {
             result = `User declined: ${tc.function.name}`;
+            // A declined dangerous command used to tell the agent nothing beyond
+            // "declined", so the next call was often the same command. The rule
+            // already names a sanctioned alternative; hand it over.
+            if (approvalMetadata?.declineHint)
+              result += ` — use this instead: ${approvalMetadata.declineHint}`;
             this.postResult(tc, toolResultText(result), undefined, convId);
             messages.push(this.toolMessage(tc, toolResultContent(result), startedAt));
             continue;

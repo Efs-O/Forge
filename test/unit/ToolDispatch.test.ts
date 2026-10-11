@@ -673,6 +673,38 @@ describe('ToolDispatch', () => {
     },
   );
 
+  // A declined dangerous command used to reach the model as `User declined:
+  // shell` and nothing else, so the next call was often the same command. The
+  // classifier already knows the sanctioned alternative for the rule it matched.
+  it.skipIf(!TEST_BASH)(
+    'offers the rule\'s alternative when the user declines a dangerous shell call',
+    async () => {
+      const shell = makeShellTool({
+        bashPath: TEST_BASH,
+        getConfig: () => ({ permissions: { exec: { shell: 'bash' } } }) as never,
+      });
+      toolRegistry.register(shell);
+      requestApproval.mockResolvedValue(false);
+
+      const messages: ChatMessage[] = [];
+      await dispatch.dispatch(
+        [makeToolCall('shell', { command: 'git checkout -- src/a.ts' })],
+        allowed,
+        messages,
+      );
+
+      // The dialog itself names the alternative, and so does the refusal text.
+      expect(requestApproval).toHaveBeenCalledWith(
+        'shell',
+        expect.stringContaining('Safer way: Use restore_file'),
+        true,
+        undefined,
+      );
+      expect(messages.at(-1)?.content).toContain('User declined: shell');
+      expect(messages.at(-1)?.content).toContain('use this instead: Use restore_file');
+    },
+  );
+
   it('requests approval for git tools', async () => {
     toolRegistry.register({
       definition: {

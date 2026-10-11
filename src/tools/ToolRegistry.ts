@@ -23,6 +23,16 @@ export type ToolPermission =
 export interface ToolApprovalMetadata {
   dangerous?: boolean;
   detail?: string;
+  /**
+   * What the agent should do instead, shown back to it when the user declines.
+   *
+   * The shell classifier already knows the sanctioned alternative for every
+   * rule it matches, and that string used to be shown only for `refused`
+   * commands (`shellTool.ts`). A declined `dangerous` call came back as a bare
+   * `User declined: shell`, so the agent retried the same command or invented
+   * another one; the hint is what turns a refusal into a course change.
+   */
+  declineHint?: string;
 }
 
 export interface MultimodalToolResult {
