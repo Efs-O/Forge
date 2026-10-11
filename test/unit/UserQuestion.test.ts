@@ -440,6 +440,33 @@ describe('RemoteQuestionBridge', () => {
     expect(text).toContain('or send free text instead');
   });
 
+  // A no-preamble call is headed by its first sub-question; on that step the
+  // headline and the question are the same sentence, so print it once.
+  it('does not repeat the first sub-question as a headline above itself on Telegram', async () => {
+    const { bridge, channel, service } = bridgeRig({ channelName: 'telegram' });
+    const asked = vi.fn();
+    service.addSink({ asked, answered: () => undefined });
+    void service.ask({
+      prompt: 'Version',
+      questions: [
+        { prompt: 'Version', options: ['bump', 'keep'] },
+        { prompt: 'Install', options: ['open', 'skip'] },
+      ],
+      conversationId: 'c1',
+    });
+    await vi.waitFor(() => expect(channel.inlineKeyboards).toHaveLength(1));
+    const first = channel.inlineKeyboards[0]?.text ?? '';
+    expect(first).toContain('Question 1 of 2: Version');
+    expect(first.match(/Version/g)).toHaveLength(1);
+
+    // The step-2 keyboard proves the headline is not simply dropped: once the
+    // question differs from the preamble, the preamble heads the step again.
+    const questionId = asked.mock.calls[0]?.[0].id as string;
+    await bridge.handleAction(questionAction(questionId, 'select', 'keyboard-1', 1));
+    await vi.waitFor(() => expect(channel.inlineKeyboards).toHaveLength(2));
+    expect(channel.inlineKeyboards[1]?.text).toBe('Forge asks: Question 2 of 2: Install');
+  });
+
   it('asks Telegram sub-questions one keyboard at a time and settles with labelled lines', async () => {
     const { bridge, channel, service } = bridgeRig({ channelName: 'telegram' });
     const asked = vi.fn();
@@ -787,5 +814,60 @@ describe('ask_user tool', () => {
     } finally {
       marker.dispose();
     }
+  });
+
+  // The failure this closes: an agent that sends `questions` with no shared
+  // preamble had the whole call refused for a missing `prompt`, costing a round
+  // to ask a question the user could already answer. The question is read from
+  // what was sent instead.
+  it('asks the sub-questions when the call sent no top-level prompt', async () => {
+    const service = new UserQuestionService();
+    const tool = makeAskUserTool(service);
+    const asked = vi.fn();
+    service.addSink({ asked, answered: () => undefined });
+    const call = tool.handler(
+      {
+        questions: [
+          { prompt: 'How to install?', options: ['now', 'later'] },
+          { prompt: 'Un-pause the job?', options: ['yes', 'no'] },
+        ],
+      },
+      { beforeMutate: () => undefined, conversationId: 'c1' },
+    );
+
+    // The box carries both sub-questions, headed by the first one rather than a
+    // blank or an error string.
+    const raised = asked.mock.calls[0]?.[0];
+    expect(raised.prompt).toBe('How to install?');
+    expect(raised.questions).toHaveLength(2);
+    expect(currentInput().prompt).toContain('2) Un-pause the job?');
+
+    const id = raised.id as string;
+    expect(service.answer(id, '1 2')).toBe(true);
+    await expect(call).resolves.toBe('How to install?: now\nUn-pause the job?: no');
+  });
+
+  it('shows the choice list itself when a flat call sent neither prompt nor options text', async () => {
+    const service = new UserQuestionService();
+    const tool = makeAskUserTool(service);
+    const asked = vi.fn();
+    service.addSink({ asked, answered: () => undefined });
+    void tool.handler({ options: ['Install now', 'Install later'] }, {
+      beforeMutate: () => undefined,
+      conversationId: 'c1',
+    });
+
+    const raised = asked.mock.calls[0]?.[0];
+    expect(raised.prompt).toContain('Install now');
+    expect(raised.options).toEqual(['Install now', 'Install later']);
+  });
+
+  it('never shows an empty question when the call sent nothing usable', async () => {
+    const service = new UserQuestionService();
+    const tool = makeAskUserTool(service);
+    const asked = vi.fn();
+    service.addSink({ asked, answered: () => undefined });
+    void tool.handler({}, { beforeMutate: () => undefined, conversationId: 'c1' });
+    expect(asked.mock.calls[0]?.[0].prompt).toContain('sent no question text');
   });
 });

@@ -33,6 +33,34 @@ export function parseQuestionGroups(value: unknown): QuestionGroup[] | undefined
 }
 
 /**
+ * The question text to show, from whatever the call actually sent.
+ *
+ * `prompt` is deliberately not schema-required: a call that sends `questions`
+ * usually puts the real text in each sub-question and skips the shared preamble,
+ * and an agent that only wants to put a choice list in front of the user has no
+ * preamble either. Refusing those calls costs a round for a question that is
+ * perfectly answerable, so the text is read from the entry that is there: the
+ * preamble, else the first sub-question, else the options themselves. A
+ * last-resort line is shown rather than a blank box, so the user is never left
+ * guessing what was asked.
+ */
+export function resolveQuestionText(
+  args: Record<string, unknown>,
+  groups?: readonly QuestionGroup[],
+): string {
+  const preamble = typeof args['prompt'] === 'string' ? args['prompt'].trim() : '';
+  if (preamble) return preamble;
+  const subQuestion = groups?.find((group) => group.prompt.trim())?.prompt.trim();
+  if (subQuestion) return subQuestion;
+  const options = Array.isArray(args['options']) ? args['options'] : undefined;
+  const firstOption = options?.find((option) => typeof option === 'string' && option.trim());
+  if (typeof firstOption === 'string') {
+    return `Choose one: ${firstOption.trim()}${options!.length > 1 ? ' …' : ''}`;
+  }
+  return 'The agent has a question for you (it sent no question text). Reply with your answer.';
+}
+
+/**
  * The assembled answer, one line per sub-question.
  *
  * Labelled rather than bare, because the model has to attribute each choice to
@@ -104,7 +132,13 @@ export function renderQuestionAsText(
       )
       .join('\n');
     const example = groups.map(() => '1').join(' ');
-    return `${prompt}\n\n${body}\n\nReply with one number per question, in order — e.g. "${example}" — or send free text instead.`;
+    // A call that sent no shared preamble is headed by its first sub-question
+    // (see `questionText` in the tool), so the header can already be one of the
+    // questions; printing it again above "1) Version" reads as two questions.
+    const headed = groups.some((group) => group.prompt.trim() === prompt.trim())
+      ? ''
+      : `${prompt}\n\n`;
+    return `${headed}${body}\n\nReply with one number per question, in order — e.g. "${example}" — or send free text instead.`;
   }
   if (options?.length) {
     const body = options.map((option, index) => `${index + 1}. ${option}`).join('\n');

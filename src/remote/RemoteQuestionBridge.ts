@@ -317,6 +317,23 @@ export class RemoteQuestionBridge {
     }
   }
 
+  /**
+   * The line above a sub-question, or empty when it would add nothing.
+   *
+   * A call that sent no shared preamble takes its text from the first
+   * sub-question (see `questionText` in the tool), so that headline is one of
+   * the questions rather than a title over them — printing it above
+   * "Question 1 of 2: Version" reads as two different questions, and above
+   * step 2 it reads as a stray label. A real preamble differs from every
+   * question, so it still heads every step.
+   */
+  private stepHeadline(pending: RemoteQuestionEntry): string {
+    const head = pending.event.prompt.trim();
+    if (!head) return '';
+    if ((pending.steps ?? []).some((group) => group.prompt.trim() === head)) return '';
+    return `${head}\n\n`;
+  }
+
   /** Sends the keyboard for the flat choice list, or for the current step. */
   private async sendKeyboard(pending: RemoteQuestionEntry): Promise<void> {
     const sendInlineKeyboard = this.channel.sendInlineKeyboard;
@@ -327,7 +344,7 @@ export class RemoteQuestionBridge {
     const step = pending.picks?.length ?? 0;
     const group = pending.steps?.[step];
     const text = group
-      ? `Forge asks: ${pending.event.prompt}\n\nQuestion ${step + 1} of ${pending.steps!.length}: ${group.prompt}`
+      ? `Forge asks: ${this.stepHeadline(pending)}Question ${step + 1} of ${pending.steps!.length}: ${group.prompt}`
       : `Forge asks: ${renderQuestionAsText(pending.event.prompt, pending.event.options)}`;
     try {
       const messageId = await sendInlineKeyboard.call(
@@ -361,9 +378,7 @@ export class RemoteQuestionBridge {
     const step = pending.picks?.length ?? 0;
     const group = pending.steps?.[step];
     const body = group
-      ? `${pending.event.prompt}
-
-Question ${step + 1} of ${pending.steps!.length}: ${renderQuestionAsText(group.prompt, group.options)}`
+      ? `${this.stepHeadline(pending)}Question ${step + 1} of ${pending.steps!.length}: ${renderQuestionAsText(group.prompt, group.options)}`
       : renderQuestionAsText(pending.event.prompt, pending.event.options);
     try {
       await this.channel.send(

@@ -131,6 +131,15 @@ const CORE_TOOL_NAMES = [
   'load_tool_group',
 ];
 
+// `ask_user` asks from whatever the call sent, so `prompt` must stay optional in
+// the advertised schema: a `questions`-only call is answerable, and a required
+// field made ToolRegistry refuse it and cost a round.
+it('advertises ask_user with no required argument', () => {
+  const registry = makeRegistry();
+  const ask = registry.get('ask_user');
+  expect(ask?.definition.function.parameters.required ?? []).toEqual([]);
+});
+
 function makeRegistry(
   options: { search?: boolean; delegation?: boolean; images?: boolean; agentBus?: boolean } = {},
 ): ToolRegistry {

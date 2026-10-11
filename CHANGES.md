@@ -3,6 +3,7 @@
 ## 0.17.19
 
 - Completed activity loaded from chat history starts collapsed again. Activity that was visible while an agent worked stays open when it finishes, including a running row that folds into a group. This prevents old chat activity from expanding at once and disrupting scrolling after a transcript refresh.
+- `ask_user` no longer requires a top-level `prompt`. A call that sent only `questions` (each carrying its own prompt) was refused by the missing-argument guard, costing a round to re-ask a question the user could already answer. The text now comes from the preamble, else the first sub-question, else the choice list; a call that sent nothing usable still shows a line, not a blank box. A preamble that is one of the sub-questions is also no longer printed again above "Question 1 of N: …", in the sidebar box or on Telegram.
 
 ## 0.17.18
 

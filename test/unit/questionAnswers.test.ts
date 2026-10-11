@@ -27,6 +27,19 @@ describe('renderQuestionAsText', () => {
     );
     expect(renderQuestionAsText('Which file?')).toBe('Which file?\n\nReply with your answer.');
   });
+
+  it('does not repeat a preamble that is one of the sub-questions', () => {
+    // A call with no shared preamble is headed by the first sub-question, so
+    // printing the header again above "1) Version" reads as two questions.
+    const text = renderQuestionAsText('Version', undefined, groups);
+    expect(text.match(/Version/g)).toHaveLength(1);
+    expect(text).toContain('1) Version');
+    expect(text).toContain('2) Install');
+    // ...but a preamble that is NOT one of the questions still heads the list:
+    // dropping the header always would also satisfy the assertions above.
+    const headed = renderQuestionAsText('Two decisions:', undefined, groups);
+    expect(headed.startsWith('Two decisions:\n\n1) Version')).toBe(true);
+  });
 });
 
 describe('resolveAnswerText (sub-questions)', () => {

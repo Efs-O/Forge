@@ -1,4 +1,4 @@
-import { parseQuestionGroups } from '../util/questionAnswers';
+import { parseQuestionGroups, resolveQuestionText } from '../util/questionAnswers';
 import * as path from 'path';
 import * as vscode from 'vscode';
 import type { RegisteredTool } from './ToolRegistry';
@@ -206,7 +206,8 @@ export function makeAskUserTool(
           'under a stated assumption, state it, notify_user, and keep going. One ' +
           'decision group per call; keep options short and mutually exclusive. For ' +
           'two related decisions in one round, pass `questions` rather than one ' +
-          'combined options list.',
+          'combined options list: each entry carries its own prompt and options, ' +
+          'and the top-level prompt only heads them.',
         parameters: {
           type: 'object',
           properties: {
@@ -243,7 +244,6 @@ export function makeAskUserTool(
               },
             },
           },
-          required: ['prompt'],
           additionalProperties: false,
         },
       },
@@ -261,7 +261,7 @@ export function makeAskUserTool(
       // point of the tool, and a half-built array must not cost a round.
       const groups = parseQuestionGroups(args['questions']);
       const answer = await questions.ask({
-        prompt: args['prompt'] as string,
+        prompt: resolveQuestionText(args, groups),
         placeholder: args['placeholder'] as string | undefined,
         options: groups ? undefined : (args['options'] as string[] | undefined),
         questions: groups,
