@@ -131,3 +131,7 @@ scripts/_*.mjs
 # Local benchmark workspaces.
 scripts/forge-tools-bench/
 scripts/strata-bench/
+
+# Rebuildable browser bundle for the activity view screenshots.
+artifacts/activity-view-mockups/actual-entry.js
+artifacts/activity-view-mockups/actual-entry.css

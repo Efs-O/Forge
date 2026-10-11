@@ -26,12 +26,19 @@ function summary(tools: readonly AppMessage[]): string {
 }
 
 /** A compact, ordered view of the parallel tool calls issued in one agent step. */
-function ToolGroupView({ tools }: { tools: AppMessage[] }): React.ReactElement | null {
+function ToolGroupView({
+  tools,
+  nested = false,
+}: {
+  tools: AppMessage[];
+  nested?: boolean;
+}): React.ReactElement | null {
   const [choice, setChoice] = useDisclosure('toolGroup', tools[0]?.id ?? '');
-  const open = choice ?? false;
+  const open = choice ?? nested;
   const label = useMemo(() => summary(tools), [tools]);
 
-  if (tools.length < 2) return tools[0] ? <ToolRow message={tools[0]} /> : null;
+  if (tools.length < 2)
+    return tools[0] ? <ToolRow message={tools[0]} defaultOpen={nested} /> : null;
 
   return (
     <div className="tool-group">
@@ -48,7 +55,7 @@ function ToolGroupView({ tools }: { tools: AppMessage[] }): React.ReactElement |
       {open && (
         <div className="tool-group-body">
           {tools.map((tool) => (
-            <ToolRow key={tool.id} message={tool} />
+            <ToolRow key={tool.id} message={tool} defaultOpen={nested} />
           ))}
         </div>
       )}
@@ -62,4 +69,7 @@ function ToolGroupView({ tools }: { tools: AppMessage[] }): React.ReactElement |
  * object on each sync, so the array prop is always a new reference and the
  * default shallow compare would never hit - hence the explicit row compare.
  */
-export const ToolGroup = React.memo(ToolGroupView, (a, b) => sameRowList(a.tools, b.tools));
+export const ToolGroup = React.memo(
+  ToolGroupView,
+  (a, b) => a.nested === b.nested && sameRowList(a.tools, b.tools),
+);

@@ -95,12 +95,16 @@ export function ToolRowThumbnails({ message }: { message: AppMessage }): React.R
 export function ToolRow({
   message,
   nested = false,
+  defaultOpen = false,
 }: {
   message: AppMessage;
   nested?: boolean;
+  defaultOpen?: boolean;
 }): React.ReactElement {
   const [choice, setChoice] = useDisclosure('tool', message.id);
-  const open = choice ?? false;
+  // A compact step is already the disclosure gate. Its nested result opens
+  // with that step, while a reader's explicit close still sticks.
+  const open = choice ?? (nested || defaultOpen);
   const { name: toolName, detail } = toolNameAndDetail(message);
   const name = nested ? 'result' : toolName;
 

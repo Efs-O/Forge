@@ -19,16 +19,18 @@ export function QueuedPromptRow({
     : '';
   return (
     <div className="msg-wrapper queued-prompt">
-      <div className="msg user msg-queued">{text || 'Attachment queued'}</div>
-      <div className="queued-prompt-actions">
-        <span className="queued-prompt-status">
-          {tell
-            ? 'Will reach Forge at its next step'
-            : `Sends when this turn ends${attachmentLabel}`}
-        </span>
-        <button className="btn-action" type="button" onClick={onCancel}>
-          Cancel
-        </button>
+      <div className="queued-prompt-card">
+        <div className="msg user msg-queued">{text || 'Attachment queued'}</div>
+        <div className="queued-prompt-actions">
+          <span className="queued-prompt-status">
+            {tell
+              ? 'Will reach Forge at its next step'
+              : `Sends when this turn ends${attachmentLabel}`}
+          </span>
+          <button className="btn-action" type="button" onClick={onCancel}>
+            Cancel
+          </button>
+        </div>
       </div>
     </div>
   );

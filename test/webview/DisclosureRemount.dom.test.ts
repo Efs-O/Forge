@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 // A streaming turn moves the same messages between components: a trailing
-// thinking row folds into the next call's step, and a lone step is pulled into
-// a group when a second one arrives. Each move remounts. The reader's
+// thinking row folds into the next call's step, and a step moves into a group.
+// Each move remounts. The reader's
 // open/closed choices must survive it (disclosureState.ts).
 import { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
@@ -95,34 +95,30 @@ describe('open/closed choices across remounts', () => {
     expect(container.querySelectorAll('.diff-line')).toHaveLength(1);
   });
 
-  it('lets the reader collapse a step that a running call forced open', () => {
+  it('keeps a running step closed until the reader opens it', () => {
     const running = edit('a');
     running.attempts[0]!.tools[0] = tool('a-call', { toolResult: undefined, toolResultTotal: undefined });
     show(React.createElement(ActivityRow, { step: running, streaming: true }));
+    expect(container.querySelector('.activity-row-body')).toBeNull();
+    click('.activity-row-header');
     expect(container.querySelector('.activity-row-body')).not.toBeNull();
     click('.activity-row-header');
     expect(container.querySelector('.activity-row-body')).toBeNull();
   });
 
-  it('keeps an automatically opened call visible when completed calls fold into a run', () => {
+  it('keeps a live group closed and reveals its calls directly on request', () => {
     const completed = (id: string): ActivityStep => ({
       attempts: [{ thoughts: [], tools: [tool(id, { toolResult: 'done', toolResultTotal: 4 })] }],
       diffs: [],
     });
-    const running: ActivityStep = {
-      attempts: [{ thoughts: [], tools: [tool('second', { toolResult: undefined, toolResultTotal: undefined })] }],
-      diffs: [],
-    };
-    show(React.createElement(ActivityRow, { step: running, streaming: true }));
-    expect(container.querySelector('.activity-row-body')).not.toBeNull();
-
     const items: ActivityGroupItem[] = [
       { kind: 'step', step: completed('first') },
       { kind: 'step', step: completed('second') },
     ];
-    show(React.createElement(ActivityGroup, { items, live: false, streaming: false }));
-    expect(container.querySelector('.activity-run .activity-row-header')?.getAttribute('aria-expanded')).toBe('true');
-    const steps = container.querySelectorAll('.activity-run .activity-row-body .activity-row-header');
-    expect(steps[1]?.getAttribute('aria-expanded')).toBe('true');
+    show(React.createElement(ActivityGroup, { items, live: true, streaming: true }));
+    expect(container.querySelector('.activity-group-toggle')?.getAttribute('aria-expanded')).toBe('false');
+    click('.activity-group-toggle');
+    expect(container.querySelectorAll('.activity-group-body > .activity-row')).toHaveLength(2);
+    expect(container.querySelector('.activity-run')).toBeNull();
   });
 });

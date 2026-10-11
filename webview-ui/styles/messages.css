@@ -6,52 +6,71 @@
   gap: 3px;
 }
 
-/*
- * No role labels and no box on either speaker.
- *
- * YOU and FORGE in caps above bordered cards meant the reading surface - the
- * assistant prose, the thing you are actually here to read - was boxed in like
- * a form field, and the eye crossed two borders per exchange for information
- * that indentation already carries. The user turn keeps a 2px accent rail,
- * which is enough to tell the two apart at a glance; the assistant turn runs
- * as plain text on the panel ground.
- */
+/* User prompts sit in a quiet bubble; assistant prose stays on the panel ground. */
 .msg {
   line-height: 1.55;
   word-break: break-word;
 }
 
-/* Transparent, not removed. The bar is the queued row's affordance (below) and
-   nothing else's, but the indent has to be identical on both or a queued prompt
-   jumps sideways the moment its turn starts and it becomes an ordinary message.
-   Transparent rather than a dark colour: black is only invisible against a dark
-   theme, and this panel follows whatever theme the user has. */
 .msg.user {
-  background: transparent;
-  border-left: 2px solid transparent;
-  padding: 2px 0 2px 9px;
+  align-self: flex-end;
+  width: fit-content;
+  max-width: min(85%, 720px);
+  margin-left: auto;
+  padding: 7px 11px;
+  background: color-mix(in srgb, var(--vscode-foreground) 8%, var(--vscode-editor-background));
+  border: 1px solid color-mix(in srgb, var(--vscode-foreground) 17%, var(--vscode-editor-background));
+  border-radius: var(--forge-radius-md);
   white-space: pre-wrap;
+  overflow-wrap: anywhere;
 }
 
-/* Queued is the exception, and deliberately so: it is not yet part of the
-   transcript. Dashed says provisional and blue says there is still something
-   to do about it - Steer or Cancel sit right underneath. */
+/* Queued local prompts share the bubble position and hold their own controls. */
+.queued-prompt {
+  align-items: flex-end;
+}
+
+.queued-prompt-card {
+  width: fit-content;
+  max-width: min(85%, 720px);
+  margin-left: auto;
+  padding: 7px 11px 6px;
+  background: color-mix(in srgb, var(--vscode-foreground) 8%, var(--vscode-editor-background));
+  border: 1px solid color-mix(in srgb, var(--vscode-foreground) 17%, var(--vscode-editor-background));
+  border-radius: var(--forge-radius-md);
+}
+
 .msg.user.msg-queued {
-  opacity: 0.7;
-  border-left-style: dashed;
-  border-left-color: var(--forge-accent);
+  width: auto;
+  max-width: none;
+  margin: 0;
+  padding: 0;
+  background: transparent;
+  border: 0;
+  border-radius: 0;
 }
 
 .queued-prompt-actions {
   display: flex;
   align-items: center;
-  gap: 7px;
-  padding: 0 2px;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 4px 8px;
+  margin: 7px -11px -6px;
+  padding: 6px 10px;
+  border-top: 1px solid color-mix(in srgb, var(--forge-green) 35%, transparent);
+  border-radius: 0 0 var(--forge-radius-md) var(--forge-radius-md);
+  background: color-mix(in srgb, var(--forge-green-dark) 24%, var(--vscode-editor-background));
 }
 
 .queued-prompt-status {
   color: var(--forge-accent);
   font-size: 11px;
+}
+
+.queued-prompt-actions .btn-action {
+  background: transparent;
+  border-color: var(--forge-border);
 }
 
 .msg.assistant {

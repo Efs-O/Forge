@@ -36,7 +36,8 @@
 .hljs-type,
 .hljs-class .hljs-title,
 .hljs-title.class_,
-.hljs-built_in { color: #4ec9b0; }
+.hljs-built_in { color: #78a99f; }
+body.vscode-light .hljs-built_in { color: #2f6e4b; }
 
 /* Variables, params: light blue */
 .hljs-variable,
@@ -63,8 +64,8 @@
 
 /* Added lines — olive/green tint */
 .hljs-addition {
-  color: #89d185;
-  background: rgba(137, 209, 133, 0.12);
+  color: var(--forge-diff-added);
+  background: color-mix(in srgb, var(--forge-diff-added) 12%, transparent);
   display: inline-block;
   width: 100%;
 }

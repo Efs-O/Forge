@@ -46,7 +46,7 @@ html, body { height: 100%; background: var(--vscode-editor-background); color: v
 .mm-row--selected { background: var(--vscode-list-inactiveSelectionBackground, #37373d); }
 
 .mm-dot { width: 8px; height: 8px; border-radius: 50%; background: #666; }
-.mm-dot--loaded { background: #3fb950; }
+.mm-dot--loaded { background: var(--forge-green); }
 .mm-dot--active { background: #d29922; }
 .mm-dot--idle { background: #555; }
 

@@ -8,8 +8,8 @@ import { useCallback, useState } from 'react';
  * move between components - a trailing thinking row folds into the next tool
  * call's step, and a lone step is pulled into a group when a second one
  * arrives. React remounts on each move, so a reasoning bubble the reader had
- * open snapped shut the moment the next tool call landed. A running step also
- * records its automatic open so completion and folded runs keep it visible.
+ * open snapped shut the moment the next tool call landed. Only reader choices
+ * are stored; live work stays compact until the reader opens it.
  */
 const choices = new Map<string, boolean>();
 

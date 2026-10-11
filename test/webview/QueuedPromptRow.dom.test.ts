@@ -23,7 +23,7 @@ afterEach(() => {
 });
 
 describe('QueuedPromptRow', () => {
-  it('shows Cancel action beside the queued message', () => {
+  it('keeps the queued message, status, and Cancel in one card', () => {
     const onCancel = vi.fn();
     act(() => {
       root.render(
@@ -37,7 +37,12 @@ describe('QueuedPromptRow', () => {
 
     expect(container.textContent).toContain('Run the tests after this task.');
     expect(container.textContent).toContain('Sends when this turn ends · 1 attachment');
-    const buttons = container.querySelectorAll<HTMLButtonElement>('button');
+    const card = container.querySelector('.queued-prompt-card');
+    expect(card?.querySelector('.msg.user.msg-queued')?.textContent).toBe('Run the tests after this task.');
+    expect(card?.querySelector('.queued-prompt-status')?.textContent).toBe(
+      'Sends when this turn ends · 1 attachment',
+    );
+    const buttons = card?.querySelectorAll<HTMLButtonElement>('button') ?? [];
     expect(Array.from(buttons, (button) => button.textContent)).toEqual(['Cancel']);
     act(() => buttons[0]!.click());
     expect(onCancel).toHaveBeenCalledOnce();
@@ -56,6 +61,9 @@ describe('QueuedPromptRow', () => {
     });
 
     expect(container.textContent).toContain('Will reach Forge at its next step');
+    expect(container.querySelector('.queued-prompt-card .queued-prompt-status')?.textContent).toBe(
+      'Will reach Forge at its next step',
+    );
     // A tell sits in the host inbox, and Cancel withdraws it there.
     expect(Array.from(container.querySelectorAll('button'), (b) => b.textContent)).toEqual(['Cancel']);
   });

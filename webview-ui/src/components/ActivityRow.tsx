@@ -1,12 +1,6 @@
-import React, { useEffect } from 'react';
+import React from 'react';
 import type { AppMessage } from '../reducer';
-import {
-  displayDetail,
-  stepMessages,
-  stepThoughts,
-  stepTools,
-  type ActivityStep,
-} from '../activityRows';
+import { displayDetail, stepMessages, stepThoughts, type ActivityStep } from '../activityRows';
 import { formatDuration } from '../../../src/util/formatDuration';
 import { sameRowList, toolNameAndDetail } from '../messageOps';
 import { readDisclosure, useDisclosure } from '../disclosureState';
@@ -34,12 +28,6 @@ function openedThought(step: ActivityStep): boolean {
   const thoughts = stepThoughts(step);
   if (thoughts[0] && readDisclosure('thinkingGroup', thoughts[0].id)) return true;
   return thoughts.some((thought) => readDisclosure('thinking', thought.id) === true);
-}
-
-function hasPendingCall(step: ActivityStep): boolean {
-  return stepTools(step).some(
-    (message) => message.toolResultTotal === undefined && !message.toolIsError,
-  );
 }
 
 function isFailure(attempt: AppMessage[]): boolean {
@@ -85,16 +73,10 @@ function editSummary(step: ActivityStep): { added: number; removed: number; meas
   );
 }
 
-function ActivityRowView({ step, streaming }: ActivityRowProps): React.ReactElement | null {
+function ActivityRowView({ step }: ActivityRowProps): React.ReactElement | null {
   const [manualOpen, setManualOpen] = useDisclosure('step', stepMessages(step)[0]!.id);
-  const pending = streaming && hasPendingCall(step);
-  // Remember an automatically opened call so completion or a remount into a
-  // folded run cannot hide it. A reader's explicit close still wins.
-  useEffect(() => {
-    if (pending && manualOpen === undefined) setManualOpen(true);
-  }, [pending, manualOpen, setManualOpen]);
   // An opened reasoning bubble also reveals its step when it folds into a call.
-  const open = manualOpen ?? (pending || openedThought(step));
+  const open = manualOpen ?? openedThought(step);
   const final = finalAttempt(step);
   const primary = final[0];
   if (!primary) return null;
@@ -174,7 +156,7 @@ function ActivityRowView({ step, streaming }: ActivityRowProps): React.ReactElem
                 />
               ))}
               {tools.length > 1 ? (
-                <ToolGroup tools={tools} />
+                <ToolGroup tools={tools} nested />
               ) : (
                 <ToolRow message={tools[0]!} nested />
               )}

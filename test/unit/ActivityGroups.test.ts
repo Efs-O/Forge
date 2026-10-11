@@ -37,11 +37,18 @@ describe('groupActivity', () => {
       .toEqual(['activityGroup', kind, 'activityGroup']);
   });
 
-  it('passes a single step through unchanged, with surrounding thoughts', () => {
+  it('groups a single step with surrounding thoughts', () => {
     const before: Row = { kind: 'thinkingGroup', steps: [message('thought', 'assistant', '', { reasoning: 'thinking' })] };
     const only = step('only');
     const after: Row = { kind: 'thinkingGroup', steps: [message('tail', 'assistant', '', { reasoning: 'tail' })] };
-    expect(groupActivity([before, only, after])).toEqual([before, only, after]);
+    expect(groupActivity([before, only, after])).toEqual([{
+      kind: 'activityGroup',
+      items: [
+        { kind: 'thinkingGroup', steps: before.steps },
+        { kind: 'step', step: only.step },
+        { kind: 'thinkingGroup', steps: after.steps },
+      ],
+    }]);
   });
 
   it('passes a thinking-only run through unchanged', () => {

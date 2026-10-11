@@ -1,0 +1,169 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Forge activity view comparison</title>
+  <style>
+    :root { color-scheme: dark; font-family: "Segoe UI", Arial, sans-serif; }
+    * { box-sizing: border-box; }
+    body { margin: 0; background: #111315; color: #c7c9cb; }
+    .frame { width: 1100px; height: 760px; background: #181a1c; border: 1px solid #303337; overflow: hidden; }
+    .tabs { height: 34px; display: flex; align-items: center; gap: 22px; padding: 0 18px; border-bottom: 1px solid #2b2d30; color: #777d83; font-size: 13px; }
+    .tabs b { color: #dedfe0; background: #292d31; padding: 5px 9px; border-radius: 4px; font-weight: 500; }
+    .brand { height: 33px; display: flex; align-items: center; justify-content: space-between; padding: 0 17px; border-bottom: 1px solid #282b2f; font-size: 12px; }
+    .brand .spark { color: #d19835; margin-right: 7px; }
+    .meter { color: #899099; font-family: Consolas, monospace; font-size: 11px; }
+    .meter i { display: inline-block; width: 81px; height: 3px; margin-right: 9px; vertical-align: middle; background: linear-gradient(90deg, #a5a8ad 62%, #2d4051 62%); }
+    .sessions { height: 68px; padding: 9px 16px; border-bottom: 1px solid #2a2d30; font-size: 12px; }
+    .session-line { display: flex; justify-content: space-between; color: #b9bdc1; }
+    .session-pill { display: inline-block; margin-top: 9px; padding: 5px 10px; border: 1px solid #355268; background: #262e34; border-radius: 5px; color: #c4cbd1; }
+    .transcript { height: 543px; padding: 17px 22px; overflow: hidden; }
+    .opening { color: #bfc1c4; font-size: 14px; line-height: 1.55; margin: 3px 0 23px; }
+    .opening code, .reply code { background: #25282c; border-radius: 4px; padding: 2px 5px; color: #adb0b4; }
+    .row, .thought, .subrow { font-family: Consolas, "Cascadia Code", monospace; font-size: 12px; color: #9da2a8; }
+    .row { height: 31px; display: flex; align-items: center; gap: 8px; white-space: nowrap; overflow: hidden; }
+    .chev { color: #898d92; display: inline-block; width: 9px; }
+    .ok { color: #789b80; } .pending { color: #caa663; } .bad { color: #d97874; }
+    .muted { color: #82878d; } .fade { color: #72777d; } .right { margin-left: auto; }
+    .target { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: #a8adb3; }
+    .note { font-family: "Segoe UI", Arial, sans-serif; font-size: 14px; color: #c8cace; line-height: 1.5; margin: 16px 0 21px; }
+    .guide { border-left: 1px solid #31373b; margin-left: 6px; padding-left: 17px; }
+    .inset { margin-left: 20px; }
+    .blank { height: 15px; }
+    .thought { height: 25px; display: flex; align-items: center; gap: 8px; font-size: 11px; }
+    .diff { color: #7eaa86; } .remove { color: #dc8178; }
+    .file { color: #95a0aa; }
+    .pill { font-family: "Segoe UI", Arial, sans-serif; font-size: 11px; border-radius: 3px; background: #222d3b; color: #6dabec; padding: 2px 6px; }
+    .reply { font-size: 14px; line-height: 1.5; margin: 17px 0 15px; }
+    .status { height: 30px; border-top: 1px solid #2c3034; color: #ba8540; padding: 7px 16px; font-size: 12px; }
+    .composer { height: 51px; border-top: 1px solid #303438; background: #181a1c; padding: 5px 10px; font-size: 13px; }
+    .input-box { height: 39px; border: 1px solid #555a5b; border-radius: 8px; background: #202224; color: #858b8c; padding: 10px 12px; }
+    .input-box.focused { border-color: #466d50; }
+    .input-box.clanker { border-color: #977551; background: #27231e; }
+    .label { position: absolute; top: 700px; left: 500px; }
+    .full .row { height: 34px; }
+    .full .note { margin: 21px 0 25px; }
+    .full .result { margin-left: 22px; color: #797e84; }
+    .current .guide { margin-top: 3px; margin-bottom: 10px; }
+    .current .row { height: 30px; }
+    .current .thought { height: 28px; }
+    .current .note { margin: 19px 0 25px; }
+    .proposed .group-summary { background: #1d2223; border: 1px solid #2b3631; border-radius: 5px; padding: 5px 11px; height: 39px; margin: 11px 0 15px; }
+    .proposed .group-summary.live { border-color: #574926; background: #22201b; }
+    .proposed .group-summary .row { height: 27px; }
+    .proposed .group-summary .label-text { color: #c8cacc; }
+    .proposed .group-summary .summary-end { margin-left: auto; color: #858d88; }
+    .proposed .live-line { margin: 5px 0 22px 18px; height: 27px; color: #bdc0bf; }
+    .proposed .note { margin: 14px 0 22px; }
+    .prompt { width: fit-content; max-width: 74%; margin: 1px 0 27px auto; border: 1px solid #393d41; border-radius: 10px; background: #2a2d30; padding: 11px 14px; font-size: 14px; line-height: 1.55; color: #e1e3e4; text-align: left; }
+    .final { margin-top: 30px; max-width: 810px; font-size: 14px; line-height: 1.6; color: #d2d5d6; }
+    .final p { margin: 0 0 11px; }
+    .final .heading { color: #eff0f0; font-weight: 600; }
+    .final .muted { color: #9da4a6; }
+    .opened-group { margin: -11px 0 18px 12px; padding: 7px 0 4px 16px; border-left: 1px solid #3c4a43; }
+    .opened-group .row { height: 34px; }
+    .opened-group .step-target { color: #a2a9aa; overflow: hidden; text-overflow: ellipsis; }
+    .opened-group .step-meta { margin-left: auto; color: #828d8b; }
+    .queue-wrap { display: flex; justify-content: flex-end; margin: 29px 0 0; }
+    .queue-card { width: fit-content; min-width: 300px; max-width: 74%; border: 1px solid #435148; border-radius: 10px; background: #292d2a; overflow: hidden; }
+    .queue-text { padding: 12px 15px 10px; color: #e1e3e2; font-size: 14px; }
+    .queue-footer { display: flex; align-items: center; gap: 11px; min-height: 36px; padding: 6px 11px 7px 15px; border-top: 1px solid #38463c; background: #263229; }
+    .queue-footer .state { color: #8eae94; font-size: 11px; }
+    .queue-footer .state-dot { color: #799e83; margin-right: 5px; }
+    .queue-footer .cancel { margin-left: auto; border: 1px solid #566057; border-radius: 5px; background: transparent; padding: 4px 9px; color: #c9cdca; font-size: 11px; }
+    body.narrow .frame { width: 440px; }
+    body.narrow .transcript { padding: 17px 13px; }
+    body.narrow .prompt { max-width: 88%; }
+    body.narrow .queue-card { min-width: 260px; max-width: 88%; }
+  </style>
+</head>
+<body>
+<div class="frame" id="frame">
+  <div class="tabs"><span>Chat</span><span>Codex</span><span>Claude Code</span><b>Forge</b></div>
+  <div class="brand"><span><span class="spark">✸</span> Forge &nbsp; <span class="fade">DESIGN MOCKUP</span></span><span class="meter"><i></i>42.5k / 65k</span></div>
+  <div class="sessions"><div class="session-line"><span>Sessions</span><span>◷ &nbsp; ＋</span></div><span class="session-pill">◯ &nbsp; Resolve the server patch… &nbsp; ×</span></div>
+  <main class="transcript" id="content"></main>
+  <div class="status">● &nbsp; Working on the server patch… <span style="float:right">384.0s</span></div>
+  <div class="composer"><div class="input-box" id="input-box">Ask or / for commands</div></div>
+</div>
+<script>
+const mode = new URLSearchParams(location.search).get('mode') || 'proposed';
+if (mode === 'queued' || mode === 'clanker') document.body.classList.add('narrow');
+const content = document.getElementById('content');
+content.className = mode === 'full' ? 'transcript full' : mode === 'compact' ? 'transcript compact' : mode === 'current' ? 'transcript current' : 'transcript proposed';
+const intro = '<div class="opening">The monitor commit is in. I’m applying the <code>--max-context</code> patch to <code>serve/server.py</code>.</div>';
+const note1 = '<div class="note">Checking how upstream’s <code>start_replicas</code> builds arguments so the override reaches both paths.</div>';
+const note2 = '<div class="note">Upstream added a replicas path. I’ll preserve it and thread the override through both branches.</div>';
+const full = `${intro}
+  <div class="thought"><span class="chev">▸</span> Thought for 2.2 s</div>
+  <div class="row"><span class="chev">▸</span><span class="ok">✓</span><span>shell</span><span class="target">grep -n '^&lt;&lt;&lt;&lt;&lt;&lt;&lt;\\|^=======\\|^&gt;&gt;&gt;&gt;&gt;&gt;&gt;' serve/server.py; sed -n '6074,6076p;6089,6091p' serve/server.py</span><span class="right muted">0.4 s</span></div>
+  <div class="row result"><span class="chev">▸</span> result <span class="right muted">933 chars</span></div>
+  <div class="thought"><span class="chev">▸</span> Thought for 1.4 s</div>
+  ${note1}
+  <div class="row"><span class="chev">▸</span><span class="ok">✓</span><span>shell</span><span class="target">grep -n 'def engine_args' serve/server.py; sed -n '6270,6290p' serve/server.py</span><span class="right muted">0.4 s</span></div>
+  <div class="row result"><span class="chev">▸</span> result <span class="right muted">2.2k chars</span></div>
+  <div class="thought"><span class="chev">▸</span> Thought for 3.8 s</div>
+  ${note2}
+  <div class="row"><span class="chev">▸</span><span class="ok">✓</span><span>apply_line_edits</span><span class="target">serve/server.py</span><span class="right muted">+6 −10</span></div>
+  <div class="row result"><span class="chev">▸</span> result <span class="right muted">115 chars</span></div>
+  <div class="row"><span class="chev">▸</span><span class="pending">○</span><span>shell</span><span class="target">grep -n '^&lt;&lt;&lt;&lt;&lt;&lt;&lt;\\|^=======\\|^&gt;&gt;&gt;&gt;&gt;&gt;&gt;' serve/server.py | head; sed -n '6074,6076p;6089,6091p' serve/server.py</span><span class="right muted">3.0 s</span></div>`;
+const compact = `${intro}
+  <div class="row"><span class="chev">▸</span><span class="ok">✓</span><span>shell</span><span class="target">grep -n '^&lt;&lt;&lt;&lt;&lt;&lt;&lt;\\|^=======\\|^&gt;&gt;&gt;&gt;&gt;&gt;&gt;' serve/server.py; sed -n '6074,6076p;6089,6091p' serve/server.py</span><span class="right muted">◔ 2.2 s</span></div>
+  ${note1}
+  <div class="row"><span class="chev">▸</span><span class="ok">✓</span><span>shell</span><span class="target">grep -n 'def engine_args' serve/server.py; sed -n '6270,6290p' serve/server.py</span><span class="right muted">◔ 1.4 s</span></div>
+  ${note2}
+  <div class="row"><span class="chev">▸</span><span class="ok">✓</span><span class="diff">✎ +6</span><span class="remove">−10</span><span>apply_line_edits</span><span class="target">serve/server.py</span><span class="right muted">◔ 3.8 s</span></div>
+  <div class="row"><span class="chev">▸</span><span class="pending">○</span><span>shell</span><span class="target">grep -n '^&lt;&lt;&lt;&lt;&lt;&lt;&lt;\\|^=======\\|^&gt;&gt;&gt;&gt;&gt;&gt;&gt;' serve/server.py | head; sed -n '6074,6076p;6089,6091p' serve/server.py</span><span class="right muted">running 3.0 s</span></div>`;
+const current = `${intro}
+  <div class="row"><span class="chev">▾</span><span class="pending">●</span> working · 1 call</div>
+  <div class="guide"><div class="row"><span class="chev">▾</span><span class="ok">✓</span><span>shell</span><span class="target">grep -n '^&lt;&lt;&lt;&lt;&lt;&lt;&lt;\\|^=======\\|^&gt;&gt;&gt;&gt;&gt;&gt;&gt;' serve/server.py; sed -n '6074,6076p;6089,6091p' serve/server.py</span><span class="right muted">◔ 2.2 s</span></div>
+    <div class="guide"><div class="thought"><span class="chev">▸</span> Thought for 2.2 s</div><div class="row muted"><span class="chev">▸</span><span class="ok">✓</span> result <span class="right">933 chars</span></div></div></div>
+  ${note1}
+  <div class="row"><span class="chev">▾</span><span class="pending">●</span> working · 1 call</div>
+  <div class="guide"><div class="row"><span class="chev">▾</span><span class="ok">✓</span><span>shell</span><span class="target">grep -n 'def engine_args' serve/server.py; sed -n '6270,6290p' serve/server.py</span><span class="right muted">◔ 1.4 s</span></div>
+    <div class="guide"><div class="thought"><span class="chev">▸</span> Thought for 1.4 s</div><div class="row muted"><span class="chev">▸</span><span class="ok">✓</span> result <span class="right">2.2k chars</span></div></div></div>
+  ${note2}
+  <div class="row"><span class="chev">▾</span><span class="pending">●</span> working · 2 calls</div>
+  <div class="guide"><div class="row"><span class="chev">▾</span><span class="ok">✓</span><span class="diff">✎ +6</span><span class="remove">−10</span><span>apply_line_edits</span><span class="target">serve/server.py</span></div>
+    <div class="guide"><div class="thought"><span class="chev">▸</span> Thought for 3.8 s</div><div class="row muted"><span class="chev">▸</span><span class="ok">✓</span> result <span class="right">115 chars</span></div><div class="row"><span class="pill">MODIFIED</span><span class="file">serve/server.py</span><span class="right diff">+6 −10 &nbsp; show diff</span></div></div>
+    <div class="row"><span class="chev">▾</span><span class="pending">○</span><span>shell</span><span class="target">grep -n '^&lt;&lt;&lt;&lt;&lt;&lt;&lt;\\|^=======\\|^&gt;&gt;&gt;&gt;&gt;&gt;&gt;' serve/server.py | head; sed -n '6074,6076p;6089,6091p' serve/server.py</span></div></div>`;
+const proposed = `${intro}
+  <div class="group-summary"><div class="row"><span class="chev">▸</span><span class="ok">✓</span><span class="label-text">1 tool call</span><span class="muted">· shell · ◔ 2.2 s</span><span class="summary-end">Details</span></div></div>
+  ${note1}
+  <div class="group-summary"><div class="row"><span class="chev">▸</span><span class="ok">✓</span><span class="label-text">1 tool call</span><span class="muted">· shell · ◔ 1.4 s</span><span class="summary-end">Details</span></div></div>
+  ${note2}
+  <div class="group-summary live"><div class="row"><span class="chev">▸</span><span class="pending">●</span><span class="label-text">Working · 2 calls</span><span class="muted">· 1 file edited</span><span class="diff">+6</span><span class="remove">−10</span><span class="summary-end">Details</span></div></div>
+  <div class="row live-line"><span class="pending">○</span><span>shell</span><span class="target">serve/server.py · verifying the patch</span><span class="right muted">3.0 s</span></div>`;
+const complete = `<div class="prompt">Please finish the <code>--max-context</code> patch in <code>serve/server.py</code>. Keep upstream’s new replicas path and verify both startup paths.</div>
+  <div class="note">I’ll check the upstream change, apply the override in both paths, and run the targeted checks.</div>
+  <div class="group-summary"><div class="row"><span class="chev">▸</span><span class="ok">✓</span><span class="label-text">4 tool calls</span><span class="muted">· inspected startup paths · ◔ 7.4 s</span><span class="summary-end">Details</span></div></div>
+  <div class="note">The replicas branch passes through a separate argument builder. I’ve updated both branches.</div>
+  <div class="group-summary"><div class="row"><span class="chev">▸</span><span class="ok">✓</span><span class="label-text">3 tool calls</span><span class="muted">· 1 file edited</span><span class="diff">+6</span><span class="remove">−10</span><span class="muted">· checks passed</span><span class="summary-end">Details</span></div></div>
+  <div class="final"><p><span class="heading">Done.</span> The <code>--max-context</code> override now reaches both the standard startup path and upstream’s new replicas path.</p>
+  <p>Verification: targeted server tests passed. The change is in <code>serve/server.py</code>.</p></div>`;
+const opened = `<div class="group-summary"><div class="row"><span class="chev">▾</span><span class="ok">✓</span><span class="label-text">4 tool calls</span><span class="muted">· inspected startup paths · ◔ 7.4 s</span><span class="summary-end">Hide details</span></div></div>
+  <div class="opened-group">
+    <div class="row"><span class="chev">▸</span><span class="ok">✓</span><span>shell</span><span class="step-target">serve/server.py · check merge markers</span><span class="step-meta">0.4 s</span></div>
+    <div class="row"><span class="chev">▸</span><span class="ok">✓</span><span>shell</span><span class="step-target">serve/server.py · inspect engine_args</span><span class="step-meta">0.4 s</span></div>
+    <div class="row"><span class="chev">▸</span><span class="ok">✓</span><span>read_file</span><span class="step-target">serve/server.py · start_replicas</span><span class="step-meta">2.2k chars</span></div>
+    <div class="row"><span class="chev">▸</span><span class="ok">✓</span><span>search_code</span><span class="step-target">other max_context references</span><span class="step-meta">3 matches</span></div>
+  </div>`;
+const details = complete.replace(
+  /<div class="group-summary"><div class="row"><span class="chev">▸<\/span><span class="ok">✓<\/span><span class="label-text">4 tool calls<\/span>.*?<\/div><\/div>/,
+  opened,
+);
+const queued = `<div class="prompt">Please finish the <code>--max-context</code> patch in <code>serve/server.py</code>. Keep upstream’s new replicas path and verify both startup paths.</div>
+  <div class="note">I’m checking the replica startup path and will run the server checks next.</div>
+  <div class="group-summary live"><div class="row"><span class="chev">▸</span><span class="pending">●</span><span class="label-text">Working · 2 calls</span><span class="muted">· inspecting serve/server.py</span><span class="summary-end">Details</span></div></div>
+  <div class="queue-wrap"><div class="queue-card"><div class="queue-text">OK</div><div class="queue-footer"><span class="state"><span class="state-dot">●</span>Queued for Forge’s next step</span><button class="cancel" type="button">Cancel</button></div></div></div>`;
+content.innerHTML = ({full, compact, current, proposed, complete, details, queued, clanker: queued})[mode] || proposed;
+if (mode === 'complete' || mode === 'details' || mode === 'proposed') document.getElementById('input-box').classList.add('focused');
+if (mode === 'clanker') document.getElementById('input-box').classList.add('clanker');
+if (mode === 'clanker') document.querySelector('.status').innerHTML = '● &nbsp; Clanker active · no confirmations <span style="float:right">384.0s</span>';
+if (mode === 'complete' || mode === 'details') {
+  document.querySelector('.status').innerHTML = '✓ &nbsp; Finished <span style="float:right">384.0s</span>';
+}
+</script>
+</body>
+</html>

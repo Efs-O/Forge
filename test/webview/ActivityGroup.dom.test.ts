@@ -60,7 +60,7 @@ function toggle(): void {
 }
 
 describe('ActivityGroup', () => {
-  it('folds back-to-back shell calls into one row that expands to each step', () => {
+  it('reveals individual calls directly when Details is opened', () => {
     const shell = (id: string, command: string): ActivityGroupItem => ({
       kind: 'step',
       step: {
@@ -79,17 +79,15 @@ describe('ActivityGroup', () => {
       false,
     );
     toggle();
-    const run = container.querySelector<HTMLButtonElement>('.activity-run .activity-row-header')!;
-    expect(run.textContent).toContain('shell×3· grep, sed');
-    act(() => run.click());
-    expect(container.querySelectorAll('.activity-run .activity-row-body .activity-row')).toHaveLength(3);
+    expect(container.querySelectorAll('.activity-group-body > .activity-row')).toHaveLength(3);
+    expect(container.querySelector('.activity-run')).toBeNull();
   });
 
-  it('starts open while live and shows the working header', () => {
+  it('starts closed while live and shows the working header', () => {
     render(activityItems(), true, true);
-    expect(container.querySelector('.activity-group-toggle')?.getAttribute('aria-expanded')).toBe('true');
-    expect(container.textContent).toContain('● working · 2 calls');
-    expect(container.querySelectorAll('.activity-row')).toHaveLength(2);
+    expect(container.querySelector('.activity-group-toggle')?.getAttribute('aria-expanded')).toBe('false');
+    expect(container.textContent).toContain('●Working · 2 calls');
+    expect(container.querySelectorAll('.activity-row')).toHaveLength(0);
   });
 
   it('starts collapsed for completed history loaded later', () => {
@@ -98,34 +96,74 @@ describe('ActivityGroup', () => {
     expect(container.querySelector('.activity-group-body')).toBeNull();
   });
 
-  it('stays expanded when live ends if the reader did not toggle it', () => {
+  it('stays closed when live ends if the reader did not toggle it', () => {
     const items = activityItems();
     render(items, true, true);
     render(items, false, false);
-    expect(container.querySelector('.activity-group-toggle')?.getAttribute('aria-expanded')).toBe('true');
-    expect(container.querySelectorAll('.activity-row')).toHaveLength(2);
+    expect(container.querySelector('.activity-group-toggle')?.getAttribute('aria-expanded')).toBe('false');
+    expect(container.querySelectorAll('.activity-row')).toHaveLength(0);
   });
 
   it('keeps a manual toggle across the live-to-not-live transition', () => {
     const items = activityItems();
     render(items, true, true);
-    toggle(); // Explicitly close the live group.
+    toggle(); // Explicitly open the live group.
     render(items, false, false);
-    expect(container.querySelector('.activity-group-toggle')?.getAttribute('aria-expanded')).toBe('false');
-    expect(container.querySelector('.activity-group-body')).toBeNull();
+    expect(container.querySelector('.activity-group-toggle')?.getAttribute('aria-expanded')).toBe('true');
+    expect(container.querySelectorAll('.activity-group-body > .activity-row')).toHaveLength(2);
   });
 
-  it('starts open for an unrecovered failure', () => {
+  it('shows an unrecovered failure in the closed summary', () => {
     render(activityItems({ failed: true }), false, false);
-    expect(container.querySelector('.activity-group-toggle')?.getAttribute('aria-expanded')).toBe('true');
+    expect(container.querySelector('.activity-group-toggle')?.getAttribute('aria-expanded')).toBe('false');
     expect(container.querySelector('.activity-group-failed')?.textContent).toBe('[1 failed]');
     expect(container.querySelector('.activity-group-status')?.textContent).toBe('✕');
   });
 
-  it('starts open for pending calls while streaming', () => {
+  it('shows one concise pending call below a closed group', () => {
+    render(activityItems({ pending: true }), true, true);
+    expect(container.querySelector('.activity-group-toggle')?.getAttribute('aria-expanded')).toBe('false');
+    expect(container.querySelector('.activity-group-status')?.textContent).toBe('●');
+    expect(container.querySelector('.activity-group-pending')?.textContent).toContain('edit_file');
+    expect(container.querySelectorAll('.activity-row')).toHaveLength(0);
+    render(activityItems(), false, false);
+    expect(container.querySelector('.activity-group-pending')).toBeNull();
+  });
+
+  it('does not call a historical incomplete step running during a later turn', () => {
     render(activityItems({ pending: true }), false, true);
-    expect(container.querySelector('.activity-group-toggle')?.getAttribute('aria-expanded')).toBe('true');
     expect(container.querySelector('.activity-group-status')?.textContent).toBe('○');
+    expect(container.querySelector('.activity-group-pending')).toBeNull();
+  });
+
+  it('keeps live edit totals in the closed summary', () => {
+    const items = activityItems();
+    if (items[0]?.kind !== 'step') throw new Error('expected a step');
+    items[0].step.diffs.push({
+      id: 'diff', role: 'diff', content: 'serve/server.py',
+      diffHunks: [{ oldStart: 1, newStart: 1, lines: [{ kind: 'added', text: 'new' }] }],
+    });
+    render(items, true, true);
+    expect(container.querySelector('.activity-group-toggle')?.getAttribute('aria-expanded')).toBe('false');
+    expect(container.querySelector('.activity-group-edit-stats')?.textContent).toContain('✎ 1 +1');
+    expect(container.querySelector('.activity-group-edits')?.textContent).toBe('to server.py');
+  });
+
+  it('opens a full command and result after Details and one call click', () => {
+    const command = 'cd /workspace && grep -n max_context serve/server.py';
+    const items: ActivityGroupItem[] = [{ kind: 'step', step: {
+      attempts: [{ thoughts: [], tools: [tool('shell', {
+        content: `shell → ${command}`, toolName: 'shell', toolTarget: command,
+        toolDetail: command, toolResult: 'match at line 42', toolResultTotal: 16,
+      })] }],
+      diffs: [],
+    } }];
+    render(items, false, false);
+    toggle();
+    expect(container.querySelectorAll('.activity-group-body > .activity-row')).toHaveLength(1);
+    act(() => container.querySelector<HTMLButtonElement>('.activity-row-header')!.click());
+    expect(container.querySelector('.tool-row-command code')?.textContent).toBe(command);
+    expect(container.querySelector('.tool-row-verbatim')?.textContent).toBe('match at line 42');
   });
 
   it('counts recovered retries with the right plural', () => {

@@ -1,12 +1,10 @@
-import React, { useEffect } from 'react';
+import React from 'react';
 import { readDisclosure, useDisclosure } from '../disclosureState';
 import type { ActivityGroupItem } from '../activityRows';
-import { groupMessages, stepMessages } from '../activityRows';
-import { sameRowList } from '../messageOps';
+import { displayDetail, groupMessages, stepMessages } from '../activityRows';
+import { sameRowList, toolNameAndDetail } from '../messageOps';
 import { summarizeGroup } from '../activityGroups';
-import { foldRuns, type FoldedItem } from '../activityRuns';
 import { ActivityRow } from './ActivityRow';
-import { ActivityRunRow } from './ActivityRunRow';
 import { ThinkingGroup } from './ThinkingGroup';
 
 export interface ActivityGroupProps {
@@ -29,27 +27,34 @@ const Chevron = ({ expanded }: { expanded: boolean }): React.ReactElement => (
   </svg>
 );
 
-function itemKey(item: FoldedItem): string {
+function itemKey(item: ActivityGroupItem): string {
   if (item.kind === 'step') return stepMessages(item.step)[0]!.id;
-  if (item.kind === 'run') return stepMessages(item.steps[0]!)[0]!.id;
   return item.steps[0]!.id;
 }
 
 function ActivityGroupView({ items, live, streaming }: ActivityGroupProps): React.ReactElement {
   const [choice, setChoice] = useDisclosure('group', groupMessages(items)[0]!.id);
   const summary = summarizeGroup(items);
-  // Remember that this group was visible while working. Completed history
-  // loaded later starts closed, so a long transcript does not expand at once.
-  useEffect(() => {
-    if (live && choice === undefined) setChoice(true);
-  }, [live, choice, setChoice]);
   const openedStep = items.some(
     (item) =>
       item.kind === 'step' && readDisclosure('step', stepMessages(item.step)[0]!.id) === true,
   );
-  const expanded =
-    choice ?? (live || (streaming && summary.pending) || summary.failed > 0 || openedStep);
-  const status = summary.failed > 0 ? '✕' : streaming && summary.pending ? '○' : '✓';
+  const expanded = choice ?? openedStep;
+  const status = summary.failed > 0 ? '✕' : summary.pending ? '○' : '✓';
+  const pendingTools = live
+    ? items.flatMap((item) =>
+        item.kind === 'step'
+          ? item.step.attempts
+              .flatMap((attempt) => attempt.tools)
+              .filter((tool) => tool.toolResultTotal === undefined && !tool.toolIsError)
+          : [],
+      )
+    : [];
+  const pending = pendingTools.at(-1);
+  const pendingLabel = pending ? toolNameAndDetail(pending) : undefined;
+  const pendingTarget = pending
+    ? displayDetail(pending.toolTarget ?? pendingLabel?.detail ?? '')
+    : '';
 
   return (
     <section className={`activity-group${expanded ? ' activity-group-open' : ''}`}>
@@ -62,39 +67,35 @@ function ActivityGroupView({ items, live, streaming }: ActivityGroupProps): Reac
         <span className="activity-group-chevron">
           <Chevron expanded={expanded} />
         </span>
-        {live ? (
-          <span className={`activity-group-live${summary.failed > 0 ? ' has-failure' : ''}`}>
-            ● working · {summary.toolCalls} calls
-          </span>
-        ) : (
+        <span
+          className={`activity-group-status${summary.failed > 0 ? ' is-failed' : live ? ' is-live' : ''}`}
+        >
+          {live && summary.failed === 0 ? '●' : status}
+        </span>
+        <span className="activity-group-label">
+          {live
+            ? 'Working'
+            : `${summary.toolCalls} tool ${summary.toolCalls === 1 ? 'call' : 'calls'}`}
+          {live && ` · ${summary.toolCalls} ${summary.toolCalls === 1 ? 'call' : 'calls'}`}
+        </span>
+        {summary.editCount > 0 && (
           <>
-            <span className={`activity-group-status${summary.failed > 0 ? ' is-failed' : ''}`}>
-              {status}
+            <span className="activity-group-edit-stats">
+              · ✎ {summary.editCount}
+              {summary.added > 0 && (
+                <span className="diff-stat diff-stat-added"> +{summary.added}</span>
+              )}
+              {summary.removed > 0 && (
+                <span className="diff-stat diff-stat-removed"> −{summary.removed}</span>
+              )}
             </span>
-            <span>{summary.toolCalls} tool calls</span>
-            {summary.editCount > 0 && (
-              <span className="activity-group-edits">
-                · ✎ {summary.editCount} edits {summary.fileLabel}
-                {summary.added > 0 && (
-                  <>
-                    {' '}
-                    <span className="diff-stat diff-stat-added">+{summary.added}</span>
-                  </>
-                )}
-                {summary.removed > 0 && (
-                  <>
-                    {' '}
-                    <span className="diff-stat diff-stat-removed">−{summary.removed}</span>
-                  </>
-                )}
-              </span>
-            )}
-            {summary.hasThinking && (
-              <span className="activity-group-thinking">
-                · ◔{summary.thinking ? ` ${summary.thinking}` : ''} thinking
-              </span>
-            )}
+            <span className="activity-group-edits">{summary.fileLabel}</span>
           </>
+        )}
+        {!live && summary.hasThinking && (
+          <span className="activity-group-thinking">
+            · ◔{summary.thinking ? ` ${summary.thinking}` : ''} thinking
+          </span>
         )}
         {summary.failed > 0 && (
           <span className="activity-group-failed">[{summary.failed} failed]</span>
@@ -104,19 +105,26 @@ function ActivityGroupView({ items, live, streaming }: ActivityGroupProps): Reac
             [{summary.retries} {summary.retries === 1 ? 'retry' : 'retries'}]
           </span>
         )}
+        <span className="activity-group-details">{expanded ? 'Hide details' : 'Details'}</span>
       </button>
+      {!expanded && pending && (
+        <div className="activity-group-pending" role="status">
+          <span className="tool-row-status is-pending">○</span>
+          <span className="activity-group-pending-name">
+            {pendingTools.length > 1 ? `${pendingTools.length} calls running` : pendingLabel?.name}
+          </span>
+          {pendingTools.length === 1 && pendingTarget && (
+            <span className="activity-group-pending-target" title={pendingTarget}>
+              {pendingTarget}
+            </span>
+          )}
+        </div>
+      )}
       {expanded && (
         <div className="activity-group-body">
-          {foldRuns(items).map((item) =>
+          {items.map((item) =>
             item.kind === 'step' ? (
               <ActivityRow key={itemKey(item)} step={item.step} streaming={streaming} />
-            ) : item.kind === 'run' ? (
-              <ActivityRunRow
-                key={itemKey(item)}
-                toolName={item.toolName}
-                steps={item.steps}
-                streaming={streaming}
-              />
             ) : (
               <ThinkingGroup key={itemKey(item)} steps={item.steps} />
             ),

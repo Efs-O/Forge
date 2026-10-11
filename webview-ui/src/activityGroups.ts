@@ -114,7 +114,7 @@ export function summarizeGroup(items: ActivityGroupItem[]): GroupSummary {
   };
 }
 
-/** Groups maximal step/thinking runs when at least two steps make a group useful. */
+/** Groups each maximal step/thinking run with at least one tool step. */
 export function groupActivity(rows: Row[]): Row[] {
   const grouped: Row[] = [];
   let run: ActivityGroupItem[] = [];
@@ -122,7 +122,7 @@ export function groupActivity(rows: Row[]): Row[] {
   let stepCount = 0;
 
   const flush = (): void => {
-    if (stepCount > 1) grouped.push({ kind: 'activityGroup', items: run });
+    if (stepCount > 0) grouped.push({ kind: 'activityGroup', items: run });
     else grouped.push(...runRows);
     run = [];
     runRows = [];

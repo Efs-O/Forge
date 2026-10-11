@@ -85,7 +85,7 @@
 }
 
 .ms-dot--ready {
-  background: var(--vscode-testing-iconPassed, #89d185);
+  background: var(--forge-green);
 }
 
 /* Hollow, so "starting" reads as different from "ready" even in monochrome. */

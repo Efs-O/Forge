@@ -1,17 +1,18 @@
 /* Grouped activity disclosure and its compact summary line. */
 .activity-group {
-  margin: 3px 0;
+  margin: 8px 0;
 }
 
 .activity-group-toggle {
   display: flex;
   align-items: center;
-  flex-wrap: wrap;
-  gap: 5px;
+  gap: 6px;
   width: 100%;
-  padding: 5px 0;
-  border: 0;
-  background: transparent;
+  min-width: 0;
+  padding: 7px 9px;
+  border: 1px solid var(--vscode-panel-border, #333);
+  border-radius: var(--forge-radius-sm);
+  background: color-mix(in srgb, var(--vscode-editorWidget-background, #252526) 45%, transparent);
   color: var(--vscode-descriptionForeground);
   cursor: pointer;
   text-align: left;
@@ -20,8 +21,7 @@
 }
 
 .activity-group-toggle:hover {
-  background: transparent;
-  text-decoration: underline;
+  background: var(--vscode-list-hoverBackground, #2a2d2e);
 }
 
 .activity-group-chevron {
@@ -35,31 +35,67 @@
 .activity-group-status {
   color: var(--forge-tool-ok);
 }
+.activity-group-status.is-live { color: var(--vscode-editorWarning-foreground, #cca700); }
 
 .activity-group-status.is-failed,
 .activity-group-failed {
   color: var(--forge-tool-bad);
 }
 
+.activity-group-label { flex: 0 0 auto; white-space: nowrap; }
+.activity-group-details {
+  flex: 0 0 auto;
+  margin-left: auto;
+  color: var(--vscode-descriptionForeground);
+  font-size: 11px;
+  white-space: nowrap;
+}
+
 .activity-group-retry {
   color: var(--vscode-editorWarning-foreground, #cca700);
 }
 
+.activity-group-edit-stats {
+  flex: 0 0 auto;
+  color: var(--vscode-descriptionForeground);
+  white-space: nowrap;
+}
 .activity-group-edits,
 .activity-group-thinking {
   color: var(--vscode-descriptionForeground);
-}
-
-.activity-group-live {
-  color: var(--vscode-foreground);
-}
-
-.activity-group-live.has-failure {
-  color: var(--forge-tool-bad);
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .activity-group-body {
-  margin: 2px 0 5px 5px;
-  padding-left: 14px;
+  margin: 3px 0 5px 10px;
+  padding-left: 11px;
   border-left: 1px solid var(--vscode-panel-border, #333);
+}
+
+.activity-group-pending {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  margin: 4px 0 5px 18px;
+  color: var(--vscode-descriptionForeground);
+  font-family: var(--vscode-editor-font-family, 'Cascadia Code', monospace);
+  font-size: 12px;
+}
+.activity-group-pending-target {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.activity-group-pending-name {
+  flex: 0 0 auto;
+  max-width: 40%;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }

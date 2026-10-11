@@ -8,23 +8,22 @@
   --forge-space-2: 8px;
   --forge-space-3: 12px;
   --forge-space-4: 16px;
-  /* Brand green, taken from the Efso publisher avatar. Replaces the theme's
-     blues (focusBorder, button, textLink, list selection, progressBar) so the
-     sidebar matches the avatar instead of the VS Code default. Every accent in
-     the webview reads one of these tokens - never a --vscode-* blue directly. */
+  /* Forest greens for Forge controls and status. Text and small marks use a
+     lighter, desaturated value so they stay legible on a dark editor surface. */
   --forge-green-deep:  #053b34;
   --forge-green-dark:  #0b5b4e;
   --forge-green-hover: #0f6e5e;
-  --forge-green:       #10b981;
-  --forge-accent:      #34d399;
+  --forge-green:       #678f75;
+  --forge-accent:      #79a989;
   --forge-accent-fill:       var(--forge-green-dark);
   --forge-accent-fill-hover: var(--forge-green-hover);
   --forge-accent-fill-fg:    #ecfdf5;
-  --forge-link:        #6ee7b7;
-  /* "Remote active" chip: a muted forest green. It stays lit for the whole
-     session, so the bright accent read as a glow. */
-  --forge-remote:      #3c8c5f;
-  --forge-link-active: #a7f3d0;
+  --forge-link:        #79a989;
+  /* The remote chip stays visible for the session, so use a quiet green with
+     enough contrast for its small label on dark backgrounds. */
+  --forge-remote:      #678f75;
+  --forge-link-active: #a9c5ad;
+  --forge-diff-added:  #79a989;
   --forge-selection:   var(--forge-green-deep);
   --forge-surface-1: var(--vscode-editorWidget-background, #252526);
   --forge-surface-2: var(--vscode-editor-inactiveSelectionBackground, #3a3a3a);
@@ -39,18 +38,20 @@
   /* Tool outcome. Green and red carry no meaning on their own here - each glyph
      differs in shape as well as hue (✓ / ✕ / ○) and carries a title, so the row
      still reads without colour. */
-  --forge-tool-ok:   var(--vscode-charts-green, #6fc099);
+  --forge-tool-ok:   #79a989;
   --forge-tool-bad:  var(--vscode-errorForeground, #f48771);
 }
 
-/* The bright greens are tuned for a dark sidebar; on a light theme they wash
-   out, so text-coloured accents drop to the deep end of the same hue. */
+/* Light surfaces need darker text and status marks from the same palette. */
 body.vscode-light {
-  --forge-accent:      #047857;
+  --forge-green:       #2f6e4b;
+  --forge-accent:      #2f6e4b;
   --forge-remote:      #2f6e4b;
-  --forge-link:        #047857;
-  --forge-link-active: #065f46;
-  --forge-selection:   #d1fae5;
+  --forge-link:        #2f6e4b;
+  --forge-link-active: #225c3e;
+  --forge-diff-added:  #2f6e4b;
+  --forge-tool-ok:     #2f6e4b;
+  --forge-selection:   #dceade;
 }
 
 *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
