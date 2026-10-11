@@ -78,6 +78,7 @@ describe('ActivityGroup', () => {
       false,
       false,
     );
+    toggle();
     const run = container.querySelector<HTMLButtonElement>('.activity-run .activity-row-header')!;
     expect(run.textContent).toContain('shell×3· grep, sed');
     act(() => run.click());
@@ -89,6 +90,12 @@ describe('ActivityGroup', () => {
     expect(container.querySelector('.activity-group-toggle')?.getAttribute('aria-expanded')).toBe('true');
     expect(container.textContent).toContain('● working · 2 calls');
     expect(container.querySelectorAll('.activity-row')).toHaveLength(2);
+  });
+
+  it('starts collapsed for completed history loaded later', () => {
+    render(activityItems(), false, false);
+    expect(container.querySelector('.activity-group-toggle')?.getAttribute('aria-expanded')).toBe('false');
+    expect(container.querySelector('.activity-group-body')).toBeNull();
   });
 
   it('stays expanded when live ends if the reader did not toggle it', () => {

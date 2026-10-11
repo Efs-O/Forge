@@ -1,5 +1,9 @@
 # Forge — Recent Changes
 
+## 0.17.19
+
+- Completed activity loaded from chat history starts collapsed again. Activity that was visible while an agent worked stays open when it finishes, including a running row that folds into a group. This prevents old chat activity from expanding at once and disrupting scrolling after a transcript refresh.
+
 ## 0.17.18
 
 - Running tool rows and their results stay open when the call completes or folds into a run. Manually closed rows stay closed. Grouped tool activity stays expanded after the answer begins, and opened result panels survive row remounts.

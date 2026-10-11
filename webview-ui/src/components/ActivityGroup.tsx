@@ -1,5 +1,5 @@
-import React from 'react';
-import { useDisclosure } from '../disclosureState';
+import React, { useEffect } from 'react';
+import { readDisclosure, useDisclosure } from '../disclosureState';
 import type { ActivityGroupItem } from '../activityRows';
 import { groupMessages, stepMessages } from '../activityRows';
 import { sameRowList } from '../messageOps';
@@ -36,9 +36,19 @@ function itemKey(item: FoldedItem): string {
 }
 
 function ActivityGroupView({ items, live, streaming }: ActivityGroupProps): React.ReactElement {
-  const [manualExpanded, setManualExpanded] = useDisclosure('group', groupMessages(items)[0]!.id);
+  const [choice, setChoice] = useDisclosure('group', groupMessages(items)[0]!.id);
   const summary = summarizeGroup(items);
-  const expanded = manualExpanded ?? true;
+  // Remember that this group was visible while working. Completed history
+  // loaded later starts closed, so a long transcript does not expand at once.
+  useEffect(() => {
+    if (live && choice === undefined) setChoice(true);
+  }, [live, choice, setChoice]);
+  const openedStep = items.some(
+    (item) =>
+      item.kind === 'step' && readDisclosure('step', stepMessages(item.step)[0]!.id) === true,
+  );
+  const expanded =
+    choice ?? (live || (streaming && summary.pending) || summary.failed > 0 || openedStep);
   const status = summary.failed > 0 ? '✕' : streaming && summary.pending ? '○' : '✓';
 
   return (
@@ -46,7 +56,7 @@ function ActivityGroupView({ items, live, streaming }: ActivityGroupProps): Reac
       <button
         className={`activity-group-toggle${summary.failed > 0 ? ' has-failure' : ''}`}
         type="button"
-        onClick={() => setManualExpanded(!expanded)}
+        onClick={() => setChoice(!expanded)}
         aria-expanded={expanded}
       >
         <span className="activity-group-chevron">
