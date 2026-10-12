@@ -102,6 +102,8 @@ describe('builtin execute template', () => {
     // The scope guard read as "stay minimal" on one-shot builds (pelican run 5 vs 0.17.0).
     expect(prompt).not.toContain('Do not refactor, clean up');
     expect(prompt).toContain('- Within the task, do the work completely and very well.');
+    expect(prompt).toContain('Write the direct answer as a standalone first sentence');
+    expect(prompt).toContain('leave a blank line before short plain headings or bullets');
     expect(prompt).toContain(
       'After each result, determine what specific information or action is still required. If something necessary remains, continue.',
     );
@@ -143,8 +145,8 @@ describe('builtin execute template', () => {
     expect(prompt).toContain(
       'If the user asks for exhaustive detail or specifies a format, follow that request exactly.',
     );
-    expect(prompt).toContain('Lead with the direct answer');
-    expect(prompt).toContain('keep one point per bullet');
+    expect(prompt).toContain('Write the direct answer as a standalone first sentence');
+    expect(prompt).toContain('Keep one point per bullet');
   });
 
   it('leaves fallback-format and terminal guidance to the code that injects them', () => {

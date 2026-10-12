@@ -30,8 +30,9 @@ describe('CliChatRunner', () => {
     expect(prompt).toContain('ASSISTANT:\nFirst answer');
     expect(prompt).toContain('USER:\nNow implement it');
     expect(prompt).toContain('using your own tools');
-    expect(prompt).toContain('lead with the direct answer');
-    expect(prompt).toContain('keep one point per bullet');
+    expect(prompt).toContain('direct answer as a standalone first sentence');
+    expect(prompt).toContain('leave a blank line before short plain headings or bullets');
+    expect(prompt).toContain('Keep one point per bullet');
   });
 
   it('sends only the latest user request when resuming a CLI session', () => {
@@ -41,7 +42,7 @@ describe('CliChatRunner', () => {
       { role: 'user', content: 'Continue with this' },
     ]);
     expect(prompt).toContain('Continue with this');
-    expect(prompt).toContain('lead with the direct answer');
+    expect(prompt).toContain('direct answer as a standalone first sentence');
   });
 
   it('keeps the host-recorded plan on a CLI resume without restoring old requests', () => {
@@ -56,7 +57,7 @@ describe('CliChatRunner', () => {
 
     expect(prompt).toContain('Task plan (recorded by Forge');
     expect(prompt).toContain('Latest request');
-    expect(prompt).toContain('lead with the direct answer');
+    expect(prompt).toContain('direct answer as a standalone first sentence');
     expect(prompt).not.toContain('First request');
   });
 

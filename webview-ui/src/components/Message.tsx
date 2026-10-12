@@ -116,6 +116,14 @@ const markdownComponents: React.ComponentProps<typeof Markdown>['components'] = 
   },
 };
 
+/** Separate a concise assistant lead from a structural explanation line. */
+function normalizeAssistantLead(content: string): string {
+  return content.replace(
+    /^(?![ \t]*(?:[-*+]\s|\d+[.)]\s|#{1,6}(?:\s|$)|>\s|```))([^\r\n]+[.!?:])\r?\n(?=(?:\*\*[^*\r\n]+\*\*:?|__[^_\r\n]+__:?|[-*+]\s|\d+[.)]\s|#{1,6}\s))/,
+    '$1\n\n',
+  );
+}
+
 function AssistantContent({
   content,
   streaming,
@@ -124,7 +132,7 @@ function AssistantContent({
   streaming?: boolean;
 }): React.ReactElement {
   const renderContent = useMemo(
-    () => linkifyForRender(normalizeMarkdownForRender(content)),
+    () => linkifyForRender(normalizeMarkdownForRender(normalizeAssistantLead(content))),
     [content],
   );
   const { settled, live } = useMemo(

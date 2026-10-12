@@ -66,3 +66,74 @@ describe('Message code blocks', () => {
     expect(container.querySelector('.forge-code-copy')?.getAttribute('aria-label')).toBe('Copied');
   });
 });
+
+describe('assistant answer layout', () => {
+  const lead = 'Confirmed against git status — my ownership and yours, exactly:';
+
+  it('renders the saved colon lead and bold label as separate paragraphs', () => {
+    act(() => {
+      root.render(
+        React.createElement(Message, {
+          role: 'assistant',
+          content: `${lead}\n**Mine:**\n- The renderer now separates the lead.`,
+        }),
+      );
+    });
+
+    const paragraphs = container.querySelectorAll('.msg.assistant p');
+    expect(paragraphs[0]?.textContent).toBe(lead);
+    expect(paragraphs[1]?.querySelector('strong')?.textContent).toBe('Mine:');
+    expect(container.querySelector('.msg.assistant ul')?.textContent).toContain(
+      'The renderer now separates the lead.',
+    );
+  });
+
+  it('applies the same colon lead separation while the message is streaming', () => {
+    act(() => {
+      root.render(
+        React.createElement(Message, {
+          role: 'assistant',
+          streaming: true,
+          content: `${lead}\n**Mine:**\n\n- The renderer now separates the lead.`,
+        }),
+      );
+    });
+
+    expect(container.querySelector('.msg.assistant p')?.textContent).toBe(lead);
+    expect(container.querySelector('.msg.assistant strong')?.textContent).toBe('Mine:');
+    expect(container.querySelector('.streaming-tail')?.textContent).toContain(
+      'The renderer now separates the lead.',
+    );
+  });
+
+  it('keeps ordinary assistant prose and code fences in their usual rendering', () => {
+    act(() => {
+      root.render(
+        React.createElement(Message, {
+          role: 'assistant',
+          content: 'The fix is ready.\nIt handles saved messages too.\n\n```text\n**Mine:**\n```',
+        }),
+      );
+    });
+
+    expect(container.querySelectorAll('.msg.assistant p')).toHaveLength(1);
+    expect(container.querySelector('.msg.assistant p')?.textContent).toBe(
+      'The fix is ready.\nIt handles saved messages too.',
+    );
+    expect(container.querySelector('.forge-code-block code')?.textContent).toBe('**Mine:**\n');
+  });
+
+  it('keeps consecutive list items in one Markdown list', () => {
+    act(() => {
+      root.render(
+        React.createElement(Message, {
+          role: 'assistant',
+          content: '- First item.\n- Second item',
+        }),
+      );
+    });
+
+    expect(container.querySelectorAll('.msg.assistant ul')).toHaveLength(1);
+    expect(container.querySelectorAll('.msg.assistant li')).toHaveLength(2);
+  });
+});

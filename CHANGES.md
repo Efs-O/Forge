@@ -1,5 +1,9 @@
 # Forge — Recent Changes
 
+## 0.17.21
+
+- Assistant replies show a standalone opening sentence above the explanation when the model puts a plain Markdown heading, label, or list on the next line. Forge's native and CLI agent instructions now ask for that simple answer-first layout. Saved message text is unchanged.
+
 ## 0.17.20
 
 - The transcript uses the full width of a wide Forge pane instead of a centered 1040 px column; assistant prose keeps a reading cap of about 1440 px. In activity groups only "tool call(s)" and tool names take the foreground color, the live dot matches "Heating the room", and Details toggles and expanded reasoning use the UI font at a readable size.

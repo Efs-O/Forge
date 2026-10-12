@@ -45,7 +45,7 @@ export interface RunWarmCliChatOptions extends Omit<RunCliChatOptions, 'driver'>
 }
 
 const CLI_ANSWER_SHAPE_GUIDANCE =
-  'Unless the user asks for exhaustive detail or a specific format, lead with the direct answer, use short sections or bullets when helpful, keep one point per bullet, and end with a brief correction or important caveat when needed.';
+  'Unless the user asks for exhaustive detail or a specific format, write the direct answer as a standalone first sentence, then leave a blank line before short plain headings or bullets when useful. Keep one point per bullet, and end with a brief correction or important caveat when needed.';
 
 function contentText(content: string | ContentPart[] | null): string {
   if (typeof content === 'string') return content;
