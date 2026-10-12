@@ -131,7 +131,7 @@ function printResult(result) {
 
 async function main() {
   const options = parseArgs(process.argv.slice(2));
-  const nativeDefinitions = extractToolDefinitions();
+  const nativeDefinitions = await extractToolDefinitions();
   const mcpDefinitions = options.includeMcp
     ? await discoverMcpDefinitions(
         options.config,

@@ -103,7 +103,7 @@ export function makeApplyLineEditsTool(
       function: {
         name: 'apply_line_edits',
         description:
-          'Atomically apply non-overlapping replacements to one file using one-based inclusive line ranges; operations are applied in line order. Read the file first and copy the current lines exactly into expected_lines; stale or out-of-range edits are rejected.',
+          'Atomically apply non-overlapping replacements to one file using one-based inclusive line ranges; operations are applied in line order. Read the file first and copy the current lines exactly into expected_lines; stale or out-of-range edits are rejected. Give start_line, end_line, or both; a missing one is derived from the length of expected_lines.',
         parameters: {
           type: 'object',
           properties: {

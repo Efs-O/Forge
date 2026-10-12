@@ -94,7 +94,7 @@ export function makeRenderHtmlToImageTool(deps: RenderHtmlDeps): RegisteredTool 
             path: {
               type: 'string',
               description:
-                'Workspace-relative file to render or check (resolves against the workspace root). Provide exactly one of html or path; preview and shader_check require path. Relative preview assets (./tex.png) do not load.',
+                'Workspace-relative file to render or check (resolves against the workspace root). shader_check accepts .wgsl, .glsl, .vert, .frag, .js, .mjs, .ts, or .html. Provide exactly one of html or path; preview and shader_check require path. Relative preview assets (./tex.png) do not load.',
             },
             width: {
               type: 'integer',

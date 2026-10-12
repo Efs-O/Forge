@@ -6,9 +6,12 @@ environment variables are not something a Marketplace visitor is reading for.
 
 The generated coverage matrix it produces is [TOOL_COVERAGE.md](TOOL_COVERAGE.md).
 
-Forge includes an opt-in local-model harness that advertises the same native
-tool constructors assembled by `registerAllTools.ts`. It asks the configured
-model to emit calls but does not execute handlers or side effects.
+Forge includes an opt-in local-model harness whose inventory is built by
+bundling and running `registerAllTools.ts` with a maximal synthetic config.
+The registry's advertised definitions are captured after every permission and
+lazy group is enabled, so schemas include evaluated constants and loop-registered
+families. The harness asks the configured model to emit calls but does not
+execute handlers or side effects.
 
 ```powershell
 npm run test:local-tools -- --list
@@ -20,7 +23,8 @@ irrelevant while array order remains significant. External MCP processes are
 never started by default. Use `--include-mcp` explicitly (and optionally
 `--config <path>`) to include configured MCP schemas in the inventory or model
 sweep. Reports identify native versus MCP tools and state that the mode is
-schema emission only.
+schema emission only. “Schema-valid” includes the schema's structural rules and
+its numeric, string-length, and array-length bounds.
 
 Generate the canonical native coverage matrix by merging dated evidence:
 
@@ -44,4 +48,3 @@ $env:FORGE_LIVE_MODEL = '<configured-model-name>'
 $env:FORGE_LIVE_REPORT = 'docs/live-reports/capabilities-YYYY-MM-DD-HHMM.json'
 npx vitest run test/live/GemmaCapabilities.live.test.ts --reporter=verbose
 ```
-

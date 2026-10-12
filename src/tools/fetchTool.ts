@@ -225,7 +225,8 @@ export function makeWebFetchTool(dependencies: WebFetchDependencies = {}): Regis
             },
             https_only: {
               type: 'boolean',
-              description: 'Reject non-HTTPS redirect targets. Used by restricted capabilities.',
+              description:
+                'Leave unset. When true, a redirect to a non-HTTPS URL is refused; set internally by remote-facing fetches.',
             },
             find: {
               type: 'string',

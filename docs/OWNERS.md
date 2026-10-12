@@ -396,6 +396,7 @@ overlaps with an existing owner, extend the owner instead.
 | search_code capped result rendering        | `src/tools/searchCodeOutput.ts`        |
 | Config-to-tool permission resolution       | `src/tools/PermissionResolver.ts`     |
 | Tool registration entry point              | `src/tools/registerAllTools.ts`       |
+| Tool-audit registry snapshot              | `scripts/tool-audit-registry.ts`       |
 | Built-in tools + active-editor access      | `src/tools/builtinTools.ts`           |
 | Truncation-recovery write ceiling           | `src/tools/writeChunking.ts`          |
 | File read/write tools                      | `src/tools/fileEditTools.ts`          |

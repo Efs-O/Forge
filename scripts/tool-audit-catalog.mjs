@@ -1,106 +1,44 @@
 import fs from 'node:fs';
 import path from 'node:path';
-import { fileURLToPath } from 'node:url';
-import ts from 'typescript';
+import { fileURLToPath, pathToFileURL } from 'node:url';
+import esbuild from 'esbuild';
 import yaml from 'js-yaml';
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { StdioClientTransport } from '@modelcontextprotocol/sdk/client/stdio.js';
 
 const ROOT = path.resolve(fileURLToPath(new URL('..', import.meta.url)));
-const REGISTRY_SOURCE_FILE = 'src/tools/registerAllTools.ts';
+let registrySnapshotPromise;
 
-export function extractToolDefinitions() {
-  const registryPath = path.join(ROOT, REGISTRY_SOURCE_FILE);
-  const registrySource = ts.createSourceFile(
-    registryPath,
-    fs.readFileSync(registryPath, 'utf8'),
-    ts.ScriptTarget.Latest,
-    true,
-    ts.ScriptKind.TS,
-  );
-  const constructorSources = new Map();
-  for (const statement of registrySource.statements) {
-    if (!ts.isImportDeclaration(statement) || !ts.isStringLiteral(statement.moduleSpecifier))
-      continue;
-    const clause = statement.importClause?.namedBindings;
-    if (!clause || !ts.isNamedImports(clause)) continue;
-    const source = `${path.posix.join('src/tools', statement.moduleSpecifier.text)}.ts`;
-    for (const element of clause.elements) constructorSources.set(element.name.text, source);
-  }
-
-  const registrations = [];
-  visit(registrySource, (node) => {
-    if (!ts.isCallExpression(node) || !ts.isPropertyAccessExpression(node.expression)) return;
-    if (node.expression.expression.getText(registrySource) !== 'registry') return;
-    if (node.expression.name.text !== 'register') return;
-    const factoryCall = node.arguments[0];
-    if (
-      !factoryCall ||
-      !ts.isCallExpression(factoryCall) ||
-      !ts.isIdentifier(factoryCall.expression)
-    )
-      return;
-    registrations.push(factoryCall.expression.text);
-  });
-
-  const definitions = [];
-  for (const constructorName of registrations) {
-    const relativePath = constructorSources.get(constructorName);
-    if (!relativePath)
-      throw new Error(`Cannot resolve registered tool constructor ${constructorName}`);
-    const filename = path.join(ROOT, relativePath);
-    const sourceFile = ts.createSourceFile(
-      filename,
-      fs.readFileSync(filename, 'utf8'),
-      ts.ScriptTarget.Latest,
-      true,
-      ts.ScriptKind.TS,
-    );
-    visit(sourceFile, (node) => {
-      if (!ts.isPropertyAssignment(node) || propertyName(node.name) !== 'definition') return;
-      if (findFactoryName(node) !== constructorName) return;
-      const value = expressionToValue(node.initializer);
-      if (!isToolDefinition(value)) return;
-      const owner = ts.isObjectLiteralExpression(node.parent) ? node.parent : undefined;
-      const permissionNode = owner?.properties.find(
-        (property) =>
-          ts.isPropertyAssignment(property) && propertyName(property.name) === 'permission',
-      );
-      definitions.push({
-        ...value,
-        source: relativePath,
-        origin: 'native',
-        factory: findFactoryName(node),
-        permission:
-          permissionNode && ts.isPropertyAssignment(permissionNode)
-            ? expressionToValue(permissionNode.initializer)
-            : 'unknown',
-      });
+export async function extractToolAuditSnapshot() {
+  registrySnapshotPromise ??= (async () => {
+    const outputDirectory = path.join(ROOT, '.test-tmp');
+    fs.mkdirSync(outputDirectory, { recursive: true });
+    const outputFile = path.join(outputDirectory, `tool-audit-registry-${process.pid}.cjs`);
+    await esbuild.build({
+      entryPoints: [path.join(ROOT, 'scripts/tool-audit-registry.ts')],
+      bundle: true,
+      platform: 'node',
+      format: 'cjs',
+      target: 'node20',
+      write: true,
+      outfile: outputFile,
+      alias: { vscode: path.join(ROOT, 'test/support/vscode.ts') },
+      external: ['playwright-core', 'node:*'],
+      loader: { '.sh': 'text', '.ps1': 'text' },
+      logLevel: 'silent',
     });
-  }
-
-  const seen = new Set();
-  const unique = definitions.filter((definition) => {
-    const name = definition.function.name;
-    if (seen.has(name)) return false;
-    seen.add(name);
-    return true;
-  });
-  if (unique.length !== registrations.length) {
-    throw new Error(
-      `Canonical registry has ${registrations.length} registrations but ${unique.length} definitions were extracted`,
-    );
-  }
-  return unique;
+    try {
+      const module = await import(`${pathToFileURL(outputFile).href}?run=${Date.now()}`);
+      return module.buildToolAuditSnapshot();
+    } finally {
+      fs.rmSync(outputFile, { force: true });
+    }
+  })();
+  return registrySnapshotPromise;
 }
 
-function findFactoryName(node) {
-  let current = node.parent;
-  while (current) {
-    if (ts.isFunctionDeclaration(current) && current.name) return current.name.text;
-    current = current.parent;
-  }
-  return 'unknown';
+export async function extractToolDefinitions() {
+  return (await extractToolAuditSnapshot()).definitions;
 }
 
 export async function discoverMcpDefinitions(configPath, nativeNames) {
@@ -173,22 +111,8 @@ export function writeCoverageReport(filename, definitions, modelEvidence, capabi
   );
   const rows = definitions.map((definition) => {
     const name = definition.function.name;
-    const handlerTest = testSources.some((source) => source.includes(definition.factory));
-    const effect =
-      definition.origin === 'mcp'
-        ? 'external process'
-        : [
-              'write',
-              'delete',
-              'terminal',
-              'headless',
-              'git-write',
-              'search',
-              'fetch',
-              'delegate',
-            ].includes(definition.permission)
-          ? definition.permission
-          : 'read-only';
+    const handlerTest = testSources.some((source) => source.includes(name));
+    const effect = sideEffect(definition);
     const modelStatus = modelResults.has(name)
       ? modelResults.get(name)
         ? 'passed'
@@ -199,17 +123,17 @@ export function writeCoverageReport(filename, definitions, modelEvidence, capabi
       : modelResults.get(name)
         ? 'schema passed'
         : 'opt-in';
-    return `| ${name} | ${definition.origin} | ${definition.permission} | yes | ${modelStatus} | ${handlerTest ? 'automated' : 'missing'} | ${liveStatus} | ${effect} |`;
+    return `| ${name} | ${definition.origin} | ${definition.permission} | ${modelStatus} | ${handlerTest ? 'automated' : 'missing'} | ${liveStatus} | ${effect} |`;
   });
   const markdown = [
     '# Forge Tool Coverage Matrix',
     '',
     `Generated: ${new Date().toISOString()}`,
     '',
-    'The inventory and permissions come from the constructors registered by `registerAllTools.ts`. “Harness” means schema emission is available but not executed by default.',
+    'This matrix covers native tools only; MCP servers are not started during generation. The inventory and permissions come from the live registry built by `registerAllTools.ts`. “Harness” means schema emission is available but not executed by default.',
     '',
-    '| Tool | Origin | Permission | Coordinator | Model schema test | Handler test | Live test | Side effect |',
-    '| --- | --- | --- | --- | --- | --- | --- | --- |',
+    '| Tool | Origin | Permission | Model schema test | Handler test | Live test | Side effect |',
+    '| --- | --- | --- | --- | --- | --- | --- |',
     ...rows,
     '',
   ].join('\n');
@@ -217,65 +141,26 @@ export function writeCoverageReport(filename, definitions, modelEvidence, capabi
   fs.writeFileSync(filename, markdown, 'utf8');
 }
 
-function visit(node, callback) {
-  callback(node);
-  ts.forEachChild(node, (child) => visit(child, callback));
-}
-
-function isToolDefinition(value) {
-  return (
-    value?.type === 'function' &&
-    typeof value.function?.name === 'string' &&
-    typeof value.function?.description === 'string' &&
-    value.function?.parameters &&
-    typeof value.function.parameters === 'object'
-  );
-}
-
-function propertyName(name) {
-  if (ts.isIdentifier(name) || ts.isStringLiteral(name) || ts.isNumericLiteral(name))
-    return name.text;
-  return undefined;
-}
-
-function expressionToValue(expression) {
-  if (ts.isStringLiteral(expression) || ts.isNoSubstitutionTemplateLiteral(expression))
-    return expression.text;
-  if (ts.isNumericLiteral(expression)) return Number(expression.text);
-  if (expression.kind === ts.SyntaxKind.TrueKeyword) return true;
-  if (expression.kind === ts.SyntaxKind.FalseKeyword) return false;
-  if (expression.kind === ts.SyntaxKind.NullKeyword) return null;
-  if (ts.isPrefixUnaryExpression(expression) && ts.isNumericLiteral(expression.operand)) {
-    const value = Number(expression.operand.text);
-    return expression.operator === ts.SyntaxKind.MinusToken ? -value : value;
-  }
-  if (ts.isTemplateExpression(expression)) {
-    return (
-      expression.head.text +
-      expression.templateSpans
-        .map((span) => `\${${span.expression.getText()}}${span.literal.text}`)
-        .join('')
+function sideEffect(definition) {
+  if (definition.origin === 'mcp') return 'external process';
+  const effects = {
+    read: 'read-only',
+    write: 'write',
+    delete: 'delete',
+    terminal: 'terminal',
+    headless: 'headless',
+    search: 'search',
+    fetch: 'fetch',
+    'git-read': 'read-only',
+    'git-write': 'git-write',
+    browser: 'browser',
+    desktop: 'desktop',
+    delegate: 'delegate',
+  };
+  if (!Object.hasOwn(effects, definition.permission)) {
+    throw new Error(
+      `Coverage matrix does not know permission ${definition.permission} for ${definition.function.name}`,
     );
   }
-  if (ts.isArrayLiteralExpression(expression)) {
-    return expression.elements.map((element) => expressionToValue(element));
-  }
-  if (ts.isObjectLiteralExpression(expression)) {
-    const obj = {};
-    for (const property of expression.properties) {
-      if (!ts.isPropertyAssignment(property)) continue;
-      const key = propertyName(property.name);
-      if (key !== undefined) obj[key] = expressionToValue(property.initializer);
-    }
-    return obj;
-  }
-  if (
-    ts.isBinaryExpression(expression) &&
-    expression.operatorToken.kind === ts.SyntaxKind.PlusToken
-  ) {
-    const left = expressionToValue(expression.left);
-    const right = expressionToValue(expression.right);
-    if (typeof left === 'string' && typeof right === 'string') return left + right;
-  }
-  return expression.getText();
+  return effects[definition.permission];
 }

@@ -1,73 +1,96 @@
 # Forge Tool Coverage Matrix
 
-Generated: 2026-10-06T22:32:11.352Z
+Generated: 2026-10-12T08:06:56.399Z
 
-The inventory and permissions come from the constructors registered by `registerAllTools.ts`. “Harness” means schema emission is available but not executed by default.
+This matrix covers native tools only; MCP servers are not started during generation. The inventory and permissions come from the live registry built by `registerAllTools.ts`. “Harness” means schema emission is available but not executed by default.
 
-| Tool | Origin | Permission | Coordinator | Model schema test | Handler test | Live test | Side effect |
-| --- | --- | --- | --- | --- | --- | --- | --- |
-| append_file | native | write | yes | harness | automated | opt-in | write |
-| apply_code_action | native | write | yes | harness | automated | opt-in | write |
-| apply_line_edits | native | write | yes | harness | automated | opt-in | write |
-| ask_live_session | native | delegate | yes | harness | automated | opt-in | delegate |
-| ask_local_agent | native | delegate | yes | harness | automated | opt-in | delegate |
-| ask_user | native | read | yes | harness | automated | opt-in | read-only |
-| code_intel | native | read | yes | harness | automated | opt-in | read-only |
-| commit | native | git-write | yes | harness | automated | opt-in | git-write |
-| copy_to_clipboard | native | read | yes | harness | automated | opt-in | read-only |
-| create_branch | native | git-write | yes | harness | automated | opt-in | git-write |
-| create_directory | native | write | yes | harness | automated | opt-in | write |
-| delete_file | native | delete | yes | harness | automated | opt-in | delete |
-| edit_file | native | write | yes | harness | automated | opt-in | write |
-| edit_notebook_cell | native | write | yes | harness | automated | opt-in | write |
-| find_files | native | read | yes | harness | automated | opt-in | read-only |
-| forget | native | delete | yes | harness | automated | opt-in | delete |
-| format_file | native | write | yes | harness | automated | opt-in | write |
-| generate_image | native | fetch | yes | harness | automated | opt-in | fetch |
-| get_editor_context | native | read | yes | harness | automated | opt-in | read-only |
-| get_power_info | native | read | yes | harness | automated | opt-in | read-only |
-| get_system_status | native | headless | yes | harness | automated | opt-in | headless |
-| git_read | native | git-read | yes | harness | automated | opt-in | read-only |
-| image_search | native | search | yes | harness | automated | opt-in | search |
-| insert_code | native | write | yes | harness | automated | opt-in | write |
-| install_llamacpp | native | write | yes | harness | automated | opt-in | write |
-| list_delegation_targets | native | delegate | yes | harness | automated | opt-in | delegate |
-| list_directory | native | read | yes | harness | automated | opt-in | read-only |
-| list_executions | native | headless | yes | harness | automated | opt-in | headless |
-| list_memories | native | read | yes | harness | automated | opt-in | read-only |
-| load_tool_group | native | read | yes | harness | automated | opt-in | read-only |
-| manage_jobs | native | read | yes | harness | automated | opt-in | read-only |
-| monitor_execution | native | headless | yes | harness | automated | opt-in | headless |
-| move_file | native | write | yes | harness | automated | opt-in | write |
-| notify_user | native | read | yes | harness | automated | opt-in | read-only |
-| open_file | native | read | yes | harness | automated | opt-in | read-only |
-| open_url_in_browser | native | read | yes | harness | automated | opt-in | read-only |
-| read_clipboard | native | read | yes | harness | automated | opt-in | read-only |
-| read_file | native | read | yes | harness | automated | opt-in | read-only |
-| read_notebook | native | read | yes | harness | automated | opt-in | read-only |
-| read_tool_result | native | read | yes | harness | automated | opt-in | read-only |
-| recall | native | read | yes | harness | automated | opt-in | read-only |
-| remember | native | read | yes | harness | automated | opt-in | read-only |
-| rename_symbol | native | write | yes | harness | automated | opt-in | write |
-| render_html_to_image | native | fetch | yes | harness | automated | opt-in | fetch |
-| replace_selection | native | write | yes | harness | automated | opt-in | write |
-| restore_file | native | write | yes | harness | automated | opt-in | write |
-| schedule_wake | native | terminal | yes | harness | automated | opt-in | terminal |
-| search_code | native | read | yes | harness | automated | opt-in | read-only |
-| search_codebase | native | read | yes | harness | automated | opt-in | read-only |
-| send_file | native | fetch | yes | harness | automated | opt-in | fetch |
-| shell | native | headless | yes | harness | automated | opt-in | headless |
-| show_diff | native | read | yes | harness | automated | opt-in | read-only |
-| show_notification | native | read | yes | harness | automated | opt-in | read-only |
-| sleep_computer | native | terminal | yes | harness | automated | opt-in | terminal |
-| stage | native | git-write | yes | harness | automated | opt-in | git-write |
-| stop_execution | native | headless | yes | harness | automated | opt-in | headless |
-| switch_branch | native | git-write | yes | harness | automated | opt-in | git-write |
-| tell_live_session | native | delegate | yes | harness | automated | opt-in | delegate |
-| update_plan | native | read | yes | harness | automated | opt-in | read-only |
-| view_image | native | read | yes | harness | automated | opt-in | read-only |
-| view_video | native | read | yes | harness | automated | opt-in | read-only |
-| wait | native | read | yes | harness | automated | opt-in | read-only |
-| web_fetch | native | fetch | yes | harness | automated | opt-in | fetch |
-| web_search | native | search | yes | harness | automated | opt-in | search |
-| write_file | native | write | yes | harness | automated | opt-in | write |
+| Tool | Origin | Permission | Model schema test | Handler test | Live test | Side effect |
+| --- | --- | --- | --- | --- | --- | --- |
+| append_file | native | write | harness | automated | opt-in | write |
+| apply_code_action | native | write | harness | automated | opt-in | write |
+| apply_line_edits | native | write | harness | automated | opt-in | write |
+| ask_agent | native | delegate | harness | automated | opt-in | delegate |
+| ask_local_agent | native | delegate | harness | automated | opt-in | delegate |
+| ask_user | native | read | harness | automated | opt-in | read-only |
+| browser_click | native | browser | harness | automated | opt-in | browser |
+| browser_close | native | browser | harness | automated | opt-in | browser |
+| browser_close_tab | native | browser | harness | automated | opt-in | browser |
+| browser_drag | native | browser | harness | automated | opt-in | browser |
+| browser_hover | native | browser | harness | automated | opt-in | browser |
+| browser_inspect | native | browser | harness | automated | opt-in | browser |
+| browser_navigate | native | browser | harness | automated | opt-in | browser |
+| browser_new_tab | native | browser | harness | automated | opt-in | browser |
+| browser_open | native | browser | harness | automated | opt-in | browser |
+| browser_press | native | browser | harness | automated | opt-in | browser |
+| browser_screenshot | native | browser | harness | automated | opt-in | browser |
+| browser_scroll | native | browser | harness | automated | opt-in | browser |
+| browser_select_tab | native | browser | harness | automated | opt-in | browser |
+| browser_tabs | native | browser | harness | automated | opt-in | browser |
+| browser_type | native | browser | harness | automated | opt-in | browser |
+| code_intel | native | read | harness | automated | opt-in | read-only |
+| commit | native | git-write | harness | automated | opt-in | git-write |
+| copy_to_clipboard | native | read | harness | automated | opt-in | read-only |
+| create_branch | native | git-write | harness | automated | opt-in | git-write |
+| create_directory | native | write | harness | automated | opt-in | write |
+| delete_file | native | delete | harness | automated | opt-in | delete |
+| desktop_capture | native | desktop | harness | automated | opt-in | desktop |
+| desktop_click | native | desktop | harness | automated | opt-in | desktop |
+| desktop_drag | native | desktop | harness | automated | opt-in | desktop |
+| desktop_focus_window | native | desktop | harness | automated | opt-in | desktop |
+| desktop_move_mouse | native | desktop | harness | automated | opt-in | desktop |
+| desktop_press | native | desktop | harness | automated | opt-in | desktop |
+| desktop_scroll | native | desktop | harness | automated | opt-in | desktop |
+| desktop_type | native | desktop | harness | automated | opt-in | desktop |
+| desktop_windows | native | desktop | harness | automated | opt-in | desktop |
+| edit_file | native | write | harness | automated | opt-in | write |
+| edit_notebook_cell | native | write | harness | automated | opt-in | write |
+| find_files | native | read | harness | automated | opt-in | read-only |
+| forget | native | delete | harness | automated | opt-in | delete |
+| format_file | native | write | harness | automated | opt-in | write |
+| generate_image | native | fetch | harness | automated | opt-in | fetch |
+| get_editor_context | native | read | harness | automated | opt-in | read-only |
+| get_power_info | native | read | harness | automated | opt-in | read-only |
+| get_system_status | native | headless | harness | automated | opt-in | headless |
+| git_read | native | git-read | harness | automated | opt-in | read-only |
+| image_search | native | search | harness | automated | opt-in | search |
+| insert_code | native | write | harness | automated | opt-in | write |
+| install_llamacpp | native | write | harness | automated | opt-in | write |
+| list_delegation_targets | native | delegate | harness | automated | opt-in | delegate |
+| list_directory | native | read | harness | automated | opt-in | read-only |
+| list_executions | native | headless | harness | automated | opt-in | headless |
+| list_memories | native | read | harness | automated | opt-in | read-only |
+| load_tool_group | native | read | harness | automated | opt-in | read-only |
+| manage_jobs | native | read | harness | automated | opt-in | read-only |
+| monitor_execution | native | headless | harness | automated | opt-in | headless |
+| move_file | native | write | harness | automated | opt-in | write |
+| notify_user | native | read | harness | automated | opt-in | read-only |
+| open_file | native | read | harness | automated | opt-in | read-only |
+| open_url_in_browser | native | read | harness | automated | opt-in | read-only |
+| read_clipboard | native | read | harness | automated | opt-in | read-only |
+| read_file | native | read | harness | automated | opt-in | read-only |
+| read_notebook | native | read | harness | automated | opt-in | read-only |
+| read_tool_result | native | read | harness | automated | opt-in | read-only |
+| recall | native | read | harness | automated | opt-in | read-only |
+| remember | native | read | harness | automated | opt-in | read-only |
+| rename_symbol | native | write | harness | automated | opt-in | write |
+| render_html_to_image | native | fetch | harness | automated | opt-in | fetch |
+| replace_selection | native | write | harness | automated | opt-in | write |
+| restore_file | native | write | harness | automated | opt-in | write |
+| schedule_wake | native | terminal | harness | automated | opt-in | terminal |
+| search_code | native | read | harness | automated | opt-in | read-only |
+| search_codebase | native | read | harness | automated | opt-in | read-only |
+| send_file | native | fetch | harness | automated | opt-in | fetch |
+| shell | native | headless | harness | automated | opt-in | headless |
+| show_diff | native | read | harness | automated | opt-in | read-only |
+| show_notification | native | read | harness | automated | opt-in | read-only |
+| sleep_computer | native | terminal | harness | automated | opt-in | terminal |
+| stage | native | git-write | harness | automated | opt-in | git-write |
+| stop_execution | native | headless | harness | automated | opt-in | headless |
+| switch_branch | native | git-write | harness | automated | opt-in | git-write |
+| update_plan | native | read | harness | automated | opt-in | read-only |
+| view_image | native | read | harness | automated | opt-in | read-only |
+| view_video | native | read | harness | automated | opt-in | read-only |
+| wait | native | read | harness | automated | opt-in | read-only |
+| web_fetch | native | fetch | harness | automated | opt-in | fetch |
+| web_search | native | search | harness | automated | opt-in | search |
+| write_file | native | write | harness | automated | opt-in | write |

@@ -32,7 +32,7 @@ import {
 } from '../src/tools/lazyToolGroups';
 import type { LocalDelegationService } from '../src/delegation/LocalDelegationService';
 import type { IndexManager } from '../src/search/IndexManager';
-import type { ToolPermission } from '../src/tools/ToolRegistry';
+import { ALL_TOOL_PERMISSIONS } from '../src/tools/ToolRegistry';
 
 const ROOT = path.resolve(__dirname, '..');
 const WORKSPACE = 'n:\\vs code apps\\Forge';
@@ -50,19 +50,7 @@ const TOKENIZE_EXE = ((): string => {
   return newest ? path.join(base, newest, 'llama-tokenize.exe') : '';
 })();
 
-const ALL_PERMISSIONS = new Set<ToolPermission>([
-  'read',
-  'write',
-  'delete',
-  'terminal',
-  'headless',
-  'search',
-  'fetch',
-  'git-read',
-  'git-write',
-  'delegate',
-  'cloud-worker',
-]);
+const ALL_PERMISSIONS = new Set(ALL_TOOL_PERMISSIONS);
 const VISION_ONLY = new Set(['view_image', 'view_video']);
 
 function charsToTokens(chars: number): number {

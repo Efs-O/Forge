@@ -10,7 +10,7 @@ import {
 import { unattendedConversations } from '../../src/sidebar/unattendedConversations';
 
 describe('ToolApprovalService', () => {
-  it('never bypasses dangerous cloud-worker approval in clanker mode', async () => {
+  it('never bypasses dangerous cloud egress approval in clanker mode', async () => {
     const posted: HostToWebview[] = [];
     const service = new ToolApprovalService(
       (message) => posted.push(message),

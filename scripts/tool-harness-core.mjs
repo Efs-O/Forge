@@ -100,14 +100,44 @@ function synthesizeValue(schema, key) {
   const type = Array.isArray(schema?.type)
     ? (schema.type.find((candidate) => candidate !== 'null') ?? schema.type[0])
     : schema?.type;
-  if (type === 'integer' || type === 'number') return schema.minimum ?? 1;
+  if (type === 'integer' || type === 'number') {
+    const minimum = numericBound(schema, 'minimum', key);
+    const maximum = numericBound(schema, 'maximum', key);
+    if (minimum !== undefined && maximum !== undefined && minimum > maximum) {
+      throw new Error(`Invalid schema bounds for ${key}: minimum exceeds maximum`);
+    }
+    const value = minimum ?? 1;
+    return maximum === undefined ? value : Math.min(value, maximum);
+  }
   if (type === 'boolean') return false;
-  if (type === 'array') return [synthesizeValue(schema.items, key)];
+  if (type === 'array') {
+    const minimum = numericBound(schema, 'minItems', key) ?? 0;
+    const maximum = numericBound(schema, 'maxItems', key);
+    if (maximum !== undefined && minimum > maximum) {
+      throw new Error(`Invalid schema bounds for ${key}: minItems exceeds maxItems`);
+    }
+    const count = Math.min(Math.max(minimum, 1), maximum ?? Number.MAX_SAFE_INTEGER);
+    return Array.from({ length: count }, () => synthesizeValue(schema.items, key));
+  }
   if (type === 'object') return synthesizeArgs(schema);
-  if (key.includes('url')) return 'https://example.com/';
-  if (key.includes('path') || key.includes('file')) return 'package.json';
-  if (key.includes('query')) return 'Forge tool-call test';
-  if (key.includes('command')) return 'node';
+  if (type === 'string') {
+    const minimum = numericBound(schema, 'minLength', key) ?? 0;
+    const maximum = numericBound(schema, 'maxLength', key);
+    if (maximum !== undefined && minimum > maximum) {
+      throw new Error(`Invalid schema bounds for ${key}: minLength exceeds maxLength`);
+    }
+    const base = key.includes('url')
+      ? 'https://example.com/'
+      : key.includes('path') || key.includes('file')
+        ? 'package.json'
+        : key.includes('query')
+          ? 'Forge tool-call test'
+          : key.includes('command')
+            ? 'node'
+            : `test_${key}`;
+    const padded = base.padEnd(minimum, 'x');
+    return maximum === undefined ? padded : padded.slice(0, maximum);
+  }
   return `test_${key}`;
 }
 
@@ -119,6 +149,9 @@ export function validateAgainstSchema(value, schema, pathName = 'arguments') {
 
 function validateValue(value, schema, pathName, errors) {
   if (!schema || typeof schema !== 'object') return;
+  for (const keyword of ['minimum', 'maximum', 'minLength', 'maxLength', 'minItems', 'maxItems']) {
+    numericBound(schema, keyword, pathName);
+  }
   const alternatives = schema.anyOf ?? schema.oneOf;
   if (Array.isArray(alternatives) && alternatives.length) {
     const valid = alternatives.some((candidate) => {
@@ -163,6 +196,7 @@ function validateValue(value, schema, pathName, errors) {
       errors.push(`${pathName} must be array`);
       return;
     }
+    checkLengthBounds(value.length, schema, 'minItems', 'maxItems', pathName, errors);
     value.forEach((entry, index) =>
       validateValue(entry, schema.items, `${pathName}[${index}]`, errors),
     );
@@ -170,17 +204,45 @@ function validateValue(value, schema, pathName, errors) {
   }
   if (type === 'integer') {
     if (!Number.isInteger(value)) errors.push(`${pathName} must be integer`);
+    else checkNumericBounds(value, schema, pathName, errors);
     return;
   }
   if (type === 'number') {
     if (typeof value !== 'number') errors.push(`${pathName} must be number`);
+    else checkNumericBounds(value, schema, pathName, errors);
     return;
   }
   if (type === 'boolean') {
     if (typeof value !== 'boolean') errors.push(`${pathName} must be boolean`);
     return;
   }
-  if (type === 'string' && typeof value !== 'string') errors.push(`${pathName} must be string`);
+  if (type === 'string') {
+    if (typeof value !== 'string') errors.push(`${pathName} must be string`);
+    else checkLengthBounds(value.length, schema, 'minLength', 'maxLength', pathName, errors);
+  }
+}
+
+function numericBound(schema, keyword, pathName) {
+  const value = schema?.[keyword];
+  if (value === undefined) return undefined;
+  if (typeof value !== 'number' || !Number.isFinite(value)) {
+    throw new Error(`Invalid schema bound ${pathName}.${keyword}: expected a finite number`);
+  }
+  return value;
+}
+
+function checkNumericBounds(value, schema, pathName, errors) {
+  const minimum = numericBound(schema, 'minimum', pathName);
+  const maximum = numericBound(schema, 'maximum', pathName);
+  if (minimum !== undefined && value < minimum) errors.push(`${pathName} must be >= ${minimum}`);
+  if (maximum !== undefined && value > maximum) errors.push(`${pathName} must be <= ${maximum}`);
+}
+
+function checkLengthBounds(value, schema, minimumKey, maximumKey, pathName, errors) {
+  const minimum = numericBound(schema, minimumKey, pathName);
+  const maximum = numericBound(schema, maximumKey, pathName);
+  if (minimum !== undefined && value < minimum) errors.push(`${pathName} must have at least ${minimum}`);
+  if (maximum !== undefined && value > maximum) errors.push(`${pathName} must have at most ${maximum}`);
 }
 
 function isPlainObject(value) {

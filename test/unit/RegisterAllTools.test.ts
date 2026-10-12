@@ -6,22 +6,10 @@ import type { IndexManager } from '../../src/search/IndexManager';
 import { UserQuestionService } from '../../src/sidebar/UserQuestionService';
 import { UserNotificationService } from '../../src/sidebar/UserNotificationService';
 import { registerAllTools } from '../../src/tools/registerAllTools';
-import { ToolRegistry, type ToolPermission } from '../../src/tools/ToolRegistry';
+import { ALL_TOOL_PERMISSIONS, ToolRegistry, type ToolPermission } from '../../src/tools/ToolRegistry';
 import { activateLazyGroup, hiddenLazyToolNames, lazyGroupForTool } from '../../src/tools/lazyToolGroups';
 
-const ALL_PERMISSIONS = new Set<ToolPermission>([
-  'read',
-  'write',
-  'delete',
-  'terminal',
-  'headless',
-  'search',
-  'fetch',
-  'git-read',
-  'git-write',
-  'delegate',
-  'cloud-worker',
-]);
+const ALL_PERMISSIONS = new Set(ALL_TOOL_PERMISSIONS);
 
 const EXPECTED_NATIVE_NAMES = [
   'append_file',
@@ -200,11 +188,7 @@ describe('registerAllTools canonical coordinator catalog', () => {
     expect(edit.parameters.required).toContain('path');
     expect(edit.parameters.properties).toHaveProperty('path');
     expect(edit.parameters.properties).not.toHaveProperty('filepath');
-    // load_tool_group is advertised for registered native groups; generate_image while config.yaml
-    // has no image_generation block, install_llamacpp while it sets no
-    // llama_server.binary, and ask_agent while it has no
-    // enabled agent_bus block, so the tools the model actually sees are
-    // unchanged for a config that uses neither.
+    // generate_image requires an image_generation config block.
     expect(
       registry
         .definitions(ALL_PERMISSIONS)
@@ -213,16 +197,14 @@ describe('registerAllTools canonical coordinator catalog', () => {
     ).toEqual(
       EXPECTED_NATIVE_NAMES.filter(
         (name) =>
+          // generate_image needs the absent image_generation block.
           name !== 'generate_image' &&
+          // image_search needs the absent image_search provider.
           name !== 'image_search' &&
+          // install_llamacpp needs the absent llama_server.binary.
           name !== 'install_llamacpp' &&
-          name !== 'ask_agent' &&
-          // browser_* tools require the 'browser' permission, which this
-          // "all permissions" set does not grant, so none are advertised here.
-          !name.startsWith('browser_') &&
-          // desktop_* tools require the 'desktop' permission, which this
-          // "all permissions" set does not grant, so none are advertised here.
-          !name.startsWith('desktop_'),
+          // ask_agent needs the absent agent_bus block.
+          name !== 'ask_agent',
       ),
     );
   });

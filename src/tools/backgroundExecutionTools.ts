@@ -37,7 +37,7 @@ export function makeMonitorExecutionTool(): RegisteredTool {
       function: {
         name: 'monitor_execution',
         description:
-          'Wait for a background shell command and return new output plus status. Use it when the result is needed in this turn; otherwise prefer notify_on_exit. Reuse the returned cursors and suggested_next_wait_ms; *_dropped_chars means that output is gone. A running job with no output may be silent: inspect its artifact, including nearby or nested .part/.tmp files, instead of polling rapidly.',
+          "Wait for a background shell command and return new output plus status. Use it when the result is needed in this turn; otherwise prefer `shell`'s `notify_on_exit` parameter. Reuse the returned cursors and suggested_next_wait_ms; *_dropped_chars means that output is gone. A running job with no output may be silent: inspect its artifact, including nearby or nested .part/.tmp files, instead of polling rapidly.",
         parameters: {
           type: 'object',
           properties: {

@@ -6,19 +6,22 @@ import type { ToolOutputLimits } from './toolOutputLimits';
 import type { ConversationRuntime } from '../sidebar/sessionTypes';
 import type { CheckpointSession } from '../checkpoint/CheckpointStack';
 
-export type ToolPermission =
-  | 'read'
-  | 'write'
-  | 'delete'
-  | 'terminal'
-  | 'headless'
-  | 'search'
-  | 'fetch'
-  | 'git-read'
-  | 'git-write'
-  | 'browser'
-  | 'desktop'
-  | 'delegate';
+export const ALL_TOOL_PERMISSIONS = [
+  'read',
+  'write',
+  'delete',
+  'terminal',
+  'headless',
+  'search',
+  'fetch',
+  'git-read',
+  'git-write',
+  'browser',
+  'desktop',
+  'delegate',
+] as const;
+
+export type ToolPermission = (typeof ALL_TOOL_PERMISSIONS)[number];
 
 export interface ToolApprovalMetadata {
   dangerous?: boolean;
