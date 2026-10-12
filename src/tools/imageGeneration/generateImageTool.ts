@@ -392,11 +392,14 @@ async function runLocalVariations(
       mime: string;
       bytes: number;
       mode: string;
+      seconds: number;
     }
   > = [];
   let partialNote: string | undefined;
   for (let index = 0; index < count; index += 1) {
     let image;
+    // The agent cannot time a render itself (one tool call), so the result says.
+    const startedAt = Date.now();
     try {
       image = await renderLocalVariation({
         backend,
@@ -442,6 +445,7 @@ async function runLocalVariations(
       mime: image.mime,
       bytes: image.bytes.length,
       mode: image.mode,
+      seconds: Math.round((Date.now() - startedAt) / 1000),
     });
   }
 
@@ -450,7 +454,7 @@ async function runLocalVariations(
       `${GENERATED_IMAGE_PREFIX}${entry.display} (${entry.mime}, ${entry.bytes.toLocaleString()} bytes) ` +
         `with backend ${backend.name}.`,
       entry.deliveryLine,
-      `Rendered locally at ${entry.width}x${entry.height}.`,
+      `Rendered locally at ${entry.width}x${entry.height} in ${entry.seconds} s.`,
       localSeedDescription(entry.seed, seedChoice.source),
     ].join('\n'),
   );

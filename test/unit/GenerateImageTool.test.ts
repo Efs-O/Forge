@@ -380,7 +380,7 @@ describe('generate_image with an sdcpp backend', () => {
     expect(request.server.baseUrl()).toBe('http://127.0.0.1:8093');
     const saved = path.join(root, 'generated-images', '20260914-102030-a-red-fox.png');
     expect(fs.readFileSync(saved)).toEqual(PNG);
-    expect(result).toContain('Rendered locally at 1024x1024.');
+    expect(result).toMatch(/Rendered locally at 1024x1024 in \d+ s\./);
     expect(result).toContain('Seed 1111 (random).');
     expect(result).not.toContain('paid');
   });
