@@ -1,6 +1,11 @@
 # Forge — Recent Changes
 
-## Unreleased
+## 0.17.20
+
+- The transcript uses the full width of a wide Forge pane instead of a centered 1040 px column; assistant prose keeps a reading cap of about 1440 px. In activity groups only "tool call(s)" and tool names take the foreground color, the live dot matches "Heating the room", and Details toggles and expanded reasoning use the UI font at a readable size.
+- Live tool calls stay stable inside grouped activity, replies are easier to read, and the transcript keeps its scroll position more reliably while it updates. The activity view is tidier, with muted green accents.
+- An external model server that does not answer is reported after 120 s, not 240 s.
+- Tool descriptions: `monitor_execution` points at `notify_on_exit`, `web_fetch` says to leave `https_only` unset, `render_html_to_image` lists the `shader_check` file extensions, and `apply_line_edits` explains a missing start or end line.
 
 ### A declined dangerous command names the safer way
 
