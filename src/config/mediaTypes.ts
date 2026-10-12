@@ -1,3 +1,5 @@
+import type { ImageUpscaleConfig } from './imageUpscaleSchema';
+
 /** Cloud image backend entry. */
 export interface CloudImageBackendConfig {
   name: string;
@@ -25,6 +27,12 @@ export interface SdcppImageBackendConfig {
   auto_fit: boolean;
   /** GiB budget for sd-server's managed weights under auto-fit. Absent = flag not passed. */
   max_vram_gib?: number;
+  /** Optional per-shape resolutions; absent uses SDCPP_SIZES. */
+  sizes?: {
+    square: { width: number; height: number };
+    portrait: { width: number; height: number };
+    landscape: { width: number; height: number };
+  };
   /** Longest edge a reference image is downscaled to before being sent. */
   max_reference_edge_px: number;
   port: number;
@@ -37,6 +45,7 @@ export interface SdcppImageBackendConfig {
     sampler: string;
     width: number;
     height: number;
+    seed?: number;
   };
   extra_args: string[];
   confirm_on_start: boolean;
@@ -50,6 +59,8 @@ export interface ImageGenerationConfig {
   backends: ImageBackendConfig[];
   default?: string;
   output_dir: string;
+  /** `upscale_image`'s one-shot ESRGAN child; absent = tool not registered. */
+  upscale?: ImageUpscaleConfig;
 }
 
 /** `image_search:` block (validated by imageSearchSchema.ts). */

@@ -29,7 +29,9 @@ export function sdcppSizeFor(name: unknown, config: SdcppImageBackendConfig): Sd
   if (typeof name !== 'string' || !name) {
     return { width: config.defaults.width, height: config.defaults.height };
   }
-  const chosen = (SDCPP_SIZES as Record<string, SdSizeShape | undefined>)[name];
+  const chosen =
+    config.sizes?.[name as SdcppSizeName] ??
+    (SDCPP_SIZES as Record<string, SdSizeShape | undefined>)[name];
   if (!chosen) {
     throw new Error(
       `generate_image: size "${name}" is not one of ${SDCPP_SIZE_NAMES.join(', ')}. ` +

@@ -20,7 +20,18 @@ function maximalConfig(): ForgeConfig {
     image_generation: {
       output_dir: 'generated-images',
       backends: [{ name: 'grok', provider: 'xai', model: 'img', confirm_each: true }],
-    },
+      // The worst case includes the upscale block: `upscale_image` is only
+      // registered when it is configured, and the budget gate exists to price
+      // the maximally-advertised set.
+      upscale: {
+        binary: '/models/sd-cli.exe',
+        model: '/models/ESRGAN/4x_foolhardy_Remacri.pth',
+        cuda_device: 0,
+        timeout_ms: 300_000,
+        min_free_vram_mb: 1_500,
+        max_input_edge_px: 2_048,
+      },
+    } as ForgeConfig['image_generation'],
     image_search: {
       provider: 'serpapi_lens',
       secret_key_name: 'serpapi-key',

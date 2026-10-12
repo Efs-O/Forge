@@ -73,6 +73,7 @@ import { makeSendFileTool } from './sendFileTool';
 import { makeWaitTool } from './waitTool';
 import { makeViewVideoTool } from './videoTool';
 import { makeGenerateImageTool } from './imageGeneration/generateImageTool';
+import { makeUpscaleImageTool, upscaleConfigFor } from './imageGeneration/upscaleImageTool';
 import { makeRenderHtmlToImageTool } from './renderHtmlToImageTool';
 import { SdServerRegistry } from '../backend/sdServerRegistry';
 import { makeImageSearchTool } from './imageSearch/imageSearchTool';
@@ -241,6 +242,16 @@ export function registerAllTools(
         ...(resolveChatAttachment ? { resolveAttachment: resolveChatAttachment } : {}),
       }),
     );
+    // Registered ONLY when `image_generation.upscale` is configured — not merely
+    // self-suppressing — because one more tool is a schema on every turn and a
+    // cold re-prefill when the list changes (plan §4c "Tool budget"). A config
+    // without the block never sees its tokens. The tool also carries an
+    // `advertise` predicate: `registerAllTools` runs once per activation, so
+    // that is what suppresses it after the owner deletes the block and reloads
+    // config.yaml without reloading the window.
+    if (upscaleConfigFor(getConfig())) {
+      registry.register(makeUpscaleImageTool({ getConfig, notifications }));
+    }
   }
 
   // Persistent agent jobs (B2). Self-suppressing until a `jobs:` block is

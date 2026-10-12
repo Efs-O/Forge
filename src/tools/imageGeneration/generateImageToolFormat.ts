@@ -3,6 +3,7 @@ import * as vscode from 'vscode';
 import type { ToolDefinition } from '../../llm/types';
 import type { ImageBackendConfig, ImageGenerationConfig } from '../../config/types';
 import type { GeneratedImage } from './cloudImageBackend';
+import { SDCPP_SIZES } from './sdcppImageBackend';
 
 /**
  * Naming, description and cost-label helpers for `generate_image`, split out of
@@ -39,6 +40,51 @@ export function backendCostTag(backend: ImageBackendConfig): string {
     return `local · free · sdcpp · ${modelLabel(backend.diffusion_model)}`;
   }
   return `cloud · billed per image · ${backend.provider} · ${backend.model}`;
+}
+
+export interface ResolvedImageSeeds {
+  seeds: number[];
+  source: 'argument' | 'configured default' | 'random';
+}
+
+/** One owner for local seed choice, including distinct random variations. */
+export function distinctSeeds(
+  count: number,
+  requested: unknown,
+  configuredDefault: number | undefined,
+  random: (() => number) | undefined,
+): ResolvedImageSeeds {
+  const chosen = requested ?? configuredDefault;
+  if (chosen !== undefined) {
+    if (
+      typeof chosen !== 'number' ||
+      !Number.isInteger(chosen) ||
+      chosen < 0 ||
+      chosen > 2_147_483_647
+    ) {
+      throw new Error('generate_image: seed must be an integer from 0 to 2147483647.');
+    }
+    if (chosen + count - 1 > 2_147_483_647) {
+      throw new Error('generate_image: count would exceed the maximum seed 2147483647.');
+    }
+    return {
+      seeds: Array.from({ length: count }, (_, index) => chosen + index),
+      source: requested !== undefined ? 'argument' : 'configured default',
+    };
+  }
+
+  const draw = random ?? randomSeed;
+  const seeds = new Set<number>();
+  while (seeds.size < count) seeds.add(draw());
+  return { seeds: [...seeds], source: 'random' };
+}
+
+export function localSeedDescription(seed: number, source: ResolvedImageSeeds['source']): string {
+  return `Seed ${seed} (${source}).`;
+}
+
+function randomSeed(): number {
+  return Math.floor(Math.random() * 2_147_483_648);
 }
 
 /** `V:/models/qwen_image_2.1-Q4_K.gguf` -> `qwen_image_2.1-Q4_K`. */
@@ -109,7 +155,15 @@ export function describeWithBackends(
   const names = config.backends.map((backend) => backend.name);
   const fallback = config.default ?? names[0];
   const listing = config.backends
-    .map((backend) => `${backend.name} (${backendCostTag(backend)})`)
+    .map((backend) => {
+      const sizes = backend.provider === 'sdcpp' ? (backend.sizes ?? SDCPP_SIZES) : undefined;
+      const sizeDescription = sizes
+        ? `; sizes: ${(['square', 'portrait', 'landscape'] as const)
+            .map((name) => `${name} ${sizes[name].width}x${sizes[name].height}`)
+            .join(', ')}`
+        : '';
+      return `${backend.name} (${backendCostTag(backend)}${sizeDescription})`;
+    })
     .join('; ');
   const properties = base.function.parameters['properties'] as Record<string, unknown>;
   return {

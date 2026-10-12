@@ -1,5 +1,21 @@
 # Forge — Recent Changes
 
+## 0.17.22
+
+- New `upscale_image` tool: one ESRGAN ×4 pass over any workspace image (a render, a screenshot, a photo) with stable-diffusion.cpp's `sd-cli`, saved as `<name>_x4.png` beside the input and never overwriting. It is registered only when `image_generation.upscale` is configured (`binary`, `model`, `cuda_device`, `min_free_vram_mb`, optional `timeout_ms` and `max_input_edge_px`, default 2048). It refuses an input over the edge cap or a card with too little free VRAM, kills only the process it started on cancel or timeout, deletes a partial output, and saves but does not send a result over 50 MB.
+- `generate_image`: a `seed` argument (and a backend `defaults.seed`); `count: 2` uses seed and seed+1, and the result reports each seed. Cloud backends ignore it and say so. A local backend can set its own `sizes` for square/portrait/landscape (multiples of 16); the tool description reports each backend's sizes instead of fixed numbers. `max_vram_gib` accepts fractions (1–64).
+- The `reference_paths` description now gives advice for local Qwen-Image: it usually keeps the first image as the base, so describe an edit as a change to picture 1 ("Replace the man in picture 1 with the man from picture 2") and name what carries over.
+
+### Tool schema budget raised
+
+`TOOL_SCHEMA_CHAR_BUDGET` goes from 55,483 to 56,600 characters. The maximally
+configured schema measures 56,025: `upscale_image` adds 942 and the
+`generate_image` changes above add 582. Both are opt-in image tools that a
+config without `image_generation` never advertises, and `upscale_image` is not
+even registered without its block, so a default config pays nothing. Merging
+tool families or scoping by model (TOOL_SCHEMA_GROWTH_PLAN steps 2–3) remains
+the answer for the next tool that does not fit.
+
 ## 0.17.21
 
 - Assistant replies show a standalone opening sentence above the explanation when the model puts a plain Markdown heading, label, or list on the next line. Forge's native and CLI agent instructions now ask for that simple answer-first layout. Saved message text is unchanged.

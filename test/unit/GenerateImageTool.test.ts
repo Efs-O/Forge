@@ -197,6 +197,13 @@ describe('generate_image', () => {
     expect(result).toContain('No remote chat is watching this turn');
   });
 
+  it('reports that a cloud backend ignored a supplied seed', async () => {
+    const { tool, generate } = rig();
+    const result = await tool.handler({ prompt: 'x', seed: 42 }, noSnapshot);
+    expect(generate).toHaveBeenCalledOnce();
+    expect(result).toContain('seed argument applies to local backends only');
+  });
+
   it('refuses an unknown backend and an empty prompt without calling the provider', async () => {
     const { tool, generate } = rig();
     await expect(tool.handler({ prompt: 'x', backend: 'nope' }, noSnapshot)).rejects.toThrow(
@@ -373,7 +380,8 @@ describe('generate_image with an sdcpp backend', () => {
     expect(request.server.baseUrl()).toBe('http://127.0.0.1:8093');
     const saved = path.join(root, 'generated-images', '20260914-102030-a-red-fox.png');
     expect(fs.readFileSync(saved)).toEqual(PNG);
-    expect(result).toContain('Rendered locally at 1024x1024, seed 1111.');
+    expect(result).toContain('Rendered locally at 1024x1024.');
+    expect(result).toContain('Seed 1111 (random).');
     expect(result).not.toContain('paid');
   });
 
@@ -427,7 +435,7 @@ describe('generate_image with an sdcpp backend', () => {
     )['backend'];
     expect(backend?.enum).toEqual(['qwen-local', 'grok-imagine']);
     expect(backend?.description).toContain(
-      'qwen-local (local · free · sdcpp · qwen_image_2.1-Q4_K)',
+      'qwen-local (local · free · sdcpp · qwen_image_2.1-Q4_K; sizes: square 1328x1328, portrait 928x1664, landscape 1664x928)',
     );
     expect(backend?.description).toContain(
       'grok-imagine (cloud · billed per image · xai · grok-imagine-image-2.0)',

@@ -129,7 +129,14 @@ it('advertises ask_user with no required argument', () => {
 });
 
 function makeRegistry(
-  options: { search?: boolean; delegation?: boolean; images?: boolean; agentBus?: boolean } = {},
+  options: {
+    search?: boolean;
+    delegation?: boolean;
+    images?: boolean;
+    agentBus?: boolean;
+    /** Only meaningful with `images`: adds the optional `image_generation.upscale` block. */
+    upscale?: boolean;
+  } = {},
 ): ToolRegistry {
   const registry = new ToolRegistry();
   const workspaceState = {
@@ -153,7 +160,19 @@ function makeRegistry(
             backends: [
               { name: 'grok', provider: 'xai' as const, model: 'img', confirm_each: true },
             ],
-          },
+            ...(options.upscale
+              ? {
+                  upscale: {
+                    binary: '/models/sd-cli.exe',
+                    model: '/models/ESRGAN/4x_foolhardy_Remacri.pth',
+                    cuda_device: 0,
+                    timeout_ms: 300_000,
+                    min_free_vram_mb: 1_500,
+                    max_input_edge_px: 2_048,
+                  },
+                }
+              : {}),
+          } as unknown as ForgeConfig['image_generation'],
         }
       : {}),
   };
@@ -251,6 +270,23 @@ describe('registerAllTools canonical coordinator catalog', () => {
     const registry = makeRegistry({ delegation: true, images: true });
     const names = registry.definitions(ALL_PERMISSIONS).map((tool) => tool.function.name);
     expect(names).toContain('generate_image');
+  });
+
+  // The tool budget rule (plan §4c): a config without `image_generation.upscale`
+  // never sees the tool at all — not merely unadvertised, but unregistered, so
+  // its schema costs no tokens and no cold re-prefill for that user.
+  it('registers upscale_image only when image_generation.upscale is configured', () => {
+    const without = makeRegistry({ delegation: true, images: true });
+    expect(without.names()).not.toContain('upscale_image');
+    const withoutNames = without.names();
+    const withBlock = makeRegistry({ delegation: true, images: true, upscale: true });
+    expect(withBlock.names()).toContain('upscale_image');
+    // The block is the ONLY difference: adding it registers exactly one tool and
+    // changes nothing else in the catalog.
+    expect(withBlock.names().sort()).toEqual([...withoutNames, 'upscale_image'].sort());
+    // And it belongs to the media group, so a config that has it costs nothing
+    // extra to a coding conversation.
+    expect(lazyGroupForTool('upscale_image')).toBe('media');
   });
 
   it('offers ask_agent and omits the retired ask and tell tools when the bus is enabled', () => {

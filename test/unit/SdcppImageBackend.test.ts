@@ -1,4 +1,8 @@
 import { describe, expect, it, vi } from 'vitest';
+import * as fs from 'node:fs';
+import * as path from 'node:path';
+import { parse as parseYaml } from 'yaml';
+import type { ToolDefinition } from '../../src/llm/types';
 import type { SdcppImageBackendConfig } from '../../src/config/types';
 import { ImageGenerationConfigSchema } from '../../src/config/imageGenerationSchema';
 import type { GpuInfo } from '../../src/system/systemProbes';
@@ -8,6 +12,7 @@ import {
   sdcppSizeFor,
   type SdServerHandle,
 } from '../../src/tools/imageGeneration/sdcppImageBackend';
+import { describeWithBackends } from '../../src/tools/imageGeneration/generateImageToolFormat';
 
 // The transport default is the point of two tests below, so the module that
 // owns the raised-timeout Agent is stood in for a spy rather than a real Agent.
@@ -114,6 +119,72 @@ describe('sdcpp size mapping', () => {
     expect(() => sdcppSizeFor('wide', sdcppConfig())).toThrow(
       /size "wide" is not one of square, portrait, landscape/,
     );
+  });
+
+  it('uses backend sizes when configured and validates the example block at load', () => {
+    const custom = {
+      square: { width: 1024, height: 1024 },
+      portrait: { width: 864, height: 1536 },
+      landscape: { width: 1536, height: 864 },
+    };
+    expect(sdcppSizeFor('portrait', sdcppConfig({ sizes: custom }))).toEqual(custom.portrait);
+
+    const source = fs.readFileSync(path.join(process.cwd(), 'config/config.example.yaml'), 'utf8');
+    const exampleBlock = source.match(
+      /^    # - name: qwen-image-local[\s\S]*?(?=\n\n# view_video)/m,
+    )?.[0];
+    if (!exampleBlock) throw new Error('commented sdcpp example block was not found');
+    const uncommented = exampleBlock.replace(/^    # ?/gm, '');
+    const backends = parseYaml(uncommented) as unknown[];
+    // The block is an item in the image_generation backend array, parsed here
+    // as a standalone one-backend config to exercise the same Zod boundary.
+    const parsed = ImageGenerationConfigSchema.parse({ backends });
+    const local = parsed?.backends[0];
+    if (!local || local.provider !== 'sdcpp') throw new Error('example backend did not parse');
+    expect(local.text_encoder_on_cpu).toBe(false);
+    expect(local.min_free_vram_mb).toBe(11200);
+    expect(local.idle_timeout_ms).toBe(300000);
+    expect(local.request_timeout_ms).toBe(240000);
+    expect(local.extra_args).toEqual([
+      '--offload-to-cpu',
+      '--sigmas',
+      '1.0,0.978453,0.95418,0.926626,0.89508,0.845148,0.704534,0.414568,0.0',
+    ]);
+    for (const size of Object.values(local.sizes ?? {})) {
+      expect(size.width % 16).toBe(0);
+      expect(size.height % 16).toBe(0);
+    }
+    expect(local.max_vram_gib).toBe(10.25);
+    expect(local.defaults.seed).toBe(7);
+
+    const parsedConfig = ImageGenerationConfigSchema.parse({ backends: [sdcppConfig({ sizes: custom })] });
+    if (!parsedConfig) throw new Error('image config did not parse');
+    const described = describeWithBackends(
+      {
+        type: 'function',
+        function: { name: 'generate_image', description: '', parameters: { type: 'object', properties: {} } },
+      } as ToolDefinition,
+      parsedConfig,
+    );
+    const properties = described.function.parameters['properties'] as Record<string, { description?: string }>;
+    expect(properties['backend']?.description).toContain('portrait 864x1536');
+  });
+
+  it('validates size grid, seed bounds, and fractional VRAM caps', () => {
+    expect(sdcppConfig({ max_vram_gib: 10.25 }).max_vram_gib).toBe(10.25);
+    expect(() => sdcppConfig({ max_vram_gib: 0.5 })).toThrow();
+    expect(() =>
+      sdcppConfig({
+        sizes: {
+          square: { width: 1025, height: 1024 },
+          portrait: { width: 864, height: 1536 },
+          landscape: { width: 1536, height: 864 },
+        },
+      }),
+    ).toThrow();
+    expect(() =>
+      sdcppConfig({ defaults: { steps: 8, cfg_scale: 1, sampler: 'euler', width: 16, height: 16, seed: 2_147_483_648 } }),
+    ).toThrow();
   });
 });
 

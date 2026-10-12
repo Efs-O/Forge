@@ -961,24 +961,38 @@ image_generation:
     # `idle_timeout_ms` idle. All four paths are required, with no discovery.
     # `cuda_device` is the nvidia-smi / PCI-bus ordinal, the same convention as
     # voice.compute.device. idle_timeout_ms must be at least
-    # request_timeout_ms + 60000. `size` in generate_image (square 1328x1328,
-    # portrait 928x1664, landscape 1664x928) applies to this kind only.
+    # request_timeout_ms + 60000. `size` selects a shape; this backend's
+    # optional `sizes` table sets its pixel dimensions.
     # - name: qwen-image-local
     #   provider: sdcpp
-    #   binary: "V:/Tools/sd.cpp-master-929/sd-server.exe"
-    #   diffusion_model: "V:/models/Qwen-Image-2.1/qwen_image_2.1-Q4_K.gguf"
-    #   text_encoder: "V:/models/Qwen-Image-2.1/Qwen3VL-8B-Instruct-Q4_K_M.gguf"
-    #   vae: "V:/models/Qwen-Image-2.1/qwen_image_2.1_vae_bf16.safetensors"
+    #   binary: "path/to/sd-server.exe"
+    #   diffusion_model: "path/to/diffusion-model.gguf"
+    #   text_encoder: "path/to/text-encoder.gguf"
+    #   vae: "path/to/vae.safetensors"
     #   cuda_device: 2
-    #   text_encoder_on_cpu: true
+    #   text_encoder_on_cpu: false
     #   port: 8093
-    #   min_free_vram_mb: 7000    # measured peak VRAM delta + 1024 margin
-    #   idle_timeout_ms: 600000
-    #   request_timeout_ms: 480000  # a cold 1328x1328 render is ~280 s
-    #   defaults: { steps: 20, cfg_scale: 6.0, sampler: euler, width: 1024, height: 1024 }
-    #   extra_args: []
+    #   min_free_vram_mb: 11200   # measured sd-server peak at 864x1536 / 10.25, plus a little
+    #   idle_timeout_ms: 300000
+    #   request_timeout_ms: 240000  # Turbo edit is ~93 s; idle must be >= request + 60000
+    #   max_vram_gib: 10.25      # fractional caps are supported
+    #   defaults: { steps: 8, cfg_scale: 1.0, sampler: euler, width: 864, height: 1536, seed: 7 }
+    #   sizes:
+    #     square: { width: 1152, height: 1152 }
+    #     portrait: { width: 864, height: 1536 }
+    #     landscape: { width: 1536, height: 864 }
+    #   extra_args: ["--offload-to-cpu", "--sigmas", "1.0,0.978453,0.95418,0.926626,0.89508,0.845148,0.704534,0.414568,0.0"] # 8-step Turbo needs its own sigma schedule; startup flag is enough, no request field
     #   confirm_on_start: true    # ask once before the GPU is occupied
     #   confirm_each: false       # free per image, so no per-call prompt
+  # upscale_image (ESRGAN x4, one sd-cli run per call; frees its VRAM on exit).
+  # Without this block the tool is not registered. Use sd-cli, not sd-server.
+  # upscale:
+  #   binary: "path/to/sd-cli.exe"
+  #   model: "path/to/4x_foolhardy_Remacri.pth"
+  #   cuda_device: 2
+  #   min_free_vram_mb: 1500    # measured ESRGAN peak ~0.6 GB, plus room for the display
+  #   timeout_ms: 300000        # 864x1536 took 47 s on an RTX 3060
+  #   max_input_edge_px: 2048   # a 2048 px input becomes 8192 px
 
 # view_video frame sampling (needs ffmpeg/ffprobe on PATH or ffmpeg_path).
 # frame_max_dimension is the context knob. Measured on a 5 s clip with

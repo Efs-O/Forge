@@ -465,6 +465,8 @@ overlaps with an existing owner, extend the owner instead.
 | Cloud `/v1/images/generations` backend     | `src/tools/imageGeneration/cloudImageBackend.ts` |
 | Local `/sdapi/v1/txt2img` backend + VRAM gate | `src/tools/imageGeneration/sdcppImageBackend.ts` |
 | `image_generation:` config schema          | `src/config/imageGenerationSchema.ts` |
+| `upscale_image` tool (input cap, VRAM gate, one-shot `sd-cli` pass, `_x4.png` naming/delivery) | `src/tools/imageGeneration/upscaleImageTool.ts` |
+| `image_generation.upscale:` config schema   | `src/config/imageUpscaleSchema.ts` |
 | `image_search` tool + attachment pick       | `src/tools/imageSearch/imageSearchTool.ts` |
 | SerpApi Google Lens call + result trimming | `src/tools/imageSearch/serpApiLens.ts` |
 | Litterbox temporary image upload           | `src/tools/imageSearch/litterboxUpload.ts` |

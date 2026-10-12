@@ -1,10 +1,23 @@
 import { z } from 'zod';
 import { LOCAL_HEADERS_TIMEOUT_MS } from '../llm/localLlamaFetch';
+import { ImageUpscaleSchema } from './imageUpscaleSchema';
 
 const BackendNameSchema = z
   .string()
   .min(1)
   .regex(/^[A-Za-z0-9._-]+$/, 'use letters, digits, dot, underscore or dash');
+
+const SdcppDimensionSchema = z
+  .number()
+  .int()
+  .positive()
+  .refine((value) => value % 16 === 0, {
+    message: 'must be a positive multiple of 16',
+  });
+const SdcppSizeSchema = z.object({
+  width: SdcppDimensionSchema,
+  height: SdcppDimensionSchema,
+});
 
 /**
  * Cloud image backends use the OpenAI-style `POST /v1/images/generations` endpoint.
@@ -57,10 +70,11 @@ const SdcppImageBackendSchema = z.object({
    * Per-device GiB budget `sd-server` gives its managed weights and runner
    * buffers under auto-fit. Absent means the flag is not passed at all, which
    * is the pre-0.16 behaviour on every card. Raise it when a multi-reference
-   * render drops the prefix cache (`insufficient memory for prefix caching`);
-   * 9 was enough for one reference and 11 for two on a 12 GB card.
+   * render drops the prefix cache (`insufficient memory for prefix caching`).
+   * The cache fits only when the render is small enough; on the RTX 3060,
+   * 864x1536 at 10.25 GiB keeps the cache and decodes untiled.
    */
-  max_vram_gib: z.number().int().min(1).max(64).optional(),
+  max_vram_gib: z.number().min(1).max(64).optional(),
   /**
    * Longest edge, in pixels, a reference image is downscaled to before it is
    * sent. The dominant cost in an edit: two full-size references took 20 min
@@ -80,7 +94,15 @@ const SdcppImageBackendSchema = z.object({
     sampler: z.string().min(1),
     width: z.number().int().positive(),
     height: z.number().int().positive(),
+    seed: z.number().int().min(0).max(2_147_483_647).optional(),
   }),
+  sizes: z
+    .object({
+      square: SdcppSizeSchema,
+      portrait: SdcppSizeSchema,
+      landscape: SdcppSizeSchema,
+    })
+    .optional(),
   extra_args: z.array(z.string()),
   confirm_on_start: z.boolean(),
   confirm_each: z.boolean(),
@@ -134,6 +156,7 @@ export const ImageGenerationConfigSchema = z
     default: z.string().min(1).optional(),
     /** Workspace-relative folder for images saved without an explicit path. */
     output_dir: z.string().min(1).default(DEFAULT_IMAGE_OUTPUT_DIR),
+    upscale: ImageUpscaleSchema.optional(),
   })
   .superRefine((cfg, ctx) => {
     const names = cfg.backends.map((backend) => backend.name);

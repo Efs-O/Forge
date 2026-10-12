@@ -312,8 +312,31 @@ describe('count / variations at the tool layer (A10, A11, A23, A25)', () => {
       '20260914-102030-a-red-fox-1.png',
       '20260914-102030-a-red-fox-2.png',
     ]);
-    expect(result).toContain('seed 1111');
-    expect(result).toContain('seed 2222');
+    expect(result).toContain('Seed 1111 (random).');
+    expect(result).toContain('Seed 2222 (random).');
+    expect(result).toContain('(random)');
+  });
+
+  it('uses an explicit seed before the configured default and increments count 2', async () => {
+    const config = localConfig({
+      defaults: { steps: 8, cfg_scale: 1, sampler: 'euler', width: 864, height: 1536, seed: 7 },
+    });
+    const { tool, generateLocal } = rig({ config });
+    const result = await tool.handler({ prompt: 'fox', seed: 42, count: 2 }, noSnapshot);
+    expect(generateLocal.mock.calls.map(([request]) => request.seed?.())).toEqual([42, 43]);
+    expect(result).toContain('Seed 42 (argument).');
+    expect(result).toContain('Seed 43 (argument).');
+    expect(result).not.toContain('configured default');
+  });
+
+  it('uses and labels the configured default seed when no argument is given', async () => {
+    const config = localConfig({
+      defaults: { steps: 8, cfg_scale: 1, sampler: 'euler', width: 864, height: 1536, seed: 7 },
+    });
+    const { tool, generateLocal } = rig({ config });
+    const result = await tool.handler({ prompt: 'fox' }, noSnapshot);
+    expect(generateLocal.mock.calls[0]?.[0].seed?.()).toBe(7);
+    expect(result).toContain('Seed 7 (configured default).');
   });
 
   it('splits an explicit path into -1/-2 so two variations never share a file (A11, A23)', () => {

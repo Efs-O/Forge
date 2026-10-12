@@ -13,8 +13,10 @@ import { MAX_IMAGE_VARIATIONS } from '../../config/imageGenerationSchema';
 import { generateCloudImage, type GeneratedImage } from './cloudImageBackend';
 import {
   backendCostTag,
+  distinctSeeds,
   describeWithBackends,
   displayPath,
+  localSeedDescription,
   pickBackend,
   targetPath,
 } from './generateImageToolFormat';
@@ -91,13 +93,20 @@ export function makeGenerateImageTool(deps: GenerateImageDeps): RegisteredTool {
               // GenerateImageTool test asserts it equals SDCPP_SIZE_NAMES.
               enum: ['square', 'portrait', 'landscape'],
               description:
-                'Local backends only: 1328x1328, 928x1664, 1664x928. Cloud backends ignore it.',
+                'Local backends only: pixel size depends on the backend; the result reports it. Cloud backends ignore it.',
+            },
+            seed: {
+              type: 'integer',
+              minimum: 0,
+              maximum: 2_147_483_647,
+              description:
+                'Optional seed for a reproducible local render. Count 2 uses this seed and the next integer. Cloud backends ignore it.',
             },
             reference_paths: {
               type: 'array',
               items: { type: 'string' },
               description:
-                'Local backends only, and only when that backend sets vision_encoder: 1-4 image paths to condition the render on — an edit, a style, or a character to keep. Out-of-workspace paths are accepted (where phone uploads live). Each is downscaled to the configured long-edge cap; the result says so. Slow: ~175s per 768x768 image.',
+                'Local backends only, and only when that backend sets vision_encoder: 1-4 image paths to condition the render on — an edit, a style, or a character to keep. Out-of-workspace paths are accepted (where phone uploads live). Each is downscaled to the configured long-edge cap; the result says so. Slow: ~175s per 768x768 image. Advice for local Qwen-Image: it usually keeps the first image as the base. For an edit, it often helps to describe the change to picture 1, e.g. "Replace the man in picture 1 with the man from picture 2", and to name what should carry over and what should stay. Describing the subject of picture 2 in the pose of picture 1 has ignored picture 1 in our tests.',
             },
             count: {
               type: 'integer',
@@ -213,6 +222,9 @@ async function runGenerateImage(
   ];
   if (sizeRequested) {
     lines.push('The size argument applies to local backends only, so this backend ignored it.');
+  }
+  if (args['seed'] !== undefined) {
+    lines.push('The seed argument applies to local backends only, so this backend ignored it.');
   }
   if (image.revisedPrompt) lines.push(`The provider rewrote the prompt as: ${image.revisedPrompt}`);
   lines.push('To inspect it, call view_image on that path.');
@@ -371,7 +383,7 @@ async function runLocalVariations(
     }
   }
 
-  const seeds = distinctSeeds(count, deps.seed);
+  const seedChoice = distinctSeeds(count, args['seed'], backend.defaults.seed, deps.seed);
   const saved: Array<
     SavedImage & {
       seed: number;
@@ -391,7 +403,7 @@ async function runLocalVariations(
         server,
         prompt,
         size: args['size'],
-        seed: seeds[index] as number,
+        seed: seedChoice.seeds[index] as number,
         alternatives,
         ...(references ? { references } : {}),
         deps: localDeps,
@@ -438,7 +450,8 @@ async function runLocalVariations(
       `${GENERATED_IMAGE_PREFIX}${entry.display} (${entry.mime}, ${entry.bytes.toLocaleString()} bytes) ` +
         `with backend ${backend.name}.`,
       entry.deliveryLine,
-      `Rendered locally at ${entry.width}x${entry.height}, seed ${entry.seed}.`,
+      `Rendered locally at ${entry.width}x${entry.height}.`,
+      localSeedDescription(entry.seed, seedChoice.source),
     ].join('\n'),
   );
   lines.push(
@@ -453,18 +466,6 @@ async function runLocalVariations(
 
 /** A stand-in for the naming rules before the real format is known. */
 const PNG_PROBE: GeneratedImage = { bytes: Buffer.alloc(0), mime: 'image/png' };
-
-/** Distinct seeds, reported so a good one can be re-run exactly. */
-function distinctSeeds(count: number, seed: (() => number) | undefined): number[] {
-  const draw = seed ?? randomSeed;
-  const seeds = new Set<number>();
-  while (seeds.size < count) seeds.add(draw());
-  return [...seeds];
-}
-
-function randomSeed(): number {
-  return Math.floor(Math.random() * 2_147_483_647);
-}
 
 /**
  * Naming and description helpers moved to `generateImageToolFormat.ts` (one

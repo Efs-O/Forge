@@ -36,18 +36,21 @@ import {
  * to stop.
  */
 
-// Reference measurement updated 2026-10-12: 64-tool non-computer-use schema,
-// 54,501 chars. The ≈4.62 chars/token ratio was measured 2026-09-30 with
-// llama.cpp b11243 and Qwen3.8-27B Q6_K (50,439 chars / 10,913 tokens).
-const MEASURED_CHARS = 54_501;
+// Reference measurement updated 2026-10-13: 65-tool non-computer-use schema at
+// 56,025 chars — `upscale_image` added 942, and `generate_image`'s seed argument,
+// per-backend sizes and reference-order advice added 582. The ≈4.62 chars/token ratio
+// was measured 2026-09-30 with llama.cpp b11243 and Qwen3.8-27B Q6_K (50,439
+// chars / 10,913 tokens).
+const MEASURED_CHARS = 56_025;
 // Phase 3 STOP: the full 88-tool wire schema is 67,128 chars, over budget.
 // Exclude computer_use (24 browser/desktop schemas) pending the owner's product
 // decision; the full and gated sizes are recorded in the report.
 const COMPUTER_USE_TOOLS_EXCLUDED_PENDING_DECISION = ['browser_', 'desktop_'] as const;
-// Ceiling ~10% above the measured size, so a single new tool (a few hundred
+// Ceiling a little above the measured size, so a single new tool (a few hundred
 // chars) does not trip it, but a batch of new tools or a large description
-// growth does.
-const TOOL_SCHEMA_CHAR_BUDGET = 55_483;
+// growth does. Raised 55,483 → 56,600 on 2026-10-13 (CHANGES.md 0.17.22): the
+// two additions are opt-in image tools, advertised only when configured.
+const TOOL_SCHEMA_CHAR_BUDGET = 56_600;
 
 const ALL_PERMISSIONS = new Set(ALL_TOOL_PERMISSIONS);
 
@@ -67,7 +70,18 @@ function maximalConfig(): ForgeConfig {
     image_generation: {
       output_dir: 'generated-images',
       backends: [{ name: 'grok', provider: 'xai', model: 'img', confirm_each: true }],
-    },
+      // The worst case includes the upscale block: `upscale_image` is only
+      // registered when it is configured, so pricing the maximally-advertised
+      // set means pricing it with the block present.
+      upscale: {
+        binary: '/models/sd-cli.exe',
+        model: '/models/ESRGAN/4x_foolhardy_Remacri.pth',
+        cuda_device: 0,
+        timeout_ms: 300_000,
+        min_free_vram_mb: 1_500,
+        max_input_edge_px: 2_048,
+      },
+    } as ForgeConfig['image_generation'],
     image_search: {
       provider: 'serpapi_lens',
       secret_key_name: 'serpapi-key',
@@ -145,10 +159,10 @@ describe('tool schema CI budget (TOOL_SCHEMA_GROWTH_PLAN.md Step 1)', () => {
     const registry = makeMaximalRegistry();
     const names = registry.definitions(ALL_PERMISSIONS).map((d) => d.function.name).sort();
     expect(names).toHaveLength(registry.names().length);
-    expect(names).toHaveLength(88);
+    expect(names).toHaveLength(89);
     expect(names.filter((name) => name.startsWith('browser_'))).toHaveLength(15);
     expect(names.filter((name) => name.startsWith('desktop_'))).toHaveLength(9);
-    // Spot-check the five self-suppressing tools that only appear when their
+    // Spot-check the six self-suppressing tools that only appear when their
     // config block is present — these are the ones a bare config would drop.
     for (const name of [
       'generate_image',
@@ -156,6 +170,7 @@ describe('tool schema CI budget (TOOL_SCHEMA_GROWTH_PLAN.md Step 1)', () => {
       'manage_jobs',
       'ask_agent',
       'install_llamacpp',
+      'upscale_image',
     ]) {
       expect(names).toContain(name);
     }
