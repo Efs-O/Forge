@@ -31,11 +31,13 @@
 }
 
 .tool-group-summary {
-  color: var(--vscode-descriptionForeground);
+  color: var(--vscode-foreground);
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
+.tool-group-count { color: var(--vscode-descriptionForeground); }
+.tool-group-word { color: var(--vscode-foreground); }
 
 .tool-group-body {
   margin: 2px 0 5px 5px;
@@ -271,9 +273,9 @@
   border-top: 1px solid var(--vscode-editorWidget-border, #454545);
   white-space: pre-wrap;
   word-break: break-word;
-  font-family: var(--vscode-editor-font-family, 'Cascadia Code', monospace);
-  font-size: 12px;
-  line-height: 1.45;
+  font-family: var(--vscode-font-family, sans-serif);
+  font-size: calc(var(--vscode-font-size, 13px) + 1px);
+  line-height: 1.55;
   color: var(--vscode-descriptionForeground);
   background: var(--vscode-textCodeBlock-background, #1e1e1e);
 }
@@ -293,8 +295,9 @@
   background: transparent;
   border: none;
   color: var(--vscode-descriptionForeground);
-  font-family: var(--vscode-editor-font-family, 'Cascadia Code', monospace);
-  font-size: 11px;
+  font-family: var(--vscode-font-family, sans-serif);
+  font-size: 12px;
+  font-weight: 500;
   cursor: pointer;
   align-self: auto;
 }

@@ -131,6 +131,15 @@ describe('ActivityGroup', () => {
     expect(container.querySelector('.activity-group-body')).toBeNull();
   });
 
+  it('keeps the grouped action wording separate from its muted count', () => {
+    render(activityItems(), false, false);
+    const button = container.querySelector<HTMLButtonElement>('.activity-group-toggle')!;
+    expect(container.querySelector('.activity-group-count')?.textContent).toBe('2');
+    expect(container.querySelector('.activity-group-word')?.textContent).toBe('tool calls');
+    expect(button.textContent).toContain('2 tool calls');
+    expect(button.hasAttribute('aria-label')).toBe(false);
+  });
+
   it('stays closed when live ends if the reader did not toggle it', () => {
     const items = activityItems();
     render(items, true, true);
@@ -167,6 +176,10 @@ describe('ActivityGroup', () => {
       'false',
     );
     expect(container.querySelector('.activity-group-status')?.textContent).toBe('●');
+    const liveLabel = container.querySelector('.activity-group-label')!;
+    expect(liveLabel.textContent).toMatch(/^Working · \d+ calls?$/);
+    expect(liveLabel.querySelector('.activity-group-count')?.textContent).toMatch(/^\d+$/);
+    expect(liveLabel.querySelector('.activity-group-word')?.textContent).toMatch(/^calls?$/);
     expect(container.querySelector('.activity-group-pending')?.textContent).toContain('edit_file');
     expect(container.querySelectorAll('.activity-row')).toHaveLength(0);
     render(activityItems(), false, false);

@@ -75,7 +75,8 @@
 }
 
 .msg.assistant {
-  width: min(100%, 930px);
+  width: 100%;
+  max-width: 1440px;
   background: transparent;
 }
 

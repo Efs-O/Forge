@@ -93,11 +93,12 @@ body {
 .messages-pane {
   flex: 1;
   overflow-y: auto;
-  /* 12px bottom: the last row should not butt against the status line. */
-  padding: 10px 10px 12px;
+  /* Keep transcript content close to the panel edge without making wide panes
+     feel crowded. clamp() preserves a useful gutter at sidebar widths. */
+  padding: 10px clamp(12px, 2vw, 28px) 12px;
   display: flex;
   flex-direction: column;
-  align-items: center;
+  align-items: stretch;
   gap: 12px;
 }
 
@@ -120,7 +121,6 @@ body {
  */
 .messages-pane > * {
   width: 100%;
-  max-width: 1040px;
   flex: 0 0 auto;
   content-visibility: auto;
   contain-intrinsic-size: auto 60px;

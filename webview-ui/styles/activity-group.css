@@ -36,7 +36,7 @@
 .activity-group-status {
   color: var(--forge-tool-ok);
 }
-.activity-group-status.is-live { color: var(--vscode-editorWarning-foreground, #cca700); }
+.activity-group-status.is-live { color: var(--forge-clanker); }
 
 .activity-group-status.is-failed,
 .activity-group-failed {
@@ -44,11 +44,15 @@
 }
 
 .activity-group-label { flex: 0 0 auto; white-space: nowrap; }
+.activity-group-count { color: var(--vscode-descriptionForeground); }
+.activity-group-word { color: var(--vscode-foreground); }
 .activity-group-details {
   flex: 0 0 auto;
   margin-left: auto;
   color: var(--vscode-descriptionForeground);
-  font-size: 11px;
+  font-family: var(--vscode-font-family, sans-serif);
+  font-size: var(--vscode-font-size, 13px);
+  font-weight: 500;
   white-space: nowrap;
 }
 
@@ -99,4 +103,10 @@
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+  color: var(--vscode-foreground);
+}
+.activity-group-pending-count,
+.activity-group-pending-meta {
+  flex: 0 0 auto;
+  color: var(--vscode-descriptionForeground);
 }

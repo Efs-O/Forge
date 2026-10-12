@@ -42,6 +42,9 @@ describe('ToolGroup', () => {
     });
 
     expect(container.textContent).toContain('3 tool calls');
+    expect(container.querySelector('.tool-group-count')?.textContent).toBe('3');
+    expect(container.querySelector('.tool-group-word')?.textContent).toBe('tool calls');
+    expect(container.querySelector('.tool-group-toggle')?.textContent).toContain('3 tool calls');
     expect(container.querySelector('.tool-group-body')).toBeNull();
 
     act(() => {

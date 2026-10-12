@@ -48,7 +48,8 @@ function ToolGroupView({
         aria-expanded={open}
       >
         <span className="tool-group-chevron">{open ? <ChevronDown /> : <ChevronRight />}</span>
-        <span>{tools.length} tool calls</span>
+        <span className="tool-group-count">{tools.length}</span>{' '}
+        <span className="tool-group-word">tool calls</span>
         <span className="tool-group-summary">{label}</span>
       </button>
       {open && (

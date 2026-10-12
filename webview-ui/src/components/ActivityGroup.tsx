@@ -96,10 +96,23 @@ function ActivityGroupView({
           {live && summary.failed === 0 ? '●' : status}
         </span>
         <span className="activity-group-label">
-          {live
-            ? 'Working'
-            : `${summary.toolCalls} tool ${summary.toolCalls === 1 ? 'call' : 'calls'}`}
-          {live && ` · ${activeCount} ${activeCount === 1 ? 'call' : 'calls'}`}
+          {live ? (
+            'Working'
+          ) : (
+            <>
+              <span className="activity-group-count">{summary.toolCalls}</span>{' '}
+              <span className="activity-group-word">
+                tool {summary.toolCalls === 1 ? 'call' : 'calls'}
+              </span>
+            </>
+          )}
+          {live && (
+            <>
+              {' · '}
+              <span className="activity-group-count">{activeCount}</span>{' '}
+              <span className="activity-group-word">{activeCount === 1 ? 'call' : 'calls'}</span>
+            </>
+          )}
         </span>
         {summary.editCount > 0 && (
           <>
@@ -139,7 +152,15 @@ function ActivityGroupView({
           >
             {activePending ? '○' : activeFailed ? '✕' : '✓'}
           </span>
-          <span className="activity-group-pending-name">{activeName}</span>
+          {pendingCalls.length > 1 ? (
+            <>
+              <span className="activity-group-pending-count">{pendingCalls.length}</span>{' '}
+              <span className="activity-group-pending-name">calls</span>{' '}
+              <span className="activity-group-pending-meta">running</span>
+            </>
+          ) : (
+            <span className="activity-group-pending-name">{activeName}</span>
+          )}
           {pendingCalls.length <= 1 && activeTarget && (
             <span className="activity-group-pending-target" title={activeTarget}>
               {activeTarget}
