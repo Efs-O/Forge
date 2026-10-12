@@ -75,6 +75,9 @@ dist/qa-layout/**
 smoke3d/**
 prodtest-md2html/**
 prodtest-*/**
+# A voxel-page build left in the repo root rode along in a local 0.17.22 VSIX.
+pagoda.html
+pagoda-build/**
 .mcp.json
 assets/.coordination/**
 assets/_preview/**
