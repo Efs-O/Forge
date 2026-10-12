@@ -311,6 +311,8 @@ describe('ActivityGroup', () => {
     toggle();
     expect(container.querySelectorAll('.activity-group-body > .activity-row')).toHaveLength(1);
     act(() => container.querySelector<HTMLButtonElement>('.activity-row-header')!.click());
+    expect(container.querySelector('.tool-row-command')).toBeNull();
+    act(() => container.querySelector<HTMLButtonElement>('.tool-row-toggle')!.click());
     expect(container.querySelector('.tool-row-command code')?.textContent).toBe(command);
     expect(container.querySelector('.tool-row-verbatim')?.textContent).toBe('match at line 42');
   });

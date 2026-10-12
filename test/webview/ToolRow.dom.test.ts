@@ -26,8 +26,8 @@ const { ToolRow } = await import('../../webview-ui/src/components/ToolRow');
 const React = await import('react');
 const { resetDisclosures } = await import('../../webview-ui/src/disclosureState');
 
-const LONG_REPORT = ['# Report', '', 'First paragraph.', '', 'Second paragraph.'].join('\n') +
-  '\n'.padEnd(400, 'x');
+const LONG_REPORT =
+  ['# Report', '', 'First paragraph.', '', 'Second paragraph.'].join('\n') + '\n'.padEnd(400, 'x');
 
 function toolMessage(extra: Partial<AppMessage> = {}): AppMessage {
   return {
@@ -85,6 +85,40 @@ describe('ToolRow', () => {
     act(() => root.render(React.createElement('div')));
     render(message);
     expect(container.querySelector('.tool-row-body')).not.toBeNull();
+  });
+
+  it('keeps a live shell result collapsed until explicitly opened, across sync and remount', () => {
+    const shell = toolMessage({
+      toolName: 'run_command',
+      content: 'run_command → npm test',
+      toolDetail: 'npm test '.repeat(20),
+      toolResult: 'test output '.repeat(20),
+    });
+    render(shell);
+    expect(container.querySelector('.tool-row-body')).toBeNull();
+
+    render({ ...shell, toolResult: `${shell.toolResult}more output` });
+    expect(container.querySelector('.tool-row-body')).toBeNull();
+    act(() => container.querySelector<HTMLButtonElement>('.tool-row-toggle')!.click());
+    act(() => root.render(React.createElement('div')));
+    render({ ...shell, toolResultTotal: 400 });
+    expect(container.querySelector('.tool-row-body')).not.toBeNull();
+  });
+
+  it('keeps short nested results visible and expands failures for their message', () => {
+    act(() =>
+      root.render(
+        React.createElement(ToolRow, {
+          message: toolMessage({ toolResult: 'ok', toolResultTotal: 2 }),
+          nested: true,
+        }),
+      ),
+    );
+    expect(container.querySelector('.tool-row-body')?.textContent).toContain('ok');
+
+    render(toolMessage({ toolResult: `Error: ${LONG_REPORT}`, toolIsError: true }));
+    expect(container.querySelector('.msg-tool-row-error')).not.toBeNull();
+    expect(container.querySelector('.tool-row-body')?.textContent).toContain('Error:');
   });
 
   it('expands a prose result to the full report with its structure intact', () => {

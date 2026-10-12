@@ -140,7 +140,11 @@ describe('builtin execute template', () => {
   });
 
   it('lets a user-specified answer format win', () => {
-    expect(prompt).toContain('If the user specified a format, follow theirs exactly');
+    expect(prompt).toContain(
+      'If the user asks for exhaustive detail or specifies a format, follow that request exactly.',
+    );
+    expect(prompt).toContain('Lead with the direct answer');
+    expect(prompt).toContain('keep one point per bullet');
   });
 
   it('leaves fallback-format and terminal guidance to the code that injects them', () => {

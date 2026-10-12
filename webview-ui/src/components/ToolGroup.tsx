@@ -37,8 +37,7 @@ function ToolGroupView({
   const open = choice ?? nested;
   const label = useMemo(() => summary(tools), [tools]);
 
-  if (tools.length < 2)
-    return tools[0] ? <ToolRow message={tools[0]} defaultOpen={nested} /> : null;
+  if (tools.length < 2) return tools[0] ? <ToolRow message={tools[0]} nested={nested} /> : null;
 
   return (
     <div className="tool-group">
@@ -55,7 +54,7 @@ function ToolGroupView({
       {open && (
         <div className="tool-group-body">
           {tools.map((tool) => (
-            <ToolRow key={tool.id} message={tool} defaultOpen={nested} />
+            <ToolRow key={tool.id} message={tool} nested={nested} />
           ))}
         </div>
       )}

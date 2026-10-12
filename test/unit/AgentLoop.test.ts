@@ -544,7 +544,7 @@ describe('AgentLoop', () => {
     expect(run.mock.calls[0]?.[0]).not.toHaveProperty('sessionId');
     expect(run.mock.calls[1]?.[0]).toEqual(
       expect.objectContaining({
-        task: 'second prompt',
+        task: expect.stringContaining('second prompt'),
         sessionId: 'persistent-session',
         model: 'opus',
       }),

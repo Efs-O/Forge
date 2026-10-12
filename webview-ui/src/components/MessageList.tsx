@@ -10,7 +10,7 @@ import { ActivityGroup } from './ActivityGroup';
 import { QueuedPromptRow } from './QueuedPromptRow';
 import { PendingToolCallRow } from './PendingToolCallRow';
 import type { PendingToolCall } from '../pendingToolCalls';
-import { nextScrolledUp } from '../scrollFollow';
+import { isScrollUpIntent, nextScrolledUp } from '../scrollFollow';
 
 interface Props {
   messages: AppMessage[];
@@ -62,6 +62,7 @@ export function MessageList({
   // back on deactivation, because by the time an effect cleanup runs the pane
   // is already hidden and the value is already gone.
   const savedScrollTop = useRef(0);
+  const cancelSettling = useRef<(() => void) | undefined>(undefined);
   const rows = useMemo(() => toRows(messages, activityView), [messages, activityView]);
 
   // The MutationObserver is installed once; a ref is how its closure reads the
@@ -105,40 +106,45 @@ export function MessageList({
   }, []);
 
   /**
-   * Scroll to the bottom and keep re-pinning until the viewport is actually
-   * there.
-   *
-   * Rows use `content-visibility: auto`, so a pane that has just been shown
-   * reports an estimated height (60px per row) for everything off screen and
-   * only corrects it as rows come into view. Scrolling once to that estimate
-   * lands in the MIDDLE of a long conversation, not at its end: the true
-   * `scrollHeight` is only reached after the browser has laid out the rows
-   * below the estimated position, which takes more than two frames for a long
-   * transcript. So re-pin every frame until `scrollHeight` stops growing under
-   * us (i.e. the viewport is genuinely at the bottom); the frame cap stops us
-   * chasing a bottom that keeps moving while a turn is still appending.
+   * Re-pin until the measured height and bottom position stay stable across
+   * several frames. Resize and mutation observers restart this bounded loop
+   * when later intrinsic-size corrections arrive.
    */
   const settleToBottom = useCallback(() => {
     const el = containerRef.current;
     if (!el) return;
+    cancelSettling.current?.();
     scrollToBottom('auto');
     if (typeof requestAnimationFrame !== 'function') return;
     let raf = 0;
     let cancelled = false;
     let frame = 0;
+    let stableFrames = 0;
+    let previousHeight = -1;
     const step = () => {
-      if (cancelled || userScrolledUp.current) return;
+      if (cancelled || userScrolledUp.current || !activeRef.current) return;
       scrollToBottom('auto');
       frame++;
       const distFromBottom = el.scrollHeight - el.scrollTop - el.clientHeight;
-      if (distFromBottom > 1 && frame < 30) {
+      if (distFromBottom <= 1 && el.scrollHeight === previousHeight) stableFrames++;
+      else stableFrames = 0;
+      previousHeight = el.scrollHeight;
+      if (stableFrames < 4 && frame < 120) {
         raf = requestAnimationFrame(step);
+      } else {
+        cancelSettling.current = undefined;
       }
     };
     raf = requestAnimationFrame(step);
-    return () => {
+    const cancel = () => {
       cancelled = true;
       if (raf) cancelAnimationFrame(raf);
+      if (cancelSettling.current === cancel) cancelSettling.current = undefined;
+    };
+    cancelSettling.current = cancel;
+    return () => {
+      cancel();
+      if (cancelSettling.current === cancel) cancelSettling.current = undefined;
     };
   }, [scrollToBottom]);
 
@@ -146,28 +152,75 @@ export function MessageList({
     const el = containerRef.current;
     if (!el) return;
     let lastScrollTop = el.scrollTop;
+    let touchY: number | undefined;
+    let scrollbarPointer = false;
     const onScroll = () => {
+      if (!activeRef.current) return;
       const distFromBottom = el.scrollHeight - el.scrollTop - el.clientHeight;
       userScrolledUp.current = nextScrolledUp(userScrolledUp.current, {
-        scrollTop: el.scrollTop,
-        lastScrollTop,
         distFromBottom,
       });
+      if (
+        scrollbarPointer &&
+        isScrollUpIntent({ kind: 'scrollbar', delta: el.scrollTop - lastScrollTop }) &&
+        distFromBottom > 1
+      ) {
+        userScrolledUp.current = true;
+        cancelSettling.current?.();
+      }
       lastScrollTop = el.scrollTop;
       savedScrollTop.current = el.scrollTop;
     };
     // An image finishing its load changes the height without a DOM mutation, so
     // the MutationObserver below never sees it. `load` does not bubble; capture.
     const onLoad = () => {
-      if (activeRef.current && !userScrolledUp.current) scrollToBottom();
+      if (activeRef.current && !userScrolledUp.current) settleToBottom();
     };
     // A wheel turned up is intent before any pixel moves; latch on it so a token
     // landing in the same frame cannot pin the view back down.
     const onWheel = (event: WheelEvent) => {
-      if (event.deltaY < 0 && el.scrollHeight > el.clientHeight) userScrolledUp.current = true;
+      if (
+        isScrollUpIntent({ kind: 'wheel', delta: event.deltaY }) &&
+        el.scrollHeight > el.clientHeight
+      ) {
+        userScrolledUp.current = true;
+        cancelSettling.current?.();
+      }
+    };
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (isScrollUpIntent({ kind: 'keyboard', key: event.key, shiftKey: event.shiftKey })) {
+        userScrolledUp.current = true;
+        cancelSettling.current?.();
+      }
+    };
+    const onTouchStart = (event: TouchEvent) => {
+      touchY = event.touches[0]?.clientY;
+    };
+    const onTouchMove = (event: TouchEvent) => {
+      const nextY = event.touches[0]?.clientY;
+      if (touchY !== undefined && nextY !== undefined && touchY < nextY) {
+        if (isScrollUpIntent({ kind: 'touch', delta: touchY - nextY })) {
+          userScrolledUp.current = true;
+          cancelSettling.current?.();
+        }
+      }
+      touchY = nextY;
+    };
+    const onPointerDown = (event: PointerEvent) => {
+      const rect = el.getBoundingClientRect();
+      const scrollbarWidth = el.offsetWidth - el.clientWidth;
+      scrollbarPointer = scrollbarWidth > 0 && event.clientX >= rect.right - scrollbarWidth;
+    };
+    const onPointerUp = () => {
+      scrollbarPointer = false;
     };
     el.addEventListener('scroll', onScroll, { passive: true });
     el.addEventListener('wheel', onWheel, { passive: true });
+    el.addEventListener('keydown', onKeyDown);
+    el.addEventListener('touchstart', onTouchStart, { passive: true });
+    el.addEventListener('touchmove', onTouchMove, { passive: true });
+    el.addEventListener('pointerdown', onPointerDown, { passive: true });
+    window.addEventListener('pointerup', onPointerUp, { passive: true });
     el.addEventListener('load', onLoad, true);
     // The pane is a flex child sharing the column with the streaming status line,
     // the checkpoint bar and the auto-growing composer. When any of those appears
@@ -177,30 +230,73 @@ export function MessageList({
       typeof ResizeObserver === 'undefined'
         ? undefined
         : new ResizeObserver(() => {
-            if (activeRef.current && !userScrolledUp.current) scrollToBottom();
+            if (activeRef.current && !userScrolledUp.current) settleToBottom();
           });
     resize?.observe(el);
     return () => {
       el.removeEventListener('scroll', onScroll);
       el.removeEventListener('wheel', onWheel);
+      el.removeEventListener('keydown', onKeyDown);
+      el.removeEventListener('touchstart', onTouchStart);
+      el.removeEventListener('touchmove', onTouchMove);
+      el.removeEventListener('pointerdown', onPointerDown);
+      window.removeEventListener('pointerup', onPointerUp);
       el.removeEventListener('load', onLoad, true);
       resize?.disconnect();
     };
-  }, [scrollToBottom]);
+  }, [scrollToBottom, settleToBottom]);
 
   useEffect(() => {
     const el = containerRef.current;
     if (!el || typeof MutationObserver === 'undefined') return;
+    const resizeRows =
+      typeof ResizeObserver === 'undefined'
+        ? undefined
+        : new ResizeObserver(() => {
+            if (activeRef.current && !userScrolledUp.current) settleToBottom();
+          });
+    const observedRows = new Set<Element>();
+    const syncRows = () => {
+      const tail = new Set<Element>();
+      let row = el.lastElementChild;
+      for (let count = 0; row && count < 8; count++) {
+        tail.add(row);
+        row = row.previousElementSibling;
+      }
+      for (const row of observedRows) {
+        if (!tail.has(row)) {
+          resizeRows?.unobserve(row);
+          observedRows.delete(row);
+        }
+      }
+      for (const row of tail) {
+        if (!observedRows.has(row)) {
+          resizeRows?.observe(row);
+          observedRows.add(row);
+        }
+      }
+    };
     // Expanding a thinking row and streaming text into its nested pane mutate
     // the DOM without changing MessageList's `messages` prop. Follow those
     // changes too, but never override a reader who intentionally scrolled up.
     const observer = new MutationObserver(() => {
+      syncRows();
       if (!activeRef.current) return;
-      if (!userScrolledUp.current) scrollToBottom();
+      if (!userScrolledUp.current) settleToBottom();
     });
+    syncRows();
     observer.observe(el, { childList: true, subtree: true, characterData: true });
-    return () => observer.disconnect();
-  }, [scrollToBottom]);
+    return () => {
+      observer.disconnect();
+      resizeRows?.disconnect();
+    };
+  }, [settleToBottom]);
+
+  useEffect(() => {
+    if (!active) cancelSettling.current?.();
+  }, [active]);
+
+  useEffect(() => () => cancelSettling.current?.(), []);
 
   useEffect(() => {
     // Session switch: jump straight to the bottom with no animation and reset the
@@ -257,6 +353,7 @@ export function MessageList({
       className="messages-pane"
       hidden={!active}
       ref={containerRef}
+      tabIndex={0}
     >
       {isEmpty && emptyState}
       {rows.map((row, rowIndex) =>

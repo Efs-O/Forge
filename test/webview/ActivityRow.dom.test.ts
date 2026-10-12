@@ -139,6 +139,8 @@ describe('ActivityRow', () => {
     expect(container.querySelector('.activity-row-detail')?.textContent)
       .toBe('npm test --run-in-band '.repeat(8));
     toggle();
+    expect(container.querySelector('.tool-row-command')).toBeNull();
+    act(() => container.querySelector<HTMLButtonElement>('.tool-row-toggle')!.click());
     expect(container.querySelector('.tool-row-command code')?.textContent).toBe(command);
   });
 

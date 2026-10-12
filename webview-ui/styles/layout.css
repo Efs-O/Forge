@@ -97,6 +97,7 @@ body {
   padding: 10px 10px 12px;
   display: flex;
   flex-direction: column;
+  align-items: center;
   gap: 12px;
 }
 
@@ -118,6 +119,9 @@ body {
  * rendered height, so the scrollbar stops jumping once a row has been seen.
  */
 .messages-pane > * {
+  width: 100%;
+  max-width: 1040px;
+  flex: 0 0 auto;
   content-visibility: auto;
   contain-intrinsic-size: auto 60px;
 }

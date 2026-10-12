@@ -2,12 +2,15 @@
 
 ## Status and scope
 
-Reviewed; ready for implementation. The owner approved the direction and
-requested full implementation.
+Implemented. Targeted checks, Edge layout QA, full CI, and packaging passed.
+The supervising owner completes the commit and local VSIX installation.
 Reference images are `artifacts/activity-view-mockups/reply-readability-1808.png`
 and `reply-readability-440.png`. This change affects Forge's webview transcript
 and the instructions Forge gives its own agents. It does not rewrite stored
 messages, change delivery/order, or add a new display mode.
+The owner also included a shell-result regression: long live command output
+must stay closed unless the reader opens it, while errors, approvals, and short
+nested outputs remain visible.
 
 ## Baseline and cause
 
@@ -27,6 +30,12 @@ messages, change delivery/order, or add a new display mode.
   reports a bottom distance under 1 px, or after 30 frames. Later intrinsic
   height corrections can leave the viewport above the true end. Hidden panes
   restore a saved pixel offset when the reader had intentionally scrolled up.
+- Nested `ToolRow` instances treated the activity-step disclosure as an
+  instruction to expand each long tool body (`open = choice ?? nested`), and
+  `ToolGroup` passed `defaultOpen={nested}` to its rows. Opening a step that
+  contained a running or completed shell call therefore expanded its long
+  command/result. Short nested results depended on this same default to remain
+  visible, so the fix must separate those behaviors.
 
 ## Implementation
 
@@ -62,6 +71,11 @@ messages, change delivery/order, or add a new display mode.
    perpetual animation loop. Keep the existing off-screen rendering benefit
    of `content-visibility: auto` unless measurement proves a narrower change
    is necessary.
+5. **Tool result disclosure.** Opening a compact activity step may reveal its
+   tool rows, but must not automatically expand a long shell command/result.
+   Keep short nested results inline, allow explicit open/close choices to
+   survive streaming remounts and final host sync, and keep failure detail and
+   approval state visible.
 
 ## Review before implementation
 
@@ -72,8 +86,10 @@ is the behavior to change. `SIDEBAR_SWITCH_LATENCY_PLAN.md` confirms that
 removing `content-visibility: auto` wholesale would regress tab performance.
 The native final-answer rule lives in `execute.njk`; `CliChatRunner.ts` puts its
 concise guidance in the initial CLI task, while resumed tasks carry only the
-latest user message and optional plan. The implementation must cover existing
-resumed CLI chats deliberately and test that path.
+latest user message and optional plan. The implementation adds the same brief
+answer-shape reminder to resumed tasks. The shell disclosure cause was the
+nested/default-open coupling described above; short nested result visibility
+now uses its own condition.
 
 - Confirm `MessageList.tsx` is the only scroll-follow owner and inspect all
   places that read/write `userScrolledUp`, saved offsets, `scrollTop`, and
@@ -94,23 +110,32 @@ resumed CLI chats deliberately and test that path.
 | --- | --- | --- | --- | --- |
 | Follow versus reader-scrolled-up (webview ref) | Explicit reader input or a deliberate return to bottom | Conversation switch starts at the new pane's end | Existing mounted pane preserves reader offset; reload starts at end | Layout reflow, streaming token, tool-card collapse, image load, and programmatic scroll cannot impersonate upward intent |
 | Settling animation/observer work (webview only) | Active pane mount/switch, content growth, resize/load | Stable bottom, user opt-out, unmount, or hidden pane | No durable state | Bounded scheduling; no stale RAF or observer follows a hidden/old conversation |
+| Tool result disclosure (webview only) | Explicit reader toggle keyed by tool message id | Webview lifecycle/reset | Existing mounted rows and streaming remounts retain the in-memory choice; reload starts from closed defaults | Long nested output starts closed; short nested result and failure detail stay visible |
 | Reply content | Existing agent output | Existing transcript lifecycle | Existing persistence unchanged | Prompt advice does not truncate or replace model text; user format/detail instructions win |
 
 ## Verification and handoff
 
-- Pure tests for scroll-intent classification: wheel up/down, keyboard,
-  scrollbar drag, programmatic negative `scrollTop`, browser height correction,
-  return to bottom, and a reader who stays above while content grows.
-- DOM/browser test for a long transcript with underestimated off-screen rows,
-  streaming growth, grouped activity shrinking/expanding, tab hide/show,
-  composer resize, and manual reading above the end. Assert both automatic
-  follow and deliberate opt-out. Use a real browser for layout behavior that
-  jsdom cannot model.
-- Inspect dark/light screenshots at the reference wide size and a 440 px
-  sidebar with answer, user bubble, tool card, code block, and long text.
-- Check prompt guidance in rendered native prompt and CLI first/resumed-turn
-  tests. Report model-output variation as a limitation.
-- Run `npm run ci`, `npm run package`, `git diff --check`, and `git status`
-  after the final edit. Commit the change and install the VSIX, then verify
-  the installed version. A reload of the open VS Code window activates a
-  same-version reinstall.
+- **Passed:** focused tests for explicit wheel, touch, keyboard, and scrollbar
+  direction; layout-driven scroll changes; follow opt-out; and returning to the
+  bottom. A jsdom `MessageList` regression covers programmatic upward movement,
+  wheel opt-out, keyboard navigation from the focusable transcript pane, and a
+  delayed height correction during bottom settling. An Edge browser regression
+  covers real content reflow, reader wheel opt-out, and follow resumption.
+- **Passed:** Edge layout QA at 1808 px and 440 px. Wide rows measured 1040 px,
+  assistant prose 930 px, and the user bubble aligned to the column edge; at
+  440 px, assistant prose used the available 420 px. Long code retained
+  internal horizontal overflow. This fixture checked layout geometry, not the
+  complete VS Code light/dark theme or a full production transcript.
+- **Passed:** tool-row DOM regressions cover live output remaining collapsed,
+  explicit open state across streaming update/remount, visible short nested
+  output, and expanded failure detail. Existing tool-group tests pass.
+- **Passed:** native answer guidance and CLI first/resumed-turn tests. Model
+  wording still varies; these instructions do not postprocess or truncate it.
+- **Passed:** `npm run ci` with one Vitest worker: 4,560 tests passed,
+  42 skipped; type-check, lint, build, and bundle checks passed. Unrestricted
+  Windows parallel runs hit an unrelated Git Bash `/tmp` startup failure in
+  existing process tests; the same tests passed in the final one-worker run.
+- **Passed:** `npm run package` produced `forge-llm-0.17.19.vsix`.
+- **Remaining handoff:** final diff/status review, commit, local installation,
+  and live VS Code theme/transcript verification. A reload of the open VS Code
+  window activates a same-version reinstall.

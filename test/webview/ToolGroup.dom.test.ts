@@ -6,8 +6,9 @@ import type { AppMessage } from '../../webview-ui/src/messageOps';
 
 (globalThis as unknown as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 
-(globalThis as unknown as { acquireVsCodeApi: () => { postMessage: (msg: unknown) => void } })
-  .acquireVsCodeApi = () => ({ postMessage: () => {} });
+(
+  globalThis as unknown as { acquireVsCodeApi: () => { postMessage: (msg: unknown) => void } }
+).acquireVsCodeApi = () => ({ postMessage: () => {} });
 
 const { ToolGroup } = await import('../../webview-ui/src/components/ToolGroup');
 const React = await import('react');
@@ -58,5 +59,23 @@ describe('ToolGroup', () => {
     act(() => root.render(React.createElement('div')));
     act(() => root.render(React.createElement(ToolGroup, { tools })));
     expect(container.querySelector('.tool-group-body')).not.toBeNull();
+  });
+
+  it('shows nested rows without auto-expanding a long shell result', () => {
+    const nestedTools: AppMessage[] = [
+      {
+        id: 'shell',
+        role: 'tool',
+        content: 'run_command → npm test',
+        toolName: 'run_command',
+        toolResult: 'test output '.repeat(20),
+      },
+      { id: 'short', role: 'tool', content: 'read_file → src/a.ts', toolResult: 'ok' },
+    ];
+    act(() => root.render(React.createElement(ToolGroup, { tools: nestedTools, nested: true })));
+
+    expect(container.querySelector('.tool-group-body')).not.toBeNull();
+    expect(container.querySelectorAll('.tool-row-body')).toHaveLength(1);
+    expect(container.querySelector('.tool-row-body')?.textContent).toBe('ok');
   });
 });

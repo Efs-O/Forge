@@ -30,6 +30,8 @@ describe('CliChatRunner', () => {
     expect(prompt).toContain('ASSISTANT:\nFirst answer');
     expect(prompt).toContain('USER:\nNow implement it');
     expect(prompt).toContain('using your own tools');
+    expect(prompt).toContain('lead with the direct answer');
+    expect(prompt).toContain('keep one point per bullet');
   });
 
   it('sends only the latest user request when resuming a CLI session', () => {
@@ -38,7 +40,8 @@ describe('CliChatRunner', () => {
       { role: 'assistant', content: 'First answer' },
       { role: 'user', content: 'Continue with this' },
     ]);
-    expect(prompt).toBe('Continue with this');
+    expect(prompt).toContain('Continue with this');
+    expect(prompt).toContain('lead with the direct answer');
   });
 
   it('keeps the host-recorded plan on a CLI resume without restoring old requests', () => {
@@ -53,6 +56,7 @@ describe('CliChatRunner', () => {
 
     expect(prompt).toContain('Task plan (recorded by Forge');
     expect(prompt).toContain('Latest request');
+    expect(prompt).toContain('lead with the direct answer');
     expect(prompt).not.toContain('First request');
   });
 
@@ -136,7 +140,11 @@ describe('CliChatRunner', () => {
     });
 
     expect(run).toHaveBeenCalledWith(
-      expect.objectContaining({ task: 'New request', sessionId: 'session-1', model: 'opus' }),
+      expect.objectContaining({
+        task: expect.stringContaining('New request'),
+        sessionId: 'session-1',
+        model: 'opus',
+      }),
     );
   });
 
@@ -171,7 +179,9 @@ describe('CliChatRunner', () => {
 
     stack.commitTurn(checkpoint);
     expect(run).toHaveBeenCalledOnce();
-    expect(onStatus).toHaveBeenCalledWith(expect.stringMatching(/rollback protection is disabled/i));
+    expect(onStatus).toHaveBeenCalledWith(
+      expect.stringMatching(/rollback protection is disabled/i),
+    );
     expect(stack.canUndo()).toBe(false);
     expect(fs.readFileSync(target, 'utf8')).toBe('changed');
   });

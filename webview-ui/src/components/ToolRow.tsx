@@ -95,21 +95,24 @@ export function ToolRowThumbnails({ message }: { message: AppMessage }): React.R
 export function ToolRow({
   message,
   nested = false,
-  defaultOpen = false,
 }: {
   message: AppMessage;
   nested?: boolean;
-  defaultOpen?: boolean;
 }): React.ReactElement {
   const [choice, setChoice] = useDisclosure('tool', message.id);
-  // A compact step is already the disclosure gate. Its nested result opens
-  // with that step, while a reader's explicit close still sticks.
-  const open = choice ?? (nested || defaultOpen);
   const { name: toolName, detail } = toolNameAndDetail(message);
   const name = nested ? 'result' : toolName;
 
   const result = message.toolResult ?? '';
-  const expandable = result.length >= EXPANDABLE_MIN_CHARS || detail.length >= EXPANDABLE_MIN_CHARS;
+  const longContent =
+    result.length >= EXPANDABLE_MIN_CHARS || detail.length >= EXPANDABLE_MIN_CHARS;
+  const expandable = longContent || (nested && detail.length > 0);
+  // Nested activity steps expose short results inline, but opening the step
+  // must not also expand a long shell command/result. Reader choices survive
+  // streaming and remounts; failures stay open initially so their cause is
+  // visible in every activity view.
+  const open = choice ?? message.toolIsError === true;
+  const showBody = open || (nested && !longContent);
   const asMarkdown = rendersAsMarkdown(message.toolName ?? '');
   // Only rows whose call Forge saw both announced and returned carry one, so an
   // absent duration means unmeasured - never "instant".
@@ -169,15 +172,16 @@ export function ToolRow({
         )}
       </div>
       <ToolRowThumbnails message={message} />
-      {open && (
+      {showBody && (
         <div className="tool-row-body">
-          {detail && (
+          {open && detail && (
             <div className="tool-row-command">
               <div className="tool-row-command-label">Command / details</div>
               <code>{detail}</code>
             </div>
           )}
           {result &&
+            (open || (nested && !longContent)) &&
             (asMarkdown ? (
               <Markdown remarkPlugins={[remarkGfm]}>{body}</Markdown>
             ) : (

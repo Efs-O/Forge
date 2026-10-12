@@ -44,6 +44,9 @@ export interface RunWarmCliChatOptions extends Omit<RunCliChatOptions, 'driver'>
   key: CliSessionKey;
 }
 
+const CLI_ANSWER_SHAPE_GUIDANCE =
+  'Unless the user asks for exhaustive detail or a specific format, lead with the direct answer, use short sections or bullets when helpful, keep one point per bullet, and end with a brief correction or important caveat when needed.';
+
 function contentText(content: string | ContentPart[] | null): string {
   if (typeof content === 'string') return content;
   if (!content) return '';
@@ -63,7 +66,7 @@ export function buildCliChatTask(messages: readonly ChatMessage[]): string {
     .join('\n\n');
   return [
     'You are the selected external coding agent in a Forge sidebar conversation.',
-    'Work directly in the current workspace using your own tools. Perform the latest user request, then give a concise final response for the chat.',
+    `Work directly in the current workspace using your own tools. Perform the latest user request, then give a concise final response for the chat. ${CLI_ANSWER_SHAPE_GUIDANCE}`,
     'To consult, ask, or delegate to a peer agent (for example Codex or Claude Code), invoke that agent through its own CLI directly — e.g. `codex exec "<task>"` — and relay the result. Forge exposes no peer-agent API: its local control server (port 8799) serves models to worker fleets, not sidebar agents, so do not probe it for this.',
     'Use the transcript for conversational context; do not repeat earlier work unless the latest request requires it.',
     '<forge_conversation>',
@@ -75,7 +78,8 @@ export function buildCliChatTask(messages: readonly ChatMessage[]): string {
 export function buildCliResumeTask(messages: readonly ChatMessage[], planPrompt?: string): string {
   const latest = [...messages].reverse().find((message) => message.role === 'user');
   const latestText = latest ? contentText(latest.content) : '';
-  return planPrompt ? `${planPrompt}\n\n${latestText}` : latestText;
+  const context = planPrompt ? `${planPrompt}\n\n${latestText}` : latestText;
+  return `${context}\n\n${CLI_ANSWER_SHAPE_GUIDANCE}`;
 }
 
 export async function prepareCliChatAgent(
