@@ -1,5 +1,9 @@
 # Forge — Recent Changes
 
+## 0.17.23
+
+- New optional `elapsed_time_note: { after_minutes: N }` (5-240). Once a task has run N minutes, Forge appends one note at the next tool-round gap: it says how long the task has run, that this is not a deadline and checks must not be skipped, and to move on to writing if the model already has the context it needs. At most one note per user-typed task; auto-compaction resumes and mid-turn messages do not restart the clock. It is internal (no user bubble, logged in the session JSONL) and does not end the task for `preserve_thinking`. Absent means off.
+
 ## 0.17.22
 
 - New `upscale_image` tool: one ESRGAN ×4 pass over any workspace image (a render, a screenshot, a photo) with stable-diffusion.cpp's `sd-cli`, saved as `<name>_x4.png` beside the input and never overwriting. It is registered only when `image_generation.upscale` is configured (`binary`, `model`, `cuda_device`, `min_free_vram_mb`, optional `timeout_ms` and `max_input_edge_px`, default 2048). It refuses an input over the edge cap or a card with too little free VRAM, kills only the process it started on cancel or timeout, deletes a partial output, and saves but does not send a result over 50 MB.
