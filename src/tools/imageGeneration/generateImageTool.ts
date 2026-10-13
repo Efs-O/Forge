@@ -30,7 +30,7 @@ import {
 import type { SdcppGeneratedImage, SdcppImageRequest } from './sdcppImageBackend';
 import type { runSdcppImageJob, SdcppJobResult } from './sdcppJobPoll';
 
-const MAX_PROMPT_CHARS = 4_000;
+const MAX_PROMPT_CHARS = 10_000;
 const CAPTION_PROMPT_CHARS = 200;
 
 export interface GenerateImageDeps {
@@ -75,7 +75,7 @@ export function makeGenerateImageTool(deps: GenerateImageDeps): RegisteredTool {
             prompt: {
               type: 'string',
               description:
-                'What to draw: subject, style, composition, lighting. At most 4000 characters.',
+                'What to draw: subject, style, composition, lighting. At most 10000 characters.',
             },
             backend: {
               type: 'string',
