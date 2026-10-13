@@ -14,7 +14,7 @@ import { SharedRuntimeRegistry, sharedRuntimeKey } from './SharedRuntimeRegistry
 import {
   acquireOllamaSlot,
   borrowSharedRuntime,
-  freeLocalForExternal,
+  freeVramForExternal,
   settleAll,
   stopAllSlots,
 } from './poolAcquisition';
@@ -265,19 +265,22 @@ export class BackendPool implements IBackendPool {
   }
 
   /**
-   * Before a request to a managed external server: free every local model so
-   * the two never share VRAM, but never under a running turn.
+   * Before a request to a managed external server: free every local model and
+   * every other managed server (two Strata entries share GPUs), never under a running turn.
    */
   async prepareExternal(modelName: string): Promise<void> {
     const key = this.poolKey(modelName);
-    if (!this.external?.isManaged(key)) return;
-    await freeLocalForExternal(key, {
+    const external = this.external;
+    if (!external?.isManaged(key)) return;
+    await freeVramForExternal(key, {
       local: [...this.slots.keys(), ...this.sharedSlots.keys(), ...this.ollamaSlots.keys()],
+      otherExternal: external.loadedNames().filter((name) => name !== key),
       busy: (m) => (this.turnPins.get(m) ?? 0) > 0 || this.gate.isPinned(m),
       stopLocal: () => this.stopLocal(),
+      unloadExternal: (name) => external.unload(name),
     });
-    await this.external.ensureStarted(key);
-    this.external.markInUse(key);
+    await external.ensureStarted(key);
+    external.markInUse(key);
   }
 
   private async stopLocal(): Promise<void> {

@@ -47,7 +47,8 @@ export class ExternalServerBusyError extends Error {}
  * server up; explicit unload commands also run its configured stop command.
  * POSTing the path frees its GPU/RAM and it reloads on its next request. The
  * pool treats each one as a resident model, so every unload command reaches it
- * and it never shares VRAM with a llama.cpp/Ollama model this window loads.
+ * and it never shares VRAM with a llama.cpp/Ollama model this window loads, or
+ * with another managed server (prepareExternal unloads the others first).
  * See docs/plans/EXTERNAL_SERVER_UNLOAD_PLAN.md.
  */
 /** A managed external server: openai-compatible with an `unload_path` (Strata). */
@@ -212,7 +213,8 @@ export class ExternalModelServers {
    * and the model has a `start_command`, launch it (detached, hidden, unref'd
    * so it survives the extension host) and wait until it accepts connections.
    * If it is down with no `start_command`, throw an actionable error. Called
-   * from `prepareExternal` after local models are freed, so VRAM is available.
+   * from `prepareExternal` after local models and other managed servers are
+   * freed, so VRAM is available.
    */
   async ensureStarted(name: string): Promise<void> {
     const pending = this.starting.get(name);

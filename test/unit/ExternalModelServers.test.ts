@@ -12,7 +12,7 @@ import {
   START_POLL_MS,
 } from '../../src/backend/ExternalModelServers';
 import { deferredStopInvocation, STOP_GRACE_MS } from '../../src/backend/deferredStop';
-import { freeLocalForExternal } from '../../src/backend/poolAcquisition';
+import { freeVramForExternal } from '../../src/backend/poolAcquisition';
 import { ForgeConfigSchema } from '../../src/config/schema';
 import { resolveRequestModel } from '../../src/config/ConfigResolver';
 import type { ForgeConfig } from '../../src/config/types';
@@ -670,12 +670,73 @@ describe('BackendPool with a managed external server', () => {
     expect(pool.loadedModelsExcept('llama')).toEqual(['strata']);
   });
 
-  it('never stops a local model under a running turn', async () => {
+  it('never stops a local model or unloads another server under a running turn', async () => {
     const stopLocal = vi.fn(async () => {});
-    await expect(
-      freeLocalForExternal('strata', { local: ['llama'], busy: () => true, stopLocal }),
-    ).rejects.toThrow(/a turn is running on it/);
+    const unloadExternal = vi.fn(async () => {});
+    const free = (local: string[], otherExternal: string[]) =>
+      freeVramForExternal('strata', {
+        local,
+        otherExternal,
+        busy: () => true,
+        stopLocal,
+        unloadExternal,
+      });
+    await expect(free(['llama'], [])).rejects.toThrow(/a turn is running on it/);
+    await expect(free([], ['strata-xxs'])).rejects.toThrow(/beside strata-xxs: a turn/);
     expect(stopLocal).not.toHaveBeenCalled();
+    expect(unloadExternal).not.toHaveBeenCalled();
+  });
+
+  it('unloads another managed server before a request to this one (shared GPUs)', async () => {
+    const config = makeConfig();
+    config.models.push({
+      name: 'strata-xxs',
+      provider: 'openai-compatible',
+      endpoint: 'http://127.0.0.1:8091',
+      api_key_secret: 'strata',
+      unload_path: '/unload',
+    } as ForgeConfig['models'][number]);
+    const urls: string[] = [];
+    const fetchImpl = (async (url: string) => {
+      urls.push(url);
+      return ok();
+    }) as unknown as typeof fetch;
+    const servers = new ExternalModelServers(() => config, async () => undefined, fetchImpl);
+    const pool = new BackendPool(config, undefined, servers);
+    servers.markInUse('strata');
+    await pool.prepareExternal('strata-xxs');
+    expect(urls).toEqual(['http://127.0.0.1:8080/unload']);
+    expect(pool.isLoaded('strata')).toBe(false);
+    expect(pool.isLoaded('strata-xxs')).toBe(true);
+    // Already unloaded: the next request does not POST again.
+    await pool.prepareExternal('strata-xxs');
+    expect(urls).toHaveLength(1);
+  });
+
+  it('refuses to start beside a managed server that is busy for another window', async () => {
+    const config = makeConfig();
+    config.models.push({
+      name: 'strata-xxs',
+      provider: 'openai-compatible',
+      endpoint: 'http://127.0.0.1:8091',
+      unload_path: '/unload',
+    } as ForgeConfig['models'][number]);
+    const fetchImpl = (async () =>
+      new Response('busy', { status: 409 })) as unknown as typeof fetch;
+    const spawnImpl = vi.fn();
+    const servers = new ExternalModelServers(
+      () => config,
+      async () => undefined,
+      fetchImpl,
+      spawnImpl,
+    );
+    const pool = new BackendPool(config, undefined, servers);
+    servers.markInUse('strata');
+    await expect(pool.prepareExternal('strata-xxs')).rejects.toThrow(
+      /Could not unload "strata": HTTP 409/,
+    );
+    expect(pool.isModelReady('strata-xxs')).toBe(false);
+    expect(spawnImpl).not.toHaveBeenCalled();
   });
 
   it('a request-resolved model keeps unload_path, so the hook fires', async () => {

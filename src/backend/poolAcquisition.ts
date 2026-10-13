@@ -159,24 +159,34 @@ export async function stopAllSlots(ctx: StopAllContext): Promise<void> {
 }
 
 /**
- * Free every local model before a request to a managed external server
- * (Strata), so the two never share VRAM — refused, never forced, while a turn
- * or delegation hold is using one. See ExternalModelServers.
+ * Free every local model AND every other managed external server before a
+ * request to one (Strata), so none of them share VRAM — two Strata entries
+ * want the same GPUs. Refused, never forced, while a turn or delegation hold
+ * in this window is using one; a server busy for another window answers the
+ * unload with 409, which surfaces as ExternalServerBusyError. See
+ * ExternalModelServers.
  */
-export async function freeLocalForExternal(
+export async function freeVramForExternal(
   external: string,
-  ctx: { local: string[]; busy(model: string): boolean; stopLocal(): Promise<void> },
+  ctx: {
+    local: string[];
+    otherExternal: string[];
+    busy(model: string): boolean;
+    stopLocal(): Promise<void>;
+    unloadExternal(model: string): Promise<void>;
+  },
 ): Promise<void> {
-  const busy = ctx.local.filter((model) => ctx.busy(model));
+  const busy = [...ctx.local, ...ctx.otherExternal].filter((model) => ctx.busy(model));
   if (busy.length) {
     throw new Error(
       `Cannot load "${external}" beside ${busy.join(', ')}: a turn is running on it. ` +
         'Wait for it to finish or stop it, then retry.',
     );
   }
-  if (!ctx.local.length) return;
-  await ctx.stopLocal();
-  log.info(`[BackendPool] freed ${ctx.local.join(', ')} for "${external}"`);
+  for (const other of ctx.otherExternal) await ctx.unloadExternal(other);
+  if (ctx.local.length) await ctx.stopLocal();
+  const freed = [...ctx.local, ...ctx.otherExternal];
+  if (freed.length) log.info(`[BackendPool] freed ${freed.join(', ')} for "${external}"`);
 }
 
 /** Wait for every task; throw once with every failure's message. */
