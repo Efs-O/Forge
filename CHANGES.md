@@ -1,5 +1,9 @@
 # Forge — Recent Changes
 
+## 0.17.25
+
+- Two Strata entries (e.g. IQ3_S on :8090 and IQ3_XXS on :8091) no longer load onto the same GPUs at once. Before a request to a managed external server, Forge now unloads every other managed server, not only llama.cpp/Ollama models. It refuses with a clear error if a turn in this window is running on the other one, or if that server answers 409 because another window is using it. Previously, picking the second while another chat still had the first loaded started it beside the first and oversubscribed VRAM.
+
 ## 0.17.24
 
 - New `set_checkin` tool, advertised only when `elapsed_time_note` is configured. At the start of a longer task the model estimates how long it should take (`minutes`, 10-180) and where it expects to be by then (`by_then`: writing, testing or done). If it is still working when the check-in is due, Forge sends one note quoting that estimate back, saying it is not a deadline and to re-estimate if the task is bigger. Calling again replaces the check-in. When the model sets none, `after_minutes` remains the fallback. A committed compaction restarts the timer, because the summary drops Forge's internal notes; the note still counts minutes from the original estimate.
