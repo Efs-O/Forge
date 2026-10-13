@@ -647,6 +647,7 @@ the configured override stays the existing `video.ffmpeg_path` key.
 | Authenticated `/agent/send-file` route                    | `src/backend/agentFileRoute.ts`                                |
 | Agent-route request body parsing                           | `src/backend/agentRouteFields.ts`                              |
 | Agent-messaging activation wiring (routes + inbox)         | `src/vscode/agentMessagingSetup.ts`                            |
+| Agent-bus message submission (routes a bus message into its Forge chat) | `src/vscode/agentBusSubmission.ts`                            |
 | Agent-bus delivery to an open Codex (`codex queue`)        | `src/agentBus/codexDelivery.ts`                                |
 | `agent_bus:` config schema                                 | `src/config/agentBusSchema.ts`                                 |
 | Live Claude session-id picker for `/link`                  | `src/vscode/agentBusCommands.ts`                               |
