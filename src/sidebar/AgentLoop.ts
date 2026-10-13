@@ -347,6 +347,12 @@ export class AgentLoop {
         finalText: '',
       };
     }
+    // A user-typed prompt starts a task; a tell source that measures wall time
+    // per task needs that boundary. An `internal` send (an auto-compaction
+    // resume) belongs to the task already running, so it does not restart the
+    // clock. Placed before the CLI branch so the clock stays right when the
+    // conversation runs a CLI agent or its model is switched mid-task.
+    if (!promptOptions?.internal) this.midTurnTells?.onTaskStart?.(convId);
     if (model.provider === 'cli') {
       return runCliTurn(this.services, conv, model, text, attachments, postC, promptOptions);
     }

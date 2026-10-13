@@ -355,6 +355,7 @@ overlaps with an existing owner, extend the owner instead.
 | Shared native/fallback tool-calling loop     | `src/agent/ToolCallingLoop.ts`               |
 | Mid-turn tell inbox                          | `src/agent/MidTurnInbox.ts`                  |
 | Mid-turn tell composer (sidebar + remote)    | `src/agent/MidTurnTellDrain.ts`              |
+| Elapsed-time note (mid-turn tell source)     | `src/agent/elapsedTimeNote.ts`               |
 | Tool-calling stream helpers                  | `src/agent/toolCallingStream.ts`             |
 | Truncated tool call: detection + recovery    | `src/agent/truncationRecovery.ts`            |
 | Repeated identical tool call detection       | `src/agent/ToolLoopGuard.ts`                 |

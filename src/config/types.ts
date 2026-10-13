@@ -409,6 +409,9 @@ export interface ForgeConfig {
      *  and retained tail. Default: true. A user-typed /compact always resumes. */
     resume?: boolean;
   };
+  /** One internal note per task at the next tool-round gap after this many
+   *  minutes. Absent block = off; 5–240; read live at every drain. */
+  elapsed_time_note?: { after_minutes: number };
   /** Optional localhost model-control API so an external orchestrator can ask
    *  Forge to load the right model on demand and discover its endpoint. */
   control_server?: {

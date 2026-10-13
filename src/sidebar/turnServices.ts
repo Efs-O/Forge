@@ -112,5 +112,9 @@ export function makeRunModelTurn(
     });
 }
 
-/** The mid-turn tell hooks, registered after construction as one pair. */
-export type MidTurnTellServices = Required<Pick<TurnServices, 'drainTells' | 'onTellArrived'>>;
+/** The mid-turn tell hooks, registered after construction. */
+export type MidTurnTellServices = Required<Pick<TurnServices, 'drainTells' | 'onTellArrived'>> & {
+  /** Fired when a user-typed prompt starts a task, so a tell source that
+   *  measures wall time per task knows where the task began. */
+  onTaskStart?: (conversationId: string) => void;
+};

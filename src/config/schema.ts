@@ -207,6 +207,13 @@ export const ForgeConfigSchema = z
         resume: z.boolean().optional(),
       })
       .optional(),
+    // Absent block = off: no hidden default, the note only matters for long tasks.
+    // The floor of 5 keeps a "nag every minute" setting impossible.
+    elapsed_time_note: z
+      .object({
+        after_minutes: z.number().int().min(5).max(240),
+      })
+      .optional(),
     control_server: z
       .object({
         enabled: z.boolean().optional(),

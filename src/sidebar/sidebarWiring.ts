@@ -44,6 +44,7 @@ import { reasoningReserve } from '../util/contextBudget';
 import { RequestChainLifecycle } from './RequestChainLifecycle';
 import { MidTurnInbox } from '../agent/MidTurnInbox';
 import { MidTurnTellDrain } from '../agent/MidTurnTellDrain';
+import { ElapsedTimeNote } from '../agent/elapsedTimeNote';
 import { randomUUID } from 'crypto';
 import { createSidebarPromptRouter, type SidebarPromptRouter } from './backgroundExitNotice';
 import { unattendedConversations } from './unattendedConversations';
@@ -141,6 +142,10 @@ export function wireSidebar(host: SidebarHost, parts: SidebarParts): SidebarRunt
   // drain ahead of any remote claim; the remote source is added by extension.ts
   // once the RemoteRuntime's store and auth exist.
   const tellDrain = new MidTurnTellDrain();
+  // Forge's own tell: one note per task once it has been running a long time.
+  const elapsedTimeNote = new ElapsedTimeNote(
+    () => host.getConfig().elapsed_time_note?.after_minutes,
+  );
 
   const agentLoop = new AgentLoop(
     pool,
@@ -172,7 +177,9 @@ export function wireSidebar(host: SidebarHost, parts: SidebarParts): SidebarRunt
       })),
     }),
   );
+  tellDrain.registerSource('elapsed-time', elapsedTimeNote.source);
   agentLoop.setMidTurnTells({
+    onTaskStart: (conversationId) => elapsedTimeNote.taskStarted(conversationId),
     drainTells: async (conversationId) => {
       const drained = await tellDrain.drain(conversationId);
       // A streaming chat ignores host syncs, so a tell (a Telegram one above
