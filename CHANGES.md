@@ -1,6 +1,6 @@
 # Forge — Recent Changes
 
-## Unreleased
+## 0.17.28
 
 - Shell denial rules now follow `sudo`, `doas`, `command`, and `env` options to find the wrapped command.
 - Shell command strings passed to shell executables are classified using that shell's syntax.
