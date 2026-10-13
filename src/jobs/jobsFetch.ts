@@ -12,6 +12,7 @@
 
 import { createWriteStream } from 'fs';
 import { Readable } from 'stream';
+import { readTextCapped } from '../util/readTextCapped';
 
 export interface JobsFetchOptions {
   /** The host a job is allowed to reach. A job may only fetch from these. */
@@ -113,26 +114,6 @@ async function fetchGated(
  * enormous body is never fully materialised. `response.text()` has no cap and
  * would happily buffer a gigabyte.
  */
-async function readTextCapped(response: Response, maxBytes: number): Promise<string> {
-  const body = response.body;
-  if (!body) return '';
-  const reader = body.getReader();
-  const chunks: Uint8Array[] = [];
-  let total = 0;
-  for (;;) {
-    const { done, value } = await reader.read();
-    if (done) break;
-    if (!value) continue;
-    total += value.byteLength;
-    if (total > maxBytes) {
-      await reader.cancel().catch(() => undefined);
-      throw new Error(`Forge: job fetch response exceeded ${maxBytes} bytes`);
-    }
-    chunks.push(value);
-  }
-  return Buffer.concat(chunks.map((c) => Buffer.from(c))).toString('utf8');
-}
-
 /**
  * Fetch a URL, gated by `allowed_hosts` and ETag-cached. Throws
  * `JobsFetchRefusedError` when the host is not allowed.
@@ -158,7 +139,13 @@ export async function jobsFetch(url: string, options: JobsFetchOptions): Promise
     throw new Error(`Forge: job fetch from ${host} failed with HTTP ${response.status}`);
   }
 
-  const body = await readTextCapped(response, options.maxBytes ?? MAX_RESPONSE_BYTES);
+  const cappedBody = await readTextCapped(response, options.maxBytes ?? MAX_RESPONSE_BYTES);
+  if (cappedBody.truncated) {
+    throw new Error(
+      `Forge: job fetch response exceeded ${options.maxBytes ?? MAX_RESPONSE_BYTES} bytes`,
+    );
+  }
+  const body = cappedBody.text;
   const etag = response.headers.get('ETag');
   if (etag && !forceFresh) options.etagCache.set(cacheKey, etag);
   return { notModified: false, body, etag };

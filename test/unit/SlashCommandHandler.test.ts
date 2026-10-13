@@ -1,4 +1,7 @@
 import { describe, expect, it, vi } from 'vitest';
+import * as fs from 'fs';
+import * as os from 'os';
+import * as path from 'path';
 import * as vscode from 'vscode';
 import { SlashCommandHandler, type SlashCommandDeps } from '../../src/sidebar/SlashCommandHandler';
 import type { HostActivityEvent } from '../../src/sidebar/HostActivity';
@@ -6,6 +9,18 @@ import type { ForgeConfig } from '../../src/config/types';
 import type { IBackendPool } from '../../src/backend/BackendPool';
 import type { ConversationRuntime } from '../../src/sidebar/sessionTypes';
 import { rebuildIndex } from '../../src/agentLinks/chatAgentLinks';
+import { loadConfig } from '../../src/config/ConfigLoader';
+
+const CHECKIN_FIXTURE = `# Keep this hand-written comment.
+active_model: gemma-a
+llama_server:
+  binary: /path/to/llama-server
+models:
+  # Primary model comment survives.
+  - name: gemma-a
+    gguf_path: /models/gemma-a.gguf
+other_setting: preserved
+`;
 
 vi.mock('vscode', () => ({
   window: {
@@ -21,6 +36,89 @@ vi.mock('vscode', () => ({
 }));
 
 describe('SlashCommandHandler', () => {
+  it('sets the check-in reminder through the config writer and confirms in chat', async () => {
+    const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'forge-checkin-'));
+    const configPath = path.join(directory, 'config.yaml');
+    fs.writeFileSync(configPath, CHECKIN_FIXTURE, 'utf8');
+    const post = vi.fn();
+    vi.mocked(vscode.window.showInputBox).mockImplementationOnce(async (options) => {
+      expect(options?.value).toBe('off');
+      expect(options?.validateInput?.('20')).toBeUndefined();
+      return '20';
+    });
+    try {
+      await new SlashCommandHandler({
+        getConfigPath: () => configPath,
+        getConfig: () => ({}) as ForgeConfig,
+        getActiveConv: () => ({ id: 'chat-1' }) as ConversationRuntime,
+        post,
+      } as unknown as SlashCommandDeps).handle('checkin');
+
+      expect(loadConfig(directory).elapsed_time_note?.after_minutes).toBe(20);
+      const raw = fs.readFileSync(configPath, 'utf8');
+      expect(raw).toContain('# Keep this hand-written comment.');
+      expect(raw).toContain('# Primary model comment survives.');
+      expect(raw).toContain('other_setting: preserved');
+      expect(post).toHaveBeenCalledWith({
+        type: 'notice',
+        message: 'Check-in reminder: after 20 minutes',
+        conversationId: 'chat-1',
+      });
+    } finally {
+      fs.rmSync(directory, { recursive: true, force: true });
+    }
+  });
+
+  it('off removes the elapsed-time block while preserving other config and comments', async () => {
+    const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'forge-checkin-'));
+    const configPath = path.join(directory, 'config.yaml');
+    fs.writeFileSync(configPath, `${CHECKIN_FIXTURE}elapsed_time_note:\n  after_minutes: 60\n`, 'utf8');
+    const post = vi.fn();
+    vi.mocked(vscode.window.showInputBox).mockResolvedValueOnce('off');
+    try {
+      await new SlashCommandHandler({
+        getConfigPath: () => configPath,
+        getConfig: () => ({ elapsed_time_note: { after_minutes: 60 } }) as ForgeConfig,
+        getActiveConv: () => ({ id: 'chat-1' }) as ConversationRuntime,
+        post,
+      } as unknown as SlashCommandDeps).handle('checkin');
+
+      const raw = fs.readFileSync(configPath, 'utf8');
+      expect(raw).not.toContain('elapsed_time_note');
+      expect(raw).toContain('# Primary model comment survives.');
+      expect(raw).toContain('other_setting: preserved');
+      expect(loadConfig(directory).elapsed_time_note).toBeUndefined();
+      expect(post).toHaveBeenCalledWith(expect.objectContaining({
+        type: 'notice',
+        message: 'Check-in reminder: off',
+      }));
+    } finally {
+      fs.rmSync(directory, { recursive: true, force: true });
+    }
+  });
+
+  it('refuses an out-of-range check-in value without changing the config', async () => {
+    const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'forge-checkin-'));
+    const configPath = path.join(directory, 'config.yaml');
+    fs.writeFileSync(configPath, CHECKIN_FIXTURE, 'utf8');
+    const before = fs.readFileSync(configPath, 'utf8');
+    let validation: string | undefined;
+    vi.mocked(vscode.window.showInputBox).mockImplementationOnce(async (options) => {
+      validation = options?.validateInput?.('4');
+      return undefined;
+    });
+    try {
+      await new SlashCommandHandler({
+        getConfigPath: () => configPath,
+        getConfig: () => ({}) as ForgeConfig,
+      } as unknown as SlashCommandDeps).handle('checkin');
+
+      expect(validation).toMatch(/5 to 240/u);
+      expect(fs.readFileSync(configPath, 'utf8')).toBe(before);
+    } finally {
+      fs.rmSync(directory, { recursive: true, force: true });
+    }
+  });
   it.each([
     ['config', 'forge.openConfig'],
     ['logs', 'forge.showBackendConsole'],

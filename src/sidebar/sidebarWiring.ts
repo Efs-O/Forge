@@ -272,6 +272,7 @@ export function wireSidebar(host: SidebarHost, parts: SidebarParts): SidebarRunt
   const slashHandler = new SlashCommandHandler({
     ...compactionDeps,
     getConfig: host.getConfig,
+    ...(parts.getConfigPath ? { getConfigPath: parts.getConfigPath } : {}),
     unloadModels: host.unloadModels,
     unloadActiveModel: host.unloadActiveModel,
     pool,

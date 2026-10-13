@@ -1,6 +1,7 @@
 import { getBuiltinDenyList, type ShellTokenRule } from './DenyList';
 import { extractHeredocs, feedsHeredocToShell } from './shellHeredoc';
 import { baseProgram, splitGitGlobals } from './shellCommandTokens';
+import { executableStatements, extractCommandStrings } from './shellCommandStrings';
 
 export type ShellClass = 'read_only' | 'normal' | 'dangerous' | 'refused';
 export type ShellKind = 'pwsh' | 'powershell' | 'bash';
@@ -415,6 +416,7 @@ export function classifyShellCommand(command: string, shell: ShellKind): ShellCl
   const heredocs = shell === 'bash' ? extractHeredocs(command) : { command, bodies: [] };
   command = heredocs.command;
   const parsed = parseCommand(command, shell);
+  const statements = executableStatements(parsed.statements);
   const rules = getBuiltinDenyList();
   const downloaders = new Set(['curl', 'wget', 'iwr', 'invoke-webrequest']);
   const shellPrograms = new Set(['sh', 'bash', 'iex', 'invoke-expression']);
@@ -436,16 +438,21 @@ export function classifyShellCommand(command: string, shell: ShellKind): ShellCl
   const nestedCommands = [
     ...heredocs.bodies.filter((body) => shellReadsHeredoc || body.expands).map((body) => body.text),
     ...nestedShellCommands(command, shell),
+    ...extractCommandStrings(parsed.statements),
   ];
   for (const nestedCommand of nestedCommands) {
+    const nestedText = typeof nestedCommand === 'string' ? nestedCommand : nestedCommand.command;
     // A block that only compares `$_` properties stays read-only; any other
     // nested command (a call, an assignment) ranks like a top-level one.
-    if (shell !== 'bash' && isPureExpression(nestedCommand)) continue;
-    const nested = classifyShellCommand(nestedCommand, shell);
+    if (shell !== 'bash' && isPureExpression(nestedText)) continue;
+    const nested = classifyShellCommand(
+      nestedText,
+      typeof nestedCommand === 'string' ? shell : nestedCommand.shell,
+    );
     if (precedence(nested.classification) > precedence(strongest.classification))
       strongest = nested;
   }
-  for (const statement of parsed.statements) {
+  for (const statement of statements) {
     const rule = rules.find((candidate) => candidate.match(statement));
     const current: ShellClassification = rule
       ? { classification: rule.class, rule }

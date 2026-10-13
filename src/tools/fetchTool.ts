@@ -2,6 +2,7 @@ import { lookup as dnsLookup } from 'dns/promises';
 import { isIP } from 'net';
 import type { RegisteredTool } from './ToolRegistry';
 import { Agent, fetch as undiciFetch } from 'undici';
+import { readTextCapped } from '../util/readTextCapped';
 
 // ── SSRF guard ────────────────────────────────────────────────────────────────
 
@@ -13,6 +14,10 @@ export const REQUEST_TIMEOUT_MS = 10_000;
 export const USER_AGENT = 'Forge-VSCode/0.16 (local-llm assistant)';
 const DEFAULT_MAX_CHARS = 30_000;
 const MAX_MAX_CHARS = 100_000;
+// Caps the raw body, before HTML is reduced to text: markup is often most of a
+// page, so a long docs page or thread runs 0.5-2 MB for well under MAX_MAX_CHARS
+// of text, and `find` must still reach its end. Bounds memory without cutting those.
+export const MAX_WEB_FETCH_BYTES = 5 * 1024 * 1024;
 
 export interface ResolvedAddress {
   address: string;
@@ -267,14 +272,15 @@ export function makeWebFetchTool(dependencies: WebFetchDependencies = {}): Regis
         throw new ToolError('web_fetch: HTTPS is required for this capability.');
       }
 
-      let result: { response: Response; body: string };
+      let result: { response: Response; body: string; bytesRead: number; truncated: boolean };
       try {
-        result = await fetchPublicPage(url, httpsOnly, lookup, pinnedFetch);
+        result = await fetchPublicPage(url, httpsOnly, lookup, pinnedFetch, MAX_WEB_FETCH_BYTES);
       } catch (err) {
         if (err instanceof ToolError) throw err;
         throw new ToolError(`web_fetch: network error — ${(err as Error).message}`);
       }
-      const { response, body: html } = result;
+      const { response, body: html, bytesRead, truncated } = result;
+      const cutNotice = truncated ? `\n[body cut at ${String(bytesRead)} bytes]` : '';
 
       if (!response.ok) {
         throw new ToolError(
@@ -297,10 +303,10 @@ export function makeWebFetchTool(dependencies: WebFetchDependencies = {}): Regis
           text.length > maxChars
             ? `\n[showing ${String(maxChars)} of ${String(text.length)} characters; pass find to jump to a phrase]`
             : '';
-        return `<UNTRUSTED_CONTENT>\n${text.slice(0, maxChars)}${more}\n</UNTRUSTED_CONTENT>`;
+        return `<UNTRUSTED_CONTENT>\n${text.slice(0, maxChars)}${more}${cutNotice}\n</UNTRUSTED_CONTENT>`;
       }
       const excerpt = findWindow(text, find, maxChars);
-      return `<UNTRUSTED_CONTENT>\n${excerpt.header}\n${excerpt.text}\n</UNTRUSTED_CONTENT>`;
+      return `<UNTRUSTED_CONTENT>\n${excerpt.header}${cutNotice}\n${excerpt.text}\n</UNTRUSTED_CONTENT>`;
     },
   };
 }
@@ -334,7 +340,8 @@ async function fetchPublicPage(
   httpsOnly: boolean,
   lookup: (hostname: string) => Promise<ResolvedAddress[]>,
   pinnedFetch: PinnedFetch,
-): Promise<{ response: Response; body: string }> {
+  maxBytes: number,
+): Promise<{ response: Response; body: string; bytesRead: number; truncated: boolean }> {
   let currentUrl = url;
   const pins = new Map<string, ResolvedAddress>();
   const agent = new Agent({
@@ -390,7 +397,13 @@ async function fetchPublicPage(
         agent,
       );
       if (response.status < 300 || response.status >= 400 || response.status === 304) {
-        return { response, body: await response.text() };
+        const body = await readTextCapped(response, maxBytes);
+        return {
+          response,
+          body: body.text,
+          bytesRead: body.bytesRead,
+          truncated: body.truncated,
+        };
       }
       const location = response.headers.get('location');
       await response.body?.cancel();

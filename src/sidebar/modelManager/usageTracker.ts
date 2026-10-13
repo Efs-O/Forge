@@ -1,5 +1,7 @@
 import * as fs from 'fs';
 import * as path from 'path';
+import { writeFileAtomicSync } from '../../util/atomicWrite';
+import { getLogger } from '../../util/logger';
 
 /**
  * Lightweight `last_used` tracking for the Model Manager's zoo-hygiene view
@@ -34,9 +36,7 @@ export function readForgeState(configPath: string): ForgeState {
 function writeForgeState(configPath: string, state: ForgeState): void {
   const target = stateFilePath(configPath);
   fs.mkdirSync(path.dirname(target), { recursive: true });
-  const tmp = `${target}.tmp`;
-  fs.writeFileSync(tmp, JSON.stringify(state, null, 2), 'utf8');
-  fs.renameSync(tmp, target);
+  writeFileAtomicSync(target, JSON.stringify(state, null, 2));
 }
 
 // Debounce per model name so a burst of tool-call round-trips within one turn
@@ -53,7 +53,7 @@ const DEBOUNCE_MS = 2000;
 
 /**
  * Record that `modelName` was just dispatched. Fire-and-forget: debounced,
- * and any failure (readonly fs, race with another window) is swallowed —
+ * and any failure (readonly fs, race with another window) is logged —
  * usage tracking must never throw into the request path. Single hook site:
  * `AgentLoop.runTurn` (see docs/OWNERS.md).
  */
@@ -74,8 +74,10 @@ function flushOne(configPath: string, modelName: string, key: string): void {
     const state = readForgeState(configPath);
     state.last_used[modelName] = new Date().toISOString();
     writeForgeState(configPath, state);
-  } catch {
-    // never let usage tracking break a request
+  } catch (err) {
+    getLogger().warn(
+      `Forge model usage state write failed for ${modelName}: ${(err as Error).message}`,
+    );
   }
 }
 

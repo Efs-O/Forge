@@ -3,6 +3,7 @@ import * as os from 'os';
 import * as path from 'path';
 import * as vscode from 'vscode';
 import { DEFAULT_IMAGE_OUTPUT_DIR } from '../config/imageGenerationSchema';
+import type { ForgeConfig } from '../config/types';
 import type { UserNotificationService } from '../sidebar/UserNotificationService';
 import { codePointLength } from '../util/codePoints';
 import { fileDeliveryRefusal, inspectFileForDelivery } from '../util/fileDeliveryValidation';
@@ -15,6 +16,12 @@ const PATH_REFUSAL =
 
 export interface SendFileDeps {
   notifications: UserNotificationService;
+  /**
+   * Optional, like render_html_to_image's: the tool is registered
+   * unconditionally. Read only for `image_generation.output_dir`, so the
+   * "did you mean" suggestion looks where generated images are actually saved.
+   */
+  getConfig?: () => ForgeConfig;
 }
 
 async function resolveFilePath(
@@ -93,8 +100,9 @@ interface MissingWorkspaceFile {
 async function suggestExistingFile(
   basename: string,
   conversationId: string | undefined,
+  imageOutputDir: string,
 ): Promise<string | undefined> {
-  const generatedPath = path.posix.join(DEFAULT_IMAGE_OUTPUT_DIR, basename);
+  const generatedPath = path.posix.join(imageOutputDir.replace(/\\/g, '/'), basename);
   try {
     const candidate = await resolveRealWorkspacePath(generatedPath);
     if ((await fs.stat(candidate)).isFile()) return generatedPath;
@@ -117,6 +125,7 @@ async function suggestExistingFile(
 async function missingWorkspaceFile(
   requestedPath: string,
   conversationId: string | undefined,
+  imageOutputDir: string,
 ): Promise<MissingWorkspaceFile | undefined> {
   try {
     const candidate = await resolveRealWorkspacePath(requestedPath, undefined, {
@@ -133,7 +142,11 @@ async function missingWorkspaceFile(
     if (!root) return undefined;
     const realRoot = await fs.realpath(root);
     const relativePath = path.relative(realRoot, candidate).split(path.sep).join('/');
-    const suggestion = await suggestExistingFile(path.basename(candidate), conversationId);
+    const suggestion = await suggestExistingFile(
+      path.basename(candidate),
+      conversationId,
+      imageOutputDir,
+    );
     return { relativePath, ...(suggestion ? { suggestion } : {}) };
   } catch {
     return undefined;
@@ -187,7 +200,11 @@ export function makeSendFileTool(deps: SendFileDeps): RegisteredTool {
 
       const absolute = await resolveFilePath(requestedPath, context?.conversationId);
       if (!absolute) {
-        const missing = await missingWorkspaceFile(requestedPath, context?.conversationId);
+        const missing = await missingWorkspaceFile(
+          requestedPath,
+          context?.conversationId,
+          deps.getConfig?.().image_generation?.output_dir ?? DEFAULT_IMAGE_OUTPUT_DIR,
+        );
         if (!missing) return PATH_REFUSAL;
         return (
           `Error: no file at ${missing.relativePath}` +

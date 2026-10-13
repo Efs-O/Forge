@@ -1,7 +1,7 @@
 import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { writeOutboxItem } from '../../src/jobs/JobOutbox';
 import { JobOutboxWatcher } from '../../src/remote/JobOutboxWatcher';
 
@@ -31,6 +31,91 @@ afterEach(async () => {
 });
 
 describe('JobOutboxWatcher (B.4 delivery route)', () => {
+  it('does not create a watcher when stop races the directory creation', async () => {
+    let release!: () => void;
+    const mkdirPending = new Promise<void>((resolve) => (release = resolve));
+    const watch = vi.fn(() => ({ close: vi.fn() }) as unknown as fs.FSWatcher);
+    const watcher = new JobOutboxWatcher({
+      outboxDir: dir,
+      deliver: async (text) => {
+        delivered.push(text);
+        return deliverResult;
+      },
+      now: () => 1000,
+      mkdir: async () => mkdirPending,
+      watch,
+    });
+
+    watcher.start();
+    watcher.stop();
+    release();
+    await mkdirPending;
+    await new Promise((resolve) => setImmediate(resolve));
+
+    expect(watch).not.toHaveBeenCalled();
+  });
+
+  it('does not deliver later items after stop and leaves them on disk', async () => {
+    await writeOutboxItem(dir, 'a', 'A', 'first', 1);
+    await writeOutboxItem(dir, 'b', 'B', 'second', 2);
+    let release!: () => void;
+    let started!: () => void;
+    const pending = new Promise<void>((resolve) => (release = resolve));
+    const deliveryStarted = new Promise<void>((resolve) => (started = resolve));
+    const watcher = new JobOutboxWatcher({
+      outboxDir: dir,
+      deliver: async (text) => {
+        delivered.push(text);
+        started();
+        await pending;
+        return 1;
+      },
+      now: () => 1000,
+    });
+
+    const draining = watcher.drain();
+    await deliveryStarted;
+    watcher.stop();
+    release();
+    await draining;
+
+    expect(delivered).toHaveLength(1);
+    expect(await fs.promises.readdir(dir)).toContain('b.json');
+  });
+
+  it('delivers the remaining items when restarted while a stopped pass was in flight', async () => {
+    await writeOutboxItem(dir, 'a', 'A', 'first', 1);
+    await writeOutboxItem(dir, 'b', 'B', 'second', 2);
+    let release!: () => void;
+    let started!: () => void;
+    const pending = new Promise<void>((resolve) => (release = resolve));
+    const deliveryStarted = new Promise<void>((resolve) => (started = resolve));
+    const watcher = new JobOutboxWatcher({
+      outboxDir: dir,
+      deliver: async (text) => {
+        delivered.push(text);
+        started();
+        await pending;
+        return 1;
+      },
+      now: () => 1000,
+      debounceMs: 0,
+      watch: () => ({ close: vi.fn() }) as unknown as fs.FSWatcher,
+    });
+
+    const draining = watcher.drain();
+    await deliveryStarted;
+    watcher.stop();
+    // The new start's own drain is refused while the old pass still runs.
+    watcher.start();
+    release();
+    await draining;
+
+    await vi.waitFor(async () => expect(await fs.promises.readdir(dir)).toEqual([]));
+    expect(delivered).toHaveLength(2);
+    watcher.stop();
+  });
+
   it('keeps a change written while the delivery was in flight', async () => {
     await writeOutboxItem(dir, 'j', 'J', 'first', 1);
     // Delivery is not instantaneous. Coalescing keeps one file per job, so a

@@ -66,7 +66,7 @@ export function applyLineEditsToContent(
     const actual = lines.slice(operation.start_line - 1, operation.end_line);
     if (!sameLines(actual, operation.expected_lines)) {
       throw new Error(
-        `apply_line_edits: operation ${index + 1} is stale; expected_lines do not match the current file`,
+        `apply_line_edits: operation ${index} is stale; expected_lines do not match the current file`,
       );
     }
   }

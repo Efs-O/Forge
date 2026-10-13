@@ -26,6 +26,12 @@ export interface SlashCommand {
  */
 export const SLASH_COMMANDS: SlashCommand[] = [
   {
+    id: 'checkin',
+    trigger: 'checkin',
+    title: 'Check-in Reminder',
+    description: 'Set how many minutes before Forge reminds a long-running task, or turn it off.',
+  },
+  {
     id: 'clanker',
     trigger: 'clanker',
     title: 'Full Clanker',

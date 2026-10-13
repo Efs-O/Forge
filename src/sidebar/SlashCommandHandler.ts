@@ -21,6 +21,7 @@ import { deriveTitle, isUntitled, type ConversationRuntime } from './sessionType
 import { collectSystemReport } from '../system/SystemReport';
 import { formatSystemReport } from '../system/formatSystemReport';
 import { agentKindSchema, link, parseAgentIdentity, unlink } from '../agentLinks/chatAgentLinks';
+import { updateConfigFile } from '../config/ConfigWriter';
 
 function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
@@ -31,6 +32,8 @@ export interface SlashCommandDeps extends CompactionDeps {
   getActiveConv: () => ConversationRuntime;
   getConversations: () => ConversationRuntime[];
   getConfig: () => ForgeConfig;
+  /** The active Forge config path used by the sole comment-preserving writer. */
+  getConfigPath?: () => string | undefined;
   pool: IBackendPool;
   events: SidebarProviderEvents;
   /** Owned by SidebarProvider. Both throw on failure; this handler reports it. */
@@ -132,6 +135,10 @@ export class SlashCommandHandler {
 
       case 'rename':
         await this.renameConversation();
+        return;
+
+      case 'checkin':
+        await this.setCheckinReminder();
         return;
 
       case 'linkAgent':
@@ -326,6 +333,49 @@ export class SlashCommandHandler {
     this.deps.postSessionSync();
   }
 
+  private async setCheckinReminder(): Promise<void> {
+    const configPath = this.deps.getConfigPath?.();
+    if (!configPath) {
+      this.deps.post({ type: 'error', message: 'Check-in reminder: config path is unavailable.' });
+      return;
+    }
+    const current = this.deps.getConfig().elapsed_time_note?.after_minutes ?? 'off';
+    const input = await vscode.window.showInputBox({
+      title: 'Check-in Reminder',
+      prompt: 'Enter 5-240 minutes, or off.',
+      value: String(current),
+      validateInput: (value) => validateCheckinValue(value),
+    });
+    if (input === undefined) return;
+    const value = input.trim().toLowerCase();
+    const minutes = value === 'off' ? undefined : Number(value);
+    const invalid = validateCheckinValue(value);
+    if (invalid) {
+      this.deps.post({ type: 'error', message: invalid });
+      return;
+    }
+    try {
+      updateConfigFile(configPath, (doc) => {
+        if (minutes === undefined) doc.delete('elapsed_time_note');
+        else doc.set('elapsed_time_note', { after_minutes: minutes });
+      });
+      const message =
+        minutes === undefined
+          ? 'Check-in reminder: off'
+          : `Check-in reminder: after ${minutes} minutes`;
+      this.deps.post({
+        type: 'notice',
+        message,
+        conversationId: this.deps.getActiveConv().id,
+      });
+    } catch (error) {
+      this.deps.post({
+        type: 'error',
+        message: `Could not update check-in reminder: ${errorMessage(error)}`,
+      });
+    }
+  }
+
   private async chooseContext(): Promise<void> {
     const pick = await vscode.window.showQuickPick(
       [
@@ -387,4 +437,13 @@ export class SlashCommandHandler {
   ): Promise<CompactionOutcome> {
     return runCompaction(this.deps, conversationId, options);
   }
+}
+
+function validateCheckinValue(input: string): string | undefined {
+  const value = input.trim().toLowerCase();
+  if (value === 'off') return undefined;
+  if (!/^\d+$/u.test(value)) return 'Enter a whole number from 5 to 240, or off.';
+  const minutes = Number(value);
+  if (minutes < 5 || minutes > 240) return 'Enter a whole number from 5 to 240, or off.';
+  return undefined;
 }

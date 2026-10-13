@@ -306,6 +306,8 @@ describe('JobStore delete', () => {
       delivered: 0,
     });
     await store.requestRun('disk');
+    await fs.promises.mkdir(path.join(root, 'state'), { recursive: true });
+    await fs.promises.writeFile(path.join(root, 'state', 'disk.config.bak'), 'config', 'utf8');
     // Every other per-job directory the feature writes, discovered rather than
     // assumed: seed each with a file named for the job.
     for (const dir of ['staged', 'outbox']) {
@@ -315,17 +317,15 @@ describe('JobStore delete', () => {
 
     await store.delete('disk');
 
-    const dirs = (await fs.promises.readdir(root, { withFileTypes: true }))
-      .filter((e) => e.isDirectory())
-      .map((e) => e.name);
-    expect(dirs.length).toBeGreaterThanOrEqual(5);
     const survivors: string[] = [];
-    for (const dir of dirs) {
-      for (const entry of await fs.promises.readdir(path.join(root, dir))) {
-        // A marker file is the bare id; everything else is `<id>.<ext>`.
-        if (entry === 'disk' || entry.startsWith('disk.')) survivors.push(`${dir}/${entry}`);
+    const findSurvivors = async (dir: string, relative = ''): Promise<void> => {
+      for (const entry of await fs.promises.readdir(dir, { withFileTypes: true })) {
+        const childRelative = path.join(relative, entry.name);
+        if (entry.isDirectory()) await findSurvivors(path.join(dir, entry.name), childRelative);
+        else if (entry.name.includes('disk')) survivors.push(childRelative);
       }
-    }
+    };
+    await findSurvivors(root);
     expect(survivors).toEqual([]);
   });
 });

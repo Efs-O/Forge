@@ -14,6 +14,7 @@ vi.mock('vscode', () => ({ workspace: { workspaceFolders: undefined } }));
 import { UserNotificationService } from '../../src/sidebar/UserNotificationService';
 import { makeSendFileTool } from '../../src/tools/sendFileTool';
 import type { ToolHandlerContext } from '../../src/tools/ToolRegistry';
+import type { ForgeConfig } from '../../src/config/types';
 
 let root: string;
 let home: string;
@@ -218,6 +219,22 @@ describe('send_file', () => {
     expect(result).toBe(
       'Error: no file at preview.png (did you mean generated-images/preview.png?)',
     );
+  });
+
+  it('suggests from the configured image output_dir, not the default folder', async () => {
+    await writeFile(path.join(root, 'art', 'out', 'preview.png'));
+    await writeFile(path.join(root, 'generated-images', 'preview.png'));
+    const service = {
+      deliverFile: vi.fn(async () => ({ kind: 'queued' as const, chats: 0 })),
+    } as unknown as UserNotificationService;
+    const tool = makeSendFileTool({
+      notifications: service,
+      getConfig: () => ({ image_generation: { output_dir: 'art\\out' } }) as unknown as ForgeConfig,
+    });
+
+    const result = await tool.handler({ path: 'preview.png' }, context('conv-a'));
+
+    expect(result).toBe('Error: no file at preview.png (did you mean art/out/preview.png?)');
   });
 
   it('suggests the matching file in this conversation screenshot directory', async () => {

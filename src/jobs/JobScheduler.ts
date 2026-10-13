@@ -4,7 +4,7 @@ import { JobDelivery } from './JobDelivery';
 import { isDue, nextDue, wakeTimesFor } from './schedule';
 import type { JobFile, RunRow } from './jobSchema';
 import type { JobStore } from './JobStore';
-import type { PowerControl } from '../system/PowerControl';
+import { PowerControlUnsupportedError, type PowerControl } from '../system/PowerControl';
 import { LlamacppAction, type LlamacppActionDeps } from './actions/llamacppAction';
 import { AgentTaskRunner, type AgentTaskDeps } from './agentTask';
 import { recoverInterruptedRuns } from './agentTaskState';
@@ -145,8 +145,6 @@ export class JobScheduler {
     // acquisition. A test drives ticks itself and passes `immediate: false`.
     const immediate = options.immediate ?? true;
     const owner = await this.acquireLease();
-    if (owner) await this.reconcileWakes();
-    if (owner) await this.recoverRuns();
     // A tick's failure is shown, not left as an unhandled rejection.
     this.timer = setInterval(
       () =>
@@ -155,6 +153,12 @@ export class JobScheduler {
         ),
       this.tickMs,
     );
+    if (owner) {
+      await this.reconcileWakes().catch((err: Error) =>
+        this.notifyLocal(`Forge jobs: could not update the scheduled wake: ${err.message}`),
+      );
+      await this.recoverRuns();
+    }
     if (owner && immediate) await this.tick();
     return owner;
   }
@@ -326,9 +330,18 @@ export class JobScheduler {
     // A job is late when it fell due before this resume tick (the machine was
     // off when it was due). A first-ever run (no next_due_at) is not late.
     const wasLate = isResume && state.next_due_at !== null && state.next_due_at < now.getTime();
-    const hold = job.wake ? this.power.holdAwake(`job ${job.id}`) : undefined;
+    let hold: ReturnType<PowerControl['holdAwake']> | undefined;
     let detached = false;
     try {
+      let holdError: string | undefined;
+      if (job.wake) {
+        try {
+          hold = this.power.holdAwake(`job ${job.id}`);
+        } catch (err) {
+          if (!(err instanceof PowerControlUnsupportedError)) throw err;
+          holdError = `wake hold unsupported: ${err.message}; this run continued without a hold`;
+        }
+      }
       // A pending agent task is a retry of the already-observed change. The
       // etag cache may quite correctly report the same observation again, so
       // do not make the pending task pass through the check a second time.
@@ -384,8 +397,9 @@ export class JobScheduler {
         late: wasLate,
         outcome: 'ok',
         changed: result.changed,
-        summary: result.summary,
+        summary: holdError ? `${result.summary}; ${holdError}` : result.summary,
         delivered,
+        ...(holdError ? { error: holdError } : {}),
       };
       await this.store.appendRun(job.id, row);
       this.store.patchState(job.id, {

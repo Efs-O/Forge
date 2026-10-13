@@ -139,6 +139,25 @@ describe('manage_jobs — create', () => {
     expect(loaded?.job.enabled).toBe(true);
   });
 
+  it('refuses a wake job off Windows and names the supported alternative', async () => {
+    await expect(
+      call(
+        {
+          action: 'create',
+          definition: {
+            name: 'Wake me',
+            wake: true,
+            schedule: { kind: 'daily', at: '08:00' },
+            check: { kind: 'none' },
+            on_change: { kind: 'notify' },
+          },
+        },
+        { platform: 'linux' },
+      ),
+    ).rejects.toThrow(/wake is Windows-only; omit it/u);
+    expect(await store.loadAll()).toEqual([]);
+  });
+
   it('schedules a new daily job for its time instead of running it on the next tick', async () => {
     const before = Date.now();
     const out = await call({

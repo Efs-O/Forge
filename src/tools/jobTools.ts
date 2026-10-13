@@ -54,6 +54,8 @@ export interface ManageJobsDeps {
   now?: () => Date;
   /** Writes `jobs.allow_cli_agents: true` (the user approved the consent card). */
   allowCliAgents?: () => void;
+  /** Injectable platform boundary for the Windows-only `wake` option. */
+  platform?: NodeJS.Platform;
 }
 
 /** The actions that mutate a job (need `write`). */
@@ -345,6 +347,7 @@ async function createJob(deps: ManageJobsDeps, args: Record<string, unknown>): P
   if (!result.success) {
     throw new Error(`manage_jobs: invalid job definition: ${result.error.message}`);
   }
+  assertWakeSupported(result.data.wake, deps.platform ?? process.platform);
   await deps.store.saveJob(result.data);
   // A state with no `next_due_at` is due at once, so a new "daily at 08:20"
   // job fired on the next tick (2026-09-23, 15:53). Seed its first run time.
@@ -414,6 +417,7 @@ async function updateJob(
   if (!result.success) {
     throw new Error(`manage_jobs: update rejected: ${result.error.message}`);
   }
+  assertWakeSupported(result.data.wake, deps.platform ?? process.platform);
   await deps.store.saveJob(result.data);
   // A new schedule must move the next run too: the scheduler only reads
   // `next_due_at`, so "run at 09:00 instead" otherwise fired once more at the
@@ -435,6 +439,12 @@ async function updateJob(
     );
   }
   return `Updated job "${result.data.name}" [${id}].`;
+}
+
+function assertWakeSupported(wake: boolean, platform: NodeJS.Platform): void {
+  if (wake && platform !== 'win32') {
+    throw new Error('manage_jobs: wake is Windows-only; omit it on this platform.');
+  }
 }
 
 /** Pause or resume a job (sets `enabled`). */

@@ -4,6 +4,7 @@ import * as path from 'path';
 import { writeFileAtomicSync } from '../util/atomicWrite';
 import { clearStaged } from './actions/stagedBuild';
 import { deleteOutboxItem } from './JobOutbox';
+import { removeConfigBackup } from './agentTaskState';
 import { getLogger } from '../util/logger';
 import { nextDue } from './schedule';
 import {
@@ -306,6 +307,7 @@ export class JobStore {
         if (err.code !== 'ENOENT') throw err;
       });
     }
+    await removeConfigBackup(this.stateDir, id);
     clearStaged(this.jobsDir, id);
     await deleteOutboxItem(this.outboxDir, id);
   }

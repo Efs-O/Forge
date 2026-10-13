@@ -122,7 +122,7 @@ export function registerAllTools(
   // as view_image two lines up. Gating it on getConfig would silently drop the
   // tool wherever that getter is not supplied. `notifications` is a required
   // argument of this signature, so the delivery dependency is always present.
-  registry.register(makeSendFileTool({ notifications }));
+  registry.register(makeSendFileTool({ ...(getConfig ? { getConfig } : {}), notifications }));
   // Registered unconditionally, beside send_file: it needs no config block to
   // exist. `browser.channel` is read to locate the binary and falls back to
   // 'chrome', and a missing binary errors at call time naming the fix. It is

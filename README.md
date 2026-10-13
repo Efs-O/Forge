@@ -691,6 +691,7 @@ Type `/` in chat to open the built-in command list. Forge also contributes comma
 | `/reindex`    | Rebuild the local semantic search index          |
 | `/new`        | Open a new conversation                          |
 | `/rename`     | Rename the active conversation                   |
+| `/checkin`    | Set or turn off the long-task check-in reminder  |
 | `/context`    | Add a file, selection, tabs, or files as context |
 | `/config`     | Open the active Forge config                     |
 | `/logs`       | Show the Forge backend output                    |

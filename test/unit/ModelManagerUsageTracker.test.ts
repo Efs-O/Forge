@@ -42,6 +42,7 @@ describe('usageTracker', () => {
 
     const state = readForgeState(configPath);
     expect(Object.keys(state.last_used).sort()).toEqual(['model-a', 'model-b']);
+    expect(fs.readdirSync(dir)).not.toContain('state.json.tmp');
   });
 
   it('never throws even when the .forge directory cannot be created', () => {

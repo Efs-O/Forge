@@ -429,11 +429,13 @@ overlaps with an existing owner, extend the owner instead.
 | git log argv, framing and parsing          | `src/tools/gitLog.ts`                 |
 | Search (Tavily / Brave)                    | `src/tools/searchTool.ts`             |
 | URL fetch tool and the SSRF guard (URL, DNS and address checks, pinned fetch) | `src/tools/fetchTool.ts` |
+| Bounded streamed response text reader (shared web and jobs fetch) | `src/util/readTextCapped.ts` |
 | LSP provider handlers dispatched by `code_intel` | `src/tools/lspTools.ts`          |
 | In-memory workspace memory tool            | `src/tools/memoryTools.ts`            |
 | UX tools (show_diff, open_file)            | `src/tools/uxTools.ts`                |
 | Power tools (sleep, wake timer, WoL info)  | `src/tools/powerTools.ts`             |
 | Denylist (dangerous command filter)        | `src/tools/DenyList.ts`               |
+| Shell command-string extraction and control statement normalization | `src/tools/shellCommandStrings.ts` |
 | User confirmation request + response flow  | `src/sidebar/ToolApprovalService.ts`  |
 | Tool strip (remove tools from request)     | `src/tools/StripTools.ts`             |
 | Structured output / fallback tool parser   | `src/tools/StructuredOutputParser.ts` |

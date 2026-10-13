@@ -46,6 +46,16 @@ describe('apply_line_edits', () => {
     ).toThrow('is stale');
   });
 
+  it('reports the original one-based index when the third operation is stale', () => {
+    expect(() =>
+      applyLineEditsToContent('a\nb\nc\nd\ne\nf', [
+        { start_line: 1, end_line: 1, expected_lines: ['a'], replacement_lines: ['A'] },
+        { start_line: 3, end_line: 3, expected_lines: ['c'], replacement_lines: ['C'] },
+        { start_line: 5, end_line: 5, expected_lines: ['wrong'], replacement_lines: ['E'] },
+      ]),
+    ).toThrow('apply_line_edits: operation 3 is stale');
+  });
+
   it('sorts out-of-order operations and names overlapping operation ranges', () => {
     expect(
       applyLineEditsToContent('a\nb\nc', [

@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { makeWebFetchTool } from '../../src/tools/fetchTool';
+import { MAX_WEB_FETCH_BYTES, makeWebFetchTool } from '../../src/tools/fetchTool';
 import { guardedFetchResource } from '../../src/tools/renderHtml/previewFetch';
 
 describe('web_fetch DNS SSRF protection', () => {
@@ -135,6 +135,33 @@ describe('web_fetch DNS SSRF protection', () => {
     await expect(
       tool.handler({ url: 'https://public.example.test/', max_chars: 100_001 }),
     ).rejects.toThrow(/max_chars must be an integer from 1 to 100000; received 100001/);
+  });
+
+  it('cancels a body beyond its byte ceiling and tells the model it was cut', async () => {
+    let cancelled = false;
+    const body = new ReadableStream<Uint8Array>({
+      start(controller) {
+        controller.enqueue(new Uint8Array(MAX_WEB_FETCH_BYTES + 1).fill(120));
+        setTimeout(() => {
+          try {
+            controller.close();
+          } catch {
+            // The capped reader already cancelled the stream.
+          }
+        }, 10);
+      },
+      cancel() {
+        cancelled = true;
+      },
+    });
+    const tool = makeWebFetchTool({
+      lookup: async () => [{ address: '8.8.8.8', family: 4 }],
+      fetch: async () => new Response(body, { headers: { 'content-type': 'text/plain' } }),
+    });
+
+    const result = String(await tool.handler({ url: 'https://public.example.test/' }));
+    expect(cancelled).toBe(true);
+    expect(result).toContain(`body cut at ${MAX_WEB_FETCH_BYTES} bytes`);
   });
 
   it('uses the same DNS guard for routed preview resources, including rebinding names', async () => {

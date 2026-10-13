@@ -13,13 +13,61 @@ const PREFIXES = new Set(['sudo', 'doas', 'command', 'env']);
 const lower = (tokens: readonly string[]) => tokens.map((token) => token.toLowerCase());
 
 function commandIndexes(tokens: readonly string[], names: readonly string[]): number[] {
-  const normalized = lower(tokens);
   let index = 0;
-  while (index < normalized.length && PREFIXES.has(normalized[index] ?? '')) index += 1;
-  if (normalized[index] === '&') index += 1;
+  const valueOptions = new Map<string, ReadonlySet<string>>([
+    [
+      'sudo',
+      new Set([
+        '-u',
+        '-g',
+        '-c',
+        '-d',
+        '-h',
+        '-p',
+        '-r',
+        '-t',
+        '--user',
+        '--group',
+        '--other-user',
+        '--close-from',
+        '--chdir',
+        '--host',
+        '--prompt',
+        '--role',
+        '--type',
+        '--command-timeout',
+      ]),
+    ],
+    ['doas', new Set(['-u', '-c'])],
+    ['env', new Set(['-u', '-c', '-s', '--unset', '--chdir', '--split-string'])],
+  ]);
+  while (index < tokens.length) {
+    const wrapper = baseProgram(tokens[index] ?? '');
+    if (!PREFIXES.has(wrapper)) break;
+    index += 1;
+    while (index < tokens.length) {
+      const token = tokens[index] ?? '';
+      if (/^[A-Za-z_][A-Za-z0-9_]*=/u.test(token)) {
+        index += 1;
+        continue;
+      }
+      if (token === '--') {
+        index += 1;
+        break;
+      }
+      if (!token.startsWith('-') || token === '-') break;
+      const option = token.toLowerCase();
+      if (valueOptions.get(wrapper)?.has(option)) index += 1;
+      index += 1;
+      // env -S consumes the rest as one shell command string.
+      if (wrapper === 'env' && (option === '-s' || option === '--split-string')) break;
+    }
+  }
+  if (tokens[index] === '&') index += 1;
   const program = baseProgram(tokens[index] ?? '');
   if (names.includes(program)) return [index];
-  if (program === 'git' && names.includes(normalized[index + 1] ?? '')) return [index + 1];
+  if (program === 'git' && names.includes((tokens[index + 1] ?? '').toLowerCase()))
+    return [index + 1];
   return [];
 }
 
@@ -29,8 +77,6 @@ function flags(tokens: readonly string[]): string[] {
 
 export function isRecursiveForceDelete(tokens: readonly string[]): boolean {
   return commandIndexes(tokens, ['rm']).some((index) => {
-    const previous = tokens[index - 1]?.toLowerCase();
-    if (previous && !PREFIXES.has(previous) && previous !== 'git') return false;
     const switches = flags(tokens.slice(index + 1)).map((token) => token.toLowerCase());
     const recursive = switches.some((flag) => flag === '--recursive' || /^-[^-]*r/u.test(flag));
     const force = switches.some((flag) => flag === '--force' || /^-[^-]*f/u.test(flag));

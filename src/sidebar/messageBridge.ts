@@ -39,6 +39,7 @@ export type ForgeSlashCommandId =
   | 'reindex'
   | 'newChat'
   | 'rename'
+  | 'checkin'
   | 'context'
   | 'config'
   | 'logs'

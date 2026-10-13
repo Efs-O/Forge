@@ -12,7 +12,7 @@ vi.mock('../../src/jobs/jobsFetch', () => ({ jobsFetch }));
 
 import { JobStore } from '../../src/jobs/JobStore';
 import { JobScheduler } from '../../src/jobs/JobScheduler';
-import { PowerControl } from '../../src/system/PowerControl';
+import { PowerControl, PowerControlUnsupportedError } from '../../src/system/PowerControl';
 import { JobSchema, type Job } from '../../src/jobs/jobSchema';
 import { FileLease } from '../../src/util/FileLease';
 
@@ -101,6 +101,40 @@ afterEach(async () => {
 });
 
 describe('JobScheduler tick', () => {
+  it('keeps a wake job runnable after an unsupported hold and records the reason', async () => {
+    await store.saveJob(makeJob({ wake: true }));
+    const hold = vi.spyOn(power, 'holdAwake').mockImplementation(() => {
+      throw new PowerControlUnsupportedError();
+    });
+    makeScheduler();
+    await scheduler.start({ immediate: false });
+
+    await scheduler.tick();
+    nowMs += 15 * 60_000;
+    await scheduler.tick();
+
+    const runs = await store.readRuns('disk');
+    expect(runs).toHaveLength(2);
+    expect(runs[0]).toMatchObject({
+      outcome: 'ok',
+      error: expect.stringContaining('continued without a hold'),
+      summary: expect.stringContaining('Windows-only'),
+    });
+    expect(hold).toHaveBeenCalledTimes(2);
+  });
+
+  it('installs the scheduler tick even when wake reconciliation throws', async () => {
+    await store.saveJob(makeJob({ wake: true, schedule: { kind: 'daily', at: '06:00' } }));
+    vi.spyOn(power, 'setScheduledWakes').mockRejectedValue(new PowerControlUnsupportedError());
+    const interval = vi.spyOn(global, 'setInterval');
+    makeScheduler();
+
+    await expect(scheduler.start({ immediate: false })).resolves.toBe(true);
+
+    expect(interval).toHaveBeenCalledWith(expect.any(Function), 30_000);
+    expect(toasts.join('\n')).toContain('could not update the scheduled wake');
+    interval.mockRestore();
+  });
   it('runs a due disk_space job once, records the run, and advances next_due_at', async () => {
     await store.saveJob(makeJob());
     makeScheduler();

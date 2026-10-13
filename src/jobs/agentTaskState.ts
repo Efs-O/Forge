@@ -12,7 +12,20 @@ import type { JobFile, JobState } from './jobSchema';
 
 /** Where a run's config.yaml snapshot lives: `state/<id>.config.bak`. */
 export function configBackupPath(store: JobStore, jobId: string): string {
-  return path.join(store.root, 'state', `${jobId}.config.bak`);
+  return backupInStateDir(path.join(store.root, 'state'), jobId);
+}
+
+function backupInStateDir(stateDir: string, jobId: string): string {
+  return path.join(stateDir, `${jobId}.config.bak`);
+}
+
+/** Remove the agent-task config snapshot when its owning job is deleted. */
+export async function removeConfigBackup(stateDir: string, jobId: string): Promise<void> {
+  await fs.promises
+    .unlink(backupInStateDir(stateDir, jobId))
+    .catch((err: NodeJS.ErrnoException) => {
+      if (err.code !== 'ENOENT') throw err;
+    });
 }
 
 /**
