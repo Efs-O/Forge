@@ -74,6 +74,7 @@ import { makeWaitTool } from './waitTool';
 import { makeViewVideoTool } from './videoTool';
 import { makeGenerateImageTool } from './imageGeneration/generateImageTool';
 import { makeUpscaleImageTool, upscaleConfigFor } from './imageGeneration/upscaleImageTool';
+import { makeSetCheckinTool, setCheckinEnabled } from './setCheckinTool';
 import { makeRenderHtmlToImageTool } from './renderHtmlToImageTool';
 import { SdServerRegistry } from '../backend/sdServerRegistry';
 import { makeImageSearchTool } from './imageSearch/imageSearchTool';
@@ -284,6 +285,16 @@ export function registerAllTools(
         workspaceRoot: () => vscode.workspace.workspaceFolders?.[0]?.uri.fsPath ?? '',
       }),
     );
+  }
+
+  // The model's own check-in timer. Registered ONLY when the `elapsed_time_note`
+  // block exists — the `upscale_image` rule, for the same reason: one more tool
+  // is a schema on every turn and a cold re-prefill when the list changes, and a
+  // config without the block never pays it. The `advertise` predicate inside the
+  // tool is what hides it after the owner deletes the block and reloads config
+  // without reloading the window.
+  if (getConfig && setCheckinEnabled(getConfig())) {
+    registry.register(makeSetCheckinTool({ getConfig }));
   }
 
   // Browser tools (plan §4.2): registered when a config getter exists; the

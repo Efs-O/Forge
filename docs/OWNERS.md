@@ -66,6 +66,7 @@ overlaps with an existing owner, extend the owner instead.
 | Agent notification: toast + remote fan-out           | `src/sidebar/UserNotificationService.ts` |
 | Model residency polling timer                        | `src/sidebar/ResidencyPoller.ts`         |
 | Timed pause for the agent loop                       | `src/tools/waitTool.ts`                  |
+| Model-set elapsed-time check-in tool                 | `src/tools/setCheckinTool.ts`            |
 | Linked-agent question ceiling and report handoff      | `src/agentBus/liveSessionLimit.ts`       |
 | LSP read operations + strict `code_intel` dispatch   | `src/tools/codeIntelTool.ts`             |
 | LSP code-action read/write handler                   | `src/tools/codeActionTools.ts`            |
@@ -512,6 +513,7 @@ overlaps with an existing owner, extend the owner instead.
 | Config load + validation                                | `src/config/ConfigLoader.ts`         |
 | Two-flavor model/profile/alias resolver                 | `src/config/ConfigResolver.ts`       |
 | Config + model types                                    | `src/config/types.ts`                |
+| Config types: model/group/profile entries               | `src/config/modelTypes.ts`           |
 | Image, video and voice configuration types              | `src/config/mediaTypes.ts`           |
 | Comment-preserving config writer (entry point)          | `src/config/ConfigWriter.ts`         |
 | YAML Document mutation helpers (set/add/remove)         | `src/config/ConfigWriterHelpers.ts`  |

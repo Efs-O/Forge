@@ -17,6 +17,7 @@ import type { ForgeInstructionsLoader } from '../llm/ForgeInstructionsLoader';
 import type { ToolRegistry } from '../tools/ToolRegistry';
 import type { ToolDefinition } from '../llm/types';
 import type { MidTurnDrainResult } from '../agent/MidTurnInbox';
+import type { CheckinStage } from '../agent/elapsedTimeNote';
 import { createContextTrimState } from '../agent/toolResultContext';
 import type { ToolDispatch } from './ToolDispatch';
 import type { ToolFailureTracker } from '../tools/StripTools';
@@ -103,6 +104,12 @@ export interface ModelTurnContext {
   compactMidTurn?: (conv: ConversationRuntime, request: { exhausted: boolean }) => Promise<boolean>;
   drainTells?: (conversationId: string) => Promise<MidTurnDrainResult>;
   onTellArrived?: (conversationId: string, callback: () => void) => () => void;
+  /** Routes `set_checkin` to this conversation's clock. Absent when unwired. */
+  setCheckin?: (
+    conversationId: string,
+    minutes: number,
+    byThen: CheckinStage,
+  ) => { dueAt: number } | undefined;
 }
 
 export interface ModelTurnRequest {
@@ -353,6 +360,14 @@ export async function runModelTurn(
             conversation: conv,
             ...(checkpoint ? { checkpoint } : {}),
             persistConversation: () => ctx.onTranscriptChanged?.(conv),
+            // Bound to this conversation here, so the tool never sees a
+            // conversation id and cannot reach another chat's clock.
+            ...(ctx.setCheckin
+              ? {
+                  setCheckin: (minutes: number, byThen: CheckinStage) =>
+                    ctx.setCheckin!(conv.id, minutes, byThen),
+                }
+              : {}),
           },
         );
         mirrorLiveSessionAnswers(conv.id, toolCalls, messages, ctx.emitAgentProgress);

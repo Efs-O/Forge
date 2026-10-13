@@ -180,6 +180,10 @@ export function wireSidebar(host: SidebarHost, parts: SidebarParts): SidebarRunt
   tellDrain.registerSource('elapsed-time', elapsedTimeNote.source);
   agentLoop.setMidTurnTells({
     onTaskStart: (conversationId) => elapsedTimeNote.taskStarted(conversationId),
+    // `set_checkin`'s route to the clock. Bound per conversation by ModelTurn,
+    // so the tool itself never handles a conversation id.
+    setCheckin: (conversationId, minutes, byThen) =>
+      elapsedTimeNote.setCheckin(conversationId, minutes, byThen),
     drainTells: async (conversationId) => {
       const drained = await tellDrain.drain(conversationId);
       // A streaming chat ignores host syncs, so a tell (a Telegram one above
@@ -259,6 +263,10 @@ export function wireSidebar(host: SidebarHost, parts: SidebarParts): SidebarRunt
     emitCompactionEvent: (event) => {
       for (const listener of slashHandler.compactionListeners) listener(event);
     },
+    // A compaction drops Forge's internal notes from the summary, so the
+    // elapsed-time clock restarts from here or a long task could read for
+    // another hour unnoticed. Only a COMMITTED compaction reaches this dep.
+    onCompacted: (conversationId) => elapsedTimeNote.compacted(conversationId),
   };
 
   const slashHandler = new SlashCommandHandler({

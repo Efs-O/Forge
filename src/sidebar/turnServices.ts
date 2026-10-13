@@ -30,6 +30,7 @@ import type { SidebarProviderEvents } from './AgentLoop';
 import type { UserPromptOptions } from './transcriptMutations';
 import type { AgentProgressEvent } from './AgentProgress';
 import type { LiveStreamMeter } from './LiveStreamMeter';
+import type { CheckinStage } from '../agent/elapsedTimeNote';
 
 export interface TurnServices {
   pool: IBackendPool;
@@ -65,6 +66,13 @@ export interface TurnServices {
   compactMidTurn?: (conv: ConversationRuntime, request: { exhausted: boolean }) => Promise<boolean>;
   /** Claims text tells (and queued remote requests) at the next safe tool-round gap. */
   drainTells?: (conversationId: string) => Promise<MidTurnDrainResult>;
+  /** Sets a conversation's check-in from the `set_checkin` tool; undefined when
+   *  the elapsed-time note is not wired for this path. */
+  setCheckin?: (
+    conversationId: string,
+    minutes: number,
+    byThen: CheckinStage,
+  ) => { dueAt: number } | undefined;
   /** Calls back when a tell reaches this conversation's inbox; returns an unsubscribe. */
   onTellArrived?: (conversationId: string, callback: () => void) => () => void;
   commitUserPrompt: (
@@ -117,4 +125,6 @@ export type MidTurnTellServices = Required<Pick<TurnServices, 'drainTells' | 'on
   /** Fired when a user-typed prompt starts a task, so a tell source that
    *  measures wall time per task knows where the task began. */
   onTaskStart?: (conversationId: string) => void;
+  /** The `set_checkin` tool's route to the same clock. */
+  setCheckin?: (conversationId: string, minutes: number, byThen: CheckinStage) => { dueAt: number };
 };

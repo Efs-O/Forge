@@ -63,6 +63,16 @@ export interface CompactionDeps {
    * Optional: sidebar-only callers (and tests) omit it.
    */
   emitCompactionEvent?: (event: CompactionEvent) => void;
+  /**
+   * Called once, after a compaction has COMMITTED (`outcome === 'compacted'`).
+   * Optional: a caller with nothing stateful to re-arm omits it, and a hook
+   * failure never changes the compaction result.
+   *
+   * This is the one point every path — auto, mid-turn, manual, remote — passes
+   * through, so anything that must notice a compaction notices exactly once.
+   * A refused or failed compaction never reaches it.
+   */
+  onCompacted?: (conversationId: string) => void;
 }
 
 export type CompactionTrigger = 'auto' | 'sidebar' | 'remote' | 'admission';

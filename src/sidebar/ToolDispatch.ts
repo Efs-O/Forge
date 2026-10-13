@@ -18,6 +18,7 @@ import { capDisplayText } from '../tools/resultCap';
 import { describeDelete } from './deletePreview';
 import { isFailureResult, readPathArg, resultLabel } from './toolResultView';
 import type { PlanItem } from './sessionTypes';
+import type { CheckinStage } from '../agent/elapsedTimeNote';
 import type { ToolOutputLimits } from '../tools/toolOutputLimits';
 import { getLogger } from '../util/logger';
 import { ToolApprovalPolicyDenied } from './ToolApprovalService';
@@ -140,6 +141,8 @@ export class ToolDispatch {
       conversation: import('./sessionTypes').ConversationRuntime;
       checkpoint?: CheckpointSession;
       persistConversation: () => void;
+      /** Session-scoped like the chat itself: `set_checkin`'s route to the clock. */
+      setCheckin?: (minutes: number, byThen: CheckinStage) => { dueAt: number } | undefined;
     },
   ): Promise<void> {
     for (const tc of toolCalls) {

@@ -124,6 +124,11 @@ export function buildTurnServices(d: TurnServicesAssembly): TurnServices {
     compactMidTurn: (conv, request) =>
       d.getMidTurnCompactor()?.(conv, request) ?? Promise.resolve(false),
     drainTells: (id) => d.getMidTurnTells()?.drainTells(id) ?? Promise.resolve({ messages: [] }),
+    // Wrapped for the same reason: the note is registered after construction.
+    // Returning undefined is the honest answer when it is not wired at all, and
+    // `set_checkin` turns that into its refusal rather than inventing a clock.
+    setCheckin: (conversationId, minutes, byThen) =>
+      d.getMidTurnTells()?.setCheckin?.(conversationId, minutes, byThen),
     onTellArrived: (id, callback) => d.getMidTurnTells()?.onTellArrived(id, callback) ?? (() => {}),
     // `options` is load-bearing and was missing here: a narrower function is
     // assignable, so dropping the 4th parameter type-checked while silently

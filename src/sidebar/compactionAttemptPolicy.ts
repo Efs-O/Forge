@@ -134,6 +134,16 @@ export async function runCompactionWithPolicy(
       if (outcome === 'compacted') {
         // Manual and remote success also recover the automatic path.
         autoFailures.delete(conv);
+        // The commit point: the transcript is already rewritten, so anything
+        // that has to notice a compaction does it here and nowhere else. Guarded
+        // because this runs in `finally` — a hook that threw would replace the
+        // successful outcome with an exception and report a compaction that
+        // happened as one that failed.
+        try {
+          deps.onCompacted?.(conversationId);
+        } catch (err) {
+          log.warn(`[compact] onCompacted hook failed: ${(err as Error).message}`);
+        }
       } else if (options.auto && outcome === 'failed') {
         autoFailures.set(conv, {
           userMessageCount: at,

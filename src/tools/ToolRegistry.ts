@@ -1,5 +1,6 @@
 import type { ChatMessage, ContentPart, ToolDefinition } from '../llm/types';
 import type { PlanItem } from '../sidebar/sessionTypes';
+import type { CheckinStage } from '../agent/elapsedTimeNote';
 import { recordNativeLazyTool } from './lazyToolGroups';
 import { invalidArrayJsonPosition } from './argCoercion';
 import type { ToolOutputLimits } from './toolOutputLimits';
@@ -76,6 +77,16 @@ export interface ToolHandlerContext {
    * the tool supplies items only.
    */
   setPlan?: (items: PlanItem[]) => void;
+  /**
+   * Sets this conversation's check-in (`set_checkin`) and says when it is due.
+   *
+   * The same shape as `setPlan`: the tool supplies the estimate, the host owns
+   * the clock — here `ElapsedTimeNote`, which also delivers the note at the
+   * next tool-round gap. Optional because the note is registered late and a
+   * prompt run outside a conversation turn has no clock to write to; the tool
+   * refuses when it gets nothing back.
+   */
+  setCheckin?: (minutes: number, byThen: CheckinStage) => { dueAt: number } | undefined;
   tellArrived?: (callback: () => void) => () => void;
   /** Active chat/checkpoint supplied by ModelTurn for session-scoped agent tools. */
   conversation?: ConversationRuntime;

@@ -93,6 +93,9 @@ function maximalConfig(): ForgeConfig {
     jobs: { enabled: true },
     agent_bus: { enabled: true },
     agent_links: { open_panel: 'every_ask', panel_live_timeout_ms: 20_000 },
+    // `set_checkin` is registered only when this block exists, so pricing the
+    // maximally-advertised set means pricing it with the block present.
+    elapsed_time_note: { after_minutes: 30 },
   };
 }
 
@@ -159,7 +162,7 @@ describe('tool schema CI budget (TOOL_SCHEMA_GROWTH_PLAN.md Step 1)', () => {
     const registry = makeMaximalRegistry();
     const names = registry.definitions(ALL_PERMISSIONS).map((d) => d.function.name).sort();
     expect(names).toHaveLength(registry.names().length);
-    expect(names).toHaveLength(89);
+    expect(names).toHaveLength(90);
     expect(names.filter((name) => name.startsWith('browser_'))).toHaveLength(15);
     expect(names.filter((name) => name.startsWith('desktop_'))).toHaveLength(9);
     // Spot-check the six self-suppressing tools that only appear when their
@@ -171,6 +174,7 @@ describe('tool schema CI budget (TOOL_SCHEMA_GROWTH_PLAN.md Step 1)', () => {
       'ask_agent',
       'install_llamacpp',
       'upscale_image',
+      'set_checkin',
     ]) {
       expect(names).toContain(name);
     }

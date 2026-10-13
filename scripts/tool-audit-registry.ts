@@ -43,6 +43,9 @@ function maximalConfig(): ForgeConfig {
     jobs: { enabled: true },
     agent_bus: { enabled: true },
     agent_links: { open_panel: 'every_ask', panel_live_timeout_ms: 20_000 },
+    // Same reason as the budget test: `set_checkin` exists only with its block,
+    // and the coverage matrix must show it.
+    elapsed_time_note: { after_minutes: 30 },
   };
 }
 
