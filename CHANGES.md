@@ -1,5 +1,10 @@
 # Forge — Recent Changes
 
+## 0.17.24
+
+- New `set_checkin` tool, advertised only when `elapsed_time_note` is configured. At the start of a longer task the model estimates how long it should take (`minutes`, 10-180) and where it expects to be by then (`by_then`: writing, testing or done). If it is still working when the check-in is due, Forge sends one note quoting that estimate back, saying it is not a deadline and to re-estimate if the task is bigger. Calling again replaces the check-in. When the model sets none, `after_minutes` remains the fallback. A committed compaction restarts the timer, because the summary drops Forge's internal notes; the note still counts minutes from the original estimate.
+- Internal: the model, group and profile config types moved from `src/config/types.ts` to `src/config/modelTypes.ts`.
+
 ## 0.17.23
 
 - New optional `elapsed_time_note: { after_minutes: N }` (5-240). Once a task has run N minutes, Forge appends one note at the next tool-round gap: it says how long the task has run, that this is not a deadline and checks must not be skipped, and to move on to writing if the model already has the context it needs. At most one note per user-typed task; auto-compaction resumes and mid-turn messages do not restart the clock. It is internal (no user bubble, logged in the session JSONL) and does not end the task for `preserve_thinking`. Absent means off.
