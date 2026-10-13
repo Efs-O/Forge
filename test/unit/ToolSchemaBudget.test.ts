@@ -37,11 +37,13 @@ import {
  */
 
 // Reference measurement updated 2026-10-13: 65-tool non-computer-use schema at
-// 56,025 chars — `upscale_image` added 942, and `generate_image`'s seed argument,
-// per-backend sizes and reference-order advice added 582. The ≈4.62 chars/token ratio
+// 56,923 chars — `upscale_image` added 942, `generate_image`'s seed argument,
+// per-backend sizes and reference-order advice added 582, and `set_checkin`
+// (added, then its description rewritten after the A/B model skipped it)
+// brought it to 56,923. The ≈4.62 chars/token ratio
 // was measured 2026-09-30 with llama.cpp b11243 and Qwen3.8-27B Q6_K (50,439
 // chars / 10,913 tokens).
-const MEASURED_CHARS = 56_025;
+const MEASURED_CHARS = 56_923;
 // Phase 3 STOP: the full 88-tool wire schema is 67,128 chars, over budget.
 // Exclude computer_use (24 browser/desktop schemas) pending the owner's product
 // decision; the full and gated sizes are recorded in the report.
@@ -50,7 +52,9 @@ const COMPUTER_USE_TOOLS_EXCLUDED_PENDING_DECISION = ['browser_', 'desktop_'] as
 // chars) does not trip it, but a batch of new tools or a large description
 // growth does. Raised 55,483 → 56,600 on 2026-10-13 (CHANGES.md 0.17.22): the
 // two additions are opt-in image tools, advertised only when configured.
-const TOOL_SCHEMA_CHAR_BUDGET = 56_600;
+// Raised 56,600 → 57,500 later the same day (CHANGES.md, unreleased):
+// `set_checkin`'s description now says what the check-in does and when to set it.
+const TOOL_SCHEMA_CHAR_BUDGET = 57_500;
 
 const ALL_PERMISSIONS = new Set(ALL_TOOL_PERMISSIONS);
 

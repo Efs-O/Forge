@@ -145,10 +145,12 @@ describe('agent-to-agent links', () => {
       expect(readEvents(path.join(root, 'exchanges.jsonl')).map((item) => item.state)).toContain(
         'crashed',
       );
+      // Inside the wait: the notice follows the crashed event, and under a
+      // loaded full CI run it can land a tick after the event is written.
+      expect(facade.showConversationNotice).toHaveBeenCalledWith(
+        'chat-1',
+        'Codex relay failed: auth expired',
+      );
     });
-    expect(facade.showConversationNotice).toHaveBeenCalledWith(
-      'chat-1',
-      'Codex relay failed: auth expired',
-    );
   });
 });

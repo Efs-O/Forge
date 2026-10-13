@@ -54,12 +54,12 @@ export function makeSetCheckinTool(deps: { getConfig: () => ForgeConfig }): Regi
         name: 'set_checkin',
         // The only place the model learns of this tool: a rule in the system
         // prompt would tax every turn, including the ones that never set one.
-        // Shorter than the plan's draft by design: the schema budget left 575
-        // chars and the entry costs 681. What was cut is said again where it
-        // costs nothing — "not a deadline / call again" in the result string,
-        // the stage meanings in the fired note, the bounds as schema keywords.
+        // Rewritten 2026-10-13 after the A/B run's model skipped the tool: it
+        // read "Forge reminds you" as a courtesy to a watching user and
+        // "estimate how long" as the whole task, so it saw no use for it. The
+        // text now says what arrives, why it helps, and when to set it.
         description:
-          'At the start of a task lasting more than a few minutes, estimate how long it should take. If you are still working when the check-in fires, Forge reminds you of your own estimate.',
+          'Call this first on any multi-step task, even when no one is watching. Pick a check-in about halfway through and say where you expect to be by then. If you are still reading or planning when that time passes, Forge sends a short message quoting your own estimate, so you notice you are overthinking and move on. Not a deadline: still verify, and never cut corners to beat the clock.',
         parameters: {
           type: 'object',
           properties: {
@@ -67,14 +67,15 @@ export function makeSetCheckinTool(deps: { getConfig: () => ForgeConfig }): Regi
               type: 'integer',
               minimum: MIN_CHECKIN_MINUTES,
               maximum: MAX_CHECKIN_MINUTES,
-              description: 'Minutes from now.',
+              description:
+                'Minutes from now until the check-in: about half your estimate for the whole task. A check-in after the work is done does nothing.',
             },
             by_then: {
               type: 'string',
               enum: ['writing', 'testing', 'done'],
               // The enum values are the words themselves; the note expands
               // them into the phrase the model hears back.
-              description: 'Where you expect to be by then.',
+              description: 'Where you expect to be at the check-in, not at the end.',
             },
           },
           required: ['minutes', 'by_then'],

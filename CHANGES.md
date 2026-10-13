@@ -1,5 +1,9 @@
 # Forge — Recent Changes
 
+## 0.17.27
+
+- `set_checkin` has a new description. In the 2026-10-13 A/B run the model saw the tool and skipped it: it read "Forge reminds you" as a courtesy to a watching user and "estimate how long it should take" as the whole task. Asked afterwards, it helped write the new text, which says to call it first on any multi-step task even when no one is watching, to set the check-in about halfway, that Forge then sends a short message quoting the model's own estimate so it notices it is overthinking, and that this is not a deadline. `minutes` and `by_then` now say they mean the check-in, not the end of the task. The tool schema budget rises from 56,600 to 57,500 characters to fit it (the schema is now 56,923).
+
 ## 0.17.26
 
 - New `forge.sh stop <your-name> [--to <conversationId>]`: cancels a running Forge turn the way the sidebar Stop button does, through the same cancel Telegram `/stop` uses. Without `--to` it stops the chat `say` would reach. It exits non-zero and says so when that chat is not streaming. Queued bus messages are not withdrawn; `forge.sh cancel` does that. Before, an agent that started a chat with `say --new` could not stop it.
