@@ -1,6 +1,6 @@
 # Forge — Recent Changes
 
-## Unreleased
+## 0.17.29
 
 - `generate_image` accepts prompts up to 10,000 characters (was 4,000).
 
