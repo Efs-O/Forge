@@ -7,7 +7,8 @@
 #   forge.sh remote-ask <claude|codex|copilot> <exchangeId> [file]  ask that chat and wait up to 20 minutes for /answer
 #   forge.sh read-verdict <your-name> <exchangeId>  read the full retained verdict without consuming it
 #   forge.sh ack-verdict <your-name> <exchangeId>   acknowledge a read verdict and remove its retained copy
-#   forge.sh steer <your-name> <to> [file] interrupt <to>'s running turn (forge/claude/codex/copilot); runs next
+#   forge.sh steer <your-name> <to> [--to <conversationId>] [file] interrupt <to>'s running turn (forge/claude/codex/copilot); runs next
+#   forge.sh stop <your-name> [--to <conversationId>]  cancel a running Forge turn; queued messages may still start
 #   forge.sh cancel <your-name> <id|all>  withdraw your queued message(s) to Forge not yet started
 #   forge.sh who                      linked agent sessions held by Forge windows
 #   forge.sh status <your-name>       what your chat with Forge is doing now (tool, last words, context)
@@ -275,7 +276,7 @@ elif [ "$VERB" = "send" ] || [ "$VERB" = "steer" ]; then
   TO="$3"; shift 3
   while [ $# -gt 0 ]; do
     case "$1" in
-      --to) [ "$VERB" = "send" ] && [ "$TO" = "forge" ] && [ $# -ge 2 ] || usage; CONVERSATION_ID="$2"; shift 2;;
+      --to) [ "$TO" = "forge" ] && [ $# -ge 2 ] || usage; CONVERSATION_ID="$2"; shift 2;;
       --to-running) [ "$VERB" = "send" ] && [ "$TO" = "forge" ] || usage; TO_RUNNING=true; shift;;
       --*) usage;;
       *) [ "$SRC" = "-" ] || usage; SRC="$1"; shift;;
@@ -292,6 +293,16 @@ elif [ "$VERB" = "send" ] || [ "$VERB" = "steer" ]; then
       *) ORIGIN_CONVERSATION="$FORGE_CONVERSATION_ID";;
     esac
   fi
+elif [ "$VERB" = "stop" ]; then
+  ARG="$2"; shift 2
+  while [ $# -gt 0 ]; do
+    case "$1" in
+      --to) [ $# -ge 2 ] && [ -z "$CONVERSATION_ID" ] || usage; CONVERSATION_ID="$2"; shift 2;;
+      *) usage;;
+    esac
+  done
+  set_sender_identity "$ARG"
+  SRC=/dev/null
 elif [ $# -ge 2 ]; then
   ARG="$2"
   [ $# -ge 3 ] && SRC="$3"
@@ -309,7 +320,11 @@ case "$VERB" in
          [ -z "$CONVERSATION_ID" ] || [ -z "$TO_RUNNING" ] || usage
          ROUTE=message; QUERY="from=$ARG&to=$TO$SENDER_QUERY"; [ -n "$CONVERSATION_ID" ] && QUERY="$QUERY&conversation_id=$CONVERSATION_ID"; [ -n "$TO_RUNNING" ] && QUERY="$QUERY&to_running=true"; [ -n "$ORIGIN_CONVERSATION" ] && [ "$TO" != "forge" ] && QUERY="$QUERY&origin_conversation=$ORIGIN_CONVERSATION" ;;
   steer) case "$ARG" in ""|*[!A-Za-z0-9._-]*) echo "forge.sh: a name is letters, digits, . _ - only" >&2; exit 2;; esac
-         ROUTE=message; QUERY="from=$ARG&to=$TO$SENDER_QUERY&priority=steer" ;;
+         case "$CONVERSATION_ID" in ""|*[!A-Za-z0-9._-]*) [ -z "$CONVERSATION_ID" ] || { echo "forge.sh: bad conversation id '$CONVERSATION_ID'" >&2; exit 2; };; esac
+         ROUTE=message; QUERY="from=$ARG&to=$TO$SENDER_QUERY&priority=steer"; [ -n "$CONVERSATION_ID" ] && QUERY="$QUERY&conversation_id=$CONVERSATION_ID" ;;
+  stop)  case "$ARG" in ""|*[!A-Za-z0-9._-]*) echo "forge.sh: a name is letters, digits, . _ - only" >&2; exit 2;; esac
+         case "$CONVERSATION_ID" in ""|*[!A-Za-z0-9._-]*) [ -z "$CONVERSATION_ID" ] || { echo "forge.sh: bad conversation id '$CONVERSATION_ID'" >&2; exit 2; };; esac
+         ROUTE=stop; QUERY="from=$ARG$SENDER_QUERY"; [ -n "$CONVERSATION_ID" ] && QUERY="$QUERY&conversation_id=$CONVERSATION_ID"; SRC=/dev/null ;;
   cancel) case "$ARG" in ""|*[!A-Za-z0-9._-]*) echo "forge.sh: a name is letters, digits, . _ - only" >&2; exit 2;; esac
          [ $# -eq 3 ] || usage
          case "$3" in ""|*[!A-Za-z0-9_-]*) echo "forge.sh: bad id '$3' (the id say printed, or all)" >&2; exit 2;; esac

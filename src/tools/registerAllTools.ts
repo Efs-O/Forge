@@ -74,7 +74,7 @@ import { makeWaitTool } from './waitTool';
 import { makeViewVideoTool } from './videoTool';
 import { makeGenerateImageTool } from './imageGeneration/generateImageTool';
 import { makeUpscaleImageTool, upscaleConfigFor } from './imageGeneration/upscaleImageTool';
-import { makeSetCheckinTool, setCheckinEnabled } from './setCheckinTool';
+import { makeSetCheckinTool } from './setCheckinTool';
 import { makeRenderHtmlToImageTool } from './renderHtmlToImageTool';
 import { SdServerRegistry } from '../backend/sdServerRegistry';
 import { makeImageSearchTool } from './imageSearch/imageSearchTool';
@@ -287,13 +287,12 @@ export function registerAllTools(
     );
   }
 
-  // The model's own check-in timer. Registered ONLY when the `elapsed_time_note`
-  // block exists — the `upscale_image` rule, for the same reason: one more tool
-  // is a schema on every turn and a cold re-prefill when the list changes, and a
-  // config without the block never pays it. The `advertise` predicate inside the
-  // tool is what hides it after the owner deletes the block and reloads config
-  // without reloading the window.
-  if (getConfig && setCheckinEnabled(getConfig())) {
+  // The model's own check-in timer. Always registered; its `advertise` predicate
+  // reads the live config, so the tool is offered only while the
+  // `elapsed_time_note` block exists and a config without it never pays the
+  // schema. Registering only when the block existed at activation meant adding
+  // the block later did nothing until a window reload (2026-10-13 A/B run).
+  if (getConfig) {
     registry.register(makeSetCheckinTool({ getConfig }));
   }
 

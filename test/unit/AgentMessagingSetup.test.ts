@@ -3,6 +3,7 @@ import {
   busModelIds,
   interruptForgeForSender,
   resolveBusMessageTarget,
+  stopForgeForSender,
   submitBusMessage,
 } from '../../src/vscode/agentMessagingSetup';
 import { forgeInboundPrompt } from '../../src/agentBus/busContent';
@@ -50,6 +51,32 @@ describe('agent bus conversation targeting', () => {
       steered: false,
       reason: expect.stringContaining('not streaming'),
     });
+    expect(interrupt).not.toHaveBeenCalled();
+  });
+
+  it('stops the explicitly resolved chat through cancel without interrupting it', async () => {
+    const cancel = vi.fn(async () => {});
+    const interrupt = vi.fn(async () => {});
+    const facade = {
+      status: () => ({
+        activeConversationId: 'visible',
+        streamingConversationIds: ['target-chat'],
+        conversations: [
+          { id: 'visible', title: 'Visible', updatedAt: 2 },
+          { id: 'target-chat', title: 'Target', updatedAt: 1 },
+        ],
+      }),
+      recentExchanges: () => [],
+      cancel,
+      interrupt,
+    } as unknown as ForgeHostFacade;
+
+    await expect(stopForgeForSender(facade, 'codex', 'target-chat')).resolves.toEqual({
+      ok: true,
+      conversationId: 'target-chat',
+      title: 'Target',
+    });
+    expect(cancel).toHaveBeenCalledExactlyOnceWith('target-chat');
     expect(interrupt).not.toHaveBeenCalled();
   });
 

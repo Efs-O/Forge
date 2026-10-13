@@ -1,5 +1,13 @@
 # Forge — Recent Changes
 
+## 0.17.26
+
+- New `forge.sh stop <your-name> [--to <conversationId>]`: cancels a running Forge turn the way the sidebar Stop button does, through the same cancel Telegram `/stop` uses. Without `--to` it stops the chat `say` would reach. It exits non-zero and says so when that chat is not streaming. Queued bus messages are not withdrawn; `forge.sh cancel` does that. Before, an agent that started a chat with `say --new` could not stop it.
+- `forge.sh steer <your-name> forge --to <conversationId>` interrupts the named chat and runs the steer text there. Before, `steer` reached only the sender's default chat, which `say --new` does not change.
+- `set_checkin` is always registered and offered whenever the config has an `elapsed_time_note` block, read live. Before, it was registered only if the block existed when the window started, so adding the block to a running config did nothing until a window reload. A call that arrives after the block was removed gets a clear "set_checkin is off" result.
+- `forge.sh` now reaches Forge when no Forge window has focus. The focused window still owns `~/.forge/agent-bus/endpoint.json`, but any open window takes it when it is missing, unreadable or names a closed window, and a window that closes or turns the bus off hands it to another open window. Before, only a focused window wrote it, so after a reload with nobody at the screen, or after closing the focused one of two windows, every `forge.sh` verb said "not reachable" until someone clicked a window.
+- Internal: the bus-message submission flow moved from `src/vscode/agentMessagingSetup.ts` to `src/vscode/agentBusSubmission.ts`, which keeps the former under the line cap.
+
 ## 0.17.25
 
 - Two Strata entries (e.g. IQ3_S on :8090 and IQ3_XXS on :8091) no longer load onto the same GPUs at once. Before a request to a managed external server, Forge now unloads every other managed server, not only llama.cpp/Ollama models. It refuses with a clear error if a turn in this window is running on the other one, or if that server answers 409 because another window is using it. Previously, picking the second while another chat still had the first loaded started it beside the first and oversubscribed VRAM.

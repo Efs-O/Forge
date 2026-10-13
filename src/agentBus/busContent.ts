@@ -32,7 +32,7 @@ export const BUS_README = `# Forge agent bus
 Written by Forge; edits are overwritten. Lets Forge, Claude Code, Codex and
 Copilot sessions message each other, each message shown in the receiving window.
 
-    endpoint.json   url + token of the last focused Forge window
+    endpoint.json   url + token of the focused Forge window, or of any open one when none has focus
     forge.sh        the client: answer Forge, or send Forge a message
     inbox/          questions Forge is waiting on   <id>-forge.pending
     outbox/         file answers                    <id>-reply.md
@@ -48,11 +48,15 @@ Copilot sessions message each other, each message shown in the receiving window.
   once; a busy one queues the message until its turn ends.
 
 When several Forge windows are open, the client reaches the last focused
-Forge window. \`forge.sh say <name> --new\` opens and selects a new chat there;
+Forge window; if that one closes, another open window takes over without being
+focused. \`forge.sh say <name> --new\` opens and selects a new chat there;
 ordinary \`say\` follows that sender's previous chat without changing the view.
 Use \`say <name> --to <conversationId>\` to select a specific Forge chat, or
 \`say <name> --to-running\` to select the currently running chat. The same flags
 work with \`send <name> forge\`; \`send\` to another agent remains a relay.
+Use \`forge.sh stop <name> [--to <conversationId>]\` to cancel a running Forge
+turn like the Stop button. Queued messages are not withdrawn and may start after
+the turn stops; use \`forge.sh cancel\` for those.
 Messages routed to an existing Forge chat print its id and title in the 202
 response. There is no \`join\` command: an agent identifies itself from its
 session environment variable.
@@ -136,7 +140,7 @@ exits 124. Ctrl-C stops it. Use it instead of re-asking Forge how it is going.
 
 ## Steering (interrupt a running turn)
 
-\`forge.sh steer <your-name> <to>\` stops \`<to>\`'s running turn and runs your
+\`forge.sh steer <your-name> <to> [--to <conversationId>]\` stops \`<to>\`'s running turn and runs your
 text next — \`forge\` (Forge's own model), \`claude\`, \`codex\` or \`copilot\`.
 Use it to correct an agent mid-turn instead of waiting for it to finish.
 
@@ -220,7 +224,7 @@ export function copilotMeshPreamble(): string {
     `[Forge agent bus — mesh identity]\n` +
     `You are "copilot", a Forge-owned agent-mesh peer (alongside "claude" and "codex").\n` +
     `To message Forge or another agent, use the forge.sh client in the agent-bus folder;\n` +
-    `its usage header lists the current commands (say, send, send-file, read-verdict, ack-verdict, steer, who, status, view, wait).\n` +
+    `its usage header lists the current commands (say, send, send-file, read-verdict, ack-verdict, steer, stop, who, status, view, wait).\n` +
     `Forge reads your final message in this turn as your answer.\n\n`
   );
 }

@@ -99,6 +99,14 @@ export interface AgentRoutesDeps {
   validateAgentSender?: (sender: AgentSender) => { ok: true } | { ok: false; error: string };
   /** Interrupt Forge's addressed chat and report whether it was streaming. */
   interruptForge?: (from: string, conversationId: string | undefined) => Promise<ForgeSteerResult>;
+  /** Cancel Forge's addressed running turn, without queuing another turn. */
+  stopForge?: (
+    from: string,
+    conversationId: string | undefined,
+  ) => Promise<
+    | { ok: true; conversationId: string; title: string }
+    | { ok: false; status: 400 | 409; error: string }
+  >;
   /** Resolve the Forge chat that will receive an accepted agent message. */
   resolveChatTarget?: (from: string, selection: ChatTargetSelection) => ChatTargetResult;
   /**
@@ -186,6 +194,7 @@ export class AgentRoutes {
       route === '/agent/holds-link' ||
       route === '/agent/reply' ||
       route === '/agent/cancel' ||
+      (route === '/agent/stop' && !!this.deps.stopForge) ||
       (route === '/agent/who' && !!this.deps.who) ||
       (route === '/agent/status' && !!this.deps.status) ||
       (route === '/agent/view' && !!this.deps.view) ||
@@ -306,6 +315,17 @@ export class AgentRoutes {
           );
         }
         return sendJson(res, 200, { cancelled });
+      }
+      if (route === '/agent/stop') {
+        const options = parseAgentMessageOptions({ conversation_id: fields['conversation_id'] });
+        const result = await this.deps.stopForge!(from, options.conversationId);
+        return result.ok
+          ? sendJson(res, 200, {
+              stopped: true,
+              conversationId: result.conversationId,
+              title: result.title,
+            })
+          : sendJson(res, result.status, { error: result.error });
       }
       // M6: an inbound message addressed to another agent (to != forge) is
       // relayed by the host through the recipient's adapter, with zero Forge

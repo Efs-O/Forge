@@ -70,6 +70,7 @@ describe('CLIENT_SCRIPT usage block', () => {
       'read-verdict',
       'ack-verdict',
       'steer',
+      'stop',
       'cancel',
       'who',
       'status',
@@ -82,8 +83,12 @@ describe('CLIENT_SCRIPT usage block', () => {
     // `sed -n '2,7p'` range: a fixed range is exactly the bug this guards.
     expect(usage).toContain('The text comes from the file, or from stdin');
     expect(usage).toContain('--to <conversationId>|--to-running');
+    expect(usage).toContain('forge.sh steer <your-name> <to> [--to <conversationId>] [file]');
+    expect(usage).toContain('forge.sh stop <your-name> [--to <conversationId>]');
     expect(BUS_README).toContain('say <name> --to-running');
     expect(BUS_README).toContain('read-verdict <name> <exchangeId>');
+    expect(BUS_README).toContain('forge.sh stop <name> [--to <conversationId>]');
+    expect(BUS_README).toContain('Queued messages are not withdrawn');
     // Implementation comments below the block are for maintainers, not users.
     expect(usage).not.toContain('usage prints');
   });

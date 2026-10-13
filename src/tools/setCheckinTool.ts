@@ -9,9 +9,9 @@
  * The tool owns no state. `ElapsedTimeNote` does, reached through the
  * `setCheckin` closure on `ToolHandlerContext` — the same shape `update_plan`
  * uses for `setPlan`, so `ToolDispatch` never gains a session store and the
- * conversation's clock stays on the turn side. Registered only when the
- * `elapsed_time_note` block exists (see `registerAllTools.ts`), and the block
- * is re-read in `advertise` so deleting it and reloading config hides the tool.
+ * conversation's clock stays on the turn side. Always registered (see
+ * `registerAllTools.ts`); `advertise` re-reads the `elapsed_time_note` block, so
+ * adding or deleting it in a live config shows or hides the tool.
  */
 
 import { z } from 'zod';
@@ -86,6 +86,10 @@ export function makeSetCheckinTool(deps: { getConfig: () => ForgeConfig }): Regi
     permission: 'read',
     advertise: () => setCheckinEnabled(deps.getConfig()),
     handler: async (args, context) => {
+      // A tool list from before the block was deleted can still carry the tool.
+      if (!setCheckinEnabled(deps.getConfig())) {
+        return 'Error: set_checkin is off (no elapsed_time_note in the config). Carry on without it.';
+      }
       const parsed = argsSchema.safeParse(args);
       if (!parsed.success) {
         // Name the bounds rather than echoing a Zod dump: the model has to be

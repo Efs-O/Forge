@@ -5,7 +5,6 @@ import { EXCHANGES_LOG_NAME, readEvents } from '../agentMesh/exchangeLog';
 import { setBoardContext } from '../agentMesh/meshContext';
 import {
   AgentInbox,
-  type BusTurnEnd,
   type ChatTargetSelection,
   type InboxMessageOptions,
 } from '../agentBus/agentInbox';
@@ -14,13 +13,13 @@ import { availableProfilesFor, expandAlias } from '../config/ConfigResolver';
 import type { ForgeConfig } from '../config/types';
 import type { ForgeHostFacade } from '../sidebar/ForgeHostFacade';
 import type { MidTurnTellDrain } from '../agent/MidTurnTellDrain';
-import { parseForgeInboundPrompt } from '../agentBus/busContent';
-import { BUS_TARGET_SCAN, busTargetConversation, senderConversation } from '../agentBus/busTarget';
+import { BUS_TARGET_SCAN, senderConversation } from '../agentBus/busTarget';
+import { busTarget, submitBusMessage } from './agentBusSubmission';
+export { submitBusMessage } from './agentBusSubmission';
 import { BusTurnWatch } from '../agentBus/busTurnWatch';
 import { renderBusStatus, renderBusView } from '../agentBus/busStatusView';
 import { MAX_VIEW_COUNT, parseViewCount } from '../remote/RemoteTranscriptView';
 import type { RemoteRuntime } from '../remote/RemoteRuntime';
-import { unattendedConversations } from '../sidebar/unattendedConversations';
 import { PendingAgentReplies } from '../agentLinks/pendingAgentReplies';
 import { makeAskAgentRuntime } from '../agentLinks/askAgentRuntime';
 import type { AskAgentRuntime } from '../agentLinks/askAgentService';
@@ -29,21 +28,8 @@ import {
   makeAgentReplyLifecycle,
   recordAcceptedInboundReply,
 } from '../agentLinks/agentReplyLifecycle';
-import { agentDisplayName } from '../agentLinks/chatAgentLinks';
 import { makeAgentToAgentRelay } from '../agentLinks/agentToAgentRelay';
 import { isAskAgentRunning } from '../agentLinks/askAgentService';
-
-/** The conversation a bus message from `from` belongs in. */
-function busTarget(
-  facade: ForgeHostFacade,
-  from: string | undefined,
-  targetConversationId?: string,
-): string {
-  if (targetConversationId) return targetConversationId;
-  return busTargetConversation(from, facade.status(), (id) =>
-    facade.recentExchanges(id, BUS_TARGET_SCAN),
-  );
-}
 
 /** The chat a bus exchange belongs to, from the exchange ledger. */
 export function exchangeConversationFromLedger(exchangeId: string): string | undefined {
@@ -105,6 +91,33 @@ export function resolveBusMessageTarget(
   return { ok: true, conversationId, title: conversation.title };
 }
 
+type StreamingBusTarget =
+  | { ok: true; conversationId: string; title: string }
+  | { ok: false; status: 400 | 409; error: string };
+
+/** Resolve a sender's target and require a running turn for stop or steer. */
+function resolveStreamingBusTarget(
+  facade: ForgeHostFacade,
+  from: string,
+  targetConversationId?: string,
+): StreamingBusTarget {
+  const target = resolveBusMessageTarget(
+    facade,
+    from,
+    { ...(targetConversationId ? { conversationId: targetConversationId } : {}) },
+    exchangeConversationFromLedger,
+  );
+  if (!target.ok) return { ok: false, status: 400, error: target.error };
+  if (!facade.status().streamingConversationIds.includes(target.conversationId)) {
+    return {
+      ok: false,
+      status: 409,
+      error: `Forge chat "${target.title}" (${target.conversationId}) is not streaming`,
+    };
+  }
+  return { ok: true, conversationId: target.conversationId, title: target.title };
+}
+
 /** Interrupt only the chat the sender's message will be routed to. */
 export async function interruptForgeForSender(
   facade: ForgeHostFacade,
@@ -113,25 +126,26 @@ export async function interruptForgeForSender(
 ): Promise<
   { steered: true; conversationId: string; title: string } | { steered: false; reason: string }
 > {
-  const target = resolveBusMessageTarget(
-    facade,
-    from,
-    { ...(targetConversationId ? { conversationId: targetConversationId } : {}) },
-    exchangeConversationFromLedger,
-  );
+  const target = resolveStreamingBusTarget(facade, from, targetConversationId);
   if (!target.ok) return { steered: false, reason: target.error };
-  if (!facade.status().streamingConversationIds.includes(target.conversationId)) {
-    return {
-      steered: false,
-      reason: `Forge chat "${target.title}" (${target.conversationId}) is not streaming`,
-    };
-  }
   await facade.interrupt(target.conversationId);
   return {
     steered: true,
     conversationId: target.conversationId,
     title: target.title,
   };
+}
+
+/** Cancel the addressed turn with the same target selection as bus messages and steers. */
+export async function stopForgeForSender(
+  facade: ForgeHostFacade,
+  from: string,
+  targetConversationId?: string,
+): Promise<StreamingBusTarget> {
+  const target = resolveStreamingBusTarget(facade, from, targetConversationId);
+  if (!target.ok) return target;
+  await facade.cancel(target.conversationId);
+  return target;
 }
 
 /** Every model, each `model@profile` it offers, and every alias key: the ids a bus sender may name. */
@@ -143,74 +157,6 @@ export function busModelIds(config: ForgeConfig): string[] {
     ]),
     ...Object.keys(config.aliases ?? {}),
   ];
-}
-
-/** The loaded chat model; config.active_model can be stale while the sidebar is open. */
-function currentLoadedModel(facade: ForgeHostFacade): string | undefined {
-  const status = facade.status();
-  const active = status.conversations.find(
-    (conversation) => conversation.id === status.activeConversationId,
-  );
-  return active?.activeModel ?? undefined;
-}
-
-/** An explicit new chat becomes visible; follow-ups keep their addressed chat. */
-
-export async function submitBusMessage(
-  facade: ForgeHostFacade,
-  prompt: string,
-  options: InboxMessageOptions | undefined,
-): Promise<BusTurnEnd> {
-  let conversationId = busTarget(facade, options?.from, options?.targetConversationId);
-  // Read before createConversation: it activates the new chat, whose model is
-  // the stale config default this is meant to replace.
-  const current = options?.newChat && !options.model ? currentLoadedModel(facade) : undefined;
-  if (options?.newChat) {
-    conversationId = (await facade.createConversation({ activate: true })).id;
-  } else if (conversationId !== facade.status().activeConversationId) {
-    await facade.restoreConversation(conversationId, { activate: false });
-  }
-  if (options?.model) {
-    await facade.setConversationModel(conversationId, options.model);
-  } else if (current) {
-    // A --new without --model follows the model the user is actually talking
-    // to (the active conversation's model — the currently loaded backend), not
-    // the stale config active_model that createConversation defaults to. That
-    // stale default opened a new chat on a different model and loading it
-    // spawned a second server.
-    await facade.setConversationModel(conversationId, current);
-  }
-  const inbound = parseForgeInboundPrompt(prompt);
-  if (inbound || options?.sender) {
-    // The agent-bus sender cannot see the user's Telegram chat. Reuse the
-    // normal host-activity subscription so the already-addressed conversation
-    // is durably mirrored to its bound remote chats before the Forge turn runs.
-    facade.emitHostActivity?.({
-      conversationId,
-      ...(options?.sender ? { suppressProgress: true } : {}),
-      text: options?.sender
-        ? `${agentDisplayName(options.sender.kind)} (${options.sender.title}) says: ${(inbound?.text ?? prompt).split(/\n\nFrom (?:Claude|Codex|Copilot) session /u)[0]!.trim()}`
-        : `Forge: ${inbound?.from} says:\n\n${inbound?.text}`,
-    });
-  }
-  // The marker lasts exactly this turn, like a job's: the conversation is
-  // attended again for whoever writes in it next.
-  const marker = options?.unattended ? unattendedConversations.mark(conversationId) : undefined;
-  let outcome: Awaited<ReturnType<ForgeHostFacade['send']>>;
-  try {
-    outcome = options?.sender
-      ? await facade.send(conversationId, prompt, undefined, { sender: options.sender })
-      : await facade.send(conversationId, prompt);
-  } finally {
-    marker?.dispose();
-  }
-  return outcome.kind === 'failed'
-    ? {
-        kind: 'failed',
-        error: outcome.error,
-        ...(outcome.finalText ? { finalText: outcome.finalText } : {}),
-      }
-    : { kind: outcome.kind, ...(outcome.finalText ? { finalText: outcome.finalText } : {}) };
 }
 
 /**
@@ -373,6 +319,10 @@ export function setupAgentMessaging(
     interruptForge: async (from, conversationId) => {
       const facade = getSidebar().getHostFacade();
       return interruptForgeForSender(facade, from, conversationId);
+    },
+    stopForge: async (from, conversationId) => {
+      const facade = getSidebar().getHostFacade();
+      return stopForgeForSender(facade, from, conversationId);
     },
     // A `--new` message needs a tab to exist. Ask the sidebar NOW whether one
     // could be opened, so the route can answer 409 with the reasons instead of

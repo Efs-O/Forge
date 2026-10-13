@@ -78,7 +78,7 @@ telemetry, analytics, or auto-update pings.
 - Ollama local and Ollama cloud routing through the local daemon
 - Optional cloud or self-hosted providers: `xai`, `openrouter`, `openai`, `openai-compatible`
 - External CLI agents (`provider: cli` — Claude Code, Codex) as full-rights agents — both in direct chat and as `ask_local_agent` delegation targets, where they can read and edit the workspace with their own tools — using each CLI's own authentication. See [delegation](docs/DELEGATION.md) for which runs Keep/Undo covers
-- Agent mesh: two-way messaging between Forge and Claude Code, Codex and Copilot sessions (`ask_agent`, `forge.sh say`/`send`/`steer`/`who`)
+- Agent mesh: two-way messaging between Forge and Claude Code, Codex and Copilot sessions (`ask_agent`, `forge.sh say`/`send`/`steer`/`stop`/`who`)
 - Localhost control server for external orchestrators and shared model lifecycle
 - Reasoning token display and optional thinking-channel stripping
 - Optional Tavily or Brave web search with keys stored in VS Code SecretStorage
@@ -654,9 +654,11 @@ Enable `control_server.enabled` and `agent_bus.enabled` (setup above).
   a session for that chat. Use **Forge: Show Live Claude Sessions** to copy an
   existing Claude session id, then `/link` in the intended Forge chat to bind it.
 - **Them → Forge.** From any terminal, `~/.forge/agent-bus/forge.sh` lets a
-  session `say` something to Forge, `steer` (interrupt) its running turn,
-  check its `status`, `view` its last answers, and see `who` is in the mesh
-  and what each member is doing.
+  session `say` something to Forge, `steer` (interrupt) its running turn and
+  run new text next, `stop` a running turn the way the sidebar Stop button
+  does, check its `status`, `view` its last answers, and see `who` is in the
+  mesh and what each member is doing. `steer` and `stop` take
+  `--to <conversationId>` to reach a chat other than the sender's default.
 - **Agent → agent.** `forge.sh send claude codex` and `forge.sh send codex claude`
   (or either sender to `copilot`) reach only the recipient linked to the
   sender's current Forge chat. Check the intended link first; the returned

@@ -85,6 +85,7 @@ const EXPECTED_NATIVE_NAMES = [
   'search_code',
   'search_codebase',
   'send_file',
+  'set_checkin',
   'shell',
   'show_diff',
   'show_notification',
@@ -223,7 +224,9 @@ describe('registerAllTools canonical coordinator catalog', () => {
           // install_llamacpp needs the absent llama_server.binary.
           name !== 'install_llamacpp' &&
           // ask_agent needs the absent agent_bus block.
-          name !== 'ask_agent',
+          name !== 'ask_agent' &&
+          // set_checkin needs the absent elapsed_time_note block.
+          name !== 'set_checkin',
       ),
     );
   });

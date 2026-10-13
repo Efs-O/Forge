@@ -194,6 +194,8 @@ command. `say` follows that agent's previously selected Forge chat, while
 chat. Claude Code uses `say claude` and `send claude <recipient>`; Codex uses
 `say codex` and `send codex <recipient>`. A 202 exchange id confirms acceptance,
 not an answer; read the verdict or failure before reporting success.
+`stop <name> [--to <conversationId>]` cancels a running Forge turn like the
+sidebar Stop button; `steer` interrupts and then runs its own text.
 For a different Forge chat, use `say --to <conversationId>` or `--to-running`;
 for a specific live Claude session, use **Forge: Show Live Claude Sessions**
 to copy its id and `/link` in the intended Forge chat before `ask_agent`.

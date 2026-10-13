@@ -1,7 +1,7 @@
 /**
  * `set_checkin` — the tool half of the elapsed-time note: its argument bounds,
  * its result string, its refusal when no clock is wired, and the config block
- * that registers it at all.
+ * that advertises it.
  */
 
 import { describe, expect, it } from 'vitest';
@@ -112,13 +112,33 @@ describe('set_checkin registration follows the config block', () => {
       ...extra,
     }) as ForgeConfig;
 
-  it('registers the tool only when the block is present', () => {
+  it('always registers the tool, advertised only while the block is present', () => {
     const without = registryWith(base({}));
-    expect(without.names()).not.toContain('set_checkin');
+    expect(without.get('set_checkin')?.advertise?.()).toBe(false);
     const withBlock = registryWith(base({ elapsed_time_note: { after_minutes: 30 } }));
-    expect(withBlock.names()).toContain('set_checkin');
-    // The block is the ONLY difference: it registers exactly one tool.
-    expect(withBlock.names().sort()).toEqual([...without.names(), 'set_checkin'].sort());
+    expect(withBlock.get('set_checkin')?.advertise?.()).toBe(true);
+    // The block changes advertisement only, never the registered set.
+    expect(withBlock.names().sort()).toEqual(without.names().sort());
+  });
+
+  it('shows the tool when the block is added to a live config, no window reload', () => {
+    let config = base({});
+    const registry = new ToolRegistry();
+    registry.register(makeSetCheckinTool({ getConfig: () => config }));
+    expect(registry.get('set_checkin')?.advertise?.()).toBe(false);
+    config = base({ elapsed_time_note: { after_minutes: 30 } });
+    expect(registry.get('set_checkin')?.advertise?.()).toBe(true);
+  });
+
+  it('refuses a call that arrives after the block was removed', async () => {
+    const off = makeSetCheckinTool({ getConfig: () => base({}) });
+    let set = false;
+    const result = await off.handler({ minutes: 30, by_then: 'writing' }, {
+      beforeMutate: () => undefined,
+      setCheckin: () => ((set = true), { dueAt: 0 }),
+    });
+    expect(String(result)).toContain('set_checkin is off');
+    expect(set).toBe(false);
   });
 
   it('hides the tool again when the block is removed from a live config', () => {

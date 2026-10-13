@@ -147,8 +147,16 @@ describe('endpoint.json', () => {
     expect(fs.existsSync(paths.endpoint)).toBe(true);
   });
 
-  it('only lets a focused window claim the shared endpoint', () => {
+  it('lets an unfocused window take the endpoint only when no live window owns it', () => {
     routes.dispose();
+    // Another live window (this test process) owns it: an unfocused window leaves it.
+    const other = {
+      windowId: '00000000-0000-4000-8000-000000000042',
+      url: 'http://127.0.0.1:1',
+      token: 'o'.repeat(64),
+      pid: process.pid,
+    };
+    fs.writeFileSync(paths.endpoint, JSON.stringify(other));
     focused = false;
     routes = new AgentRoutes({
       paths: () => paths,
@@ -158,7 +166,7 @@ describe('endpoint.json', () => {
     });
     routes.setEnabled(true);
     routes.onListening(base);
-    expect(fs.existsSync(paths.endpoint)).toBe(false);
+    expect(JSON.parse(fs.readFileSync(paths.endpoint, 'utf8'))).toMatchObject({ token: other.token });
 
     focused = true;
     routes.claim();
@@ -167,13 +175,15 @@ describe('endpoint.json', () => {
       token: TOKEN,
     });
 
+    // Unfocused: keeps its own file rather than withdrawing it.
     focused = false;
+    routes.claim();
+    expect(JSON.parse(fs.readFileSync(paths.endpoint, 'utf8'))).toMatchObject({ token: TOKEN });
+
+    // An unreadable file has no owner, so even an unfocused window replaces it.
     fs.writeFileSync(paths.endpoint, JSON.stringify({ url: 'other', token: 'other' }));
     routes.claim();
-    expect(JSON.parse(fs.readFileSync(paths.endpoint, 'utf8'))).toMatchObject({
-      url: 'other',
-      token: 'other',
-    });
+    expect(JSON.parse(fs.readFileSync(paths.endpoint, 'utf8'))).toMatchObject({ token: TOKEN });
   });
 });
 
@@ -417,6 +427,59 @@ describe('routes', () => {
   });
 });
 
+describe('POST /agent/stop', () => {
+  function install(stopForge: NonNullable<ConstructorParameters<typeof AgentRoutes>[0]['stopForge']>): void {
+    routes.dispose();
+    routes = new AgentRoutes({ paths: () => paths, inbox: stubInbox(), token: TOKEN, stopForge });
+    routes.setEnabled(true);
+    routes.onListening(base);
+  }
+
+  it('stops the resolved default target and returns its chat details', async () => {
+    const stopForge = vi.fn(async (from: string, conversationId: string | undefined) => {
+      expect(from).toBe('claude');
+      expect(conversationId).toBeUndefined();
+      return { ok: true as const, conversationId: 'default-chat', title: 'Claude run' };
+    });
+    install(stopForge);
+
+    expect(await post('/agent/stop?from=claude', '')).toEqual({
+      status: 200,
+      body: { stopped: true, conversationId: 'default-chat', title: 'Claude run' },
+    });
+    expect(stopForge).toHaveBeenCalledOnce();
+  });
+
+  it('returns 409 for an idle chat and 400 for a closed chat or exchange id', async () => {
+    const stopForge = vi.fn(async (_from: string, conversationId: string | undefined) => {
+      if (conversationId === 'closed')
+        return { ok: false as const, status: 400 as const, error: 'Forge chat "closed" is no longer open' };
+      if (conversationId === 'exchange-1')
+        return { ok: false as const, status: 400 as const, error: 'exchange id is not a chat id' };
+      return {
+        ok: false as const,
+        status: 409 as const,
+        error: 'Forge chat "Idle" (idle-chat) is not streaming',
+      };
+    });
+    install(stopForge);
+
+    expect((await post('/agent/stop?from=codex&conversation_id=idle-chat', '')).status).toBe(409);
+    expect((await post('/agent/stop?from=codex&conversation_id=closed', '')).status).toBe(400);
+    expect((await post('/agent/stop?from=codex&conversation_id=exchange-1', '')).status).toBe(400);
+    expect(stopForge).toHaveBeenCalledTimes(3);
+  });
+
+  it('requires the token and POST', async () => {
+    install(async () => ({ ok: true, conversationId: 'chat', title: 'Chat' }));
+    expect((await post('/agent/stop?from=claude', '', { token: null })).status).toBe(401);
+    const response = await fetch(`${base}/agent/stop?from=claude`, {
+      headers: { Authorization: `Bearer ${TOKEN}` },
+    });
+    expect(response.status).toBe(405);
+  });
+});
+
 /** Run the shipped client the way another agent would. Async: the routes
  *  answer from this same process, so a blocking spawn would deadlock. */
 function runClient(
@@ -424,9 +487,10 @@ function runClient(
   input: string,
   env: Record<string, string> = {},
 ): Promise<{ code: number; out: string }> {
+  const bash = TEST_BASH!;
   return new Promise((resolve) => {
     const child = execFile(
-      TEST_BASH ?? 'bash',
+      bash,
       [paths.script.replace(/\\/g, '/'), ...args],
       { timeout: 20_000, env: { ...process.env, ...env } },
       (err, stdout, stderr) => {
@@ -438,7 +502,7 @@ function runClient(
   });
 }
 
-describe('forge.sh against the routes', () => {
+describe.skipIf(!TEST_BASH)('forge.sh against the routes', () => {
   // Needs a bash that can read this OS's paths and has curl (Git Bash on
   // Windows, not WSL's). Skipped, not failed, where there is none.
   let usable = false;
@@ -589,6 +653,54 @@ describe('forge.sh against the routes', () => {
     );
     expect(said.code).toBe(0);
     expect(acceptedOptions[0]).toEqual({ model: 'alpha', newChat: true });
+  }, 30_000);
+
+  it('stop sends no turn text, accepts --to, and exits non-zero for a 409', async (ctx) => {
+    if (!usable) ctx.skip();
+    const stopped: Array<string | undefined> = [];
+    installClientRoutes({
+      paths: () => paths,
+      inbox: stubInbox(),
+      token: TOKEN,
+      stopForge: async (_from, conversationId) => {
+        stopped.push(conversationId);
+        return conversationId === 'idle-chat'
+          ? {
+              ok: false,
+              status: 409,
+              error: 'Forge chat "Idle" (idle-chat) is not streaming',
+            }
+          : {
+              ok: true,
+              conversationId: conversationId ?? 'default-chat',
+              title: 'Bus stop test',
+            };
+      },
+    });
+    const env = { CODEX_SESSION_ID: '00000000-0000-4000-8000-000000000001' };
+
+    const defaultStop = await runClient(['stop', 'codex'], 'ignored input', env);
+    const targetedStop = await runClient(['stop', 'codex', '--to', 'target-chat'], '', env);
+    const idleStop = await runClient(['stop', 'codex', '--to', 'idle-chat'], '', env);
+
+    expect(defaultStop.code).toBe(0);
+    expect(defaultStop.out).toContain('"stopped":true');
+    expect(targetedStop.code).toBe(0);
+    expect(targetedStop.out).toContain('"conversationId":"target-chat"');
+    expect(idleStop.code).toBe(1);
+    expect(idleStop.out).toContain('not streaming');
+    expect(stopped).toEqual([undefined, 'target-chat', 'idle-chat']);
+    expect(accepted).toEqual([]);
+  }, 30_000);
+
+  it('steer targeting and stop argument errors are checked before a request', async (ctx) => {
+    if (!usable) ctx.skip();
+    expect((await runClient(['steer', 'codex', 'codex', '--to', 'chat'], 'text')).code).toBe(2);
+    expect(
+      (await runClient(['steer', 'codex', 'forge', '--to', 'chat', '--to-running'], 'text')).code,
+    ).toBe(2);
+    expect((await runClient(['stop', 'codex', 'unexpected'], '')).code).toBe(2);
+    expect(accepted).toEqual([]);
   }, 30_000);
 
   it('requires the declared kind session variable before an agent say', async (ctx) => {
@@ -779,19 +891,30 @@ describe('forge.sh against the routes', () => {
   it('steer to forge queues at the front and interrupts the running turn (§6)', async (ctx) => {
     if (!usable) ctx.skip();
     const calls: string[] = [];
+    const targets: string[] = [];
     routes = new AgentRoutes({
       paths: () => paths,
       inbox: {
-        accept: (_prompt, _from, front) => (
+        accept: (_prompt, _from, front, options) => (
           calls.push(`accept front=${String(front)}`),
+          targets.push(options?.targetConversationId ?? 'default'),
           { position: 1, id: 'm1' }
         ),
         cancel: () => 0,
       },
       token: TOKEN,
-      interruptForge: async () => {
-        calls.push('interrupt');
-        return { steered: true, conversationId: 'sender-chat', title: 'Codex: task' };
+      resolveChatTarget: (_from, selection) => ({
+        ok: true,
+        conversationId: selection.conversationId ?? 'sender-chat',
+        title: selection.conversationId === 'target-chat' ? 'Named chat' : 'Codex: task',
+      }),
+      interruptForge: async (_from, conversationId) => {
+        calls.push(`interrupt ${conversationId ?? 'default'}`);
+        return {
+          steered: true,
+          conversationId: conversationId ?? 'sender-chat',
+          title: conversationId === 'target-chat' ? 'Named chat' : 'Codex: task',
+        };
       },
     });
     routes.setEnabled(true);
@@ -804,10 +927,21 @@ describe('forge.sh against the routes', () => {
       conversationId: 'sender-chat',
       title: 'Codex: task',
     });
-    expect(calls).toEqual(['accept front=true', 'interrupt']);
+    expect(calls).toEqual(['accept front=true', 'interrupt sender-chat']);
+    const targetedSteer = await runClient(
+      ['steer', 'claude-review', 'forge', '--to', 'target-chat'],
+      'targeted correction',
+    );
+    expect(JSON.parse(targetedSteer.out.trim())).toMatchObject({
+      steered: true,
+      conversationId: 'target-chat',
+      title: 'Named chat',
+    });
+    expect(calls.slice(2)).toEqual(['accept front=true', 'interrupt target-chat']);
+    expect(targets).toEqual(['sender-chat', 'target-chat']);
     const said = await runClient(['say', 'claude-review'], 'plain');
     expect(said.out).toContain('"queued"');
-    expect(calls.slice(2)).toEqual(['accept front=false']);
+    expect(calls.slice(4)).toEqual(['accept front=false']);
   }, 30_000);
 
   it('say/send support an explicit chat target and --to-running', async (ctx) => {

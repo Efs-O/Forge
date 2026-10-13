@@ -56,36 +56,62 @@ export function processIsAlive(pid: number): boolean {
   }
 }
 
-export function removeDeadWindowEndpoints(
-  root: string,
-  isAlive: (pid: number) => boolean = processIsAlive,
-): string[] {
-  const directory = windowEndpointsDirectory(root);
-  let names: string[];
+/** One endpoint file; undefined when it is absent or not a valid endpoint (warned). */
+export function readWindowEndpoint(file: string): WindowEndpoint | undefined {
+  let raw: unknown;
   try {
-    names = fs.readdirSync(directory).filter((name) => name.endsWith('.json'));
+    raw = JSON.parse(fs.readFileSync(file, 'utf8')) as unknown;
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === 'ENOENT') return undefined;
+    log.warn(`[windowEndpoints] could not parse ${path.basename(file)}: ${String(error)}`);
+    return undefined;
+  }
+  const parsed = endpointSchema.safeParse(raw);
+  if (!parsed.success) {
+    log.warn(`[windowEndpoints] invalid endpoint ${path.basename(file)}: ${parsed.error.message}`);
+    return undefined;
+  }
+  return parsed.data;
+}
+
+function windowEndpointFiles(root: string): string[] {
+  const directory = windowEndpointsDirectory(root);
+  try {
+    return fs
+      .readdirSync(directory)
+      .filter((name) => name.endsWith('.json'))
+      .map((name) => path.join(directory, name));
   } catch (error) {
     if ((error as NodeJS.ErrnoException).code === 'ENOENT') return [];
     throw error;
   }
+}
+
+/** Live windows other than `exceptWindowId`, the most recently started first. */
+export function liveWindowEndpoints(
+  root: string,
+  exceptWindowId: string,
+  isAlive: (pid: number) => boolean = processIsAlive,
+): WindowEndpoint[] {
+  const live: { endpoint: WindowEndpoint; started: number }[] = [];
+  for (const file of windowEndpointFiles(root)) {
+    const endpoint = readWindowEndpoint(file);
+    if (!endpoint || endpoint.windowId === exceptWindowId || !isAlive(endpoint.pid)) continue;
+    live.push({ endpoint, started: fs.statSync(file).mtimeMs });
+  }
+  return live.sort((a, b) => b.started - a.started).map((entry) => entry.endpoint);
+}
+
+export function removeDeadWindowEndpoints(
+  root: string,
+  isAlive: (pid: number) => boolean = processIsAlive,
+): string[] {
   const removed: string[] = [];
-  for (const name of names) {
-    const file = path.join(directory, name);
-    let raw: unknown;
-    try {
-      raw = JSON.parse(fs.readFileSync(file, 'utf8')) as unknown;
-    } catch (error) {
-      log.warn(`[windowEndpoints] could not parse ${name}: ${String(error)}`);
-      continue;
-    }
-    const parsed = endpointSchema.safeParse(raw);
-    if (!parsed.success) {
-      log.warn(`[windowEndpoints] invalid endpoint ${name}: ${parsed.error.message}`);
-      continue;
-    }
-    if (isAlive(parsed.data.pid)) continue;
+  for (const file of windowEndpointFiles(root)) {
+    const endpoint = readWindowEndpoint(file);
+    if (!endpoint || isAlive(endpoint.pid)) continue;
     fs.unlinkSync(file);
-    removed.push(parsed.data.windowId);
+    removed.push(endpoint.windowId);
   }
   return removed;
 }
