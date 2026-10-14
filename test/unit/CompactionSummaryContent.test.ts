@@ -35,6 +35,42 @@ describe('compaction summary content', () => {
     );
   });
 
+  it('keeps an attachment note and only its first 2,000 chars in summarizer input', () => {
+    const fileText = `${'A'.repeat(2_000)}SYNTHETIC_SUMMARY_ATTACHMENT_TAIL_${'B'.repeat(5_000)}`;
+    const message: ChatMessage = {
+      role: 'user',
+      content: [
+        { type: 'text', text: 'Review this:' },
+        { type: 'text', text: `\`\`\`readme.md\n${fileText}\n\`\`\`` },
+      ],
+      attachments: [
+        {
+          name: 'readme.md',
+          mediaType: 'text/markdown',
+          bytes: 1_000_000,
+          relativePath: 'c/readme.md',
+        },
+      ],
+    };
+    const prompt = buildSummaryPrompt(
+      'test time',
+      undefined,
+      [message],
+      '',
+      '',
+      undefined,
+      { sourceMaxChars: 12_000 },
+    );
+    const retainedText = fileText.slice(0, 2_000);
+
+    expect(prompt).toContain('Review this:');
+    expect(prompt).toContain(
+      '[attached file readme.md, 1000000 bytes — not kept in compacted context; ask the user to re-attach it if it is needed]',
+    );
+    expect(prompt).toContain(retainedText);
+    expect(prompt).not.toContain(fileText.slice(2_000, 2_100));
+  });
+
   it('condenses a long earlier summary without changing the summary allowance', () => {
     const previousSummary =
       'Completed edit: file A changed. Superseded choice: use old API. Resolved error: missing import. '.repeat(

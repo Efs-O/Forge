@@ -317,8 +317,13 @@ export function buildUserContent(
         image_url: { url: `data:${att.mediaType};base64,${att.data}` },
       });
     } else {
-      parts.push({ type: 'text', text: `\`\`\`${att.name}\n${att.data}\n\`\`\`` });
+      parts.push({ type: 'text', text: fenceTextAttachment(att.name, att.data) });
     }
   }
   return parts.length === 1 && parts[0].type === 'text' ? parts[0].text : parts;
+}
+
+/** The transcript wrapper for an inlined text attachment. */
+export function fenceTextAttachment(name: string, data: string): string {
+  return `\`\`\`${name}\n${data}\n\`\`\``;
 }

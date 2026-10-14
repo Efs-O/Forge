@@ -116,6 +116,64 @@ describe('compaction user context', () => {
     expect(huge[0]!.length).toBeLessThan(FIRST_REQUEST_MAX_CHARS + 100);
   });
 
+  it('keeps the typed request and attachment note without copying attached text into the host block', () => {
+    const fileText = 'S'.repeat(1_000_000);
+    const collected = collectCompactionUserMessages(undefined, [
+      {
+        role: 'user',
+        content: [
+          { type: 'text', text: 'Summarize this file:' },
+          { type: 'text', text: `\`\`\`notes.txt\n${fileText}\n\`\`\`` },
+        ],
+        attachments: [
+          {
+            name: 'notes.txt',
+            mediaType: 'text/plain',
+            bytes: 1_000_000,
+            relativePath: 'c/notes.txt',
+          },
+        ],
+      },
+    ]);
+
+    expect(collected).toHaveLength(1);
+    expect(collected[0]).toContain('Summarize this file:');
+    expect(collected[0]).toContain(
+      '[attached file notes.txt, 1000000 bytes — not kept in compacted context; ask the user to re-attach it if it is needed]',
+    );
+    expect(collected[0]).not.toContain('S'.repeat(100));
+  });
+
+  it('handles a single attached text file stored as plain string content', () => {
+    const fileText = 'SYNTHETIC_SINGLE_FILE_'.repeat(500);
+    const collected = collectCompactionUserMessages(undefined, [
+      {
+        role: 'user',
+        content: `\`\`\`single.txt\n${fileText}\n\`\`\``,
+        attachments: [
+          {
+            name: 'single.txt',
+            mediaType: 'text/plain',
+            bytes: 10_500,
+            relativePath: 'c/single.txt',
+          },
+        ],
+      },
+    ]);
+    expect(collected[0]).toContain('[attached file single.txt, 10500 bytes');
+    expect(collected[0]).not.toContain('SYNTHETIC_SINGLE_FILE_');
+  });
+
+  it('leaves text unchanged when the message has no attachment refs', () => {
+    const content = '```notes.txt\nordinary message\n```';
+    expect(collectCompactionUserMessages(undefined, [{ role: 'user', content }])).toEqual([content]);
+    expect(
+      collectCompactionUserMessages(undefined, [
+        { role: 'user', content: [{ type: 'image_url', image_url: { url: 'data:image/png;base64,x' } }] },
+      ]),
+    ).toEqual([]);
+  });
+
   it('gives later requests their full budget regardless of the first request', () => {
     const later = (first: string): string[] =>
       collectCompactionUserMessages(undefined, [

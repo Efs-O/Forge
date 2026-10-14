@@ -10,6 +10,14 @@
  */
 
 import type { ChatMessage, ContentPart } from '../llm/types';
+import { fenceTextAttachment } from './ConversationOps';
+
+export type TextAttachmentNoteMode = 'note' | { maxChars: number };
+
+export type TextWithImageNotesOptions = ImageStripOptions & {
+  textAttachments?: TextAttachmentNoteMode;
+  includeImageNotes?: boolean;
+};
 
 /**
  * The phrase both persist notes share. A restored conversation carries these as
@@ -121,11 +129,60 @@ export function stripImageParts(
  * text-only consumers (the compaction summarizer) of a message that may carry
  * images; the stored message is not touched.
  */
-export function textWithImageNotes(message: ChatMessage, options: ImageStripOptions): string {
-  if (typeof message.content === 'string') return message.content;
+function textAttachmentNote(name: string, bytes: number): string {
+  return `[attached file ${name}, ${bytes} bytes — not kept in compacted context; ask the user to re-attach it if it is needed]`;
+}
+
+function replaceTextAttachment(
+  text: string,
+  name: string,
+  bytes: number,
+  mode: TextAttachmentNoteMode,
+): string | undefined {
+  const prefix = `\`\`\`${name}\n`;
+  const suffix = '\n```';
+  if (
+    !text.startsWith(prefix) ||
+    !text.endsWith(suffix) ||
+    text.length < prefix.length + suffix.length
+  ) {
+    return undefined;
+  }
+  const data = text.slice(prefix.length, -suffix.length);
+  if (fenceTextAttachment(name, data) !== text) return undefined;
+  const note = textAttachmentNote(name, bytes);
+  return mode === 'note' ? note : `${note}\n${data.slice(0, mode.maxChars)}`;
+}
+
+function replaceTextAttachments(
+  text: string,
+  message: ChatMessage,
+  mode: TextAttachmentNoteMode | undefined,
+): string {
+  if (!mode || !message.attachments?.length) return text;
+  for (const attachment of message.attachments) {
+    if (attachment.mediaType.startsWith('image/')) continue;
+    const replacement = replaceTextAttachment(text, attachment.name, attachment.bytes, mode);
+    if (replacement !== undefined) return replacement;
+  }
+  return text;
+}
+
+export function textWithImageNotes(
+  message: ChatMessage,
+  options: TextWithImageNotesOptions,
+): string {
+  if (typeof message.content === 'string') {
+    return replaceTextAttachments(message.content, message, options.textAttachments);
+  }
   if (!Array.isArray(message.content)) return '';
-  return replaceIn(message.content, options, message.role)
-    .map((part) => (part.type === 'text' ? part.text : ''))
+  return message.content
+    .map((part) => {
+      if (part.type === 'image_url') {
+        return options.includeImageNotes === false ? '' : noteFor(options, message.role);
+      }
+      return replaceTextAttachments(part.text, message, options.textAttachments);
+    })
     .join('\n');
 }
 

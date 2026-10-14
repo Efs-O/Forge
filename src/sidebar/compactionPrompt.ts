@@ -58,7 +58,10 @@ function formatSummaryMessage(message: ChatMessage, sourceMaxChars: number): str
       ? message.content
       : message.content === null
         ? '[no visible assistant text]'
-        : textWithImageNotes(message, { reason: 'summarized' });
+        : textWithImageNotes(message, {
+            reason: 'summarized',
+            textAttachments: { maxChars: 2000 },
+          });
   const body =
     message.role === 'tool'
       ? compactToolOutput(

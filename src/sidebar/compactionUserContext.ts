@@ -8,6 +8,7 @@
  */
 
 import type { ChatMessage } from '../llm/types';
+import { textWithImageNotes } from './imageParts';
 
 export const USER_CONTEXT_MAX_MESSAGES = 24;
 export const USER_CONTEXT_MESSAGE_MAX_CHARS = 4000;
@@ -27,13 +28,11 @@ function truncate(text: string, max: number): string {
 
 function userText(message: ChatMessage): string | undefined {
   if (message.role !== 'user' || message.internal) return undefined;
-  if (typeof message.content === 'string') return message.content.trim() || undefined;
-  if (!Array.isArray(message.content)) return undefined;
-  const text = message.content
-    .filter((part) => part.type === 'text')
-    .map((part) => part.text)
-    .join('\n')
-    .trim();
+  const text = textWithImageNotes(message, {
+    reason: 'summarized',
+    textAttachments: 'note',
+    includeImageNotes: false,
+  }).trim();
   return text || undefined;
 }
 
