@@ -1,5 +1,9 @@
 # Forge — Recent Changes
 
+## 0.17.31
+
+- New model/group key `thinking_off_effort`: the `reasoning_effort` Forge sends when it turns thinking off (the compaction summary). openai-compatible providers default to `none`; xAI, OpenRouter and OpenAI send nothing extra unless it is set, because their models name effort levels differently.
+
 ## 0.17.30
 
 - Compaction prices images at their token cost instead of their base64 length. Photo-heavy conversations were measured as millions of characters and refused with "no summary could shrink" before any model call.
