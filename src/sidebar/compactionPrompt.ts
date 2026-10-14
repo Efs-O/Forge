@@ -32,7 +32,11 @@ const PREVIOUS_SUMMARY_MAX_CHARS = COMPACTION_SUMMARY_MAX_CHARS;
 const TOOL_CALL_METADATA_MAX_CHARS = 1200;
 
 function truncateText(text: string, limit: number): string {
-  return text.length <= limit ? text : `${text.slice(0, limit)}\n…[truncated]`;
+  if (text.length <= limit) return text;
+  const marker = '\n…[middle omitted]…\n';
+  const room = Math.max(0, limit - marker.length);
+  const head = Math.ceil(room / 2);
+  return `${text.slice(0, head)}${marker}${text.slice(-(room - head))}`;
 }
 
 /** Bound re-fetchable tool output while retaining its start and final status. */
@@ -354,15 +358,13 @@ function planSnapshotBlock(plan: readonly PlanItem[] | undefined): string {
 }
 
 /** Share of the enforced ceiling the summary is asked to aim for. */
-const SUMMARY_TARGET_SHARE = 0.6;
+const SUMMARY_TARGET_SHARE = 0.75;
 
 /**
  * The length rule, in the characters the runner enforces.
  *
- * A token target was converted at ~3.8 chars/token by the model and checked at
- * 2.5 by the allowance, so a summary that met its target landed within 5% of
- * the hard cap. One unit on both sides, and the ceiling named as the limit
- * that rejects the summary.
+ * The summary has a reserved share, and the prompt asks for 75% of it so the
+ * model has useful room without treating the entire ceiling as its target.
  */
 export function summaryLengthRule(summaryMaxChars: number): string {
   const target = Math.floor(summaryMaxChars * SUMMARY_TARGET_SHARE);
@@ -379,11 +381,36 @@ export function buildSummaryPrompt(
   recordedFacts = '',
   userContext = '',
   plan: readonly PlanItem[] | undefined = undefined,
-  budget?: { sourceMaxChars: number; summaryMaxChars?: number },
+  budget?: {
+    sourceMaxChars: number;
+    summaryMaxChars?: number;
+    previousSummaryMaxChars?: number;
+  },
 ): string {
-  const previous = previousSummary
-    ? `EARLIER SUMMARY:\n${truncateText(previousSummary, budget ? Math.floor(budget.sourceMaxChars * 0.1) : PREVIOUS_SUMMARY_MAX_CHARS)}\n\n`
-    : '';
+  let earlierSummary = previousSummary ?? '';
+  const previousLimit =
+    budget?.previousSummaryMaxChars ?? budget?.summaryMaxChars ?? PREVIOUS_SUMMARY_MAX_CHARS;
+  if (earlierSummary.length > previousLimit) {
+    const nextStartMatch = /(?:^|\n)(?:#{1,6}\s*)?(?:\*\*)?Next\b/iu.exec(earlierSummary);
+    if (nextStartMatch && nextStartMatch.index !== undefined) {
+      const start = nextStartMatch.index + (nextStartMatch[0].startsWith('\n') ? 1 : 0);
+      const remainder = earlierSummary.slice(start);
+      const nextEndMatch =
+        /\n(?:#{1,6}\s*)?(?:\*\*)?(?:Goal|State|Files|Constraints|Errors|Reference)\b/iu.exec(
+          remainder,
+        );
+      const nextSection = nextEndMatch ? remainder.slice(0, nextEndMatch.index) : remainder;
+      const marker = '\n…[earlier summary shortened]…\n';
+      const nextLimit = Math.max(1, Math.floor((previousLimit - marker.length) / 2));
+      const keptNext = truncateText(nextSection, nextLimit);
+      const headLimit = Math.max(0, previousLimit - keptNext.length - marker.length);
+      const head = earlierSummary.slice(0, start).slice(0, headLimit);
+      earlierSummary = `${head}${marker}${keptNext}`;
+    } else {
+      earlierSummary = truncateText(earlierSummary, previousLimit);
+    }
+  }
+  const previous = earlierSummary ? `EARLIER SUMMARY:\n${earlierSummary}\n\n` : '';
   const sourceMaxChars = budget?.sourceMaxChars ?? SUMMARY_SOURCE_MAX_CHARS;
   const transcript = capSummarySource(
     messages.map((message) => formatSummaryMessage(message, sourceMaxChars)),
@@ -403,10 +430,8 @@ export function buildSummaryPrompt(
     // One name for one artifact, matching SUMMARY_PREAMBLE and RESUME_PROMPT.
     'Create a compact conversation summary for the same repository.\n\n' +
     'Use only facts present below. ' +
-    'Merge the earlier summary into this one and condense it on every compaction. ' +
-    'Completed work should shrink to one line per item; drop superseded decisions and resolved ' +
-    'errors. Keep open work and current file state detailed. Keep the summary target fixed across ' +
-    'compactions; do not carry earlier summary prose forward just because it was already summarized. ' +
+    'Carry forward everything from the earlier summary that is still true. Condense finished work ' +
+    'to one line each and drop superseded decisions. The size target is the same every compaction. ' +
     (budget?.summaryMaxChars !== undefined ? summaryLengthRule(budget.summaryMaxChars) : '') +
     'Use all seven headings: Goal, State, Next, Files, Constraints, Errors, Reference. ' +
     // Without this, State became a narrative of the conversation and the

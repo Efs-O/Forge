@@ -5,6 +5,15 @@ import { CHARS_PER_TOKEN } from '../util/contextBudget';
 /** Pessimistic conversion for a proposal that has not been tokenized yet. */
 export const COMPACTION_CHARS_PER_TOKEN = 2.5;
 const SMALL_WINDOW_FLOOR_TOKENS = 20_000;
+const REPLACEMENT_SHARE = 0.12;
+const SUMMARY_SHARE = 0.55;
+const HOST_SHARE = 0.35;
+const TAIL_SHARE = 0.1;
+const MIN_REPLACEMENT_CHARS = 12_000;
+// The 6,000-char host floor cannot fit beside 55% summary and 10% tail shares
+// until R is at least 6,000 / 35%. Keep the shares and floor mutually viable.
+const MIN_STABLE_REPLACEMENT_CHARS = 17_143;
+const MIN_HOST_CHARS = 6_000;
 
 export class SummaryPromptFitError extends Error {
   constructor(message: string) {
@@ -22,6 +31,7 @@ export interface CompactionBudget {
   summaryTargetTokens: number;
   summaryCeilingTokens: number;
   summaryCeilingChars: number;
+  charsPerToken: number;
   tailMaxChars: number;
   hostMaxChars: number;
   replacementMaxChars: number;
@@ -33,15 +43,46 @@ export function compactionBudget(
   modelMaxTokens = 0,
   reasoningTokens = 0,
   charsPerToken = COMPACTION_CHARS_PER_TOKEN,
+  windowTokens?: number,
 ): CompactionBudget {
   const estimatedWindow = Math.ceil(activeWindowChars / CHARS_PER_TOKEN);
   const observedTokens = reportedTokens > 0 ? reportedTokens : estimatedWindow;
-  const policyTokens = Math.max(SMALL_WINDOW_FLOOR_TOKENS, observedTokens);
-  const chars = (fraction: number): number =>
-    Math.floor(policyTokens * fraction * COMPACTION_CHARS_PER_TOKEN);
-  const summaryTargetTokens = Math.max(3_072, Math.floor(policyTokens * 0.06));
-  const summaryCeilingTokens = Math.max(summaryTargetTokens, Math.floor(policyTokens * 0.12));
-  const sourceByPolicy = chars(0.8);
+  // Service calls provide W explicitly. Omitting it preserves the pre-existing
+  // helper contract for non-service callers; the service uses usage only when
+  // W is unknown, as marked by maxTokens=0 in its attempt row.
+  const stableWindow = windowTokens !== undefined;
+  const policyTokens = Math.max(
+    SMALL_WINDOW_FLOOR_TOKENS,
+    stableWindow ? (windowTokens > 0 ? windowTokens : observedTokens) : observedTokens,
+  );
+  const sourceTokens = Math.max(SMALL_WINDOW_FLOOR_TOKENS, observedTokens);
+  const chars = (tokens: number, fraction: number): number =>
+    Math.floor(tokens * fraction * charsPerToken);
+  const replacementMaxChars = stableWindow
+    ? Math.max(MIN_STABLE_REPLACEMENT_CHARS, chars(policyTokens, REPLACEMENT_SHARE))
+    : Math.max(MIN_REPLACEMENT_CHARS, chars(policyTokens, REPLACEMENT_SHARE));
+  const summaryCeilingChars = stableWindow
+    ? Math.floor(replacementMaxChars * SUMMARY_SHARE)
+    : Math.max(MIN_REPLACEMENT_CHARS, chars(policyTokens, REPLACEMENT_SHARE));
+  const tailMaxChars = stableWindow
+    ? Math.floor(replacementMaxChars * TAIL_SHARE)
+    : chars(policyTokens, 0.015);
+  const hostMaxChars = stableWindow
+    ? Math.max(
+        MIN_HOST_CHARS,
+        Math.min(
+          Math.floor(replacementMaxChars * HOST_SHARE),
+          replacementMaxChars - summaryCeilingChars - tailMaxChars,
+        ),
+      )
+    : Math.max(MIN_HOST_CHARS, Math.floor(policyTokens * 0.035 * charsPerToken));
+  const summaryTargetTokens = stableWindow
+    ? Math.floor((summaryCeilingChars * 0.75) / charsPerToken)
+    : Math.max(3_072, Math.floor(policyTokens * 0.06));
+  const summaryCeilingTokens = stableWindow
+    ? Math.floor(summaryCeilingChars / charsPerToken)
+    : Math.max(summaryTargetTokens, Math.floor(policyTokens * REPLACEMENT_SHARE));
+  const sourceByPolicy = stableWindow ? chars(sourceTokens, 0.8) : chars(policyTokens, 0.8);
   // Leave the complete replacement allowance, reasoning reserve, and request margin.
   const sourceByModel =
     modelMaxTokens > 0
@@ -49,7 +90,7 @@ export function compactionBudget(
           0,
           Math.floor(
             (modelMaxTokens - summaryCeilingTokens - reasoningTokens - 6_000) *
-              COMPACTION_CHARS_PER_TOKEN,
+              (stableWindow ? charsPerToken : COMPACTION_CHARS_PER_TOKEN),
           ),
         )
       : sourceByPolicy;
@@ -60,12 +101,11 @@ export function compactionBudget(
     sourceMaxChars: Math.max(24_000, Math.min(sourceByPolicy, sourceByModel)),
     summaryTargetTokens,
     summaryCeilingTokens,
-    summaryCeilingChars: Math.max(12_000, chars(0.12)),
-    tailMaxChars: chars(0.015),
-    // Only the host block uses a measured ratio in Phase 1. Other allowances
-    // intentionally keep the historical conservative conversion.
-    hostMaxChars: Math.max(6_000, Math.floor(policyTokens * 0.035 * charsPerToken)),
-    replacementMaxChars: Math.max(12_000, chars(0.12)),
+    summaryCeilingChars,
+    charsPerToken: stableWindow ? charsPerToken : COMPACTION_CHARS_PER_TOKEN,
+    tailMaxChars,
+    hostMaxChars,
+    replacementMaxChars,
   };
 }
 
@@ -73,7 +113,7 @@ export function compactionBudget(
  * Adds the first request's own allowance on top of the policy budget. Both the
  * host block and the replacement window grow by the same amount, so the extra
  * text takes no room from later requests, recorded actions or the summary
- * (the summary's allowance is replacementMaxChars minus the host floor).
+ * (the summary's allowance remains its reserved share).
  */
 export function withFirstRequestAllowance(
   budget: CompactionBudget,
@@ -133,7 +173,7 @@ export function fitSummaryPrompt(
   let sourceMaxChars = budget.sourceMaxChars;
   for (let attempt = 0; attempt < 8; attempt++) {
     const prompt = build(sourceMaxChars);
-    const estimatedTokens = Math.ceil(prompt.length / COMPACTION_CHARS_PER_TOKEN);
+    const estimatedTokens = Math.ceil(prompt.length / budget.charsPerToken);
     if (
       modelMaxTokens <= 0 ||
       estimatedTokens + outputTokens + reasoningTokens + 6_000 <= modelMaxTokens

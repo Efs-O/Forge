@@ -122,7 +122,14 @@ async function compactOnce(
   const metrics = deps.compactionMetrics?.(conv);
   const modelMax = metrics?.max ?? 0;
   const thinkingTokens = metrics?.reasoningReserve ?? 0;
-  let budget = compactionBudget(reportedContextTokens(conv), beforeChars, modelMax, thinkingTokens);
+  let budget = compactionBudget(
+    reportedContextTokens(conv),
+    beforeChars,
+    modelMax,
+    thinkingTokens,
+    undefined,
+    modelMax,
+  );
   const split = selectCompactionSplit(pending, budget.tailMaxChars);
   if (!split) {
     if (!options.auto) {
@@ -217,6 +224,7 @@ async function compactOnce(
               modelMax,
               thinkingTokens,
               ratio,
+              modelMax,
             ),
             firstRequestExtra,
           ),
@@ -233,7 +241,19 @@ async function compactOnce(
           }),
         render: renderHostBlock,
       });
-      budget = { ...budget, hostMaxChars: hostFit.hostMaxChars };
+      // Host fitting learns the measured chars/token ratio when token_count is
+      // available. Recompute every allowance from that one ratio, not H alone.
+      budget = withFirstRequestAllowance(
+        compactionBudget(
+          reportedContextTokens(conv),
+          beforeChars,
+          modelMax,
+          thinkingTokens,
+          hostFit.charsPerToken,
+          modelMax,
+        ),
+        firstRequestExtra,
+      );
       attemptHostFields = {
         hostChars: hostFit.hostChars,
         hostMaxChars: hostFit.hostMaxChars,
@@ -306,9 +326,11 @@ async function compactOnce(
     }
 
     const proposed = groupsNote ? `${summary.trim()}\n\n${groupsNote}` : summary.trim();
-    const summaryAllowance = Math.min(
+    const summaryAllowance = compactionSummaryAllowance(
       budget.summaryCeilingChars,
-      budget.replacementMaxChars - compactionWindowChars(conv.messages, hostContext.candidate('')),
+      budget.replacementMaxChars,
+      0,
+      groupsNote,
     );
     if (proposed.length > summaryAllowance) {
       throw new CompactionFailure(

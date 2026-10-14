@@ -1,11 +1,6 @@
 import type { ChatMessage } from '../llm/types';
 import type { PromptRunOptions } from './PromptRun';
-import {
-  COMPACTION_CHARS_PER_TOKEN,
-  fitSummaryPrompt,
-  planOutput,
-  type CompactionBudget,
-} from './compactionBudget';
+import { fitSummaryPrompt, planOutput, type CompactionBudget } from './compactionBudget';
 import { buildSummaryPrompt, isUsableSummary } from './compactionPrompt';
 import { CompactionFailure } from './compactionFailure';
 import type { PlanItem } from './sessionTypes';
@@ -42,11 +37,11 @@ export function compactionResumeNote(groupsNote: string, hasPlan: boolean): stri
 /** Reserve the resume note from the summary's replacement-window allowance. */
 export function compactionSummaryAllowance(
   summaryCeilingChars: number,
-  replacementMaxChars: number,
-  floorChars: number,
+  _replacementMaxChars: number,
+  _floorChars: number,
   resumeNote: string,
 ): number {
-  return Math.min(summaryCeilingChars, replacementMaxChars - floorChars) - resumeNote.length;
+  return summaryCeilingChars - resumeNote.length;
 }
 
 export interface CompactionSummaryResult {
@@ -66,7 +61,7 @@ function visibleOutputLimit(input: CompactionSummaryInput): number {
     );
   }
   const plan = planOutput(
-    Math.floor(charsBudget / COMPACTION_CHARS_PER_TOKEN),
+    Math.floor(charsBudget / input.budget.charsPerToken),
     input.reasoningTokens,
     input.outputLimitTokens,
   );
@@ -91,7 +86,11 @@ function oneShotPrompt(input: CompactionSummaryInput, outputTokens: number) {
         input.recordedFacts,
         input.userContext,
         input.plan,
-        { sourceMaxChars, summaryMaxChars: input.maximumSummaryChars },
+        {
+          sourceMaxChars,
+          summaryMaxChars: input.maximumSummaryChars,
+          previousSummaryMaxChars: input.budget.summaryCeilingChars,
+        },
       ),
     input.reasoningTokens,
     outputTokens,

@@ -27,7 +27,7 @@ function input(
     modelMaxTokens: 200_000,
     outputLimitTokens: 32_768,
     reasoningTokens: 0,
-    budget: compactionBudget(170_000, 400_000, 200_000),
+    budget: compactionBudget(170_000, 400_000, 200_000, 0, undefined, 200_000),
     maximumSummaryChars: 25_000,
     conversationId: 'c1',
     runPrompt,
@@ -74,7 +74,7 @@ describe('one-shot compaction', () => {
     const prompt = runPrompt.mock.calls[0]![0];
     const ceiling = /Hard limit: (\d+) characters/u.exec(prompt)?.[1];
     expect(Number(ceiling)).toBe(request.maximumSummaryChars);
-    expect(prompt).toContain(`Aim for about ${Math.floor(request.maximumSummaryChars * 0.6)} characters`);
+    expect(prompt).toContain(`Aim for about ${Math.floor(request.maximumSummaryChars * 0.75)} characters`);
     expect(prompt).not.toMatch(/visible tokens/u);
   });
 
@@ -113,13 +113,26 @@ describe('one-shot compaction', () => {
     ).rejects.toThrow(/Reference/u);
   });
 
-  it('budgets 200k and synthetic 400k slots at 6% target and 12% replacement', () => {
-    const twoHundred = compactionBudget(170_000, 400_000, 200_000);
-    expect(twoHundred.summaryTargetTokens).toBe(10_200);
-    expect(twoHundred.replacementMaxChars).toBe(51_000);
-    const fourHundred = compactionBudget(340_000, 850_000, 400_000);
-    expect(fourHundred.summaryTargetTokens).toBe(20_400);
-    expect(fourHundred.replacementMaxChars).toBe(102_000);
+  it('budgets fixed shares from the model window with a 75% summary target', () => {
+    const twoHundred = compactionBudget(170_000, 400_000, 200_000, 0, undefined, 200_000);
+    expect(twoHundred.summaryCeilingChars).toBe(33_000);
+    expect(twoHundred.summaryTargetTokens).toBe(9_900);
+    expect(twoHundred.replacementMaxChars).toBe(60_000);
+    expect(twoHundred.hostMaxChars).toBe(21_000);
+    expect(twoHundred.tailMaxChars).toBe(6_000);
+    const fourHundred = compactionBudget(340_000, 850_000, 400_000, 0, undefined, 400_000);
+    expect(fourHundred.summaryCeilingChars).toBe(66_000);
+    expect(fourHundred.summaryTargetTokens).toBe(19_800);
+    expect(fourHundred.replacementMaxChars).toBe(120_000);
     expect(planOutput(10_000, 0, 32_768)).toEqual({ outputTokens: 10_000, requestCap: 10_000 });
+  });
+
+  it('keeps the host floor inside the replacement window at the smallest policy window', () => {
+    const budget = compactionBudget(8_000, 50_000, 20_000, 0, 2.5, 20_000);
+
+    expect(budget.hostMaxChars).toBeGreaterThanOrEqual(6_000);
+    expect(budget.hostMaxChars + budget.summaryCeilingChars + budget.tailMaxChars).toBeLessThanOrEqual(
+      budget.replacementMaxChars,
+    );
   });
 });

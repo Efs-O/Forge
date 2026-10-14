@@ -32,7 +32,7 @@ describe('compaction summary content', () => {
     expect(withPlan).toContain(planLine);
     expect(withoutPlan).not.toContain(planLine);
     expect(compactionSummaryAllowance(12_000, 14_000, 2_000, withPlan)).toBe(
-      Math.min(12_000, 14_000 - 2_000) - withPlan.length,
+      12_000 - withPlan.length,
     );
   });
 
@@ -129,11 +129,10 @@ describe('compaction summary content', () => {
     }
   });
 
-  it('condenses a long earlier summary without changing the summary allowance', () => {
+  it('carries an earlier summary forward whole and keeps the summary target fixed', () => {
     const previousSummary =
-      'Completed edit: file A changed. Superseded choice: use old API. Resolved error: missing import. '.repeat(
-        80,
-      );
+      'Goal: finish the task.\nState: file A is updated.\nNext: run the focused check. ' +
+      'Constraints: preserve the API. Errors: none. Reference: source is src/a.ts.';
     const messages: ChatMessage[] = [{ role: 'user', content: 'Continue the task.' }];
     const allowance = compactionSummaryAllowance(8_000, 12_000, 1_000, 'resume note');
     const prompt = buildSummaryPrompt(
@@ -146,11 +145,49 @@ describe('compaction summary content', () => {
       { sourceMaxChars: 10_000, summaryMaxChars: 4_000 },
     );
 
-    expect(prompt).toContain('Merge the earlier summary into this one and condense it on every compaction.');
-    expect(prompt).toContain('Completed work should shrink to one line per item');
-    expect(prompt).toContain('drop superseded decisions and resolved errors');
-    expect(prompt).toContain('Keep open work and current file state detailed.');
-    expect(prompt).toContain('Keep the summary target fixed across compactions');
+    expect(prompt).toContain(`EARLIER SUMMARY:\n${previousSummary}`);
+    expect(prompt).toContain('Carry forward everything from the earlier summary that is still true.');
+    expect(prompt).toContain('Condense finished work to one line each and drop superseded decisions.');
+    expect(prompt).toContain('The size target is the same every compaction.');
+    expect(prompt).toContain('Aim for about 3000 characters. Hard limit: 4000 characters;');
     expect(compactionSummaryAllowance(8_000, 12_000, 1_000, 'resume note')).toBe(allowance);
+  });
+
+  it('uses the reserved summary share, including the resume note, for the prior summary', () => {
+    const previousSummary = `State: ${'still relevant. '.repeat(250)}`;
+    const prompt = buildSummaryPrompt(
+      'Monday, October 5, 2026 at 14:05',
+      previousSummary,
+      [{ role: 'user', content: 'Continue the task.' }],
+      '',
+      '',
+      undefined,
+      { sourceMaxChars: 10_000, summaryMaxChars: 4_000, previousSummaryMaxChars: 5_000 },
+    );
+
+    expect(prompt).toContain(`EARLIER SUMMARY:\n${previousSummary}`);
+  });
+
+  it('shortens a legacy oversized summary while retaining its head and Next section', () => {
+    const previousSummary = [
+      'Goal: preserve the active task.',
+      `State: ${'finished work. '.repeat(80)}`,
+      `Next: ${'continue the exact pending action. '.repeat(40)}`,
+      `Files: ${'src/a.ts '.repeat(80)}`,
+    ].join('\n');
+    const prompt = buildSummaryPrompt(
+      'Monday, October 5, 2026 at 14:05',
+      previousSummary,
+      [{ role: 'user', content: 'Continue the task.' }],
+      '',
+      '',
+      undefined,
+      { sourceMaxChars: 10_000, summaryMaxChars: 800 },
+    );
+
+    expect(prompt).toContain('Goal: preserve the active task.');
+    expect(prompt).toContain('Next:');
+    expect(prompt).toContain('continue the exact pending action.');
+    expect(prompt).not.toContain('Files: src/a.ts');
   });
 });
