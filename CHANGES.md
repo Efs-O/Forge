@@ -1,6 +1,6 @@
 # Forge — Recent Changes
 
-## Unreleased
+## 0.17.32
 
 - Compaction sizes the summary, host facts and retained tail from the model's per-slot window, not from how full the window happened to be. Each allowance is a fixed share, so the summary no longer shrinks with every compaction.
 - An earlier summary is carried forward whole. One from an older build that is over the new size keeps its opening and its Next section.
