@@ -24,6 +24,7 @@ const SCALAR_GROUP_KEYS = [
   'num_ctx',
   'think',
   'reasoning_effort',
+  'thinking_off_effort',
   'strip_tools',
   'strip_thinking_channels',
   'system_prompt',

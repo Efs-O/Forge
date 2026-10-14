@@ -297,6 +297,31 @@ describe('runPromptToMarkdown options', () => {
     expect(sent.chat_template_kwargs).toBeUndefined();
   });
 
+  it('sends a cloud group its configured thinking_off_effort when thinking is off', async () => {
+    const withXaiGroup = (): ForgeConfig => {
+      const base = config();
+      return {
+        ...base,
+        groups: { ...base.groups, xai: { provider: 'xai', thinking_off_effort: 'none' } },
+        models: [
+          ...base.models,
+          { name: 'grok', group: 'xai', endpoint: 'https://api.x.ai', api_key_secret: 'xai' },
+        ],
+      } as unknown as ForgeConfig;
+    };
+    const run = (disableThinking: boolean) =>
+      runPromptToMarkdown(
+        { ...ctx(), getConfig: withXaiGroup, secrets: { get: async () => 'k' } as never },
+        'summarize',
+        'c1',
+        { modelName: 'grok', outputTokens: 4_000, reasoningEffort: 'low', disableThinking },
+      );
+    await run(true);
+    expect(sent.reasoning_effort).toBe('none');
+    await run(false);
+    expect(sent.reasoning_effort).toBe('low');
+  });
+
   it('names the budget when a reply is all thinking and no answer', async () => {
     streamModelChatCompletion.mockImplementation(
       (_u: string, request: ChatCompletionRequest, _m: unknown, handlers: any) => {

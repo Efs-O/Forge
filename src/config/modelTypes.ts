@@ -65,6 +65,8 @@ export interface GroupConfig {
   num_ctx?: number;
   think?: boolean;
   reasoning_effort?: 'xhigh' | 'high' | 'medium' | 'low' | 'none';
+  /** reasoning_effort sent when Forge turns thinking off (the compaction summary). See ModelConfig. */
+  thinking_off_effort?: 'xhigh' | 'high' | 'medium' | 'low' | 'none';
   strip_tools?: boolean;
   strip_thinking_channels?: boolean;
   system_prompt?: string;
@@ -199,6 +201,14 @@ export interface ModelConfig {
   chat_template_thinking?: boolean;
   /** Ollama reasoning effort level when think is enabled. */
   reasoning_effort?: 'xhigh' | 'high' | 'medium' | 'low' | 'none';
+  /**
+   * The `reasoning_effort` Forge sends when it turns thinking off for a request
+   * (today: the compaction summary when its budget reserves no reasoning tokens).
+   * openai-compatible defaults to 'none'. xai/openrouter/openai name their effort
+   * levels differently, so Forge sends nothing extra for them unless this is set.
+   * llama.cpp and Ollama use `enable_thinking: false` and ignore it.
+   */
+  thinking_off_effort?: 'xhigh' | 'high' | 'medium' | 'low' | 'none';
   /** Request-time profiles exposed for this model; [] disables them. */
   profiles?: string[];
   /** When true, strip visible thinking/channel markup when think is explicitly false. */

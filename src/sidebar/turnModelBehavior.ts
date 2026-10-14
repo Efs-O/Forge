@@ -31,7 +31,9 @@ export function canUseThinkingKwargs(
  * an explicit `false`, and maps it to Ollama's `think: false`). Self-hosted
  * OpenAI-compatible servers take `reasoning_effort: 'none'` (Strata maps it to
  * `enable_thinking: false`). The named cloud providers accept different effort
- * vocabularies per model, so a value that one model rejects is not guessed.
+ * vocabularies per model, so a value that one model rejects is not guessed:
+ * they get one only from the model's `thinking_off_effort`, which also
+ * overrides openai-compatible's 'none'.
  */
 export function thinkingOffFields(
   model: ModelConfig,
@@ -39,6 +41,9 @@ export function thinkingOffFields(
   const provider = model.provider ?? 'llama.cpp';
   if (provider === 'llama.cpp' || provider === 'ollama') {
     return { chat_template_kwargs: { enable_thinking: false } };
+  }
+  if (model.thinking_off_effort !== undefined) {
+    return { reasoning_effort: model.thinking_off_effort };
   }
   if (provider === 'openai-compatible') return { reasoning_effort: 'none' };
   return undefined;

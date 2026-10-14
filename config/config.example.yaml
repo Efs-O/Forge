@@ -175,6 +175,12 @@ groups:
   xai-cloud:
     provider: xai
     sampling: { temperature: 0.7 }
+    # reasoning_effort Forge sends when it turns thinking off (the compaction
+    # summary, when its budget reserves no reasoning tokens). Unset on xai /
+    # openrouter / openai: Forge sends nothing extra, because their models name
+    # effort levels differently. openai-compatible defaults to none; llama.cpp
+    # and Ollama use enable_thinking: false instead.
+    # thinking_off_effort: low
   llamacpp-qwen3:
     spawn:
       num_ctx: 100000

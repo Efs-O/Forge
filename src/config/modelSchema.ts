@@ -106,6 +106,7 @@ export const ModelConfigSchema = z.object({
   think: z.boolean().optional(),
   chat_template_thinking: z.boolean().optional(),
   reasoning_effort: ReasoningEffortSchema.optional(),
+  thinking_off_effort: ReasoningEffortSchema.optional(),
   strip_thinking_channels: z.boolean().optional(),
   api_key_secret: z.string().min(1).optional(),
   // F6 additions

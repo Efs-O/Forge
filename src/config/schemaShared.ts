@@ -67,6 +67,7 @@ export const GroupSchema = z.object({
   num_ctx: z.number().int().positive().optional(),
   think: z.boolean().optional(),
   reasoning_effort: ReasoningEffortSchema.optional(),
+  thinking_off_effort: ReasoningEffortSchema.optional(),
   strip_tools: z.boolean().optional(),
   strip_thinking_channels: z.boolean().optional(),
   system_prompt: z.string().optional(),
