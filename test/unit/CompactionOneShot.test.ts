@@ -1,7 +1,11 @@
 import { describe, expect, it, vi } from 'vitest';
 import type { ChatMessage } from '../../src/llm/types';
 import { compactionBudget, planOutput } from '../../src/sidebar/compactionBudget';
-import { summarizeCompaction } from '../../src/sidebar/compactionSummaryRunner';
+import { fitSummaryToChars, missingSummarySections } from '../../src/sidebar/compactionPrompt';
+import {
+  compactionSummaryAllowance,
+  summarizeCompaction,
+} from '../../src/sidebar/compactionSummaryRunner';
 import { PromptIncompleteError } from '../../src/sidebar/PromptRun';
 import type { PromptRunOptions } from '../../src/sidebar/PromptRun';
 
@@ -74,16 +78,20 @@ describe('one-shot compaction', () => {
     const prompt = runPrompt.mock.calls[0]![0];
     const ceiling = /Hard limit: (\d+) characters/u.exec(prompt)?.[1];
     expect(Number(ceiling)).toBe(request.maximumSummaryChars);
-    expect(prompt).toContain(`Aim for about ${Math.floor(request.maximumSummaryChars * 0.75)} characters`);
+    expect(prompt).toContain(
+      `Aim for about ${Math.floor(request.maximumSummaryChars * 0.75)} characters`,
+    );
     expect(prompt).not.toMatch(/visible tokens/u);
   });
 
-  it('rejects a summary one character over the ceiling the prompt named', async () => {
+  it('cuts a summary over the ceiling the prompt named down to it', async () => {
     const request = input(messages, async () => note);
     const over = `${note}${'x'.repeat(Math.max(0, request.maximumSummaryChars - note.length + 1))}`;
-    await expect(
-      summarizeCompaction({ ...request, runPrompt: async () => over }),
-    ).rejects.toThrow(new RegExp(`${request.maximumSummaryChars}-character allocation`, 'u'));
+    const result = await summarizeCompaction({ ...request, runPrompt: async () => over });
+    expect(result.summary.length).toBeLessThanOrEqual(request.maximumSummaryChars);
+    expect(result.cutFromChars).toBe(over.length);
+    expect(result.summary).toContain('Next: continue the approved task.');
+    expect(result.summary).toContain('[shortened to fit]');
   });
 
   it('keeps a length stop as a failure without a second request', async () => {
@@ -131,8 +139,103 @@ describe('one-shot compaction', () => {
     const budget = compactionBudget(8_000, 50_000, 20_000, 0, 2.5, 20_000);
 
     expect(budget.hostMaxChars).toBeGreaterThanOrEqual(6_000);
-    expect(budget.hostMaxChars + budget.summaryCeilingChars + budget.tailMaxChars).toBeLessThanOrEqual(
-      budget.replacementMaxChars,
+    expect(
+      budget.hostMaxChars + budget.summaryCeilingChars + budget.tailMaxChars,
+    ).toBeLessThanOrEqual(budget.replacementMaxChars);
+  });
+});
+
+describe('fitSummaryToChars', () => {
+  const sections = [
+    `Goal: ${'g'.repeat(300)}`,
+    `State: ${'s'.repeat(5_000)}`,
+    `Next: ${'n'.repeat(300)}`,
+    `Files: ${'f'.repeat(200)}`,
+    'Constraints: none recorded',
+    'Errors: none recorded',
+    `Reference: ${'r'.repeat(8_000)}`,
+  ].join('\n');
+
+  it('returns a summary within the limit unchanged', () => {
+    expect(fitSummaryToChars(sections, sections.length)).toBe(sections);
+  });
+
+  it('cuts the longest bodies first, keeps every heading and Goal and Next whole', () => {
+    const fitted = fitSummaryToChars(sections, 4_000)!;
+    expect(fitted.length).toBeLessThanOrEqual(4_000);
+    for (const heading of [
+      'Goal:',
+      'State:',
+      'Next:',
+      'Files:',
+      'Constraints:',
+      'Errors:',
+      'Reference:',
+    ])
+      expect(fitted).toContain(heading);
+    expect(fitted).toContain(`Goal: ${'g'.repeat(300)}`);
+    expect(fitted).toContain(`Next: ${'n'.repeat(300)}`);
+    expect(fitted).toContain(`Files: ${'f'.repeat(200)}`);
+    expect(fitted.match(/shortened to fit/gu)).toHaveLength(2);
+  });
+
+  it('cuts Goal and Next too when the other sections cannot make room', () => {
+    const fitted = fitSummaryToChars(sections, 400)!;
+    expect(fitted.length).toBeLessThanOrEqual(400);
+    expect(fitted).toContain('Next:');
+  });
+
+  it('closes a code fence the cut left open', () => {
+    const fence = '`'.repeat(3);
+    const fenced = sections.replace(
+      `Reference: ${'r'.repeat(8_000)}`,
+      `Reference:\n${fence}ts\n${'const x = 1;\n'.repeat(700)}${fence}`,
     );
+    const fitted = fitSummaryToChars(fenced, 4_000)!;
+    expect(fitted.length).toBeLessThanOrEqual(4_000);
+    expect(fitted.split('\n').filter((line) => line.startsWith(fence)).length % 2).toBe(0);
+  });
+
+  it('does not take prose at a line start for a heading', () => {
+    const prose = sections.replace(
+      `State: ${'s'.repeat(5_000)}`,
+      `State: ${'s'.repeat(2_500)}\nNext, run the tests ${'p'.repeat(2_500)}`,
+    );
+    const fitted = fitSummaryToChars(prose, 4_000)!;
+    // Only the real Next is kept whole; the prose line is State's body and is cut.
+    expect(fitted).toContain(`Next: ${'n'.repeat(300)}`);
+    expect(fitted).not.toContain(`Next, run the tests ${'p'.repeat(2_500)}`);
+  });
+
+  it('accepts singular and plural section names and rejects prose ones', () => {
+    const plural = [
+      '## Goals',
+      'Ship it.',
+      '## State',
+      'Done.',
+      '## Next',
+      'none.',
+      '## File',
+      'a.ts',
+      '## Constraint',
+      'none',
+      '## Error',
+      'none',
+      '## References',
+      'none',
+    ].join('\n');
+    expect(missingSummarySections(plural)).toEqual([]);
+    expect(
+      missingSummarySections(['Goal: a', 'State of the art', 'Next, run it'].join('\n')),
+    ).toEqual(['State', 'Next', 'Files', 'Constraints', 'Errors', 'Reference']);
+  });
+
+  it('gives up only when the headings alone do not fit', () => {
+    expect(fitSummaryToChars(sections, 20)).toBeUndefined();
+  });
+
+  it('subtracts the resume note and its joining blank line from the allowance', () => {
+    expect(compactionSummaryAllowance(1_000, '')).toBe(1_000);
+    expect(compactionSummaryAllowance(1_000, 'abc')).toBe(995);
   });
 });

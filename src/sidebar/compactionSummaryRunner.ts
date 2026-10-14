@@ -1,7 +1,12 @@
 import type { ChatMessage } from '../llm/types';
 import type { PromptRunOptions } from './PromptRun';
 import { fitSummaryPrompt, planOutput, type CompactionBudget } from './compactionBudget';
-import { buildSummaryPrompt, isUsableSummary } from './compactionPrompt';
+import {
+  buildSummaryPrompt,
+  fitSummaryToChars,
+  isUsableSummary,
+  missingSummarySections,
+} from './compactionPrompt';
 import { CompactionFailure } from './compactionFailure';
 import type { PlanItem } from './sessionTypes';
 
@@ -37,14 +42,15 @@ export function compactionResumeNote(groupsNote: string, hasPlan: boolean): stri
 }
 
 /**
- * The summary's reserved share less the resume note. Fixed per model: it does
- * not depend on the host block or the tail, so it cannot drift by generation.
+ * The summary's reserved share less the resume note and the blank line that
+ * joins them. Fixed per model: it does not depend on the host block or the
+ * tail, so it cannot drift by generation.
  */
 export function compactionSummaryAllowance(
   summaryCeilingChars: number,
   resumeNote: string,
 ): number {
-  return summaryCeilingChars - resumeNote.length;
+  return summaryCeilingChars - (resumeNote ? resumeNote.length + 2 : 0);
 }
 
 export interface CompactionSummaryResult {
@@ -53,6 +59,8 @@ export interface CompactionSummaryResult {
   method: 'one-shot';
   calls: number;
   outputTokens: number;
+  /** The written length, when the summary was cut down to its allowance. */
+  cutFromChars?: number;
 }
 
 function visibleOutputLimit(input: CompactionSummaryInput): number {
@@ -145,11 +153,12 @@ async function summarizeCompactionCounted(
 ): Promise<CompactionSummaryResult> {
   const outputTokens = visibleOutputLimit(input);
   const { prompt } = oneShotPrompt(input, outputTokens);
-  const summary = (await runOneShot(input, prompt, outputTokens)).trim();
-  if (summary.length > input.maximumSummaryChars) {
+  const written = (await runOneShot(input, prompt, outputTokens)).trim();
+  const summary = fitSummaryToChars(written, input.maximumSummaryChars);
+  if (summary === undefined) {
     throw new CompactionFailure(
       'budget-refusal',
-      `Summary exceeds its ${input.maximumSummaryChars}-character allocation; previous context kept.`,
+      `Summary exceeds its ${input.maximumSummaryChars}-character allocation even with every section cut; previous context kept.`,
     );
   }
   if (!isUsableSummary(summary)) {
@@ -158,14 +167,21 @@ async function summarizeCompactionCounted(
       'The summarizer returned no usable summary; previous context kept.',
     );
   }
-  const missing = ['Goal', 'State', 'Next', 'Files', 'Constraints', 'Errors', 'Reference'].filter(
-    (heading) => !new RegExp(`(?:^|\\n)\\s*#{0,6}\\s*(?:\\*\\*)?${heading}\\b`, 'iu').test(summary),
-  );
+  // The same heading rule the cut used, so a cut can never drop a heading the
+  // check counted.
+  const missing = missingSummarySections(summary);
   if (missing.length > 0) {
     throw new CompactionFailure(
       'invalid-summary',
       `Summary is missing required sections: ${missing.join(', ')}; previous context kept.`,
     );
   }
-  return { summary, prompt, method: 'one-shot', calls: 1, outputTokens };
+  return {
+    summary,
+    prompt,
+    method: 'one-shot',
+    calls: 1,
+    outputTokens,
+    ...(summary.length < written.length ? { cutFromChars: written.length } : {}),
+  };
 }

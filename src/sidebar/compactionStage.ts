@@ -173,7 +173,7 @@ export async function runCompactionStage(
     ...(input.floorMode ? { floorMode: true } : {}),
   });
   log.info(
-    `[compact] budget P=${budget.policyTokens} (${budget.estimated ? 'estimated' : 'reported'}), host~${Math.ceil(hostFit.hostChars / COMPACTION_CHARS_PER_TOKEN)}, tail~${Math.ceil(tailChars / COMPACTION_CHARS_PER_TOKEN)}, output_cap=${summaryRun.outputTokens}, summary_max_chars=${summaryAllowance}, method=${summaryRun.method}, calls=${summaryRun.calls}${input.floorMode ? ', floor_mode' : ''}`,
+    `[compact] budget P=${budget.policyTokens} (${budget.estimated ? 'estimated' : 'reported'}), host~${Math.ceil(hostFit.hostChars / COMPACTION_CHARS_PER_TOKEN)}, tail~${Math.ceil(tailChars / COMPACTION_CHARS_PER_TOKEN)}, output_cap=${summaryRun.outputTokens}, summary_max_chars=${summaryAllowance}, method=${summaryRun.method}, calls=${summaryRun.calls}${input.floorMode ? ', floor_mode' : ''}${summaryRun.cutFromChars ? `, summary_cut_from=${summaryRun.cutFromChars}` : ''}`,
   );
   return {
     kind: 'summarized',

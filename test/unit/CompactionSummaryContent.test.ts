@@ -37,7 +37,8 @@ describe('compaction summary content', () => {
 
     expect(withPlan).toContain(planLine);
     expect(withoutPlan).not.toContain(planLine);
-    expect(compactionSummaryAllowance(12_000, withPlan)).toBe(12_000 - withPlan.length);
+    // The note is joined to the summary with a blank line.
+    expect(compactionSummaryAllowance(12_000, withPlan)).toBe(12_000 - withPlan.length - 2);
   });
 
   it('keeps an attachment note and only its first 2,000 chars in summarizer input', () => {

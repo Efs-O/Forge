@@ -1,5 +1,10 @@
 # Forge — Recent Changes
 
+## Unreleased
+
+- A compaction summary longer than its allowance is cut down to fit instead of failing with "Summary exceeds its N-character allocation". Every section keeps its heading; the longest sections are shortened first, and Goal and Next are kept whole when the others can make room. The output cap is sized at 2.5 characters per token, so it could not stop a model writing ordinary prose from passing the character limit.
+- With a plan open, the summary allowance no longer counts the plan note twice.
+
 ## 0.17.32
 
 - Compaction sizes the summary, host facts and retained tail from the model's per-slot window, not from how full the window happened to be. Each allowance is a fixed share, so the summary no longer shrinks with every compaction.

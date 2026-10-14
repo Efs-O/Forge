@@ -72,8 +72,127 @@ export function summaryLengthRule(summaryMaxChars: number): string {
   const target = Math.floor(summaryMaxChars * SUMMARY_TARGET_SHARE);
   return (
     `Aim for about ${target} characters. Hard limit: ${summaryMaxChars} characters; ` +
-    'a longer summary is rejected and the compaction fails. '
+    'a longer summary is cut down to fit and loses detail. '
   );
+}
+
+/** The seven required sections, each with the spellings models actually write. */
+const REQUIRED_SECTIONS = [
+  ['Goal', 'Goals?'],
+  ['State', 'State'],
+  ['Next', 'Next'],
+  ['Files', 'Files?'],
+  ['Constraints', 'Constraints?'],
+  ['Errors', 'Errors?'],
+  ['Reference', 'References?'],
+] as const;
+
+/**
+ * A heading line: the name, then a colon or dash or the end of the line. The
+ * terminator is what keeps prose such as "Next, run the tests" or "State of
+ * the art…" at a line start from being read as a section.
+ */
+function headingPattern(names: string): RegExp {
+  return new RegExp(
+    `^[ \\t]*#{0,6}[ \\t]*(?:\\*\\*)?(${names})(?:\\*\\*)?[ \\t]*(?:[:\\-–—]|$)`,
+    'imu',
+  );
+}
+
+const SUMMARY_SECTION_HEADING = headingPattern(REQUIRED_SECTIONS.map(([, re]) => re).join('|'));
+
+/** The required sections a summary does not head. */
+export function missingSummarySections(summary: string): string[] {
+  return REQUIRED_SECTIONS.filter(([, re]) => !headingPattern(re).test(summary)).map(
+    ([name]) => name,
+  );
+}
+
+const SECTION_CUT_MARKER = '\n…[shortened to fit]…';
+
+interface SummarySection {
+  heading: string;
+  body: string;
+  keepWhole: boolean;
+}
+
+/** The heading token at the start of a section, e.g. `## **State:**`. */
+const SECTION_HEADING_TOKEN = new RegExp(
+  `^[ \\t]*#{0,6}[ \\t]*(?:\\*\\*)?(${REQUIRED_SECTIONS.map(([, re]) => re).join('|')})(?:\\*\\*)?(?::(?:\\*\\*)?)?`,
+  'iu',
+);
+
+/** A body cut to `cap`, never splitting a surrogate pair or leaving a code fence open. */
+function cutBody(body: string, cap: number): string {
+  let end = cap;
+  const code = body.charCodeAt(end - 1);
+  if (end > 0 && code >= 0xd800 && code <= 0xdbff) end -= 1;
+  const kept = body.slice(0, end).trimEnd();
+  const fenceOpen = (kept.match(/^[ \t]*```/gmu)?.length ?? 0) % 2 === 1;
+  return `${kept}${fenceOpen ? '\n```' : ''}`;
+}
+
+function splitSummarySections(text: string): SummarySection[] {
+  const sections: SummarySection[] = [];
+  const first = SUMMARY_SECTION_HEADING.exec(text);
+  if (!first) return [{ heading: '', body: text, keepWhole: false }];
+  if (first.index > 0)
+    sections.push({ heading: '', body: text.slice(0, first.index), keepWhole: false });
+  let rest = text.slice(first.index);
+  while (rest) {
+    const token = SECTION_HEADING_TOKEN.exec(rest);
+    const heading = token?.[0] ?? '';
+    const name = token?.[1]?.toLowerCase() ?? '';
+    const after = rest.slice(heading.length);
+    // A heading starts a line, so the search begins at the next line: "Next:
+    // State the fix" is one section, not two.
+    const lineEnd = after.indexOf('\n');
+    const next = lineEnd === -1 ? null : SUMMARY_SECTION_HEADING.exec(after.slice(lineEnd));
+    const body = next ? after.slice(0, lineEnd + next.index) : after;
+    sections.push({ heading, body, keepWhole: name.startsWith('goal') || name === 'next' });
+    rest = after.slice(body.length);
+  }
+  return sections;
+}
+
+function joinWithCap(sections: readonly SummarySection[], cap: number, all: boolean): string {
+  return sections
+    .map(({ heading, body, keepWhole }) =>
+      (keepWhole && !all) || body.length <= cap
+        ? `${heading}${body}`
+        : `${heading}${cutBody(body, cap)}${SECTION_CUT_MARKER}\n`,
+    )
+    .join('');
+}
+
+/**
+ * Cut an over-long summary down to `maxChars` instead of refusing it.
+ *
+ * The output cap is sized at 2.5 characters per token, so it cannot stop a
+ * model writing prose at 4 per token from passing the character ceiling, and
+ * models do not count characters. Refusing then threw away a usable summary
+ * and kept a window that was already over its threshold. Every section keeps
+ * its heading; the longest bodies are cut to one shared length, with Goal and
+ * Next kept whole unless the others cannot make room. Returns undefined only
+ * when the headings alone do not fit.
+ */
+export function fitSummaryToChars(summary: string, maxChars: number): string | undefined {
+  const text = summary.trim();
+  if (text.length <= maxChars) return text;
+  const sections = splitSummarySections(text);
+  const longest = Math.max(...sections.map((s) => s.body.length));
+  for (const all of [false, true]) {
+    if (joinWithCap(sections, 0, all).trim().length > maxChars) continue;
+    let low = 0;
+    let high = longest;
+    while (low < high) {
+      const mid = Math.ceil((low + high) / 2);
+      if (joinWithCap(sections, mid, all).trim().length <= maxChars) low = mid;
+      else high = mid - 1;
+    }
+    return joinWithCap(sections, low, all).trim();
+  }
+  return undefined;
 }
 
 export function buildSummaryPrompt(

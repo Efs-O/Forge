@@ -24,7 +24,6 @@ import {
   compactionFailureCategory,
   type CompactionFailureCategory,
 } from './compactionFailure';
-import { compactionSummaryAllowance } from './compactionSummaryRunner';
 import { PromptIncompleteError, type PromptRunOptions } from './PromptRun';
 import { getLogger } from '../util/logger';
 import { floorModeSplit, selectCompactionSplit } from './compactionSplit';
@@ -251,14 +250,15 @@ async function compactOnce(
 
     const { budget, groupsNote, summary } = stage;
     const proposed = groupsNote ? `${summary.trim()}\n\n${groupsNote}` : summary.trim();
-    const summaryAllowance = compactionSummaryAllowance(budget.summaryCeilingChars, groupsNote);
-    if (proposed.length > summaryAllowance) {
+    // The summary was fitted to the ceiling less this note, so the joined
+    // text is measured against the ceiling itself, not the allowance.
+    if (proposed.length > budget.summaryCeilingChars) {
       throw new CompactionFailure(
         'budget-refusal',
-        `Summary exceeds its ${summaryAllowance}-character allocation within the whole-replacement budget; previous context kept.`,
+        `Summary exceeds its ${budget.summaryCeilingChars}-character allocation within the whole-replacement budget; previous context kept.`,
       );
     }
-    const trimmed = capSummary(proposed, summaryAllowance);
+    const trimmed = capSummary(proposed, budget.summaryCeilingChars);
     if (!isUsableSummary(trimmed)) {
       log.info(`[compact] rejected unusable summary (${trimmed.length} chars)`);
       options.onFailureCategory?.('invalid-summary');

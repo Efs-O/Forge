@@ -3,6 +3,7 @@ import { runCompaction, type CompactionDeps } from '../../src/sidebar/Compaction
 import type { CompactionAttemptLogEntry } from '../../src/sidebar/SessionLogger';
 import type { ConversationRuntime } from '../../src/sidebar/sessionTypes';
 import type { ChatMessage } from '../../src/llm/types';
+import { CompactionFailure } from '../../src/sidebar/compactionFailure';
 
 const HEAD = 'Goal: g\nState: s\nNext: n\nFiles: f\nConstraints: c\nErrors: e\nReference: r\n';
 
@@ -12,7 +13,10 @@ const HEAD = 'Goal: g\nState: s\nNext: n\nFiles: f\nConstraints: c\nErrors: e\nR
  * pairs), while floor mode — no tail, older history condensed up front — fits.
  * At 14k even floor mode cannot.
  */
-function harness(modelMax: number, summary = `${HEAD}${'x'.repeat(500)}`) {
+function harness(
+  modelMax: number,
+  summary: () => Promise<string> = async () => `${HEAD}${'x'.repeat(500)}`,
+) {
   const messages: ChatMessage[] = [];
   for (let i = 0; i < 4; i++) {
     messages.push({ role: 'user', content: `request ${i} ${'u'.repeat(3_000)}` });
@@ -28,7 +32,7 @@ function harness(modelMax: number, summary = `${HEAD}${'x'.repeat(500)}`) {
   };
   const rows: CompactionAttemptLogEntry[] = [];
   const posted: Array<{ type: string; message?: string }> = [];
-  const runPrompt = vi.fn(async () => summary);
+  const runPrompt = vi.fn(summary);
   const deps: CompactionDeps = {
     post: (m) => posted.push(m as never),
     getConversation: () => conv,
@@ -87,8 +91,21 @@ describe('floor-mode retry', () => {
     });
   });
 
+  it('cuts an over-long summary to its allowance instead of refusing', async () => {
+    const h = harness(64_000, async () => `${HEAD}${'x'.repeat(40_000)}`);
+    await expect(runCompaction(h.deps, 'c1', { auto: true })).resolves.toBe('compacted');
+
+    expect(h.runPrompt).toHaveBeenCalledTimes(1);
+    const summary = h.conv.compaction?.summary ?? '';
+    expect(summary).toContain('Next: n');
+    expect(summary).toContain('[shortened to fit]');
+    expect(summary.length).toBeLessThan(40_000);
+  });
+
   it('does not retry a size refusal raised after a summarizer call', async () => {
-    const h = harness(64_000, `${HEAD}${'x'.repeat(40_000)}`);
+    const h = harness(64_000, async () => {
+      throw new CompactionFailure('budget-refusal', 'refused after the call');
+    });
     await expect(runCompaction(h.deps, 'c1', { auto: true })).resolves.toBe('failed');
 
     expect(h.runPrompt).toHaveBeenCalledTimes(1);
