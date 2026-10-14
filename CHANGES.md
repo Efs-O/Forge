@@ -1,5 +1,13 @@
 # Forge — Recent Changes
 
+## 0.17.30
+
+- Compaction prices images at their token cost instead of their base64 length. Photo-heavy conversations were measured as millions of characters and refused with "no summary could shrink" before any model call.
+- Messages with images reach the summarizer as their text plus a note per image, instead of `[non-text content]`. The stored conversation keeps its images.
+- The compaction summary turns thinking off when its budget reserves no reasoning tokens (`enable_thinking: false` on llama.cpp and Ollama, `reasoning_effort: 'none'` on openai-compatible providers such as Strata), so the summary is no longer cut off at the length limit.
+- The summary prompt states its length limit in characters, the unit the check uses.
+- An opened thinking bubble stays open when it folds into a tool-call group or a longer reasoning run; a group you closed stays closed.
+
 ## 0.17.29
 
 - `generate_image` accepts prompts up to 10,000 characters (was 4,000).
