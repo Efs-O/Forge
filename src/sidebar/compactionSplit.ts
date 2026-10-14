@@ -67,3 +67,8 @@ export function selectCompactionSplit(
 
   return { summarize: pending.slice(0, tailStart).filter(isSummarizable), tailStart };
 }
+
+/** The floor-mode retry's split: everything is summarized and no tail is kept. */
+export function floorModeSplit(pending: ChatMessage[]): CompactionSplit {
+  return { summarize: pending.filter(isSummarizable), tailStart: pending.length };
+}

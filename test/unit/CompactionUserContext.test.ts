@@ -166,10 +166,15 @@ describe('compaction user context', () => {
 
   it('leaves text unchanged when the message has no attachment refs', () => {
     const content = '```notes.txt\nordinary message\n```';
-    expect(collectCompactionUserMessages(undefined, [{ role: 'user', content }])).toEqual([content]);
+    expect(collectCompactionUserMessages(undefined, [{ role: 'user', content }])).toEqual([
+      content,
+    ]);
     expect(
       collectCompactionUserMessages(undefined, [
-        { role: 'user', content: [{ type: 'image_url', image_url: { url: 'data:image/png;base64,x' } }] },
+        {
+          role: 'user',
+          content: [{ type: 'image_url', image_url: { url: 'data:image/png;base64,x' } }],
+        },
       ]),
     ).toEqual([]);
   });
@@ -190,9 +195,9 @@ describe('compaction user context', () => {
     expect(afterLong.reduce((sum, message) => sum + message.length, 0)).toBeGreaterThan(
       USER_CONTEXT_MAX_CHARS - 1_600,
     );
-    expect(renderCompactionUserMessages(['z'.repeat(FIRST_REQUEST_MAX_CHARS), ...afterLong])).toContain(
-      afterLong.at(-1)!,
-    );
+    expect(
+      renderCompactionUserMessages(['z'.repeat(FIRST_REQUEST_MAX_CHARS), ...afterLong]),
+    ).toContain(afterLong.at(-1)!);
   });
 
   it('grows the host and replacement budgets together, so the summary allowance is unchanged', () => {
@@ -205,9 +210,8 @@ describe('compaction user context', () => {
     expect(grown.hostMaxChars).toBe(base.hostMaxChars + extra);
     expect(grown.replacementMaxChars).toBe(base.replacementMaxChars + extra);
     expect(grown.summaryCeilingChars).toBe(base.summaryCeilingChars);
-    const floor = 3_000;
-    expect(
-      compactionSummaryAllowance(grown.summaryCeilingChars, grown.replacementMaxChars, floor + extra, ''),
-    ).toBe(compactionSummaryAllowance(base.summaryCeilingChars, base.replacementMaxChars, floor, ''));
+    expect(compactionSummaryAllowance(grown.summaryCeilingChars, '')).toBe(
+      compactionSummaryAllowance(base.summaryCeilingChars, ''),
+    );
   });
 });

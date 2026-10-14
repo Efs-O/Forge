@@ -24,6 +24,8 @@ export interface CompactionSummaryInput {
   runPrompt: (text: string, conversationId: string, options: PromptRunOptions) => Promise<string>;
   /** Called with the running count each time a summarizer call is issued. */
   onCalls?: (issued: number) => void;
+  /** The floor-mode retry: the older transcript is shed up front. */
+  floorMode?: boolean;
 }
 
 const PLAN_REFRESH_NOTE =
@@ -34,11 +36,12 @@ export function compactionResumeNote(groupsNote: string, hasPlan: boolean): stri
   return [groupsNote, ...(hasPlan ? [PLAN_REFRESH_NOTE] : [])].filter(Boolean).join('\n\n');
 }
 
-/** Reserve the resume note from the summary's replacement-window allowance. */
+/**
+ * The summary's reserved share less the resume note. Fixed per model: it does
+ * not depend on the host block or the tail, so it cannot drift by generation.
+ */
 export function compactionSummaryAllowance(
   summaryCeilingChars: number,
-  _replacementMaxChars: number,
-  _floorChars: number,
   resumeNote: string,
 ): number {
   return summaryCeilingChars - resumeNote.length;
@@ -90,6 +93,7 @@ function oneShotPrompt(input: CompactionSummaryInput, outputTokens: number) {
           sourceMaxChars,
           summaryMaxChars: input.maximumSummaryChars,
           previousSummaryMaxChars: input.budget.summaryCeilingChars,
+          ...(input.floorMode ? { floorMode: true } : {}),
         },
       ),
     input.reasoningTokens,

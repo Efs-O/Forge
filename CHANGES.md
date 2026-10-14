@@ -1,5 +1,14 @@
 # Forge — Recent Changes
 
+## Unreleased
+
+- Compaction sizes the summary, host facts and retained tail from the model's per-slot window, not from how full the window happened to be. Each allowance is a fixed share, so the summary no longer shrinks with every compaction.
+- An earlier summary is carried forward whole. One from an older build that is over the new size keeps its opening and its Next section.
+- When host facts outgrow their share, compaction sheds them in order instead of refusing: action evidence is shortened, older recorded actions are dropped (the newest 4 unresolved stay), memory keys are cut to 5 with a note to call `list_memories`, and user requests are cut to 2,400 characters.
+- An attached text file is kept in the compacted context as a note naming the file. The summarizer sees its first 2,000 characters.
+- An oversized summarizer input is shed instead of refused: tool results are dropped first, then older reasoning notes, tool-call details, assistant text and user text.
+- If a compaction is still refused for size before the summarizer runs, Forge retries once in reduced mode: no recent messages are kept verbatim, required facts go to their floors, and older history is condensed up front. The notice says "compacted in reduced mode" and names what was shed. The attempt row in the session log gets `floor_mode: true`.
+
 ## 0.17.31
 
 - New model/group key `thinking_off_effort`: the `reasoning_effort` Forge sends when it turns thinking off (the compaction summary). openai-compatible providers default to `none`; xAI, OpenRouter and OpenAI send nothing extra unless it is set, because their models name effort levels differently.

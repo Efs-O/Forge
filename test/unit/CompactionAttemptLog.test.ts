@@ -108,7 +108,8 @@ describe('compaction attempt rows (A48)', () => {
     (h.deps as CompactionDeps & { tokenCountMode: () => 'estimate' }).tokenCountMode = () =>
       'estimate';
     await runCompaction(h.deps, 'c1', { auto: true });
-    expect(h.rows[1]!.hostMaxChars).toBe(14_875);
+    // H = min(35% of R, R - S - T) with R = 12% of 170,000 tokens x 2.5.
+    expect(h.rows[1]!.hostMaxChars).toBe(17_850);
     expect(h.rows[1]!.counter).toBe('estimate');
   });
 

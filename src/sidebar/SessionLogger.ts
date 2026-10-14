@@ -87,6 +87,8 @@ export interface CompactionAttemptLogEntry {
   counter?: 'tokenize' | 'count_tokens' | 'estimate';
   components?: Record<string, number>;
   shed?: string[];
+  /** The attempt succeeded or failed on its single floor-mode retry: no tail, every fact at its floor. */
+  floorMode?: boolean;
 }
 
 export interface SessionContext {
@@ -268,6 +270,7 @@ export class SessionLogger {
         ...(entry.counter !== undefined ? { counter: entry.counter } : {}),
         ...(entry.components !== undefined ? { components: entry.components } : {}),
         ...(entry.shed !== undefined ? { shed: entry.shed } : {}),
+        ...(entry.floorMode ? { floor_mode: true } : {}),
         timestamp_ms: Date.now(),
         model,
       }) + '\n',

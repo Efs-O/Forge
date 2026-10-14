@@ -1,6 +1,7 @@
 /** One percentage policy for summarization and the replacement window. */
 
 import { CHARS_PER_TOKEN } from '../util/contextBudget';
+import { CompactionFailure } from './compactionFailure';
 
 /** Pessimistic conversion for a proposal that has not been tokenized yet. */
 export const COMPACTION_CHARS_PER_TOKEN = 2.5;
@@ -15,9 +16,10 @@ const MIN_REPLACEMENT_CHARS = 12_000;
 const MIN_STABLE_REPLACEMENT_CHARS = 17_143;
 const MIN_HOST_CHARS = 6_000;
 
-export class SummaryPromptFitError extends Error {
+/** A budget refusal, so the floor-mode retry and the attempt row see it as one. */
+export class SummaryPromptFitError extends CompactionFailure {
   constructor(message: string) {
-    super(message);
+    super('budget-refusal', message);
     this.name = 'SummaryPromptFitError';
   }
 }

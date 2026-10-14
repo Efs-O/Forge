@@ -12,7 +12,7 @@ import {
   USER_CONTEXT_MAX_CHARS,
 } from './compactionUserContext';
 
-/** Optional host facts. User requests, recorded actions and memory keys are never shed. */
+/** Optional host facts. Required facts (user requests, recorded actions, memory keys) are only cut to their floors. */
 export interface OptionalHostFacts {
   repoState: string;
   lastReply: string | undefined;
@@ -123,6 +123,8 @@ export async function fitCompactionHostBlock(options: {
   conv: ConversationRuntime;
   onHostBudget?: (hostMaxChars: number) => void;
   shedRequired?: (measure: () => number, maxChars: number) => string[];
+  /** The floor-mode retry: required facts go to their floors even when the block fits. */
+  floorMode?: boolean;
 }): Promise<HostFitResult> {
   const {
     optional,
@@ -135,6 +137,7 @@ export async function fitCompactionHostBlock(options: {
     conv,
     onHostBudget,
     shedRequired,
+    floorMode,
   } = options;
   const largest = render();
   let charsPerToken = COMPACTION_CHARS_PER_TOKEN;
@@ -167,8 +170,8 @@ export async function fitCompactionHostBlock(options: {
   onHostBudget?.(hostMaxChars);
   const measure = () => render().hostChars;
   const shed = shedOptionalHostFacts(optional, measure, hostMaxChars);
-  if (measure() > hostMaxChars && shedRequired) {
-    shed.push(...shedRequired(measure, hostMaxChars));
+  if (shedRequired && (floorMode || measure() > hostMaxChars)) {
+    shed.push(...shedRequired(measure, floorMode ? 0 : hostMaxChars));
   }
   const rendered = render();
   if (rendered.hostChars > hostMaxChars) {

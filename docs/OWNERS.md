@@ -80,11 +80,13 @@ overlaps with an existing owner, extend the owner instead.
 | Compaction host-context assembly (preserved facts + candidate state) | `src/sidebar/compactionHostContext.ts` |
 | Compaction between rounds of a running turn (policy) | `src/sidebar/midTurnCompaction.ts`       |
 | Summary prompt text + summary validation             | `src/sidebar/compactionPrompt.ts`        |
+| Summarizer transcript formatting + input shedding    | `src/sidebar/compactionSummarySource.ts` |
+| One compaction summarize stage (host fit → summary; floor-mode retry runs it twice) | `src/sidebar/compactionStage.ts` |
 | Compaction attempt hold/rearm + suppressed-attempt log row | `src/sidebar/compactionAttemptPolicy.ts` |
 | Compaction attempt log rows (`compaction_attempt`)   | `src/sidebar/SessionLogger.ts`           |
 | Admission-time auto-compact check                    | `src/sidebar/ContextBudgetPublisher.ts`  |
 | Compaction failure categories                        | `src/sidebar/compactionFailure.ts`       |
-| Host-fact fit (shed optional, refuse required)       | `src/sidebar/compactionHostFit.ts`       |
+| Host-fact fit (shed optional, then required to floors) | `src/sidebar/compactionHostFit.ts`       |
 | Compaction service contract types (deps/options)     | `src/sidebar/compactionServiceTypes.ts`  |
 | One-shot vs staged summary run, output cap           | `src/sidebar/compactionSummaryRunner.ts` |
 | Bounded staged (chunked) compaction                  | `src/sidebar/compactionStaging.ts`       |

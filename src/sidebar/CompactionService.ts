@@ -18,28 +18,23 @@ import type {
 import { logAttemptSafely, runCompactionWithPolicy } from './compactionAttemptPolicy';
 import { compactionRefusalNotice } from './compactionRefusal';
 import { capSummary, isUsableSummary } from './compactionPrompt';
-import {
-  COMPACTION_CHARS_PER_TOKEN,
-  compactionBudget,
-  withFirstRequestAllowance,
-} from './compactionBudget';
+import { COMPACTION_CHARS_PER_TOKEN, compactionBudget } from './compactionBudget';
 import {
   CompactionFailure,
   compactionFailureCategory,
   type CompactionFailureCategory,
 } from './compactionFailure';
-import { fitCompactionHostBlock } from './compactionHostFit';
-import {
-  compactionResumeNote,
-  compactionSummaryAllowance,
-  summarizeCompaction,
-} from './compactionSummaryRunner';
-import { PromptIncompleteError } from './PromptRun';
+import { compactionSummaryAllowance } from './compactionSummaryRunner';
+import { PromptIncompleteError, type PromptRunOptions } from './PromptRun';
 import { getLogger } from '../util/logger';
-import { selectCompactionSplit } from './compactionSplit';
+import { floorModeSplit, selectCompactionSplit } from './compactionSplit';
 import { reportedContextTokens } from '../util/contextBudget';
-import { compactionWindowChars, messageCostChars } from './compactionWindow';
-import { CompactionHostContext } from './compactionHostContext';
+import { compactionWindowChars } from './compactionWindow';
+import {
+  MIN_WINDOW_CHARS_FOR_FIT_GUARD,
+  runCompactionStage,
+  type CompactionStageResult,
+} from './compactionStage';
 import { resetContextTrimState } from '../agent/toolResultContext';
 
 const log = getLogger();
@@ -60,8 +55,12 @@ export const RESUME_PROMPT = 'Continue the active task from the compacted contex
 /** Consecutive auto-resumes allowed without an intervening user prompt. */
 export const MAX_CONSECUTIVE_AUTO_CONTINUES = 2;
 
-/** Small manual compactions may grow; only a substantial window risks a loop. */
-export const MIN_WINDOW_CHARS_FOR_FIT_GUARD = 24000;
+export { MIN_WINDOW_CHARS_FOR_FIT_GUARD } from './compactionStage';
+
+/** What the floor-mode retry gave up, for its one notice. */
+function reducedModeNote(shed: readonly string[]): string {
+  return ['no recent messages kept verbatim', 'older history condensed', ...shed].join(', ');
+}
 
 /**
  * Runs one compaction against the active conversation.
@@ -122,7 +121,9 @@ async function compactOnce(
   const metrics = deps.compactionMetrics?.(conv);
   const modelMax = metrics?.max ?? 0;
   const thinkingTokens = metrics?.reasoningReserve ?? 0;
-  let budget = compactionBudget(
+  // The tail allowance does not depend on the measured ratio's host share, so
+  // the default ratio picks the split; the stage recomputes the rest.
+  const { tailMaxChars } = compactionBudget(
     reportedContextTokens(conv),
     beforeChars,
     modelMax,
@@ -130,7 +131,7 @@ async function compactOnce(
     undefined,
     modelMax,
   );
-  const split = selectCompactionSplit(pending, budget.tailMaxChars);
+  const split = selectCompactionSplit(pending, tailMaxChars);
   if (!split) {
     if (!options.auto) {
       void vscode.window.showInformationMessage(
@@ -139,23 +140,6 @@ async function compactOnce(
     }
     return 'skipped';
   }
-
-  // Derived from the snapshot, NOT from conv.messages.length after the await.
-  // Reading the length afterwards put every message appended during the
-  // summarization behind the cut: absent from the summary (snapshotted before)
-  // and sliced away by applyCompactionWindow — visible in the transcript,
-  // invisible to the model.
-  const fromIndex = from + split.tailStart;
-  const hostContext = new CompactionHostContext({
-    previous: conv.compaction,
-    pending,
-    summarize: split.summarize,
-    tailStart: split.tailStart,
-    fromIndex,
-    memoryKeys: deps.listMemoryKeys?.() ?? [],
-  });
-  const firstRequestExtra = hostContext.firstRequestExtraChars;
-  budget = withFirstRequestAllowance(budget, firstRequestExtra);
 
   deps.post({ type: 'notice', message: 'Compacting conversation…', conversationId: conv.id });
   // The webview treats the conversation as streaming between these two, so a
@@ -186,21 +170,18 @@ async function compactOnce(
       ...entry,
     });
   logAttempt({ phase: 'start' });
-  let summary = '';
-  let summaryPrompt = '';
-  let groupsNote = '';
+  let stage: Extract<CompactionStageResult, { kind: 'summarized' }>;
+  let floorMode = false;
   let outcome: CompactionOutcome = 'failed';
   try {
     try {
       // Keep the conversation busy while the bounded snapshot runs. Awaiting it
       // before beginCompaction left a window in which a new turn could start and
       // invalidate the cut point we just selected.
-      const tailChars = pending
-        .slice(split.tailStart)
-        .reduce((sum, message) => sum + messageCostChars(message), 0);
+      let repoState: string | undefined;
       if (deps.snapshotRepoState) {
         try {
-          hostContext.optional.repoState = await deps.snapshotRepoState();
+          repoState = await deps.snapshotRepoState();
         } catch (err) {
           // Evidence is optional even when an injected implementation is faulty.
           // The real snapshotter already catches its own git errors; this guard
@@ -208,101 +189,18 @@ async function compactOnce(
           log.info(`[compact] repo snapshot unavailable — ${(err as Error).message}`);
         }
       }
-      // If even an empty summary cannot shrink this window, skip the model call.
-      const counter =
-        deps.tokenCountMode?.(conv) ?? (deps.countTokens ? 'count_tokens' : 'estimate');
-      const tokenCountEndpoint = deps.tokenCountEndpoint?.(conv);
-      const renderHostBlock = () => hostContext.render(conv.messages, tailChars);
-      const hostFit = await fitCompactionHostBlock({
-        optional: hostContext.optional,
-        budget,
-        budgetForCharsPerToken: (ratio) =>
-          withFirstRequestAllowance(
-            compactionBudget(
-              reportedContextTokens(conv),
-              beforeChars,
-              modelMax,
-              thinkingTokens,
-              ratio,
-              modelMax,
-            ),
-            firstRequestExtra,
-          ),
-        counter,
-        ...(deps.countTokens ? { countTokens: deps.countTokens } : {}),
-        ...(tokenCountEndpoint ? { endpoint: tokenCountEndpoint } : {}),
-        conv,
-        onHostBudget: (hostMaxChars) =>
-          hostContext.fitUserContext({
-            budget,
-            hostMaxChars,
-            conversationMessages: conv.messages,
-            tailChars,
-          }),
-        render: renderHostBlock,
-      });
-      // Host fitting learns the measured chars/token ratio when token_count is
-      // available. Recompute every allowance from that one ratio, not H alone.
-      budget = withFirstRequestAllowance(
-        compactionBudget(
-          reportedContextTokens(conv),
-          beforeChars,
-          modelMax,
-          thinkingTokens,
-          hostFit.charsPerToken,
-          modelMax,
-        ),
-        firstRequestExtra,
-      );
-      attemptHostFields = {
-        hostChars: hostFit.hostChars,
-        hostMaxChars: hostFit.hostMaxChars,
-        charsPerToken: hostFit.charsPerToken,
-        counter: hostFit.counter,
-        components: hostFit.components,
-        shed: hostFit.shed,
-      };
-      const shed = hostFit.shed;
-      if (shed.length > 0)
-        log.info(`[compact] shed optional host facts to fit: ${shed.join(', ')}`);
-      const floorChars = hostFit.floorChars;
-      const hostChars = hostFit.hostChars;
-      if (beforeChars >= MIN_WINDOW_CHARS_FOR_FIT_GUARD && floorChars >= beforeChars) {
-        log.info(
-          `[compact] no summary could shrink this window (~${floorChars} vs ~${beforeChars} chars before the summary) — not summarizing`,
-        );
-        deps.post({
-          type: 'notice',
-          message: compactionRefusalNotice(floorChars, beforeChars, midTurn),
-          conversationId: conv.id,
-        });
-        options.onFailureCategory?.('budget-refusal');
-        return 'failed';
-      }
-
-      groupsNote = compactionResumeNote('', Boolean(conv.plan?.items?.length));
-      const summaryAllowance = compactionSummaryAllowance(
-        budget.summaryCeilingChars,
-        budget.replacementMaxChars,
-        floorChars,
-        groupsNote,
-      );
       const outputLimitTokens = metrics?.outputLimitTokens ?? 0;
-      const summaryRun = await summarizeCompaction({
-        messages: split.summarize,
-        ...(conv.compaction?.summary ? { previousSummary: conv.compaction.summary } : {}),
-        recordedFacts: hostContext.recordedFactsText,
-        userContext: hostContext.userContextText,
-        currentLocalTime: deps.currentLocalTime(),
-        ...(conv.plan?.items ? { plan: conv.plan.items } : {}),
-        ...(conv.active_model ? { modelName: conv.active_model } : {}),
-        modelMaxTokens: modelMax,
+      const stageInput = {
+        deps,
+        conv,
+        pending,
+        from,
+        beforeChars,
+        modelMax,
+        thinkingTokens,
         outputLimitTokens,
-        reasoningTokens: thinkingTokens,
-        budget,
-        maximumSummaryChars: summaryAllowance,
-        conversationId: conv.id,
-        runPrompt: async (text, id, promptOptions) => {
+        repoState,
+        runPrompt: async (text: string, id: string, promptOptions: PromptRunOptions) => {
           try {
             return await deps.runPromptToMarkdown(text, id, promptOptions);
           } catch (err) {
@@ -311,27 +209,49 @@ async function compactOnce(
             throw err;
           }
         },
-        onCalls: (issued) => {
+        onCalls: (issued: number) => {
           attemptCalls = issued;
         },
-      });
-      summaryPrompt = summaryRun.prompt;
-      summary = summaryRun.summary;
-      log.info(
-        `[compact] budget P=${budget.policyTokens} (${budget.estimated ? 'estimated' : 'reported'}), host~${Math.ceil(hostChars / COMPACTION_CHARS_PER_TOKEN)}, tail~${Math.ceil(tailChars / COMPACTION_CHARS_PER_TOKEN)}, output_cap=${summaryRun.outputTokens}, summary_max_chars=${summaryAllowance}, method=${summaryRun.method}, calls=${summaryRun.calls}`,
-      );
+        onHostFields: (fields: Partial<CompactionAttemptLogEntry>) => {
+          attemptHostFields = fields;
+        },
+      };
+      let result: CompactionStageResult;
+      try {
+        result = await runCompactionStage({ ...stageInput, split, floorMode: false });
+      } catch (err) {
+        // One retry, only for a size refusal raised before any summarizer call:
+        // no retained tail, required host facts at their floors, and the older
+        // transcript shed up front. A refusal after a call is the model's
+        // output, which a smaller request does not fix.
+        if (compactionFailureCategory(err) !== 'budget-refusal' || attemptCalls !== undefined)
+          throw err;
+        log.info(`[compact] ${(err as Error).message} — retrying once in floor mode`);
+        floorMode = true;
+        result = await runCompactionStage({
+          ...stageInput,
+          split: floorModeSplit(pending),
+          floorMode: true,
+        });
+      }
+      if (result.kind === 'not-smaller') {
+        deps.post({
+          type: 'notice',
+          message: compactionRefusalNotice(result.floorChars, beforeChars, midTurn),
+          conversationId: conv.id,
+        });
+        options.onFailureCategory?.('budget-refusal');
+        return 'failed';
+      }
+      stage = result;
     } finally {
       release();
       if (!midTurn) deps.post({ type: 'done', finishReason: 'stop', conversationId: conv.id });
     }
 
+    const { budget, groupsNote, summary } = stage;
     const proposed = groupsNote ? `${summary.trim()}\n\n${groupsNote}` : summary.trim();
-    const summaryAllowance = compactionSummaryAllowance(
-      budget.summaryCeilingChars,
-      budget.replacementMaxChars,
-      0,
-      groupsNote,
-    );
+    const summaryAllowance = compactionSummaryAllowance(budget.summaryCeilingChars, groupsNote);
     if (proposed.length > summaryAllowance) {
       throw new CompactionFailure(
         'budget-refusal',
@@ -358,7 +278,7 @@ async function compactOnce(
     // with the log row so the two can never disagree about which generation
     // this was.
     const generation = (conv.compaction?.generation ?? 0) + 1;
-    const candidate = hostContext.candidate(trimmed);
+    const candidate = stage.hostContext.candidate(trimmed);
 
     // Does the candidate actually shrink the window?
     //
@@ -384,7 +304,7 @@ async function compactOnce(
       return 'failed';
     }
     log.info(
-      `[compact] replacement~${Math.ceil(afterChars / COMPACTION_CHARS_PER_TOKEN)} estimated tokens, summary=${trimmed.length} chars, omitted-source=${summaryPrompt.includes('omitted for space')}`,
+      `[compact] replacement~${Math.ceil(afterChars / COMPACTION_CHARS_PER_TOKEN)} estimated tokens, summary=${trimmed.length} chars, omitted-source=${stage.summaryPrompt.includes('omitted for space')}`,
     );
 
     // Non-destructive: recorded only once the candidate is known to be better.
@@ -396,7 +316,7 @@ async function compactOnce(
     const usedBefore = reportedContextTokens(conv);
     deps.logCompaction?.(conv, {
       generation,
-      fromIndex,
+      fromIndex: stage.fromIndex,
       usedTokens: usedBefore,
       maxTokens: metrics?.max ?? 0,
       summaryChars: trimmed.length,
@@ -420,7 +340,9 @@ async function compactOnce(
         : '';
     deps.post({
       type: 'notice',
-      message: `Conversation compacted${atSize}. Chat history is unchanged.`,
+      message: floorMode
+        ? `Conversation compacted in reduced mode${atSize}: ${reducedModeNote(stage.shed)}. Chat history is unchanged.`
+        : `Conversation compacted${atSize}. Chat history is unchanged.`,
       conversationId: conv.id,
     });
     if (!options.auto) {
@@ -453,6 +375,7 @@ async function compactOnce(
       ...(attemptFinish ? { finishReason: attemptFinish } : {}),
       ...(attemptCandidateChars !== undefined ? { candidateChars: attemptCandidateChars } : {}),
       ...attemptHostFields,
+      ...(floorMode ? { floorMode: true } : {}),
     });
     deps.emitCompactionEvent?.({
       conversationId: conv.id,

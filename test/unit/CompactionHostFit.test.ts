@@ -2,6 +2,7 @@ import { describe, expect, it, vi } from 'vitest';
 import { runCompaction, type CompactionDeps } from '../../src/sidebar/CompactionService';
 import {
   fitCompactionHostBlock,
+  COMPACTION_USER_REQUEST_FLOOR_CHARS,
   REPO_STATE_SHED_MARKER,
   shedOptionalHostFacts,
   type OptionalHostFacts,
@@ -13,6 +14,7 @@ import type { RecordedCompactionAction } from '../../src/sidebar/compactionTypes
 import { renderCompactionHostBlock } from '../../src/sidebar/compactionHostFit';
 import { replacementHostMessages } from '../../src/sidebar/compactionWindow';
 import { CompactionHostContext } from '../../src/sidebar/compactionHostContext';
+import { renderCompactionUserMessages } from '../../src/sidebar/compactionUserContext';
 
 const summary = `Goal: complete the request.\nState: recorded. ${'detail. '.repeat(40)}\nNext: continue.\nFiles: src/a.ts.\nConstraints: none.\nErrors: none.\nReference: none recorded.`;
 
@@ -98,14 +100,12 @@ describe('host-fact budgeting', () => {
     expect(shed).not.toContain('memory keys');
   });
 
-  it('refuses before any model call when required user requests alone exceed the budget, naming them', async () => {
+  it('sheds required user requests to their floor instead of refusing', async () => {
     const h = setup(3_900, '', 2_000);
-    await expect(runCompaction(h.deps, 'c1', { auto: true })).resolves.toBe('failed');
-    expect(h.runPrompt).not.toHaveBeenCalled();
-    expect(h.conv.compaction).toBeUndefined();
-    expect(h.posted.find((m) => m.type === 'error')?.message).toMatch(
-      /largest component: user requests/u,
-    );
+    await expect(runCompaction(h.deps, 'c1', { auto: true })).resolves.toBe('compacted');
+    expect(h.runPrompt).toHaveBeenCalledTimes(1);
+    const kept = renderCompactionUserMessages(h.conv.compaction?.userMessages);
+    expect(kept.length).toBeLessThanOrEqual(COMPACTION_USER_REQUEST_FLOOR_CHARS + 200);
   });
 
   it('includes required memory keys in the host refusal component map', () => {
@@ -121,23 +121,21 @@ describe('host-fact budgeting', () => {
     expect(host.render([], 0).components['memory keys']).toBeGreaterThan(0);
   });
 
-  it.each([
-    [8_000, 'failed'],
-    [128_000, 'compacted'],
-    [200_000, 'compacted'],
-  ] as const)('required 12k user requests at a %i-token window → %s', async (tokens, outcome) => {
-    const h = setup(3_000, 'r'.repeat(1_900), tokens);
-    h.conv.messages.splice(
-      2,
-      0,
-      { role: 'assistant', content: 'ok' },
-      { role: 'user', content: 'c'.repeat(3_000) },
-      { role: 'assistant', content: 'ok' },
-      { role: 'user', content: 'd'.repeat(3_000) },
-    );
-    await expect(runCompaction(h.deps, 'c1', { auto: true })).resolves.toBe(outcome);
-    if (outcome === 'failed') expect(h.conv.compaction).toBeUndefined();
-  });
+  it.each([8_000, 128_000, 200_000])(
+    'required 12k user requests at a %i-token window compact',
+    async (tokens) => {
+      const h = setup(3_000, 'r'.repeat(1_900), tokens);
+      h.conv.messages.splice(
+        2,
+        0,
+        { role: 'assistant', content: 'ok' },
+        { role: 'user', content: 'c'.repeat(3_000) },
+        { role: 'assistant', content: 'ok' },
+        { role: 'user', content: 'd'.repeat(3_000) },
+      );
+      await expect(runCompaction(h.deps, 'c1', { auto: true })).resolves.toBe('compacted');
+    },
+  );
 
   it('keeps optional facts when the actual rendered block fits', async () => {
     const h = setup(100, 'r'.repeat(500), 2_000);
@@ -209,17 +207,13 @@ describe('A24: constructed 200k host block at P=170,000', () => {
     await expect(runCompaction(h.deps, 'c1', { auto: true })).resolves.toBe('compacted');
   });
 
-  it('refuses when required host facts exceed the 14,875-char budget and leaves state intact', async () => {
+  it('sheds required host facts above the 14,875-char budget instead of refusing', async () => {
     const h = heavy(6_000);
     const hostMax = compactionBudget(170_000, 170_000 * 2.5, 200_000, 0).hostMaxChars;
     expect(hostMax).toBe(14_875);
-    const before = structuredClone(h.conv.compaction);
-    await expect(runCompaction(h.deps, 'c1', { auto: true })).resolves.toBe('failed');
-    expect(h.runPrompt).not.toHaveBeenCalled();
-    expect(h.conv.compaction).toEqual(before);
-    expect(h.posted.find((m) => m.type === 'error')?.message).toMatch(
-      /need an estimated 17416 characters/u,
-    );
+    await expect(runCompaction(h.deps, 'c1', { auto: true })).resolves.toBe('compacted');
+    expect(h.runPrompt).toHaveBeenCalledTimes(1);
+    expect(h.conv.compaction?.recordedActions?.length).toBeLessThan(100);
   });
 
   it('sheds synthetic maximum host facts to the measured 6,000-character floor', async () => {
@@ -239,7 +233,10 @@ describe('A24: constructed 200k host block at P=170,000', () => {
         summary: 'previous',
         fromIndex: 0,
         generation: 1,
-        userMessages: Array.from({ length: 24 }, (_, index) => `request-${index} ${'u'.repeat(3_900)}`),
+        userMessages: Array.from(
+          { length: 24 },
+          (_, index) => `request-${index} ${'u'.repeat(3_900)}`,
+        ),
         recordedActions: originalActions,
       },
       pending: [],
@@ -259,14 +256,19 @@ describe('A24: constructed 200k host block at P=170,000', () => {
       render: () => host.render(messages, 0),
       counter: 'estimate',
       conv: {
-        id: 'floor-test', title: 'test', messages, createdAt: 0, updatedAt: 0,
+        id: 'floor-test',
+        title: 'test',
+        messages,
+        createdAt: 0,
+        updatedAt: 0,
       },
-      onHostBudget: (hostMaxChars) => host.fitUserContext({
-        budget,
-        hostMaxChars,
-        conversationMessages: messages,
-        tailChars: 0,
-      }),
+      onHostBudget: (hostMaxChars) =>
+        host.fitUserContext({
+          budget,
+          hostMaxChars,
+          conversationMessages: messages,
+          tailChars: 0,
+        }),
       shedRequired: (measure, maxChars) => host.shedRequiredFacts(measure, maxChars),
     });
 
@@ -296,7 +298,7 @@ describe('shedOptionalHostFacts', () => {
       repoState: 'x'.repeat(100),
       lastReply: 'reply',
     };
-    const measure = (): number => optional.repoState.length > 99 ? 100 : 10;
+    const measure = (): number => (optional.repoState.length > 99 ? 100 : 10);
     const shed = shedOptionalHostFacts(optional, measure, 20);
     expect(shed).toEqual(['repo state']);
     expect(optional.lastReply).toBe('reply');
