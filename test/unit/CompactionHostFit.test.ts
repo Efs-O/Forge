@@ -222,6 +222,68 @@ describe('A24: constructed 200k host block at P=170,000', () => {
     );
   });
 
+  it('sheds synthetic maximum host facts to the measured 6,000-character floor', async () => {
+    const action = (kind: 'file' | 'command', index: number): RecordedCompactionAction => ({
+      kind,
+      key: `${kind}-${index}`,
+      outcome: 'unknown',
+      line: `${kind} action ${index} ${'e'.repeat(760)}`,
+      toolCallId: `call-${kind}-${index}`,
+    });
+    const originalActions = [
+      ...Array.from({ length: 24 }, (_, index) => action('file', index)),
+      ...Array.from({ length: 24 }, (_, index) => action('command', index)),
+    ];
+    const host = new CompactionHostContext({
+      previous: {
+        summary: 'previous',
+        fromIndex: 0,
+        generation: 1,
+        userMessages: Array.from({ length: 24 }, (_, index) => `request-${index} ${'u'.repeat(3_900)}`),
+        recordedActions: originalActions,
+      },
+      pending: [],
+      summarize: [],
+      tailStart: 0,
+      fromIndex: 0,
+      memoryKeys: Array.from({ length: 40 }, (_, index) => `memory-${index}-${'m'.repeat(190)}`),
+    });
+    host.optional.repoState = 'repo'.repeat(500);
+    host.optional.lastReply = 'last reply '.repeat(100);
+    const messages: ChatMessage[] = [];
+    const budget = { ...compactionBudget(100_000, 50_000, 100_000, 0), hostMaxChars: 6_000 };
+    const result = await fitCompactionHostBlock({
+      optional: host.optional,
+      budget,
+      budgetForCharsPerToken: () => budget,
+      render: () => host.render(messages, 0),
+      counter: 'estimate',
+      conv: {
+        id: 'floor-test', title: 'test', messages, createdAt: 0, updatedAt: 0,
+      },
+      onHostBudget: (hostMaxChars) => host.fitUserContext({
+        budget,
+        hostMaxChars,
+        conversationMessages: messages,
+        tailChars: 0,
+      }),
+      shedRequired: (measure, maxChars) => host.shedRequiredFacts(measure, maxChars),
+    });
+
+    expect(result.hostChars).toBeLessThanOrEqual(6_000);
+    expect(result.shed).toContain('action evidence');
+    expect(result.shed.some((step) => step.startsWith('recorded actions ×'))).toBe(true);
+    expect(result.shed.some((step) => step.startsWith('memory keys ×'))).toBe(true);
+    expect(result.shed.some((step) => step.startsWith('user requests to floor'))).toBe(true);
+    expect(host.recordedActions.filter((entry) => entry.outcome !== 'ok')).toHaveLength(4);
+    expect(host.omittedActions.file + host.omittedActions.command).toBe(
+      originalActions.length - host.recordedActions.length,
+    );
+    const rendered = host.render(messages, 0).hostBlock;
+    expect(rendered).toContain('more memory keys exist; list them with `list_memories`');
+    expect(rendered.length).toBeLessThanOrEqual(6_000);
+  });
+
   it('positive case: smaller host facts at the same P still compact', async () => {
     const h = setup(200, 'r'.repeat(500), 170_000);
     await expect(runCompaction(h.deps, 'c1', { auto: true })).resolves.toBe('compacted');

@@ -14,6 +14,7 @@ import { formatExecCommandOutput } from '../../src/tools/execHelpers';
 import { makeReadToolResultTool } from '../../src/tools/toolResultTools';
 import { compactionPersistedSchema } from '../../src/sidebar/compactionPersistedSchema';
 import type { ChatMessage } from '../../src/llm/types';
+import { shedRecordedActions, shortenActionEvidence } from '../../src/sidebar/compactionRecordedState';
 
 function call(id: string, name: string, args: Record<string, unknown>): ChatMessage {
   return {
@@ -483,5 +484,30 @@ describe('collectWrittenFiles', () => {
       call('b', 'move_file', { source: 'a.ts', destination: 'b.ts' }),
     ]);
     expect(files).toEqual(['src/win.ts', 'a.ts', 'b.ts']);
+  });
+});
+
+describe('host-fit action shedding', () => {
+  it('shortens evidence then drops plain and durable successes before unresolved actions', () => {
+    const actions = [
+      { kind: 'file' as const, key: 'plain', outcome: 'ok' as const, line: 'p'.repeat(800) },
+      { kind: 'file' as const, key: 'durable', outcome: 'ok' as const, durableEvidence: true, line: 'd'.repeat(800) },
+      ...Array.from({ length: 5 }, (_, index) => ({
+        kind: 'command' as const,
+        key: `unresolved-${index}`,
+        outcome: 'unknown' as const,
+        line: `u${index}`.repeat(400),
+      })),
+    ];
+    const shortened = shortenActionEvidence(actions, 300);
+    expect(shortened.changed).toBe(true);
+    expect(shortened.actions.every((action) => action.line.length <= 300)).toBe(true);
+
+    const reduced = shedRecordedActions(shortened.actions, { file: 2, command: 3 }, 4);
+    expect(reduced.actions.map((action) => action.key)).toEqual([
+      'unresolved-1', 'unresolved-2', 'unresolved-3', 'unresolved-4',
+    ]);
+    expect(reduced.omitted).toEqual({ file: 4, command: 4 });
+    expect(reduced.dropped).toBe(3);
   });
 });

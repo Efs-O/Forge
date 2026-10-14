@@ -26,6 +26,19 @@ describe('applyCompactionWindow', () => {
     expect(output[1]?.content).not.toContain('removed');
     expect(clean?.memoryKeys).toEqual(['kept']);
   });
+
+  it('renders shed memory-key count as a list_memories note, not as a recall key', () => {
+    const output = applyCompactionWindow([{ role: 'user', content: 'old' }], {
+      summary: 'State: done. Next: continue.',
+      fromIndex: 1,
+      memoryKeys: ['__forge_omitted_memory_keys__:35', 'recent-a', 'recent-b'],
+    });
+    const assistant = String(output[1]?.content);
+    expect(assistant).toContain('35 more memory keys exist; list them with `list_memories`.');
+    expect(assistant).toContain('recent-a, recent-b');
+    expect(assistant).not.toContain('__forge_omitted_memory_keys__');
+    expect(assistant).not.toContain('Call `recall` with a key');
+  });
   it('points resumed agents at search for stored pre-compaction conversation text', () => {
     expect(SUMMARY_PREAMBLE).toContain(
       'Earlier conversation text is still stored; use `read_tool_result` with `query` to search it.',

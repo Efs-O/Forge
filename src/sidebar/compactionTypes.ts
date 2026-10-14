@@ -5,6 +5,8 @@ export const RECORDED_ACTION_LINE_MAX_CHARS = 800;
 export const COMPACTION_REPO_STATE_MAX_CHARS = 2000;
 export const COMPACTION_MEMORY_KEYS_MAX = 40;
 export const COMPACTION_MEMORY_KEY_MAX_CHARS = 200;
+/** Internal persisted marker rendered as an omitted-key note, never as a key. */
+export const COMPACTION_MEMORY_KEYS_OMITTED_PREFIX = '__forge_omitted_memory_keys__:';
 
 /** Persisted, host-authored action carried outside the model summary. */
 export interface RecordedCompactionAction {

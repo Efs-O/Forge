@@ -160,3 +160,59 @@ export function renderRecordedActionsBlock(
     )
   );
 }
+
+/** Shorten quoted action details while retaining the stable tool-call id. */
+export function shortenActionEvidence(
+  actions: readonly RecordedCompactionAction[],
+  maxChars: number,
+): { actions: RecordedCompactionAction[]; changed: boolean } {
+  let changed = false;
+  const shortened = actions.map((action) => {
+    if (action.line.length <= maxChars) return action;
+    changed = true;
+    const marker = '…[evidence shortened]';
+    return {
+      ...action,
+      line: `${action.line.slice(0, Math.max(0, maxChars - marker.length))}${marker}`,
+    };
+  });
+  return { actions: shortened, changed };
+}
+
+/** Drop oldest entries by the reverse priority of capActions, retaining four unresolved. */
+export function shedRecordedActions(
+  actions: readonly RecordedCompactionAction[],
+  omitted: OmittedActionCounts,
+  keepUnresolved: number,
+  stillOver?: () => boolean,
+): { actions: RecordedCompactionAction[]; omitted: OmittedActionCounts; dropped: number } {
+  const kept = [...actions];
+  const counts = { ...omitted };
+  let dropped = 0;
+  const removeOldest = (predicate: (action: RecordedCompactionAction) => boolean): void => {
+    for (let index = 0; index < kept.length; ) {
+      if (stillOver && !stillOver()) return;
+      if (!predicate(kept[index]!)) {
+        index += 1;
+        continue;
+      }
+      const unresolvedCount = kept.filter(isUnresolved).length;
+      if (isUnresolved(kept[index]!) && unresolvedCount <= keepUnresolved) {
+        index += 1;
+        continue;
+      }
+      const [removed] = kept.splice(index, 1);
+      counts[removed!.kind] += 1;
+      dropped += 1;
+      if (stillOver && !stillOver()) return;
+    }
+  };
+  removeOldest(
+    (action) => !isUnresolved(action) && action.outcome === 'ok' && !action.durableEvidence,
+  );
+  removeOldest(
+    (action) => !isUnresolved(action) && action.outcome === 'ok' && action.durableEvidence === true,
+  );
+  removeOldest(isUnresolved);
+  return { actions: kept, omitted: counts, dropped };
+}

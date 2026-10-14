@@ -15,6 +15,7 @@ import { renderCompactionUserMessages } from './compactionUserContext';
 import {
   COMPACTION_MEMORY_KEY_MAX_CHARS,
   COMPACTION_MEMORY_KEYS_MAX,
+  COMPACTION_MEMORY_KEYS_OMITTED_PREFIX,
   type CompactionState,
 } from './compactionTypes';
 
@@ -59,6 +60,25 @@ export function boundMemoryKeys(keys: readonly string[]): string[] {
     .slice(-COMPACTION_MEMORY_KEYS_MAX);
 }
 
+/** Keep the newest keys and carry a display-only count for keys left in the store. */
+export function shedMemoryKeys(
+  keys: readonly string[],
+  floor: number,
+): {
+  keys: string[];
+  dropped: number;
+} {
+  const valid = keys.filter(
+    (key) => key.length > 0 && key.length <= COMPACTION_MEMORY_KEY_MAX_CHARS,
+  );
+  if (valid.length <= floor) return { keys: [...valid], dropped: 0 };
+  const dropped = valid.length - floor;
+  return {
+    keys: [`${COMPACTION_MEMORY_KEYS_OMITTED_PREFIX}${dropped}`, ...valid.slice(-floor)],
+    dropped,
+  };
+}
+
 /** Historical snapshots may name a key removed after their compaction ran. */
 export function retainLiveMemoryKeys(
   compaction: CompactionState | undefined,
@@ -66,7 +86,9 @@ export function retainLiveMemoryKeys(
 ): CompactionState | undefined {
   if (!compaction?.memoryKeys?.length) return compaction;
   const live = new Set(liveKeys);
-  const kept = compaction.memoryKeys.filter((key) => live.has(key));
+  const kept = compaction.memoryKeys.filter(
+    (key) => key.startsWith(COMPACTION_MEMORY_KEYS_OMITTED_PREFIX) || live.has(key),
+  );
   return kept.length === compaction.memoryKeys.length
     ? compaction
     : { ...compaction, memoryKeys: kept };
@@ -74,10 +96,17 @@ export function retainLiveMemoryKeys(
 
 function renderMemoryKeysBlock(keys: readonly string[] | undefined): string {
   if (!keys || keys.length === 0) return '';
+  const omitted = keys.find((key) => key.startsWith(COMPACTION_MEMORY_KEYS_OMITTED_PREFIX));
+  const omittedCount = omitted
+    ? Number(omitted.slice(COMPACTION_MEMORY_KEYS_OMITTED_PREFIX.length))
+    : 0;
+  const actualKeys = keys.filter((key) => !key.startsWith(COMPACTION_MEMORY_KEYS_OMITTED_PREFIX));
   return (
     '\n\n**Stored memories (keys saved with `remember`, recorded by Forge):** ' +
-    keys.join(', ') +
-    '\nCall `recall` with a key for its value; `list_memories` shows every key.'
+    actualKeys.join(', ') +
+    (omittedCount > 0
+      ? `\n${omittedCount} more memory keys exist; list them with \`list_memories\`.`
+      : '\nCall `recall` with a key for its value; `list_memories` shows every key.')
   );
 }
 

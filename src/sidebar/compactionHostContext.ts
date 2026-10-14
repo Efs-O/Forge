@@ -7,10 +7,16 @@ import {
   mergeRecordedActions,
   renderRecordedActionsBlock,
 } from './compactionLedger';
-import { fitUserMessagesToHostBudget, renderCompactionHostBlock } from './compactionHostFit';
-import { boundMemoryKeys } from './compactionWindow';
+import { shedRecordedActions, shortenActionEvidence } from './compactionRecordedState';
+import {
+  COMPACTION_USER_REQUEST_FLOOR_CHARS,
+  fitUserMessagesToHostBudget,
+  renderCompactionHostBlock,
+} from './compactionHostFit';
+import { boundMemoryKeys, shedMemoryKeys } from './compactionWindow';
 import {
   collectCompactionUserMessages,
+  boundCompactionUserMessages,
   firstRequestExtraChars,
   renderCompactionUserMessages,
 } from './compactionUserContext';
@@ -21,7 +27,7 @@ import type { OptionalHostFacts } from './compactionHostFit';
 export class CompactionHostContext {
   readonly recordedActions: RecordedCompactionAction[];
   readonly omittedActions: { file: number; command: number };
-  readonly recordedActionsText: string;
+  recordedActionsText: string;
   readonly optional: OptionalHostFacts;
   readonly memoryKeys: string[];
   readonly lastReplyFollowedByTools: boolean;
@@ -138,5 +144,63 @@ export class CompactionHostContext {
     });
     this.userMessages = fitted.userMessages;
     this.userContext = renderCompactionUserMessages(this.userMessages, fitted.maxChars);
+  }
+
+  /** Sheds required facts in the Phase 3 order, checking the rendered block after each change. */
+  shedRequiredFacts(measure: () => number, maxChars: number): string[] {
+    const shed: string[] = [];
+    if (measure() <= maxChars) return shed;
+
+    const shortened = shortenActionEvidence(this.recordedActions, 300);
+    if (shortened.changed) {
+      this.recordedActions.splice(0, this.recordedActions.length, ...shortened.actions);
+      this.recordedActionsText = renderRecordedActionsBlock(
+        this.recordedActions,
+        this.omittedActions,
+      );
+      shed.push('action evidence');
+    }
+    if (measure() > maxChars) {
+      const reduced = shedRecordedActions(
+        this.recordedActions,
+        this.omittedActions,
+        4,
+        () => measure() > maxChars,
+      );
+      if (reduced.dropped > 0) {
+        this.recordedActions.splice(0, this.recordedActions.length, ...reduced.actions);
+        this.omittedActions.file = reduced.omitted.file;
+        this.omittedActions.command = reduced.omitted.command;
+        this.recordedActionsText = renderRecordedActionsBlock(
+          this.recordedActions,
+          this.omittedActions,
+        );
+        shed.push(`recorded actions ×${reduced.dropped} (floor: 4 unresolved)`);
+      }
+    }
+    if (measure() > maxChars) {
+      const reduced = shedMemoryKeys(this.memoryKeys, 5);
+      if (reduced.dropped > 0) {
+        this.memoryKeys.splice(0, this.memoryKeys.length, ...reduced.keys);
+        shed.push(`memory keys ×${reduced.dropped} (floor: 5)`);
+      }
+    }
+    if (measure() > maxChars) {
+      const bounded = boundCompactionUserMessages(
+        this.userMessages,
+        COMPACTION_USER_REQUEST_FLOOR_CHARS,
+      );
+      if (bounded.some((message, index) => message !== this.userMessages[index])) {
+        this.userMessages = bounded;
+        this.userContext = renderCompactionUserMessages(
+          this.userMessages,
+          COMPACTION_USER_REQUEST_FLOOR_CHARS,
+        );
+        shed.push(
+          `user requests to floor (floor: ${COMPACTION_USER_REQUEST_FLOOR_CHARS} characters)`,
+        );
+      }
+    }
+    return shed;
   }
 }

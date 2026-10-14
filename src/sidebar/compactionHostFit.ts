@@ -19,6 +19,7 @@ export interface OptionalHostFacts {
 }
 
 export const REPO_STATE_SHED_MARKER = '[repository state omitted to fit the compaction budget]';
+export const COMPACTION_USER_REQUEST_FLOOR_CHARS = 2_400;
 
 /**
  * Sheds optional facts, least valuable first, until the host block fits.
@@ -61,11 +62,12 @@ export function refuseHostFacts(
   hostChars: number,
   maxChars: number,
   components: Record<string, number>,
+  shed: readonly string[] = [],
 ): never {
   const [largest] = Object.entries(components).sort((a, b) => b[1] - a[1])[0] ?? ['host facts'];
   throw new CompactionFailure(
     'budget-refusal',
-    `Required host-preserved compaction facts need an estimated ${hostChars} characters, above the ${maxChars}-character budget (largest component: ${largest}); previous context kept.`,
+    `Required host-preserved compaction facts need an estimated ${hostChars} characters, above the ${maxChars}-character budget (largest component: ${largest}); steps run: ${shed.length ? shed.join(', ') : 'none'}; floors: action evidence 300 characters, actions 4 unresolved, memory keys 5, user requests ${COMPACTION_USER_REQUEST_FLOOR_CHARS} characters; previous context kept.`,
   );
 }
 
@@ -120,6 +122,7 @@ export async function fitCompactionHostBlock(options: {
   endpoint?: string;
   conv: ConversationRuntime;
   onHostBudget?: (hostMaxChars: number) => void;
+  shedRequired?: (measure: () => number, maxChars: number) => string[];
 }): Promise<HostFitResult> {
   const {
     optional,
@@ -131,6 +134,7 @@ export async function fitCompactionHostBlock(options: {
     endpoint,
     conv,
     onHostBudget,
+    shedRequired,
   } = options;
   const largest = render();
   let charsPerToken = COMPACTION_CHARS_PER_TOKEN;
@@ -161,10 +165,14 @@ export async function fitCompactionHostBlock(options: {
       ? budget.hostMaxChars
       : budgetForCharsPerToken(charsPerToken).hostMaxChars;
   onHostBudget?.(hostMaxChars);
-  const shed = shedOptionalHostFacts(optional, () => render().hostChars, hostMaxChars);
+  const measure = () => render().hostChars;
+  const shed = shedOptionalHostFacts(optional, measure, hostMaxChars);
+  if (measure() > hostMaxChars && shedRequired) {
+    shed.push(...shedRequired(measure, hostMaxChars));
+  }
   const rendered = render();
   if (rendered.hostChars > hostMaxChars) {
-    refuseHostFacts(rendered.hostChars, hostMaxChars, rendered.components);
+    refuseHostFacts(rendered.hostChars, hostMaxChars, rendered.components, shed);
   }
   return {
     ...rendered,
