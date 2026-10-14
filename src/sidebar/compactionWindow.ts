@@ -7,6 +7,8 @@
  */
 
 import type { ChatMessage } from '../llm/types';
+import { contentPartCostChars } from '../util/contextBudget';
+import { COMPACTION_CHARS_PER_TOKEN } from './compactionBudget';
 import { renderLastReplyBlock } from './compactionLastReply';
 import { renderRecordedActionsBlock } from './compactionRecordedState';
 import { renderCompactionUserMessages } from './compactionUserContext';
@@ -156,9 +158,12 @@ export function messageCostChars(message: ChatMessage): number {
   let cost = message.role.length;
   if (typeof message.content === 'string') cost += message.content.length;
   else if (Array.isArray(message.content)) {
-    // Image and file parts carry their payload here; skipping them is what let
-    // an attachment-heavy tail look free.
-    for (const part of message.content) cost += JSON.stringify(part).length;
+    // Images cost their token ceiling, not their base64: counting the payload
+    // made one photo outweigh the whole replacement allowance, and skipping it
+    // let an attachment-heavy tail look free.
+    for (const part of message.content) {
+      cost += contentPartCostChars(part, COMPACTION_CHARS_PER_TOKEN);
+    }
   }
   for (const call of message.tool_calls ?? []) {
     cost += call.function.name.length + call.function.arguments.length;

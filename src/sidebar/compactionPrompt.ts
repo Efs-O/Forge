@@ -12,6 +12,7 @@
 import type { ChatMessage } from '../llm/types';
 import type { PlanItem } from './sessionTypes';
 import { CompactionFailure } from './compactionFailure';
+import { textWithImageNotes } from './imageParts';
 
 /** Small direct-call defaults; the service supplies percentage budgets. */
 const TOOL_RESULT_MAX_CHARS = 2000;
@@ -57,7 +58,7 @@ function formatSummaryMessage(message: ChatMessage, sourceMaxChars: number): str
       ? message.content
       : message.content === null
         ? '[no visible assistant text]'
-        : '[non-text content]';
+        : textWithImageNotes(message, { reason: 'summarized' });
   const body =
     message.role === 'tool'
       ? compactToolOutput(
@@ -180,6 +181,25 @@ function planSnapshotBlock(plan: readonly PlanItem[] | undefined): string {
   );
 }
 
+/** Share of the enforced ceiling the summary is asked to aim for. */
+const SUMMARY_TARGET_SHARE = 0.6;
+
+/**
+ * The length rule, in the characters the runner enforces.
+ *
+ * A token target was converted at ~3.8 chars/token by the model and checked at
+ * 2.5 by the allowance, so a summary that met its target landed within 5% of
+ * the hard cap. One unit on both sides, and the ceiling named as the limit
+ * that rejects the summary.
+ */
+export function summaryLengthRule(summaryMaxChars: number): string {
+  const target = Math.floor(summaryMaxChars * SUMMARY_TARGET_SHARE);
+  return (
+    `Aim for about ${target} characters. Hard limit: ${summaryMaxChars} characters; ` +
+    'a longer summary is rejected and the compaction fails. '
+  );
+}
+
 export function buildSummaryPrompt(
   currentLocalTime: string,
   previousSummary: string | undefined,
@@ -187,7 +207,7 @@ export function buildSummaryPrompt(
   recordedFacts = '',
   userContext = '',
   plan: readonly PlanItem[] | undefined = undefined,
-  budget?: { sourceMaxChars: number; summaryTargetTokens: number; summaryCeilingTokens: number },
+  budget?: { sourceMaxChars: number; summaryMaxChars?: number },
 ): string {
   const previous = previousSummary
     ? `EARLIER SUMMARY:\n${truncateText(previousSummary, budget ? Math.floor(budget.sourceMaxChars * 0.1) : PREVIOUS_SUMMARY_MAX_CHARS)}\n\n`
@@ -215,9 +235,7 @@ export function buildSummaryPrompt(
     'Completed work should shrink to one line per item; drop superseded decisions and resolved ' +
     'errors. Keep open work and current file state detailed. Keep the summary target fixed across ' +
     'compactions; do not carry earlier summary prose forward just because it was already summarized. ' +
-    (budget
-      ? `Aim for about ${budget.summaryTargetTokens} visible tokens; do not exceed ${budget.summaryCeilingTokens}. `
-      : '') +
+    (budget?.summaryMaxChars !== undefined ? summaryLengthRule(budget.summaryMaxChars) : '') +
     'Use all seven headings: Goal, State, Next, Files, Constraints, Errors, Reference. ' +
     // Without this, State became a narrative of the conversation and the
     // conclusions of finished investigations were lost, so the resumed agent

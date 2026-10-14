@@ -9,7 +9,7 @@ import * as path from 'path';
 import type { ForgeConfig, ModelConfig } from '../config/types';
 import type { RuntimeModelCapabilities } from '../backend/ModelCapabilities';
 import type { ForgeInstructionsLoader } from '../llm/ForgeInstructionsLoader';
-import type { ToolDefinition } from '../llm/types';
+import type { ChatCompletionRequest, ToolDefinition } from '../llm/types';
 import { stripThinkingFromFullText } from '../llm/ThinkingChannelStripper';
 import { stripHtmlDocumentBoilerplateFromFullText } from '../llm/HtmlDocumentBoilerplateStripper';
 import { stripStructuredOutputFromFullText } from '../tools/StructuredOutputParser';
@@ -21,6 +21,27 @@ export function canUseThinkingKwargs(
   if (!model) return false;
   if (runtimeCaps?.likelySupportsThinking === false) return false;
   return model.think !== undefined || model.sampling?.preserve_thinking !== undefined;
+}
+
+/**
+ * Request fields that turn thinking off for one request, or `undefined` when
+ * Forge knows no off switch for the provider.
+ *
+ * llama.cpp and Ollama take the chat-template kwarg (`RequestNormalizer` keeps
+ * an explicit `false`, and maps it to Ollama's `think: false`). Self-hosted
+ * OpenAI-compatible servers take `reasoning_effort: 'none'` (Strata maps it to
+ * `enable_thinking: false`). The named cloud providers accept different effort
+ * vocabularies per model, so a value that one model rejects is not guessed.
+ */
+export function thinkingOffFields(
+  model: ModelConfig,
+): Pick<ChatCompletionRequest, 'chat_template_kwargs' | 'reasoning_effort'> | undefined {
+  const provider = model.provider ?? 'llama.cpp';
+  if (provider === 'llama.cpp' || provider === 'ollama') {
+    return { chat_template_kwargs: { enable_thinking: false } };
+  }
+  if (provider === 'openai-compatible') return { reasoning_effort: 'none' };
+  return undefined;
 }
 
 export function shouldStripThinking(model: ModelConfig | undefined, config: ForgeConfig): boolean {

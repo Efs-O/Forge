@@ -34,11 +34,15 @@ export const USER_IMAGE_DROPPED_NOTE =
  *               has no projector. Needs the model name to be actionable.
  * - `aged-out`  dropped from the model-facing copy to reclaim context. It is
  *               recoverable — say how.
+ * - `summarized` the compaction summarizer's copy: the image exists, but the
+ *               summary turn is text-only. The summary should record that it
+ *               existed, never what it showed.
  */
 export type ImageStripOptions =
   | { reason: 'persist' }
   | { reason: 'no-vision'; modelName: string }
-  | { reason: 'aged-out' };
+  | { reason: 'aged-out' }
+  | { reason: 'summarized' };
 
 /**
  * The "do not guess" clause in every note is load-bearing: a local model handed
@@ -63,6 +67,10 @@ function noteFor(options: ImageStripOptions, role: ChatMessage['role']): string 
         : '[An image the user attached earlier is no longer in context. Ask the user to ' +
             're-attach it if you need to look at it — do not describe or guess at its ' +
             'contents.]';
+    case 'summarized':
+      return role === 'tool'
+        ? '[image returned by this tool call; not shown to the summarizer — do not describe it]'
+        : '[image attached by the user; not shown to the summarizer — do not describe it]';
   }
 }
 
@@ -106,6 +114,19 @@ export function stripImageParts(
       ? { ...message, content: replaceIn(message.content, options, message.role) }
       : message,
   );
+}
+
+/**
+ * One message's content as plain text, each image replaced by its note. For
+ * text-only consumers (the compaction summarizer) of a message that may carry
+ * images; the stored message is not touched.
+ */
+export function textWithImageNotes(message: ChatMessage, options: ImageStripOptions): string {
+  if (typeof message.content === 'string') return message.content;
+  if (!Array.isArray(message.content)) return '';
+  return replaceIn(message.content, options, message.role)
+    .map((part) => (part.type === 'text' ? part.text : ''))
+    .join('\n');
 }
 
 /**

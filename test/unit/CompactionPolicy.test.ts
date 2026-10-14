@@ -100,8 +100,7 @@ describe('percentage compaction policy', () => {
     expect(() =>
       buildSummaryPrompt('test local time', undefined, messages, '', '', undefined, {
         sourceMaxChars: 4_000,
-        summaryTargetTokens: 1_000,
-        summaryCeilingTokens: 1_250,
+        summaryMaxChars: 3_000,
       }),
     ).toThrow(
       expect.objectContaining({

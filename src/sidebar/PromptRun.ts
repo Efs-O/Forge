@@ -25,7 +25,12 @@ import { normalizeRequestForModel } from '../llm/RequestNormalizer';
 import { resolveRequestModel } from '../config/ConfigResolver';
 import { isCloudProvider } from '../llm/CloudProviders';
 import { resolveCloudRequestTarget } from '../llm/CloudRequestResolver';
-import { buildTemplateContext, sanitizeText, shouldStripThinking } from './turnModelBehavior';
+import {
+  buildTemplateContext,
+  sanitizeText,
+  shouldStripThinking,
+  thinkingOffFields,
+} from './turnModelBehavior';
 import { reasoningReserve } from '../util/contextBudget';
 import { getLogger } from '../util/logger';
 
@@ -79,6 +84,9 @@ export interface PromptRunOptions {
   requireComplete?: boolean;
   /** Per-request reasoning level; leaves the model's configured default intact. */
   reasoningEffort?: ChatCompletionRequest['reasoning_effort'];
+  /** Turn thinking off where the provider has a known off switch
+   *  (`thinkingOffFields`); `reasoningEffort` still applies where it has none. */
+  disableThinking?: boolean;
   /** Already-held backend for host-owned non-evicting runs. */
   backend?: BackendController;
   /** Narrow, caller-owned tools for an isolated prompt. */
@@ -233,6 +241,7 @@ export async function runPromptToMarkdown(
         ...(options.reasoningEffort !== undefined
           ? { reasoning_effort: options.reasoningEffort }
           : {}),
+        ...(options.disableThinking ? thinkingOffFields(selectedModel) : {}),
         ...(options.contactTools && options.dispatchContactTool
           ? { tools: [...options.contactTools] }
           : {}),

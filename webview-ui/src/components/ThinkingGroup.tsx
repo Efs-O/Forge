@@ -4,7 +4,7 @@ import type { AppMessage } from '../reducer';
 import { isReasoningOnly } from '../activityRows';
 import { sameRowList } from '../messageOps';
 import { formatDuration } from '../../../src/util/formatDuration';
-import { useDisclosure } from '../disclosureState';
+import { openedReasoning, useDisclosure } from '../disclosureState';
 
 const ChevronDown = (): React.ReactElement => (
   <svg width="10" height="6" viewBox="0 0 10 6" fill="currentColor" aria-hidden="true">
@@ -114,7 +114,8 @@ interface Props {
 
 function ThinkingGroupView({ steps }: Props): React.ReactElement | null {
   const [choice, setChoice] = useDisclosure('thinkingGroup', steps[0]?.id ?? '');
-  const expanded = choice ?? false;
+  // A lone bubble the reader opened keeps the run open once a second step joins.
+  const expanded = choice ?? openedReasoning(steps);
 
   if (steps.length === 0) return null;
 

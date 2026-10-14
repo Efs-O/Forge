@@ -55,6 +55,37 @@ describe('one-shot compaction', () => {
     expect(options).toMatchObject({ reasoningEffort: 'low', requireComplete: true });
   });
 
+  it('asks for thinking off when the model has no reasoning reserve', async () => {
+    const runPrompt = vi.fn(async (_text: string, _id: string, _options: PromptRunOptions) => note);
+    await summarizeCompaction(input(messages, runPrompt));
+    expect(runPrompt.mock.calls[0]![2]).toMatchObject({ disableThinking: true });
+  });
+
+  it('keeps thinking when a reserve is configured, since the cap already makes room for it', async () => {
+    const runPrompt = vi.fn(async (_text: string, _id: string, _options: PromptRunOptions) => note);
+    await summarizeCompaction({ ...input(messages, runPrompt), reasoningTokens: 3_072 });
+    expect(runPrompt.mock.calls[0]![2].disableThinking).toBeUndefined();
+  });
+
+  it('names the same character ceiling in the prompt that the runner enforces', async () => {
+    const runPrompt = vi.fn(async (_text: string, _id: string, _options: PromptRunOptions) => note);
+    const request = input(messages, runPrompt);
+    await summarizeCompaction(request);
+    const prompt = runPrompt.mock.calls[0]![0];
+    const ceiling = /Hard limit: (\d+) characters/u.exec(prompt)?.[1];
+    expect(Number(ceiling)).toBe(request.maximumSummaryChars);
+    expect(prompt).toContain(`Aim for about ${Math.floor(request.maximumSummaryChars * 0.6)} characters`);
+    expect(prompt).not.toMatch(/visible tokens/u);
+  });
+
+  it('rejects a summary one character over the ceiling the prompt named', async () => {
+    const request = input(messages, async () => note);
+    const over = `${note}${'x'.repeat(Math.max(0, request.maximumSummaryChars - note.length + 1))}`;
+    await expect(
+      summarizeCompaction({ ...request, runPrompt: async () => over }),
+    ).rejects.toThrow(new RegExp(`${request.maximumSummaryChars}-character allocation`, 'u'));
+  });
+
   it('keeps a length stop as a failure without a second request', async () => {
     const runPrompt = vi.fn(async (_text: string, _id: string, _options: PromptRunOptions) => {
       throw new PromptIncompleteError('length');

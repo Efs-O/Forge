@@ -91,7 +91,7 @@ function oneShotPrompt(input: CompactionSummaryInput, outputTokens: number) {
         input.recordedFacts,
         input.userContext,
         input.plan,
-        { ...input.budget, sourceMaxChars },
+        { sourceMaxChars, summaryMaxChars: input.maximumSummaryChars },
       ),
     input.reasoningTokens,
     outputTokens,
@@ -111,6 +111,11 @@ async function runOneShot(
     alwaysStripThinking: true,
     requireComplete: true,
     reasoningEffort: 'low',
+    // Thinking and the summary share one output budget, and with no reserve
+    // configured the cap holds the visible summary only: a thinking model cut
+    // its own summary off with finish_reason=length. The summary is stripped
+    // of thinking anyway.
+    ...(input.reasoningTokens === 0 ? { disableThinking: true } : {}),
   });
 }
 

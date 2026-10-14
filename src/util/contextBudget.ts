@@ -1,4 +1,4 @@
-import type { ChatCompletionRequest, ChatMessage, ToolDefinition } from '../llm/types';
+import type { ChatCompletionRequest, ChatMessage, ContentPart, ToolDefinition } from '../llm/types';
 import type { ModelConfig, LlamaServerConfig } from '../config/types';
 
 /**
@@ -100,6 +100,17 @@ export const MIN_ROUND_HEADROOM_TOKENS = 4000;
 
 /** Measured image ceiling (~1,050 tokens); 1,100 covers rounding/tokenizer variation. */
 export const IMAGE_PART_TOKENS = 1100;
+
+/**
+ * Character cost of one content part for char-measured budgets (compaction).
+ * An image costs its token ceiling converted at the caller's rate, never its
+ * base64 payload: a 300 KB photo is ~1,100 tokens to the model, not 410K chars.
+ */
+export function contentPartCostChars(part: ContentPart, charsPerToken: number): number {
+  return part.type === 'image_url'
+    ? Math.ceil(IMAGE_PART_TOKENS * charsPerToken)
+    : part.text.length;
+}
 
 /** Chat-template delimiters for each message appended after a measured request. */
 const ADDED_MESSAGE_TOKENS = 16;

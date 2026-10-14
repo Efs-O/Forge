@@ -298,7 +298,7 @@ async function compactOnce(
       summaryPrompt = summaryRun.prompt;
       summary = summaryRun.summary;
       log.info(
-        `[compact] budget P=${budget.policyTokens} (${budget.estimated ? 'estimated' : 'reported'}), host~${Math.ceil(hostChars / COMPACTION_CHARS_PER_TOKEN)}, tail~${Math.ceil(tailChars / COMPACTION_CHARS_PER_TOKEN)}, output_cap=${summaryRun.outputTokens}, summary_target=${budget.summaryTargetTokens}, method=${summaryRun.method}, calls=${summaryRun.calls}`,
+        `[compact] budget P=${budget.policyTokens} (${budget.estimated ? 'estimated' : 'reported'}), host~${Math.ceil(hostChars / COMPACTION_CHARS_PER_TOKEN)}, tail~${Math.ceil(tailChars / COMPACTION_CHARS_PER_TOKEN)}, output_cap=${summaryRun.outputTokens}, summary_max_chars=${summaryAllowance}, method=${summaryRun.method}, calls=${summaryRun.calls}`,
       );
     } finally {
       release();

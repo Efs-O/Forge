@@ -106,6 +106,56 @@ describe('open/closed choices across remounts', () => {
     expect(container.querySelector('.activity-row-body')).toBeNull();
   });
 
+  it('keeps an opened reasoning bubble open when it folds into a step inside a group', () => {
+    show(React.createElement(ThinkingGroup, { steps: [thought] }));
+    click('.thinking-row-toggle');
+
+    const items: ActivityGroupItem[] = [
+      { kind: 'step', step: edit('a', [thought]) },
+      { kind: 'step', step: edit('b') },
+    ];
+    show(React.createElement(ActivityGroup, { items, live: true, streaming: true }));
+    expect(container.querySelector('.activity-group-toggle')?.getAttribute('aria-expanded')).toBe('true');
+    expect(container.querySelector('.thinking-content')?.textContent).toBe('check the file first');
+  });
+
+  it('keeps an opened reasoning bubble open when it joins a group as a reasoning run', () => {
+    show(React.createElement(ThinkingGroup, { steps: [thought] }));
+    click('.thinking-row-toggle');
+
+    const items: ActivityGroupItem[] = [
+      { kind: 'step', step: edit('a') },
+      { kind: 'thinkingGroup', steps: [thought] },
+    ];
+    show(React.createElement(ActivityGroup, { items, live: true, streaming: true }));
+    expect(container.querySelector('.activity-group-toggle')?.getAttribute('aria-expanded')).toBe('true');
+    expect(container.querySelector('.thinking-content')?.textContent).toBe('check the file first');
+  });
+
+  it('keeps a group the reader closed closed, even over an opened bubble', () => {
+    show(React.createElement(ThinkingGroup, { steps: [thought] }));
+    click('.thinking-row-toggle');
+    const items: ActivityGroupItem[] = [
+      { kind: 'step', step: edit('a', [thought]) },
+      { kind: 'step', step: edit('b') },
+    ];
+    show(React.createElement(ActivityGroup, { items, live: true, streaming: true }));
+    click('.activity-group-toggle');
+    expect(container.querySelector('.activity-group-body')).toBeNull();
+
+    show(React.createElement(ActivityGroup, { items: [...items, { kind: 'step', step: edit('c') }], live: true, streaming: true }));
+    expect(container.querySelector('.activity-group-body')).toBeNull();
+  });
+
+  it('keeps an opened lone bubble open when a second reasoning step joins its run', () => {
+    show(React.createElement(ThinkingGroup, { steps: [thought] }));
+    click('.thinking-row-toggle');
+
+    const second: AppMessage = { ...thought, id: 'thought-2', reasoning: 'then run the tests' };
+    show(React.createElement(ThinkingGroup, { steps: [thought, second] }));
+    expect(container.querySelector('.thinking-content')?.textContent).toContain('check the file first');
+  });
+
   it('keeps a live group closed and reveals its calls directly on request', () => {
     const completed = (id: string): ActivityStep => ({
       attempts: [{ thoughts: [], tools: [tool(id, { toolResult: 'done', toolResultTotal: 4 })] }],

@@ -3,7 +3,7 @@ import type { AppMessage } from '../reducer';
 import { displayDetail, stepMessages, stepThoughts, type ActivityStep } from '../activityRows';
 import { formatDuration } from '../../../src/util/formatDuration';
 import { sameRowList, toolNameAndDetail } from '../messageOps';
-import { readDisclosure, useDisclosure } from '../disclosureState';
+import { openedReasoning, readDisclosure, useDisclosure } from '../disclosureState';
 import { DiffBlock, diffStats } from './DiffBlock';
 import { ThinkingLabel, ThinkingRow } from './ThinkingGroup';
 import { ToolGroup } from './ToolGroup';
@@ -24,10 +24,13 @@ function finalAttempt(step: ActivityStep): AppMessage[] {
   return step.attempts.at(-1)?.tools ?? [];
 }
 
-function openedThought(step: ActivityStep): boolean {
-  const thoughts = stepThoughts(step);
-  if (thoughts[0] && readDisclosure('thinkingGroup', thoughts[0].id)) return true;
-  return thoughts.some((thought) => readDisclosure('thinking', thought.id) === true);
+/**
+ * Whether a step renders open before this render's own choice is known: the
+ * reader's choice for the step, else whether they opened reasoning that has
+ * since folded into it. `ActivityGroup` asks the same question of its items.
+ */
+export function stepRevealed(step: ActivityStep): boolean {
+  return readDisclosure('step', stepMessages(step)[0]!.id) ?? openedReasoning(stepThoughts(step));
 }
 
 function isFailure(attempt: AppMessage[]): boolean {
@@ -76,7 +79,7 @@ function editSummary(step: ActivityStep): { added: number; removed: number; meas
 function ActivityRowView({ step }: ActivityRowProps): React.ReactElement | null {
   const [manualOpen, setManualOpen] = useDisclosure('step', stepMessages(step)[0]!.id);
   // An opened reasoning bubble also reveals its step when it folds into a call.
-  const open = manualOpen ?? openedThought(step);
+  const open = manualOpen ?? openedReasoning(stepThoughts(step));
   const final = finalAttempt(step);
   const primary = final[0];
   if (!primary) return null;

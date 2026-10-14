@@ -33,6 +33,18 @@ export function readDisclosure(kind: DisclosureKind, id: string): boolean | unde
 }
 
 /**
+ * True when the reader opened any of these reasoning messages, as a lone
+ * bubble (`thinking`) or as the run they first appeared in (`thinkingGroup`,
+ * keyed on the run's first id). Every container a reasoning run can fold into -
+ * a step, a group, a longer run - asks this, so an opened bubble keeps its
+ * container open wherever it lands.
+ */
+export function openedReasoning(thoughts: readonly { id: string }[]): boolean {
+  if (thoughts[0] && readDisclosure('thinkingGroup', thoughts[0].id) === true) return true;
+  return thoughts.some((thought) => readDisclosure('thinking', thought.id) === true);
+}
+
+/**
  * `useState` for an open/closed choice that survives remounts. `id` is
  * the element's first message id - the same id `rowKey` uses - so it is fixed
  * from the moment the element first renders.

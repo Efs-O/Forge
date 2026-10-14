@@ -49,7 +49,7 @@ describe('compaction summary content', () => {
       '',
       '',
       undefined,
-      { sourceMaxChars: 10_000, summaryTargetTokens: 1_200, summaryCeilingTokens: 1_500 },
+      { sourceMaxChars: 10_000, summaryMaxChars: 4_000 },
     );
 
     expect(prompt).toContain('Merge the earlier summary into this one and condense it on every compaction.');

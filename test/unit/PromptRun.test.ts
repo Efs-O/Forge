@@ -248,6 +248,55 @@ describe('runPromptToMarkdown options', () => {
     );
   });
 
+  it('turns Strata thinking off for a summary when disableThinking is set', async () => {
+    // With no reasoning reserve the cap holds the visible summary only, so a
+    // thinking summarizer cut itself off with finish_reason=length.
+    const strata: PromptRunContext = {
+      ...ctx(),
+      secrets: { get: async () => 'test-key' } as never,
+    };
+    await runPromptToMarkdown(strata, 'summarize', 'c1', {
+      modelName: 'strata',
+      outputTokens: 12_500,
+      strictOutputTokens: true,
+      reasoningEffort: 'low',
+      disableThinking: true,
+    });
+    expect(sent.reasoning_effort).toBe('none');
+    expect(sent.max_tokens).toBe(12_500);
+  });
+
+  it('turns llama.cpp thinking off through the template kwarg', async () => {
+    await runPromptToMarkdown(ctx(), 'summarize', 'c1', {
+      modelName: 'pinned',
+      outputTokens: 4_000,
+      strictOutputTokens: true,
+      disableThinking: true,
+    });
+    expect(sent.chat_template_kwargs?.['enable_thinking']).toBe(false);
+  });
+
+  it('leaves a named cloud provider on its requested effort, guessing no off switch', async () => {
+    const withXai = (): ForgeConfig => {
+      const base = config();
+      return {
+        ...base,
+        models: [
+          ...base.models,
+          { name: 'grok', provider: 'xai', endpoint: 'https://api.x.ai', api_key_secret: 'xai' },
+        ],
+      } as unknown as ForgeConfig;
+    };
+    await runPromptToMarkdown(
+      { ...ctx(), getConfig: withXai, secrets: { get: async () => 'k' } as never },
+      'summarize',
+      'c1',
+      { modelName: 'grok', outputTokens: 4_000, reasoningEffort: 'low', disableThinking: true },
+    );
+    expect(sent.reasoning_effort).toBe('low');
+    expect(sent.chat_template_kwargs).toBeUndefined();
+  });
+
   it('names the budget when a reply is all thinking and no answer', async () => {
     streamModelChatCompletion.mockImplementation(
       (_u: string, request: ChatCompletionRequest, _m: unknown, handlers: any) => {

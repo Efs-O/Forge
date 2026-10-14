@@ -1,10 +1,10 @@
 import React from 'react';
-import { readDisclosure, useDisclosure } from '../disclosureState';
+import { openedReasoning, useDisclosure } from '../disclosureState';
 import type { ActivityGroupItem } from '../activityRows';
 import { displayDetail, groupMessages, stepMessages } from '../activityRows';
 import { sameRowList, toolNameAndDetail } from '../messageOps';
 import { summarizeGroup } from '../activityGroups';
-import { ActivityRow } from './ActivityRow';
+import { ActivityRow, stepRevealed } from './ActivityRow';
 import { ThinkingGroup } from './ThinkingGroup';
 import type { PendingToolCall } from '../pendingToolCalls';
 
@@ -47,11 +47,12 @@ function ActivityGroupView({
     `pending-${pendingCalls[0]?.index ?? 0}`;
   const [choice, setChoice] = useDisclosure('group', firstId);
   const summary = summarizeGroup(items);
-  const openedStep = items.some(
-    (item) =>
-      item.kind === 'step' && readDisclosure('step', stepMessages(item.step)[0]!.id) === true,
+  // An opened step, or an opened reasoning bubble that folded into this group
+  // (inside a step or as a reasoning run), keeps the group open on remount.
+  const openedItem = items.some((item) =>
+    item.kind === 'step' ? stepRevealed(item.step) : openedReasoning(item.steps),
   );
-  const expanded = choice ?? openedStep;
+  const expanded = choice ?? openedItem;
   const status = summary.failed > 0 ? '✕' : summary.pending ? '○' : '✓';
   const recordedTools = live
     ? items.flatMap((item) =>
