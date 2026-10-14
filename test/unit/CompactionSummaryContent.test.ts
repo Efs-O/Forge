@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { buildSummaryPrompt } from '../../src/sidebar/compactionPrompt';
+import { CompactionFailure } from '../../src/sidebar/compactionFailure';
 import {
   compactionResumeNote,
   compactionSummaryAllowance,
@@ -69,6 +70,63 @@ describe('compaction summary content', () => {
     );
     expect(prompt).toContain(retainedText);
     expect(prompt).not.toContain(fileText.slice(2_000, 2_100));
+  });
+
+  it('sheds a prose-heavy source to fit 12,000 chars without refusing', () => {
+    const messages: ChatMessage[] = [
+      { role: 'user', content: `typed request ${'U'.repeat(50_000)}` },
+      ...Array.from({ length: 1 }, (_, index) => ({
+        role: 'user' as const,
+        content: `user entry ${index} ${'V'.repeat(20_000)}`,
+      })),
+      ...Array.from({ length: 400 }, (_, index) => ({
+        role: 'assistant' as const,
+        content: `assistant ${index} ${'A'.repeat(20_000)}`,
+        reasoning: `reasoning ${'R'.repeat(2_000)}`,
+        tool_calls: [
+          {
+            id: `call-${index}`,
+            type: 'function' as const,
+            function: { name: 'read_file', arguments: `{"path":"${'P'.repeat(1_000)}"}` },
+          },
+        ],
+      })),
+    ];
+
+    const prompt = buildSummaryPrompt(
+      'test time',
+      undefined,
+      messages,
+      '',
+      '',
+      undefined,
+      { sourceMaxChars: 12_000 },
+    );
+    const source = prompt.slice(prompt.indexOf('Conversation:\n') + 'Conversation:\n'.length);
+
+    expect(source.length).toBeLessThanOrEqual(12_000);
+    expect(source).toContain('[for space: reasoning notes dropped from');
+    expect(source).toContain('[for space: tool-call details reduced to names in');
+    expect(source).toContain('[for space: 394 earlier assistant entries dropped]');
+    expect(source).toContain('[for space: earlier user entries cut to their first 1,000 chars (2)]');
+    expect(source).toContain('[for space: newest six entries reduced (6 affected)');
+    expect(source).toContain('typed request');
+  });
+
+  it('names the final source floor when the available budget is below it', () => {
+    const messages: ChatMessage[] = [
+      { role: 'user', content: 'typed request' },
+      ...Array.from({ length: 8 }, () => ({ role: 'assistant' as const, content: 'A'.repeat(2_000) })),
+    ];
+
+    try {
+      buildSummaryPrompt('test time', undefined, messages, '', '', undefined, { sourceMaxChars: 500 });
+      throw new Error('expected floor refusal');
+    } catch (error) {
+      expect(error).toBeInstanceOf(CompactionFailure);
+      expect(error).toMatchObject({ category: 'budget-refusal' });
+      expect(error).toHaveProperty('message', expect.stringContaining('floor:'));
+    }
   });
 
   it('condenses a long earlier summary without changing the summary allowance', () => {
