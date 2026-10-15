@@ -86,6 +86,21 @@ export function generatedImagePath(toolName: string, result: string): string | u
   return relative;
 }
 
+/** How an image-mode `render_html_to_image` result begins. */
+export const RENDERED_IMAGE_PREFIX = 'Rendered ';
+
+const RENDERED_IMAGE_LINE = /^Rendered (.+?\.(?:png|jpe?g|gif|bmp|webp)) \(PNG,/imu;
+
+/** Workspace-relative image path saved by image-mode `render_html_to_image`. */
+export function renderedImagePath(toolName: string, result: string): string | undefined {
+  if (toolName !== 'render_html_to_image' || isFailureResult(result)) return undefined;
+  const relative = RENDERED_IMAGE_LINE.exec(result)?.[1];
+  const normalized = relative?.replace(/\\/g, '/');
+  if (!normalized || normalized.startsWith('/') || /^[a-z]:/iu.test(normalized)) return undefined;
+  if (normalized.split('/').includes('..')) return undefined;
+  return relative;
+}
+
 /**
  * Absolute screenshot path a browser or desktop capture saved, parsed from its
  * final result line. Unlike generated images, screenshots live outside the

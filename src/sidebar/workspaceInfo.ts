@@ -11,6 +11,7 @@
 
 import * as vscode from 'vscode';
 import type { HostToWebview } from './messageBridge';
+import { SCREENSHOT_DIR } from '../tools/browser/browserTools';
 
 /**
  * `activationRoot` is the root every by-value consumer — delegation, the
@@ -31,6 +32,7 @@ export function workspaceInfoMessage(
     extraRoots: Math.max(0, folders.length - 1),
     stale: root !== activationRoot,
     ...(folders[0] && toWebviewUri ? { rootUri: toWebviewUri(folders[0].uri) } : {}),
+    ...(toWebviewUri ? { screenshotsUri: toWebviewUri(vscode.Uri.file(SCREENSHOT_DIR)) } : {}),
   };
 }
 

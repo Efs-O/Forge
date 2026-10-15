@@ -18,7 +18,7 @@ type GetConfig = () => ForgeConfig;
 /** Screenshots live under the user's home Forge dir, never the workspace's
  *  `.forge/` (plan §4.3): desktop captures can hold secrets, and a repo's
  *  `.forge/` is gitignored in Forge but not in other repos the agent works in. */
-const SCREENSHOT_DIR = path.join(os.homedir(), '.forge', 'screenshots');
+export const SCREENSHOT_DIR = path.join(os.homedir(), '.forge', 'screenshots');
 
 /** Atomic temp→rename so a failed write never leaves a torn PNG (ledger row). */
 export async function saveScreenshot(

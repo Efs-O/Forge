@@ -335,6 +335,7 @@ export interface WorkspaceInfoMsg {
   stale: boolean;
   /** Webview URI of `path`, for thumbnails of workspace images (generate_image). */
   rootUri?: string;
+  screenshotsUri?: string; // Webview URI of Forge's screenshot directory.
 }
 
 export type HostToWebview =

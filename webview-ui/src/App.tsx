@@ -7,7 +7,7 @@ import type {
   SessionTabMeta,
 } from '../../src/sidebar/messageBridge';
 import { vscode } from './vscode';
-import { WorkspaceRootUriContext } from './workspaceRootUri';
+import { WorkspaceUrisProvider } from './workspaceRootUri';
 import {
   reducer,
   initialState,
@@ -38,6 +38,8 @@ import { usePendingPrompts } from './usePendingPrompts';
 import { hostMessageToAction } from './hostActions';
 export type { QueuedPrompt } from './usePendingPrompts';
 
+type WorkspaceContextInfo = WorkspaceInfo & { screenshotsUri?: string };
+
 export function App(): React.ReactElement {
   webviewDiagnostics.recordRender();
   const [state, dispatch] = useReducer(reducer, initialState);
@@ -47,7 +49,7 @@ export function App(): React.ReactElement {
   const dialogs = useAgentDialogs();
   const [tokenUsed, setTokenUsed] = useState(0);
   const [tokenMax, setTokenMax] = useState(0);
-  const [workspace, setWorkspace] = useState<WorkspaceInfo | undefined>(undefined);
+  const [workspace, setWorkspace] = useState<WorkspaceContextInfo | undefined>(undefined);
   const [prefillText, setPrefillText] = useState<string | null>(null);
   const [historyExpanded, setHistoryExpanded] = useState(false);
   const [waitingIds, setWaitingIds] = useState<ReadonlySet<string>>(() => new Set());
@@ -122,6 +124,7 @@ export function App(): React.ReactElement {
             extraRoots: msg.extraRoots,
             stale: msg.stale,
             ...(msg.rootUri ? { rootUri: msg.rootUri } : {}),
+            ...(msg.screenshotsUri ? { screenshotsUri: msg.screenshotsUri } : {}),
           });
           break;
         case 'sessionSync':
@@ -300,7 +303,7 @@ export function App(): React.ReactElement {
   const checkpointStats = selectCheckpointStats(state);
 
   return (
-    <WorkspaceRootUriContext.Provider value={workspace?.rootUri}>
+    <WorkspaceUrisProvider rootUri={workspace?.rootUri} screenshotsUri={workspace?.screenshotsUri}>
       <div id="forge-root">
         <Header tokenUsed={tokenUsed} tokenMax={tokenMax} workspace={workspace} />
         <aside id="chats-panel" aria-label="Forge sessions">
@@ -400,6 +403,6 @@ export function App(): React.ReactElement {
           />
         )}
       </div>
-    </WorkspaceRootUriContext.Provider>
+    </WorkspaceUrisProvider>
   );
 }

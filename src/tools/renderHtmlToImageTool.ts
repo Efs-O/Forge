@@ -4,6 +4,7 @@ import { DEFAULT_BROWSER_CHANNEL } from '../config/browserSchema';
 import { DEFAULT_IMAGE_OUTPUT_DIR } from '../config/imageGenerationSchema';
 import type { ForgeConfig } from '../config/types';
 import { writeFileAtomicSync } from '../util/atomicWrite';
+import { RENDERED_IMAGE_PREFIX } from '../sidebar/toolResultView';
 import type { UserNotificationService } from '../sidebar/UserNotificationService';
 import { resolveRealWorkspacePath } from '../util/WorkspacePaths';
 import { pngDimensions } from './browser/BrowserSessionManager';
@@ -329,7 +330,7 @@ async function runRender(
     const dims = pngDimensions(png);
     // The claimed name, which may carry a `-2` suffix, so not `target`.
     const workspacePath = path.posix.join(outputPosixDir, path.basename(absolute));
-    const head = `Rendered ${workspacePath} (PNG, ${png.length.toLocaleString()} bytes) at ${dims.width}x${dims.height}.`;
+    const head = `${RENDERED_IMAGE_PREFIX}${workspacePath} (PNG, ${png.length.toLocaleString()} bytes) at ${dims.width}x${dims.height}.`;
     if (reached.kind === 'refused') return `${head}\n${reached.reason}`;
     return reached.chats > 0
       ? `${head} Queued for ${reached.chats} remote chat(s).`

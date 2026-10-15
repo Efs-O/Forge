@@ -1,19 +1,16 @@
-import React, { useCallback, useContext, useMemo, useState } from 'react';
+import React, { useMemo } from 'react';
 import { toolNameAndDetail } from '../messageOps';
 import Markdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import type { AppMessage } from '../reducer';
 import { vscode } from '../vscode';
 import { normalizeMarkdownForRender } from '../markdown';
-import {
-  generatedImagePath,
-  imageSearchThumbnails,
-  rendersAsMarkdown,
-} from '../../../src/sidebar/toolResultView';
-import { WorkspaceRootUriContext, workspaceFileUri } from '../workspaceRootUri';
-import { ImageLightbox } from './ImageLightbox';
+import { rendersAsMarkdown } from '../../../src/sidebar/toolResultView';
 import { formatDuration } from '../../../src/util/formatDuration';
 import { useDisclosure } from '../disclosureState';
+import { ToolRowThumbnails } from './ToolThumbnails';
+
+export { ToolRowThumbnails } from './ToolThumbnails';
 
 const ChevronDown = (): React.ReactElement => (
   <svg width="10" height="6" viewBox="0 0 10 6" fill="currentColor" aria-hidden="true">
@@ -32,55 +29,6 @@ const EXPANDABLE_MIN_CHARS = 100;
 
 function formatSize(chars: number): string {
   return chars >= 1000 ? `${(chars / 1000).toFixed(1)}k chars` : `${chars} chars`;
-}
-
-/** The one thumbnail renderer is shared by full tool rows and collapsed steps. */
-export function ToolRowThumbnails({ message }: { message: AppMessage }): React.ReactElement | null {
-  const [expanded, setExpanded] = useState<number | null>(null);
-  const closeExpanded = useCallback(() => setExpanded(null), []);
-  const rootUri = useContext(WorkspaceRootUriContext);
-  const result = message.toolResult ?? '';
-  const toolName = message.toolName ?? '';
-  const generated = generatedImagePath(toolName, result);
-  const listed = generated ? [{ path: generated }] : imageSearchThumbnails(toolName, result);
-  const images = rootUri
-    ? listed.map((entry) => ({
-        attachment: {
-          name: entry.path,
-          mediaType: 'image/*',
-          bytes: 0,
-          src: workspaceFileUri(rootUri, entry.path),
-        },
-        original: 'original' in entry ? entry.original : undefined,
-      }))
-    : [];
-  const openImage = expanded === null ? undefined : images[expanded];
-
-  if (images.length === 0) return null;
-  return (
-    <>
-      <div className={`tool-row-thumbs${images.length > 1 ? ' is-grid' : ''}`}>
-        {images.map(({ attachment }, index) => (
-          <button
-            key={attachment.name}
-            type="button"
-            className="tool-row-thumb"
-            title={`${attachment.name} — click to expand`}
-            onClick={() => setExpanded(index)}
-          >
-            <img src={attachment.src} alt={attachment.name} />
-          </button>
-        ))}
-      </div>
-      {openImage && (
-        <ImageLightbox
-          attachment={openImage.attachment}
-          onClose={closeExpanded}
-          {...(openImage.original ? { originalUrl: openImage.original } : {})}
-        />
-      )}
-    </>
-  );
 }
 
 /**

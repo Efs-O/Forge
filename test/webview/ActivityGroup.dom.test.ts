@@ -12,6 +12,7 @@ import type { PendingToolCall } from '../../webview-ui/src/pendingToolCalls';
 ).acquireVsCodeApi = () => ({ postMessage: () => undefined });
 
 const { ActivityGroup } = await import('../../webview-ui/src/components/ActivityGroup');
+const { WorkspaceRootUriContext } = await import('../../webview-ui/src/workspaceRootUri');
 const React = await import('react');
 const { resetDisclosures } = await import('../../webview-ui/src/disclosureState');
 
@@ -452,5 +453,51 @@ describe('ActivityGroup', () => {
     expect(container.querySelector('.activity-group-retry')?.textContent).toBe('[1 retry]');
     render([recovered(1), recovered(2)], false, false);
     expect(container.querySelector('.activity-group-retry')?.textContent).toBe('[3 retries]');
+  });
+
+  it('shows every folded image, caps the strip, and opens the group from +N more', () => {
+    const imagePaths = Array.from(
+      { length: 7 },
+      (_, index) => `.forge/image-search/c1/${index + 1}.png`,
+    );
+    const item: ActivityGroupItem = {
+      kind: 'step',
+      step: {
+        attempts: [
+          {
+            thoughts: [],
+            tools: [
+              tool('search', {
+                content: 'image_search',
+                toolName: 'image_search',
+                toolResult:
+                  'Search complete.\nThumbnails saved and shown to the user (view_image can open them): ' +
+                  imagePaths.join(', '),
+                toolResultTotal: 200,
+              }),
+            ],
+          },
+        ],
+        diffs: [],
+      },
+    };
+    act(() => {
+      root.render(
+        React.createElement(
+          WorkspaceRootUriContext.Provider,
+          { value: 'https://file.vscode-resource/ws' },
+          React.createElement(ActivityGroup, { items: [item], live: false, streaming: false }),
+        ),
+      );
+    });
+
+    expect(container.querySelector('.activity-group-images')?.textContent).toBe('· 7 images');
+    expect(container.querySelectorAll('.group-image-strip .tool-row-thumb')).toHaveLength(5);
+    const more = container.querySelector<HTMLButtonElement>('.group-image-more')!;
+    expect(more.textContent).toBe('+2 more');
+    act(() => more.click());
+    expect(container.querySelector('.activity-group-toggle')?.getAttribute('aria-expanded')).toBe(
+      'true',
+    );
   });
 });

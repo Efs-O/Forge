@@ -52,6 +52,9 @@ describe('workspaceInfoMessage', () => {
     setFolders([{ name: 'Forge', fsPath: 'N:/forge' }]);
     expect(
       workspaceInfoMessage('N:/forge', (uri) => `webview:${(uri as { fsPath: string }).fsPath}`),
-    ).toMatchObject({ rootUri: 'webview:N:/forge' });
+    ).toMatchObject({
+      rootUri: 'webview:N:/forge',
+      screenshotsUri: expect.stringMatching(/^webview:/u),
+    });
   });
 });

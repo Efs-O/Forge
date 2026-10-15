@@ -13,6 +13,8 @@ import {
 import { ActivityRow, stepRevealed } from './ActivityRow';
 import { ThinkingGroup } from './ThinkingGroup';
 import type { PendingToolCall } from '../pendingToolCalls';
+import { groupImages } from '../toolImages';
+import { GroupImageStrip } from './ToolThumbnails';
 
 export interface ActivityGroupProps {
   items: ActivityGroupItem[];
@@ -90,6 +92,7 @@ function ActivityGroupView({
     ),
   );
   const visibleItems = visibleGroupItems(items, recovered, revealed);
+  const imageCount = groupImages(items).length;
   // An opened step, or an opened reasoning bubble that folded into this group
   // (inside a step or as a reasoning run), keeps the group open on remount.
   const openedItem = items.some((item) =>
@@ -182,12 +185,18 @@ function ActivityGroupView({
             · ◔{summary.thinking ? ` ${summary.thinking}` : ''} thinking
           </span>
         )}
+        {imageCount > 0 && (
+          <span className="activity-group-images">
+            · {imageCount} {imageCount === 1 ? 'image' : 'images'}
+          </span>
+        )}
         {summary.retries > 0 && (
           <span className="activity-group-retry">
             [{summary.retries} {summary.retries === 1 ? 'retry' : 'retries'}]
           </span>
         )}
       </button>
+      {!expanded && <GroupImageStrip items={items} onMore={() => setChoice(true)} />}
       {!expanded && live && activeName && (
         <div className="activity-group-pending" role="status">
           <span

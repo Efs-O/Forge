@@ -1,6 +1,8 @@
 import { describe, expect, it } from 'vitest';
 import {
   generatedImagePath,
+  renderedImagePath,
+  RENDERED_IMAGE_PREFIX,
   formatThumbnailLine,
   IMAGE_SEARCH_THUMBNAILS_PREFIX,
   imageSearchThumbnails,
@@ -122,6 +124,30 @@ describe('generatedImagePath', () => {
     expect(workspaceFileUri('https://file.vscode-resource/N:/ws/', 'art/a fox (1).jpg')).toBe(
       'https://file.vscode-resource/N:/ws/art/a%20fox%20(1).jpg',
     );
+  });
+});
+
+describe('renderedImagePath', () => {
+  const ok = `${RENDERED_IMAGE_PREFIX}generated-images/20261015-invite.png (PNG, 130 bytes) at 1024x768.`;
+
+  it('reads an image-mode render from its successful result', () => {
+    expect(renderedImagePath('render_html_to_image', ok)).toBe(
+      'generated-images/20261015-invite.png',
+    );
+  });
+
+  it('ignores other tools, failures, and paths that leave the workspace', () => {
+    expect(renderedImagePath('generate_image', ok)).toBeUndefined();
+    expect(renderedImagePath('render_html_to_image', 'Error: Chrome failed')).toBeUndefined();
+    expect(
+      renderedImagePath('render_html_to_image', 'Rendered ../outside.png (PNG, 1 byte)'),
+    ).toBeUndefined();
+    expect(
+      renderedImagePath('render_html_to_image', 'Rendered C:/outside.png (PNG, 1 byte)'),
+    ).toBeUndefined();
+    expect(
+      renderedImagePath('generate_image', 'Rendered locally at generated-images/a.png'),
+    ).toBeUndefined();
   });
 });
 
