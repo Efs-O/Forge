@@ -1,5 +1,10 @@
 # Forge — Recent Changes
 
+## 0.17.38
+
+- An opened step, or an opened thinking bubble that folded into one, no longer prints a long command in full. A multi-line command (an inline script, a heredoc, a commit with a long message) or a single line over 200 characters shows as one line, `▸ Command · 49 lines python - <<'EOF'`, with the leading `cd "<folder>" &&` dropped. Clicking it shows the whole original command in a box about 20 lines tall that scrolls, the same as the output.
+- `update_plan` accepts item text up to 300 characters, up from 200. Plans longer than about 1,500 characters used to lose their last items, usually the unfinished ones, from what the model saw, while the tool still reported the whole plan recorded. Every plan the tool accepts now reaches the model in full. A rejected plan names the item and the rule it broke, such as `item 6 text is 227 characters; the limit is 300`.
+
 ## 0.17.37
 
 - Opening a tool step shows the call and one folded line, `▸ Output · N chars`. The result appears only when you click that line, and an opened result scrolls in a box about 20 lines tall instead of pushing the chat down. Opening the thinking that led into a call no longer prints the call's whole result.
