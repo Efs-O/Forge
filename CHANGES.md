@@ -1,5 +1,11 @@
 # Forge — Recent Changes
 
+## 0.17.35
+
+- Leaving a chat moves it to history: starting a new chat, clicking another open chat or opening one from history moves the idle chat you left into Recent history. A chat that is running, waiting for an approval or answer, has queued messages, or is bound to a remote chat stays open. An empty chat is dropped. Each start also moves idle open chats other than the current one, so the Open section holds what is in use. Nothing is deleted; history past 40 chats still goes to Archived sessions.
+- Open chats are saved one file per chat under the workspace storage folder (`open/<id>.json`), and VS Code's saved state keeps only their order and the active chat. A tool round rewrites only the chat that changed. A body that cannot be written stays in saved state for that save, and an unreadable body file is set aside as `.bad` while the other chats load. The first start moves existing chats into files, then shrinks the old saved session to one empty chat; a chat an older build added after a downgrade is merged back on the next upgrade.
+- `jobs.home_workspace` (optional, absolute path) names the folder whose window runs scheduled jobs and owns the wake task. Other windows can still add, edit and run jobs; `run_now` and `discuss` there say which window will run it. Without the field, any window with jobs enabled can run them, as before.
+
 ## 0.17.34
 
 - A tool step is one call row: the tool, its target, then a right-hand cluster with the tag, diff counts, retries and time. Clicking the row opens the result once, with repeated lines folded; the command is shown again only when the row cut it short. A failed call shows its error's first line under the row.

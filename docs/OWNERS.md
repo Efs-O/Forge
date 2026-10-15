@@ -37,7 +37,7 @@ overlaps with an existing owner, extend the owner instead.
 | Live streamed-token estimate (status bar)            | `src/sidebar/LiveStreamMeter.ts`         |
 | Host facade construction (remote/extension seam)     | `src/sidebar/sidebarFacadeWiring.ts`     |
 | Ctx bar, HalluMeter bridge, thresholds               | `src/sidebar/ContextBudgetPublisher.ts`  |
-| Chat create/switch/close/restore, auto-archive | `src/sidebar/ConversationTabs.ts`        |
+| Chat create/switch/close/restore, auto-archive, leave-to-history + startup idle sweep | `src/sidebar/ConversationTabs.ts` |
 | A tab's model VRAM release (switch, close, `/unloadModel`) | `src/sidebar/TabModelRelease.ts` |
 | Chat-cap refusal wording (`chatCapMessage`) | `src/sidebar/sessionTypes.ts` |
 | Hidden conversation notifications                    | `src/sidebar/hiddenChatAlerts.ts`        |
@@ -124,8 +124,10 @@ overlaps with an existing owner, extend the owner instead.
 | Conversation titles: placeholder + derive            | `src/sidebar/conversationTitle.ts`       |
 | Image content parts: count/strip/age out             | `src/sidebar/imageParts.ts`              |
 | Missing-image notices to the user                    | `src/sidebar/imageNotices.ts`            |
-| Session load/save/migrate (workspaceState)           | `src/sidebar/sessionPersistence.ts`      |
-| Per-conversation history bodies + legacy-list migration (history out of memento) | `src/sidebar/HistoryArchive.ts` |
+| Session load/save/migrate (workspaceState; open-chat v2 delegated to `openConversationsPersistence`) | `src/sidebar/sessionPersistence.ts` |
+| Open-chat v2 memento, v1 merge/shrink, inline fallbacks, commit/prune ordering, `persistMemento` | `src/sidebar/openConversationsPersistence.ts` |
+| Atomic per-id conversation body files (load/quarantine, signatures, deferred removal) | `src/sidebar/ConversationBodyStore.ts` |
+| History legacy-list migration + overflow wiring (bodies via `ConversationBodyStore`) | `src/sidebar/HistoryArchive.ts` |
 | Overflow archived-session bodies and index           | `src/sidebar/ArchivedSessions.ts`        |
 | Session -> webview projections (rows, metas, counts) | `src/sidebar/sessionProjections.ts`      |
 | First-run setup wizard                               | `src/sidebar/FirstRunWizard.ts`          |
@@ -616,6 +618,7 @@ the configured override stays the existing `video.ffmpeg_path` key.
 | Failure threshold and next-due backoff math                 | `src/jobs/backoff.ts`                                          |
 | CLI-agent consent gate for jobs (`jobs.allow_cli_agents`)  | `src/jobs/cliAgentGate.ts`                                     |
 | Wake-task ownership (dedupe, lease-guarded delete)         | `src/jobs/schedulerWakes.ts`                                   |
+| Home-window match (`jobs.home_workspace`) + non-home note  | `src/jobs/jobsHome.ts`                                         |
 | Outbox write, local toast, summarize-waits-for-idle        | `src/jobs/JobDelivery.ts`                                      |
 | Coalescing outbox (one pending message per job)            | `src/jobs/JobOutbox.ts`                                        |
 | Gated jobs network fetch (release API, binary download)    | `src/jobs/jobsFetch.ts`                                        |
@@ -639,7 +642,7 @@ the configured override stays the existing `video.ffmpeg_path` key.
 | Scheduler-facing llamacpp action wrapper + busy gate       | `src/jobs/actions/llamacppAction.ts`                           |
 | Staged build metadata + 24 h TTL                           | `src/jobs/actions/stagedBuild.ts`                              |
 | llamacpp IO (sha256, extractZip, runCommand, setBinary)    | `src/jobs/actions/llamacppIo.ts`                               |
-| Production jobs wiring (scheduler + action deps)           | `src/vscode/jobsSetup.ts`                                      |
+| Production jobs wiring (home-window gate, scheduler + action deps) | `src/vscode/jobsSetup.ts`                              |
 | Telegram `/jobs` + `/job <n>` commands                     | `src/remote/RemoteJobCommands.ts`                              |
 | Outbox watcher (drains the outbox to the owner chat)       | `src/remote/JobOutboxWatcher.ts`                               |
 | Agent-bus files (ids, wait, replies, orphans, TTL)         | `src/agentBus/agentBus.ts`                                     |
