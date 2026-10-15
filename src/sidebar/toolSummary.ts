@@ -8,11 +8,25 @@ export function extractToolDetail(argsJson: string): string {
       return typeof focus === 'string' ? `${model} · ${focus}` : model;
     }
     const path = args['path'] ?? args['file_path'] ?? args['directory'];
-    if (typeof path === 'string') return path.split(/[\\/]/).pop() ?? path;
+    if (typeof path === 'string') {
+      const target = pathBasename(path);
+      const edits = args['edits'];
+      return target && Array.isArray(edits) && edits.length > 1
+        ? `${target} · ${edits.length} edits`
+        : target;
+    }
     const paths = args['paths'];
-    if (Array.isArray(paths) && typeof paths[0] === 'string') {
-      const first = paths[0].split(/[\\/]/).pop() ?? paths[0];
-      return paths.length > 1 ? `${first} +${paths.length - 1} more` : first;
+    // A valid target may arrive either as the bulk-delete array or, from a
+    // malformed call, as a string. Keep that string visible as supplied.
+    if (typeof paths === 'string') return paths;
+    if (Array.isArray(paths)) {
+      const targets = paths
+        .filter((value): value is string => typeof value === 'string' && value.length > 0)
+        .map(pathBasename);
+      if (targets.length > 3) {
+        return `${targets.slice(0, 3).join(', ')} +${targets.length - 3} more`;
+      }
+      return targets.join(', ');
     }
     const cmd = args['command'];
     if (typeof cmd === 'string') {
@@ -31,6 +45,10 @@ export function extractToolDetail(argsJson: string): string {
     /* malformed args — show nothing */
   }
   return '';
+}
+
+function pathBasename(path: string): string {
+  return path.split(/[\\/]/).pop() ?? path;
 }
 
 function displayArgument(value: string): string {
