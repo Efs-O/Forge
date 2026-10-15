@@ -1,24 +1,22 @@
-import React from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import type { AppMessage } from '../reducer';
 import { displayDetail, stepMessages, stepThoughts, type ActivityStep } from '../activityRows';
 import { formatDuration } from '../../../src/util/formatDuration';
 import { sameRowList, toolNameAndDetail } from '../messageOps';
-import { openedReasoning, readDisclosure, useDisclosure } from '../disclosureState';
+import {
+  openedReasoning,
+  readDisclosure,
+  useDisclosure,
+  writeDisclosure,
+} from '../disclosureState';
 import { DiffBlock, diffStats } from './DiffBlock';
 import { ThinkingLabel, ThinkingRow } from './ThinkingGroup';
-import { ToolGroup } from './ToolGroup';
-import { ToolRow, ToolRowThumbnails } from './ToolRow';
+import { ToolRowThumbnails, ToolResultContent } from './ToolRow';
 
 export interface ActivityRowProps {
   step: ActivityStep;
   streaming: boolean;
 }
-
-const Chevron = ({ open }: { open: boolean }): React.ReactElement => (
-  <span className="activity-row-chevron" aria-hidden="true">
-    {open ? '▾' : '▸'}
-  </span>
-);
 
 function finalAttempt(step: ActivityStep): AppMessage[] {
   return step.attempts.at(-1)?.tools ?? [];
@@ -76,65 +74,200 @@ function editSummary(step: ActivityStep): { added: number; removed: number; meas
   );
 }
 
+function messageStatus(message: AppMessage): { glyph: string; className: string; label: string } {
+  if (message.toolIsError) return { glyph: '✕', className: 'is-error', label: 'failed' };
+  if (message.toolResultTotal !== undefined) {
+    return { glyph: '✓', className: 'is-ok', label: 'completed' };
+  }
+  return { glyph: '○', className: 'is-pending', label: 'running' };
+}
+
+/**
+ * The call's target. Without an extracted one, the content-derived detail is the
+ * result label, and for a failure that is the error's first line, which the row
+ * already prints under itself; showing it as the target put an argument name
+ * such as "paths" where the paths belong.
+ */
+function callTarget(message: AppMessage): string {
+  if (message.toolTarget !== undefined) return message.toolTarget;
+  if (message.toolIsError) return message.toolDetail ?? '';
+  return toolNameAndDetail(message).detail;
+}
+
+function firstErrorLine(message: AppMessage): string {
+  return (message.toolResult ?? '').trim().split(/\r?\n/u, 1)[0] ?? '';
+}
+
+function AttemptLine({ message }: { message: AppMessage }): React.ReactElement {
+  const state = messageStatus(message);
+  const target = callTarget(message);
+  const { name } = toolNameAndDetail(message);
+  const elapsed = formatDuration(message.toolMs);
+  const error = message.toolIsError ? firstErrorLine(message) : '';
+  return (
+    <div className={`activity-row-attempt ${message.toolIsError ? 'is-error' : ''}`}>
+      <span className={`tool-row-status ${state.className}`} title={state.label}>
+        {state.glyph}
+      </span>
+      <span className="activity-row-attempt-name">{message.toolName ?? name}</span>
+      {target && (
+        <span className="activity-row-attempt-target" title={target}>
+          {displayDetail(target)}
+        </span>
+      )}
+      {error && (
+        <span className="activity-row-attempt-error" title={message.toolResult}>
+          {error}
+        </span>
+      )}
+      {elapsed && <span className="activity-row-attempt-time">{elapsed}</span>}
+    </div>
+  );
+}
+
+function DiffLink({
+  ids,
+  label,
+  onOpenRow,
+  onDiffChoiceChanged,
+}: {
+  ids: string[];
+  label: React.ReactNode;
+  onOpenRow: () => void;
+  onDiffChoiceChanged: () => void;
+}): React.ReactElement {
+  return (
+    <button
+      type="button"
+      className="activity-row-diff-link"
+      aria-label="Toggle file diff"
+      onKeyDown={(event) => event.stopPropagation()}
+      onClick={(event) => {
+        event.stopPropagation();
+        const show = !(readDisclosure('diff', ids[0]!) ?? false);
+        for (const id of ids) writeDisclosure('diff', id, show);
+        onOpenRow();
+        onDiffChoiceChanged();
+      }}
+    >
+      {label}
+    </button>
+  );
+}
+
 function ActivityRowView({ step }: ActivityRowProps): React.ReactElement | null {
   const [manualOpen, setManualOpen] = useDisclosure('step', stepMessages(step)[0]!.id);
   // An opened reasoning bubble also reveals its step when it folds into a call.
   const open = manualOpen ?? openedReasoning(stepThoughts(step));
+  const [commandVisible, setCommandVisible] = useState(false);
+  const [diffRevision, setDiffRevision] = useState(0);
+  const targetRef = useRef<HTMLSpanElement>(null);
   const final = finalAttempt(step);
   const primary = final[0];
-  if (!primary) return null;
-
-  const { name, detail } = toolNameAndDetail(primary);
-  const target = primary.toolTarget ?? detail;
+  const { name } = primary ? toolNameAndDetail(primary) : { name: '' };
+  const target = primary ? callTarget(primary) : '';
   const displayedTarget = target ? displayDetail(target) : '';
+  const command = primary?.toolDetail ?? target;
   const state = status(step);
   const failedEarlier = retryCount(step);
   // A step that ended red shows ✕ only; the amber chip means "recovered".
   const retries = state.className === 'is-error' ? 0 : failedEarlier;
+  const repeated = failedEarlier === 0 && step.attempts.length > 1;
+  const parallelCount = Math.max(...step.attempts.map((attempt) => attempt.tools.length));
   const edits = editSummary(step);
   const reasoning = reasoningSummary(step);
+  const elapsed = formatDuration(primary?.toolMs);
+  const tag =
+    step.diffs.length === 0 ? '' : step.diffs.some((diff) => diff.diffIsNew) ? 'NEW' : 'MODIFIED';
+  const rowTitle = [tag, elapsed].filter(Boolean).join(' · ');
+  const failedMessage = final.find((message) => message.toolIsError);
+  const errorLine = failedMessage ? firstErrorLine(failedMessage) : '';
+  const hasCounts = edits.measured && (edits.added > 0 || edits.removed > 0);
+  const diffLabel = hasCounts ? (
+    <>
+      {edits.added > 0 && <span className="diff-stat diff-stat-added">+{edits.added}</span>}
+      {edits.removed > 0 && <span className="diff-stat diff-stat-removed">−{edits.removed}</span>}
+    </>
+  ) : (
+    'diff'
+  );
+
+  useEffect(() => {
+    if (!open) {
+      setCommandVisible(false);
+      return;
+    }
+    const targetElement = targetRef.current;
+    setCommandVisible(
+      Boolean(command && targetElement && targetElement.scrollWidth > targetElement.clientWidth),
+    );
+  }, [command, open]);
+
+  if (!primary) return null;
+
+  const toggle = (): void => setManualOpen(!open);
+  const onHeaderKeyDown = (event: React.KeyboardEvent<HTMLDivElement>): void => {
+    if (event.key === 'Enter' || event.key === ' ') {
+      event.preventDefault();
+      toggle();
+    }
+  };
 
   return (
     <div className={`activity-row${state.className === 'is-error' ? ' is-error' : ''}`}>
-      <button
-        type="button"
+      <div
         className="activity-row-header"
+        role="button"
+        tabIndex={0}
         aria-expanded={open}
-        onClick={() => setManualOpen(!open)}
+        title={rowTitle || undefined}
+        onClick={toggle}
+        onKeyDown={onHeaderKeyDown}
       >
-        <Chevron open={open} />
+        <span className="activity-row-chevron" aria-hidden="true">
+          {open ? '▾' : '▸'}
+        </span>
         <span className={`tool-row-status ${state.className}`} title={state.label}>
           {state.glyph}
         </span>
-        {step.diffs.length > 0 && (
-          <span className="activity-row-edit" title="File changes">
-            ✎
-            {edits.measured && edits.added > 0 && (
-              <>
-                {' '}
-                <span className="diff-stat diff-stat-added">+{edits.added}</span>
-              </>
-            )}
-            {edits.measured && edits.removed > 0 && (
-              <>
-                {' '}
-                <span className="diff-stat diff-stat-removed">−{edits.removed}</span>
-              </>
-            )}
-          </span>
-        )}
         <span className="activity-row-name">{primary.toolName ?? name}</span>
-        {displayedTarget && <span className="activity-row-detail">{displayedTarget}</span>}
-        {step.attempts.length > 1 && failedEarlier === 0 && (
-          <span className="activity-row-repeat">×{step.attempts.length}</span>
+        {parallelCount > 1 && (
+          <span className="activity-row-parallel">+{parallelCount - 1} parallel</span>
         )}
-        {retries > 0 && (
-          <span className="activity-row-retry">
-            {retries} {retries === 1 ? 'retry' : 'retries'}
+        {displayedTarget && (
+          <span ref={targetRef} className="activity-row-detail" title={target}>
+            {displayedTarget}
           </span>
         )}
-        {reasoning && <span className="activity-row-reasoning">{reasoning}</span>}
-      </button>
+        <span className="activity-row-cluster">
+          {tag && <span className="activity-row-tag">{tag}</span>}
+          {step.diffs.length > 0 && (
+            <DiffLink
+              ids={step.diffs.map((diff) => diff.id)}
+              label={diffLabel}
+              onOpenRow={() => setManualOpen(true)}
+              onDiffChoiceChanged={() => setDiffRevision((revision) => revision + 1)}
+            />
+          )}
+          {reasoning && (
+            <span className="activity-row-reasoning" title="Thinking">
+              ◔
+            </span>
+          )}
+          {repeated && <span className="activity-row-repeat">×{step.attempts.length}</span>}
+          {retries > 0 && (
+            <span className="activity-row-retry">
+              {retries} {retries === 1 ? 'retry' : 'retries'}
+            </span>
+          )}
+          {elapsed && <span className="activity-row-time">{elapsed}</span>}
+        </span>
+      </div>
+      {errorLine && (
+        <div className="activity-row-error-line" title={failedMessage?.toolResult}>
+          {errorLine}
+        </div>
+      )}
       {!open &&
         final.map((message) => (
           <div key={message.id} className="activity-row-collapsed-thumbnails">
@@ -143,7 +276,7 @@ function ActivityRowView({ step }: ActivityRowProps): React.ReactElement | null 
         ))}
       {open && (
         <div className="activity-row-body">
-          {step.attempts.map(({ thoughts, tools }) => (
+          {step.attempts.map(({ thoughts, tools }, attemptIndex) => (
             <React.Fragment key={tools[0]!.id}>
               {thoughts.map((thought) => (
                 <ThinkingRow
@@ -158,16 +291,27 @@ function ActivityRowView({ step }: ActivityRowProps): React.ReactElement | null 
                   reasoning={thought.reasoning ?? ''}
                 />
               ))}
-              {tools.length > 1 ? (
-                <ToolGroup tools={tools} nested />
-              ) : (
-                <ToolRow message={tools[0]!} nested />
+              {(step.attempts.length > 1 || tools.length > 1) && (
+                <div className="activity-row-attempts" aria-label={`Attempt ${attemptIndex + 1}`}>
+                  {tools.map((tool) => (
+                    <AttemptLine key={tool.id} message={tool} />
+                  ))}
+                </div>
               )}
+            </React.Fragment>
+          ))}
+          {final.map((message) => (
+            <React.Fragment key={`output-${message.id}`}>
+              <ToolResultContent
+                message={message}
+                {...(commandVisible && message.id === primary.id && command ? { command } : {})}
+              />
+              <ToolRowThumbnails message={message} />
             </React.Fragment>
           ))}
           {step.diffs.map((diff) => (
             <DiffBlock
-              key={diff.id}
+              key={`${diff.id}-${diffRevision}`}
               id={diff.id}
               filePath={diff.content}
               hunks={diff.diffHunks}

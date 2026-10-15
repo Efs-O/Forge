@@ -18,7 +18,8 @@ function tool(id: string, fields: Partial<AppMessage> = {}): AppMessage {
   return {
     id, role: 'tool', content: 'run_terminal → cd /workspace && npm test',
     toolName: 'run_terminal', toolTarget: 'cd /workspace && npm test',
-    toolDetail: 'cd /workspace && npm test', ...fields,
+    toolDetail: 'cd /workspace && npm test', toolResult: 'ok', toolResultTotal: 2,
+    toolMs: 3_500, ...fields,
   };
 }
 
@@ -29,7 +30,7 @@ function rounds(...tools: AppMessage[][]): ActivityStep['attempts'] {
 
 function step(overrides: Partial<ActivityStep> = {}): ActivityStep {
   return {
-    attempts: rounds([tool('call', { toolResult: 'ok', toolResultTotal: 2 })]),
+    attempts: rounds([tool('call')]),
     diffs: [],
     ...overrides,
   };
@@ -62,16 +63,24 @@ function render(activity: ActivityStep, streaming = false): void {
 }
 
 function toggle(): void {
-  act(() => container.querySelector<HTMLButtonElement>('.activity-row-header')!.click());
+  act(() => container.querySelector<HTMLElement>('.activity-row-header')!.click());
 }
 
 describe('ActivityRow', () => {
-  it('names the tool once when a single-call step is opened', () => {
+  it('renders one call row and reveals its short result only when opened', () => {
     render(step());
+    expect(container.querySelector('.activity-row-body')).toBeNull();
+    expect(container.querySelector('.activity-row-header')?.getAttribute('role')).toBe('button');
+    expect(container.querySelector('.activity-row-header')?.getAttribute('aria-expanded')).toBe('false');
+    expect(container.querySelectorAll('.tool-row-name')).toHaveLength(0);
+    expect(container.textContent).not.toContain('result');
+    expect(container.textContent).not.toContain('ok');
+
     toggle();
-    expect(container.querySelectorAll('.activity-row-body .tool-row-name')[0]?.textContent).toBe('result');
-    expect(container.querySelector('.activity-row-body .tool-row-detail')).toBeNull();
-    expect(container.textContent?.match(/run_terminal/gu)).toHaveLength(1);
+    expect(container.querySelector('.activity-row-body')).not.toBeNull();
+    expect(container.querySelector('.tool-row-output-label')?.textContent).toBe('Output');
+    expect(container.textContent).toContain('ok');
+    expect(container.querySelectorAll('.tool-row-name')).toHaveLength(0);
   });
 
   it('keeps a running step closed after it completes unless the reader opens it', () => {
@@ -86,7 +95,7 @@ describe('ActivityRow', () => {
   });
 
   it('honours a manual open and close of a running step after completion', () => {
-    const pending = step({ attempts: rounds([tool('pending')]) });
+    const pending = step({ attempts: rounds([tool('pending', { toolResult: undefined, toolResultTotal: undefined })]) });
     render(pending, true);
     toggle();
     expect(container.querySelector('.activity-row-body')).not.toBeNull();
@@ -95,53 +104,135 @@ describe('ActivityRow', () => {
     expect(container.querySelector('.activity-row-body')).toBeNull();
   });
 
-  it('shows diff counts and keeps the hunks collapsed until the diff is opened', () => {
+  it('shows tag, diff counts and time on the row and opens the existing diff disclosure', () => {
     const hunks: DiffHunk[] = [{ oldStart: 1, newStart: 1, lines: [
       { kind: 'added', text: 'new' }, { kind: 'removed', text: 'old' },
     ] }];
     render(step({ diffs: [diff('change', hunks)] }));
-    expect(container.querySelector('.activity-row-edit')?.textContent).toContain('+1 −1');
-    toggle();
-    expect(container.querySelector('.diff-block')).not.toBeNull();
-    expect(container.querySelectorAll('.diff-line')).toHaveLength(0);
-    act(() => container.querySelector<HTMLButtonElement>('.diff-toggle')!.click());
+    expect(container.querySelector('.activity-row-tag')?.textContent).toBe('MODIFIED');
+    expect(container.querySelector('.activity-row-diff-link')?.textContent).toBe('+1−1');
+    expect(container.querySelector('.activity-row-time')?.textContent).toBe('3.5 s');
+    expect(container.querySelector('.activity-row-edit')).toBeNull();
+
+    const link = container.querySelector<HTMLButtonElement>('.activity-row-diff-link')!;
+    act(() => link.click());
+    expect(container.querySelector('.activity-row-header')?.getAttribute('aria-expanded')).toBe('true');
     expect(container.querySelectorAll('.diff-line')).toHaveLength(2);
   });
 
-  it('shows the edit glyph without zero counts when hunks are unavailable', () => {
-    render(step({ diffs: [diff('unknown', null)] }));
-    expect(container.querySelector('.activity-row-edit')?.textContent).toBe('✎');
+  it('shows NEW for a new file and uses the word diff when counts are unavailable', () => {
+    render(step({ diffs: [{ ...diff('new-file', null), diffIsNew: true }] }));
+    expect(container.querySelector('.activity-row-tag')?.textContent).toBe('NEW');
+    expect(container.querySelector('.activity-row-diff-link')?.textContent).toBe('diff');
   });
 
-  it('shows an amber retry chip and keeps an unrecovered final failure red', () => {
-    const earlier = tool('failed', { toolIsError: true, toolResultTotal: 3 });
-    const final = tool('success', { toolCallId: 'second', toolResultTotal: 2 });
+  it('opens with Enter and Space and keeps the diff as a separate focusable button', () => {
+    render(step({ diffs: [diff('change', null)] }));
+    const header = container.querySelector<HTMLElement>('.activity-row-header')!;
+    expect(header.tabIndex).toBe(0);
+    expect(container.querySelector('.activity-row-diff-link')?.tagName).toBe('BUTTON');
+
+    act(() => header.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true })));
+    expect(header.getAttribute('aria-expanded')).toBe('true');
+    act(() => header.dispatchEvent(new KeyboardEvent('keydown', { key: ' ', bubbles: true })));
+    expect(header.getAttribute('aria-expanded')).toBe('false');
+  });
+
+  it('shows a failed call first line without opening and keeps the full error in its title', () => {
+    const error = 'Error: permission denied\nAdditional diagnostic details';
+    render(step({ attempts: rounds([tool('failed', {
+      toolResult: error, toolIsError: true, toolResultTotal: 3, toolMs: 1_200,
+    })]) }));
+    const line = container.querySelector<HTMLElement>('.activity-row-error-line');
+    expect(line?.textContent).toBe('Error: permission denied');
+    expect(line?.title).toBe(error);
+    expect(container.querySelector('.activity-row-body')).toBeNull();
+    expect(container.querySelector('.activity-row-header')?.getAttribute('title')).toBe('1.2 s');
+  });
+
+  it('never shows the error line as the target of a failed call without one', () => {
+    // Live rows carry the result label as content when no target was extracted.
+    render(step({ attempts: rounds([tool('failed', {
+      content: 'read_files → Error: paths must be an array',
+      toolName: 'read_files', toolTarget: undefined, toolDetail: undefined,
+      toolResult: 'Error: paths must be an array', toolIsError: true,
+    })]) }));
+    expect(container.querySelector('.activity-row-detail')).toBeNull();
+    expect(container.querySelector('.activity-row-error-line')?.textContent)
+      .toBe('Error: paths must be an array');
+  });
+
+  it('shows no retry chip on a step that ended red, and ×N without retries for a clean repeat', () => {
+    const failed = (id: string): AppMessage => tool(id, { toolIsError: true, toolResult: 'Error: x' });
+    render(step({ attempts: rounds([failed('a')], [failed('b')]) }));
+    expect(container.querySelector('.activity-row-retry')).toBeNull();
+    act(() => root.unmount());
+    root = createRoot(container);
+    render(step({ attempts: rounds([tool('c')], [tool('d')]) }));
+    expect(container.querySelector('.activity-row-repeat')?.textContent).toBe('×2');
+    expect(container.querySelector('.activity-row-retry')).toBeNull();
+  });
+
+  it('shows a retry count and compact lines for every attempt in order', () => {
+    const earlier = tool('failed', { toolIsError: true, toolResult: 'Error: first', toolResultTotal: 3, toolMs: 1_200 });
+    const final = tool('success', { toolCallId: 'second', toolResultTotal: 2, toolMs: 3_500 });
     render(step({ attempts: rounds([earlier], [final]) }));
     expect(container.querySelector('.activity-row-retry')?.textContent).toBe('1 retry');
     expect(container.querySelector('.activity-row.is-error')).toBeNull();
-
-    render(step({ attempts: rounds([earlier]) }));
-    expect(container.querySelector('.activity-row.is-error')).not.toBeNull();
-    expect(container.querySelector('.tool-row-status')?.textContent).toBe('✕');
-
-    const again = tool('again', { toolCallId: 'third', toolIsError: true, toolResultTotal: 1 });
-    render(step({ attempts: rounds([earlier], [again]) }));
-    expect(container.querySelector('.activity-row.is-error')).not.toBeNull();
-    expect(container.querySelector('.activity-row-retry')).toBeNull();
-    expect(container.querySelector('.activity-row-repeat')).toBeNull();
+    toggle();
+    expect([...container.querySelectorAll('.activity-row-attempt-name')].map((node) => node.textContent))
+      .toEqual(['run_terminal', 'run_terminal']);
+    expect(container.querySelectorAll('.activity-row-attempt')).toHaveLength(2);
+    expect(container.querySelector('.activity-row-attempt-error')?.textContent).toBe('Error: first');
+    expect(container.querySelector('.tool-row-output')?.textContent).toContain('ok');
   });
 
-  it('shortens only the header detail and keeps the full command in the body', () => {
-    const command = `cd /workspace && ${'npm test --run-in-band '.repeat(8)}`;
-    render(step({ attempts: rounds([tool('call', {
-      content: `run_terminal → ${command}`, toolTarget: command, toolDetail: command,
-    })]) }));
-    expect(container.querySelector('.activity-row-detail')?.textContent)
-      .toBe('npm test --run-in-band '.repeat(8));
+  it('renders one named compact line per parallel call', () => {
+    const parallel = [
+      tool('one', { toolName: 'read_file', toolTarget: 'src/a.ts', toolResult: 'a', toolResultTotal: 1 }),
+      tool('two', { toolName: 'search_code', toolTarget: 'TODO', toolResult: 'b', toolResultTotal: 1 }),
+    ];
+    render(step({ attempts: rounds(parallel) }));
+    expect(container.querySelector('.activity-row-parallel')?.textContent).toBe('+1 parallel');
+    toggle();
+    expect([...container.querySelectorAll('.activity-row-attempt-name')].map((node) => node.textContent))
+      .toEqual(['read_file', 'search_code']);
+    expect([...container.querySelectorAll('.activity-row-attempt-target')].map((node) => node.textContent))
+      .toEqual(['src/a.ts', 'TODO']);
+    expect(container.querySelectorAll('.tool-row-name')).toHaveLength(0);
+  });
+
+  it('shows Command only when the row target is cut short', () => {
+    render(step());
+    const target = container.querySelector<HTMLElement>('.activity-row-detail')!;
+    Object.defineProperties(target, {
+      scrollWidth: { configurable: true, value: 80 },
+      clientWidth: { configurable: true, value: 80 },
+    });
     toggle();
     expect(container.querySelector('.tool-row-command')).toBeNull();
-    act(() => container.querySelector<HTMLButtonElement>('.tool-row-toggle')!.click());
-    expect(container.querySelector('.tool-row-command code')?.textContent).toBe(command);
+
+    toggle();
+    render(step());
+    const clipped = container.querySelector<HTMLElement>('.activity-row-detail')!;
+    Object.defineProperties(clipped, {
+      scrollWidth: { configurable: true, value: 200 },
+      clientWidth: { configurable: true, value: 80 },
+    });
+    toggle();
+    expect(container.querySelector('.tool-row-command-label')?.textContent).toBe('Command');
+    expect(container.querySelector('.tool-row-command code')?.textContent).toBe('cd /workspace && npm test');
+  });
+
+  it('renders a multi-edit detail once and keeps its short result hidden until opened', () => {
+    render(step({ attempts: rounds([tool('edit', {
+      toolName: 'edit_file', toolTarget: 'src/a.ts · 2 edits', toolDetail: 'src/a.ts · 2 edits',
+      toolResult: 'Replaced in src/a.ts', toolResultTotal: 21,
+    })]) }));
+    expect(container.textContent?.match(/2 edits/gu)).toHaveLength(1);
+    expect(container.textContent).not.toContain('Replaced in src/a.ts');
+    toggle();
+    expect(container.textContent).toContain('Replaced in src/a.ts');
   });
 
   it('keeps a manual expand choice when a retry appends to the step', () => {
@@ -156,14 +247,15 @@ describe('ActivityRow', () => {
     expect(container.querySelector('.activity-row-retry')?.textContent).toBe('1 retry');
   });
 
-  it("renders each retry's reasoning just before that retry in the body", () => {
+  it("renders each retry's reasoning before that attempt's compact line", () => {
     const first = tool('first', { toolIsError: true, toolResultTotal: 3 });
     const retry = tool('retry', { toolCallId: 'retry-id', toolResultTotal: 2 });
     const thought: AppMessage = { id: 'why', role: 'assistant', content: '', reasoning: 'fix it' };
     render(step({ attempts: [{ thoughts: [], tools: [first] }, { thoughts: [thought], tools: [retry] }] }));
     toggle();
     const body = container.querySelector('.activity-row-body')!;
-    const kinds = [...body.children].map((el) => (el.className.includes('thinking') ? 'thought' : 'tool'));
-    expect(kinds).toEqual(['tool', 'thought', 'tool']);
+    expect(body.children[0]?.classList.contains('activity-row-attempts')).toBe(true);
+    expect(body.children[1]?.classList.contains('thinking-row')).toBe(true);
+    expect(body.children[2]?.classList.contains('activity-row-attempts')).toBe(true);
   });
 });

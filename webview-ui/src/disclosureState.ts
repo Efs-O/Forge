@@ -46,6 +46,14 @@ export function openedReasoning(thoughts: readonly { id: string }[]): boolean {
 }
 
 /**
+ * Store a choice without a component, for one control that opens several
+ * elements at once (a step's diff link opens every diff in the step).
+ */
+export function writeDisclosure(kind: DisclosureKind, id: string, open: boolean): void {
+  choices.set(keyOf(kind, id), open);
+}
+
+/**
  * `useState` for an open/closed choice that survives remounts. `id` is
  * the element's first message id - the same id `rowKey` uses - so it is fixed
  * from the moment the element first renders.
@@ -57,7 +65,7 @@ export function useDisclosure(
   const [choice, setChoice] = useState(() => readDisclosure(kind, id));
   const set = useCallback(
     (open: boolean) => {
-      choices.set(keyOf(kind, id), open);
+      writeDisclosure(kind, id, open);
       setChoice(open);
     },
     [kind, id],

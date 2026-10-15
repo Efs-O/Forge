@@ -395,7 +395,7 @@ describe('ActivityGroup', () => {
     expect(container.querySelector('.activity-group-edits')?.textContent).toBe('to server.py');
   });
 
-  it('opens a full command and result after Details and one call click', () => {
+  it('opens the full result with one call click after opening the group', () => {
     const command = 'cd /workspace && grep -n max_context serve/server.py';
     const items: ActivityGroupItem[] = [
       {
@@ -423,11 +423,15 @@ describe('ActivityGroup', () => {
     render(items, false, false);
     toggle();
     expect(container.querySelectorAll('.activity-group-body > .activity-row')).toHaveLength(1);
-    act(() => container.querySelector<HTMLButtonElement>('.activity-row-header')!.click());
-    expect(container.querySelector('.tool-row-command')).toBeNull();
-    act(() => container.querySelector<HTMLButtonElement>('.tool-row-toggle')!.click());
+    const target = container.querySelector<HTMLElement>('.activity-row-detail')!;
+    Object.defineProperties(target, {
+      scrollWidth: { configurable: true, value: 300 },
+      clientWidth: { configurable: true, value: 80 },
+    });
+    act(() => container.querySelector<HTMLElement>('.activity-row-header')!.click());
     expect(container.querySelector('.tool-row-command code')?.textContent).toBe(command);
     expect(container.querySelector('.tool-row-verbatim')?.textContent).toBe('match at line 42');
+    expect(container.querySelector('.tool-row-toggle')).toBeNull();
   });
 
   it('counts recovered retries with the right plural', () => {

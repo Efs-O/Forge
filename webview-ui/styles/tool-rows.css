@@ -84,6 +84,8 @@
 }
 
 .tool-row-detail {
+  flex: 1 1 auto;
+  min-width: 0;
   font-family: var(--vscode-editor-font-family, 'Cascadia Code', monospace);
   font-size: 11px;
   color: var(--vscode-descriptionForeground);
@@ -209,6 +211,13 @@
   font-size: 10px;
   font-weight: 600;
 }
+.tool-row-output-label {
+  margin: 4px 0 3px;
+  color: var(--vscode-descriptionForeground);
+  font-size: 10px;
+  font-weight: 600;
+}
+.tool-row-output-label:first-child { margin-top: 0; }
 .tool-row-command code {
   display: block;
   white-space: pre-wrap;
@@ -222,6 +231,11 @@
 .tool-row-body code {
   font-family: var(--vscode-editor-font-family, 'Cascadia Code', monospace);
   font-size: 11px;
+}
+
+@container (max-width: 360px) {
+  .msg-tool-row .tool-row-time,
+  .msg-tool-row .tool-row-tag { display: none; }
 }
 
 /* ── Thinking bubble ─────────────────────────────────────────────────────── */

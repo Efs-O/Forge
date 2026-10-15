@@ -1,5 +1,7 @@
 /* ── Message wrappers ───────────────────────────────────────────────────── */
 
+.messages-pane { container-type: inline-size; }
+
 .msg-wrapper {
   display: flex;
   flex-direction: column;

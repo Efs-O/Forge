@@ -62,13 +62,17 @@ function render(message: AppMessage): void {
 }
 
 describe('ToolRow', () => {
-  it('renders a short result as a plain one-line row', () => {
+  it('keeps a short result out of the DOM until its row is opened', () => {
     render(toolMessage({ toolResult: 'ok', toolResultTotal: 2 }));
 
-    expect(container.querySelector('.tool-row-toggle')).toBeNull();
+    expect(container.querySelector('.tool-row-toggle')).not.toBeNull();
     expect(container.querySelector('.tool-row-body')).toBeNull();
     expect(container.querySelector('.tool-row-name')?.textContent).toBe('codex');
     expect(container.querySelector('.tool-row-detail')?.textContent).toBe('Summary line');
+    expect(container.textContent).not.toContain('ok');
+    act(() => container.querySelector<HTMLButtonElement>('.tool-row-toggle')!.click());
+    expect(container.querySelector('.tool-row-output-label')?.textContent).toBe('Output');
+    expect(container.querySelector('.tool-row-body')?.textContent).toContain('ok');
   });
 
   it('collapses a long result behind a toggle and reports its size', () => {
@@ -105,7 +109,7 @@ describe('ToolRow', () => {
     expect(container.querySelector('.tool-row-body')).not.toBeNull();
   });
 
-  it('keeps short nested results visible and expands failures for their message', () => {
+  it('does not add a nested result row and opens failures for their message', () => {
     act(() =>
       root.render(
         React.createElement(ToolRow, {
@@ -114,10 +118,14 @@ describe('ToolRow', () => {
         }),
       ),
     );
+    expect(container.querySelector('.tool-row-name')?.textContent).toBe('codex');
+    expect(container.querySelector('.tool-row-body')).toBeNull();
+    act(() => container.querySelector<HTMLButtonElement>('.tool-row-toggle')!.click());
     expect(container.querySelector('.tool-row-body')?.textContent).toContain('ok');
 
     render(toolMessage({ toolResult: `Error: ${LONG_REPORT}`, toolIsError: true }));
     expect(container.querySelector('.msg-tool-row-error')).not.toBeNull();
+    expect(container.querySelector('.tool-row-body')?.textContent).toContain('Output');
     expect(container.querySelector('.tool-row-body')?.textContent).toContain('Error:');
   });
 
@@ -154,6 +162,34 @@ describe('ToolRow', () => {
     const body = container.querySelector('.tool-row-body')!;
     expect(body.querySelector('h1')).toBeNull();
     expect(body.querySelector('.tool-row-verbatim')?.textContent).toContain('# personal');
+  });
+
+  it('shows the Command block only when the row target is clipped', () => {
+    render(toolMessage({ toolDetail: 'npm test '.repeat(20) }));
+    const target = container.querySelector<HTMLElement>('.tool-row-detail')!;
+    Object.defineProperties(target, {
+      scrollWidth: { configurable: true, value: 80 },
+      clientWidth: { configurable: true, value: 80 },
+    });
+    act(() => container.querySelector<HTMLButtonElement>('.tool-row-toggle')!.click());
+    expect(container.querySelector('.tool-row-command')).toBeNull();
+
+    act(() => container.querySelector<HTMLButtonElement>('.tool-row-toggle')!.click());
+    render(toolMessage({ toolDetail: 'npm test '.repeat(20) }));
+    const clipped = container.querySelector<HTMLElement>('.tool-row-detail')!;
+    Object.defineProperties(clipped, {
+      scrollWidth: { configurable: true, value: 200 },
+      clientWidth: { configurable: true, value: 80 },
+    });
+    act(() => container.querySelector<HTMLButtonElement>('.tool-row-toggle')!.click());
+    expect(container.querySelector('.tool-row-command-label')?.textContent).toBe('Command');
+  });
+
+  it('labels result text Output and folds repeated consecutive lines', () => {
+    render(toolMessage({ toolResult: 'same\nsame\nother\nsame', toolResultTotal: 19 }));
+    act(() => container.querySelector<HTMLButtonElement>('.tool-row-toggle')!.click());
+    expect(container.querySelector('.tool-row-output-label')?.textContent).toBe('Output');
+    expect(container.querySelector('.tool-row-verbatim')?.textContent).toBe('same (×2)\nother\nsame');
   });
 
   it('marks a failed call', () => {

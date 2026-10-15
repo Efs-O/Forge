@@ -64,7 +64,7 @@ describe('ToolGroup', () => {
     expect(container.querySelector('.tool-group-body')).not.toBeNull();
   });
 
-  it('shows nested rows without auto-expanding a long shell result', () => {
+  it('keeps nested calls named and short results collapsed until their row is opened', () => {
     const nestedTools: AppMessage[] = [
       {
         id: 'shell',
@@ -78,7 +78,11 @@ describe('ToolGroup', () => {
     act(() => root.render(React.createElement(ToolGroup, { tools: nestedTools, nested: true })));
 
     expect(container.querySelector('.tool-group-body')).not.toBeNull();
-    expect(container.querySelectorAll('.tool-row-body')).toHaveLength(1);
-    expect(container.querySelector('.tool-row-body')?.textContent).toBe('ok');
+    expect([...container.querySelectorAll('.tool-row-name')].map((node) => node.textContent))
+      .toEqual(['run_command', 'read_file']);
+    expect(container.textContent).not.toContain('result');
+    expect(container.querySelectorAll('.tool-row-body')).toHaveLength(0);
+    act(() => container.querySelectorAll<HTMLButtonElement>('.tool-row-toggle')[1]!.click());
+    expect(container.querySelector('.tool-row-body')?.textContent).toContain('ok');
   });
 });

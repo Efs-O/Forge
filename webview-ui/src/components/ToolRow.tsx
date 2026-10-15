@@ -1,4 +1,4 @@
-import React, { useMemo } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { toolNameAndDetail } from '../messageOps';
 import Markdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
@@ -8,6 +8,7 @@ import { normalizeMarkdownForRender } from '../markdown';
 import { rendersAsMarkdown } from '../../../src/sidebar/toolResultView';
 import { formatDuration } from '../../../src/util/formatDuration';
 import { useDisclosure } from '../disclosureState';
+import { foldConsecutiveLines } from '../toolResultLines';
 import { ToolRowThumbnails } from './ToolThumbnails';
 
 export { ToolRowThumbnails } from './ToolThumbnails';
@@ -24,21 +25,51 @@ const ChevronRight = (): React.ReactElement => (
   </svg>
 );
 
-/** Below this a result or command is short enough that expanding it adds little. */
-const EXPANDABLE_MIN_CHARS = 100;
-
 function formatSize(chars: number): string {
   return chars >= 1000 ? `${(chars / 1000).toFixed(1)}k chars` : `${chars} chars`;
+}
+
+/** Below this a result is compact enough that a size label adds little. */
+const EXPANDABLE_MIN_CHARS = 100;
+
+/** Renders a call's result without adding another call row around it. */
+export function ToolResultContent({
+  message,
+  command,
+}: {
+  message: AppMessage;
+  command?: string;
+}): React.ReactElement {
+  const result = message.toolResult ?? '';
+  const body = useMemo(() => normalizeMarkdownForRender(foldConsecutiveLines(result)), [result]);
+  const asMarkdown = rendersAsMarkdown(message.toolName ?? '');
+
+  return (
+    <>
+      {command && (
+        <div className="tool-row-command">
+          <div className="tool-row-command-label">Command</div>
+          <code>{command}</code>
+        </div>
+      )}
+      {result && (
+        <div className="tool-row-output">
+          <div className="tool-row-output-label">Output</div>
+          {asMarkdown ? (
+            <Markdown remarkPlugins={[remarkGfm]}>{body}</Markdown>
+          ) : (
+            <pre className="tool-row-verbatim">{body}</pre>
+          )}
+        </div>
+      )}
+    </>
+  );
 }
 
 /**
  * One line per tool call. A long result — a delegated agent's report, most of
  * all — stays behind a toggle and renders as markdown with its newlines intact,
  * instead of being flattened into a 600-char grey ribbon.
- */
-/**
- * `nested`: the row sits under an activity step whose header already names the
- * tool and its target, so it shows only what the header lacks (the result).
  */
 export function ToolRow({
   message,
@@ -49,35 +80,32 @@ export function ToolRow({
 }): React.ReactElement {
   const [choice, setChoice] = useDisclosure('tool', message.id);
   const { name: toolName, detail } = toolNameAndDetail(message);
-  const name = nested ? 'result' : toolName;
-
   const result = message.toolResult ?? '';
+  const expandable = Boolean(result || detail);
   const longContent =
     result.length >= EXPANDABLE_MIN_CHARS || detail.length >= EXPANDABLE_MIN_CHARS;
-  const expandable = longContent || (nested && detail.length > 0);
-  // Nested activity steps expose short results inline, but opening the step
-  // must not also expand a long shell command/result. Reader choices survive
-  // streaming and remounts; failures stay open initially so their cause is
-  // visible in every activity view.
   const open = choice ?? message.toolIsError === true;
-  const showBody = open || (nested && !longContent);
-  const asMarkdown = rendersAsMarkdown(message.toolName ?? '');
-  // Only rows whose call Forge saw both announced and returned carry one, so an
-  // absent duration means unmeasured - never "instant".
   const elapsed = formatDuration(message.toolMs);
-  // A row exists from the moment the call is announced, so it has three states,
-  // not two. `toolResultTotal` is the field TOOL_RESULT always sets - an empty
-  // `toolResult` is a tool that returned nothing, not one still running.
   const status = message.toolIsError
     ? { className: 'is-error', glyph: '✕', label: 'failed' }
     : message.toolResultTotal !== undefined
       ? { className: 'is-ok', glyph: '✓', label: 'completed' }
       : { className: 'is-pending', glyph: '○', label: 'running' };
-  const body = useMemo(() => normalizeMarkdownForRender(result), [result]);
+  const targetRef = useRef<HTMLSpanElement>(null);
+  const [commandVisible, setCommandVisible] = useState(false);
+
+  useEffect(() => {
+    if (!open) {
+      setCommandVisible(false);
+      return;
+    }
+    const target = targetRef.current;
+    setCommandVisible(Boolean(detail && target && target.scrollWidth > target.clientWidth));
+  }, [detail, open]);
 
   return (
     <div className={`msg-tool-row-wrap${message.toolIsError ? ' msg-tool-row-error' : ''}`}>
-      <div className="msg-tool-row">
+      <div className="msg-tool-row" title={elapsed || undefined}>
         <span className={`tool-row-status ${status.className}`} title={status.label}>
           {status.glyph}
         </span>
@@ -87,17 +115,21 @@ export function ToolRow({
             type="button"
             onClick={() => setChoice(!open)}
             aria-expanded={open}
-            title={open ? 'Hide result' : 'Show full result'}
+            title={open ? 'Hide result' : 'Show result'}
           >
             <span className="tool-row-chevron">{open ? <ChevronDown /> : <ChevronRight />}</span>
-            <span className="tool-row-name">{name}</span>
+            <span className="tool-row-name">{toolName}</span>
           </button>
         ) : (
-          <span className="tool-row-name">{name}</span>
+          <span className="tool-row-name">{toolName}</span>
         )}
-        {detail && !nested && <span className="tool-row-detail">{detail}</span>}
+        {detail && !nested && (
+          <span ref={targetRef} className="tool-row-detail" title={detail}>
+            {detail}
+          </span>
+        )}
         {elapsed && <span className="tool-row-time">{elapsed}</span>}
-        {expandable && (
+        {longContent && (
           <span className="tool-row-size">
             {formatSize(message.toolResultTotal ?? result.length)}
           </span>
@@ -120,21 +152,12 @@ export function ToolRow({
         )}
       </div>
       <ToolRowThumbnails message={message} />
-      {showBody && (
+      {open && (
         <div className="tool-row-body">
-          {open && detail && (
-            <div className="tool-row-command">
-              <div className="tool-row-command-label">Command / details</div>
-              <code>{detail}</code>
-            </div>
-          )}
-          {result &&
-            (open || (nested && !longContent)) &&
-            (asMarkdown ? (
-              <Markdown remarkPlugins={[remarkGfm]}>{body}</Markdown>
-            ) : (
-              <pre className="tool-row-verbatim">{result}</pre>
-            ))}
+          <ToolResultContent
+            message={message}
+            {...(commandVisible && detail ? { command: detail } : {})}
+          />
         </div>
       )}
     </div>
