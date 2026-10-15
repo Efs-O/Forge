@@ -1,6 +1,6 @@
 # Forge — Recent Changes
 
-## Unreleased
+## 0.17.34
 
 - A tool step is one call row: the tool, its target, then a right-hand cluster with the tag, diff counts, retries and time. Clicking the row opens the result once, with repeated lines folded; the command is shown again only when the row cut it short. A failed call shows its error's first line under the row.
 - Tool targets list file names, not argument names: a `paths` array shows `a.ts, b.ts, c.ts +2 more`, and a multi-edit `edit_file` shows `<file> · N edits`. A failed call with no target no longer shows its error text in the target's place.
