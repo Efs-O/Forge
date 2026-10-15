@@ -131,6 +131,8 @@
 /* An opened step names its output and size; the text waits for its own click. */
 .tool-row-output-toggle {
   display: block;
+}
+.tool-row-content-toggle {
   padding: 0;
   border: 0;
   background: none;
@@ -138,9 +140,28 @@
   text-align: left;
   cursor: pointer;
 }
-.tool-row-output-toggle:hover { color: var(--vscode-foreground); }
-/* An opened output scrolls instead of pushing the chat down by its length. */
-.tool-row-output.is-folded .tool-row-output-body {
+.tool-row-content-toggle:hover { color: var(--vscode-foreground); }
+.tool-row-command-toggle {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  width: 100%;
+  min-width: 0;
+}
+.tool-row-command-toggle-label {
+  flex: 0 0 auto;
+  white-space: nowrap;
+}
+.tool-row-command-summary {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  font-family: var(--vscode-editor-font-family, 'Cascadia Code', monospace);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+/* Opened commands and folded outputs scroll instead of pushing the chat down. */
+.tool-row-scroll-body {
   max-height: 20em;
   overflow-y: auto;
 }

@@ -23,6 +23,7 @@ export type DisclosureKind =
   | 'toolGroup'
   | 'diff'
   | 'output'
+  | 'command'
   | 'gap';
 
 function keyOf(kind: DisclosureKind, id: string): string {

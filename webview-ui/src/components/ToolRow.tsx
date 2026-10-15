@@ -9,6 +9,7 @@ import { rendersAsMarkdown } from '../../../src/sidebar/toolResultView';
 import { formatDuration } from '../../../src/util/formatDuration';
 import { useDisclosure } from '../disclosureState';
 import { foldConsecutiveLines } from '../toolResultLines';
+import { displayDetail } from '../activityRows';
 import { ToolRowThumbnails } from './ToolThumbnails';
 
 export { ToolRowThumbnails } from './ToolThumbnails';
@@ -31,6 +32,51 @@ function formatSize(chars: number): string {
 
 /** Below this a result is compact enough that a size label adds little. */
 const EXPANDABLE_MIN_CHARS = 100;
+
+/** A one-line command past this wraps into several lines of a narrow sidebar. */
+const COMMAND_FOLD_MIN_CHARS = 200;
+
+function CommandBlock({
+  messageId,
+  command,
+}: {
+  messageId: string;
+  command: string;
+}): React.ReactElement {
+  const [choice, setChoice] = useDisclosure('command', messageId);
+  const lines = command.split(/\r\n|\r|\n/u);
+  // A single line long enough to wrap into a paragraph (an `rg` over many
+  // paths) bloats the step as much as a script does.
+  const foldable = lines.length > 1 || command.length > COMMAND_FOLD_MIN_CHARS;
+  const showBody = !foldable || choice === true;
+  const summary = displayDetail(command).split(/\r\n|\r|\n/u, 1)[0] ?? '';
+  const size = lines.length > 1 ? `${lines.length} lines` : formatSize(command.length);
+
+  return (
+    <div className="tool-row-command">
+      {foldable ? (
+        <button
+          className="tool-row-output-label tool-row-content-toggle tool-row-command-toggle"
+          type="button"
+          aria-expanded={showBody}
+          onClick={() => setChoice(!showBody)}
+        >
+          <span className="tool-row-command-toggle-label">
+            {showBody ? '▾' : '▸'} Command · {size}
+          </span>
+          {!showBody && <span className="tool-row-command-summary"> {summary}</span>}
+        </button>
+      ) : (
+        <div className="tool-row-command-label">Command</div>
+      )}
+      {showBody && (
+        <div className="tool-row-command-body tool-row-scroll-body">
+          <code>{command}</code>
+        </div>
+      )}
+    </div>
+  );
+}
 
 /**
  * Renders a call's result without adding another call row around it.
@@ -58,17 +104,12 @@ export function ToolResultContent({
 
   return (
     <>
-      {command && (
-        <div className="tool-row-command">
-          <div className="tool-row-command-label">Command</div>
-          <code>{command}</code>
-        </div>
-      )}
+      {command && <CommandBlock messageId={message.id} command={command} />}
       {result && (
         <div className={`tool-row-output${folded ? ' is-folded' : ''}`}>
           {folded ? (
             <button
-              className="tool-row-output-label tool-row-output-toggle"
+              className="tool-row-output-label tool-row-output-toggle tool-row-content-toggle"
               type="button"
               aria-expanded={showBody}
               onClick={() => setChoice(!showBody)}
@@ -79,7 +120,7 @@ export function ToolResultContent({
             <div className="tool-row-output-label">Output</div>
           )}
           {showBody && (
-            <div className="tool-row-output-body">
+            <div className={`tool-row-output-body${folded ? ' tool-row-scroll-body' : ''}`}>
               {asMarkdown ? (
                 <Markdown remarkPlugins={[remarkGfm]}>{body}</Markdown>
               ) : (

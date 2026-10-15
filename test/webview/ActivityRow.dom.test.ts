@@ -228,6 +228,41 @@ describe('ActivityRow', () => {
     toggle();
     expect(container.querySelector('.tool-row-command-label')?.textContent).toBe('Command');
     expect(container.querySelector('.tool-row-command code')?.textContent).toBe('cd /workspace && npm test');
+    expect(container.querySelector('.tool-row-command-toggle')).toBeNull();
+  });
+
+  it('folds a multiline command to a cd-stripped first line and keeps its open choice across remount', () => {
+    const command = 'cd "/workspace" && python - <<\'PY\'\nprint("one")\nprint("two")\nPY';
+    const activity = step({
+      attempts: rounds([tool('call', { toolTarget: 'run Python script', toolDetail: command })]),
+    });
+    render(activity);
+    const setTargetWidth = (): void => {
+      const target = container.querySelector<HTMLElement>('.activity-row-detail')!;
+      Object.defineProperties(target, {
+        scrollWidth: { configurable: true, value: 200 },
+        clientWidth: { configurable: true, value: 80 },
+      });
+    };
+    setTargetWidth();
+    toggle();
+
+    const commandToggle = container.querySelector<HTMLButtonElement>('.tool-row-command-toggle')!;
+    expect(commandToggle.textContent).toBe('▸ Command · 4 lines python - <<\'PY\'');
+    expect(commandToggle.getAttribute('aria-expanded')).toBe('false');
+    expect(container.querySelector('.tool-row-command code')).toBeNull();
+
+    act(() => commandToggle.click());
+    expect(container.querySelector('.tool-row-command code')?.textContent).toBe(command);
+
+    act(() => root.unmount());
+    root = createRoot(container);
+    render(activity);
+    toggle();
+    setTargetWidth();
+    toggle();
+    expect(container.querySelector('.tool-row-command-toggle')?.getAttribute('aria-expanded')).toBe('true');
+    expect(container.querySelector('.tool-row-command code')?.textContent).toBe(command);
   });
 
   it('renders a multi-edit detail once and keeps its short result hidden until opened', () => {

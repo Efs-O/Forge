@@ -185,6 +185,41 @@ describe('ToolRow', () => {
     expect(container.querySelector('.tool-row-command-label')?.textContent).toBe('Command');
   });
 
+  it('folds multiline commands in the regular ToolRow body too', () => {
+    const command = 'cd "/workspace" && python -c "print(1)"\npython -c "print(2)"';
+    render(toolMessage({ toolName: 'run_command', toolDetail: command, toolResult: 'done' }));
+    const target = container.querySelector<HTMLElement>('.tool-row-detail')!;
+    Object.defineProperties(target, {
+      scrollWidth: { configurable: true, value: 200 },
+      clientWidth: { configurable: true, value: 80 },
+    });
+    act(() => container.querySelector<HTMLButtonElement>('.tool-row-toggle')!.click());
+
+    const commandToggle = container.querySelector<HTMLButtonElement>('.tool-row-command-toggle')!;
+    expect(commandToggle.textContent).toContain('Command · 2 lines');
+    expect(commandToggle.textContent).toContain('python -c "print(1)"');
+    expect(container.querySelector('.tool-row-command code')).toBeNull();
+    act(() => commandToggle.click());
+    expect(container.querySelector('.tool-row-command code')?.textContent).toBe(command);
+  });
+
+  it('folds a long single-line command behind its size', () => {
+    const command = `rg -n "needle" ${Array.from({ length: 30 }, (_, i) => `src/dir${i}/file.ts`).join(' ')}`;
+    render(toolMessage({ toolName: 'run_command', toolDetail: command, toolResult: 'done' }));
+    const target = container.querySelector<HTMLElement>('.tool-row-detail')!;
+    Object.defineProperties(target, {
+      scrollWidth: { configurable: true, value: 200 },
+      clientWidth: { configurable: true, value: 80 },
+    });
+    act(() => container.querySelector<HTMLButtonElement>('.tool-row-toggle')!.click());
+
+    const commandToggle = container.querySelector<HTMLButtonElement>('.tool-row-command-toggle')!;
+    expect(commandToggle.textContent).toContain(`Command · ${command.length} chars`);
+    expect(container.querySelector('.tool-row-command code')).toBeNull();
+    act(() => commandToggle.click());
+    expect(container.querySelector('.tool-row-command code')?.textContent).toBe(command);
+  });
+
   it('labels result text Output and folds repeated consecutive lines', () => {
     render(toolMessage({ toolResult: 'same\nsame\nother\nsame', toolResultTotal: 19 }));
     act(() => container.querySelector<HTMLButtonElement>('.tool-row-toggle')!.click());
