@@ -24,10 +24,12 @@ overlaps with an existing owner, extend the owner instead.
 | Folding back-to-back calls of one tool into a run row | `webview-ui/src/activityRuns.ts` (row: `components/ActivityRunRow.tsx`) |
 | Count-up seconds for in-flight labels (hook)         | `webview-ui/src/useSecondsSince.ts` |
 | Tool calls still being written (live progress rows)  | `webview-ui/src/pendingToolCalls.ts` (row: `components/PendingToolCallRow.tsx`; host message: `src/sidebar/toolCallProgress.ts`) |
-| Sidebar grouped activity view (step runs → groups)   | `webview-ui/src/activityGroups.ts`        |
+| Sidebar grouped activity view (step runs → groups, recovered failures, long-group gaps) | `webview-ui/src/activityGroups.ts` |
 | Sidebar open/closed choices that survive remounts    | `webview-ui/src/disclosureState.ts`       |
 | Sidebar transcript follow-the-bottom decision         | `webview-ui/src/scrollFollow.ts`          |
-| Compact activity step row component                  | `webview-ui/src/components/ActivityRow.tsx` |
+| Compact activity step row component (the call row)   | `webview-ui/src/components/ActivityRow.tsx` |
+| Folding repeated result lines before display         | `webview-ui/src/toolResultLines.ts`       |
+| Images a tool call produced (row + group strip data) | `webview-ui/src/toolImages.ts` (thumbnails, strip, placeholder: `components/ToolThumbnails.tsx`) |
 | Grouped activity row component                       | `webview-ui/src/components/ActivityGroup.tsx` |
 | Sidebar host->webview event contract                 | `src/sidebar/providerEvents.ts`          |
 | Sidebar collaborator construction                    | `src/sidebar/sidebarWiring.ts`           |
@@ -164,7 +166,7 @@ overlaps with an existing owner, extend the owner instead.
 | Single-file diff rendering + stats              | `webview-ui/src/components/DiffBlock.tsx`       |
 | Per-turn multi-file diff summary card           | `webview-ui/src/components/DiffGroup.tsx`       |
 | Compact per-round reasoning rows                | `webview-ui/src/components/ThinkingGroup.tsx`   |
-| Tool call rows + expandable results             | `webview-ui/src/components/ToolRow.tsx`         |
+| Tool call rows + expandable results (`ToolResultContent`) | `webview-ui/src/components/ToolRow.tsx` |
 | Model picker dropdown (grouped, opens upward)   | `webview-ui/src/components/ModelSelector.tsx`   |
 | History panel: open + archived chats, markers   | `webview-ui/src/components/HistoryList.tsx`     |
 | Single-chat header (title, history, new chat)   | `webview-ui/src/components/ChatHeader.tsx`      |
@@ -480,7 +482,7 @@ overlaps with an existing owner, extend the owner instead.
 | SerpApi transport + error surfacing        | `src/tools/imageSearch/serpApi.ts`    |
 | SerpApi Yandex Images call + formatting    | `src/tools/imageSearch/yandexImages.ts` |
 | `image_search:` config schema              | `src/config/imageSearchSchema.ts` |
-| `generate_image` thumbnail URL (webview)   | `webview-ui/src/workspaceRootUri.ts` |
+| Tool image thumbnail URLs: workspace + screenshots (webview) | `webview-ui/src/workspaceRootUri.ts` |
 | `view_video` tool definition + handler     | `src/tools/videoTool.ts`              |
 | ffmpeg probe + frame extraction            | `src/tools/videoExtract.ts`           |
 | ffmpeg/ffprobe executable discovery        | `src/tools/ffmpegLocate.ts`           |

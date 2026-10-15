@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+- A tool step is one call row: the tool, its target, then a right-hand cluster with the tag, diff counts, retries and time. Clicking the row opens the result once, with repeated lines folded; the command is shown again only when the row cut it short. A failed call shows its error's first line under the row.
+- Tool targets list file names, not argument names: a `paths` array shows `a.ts, b.ts, c.ts +2 more`, and a multi-edit `edit_file` shows `<file> · N edits`. A failed call with no target no longer shows its error text in the target's place.
+- Group headers say "N failed" right after the call count, or "N failed, recovered" when a later call of the same tool on the same target succeeded. The "Details" label is gone; the chevron stays.
+- Groups over 10 calls open on their last 6, with every unrecovered failure kept in view and "Show N earlier calls" / "Show N more calls" buttons for the rest.
+- Images a group's calls produced (generate_image, image_search, browser screenshots, render_html_to_image) show as a strip under the folded header, with "+N more" past 6. A thumbnail whose file is gone shows "image no longer on disk".
+- In a narrow sidebar, call rows drop the time and tag first.
+
 - Compaction no longer fails with "Summarization ended with finish_reason=length". The summary's output cap was the character allowance converted to tokens, so a model that wrote past the allowance hit the cap before the 0.17.33 cut could shorten the summary. The cap now has headroom: half the allowance or 4,000 tokens, whichever is more, and never more than a tenth of the model's window.
 - If a summary still hits the cap, Forge keeps it when all seven sections were written and the last one has real content. The unfinished last line is dropped, an open code block is closed, and a note marks the section as cut off. The session log records this as `finish_reason: "length"` with outcome `compacted` and `salvaged_from_length: true`, and the Output log line ends with `salvaged_from_length`. A summary cut off before its last section still fails as before.
 
