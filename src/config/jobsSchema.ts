@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import * as path from 'path';
 import type { ForgeConfig } from './types';
 
 export const GpuGateConfigSchema = z.object({
@@ -21,6 +22,11 @@ export const GpuGateConfigSchema = z.object({
 export const JobsConfigSchema = z
   .object({
     enabled: z.boolean().default(false),
+    /** Workspace folder whose window owns job scheduling and wake tasks. */
+    home_workspace: z
+      .string()
+      .refine((value) => path.isAbsolute(value), 'jobs.home_workspace must be an absolute path')
+      .optional(),
     /** Outbound fetch gate. A job fetches only from a host in this list. */
     allowed_hosts: z.array(z.string().min(1)).default([]),
     /** How many jobs may run at once. 1 is safe for a single GPU. */

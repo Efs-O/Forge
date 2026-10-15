@@ -108,6 +108,8 @@ export interface GpuGateConfig {
 /** `jobs:` block (validated by jobsSchema.ts). Absent means no scheduler. */
 export interface JobsConfig {
   enabled: boolean;
+  /** Absolute workspace folder whose window owns job scheduling and wake tasks. */
+  home_workspace?: string;
   /** Outbound fetch gate: a job fetches only from a host in this list. */
   allowed_hosts: string[];
   /** How many jobs may run at once. */

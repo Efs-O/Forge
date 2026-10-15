@@ -1,19 +1,17 @@
 /**
- * `manage_jobs` — the single agent tool for persistent agent jobs (B2, D4).
- * One tool with an `action` enum instead of five: one round per call. Advertised
- * in every conversation when `jobs.enabled`, so a watch can be added, edited,
- * paused, resumed, or removed from wherever the user is talking (user
- * requirement, 2026-09-14). Permissions: `read` for `list`/`get`, `write` for
- * the mutating actions, `delete` for `delete` (always approval, even under
- * /clanker). `run_now` writes a `run_requests/<id>` marker the scheduler
- * consumes on its next tick; `discuss` opens or reuses the job's discuss chat
- * and seeds it (B.6).
+ * `manage_jobs` is the single persistent-job tool (B2, D4), one action per
+ * call. It is advertised in every conversation when `jobs.enabled`, with read
+ * for `list`/`get`, write for changes, and approved delete (even under
+ * `/clanker`). `run_now` marks the next tick; `discuss` opens and seeds the
+ * job chat (B.6).
  */
 
 import * as path from 'path';
+import * as vscode from 'vscode';
 import type { ForgeConfig } from '../config/types';
 import { defaultState, type JobStore } from '../jobs/JobStore';
 import { JobSchema, type JobFile } from '../jobs/jobSchema';
+import { appendHomeNote } from '../jobs/jobsHome';
 import { nextDue } from '../jobs/schedule';
 import {
   describeAction,
@@ -249,7 +247,11 @@ async function runManageJobs(deps: ManageJobsDeps, args: Record<string, unknown>
       return `Deleted job "${match.jobFile.job.name}" (${match.jobFile.job.id}).`;
     case 'run_now': {
       await deps.store.requestRun(match.jobFile.job.id);
-      return `Run requested for "${match.jobFile.job.name}" (${match.jobFile.job.id}). It will run on the next scheduler tick, in whichever window holds the jobs lease.`;
+      return appendHomeNote(
+        `Run requested for "${match.jobFile.job.name}" (${match.jobFile.job.id}). It will run on the next scheduler tick, in whichever window holds the jobs lease.`,
+        deps.getConfig(),
+        vscode.workspace.workspaceFolders?.[0]?.uri.fsPath,
+      );
     }
     case 'discuss':
       return discussJob(deps, match.jobFile);
@@ -489,5 +491,9 @@ async function discussJob(deps: ManageJobsDeps, jobFile: JobFile): Promise<strin
   // The tool runs in a window where the user is present, so the chat is brought
   // to the foreground (activate: true). The Telegram entry point does not.
   await openDiscussChat(host, deps.store, jobFile, true);
-  return `Opened the discuss chat for "${jobFile.job.name}" [${jobFile.job.id}] and seeded it with the job, its recent runs, and the last observation. It is now an ordinary chat where manage_jobs is available.`;
+  return appendHomeNote(
+    `Opened the discuss chat for "${jobFile.job.name}" [${jobFile.job.id}] and seeded it with the job, its recent runs, and the last observation. It is now an ordinary chat where manage_jobs is available.`,
+    deps.getConfig(),
+    vscode.workspace.workspaceFolders?.[0]?.uri.fsPath,
+  );
 }

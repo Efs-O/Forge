@@ -82,6 +82,9 @@ permissions:
 # jobs defined it is inert.
 jobs:
   enabled: true
+  # Optional absolute workspace folder whose window schedules jobs and owns
+  # the machine-wide wake task. Other windows can still manage jobs.
+  # home_workspace: C:/path/to/Forge
   # Let an unattended job drive a CLI agent (Claude Code / Codex) on your own
   # subscription. The wizard turns this on; set false to require approval.
   allow_cli_agents: true

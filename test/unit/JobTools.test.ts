@@ -1,12 +1,27 @@
 import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { JobStore } from '../../src/jobs/JobStore';
 import { JobSchema, type Job } from '../../src/jobs/jobSchema';
 import { makeManageJobsTool, type ManageJobsDeps } from '../../src/tools/jobTools';
 import type { RegisteredTool } from '../../src/tools/ToolRegistry';
 import type { ForgeConfig } from '../../src/config/types';
+
+const workspaceMock = vi.hoisted(() => ({
+  folders: undefined as Array<{ uri: { fsPath: string } }> | undefined,
+}));
+
+vi.mock('vscode', () => ({
+  workspace: {
+    get workspaceFolders() {
+      return workspaceMock.folders;
+    },
+  },
+  window: {
+    createOutputChannel: () => ({ appendLine: () => undefined, show: () => undefined, dispose: () => undefined }),
+  },
+}));
 
 let root: string;
 let store: JobStore;
@@ -59,6 +74,7 @@ beforeEach(async () => {
   jobsEnabled = true;
   getConfig = () =>
     makeConfig(jobsEnabled ? { enabled: true, allowed_hosts: [], max_concurrent: 1 } : undefined);
+  workspaceMock.folders = undefined;
   tool = makeManageJobsTool(deps());
 });
 
@@ -485,6 +501,27 @@ describe('manage_jobs — run_now', () => {
     expect(consumed).toEqual(['release.v2']);
     expect(fs.existsSync(path.join(root, 'run_requests', 'release.v2'))).toBe(false);
   });
+
+  it('says which window will run a request made from a non-home window', async () => {
+    await store.saveJob(job());
+    const home = path.join(root, 'home');
+    workspaceMock.folders = [{ uri: { fsPath: path.join(root, 'other') } }];
+    const out = await call(
+      { action: 'run_now', job: 'disk' },
+      {
+        getConfig: () =>
+          makeConfig({
+            enabled: true,
+            allowed_hosts: [],
+            max_concurrent: 1,
+            home_workspace: home,
+          }),
+      },
+    );
+
+    expect(out).toContain(`Jobs run in the window for ${home}.`);
+    expect(out).toContain("This one runs there on that window's next tick");
+  });
 });
 
 describe('manage_jobs — discuss', () => {
@@ -516,6 +553,35 @@ describe('manage_jobs — discuss', () => {
     expect(sent[0]!.text).toContain('The user wants to discuss this job.');
     // The conversation id is persisted so the next discuss reuses it.
     expect((await store.load('disk'))?.state.conversation_id).toBe('conv-1');
+  });
+
+  it('says which window runs the job when discussing it from a non-home window', async () => {
+    await store.saveJob(job());
+    const home = path.join(root, 'home');
+    workspaceMock.folders = [{ uri: { fsPath: path.join(root, 'other') } }];
+    const hostFacade = {
+      restoreConversation: async () => {
+        throw new Error('no such conversation');
+      },
+      createConversation: async () => ({ id: 'conv-1' }),
+      send: async () => undefined,
+    };
+
+    const out = await call(
+      { action: 'discuss', job: 'disk' },
+      {
+        hostFacade: () => hostFacade,
+        getConfig: () =>
+          makeConfig({
+            enabled: true,
+            allowed_hosts: [],
+            max_concurrent: 1,
+            home_workspace: home,
+          }),
+      },
+    );
+
+    expect(out).toContain(`Jobs run in the window for ${home}.`);
   });
 
   it('reuses an existing conversation when it still exists', async () => {
