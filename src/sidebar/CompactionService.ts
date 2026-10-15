@@ -86,6 +86,7 @@ async function compactOnce(
   let attemptCategory: CompactionFailureCategory | undefined;
   let attemptCalls: number | undefined;
   let attemptFinish: string | undefined;
+  let attemptSalvaged = false;
   let attemptCandidateChars: number | undefined;
   let attemptHostFields: Partial<CompactionAttemptLogEntry> = {};
   options = {
@@ -351,7 +352,10 @@ async function compactOnce(
       );
     }
     outcome = 'compacted';
-    attemptFinish = 'stop';
+    // A kept cut-off summary records the finish it really had, so the log
+    // tells a salvage apart from a clean stop.
+    attemptSalvaged = stage.salvagedFromLength;
+    attemptFinish = attemptSalvaged ? 'length' : 'stop';
     return outcome;
   } catch (err) {
     const category =
@@ -376,6 +380,7 @@ async function compactOnce(
       ...(attemptCandidateChars !== undefined ? { candidateChars: attemptCandidateChars } : {}),
       ...attemptHostFields,
       ...(floorMode ? { floorMode: true } : {}),
+      ...(attemptSalvaged ? { salvagedFromLength: true } : {}),
     });
     deps.emitCompactionEvent?.({
       conversationId: conv.id,

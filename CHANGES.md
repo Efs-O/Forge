@@ -1,5 +1,10 @@
 # Forge — Recent Changes
 
+## Unreleased
+
+- Compaction no longer fails with "Summarization ended with finish_reason=length". The summary's output cap was the character allowance converted to tokens, so a model that wrote past the allowance hit the cap before the 0.17.33 cut could shorten the summary. The cap now has headroom: half the allowance or 4,000 tokens, whichever is more, and never more than a tenth of the model's window.
+- If a summary still hits the cap, Forge keeps it when all seven sections were written and the last one has real content. The unfinished last line is dropped, an open code block is closed, and a note marks the section as cut off. The session log records this as `finish_reason: "length"` with outcome `compacted` and `salvaged_from_length: true`, and the Output log line ends with `salvaged_from_length`. A summary cut off before its last section still fails as before.
+
 ## 0.17.33
 
 - A compaction summary longer than its allowance is cut down to fit instead of failing with "Summary exceeds its N-character allocation". Every section keeps its heading; the longest sections are shortened first, and Goal and Next are kept whole when the others can make room. The output cap is sized at 2.5 characters per token, so it could not stop a model writing ordinary prose from passing the character limit.

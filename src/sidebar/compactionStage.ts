@@ -69,6 +69,8 @@ export type CompactionStageResult =
       groupsNote: string;
       /** What the host fit shed, for the reduced-mode notice. */
       shed: string[];
+      /** The output cap ended the summary and its complete part was kept. */
+      salvagedFromLength: boolean;
     };
 
 export async function runCompactionStage(
@@ -173,7 +175,7 @@ export async function runCompactionStage(
     ...(input.floorMode ? { floorMode: true } : {}),
   });
   log.info(
-    `[compact] budget P=${budget.policyTokens} (${budget.estimated ? 'estimated' : 'reported'}), host~${Math.ceil(hostFit.hostChars / COMPACTION_CHARS_PER_TOKEN)}, tail~${Math.ceil(tailChars / COMPACTION_CHARS_PER_TOKEN)}, output_cap=${summaryRun.outputTokens}, summary_max_chars=${summaryAllowance}, method=${summaryRun.method}, calls=${summaryRun.calls}${input.floorMode ? ', floor_mode' : ''}${summaryRun.cutFromChars ? `, summary_cut_from=${summaryRun.cutFromChars}` : ''}`,
+    `[compact] budget P=${budget.policyTokens} (${budget.estimated ? 'estimated' : 'reported'}), host~${Math.ceil(hostFit.hostChars / COMPACTION_CHARS_PER_TOKEN)}, tail~${Math.ceil(tailChars / COMPACTION_CHARS_PER_TOKEN)}, output_cap=${summaryRun.outputTokens}, summary_max_chars=${summaryAllowance}, method=${summaryRun.method}, calls=${summaryRun.calls}${input.floorMode ? ', floor_mode' : ''}${summaryRun.cutFromChars ? `, summary_cut_from=${summaryRun.cutFromChars}` : ''}${summaryRun.salvagedFromLength ? ', salvaged_from_length' : ''}`,
   );
   return {
     kind: 'summarized',
@@ -184,5 +186,6 @@ export async function runCompactionStage(
     summaryPrompt: summaryRun.prompt,
     groupsNote,
     shed: hostFit.shed,
+    salvagedFromLength: summaryRun.salvagedFromLength === true,
   };
 }

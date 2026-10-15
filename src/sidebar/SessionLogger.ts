@@ -89,6 +89,8 @@ export interface CompactionAttemptLogEntry {
   shed?: string[];
   /** The attempt succeeded or failed on its single floor-mode retry: no tail, every fact at its floor. */
   floorMode?: boolean;
+  /** The summary was cut off by the output cap and its complete part kept. */
+  salvagedFromLength?: boolean;
 }
 
 export interface SessionContext {
@@ -271,6 +273,7 @@ export class SessionLogger {
         ...(entry.components !== undefined ? { components: entry.components } : {}),
         ...(entry.shed !== undefined ? { shed: entry.shed } : {}),
         ...(entry.floorMode ? { floor_mode: true } : {}),
+        ...(entry.salvagedFromLength ? { salvaged_from_length: true } : {}),
         timestamp_ms: Date.now(),
         model,
       }) + '\n',

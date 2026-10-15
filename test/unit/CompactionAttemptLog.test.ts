@@ -163,6 +163,23 @@ describe('compaction attempt rows (A48)', () => {
     expect(h.rows[1]!.calls).toBeGreaterThanOrEqual(1);
   });
 
+  it('a kept cut-off summary is logged as compacted with its length finish', async () => {
+    const h = setup(async () => {
+      const whole = await good();
+      throw new PromptIncompleteError(
+        'length',
+        `${whole.replace('Reference: none recorded.', `Reference:\n${'- src/a.ts:12 audit()\n'.repeat(4)}`)}- src/b.ts:4 unfin`,
+      );
+    });
+    await expect(runCompaction(h.deps, 'c1', { auto: true })).resolves.toBe('compacted');
+    expect(h.rows[1]).toMatchObject({
+      outcome: 'compacted',
+      finishReason: 'length',
+      salvagedFromLength: true,
+    });
+    expect(h.rows[1]!.category).toBeUndefined();
+  });
+
   it('a suppressed automatic attempt is a distinct row with the held category', async () => {
     const h = setup(async () => {
       throw new PromptIncompleteError('length');

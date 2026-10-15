@@ -127,9 +127,13 @@ function cutBody(body: string, cap: number): string {
   let end = cap;
   const code = body.charCodeAt(end - 1);
   if (end > 0 && code >= 0xd800 && code <= 0xdbff) end -= 1;
-  const kept = body.slice(0, end).trimEnd();
-  const fenceOpen = (kept.match(/^[ \t]*```/gmu)?.length ?? 0) % 2 === 1;
-  return `${kept}${fenceOpen ? '\n```' : ''}`;
+  return closeOpenFence(body.slice(0, end).trimEnd());
+}
+
+/** The text with a closing fence appended when it leaves a code fence open. */
+function closeOpenFence(text: string): string {
+  const fenceOpen = (text.match(/^[ \t]*```/gmu)?.length ?? 0) % 2 === 1;
+  return `${text}${fenceOpen ? '\n```' : ''}`;
 }
 
 function splitSummarySections(text: string): SummarySection[] {
@@ -193,6 +197,35 @@ export function fitSummaryToChars(summary: string, maxChars: number): string | u
     return joinWithCap(sections, low, all).trim();
   }
   return undefined;
+}
+
+/** Marks a section the output cap ended while the model was still writing it. */
+export const LENGTH_CUT_MARKER =
+  '\n…[cut off at the output limit — re-read the files before relying on this section]…';
+
+/** Less body than this in the cut section means it was barely started. */
+const MIN_CUT_SECTION_BODY_CHARS = 40;
+
+/**
+ * Keep a summary the output cap ended mid-write, when it is complete enough.
+ *
+ * Kept only when every required heading is present, so the cut fell in the
+ * last section (Reference, in the prompt's order), and that section has real
+ * body. The unfinished last line is dropped, an open code fence is closed, the
+ * cut is marked so the resumed agent treats that section as partial, and the
+ * result is fitted to `maxChars` like any other summary. Returns undefined
+ * when the text is not worth keeping; the caller then reports the failure.
+ */
+export function salvageCutSummary(partial: string, maxChars: number): string | undefined {
+  const lineEnd = partial.lastIndexOf('\n');
+  if (lineEnd === -1) return undefined;
+  const whole = partial.slice(0, lineEnd).trim();
+  if (missingSummarySections(whole).length > 0) return undefined;
+  const sections = splitSummarySections(whole);
+  const last = sections[sections.length - 1];
+  if (!last || last.body.trim().length < MIN_CUT_SECTION_BODY_CHARS) return undefined;
+  const fitted = fitSummaryToChars(closeOpenFence(whole), maxChars - LENGTH_CUT_MARKER.length);
+  return fitted === undefined ? undefined : `${fitted}${LENGTH_CUT_MARKER}`;
 }
 
 export function buildSummaryPrompt(

@@ -1,16 +1,47 @@
 import type { ChatMessage } from '../llm/types';
-import type { PromptRunOptions } from './PromptRun';
+import { PromptIncompleteError, type PromptRunOptions } from './PromptRun';
 import { fitSummaryPrompt, planOutput, type CompactionBudget } from './compactionBudget';
 import {
   buildSummaryPrompt,
   fitSummaryToChars,
   isUsableSummary,
   missingSummarySections,
+  salvageCutSummary,
 } from './compactionPrompt';
-import { CompactionFailure } from './compactionFailure';
+import { CompactionFailure, compactionFailureCategory } from './compactionFailure';
 import type { PlanItem } from './sessionTypes';
 
 const REPLACEMENT_DELIMITER_RESERVE_CHARS = 256;
+
+/**
+ * Output room past the token equivalent of the character allowance.
+ *
+ * A cap equal to the allowance turned every overshoot into
+ * finish_reason=length, so the cut in fitSummaryToChars never ran: a model
+ * asked for 75% of the allowance wrote between 66% and 94% of it on the same
+ * prompt, and the prompt cannot steer that. The extra room lets it finish and
+ * the cut trim the result. It is bounded by the window share so a small
+ * window does not lose its transcript source to output it rarely uses.
+ */
+const OUTPUT_HEADROOM_SHARE = 0.5;
+const OUTPUT_HEADROOM_MIN_TOKENS = 4000;
+const OUTPUT_HEADROOM_MAX_WINDOW_SHARE = 0.1;
+
+/** The summary's output cap: the allowance in tokens plus bounded headroom. */
+export function summaryOutputTokens(
+  charsBudget: number,
+  charsPerToken: number,
+  modelMaxTokens: number,
+): number {
+  const base = Math.floor(charsBudget / charsPerToken);
+  const headroom = Math.max(Math.floor(base * OUTPUT_HEADROOM_SHARE), OUTPUT_HEADROOM_MIN_TOKENS);
+  return (
+    base +
+    (modelMaxTokens > 0
+      ? Math.min(headroom, Math.floor(modelMaxTokens * OUTPUT_HEADROOM_MAX_WINDOW_SHARE))
+      : headroom)
+  );
+}
 
 export interface CompactionSummaryInput {
   messages: ChatMessage[];
@@ -61,9 +92,11 @@ export interface CompactionSummaryResult {
   outputTokens: number;
   /** The written length, when the summary was cut down to its allowance. */
   cutFromChars?: number;
+  /** The output cap ended the summary and its complete part was kept. */
+  salvagedFromLength?: boolean;
 }
 
-function visibleOutputLimit(input: CompactionSummaryInput): number {
+function visibleOutputLimit(input: CompactionSummaryInput, withHeadroom: boolean): number {
   const charsBudget = input.maximumSummaryChars - REPLACEMENT_DELIMITER_RESERVE_CHARS;
   if (charsBudget <= 0) {
     throw new CompactionFailure(
@@ -72,7 +105,9 @@ function visibleOutputLimit(input: CompactionSummaryInput): number {
     );
   }
   const plan = planOutput(
-    Math.floor(charsBudget / input.budget.charsPerToken),
+    withHeadroom
+      ? summaryOutputTokens(charsBudget, input.budget.charsPerToken, input.modelMaxTokens)
+      : Math.floor(charsBudget / input.budget.charsPerToken),
     input.reasoningTokens,
     input.outputLimitTokens,
   );
@@ -109,6 +144,24 @@ function oneShotPrompt(input: CompactionSummaryInput, outputTokens: number) {
   );
 }
 
+/**
+ * The output cap and the prompt fitted around it. The headroom is spent only
+ * when the request still fits the window with it; otherwise the cap is the
+ * bare allowance, so a request that fitted before the headroom still fits.
+ */
+function fittedRequest(input: CompactionSummaryInput): { outputTokens: number; prompt: string } {
+  const outputTokens = visibleOutputLimit(input, true);
+  try {
+    return { outputTokens, prompt: oneShotPrompt(input, outputTokens).prompt };
+  } catch (err) {
+    const bare = visibleOutputLimit(input, false);
+    // Both size refusals: the window check, and the transcript shrinking past
+    // its floor while making room for the larger cap.
+    if (compactionFailureCategory(err) !== 'budget-refusal' || bare >= outputTokens) throw err;
+    return { outputTokens: bare, prompt: oneShotPrompt(input, bare).prompt };
+  }
+}
+
 async function runOneShot(
   input: CompactionSummaryInput,
   prompt: string,
@@ -121,6 +174,7 @@ async function runOneShot(
     strictOutputTokens: true,
     alwaysStripThinking: true,
     requireComplete: true,
+    partialOnIncomplete: true,
     reasoningEffort: 'low',
     // Thinking and the summary share one output budget, and with no reserve
     // configured the cap holds the visible summary only: a thinking model cut
@@ -151,10 +205,28 @@ export async function summarizeCompaction(
 async function summarizeCompactionCounted(
   input: CompactionSummaryInput,
 ): Promise<CompactionSummaryResult> {
-  const outputTokens = visibleOutputLimit(input);
-  const { prompt } = oneShotPrompt(input, outputTokens);
-  const written = (await runOneShot(input, prompt, outputTokens)).trim();
-  const summary = fitSummaryToChars(written, input.maximumSummaryChars);
+  const { outputTokens, prompt } = fittedRequest(input);
+  let written: string;
+  let summary: string | undefined;
+  let salvaged = false;
+  try {
+    written = (await runOneShot(input, prompt, outputTokens)).trim();
+    summary = fitSummaryToChars(written, input.maximumSummaryChars);
+  } catch (err) {
+    // Even with headroom a model can run on; a summary cut inside its last
+    // section is still worth more than keeping a window already over its
+    // threshold. Anything less complete reports the original failure.
+    if (
+      !(err instanceof PromptIncompleteError) ||
+      err.finishReason !== 'length' ||
+      err.partialContent === undefined
+    )
+      throw err;
+    summary = salvageCutSummary(err.partialContent, input.maximumSummaryChars);
+    if (summary === undefined) throw err;
+    written = err.partialContent.trim();
+    salvaged = true;
+  }
   if (summary === undefined) {
     throw new CompactionFailure(
       'budget-refusal',
@@ -183,5 +255,6 @@ async function summarizeCompactionCounted(
     calls: 1,
     outputTokens,
     ...(summary.length < written.length ? { cutFromChars: written.length } : {}),
+    ...(salvaged ? { salvagedFromLength: true } : {}),
   };
 }

@@ -82,6 +82,10 @@ export interface PromptRunOptions {
   alwaysStripThinking?: boolean;
   /** Require an explicit stop finish before returning generated prose. */
   requireComplete?: boolean;
+  /** With `requireComplete`, attach the text written before an incomplete
+   *  finish to the thrown PromptIncompleteError, for a caller that can check
+   *  and keep it. Other callers never see partial text. */
+  partialOnIncomplete?: boolean;
   /** Per-request reasoning level; leaves the model's configured default intact. */
   reasoningEffort?: ChatCompletionRequest['reasoning_effort'];
   /** Turn thinking off where the provider has a known off switch
@@ -98,7 +102,11 @@ export interface PromptRunOptions {
 }
 
 export class PromptIncompleteError extends Error {
-  constructor(readonly finishReason: string | null) {
+  constructor(
+    readonly finishReason: string | null,
+    /** Set only when the caller asked for it with `partialOnIncomplete`. */
+    readonly partialContent?: string,
+  ) {
     super(
       finishReason
         ? `Summarization ended with finish_reason=${finishReason}; generated text is incomplete.`
@@ -293,7 +301,16 @@ export async function runPromptToMarkdown(
         (toolCalls.length === 0 || !options.contactTools || !options.dispatchContactTool) &&
         finishReason !== 'stop'
       ) {
-        throw new PromptIncompleteError(finishReason);
+        throw new PromptIncompleteError(
+          finishReason,
+          options.partialOnIncomplete === true
+            ? sanitizeText(
+                content,
+                options.alwaysStripThinking === true || shouldStripThinking(selectedModel, config),
+                new Set(),
+              )
+            : undefined,
+        );
       }
       if (!content.trim() && reasoningChars > 0 && finishReason === 'length') {
         // An empty answer otherwise reaches the caller as "no summary", which

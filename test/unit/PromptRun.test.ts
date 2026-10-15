@@ -35,7 +35,11 @@ vi.mock('vscode', () => ({
 
 vi.mock('../../src/llm/ChatClient', () => ({ streamModelChatCompletion }));
 
-import { runPromptToMarkdown, type PromptRunContext } from '../../src/sidebar/PromptRun';
+import {
+  PromptIncompleteError,
+  runPromptToMarkdown,
+  type PromptRunContext,
+} from '../../src/sidebar/PromptRun';
 
 const config = (): ForgeConfig =>
   ({
@@ -347,6 +351,28 @@ describe('runPromptToMarkdown options', () => {
     await expect(
       runPromptToMarkdown(ctx(), 'summarize', 'c1', { requireComplete: true }),
     ).rejects.toMatchObject({ name: 'PromptIncompleteError', finishReason: 'length' });
+  });
+
+  it('attaches the cut-off text only for a caller that opts in', async () => {
+    streamModelChatCompletion.mockImplementation(
+      (_u: string, _request: ChatCompletionRequest, _m: unknown, handlers: any) => {
+        handlers.onToken('<think>planning</think>Goal: partial');
+        handlers.onDone('length');
+      },
+    );
+
+    const plain = await runPromptToMarkdown(ctx(), 'summarize', 'c1', {
+      requireComplete: true,
+    }).catch((err: unknown) => err);
+    expect(plain).toBeInstanceOf(PromptIncompleteError);
+    expect((plain as PromptIncompleteError).partialContent).toBeUndefined();
+
+    const opted = await runPromptToMarkdown(ctx(), 'summarize', 'c1', {
+      requireComplete: true,
+      partialOnIncomplete: true,
+      alwaysStripThinking: true,
+    }).catch((err: unknown) => err);
+    expect((opted as PromptIncompleteError).partialContent).toBe('Goal: partial');
   });
 
   it('does not treat a missing finish reason as a complete compaction result', async () => {
