@@ -133,7 +133,7 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
         postModels: () => this.postModels(),
         postSessionSync: () => this.postSessionSync(),
         postTokenBudget: () => this.postTokenBudget(),
-        persistSession: () => this.persistSession(),
+        persistSession: (changedId) => this.persistSession(changedId),
         persistActiveId: () => this.persistActiveId(),
         baseOf: (id) => this.baseOf(id),
         reindexCodebase: () => this.reindexCodebase(),
@@ -398,8 +398,8 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
     }
   }
 
-  private persistSession(): void {
-    saveSidebarSession(this.workspaceState, this.sidebar, this.historyArchive);
+  private persistSession(changedId?: string): void {
+    saveSidebarSession(this.workspaceState, this.sidebar, this.historyArchive, changedId);
   }
 
   /** Tab-switch persistence: one string, not the whole transcript blob. */

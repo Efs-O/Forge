@@ -7,6 +7,7 @@ import { getLogger } from '../../src/util/logger';
 import * as atomicWrites from '../../src/util/atomicWrite';
 import { HistoryArchive, HISTORY_ARCHIVE_FILE } from '../../src/sidebar/HistoryArchive';
 import { loadSidebarSession, saveSidebarSession } from '../../src/sidebar/sessionPersistence';
+import { OPEN_CONVERSATIONS_KEY_V2 } from '../../src/sidebar/openConversationsPersistence';
 import {
   runtimeToPersisted,
   SESSION_KEY_V1,
@@ -150,7 +151,8 @@ describe('HistoryArchive', () => {
         updates.push(key);
         if (value === undefined) delete store[key];
         else store[key] = value;
-        if (key === SESSION_KEY_V1) expect(fs.existsSync(bodyPath(file, 'remove'))).toBe(true);
+        if (key === OPEN_CONVERSATIONS_KEY_V2)
+          expect(fs.existsSync(bodyPath(file, 'remove'))).toBe(true);
         return Promise.resolve();
       },
     } as unknown as Memento;
@@ -171,7 +173,7 @@ describe('HistoryArchive', () => {
     expect(fs.existsSync(bodyPath(file, 'remove'))).toBe(true);
     expect(updates).toEqual([]);
     await settle();
-    expect(updates[0]).toBe(SESSION_KEY_V1);
+    expect(updates[0]).toBe(OPEN_CONVERSATIONS_KEY_V2);
     expect(fs.existsSync(bodyPath(file, 'remove'))).toBe(false);
     expect(fs.existsSync(bodyPath(file, 'keep'))).toBe(true);
     expect(fs.existsSync(bodyPath(file, 'stay'))).toBe(true);
@@ -213,8 +215,11 @@ describe('HistoryArchive', () => {
     saveSidebarSession(makeMemento(store), session([conv('keep', 'me')]), new HistoryArchive(file));
     await settle();
     expect(
-      (store[SESSION_KEY_V1] as { history: Array<{ id: string }> }).history.map((item) => item.id),
+      (store[OPEN_CONVERSATIONS_KEY_V2] as { inline: Array<{ id: string }> }).inline.map(
+        (item) => item.id,
+      ),
     ).toEqual(['keep']);
+    expect((store[SESSION_KEY_V1] as { history?: unknown }).history).toBeUndefined();
     expect(error).toHaveBeenCalled();
   });
 

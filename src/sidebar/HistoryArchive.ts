@@ -1,13 +1,11 @@
-/**
- * Per-conversation history bodies, with the old list file read only for migration.
- * See `docs/plans/HISTORY_PER_CONVERSATION_FILES_PLAN.md`.
- */
+/** Per-conversation history bodies, with the old list file read only for migration. */
 
 import * as fs from 'fs';
 import * as path from 'path';
-import { writeFileAtomicSync } from '../util/atomicWrite';
 import { getLogger } from '../util/logger';
-import { ArchivedSessions, isSafeId } from './ArchivedSessions';
+import { ArchivedSessions } from './ArchivedSessions';
+import { ConversationBodyStore } from './ConversationBodyStore';
+import { OpenConversationsPersistence } from './openConversationsPersistence';
 import {
   conversationPersistedSchema,
   type ConversationPersisted,
@@ -18,7 +16,7 @@ const log = getLogger();
 
 export const HISTORY_ARCHIVE_FILE = 'conversation-history.json';
 
-function signatureOf(conversation: ConversationRuntime): string {
+function signatureOf(conversation: ConversationRuntime | ConversationPersisted): string {
   return `${conversation.updatedAt}:${conversation.title}:${conversation.messages.length}:${JSON.stringify(conversation.agentLinks ?? {})}`;
 }
 
@@ -27,25 +25,25 @@ function detailOf(error: unknown): string {
 }
 
 export class HistoryArchive {
-  private readonly bodyDirectory: string;
-  private readonly written = new Map<string, string>();
-  private readonly pendingRemovals = new Set<string>();
-  /** Refuse writes if existing data could not be read or safely quarantined. */
-  private blocked = false;
-  /**
-   * True until a save confirms the legacy list file is gone, so the delete is
-   * one syscall per process rather than one per tool-round save.
-   */
+  private readonly bodies: ConversationBodyStore;
   private legacyMayExist = true;
-
+  private legacyBlocked = false;
+  readonly openConversations: OpenConversationsPersistence;
   readonly overflow: ArchivedSessions;
 
   constructor(
     readonly filePath: string,
     workspacePath?: string,
   ) {
-    this.bodyDirectory = path.join(path.dirname(filePath), 'history');
-    this.overflow = new ArchivedSessions(path.dirname(filePath), workspacePath);
+    const storageDirectory = path.dirname(filePath);
+    this.bodies = new ConversationBodyStore(
+      path.join(storageDirectory, 'history'),
+      'HistoryArchive',
+    );
+    this.openConversations = new OpenConversationsPersistence(
+      new ConversationBodyStore(path.join(storageDirectory, 'open'), 'OpenConversations'),
+    );
+    this.overflow = new ArchivedSessions(storageDirectory, workspacePath);
   }
 
   /** The archive for a workspace storage folder; none without one (no folder open). */
@@ -58,41 +56,17 @@ export class HistoryArchive {
       : undefined;
   }
 
-  /**
-   * Read all conversation bodies, unioning an old list file while it migrates.
-   * Returns undefined only when neither storage layout exists.
-   */
+  /** Read directory bodies and union the old list file while it migrates. */
   load(): ConversationPersisted[] | undefined {
-    let filenames: string[] | undefined;
-    try {
-      filenames = fs.readdirSync(this.bodyDirectory).filter((name) => name.endsWith('.json'));
-    } catch (error) {
-      if ((error as NodeJS.ErrnoException).code !== 'ENOENT') {
-        log.error(`[HistoryArchive] could not list ${this.bodyDirectory}: ${detailOf(error)}`);
-        this.blocked = true;
-        return [];
-      }
-    }
-
-    this.written.clear();
-    const byId = new Map<string, ConversationPersisted>();
-    for (const filename of filenames ?? []) {
-      const id = filename.slice(0, -'.json'.length);
-      const body = this.readBody(filename, id);
-      if (!body) continue;
-      byId.set(id, body);
-      this.written.set(id, this.signatureOfPersisted(body));
-    }
-
+    const bodies = this.bodies.load(signatureOf);
+    const byId = new Map((bodies ?? []).map((body) => [body.id, body]));
     const legacy = this.loadLegacy();
-    if (legacy === undefined && filenames === undefined && !this.blocked) return undefined;
+    if (legacy === undefined && bodies === undefined) return undefined;
     for (const entry of legacy ?? []) {
       const current = byId.get(entry.id);
       if (!current || entry.updatedAt > current.updatedAt) byId.set(entry.id, entry);
-      // Legacy-only entries intentionally are not marked written; the first
-      // save must materialize them in the new directory before deleting legacy.
+      // Legacy-only entries are materialized before the legacy file is removed.
     }
-
     return [...byId.values()].sort((a, b) => b.updatedAt - a.updatedAt);
   }
 
@@ -101,29 +75,8 @@ export class HistoryArchive {
     history: readonly ConversationRuntime[],
     build: (conversation: ConversationRuntime) => ConversationPersisted,
   ): boolean {
-    if (this.blocked) return false;
-    try {
-      for (const conversation of history) {
-        if (!isSafeId(conversation.id))
-          throw new Error(`Invalid history conversation id: ${conversation.id}`);
-        const signature = signatureOf(conversation);
-        if (this.written.get(conversation.id) === signature) continue;
-        fs.mkdirSync(this.bodyDirectory, { recursive: true });
-        const persisted = build(conversation);
-        writeFileAtomicSync(this.bodyPath(conversation.id), JSON.stringify(persisted));
-        this.written.set(conversation.id, signature);
-      }
-    } catch (error) {
-      log.error(`[HistoryArchive] could not write history bodies: ${detailOf(error)}`);
-      return false;
-    }
-
-    const currentIds = new Set(history.map((conversation) => conversation.id));
-    for (const id of currentIds) this.pendingRemovals.delete(id);
-    for (const id of this.written.keys()) {
-      if (!currentIds.has(id)) this.pendingRemovals.add(id);
-    }
-
+    if (this.legacyBlocked) return false;
+    if (!this.bodies.save(history, build, signatureOf).ok) return false;
     if (!this.legacyMayExist) return true;
     try {
       fs.unlinkSync(this.filePath);
@@ -143,40 +96,7 @@ export class HistoryArchive {
 
   /** Remove bodies made redundant by a successful memento write. */
   pruneRemoved(): void {
-    for (const id of this.pendingRemovals) {
-      try {
-        fs.unlinkSync(this.bodyPath(id));
-        this.pendingRemovals.delete(id);
-        this.written.delete(id);
-      } catch (error) {
-        if ((error as NodeJS.ErrnoException).code === 'ENOENT') {
-          this.pendingRemovals.delete(id);
-          this.written.delete(id);
-          continue;
-        }
-        log.error(`[HistoryArchive] could not remove history body ${id}: ${detailOf(error)}`);
-      }
-    }
-  }
-
-  private readBody(filename: string, expectedId: string): ConversationPersisted | undefined {
-    const target = path.join(this.bodyDirectory, filename);
-    try {
-      const parsed = conversationPersistedSchema.safeParse(
-        JSON.parse(fs.readFileSync(target, 'utf8')),
-      );
-      if (parsed.success && isSafeId(expectedId) && parsed.data.id === expectedId)
-        return parsed.data;
-      this.quarantineBody(
-        target,
-        expectedId,
-        parsed.success ? 'body id does not match filename' : parsed.error.message,
-      );
-    } catch (error) {
-      if ((error as NodeJS.ErrnoException).code === 'ENOENT') return undefined;
-      this.quarantineBody(target, expectedId, detailOf(error));
-    }
-    return undefined;
+    this.bodies.pruneRemoved();
   }
 
   private loadLegacy(): ConversationPersisted[] | undefined {
@@ -188,7 +108,7 @@ export class HistoryArchive {
       log.error(
         `[HistoryArchive] could not read ${this.filePath}; leaving it untouched: ${detailOf(error)}`,
       );
-      this.blocked = true;
+      this.legacyBlocked = true;
       return [];
     }
     let json: unknown;
@@ -211,20 +131,6 @@ export class HistoryArchive {
     return parsed.flatMap((entry) => (entry.success ? [entry.data] : []));
   }
 
-  private quarantineBody(target: string, id: string, detail: string): void {
-    const safeId = isSafeId(id) ? id : path.basename(target, '.json');
-    const aside = path.join(this.bodyDirectory, `${safeId}.corrupt-${Date.now()}.json.bad`);
-    try {
-      fs.renameSync(target, aside);
-      log.error(`[HistoryArchive] unreadable body moved to ${aside}: ${detail}`);
-    } catch (error) {
-      log.error(
-        `[HistoryArchive] unreadable body ${target} (${detail}); could not quarantine it: ${detailOf(error)}`,
-      );
-      this.blocked = true;
-    }
-  }
-
   private quarantineLegacy(detail: string): void {
     const parsed = path.parse(this.filePath);
     const target = path.join(parsed.dir, `${parsed.name}.corrupt-${Date.now()}${parsed.ext}`);
@@ -235,16 +141,7 @@ export class HistoryArchive {
       log.error(
         `[HistoryArchive] unreadable archive ${this.filePath} (${detail}); could not move it aside: ${detailOf(error)}`,
       );
-      this.blocked = true;
+      this.legacyBlocked = true;
     }
-  }
-
-  private bodyPath(id: string): string {
-    if (!isSafeId(id)) throw new Error(`Invalid history conversation id: ${id}`);
-    return path.join(this.bodyDirectory, `${id}.json`);
-  }
-
-  private signatureOfPersisted(conversation: ConversationPersisted): string {
-    return `${conversation.updatedAt}:${conversation.title}:${conversation.messages.length}:${JSON.stringify(conversation.agentLinks ?? {})}`;
   }
 }

@@ -8,54 +8,26 @@
  */
 
 import type { Memento } from 'vscode';
-import { getLogger } from '../util/logger';
 import type { ChatMessage } from '../llm/types';
 import type { CompactionState } from './compactionTypes';
 import { rebuildIndex, type AgentLinkConflict } from '../agentLinks/chatAgentLinks';
 import type { HistoryArchive } from './HistoryArchive';
+import { openConversationsPersistenceFor, persistMemento } from './openConversationsPersistence';
 import {
   ACTIVE_ID_KEY,
   HISTORY_KEY_LEGACY,
   MAX_HISTORY_CONVERSATIONS,
   SESSION_KEY_V1,
-  SESSION_KEY_V1_CORRUPT,
   chatMessagesFromSlim,
   UNTITLED_TITLE,
   deriveTitle,
   newConversationId,
-  sidebarSessionPersistedSchema,
   slimPersistMessages,
   type ConversationPersisted,
   type ConversationRuntime,
   type SidebarRuntime,
   type SidebarSessionPersisted,
 } from './sessionTypes';
-
-const log = getLogger();
-const pendingMementoWrites = new WeakMap<Memento, Promise<void>>();
-
-/**
- * Serialize writes so a rejected quota write is visible and cannot race a later
- * update. Resolves true once committed, false (already logged) when rejected —
- * never rejects, because most callers do not await it.
- */
-function persistMemento(workspaceState: Memento, key: string, value: unknown): Promise<boolean> {
-  const previous = pendingMementoWrites.get(workspaceState) ?? Promise.resolve();
-  const pending = previous.then(() => workspaceState.update(key, value));
-  const reported = pending.then(
-    () => true,
-    (error: unknown) => {
-      const detail = error instanceof Error ? error.message : String(error);
-      log.error(`[sessionPersistence] failed to persist ${key}: ${detail}`);
-      return false;
-    },
-  );
-  pendingMementoWrites.set(
-    workspaceState,
-    reported.then(() => undefined),
-  );
-  return reported;
-}
 
 function emptyConversation(id: string, now: number): ConversationRuntime {
   return {
@@ -289,8 +261,9 @@ function migrateLegacyHistory(
 }
 
 /**
- * Load session from workspace state: v1 blob, else legacy single history, else default.
- * Archived history comes from `archive` unless the blob still carries its own.
+ * Load v2 open chats, merging a v1 session when needed; then fall back to the
+ * legacy single-history key or a default session. History can still be inline
+ * in v1/v2 while its directory migration or a failed write is being recovered.
  * After successful migration from legacy, removes legacy key.
  */
 export function loadSidebarSession(
@@ -298,19 +271,24 @@ export function loadSidebarSession(
   archive?: HistoryArchive,
   notifyWarning?: (message: string) => void,
 ): SidebarRuntime {
-  const rawV1 = workspaceState.get<unknown>(SESSION_KEY_V1);
-  const parsedV1 = sidebarSessionPersistedSchema.safeParse(rawV1);
-  if (parsedV1.success && parsedV1.data.conversations.length > 0) {
-    const d = parsedV1.data;
+  const openPersistence = openConversationsPersistenceFor(
+    workspaceState,
+    archive?.openConversations,
+  );
+  const loaded = openPersistence.load(workspaceState);
+  const d = loaded.v1;
+  if (loaded.hasSession) {
+    const conversations = loaded.conversations.map(persistedToRuntime);
+    if (conversations.length === 0) conversations.push(...createDefaultSession().conversations);
     // The pointer key wins when it still names an open conversation: a tab
     // switch writes only that, so the blob's own `activeConversationId` can be
     // several switches stale. Absent (records written before the split) or
     // dangling, fall back to the blob and then to the first tab.
     const pointer = workspaceState.get<string>(ACTIVE_ID_KEY);
-    const candidates = [pointer, d.activeConversationId];
-    let activeId = d.conversations[0].id;
+    const candidates = [pointer, loaded.activeConversationId, d?.activeConversationId];
+    let activeId = conversations[0]!.id;
     for (const candidate of candidates) {
-      if (candidate && d.conversations.some((c) => c.id === candidate)) {
+      if (candidate && conversations.some((conversation) => conversation.id === candidate)) {
         activeId = candidate;
         break;
       }
@@ -318,34 +296,25 @@ export function loadSidebarSession(
 
     persistMemento(workspaceState, HISTORY_KEY_LEGACY, undefined);
     archive?.overflow.list([
-      ...d.conversations.map((conversation) => conversation.id),
-      ...(d.history ?? []).map((conversation) => conversation.id),
+      ...conversations.map((conversation) => conversation.id),
+      ...(d?.history ?? []).map((conversation) => conversation.id),
+      ...loaded.inlineHistory.map((conversation) => conversation.id),
     ]);
+    const history = mergeHistory(loadHistory(d, archive), loaded.inlineHistory)
+      .filter((entry) => !conversations.some((open) => open.id === entry.id))
+      .map(persistedToRuntime);
     return indexSession(
       {
         activeConversationId: activeId,
-        conversations: d.conversations.map(persistedToRuntime),
+        conversations,
         // A close can persist the archive file before the open-session memento.
         // If the host crashes between those writes, the open copy is authoritative
         // and the duplicate archive entry must not be shown or restored twice.
-        history: loadHistory(d, archive)
-          .filter((entry) => !d.conversations.some((open) => open.id === entry.id))
-          .map(persistedToRuntime),
+        history,
       },
       archive,
       notifyWarning,
     );
-  }
-
-  if (rawV1 !== undefined && !parsedV1.success) {
-    const detail = parsedV1.error.message;
-    log.error(
-      `[sessionPersistence] invalid ${SESSION_KEY_V1}; keeping a quarantine copy: ${detail}`,
-    );
-    persistMemento(workspaceState, SESSION_KEY_V1_CORRUPT, {
-      quarantinedAt: Date.now(),
-      value: rawV1,
-    });
   }
 
   const legacy =
@@ -359,8 +328,13 @@ export function loadSidebarSession(
     return indexSession(migrated, archive, notifyWarning);
   }
 
-  archive?.overflow.list();
-  return indexSession(createDefaultSession(), archive, notifyWarning);
+  const session = createDefaultSession();
+  session.history = (archive?.load() ?? []).map(persistedToRuntime);
+  archive?.overflow.list([
+    ...session.conversations.map((conversation) => conversation.id),
+    ...session.history.map((conversation) => conversation.id),
+  ]);
+  return indexSession(session, archive, notifyWarning);
 }
 
 function indexSession(
@@ -404,26 +378,39 @@ function agentLinkRecords(
  * start. The next save moves a winning memento copy into the file.
  */
 function loadHistory(
-  persisted: SidebarSessionPersisted,
+  persisted: SidebarSessionPersisted | undefined,
   archive: HistoryArchive | undefined,
 ): ConversationPersisted[] {
-  if (!archive) return persisted.history ?? [];
-  if ((persisted.history?.length ?? 0) > 0) {
+  if (!archive) return persisted?.history ?? [];
+  if ((persisted?.history?.length ?? 0) > 0) {
     archive.load();
-    return persisted.history ?? [];
+    return persisted?.history ?? [];
   }
-  return archive.load() ?? persisted.history ?? [];
+  return archive.load() ?? persisted?.history ?? [];
+}
+
+function mergeHistory(
+  primary: readonly ConversationPersisted[],
+  inline: readonly ConversationPersisted[],
+): ConversationPersisted[] {
+  const byId = new Map(primary.map((conversation) => [conversation.id, conversation]));
+  for (const conversation of inline) {
+    const current = byId.get(conversation.id);
+    if (!current || conversation.updatedAt > current.updatedAt)
+      byId.set(conversation.id, conversation);
+  }
+  return [...byId.values()].sort((a, b) => b.updatedAt - a.updatedAt);
 }
 
 /**
- * With an `archive`, history goes to its file and the memento record carries
- * only the open tabs — see `HistoryArchive` for why. A failed file write keeps
- * history in the memento for that save, so it is never dropped.
+ * With an `archive`, history goes to its file and v2 carries only failed body
+ * fallbacks. Without storage, v2 keeps both open and history bodies inline.
  */
 export function saveSidebarSession(
   workspaceState: Memento,
   session: SidebarRuntime,
   archive?: HistoryArchive,
+  changedId?: string,
 ): void {
   session.history.sort((a, b) => b.updatedAt - a.updatedAt);
   // Past the cap, chats are evicted to the archive, not dropped. Without a
@@ -433,18 +420,15 @@ export function saveSidebarSession(
   }
   session.history = session.history.slice(0, MAX_HISTORY_CONVERSATIONS);
   const inFile = archive?.save(session.history, conversationToPersisted);
-  const mementoWrite = persistMemento(
+  const historyFallback = inFile === true ? [] : session.history.map(conversationToPersisted);
+  openConversationsPersistenceFor(workspaceState, archive?.openConversations).save(
     workspaceState,
-    SESSION_KEY_V1,
-    runtimeToPersisted(session, { withHistory: inFile !== true }),
+    session,
+    conversationToPersisted,
+    historyFallback,
+    changedId,
+    archive ? () => archive.pruneRemoved() : undefined,
   );
-  if (inFile === true && archive) {
-    // persistMemento already logs a rejected write. Do not prune after failure;
-    // the body remains the only durable copy until the memento is committed.
-    void mementoWrite.then((committed) => {
-      if (committed) archive.pruneRemoved();
-    });
-  }
   // Keep the pointer in step so it is always the authoritative answer on load,
   // rather than a value that may be older than the blob beside it.
   persistMemento(workspaceState, ACTIVE_ID_KEY, session.activeConversationId);

@@ -68,7 +68,7 @@ export interface SidebarHost {
   postModels: () => void;
   postSessionSync: () => void;
   postTokenBudget: () => void;
-  persistSession: () => void;
+  persistSession: (changedId?: string) => void;
   /** Writes only the active-conversation pointer — see `saveActiveConversationId`. */
   persistActiveId: () => void;
   baseOf: (id: string | null | undefined) => string | null;
@@ -329,7 +329,7 @@ export function wireSidebar(host: SidebarHost, parts: SidebarParts): SidebarRunt
   // Flushed per round too: a mesh run is one turn that can last an hour, and
   // a log written only at turn end showed nothing of it while it ran.
   agentLoop.setTranscriptChangedListener((convId) => {
-    host.persistSession();
+    host.persistSession(convId);
     host.postSessionSync();
     send.flushSessionLog(convId, true);
   });
