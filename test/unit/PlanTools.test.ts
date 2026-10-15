@@ -1,8 +1,14 @@
 import type { Memento } from 'vscode';
 import { describe, expect, it } from 'vitest';
-import { makeUpdatePlanTool, renderPlan } from '../../src/tools/planTools';
+import {
+  makeUpdatePlanTool,
+  PLAN_RENDER_MAX_CHARS,
+  renderPlan,
+} from '../../src/tools/planTools';
 import {
   loadSidebarSession,
+  PLAN_ITEM_MAX_CHARS,
+  PLAN_MAX_ITEMS,
   runtimeToPersisted,
   saveSidebarSession,
   SESSION_KEY_V1,
@@ -12,6 +18,7 @@ import {
 } from '../../src/sidebar/sessionTypes';
 import type { ChatMessage } from '../../src/llm/types';
 import type { ToolHandlerContext } from '../../src/tools/ToolRegistry';
+import { injectTurnContext } from '../../src/sidebar/turnContext';
 
 function makeMemento(store: Record<string, unknown>): Memento {
   return {
@@ -61,37 +68,70 @@ describe('update_plan', () => {
     expect(tool.mutation).toBeUndefined();
   });
 
-  it('rejects an over-long list and names the limit so the round is not lost', async () => {
+  it('rejects an over-long list and reports the actual count and limit', async () => {
     const tool = makeUpdatePlanTool();
     const { ctx, written } = context();
-    const items = Array.from({ length: 21 }, (_, i) => ({
+    const items = Array.from({ length: PLAN_MAX_ITEMS + 1 }, (_, i) => ({
       text: `task ${i}`,
       status: 'pending' as const,
     }));
     const result = await tool.handler({ items }, ctx);
-    expect(result).toContain('1-20 items');
+    expect(result).toContain('21 items');
+    expect(result).toContain(`limit is ${PLAN_MAX_ITEMS}`);
+    expect(result.length).toBeLessThanOrEqual(200);
     expect(written).toEqual([]);
   });
 
-  it('rejects an over-long item text', async () => {
+  it('accepts the text limit and rejects the next character with its item and length', async () => {
+    const tool = makeUpdatePlanTool();
+    const accepted = context();
+    const validItems = [{ text: 'x'.repeat(PLAN_ITEM_MAX_CHARS), status: 'pending' }];
+    expect(await tool.handler({ items: validItems }, accepted.ctx)).toContain('Plan recorded: 1 items');
+    expect(accepted.written).toEqual([validItems]);
+
+    const rejected = context();
+    const invalidLength = PLAN_ITEM_MAX_CHARS + 1;
+    const result = await tool.handler(
+      { items: [{ text: 'x'.repeat(invalidLength), status: 'pending' }] },
+      rejected.ctx,
+    );
+    expect(result).toContain(`item 1 text is ${invalidLength} characters`);
+    expect(result).toContain(`limit is ${PLAN_ITEM_MAX_CHARS}`);
+    expect(result.length).toBeLessThanOrEqual(200);
+    expect(rejected.written).toEqual([]);
+  });
+
+  it('names an invalid status value and the allowed values', async () => {
     const tool = makeUpdatePlanTool();
     const { ctx, written } = context();
     const result = await tool.handler(
-      { items: [{ text: 'x'.repeat(201), status: 'pending' }] },
+      { items: [{ text: 'ok', status: 'in_progress' }] },
       ctx,
     );
-    expect(result).toContain('1-200 characters');
+    expect(result).toContain('"in_progress"');
+    expect(result).toContain('pending, active, or done');
+    expect(result.length).toBeLessThanOrEqual(200);
     expect(written).toEqual([]);
   });
 
-  it('rejects unknown fields rather than persisting them', async () => {
+  it('names an extra field and missing items without exceeding the refusal limit', async () => {
+    const tool = makeUpdatePlanTool();
+    const extraField = await tool.handler(
+      { items: [{ text: 'ok', status: 'pending', id: 'task-1' }] },
+      context().ctx,
+    );
+    expect(extraField).toContain('unexpected field "id"');
+    expect(extraField.length).toBeLessThanOrEqual(200);
+
+    const missingItems = await tool.handler({}, context().ctx);
+    expect(missingItems).toContain('missing "items"');
+    expect(missingItems.length).toBeLessThanOrEqual(200);
+  });
+
+  it('does not persist a rejected plan', async () => {
     const tool = makeUpdatePlanTool();
     const { ctx, written } = context();
-    const result = await tool.handler(
-      { items: [{ text: 'ok', status: 'pending', notes: 'x'.repeat(5000) }] },
-      ctx,
-    );
-    expect(result).toContain('no other fields');
+    await tool.handler({ items: [{ text: 'ok', status: 'pending', notes: 'x'.repeat(5000) }] }, ctx);
     expect(written).toEqual([]);
   });
 
@@ -103,6 +143,27 @@ describe('update_plan', () => {
 });
 
 describe('renderPlan', () => {
+  it('keeps the largest valid plan whole through turn-context injection', () => {
+    const items: PlanItem[] = Array.from({ length: PLAN_MAX_ITEMS }, (_, index) => {
+      const prefix = `item-${index + 1} `;
+      return {
+        text: prefix + 'x'.repeat(PLAN_ITEM_MAX_CHARS - prefix.length),
+        status: 'active',
+      };
+    });
+    const rendered = renderPlan(items);
+    const injected = injectTurnContext([{ role: 'user', content: 'do the work' }], {
+      plan: { items, updatedAt: 0 },
+    });
+    const output = injected.map((message) => message.content).join('\n');
+
+    expect(items.every((item) => item.text.length === PLAN_ITEM_MAX_CHARS)).toBe(true);
+    expect(rendered.length).toBeLessThanOrEqual(PLAN_RENDER_MAX_CHARS);
+    for (const item of items) {
+      expect(output).toContain(`- [>] in progress: ${item.text}`);
+    }
+  });
+
   it('is a pure function of the items, so the clock cannot move the prompt', () => {
     // The age suffix used to be re-rendered every tool round. A turn that
     // crossed a minute boundary rewrote the prompt head mid-turn and dropped

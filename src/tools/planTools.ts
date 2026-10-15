@@ -28,6 +28,18 @@ const argsSchema = z
   })
   .strict();
 
+const PLAN_RENDER_HEADER = '**Task plan (recorded by Forge):**';
+const PLAN_STATUS_MARKS: Record<PlanItem['status'], string> = {
+  done: '[x] done',
+  active: '[>] in progress',
+  pending: '[ ] pending',
+};
+const PLAN_RETRY_RULE =
+  `Resend 1-${PLAN_MAX_ITEMS} items; text 1-${PLAN_ITEM_MAX_CHARS} chars; ` +
+  'status pending/active/done; no extra fields.';
+const PLAN_REFUSAL_PREFIX = 'Error: update_plan rejected: ';
+const PLAN_REFUSAL_MAX_CHARS = 200;
+
 /**
  * One line per item, with the status leading so it survives a skim.
  *
@@ -40,13 +52,100 @@ const argsSchema = z
  * See docs/plans/PROMPT_PREFIX_STABILITY_PLAN.md.
  */
 export function renderPlan(items: readonly PlanItem[]): string {
-  const marks: Record<PlanItem['status'], string> = {
-    done: '[x] done',
-    active: '[>] in progress',
-    pending: '[ ] pending',
-  };
-  const lines = items.map((item) => `- ${marks[item.status]}: ${item.text}`);
-  return `**Task plan (recorded by Forge):**\n${lines.join('\n')}`;
+  const lines = items.map((item) => `- ${PLAN_STATUS_MARKS[item.status]}: ${item.text}`);
+  return `${PLAN_RENDER_HEADER}\n${lines.join('\n')}`;
+}
+
+function valueAtPath(root: unknown, path: readonly PropertyKey[]): unknown {
+  let value = root;
+  for (const key of path) {
+    if ((typeof value !== 'object' || value === null) && typeof value !== 'function') {
+      return undefined;
+    }
+    value = Reflect.get(value, key);
+  }
+  return value;
+}
+
+function formatIssueValue(value: unknown): string {
+  let rendered: string;
+  try {
+    rendered = JSON.stringify(value) ?? String(value);
+  } catch {
+    rendered = String(value);
+  }
+  return rendered.length <= 48 ? rendered : `${rendered.slice(0, 45)}...`;
+}
+
+function describePlanIssue(args: unknown, issue: z.ZodError['issues'][number]): string | undefined {
+  const [root, index, field] = issue.path;
+
+  if (root === 'items' && issue.path.length === 1) {
+    if (issue.code === 'invalid_type') {
+      const hasItems =
+        typeof args === 'object' &&
+        args !== null &&
+        Object.prototype.hasOwnProperty.call(args, 'items');
+      return hasItems ? '"items" must be an array.' : 'missing "items".';
+    }
+    if (issue.code === 'too_big') {
+      const items = valueAtPath(args, issue.path);
+      const count = Array.isArray(items) ? items.length : issue.maximum;
+      return `${count} items; the limit is ${issue.maximum}.`;
+    }
+    if (issue.code === 'too_small') {
+      const items = valueAtPath(args, issue.path);
+      const count = Array.isArray(items) ? items.length : issue.minimum;
+      return `${count} items; the minimum is ${issue.minimum}.`;
+    }
+  }
+
+  if (root === 'items' && typeof index === 'number' && field === 'text') {
+    const text = valueAtPath(args, issue.path);
+    if (issue.code === 'too_big' && typeof text === 'string') {
+      return `item ${index + 1} text is ${text.length} characters; the limit is ${issue.maximum}.`;
+    }
+    if (issue.code === 'too_small' && typeof text === 'string') {
+      return `item ${index + 1} text is ${text.length} characters; the minimum is ${issue.minimum}.`;
+    }
+    if (issue.code === 'invalid_type') {
+      return text === undefined
+        ? `item ${index + 1} is missing "text".`
+        : `item ${index + 1} text must be a string.`;
+    }
+  }
+
+  if (root === 'items' && typeof index === 'number' && field === 'status') {
+    if (issue.code === 'invalid_value') {
+      const value = formatIssueValue(valueAtPath(args, issue.path));
+      return `item ${index + 1} status ${value} is invalid; use pending, active, or done.`;
+    }
+    if (issue.code === 'invalid_type') {
+      return `item ${index + 1} is missing "status" or its value is not a string.`;
+    }
+  }
+
+  if (issue.code === 'unrecognized_keys') {
+    const key = issue.keys[0];
+    if (key !== undefined) {
+      const location =
+        root === 'items' && typeof index === 'number'
+          ? ` at item ${index + 1}`
+          : ' at the top level';
+      return `unexpected field ${JSON.stringify(key)}${location}.`;
+    }
+  }
+
+  return undefined;
+}
+
+function formatPlanRefusal(reason: string | undefined): string {
+  const detail = reason ?? 'arguments do not match the update_plan schema.';
+  const suffix = ` ${PLAN_RETRY_RULE}`;
+  const detailLimit = PLAN_REFUSAL_MAX_CHARS - PLAN_REFUSAL_PREFIX.length - suffix.length;
+  const boundedDetail =
+    detail.length <= detailLimit ? detail : `${detail.slice(0, Math.max(0, detailLimit - 3))}...`;
+  return `${PLAN_REFUSAL_PREFIX}${boundedDetail}${suffix}`;
 }
 
 /**
@@ -128,12 +227,9 @@ export function makeUpdatePlanTool(): RegisteredTool {
     handler: async (args, context) => {
       const parsed = argsSchema.safeParse(args);
       if (!parsed.success) {
-        // Name the limit rather than echoing a Zod dump: the model has to be
-        // able to retry correctly, or the round is simply lost.
-        return (
-          `Error: update_plan rejected. Send 1-${PLAN_MAX_ITEMS} items, each with a "text" of ` +
-          `1-${PLAN_ITEM_MAX_CHARS} characters and a "status" of pending, active, or done, and no other fields.`
-        );
+        // Report the first Zod issue in a bounded form so the model can repair
+        // the actual problem without receiving a Zod dump.
+        return formatPlanRefusal(describePlanIssue(args, parsed.error.issues[0]!));
       }
       if (!context?.setPlan) {
         return 'Error: update_plan is unavailable outside a conversation turn.';
@@ -146,8 +242,15 @@ export function makeUpdatePlanTool(): RegisteredTool {
 }
 
 /**
- * Belt-and-braces bound on what the plan can cost the prompt. 20 items x 200
- * chars cannot reach this, so in practice it never truncates — it exists so
- * that a plan loaded from a corrupted session cannot grow the context either.
+ * Full rendering size of the largest schema-valid plan. The header and longest
+ * status marker come from the same values used by renderPlan; this cap only
+ * truncates a corrupted or hand-edited session that bypassed the plan schema.
  */
-export const PLAN_RENDER_MAX_CHARS = 1500;
+const PLAN_LONGEST_STATUS_MARK_CHARS = Math.max(
+  ...Object.values(PLAN_STATUS_MARKS).map((mark) => mark.length),
+);
+export const PLAN_RENDER_MAX_CHARS =
+  PLAN_RENDER_HEADER.length +
+  PLAN_MAX_ITEMS *
+    ('- '.length + PLAN_LONGEST_STATUS_MARK_CHARS + ': '.length + PLAN_ITEM_MAX_CHARS) +
+  PLAN_MAX_ITEMS;

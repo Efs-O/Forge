@@ -62,9 +62,8 @@ function renderTurnContext(state: TurnContextState): string | undefined {
     parts.push(`Active VS Code terminal working directory: ${state.activeTerminalCwd}`);
   }
   if (state.plan && state.plan.items.length > 0) {
-    // Guidance appended AFTER the slice, not folded into it: the cap belongs to
-    // the plan's own items, and a long plan must not be what truncates the
-    // rules for reading it.
+    // The cap is derived to fit every schema-valid plan; this slice is only a
+    // backstop for corrupted session state. Guidance stays outside that bound.
     parts.push(
       `${renderPlan(state.plan.items).slice(0, PLAN_RENDER_MAX_CHARS)}\n\n${PLAN_GUIDANCE}`,
     );
