@@ -1,5 +1,11 @@
 # Forge — Recent Changes
 
+## 0.17.37
+
+- Opening a tool step shows the call and one folded line, `▸ Output · N chars`. The result appears only when you click that line, and an opened result scrolls in a box about 20 lines tall instead of pushing the chat down. Opening the thinking that led into a call no longer prints the call's whole result.
+- A step you opened in a group of more than 10 calls stays in view as later calls arrive, instead of sliding into the "Show N more calls" gap.
+- Rows you opened stay open when the turn ends. A live row holding both thinking and text took a new id when the final sync stored it as two rows, and every bubble, step and group keyed on it collapsed.
+
 ## 0.17.36
 
 - The Forge Output log warns when another process (a virus scanner, a backup tool) held a chat file open while Forge saved it: `[atomicWrite] rename onto <file> was blocked for N ms (K retries) before it succeeded`, or `... still blocked after N ms (K retries); giving up` when the 2.5 s retry budget ran out and the chat stayed in saved state for that save. A save that succeeds first time logs nothing.
