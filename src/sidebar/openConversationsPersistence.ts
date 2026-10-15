@@ -225,8 +225,12 @@ export class OpenConversationsPersistence {
         open.set(id, body);
       }
 
+      // A v1 chat a downgraded build wrote or continued (the shrink had not
+      // committed yet) wins over an older v2 body of the same id.
       for (const body of v1?.conversations ?? []) {
-        if (body.messages.length === 0 || order.includes(body.id)) continue;
+        if (body.messages.length === 0) continue;
+        const current = open.get(body.id);
+        if (current && body.updatedAt <= current.updatedAt) continue;
         open.set(body.id, body);
         this.forceMigrationIds.add(body.id);
         this.needsV1Shrink = true;

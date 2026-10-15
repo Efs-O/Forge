@@ -6,9 +6,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import { getLogger } from '../../src/util/logger';
 import * as atomicWrites from '../../src/util/atomicWrite';
 import { HistoryArchive, HISTORY_ARCHIVE_FILE } from '../../src/sidebar/HistoryArchive';
-import {
-  OPEN_CONVERSATIONS_KEY_V2,
-} from '../../src/sidebar/openConversationsPersistence';
+import { OPEN_CONVERSATIONS_KEY_V2 } from '../../src/sidebar/openConversationsPersistence';
 import { loadSidebarSession, saveSidebarSession } from '../../src/sidebar/sessionPersistence';
 import {
   runtimeToPersisted,
@@ -83,7 +81,10 @@ function chat(id: string, text: string, updatedAt = 1): ConversationRuntime {
   };
 }
 
-function sidebar(conversations: ConversationRuntime[], history: ConversationRuntime[] = []): SidebarRuntime {
+function sidebar(
+  conversations: ConversationRuntime[],
+  history: ConversationRuntime[] = [],
+): SidebarRuntime {
   return {
     activeConversationId: conversations[0]!.id,
     conversations,
@@ -202,18 +203,20 @@ describe('open conversations persistence', () => {
     const store: Record<string, unknown> = {};
     const error = vi.spyOn(getLogger(), 'error');
     const actualWrite = atomicWrites.writeFileAtomicSync;
-    vi.spyOn(atomicWrites, 'writeFileAtomicSync').mockImplementation((target, content, expected) => {
-      if (target === body(directory, 'failed')) throw new Error('disk full');
-      actualWrite(target, content, expected);
-    });
+    vi.spyOn(atomicWrites, 'writeFileAtomicSync').mockImplementation(
+      (target, content, expected) => {
+        if (target === body(directory, 'failed')) throw new Error('disk full');
+        actualWrite(target, content, expected);
+      },
+    );
 
     saveSidebarSession(makeMemento(store), current, archive);
     await settle();
 
     expect(fs.existsSync(body(directory, 'failed'))).toBe(false);
-    expect((store[OPEN_CONVERSATIONS_KEY_V2] as { inline: ConversationPersisted[] }).inline).toEqual([
-      persisted(current.conversations[0]!),
-    ]);
+    expect(
+      (store[OPEN_CONVERSATIONS_KEY_V2] as { inline: ConversationPersisted[] }).inline,
+    ).toEqual([persisted(current.conversations[0]!)]);
     expect(error).toHaveBeenCalledWith(expect.stringContaining('could not write failed'));
   });
 
@@ -237,9 +240,13 @@ describe('open conversations persistence', () => {
 
     expect(loaded.conversations.map((conversation) => conversation.id)).toEqual(['good']);
     expect(fs.existsSync(body(directory, 'bad'))).toBe(false);
-    expect(fs.readdirSync(openDirectory).some((name) => /^bad\.corrupt-\d+\.json\.bad$/.test(name))).toBe(true);
+    expect(
+      fs.readdirSync(openDirectory).some((name) => /^bad\.corrupt-\d+\.json\.bad$/.test(name)),
+    ).toBe(true);
     expect(error).toHaveBeenCalledWith(expect.stringContaining('unreadable body moved'));
-    expect(error).toHaveBeenCalledWith(expect.stringContaining('missing body for open conversation bad'));
+    expect(error).toHaveBeenCalledWith(
+      expect.stringContaining('missing body for open conversation bad'),
+    );
   });
 
   it('ignores an orphan atomic-write temp and reads the previous whole body', () => {
@@ -315,7 +322,10 @@ describe('open conversations persistence', () => {
     fs.mkdirSync(path.join(directory, 'open'), { recursive: true });
     const keep = chat('keep', 'current');
     fs.writeFileSync(body(directory, 'keep'), JSON.stringify(persisted(keep)));
-    fs.writeFileSync(body(directory, 'orphan'), JSON.stringify(persisted(chat('orphan', 'old', 2))));
+    fs.writeFileSync(
+      body(directory, 'orphan'),
+      JSON.stringify(persisted(chat('orphan', 'old', 2))),
+    );
     const seed = chat('seed', '');
     seed.messages = [];
     const store: Record<string, unknown> = {
@@ -405,13 +415,45 @@ describe('open conversations persistence', () => {
     expect(shrunk).not.toHaveProperty('history');
   });
 
+  it('takes a newer v1 copy of an ordered chat continued by a downgraded build', async () => {
+    const directory = tempDirectory();
+    const archive = archiveFor(directory);
+    const older = chat('shared', 'before downgrade', 1);
+    fs.mkdirSync(path.join(directory, 'open'), { recursive: true });
+    fs.writeFileSync(body(directory, 'shared'), JSON.stringify(persisted(older)));
+    const continued = chat('shared', 'continued while downgraded', 9);
+    const store: Record<string, unknown> = {
+      [OPEN_CONVERSATIONS_KEY_V2]: {
+        activeConversationId: 'shared',
+        order: ['shared'],
+        inline: [],
+      },
+      [SESSION_KEY_V1]: runtimeToPersisted(sidebar([continued]), { withHistory: false }),
+    };
+    const memento = makeMemento(store);
+
+    const loaded = loadSidebarSession(memento, archive);
+    expect(loaded.conversations).toHaveLength(1);
+    expect(loaded.conversations[0]!.updatedAt).toBe(9);
+
+    saveSidebarSession(memento, loaded, archive);
+    await settle();
+    const onDisk = JSON.parse(fs.readFileSync(body(directory, 'shared'), 'utf8')) as {
+      updatedAt: number;
+    };
+    expect(onDisk.updatedAt).toBe(9);
+  });
+
   it('keeps open and history bodies inline when no workspace storage directory exists', async () => {
     const current = sidebar([chat('open', 'open body')], [chat('history', 'history body', 2)]);
     const store: Record<string, unknown> = {};
     saveSidebarSession(makeMemento(store), current);
     await settle();
 
-    const v2 = store[OPEN_CONVERSATIONS_KEY_V2] as { order: string[]; inline: ConversationPersisted[] };
+    const v2 = store[OPEN_CONVERSATIONS_KEY_V2] as {
+      order: string[];
+      inline: ConversationPersisted[];
+    };
     expect(v2.order).toEqual(['open']);
     expect(v2.inline.map((conversation) => conversation.id).sort()).toEqual(['history', 'open']);
   });
