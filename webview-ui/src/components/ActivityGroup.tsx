@@ -1,9 +1,15 @@
 import React from 'react';
-import { openedReasoning, useDisclosure } from '../disclosureState';
+import { openedReasoning, readDisclosure, useDisclosure } from '../disclosureState';
 import type { ActivityGroupItem } from '../activityRows';
 import { displayDetail, groupMessages, stepMessages } from '../activityRows';
 import { sameRowList, toolNameAndDetail } from '../messageOps';
-import { summarizeGroup } from '../activityGroups';
+import {
+  recoveredFailures,
+  summarizeGroup,
+  visibleGroupItems,
+  type GroupGap,
+  type VisibleGroupItem,
+} from '../activityGroups';
 import { ActivityRow, stepRevealed } from './ActivityRow';
 import { ThinkingGroup } from './ThinkingGroup';
 import type { PendingToolCall } from '../pendingToolCalls';
@@ -30,6 +36,31 @@ const Chevron = ({ expanded }: { expanded: boolean }): React.ReactElement => (
   </svg>
 );
 
+function GroupGapButton({
+  groupId,
+  gap,
+  onReveal,
+}: {
+  groupId: string;
+  gap: GroupGap;
+  onReveal: () => void;
+}): React.ReactElement {
+  const [, remember] = useDisclosure('gap', `${groupId}:${gap.firstStepId}`);
+  return (
+    <button
+      className="activity-group-gap"
+      type="button"
+      onClick={() => {
+        remember(true);
+        onReveal();
+      }}
+    >
+      {gap.leading ? '▴' : '⋯'} Show {gap.calls} {gap.leading ? 'earlier' : 'more'}{' '}
+      {gap.calls === 1 ? 'call' : 'calls'}
+    </button>
+  );
+}
+
 function itemKey(item: ActivityGroupItem): string {
   if (item.kind === 'step') return stepMessages(item.step)[0]!.id;
   return item.steps[0]!.id;
@@ -46,14 +77,26 @@ function ActivityGroupView({
     pendingCalls[0]?.toolCallId ??
     `pending-${pendingCalls[0]?.index ?? 0}`;
   const [choice, setChoice] = useDisclosure('group', firstId);
+  const [, refreshGaps] = React.useState(0);
   const summary = summarizeGroup(items);
+  const recovered = recoveredFailures(items);
+  const unrecovered = Math.max(0, summary.failed - recovered.size);
+  const initialItems = visibleGroupItems(items, recovered, new Set());
+  const revealed = new Set(
+    initialItems.flatMap((item) =>
+      item.kind === 'gap' && readDisclosure('gap', `${firstId}:${item.firstStepId}`) === true
+        ? [item.firstStepId]
+        : [],
+    ),
+  );
+  const visibleItems = visibleGroupItems(items, recovered, revealed);
   // An opened step, or an opened reasoning bubble that folded into this group
   // (inside a step or as a reasoning run), keeps the group open on remount.
   const openedItem = items.some((item) =>
     item.kind === 'step' ? stepRevealed(item.step) : openedReasoning(item.steps),
   );
   const expanded = choice ?? openedItem;
-  const status = summary.failed > 0 ? '✕' : summary.pending ? '○' : '✓';
+  const status = unrecovered > 0 ? '✕' : summary.pending ? '○' : '✓';
   const recordedTools = live
     ? items.flatMap((item) =>
         item.kind === 'step' ? item.step.attempts.flatMap((attempt) => attempt.tools) : [],
@@ -82,7 +125,7 @@ function ActivityGroupView({
   return (
     <section className={`activity-group${expanded ? ' activity-group-open' : ''}`}>
       <button
-        className={`activity-group-toggle${summary.failed > 0 ? ' has-failure' : ''}`}
+        className={`activity-group-toggle${unrecovered > 0 ? ' has-failure' : ''}`}
         type="button"
         disabled={items.length === 0}
         onClick={() => setChoice(!expanded)}
@@ -92,9 +135,9 @@ function ActivityGroupView({
           {items.length > 0 && <Chevron expanded={expanded} />}
         </span>
         <span
-          className={`activity-group-status${summary.failed > 0 ? ' is-failed' : live ? ' is-live' : ''}`}
+          className={`activity-group-status${unrecovered > 0 ? ' is-failed' : live ? ' is-live' : ''}`}
         >
-          {live && summary.failed === 0 ? '●' : status}
+          {live && unrecovered === 0 ? '●' : status}
         </span>
         <span className="activity-group-label">
           {live ? (
@@ -115,6 +158,11 @@ function ActivityGroupView({
             </>
           )}
         </span>
+        {summary.failed > 0 && (
+          <span className={`activity-group-failed${unrecovered === 0 ? ' is-recovered' : ''}`}>
+            {unrecovered > 0 ? `${unrecovered} failed` : `${summary.failed} failed, recovered`}
+          </span>
+        )}
         {summary.editCount > 0 && (
           <>
             <span className="activity-group-edit-stats">
@@ -134,16 +182,10 @@ function ActivityGroupView({
             · ◔{summary.thinking ? ` ${summary.thinking}` : ''} thinking
           </span>
         )}
-        {summary.failed > 0 && (
-          <span className="activity-group-failed">[{summary.failed} failed]</span>
-        )}
         {summary.retries > 0 && (
           <span className="activity-group-retry">
             [{summary.retries} {summary.retries === 1 ? 'retry' : 'retries'}]
           </span>
-        )}
-        {items.length > 0 && (
-          <span className="activity-group-details">{expanded ? 'Hide details' : 'Details'}</span>
         )}
       </button>
       {!expanded && live && activeName && (
@@ -171,13 +213,23 @@ function ActivityGroupView({
       )}
       {expanded && (
         <div className="activity-group-body">
-          {items.map((item) =>
-            item.kind === 'step' ? (
+          {visibleItems.map((item: VisibleGroupItem) => {
+            if (item.kind === 'gap') {
+              return (
+                <GroupGapButton
+                  key={`gap-${item.firstStepId}`}
+                  groupId={firstId}
+                  gap={item}
+                  onReveal={() => refreshGaps((version) => version + 1)}
+                />
+              );
+            }
+            return item.kind === 'step' ? (
               <ActivityRow key={itemKey(item)} step={item.step} streaming={streaming} />
             ) : (
               <ThinkingGroup key={itemKey(item)} steps={item.steps} />
-            ),
-          )}
+            );
+          })}
         </div>
       )}
     </section>

@@ -1,7 +1,10 @@
 import type { AppMessage } from './messageOps';
-import { stepThoughts, type ActivityGroupItem, type Row } from './activityRows';
+import { stepMessages, stepThoughts, type ActivityGroupItem, type Row } from './activityRows';
 import { diffStats } from '../../src/sidebar/diffMessages';
 import { formatDuration } from '../../src/util/formatDuration';
+
+export const LONG_GROUP_AT = 10;
+export const LONG_GROUP_TAIL = 6;
 
 export interface GroupSummary {
   toolCalls: number;
@@ -19,6 +22,141 @@ export interface GroupSummary {
 
 function isFailedAttempt(attempt: AppMessage[] | undefined): boolean {
   return Boolean(attempt?.some((tool) => tool.toolIsError));
+}
+
+function stepId(step: ActivityGroupItem & { kind: 'step' }): string {
+  return stepMessages(step.step)[0]!.id;
+}
+
+function finalTools(step: ActivityGroupItem & { kind: 'step' }): AppMessage[] {
+  return step.step.attempts.at(-1)?.tools ?? [];
+}
+
+function isSuccessfulTool(tool: AppMessage): boolean {
+  return !tool.toolIsError && tool.toolResultTotal !== undefined;
+}
+
+function sameTargetCall(failed: AppMessage, succeeded: AppMessage): boolean {
+  return Boolean(
+    failed.toolName &&
+    failed.toolTarget !== undefined &&
+    failed.toolName === succeeded.toolName &&
+    failed.toolTarget === succeeded.toolTarget,
+  );
+}
+
+/** Step ids whose final-attempt failures a later same-target success recovered. */
+export function recoveredFailures(items: ActivityGroupItem[]): ReadonlySet<string> {
+  const steps = items.filter(
+    (item): item is Extract<ActivityGroupItem, { kind: 'step' }> => item.kind === 'step',
+  );
+  const recovered = new Set<string>();
+
+  for (let index = 0; index < steps.length; index++) {
+    const failedTools = finalTools(steps[index]!).filter((tool) => tool.toolIsError);
+    if (failedTools.length === 0) continue;
+
+    const laterTools = steps.slice(index + 1).flatMap(finalTools);
+    if (
+      failedTools.every((failed) =>
+        laterTools.some((later) => isSuccessfulTool(later) && sameTargetCall(failed, later)),
+      )
+    ) {
+      recovered.add(stepId(steps[index]!));
+    }
+  }
+
+  return recovered;
+}
+
+export interface GroupGap {
+  kind: 'gap';
+  /** The first hidden call keeps the disclosure key stable across remounts. */
+  firstStepId: string;
+  calls: number;
+  leading: boolean;
+}
+
+export type VisibleGroupItem = ActivityGroupItem | GroupGap;
+
+/**
+ * Keeps short groups whole. Long groups retain their tail and every failure
+ * that is still unrecovered; hidden calls collapse into individually revealable
+ * gaps. A thinking run belongs to the next call it led into (or the prior call
+ * when it trails the group), so it folds with that call.
+ */
+export function visibleGroupItems(
+  items: ActivityGroupItem[],
+  recovered: ReadonlySet<string>,
+  revealed: ReadonlySet<string>,
+): VisibleGroupItem[] {
+  const stepIndexes = items.flatMap((item, index) => (item.kind === 'step' ? [index] : []));
+  if (stepIndexes.length <= LONG_GROUP_AT) return items;
+
+  const visibleStepIds = new Set(
+    stepIndexes
+      .slice(-LONG_GROUP_TAIL)
+      .map((index) => stepId(items[index] as Extract<ActivityGroupItem, { kind: 'step' }>)),
+  );
+  for (const index of stepIndexes) {
+    const item = items[index]!;
+    if (item.kind === 'step' && isFailedAttempt(item.step.attempts.at(-1)?.tools)) {
+      const id = stepId(item);
+      if (!recovered.has(id)) visibleStepIds.add(id);
+    }
+  }
+
+  const nextStepId: Array<string | undefined> = new Array(items.length);
+  let nextId: string | undefined;
+  for (let index = items.length - 1; index >= 0; index--) {
+    const item = items[index]!;
+    if (item.kind === 'step') nextId = stepId(item);
+    nextStepId[index] = nextId;
+  }
+  const previousStepId: Array<string | undefined> = new Array(items.length);
+  let previousId: string | undefined;
+  for (let index = 0; index < items.length; index++) {
+    const item = items[index]!;
+    if (item.kind === 'step') previousId = stepId(item);
+    previousStepId[index] = previousId;
+  }
+
+  const itemIsVisible = items.map((item, index) => {
+    const id = item.kind === 'step' ? stepId(item) : (nextStepId[index] ?? previousStepId[index]);
+    return id !== undefined && visibleStepIds.has(id);
+  });
+
+  const output: VisibleGroupItem[] = [];
+  let shownCall = false;
+  for (let index = 0; index < items.length; ) {
+    if (itemIsVisible[index]) {
+      const item = items[index]!;
+      output.push(item);
+      if (item.kind === 'step') shownCall = true;
+      index++;
+      continue;
+    }
+
+    const start = index;
+    let calls = 0;
+    let firstStepId: string | undefined;
+    while (index < items.length && !itemIsVisible[index]) {
+      const hidden = items[index]!;
+      if (hidden.kind === 'step') {
+        calls++;
+        firstStepId ??= stepId(hidden);
+      }
+      index++;
+    }
+
+    if (firstStepId && revealed.has(firstStepId)) {
+      output.push(...items.slice(start, index));
+      if (calls > 0) shownCall = true;
+    } else if (firstStepId) {
+      output.push({ kind: 'gap', firstStepId, calls, leading: !shownCall });
+    }
+  }
+  return output;
 }
 
 function basename(path: string): string {

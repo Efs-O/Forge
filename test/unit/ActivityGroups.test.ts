@@ -1,7 +1,12 @@
 import { describe, expect, it } from 'vitest';
 import { rowKey, type ActivityGroupItem, type ActivityStep, type Row, type StepAttempt } from '../../webview-ui/src/activityRows';
 import type { AppMessage } from '../../webview-ui/src/messageOps';
-import { groupActivity, summarizeGroup } from '../../webview-ui/src/activityGroups';
+import {
+  groupActivity,
+  recoveredFailures,
+  summarizeGroup,
+  visibleGroupItems,
+} from '../../webview-ui/src/activityGroups';
 
 const summarize = (items: ActivityGroupItem[]) => summarizeGroup(items);
 
@@ -180,5 +185,105 @@ describe('summarizeGroup', () => {
     }]);
     expect(untimed).toMatchObject({ hasThinking: true, thinking: '' });
     expect(summarize([{ kind: 'step', step: { attempts: [], diffs: [] } }]).hasThinking).toBe(false);
+  });
+});
+
+describe('recoveredFailures', () => {
+  const failed = (id: string, target: string): ActivityGroupItem => ({
+    kind: 'step',
+    step: {
+      attempts: attempts([
+        message(id, 'tool', 'edit_file', {
+          toolName: 'edit_file',
+          toolTarget: target,
+          toolIsError: true,
+        }),
+      ]),
+      diffs: [],
+    },
+  });
+  const succeeded = (id: string, target: string): ActivityGroupItem => ({
+    kind: 'step',
+    step: {
+      attempts: attempts([
+        message(id, 'tool', 'edit_file', {
+          toolName: 'edit_file',
+          toolTarget: target,
+          toolResultTotal: 1,
+        }),
+      ]),
+      diffs: [],
+    },
+  });
+
+  it('marks a failed step recovered after a later same-target success', () => {
+    const items = [failed('failed-a', 'src/a.ts'), succeeded('success-a', 'src/a.ts')];
+    expect(recoveredFailures(items)).toEqual(new Set(['failed-a']));
+  });
+
+  it('leaves an unrecovered failed step out of the recovered set', () => {
+    expect(recoveredFailures([failed('failed-a', 'src/a.ts')])).toEqual(new Set());
+  });
+
+  it('does not recover a failure with a success on a different target', () => {
+    expect(recoveredFailures([
+      failed('failed-a', 'src/a.ts'),
+      succeeded('success-b', 'src/b.ts'),
+    ])).toEqual(new Set());
+  });
+});
+
+describe('visibleGroupItems', () => {
+  const longGroup = (): ActivityGroupItem[] =>
+    Array.from({ length: 40 }, (_, index) => ({
+      kind: 'step' as const,
+      step: {
+        attempts: attempts([
+          message(`call-${index}`, 'tool', 'call', {
+            toolName: 'read_file',
+            toolTarget: `src/${index}.ts`,
+            toolResultTotal: index === 20 ? undefined : 1,
+            ...(index === 20 ? { toolIsError: true } : {}),
+          }),
+        ]),
+        diffs: [],
+      },
+    }));
+
+  it('keeps the last six calls and pins an unrecovered failure between two gaps', () => {
+    const items = longGroup();
+    const visible = visibleGroupItems(items, recoveredFailures(items), new Set());
+    expect(visible.filter((item) => item.kind === 'step').map((item) =>
+      item.kind === 'step' ? item.step.attempts[0]!.tools[0]!.id : '',
+    )).toEqual(['call-20', 'call-34', 'call-35', 'call-36', 'call-37', 'call-38', 'call-39']);
+    expect(visible.filter((item) => item.kind === 'gap')).toEqual([
+      { kind: 'gap', firstStepId: 'call-0', calls: 20, leading: true },
+      { kind: 'gap', firstStepId: 'call-21', calls: 13, leading: false },
+    ]);
+  });
+
+  it('reveals only the selected gap and leaves groups of ten calls whole', () => {
+    const items = longGroup();
+    const [firstGap] = visibleGroupItems(items, recoveredFailures(items), new Set())
+      .filter((item) => item.kind === 'gap');
+    if (!firstGap || firstGap.kind !== 'gap') throw new Error('expected leading gap');
+    const revealed = visibleGroupItems(items, recoveredFailures(items), new Set([firstGap.firstStepId]));
+    expect(revealed.filter((item) => item.kind === 'step')).toHaveLength(27);
+    expect(revealed.filter((item) => item.kind === 'gap')).toEqual([
+      { kind: 'gap', firstStepId: 'call-21', calls: 13, leading: false },
+    ]);
+
+    const short = items.slice(0, 10);
+    expect(visibleGroupItems(short, recoveredFailures(short), new Set())).toEqual(short);
+  });
+
+  it('folds thinking between hidden calls with those calls', () => {
+    const items = longGroup();
+    items.splice(1, 0, {
+      kind: 'thinkingGroup',
+      steps: [message('hidden-thought', 'assistant', '', { reasoning: 'thinking' })],
+    });
+    const visible = visibleGroupItems(items, recoveredFailures(items), new Set());
+    expect(visible.some((item) => item.kind === 'thinkingGroup')).toBe(false);
   });
 });

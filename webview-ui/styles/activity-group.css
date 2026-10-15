@@ -42,18 +42,37 @@
 .activity-group-failed {
   color: var(--forge-tool-bad);
 }
+.activity-group-failed {
+  flex: 0 0 auto;
+  white-space: nowrap;
+}
+.activity-group-failed.is-recovered {
+  color: var(--vscode-editorWarning-foreground, #cca700);
+}
 
 .activity-group-label { flex: 0 0 auto; white-space: nowrap; }
 .activity-group-count { color: var(--vscode-descriptionForeground); }
 .activity-group-word { color: var(--vscode-foreground); }
-.activity-group-details {
-  flex: 0 0 auto;
-  margin-left: auto;
+.activity-group-failed + .activity-group-edit-stats {
+  margin-left: 2px;
+}
+.activity-group-gap {
+  display: block;
+  max-width: 100%;
+  margin: 5px 0 7px;
+  padding: 2px 7px;
+  border: 1px dashed var(--vscode-panel-border, #333);
+  border-radius: var(--forge-radius-sm);
+  background: transparent;
   color: var(--vscode-descriptionForeground);
   font-family: var(--vscode-font-family, sans-serif);
   font-size: var(--vscode-font-size, 13px);
-  font-weight: 500;
-  white-space: nowrap;
+  cursor: pointer;
+  text-align: left;
+}
+.activity-group-gap:hover {
+  color: var(--vscode-foreground);
+  background: var(--vscode-list-hoverBackground, #2a2d2e);
 }
 
 .activity-group-retry {

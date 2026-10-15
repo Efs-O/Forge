@@ -85,7 +85,7 @@ function toggle(): void {
 }
 
 describe('ActivityGroup', () => {
-  it('reveals individual calls directly when Details is opened', () => {
+  it('reveals individual calls directly when the group is opened', () => {
     const shell = (id: string, command: string): ActivityGroupItem => ({
       kind: 'step',
       step: {
@@ -166,8 +166,107 @@ describe('ActivityGroup', () => {
     expect(container.querySelector('.activity-group-toggle')?.getAttribute('aria-expanded')).toBe(
       'false',
     );
-    expect(container.querySelector('.activity-group-failed')?.textContent).toBe('[1 failed]');
+    expect(container.querySelector('.activity-group-failed')?.textContent).toBe('1 failed');
     expect(container.querySelector('.activity-group-status')?.textContent).toBe('✕');
+  });
+
+  it('shows recovered failures in amber after the count with a successful status', () => {
+    const items: ActivityGroupItem[] = [
+      {
+        kind: 'step',
+        step: {
+          attempts: [{
+            thoughts: [],
+            tools: [tool('failed-call', {
+              toolName: 'edit_file',
+              toolTarget: 'src/a.ts',
+              toolIsError: true,
+            })],
+          }],
+          diffs: [],
+        },
+      },
+      {
+        kind: 'step',
+        step: {
+          attempts: [{
+            thoughts: [],
+            tools: [tool('successful-retry', {
+              toolName: 'edit_file',
+              toolTarget: 'src/a.ts',
+            })],
+          }],
+          diffs: [],
+        },
+      },
+    ];
+    render(items, false, false);
+    expect(container.querySelector('.activity-group-status')?.textContent).toBe('✓');
+    const failed = container.querySelector('.activity-group-failed')!;
+    expect(failed.textContent).toBe('1 failed, recovered');
+    expect(failed.classList.contains('is-recovered')).toBe(true);
+    expect(container.querySelector('.activity-group-label')?.nextElementSibling).toBe(failed);
+    expect(container.querySelector('.activity-group-toggle')?.textContent).not.toContain('Details');
+  });
+
+  it('opens a 40-call group with its six-call tail and one earlier-calls gap', () => {
+    const items: ActivityGroupItem[] = Array.from({ length: 40 }, (_, index) => ({
+      kind: 'step',
+      step: {
+        attempts: [{
+          thoughts: [],
+          tools: [tool(`tail-call-${index}`, {
+            toolName: 'read_file',
+            toolTarget: `src/${index}.ts`,
+          })],
+        }],
+        diffs: [],
+      },
+    }));
+    render(items, false, false);
+    toggle();
+    expect(container.querySelectorAll('.activity-group-body > .activity-row')).toHaveLength(6);
+    expect(container.querySelector('.activity-group-gap')?.textContent).toBe(
+      '▴ Show 34 earlier calls',
+    );
+  });
+
+  it('keeps only the tail and unrecovered failures, and remembers a gap reveal on remount', () => {
+    const items: ActivityGroupItem[] = Array.from({ length: 40 }, (_, index) => ({
+      kind: 'step',
+      step: {
+        attempts: [{
+          thoughts: [],
+          tools: [tool(`call-${index}`, {
+            toolName: 'read_file',
+            toolTarget: `src/${index}.ts`,
+            toolResultTotal: index === 20 ? undefined : 1,
+            ...(index === 20 ? { toolIsError: true } : {}),
+          })],
+        }],
+        diffs: [],
+      },
+    }));
+    render(items, false, false);
+    toggle();
+    expect(container.querySelectorAll('.activity-group-body > .activity-row')).toHaveLength(7);
+    const gaps = container.querySelectorAll<HTMLButtonElement>('.activity-group-gap');
+    expect(gaps).toHaveLength(2);
+    expect(gaps[0]?.textContent).toBe('▴ Show 20 earlier calls');
+    expect(gaps[1]?.textContent).toBe('⋯ Show 13 more calls');
+
+    act(() => gaps[0]!.click());
+    expect(container.querySelectorAll('.activity-group-body > .activity-row')).toHaveLength(27);
+    expect(container.querySelectorAll('.activity-group-gap')).toHaveLength(1);
+
+    act(() => root.unmount());
+    root = createRoot(container);
+    render(items, false, false);
+    expect(container.querySelectorAll('.activity-group-body > .activity-row')).toHaveLength(27);
+    expect(container.querySelectorAll('.activity-group-gap')).toHaveLength(1);
+    act(() => container.querySelector<HTMLButtonElement>('.activity-group-gap')!.click());
+    expect(container.querySelectorAll('.activity-group-body > .activity-row')).toHaveLength(40);
+    expect(container.querySelectorAll('.activity-group-gap')).toHaveLength(0);
   });
 
   it('shows one concise pending call below a closed group', () => {
