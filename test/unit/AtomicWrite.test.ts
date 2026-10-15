@@ -1,10 +1,11 @@
 import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
-import { afterEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi, type Mock } from 'vitest';
 import {
   RENAME_BUDGET_MS,
   renameContendedSync,
+  setRenameContentionListener,
   writeFileAtomicSync,
 } from '../../src/util/atomicWrite';
 
@@ -64,6 +65,15 @@ describe('writeFileAtomicSync', () => {
 });
 
 describe('renameContendedSync', () => {
+  let warn: Mock<(message: string) => void>;
+  beforeEach(() => {
+    warn = vi.fn<(message: string) => void>();
+    setRenameContentionListener(warn);
+  });
+  afterEach(() => {
+    setRenameContentionListener(undefined);
+  });
+
   it('retries a transient EPERM and then succeeds', () => {
     const root = fs.mkdtempSync(path.join(os.tmpdir(), 'forge-atomic-'));
     roots.push(root);
@@ -80,6 +90,22 @@ describe('renameContendedSync', () => {
 
     expect(attempts).toBe(3);
     expect(fs.readFileSync(target, 'utf8')).toBe('new content');
+    expect(warn).toHaveBeenCalledTimes(1);
+    expect(warn.mock.calls[0]![0]).toMatch(
+      /was blocked for \d+ ms \(2 retries\) before it succeeded/,
+    );
+  });
+
+  it('logs nothing when the first rename succeeds', () => {
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), 'forge-atomic-'));
+    roots.push(root);
+    const temporary = path.join(root, 'tmp');
+    const target = path.join(root, 'target');
+    fs.writeFileSync(temporary, 'new content');
+
+    renameContendedSync(temporary, target);
+
+    expect(warn).not.toHaveBeenCalled();
   });
 
   it('surfaces a non-contended rename error immediately (no retry)', () => {
@@ -116,15 +142,24 @@ describe('renameContendedSync', () => {
       throw errno('EPERM', 'rename: operation not permitted');
     };
 
-    expect(() => renameContendedSync(temporary, target, always, () => now, (ms) => {
-      sleeps.push(ms);
-      now += ms;
-    })).toThrow(
-      /operation not permitted/,
-    );
+    expect(() =>
+      renameContendedSync(
+        temporary,
+        target,
+        always,
+        () => now,
+        (ms) => {
+          sleeps.push(ms);
+          now += ms;
+        },
+      ),
+    ).toThrow(/operation not permitted/);
     expect(now).toBe(RENAME_BUDGET_MS);
     expect(attempts).toBe(sleeps.length + 1);
     expect(attempts).toBeGreaterThan(6);
     expect(Math.max(...sleeps)).toBeLessThanOrEqual(250);
+    expect(warn).toHaveBeenCalledTimes(1);
+    expect(warn.mock.calls[0]![0]).toContain(`still blocked after ${RENAME_BUDGET_MS} ms`);
+    expect(warn.mock.calls[0]![0]).toMatch(/\(\d+ retries\); giving up$/);
   });
 });

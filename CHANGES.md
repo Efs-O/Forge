@@ -1,5 +1,9 @@
 # Forge — Recent Changes
 
+## 0.17.36
+
+- The Forge Output log warns when another process (a virus scanner, a backup tool) held a chat file open while Forge saved it: `[atomicWrite] rename onto <file> was blocked for N ms (K retries) before it succeeded`, or `... still blocked after N ms (K retries); giving up` when the 2.5 s retry budget ran out and the chat stayed in saved state for that save. A save that succeeds first time logs nothing.
+
 ## 0.17.35
 
 - Leaving a chat moves it to history: starting a new chat, clicking another open chat or opening one from history moves the idle chat you left into Recent history. A chat that is running, waiting for an approval or answer, has queued messages, or is bound to a remote chat stays open. An empty chat is dropped. Each start also moves idle open chats other than the current one, so the Open section holds what is in use. Nothing is deleted; history past 40 chats still goes to Archived sessions.

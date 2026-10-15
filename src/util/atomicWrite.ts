@@ -49,6 +49,20 @@ const RENAME_BASE_BACKOFF_MS = 25;
 const RENAME_MAX_BACKOFF_MS = 250;
 
 /**
+ * Told when a rename had to wait for another process. This module stays free
+ * of `vscode`, so the extension wires the listener to its log at activation.
+ * The Output log then shows whether contention stalls the host in practice,
+ * which decides whether an async write is worth it.
+ */
+let contentionListener: ((message: string) => void) | undefined;
+
+export function setRenameContentionListener(
+  listener: ((message: string) => void) | undefined,
+): void {
+  contentionListener = listener;
+}
+
+/**
  * Synchronous sleep. `writeFileAtomicSync` is sync, so a Promise/setTimeout
  * backoff is unavailable; `Atomics.wait` blocks the current thread for the
  * given milliseconds without spinning.
@@ -79,12 +93,21 @@ export function renameContendedSync(
   while (true) {
     try {
       rename(temporary, target);
+      if (attempt > 0)
+        contentionListener?.(
+          `[atomicWrite] rename onto ${target} was blocked for ${now() - startedAt} ms (${attempt} retries) before it succeeded`,
+        );
       return;
     } catch (error) {
       lastError = error;
       if (!CONTENDED.has((error as NodeJS.ErrnoException).code ?? '')) throw error;
       const elapsed = now() - startedAt;
-      if (elapsed >= RENAME_BUDGET_MS) break;
+      if (elapsed >= RENAME_BUDGET_MS) {
+        contentionListener?.(
+          `[atomicWrite] rename onto ${target} still blocked after ${elapsed} ms (${attempt} retries); giving up`,
+        );
+        break;
+      }
       const delay = Math.min(
         RENAME_MAX_BACKOFF_MS,
         RENAME_BASE_BACKOFF_MS * 2 ** attempt,

@@ -23,6 +23,7 @@ import { bootstrapWorkspace } from './vscode/workspaceBootstrap';
 import { registerIndexWatchers } from './vscode/indexWatchers';
 import type { ForgeConfig } from './config/types';
 import { initLogger, getLogger } from './util/logger';
+import { setRenameContentionListener } from './util/atomicWrite';
 import { ToolRegistry } from './tools/ToolRegistry';
 import { createCheckpointStack } from './vscode/checkpointSetup';
 import { watchForgeConfig } from './vscode/configReload';
@@ -77,6 +78,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
   initLogger(context);
   const log = getLogger();
   log.info('Forge activating');
+  setRenameContentionListener((message) => log.warn(message));
   try {
     await backgroundRegistry.reap();
   } catch (error) {
