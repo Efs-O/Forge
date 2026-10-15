@@ -304,6 +304,7 @@ function ActivityRowView({ step }: ActivityRowProps): React.ReactElement | null 
             <React.Fragment key={`output-${message.id}`}>
               <ToolResultContent
                 message={message}
+                folded
                 {...(commandVisible && message.id === primary.id && command ? { command } : {})}
               />
               <ToolRowThumbnails message={message} />

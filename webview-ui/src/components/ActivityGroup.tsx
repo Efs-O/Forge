@@ -83,7 +83,12 @@ function ActivityGroupView({
   const summary = summarizeGroup(items);
   const recovered = recoveredFailures(items);
   const unrecovered = Math.max(0, summary.failed - recovered.size);
-  const initialItems = visibleGroupItems(items, recovered, new Set());
+  const opened = new Set(
+    items.flatMap((item) =>
+      item.kind === 'step' && stepRevealed(item.step) ? [stepMessages(item.step)[0]!.id] : [],
+    ),
+  );
+  const initialItems = visibleGroupItems(items, recovered, new Set(), opened);
   const revealed = new Set(
     initialItems.flatMap((item) =>
       item.kind === 'gap' && readDisclosure('gap', `${firstId}:${item.firstStepId}`) === true
@@ -91,7 +96,7 @@ function ActivityGroupView({
         : [],
     ),
   );
-  const visibleItems = visibleGroupItems(items, recovered, revealed);
+  const visibleItems = visibleGroupItems(items, recovered, revealed, opened);
   const imageCount = groupImages(items).length;
   // An opened step, or an opened reasoning bubble that folded into this group
   // (inside a step or as a reasoning run), keeps the group open on remount.

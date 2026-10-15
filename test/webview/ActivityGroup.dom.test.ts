@@ -395,7 +395,7 @@ describe('ActivityGroup', () => {
     expect(container.querySelector('.activity-group-edits')?.textContent).toBe('to server.py');
   });
 
-  it('opens the full result with one call click after opening the group', () => {
+  it('opens the command with the call click and the output with its own click', () => {
     const command = 'cd /workspace && grep -n max_context serve/server.py';
     const items: ActivityGroupItem[] = [
       {
@@ -430,6 +430,8 @@ describe('ActivityGroup', () => {
     });
     act(() => container.querySelector<HTMLElement>('.activity-row-header')!.click());
     expect(container.querySelector('.tool-row-command code')?.textContent).toBe(command);
+    expect(container.querySelector('.tool-row-verbatim')).toBeNull();
+    act(() => container.querySelector<HTMLElement>('.tool-row-output-toggle')!.click());
     expect(container.querySelector('.tool-row-verbatim')?.textContent).toBe('match at line 42');
     expect(container.querySelector('.tool-row-toggle')).toBeNull();
   });

@@ -277,6 +277,19 @@ describe('visibleGroupItems', () => {
     expect(visibleGroupItems(short, recoveredFailures(short), new Set())).toEqual(short);
   });
 
+  it('keeps a step the reader opened visible after later calls push it out of the tail', () => {
+    const items = longGroup();
+    const visible = visibleGroupItems(items, recoveredFailures(items), new Set(), new Set(['call-5']));
+    expect(visible.filter((item) => item.kind === 'step').map((item) =>
+      item.kind === 'step' ? item.step.attempts[0]!.tools[0]!.id : '',
+    )).toEqual(['call-5', 'call-20', 'call-34', 'call-35', 'call-36', 'call-37', 'call-38', 'call-39']);
+    expect(visible.filter((item) => item.kind === 'gap')).toEqual([
+      { kind: 'gap', firstStepId: 'call-0', calls: 5, leading: true },
+      { kind: 'gap', firstStepId: 'call-6', calls: 14, leading: false },
+      { kind: 'gap', firstStepId: 'call-21', calls: 13, leading: false },
+    ]);
+  });
+
   it('folds thinking between hidden calls with those calls', () => {
     const items = longGroup();
     items.splice(1, 0, {

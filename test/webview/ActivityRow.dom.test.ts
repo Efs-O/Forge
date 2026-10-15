@@ -67,7 +67,7 @@ function toggle(): void {
 }
 
 describe('ActivityRow', () => {
-  it('renders one call row and reveals its short result only when opened', () => {
+  it('renders one call row and folds its result behind its own Output toggle', () => {
     render(step());
     expect(container.querySelector('.activity-row-body')).toBeNull();
     expect(container.querySelector('.activity-row-header')?.getAttribute('role')).toBe('button');
@@ -78,8 +78,14 @@ describe('ActivityRow', () => {
 
     toggle();
     expect(container.querySelector('.activity-row-body')).not.toBeNull();
-    expect(container.querySelector('.tool-row-output-label')?.textContent).toBe('Output');
-    expect(container.textContent).toContain('ok');
+    const output = container.querySelector<HTMLElement>('.tool-row-output-toggle')!;
+    expect(output.textContent).toBe('▸ Output · 2 chars');
+    expect(output.getAttribute('aria-expanded')).toBe('false');
+    expect(container.querySelector('.tool-row-output-body')).toBeNull();
+
+    act(() => output.click());
+    expect(output.getAttribute('aria-expanded')).toBe('true');
+    expect(container.querySelector('.tool-row-output-body')?.textContent).toContain('ok');
     expect(container.querySelectorAll('.tool-row-name')).toHaveLength(0);
   });
 
@@ -184,7 +190,7 @@ describe('ActivityRow', () => {
       .toEqual(['run_terminal', 'run_terminal']);
     expect(container.querySelectorAll('.activity-row-attempt')).toHaveLength(2);
     expect(container.querySelector('.activity-row-attempt-error')?.textContent).toBe('Error: first');
-    expect(container.querySelector('.tool-row-output')?.textContent).toContain('ok');
+    expect(container.querySelector('.tool-row-output')?.textContent).toContain('Output');
   });
 
   it('renders one named compact line per parallel call', () => {
@@ -232,6 +238,8 @@ describe('ActivityRow', () => {
     expect(container.textContent?.match(/2 edits/gu)).toHaveLength(1);
     expect(container.textContent).not.toContain('Replaced in src/a.ts');
     toggle();
+    expect(container.textContent).not.toContain('Replaced in src/a.ts');
+    act(() => container.querySelector<HTMLElement>('.tool-row-output-toggle')!.click());
     expect(container.textContent).toContain('Replaced in src/a.ts');
   });
 

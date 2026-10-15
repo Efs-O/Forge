@@ -128,6 +128,22 @@
   border-bottom: 1px solid var(--vscode-panel-border, #333);
 }
 .activity-row-body .tool-row-output { margin: 2px 0 6px; }
+/* An opened step names its output and size; the text waits for its own click. */
+.tool-row-output-toggle {
+  display: block;
+  padding: 0;
+  border: 0;
+  background: none;
+  font-family: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+.tool-row-output-toggle:hover { color: var(--vscode-foreground); }
+/* An opened output scrolls instead of pushing the chat down by its length. */
+.tool-row-output.is-folded .tool-row-output-body {
+  max-height: 20em;
+  overflow-y: auto;
+}
 
 .activity-row-attempts {
   margin: 2px 0 5px;

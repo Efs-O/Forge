@@ -167,6 +167,7 @@ export function mergeSyncedMessages(
   // matching below compares full message bodies, so skipping it is worth the
   // early return rather than letting it fall out of the loop below.
   if (local.length === 0) return reconstructed;
+  local = local.flatMap(splitThoughtAndAnswer);
 
   // Match the local renderable rows to the authoritative host rows in order.
   // The host can omit an assistant tool-call turn (content: null), so this is
@@ -246,6 +247,28 @@ export function mergeSyncedMessages(
     message,
     ...(after.get(index) ?? []),
   ]);
+}
+
+/**
+ * A live assistant row can hold reasoning and answer text together (reasoning
+ * that streamed after the text began). The host projection stores that turn as
+ * two rows, thought then answer, so match against the same shape: the thought
+ * keeps the live id - the key every opened bubble, step and group remembers -
+ * and the answer takes a derived one. Unsplit, neither half matched, both took
+ * fresh ids, and everything the reader had open collapsed at turn end.
+ */
+function splitThoughtAndAnswer(message: AppMessage): AppMessage[] {
+  if (message.role !== 'assistant' || !message.reasoning || !message.content) return [message];
+  const { reasoning, reasoningMs, reasoningStartedAt, ...answer } = message;
+  const thought: AppMessage = {
+    id: message.id,
+    role: 'assistant',
+    content: '',
+    reasoning,
+    ...(reasoningMs !== undefined ? { reasoningMs } : {}),
+    ...(reasoningStartedAt !== undefined ? { reasoningStartedAt } : {}),
+  };
+  return [thought, { ...answer, id: `${message.id}-answer` }];
 }
 
 function sameRenderableMessage(local: AppMessage, host: AppMessage): boolean {

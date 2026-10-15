@@ -80,8 +80,10 @@ export interface GroupGap {
 export type VisibleGroupItem = ActivityGroupItem | GroupGap;
 
 /**
- * Keeps short groups whole. Long groups retain their tail and every failure
- * that is still unrecovered; hidden calls collapse into individually revealable
+ * Keeps short groups whole. Long groups retain their tail, every failure
+ * that is still unrecovered, and every step the reader opened (`opened`, by
+ * step id) - a step the reader is looking at must not slide into a gap as
+ * later calls arrive. Hidden calls collapse into individually revealable
  * gaps. A thinking run belongs to the next call it led into (or the prior call
  * when it trails the group), so it folds with that call.
  */
@@ -89,6 +91,7 @@ export function visibleGroupItems(
   items: ActivityGroupItem[],
   recovered: ReadonlySet<string>,
   revealed: ReadonlySet<string>,
+  opened: ReadonlySet<string> = new Set(),
 ): VisibleGroupItem[] {
   const stepIndexes = items.flatMap((item, index) => (item.kind === 'step' ? [index] : []));
   if (stepIndexes.length <= LONG_GROUP_AT) return items;
@@ -100,6 +103,7 @@ export function visibleGroupItems(
   );
   for (const index of stepIndexes) {
     const item = items[index]!;
+    if (item.kind === 'step' && opened.has(stepId(item))) visibleStepIds.add(stepId(item));
     if (item.kind === 'step' && isFailedAttempt(item.step.attempts.at(-1)?.tools)) {
       const id = stepId(item);
       if (!recovered.has(id)) visibleStepIds.add(id);

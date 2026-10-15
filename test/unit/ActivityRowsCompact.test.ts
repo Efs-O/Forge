@@ -186,4 +186,26 @@ describe('compact activity rows', () => {
     const after = steps(toCompactRows(mergeSyncedMessages(local, persisted))).map(rowKey);
     expect(after).toEqual(before);
   });
+
+  it('keeps a live thought-plus-answer row id when the host stores it as two rows', () => {
+    const local = [
+      msg('user', 'user', 'go'),
+      msg('both', 'assistant', 'Let me look.', { reasoning: 'think', reasoningMs: 900 }),
+      tool('read', 'read_file', 'a.ts', { toolCallId: 'call-a', toolResult: 'x', toolResultTotal: 1 }),
+    ];
+    const persisted: PersistedRow[] = [
+      { role: 'user', content: 'go' },
+      { role: 'assistant', content: '', reasoning: 'think', reasoningMs: 900 },
+      { role: 'assistant', content: 'Let me look.' },
+      {
+        role: 'tool', content: 'read_file → a.ts', toolName: 'read_file', toolCallId: 'call-a',
+        toolTarget: 'a.ts', toolResult: 'x', toolResultTotal: 1,
+      },
+    ];
+    const merged = mergeSyncedMessages(local, persisted);
+    expect(merged.map((message) => message.id)).toEqual(['user', 'both', 'both-answer', 'read']);
+    expect(merged[1]).toMatchObject({ content: '', reasoning: 'think', reasoningMs: 900 });
+    expect(merged[2]).toMatchObject({ content: 'Let me look.' });
+    expect(merged[2]!.reasoning).toBeUndefined();
+  });
 });

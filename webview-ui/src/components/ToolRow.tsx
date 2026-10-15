@@ -32,16 +32,28 @@ function formatSize(chars: number): string {
 /** Below this a result is compact enough that a size label adds little. */
 const EXPANDABLE_MIN_CHARS = 100;
 
-/** Renders a call's result without adding another call row around it. */
+/**
+ * Renders a call's result without adding another call row around it.
+ * `folded`: the result sits behind its own `Output` toggle, closed until the
+ * reader opens it - an opened step (or reasoning that folded into one) shows
+ * the call, not every byte it returned.
+ */
 export function ToolResultContent({
   message,
   command,
+  folded = false,
 }: {
   message: AppMessage;
   command?: string;
+  folded?: boolean;
 }): React.ReactElement {
+  const [choice, setChoice] = useDisclosure('output', message.id);
   const result = message.toolResult ?? '';
-  const body = useMemo(() => normalizeMarkdownForRender(foldConsecutiveLines(result)), [result]);
+  const showBody = !folded || choice === true;
+  const body = useMemo(
+    () => (showBody ? normalizeMarkdownForRender(foldConsecutiveLines(result)) : ''),
+    [result, showBody],
+  );
   const asMarkdown = rendersAsMarkdown(message.toolName ?? '');
 
   return (
@@ -53,12 +65,27 @@ export function ToolResultContent({
         </div>
       )}
       {result && (
-        <div className="tool-row-output">
-          <div className="tool-row-output-label">Output</div>
-          {asMarkdown ? (
-            <Markdown remarkPlugins={[remarkGfm]}>{body}</Markdown>
+        <div className={`tool-row-output${folded ? ' is-folded' : ''}`}>
+          {folded ? (
+            <button
+              className="tool-row-output-label tool-row-output-toggle"
+              type="button"
+              aria-expanded={showBody}
+              onClick={() => setChoice(!showBody)}
+            >
+              {showBody ? '▾' : '▸'} Output · {formatSize(message.toolResultTotal ?? result.length)}
+            </button>
           ) : (
-            <pre className="tool-row-verbatim">{body}</pre>
+            <div className="tool-row-output-label">Output</div>
+          )}
+          {showBody && (
+            <div className="tool-row-output-body">
+              {asMarkdown ? (
+                <Markdown remarkPlugins={[remarkGfm]}>{body}</Markdown>
+              ) : (
+                <pre className="tool-row-verbatim">{body}</pre>
+              )}
+            </div>
           )}
         </div>
       )}
