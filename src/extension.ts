@@ -327,6 +327,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
     sidebarProvider,
     jobStore: jobsStore,
   });
+  sidebarProvider.sweepIdleConversations();
   activeRemoteRuntime = remoteRuntime;
   const sessionTimeBar = new SessionTimeStatusBar((followed) =>
     sidebarProvider.getSessionMetrics(followed),

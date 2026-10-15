@@ -206,6 +206,10 @@ describe('chat agent link ownership', () => {
       },
       failureTracker: { reset: vi.fn() },
       refreshUi: vi.fn(),
+      isConversationEvictable: () => true,
+      evictionBlockers: () => [],
+      agentLoop: { stopStreamingIfNeeded: vi.fn(), disposeConversation: vi.fn() },
+      post: vi.fn(),
     } as unknown as ConversationTabsDeps);
 
     tabs.clearActive();

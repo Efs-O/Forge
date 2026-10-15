@@ -277,6 +277,8 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
     return this.hostFacade;
   }
 
+  sweepIdleConversations = (): void => this.tabs.sweepIdleConversations();
+
   clearChat(): void {
     this.tabs.clearActive();
   }

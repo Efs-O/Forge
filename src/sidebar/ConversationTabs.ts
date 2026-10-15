@@ -106,11 +106,22 @@ export class ConversationTabs {
   }
 
   create(options: { activate?: boolean } = {}): ConversationRuntime | undefined {
+    const leavingId = this.deps.getSidebar().activeConversationId;
+    let leftActiveBeforeCreate = false;
     // Pin the current selection onto the new tab. Left unpinned it tracked the
     // global default, so switching to another tab and back silently re-pointed
     // this one at that tab's model.
     let sidebar = this.deps.getSidebar();
     let result = opNewConversation(sidebar, this.deps.getConfig().active_model, options);
+    if (result.atCap && options.activate !== false && leavingId) {
+      const left = this.leaveActiveConversation(sidebar, leavingId);
+      if (left !== sidebar) {
+        sidebar = left;
+        this.deps.setSidebar(sidebar);
+        leftActiveBeforeCreate = true;
+        result = opNewConversation(sidebar, this.deps.getConfig().active_model, options);
+      }
+    }
     if (result.atCap) {
       // Archive first, then persist the updated open set. Load-time dedupe in
       // sessionPersistence keeps the open copy if a crash splits those writes.
@@ -129,8 +140,12 @@ export class ConversationTabs {
       void vscode.window.showWarningMessage(chatCapMessage(this.capBlockers()));
       return undefined;
     }
-    this.deps.setSidebar(result.sidebar);
-    const created = result.sidebar.conversations.find((conv) => conv.id === result.newId);
+    const nextSidebar =
+      options.activate === false || leftActiveBeforeCreate
+        ? result.sidebar
+        : this.leaveActiveConversation(result.sidebar, leavingId);
+    this.deps.setSidebar(nextSidebar);
+    const created = nextSidebar.conversations.find((conv) => conv.id === result.newId);
     if (options.activate === false) {
       this.deps.persistSession();
       this.deps.postSessionSync();
@@ -184,15 +199,20 @@ export class ConversationTabs {
   }
 
   switch(id: string): void {
-    const result = opSwitchConversation(this.deps.getSidebar(), id);
+    const sidebar = this.deps.getSidebar();
+    const leavingId = sidebar.activeConversationId;
+    const result = opSwitchConversation(sidebar, id);
     if (!result) return;
-    this.deps.setSidebar(result.sidebar);
+    const nextSidebar =
+      id === leavingId ? result.sidebar : this.leaveActiveConversation(result.sidebar, leavingId);
+    const archived = nextSidebar !== result.sidebar;
+    this.deps.setSidebar(nextSidebar);
     if (result.activeModelOverride) this.deps.setActiveModel(result.activeModelOverride);
     // No failure-tracker reset: a streak belongs to its conversation and
     // survives a switch away and back.
-    // A switch moves the active id and nothing else: no transcript, title,
-    // counter or pin changes here, so there is nothing for a full save to write.
-    this.deps.refreshUi({ pointerOnly: true });
+    // Without an archive, a switch changes only the active id and can use the
+    // pointer-only save. Archiving also changes the open set and history.
+    this.deps.refreshUi(archived ? undefined : { pointerOnly: true });
     this.deps.events.onConversationSwitched?.(this.deps.getConfig().active_model ?? null);
   }
 
@@ -240,6 +260,28 @@ export class ConversationTabs {
         message: `Could not fully clean up archived chat: ${detail}`,
       });
     });
+  }
+
+  /** Sweep eligible background chats once the restored session and gates are ready. */
+  sweepIdleConversations(): void {
+    const initial = this.deps.getSidebar();
+    let updated = initial;
+    for (const conversation of initial.conversations) {
+      if (conversation.id === initial.activeConversationId) continue;
+      updated = this.leaveActiveConversation(updated, conversation.id);
+    }
+    if (updated === initial) return;
+    this.deps.setSidebar(updated);
+    this.deps.refreshUi();
+  }
+
+  /** Apply the shared eviction gate and existing close/archive path to one chat. */
+  private leaveActiveConversation(sidebar: SidebarRuntime, id: string): SidebarRuntime {
+    if (!this.deps.isConversationEvictable(id)) return sidebar;
+    const closed = opCloseConversation(sidebar, id);
+    if (!closed) return sidebar;
+    this.disposeEvictedConversation(id);
+    return closed.sidebar;
   }
   async deleteConversation(id: string): Promise<void> {
     let sidebar = this.deps.getSidebar();
@@ -358,12 +400,23 @@ export class ConversationTabs {
 
   restore(id: string, options: { activate?: boolean } = {}): ConversationRuntime | undefined {
     let sidebar = this.deps.getSidebar();
+    const leavingId = sidebar.activeConversationId;
+    let leftActiveBeforeRestore = false;
     if (!sidebar.history.some((item) => item.id === id)) {
       const stored = this.deps.archivedSessions?.read(id);
       if (stored)
         sidebar = { ...sidebar, history: [...sidebar.history, persistedToRuntime(stored)] };
     }
     let result = opRestoreConversation(sidebar, id, options);
+    if ('atCap' in result && result.atCap && options.activate !== false && leavingId !== id) {
+      const left = this.leaveActiveConversation(sidebar, leavingId);
+      if (left !== sidebar) {
+        sidebar = left;
+        this.deps.setSidebar(sidebar);
+        leftActiveBeforeRestore = true;
+        result = opRestoreConversation(sidebar, id, options);
+      }
+    }
     if ('atCap' in result && result.atCap) {
       const archived = this.archiveLeastRecent(sidebar, options);
       if (archived) {
@@ -382,12 +435,16 @@ export class ConversationTabs {
     }
     if ('notFound' in result) return undefined;
     if (!('ok' in result)) return undefined;
-    const restored = result.sidebar.conversations.find((conv) => conv.id === id);
+    const nextSidebar =
+      options.activate === false || leftActiveBeforeRestore || leavingId === id
+        ? result.sidebar
+        : this.leaveActiveConversation(result.sidebar, leavingId);
+    const restored = nextSidebar.conversations.find((conv) => conv.id === id);
     if (restored?.compaction && this.deps.liveMemoryKeys) {
       const retained = retainLiveMemoryKeys(restored.compaction, this.deps.liveMemoryKeys());
       if (retained) restored.compaction = retained;
     }
-    this.deps.setSidebar(result.sidebar);
+    this.deps.setSidebar(nextSidebar);
     if (options.activate === false) {
       this.deps.persistSession();
       this.deps.postSessionSync();
@@ -397,7 +454,7 @@ export class ConversationTabs {
     }
     this.revivePendingCheckpoint(id);
     this.deps.archivedSessions?.delete(id);
-    return result.sidebar.conversations.find((conv) => conv.id === id);
+    return nextSidebar.conversations.find((conv) => conv.id === id);
   }
 
   /**
