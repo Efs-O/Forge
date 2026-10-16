@@ -25,6 +25,7 @@ function render(
         messages,
         queuedPrompts: [],
         onCancelQueuedPrompt: () => undefined,
+        onSendQueuedPromptNow: () => undefined,
         streaming: true,
         conversationId: 'chat-1',
         active,

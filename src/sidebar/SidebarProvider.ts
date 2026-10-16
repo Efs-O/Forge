@@ -193,7 +193,7 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
       questions,
       notifications,
       workspaceState,
-      interrupt: (conversationId) => this.interruptForSteering(conversationId),
+      interrupt: (conversationId) => this.promptRouter.interruptForSteering(conversationId),
       unloadModels: () => this.unloadModels(),
       restartModel: (modelName) => this.restartModel(modelName),
       ...agentLinkFacadeDeps(
@@ -420,11 +420,6 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
     this.budget.publish(this.getActive());
   }
 
-  private async interruptForSteering(conversationId: string): Promise<void> {
-    this.requestChains.markCancelling(conversationId, 'interrupted');
-    await this.agentLoop.interrupt(conversationId);
-  }
-
   private getActive(): ConversationRuntime {
     return this.tabs.active();
   }
@@ -457,6 +452,7 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
         send: (text, attachments, conversationId, tellId) =>
           this.promptRouter.route(text, attachments, conversationId, tellId),
         cancelTell: (id, tellId) => this.promptRouter.cancelTell(id, tellId),
+        sendQueuedNow: (id, tellId) => this.promptRouter.sendQueuedNow(id, tellId),
         cancel: () => {
           this.requestChains.markCancelling(this.sidebar.activeConversationId);
           void this.agentLoop.cancel(this.sidebar.activeConversationId);

@@ -10,6 +10,8 @@ export interface QueuedPrompt {
   text: string;
   attachments: AttachmentData[];
   tell?: boolean;
+  /** "Send now" was pressed: the running turn is being stopped for this chip. */
+  sendingNow?: boolean;
 }
 
 interface UsePendingPromptsOptions {
@@ -23,6 +25,7 @@ export interface PendingPrompts {
   queuedPrompts: QueuedPrompt[];
   handleSend: (text: string, attachments: AttachmentData[]) => void;
   cancelQueuedPrompt: (id: string) => void;
+  sendQueuedPromptNow: (id: string) => void;
   clearTellPrompts: (conversationId?: string) => void;
   reconcileSessionSync: (messagesById: SessionSyncMsg['messagesById']) => void;
 }
@@ -107,6 +110,27 @@ export function usePendingPrompts({
     [queuedPrompts],
   );
 
+  // The host interrupts the turn. A tell is held there and comes back as the
+  // next turn's bubble, which retires the chip; an attachment chip flushes
+  // through the effect above once the interrupted turn ends.
+  const sendQueuedPromptNow = useCallback(
+    (id: string) => {
+      const prompt = queuedPrompts.find((candidate) => candidate.id === id);
+      if (!prompt || prompt.sendingNow) return;
+      vscode.postMessage({
+        type: 'sendQueuedNow',
+        conversationId: prompt.conversationId,
+        ...(prompt.tell ? { tellId: prompt.id } : {}),
+      });
+      setQueuedPrompts((current) =>
+        current.map((candidate) =>
+          candidate.id === id ? { ...candidate, sendingNow: true } : candidate,
+        ),
+      );
+    },
+    [queuedPrompts],
+  );
+
   const clearTellPrompts = useCallback((conversationId?: string) => {
     const targetId = conversationId ?? activeConversationIdRef.current;
     setQueuedPrompts((current) =>
@@ -130,6 +154,7 @@ export function usePendingPrompts({
     queuedPrompts,
     handleSend,
     cancelQueuedPrompt,
+    sendQueuedPromptNow,
     clearTellPrompts,
     reconcileSessionSync,
   };

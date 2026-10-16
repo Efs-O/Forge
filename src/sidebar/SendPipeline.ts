@@ -30,7 +30,8 @@ import type { AdmissionDecision, ContextThresholdAction } from './ContextBudgetP
 import { isContextExhaustionReason } from '../agent/truncationRecovery';
 import type { ChatAttachmentStore } from './ChatAttachmentStore';
 import type { ChatAttachmentRef } from '../llm/types';
-import type { MidTurnInbox, MidTurnTell } from '../agent/MidTurnInbox';
+import type { MidTurnInbox } from '../agent/MidTurnInbox';
+import { groupTellBatches, inputTextOf, runsAfterStop, type TellBatch } from './undeliveredTells';
 import type { RequestFingerprint } from '../sessions/requestFingerprint';
 
 const log = getLogger();
@@ -40,22 +41,6 @@ export const CONVERSATION_BUSY_ERROR = 'Forge: this conversation is still genera
 function forgeVersion(): string | undefined {
   const version = vscode.extensions.getExtension('Efsoo.forge-llm')?.packageJSON?.['version'];
   return typeof version === 'string' ? version : undefined;
-}
-
-interface TellBatch {
-  text: string;
-  internal: boolean;
-}
-
-function groupTellBatches(tells: MidTurnTell[]): TellBatch[] {
-  const batches: TellBatch[] = [];
-  for (const tell of tells) {
-    const internal = tell.internal === true;
-    const current = batches[batches.length - 1];
-    if (current?.internal === internal) current.text += `\n\n${tell.text}`;
-    else batches.push({ text: tell.text, internal });
-  }
-  return batches;
 }
 
 export interface SendPipelineDeps {
@@ -246,6 +231,8 @@ export class SendPipeline {
     }
     let outcome: ForgeRequestOutcome;
     const pendingTellBatches: TellBatch[] = [];
+    // Set when "Send now" interrupted the turn: its batches run after release.
+    let sendNowHeld = false;
     try {
       outcome = await deps.requestChains.run(chain, async () => {
         let nextText = text;
@@ -298,13 +285,10 @@ export class SendPipeline {
           pendingTellBatches.push(...groupTellBatches(undelivered));
           if (pendingTellBatches.length > 0) {
             if (turn.kind === 'cancelled' || turn.kind === 'interrupted') {
-              const userText = pendingTellBatches
-                .filter((batch) => !batch.internal)
-                .map((batch) => batch.text)
-                .join('\n\n');
-              if (userText) {
+              sendNowHeld = runsAfterStop(turn.kind, undelivered);
+              const userText = sendNowHeld ? undefined : inputTextOf(pendingTellBatches);
+              if (userText)
                 deps.post({ type: 'setInput', text: userText, conversationId: conv.id });
-              }
               return toRequestOutcome(turn);
             }
             const nextBatch = pendingTellBatches.shift()!;
@@ -352,13 +336,14 @@ export class SendPipeline {
       throw error;
     }
     const undeliveredAfterRelease = deps.midTurnInbox.takeUndelivered(conv.id);
-    const tellBatches = groupTellBatches(undeliveredAfterRelease);
+    const tellBatches = [
+      ...(sendNowHeld ? pendingTellBatches : []),
+      ...groupTellBatches(undeliveredAfterRelease),
+    ];
     if (tellBatches.length === 0) return outcome;
-    if (outcome.kind === 'cancelled' || outcome.kind === 'interrupted') {
-      const userText = tellBatches
-        .filter((batch) => !batch.internal)
-        .map((batch) => batch.text)
-        .join('\n\n');
+    const stopped = outcome.kind === 'cancelled' || outcome.kind === 'interrupted';
+    if (stopped && !sendNowHeld && !runsAfterStop(outcome.kind, undeliveredAfterRelease)) {
+      const userText = inputTextOf(tellBatches);
       if (userText) deps.post({ type: 'setInput', text: userText, conversationId: conv.id });
       return outcome;
     }

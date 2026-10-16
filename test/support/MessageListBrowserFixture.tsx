@@ -31,6 +31,7 @@ function Fixture(): React.ReactElement {
         messages={messages}
         queuedPrompts={[]}
         onCancelQueuedPrompt={() => undefined}
+        onSendQueuedPromptNow={() => undefined}
         streaming
         conversationId="browser-scroll-regression"
         active

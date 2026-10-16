@@ -33,6 +33,8 @@ export interface WebviewActions {
   ) => void;
   /** False when the tell had already reached the running turn. */
   cancelTell: (conversationId: string, tellId: string) => boolean;
+  /** False when the tell had already reached the running turn. */
+  sendQueuedNow: (conversationId: string, tellId?: string) => boolean;
   cancel: () => void;
   switchModel: (name: string | null) => Promise<void>;
   undo: () => Promise<string[]>;
@@ -91,6 +93,15 @@ export function routeWebviewMessage(actions: WebviewActions, msg: WebviewToHost)
 
     case 'cancelTell':
       if (!actions.cancelTell(msg.conversationId, msg.tellId)) {
+        actions.post({
+          type: 'error',
+          message: 'Forge: that message had already reached the running turn.',
+        });
+      }
+      break;
+
+    case 'sendQueuedNow':
+      if (!actions.sendQueuedNow(msg.conversationId, msg.tellId)) {
         actions.post({
           type: 'error',
           message: 'Forge: that message had already reached the running turn.',

@@ -109,6 +109,15 @@ export interface SidebarPromptRouter {
   route: (text: string, attachments?: AttachmentData[], id?: string, tellId?: string) => void;
   /** False when the tell had already reached the turn. */
   cancelTell: (conversationId: string, tellId: string) => boolean;
+  /**
+   * "Send now" on a queued chip: holds the tell for the next turn and
+   * interrupts the running one. False when the tell had already reached the
+   * turn; then nothing is interrupted. No `tellId` (an attachment chip) only
+   * interrupts.
+   */
+  sendQueuedNow: (conversationId: string, tellId?: string) => boolean;
+  /** Interrupt only the active turn, keeping its backend, so a steering prompt runs next. */
+  interruptForSteering: (conversationId: string) => Promise<void>;
   /** Stops delivering background exit notices. */
   dispose(): void;
 }
@@ -118,6 +127,9 @@ export function createSidebarPromptRouter(options: {
   isReserved: (id: string) => boolean;
   addTell: (id: string, text: string, internal?: boolean, tellId?: string) => void;
   removeTell: (conversationId: string, tellId: string) => boolean;
+  markSendNow: (conversationId: string, tellId: string) => boolean;
+  isStreaming: (conversationId: string) => boolean;
+  interruptForSteering: (conversationId: string) => Promise<void>;
   send: (
     text: string,
     attachments?: AttachmentData[],
@@ -155,6 +167,14 @@ export function createSidebarPromptRouter(options: {
   return {
     route: (text, attachments, id, tellId) => route(text, attachments, id, false, false, tellId),
     cancelTell: options.removeTell,
+    sendQueuedNow: (conversationId, tellId) => {
+      if (tellId && !options.markSendNow(conversationId, tellId)) return false;
+      // Only a turn the agent loop is running: a chain that is evaluating or
+      // compacting runs the held tell as its follow-up once it releases.
+      if (options.isStreaming(conversationId)) void options.interruptForSteering(conversationId);
+      return true;
+    },
+    interruptForSteering: options.interruptForSteering,
     dispose: () => {
       subscription.dispose();
     },

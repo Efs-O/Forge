@@ -9,6 +9,7 @@ interface Props {
   state: State;
   queuedPrompts: QueuedPrompt[];
   onCancelQueuedPrompt: (id: string) => void;
+  onSendQueuedPromptNow: (id: string) => void;
   resumedIds: ReadonlySet<string>;
   /** Shown in whichever pane has nothing in it; identical for all of them. */
   emptyState: React.ReactNode;
@@ -34,6 +35,7 @@ export function TranscriptPanes({
   state,
   queuedPrompts,
   onCancelQueuedPrompt,
+  onSendQueuedPromptNow,
   resumedIds,
   emptyState,
 }: Props): React.ReactElement {
@@ -73,6 +75,7 @@ export function TranscriptPanes({
             messages={state.messagesById[id] ?? []}
             queuedPrompts={queuedPrompts.filter((prompt) => prompt.conversationId === id)}
             onCancelQueuedPrompt={onCancelQueuedPrompt}
+            onSendQueuedPromptNow={onSendQueuedPromptNow}
             streaming={state.streamingIds.has(id)}
             conversationId={id}
             emptyState={emptyState}

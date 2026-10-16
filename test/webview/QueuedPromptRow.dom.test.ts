@@ -30,6 +30,7 @@ describe('QueuedPromptRow', () => {
         React.createElement(QueuedPromptRow, {
           text: 'Run the tests after this task.',
           attachmentCount: 1,
+          onSendNow: vi.fn(),
           onCancel,
         }),
       );
@@ -43,8 +44,8 @@ describe('QueuedPromptRow', () => {
       'Sends when this turn ends · 1 attachment',
     );
     const buttons = card?.querySelectorAll<HTMLButtonElement>('button') ?? [];
-    expect(Array.from(buttons, (button) => button.textContent)).toEqual(['Cancel']);
-    act(() => buttons[0]!.click());
+    expect(Array.from(buttons, (button) => button.textContent)).toEqual(['Send now', 'Cancel']);
+    act(() => buttons[1]!.click());
     expect(onCancel).toHaveBeenCalledOnce();
   });
 
@@ -55,6 +56,7 @@ describe('QueuedPromptRow', () => {
           text: 'add a test for perSlotContext',
           attachmentCount: 0,
           tell: true,
+          onSendNow: vi.fn(),
           onCancel: vi.fn(),
         }),
       );
@@ -65,6 +67,38 @@ describe('QueuedPromptRow', () => {
       'Will reach Forge at its next step',
     );
     // A tell sits in the host inbox, and Cancel withdraws it there.
-    expect(Array.from(container.querySelectorAll('button'), (b) => b.textContent)).toEqual(['Cancel']);
+    expect(Array.from(container.querySelectorAll('button'), (b) => b.textContent)).toEqual([
+      'Send now',
+      'Cancel',
+    ]);
+  });
+
+  it('sends now once, then says the turn is stopping', () => {
+    const onSendNow = vi.fn();
+    const render = (sendingNow: boolean) =>
+      act(() => {
+        root.render(
+          React.createElement(QueuedPromptRow, {
+            text: 'fix the test first',
+            attachmentCount: 0,
+            tell: true,
+            sendingNow,
+            onSendNow,
+            onCancel: vi.fn(),
+          }),
+        );
+      });
+
+    render(false);
+    const sendNow = container.querySelector<HTMLButtonElement>('button')!;
+    expect(sendNow.textContent).toBe('Send now');
+    act(() => sendNow.click());
+    expect(onSendNow).toHaveBeenCalledOnce();
+
+    render(true);
+    expect(container.querySelector('.queued-prompt-status')?.textContent).toBe(
+      'Stopping the turn to send this…',
+    );
+    expect(container.querySelector<HTMLButtonElement>('button')!.disabled).toBe(true);
   });
 });

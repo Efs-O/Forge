@@ -28,3 +28,36 @@ describe('cancelTell from the sidebar', () => {
     });
   });
 });
+
+describe('sendQueuedNow from the sidebar', () => {
+  function sendNowRig(held: boolean, tellId?: string) {
+    const post = vi.fn();
+    const sendQueuedNow = vi.fn(() => held);
+    const actions = { post, sendQueuedNow } as unknown as WebviewActions;
+    routeWebviewMessage(actions, {
+      type: 'sendQueuedNow',
+      conversationId: 'c1',
+      ...(tellId ? { tellId } : {}),
+    });
+    return { post, sendQueuedNow };
+  }
+
+  it('hands the chip to the host quietly while the tell is still unread', () => {
+    const { post, sendQueuedNow } = sendNowRig(true, 'chip-1');
+    expect(sendQueuedNow).toHaveBeenCalledWith('c1', 'chip-1');
+    expect(post).not.toHaveBeenCalled();
+  });
+
+  it('interrupts for an attachment chip, which has no host tell', () => {
+    const { sendQueuedNow } = sendNowRig(true);
+    expect(sendQueuedNow).toHaveBeenCalledWith('c1', undefined);
+  });
+
+  it('says so when the running turn had already read it', () => {
+    const { post } = sendNowRig(false, 'chip-1');
+    expect(post).toHaveBeenCalledWith({
+      type: 'error',
+      message: 'Forge: that message had already reached the running turn.',
+    });
+  });
+});

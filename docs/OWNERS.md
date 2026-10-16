@@ -139,6 +139,7 @@ overlaps with an existing owner, extend the owner instead.
 | Webview diagnostic message shapes                    | `src/sidebar/diagnosticMessages.ts`      |
 | Conversation-tab webview message shapes              | `src/sidebar/conversationMessages.ts`    |
 | "Open this in the editor" message shapes             | `src/sidebar/openMessages.ts`            |
+| Queued-chip message shapes (Cancel, Send now)        | `src/sidebar/tellMessages.ts`            |
 | Model-picker message shapes (labels, residency)      | `src/sidebar/modelMessages.ts`           |
 | Diff shapes, `fileDiff`, `diffStats`, checkpoint stats | `src/sidebar/diffMessages.ts`            |
 | Checkpoint bar net stats (snapshot vs disk)          | `src/sidebar/checkpointStats.ts`         |
@@ -363,6 +364,7 @@ overlaps with an existing owner, extend the owner instead.
 | Shared native/fallback tool-calling loop     | `src/agent/ToolCallingLoop.ts`               |
 | Mid-turn tell inbox                          | `src/agent/MidTurnInbox.ts`                  |
 | Mid-turn tell composer (sidebar + remote)    | `src/agent/MidTurnTellDrain.ts`              |
+| Undelivered tells at turn end (batch, restore, Send now) | `src/sidebar/undeliveredTells.ts`     |
 | Elapsed-time note (mid-turn tell source)     | `src/agent/elapsedTimeNote.ts`               |
 | Tool-calling stream helpers                  | `src/agent/toolCallingStream.ts`             |
 | Truncated tool call: detection + recovery    | `src/agent/truncationRecovery.ts`            |

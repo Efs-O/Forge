@@ -10,6 +10,8 @@ export interface MidTurnTell {
   id: string;
   text: string;
   internal?: boolean;
+  /** The user pressed "Send now": it needs a turn of its own, never a tool-round gap. */
+  sendNow?: boolean;
 }
 
 /**
@@ -46,8 +48,23 @@ export class MidTurnInbox {
     for (const listener of this.listeners.get(conversationId) ?? []) listener();
   }
 
+  /**
+   * The tells for the running turn's next tool-round gap. Nothing while a
+   * send-now tell is held: read a moment before its interrupt lands, it would
+   * sit in the transcript with no turn left to answer it. Tells queued with it
+   * wait too, so they keep their order.
+   */
   drain(conversationId: string): MidTurnTell[] {
+    if (this.pending.get(conversationId)?.some((tell) => tell.sendNow)) return [];
     return this.take(conversationId);
+  }
+
+  /** Holds one tell for the turn after an interrupt; false once a drain has already taken it. */
+  markSendNow(conversationId: string, id: string): boolean {
+    const tell = this.pending.get(conversationId)?.find((candidate) => candidate.id === id);
+    if (!tell) return false;
+    tell.sendNow = true;
+    return true;
   }
 
   /** Withdraws one tell the user cancelled; false once a drain has already taken it. */

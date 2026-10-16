@@ -71,13 +71,19 @@ export function App(): React.ReactElement {
   // Queued prompts belong in state so the user can see and cancel them before
   // Forge submits them to the extension host. Text-only entries become tells;
   // attachment entries retain the end-of-turn queue.
-  const { queuedPrompts, handleSend, cancelQueuedPrompt, clearTellPrompts, reconcileSessionSync } =
-    usePendingPrompts({
-      dispatch,
-      activeConversationId: state.activeConversationId,
-      streamingIds: state.streamingIds,
-      clearResumed,
-    });
+  const {
+    queuedPrompts,
+    handleSend,
+    cancelQueuedPrompt,
+    sendQueuedPromptNow,
+    clearTellPrompts,
+    reconcileSessionSync,
+  } = usePendingPrompts({
+    dispatch,
+    activeConversationId: state.activeConversationId,
+    streamingIds: state.streamingIds,
+    clearResumed,
+  });
   useEffect(() => {
     function handler(event: MessageEvent): void {
       const msg = event.data as HostToWebview;
@@ -357,6 +363,7 @@ export function App(): React.ReactElement {
           state={state}
           queuedPrompts={queuedPrompts}
           onCancelQueuedPrompt={cancelQueuedPrompt}
+          onSendQueuedPromptNow={sendQueuedPromptNow}
           resumedIds={resumedIds}
           emptyState={emptyState}
         />

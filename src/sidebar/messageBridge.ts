@@ -402,12 +402,8 @@ export interface SendMsg {
   /** Present on a mid-turn tell: the id `cancelTell` withdraws it by. */
   tellId?: string;
 }
-/** Withdraws a mid-turn tell the running turn has not read yet. */
-export interface CancelTellMsg {
-  type: 'cancelTell';
-  conversationId: string;
-  tellId: string;
-}
+export type { CancelTellMsg, SendQueuedNowMsg } from './tellMessages';
+import type { CancelTellMsg, SendQueuedNowMsg } from './tellMessages';
 export interface CancelMsg {
   type: 'cancel';
 }
@@ -479,6 +475,7 @@ export type WebviewToHost =
   | SendMsg
   | CancelMsg
   | CancelTellMsg
+  | SendQueuedNowMsg
   | SwitchModelMsg
   | WebviewReadyMsg
   | QueuedConversationIdsMsg

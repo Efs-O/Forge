@@ -4,6 +4,8 @@ interface Props {
   text: string;
   attachmentCount: number;
   tell?: boolean;
+  sendingNow?: boolean;
+  onSendNow: () => void;
   onCancel: () => void;
 }
 
@@ -12,6 +14,8 @@ export function QueuedPromptRow({
   text,
   attachmentCount,
   tell = false,
+  sendingNow = false,
+  onSendNow,
   onCancel,
 }: Props): React.ReactElement {
   const attachmentLabel = attachmentCount
@@ -23,10 +27,21 @@ export function QueuedPromptRow({
         <div className="msg user msg-queued">{text || 'Attachment queued'}</div>
         <div className="queued-prompt-actions">
           <span className="queued-prompt-status">
-            {tell
-              ? 'Will reach Forge at its next step'
-              : `Sends when this turn ends${attachmentLabel}`}
+            {sendingNow
+              ? 'Stopping the turn to send this…'
+              : tell
+                ? 'Will reach Forge at its next step'
+                : `Sends when this turn ends${attachmentLabel}`}
           </span>
+          <button
+            className="btn-action"
+            type="button"
+            disabled={sendingNow}
+            title="Stop the running turn and send this now"
+            onClick={onSendNow}
+          >
+            Send now
+          </button>
           <button className="btn-action" type="button" onClick={onCancel}>
             Cancel
           </button>

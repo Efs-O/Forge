@@ -14,8 +14,15 @@ import { isScrollUpIntent, nextScrolledUp } from '../scrollFollow';
 
 interface Props {
   messages: AppMessage[];
-  queuedPrompts: Array<{ id: string; text: string; attachments: unknown[]; tell?: boolean }>;
+  queuedPrompts: Array<{
+    id: string;
+    text: string;
+    attachments: unknown[];
+    tell?: boolean;
+    sendingNow?: boolean;
+  }>;
   onCancelQueuedPrompt: (id: string) => void;
+  onSendQueuedPromptNow: (id: string) => void;
   streaming: boolean;
   /** Active conversation/tab id. A change means the user switched sessions, which
    *  must jump to the bottom instantly instead of smooth-scrolling the whole
@@ -46,6 +53,7 @@ export function MessageList({
   messages,
   queuedPrompts,
   onCancelQueuedPrompt,
+  onSendQueuedPromptNow,
   streaming,
   conversationId,
   emptyState,
@@ -403,6 +411,8 @@ export function MessageList({
           text={prompt.text}
           attachmentCount={prompt.attachments.length}
           tell={prompt.tell}
+          sendingNow={prompt.sendingNow}
+          onSendNow={() => onSendQueuedPromptNow(prompt.id)}
           onCancel={() => onCancelQueuedPrompt(prompt.id)}
         />
       ))}

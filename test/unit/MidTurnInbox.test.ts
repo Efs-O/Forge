@@ -27,4 +27,19 @@ describe('MidTurnInbox', () => {
     expect(inbox.drain('one')).toEqual([{ id: 'b', text: 'second' }]);
     expect(inbox.remove('one', 'b')).toBe(false);
   });
+
+  it('holds a send-now tell, and those queued with it, back from a tool-round drain', () => {
+    const inbox = new MidTurnInbox();
+    inbox.add('one', { id: 'a', text: 'first' });
+    inbox.add('one', { id: 'b', text: 'second' });
+
+    expect(inbox.markSendNow('one', 'b')).toBe(true);
+    expect(inbox.markSendNow('two', 'b')).toBe(false);
+    expect(inbox.drain('one')).toEqual([]);
+    expect(inbox.takeUndelivered('one')).toEqual([
+      { id: 'a', text: 'first' },
+      { id: 'b', text: 'second', sendNow: true },
+    ]);
+    expect(inbox.markSendNow('one', 'b')).toBe(false);
+  });
 });

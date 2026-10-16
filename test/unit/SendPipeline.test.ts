@@ -426,6 +426,42 @@ describe('SendPipeline.send', () => {
     expect(h.midTurnInbox.takeUndelivered('conv-1')).toEqual([]);
   });
 
+  it('runs a "Send now" tell as the next turn after the interrupt it caused', async () => {
+    const h = harness();
+    h.runTurn.mockResolvedValueOnce({ kind: 'interrupted', finalText: '' });
+    h.midTurnInbox.add('conv-1', { id: 'tell-0', text: 'and the docs' });
+    h.midTurnInbox.add('conv-1', { id: 'tell-1', text: 'fix the test first' });
+    expect(h.midTurnInbox.markSendNow('conv-1', 'tell-1')).toBe(true);
+
+    await h.pipeline.send('start');
+
+    expect(h.runTurn).toHaveBeenCalledTimes(2);
+    // Queued with it, so it travels with it, in the order they were typed.
+    expect(h.runTurn.mock.calls[1]?.[2]).toBe('and the docs\n\nfix the test first');
+    expect(h.posted.some((msg) => msg.type === 'setInput')).toBe(false);
+    expect(h.posted).toContainEqual({
+      type: 'userPrompt',
+      text: 'and the docs\n\nfix the test first',
+      conversationId: 'conv-1',
+    });
+  });
+
+  it('lets Stop win over "Send now": a cancelled turn hands the tell back', async () => {
+    const h = harness();
+    h.runTurn.mockResolvedValueOnce({ kind: 'cancelled', finalText: '' });
+    h.midTurnInbox.add('conv-1', { id: 'tell-1', text: 'fix the test first' });
+    h.midTurnInbox.markSendNow('conv-1', 'tell-1');
+
+    await h.pipeline.send('start');
+
+    expect(h.runTurn).toHaveBeenCalledOnce();
+    expect(h.posted).toContainEqual({
+      type: 'setInput',
+      text: 'fix the test first',
+      conversationId: 'conv-1',
+    });
+  });
+
   it('pins the full selection including @profile on the conversation', async () => {
     const h = harness({
       config: {

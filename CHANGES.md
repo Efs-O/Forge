@@ -1,5 +1,9 @@
 # Forge — Recent Changes
 
+## 0.17.40
+
+- A queued chip has a **Send now** button next to Cancel. On a message typed during a turn, it stops the running turn the way a remote `steer` does (the model stays loaded) and runs the message as the next turn, together with any other messages queued before it, instead of waiting for the agent's next step. While the turn stops, the chip reads "Stopping the turn to send this…". The turn does not read the message at a tool step in the meantime, so it cannot land in a turn that is about to end. Pressing Stop after Send now still wins: the message goes back to the input box. If the turn had already read the message, the sidebar says so. On a chip with attachments, Send now stops the turn and the chip sends as the turn ends.
+
 ## 0.17.39
 
 - Each agent-loop model request writes a `request_prefix` row to the chat's session log (`~/.forge/sessions/<id>.jsonl`), so a cold prompt re-read on the server can be traced to its cause. The row holds hashes and counts only, no message or tool text: `tools_hash` and `tools_chars` for the full tool definitions, `system_hash` and `system_chars` for the system message, `params_hash` for the other request fields that reach the prompt (template kwargs, reasoning effort; not `max_tokens`), and the message count. When the request is not a plain append to the previous one in the same run, `first_changed` and `changed_role` name the first message that differs, or `removed` when history got shorter.

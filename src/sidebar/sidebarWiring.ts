@@ -465,6 +465,12 @@ export function wireSidebar(host: SidebarHost, parts: SidebarParts): SidebarRunt
         ...(internal ? { internal: true } : {}),
       }),
     removeTell: (id, tellId) => midTurnInbox.remove(id, tellId),
+    markSendNow: (id, tellId) => midTurnInbox.markSendNow(id, tellId),
+    isStreaming: (id) => agentLoop.isStreamingConv(id),
+    interruptForSteering: async (id) => {
+      requestChains.markCancelling(id, 'interrupted');
+      await agentLoop.interrupt(id);
+    },
     send: (text, attachments, id, echo, internal) =>
       void send.send(
         text,
