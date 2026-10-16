@@ -1,5 +1,9 @@
 # Forge — Recent Changes
 
+## 0.17.42
+
+- On Windows, Forge's saved files now actually reach the disk before they replace the old copy. Every save (open chats, history, jobs, checkpoints, the agent's own file edits) wrote a temporary file, reopened it read-only and asked Windows to flush it. Windows refuses to flush a read-only handle, and Forge ignored the refusal, so nothing was ever flushed. After a power loss Windows kept the file's name and size but not its contents. On 2026-10-17 an open chat came back as 482,734 zero bytes, and Forge set it aside as `open/<id>.corrupt-<time>.json.bad`. Forge now flushes through the handle it wrote with, and a failed flush is reported instead of skipped. The session log in `~/.forge/sessions/` still held that chat, and it was rebuilt from there.
+
 ## 0.17.41
 
 - With `sampling.preserve_thinking: true`, Forge sends the model's stored thinking back on every assistant turn in the conversation. It used to send only the current task's: each typed message stripped the previous task's thinking, which changed the start of the prompt and made Strata re-read it from an earlier checkpoint. On 2026-10-16 that happened 8 times in one evening and cost about 6 minutes. Keeping all of it matches Qwen's model card, llama.cpp's default since b10763, Strata's chat template and OpenCode. Auto-compaction still bounds the size, and a prompt that still does not fit drops the oldest thinking first, before any tool result is cut.

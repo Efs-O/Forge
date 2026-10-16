@@ -24,15 +24,20 @@ function assertUnchanged(target: string, expected: ExpectedFileState): void {
   }
 }
 
-function syncFile(handle: number): void {
+/**
+ * Write `content` to a new file and flush it to disk through the same
+ * writable handle. Windows' FlushFileBuffers needs write access: an fsync on a
+ * handle reopened read-only fails with EPERM, and swallowing that left every
+ * write unflushed — after a power loss NTFS kept the renamed file's size but
+ * not its data, and an open conversation came back as all NUL bytes.
+ */
+function writeAndSync(file: string, content: string | Buffer): void {
+  const handle = fs.openSync(file, 'w');
   try {
+    fs.writeFileSync(handle, content);
     fs.fsyncSync(handle);
-  } catch (err) {
-    // Node's Windows implementation can report EPERM for FlushFileBuffers on
-    // regular files. The rename still prevents torn readers; unexpected sync
-    // failures on other platforms must remain visible to the caller.
-    if (process.platform === 'win32' && (err as NodeJS.ErrnoException).code === 'EPERM') return;
-    throw err;
+  } finally {
+    fs.closeSync(handle);
   }
 }
 
@@ -132,13 +137,7 @@ export function writeFileAtomicSync(
     `.${path.basename(target)}.forge-${process.pid}-${sequence++}.tmp`,
   );
   try {
-    fs.writeFileSync(temporary, content);
-    const temporaryHandle = fs.openSync(temporary, 'r');
-    try {
-      syncFile(temporaryHandle);
-    } finally {
-      fs.closeSync(temporaryHandle);
-    }
+    writeAndSync(temporary, content);
     if (expected) assertUnchanged(target, expected);
     renameContendedSync(temporary, target);
     if (process.platform !== 'win32') {

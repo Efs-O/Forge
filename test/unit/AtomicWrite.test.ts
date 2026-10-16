@@ -62,6 +62,46 @@ describe('writeFileAtomicSync', () => {
     expect(attempts).toBe(2);
     expect(fs.readFileSync(target, 'utf8')).toBe('new content');
   });
+
+  it('flushes through the writable handle it wrote with', () => {
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), 'forge-atomic-'));
+    roots.push(root);
+    const target = path.join(root, 'value.txt');
+    const opened = new Map<number, string>();
+    const realOpen = fs.openSync;
+    vi.spyOn(fs, 'openSync').mockImplementation((file, flags, mode) => {
+      const fd = realOpen(file, flags, mode);
+      opened.set(fd, String(flags));
+      return fd;
+    });
+    const synced: number[] = [];
+    const realSync = fs.fsyncSync;
+    vi.spyOn(fs, 'fsyncSync').mockImplementation((fd) => {
+      synced.push(fd);
+      realSync(fd);
+    });
+
+    writeFileAtomicSync(target, 'durable');
+
+    // A read-only handle makes Windows' FlushFileBuffers fail with EPERM.
+    expect(synced.length).toBeGreaterThan(0);
+    expect(opened.get(synced[0])).toBe('w');
+    expect(fs.readFileSync(target, 'utf8')).toBe('durable');
+  });
+
+  it('surfaces a flush failure and leaves the target untouched', () => {
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), 'forge-atomic-'));
+    roots.push(root);
+    const target = path.join(root, 'value.txt');
+    fs.writeFileSync(target, 'before');
+    vi.spyOn(fs, 'fsyncSync').mockImplementation(() => {
+      throw errno('EPERM', 'fsync: operation not permitted');
+    });
+
+    expect(() => writeFileAtomicSync(target, 'after')).toThrow(/operation not permitted/);
+    expect(fs.readFileSync(target, 'utf8')).toBe('before');
+    expect(fs.readdirSync(root)).toEqual(['value.txt']);
+  });
 });
 
 describe('renameContendedSync', () => {
