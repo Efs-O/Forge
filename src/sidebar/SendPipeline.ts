@@ -31,6 +31,7 @@ import { isContextExhaustionReason } from '../agent/truncationRecovery';
 import type { ChatAttachmentStore } from './ChatAttachmentStore';
 import type { ChatAttachmentRef } from '../llm/types';
 import type { MidTurnInbox, MidTurnTell } from '../agent/MidTurnInbox';
+import type { RequestFingerprint } from '../sessions/requestFingerprint';
 
 const log = getLogger();
 export const CONVERSATION_BUSY_ERROR = 'Forge: this conversation is still generating.';
@@ -439,13 +440,14 @@ export class SendPipeline {
     this.loggerFor(conv).logCompactionAttempt(entry, conv.active_model ?? '');
   }
 
-  /** Records the tool names exposed on a model request through its session log. */
-  logToolsOffered(convId: string, names: readonly string[]): void {
+  /** Records the tool names and the head of a model request through its session log. */
+  logToolsOffered(convId: string, names: readonly string[], fingerprint: RequestFingerprint): void {
     const conv = this.deps.getSidebar().conversations.find((c) => c.id === convId);
     if (!conv) return;
     const logger = this.loggerFor(conv);
     logger.updateTitle(conv.title);
     logger.logToolsOffered(names, conv.active_model ?? '');
+    logger.logRequestPrefix(fingerprint, conv.active_model ?? '');
   }
 
   /** Records why a turn stopped, next to the rows it produced before stopping. */

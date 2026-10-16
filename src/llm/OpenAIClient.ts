@@ -71,7 +71,7 @@ function toWireMessage(message: ChatMessage): ChatMessage {
   return wire;
 }
 
-function toWireRequest(request: ChatCompletionRequest): ChatCompletionRequest {
+export function toWireRequest(request: ChatCompletionRequest): ChatCompletionRequest {
   return { ...request, messages: request.messages.map(toWireMessage) };
 }
 

@@ -116,7 +116,8 @@ export function buildTurnServices(d: TurnServicesAssembly): TurnServices {
       d.recordTranscriptMutation(conv);
     },
     onTranscriptChanged: (conv) => d.recordTranscriptMutation(conv),
-    onToolsOffered: (convId, names) => d.getToolsOfferedListener()?.(convId, names),
+    onToolsOffered: (convId, names, fingerprint) =>
+      d.getToolsOfferedListener()?.(convId, names, fingerprint),
     emitAgentProgress: (event) => d.emitAgentProgress(event),
     // Wrapped, not snapshotted, for the reason above: the probe is
     // registered after construction and only while a transport is running.

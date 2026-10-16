@@ -69,7 +69,7 @@ export class AgentLoop {
   private midTurnCompactor?: TurnServices['compactMidTurn'];
   private midTurnTells?: MidTurnTellServices;
   private onTranscriptChanged?: (convId: string) => void;
-  private onToolsOffered?: (convId: string, names: readonly string[]) => void;
+  private onToolsOffered?: TurnServices['onToolsOffered'];
   private readonly progress = new AgentProgressBus();
 
   /**
@@ -121,7 +121,7 @@ export class AgentLoop {
     this.onTranscriptChanged = listener;
   }
 
-  setToolsOfferedListener(listener: (convId: string, names: readonly string[]) => void): void {
+  setToolsOfferedListener(listener: NonNullable<TurnServices['onToolsOffered']>): void {
     this.onToolsOffered = listener;
   }
 

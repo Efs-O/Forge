@@ -51,6 +51,7 @@ import type { AgentProgressEvent } from './AgentProgress';
 import type { LiveStreamMeter } from './LiveStreamMeter';
 import { writeChunkLimit } from '../tools/writeChunking';
 import { toolCallProgressMsg } from './toolCallProgress';
+import type { RequestOfferedListener } from '../sessions/requestFingerprint';
 
 const log = getLogger();
 
@@ -95,7 +96,7 @@ export interface ModelTurnContext {
   warnOnce: (key: string, message: string) => void;
   onContextChanged?: (convId: string) => void;
   onUsage?: (conv: ConversationRuntime, inputTokens: number, outputTokens: number) => void;
-  onToolsOffered?: (conversationId: string, names: readonly string[]) => void;
+  onToolsOffered?: RequestOfferedListener;
   onTranscriptChanged?: (conv: ConversationRuntime) => void;
   emitAgentProgress: (event: AgentProgressEvent) => void;
   streamMeter?: LiveStreamMeter;
@@ -287,7 +288,7 @@ export async function runModelTurn(
       model,
       messages: conv.messages,
       getToolDefinitions: buildToolDefinitions,
-      onToolsOffered: (names) => ctx.onToolsOffered?.(conv.id, names),
+      onToolsOffered: (names, fingerprint) => ctx.onToolsOffered?.(conv.id, names, fingerprint),
       signal: ctrl.signal,
       maxRounds,
       writeChunkLimit: writeLimit,

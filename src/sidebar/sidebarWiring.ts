@@ -350,8 +350,8 @@ export function wireSidebar(host: SidebarHost, parts: SidebarParts): SidebarRunt
     attachmentStore: parts.attachmentStore,
     midTurnInbox,
   });
-  agentLoop.setToolsOfferedListener((conversationId, names) =>
-    send.logToolsOffered(conversationId, names),
+  agentLoop.setToolsOfferedListener((conversationId, names, fingerprint) =>
+    send.logToolsOffered(conversationId, names, fingerprint),
   );
 
   // One reading of the eviction gate, shared by the yes/no decision and the

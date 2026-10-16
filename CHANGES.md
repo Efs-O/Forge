@@ -1,5 +1,9 @@
 # Forge — Recent Changes
 
+## 0.17.39
+
+- Each agent-loop model request writes a `request_prefix` row to the chat's session log (`~/.forge/sessions/<id>.jsonl`), so a cold prompt re-read on the server can be traced to its cause. The row holds hashes and counts only, no message or tool text: `tools_hash` and `tools_chars` for the full tool definitions, `system_hash` and `system_chars` for the system message, `params_hash` for the other request fields that reach the prompt (template kwargs, reasoning effort; not `max_tokens`), and the message count. When the request is not a plain append to the previous one in the same run, `first_changed` and `changed_role` name the first message that differs, or `removed` when history got shorter.
+
 ## 0.17.38
 
 - An opened step, or an opened thinking bubble that folded into one, no longer prints a long command in full. A multi-line command (an inline script, a heredoc, a commit with a long message) or a single line over 200 characters shows as one line, `▸ Command · 49 lines python - <<'EOF'`, with the leading `cd "<folder>" &&` dropped. Clicking it shows the whole original command in a box about 20 lines tall that scrolls, the same as the output.

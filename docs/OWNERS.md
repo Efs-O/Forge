@@ -148,6 +148,7 @@ overlaps with an existing owner, extend the owner instead.
 | Per-call diff-card base (file before one tool call) | `src/sidebar/callDiffBase.ts`            |
 | Session transcript logging (~/.forge)                | `src/sidebar/SessionLogger.ts`           |
 | Replay-aware session-log row reading                 | `src/sessions/sessionLogRows.ts`         |
+| Per-request prompt-head fingerprint (`request_prefix` rows: hashes and counts, no text) | `src/sessions/requestFingerprint.ts` |
 | Tool visibility and shell-workaround audit (daily files in ~/.forge/tool-usage/) | `src/sessions/toolUsage.ts` |
 | Tool-call argument summary labels                    | `src/sidebar/toolSummary.ts`             |
 | Runtime capability memo + warn-once ledger           | `src/sidebar/CapabilityCache.ts`         |

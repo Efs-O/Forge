@@ -3,6 +3,7 @@ import * as os from 'os';
 import * as path from 'path';
 import { createHash } from 'crypto';
 import type { ChatMessage } from '../llm/types';
+import { requestPrefixRow, type RequestFingerprint } from '../sessions/requestFingerprint';
 
 const SESSIONS_DIR = path.join(os.homedir(), '.forge', 'sessions');
 
@@ -152,6 +153,7 @@ export class SessionLogger {
   private headerWritten = false;
   private lastUsage: SessionUsage | null = null;
   private lastToolsOfferedHash: string | undefined;
+  private lastRequestFingerprint: RequestFingerprint | undefined;
 
   constructor(
     private readonly sessionId: string,
@@ -295,6 +297,17 @@ export class SessionLogger {
       model,
     });
     this.lastToolsOfferedHash = hash;
+  }
+
+  /** One row per model request: what its head looked like, as hashes and counts. */
+  logRequestPrefix(fingerprint: RequestFingerprint, model: string): void {
+    this.ensureHeader(model);
+    this.append({
+      ...requestPrefixRow(this.lastRequestFingerprint, fingerprint),
+      timestamp_ms: Date.now(),
+      model,
+    });
+    this.lastRequestFingerprint = fingerprint;
   }
 
   /**

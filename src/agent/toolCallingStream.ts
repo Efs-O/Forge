@@ -5,6 +5,7 @@ import { stripThinkingFromFullText } from '../llm/ThinkingChannelStripper';
 import { stripStructuredOutputFromFullText } from '../tools/StructuredOutputParser';
 import type { ToolCallingLoopOptions } from './ToolCallingLoop';
 import { snapshotPromptRequest } from '../util/contextBudget';
+import { fingerprintRequest } from '../sessions/requestFingerprint';
 
 export function sanitizeText(
   text: string,
@@ -28,7 +29,7 @@ export async function streamOnce(
   completionTokens?: number;
 }> {
   const baseUrl = await options.resolveBaseUrl();
-  options.onToolsOffered?.(offeredToolNames);
+  if (options.onToolsOffered) options.onToolsOffered(offeredToolNames, fingerprintRequest(request));
   const promptSnapshot = options.onUsage ? snapshotPromptRequest(request) : undefined;
   return new Promise((resolve, reject) => {
     let capturedToolCalls: ToolCall[] | null = null;

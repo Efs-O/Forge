@@ -3,6 +3,7 @@ import type { ToolCallProgressHandler, UsageHandler } from '../llm/OpenAIClient'
 import type { ChatMessage, ToolCall, ToolDefinition } from '../llm/types';
 import type { ToolResultContextResult } from './toolResultContext';
 import type { OutputRoomBudget, PromptRequestSnapshot } from '../util/contextBudget';
+import type { RequestFingerprint } from '../sessions/requestFingerprint';
 
 /** Inputs and outputs shared by the tool-calling loop and its turn adapter. */
 export interface ToolCallingLoopOptions {
@@ -39,8 +40,11 @@ export interface ToolCallingLoopOptions {
   onNativeFallback?: () => void;
   /** Called as soon as a transcript entry is appended, before the turn ends. */
   onMessagesChanged?: () => void;
-  /** Actual tool names from the request, after all filtering, before dispatch. */
-  onToolsOffered?: (names: readonly string[]) => void;
+  /**
+   * Actual tool names from the request, after all filtering, before dispatch,
+   * with the request's head as hashes (see requestFingerprint.ts).
+   */
+  onToolsOffered?: (names: readonly string[], fingerprint: RequestFingerprint) => void;
   /** Finished narration for a round that calls tools. */
   onRoundNarration?: (text: string) => void;
   /** Request exact provider usage in the final stream frame. */
