@@ -7,12 +7,10 @@
 
 import { describe, expect, it, vi } from 'vitest';
 import { ElapsedTimeNote } from '../../src/agent/elapsedTimeNote';
-import { attachCurrentTaskReasoning } from '../../src/agent/preserveThinking';
 import { runCompactionWithPolicy } from '../../src/sidebar/compactionAttemptPolicy';
 import type { CompactionDeps, CompactionOutcome } from '../../src/sidebar/CompactionService';
 import type { ConversationRuntime } from '../../src/sidebar/sessionTypes';
 import { ForgeConfigSchema } from '../../src/config/schema';
-import type { ChatMessage } from '../../src/llm/types';
 
 const MINUTE = 60_000;
 
@@ -114,22 +112,6 @@ describe('ElapsedTimeNote fallback (no check-in)', () => {
     expect(text).toContain('[Forge]');
     expect(text).toContain('45 minutes');
     expect(text).toContain('do not skip checks, tests or verification');
-  });
-
-  it('does not end the task for preserve_thinking', async () => {
-    const h = harness(after30);
-    h.note.taskStarted('c1');
-    h.advance(30);
-    const [note] = (await h.drain()).messages;
-    const transcript: ChatMessage[] = [
-      { role: 'user', content: 'hunt the bugs' },
-      { role: 'assistant', content: 'reading', reasoning: 'plan: read one more file' },
-      note,
-      { role: 'assistant', content: 'still reading', reasoning: 'found three so far' },
-    ];
-    const sent = attachCurrentTaskReasoning(transcript);
-    expect(sent[1].reasoning_content).toBe('plan: read one more file');
-    expect(sent[3].reasoning_content).toBe('found three so far');
   });
 });
 

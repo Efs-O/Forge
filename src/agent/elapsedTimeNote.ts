@@ -16,13 +16,12 @@
  * The config block gates both, and the tool: no block, no tool, no note, no
  * schema tokens.
  *
- * A "task" is what the user typed, so it shares `taskStart()`'s boundary in
- * `preserveThinking.ts`: an auto-compaction resume (`internal`) or a message
- * told mid-turn belongs to the task already running and does not restart the
- * clock. The note is delivered through the mid-turn tell path, so it lands at
- * the end of the transcript and keeps the prompt cache; it is flagged
- * `internal` (no user bubble, logged as Forge's own line) and `midTurn` (it
- * does not end the task for `preserve_thinking`).
+ * A "task" is what the user typed: an auto-compaction resume (`internal`) or a
+ * message told mid-turn belongs to the task already running and does not
+ * restart the clock. The note is delivered through the mid-turn tell path, so
+ * it lands at the end of the transcript and keeps the prompt cache; it is
+ * flagged `internal` (no user bubble, logged as Forge's own line) and `midTurn`
+ * (it does not start a new task).
  *
  * Deliberately small: no timer object, no re-arming from Forge, no snooze. The
  * clock is read only at a drain, so a round that never reaches a tool-round gap

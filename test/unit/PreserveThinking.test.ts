@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import {
-  attachCurrentTaskReasoning,
+  attachReasoning,
   dropOldestReasoning,
   preservesThinking,
 } from '../../src/agent/preserveThinking';
@@ -57,10 +57,12 @@ describe('preserve_thinking', () => {
     ).toBe(false);
   });
 
-  it('sends back only the current task, verbatim, across mid-turn and internal messages', () => {
+  it('sends back every task, verbatim, but never blank thinking', () => {
     const messages = task();
-    const out = attachCurrentTaskReasoning(messages);
-    expect(out[1]?.reasoning_content).toBeUndefined();
+    const out = attachReasoning(messages);
+    // An earlier task's thinking stays: stripping it at the next typed message
+    // changed the prompt prefix and cold-read Strata back to a checkpoint.
+    expect(out[1]?.reasoning_content).toBe('OLD TASK THINKING');
     // Byte-for-byte, whitespace included: a trimmed copy would miss the KV cache.
     expect(out[3]?.reasoning_content).toBe('  Round one:\nread it.  ');
     expect(out[6]?.reasoning_content).toBe('Round two.');
@@ -77,8 +79,9 @@ describe('preserve_thinking', () => {
   });
 
   it('drops the oldest reasoning first', () => {
-    const out = attachCurrentTaskReasoning(task());
-    const trimmed = dropOldestReasoning(out, 1);
+    const out = attachReasoning(task());
+    const trimmed = dropOldestReasoning(out, 2);
+    expect(trimmed[1]?.reasoning_content).toBeUndefined();
     expect(trimmed[3]?.reasoning_content).toBeUndefined();
     expect(trimmed[6]?.reasoning_content).toBe('Round two.');
   });

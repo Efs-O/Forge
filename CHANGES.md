@@ -1,5 +1,9 @@
 # Forge — Recent Changes
 
+## 0.17.41
+
+- With `sampling.preserve_thinking: true`, Forge sends the model's stored thinking back on every assistant turn in the conversation. It used to send only the current task's: each typed message stripped the previous task's thinking, which changed the start of the prompt and made Strata re-read it from an earlier checkpoint. On 2026-10-16 that happened 8 times in one evening and cost about 6 minutes. Keeping all of it matches Qwen's model card, llama.cpp's default since b10763, Strata's chat template and OpenCode. Auto-compaction still bounds the size, and a prompt that still does not fit drops the oldest thinking first, before any tool result is cut.
+
 ## 0.17.40
 
 - A queued chip has a **Send now** button next to Cancel. On a message typed during a turn, it stops the running turn the way a remote `steer` does (the model stays loaded) and runs the message as the next turn, together with any other messages queued before it, instead of waiting for the agent's next step. While the turn stops, the chip reads "Stopping the turn to send this…". The turn does not read the message at a tool step in the meantime, so it cannot land in a turn that is about to end. Pressing Stop after Send now still wins: the message goes back to the input box. If the turn had already read the message, the sidebar says so. On a chip with attachments, Send now stops the turn and the chip sends as the turn ends.
