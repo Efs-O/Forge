@@ -81,9 +81,10 @@ describe('TerminalCommandTracker user commands', () => {
 
   it('captures commands from every terminal', async () => {
     const { tracker, run } = harness();
-    const terminal = { name: 'pwsh' } as vscode.Terminal;
-    await run(terminal, 'npm test', 'ok\n', 0);
-    await run(terminal, 'git status', 'clean\n', 0);
+    const firstTerminal = { name: 'pwsh' } as vscode.Terminal;
+    const secondTerminal = { name: 'bash' } as vscode.Terminal;
+    await run(firstTerminal, 'npm test', 'ok\n', 0);
+    await run(secondTerminal, 'git status', 'clean\n', 0);
 
     expect(tracker.recentUserCommands().map((entry) => entry.command)).toEqual([
       'git status', 'npm test',
