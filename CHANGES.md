@@ -1,5 +1,9 @@
 # Forge — Recent Changes
 
+## 0.17.45
+
+- The bar beside a thinking block is now invisible. It keeps its width, so the block's indent is unchanged, and the "Thinking" label keeps its green.
+
 ## 0.17.44
 
 - A chat's earlier messages no longer disappear from the sidebar when a prompt reaches it while you are viewing another chat (from Telegram, the agent bus, a queued prompt, or by switching back and sending at once). The sidebar keeps only the chat on screen in memory, so it rebuilt the other chat from the new prompt alone, and the guard that protects text still streaming then refused the full history the host sent. Only the new exchange showed until a reload. Nothing was lost on disk. The guard now protects only chats the sidebar has loaded from the host.

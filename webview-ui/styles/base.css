@@ -40,7 +40,6 @@
      still reads without colour. */
   --forge-tool-ok: #79a989;
   --forge-tool-bad: var(--vscode-errorForeground, #f48771);
-  --forge-thinking: var(--forge-green-dark);
 }
 
 /* Light surfaces need darker text and status marks from the same palette. */

@@ -265,7 +265,8 @@
 .thinking-block {
   margin: 3px 0 7px;
   padding: 4px 0 5px 10px;
-  border-left: 2px solid var(--forge-thinking);
+  /* Invisible by choice; it keeps the block's indent. */
+  border-left: 2px solid transparent;
 }
 
 .thinking-block-header {
