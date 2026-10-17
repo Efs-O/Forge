@@ -1,5 +1,9 @@
 import { describe, expect, it, vi } from 'vitest';
 import { SidebarHostFacade } from '../../src/sidebar/ForgeHostFacade';
+import {
+  createSidebarHostFacade,
+  type SidebarFacadeDeps,
+} from '../../src/sidebar/sidebarFacadeWiring';
 import type { ConversationRuntime } from '../../src/sidebar/sessionTypes';
 import { MAX_CONVERSATIONS } from '../../src/sidebar/sessionTypes';
 
@@ -19,14 +23,29 @@ describe('SidebarHostFacade', () => {
     const open = Array.from({ length: MAX_CONVERSATIONS }, (_, i) => conversation(`c${i}`));
     const created = conversation('created');
     const createConversation = vi.fn().mockReturnValueOnce(created).mockReturnValueOnce(undefined);
-    const capBlockers = vi.fn(() => ['7 running a turn', '3 waiting on a tool approval', '2 bound to a remote chat']);
+    const capBlockers = vi.fn(() => [
+      '7 running a turn',
+      '3 waiting on a tool approval',
+      '2 bound to a remote chat',
+    ]);
     const facade = new SidebarHostFacade({
-      createConversation, restoreConversation: () => created, send: vi.fn(), cancel: vi.fn(),
-      queueIntent: vi.fn(), addApprovalSink: vi.fn(() => ({ dispose: vi.fn() })),
-      addQuestionSink: () => ({ dispose: () => undefined }), answerQuestion: () => false,
-      dismissQuestion: () => false, resolveApproval: vi.fn(), getPendingApproval: () => undefined,
-      getActiveConversationId: () => 'c0', getOpenConversations: () => open,
-      getRequestChains: () => [], getStreamingConversationIds: () => new Set(), getSessionActiveMs: () => 0, capBlockers,
+      createConversation,
+      restoreConversation: () => created,
+      send: vi.fn(),
+      cancel: vi.fn(),
+      queueIntent: vi.fn(),
+      addApprovalSink: vi.fn(() => ({ dispose: vi.fn() })),
+      addQuestionSink: () => ({ dispose: () => undefined }),
+      answerQuestion: () => false,
+      dismissQuestion: () => false,
+      resolveApproval: vi.fn(),
+      getPendingApproval: () => undefined,
+      getActiveConversationId: () => 'c0',
+      getOpenConversations: () => open,
+      getRequestChains: () => [],
+      getStreamingConversationIds: () => new Set(),
+      getSessionActiveMs: () => 0,
+      capBlockers,
     });
     await expect(facade.createConversation()).resolves.toMatchObject({ id: 'created' });
     const failure = await facade.createConversation().catch((err: unknown) => err as Error);
@@ -63,7 +82,8 @@ describe('SidebarHostFacade', () => {
       getActiveConversationId: () => 'c0',
       getOpenConversations: () => open,
       getRequestChains: () => [],
-      getStreamingConversationIds: () => new Set(), getSessionActiveMs: () => 0,
+      getStreamingConversationIds: () => new Set(),
+      getSessionActiveMs: () => 0,
       capBlockers: () => ['12 running a turn'],
     });
     const failure = await facade
@@ -88,12 +108,37 @@ describe('SidebarHostFacade', () => {
       getActiveConversationId: () => 'c0',
       getOpenConversations: () => [conversation('c0')],
       getRequestChains: () => [],
-      getStreamingConversationIds: () => new Set(), getSessionActiveMs: () => 0,
+      getStreamingConversationIds: () => new Set(),
+      getSessionActiveMs: () => 0,
       capBlockers: () => [],
     });
     await expect(facade.restoreConversation('nope')).rejects.toThrow(
       'Forge: conversation could not be restored.',
     );
+  });
+
+  it('checks conversation existence before reporting a cap error at 10 open chats', async () => {
+    const restore = vi.fn();
+    const tabs = {
+      hasConversation: vi.fn(() => false),
+      capBlockers: vi.fn(() => []),
+      restore,
+    };
+    const facade = createSidebarHostFacade({
+      runtime: { tabs } as never,
+      getSidebar: () =>
+        ({
+          activeConversationId: 'c0',
+          conversations: Array.from({ length: MAX_CONVERSATIONS }, (_, i) => conversation(`c${i}`)),
+          history: [],
+        }) as never,
+    } as unknown as SidebarFacadeDeps);
+
+    await expect(facade.restoreConversation('nope')).rejects.toThrow(
+      'Forge: conversation could not be restored.',
+    );
+    expect(tabs.hasConversation).toHaveBeenCalledWith('nope');
+    expect(restore).not.toHaveBeenCalled();
   });
   it('creates and restores without activation by default', async () => {
     const created = conversation('created');
@@ -115,7 +160,8 @@ describe('SidebarHostFacade', () => {
       getActiveConversationId: () => 'visible',
       getOpenConversations: () => [created, restored],
       getRequestChains: () => [],
-      getStreamingConversationIds: () => new Set(), getSessionActiveMs: () => 0,
+      getStreamingConversationIds: () => new Set(),
+      getSessionActiveMs: () => 0,
       capBlockers: () => [],
     });
 
@@ -178,7 +224,8 @@ describe('SidebarHostFacade', () => {
       getActiveConversationId: () => 'c1',
       getOpenConversations: () => [conversation('c1')],
       getRequestChains: () => [],
-      getStreamingConversationIds: () => new Set(), getSessionActiveMs: () => 0,
+      getStreamingConversationIds: () => new Set(),
+      getSessionActiveMs: () => 0,
       capBlockers: () => [],
     };
     // Unwired sink: the count is 0, so the mesh buffer treats it as not ready.

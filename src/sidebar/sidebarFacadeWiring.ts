@@ -46,7 +46,12 @@ export function createSidebarHostFacade(deps: SidebarFacadeDeps): ForgeHostFacad
   const { questions, notifications } = deps;
   return new SidebarHostFacade({
     createConversation: (options) => tabs.create(options),
-    restoreConversation: (conversationId, options) => tabs.restore(conversationId, options),
+    restoreConversation: (conversationId, options) => {
+      if (!tabs.hasConversation(conversationId)) {
+        throw new Error('Forge: conversation could not be restored.');
+      }
+      return tabs.restore(conversationId, options);
+    },
     // Every send that arrives through the facade came from outside the webview
     // -- a paired chat, or another extension -- so its prompt has no bubble
     // unless the pipeline draws one.
