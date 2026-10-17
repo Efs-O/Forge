@@ -13,6 +13,7 @@ import type { ForgeConfig } from '../../src/config/types';
 const commands = new Map<string, (...args: unknown[]) => unknown>();
 const quickPicks: Array<Array<{ label: string; description?: string }>> = [];
 const infoMessages: string[] = [];
+const statusCalls: string[] = [];
 
 vi.mock('vscode', () => ({
   commands: {
@@ -60,7 +61,12 @@ function register(config: ForgeConfig): { acquired: string[] } {
       stopAll: async () => {},
     },
     sidebar: { switchModel: async () => {} },
-    statusBar: { setStarting: () => {}, setReady: () => {}, setError: () => {} },
+    statusBar: {
+      setStarting: () => {},
+      setReady: () => statusCalls.push('ready'),
+      setStopped: () => statusCalls.push('stopped'),
+      setError: () => {},
+    },
     getConfig: () => config,
     getConfigPath: () => 'config.yaml',
     setConfig: () => {},
@@ -74,6 +80,7 @@ describe('forge.pickModel provider classification', () => {
     commands.clear();
     quickPicks.length = 0;
     infoMessages.length = 0;
+    statusCalls.length = 0;
   });
 
   it('resolves the provider through the model’s group', async () => {
@@ -102,5 +109,16 @@ describe('forge.pickModel provider classification', () => {
     // A profiled model is always run through a profile: the chosen one becomes
     // `<model>@<profile>` (the mock returns the first item, "fast").
     expect(acquired).toEqual(['local-profiled@fast']);
+  });
+
+  // With no model selected nothing restarts; it reported a ready backend (U20-03).
+  it('restart with no model selected reports the backends stopped, not restarted', async () => {
+    const { acquired } = register(makeConfig()); // active_model: null
+
+    await commands.get('forge.restartBackend')!();
+
+    expect(acquired).toEqual([]);
+    expect(statusCalls).toEqual(['stopped']);
+    expect(infoMessages).toEqual(['Forge: all backends stopped. Pick a model to start again.']);
   });
 });

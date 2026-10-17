@@ -240,7 +240,12 @@ export function setupJobs(
     },
     dispose: () => {
       store.unwatch();
-      void scheduler?.stop();
+      // A lease that fails to release at shutdown was an unhandled rejection (U20-05).
+      void scheduler?.stop().catch((err: Error) => {
+        void vscode.window.showErrorMessage(
+          `Forge jobs scheduler did not stop cleanly: ${err.message}`,
+        );
+      });
     },
   };
   context.subscriptions.push(setup);

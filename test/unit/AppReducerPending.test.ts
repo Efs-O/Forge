@@ -61,6 +61,19 @@ describe('webview App reducer — pending tool calls', () => {
     expect(state.pendingToolCallsById.has(cid)).toBe(false);
   });
 
+  // An unmatched id used to drop the oldest call, another call's row (U20-06).
+  it('keeps the pending calls when a landed row carries an id none of them has', () => {
+    let state = run([{ type: 'USER_SEND', text: 'go', convId: cid }, progress(10, 'call-a')]);
+    state = mod.reducer(state, {
+      type: 'TOOL_ACTIVITY',
+      toolName: 'read_file',
+      toolCallId: 'call-b',
+      detail: 'other.ts',
+      convId: cid,
+    });
+    expect(state.pendingToolCallsById.get(cid)?.map((c) => c.toolCallId)).toEqual(['call-a']);
+  });
+
   it.each<Action>([
     { type: 'DONE', convId: cid },
     { type: 'ERROR', message: 'boom', convId: cid },

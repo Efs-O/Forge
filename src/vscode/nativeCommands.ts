@@ -42,7 +42,16 @@ export function registerNativeCommands(
       deps.statusBar.setStarting(modelName);
       try {
         await deps.backend.stopAll();
-        if (modelName) await deps.backend.acquire(modelName);
+        // With no model selected nothing restarts; say so, as /restartBackend
+        // does, rather than reporting a ready backend (U20-03).
+        if (!modelName) {
+          deps.statusBar.setStopped(modelName);
+          void vscode.window.showInformationMessage(
+            'Forge: all backends stopped. Pick a model to start again.',
+          );
+          return;
+        }
+        await deps.backend.acquire(modelName);
         deps.statusBar.setReady(modelName);
         void vscode.window.showInformationMessage('Forge: backend restarted');
       } catch (err) {

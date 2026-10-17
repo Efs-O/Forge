@@ -40,7 +40,9 @@ export function withProgress(
 
 /**
  * Removes the call whose row just landed: by id when the host sent one, else
- * the oldest entry (calls are announced in the order they were written).
+ * the oldest entry (calls are announced in the order they were written). An id
+ * that matches nothing may only take an entry that has no id of its own; it
+ * used to drop the oldest call, another call's progress row (U20-06).
  */
 export function withoutCall(
   pending: PendingToolCalls,
@@ -49,8 +51,12 @@ export function withoutCall(
 ): PendingToolCalls {
   const calls = pending.get(cid);
   if (!calls || calls.length === 0) return pending;
-  const at = toolCallId ? calls.findIndex((c) => c.toolCallId === toolCallId) : -1;
-  const drop = at === -1 ? 0 : at;
+  let drop = 0;
+  if (toolCallId) {
+    drop = calls.findIndex((c) => c.toolCallId === toolCallId);
+    if (drop === -1) drop = calls.findIndex((c) => c.toolCallId === undefined);
+    if (drop === -1) return pending;
+  }
   return withoutConversation(
     pending,
     cid,

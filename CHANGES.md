@@ -56,6 +56,11 @@
 - **`view_image`'s description matches what it reads (U16-07).** It said absolute paths must be inside the workspace; reads outside it are allowed, as for `read_file`.
 - **A missing absolute path is described as used as given (U16-08).** The not-found message said it was resolved against the workspace root and advised about the project root, sending the model to the wrong base.
 - **A backend that fails to start hands your prompt back (U20-01).** The prompt is saved only once the backend is up, so the next sidebar sync dropped it and you had to retype it; it now returns to the input box, as a refused prompt already did.
+- **A failed session migration is retried (U20-02).** The per-workspace migration marker was written before the old global session was copied, so a copy that failed was never attempted again.
+- **`Forge: Restart Backend` with no model selected says the backends stopped (U20-03).** It reported "backend restarted" and a ready status bar; it now matches `/restartBackend`.
+- **The authenticator QR panel closes after a wrong code (U20-04).** An invalid TOTP code left the QR code and the manual secret on screen.
+- **A jobs-scheduler lease that fails to release on shutdown is reported (U20-05)** instead of becoming an unhandled rejection.
+- **A tool row with an unknown call id no longer removes another call's progress row (U20-06).**
 
 ## 0.17.42
 

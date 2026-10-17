@@ -78,29 +78,40 @@ export function prefillManyBlocks(
   sidebar.prefillInput(`${instruction}\n\n${formatContextBlocks(blocks)}`);
 }
 
+/**
+ * The diagnostic prompt shared by the prefill and run commands, or undefined
+ * (after telling the user) when there is no target or no diagnostic.
+ */
+async function diagnosticPrompt(
+  instruction: string,
+  uri: vscode.Uri | undefined,
+  diagnostic: vscode.Diagnostic | undefined,
+): Promise<string | undefined> {
+  const targetUri = uri ?? vscode.window.activeTextEditor?.document.uri;
+  if (!targetUri) {
+    void vscode.window.showInformationMessage('Forge: no active diagnostic target');
+    return undefined;
+  }
+  const targetDiagnostic = diagnostic ?? nearestDiagnostic(targetUri);
+  if (!targetDiagnostic) {
+    void vscode.window.showInformationMessage('Forge: no diagnostics found');
+    return undefined;
+  }
+  const document = await vscode.workspace.openTextDocument(targetUri);
+  const source = targetDiagnostic.source ? `\nSource: ${targetDiagnostic.source}` : '';
+  const code =
+    targetDiagnostic.code === undefined ? '' : `\nCode: ${String(targetDiagnostic.code)}`;
+  return `${instruction}\n\nFile: ${relativePath(targetUri)}\nDiagnostic: ${targetDiagnostic.message}${source}${code}\nRange: ${targetDiagnostic.range.start.line + 1}:${targetDiagnostic.range.start.character + 1}-${targetDiagnostic.range.end.line + 1}:${targetDiagnostic.range.end.character + 1}\n\nRelevant code:\n\`\`\`${document.languageId}\n${diagnosticSnippet(document, targetDiagnostic)}\n\`\`\``;
+}
+
 export async function prefillDiagnostic(
   sidebar: SidebarProvider,
   instruction: string,
   uri?: vscode.Uri,
   diagnostic?: vscode.Diagnostic,
 ): Promise<void> {
-  const targetUri = uri ?? vscode.window.activeTextEditor?.document.uri;
-  if (!targetUri) {
-    void vscode.window.showInformationMessage('Forge: no active diagnostic target');
-    return;
-  }
-  const targetDiagnostic = diagnostic ?? nearestDiagnostic(targetUri);
-  if (!targetDiagnostic) {
-    void vscode.window.showInformationMessage('Forge: no diagnostics found');
-    return;
-  }
-  const document = await vscode.workspace.openTextDocument(targetUri);
-  const source = targetDiagnostic.source ? `\nSource: ${targetDiagnostic.source}` : '';
-  const code =
-    targetDiagnostic.code === undefined ? '' : `\nCode: ${String(targetDiagnostic.code)}`;
-  sidebar.prefillInput(
-    `${instruction}\n\nFile: ${relativePath(targetUri)}\nDiagnostic: ${targetDiagnostic.message}${source}${code}\nRange: ${targetDiagnostic.range.start.line + 1}:${targetDiagnostic.range.start.character + 1}-${targetDiagnostic.range.end.line + 1}:${targetDiagnostic.range.end.character + 1}\n\nRelevant code:\n\`\`\`${document.languageId}\n${diagnosticSnippet(document, targetDiagnostic)}\n\`\`\``,
-  );
+  const prompt = await diagnosticPrompt(instruction, uri, diagnostic);
+  if (prompt !== undefined) sidebar.prefillInput(prompt);
 }
 
 export async function draftScratch(deps: NativeCommandDeps, instruction: string): Promise<void> {
@@ -150,25 +161,11 @@ export async function runDiagnosticPrompt(
   uri?: vscode.Uri,
   diagnostic?: vscode.Diagnostic,
 ): Promise<void> {
-  const targetUri = uri ?? vscode.window.activeTextEditor?.document.uri;
-  if (!targetUri) {
-    void vscode.window.showInformationMessage('Forge: no active diagnostic target');
-    return;
-  }
-  const targetDiagnostic = diagnostic ?? nearestDiagnostic(targetUri);
-  if (!targetDiagnostic) {
-    void vscode.window.showInformationMessage('Forge: no diagnostics found');
-    return;
-  }
-  const document = await vscode.workspace.openTextDocument(targetUri);
-  const source = targetDiagnostic.source ? `\nSource: ${targetDiagnostic.source}` : '';
-  const code =
-    targetDiagnostic.code === undefined ? '' : `\nCode: ${String(targetDiagnostic.code)}`;
+  const prompt = await diagnosticPrompt(instruction, uri, diagnostic);
+  if (prompt === undefined) return;
   deps.statusBar.setGenerating(deps.getConfig().active_model);
   try {
-    await deps.sidebar.submitPrompt(
-      `${instruction}\n\nFile: ${relativePath(targetUri)}\nDiagnostic: ${targetDiagnostic.message}${source}${code}\nRange: ${targetDiagnostic.range.start.line + 1}:${targetDiagnostic.range.start.character + 1}-${targetDiagnostic.range.end.line + 1}:${targetDiagnostic.range.end.character + 1}\n\nRelevant code:\n\`\`\`${document.languageId}\n${diagnosticSnippet(document, targetDiagnostic)}\n\`\`\``,
-    );
+    await deps.sidebar.submitPrompt(prompt);
   } catch (err) {
     const message = (err as Error).message;
     deps.statusBar.setError(message);

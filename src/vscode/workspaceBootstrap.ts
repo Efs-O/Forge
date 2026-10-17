@@ -20,12 +20,13 @@ export async function bootstrapWorkspace(
 ): Promise<void> {
   const log = getLogger();
   // Migration v2: globalState → workspaceState (sessions now per-workspace)
+  // The marker goes last, so a copy that fails is retried next activation (U20-02).
   if (!context.workspaceState.get<boolean>('forge.migrated.sessions.v2')) {
-    await context.workspaceState.update('forge.migrated.sessions.v2', true);
     if (!context.workspaceState.get(SESSION_KEY_V1)) {
       const globalSession = context.globalState.get(SESSION_KEY_V1);
       if (globalSession) await context.workspaceState.update(SESSION_KEY_V1, globalSession);
     }
+    await context.workspaceState.update('forge.migrated.sessions.v2', true);
   }
   if (workspaceRoot && autoCreate) {
     const repositoryRoots = await discoverWorkspaceRepositoryRoots(workspaceRoot);

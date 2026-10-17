@@ -190,11 +190,12 @@ async function enrollTotp(
   channel: 'telegram' | 'whatsapp',
   reset: boolean,
 ): Promise<void> {
+  let panel: vscode.WebviewPanel | undefined;
   try {
     const secret = await runtime.createTotpEnrollmentSecret(channel);
     const uri = `otpauth://totp/${encodeURIComponent(`Forge:${channel}`)}?secret=${secret}&issuer=Forge&digits=6&period=30`;
     const dataUrl = await toDataURL(uri, { errorCorrectionLevel: 'M', margin: 2, width: 280 });
-    const panel = vscode.window.createWebviewPanel(
+    panel = vscode.window.createWebviewPanel(
       'forge.remote.totpEnrollment',
       `Forge ${channel} authenticator`,
       vscode.ViewColumn.Active,
@@ -207,12 +208,8 @@ async function enrollTotp(
       ignoreFocusOut: true,
       validateInput: (value) => (/^\d{6}$/.test(value) ? undefined : 'Enter exactly 6 digits.'),
     });
-    if (!code) {
-      panel.dispose();
-      return;
-    }
+    if (!code) return;
     await runtime.confirmTotpEnrollment(channel, secret, code);
-    panel.dispose();
     void vscode.window.showInformationMessage(
       `Forge: ${channel} authenticator ${reset ? 'reset' : 'enrolled'} locally.`,
     );
@@ -220,6 +217,9 @@ async function enrollTotp(
     void vscode.window.showErrorMessage(
       `Forge remote TOTP enrollment failed: ${(err as Error).message}`,
     );
+  } finally {
+    // The QR code and secret must not stay on screen after a wrong code (U20-04).
+    panel?.dispose();
   }
 }
 
