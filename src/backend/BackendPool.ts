@@ -78,7 +78,9 @@ export class BackendPool implements IBackendPool {
     this.gate = new DelegationGate({
       poolKey: (name) => this.poolKey(name),
       isOllama: (key) => this.isOllamaModel(key),
-      hasSlot: (key) => this.slots.has(key),
+      // A runtime borrowed from another window serves without a port of ours.
+      hasSlot: (key) =>
+        this.slots.has(key) || this.sharedSlots.get(key)?.backend.isReady() === true,
       freeSlotCount: () => this.freePorts.length,
       maxSlots: () => this.config.max_simultaneous_models ?? 1,
       acquireNonEvicting: (key) => this.acquireByKey(key, false),

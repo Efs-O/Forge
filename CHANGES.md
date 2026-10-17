@@ -25,6 +25,7 @@
 - When a delegated Codex session asks for extra permissions (network or file access), Forge now answers in the form Codex expects: it grants the requested permissions for that turn. Forge used to send the answer meant for command approvals, which Codex could not read.
 - The control server's `/ensure` and `/unload` now see a provider set on a model's group. They read only the model's own entry, so a grouped Ollama model was treated as llama.cpp (and could evict a loaded local model to make room), and a grouped cloud model was not refused. `GET /models` already merged groups.
 - Two VS Code windows that point the same model at different llama-server builds no longer share one server. The sharing key covered the server's arguments but not its binary, so the second window could borrow the first window's build and never run its own.
+- Delegating to a model this window borrowed from another Forge window no longer fails with "no free slot" when every port is in use. The capacity check ignored borrowed servers, which use none of this window's ports.
 
 ## 0.17.42
 

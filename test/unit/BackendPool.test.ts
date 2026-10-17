@@ -325,6 +325,20 @@ describe('BackendPool delegation safety', () => {
     expect(harness.pending).toHaveLength(1);
   });
 
+  it('counts a ready borrowed runtime as loaded, not as needing a port (U04-05)', async () => {
+    const pool = new BackendPool(makeConfig(1));
+    const acquireA = pool.acquire('A');
+    harness.pending[0].resolve();
+    await acquireA;
+    (pool as unknown as { sharedSlots: Map<string, unknown> }).sharedSlots.set('B', {
+      backend: { isReady: () => true, detach: vi.fn(), stop: vi.fn() },
+      key: 'runtime-key',
+      leaseId: 'lease-1',
+    });
+
+    expect(pool.canDelegate('A', 'B')).toEqual({ safe: true });
+  });
+
   it('allows a second llama.cpp model when a port is free', async () => {
     const pool = new BackendPool(makeConfig(2));
     const acquireA = pool.acquire('A');
