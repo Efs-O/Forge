@@ -83,7 +83,7 @@ describe('updateConfigFile (comment-preserving Document API)', () => {
         setTopLevel(doc, 'active_model', 'x');
       }),
     ).toThrow(/parse failed/);
-    expect(fs.existsSync(`${configPath}.tmp`)).toBe(false);
+    expect(fs.readdirSync(directory).filter((f) => f.endsWith('.tmp'))).toEqual([]);
   });
 
   it('throws and writes nothing when a mutation produces an invalid config', () => {
@@ -94,36 +94,7 @@ describe('updateConfigFile (comment-preserving Document API)', () => {
       }),
     ).toThrow();
     expect(fs.readFileSync(configPath, 'utf8')).toBe(before);
-    expect(fs.existsSync(`${configPath}.tmp`)).toBe(false);
-  });
-});
-
-describe('atomic write failure path', () => {
-  let directory: string;
-  let configPath: string;
-
-  beforeEach(() => {
-    directory = fs.mkdtempSync(path.join(os.tmpdir(), 'forge-config-atomic-'));
-    configPath = path.join(directory, 'config.yaml');
-    fs.writeFileSync(configPath, FIXTURE, 'utf8');
-  });
-
-  afterEach(() => fs.rmSync(directory, { recursive: true, force: true }));
-
-  it('leaves the original file untouched when the temp-file write step fails', () => {
-    const before = fs.readFileSync(configPath, 'utf8');
-    // Force the write step to fail by occupying the `.tmp` path with a
-    // directory — writeFileSync(temporaryPath, …) throws EISDIR before
-    // anything ever touches the real config file.
-    fs.mkdirSync(`${configPath}.tmp`);
-
-    expect(() =>
-      updateConfigFile(configPath, (doc) => {
-        setTopLevel(doc, 'active_model', 'gemma-b');
-      }),
-    ).toThrow();
-
-    expect(fs.readFileSync(configPath, 'utf8')).toBe(before);
+    expect(fs.readdirSync(directory).filter((f) => f.endsWith('.tmp'))).toEqual([]);
   });
 });
 

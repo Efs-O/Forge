@@ -7,6 +7,8 @@
 - On Windows, a multi-line question or task sent to Codex, Claude or Copilot now arrives whole. These CLIs are installed as npm `.cmd` shims, and cmd.exe ends a command at the first line break, so Forge delivered only the first line. A `codex queue` message always has several lines, so every linked-Codex message arrived as its first line, and a multi-line delegated task lost the flags after it, such as `--json`. Forge now reads the npm shim and starts the program it points to directly. A `.cmd` or `.bat` that is not an npm shim is still run through cmd.exe. Given multi-line text, it now fails with an error that says why, instead of losing the text after the first line.
 - Text passed through that cmd.exe path is escaped for cmd.exe as well. A message containing `&` or `%PATH%` used to be able to run a second command or expand a variable.
 - On Windows, stopping or timing out a shell command, or cancelling a CLI agent, now ends the whole process tree. Forge killed the top process first, which left `taskkill /T` no tree to walk, so its children kept running and held their files and folder. The result now waits until the tree is gone (at most 6 seconds). Background jobs started with `&` inside Git Bash are still out of reach, a limit of Git Bash.
+- The first-run wizard can save config.yaml to `<workspace>/.forge` or to Forge's storage folder when that folder does not exist yet. The save took its lock file inside the folder before creating it, so on a fresh setup it failed with ENOENT.
+- config.yaml is now flushed to disk before it replaces the old copy, as every other Forge file has been since 0.17.42. It had a separate writer that 0.17.42 did not reach, so a power loss during a settings change could leave config.yaml empty.
 
 ## 0.17.42
 

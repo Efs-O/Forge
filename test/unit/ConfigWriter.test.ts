@@ -9,6 +9,15 @@ vi.mock('fs', async (importOriginal) => ({
   ...await importOriginal<typeof import('fs')>(),
 }));
 
+const tempFiles = (directory: string): string[] =>
+  fs.readdirSync(directory).filter((name) => name.endsWith('.tmp'));
+
+const ollamaConfig = {
+  models: [{ name: 'm', provider: 'ollama' as const, endpoint: 'http://127.0.0.1:11434' }],
+  active_model: 'm',
+  llama_server: {},
+};
+
 describe('writeConfigSafely', () => {
   let directory: string;
   let configPath: string;
@@ -33,7 +42,24 @@ describe('writeConfigSafely', () => {
       active_model: 'm', llama_server: {},
     })).toThrow('replacement denied');
     expect(fs.readFileSync(configPath, 'utf8')).toBe('original: true\n');
-    expect(fs.existsSync(`${configPath}.tmp`)).toBe(false);
+    expect(tempFiles(directory)).toEqual([]);
+  });
+
+  it('leaves the live config and no temp file when the flush fails', () => {
+    fs.writeFileSync(configPath, 'original: true\n');
+    vi.spyOn(fs, 'fsyncSync').mockImplementation(() => {
+      throw new Error('flush failed');
+    });
+    expect(() => writeConfigSafely(configPath, ollamaConfig)).toThrow('flush failed');
+    expect(fs.readFileSync(configPath, 'utf8')).toBe('original: true\n');
+    expect(tempFiles(directory)).toEqual([]);
+  });
+
+  it('creates a missing config folder before taking the lock (first-run wizard)', () => {
+    const nested = path.join(directory, 'workspace', '.forge', 'config.yaml');
+    writeConfigSafely(nested, ollamaConfig);
+    expect(loadConfig(path.dirname(nested)).active_model).toBe('m');
+    expect(fs.existsSync(`${nested}.lock`)).toBe(false);
   });
 
   it('validates and writes a loadable config', () => {
@@ -43,7 +69,7 @@ describe('writeConfigSafely', () => {
       llama_server: {},
     });
     expect(loadConfig(directory).active_model).toBe('ollama-model');
-    expect(fs.existsSync(`${configPath}.tmp`)).toBe(false);
+    expect(tempFiles(directory)).toEqual([]);
   });
 
   it('backs up the previous file before replacing it', () => {

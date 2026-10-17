@@ -1,6 +1,7 @@
 import * as fs from 'fs';
 import * as path from 'path';
 import * as YAML from 'yaml';
+import { writeFileAtomicSync } from '../util/atomicWrite';
 import { ForgeConfigSchema } from './schema';
 import type { ForgeConfig } from './types';
 import { reconcileModels, reconcileTopLevel } from './ConfigWriterHelpers';
@@ -36,6 +37,9 @@ export {
  * that leaves the config schema-invalid, or an atomic-write failure.
  */
 export function updateConfigFile(configPath: string, mutate: (doc: YAML.Document) => void): void {
+  // The lock file lives beside the config, so its folder must exist first: the
+  // first-run wizard offers `<workspace>/.forge` and global storage, both new.
+  fs.mkdirSync(path.dirname(configPath), { recursive: true });
   withConfigFileLock(configPath, () => {
     const raw = fs.existsSync(configPath) ? fs.readFileSync(configPath, 'utf8') : '';
     const doc = raw.trim().length > 0 ? YAML.parseDocument(raw) : new YAML.Document({});
@@ -98,22 +102,10 @@ export function writeConfigSafely(configPath: string, config: ForgeConfig): void
   });
 }
 
-/** Write `contents` to `configPath` via temp-file + rename, backing up any
- *  existing file first. On any failure the temp file is cleaned up and the
- *  original file is left untouched. */
+/** Back up any existing file, then replace it through the shared atomic
+ *  writer, which flushes before the rename. On failure the original is left
+ *  untouched and the temp file is removed. */
 function atomicWrite(configPath: string, contents: string): void {
-  const directory = path.dirname(configPath);
-  const temporaryPath = `${configPath}.tmp`;
-  const backupPath = `${configPath}.bak`;
-  fs.mkdirSync(directory, { recursive: true });
-  if (fs.existsSync(configPath)) fs.copyFileSync(configPath, backupPath);
-  try {
-    fs.writeFileSync(temporaryPath, contents, 'utf8');
-    // Replace directly: deleting first leaves the live config missing if rename
-    // fails. An open-file sharing violation must fail with the original intact.
-    fs.renameSync(temporaryPath, configPath);
-  } catch (err) {
-    if (fs.existsSync(temporaryPath)) fs.rmSync(temporaryPath, { force: true });
-    throw err;
-  }
+  if (fs.existsSync(configPath)) fs.copyFileSync(configPath, `${configPath}.bak`);
+  writeFileAtomicSync(configPath, contents);
 }
