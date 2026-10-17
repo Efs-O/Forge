@@ -145,6 +145,45 @@ describe('App docked agent dialogs', () => {
     expect(container.querySelector('.composer-slot')?.hasAttribute('hidden')).toBe(false);
   });
 
+  it('posts approve and deny responses and explains the dangerous action', () => {
+    act(() =>
+      hostMessage({
+        type: 'confirmRequest',
+        id: 'approval-dangerous',
+        toolName: 'delete_file',
+        detail: 'Delete the requested file',
+        isDangerous: true,
+      }),
+    );
+    expect(container.querySelector('.confirm-tool-name')?.textContent).toContain(
+      '⚠ DANGEROUS: delete_file',
+    );
+    expect(container.querySelector('.confirm-btn-approve')?.textContent).toBe(
+      'Run (I understand the risk)',
+    );
+    act(() => container.querySelector<HTMLButtonElement>('.confirm-btn-approve')!.click());
+    expect(posted).toContainEqual({
+      type: 'confirmResponse',
+      id: 'approval-dangerous',
+      approved: true,
+    });
+
+    act(() =>
+      hostMessage({
+        type: 'confirmRequest',
+        id: 'approval-denied',
+        toolName: 'write_file',
+        detail: 'Write the requested file',
+      }),
+    );
+    act(() => container.querySelector<HTMLButtonElement>('.confirm-btn-deny')!.click());
+    expect(posted).toContainEqual({
+      type: 'confirmResponse',
+      id: 'approval-denied',
+      approved: false,
+    });
+  });
+
   it('leaves the approval pending when Escape belongs to a field outside the panel', () => {
     act(() =>
       hostMessage({
