@@ -9,16 +9,22 @@ describe('normalizeSpawnCwd', () => {
   const win = process.platform === 'win32';
 
   it.runIf(win)('upper-cases a lower-case Windows drive letter', () => {
-    expect(normalizeSpawnCwd('n:\vs code apps\Forge')).toBe('N:\vs code apps\Forge');
+    expect(normalizeSpawnCwd(String.raw`n:\vs code apps\Forge`)).toBe(
+      String.raw`N:\vs code apps\Forge`,
+    );
     expect(normalizeSpawnCwd('c:/Users/x')).toBe('C:/Users/x');
   });
 
   it.runIf(win)('leaves an already upper-case drive letter alone', () => {
-    expect(normalizeSpawnCwd('N:\vs code apps\Forge')).toBe('N:\vs code apps\Forge');
+    expect(normalizeSpawnCwd(String.raw`N:\vs code apps\Forge`)).toBe(
+      String.raw`N:\vs code apps\Forge`,
+    );
   });
 
   it.runIf(win)('leaves UNC and relative paths alone', () => {
-    expect(normalizeSpawnCwd('\\server\share\proj')).toBe('\\server\share\proj');
+    expect(normalizeSpawnCwd(String.raw`\\server\share\proj`)).toBe(
+      String.raw`\\server\share\proj`,
+    );
     expect(normalizeSpawnCwd('sub/dir')).toBe('sub/dir');
   });
 

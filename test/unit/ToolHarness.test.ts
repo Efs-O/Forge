@@ -2,7 +2,7 @@ import { execFileSync } from 'child_process';
 import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
-import { describe, expect, it } from 'vitest';
+import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 // @ts-expect-error -- the standalone catalog is a plain ESM script
 import {
   extractToolAuditSnapshot,
@@ -105,16 +105,35 @@ describe('local tool harness argument classification', () => {
 });
 
 describe('local tool harness canonical inventory', () => {
-  it('contains every live registered native tool, including ask_agent and memory cleanup', async () => {
-    const root = path.resolve(__dirname, '../..');
-    const snapshot = await extractToolAuditSnapshot();
-    const output = execFileSync(process.execPath, ['scripts/test-local-tools.mjs', '--list'], {
-      cwd: root,
-      encoding: 'utf8',
-    });
+  const root = path.resolve(__dirname, '../..');
+  let snapshot!: Awaited<ReturnType<typeof extractToolAuditSnapshot>>;
+  let output = '';
+  let coverage = '';
+  let committed = '';
+  let temp: string | undefined;
+
+  beforeAll(async () => {
+    snapshot = await extractToolAuditSnapshot();
+    temp = fs.mkdtempSync(path.join(os.tmpdir(), 'forge-tool-coverage-'));
+    const report = path.join(temp, 'coverage.md');
+    output = execFileSync(
+      process.execPath,
+      ['scripts/test-local-tools.mjs', '--list', '--coverage-report', report],
+      { cwd: root, encoding: 'utf8' },
+    );
+    coverage = fs.readFileSync(report, 'utf8');
+    committed = fs.readFileSync(path.join(root, 'docs/TOOL_COVERAGE.md'), 'utf8');
+  }, 20_000);
+
+  afterAll(() => {
+    if (temp) fs.rmSync(temp, { recursive: true, force: true });
+  });
+
+  it('contains every live registered native tool, including ask_agent and memory cleanup', () => {
     const names = output
       .trim()
       .split(/\r?\n/)
+      .filter((line) => line.includes('\t'))
       .map((line) => line.split('\t')[0]);
 
     expect(names).toHaveLength(snapshot.names.length);
@@ -136,8 +155,7 @@ describe('local tool harness canonical inventory', () => {
     // (audit 2026-09-26 F1).
   }, 20_000);
 
-  it('keeps audit inventory names and function schemas equal to the live registry', async () => {
-    const snapshot = await extractToolAuditSnapshot();
+  it('keeps audit inventory names and function schemas equal to the live registry', () => {
     const inventoryNames = snapshot.definitions.map((definition) => definition.function.name).sort();
     expect(inventoryNames).toEqual(snapshot.names);
     const registryByName = new Map(
@@ -150,34 +168,17 @@ describe('local tool harness canonical inventory', () => {
     expect(inventoryNames.filter((name) => name.startsWith('desktop_'))).toHaveLength(9);
   });
 
-  it('generates a canonical coverage matrix with no missing native handler tests', async () => {
-    const root = path.resolve(__dirname, '../..');
-    const temp = fs.mkdtempSync(path.join(os.tmpdir(), 'forge-tool-coverage-'));
-    const report = path.join(temp, 'coverage.md');
-    try {
-      execFileSync(
-        process.execPath,
-        ['scripts/test-local-tools.mjs', '--list', '--coverage-report', report],
-        { cwd: root, encoding: 'utf8' },
-      );
-      const content = fs.readFileSync(report, 'utf8');
-      expect(content.match(/^\| [a-z_]+ \| native \|/gmu)).toHaveLength(
-        (await extractToolAuditSnapshot()).names.length,
-      );
-      expect(content).not.toContain('| missing |');
-      expect(content).toContain('| search_code | native | read | harness | automated |');
-      expect(content).not.toContain('Coordinator');
-      expect(content).toContain('| browser_click | native | browser | harness |');
-      expect(content).toContain('| desktop_click | native | desktop | harness |');
-      const committed = fs.readFileSync(path.join(root, 'docs/TOOL_COVERAGE.md'), 'utf8');
-      const withoutGeneratedAt = (value: string) =>
-        value.replace(/^Generated: .*$/mu, 'Generated: <ignored>');
-      expect(withoutGeneratedAt(content)).toBe(withoutGeneratedAt(committed));
-    } finally {
-      fs.rmSync(temp, { recursive: true, force: true });
-    }
-    // 20 s: same child-process shape as the inventory test above.
-  }, 20_000);
+  it('generates a canonical coverage matrix with no missing native handler tests', () => {
+    expect(coverage.match(/^\| [a-z_]+ \| native \|/gmu)).toHaveLength(snapshot.names.length);
+    expect(coverage).not.toContain('| missing |');
+    expect(coverage).toContain('| search_code | native | read | harness | automated |');
+    expect(coverage).not.toContain('Coordinator');
+    expect(coverage).toContain('| browser_click | native | browser | harness |');
+    expect(coverage).toContain('| desktop_click | native | desktop | harness |');
+    const withoutGeneratedAt = (value: string) =>
+      value.replace(/^Generated: .*$/mu, 'Generated: <ignored>');
+    expect(withoutGeneratedAt(coverage)).toBe(withoutGeneratedAt(committed));
+  });
 
   it('fails loudly when the coverage matrix encounters an unknown permission', () => {
     const temp = fs.mkdtempSync(path.join(os.tmpdir(), 'forge-tool-coverage-invalid-'));
