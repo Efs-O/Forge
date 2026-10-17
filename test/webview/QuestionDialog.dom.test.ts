@@ -28,10 +28,7 @@ afterEach(() => {
  * through the prototype setter is what makes the event real.
  */
 function type(element: HTMLTextAreaElement, value: string): void {
-  const setter = Object.getOwnPropertyDescriptor(
-    HTMLTextAreaElement.prototype,
-    'value',
-  )?.set;
+  const setter = Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value')?.set;
   setter?.call(element, value);
   element.dispatchEvent(new Event('input', { bubbles: true }));
 }
@@ -51,6 +48,17 @@ function render(onAnswer = vi.fn()): typeof onAnswer {
 }
 
 describe('QuestionDialog', () => {
+  it('uses a docked non-modal dialog and focuses its first control', () => {
+    render();
+
+    const dialog = container.querySelector<HTMLElement>('[role="dialog"]')!;
+    expect(dialog.classList.contains('docked-dialog-panel')).toBe(true);
+    expect(dialog.classList.contains('confirm-overlay')).toBe(false);
+    expect(dialog.hasAttribute('aria-modal')).toBe(false);
+    expect(dialog.getAttribute('aria-labelledby')).toBe('question-dialog-title');
+    expect(document.activeElement).toBe(container.querySelector('.question-option'));
+  });
+
   it('keeps numbered options as immediate answers', () => {
     const onAnswer = render();
 
@@ -71,18 +79,66 @@ describe('QuestionDialog', () => {
     expect(container.querySelector<HTMLButtonElement>('.confirm-btn-approve')).not.toBeNull();
   });
 
+  it('submits typed answers with Enter while Shift+Enter remains available for a newline', () => {
+    const onAnswer = render();
+    act(() => container.querySelector<HTMLButtonElement>('.question-other')!.click());
+    const input = container.querySelector<HTMLTextAreaElement>('.question-input')!;
+    act(() => type(input, 'custom reviewer'));
+
+    act(() =>
+      input.dispatchEvent(
+        new KeyboardEvent('keydown', { key: 'Enter', shiftKey: true, bubbles: true }),
+      ),
+    );
+    expect(onAnswer).not.toHaveBeenCalled();
+
+    act(() => input.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true })));
+    expect(onAnswer).toHaveBeenCalledWith('custom reviewer');
+  });
+
   it('leaves the options answerable after Other… opens the text box', () => {
     const onAnswer = render();
 
     act(() => container.querySelector<HTMLButtonElement>('.question-other')!.click());
 
-    const shown = [...container.querySelectorAll('.question-option-label')].map((el) => el.textContent);
+    const shown = [...container.querySelectorAll('.question-option-label')].map(
+      (el) => el.textContent,
+    );
     expect(shown).toEqual(['Codex', 'Claude']);
     // The link is spent once its box is open -- nothing left for it to reveal.
     expect(container.querySelector('.question-other')).toBeNull();
 
     act(() => container.querySelectorAll<HTMLButtonElement>('.question-option')[1]!.click());
     expect(onAnswer).toHaveBeenCalledWith('Claude');
+  });
+
+  it('keeps number shortcuts and Escape available from the focused panel', () => {
+    const onAnswer = render();
+    const onDismiss = vi.fn();
+    act(() => {
+      root.render(
+        React.createElement(QuestionDialog, {
+          prompt: 'Which reviewer should continue?',
+          options: ['Codex', 'Claude'],
+          onAnswer,
+          onDismiss,
+        }),
+      );
+    });
+
+    act(() =>
+      container
+        .querySelector<HTMLElement>('[role="dialog"]')!
+        .dispatchEvent(new KeyboardEvent('keydown', { key: '2', bubbles: true })),
+    );
+    expect(onAnswer).toHaveBeenCalledWith('Claude');
+
+    act(() =>
+      container
+        .querySelector<HTMLElement>('[role="dialog"]')!
+        .dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true })),
+    );
+    expect(onDismiss).toHaveBeenCalledOnce();
   });
 });
 
@@ -137,5 +193,18 @@ describe('QuestionDialog with sub-questions', () => {
     act(() => type(input, 'neither — ship it unversioned'));
     act(() => container.querySelector<HTMLButtonElement>('.confirm-btn-approve')!.click());
     expect(onAnswer).toHaveBeenCalledWith('neither — ship it unversioned');
+  });
+
+  it('uses numbered shortcuts to fill the next unanswered group', () => {
+    renderGroups();
+    const panel = container.querySelector<HTMLElement>('[role="dialog"]')!;
+    const press = (key: string): void =>
+      panel.dispatchEvent(new KeyboardEvent('keydown', { key, bubbles: true }));
+
+    act(() => press('2'));
+    act(() => press('1'));
+    act(() => container.querySelector<HTMLButtonElement>('.confirm-btn-approve')!.click());
+
+    expect(onAnswer).toHaveBeenCalledWith('Version: keep\nInstall: open');
   });
 });

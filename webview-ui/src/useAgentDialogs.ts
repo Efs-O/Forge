@@ -4,7 +4,7 @@ import type { HostToWebview } from '../../src/sidebar/messageBridge';
 import { vscode } from './vscode';
 
 /**
- * The two modal dialogs a turn can raise: a tool approval, and an `ask_user`
+ * The two dialogs a turn can raise: a tool approval, and an `ask_user`
  * question.
  *
  * Extracted from `App` because they are one concern with a shared rule -- both

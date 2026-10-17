@@ -69,6 +69,7 @@
 - When a later file write restores a file to its original contents, its pending added and removed line highlights are cleared at once.
 - Closing the browser session now forgets origins approved during that session while keeping configured pre-approvals.
 - Closing a tab now explains when an active delegation still holds its model and prevents it from being unloaded.
+- `ask_user` questions and tool approvals now dock above the composer, leaving the transcript visible and scrollable while the agent waits. The composer draft returns after the question is answered or dismissed.
 
 ## 0.17.42
 

@@ -44,7 +44,7 @@ export function App(): React.ReactElement {
   webviewDiagnostics.recordRender();
   const [state, dispatch] = useReducer(reducer, initialState);
 
-  // A tool approval and an ask_user question: two modals with one shared rule,
+  // A tool approval and an ask_user question: two dialogs with one shared rule,
   // which is why they live together. See useAgentDialogs.
   const dialogs = useAgentDialogs();
   const [tokenUsed, setTokenUsed] = useState(0);
@@ -386,42 +386,51 @@ export function App(): React.ReactElement {
           clanker={state.clankerMode}
         />
         <CheckpointBar visible={selectCheckpointPending(state)} stats={checkpointStats} />
-        <InputRow
-          onSend={handleComposerSend}
-          onCancel={handleCancel}
-          streaming={streaming}
-          backendReady={state.backendReady}
-          slashCommands={SLASH_COMMANDS}
-          onRunSlashCommand={handleRunSlashCommand}
-          prefillText={prefillText}
-          onPrefillConsumed={handlePrefillConsumed}
-          clankerMode={state.clankerMode}
-          models={state.models}
-          activeModel={state.activeModel}
-          onModelChange={handleModelChange}
-          modelPickerDisabled={uiBusy}
-          remote={state.remote}
-          activeConversationId={state.activeConversationId}
-        />
-        {dialogs.question && (
-          <QuestionDialog
-            prompt={dialogs.question.prompt}
-            placeholder={dialogs.question.placeholder}
-            options={dialogs.question.options}
-            questions={dialogs.question.questions}
-            onAnswer={dialogs.answerQuestion}
-            onDismiss={dialogs.dismissQuestion}
-          />
-        )}
-        {dialogs.confirmRequest && (
-          <ConfirmationDialog
-            toolName={dialogs.confirmRequest.toolName}
-            detail={dialogs.confirmRequest.detail}
-            isDangerous={dialogs.confirmRequest.isDangerous}
-            onApprove={dialogs.approveConfirm}
-            onDeny={dialogs.denyConfirm}
-          />
-        )}
+        <div id="composer-area">
+          <div
+            className="composer-slot"
+            hidden={Boolean(dialogs.question || dialogs.confirmRequest)}
+          >
+            <InputRow
+              onSend={handleComposerSend}
+              onCancel={handleCancel}
+              streaming={streaming}
+              backendReady={state.backendReady}
+              slashCommands={SLASH_COMMANDS}
+              onRunSlashCommand={handleRunSlashCommand}
+              prefillText={prefillText}
+              onPrefillConsumed={handlePrefillConsumed}
+              clankerMode={state.clankerMode}
+              models={state.models}
+              activeModel={state.activeModel}
+              onModelChange={handleModelChange}
+              modelPickerDisabled={uiBusy}
+              remote={state.remote}
+              activeConversationId={state.activeConversationId}
+            />
+          </div>
+          {/* Confirmation was rendered after a question before docking, so it
+              remains the active panel when both requests are pending. The
+              question stays in dialog state and appears when approval settles. */}
+          {dialogs.confirmRequest ? (
+            <ConfirmationDialog
+              toolName={dialogs.confirmRequest.toolName}
+              detail={dialogs.confirmRequest.detail}
+              isDangerous={dialogs.confirmRequest.isDangerous}
+              onApprove={dialogs.approveConfirm}
+              onDeny={dialogs.denyConfirm}
+            />
+          ) : dialogs.question ? (
+            <QuestionDialog
+              prompt={dialogs.question.prompt}
+              placeholder={dialogs.question.placeholder}
+              options={dialogs.question.options}
+              questions={dialogs.question.questions}
+              onAnswer={dialogs.answerQuestion}
+              onDismiss={dialogs.dismissQuestion}
+            />
+          ) : null}
+        </div>
       </div>
     </WorkspaceUrisProvider>
   );
