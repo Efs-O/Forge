@@ -154,6 +154,17 @@ async function completeRelay(options: {
     fs.mkdirSync(path.dirname(source), { recursive: true });
     writeFileAtomicSync(source, `${answer}\n`);
     retainVerdict(options.root, source, options.exchangeId);
+    // Recorded before the live delivery is awaited: the retained file is
+    // readable only once this event exists, and nothing rescans the folder
+    // after a crash, so a crash or a hung delivery must not come between them.
+    await appendEvent(options.logPaths, {
+      ...options.common,
+      eventId: verdictEventId(options.exchangeId),
+      ts: Date.now(),
+      type: 'verdict',
+      state: 'completed',
+      detail: 'answer retained as verdict',
+    });
     const senderLink = options.facade.getAgentLink(options.conversationId, options.sender.kind);
     let delivered = false;
     if (senderLink?.sessionId === options.sender.sessionId) {
@@ -177,16 +188,6 @@ async function completeRelay(options: {
         options.conversationId,
         `${name} replied; the answer was not seen live and is available with forge.sh read-verdict ${options.exchangeId}.`,
       );
-    await appendEvent(options.logPaths, {
-      ...options.common,
-      eventId: verdictEventId(options.exchangeId),
-      ts: Date.now(),
-      type: 'verdict',
-      state: 'completed',
-      detail: delivered
-        ? 'answer delivered live and retained as verdict'
-        : 'answer retained as verdict',
-    });
   } catch (error) {
     const detail = error instanceof Error ? error.message : String(error);
     await appendEvent(options.logPaths, {

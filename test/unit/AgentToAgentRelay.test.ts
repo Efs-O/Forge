@@ -95,6 +95,50 @@ describe('agent-to-agent links', () => {
     );
   });
 
+  it('records the verdict before awaiting the live delivery (U03-02)', async () => {
+    const root = await fs.mkdtemp(path.join(os.tmpdir(), 'forge-linked-relay-'));
+    dirs.push(root);
+    rebuildIndex([
+      {
+        id: 'chat-1',
+        title: 'Review',
+        agentLinks: { claude: { ...codex, kind: 'claude', sessionId: sender.sessionId }, codex },
+      },
+    ]);
+    const senderLink = { ...codex, kind: 'claude', sessionId: sender.sessionId };
+    const facade = {
+      getAgentLink: vi.fn(() => senderLink),
+      status: vi.fn(() => ({ conversations: [{ id: 'chat-1', title: 'Review' }] })),
+      askAgent: vi.fn(async () => ({
+        agent: 'codex',
+        status: 'completed',
+        finalText: 'Codex reply',
+        sessionTitle: 'Forge · Review',
+        subject: 'Review the patch',
+        live: false,
+      })),
+      showConversationNotice: vi.fn(),
+    } as unknown as ForgeHostFacade;
+    // The live delivery never settles: a crash at this point used to strand the file.
+    const runtime = {
+      isLive: vi.fn(async () => true),
+      sendLive: vi.fn(() => new Promise(() => undefined)),
+    } as unknown as AskAgentRuntime;
+    const relay = makeAgentToAgentRelay(
+      () => facade,
+      path.join(root, '.forge', 'agent-bus'),
+      'C:/workspace',
+      runtime,
+    );
+    const result = await relay(sender, 'codex', 'Review the patch');
+    if (!result.ok || !result.exchangeId)
+      throw new Error('relay did not create a verdict exchange');
+    await vi.waitFor(() => expect(runtime.sendLive).toHaveBeenCalledOnce());
+    expect(
+      readVerdictArtifact(busPaths(root), result.exchangeId, sender.kind, sender.sessionId),
+    ).toBe('Codex reply\n');
+  });
+
   it('refuses an agent sender that has no linked Forge chat', async () => {
     rebuildIndex([]);
     const askAgent = vi.fn();

@@ -22,10 +22,11 @@ export function wakeEventId(exchangeId: string): string {
 }
 
 /**
- * The writer has already renamed its .tmp to .verdict.md. Moving that complete
- * file into the artifact directory is atomic on the same filesystem. If the
- * process dies before the exchange event is appended, the poller finds it there
- * on restart and appends that event once.
+ * The writer has already written its complete file. Moving it into the
+ * artifact directory is atomic on the same filesystem. Callers append the
+ * `verdict-<id>` exchange event straight after, with no other await between:
+ * a read is refused until that event exists, and nothing rescans this folder
+ * on restart.
  */
 export function retainVerdict(root: string, source: string, exchangeId: string): string {
   const target = verdictArtifactPath(root, exchangeId);
@@ -38,16 +39,6 @@ export function retainVerdict(root: string, source: string, exchangeId: string):
   }
   fs.renameSync(source, target);
   return target;
-}
-
-export function pendingVerdictArtifacts(root: string): string[] {
-  const dir = path.join(root, VERDICT_DIR);
-  try {
-    return fs.readdirSync(dir).filter((name) => name.endsWith('.md'));
-  } catch (err) {
-    if ((err as NodeJS.ErrnoException).code === 'ENOENT') return [];
-    throw err;
-  }
 }
 
 function authorizeRecipient(
