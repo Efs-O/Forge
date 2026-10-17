@@ -85,8 +85,16 @@ export class IndexManager {
     this.ensureEmbeddingsEnabled();
     await this.backend.start();
     return this.backend.withActivity(async () => {
-      const paths = await this.findWorkspaceFiles();
-      const chunks = await this.buildChunksForPaths(paths);
+      // Every file is rebuilt, but one saved during the build may have been
+      // read before the save: only the marks made before it starts are covered.
+      const covered = this.takeDirtyPaths();
+      let chunks: SearchChunk[];
+      try {
+        chunks = await this.buildChunksForPaths(await this.findWorkspaceFiles());
+      } catch (error) {
+        this.restoreDirtyPaths(covered);
+        throw error;
+      }
       this.index = {
         version: INDEX_VERSION,
         workspaceRoot: this.workspaceRoot(),
@@ -99,7 +107,6 @@ export class IndexManager {
         chunks,
       };
       this.indexLoaded = true;
-      this.dirtyPaths.clear();
       this.pendingSave = false;
       await this.saveIndex();
 
@@ -156,10 +163,16 @@ export class IndexManager {
 
   private async refreshDirtyPaths(): Promise<void> {
     if (!this.index) return;
-    const dirty = [...this.dirtyPaths];
+    const dirty = this.takeDirtyPaths();
     if (dirty.length === 0) return;
 
-    const replacements = await this.buildChunksForPaths(dirty);
+    let replacements: SearchChunk[];
+    try {
+      replacements = await this.buildChunksForPaths(dirty);
+    } catch (error) {
+      this.restoreDirtyPaths(dirty);
+      throw error;
+    }
     const replacementMap = new Map<string, SearchChunk[]>();
     for (const chunk of replacements) {
       const current = replacementMap.get(chunk.path) ?? [];
@@ -176,8 +189,19 @@ export class IndexManager {
 
     this.index.chunks = nextChunks;
     this.index.builtAt = Date.now();
-    this.dirtyPaths.clear();
     this.pendingSave = true;
+  }
+
+  /** Empties the set BEFORE the embedding await, so a file saved during it is
+   *  marked again rather than cleared with the batch that read its old text. */
+  private takeDirtyPaths(): string[] {
+    const paths = [...this.dirtyPaths];
+    this.dirtyPaths.clear();
+    return paths;
+  }
+
+  private restoreDirtyPaths(paths: string[]): void {
+    for (const relPath of paths) this.dirtyPaths.add(relPath);
   }
 
   private async buildChunksForPaths(relativePaths: string[]): Promise<SearchChunk[]> {
