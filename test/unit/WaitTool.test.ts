@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import { MAX_WAIT_SECONDS, makeWaitTool } from '../../src/tools/waitTool';
 
 const tool = makeWaitTool();
@@ -9,24 +9,36 @@ const ctx = (signal?: AbortSignal) => ({
 
 describe('wait tool', () => {
   it('waits about as long as asked and reports the measured time', async () => {
-    const startedAt = Date.now();
-    const result = await tool.handler({ seconds: 1 }, ctx());
-    const elapsed = Date.now() - startedAt;
-    expect(elapsed).toBeGreaterThanOrEqual(900);
-    expect(result).toMatch(/^Waited 1s\. Local time is now \d{2}:\d{2}\.$/u);
+    vi.useFakeTimers();
+    try {
+      vi.setSystemTime(new Date('2026-01-01T12:00:00Z'));
+      const pending = tool.handler({ seconds: 1 }, ctx());
+      let settled = false;
+      void pending.then(() => (settled = true));
+
+      await vi.advanceTimersByTimeAsync(999);
+      expect(settled).toBe(false);
+      await vi.advanceTimersByTimeAsync(1);
+      await expect(pending).resolves.toMatch(/^Waited 1s\. Local time is now \d{2}:\d{2}\.$/u);
+      expect(Date.now()).toBe(Date.parse('2026-01-01T12:00:01Z'));
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   // /stop must not leave a turn parked on a timer.
   it('returns as soon as the turn is aborted', async () => {
+    vi.useFakeTimers();
     const controller = new AbortController();
-    const startedAt = Date.now();
     const pending = tool.handler({ seconds: MAX_WAIT_SECONDS }, ctx(controller.signal));
-    setTimeout(() => controller.abort(), 50);
-    const result = await pending;
-    expect(Date.now() - startedAt).toBeLessThan(2000);
-    expect(result).toContain('Wait cancelled after');
-    expect(result).toContain(`of the ${MAX_WAIT_SECONDS}s requested`);
-    expect(result).toMatch(/Local time is now \d{2}:\d{2}\./u);
+    try {
+      await vi.advanceTimersByTimeAsync(50);
+      controller.abort();
+      await expect(pending).resolves.toContain('Wait cancelled after 0s');
+      await expect(pending).resolves.toContain(`of the ${MAX_WAIT_SECONDS}s requested`);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it('returns immediately when the turn is already aborted', async () => {
