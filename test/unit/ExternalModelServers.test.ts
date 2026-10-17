@@ -625,8 +625,10 @@ describe('deferred stop watcher', () => {
       child.once('error', reject);
       child.once('exit', () => resolve());
     });
-    for (let i = 0; i < 30 && !fs.existsSync(marker); i++) {
-      await new Promise((resolve) => setTimeout(resolve, 100));
+    if (leasePid === undefined) {
+      for (let i = 0; i < 30 && !fs.existsSync(marker); i++) {
+        await new Promise((resolve) => setTimeout(resolve, 100));
+      }
     }
     const stopped = fs.existsSync(marker);
     fs.rmSync(dir, { recursive: true, force: true });
