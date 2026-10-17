@@ -95,6 +95,7 @@ function signatureFor(conversation: SignatureInput, displayDiffs: unknown): stri
     compaction?.summary.length ?? null,
     compaction?.generation ?? null,
     compaction?.fromIndex ?? null,
+    compaction?.memoryKeys ?? null,
     conversation.active_model ?? null,
     conversation.last_input_tokens ?? null,
     lastContentLength(conversation),

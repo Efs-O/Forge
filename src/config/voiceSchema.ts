@@ -54,8 +54,14 @@ export const VoiceConfigSchema = z
         enabled: z.boolean().default(false),
         piper_binary: z.string().min(1).optional(),
         voices_dir: z.string().min(1).optional(),
-        voice_en: z.string().min(1).optional(),
-        voice_el: z.string().min(1).optional(),
+        voice_en: z
+          .string()
+          .regex(/^[A-Za-z0-9_-]+$/)
+          .optional(),
+        voice_el: z
+          .string()
+          .regex(/^[A-Za-z0-9_-]+$/)
+          .optional(),
         max_chars: z.number().int().positive().optional(),
       })
       .optional(),

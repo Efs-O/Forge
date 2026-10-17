@@ -1,6 +1,7 @@
 import { spawn } from 'child_process';
 import * as fs from 'fs/promises';
 import * as path from 'path';
+import { isPathInside } from '../util/pathContainment';
 import type { VoiceOperation } from './VoiceOperation';
 
 /**
@@ -54,7 +55,11 @@ export class PiperRunner {
     voice: string,
     signal?: AbortSignal,
   ): Promise<string> {
-    const model = path.join(this.options.voicesDir, `${voice}.onnx`);
+    const voicesDir = path.resolve(this.options.voicesDir);
+    const model = path.resolve(voicesDir, `${voice}.onnx`);
+    if (!isPathInside(voicesDir, model)) {
+      throw new PiperSynthesisError('Piper voice must be a safe voice identifier.');
+    }
     try {
       await fs.access(model);
     } catch {

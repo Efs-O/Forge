@@ -2,6 +2,7 @@ import * as crypto from 'crypto';
 import * as fs from 'fs/promises';
 import * as os from 'os';
 import * as path from 'path';
+import { isPathInside } from '../util/pathContainment';
 import type { VoiceAudioHandle } from './VoiceTypes';
 
 /**
@@ -39,7 +40,10 @@ export class VoiceOperation {
   /** Absolute path for a new owned file. Nothing is created here. */
   reserve(basename: string): string {
     if (this.disposed) throw new Error(`voice operation ${this.id} is disposed`);
-    const target = path.join(this.dir, basename);
+    const target = path.resolve(this.dir, basename);
+    if (!isPathInside(this.dir, target)) {
+      throw new Error(`voice operation ${this.id} cannot reserve a path outside its directory`);
+    }
     this.owned.push(target);
     return target;
   }

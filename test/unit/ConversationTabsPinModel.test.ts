@@ -9,7 +9,11 @@ import type { ForgeConfig } from '../../src/config/types';
 import type { HostToWebview } from '../../src/sidebar/messageBridge';
 import type { SidebarRuntime } from '../../src/sidebar/sessionTypes';
 import { MAX_CONVERSATIONS } from '../../src/sidebar/sessionTypes';
-import { activateLazyGroup, isLazyGroupActive, resetLazyToolGroups } from '../../src/tools/lazyToolGroups';
+import {
+  activateLazyGroup,
+  isLazyGroupActive,
+  resetLazyToolGroups,
+} from '../../src/tools/lazyToolGroups';
 
 const flush = (): Promise<void> => new Promise((resolve) => setTimeout(resolve, 0));
 
@@ -524,6 +528,24 @@ describe('ConversationTabs.pinModel VRAM release', () => {
       type: 'error',
       message: 'Still loaded — an active delegation hold is using it',
     });
+  });
+
+  it('reports a refused unload offer instead of leaving the rejection unhandled', async () => {
+    const { tabs, release, posted } = harness({ tabs: ['12b'], loaded: ['12b'] });
+    const prompt = vi
+      .spyOn(vscode.window, 'showInformationMessage')
+      .mockResolvedValueOnce('Unload Now' as never);
+    release.mockRejectedValueOnce(new Error('an active delegation hold is using it'));
+
+    await tabs.close('tab0');
+    await flush();
+
+    expect(prompt).toHaveBeenCalled();
+    expect(posted).toContainEqual({
+      type: 'error',
+      message: 'Could not unload "12b": an active delegation hold is using it',
+    });
+    prompt.mockRestore();
   });
 
   it('does not offer to unload a model already released by a tab switch', async () => {

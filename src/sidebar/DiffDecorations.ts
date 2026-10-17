@@ -46,11 +46,17 @@ export class DiffDecorations {
    * when the editor becomes visible via onDidChangeVisibleTextEditors.
    */
   apply(resolvedPath: string, beforeContent: string | null): void {
-    if (!fs.existsSync(resolvedPath)) return;
+    if (!fs.existsSync(resolvedPath)) {
+      this.clearPath(resolvedPath);
+      return;
+    }
 
     const afterContent = fs.readFileSync(resolvedPath, 'utf8');
     const hunks = computeDiff(beforeContent ?? '', afterContent);
-    if (!hunks || hunks.length === 0) return;
+    if (!hunks || hunks.length === 0) {
+      this.clearPath(resolvedPath);
+      return;
+    }
 
     const added: vscode.Range[] = [];
     const removed: vscode.Range[] = [];
@@ -98,6 +104,16 @@ export class DiffDecorations {
     if (!entry) return;
     editor.setDecorations(this.addedType, entry.added);
     editor.setDecorations(this.removedType, entry.removed);
+  }
+
+  private clearPath(resolvedPath: string): void {
+    if (!this.pending.has(resolvedPath)) return;
+    for (const editor of vscode.window.visibleTextEditors) {
+      if (editor.document.uri.fsPath !== resolvedPath) continue;
+      editor.setDecorations(this.addedType, []);
+      editor.setDecorations(this.removedType, []);
+    }
+    this.pending.delete(resolvedPath);
   }
 
   /** Clear all decorations from tracked files. Call on Keep or Undo. */

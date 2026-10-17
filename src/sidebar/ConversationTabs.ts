@@ -477,6 +477,17 @@ export class ConversationTabs {
     this.deps.post(checkpointReadyMessage(this.deps.checkpoints, id));
   }
 
+  hasConversation(id: string): boolean {
+    const sidebar = this.deps.getSidebar();
+    if (
+      sidebar.conversations.some((conversation) => conversation.id === id) ||
+      sidebar.history.some((conversation) => conversation.id === id)
+    ) {
+      return true;
+    }
+    return this.deps.archivedSessions?.read(id) !== undefined;
+  }
+
   /** `/unloadModel` for one tab — see `TabModelRelease.unloadModelOf`. */
   unloadModelOf(
     convId: string,

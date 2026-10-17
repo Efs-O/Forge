@@ -40,6 +40,7 @@
 - **Desktop focus approval names the window it binds (U18-02).** `desktop_focus_window` resolved its title only after approval, taking the first window whose title merely contained the text (with `[ ] * ?` read as wildcards). The approval now resolves the target first and names its real title, process, pid and HWND, and the call focuses exactly that HWND. Titles match exactly or as a literal case-insensitive substring; more than one match is refused with the candidates listed.
 - **A lease caught half-written is no longer taken over (U19-04).** A lease file is created before its JSON is written, and a second window reading it in that gap treated it as stale garbage and took the lease too, so two windows could both run the remote transport or the job scheduler. An unreadable lease now counts as live until its mtime is older than the stale window; a crash mid-write is still reclaimed then.
 - **`desktop_click` takes 1 or 2 clicks only (U18-03).** The schema allowed any number and the driver looped that many times; it is now an integer enum and the handler refuses anything else.
+- Piper voice names now accept only letters, numbers, underscores and hyphens. A path-like voice name could make Piper write a WAV outside its private operation folder, then make cleanup delete that outside file.
 - **`view_video` reports the span it sampled (U17-05).** An `end_seconds` past the clip's end was printed as given in the summary; it now shows the clamped end.
 - **Model Manager's purge keeps files another model still uses (U14-01, U14-02).** Purging a model deleted its GGUF and mmproj even when another model pointed at the same file, and deleted them before the config write, so a failed write left a config entry pointing at nothing. The config entry now goes first, and a shared file is kept with a message naming the model that still uses it.
 - **`/wake off` reports a failed delete (U14-03).** A scheduled-task delete that failed for any reason other than "no such task" was reported as cleared; it now replies with schtasks' error.
@@ -64,6 +65,10 @@
 - **A tool row with an unknown call id no longer removes another call's progress row (U20-06).**
 - **Telegram Stop sits above the working status.** A silent control message with the Stop button is sent first, followed by the notifying status message. Edits stay on the status message, and both rows are cleaned up when the turn ends.
 - **Sidebar messages show their creation time.** Owner prompts and agent replies show local time in today/older-message formats; sessions saved before timestamps were added continue to render without a time.
+- An unknown chat id now reports not found even when all 10 chat tabs are open.
+- When a later file write restores a file to its original contents, its pending added and removed line highlights are cleared at once.
+- Closing the browser session now forgets origins approved during that session while keeping configured pre-approvals.
+- Closing a tab now explains when an active delegation still holds its model and prevents it from being unloaded.
 
 ## 0.17.42
 
