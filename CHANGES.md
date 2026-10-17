@@ -50,6 +50,11 @@
 - **`replace_selection` and `insert_code` save the buffer, or say why not (U15-02, U15-05).** A refused editor edit was reported as done; it is now an error. A clean buffer is saved after the edit so Undo covers it; a buffer already holding your unsaved changes is left unsaved, and the result says Undo does not cover that edit.
 - **Stop cancels a running `web_fetch` (U15-06).** The request ran on until its 10-second timeout after the turn was stopped.
 - **`shell`'s `notify_on_exit` description is accurate again (U15-10).** The shell rewrite replaced the measured wording with "send the user a message", which is not what happens and dropped the cases where no notice arrives; it now uses the shared description that says the notice is posted into the chat and names when none is sent.
+- **`git_read` diff, blame and show run through the bounded git runner (U16-01).** They spawned git synchronously with no timeout or output limit, freezing the extension host on a large diff, and returned git's stderr as if it were the result; a git failure is now an error naming the repository.
+- **`manage_jobs` update pins the model of a replaced agent task (U16-02).** Create wrote the current model into an agent_task without one; update did not, so an updated job followed whatever model a chat tab last switched to.
+- **Stop cancels a running `web_search` (U16-04).** Tavily and Brave requests had no abort signal and no timeout.
+- **`view_image`'s description matches what it reads (U16-07).** It said absolute paths must be inside the workspace; reads outside it are allowed, as for `read_file`.
+- **A missing absolute path is described as used as given (U16-08).** The not-found message said it was resolved against the workspace root and advised about the project root, sending the model to the wrong base.
 
 ## 0.17.42
 

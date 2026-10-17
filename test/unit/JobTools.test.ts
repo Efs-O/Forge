@@ -353,6 +353,18 @@ describe('manage_jobs — update', () => {
     expect(loaded?.job.check).toEqual({ kind: 'disk_space', path: 'C:\\', min_free_gb: 10 });
   });
 
+  // Unpinned, an updated agent_task followed every chat-tab model switch (U16-02).
+  it('pins the current model into an agent_task replaced by update', async () => {
+    await store.saveJob(job({ check: { kind: 'none' } }));
+    await call({
+      action: 'update',
+      job: 'disk',
+      definition: { action: { kind: 'agent_task', task: 'look' } },
+    });
+    const loaded = await store.load('disk');
+    expect(loaded?.job.action).toMatchObject({ kind: 'agent_task', model: 'primary' });
+  });
+
   it('a new schedule moves the next run; other state is kept', async () => {
     await store.saveJob(job({ schedule: { kind: 'daily', at: '03:00' } }));
     const old = new Date(2026, 8, 23, 3, 0).getTime();

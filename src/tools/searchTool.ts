@@ -47,7 +47,7 @@ export function makeWebSearchTool(
       },
     },
     permission: 'search',
-    handler: async (args) => {
+    handler: async (args, context) => {
       const query = args['query'] as string;
       const apiKey = await secrets.get(cfg.secret_key_name);
       if (!apiKey) {
@@ -59,16 +59,23 @@ export function makeWebSearchTool(
 
       const maxResults = cfg.max_results ?? 5;
 
+      // Stop cancels the request instead of leaving it running (U16-04).
+      const signal = context?.abortSignal;
       return cfg.provider === 'tavily'
-        ? searchTavily(query, apiKey, maxResults)
-        : searchBrave(query, apiKey, maxResults);
+        ? searchTavily(query, apiKey, maxResults, signal)
+        : searchBrave(query, apiKey, maxResults, signal);
     },
   };
 }
 
 // ── Tavily ────────────────────────────────────────────────────────────────────
 
-async function searchTavily(query: string, apiKey: string, maxResults: number): Promise<string> {
+async function searchTavily(
+  query: string,
+  apiKey: string,
+  maxResults: number,
+  signal: AbortSignal | undefined,
+): Promise<string> {
   // Bearer header, which is the only form Tavily documents. The older `api_key`
   // body field still works (verified against the live API 2026-08-19), so this
   // is alignment with the documented contract, not a fix for a broken call — do
@@ -86,6 +93,7 @@ async function searchTavily(query: string, apiKey: string, maxResults: number): 
       max_results: maxResults,
       search_depth: 'basic',
     }),
+    signal: signal ?? null,
   });
 
   if (!response.ok) {
@@ -112,13 +120,19 @@ async function searchTavily(query: string, apiKey: string, maxResults: number): 
 
 // ── Brave ─────────────────────────────────────────────────────────────────────
 
-async function searchBrave(query: string, apiKey: string, maxResults: number): Promise<string> {
+async function searchBrave(
+  query: string,
+  apiKey: string,
+  maxResults: number,
+  signal: AbortSignal | undefined,
+): Promise<string> {
   const url = `https://api.search.brave.com/res/v1/web/search?q=${encodeURIComponent(query)}&count=${maxResults}`;
   const response = await fetch(url, {
     headers: {
       Accept: 'application/json',
       'X-Subscription-Token': apiKey,
     },
+    signal: signal ?? null,
   });
 
   if (!response.ok) {

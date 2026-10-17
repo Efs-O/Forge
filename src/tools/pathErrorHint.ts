@@ -1,3 +1,4 @@
+import * as path from 'path';
 import * as vscode from 'vscode';
 
 /**
@@ -16,6 +17,14 @@ import * as vscode from 'vscode';
 export function describePathMiss(tool: string, requestedPath: string, err: unknown): string {
   const message = err instanceof Error ? err.message : String(err);
   if (!/\bENOENT\b/u.test(message)) return `${tool}: ${message}`;
+  if (path.isAbsolute(requestedPath)) {
+    // An absolute path is used as given; naming the workspace root here sent
+    // the model to the wrong base (U16-08).
+    return (
+      `${tool}: nothing exists there. "${requestedPath}" is absolute, so it was used as given. ` +
+      `${message} Use find_files to locate it before retrying.`
+    );
+  }
   const root = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
   // Show the request and the resolution separately: seeing only one of them is
   // what makes a wrong base indistinguishable from a wrong filename.

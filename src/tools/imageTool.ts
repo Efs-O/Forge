@@ -98,14 +98,13 @@ export function makeViewImageTool(): RegisteredTool {
       function: {
         name: 'view_image',
         description:
-          'Load an image file from the workspace so you can see it. Needs a vision model; on a text-only model report that you cannot see it and ask the user to switch models. The path must be workspace-relative or absolute inside the workspace. Supported formats: PNG, JPEG, GIF, BMP, and WebP. Maximum file size is 10 MB.',
+          'Load an image file from the workspace so you can see it. Needs a vision model; on a text-only model report that you cannot see it and ask the user to switch models. The path may be workspace-relative or absolute. Supported formats: PNG, JPEG, GIF, BMP, and WebP. Maximum file size is 10 MB.',
         parameters: {
           type: 'object',
           properties: {
             path: {
               type: 'string',
-              description:
-                'Image path relative to the workspace root or an absolute path inside it.',
+              description: 'Image path, relative to the workspace root or absolute.',
             },
           },
           required: ['path'],

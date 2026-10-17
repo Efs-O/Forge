@@ -435,6 +435,7 @@ overlaps with an existing owner, extend the owner instead.
 | Git tools (status, diff, commit)           | `src/tools/gitTools.ts`               |
 | Strict `git_read` operation schema/dispatch | `src/tools/gitReadTool.ts`           |
 | Git read-operation handlers                 | `src/tools/gitReadTools.ts`          |
+| Notebook read/edit tools                    | `src/tools/notebookTools.ts`         |
 | Git handle, execution, status parsing      | `src/tools/gitRepo.ts`                |
 | Git repository discovery + selection       | `src/tools/gitDiscovery.ts`           |
 | Git tracked/ignored state of a path        | `src/tools/gitTrackedStatus.ts`       |
@@ -634,6 +635,7 @@ the configured override stays the existing `video.ffmpeg_path` key.
 | Check dispatch + check context                             | `src/jobs/checks/runCheck.ts`                                |
 | Check context + result types                               | `src/jobs/checks/checkTypes.ts`                                |
 | Human-readable job description (for `/jobs`)               | `src/jobs/jobDescribe.ts`                                      |
+| `manage_jobs` tool (create/update/pause/delete)            | `src/tools/jobTools.ts`                                        |
 | Discuss chat seeding (`manage_jobs` + `/job chat`)         | `src/jobs/jobDiscuss.ts`                                       |
 | `agent_task` runner (unattended agent turn)                 | `src/jobs/agentTask.ts`                                        |
 | Agent task prompt and final result parsing                  | `src/jobs/agentTaskPrompt.ts`                                  |
@@ -665,6 +667,7 @@ the configured override stays the existing `video.ffmpeg_path` key.
 | Agent-messaging activation wiring (routes + inbox)         | `src/vscode/agentMessagingSetup.ts`                            |
 | Agent-bus message submission (routes a bus message into its Forge chat) | `src/vscode/agentBusSubmission.ts`                            |
 | Agent-bus delivery to an open Codex (`codex queue`)        | `src/agentBus/codexDelivery.ts`                                |
+| `jobs:` config schema + agent_task model default and pin   | `src/config/jobsSchema.ts`                                     |
 | `agent_bus:` config schema                                 | `src/config/agentBusSchema.ts`                                 |
 | Live Claude session-id picker for `/link`                  | `src/vscode/agentBusCommands.ts`                               |
 

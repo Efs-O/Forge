@@ -24,7 +24,7 @@ import {
 import { openDiscussChat } from '../jobs/jobDiscuss';
 import type { ForgeHostFacade } from '../sidebar/ForgeHostFacade';
 import { CLI_AGENT_CONSENT_DETAIL, needsCliConsent } from '../jobs/cliAgentGate';
-import { jobDefaultModel } from '../config/jobsSchema';
+import { jobDefaultModel, pinAgentTaskModel } from '../config/jobsSchema';
 import type { RegisteredTool } from './ToolRegistry';
 
 /** The actions `manage_jobs` can perform. */
@@ -365,22 +365,6 @@ async function createJob(deps: ManageJobsDeps, args: Record<string, unknown>): P
   return `Created job "${result.data.name}" [${id}]. First run: ${firstRun.toLocaleString()}.${runsOn}`;
 }
 
-/**
- * An agent_task created without a `model` gets the current model written in.
- * Left empty, the runner fell back to the in-memory active model, which every
- * chat-tab model switch overwrites: an unattended job ran on a paid cloud model
- * because a tab had been switched to it two minutes earlier. With
- * `jobs.default_model` set there is a stable default to follow, so no pin.
- */
-function pinAgentTaskModel(action: unknown, config: ForgeConfig): unknown {
-  const activeModel = config.jobs?.default_model ? undefined : config.active_model;
-  if (typeof action !== 'object' || action === null || Array.isArray(action)) return action;
-  const fields = action as Record<string, unknown>;
-  if (fields['kind'] !== 'agent_task' || fields['model'] !== undefined || !activeModel)
-    return action;
-  return { ...fields, model: activeModel };
-}
-
 /** Build a stable id from the name: a slug, suffixed if taken (so two "llama.cpp" jobs can coexist). */
 function uniqueId(name: string, taken: ReadonlySet<string>): string {
   const slug =
@@ -413,6 +397,10 @@ async function updateJob(
   const merged: Record<string, unknown> = { ...current };
   for (const key of UPDATABLE_KEYS) {
     if (partial[key] !== undefined) merged[key] = partial[key];
+  }
+  // A replaced action gets the create-time pin, or it follows chat-tab model switches (U16-02).
+  if (partial['action'] !== undefined) {
+    merged['action'] = pinAgentTaskModel(partial['action'], deps.getConfig());
   }
   merged['updated_at'] = Date.now();
   const result = JobSchema.safeParse({ ...merged, id });

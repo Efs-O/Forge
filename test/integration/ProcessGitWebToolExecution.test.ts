@@ -97,6 +97,14 @@ describe('isolated process, Git, and web tool execution', () => {
       'author Not Committed Yet',
     );
     await expect(gitRead.handler({ operation: 'show', ref: 'HEAD' })).resolves.toContain('fixture');
+    // Per-file diff and a bad ref go through the bounded async runner (U16-01):
+    // a git failure is an error, not stderr returned as the result.
+    await expect(
+      gitRead.handler({ operation: 'diff', path: 'tracked.txt' }),
+    ).resolves.toContain('+changed');
+    await expect(gitRead.handler({ operation: 'show', ref: 'no-such-ref' })).rejects.toThrow(
+      /git show failed/,
+    );
 
     await expect(makeCreateBranchTool().handler({ name: 'feature', from: 'HEAD' })).resolves.toBe(
       'Branch created: feature',
@@ -219,6 +227,32 @@ describe('isolated process, Git, and web tool execution', () => {
         max_results: 1,
       }).handler({ query: 'fixture' }),
     ).resolves.toContain('**Fixture**');
+  });
+
+  // Stop used to leave a search request running with no timeout (U16-04).
+  it.each(['tavily', 'brave'] as const)('aborts a %s search when the turn is stopped', async (provider) => {
+    const signals: AbortSignal[] = [];
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(
+        (_url: string, init: RequestInit) =>
+          new Promise<Response>((_resolve, reject) => {
+            const signal = init.signal as AbortSignal;
+            signals.push(signal);
+            signal.addEventListener('abort', () => reject(signal.reason));
+          }),
+      ),
+    );
+    const secrets = { get: async () => 'fixture-secret' } as unknown as vscode.SecretStorage;
+    const tool = makeWebSearchTool(secrets, { provider, secret_key_name: 'k', max_results: 1 });
+    const controller = new AbortController();
+    const pending = tool.handler({ query: 'fixture' }, {
+      abortSignal: controller.signal,
+    } as Parameters<typeof tool.handler>[1]);
+    await vi.waitFor(() => expect(signals).toHaveLength(1));
+    controller.abort();
+    await expect(pending).rejects.toThrow();
+    expect(signals[0]?.aborted).toBe(true);
   });
 });
 

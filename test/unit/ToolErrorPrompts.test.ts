@@ -21,6 +21,15 @@ describe('describePathMiss', () => {
     expect(text).toContain('workspace root is often not the project root');
   });
 
+  // An absolute path never touched the workspace root, so naming it misled (U16-08).
+  it('says an absolute path was used as given, without the workspace-root advice', () => {
+    const absolute = process.platform === 'win32' ? 'C:\\proj\\b.ts' : '/proj/b.ts';
+    const text = describePathMiss('read_file', absolute, enoent);
+    expect(text).toContain('is absolute, so it was used as given');
+    expect(text).toContain('find_files');
+    expect(text).not.toContain('workspace root');
+  });
+
   it('carries the tool name it was given', () => {
     expect(describePathMiss('list_directory', 'src', enoent)).toContain('list_directory:');
   });

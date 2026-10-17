@@ -50,3 +50,19 @@ export const JobsConfigSchema = z
 export function jobDefaultModel(config: ForgeConfig): string | undefined {
   return config.jobs?.default_model ?? config.active_model ?? undefined;
 }
+
+/**
+ * An agent_task created or updated without a `model` gets the current model written in.
+ * Left empty, the runner fell back to the in-memory active model, which every
+ * chat-tab model switch overwrites: an unattended job ran on a paid cloud model
+ * because a tab had been switched to it two minutes earlier. With
+ * `jobs.default_model` set there is a stable default to follow, so no pin.
+ */
+export function pinAgentTaskModel(action: unknown, config: ForgeConfig): unknown {
+  const activeModel = config.jobs?.default_model ? undefined : config.active_model;
+  if (typeof action !== 'object' || action === null || Array.isArray(action)) return action;
+  const fields = action as Record<string, unknown>;
+  if (fields['kind'] !== 'agent_task' || fields['model'] !== undefined || !activeModel)
+    return action;
+  return { ...fields, model: activeModel };
+}

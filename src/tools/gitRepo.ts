@@ -18,18 +18,16 @@ import * as path from 'path';
 import { execFile } from 'child_process';
 import { promisify } from 'util';
 import {
-  GitDiscoveryError,
   canonicalPath,
   realPathLike,
   repoRootForLocation,
   repoRootForWorkspace,
   resolveFilePath,
-  workspaceRoot,
 } from './gitDiscovery';
 
 const execFileAsync = promisify(execFile);
 
-export { resolveFilePath, workspaceRoot, GitDiscoveryError };
+export { resolveFilePath };
 
 /**
  * A selected repository.

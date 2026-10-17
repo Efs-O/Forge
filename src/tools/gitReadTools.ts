@@ -5,9 +5,8 @@
  * repository, so they carry no confirmation weight.
  */
 
-import * as child_process from 'child_process';
 import type { RegisteredTool } from './ToolRegistry';
-import { getRepo, gitCwd, readLiveGitStatus, resolveFilePath, runGit } from './gitRepo';
+import { getRepo, readLiveGitStatus, resolveFilePath, runGit } from './gitRepo';
 import { formatGitLog, gitLogArgs, gitShowArgs, isEmptyHistoryError } from './gitLog';
 
 const cwdParameter = {
@@ -117,21 +116,10 @@ export function makeGitDiffTool(): RegisteredTool {
       const cwd = args['cwd'] as string | undefined;
       const staged = args['staged'] === true;
 
-      // A per-file diff takes a pathspec, which `runGit`'s bounded helper does
-      // not shape; spawn directly for that case.
       const filePath = args['path'] as string | undefined;
       const repo = await getRepo(filePath ?? cwd);
-      if (filePath) {
-        const resolved = resolveFilePath(filePath);
-        const spawnArgs = staged ? ['diff', '--staged', '--', resolved] : ['diff', '--', resolved];
-        const result = child_process.spawnSync('git', spawnArgs, {
-          cwd: repo.root,
-          encoding: 'utf8',
-        });
-        return result.stdout || result.stderr || '(no diff)';
-      }
-
-      const diff = await runGit(repo, ['diff', ...(staged ? ['--staged'] : [])]);
+      const pathspec = filePath ? ['--', resolveFilePath(filePath)] : [];
+      const diff = await runGit(repo, ['diff', ...(staged ? ['--staged'] : []), ...pathspec]);
       return diff || '(no diff)';
     },
   };
@@ -160,12 +148,8 @@ export function makeGitBlameTool(): RegisteredTool {
     permission: 'git-read',
     handler: async (args) => {
       const filePath = resolveFilePath(args['path'] as string);
-      const result = child_process.spawnSync('git', ['blame', '--line-porcelain', '--', filePath], {
-        cwd: await gitCwd((args['path'] as string) ?? (args['cwd'] as string | undefined)),
-        encoding: 'utf8',
-      });
-      if (result.error) throw new Error(`git_read operation "blame": ${result.error.message}`);
-      return result.stdout || result.stderr || '(no output)';
+      const repo = await getRepo((args['path'] as string) ?? (args['cwd'] as string | undefined));
+      return (await runGit(repo, ['blame', '--line-porcelain', '--', filePath])) || '(no output)';
     },
   };
 }
@@ -200,12 +184,8 @@ export function makeGitShowTool(): RegisteredTool {
     },
     permission: 'git-read',
     handler: async (args) => {
-      const result = child_process.spawnSync('git', gitShowArgs(args['ref']), {
-        cwd: await gitCwd(args['cwd'] as string | undefined),
-        encoding: 'utf8',
-      });
-      if (result.error) throw new Error(`git_read operation "show": ${result.error.message}`);
-      return result.stdout || result.stderr || '(no output)';
+      const repo = await getRepo(args['cwd'] as string | undefined);
+      return (await runGit(repo, gitShowArgs(args['ref']))) || '(no output)';
     },
   };
 }
