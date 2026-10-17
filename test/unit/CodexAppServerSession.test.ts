@@ -16,7 +16,7 @@ function session(confirmedSessionId?: string): CodexAppServerSession {
 }
 
 describe('CodexAppServerSession', () => {
-  it('maps warm deltas, statuses, completion, and thread identity', async () => {
+  it('maps warm turns, completed messages, mismatched deltas, history, and thread identity', async () => {
     const current = session();
     const statuses: string[] = [];
     const first = await current.send('first', {
@@ -29,6 +29,14 @@ describe('CodexAppServerSession', () => {
     expect(second.finalText).toBe('Done codex turn 2');
     expect(second.sessionId).toBe('fixture-thread-id');
     expect(statuses).toContain('[codex: commandExecution]');
+    const completed = await current.send('TRIGGER_COMPLETED_MESSAGE');
+    expect(completed.finalText).toBe('Done codex turn 3 The command completed successfully.');
+    const mismatched = await current.send('TRIGGER_MISMATCHED_DELTA_ITEM');
+    expect(mismatched.finalText).toBe('Done codex turn 4');
+    const history = await current.send('TRIGGER_HISTORY_ONLY_MESSAGE');
+    expect(history.finalText).toBe(
+      'Done codex turn 5 The command completed successfully from history.',
+    );
     await current.dispose();
   });
 
@@ -52,17 +60,10 @@ describe('CodexAppServerSession', () => {
     await current.dispose();
   });
 
-  it('resumes the exact persisted thread id', async () => {
-    const current = session('persisted-thread');
-    const result = await current.send('resumed');
-    expect(result.sessionId).toBe('persisted-thread');
-    await current.dispose();
-  });
-
   // The resume path used to drop agent_bus.codex_model/codex_effort, so a
   // resumed thread silently kept the model it was created with. The fixture
   // refuses the resume unless the overrides are on the wire.
-  it('re-applies codex_model and codex_effort when resuming a thread', async () => {
+  it('resumes the exact persisted thread and re-applies model and effort overrides', async () => {
     const current = new CodexAppServerSession({
       cliName: 'codex',
       executable: process.execPath,
@@ -95,7 +96,7 @@ describe('CodexAppServerSession', () => {
     await current.dispose();
   });
 
-  it('applies the full-access, never-approval policy to the Forge-owned app-server process', async () => {
+  it('applies full-access policy and answers command and network approvals', async () => {
     const current = new CodexAppServerSession({
       cliName: 'codex',
       executable: process.execPath,
@@ -106,70 +107,31 @@ describe('CodexAppServerSession', () => {
       ],
       cwd: process.cwd(),
     });
-    const result = await current.send('verify global sandbox policy');
-    expect(result.status).toBe('completed');
-    await current.dispose();
-  });
-
-  it('answers an approval request rather than leaving the turn stalled', async () => {
-    const current = session();
     const statuses: string[] = [];
-    const result = await current.send('TRIGGER_COMMAND_APPROVAL', {
+    const command = await current.send('TRIGGER_COMMAND_APPROVAL', {
       onEvent: (event) => {
         if (event.kind === 'status') statuses.push(event.text);
       },
     });
-    expect(result.finalText).toBe('Approval accept');
+    expect(command.finalText).toBe('Approval accept');
     expect(statuses).toContain('[codex policy: allowed command]');
-    await current.dispose();
-  });
-
-  // Codex runs unrestricted, so nothing is screened out — but every request
-  // still gets an answer, because an unanswered one hangs the turn forever.
-  it('allows a command an earlier build would have screened out', async () => {
-    const current = session();
-    const statuses: string[] = [];
-    const result = await current.send('TRIGGER_COMMAND_APPROVAL TRIGGER_DANGEROUS_APPROVAL', {
+    const dangerous = await current.send(
+      'TRIGGER_COMMAND_APPROVAL TRIGGER_DANGEROUS_APPROVAL',
+      {
+        onEvent: (event) => {
+          if (event.kind === 'status') statuses.push(event.text);
+        },
+      },
+    );
+    expect(dangerous.finalText).toBe('Approval accept');
+    expect(statuses.filter((text) => text === '[codex policy: allowed command]')).toHaveLength(2);
+    const network = await current.send('TRIGGER_NETWORK_APPROVAL', {
       onEvent: (event) => {
         if (event.kind === 'status') statuses.push(event.text);
       },
     });
-    expect(result.finalText).toBe('Approval accept');
+    expect(network.finalText).toBe('Approval accept');
     expect(statuses).toContain('[codex policy: allowed command]');
-    await current.dispose();
-  });
-
-  it('allows network-expansion requests through the command channel', async () => {
-    const current = session();
-    const statuses: string[] = [];
-    const result = await current.send('TRIGGER_NETWORK_APPROVAL', {
-      onEvent: (event) => {
-        if (event.kind === 'status') statuses.push(event.text);
-      },
-    });
-    expect(result.finalText).toBe('Approval accept');
-    expect(statuses).toContain('[codex policy: allowed command]');
-    await current.dispose();
-  });
-
-  it('keeps a final assistant message delivered only on item completion', async () => {
-    const current = session();
-    const result = await current.send('TRIGGER_COMPLETED_MESSAGE');
-    expect(result.finalText).toBe('Done codex turn 1 The command completed successfully.');
-    await current.dispose();
-  });
-
-  it('does not duplicate a completed message when its delta uses another item id', async () => {
-    const current = session();
-    const result = await current.send('TRIGGER_MISMATCHED_DELTA_ITEM');
-    expect(result.finalText).toBe('Done codex turn 1');
-    await current.dispose();
-  });
-
-  it('recovers a post-command final message from completed turn history', async () => {
-    const current = session();
-    const result = await current.send('TRIGGER_HISTORY_ONLY_MESSAGE');
-    expect(result.finalText).toBe('Done codex turn 1 The command completed successfully from history.');
     await current.dispose();
   });
 
