@@ -1,5 +1,6 @@
 import * as path from 'path';
-import { describe, expect, it } from 'vitest';
+import type { ChildProcess } from 'node:child_process';
+import { describe, expect, it, vi } from 'vitest';
 import { CodexDiscovery, matchThread } from '../../src/agentMesh/codexDiscovery';
 
 const fixture = path.resolve(__dirname, '../fixtures/fake-codex-cli.mjs');
@@ -66,8 +67,15 @@ describe('CodexDiscovery (P4: scriptable thread/list against the app-server)', (
 
   it('never owns a session: the app-server process is disposed after discovery', async () => {
     const d = discovery();
-    await d.discover();
-    // dispose() is idempotent and the process is gone.
-    await d.dispose();
+    const state = d as unknown as { child?: ChildProcess };
+    const result = d.discover();
+    try {
+      await vi.waitFor(() => expect(state.child).toBeDefined());
+      const child = state.child!;
+      await result;
+      expect(child.exitCode !== null || child.signalCode !== null).toBe(true);
+    } finally {
+      await d.dispose();
+    }
   });
 });

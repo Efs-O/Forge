@@ -50,7 +50,7 @@ afterAll(() => {
 });
 
 describe.skipIf(!LIVE)('live: group-inherited Ollama delegation', () => {
-  it('auto-starts the daemon itself when nothing is running', async () => {
+  it('auto-starts the daemon itself when nothing is running', async (ctx) => {
     // Deliberately run with the Ollama tray app closed and no server up: the
     // question is whether Forge brings the daemon up on its own, or whether a
     // local model is unreachable without the tray app running first.
@@ -59,7 +59,8 @@ describe.skipIf(!LIVE)('live: group-inherited Ollama delegation', () => {
       () => false,
     );
     if (reachable) {
-      console.log('[live] daemon already up — auto-start not exercised');
+      ctx.skip('Ollama is already reachable; cold-start behavior cannot be tested');
+      return;
     }
 
     const config = makeConfig();

@@ -2,6 +2,7 @@ import * as fs from 'fs/promises';
 import * as os from 'os';
 import * as path from 'path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
+import { MemorySecrets } from '../support/memorySecrets';
 import type * as vscode from 'vscode';
 import { ForgeConfigSchema } from '../../src/config/schema';
 import { FakeRemoteChannel } from '../../src/remote/FakeRemoteChannel';
@@ -11,22 +12,6 @@ import type { RemoteBinding } from '../../src/remote/types';
 import type { ForgeHostFacade } from '../../src/sidebar/ForgeHostFacade';
 
 const temporaryDirectories: string[] = [];
-
-class MemorySecrets {
-  readonly values = new Map<string, string>();
-  get(key: string): Thenable<string | undefined> {
-    return Promise.resolve(this.values.get(key));
-  }
-  store(key: string, value: string): Thenable<void> {
-    this.values.set(key, value);
-    return Promise.resolve();
-  }
-  delete(key: string): Thenable<void> {
-    this.values.delete(key);
-    return Promise.resolve();
-  }
-  onDidChange = vi.fn();
-}
 
 function host(): ForgeHostFacade {
   return {

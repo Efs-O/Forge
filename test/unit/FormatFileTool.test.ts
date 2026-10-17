@@ -81,7 +81,8 @@ describe('format_file', () => {
   });
 
   it('formats through the provider without opening, showing or closing an editor', async () => {
-    const d = doc();
+    const save = vi.fn(async () => true);
+    const d = doc({ save });
     ws.openTextDocument.mockResolvedValue(d);
     cmds.executeCommand.mockResolvedValue([{ newText: 'x' }]);
 
@@ -93,6 +94,7 @@ describe('format_file', () => {
     expect(commandNames).not.toContain('editor.action.formatDocument');
     expect(vscode.window.showTextDocument).not.toHaveBeenCalled();
     expect(ws.applyEdit).toHaveBeenCalledOnce();
+    expect(save).toHaveBeenCalledOnce();
   });
 
   it('reports the absent/no-result ambiguity instead of claiming success', async () => {

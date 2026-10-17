@@ -59,4 +59,59 @@ describe('open conversation signature', () => {
     };
     expect(openConversationSignature(value)).not.toBe(withContent);
   });
+
+  it.each([
+    ['id', (value: ConversationRuntime) => (value.id = 'chat-2')],
+    ['title', (value: ConversationRuntime) => (value.title = 'Renamed')],
+    ['createdAt', (value: ConversationRuntime) => (value.createdAt = 3)],
+    ['updatedAt', (value: ConversationRuntime) => (value.updatedAt = 3)],
+    [
+      'messages',
+      (value: ConversationRuntime) => (value.messages[0] = { role: 'assistant', content: 'changed' }),
+    ],
+    [
+      'agentLinks',
+      (value: ConversationRuntime) => {
+        value.agentLinks = {
+          copilot: {
+            kind: 'copilot',
+            sessionId: 'session-1',
+            cwd: 'workspace',
+            title: 'Agent',
+            linkedAt: 1,
+            lastUsedAt: 2,
+            origin: 'user-set',
+          },
+        };
+      },
+    ],
+    ['active_model', (value: ConversationRuntime) => (value.active_model = 'local-model')],
+    ['cli_sessions', (value: ConversationRuntime) => (value.cli_sessions = { codex: 'session-1' })],
+    [
+      'compaction',
+      (value: ConversationRuntime) =>
+        (value.compaction = { summary: 'summary', fromIndex: 1, generation: 1 }),
+    ],
+    [
+      'plan',
+      (value: ConversationRuntime) =>
+        (value.plan = { items: [{ text: 'step', status: 'pending' }], updatedAt: 3 }),
+    ],
+    ['display_diffs', (value: ConversationRuntime) => (value.displayDiffs = [])],
+    ['active_time_ms', (value: ConversationRuntime) => (value.active_time_ms = 10)],
+    ['active_started_at', (value: ConversationRuntime) => (value.active_started_at = 10)],
+    ['input_tokens', (value: ConversationRuntime) => (value.input_tokens = 10)],
+    ['output_tokens', (value: ConversationRuntime) => (value.output_tokens = 10)],
+    ['last_input_tokens', (value: ConversationRuntime) => (value.last_input_tokens = 10)],
+    ['last_output_tokens', (value: ConversationRuntime) => (value.last_output_tokens = 10)],
+    ['model_request_count', (value: ConversationRuntime) => (value.model_request_count = 1)],
+    ['tool_call_count', (value: ConversationRuntime) => (value.tool_call_count = 1)],
+  ] as const)('changes the signature when %s changes', (_field, mutate) => {
+    const value = conversation();
+    const original = openConversationSignature(value);
+
+    mutate(value);
+
+    expect(openConversationSignature(value)).not.toBe(original);
+  });
 });

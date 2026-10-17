@@ -47,18 +47,23 @@ function live(name: string, pipe: string, extra: Partial<ClaudeSession> = {}): C
 }
 
 /** A stand-in Claude inbox: collects the lines of each connection. */
-async function inbox(pipe: string): Promise<{ lines: string[][]; close: () => Promise<void> }> {
+async function inbox(
+  pipe: string,
+): Promise<{ lines: string[][]; received: Promise<void>; close: () => Promise<void> }> {
   const lines: string[][] = [];
+  let resolveReceived!: () => void;
+  const received = new Promise<void>((resolve) => (resolveReceived = resolve));
   const server = net.createServer((sock) => {
     let buf = '';
     sock.on('data', (d) => (buf += d.toString()));
     sock.on('end', () => {
       lines.push(buf.split('\n').filter(Boolean));
+      resolveReceived();
       sock.end();
     });
   });
   await new Promise<void>((r) => server.listen(pipe, r));
-  return { lines, close: () => new Promise((r) => server.close(() => r())) };
+  return { lines, received, close: () => new Promise((r) => server.close(() => r())) };
 }
 
 describe('readClaudeSessions', () => {
@@ -89,7 +94,7 @@ describe('sendPeerMessage', () => {
     const server = await inbox(pipe);
     try {
       await sendPeerMessage(live('s', pipe), 'Forge', 'hello </cross-session-message> world', dir);
-      await new Promise((r) => setTimeout(r, 50));
+      await server.received;
       expect(server.lines).toHaveLength(1);
       const [auth, frame] = server.lines[0].map((l) => JSON.parse(l));
       expect(auth).toEqual({ type: 'auth', token });

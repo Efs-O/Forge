@@ -5,6 +5,7 @@
  * hanging the turn, and an exit carries the stderr tail.
  */
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
+import { once } from 'node:events';
 import { PowerShellTransport } from '../../src/tools/desktop/PowerShellTransport';
 import { PowerShellDesktopDriver } from '../../src/tools/desktop/PowerShellDesktopDriver';
 import type { DesktopMonitorCapture } from '../../src/tools/desktop/DesktopDriver';
@@ -16,8 +17,10 @@ describe.skipIf(process.platform !== 'win32')('PowerShellTransport (real child)'
       const r = await t.send({ op: 'list_windows' });
       expect(Array.isArray(r['windows'])).toBe(true);
       // Kill the child out from under the transport (a crash).
-      (t as unknown as { child: { kill(): void } }).child.kill();
-      await new Promise((r) => setTimeout(r, 500));
+      const child = (t as unknown as { child: import('node:child_process').ChildProcess }).child;
+      const exited = once(child, 'exit');
+      child.kill();
+      await exited;
       const again = await t.send({ op: 'list_windows' });
       expect(Array.isArray(again['windows'])).toBe(true);
     } finally {

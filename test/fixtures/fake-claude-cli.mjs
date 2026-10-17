@@ -122,11 +122,12 @@ if (process.argv.includes('--input-format')) {
       });
       return;
     }
-    if (text.includes('TRIGGER_INIT_THEN_SLOW')) {
-      // Re-announce the id and stall, so a caller timeout fires on a known id.
-      line({ type: 'system', subtype: 'init', session_id: sessionId });
-      return;
-    }
+  if (text.includes('TRIGGER_INIT_THEN_SLOW')) {
+    // Re-announce the id and stall, so a caller timeout fires on a known id.
+    line({ type: 'system', subtype: 'init', session_id: sessionId });
+    line({ type: 'assistant', message: { content: [{ type: 'text', text: 'fixture init ready' }] } });
+    return;
+  }
     if (text.includes('TRIGGER_SLOW')) return; // hold the turn open (no result)
     if (text.includes('TRIGGER_FAIL')) {
       process.stderr.write('claude: boom, something broke\n');

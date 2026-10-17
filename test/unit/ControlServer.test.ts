@@ -120,10 +120,11 @@ const testDeps = (over: ControlServerDeps = {}): ControlServerDeps => ({
   ...over,
 });
 
-async function waitReady(base: string): Promise<void> {
+async function waitReady(server: ControlServer): Promise<string> {
   for (let i = 0; i < 50; i++) {
+    const base = `http://127.0.0.1:${server.status().port}`;
     try {
-      if ((await fetch(`${base}/healthz`)).ok) return;
+      if ((await fetch(`${base}/healthz`)).ok) return base;
     } catch {
       /* not up yet */
     }
@@ -143,8 +144,8 @@ describe('ControlServer', () => {
   });
 
   it('publishes discovery after listening and removes only its PID on disposal', async () => {
-    const port = 18822;
-    const base = `http://127.0.0.1:${port}`;
+    const port = 0;
+    let base = '';
     const registry: IControlServerRegistry = {
       publish: vi.fn(),
       removeIfOwned: vi.fn(),
@@ -155,7 +156,7 @@ describe('ControlServer', () => {
       testDeps({ registry, version: '0.12.27' }),
     );
     server.start();
-    await waitReady(base);
+    base = await waitReady(server!);
 
     expect(registry.publish).toHaveBeenCalledWith(
       expect.objectContaining({ url: base, pid: process.pid, version: '0.12.27' }),
@@ -197,12 +198,12 @@ describe('ControlServer', () => {
   });
 
   it('ensures a model, ref-counts holders, and guards capacity against in-use eviction', async () => {
-    const port = 18799;
-    const base = `http://127.0.0.1:${port}`;
+    const port = 0;
+    let base = '';
     const pool = new FakePool();
     server = new ControlServer(pool, makeConfig(port), testDeps());
     server.start();
-    await waitReady(base);
+    base = await waitReady(server!);
 
     // /ensure A → loads it; baseUrl normalized to include /v1.
     const a = await (await post(base, 'A')).json();
@@ -223,12 +224,12 @@ describe('ControlServer', () => {
   });
 
   it('never stops a model a sidebar turn is using to make room (U04-01)', async () => {
-    const port = 18842;
-    const base = `http://127.0.0.1:${port}`;
+    const port = 0;
+    let base = '';
     const pool = new FakePool();
     server = new ControlServer(pool, makeConfig(port), testDeps());
     server.start();
-    await waitReady(base);
+    base = await waitReady(server!);
 
     // A is resident with no control-server hold, but a sidebar turn pins it.
     await pool.acquire('A');
@@ -243,15 +244,15 @@ describe('ControlServer', () => {
   });
 
   it('strips @profile / expands aliases on /ensure and keys holds by base (F6)', async () => {
-    const port = 18820;
-    const base = `http://127.0.0.1:${port}`;
+    const port = 0;
+    let base = '';
     const pool = new FakePool();
     const cfg = makeConfig(port);
     cfg.profiles = { main: {}, worker: {} };
     cfg.aliases = { 'A-legacy': 'A@worker' };
     server = new ControlServer(pool, cfg, testDeps());
     server.start();
-    await waitReady(base);
+    base = await waitReady(server!);
 
     // @profile resolves to base A for loading.
     const r = await (await post(base, 'A@main')).json();
@@ -266,14 +267,14 @@ describe('ControlServer', () => {
   });
 
   it('/models lists profiles and derived capabilities per base (F6)', async () => {
-    const port = 18821;
-    const base = `http://127.0.0.1:${port}`;
+    const port = 0;
+    let base = '';
     const cfg = makeConfig(port);
     cfg.profiles = { main: {}, worker: {} };
     cfg.models[0].mmproj_path = '/a-mmproj.gguf'; // A → vision
     server = new ControlServer(new FakePool(), cfg, testDeps());
     server.start();
-    await waitReady(base);
+    base = await waitReady(server!);
 
     const { models } = await (await fetch(`${base}/models`)).json();
     const a = models.find((m: { name: string }) => m.name === 'A');
@@ -282,19 +283,19 @@ describe('ControlServer', () => {
   });
 
   it('404s an unknown model and an unknown route', async () => {
-    const port = 18800;
-    const base = `http://127.0.0.1:${port}`;
+    const port = 0;
+    let base = '';
     server = new ControlServer(new FakePool(), makeConfig(port), testDeps());
     server.start();
-    await waitReady(base);
+    base = await waitReady(server!);
 
     expect((await post(base, 'Z')).status).toBe(404);
     expect((await fetch(`${base}/nope`)).status).toBe(404);
   });
 
   it('/ensure blocks until the readiness probe passes (cold load)', async () => {
-    const port = 18801;
-    const base = `http://127.0.0.1:${port}`;
+    const port = 0;
+    let base = '';
     let serving = false;
     server = new ControlServer(
       new FakePool(),
@@ -305,7 +306,7 @@ describe('ControlServer', () => {
       }),
     );
     server.start();
-    await waitReady(base);
+    base = await waitReady(server!);
 
     const inflight = post(base, 'A');
     // Backend not serving yet → request stays pending.
@@ -323,8 +324,8 @@ describe('ControlServer', () => {
   });
 
   it('/ensure returns 502 when the backend never becomes ready', async () => {
-    const port = 18802;
-    const base = `http://127.0.0.1:${port}`;
+    const port = 0;
+    let base = '';
     server = new ControlServer(
       new FakePool(),
       makeConfig(port),
@@ -334,7 +335,7 @@ describe('ControlServer', () => {
       }),
     );
     server.start();
-    await waitReady(base);
+    base = await waitReady(server!);
 
     const res = await post(base, 'A');
     expect(res.status).toBe(502);
@@ -342,13 +343,13 @@ describe('ControlServer', () => {
   });
 
   it('serializes concurrent /ensure + /release; holds never goes negative', async () => {
-    const port = 18803;
-    const base = `http://127.0.0.1:${port}`;
+    const port = 0;
+    let base = '';
     const pool = new FakePool();
     pool.acquireDelayMs = 10; // force the ensure calls to overlap
     server = new ControlServer(pool, makeConfig(port, 4), testDeps());
     server.start();
-    await waitReady(base);
+    base = await waitReady(server!);
 
     // 4 concurrent same-model ensures interleaved with releases.
     const ensures = Array.from({ length: 4 }, () => post(base, 'A'));
@@ -364,12 +365,12 @@ describe('ControlServer', () => {
   });
 
   it('does not evict a model acquired within the eviction grace window', async () => {
-    const port = 18804;
-    const base = `http://127.0.0.1:${port}`;
+    const port = 0;
+    let base = '';
     const pool = new FakePool();
     server = new ControlServer(pool, makeConfig(port, 1), testDeps({ evictionGraceMs: 10_000 }));
     server.start();
-    await waitReady(base);
+    base = await waitReady(server!);
 
     // Acquire A then immediately release it → holds 0 but lastAcquiredAt is fresh.
     expect((await post(base, 'A')).status).toBe(200);
@@ -383,12 +384,12 @@ describe('ControlServer', () => {
   });
 
   it('422s a cloud-provider model with the reason, without evicting a loaded local model', async () => {
-    const port = 18806;
-    const base = `http://127.0.0.1:${port}`;
+    const port = 0;
+    let base = '';
     const pool = new FakePool();
     server = new ControlServer(pool, makeConfig(port, 1), testDeps());
     server.start();
-    await waitReady(base);
+    base = await waitReady(server!);
 
     // Load A, release the hold → A is idle and would be evictable.
     expect((await post(base, 'A')).status).toBe(200);
@@ -403,11 +404,11 @@ describe('ControlServer', () => {
   });
 
   it('GET /models golden shape: every pre-existing field survives, new fields are additive-only', async () => {
-    const port = 18826;
-    const base = `http://127.0.0.1:${port}`;
+    const port = 0;
+    let base = '';
     server = new ControlServer(new FakePool(), makeFuzzyConfig(port), testDeps());
     server.start();
-    await waitReady(base);
+    base = await waitReady(server!);
 
     const catalog = await (await fetch(`${base}/models`)).json();
     expect(catalog.contractVersion).toBe(1);
@@ -452,12 +453,12 @@ describe('ControlServer', () => {
   });
 
   it('/ensure and /unload accept a fuzzy short_name and resolve to the base model', async () => {
-    const port = 18827;
-    const base = `http://127.0.0.1:${port}`;
+    const port = 0;
+    let base = '';
     const pool = new FakePool();
     server = new ControlServer(pool, makeFuzzyConfig(port), testDeps());
     server.start();
-    await waitReady(base);
+    base = await waitReady(server!);
 
     // "gemma4" is an exact short_name — resolves unambiguously even though
     // another configured model ("gemma4-12b") shares the prefix.
@@ -472,11 +473,11 @@ describe('ControlServer', () => {
   });
 
   it('/ensure, /release, and /unload 400 with candidates on an ambiguous fuzzy name', async () => {
-    const port = 18828;
-    const base = `http://127.0.0.1:${port}`;
+    const port = 0;
+    let base = '';
     server = new ControlServer(new FakePool(), makeFuzzyConfig(port), testDeps());
     server.start();
-    await waitReady(base);
+    base = await waitReady(server!);
 
     for (const route of ['ensure', 'release', 'unload'] as const) {
       const res = await post(base, 'gemma4-', route);
@@ -488,11 +489,11 @@ describe('ControlServer', () => {
   });
 
   it('publishes a versioned execution and availability contract on GET /models', async () => {
-    const port = 18807;
-    const base = `http://127.0.0.1:${port}`;
+    const port = 0;
+    let base = '';
     server = new ControlServer(new FakePool(), makeConfig(port), testDeps());
     server.start();
-    await waitReady(base);
+    base = await waitReady(server!);
 
     const catalog = await (await fetch(`${base}/models`)).json();
     expect(catalog.contractVersion).toBe(1);
@@ -519,11 +520,11 @@ describe('ControlServer', () => {
   });
 
   it('resolves group-inherited providers before publishing model routing metadata', async () => {
-    const port = 18829;
-    const base = `http://127.0.0.1:${port}`;
+    const port = 0;
+    let base = '';
     server = new ControlServer(new FakePool(), makeGroupedProviderConfig(port), testDeps());
     server.start();
-    await waitReady(base);
+    base = await waitReady(server!);
 
     const catalog = await (await fetch(`${base}/models`)).json();
     const byName = Object.fromEntries(catalog.models.map((m: { name: string }) => [m.name, m]));
@@ -548,8 +549,8 @@ describe('ControlServer', () => {
   });
 
   it('marks CLI agents unservable — they are driven in-process, not over the control API', async () => {
-    const port = 18831;
-    const base = `http://127.0.0.1:${port}`;
+    const port = 0;
+    let base = '';
     const config = {
       models: [
         { name: 'A', provider: 'llama.cpp', gguf_path: '/a.gguf' },
@@ -562,7 +563,7 @@ describe('ControlServer', () => {
     } as ForgeConfig;
     server = new ControlServer(new FakePool(), config, testDeps());
     server.start();
-    await waitReady(base);
+    base = await waitReady(server!);
 
     const catalog = await (await fetch(`${base}/models`)).json();
     const byName = Object.fromEntries(catalog.models.map((m: { name: string }) => [m.name, m]));
@@ -576,11 +577,11 @@ describe('ControlServer', () => {
   });
 
   it('changes catalog revision and reports capacity-busy models', async () => {
-    const port = 18823;
-    const base = `http://127.0.0.1:${port}`;
+    const port = 0;
+    let base = '';
     server = new ControlServer(new FakePool(), makeConfig(port), testDeps());
     server.start();
-    await waitReady(base);
+    base = await waitReady(server!);
 
     const initial = await (await fetch(`${base}/models`)).json();
     expect((await post(base, 'A')).status).toBe(200);
@@ -607,13 +608,13 @@ describe('ControlServer', () => {
   });
 
   it('reports loading while a backend acquisition is in flight', async () => {
-    const port = 18824;
-    const base = `http://127.0.0.1:${port}`;
+    const port = 0;
+    let base = '';
     const pool = new FakePool();
     pool.acquireDelayMs = 100;
     server = new ControlServer(pool, makeConfig(port), testDeps());
     server.start();
-    await waitReady(base);
+    base = await waitReady(server!);
 
     const pending = post(base, 'A');
     await new Promise((resolve) => setTimeout(resolve, 20));
@@ -627,12 +628,12 @@ describe('ControlServer', () => {
   });
 
   it('reports cloud chat as ready when the in-host proxy is available', async () => {
-    const port = 18825;
-    const base = `http://127.0.0.1:${port}`;
+    const port = 0;
+    let base = '';
     const chatProxy = async () => ({ content: '', reasoning: '', finishReason: 'stop' });
     server = new ControlServer(new FakePool(), makeConfig(port), testDeps({ chatProxy }));
     server.start();
-    await waitReady(base);
+    base = await waitReady(server!);
 
     const catalog = await (await fetch(`${base}/models`)).json();
     expect(catalog.models.find((m: { name: string }) => m.name === 'grok')).toMatchObject({
@@ -643,14 +644,14 @@ describe('ControlServer', () => {
   });
 
   it('evicts ALL idle local models before loading a different one, even under capacity', async () => {
-    const port = 18808;
-    const base = `http://127.0.0.1:${port}`;
+    const port = 0;
+    let base = '';
     const pool = new FakePool();
     // capacity 4: slots are NOT the constraint — VRAM-policy eviction must
     // still unload idle A before spawning B (docs/archive/validation/RELAY_SMOKE_FINDINGS.md F4).
     server = new ControlServer(pool, makeConfig(port, 4), testDeps());
     server.start();
-    await waitReady(base);
+    base = await waitReady(server!);
 
     expect((await post(base, 'A')).status).toBe(200);
     expect((await (await post(base, 'A', 'release')).json()).released).toBe(true);
@@ -664,12 +665,12 @@ describe('ControlServer', () => {
   });
 
   it('POST /unload tears down an idle model, refuses a held one, 422s cloud', async () => {
-    const port = 18809;
-    const base = `http://127.0.0.1:${port}`;
+    const port = 0;
+    let base = '';
     const pool = new FakePool();
     server = new ControlServer(pool, makeConfig(port, 4), testDeps());
     server.start();
-    await waitReady(base);
+    base = await waitReady(server!);
 
     // Held → 409, still loaded.
     expect((await post(base, 'A')).status).toBe(200);
@@ -693,11 +694,11 @@ describe('ControlServer', () => {
   });
 
   it('exposes per-model holds on GET /models', async () => {
-    const port = 18805;
-    const base = `http://127.0.0.1:${port}`;
+    const port = 0;
+    let base = '';
     server = new ControlServer(new FakePool(), makeConfig(port), testDeps());
     server.start();
-    await waitReady(base);
+    base = await waitReady(server!);
 
     await post(base, 'A');
     const { models } = await (await fetch(`${base}/models`)).json();
@@ -710,19 +711,19 @@ describe('ControlServer', () => {
     fetch(`${base}/chat`, { method: 'POST', body: JSON.stringify(body) });
 
   it('POST /chat 501s when no chatProxy is wired', async () => {
-    const port = 18810;
-    const base = `http://127.0.0.1:${port}`;
+    const port = 0;
+    let base = '';
     server = new ControlServer(new FakePool(), makeConfig(port), testDeps());
     server.start();
-    await waitReady(base);
+    base = await waitReady(server!);
 
     const res = await chat(base, { model: 'grok', messages: [{ role: 'user', content: 'hi' }] });
     expect(res.status).toBe(501);
   });
 
   it('POST /chat validates model and messages, then delegates to the proxy', async () => {
-    const port = 18811;
-    const base = `http://127.0.0.1:${port}`;
+    const port = 0;
+    let base = '';
     const chatProxy = async (req: { model: string; messages: unknown[] }) => ({
       content: `echo:${req.model}:${req.messages.length}`,
       reasoning: '',
@@ -730,7 +731,7 @@ describe('ControlServer', () => {
     });
     server = new ControlServer(new FakePool(), makeConfig(port), testDeps({ chatProxy }));
     server.start();
-    await waitReady(base);
+    base = await waitReady(server!);
 
     expect((await chat(base, { messages: [{ role: 'user', content: 'x' }] })).status).toBe(400);
     expect((await chat(base, { model: 'grok' })).status).toBe(400);
@@ -748,8 +749,8 @@ describe('ControlServer', () => {
   });
 
   it('POST /chat forwards tools and returns buffered tool_calls in OpenAI shape', async () => {
-    const port = 18813;
-    const base = `http://127.0.0.1:${port}`;
+    const port = 0;
+    let base = '';
     const toolCalls = [
       { id: 'c1', type: 'function' as const, function: { name: 'read_file', arguments: '{}' } },
     ];
@@ -762,7 +763,7 @@ describe('ControlServer', () => {
     });
     server = new ControlServer(new FakePool(), makeConfig(port), testDeps({ chatProxy }));
     server.start();
-    await waitReady(base);
+    base = await waitReady(server!);
 
     const tools = [
       { type: 'function', function: { name: 'read_file', description: 'd', parameters: {} } },
@@ -787,14 +788,14 @@ describe('ControlServer', () => {
   });
 
   it('POST /chat maps a ProxyError status faithfully', async () => {
-    const port = 18812;
-    const base = `http://127.0.0.1:${port}`;
+    const port = 0;
+    let base = '';
     const chatProxy = async () => {
       throw new ProxyError(422, 'use /ensure for local models');
     };
     server = new ControlServer(new FakePool(), makeConfig(port), testDeps({ chatProxy }));
     server.start();
-    await waitReady(base);
+    base = await waitReady(server!);
 
     const res = await chat(base, { model: 'A', messages: [{ role: 'user', content: 'x' }] });
     expect(res.status).toBe(422);

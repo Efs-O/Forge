@@ -75,25 +75,28 @@ describe('HealthCheck', () => {
   });
 
   it('stops polling and removes its listener when the signal aborts mid-wait', async () => {
+    vi.useFakeTimers();
     const fetchMock = vi.fn(async () => {
       throw new TypeError('fetch failed');
     });
     vi.stubGlobal('fetch', fetchMock);
     const ctrl = new AbortController();
+    const setIntervalSpy = vi.spyOn(globalThis, 'setInterval');
+    const clearIntervalSpy = vi.spyOn(globalThis, 'clearInterval');
 
     const pending = waitForHealthy(
       { baseUrl: 'http://127.0.0.1:8080', intervalMs: 5, timeoutMs: 60_000 },
       undefined,
       ctrl.signal,
     );
-    await new Promise((resolve) => setTimeout(resolve, 20));
+    await vi.advanceTimersByTimeAsync(5);
     ctrl.abort();
     await expect(pending).resolves.toEqual({ ok: false, reason: 'aborted', message: 'Aborted' });
 
-    // A second abort must not resurrect the settled check: the listener is
-    // removed in `done`, so nothing re-fires.
+    expect(setIntervalSpy).toHaveBeenCalledOnce();
+    expect(clearIntervalSpy).toHaveBeenCalledWith(setIntervalSpy.mock.results[0]?.value);
     const pollsAfter = fetchMock.mock.calls.length;
-    await new Promise((resolve) => setTimeout(resolve, 30));
+    await vi.advanceTimersByTimeAsync(30);
     expect(fetchMock.mock.calls.length).toBe(pollsAfter);
   });
 

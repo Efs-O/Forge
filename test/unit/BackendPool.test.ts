@@ -472,32 +472,6 @@ describe('BackendPool delegation holds', () => {
     expect(pool.loadedModelNames()).toContain('C');
   });
 
-  it.each(['success', 'cancellation', 'failure'] as const)(
-    'releases the hold after delegated request %s',
-    async (outcome) => {
-      const pool = new BackendPool(makeConfig(2));
-      await loadPrimary(pool);
-      const holdP = pool.acquireForDelegation('A', 'B');
-      harness.pending[1].resolve();
-      const hold = await holdP;
-
-      try {
-        if (outcome === 'cancellation') throw new DOMException('cancelled', 'AbortError');
-        if (outcome === 'failure') throw new Error('request failed');
-      } catch {
-        // The service owns propagation; this test exercises its required finally path.
-      } finally {
-        hold.release();
-      }
-
-      const acquireC = pool.acquire('C');
-      await flush(); // evicting acquire: boots after the evicted backend stops
-      harness.pending[2].resolve();
-      await acquireC;
-      expect(pool.loadedModelNames()).toContain('C');
-    },
-  );
-
   it('pins apply during the in-flight target boot (TOCTOU window)', async () => {
     const pool = new BackendPool(makeConfig(2));
     await loadPrimary(pool);

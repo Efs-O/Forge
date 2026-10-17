@@ -35,16 +35,17 @@ describe('background shell exit notification', () => {
   it('notifies once on natural exit with bounded tails', async () => {
     const listener = vi.fn();
     manager.onNotifiedExit(listener);
-    manager.start({
+    const execution = manager.start({
       command: process.execPath,
       args: ['-e', 'process.stdout.write("x".repeat(3000))'],
       cwd: process.cwd(),
       notifyConversationId: 'chat',
     });
-    await vi.waitFor(() => expect(listener).toHaveBeenCalledTimes(1));
+    await vi.waitFor(() => {
+      expect(manager.list().find((item) => item.id === execution.id)?.status).toBe('completed');
+    });
     expect(listener.mock.calls[0]?.[0]).toMatchObject({ conversationId: 'chat', status: 'completed' });
     expect(listener.mock.calls[0]?.[0].stdoutTail).toHaveLength(2_000);
-    await new Promise((resolve) => setTimeout(resolve, 20));
     expect(listener).toHaveBeenCalledTimes(1);
   });
 

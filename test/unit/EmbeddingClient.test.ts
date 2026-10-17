@@ -17,10 +17,9 @@ function stubFetch(): { requests: string[][] } {
       return {
         ok: true,
         json: async () => ({
-          data: body.input.map((text, index) => ({
-            index,
-            // Vector encodes the input length so ordering is observable.
-            embedding: [text.length, index],
+          data: body.input.map((text) => ({
+            // Vector encodes input identity independently of request-local index.
+            embedding: [text.charCodeAt(0), text.charCodeAt(1), text.length],
           })),
         }),
       };
@@ -77,7 +76,7 @@ describe('EmbeddingClient token-budget batching', () => {
     expect(requests.flat()).toEqual(docs);
     expect(vectors).toHaveLength(5);
     for (const vector of vectors) {
-      expect(vector[0]).toBe(2000); // input length preserved
+      expect(vector).toEqual([98, 98, 2000]); // input identity and length preserved
     }
   });
 
@@ -86,15 +85,19 @@ describe('EmbeddingClient token-budget batching', () => {
     const client = new EmbeddingClient(
       () => 'http://127.0.0.1:8091',
       () => 'none',
-      () => 100, // tiny budget to force many sub-batches
+      () => 12, // tiny budget to force multiple sub-batches
     );
     const docs = ['one', 'two', 'three', 'four', 'five'];
     const vectors = await client.embedDocuments(docs);
 
+    expect(requests.length).toBeGreaterThan(1);
     // Concatenated request inputs reproduce the original order.
     expect(requests.flat()).toEqual(docs);
-    // Response vectors are re-indexed to their original global position.
-    expect(vectors.map((v) => v[1])).toEqual([0, 1, 2, 3, 4]);
+    // Each returned vector identifies its document, even when each response
+    // starts its own index at zero.
+    expect(vectors).toEqual(
+      docs.map((text) => [text.charCodeAt(0), text.charCodeAt(1), text.length]),
+    );
   });
 
   it('throws a precise local error when a single input exceeds the window', async () => {
