@@ -1,7 +1,8 @@
 import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
+import * as atomicWrites from '../../src/util/atomicWrite';
 import {
   ControlServerRegistry,
   controlServerRegistryPath,
@@ -38,9 +39,22 @@ describe('ControlServerRegistry', () => {
 
   it('publishes atomically and replaces a stale owner record', () => {
     const { registry, filePath } = temporaryRegistry();
+    const write = vi.spyOn(atomicWrites, 'writeFileAtomicSync');
     registry.publish(record(100));
     registry.publish(record(200));
 
+    expect(write).toHaveBeenNthCalledWith(
+      1,
+      filePath,
+      `${JSON.stringify(record(100), null, 2)}\n`,
+      { mode: 0o600 },
+    );
+    expect(write).toHaveBeenNthCalledWith(
+      2,
+      filePath,
+      `${JSON.stringify(record(200), null, 2)}\n`,
+      { mode: 0o600 },
+    );
     expect(JSON.parse(fs.readFileSync(filePath, 'utf8'))).toEqual(record(200));
     expect(fs.readdirSync(path.dirname(filePath))).toEqual(['control-server.json']);
   });
