@@ -30,6 +30,7 @@ function render(
         conversationId: 'chat-1',
         active,
         activityView: 'full',
+        thinkingDisplay: 'preview',
       }),
     );
   });

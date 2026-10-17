@@ -23,7 +23,9 @@
 .activity-group-toggle:not(:disabled):hover {
   background: var(--vscode-list-hoverBackground, #2a2d2e);
 }
-.activity-group-toggle:disabled { cursor: default; }
+.activity-group-toggle:disabled {
+  cursor: default;
+}
 
 .activity-group-chevron {
   display: inline-flex;
@@ -36,7 +38,9 @@
 .activity-group-status {
   color: var(--forge-tool-ok);
 }
-.activity-group-status.is-live { color: var(--forge-clanker); }
+.activity-group-status.is-live {
+  color: var(--forge-clanker);
+}
 
 .activity-group-status.is-failed,
 .activity-group-failed {
@@ -50,9 +54,16 @@
   color: var(--vscode-editorWarning-foreground, #cca700);
 }
 
-.activity-group-label { flex: 0 0 auto; white-space: nowrap; }
-.activity-group-count { color: var(--vscode-descriptionForeground); }
-.activity-group-word { color: var(--vscode-foreground); }
+.activity-group-label {
+  flex: 0 0 auto;
+  white-space: nowrap;
+}
+.activity-group-count {
+  color: var(--vscode-descriptionForeground);
+}
+.activity-group-word {
+  color: var(--vscode-foreground);
+}
 .activity-group-failed + .activity-group-edit-stats {
   margin-left: 2px;
 }
@@ -84,8 +95,7 @@
   color: var(--vscode-descriptionForeground);
   white-space: nowrap;
 }
-.activity-group-edits,
-.activity-group-thinking {
+.activity-group-edits {
   color: var(--vscode-descriptionForeground);
   min-width: 0;
   overflow: hidden;

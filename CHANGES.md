@@ -70,6 +70,8 @@
 - Closing the browser session now forgets origins approved during that session while keeping configured pre-approvals.
 - Closing a tab now explains when an active delegation still holds its model and prevents it from being unloaded.
 
+- **Sidebar thinking and tool output:** Show thinking blocks in the transcript and short tool output inline; fold long blocks to a readable tail.
+
 ## 0.17.42
 
 - On Windows, Forge's saved files now actually reach the disk before they replace the old copy. Every save (open chats, history, jobs, checkpoints, the agent's own file edits) wrote a temporary file, reopened it read-only and asked Windows to flush it. Windows refuses to flush a read-only handle, and Forge ignored the refusal, so nothing was ever flushed. After a power loss Windows kept the file's name and size but not its contents. On 2026-10-17 an open chat came back as 482,734 zero bytes, and Forge set it aside as `open/<id>.corrupt-<time>.json.bad`. Forge now flushes through the handle it wrote with, and a failed flush is reported instead of skipped. The session log in `~/.forge/sessions/` still held that chat, and it was rebuilt from there.

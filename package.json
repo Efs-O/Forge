@@ -406,6 +406,21 @@
           "default": "grouped",
           "description": "Choose how Forge displays tool activity in the sidebar. Changes apply immediately."
         },
+        "forge.thinkingDisplay": {
+          "type": "string",
+          "enum": [
+            "preview",
+            "open",
+            "collapsed"
+          ],
+          "enumDescriptions": [
+            "Show thinking live and fold long finished blocks to their last lines.",
+            "Keep thinking blocks open unless you collapse an individual block.",
+            "Show thinking headers only until you expand an individual block."
+          ],
+          "default": "preview",
+          "description": "Choose how Forge displays model thinking in the sidebar. Changes apply immediately."
+        },
         "forge.terminal.watchUserCommands": {
           "type": "boolean",
           "default": true,

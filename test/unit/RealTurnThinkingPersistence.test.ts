@@ -15,7 +15,7 @@ import { chatMessagesFromSlim } from '../../src/sidebar/sessionTypes';
 import { displayPersistMessages } from '../../src/sidebar/sessionProjections';
 import type { ConversationPersisted } from '../../src/sidebar/sessionTypes';
 import { mergeSyncedMessages, type AppMessage } from '../../webview-ui/src/messageOps';
-import { isReasoningOnly } from '../../webview-ui/src/components/ThinkingGroup';
+import { isReasoningOnly } from '../../webview-ui/src/activityRows';
 
 const FIXTURE = join(__dirname, '..', 'fixtures', 'real-conv-9cac0b12.json');
 const SENTENCE = 'the controls grid in both the start and pause overlays';

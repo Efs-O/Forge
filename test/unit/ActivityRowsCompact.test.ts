@@ -24,11 +24,13 @@ function steps(rows: Row[]) {
 }
 
 describe('compact activity rows', () => {
-  it('folds thoughts forward and keeps a trailing thought run as a thinking row', () => {
+  it('keeps thoughts at transcript level before tool steps', () => {
     const thoughts = [msg('r1', 'assistant', '', { reasoning: 'one' }), msg('r2', 'assistant', '', { reasoning: 'two' })];
     const rows = toCompactRows([...thoughts, tool('t1', 'read_file'), ...thoughts.map((m) => ({ ...m, id: `tail-${m.id}` }))]);
-    expect(rows[0]).toMatchObject({ kind: 'step', step: { attempts: [{ thoughts, tools: [expect.objectContaining({ id: 't1' })] }] } });
-    expect(rows[1]).toMatchObject({ kind: 'thinkingGroup', steps: [{ id: 'tail-r1' }, { id: 'tail-r2' }] });
+    expect(rows.map((row) => row.kind)).toEqual(['thinkingGroup', 'step', 'thinkingGroup']);
+    expect(rows[0]).toMatchObject({ kind: 'thinkingGroup', steps: thoughts });
+    expect(rows[1]).toMatchObject({ kind: 'step', step: { attempts: [{ tools: [expect.objectContaining({ id: 't1' })] }] } });
+    expect(rows[2]).toMatchObject({ kind: 'thinkingGroup', steps: [{ id: 'tail-r1' }, { id: 'tail-r2' }] });
   });
 
   it('attaches matching diffs by call id, including diffs after all parallel calls', () => {
@@ -51,23 +53,21 @@ describe('compact activity rows', () => {
     expect(rows[1]).toMatchObject({ kind: 'diffGroup', diffs: [{ id: 'wrong' }, { id: 'legacy' }] });
   });
 
-  it('merges a failed single-call round with its same-target retry', () => {
+  it('keeps reasoning before a retry as a top-level block', () => {
     const failed = tool('failed', 'edit_file', 'a.ts', { toolCallId: 'one', toolIsError: true });
     const retry = tool('retry', 'edit_file', 'a.ts', { toolCallId: 'two' });
     const thought = pause('retry-thought');
     const rows = toCompactRows([failed, thought, retry]);
-    expect(steps(rows)).toHaveLength(1);
-    expect(rows[0]).toMatchObject({
-      kind: 'step',
-      step: { attempts: [{ thoughts: [], tools: [failed] }, { thoughts: [thought], tools: [retry] }] },
-    });
+    expect(rows.map((row) => row.kind)).toEqual(['step', 'thinkingGroup', 'step']);
+    expect(steps(rows)).toHaveLength(2);
+    expect(rows[1]).toMatchObject({ kind: 'thinkingGroup', steps: [thought] });
   });
 
-  it('merges plain repeats when neither attempt edits a file', () => {
+  it('keeps plain repeats separated by reasoning in transcript order', () => {
     const one = tool('one', 'render_html_to_image', 'page.html');
     const two = tool('two', 'render_html_to_image', 'page.html');
-    expect(toCompactRows([one, pause('between'), two])).toMatchObject([
-      { kind: 'step', step: { attempts: [{ tools: [one] }, { tools: [two] }] } },
+    expect(toCompactRows([one, pause('between'), two]).map((row) => row.kind)).toEqual([
+      'step', 'thinkingGroup', 'step',
     ]);
   });
 
@@ -112,7 +112,7 @@ describe('compact activity rows', () => {
     expect(displayDetail("cd 'a b' && cd sub && sed -n 1p f")).toBe('sed -n 1p f');
   });
 
-  it('renders the nine-call acceptance sequence as seven steps plus trailing thoughts', () => {
+  it('keeps thinking blocks between the nine calls in transcript order', () => {
     const sequence = [
       tool('1', 'read_file', 'a.ts'),
       pause('r1'),
@@ -134,11 +134,16 @@ describe('compact activity rows', () => {
       msg('tail', 'assistant', '', { reasoning: 'final thought' }),
     ];
     const rows = toCompactRows(sequence);
-    expect(steps(rows)).toHaveLength(7);
+    expect(steps(rows)).toHaveLength(9);
+    expect(rows.map((row) => row.kind)).toEqual([
+      'step', 'thinkingGroup', 'step', 'thinkingGroup', 'step', 'thinkingGroup',
+      'step', 'thinkingGroup', 'step', 'thinkingGroup', 'step', 'thinkingGroup',
+      'step', 'thinkingGroup', 'step', 'thinkingGroup', 'step', 'thinkingGroup',
+    ]);
     expect(rows.at(-1)?.kind).toBe('thinkingGroup');
   });
 
-  it('keeps a step key stable when a thought-led retry appends to a step that began without one', () => {
+  it('keeps the first step key stable when a thought-led retry becomes a new step', () => {
     const first = tool('first', 'edit_file', 'a.ts', { toolIsError: true });
     const before = steps(toCompactRows([first]))[0]!;
     const after = steps(toCompactRows([first, pause('retry-thought'), tool('retry', 'edit_file', 'a.ts')]))[0]!;
@@ -146,13 +151,13 @@ describe('compact activity rows', () => {
     expect(rowKey(after)).toBe('first');
   });
 
-  it('keeps a step key stable when a retry appends', () => {
+  it('keeps a step key stable when a same-target retry appends without new reasoning', () => {
     const first = tool('first', 'edit_file', 'a.ts', { toolIsError: true });
     const retry = tool('retry', 'edit_file', 'a.ts');
     const initialThought = pause('initial-thought');
     const before = steps(toCompactRows([initialThought, first]))[0]!;
-    const after = steps(toCompactRows([initialThought, first, pause('retry-thought'), retry]))[0]!;
-    expect(rowKey(before)).toBe('initial-thought');
+    const after = steps(toCompactRows([initialThought, first, retry]))[0]!;
+    expect(rowKey(before)).toBe('first');
     expect(rowKey(after)).toBe(rowKey(before));
   });
 

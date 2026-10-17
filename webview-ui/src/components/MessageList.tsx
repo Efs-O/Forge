@@ -10,6 +10,7 @@ import { ActivityGroup } from './ActivityGroup';
 import { QueuedPromptRow } from './QueuedPromptRow';
 import { PendingToolCallRow } from './PendingToolCallRow';
 import type { PendingToolCall } from '../pendingToolCalls';
+import type { ThinkingDisplayMode } from '../../../src/sidebar/activityViewSetting';
 import { isScrollUpIntent, nextScrolledUp } from '../scrollFollow';
 
 interface Props {
@@ -43,6 +44,7 @@ interface Props {
    */
   active: boolean;
   activityView: ActivityViewMode;
+  thinkingDisplay: ThinkingDisplayMode;
   /** Tool calls the model is still writing; grouped view keeps these in its live card. */
   pendingToolCalls?: readonly PendingToolCall[];
 }
@@ -60,6 +62,7 @@ export function MessageList({
   resumedNote,
   active,
   activityView,
+  thinkingDisplay,
   pendingToolCalls = [],
 }: Props): React.ReactElement {
   const containerRef = useRef<HTMLDivElement>(null);
@@ -284,9 +287,9 @@ export function MessageList({
         }
       }
     };
-    // Expanding a thinking row and streaming text into its nested pane mutate
-    // the DOM without changing MessageList's `messages` prop. Follow those
-    // changes too, but never override a reader who intentionally scrolled up.
+    // Expanding a thinking block and streaming text into its body mutate the
+    // DOM without changing MessageList's `messages` prop. Follow those changes
+    // too, but never override a reader who intentionally scrolled up.
     const observer = new MutationObserver(() => {
       syncRows();
       if (!activeRef.current) return;
@@ -368,17 +371,21 @@ export function MessageList({
         row.kind === 'diffGroup' ? (
           <DiffGroup key={rowKey(row)} diffs={row.diffs} />
         ) : row.kind === 'thinkingGroup' ? (
-          <ThinkingGroup key={rowKey(row)} steps={row.steps} />
+          <ThinkingGroup
+            key={rowKey(row)}
+            steps={row.steps}
+            displayMode={thinkingDisplay}
+            streaming={streaming}
+          />
         ) : row.kind === 'toolGroup' ? (
           <ToolGroup key={rowKey(row)} tools={row.tools} />
         ) : row.kind === 'step' ? (
-          <ActivityRow key={rowKey(row)} step={row.step} streaming={streaming} />
+          <ActivityRow key={rowKey(row)} step={row.step} />
         ) : row.kind === 'activityGroup' ? (
           <ActivityGroup
             key={rowKey(row)}
             items={row.items}
             live={streaming && rowIndex === rows.length - 1}
-            streaming={streaming}
             pendingCalls={
               pendingInLastGroup && rowIndex === rows.length - 1 ? pendingToolCalls : undefined
             }
@@ -394,7 +401,7 @@ export function MessageList({
         ),
       )}
       {groupedPending && !pendingInLastGroup && (
-        <ActivityGroup items={[]} live streaming={streaming} pendingCalls={pendingToolCalls} />
+        <ActivityGroup items={[]} live pendingCalls={pendingToolCalls} />
       )}
       {!groupedPending &&
         pendingToolCalls.map((call) => (

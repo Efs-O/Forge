@@ -84,9 +84,12 @@ describe('activity row folding', () => {
     expect(toRows(messages, 'full')).toEqual([{ kind: 'toolGroup', tools: messages }]);
   });
 
-  it('retains content-bearing assistant messages as standalone rows', () => {
+  it('renders reasoning before the reply as a separate top-level row', () => {
     const message = row('answer', 'assistant', 'The work is done.', { reasoning: 'private thought' });
-    expect(toRows([message], 'full')).toEqual([{ kind: 'message', message, index: 0 }]);
+    expect(toRows([message], 'full')).toEqual([
+      { kind: 'thinkingGroup', steps: [{ ...message, content: '' }] },
+      { kind: 'message', message: { id: 'answer-answer', role: 'assistant', content: 'The work is done.' }, index: 0 },
+    ]);
   });
 
   it('accepts all current mode names in its public type contract', () => {

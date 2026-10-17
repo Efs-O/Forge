@@ -11,7 +11,7 @@ import {
 const summarize = (items: ActivityGroupItem[]) => summarizeGroup(items);
 
 /** Tool rounds as attempts with no reasoning before them. */
-const attempts = (...rounds: AppMessage[][]): StepAttempt[] => rounds.map((tools) => ({ thoughts: [], tools }));
+const attempts = (...rounds: AppMessage[][]): StepAttempt[] => rounds.map((tools) => ({ tools }));
 
 function message(id: string, role: AppMessage['role'], content = '', extra: Partial<AppMessage> = {}): AppMessage {
   return { id, role, content, ...extra };
@@ -42,18 +42,15 @@ describe('groupActivity', () => {
       .toEqual(['activityGroup', kind, 'activityGroup']);
   });
 
-  it('groups a single step with surrounding thoughts', () => {
+  it('keeps thoughts at top level around a collapsed tool group', () => {
     const before: Row = { kind: 'thinkingGroup', steps: [message('thought', 'assistant', '', { reasoning: 'thinking' })] };
     const only = step('only');
     const after: Row = { kind: 'thinkingGroup', steps: [message('tail', 'assistant', '', { reasoning: 'tail' })] };
-    expect(groupActivity([before, only, after])).toEqual([{
-      kind: 'activityGroup',
-      items: [
-        { kind: 'thinkingGroup', steps: before.steps },
-        { kind: 'step', step: only.step },
-        { kind: 'thinkingGroup', steps: after.steps },
-      ],
-    }]);
+    expect(groupActivity([before, only, after])).toEqual([
+      before,
+      { kind: 'activityGroup', items: [{ kind: 'step', step: only.step }] },
+      after,
+    ]);
   });
 
   it('passes a thinking-only run through unchanged', () => {
@@ -64,25 +61,20 @@ describe('groupActivity', () => {
     expect(groupActivity(rows)).toEqual(rows);
   });
 
-  it('includes interleaved thinking rows and preserves every item in order', () => {
+  it('splits tool groups around top-level thinking rows', () => {
     const first = step('first');
     const thought: Row = { kind: 'thinkingGroup', steps: [message('thought', 'assistant', '', { reasoning: 'ponder' })] };
     const second = step('second');
-    const grouped = groupOf(first, thought, second);
-    expect(grouped.kind).toBe('activityGroup');
-    if (grouped.kind === 'activityGroup') {
-      expect(grouped.items.map((item) => item.kind)).toEqual(['step', 'thinkingGroup', 'step']);
-      expect(grouped.items.flatMap((item) => item.kind === 'step'
-        ? item.step.attempts.flatMap((a) => a.tools).map((tool) => tool.id)
-        : item.steps.map((msg) => msg.id))).toEqual(['first-tool', 'thought', 'second-tool']);
-    }
+    expect(groupActivity([first, thought, second]).map((row) => row.kind)).toEqual([
+      'activityGroup', 'thinkingGroup', 'activityGroup',
+    ]);
   });
 
   it('keeps the group key anchored to the first message as a step is appended', () => {
     const firstStep = { kind: 'step' as const, step: { attempts: attempts([message('first', 'tool', 'call')]), diffs: [] } };
     const appended = { kind: 'step' as const, step: { attempts: attempts([message('later', 'tool', 'call')]), diffs: [] } };
-    const beforeAppend = groupOf(firstStep, { kind: 'thinkingGroup', steps: [message('middle', 'assistant')] });
-    const afterAppend = groupOf(firstStep, { kind: 'thinkingGroup', steps: [message('middle', 'assistant')] }, appended);
+    const beforeAppend = groupOf(firstStep);
+    const afterAppend = groupOf(firstStep, appended);
     expect(rowKey(beforeAppend)).toBe('first');
     expect(rowKey(afterAppend)).toBe(rowKey(beforeAppend));
   });
@@ -163,29 +155,6 @@ describe('summarizeGroup', () => {
     expect(summarize([recovered, failed])).toMatchObject({ retries: 1, failed: 1 });
   });
 
-  it('reports thinking with measured time and without measurement', () => {
-    const timed = summarize([
-      {
-        kind: 'step',
-        step: {
-          attempts: [{
-            thoughts: [message('thought', 'assistant', '', { reasoning: 'x', reasoningMs: 20_000 })],
-            tools: [message('timed-tool', 'tool', 'call', { toolResultTotal: 1 })],
-          }],
-          diffs: [],
-        },
-      },
-      { kind: 'thinkingGroup', steps: [message('other-thought', 'assistant', '', { reasoning: 'y', reasoningMs: 69_000 })] },
-    ]);
-    expect(timed).toMatchObject({ hasThinking: true, thinking: '89 s' });
-
-    const untimed = summarize([{
-      kind: 'thinkingGroup',
-      steps: [message('thought', 'assistant', '', { reasoning: 'x' })],
-    }]);
-    expect(untimed).toMatchObject({ hasThinking: true, thinking: '' });
-    expect(summarize([{ kind: 'step', step: { attempts: [], diffs: [] } }]).hasThinking).toBe(false);
-  });
 });
 
 describe('recoveredFailures', () => {
@@ -290,13 +259,4 @@ describe('visibleGroupItems', () => {
     ]);
   });
 
-  it('folds thinking between hidden calls with those calls', () => {
-    const items = longGroup();
-    items.splice(1, 0, {
-      kind: 'thinkingGroup',
-      steps: [message('hidden-thought', 'assistant', '', { reasoning: 'thinking' })],
-    });
-    const visible = visibleGroupItems(items, recoveredFailures(items), new Set());
-    expect(visible.some((item) => item.kind === 'thinkingGroup')).toBe(false);
-  });
 });

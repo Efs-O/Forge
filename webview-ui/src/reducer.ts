@@ -1,7 +1,8 @@
-import { findPendingToolRow, mergeSyncedMessages, mkId, type AppMessage } from './messageOps';
+import { findPendingToolRow, mkId, type AppMessage } from './messageOps';
 import { withoutCall, withoutConversation, withProgress } from './pendingToolCalls';
 import type { Action, State } from './appState';
 import { formatDuration } from '../../src/util/formatDuration';
+import { applySessionSync } from './sessionSyncReducer';
 
 export type { AppMessage } from './messageOps';
 export type { Action, State } from './appState';
@@ -441,58 +442,13 @@ export function reducer(state: State, action: Action): State {
     case 'ACTIVITY_VIEW':
       return state.activityView === action.mode ? state : { ...state, activityView: action.mode };
 
-    case 'SESSION_SYNC': {
-      const hostStreaming = action.tabs.filter((tab) => tab.streaming).map((tab) => tab.id);
-      const liveConversationIds = new Set([...state.streamingIds, ...hostStreaming]);
-      // `messagesById` is a PARTIAL update — the host ships only the transcripts
-      // that can be rendered right now (active + streaming + anything asked
-      // for), because shipping all 52 was costing a second per tab switch. So
-      // start from what is already cached and overlay, rather than replacing:
-      // an id absent from the payload means "unchanged", never "empty".
-      const messagesById: Record<string, AppMessage[]> = { ...state.messagesById };
-      for (const [id, rows] of Object.entries(action.messagesById)) {
-        const local = state.messagesById[id] ?? [];
-        // Stream tokens and tool events are the newest presentation state. A
-        // periodic host checkpoint can have been serialized before the latest
-        // webview events arrive; reconciling that older snapshot used to make
-        // an open Thinking trace shrink or disappear until the final sync.
-        // Hydrate an empty/restored webview, but never replace an established
-        // live transcript. DONE removes the id so the settled sync becomes
-        // authoritative again.
-        messagesById[id] =
-          liveConversationIds.has(id) && local.length > 0
-            ? local
-            : mergeSyncedMessages(local, rows, action.attachmentsRoot);
-      }
-      // A closed tab can never show its bar again, so drop its pending id rather
-      // than letting the set grow for the lifetime of the webview.
-      // The active id is retained unconditionally: a sync can report an empty tab
-      // list mid-reconciliation, and dropping the visible bar there would strand
-      // an undo the user can still see files for.
-      const openIds = new Set([...action.tabs.map((tab) => tab.id), action.activeId]);
-      const pending = new Set([...state.checkpointPendingIds].filter((id) => openIds.has(id)));
-      // Bound the transcript cache to the open tabs. A closed or archived
-      // conversation is re-sent by the host if it is ever shown again, so
-      // holding its rows here only grows the webview's heap for the session.
-      for (const id of Object.keys(messagesById)) {
-        if (!openIds.has(id)) delete messagesById[id];
-      }
-      // A restored webview may have missed generationStarted. Recover host-busy
-      // tabs without clearing newer local starts; DONE remains the end signal.
-      return {
-        ...state,
-        sessionHydrated: true,
-        streamingIds: new Set([...state.streamingIds, ...hostStreaming]),
-        generatingIds: new Set([...state.generatingIds, ...hostStreaming]),
-        checkpointPendingIds:
-          pending.size === state.checkpointPendingIds.size ? state.checkpointPendingIds : pending,
-        tabs: action.tabs,
-        history: action.history,
-        archived: action.archived,
-        activeConversationId: action.activeId,
-        messagesById,
-      };
-    }
+    case 'THINKING_DISPLAY':
+      return state.thinkingDisplay === action.mode
+        ? state
+        : { ...state, thinkingDisplay: action.mode };
+
+    case 'SESSION_SYNC':
+      return applySessionSync(state, action);
 
     default:
       return state;

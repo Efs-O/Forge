@@ -14,7 +14,7 @@ overlaps with an existing owner, extend the owner instead.
 | Webview lifecycle + message bridge entry             | `src/sidebar/SidebarProvider.ts`         |
 | Webview message routing                              | `src/sidebar/webviewMessageRouter.ts`    |
 | Outbound webview payloads + status metrics           | `src/sidebar/sidebarPayloads.ts`         |
-| Activity-view setting parse + validation             | `src/sidebar/activityViewSetting.ts`     |
+| Transcript view setting parse + validation           | `src/sidebar/activityViewSetting.ts`     |
 | Active workspace root + folder-change watch          | `src/sidebar/workspaceInfo.ts`           |
 | Webview crash/diagnostic relay to host log           | `src/sidebar/webviewDiagnostics.ts`      |
 | Auto vs manual compaction resume policy              | `src/sidebar/compactionPolicy.ts`        |
@@ -26,7 +26,7 @@ overlaps with an existing owner, extend the owner instead.
 | Count-up seconds for in-flight labels (hook)         | `webview-ui/src/useSecondsSince.ts` |
 | Tool calls still being written (live progress rows)  | `webview-ui/src/pendingToolCalls.ts` (row: `components/PendingToolCallRow.tsx`; host message: `src/sidebar/toolCallProgress.ts`) |
 | Sidebar grouped activity view (step runs → groups, recovered failures, long-group gaps) | `webview-ui/src/activityGroups.ts` |
-| Sidebar open/closed choices that survive remounts    | `webview-ui/src/disclosureState.ts`       |
+| Sidebar open/closed and folded-tail choices in webview memory | `webview-ui/src/disclosureState.ts` |
 | Sidebar transcript follow-the-bottom decision         | `webview-ui/src/scrollFollow.ts`          |
 | Compact activity step row component (the call row)   | `webview-ui/src/components/ActivityRow.tsx` |
 | Folding repeated result lines before display         | `webview-ui/src/toolResultLines.ts`       |
@@ -162,6 +162,7 @@ overlaps with an existing owner, extend the owner instead.
 | ----------------------------------------------- | ----------------------------------------------- |
 | Streamed assistant turn finalization            | `src/agent/StreamedAssistantTurn.ts`            |
 | Webview state reducer (per-conversation keying) | `webview-ui/src/reducer.ts`                     |
+| Session snapshot reconciliation and transcript cache lifecycle | `webview-ui/src/sessionSyncReducer.ts`          |
 | Pending prompts, queue flush, and mid-turn tells | `webview-ui/src/usePendingPrompts.ts`           |
 | Fire-and-forget webview→host commands           | `webview-ui/src/hostCommands.ts`                |
 | Host message → reducer action mapping           | `webview-ui/src/hostActions.ts`                 |
@@ -171,7 +172,8 @@ overlaps with an existing owner, extend the owner instead.
 | One mounted transcript pane per visited tab     | `webview-ui/src/components/TranscriptPanes.tsx` |
 | Single-file diff rendering + stats              | `webview-ui/src/components/DiffBlock.tsx`       |
 | Per-turn multi-file diff summary card           | `webview-ui/src/components/DiffGroup.tsx`       |
-| Compact per-round reasoning rows                | `webview-ui/src/components/ThinkingGroup.tsx`   |
+| Top-level reasoning blocks                    | `webview-ui/src/components/ThinkingGroup.tsx`   |
+| Shared tail-preview folding for thinking + tool output | `webview-ui/src/components/FoldedContent.tsx` |
 | Tool call rows + expandable results (`ToolResultContent`) | `webview-ui/src/components/ToolRow.tsx` |
 | Model picker dropdown (grouped, opens upward)   | `webview-ui/src/components/ModelSelector.tsx`   |
 | History panel: open + archived chats, markers   | `webview-ui/src/components/HistoryList.tsx`     |

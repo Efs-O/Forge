@@ -1,34 +1,23 @@
 import React, { useEffect, useRef, useState } from 'react';
 import type { AppMessage } from '../reducer';
-import { displayDetail, stepMessages, stepThoughts, type ActivityStep } from '../activityRows';
+import { displayDetail, stepMessages, type ActivityStep } from '../activityRows';
 import { formatDuration } from '../../../src/util/formatDuration';
 import { sameRowList, toolNameAndDetail } from '../messageOps';
-import {
-  openedReasoning,
-  readDisclosure,
-  useDisclosure,
-  writeDisclosure,
-} from '../disclosureState';
+import { readDisclosure, useDisclosure, writeDisclosure } from '../disclosureState';
 import { DiffBlock, diffStats } from './DiffBlock';
-import { ThinkingLabel, ThinkingRow } from './ThinkingGroup';
 import { ToolRowThumbnails, ToolResultContent } from './ToolRow';
 
 export interface ActivityRowProps {
   step: ActivityStep;
-  streaming: boolean;
 }
 
 function finalAttempt(step: ActivityStep): AppMessage[] {
   return step.attempts.at(-1)?.tools ?? [];
 }
 
-/**
- * Whether a step renders open before this render's own choice is known: the
- * reader's choice for the step, else whether they opened reasoning that has
- * since folded into it. `ActivityGroup` asks the same question of its items.
- */
+/** Whether the reader explicitly opened this call step. */
 export function stepRevealed(step: ActivityStep): boolean {
-  return readDisclosure('step', stepMessages(step)[0]!.id) ?? openedReasoning(stepThoughts(step));
+  return readDisclosure('step', stepMessages(step)[0]!.id) === true;
 }
 
 function isFailure(attempt: AppMessage[]): boolean {
@@ -46,17 +35,6 @@ function status(step: ActivityStep): { glyph: string; className: string; label: 
 
 function retryCount(step: ActivityStep): number {
   return step.attempts.slice(0, -1).filter((attempt) => isFailure(attempt.tools)).length;
-}
-
-function reasoningSummary(step: ActivityStep): string | undefined {
-  const thoughts = stepThoughts(step);
-  if (thoughts.length === 0) return undefined;
-  const measured = thoughts.filter((thought) => thought.reasoningMs !== undefined);
-  if (measured.length === 0) return '◔';
-  const elapsed = formatDuration(
-    measured.reduce((total, thought) => total + thought.reasoningMs!, 0),
-  );
-  return elapsed ? `◔ ${elapsed}` : '◔';
 }
 
 function editSummary(step: ActivityStep): { added: number; removed: number; measured: boolean } {
@@ -157,8 +135,7 @@ function DiffLink({
 
 function ActivityRowView({ step }: ActivityRowProps): React.ReactElement | null {
   const [manualOpen, setManualOpen] = useDisclosure('step', stepMessages(step)[0]!.id);
-  // An opened reasoning bubble also reveals its step when it folds into a call.
-  const open = manualOpen ?? openedReasoning(stepThoughts(step));
+  const open = manualOpen ?? false;
   const [commandVisible, setCommandVisible] = useState(false);
   const [diffRevision, setDiffRevision] = useState(0);
   const targetRef = useRef<HTMLSpanElement>(null);
@@ -175,7 +152,6 @@ function ActivityRowView({ step }: ActivityRowProps): React.ReactElement | null 
   const repeated = failedEarlier === 0 && step.attempts.length > 1;
   const parallelCount = Math.max(...step.attempts.map((attempt) => attempt.tools.length));
   const edits = editSummary(step);
-  const reasoning = reasoningSummary(step);
   const elapsed = formatDuration(primary?.toolMs);
   const tag =
     step.diffs.length === 0 ? '' : step.diffs.some((diff) => diff.diffIsNew) ? 'NEW' : 'MODIFIED';
@@ -249,11 +225,6 @@ function ActivityRowView({ step }: ActivityRowProps): React.ReactElement | null 
               onDiffChoiceChanged={() => setDiffRevision((revision) => revision + 1)}
             />
           )}
-          {reasoning && (
-            <span className="activity-row-reasoning" title="Thinking">
-              ◔
-            </span>
-          )}
           {repeated && <span className="activity-row-repeat">×{step.attempts.length}</span>}
           {retries > 0 && (
             <span className="activity-row-retry">
@@ -276,21 +247,8 @@ function ActivityRowView({ step }: ActivityRowProps): React.ReactElement | null 
         ))}
       {open && (
         <div className="activity-row-body">
-          {step.attempts.map(({ thoughts, tools }, attemptIndex) => (
+          {step.attempts.map(({ tools }, attemptIndex) => (
             <React.Fragment key={tools[0]!.id}>
-              {thoughts.map((thought) => (
-                <ThinkingRow
-                  key={thought.id}
-                  id={thought.id}
-                  label={
-                    <ThinkingLabel
-                      startedAt={thought.reasoningStartedAt}
-                      ms={thought.reasoningMs}
-                    />
-                  }
-                  reasoning={thought.reasoning ?? ''}
-                />
-              ))}
               {(step.attempts.length > 1 || tools.length > 1) && (
                 <div className="activity-row-attempts" aria-label={`Attempt ${attemptIndex + 1}`}>
                   {tools.map((tool) => (
@@ -304,7 +262,6 @@ function ActivityRowView({ step }: ActivityRowProps): React.ReactElement | null 
             <React.Fragment key={`output-${message.id}`}>
               <ToolResultContent
                 message={message}
-                folded
                 {...(commandVisible && message.id === primary.id && command ? { command } : {})}
               />
               <ToolRowThumbnails message={message} />
@@ -326,9 +283,6 @@ function ActivityRowView({ step }: ActivityRowProps): React.ReactElement | null 
   );
 }
 
-export const ActivityRow = React.memo(
-  ActivityRowView,
-  (previous, next) =>
-    previous.streaming === next.streaming &&
-    sameRowList(stepMessages(previous.step), stepMessages(next.step)),
+export const ActivityRow = React.memo(ActivityRowView, (previous, next) =>
+  sameRowList(stepMessages(previous.step), stepMessages(next.step)),
 );

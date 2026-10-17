@@ -1,13 +1,12 @@
 import type { AppMessage } from './messageOps';
 import type { ActivityViewMode } from '../../src/sidebar/activityViewSetting';
+import { splitThoughtAndAnswer } from './messageOps';
 import { groupActivity } from './activityGroups';
 
 export type { ActivityViewMode };
 
-/** One call of a step, with the reasoning that led to it. */
+/** One round of tool calls. Thinking messages stay in separate transcript rows. */
 export interface StepAttempt {
-  /** Reasoning-only assistant messages just before this attempt, in order. */
-  thoughts: AppMessage[];
   /** One round's tool rows: one for a single call, several for a parallel round. */
   tools: AppMessage[];
 }
@@ -16,19 +15,18 @@ export interface StepAttempt {
 export interface ActivityStep {
   /**
    * Attempts of the same call, oldest first. More than one means a retry or a
-   * plain repeat (×N). Thoughts sit on the attempt they preceded, so a retry's
-   * reasoning renders before the retry and the step's first message (its
-   * `rowKey`) never changes as attempts are appended.
+   * plain repeat (×N). The step's first tool message anchors its `rowKey`.
    */
   attempts: StepAttempt[];
   /** Diff rows produced by this step's calls, matched by `toolCallId`. */
   diffs: AppMessage[];
 }
 
-/** What an `activityGroup` row holds: steps, and thinking runs between them. */
-export type ActivityGroupItem =
-  | { kind: 'step'; step: ActivityStep }
-  | { kind: 'thinkingGroup'; steps: AppMessage[] };
+/** A tool step inside an `activityGroup`; thinking rows stay at transcript level. */
+export interface ActivityGroupItem {
+  kind: 'step';
+  step: ActivityStep;
+}
 
 export type Row =
   | { kind: 'message'; message: AppMessage; index: number }
@@ -38,14 +36,9 @@ export type Row =
   | { kind: 'step'; step: ActivityStep }
   | { kind: 'activityGroup'; items: ActivityGroupItem[] };
 
-/** Every message in a step, in chronological order: each attempt's thoughts then tools, then diffs. */
+/** Every tool and diff message in a step, in chronological order. */
 export function stepMessages(step: ActivityStep): AppMessage[] {
-  return [...step.attempts.flatMap((a) => [...a.thoughts, ...a.tools]), ...step.diffs];
-}
-
-/** All reasoning in a step, across attempts. */
-export function stepThoughts(step: ActivityStep): AppMessage[] {
-  return step.attempts.flatMap((a) => a.thoughts);
+  return [...step.attempts.flatMap((a) => a.tools), ...step.diffs];
 }
 
 /** All tool rows in a step, across attempts. */
@@ -55,7 +48,7 @@ export function stepTools(step: ActivityStep): AppMessage[] {
 
 /** Every message in a group, in order. */
 export function groupMessages(items: ActivityGroupItem[]): AppMessage[] {
-  return items.flatMap((item) => (item.kind === 'step' ? stepMessages(item.step) : item.steps));
+  return items.flatMap((item) => stepMessages(item.step));
 }
 
 /**
@@ -97,7 +90,7 @@ export function toRows(messages: AppMessage[], mode: ActivityViewMode): Row[] {
 
 /**
  * Compact rows (plan § Proposal A, rules 1-4): each tool round becomes a step
- * carrying the reasoning before it and the diffs it produced.
+ * after any preceding reasoning row and carries the diffs it produced.
  */
 export function toCompactRows(messages: AppMessage[]): Row[] {
   const rows: Row[] = [];
@@ -117,9 +110,21 @@ export function toCompactRows(messages: AppMessage[]): Row[] {
 
   for (let i = 0; i < messages.length; ) {
     const message = messages[i]!;
+    const split = splitThoughtAndAnswer(message);
+
+    if (split.length > 1) {
+      flushUnmatchedDiffs();
+      flushThoughts();
+      rows.push({ kind: 'thinkingGroup', steps: [split[0]!] });
+      rows.push({ kind: 'message', message: split[1]!, index: i });
+      previousStep = undefined;
+      i++;
+      continue;
+    }
 
     if (isReasoningOnly(message)) {
       flushUnmatchedDiffs();
+      previousStep = undefined;
       thoughts.push(message);
       i++;
       continue;
@@ -127,6 +132,7 @@ export function toCompactRows(messages: AppMessage[]): Row[] {
 
     if (message.role === 'tool') {
       flushUnmatchedDiffs();
+      flushThoughts();
       let end = i + 1;
       while (end < messages.length && messages[end]!.role === 'tool') end++;
       const round = messages.slice(i, end);
@@ -138,7 +144,7 @@ export function toCompactRows(messages: AppMessage[]): Row[] {
         (isFailed(last) ||
           (!hasDiffForAttempt(previousStep!, last) && !hasDiffForRound(round, messages, end)));
 
-      const attempt: StepAttempt = { thoughts, tools: round };
+      const attempt: StepAttempt = { tools: round };
       if (canMerge) {
         previousStep!.attempts.push(attempt);
       } else {
@@ -209,13 +215,20 @@ export function displayDetail(detail: string): string {
 }
 
 /**
- * Folds runs of adjacent same-kind messages into single rows: file edits and
- * tool calls become one card per turn, and per-round reasoning becomes one line.
+ * Folds adjacent reasoning messages and tool calls into rows; reasoning stays
+ * at transcript level, while tool calls become one card per turn.
  */
 export function toFullRows(messages: AppMessage[]): Row[] {
   const rows: Row[] = [];
   for (let i = 0; i < messages.length; i++) {
     const message = messages[i]!;
+    const split = splitThoughtAndAnswer(message);
+
+    if (split.length > 1) {
+      rows.push({ kind: 'thinkingGroup', steps: [split[0]!] });
+      rows.push({ kind: 'message', message: split[1]!, index: i });
+      continue;
+    }
 
     if (message.role === 'diff') {
       const diffs: AppMessage[] = [];

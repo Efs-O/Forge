@@ -62,7 +62,7 @@ function render(message: AppMessage): void {
 }
 
 describe('ToolRow', () => {
-  it('keeps a short result out of the DOM until its row is opened', () => {
+  it('shows a short result inline when its call row is opened', () => {
     render(toolMessage({ toolResult: 'ok', toolResultTotal: 2 }));
 
     expect(container.querySelector('.tool-row-toggle')).not.toBeNull();
@@ -71,8 +71,9 @@ describe('ToolRow', () => {
     expect(container.querySelector('.tool-row-detail')?.textContent).toBe('Summary line');
     expect(container.textContent).not.toContain('ok');
     act(() => container.querySelector<HTMLButtonElement>('.tool-row-toggle')!.click());
-    expect(container.querySelector('.tool-row-output-label')?.textContent).toBe('Output');
     expect(container.querySelector('.tool-row-body')?.textContent).toContain('ok');
+    expect(container.querySelector('.tool-row-output-label')).toBeNull();
+    expect(container.querySelector('.folded-content-toggle')).toBeNull();
   });
 
   it('collapses a long result behind a toggle and reports its size', () => {
@@ -122,10 +123,13 @@ describe('ToolRow', () => {
     expect(container.querySelector('.tool-row-body')).toBeNull();
     act(() => container.querySelector<HTMLButtonElement>('.tool-row-toggle')!.click());
     expect(container.querySelector('.tool-row-body')?.textContent).toContain('ok');
+    expect(container.querySelector('.tool-row-output-label')).toBeNull();
 
     render(toolMessage({ toolResult: `Error: ${LONG_REPORT}`, toolIsError: true }));
     expect(container.querySelector('.msg-tool-row-error')).not.toBeNull();
-    expect(container.querySelector('.tool-row-body')?.textContent).toContain('Output');
+    expect(container.querySelector('.tool-row-body')?.textContent).not.toContain('Error:');
+    expect(container.querySelector('.folded-content-toggle')?.textContent).toBe('Show all');
+    act(() => container.querySelector<HTMLButtonElement>('.folded-content-toggle')!.click());
     expect(container.querySelector('.tool-row-body')?.textContent).toContain('Error:');
   });
 
@@ -142,6 +146,8 @@ describe('ToolRow', () => {
       container.querySelector<HTMLButtonElement>('.tool-row-toggle')!.click();
     });
 
+    expect(container.querySelector('.folded-content-body')?.textContent).not.toContain('Report');
+    act(() => container.querySelector<HTMLButtonElement>('.folded-content-toggle')!.click());
     const body = container.querySelector('.tool-row-body')!;
     // Markdown, not a flattened single line: the heading and both paragraphs survive.
     expect(body.querySelector('h1')?.textContent).toBe('Report');
@@ -220,11 +226,12 @@ describe('ToolRow', () => {
     expect(container.querySelector('.tool-row-command code')?.textContent).toBe(command);
   });
 
-  it('labels result text Output and folds repeated consecutive lines', () => {
+  it('folds repeated consecutive lines in a long output preview', () => {
     render(toolMessage({ toolResult: 'same\nsame\nother\nsame', toolResultTotal: 19 }));
     act(() => container.querySelector<HTMLButtonElement>('.tool-row-toggle')!.click());
-    expect(container.querySelector('.tool-row-output-label')?.textContent).toBe('Output');
+    expect(container.querySelector('.tool-row-output-label')).toBeNull();
     expect(container.querySelector('.tool-row-verbatim')?.textContent).toBe('same (×2)\nother\nsame');
+    expect(container.querySelector('.folded-content-toggle')?.textContent).toBe('Show all');
   });
 
   it('marks a failed call', () => {

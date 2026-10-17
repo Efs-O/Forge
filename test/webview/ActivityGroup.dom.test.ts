@@ -28,24 +28,16 @@ function tool(id: string, extra: Partial<AppMessage> = {}): AppMessage {
 }
 
 function activityItems(options: { failed?: boolean; pending?: boolean } = {}): ActivityGroupItem[] {
-  const first: AppMessage = {
-    id: 'thought',
-    role: 'assistant',
-    content: '',
-    reasoning: 'planning',
-    reasoningMs: 1_000,
-  };
   const finalTool = options.pending
     ? tool('pending', { toolResultTotal: undefined })
     : tool('completed', options.failed ? { toolIsError: true } : {});
   return [
-    { kind: 'step', step: { attempts: [{ thoughts: [first], tools: [finalTool] }], diffs: [] } },
+    { kind: 'step', step: { attempts: [{ tools: [finalTool] }], diffs: [] } },
     {
       kind: 'step',
       step: {
         attempts: [
           {
-            thoughts: [],
             tools: [tool('second', { content: 'read_file', toolName: 'read_file' })],
           },
         ],
@@ -73,12 +65,9 @@ afterEach(() => {
 function render(
   items: ActivityGroupItem[],
   live: boolean,
-  streaming: boolean,
   pendingCalls?: readonly PendingToolCall[],
 ): void {
-  act(() =>
-    root.render(React.createElement(ActivityGroup, { items, live, streaming, pendingCalls })),
-  );
+  act(() => root.render(React.createElement(ActivityGroup, { items, live, pendingCalls })));
 }
 
 function toggle(): void {
@@ -92,7 +81,6 @@ describe('ActivityGroup', () => {
       step: {
         attempts: [
           {
-            thoughts: [],
             tools: [
               tool(id, { content: `shell → ${command}`, toolName: 'shell', toolTarget: command }),
             ],
@@ -108,7 +96,6 @@ describe('ActivityGroup', () => {
         shell('s3', 'grep y f'),
       ],
       false,
-      false,
     );
     toggle();
     expect(container.querySelectorAll('.activity-group-body > .activity-row')).toHaveLength(3);
@@ -116,7 +103,7 @@ describe('ActivityGroup', () => {
   });
 
   it('starts closed while live and shows the working header', () => {
-    render(activityItems(), true, true);
+    render(activityItems(), true);
     expect(container.querySelector('.activity-group-toggle')?.getAttribute('aria-expanded')).toBe(
       'false',
     );
@@ -125,7 +112,7 @@ describe('ActivityGroup', () => {
   });
 
   it('starts collapsed for completed history loaded later', () => {
-    render(activityItems(), false, false);
+    render(activityItems(), false);
     expect(container.querySelector('.activity-group-toggle')?.getAttribute('aria-expanded')).toBe(
       'false',
     );
@@ -133,7 +120,7 @@ describe('ActivityGroup', () => {
   });
 
   it('keeps the grouped action wording separate from its muted count', () => {
-    render(activityItems(), false, false);
+    render(activityItems(), false);
     const button = container.querySelector<HTMLButtonElement>('.activity-group-toggle')!;
     expect(container.querySelector('.activity-group-count')?.textContent).toBe('2');
     expect(container.querySelector('.activity-group-word')?.textContent).toBe('tool calls');
@@ -143,8 +130,8 @@ describe('ActivityGroup', () => {
 
   it('stays closed when live ends if the reader did not toggle it', () => {
     const items = activityItems();
-    render(items, true, true);
-    render(items, false, false);
+    render(items, true);
+    render(items, false);
     expect(container.querySelector('.activity-group-toggle')?.getAttribute('aria-expanded')).toBe(
       'false',
     );
@@ -153,9 +140,9 @@ describe('ActivityGroup', () => {
 
   it('keeps a manual toggle across the live-to-not-live transition', () => {
     const items = activityItems();
-    render(items, true, true);
+    render(items, true);
     toggle(); // Explicitly open the live group.
-    render(items, false, false);
+    render(items, false);
     expect(container.querySelector('.activity-group-toggle')?.getAttribute('aria-expanded')).toBe(
       'true',
     );
@@ -163,7 +150,7 @@ describe('ActivityGroup', () => {
   });
 
   it('shows an unrecovered failure in the closed summary', () => {
-    render(activityItems({ failed: true }), false, false);
+    render(activityItems({ failed: true }), false);
     expect(container.querySelector('.activity-group-toggle')?.getAttribute('aria-expanded')).toBe(
       'false',
     );
@@ -177,7 +164,6 @@ describe('ActivityGroup', () => {
         kind: 'step',
         step: {
           attempts: [{
-            thoughts: [],
             tools: [tool('failed-call', {
               toolName: 'edit_file',
               toolTarget: 'src/a.ts',
@@ -191,7 +177,6 @@ describe('ActivityGroup', () => {
         kind: 'step',
         step: {
           attempts: [{
-            thoughts: [],
             tools: [tool('successful-retry', {
               toolName: 'edit_file',
               toolTarget: 'src/a.ts',
@@ -201,7 +186,7 @@ describe('ActivityGroup', () => {
         },
       },
     ];
-    render(items, false, false);
+    render(items, false);
     expect(container.querySelector('.activity-group-status')?.textContent).toBe('✓');
     const failed = container.querySelector('.activity-group-failed')!;
     expect(failed.textContent).toBe('1 failed, recovered');
@@ -215,7 +200,6 @@ describe('ActivityGroup', () => {
       kind: 'step',
       step: {
         attempts: [{
-          thoughts: [],
           tools: [tool(`tail-call-${index}`, {
             toolName: 'read_file',
             toolTarget: `src/${index}.ts`,
@@ -224,7 +208,7 @@ describe('ActivityGroup', () => {
         diffs: [],
       },
     }));
-    render(items, false, false);
+    render(items, false);
     toggle();
     expect(container.querySelectorAll('.activity-group-body > .activity-row')).toHaveLength(6);
     expect(container.querySelector('.activity-group-gap')?.textContent).toBe(
@@ -237,7 +221,6 @@ describe('ActivityGroup', () => {
       kind: 'step',
       step: {
         attempts: [{
-          thoughts: [],
           tools: [tool(`call-${index}`, {
             toolName: 'read_file',
             toolTarget: `src/${index}.ts`,
@@ -248,7 +231,7 @@ describe('ActivityGroup', () => {
         diffs: [],
       },
     }));
-    render(items, false, false);
+    render(items, false);
     toggle();
     expect(container.querySelectorAll('.activity-group-body > .activity-row')).toHaveLength(7);
     const gaps = container.querySelectorAll<HTMLButtonElement>('.activity-group-gap');
@@ -262,7 +245,7 @@ describe('ActivityGroup', () => {
 
     act(() => root.unmount());
     root = createRoot(container);
-    render(items, false, false);
+    render(items, false);
     expect(container.querySelectorAll('.activity-group-body > .activity-row')).toHaveLength(27);
     expect(container.querySelectorAll('.activity-group-gap')).toHaveLength(1);
     act(() => container.querySelector<HTMLButtonElement>('.activity-group-gap')!.click());
@@ -271,7 +254,7 @@ describe('ActivityGroup', () => {
   });
 
   it('shows one concise pending call below a closed group', () => {
-    render(activityItems({ pending: true }), true, true);
+    render(activityItems({ pending: true }), true);
     expect(container.querySelector('.activity-group-toggle')?.getAttribute('aria-expanded')).toBe(
       'false',
     );
@@ -282,7 +265,7 @@ describe('ActivityGroup', () => {
     expect(liveLabel.querySelector('.activity-group-word')?.textContent).toMatch(/^calls?$/);
     expect(container.querySelector('.activity-group-pending')?.textContent).toContain('edit_file');
     expect(container.querySelectorAll('.activity-row')).toHaveLength(0);
-    render(activityItems(), false, false);
+    render(activityItems(), false);
     expect(container.querySelector('.activity-group-pending')).toBeNull();
   });
 
@@ -295,7 +278,7 @@ describe('ActivityGroup', () => {
       tokens: 12,
       startedAt: 1,
     };
-    render([], true, true, [writing]);
+    render([], true, [writing]);
     expect(container.textContent).toContain('Working · 1 call');
     expect(container.querySelector<HTMLButtonElement>('.activity-group-toggle')?.disabled).toBe(
       true,
@@ -309,7 +292,6 @@ describe('ActivityGroup', () => {
       step: {
         attempts: [
           {
-            thoughts: [],
             tools: [
               tool('first', {
                 content: 'shell → rg -n x src',
@@ -324,7 +306,7 @@ describe('ActivityGroup', () => {
         diffs: [],
       },
     };
-    render([first], true, true);
+    render([first], true);
     expect(container.textContent).toContain('Working · 1 call');
     expect(container.querySelector('.activity-group-pending')?.textContent).toContain('shell');
 
@@ -333,7 +315,6 @@ describe('ActivityGroup', () => {
       step: {
         attempts: [
           {
-            thoughts: [],
             tools: [
               tool('second', {
                 content: 'read_file → src/app.ts',
@@ -352,7 +333,6 @@ describe('ActivityGroup', () => {
       step: {
         attempts: [
           {
-            thoughts: [],
             tools: [
               tool('first', {
                 content: 'shell → rg -n x src',
@@ -366,14 +346,14 @@ describe('ActivityGroup', () => {
         diffs: [],
       },
     };
-    render([completedFirst, second], true, true);
+    render([completedFirst, second], true);
     expect(container.textContent).toContain('Working · 2 calls');
     expect(container.querySelector('.activity-group-pending')?.textContent).toContain('read_file');
     expect(container.querySelector('.activity-group-pending .is-ok')?.textContent).toBe('✓');
   });
 
   it('does not call a historical incomplete step running during a later turn', () => {
-    render(activityItems({ pending: true }), false, true);
+    render(activityItems({ pending: true }), false);
     expect(container.querySelector('.activity-group-status')?.textContent).toBe('○');
     expect(container.querySelector('.activity-group-pending')).toBeNull();
   });
@@ -387,7 +367,7 @@ describe('ActivityGroup', () => {
       content: 'serve/server.py',
       diffHunks: [{ oldStart: 1, newStart: 1, lines: [{ kind: 'added', text: 'new' }] }],
     });
-    render(items, true, true);
+    render(items, true);
     expect(container.querySelector('.activity-group-toggle')?.getAttribute('aria-expanded')).toBe(
       'false',
     );
@@ -395,7 +375,7 @@ describe('ActivityGroup', () => {
     expect(container.querySelector('.activity-group-edits')?.textContent).toBe('to server.py');
   });
 
-  it('opens the command with the call click and the output with its own click', () => {
+  it('shows a short output inline after opening the call row', () => {
     const command = 'cd /workspace && grep -n max_context serve/server.py';
     const items: ActivityGroupItem[] = [
       {
@@ -403,7 +383,6 @@ describe('ActivityGroup', () => {
         step: {
           attempts: [
             {
-              thoughts: [],
               tools: [
                 tool('shell', {
                   content: `shell → ${command}`,
@@ -420,7 +399,7 @@ describe('ActivityGroup', () => {
         },
       },
     ];
-    render(items, false, false);
+    render(items, false);
     toggle();
     expect(container.querySelectorAll('.activity-group-body > .activity-row')).toHaveLength(1);
     const target = container.querySelector<HTMLElement>('.activity-row-detail')!;
@@ -430,20 +409,19 @@ describe('ActivityGroup', () => {
     });
     act(() => container.querySelector<HTMLElement>('.activity-row-header')!.click());
     expect(container.querySelector('.tool-row-command code')?.textContent).toBe(command);
-    expect(container.querySelector('.tool-row-verbatim')).toBeNull();
-    act(() => container.querySelector<HTMLElement>('.tool-row-output-toggle')!.click());
     expect(container.querySelector('.tool-row-verbatim')?.textContent).toBe('match at line 42');
-    expect(container.querySelector('.tool-row-toggle')).toBeNull();
+    expect(container.querySelector('.tool-row-output-toggle')).toBeNull();
+    expect(container.querySelector('.folded-content-toggle')).toBeNull();
   });
 
   it('counts recovered retries with the right plural', () => {
-    const failedTry = (id: string) => ({ thoughts: [], tools: [tool(id, { toolIsError: true })] });
+    const failedTry = (id: string) => ({ tools: [tool(id, { toolIsError: true })] });
     const recovered = (n: number): ActivityGroupItem => ({
       kind: 'step',
       step: {
         attempts: [
           ...Array.from({ length: n }, (_, i) => failedTry(`f${n}-${i}`)),
-          { thoughts: [], tools: [tool(`ok${n}`)] },
+          { tools: [tool(`ok${n}`)] },
         ],
         diffs: [],
       },
@@ -451,13 +429,12 @@ describe('ActivityGroup', () => {
     render(
       [
         recovered(1),
-        { kind: 'step', step: { attempts: [{ thoughts: [], tools: [tool('x')] }], diffs: [] } },
+        { kind: 'step', step: { attempts: [{ tools: [tool('x')] }], diffs: [] } },
       ],
-      false,
       false,
     );
     expect(container.querySelector('.activity-group-retry')?.textContent).toBe('[1 retry]');
-    render([recovered(1), recovered(2)], false, false);
+    render([recovered(1), recovered(2)], false);
     expect(container.querySelector('.activity-group-retry')?.textContent).toBe('[3 retries]');
   });
 
@@ -471,7 +448,6 @@ describe('ActivityGroup', () => {
       step: {
         attempts: [
           {
-            thoughts: [],
             tools: [
               tool('search', {
                 content: 'image_search',
@@ -492,7 +468,7 @@ describe('ActivityGroup', () => {
         React.createElement(
           WorkspaceRootUriContext.Provider,
           { value: 'https://file.vscode-resource/ws' },
-          React.createElement(ActivityGroup, { items: [item], live: false, streaming: false }),
+          React.createElement(ActivityGroup, { items: [item], live: false }),
         ),
       );
     });

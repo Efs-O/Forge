@@ -258,11 +258,11 @@ export function mergeSyncedMessages(
  * A live assistant row can hold reasoning and answer text together (reasoning
  * that streamed after the text began). The host projection stores that turn as
  * two rows, thought then answer, so match against the same shape: the thought
- * keeps the live id - the key every opened bubble, step and group remembers -
- * and the answer takes a derived one. Unsplit, neither half matched, both took
- * fresh ids, and everything the reader had open collapsed at turn end.
+ * keeps the live id - the key the thinking block's reader choice uses - and
+ * the answer takes a derived one. Unsplit, neither half matched and a host sync
+ * assigned fresh ids, losing that choice.
  */
-function splitThoughtAndAnswer(message: AppMessage): AppMessage[] {
+export function splitThoughtAndAnswer(message: AppMessage): AppMessage[] {
   if (message.role !== 'assistant' || !message.reasoning || !message.content) return [message];
   const { reasoning, reasoningMs, reasoningStartedAt, ...answer } = message;
   const thought: AppMessage = {
