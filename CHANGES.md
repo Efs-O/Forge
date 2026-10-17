@@ -70,6 +70,7 @@
 - Closing the browser session now forgets origins approved during that session while keeping configured pre-approvals.
 - Closing a tab now explains when an active delegation still holds its model and prevents it from being unloaded.
 - **DuckDuckGo is the primary `web_search` provider, with Tavily or Brave as an optional fallback.** DuckDuckGo results are paced, parsed from its HTML endpoint, and labeled with their source; empty or blocked pages are clearly flagged so they cannot be mistaken for proof that nothing exists.
+- **`web_fetch` decodes HTML entities.** Pages read as `Events & webinars` instead of `Events &amp; webinars`, and a page that spells out the closing `UNTRUSTED_CONTENT` tag as entities cannot end the fence around it early.
 
 ## 0.17.42
 

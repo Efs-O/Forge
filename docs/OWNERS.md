@@ -443,6 +443,7 @@ overlaps with an existing owner, extend the owner instead.
 | git log argv, framing and parsing          | `src/tools/gitLog.ts`                 |
 | Search provider requests and result formatting (DuckDuckGo / Tavily / Brave) | `src/tools/searchTool.ts` |
 | DuckDuckGo HTML result extraction and anomaly detection | `src/tools/searchToolDuckDuckGo.ts` |
+| HTML to plain text for fetched web pages                | `src/util/htmlText.ts` |
 | URL fetch tool and the SSRF guard (URL, DNS and address checks, pinned fetch) | `src/tools/fetchTool.ts` |
 | Bounded streamed response text reader (shared web and jobs fetch) | `src/util/readTextCapped.ts` |
 | LSP provider handlers dispatched by `code_intel` | `src/tools/lspTools.ts`          |
