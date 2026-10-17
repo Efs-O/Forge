@@ -48,7 +48,7 @@ These commands are currently contributed by the extension.
 
 | Command                           | Description                         |
 | --------------------------------- | ----------------------------------- |
-| `Forge: Set Search API Key`       | Store a Tavily or Brave API key     |
+| `Forge: Set Search API Key`       | Store a Tavily or Brave API key in SecretStorage |
 | `Forge: Set Cloud Provider Token` | Store a cloud-provider bearer token |
 
 ### Remote control

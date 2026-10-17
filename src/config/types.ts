@@ -73,11 +73,15 @@ export interface SharedRuntimeConfig {
 }
 
 export interface SearchConfig {
-  provider: 'tavily' | 'brave';
+  provider: SearchProvider;
+  /** API fallback used when DuckDuckGo is blocked, errors, or returns nothing. */
+  fallback?: 'tavily' | 'brave';
   /** Secret key name in VS Code SecretStorage - never a raw key. */
-  secret_key_name: string;
+  secret_key_name?: string;
   max_results?: number;
 }
+
+export type SearchProvider = 'duckduckgo' | 'tavily' | 'brave';
 
 export interface EmbeddingsConfig {
   enabled?: boolean;

@@ -58,6 +58,58 @@ models:
     expect(config.active_model).toBe('z-cloud');
   });
 
+  it('loads a legacy search config without a fallback field', () => {
+    const dir = mkTempDir();
+    fs.writeFileSync(
+      path.join(dir, 'config.yaml'),
+      `active_model: local-gguf
+llama_server:
+  binary: llama-server
+models:
+  - name: local-gguf
+    provider: llama.cpp
+    gguf_path: C:/models/local.gguf
+search:
+  provider: tavily
+  secret_key_name: forge.tavily.apiKey
+  max_results: 5
+`,
+      'utf8',
+    );
+
+    const config = loadConfig(dir);
+
+    expect(config.search).toEqual({
+      provider: 'tavily',
+      secret_key_name: 'forge.tavily.apiKey',
+      max_results: 5,
+    });
+  });
+
+  it('loads DuckDuckGo and its optional keyed API fallback without a primary key name', () => {
+    const dir = mkTempDir();
+    fs.writeFileSync(
+      path.join(dir, 'config.yaml'),
+      `active_model: local-gguf
+llama_server:
+  binary: llama-server
+models:
+  - name: local-gguf
+    provider: llama.cpp
+    gguf_path: C:/models/local.gguf
+search:
+  provider: duckduckgo
+  fallback: brave
+  max_results: 7
+`,
+      'utf8',
+    );
+
+    const config = loadConfig(dir);
+
+    expect(config.search).toEqual({ provider: 'duckduckgo', fallback: 'brave', max_results: 7 });
+  });
+
   it('rejects eager tool groups outside the static native group list', () => {
     const dir = mkTempDir();
     fs.writeFileSync(
@@ -101,12 +153,12 @@ models:
     );
 
     const config = loadConfig(dir);
-    expect(config.models.find((model) => model.name === 'retention-zero')?.image_retention_turns).toBe(
-      0,
-    );
-    expect(config.models.find((model) => model.name === 'retention-four')?.image_retention_turns).toBe(
-      4,
-    );
+    expect(
+      config.models.find((model) => model.name === 'retention-zero')?.image_retention_turns,
+    ).toBe(0);
+    expect(
+      config.models.find((model) => model.name === 'retention-four')?.image_retention_turns,
+    ).toBe(4);
     expect(
       config.models.find((model) => model.name === 'retention-disabled')?.image_retention_turns,
     ).toBeUndefined();
@@ -432,7 +484,9 @@ models:
 `,
       'utf8',
     );
-    expect(() => loadConfig(dir)).toThrow(/short_name "qwen".*collides with a configured model name/i);
+    expect(() => loadConfig(dir)).toThrow(
+      /short_name "qwen".*collides with a configured model name/i,
+    );
   });
 
   it('rejects a short_name colliding with an alias key', () => {
