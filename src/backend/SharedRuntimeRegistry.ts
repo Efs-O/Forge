@@ -200,7 +200,10 @@ const PATH_ARGS = new Set(['-m', '--mmproj']);
  */
 export function sharedRuntimeKey(model: ModelConfig, server: LlamaServerConfig): string {
   const argv = composeLlamaServerArgs('', model, server, 'identity', 0);
-  const identity: string[] = [];
+  // The binary is not in argv, but two builds are two servers: the same
+  // choice DirectBackend.startLlamaServer makes.
+  const binary = model.llama_server_binary ?? server.binary;
+  const identity: string[] = ['binary', binary ? canonicalRuntimePath(binary) : ''];
   for (let i = 0; i < argv.length; i++) {
     const arg = argv[i]!;
     if (INSTANCE_ARGS.has(arg)) {

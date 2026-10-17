@@ -24,6 +24,7 @@
 - A reply that one linked agent sends another through Forge can now be read with `forge.sh read-verdict` as soon as it is saved. Forge recorded it as readable only after the live delivery to the sender finished, so a delivery that hung, or a crash during it, left the reply saved but unreadable for good.
 - When a delegated Codex session asks for extra permissions (network or file access), Forge now answers in the form Codex expects: it grants the requested permissions for that turn. Forge used to send the answer meant for command approvals, which Codex could not read.
 - The control server's `/ensure` and `/unload` now see a provider set on a model's group. They read only the model's own entry, so a grouped Ollama model was treated as llama.cpp (and could evict a loaded local model to make room), and a grouped cloud model was not refused. `GET /models` already merged groups.
+- Two VS Code windows that point the same model at different llama-server builds no longer share one server. The sharing key covered the server's arguments but not its binary, so the second window could borrow the first window's build and never run its own.
 
 ## 0.17.42
 

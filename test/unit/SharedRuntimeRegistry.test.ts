@@ -6,7 +6,9 @@ import { SharedRuntimeRegistry, sharedRuntimeKey } from '../../src/backend/Share
 import type { ModelConfig } from '../../src/config/types';
 
 const roots: string[] = [];
-afterEach(() => roots.splice(0).forEach((root) => fs.rmSync(root, { recursive: true, force: true })));
+afterEach(() =>
+  roots.splice(0).forEach((root) => fs.rmSync(root, { recursive: true, force: true })),
+);
 
 function registry(isAlive?: (pid: number) => boolean): SharedRuntimeRegistry {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'forge-shared-runtime-'));
@@ -24,7 +26,13 @@ describe('SharedRuntimeRegistry', () => {
   it('publishes a compatible runtime and tracks independent borrower leases', () => {
     const current = registry();
     const key = sharedRuntimeKey(model({ gguf_path: 'N:/models/gemma.gguf' }), {});
-    current.publish({ key, model: 'gemma', endpoint: 'http://127.0.0.1:8080', ownerPid: process.pid, createdAt: 'now' });
+    current.publish({
+      key,
+      model: 'gemma',
+      endpoint: 'http://127.0.0.1:8080',
+      ownerPid: process.pid,
+      createdAt: 'now',
+    });
     expect(current.find(key)?.endpoint).toBe('http://127.0.0.1:8080');
     current.acquireLease(key, 'workspace-a');
     current.acquireLease(key, 'workspace-b');
@@ -119,11 +127,25 @@ describe('sharedRuntimeKey', () => {
     expect(sharedRuntimeKey(model({ type_k: 'f16' }), {})).not.toBe(base);
     // --threads lives on the server config and was missing from the old key
     expect(sharedRuntimeKey(model(), { n_threads: 8 })).not.toBe(base);
+    // U04-03: a different llama-server build is a different server.
+    const global = sharedRuntimeKey(model(), { binary: 'C:/llama/b1/llama-server.exe' });
+    expect(sharedRuntimeKey(model(), { binary: 'C:/llama/b2/llama-server.exe' })).not.toBe(global);
+    expect(
+      sharedRuntimeKey(model({ llama_server_binary: 'C:/fork/llama-server.exe' }), {
+        binary: 'C:/llama/b1/llama-server.exe',
+      }),
+    ).not.toBe(global);
   });
 
   it('treats extra server args as ordered, never sorted', () => {
-    const a = sharedRuntimeKey(model({ extra_llama_server_args: ['--foo', '1', '--bar', '2'] }), {});
-    const b = sharedRuntimeKey(model({ extra_llama_server_args: ['--bar', '2', '--foo', '1'] }), {});
+    const a = sharedRuntimeKey(
+      model({ extra_llama_server_args: ['--foo', '1', '--bar', '2'] }),
+      {},
+    );
+    const b = sharedRuntimeKey(
+      model({ extra_llama_server_args: ['--bar', '2', '--foo', '1'] }),
+      {},
+    );
     // llama.cpp honours later-option precedence, so order is meaning.
     expect(a).not.toBe(b);
   });
