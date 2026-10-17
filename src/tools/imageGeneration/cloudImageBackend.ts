@@ -1,7 +1,9 @@
 import type * as vscode from 'vscode';
 import type { CloudImageBackendConfig } from '../../config/types';
 import { resolveCloudRequestTarget } from '../../llm/CloudRequestResolver';
+import type { WebFetchDependencies } from '../fetchTool';
 import { mimeFromHeader } from '../imageTool';
+import { guardedFetchResource } from '../renderHtml/previewFetch';
 
 /** Generous: a 2k render from a busy provider has been seen past a minute. */
 const GENERATION_TIMEOUT_MS = 180_000;
@@ -24,6 +26,7 @@ export interface CloudImageRequest {
   secrets: vscode.SecretStorage | undefined;
   signal?: AbortSignal;
   fetchImpl?: typeof fetch;
+  webFetchDependencies?: WebFetchDependencies;
 }
 
 interface ImagesResponse {
@@ -70,7 +73,7 @@ export async function generateCloudImage(request: CloudImageRequest): Promise<Ge
   if (first?.b64_json) {
     bytes = Buffer.from(first.b64_json, 'base64');
   } else if (first?.url) {
-    bytes = await downloadImage(first.url, fetchImpl, signal);
+    bytes = await downloadImage(first.url, request.webFetchDependencies, signal);
   } else {
     throw new Error(
       `${backend.name}: the provider answered 200 but returned no image (no url or b64_json).`,
@@ -93,23 +96,25 @@ export async function generateCloudImage(request: CloudImageRequest): Promise<Ge
 
 async function downloadImage(
   url: string,
-  fetchImpl: typeof fetch,
+  dependencies: WebFetchDependencies | undefined,
   signal: AbortSignal,
 ): Promise<Buffer> {
-  if (!url.toLowerCase().startsWith('https://')) {
-    throw new Error(`image URL is not https, refusing to fetch it: ${url.slice(0, 80)}`);
-  }
-  const response = await fetchImpl(url, { signal });
-  if (!response.ok) {
+  const response = await guardedFetchResource(
+    url,
+    {
+      method: 'GET',
+      maxBytes: MAX_GENERATED_IMAGE_BYTES,
+      httpsOnly: true,
+      signal,
+    },
+    dependencies,
+  );
+  if (response.status < 200 || response.status >= 300) {
     throw new Error(
       `the image was generated but its download failed (HTTP ${response.status}); the temporary URL may have expired.`,
     );
   }
-  const declared = Number(response.headers.get('content-length') ?? '0');
-  if (declared > MAX_GENERATED_IMAGE_BYTES) {
-    throw new Error(`image download is ${declared.toLocaleString()} bytes, over the cap.`);
-  }
-  return Buffer.from(await response.arrayBuffer());
+  return response.body;
 }
 
 async function describeHttpFailure(

@@ -25,6 +25,8 @@ export interface ResourceRequest {
   body?: Buffer;
   headers?: Record<string, string>;
   maxBytes: number;
+  httpsOnly?: boolean;
+  signal?: AbortSignal;
 }
 
 export interface FetchedResource {
@@ -85,6 +87,9 @@ async function fetchResourceHop(
   }
   const parsed = parseFetchUrl(url);
   if (typeof parsed === 'string') throw new ToolError(`web_fetch: ${parsed}`);
+  if (options.httpsOnly && parsed.protocol !== 'https:') {
+    throw new ToolError('web_fetch: HTTPS is required for every redirect target.');
+  }
   const hostname = normalizedHostname(parsed);
   const lookup = dependencies.lookup ?? ((host) => dnsLookup(host, { all: true }));
   const addresses = await lookup(hostname);
@@ -113,7 +118,9 @@ async function fetchResourceHop(
       pinned,
       {
         redirect: 'manual',
-        signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
+        signal: options.signal
+          ? AbortSignal.any([options.signal, AbortSignal.timeout(REQUEST_TIMEOUT_MS)])
+          : AbortSignal.timeout(REQUEST_TIMEOUT_MS),
         method: options.method,
         ...(options.body ? { body: options.body } : {}),
         headers: { 'User-Agent': USER_AGENT, ...options.headers },

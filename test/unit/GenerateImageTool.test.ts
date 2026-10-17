@@ -23,7 +23,11 @@ import {
   pickBackend,
   targetPath,
 } from '../../src/tools/imageGeneration/generateImageTool';
-import { generateCloudImage } from '../../src/tools/imageGeneration/cloudImageBackend';
+import {
+  generateCloudImage,
+  MAX_GENERATED_IMAGE_BYTES,
+} from '../../src/tools/imageGeneration/cloudImageBackend';
+import type { WebFetchDependencies } from '../../src/tools/fetchTool';
 import {
   SDCPP_SIZE_NAMES,
   type SdcppImageRequest,
@@ -233,6 +237,15 @@ describe('generateCloudImage', () => {
   const xai = backends[0]!;
   const custom = backends[1]!;
 
+  function imageFetchDependencies(
+    fetchImage: (url: string | URL | Request, init?: RequestInit) => Promise<Response>,
+  ): WebFetchDependencies {
+    return {
+      lookup: async () => [{ address: '93.184.216.34', family: 4 }],
+      fetch: (url, _address, init) => fetchImage(url, init),
+    };
+  }
+
   it('downloads a URL response right away and sniffs the format', async () => {
     const calls: string[] = [];
     const fetchImpl = vi.fn(async (url: string | URL | Request) => {
@@ -243,13 +256,84 @@ describe('generateCloudImage', () => {
       return new Response(JPEG);
     }) as unknown as typeof fetch;
 
-    const image = await generateCloudImage({ backend: xai, prompt: 'fox', secrets, fetchImpl });
+    const image = await generateCloudImage({
+      backend: xai,
+      prompt: 'fox',
+      secrets,
+      fetchImpl,
+      webFetchDependencies: imageFetchDependencies(fetchImpl),
+    });
 
     expect(image.mime).toBe('image/jpeg');
     expect(calls).toEqual([
       'https://api.x.ai/v1/images/generations',
       'https://imgen.x.ai/tmp/a.jpeg',
     ]);
+  });
+
+  it('checks every image redirect and refuses a non-HTTPS destination', async () => {
+    const fetchImpl = vi.fn(async (url: string | URL | Request) => {
+      if (String(url).endsWith('/v1/images/generations')) {
+        return new Response(JSON.stringify({ data: [{ url: 'https://imgen.x.ai/tmp/a.jpeg' }] }));
+      }
+      return new Response(null, {
+        status: 302,
+        headers: { location: 'http://images.example.com/private.png' },
+      });
+    }) as unknown as typeof fetch;
+    const fetchImage = vi.fn(async (url: string | URL | Request, init?: RequestInit) =>
+      fetchImpl(url, init),
+    );
+
+    await expect(
+      generateCloudImage({
+        backend: xai,
+        prompt: 'fox',
+        secrets,
+        fetchImpl,
+        webFetchDependencies: imageFetchDependencies(fetchImage),
+      }),
+    ).rejects.toThrow(/HTTPS is required/);
+
+    expect(fetchImage).toHaveBeenCalledOnce();
+    expect(fetchImage.mock.calls[0]?.[1]?.redirect).toBe('manual');
+  });
+
+  it('cancels a chunked image download as soon as it exceeds the byte cap', async () => {
+    let cancelled = false;
+    let closeTimer: ReturnType<typeof setTimeout> | undefined;
+    const stream = new ReadableStream<Uint8Array>({
+      start(controller) {
+        controller.enqueue(new Uint8Array(MAX_GENERATED_IMAGE_BYTES + 1));
+        closeTimer = setTimeout(() => {
+          controller.enqueue(new Uint8Array([0]));
+          controller.close();
+        }, 20);
+      },
+      cancel() {
+        cancelled = true;
+        if (closeTimer) clearTimeout(closeTimer);
+      },
+    });
+    const fetchImpl = (async (url: string | URL | Request) =>
+      String(url).endsWith('/v1/images/generations')
+        ? new Response(JSON.stringify({ data: [{ url: 'https://imgen.x.ai/tmp/a.jpeg' }] }))
+        : new Response(stream)) as unknown as typeof fetch;
+    const dependencies: WebFetchDependencies = {
+      lookup: async () => [{ address: '93.184.216.34', family: 4 }],
+      fetch: async () => new Response(stream),
+    };
+
+    await expect(
+      generateCloudImage({
+        backend: xai,
+        prompt: 'fox',
+        secrets,
+        fetchImpl,
+        webFetchDependencies: dependencies,
+      }),
+    ).rejects.toThrow(/response exceeds/);
+    expect(cancelled).toBe(true);
   });
 
   it('accepts a base64 response from a custom endpoint', async () => {
@@ -288,11 +372,17 @@ describe('generateCloudImage', () => {
 
     const plainHttp = (async () =>
       new Response(
-        JSON.stringify({ data: [{ url: 'http://127.0.0.1/a.png' }] }),
+        JSON.stringify({ data: [{ url: 'http://images.example.com/a.png' }] }),
       )) as unknown as typeof fetch;
     await expect(
-      generateCloudImage({ backend: xai, prompt: 'fox', secrets, fetchImpl: plainHttp }),
-    ).rejects.toThrow(/not https/);
+      generateCloudImage({
+        backend: xai,
+        prompt: 'fox',
+        secrets,
+        fetchImpl: plainHttp,
+        webFetchDependencies: imageFetchDependencies(plainHttp),
+      }),
+    ).rejects.toThrow(/HTTPS is required/);
   });
 });
 
