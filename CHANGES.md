@@ -30,6 +30,7 @@
 - **Forge: Compact config** no longer refuses a valid config whose models limit which request profiles they accept. A model-and-profile pair the old config already rejected was reported as a pair the migration had broken.
 - An agent task that cannot back up `config.yaml` (a full disk, a permissions error) now fails before it starts, with the reason. It used to go on and change config with no backup to roll back to. The backup is also written atomically now.
 - When an agent task's model restart hits its five-minute cap, the rollback restart now waits for the timed-out restart to finish (up to another minute) instead of racing it. A late finish could leave the backend on the new binary while config.yaml said the old one. If the first restart is still running after that minute, Forge restores config.yaml for the next load and says so, without a second restart.
+- A `github_release` job with an `asset_pattern` now fires when the matching builds are uploaded, not only when the tag changes. llama.cpp tags a release before CI uploads its builds, so a poll in between recorded the tag with no matching build, and the upload was never noticed.
 
 ## 0.17.42
 

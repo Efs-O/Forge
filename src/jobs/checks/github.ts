@@ -63,10 +63,22 @@ function pickRelease(body: string, channel: 'latest' | 'prerelease'): ReleasePay
   return release as ReleasePayload;
 }
 
+interface ObservedAsset {
+  name: string;
+  digest?: string | undefined;
+}
+
+/** Order-free identity of a set of assets: names and digests. */
+function assetKey(assets: readonly ObservedAsset[]): string {
+  return JSON.stringify(assets.map((a) => [a.name, a.digest ?? null]).sort());
+}
+
 /**
  * Watch a repo's latest release. The observation is a JSON blob of the tag,
  * publish time, matching assets, and a bounded body. It changes when the tag
- * differs (a new release), or when the tag no longer matches the asset pattern.
+ * differs (a new release), or when the matching assets do: llama.cpp tags a
+ * release before CI uploads its builds, so a poll in between sees the tag
+ * with no matching asset, and the upload must still count.
  */
 export async function githubReleaseCheck(
   check: GithubReleaseCheck,
@@ -114,9 +126,12 @@ export async function githubReleaseCheck(
     body: typeof release.body === 'string' ? release.body.slice(0, MAX_BODY_CHARS) : '',
   });
 
-  const lastTag = lastObservation ? (JSON.parse(lastObservation) as { tag?: string }).tag : null;
+  const last = lastObservation
+    ? (JSON.parse(lastObservation) as { tag?: string; assets?: ObservedAsset[] })
+    : null;
   // The first run only records a baseline; it never reports "changed" (B.2).
-  const changed = lastObservation !== null && tag !== lastTag;
+  const changed =
+    last !== null && (tag !== last.tag || assetKey(assets) !== assetKey(last.assets ?? []));
   const assetNote =
     assets.length > 0 ? ` (${assets.length} matching asset${assets.length === 1 ? '' : 's'})` : '';
   return {

@@ -29,7 +29,9 @@ const RELEASE_BODY = JSON.stringify({
 
 describe('assetMatches', () => {
   it('matches a glob with *', () => {
-    expect(assetMatches('llama-b10910-bin-win-cuda-13.3-x64.zip', '*win-cuda-13.3-x64.zip')).toBe(true);
+    expect(assetMatches('llama-b10910-bin-win-cuda-13.3-x64.zip', '*win-cuda-13.3-x64.zip')).toBe(
+      true,
+    );
     expect(assetMatches('llama-b10910-bin-macos-arm64.zip', '*win-cuda-13.3-x64.zip')).toBe(false);
   });
   it('an undefined pattern matches everything', () => {
@@ -62,6 +64,21 @@ describe('githubReleaseCheck', () => {
     expect(result.observation).toContain('b10910');
   });
 
+  it('same tag: assets uploaded after the tag are a change, the same assets are not (U07-07)', async () => {
+    const check = {
+      kind: 'github_release' as const,
+      repo: 'ggml-org/llama.cpp',
+      asset_pattern: '*win-cuda*',
+    };
+    // Polled between the tag and CI's upload: the tag with no matching asset.
+    const tagOnly = JSON.stringify({ tag: 'b10910', published_at: null, assets: [], body: '' });
+    const uploaded = await githubReleaseCheck(check, tagOnly, fakeCtx(RELEASE_BODY));
+    expect(uploaded.changed).toBe(true);
+
+    const again = await githubReleaseCheck(check, uploaded.observation, fakeCtx(RELEASE_BODY));
+    expect(again.changed).toBe(false);
+  });
+
   it('an ETag 304 counts as unchanged and keeps the last observation', async () => {
     const last = JSON.stringify({ tag: 'b10910' });
     const result = await githubReleaseCheck(
@@ -91,7 +108,11 @@ describe('githubReleaseCheck', () => {
 
   it('an asset pattern filters the recorded assets', async () => {
     const result = await githubReleaseCheck(
-      { kind: 'github_release', repo: 'ggml-org/llama.cpp', asset_pattern: '*win-cuda-13.3-x64.zip' },
+      {
+        kind: 'github_release',
+        repo: 'ggml-org/llama.cpp',
+        asset_pattern: '*win-cuda-13.3-x64.zip',
+      },
       null,
       fakeCtx(RELEASE_BODY),
     );
@@ -136,7 +157,9 @@ describe('githubIssueCheck', () => {
       null,
       issue,
     );
-    const observation = JSON.parse(result.observation) as { last_comment: { id: number; author: string; excerpt: string } };
+    const observation = JSON.parse(result.observation) as {
+      last_comment: { id: number; author: string; excerpt: string };
+    };
     expect(observation.last_comment).toMatchObject({ id: 9, author: 'forge' });
     expect(observation.last_comment.excerpt).toHaveLength(200);
   });
@@ -148,22 +171,39 @@ describe('githubIssueCheck', () => {
     issue.fetch = async (url) => {
       urls.push(url);
       return url.includes('/comments?')
-        ? { notModified: false, body: JSON.stringify([{ id: 12, user: { login: 'b' }, body: 'newest' }]), etag: null }
+        ? {
+            notModified: false,
+            body: JSON.stringify([{ id: 12, user: { login: 'b' }, body: 'newest' }]),
+            etag: null,
+          }
         : { notModified: false, body: ISSUE_BODY, etag: null };
     };
-    await githubIssueCheck({ kind: 'github_issue', repo: 'ggml-org/llama.cpp', issue_number: 1234 }, null, issue);
+    await githubIssueCheck(
+      { kind: 'github_issue', repo: 'ggml-org/llama.cpp', issue_number: 1234 },
+      null,
+      issue,
+    );
     expect(urls.find((u) => u.includes('/comments?'))).toMatch(/[?&]per_page=1&page=4$/);
   });
 
   it('an issue with no comments makes no comments request', async () => {
     const urls: string[] = [];
-    const body = JSON.stringify({ state: 'open', updated_at: '2026-09-14T10:00:00Z', title: 't', comments: 0 });
+    const body = JSON.stringify({
+      state: 'open',
+      updated_at: '2026-09-14T10:00:00Z',
+      title: 't',
+      comments: 0,
+    });
     const issue = fakeCtx(body);
     issue.fetch = async (url) => {
       urls.push(url);
       return { notModified: false, body, etag: null };
     };
-    const result = await githubIssueCheck({ kind: 'github_issue', repo: 'ggml-org/llama.cpp', issue_number: 1 }, null, issue);
+    const result = await githubIssueCheck(
+      { kind: 'github_issue', repo: 'ggml-org/llama.cpp', issue_number: 1 },
+      null,
+      issue,
+    );
     expect(urls.some((u) => u.includes('/comments'))).toBe(false);
     expect((JSON.parse(result.observation) as { last_comment: unknown }).last_comment).toBeNull();
   });
@@ -209,12 +249,16 @@ describe('hfDiscussionCheck', () => {
     author: { name: 'Efso' },
     data: { latest: { raw } },
   });
-  const thread = (status: string, events: object[]) => JSON.stringify({ status, title: 't', events });
+  const thread = (status: string, events: object[]) =>
+    JSON.stringify({ status, title: 't', events });
 
   it('fetches the model discussion API and records a baseline without a change', async () => {
     const urls: string[] = [];
     const ctx = fakeCtx(thread('open', [comment('a', 'hi')]));
-    const r = await hfDiscussionCheck(check, null, { ...ctx, fetch: (u) => (urls.push(u), ctx.fetch(u)) });
+    const r = await hfDiscussionCheck(check, null, {
+      ...ctx,
+      fetch: (u) => (urls.push(u), ctx.fetch(u)),
+    });
     expect(urls).toEqual([
       'https://huggingface.co/api/models/Jackrong/Qwopus3.8-27B-Flash-V2-GGUF/discussions/2',
     ]);
@@ -223,23 +267,40 @@ describe('hfDiscussionCheck', () => {
   });
 
   it('a new comment or a status change is a change; an edited comment is not', async () => {
-    const base = (await hfDiscussionCheck(check, null, fakeCtx(thread('open', [comment('a', 'hi')])))).observation;
-    const edited = await hfDiscussionCheck(check, base, fakeCtx(thread('open', [comment('a', 'hi (edited)')])));
+    const base = (
+      await hfDiscussionCheck(check, null, fakeCtx(thread('open', [comment('a', 'hi')])))
+    ).observation;
+    const edited = await hfDiscussionCheck(
+      check,
+      base,
+      fakeCtx(thread('open', [comment('a', 'hi (edited)')])),
+    );
     expect(edited.changed).toBe(false);
-    const reply = await hfDiscussionCheck(check, base, fakeCtx(thread('open', [comment('a', 'hi'), comment('b', 'ok')])));
+    const reply = await hfDiscussionCheck(
+      check,
+      base,
+      fakeCtx(thread('open', [comment('a', 'hi'), comment('b', 'ok')])),
+    );
     expect(reply.changed).toBe(true);
     expect(reply.summary).toContain('2 events');
-    const closed = await hfDiscussionCheck(check, base, fakeCtx(thread('closed', [comment('a', 'hi')])));
+    const closed = await hfDiscussionCheck(
+      check,
+      base,
+      fakeCtx(thread('closed', [comment('a', 'hi')])),
+    );
     expect(closed.changed).toBe(true);
   });
 
   it('a 304 keeps the last observation, even a null baseline', async () => {
-    expect(await hfDiscussionCheck(check, null, fakeCtx(null))).toMatchObject({ observation: null, changed: false });
+    expect(await hfDiscussionCheck(check, null, fakeCtx(null))).toMatchObject({
+      observation: null,
+      changed: false,
+    });
   });
 
   it('an error payload throws with the API message', async () => {
-    await expect(hfDiscussionCheck(check, null, fakeCtx(JSON.stringify({ error: 'Repository not found' })))).rejects.toThrow(
-      'Repository not found',
-    );
+    await expect(
+      hfDiscussionCheck(check, null, fakeCtx(JSON.stringify({ error: 'Repository not found' }))),
+    ).rejects.toThrow('Repository not found');
   });
 });
