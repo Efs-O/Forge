@@ -22,6 +22,17 @@ export interface RecurringWake {
 
 const WEEKDAY_ORDER: readonly Weekday[] = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
 
+/** Task Scheduler names each day as an empty child of `DaysOfWeek`: `<Monday />`. */
+const WEEKDAY_ELEMENT: Readonly<Record<Weekday, string>> = {
+  Mon: 'Monday',
+  Tue: 'Tuesday',
+  Wed: 'Wednesday',
+  Thu: 'Thursday',
+  Fri: 'Friday',
+  Sat: 'Saturday',
+  Sun: 'Sunday',
+};
+
 function validWake(wake: RecurringWake): void {
   if (
     !Number.isInteger(wake.hour) ||
@@ -148,22 +159,26 @@ export function renderOneShotTrigger(when: Date): string {
  * explicitly deleted (empty wake list).
  */
 export function renderRecurringTriggers(wakes: readonly RecurringWake[]): string {
-  const triggers = distinctWakes(wakes).map((wake) => {
+  const triggers = distinctWakes(wakes).map(({ hour, minute, days }) => {
     // StartBoundary is the next occurrence of this clock time. The task
     // scheduler repeats it on the schedule below; the boundary just needs to
     // be a valid future local timestamp.
     const now = new Date();
     const start = new Date(now);
-    start.setHours(wake.hour, wake.minute, 0, 0);
+    start.setHours(hour, minute, 0, 0);
     if (start.getTime() <= now.getTime()) start.setDate(start.getDate() + 1);
     const boundary = localIso(start);
 
     const schedule =
-      wake.days === 'daily'
+      days === 'daily'
         ? '      <ScheduleByDay><DaysInterval>1</DaysInterval></ScheduleByDay>'
         : [
             '      <ScheduleByWeek>',
-            `        <DaysOfWeek>${[...wake.days].sort((a, b) => WEEKDAY_ORDER.indexOf(a) - WEEKDAY_ORDER.indexOf(b)).join('')}</DaysOfWeek>`,
+            '        <DaysOfWeek>',
+            ...WEEKDAY_ORDER.filter((day) => days.includes(day)).map(
+              (day) => `          <${WEEKDAY_ELEMENT[day]} />`,
+            ),
+            '        </DaysOfWeek>',
             '        <WeeksInterval>1</WeeksInterval>',
             '      </ScheduleByWeek>',
           ].join('\n');
@@ -241,7 +256,7 @@ export function parseScheduledWakes(xml: string): RecurringWake[] | null {
     const hour = Number(boundary[1]);
     const minute = Number(boundary[2]);
     const isDaily = /<ScheduleByDay>/.test(trigger);
-    const daysMatch = /<DaysOfWeek>([A-Za-z]+)<\/DaysOfWeek>/.exec(trigger);
+    const daysMatch = /<DaysOfWeek>([\s\S]*?)<\/DaysOfWeek>/.exec(trigger);
     if (!isDaily && !daysMatch) {
       throw new Error('Forge: scheduled wake task has a weekly trigger without DaysOfWeek.');
     }
@@ -253,10 +268,9 @@ export function parseScheduledWakes(xml: string): RecurringWake[] | null {
 }
 
 function parseWeekdays(text: string): Weekday[] {
-  const result: Weekday[] = [];
-  for (const day of WEEKDAY_ORDER) {
-    if (text.includes(day)) result.push(day);
-  }
+  const result = WEEKDAY_ORDER.filter((day) =>
+    new RegExp(`<${WEEKDAY_ELEMENT[day]}\\s*/>`).test(text),
+  );
   if (result.length === 0) throw new Error('Forge: scheduled wake task has no valid weekdays.');
   return result;
 }

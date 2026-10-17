@@ -7,6 +7,15 @@ import {
   type RecurringWake,
 } from '../../src/system/wakeTaskXml';
 
+/** Task Scheduler's schema: each day is an empty child element, never text. */
+const MON_WED_FRI = [
+  '        <DaysOfWeek>',
+  '          <Monday />',
+  '          <Wednesday />',
+  '          <Friday />',
+  '        </DaysOfWeek>',
+].join('\n');
+
 describe('oneShotTaskXml', () => {
   const when = new Date(2026, 8, 15, 7, 0, 0);
 
@@ -62,7 +71,7 @@ describe('scheduledWakeTaskXml', () => {
   it('renders weekday wakes as ScheduleByWeek with days in canonical order', () => {
     // Input order is deliberately non-canonical; the output must be sorted.
     const xml = scheduledWakeTaskXml([{ hour: 9, minute: 30, days: ['Fri', 'Mon', 'Wed'] }]);
-    expect(xml).toContain('<DaysOfWeek>MonWedFri</DaysOfWeek>');
+    expect(xml).toContain(MON_WED_FRI);
   });
 
   it('does not mutate the input days array', () => {
@@ -94,7 +103,7 @@ describe('renderRecurringTriggers', () => {
       { hour: 6, minute: 0, days: ['Wed', 'Fri'] },
     ]);
     expect(xml.match(/<CalendarTrigger>/g)).toHaveLength(1);
-    expect(xml).toContain('<DaysOfWeek>MonWedFri</DaysOfWeek>');
+    expect(xml).toContain(MON_WED_FRI);
   });
 
   it('rejects invalid recurring wake definitions before rendering XML', () => {
@@ -135,6 +144,38 @@ describe('parseScheduledWakes', () => {
   it('returns null when the XML has no CalendarTrigger', () => {
     const xml = oneShotTaskXml(new Date(2026, 8, 15, 7, 0, 0));
     expect(parseScheduledWakes(xml)).toBeNull();
+  });
+
+  it('reads the weekly trigger as schtasks /query /xml exports it', () => {
+    // Shape of a real export: CRLF, spacing before "/>", sibling Enabled.
+    const exported = [
+      '<?xml version="1.0" encoding="UTF-16"?>',
+      '<Task version="1.2" xmlns="http://schemas.microsoft.com/windows/2004/02/mit/task">',
+      '  <Triggers>',
+      '    <CalendarTrigger>',
+      '      <StartBoundary>2026-10-19T09:30:00</StartBoundary>',
+      '      <Enabled>true</Enabled>',
+      '      <ScheduleByWeek>',
+      '        <DaysOfWeek>',
+      '          <Tuesday />',
+      '          <Saturday/>',
+      '        </DaysOfWeek>',
+      '        <WeeksInterval>1</WeeksInterval>',
+      '      </ScheduleByWeek>',
+      '    </CalendarTrigger>',
+      '  </Triggers>',
+      '</Task>',
+    ].join('\r\n');
+    expect(parseScheduledWakes(exported)).toEqual([
+      { hour: 9, minute: 30, days: ['Tue', 'Sat'] },
+    ]);
+  });
+
+  it('rejects a DaysOfWeek with no day elements', () => {
+    const legacy =
+      '<CalendarTrigger><StartBoundary>2026-10-19T09:30:00</StartBoundary>' +
+      '<ScheduleByWeek><DaysOfWeek>MonWed</DaysOfWeek></ScheduleByWeek></CalendarTrigger>';
+    expect(() => parseScheduledWakes(legacy)).toThrow(/no valid weekdays/);
   });
 
   it('rejects malformed calendar triggers instead of inventing a schedule', () => {

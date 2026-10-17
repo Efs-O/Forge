@@ -10,6 +10,7 @@
 - The first-run wizard can save config.yaml to `<workspace>/.forge` or to Forge's storage folder when that folder does not exist yet. The save took its lock file inside the folder before creating it, so on a fresh setup it failed with ENOENT.
 - config.yaml is now flushed to disk before it replaces the old copy, as every other Forge file has been since 0.17.42. It had a separate writer that 0.17.42 did not reach, so a power loss during a settings change could leave config.yaml empty.
 - Thirteen other files 0.17.42 missed are now flushed the same way. They include the Telegram/remote state, the encrypted WhatsApp login, checkpoint manifests, saved chat and Telegram attachments, the agent-exchange log and the agent bus's question and reply files. Each had its own copy of the save code, and none flushed. They now share Forge's one atomic writer.
+- A scheduled job that runs on chosen weekdays now registers its wake timer correctly. Forge wrote the days as `MonWedFri`, but Task Scheduler's schema names each day as its own element (`<Monday />`). Daily wakes were not affected. Forge also reads the days back in the form Windows exports them.
 
 ## 0.17.42
 
