@@ -55,6 +55,7 @@
 - **Stop cancels a running `web_search` (U16-04).** Tavily and Brave requests had no abort signal and no timeout.
 - **`view_image`'s description matches what it reads (U16-07).** It said absolute paths must be inside the workspace; reads outside it are allowed, as for `read_file`.
 - **A missing absolute path is described as used as given (U16-08).** The not-found message said it was resolved against the workspace root and advised about the project root, sending the model to the wrong base.
+- **A backend that fails to start hands your prompt back (U20-01).** The prompt is saved only once the backend is up, so the next sidebar sync dropped it and you had to retype it; it now returns to the input box, as a refused prompt already did.
 
 ## 0.17.42
 

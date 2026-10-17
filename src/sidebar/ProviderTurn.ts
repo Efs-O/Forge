@@ -242,6 +242,9 @@ export async function runLocalProviderTurn(
       ctx.events.onBackendError?.(msg);
       ctx.events.onTurnFailed?.(convId, msg);
       postC({ type: 'backendDown', message: msg });
+      // The prompt never reached conv.messages, so the next sync drops its
+      // optimistic row; hand it back, as an admission refusal does (U20-01).
+      if (!ctrl.signal.aborted) postC({ type: 'setInput', text });
       if (ctrl.signal.aborted) postC({ type: 'done', finishReason: 'cancelled' });
       ctx.lifecycle.settle(convId);
       return ctrl.signal.aborted

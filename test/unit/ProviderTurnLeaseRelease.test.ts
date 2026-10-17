@@ -253,6 +253,24 @@ describe('runLocalProviderTurn turn-lease release', () => {
     expect(post).toHaveBeenCalledWith({ type: 'error', message });
   });
 
+  // The prompt is committed only after the backend is up; a failed start used
+  // to lose it when the next sync dropped its optimistic row (U20-01).
+  it('hands the prompt back to the composer when the backend fails to start', async () => {
+    const pool = countingPool();
+    (pool as unknown as { acquireForTurn: () => Promise<never> }).acquireForTurn = async () => {
+      throw new Error('llama-server exited with code 1');
+    };
+    const h = fakeHarness(pool);
+    const ctrl = new AbortController();
+    const post = vi.fn();
+    h.ctx.lifecycle.register('conv-1', ctrl);
+
+    const outcome = await runTurn(h.ctx, ctrl, post);
+
+    expect(outcome.kind).toBe('failed');
+    expect(post).toHaveBeenCalledWith({ type: 'setInput', text: 'hello' });
+  });
+
   it('releases the lease BEFORE settling when Stop lands during backend start', async () => {
     // Ordering, not just counting. `settle` is what tells the rest of the app
     // the turn is over; if the pin is still held at that moment there is a
