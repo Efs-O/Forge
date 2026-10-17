@@ -179,10 +179,22 @@ describe('sessionTypes', () => {
 
   it('links parallel tool rows and their diffs by call id and reuses the live detail label', () => {
     const messages: ChatMessage[] = [
-      { role: 'assistant', content: null, tool_calls: [
-        { id: 'edit-a', type: 'function', function: { name: 'edit_file', arguments: '{"path":"src/a.ts"}' } },
-        { id: 'edit-b', type: 'function', function: { name: 'edit_file', arguments: '{"path":"docs/b.md"}' } },
-      ] },
+      {
+        role: 'assistant',
+        content: null,
+        tool_calls: [
+          {
+            id: 'edit-a',
+            type: 'function',
+            function: { name: 'edit_file', arguments: '{"path":"src/a.ts"}' },
+          },
+          {
+            id: 'edit-b',
+            type: 'function',
+            function: { name: 'edit_file', arguments: '{"path":"docs/b.md"}' },
+          },
+        ],
+      },
       { role: 'tool', content: 'edited a', tool_call_id: 'edit-a', name: 'edit_file' },
       { role: 'tool', content: 'edited b', tool_call_id: 'edit-b', name: 'edit_file' },
     ];
@@ -216,17 +228,58 @@ describe('sessionTypes', () => {
     const message: ChatMessage = { role: 'user', content: 'adjust the task', midTurn: true };
     const persisted = slimPersistMessages([message]);
 
-    expect(sidebarSessionPersistedSchema.safeParse({
-      activeConversationId: 'c1',
-      conversations: [{
-        id: 'c1',
-        title: 'Chat',
-        createdAt: 1,
-        updatedAt: 1,
-        messages: persisted,
-      }],
-    }).success).toBe(true);
+    expect(
+      sidebarSessionPersistedSchema.safeParse({
+        activeConversationId: 'c1',
+        conversations: [
+          {
+            id: 'c1',
+            title: 'Chat',
+            createdAt: 1,
+            updatedAt: 1,
+            messages: persisted,
+          },
+        ],
+      }).success,
+    ).toBe(true);
     expect(chatMessagesFromSlim(persisted)).toEqual([message]);
+  });
+
+  it('persists visible message creation times and tolerates older rows without them', () => {
+    const messages: ChatMessage[] = [
+      { role: 'user', content: 'question', createdAt: 1_700_000_000_000 },
+      { role: 'assistant', content: 'answer', createdAt: 1_700_000_123_000 },
+    ];
+    const slim = slimPersistMessages(messages);
+
+    expect(slim.map((message) => message.createdAt)).toEqual([
+      1_700_000_000_000, 1_700_000_123_000,
+    ]);
+    expect(chatMessagesFromSlim(slim)).toEqual(messages);
+    expect(displayPersistMessages(messages)).toEqual([
+      { role: 'user', content: 'question', createdAt: 1_700_000_000_000 },
+      { role: 'assistant', content: 'answer', createdAt: 1_700_000_123_000 },
+    ]);
+
+    const legacy = chatMessagesFromSlim([{ role: 'user', content: 'saved before timestamps' }]);
+    expect(legacy).toEqual([{ role: 'user', content: 'saved before timestamps' }]);
+    expect(displayPersistMessages(legacy)).toEqual([
+      { role: 'user', content: 'saved before timestamps' },
+    ]);
+    expect(
+      sidebarSessionPersistedSchema.safeParse({
+        activeConversationId: 'c1',
+        conversations: [
+          {
+            id: 'c1',
+            title: 'Chat',
+            createdAt: 1,
+            updatedAt: 1,
+            messages: [{ role: 'user', content: 'legacy row' }],
+          },
+        ],
+      }).success,
+    ).toBe(true);
   });
 
   it('restores a completed tool row and its file preview after session sync or reload', () => {

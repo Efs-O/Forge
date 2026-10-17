@@ -21,6 +21,7 @@ overlaps with an existing owner, extend the owner instead.
 | Generation-event session timing                      | `src/sidebar/sessionTimerWiring.ts`      |
 | Pure transcript/usage mutations                      | `src/sidebar/transcriptMutations.ts`     |
 | Sidebar transcript activity row folding               | `webview-ui/src/activityRows.ts`          |
+| Sidebar message timestamp formatting                  | `webview-ui/src/messageTimestamp.ts`       |
 | Folding back-to-back calls of one tool into a run row | `webview-ui/src/activityRuns.ts` (row: `components/ActivityRunRow.tsx`) |
 | Count-up seconds for in-flight labels (hook)         | `webview-ui/src/useSecondsSince.ts` |
 | Tool calls still being written (live progress rows)  | `webview-ui/src/pendingToolCalls.ts` (row: `components/PendingToolCallRow.tsx`; host message: `src/sidebar/toolCallProgress.ts`) |

@@ -229,6 +229,15 @@ describe('Telegram inbound mapping — status bubble Stop button', () => {
     });
   });
 
+  it('marks the separate control-row Stop callback for stale-message cleanup', () => {
+    const parsed = TelegramUpdateSchema.parse(tap('y'));
+    expect(telegramUpdateToEvent(parsed)).toMatchObject({
+      kind: 'stop_action',
+      messageId: '55',
+      control: true,
+    });
+  });
+
   it('does not read a longer callback that starts with x as Stop', () => {
     const parsed = TelegramUpdateSchema.parse(tap('xy'));
     expect(telegramUpdateToEvent(parsed)?.kind).not.toBe('stop_action');

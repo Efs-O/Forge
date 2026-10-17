@@ -61,8 +61,7 @@ function activeTerminalCwd(): string | undefined {
   return cwd.scheme === 'file' ? cwd.fsPath : cwd.toString(true);
 }
 
-/** Tool rounds per sidebar turn when the model does not set `max_tool_rounds`.
- */
+/** Tool rounds per sidebar turn when the model does not set `max_tool_rounds`. */
 export const MAX_TOOL_ROUNDS = 1000;
 
 /** Ceiling on a configured `max_tool_rounds`. The cap's job is to stop a
@@ -376,14 +375,18 @@ export async function runModelTurn(
       },
       onMessagesChanged: () => ctx.onTranscriptChanged?.(conv),
       ...(ctx.drainTells ? { drainTells: () => ctx.drainTells!(conv.id) } : {}),
-      onToken: (text) => {
+      onToken: (text, createdAt) => {
         ctx.streamMeter?.add(conv.id, 'answer', text);
-        postC({ type: 'token', text });
+        postC({ type: 'token', text, ...(createdAt !== undefined ? { createdAt } : {}) });
         ctx.emitAgentProgress({ conversationId: conv.id, kind: 'commentary', text });
       },
-      onReasoning: (text) => {
+      onReasoning: (text, createdAt) => {
         ctx.streamMeter?.add(conv.id, 'reasoning', text);
-        postC({ type: 'reasoningToken', text });
+        postC({
+          type: 'reasoningToken',
+          text,
+          ...(createdAt !== undefined ? { createdAt } : {}),
+        });
         ctx.emitAgentProgress({ conversationId: conv.id, kind: 'reasoning' });
       },
       onToolCallProgress: (progress) => {

@@ -112,15 +112,17 @@ export function displayPersistMessages(
     // The span belongs to the thought, so on a split turn it rides the reasoning
     // half - the answer half never reasoned.
     const reasoningMs = typeof m.reasoningMs === 'number' ? { reasoningMs: m.reasoningMs } : {};
+    const createdAt = typeof m.createdAt === 'number' ? { createdAt: m.createdAt } : {};
     if (m.role === 'assistant' && content && reasoning) {
-      out.push({ role: 'assistant', content: '', reasoning, ...reasoningMs });
-      out.push({ role: 'assistant', content });
+      out.push({ role: 'assistant', content: '', reasoning, ...reasoningMs, ...createdAt });
+      out.push({ role: 'assistant', content, ...createdAt });
       continue;
     }
     out.push({
       role: m.role,
       // A reasoning-only turn has content: null; the webview contract is string.
       content,
+      ...(m.role === 'user' || m.role === 'assistant' ? createdAt : {}),
       ...(reasoning ? { reasoning, ...reasoningMs } : {}),
       ...(m.role === 'user' && m.midTurn ? { midTurn: true } : {}),
       ...(m.role === 'user' && m.agentSender ? { agentSender: m.agentSender } : {}),

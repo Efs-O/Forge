@@ -22,6 +22,8 @@ export interface ChatAttachmentRef {
 
 export interface ChatMessage {
   role: Role;
+  /** Host-stamped creation time in epoch milliseconds for visible chat messages. */
+  createdAt?: number;
   /** May be null on assistant messages that carry tool_calls without text. */
   content: string | ContentPart[] | null;
   /**

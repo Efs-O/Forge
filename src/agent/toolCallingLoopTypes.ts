@@ -32,8 +32,8 @@ export interface ToolCallingLoopOptions {
   stripAllTools?: boolean;
   canUseThinkingKwargs?: boolean;
   stripThinkingChannels?: boolean;
-  onToken?: (text: string) => void;
-  onReasoning?: (text: string) => void;
+  onToken?: (text: string, createdAt?: number) => void;
+  onReasoning?: (text: string, createdAt?: number) => void;
   onToolCallProgress?: ToolCallProgressHandler;
   onDone?: (finishReason: string | null) => void;
   onRepeatedCall?: () => void;

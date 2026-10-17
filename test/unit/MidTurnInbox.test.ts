@@ -9,11 +9,13 @@ describe('MidTurnInbox', () => {
     inbox.add('two', { id: 'c', text: 'other' });
 
     expect(inbox.drain('one')).toEqual([
-      { id: 'a', text: 'first' },
-      { id: 'b', text: 'second' },
+      { id: 'a', text: 'first', createdAt: expect.any(Number) },
+      { id: 'b', text: 'second', createdAt: expect.any(Number) },
     ]);
     expect(inbox.drain('one')).toEqual([]);
-    expect(inbox.takeUndelivered('two')).toEqual([{ id: 'c', text: 'other' }]);
+    expect(inbox.takeUndelivered('two')).toEqual([
+      { id: 'c', text: 'other', createdAt: expect.any(Number) },
+    ]);
   });
 
   it('withdraws only the named tell, and refuses once a drain has taken it', () => {
@@ -24,7 +26,9 @@ describe('MidTurnInbox', () => {
     expect(inbox.remove('one', 'a')).toBe(true);
     expect(inbox.remove('one', 'a')).toBe(false);
     expect(inbox.remove('two', 'b')).toBe(false);
-    expect(inbox.drain('one')).toEqual([{ id: 'b', text: 'second' }]);
+    expect(inbox.drain('one')).toEqual([
+      { id: 'b', text: 'second', createdAt: expect.any(Number) },
+    ]);
     expect(inbox.remove('one', 'b')).toBe(false);
   });
 
@@ -37,8 +41,8 @@ describe('MidTurnInbox', () => {
     expect(inbox.markSendNow('two', 'b')).toBe(false);
     expect(inbox.drain('one')).toEqual([]);
     expect(inbox.takeUndelivered('one')).toEqual([
-      { id: 'a', text: 'first' },
-      { id: 'b', text: 'second', sendNow: true },
+      { id: 'a', text: 'first', createdAt: expect.any(Number) },
+      { id: 'b', text: 'second', sendNow: true, createdAt: expect.any(Number) },
     ]);
     expect(inbox.markSendNow('one', 'b')).toBe(false);
   });

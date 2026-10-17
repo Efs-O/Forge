@@ -4,6 +4,7 @@ import { QUEUED_ACK_DELETE_SECONDS } from './TelegramAcknowledgement';
 import { DEFAULT_STATUS, renderProgressFooter } from './remoteProgressRender';
 import { keepTail, sanitize, sanitizeToolName } from './remoteProgressText';
 import { RemoteLiveBubble } from './RemoteLiveBubble';
+import { removeProgressStopControl } from './remoteProgressOpen';
 
 /** Telegram allows about one edit per second per chat. */
 const DEFAULT_EDIT_INTERVAL_MS = 1_000;
@@ -43,6 +44,8 @@ interface ActiveProgress {
   chatId: string;
   /** The turn's words and status footer; absent on a transport that cannot edit. */
   bubble?: RemoteLiveBubble;
+  /** Separate Telegram Stop row, when this transport supports it. */
+  stopMessageId?: string;
   /** Replaces the default status while the turn waits on something else. */
   phase?: string;
   milestone?: string;
@@ -77,8 +80,9 @@ interface ActiveProgress {
  * Mirrors a turn into the chat as it happens.
  *
  * The agent's words stream into real messages, one per text block, and the
- * status footer with the ⏹ Stop button rides on the newest of them (see
- * `RemoteLiveBubble`). A separate status message was tried first and failed:
+ * status footer rides on the newest of them (see `RemoteLiveBubble`). Telegram
+ * keeps Stop in its own row above the status; other channels retain their
+ * inline control when they support one. A separate status message was tried first and failed:
  * Telegram never moves a message, so it stayed where it was opened while every
  * later bubble appeared below it and the live status scrolled out of view.
  *
@@ -119,12 +123,14 @@ export class RemoteAgentProgress {
     chatId: string,
     messageId: string,
     origin: ProgressOrigin = 'remote',
+    stopMessageId?: string,
   ): void {
     this.drop(conversationId);
     const now = Date.now();
     const state: ActiveProgress = {
       origin,
       chatId,
+      ...(stopMessageId ? { stopMessageId } : {}),
       warnings: [],
       narrations: [],
       startedAt: now,
@@ -144,6 +150,7 @@ export class RemoteAgentProgress {
         maxChars: () => this.maxMessageChars,
         footer: (maximum) => renderProgressFooter(state, maximum, Date.now()),
         intervalMs: this.editIntervalMs,
+        stopButtonOnBubble: !stopMessageId,
         report: (err) => this.report(err),
       },
       messageId,
@@ -285,7 +292,11 @@ export class RemoteAgentProgress {
    */
   conversationForBubble(chatId: string, messageId: string): string | undefined {
     for (const [conversationId, state] of this.active) {
-      if (!state.closed && state.chatId === chatId && state.bubble?.owns(messageId)) {
+      if (
+        !state.closed &&
+        state.chatId === chatId &&
+        (state.stopMessageId === messageId || state.bubble?.owns(messageId))
+      ) {
         return conversationId;
       }
     }
@@ -297,13 +308,25 @@ export class RemoteAgentProgress {
     if (!state) return;
     state.closed = true;
     if (state.clock) clearInterval(state.clock);
-    await state.tail;
+    try {
+      await state.tail;
+    } catch (err) {
+      this.report(err);
+    }
     // Only this state: a new message may have begun for the conversation
     // while the tail settled, and it is not this call's to delete.
     if (this.active.get(conversationId) === state) this.active.delete(conversationId);
-    if (!state.bubble || this.signal.aborted) return;
-    const statusOnly = await state.bubble.close(terminalText);
-    if (statusOnly.length > 0) this.armAfter?.(state.chatId, statusOnly, QUEUED_ACK_DELETE_SECONDS);
+    try {
+      if (state.bubble && !this.signal.aborted) {
+        const statusOnly = await state.bubble.close(terminalText);
+        if (statusOnly.length > 0)
+          this.armAfter?.(state.chatId, statusOnly, QUEUED_ACK_DELETE_SECONDS);
+      }
+    } catch (err) {
+      this.report(err);
+    } finally {
+      await this.removeStopControl(state);
+    }
   }
 
   async dispose(): Promise<void> {
@@ -311,6 +334,7 @@ export class RemoteAgentProgress {
     for (const [conversationId, state] of this.active) {
       this.abandon(state);
       pending.push(state.tail);
+      pending.push(this.removeStopControl(state));
       this.active.delete(conversationId);
     }
     await Promise.allSettled(pending);
@@ -338,6 +362,18 @@ export class RemoteAgentProgress {
     if (!previous) return;
     this.abandon(previous);
     this.active.delete(conversationId);
+    void this.removeStopControl(previous);
+  }
+
+  private async removeStopControl(state: ActiveProgress): Promise<void> {
+    const messageId = state.stopMessageId;
+    if (!messageId) return;
+    delete state.stopMessageId;
+    try {
+      await removeProgressStopControl(this.channel, state.chatId, messageId);
+    } catch (err) {
+      this.report(err);
+    }
   }
 
   /** Stops a turn's timers without a final edit: a replaced or disposed turn. */

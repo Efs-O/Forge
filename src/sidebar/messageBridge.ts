@@ -1,7 +1,6 @@
 import type { QuestionGroup } from '../util/questionAnswers';
 import type { ChatAttachmentRef } from '../llm/types';
-import type { AgentLinks } from '../agentLinks/chatAgentLinks';
-import type { AgentSenderMetadata } from '../agentLinks/chatAgentLinks';
+import type { AgentLinks, AgentSenderMetadata } from '../agentLinks/chatAgentLinks';
 import type { ActivityViewMode } from './activityViewSetting';
 export type { ChatAttachmentRef };
 
@@ -19,7 +18,6 @@ export interface SessionTabMeta {
   active_time_ms?: number;
   agentLinks?: AgentLinks;
 }
-
 export interface SessionHistoryMeta {
   id: string;
   title: string;
@@ -59,6 +57,7 @@ export type ForgeSlashCommandId =
 export interface TokenMsg {
   type: 'token';
   text: string;
+  createdAt?: number;
   conversationId?: string;
 }
 /** A non-model status row displayed in the conversation. */
@@ -75,6 +74,7 @@ export interface NoticeMsg {
 export interface ReasoningTokenMsg {
   type: 'reasoningToken';
   text: string;
+  createdAt?: number;
   conversationId?: string;
 }
 export interface GenerationStartedMsg {
@@ -94,6 +94,7 @@ export interface GenerationStartedMsg {
 export interface UserPromptMsg {
   type: 'userPrompt';
   text: string;
+  createdAt?: number;
   conversationId?: string;
   /** A tell the running turn just took in: shown inline, it opens no turn. */
   midTurn?: boolean;
@@ -282,6 +283,7 @@ export interface SessionSyncMsg {
       | {
           role: 'user' | 'assistant';
           content: string;
+          createdAt?: number | undefined;
           reasoning?: string | undefined;
           reasoningMs?: number | undefined;
           midTurn?: boolean | undefined;
@@ -396,6 +398,7 @@ export interface AttachmentData {
 export interface SendMsg {
   type: 'send';
   text: string;
+  createdAt?: number;
   attachments?: AttachmentData[];
   /** Set by the standby-prompt queue so it stays with the conversation that queued it. */
   conversationId?: string;

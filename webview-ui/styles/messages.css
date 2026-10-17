@@ -1,12 +1,27 @@
 /* ── Message wrappers ───────────────────────────────────────────────────── */
 
-.messages-pane { container-type: inline-size; }
+.messages-pane {
+  container-type: inline-size;
+}
 
 .msg-wrapper {
   display: flex;
   flex-direction: column;
   gap: 3px;
   width: 100%;
+}
+
+.message-timestamp {
+  color: var(--vscode-descriptionForeground);
+  font-size: 10px;
+  line-height: 1.2;
+  align-self: flex-start;
+  margin-left: 2px;
+}
+
+.msg-wrapper-user .message-timestamp {
+  align-self: flex-end;
+  margin-right: 2px;
 }
 
 /* User prompts sit in a quiet bubble; assistant prose stays on the panel ground. */
@@ -22,7 +37,8 @@
   margin-left: auto;
   padding: 7px 11px;
   background: color-mix(in srgb, var(--vscode-foreground) 8%, var(--vscode-editor-background));
-  border: 1px solid color-mix(in srgb, var(--vscode-foreground) 17%, var(--vscode-editor-background));
+  border: 1px solid
+    color-mix(in srgb, var(--vscode-foreground) 17%, var(--vscode-editor-background));
   border-radius: var(--forge-radius-md);
   white-space: pre-wrap;
   overflow-wrap: anywhere;
@@ -39,7 +55,8 @@
   margin-left: auto;
   padding: 7px 11px 6px;
   background: color-mix(in srgb, var(--vscode-foreground) 8%, var(--vscode-editor-background));
-  border: 1px solid color-mix(in srgb, var(--vscode-foreground) 17%, var(--vscode-editor-background));
+  border: 1px solid
+    color-mix(in srgb, var(--vscode-foreground) 17%, var(--vscode-editor-background));
   border-radius: var(--forge-radius-md);
 }
 
@@ -92,22 +109,36 @@
   font-weight: 600;
   line-height: 1.3;
 }
-.msg.assistant h1 { font-size: 1.3em; }
-.msg.assistant h2 { font-size: 1.2em; }
-.msg.assistant h3 { font-size: 1.1em; }
+.msg.assistant h1 {
+  font-size: 1.3em;
+}
+.msg.assistant h2 {
+  font-size: 1.2em;
+}
+.msg.assistant h3 {
+  font-size: 1.1em;
+}
 .msg.assistant h4,
 .msg.assistant h5,
-.msg.assistant h6 { font-size: 1em; }
+.msg.assistant h6 {
+  font-size: 1em;
+}
 .msg.assistant h1:first-child,
 .msg.assistant h2:first-child,
-.msg.assistant h3:first-child { margin-top: 0; }
+.msg.assistant h3:first-child {
+  margin-top: 0;
+}
 
 .msg.error {
   color: var(--vscode-errorForeground, #f48771);
   font-style: italic;
   white-space: pre-wrap;
   border: 1px solid var(--vscode-inputValidation-errorBorder, #be1100);
-  background: color-mix(in srgb, var(--vscode-inputValidation-errorBackground, #5a1d1d) 40%, transparent);
+  background: color-mix(
+    in srgb,
+    var(--vscode-inputValidation-errorBackground, #5a1d1d) 40%,
+    transparent
+  );
   border-radius: var(--forge-radius-sm);
   padding: 6px 10px;
 }
@@ -148,7 +179,9 @@
   padding: 0 2px;
   opacity: 0;
   transform: translateY(3px);
-  transition: opacity 0.15s ease, transform 0.15s ease;
+  transition:
+    opacity 0.15s ease,
+    transform 0.15s ease;
 }
 
 .msg-wrapper:hover .msg-actions {
@@ -169,7 +202,9 @@
   transition: background 0.1s ease;
 }
 
-.btn-action:hover { background: var(--vscode-button-secondaryHoverBackground, #4a4d51); }
+.btn-action:hover {
+  background: var(--vscode-button-secondaryHoverBackground, #4a4d51);
+}
 
 .btn-action-icon {
   display: inline-flex;
@@ -183,11 +218,20 @@
 
 /* ── Markdown inside assistant messages ─────────────────────────────────── */
 
-.msg.assistant p          { margin: 0 0 8px; }
-.msg.assistant p:last-child { margin-bottom: 0; }
+.msg.assistant p {
+  margin: 0 0 8px;
+}
+.msg.assistant p:last-child {
+  margin-bottom: 0;
+}
 .msg.assistant ul,
-.msg.assistant ol         { padding-left: 1.4em; margin: 0 0 8px; }
-.msg.assistant li         { margin: 2px 0; }
+.msg.assistant ol {
+  padding-left: 1.4em;
+  margin: 0 0 8px;
+}
+.msg.assistant li {
+  margin: 2px 0;
+}
 .msg.assistant blockquote {
   border-left: 3px solid var(--vscode-textBlockQuote-border, #555);
   padding-left: 8px;
@@ -239,8 +283,9 @@
   color: var(--forge-link);
   text-decoration: none;
 }
-.msg.assistant a:hover { text-decoration: underline; }
-
+.msg.assistant a:hover {
+  text-decoration: underline;
+}
 
 .msg.assistant table {
   border-collapse: collapse;
@@ -253,8 +298,12 @@
   padding: 4px 8px;
   text-align: left;
 }
-.msg.assistant th { background: var(--forge-selection); }
-.msg.assistant hr { display: none; }
+.msg.assistant th {
+  background: var(--forge-selection);
+}
+.msg.assistant hr {
+  display: none;
+}
 
 /* ── Linkified file references ──────────────────────────────────────────── */
 

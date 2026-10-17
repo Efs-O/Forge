@@ -134,6 +134,27 @@ export class TelegramOutbound {
     return parsed.success ? String(parsed.data.message_id) : undefined;
   }
 
+  /** Sends the separate Stop row without adding a second push notification. */
+  async sendProgressStopControl(
+    chatId: string,
+    options?: { signal?: AbortSignal },
+  ): Promise<string | undefined> {
+    const sent = await this.call(
+      'sendMessage',
+      {
+        chat_id: chatId,
+        // Telegram requires text for an inline keyboard. This invisible
+        // separator leaves the button as the only visible content in the row.
+        text: '\u2063',
+        disable_notification: true,
+        ...stopKeyboard({ stopButton: true, control: true }),
+      },
+      options?.signal,
+    );
+    const parsed = TelegramSentMessageSchema.safeParse(sent);
+    return parsed.success ? String(parsed.data.message_id) : undefined;
+  }
+
   async sendInlineKeyboard(
     chatId: string,
     text: string,

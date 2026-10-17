@@ -163,13 +163,13 @@ export async function runToolCallingLoop(
       const withoutMarkers = structured.push(token);
       const withoutHtml = html.push(withoutMarkers);
       const visible = thinking ? thinking.push(withoutHtml) : withoutHtml;
-      if (visible) options.onToken?.(visible);
+      if (visible) options.onToken?.(visible, streamedAssistant.createdAt);
     };
     const reasoningHandler = (token: string): void => {
       if (options.stripThinkingChannels) return;
       rawReasoning += token;
       streamedAssistant.appendReasoning(token);
-      options.onReasoning?.(token);
+      options.onReasoning?.(token, streamedAssistant.createdAt);
     };
 
     let streamed: {
@@ -260,7 +260,7 @@ export async function runToolCallingLoop(
     const trailingTool = structured.flush();
     const trailingHtml = html.push(trailingTool) + html.flush();
     const trailing = thinking ? thinking.push(trailingHtml) : trailingHtml;
-    if (trailing) options.onToken?.(trailing);
+    if (trailing) options.onToken?.(trailing, streamedAssistant.createdAt);
 
     // Only a ```json block naming a real tool is a call; any other is shown.
     const toolNames = new Set(toolDefinitions.map((d) => d.function.name));
@@ -415,6 +415,7 @@ export async function runToolCallingLoop(
       options.messages.push({
         role: 'assistant',
         content: stopNotice,
+        createdAt: Date.now(),
       });
       options.onMessagesChanged?.();
       options.onDone?.(streamed.finishReason);
@@ -444,11 +445,15 @@ export async function runToolCallingLoop(
 
   // Record the round cap in the transcript so the next request knows work stopped early.
   const capNotice = `${MAX_ROUNDS_MESSAGE_PREFIX} (${options.maxRounds}).`;
-  options.messages.push({ role: 'assistant', content: capNotice });
+  const createdAt = Date.now();
+  options.messages.push({ role: 'assistant', content: capNotice, createdAt });
   options.onMessagesChanged?.();
-  options.onToken?.(`
+  options.onToken?.(
+    `
 
-_${capNotice}_`);
+_${capNotice}_`,
+    createdAt,
+  );
   options.onDone?.('max_rounds');
   return {
     finishReason: 'max_rounds',

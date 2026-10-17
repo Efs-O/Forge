@@ -65,6 +65,18 @@ describe('RemoteAgentProgress', () => {
     expect(channel.edits.at(-1)?.text).toContain('2 tool calls');
   });
 
+  it('deletes the separate Stop row during disposal even when transport edits are aborted', async () => {
+    const channel = new FakeRemoteChannel('telegram');
+    const abort = new AbortController();
+    const progress = new RemoteAgentProgress(channel, abort.signal, () => true, 3_900);
+    progress.begin('c1', 'chat-a', 'status-id', 'remote', 'stop-id');
+
+    abort.abort();
+    await progress.dispose();
+
+    expect(channel.deleted).toContainEqual({ chatId: 'chat-a', messageId: 'stop-id' });
+  });
+
   it('gives a narration that did not stream a bubble of its own, once', async () => {
     vi.useFakeTimers();
     const { channel, progress } = rig();

@@ -9,6 +9,7 @@ import type { ChatMessage } from '../llm/types';
 export interface MidTurnTell {
   id: string;
   text: string;
+  createdAt?: number;
   internal?: boolean;
   /** The user pressed "Send now": it needs a turn of its own, never a tool-round gap. */
   sendNow?: boolean;
@@ -42,9 +43,10 @@ export class MidTurnInbox {
   }
 
   add(conversationId: string, tell: MidTurnTell): void {
+    const stamped = { ...tell, createdAt: tell.createdAt ?? Date.now() };
     const current = this.pending.get(conversationId);
-    if (current) current.push({ ...tell });
-    else this.pending.set(conversationId, [{ ...tell }]);
+    if (current) current.push(stamped);
+    else this.pending.set(conversationId, [stamped]);
     for (const listener of this.listeners.get(conversationId) ?? []) listener();
   }
 

@@ -113,13 +113,14 @@ describe('ToolCallingLoop reasoning retention', () => {
     await runToolCallingLoop(runOptions(messages) as never);
 
     expect(messages.filter((m) => m.role === 'assistant')).toEqual([
-      {
+      expect.objectContaining({
         role: 'assistant',
         content: 'Now the docs — index.html control grids and README.',
         reasoning: 'Checking what remains.',
         tool_calls: [CALL],
-      },
-      { role: 'assistant', content: 'Done.' },
+        createdAt: expect.any(Number),
+      }),
+      expect.objectContaining({ role: 'assistant', content: 'Done.', createdAt: expect.any(Number) }),
     ]);
   });
 
@@ -327,6 +328,7 @@ describe('ToolCallingLoop reasoning retention', () => {
         role: 'assistant',
         content: '',
         reasoning: 'Now the docs — index.html control grids and README.',
+        createdAt: expect.any(Number),
       },
     ]);
     expect(messages).toEqual([
@@ -335,6 +337,7 @@ describe('ToolCallingLoop reasoning retention', () => {
         role: 'assistant',
         content: 'Done.',
         reasoning: 'Now the docs — index.html control grids and README.',
+        createdAt: expect.any(Number),
       },
     ]);
   });

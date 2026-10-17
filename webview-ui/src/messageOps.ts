@@ -21,6 +21,7 @@ export interface AppMessage {
   id: string;
   role: 'user' | 'assistant' | 'error' | 'system' | 'tool' | 'diff';
   content: string;
+  createdAt?: number;
   reasoning?: string | undefined;
   /**
    * Wall time the reasoning phase took, stamped live by the reducer. Absent on
@@ -59,6 +60,7 @@ export type PersistedRow =
   | {
       role: 'user' | 'assistant';
       content: string;
+      createdAt?: number | undefined;
       reasoning?: string | undefined;
       reasoningMs?: number | undefined;
       midTurn?: boolean | undefined;
@@ -127,6 +129,9 @@ export function mergeSyncedMessages(
     id: mkId(),
     role: m.role,
     content: m.content,
+    ...((m.role === 'user' || m.role === 'assistant') && m.createdAt !== undefined
+      ? { createdAt: m.createdAt }
+      : {}),
     ...((m.role === 'user' || m.role === 'assistant') && m.reasoning !== undefined
       ? { reasoning: m.reasoning }
       : {}),
@@ -264,6 +269,7 @@ function splitThoughtAndAnswer(message: AppMessage): AppMessage[] {
     id: message.id,
     role: 'assistant',
     content: '',
+    ...(message.createdAt !== undefined ? { createdAt: message.createdAt } : {}),
     reasoning,
     ...(reasoningMs !== undefined ? { reasoningMs } : {}),
     ...(reasoningStartedAt !== undefined ? { reasoningStartedAt } : {}),

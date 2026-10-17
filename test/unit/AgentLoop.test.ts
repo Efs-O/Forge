@@ -447,13 +447,21 @@ describe('AgentLoop', () => {
       expect.objectContaining({ cwd: process.cwd() }),
     );
     expect(conv.messages).toEqual([
-      { role: 'user', content: 'please implement this' },
+      expect.objectContaining({
+        role: 'user',
+        content: 'please implement this',
+        createdAt: expect.any(Number),
+      }),
       {
         role: 'tool',
         content: '[codex: edit src/foo.ts]',
         name: 'claude',
       },
-      { role: 'assistant', content: 'Implemented it.' },
+      expect.objectContaining({
+        role: 'assistant',
+        content: 'Implemented it.',
+        createdAt: expect.any(Number),
+      }),
     ]);
     expect(post).toHaveBeenCalledWith(
       expect.objectContaining({
@@ -621,11 +629,23 @@ describe('AgentLoop', () => {
     await vi.waitFor(() => expect(run).toHaveBeenCalledTimes(1));
     await loop.runTurn(second, config.models[0]!, 'independent prompt');
 
-    expect(second.messages).toContainEqual({ role: 'assistant', content: 'Second finished' });
+    expect(second.messages).toContainEqual(
+      expect.objectContaining({
+        role: 'assistant',
+        content: 'Second finished',
+        createdAt: expect.any(Number),
+      }),
+    );
     expect(first.messages).toHaveLength(1);
     finishFirst?.();
     await firstTurn;
-    expect(first.messages).toContainEqual({ role: 'assistant', content: 'First finished' });
+    expect(first.messages).toContainEqual(
+      expect.objectContaining({
+        role: 'assistant',
+        content: 'First finished',
+        createdAt: expect.any(Number),
+      }),
+    );
   });
 
   it('rejects image input with an actionable setup message for a text-only model', async () => {

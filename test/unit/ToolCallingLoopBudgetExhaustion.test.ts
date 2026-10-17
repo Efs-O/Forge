@@ -137,7 +137,11 @@ describe('a round that spends its whole budget thinking', () => {
       maxOutputTokens: 140_347,
     } as never);
 
-    expect(messages.at(-1)).toEqual({ role: 'assistant', content: OUTPUT_BUDGET_EXHAUSTED_NOTICE });
+    expect(messages.at(-1)).toMatchObject({
+      role: 'assistant',
+      content: OUTPUT_BUDGET_EXHAUSTED_NOTICE,
+      createdAt: expect.any(Number),
+    });
     expect(streamModelChatCompletion).toHaveBeenCalledTimes(1);
   });
 
@@ -156,9 +160,10 @@ describe('a round that spends its whole budget thinking', () => {
       maxOutputTokens: 140_347,
     } as never);
 
-    expect(messages.at(-1)).toEqual({
+    expect(messages.at(-1)).toMatchObject({
       role: 'assistant',
       content: earlyServerLengthStopNotice(34_195, 140_347),
+      createdAt: expect.any(Number),
     });
     expect(streamModelChatCompletion).toHaveBeenCalledTimes(2);
   });
@@ -220,7 +225,11 @@ describe('a round that spends its whole budget thinking', () => {
     expect(result.finishReason).toBe('stop');
     expect(result.finalText).toBe('');
     expect(result.stoppedWhileReasoning).toBe(true);
-    expect(messages.at(-1)).toEqual({ role: 'assistant', content: REASONING_ONLY_STOP_NOTICE });
+    expect(messages.at(-1)).toMatchObject({
+      role: 'assistant',
+      content: REASONING_ONLY_STOP_NOTICE,
+      createdAt: expect.any(Number),
+    });
     // One retry, not a loop.
     expect(streamModelChatCompletion).toHaveBeenCalledTimes(2);
   });

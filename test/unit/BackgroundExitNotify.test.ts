@@ -80,7 +80,7 @@ describe('background shell exit notification', () => {
     const send = vi.fn();
     const log = vi.fn();
     routeSidebarPrompt('notice', { conversationId: 'chat', tellId: 'chip-1' }, 'active', () => true, addTell, send);
-    expect(addTell).toHaveBeenCalledWith('chat', 'notice', false, 'chip-1');
+    expect(addTell).toHaveBeenCalledWith('chat', 'notice', false, 'chip-1', undefined);
     deliverBackgroundExitNotice(notice, () => true, (text, id, echo, internal) => {
       routeSidebarPrompt(text, { conversationId: id }, 'active', () => false, addTell, send, echo, internal);
     }, log);

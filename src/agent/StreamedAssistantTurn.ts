@@ -10,11 +10,14 @@ export class StreamedAssistantTurn {
   private reasoningStartedAt?: number;
   private reasoningEndedAt?: number;
 
-  constructor(private readonly messages: ChatMessage[]) {}
+  constructor(
+    private readonly messages: ChatMessage[],
+    readonly createdAt = Date.now(),
+  ) {}
 
   appendReasoning(token: string): void {
     if (!this.current) {
-      this.current = { role: 'assistant', content: '', reasoning: '' };
+      this.current = { role: 'assistant', content: '', reasoning: '', createdAt: this.createdAt };
       this.messages.push(this.current);
     }
     this.current.reasoning = (this.current.reasoning ?? '') + token;
@@ -55,6 +58,7 @@ export class StreamedAssistantTurn {
     this.messages.push({
       role: 'assistant',
       content: content || null,
+      createdAt: this.createdAt,
       tool_calls: calls,
       ...(reasoning ? { reasoning } : {}),
       ...(elapsed !== undefined ? { reasoningMs: elapsed } : {}),
@@ -72,6 +76,7 @@ export class StreamedAssistantTurn {
     this.messages.push({
       role: 'assistant',
       content,
+      createdAt: this.createdAt,
       ...(reasoning ? { reasoning } : {}),
       ...(elapsed !== undefined ? { reasoningMs: elapsed } : {}),
     });

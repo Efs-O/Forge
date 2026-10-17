@@ -1572,6 +1572,7 @@ describe('TelegramChannel — progress bubble', () => {
     const abort = new AbortController();
     const methods: string[] = [];
     const bodies: Record<string, unknown>[] = [];
+    let nextMessageId = 1;
     const channel = new TelegramChannel({
       token: 'secret-token',
       getCursor: () => undefined,
@@ -1579,20 +1580,36 @@ describe('TelegramChannel — progress bubble', () => {
       fetch: (async (url: string | URL | Request, init?: RequestInit) => {
         methods.push(String(url).split('/').at(-1)!);
         bodies.push(JSON.parse(String(init?.body ?? '{}')) as Record<string, unknown>);
-        return response({ message_id: 4 });
+        return response({ message_id: nextMessageId++ });
       }) as typeof fetch,
     });
     await channel.start(abort.signal);
 
     const bubble = await openProgressBubble(channel, CHAT, 'Forge: working…', abort.signal);
 
-    expect(bubble).toEqual({ kind: 'plain', messageId: '4' });
-    expect(methods).toContain('sendMessage');
-    expect(methods).not.toContain('sendRichMessageDraft');
-    // The bubble carries the turn's Stop for its whole life.
-    expect(bodies[methods.indexOf('sendMessage')]).toMatchObject({
-      reply_markup: { inline_keyboard: [[{ text: '⏹ Stop', callback_data: 'x' }]] },
+    expect(bubble).toEqual({
+      kind: 'plain',
+      messageId: expect.any(String),
+      stopButtonOnStatus: false,
+      stopMessageId: expect.any(String),
     });
+    expect(Number(bubble.messageId)).toBe(Number(bubble.stopMessageId) + 1);
+    expect(methods.filter((method) => method === 'sendMessage')).toHaveLength(2);
+    expect(methods).not.toContain('sendRichMessageDraft');
+    // The control row is above the status and silent; the ordinary status send
+    // remains the turn's one push notification.
+    const controlBody = bodies.find((body) => body.text === '\u2063');
+    const controlIndex = bodies.indexOf(controlBody!);
+    expect(controlBody).toMatchObject({
+      text: '\u2063',
+      disable_notification: true,
+      reply_markup: { inline_keyboard: [[{ text: '⏹ Stop', callback_data: 'y' }]] },
+    });
+    const statusBody = bodies.find((body) => body.text === 'Forge: working…');
+    const statusIndex = bodies.indexOf(statusBody!);
+    expect(statusIndex).toBeGreaterThan(controlIndex);
+    expect(statusBody).not.toHaveProperty('disable_notification');
+    expect(statusBody).not.toHaveProperty('reply_markup');
     abort.abort();
   });
 

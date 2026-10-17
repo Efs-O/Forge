@@ -81,6 +81,7 @@ export async function runCliTurn(
   ctx.lifecycle.markStreaming(convId);
   let generationStarted = false;
   let finalText = '';
+  let assistantCreatedAt: number | undefined;
   let outcome: ForgeTurnOutcome;
 
   try {
@@ -99,7 +100,8 @@ export async function runCliTurn(
       checkpoint,
       signal: ctrl.signal,
       onText: (chunk: string) => {
-        postC({ type: 'token', text: chunk });
+        assistantCreatedAt ??= Date.now();
+        postC({ type: 'token', text: chunk, createdAt: assistantCreatedAt });
         ctx.emitAgentProgress({ conversationId: convId, kind: 'commentary', text: chunk });
       },
       onStatus: (detail: string) => {
@@ -150,7 +152,11 @@ export async function runCliTurn(
       ctx.onTranscriptChanged(conv);
     }
     if (result.assistantText) {
-      conv.messages.push({ role: 'assistant', content: result.assistantText });
+      conv.messages.push({
+        role: 'assistant',
+        content: result.assistantText,
+        createdAt: assistantCreatedAt ?? Date.now(),
+      });
       ctx.onTranscriptChanged(conv);
     }
     if (!ctrl.signal.aborted && result.status !== 'completed' && result.status !== 'cancelled') {

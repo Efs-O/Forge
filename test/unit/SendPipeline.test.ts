@@ -128,6 +128,18 @@ describe('SendPipeline.send', () => {
     expect(echo).toBeLessThan(started);
   });
 
+  it('keeps the webview prompt timestamp on both the live echo and host turn options', async () => {
+    const h = harness();
+    const createdAt = 1_802_000_000_000;
+    await h.pipeline.send('typed here', undefined, 'conv-1', undefined, {
+      createdAt,
+      echoPrompt: true,
+    });
+
+    expect(h.posted.find((msg) => msg.type === 'userPrompt')).toMatchObject({ createdAt });
+    expect(h.runTurn.mock.calls[0]?.[4]).toMatchObject({ createdAt });
+  });
+
   it('echoes the files sent with a remote prompt, so the bubble shows them', async () => {
     const h = harness();
     const file = { name: 'notes.txt', mediaType: 'text/plain', data: 'hi' };
@@ -285,7 +297,7 @@ describe('SendPipeline.send', () => {
 
     expect(h.runTurn).toHaveBeenCalledTimes(2);
     expect(h.runTurn.mock.calls[1]?.[2]).toBe('resume');
-    expect(h.runTurn.mock.calls[1]?.[4]).toEqual({ internal: true });
+    expect(h.runTurn.mock.calls[1]?.[4]).toMatchObject({ internal: true });
     expect(h.requestChains.currentEpoch('conv-1')).toBe(1);
     expect(outcome).toEqual({ kind: 'completed', finalText: 'final' });
   });
@@ -365,7 +377,7 @@ describe('SendPipeline.send', () => {
 
     expect(h.runTurn).toHaveBeenCalledTimes(2);
     expect(h.runTurn.mock.calls[1]?.[2]).toBe('[Forge notice] background job finished');
-    expect(h.runTurn.mock.calls[1]?.[4]).toEqual({ internal: true });
+    expect(h.runTurn.mock.calls[1]?.[4]).toMatchObject({ internal: true });
     expect(h.posted.some((message) => message.type === 'userPrompt')).toBe(false);
   });
 
@@ -386,12 +398,12 @@ describe('SendPipeline.send', () => {
     expect(h.runTurn).toHaveBeenCalledTimes(3);
     expect(h.runTurn.mock.calls[1]?.[2]).toBe('also check the logs');
     expect(h.runTurn.mock.calls[2]?.[2]).toBe('[Forge notice] background job finished');
-    expect(h.runTurn.mock.calls[2]?.[4]).toEqual({ internal: true });
-    expect(h.posted).toContainEqual({
+    expect(h.runTurn.mock.calls[2]?.[4]).toMatchObject({ internal: true });
+    expect(h.posted).toContainEqual(expect.objectContaining({
       type: 'userPrompt',
       text: 'also check the logs',
       conversationId: 'conv-1',
-    });
+    }));
     expect(
       h.posted.some(
         (message) => message.type === 'userPrompt' && message.text.includes('[Forge notice]'),
@@ -410,11 +422,11 @@ describe('SendPipeline.send', () => {
 
     expect(h.runTurn).toHaveBeenCalledTimes(2);
     expect(h.runTurn.mock.calls[1]?.[2]).toBe('finish this too');
-    expect(h.posted).toContainEqual({
+    expect(h.posted).toContainEqual(expect.objectContaining({
       type: 'userPrompt',
       text: 'finish this too',
       conversationId: 'conv-1',
-    });
+    }));
     expect(h.midTurnInbox.takeUndelivered('conv-1')).toEqual([]);
   });
 
@@ -447,11 +459,11 @@ describe('SendPipeline.send', () => {
     // Queued with it, so it travels with it, in the order they were typed.
     expect(h.runTurn.mock.calls[1]?.[2]).toBe('and the docs\n\nfix the test first');
     expect(h.posted.some((msg) => msg.type === 'setInput')).toBe(false);
-    expect(h.posted).toContainEqual({
+    expect(h.posted).toContainEqual(expect.objectContaining({
       type: 'userPrompt',
       text: 'and the docs\n\nfix the test first',
       conversationId: 'conv-1',
-    });
+    }));
   });
 
   it('lets Stop win over "Send now": a cancelled turn hands the tell back', async () => {

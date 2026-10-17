@@ -16,6 +16,8 @@ export interface LiveBubbleDeps {
   footer: (maximum: number) => string;
   /** Minimum gap between two refreshes: Telegram allows ~1 edit/s per chat. */
   intervalMs: number;
+  /** False when the Stop button lives in the separate row above the status. */
+  stopButtonOnBubble?: boolean;
   report: (err: unknown) => void;
 }
 
@@ -39,7 +41,7 @@ type BlockState = 'none' | 'streaming' | 'finished' | 'narrated';
 
 /**
  * A turn's chat bubbles: the agent's words, one bubble per text block, with the
- * status footer and the Stop button only on the newest.
+ * status footer and any inline Stop button only on the newest.
  *
  * Telegram never moves a message, so a separate status message was left
  * stranded above every bubble sent after it. The footer instead travels with
@@ -313,7 +315,11 @@ export class RemoteLiveBubble {
 
   private async show(bubble: Bubble, text: string, stopButton: boolean): Promise<void> {
     const { channel, chatId, signal } = this.deps;
-    const options = { signal, stopButton, retryRateLimit: false };
+    const options = {
+      signal,
+      stopButton: stopButton && this.deps.stopButtonOnBubble !== false,
+      retryRateLimit: false,
+    };
     if (bubble.id === undefined) {
       if (!channel.sendProgress) return;
       const id = await channel.sendProgress(chatId, text, options);

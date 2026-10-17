@@ -4,7 +4,7 @@ import type { RemoteInboundEvent } from './types';
 import { parseTelegramSelectionCallback } from './TelegramSelectionPagination';
 import { parseTelegramQuestionCallback } from './TelegramQuestionButtons';
 import { parseTelegramHelpCallback } from './TelegramHelpButtons';
-import { isTelegramStopCallback } from './TelegramStopButton';
+import { isTelegramStopCallback, isTelegramStopControlCallback } from './TelegramStopButton';
 
 /**
  * Bot API update -> `RemoteInboundEvent`, and the media-type guesses that go
@@ -360,6 +360,7 @@ export function telegramUpdateToEvent(
       chatType: telegramChatType(callback.message.chat.type),
       receivedAt: Date.now(),
       messageId: String(callback.message.message_id),
+      ...(isTelegramStopControlCallback(callback.data) ? { control: true } : {}),
     };
   }
   const contact = /^c:([A-Za-z0-9_-]{16,48}):([sc])$/.exec(callback.data);

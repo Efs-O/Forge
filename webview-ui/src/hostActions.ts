@@ -11,7 +11,12 @@ export function hostMessageToAction(msg: HostToWebview): Action | undefined {
     case 'generationStarted':
       return { type: 'GENERATION_STARTED', convId: msg.conversationId };
     case 'token':
-      return { type: 'TOKEN', text: msg.text, convId: msg.conversationId };
+      return {
+        type: 'TOKEN',
+        text: msg.text,
+        ...(msg.createdAt !== undefined ? { createdAt: msg.createdAt } : {}),
+        convId: msg.conversationId,
+      };
     case 'notice':
       return {
         type: 'NOTICE',
@@ -20,7 +25,12 @@ export function hostMessageToAction(msg: HostToWebview): Action | undefined {
         preformatted: msg.preformatted,
       };
     case 'reasoningToken':
-      return { type: 'REASONING_TOKEN', text: msg.text, convId: msg.conversationId };
+      return {
+        type: 'REASONING_TOKEN',
+        text: msg.text,
+        ...(msg.createdAt !== undefined ? { createdAt: msg.createdAt } : {}),
+        convId: msg.conversationId,
+      };
     case 'done':
       return { type: 'DONE', convId: msg.conversationId, finishReason: msg.finishReason };
     case 'toolCallProgress':

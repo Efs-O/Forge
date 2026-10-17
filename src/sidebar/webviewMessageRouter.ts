@@ -30,6 +30,7 @@ export interface WebviewActions {
     attachments?: AttachmentData[],
     conversationId?: string,
     tellId?: string,
+    createdAt?: number,
   ) => void;
   /** False when the tell had already reached the running turn. */
   cancelTell: (conversationId: string, tellId: string) => boolean;
@@ -88,7 +89,9 @@ export function routeWebviewMessage(actions: WebviewActions, msg: WebviewToHost)
       break;
 
     case 'send':
-      actions.send(msg.text, msg.attachments, msg.conversationId, msg.tellId);
+      if (msg.createdAt === undefined)
+        actions.send(msg.text, msg.attachments, msg.conversationId, msg.tellId);
+      else actions.send(msg.text, msg.attachments, msg.conversationId, msg.tellId, msg.createdAt);
       break;
 
     case 'cancelTell':

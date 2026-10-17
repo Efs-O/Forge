@@ -172,6 +172,7 @@ export function wireSidebar(host: SidebarHost, parts: SidebarParts): SidebarRunt
       messages: midTurnInbox.drain(conversationId).map((tell) => ({
         role: 'user',
         content: tell.text,
+        ...(tell.createdAt !== undefined ? { createdAt: tell.createdAt } : {}),
         midTurn: true,
         ...(tell.internal ? { internal: true } : {}),
       })),
@@ -191,7 +192,13 @@ export function wireSidebar(host: SidebarHost, parts: SidebarParts): SidebarRunt
       for (const tell of drained.messages) {
         if (typeof tell.content !== 'string') continue;
         if (tell.internal) continue;
-        host.post({ type: 'userPrompt', text: tell.content, conversationId, midTurn: true });
+        host.post({
+          type: 'userPrompt',
+          text: tell.content,
+          ...(tell.createdAt !== undefined ? { createdAt: tell.createdAt } : {}),
+          conversationId,
+          midTurn: true,
+        });
       }
       return drained;
     },
@@ -452,17 +459,17 @@ export function wireSidebar(host: SidebarHost, parts: SidebarParts): SidebarRunt
     requested: () => host.postSessionSync(),
     resolved: () => host.postSessionSync(),
   });
-
   // Webview sends and background exit notices share this router, so a notice
   // reaches a busy chat exactly the way a typed message does.
   const promptRouter = createSidebarPromptRouter({
     activeId: () => host.getSidebar().activeConversationId,
     isReserved: (id) => requestChains.isReserved(id),
-    addTell: (id, text, internal, tellId) =>
+    addTell: (id, text, internal, tellId, createdAt) =>
       midTurnInbox.add(id, {
         id: tellId ?? randomUUID(),
         text,
         ...(internal ? { internal: true } : {}),
+        ...(createdAt !== undefined ? { createdAt } : {}),
       }),
     removeTell: (id, tellId) => midTurnInbox.remove(id, tellId),
     markSendNow: (id, tellId) => midTurnInbox.markSendNow(id, tellId),
@@ -471,14 +478,11 @@ export function wireSidebar(host: SidebarHost, parts: SidebarParts): SidebarRunt
       requestChains.markCancelling(id, 'interrupted');
       await agentLoop.interrupt(id);
     },
-    send: (text, attachments, id, echo, internal) =>
-      void send.send(
-        text,
-        attachments,
-        id,
-        internal ? { internal: true } : undefined,
-        echo ? { echoPrompt: true } : undefined,
-      ),
+    send: (text, attachments, id, echo, internal, createdAt) =>
+      void send.send(text, attachments, id, internal ? { internal: true } : undefined, {
+        ...(echo ? { echoPrompt: true } : {}),
+        ...(createdAt !== undefined ? { createdAt } : {}),
+      }),
     isOpen: (id) => host.getSidebar().conversations.some((conversation) => conversation.id === id),
   });
 

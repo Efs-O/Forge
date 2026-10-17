@@ -126,13 +126,14 @@ describe('App heavy streaming load', () => {
       );
     });
 
-    expect(posted).toContainEqual({
+    expect(posted).toContainEqual(expect.objectContaining({
       type: 'send',
       text: 'redirect the active turn',
       conversationId: 'stress-conversation',
+      createdAt: expect.any(Number),
       // The chip's id, so its Cancel button can withdraw the tell on the host.
       tellId: expect.any(String),
-    });
+    }));
     expect(container.textContent).toContain('redirect the active turn');
 
     // The running turn publishes the injected message at the next sync.

@@ -51,6 +51,7 @@ export function runningBackgroundExecutionsNotice(
 
 export interface SidebarPromptRoute {
   conversationId?: string;
+  createdAt?: number;
   attachments?: AttachmentData[];
   /** The webview's chip id, so a cancel can name the tell it withdraws. */
   tellId?: string;
@@ -61,13 +62,20 @@ export function routeSidebarPrompt(
   target: SidebarPromptRoute,
   activeConversationId: string,
   isReserved: (id: string) => boolean,
-  addTell: (id: string, text: string, internal?: boolean, tellId?: string) => void,
+  addTell: (
+    id: string,
+    text: string,
+    internal?: boolean,
+    tellId?: string,
+    createdAt?: number,
+  ) => void,
   send: (
     text: string,
     attachments?: AttachmentData[],
     conversationId?: string,
     echoPrompt?: boolean,
     internal?: boolean,
+    createdAt?: number,
   ) => void,
   echoPrompt = false,
   internal = false,
@@ -75,10 +83,13 @@ export function routeSidebarPrompt(
   const id = target.conversationId ?? activeConversationId;
   if (!target.attachments?.length && isReserved(id)) {
     if (internal) addTell(id, text, true);
-    else addTell(id, text, false, target.tellId);
+    else addTell(id, text, false, target.tellId, target.createdAt);
     return;
   }
-  send(text, target.attachments, target.conversationId, echoPrompt, internal);
+  if (target.createdAt === undefined)
+    send(text, target.attachments, target.conversationId, echoPrompt, internal);
+  else
+    send(text, target.attachments, target.conversationId, echoPrompt, internal, target.createdAt);
 }
 
 export function deliverBackgroundExitNotice(
@@ -106,7 +117,13 @@ export function subscribeBackgroundExitNotices(
 }
 
 export interface SidebarPromptRouter {
-  route: (text: string, attachments?: AttachmentData[], id?: string, tellId?: string) => void;
+  route: (
+    text: string,
+    attachments?: AttachmentData[],
+    id?: string,
+    tellId?: string,
+    createdAt?: number,
+  ) => void;
   /** False when the tell had already reached the turn. */
   cancelTell: (conversationId: string, tellId: string) => boolean;
   /**
@@ -125,7 +142,13 @@ export interface SidebarPromptRouter {
 export function createSidebarPromptRouter(options: {
   activeId: () => string;
   isReserved: (id: string) => boolean;
-  addTell: (id: string, text: string, internal?: boolean, tellId?: string) => void;
+  addTell: (
+    id: string,
+    text: string,
+    internal?: boolean,
+    tellId?: string,
+    createdAt?: number,
+  ) => void;
   removeTell: (conversationId: string, tellId: string) => boolean;
   markSendNow: (conversationId: string, tellId: string) => boolean;
   isStreaming: (conversationId: string) => boolean;
@@ -136,6 +159,7 @@ export function createSidebarPromptRouter(options: {
     id?: string,
     echoPrompt?: boolean,
     internal?: boolean,
+    createdAt?: number,
   ) => void;
   isOpen: (id: string) => boolean;
 }): SidebarPromptRouter {
@@ -146,11 +170,13 @@ export function createSidebarPromptRouter(options: {
     echoPrompt = false,
     internal = false,
     tellId?: string,
+    createdAt?: number,
   ) =>
     routeSidebarPrompt(
       text,
       {
         ...(id ? { conversationId: id } : {}),
+        ...(createdAt !== undefined ? { createdAt } : {}),
         ...(attachments ? { attachments } : {}),
         ...(tellId ? { tellId } : {}),
       },
@@ -165,7 +191,8 @@ export function createSidebarPromptRouter(options: {
     route(text, undefined, id, echo, true),
   );
   return {
-    route: (text, attachments, id, tellId) => route(text, attachments, id, false, false, tellId),
+    route: (text, attachments, id, tellId, createdAt) =>
+      route(text, attachments, id, false, false, tellId, createdAt),
     cancelTell: options.removeTell,
     sendQueuedNow: (conversationId, tellId) => {
       if (tellId && !options.markSendNow(conversationId, tellId)) return false;

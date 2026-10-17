@@ -20,7 +20,7 @@ import {
 import { resolveRequestModel } from '../config/ConfigResolver';
 import { deriveStaticCapabilities } from '../config/ConfigResolver';
 import { getLogger } from '../util/logger';
-import type { UserPromptOptions } from './transcriptMutations';
+import { messageCreatedAt, type UserPromptOptions } from './transcriptMutations';
 import { attachmentMediaType } from './attachmentLimits';
 import { validateAttachments } from './attachmentValidation';
 import type { ModelConfig } from '../config/types';
@@ -78,7 +78,7 @@ export class SendPipeline {
     attachments?: AttachmentData[],
     conversationId?: string,
     promptOptions?: UserPromptOptions,
-    metadata?: { remoteRequestId?: string; echoPrompt?: boolean },
+    metadata?: { remoteRequestId?: string; echoPrompt?: boolean; createdAt?: number },
   ): Promise<ForgeRequestOutcome> {
     const { deps } = this;
     const refuse = (message: string, error: string, id?: string): ForgeRequestOutcome => {
@@ -162,6 +162,8 @@ export class SendPipeline {
       return refuse(busyAgain, CONVERSATION_BUSY_ERROR, conv.id);
     }
     const chain = deps.requestChains.accept(admission.reservation, metadata?.remoteRequestId);
+    const createdAt = messageCreatedAt(metadata?.createdAt);
+    const initialPromptOptions = { ...(promptOptions ?? {}), createdAt };
     // Persist the full selection (incl. @profile) on the conversation so tab
     // switches restore the same profile, not just the base model (F6).
     conv.active_model = modelName;
@@ -177,6 +179,7 @@ export class SendPipeline {
       deps.post({
         type: 'userPrompt',
         text,
+        createdAt,
         conversationId: conv.id,
         ...(promptOptions?.sender ? { sender: promptOptions.sender } : {}),
         ...(attachments?.length ? { attachments } : {}),
@@ -217,9 +220,9 @@ export class SendPipeline {
         let nextAttachments = attachments;
         // Only the FIRST request of a chain carries the files the user sent; a
         // continuation re-sends neither the bytes nor their references.
-        let nextOptions = attachmentRefs.length
-          ? { ...(promptOptions ?? {}), attachmentRefs }
-          : promptOptions;
+        let nextOptions: UserPromptOptions | undefined = attachmentRefs.length
+          ? { ...initialPromptOptions, attachmentRefs }
+          : initialPromptOptions;
         if (!promptOptions?.internal && deps.evaluateAtAdmission) {
           let decision: AdmissionDecision = { kind: 'proceed' };
           try {
@@ -273,13 +276,22 @@ export class SendPipeline {
               return toRequestOutcome(turn);
             }
             const nextBatch = pendingTellBatches.shift()!;
+            const nextCreatedAt = nextBatch.createdAt ?? Date.now();
             if (!nextBatch.internal) {
-              deps.post({ type: 'userPrompt', text: nextBatch.text, conversationId: conv.id });
+              deps.post({
+                type: 'userPrompt',
+                text: nextBatch.text,
+                createdAt: nextCreatedAt,
+                conversationId: conv.id,
+              });
             }
             deps.post({ type: 'generationStarted', conversationId: conv.id });
             nextText = nextBatch.text;
             nextAttachments = undefined;
-            nextOptions = nextBatch.internal ? { internal: true } : undefined;
+            nextOptions = {
+              ...(nextBatch.internal ? { internal: true } : {}),
+              createdAt: nextCreatedAt,
+            };
             continue;
           }
           // Context exhaustion is a failed provider turn, but it is also the one

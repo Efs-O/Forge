@@ -90,11 +90,22 @@ interface Fixture {
  * the turn's bubble, the model's first words stream into it, and `host.send`
  * blocks so the turn is still live while the Stop taps arrive.
  */
-async function liveTurn(): Promise<Fixture> {
+async function liveTurn(options: { separateStopControl?: boolean } = {}): Promise<Fixture> {
   const state = await store();
   const secrets = new MemorySecrets();
   const auth = new RemoteAuth(secrets as unknown as vscode.SecretStorage);
   const channel = new FakeRemoteChannel('telegram');
+  if (options.separateStopControl) {
+    const controllable = channel as FakeRemoteChannel & {
+      sendProgressStopControl: (chatId: string) => Promise<string>;
+    };
+    controllable.sendProgressStopControl = async (chatId) => {
+      channel.progress.push({ chatId, text: '\u2063' });
+      const messageId = String(channel.progress.length);
+      channel.stopButtons.add(messageId);
+      return messageId;
+    };
+  }
 
   let release!: () => void;
   const gate = new Promise<void>((resolve) => (release = resolve));
@@ -230,6 +241,57 @@ describe('remote stop_action (newest bubble Stop button)', () => {
     await f.drainDone();
     // The terminal edit takes the button away with the turn.
     expect(f.channel.stopButtons.has(bubble)).toBe(false);
+    await f.controller.stop();
+  });
+
+  it('owns the separate control row, maps its Stop callback, and deletes it on finish', async () => {
+    const f = await liveTurn({ separateStopControl: true });
+    const stopRow = String(f.channel.progress.findIndex((p) => p.text === '\u2063') + 1);
+    const status = bubbleId(f.channel);
+    expect(stopRow).toBe('1');
+    expect(status).toBe('2');
+    expect(f.channel.stopButtons.has(stopRow)).toBe(true);
+    expect(f.channel.stopButtons.has(status)).toBe(false);
+
+    await expect(f.channel.emit(tap(stopRow, 'cb-control', { control: true }))).resolves.toEqual({
+      kind: 'handled',
+    });
+    expect(f.cancel).toHaveBeenCalledWith('c1');
+
+    f.release();
+    await f.drainDone();
+    expect(f.channel.deleted).toContainEqual({ chatId: 'chat-1', messageId: stopRow });
+    await expect(
+      f.channel.emit(tap(stopRow, 'cb-control-stale', { control: true })),
+    ).resolves.toEqual({
+      kind: 'rejected',
+      reason: 'This turn has already ended.',
+    });
+    await f.controller.stop();
+  });
+
+  it('deletes the control row at finish even when a status edit fails', async () => {
+    const f = await liveTurn({ separateStopControl: true });
+    const stopRow = String(f.channel.progress.findIndex((p) => p.text === '\u2063') + 1);
+    const edit = f.channel.editMessage.bind(f.channel);
+    let failEdit = true;
+    f.channel.editMessage = async (...args: Parameters<FakeRemoteChannel['editMessage']>) => {
+      if (failEdit) throw new Error('edit denied');
+      return edit(...args);
+    };
+
+    f.emitProgress({ kind: 'commentary', conversationId: 'c1', text: 'A streamed answer' });
+    await vi.waitFor(
+      () => expect(f.errors.some((message) => message.includes('edit denied'))).toBe(true),
+      {
+        timeout: 3_000,
+      },
+    );
+    failEdit = false;
+    f.release();
+    await f.drainDone();
+
+    expect(f.channel.deleted).toContainEqual({ chatId: 'chat-1', messageId: stopRow });
     await f.controller.stop();
   });
 

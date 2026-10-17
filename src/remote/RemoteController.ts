@@ -25,6 +25,7 @@ import { RemoteApprovalBridge } from './RemoteApprovalBridge';
 import { RemoteQuestionBridge } from './RemoteQuestionBridge';
 import { CommandCleanupScheduler } from './CommandCleanupScheduler';
 import { RemoteAgentProgress, CLOCK_INTERVAL_MS } from './RemoteAgentProgress';
+import { removeProgressStopControl } from './remoteProgressOpen';
 import { HostProgressOpener } from './remoteHostProgress';
 import { RemoteNotificationFanout } from './RemoteNotificationFanout';
 import type { RemotePromptAdmissionDeps } from './RemotePromptAdmission';
@@ -404,6 +405,13 @@ export class RemoteController {
     // Not retried: redelivery would only find the same nothing. A tapped button
     // shows the rejection reason as its toast; a native Stop has no toast.
     if (!conversationId) {
+      if (event.control) {
+        try {
+          await removeProgressStopControl(this.channel, event.chatId, event.messageId);
+        } catch (err) {
+          this.options.onError?.(`Forge stale Stop control cleanup failed: ${describeError(err)}`);
+        }
+      }
       return event.kind === 'stop_action'
         ? { kind: 'rejected', reason: 'This turn has already ended.' }
         : { kind: 'handled' };

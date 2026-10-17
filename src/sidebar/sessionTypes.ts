@@ -92,6 +92,7 @@ const attachmentRefSchema = z.object({
 const slimMsgSchema = z.object({
   role: z.enum(['user', 'assistant', 'tool']),
   content: z.string().nullable(),
+  createdAt: z.number().optional(),
   reasoning: z.string().optional(),
   /** Measured spans. Optional, so records written before 0.15.12 still parse. */
   reasoningMs: z.number().optional(),
@@ -113,6 +114,7 @@ export type DisplayPersistMessage =
   | {
       role: 'user' | 'assistant';
       content: string;
+      createdAt?: number;
       reasoning?: string;
       reasoningMs?: number;
       midTurn?: boolean;
@@ -368,6 +370,7 @@ export function slimPersistMessages(messages: ChatMessage[]): SlimPersistMessage
     out.push({
       role: m.role,
       content: hasText ? (persistedText as string) : null,
+      ...(typeof m.createdAt === 'number' ? { createdAt: m.createdAt } : {}),
       ...(typeof m.reasoning === 'string' && m.reasoning.length > 0
         ? { reasoning: m.reasoning }
         : {}),
@@ -391,6 +394,7 @@ export function chatMessagesFromSlim(slim: SlimPersistMessage[]): ChatMessage[] 
   return slim.map((m) => ({
     role: m.role,
     content: m.content,
+    ...(typeof m.createdAt === 'number' ? { createdAt: m.createdAt } : {}),
     ...(typeof m.reasoning === 'string' && m.reasoning.length > 0
       ? { reasoning: m.reasoning }
       : {}),

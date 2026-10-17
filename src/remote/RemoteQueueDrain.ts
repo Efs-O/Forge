@@ -148,8 +148,8 @@ export async function drainRemoteQueue(
       deps.outbox.kick();
       continue;
     }
-    // Always a plain bubble edited in place; the model's words stream into a
-    // separate draft opened by RemoteAgentProgress (see openProgressBubble).
+    // Always a plain status message edited in place. Telegram's separate
+    // silent Stop control is opened by openProgressBubble before this message.
     const bubble = await openProgressBubble(
       deps.channel,
       next.chatId,
@@ -157,7 +157,15 @@ export async function drainRemoteQueue(
       deps.signal,
     );
     if (bubble.kind === 'plain') {
-      deps.progress.begin(conversationId, next.chatId, bubble.messageId);
+      deps.progress.begin(
+        conversationId,
+        next.chatId,
+        bubble.messageId,
+        'remote',
+        bubble.stopMessageId,
+      );
+      if (bubble.error)
+        deps.onError?.(`Forge remote progress could not fully open: ${bubble.error}`);
     } else if (bubble.error) {
       // Only a real fault is worth a warning. A transport that offers no
       // progress affordance at all is normal (and was silent before this

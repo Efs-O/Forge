@@ -4,8 +4,19 @@ import { RemoteAgentProgress } from '../../src/remote/RemoteAgentProgress';
 import { HostProgressOpener } from '../../src/remote/remoteHostProgress';
 import type { AgentProgressEvent } from '../../src/sidebar/AgentProgress';
 
-function rig(options: { target?: string | undefined } = {}) {
+function rig(options: { target?: string | undefined; separateStopControl?: boolean } = {}) {
   const channel = new FakeRemoteChannel();
+  if (options.separateStopControl) {
+    const controllable = channel as FakeRemoteChannel & {
+      sendProgressStopControl: (chatId: string) => Promise<string>;
+    };
+    controllable.sendProgressStopControl = async (chatId) => {
+      channel.progress.push({ chatId, text: '\u2063' });
+      const messageId = String(channel.progress.length);
+      channel.stopButtons.add(messageId);
+      return messageId;
+    };
+  }
   const signal = new AbortController().signal;
   const progress = new RemoteAgentProgress(channel, signal, () => true, 3_900, 0);
   const opener = new HostProgressOpener({
@@ -64,6 +75,24 @@ describe('HostProgressOpener', () => {
     opener.handle({ conversationId: 'c1', kind: 'end', ok: true });
     await settle();
     expect(channel.edits.at(-1)?.text).toBe('Forge: completed.');
+  });
+
+  it('keeps the separate Stop row above a mirrored turn and deletes it at end', async () => {
+    const { channel, opener } = rig({ separateStopControl: true });
+    opener.handle(token('I have strong evidence'));
+    await settle();
+
+    expect(channel.progress.map((message) => message.text)).toEqual([
+      '\u2063',
+      'Forge: working…',
+    ]);
+    expect(channel.stopButtons.has('1')).toBe(true);
+    expect(channel.stopButtons.has('2')).toBe(false);
+
+    opener.handle({ conversationId: 'c1', kind: 'end', ok: true });
+    await settle();
+
+    expect(channel.deleted).toContainEqual({ chatId: 'chat-1', messageId: '1' });
   });
 
   it('reports a failed turn as failed', async () => {

@@ -94,9 +94,9 @@ export function selectCheckpointStats(state: State): CheckpointStats | undefined
 }
 
 export type Action =
-  | { type: 'TOKEN'; text: string; convId?: string }
+  | { type: 'TOKEN'; text: string; createdAt?: number; convId?: string }
   | { type: 'NOTICE'; message: string; convId?: string; preformatted?: boolean }
-  | { type: 'REASONING_TOKEN'; text: string; convId?: string }
+  | { type: 'REASONING_TOKEN'; text: string; createdAt?: number; convId?: string }
   | { type: 'GENERATION_STARTED'; convId?: string }
   | { type: 'DONE'; convId?: string; finishReason?: string | null }
   | {
@@ -116,13 +116,14 @@ export type Action =
   | {
       type: 'USER_SEND';
       text: string;
+      createdAt?: number;
       convId?: string;
       /** Shown immediately from the bytes still in hand; the next sync replaces
        *  them with the host's stored references. */
       attachments?: MessageAttachment[];
       sender?: AgentSenderMetadata;
     }
-  | { type: 'MID_TURN_TELL'; text: string; convId?: string }
+  | { type: 'MID_TURN_TELL'; text: string; createdAt?: number; convId?: string }
   | { type: 'SET_MODEL'; name: string | null }
   | { type: 'CHECKPOINT_READY'; convId?: string; stats: CheckpointStats }
   | { type: 'CHECKPOINT_DISMISSED'; convId?: string }

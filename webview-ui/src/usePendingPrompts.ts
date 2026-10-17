@@ -43,10 +43,12 @@ export function usePendingPrompts({
 
   const postPrompt = useCallback(
     (prompt: QueuedPrompt) => {
+      const createdAt = Date.now();
       if (!prompt.tell) {
         dispatch({
           type: 'USER_SEND',
           text: prompt.text,
+          createdAt,
           convId: prompt.conversationId,
           attachments: toMessageAttachments(prompt.attachments),
         });
@@ -54,6 +56,7 @@ export function usePendingPrompts({
       vscode.postMessage({
         type: 'send',
         text: prompt.text,
+        createdAt,
         attachments: prompt.attachments.length ? prompt.attachments : undefined,
         conversationId: prompt.conversationId,
         ...(prompt.tell ? { tellId: prompt.id } : {}),

@@ -11,6 +11,7 @@ import { FILE_LINK_SCHEME, linkifyForRender, parseFileLink } from '../linkify';
 // was the unmeasured one, so the rows that cost the most said the least.
 import { ThinkingLabel } from './ThinkingGroup';
 import { MessageAttachments } from './MessageAttachments';
+import { formatMessageTimestamp } from '../messageTimestamp';
 
 const ChevronDown = (): React.ReactElement => (
   <svg width="10" height="6" viewBox="0 0 10 6" fill="currentColor" aria-hidden="true">
@@ -204,6 +205,7 @@ function splitStreamingContent(content: string): { settled: string; live: string
 function MessageView({
   role,
   content,
+  createdAt,
   reasoning,
   reasoningMs,
   reasoningStartedAt,
@@ -214,6 +216,9 @@ function MessageView({
 }: MessageProps): React.ReactElement {
   const [thinkingOpen, setThinkingOpen] = useState(false);
   const [copied, setCopied] = useState(false);
+  const timestampText = formatMessageTimestamp(createdAt);
+  const timestampDateTime =
+    createdAt !== undefined && timestampText ? new Date(createdAt).toISOString() : undefined;
 
   const handleCopy = useCallback(() => {
     navigator.clipboard
@@ -241,7 +246,7 @@ function MessageView({
   }
 
   return (
-    <div className="msg-wrapper">
+    <div className={`msg-wrapper msg-wrapper-${role}`}>
       <div className={`msg ${role}`}>
         {role === 'user' && agentSender && (
           <div className="agent-sender-badge">
@@ -277,6 +282,12 @@ function MessageView({
           </>
         ) : null}
       </div>
+
+      {(role === 'user' || role === 'assistant') && timestampText && timestampDateTime && (
+        <time className="message-timestamp" dateTime={timestampDateTime}>
+          {timestampText}
+        </time>
+      )}
 
       {role === 'assistant' && content && (
         <div className="msg-actions">

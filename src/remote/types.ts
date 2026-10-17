@@ -224,9 +224,9 @@ export interface RemoteSelectionPages {
 }
 
 /**
- * Options for the status bubble's send and edits. `stopButton` attaches the
- * turn's Stop button; an edit without it removes the button, which is how the
- * terminal edit takes it away.
+ * Options for a progress message send or edit. `stopButton` attaches an inline
+ * Stop control where the transport uses one; an edit without it removes that
+ * button, which is how a terminal or retiring-bubble edit takes it away.
  */
 export interface ProgressMessageOptions {
   signal?: AbortSignal;
@@ -292,6 +292,11 @@ export interface RemoteChannel {
     chatId: string,
     text: string,
     options?: ProgressMessageOptions,
+  ): Promise<string | undefined>;
+  /** Telegram-only, silent Stop-control bubble placed above the working status. */
+  sendProgressStopControl?(
+    chatId: string,
+    options?: { signal?: AbortSignal },
   ): Promise<string | undefined>;
   /** Best-effort presentation only; a reload may lose the provider message id. */
   editMessage?(

@@ -133,6 +133,7 @@ export function reducer(state: State, action: Action): State {
               id: mkId(),
               role: 'user',
               content: action.text,
+              createdAt: action.createdAt ?? Date.now(),
               ...(action.sender ? { agentSender: action.sender } : {}),
               ...(action.attachments?.length ? { attachments: action.attachments } : {}),
             },
@@ -140,7 +141,6 @@ export function reducer(state: State, action: Action): State {
         },
       };
     }
-
     case 'MID_TURN_TELL': {
       // Inline in the running turn; the next round's tokens open a new bubble.
       const cid = resolveConvId(state, action.convId);
@@ -148,10 +148,10 @@ export function reducer(state: State, action: Action): State {
         id: mkId(),
         role: 'user',
         content: action.text,
+        createdAt: action.createdAt ?? Date.now(),
         midTurn: true,
       });
     }
-
     case 'TOKEN': {
       const cid = resolveConvId(state, action.convId);
       const existing = state.messagesById[cid] ?? [];
@@ -166,6 +166,7 @@ export function reducer(state: State, action: Action): State {
           id: mkId(),
           role: 'assistant',
           content: action.text,
+          createdAt: action.createdAt ?? Date.now(),
         });
       }
       if (last?.role === 'assistant') {
@@ -179,9 +180,13 @@ export function reducer(state: State, action: Action): State {
             : {}),
         }));
       }
-      return appendToConv(state, cid, { id: mkId(), role: 'assistant', content: action.text });
+      return appendToConv(state, cid, {
+        id: mkId(),
+        role: 'assistant',
+        content: action.text,
+        createdAt: action.createdAt ?? Date.now(),
+      });
     }
-
     case 'NOTICE': {
       const cid = resolveConvId(state, action.convId);
       return appendToConv(state, cid, {
@@ -191,7 +196,6 @@ export function reducer(state: State, action: Action): State {
         ...(action.preformatted ? { preformatted: true } : {}),
       });
     }
-
     case 'REASONING_TOKEN': {
       const cid = resolveConvId(state, action.convId);
       const existing = state.messagesById[cid] ?? [];
@@ -201,6 +205,7 @@ export function reducer(state: State, action: Action): State {
           ...m,
           reasoning: (m.reasoning ?? '') + action.text,
           reasoningStartedAt: m.reasoningStartedAt ?? Date.now(),
+          createdAt: m.createdAt ?? action.createdAt ?? Date.now(),
         }));
       }
       return appendToConv(state, cid, {
@@ -208,6 +213,7 @@ export function reducer(state: State, action: Action): State {
         role: 'assistant',
         content: '',
         reasoning: action.text,
+        createdAt: action.createdAt ?? Date.now(),
         reasoningStartedAt: Date.now(),
       });
     }

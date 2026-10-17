@@ -1,7 +1,7 @@
 import type { AgentProgressEvent } from '../sidebar/AgentProgress';
 import type { RemoteAgentProgress } from './RemoteAgentProgress';
 import type { RemoteChannel } from './types';
-import { openProgressBubble } from './remoteProgressOpen';
+import { openProgressBubble, removeProgressStopControl } from './remoteProgressOpen';
 
 /**
  * Events held while the opening message is in flight.
@@ -119,9 +119,26 @@ export class HostProgressOpener {
         // not deleted here because the existing policy never deleted a progress
         // message it did not finish, and inventing a delete path here would be
         // a new behaviour this phase does not need.
+        if (bubble.kind === 'plain' && bubble.stopMessageId) {
+          try {
+            await removeProgressStopControl(this.deps.channel, chatId, bubble.stopMessageId);
+          } catch (err) {
+            this.deps.onError?.(
+              `Forge remote Stop control cleanup failed: ${err instanceof Error ? err.message : String(err)}`,
+            );
+          }
+        }
         return;
       }
-      this.deps.progress.begin(conversationId, chatId, bubble.messageId, 'host');
+      this.deps.progress.begin(
+        conversationId,
+        chatId,
+        bubble.messageId,
+        'host',
+        bubble.stopMessageId,
+      );
+      if (bubble.error)
+        this.deps.onError?.(`Forge remote progress could not fully open: ${bubble.error}`);
       for (const held of this.opening.get(conversationId) ?? []) {
         this.deps.progress.handle(held);
       }

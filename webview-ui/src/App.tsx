@@ -102,10 +102,22 @@ export function App(): React.ReactElement {
             // Retire the matching queued chip: the bubble below replaces it.
             if (msg.conversationId) {
               reconcileSessionSync({
-                [msg.conversationId]: [{ role: 'user', content: msg.text, midTurn: true }],
+                [msg.conversationId]: [
+                  {
+                    role: 'user',
+                    content: msg.text,
+                    midTurn: true,
+                    ...(msg.createdAt !== undefined ? { createdAt: msg.createdAt } : {}),
+                  },
+                ],
               });
             }
-            dispatch({ type: 'MID_TURN_TELL', text: msg.text, convId: msg.conversationId });
+            dispatch({
+              type: 'MID_TURN_TELL',
+              text: msg.text,
+              ...(msg.createdAt !== undefined ? { createdAt: msg.createdAt } : {}),
+              convId: msg.conversationId,
+            });
             break;
           }
           // A prompt sent from a paired chat or a VS Code command. Reuses
@@ -116,6 +128,7 @@ export function App(): React.ReactElement {
           dispatch({
             type: 'USER_SEND',
             text: msg.text,
+            ...(msg.createdAt !== undefined ? { createdAt: msg.createdAt } : {}),
             convId: msg.conversationId,
             ...(msg.sender ? { sender: msg.sender } : {}),
             ...(msg.attachments?.length

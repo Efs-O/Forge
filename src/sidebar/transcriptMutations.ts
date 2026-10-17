@@ -15,6 +15,8 @@ import type { AgentSenderMetadata } from '../agentLinks/chatAgentLinks';
 
 /** Presentation metadata for a prompt injected by Forge rather than authored by the user. */
 export interface UserPromptOptions {
+  /** Creation time shared with the optimistic webview row, when supplied. */
+  createdAt?: number;
   internal?: boolean;
   /**
    * On-disk references to what this prompt carried, stamped on the transcript
@@ -23,6 +25,12 @@ export interface UserPromptOptions {
    */
   attachmentRefs?: ChatAttachmentRef[];
   sender?: AgentSenderMetadata;
+}
+
+/** Keep bridge-supplied values finite and inside JavaScript's date range. */
+export function messageCreatedAt(value?: number): number {
+  if (value === undefined || !Number.isFinite(value)) return Date.now();
+  return Number.isNaN(new Date(value).getTime()) ? Date.now() : value;
 }
 
 /** Append the user's message, titling the conversation from its first one. */
@@ -36,6 +44,7 @@ export function appendUserPrompt(
   conv.messages.push({
     role: 'user',
     content: buildUserContent(text, attachments),
+    createdAt: messageCreatedAt(options?.createdAt),
     ...(options?.internal ? { internal: true } : {}),
     ...(options?.attachmentRefs?.length ? { attachments: options.attachmentRefs } : {}),
     ...(options?.sender ? { agentSender: options.sender } : {}),
