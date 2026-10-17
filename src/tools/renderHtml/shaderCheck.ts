@@ -1,6 +1,6 @@
 import type { BrowserChannel } from '../browser/BrowserSessionManager';
 import { readWorkspaceTextFileCapped } from './htmlInput';
-import { PREVIEW_LAUNCH_ARGS, PREVIEW_ORIGIN, withRenderBrowser } from './renderEngine';
+import { PREVIEW_LAUNCH_ARGS, PREVIEW_ORIGIN, withRenderBrowser } from './renderBrowser';
 import { extractShaders, mappedPosition, type ShaderCandidate } from './shaderExtract';
 
 const SHADER_CHECK_TIMEOUT_MS = 30_000;

@@ -241,8 +241,8 @@ export function wireSidebar(host: SidebarHost, parts: SidebarParts): SidebarRunt
     postTokenBudget: (conv) => budget.publish(conv),
     // `send` is constructed below; this closure only runs after a compaction,
     // which cannot happen before the pipeline exists.
-    logCompaction: (conv, entry) => send.logCompaction(conv.id, entry),
-    logCompactionAttempt: (conv, entry) => send.logCompactionAttempt(conv.id, entry),
+    logCompaction: (conv, entry) => send.sessionLogs.logCompaction(conv.id, entry),
+    logCompactionAttempt: (conv, entry) => send.sessionLogs.logCompactionAttempt(conv.id, entry),
     compactionMetrics: (conv) => {
       const { max } = budget.snapshot(conv);
       const config = host.getConfig();
@@ -338,7 +338,7 @@ export function wireSidebar(host: SidebarHost, parts: SidebarParts): SidebarRunt
   agentLoop.setTranscriptChangedListener((convId) => {
     host.persistSession(convId);
     host.postSessionSync();
-    send.flushSessionLog(convId, true);
+    send.sessionLogs.flushSessionLog(convId, true);
   });
 
   const send = new SendPipeline({
@@ -358,7 +358,7 @@ export function wireSidebar(host: SidebarHost, parts: SidebarParts): SidebarRunt
     midTurnInbox,
   });
   agentLoop.setToolsOfferedListener((conversationId, names, fingerprint) =>
-    send.logToolsOffered(conversationId, names, fingerprint),
+    send.sessionLogs.logToolsOffered(conversationId, names, fingerprint),
   );
 
   // One reading of the eviction gate, shared by the yes/no decision and the

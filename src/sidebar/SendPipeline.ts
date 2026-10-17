@@ -12,11 +12,7 @@ import type { ForgeConfig } from '../config/types';
 import type { AttachmentData, HostToWebview } from './messageBridge';
 import type { ConversationRuntime, SidebarRuntime } from './sessionTypes';
 import type { AgentLoop, SidebarProviderEvents } from './AgentLoop';
-import {
-  SessionLogger,
-  type CompactionAttemptLogEntry,
-  type CompactionLogEntry,
-} from './SessionLogger';
+import { SessionLogCoordinator } from './SessionLogCoordinator';
 import { resolveRequestModel } from '../config/ConfigResolver';
 import { deriveStaticCapabilities } from '../config/ConfigResolver';
 import { getLogger } from '../util/logger';
@@ -33,16 +29,9 @@ import type { ChatAttachmentStore } from './ChatAttachmentStore';
 import type { ChatAttachmentRef } from '../llm/types';
 import type { MidTurnInbox } from '../agent/MidTurnInbox';
 import { groupTellBatches, inputTextOf, runsAfterStop, type TellBatch } from './undeliveredTells';
-import type { RequestFingerprint } from '../sessions/requestFingerprint';
 
 const log = getLogger();
 export const CONVERSATION_BUSY_ERROR = 'Forge: this conversation is still generating.';
-
-/** Undefined outside a real host (tests, or an unresolvable extension id). */
-function forgeVersion(): string | undefined {
-  const version = vscode.extensions.getExtension('Efsoo.forge-llm')?.packageJSON?.['version'];
-  return typeof version === 'string' ? version : undefined;
-}
 
 export interface SendPipelineDeps {
   getConfig: () => ForgeConfig;
@@ -69,9 +58,11 @@ export interface SendPipelineDeps {
 }
 
 export class SendPipeline {
-  private readonly sessionLoggers = new Map<string, SessionLogger>();
+  readonly sessionLogs: SessionLogCoordinator;
 
-  constructor(private readonly deps: SendPipelineDeps) {}
+  constructor(private readonly deps: SendPipelineDeps) {
+    this.sessionLogs = new SessionLogCoordinator(deps.getSidebar);
+  }
 
   async send(
     text: string,
@@ -275,14 +266,14 @@ export class SendPipeline {
           } finally {
             deps.persistSession();
             deps.postSessionSync();
-            this.flushSessionLog(conv.id);
+            this.sessionLogs.flushSessionLog(conv.id);
           }
           // After the flush, so the error lands beneath the rows it followed. A
           // failed turn writes no messages of its own, so without this the file
           // ends on the last successful tool row and reads as a healthy turn.
-          if (turn.kind === 'failed') this.logTurnError(conv.id, turn.error);
+          if (turn.kind === 'failed') this.sessionLogs.logTurnError(conv.id, turn.error);
           if (turn.kind === 'cancelled' || turn.kind === 'interrupted') {
-            this.logTurnStopped(conv.id, turn.kind);
+            this.sessionLogs.logTurnStopped(conv.id, turn.kind);
           }
           const undelivered = deps.midTurnInbox.takeUndelivered(conv.id);
           pendingTellBatches.push(...groupTellBatches(undelivered));
@@ -412,86 +403,5 @@ export class SendPipeline {
     // Same hole as a remote prompt: a command-issued prompt is not typed in the
     // webview, so nothing else would draw its bubble.
     await this.send(text, attachments, undefined, undefined, { echoPrompt: true });
-  }
-
-  /**
-   * Records a completed compaction on the same transcript as the turns.
-   *
-   * Public because `CompactionService` is reached through the slash handler and
-   * has no logger of its own; this class owns the per-conversation loggers, so
-   * routing the row through it keeps that ownership single rather than handing
-   * a second writer the same file.
-   */
-  logCompaction(convId: string, entry: CompactionLogEntry): void {
-    const conv = this.deps.getSidebar().conversations.find((c) => c.id === convId);
-    if (!conv) return;
-    const logger = this.loggerFor(conv);
-    logger.updateTitle(conv.title);
-    logger.logCompaction(entry, conv.active_model ?? '');
-  }
-
-  /** Start, terminal and suppressed rows for one compaction attempt. */
-  logCompactionAttempt(convId: string, entry: CompactionAttemptLogEntry): void {
-    const conv = this.deps.getSidebar().conversations.find((c) => c.id === convId);
-    if (!conv) return;
-    this.loggerFor(conv).logCompactionAttempt(entry, conv.active_model ?? '');
-  }
-
-  /** Records the tool names and the head of a model request through its session log. */
-  logToolsOffered(convId: string, names: readonly string[], fingerprint: RequestFingerprint): void {
-    const conv = this.deps.getSidebar().conversations.find((c) => c.id === convId);
-    if (!conv) return;
-    const logger = this.loggerFor(conv);
-    logger.updateTitle(conv.title);
-    logger.logToolsOffered(names, conv.active_model ?? '');
-    logger.logRequestPrefix(fingerprint, conv.active_model ?? '');
-  }
-
-  /** Records why a turn stopped, next to the rows it produced before stopping. */
-  private logTurnError(convId: string, message: string): void {
-    const conv = this.deps.getSidebar().conversations.find((c) => c.id === convId);
-    if (!conv) return;
-    this.loggerFor(conv).logTurnError(message, conv.active_model ?? '');
-  }
-
-  private logTurnStopped(convId: string, kind: 'cancelled' | 'interrupted'): void {
-    const conv = this.deps.getSidebar().conversations.find((c) => c.id === convId);
-    if (!conv) return;
-    this.loggerFor(conv).logTurnStopped(kind, conv.active_model ?? '');
-  }
-
-  private loggerFor(conv: ConversationRuntime): SessionLogger {
-    const existing = this.sessionLoggers.get(conv.id);
-    if (existing) return existing;
-    const folder = vscode.workspace.workspaceFolders?.[0];
-    const logger = new SessionLogger(conv.id, conv.title, conv.active_model ?? '', {
-      ...(folder ? { workspaceName: folder.name, workspacePath: folder.uri.fsPath } : {}),
-      ...(forgeVersion() ? { forgeVersion: forgeVersion()! } : {}),
-    });
-    this.sessionLoggers.set(conv.id, logger);
-    return logger;
-  }
-
-  /**
-   * Appends new transcript rows to the on-disk log under ~/.forge. Incremental
-   * (cursor-based), so it is safe per tool round as well as at turn end.
-   * `settledOnly` (the per-round path) holds back a trailing assistant row
-   * that may still be streaming: the cursor would move past it, and the log
-   * would keep its half-written text for good.
-   */
-  flushSessionLog(convId: string, settledOnly = false): void {
-    const conv = this.deps.getSidebar().conversations.find((c) => c.id === convId);
-    if (!conv || conv.messages.length === 0) return;
-    const last = conv.messages[conv.messages.length - 1];
-    const unsettled = settledOnly && last?.role === 'assistant' && !last.tool_calls?.length;
-    const messages = unsettled ? conv.messages.slice(0, -1) : conv.messages;
-    const logger = this.loggerFor(conv);
-    logger.updateTitle(conv.title);
-    logger.flush(messages, conv.active_model ?? '', {
-      inputTokens: conv.input_tokens ?? 0,
-      outputTokens: conv.output_tokens ?? 0,
-      requestCount: conv.model_request_count ?? 0,
-      ...(conv.active_time_ms !== undefined ? { activeTimeMs: conv.active_time_ms } : {}),
-    });
   }
 }

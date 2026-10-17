@@ -2,7 +2,7 @@ import type { BrowserChannel } from '../browser/BrowserSessionManager';
 import { pngDimensions } from '../browser/BrowserSessionManager';
 import type { ToolHandlerContext, ToolHandlerResult } from '../ToolRegistry';
 import { readHtmlFile, readViewportPx } from './htmlInput';
-import { renderPreview } from './renderEngine';
+import { renderPreview } from './previewRenderer';
 
 /**
  * `render_html_to_image` with `mode: "preview"`: let the agent look at a page

@@ -25,10 +25,8 @@ vi.mock('../../src/tools/renderHtml/previewFetch', () => ({
   }),
 }));
 
-import {
-  isPreviewRequestAllowed,
-  PREVIEW_LAUNCH_ARGS,
-} from '../../src/tools/renderHtml/renderEngine';
+import { isPreviewRequestAllowed } from '../../src/tools/renderHtml/previewRenderer';
+import { PREVIEW_LAUNCH_ARGS } from '../../src/tools/renderHtml/renderBrowser';
 import { makeRenderHtmlToImageTool } from '../../src/tools/renderHtmlToImageTool';
 import type { MultimodalToolResult } from '../../src/tools/ToolRegistry';
 import { pngWith, renderFake, resetRenderFake } from '../support/renderHtmlHarness';
