@@ -541,6 +541,10 @@ describe('ControlServer', () => {
       action: 'configure',
       servable: false,
     });
+
+    // /ensure and /unload read the same merged provider (U04-02).
+    expect((await post(base, 'cloud-grok')).status).toBe(422);
+    expect((await post(base, 'cloud-grok', 'unload')).status).toBe(422);
   });
 
   it('marks CLI agents unservable — they are driven in-process, not over the control API', async () => {

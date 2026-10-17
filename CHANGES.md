@@ -23,6 +23,7 @@
 - When a Telegram or WhatsApp transport fails to start (a rejected bot token, a network error), Forge now stops what it had already started for it. The session-recovery timer and the approval and question hooks kept running for a transport that never came up.
 - A reply that one linked agent sends another through Forge can now be read with `forge.sh read-verdict` as soon as it is saved. Forge recorded it as readable only after the live delivery to the sender finished, so a delivery that hung, or a crash during it, left the reply saved but unreadable for good.
 - When a delegated Codex session asks for extra permissions (network or file access), Forge now answers in the form Codex expects: it grants the requested permissions for that turn. Forge used to send the answer meant for command approvals, which Codex could not read.
+- The control server's `/ensure` and `/unload` now see a provider set on a model's group. They read only the model's own entry, so a grouped Ollama model was treated as llama.cpp (and could evict a loaded local model to make room), and a grouped cloud model was not refused. `GET /models` already merged groups.
 
 ## 0.17.42
 

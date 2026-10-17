@@ -9,6 +9,7 @@
 import type { IBackendPool } from './BackendPool';
 import type { ForgeConfig } from '../config/types';
 import { isCloudProvider, getCloudProviderLabel } from '../llm/CloudProviders';
+import { mergeGroupsIntoModel } from '../config/ConfigResolver';
 import { delay, toOpenAiBase, errText } from './controlHttp';
 import { getLogger } from '../util/logger';
 import type { EnsureResult } from './ControlServer';
@@ -32,6 +33,12 @@ export interface ModelLifecycleContext {
   resolveBase: (requested: string) => { name: string } | EnsureResult;
 }
 
+/** The config entry with its group's settings merged in: a provider is often only on the group. */
+function knownModel(config: ForgeConfig, name: string): ForgeConfig['models'][number] | undefined {
+  const entry = config.models.find((m) => m.name === name);
+  return entry ? mergeGroupsIntoModel(config, entry) : undefined;
+}
+
 export async function ensureModelLoaded(
   ctx: ModelLifecycleContext,
   requested: string,
@@ -41,7 +48,7 @@ export async function ensureModelLoaded(
   const resolved = ctx.resolveBase(requested);
   if (!('name' in resolved)) return resolved;
   const model = resolved.name;
-  const known = ctx.config.models.find((m) => m.name === model);
+  const known = knownModel(ctx.config, model);
   if (!known) {
     return { status: 404, body: { error: `unknown model "${requested}" — not in config` } };
   }
@@ -180,7 +187,7 @@ export async function unloadModel(
   const resolved = ctx.resolveBase(requested);
   if (!('name' in resolved)) return resolved;
   const model = resolved.name;
-  const known = ctx.config.models.find((m) => m.name === model);
+  const known = knownModel(ctx.config, model);
   if (!known) {
     return { status: 404, body: { error: `unknown model "${requested}" — not in config` } };
   }
