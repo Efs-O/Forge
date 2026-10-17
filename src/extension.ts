@@ -135,6 +135,9 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
   context.subscriptions.push(embeddingBackend);
   const indexManager = new IndexManager(config, embeddingBackend);
   const workspaceRoot = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath ?? '';
+  const workspaceId = workspaceRoot
+    ? workspaceIdFor(workspaceRoot)
+    : createHash('sha256').update(`no-workspace:${activeConfigPath}`).digest('hex');
   // Selected CLI chat models own resumable sessions; CLI delegation is one-shot.
   const cliSessions = new CliSessionRegistry(
     config.max_cli_agents ?? DEFAULT_MAX_CLI_AGENTS,
@@ -163,6 +166,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
   context.subscriptions.push(terminalCommandTracker);
   const chatAttachments = new ChatAttachmentStore(
     path.join(context.globalStorageUri.fsPath, 'chat-attachments'),
+    workspaceId,
   );
   const sdServers = registerAllTools(
     toolRegistry,
@@ -309,12 +313,18 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
     leaseId: externalLifecycleLeaseId,
     isBusy: (modelName) => [...activeTurnModels.values()].includes(modelName),
   };
-  // Best-effort, after the session is loaded: an attachment whose conversation
-  // is gone is unreachable, and nothing else ever deletes it.
-  void chatAttachments.prune(sidebarProvider.liveConversationIds());
-  const workspaceId = workspaceRoot
-    ? workspaceIdFor(workspaceRoot)
-    : createHash('sha256').update(`no-workspace:${activeConfigPath}`).digest('hex');
+  // globalStorage is shared across all workspaces. Prune only after session load
+  // and only in a real workspace: windows without one share a derived id, so
+  // each would take the other's chats for dead ones.
+  if (workspaceRoot) {
+    void Promise.resolve()
+      .then(() => chatAttachments.prune(sidebarProvider.liveConversationIds()))
+      .catch((error: unknown) =>
+        log.warn(
+          `[ChatAttachmentStore] activation prune failed: ${error instanceof Error ? error.message : String(error)}`,
+        ),
+      );
+  }
   // Persistent agent jobs (B1). Runs in whichever window wins the
   // `jobs-scheduler` lease; a no-op when `jobs.enabled` is false.
   const jobsSetup = setupJobs(context, () => config, workspaceId, sidebarProvider, jobsStore, pool);

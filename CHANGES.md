@@ -69,6 +69,7 @@
 - When a later file write restores a file to its original contents, its pending added and removed line highlights are cleared at once.
 - Closing the browser session now forgets origins approved during that session while keeping configured pre-approvals.
 - Closing a tab now explains when an active delegation still holds its model and prevents it from being unloaded.
+- **Chat attachments are no longer deleted by another window.** The saved copies shown in the transcript live in one folder shared by every workspace, and each window's startup clean-up deleted every chat folder it did not know, including other workspaces' chats and its own overflow-archived chats. Each chat folder now records its workspace, and a window deletes only its own dead chats; folders saved before this release are kept. An attachment that cannot be saved now shows a warning naming the file instead of failing silently, and the turn continues.
 
 ## 0.17.42
 

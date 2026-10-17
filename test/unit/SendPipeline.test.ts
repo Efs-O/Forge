@@ -152,6 +152,38 @@ describe('SendPipeline.send', () => {
     });
   });
 
+  it('warns about unsaved attachment thumbnails and continues with the original files', async () => {
+    const h = harness();
+    const files = [
+      { name: 'one.txt', mediaType: 'text/plain', data: 'one' },
+      { name: 'two.txt', mediaType: 'text/plain', data: 'two' },
+    ];
+    h.deps.attachmentStore = {
+      save: vi.fn().mockResolvedValue({
+        refs: [
+          { name: 'one.txt', mediaType: 'text/plain', bytes: 3, relativePath: 'conv-1/one.txt' },
+        ],
+        failures: [{ name: 'two.txt', error: 'disk full' }],
+      }),
+    } as unknown as SendPipelineDeps['attachmentStore'];
+
+    await h.pipeline.send('inspect these', files, 'conv-1');
+
+    expect(h.posted).toContainEqual(
+      expect.objectContaining({
+        type: 'notice',
+        severity: 'warning',
+        conversationId: 'conv-1',
+        message: expect.stringContaining('two.txt'),
+      }),
+    );
+    expect(h.runTurn).toHaveBeenCalledOnce();
+    expect(h.runTurn.mock.calls[0]?.[3]).toEqual(files);
+    expect(h.runTurn.mock.calls[0]?.[4]).toMatchObject({
+      attachmentRefs: [{ relativePath: 'conv-1/one.txt' }],
+    });
+  });
+
   it('does not echo a prompt the webview typed itself', async () => {
     const h = harness();
     await h.pipeline.send('typed here');
@@ -399,11 +431,13 @@ describe('SendPipeline.send', () => {
     expect(h.runTurn.mock.calls[1]?.[2]).toBe('also check the logs');
     expect(h.runTurn.mock.calls[2]?.[2]).toBe('[Forge notice] background job finished');
     expect(h.runTurn.mock.calls[2]?.[4]).toMatchObject({ internal: true });
-    expect(h.posted).toContainEqual(expect.objectContaining({
-      type: 'userPrompt',
-      text: 'also check the logs',
-      conversationId: 'conv-1',
-    }));
+    expect(h.posted).toContainEqual(
+      expect.objectContaining({
+        type: 'userPrompt',
+        text: 'also check the logs',
+        conversationId: 'conv-1',
+      }),
+    );
     expect(
       h.posted.some(
         (message) => message.type === 'userPrompt' && message.text.includes('[Forge notice]'),
@@ -422,11 +456,13 @@ describe('SendPipeline.send', () => {
 
     expect(h.runTurn).toHaveBeenCalledTimes(2);
     expect(h.runTurn.mock.calls[1]?.[2]).toBe('finish this too');
-    expect(h.posted).toContainEqual(expect.objectContaining({
-      type: 'userPrompt',
-      text: 'finish this too',
-      conversationId: 'conv-1',
-    }));
+    expect(h.posted).toContainEqual(
+      expect.objectContaining({
+        type: 'userPrompt',
+        text: 'finish this too',
+        conversationId: 'conv-1',
+      }),
+    );
     expect(h.midTurnInbox.takeUndelivered('conv-1')).toEqual([]);
   });
 
@@ -459,11 +495,13 @@ describe('SendPipeline.send', () => {
     // Queued with it, so it travels with it, in the order they were typed.
     expect(h.runTurn.mock.calls[1]?.[2]).toBe('and the docs\n\nfix the test first');
     expect(h.posted.some((msg) => msg.type === 'setInput')).toBe(false);
-    expect(h.posted).toContainEqual(expect.objectContaining({
-      type: 'userPrompt',
-      text: 'and the docs\n\nfix the test first',
-      conversationId: 'conv-1',
-    }));
+    expect(h.posted).toContainEqual(
+      expect.objectContaining({
+        type: 'userPrompt',
+        text: 'and the docs\n\nfix the test first',
+        conversationId: 'conv-1',
+      }),
+    );
   });
 
   it('lets Stop win over "Send now": a cancelled turn hands the tell back', async () => {
@@ -510,7 +548,7 @@ describe('SendPipeline.send', () => {
     const h = harness();
     let saved = (): void => {};
     h.deps.attachmentStore = {
-      save: () => new Promise((resolve) => (saved = () => resolve([]))),
+      save: () => new Promise((resolve) => (saved = () => resolve({ refs: [], failures: [] }))),
     } as unknown as SendPipelineDeps['attachmentStore'];
     const file = { name: 'notes.txt', mediaType: 'text/plain', data: 'hi' };
     const sent = h.pipeline.send('look', [file], 'conv-1');

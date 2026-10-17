@@ -192,9 +192,28 @@ export class SendPipeline {
     let attachmentRefs: ChatAttachmentRef[] = [];
     if (attachments?.length && deps.attachmentStore) {
       try {
-        attachmentRefs = await deps.attachmentStore.save(conv.id, attachments);
+        const saved = await deps.attachmentStore.save(conv.id, attachments);
+        attachmentRefs = saved.refs;
+        if (saved.failures.length) {
+          const names = saved.failures.map((failure) => failure.name).join(', ');
+          log.warn(`[SendPipeline] chat attachment failures: ${JSON.stringify(saved.failures)}`);
+          deps.post({
+            type: 'notice',
+            severity: 'warning',
+            message: `Some attachment thumbnails could not be saved: ${names}. The turn will continue with the attached files.`,
+            conversationId: conv.id,
+          });
+        }
       } catch (err) {
-        log.warn(`[SendPipeline] chat attachments were not saved: ${(err as Error).message}`);
+        const detail = err instanceof Error ? err.message : String(err);
+        const filenames = attachments.map((attachment) => attachment.name).join(', ');
+        log.warn(`[SendPipeline] chat attachments were not saved: ${detail}`);
+        deps.post({
+          type: 'notice',
+          severity: 'warning',
+          message: `Attachment thumbnails could not be saved: ${filenames}. The turn will continue with the attached files.`,
+          conversationId: conv.id,
+        });
       }
     }
     // Closing or deleting the chat during either await above or the admission

@@ -389,6 +389,7 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
     return [
       ...this.sidebar.conversations.map((conversation) => conversation.id),
       ...this.sidebar.history.map((conversation) => conversation.id),
+      ...(this.historyArchive?.overflow.list().map((conversation) => conversation.id) ?? []),
     ];
   }
 
