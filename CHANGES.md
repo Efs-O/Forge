@@ -35,6 +35,7 @@
 - A custom prompt template that fails to render now stops the turn with the template error. Forge used to switch silently to the built-in template, so the turn ran on a prompt you had not written.
 - Stop pressed while Forge is still preparing a turn (saving attachments, checking the context window) now cancels it and hands the prompt back to the input. The turn used to start anyway once those steps finished.
 - Attaching `.svg`, `.json`, `.xml`, `.sh` or `.ts` files works again: the browser or Telegram labelled them by extension (`image/svg+xml`, `application/json`, `video/mp2t`), so an `.svg` was refused by text-only models as an image, and the saved copy of the others, and Telegram's `.svg`/`.ts` uploads, reached the turn as garbled bytes. Text files now always travel as text.
+- A foreground shell command that prints a lot (`yes`, a verbose build) no longer holds all of its output in memory until it exits. Past the inline cap Forge keeps only the head and tail and streams the rest to the spill file as it arrives. The result text is unchanged.
 
 ## 0.17.42
 

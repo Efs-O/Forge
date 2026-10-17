@@ -12,7 +12,7 @@ import {
 import { resolveExecCwd } from './execHelpers';
 import { resolveGitBash } from './execProgramResolver';
 import { classifyShellCommand, type ShellClassification, type ShellKind } from './shellPolicy';
-import { capShellOutput } from './shellOutput';
+import { ShellOutputCollector } from './shellOutput';
 import { DEFAULT_TOOL_OUTPUT_LIMITS } from './toolOutputLimits';
 import type { RegisteredTool } from './ToolRegistry';
 
@@ -285,7 +285,8 @@ async function runForeground(
   timeoutMs: number,
   env: NodeJS.ProcessEnv,
   signal: AbortSignal | undefined,
-): Promise<{ code: number | null; timedOut: boolean; output: string; seconds: number }> {
+  output: ShellOutputCollector,
+): Promise<{ code: number | null; timedOut: boolean; seconds: number }> {
   const started = Date.now();
   return new Promise((resolve, reject) => {
     const proc = spawn(executable, args, {
@@ -302,7 +303,6 @@ async function runForeground(
       },
       ...(process.platform !== 'win32' ? { detached: true } : {}),
     });
-    let output = '';
     let timedOut = false;
     let settled = false;
     const finish = (code: number | null): void => {
@@ -310,7 +310,7 @@ async function runForeground(
       settled = true;
       clearTimeout(timer);
       signal?.removeEventListener('abort', stop);
-      resolve({ code, timedOut, output, seconds: (Date.now() - started) / 1000 });
+      resolve({ code, timedOut, seconds: (Date.now() - started) / 1000 });
     };
     // Resolve only once the tree is dead, or the next command races its files.
     let killing = false;
@@ -326,11 +326,8 @@ async function runForeground(
     }, timeoutMs);
     signal?.addEventListener('abort', stop, { once: true });
     if (signal?.aborted) stop();
-    const append = (chunk: string): void => {
-      output += chunk;
-    };
-    proc.stdout.setEncoding('utf8').on('data', append);
-    proc.stderr.setEncoding('utf8').on('data', append);
+    output.collect(proc.stdout);
+    output.collect(proc.stderr);
     proc.once('error', reject);
     proc.once('close', (code) => !killing && finish(code));
   });
@@ -464,6 +461,11 @@ export function makeShellTool(options: ShellToolOptions = {}): RegisteredTool {
         });
         return `execution_id: ${start.id}\nstatus: ${start.status}\npid: ${start.pid ?? 'unknown'}`;
       }
+      const output = new ShellOutputCollector(
+        context?.conversationId ?? 'unknown',
+        context?.toolCallId ?? 'unknown',
+        context?.outputLimits?.shellInlineChars ?? DEFAULT_TOOL_OUTPUT_LIMITS.shellInlineChars,
+      );
       try {
         const result = await runForeground(
           resolved.command,
@@ -472,13 +474,9 @@ export function makeShellTool(options: ShellToolOptions = {}): RegisteredTool {
           timeout,
           environment,
           context?.abortSignal,
+          output,
         );
-        const capped = await capShellOutput(
-          result.output,
-          context?.conversationId ?? 'unknown',
-          context?.toolCallId ?? 'unknown',
-          context?.outputLimits?.shellInlineChars ?? DEFAULT_TOOL_OUTPUT_LIMITS.shellInlineChars,
-        );
+        const capped = await output.finish();
         return (
           formatResult(result.code, result.seconds, result.timedOut, capped.text) +
           pwshHint(shell, result.code, command)

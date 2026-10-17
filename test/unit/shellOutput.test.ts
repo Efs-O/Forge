@@ -2,7 +2,7 @@ import * as fs from 'fs/promises';
 import * as os from 'os';
 import * as path from 'path';
 import { describe, expect, it } from 'vitest';
-import { capShellOutput, SHELL_OUTPUT_CAP, SHELL_OUTPUT_HEAD, SHELL_OUTPUT_TAIL, shellOutputRoot, sweepShellOutput } from '../../src/tools/shellOutput';
+import { capShellOutput, ShellOutputCollector, SHELL_OUTPUT_CAP, SHELL_OUTPUT_HEAD, SHELL_OUTPUT_TAIL, shellOutputRoot, sweepShellOutput } from '../../src/tools/shellOutput';
 
 describe('shell output cap and spill', () => {
   it('keeps the exact head and tail and spills the complete output', async () => {
@@ -48,6 +48,39 @@ describe('shell output cap and spill', () => {
       await sweepShellOutput(root, now);
       await expect(fs.access(old)).rejects.toThrow();
       await expect(fs.readFile(fresh, 'utf8')).resolves.toBe('fresh');
+    } finally { await fs.rm(root, { recursive: true, force: true }); }
+  });
+});
+
+describe('streamed shell output (U17-01)', () => {
+  it('holds only head and tail in memory past the cap, and spills everything', async () => {
+    const root = await fs.mkdtemp(path.join(os.tmpdir(), 'forge-shell-stream-'));
+    try {
+      const collector = new ShellOutputCollector('conv', 'call', 300, root);
+      const chunks = Array.from({ length: 5000 }, (_, index) => `line ${index}\n`);
+      let peak = 0;
+      for (const chunk of chunks) {
+        collector.append(chunk);
+        peak = Math.max(peak, String(Reflect.get(collector, 'head')).length + String(Reflect.get(collector, 'tail')).length);
+      }
+      await collector.drained();
+      const full = chunks.join('');
+      const streamed = await collector.finish();
+      expect(peak).toBeLessThanOrEqual(100 + 2 * 200 + 'line 4999\n'.length);
+      expect(await fs.readFile(streamed.spillPath!, 'utf8')).toBe(full);
+      const whole = await capShellOutput(full, 'conv', 'whole', 300, root);
+      expect(streamed.text).toBe(whole.text.replace(whole.spillPath!, streamed.spillPath!));
+      expect(collector.append('late output after a kill')).toBe(true);
+    } finally { await fs.rm(root, { recursive: true, force: true }); }
+  });
+
+  it('output within the cap is returned whole and writes no spill file', async () => {
+    const root = await fs.mkdtemp(path.join(os.tmpdir(), 'forge-shell-stream-'));
+    try {
+      const collector = new ShellOutputCollector('conv', 'call', 300, root);
+      collector.append('short\n');
+      await expect(collector.finish()).resolves.toEqual({ text: 'short\n' });
+      await expect(fs.readdir(root)).resolves.toEqual([]);
     } finally { await fs.rm(root, { recursive: true, force: true }); }
   });
 });
