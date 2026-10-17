@@ -88,6 +88,7 @@ describe('MessageList scroll behavior in Edge', () => {
         return Boolean(el && el.scrollTop < el.scrollHeight - el.clientHeight - 100);
       }, undefined, { timeout: 5000 });
       const readerPosition = await pane.evaluate((el) => el.scrollTop);
+      const previousHeight = await pane.evaluate((el) => el.scrollHeight);
       await page.evaluate(
         (content) =>
           window.setTranscriptMessage(
@@ -96,7 +97,14 @@ describe('MessageList scroll behavior in Edge', () => {
           ),
         longReply,
       );
-      await page.waitForTimeout(100);
+      await page.waitForFunction(
+        (previousHeight) => {
+          const el = document.querySelector<HTMLElement>('.messages-pane');
+          return Boolean(el && el.scrollHeight > previousHeight);
+        },
+        previousHeight,
+        { timeout: 5000 },
+      );
       const afterGrowth = await pane.evaluate((el) => ({
         scrollTop: el.scrollTop,
         distance: el.scrollHeight - el.scrollTop - el.clientHeight,
