@@ -6,12 +6,13 @@
  * recovered rather than fatal.
  */
 
-import { FileLease } from '../util/FileLease';
+import { FileLease, FileLeaseError } from '../util/FileLease';
 import { SCHEDULER_LEASE_KEY, type WakeReconciler } from './schedulerWakes';
 
 /**
  * Try to take the `jobs-scheduler` lease. Returns the lease on success, or
- * undefined when another window holds it. `onLost` fires when the lease is
+ * undefined when another window holds it; any other error (the folder cannot
+ * be written, the disk is full) is thrown, not read as contention. `onLost` fires when the lease is
  * stolen or a heartbeat fails; the caller clears its handle and stays alive
  * (the next tick re-acquires) — never a full `stop()`, which would make a
  * transient loss permanent while the scheduled wake kept waking the machine.
@@ -33,7 +34,8 @@ export async function acquireSchedulerLease(
     });
     wakes.reset();
     return lease;
-  } catch {
-    return undefined;
+  } catch (error) {
+    if (error instanceof FileLeaseError) return undefined;
+    throw error;
   }
 }

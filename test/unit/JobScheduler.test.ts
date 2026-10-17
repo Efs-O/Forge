@@ -55,7 +55,7 @@ function issueBody(comments: number): string {
 
 let scheduler: JobScheduler;
 
-function makeScheduler(options: { maxConcurrent?: number } = {}) {
+function makeScheduler(options: { maxConcurrent?: number; leaseDirectory?: string } = {}) {
   scheduler = new JobScheduler({
     store,
     power,
@@ -65,7 +65,7 @@ function makeScheduler(options: { maxConcurrent?: number } = {}) {
     }),
     workspaceId: 'ws',
     instanceId: 'inst',
-    leaseDirectory: jobsRoot,
+    leaseDirectory: options.leaseDirectory ?? jobsRoot,
     outboxDir,
     now: () => new Date(nowMs),
     busy: () => busyReason,
@@ -459,6 +459,23 @@ describe('JobScheduler lease loss (audit F2)', () => {
     nowMs += 15 * 60_000;
     await scheduler.tick();
 
+    expect(await store.readRuns('disk')).toHaveLength(1);
+  });
+
+  it('shows a lease error that is not contention once, and recovers when it clears (F-03)', async () => {
+    await store.saveJob(makeJob());
+    // A file where the lease folder should be: not another window, a broken folder.
+    const leaseDirectory = path.join(jobsRoot, 'leases');
+    await fs.promises.writeFile(leaseDirectory, '');
+    makeScheduler({ leaseDirectory });
+    expect(await scheduler.start({ immediate: false })).toBe(false);
+    nowMs += 15 * 60_000;
+    await scheduler.tick();
+    expect(toasts.filter((t) => t.includes('could not take the scheduler lease'))).toHaveLength(1);
+    expect(await store.readRuns('disk')).toEqual([]);
+
+    await fs.promises.rm(leaseDirectory);
+    await scheduler.tick();
     expect(await store.readRuns('disk')).toHaveLength(1);
   });
 

@@ -10,6 +10,7 @@ import { AgentTaskRunner, type AgentTaskDeps } from './agentTask';
 import { recoverInterruptedRuns } from './agentTaskState';
 import { WakeReconciler } from './schedulerWakes';
 import { acquireSchedulerLease } from './jobLease';
+import { describeError } from '../util/describeError';
 import { BACKOFF_THRESHOLD } from './backoff';
 import { runJobCheck, applyJobBackoff, sleepIfIdleIfRequested } from './jobRunLifecycle';
 
@@ -79,6 +80,8 @@ export class JobScheduler {
   /** The single writer of `ForgeScheduledWake` while this window holds the lease. */
   private readonly wakes: WakeReconciler;
   private lease: FileLease | undefined;
+  /** The last lease error shown, so a persisting one is not toasted every tick. */
+  private leaseError: string | undefined;
   private timer: ReturnType<typeof setInterval> | undefined;
   /** The tick in flight, so a second one skips it and stop() can wait it out. */
   private running: Promise<void> | undefined;
@@ -181,16 +184,28 @@ export class JobScheduler {
     if (this.gpuGateAbortController.signal.aborted) {
       this.gpuGateAbortController = new AbortController();
     }
-    this.lease = await acquireSchedulerLease(
-      this.leaseDirectory,
-      this.workspaceId,
-      this.instanceId,
-      () => {
-        this.lease = undefined;
-        this.gpuGateAbortController.abort();
-      },
-      this.wakes,
-    );
+    try {
+      this.lease = await acquireSchedulerLease(
+        this.leaseDirectory,
+        this.workspaceId,
+        this.instanceId,
+        () => {
+          this.lease = undefined;
+          this.gpuGateAbortController.abort();
+        },
+        this.wakes,
+      );
+      this.leaseError = undefined;
+    } catch (error) {
+      // Not another window: no scheduled job runs until this clears. Shown
+      // once per distinct error; the next tick tries again.
+      const message = describeError(error);
+      if (message !== this.leaseError) {
+        this.notifyLocal(`Forge jobs: could not take the scheduler lease: ${message}`);
+      }
+      this.leaseError = message;
+      this.lease = undefined;
+    }
     return this.lease !== undefined;
   }
 
