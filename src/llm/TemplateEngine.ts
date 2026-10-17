@@ -1,6 +1,4 @@
 import * as nunjucks from 'nunjucks';
-import * as fs from 'fs';
-import * as path from 'path';
 import { localDate } from '../util/localClock';
 
 export interface TemplateContext {
@@ -42,18 +40,9 @@ export class TemplateEngine {
     // no way to date anything it writes, and asking for one cost a round to a
     // banned `powershell -Command "Get-Date"` and a fallback to `node -e`.
     const withDate = { currentDate: localDate(), ...context };
-    try {
-      return this.env.render(templateName, withDate);
-    } catch (err) {
-      // Fall back to builtin if user template errors
-      const builtinDir = this.templateDirs[this.templateDirs.length - 1];
-      const builtinPath = path.join(builtinDir, templateName);
-      if (fs.existsSync(builtinPath)) {
-        const raw = fs.readFileSync(builtinPath, 'utf8');
-        return nunjucks.renderString(raw, withDate);
-      }
-      throw err;
-    }
+    // A user template that fails to render throws: falling back to the builtin
+    // would run the turn on a prompt the user did not write, with no sign of it.
+    return this.env.render(templateName, withDate);
   }
 
   /** Reload by creating a new environment (called on file save). */

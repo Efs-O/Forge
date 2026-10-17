@@ -57,3 +57,19 @@ describe('TemplateEngine currentDate', () => {
     expect(rendered).toMatch(/Today's date is \d{4}-\d{2}-\d{2}\./u);
   });
 });
+
+describe('TemplateEngine user template errors (U08-05)', () => {
+  it('a user template that fails to render throws instead of using the builtin', () => {
+    const builtin = fs.mkdtempSync(path.join(os.tmpdir(), 'forge-template-builtin-'));
+    const user = fs.mkdtempSync(path.join(os.tmpdir(), 'forge-template-user-'));
+    try {
+      fs.writeFileSync(path.join(builtin, 'execute.njk'), 'builtin prompt', 'utf8');
+      fs.writeFileSync(path.join(user, 'execute.njk'), '{% if %}broken{% endif %}', 'utf8');
+      const engine = new TemplateEngine(builtin, [user]);
+      expect(() => engine.render('execute', {})).toThrow();
+    } finally {
+      fs.rmSync(builtin, { recursive: true, force: true });
+      fs.rmSync(user, { recursive: true, force: true });
+    }
+  });
+});

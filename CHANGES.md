@@ -32,6 +32,7 @@
 - When an agent task's model restart hits its five-minute cap, the rollback restart now waits for the timed-out restart to finish (up to another minute) instead of racing it. A late finish could leave the backend on the new binary while config.yaml said the old one. If the first restart is still running after that minute, Forge restores config.yaml for the next load and says so, without a second restart.
 - A `github_release` job with an `asset_pattern` now fires when the matching builds are uploaded, not only when the tag changes. llama.cpp tags a release before CI uploads its builds, so a poll in between recorded the tag with no matching build, and the upload was never noticed.
 - A remote `/new` whose confirmation message failed to send no longer creates a second chat when Telegram redelivers the command. The new chat and its binding were already saved, so the redelivery is now answered as handled.
+- A custom prompt template that fails to render now stops the turn with the template error. Forge used to switch silently to the built-in template, so the turn ran on a prompt you had not written.
 
 ## 0.17.42
 
