@@ -34,6 +34,7 @@
 - A remote `/new` whose confirmation message failed to send no longer creates a second chat when Telegram redelivers the command. The new chat and its binding were already saved, so the redelivery is now answered as handled.
 - A custom prompt template that fails to render now stops the turn with the template error. Forge used to switch silently to the built-in template, so the turn ran on a prompt you had not written.
 - Stop pressed while Forge is still preparing a turn (saving attachments, checking the context window) now cancels it and hands the prompt back to the input. The turn used to start anyway once those steps finished.
+- Attaching `.svg`, `.json`, `.xml`, `.sh` or `.ts` files works again: the browser or Telegram labelled them by extension (`image/svg+xml`, `application/json`, `video/mp2t`), so an `.svg` was refused by text-only models as an image, and the saved copy of the others, and Telegram's `.svg`/`.ts` uploads, reached the turn as garbled bytes. Text files now always travel as text.
 
 ## 0.17.42
 

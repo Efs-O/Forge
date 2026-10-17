@@ -66,3 +66,14 @@ export function attachmentLimitBytes(
   if (kind === 'text') return MAX_TEXT_ATTACHMENT_BYTES;
   return null;
 }
+
+/**
+ * The media type an attachment travels under. A text-kind file is read as
+ * UTF-8 text, but browsers and Telegram label it by extension (`.svg` as
+ * `image/svg+xml`, `.json` as `application/json`, `.ts` as `video/mp2t`), and
+ * every later step decides between text and base64 by that type.
+ */
+export function attachmentMediaType(name: string, mediaType: string): string {
+  if (mediaType.startsWith('text/')) return mediaType;
+  return attachmentKind(name, mediaType) === 'text' ? 'text/plain' : mediaType;
+}

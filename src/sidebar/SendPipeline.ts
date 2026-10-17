@@ -21,6 +21,7 @@ import { resolveRequestModel } from '../config/ConfigResolver';
 import { deriveStaticCapabilities } from '../config/ConfigResolver';
 import { getLogger } from '../util/logger';
 import type { UserPromptOptions } from './transcriptMutations';
+import { attachmentMediaType } from './attachmentLimits';
 import { validateAttachments } from './attachmentValidation';
 import type { ModelConfig } from '../config/types';
 import type { RequestChainLifecycle } from './RequestChainLifecycle';
@@ -96,6 +97,11 @@ export class SendPipeline {
       // user can actually see it, and nothing is left streaming to clear.
       return refuse(gone, gone);
     }
+    // Any sender, not only the webview, may label a text file by extension.
+    attachments = attachments?.map((a) => ({
+      ...a,
+      mediaType: attachmentMediaType(a.name, a.mediaType),
+    }));
     const attachmentError = validateAttachments(attachments);
     if (attachmentError) return refuse(attachmentError, attachmentError, conv.id);
     // Every refusal below MUST name the conversation it refers to. The webview

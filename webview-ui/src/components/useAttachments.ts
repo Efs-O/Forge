@@ -4,6 +4,7 @@ import type { MessageAttachment } from '../messageOps';
 import {
   attachmentKind,
   attachmentLimitBytes,
+  attachmentMediaType,
   MAX_ATTACHMENTS_PER_PROMPT,
   MAX_ATTACHMENT_TOTAL_BYTES,
 } from '../../../src/sidebar/attachmentLimits';
@@ -57,7 +58,7 @@ function readFile(file: File, kind: 'image' | 'text'): Promise<AttachmentData> {
       const raw = reader.result as string;
       resolve({
         name: file.name,
-        mediaType: file.type || 'application/octet-stream',
+        mediaType: attachmentMediaType(file.name, file.type || 'application/octet-stream'),
         data: kind === 'image' ? (raw.split(',')[1] ?? '') : raw,
       });
     };

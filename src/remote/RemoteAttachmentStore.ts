@@ -5,10 +5,12 @@ import { randomUUID } from 'crypto';
 import { writeFileAtomic } from '../util/atomicWrite';
 import {
   attachmentKind,
+  attachmentMediaType,
   MAX_ATTACHMENT_TOTAL_BYTES,
   MAX_ATTACHMENTS_PER_PROMPT,
 } from '../sidebar/attachmentLimits';
 import type { AttachmentData } from '../sidebar/messageBridge';
+import { isTextMediaType } from './TelegramInboundMapping';
 import { mimeFromHeader } from '../tools/imageTool';
 import type { RemoteAttachmentReference, RemoteInboundAttachment } from './types';
 
@@ -93,11 +95,11 @@ export class RemoteAttachmentStore {
     bytes: Buffer;
   }> {
     if (!attachment.data) throw new Error('attachment payload is unavailable');
-    const binary =
-      attachment.mediaType.startsWith('image/') || attachment.mediaType === 'application/pdf';
-    const bytes = binary
-      ? Buffer.from(attachment.data, 'base64')
-      : Buffer.from(attachment.data, 'utf8');
+    // The channel encodes by the same rule (TelegramDownloads), so `.svg` arrives
+    // as UTF-8 and a `.ts` labelled `video/mp2t` as base64.
+    const bytes = isTextMediaType(attachment.mediaType)
+      ? Buffer.from(attachment.data, 'utf8')
+      : Buffer.from(attachment.data, 'base64');
     if (attachment.mediaType === 'application/pdf') {
       if (bytes.length > MAX_PDF_BYTES)
         throw new Error(`${attachment.name} exceeds its 10 MiB limit`);
@@ -119,7 +121,8 @@ export class RemoteAttachmentStore {
     } else if (bytes.length > 2 * 1024 * 1024) {
       throw new Error(`${attachment.name} exceeds its 2 MiB limit`);
     }
-    return { name: attachment.name, mediaType: attachment.mediaType, kind, bytes };
+    const mediaType = attachmentMediaType(attachment.name, attachment.mediaType);
+    return { name: attachment.name, mediaType, kind, bytes };
   }
 }
 
