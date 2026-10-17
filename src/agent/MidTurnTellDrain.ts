@@ -25,6 +25,7 @@ export class MidTurnTellDrain {
   async drain(conversationId: string): Promise<MidTurnDrainResult> {
     const results: MidTurnDrainResult[] = [];
     let firstError: unknown;
+    let hasSourceError = false;
     for (const source of this.sources.values()) {
       try {
         results.push(await source(conversationId));
@@ -32,19 +33,34 @@ export class MidTurnTellDrain {
         // A failing source yields nothing, but messages already drained by the
         // earlier sources still reach the turn.
         results.push({ messages: [] });
-        firstError ??= err;
+        if (!hasSourceError) {
+          firstError = err;
+          hasSourceError = true;
+        }
       }
     }
     const messages = results.flatMap((result) => result.messages);
     const settles = results
       .map((result) => result.settle)
       .filter((step): step is () => Promise<void> => step !== undefined);
-    if (settles.length === 0 && firstError === undefined) return { messages };
+    if (settles.length === 0 && !hasSourceError) return { messages };
     return {
       messages,
       settle: async () => {
-        for (const step of settles) await step();
-        if (firstError !== undefined) throw firstError;
+        let settlementError: unknown;
+        let hasSettlementError = false;
+        for (const step of settles) {
+          try {
+            await step();
+          } catch (err) {
+            if (!hasSettlementError) {
+              settlementError = err;
+              hasSettlementError = true;
+            }
+          }
+        }
+        if (hasSourceError) throw firstError;
+        if (hasSettlementError) throw settlementError;
       },
     };
   }
