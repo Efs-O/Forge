@@ -43,7 +43,8 @@ overlaps with an existing owner, extend the owner instead.
 | Chat-cap refusal wording (`chatCapMessage`) | `src/sidebar/sessionTypes.ts` |
 | Hidden conversation notifications                    | `src/sidebar/hiddenChatAlerts.ts`        |
 | Background process exit notice + end-of-turn still-running notice text | `src/sidebar/backgroundExitNotice.ts` |
-| Send guards, model resolution, turn logs             | `src/sidebar/SendPipeline.ts`            |
+| Send admission, model resolution and request-chain orchestration | `src/sidebar/SendPipeline.ts`            |
+| Per-conversation session-log lifecycle, event routing and cursor flush | `src/sidebar/SessionLogCoordinator.ts` |
 | /reindex progress interaction                        | `src/sidebar/reindexCommand.ts`          |
 | Primary turn + streaming lifecycle                   | `src/sidebar/AgentLoop.ts`               |
 | Contact-prompt capacity gate (ready-slot reservation) | `src/sidebar/contactPrompt.ts`          |
