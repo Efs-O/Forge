@@ -309,8 +309,7 @@ export class AgentTaskRunner {
       failed || outcome.kind === 'ok' || (outcome.kind === 'no_change' && report === 'always');
     if (shouldReport) {
       const message = reportMessage(outcome, startedAt, durationMs, conversationId);
-      await this.delivery.deliver(job, message).catch(() => undefined);
-      delivered = 1;
+      delivered = await this.delivery.tryDeliver(job, message);
     }
 
     // Backoff on failure; the runner already reported it.

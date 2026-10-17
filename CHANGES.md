@@ -17,6 +17,7 @@
 - A Telegram or WhatsApp message waiting behind a running turn no longer adds a listener to the remote session every 250 ms, about 14,000 an hour, that stayed until the session ended. Telegram polling, the live progress bubble and the voice server had the same leak. They now share one timer helper that cleans up after itself.
 - The agent bus (`~/.forge/agent-bus`) again deletes files older than 24 hours, as its README says. The clean-up lost its only caller when `ask_live_session` was removed, so late replies to questions that had timed out stayed forever. It now runs when Forge starts and before every question to a linked agent.
 - Semantic code search no longer loses a file saved while the index was updating. The index cleared its list of changed files after embedding them, so a save during that wait was dropped, and the file kept the embedding of its old text until the next full reindex. A full reindex had the same gap. A failed update now also keeps the list for the next search.
+- A scheduled job's run log no longer says a report was delivered when Forge could not write it to the Telegram outbox. Three places ignored the error and counted the report as sent: an agent task's report, the notice for a run interrupted by a restart, and the warning when a job starts backing off. The error is now logged and the run row says 0. The backoff warning's row used to say 0 even when it was sent, and now says 1.
 
 ## 0.17.42
 

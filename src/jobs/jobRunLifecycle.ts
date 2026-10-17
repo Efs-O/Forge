@@ -81,16 +81,15 @@ export async function applyJobBackoff(
   // Report once, on the run that crosses the threshold. Later
   // failures keep extending the backoff silently; the recovery (a success
   // after backoff) is reported by the next successful run.
-  if (count === BACKOFF_THRESHOLD) {
-    await delivery.deliver(job, `failing: ${message}`).catch(() => undefined);
-  }
+  const delivered =
+    count === BACKOFF_THRESHOLD ? await delivery.tryDeliver(job, `failing: ${message}`) : 0;
   await store.appendRun(job.id, {
     at: at.getTime(),
     late: false,
     outcome: 'skipped',
     changed: false,
     summary: `backed off after ${count} failures: ${message}`,
-    delivered: 0,
+    delivered,
   });
 }
 

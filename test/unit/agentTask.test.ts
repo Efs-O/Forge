@@ -598,6 +598,23 @@ describe('AgentTaskRunner', () => {
     expect(item!.text).toContain('failed');
   });
 
+  it('a report the outbox could not take is recorded as not delivered (F-02)', async () => {
+    const job = baseJob({ action: { kind: 'agent_task', task: 'install', report: 'always' } });
+    await store.saveJob(job);
+    // A file where the outbox folder should be: every outbox write fails.
+    const blocked = path.join(jobsRoot, 'not-a-folder');
+    await fs.promises.writeFile(blocked, '');
+    await new AgentTaskRunner(makeDeps({ outboxDir: blocked })).run(
+      { job, state: JobStateSchema.parse({}) },
+      false,
+    );
+    const runs = await store.readRuns('agent-task');
+    expect(runs[0]!.outcome).toBe('ok');
+    expect(runs[0]!.delivered).toBe(0);
+    // The local toast still went out; only the Telegram half was lost.
+    expect(toasts.some((text) => text.startsWith('Job "'))).toBe(true);
+  });
+
   it('no RESULT line → failed run row', async () => {
     const job = baseJob();
     await store.saveJob(job);

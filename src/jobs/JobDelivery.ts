@@ -1,6 +1,8 @@
 import { writeOutboxItem } from './JobOutbox';
 import type { Job } from './jobSchema';
 import type { JobStore } from './JobStore';
+import { describeError } from '../util/describeError';
+import { getLogger } from '../util/logger';
 
 /**
  * Turning a check result into something the user actually sees (§B.4).
@@ -54,6 +56,23 @@ export class JobDelivery {
     const message = `Job "${job.name}": ${text}`;
     this.deps.notifyLocal(message);
     await writeOutboxItem(this.deps.outboxDir, job.id, job.name, message, this.deps.now());
+  }
+
+  /**
+   * {@link deliver} for a run that must finish either way. Returns the run
+   * row's `delivered` count: 1, or 0 with the error logged when the outbox
+   * write failed. The toast has been shown by then; only Telegram missed it.
+   */
+  async tryDeliver(job: Job, text: string): Promise<number> {
+    try {
+      await this.deliver(job, text);
+      return 1;
+    } catch (error) {
+      getLogger().warn(
+        `[JobDelivery] job "${job.name}": report not delivered: ${describeError(error)}`,
+      );
+      return 0;
+    }
   }
 
   /** Deliver a fact for a job by id (callers that do not hold the `Job`). */

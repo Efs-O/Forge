@@ -2,6 +2,8 @@ import * as fs from 'fs';
 import * as path from 'path';
 import type { JobStore } from './JobStore';
 import { writeOutboxItem } from './JobOutbox';
+import { describeError } from '../util/describeError';
+import { getLogger } from '../util/logger';
 import type { JobFile, JobState } from './jobSchema';
 
 /**
@@ -113,14 +115,22 @@ export async function recoverInterruptedRuns(
     const started = new Date(state.task_run.started_at);
     const hhmm = `${String(started.getHours()).padStart(2, '0')}:${String(started.getMinutes()).padStart(2, '0')}`;
     const backupPath = configBackupPath(store, job.id);
-    await writeOutboxItem(
+    const delivered = await writeOutboxItem(
       outboxDir,
       job.id,
       job.name,
       `interrupted — Forge restarted during the run (started ${hhmm}); ` +
         `config.yaml backup kept at ${backupPath}`,
       now(),
-    ).catch(() => undefined);
+    ).then(
+      () => 1,
+      (error: unknown) => {
+        getLogger().warn(
+          `[AgentTask] interrupted-run notice for "${job.name}" not delivered: ${describeError(error)}`,
+        );
+        return 0;
+      },
+    );
     await store
       .appendRun(job.id, {
         at: now(),
@@ -129,7 +139,7 @@ export async function recoverInterruptedRuns(
         changed: false,
         summary: 'interrupted — Forge restarted during the run',
         error: 'interrupted — Forge restarted during the run',
-        delivered: 1,
+        delivered,
       })
       .catch(() => undefined);
     store.patchState(job.id, { task_run: null });
