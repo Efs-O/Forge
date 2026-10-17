@@ -158,13 +158,14 @@ if [ "$VERB" = "wait" ]; then
   URL="$(grep '"url"' "$EP" | cut -d'"' -f4)"
   TOKEN="$(grep '"token"' "$EP" | cut -d'"' -f4)"
   # ~55 s between polls: cheap for Forge, and a turn that ends between polls is
-  # picked up on the next one. FORGE_WAIT_POLL_SECONDS is a test-only override
-  # (a positive whole number of seconds) so integration tests do not sleep 55 s.
+  # picked up on the next one. The test-only overrides keep route integration
+  # tests deterministic without waiting for the production interval.
   POLL=55
-  if [ -n "${FORGE_WAIT_POLL_SECONDS:-}" ]; then
-    case "$FORGE_WAIT_POLL_SECONDS" in *[!0-9]*) echo "forge.sh: FORGE_WAIT_POLL_SECONDS is a positive whole number of seconds" >&2; exit 2;; esac
-    [ "$FORGE_WAIT_POLL_SECONDS" -ge 1 ] || { echo "forge.sh: FORGE_WAIT_POLL_SECONDS is a positive whole number of seconds" >&2; exit 2; }
-    POLL="$FORGE_WAIT_POLL_SECONDS"
+  if [ -n "${FORGE_WAIT_POLL_MS:-}" ]; then
+    case "$FORGE_WAIT_POLL_MS" in *[!0-9]*) echo "forge.sh: FORGE_WAIT_POLL_MS is a positive whole number of milliseconds" >&2; exit 2;; esac
+    POLL_MS=$((10#$FORGE_WAIT_POLL_MS))
+    [ "$POLL_MS" -ge 1 ] || { echo "forge.sh: FORGE_WAIT_POLL_MS is a positive whole number of milliseconds" >&2; exit 2; }
+    POLL="$(printf '%d.%03d' "$((POLL_MS / 1000))" "$((POLL_MS % 1000))")"
   fi
   # Bounded: minutes up to 100000 keeps the deadline within 64-bit range.
   if [ "${MINUTES:-60}" -gt 100000 ]; then

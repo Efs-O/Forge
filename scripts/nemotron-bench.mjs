@@ -13,7 +13,6 @@ import { isAbsolute, relative, resolve, sep } from 'node:path';
 import { pathToFileURL } from 'node:url';
 
 const ROOT = resolve(import.meta.dirname, '..');
-const DEFAULT_OUTPUT = resolve(ROOT, 'docs', 'benchmarks');
 const GREEK_TOOL_SCENARIOS = resolve(ROOT, 'benchmarks', 'nemotron-greek-tool-calls.json');
 const HARDWARE = '2x RTX 5060 Ti 16 GB (PCIe Gen3 x8) + RTX 3060 12 GB (x4); i7-8700K DDR4';
 
@@ -30,7 +29,7 @@ function usage() {
   ].join('\n');
 }
 
-function options(args) {
+export function options(args, root, exists) {
   if (args.includes('--help') || args.includes('-h')) return { help: true };
   const baseUrl = value(args, '--base-url')?.replace(/\/$/u, '');
   const model = value(args, '--model');
@@ -42,21 +41,28 @@ function options(args) {
   if (!Number.isInteger(greekMaxTokens) || greekMaxTokens <= 0) throw new Error('--greek-max-tokens must be a positive integer.');
   const determinism = Number(value(args, '--determinism') ?? 0);
   if (!Number.isInteger(determinism) || determinism < 0) throw new Error('--determinism must be an integer greater than or equal to 0.');
-  const output = resolve(ROOT, value(args, '--out') ?? DEFAULT_OUTPUT);
+  const output = resolve(root, value(args, '--out') ?? resolve(root, 'docs', 'benchmarks'));
   const greekEvalValue = value(args, '--greek-eval');
   if (!greekEvalValue) throw new Error('--greek-eval PATH is required.\n' + usage());
   const greekEval = resolve(greekEvalValue);
-  if (!existsSync(greekEval)) throw new Error(`Greek evaluation file not found: ${greekEval}`);
+  if (!exists(greekEval)) throw new Error(`Greek evaluation file not found: ${greekEval}`);
   const rowsOutValue = value(args, '--rows-out');
   const rowsOut = rowsOutValue ? resolve(rowsOutValue) : undefined;
   if (rowsOut) {
-    const rel = relative(ROOT, rowsOut);
+    const rel = relative(root, rowsOut);
     if (rel === '' || (!rel.startsWith(`..${sep}`) && rel !== '..' && !isAbsolute(rel))) throw new Error('--rows-out must be outside the Forge repository root.');
-    if (existsSync(rowsOut) && !args.includes('--force-rows-out')) throw new Error('--rows-out already exists; pass --force-rows-out to overwrite it.');
+    if (exists(rowsOut) && !args.includes('--force-rows-out')) throw new Error('--rows-out already exists; pass --force-rows-out to overwrite it.');
   }
   const gguf = value(args, '--gguf');
-  if (gguf && !existsSync(resolve(gguf))) throw new Error(`GGUF file not found: ${resolve(gguf)}`);
+  if (gguf && !exists(resolve(gguf))) throw new Error(`GGUF file not found: ${resolve(gguf)}`);
   return { baseUrl, model, quant, output, greekEval, greekMaxTokens, determinism, rowsOut, forceRowsOut: args.includes('--force-rows-out'), greekNoSystem: args.includes('--greek-no-system'), gguf: gguf ? resolve(gguf) : undefined };
+}
+
+export function greekMessages(question, systemPrompt) {
+  return [
+    ...(systemPrompt ? [{ role: 'system', content: systemPrompt }] : []),
+    { role: 'user', content: question },
+  ];
 }
 
 async function sha256File(file) {
@@ -65,7 +71,7 @@ async function sha256File(file) {
   return hash.digest('hex');
 }
 
-function greekSystemInfo(rows, disabled) {
+export function greekSystemInfo(rows, disabled) {
   const systems = [...new Set(rows.map((row) => row.system).filter((item) => typeof item === 'string' && item.length > 0))];
   if (systems.length > 1) throw new Error('Greek evaluation rows contain more than one distinct system prompt.');
   return { mode: disabled || systems.length === 0 ? 'none' : 'row', prompt: disabled ? undefined : systems[0], sha256: disabled || !systems[0] ? null : createHash('sha256').update(systems[0], 'utf8').digest('hex') };
@@ -282,7 +288,7 @@ function markdown(result) {
 }
 
 async function main() {
-  const input = options(process.argv.slice(2));
+  const input = options(process.argv.slice(2), ROOT, existsSync);
   if (input.help) return console.log(usage());
   const greekRows = greekEvaluation(input.greekEval);
   if (input.determinism > greekRows.length) throw new Error(`--determinism (${input.determinism}) exceeds Greek evaluation row count (${greekRows.length}).`);
@@ -302,7 +308,7 @@ async function main() {
     const definitionsByName = new Map(definitions.map((definition) => [definition.function.name, definition]));
     let determinismMatched = 0;
     for (const row of greekRows.slice(0, input.determinism)) {
-      const request = { model: input.model, messages: [...(system.prompt ? [{ role: 'system', content: system.prompt }] : []), { role: 'user', content: row.q }], temperature: 0, top_k: 1, seed: 3407, max_tokens: input.greekMaxTokens, cache_prompt: false, stream: false, chat_template_kwargs: { enable_thinking: false } };
+      const request = { model: input.model, messages: greekMessages(row.q, system.prompt), temperature: 0, top_k: 1, seed: 3407, max_tokens: input.greekMaxTokens, cache_prompt: false, stream: false, chat_template_kwargs: { enable_thinking: false } };
       const a = await jsonRequest(`${input.baseUrl}/v1/chat/completions`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(request) });
       const b = await jsonRequest(`${input.baseUrl}/v1/chat/completions`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(request) });
       if ((a?.choices?.[0]?.message?.content ?? '') !== (b?.choices?.[0]?.message?.content ?? '')) throw new Error(`Determinism check failed for Greek row ${row.id ?? '(no id)'}; main benchmark was not started.`);
@@ -349,7 +355,7 @@ async function main() {
       const finishReasons = {};
       let emptyAnswers = 0;
       for (const row of greekRows) {
-        const response = await jsonRequest(`${input.baseUrl}/v1/chat/completions`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ model: input.model, messages: [...(system.prompt ? [{ role: 'system', content: system.prompt }] : []), { role: 'user', content: row.q }], temperature: 0, top_k: 1, seed: 3407, max_tokens: input.greekMaxTokens, cache_prompt: false, stream: false, chat_template_kwargs: { enable_thinking: thinking } }) });
+        const response = await jsonRequest(`${input.baseUrl}/v1/chat/completions`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ model: input.model, messages: greekMessages(row.q, system.prompt), temperature: 0, top_k: 1, seed: 3407, max_tokens: input.greekMaxTokens, cache_prompt: false, stream: false, chat_template_kwargs: { enable_thinking: thinking } }) });
         const message = response?.choices?.[0]?.message ?? {};
         const answer = typeof message.content === 'string' ? message.content : '';
         const finishReason = response?.choices?.[0]?.finish_reason ?? null;
@@ -404,7 +410,9 @@ async function main() {
   }
 }
 
-main().catch((error) => {
-  console.error(`nemotron-bench: ${error instanceof Error ? error.message : String(error)}`);
-  process.exitCode = 1;
-});
+if (process.argv[1] && import.meta.url === pathToFileURL(resolve(process.argv[1])).href) {
+  main().catch((error) => {
+    console.error(`nemotron-bench: ${error instanceof Error ? error.message : String(error)}`);
+    process.exitCode = 1;
+  });
+}

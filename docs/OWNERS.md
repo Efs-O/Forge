@@ -702,6 +702,13 @@ the configured override stays the existing `video.ffmpeg_path` key.
 | Hermetic fake `claude` executable for tests                | `test/support/fakeCli.ts`                 |
 | Shared Telegram contact fixtures and completion signals    | `test/support/telegramContactFixture.ts`  |
 
+## Test support
+
+| Concern                                | Owner                                  |
+| -------------------------------------- | -------------------------------------- |
+| Shared sdcpp backend config fixtures   | `test/support/sdServerFixtures.ts`     |
+| Shared silent PCM WAV fixture          | `test/support/silentPcmWav.ts`         |
+
 ## Misc
 
 | Concern                                     | Owner                         |

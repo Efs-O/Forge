@@ -14,6 +14,7 @@ import { VoiceIngress } from '../../src/voice/VoiceIngress';
 import { VoiceOperation } from '../../src/voice/VoiceOperation';
 import type { VoiceTranscript } from '../../src/voice/VoiceTypes';
 import { passthroughNormalize } from '../support/voiceNormalize';
+import { silentPcmWav } from '../support/silentPcmWav';
 
 /**
  * The one-terminal-row invariant spans ingress AND the draft: ingress cannot
@@ -26,22 +27,7 @@ const CHAT = { channel: 'telegram', chatId: '42' };
 
 async function silentWav(operation: VoiceOperation): Promise<string> {
   const target = operation.reserve('input.wav');
-  const data = Buffer.alloc(16000 * 2);
-  const header = Buffer.alloc(44);
-  header.write('RIFF', 0);
-  header.writeUInt32LE(36 + data.length, 4);
-  header.write('WAVE', 8);
-  header.write('fmt ', 12);
-  header.writeUInt32LE(16, 16);
-  header.writeUInt16LE(1, 20);
-  header.writeUInt16LE(1, 22);
-  header.writeUInt32LE(16000, 24);
-  header.writeUInt32LE(32000, 28);
-  header.writeUInt16LE(2, 32);
-  header.writeUInt16LE(16, 34);
-  header.write('data', 36);
-  header.writeUInt32LE(data.length, 40);
-  await fs.writeFile(target, Buffer.concat([header, data]));
+  await fs.writeFile(target, silentPcmWav());
   return target;
 }
 

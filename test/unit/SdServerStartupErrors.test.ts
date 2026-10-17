@@ -7,8 +7,8 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { ChildProcess } from 'child_process';
 import { SdServerBackend, type SdServerBackendDeps } from '../../src/backend/SdServerBackend';
 import { sdServerRecordPath, type SdProcessIdentity } from '../../src/backend/sdServerOwnerRecord';
-import { ImageGenerationConfigSchema } from '../../src/config/imageGenerationSchema';
 import type { SdcppImageBackendConfig } from '../../src/config/types';
+import { SDCPP_MODEL_FIELDS, sdcppBackendConfig } from '../support/sdServerFixtures';
 
 vi.mock('vscode', () => ({
   window: {
@@ -28,20 +28,13 @@ vi.mock('vscode', () => ({
  * thing the user can actually edit.
  */
 
-const MODEL_FIELDS = {
-  binary: 'sd-server.exe',
-  diffusion_model: 'diffusion.gguf',
-  text_encoder: 'text-encoder.gguf',
-  vae: 'vae.safetensors',
-};
-
 let root: string;
 let recordDir: string;
 
 beforeEach(() => {
   root = fs.mkdtempSync(path.join(os.tmpdir(), 'forge-sd-startup-'));
   recordDir = path.join(root, 'records');
-  for (const file of Object.values(MODEL_FIELDS)) fs.writeFileSync(path.join(root, file), 'test');
+  for (const file of Object.values(SDCPP_MODEL_FIELDS)) fs.writeFileSync(path.join(root, file), 'test');
 });
 
 afterEach(() => {
@@ -49,32 +42,7 @@ afterEach(() => {
 });
 
 function localConfig(overrides: Record<string, unknown> = {}): SdcppImageBackendConfig {
-  const parsed = ImageGenerationConfigSchema.parse({
-    backends: [
-      {
-        name: 'qwen-local',
-        provider: 'sdcpp',
-        binary: path.join(root, MODEL_FIELDS.binary),
-        diffusion_model: path.join(root, MODEL_FIELDS.diffusion_model),
-        text_encoder: path.join(root, MODEL_FIELDS.text_encoder),
-        vae: path.join(root, MODEL_FIELDS.vae),
-        cuda_device: 2,
-        text_encoder_on_cpu: true,
-        port: 8093,
-        min_free_vram_mb: 7000,
-        idle_timeout_ms: 61_000,
-        request_timeout_ms: 1000,
-        defaults: { steps: 20, cfg_scale: 6, sampler: 'euler', width: 1024, height: 1024 },
-        extra_args: [],
-        confirm_on_start: true,
-        confirm_each: false,
-        ...overrides,
-      },
-    ],
-  });
-  const backend = parsed.backends[0];
-  if (!backend || backend.provider !== 'sdcpp') throw new Error('config did not parse as sdcpp.');
-  return backend;
+  return sdcppBackendConfig(root, overrides);
 }
 
 interface Rig {

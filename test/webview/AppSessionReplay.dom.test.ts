@@ -113,6 +113,11 @@ describe.skipIf(!fixturePath)('App saved-session replay', () => {
       const textarea = container.querySelector<HTMLTextAreaElement>('#prompt')!;
       const savedPrompts = displayed.filter((message) => message.role === 'user');
       const followUp = savedPrompts.at(-1)?.content || 'replay follow-up';
+      const firstSavedPrompt = savedPrompts.find((message) => typeof message.content === 'string')
+        ?.content;
+      if (!firstSavedPrompt) throw new Error('The replay fixture has no saved user prompt.');
+
+      expect(container.textContent).toContain(firstSavedPrompt);
 
       for (let end = 1; end <= followUp.length; end++) {
         act(() => setNativeTextareaValue(textarea, followUp.slice(0, end)));
@@ -121,7 +126,7 @@ describe.skipIf(!fixturePath)('App saved-session replay', () => {
 
       expectNoReactDepthFailure();
       expect(textarea.value).toBe('');
-      expect(posted.some((message) => (message as { type?: string }).type === 'send')).toBe(true);
+      expect(posted).toContainEqual(expect.objectContaining({ type: 'send', text: followUp }));
     },
     60_000,
   );
@@ -138,7 +143,9 @@ describe.skipIf(!fixturePath)('App saved-session replay', () => {
       );
 
       expectNoReactDepthFailure();
-      expect(posted.some((message) => (message as { type?: string }).type === 'send')).toBe(true);
+      expect(posted).toContainEqual(
+        expect.objectContaining({ type: 'send', text: 'queued replay prompt' }),
+      );
     },
     60_000,
   );

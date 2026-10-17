@@ -46,15 +46,10 @@ describe('injectSystemPrompt', () => {
     expect(system!.content).not.toContain('tools');
   });
 
-  it('replace without a prompt falls back to the template, never an empty prompt', () => {
-    const [system] = injectSystemPrompt(user, engine, {}, undefined, 'replace');
+  it.each([undefined, '   '])('replace prompt %s falls back to the template', (prompt) => {
+    const [system] = injectSystemPrompt(user, engine, {}, prompt, 'replace');
     expect(system!.content).toContain('Coding assistant rules');
     expect(system!.content.trim().length).toBeGreaterThan(0);
-  });
-
-  it('replace ignores a whitespace-only prompt', () => {
-    const [system] = injectSystemPrompt(user, engine, {}, '   ', 'replace');
-    expect(system!.content).toContain('Coding assistant rules');
   });
 
   it('replaces an existing system message rather than stacking', () => {
