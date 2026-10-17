@@ -210,6 +210,7 @@ describe('RemoteController.broadcastHostNotification (ephemeral)', () => {
     const { controller, channel, cleanup } = await rig(['chat-1'], {
       deleteCommandRepliesAfter: 1,
     });
+    vi.useFakeTimers();
     try {
       expect(await controller.broadcastHostNotification('Forge: backend restarted.')).toBe(1);
       await vi.waitFor(
@@ -217,9 +218,10 @@ describe('RemoteController.broadcastHostNotification (ephemeral)', () => {
         { timeout: 2_000 },
       );
       // Past the 1 s reply delay: a non-ephemeral notification is never deleted.
-      await new Promise((resolve) => setTimeout(resolve, 1_500));
+      await vi.advanceTimersByTimeAsync(1_500);
       expect(channel.deleted).toEqual([]);
     } finally {
+      vi.useRealTimers();
       await cleanup();
     }
   });

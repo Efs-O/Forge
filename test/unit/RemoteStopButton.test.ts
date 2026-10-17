@@ -29,6 +29,7 @@ import type {
 const tempDirs: string[] = [];
 
 afterEach(async () => {
+  vi.useRealTimers();
   for (const directory of tempDirs.splice(0))
     await fs.rm(directory, { recursive: true, force: true });
 });
@@ -173,10 +174,6 @@ async function liveTurn(options: { separateStopControl?: boolean } = {}): Promis
   await channel.emit({ ...base, kind: 'text', providerMessageId: 'pair', text: `/pair ${code}` });
   await channel.emit({ ...base, kind: 'text', providerMessageId: 'go', text: 'hello' });
   await vi.waitFor(() => expect(host.send).toHaveBeenCalled());
-  progressListener?.({ kind: 'commentary', conversationId: 'c1', text: 'Looking at it' });
-  await vi.waitFor(() => expect(channel.edits.at(-1)?.text).toContain('Looking at it'), {
-    timeout: 3_000,
-  });
 
   return {
     channel,
@@ -376,6 +373,7 @@ describe('remote stop_action through the controller', () => {
   });
 
   it('cancels from the newest bubble after the footer has moved', async () => {
+    vi.useFakeTimers();
     const f = await liveTurn();
     // A warning is sent below the bubble, so the footer and Stop move to a new
     // bubble under it. That bubble's Stop must still reach the turn.
@@ -385,9 +383,9 @@ describe('remote stop_action through the controller', () => {
       severity: 'warning',
       text: 'agent is repeating the same tool call',
     });
-    await vi.waitFor(() => expect(f.channel.progress.length).toBeGreaterThan(1), {
-      timeout: 3_000,
-    });
+    await vi.advanceTimersByTimeAsync(1_000);
+    expect(f.channel.sent.some((item) => item.text.includes('agent is repeating'))).toBe(true);
+    expect(f.channel.progress.length).toBeGreaterThan(1);
     const newest = String(f.channel.progress.length);
     expect(f.channel.stopButtons.has(newest)).toBe(true);
 

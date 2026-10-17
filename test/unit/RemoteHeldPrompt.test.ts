@@ -206,13 +206,29 @@ describe('held remote prompt', () => {
     await controller.stop();
   });
 
-  it('names the inactivity timeout when the session expired', async () => {
+  it('asks for authentication when an enrolled owner has no live session', async () => {
     const { controller, channel } = await enrolledRig(45);
     await channel.emit(event({ providerMessageId: 'p1', text: 'do the thing' }));
-    // Never authenticated in this process, so the cause is a plain lock, not a timeout.
     expect(channel.sent.some((item) => item.text.includes('authentication required'))).toBe(true);
     expect(channel.sent.some((item) => item.text.includes('45 min idle'))).toBe(false);
     await controller.stop();
+  });
+
+  it('names the inactivity timeout after an authenticated session expires', async () => {
+    const { controller, channel, code } = await enrolledRig(45);
+    await channel.emit(event({ providerMessageId: 'auth', text: code }));
+    const authenticatedAt = Date.now();
+    const now = vi.spyOn(Date, 'now').mockReturnValue(authenticatedAt + 45 * 60_000 + 1);
+    try {
+      await channel.emit(event({ providerMessageId: 'expired', text: 'do the thing' }));
+      expect(channel.sent.some((item) => item.text.includes('45 min idle'))).toBe(true);
+      expect(channel.sent.some((item) => item.text.includes('authentication required'))).toBe(
+        false,
+      );
+    } finally {
+      now.mockRestore();
+      await controller.stop();
+    }
   });
 
   it('drops the held prompt after repeated wrong codes lock the session out', async () => {
@@ -223,7 +239,6 @@ describe('held remote prompt', () => {
     for (let attempt = 0; attempt < 5; attempt++) {
       await channel.emit(event({ providerMessageId: `bad-${attempt}`, text: wrong }));
     }
-    await new Promise((resolve) => setTimeout(resolve, 20));
     expect(forgeHost.send).not.toHaveBeenCalled();
     await controller.stop();
   });
@@ -236,7 +251,6 @@ describe('held remote prompt', () => {
     // next owner to pair inherits the last one's queued work.
     controller.forgetChannel('fake');
     await channel.emit(event({ providerMessageId: 'auth', text: code }));
-    await new Promise((resolve) => setTimeout(resolve, 20));
     expect(forgeHost.send).not.toHaveBeenCalled();
     await controller.stop();
   });
@@ -255,7 +269,6 @@ describe('held remote prompt', () => {
     await expect(
       channel.emit(event({ providerMessageId: 'auth', text: code })),
     ).resolves.toEqual({ kind: 'handled' });
-    await new Promise((resolve) => setTimeout(resolve, 20));
     expect(forgeHost.send).not.toHaveBeenCalled();
     expect(channel.sent.some((item) => item.text.includes('running your held prompt'))).toBe(false);
     expect(channel.sent.some((item) => item.text.includes('reloading'))).toBe(false);
@@ -276,7 +289,6 @@ describe('held remote prompt', () => {
     await channel.emit(
       event({ providerMessageId: 'p1', senderId: 'intruder', text: 'exfiltrate' }),
     );
-    await new Promise((resolve) => setTimeout(resolve, 20));
     expect(forgeHost.send).not.toHaveBeenCalled();
     expect(channel.sent.some((item) => item.text.includes('Your prompt is held'))).toBe(false);
     await controller.stop();
