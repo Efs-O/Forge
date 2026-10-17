@@ -5,6 +5,7 @@ import { randomBytes } from 'crypto';
 import { BUS_README, CLIENT_SCRIPT } from './busContent';
 import { writeFileAtomicSync } from '../util/atomicWrite';
 import { getLogger } from '../util/logger';
+import { abortableSleep } from '../util/abortableSleep';
 
 /**
  * The agent-bus files (docs/plans/AGENT_MESSAGING_PLAN.md). Every artifact
@@ -84,6 +85,9 @@ export function ensureBus(paths: BusPaths): void {
       // Best effort: a leftover must never block a question. Retried next call.
     }
   }
+  // At activation and before every question: late replies to withdrawn
+  // questions and other askers' leftovers go after the README's 24 hours.
+  sweepStale(paths);
 }
 
 /** Remove the pre-link alias ownership records once during extension activation. */
@@ -173,8 +177,8 @@ export function writeReply(paths: BusPaths, id: string, text: string): void {
   writeFileAtomicSync(replyFile(paths, id), text);
 }
 
-/** The record that a question is still waited on: {@link takeOrphans} leaves
- *  its reply alone. Written via .tmp and a rename, like every bus file. */
+/** The record that a question is still waited on. Written via .tmp and a
+ *  rename, like every bus file. */
 export function writeQuestion(paths: BusPaths, id: string, subject: string, body: string): void {
   const text =
     `Subject: ${subject}\n\n${body}\n\n` +
@@ -182,25 +186,10 @@ export function writeQuestion(paths: BusPaths, id: string, subject: string, body
   writeFileAtomicSync(questionFile(paths, id), text);
 }
 
-/** Remove the question. A reply that lands after this is an orphan,
- *  announced once by {@link takeOrphans}. */
+/** Remove the question. A reply that lands after this is left for
+ *  {@link sweepStale}. */
 export function withdrawQuestion(paths: BusPaths, id: string): void {
   unlinkQuiet(questionFile(paths, id));
-}
-
-function abortableSleep(ms: number, signal: AbortSignal | undefined): Promise<void> {
-  return new Promise((resolve) => {
-    if (signal?.aborted) return resolve();
-    const onAbort = (): void => {
-      clearTimeout(timer);
-      resolve();
-    };
-    const timer = setTimeout(() => {
-      signal?.removeEventListener('abort', onAbort);
-      resolve();
-    }, ms);
-    signal?.addEventListener('abort', onAbort, { once: true });
-  });
 }
 
 /**
@@ -233,36 +222,6 @@ export async function waitForReply(
 export function clearExchange(paths: BusPaths, id: string): void {
   withdrawQuestion(paths, id);
   unlinkQuiet(replyFile(paths, id));
-}
-
-export interface Orphans {
-  shown: { id: string; text: string }[];
-  more: number;
-}
-
-/**
- * Replies to questions this module already withdrew (the wait timed out or was
- * stopped). Each is returned once and then deleted: never dropped unseen,
- * never announced twice. Only `fg` ids are ours to claim.
- */
-export function takeOrphans(paths: BusPaths, limit: number): Orphans {
-  let names: string[];
-  try {
-    names = fs.readdirSync(paths.outbox);
-  } catch {
-    return { shown: [], more: 0 };
-  }
-  const orphanIds = names
-    .filter((n) => n.startsWith(FORGE_ID_PREFIX) && n.endsWith('-reply.md'))
-    .map((n) => n.slice(0, -'-reply.md'.length))
-    .filter((id) => !fs.existsSync(questionFile(paths, id)))
-    .sort();
-  const shown = orphanIds.slice(0, limit).map((id) => {
-    const text = fs.readFileSync(replyFile(paths, id), 'utf8');
-    unlinkQuiet(replyFile(paths, id));
-    return { id, text };
-  });
-  return { shown, more: orphanIds.length - shown.length };
 }
 
 /** Delete anything older than the TTL in either folder, from any asker. */

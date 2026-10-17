@@ -10,7 +10,6 @@ import {
   ensureBus,
   newBusId,
   sweepStale,
-  takeOrphans,
   waitForReply,
   withdrawQuestion,
   writeQuestion,
@@ -216,37 +215,6 @@ describe('writeReply', () => {
   });
 });
 
-describe('late replies', () => {
-  beforeEach(() => ensureBus(paths));
-
-  it('are announced once, then deleted, and never repeated', () => {
-    writeQuestion(paths, 'fg1-a', 's', 'q');
-    withdrawQuestion(paths, 'fg1-a');
-    writeReply(paths, 'fg1-a', 'late');
-    expect(takeOrphans(paths, 3)).toEqual({ shown: [{ id: 'fg1-a', text: 'late' }], more: 0 });
-    expect(takeOrphans(paths, 3)).toEqual({ shown: [], more: 0 });
-  });
-
-  it('are not claimed while the question is still pending', () => {
-    writeQuestion(paths, 'fg1-a', 's', 'q');
-    writeReply(paths, 'fg1-a', 'on time');
-    expect(takeOrphans(paths, 3).shown).toEqual([]);
-  });
-
-  it("never claims another asker's reply", () => {
-    writeReply(paths, 'sh123-99', 'a codex answer');
-    expect(takeOrphans(paths, 3).shown).toEqual([]);
-    expect(fs.existsSync(path.join(paths.outbox, 'sh123-99-reply.md'))).toBe(true);
-  });
-
-  it('caps the list and counts the rest', () => {
-    for (const id of ['fg1-a', 'fg2-b', 'fg3-c', 'fg4-d']) writeReply(paths, id, id);
-    const orphans = takeOrphans(paths, 3);
-    expect(orphans.shown).toHaveLength(3);
-    expect(orphans.more).toBe(1);
-  });
-});
-
 describe('sweepStale', () => {
   it('removes files older than the TTL from any asker and keeps newer ones', () => {
     ensureBus(paths);
@@ -258,6 +226,17 @@ describe('sweepStale', () => {
     sweepStale(paths);
     expect(fs.existsSync(old)).toBe(false);
     expect(fs.existsSync(fresh)).toBe(true);
+  });
+
+  it('runs with every ensureBus, so a late reply does not stay forever (C-04)', () => {
+    ensureBus(paths);
+    writeQuestion(paths, 'fg1-a', 's', 'q');
+    withdrawQuestion(paths, 'fg1-a');
+    writeReply(paths, 'fg1-a', 'late');
+    const late = path.join(paths.outbox, 'fg1-a-reply.md');
+    setAge(late, TTL_MS + 60_000);
+    ensureBus(paths);
+    expect(fs.existsSync(late)).toBe(false);
   });
 });
 

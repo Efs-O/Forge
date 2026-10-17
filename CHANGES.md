@@ -15,6 +15,7 @@
 - A Claude CLI turn sent right after a timed-out or cancelled one no longer fails at once with "Claude CLI exited". The old process's exit started a second clean-up, and when that clean-up finished after the next turn had started, it ended the new turn instead of the old one.
 - Closing a chat while its message is still being sent (attachments saving, or the context check running) now cancels that message. Close only stopped a running turn, so the message could still start a turn in the closed chat after the check finished.
 - A Telegram or WhatsApp message waiting behind a running turn no longer adds a listener to the remote session every 250 ms, about 14,000 an hour, that stayed until the session ended. Telegram polling, the live progress bubble and the voice server had the same leak. They now share one timer helper that cleans up after itself.
+- The agent bus (`~/.forge/agent-bus`) again deletes files older than 24 hours, as its README says. The clean-up lost its only caller when `ask_live_session` was removed, so late replies to questions that had timed out stayed forever. It now runs when Forge starts and before every question to a linked agent.
 
 ## 0.17.42
 
