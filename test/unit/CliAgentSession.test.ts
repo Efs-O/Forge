@@ -1,10 +1,18 @@
 import * as path from 'path';
 import { describe, expect, it, vi } from 'vitest';
 import { CliAgentSession } from '../../src/agents/CliAgentSession';
+import type { CliAgentEvent, CliAgentRunResult } from '../../src/agents/types';
 
 /** When `on`: a kill of a live child lingers so its exit event lands first,
  *  and a kill of an already-dead child (a stale stop) waits for `gate`. */
-const stops = vi.hoisted(() => ({ on: false, stale: 0, gate: Promise.resolve() }));
+const stops = vi.hoisted(() => ({
+  on: false,
+  stale: 0,
+  gate: Promise.resolve(),
+  controlled: false,
+  staleStarted: undefined as (() => void) | undefined,
+  staleFinished: undefined as (() => void) | undefined,
+}));
 
 vi.mock('../../src/agents/cliProcess', async (importOriginal) => {
   const real = await importOriginal<typeof import('../../src/agents/cliProcess')>();
@@ -15,16 +23,45 @@ vi.mock('../../src/agents/cliProcess', async (importOriginal) => {
     ): Promise<void> => {
       const [child] = args;
       const dead = child.exitCode !== null || child.signalCode !== null;
-      await real.terminateCliProcessTree(...args);
+      if (stops.controlled) {
+        await new Promise<void>((resolve) => {
+          if (child.exitCode !== null || child.signalCode !== null) {
+            resolve();
+            return;
+          }
+          child.once('exit', resolve);
+          child.once('error', resolve);
+          if (!child.kill()) resolve();
+        });
+      } else {
+        await real.terminateCliProcessTree(...args);
+      }
       if (!stops.on) return;
-      if (!dead) return new Promise((r) => setTimeout(r, 200));
+      if (!dead) return;
       stops.stale++;
+      stops.staleStarted?.();
       await stops.gate;
+      stops.staleFinished?.();
     },
   };
 });
 
 const claudeFixture = path.resolve(__dirname, '../fixtures/fake-claude-cli.mjs');
+
+function sendUntilInit(session: CliAgentSession): {
+  initialized: Promise<void>;
+  pending: Promise<CliAgentRunResult>;
+} {
+  let release!: () => void;
+  const initialized = new Promise<void>((resolve) => (release = resolve));
+  const onEvent = (event: CliAgentEvent): void => {
+    if (event.kind === 'text' && event.text.includes('fixture init ready')) release();
+  };
+  return {
+    initialized,
+    pending: session.send('TRIGGER_INIT_THEN_SLOW', { onEvent }),
+  };
+}
 
 function createSession(confirmedSessionId?: string, timeoutMs?: number): CliAgentSession {
   return new CliAgentSession({
@@ -79,43 +116,70 @@ describe('CliAgentSession', () => {
     // cold process and re-pay the whole prompt prefix as a cache miss.
     // The fixture must first spawn and emit its init event. A sub-second turn
     // timeout races that setup when the full Vitest suite is under load.
-    const session = createSession(undefined, 1_500);
-    const timedOut = await session.send('TRIGGER_INIT_THEN_SLOW');
-    expect(timedOut.status).toBe('timed_out');
-    expect(timedOut.sessionId).toBe('fixture-session-id');
-    expect(session.confirmedSessionId).toBe('fixture-session-id');
-    const retried = await session.send('WARM_TURN retry');
-    expect(retried.status).toBe('completed');
-    expect(retried.sessionId).toBe('fixture-session-id');
-    await session.dispose();
+    vi.useFakeTimers();
+    stops.controlled = true;
+    const session = createSession(undefined, 250);
+    try {
+      const first = sendUntilInit(session);
+      await first.initialized;
+      await vi.advanceTimersByTimeAsync(250);
+      const timedOut = await first.pending;
+      expect(timedOut.status).toBe('timed_out');
+      expect(timedOut.sessionId).toBe('fixture-session-id');
+      expect(session.confirmedSessionId).toBe('fixture-session-id');
+      const retried = await session.send('WARM_TURN retry');
+      expect(retried.status).toBe('completed');
+      expect(retried.sessionId).toBe('fixture-session-id');
+    } finally {
+      await session.dispose();
+      stops.controlled = false;
+      vi.useRealTimers();
+    }
   }, 10_000);
 
   it('a stale stop from the timed-out child leaves the next turn alone', async () => {
     // The timeout's stop and the dying child's exit each start a stop. The
     // second one is held until the next turn is running; it used to close
     // that turn's reader and resolve it as failed.
+    vi.useFakeTimers();
+    stops.controlled = true;
     let release = (): void => {};
+    let staleStarted!: () => void;
+    let staleFinished!: () => void;
+    const staleStopStarted = new Promise<void>((resolve) => (staleStarted = resolve));
+    const staleStopFinished = new Promise<void>((resolve) => (staleFinished = resolve));
     stops.on = true;
     stops.stale = 0;
     stops.gate = new Promise<void>((r) => (release = r));
-    const session = createSession(undefined, 1_500);
+    stops.staleStarted = () => staleStarted();
+    stops.staleFinished = () => staleFinished();
+    const session = createSession(undefined, 250);
     try {
-      expect((await session.send('TRIGGER_INIT_THEN_SLOW')).status).toBe('timed_out');
-      // At least: an earlier test's own stale stop can land here too.
+      const first = sendUntilInit(session);
+      await first.initialized;
+      await vi.advanceTimersByTimeAsync(250);
+      expect((await first.pending).status).toBe('timed_out');
+      await staleStopStarted;
       expect(stops.stale).toBeGreaterThanOrEqual(1);
       const controller = new AbortController();
       let settled = false;
       const next = session.send('TRIGGER_SLOW', { signal: controller.signal });
       void next.then(() => (settled = true));
+      expect(session.state).toBe('running');
       release();
-      await new Promise((r) => setTimeout(r, 300));
+      await staleStopFinished;
+      await Promise.resolve();
       expect(settled).toBe(false);
       controller.abort();
       expect((await next).status).toBe('cancelled');
     } finally {
       release();
-      stops.on = false;
       await session.dispose();
+      stops.on = false;
+      stops.controlled = false;
+      stops.staleStarted = undefined;
+      stops.staleFinished = undefined;
+      vi.useRealTimers();
     }
   }, 10_000);
 
