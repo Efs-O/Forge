@@ -3,6 +3,7 @@ import { MAX_TELEGRAM_UPDATE_RETRIES, TelegramAlbumCoordinator } from './Telegra
 import { TelegramUpdateSchema, telegramUpdateToEvent } from './TelegramInboundMapping';
 import type { RemoteInboundDisposition, RemoteInboundEvent } from './types';
 import { getLogger } from '../util/logger';
+import { abortableSleep } from '../util/abortableSleep';
 
 const log = getLogger();
 
@@ -70,7 +71,7 @@ export async function pollTelegramUpdates(
         );
       }
       const delay = Math.min(1_000 * 2 ** Math.min(consecutiveFailures - 1, 5), 30_000);
-      await abortableDelay(delay, signal);
+      await abortableSleep(delay, signal);
       continue;
     }
     if (updates.length === 0 && dependencies.albumCoordinator.hasPending) {
@@ -143,20 +144,6 @@ export async function pollTelegramUpdates(
       await dependencies.setCursor(TELEGRAM_CURSOR_KEY, String(offset));
     }
   }
-}
-
-function abortableDelay(ms: number, signal: AbortSignal): Promise<void> {
-  return new Promise((resolve) => {
-    const timer = setTimeout(resolve, ms);
-    signal.addEventListener(
-      'abort',
-      () => {
-        clearTimeout(timer);
-        resolve();
-      },
-      { once: true },
-    );
-  });
 }
 
 /**

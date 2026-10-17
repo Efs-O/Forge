@@ -1,5 +1,6 @@
 import type { ChildProcess } from 'child_process';
 import type * as vscode from 'vscode';
+import { sleepOrThrow } from '../util/abortableSleep';
 
 const READY_TIMEOUT_MS = 30_000;
 const READY_POLL_MS = 250;
@@ -52,7 +53,11 @@ export class SdServerReadiness {
       } catch (error) {
         lastError = errorMessage(error);
       }
-      await delay(READY_POLL_MS, signal);
+      await sleepOrThrow(
+        READY_POLL_MS,
+        signal,
+        () => signal.reason ?? new Error('sd-server startup was cancelled.'),
+      );
     }
     const stderr = this.stderrSummary();
     throw new Error(
@@ -102,26 +107,6 @@ export function isConnectionRefused(error: unknown): boolean {
     return error.errors.some((nested: unknown) => isConnectionRefused(nested));
   }
   return false;
-}
-
-function delay(ms: number, signal: AbortSignal): Promise<void> {
-  return new Promise((resolve, reject) => {
-    if (signal.aborted) {
-      reject(signal.reason ?? new Error('sd-server startup was cancelled.'));
-      return;
-    }
-    const finish = (): void => {
-      signal.removeEventListener('abort', onAbort);
-      resolve();
-    };
-    const onAbort = (): void => {
-      clearTimeout(timer);
-      signal.removeEventListener('abort', onAbort);
-      reject(signal.reason ?? new Error('sd-server startup was cancelled.'));
-    };
-    const timer = setTimeout(finish, ms);
-    signal.addEventListener('abort', onAbort, { once: true });
-  });
 }
 
 function errorMessage(error: unknown): string {

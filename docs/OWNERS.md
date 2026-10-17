@@ -386,6 +386,7 @@ overlaps with an existing owner, extend the owner instead.
 | Token-count display formatting               | `src/util/formatTokens.ts`                   |
 | Elapsed-duration display formatting          | `src/util/formatDuration.ts`                 |
 | Local date + wall clock for the model        | `src/util/localClock.ts`                     |
+| Abortable sleep (listener removed either way) | `src/util/abortableSleep.ts`                |
 | Remote compaction notice policy              | `src/remote/remoteCompactionNotice.ts`       |
 | Host activity event shape                    | `src/sidebar/HostActivity.ts`                |
 | Finished-turn mirroring to remote chats      | `src/sidebar/turnMirrorWiring.ts`            |

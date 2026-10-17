@@ -2,6 +2,7 @@ import { spawn, type ChildProcess } from 'child_process';
 import { access } from 'fs/promises';
 import { terminateProcessTree } from '../agents/cliProcess';
 import type { WhisperCppOptions } from './WhisperCppRunner';
+import { abortableSleep } from '../util/abortableSleep';
 
 const DEFAULT_HOST = '127.0.0.1';
 const DEFAULT_PORT = 8092;
@@ -146,7 +147,7 @@ export class WhisperServerProcess {
           this.startAbort = undefined;
           return;
         }
-        await delay(100, this.startAbort.signal);
+        await abortableSleep(100, this.startAbort.signal);
       }
       throw new Error(
         `whisper-server did not become ready within ${this.options.startupTimeoutMs ?? DEFAULT_STARTUP_TIMEOUT_MS} ms${output.trim() ? ` — ${output.trim()}` : ''}`,
@@ -212,18 +213,4 @@ export class WhisperServerProcess {
       if (this.activeUses === 0) void this.stop();
     }, timeout);
   }
-}
-
-function delay(ms: number, signal: AbortSignal): Promise<void> {
-  return new Promise((resolve) => {
-    const timer = setTimeout(resolve, ms);
-    signal.addEventListener(
-      'abort',
-      () => {
-        clearTimeout(timer);
-        resolve();
-      },
-      { once: true },
-    );
-  });
 }

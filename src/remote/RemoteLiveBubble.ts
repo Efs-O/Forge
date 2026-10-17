@@ -1,4 +1,5 @@
 import type { RemoteChannel } from './types';
+import { abortableSleep } from '../util/abortableSleep';
 
 /** Room the status footer may take; the words split into a new bubble before it. */
 const MAX_FOOTER_CHARS = 700;
@@ -267,7 +268,7 @@ export class RemoteLiveBubble {
         } else {
           // Throttled: wait as told, then render the newest state, never the
           // snapshot that was refused.
-          await delay(wait, this.deps.signal);
+          await abortableSleep(wait, this.deps.signal);
           this.pending = true;
         }
       }
@@ -342,16 +343,4 @@ function retryAfterMs(err: unknown): number | undefined {
   if (typeof err !== 'object' || err === null || !('retryAfterMs' in err)) return undefined;
   const value = (err as { retryAfterMs: unknown }).retryAfterMs;
   return typeof value === 'number' ? value : undefined;
-}
-
-function delay(ms: number, signal: AbortSignal): Promise<void> {
-  return new Promise((resolve) => {
-    const timer = setTimeout(done, ms);
-    function done(): void {
-      clearTimeout(timer);
-      signal.removeEventListener('abort', done);
-      resolve();
-    }
-    signal.addEventListener('abort', done, { once: true });
-  });
 }

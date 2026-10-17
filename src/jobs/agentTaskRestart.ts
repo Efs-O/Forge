@@ -3,6 +3,7 @@ import * as YAML from 'yaml';
 import type { ForgeHostFacade } from '../sidebar/ForgeHostFacade';
 import type { IBackendPool } from '../backend/poolTypes';
 import type { AgentTaskOutcome } from './agentTaskReport';
+import { sleepWithAbort } from './agentTaskCap';
 
 /**
  * Step 7 of the agent-task runner (AGENT_TASK_JOBS_PLAN phase 4): after the
@@ -172,20 +173,4 @@ function readBinaryFrom(backupPath: string | undefined): string | undefined {
   } catch {
     return undefined;
   }
-}
-
-function sleepWithAbort(ms: number, signal?: AbortSignal): Promise<void> {
-  return new Promise((resolve, reject) => {
-    if (signal?.aborted) return reject(new Error('timer aborted'));
-    const timer = setTimeout(() => {
-      signal?.removeEventListener('abort', onAbort);
-      resolve();
-    }, ms);
-    const onAbort = () => {
-      clearTimeout(timer);
-      signal?.removeEventListener('abort', onAbort);
-      reject(new Error('timer aborted'));
-    };
-    signal?.addEventListener('abort', onAbort, { once: true });
-  });
 }

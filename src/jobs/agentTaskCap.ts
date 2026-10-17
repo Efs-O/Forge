@@ -1,21 +1,10 @@
 import type { ForgeHostFacade } from '../sidebar/ForgeHostFacade';
 import type { ForgeRequestOutcome } from '../sidebar/turnOutcome';
+import { sleepOrThrow } from '../util/abortableSleep';
 
-/** An abortable timer: resolves after `ms`, or rejects early if `signal` aborts. */
+/** The job runner's default timer: resolves after `ms`, or rejects early if `signal` aborts. */
 export function sleepWithAbort(ms: number, signal?: AbortSignal): Promise<void> {
-  return new Promise((resolve, reject) => {
-    if (signal?.aborted) return reject(new Error('timer aborted'));
-    const timer = setTimeout(() => {
-      signal?.removeEventListener('abort', onAbort);
-      resolve();
-    }, ms);
-    const onAbort = () => {
-      clearTimeout(timer);
-      signal?.removeEventListener('abort', onAbort);
-      reject(new Error('timer aborted'));
-    };
-    signal?.addEventListener('abort', onAbort, { once: true });
-  });
+  return sleepOrThrow(ms, signal, () => new Error('timer aborted'));
 }
 
 /**

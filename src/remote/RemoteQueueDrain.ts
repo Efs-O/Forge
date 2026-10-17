@@ -11,6 +11,7 @@ import { openProgressBubble } from './remoteProgressOpen';
 import type { RemoteRequestStore } from './RemoteRequestStore';
 import type { RemoteChannel } from './types';
 import { agentDisplayName } from '../agentLinks/chatAgentLinks';
+import { abortableSleep } from '../util/abortableSleep';
 
 const log = getLogger();
 type ProgressOutcome = 'completed' | 'cancelled' | 'failed' | 'queued';
@@ -41,7 +42,7 @@ export async function drainRemoteQueue(
     });
   while (!deps.signal.aborted) {
     if (deps.isBusy(conversationId)) {
-      await delay(250, deps.signal);
+      await abortableSleep(250, deps.signal);
       continue;
     }
     const first = deps.store.queued(conversationId, deps.channel.name)[0];
@@ -50,7 +51,7 @@ export async function drainRemoteQueue(
     const next = await deps.store.claimNext(conversationId, deps.channel.name);
     if (!next) {
       if (deps.store.queued(conversationId, deps.channel.name).length === 0) return;
-      await delay(250, deps.signal);
+      await abortableSleep(250, deps.signal);
       continue;
     }
     if (deps.signal.aborted) {
@@ -207,7 +208,7 @@ export async function drainRemoteQueue(
       } else if (outcome.error === CONVERSATION_BUSY_ERROR) {
         progressOutcome = 'queued';
         if (!(await persistResult(() => deps.store.requeue(next.id)))) return;
-        await delay(250, deps.signal);
+        await abortableSleep(250, deps.signal);
         continue;
       } else {
         if (
@@ -246,20 +247,6 @@ export async function drainRemoteQueue(
     }
     deps.outbox.kick();
   }
-}
-
-function delay(ms: number, signal: AbortSignal): Promise<void> {
-  return new Promise((resolve) => {
-    const timer = setTimeout(resolve, ms);
-    signal.addEventListener(
-      'abort',
-      () => {
-        clearTimeout(timer);
-        resolve();
-      },
-      { once: true },
-    );
-  });
 }
 
 function progressTerminalText(outcome: ProgressOutcome): string {

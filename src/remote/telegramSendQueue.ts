@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { sleepOrThrow } from '../util/abortableSleep';
 
 /**
  * Telegram's own rate-limit reply. `retry_after` is seconds, and it is the only
@@ -121,7 +122,11 @@ export async function postTelegram(
         MAX_RETRY_AFTER_MS,
       );
       if (attempt >= retries) throw new TelegramRateLimitError(retryAfterMs);
-      await sleep(retryAfterMs, signal);
+      await sleepOrThrow(
+        retryAfterMs,
+        signal,
+        () => new Error('Telegram send aborted while rate-limited.'),
+      );
       continue;
     }
     // An edit that changes nothing is refused with a 400, but the message
@@ -175,22 +180,4 @@ function isNotModified(parsed: z.infer<typeof TelegramResponseSchema> | undefine
 function safeParse(payload: unknown): z.infer<typeof TelegramResponseSchema> | undefined {
   const parsed = TelegramResponseSchema.safeParse(payload);
   return parsed.success ? parsed.data : undefined;
-}
-
-function sleep(ms: number, signal?: AbortSignal): Promise<void> {
-  return new Promise((resolve, reject) => {
-    if (signal?.aborted) {
-      reject(new Error('Telegram send aborted while rate-limited.'));
-      return;
-    }
-    const timer = setTimeout(() => {
-      signal?.removeEventListener('abort', onAbort);
-      resolve();
-    }, ms);
-    function onAbort(): void {
-      clearTimeout(timer);
-      reject(new Error('Telegram send aborted while rate-limited.'));
-    }
-    signal?.addEventListener('abort', onAbort, { once: true });
-  });
 }

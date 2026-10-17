@@ -7,6 +7,7 @@ import { MAX_GENERATED_IMAGE_BYTES } from './cloudImageBackend';
 import { alternativeText, describeHttpFailure } from './sdcppErrors';
 import type { SdServerHandle, SdcppFetch } from './sdcppImageBackend';
 import { assertVramAvailable } from './sdcppVramGate';
+import { abortableSleep } from '../../util/abortableSleep';
 
 /**
  * The asynchronous `POST /sdcpp/v1/img_gen` job path — the ONLY shape measured
@@ -158,7 +159,7 @@ export async function runSdcppImageJob(request: SdcppImageJobRequest): Promise<S
 
         const pollIntervalMs = request.pollIntervalMs ?? JOB_POLL_INTERVAL_MS;
         for (;;) {
-          await sleep(pollIntervalMs, signal);
+          await abortableSleep(pollIntervalMs, signal);
           signal.throwIfAborted();
           const polled = await fetchImpl(`${server.baseUrl()}${pollPath}`, {
             method: 'GET',
@@ -294,20 +295,3 @@ function jobTimeoutError(
  * between polls, or cancelling a 70 s render feels dead for up to the poll
  * interval.
  */
-async function sleep(ms: number, signal: AbortSignal | undefined): Promise<void> {
-  if (!signal) {
-    await new Promise((resolve) => setTimeout(resolve, ms));
-    return;
-  }
-  await new Promise<void>((resolve) => {
-    const timer = setTimeout(() => {
-      signal.removeEventListener('abort', onAbort);
-      resolve();
-    }, ms);
-    const onAbort = (): void => {
-      clearTimeout(timer);
-      resolve();
-    };
-    signal.addEventListener('abort', onAbort, { once: true });
-  });
-}
