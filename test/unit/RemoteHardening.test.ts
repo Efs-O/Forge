@@ -124,7 +124,6 @@ describe('remote authorization and privacy hardening', () => {
       rateLimitPerMinute: 30,
     });
     await controller.start();
-    await new Promise((resolve) => setTimeout(resolve, 20));
     expect(forgeHost.send).not.toHaveBeenCalled();
     await expect(
       channel.emit(event({ providerMessageId: 'status', text: '/status' })),
@@ -589,14 +588,19 @@ describe('remote durable boundaries', () => {
       undefined,
       () => unlocked,
     );
-    delivery.start();
-    await new Promise((resolve) => setTimeout(resolve, 20));
-    expect(channel.sent).toHaveLength(0);
-    expect(store.pendingOutbox()[0]).toMatchObject({ attempts: 0, state: 'pending' });
-    unlocked = true;
-    delivery.kick();
-    await vi.waitFor(() => expect(channel.sent.at(-1)?.text).toBe('answer'));
-    await delivery.stop();
+    vi.useFakeTimers();
+    try {
+      delivery.start();
+      await vi.advanceTimersByTimeAsync(100);
+      expect(channel.sent).toHaveLength(0);
+      expect(store.pendingOutbox()[0]).toMatchObject({ attempts: 0, state: 'pending' });
+      unlocked = true;
+      delivery.kick();
+      await vi.waitFor(() => expect(channel.sent.at(-1)?.text).toBe('answer'));
+    } finally {
+      await delivery.stop();
+      vi.useRealTimers();
+    }
   });
 
   it('detects fencing loss and never removes the replacement lease', async () => {
@@ -751,8 +755,15 @@ describe('remote runtime lifecycle', () => {
       ...config,
       remote: { ...config.remote!, enabled: false },
     });
+    let changeSettled = false;
+    void changing.then(
+      () => (changeSettled = true),
+      () => (changeSettled = true),
+    );
     try {
-      await new Promise((resolve) => setTimeout(resolve, 20));
+      await Promise.resolve();
+      await Promise.resolve();
+      expect(changeSettled).toBe(false);
       expect(stop).not.toHaveBeenCalled();
     } finally {
       finishUnlink();
