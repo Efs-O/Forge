@@ -63,6 +63,7 @@ export class BrowserSessionManager {
   private readonly tabIds = new Map<Page, string>();
   private nextTab = 1;
   private activePage: Page | null = null;
+  private readonly preApprovedOrigins: Set<string>;
   private readonly approvedOrigins = new Set<string>();
   /**
    * The last inspection of each tab (fix plan Phase 1). `browser_click`,
@@ -75,7 +76,7 @@ export class BrowserSessionManager {
   private readonly frameListeners = new WeakSet<Page>();
 
   constructor(preApprovedOrigins: readonly string[] = []) {
-    for (const origin of preApprovedOrigins) this.approvedOrigins.add(origin);
+    this.preApprovedOrigins = new Set(preApprovedOrigins);
   }
 
   isLaunched(): boolean {
@@ -84,7 +85,7 @@ export class BrowserSessionManager {
 
   /** Origins already approved this session (for the approval() closures). */
   isOriginApproved(origin: string): boolean {
-    return this.approvedOrigins.has(origin);
+    return this.preApprovedOrigins.has(origin) || this.approvedOrigins.has(origin);
   }
 
   /** Record an origin as approved after a successful action on it. */
@@ -112,11 +113,25 @@ export class BrowserSessionManager {
           `Set browser.channel to an installed browser (chrome | msedge). No silent fallback.`,
       );
     }
+    let context: BrowserContext;
+    try {
+      context = await browser.newContext({
+        viewport: { width: VIEWPORT_WIDTH, height: VIEWPORT_HEIGHT },
+        deviceScaleFactor: 1,
+      });
+    } catch (err) {
+      try {
+        await browser.close();
+      } catch (closeError) {
+        throw new AggregateError(
+          [err, closeError],
+          'browser_open: context creation failed and the browser could not be closed.',
+        );
+      }
+      throw err;
+    }
     this.browser = browser;
-    this.context = await browser.newContext({
-      viewport: { width: VIEWPORT_WIDTH, height: VIEWPORT_HEIGHT },
-      deviceScaleFactor: 1,
-    });
+    this.context = context;
     this.context.on('page', (page) => this.adoptPage(page));
     return { version: browser.version() };
   }
@@ -131,6 +146,7 @@ export class BrowserSessionManager {
     this.tabIds.clear();
     this.nextTab = 1;
     this.inspections.dropAll();
+    this.approvedOrigins.clear();
     await browser.close();
   }
 

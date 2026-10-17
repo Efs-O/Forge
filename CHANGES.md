@@ -64,6 +64,7 @@
 - **A tool row with an unknown call id no longer removes another call's progress row (U20-06).**
 - An unknown chat id now reports not found even when all 10 chat tabs are open.
 - When a later file write restores a file to its original contents, its pending added and removed line highlights are cleared at once.
+- Closing the browser session now forgets origins approved during that session while keeping configured pre-approvals.
 - Closing a tab now explains when an active delegation still holds its model and prevents it from being unloaded.
 
 ## 0.17.42
