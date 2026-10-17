@@ -14,16 +14,28 @@ describe('ArchivedSessions', () => {
   it('keeps the oldest of 41 archived chats readable by id', () => {
     root = fs.mkdtempSync(path.join(os.tmpdir(), 'forge-archived-'));
     const archive = new ArchivedSessions(root);
+    fs.mkdirSync(archive.directory, { recursive: true });
+    const rows = [];
     for (let i = 0; i < 41; i += 1) {
       const id = `chat-${i}`;
-      archive.put({
+      const conversation = {
         id,
         title: id,
         createdAt: i,
         updatedAt: i,
         messages: [{ role: 'user', content: `message ${i}` }],
+      };
+      fs.writeFileSync(path.join(archive.directory, `${id}.json`), JSON.stringify(conversation));
+      rows.push({
+        id,
+        title: id,
+        createdAt: i,
+        updatedAt: i,
+        messageCount: 1,
+        source: 'body' as const,
       });
     }
+    fs.writeFileSync(path.join(archive.directory, 'index.json'), JSON.stringify(rows));
     expect(archive.list()).toHaveLength(41);
     expect(archive.read('chat-0')?.messages[0]?.content).toBe('message 0');
   });
