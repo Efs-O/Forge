@@ -256,9 +256,10 @@ export function makeAskUserTool(
           'Make the safest assumption and continue, or stop and report RESULT: failed with the question.'
         );
       }
-      // A malformed `questions` falls back to the flat shape rather than
-      // failing the call: the question still reaches the user, which is the
-      // point of the tool, and a half-built array must not cost a round.
+      // `parseQuestionGroups` returning undefined selects the flat prompt/options
+      // shape. This covers missing `questions`, an empty array, and valid arrays
+      // of objects whose prompt/options fields fail its checks. ToolRegistry
+      // rejects malformed JSON strings and non-object entries before this handler.
       const groups = parseQuestionGroups(args['questions']);
       const answer = await questions.ask({
         prompt: resolveQuestionText(args, groups),

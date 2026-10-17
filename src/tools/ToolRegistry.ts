@@ -2,7 +2,7 @@ import type { ChatMessage, ContentPart, ToolDefinition } from '../llm/types';
 import type { PlanItem } from '../sidebar/sessionTypes';
 import type { CheckinStage } from '../agent/elapsedTimeNote';
 import { recordNativeLazyTool } from './lazyToolGroups';
-import { invalidArrayJsonPosition } from './argCoercion';
+import { invalidArrayJsonDiagnostic } from './argCoercion';
 import type { ToolOutputLimits } from './toolOutputLimits';
 import type { ConversationRuntime } from '../sidebar/sessionTypes';
 import type { CheckpointSession } from '../checkpoint/CheckpointStack';
@@ -343,9 +343,21 @@ export class ToolRegistry {
     if (notArray.length > 0) {
       for (const [key, schema] of declared) {
         if (schema?.type !== 'array' || typeof present[key] !== 'string') continue;
-        const position = invalidArrayJsonPosition(present[key]);
-        if (position !== undefined) {
-          return `Error: ${name} "${key}" is invalid JSON at position ${position}; correct the JSON array syntax.`;
+        const value = present[key];
+        const diagnostic = invalidArrayJsonDiagnostic(value);
+        if (diagnostic) {
+          const format = (excerpt: string): string =>
+            `Error: ${name} "${key}" has invalid JSON at character index ${diagnostic.position}; near: \`${excerpt}\`. Likely cause: ${diagnostic.cause}. Resend "${key}" as a JSON array, not a string.`;
+          let message = format(diagnostic.excerpt);
+          if (message.length > 320) {
+            const maxExcerptLength = Math.max(
+              0,
+              320 - (message.length - diagnostic.excerpt.length),
+            );
+            const bounded = invalidArrayJsonDiagnostic(value, maxExcerptLength);
+            if (bounded) message = format(bounded.excerpt);
+          }
+          return message;
         }
       }
       return `Error: ${name} needs a JSON array for ${notArray.join(', ')}, not a string holding one. Resend it as a bare array, e.g. ["a", "b"].`;
