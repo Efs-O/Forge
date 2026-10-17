@@ -55,8 +55,8 @@ describe('TelegramChannel', () => {
    * cap and the size limits must be spelled out there rather than discovered by
    * trial and error.
    */
-  it('documents the 3-image album cap and the size limits in /help', () => {
-    expect(HELP_TEXT).toContain('3 images');
+  it('documents the 10-image album cap and the size limits in /help', () => {
+    expect(HELP_TEXT).toContain('up to 10 images');
     expect(HELP_TEXT).toContain('10 MiB');
     expect(HELP_TEXT).toContain('25 MiB');
   });
@@ -1307,46 +1307,28 @@ describe('TelegramChannel photo albums', () => {
     });
   });
 
-  it('merges a 3-photo album into one event with no overflow notice', async () => {
-    const h = await runAlbums(
-      [
-        [
-          photoUpdate(1, 1, 'f1', 'g1'),
-          photoUpdate(2, 2, 'f2', 'g1'),
-          photoUpdate(3, 3, 'f3', 'g1'),
-        ],
-      ],
-      async () => ({ kind: 'accepted', requestId: 'r' }),
-    );
+  /** `count` photos of one album, as one getUpdates batch. */
+  function album(count: number): unknown[] {
+    return Array.from({ length: count }, (_, i) => photoUpdate(i + 1, i + 1, `f${i + 1}`, 'g1'));
+  }
+  const fileIds = (count: number) =>
+    Array.from({ length: count }, (_, i) => ({ providerFileId: `f${i + 1}` }));
+
+  it('merges a 10-photo album, Telegram maximum, into one event with no overflow notice', async () => {
+    const h = await runAlbums([album(10)], async () => ({ kind: 'accepted', requestId: 'r' }));
     await vi.waitFor(() => expect(h.events).toHaveLength(1));
     h.abort.abort();
-    expect(h.events[0]).toMatchObject({
-      kind: 'text',
-      attachments: [{ providerFileId: 'f1' }, { providerFileId: 'f2' }, { providerFileId: 'f3' }],
-    });
+    expect(h.events[0]).toMatchObject({ kind: 'text', attachments: fileIds(10) });
     expect(h.sent).toHaveLength(0);
   });
 
-  it('caps a 4-photo album at 3 and tells the user the limit', async () => {
-    const h = await runAlbums(
-      [
-        [
-          photoUpdate(1, 1, 'f1', 'g1'),
-          photoUpdate(2, 2, 'f2', 'g1'),
-          photoUpdate(3, 3, 'f3', 'g1'),
-          photoUpdate(4, 4, 'f4', 'g1'),
-        ],
-      ],
-      async () => ({ kind: 'accepted', requestId: 'r' }),
-    );
+  it('caps an 11-photo group at 10 and tells the user the limit', async () => {
+    const h = await runAlbums([album(11)], async () => ({ kind: 'accepted', requestId: 'r' }));
     await vi.waitFor(() => expect(h.events).toHaveLength(1));
     await vi.waitFor(() => expect(h.sent).toHaveLength(1));
     h.abort.abort();
-    expect(h.events[0]).toMatchObject({
-      kind: 'text',
-      attachments: [{ providerFileId: 'f1' }, { providerFileId: 'f2' }, { providerFileId: 'f3' }],
-    });
-    expect(String(h.sent[0]!.text)).toContain('limited to 3 images');
+    expect(h.events[0]).toMatchObject({ kind: 'text', attachments: fileIds(10) });
+    expect(String(h.sent[0]!.text)).toContain('limited to 10 images');
     expect(String(h.sent[0]!.text)).toContain('10 MiB');
     expect(h.armed).toEqual([{ chatId: '99', messageIds: ['1'], kind: 'transient' }]);
   });

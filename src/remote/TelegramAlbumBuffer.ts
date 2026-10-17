@@ -6,7 +6,8 @@ import {
   TelegramUpdateSchema,
 } from './TelegramInboundMapping';
 
-export const MAX_TELEGRAM_IMAGES_PER_MESSAGE = 3;
+/** Telegram's own album maximum, and the same as the sidebar's per-prompt attachment cap. */
+export const MAX_TELEGRAM_IMAGES_PER_MESSAGE = 10;
 export const MAX_TELEGRAM_UPDATE_RETRIES = 3;
 
 export interface TelegramAlbumPhoto {

@@ -7,6 +7,8 @@
  * brackets in `<n-or-name>` stay literal either way.
  */
 
+import { MAX_TELEGRAM_IMAGES_PER_MESSAGE } from './TelegramAlbumBuffer';
+
 /** Section labels that head a command group, bolded when the transport allows. */
 export const HELP_SECTIONS = new Set([
   'Session',
@@ -36,7 +38,7 @@ Session: /agents · /chat <n-or-name> · /chats [page] · /context · /help · /
 
 • /voice off stops replies being sent as a spoken voice message (text stays); /voice on turns it back on — saved to config.yaml, so it survives a window reload
 
-• You can send up to 3 images in one message (send them as a photo album). Each image is capped at 10 MiB and 25 MiB total; send more than 3 and I keep the first 3 and tell you
+• You can send up to ${MAX_TELEGRAM_IMAGES_PER_MESSAGE} images in one message (send them as a photo album). Each image is capped at 10 MiB and 25 MiB total; send more than ${MAX_TELEGRAM_IMAGES_PER_MESSAGE} and I keep the first ${MAX_TELEGRAM_IMAGES_PER_MESSAGE} and tell you
 
 Queue: /drop <n|all> · /queue
 

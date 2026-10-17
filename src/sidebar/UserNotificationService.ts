@@ -15,13 +15,14 @@ export const NOTIFY_TURN_LIMIT = 5;
 /**
  * File deliveries a single turn may queue before `deliverFile` refuses.
  *
- * Sized to `NOTIFY_TURN_LIMIT` deliberately: both brakes answer the same
- * question (how much may one turn push at the phone), and a runaway render
- * loop takes a second or two per call rather than the 30 s a model turn does.
- * The COUNTERS are separate, though: five images must not spend the ability to
- * notify, and five notifications must not spend the ability to send a file.
+ * Ten, Telegram's own album maximum and the inbound album cap
+ * (`MAX_TELEGRAM_IMAGES_PER_MESSAGE`): a turn may send back as many images as
+ * the user can send in. It still brakes a runaway render loop, which takes a
+ * second or two per call rather than the 30 s a model turn does. The counter is
+ * separate from `NOTIFY_TURN_LIMIT`'s: images must not spend the ability to
+ * notify, and notifications must not spend the ability to send a file.
  */
-export const FILE_DELIVERY_TURN_LIMIT = NOTIFY_TURN_LIMIT;
+export const FILE_DELIVERY_TURN_LIMIT = 10;
 
 /**
  * What a budgeted file delivery decided.

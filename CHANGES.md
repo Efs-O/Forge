@@ -1,5 +1,10 @@
 # Forge — Recent Changes
 
+## 0.17.43
+
+- A Telegram photo album can carry up to 10 images into one prompt, up from 3. Ten is Telegram's own album maximum and the same as the sidebar's per-message attachment limit. The 10 MiB per-image and 25 MiB total limits are unchanged, and `/help` now takes the number from the code instead of repeating it.
+- A single turn can send up to 10 files or images to the phone, up from 5. `send_file`, `render_html_to_image`, `generate_image`, `upscale_image` and `image_search` thumbnails share that one count, so one image search used to leave room for just one more file. Ten matches the album limit above. The limit on notifications stays at 5 per turn, and it is counted separately.
+
 ## 0.17.42
 
 - On Windows, Forge's saved files now actually reach the disk before they replace the old copy. Every save (open chats, history, jobs, checkpoints, the agent's own file edits) wrote a temporary file, reopened it read-only and asked Windows to flush it. Windows refuses to flush a read-only handle, and Forge ignored the refusal, so nothing was ever flushed. After a power loss Windows kept the file's name and size but not its contents. On 2026-10-17 an open chat came back as 482,734 zero bytes, and Forge set it aside as `open/<id>.corrupt-<time>.json.bad`. Forge now flushes through the handle it wrote with, and a failed flush is reported instead of skipped. The session log in `~/.forge/sessions/` still held that chat, and it was rebuilt from there.

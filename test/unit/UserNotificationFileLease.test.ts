@@ -13,13 +13,13 @@ describe('UserNotificationService file delivery leases', () => {
     service.addSink(sink);
     const lease = service.reserveFileDeliveries('c1', 4);
 
-    expect(lease).toMatchObject({ granted: 4, remaining: 1 });
-    expect(service.remainingFileDeliveries('c1')).toBe(1);
+    expect(lease).toMatchObject({ granted: 4, remaining: FILE_DELIVERY_TURN_LIMIT - 4 });
+    expect(service.remainingFileDeliveries('c1')).toBe(FILE_DELIVERY_TURN_LIMIT - 4);
     expect(await Promise.all(Array.from({ length: 4 }, () => lease.deliver(event)))).toEqual(
       Array.from({ length: 4 }, () => ({ kind: 'queued', chats: 1 })),
     );
     expect(await lease.deliver(event)).toEqual({ kind: 'exhausted' });
-    expect(service.remainingFileDeliveries('c1')).toBe(1);
+    expect(service.remainingFileDeliveries('c1')).toBe(FILE_DELIVERY_TURN_LIMIT - 4);
     expect(sink).toHaveBeenCalledTimes(4);
   });
 
@@ -27,10 +27,16 @@ describe('UserNotificationService file delivery leases', () => {
     const service = new UserNotificationService();
     expect(() => service.reserveFileDeliveries('c1', -1)).toThrow(/nonnegative integer/);
     expect(() => service.reserveFileDeliveries('c1', 1.5)).toThrow(/nonnegative integer/);
-    expect(service.reserveFileDeliveries('c1', 0)).toMatchObject({ granted: 0, remaining: 5 });
-    expect(service.reserveFileDeliveries('c2', 8)).toMatchObject({ granted: 5, remaining: 0 });
+    expect(service.reserveFileDeliveries('c1', 0)).toMatchObject({
+      granted: 0,
+      remaining: FILE_DELIVERY_TURN_LIMIT,
+    });
+    expect(service.reserveFileDeliveries('c2', FILE_DELIVERY_TURN_LIMIT + 3)).toMatchObject({
+      granted: FILE_DELIVERY_TURN_LIMIT,
+      remaining: 0,
+    });
 
-    service.reserveFileDeliveries('partial', 3);
+    service.reserveFileDeliveries('partial', FILE_DELIVERY_TURN_LIMIT - 2);
     expect(service.reserveFileDeliveries('partial', 4)).toMatchObject({
       granted: 2,
       remaining: 0,
@@ -40,11 +46,12 @@ describe('UserNotificationService file delivery leases', () => {
   it('serializes competing reservations with deliverFile against the shared limit', async () => {
     const service = new UserNotificationService();
     service.addSink(async () => 1);
+    const request = FILE_DELIVERY_TURN_LIMIT - 1;
     const [first, second] = await Promise.all([
-      Promise.resolve(service.reserveFileDeliveries('c1', 4)),
-      Promise.resolve(service.reserveFileDeliveries('c1', 4)),
+      Promise.resolve(service.reserveFileDeliveries('c1', request)),
+      Promise.resolve(service.reserveFileDeliveries('c1', request)),
     ]);
-    expect([first.granted, second.granted]).toEqual([4, 1]);
+    expect([first.granted, second.granted]).toEqual([request, 1]);
     expect(service.remainingFileDeliveries('c1')).toBe(0);
     expect((await service.deliverFile({ ...event, conversationId: 'c1' })).kind).toBe('refused');
     expect(await first.deliver(event)).toEqual({ kind: 'queued', chats: 1 });

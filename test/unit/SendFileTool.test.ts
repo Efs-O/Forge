@@ -11,7 +11,10 @@ vi.mock('os', async (importOriginal) => {
 });
 vi.mock('vscode', () => ({ workspace: { workspaceFolders: undefined } }));
 
-import { UserNotificationService } from '../../src/sidebar/UserNotificationService';
+import {
+  FILE_DELIVERY_TURN_LIMIT,
+  UserNotificationService,
+} from '../../src/sidebar/UserNotificationService';
 import { makeSendFileTool } from '../../src/tools/sendFileTool';
 import type { ToolHandlerContext } from '../../src/tools/ToolRegistry';
 import type { ForgeConfig } from '../../src/config/types';
@@ -350,26 +353,28 @@ describe('send_file', () => {
     expect(tool.mutation).toBeUndefined();
   });
 
-  it('refuses the sixth delivery in a turn using the shared service budget', async () => {
+  it('refuses the delivery past the per-turn limit using the shared service budget', async () => {
     await writeFile(path.join(root, 'report.md'));
     const { tool } = makeTool(notifications.deliverFile.bind(notifications));
     const sink = vi.fn(async () => 1);
     notifications.addSink(sink);
 
-    for (let index = 0; index < 5; index += 1) {
+    for (let index = 0; index < FILE_DELIVERY_TURN_LIMIT; index += 1) {
       expect(await tool.handler({ path: 'report.md' }, context('conv-a'))).toContain('Queued');
     }
-    const sixth = await tool.handler({ path: 'report.md' }, context('conv-a'));
+    const overLimit = await tool.handler({ path: 'report.md' }, context('conv-a'));
 
-    expect(sixth).toContain('File delivery limit reached: 5 of 5');
-    expect(sink).toHaveBeenCalledTimes(5);
+    expect(overLimit).toContain(
+      `File delivery limit reached: ${FILE_DELIVERY_TURN_LIMIT} of ${FILE_DELIVERY_TURN_LIMIT}`,
+    );
+    expect(sink).toHaveBeenCalledTimes(FILE_DELIVERY_TURN_LIMIT);
   });
 
   it('resets the shared file budget for the next turn', async () => {
     await writeFile(path.join(root, 'report.md'));
     const { tool } = makeTool(notifications.deliverFile.bind(notifications));
     notifications.addSink(async () => 1);
-    for (let index = 0; index < 5; index += 1) {
+    for (let index = 0; index < FILE_DELIVERY_TURN_LIMIT; index += 1) {
       await tool.handler({ path: 'report.md' }, context('conv-a'));
     }
     expect(await tool.handler({ path: 'report.md' }, context('conv-a'))).toContain(

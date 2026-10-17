@@ -156,7 +156,7 @@ describe('image_search thumbnail delivery budget', () => {
   it('queues every thumbnail when the budget fits, numbering captions by what was sent', async () => {
     const h = harness({ thumbnails: 4 });
     const result = String(await h.run());
-    expect(h.remaining()).toBe(1);
+    expect(h.remaining()).toBe(FILE_DELIVERY_TURN_LIMIT - 4);
     expect(h.sinkCalls()).toBe(4);
     expect(h.captions()[0]).toBe(
       '🔎 1/4 Title 1 — source1.example\nhttps://example.com/page/1',
@@ -174,8 +174,8 @@ describe('image_search thumbnail delivery budget', () => {
   });
 
   it('sends the prefix that fits and names the withheld count in caption and footer', async () => {
-    // 3 of the 5 slots already spent by another sender: 2 left for 4 saved.
-    const h = harness({ thumbnails: 4, spent: 3 });
+    // All but 2 slots already spent by another sender: 2 left for 4 saved.
+    const h = harness({ thumbnails: 4, spent: FILE_DELIVERY_TURN_LIMIT - 2 });
     const result = String(await h.run());
     expect(h.sinkCalls()).toBe(2);
     expect(h.captions()).toEqual([
@@ -203,8 +203,8 @@ describe('image_search thumbnail delivery budget', () => {
     expect(h.sidebarPaths(result)).toHaveLength(4);
   });
 
-  it('grants the five slots it has to an eight-thumbnail search, never zero', async () => {
-    const h = harness({ thumbnails: 8 });
+  it('grants the five slots it has left to an eight-thumbnail search, never zero', async () => {
+    const h = harness({ thumbnails: 8, spent: FILE_DELIVERY_TURN_LIMIT - 5 });
     const result = String(await h.run());
     expect(h.sinkCalls()).toBe(5);
     expect(h.captions()[0]).toContain('🔎 1/5 (of 8 saved; 3 withheld by the per-turn file limit)');
@@ -216,7 +216,7 @@ describe('image_search thumbnail delivery budget', () => {
   it('charges only the files that actually saved', async () => {
     const h = harness({ thumbnails: 4, saved: 2, failures: ['#3: HTTP 404', '#4: not an image'] });
     const result = String(await h.run());
-    expect(h.remaining()).toBe(3);
+    expect(h.remaining()).toBe(FILE_DELIVERY_TURN_LIMIT - 2);
     expect(h.sinkCalls()).toBe(2);
     expect(h.captions()[0]).toContain('🔎 1/2 Title 1');
     expect(result).toContain('2 thumbnail(s) could not be saved: #3: HTTP 404; #4: not an image');
@@ -231,7 +231,7 @@ describe('image_search thumbnail delivery budget', () => {
     expect(result).toContain('No remote chat is watching this turn');
     expect(result).not.toContain('Sent ');
     // The grant is still spent: an unwatched search must not farm slots.
-    expect(h.remaining()).toBe(1);
+    expect(h.remaining()).toBe(FILE_DELIVERY_TURN_LIMIT - 4);
     expect(h.sidebarPaths(result)).toHaveLength(4);
   });
 
@@ -239,26 +239,29 @@ describe('image_search thumbnail delivery budget', () => {
     const h = harness({ thumbnails: 4, chats: [0, 1, 0, 1] });
     const result = String(await h.run());
     expect(h.sinkCalls()).toBe(4);
-    expect(h.remaining()).toBe(1);
+    expect(h.remaining()).toBe(FILE_DELIVERY_TURN_LIMIT - 4);
     expect(result).toContain('Sent 2 thumbnail(s) to 1 remote chat(s).');
     expect(result).toContain('2 of 4 thumbnail(s) were not queued to a phone');
     expect(h.sidebarPaths(result)).toHaveLength(4);
   });
 
-  it('never exceeds five queued photos across repeated searches, then refills at reset', async () => {
+  it('never exceeds the per-turn limit across repeated searches, then refills at reset', async () => {
+    // Ten slots, four thumbnails a search: 4 + 4 + 2, then the third withholds 2.
     const h = harness({ thumbnails: 4 });
     const first = String(await h.run());
     const second = String(await h.run());
+    const third = String(await h.run());
     expect(h.sinkCalls()).toBe(FILE_DELIVERY_TURN_LIMIT);
     expect(first).toContain('Sent 4 thumbnail(s) to 1 remote chat(s).');
-    expect(second).toContain('Sent 1 thumbnail(s) to 1 remote chat(s).');
-    expect(second).toContain(
-      `3 of 4 thumbnail(s) were not queued to a phone. All 4 are saved under ${FOLDER}`,
+    expect(second).toContain('Sent 4 thumbnail(s) to 1 remote chat(s).');
+    expect(third).toContain('Sent 2 thumbnail(s) to 1 remote chat(s).');
+    expect(third).toContain(
+      `2 of 4 thumbnail(s) were not queued to a phone. All 4 are saved under ${FOLDER}`,
     );
     expect(h.remaining()).toBe(0);
     h.service?.resetTurn('c1');
-    const third = String(await h.run());
-    expect(third).toContain('Sent 4 thumbnail(s) to 1 remote chat(s).');
+    const afterReset = String(await h.run());
+    expect(afterReset).toContain('Sent 4 thumbnail(s) to 1 remote chat(s).');
     expect(h.sinkCalls()).toBe(FILE_DELIVERY_TURN_LIMIT + 4);
   });
 
@@ -270,7 +273,7 @@ describe('image_search thumbnail delivery budget', () => {
     expect(result).toContain(
       `3 of 4 thumbnail(s) were not queued to a phone — the search was cancelled. All 4 are saved under ${FOLDER}`,
     );
-    expect(h.remaining()).toBe(1);
+    expect(h.remaining()).toBe(FILE_DELIVERY_TURN_LIMIT - 4);
   });
 
   it('reports a stale lease as unsent instead of claiming a send after resetTurn', async () => {
@@ -308,11 +311,12 @@ describe('image_search thumbnail delivery budget', () => {
     expect(bare.sidebarPaths(bareResult)).toHaveLength(3);
   });
 
-  it('shares one budget with the other senders: 2 renders + 1 send_file + a 2-photo search fill 5', async () => {
+  it('shares one budget with the other senders: their files + a 2-photo search fill the turn', async () => {
     // The other senders go through their real call (deliverFile), so this is
     // the shared-counter invariant, not a mock of it.
     const h = harness({ thumbnails: 2, spent: 0 });
-    for (let i = 0; i < 3; i += 1) {
+    const others = FILE_DELIVERY_TURN_LIMIT - 2;
+    for (let i = 0; i < others; i += 1) {
       const result = await h.service!.deliverFile({
         conversationId: 'c1',
         text: `sender ${i + 1}`,
@@ -323,20 +327,20 @@ describe('image_search thumbnail delivery budget', () => {
     const result = String(await h.run());
     expect(result).toContain('Sent 2 thumbnail(s) to 1 remote chat(s).');
     expect(h.remaining()).toBe(0);
-    const sixth = await h.service!.deliverFile({
+    const overLimit = await h.service!.deliverFile({
       conversationId: 'c1',
-      text: 'sixth',
-      imagePath: '/ws/out/6.png',
+      text: 'one over the limit',
+      imagePath: '/ws/out/over.png',
     });
-    expect(sixth.kind).toBe('refused');
+    expect(overLimit.kind).toBe('refused');
     // Each queued photo was attempted exactly once.
-    expect(h.sinkCalls()).toBe(5);
+    expect(h.sinkCalls()).toBe(FILE_DELIVERY_TURN_LIMIT);
   });
 
   it('skips upload approval for a public URL yet still budgets the thumbnails', async () => {
     const h = harness({ thumbnails: 4 });
     expect(h.tool.approval?.({ image_url: 'https://example.com/input.jpg' })).toBeUndefined();
     await h.run();
-    expect(h.remaining()).toBe(1);
+    expect(h.remaining()).toBe(FILE_DELIVERY_TURN_LIMIT - 4);
   });
 });
