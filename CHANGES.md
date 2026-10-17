@@ -69,6 +69,7 @@
 - When a later file write restores a file to its original contents, its pending added and removed line highlights are cleared at once.
 - Closing the browser session now forgets origins approved during that session while keeping configured pre-approvals.
 - Closing a tab now explains when an active delegation still holds its model and prevents it from being unloaded.
+- **Malformed array arguments point to the bad character.** When a tool receives broken JSON as a string for an array field, the refusal now includes a marked excerpt and the likely syntax cause, then asks for a JSON array rather than a string.
 
 ## 0.17.42
 

@@ -3,7 +3,7 @@ import * as path from 'path';
 import { describe, expect, it, vi } from 'vitest';
 import { ToolRegistry, type RegisteredTool } from '../../src/tools/ToolRegistry';
 import { makeApplyLineEditsTool } from '../../src/tools/structuredEditTool';
-import { coerceToolArgs } from '../../src/tools/argCoercion';
+import { coerceToolArgs, invalidArrayJsonDiagnostic } from '../../src/tools/argCoercion';
 
 vi.mock('vscode', () => ({
   workspace: { workspaceFolders: [{ uri: { fsPath: process.cwd() } }] },
@@ -256,7 +256,131 @@ describe('apply_line_edits reports invalid JSON array positions', () => {
     '[{"start_line":859,"end_line":923,"expected_lines":["/* ---- pelican',
   ])('identifies a JSON.parse position in the operations string', (operations) => {
     const args = coerceToolArgs(tool.definition, { path: 'scene.js', operations });
-    expect(registry.invalidArgs(tool, args)).toMatch(/invalid JSON at position \d+/u);
+    expect(registry.invalidArgs(tool, args)).toMatch(/invalid JSON at character index \d+/u);
+  });
+});
+
+describe('ToolRegistry.invalidArgs malformed array JSON refusal', () => {
+  const registry = new ToolRegistry();
+  const askTool = makeBoolTool('ask_user', {
+    questions: {
+      type: 'array',
+      items: { type: 'object', properties: { prompt: { type: 'string' } }, required: ['prompt'] },
+    },
+  } as never);
+
+  it.each([
+    {
+      label: 'an extra object closer',
+      value: '[{"options": ["...", "You tell me the exact wording to use"]}]}',
+      marker: '⟦HERE⟧}',
+      position: '[{"options": ["...", "You tell me the exact wording to use"]}]}'.lastIndexOf('}'),
+      cause:
+        'a closing bracket that does not match the open one (an array closes with ], an object with })',
+    },
+    {
+      label: 'a missing options-array closer',
+      value:
+        '[{"options": ["...", "(0.16.79 ships without num_ctx; you lose it from your local build)"}]',
+      marker: '⟦HERE⟧}',
+      position:
+        '[{"options": ["...", "(0.16.79 ships without num_ctx; you lose it from your local build)"}]'.lastIndexOf(
+          '}',
+        ),
+      cause:
+        'a closing bracket that does not match the open one (an array closes with ], an object with })',
+    },
+    {
+      label: 'a stray inner list',
+      value: '[{"options": ["...", "..."], ["", ""]], "prompt": "..."}]',
+      marker: '⟦HERE⟧[',
+      position: '[{"options": ["...", "..."], ["", ""]], "prompt": "..."}]'.indexOf('["",'),
+      cause: undefined,
+    },
+  ])('points to $label in ask_user questions', ({ value, marker, position, cause }) => {
+    const message = registry.invalidArgs(askTool, { questions: value });
+    expect(message).toContain(
+      `Error: ask_user "questions" has invalid JSON at character index ${position};`,
+    );
+    expect(message).toContain(marker);
+    if (cause) expect(message).toContain(`Likely cause: ${cause}.`);
+    else {
+      let parseMessage = '';
+      try {
+        JSON.parse(value);
+      } catch (error) {
+        parseMessage = error instanceof Error ? error.message : String(error);
+      }
+      expect(message).toContain(`Likely cause: JSON.parse says: ${parseMessage}.`);
+    }
+    expect(message?.endsWith('Resend "questions" as a JSON array, not a string.')).toBe(true);
+  });
+
+  it('points out a single-backslash escape in a non-ask_user array field', () => {
+    const tool = makeBoolTool('stage', {
+      paths: { type: 'array', items: { type: 'string' } },
+    } as never);
+    const value = '[{"path":"N:\\vs code apps\\Forge"}]';
+    const message = registry.invalidArgs(tool, { paths: value });
+
+    expect(message).toContain(
+      `"paths" has invalid JSON at character index ${value.indexOf('N:') + 3};`,
+    );
+    expect(message).toContain('⟦HERE⟧v');
+    expect(message).toContain(
+      'Likely cause: a single backslash; write \\\\ (for example in Windows paths).',
+    );
+    expect(message?.endsWith('Resend "paths" as a JSON array, not a string.')).toBe(true);
+  });
+
+  it.each(['[{"prompt":"unfinished', '[{"prompt":"pick"'])(
+    'explains a cut-off array: %s',
+    (value) => {
+      const message = registry.invalidArgs(askTool, { questions: value });
+      expect(message).toContain(`at character index ${value.length};`);
+      expect(message).toContain('⟦HERE⟧');
+      expect(message).toContain('Likely cause: the array is cut off before it closes.');
+    },
+  );
+
+  it('shows newlines visibly and keeps a long-value refusal under 320 characters', () => {
+    const withNewline = '[{"prompt":"before\ninside"}]';
+    const newlineMessage = registry.invalidArgs(askTool, { questions: withNewline });
+    expect(newlineMessage).toContain('before⟦HERE⟧\\ninside');
+    expect(newlineMessage).not.toContain('\n');
+
+    const longValue = `[{"prompt":"${'x'.repeat(1_000)}`;
+    const longMessage = registry.invalidArgs(askTool, { questions: longValue });
+    expect(longMessage).toContain('⟦HERE⟧');
+    expect(longMessage?.length).toBeLessThanOrEqual(320);
+    expect(longMessage).not.toContain('x'.repeat(100));
+  });
+
+  it('maps a line-and-column-only JSON.parse error to the marked character', () => {
+    const parse = vi.spyOn(JSON, 'parse').mockImplementation(() => {
+      throw new SyntaxError('Unexpected token in JSON at line 2 column 3');
+    });
+    try {
+      const diagnostic = invalidArrayJsonDiagnostic('[\n  x]');
+      expect(diagnostic?.position).toBe(4);
+      expect(diagnostic?.excerpt).toContain('⟦HERE⟧x');
+    } finally {
+      parse.mockRestore();
+    }
+  });
+
+  it('keeps the generic refusal for non-strings and valid JSON that is not an array', () => {
+    const tool = makeBoolTool('stage', {
+      paths: { type: 'array', items: { type: 'string' } },
+    } as never);
+    expect(registry.invalidArgs(tool, { paths: { value: 'x' } })).toBe(
+      'Error: stage needs a JSON array for "paths" (got object), not a string holding one. ' +
+        'Resend it as a bare array, e.g. ["a", "b"].',
+    );
+    expect(registry.invalidArgs(tool, { paths: '{"value":"x"}' })).toBe(
+      'Error: stage needs a JSON array for "paths" (got string), not a string holding one. ' +
+        'Resend it as a bare array, e.g. ["a", "b"].',
+    );
   });
 });
 
@@ -295,7 +419,9 @@ describe('unavailable tool refusals', () => {
       permission: 'read',
       additionalPermissionsForArgs: (args) => (args['action'] === 'delete' ? ['delete'] : []),
     };
-    expect(() => registry.assertAllowed(manageJobs, new Set(['read']), { action: 'delete' })).toThrow(
+    expect(() =>
+      registry.assertAllowed(manageJobs, new Set(['read']), { action: 'delete' }),
+    ).toThrow(
       'ToolRegistry: manage_jobs action "delete" needs the "delete" permission, which this conversation does not have.',
     );
   });
