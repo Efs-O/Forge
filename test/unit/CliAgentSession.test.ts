@@ -1,6 +1,28 @@
 import * as path from 'path';
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import { CliAgentSession } from '../../src/agents/CliAgentSession';
+
+/** When `on`: a kill of a live child lingers so its exit event lands first,
+ *  and a kill of an already-dead child (a stale stop) waits for `gate`. */
+const stops = vi.hoisted(() => ({ on: false, stale: 0, gate: Promise.resolve() }));
+
+vi.mock('../../src/agents/cliProcess', async (importOriginal) => {
+  const real = await importOriginal<typeof import('../../src/agents/cliProcess')>();
+  return {
+    ...real,
+    terminateCliProcessTree: async (
+      ...args: Parameters<typeof real.terminateCliProcessTree>
+    ): Promise<void> => {
+      const [child] = args;
+      const dead = child.exitCode !== null || child.signalCode !== null;
+      await real.terminateCliProcessTree(...args);
+      if (!stops.on) return;
+      if (!dead) return new Promise((r) => setTimeout(r, 200));
+      stops.stale++;
+      await stops.gate;
+    },
+  };
+});
 
 const claudeFixture = path.resolve(__dirname, '../fixtures/fake-claude-cli.mjs');
 
@@ -66,6 +88,35 @@ describe('CliAgentSession', () => {
     expect(retried.status).toBe('completed');
     expect(retried.sessionId).toBe('fixture-session-id');
     await session.dispose();
+  }, 10_000);
+
+  it('a stale stop from the timed-out child leaves the next turn alone', async () => {
+    // The timeout's stop and the dying child's exit each start a stop. The
+    // second one is held until the next turn is running; it used to close
+    // that turn's reader and resolve it as failed.
+    let release = (): void => {};
+    stops.on = true;
+    stops.stale = 0;
+    stops.gate = new Promise<void>((r) => (release = r));
+    const session = createSession(undefined, 1_500);
+    try {
+      expect((await session.send('TRIGGER_INIT_THEN_SLOW')).status).toBe('timed_out');
+      // At least: an earlier test's own stale stop can land here too.
+      expect(stops.stale).toBeGreaterThanOrEqual(1);
+      const controller = new AbortController();
+      let settled = false;
+      const next = session.send('TRIGGER_SLOW', { signal: controller.signal });
+      void next.then(() => (settled = true));
+      release();
+      await new Promise((r) => setTimeout(r, 300));
+      expect(settled).toBe(false);
+      controller.abort();
+      expect((await next).status).toBe('cancelled');
+    } finally {
+      release();
+      stops.on = false;
+      await session.dispose();
+    }
   }, 10_000);
 
   it('rejects a concurrent send deterministically', async () => {

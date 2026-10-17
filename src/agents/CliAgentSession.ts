@@ -192,13 +192,15 @@ export class CliAgentSession {
   }
 
   private async stopActiveProcess(error = 'Cancelled.'): Promise<void> {
-    const child = this.child;
+    // Captured before the await: a timeout and the dying child's exit event
+    // each start a stop, and the caller may send the next turn in between.
+    // The later stop must not close that turn's reader or resolve it.
+    const { child, lines, active: turn } = this;
     if (child) await terminateCliProcessTree(child);
     if (this.child === child) this.child = undefined;
-    this.lines?.close();
-    this.lines = undefined;
-    const turn = this.active;
-    if (!turn) return;
+    if (this.lines === lines) this.lines = undefined;
+    lines?.close();
+    if (!turn || this.active !== turn) return;
     this.clearTurn(turn);
     if (this.currentState !== 'disposed') this.currentState = 'idle';
     // Retain the session id even though the turn did not complete. Claude

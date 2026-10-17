@@ -12,6 +12,7 @@
 - Thirteen other files 0.17.42 missed are now flushed the same way. They include the Telegram/remote state, the encrypted WhatsApp login, checkpoint manifests, saved chat and Telegram attachments, the agent-exchange log and the agent bus's question and reply files. Each had its own copy of the save code, and none flushed. They now share Forge's one atomic writer.
 - A scheduled job that runs on chosen weekdays now registers its wake timer correctly. Forge wrote the days as `MonWedFri`, but Task Scheduler's schema names each day as its own element (`<Monday />`). Daily wakes were not affected. Forge also reads the days back in the form Windows exports them.
 - An external `/ensure` (Relay, scripts) no longer unloads a model while a sidebar turn is using it. Making room for another model only checked the control server's own holds, so a chat turn with no hold could have its model stopped mid-answer. That model now counts as in use, and the request gets the usual 409.
+- A Claude CLI turn sent right after a timed-out or cancelled one no longer fails at once with "Claude CLI exited". The old process's exit started a second clean-up, and when that clean-up finished after the next turn had started, it ended the new turn instead of the old one.
 
 ## 0.17.42
 
