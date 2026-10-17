@@ -1,6 +1,7 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { formatGroupAnswer, type QuestionGroup } from '../../../src/util/questionAnswers';
 import { QuestionGroups } from './QuestionGroups';
+import { useDockedDialogEscape } from '../useDockedDialogEscape';
 
 interface Props {
   prompt: string;
@@ -45,6 +46,7 @@ export function QuestionDialog({
   const [showOther, setShowOther] = useState(false);
   const [picks, setPicks] = useState<Record<number, string>>({});
   const inputRef = useRef<HTMLTextAreaElement>(null);
+  const panelRef = useRef<HTMLDivElement>(null);
   const groups = questions?.length ? questions : undefined;
   const showFreeText = (!options?.length && !groups) || showOther;
   // Sub-questions are answered together or not at all: a partial set would
@@ -60,8 +62,14 @@ export function QuestionDialog({
   // else is going to hand it focus. `Other…` changes this component in place,
   // so its textarea needs the same focus hand-off after it appears.
   useEffect(() => {
-    inputRef.current?.focus();
+    if (showFreeText) {
+      inputRef.current?.focus();
+      return;
+    }
+    panelRef.current?.querySelector<HTMLButtonElement>('button:not(:disabled)')?.focus();
   }, [showFreeText]);
+
+  useDockedDialogEscape(panelRef, onDismiss);
 
   // Typed text wins when there is any: opening `Other…` and writing in it is an
   // explicit override of whatever was clicked above.
@@ -74,42 +82,43 @@ export function QuestionDialog({
     setPicks((current) => ({ ...current, [groupIndex]: option }));
   }, []);
 
-  // Escape lives on the document, not on the textarea: the options variant has
-  // no text field to carry the handler, and a modal that only closes when the
-  // right element happens to hold focus is a modal that traps the user.
-  useEffect(() => {
-    const onEscape = (event: KeyboardEvent): void => {
-      if (event.key !== 'Escape') return;
-      event.preventDefault();
-      onDismiss();
-    };
-    document.addEventListener('keydown', onEscape);
-    return () => document.removeEventListener('keydown', onEscape);
-  }, [onDismiss]);
-
-  const onKeyDown = useCallback(
+  const onPanelKeyDown = useCallback(
     (event: React.KeyboardEvent): void => {
-      // Enter sends, Shift+Enter breaks the line — the same contract as the
-      // main input row, so the muscle memory carries over.
-      if (event.key === 'Enter' && !event.shiftKey) {
-        event.preventDefault();
-        submit();
+      // Number keys mirror the labels beside the choices. In grouped questions
+      // they pick from the first unanswered group, then Enter submits the set.
+      if (!/^[1-9]$/u.test(event.key)) return;
+      const target = event.target;
+      if (
+        target instanceof HTMLElement &&
+        target.closest('textarea, input, [contenteditable="true"]')
+      ) {
+        return;
       }
+      const optionIndex = Number(event.key) - 1;
+      const groupIndex = groups?.findIndex((_, index) => picks[index] === undefined) ?? -1;
+      const option = groups ? groups[groupIndex]?.options[optionIndex] : options?.[optionIndex];
+      if (!option) return;
+      event.preventDefault();
+      if (groups) pick(groupIndex, option);
+      else onAnswer(option);
     },
-    [submit],
+    [groups, onAnswer, options, pick, picks],
   );
 
   return (
     <div
-      className="confirm-overlay"
+      ref={panelRef}
+      className="docked-dialog-panel"
       role="dialog"
-      aria-modal="true"
-      aria-label="Forge is asking a question"
+      aria-labelledby="question-dialog-title"
+      onKeyDown={onPanelKeyDown}
     >
       <div className="confirm-dialog question-dialog">
         <div className="confirm-header">
           <QuestionIcon />
-          <span className="confirm-tool-name">Forge asks</span>
+          <span id="question-dialog-title" className="confirm-tool-name">
+            Forge asks
+          </span>
         </div>
         <div className="question-prompt">{prompt}</div>
 
@@ -149,7 +158,14 @@ export function QuestionDialog({
             value={text}
             placeholder={placeholder ?? 'Your answer…'}
             onChange={(event) => setText(event.target.value)}
-            onKeyDown={onKeyDown}
+            onKeyDown={(event) => {
+              // Enter sends, Shift+Enter breaks the line — the same contract
+              // as the main input row, so the muscle memory carries over.
+              if (event.key === 'Enter' && !event.shiftKey) {
+                event.preventDefault();
+                submit();
+              }
+            }}
           />
         )}
 

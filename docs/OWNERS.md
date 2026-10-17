@@ -167,6 +167,7 @@ overlaps with an existing owner, extend the owner instead.
 | Host message → reducer action mapping           | `webview-ui/src/hostActions.ts`                 |
 | Approval + agent-question modal state           | `webview-ui/src/useAgentDialogs.ts`             |
 | Agent question dialog (ask_user in the sidebar) | `webview-ui/src/components/QuestionDialog.tsx`  |
+| Escape rule for the docked agent dialogs        | `webview-ui/src/useDockedDialogEscape.ts`       |
 | Transcript row folding (diff / thinking runs)   | `webview-ui/src/components/MessageList.tsx`     |
 | One mounted transcript pane per visited tab     | `webview-ui/src/components/TranscriptPanes.tsx` |
 | Single-file diff rendering + stats              | `webview-ui/src/components/DiffBlock.tsx`       |

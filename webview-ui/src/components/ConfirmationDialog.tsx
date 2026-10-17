@@ -1,4 +1,5 @@
-import React from 'react';
+import React, { useEffect, useRef } from 'react';
+import { useDockedDialogEscape } from '../useDockedDialogEscape';
 
 interface Props {
   toolName: string;
@@ -28,17 +29,25 @@ export function ConfirmationDialog({
   onApprove,
   onDeny,
 }: Props): React.ReactElement {
+  const panelRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    panelRef.current?.querySelector<HTMLButtonElement>('button:not(:disabled)')?.focus();
+  }, []);
+
+  useDockedDialogEscape(panelRef, onDeny);
+
   return (
     <div
-      className="confirm-overlay"
+      ref={panelRef}
+      className="docked-dialog-panel"
       role="dialog"
-      aria-modal="true"
-      aria-label={`Confirm tool: ${toolName}`}
+      aria-labelledby="confirmation-dialog-title"
     >
       <div className={`confirm-dialog${isDangerous ? ' confirm-dialog--dangerous' : ''}`}>
         <div className="confirm-header">
           <WarningIcon />
-          <span className="confirm-tool-name">
+          <span id="confirmation-dialog-title" className="confirm-tool-name">
             {isDangerous ? '⚠ DANGEROUS: ' : ''}
             {toolName}
           </span>
