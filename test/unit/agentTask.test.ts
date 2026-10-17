@@ -770,12 +770,13 @@ describe('AgentTaskRunner', () => {
       // Two issue fetches, both from the earlier ticks: the retry reruns no check.
       expect(jobsFetch).toHaveBeenCalledTimes(2);
       resolveSend({ kind: 'completed', finalText: 'RESULT: ok — retried' });
+      let deadline: ReturnType<typeof setTimeout> | undefined;
       await Promise.race([
         runnerFinished,
-        new Promise<never>((_, reject) =>
-          setTimeout(() => reject(new Error('pending runner did not finish')), 1_000),
-        ),
-      ]);
+        new Promise<never>((_, reject) => {
+          deadline = setTimeout(() => reject(new Error('pending runner did not finish')), 1_000);
+        }),
+      ]).finally(() => clearTimeout(deadline));
       const done = (await store.load('agent-task'))!.state;
       expect(done.task_run).toBeNull();
       expect(done.task_pending).toBe(false);

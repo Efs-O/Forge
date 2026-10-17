@@ -171,12 +171,20 @@ afterEach(async () => {
 });
 
 /** A run that writes a partial file, then obeys the abort it was handed. */
-function abortingRun(writesPartial: boolean): { run: UpscaleRun; specs: UpscaleSpawnSpec[] } {
+function abortingRun(writesPartial: boolean): {
+  run: UpscaleRun;
+  specs: UpscaleSpawnSpec[];
+  /** Settles once the run is listening for the abort. */
+  listening: Promise<void>;
+} {
   const specs: UpscaleSpawnSpec[] = [];
+  let listen!: () => void;
+  const listening = new Promise<void>((resolve) => (listen = resolve));
   const run: UpscaleRun = (spec) =>
     new Promise<UpscaleRunResult>((resolve) => {
       specs.push(spec);
       const output = spec.args[spec.args.length - 1]!;
+      listen();
       spec.signal?.addEventListener('abort', () => {
         void (async () => {
           if (writesPartial) await fs.writeFile(output, 'half');
@@ -191,7 +199,7 @@ function abortingRun(writesPartial: boolean): { run: UpscaleRun; specs: UpscaleS
         })();
       });
     });
-  return { run, specs };
+  return { run, specs, listening };
 }
 
 /** A fake child that produces a PNG-shaped 4x output, standing in for sd-cli. */
@@ -268,11 +276,12 @@ describe('upscale_image', () => {
   it('deletes the partial output and reports the kill when the turn aborts', async () => {
     pngFile('ok.png', 800, 600);
     const abort = new AbortController();
-    const { run, specs } = abortingRun(true);
+    const { run, specs, listening } = abortingRun(true);
     const { tool } = build({ run });
     const ctx: ToolHandlerContext = { ...context(), abortSignal: abort.signal };
     const call = tool.handler({ path: 'ok.png' }, ctx);
-    await new Promise((resolve) => setTimeout(resolve, 20));
+    // A fixed sleep lost the race under load: aborted before the run listened.
+    await listening;
     abort.abort();
     await expect(call).rejects.toThrow(/cancelled and the sd-cli process Forge started was killed/s);
     expect(specs[0]?.signal).toBe(abort.signal);

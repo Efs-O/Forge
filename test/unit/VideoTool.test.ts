@@ -70,12 +70,14 @@ afterEach(() => {
 });
 
 describe('view_video handler', () => {
-  it('returns a labelled frame sequence as multimodal content', async () => {
+  it('returns a label before every frame, in time order', async () => {
     writeClip('clips/ss01.mp4');
     const result = await makeViewVideoTool().handler({ path: 'clips/ss01.mp4' });
 
     if (typeof result === 'string') throw new Error('expected multimodal result');
-    expect(result.content).toHaveLength(7); // summary + 3 x (label, image)
+    // summary + 3 x (label, image)
+    const kinds = result.content.map((part) => part.type);
+    expect(kinds).toEqual(['text', 'text', 'image_url', 'text', 'image_url', 'text', 'image_url']);
     expect(result.content[0]).toEqual({ type: 'text', text: result.text });
     expect(result.content[1]).toEqual({ type: 'text', text: 'Frame 1 of 3 — t=0.8s' });
     expect(result.content[2]).toEqual({
@@ -83,15 +85,6 @@ describe('view_video handler', () => {
       image_url: { url: 'data:image/jpeg;base64,AAA' },
     });
     expect(result.content[5]).toEqual({ type: 'text', text: 'Frame 3 of 3 — t=4.2s' });
-  });
-
-  it('interleaves a label before every frame, in time order', async () => {
-    writeClip('clips/ss01.mp4');
-    const result = await makeViewVideoTool().handler({ path: 'clips/ss01.mp4' });
-    if (typeof result === 'string') throw new Error('expected multimodal result');
-
-    const kinds = result.content.map((part) => part.type);
-    expect(kinds).toEqual(['text', 'text', 'image_url', 'text', 'image_url', 'text', 'image_url']);
   });
 
   it('tells the model these are stills, not motion, and carry no audio', async () => {

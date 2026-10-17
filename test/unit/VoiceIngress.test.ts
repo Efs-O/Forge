@@ -1,6 +1,5 @@
 import * as fs from 'fs/promises';
 import * as os from 'os';
-import * as path from 'path';
 import { afterEach, describe, expect, it } from 'vitest';
 import { FakeWhisperRunner } from '../../src/voice/FakeWhisperRunner';
 import { VoiceAuditLog, type VoiceAuditEvent } from '../../src/voice/VoiceAudit';
@@ -216,6 +215,3 @@ function admitted(operationId: string) {
     grammar_match: null,
   };
 }
-
-/** Keeps the unused-path lint quiet for the fixture helper. */
-export const FIXTURE_DIR = path.join(os.tmpdir(), 'forge-voice-tests');

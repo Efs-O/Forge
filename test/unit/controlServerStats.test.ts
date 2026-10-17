@@ -1,6 +1,6 @@
 import * as os from 'os';
 import * as path from 'path';
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import { ControlServer } from '../../src/backend/ControlServer';
 import type { IBackendPool } from '../../src/backend/BackendPool';
 import type { ForgeConfig } from '../../src/config/types';
@@ -41,24 +41,15 @@ describe('ControlServer GET /stats', () => {
       {
         models: [],
         llama_server: {},
-        control_server: { enabled: true, port: 18871 },
+        control_server: { enabled: true, port: 0 },
       } as ForgeConfig,
       { stats, probe: async () => true },
     );
     server.start();
 
-    const base = 'http://127.0.0.1:18871';
-    let ready = false;
-    for (let attempt = 0; attempt < 50; attempt += 1) {
-      try {
-        ready = (await fetch(`${base}/healthz`)).ok;
-        if (ready) break;
-      } catch {
-        await new Promise((resolve) => setTimeout(resolve, 20));
-      }
-    }
-    expect(ready).toBe(true);
-
+    // Port 0: the OS picks a free one, so nothing else can hold or answer it.
+    await vi.waitFor(() => expect(server?.status().port).toBeGreaterThan(0));
+    const base = `http://127.0.0.1:${server.status().port}`;
     const response = await fetch(`${base}/stats`);
     expect(response.status).toBe(200);
     expect(controlStatsSchema.parse(await response.json())).toMatchObject({

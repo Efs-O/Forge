@@ -251,9 +251,8 @@ function bridgeRig(
           ]
         : [],
   } as unknown as RemoteRequestStore;
-  const auth = {
-    canDeliver: async () => options.canDeliver ?? true,
-  } as unknown as RemoteAuth;
+  const canDeliver = vi.fn(async () => options.canDeliver ?? true);
+  const auth = { canDeliver } as unknown as RemoteAuth;
   const host = {
     addQuestionSink: (sink: Parameters<ForgeHostFacade['addQuestionSink']>[0]) =>
       service.addSink(sink),
@@ -284,7 +283,15 @@ function bridgeRig(
     options.cleanup,
   );
   bridge.start();
-  return { bridge, channel, service };
+  /**
+   * Settles once the bridge has asked the session `calls` times and acted on
+   * the answer, so a "nothing was sent" check cannot run before the send would.
+   */
+  const deliveryDecided = async (calls: number) => {
+    await vi.waitFor(() => expect(canDeliver).toHaveBeenCalledTimes(calls));
+    await new Promise((resolve) => setImmediate(resolve));
+  };
+  return { bridge, channel, service, deliveryDecided };
 }
 
 function questionAction(
@@ -565,7 +572,8 @@ describe('RemoteQuestionBridge', () => {
   it('stays silent for a turn with neither a remote chain nor a bound chat', async () => {
     const { bridge, channel, service } = bridgeRig({ remoteRequestId: undefined });
     void service.ask({ prompt: 'Which file?', conversationId: 'c1' });
-    await new Promise((resolve) => setTimeout(resolve, 10));
+    // No target: the bridge decides synchronously and never asks the session.
+    await new Promise((resolve) => setImmediate(resolve));
     expect(channel.sent).toHaveLength(0);
     expect(bridge.hasPending('chat-1')).toBe(false);
   });
@@ -583,17 +591,17 @@ describe('RemoteQuestionBridge', () => {
   });
 
   it('never hands the question to an expired session', async () => {
-    const { channel, service } = bridgeRig({ canDeliver: false });
+    const { channel, service, deliveryDecided } = bridgeRig({ canDeliver: false });
     void service.ask({ prompt: 'TOP SECRET question', conversationId: 'c1' });
-    await new Promise((resolve) => setTimeout(resolve, 10));
+    await deliveryDecided(1);
     expect(channel.sent).toHaveLength(0);
   });
 
   it('shows a question asked while locked once the chat authenticates, and only once', async () => {
     const options = { canDeliver: false };
-    const { bridge, channel, service } = bridgeRig(options);
+    const { bridge, channel, service, deliveryDecided } = bridgeRig(options);
     void service.ask({ prompt: 'Asked before unlock', conversationId: 'c1' });
-    await new Promise((resolve) => setTimeout(resolve, 10));
+    await deliveryDecided(1);
     expect(channel.sent).toHaveLength(0);
     options.canDeliver = true;
     bridge.republish('someone-else');
@@ -601,7 +609,8 @@ describe('RemoteQuestionBridge', () => {
     await vi.waitFor(() => expect(channel.sent).toHaveLength(1));
     expect(channel.sent[0]?.text).toContain('Forge asks: Asked before unlock');
     bridge.republish('chat-1');
-    await new Promise((resolve) => setTimeout(resolve, 10));
+    // A delivered question is not republished, so no further send can follow.
+    await new Promise((resolve) => setImmediate(resolve));
     expect(channel.sent).toHaveLength(1);
   });
 
