@@ -70,7 +70,7 @@ export class RemoteSpeechDelivery {
     const operation = await VoiceOperation.create();
     try {
       const voice = language === 'el' ? settings.voiceEl : settings.voiceEn;
-      const wav = await this.piper.synthesize(operation, spoken, voice);
+      const wav = await this.piper.synthesize(operation, spoken, voice, this.signal);
       const ogg = await encodeToOpus(operation, wav, {
         ffmpegPath: settings.ffmpegPath,
         ...(this.signal ? { signal: this.signal } : {}),
@@ -78,6 +78,8 @@ export class RemoteSpeechDelivery {
       await this.channel.sendVoice(chatId, ogg, this.signal);
       return true;
     } catch (error) {
+      // A stopped transport is not a failing voice: no warning, nowhere to send it.
+      if (this.signal?.aborted) return false;
       if (!this.warned) {
         this.warned = true;
         const message = `Forge: spoken replies are failing (${

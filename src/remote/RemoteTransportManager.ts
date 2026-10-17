@@ -37,6 +37,8 @@ export interface ActiveTransport {
    * what the scheduler window wrote.
    */
   jobOutboxWatcher?: JobOutboxWatcher | undefined;
+  /** Aborted on stop, so voice work in flight does not outlive the transport. */
+  abort: AbortController;
 }
 
 /**
@@ -112,6 +114,7 @@ export class RemoteTransportManager {
     });
     this.store.setClaimOwner(channelName, lease.claimIdentity());
     let voice: VoiceBridgeBundle | undefined;
+    const abort = new AbortController();
     try {
       const channel = await factory({
         getCursor: (key) => this.store.cursor(key),
@@ -119,8 +122,9 @@ export class RemoteTransportManager {
       });
       voice = buildVoiceBridge(channel, config, undefined, {
         confirmServerStart: this.options.confirmWhisperServerStart,
+        signal: abort.signal,
       });
-      const speech = buildSpeechDelivery(channel, config, undefined, this.options.notifyLocal);
+      const speech = buildSpeechDelivery(channel, config, abort.signal, this.options.notifyLocal);
       const contactService =
         channelName === 'telegram' && config.remote?.contacts.enabled === true
           ? new TelegramContactService(
@@ -187,6 +191,7 @@ export class RemoteTransportManager {
           controller,
           lease,
           subscriptions,
+          abort,
           ...(voice ? { voice } : {}),
           ...(speech ? { speech } : {}),
           ...(contactService ? { contactService } : {}),
@@ -197,10 +202,12 @@ export class RemoteTransportManager {
         subscriptions.dispose();
         this.onTransportStopped(controller);
         contactService?.dispose();
+        abort.abort();
         await voice?.dispose();
         throw err;
       }
     } catch (err) {
+      abort.abort();
       this.store.setClaimOwner(channelName, undefined);
       await lease.release();
       throw err;
@@ -222,6 +229,7 @@ export class RemoteTransportManager {
     // stray "N compactions complete." into a chat that no longer has a sink.
     this.onTransportStopped(transport.controller);
     transport.jobOutboxWatcher?.stop();
+    transport.abort.abort();
     await transport.voice?.dispose();
     try {
       await transport.controller.stop();

@@ -44,8 +44,16 @@ export class PiperRunner {
    * Text goes in over stdin, never as an argv element: a reply can be hundreds
    * of characters and contain anything at all, and Windows argv limits and
    * quoting rules are not a place to discover that.
+   *
+   * `signal` is the transport's: stopping it kills the child rather than
+   * leaving it to run out the timeout against a channel that is gone.
    */
-  async synthesize(operation: VoiceOperation, text: string, voice: string): Promise<string> {
+  async synthesize(
+    operation: VoiceOperation,
+    text: string,
+    voice: string,
+    signal?: AbortSignal,
+  ): Promise<string> {
     const model = path.join(this.options.voicesDir, `${voice}.onnx`);
     try {
       await fs.access(model);
@@ -53,12 +61,13 @@ export class PiperRunner {
       throw new PiperSynthesisError(`Piper voice not found: ${model}`);
     }
     const target = operation.reserve(`speech-${voice}.wav`);
-    await this.run(['--model', model, '--output_file', target], text);
+    await this.run(['--model', model, '--output_file', target], text, signal);
     return target;
   }
 
-  private run(args: string[], input: string): Promise<void> {
+  private run(args: string[], input: string, signal?: AbortSignal): Promise<void> {
     return new Promise((resolve, reject) => {
+      if (signal?.aborted) return reject(new PiperSynthesisError('piper cancelled'));
       const child = spawn(this.options.binary, args, { shell: false, windowsHide: true });
       let stderr = '';
       let settled = false;
@@ -66,12 +75,18 @@ export class PiperRunner {
         if (settled) return;
         settled = true;
         clearTimeout(timer);
+        signal?.removeEventListener('abort', onAbort);
         fn();
       };
       const timer = setTimeout(() => {
         child.kill();
         finish(() => reject(new PiperSynthesisError('piper timed out')));
       }, this.options.timeoutMs ?? DEFAULT_TIMEOUT_MS);
+      const onAbort = (): void => {
+        child.kill();
+        finish(() => reject(new PiperSynthesisError('piper cancelled')));
+      };
+      signal?.addEventListener('abort', onAbort, { once: true });
 
       child.stderr.on('data', (chunk: Buffer) => {
         if (stderr.length < 4096) stderr += chunk.toString('utf8');

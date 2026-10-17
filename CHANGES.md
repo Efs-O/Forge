@@ -19,6 +19,7 @@
 - Semantic code search no longer loses a file saved while the index was updating. The index cleared its list of changed files after embedding them, so a save during that wait was dropped, and the file kept the embedding of its old text until the next full reindex. A full reindex had the same gap. A failed update now also keeps the list for the next search.
 - A scheduled job's run log no longer says a report was delivered when Forge could not write it to the Telegram outbox. Three places ignored the error and counted the report as sent: an agent task's report, the notice for a run interrupted by a restart, and the warning when a job starts backing off. The error is now logged and the run row says 0. The backoff warning's row used to say 0 even when it was sent, and now says 1.
 - When the jobs scheduler cannot write its lease (a permissions problem or a full disk), Forge now says so once, instead of silently treating it as "another window owns the scheduler" while no scheduled job ran. It keeps retrying every tick, and the jobs resume once the error clears.
+- Stopping or restarting a Telegram or WhatsApp transport now cancels voice work in flight: a transcription, a spoken reply being synthesized by Piper, and its ffmpeg conversion. Nothing passed the transport's stop to them, so they ran on against a channel that was gone, and a stopped Piper reported "spoken replies are failing". ffmpeg also has a 60-second deadline now. A wedged ffmpeg used to hold the voice message forever; it now fails with "ffmpeg timed out".
 
 ## 0.17.42
 

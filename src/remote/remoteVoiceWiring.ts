@@ -15,13 +15,19 @@ import {
 } from './RemoteVoiceBridge';
 import type { WhisperRunner } from '../voice/VoiceTypes';
 
+export interface VoiceBridgeLifecycle {
+  readonly confirmServerStart?: ((detail: string) => Promise<boolean>) | undefined;
+  /** The transport's: stopping it cancels in-flight transcription and replies. */
+  readonly signal?: AbortSignal | undefined;
+}
+
 export type VoiceBridgeFactory = (options: RemoteVoiceBridgeOptions) => VoiceBridgeBundle['bridge'];
 
 export function buildVoiceBridge(
   channel: RemoteChannel,
   config: ForgeConfig,
   sink: VoiceAuditSink = new VoiceAuditFileSink(),
-  lifecycle: { confirmServerStart?: ((detail: string) => Promise<boolean>) | undefined } = {},
+  lifecycle: VoiceBridgeLifecycle = {},
   createBridge: VoiceBridgeFactory,
 ): VoiceBridgeBundle | undefined {
   const voice = config.voice;
@@ -58,6 +64,7 @@ export function buildVoiceBridge(
     audit: new VoiceAuditLog(sink),
     drafts,
     settings: () => voiceSettings(config),
+    ...(lifecycle.signal ? { signal: lifecycle.signal } : {}),
     ...(server ? { withActivity: (operation) => server.withActivity(operation) } : {}),
   });
   return { bridge, drafts, dispose: async () => await server?.dispose() };

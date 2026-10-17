@@ -13,7 +13,10 @@ import {
 } from '../voice/VoiceGrammar';
 import { PendingVoiceDraft, type DraftResolution } from '../voice/PendingVoiceDraft';
 import type { RemoteChannel, RemoteInboundDisposition, RemoteInboundEvent } from './types';
-import { buildVoiceBridge as buildVoiceBridgeWiring } from './remoteVoiceWiring';
+import {
+  buildVoiceBridge as buildVoiceBridgeWiring,
+  type VoiceBridgeLifecycle,
+} from './remoteVoiceWiring';
 
 /**
  * Turns an inbound voice note into a draft the sender confirms, and nothing more.
@@ -342,7 +345,7 @@ export function buildVoiceBridge(
   channel: RemoteChannel,
   config: ForgeConfig,
   sink: VoiceAuditSink = new VoiceAuditFileSink(),
-  lifecycle: { confirmServerStart?: ((detail: string) => Promise<boolean>) | undefined } = {},
+  lifecycle: VoiceBridgeLifecycle = {},
 ): VoiceBridgeBundle | undefined {
   return buildVoiceBridgeWiring(
     channel,

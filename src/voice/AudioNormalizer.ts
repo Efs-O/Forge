@@ -41,7 +41,16 @@ export interface NormalizeOptions {
   /** Off only for the Phase 0 A/B that measures the filter's cost. */
   readonly trimSilence?: boolean | undefined;
   readonly signal?: AbortSignal | undefined;
+  /** Hard ceiling on the ffmpeg run; defaults to FFMPEG_TIMEOUT_MS. */
+  readonly timeoutMs?: number | undefined;
 }
+
+/**
+ * A wedged ffmpeg (a stalled network-drive read, a decoder spinning on a
+ * corrupt file) must not hold the voice turn forever. Decoding the 300-second
+ * input cap takes a few seconds, so a minute is far past any honest run.
+ */
+export const FFMPEG_TIMEOUT_MS = 60_000;
 
 /**
  * Decodes and resamples `source` into a WAV owned by the same operation.
@@ -74,41 +83,69 @@ export async function normalizeToWav(
     'pcm_s16le',
     target,
   ];
-  await runFfmpeg(ffmpeg, args, options.signal);
+  await runFfmpeg(ffmpeg, args, options);
   return operation.adopt(target, 'audio/wav');
 }
 
-function runFfmpeg(ffmpeg: string, args: string[], signal?: AbortSignal): Promise<void> {
+function runFfmpeg(
+  ffmpeg: string,
+  args: string[],
+  options: { signal?: AbortSignal | undefined; timeoutMs?: number | undefined },
+): Promise<void> {
+  const { signal } = options;
   return new Promise((resolve, reject) => {
+    if (signal?.aborted) {
+      return reject(new VoiceTranscriptionError('cancelled', 'audio normalization cancelled'));
+    }
     const child = spawn(ffmpeg, args, { shell: false, windowsHide: true });
     let stderr = '';
+    let settled = false;
+    const finish = (fn: () => void): void => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      signal?.removeEventListener('abort', onAbort);
+      fn();
+    };
+    const timeoutMs = options.timeoutMs ?? FFMPEG_TIMEOUT_MS;
+    const timer = setTimeout(() => {
+      child.kill();
+      finish(() =>
+        reject(
+          new VoiceTranscriptionError('decode_failed', `ffmpeg timed out after ${timeoutMs} ms`),
+        ),
+      );
+    }, timeoutMs);
     const onAbort = (): void => {
       child.kill();
-      reject(new VoiceTranscriptionError('cancelled', 'audio normalization cancelled'));
+      finish(() =>
+        reject(new VoiceTranscriptionError('cancelled', 'audio normalization cancelled')),
+      );
     };
-    if (signal?.aborted) return onAbort();
     signal?.addEventListener('abort', onAbort, { once: true });
     child.stderr.on('data', (chunk: Buffer) => {
       // Bounded: a decoder failing on every frame can emit unboundedly.
       if (stderr.length < 4096) stderr += chunk.toString('utf8');
     });
-    child.on('error', (error) => {
-      signal?.removeEventListener('abort', onAbort);
-      reject(
-        new VoiceTranscriptionError('decode_failed', `ffmpeg failed to start: ${error.message}`),
-      );
-    });
-    child.on('close', (code) => {
-      signal?.removeEventListener('abort', onAbort);
-      if (signal?.aborted) return;
-      if (code === 0) return resolve();
-      reject(
-        new VoiceTranscriptionError(
-          'decode_failed',
-          `ffmpeg exited ${code}: ${stderr.trim() || 'no stderr'}`,
+    child.on('error', (error) =>
+      finish(() =>
+        reject(
+          new VoiceTranscriptionError('decode_failed', `ffmpeg failed to start: ${error.message}`),
         ),
-      );
-    });
+      ),
+    );
+    child.on('close', (code) =>
+      finish(() =>
+        code === 0
+          ? resolve()
+          : reject(
+              new VoiceTranscriptionError(
+                'decode_failed',
+                `ffmpeg exited ${code}: ${stderr.trim() || 'no stderr'}`,
+              ),
+            ),
+      ),
+    );
   });
 }
 
@@ -127,7 +164,11 @@ function runFfmpeg(ffmpeg: string, args: string[], signal?: AbortSignal): Promis
 export async function encodeToOpus(
   operation: VoiceOperation,
   wavPath: string,
-  options: { ffmpegPath?: string | undefined; signal?: AbortSignal | undefined } = {},
+  options: {
+    ffmpegPath?: string | undefined;
+    signal?: AbortSignal | undefined;
+    timeoutMs?: number | undefined;
+  } = {},
 ): Promise<string> {
   const { ffmpeg } = resolveFfmpeg(options.ffmpegPath);
   const target = operation.reserve('speech.ogg');
@@ -151,7 +192,7 @@ export async function encodeToOpus(
       '1',
       target,
     ],
-    options.signal,
+    options,
   );
   return target;
 }
