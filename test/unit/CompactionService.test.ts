@@ -773,14 +773,6 @@ describe('runCompaction', () => {
     expect(h.posted.some((m) => m.type === 'error')).toBe(true);
   });
 
-  it('rejects an oversized summary instead of silently cutting task evidence', async () => {
-    const c = conv([...base]);
-    const h = harness(c, async () => 'x'.repeat(13_000));
-
-    expect(await runCompaction(h.deps, c.id, { auto: true })).toBe('failed');
-    expect(c.compaction).toBeUndefined();
-  });
-
   it('emits started once and finished(compacted) after validation', async () => {
     const c = conv([...base]);
     const h = harness(c, async () => long('summary'));

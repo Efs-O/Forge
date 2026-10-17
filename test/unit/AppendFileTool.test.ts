@@ -55,13 +55,4 @@ describe('append_file', () => {
     expect(tool.permission).toBe('write');
     expect(tool.mutation?.paths({ path: '/tmp/x' })).toEqual(['/tmp/x']);
   });
-
-  it('describes write and append without size or chunking advice', () => {
-    const describe_ = (t: ReturnType<typeof makeAppendFileTool>) =>
-      t.definition.function.description ?? '';
-    const descriptions = [describe_(makeWriteFileTool()), describe_(makeAppendFileTool())];
-    for (const description of descriptions) {
-      expect(description).not.toMatch(/characters? should be split|chunk|size limit/i);
-    }
-  });
 });

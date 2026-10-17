@@ -388,19 +388,21 @@ describe('sdcpp abort and timeout (criterion 9)', () => {
       async (_url: string | URL | Request, init?: RequestInit) => rejectOnAbort(init?.signal),
     ) as unknown as typeof fetch;
     const server = fakeServer();
+
+    const render = generateSdcppImage({
+      backend: sdcppConfig(),
+      server: server.handle,
+      prompt: 'a fox by the sea',
+      alternatives: ['grok-imagine'],
+      signal: controller.signal,
+      probe: enoughVram,
+      fetchImpl,
+    });
+    // Abort with the request in flight, so its signal is what ends it.
+    await vi.waitFor(() => expect(fetchImpl).toHaveBeenCalled());
     controller.abort();
 
-    await expect(
-      generateSdcppImage({
-        backend: sdcppConfig(),
-        server: server.handle,
-        prompt: 'a fox by the sea',
-        alternatives: ['grok-imagine'],
-        signal: controller.signal,
-        probe: enoughVram,
-        fetchImpl,
-      }),
-    ).rejects.toThrow(
+    await expect(render).rejects.toThrow(
       /the turn was cancelled while a fox by the sea was rendering.*Forge stopped its own sd-server/,
     );
     expect(server.stopCalls()).toBe(1);

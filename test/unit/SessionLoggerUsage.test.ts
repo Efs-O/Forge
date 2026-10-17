@@ -115,14 +115,14 @@ describe('SessionLogger usage capture', () => {
     // project a Forge session belongs to.
     const logger = new SessionLogger('u8', 't', 'm', {
       workspaceName: 'Halluscribe',
-      workspacePath: 'N:\vs code apps\Halluscribe',
+      workspacePath: 'N:\\vs code apps\\Halluscribe',
       forgeVersion: '0.13.17',
     });
     logger.flush(turn, 'm');
     const header = readRows('u8').find((r) => r['type'] === 'session_start');
     expect(header).toMatchObject({
       workspace_name: 'Halluscribe',
-      workspace_path: 'N:\vs code apps\Halluscribe',
+      workspace_path: 'N:\\vs code apps\\Halluscribe',
       forge_version: '0.13.17',
     });
   });

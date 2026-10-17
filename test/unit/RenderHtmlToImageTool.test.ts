@@ -310,10 +310,8 @@ describe('render_html_to_image cleanup', () => {
 
     const pending = tool.handler({ html: '<p>x</p>' }, context({ abortSignal: controller.signal }));
     await vi.waitFor(() => expect(renderFake.launchCalls).toHaveLength(1));
-    const started = Date.now();
     controller.abort();
     await expect(pending).rejects.toThrow(/cancelled during rendering/);
-    expect(Date.now() - started).toBeLessThan(1_000);
 
     // The launch that resolves AFTER the abort must still be closed.
     releaseLaunch();

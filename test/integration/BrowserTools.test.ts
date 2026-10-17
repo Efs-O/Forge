@@ -48,7 +48,7 @@ describe('browser tools: inspect, index identity, coordinate bounds (Phase 1)', 
       h.opened = true;
     } catch (err) {
       h.skipReason = `browser_open failed (no Chrome on this host?): ${(err as Error).message}`;
-      t.skip(skipReason);
+      t.skip(h.skipReason);
       return;
     }
     expect(openRes).toMatch(/Browser ready/);

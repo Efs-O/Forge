@@ -31,13 +31,12 @@ describe('git_read', () => {
     }
   });
 
-  it.each(operations)('%s retains the old git-read auto-approval behavior', (operation) => {
+  it('keeps the git-read permission every replaced operation had (no approval)', () => {
     const tool = makeGitReadTool();
     expect(tool.permission).toBe('git-read');
     // ToolDispatch asks only for write/delete/terminal/headless/git-write permissions.
     // Every replaced read operation had git-read and therefore needed no approval.
     expect(['write', 'delete', 'terminal', 'headless', 'git-write']).not.toContain(tool.permission);
-    expect(operation).toBeDefined();
   });
 
   it('names the operation and missing path for blame', async () => {

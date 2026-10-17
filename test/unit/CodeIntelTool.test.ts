@@ -51,13 +51,12 @@ describe('code_intel', () => {
     }
   });
 
-  it.each(operations)('%s retains the old read auto-approval behavior', (operation) => {
+  it('keeps the read permission every replaced read tool had (no approval)', () => {
     const tool = makeCodeIntelTool();
     expect(tool.permission).toBe('read');
     // ToolDispatch asks only for write/delete/terminal/headless/git-write permissions.
     // Each replaced read tool used a non-writing permission and required no approval.
     expect(['write', 'delete', 'terminal', 'headless', 'git-write']).not.toContain(tool.permission);
-    expect(operation).toBeDefined();
   });
 
   it.each([

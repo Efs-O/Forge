@@ -269,12 +269,3 @@ export function pngWith(width: number, height: number, extraBytes = 0): Buffer {
 
 /** The filename stamp `now: () => new Date('2026-10-03T12:34:56.789Z')` yields. */
 export const STAMP = '20261003-123456';
-
-/**
- * Sizes in tool messages go through `toLocaleString()`, whose separator is
- * locale-dependent (this machine renders 1,048,576 as 1.048.576). Stripping
- * everything but digits lets a test assert the number without pinning a locale.
- */
-export function digits(text: string): string {
-  return text.replace(/[^\d]/g, '');
-}
