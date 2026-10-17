@@ -11,8 +11,8 @@ import {
   writeSdServerRecord,
   type SdProcessIdentity,
 } from '../../src/backend/sdServerOwnerRecord';
-import { ImageGenerationConfigSchema } from '../../src/config/imageGenerationSchema';
 import type { SdcppImageBackendConfig } from '../../src/config/types';
+import { SDCPP_MODEL_FIELDS, sdcppBackendConfig } from '../support/sdServerFixtures';
 
 vi.mock('vscode', () => ({
   window: {
@@ -33,18 +33,11 @@ vi.mock('vscode', () => ({
  * could have a render in flight. These tests pin that decision, not the fetch.
  */
 
-const MODEL_FIELDS = {
-  binary: 'sd-server.exe',
-  diffusion_model: 'diffusion.gguf',
-  text_encoder: 'text-encoder.gguf',
-  vae: 'vae.safetensors',
-};
-
 let root: string;
 
 beforeEach(() => {
   root = fs.mkdtempSync(path.join(os.tmpdir(), 'forge-sd-abort-'));
-  for (const file of Object.values(MODEL_FIELDS)) fs.writeFileSync(path.join(root, file), 'test');
+  for (const file of Object.values(SDCPP_MODEL_FIELDS)) fs.writeFileSync(path.join(root, file), 'test');
 });
 
 afterEach(() => {
@@ -52,31 +45,7 @@ afterEach(() => {
 });
 
 function localConfig(): SdcppImageBackendConfig {
-  const parsed = ImageGenerationConfigSchema.parse({
-    backends: [
-      {
-        name: 'qwen-local',
-        provider: 'sdcpp',
-        binary: path.join(root, MODEL_FIELDS.binary),
-        diffusion_model: path.join(root, MODEL_FIELDS.diffusion_model),
-        text_encoder: path.join(root, MODEL_FIELDS.text_encoder),
-        vae: path.join(root, MODEL_FIELDS.vae),
-        cuda_device: 2,
-        text_encoder_on_cpu: true,
-        port: 8093,
-        min_free_vram_mb: 7000,
-        idle_timeout_ms: 600_000,
-        request_timeout_ms: 300_000,
-        defaults: { steps: 20, cfg_scale: 6, sampler: 'euler', width: 1024, height: 1024 },
-        extra_args: [],
-        confirm_on_start: true,
-        confirm_each: false,
-      },
-    ],
-  });
-  const backend = parsed.backends[0];
-  if (!backend || backend.provider !== 'sdcpp') throw new Error('config did not parse as sdcpp.');
-  return backend;
+  return sdcppBackendConfig(root, { idle_timeout_ms: 600_000, request_timeout_ms: 300_000 });
 }
 
 interface Rig {

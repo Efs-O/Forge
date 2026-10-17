@@ -17,12 +17,33 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 const { InputRow } = await import('../../webview-ui/src/components/InputRow');
 const { shortenName } = await import('../../webview-ui/src/components/AttachmentTray');
 const React = await import('react');
+const fileContents = new WeakMap<File, string>();
+
+class DeterministicFileReader extends FileReader {
+  private resultValue: string | null = null;
+
+  override get result(): string | ArrayBuffer | null {
+    return this.resultValue;
+  }
+
+  override readAsText(file: Blob): void {
+    this.resultValue = fileContents.get(file as File) ?? '';
+    this.onload?.(new ProgressEvent('load') as ProgressEvent<FileReader>);
+  }
+
+  override readAsDataURL(file: Blob): void {
+    const content = fileContents.get(file as File) ?? '';
+    this.resultValue = `data:${file.type};base64,${btoa(content)}`;
+    this.onload?.(new ProgressEvent('load') as ProgressEvent<FileReader>);
+  }
+}
 
 let container: HTMLDivElement;
 let root: Root;
 let onSend: ReturnType<typeof vi.fn>;
 
 beforeEach(() => {
+  vi.stubGlobal('FileReader', DeterministicFileReader);
   container = document.createElement('div');
   document.body.appendChild(container);
   root = createRoot(container);
@@ -53,10 +74,14 @@ beforeEach(() => {
 afterEach(() => {
   act(() => root.unmount());
   container.remove();
+  vi.unstubAllGlobals();
 });
 
 function textFile(name: string, size = 12): File {
-  return new File(['x'.repeat(size)], name, { type: 'text/plain' });
+  const content = 'x'.repeat(size);
+  const file = new File([content], name, { type: 'text/plain' });
+  fileContents.set(file, content);
+  return file;
 }
 
 /** jsdom has no DataTransfer, and React only reads the fields we set here. */
@@ -75,10 +100,10 @@ function fileEvent(type: 'drop' | 'dragenter' | 'paste', files: File[], text = '
   return event;
 }
 
-/** Attachments land through FileReader callbacks, so flush the microtask queue. */
+/** The FileReader stub completes immediately; flush the resulting state update in act. */
 async function settle(): Promise<void> {
   await act(async () => {
-    for (let i = 0; i < 5; i++) await new Promise((resolve) => setTimeout(resolve, 5));
+    await Promise.resolve();
   });
 }
 

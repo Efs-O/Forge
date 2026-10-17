@@ -4,7 +4,8 @@
  */
 import { describe, it, expect } from 'vitest';
 import { screenshotPath } from '../../src/sidebar/toolResultView';
-import { isSystemChord } from '../../src/tools/desktop/DesktopDriver';
+import { makeDesktopTools } from '../../src/tools/desktop/desktopTools';
+import type { ForgeConfig } from '../../src/config/types';
 
 describe('screenshotPath (webview thumbnail parsing)', () => {
   it('parses the saved path from a browser_screenshot result', () => {
@@ -42,45 +43,23 @@ describe('screenshotPath (webview thumbnail parsing)', () => {
   });
 });
 
-describe('consequential approval logic', () => {
-  it('isSystemChord detects the B2 system chords', () => {
-    // win+any
-    expect(isSystemChord(['win', 'r'])).toBe(true);
-    expect(isSystemChord(['win', 'd'])).toBe(true);
-    // alt+f4
-    expect(isSystemChord(['alt', 'f4'])).toBe(true);
-    // ctrl+alt+any
-    expect(isSystemChord(['ctrl', 'alt', 'delete'])).toBe(true);
-    expect(isSystemChord(['ctrl', 'alt', 't'])).toBe(true);
-  });
-
-  it('isSystemChord does not flag normal editing chords', () => {
-    expect(isSystemChord(['ctrl', 'c'])).toBe(false);
-    expect(isSystemChord(['ctrl', 'v'])).toBe(false);
-    expect(isSystemChord(['ctrl', 'z'])).toBe(false);
-    expect(isSystemChord(['alt', 'tab'])).toBe(false);
-    expect(isSystemChord(['shift', 'tab'])).toBe(false);
-    expect(isSystemChord(['enter'])).toBe(false);
-    expect(isSystemChord(['escape'])).toBe(false);
-  });
-
-  it('isSystemChord handles case-insensitivity', () => {
-    expect(isSystemChord(['WIN', 'R'])).toBe(true);
-    expect(isSystemChord(['Alt', 'F4'])).toBe(true);
-    expect(isSystemChord(['Ctrl', 'Alt', 'Delete'])).toBe(true);
-  });
-});
-
 describe('platform gate (B7)', () => {
-  it('desktop tools are advertised only on win32', () => {
-    // The advertise predicate is `() => process.platform === 'win32'`.
-    // We cannot easily mock process.platform in vitest without vi.spyOn,
-    // so we verify the logic directly.
-    const isWin = () => process.platform === 'win32';
-    if (process.platform === 'win32') {
-      expect(isWin()).toBe(true);
-    } else {
-      expect(isWin()).toBe(false);
+  it('advertises the actual desktop tools only on win32', () => {
+    const tools = makeDesktopTools(
+      () => ({ permissions: { desktop: { allow_vscode: false } } }) as ForgeConfig,
+    );
+    const names = tools.map((tool) => tool.definition.function.name);
+    const originalPlatform = Object.getOwnPropertyDescriptor(process, 'platform');
+    if (!originalPlatform?.configurable) throw new Error('process.platform cannot be stubbed');
+
+    try {
+      Object.defineProperty(process, 'platform', { ...originalPlatform, value: 'win32' });
+      expect(tools.filter((tool) => tool.advertise?.()).map((tool) => tool.definition.function.name)).toEqual(names);
+
+      Object.defineProperty(process, 'platform', { ...originalPlatform, value: 'linux' });
+      expect(tools.filter((tool) => tool.advertise?.())).toEqual([]);
+    } finally {
+      Object.defineProperty(process, 'platform', originalPlatform);
     }
   });
 });

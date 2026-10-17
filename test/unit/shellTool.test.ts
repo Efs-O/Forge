@@ -74,29 +74,80 @@ describe.skipIf(!TEST_BASH)('shell bash execution', () => {
       try {
         process.kill(pid, 0);
         return true;
-      } catch {
-        return false;
+      } catch (error) {
+        return (error as NodeJS.ErrnoException).code === 'EPERM';
       }
     };
+    const expectExited = (pidFile: string): Promise<void> =>
+      vi.waitFor(
+        () => expect(alive(pidFile)).toBe(false),
+        { interval: 10, timeout: 3_000 },
+      );
     const pidWritten = async (pidFile: string): Promise<void> => {
       const file = path.join(root, pidFile);
-      while (!fs.existsSync(file) || fs.readFileSync(file, 'utf8').trim() === '') {
-        await new Promise((r) => setTimeout(r, 20));
-      }
+      const isWritten = (): boolean => {
+        try {
+          return fs.readFileSync(file, 'utf8').trim() !== '';
+        } catch {
+          return false;
+        }
+      };
+      if (isWritten()) return;
+      await new Promise<void>((resolve, reject) => {
+        const watcher = fs.watch(root, () => {
+          if (!isWritten()) return;
+          watcher.close();
+          resolve();
+        });
+        watcher.once('error', (error) => {
+          watcher.close();
+          reject(error);
+        });
+        if (isWritten()) {
+          watcher.close();
+          resolve();
+        }
+      });
     };
     try {
       const tool = makeShellTool({ bashPath: TEST_BASH });
-      await expect(
-        tool.handler({ ...sleeper('timeout.pid'), timeout_ms: 1000 }, context()),
-      ).resolves.toContain('timed out');
-      expect(alive('timeout.pid')).toBe(false);
+      vi.useFakeTimers();
+      try {
+        let timeoutComplete = false;
+        let timeoutOutput: string | undefined;
+        let timeoutFailure: unknown;
+        const timeoutRun = tool
+          .handler({ ...sleeper('timeout.pid'), timeout_ms: 1000 }, context())
+          .then(
+            (output) => {
+              timeoutOutput = output;
+              timeoutComplete = true;
+            },
+            (error: unknown) => {
+              timeoutFailure = error;
+              timeoutComplete = true;
+            },
+          );
+        await pidWritten('timeout.pid');
+        await vi.advanceTimersByTimeAsync(1000);
+        await vi.waitFor(() => expect(timeoutComplete).toBe(true), {
+          interval: 10,
+          timeout: 3_000,
+        });
+        await timeoutRun;
+        expect(timeoutFailure).toBeUndefined();
+        expect(timeoutOutput).toContain('timed out');
+        expect(alive('timeout.pid')).toBe(false);
+      } finally {
+        vi.useRealTimers();
+      }
 
       const abort = new AbortController();
       const running = tool.handler(sleeper('abort.pid'), context({ abortSignal: abort.signal }));
       await pidWritten('abort.pid');
       abort.abort();
       await expect(running).resolves.toContain('exit');
-      expect(alive('abort.pid')).toBe(false);
+      await expectExited('abort.pid');
     } finally {
       vscode.workspace.workspaceFolders?.splice(0, Infinity, ...previous);
       fs.rmSync(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });

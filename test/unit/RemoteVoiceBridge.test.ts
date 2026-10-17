@@ -14,6 +14,7 @@ import { VoiceAuditFileSink } from '../../src/voice/VoiceAuditFileSink';
 import { FakeWhisperRunner } from '../../src/voice/FakeWhisperRunner';
 import type { RemoteChannel, RemoteInboundEvent } from '../../src/remote/types';
 import { passthroughNormalize } from '../support/voiceNormalize';
+import { silentPcmWav } from '../support/silentPcmWav';
 
 /**
  * The Telegram voice path end to end, with no model, GPU, network or ffmpeg.
@@ -35,33 +36,6 @@ const SETTINGS: VoiceBridgeSettings = {
   biasPrompt: '',
   trimSilence: true,
 };
-
-/**
- * A real, decodable 16 kHz mono WAV of silence.
- *
- * `VoiceIngress` genuinely runs ffmpeg, so a buffer of zero bytes is rejected as
- * `decode_failed` before the transcript is ever produced -- which would make
- * every assertion past that point vacuously pass. Half a second of silence is
- * the cheapest thing ffmpeg will actually decode.
- */
-function silentWav(seconds = 0.5, rate = 16_000): Buffer {
-  const samples = Math.floor(seconds * rate);
-  const data = Buffer.alloc(samples * 2);
-  const header = Buffer.alloc(44);
-  header.write('RIFF', 0);
-  header.writeUInt32LE(36 + data.length, 4);
-  header.write('WAVEfmt ', 8);
-  header.writeUInt32LE(16, 16);
-  header.writeUInt16LE(1, 20);
-  header.writeUInt16LE(1, 22);
-  header.writeUInt32LE(rate, 24);
-  header.writeUInt32LE(rate * 2, 28);
-  header.writeUInt16LE(2, 32);
-  header.writeUInt16LE(16, 34);
-  header.write('data', 36);
-  header.writeUInt32LE(data.length, 40);
-  return Buffer.concat([header, data]);
-}
 
 function voiceEvent(
   overrides: Partial<Extract<RemoteInboundEvent, { kind: 'voice' }>> = {},
@@ -314,7 +288,7 @@ describe('spoken approvals', () => {
         sent.push(message);
       },
       downloadAttachmentToFile: async (_id: string, targetPath: string) => {
-        const wav = silentWav();
+        const wav = silentPcmWav({ durationSeconds: 0.5 });
         await fs.writeFile(targetPath, wav);
         return { bytes: wav.length, mediaType: 'audio/wav' };
       },

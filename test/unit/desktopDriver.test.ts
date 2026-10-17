@@ -82,6 +82,7 @@ function makeDriver(transport: FakeTransport): PowerShellDesktopDriver {
 describe('isSystemChord', () => {
   it('detects win+any', () => {
     expect(isSystemChord(['win', 'r'])).toBe(true);
+    expect(isSystemChord(['win', 'd'])).toBe(true);
     expect(isSystemChord(['win'])).toBe(true);
   });
 
@@ -91,13 +92,23 @@ describe('isSystemChord', () => {
 
   it('detects ctrl+alt+any', () => {
     expect(isSystemChord(['ctrl', 'alt', 'delete'])).toBe(true);
+    expect(isSystemChord(['ctrl', 'alt', 't'])).toBe(true);
   });
 
   it('does not flag normal chords', () => {
     expect(isSystemChord(['ctrl', 'c'])).toBe(false);
     expect(isSystemChord(['ctrl', 'v'])).toBe(false);
+    expect(isSystemChord(['ctrl', 'z'])).toBe(false);
     expect(isSystemChord(['alt', 'tab'])).toBe(false);
+    expect(isSystemChord(['shift', 'tab'])).toBe(false);
     expect(isSystemChord(['enter'])).toBe(false);
+    expect(isSystemChord(['escape'])).toBe(false);
+  });
+
+  it('handles system chord names without case sensitivity', () => {
+    expect(isSystemChord(['WIN', 'R'])).toBe(true);
+    expect(isSystemChord(['Alt', 'F4'])).toBe(true);
+    expect(isSystemChord(['Ctrl', 'Alt', 'Delete'])).toBe(true);
   });
 });
 

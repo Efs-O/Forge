@@ -240,8 +240,10 @@ describe('frameCountFor', () => {
 
   // The bug this guards: the duration heuristic used to win over an explicit
   // request, so `max_frames` did nothing on any clip under ~40s.
-  it('honours an explicit request over the duration heuristic', () => {
+  it('honours explicit requests over the duration heuristic', () => {
+    expect(frameCountFor(11, 8)).toBe(3);
     expect(frameCountFor(11, 8, 6)).toBe(6);
+    expect(frameCountFor(11, 8, 8)).toBe(8);
     expect(frameCountFor(5, 8, 8)).toBe(8);
     expect(frameCountFor(9, 8, 2)).toBe(2);
   });
@@ -251,10 +253,6 @@ describe('frameCountFor', () => {
     expect(frameCountFor(11, 3, 10)).toBe(3);
   });
 
-  it('gives a short clip more frames than the heuristic would, when asked', () => {
-    expect(frameCountFor(11, 8)).toBe(3);
-    expect(frameCountFor(11, 8, 8)).toBe(8);
-  });
 });
 
 describe('frameTimes', () => {

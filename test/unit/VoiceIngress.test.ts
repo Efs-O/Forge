@@ -6,6 +6,7 @@ import { VoiceAuditLog, type VoiceAuditEvent } from '../../src/voice/VoiceAudit'
 import { VoiceIngress } from '../../src/voice/VoiceIngress';
 import { VoiceOperation } from '../../src/voice/VoiceOperation';
 import { passthroughNormalize } from '../support/voiceNormalize';
+import { silentPcmWav } from '../support/silentPcmWav';
 
 /**
  * Tier A: no model, no GPU, no network. ffmpeg is the one real dependency the
@@ -21,23 +22,7 @@ afterEach(async () => {
 /** A real 16 kHz mono s16 WAV of silence, so ffmpeg has something valid to read. */
 async function wavFixture(operation: VoiceOperation, seconds = 1): Promise<string> {
   const target = operation.reserve('input.wav');
-  const samples = 16000 * seconds;
-  const data = Buffer.alloc(samples * 2);
-  const header = Buffer.alloc(44);
-  header.write('RIFF', 0);
-  header.writeUInt32LE(36 + data.length, 4);
-  header.write('WAVE', 8);
-  header.write('fmt ', 12);
-  header.writeUInt32LE(16, 16);
-  header.writeUInt16LE(1, 20);
-  header.writeUInt16LE(1, 22);
-  header.writeUInt32LE(16000, 24);
-  header.writeUInt32LE(32000, 28);
-  header.writeUInt16LE(2, 32);
-  header.writeUInt16LE(16, 34);
-  header.write('data', 36);
-  header.writeUInt32LE(data.length, 40);
-  await fs.writeFile(target, Buffer.concat([header, data]));
+  await fs.writeFile(target, silentPcmWav({ durationSeconds: seconds }));
   return target;
 }
 

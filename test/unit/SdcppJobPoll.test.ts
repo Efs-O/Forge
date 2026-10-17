@@ -200,7 +200,7 @@ describe('the async reference-edit job (A15)', () => {
   });
 
   it('gives up at the job deadline and warns the render may still own the GPU (A15)', async () => {
-    const backend = sdcppConfig({ request_timeout_ms: 1000 });
+    const backend = sdcppConfig({ request_timeout_ms: 100 });
     const fetchImpl = fetchFor({
       polls: Array.from({ length: 40 }, () => ({
         status: 200,
@@ -235,7 +235,7 @@ describe('the async reference-edit job (A15)', () => {
   });
 
   it('cuts a hung poll at request_timeout_ms instead of waiting on the 30-minute fetch timeout', async () => {
-    const backend = sdcppConfig({ request_timeout_ms: 300 });
+    const backend = sdcppConfig({ request_timeout_ms: 100 });
     const fetchImpl = (async (url: string, init: RequestInit) => {
       if (url.endsWith('/img_gen')) {
         return new Response(
