@@ -3,6 +3,7 @@ import * as path from 'path';
 import type { JobStore } from './JobStore';
 import { writeOutboxItem } from './JobOutbox';
 import { describeError } from '../util/describeError';
+import { writeFileAtomic } from '../util/atomicWrite';
 import { getLogger } from '../util/logger';
 import type { JobFile, JobState } from './jobSchema';
 
@@ -33,7 +34,8 @@ export async function removeConfigBackup(stateDir: string, jobId: string): Promi
 /**
  * Step 4: snapshot config.yaml's bytes to `state/<id>.config.bak` (the rollback
  * source for step 7). A missing config is not fatal; rollback simply has
- * nothing to restore.
+ * nothing to restore. Any other failure throws: the task must not go on to
+ * change config with no backup to roll back to.
  */
 export async function snapshotConfig(
   store: JobStore,
@@ -42,14 +44,20 @@ export async function snapshotConfig(
 ): Promise<string | undefined> {
   if (!configPath) return undefined;
   const backupPath = configBackupPath(store, jobId);
+  let bytes: Buffer;
   try {
-    const bytes = await fs.promises.readFile(configPath);
-    await fs.promises.mkdir(path.dirname(backupPath), { recursive: true });
-    await fs.promises.writeFile(backupPath, bytes);
-    return backupPath;
-  } catch {
-    return undefined;
+    bytes = await fs.promises.readFile(configPath);
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === 'ENOENT') return undefined;
+    throw new Error(`Could not read config.yaml to back it up: ${describeError(error)}`);
   }
+  try {
+    await fs.promises.mkdir(path.dirname(backupPath), { recursive: true });
+    await writeFileAtomic(backupPath, bytes);
+  } catch (error) {
+    throw new Error(`Could not back up config.yaml: ${describeError(error)}`);
+  }
+  return backupPath;
 }
 
 /** How often a running agent task refreshes `task_run.heartbeat_at`. */

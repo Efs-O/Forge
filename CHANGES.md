@@ -28,6 +28,7 @@
 - Delegating to a model this window borrowed from another Forge window no longer fails with "no free slot" when every port is in use. The capacity check ignored borrowed servers, which use none of this window's ports.
 - A managed server whose `start_command` cannot run (a misspelled program, a missing file) now fails within a couple of seconds with the launch error. Forge used to log the error and keep polling for the full two-minute start timeout before reporting "did not become reachable".
 - **Forge: Compact config** no longer refuses a valid config whose models limit which request profiles they accept. A model-and-profile pair the old config already rejected was reported as a pair the migration had broken.
+- An agent task that cannot back up `config.yaml` (a full disk, a permissions error) now fails before it starts, with the reason. It used to go on and change config with no backup to roll back to. The backup is also written atomically now.
 
 ## 0.17.42
 
