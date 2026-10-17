@@ -113,25 +113,14 @@ describe('MessageAttachments', () => {
     expect(document.body.querySelector('.lightbox-overlay')).toBeNull();
   });
 
-  it('leaves a non-image chip without a relativePath disabled', () => {
+  it.each([
+    ['missing', undefined],
+    ['empty', ''],
+  ])('leaves a non-image chip with a %s relativePath disabled', (_caseName, relativePath) => {
     act(() => {
       root.render(
         React.createElement(MessageAttachments, {
-          attachments: [{ ...textFile, relativePath: undefined }],
-        }),
-      );
-    });
-
-    const chip = container.querySelector<HTMLButtonElement>('.msg-attachment');
-    expect(chip).not.toBeNull();
-    expect(chip!.disabled).toBe(true);
-  });
-
-  it('leaves a non-image chip with an empty relativePath disabled', () => {
-    act(() => {
-      root.render(
-        React.createElement(MessageAttachments, {
-          attachments: [{ ...textFile, relativePath: '' }],
+          attachments: [{ ...textFile, relativePath }],
         }),
       );
     });

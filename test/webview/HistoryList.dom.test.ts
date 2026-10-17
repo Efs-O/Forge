@@ -123,14 +123,17 @@ describe('HistoryList row actions', () => {
     expect(input()).toBeNull();
   });
 
-  it('does not post a rename when the title is unchanged or blank', () => {
+  it.each([
+    ['unchanged', 'hello man'],
+    ['blank', '   '],
+  ])('does not post a rename when the title is %s', (_caseName, title) => {
     const onRename = vi.fn();
     render({ onRename });
 
     click(kebabs()[0]!);
     click(menuItems()[0]!);
     act(() => {
-      input()!.value = '   ';
+      input()!.value = title;
       input()!.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }));
     });
 
