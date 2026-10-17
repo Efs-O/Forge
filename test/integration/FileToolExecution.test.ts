@@ -178,14 +178,16 @@ describe('isolated file and directory tool execution', () => {
   it('executes active-editor replacement and insertion through controlled adapters', async () => {
     const replace = vi.fn();
     const insert = vi.fn();
+    const save = vi.fn(async () => true);
+    let applies = true;
     const editor = {
-      document: { uri: vscode.Uri.file(path.join(root, 'editor.ts')) },
+      document: { uri: vscode.Uri.file(path.join(root, 'editor.ts')), isDirty: false, save },
       selection: new vscode.Range(new vscode.Position(0, 0), new vscode.Position(0, 3)),
       edit: async (
         callback: (builder: { replace: typeof replace; insert: typeof insert }) => void,
       ) => {
         callback({ replace, insert });
-        return true;
+        return applies;
       },
     };
     (vscode.window as unknown as { activeTextEditor: typeof editor }).activeTextEditor = editor;
@@ -194,5 +196,20 @@ describe('isolated file and directory tool execution', () => {
     await makeInsertCodeTool().handler({ text: 'const value = 1;', line: 2 });
     expect(replace).toHaveBeenCalledWith(editor.selection, 'replacement');
     expect(insert).toHaveBeenCalledWith(new vscode.Position(2, 0), 'const value = 1;\n');
+    // A clean buffer is saved so the checkpoint, and Undo, cover the edit (U15-02).
+    expect(save).toHaveBeenCalledTimes(2);
+
+    // A buffer holding the user's own unsaved edits is never saved by a tool.
+    editor.document.isDirty = true;
+    await expect(makeInsertCodeTool().handler({ text: 'x', line: 0 })).resolves.toContain(
+      'Undo does not cover this edit',
+    );
+    expect(save).toHaveBeenCalledTimes(2);
+
+    // A refused edit is an error, not a reported write (U15-05).
+    applies = false;
+    await expect(makeReplaceSelectionTool().handler({ text: 'y' })).rejects.toThrow(
+      'did not apply the edit',
+    );
   });
 });

@@ -19,10 +19,10 @@ export const DEFAULT_MONITOR_WAIT_MS = 10_000;
 export const MAX_MONITOR_WAIT_MS = 60_000;
 
 /**
- * Shared between shell's background-run schema and monitor_execution's
- * description, so the schema budget counts one copy, not two. The negative
- * cases are the point: a model that expects a notice which never comes waits
- * forever, so it must know exactly when none is sent.
+ * shell's `notify_on_exit` description, used by both shell variants. The
+ * negative cases are the point: a model that expects a notice which never
+ * comes waits forever, so it must know exactly when none is sent. The shell
+ * rewrite once replaced this with a one-liner that dropped them (U15-10).
  */
 export const NOTIFY_ON_EXIT_DESCRIPTION =
   'Only with background=true. On exit, Forge posts status and last output into this chat, ' +

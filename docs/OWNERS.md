@@ -72,6 +72,7 @@ overlaps with an existing owner, extend the owner instead.
 | Linked-agent question ceiling and report handoff      | `src/agentBus/liveSessionLimit.ts`       |
 | LSP read operations + strict `code_intel` dispatch   | `src/tools/codeIntelTool.ts`             |
 | LSP code-action read/write handler                   | `src/tools/codeActionTools.ts`            |
+| Guarded apply + save of a language-server WorkspaceEdit | `src/tools/workspaceEditApply.ts`     |
 | Filesystem-miss error text for tools                 | `src/tools/pathErrorHint.ts`             |
 | Tool call execution + result formatting              | `src/sidebar/ToolDispatch.ts`            |
 | Delete approval preview and bounded inventory        | `src/sidebar/deletePreview.ts`           |

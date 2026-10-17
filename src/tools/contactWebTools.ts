@@ -1,6 +1,7 @@
 import type { ForgeConfig } from '../config/types';
 import type { ToolDefinition } from '../llm/types';
 import { ToolRegistry, type ToolPermission } from './ToolRegistry';
+import { MAX_MAX_CHARS as WEB_FETCH_MAX_CHARS } from './fetchTool';
 
 const CONTACT_WEB_SEARCH = 'contact_web_search';
 const CONTACT_WEB_FETCH = 'contact_web_fetch';
@@ -64,7 +65,9 @@ export function createContactWebTools(
   let searchCalls = 0;
   let fetchCalls = 0;
   const maxResults = contacts.web.max_results;
-  const maxFetchChars = contacts.web.max_fetch_bytes;
+  // web_fetch refuses a larger max_chars outright; the config accepts up to
+  // 200,000 for older files, so cap it here (U15-01).
+  const maxFetchChars = Math.min(contacts.web.max_fetch_bytes, WEB_FETCH_MAX_CHARS);
   const timeoutMs = contacts.web.timeout_ms;
   const allowed = new Set<ToolPermission>(['search', 'fetch']);
 
@@ -135,8 +138,15 @@ function resultToText(result: string | { text: string }): string {
   return typeof result === 'string' ? result : result.text;
 }
 
+/** Normalised the way `readUrl` normalises, so `<https://a.com>` matches `https://a.com/` (U15-08). */
 function extractSearchUrls(text: string): string[] {
-  return [...text.matchAll(/<(https:\/\/[^>\s]+)>/giu)].map((match) => match[1]!);
+  return [...text.matchAll(/<(https:\/\/[^>\s]+)>/giu)].flatMap((match) => {
+    try {
+      return [new URL(match[1]!).toString()];
+    } catch {
+      return []; // unparseable: readUrl would refuse it anyway
+    }
+  });
 }
 
 function limitSearchResults(text: string, maxResults: number): string {

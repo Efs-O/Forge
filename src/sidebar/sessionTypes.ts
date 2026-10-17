@@ -23,9 +23,7 @@ export {
 } from './sessionPersistence';
 import type { ChatAttachmentRef, ChatMessage } from '../llm/types';
 import { stripImageParts } from './imageParts';
-import type { DiffHunk, SessionHistoryMeta, SessionTabMeta } from './messageBridge';
-
-export type { SessionHistoryMeta, SessionTabMeta };
+import type { DiffHunk } from './messageBridge';
 
 // Naming lives in its own module; re-exported here because sessionTypes is
 // the import site every caller already reaches for.

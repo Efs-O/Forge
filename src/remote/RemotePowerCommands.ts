@@ -227,7 +227,14 @@ async function handleWake(
   const argument = operands.join(' ').toLowerCase();
 
   if (argument === 'off' || argument === 'clear') {
-    const removed = await context.power.clearWakeTimer();
+    let removed: boolean;
+    try {
+      removed = await context.power.clearWakeTimer();
+    } catch (err) {
+      const detail = (err as Error).message;
+      await reply(context, event.chatId, `Forge: could not clear the wake timer.\n\n${detail}`);
+      return { kind: 'handled' };
+    }
     await reply(
       context,
       event.chatId,

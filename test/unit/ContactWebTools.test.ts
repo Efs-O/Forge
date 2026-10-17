@@ -6,11 +6,15 @@ import { ToolRegistry } from '../../src/tools/ToolRegistry';
 function config(web: boolean) {
   return ForgeConfigSchema.parse({
     models: [{ name: 'm', provider: 'ollama', endpoint: 'http://127.0.0.1:11434' }],
-    remote: { contacts: { enabled: web, web: { enabled: web } } },
+    // An older config's 200,000 is capped to web_fetch's maximum (U15-01).
+    remote: { contacts: { enabled: web, web: { enabled: web, max_fetch_bytes: 200_000 } } },
   });
 }
 
-function registry(): { value: ToolRegistry; fetch: ReturnType<typeof vi.fn> } {
+function registry(searchText = '1. Result — <https://example.com/weather>'): {
+  value: ToolRegistry;
+  fetch: ReturnType<typeof vi.fn>;
+} {
   const value = new ToolRegistry();
   value.register({
     definition: {
@@ -18,7 +22,7 @@ function registry(): { value: ToolRegistry; fetch: ReturnType<typeof vi.fn> } {
       function: { name: 'web_search', description: 'search', parameters: { type: 'object' } },
     },
     permission: 'search',
-    handler: vi.fn(async () => '1. Result — <https://example.com/weather>'),
+    handler: vi.fn(async () => searchText),
   });
   const fetch = vi.fn(async () => '<UNTRUSTED_CONTENT>forecast</UNTRUSTED_CONTENT>');
   value.register({
@@ -38,6 +42,15 @@ describe('contact web capability', () => {
     expect(createContactWebTools(tools.value, config(false))).toBeUndefined();
   });
 
+  it('fetches a bare-host search result, which URL parsing gives a trailing slash (U15-08)', async () => {
+    const tools = registry('1. Result — <https://example.com>');
+    const contactWeb = createContactWebTools(tools.value, config(true))!;
+    await contactWeb.dispatch('contact_web_search', { query: 'example' });
+    await expect(
+      contactWeb.dispatch('contact_web_fetch', { url: 'https://example.com' }),
+    ).resolves.toContain('forecast');
+  });
+
   it('allows only bounded search results and exact HTTPS URLs returned by search', async () => {
     const tools = registry();
     const contactWeb = createContactWebTools(tools.value, config(true));
@@ -48,7 +61,7 @@ describe('contact web capability', () => {
       contactWeb!.dispatch('contact_web_fetch', { url: 'https://example.com/weather' }),
     ).resolves.toContain('forecast');
     expect(tools.fetch).toHaveBeenCalledWith(
-      { url: 'https://example.com/weather', max_chars: 200_000, https_only: true },
+      { url: 'https://example.com/weather', max_chars: 100_000, https_only: true },
       undefined,
     );
     await expect(

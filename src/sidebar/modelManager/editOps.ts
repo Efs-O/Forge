@@ -4,6 +4,7 @@ import * as YAML from 'yaml';
 import type { ForgeConfig } from '../../config/types';
 import { updateConfigFile, removeModel, setModelField } from '../../config/ConfigWriter';
 import { expandAlias, splitModelProfile } from '../../config/ConfigResolver';
+import { samePath } from '../../tools/gitDiscovery';
 
 /**
  * Write-path operations for the Model Manager (F7/§2.3): field edit,
@@ -81,18 +82,26 @@ export function purgeOrphanFile(target: string): void {
   fs.rmSync(target, { force: true });
 }
 
+/** A model file `purgeModel` left on disk because another model still uses it. */
+export interface KeptModelFile {
+  path: string;
+  usedBy: string[];
+}
+
 /**
- * Purge a model: delete its gguf + sibling mmproj + (if left empty) the
- * parent snapshot directory, then remove the config entry (Q7). Refuses
- * while the model is loaded or currently active (Q7) — throws without
- * touching disk or config in that case.
+ * Purge a model: remove the config entry, then delete its gguf + sibling
+ * mmproj + (if left empty) the parent snapshot directory (Q7). Refuses while
+ * the model is loaded or currently active (Q7) — throws without touching disk
+ * or config in that case. The entry goes first so a failed config write leaves
+ * the files in place (U14-01), and a file another model still references (one
+ * mmproj shared by several quants) is kept and reported (U14-02).
  */
 export function purgeModel(
   configPath: string,
   config: ForgeConfig,
   modelName: string,
   isLoaded: (name: string) => boolean,
-): void {
+): KeptModelFile[] {
   const model = config.models.find((m) => m.name === modelName);
   if (!model) throw new Error(`Forge: model "${modelName}" not found in config`);
 
@@ -103,8 +112,21 @@ export function purgeModel(
     throw new Error(`Forge: "${modelName}" is currently loaded/active — unload it before purging.`);
   }
 
-  if (model.gguf_path) deleteFileBestEffort(model.gguf_path);
-  if (model.mmproj_path) deleteFileBestEffort(model.mmproj_path);
+  removeModelFromConfig(configPath, modelName);
+
+  const kept: KeptModelFile[] = [];
+  for (const file of [model.gguf_path, model.mmproj_path]) {
+    if (!file) continue;
+    const usedBy = config.models
+      .filter(
+        (m) =>
+          m.name !== modelName &&
+          [m.gguf_path, m.mmproj_path].some((other) => other && samePath(other, file)),
+      )
+      .map((m) => m.name);
+    if (usedBy.length > 0) kept.push({ path: file, usedBy });
+    else deleteFileBestEffort(file);
+  }
 
   if (model.gguf_path) {
     const dir = path.dirname(model.gguf_path);
@@ -114,6 +136,5 @@ export function purgeModel(
       // best-effort — leaving an empty dir behind is harmless
     }
   }
-
-  removeModelFromConfig(configPath, modelName);
+  return kept;
 }

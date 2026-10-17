@@ -261,9 +261,11 @@ export function makeReplaceSelectionTool(): RegisteredTool {
     handler: async (args) => {
       const editor = vscode.window.activeTextEditor;
       if (!editor) throw new Error('replace_selection: no active editor');
-      await editor.edit((b) => b.replace(editor.selection, args['text'] as string));
+      const saved = await editAndSave('replace_selection', editor, (b) =>
+        b.replace(editor.selection, args['text'] as string),
+      );
       // Name the file, for the same reason insert_code does.
-      return `Selection replaced in ${vscode.workspace.asRelativePath(editor.document.uri)}.`;
+      return `Selection replaced in ${vscode.workspace.asRelativePath(editor.document.uri)}.${saved}`;
     },
   };
 }
@@ -301,16 +303,41 @@ export function makeInsertCodeTool(): RegisteredTool {
       const editor = vscode.window.activeTextEditor;
       if (!editor) throw new Error('insert_code: no active editor');
       const line = args['line'] as number;
-      await editor.edit((b) =>
+      const saved = await editAndSave('insert_code', editor, (b) =>
         b.insert(new vscode.Position(line, 0), (args['text'] as string) + '\n'),
       );
       // Name the file. The target is whatever the user has focused, which the
       // model cannot choose or inspect — so a bare "Inserted at line 0." let a
       // write land in an unrelated file with nothing in the transcript to show
       // it. Reporting the path turns a silent mistake into a visible one.
-      return `Inserted at line ${line} of ${vscode.workspace.asRelativePath(editor.document.uri)}.`;
+      return `Inserted at line ${line} of ${vscode.workspace.asRelativePath(editor.document.uri)}.${saved}`;
     },
   };
+}
+
+/**
+ * Edit the active editor and, when it held no unsaved user edits, save it, so
+ * the change reaches disk where the per-turn checkpoint (and Undo) can see it
+ * (U15-02). A buffer that was already dirty is left unsaved — saving would
+ * persist the user's own edits — and the result says Undo will not cover it.
+ * `editor.edit` resolves false when VS Code refuses the edit (U15-05).
+ */
+async function editAndSave(
+  tool: string,
+  editor: vscode.TextEditor,
+  change: (builder: vscode.TextEditorEdit) => void,
+): Promise<string> {
+  const wasDirty = editor.document.isDirty;
+  if (!(await editor.edit(change))) throw new Error(`${tool}: VS Code did not apply the edit`);
+  if (wasDirty) {
+    return ' The file already had unsaved changes, so it was left unsaved; Undo does not cover this edit.';
+  }
+  if (!(await editor.document.save())) {
+    throw new Error(
+      `${tool}: edited, but the file could not be saved; the change is in the editor buffer only`,
+    );
+  }
+  return '';
 }
 
 /**

@@ -13,7 +13,7 @@ export const MAX_REDIRECT_HOPS = 3;
 export const REQUEST_TIMEOUT_MS = 10_000;
 export const USER_AGENT = 'Forge-VSCode/0.16 (local-llm assistant)';
 const DEFAULT_MAX_CHARS = 30_000;
-const MAX_MAX_CHARS = 100_000;
+export const MAX_MAX_CHARS = 100_000;
 // Caps the raw body, before HTML is reduced to text: markup is often most of a
 // page, so a long docs page or thread runs 0.5-2 MB for well under MAX_MAX_CHARS
 // of text, and `find` must still reach its end. Bounds memory without cutting those.
@@ -246,7 +246,7 @@ export function makeWebFetchTool(dependencies: WebFetchDependencies = {}): Regis
       },
     },
     permission: 'fetch',
-    handler: async (args) => {
+    handler: async (args, context) => {
       const url = args['url'] as string;
       const requestedMaxChars = args['max_chars'];
       if (
@@ -274,7 +274,14 @@ export function makeWebFetchTool(dependencies: WebFetchDependencies = {}): Regis
 
       let result: { response: Response; body: string; bytesRead: number; truncated: boolean };
       try {
-        result = await fetchPublicPage(url, httpsOnly, lookup, pinnedFetch, MAX_WEB_FETCH_BYTES);
+        result = await fetchPublicPage(
+          url,
+          httpsOnly,
+          lookup,
+          pinnedFetch,
+          MAX_WEB_FETCH_BYTES,
+          context?.abortSignal,
+        );
       } catch (err) {
         if (err instanceof ToolError) throw err;
         throw new ToolError(`web_fetch: network error — ${(err as Error).message}`);
@@ -341,6 +348,7 @@ async function fetchPublicPage(
   lookup: (hostname: string) => Promise<ResolvedAddress[]>,
   pinnedFetch: PinnedFetch,
   maxBytes: number,
+  signal?: AbortSignal,
 ): Promise<{ response: Response; body: string; bytesRead: number; truncated: boolean }> {
   let currentUrl = url;
   const pins = new Map<string, ResolvedAddress>();
@@ -373,6 +381,8 @@ async function fetchPublicPage(
       }
       const hostname = normalizedHostname(parsed);
       const addresses = await lookup(hostname);
+      // dns.lookup cannot be cancelled; a turn stopped meanwhile ends here (U15-06).
+      signal?.throwIfAborted();
       if (addresses.length === 0) {
         throw new ToolError(`web_fetch: DNS lookup returned no addresses for ${hostname}.`);
       }
@@ -390,7 +400,9 @@ async function fetchPublicPage(
         pinned,
         {
           redirect: 'manual',
-          signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
+          signal: signal
+            ? AbortSignal.any([signal, AbortSignal.timeout(REQUEST_TIMEOUT_MS)])
+            : AbortSignal.timeout(REQUEST_TIMEOUT_MS),
           method: 'GET',
           headers: { 'User-Agent': USER_AGENT },
         },

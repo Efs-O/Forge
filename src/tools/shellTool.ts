@@ -10,6 +10,7 @@ import {
   backgroundExecutionManager,
 } from './BackgroundExecutionManager';
 import { resolveExecCwd } from './execHelpers';
+import { NOTIFY_ON_EXIT_DESCRIPTION } from './backgroundExecutionTools';
 import { resolveGitBash } from './execProgramResolver';
 import { classifyShellCommand, type ShellClassification, type ShellKind } from './shellPolicy';
 import { ShellOutputCollector } from './shellOutput';
@@ -80,8 +81,6 @@ export function gitBashDir(
   }
 }
 
-const NOTIFY_ON_EXIT_DESCRIPTION =
-  'When true, send the user a message when this background command exits. Requires background=true.';
 const classifications = new WeakMap<Record<string, unknown>, ShellClassification>();
 
 function getClassification(args: Record<string, unknown>, shell: ShellKind): ShellClassification {

@@ -159,16 +159,22 @@ export function parseWakeTime(input: string, now: Date = new Date()): Date | und
 
   const stamp = /^(\d{4})-(\d{2})-(\d{2})[ t](\d{1,2}):(\d{2})$/.exec(text);
   if (stamp) {
-    const target = new Date(
-      Number(stamp[1]),
-      Number(stamp[2]) - 1,
-      Number(stamp[3]),
-      Number(stamp[4]),
-      Number(stamp[5]),
-      0,
-      0,
-    );
-    return Number.isNaN(target.getTime()) ? undefined : target;
+    const [year, month, day, hours, minutes] = stamp.slice(1).map(Number) as [
+      number,
+      number,
+      number,
+      number,
+      number,
+    ];
+    const target = new Date(year, month - 1, day, hours, minutes, 0, 0);
+    // Date rolls 2026-02-31 into March and 25:00 into tomorrow; refuse those.
+    const exact =
+      target.getFullYear() === year &&
+      target.getMonth() === month - 1 &&
+      target.getDate() === day &&
+      target.getHours() === hours &&
+      target.getMinutes() === minutes;
+    return exact ? target : undefined;
   }
   return undefined;
 }

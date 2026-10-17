@@ -148,5 +148,42 @@ describe('modelManager editOps', () => {
       expect(fs.existsSync(ggufPath)).toBe(false);
       expect(fs.existsSync(snapshotDir)).toBe(true);
     });
+
+    it('keeps an mmproj another model still uses (U14-02)', () => {
+      const ggufPath = path.join(dir, 'q4.gguf');
+      const sharedMmproj = path.join(dir, 'mmproj.gguf');
+      for (const file of [ggufPath, sharedMmproj, path.join(dir, 'q6.gguf')])
+        fs.writeFileSync(file, 'x');
+      seed({
+        models: [
+          { name: 'q6', provider: 'llama.cpp', gguf_path: path.join(dir, 'q6.gguf'), mmproj_path: sharedMmproj },
+          { name: 'my-model', provider: 'llama.cpp', gguf_path: ggufPath, mmproj_path: sharedMmproj },
+        ],
+        active_model: 'q6',
+      } as unknown as ForgeConfig);
+
+      const kept = purgeModel(configPath, loadConfig(dir), 'my-model', () => false);
+
+      expect(fs.existsSync(ggufPath)).toBe(false);
+      expect(fs.existsSync(sharedMmproj)).toBe(true);
+      expect(kept).toEqual([{ path: sharedMmproj, usedBy: ['q6'] }]);
+    });
+
+    it('deletes nothing when the config write fails (U14-01)', () => {
+      const ggufPath = path.join(dir, 'a.gguf');
+      fs.writeFileSync(ggufPath, 'x');
+      seed({ active_model: undefined } as unknown as ForgeConfig);
+      fs.writeFileSync(configPath, 'models: [unclosed');
+
+      expect(() =>
+        purgeModel(
+          configPath,
+          { models: [{ name: 'my-model', provider: 'llama.cpp', gguf_path: ggufPath }] } as ForgeConfig,
+          'my-model',
+          () => false,
+        ),
+      ).toThrow();
+      expect(fs.existsSync(ggufPath)).toBe(true);
+    });
   });
 });

@@ -1,6 +1,7 @@
 import * as vscode from 'vscode';
 import type { RegisteredTool } from './ToolRegistry';
-import { resolveWorkspaceUri } from '../util/WorkspacePaths';
+import { resolveRealWorkspacePath, resolveWorkspaceUri } from '../util/WorkspacePaths';
+import { applyAndSaveWorkspaceEdit } from './workspaceEditApply';
 
 interface ListedCodeAction {
   title: string;
@@ -43,7 +44,9 @@ export async function getCodeActions(args: Record<string, unknown>): Promise<str
 }
 
 /** Applies only code actions represented as a WorkspaceEdit; arbitrary commands stay out of scope. */
-export function makeApplyCodeActionTool(): RegisteredTool {
+export function makeApplyCodeActionTool(
+  extraRoots: () => readonly string[] = () => [],
+): RegisteredTool {
   return {
     definition: {
       type: 'function',
@@ -72,8 +75,11 @@ export function makeApplyCodeActionTool(): RegisteredTool {
     permission: 'write',
     mutation: { paths: (args) => [args['path'] as string], showDiff: true },
     handler: async (args, context) => {
+      const filePath = await resolveRealWorkspacePath(args['path'] as string, undefined, {
+        extraRoots: extraRoots(),
+      });
       const actions = await codeActions(
-        args['path'] as string,
+        filePath,
         args['line'] as number,
         args['character'] as number,
       );
@@ -84,14 +90,7 @@ export function makeApplyCodeActionTool(): RegisteredTool {
       if (!action.edit || action.command) {
         throw new Error('apply_code_action: this action is not a workspace-edit-only action.');
       }
-      const changedPaths = action.edit
-        .entries()
-        .map(([uri]) => uri.fsPath)
-        .filter((filePath) => filePath.length > 0);
-      context?.beforeMutate(changedPaths);
-      if (!(await vscode.workspace.applyEdit(action.edit))) {
-        throw new Error('apply_code_action: VS Code rejected the workspace edit.');
-      }
+      await applyAndSaveWorkspaceEdit('apply_code_action', action.edit, extraRoots(), context);
       return `Applied code action: ${action.title}`;
     },
   };

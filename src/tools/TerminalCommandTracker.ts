@@ -1,7 +1,6 @@
 import * as vscode from 'vscode';
 
-const MAX_OUTPUT_CHARS = 12_000;
-/** Per-command cap for user-typed commands. Several are carried at once. */
+/** Per-command output cap. Several commands are carried at once. */
 const MAX_USER_OUTPUT_CHARS = 4_000;
 /** How many of the user's own recent commands are retained. */
 const MAX_USER_COMMANDS = 5;
@@ -19,18 +18,6 @@ export interface UserTerminalCommand {
   outputTruncated: boolean;
 }
 
-export type TerminalCommandStatus = 'waiting' | 'running' | 'completed';
-
-export interface TerminalCommandObservation {
-  command: string;
-  intendedCwd: string;
-  status: TerminalCommandStatus;
-  actualCwd?: string | undefined;
-  exitCode?: number | undefined;
-  output?: string | undefined;
-  outputTruncated: boolean;
-}
-
 interface CapturedOutput {
   output?: string | undefined;
   outputTruncated: boolean;
@@ -38,13 +25,6 @@ interface CapturedOutput {
 
 interface TrackedUserCommand extends UserTerminalCommand {
   execution: vscode.TerminalShellExecution;
-  readTask?: Promise<void> | undefined;
-}
-
-interface TrackedCommand extends TerminalCommandObservation {
-  terminal: vscode.Terminal;
-  conversationId?: string | undefined;
-  execution?: vscode.TerminalShellExecution | undefined;
   readTask?: Promise<void> | undefined;
 }
 
@@ -60,10 +40,6 @@ interface TerminalExecutionEvents {
 function cwdOf(uri: vscode.Uri | undefined): string | undefined {
   if (!uri) return undefined;
   return uri.scheme === 'file' ? uri.fsPath : uri.toString(true);
-}
-
-function sameCommand(left: string, right: string): boolean {
-  return left.trim().replace(/\r\n/g, '\n') === right.trim().replace(/\r\n/g, '\n');
 }
 
 /** Read live so toggling the setting takes effect without a reload. */
@@ -87,8 +63,6 @@ function stripTerminalEscapes(text: string): string {
  * while `forge.terminal.watchUserCommands` is enabled.
  */
 export class TerminalCommandTracker implements vscode.Disposable {
-  private readonly byTerminal = new Map<vscode.Terminal, TrackedCommand>();
-  private readonly byConversation = new Map<string, TrackedCommand>();
   private readonly byUserExecution = new Map<vscode.TerminalShellExecution, TrackedUserCommand>();
   /** Oldest first; trimmed to MAX_USER_COMMANDS. */
   private readonly userCommands: TrackedUserCommand[] = [];
@@ -102,38 +76,6 @@ export class TerminalCommandTracker implements vscode.Disposable {
         void this.captureEnded(event);
       }),
     );
-  }
-
-  trackPastedCommand(
-    terminal: vscode.Terminal,
-    command: string,
-    intendedCwd: string,
-    conversationId?: string,
-  ): void {
-    const tracked: TrackedCommand = {
-      terminal,
-      command,
-      intendedCwd,
-      status: 'waiting',
-      outputTruncated: false,
-      ...(conversationId ? { conversationId } : {}),
-    };
-    this.byTerminal.set(terminal, tracked);
-    if (conversationId) this.byConversation.set(conversationId, tracked);
-  }
-
-  latestForConversation(conversationId: string): TerminalCommandObservation | undefined {
-    const tracked = this.byConversation.get(conversationId);
-    if (!tracked) return undefined;
-    return {
-      command: tracked.command,
-      intendedCwd: tracked.intendedCwd,
-      status: tracked.status,
-      ...(tracked.actualCwd ? { actualCwd: tracked.actualCwd } : {}),
-      ...(tracked.exitCode !== undefined ? { exitCode: tracked.exitCode } : {}),
-      ...(tracked.output ? { output: tracked.output } : {}),
-      outputTruncated: tracked.outputTruncated,
-    };
   }
 
   /** The user's own recent commands, newest first. */
@@ -151,27 +93,7 @@ export class TerminalCommandTracker implements vscode.Disposable {
       .reverse();
   }
 
-  captureStarted(event: vscode.TerminalShellExecutionStartEvent): void {
-    const tracked = this.byTerminal.get(event.terminal);
-    if (tracked && sameCommand(tracked.command, event.execution.commandLine.value)) {
-      tracked.status = 'running';
-      tracked.execution = event.execution;
-      tracked.actualCwd = cwdOf(event.execution.cwd);
-      tracked.readTask = this.readOutput(tracked, event.execution, MAX_OUTPUT_CHARS);
-      return;
-    }
-    this.captureUserStarted(event);
-  }
-
   async captureEnded(event: vscode.TerminalShellExecutionEndEvent): Promise<void> {
-    const tracked = this.byTerminal.get(event.terminal);
-    if (tracked && tracked.execution === event.execution) {
-      await tracked.readTask;
-      tracked.status = 'completed';
-      tracked.exitCode = event.exitCode;
-      tracked.actualCwd = cwdOf(event.execution.cwd) ?? tracked.actualCwd;
-      return;
-    }
     const user = this.byUserExecution.get(event.execution);
     if (!user) return;
     this.byUserExecution.delete(event.execution);
@@ -181,7 +103,7 @@ export class TerminalCommandTracker implements vscode.Disposable {
     user.cwd = cwdOf(event.execution.cwd) ?? user.cwd;
   }
 
-  private captureUserStarted(event: vscode.TerminalShellExecutionStartEvent): void {
+  captureStarted(event: vscode.TerminalShellExecutionStartEvent): void {
     if (!userCaptureEnabled()) return;
     const command = event.execution.commandLine.value.trim();
     if (!command) return;
@@ -205,8 +127,6 @@ export class TerminalCommandTracker implements vscode.Disposable {
   dispose(): void {
     for (const subscription of this.subscriptions) subscription.dispose();
     this.subscriptions.length = 0;
-    this.byTerminal.clear();
-    this.byConversation.clear();
     this.byUserExecution.clear();
     this.userCommands.length = 0;
   }

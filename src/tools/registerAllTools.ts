@@ -184,9 +184,9 @@ export function registerAllTools(
   registry.register(makeCreateDirectoryTool(extraRoots));
   registry.register(makeMoveFileTool(extraRoots));
   registry.register(makeDeleteFileTool(extraRoots));
-  registry.register(makeFormatFileTool());
-  registry.register(makeRenameSymbolTool());
-  registry.register(makeApplyCodeActionTool());
+  registry.register(makeFormatFileTool(extraRoots));
+  registry.register(makeRenameSymbolTool(extraRoots));
+  registry.register(makeApplyCodeActionTool(extraRoots));
   registry.register(makeEditNotebookCellTool());
 
   // v0.7 exec + git

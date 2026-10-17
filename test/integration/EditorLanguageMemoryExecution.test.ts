@@ -264,6 +264,22 @@ describe('isolated editor, language, search, and memory tool execution', () => {
     ).resolves.toBe('Renamed to renamed');
     expect(beforeMutate).toHaveBeenCalledWith([path.join(root, 'sample.ts')]);
     expect(apply).toHaveBeenCalledWith(workspaceEdit);
+    // The rename is saved so the disk checkpoint, and Undo, cover it (U15-02).
+    expect(save).toHaveBeenCalledTimes(2);
+
+    // A rename reaching outside the workspace is refused before applying (U15-03).
+    const outside = {
+      entries: () => [[vscode.Uri.file(path.join(os.tmpdir(), 'elsewhere.ts')), []]],
+    };
+    executeCommand.mockImplementation(async () => outside);
+    apply.mockClear();
+    await expect(
+      makeRenameSymbolTool().handler(
+        { path: 'sample.ts', line: 0, character: 1, new_name: 'renamed' },
+        { beforeMutate },
+      ),
+    ).rejects.toThrow();
+    expect(apply).not.toHaveBeenCalled();
   });
 
   it('executes memory create, recall, and list semantics with fake workspace state', async () => {

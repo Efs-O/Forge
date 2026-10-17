@@ -267,5 +267,3 @@ export function injectTurnContext(messages: ChatMessage[], state: TurnContextSta
   if (head === -1) return [...out, standalone];
   return [...out.slice(0, head), standalone, ...out.slice(head)];
 }
-
-export { OPEN as TURN_CONTEXT_OPEN, CLOSE as TURN_CONTEXT_CLOSE };

@@ -164,6 +164,31 @@ describe('web_fetch DNS SSRF protection', () => {
     expect(result).toContain(`body cut at ${MAX_WEB_FETCH_BYTES} bytes`);
   });
 
+  // Stop used to leave the request running until its 10 s timeout (U15-06).
+  it('aborts an in-flight request when the turn is stopped', async () => {
+    const controller = new AbortController();
+    let seen: AbortSignal | undefined;
+    const fetch = vi.fn(
+      (_url: string, _address: unknown, init: { signal: AbortSignal }) =>
+        new Promise<Response>((_resolve, reject) => {
+          seen = init.signal;
+          init.signal.addEventListener('abort', () => reject(init.signal.reason));
+        }),
+    );
+    const tool = makeWebFetchTool({
+      lookup: async () => [{ address: '8.8.8.8', family: 4 }],
+      fetch,
+    });
+
+    const pending = tool.handler({ url: 'https://public.example.test/' }, {
+      abortSignal: controller.signal,
+    } as Parameters<typeof tool.handler>[1]);
+    await vi.waitFor(() => expect(fetch).toHaveBeenCalled());
+    controller.abort();
+    await expect(pending).rejects.toThrow();
+    expect(seen?.aborted).toBe(true);
+  });
+
   it('uses the same DNS guard for routed preview resources, including rebinding names', async () => {
     const lookup = vi.fn(async () => [{ address: '127.0.0.1', family: 4 }]);
     const fetch = vi.fn(async () => new Response('must not connect'));

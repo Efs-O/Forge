@@ -108,6 +108,28 @@ async function runPowerShell(script: string, timeoutMs: number): Promise<string>
   return result.stdout;
 }
 
+function schtasks(args: string[]): ReturnType<typeof spawnAndWait> {
+  return spawnAndWait(
+    `${process.env['SystemRoot'] ?? 'C:\\Windows'}\\System32\\schtasks.exe`,
+    args,
+    os.tmpdir(),
+    SCHTASKS_TIMEOUT_MS,
+  );
+}
+
+/**
+ * Delete a task: true when deleted, false when there was none. A failed delete
+ * of a task that still exists throws (U14-03) — telling "not found" apart by
+ * re-querying, because schtasks' error text is localised.
+ */
+async function deleteTask(name: string): Promise<boolean> {
+  const deleted = await schtasks(['/delete', '/tn', name, '/f']);
+  if (deleted.exitCode === 0) return true;
+  if ((await schtasks(['/query', '/tn', name])).exitCode !== 0) return false;
+  const detail = (deleted.stderr || deleted.stdout).trim().split('\n')[0] || 'no output';
+  throw new Error(`could not delete scheduled task ${name}: ${detail}`);
+}
+
 export class PowerControlUnsupportedError extends Error {
   constructor() {
     super('Forge power control is Windows-only; this host is not Windows.');
@@ -281,13 +303,7 @@ export class PowerControl {
   /** Removes the armed wake. True when one was there to remove. */
   async clearWakeTimer(): Promise<boolean> {
     this.assertWindows();
-    const result = await spawnAndWait(
-      `${process.env['SystemRoot'] ?? 'C:\\Windows'}\\System32\\schtasks.exe`,
-      ['/delete', '/tn', WAKE_TASK_NAME, '/f'],
-      os.tmpdir(),
-      SCHTASKS_TIMEOUT_MS,
-    );
-    return result.exitCode === 0;
+    return deleteTask(WAKE_TASK_NAME);
   }
 
   /**
@@ -327,23 +343,13 @@ export class PowerControl {
    */
   async readScheduledWakes(): Promise<RecurringWake[] | null> {
     this.assertWindows();
-    const result = await spawnAndWait(
-      `${process.env['SystemRoot'] ?? 'C:\\Windows'}\\System32\\schtasks.exe`,
-      ['/query', '/tn', SCHEDULED_WAKE_TASK_NAME, '/xml'],
-      os.tmpdir(),
-      SCHTASKS_TIMEOUT_MS,
-    );
+    const result = await schtasks(['/query', '/tn', SCHEDULED_WAKE_TASK_NAME, '/xml']);
     if (result.exitCode !== 0) return null;
     return parseScheduledWakes(result.stdout);
   }
 
   private async deleteScheduledWakes(): Promise<void> {
-    await spawnAndWait(
-      `${process.env['SystemRoot'] ?? 'C:\\Windows'}\\System32\\schtasks.exe`,
-      ['/delete', '/tn', SCHEDULED_WAKE_TASK_NAME, '/f'],
-      os.tmpdir(),
-      SCHTASKS_TIMEOUT_MS,
-    );
+    await deleteTask(SCHEDULED_WAKE_TASK_NAME);
   }
 
   /**

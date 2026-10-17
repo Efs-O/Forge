@@ -132,9 +132,14 @@ export class ModelManagerPanel {
         );
         if (choice !== 'Delete permanently') return;
         try {
-          purgeModel(this.getConfigPath(), this.getConfig(), msg.modelName, (name) =>
+          const kept = purgeModel(this.getConfigPath(), this.getConfig(), msg.modelName, (name) =>
             this.pool.isLoaded(name),
           );
+          for (const file of kept) {
+            void vscode.window.showInformationMessage(
+              `Forge: kept ${file.path} — still used by ${file.usedBy.join(', ')}.`,
+            );
+          }
         } catch (err) {
           this.reportError(err);
         }

@@ -28,3 +28,24 @@ describe('PowerControl.setScheduledWakes', () => {
     );
   });
 });
+
+describe('PowerControl task deletion (U14-03)', () => {
+  beforeEach(() => {
+    Object.defineProperty(process, 'platform', { ...platform, value: 'win32' });
+    spawnAndWait.mockReset();
+  });
+
+  afterEach(() => Object.defineProperty(process, 'platform', platform));
+
+  it('reports a missing one-shot task as nothing armed', async () => {
+    spawnAndWait.mockResolvedValue({ exitCode: 1, stdout: '', stderr: 'not found' });
+    await expect(new PowerControl().clearWakeTimer()).resolves.toBe(false);
+  });
+
+  it('throws when the delete fails and the task is still there', async () => {
+    spawnAndWait
+      .mockResolvedValueOnce({ exitCode: 1, stdout: '', stderr: 'ERROR: Access is denied.' })
+      .mockResolvedValueOnce({ exitCode: 0, stdout: '', stderr: '' });
+    await expect(new PowerControl().setScheduledWakes([])).rejects.toThrow('Access is denied');
+  });
+});

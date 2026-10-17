@@ -3,6 +3,7 @@ import * as path from 'path';
 import * as vscode from 'vscode';
 import type { RegisteredTool } from './ToolRegistry';
 import { resolveRealWorkspacePath } from '../util/WorkspacePaths';
+import { applyAndSaveWorkspaceEdit } from './workspaceEditApply';
 
 /** Join a result line to its optional follow-up sentence. */
 function withWarning(result: string, warning: string): string {
@@ -283,7 +284,7 @@ export function resolveFormattingOptions(doc: vscode.TextDocument): vscode.Forma
   };
 }
 
-export function makeFormatFileTool(): RegisteredTool {
+export function makeFormatFileTool(extraRoots: () => readonly string[] = () => []): RegisteredTool {
   return {
     definition: {
       type: 'function',
@@ -306,7 +307,10 @@ export function makeFormatFileTool(): RegisteredTool {
     handler: async (args, context) => {
       const filePath = args['path'] as string;
       const uri = vscode.Uri.file(
-        await resolveRealWorkspacePath(filePath, undefined, { allowMissing: true }),
+        await resolveRealWorkspacePath(filePath, undefined, {
+          allowMissing: true,
+          extraRoots: extraRoots(),
+        }),
       );
       // Load the document only. Never show, activate or close an editor: a tool
       // call must not move the user's focus, and the close command acted on
@@ -371,7 +375,9 @@ export function makeFormatFileTool(): RegisteredTool {
 
 // ── rename_symbol ──────────────────────────────────────────────────────────────
 
-export function makeRenameSymbolTool(): RegisteredTool {
+export function makeRenameSymbolTool(
+  extraRoots: () => readonly string[] = () => [],
+): RegisteredTool {
   return {
     definition: {
       type: 'function',
@@ -401,7 +407,10 @@ export function makeRenameSymbolTool(): RegisteredTool {
       const filePath = args['path'] as string;
       const newName = args['new_name'] as string;
       const uri = vscode.Uri.file(
-        await resolveRealWorkspacePath(filePath, undefined, { allowMissing: true }),
+        await resolveRealWorkspacePath(filePath, undefined, {
+          allowMissing: true,
+          extraRoots: extraRoots(),
+        }),
       );
       const position = new vscode.Position(args['line'] as number, args['character'] as number);
 
@@ -413,9 +422,7 @@ export function makeRenameSymbolTool(): RegisteredTool {
       );
 
       if (!edit) throw new Error('rename_symbol: no rename provider available for this file type');
-      context?.beforeMutate(edit.entries().map(([target]) => target.fsPath));
-      const applied = await vscode.workspace.applyEdit(edit);
-      if (!applied) throw new Error('rename_symbol: workspace edit was rejected');
+      await applyAndSaveWorkspaceEdit('rename_symbol', edit, extraRoots(), context);
       return `Renamed to ${newName}`;
     },
   };

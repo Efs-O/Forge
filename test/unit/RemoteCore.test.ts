@@ -199,7 +199,7 @@ describe('remote configuration and lease', () => {
         web: {
           enabled: false,
           max_results: 5,
-          max_fetch_bytes: 200_000,
+          max_fetch_bytes: 100_000,
           timeout_ms: 15_000,
         },
       },

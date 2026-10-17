@@ -13,13 +13,13 @@ export const RemoteContactsConfigSchema = z
       .object({
         enabled: z.boolean().default(false),
         max_results: z.number().int().min(1).max(5).default(5),
-        max_fetch_bytes: z.number().int().min(10_000).max(200_000).default(200_000),
+        max_fetch_bytes: z.number().int().min(10_000).max(200_000).default(100_000),
         timeout_ms: z.number().int().min(1_000).max(30_000).default(15_000),
       })
       .default({
         enabled: false,
         max_results: 5,
-        max_fetch_bytes: 200_000,
+        max_fetch_bytes: 100_000,
         timeout_ms: 15_000,
       }),
   })
@@ -28,7 +28,7 @@ export const RemoteContactsConfigSchema = z
     web: {
       enabled: false,
       max_results: 5,
-      max_fetch_bytes: 200_000,
+      max_fetch_bytes: 100_000,
       timeout_ms: 15_000,
     },
   });

@@ -162,6 +162,10 @@ describe('parseWakeTime', () => {
     expect(parseWakeTime('07:60', now)).toBeUndefined();
     expect(parseWakeTime('0h', now)).toBeUndefined();
     expect(parseWakeTime('400h', now)).toBeUndefined();
+    // Calendar overflow must not roll into the next month or day (U14-05).
+    expect(parseWakeTime('2026-02-31 06:15', now)).toBeUndefined();
+    expect(parseWakeTime('2026-13-01 06:15', now)).toBeUndefined();
+    expect(parseWakeTime('2026-09-09 24:15', now)).toBeUndefined();
   });
 });
 

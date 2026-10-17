@@ -219,9 +219,10 @@ export class RelativePattern {
 }
 
 export const Uri = {
-  file: (fsPath: string) => ({ fsPath }),
+  file: (fsPath: string) => ({ fsPath, scheme: 'file' }),
   joinPath: (base: { fsPath: string }, ...segments: string[]) => ({
     fsPath: path.join(base.fsPath, ...segments),
+    scheme: 'file',
   }),
   parse: (value: string) => ({ fsPath: value, toString: () => value }),
 };
