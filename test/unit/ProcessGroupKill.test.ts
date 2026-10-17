@@ -1,5 +1,5 @@
 import * as os from 'os';
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import { spawnCliProcess, terminateProcessTree } from '../../src/agents/cliProcess';
 import { TEST_BASH } from '../support/bash';
 
@@ -36,18 +36,12 @@ describe.runIf(process.platform !== 'win32' && Boolean(TEST_BASH))(
             }
           });
         });
-        // Let the sleep actually start before we kill the tree.
-        await new Promise((r) => setTimeout(r, 300));
+        // `$!` is printed after the fork, so the sleep already exists here.
         await terminateProcessTree(proc);
-        // Give the group a moment to die and be reaped by init.
-        await new Promise((r) => setTimeout(r, 500));
-        let alive = true;
-        try {
-          process.kill(sleepPid, 0);
-        } catch {
-          alive = false;
-        }
-        expect(alive).toBe(false);
+        // Poll until the group is gone and reaped by init.
+        await vi.waitFor(() => expect(() => process.kill(sleepPid, 0)).toThrow(), {
+          timeout: 5000,
+        });
       } finally {
         // Never leak the group, even if the assertions above fail first.
         await terminateProcessTree(proc).catch(() => undefined);

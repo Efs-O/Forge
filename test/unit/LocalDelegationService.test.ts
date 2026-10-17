@@ -338,8 +338,11 @@ describe('LocalDelegationService limits and dispatch', () => {
       targetModel: 'llama',
       task: 'check',
     });
+    // Abort only once the provider stream is open, or the test never reaches it.
+    await vi.waitFor(() => expect(timed.streamChat).toHaveBeenCalled());
     timed.timeout.abort(new DOMException('deadline', 'TimeoutError'));
     await expect(timeoutRun).rejects.toThrow('timeout');
+    expect((timed.streamChat.mock.calls[0]?.[4] as AbortSignal).aborted).toBe(true);
     expect(timed.release).toHaveBeenCalledTimes(1);
 
     const cancelled = makeHarness({ streamNever: true });
@@ -350,8 +353,10 @@ describe('LocalDelegationService limits and dispatch', () => {
       task: 'check',
       signal: caller.signal,
     });
+    await vi.waitFor(() => expect(cancelled.streamChat).toHaveBeenCalled());
     caller.abort(new DOMException('stop', 'AbortError'));
     await expect(cancelRun).rejects.toThrow('cancelled');
+    expect((cancelled.streamChat.mock.calls[0]?.[4] as AbortSignal).aborted).toBe(true);
     expect(cancelled.release).toHaveBeenCalledTimes(1);
   });
 

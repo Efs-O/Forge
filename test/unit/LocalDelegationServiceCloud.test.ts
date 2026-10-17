@@ -150,9 +150,10 @@ describe('LocalDelegationService cloud targets', () => {
     const rejected = expect(promise).rejects.toThrow(
       `Delegation timeout: exceeded ${CLOUD_DELEGATION_TIMEOUT_MS}ms.`,
     );
-    await Promise.resolve();
+    await vi.waitFor(() => expect(h.streamChat).toHaveBeenCalled());
     h.timeout.abort(new DOMException('timeout', 'TimeoutError'));
     await rejected;
+    expect((h.streamChat.mock.calls[0]?.[4] as AbortSignal).aborted).toBe(true);
   });
 
   it('reports a caller abort as a cancellation', async () => {
@@ -165,8 +166,9 @@ describe('LocalDelegationService cloud targets', () => {
       signal: caller.signal,
     });
     const rejected = expect(promise).rejects.toThrow('Delegation cancelled by caller.');
-    await Promise.resolve();
+    await vi.waitFor(() => expect(h.streamChat).toHaveBeenCalled());
     caller.abort(new DOMException('cancelled', 'AbortError'));
     await rejected;
+    expect((h.streamChat.mock.calls[0]?.[4] as AbortSignal).aborted).toBe(true);
   });
 });
