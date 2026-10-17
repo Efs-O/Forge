@@ -475,7 +475,9 @@ overlaps with an existing owner, extend the owner instead.
 | `view_image` tool                          | `src/tools/imageTool.ts`              |
 | `send_file` tool (workspace + screenshot-dir delivery) | `src/tools/sendFileTool.ts` |
 | `render_html_to_image` tool (schema, mode dispatch, image-mode naming and delivery) | `src/tools/renderHtmlToImageTool.ts` |
-| HTML→PNG render engine (launch hardening, SSRF-guarded preview routing, abort/timeout cleanup) | `src/tools/renderHtml/renderEngine.ts` |
+| Shared render-browser launch hardening, abort/timeout cleanup and preview origin | `src/tools/renderHtml/renderBrowser.ts` |
+| Inert HTML→PNG rendering and full-page height cap | `src/tools/renderHtml/renderEngine.ts` |
+| Interactive HTML preview (guarded request routing, frame capture and page diagnostics) | `src/tools/renderHtml/previewRenderer.ts` |
 | Preview resource transport (host-side fetch of routed requests, redirects re-checked per hop, byte cap) | `src/tools/renderHtml/previewFetch.ts` |
 | `render_html_to_image` input validation (HTML size cap, workspace file read, viewport bounds) | `src/tools/renderHtml/htmlInput.ts` |
 | `render_html_to_image` preview mode (result text, vision-gated image part; saves and sends nothing) | `src/tools/renderHtml/previewMode.ts` |
