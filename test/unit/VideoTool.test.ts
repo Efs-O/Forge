@@ -91,15 +91,7 @@ describe('view_video handler', () => {
     if (typeof result === 'string') throw new Error('expected multimodal result');
 
     const kinds = result.content.map((part) => part.type);
-    expect(kinds).toEqual([
-      'text',
-      'text',
-      'image_url',
-      'text',
-      'image_url',
-      'text',
-      'image_url',
-    ]);
+    expect(kinds).toEqual(['text', 'text', 'image_url', 'text', 'image_url', 'text', 'image_url']);
   });
 
   it('tells the model these are stills, not motion, and carry no audio', async () => {
@@ -339,6 +331,15 @@ describe('per-call ffmpeg overrides', () => {
       endSeconds: 5,
     });
     expect(line).toContain('Sampled only 4.0s-5.0s of the clip, not all of it.');
+  });
+
+  it('reports an end past the clip as the clamped span (U17-05)', () => {
+    const line = summaryLine('clips/a.mp4', PROBE, [3.2, 4.6], {
+      ...VIDEO_DEFAULTS,
+      startSeconds: 3,
+      endSeconds: 60,
+    });
+    expect(line).toContain('Sampled only 3.0s-5.0s of the clip');
   });
 
   it('stays quiet about the window when the whole clip was sampled', () => {

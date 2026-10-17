@@ -296,7 +296,11 @@ export function makeDesktopTools(getConfig: GetConfig): RegisteredTool[] {
                 enum: ['left', 'right', 'middle'],
                 description: 'Mouse button (default left).',
               },
-              clicks: { type: 'number', description: '1 = click, 2 = double-click (default 1).' },
+              clicks: {
+                type: 'integer',
+                enum: [1, 2],
+                description: '1 = click, 2 = double-click (default 1).',
+              },
               capture_id: { type: 'string' },
               coord_space: { type: 'string', enum: ['image_px', 'norm_1000'] },
               consequential: {
@@ -323,6 +327,8 @@ export function makeDesktopTools(getConfig: GetConfig): RegisteredTool[] {
         const capId = str(args, 'capture_id')!;
         const button = (args.button as string) ?? 'left';
         const clicks = num(args, 'clicks') ?? 1;
+        if (clicks !== 1 && clicks !== 2)
+          throw new Error(`desktop_click: clicks must be 1 or 2, got ${clicks}`);
         await driver.click(
           x,
           y,

@@ -119,11 +119,13 @@ export function summaryLine(
   const requested = options?.requestedFrames;
   // State the window explicitly. Otherwise a windowed result is indistinguishable
   // from a short clip, and the model reasons about the wrong span of time.
-  const start = options?.startSeconds;
-  const end = options?.endSeconds;
+  // The end is clamped to the clip as `resolveWindow` clamps it, so an
+  // end_seconds past the end is reported as the span actually sampled.
+  const start = options?.startSeconds ?? 0;
+  const end = Math.min(options?.endSeconds ?? probe.durationSeconds, probe.durationSeconds);
   const windowed =
-    (start !== undefined && start > 0) || (end !== undefined && end < probe.durationSeconds)
-      ? ` Sampled only ${(start ?? 0).toFixed(1)}s-${(end ?? probe.durationSeconds).toFixed(1)}s of the clip, not all of it.`
+    start > 0 || end < probe.durationSeconds
+      ? ` Sampled only ${start.toFixed(1)}s-${end.toFixed(1)}s of the clip, not all of it.`
       : '';
   // Say why the count is what it is. Without this a caller whose request was
   // clipped has to infer the reason, and the obvious inference is wrong.

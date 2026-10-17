@@ -405,6 +405,7 @@ overlaps with an existing owner, extend the owner instead.
 | ------------------------------------------ | ------------------------------------- |
 | Tool dispatch + capability/permission gate | `src/tools/ToolRegistry.ts`           |
 | Per-model tool output limits               | `src/tools/toolOutputLimits.ts`        |
+| `read_tool_result` tool (re-read a capped tool result or past message by id, query or index) | `src/tools/toolResultTools.ts` |
 | search_code capped result rendering        | `src/tools/searchCodeOutput.ts`        |
 | Config-to-tool permission resolution       | `src/tools/PermissionResolver.ts`     |
 | Tool registration entry point              | `src/tools/registerAllTools.ts`       |

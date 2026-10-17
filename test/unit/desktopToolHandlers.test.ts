@@ -11,6 +11,7 @@ import driverScript from '../../src/tools/desktop/desktopDriver.ps1';
 const h = vi.hoisted(() => ({
   findWindow: vi.fn(),
   focusWindow: vi.fn(),
+  click: vi.fn(),
 }));
 
 vi.mock('../../src/tools/desktop/PowerShellDesktopDriver', async (importOriginal) => {
@@ -22,6 +23,7 @@ vi.mock('../../src/tools/desktop/PowerShellDesktopDriver', async (importOriginal
       coversTitle: () => true,
       findWindow: h.findWindow,
       focusWindow: h.focusWindow,
+      click: h.click,
       approvedTarget: () => undefined,
       captureTarget: () => undefined,
     }),
@@ -38,14 +40,13 @@ const notepad: FoundWindow = {
   processName: 'notepad',
 };
 
-function focusTool() {
+function desktopTool(name: string) {
   const config = { permissions: { desktop: { enabled: true } } } as unknown as ForgeConfig;
-  const tool = makeDesktopTools(() => config).find(
-    (t) => t.definition.function.name === 'desktop_focus_window',
-  );
-  if (!tool) throw new Error('desktop_focus_window is not registered');
+  const tool = makeDesktopTools(() => config).find((t) => t.definition.function.name === name);
+  if (!tool) throw new Error(`${name} is not registered`);
   return tool;
 }
+const focusTool = () => desktopTool('desktop_focus_window');
 
 describe('desktop_focus_window approval (U18-02)', () => {
   it('names the resolved window, not the query', async () => {
@@ -85,5 +86,19 @@ describe('desktop_focus_window approval (U18-02)', () => {
     expect(body).not.toMatch(/\$_\.title -like/);
     expect(body).toContain('IndexOf($title, [StringComparison]::OrdinalIgnoreCase)');
     expect(body).toMatch(/if \(\$hits\.Count -gt 1\) \{[\s\S]*throw/);
+  });
+});
+
+describe('desktop_click clicks (U18-03)', () => {
+  it('accepts 1 or 2 only; the driver never loops a model-chosen count', async () => {
+    h.click.mockReset().mockResolvedValue(undefined);
+    const tool = desktopTool('desktop_click');
+    const schema = tool.definition.function.parameters as {
+      properties: { clicks: { type: string; enum: number[] } };
+    };
+    expect(schema.properties.clicks).toMatchObject({ type: 'integer', enum: [1, 2] });
+    const args = { x: 1, y: 1, capture_id: 'c1', clicks: 500 };
+    await expect(tool.handler(args, {} as never)).rejects.toThrow('clicks must be 1 or 2');
+    expect(h.click).not.toHaveBeenCalled();
   });
 });
