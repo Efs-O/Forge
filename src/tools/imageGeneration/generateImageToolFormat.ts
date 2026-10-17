@@ -18,7 +18,7 @@ export const EXTENSION_BY_MIME: Readonly<Record<string, string>> = {
   'image/bmp': '.bmp',
   'image/webp': '.webp',
 };
-export const IMAGE_EXTENSIONS = new Set(['.png', '.jpg', '.jpeg', '.gif', '.bmp', '.webp']);
+const IMAGE_EXTENSIONS = new Set(['.png', '.jpg', '.jpeg', '.gif', '.bmp', '.webp']);
 
 export function pickBackend(
   config: ImageGenerationConfig,
@@ -88,7 +88,7 @@ function randomSeed(): number {
 }
 
 /** `V:/models/qwen_image_2.1-Q4_K.gguf` -> `qwen_image_2.1-Q4_K`. */
-export function modelLabel(modelPath: string): string {
+function modelLabel(modelPath: string): string {
   const base = path.win32.basename(modelPath);
   const dot = base.lastIndexOf('.');
   return dot > 0 ? base.slice(0, dot) : base;

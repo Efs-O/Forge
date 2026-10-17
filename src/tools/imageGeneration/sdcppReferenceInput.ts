@@ -40,7 +40,7 @@ export const MAX_REFERENCE_INPUT_BYTES = 24 * 1024 * 1024;
 export const DIMENSION_MULTIPLE = 32;
 
 /** One reference decode. A hung ffmpeg must not hang the round. */
-export const REFERENCE_DECODE_TIMEOUT_MS = 30_000;
+const REFERENCE_DECODE_TIMEOUT_MS = 30_000;
 
 /** Injection seam, mirroring `videoExtract.RunFfmpeg`; tests assert on argv. */
 export type RunFfmpeg = (

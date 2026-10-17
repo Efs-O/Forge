@@ -1,13 +1,13 @@
 import type { BenchmarkRunResult, BenchmarkTask } from './contracts';
 
-export interface SmokeReportInput {
+interface SmokeReportInput {
   runId: string;
   task: BenchmarkTask;
   results: readonly BenchmarkRunResult[];
   generatedAt?: string;
 }
 
-export interface SmokeReportDocument {
+interface SmokeReportDocument {
   version: 1;
   run_id: string;
   generated_at: string;
@@ -31,9 +31,7 @@ const ORDER: Record<BenchmarkRunResult['status'], number> = {
   SKIPPED: 5,
 };
 
-export function rankSmokeResults(
-  results: readonly BenchmarkRunResult[],
-): SmokeReportDocument['ranking'] {
+function rankSmokeResults(results: readonly BenchmarkRunResult[]): SmokeReportDocument['ranking'] {
   let rank = 0;
   let previous: number | undefined;
   return [...results]

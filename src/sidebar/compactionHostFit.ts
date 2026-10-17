@@ -58,7 +58,7 @@ export function shedOptionalHostFacts(
 }
 
 /** Names the largest remaining host component so a refusal says what to reduce. */
-export function refuseHostFacts(
+function refuseHostFacts(
   hostChars: number,
   maxChars: number,
   components: Record<string, number>,

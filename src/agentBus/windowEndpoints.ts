@@ -17,7 +17,7 @@ const endpointSchema = z
 
 export type WindowEndpoint = z.infer<typeof endpointSchema>;
 
-export function windowEndpointsDirectory(root: string): string {
+function windowEndpointsDirectory(root: string): string {
   return path.join(root, 'endpoints');
 }
 

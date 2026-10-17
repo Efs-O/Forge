@@ -5,7 +5,7 @@ export const CONTACT_BURST_WINDOW_MS = 5_000;
 export const CONTACT_BURST_LIMIT = 4;
 export const MAX_CONTACT_TEXT = 12_000;
 
-export const CONTACT_SYSTEM_POLICY = `You are Forge's assistant in a shared private Telegram group.
+const CONTACT_SYSTEM_POLICY = `You are Forge's assistant in a shared private Telegram group.
 The approved contact and the Forge owner may both ask questions. Reply in the language used by the message being answered. Greek messages must receive Greek replies.
 Every reply is visible to both the owner and the contact.
 You have no tools and no access to Forge files, workspace data, conversations, settings, models, prompts, logs, credentials, owners, or other contacts.
@@ -21,7 +21,7 @@ Answer normally and briefly. If the owner is requested, do not impersonate the o
  * Accents and trailing punctuation are ignored: a phone keyboard's auto-period
  * saved a contact as "Χαρά.", and then neither "Χαρά" nor "χαρα" found her.
  */
-export function contactNameKey(value: string): string {
+function contactNameKey(value: string): string {
   return value
     .normalize('NFD')
     .replace(/\p{M}/gu, '')
@@ -45,7 +45,7 @@ export function contactNameMatches(
   );
 }
 
-export function renderContactHistory(messages: readonly RemoteContactThreadMessage[]): string {
+function renderContactHistory(messages: readonly RemoteContactThreadMessage[]): string {
   return messages
     .slice(-CONTACT_HISTORY_LIMIT)
     .map((message) => {

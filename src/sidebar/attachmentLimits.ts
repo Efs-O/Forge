@@ -3,8 +3,8 @@ import type { AttachmentData } from './messageBridge';
 /** Attachment limits apply at both picker and extension-host boundaries. */
 export const MAX_ATTACHMENTS_PER_PROMPT = 10;
 export const MAX_ATTACHMENT_TOTAL_BYTES = 25 * 1024 * 1024;
-export const MAX_IMAGE_ATTACHMENT_BYTES = 10 * 1024 * 1024;
-export const MAX_TEXT_ATTACHMENT_BYTES = 2 * 1024 * 1024;
+const MAX_IMAGE_ATTACHMENT_BYTES = 10 * 1024 * 1024;
+const MAX_TEXT_ATTACHMENT_BYTES = 2 * 1024 * 1024;
 
 const TEXT_EXTENSIONS = new Set([
   'c',

@@ -47,7 +47,7 @@ export type ForgeInstructionsBootstrapResult =
   | { status: 'exists'; path: string }
   | { status: 'error'; path: string; error: Error };
 
-export function preferredProjectInstructionsPath(repositoryRoot: string): string {
+function preferredProjectInstructionsPath(repositoryRoot: string): string {
   return path.join(repositoryRoot, FORGE_MD);
 }
 

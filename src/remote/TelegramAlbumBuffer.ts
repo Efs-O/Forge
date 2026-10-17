@@ -10,13 +10,13 @@ import {
 export const MAX_TELEGRAM_IMAGES_PER_MESSAGE = 10;
 export const MAX_TELEGRAM_UPDATE_RETRIES = 3;
 
-export interface TelegramAlbumPhoto {
+interface TelegramAlbumPhoto {
   name: string;
   mediaType: string;
   providerFileId: string;
 }
 
-export interface TelegramAlbumInput {
+interface TelegramAlbumInput {
   updateId: number;
   mediaGroupId: string;
   photo: TelegramAlbumPhoto;
@@ -30,7 +30,7 @@ export interface TelegramAlbumInput {
 
 type TelegramTextEvent = Extract<RemoteInboundEvent, { kind: 'text' }>;
 
-export interface PendingTelegramAlbum {
+interface PendingTelegramAlbum {
   mediaGroupId: string;
   event: TelegramTextEvent;
   lastUpdateId: number;
@@ -86,7 +86,7 @@ export class TelegramAlbumBuffer {
   }
 }
 
-export interface TelegramAlbumFlushDependencies {
+interface TelegramAlbumFlushDependencies {
   signal: AbortSignal;
   handle: (event: TelegramTextEvent) => Promise<RemoteInboundDisposition>;
   acknowledge: (
@@ -107,7 +107,7 @@ export interface TelegramAlbumFlushDependencies {
 }
 
 /** Handles one buffered album with the same retry-before-cursor contract as a normal update. */
-export async function flushTelegramAlbum(
+async function flushTelegramAlbum(
   album: PendingTelegramAlbum,
   dependencies: TelegramAlbumFlushDependencies,
 ): Promise<void> {

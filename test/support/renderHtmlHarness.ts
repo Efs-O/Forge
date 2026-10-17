@@ -58,7 +58,7 @@ export interface RenderFake {
   screenshotError: string | undefined;
 }
 
-export interface FakeRoute {
+interface FakeRoute {
   request: () => {
     url: () => string;
     method: () => string;

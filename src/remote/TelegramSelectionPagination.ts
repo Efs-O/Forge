@@ -118,7 +118,7 @@ export function parseTelegramSelectionCallback(
   return { kind, token: match[1]!, action: 'show', page: Number(match[3]) };
 }
 
-export async function sendTelegramSelectionPage(
+async function sendTelegramSelectionPage(
   call: TelegramBotCall,
   chatId: string,
   text: string,
@@ -138,7 +138,7 @@ export async function sendTelegramSelectionPage(
   );
 }
 
-export async function editTelegramSelectionPage(
+async function editTelegramSelectionPage(
   call: TelegramBotCall,
   chatId: string,
   messageId: string,
@@ -160,7 +160,7 @@ export async function editTelegramSelectionPage(
   );
 }
 
-export async function closeTelegramSelectionPage(
+async function closeTelegramSelectionPage(
   call: TelegramBotCall,
   chatId: string,
   messageId: string,

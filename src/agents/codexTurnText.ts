@@ -51,7 +51,7 @@ export function captureCompletedAgentMessage(
   captureAgentMessage(active, record);
 }
 
-export function captureAgentMessage(active: ActiveTurn, record: Record<string, unknown>): void {
+function captureAgentMessage(active: ActiveTurn, record: Record<string, unknown>): void {
   if (record['type'] !== 'agentMessage' || typeof record['text'] !== 'string') return;
   const itemId = typeof record['id'] === 'string' ? record['id'] : undefined;
   const completed = record['text'];
@@ -69,7 +69,7 @@ export function captureAgentMessage(active: ActiveTurn, record: Record<string, u
 }
 
 /** Length of the longest suffix of `existing` that is a prefix of `next`. */
-export function trailingPrefixOverlap(existing: string, next: string): number {
+function trailingPrefixOverlap(existing: string, next: string): number {
   const limit = Math.min(existing.length, next.length);
   for (let length = limit; length > 0; length -= 1) {
     if (existing.endsWith(next.slice(0, length))) return length;

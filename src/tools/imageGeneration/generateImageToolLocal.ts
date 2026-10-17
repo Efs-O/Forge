@@ -72,7 +72,7 @@ function withoutExtension(filePath: string): string {
  * session's sketches lived under `V:/models/`. The write sandbox is a different
  * exposure and stays where it is.
  */
-export function resolveReferencePath(filePath: string, workspaceRoot?: string): string {
+function resolveReferencePath(filePath: string, workspaceRoot?: string): string {
   return resolveWorkspacePath(filePath, {
     ...(workspaceRoot ? { workspaceRoot } : {}),
     allowAbsolute: true,

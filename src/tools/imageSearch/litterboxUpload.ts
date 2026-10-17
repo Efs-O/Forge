@@ -7,9 +7,9 @@
  * (seen live 2026-09-15) — so the caller must sniff magic bytes first.
  */
 
-export const LITTERBOX_ENDPOINT = 'https://litterbox.catbox.moe/resources/internals/api.php';
+const LITTERBOX_ENDPOINT = 'https://litterbox.catbox.moe/resources/internals/api.php';
 /** Lifetime requested per upload. Callers cache the URL for less than this. */
-export const LITTERBOX_LIFETIME = '1h';
+const LITTERBOX_LIFETIME = '1h';
 
 const LITTERBOX_URL = /^https:\/\/litter\.catbox\.moe\/\S+$/u;
 

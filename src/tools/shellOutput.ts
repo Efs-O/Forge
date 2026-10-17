@@ -8,7 +8,7 @@ import { finished } from 'stream/promises';
 export const SHELL_OUTPUT_CAP = 30_000;
 export const SHELL_OUTPUT_HEAD = 10_000;
 export const SHELL_OUTPUT_TAIL = 20_000;
-export const SHELL_OUTPUT_TTL_MS = 24 * 60 * 60 * 1000;
+const SHELL_OUTPUT_TTL_MS = 24 * 60 * 60 * 1000;
 
 export interface CappedShellOutput {
   text: string;

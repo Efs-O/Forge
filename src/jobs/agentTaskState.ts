@@ -61,9 +61,9 @@ export async function snapshotConfig(
 }
 
 /** How often a running agent task refreshes `task_run.heartbeat_at`. */
-export const TASK_RUN_HEARTBEAT_MS = 30_000;
+const TASK_RUN_HEARTBEAT_MS = 30_000;
 /** A `task_run` not refreshed for this long belongs to a window that died. */
-export const TASK_RUN_STALE_MS = 120_000;
+const TASK_RUN_STALE_MS = 120_000;
 
 /**
  * Keep a run's `task_run` marker fresh so a scheduler that takes the lease
@@ -90,7 +90,7 @@ export function startTaskRunHeartbeat(
 }
 
 /** Whether a `task_run` marker is still being refreshed by a live window. */
-export function taskRunIsLive(state: JobState, now: number): boolean {
+function taskRunIsLive(state: JobState, now: number): boolean {
   const run = state.task_run;
   if (!run) return false;
   return now - (run.heartbeat_at ?? run.started_at) < TASK_RUN_STALE_MS;

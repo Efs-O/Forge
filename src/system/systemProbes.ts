@@ -41,7 +41,7 @@ export interface GpuInfo {
   temperatureC: number | null;
 }
 
-export interface VramSample {
+interface VramSample {
   pid: number;
   /** Adapter LUID from the counter instance name; '' when it carried none. */
   luid: string;

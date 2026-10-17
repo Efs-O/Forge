@@ -2,7 +2,7 @@ import { z } from 'zod';
 
 const ChannelSchema = z.enum(['fake', 'telegram', 'whatsapp']);
 
-export const RequestSchema = z.object({
+const RequestSchema = z.object({
   id: z.string(),
   dedupKey: z.string(),
   channel: ChannelSchema,
@@ -43,7 +43,7 @@ export const RequestSchema = z.object({
   error: z.string().optional(),
 });
 
-export const OutboxSchema = z.object({
+const OutboxSchema = z.object({
   id: z.string(),
   requestId: z.string(),
   channel: ChannelSchema,
@@ -56,7 +56,7 @@ export const OutboxSchema = z.object({
   ephemeral: z.boolean().optional(),
 });
 
-export const BindingSchema = z.object({
+const BindingSchema = z.object({
   channel: ChannelSchema,
   chatId: z.string(),
   workspaceId: z.string(),
@@ -71,7 +71,7 @@ const ControlReceiptSchema = z.object({
   updatedAt: z.number(),
 });
 
-export const RemoteSelectionSchema = z.object({
+const RemoteSelectionSchema = z.object({
   channel: ChannelSchema,
   chatId: z.string(),
   kind: z.enum(['models', 'conversations', 'workspaces']),

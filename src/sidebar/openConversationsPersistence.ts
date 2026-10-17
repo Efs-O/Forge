@@ -38,7 +38,7 @@ function openConversationsV2Schema(): z.ZodType<OpenConversationsV2> {
 }
 
 /** Every persisted key is deliberately classified by the signature test. */
-export const OPEN_SIGNATURE_FIELDS = [
+const OPEN_SIGNATURE_FIELDS = [
   'id',
   'title',
   'createdAt',
@@ -61,7 +61,7 @@ export const OPEN_SIGNATURE_FIELDS = [
 ] as const;
 
 /** No persisted field currently relies on an `updatedAt`-only classification. */
-export const OPEN_UPDATED_AT_ONLY_FIELDS: readonly string[] = [];
+const OPEN_UPDATED_AT_ONLY_FIELDS: readonly string[] = [];
 
 type SignatureInput = ConversationRuntime | ConversationPersisted;
 
@@ -117,7 +117,7 @@ export function openConversationSignature(conversation: ConversationRuntime): st
   return signatureFor(conversation, conversation.displayDiffs);
 }
 
-export function persistedOpenConversationSignature(conversation: ConversationPersisted): string {
+function persistedOpenConversationSignature(conversation: ConversationPersisted): string {
   return signatureFor(conversation, conversation.display_diffs);
 }
 

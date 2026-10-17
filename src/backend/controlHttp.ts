@@ -38,7 +38,7 @@ export function errText(err: unknown): string {
 /** Upper bound for POST /chat bodies — worker prompts carry large context. */
 export const CHAT_BODY_BYTES = 1024 * 1024;
 
-export interface ParsedChatRequest {
+interface ParsedChatRequest {
   model: string;
   messages: ChatMessage[];
   temperature?: number;
@@ -71,7 +71,7 @@ function isToolDefinitionArray(value: unknown): value is ToolDefinition[] {
 
 /** Validate a POST /chat body. Returns the parsed request or an error string
  *  (caller maps to 400). Strict — unknown fields are ignored, never blobbed. */
-export function parseChatRequest(body: Record<string, unknown>): ParsedChatRequest | string {
+function parseChatRequest(body: Record<string, unknown>): ParsedChatRequest | string {
   const model = requireModel(body);
   if (!model) return 'model is required';
   const messages = body['messages'];

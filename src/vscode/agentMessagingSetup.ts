@@ -32,7 +32,7 @@ import { makeAgentToAgentRelay } from '../agentLinks/agentToAgentRelay';
 import { isAskAgentRunning } from '../agentLinks/askAgentService';
 
 /** The chat a bus exchange belongs to, from the exchange ledger. */
-export function exchangeConversationFromLedger(exchangeId: string): string | undefined {
+function exchangeConversationFromLedger(exchangeId: string): string | undefined {
   const events = readEvents(path.join(busPaths().root, EXCHANGES_LOG_NAME));
   return events.find((event) => event.exchangeId === exchangeId && event.conversation)
     ?.conversation;

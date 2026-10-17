@@ -10,7 +10,7 @@ const log = getLogger();
 /** How long an unload POST may take; Strata answers once the GPU is free. */
 const UNLOAD_TIMEOUT_MS = 60_000;
 /** An explicit stop waits for the server to leave its port before reporting success. */
-export const STOP_TIMEOUT_MS = 90_000;
+const STOP_TIMEOUT_MS = 90_000;
 /** How long to wait for a started server to accept connections before giving up. */
 export const START_TIMEOUT_MS = 120_000;
 /** How often to probe while waiting for a started server. */

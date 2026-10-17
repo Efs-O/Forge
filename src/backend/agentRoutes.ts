@@ -30,12 +30,10 @@ import { parseAgentSender, parseOptionalAgentSender } from './agentSenderParsing
 import type { PendingAgentReply } from '../agentLinks/pendingAgentReplies';
 
 /** An answer may be longer than a new message: it is what Forge asked for. */
-export const MAX_REPLY_CHARS = 32_000;
+const MAX_REPLY_CHARS = 32_000;
 const FROM_PATTERN = /^[A-Za-z0-9][A-Za-z0-9 ._-]{0,39}$/;
 
-export type BusReadResult =
-  | { ok: true; text: string }
-  | { ok: false; status: 400 | 404; error: string };
+type BusReadResult = { ok: true; text: string } | { ok: false; status: 400 | 404; error: string };
 
 export interface AgentRoutesDeps {
   paths: () => BusPaths;

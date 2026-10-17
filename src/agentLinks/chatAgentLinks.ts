@@ -67,7 +67,7 @@ export function parseAgentIdentity(
   return { kind: parsedKind, sessionId: sessionIdSchemas[parsedKind].parse(sessionId) };
 }
 
-export const agentLinkSchema = z
+const agentLinkSchema = z
   .object({
     kind: agentKindSchema,
     sessionId: z.string().min(1),

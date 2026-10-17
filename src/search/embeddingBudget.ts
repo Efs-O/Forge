@@ -40,7 +40,7 @@ export function estimateTokens(text: string): number {
  * Reserve for the special tokens the embedding path adds (BOS, and a trailing
  * EOS for Gemma-family). Added to a byte count to form a hard upper bound.
  */
-export const SPECIAL_TOKEN_RESERVE = 4;
+const SPECIAL_TOKEN_RESERVE = 4;
 
 /**
  * A hard upper bound on the token count of `text`. SentencePiece byte fallback

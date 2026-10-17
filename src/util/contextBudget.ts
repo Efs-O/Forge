@@ -73,7 +73,7 @@ export const CHARS_PER_TOKEN = 3.1;
  * same reason `CHARS_PER_TOKEN` is: over-estimating the prompt only costs some
  * excerpting, while under-estimating it can overrun the slot.
  */
-export const TOOL_RESULT_CHARS_PER_TOKEN = 3.4;
+const TOOL_RESULT_CHARS_PER_TOKEN = 3.4;
 
 /**
  * Prompt scaffolding the message estimate cannot see (chat template, BOS/EOS,

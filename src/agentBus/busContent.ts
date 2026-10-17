@@ -208,25 +208,8 @@ are swept.
 `;
 
 /** The bash path an agent runs, with forward slashes (bash and pwsh accept them). */
-export function clientCommand(scriptPath: string): string {
+function clientCommand(scriptPath: string): string {
   return `bash "${scriptPath.replace(/\\/g, '/')}"`;
-}
-
-/**
- * The one-time creation prompt for a freshly-created owned Copilot session.
- * It identifies the agent as `copilot` in the Forge mesh and points it to the
- * forge.sh client for the current command list (referenced, not hardcoded, so
- * it cannot go stale when forge.sh's verbs change). A resumed session already
- * knows its identity and gets no preamble.
- */
-export function copilotMeshPreamble(): string {
-  return (
-    `[Forge agent bus — mesh identity]\n` +
-    `You are "copilot", a Forge-owned agent-mesh peer (alongside "claude" and "codex").\n` +
-    `To message Forge or another agent, use the forge.sh client in the agent-bus folder;\n` +
-    `its usage header lists the current commands (say, send, send-file, read-verdict, ack-verdict, steer, stop, who, status, view, wait).\n` +
-    `Forge reads your final message in this turn as your answer.\n\n`
-  );
 }
 
 /** What a Claude session receives for one `ask_agent` question. */

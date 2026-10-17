@@ -2,7 +2,7 @@ import { z } from 'zod';
 import * as path from 'path';
 import type { ForgeConfig } from './types';
 
-export const GpuGateConfigSchema = z.object({
+const GpuGateConfigSchema = z.object({
   /** nvidia-smi indices of the GPUs local models use. */
   gpus: z.array(z.number().int().nonnegative()).min(1),
   max_util_percent: z.number().min(0).max(100).default(1),

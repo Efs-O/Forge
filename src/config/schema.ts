@@ -447,5 +447,3 @@ export const ForgeConfigSchema = z
       });
     }
   });
-
-export type ForgeConfigInput = z.input<typeof ForgeConfigSchema>;

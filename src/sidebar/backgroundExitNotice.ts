@@ -6,7 +6,7 @@ import type { AttachmentData } from './messageBridge';
 import { backgroundExecutionManager } from '../tools/BackgroundExecutionManager';
 import { logger } from '../util/logger';
 
-export function formatBackgroundExitNotice(notice: BackgroundExecutionExitNotice): string {
+function formatBackgroundExitNotice(notice: BackgroundExecutionExitNotice): string {
   const command = [notice.command, ...notice.args].join(' ').slice(0, 200);
   const duration = `${Math.floor(notice.durationMs / 60_000)}m ${String(Math.floor((notice.durationMs % 60_000) / 1_000)).padStart(2, '0')}s`;
   const status = `${notice.status}${notice.exitCode === null ? '' : ` (exit ${notice.exitCode})`}`;
@@ -107,7 +107,7 @@ export function deliverBackgroundExitNotice(
   route(formatBackgroundExitNotice(notice), notice.conversationId, false, true);
 }
 
-export function subscribeBackgroundExitNotices(
+function subscribeBackgroundExitNotices(
   isOpen: (conversationId: string) => boolean,
   route: (text: string, conversationId: string, echoPrompt: boolean, internal: boolean) => void,
 ): { dispose(): void } {

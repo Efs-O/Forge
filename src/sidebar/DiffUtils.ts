@@ -6,7 +6,7 @@ import type { DiffHunk } from './messageBridge';
 export type { DiffHunk, DiffLine, DiffLineKind } from './messageBridge';
 
 const CONTEXT_SIZE = 3;
-export const MAX_LINES = 500;
+const MAX_LINES = 500;
 
 /**
  * A file's lines. The newline that ends the last line does not start another:
@@ -96,7 +96,7 @@ export function computeDiff(before: string, after: string): DiffHunk[] | null {
  * Parse the stdout of `git diff --no-index --unified=N` into DiffHunk[].
  * Returns an empty array when the patch is empty (files identical).
  */
-export function parseUnifiedDiff(patch: string): DiffHunk[] {
+function parseUnifiedDiff(patch: string): DiffHunk[] {
   const hunks: DiffHunk[] = [];
   if (!patch.trim()) return hunks;
 

@@ -25,7 +25,7 @@ import table from './lexicon.json';
  * Plan: docs/VOICE_STT_TTS_IMPLEMENTATION_PLAN.md §14, §15.
  */
 
-export interface LexiconEntry {
+interface LexiconEntry {
   readonly en_text?: string;
   readonly el_text?: string;
   readonly en_phonemes?: string;

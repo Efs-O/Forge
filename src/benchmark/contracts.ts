@@ -1,4 +1,4 @@
-export const BENCHMARK_ARMS = ['qwen-minimal', 'qwen-forge', 'claude-code', 'codex'] as const;
+const BENCHMARK_ARMS = ['qwen-minimal', 'qwen-forge', 'claude-code', 'codex'] as const;
 export type BenchmarkArm = (typeof BENCHMARK_ARMS)[number];
 
 export interface BenchmarkTask {

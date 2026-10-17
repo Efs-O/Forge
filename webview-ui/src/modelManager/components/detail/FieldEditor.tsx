@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from 'react';
 
-export type FieldKind = 'text' | 'number' | 'boolean' | 'textarea' | 'stopList' | 'list';
+type FieldKind = 'text' | 'number' | 'boolean' | 'textarea' | 'stopList' | 'list';
 
 interface Props {
   label: string;

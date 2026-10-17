@@ -2,7 +2,7 @@ import { z } from 'zod';
 import * as vscode from 'vscode';
 import type { HostToWebview } from './messageBridge';
 
-export const ActivityViewModeSchema = z.enum(['grouped', 'compact', 'full']);
+const ActivityViewModeSchema = z.enum(['grouped', 'compact', 'full']);
 export type ActivityViewMode = z.infer<typeof ActivityViewModeSchema>;
 
 export function parseActivityViewMode(
@@ -13,7 +13,7 @@ export function parseActivityViewMode(
   return { success: false, received: describeSettingValue(value) };
 }
 
-export function publishActivityView(
+function publishActivityView(
   value: unknown,
   post: (message: HostToWebview) => void,
 ): string | undefined {

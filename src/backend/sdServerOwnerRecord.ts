@@ -7,7 +7,7 @@ import { z } from 'zod';
 
 const execFileAsync = promisify(execFile);
 
-export const SdServerOwnerRecordSchema = z.object({
+const SdServerOwnerRecordSchema = z.object({
   pid: z.number().int().positive(),
   pidCreatedAt: z.number().positive(),
   port: z.number().int().min(1).max(65535),

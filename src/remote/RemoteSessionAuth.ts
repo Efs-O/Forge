@@ -7,7 +7,7 @@ const BASE32 = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ234567';
 const MAX_FAILURES = 5;
 const LOCKOUT_MS = 5 * 60_000;
 
-export type RemoteAuthState = 'locked' | 'awaiting_totp' | 'authenticated';
+type RemoteAuthState = 'locked' | 'awaiting_totp' | 'authenticated';
 
 export interface RemoteSessionPolicy {
   inactivityTimeoutMinutes: number;

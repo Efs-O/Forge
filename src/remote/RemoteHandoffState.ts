@@ -8,7 +8,7 @@
 import type { WorkspaceHandoff } from './RemoteStoreSchemas';
 
 /** A switch the target window has this long to claim before it is abandoned. */
-export const HANDOFF_TTL_MS = 5 * 60_000;
+const HANDOFF_TTL_MS = 5 * 60_000;
 
 export type HandoffInput = Omit<
   WorkspaceHandoff,

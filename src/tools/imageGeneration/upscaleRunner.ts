@@ -25,7 +25,7 @@ export function upscaleArgv(model: string, inputPath: string, outputPath: string
   return ['-M', 'upscale', '--upscale-model', model, '-i', inputPath, '-o', outputPath];
 }
 
-export type UpscaleFailureKind = 'cancelled' | 'timeout' | 'spawn_error' | 'exit';
+type UpscaleFailureKind = 'cancelled' | 'timeout' | 'spawn_error' | 'exit';
 
 export interface UpscaleSpawnSpec {
   /** Absolute path to `sd-cli` / `sd-cli.exe`. */

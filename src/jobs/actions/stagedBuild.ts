@@ -62,7 +62,7 @@ export function newBinaryPath(root: string, tag: string): string {
 }
 
 /** The staged-metadata file for a job. */
-export function stagedFile(jobsRoot: string, jobId: string): string {
+function stagedFile(jobsRoot: string, jobId: string): string {
   return path.join(jobsRoot, 'staged', `${jobId}.json`);
 }
 

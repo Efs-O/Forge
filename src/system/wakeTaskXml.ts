@@ -86,7 +86,7 @@ function localIso(when: Date): string {
  * at the time the task fires" — no stored credentials, no elevation needed to
  * create the task.
  */
-export function renderPrincipal(): string {
+function renderPrincipal(): string {
   return [
     '  <Principals>',
     '    <Principal id="Author">',
@@ -101,7 +101,7 @@ export function renderPrincipal(): string {
  * tells the RTC to wake the machine to run the task. The task itself does
  * nothing (`cmd /c exit`); waking the machine to run it IS the effect.
  */
-export function renderSettings(options: { deleteExpiredAfter?: string } = {}): string {
+function renderSettings(options: { deleteExpiredAfter?: string } = {}): string {
   const lines = [
     '  <Settings>',
     '    <WakeToRun>true</WakeToRun>',
@@ -122,7 +122,7 @@ export function renderSettings(options: { deleteExpiredAfter?: string } = {}): s
 }
 
 /** The no-op action: the wake is the point, not the task. */
-export function renderAction(): string {
+function renderAction(): string {
   return [
     '  <Actions Context="Author">',
     '    <Exec>',
@@ -138,7 +138,7 @@ export function renderAction(): string {
  * The `EndBoundary` and `DeleteExpiredTaskAfter` (in the full task XML) mean
  * the task cleans itself up after firing.
  */
-export function renderOneShotTrigger(when: Date): string {
+function renderOneShotTrigger(when: Date): string {
   const start = localIso(when);
   const end = localIso(new Date(when.getTime() + 60_000));
   return [

@@ -11,7 +11,7 @@ import type { ChatCompletionRequest, ToolCall, ToolDefinition } from './types';
 /** A single buffered (non-streaming) chat request handled inside the extension
  *  host. Used by ControlServer's POST /chat so external orchestrators can reach
  *  cloud-provider workers whose API key only lives in SecretStorage. */
-export interface ChatProxyRequest {
+interface ChatProxyRequest {
   model: string;
   messages: ChatMessage[];
   temperature?: number;
@@ -24,7 +24,7 @@ export interface ChatProxyRequest {
   signal?: AbortSignal;
 }
 
-export interface ChatProxyResult {
+interface ChatProxyResult {
   content: string;
   reasoning: string;
   finishReason: string | null;

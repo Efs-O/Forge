@@ -44,9 +44,7 @@ export interface DesktopWindow {
   rect: DesktopRect;
 }
 
-export type DesktopCaptureTarget =
-  | { kind: 'window'; title: string }
-  | { kind: 'monitor'; index: number };
+type DesktopCaptureTarget = { kind: 'window'; title: string } | { kind: 'monitor'; index: number };
 
 /**
  * Validate a monitor ordinal at the boundary that receives it.
@@ -120,7 +118,7 @@ interface DesktopCaptureBase {
 }
 
 /** A window capture: binds the approved control target (B2). */
-export interface DesktopWindowCapture extends DesktopCaptureBase {
+interface DesktopWindowCapture extends DesktopCaptureBase {
   kind: 'window';
   approvedHwnd: string;
   approvedPid: number;

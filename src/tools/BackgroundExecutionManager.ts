@@ -8,7 +8,7 @@ import type { ExecOutputOptions } from './execHelpers';
 import { backgroundRegistry, type BackgroundRegistry } from './backgroundRegistry';
 
 export const MAX_BACKGROUND_OUTPUT_CHARS = 200_000;
-export const MAX_BACKGROUND_EXECUTIONS = 32;
+const MAX_BACKGROUND_EXECUTIONS = 32;
 const FINISHED_EXECUTION_TTL_MS = 10 * 60 * 1000;
 
 export type BackgroundExecutionStatus = 'running' | 'completed' | 'failed' | 'terminated';

@@ -12,7 +12,7 @@ import type { SdcppImageBackendConfig } from '../config/types';
  * within ~5 s (probe 0.8) — Forge's job there is to surface that fast crash as a
  * failure rather than let it look like a hang.
  */
-export function requiredConfiguredPaths(
+function requiredConfiguredPaths(
   config: SdcppImageBackendConfig,
 ): ReadonlyArray<readonly [string, string]> {
   return [

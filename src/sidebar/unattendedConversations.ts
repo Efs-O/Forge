@@ -11,7 +11,7 @@
  * under the conversation id with a "Unattended conversation <uuid>" name, which
  * is what Telegram would have shown the owner.
  */
-export interface UnattendedJobMeta {
+interface UnattendedJobMeta {
   /** The job id — the outbox key. */
   jobId: string;
   /** The job's display name — the outbox item name. */

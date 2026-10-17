@@ -5,7 +5,7 @@ import type { RemoteRequestRecord } from './types';
 import type { RemoteStoreState } from './RemoteStoreSchemas';
 
 /** A running record is recoverable only when its transport owner is proven gone. */
-export function isRemoteClaimOwnerLive(
+function isRemoteClaimOwnerLive(
   storeFile: string,
   request: RemoteRequestRecord,
   liveness: HostLivenessDeps = {},

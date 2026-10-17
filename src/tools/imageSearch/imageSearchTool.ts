@@ -17,7 +17,7 @@ import {
 } from './serpApiLens';
 import { formatYandexResults, searchYandex, yandexThumbnailCandidates } from './yandexImages';
 
-export const IMAGE_SEARCH_ENGINES = ['google_lens', 'yandex'] as const;
+const IMAGE_SEARCH_ENGINES = ['google_lens', 'yandex'] as const;
 type ImageSearchEngine = (typeof IMAGE_SEARCH_ENGINES)[number];
 
 /** Litterbox keeps files 1 h; reuse an upload only well inside that. */

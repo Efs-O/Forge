@@ -53,7 +53,7 @@ export function describeStartupFailure(stderrTail: string): string {
   return ` — ${tail.slice(-STARTUP_TAIL_CHARS)}`;
 }
 
-export interface ServerDiagnosticsSink {
+interface ServerDiagnosticsSink {
   append(text: string): void;
   appendLine(text: string): void;
 }

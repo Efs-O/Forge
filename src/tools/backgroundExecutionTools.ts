@@ -14,9 +14,9 @@ import {
 } from './BackgroundExecutionManager';
 
 /** Default wait for a fresh monitor call, and the value backoff resets to. */
-export const DEFAULT_MONITOR_WAIT_MS = 10_000;
+const DEFAULT_MONITOR_WAIT_MS = 10_000;
 /** Schema ceiling for a single wait, and therefore the backoff ceiling. */
-export const MAX_MONITOR_WAIT_MS = 60_000;
+const MAX_MONITOR_WAIT_MS = 60_000;
 
 /**
  * shell's `notify_on_exit` description, used by both shell variants. The
@@ -208,7 +208,7 @@ function suggestNextWaitMs(requestedWaitMs: number, sawNewOutput: boolean): numb
   return Math.min(base * 2, MAX_MONITOR_WAIT_MS);
 }
 
-export function formatBackgroundObservation(
+function formatBackgroundObservation(
   observation: BackgroundExecutionObservation,
   waitedMs: number,
   outputOptions: ReturnType<typeof parseExecOutputOptions>,

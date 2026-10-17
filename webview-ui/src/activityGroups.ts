@@ -3,8 +3,8 @@ import { stepMessages, stepThoughts, type ActivityGroupItem, type Row } from './
 import { diffStats } from '../../src/sidebar/diffMessages';
 import { formatDuration } from '../../src/util/formatDuration';
 
-export const LONG_GROUP_AT = 10;
-export const LONG_GROUP_TAIL = 6;
+const LONG_GROUP_AT = 10;
+const LONG_GROUP_TAIL = 6;
 
 export interface GroupSummary {
   toolCalls: number;

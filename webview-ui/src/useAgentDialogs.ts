@@ -15,14 +15,14 @@ import { vscode } from './vscode';
  * `useState`s forty lines apart.
  */
 
-export interface ConfirmRequestState {
+interface ConfirmRequestState {
   id: string;
   toolName: string;
   detail: string;
   isDangerous?: boolean;
 }
 
-export interface QuestionState {
+interface QuestionState {
   id: string;
   prompt: string;
   placeholder?: string | undefined;

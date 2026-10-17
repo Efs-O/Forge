@@ -7,7 +7,7 @@
  * admin rights, and no actually suspending the developer's machine.
  */
 
-export interface WakeAdapter {
+interface WakeAdapter {
   name: string;
   description: string;
   macAddress: string;

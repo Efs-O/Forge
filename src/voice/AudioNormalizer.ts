@@ -31,7 +31,7 @@ import type { VoiceOperation } from './VoiceOperation';
  * chosen values with the benchmark result (R7). They are deliberately loose
  * until that measurement exists.
  */
-export const SILENCE_TRIM_FILTER =
+const SILENCE_TRIM_FILTER =
   'silenceremove=start_periods=1:start_duration=0.15:start_threshold=-50dB:' +
   'stop_periods=1:stop_duration=0.6:stop_threshold=-50dB:detection=peak';
 

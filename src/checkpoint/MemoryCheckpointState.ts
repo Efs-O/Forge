@@ -4,12 +4,12 @@ import { createHash } from 'crypto';
 import { assertCheckpointWithinLimits, type CheckpointLimits } from './CheckpointPolicy';
 import { writeFileAtomicSync } from '../util/atomicWrite';
 
-export type MemoryLeafState =
+type MemoryLeafState =
   | { kind: 'file'; content: Buffer }
   | { kind: 'directory' }
   | { kind: 'symlink'; target: string };
 
-export interface MemoryDirectoryEntry {
+interface MemoryDirectoryEntry {
   relativePath: string;
   state: MemoryLeafState;
 }

@@ -434,7 +434,7 @@ function stamp(now: Date): string {
  * ASCII-only to match `generate_image`: a Greek or Cyrillic title therefore
  * yields `render`, which is a cosmetic limitation, not a failure.
  */
-export function slugFor(html: string): string {
+function slugFor(html: string): string {
   const match = /<title[^>]*>([\s\S]*?)<\/title>/i.exec(html);
   const raw = (match?.[1] ?? '').trim().toLowerCase();
   const slug = raw

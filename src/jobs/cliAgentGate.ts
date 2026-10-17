@@ -28,7 +28,7 @@ const REFUSAL =
   'approving a manage_jobs create/update that uses a CLI model, or by setting ' +
   '`jobs.allow_cli_agents: true` in config.yaml.';
 
-export function cliAgentsAllowed(config: ForgeConfig): boolean {
+function cliAgentsAllowed(config: ForgeConfig): boolean {
   return config.jobs?.allow_cli_agents === true;
 }
 
