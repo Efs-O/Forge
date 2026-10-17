@@ -22,30 +22,49 @@ export function checkHtmlBytes(html: string, what: string): void {
   }
 }
 
+/** Open a workspace text file and read at most the HTML limit plus one byte. */
+export async function readWorkspaceTextFileCapped(
+  rawPath: string,
+  kind: 'html' | 'shader',
+): Promise<string> {
+  const file = await resolveRealWorkspacePath(rawPath);
+  const handle = await fs.open(file, 'r');
+  try {
+    const stat = await handle.stat();
+    if (!stat.isFile()) {
+      throw new Error(`render_html_to_image: not a file: ${rawPath}`);
+    }
+    if (stat.size > MAX_HTML_BYTES) {
+      const message =
+        kind === 'html'
+          ? `html file is ${stat.size.toLocaleString()} bytes; the limit is ${MAX_HTML_BYTES.toLocaleString()}.`
+          : `shader file exceeds ${MAX_HTML_BYTES} bytes.`;
+      throw new Error(`render_html_to_image: ${message}`);
+    }
+
+    const buffer = Buffer.alloc(MAX_HTML_BYTES + 1);
+    let total = 0;
+    while (total < buffer.length) {
+      const { bytesRead } = await handle.read(buffer, total, buffer.length - total, null);
+      if (bytesRead === 0) break;
+      total += bytesRead;
+    }
+    if (total > MAX_HTML_BYTES) {
+      const message =
+        kind === 'html'
+          ? `html file grew to ${total.toLocaleString()} bytes while being read; the limit is ${MAX_HTML_BYTES.toLocaleString()}.`
+          : 'shader file grew beyond the 10 MB limit while being read.';
+      throw new Error(`render_html_to_image: ${message}`);
+    }
+    return buffer.subarray(0, total).toString('utf8');
+  } finally {
+    await handle.close();
+  }
+}
+
 /** Read a workspace `.html` file under the size cap. */
 export async function readHtmlFile(rawPath: string): Promise<string> {
-  const file = await resolveRealWorkspacePath(rawPath);
-  const stat = await fs.stat(file);
-  if (!stat.isFile()) {
-    throw new Error(`render_html_to_image: not a file: ${rawPath}`);
-  }
-  if (stat.size > MAX_HTML_BYTES) {
-    throw new Error(
-      `render_html_to_image: html file is ${stat.size.toLocaleString()} bytes; the limit is ${MAX_HTML_BYTES.toLocaleString()}.`,
-    );
-  }
-  const html = await fs.readFile(file, 'utf8');
-  // Re-check after the read: `stat` is a snapshot, and a file that grew (or
-  // was swapped for a symlink target) between `stat` and `readFile` would
-  // otherwise slip past the cap. The byte length of the decoded string is what
-  // Chrome will actually be handed.
-  const readBytes = Buffer.byteLength(html, 'utf8');
-  if (readBytes > MAX_HTML_BYTES) {
-    throw new Error(
-      `render_html_to_image: html file grew to ${readBytes.toLocaleString()} bytes while being read; the limit is ${MAX_HTML_BYTES.toLocaleString()}.`,
-    );
-  }
-  return html;
+  return readWorkspaceTextFileCapped(rawPath, 'html');
 }
 
 export function readViewportPx(value: unknown, fallback: number, name: string): number {

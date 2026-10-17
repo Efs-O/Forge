@@ -1,7 +1,5 @@
-import * as fs from 'fs/promises';
-import { resolveRealWorkspacePath } from '../../util/WorkspacePaths';
 import type { BrowserChannel } from '../browser/BrowserSessionManager';
-import { MAX_HTML_BYTES } from './htmlInput';
+import { readWorkspaceTextFileCapped } from './htmlInput';
 import { PREVIEW_LAUNCH_ARGS, PREVIEW_ORIGIN, withRenderBrowser } from './renderEngine';
 import { extractShaders, mappedPosition, type ShaderCandidate } from './shaderExtract';
 
@@ -29,16 +27,7 @@ export async function runShaderCheck(
       'render_html_to_image: shader_check path must end in .wgsl, .glsl, .vert, .frag, .js, .mjs, .ts, or .html.',
     );
   }
-  const absolute = await resolveRealWorkspacePath(filePath);
-  const stat = await fs.stat(absolute);
-  if (!stat.isFile()) throw new Error(`render_html_to_image: not a file: ${filePath}`);
-  if (stat.size > MAX_HTML_BYTES)
-    throw new Error(`render_html_to_image: shader file exceeds ${MAX_HTML_BYTES} bytes.`);
-  const source = await fs.readFile(absolute, 'utf8');
-  if (Buffer.byteLength(source, 'utf8') > MAX_HTML_BYTES)
-    throw new Error(
-      'render_html_to_image: shader file grew beyond the 10 MB limit while being read.',
-    );
+  const source = await readWorkspaceTextFileCapped(filePath, 'shader');
   const extracted = extractShaders(filePath, source);
   if (extracted.shaders.length === 0 && extracted.skipped.length === 0) {
     return 'Shader check: No shaders found.';
