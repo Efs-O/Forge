@@ -54,6 +54,30 @@ function readSuite(filePath) {
   return { name: typeof suite.name === 'string' ? suite.name : 'SWE-bench suite', tasks };
 }
 
+/** Refuses a --resume whose saved suite.json differs from the requested run. */
+function assertSameRun(runDir, suite, run) {
+  const savedPath = resolve(runDir, 'suite.json');
+  if (!existsSync(savedPath)) throw new Error(`--resume: no suite.json in ${runDir}`);
+  const saved = JSON.parse(readFileSync(savedPath, 'utf8'));
+  if (saved.run === undefined) {
+    throw new Error(
+      `--resume: ${savedPath} records no run settings (written before resume checks), ` +
+        'so its reports cannot be matched to this run. Start a new run instead.',
+    );
+  }
+  const differs = [];
+  if (JSON.stringify(saved.tasks) !== JSON.stringify(suite.tasks)) differs.push('tasks');
+  for (const key of Object.keys(run)) {
+    if (JSON.stringify(saved.run[key]) !== JSON.stringify(run[key])) differs.push(key);
+  }
+  if (differs.length > 0) {
+    throw new Error(
+      `--resume: this run differs from ${savedPath} in ${differs.join(', ')}; ` +
+        'its reports would be counted for settings they were not run with.',
+    );
+  }
+}
+
 function latestReport(taskOutput) {
   if (!existsSync(taskOutput)) return undefined;
   const runs = readdirSync(taskOutput, { withFileTypes: true })
@@ -146,6 +170,16 @@ function main() {
   if (startAt !== undefined && (!Number.isInteger(startAt) || startAt < 1)) {
     throw new Error('--start-at must be a positive 1-based task index.');
   }
+  // Everything that decides a task's result. A resumed run reuses old reports,
+  // so it must be the same run: same tasks, same arms, model and endpoint.
+  const run = {
+    arms,
+    model: value(args, '--model') ?? null,
+    base_url: value(args, '--base-url') ?? null,
+    evaluator: value(args, '--evaluator') ?? null,
+    forge_config: value(args, '--forge-config') ?? null,
+    unload_chat_node: args.includes('--unload-chat-node'),
+  };
   let runId;
   let runDir;
   if (resumeDir) {
@@ -153,6 +187,7 @@ function main() {
     if (!existsSync(runDir) || !statSync(runDir).isDirectory()) {
       throw new Error(`--resume dir not found: ${runDir}`);
     }
+    assertSameRun(runDir, suite, run);
     runId = basename(runDir);
   } else {
     runId = `suite-${new Date().toISOString().replace(/[:.]/gu, '-')}`;
@@ -160,7 +195,7 @@ function main() {
     mkdirSync(runDir, { recursive: true });
     writeFileSync(
       resolve(runDir, 'suite.json'),
-      JSON.stringify({ ...suite, source: suitePath }, null, 2),
+      JSON.stringify({ ...suite, source: suitePath, run }, null, 2),
     );
   }
   const taskReports = [];

@@ -228,7 +228,7 @@ function scenarios() {
       'coding-run-test',
       'run_tests',
       strict('run_tests', { command: 'node -e "process.exit(0)"', timeout_ms: 5000 }),
-      (args) => args.command === 'node -e "process.exit(0)"' && args.timeout_seconds === 5,
+      (args) => args.command === 'node -e "process.exit(0)"' && args.timeout_ms === 5000,
     ),
   ];
 }
