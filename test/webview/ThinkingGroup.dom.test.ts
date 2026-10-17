@@ -85,6 +85,23 @@ describe('top-level thinking blocks', () => {
     expect(container.querySelector('.thinking-block-title')?.textContent).toContain('Thinking · 3.0 s');
   });
 
+  it('streams a long preview block as its tail and keeps that shape when it finishes', () => {
+    const body = Array.from({ length: 7 }, (_, index) => `line ${index + 1}`).join('\n');
+    const live = thought('long-live', body, { reasoningStartedAt: 1_000 });
+    render([live], 'preview', true);
+
+    let preview = container.querySelector('.folded-content-body')!;
+    expect(preview.classList.contains('is-tail-preview')).toBe(true);
+    expect(preview.textContent).toContain('line 7');
+    expect(preview.textContent).not.toContain('line 3');
+    expect(container.querySelector('.folded-content-toggle')?.textContent).toBe('Show all');
+
+    render([{ ...live, reasoningMs: 3_000 }], 'preview', true);
+    preview = container.querySelector('.folded-content-body')!;
+    expect(preview.classList.contains('is-tail-preview')).toBe(true);
+    expect(preview.textContent).not.toContain('line 3');
+  });
+
   it('folds long finished preview blocks to their tail with show all and show less', () => {
     const body = Array.from({ length: 7 }, (_, index) => `line ${index + 1}`).join('\n');
     render([thought('long', body, { reasoningMs: 3_200 })]);

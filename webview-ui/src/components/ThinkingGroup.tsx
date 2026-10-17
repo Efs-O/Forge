@@ -21,8 +21,9 @@ function ThinkingBlock({
   const live = streaming && step.reasoningStartedAt !== undefined && step.reasoningMs === undefined;
   const long = isLongThinking(reasoning);
   const collapsed = choice.collapsed ?? displayMode === 'collapsed';
-  const foldable = displayMode === 'preview' && !live && long;
-  const defaultShowAll = displayMode !== 'preview' || live || !long;
+  // Live and finished blocks fold alike, so a block never shrinks when it ends.
+  const foldable = displayMode === 'preview' && long;
+  const defaultShowAll = displayMode !== 'preview' || !long;
   const duration = formatDuration(step.reasoningMs);
 
   return (

@@ -343,6 +343,21 @@
   line-height: 1.5;
 }
 
+/* A thinking tail keeps one exact height while it streams, so the header above
+   it holds still under the pointer and its Collapse link stays clickable.
+   Bottom-anchored: wrapped rows overflow at the faded top, never the newest line. */
+.thinking-block-content .folded-content-body.is-tail-preview {
+  display: flex;
+  flex-direction: column;
+  justify-content: flex-end;
+  height: calc(1.5em * 4 + 4px);
+  max-height: none;
+}
+
+.thinking-block-content .folded-content-body.is-tail-preview > * {
+  flex-shrink: 0;
+}
+
 .tool-row-output.is-error .folded-content-body {
   color: var(--forge-tool-bad);
 }

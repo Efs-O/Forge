@@ -1,5 +1,10 @@
 # Forge — Recent Changes
 
+## 0.17.46
+
+- A long thinking block no longer shrinks when it finishes. It used to stream fully open and then fold to its last lines, which made the chat jump. It now streams as its last 4 lines, with "Show all", and keeps that size when it ends.
+- A thinking block's Collapse and Expand link can be clicked while it streams. The block used to grow with every token and the sidebar kept scrolling, so the link slid away from under the pointer. The folded block now keeps one exact height, and it shows the newest line even when long lines wrap.
+
 ## 0.17.45
 
 - The bar beside a thinking block is now invisible. It keeps its width, so the block's indent is unchanged, and the "Thinking" label keeps its green.
