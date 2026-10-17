@@ -98,6 +98,15 @@ describe('HistoryArchive', () => {
   // ARCHIVED_SESSIONS_PLAN's CI row: the 41st chat used to delete the oldest.
   it('evicts the oldest of 41 chats to the overflow archive instead of deleting it', () => {
     const archive = new HistoryArchive(file);
+    const seeded = Array.from({ length: 40 }, (_, index) =>
+      conv(`c${index + 1}`, `text ${index + 1}`, index + 2),
+    );
+    fs.mkdirSync(bodyDir(file), { recursive: true });
+    for (const conversation of seeded) {
+      const persisted = runtimeToPersisted(session([conversation])).history![0]!;
+      fs.writeFileSync(bodyPath(file, conversation.id), JSON.stringify(persisted));
+    }
+    archive.load();
     const history = Array.from({ length: 41 }, (_, index) =>
       conv(`c${index}`, `text ${index}`, index + 1),
     );
