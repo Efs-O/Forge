@@ -30,7 +30,7 @@ const SCHTASKS_TIMEOUT_MS = 10_000;
 const SUSPEND_TIMEOUT_MS = 20_000;
 
 /** One-shot task name. Fixed, so arming twice replaces rather than accumulates. */
-export const WAKE_TASK_NAME = 'ForgeWakeTimer';
+const WAKE_TASK_NAME = 'ForgeWakeTimer';
 
 /**
  * Recurring task name. Written only by the job scheduler; distinct from the

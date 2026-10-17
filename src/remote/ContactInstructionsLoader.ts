@@ -34,5 +34,3 @@ export class ContactInstructionsLoader {
     }
   }
 }
-
-export const contactInstructionsPath = CONTACT_INSTRUCTIONS;

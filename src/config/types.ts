@@ -68,7 +68,7 @@ export interface LlamaServerConfig {
 }
 
 /** Opt-in machine-wide reuse for compatible direct llama.cpp servers. */
-export interface SharedRuntimeConfig {
+interface SharedRuntimeConfig {
   enabled: boolean;
 }
 
@@ -83,7 +83,7 @@ export interface SearchConfig {
 
 export type SearchProvider = 'duckduckgo' | 'tavily' | 'brave';
 
-export interface EmbeddingsConfig {
+interface EmbeddingsConfig {
   enabled?: boolean;
   model_path?: string;
   port?: number;
@@ -110,7 +110,7 @@ export interface GpuGateConfig {
 }
 
 /** `jobs:` block (validated by jobsSchema.ts). Absent means no scheduler. */
-export interface JobsConfig {
+interface JobsConfig {
   enabled: boolean;
   /** Absolute workspace folder whose window owns job scheduling and wake tasks. */
   home_workspace?: string;

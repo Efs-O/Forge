@@ -1,7 +1,7 @@
 import type { ChatCompletionRequest } from './types';
 import type { ModelConfig } from '../config/types';
 
-export interface SamplingDefaults {
+interface SamplingDefaults {
   temperature?: number;
   top_p?: number;
   top_k?: number;

@@ -3,7 +3,7 @@ import { extractHeredocs, feedsHeredocToShell } from './shellHeredoc';
 import { baseProgram, splitGitGlobals } from './shellCommandTokens';
 import { executableStatements, extractCommandStrings } from './shellCommandStrings';
 
-export type ShellClass = 'read_only' | 'normal' | 'dangerous' | 'refused';
+type ShellClass = 'read_only' | 'normal' | 'dangerous' | 'refused';
 export type ShellKind = 'pwsh' | 'powershell' | 'bash';
 
 export interface ShellClassification {

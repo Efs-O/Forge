@@ -152,7 +152,7 @@ export async function jobsFetch(url: string, options: JobsFetchOptions): Promise
 }
 
 /** A release asset as the `llamacpp_update` action needs it. */
-export interface ReleaseAssetInfo {
+interface ReleaseAssetInfo {
   name: string;
   /** The release API digest, e.g. `sha256:<hex>`. */
   digest: string;

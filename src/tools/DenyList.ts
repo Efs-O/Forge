@@ -75,7 +75,7 @@ function flags(tokens: readonly string[]): string[] {
   return tokens.filter((token) => token.startsWith('-') || token.startsWith('/'));
 }
 
-export function isRecursiveForceDelete(tokens: readonly string[]): boolean {
+function isRecursiveForceDelete(tokens: readonly string[]): boolean {
   return commandIndexes(tokens, ['rm']).some((index) => {
     const switches = flags(tokens.slice(index + 1)).map((token) => token.toLowerCase());
     const recursive = switches.some((flag) => flag === '--recursive' || /^-[^-]*r/u.test(flag));
@@ -93,7 +93,7 @@ function isRecursiveDelete(tokens: readonly string[]): boolean {
   );
 }
 
-export function isDestructiveGitCheckout(tokens: readonly string[]): boolean {
+function isDestructiveGitCheckout(tokens: readonly string[]): boolean {
   const index = commandIndexes(tokens, ['git'])[0];
   if (index === undefined) return false;
   const [subcommand, ...rest] = lower(tokens.slice(index + 1));
@@ -105,7 +105,7 @@ export function isDestructiveGitCheckout(tokens: readonly string[]): boolean {
   return rest.some((token) => token === '.' || token.endsWith('/'));
 }
 
-export function isDestructiveGitPush(tokens: readonly string[]): boolean {
+function isDestructiveGitPush(tokens: readonly string[]): boolean {
   const index = commandIndexes(tokens, ['git'])[0];
   if (index === undefined || lower(tokens[index + 1] ? [tokens[index + 1]] : [])[0] !== 'push')
     return false;

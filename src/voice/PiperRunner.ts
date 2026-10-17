@@ -17,7 +17,7 @@ import type { VoiceOperation } from './VoiceOperation';
  * Plan: docs/VOICE_STT_TTS_IMPLEMENTATION_PLAN.md §11.
  */
 
-export class PiperSynthesisError extends Error {
+class PiperSynthesisError extends Error {
   constructor(message: string) {
     super(message);
     this.name = 'PiperSynthesisError';

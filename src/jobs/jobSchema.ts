@@ -23,7 +23,7 @@ const ClockTimeSchema = z
   .string()
   .regex(/^([01]?\d|2[0-3]):[0-5]\d$/, 'use HH:MM, e.g. 06:00 (24-hour clock, 00:00-23:59)');
 
-export const WeekdaySchema = z.enum(['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun']);
+const WeekdaySchema = z.enum(['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun']);
 export type Weekday = z.infer<typeof WeekdaySchema>;
 
 /**
@@ -33,7 +33,7 @@ export type Weekday = z.infer<typeof WeekdaySchema>;
  * - `daily`: at a clock time each day.
  * - `weekly`: at a clock time on one or more weekdays.
  */
-export const ScheduleSchema = z.discriminatedUnion('kind', [
+const ScheduleSchema = z.discriminatedUnion('kind', [
   z.object({
     kind: z.literal('interval'),
     minutes: z
@@ -104,29 +104,26 @@ export type GithubReleaseCheck = Extract<Check, { kind: 'github_release' }>;
 export type GithubIssueCheck = Extract<Check, { kind: 'github_issue' }>;
 export type HfDiscussionCheck = Extract<Check, { kind: 'hf_discussion' }>;
 export type DiskSpaceCheck = Extract<Check, { kind: 'disk_space' }>;
-export type ToolUsageCheck = Extract<Check, { kind: 'tool_usage' }>;
 
 /**
  * What a typed summarize focuses on. A fixed prompt is built from the job name,
  * the check's observation, and this focus — no free-form user prompt (B.5:
  * `update` takes a strict schema, no free-form blobs).
  */
-export const SummaryFocusSchema = z.enum(['release_notes', 'breaking_changes', 'cuda', 'assets']);
-export type SummaryFocus = z.infer<typeof SummaryFocusSchema>;
+const SummaryFocusSchema = z.enum(['release_notes', 'breaking_changes', 'cuda', 'assets']);
 
 /**
  * What a job does when the check reports a change (B.1). Exactly one of the
  * two. `notify` just reports; `summarize` runs a no-tools model call to
  * summarize the change, only when no turn is streaming (it waits for idle).
  */
-export const OnChangeSchema = z.discriminatedUnion('kind', [
+const OnChangeSchema = z.discriminatedUnion('kind', [
   z.object({ kind: z.literal('notify') }),
   z.object({
     kind: z.literal('summarize'),
     focus: z.array(SummaryFocusSchema).min(1).max(3).default(['release_notes']),
   }),
 ]);
-export type OnChange = z.infer<typeof OnChangeSchema>;
 
 /** The mutating actions (B.7). `llamacpp_update` is the fixed pipeline; `agent_task` runs an agent turn. */
 export const ActionSchema = z.discriminatedUnion('kind', [

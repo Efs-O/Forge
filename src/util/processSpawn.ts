@@ -76,7 +76,7 @@ export function cwdProblem(cwd: string): 'missing' | 'not_folder' | undefined {
 }
 
 /** Return a typed spawn failure when cwd is absent or is not a directory. */
-export function spawnCwdFailure(cwd: string, program: string): ExecCommandError | undefined {
+function spawnCwdFailure(cwd: string, program: string): ExecCommandError | undefined {
   let problem: ReturnType<typeof cwdProblem>;
   try {
     problem = cwdProblem(cwd);

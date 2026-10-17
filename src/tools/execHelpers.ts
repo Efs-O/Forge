@@ -3,7 +3,7 @@ import * as vscode from 'vscode';
 
 export const MAX_OUTPUT_CHARS = 16_000;
 export const MAX_OUTPUT_CHARS_CEILING = 32_000;
-export const MAX_EXEC_OUTPUT_LINES = 2_000;
+const MAX_EXEC_OUTPUT_LINES = 2_000;
 
 /**
  * Upper bound on how much of a command's output is RETURNED, and therefore
@@ -21,7 +21,7 @@ export const MAX_EXEC_OUTPUT_LINES = 2_000;
  */
 export const MAX_EXEC_STORED_CHARS = 60_000;
 
-export type ExecOutputStream = 'both' | 'stdout' | 'stderr';
+type ExecOutputStream = 'both' | 'stdout' | 'stderr';
 
 export interface ExecOutputOptions {
   /** Return the first N lines from each selected stream. */
@@ -90,7 +90,7 @@ export function parseExecOutputOptions(
 
 // ── Workspace helpers ──────────────────────────────────────────────────────────
 
-export function getWorkspaceRoot(): string {
+function getWorkspaceRoot(): string {
   const folders = vscode.workspace.workspaceFolders;
   if (!folders?.length) throw new Error('No workspace folder open');
   return folders[0].uri.fsPath;

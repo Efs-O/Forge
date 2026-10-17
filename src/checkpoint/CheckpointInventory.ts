@@ -4,7 +4,7 @@ import { fromManifestPath, toManifestPath } from './CheckpointManifest';
 
 const EXCLUDED_TOP_LEVEL = new Set(['.git', '.hg', '.svn', 'node_modules', '.venv', 'venv']);
 
-export interface InventoryFileEntry {
+interface InventoryFileEntry {
   kind: 'file';
   relativePath: string;
   absolutePath: string;
@@ -13,14 +13,14 @@ export interface InventoryFileEntry {
   mode: number;
 }
 
-export interface InventoryDirectoryEntry {
+interface InventoryDirectoryEntry {
   kind: 'directory';
   relativePath: string;
   absolutePath: string;
   mode: number;
 }
 
-export interface InventorySymlinkEntry {
+interface InventorySymlinkEntry {
   kind: 'symlink';
   relativePath: string;
   absolutePath: string;
@@ -46,7 +46,7 @@ export interface InventoryProgress {
   totalBytes: number;
 }
 
-export function isExcludedTopLevel(name: string): boolean {
+function isExcludedTopLevel(name: string): boolean {
   const lower = name.toLowerCase();
   return lower === '.forge' || lower.startsWith('.forge-') || EXCLUDED_TOP_LEVEL.has(lower);
 }

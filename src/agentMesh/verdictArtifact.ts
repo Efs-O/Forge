@@ -16,11 +16,6 @@ export function verdictEventId(exchangeId: string): string {
   return `verdict-${exchangeId}`;
 }
 
-export function wakeEventId(exchangeId: string): string {
-  if (!EXCHANGE_ID.test(exchangeId)) throw new Error('invalid exchange id');
-  return `wake-${exchangeId}`;
-}
-
 /**
  * The writer has already written its complete file. Moving it into the
  * artifact directory is atomic on the same filesystem. Callers append the

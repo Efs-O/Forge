@@ -4,7 +4,7 @@ import type { ToolApprovalSink } from './ToolApprovalService';
 import type { UserQuestionSink } from './UserQuestionService';
 import { displayTitle } from './conversationTitle';
 
-export const HIDDEN_TURN_ALERT_MS = 60_000;
+const HIDDEN_TURN_ALERT_MS = 60_000;
 
 export interface HiddenChatAlertDeps {
   events: SidebarProviderEvents;

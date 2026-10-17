@@ -1,7 +1,7 @@
 import { randomUUID } from 'crypto';
 import * as fs from 'fs';
 import type { HostId, HostLivenessDeps } from './hostIdentity';
-import { getHostIdentity, isHostAlive } from './hostIdentity';
+import { isHostAlive } from './hostIdentity';
 
 /**
  * The M1 interprocess lock, shared by every durable bus artifact that does a
@@ -184,25 +184,5 @@ export function releaseLock(lockPath: string, holder: HostId): void {
     }
   } catch {
     // Not ours or unreadable: leave it.
-  }
-}
-
-/**
- * Run `fn` while holding `lockPath`. The holder is the calling host (or
- * `deps.selfPid`). Used to serialize a read-modify-write of a whole durable
- * file against another extension host.
- */
-export function withLock<T>(
-  lockPath: string,
-  deps: HostLivenessDeps,
-  timeoutMs: number,
-  fn: () => T,
-): T {
-  const holder = getHostIdentity(deps);
-  acquireLock(lockPath, holder, deps, Date.now() + timeoutMs);
-  try {
-    return fn();
-  } finally {
-    releaseLock(lockPath, holder);
   }
 }

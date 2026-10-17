@@ -26,10 +26,3 @@ export function formatRelativeTime(iso: string | null): string {
   if (diffMonths < 12) return `${diffMonths} mo ago`;
   return `${Math.floor(diffMonths / 12)} yr ago`;
 }
-
-export function daysSince(iso: string | null): number {
-  if (!iso) return Infinity;
-  const then = new Date(iso).getTime();
-  if (Number.isNaN(then)) return Infinity;
-  return Math.floor((Date.now() - then) / (24 * 60 * 60 * 1000));
-}

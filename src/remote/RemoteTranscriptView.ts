@@ -4,7 +4,7 @@ import type { ForgeExchange } from '../sidebar/sessionProjections';
 import type { RemoteChannel } from './types';
 
 /** `/view` with no argument. Enough to remember an outcome, short enough to read. */
-export const DEFAULT_VIEW_COUNT = 3;
+const DEFAULT_VIEW_COUNT = 3;
 /** Ten messages is already a wall on a phone; past it the command stops helping. */
 export const MAX_VIEW_COUNT = 10;
 /** Telegram's own cap is 4096; the header and the cut marker take the rest. */

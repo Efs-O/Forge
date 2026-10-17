@@ -32,7 +32,7 @@ export async function runInitForgeCommand(deps: SlashCommandDeps): Promise<void>
   await deps.submitPrompt(buildInitPrompt(path.relative(root, result.path) || result.path));
 }
 
-export function buildInitPrompt(instructionsPath: string): string {
+function buildInitPrompt(instructionsPath: string): string {
   return `Set up \`${instructionsPath}\`, the instructions file Forge adds to every prompt in this repository.
 
 Read the repository first: its README, its build and package files, its test setup and its main source folders. Then edit \`${instructionsPath}\` in place:

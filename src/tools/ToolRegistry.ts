@@ -94,7 +94,7 @@ export interface ToolHandlerContext {
   persistConversation?: () => void;
 }
 
-export interface ToolMutation {
+interface ToolMutation {
   /** Paths known from arguments/editor state before the handler executes. */
   paths(args: Record<string, unknown>): string[];
   /** Whether Forge should render file diffs for these paths. */

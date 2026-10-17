@@ -259,7 +259,7 @@ export interface SidebarHostFacadeDeps {
  * phone and the bus needs to put the reasons in a JSON body. Existing callers
  * already catch a throw here, so only the error's shape changes.
  */
-export class ChatCapacityError extends Error {
+class ChatCapacityError extends Error {
   constructor(
     /** Counts per reason, e.g. `7 running a turn`. Never empty in practice. */
     readonly atCapReason: readonly string[],

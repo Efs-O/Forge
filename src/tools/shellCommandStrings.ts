@@ -1,6 +1,6 @@
 import { baseProgram } from './shellCommandTokens';
 
-export type NestedShellKind = 'bash' | 'pwsh';
+type NestedShellKind = 'bash' | 'pwsh';
 export interface NestedShellCommand {
   command: string;
   shell: NestedShellKind;

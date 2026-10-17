@@ -37,7 +37,7 @@ const argsSchema = z
   .strict();
 
 /** The block is the switch: present turns the tool and the note on. */
-export function setCheckinEnabled(config: ForgeConfig | undefined): boolean {
+function setCheckinEnabled(config: ForgeConfig | undefined): boolean {
   return config?.elapsed_time_note !== undefined;
 }
 

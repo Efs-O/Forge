@@ -25,7 +25,7 @@ export function extractQuant(filename: string): string | undefined {
 
 /** True for `mmproj-*.gguf` / `*-mmproj.gguf` vision-projector files — these
  *  are never model candidates themselves, only sibling attachments (F7/§2.5). */
-export function isMmprojFile(filename: string): boolean {
+function isMmprojFile(filename: string): boolean {
   return filename.toLowerCase().includes('mmproj');
 }
 

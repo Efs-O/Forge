@@ -1,11 +1,11 @@
 export type Role = 'system' | 'user' | 'assistant' | 'tool';
 import type { AgentSenderMetadata } from '../agentLinks/chatAgentLinks';
 
-export interface ContentPartText {
+interface ContentPartText {
   type: 'text';
   text: string;
 }
-export interface ContentPartImage {
+interface ContentPartImage {
   type: 'image_url';
   image_url: { url: string };
 }
@@ -79,7 +79,7 @@ export interface ToolCall {
   };
 }
 
-export interface ChatDelta {
+interface ChatDelta {
   role?: Role;
   content?: string | null;
   /** OpenAI-compat reasoning models sometimes stream assistant text here instead of `content`. */

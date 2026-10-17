@@ -55,14 +55,14 @@ export type ForgeSlashCommandId =
   | 'unlinkAgent';
 
 // ── Host → Webview ────────────────────────────────────────────────────────────
-export interface TokenMsg {
+interface TokenMsg {
   type: 'token';
   text: string;
   createdAt?: number;
   conversationId?: string;
 }
 /** A non-model status row displayed in the conversation. */
-export interface NoticeMsg {
+interface NoticeMsg {
   type: 'notice';
   message: string;
   conversationId?: string;
@@ -72,13 +72,13 @@ export interface NoticeMsg {
   /** `warning` is sent to remote chats as a new message (a phone push), not an edit. */
   severity?: 'info' | 'warning';
 }
-export interface ReasoningTokenMsg {
+interface ReasoningTokenMsg {
   type: 'reasoningToken';
   text: string;
   createdAt?: number;
   conversationId?: string;
 }
-export interface GenerationStartedMsg {
+interface GenerationStartedMsg {
   type: 'generationStarted';
   conversationId?: string;
 }
@@ -92,7 +92,7 @@ export interface GenerationStartedMsg {
  * conversation that is streaming, which is exactly the state a remote turn is
  * in from the moment it is admitted.
  */
-export interface UserPromptMsg {
+interface UserPromptMsg {
   type: 'userPrompt';
   text: string;
   createdAt?: number;
@@ -103,26 +103,26 @@ export interface UserPromptMsg {
   attachments?: AttachmentData[];
   sender?: AgentSenderMetadata;
 }
-export interface DoneMsg {
+interface DoneMsg {
   type: 'done';
   finishReason: string | null;
   conversationId?: string;
 }
-export interface ErrorMsg {
+interface ErrorMsg {
   type: 'error';
   message: string;
   conversationId?: string;
 }
-export interface ReadyMsg {
+interface ReadyMsg {
   type: 'ready';
   conversationId?: string;
 }
-export interface BackendStartingMsg {
+interface BackendStartingMsg {
   type: 'backendStarting';
   message: string;
   conversationId?: string;
 }
-export interface BackendDownMsg {
+interface BackendDownMsg {
   type: 'backendDown';
   message: string;
   conversationId?: string;
@@ -135,16 +135,16 @@ export interface CheckpointReadyMsg {
   /** Net change of the pending checkpoint (`checkpointStats.ts`). */
   stats: CheckpointStats;
 }
-export interface CheckpointDismissedMsg {
+interface CheckpointDismissedMsg {
   type: 'checkpointDismissed';
   conversationId?: string;
 }
 /** @deprecated Prefer sessionSync — kept for compat with stale webviews. */
-export interface NewChatMsg {
+interface NewChatMsg {
   type: 'newChat';
 }
 
-export interface ConfirmRequestMsg {
+interface ConfirmRequestMsg {
   type: 'confirmRequest';
   id: string;
   toolName: string;
@@ -160,7 +160,7 @@ export interface ConfirmRequestMsg {
  * resolved counterpart. The difference is that a question can want free text
  * back, which an approval's two buttons cannot carry.
  */
-export interface QuestionRequestMsg {
+interface QuestionRequestMsg {
   type: 'question';
   id: string;
   prompt: string;
@@ -171,7 +171,7 @@ export interface QuestionRequestMsg {
   conversationId?: string;
 }
 /** A question something else settled — a paired chat, or a cancelled turn. */
-export interface QuestionResolvedMsg {
+interface QuestionResolvedMsg {
   type: 'questionResolved';
   id: string;
 }
@@ -180,7 +180,7 @@ export interface QuestionResolvedMsg {
  * transport button, or a cancelled turn. Without it the sidebar keeps showing
  * live-looking Approve/Deny buttons for an approval that is already resolved.
  */
-export interface ConfirmResolvedMsg {
+interface ConfirmResolvedMsg {
   type: 'confirmResolved';
   id: string;
 }
@@ -190,7 +190,7 @@ export interface ConfirmResolvedMsg {
  * not be collapsed (it was not a message) and destroyed the newlines of any
  * long result, such as a delegated CLI agent's report.
  */
-export interface ToolResultMsg {
+interface ToolResultMsg {
   type: 'toolResult';
   toolName: string;
   /** Correlates a result with its activity row when a model issued parallel calls. */
@@ -206,7 +206,7 @@ export interface ToolResultMsg {
   isError?: boolean;
   conversationId?: string;
 }
-export interface ToolActivityMsg {
+interface ToolActivityMsg {
   type: 'toolActivity';
   toolName: string;
   /** Native tool-call id, when this activity represents one model tool call. */
@@ -223,7 +223,7 @@ export interface ToolCallProgressMsg {
   target?: string;
   tokens: number;
 }
-export interface TokenBudgetMsg {
+interface TokenBudgetMsg {
   type: 'tokenBudget';
   used: number;
   max: number;
@@ -239,13 +239,13 @@ export type {
 } from './diffMessages';
 import type { CheckpointStats, FileDiffMsg } from './diffMessages';
 
-export interface ClankerChangedMsg {
+interface ClankerChangedMsg {
   type: 'clankerChanged';
   enabled: boolean;
 }
 
 /** External reach, sent on handshake and transport or pairing changes. */
-export interface RemoteStatusMsg {
+interface RemoteStatusMsg {
   type: 'remoteStatus';
   /** Running transports, sorted; empty when remote control is off. */
   transports: string[];
@@ -253,20 +253,20 @@ export interface RemoteStatusMsg {
   paired: boolean;
 }
 
-export interface ActivityViewMsg {
+interface ActivityViewMsg {
   type: 'activityView';
   mode: ActivityViewMode;
 }
-export type SetInputMsg = { type: 'setInput'; text: string; conversationId?: string };
+type SetInputMsg = { type: 'setInput'; text: string; conversationId?: string };
 /** @deprecated Replaced by sessionSync on load. */
-export interface HistoryRestoreMsg {
+interface HistoryRestoreMsg {
   type: 'historyRestore';
   messages: Array<{ role: 'user' | 'assistant'; content: string }>;
 }
-export interface ThreadStreamStateChangedMsg {
+interface ThreadStreamStateChangedMsg {
   type: 'thread-stream-state-changed';
 }
-export interface ThreadReadStateChangedMsg {
+interface ThreadReadStateChangedMsg {
   type: 'thread-read-state-changed';
 }
 
@@ -304,7 +304,7 @@ export interface SessionSyncMsg {
  * The header shows this so the answer is visible before a turn runs, not after
  * the model reports a surprising root.
  */
-export interface WorkspaceInfoMsg {
+interface WorkspaceInfoMsg {
   type: 'workspaceInfo';
   /** Basename of `workspaceFolders[0]`, or '' when no folder is open. */
   name: string;
@@ -374,7 +374,7 @@ export interface AttachmentData {
   data: string;
 }
 
-export interface SendMsg {
+interface SendMsg {
   type: 'send';
   text: string;
   createdAt?: number;
@@ -386,28 +386,28 @@ export interface SendMsg {
 }
 export type { CancelTellMsg, SendQueuedNowMsg } from './tellMessages';
 import type { CancelTellMsg, SendQueuedNowMsg } from './tellMessages';
-export interface CancelMsg {
+interface CancelMsg {
   type: 'cancel';
 }
-export interface SwitchModelMsg {
+interface SwitchModelMsg {
   type: 'switchModel';
   name: string | null;
 }
-export interface WebviewReadyMsg {
+interface WebviewReadyMsg {
   type: 'webviewReady';
 }
-export interface QueuedConversationIdsMsg {
+interface QueuedConversationIdsMsg {
   type: 'queuedConversationIds';
   ids: string[];
 }
-export interface UndoMsg {
+interface UndoMsg {
   type: 'undo';
 }
-export interface KeepMsg {
+interface KeepMsg {
   type: 'keep';
 }
 /** Open the pending turn's changes in the native diff editor, without dismissing. */
-export interface ReviewCheckpointMsg {
+interface ReviewCheckpointMsg {
   type: 'reviewCheckpoint';
 }
 export type {
@@ -431,18 +431,18 @@ import type {
 } from './conversationMessages';
 
 // v0.2+ additions
-export interface ConfirmResponseMsg {
+interface ConfirmResponseMsg {
   type: 'confirmResponse';
   id: string;
   approved: boolean;
 }
 /** The sidebar's answer to a `question`. `text: undefined` means dismissed. */
-export interface QuestionResponseMsg {
+interface QuestionResponseMsg {
   type: 'questionResponse';
   id: string;
   text?: string;
 }
-export interface RunSlashCommandMsg {
+interface RunSlashCommandMsg {
   type: 'runSlashCommand';
   commandId: ForgeSlashCommandId;
   agentKind?: string;

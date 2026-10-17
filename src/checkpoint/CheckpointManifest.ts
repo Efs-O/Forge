@@ -49,7 +49,7 @@ const checkpointPostconditionSchema = z
   })
   .strict();
 
-export const storedCheckpointEntrySchema = z.discriminatedUnion('kind', [
+const storedCheckpointEntrySchema = z.discriminatedUnion('kind', [
   storedFileSchema,
   storedDirectorySchema,
   storedSymlinkSchema,
@@ -57,7 +57,7 @@ export const storedCheckpointEntrySchema = z.discriminatedUnion('kind', [
 
 export type StoredCheckpointEntry = z.infer<typeof storedCheckpointEntrySchema>;
 
-export const committedCheckpointManifestSchema = z
+const committedCheckpointManifestSchema = z
   .object({
     version: z.literal(CHECKPOINT_MANIFEST_VERSION),
     status: z.literal('committed'),

@@ -8,11 +8,11 @@ import {
 import { getProviderDisplayName, isCloudProvider } from '../llm/CloudProviders';
 import type { IBackendPool } from './BackendPool';
 
-export const MODEL_CATALOG_CONTRACT_VERSION = 1;
+const MODEL_CATALOG_CONTRACT_VERSION = 1;
 
-export type ModelCatalogRoute = 'ensure' | 'chat';
-export type ModelCatalogAction = 'dispatch' | 'ensure' | 'wait' | 'configure' | 'none';
-export type ModelAvailability =
+type ModelCatalogRoute = 'ensure' | 'chat';
+type ModelCatalogAction = 'dispatch' | 'ensure' | 'wait' | 'configure' | 'none';
+type ModelAvailability =
   | 'ready'
   | 'loadable'
   | 'loading'

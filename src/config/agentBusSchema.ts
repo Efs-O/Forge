@@ -7,7 +7,7 @@ import { z } from 'zod';
  * without it keeps the tool list, and with it the KV prefix, unchanged.
  */
 /** `agent_bus.copilot_model` default; also used when there is no `agent_bus` block. */
-export const DEFAULT_COPILOT_MODEL = 'auto';
+const DEFAULT_COPILOT_MODEL = 'auto';
 
 export const AgentBusConfigSchema = z
   .object({

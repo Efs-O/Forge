@@ -15,7 +15,7 @@ import { mimeFromHeader } from '../imageTool';
  */
 
 /** Workspace-relative; `.forge/` already holds Forge's remote inbox. */
-export const THUMBNAIL_DIR = '.forge/image-search';
+const THUMBNAIL_DIR = '.forge/image-search';
 /** Searches older than this lose their thumbnails on the next search. */
 const RETAIN_MS = 7 * 24 * 60 * 60 * 1000;
 const MAX_THUMBNAIL_BYTES = 512 * 1024;

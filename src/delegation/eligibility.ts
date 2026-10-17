@@ -97,7 +97,7 @@ export interface EligibleDelegationTarget {
 }
 
 /** Whether a delegation target loads weights into local VRAM. */
-export function targetUsesLocalWeights(route: ModelRoute): boolean {
+function targetUsesLocalWeights(route: ModelRoute): boolean {
   return route === 'local-llama' || route === 'local-ollama';
 }
 

@@ -15,7 +15,7 @@ import { abortableSleep } from '../util/abortableSleep';
 
 /** Ids this module mints start with this, so orphan detection never claims
  *  a reply that belongs to another asker (a Codex shell, a script). */
-export const FORGE_ID_PREFIX = 'fg';
+const FORGE_ID_PREFIX = 'fg';
 
 /** Anything older than this is swept at the start of a call. */
 export const TTL_MS = 24 * 60 * 60_000;

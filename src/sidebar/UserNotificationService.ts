@@ -35,7 +35,7 @@ export type FileDeliveryResult =
   | { readonly kind: 'queued'; readonly chats: number }
   | { readonly kind: 'refused'; readonly spentThisTurn: number; readonly reason: string };
 
-export type FileLeaseSendResult =
+type FileLeaseSendResult =
   | { readonly kind: 'queued'; readonly chats: number }
   | { readonly kind: 'exhausted' | 'stale' };
 

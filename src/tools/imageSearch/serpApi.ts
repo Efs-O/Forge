@@ -4,7 +4,7 @@
  * how SerpApi reports a failure.
  */
 
-export const SERPAPI_ENDPOINT = 'https://serpapi.com/search.json';
+const SERPAPI_ENDPOINT = 'https://serpapi.com/search.json';
 
 export type SerpApiResponse = Record<string, unknown>;
 

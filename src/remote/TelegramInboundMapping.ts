@@ -194,10 +194,7 @@ const UNSUPPORTED_USER_MEDIA = [
   ['poll', 'poll'],
 ] as const satisfies ReadonlyArray<readonly [string, RemoteUnsupportedMediaEvent['mediaType']]>;
 
-export type RemoteUnsupportedMediaEvent = Extract<
-  RemoteInboundEvent,
-  { kind: 'unsupported_media' }
->;
+type RemoteUnsupportedMediaEvent = Extract<RemoteInboundEvent, { kind: 'unsupported_media' }>;
 
 /**
  * Which unhandled media a message carries, or `undefined` if it carries none.

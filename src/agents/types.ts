@@ -33,7 +33,7 @@ export interface CliParseContext {
   setSessionId(sessionId: string): void;
 }
 
-export interface CliInvocationOptions {
+interface CliInvocationOptions {
   sessionId?: string;
   createSessionId?: string;
   sessionTitle?: string;

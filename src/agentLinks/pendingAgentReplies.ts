@@ -122,7 +122,3 @@ export class PendingAgentReplies {
     }
   }
 }
-
-export function pendingSender(sender: PendingAgentReply['sender']): AgentSenderMetadata {
-  return agentSenderMetadataSchema.parse(sender);
-}

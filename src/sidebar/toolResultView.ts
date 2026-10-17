@@ -5,7 +5,7 @@
  */
 
 /** Tools whose result is noise — the argument is the interesting part. */
-export const READ_ONLY_TOOLS = new Set([
+const READ_ONLY_TOOLS = new Set([
   'read_file',
   'list_directory',
   'search_code',
@@ -43,7 +43,7 @@ export function resultLabel(toolName: string, result: string, pathArg: string | 
  * became an H1 at the browser's default 2em, which is how a config.yaml read
  * exploded to banner size inside a 12px tool row.
  */
-export const PROSE_RESULT_TOOLS = new Set([
+const PROSE_RESULT_TOOLS = new Set([
   'ask_local_agent',
   'ask_agent',
   'ask_user',

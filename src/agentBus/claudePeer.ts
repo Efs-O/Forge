@@ -15,7 +15,7 @@ import { z } from 'zod';
  * and reports every failure instead of falling back.
  */
 
-export const PEER_PROTOCOL = 1;
+const PEER_PROTOCOL = 1;
 const SEND_TIMEOUT_MS = 5_000;
 const TAG = 'cross-session-message';
 
@@ -48,7 +48,7 @@ export interface ClaudeSession {
   startedAt: number | undefined;
 }
 
-export function claudeSessionsDir(home: string = os.homedir()): string {
+function claudeSessionsDir(home: string = os.homedir()): string {
   return path.join(home, '.claude', 'sessions');
 }
 

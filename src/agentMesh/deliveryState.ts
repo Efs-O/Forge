@@ -38,7 +38,7 @@ export type ExchangeState =
  * so they stay exempt from compaction until they reach a true terminal state
  * (or a deadline turns them into `timeout`).
  */
-export const TERMINAL_STATES: ReadonlySet<ExchangeState> = new Set<ExchangeState>([
+const TERMINAL_STATES: ReadonlySet<ExchangeState> = new Set<ExchangeState>([
   'completed',
   'rejected',
   'timeout',

@@ -45,7 +45,7 @@ const CONTEXT_LABELS = new Set(['Forge context', 'Remaining']);
 /**
  * Recent exchange lines for `/status`, scoped to the bound chat.
  */
-export function describeAgentBoard(conversation: string | undefined): string | undefined {
+function describeAgentBoard(conversation: string | undefined): string | undefined {
   const ctx = getBoardContext();
   if (!ctx) return undefined;
   if (conversation === undefined) return undefined;

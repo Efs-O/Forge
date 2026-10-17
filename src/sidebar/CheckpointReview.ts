@@ -1,7 +1,7 @@
 import * as path from 'path';
 import * as vscode from 'vscode';
 
-export const CHECKPOINT_REVIEW_SCHEME = 'forge-checkpoint';
+const CHECKPOINT_REVIEW_SCHEME = 'forge-checkpoint';
 
 /** Opening dozens of diff tabs at once is worse than not offering the button. */
 const MAX_REVIEW_TABS = 12;

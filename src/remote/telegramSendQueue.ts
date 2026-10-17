@@ -23,9 +23,9 @@ const MAX_RETRY_AFTER_MS = 60_000;
  * for minutes (2026-10-05, 17:02-17:06): nothing the user sent, Stop
  * included, reached Forge until the OS gave up on it.
  */
-export const TELEGRAM_CALL_TIMEOUT_MS = 30_000;
+const TELEGRAM_CALL_TIMEOUT_MS = 30_000;
 /** A long poll is answered after its own `timeout`; this is the margin past it. */
-export const TELEGRAM_LONG_POLL_GRACE_MS = 10_000;
+const TELEGRAM_LONG_POLL_GRACE_MS = 10_000;
 
 type Fetch = typeof fetch;
 

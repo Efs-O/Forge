@@ -12,7 +12,7 @@ import type { ForgeConfig, ModelConfig } from '../config/types';
  * fs.watch on Windows misses appends to a file held open elsewhere.
  */
 
-export const SERVER_LOG_POLL_MS = 1_000;
+const SERVER_LOG_POLL_MS = 1_000;
 /** Cap on one read, so a log that grew by megabytes while VS Code slept does not flood the channel. */
 export const SERVER_LOG_MAX_READ_BYTES = 256 * 1024;
 

@@ -23,7 +23,7 @@ export interface OmittedActionCounts {
   command: number;
 }
 
-export const NO_OMITTED_ACTIONS: OmittedActionCounts = { file: 0, command: 0 };
+const NO_OMITTED_ACTIONS: OmittedActionCounts = { file: 0, command: 0 };
 
 /**
  * Slot reserves, per kind. They sum to the cap, and no category can take every
@@ -50,7 +50,7 @@ function isUnresolved(action: RecordedCompactionAction): boolean {
  * `actions` is oldest to newest; the result preserves that order, because the
  * rendered block reads as a history.
  */
-export function capActions(actions: readonly RecordedCompactionAction[]): {
+function capActions(actions: readonly RecordedCompactionAction[]): {
   actions: RecordedCompactionAction[];
   omitted: number;
 } {

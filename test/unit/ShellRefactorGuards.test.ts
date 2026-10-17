@@ -48,8 +48,10 @@ function isException(file: string): boolean {
 
 function lineHits(file: string, pattern: RegExp): string[] {
   const rel = posixRel(file);
-  return fs
-    .readFileSync(file, 'utf8')
+  const text = fs.readFileSync(file, 'utf8');
+  // Most files never match; skip splitting them, since this walks the whole tree.
+  if (!pattern.test(text)) return [];
+  return text
     .split(/\r?\n/)
     .map((line, index) => (pattern.test(line) ? `${rel}:${index + 1}` : null))
     .filter((hit): hit is string => hit !== null);
@@ -60,9 +62,9 @@ describe('shell/core-group refactor guards', () => {
     const files = [...walk(path.join(root, 'src')), ...walk(path.join(root, 'config'))].filter(
       (file) => !isException(file),
     );
-    const hits = files.flatMap((file) =>
-      REMOVED_TOOL_NAMES.flatMap((name) => lineHits(file, new RegExp(`\\b${name}\\b`))),
-    );
+    // One pass per file: reading the tree once per name timed out under full CI load.
+    const removed = new RegExp(`\\b(?:${REMOVED_TOOL_NAMES.join('|')})\\b`);
+    const hits = files.flatMap((file) => lineHits(file, removed));
     expect(hits, `removed tool names still referenced:\n${hits.join('\n')}`).toEqual([]);
   });
 
@@ -80,10 +82,8 @@ describe('shell/core-group refactor guards', () => {
   });
 
   it('no file under src/tools/ declares a filepath schema property', () => {
-    const patterns = [/\bfilepath\s*:/, /['"]filepath['"]\s*:/];
-    const hits = walk(path.join(root, 'src', 'tools')).flatMap((file) =>
-      patterns.flatMap((pattern) => lineHits(file, pattern)),
-    );
+    const filepath = /\bfilepath\s*:|['"]filepath['"]\s*:/;
+    const hits = walk(path.join(root, 'src', 'tools')).flatMap((file) => lineHits(file, filepath));
     expect(hits, `filepath schema properties remain:\n${hits.join('\n')}`).toEqual([]);
   });
 });

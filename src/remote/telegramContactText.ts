@@ -8,7 +8,7 @@
  */
 
 /** Drop a trailing `@botusername` from a `/command` so `/owner@mybot` is `/owner`. */
-export function stripBotUsername(text: string): string {
+function stripBotUsername(text: string): string {
   return text.replace(/^\/([A-Za-z0-9_]+)(?:@[A-Za-z0-9_]+)?/, '/$1');
 }
 

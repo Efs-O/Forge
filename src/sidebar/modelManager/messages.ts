@@ -62,7 +62,7 @@ export interface ModelManagerStateMsg {
   modelDirs: string[];
 }
 
-export interface ModelManagerErrorMsg {
+interface ModelManagerErrorMsg {
   type: 'error';
   message: string;
   /** When set, the error is scoped to one in-flight field edit so the panel
@@ -71,12 +71,12 @@ export interface ModelManagerErrorMsg {
   modelName?: string;
 }
 
-export interface ModelManagerScanResultMsg {
+interface ModelManagerScanResultMsg {
   type: 'scanResult';
   candidates: ScanCandidateView[];
 }
 
-export interface ModelManagerLoadResultMsg {
+interface ModelManagerLoadResultMsg {
   type: 'loadResult';
   modelName: string;
   ok: boolean;
@@ -91,33 +91,33 @@ export type ModelManagerHostToPanel =
 
 // ── Panel → Host ─────────────────────────────────────────────────────────────
 
-export interface PanelReadyMsg {
+interface PanelReadyMsg {
   type: 'ready';
 }
-export interface PanelRefreshMsg {
+interface PanelRefreshMsg {
   type: 'refresh';
 }
 /** `field` may be a dot-path into a nested object field (e.g. `sampling.temperature`). */
-export interface PanelEditFieldMsg {
+interface PanelEditFieldMsg {
   type: 'editField';
   modelName: string;
   field: string;
   value: unknown;
 }
-export interface PanelRemoveModelMsg {
+interface PanelRemoveModelMsg {
   type: 'removeModel';
   modelName: string;
 }
-export interface PanelPurgeModelMsg {
+interface PanelPurgeModelMsg {
   type: 'purgeModel';
   modelName: string;
   /** User-typed confirmation string — must equal `modelName`, re-verified host-side. */
   typedName: string;
 }
-export interface PanelScanDirectoryMsg {
+interface PanelScanDirectoryMsg {
   type: 'scanDirectory';
 }
-export interface PanelAddScannedMsg {
+interface PanelAddScannedMsg {
   type: 'addScanned';
   picks: Array<{
     ggufPath: string;
@@ -125,31 +125,31 @@ export interface PanelAddScannedMsg {
     mmprojPath?: string;
   }>;
 }
-export interface PanelLoadAndTryMsg {
+interface PanelLoadAndTryMsg {
   type: 'loadAndTry';
   modelName: string;
 }
-export interface PanelRevealInExplorerMsg {
+interface PanelRevealInExplorerMsg {
   type: 'revealInExplorer';
   modelName: string;
 }
-export interface PanelSetGroupFieldMsg {
+interface PanelSetGroupFieldMsg {
   type: 'setGroupField';
   groupName: string;
   field: string;
   value: unknown;
 }
-export interface PanelAddGroupMsg {
+interface PanelAddGroupMsg {
   type: 'addGroup';
   groupName: string;
 }
-export interface PanelRemoveGroupMsg {
+interface PanelRemoveGroupMsg {
   type: 'removeGroup';
   groupName: string;
 }
 /** Delete one unreferenced GGUF found on disk (orphans section) — pure file
  *  deletion, no config entry involved. */
-export interface PanelPurgeOrphanMsg {
+interface PanelPurgeOrphanMsg {
   type: 'purgeOrphan';
   path: string;
 }

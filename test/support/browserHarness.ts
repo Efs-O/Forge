@@ -40,7 +40,7 @@ export const PAGE =
  * target, a hidden button, a disabled button, and a text input. Every element
  * records its own click so an action can be attributed to a specific node.
  */
-export const RICH_HTML =
+const RICH_HTML =
   '<html><body style="font:16px sans-serif;padding:16px">' +
   '<h1 id="h">idle</h1>' +
   // Three elements share id="dup": `#dup` is therefore ambiguous and must not be
@@ -57,15 +57,16 @@ export const RICH_HTML =
   '<button id="disabledBtn" disabled>Disabled</button>' +
   '<button id="plain" onclick="document.getElementById(\'h\').textContent=\'PLAIN\'">Plain</button>' +
   '<div id="bg" style="width:200px;height:120px;background:#eee" onclick="window.__bg=(window.__bg||0)+1"></div>' +
-  '<script>window.__clicks=[];document.addEventListener(\'click\',e=>{window.__clicks.push([e.clientX,e.clientY])});' +
+  "<script>window.__clicks=[];document.addEventListener('click',e=>{window.__clicks.push([e.clientX,e.clientY])});" +
   // A page timer that mutates the DOM without navigating: any index action must
   // survive (or refuse) against a document that is not the one inspected.
-  'window.__mutate=()=>{const b=document.querySelector(\'#dup button\');if(b){b.textContent=\'Dup (mutated)\';}};' +
+  "window.__mutate=()=>{const b=document.querySelector('#dup button');if(b){b.textContent='Dup (mutated)';}};" +
   '</script>' +
   '</body></html>';
 export const RICH_PAGE = 'data:text/html,' + encodeURIComponent(RICH_HTML);
 
-export const EMPTY_PAGE = 'data:text/html,' + encodeURIComponent('<html><body><p>Nothing here.</p></body></html>');
+export const EMPTY_PAGE =
+  'data:text/html,' + encodeURIComponent('<html><body><p>Nothing here.</p></body></html>');
 
 /**
  * A dropdown fixture: a single-select whose labels and values DIFFER (so a label
@@ -99,7 +100,7 @@ const getConfig = (): ForgeConfig =>
   }) as ForgeConfig;
 
 /** One parsed `browser_inspect` line. */
-export interface InspectedEntry {
+interface InspectedEntry {
   index: number;
   role: string;
   text: string;
@@ -155,7 +156,9 @@ export function createBrowserHarness(conversationId: string): BrowserHarness {
     call,
     callText: async (name, args) => (await call(name, args)) as string,
     pngFromShot: (shot) => {
-      const img = shot.content!.find((p) => p.type === 'image_url') as { image_url: { url: string } };
+      const img = shot.content!.find((p) => p.type === 'image_url') as {
+        image_url: { url: string };
+      };
       return Buffer.from(img.image_url.url.split('base64,')[1], 'base64');
     },
     parseInspect: (text) =>

@@ -13,7 +13,7 @@ import { createStallProbe } from './stallProbe';
 
 const log = getLogger();
 let requestSequence = 0;
-export const MID_TURN_WIRE_LABEL =
+const MID_TURN_WIRE_LABEL =
   '[Sent by the user while you were working. If it changes the task, adjust; otherwise acknowledge it in one line and continue.]';
 
 export function wireMessageContent(
@@ -75,11 +75,11 @@ export function toWireRequest(request: ChatCompletionRequest): ChatCompletionReq
   return { ...request, messages: request.messages.map(toWireMessage) };
 }
 
-export type TokenHandler = (token: string) => void;
-export type ReasoningHandler = (token: string) => void;
-export type DoneHandler = (finishReason: string | null) => void;
-export type ErrorHandler = (err: Error) => void;
-export type ToolCallsHandler = (calls: ToolCall[]) => void;
+type TokenHandler = (token: string) => void;
+type ReasoningHandler = (token: string) => void;
+type DoneHandler = (finishReason: string | null) => void;
+type ErrorHandler = (err: Error) => void;
+type ToolCallsHandler = (calls: ToolCall[]) => void;
 export interface ToolCallProgress {
   index: number;
   id: string;

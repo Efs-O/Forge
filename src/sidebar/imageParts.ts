@@ -12,7 +12,7 @@
 import type { ChatMessage, ContentPart } from '../llm/types';
 import { fenceTextAttachment } from './ConversationOps';
 
-export type TextAttachmentNoteMode = 'note' | { maxChars: number };
+type TextAttachmentNoteMode = 'note' | { maxChars: number };
 
 export type TextWithImageNotesOptions = ImageStripOptions & {
   textAttachments?: TextAttachmentNoteMode;
@@ -27,10 +27,10 @@ export type TextWithImageNotesOptions = ImageStripOptions & {
 const RELOAD_LOSS_MARKER = 'not retained across the reload';
 
 /** Image parts never reach workspaceState, so a restored turn must say so. */
-export const TOOL_IMAGE_DROPPED_NOTE =
+const TOOL_IMAGE_DROPPED_NOTE =
   '[The image itself was not retained across the reload and is NOT visible to you now. ' +
   'Call view_image again before describing it.]';
-export const USER_IMAGE_DROPPED_NOTE =
+const USER_IMAGE_DROPPED_NOTE =
   '[The user attached an image here. It was not retained across the reload and is NOT ' +
   'visible to you now. Ask the user to re-attach it before describing it.]';
 
@@ -82,7 +82,7 @@ function noteFor(options: ImageStripOptions, role: ChatMessage['role']): string 
   }
 }
 
-export function hasImageParts(content: ChatMessage['content']): boolean {
+function hasImageParts(content: ChatMessage['content']): boolean {
   return Array.isArray(content) && content.some((part) => part.type === 'image_url');
 }
 

@@ -6,7 +6,7 @@ import { DirectBackend } from '../backend/DirectBackend';
 import { resolveRequestModel, resolveSpawnModel } from '../config/ConfigResolver';
 import { inspectQwenEndpoint, normalizeLlamaBaseUrl, type QwenEndpointFacts } from './preflight';
 
-export interface QwenLifecycleOptions {
+interface QwenLifecycleOptions {
   forgeConfigPath: string;
   model?: string | undefined;
   onStdout?: (text: string) => void;

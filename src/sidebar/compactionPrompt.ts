@@ -68,7 +68,7 @@ const SUMMARY_TARGET_SHARE = 0.75;
  * The summary has a reserved share, and the prompt asks for 75% of it so the
  * model has useful room without treating the entire ceiling as its target.
  */
-export function summaryLengthRule(summaryMaxChars: number): string {
+function summaryLengthRule(summaryMaxChars: number): string {
   const target = Math.floor(summaryMaxChars * SUMMARY_TARGET_SHARE);
   return (
     `Aim for about ${target} characters. Hard limit: ${summaryMaxChars} characters; ` +

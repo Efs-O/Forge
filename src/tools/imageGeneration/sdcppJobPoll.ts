@@ -83,7 +83,7 @@ const SUCCESS = 'completed';
  * Poll cadence. Measured: a warm 768x768 job takes 66-72 s, so a finer interval
  * buys nothing and every poll is a request through the shared local agent.
  */
-export const JOB_POLL_INTERVAL_MS = 3_000;
+const JOB_POLL_INTERVAL_MS = 3_000;
 
 /**
  * One submit → poll → fetch cycle.

@@ -11,7 +11,7 @@ import type {
 } from './types';
 import type { RemoteSessionTarget } from './remoteSessionTellCommands';
 
-export interface RemotePromptAdmissionOptions {
+interface RemotePromptAdmissionOptions {
   workspaceId: string;
   queueLimit: number;
   attachmentsEnabled: boolean;

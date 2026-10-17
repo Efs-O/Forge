@@ -61,7 +61,7 @@ export interface ExchangeLogDeps extends HostLivenessDeps {
 }
 
 /** Last-N terminal exchanges kept by compaction (the plan's N=200). */
-export const DEFAULT_MAX_EXCHANGES = 200;
+const DEFAULT_MAX_EXCHANGES = 200;
 /** 24 h backstop; only fires when fewer than N exchanges exist. */
 export const DEFAULT_TTL_MS = 24 * 60 * 60_000;
 /**
@@ -69,7 +69,7 @@ export const DEFAULT_TTL_MS = 24 * 60 * 60_000;
  * terminal `timeout` event (e.g. a user-opened session that stays `accepted`
  * with no verdict). After that it is eligible for compaction like any other.
  */
-export const NON_TERMINAL_DEADLINE_MS = 24 * 60 * 60_000;
+const NON_TERMINAL_DEADLINE_MS = 24 * 60 * 60_000;
 
 /** A durable artifact in the bus folder; the CI row lists it. */
 export const EXCHANGES_LOG_NAME = 'exchanges.jsonl';
@@ -92,11 +92,6 @@ function enqueue<T>(task: () => Promise<T>): Promise<T> {
     () => undefined,
   );
   return run;
-}
-
-/** Test-only: reset the in-process queue between tests. */
-export function __resetInProcessQueue(): void {
-  inProcessQueue = Promise.resolve();
 }
 
 // ---------------------------------------------------------------------------
@@ -134,7 +129,7 @@ export function readEvents(logPath: string): ExchangeEvent[] {
 }
 
 /** Group events by exchange, preserving log order. */
-export function groupByExchange(events: readonly ExchangeEvent[]): Map<string, ExchangeEvent[]> {
+function groupByExchange(events: readonly ExchangeEvent[]): Map<string, ExchangeEvent[]> {
   const map = new Map<string, ExchangeEvent[]>();
   for (const e of events) {
     const arr = map.get(e.exchangeId);

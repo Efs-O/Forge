@@ -6,7 +6,7 @@ import { z } from 'zod';
  * relay, channels). Kept apart from schema.ts so the remote shape has one home.
  */
 
-export const RemoteContactsConfigSchema = z
+const RemoteContactsConfigSchema = z
   .object({
     enabled: z.boolean().default(false),
     web: z

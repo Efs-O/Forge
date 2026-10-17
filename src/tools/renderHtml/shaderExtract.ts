@@ -1,5 +1,5 @@
-export type ShaderLanguage = 'wgsl' | 'glsl';
-export type ShaderStage = 'vertex' | 'fragment' | 'compute';
+type ShaderLanguage = 'wgsl' | 'glsl';
+type ShaderStage = 'vertex' | 'fragment' | 'compute';
 
 export interface ShaderCandidate {
   label: string;
@@ -11,7 +11,7 @@ export interface ShaderCandidate {
   startColumn: number;
 }
 
-export interface SkippedShader {
+interface SkippedShader {
   line: number;
   reason: string;
 }
@@ -93,7 +93,7 @@ export function extractShaders(filePath: string, source: string): ExtractedShade
   return { shaders, skipped };
 }
 
-export function sourcePosition(source: string, offset: number): { line: number; column: number } {
+function sourcePosition(source: string, offset: number): { line: number; column: number } {
   const before = source.slice(0, Math.max(0, offset));
   const line = before.split('\n').length;
   return { line, column: before.length - (before.lastIndexOf('\n') + 1) + 1 };

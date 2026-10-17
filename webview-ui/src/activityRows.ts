@@ -212,7 +212,7 @@ export function displayDetail(detail: string): string {
  * Folds runs of adjacent same-kind messages into single rows: file edits and
  * tool calls become one card per turn, and per-round reasoning becomes one line.
  */
-export function toFullRows(messages: AppMessage[]): Row[] {
+function toFullRows(messages: AppMessage[]): Row[] {
   const rows: Row[] = [];
   for (let i = 0; i < messages.length; i++) {
     const message = messages[i]!;

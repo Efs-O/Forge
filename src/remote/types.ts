@@ -83,8 +83,8 @@ export interface RemoteAttachmentReference {
   bytes: number;
 }
 
-export type RemoteContactStatus = 'active' | 'disabled';
-export type RemoteContactGroupStatus = 'unbound' | 'link_pending' | 'bound';
+type RemoteContactStatus = 'active' | 'disabled';
+type RemoteContactGroupStatus = 'unbound' | 'link_pending' | 'bound';
 
 export interface RemoteContactRecord {
   id: string;
@@ -181,7 +181,7 @@ export interface RemoteOutboxRecord {
   ephemeral?: boolean | undefined;
 }
 
-export interface RemoteTransportHealth {
+interface RemoteTransportHealth {
   ok: boolean;
   detail: string;
 }

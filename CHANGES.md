@@ -75,6 +75,7 @@
 - **`web_fetch` decodes HTML entities.** Pages read as `Events & webinars` instead of `Events &amp; webinars`, and a page that spells out the closing `UNTRUSTED_CONTENT` tag as entities cannot end the fence around it early.
 - **The sidebar keeps the agent's words across a compaction, and marks where it happened.** Reply text streamed before an automatic mid-turn compaction used to be missing from the chat afterwards while the tool rows stayed, because the text reached the conversation only when the turn ended; it is now stored as it streams. A turn that only thought, with no reply or tool call, also survives a reload now. Each compaction leaves a divider row ("Context compacted · generation N · auto/manual") that is still there after a reload and is never sent to the model.
 - **Malformed array arguments point to the bad character.** When a tool receives broken JSON as a string for an array field, the refusal now includes a marked excerpt and the likely syntax cause, then asks for a JSON array rather than a string.
+- HTML and shader inputs are read with a strict memory limit (U19-05). `render_html_to_image` now reads at most 10 MiB plus one byte to detect oversized files, instead of loading a file that grew after its size check.
 
 ## 0.17.42
 

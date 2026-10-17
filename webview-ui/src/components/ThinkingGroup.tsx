@@ -36,7 +36,7 @@ export { isReasoningOnly };
  * draw on the same pool, that is the number worth seeing. Rows rehydrated from
  * the host carry no timing, hence the fallback.
  */
-export function thinkingLabel(ms: number | undefined): string {
+function thinkingLabel(ms: number | undefined): string {
   const elapsed = formatDuration(ms);
   return elapsed ? `Thought for ${elapsed}` : 'Thinking';
 }
