@@ -63,7 +63,7 @@
 - **A jobs-scheduler lease that fails to release on shutdown is reported (U20-05)** instead of becoming an unhandled rejection.
 - **Stop during a cold model load cancels a summary or contact run (U12-01).** The run published its cancel handle only after the backend was up, so it started anyway once the model loaded.
 - **A tool row with an unknown call id no longer removes another call's progress row (U20-06).**
-- **Telegram Stop sits above the working status.** A silent control message with the Stop button is sent first, followed by the notifying status message. Edits stay on the status message, and both rows are cleaned up when the turn ends.
+- **Telegram Stop sits above the working status.** A silent control message with the Stop button is sent first, followed by the notifying status message. Edits stay on the status message, the control moves with each new footer bubble, and both rows are cleaned up when the turn ends.
 - **Sidebar messages show their creation time.** Owner prompts and agent replies show local time in today/older-message formats; sessions saved before timestamps were added continue to render without a time.
 - An unknown chat id now reports not found even when all 10 chat tabs are open.
 - When a later file write restores a file to its original contents, its pending added and removed line highlights are cleared at once.

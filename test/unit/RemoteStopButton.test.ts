@@ -51,6 +51,7 @@ const base = {
 
 interface Fixture {
   channel: FakeRemoteChannel;
+  progressSends: string[];
   controller: RemoteController;
   auth: RemoteAuth;
   host: ForgeHostFacade;
@@ -75,19 +76,39 @@ interface Fixture {
  * the turn's bubble, the model's first words stream into it, and `host.send`
  * blocks so the turn is still live while the Stop taps arrive.
  */
-async function liveTurn(options: { separateStopControl?: boolean } = {}): Promise<Fixture> {
+async function liveTurn(
+  options: { separateStopControl?: boolean; failStopControlResend?: boolean } = {},
+): Promise<Fixture> {
   const state = await store();
   const secrets = new MemorySecrets();
   const auth = new RemoteAuth(secrets as unknown as vscode.SecretStorage);
   const channel = new FakeRemoteChannel('telegram');
+  const progressSends: string[] = [];
+  const sendProgress = channel.sendProgress.bind(channel);
+  channel.sendProgress = async (...args: Parameters<FakeRemoteChannel['sendProgress']>) => {
+    const messageId = await sendProgress(...args);
+    progressSends.push(`send:${messageId}:bubble`);
+    return messageId;
+  };
+  const deleteMessage = channel.deleteMessage.bind(channel);
+  channel.deleteMessage = async (chatId, messageId) => {
+    progressSends.push(`delete:${messageId}`);
+    await deleteMessage(chatId, messageId);
+  };
   if (options.separateStopControl) {
     const controllable = channel as FakeRemoteChannel & {
-      sendProgressStopControl: (chatId: string) => Promise<string>;
+      sendProgressStopControl: (chatId: string) => Promise<string | undefined>;
     };
+    let controlSends = 0;
     controllable.sendProgressStopControl = async (chatId) => {
+      controlSends += 1;
+      if (options.failStopControlResend && controlSends > 1) {
+        throw new Error('Stop control resend denied');
+      }
       channel.progress.push({ chatId, text: '\u2063' });
       const messageId = String(channel.progress.length);
       channel.stopButtons.add(messageId);
+      progressSends.push(`send:${messageId}:stop`);
       return messageId;
     };
   }
@@ -180,6 +201,7 @@ async function liveTurn(options: { separateStopControl?: boolean } = {}): Promis
 
   return {
     channel,
+    progressSends,
     controller,
     auth,
     host,
@@ -252,6 +274,143 @@ describe('remote stop_action (newest bubble Stop button)', () => {
       kind: 'rejected',
       reason: 'This turn has already ended.',
     });
+    await f.controller.stop();
+  });
+
+  it('moves the separate Stop above each new footer bubble and cleans up the latest control', async () => {
+    const f = await liveTurn({ separateStopControl: true });
+    const initialStop = String(f.channel.progress.findIndex((p) => p.text === '\u2063') + 1);
+
+    f.emitProgress({
+      conversationId: 'c1',
+      kind: 'notice',
+      severity: 'warning',
+      text: 'agent is repeating the same tool call',
+    });
+    await vi.waitFor(
+      () => {
+        expect(f.channel.progress.filter((p) => p.text === '\u2063')).toHaveLength(2);
+        expect(f.channel.progress.at(-1)?.text).toContain('⏳ Forge: working…');
+        expect(f.channel.deleted).toContainEqual({ chatId: 'chat-1', messageId: initialStop });
+      },
+      { timeout: 3_000 },
+    );
+
+    const newFooter = String(f.channel.progress.length);
+    const newStop = String(
+      f.channel.progress.map((message) => message.text).lastIndexOf('\u2063') + 1,
+    );
+    const liveControls = [...f.channel.stopButtons].filter(
+      (id) => !f.channel.deleted.some((deleted) => deleted.messageId === id),
+    );
+    expect(liveControls).toEqual([newStop]);
+    expect(Number(newFooter)).toBe(Number(newStop) + 1);
+    const removeOldControl = f.progressSends.indexOf(`delete:${initialStop}`);
+    const sendNewControl = f.progressSends.indexOf(`send:${newStop}:stop`);
+    const sendNewFooter = f.progressSends.indexOf(`send:${newFooter}:bubble`);
+    expect(removeOldControl).toBeGreaterThanOrEqual(0);
+    expect(f.progressSends.slice(sendNewControl, sendNewFooter + 1)).toEqual([
+      `send:${newStop}:stop`,
+      `send:${newFooter}:bubble`,
+    ]);
+    expect(removeOldControl).toBeLessThan(sendNewControl);
+
+    await expect(
+      f.channel.emit(tap(newStop, 'stop-new-control', { control: true })),
+    ).resolves.toEqual({ kind: 'handled' });
+    expect(f.cancel).toHaveBeenCalledWith('c1');
+
+    f.release();
+    await f.drainDone();
+    expect(f.channel.deleted).toContainEqual({ chatId: 'chat-1', messageId: newStop });
+    await f.controller.stop();
+  });
+
+  it('puts inline Stop on a new footer bubble when moving its control fails', async () => {
+    const f = await liveTurn({ separateStopControl: true, failStopControlResend: true });
+    const initialStop = String(f.channel.progress.findIndex((p) => p.text === '\u2063') + 1);
+
+    f.emitProgress({
+      conversationId: 'c1',
+      kind: 'notice',
+      severity: 'warning',
+      text: 'agent is repeating the same tool call',
+    });
+    await vi.waitFor(
+      () => {
+        expect(f.channel.progress.at(-1)?.text).toContain('⏳ Forge: working…');
+        expect(f.channel.deleted).toContainEqual({ chatId: 'chat-1', messageId: initialStop });
+        expect(f.errors.some((error) => error.includes('Stop control resend denied'))).toBe(true);
+      },
+      { timeout: 3_000 },
+    );
+
+    const newFooter = String(f.channel.progress.length);
+    expect(f.channel.stopButtons.has(newFooter)).toBe(true);
+    expect(f.channel.progress.filter((p) => p.text === '\u2063')).toHaveLength(1);
+
+    // The footer's next edit must keep the inline Stop it was sent with.
+    const edited: string[] = [];
+    const edit = f.channel.editMessage.bind(f.channel);
+    f.channel.editMessage = async (...args: Parameters<FakeRemoteChannel['editMessage']>) => {
+      await edit(...args);
+      edited.push(args[1]);
+    };
+    f.emitProgress({ kind: 'commentary', conversationId: 'c1', text: 'More streamed words' });
+    await vi.waitFor(() => expect(edited).toContain(newFooter), { timeout: 3_000 });
+    expect(f.channel.stopButtons.has(newFooter)).toBe(true);
+
+    await expect(f.channel.emit(tap(newFooter, 'stop-inline-fallback'))).resolves.toEqual({
+      kind: 'handled',
+    });
+    expect(f.cancel).toHaveBeenCalledWith('c1');
+
+    f.release();
+    await f.drainDone();
+    await f.controller.stop();
+  });
+
+  it('reports a failed old-control removal and keeps that Stop mapped', async () => {
+    const f = await liveTurn({ separateStopControl: true });
+    const initialStop = String(f.channel.progress.findIndex((p) => p.text === '\u2063') + 1);
+    const deleteMessage = f.channel.deleteMessage.bind(f.channel);
+    const clearInlineKeyboard = f.channel.clearInlineKeyboard.bind(f.channel);
+    let denyRemoval = true;
+    f.channel.deleteMessage = async (chatId, messageId) => {
+      if (denyRemoval && messageId === initialStop) throw new Error('delete denied');
+      await deleteMessage(chatId, messageId);
+    };
+    f.channel.clearInlineKeyboard = async (chatId, messageId) => {
+      if (denyRemoval && messageId === initialStop) throw new Error('disable denied');
+      await clearInlineKeyboard(chatId, messageId);
+    };
+
+    f.emitProgress({
+      conversationId: 'c1',
+      kind: 'notice',
+      severity: 'warning',
+      text: 'agent is repeating the same tool call',
+    });
+    await vi.waitFor(
+      () => {
+        expect(f.channel.progress.at(-1)?.text).toContain('⏳ Forge: working…');
+        expect(f.errors.some((error) => error.includes('delete denied'))).toBe(true);
+      },
+      { timeout: 3_000 },
+    );
+
+    const newFooter = String(f.channel.progress.length);
+    expect(f.channel.stopButtons.has(initialStop)).toBe(true);
+    expect(f.channel.stopButtons.has(newFooter)).toBe(true);
+    await expect(
+      f.channel.emit(tap(initialStop, 'stop-old-control', { control: true })),
+    ).resolves.toEqual({ kind: 'handled' });
+    expect(f.cancel).toHaveBeenCalledWith('c1');
+
+    denyRemoval = false;
+    f.release();
+    await f.drainDone();
+    expect(f.channel.deleted).toContainEqual({ chatId: 'chat-1', messageId: initialStop });
     await f.controller.stop();
   });
 

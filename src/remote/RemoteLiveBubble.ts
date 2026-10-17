@@ -18,6 +18,8 @@ export interface LiveBubbleDeps {
   intervalMs: number;
   /** False when the Stop button lives in the separate row above the status. */
   stopButtonOnBubble?: boolean;
+  /** Moves a separate Stop control before a new footer bubble; true means it is live. */
+  refreshStopControl?: () => Promise<boolean>;
   report: (err: unknown) => void;
 }
 
@@ -28,6 +30,8 @@ interface Bubble {
   text: string;
   /** What the chat last showed for it, footer included. */
   shown?: string;
+  /** Whether its Stop is inline, fixed when it is sent so later edits keep it. */
+  inlineStop?: boolean;
 }
 
 /**
@@ -315,16 +319,24 @@ export class RemoteLiveBubble {
 
   private async show(bubble: Bubble, text: string, stopButton: boolean): Promise<void> {
     const { channel, chatId, signal } = this.deps;
+    const sendProgress = channel.sendProgress?.bind(channel);
+    if (bubble.id === undefined && !sendProgress) return;
+    let showStopButton =
+      stopButton && (bubble.inlineStop ?? this.deps.stopButtonOnBubble !== false);
+    if (stopButton && bubble.id === undefined && this.deps.refreshStopControl) {
+      showStopButton = !(await this.deps.refreshStopControl());
+    }
     const options = {
       signal,
-      stopButton: stopButton && this.deps.stopButtonOnBubble !== false,
+      stopButton: showStopButton,
       retryRateLimit: false,
     };
     if (bubble.id === undefined) {
-      if (!channel.sendProgress) return;
-      const id = await channel.sendProgress(chatId, text, options);
+      if (!sendProgress) return;
+      const id = await sendProgress(chatId, text, options);
       if (id) {
         bubble.id = id;
+        if (stopButton) bubble.inlineStop = showStopButton;
         this.ids.add(id);
       }
     } else {

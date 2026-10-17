@@ -151,6 +151,36 @@ export class RemoteAgentProgress {
         footer: (maximum) => renderProgressFooter(state, maximum, Date.now()),
         intervalMs: this.editIntervalMs,
         stopButtonOnBubble: !stopMessageId,
+        ...(this.channel.sendProgressStopControl
+          ? {
+              refreshStopControl: async () => {
+                if (state.stopMessageId) {
+                  try {
+                    await removeProgressStopControl(
+                      this.channel,
+                      state.chatId,
+                      state.stopMessageId,
+                    );
+                    delete state.stopMessageId;
+                  } catch (err) {
+                    this.report(err);
+                    return false;
+                  }
+                }
+                try {
+                  const nextId = await this.channel.sendProgressStopControl!(chatId, {
+                    signal: this.signal,
+                  });
+                  if (!nextId) throw new Error('Telegram Stop control send returned no message id');
+                  state.stopMessageId = nextId;
+                  return true;
+                } catch (err) {
+                  this.report(err);
+                  return false;
+                }
+              },
+            }
+          : {}),
         report: (err) => this.report(err),
       },
       messageId,
