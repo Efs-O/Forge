@@ -32,7 +32,14 @@ function sweepDeadRuns(base: string): void {
     if (!name.startsWith(RUN_PREFIX)) continue;
     const pid = Number(name.slice(RUN_PREFIX.length).split('-')[0]);
     if (!Number.isSafeInteger(pid) || pid === process.pid || pidAlive(pid)) continue;
-    fs.rmSync(path.join(base, name), { recursive: true, force: true, maxRetries: 10, retryDelay: 200 });
+    const dir = path.join(base, name);
+    try {
+      fs.rmSync(dir, { recursive: true, force: true, maxRetries: 10, retryDelay: 200 });
+    } catch (error) {
+      // An orphan from that run still holds a file. It is not this run's folder,
+      // so name it and go on rather than failing every run until it is found.
+      console.warn(`tempGuard: could not remove ${dir} (${(error as Error).message})`);
+    }
   }
 }
 

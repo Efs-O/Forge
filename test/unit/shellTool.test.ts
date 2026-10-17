@@ -61,20 +61,45 @@ describe.skipIf(!TEST_BASH)('shell bash execution', () => {
     const root = fs.mkdtempSync(path.join(os.tmpdir(), 'forge-shell-kill-'));
     const previous = [...(vscode.workspace.workspaceFolders ?? [])];
     vscode.workspace.workspaceFolders?.splice(0, Infinity, { uri: vscode.Uri.file(root) });
+    // A native grandchild records its own OS pid. Windows used to kill bash
+    // first, so taskkill /T found no tree and the grandchild kept running,
+    // holding the cwd. (Background `&` jobs are out of reach either way: Git
+    // Bash's fork emulation gives them a Windows parent that is not bash.)
+    const sleeper = (file: string) =>
+      bashArgs(
+        `node -e "require('fs').writeFileSync('${file}', String(process.pid)); setInterval(() => {}, 1000)"`,
+      );
+    const alive = (pidFile: string): boolean => {
+      const pid = Number(fs.readFileSync(path.join(root, pidFile), 'utf8').trim());
+      try {
+        process.kill(pid, 0);
+        return true;
+      } catch {
+        return false;
+      }
+    };
+    const pidWritten = async (pidFile: string): Promise<void> => {
+      const file = path.join(root, pidFile);
+      while (!fs.existsSync(file) || fs.readFileSync(file, 'utf8').trim() === '') {
+        await new Promise((r) => setTimeout(r, 20));
+      }
+    };
     try {
       const tool = makeShellTool({ bashPath: TEST_BASH });
       await expect(
-        tool.handler({ ...bashArgs('sleep 20'), timeout_ms: 1000 }, context()),
+        tool.handler({ ...sleeper('timeout.pid'), timeout_ms: 1000 }, context()),
       ).resolves.toContain('timed out');
+      expect(alive('timeout.pid')).toBe(false);
+
       const abort = new AbortController();
-      const running = tool.handler(bashArgs('sleep 20'), context({ abortSignal: abort.signal }));
-      setTimeout(() => abort.abort(), 300);
+      const running = tool.handler(sleeper('abort.pid'), context({ abortSignal: abort.signal }));
+      await pidWritten('abort.pid');
+      abort.abort();
       await expect(running).resolves.toContain('exit');
+      expect(alive('abort.pid')).toBe(false);
     } finally {
       vscode.workspace.workspaceFolders?.splice(0, Infinity, ...previous);
-      // A just-killed child can hold the folder as its cwd for a moment (EPERM on Windows).
-      // Under a full CI run that moment exceeded 2 s, so allow up to 10 s.
-      fs.rmSync(root, { recursive: true, force: true, maxRetries: 50, retryDelay: 200 });
+      fs.rmSync(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
     }
   }, 15_000);
 });

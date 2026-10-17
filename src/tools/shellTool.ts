@@ -309,30 +309,30 @@ async function runForeground(
       if (settled) return;
       settled = true;
       clearTimeout(timer);
-      signal?.removeEventListener('abort', abort);
+      signal?.removeEventListener('abort', stop);
       resolve({ code, timedOut, output, seconds: (Date.now() - started) / 1000 });
     };
-    const abort = (): void => {
-      void terminateCliProcessTree(proc);
-      finish(null);
+    // Resolve only once the tree is dead, or the next command races its files.
+    let killing = false;
+    const stop = (): void => {
+      if (killing || settled) return;
+      killing = true;
+      clearTimeout(timer);
+      void terminateCliProcessTree(proc).then(() => finish(null));
     };
     const timer = setTimeout(() => {
       timedOut = true;
-      void terminateCliProcessTree(proc);
-      finish(null);
+      stop();
     }, timeoutMs);
-    signal?.addEventListener('abort', abort, { once: true });
-    if (signal?.aborted) abort();
-    proc.stdout.setEncoding('utf8');
-    proc.stderr.setEncoding('utf8');
-    proc.stdout.on('data', (chunk: string) => {
+    signal?.addEventListener('abort', stop, { once: true });
+    if (signal?.aborted) stop();
+    const append = (chunk: string): void => {
       output += chunk;
-    });
-    proc.stderr.on('data', (chunk: string) => {
-      output += chunk;
-    });
+    };
+    proc.stdout.setEncoding('utf8').on('data', append);
+    proc.stderr.setEncoding('utf8').on('data', append);
     proc.once('error', reject);
-    proc.once('close', (code) => finish(code));
+    proc.once('close', (code) => !killing && finish(code));
   });
 }
 

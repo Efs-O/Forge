@@ -1,70 +1,70 @@
-import { afterEach, describe, expect, it, vi } from 'vitest';
+import * as fs from 'fs';
+import * as os from 'os';
+import * as path from 'path';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { codexMessage, queueToCodex } from '../../src/agentBus/codexDelivery';
-import { buildCliProcessInvocation } from '../../src/agents/cliProcess';
 
-const { spawn, waitForExit, resolveExecutable } = vi.hoisted(() => ({
-  spawn: vi.fn(),
-  waitForExit: vi.fn(),
-  resolveExecutable: vi.fn(),
-}));
+const { resolveExecutable } = vi.hoisted(() => ({ resolveExecutable: vi.fn() }));
 
-vi.mock('../../src/agents/cliProcess', async (importOriginal) => ({
-  ...(await importOriginal<typeof import('../../src/agents/cliProcess')>()),
-  spawnCliProcess: spawn,
-  waitForCliProcessExit: waitForExit,
-  terminateProcessTree: vi.fn(),
-}));
 vi.mock('../../src/agents/resolveCliExecutable', () => ({
   resolveCliExecutable: resolveExecutable,
 }));
 
 const thread = '12345678-1234-1234-1234-123456789abc';
-const cli = 'codex';
-const executable = 'C:\\Users\\tester\\AppData\\Roaming\\npm\\codex.cmd';
 const replyPath = 'C:\\Users\\tester\\.forge\\agent-bus\\outbox\\fg1791234567890-12345678-reply.md';
 
-function encodedCommand(message: string): string {
-  return buildCliProcessInvocation(
-    {
-      executable,
-      args: ['queue', '--thread', thread, '--message', message],
-      cwd: 'C:\\',
-    },
-    'win32',
-  ).args[3]!;
-}
+// Every codexMessage has blank lines. Through cmd.exe a line break ends the
+// command, so the open Codex session received the subject line and nothing
+// else: no question, no reply instructions, and the asker waited 20 minutes.
+describe.runIf(process.platform === 'win32')('codex queue message delivery', () => {
+  let dir: string;
+  let argvFile: string;
 
-afterEach(() => vi.clearAllMocks());
-
-describe('Codex queue cmd.exe encoded length', () => {
-  it('admits 6,000 chars of prose and measures the same encoded argv as the shim builder', async (ctx) => {
-    if (process.platform !== 'win32') ctx.skip();
-    resolveExecutable.mockResolvedValue(executable);
-    spawn.mockReturnValue({ stderr: { on: vi.fn() }, stdout: { resume: vi.fn() } });
-    waitForExit.mockResolvedValue({ code: 0 });
-    const message = codexMessage(replyPath, 'fg1791234567890-12345678', 's', 'x'.repeat(6000));
-    const expected = encodedCommand(message);
-    expect(expected.length).toBeLessThanOrEqual(8191);
-
-    await queueToCodex(cli, thread, message);
-
-    expect(spawn).toHaveBeenCalledTimes(1);
-    expect(spawn.mock.calls[0]?.[0]).toMatchObject({
-      executable,
-      args: ['queue', '--thread', thread, '--message', message],
-    });
-    expect(spawn.mock.calls[0]?.[1]?.args[3]).toBe(expected);
+  beforeEach(() => {
+    dir = fs.mkdtempSync(path.join(os.tmpdir(), 'forge codex queue '));
+    argvFile = path.join(dir, 'argv.json');
+    const script = path.join(dir, 'node_modules', '@openai', 'codex', 'bin', 'codex.js');
+    fs.mkdirSync(path.dirname(script), { recursive: true });
+    fs.writeFileSync(
+      script,
+      `require('fs').writeFileSync(${JSON.stringify(argvFile)}, JSON.stringify(process.argv.slice(2)));\n`,
+    );
   });
 
-  it('refuses a 4,000-quote question before spawning and reports the encoded length', async (ctx) => {
-    if (process.platform !== 'win32') ctx.skip();
-    resolveExecutable.mockResolvedValue(executable);
-    spawn.mockReturnValue({ stderr: { on: vi.fn() }, stdout: { resume: vi.fn() } });
-    const message = codexMessage(replyPath, 'fg1791234567890-12345678', 's', '"'.repeat(4000));
-    const expectedLength = encodedCommand(message).length;
-    await expect(queueToCodex(cli, thread, message)).rejects.toThrow(
-      new RegExp(`encoded Codex command.*${expectedLength}.*8,191`),
+  afterEach(() => {
+    vi.clearAllMocks();
+    fs.rmSync(dir, { recursive: true, force: true });
+  });
+
+  it('delivers the whole multi-line message through an npm shim', async () => {
+    const shim = path.join(dir, 'codex.cmd');
+    fs.writeFileSync(
+      shim,
+      '@ECHO off\r\nSETLOCAL\r\nSET dp0=%~dp0\r\nSET "_prog=node"\r\n' +
+        'endLocal & goto #_undefined_# 2>NUL || title %COMSPEC% & "%_prog%"  ' +
+        '"%dp0%\\node_modules\\@openai\\codex\\bin\\codex.js" %*\r\n',
     );
-    expect(spawn).not.toHaveBeenCalled();
+    resolveExecutable.mockResolvedValue(shim);
+    const message = codexMessage(replyPath, 'fg1791234567890-12345678', 's', 'a & b\n"%PATH%"');
+
+    await queueToCodex('codex', thread, message);
+
+    expect(JSON.parse(fs.readFileSync(argvFile, 'utf8'))).toEqual([
+      'queue',
+      '--thread',
+      thread,
+      '--message',
+      message,
+    ]);
+  });
+
+  it('refuses before spawning when the shim can only run through cmd.exe', async () => {
+    const shim = path.join(dir, 'codex.bat');
+    fs.writeFileSync(shim, `@node "%~dp0\\node_modules\\@openai\\codex\\bin\\codex.js" %*\r\n`);
+    resolveExecutable.mockResolvedValue(shim);
+    const message = codexMessage(replyPath, 'fg1791234567890-12345678', 's', 'question');
+
+    await expect(queueToCodex('codex', thread, message)).rejects.toThrow(/line break/);
+    expect(fs.existsSync(argvFile)).toBe(false);
   });
 });

@@ -1,6 +1,5 @@
 /** Shared ask_agent size policy and the required report-file handoff. */
 export const MAX_QUESTION_CHARS = 6000;
-export const MAX_WINDOWS_CMD_COMMAND_CHARS = 8191;
 
 export function questionSizeRefusal(detail: string): string {
   return (

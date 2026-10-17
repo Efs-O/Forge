@@ -1,12 +1,6 @@
 import * as os from 'os';
-import {
-  buildCliProcessInvocation,
-  spawnCliProcess,
-  terminateProcessTree,
-  waitForCliProcessExit,
-} from '../agents/cliProcess';
+import { spawnCliProcess, terminateProcessTree, waitForCliProcessExit } from '../agents/cliProcess';
 import { resolveCliExecutable } from '../agents/resolveCliExecutable';
-import { MAX_WINDOWS_CMD_COMMAND_CHARS, questionSizeRefusal } from './liveSessionLimit';
 
 /** `codex queue` only hands the message to the open session; it returns fast. */
 const QUEUE_TIMEOUT_MS = 30_000;
@@ -51,19 +45,9 @@ export async function queueToCodex(
     args: ['queue', '--thread', thread, '--message', message],
     cwd: os.homedir(),
   };
-  const invocation = buildCliProcessInvocation(options);
-  if (invocation.windowsCmdWrapped) {
-    const encodedLength = invocation.args[3]?.length ?? 0;
-    if (encodedLength > MAX_WINDOWS_CMD_COMMAND_CHARS) {
-      throw new Error(
-        questionSizeRefusal(
-          `the encoded Codex command is ${encodedLength} characters; cmd.exe allows ` +
-            `${MAX_WINDOWS_CMD_COMMAND_CHARS.toLocaleString('en-US')}.`,
-        ),
-      );
-    }
-  }
-  const proc = spawnCliProcess(options, invocation);
+  // An npm shim is run directly (unwrapNpmCmdShim); any other .cmd goes through
+  // cmd.exe, which refuses the multi-line message rather than truncate it.
+  const proc = spawnCliProcess(options);
   let stderr = '';
   proc.stderr?.on('data', (chunk: Buffer) => {
     stderr = (stderr + chunk.toString('utf8')).slice(-STDERR_TAIL_CHARS);

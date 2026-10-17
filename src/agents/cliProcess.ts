@@ -1,5 +1,9 @@
 import { spawn, type ChildProcess } from 'child_process';
-import { buildWindowsCmdShellInvocation, needsWindowsCmdShellWrap } from './windowsCmdShim';
+import {
+  buildWindowsCmdShellInvocation,
+  needsWindowsCmdShellWrap,
+  unwrapNpmCmdShim,
+} from './windowsCmdShim';
 
 export interface SpawnCliProcessOptions {
   executable: string;
@@ -37,17 +41,23 @@ export function buildCliSpawnEnvironment(
   return environment;
 }
 
-/** Builds the exact argv used by {@link spawnCliProcess}. Exported so a
- *  caller can check cmd.exe's command-length ceiling before starting a shim. */
+/** Builds the exact argv used by {@link spawnCliProcess}: an npm `.cmd` shim's
+ *  target directly when it can be read, otherwise an escaped cmd.exe line. */
 export function buildCliProcessInvocation(
   options: SpawnCliProcessOptions,
   platform: NodeJS.Platform = process.platform,
 ): CliProcessInvocation {
-  const wrap = platform === 'win32' && needsWindowsCmdShellWrap(options.executable);
-  const invocation = wrap
-    ? buildWindowsCmdShellInvocation(options.executable, [...options.args])
-    : { file: options.executable, args: [...options.args] };
-  return { ...invocation, windowsCmdWrapped: wrap };
+  if (platform !== 'win32' || !needsWindowsCmdShellWrap(options.executable)) {
+    return { file: options.executable, args: [...options.args], windowsCmdWrapped: false };
+  }
+  const direct = unwrapNpmCmdShim(options.executable);
+  if (direct) {
+    return { file: direct.file, args: [...direct.args, ...options.args], windowsCmdWrapped: false };
+  }
+  return {
+    ...buildWindowsCmdShellInvocation(options.executable, [...options.args]),
+    windowsCmdWrapped: true,
+  };
 }
 
 /**
@@ -83,9 +93,9 @@ export function waitForCliProcessExit(proc: ChildProcess): Promise<CliProcessExi
 }
 
 /**
- * Terminates a Forge-owned CLI process tree. Windows uses best-effort kill()
- * followed by taskkill; POSIX sends SIGTERM then SIGKILL after a grace period.
- * Cleanup never waits longer than six seconds.
+ * Terminates a Forge-owned CLI process tree. Windows runs `taskkill /T /F`
+ * and resolves when it returns; POSIX sends SIGTERM then SIGKILL after a grace
+ * period. Cleanup never waits longer than six seconds.
  */
 export function terminateProcessTree(proc: ChildProcess): Promise<void> {
   return new Promise<void>((resolve) => {
@@ -95,23 +105,31 @@ export function terminateProcessTree(proc: ChildProcess): Promise<void> {
       settled = true;
       resolve();
     };
-    proc.once('exit', finish);
-    proc.once('error', finish);
 
     if (process.platform === 'win32' && proc.pid) {
-      try {
-        proc.kill();
-      } catch {
-        // Continue to taskkill, which may still be able to clean up children.
-      }
+      // taskkill /T walks the tree from the live parent, so the parent must
+      // not die first. Killing it with proc.kill() beforehand left every
+      // grandchild running (a timed-out `sleep 20` under bash, a CLI agent's
+      // own subprocesses). The parent's exit is not the signal either: the
+      // tree is gone only when taskkill returns.
       const killer = spawn('taskkill', ['/PID', String(proc.pid), '/T', '/F'], {
         shell: false,
         stdio: 'ignore',
         windowsHide: true,
       });
-      killer.once('exit', () => setTimeout(finish, 250));
-      killer.once('error', () => setTimeout(finish, 250));
+      const fallback = (): void => {
+        try {
+          proc.kill();
+        } catch {
+          // Already gone; taskkill's failure was "process not found".
+        }
+        setTimeout(finish, 250);
+      };
+      killer.once('exit', (code) => (code === 0 ? setTimeout(finish, 250) : fallback()));
+      killer.once('error', fallback);
     } else {
+      proc.once('exit', finish);
+      proc.once('error', finish);
       // POSIX: signal the whole process group, not just the direct child. The
       // child is a group leader (spawned detached), so -pid reaches every
       // descendant it forked. If it is not a group leader (e.g. a child from
