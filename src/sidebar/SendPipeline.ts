@@ -80,6 +80,13 @@ export class SendPipeline {
     metadata?: { remoteRequestId?: string; echoPrompt?: boolean },
   ): Promise<ForgeRequestOutcome> {
     const { deps } = this;
+    const refuse = (message: string, error: string, id?: string): ForgeRequestOutcome => {
+      deps.post({ type: 'error', message, ...(id ? { conversationId: id } : {}) });
+      return { kind: 'failed', error, finalText: '' };
+    };
+    const gone = 'Forge: the queued conversation is no longer open.';
+    const busyAgain =
+      'Forge: this conversation is still generating. Cancel it before sending again.';
     let conv = conversationId
       ? deps.getSidebar().conversations.find((candidate) => candidate.id === conversationId)
       : deps.getActive();
@@ -87,18 +94,10 @@ export class SendPipeline {
       // Deliberately unaddressed: the conversation this referred to is gone, so
       // there is no tab to route it to. The active tab is the only place the
       // user can actually see it, and nothing is left streaming to clear.
-      deps.post({ type: 'error', message: 'Forge: the queued conversation is no longer open.' });
-      return {
-        kind: 'failed',
-        error: 'Forge: the queued conversation is no longer open.',
-        finalText: '',
-      };
+      return refuse(gone, gone);
     }
     const attachmentError = validateAttachments(attachments);
-    if (attachmentError) {
-      deps.post({ type: 'error', message: attachmentError, conversationId: conv.id });
-      return { kind: 'failed', error: attachmentError, finalText: '' };
-    }
+    if (attachmentError) return refuse(attachmentError, attachmentError, conv.id);
     // Every refusal below MUST name the conversation it refers to. The webview
     // resolves an unaddressed message against the ACTIVE tab, and its ERROR
     // action clears that tab's streaming state — so a background conversation
@@ -106,16 +105,11 @@ export class SendPipeline {
     // happened to be looking at, while leaving the real one streaming with no
     // way to cancel it.
     if (deps.agentLoop.isStreamingConv(conv.id) && !deps.agentLoop.isCancellationPending(conv.id)) {
-      deps.post({
-        type: 'error',
-        message: 'Forge: this conversation is still generating. Cancel it first or open a new tab.',
-        conversationId: conv.id,
-      });
-      return {
-        kind: 'failed',
-        error: CONVERSATION_BUSY_ERROR,
-        finalText: '',
-      };
+      return refuse(
+        'Forge: this conversation is still generating. Cancel it first or open a new tab.',
+        CONVERSATION_BUSY_ERROR,
+        conv.id,
+      );
     }
     await deps.agentLoop.waitForCancelledTurns();
     // Everything after the await is the final preflight. No asynchronous gap
@@ -123,38 +117,18 @@ export class SendPipeline {
     conv = conversationId
       ? deps.getSidebar().conversations.find((candidate) => candidate.id === conversationId)
       : deps.getActive();
-    if (!conv) {
-      deps.post({ type: 'error', message: 'Forge: the queued conversation is no longer open.' });
-      return {
-        kind: 'failed',
-        error: 'Forge: the queued conversation is no longer open.',
-        finalText: '',
-      };
-    }
+    if (!conv) return refuse(gone, gone);
     const finalAttachmentError = validateAttachments(attachments);
-    if (finalAttachmentError) {
-      deps.post({ type: 'error', message: finalAttachmentError, conversationId: conv.id });
-      return { kind: 'failed', error: finalAttachmentError, finalText: '' };
-    }
+    if (finalAttachmentError) return refuse(finalAttachmentError, finalAttachmentError, conv.id);
     if (deps.agentLoop.isStreamingConv(conv.id)) {
-      deps.post({
-        type: 'error',
-        message: 'Forge: this conversation is still generating. Cancel it before sending again.',
-        conversationId: conv.id,
-      });
-      return {
-        kind: 'failed',
-        error: CONVERSATION_BUSY_ERROR,
-        finalText: '',
-      };
+      return refuse(busyAgain, CONVERSATION_BUSY_ERROR, conv.id);
     }
     const config = deps.getConfig();
     const modelName = conv.active_model ?? config.active_model;
     if (!modelName) {
       const message = 'Forge: no active model selected. Pick a model before sending.';
       deps.events.onBackendError?.(message);
-      deps.post({ type: 'error', message, conversationId: conv.id });
-      return { kind: 'failed', error: message, finalText: '' };
+      return refuse(message, message, conv.id);
     }
     // Request-time resolution: active_model may carry @profile (F6). Flattens
     // defaults + base + profile into a legacy ModelConfig for the agent loop.
@@ -162,39 +136,24 @@ export class SendPipeline {
     try {
       selectedModel = resolveRequestModel(config, modelName, (m) => log.info(m));
     } catch (err) {
-      deps.post({ type: 'error', message: (err as Error).message, conversationId: conv.id });
-      return { kind: 'failed', error: (err as Error).message, finalText: '' };
+      return refuse((err as Error).message, (err as Error).message, conv.id);
     }
     const hasImage = attachments?.some((attachment) => attachment.mediaType.startsWith('image/'));
     if (hasImage && !deriveStaticCapabilities(selectedModel).includes('vision')) {
-      deps.post({
-        type: 'error',
-        message:
-          `Forge: model "${selectedModel.name}" is not configured for image input. ` +
-          'Choose a vision-capable model. For llama.cpp, set mmproj_path to its compatible ' +
-          'projector; for other providers, declare the vision capability only when supported.',
-        conversationId: conv.id,
-      });
-      return {
-        kind: 'failed',
-        error: `Forge: model "${selectedModel.name}" is not configured for image input.`,
-        finalText: '',
-      };
+      const refusal = `Forge: model "${selectedModel.name}" is not configured for image input.`;
+      return refuse(
+        `${refusal} Choose a vision-capable model. For llama.cpp, set mmproj_path to its ` +
+          'compatible projector; for other providers, declare the vision capability only when ' +
+          'supported.',
+        refusal,
+        conv.id,
+      );
     }
     const admission = deps.requestChains.reserve(conv.id, () =>
       deps.agentLoop.isStreamingConv(conv.id),
     );
     if (admission.kind === 'busy') {
-      deps.post({
-        type: 'error',
-        message: 'Forge: this conversation is still generating. Cancel it before sending again.',
-        conversationId: conv.id,
-      });
-      return {
-        kind: 'failed',
-        error: CONVERSATION_BUSY_ERROR,
-        finalText: '',
-      };
+      return refuse(busyAgain, CONVERSATION_BUSY_ERROR, conv.id);
     }
     const chain = deps.requestChains.accept(admission.reservation, metadata?.remoteRequestId);
     // Persist the full selection (incl. @profile) on the conversation so tab
@@ -230,7 +189,8 @@ export class SendPipeline {
       }
     }
     // Closing or deleting the chat during either await above or the admission
-    // check below invalidates the chain; it must not reach runTurn.
+    // check below invalidates the chain; it must not reach runTurn. A Stop then
+    // only marks the chain (no turn to abort): stoppedBeforeTurn honours it.
     if (!deps.requestChains.isCurrent(chain)) return { kind: 'cancelled' };
     let outcome: ForgeRequestOutcome;
     const pendingTellBatches: TellBatch[] = [];
@@ -238,6 +198,15 @@ export class SendPipeline {
     let sendNowHeld = false;
     try {
       outcome = await deps.requestChains.run(chain, async () => {
+        const stoppedBeforeTurn = (): ForgeRequestOutcome | undefined => {
+          const kind = deps.requestChains.terminationKind(chain);
+          if (!kind) return undefined;
+          deps.post({ type: 'setInput', text, conversationId: conv.id });
+          deps.post({ type: 'done', finishReason: 'cancelled', conversationId: conv.id });
+          return { kind };
+        };
+        const stopped = stoppedBeforeTurn();
+        if (stopped) return stopped;
         let nextText = text;
         let nextAttachments = attachments;
         // Only the FIRST request of a chain carries the files the user sent; a
@@ -262,6 +231,8 @@ export class SendPipeline {
             return { kind: 'failed', error: decision.reason };
           }
           if (!deps.requestChains.isCurrent(chain)) return { kind: 'cancelled' };
+          const stoppedAtAdmission = stoppedBeforeTurn();
+          if (stoppedAtAdmission) return stoppedAtAdmission;
         }
         for (;;) {
           let turn: ForgeTurnOutcome;

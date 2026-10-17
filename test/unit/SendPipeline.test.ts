@@ -93,7 +93,15 @@ function harness(
     midTurnInbox,
   };
 
-  return { pipeline: new SendPipeline(deps), posted, runTurn, deps, conv, requestChains, midTurnInbox };
+  return {
+    pipeline: new SendPipeline(deps),
+    posted,
+    runTurn,
+    deps,
+    conv,
+    requestChains,
+    midTurnInbox,
+  };
 }
 
 function errors(posted: HostToWebview[]): string[] {
@@ -510,6 +518,23 @@ describe('SendPipeline.send', () => {
     };
     expect((await h.pipeline.send('hello', undefined, 'conv-1')).kind).toBe('cancelled');
     expect(h.runTurn).not.toHaveBeenCalled();
+  });
+
+  it('Stop during the admission check ends the send before the turn (U12-01)', async () => {
+    const h = harness();
+    h.deps.evaluateAtAdmission = async () => {
+      h.requestChains.markCancelling('conv-1');
+      return { kind: 'proceed' };
+    };
+    expect((await h.pipeline.send('hello', undefined, 'conv-1')).kind).toBe('cancelled');
+    expect(h.runTurn).not.toHaveBeenCalled();
+    // The prompt never reached the transcript, so it goes back to the input.
+    expect(h.posted).toContainEqual({ type: 'setInput', text: 'hello', conversationId: 'conv-1' });
+    expect(h.posted).toContainEqual({
+      type: 'done',
+      finishReason: 'cancelled',
+      conversationId: 'conv-1',
+    });
   });
 
   it('only writes a session log for a conversation that has messages', async () => {
