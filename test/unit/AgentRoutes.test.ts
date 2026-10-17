@@ -4,7 +4,7 @@ import * as http from 'http';
 import type { AddressInfo } from 'net';
 import * as os from 'os';
 import * as path from 'path';
-import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import {
   busPaths,
   clearExchange,
@@ -30,8 +30,16 @@ let server: http.Server;
 let base: string;
 let focused: boolean;
 
-beforeEach(async () => {
+beforeAll(async () => {
   home = await fs.promises.mkdtemp(path.join(os.tmpdir(), 'forge-agent-routes-'));
+  server = http.createServer((req, res) => void routes.handle(req, res));
+  await new Promise<void>((r) => server.listen(0, '127.0.0.1', r));
+  base = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
+});
+
+beforeEach(async () => {
+  await fs.promises.rm(home, { recursive: true, force: true });
+  await fs.promises.mkdir(home, { recursive: true });
   paths = busPaths(home);
   accepted = [];
   acceptedOptions = [];
@@ -61,16 +69,16 @@ beforeEach(async () => {
     token: TOKEN,
     configuredModels: () => ['alpha', 'beta'],
   });
-  server = http.createServer((req, res) => void routes.handle(req, res));
-  await new Promise<void>((r) => server.listen(0, '127.0.0.1', r));
-  base = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
   routes.setEnabled(true);
   routes.onListening(base);
 });
 
-afterEach(async () => {
+afterEach(() => {
   routes.dispose();
-  await new Promise((r) => server.close(r));
+});
+
+afterAll(async () => {
+  await new Promise<void>((r) => server.close(() => r()));
   await fs.promises.rm(home, { recursive: true, force: true });
 });
 
@@ -486,13 +494,14 @@ function runClient(
   args: string[],
   input: string,
   env: Record<string, string> = {},
+  timeoutMs = 20_000,
 ): Promise<{ code: number; out: string }> {
   const bash = TEST_BASH!;
   return new Promise((resolve) => {
     const child = execFile(
       bash,
       [paths.script.replace(/\\/g, '/'), ...args],
-      { timeout: 20_000, env: { ...process.env, ...env } },
+      { timeout: timeoutMs, env: { ...process.env, ...env } },
       (err, stdout, stderr) => {
         const code = err ? ((err as { code?: number }).code ?? 1) : 0;
         resolve({ code: typeof code === 'number' ? code : 1, out: stdout + stderr });
@@ -664,17 +673,18 @@ describe.skipIf(!TEST_BASH)('forge.sh against the routes', () => {
       token: TOKEN,
       stopForge: async (_from, conversationId) => {
         stopped.push(conversationId);
-        return conversationId === 'idle-chat'
-          ? {
-              ok: false,
-              status: 409,
-              error: 'Forge chat "Idle" (idle-chat) is not streaming',
-            }
-          : {
-              ok: true,
-              conversationId: conversationId ?? 'default-chat',
-              title: 'Bus stop test',
-            };
+        if (conversationId === 'idle-chat') {
+          return {
+            ok: false,
+            status: 409,
+            error: 'Forge chat "Idle" (idle-chat) is not streaming',
+          };
+        }
+        return {
+          ok: true,
+          conversationId: conversationId ?? 'default-chat',
+          title: 'Bus stop test',
+        };
       },
     });
     const env = { CODEX_SESSION_ID: '00000000-0000-4000-8000-000000000001' };
@@ -695,11 +705,12 @@ describe.skipIf(!TEST_BASH)('forge.sh against the routes', () => {
 
   it('steer targeting and stop argument errors are checked before a request', async (ctx) => {
     if (!usable) ctx.skip();
-    expect((await runClient(['steer', 'codex', 'codex', '--to', 'chat'], 'text')).code).toBe(2);
-    expect(
-      (await runClient(['steer', 'codex', 'forge', '--to', 'chat', '--to-running'], 'text')).code,
-    ).toBe(2);
-    expect((await runClient(['stop', 'codex', 'unexpected'], '')).code).toBe(2);
+    const results = await Promise.all([
+      runClient(['steer', 'codex', 'codex', '--to', 'chat'], 'text'),
+      runClient(['steer', 'codex', 'forge', '--to', 'chat', '--to-running'], 'text'),
+      runClient(['stop', 'codex', 'unexpected'], ''),
+    ]);
+    expect(results.map((result) => result.code)).toEqual([2, 2, 2]);
     expect(accepted).toEqual([]);
   }, 30_000);
 
@@ -831,26 +842,6 @@ describe.skipIf(!TEST_BASH)('forge.sh against the routes', () => {
     );
   });
 
-  it('does not retain the removed reply-in-chat option', async (ctx) => {
-    if (!usable) ctx.skip();
-    const said = await runClient(['say', 'claude-review', '--reply-in-chat'], 'question\n');
-    expect(said.code).toBe(2);
-    expect(accepted).toEqual([]);
-  }, 30_000);
-
-  it('a reply still lands through the outbox file when Forge is gone; a message does not', async (ctx) => {
-    if (!usable) ctx.skip();
-    routes.dispose();
-    const replied = await runClient(['reply', 'fg3-abc'], 'offline answer');
-    expect(replied).toMatchObject({ code: 0 });
-    await expect(waitForReply(paths, 'fg3-abc', 1_000, undefined, 10)).resolves.toBe(
-      'offline answer',
-    );
-    const said = await runClient(['say', 'x'], 'hi');
-    expect(said.code).toBe(1);
-    expect(said.out).toContain('not reachable');
-  }, 30_000);
-
   it('agent send relays by linked session kind', async (ctx) => {
     if (!usable) ctx.skip();
     const agentRelays: [string, string, string][] = [];
@@ -878,7 +869,6 @@ describe.skipIf(!TEST_BASH)('forge.sh against the routes', () => {
         '(when the send came from a Forge chat). Use `wait` and then `read-verdict` for the full response.',
     });
     expect(agentRelays).toEqual([['claude', 'codex', 'plan ready\n']]);
-
     const invalid = await runClient(['send', 'claude', 'codex'], 'still sent\n', {
       FORGE_CONVERSATION_ID: 'bad/id',
       CLAUDE_CODE_SESSION_ID: '8e395649-705e-47f9-b499-03a36e908f50',
@@ -987,26 +977,50 @@ describe.skipIf(!TEST_BASH)('forge.sh against the routes', () => {
 
   it('refuses a bad id or name before sending anything', async (ctx) => {
     if (!usable) ctx.skip();
-    expect((await runClient(['reply', '../x'], 'a')).code).toBe(2);
-    expect((await runClient(['say', 'a b'], 'a')).code).toBe(2);
-    expect((await runClient(['cancel', 'x', '../m1'], '')).code).toBe(2);
-    expect((await runClient(['cancel', 'x'], '')).code).toBe(2);
+    const results = await Promise.all([
+      runClient(['reply', '../x'], 'a'),
+      runClient(['say', 'a b'], 'a'),
+      runClient(['cancel', 'x', '../m1'], ''),
+      runClient(['cancel', 'x'], ''),
+    ]);
+    expect(results.map((result) => result.code)).toEqual([2, 2, 2, 2]);
     expect(accepted).toEqual([]);
   }, 30_000);
 
-  it('wait: refuses bad names, timeouts, arity and env overrides before any request', async (ctx) => {
+  it('does not retain the removed reply-in-chat option', async (ctx) => {
     if (!usable) ctx.skip();
-    expect((await runClient(['wait', 'a b'], '')).code).toBe(2);
-    expect((await runClient(['wait', 'x', 'abc'], '')).code).toBe(2);
-    expect((await runClient(['wait', 'x', '0'], '')).code).toBe(2);
-    expect((await runClient(['wait', 'x', '100001'], '')).code).toBe(2);
-    expect((await runClient(['wait', 'x', '1', 'extra'], '')).code).toBe(2);
-    expect((await runClient(['wait', 'x'], '', { FORGE_WAIT_POLL_SECONDS: 'nope' })).code).toBe(2);
-    expect((await runClient(['wait', 'x'], '', { FORGE_WAIT_POLL_SECONDS: '0' })).code).toBe(2);
-    expect((await runClient(['wait', 'x'], '', { FORGE_WAIT_TIMEOUT_SECONDS: 'nope' })).code).toBe(
-      2,
+    const said = await runClient(['say', 'claude-review', '--reply-in-chat'], 'question\n');
+    expect(said.code).toBe(2);
+    expect(accepted).toEqual([]);
+  }, 30_000);
+
+  it('a reply still lands through the outbox file when Forge is gone; a message does not', async (ctx) => {
+    if (!usable) ctx.skip();
+    routes.dispose();
+    const replied = await runClient(['reply', 'fg3-abc'], 'offline answer');
+    expect(replied).toMatchObject({ code: 0 });
+    await expect(waitForReply(paths, 'fg3-abc', 1_000, undefined, 10)).resolves.toBe(
+      'offline answer',
     );
-    expect((await runClient(['wait', 'x'], '', { FORGE_WAIT_TIMEOUT_SECONDS: '0' })).code).toBe(2);
+    const said = await runClient(['say', 'x'], 'hi');
+    expect(said.code).toBe(1);
+    expect(said.out).toContain('not reachable');
+  }, 30_000);
+
+  it('wait: refuses bad names, timeout arguments, and env overrides before any request', async (ctx) => {
+    if (!usable) ctx.skip();
+    const results = await Promise.all([
+      runClient(['wait', 'a b'], ''),
+      runClient(['wait', 'x', 'abc'], ''),
+      runClient(['wait', 'x', '0'], ''),
+      runClient(['wait', 'x', '100001'], ''),
+      runClient(['wait', 'x', '1', 'extra'], ''),
+      runClient(['wait', 'x'], '', { FORGE_WAIT_POLL_MS: 'nope' }),
+      runClient(['wait', 'x'], '', { FORGE_WAIT_POLL_MS: '0' }),
+      runClient(['wait', 'x'], '', { FORGE_WAIT_TIMEOUT_SECONDS: 'nope' }),
+      runClient(['wait', 'x'], '', { FORGE_WAIT_TIMEOUT_SECONDS: '0' }),
+    ]);
+    expect(results.map((result) => result.code)).toEqual(Array(9).fill(2));
     expect(accepted).toEqual([]);
   }, 30_000);
 
@@ -1026,7 +1040,12 @@ describe.skipIf(!TEST_BASH)('forge.sh against the routes', () => {
       token: TOKEN,
       status: () => ({ ok: false, status: 404, error: 'no chat' }),
     });
-    const res = await runClient(['wait', 'x'], '', { FORGE_WAIT_POLL_SECONDS: '1' });
+    const res = await runClient(
+      ['wait', 'x'],
+      '',
+      { FORGE_WAIT_POLL_MS: '1', FORGE_WAIT_TIMEOUT_SECONDS: '1' },
+      10_000,
+    );
     expect(res.code).toBe(1);
     expect(res.out).toContain("Forge's endpoint did not accept it");
   }, 30_000);
@@ -1054,8 +1073,13 @@ describe.skipIf(!TEST_BASH)('forge.sh against the routes', () => {
       },
       view: () => ({ ok: true, text: 'the answer' }),
     });
-    const res = await runClient(['wait', 'x'], '', { FORGE_WAIT_POLL_SECONDS: '1' });
-    expect(res.code).toBe(0);
+    const res = await runClient(
+      ['wait', 'x'],
+      '',
+      { FORGE_WAIT_POLL_MS: '1' },
+      10_000,
+    );
+    expect(res.code, res.out).toBe(0);
     expect(res.out).toContain('State: idle');
     expect(res.out).toContain('Queued from you: 0');
     expect(res.out).toContain('the answer');
@@ -1085,8 +1109,13 @@ describe.skipIf(!TEST_BASH)('forge.sh against the routes', () => {
       },
       view: () => ({ ok: true, text: 'the answer' }),
     });
-    const res = await runClient(['wait', 'x'], '', { FORGE_WAIT_POLL_SECONDS: '1' });
-    expect(res.code).toBe(0);
+    const res = await runClient(
+      ['wait', 'x'],
+      '',
+      { FORGE_WAIT_POLL_MS: '1' },
+      10_000,
+    );
+    expect(res.code, res.out).toBe(0);
     expect(res.out).toContain('Queued from you: 0');
     expect(res.out).toContain('the answer');
     expect(polls).toBe(3);
@@ -1112,8 +1141,13 @@ describe.skipIf(!TEST_BASH)('forge.sh against the routes', () => {
       },
       view: () => ({ ok: true, text: 'the answer' }),
     });
-    const res = await runClient(['wait', 'x'], '', { FORGE_WAIT_POLL_SECONDS: '1' });
-    expect(res.code).toBe(0);
+    const res = await runClient(
+      ['wait', 'x'],
+      '',
+      { FORGE_WAIT_POLL_MS: '1' },
+      10_000,
+    );
+    expect(res.code, res.out).toBe(0);
     expect(polls).toBe(2);
   }, 30_000);
 
@@ -1135,9 +1169,9 @@ describe.skipIf(!TEST_BASH)('forge.sh against the routes', () => {
       }),
     });
     const res = await runClient(['wait', 'x', '1'], '', {
-      FORGE_WAIT_POLL_SECONDS: '1',
       FORGE_WAIT_TIMEOUT_SECONDS: '1',
-    });
+      FORGE_WAIT_POLL_MS: '1',
+    }, 10_000);
     expect(res.code).toBe(124);
     expect(res.out).toContain('still not idle after 1 minute(s); last status:');
     expect(res.out).toContain('State: busy');
@@ -1439,4 +1473,5 @@ describe('forge.sh who against the routes (§11)', () => {
     const res = await runClient(['who', 'extra'], '');
     expect(res.code).toBe(2);
   }, 30_000);
+
 });
