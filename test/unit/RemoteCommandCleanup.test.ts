@@ -2,6 +2,7 @@ import * as fs from 'fs/promises';
 import * as os from 'os';
 import * as path from 'path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
+import { MemorySecrets } from '../support/memorySecrets';
 import type * as vscode from 'vscode';
 import { FakeRemoteChannel } from '../../src/remote/FakeRemoteChannel';
 import { RemoteAuth } from '../../src/remote/RemoteAuth';
@@ -24,21 +25,6 @@ afterEach(async () => {
   for (const directory of tempDirs.splice(0))
     await fs.rm(directory, { recursive: true, force: true });
 });
-
-class MemorySecrets {
-  readonly values = new Map<string, string>();
-  get(key: string): Thenable<string | undefined> {
-    return Promise.resolve(this.values.get(key));
-  }
-  store(key: string, value: string): Thenable<void> {
-    this.values.set(key, value);
-    return Promise.resolve();
-  }
-  delete(key: string): Thenable<void> {
-    this.values.delete(key);
-    return Promise.resolve();
-  }
-}
 
 async function store(): Promise<RemoteRequestStore> {
   const directory = await fs.mkdtemp(path.join(os.tmpdir(), 'forge-cleanup-test-'));
