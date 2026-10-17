@@ -43,6 +43,13 @@ function copyCompaction(compaction: {
   summary: string;
   fromIndex: number;
   generation?: number | undefined;
+  dividers?:
+    | Array<{
+        generation: number;
+        fromIndex: number;
+        source?: 'auto' | 'manual' | undefined;
+      }>
+    | undefined;
   userMessages?: string[] | undefined;
   recordedActions?:
     | Array<{
@@ -62,6 +69,15 @@ function copyCompaction(compaction: {
     summary: compaction.summary,
     fromIndex: compaction.fromIndex,
     ...(compaction.generation !== undefined ? { generation: compaction.generation } : {}),
+    ...(compaction.dividers
+      ? {
+          dividers: compaction.dividers.map((divider) => ({
+            generation: divider.generation,
+            fromIndex: divider.fromIndex,
+            ...(divider.source !== undefined ? { source: divider.source } : {}),
+          })),
+        }
+      : {}),
     ...(compaction.userMessages ? { userMessages: [...compaction.userMessages] } : {}),
     ...(compaction.recordedActions
       ? {

@@ -1,5 +1,10 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { ChatMessage, ToolCall } from '../../src/llm/types';
+import { chatMessagesFromSlim, slimPersistMessages } from '../../src/sidebar/sessionTypes';
+import { displayPersistMessages } from '../../src/sidebar/sessionProjections';
+import { applyCompactionWindow } from '../../src/sidebar/compactionWindow';
+import type { CompactionState } from '../../src/sidebar/compactionTypes';
+import { mergeSyncedMessages } from '../../webview-ui/src/messageOps';
 
 const { streamModelChatCompletion } = vi.hoisted(() => ({
   streamModelChatCompletion: vi.fn(),
@@ -120,8 +125,101 @@ describe('ToolCallingLoop reasoning retention', () => {
         tool_calls: [CALL],
         createdAt: expect.any(Number),
       }),
-      expect.objectContaining({ role: 'assistant', content: 'Done.', createdAt: expect.any(Number) }),
+      expect.objectContaining({
+        role: 'assistant',
+        content: 'Done.',
+        createdAt: expect.any(Number),
+      }),
     ]);
+  });
+
+  it('keeps streamed text from an incomplete round when auto-compaction syncs the transcript', async () => {
+    let requestCount = 0;
+    const requests: ChatMessage[][] = [];
+    streamModelChatCompletion.mockImplementation(
+      async (_url: string, request: { messages: ChatMessage[] }, _model: unknown, h: Handlers) => {
+        requestCount++;
+        requests.push(request.messages);
+        if (requestCount === 1) {
+          h.onReasoning('I was checking the current state.');
+          h.onToken('Partial progress before the context refusal.');
+          throw new Error('exceeds the available context size');
+        }
+        h.onToken('Continued after compaction.');
+        h.onDone('stop');
+      },
+    );
+    const messages: ChatMessage[] = [{ role: 'user', content: 'go' }];
+    let compactions = 0;
+    let compaction: CompactionState | undefined;
+
+    await runToolCallingLoop({
+      ...runOptions(messages),
+      prepareMessages: (current: ChatMessage[]) => applyCompactionWindow(current, compaction),
+      compactMidTurn: async ({ exhausted }: { exhausted: boolean }) => {
+        if (!exhausted) return false;
+        compactions++;
+        expect(
+          messages.some(
+            (message) =>
+              message.role === 'assistant' &&
+              typeof message.content === 'string' &&
+              message.content.includes('Partial progress before the context refusal.'),
+          ),
+        ).toBe(true);
+        const partial = messages.find(
+          (message) =>
+            message.role === 'assistant' &&
+            typeof message.content === 'string' &&
+            message.content.includes('Partial progress before the context refusal.'),
+        )!;
+        compaction = {
+          summary: `Summary captured: ${partial.content}`,
+          fromIndex: messages.length,
+          generation: 1,
+        };
+        messages.push({ role: 'user', content: 'Continue from the summary.', internal: true });
+        return true;
+      },
+    } as never);
+
+    expect(compactions).toBe(1);
+    expect(requests[1]).toContainEqual(
+      expect.objectContaining({
+        role: 'assistant',
+        content: expect.stringContaining(
+          'Summary captured: Partial progress before the context refusal.',
+        ),
+      }),
+    );
+    const restored = chatMessagesFromSlim(slimPersistMessages(messages));
+    const displayed = displayPersistMessages(restored);
+    expect(displayed).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          role: 'assistant',
+          content: 'Partial progress before the context refusal.',
+        }),
+        expect.objectContaining({
+          role: 'assistant',
+          content: '',
+          reasoning: 'I was checking the current state.',
+        }),
+      ]),
+    );
+    expect(mergeSyncedMessages([], displayed)).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          role: 'assistant',
+          content: 'Partial progress before the context refusal.',
+        }),
+        expect.objectContaining({
+          role: 'assistant',
+          content: '',
+          reasoning: 'I was checking the current state.',
+        }),
+      ]),
+    );
   });
 
   it('drains tells after tool results and before the next request', async () => {

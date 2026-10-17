@@ -46,6 +46,17 @@ export const compactionPersistedSchema = z
     summary: z.string().min(1),
     fromIndex: z.number().int().min(0),
     generation: z.number().int().min(1).optional(),
+    dividers: z
+      .array(
+        z
+          .object({
+            generation: z.number().int().min(1),
+            fromIndex: z.number().int().min(0),
+            source: z.enum(['auto', 'manual']).optional(),
+          })
+          .strict(),
+      )
+      .optional(),
     userMessages: z
       .array(
         z

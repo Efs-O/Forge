@@ -2,6 +2,7 @@ import type { QuestionGroup } from '../util/questionAnswers';
 import type { ChatAttachmentRef } from '../llm/types';
 import type { AgentLinks, AgentSenderMetadata } from '../agentLinks/chatAgentLinks';
 import type { ActivityViewMode } from './activityViewSetting';
+import type { DisplayPersistMessage } from './sessionTypes';
 export type { ChatAttachmentRef };
 
 /** Tab row mirrored for host + webview. */
@@ -236,7 +237,7 @@ export type {
   DiffStats,
   FileDiffMsg,
 } from './diffMessages';
-import type { CheckpointStats, DiffHunk, FileDiffMsg } from './diffMessages';
+import type { CheckpointStats, FileDiffMsg } from './diffMessages';
 
 export interface ClankerChangedMsg {
   type: 'clankerChanged';
@@ -269,6 +270,14 @@ export interface ThreadReadStateChangedMsg {
   type: 'thread-read-state-changed';
 }
 
+/** A divider row marking one compaction; display only, never sent to the model. */
+export interface CompactionDividerMessage {
+  role: 'compaction';
+  content: 'Context compacted';
+  generation: number;
+  source?: 'auto' | 'manual';
+}
+
 /** Authoritative multi-tab state (tabs + transcripts). */
 export interface SessionSyncMsg {
   type: 'sessionSync';
@@ -277,37 +286,7 @@ export interface SessionSyncMsg {
   history: SessionHistoryMeta[];
   archived: SessionHistoryMeta[];
   waitingIds: string[];
-  messagesById: Record<
-    string,
-    Array<
-      | {
-          role: 'user' | 'assistant';
-          content: string;
-          createdAt?: number | undefined;
-          reasoning?: string | undefined;
-          reasoningMs?: number | undefined;
-          midTurn?: boolean | undefined;
-          agentSender?: AgentSenderMetadata | undefined;
-          attachments?: ChatAttachmentRef[] | undefined;
-        }
-      | {
-          role: 'tool';
-          content: string;
-          toolName: string;
-          toolResult: string;
-          toolResultTotal: number;
-          toolIsError?: boolean | undefined;
-          toolMs?: number | undefined;
-        }
-      | {
-          role: 'diff';
-          content: string;
-          diffHunks: DiffHunk[] | null;
-          diffIsNew: boolean;
-          diffIsDeleted: boolean;
-        }
-    >
-  >;
+  messagesById: Record<string, Array<DisplayPersistMessage | CompactionDividerMessage>>;
   /**
    * Webview-URI prefix for the chat attachment store, so a transcript row's
    * `relativePath` resolves to something the webview may load. Absent when the

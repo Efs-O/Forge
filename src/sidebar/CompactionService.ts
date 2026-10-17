@@ -278,7 +278,21 @@ async function compactOnce(
     // Read before the assignment below overwrites conv.compaction, and shared
     // with the log row so the two can never disagree about which generation
     // this was.
-    const generation = (conv.compaction?.generation ?? 0) + 1;
+    const previousDividers =
+      conv.compaction?.dividers ??
+      (conv.compaction
+        ? [
+            {
+              generation: conv.compaction.generation ?? 1,
+              fromIndex: conv.compaction.fromIndex,
+            },
+          ]
+        : []);
+    const generation =
+      Math.max(
+        conv.compaction?.generation ?? 0,
+        ...previousDividers.map((item) => item.generation),
+      ) + 1;
     const candidate = stage.hostContext.candidate(trimmed);
 
     // Does the candidate actually shrink the window?
@@ -309,7 +323,18 @@ async function compactOnce(
     );
 
     // Non-destructive: recorded only once the candidate is known to be better.
-    conv.compaction = candidate;
+    conv.compaction = {
+      ...candidate,
+      generation,
+      dividers: [
+        ...previousDividers,
+        {
+          generation,
+          fromIndex: stage.fromIndex,
+          source: trigger === 'auto' || trigger === 'admission' ? 'auto' : 'manual',
+        },
+      ],
+    };
     resetContextTrimState(conv);
     conv.updatedAt = Date.now();
     // Before invalidateExactTokenBudget below: that deletes the very counters

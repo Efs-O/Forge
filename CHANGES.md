@@ -69,6 +69,7 @@
 - When a later file write restores a file to its original contents, its pending added and removed line highlights are cleared at once.
 - Closing the browser session now forgets origins approved during that session while keeping configured pre-approvals.
 - Closing a tab now explains when an active delegation still holds its model and prevents it from being unloaded.
+- **The sidebar keeps the agent's words across a compaction, and marks where it happened.** Reply text streamed before an automatic mid-turn compaction used to be missing from the chat afterwards while the tool rows stayed, because the text reached the conversation only when the turn ended; it is now stored as it streams. A turn that only thought, with no reply or tool call, also survives a reload now. Each compaction leaves a divider row ("Context compacted · generation N · auto/manual") that is still there after a reload and is never sent to the model.
 
 ## 0.17.42
 

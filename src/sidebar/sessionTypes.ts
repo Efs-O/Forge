@@ -365,8 +365,11 @@ export function slimPersistMessages(messages: ChatMessage[]): SlimPersistMessage
     const persistedText = typeof m.content === 'string' ? m.content : textContent(m.content);
     const hasText = typeof persistedText === 'string';
     const hasToolCalls = Array.isArray(m.tool_calls) && m.tool_calls.length > 0;
+    const hasReasoning =
+      m.role === 'assistant' && typeof m.reasoning === 'string' && m.reasoning.length > 0;
     // An assistant turn with tool_calls legitimately has content: null.
-    if (!hasText && !hasToolCalls) continue;
+    // A reasoning-only turn may also have content: null, and must survive reload.
+    if (!hasText && !hasToolCalls && !hasReasoning) continue;
     out.push({
       role: m.role,
       content: hasText ? (persistedText as string) : null,

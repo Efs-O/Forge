@@ -15,6 +15,16 @@ export class StreamedAssistantTurn {
     readonly createdAt = Date.now(),
   ) {}
 
+  appendContent(token: string): void {
+    if (!token) return;
+    if (!this.current) {
+      this.current = { role: 'assistant', content: '', createdAt: this.createdAt };
+      this.messages.push(this.current);
+    }
+    const currentContent = typeof this.current.content === 'string' ? this.current.content : '';
+    this.current.content = `${currentContent}${token}`;
+  }
+
   appendReasoning(token: string): void {
     if (!this.current) {
       this.current = { role: 'assistant', content: '', reasoning: '', createdAt: this.createdAt };

@@ -1,4 +1,8 @@
-import type { ChatAttachmentRef, DiffHunk } from '../../src/sidebar/messageBridge';
+import type {
+  ChatAttachmentRef,
+  CompactionDividerMessage,
+  DiffHunk,
+} from '../../src/sidebar/messageBridge';
 import type { AgentSenderMetadata } from '../../src/agentLinks/chatAgentLinks';
 
 /**
@@ -19,8 +23,10 @@ export interface MessageAttachment {
 
 export interface AppMessage {
   id: string;
-  role: 'user' | 'assistant' | 'error' | 'system' | 'tool' | 'diff';
+  role: 'user' | 'assistant' | 'error' | 'system' | 'tool' | 'diff' | 'compaction';
   content: string;
+  compactionGeneration?: number;
+  compactionSource?: 'auto' | 'manual';
   createdAt?: number;
   reasoning?: string | undefined;
   /**
@@ -86,7 +92,8 @@ export type PersistedRow =
       diffHunks: DiffHunk[] | null;
       diffIsNew: boolean;
       diffIsDeleted: boolean;
-    };
+    }
+  | CompactionDividerMessage;
 
 /**
  * A stored reference becomes renderable only once the host has told us where
@@ -129,6 +136,12 @@ export function mergeSyncedMessages(
     id: mkId(),
     role: m.role,
     content: m.content,
+    ...(m.role === 'compaction'
+      ? {
+          compactionGeneration: m.generation,
+          ...(m.source ? { compactionSource: m.source } : {}),
+        }
+      : {}),
     ...((m.role === 'user' || m.role === 'assistant') && m.createdAt !== undefined
       ? { createdAt: m.createdAt }
       : {}),
