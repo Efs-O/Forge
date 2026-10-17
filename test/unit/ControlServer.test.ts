@@ -45,6 +45,11 @@ class FakePool implements IBackendPool {
   loadedModelNames(): string[] {
     return [...this.loaded.keys()];
   }
+  /** Models a sidebar turn is using, outside the control server's holds. */
+  readonly busy = new Set<string>();
+  isBusy(name: string): boolean {
+    return this.busy.has(name);
+  }
   loadedModelsExcept(name: string): string[] {
     return this.loadedModelNames().filter((loaded) => loaded !== name);
   }
@@ -214,6 +219,26 @@ describe('ControlServer', () => {
     expect((await (await post(base, 'A', 'release')).json()).released).toBe(true);
     const bOk = await post(base, 'B');
     expect(bOk.status).toBe(200);
+    expect(pool.loadedModelNames()).toEqual(['B']);
+  });
+
+  it('never stops a model a sidebar turn is using to make room (U04-01)', async () => {
+    const port = 18842;
+    const base = `http://127.0.0.1:${port}`;
+    const pool = new FakePool();
+    server = new ControlServer(pool, makeConfig(port), testDeps());
+    server.start();
+    await waitReady(base);
+
+    // A is resident with no control-server hold, but a sidebar turn pins it.
+    await pool.acquire('A');
+    pool.busy.add('A');
+    const busy = await post(base, 'B');
+    expect(busy.status).toBe(409);
+    expect(pool.loadedModelNames()).toEqual(['A']);
+
+    pool.busy.delete('A');
+    expect((await post(base, 'B')).status).toBe(200);
     expect(pool.loadedModelNames()).toEqual(['B']);
   });
 

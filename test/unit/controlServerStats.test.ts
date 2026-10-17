@@ -16,6 +16,7 @@ const pool: IBackendPool = {
   showConsole: () => {},
   isAnyReady: () => false,
   loadedModelNames: () => [],
+  isBusy: () => false,
   loadedModelsExcept: () => [],
   isLoaded: () => false,
 };

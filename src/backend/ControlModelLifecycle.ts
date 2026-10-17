@@ -117,9 +117,10 @@ async function waitReady(ctx: ModelLifecycleContext, baseUrl: string): Promise<b
  * second GGUF while an idle one still holds VRAM starves the new server until
  * its health timeout. So EVERY idle local model is released before the spawn,
  * not only when the slot table is full. Evictable = no holders AND not
- * acquired within the grace window (which stops a model whose ref-count
+ * acquired within the grace window AND no sidebar turn or delegation hold
+ * using it (`pool.isBusy`). The grace window stops a model whose ref-count
  * momentarily reads 0 between one worker's /release and the next /ensure from
- * being torn out from under a live request). Returns 409 when the in-use
+ * being torn out from under a live request. Returns 409 when the in-use
  * models that remain already fill capacity; null when it is safe to proceed.
  */
 async function makeRoom(ctx: ModelLifecycleContext, model: string): Promise<EnsureResult | null> {
@@ -130,6 +131,7 @@ async function makeRoom(ctx: ModelLifecycleContext, model: string): Promise<Ensu
   const idle = loaded.filter(
     (m) =>
       (ctx.holds.get(m) ?? 0) === 0 &&
+      !ctx.pool.isBusy(m) &&
       now - (ctx.lastAcquiredAt.get(m) ?? 0) >= ctx.evictionGraceMs,
   );
   for (const victim of idle) {

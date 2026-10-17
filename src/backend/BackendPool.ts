@@ -275,7 +275,7 @@ export class BackendPool implements IBackendPool {
     await freeVramForExternal(key, {
       local: [...this.slots.keys(), ...this.sharedSlots.keys(), ...this.ollamaSlots.keys()],
       otherExternal: external.loadedNames().filter((name) => name !== key),
-      busy: (m) => (this.turnPins.get(m) ?? 0) > 0 || this.gate.isPinned(m),
+      busy: (m) => this.isBusy(m),
       stopLocal: () => this.stopLocal(),
       unloadExternal: (name) => external.unload(name),
     });
@@ -315,13 +315,13 @@ export class BackendPool implements IBackendPool {
 
   showConsole(modelName?: string): void {
     const target = modelName ?? this.lastAcquiredModel;
-    if (target) {
-      this.slots.get(target)?.backend.showConsole();
-    } else {
-      // Show the most recently used slot
-      const lru = this.getMostRecentSlot();
-      lru?.backend.showConsole();
-    }
+    const slot = target ? this.slots.get(target) : mostRecentSlot(this.slots);
+    slot?.backend.showConsole();
+  }
+
+  isBusy(modelName: string): boolean {
+    const key = this.poolKey(modelName);
+    return this.gate.isPinned(key) || (this.turnPins.get(key) ?? 0) > 0;
   }
 
   /** Readiness across owned, borrowed, and Ollama backends. */
@@ -432,15 +432,11 @@ export class BackendPool implements IBackendPool {
     freeSlot(this.slotTable(), modelName, slot);
   }
 
-  private getMostRecentSlot(): PoolSlot | undefined {
-    return mostRecentSlot(this.slots);
-  }
-
   private slotTable(): SlotTable {
     return {
       slots: this.slots,
       freePorts: this.freePorts,
-      isPinned: (model) => this.gate.isPinned(model) || (this.turnPins.get(model) ?? 0) > 0,
+      isPinned: (model) => this.isBusy(model),
     };
   }
 
