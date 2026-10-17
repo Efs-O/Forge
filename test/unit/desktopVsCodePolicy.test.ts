@@ -9,10 +9,8 @@
  * tests pin the lifetime the plan requires — a getter, not a captured Boolean.
  */
 import { describe, it, expect } from 'vitest';
-import {
-  PowerShellDesktopDriver,
-  type DesktopTransport,
-} from '../../src/tools/desktop/PowerShellDesktopDriver';
+import { PowerShellDesktopDriver } from '../../src/tools/desktop/PowerShellDesktopDriver';
+import type { DesktopTransport } from '../../src/tools/desktop/PowerShellTransport';
 import type { DesktopPolicy } from '../../src/tools/desktop/targetWindowGate';
 
 class FakeTransport implements DesktopTransport {

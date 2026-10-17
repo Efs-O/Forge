@@ -20,6 +20,7 @@ import {
   codeInputApproval,
   composeApprovals,
   consequentialApproval,
+  focusApproval,
   systemChordApproval,
 } from './desktopApprovals';
 import type { CoordSpace } from './coordinateTransform';
@@ -64,6 +65,7 @@ export function makeDesktopTools(getConfig: GetConfig): RegisteredTool[] {
   const codeScroll = codeInputApproval(driver, 'Scroll');
   const codeType = codeInputApproval(driver, 'Type text');
   const codePress = codeInputApproval(driver, 'Press keys');
+  const focus = focusApproval(driver);
 
   return [
     // ── desktop_capture ──────────────────────────────────────────────────────
@@ -208,7 +210,8 @@ export function makeDesktopTools(getConfig: GetConfig): RegisteredTool[] {
             properties: {
               window_title: {
                 type: 'string',
-                description: 'Title of the window to focus (exact or substring match).',
+                description:
+                  'Title of the window to focus: an exact title, or text it contains (case-insensitive, literal). Several matches are refused; pass window_id then.',
               },
               window_id: {
                 type: 'string',
@@ -221,18 +224,12 @@ export function makeDesktopTools(getConfig: GetConfig): RegisteredTool[] {
       },
       permission: 'desktop',
       advertise: isWin,
-      approval: (args) => ({
-        detail: `Approve controlling "${str(args, 'window_title') ?? str(args, 'window_id') ?? '?'}" (binds HWND+pid)`,
-      }),
+      approval: focus.approval,
       handler: async (args) => {
-        const title = str(args, 'window_title');
-        const id = str(args, 'window_id');
-        if (!title && !id)
+        if (!str(args, 'window_title') && !str(args, 'window_id'))
           throw new Error('desktop_focus_window: window_title or window_id is required');
-        const target = title
-          ? { kind: 'window' as const, title }
-          : { kind: 'windowId' as const, id: id! };
-        const w = await driver.focusWindow(target);
+        const found = await focus.resolved(args);
+        const w = await driver.focusWindow({ kind: 'windowId', id: found.id });
         return `Focused and approved "${w.title}" (HWND ${w.id}). Input actions are now foreground-checked against this window.`;
       },
     },

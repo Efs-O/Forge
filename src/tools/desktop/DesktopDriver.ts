@@ -145,6 +145,14 @@ export type DesktopFocusTarget =
   | { kind: 'window'; title: string }
   | { kind: 'windowId'; id: string };
 
+/** The one window a focus target resolves to, named in the focus approval. */
+export interface FoundWindow {
+  id: string;
+  title: string;
+  pid: number;
+  processName: string;
+}
+
 /** `listWindows` result: usable windows, plus named entries skipped as malformed. */
 export interface WindowListing {
   windows: DesktopWindow[];
@@ -179,6 +187,11 @@ export interface DesktopDriver {
    * desktop, which is what the driver used to do.
    */
   capture(target: DesktopCaptureTarget): Promise<DesktopCapture>;
+  /**
+   * Resolve a target to exactly one window without focusing it. A title that
+   * matches several windows is refused with the candidates listed.
+   */
+  findWindow(target: DesktopFocusTarget): Promise<FoundWindow>;
   /** Focus + approve a window as the control target (binds HWND+pid). */
   focusWindow(target: DesktopFocusTarget): Promise<DesktopWindow>;
   /**

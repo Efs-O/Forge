@@ -111,7 +111,10 @@ export interface RegisteredTool {
   mutation?: ToolMutation;
   /** Mutates VS Code workspace state, which has no file path for a checkpoint. */
   workspaceStateMutation?: boolean;
-  approval?: (args: Record<string, unknown>) => ToolApprovalMetadata | undefined;
+  /** May resolve state first (the desktop focus approval names the window it found). */
+  approval?: (
+    args: Record<string, unknown>,
+  ) => ToolApprovalMetadata | undefined | Promise<ToolApprovalMetadata | undefined>;
   /**
    * The handler's inputs and effects are structurally bounded enough to run
    * without the normal per-call confirmation. This must never be used for a

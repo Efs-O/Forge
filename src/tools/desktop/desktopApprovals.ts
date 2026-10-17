@@ -7,7 +7,8 @@ import { resolveRequestModel } from '../../config/ConfigResolver';
 import { usesLocalGpu } from '../../backend/ModelHeuristics';
 import { isCloudProvider, getProviderDisplayName } from '../../llm/CloudProviders';
 import type { ToolApprovalMetadata } from '../ToolRegistry';
-import { isSystemChord, type PowerShellDesktopDriver } from './PowerShellDesktopDriver';
+import { isSystemChord, type DesktopDriver, type FoundWindow } from './DesktopDriver';
+import type { PowerShellDesktopDriver } from './PowerShellDesktopDriver';
 import { isVsCodeTarget } from './targetWindowGate';
 
 type Approval = (args: Record<string, unknown>) => ToolApprovalMetadata | undefined;
@@ -176,5 +177,47 @@ export function captureApproval(
     if (title === '' || args.kind === 'monitor') return monitorApproval(args);
     if (driver.coversTitle(title)) return undefined;
     return { detail: `Approve capturing and controlling "${title}" (binds HWND+pid)` };
+  };
+}
+
+/**
+ * The focus approval names the window the call will bind, not the model's query
+ * (U18-02). The target is resolved before the prompt, and the handler focuses
+ * exactly that HWND, so a title that comes to match another window in between
+ * cannot bind it unapproved. A target that does not resolve gets no prompt: the
+ * handler throws the driver's reason (not found, or the ambiguous candidates).
+ */
+export function focusApproval(driver: Pick<DesktopDriver, 'findWindow'>): {
+  approval: (args: Record<string, unknown>) => Promise<ToolApprovalMetadata | undefined>;
+  resolved: (args: Record<string, unknown>) => Promise<FoundWindow>;
+} {
+  const resolutions = new WeakMap<Record<string, unknown>, Promise<FoundWindow>>();
+  const resolved = (args: Record<string, unknown>): Promise<FoundWindow> => {
+    let found = resolutions.get(args);
+    if (!found) {
+      const title = args['window_title'];
+      found = driver.findWindow(
+        typeof title === 'string' && title
+          ? { kind: 'window', title }
+          : { kind: 'windowId', id: String(args['window_id']) },
+      );
+      found.catch(() => undefined); // awaited again by the handler
+      resolutions.set(args, found);
+    }
+    return found;
+  };
+  return {
+    approval: async (args) => {
+      if (!args['window_title'] && !args['window_id']) return undefined;
+      try {
+        const w = await resolved(args);
+        return {
+          detail: `Approve controlling "${w.title}" — ${w.processName || 'unknown process'} (pid ${w.pid}, HWND ${w.id}). Binds HWND+pid.`,
+        };
+      } catch {
+        return undefined;
+      }
+    },
+    resolved,
   };
 }

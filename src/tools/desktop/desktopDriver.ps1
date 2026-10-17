@@ -311,11 +311,19 @@ function Get-AllWindows {
 function Find-Window($title, $id) {
   $all = Get-AllWindows
   if ($id) { $w = $all | Where-Object { $_.id -eq $id } | Select-Object -First 1; if ($w) { return $w }; return $null }
-  if ($title) {
-    $w = $all | Where-Object { $_.title -eq $title } | Select-Object -First 1
-    if ($w) { return $w }
-    return ($all | Where-Object { $_.title -like "*$title*" } | Select-Object -First 1)
+  if (-not $title) { return $null }
+  # Exact title first, then a literal substring: -like would read [ ] * ? in a
+  # title as wildcards. More than one hit is refused, never the first one taken,
+  # because the approval names the window this resolves to.
+  $hits = @($all | Where-Object { $_.title -eq $title })
+  if ($hits.Count -eq 0) {
+    $hits = @($all | Where-Object { $_.title.IndexOf($title, [StringComparison]::OrdinalIgnoreCase) -ge 0 })
   }
+  if ($hits.Count -gt 1) {
+    $names = ($hits | Select-Object -First 8 | ForEach-Object { "$($_.id) `"$($_.title)`" ($($_.process_name))" }) -join '; '
+    throw "$($hits.Count) windows match `"$title`": $names - pass window_id from desktop_windows, or a longer title"
+  }
+  if ($hits.Count -eq 1) { return $hits[0] }
   return $null
 }
 function New-MouseInput($dx, $dy, $flags, $data) {
@@ -545,6 +553,11 @@ function Get-Exp($req) {
 function Invoke-Op($req) {
   switch ($req.op) {
     'list_windows' { return @{ ok = $true; windows = (Get-AllWindows) } }
+    'find_window' {
+      $w = Find-Window $req.title $req.window_id
+      if (-not $w) { return @{ ok = $false; reason = "window not found: call desktop_windows to list targets" } }
+      return @{ ok = $true; window = $w }
+    }
     'focus_window' {
       $w = Find-Window $req.title $req.window_id
       if (-not $w) { return @{ ok = $false; reason = "window not found: call desktop_windows to list targets" } }

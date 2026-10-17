@@ -34,8 +34,10 @@ import type {
   DesktopCapture,
   DesktopClickOptions,
   DesktopDriver,
+  DesktopFocusTarget,
   DesktopPoint,
   DesktopWindow,
+  FoundWindow,
   WindowListing,
 } from './DesktopDriver';
 import { assertMonitorIndex } from './DesktopDriver';
@@ -49,8 +51,8 @@ import {
 } from './driverProtocol';
 import { PowerShellTransport, type DesktopTransport } from './PowerShellTransport';
 
-// Re-export so existing imports (e.g. the unit test) keep working.
-export type { DesktopTransport } from './PowerShellTransport';
+const targetFields = (target: DesktopFocusTarget): Record<string, string> =>
+  target.kind === 'window' ? { title: target.title } : { window_id: target.id };
 
 /** A capture the driver has bound: its pixel frame + (for windows) its approval. */
 interface CaptureRecord {
@@ -58,10 +60,6 @@ interface CaptureRecord {
   kind: 'window' | 'monitor';
   approved?: ApprovedWindow;
 }
-
-// Re-export so existing imports (the tool layer, and the gate/chord tests that
-// sign against them) keep working after these pure rules moved to the contract.
-export { isSystemChord } from './DesktopDriver';
 
 /**
  * The desktop driver. Owns the B2 gate (approval + per-input check) and the
@@ -280,14 +278,15 @@ export class PowerShellDesktopDriver implements DesktopDriver {
     };
   }
 
-  async focusWindow(
-    target: { kind: 'window'; title: string } | { kind: 'windowId'; id: string },
-  ): Promise<DesktopWindow> {
-    const op =
-      target.kind === 'window'
-        ? { op: 'focus_window', title: target.title }
-        : { op: 'focus_window', window_id: target.id };
-    const r = await this.transport.send(op);
+  async findWindow(target: DesktopFocusTarget): Promise<FoundWindow> {
+    const r = await this.transport.send({ op: 'find_window', ...targetFields(target) });
+    const w = (r['window'] ?? {}) as Record<string, unknown>;
+    const found = { id: str(w['id']), title: str(w['title']), pid: num(w['pid']) };
+    return { ...found, processName: str(w['process_name']) };
+  }
+
+  async focusWindow(target: DesktopFocusTarget): Promise<DesktopWindow> {
+    const r = await this.transport.send({ op: 'focus_window', ...targetFields(target) });
     const w = (r['window'] ?? r) as Record<string, unknown>;
     const startTime = optNum(w['process_start_time']);
     this.requireReadableStartTime(startTime, str(w['title']));

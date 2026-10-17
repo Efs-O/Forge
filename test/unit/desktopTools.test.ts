@@ -4,7 +4,7 @@
  */
 import { describe, it, expect } from 'vitest';
 import { screenshotPath } from '../../src/sidebar/toolResultView';
-import { isSystemChord } from '../../src/tools/desktop/PowerShellDesktopDriver';
+import { isSystemChord } from '../../src/tools/desktop/DesktopDriver';
 
 describe('screenshotPath (webview thumbnail parsing)', () => {
   it('parses the saved path from a browser_screenshot result', () => {

@@ -3,11 +3,9 @@
  * desktop tool approval logic. No real mouse, no PowerShell process.
  */
 import { describe, it, expect, vi } from 'vitest';
-import {
-  PowerShellDesktopDriver,
-  isSystemChord,
-  type DesktopTransport,
-} from '../../src/tools/desktop/PowerShellDesktopDriver';
+import { PowerShellDesktopDriver } from '../../src/tools/desktop/PowerShellDesktopDriver';
+import { isSystemChord } from '../../src/tools/desktop/DesktopDriver';
+import type { DesktopTransport } from '../../src/tools/desktop/PowerShellTransport';
 import type { ApprovedWindow } from '../../src/tools/desktop/targetWindowGate';
 import type { CaptureFrame } from '../../src/tools/desktop/coordinateTransform';
 

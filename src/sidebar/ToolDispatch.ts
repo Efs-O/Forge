@@ -219,7 +219,7 @@ export class ToolDispatch {
         }
 
         const requiredPermissions = this.toolRegistry.requiredPermissions(reg, args);
-        const approvalMetadata = reg.approval?.(args);
+        const approvalMetadata = await reg.approval?.(args);
         const autoApproved = reg.autoApprove === true || reg.autoApproveIf?.(args) === true;
         const needsConfirm =
           approvalMetadata !== undefined ||
