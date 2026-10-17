@@ -198,9 +198,9 @@ export class CodexAppServerSession {
 
   /**
    * Codex app-server sends approval elicitations as server-initiated JSON-RPC
-   * requests. Forge answers them automatically: ordinary workspace work keeps
-   * moving, while destructive commands and all sandbox-expansion requests are
-   * denied. This is intentionally enforcement, not a stream of modal prompts.
+   * requests. Forge answers them automatically, as the unrestricted session
+   * implies (see CodexApprovalPolicy): commands, file changes and permission
+   * requests are accepted, anything else is declined. No modal prompts.
    */
   private handleServerRequest(id: number, method: string, rawParams: unknown): void {
     const params =
@@ -215,7 +215,7 @@ export class CodexAppServerSession {
 
     const approval = decideCodexApproval(method, params);
     active.onEvent?.({ kind: 'status', text: `[codex policy: ${approval.status}]` });
-    this.write({ id, result: { decision: approval.decision } });
+    this.write({ id, result: approval.result });
   }
 
   private handleNotification(method: string, rawParams: unknown): void {

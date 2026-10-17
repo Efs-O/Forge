@@ -1,5 +1,6 @@
 export interface CodexApprovalDecision {
-  decision: 'accept' | 'decline';
+  /** The JSON-RPC `result` sent back; its shape depends on the request method. */
+  result: Record<string, unknown>;
   status: string;
 }
 
@@ -8,17 +9,24 @@ export interface CodexApprovalDecision {
  * exists for the requests that arrive anyway (an older CLI, a tool that asks
  * regardless): an unanswered request stalls the turn forever, so answer it the
  * way the unrestricted session implies — accept — rather than leaving it open.
+ *
+ * A permissions request is not answered with a `decision`: its response
+ * (`PermissionsRequestApprovalResponse`, from `codex app-server
+ * generate-json-schema`) requires the granted `permissions` profile. Forge
+ * grants exactly the profile requested, for this turn only.
  */
 export function decideCodexApproval(
   method: string,
   params: Record<string, unknown>,
 ): CodexApprovalDecision {
-  void params;
   if (method === 'item/commandExecution/requestApproval')
-    return { decision: 'accept', status: 'allowed command' };
+    return { result: { decision: 'accept' }, status: 'allowed command' };
   if (method === 'item/fileChange/requestApproval')
-    return { decision: 'accept', status: 'allowed file change' };
-  if (method === 'item/permissions/requestApproval')
-    return { decision: 'accept', status: 'allowed permission request' };
-  return { decision: 'decline', status: 'denied unsupported approval request' };
+    return { result: { decision: 'accept' }, status: 'allowed file change' };
+  if (method === 'item/permissions/requestApproval') {
+    const requested = params['permissions'];
+    const permissions = requested && typeof requested === 'object' ? requested : {};
+    return { result: { permissions, scope: 'turn' }, status: 'allowed permission request' };
+  }
+  return { result: { decision: 'decline' }, status: 'denied unsupported approval request' };
 }

@@ -22,6 +22,7 @@
 - Stopping or restarting a Telegram or WhatsApp transport now cancels voice work in flight: a transcription, a spoken reply being synthesized by Piper, and its ffmpeg conversion. Nothing passed the transport's stop to them, so they ran on against a channel that was gone, and a stopped Piper reported "spoken replies are failing". ffmpeg also has a 60-second deadline now. A wedged ffmpeg used to hold the voice message forever; it now fails with "ffmpeg timed out".
 - When a Telegram or WhatsApp transport fails to start (a rejected bot token, a network error), Forge now stops what it had already started for it. The session-recovery timer and the approval and question hooks kept running for a transport that never came up.
 - A reply that one linked agent sends another through Forge can now be read with `forge.sh read-verdict` as soon as it is saved. Forge recorded it as readable only after the live delivery to the sender finished, so a delivery that hung, or a crash during it, left the reply saved but unreadable for good.
+- When a delegated Codex session asks for extra permissions (network or file access), Forge now answers in the form Codex expects: it grants the requested permissions for that turn. Forge used to send the answer meant for command approvals, which Codex could not read.
 
 ## 0.17.42
 
