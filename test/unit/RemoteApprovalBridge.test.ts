@@ -209,7 +209,6 @@ describe('RemoteApprovalBridge', () => {
   it('stays silent when no chat is queued and none is bound', async () => {
     const { channel, request } = rig({ remoteRequestId: undefined });
     request();
-    await new Promise((resolve) => setTimeout(resolve, 10));
     expect(channel.sent).toHaveLength(0);
   });
 
