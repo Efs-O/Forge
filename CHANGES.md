@@ -27,6 +27,7 @@
 - Two VS Code windows that point the same model at different llama-server builds no longer share one server. The sharing key covered the server's arguments but not its binary, so the second window could borrow the first window's build and never run its own.
 - Delegating to a model this window borrowed from another Forge window no longer fails with "no free slot" when every port is in use. The capacity check ignored borrowed servers, which use none of this window's ports.
 - A managed server whose `start_command` cannot run (a misspelled program, a missing file) now fails within a couple of seconds with the launch error. Forge used to log the error and keep polling for the full two-minute start timeout before reporting "did not become reachable".
+- **Forge: Compact config** no longer refuses a valid config whose models limit which request profiles they accept. A model-and-profile pair the old config already rejected was reported as a pair the migration had broken.
 
 ## 0.17.42
 

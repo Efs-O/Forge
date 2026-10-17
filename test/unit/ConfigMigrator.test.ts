@@ -197,6 +197,37 @@ describe('migrateConfig', () => {
     expect(verify.diffs.length).toBeGreaterThan(0);
   });
 
+  it('does not report a resolution the old config already rejects (U06-05)', () => {
+    const oldConfig: ForgeConfig = {
+      profiles: { fast: { sampling: { temperature: 0.2 } }, deep: {} },
+      models: [
+        { name: 'a', gguf_path: '/a.gguf', profiles: ['fast'], sampling: { top_k: 64 } },
+        { name: 'b', gguf_path: '/b.gguf', sampling: { top_k: 64 } },
+      ],
+      active_model: 'a',
+      llama_server: { binary: '/bin/llama-server' },
+    };
+    const grouped: ForgeConfig = {
+      ...oldConfig,
+      groups: { g: { sampling: { top_k: 64 } } },
+      models: [
+        { name: 'a', gguf_path: '/a.gguf', profiles: ['fast'], group: 'g' },
+        { name: 'b', gguf_path: '/b.gguf', group: 'g' },
+      ],
+    };
+    // "a@deep" throws against both configs; that is not a migration diff.
+    expect(verifyResolvedDiff(oldConfig, grouped)).toEqual({ ok: true, diffs: [] });
+
+    const narrowed: ForgeConfig = {
+      ...grouped,
+      models: [grouped.models[0]!, { ...grouped.models[1]!, profiles: ['fast'] }],
+    };
+    // Throwing only against the new config still is one.
+    expect(verifyResolvedDiff(oldConfig, narrowed).diffs).toContain(
+      'resolveRequestModel("b@deep") now throws: Forge: profile "deep" is not available for model "b"',
+    );
+  });
+
   it('is a no-op — writes nothing — when a config has nothing groupable', () => {
     // Corrupting one model's spawn value directly mid-heuristic isn't
     // reachable via the public API (the verifier exists precisely so a

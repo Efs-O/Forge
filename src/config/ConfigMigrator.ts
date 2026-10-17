@@ -73,28 +73,54 @@ export function verifyResolvedDiff(
   const diffs: string[] = [];
   for (const id of collectResolveIds(oldConfig)) {
     if (diffs.length >= maxDiffs) break;
-    try {
-      const before = withoutGroupRefs(resolveRequestModel(oldConfig, id));
-      const after = withoutGroupRefs(resolveRequestModel(newConfig, id));
-      if (!deepEqual(before, after)) {
-        diffs.push(`resolveRequestModel("${id}") changed: ${describeDiff(before, after)}`);
-      }
-    } catch (err) {
-      diffs.push(`resolveRequestModel("${id}") now throws: ${(err as Error).message}`);
-    }
+    const request = compareResolution(
+      `resolveRequestModel("${id}")`,
+      () => resolveRequestModel(oldConfig, id),
+      () => resolveRequestModel(newConfig, id),
+    );
+    if (request) diffs.push(request);
 
     const base = splitModelProfile(id).base;
-    try {
-      const before = withoutGroupRefs(resolveSpawnModel(oldConfig, base));
-      const after = withoutGroupRefs(resolveSpawnModel(newConfig, base));
-      if (!deepEqual(before, after)) {
-        diffs.push(`resolveSpawnModel("${base}") changed: ${describeDiff(before, after)}`);
-      }
-    } catch (err) {
-      diffs.push(`resolveSpawnModel("${base}") now throws: ${(err as Error).message}`);
-    }
+    const spawn = compareResolution(
+      `resolveSpawnModel("${base}")`,
+      () => resolveSpawnModel(oldConfig, base),
+      () => resolveSpawnModel(newConfig, base),
+    );
+    if (spawn) diffs.push(spawn);
   }
   return { ok: diffs.length === 0, diffs };
+}
+
+type Resolved = { group?: unknown; groups?: unknown };
+type Outcome = { value: unknown } | { error: string };
+
+function outcome(resolve: () => Resolved): Outcome {
+  try {
+    return { value: withoutGroupRefs(resolve()) };
+  } catch (err) {
+    return { error: (err as Error).message };
+  }
+}
+
+/** The diff line for one resolution, or undefined when both configs agree.
+ *  Agreement includes both throwing the same error: an id@profile pair the
+ *  old config already rejects (a model-specific `profiles` subset) is not a
+ *  change the migration made. */
+function compareResolution(
+  label: string,
+  resolveOld: () => Resolved,
+  resolveNew: () => Resolved,
+): string | undefined {
+  const before = outcome(resolveOld);
+  const after = outcome(resolveNew);
+  if ('error' in after) {
+    return 'error' in before && before.error === after.error
+      ? undefined
+      : `${label} now throws: ${after.error}`;
+  }
+  if ('error' in before) return `${label} no longer throws: ${before.error}`;
+  if (deepEqual(before.value, after.value)) return undefined;
+  return `${label} changed: ${describeDiff(before.value, after.value)}`;
 }
 
 /** `group`/`groups` are provenance metadata the migration intentionally
