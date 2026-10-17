@@ -55,12 +55,18 @@ function fakeHandle(recheck: unknown) {
 function livePage(scenarios: Array<{ raw: unknown; nodes?: ReturnType<typeof fakeHandle>[] }>) {
   let call = 0;
   const published: string[] = [];
+  const pageStore = new Map<string, ReturnType<typeof fakeHandle>[]>();
   const page = {
     url: () => 'https://example.test/',
-    evaluate: () => Promise.resolve(scenarios[Math.min(call, scenarios.length - 1)]!.raw),
+    evaluate: (_fn: unknown, args?: { nodeKey?: string }) => {
+      const scenario = scenarios[Math.min(call, scenarios.length - 1)]!;
+      if (args?.nodeKey) pageStore.set(args.nodeKey, scenario.nodes ?? []);
+      return Promise.resolve(scenario.raw);
+    },
     evaluateHandle: (_fn: unknown, key: string) => {
-      const nodes = scenarios[Math.min(call, scenarios.length - 1)]!.nodes ?? [];
+      const nodes = pageStore.get(key) ?? [];
       published.push(key);
+      pageStore.delete(key);
       call++;
       const properties = new Map(
         nodes.map((node, i) => [String(i), { asElement: () => node }]),
@@ -71,6 +77,7 @@ function livePage(scenarios: Array<{ raw: unknown; nodes?: ReturnType<typeof fak
       });
     },
     published,
+    pageStore,
   };
   return page;
 }
@@ -175,6 +182,7 @@ describe('InspectionStore handle lifecycle', () => {
     const page = fakePage({ raw: [entry(0)], nodes: [fakeHandle({})] });
     await store.capture(page as unknown as Page, 50);
     expect(page.published.length).toBe(1);
+    expect(page.pageStore.has(page.published[0]!)).toBe(false);
   });
 });
 

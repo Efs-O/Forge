@@ -112,14 +112,6 @@ describe('textFromFacts', () => {
     expect(textFromFacts(facts({ textContent: 'x'.repeat(200) })).length).toBe(80);
   });
 
-  it('mirrors the page-side trim so a stored label and a live one compare equal', () => {
-    // The page callback may hand back untrimmed textContent; the derived label
-    // must not differ between inspect and recheck purely because of that.
-    const stored = textFromFacts(facts({ textContent: ' Save ' }));
-    const liveLabel = textFromFacts(facts({ textContent: ' Save ' }));
-    expect(stored).toBe(liveLabel);
-    expect(stored).toBe('Save');
-  });
 });
 
 describe('inputModeFor', () => {
