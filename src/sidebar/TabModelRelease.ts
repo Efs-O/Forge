@@ -145,10 +145,20 @@ export class TabModelRelease {
       )
       .then((choice) => {
         if (choice !== 'Unload Now') return;
-        void this.deps.pool.release(base).then(() => {
-          this.deps.events.onBackendStopped?.(base);
-          this.deps.post({ type: 'backendDown', message: `${base} unloaded.` });
-        });
+        void this.deps.pool
+          .release(base)
+          .then(() => {
+            this.deps.events.onBackendStopped?.(base);
+            this.deps.post({ type: 'backendDown', message: `${base} unloaded.` });
+          })
+          .catch((err: unknown) => {
+            const message = err instanceof Error ? err.message : String(err);
+            log.warn(`[TabModelRelease] could not unload "${base}": ${message}`);
+            this.deps.post({
+              type: 'error',
+              message: `Could not unload "${base}": ${message}`,
+            });
+          });
       });
   }
 }
