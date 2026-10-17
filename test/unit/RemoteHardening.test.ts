@@ -132,25 +132,28 @@ describe('remote authorization and privacy hardening', () => {
     await auth.confirmTotpEnrollment('fake', secret, code, now);
     const channel = new FakeRemoteChannel();
     const forgeHost = host();
-    const controller = new RemoteController(
-      channel,
-      store,
-      auth,
-      forgeHost,
-      { workspaceId: 'workspace', queueLimit: 5, maxMessageChars: 100, rateLimitPerMinute: 30 },
-    );
+    const controller = new RemoteController(channel, store, auth, forgeHost, {
+      workspaceId: 'workspace',
+      queueLimit: 5,
+      maxMessageChars: 100,
+      rateLimitPerMinute: 30,
+    });
     await controller.start();
     await new Promise((resolve) => setTimeout(resolve, 20));
     expect(forgeHost.send).not.toHaveBeenCalled();
-    await expect(channel.emit(event({ providerMessageId: 'status', text: '/status' }))).resolves.toEqual({
+    await expect(
+      channel.emit(event({ providerMessageId: 'status', text: '/status' })),
+    ).resolves.toEqual({
       kind: 'handled',
     });
     await expect(channel.emit(event({ providerMessageId: 'auth', text: code }))).resolves.toEqual({
       kind: 'handled',
     });
-    await vi.waitFor(() => expect(forgeHost.send).toHaveBeenCalledWith('c1', 'queued prompt', undefined, {
-      remoteRequestId: 'queued-totp',
-    }));
+    await vi.waitFor(() =>
+      expect(forgeHost.send).toHaveBeenCalledWith('c1', 'queued prompt', undefined, {
+        remoteRequestId: 'queued-totp',
+      }),
+    );
     await controller.stop();
   });
 
@@ -215,13 +218,12 @@ describe('remote owner commands', () => {
     const channel = new FakeRemoteChannel();
     const forgeHost = host(overrides);
     const auth = new RemoteAuth(secrets as unknown as vscode.SecretStorage);
-    const controller = new RemoteController(
-      channel,
-      store,
-      auth,
-      forgeHost,
-      { workspaceId: 'workspace', queueLimit: 5, maxMessageChars: 500, rateLimitPerMinute: 30 },
-    );
+    const controller = new RemoteController(channel, store, auth, forgeHost, {
+      workspaceId: 'workspace',
+      queueLimit: 5,
+      maxMessageChars: 500,
+      rateLimitPerMinute: 30,
+    });
     await controller.start();
     return { channel, controller, forgeHost, auth };
   }
@@ -349,7 +351,10 @@ describe('remote owner commands', () => {
     await expect(
       channel.emit(event({ providerMessageId: 'compact', text: '/compact' })),
     ).resolves.toEqual({ kind: 'handled' });
-    expect(forgeHost.compact).toHaveBeenCalledWith('c1', expect.objectContaining({ trigger: 'remote' }));
+    expect(forgeHost.compact).toHaveBeenCalledWith(
+      'c1',
+      expect.objectContaining({ trigger: 'remote' }),
+    );
     expect(channel.sent.at(-1)?.text).toContain('compaction compacted');
     await controller.stop();
   });
@@ -647,9 +652,9 @@ describe('remote durable boundaries', () => {
     // length would zero-fill the gap and every later parse would fail.
     await vi.waitFor(
       async () =>
-        expect(
-          JSON.parse(await fs.readFile(leasePath, 'utf8')).heartbeatAt,
-        ).toBeGreaterThan(first.heartbeatAt),
+        expect(JSON.parse(await fs.readFile(leasePath, 'utf8')).heartbeatAt).toBeGreaterThan(
+          first.heartbeatAt,
+        ),
       { timeout: 500 },
     );
     const raw = await fs.readFile(leasePath);
@@ -665,6 +670,8 @@ describe('remote durable boundaries', () => {
     await fs.mkdir(directory, { recursive: true });
     const leasePath = path.join(directory, 'telegram.lease.json');
     await fs.writeFile(leasePath, Buffer.alloc(283));
+    // Left by a crash mid-write: unreadable and older than the stale window.
+    await fs.utimes(leasePath, new Date(0), new Date(0));
     const lease = await RemoteTransportLease.acquire({
       directory,
       key: 'telegram',
@@ -725,19 +732,28 @@ describe('remote runtime lifecycle', () => {
   it('serializes configuration changes behind WhatsApp unlink', async () => {
     const { directory } = await newStore();
     let finishUnlink!: () => void;
-    const unlink = vi.fn(() => new Promise<void>((resolve) => { finishUnlink = resolve; }));
+    const unlink = vi.fn(
+      () =>
+        new Promise<void>((resolve) => {
+          finishUnlink = resolve;
+        }),
+    );
     const stop = vi.fn(async () => {});
     const channel: RemoteChannel = {
       name: 'whatsapp',
       onEvent: () => ({ dispose: stop }),
-      start: async () => {}, unlink,
+      start: async () => {},
+      unlink,
       send: async () => {},
       retractPrompt: async () => {},
     };
     const runtime = new RemoteRuntime({
-      storageDirectory: directory, workspaceId: 'workspace', host: host(),
+      storageDirectory: directory,
+      workspaceId: 'workspace',
+      host: host(),
       secrets: new MemorySecrets() as unknown as vscode.SecretStorage,
-      channelFactories: { whatsapp: () => channel }, notifyLocal: vi.fn(),
+      channelFactories: { whatsapp: () => channel },
+      notifyLocal: vi.fn(),
     });
     const config = ForgeConfigSchema.parse({
       models: [{ name: 'm', provider: 'ollama', endpoint: 'http://127.0.0.1:11434' }],
@@ -746,7 +762,10 @@ describe('remote runtime lifecycle', () => {
     await runtime.applyConfig(config);
     const unlinking = runtime.unlinkWhatsApp();
     await vi.waitFor(() => expect(unlink).toHaveBeenCalledOnce());
-    const changing = runtime.applyConfig({ ...config, remote: { ...config.remote!, enabled: false } });
+    const changing = runtime.applyConfig({
+      ...config,
+      remote: { ...config.remote!, enabled: false },
+    });
     try {
       await new Promise((resolve) => setTimeout(resolve, 20));
       expect(stop).not.toHaveBeenCalled();
@@ -1044,9 +1063,10 @@ describe('ephemeral outbox delivery', () => {
     vi.spyOn(channel, 'send').mockRejectedValue(new Error('offline'));
     delivery.start();
     await vi.waitFor(() =>
-      expect(
-        store.pendingOutbox('fake').find((item) => item.id === recordId),
-      ).toMatchObject({ state: 'pending', attempts: 1 }),
+      expect(store.pendingOutbox('fake').find((item) => item.id === recordId)).toMatchObject({
+        state: 'pending',
+        attempts: 1,
+      }),
     );
     expect(armEphemeral).not.toHaveBeenCalled();
     await delivery.stop();
@@ -1132,10 +1152,7 @@ describe('ephemeral outbox delivery', () => {
       return originalMarkOutbox(id, state);
     });
     delivery.start();
-    await vi.waitFor(
-      () => expect(armEphemeral).toHaveBeenCalledOnce(),
-      5_000,
-    );
+    await vi.waitFor(() => expect(armEphemeral).toHaveBeenCalledOnce(), 5_000);
     await delivery.stop();
     expect(channel.send).toHaveBeenCalledTimes(2);
     expect(armEphemeral).toHaveBeenCalledTimes(1);

@@ -73,10 +73,18 @@ export class FileLease {
       await FileLease.createExclusive(filePath, record);
     } catch (err) {
       if ((err as NodeJS.ErrnoException).code !== 'EEXIST') throw err;
-      // An unreadable lease is garbage, not a live owner: treat it as stale so a
-      // corrupt file cannot wedge the holder with no recovery path.
+      // An unreadable lease is either another window's create caught between
+      // `wx` and its write, or garbage from a crash mid-write. Its mtime tells
+      // them apart: fresh, it is live (reclaiming it would let both windows
+      // hold the lease, U19-04); once stale, it is reclaimed like any other.
       const existing = await FileLease.read(filePath).catch(() => undefined);
-      if (existing && Date.now() - existing.heartbeatAt <= staleAfterMs) {
+      const lastSign =
+        existing?.heartbeatAt ??
+        (await fs.stat(filePath).then(
+          (stat) => stat.mtimeMs,
+          () => 0,
+        ));
+      if (Date.now() - lastSign <= staleAfterMs) {
         throw new FileLeaseError(
           `Forge lease "${options.key}" is already owned by another window.`,
         );

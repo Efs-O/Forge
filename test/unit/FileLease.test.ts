@@ -87,4 +87,28 @@ describe('FileLease stale recovery', () => {
     expect(await acquired[0]?.verify()).toBe(true);
     await acquired[0]?.release();
   });
+
+  it('a lease caught half-written is live until its mtime goes stale (U19-04)', async () => {
+    directory = await fs.mkdtemp(path.join(os.tmpdir(), 'forge-file-lease-'));
+    const leasePath = path.join(directory, 'shared.lease.json');
+    // Another window's `wx` create, seen before its JSON landed.
+    await fs.writeFile(leasePath, '{"version":1,"ke');
+    const options = {
+      directory,
+      key: 'shared',
+      workspaceId: 'workspace',
+      instanceId: 'second',
+      heartbeatMs: 60_000,
+      staleAfterMs: 20_000,
+      onLost: () => {},
+    };
+    await expect(FileLease.acquire(options)).rejects.toThrow('already owned by another window');
+    expect(await fs.readFile(leasePath, 'utf8')).toBe('{"version":1,"ke');
+
+    // The same garbage left by a crash mid-write is reclaimed once stale.
+    await fs.utimes(leasePath, new Date(0), new Date(0));
+    const lease = await FileLease.acquire(options);
+    expect(await lease.verify()).toBe(true);
+    await lease.release();
+  });
 });

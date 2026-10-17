@@ -38,6 +38,7 @@
 - A foreground shell command that prints a lot (`yes`, a verbose build) no longer holds all of its output in memory until it exits. Past the inline cap Forge keeps only the head and tail and streams the rest to the spill file as it arrives. The result text is unchanged.
 - When the desktop driver fails to release a held key or mouse button, it now reports a failure instead of answering ok, so Forge's one-shot release fallback runs and nothing stays held down. A hung one-shot release is killed after 2 s rather than left running.
 - **Desktop focus approval names the window it binds (U18-02).** `desktop_focus_window` resolved its title only after approval, taking the first window whose title merely contained the text (with `[ ] * ?` read as wildcards). The approval now resolves the target first and names its real title, process, pid and HWND, and the call focuses exactly that HWND. Titles match exactly or as a literal case-insensitive substring; more than one match is refused with the candidates listed.
+- **A lease caught half-written is no longer taken over (U19-04).** A lease file is created before its JSON is written, and a second window reading it in that gap treated it as stale garbage and took the lease too, so two windows could both run the remote transport or the job scheduler. An unreadable lease now counts as live until its mtime is older than the stale window; a crash mid-write is still reclaimed then.
 
 ## 0.17.42
 
