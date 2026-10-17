@@ -1,12 +1,14 @@
 import { createServer, type IncomingMessage, type ServerResponse } from 'node:http';
 import { spawn, spawnSync } from 'node:child_process';
-import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { resolve } from 'node:path';
 import { describe, expect, it } from 'vitest';
+import { greekMessages, greekSystemInfo, options } from '../../scripts/nemotron-bench.mjs';
 
 const script = resolve(process.cwd(), 'scripts', 'nemotron-bench.mjs');
 const baseArgs = ['--base-url', 'http://127.0.0.1:1', '--model', 'test-model'];
+const parseOptions = (args: string[]) => options(args, process.cwd(), existsSync);
 
 function run(args: string[]) {
   return spawnSync(process.execPath, [script, ...args], { encoding: 'utf8', env: { ...process.env, CUDA_VISIBLE_DEVICES: '' } });
@@ -24,7 +26,7 @@ function runAsync(args: string[]) {
   });
 }
 
-async function fakeRun(noSystem = false) {
+async function fakeRun() {
   const temp = mkdtempSync(resolve(tmpdir(), 'forge-nemotron-bench-test-'));
   const evalFile = resolve(temp, 'eval.jsonl');
   const output = resolve(temp, 'out');
@@ -52,7 +54,6 @@ async function fakeRun(noSystem = false) {
   if (!address || typeof address === 'string') throw new Error('Fake server did not bind');
   try {
     const args = ['--base-url', `http://127.0.0.1:${address.port}`, '--model', 'test-model', '--quant', 'test-quant', '--greek-eval', evalFile, '--out', output, '--determinism', '2', '--rows-out', rowsOut];
-    if (noSystem) args.push('--greek-no-system');
     const result = await runAsync(args);
     return { result, bodies, rows: readFileSync(rowsOut, 'utf8').trim().split(/\r?\n/u).map((line) => JSON.parse(line) as Record<string, unknown>) };
   } finally {
@@ -76,31 +77,28 @@ describe('nemotron benchmark script', () => {
     expect(result.stdout).toContain('never starts, stops, unloads');
   });
 
-  it('rejects missing connection inputs before creating benchmark artifacts', () => {
+  it('reports missing connection inputs through the CLI before creating artifacts', () => {
     const result = run([]);
     expect(result.status).toBe(1);
     expect(result.stderr).toContain('--base-url must be an HTTP(S) URL.');
   });
 
   it('requires an explicit Greek evaluation file before network access', () => {
-    const result = run([...baseArgs, '--quant', 'test']);
-    expect(result.status).toBe(1);
-    expect(result.stderr).toContain('--greek-eval PATH is required.');
-    expect(result.stderr).not.toContain('ECONNREFUSED');
+    expect(() => parseOptions([...baseArgs, '--quant', 'test'])).toThrow(
+      '--greek-eval PATH is required.',
+    );
   });
 
   it('rejects a nonexistent Greek evaluation file before network access', () => {
-    const result = run([...baseArgs, '--quant', 'test', '--greek-eval', 'missing-greek-eval.jsonl']);
-    expect(result.status).toBe(1);
-    expect(result.stderr).toContain('Greek evaluation file not found:');
-    expect(result.stderr).not.toContain('ECONNREFUSED');
+    expect(() =>
+      parseOptions([...baseArgs, '--quant', 'test', '--greek-eval', 'missing-greek-eval.jsonl']),
+    ).toThrow('Greek evaluation file not found:');
   });
 
   it('requires quant before network access', () => {
-    const result = run([...baseArgs, '--greek-eval', 'missing-greek-eval.jsonl']);
-    expect(result.status).toBe(1);
-    expect(result.stderr).toContain('--quant NAME is required.');
-    expect(result.stderr).not.toContain('ECONNREFUSED');
+    expect(() =>
+      parseOptions([...baseArgs, '--greek-eval', 'missing-greek-eval.jsonl']),
+    ).toThrow('--quant NAME is required.');
   });
 
   it('refuses rows output in the repository before network access', () => {
@@ -108,10 +106,17 @@ describe('nemotron benchmark script', () => {
     const evalFile = resolve(temp, 'eval.jsonl');
     writeFileSync(evalFile, JSON.stringify({ q: 'q', a: 'a', system: 's' }));
     try {
-      const result = run([...baseArgs, '--quant', 'test', '--greek-eval', evalFile, '--rows-out', resolve(process.cwd(), 'unsafe.jsonl')]);
-      expect(result.status).toBe(1);
-      expect(result.stderr).toContain('--rows-out must be outside the Forge repository root.');
-      expect(result.stderr).not.toContain('ECONNREFUSED');
+      expect(() =>
+        parseOptions([
+          ...baseArgs,
+          '--quant',
+          'test',
+          '--greek-eval',
+          evalFile,
+          '--rows-out',
+          resolve(process.cwd(), 'unsafe.jsonl'),
+        ]),
+      ).toThrow('--rows-out must be outside the Forge repository root.');
     } finally {
       rmSync(temp, { recursive: true, force: true });
     }
@@ -120,10 +125,41 @@ describe('nemotron benchmark script', () => {
   it('rejects invalid Greek token and determinism values', () => {
     const evalFile = resolve(tmpdir(), 'nonexistent-eval.jsonl');
     for (const [flag, value, expected] of [['--greek-max-tokens', '0', 'positive integer'], ['--determinism', '-1', 'greater than or equal to 0']]) {
-      const result = run([...baseArgs, '--quant', 'test', '--greek-eval', evalFile, flag, value]);
-      expect(result.status).toBe(1);
-      expect(result.stderr).toContain(expected);
-      expect(result.stderr).not.toContain('ECONNREFUSED');
+      expect(() =>
+        parseOptions([...baseArgs, '--quant', 'test', '--greek-eval', evalFile, flag, value]),
+      ).toThrow(expected);
+    }
+  });
+
+  it('parses the no-system mode and builds its request without a system message', () => {
+    const temp = mkdtempSync(resolve(tmpdir(), 'forge-nemotron-options-test-'));
+    const evalFile = resolve(temp, 'eval.jsonl');
+    writeFileSync(evalFile, JSON.stringify({ q: 'q', a: 'a', system: 'Fixed system' }));
+    try {
+      const input = parseOptions([
+        ...baseArgs,
+        '--quant',
+        'test',
+        '--greek-eval',
+        evalFile,
+        '--greek-no-system',
+      ]);
+      expect(input.greekNoSystem).toBe(true);
+
+      const rows = [{ system: 'Fixed system' }];
+      const disabledSystem = greekSystemInfo(rows, input.greekNoSystem ?? false);
+      expect(disabledSystem).toMatchObject({ mode: 'none', prompt: undefined, sha256: null });
+      expect(greekMessages('q', disabledSystem.prompt)).toEqual([
+        { role: 'user', content: 'q' },
+      ]);
+      const enabledSystem = greekSystemInfo(rows, false);
+      expect(enabledSystem.prompt).toBe('Fixed system');
+      expect(greekMessages('q', enabledSystem.prompt)).toEqual([
+        { role: 'system', content: 'Fixed system' },
+        { role: 'user', content: 'q' },
+      ]);
+    } finally {
+      rmSync(temp, { recursive: true, force: true });
     }
   });
 
@@ -141,11 +177,4 @@ describe('nemotron benchmark script', () => {
     expect(rows.slice(1).every((row) => row.type === 'row')).toBe(true);
   }, 120_000);
 
-  it('omits the Greek system message with --greek-no-system', async () => {
-    const { result, bodies } = await fakeRun(true);
-    expect(result.status).toBe(0);
-    const greek = bodies.filter((body) => Array.isArray(body.messages) && (body.messages as Array<{ content: string }>).some((message) => message.content === 'q1' || message.content === 'q2'));
-    expect(greek.length).toBe(8);
-    expect(greek.every((body) => (body.messages as Array<{ role: string }>).every((message) => message.role !== 'system'))).toBe(true);
-  }, 120_000);
 });
