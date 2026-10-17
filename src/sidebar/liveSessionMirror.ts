@@ -1,6 +1,7 @@
 import type { ChatMessage, ToolCall } from '../llm/types';
 import type { AgentProgressEvent } from './AgentProgress';
 import { agentKindSchema, agentDisplayName } from '../agentLinks/chatAgentLinks';
+import { isJsonObject, parseJsonWithInvalidEscapeRepair } from '../tools/argCoercion';
 
 const TOOL = 'ask_agent';
 
@@ -48,12 +49,6 @@ export function mirrorLiveSessionAnswers(
 }
 
 function argumentsOf(value: string): Record<string, unknown> {
-  try {
-    const parsed: unknown = JSON.parse(value);
-    if (parsed && typeof parsed === 'object' && !Array.isArray(parsed))
-      return parsed as Record<string, unknown>;
-  } catch {
-    return {};
-  }
-  return {};
+  const parsed = parseJsonWithInvalidEscapeRepair(value);
+  return parsed.ok && isJsonObject(parsed.value) ? parsed.value : {};
 }

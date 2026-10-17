@@ -1,5 +1,6 @@
 import type { ChatMessage } from '../llm/types';
 import { isCapTruncated } from '../tools/resultCap';
+import { parseJsonWithInvalidEscapeRepair } from '../tools/argCoercion';
 
 /**
  * Model-facing annotation of `read_file` results that re-read a path already
@@ -49,13 +50,9 @@ function isCompleteRead(content: string): boolean {
 }
 
 function readFilePath(argumentsJson: string): string | undefined {
-  let parsed: unknown;
-  try {
-    parsed = JSON.parse(argumentsJson);
-  } catch {
-    // Malformed args mean no reliable key. No key, no annotation.
-    return undefined;
-  }
+  const result = parseJsonWithInvalidEscapeRepair(argumentsJson);
+  if (!result.ok) return undefined;
+  const parsed = result.value;
   if (typeof parsed !== 'object' || parsed === null) return undefined;
   const args = parsed as Record<string, unknown>;
   // A ranged read is part of the file. Counting it as a copy tagged a read of

@@ -22,7 +22,14 @@ import type { CheckinStage } from '../agent/elapsedTimeNote';
 import type { ToolOutputLimits } from '../tools/toolOutputLimits';
 import { getLogger } from '../util/logger';
 import { ToolApprovalPolicyDenied } from './ToolApprovalService';
-import { coerceToolArgs } from '../tools/argCoercion';
+import {
+  coerceToolArgs,
+  isJsonObject,
+  parseJsonWithInvalidEscapeRepair,
+  recordToolArgumentRepair,
+  repairedToolArgumentFields,
+} from '../tools/argCoercion';
+import type { ToolArgumentRepairInfo } from '../tools/argCoercion';
 import { isLazyGroupActive, lazyGroupForTool, lazyGroupNames } from '../tools/lazyToolGroups';
 
 const log = getLogger();
@@ -152,6 +159,7 @@ export class ToolDispatch {
       const startedAt = Date.now();
       let result: ToolHandlerResult;
       let args: Record<string, unknown> | undefined;
+      let argumentRepair: ToolArgumentRepairInfo | undefined;
       try {
         if (signal?.aborted) {
           result = 'Error: tool execution cancelled';
@@ -160,7 +168,17 @@ export class ToolDispatch {
           continue;
         }
         try {
-          args = JSON.parse(tc.function.arguments) as Record<string, unknown>;
+          const parsed = parseJsonWithInvalidEscapeRepair(tc.function.arguments);
+          if (!parsed.ok || (parsed.repaired && !isJsonObject(parsed.value))) {
+            throw parsed.ok
+              ? new Error('Repaired tool arguments are not a JSON object')
+              : parsed.error;
+          }
+          args = parsed.value as Record<string, unknown>;
+          if (parsed.repaired) {
+            argumentRepair = { wholeArguments: true, fields: [] };
+            tc.function.arguments = JSON.stringify(args);
+          }
         } catch {
           const rawArguments = tc.function.arguments;
           tc.function.arguments = '{}';
@@ -184,7 +202,7 @@ export class ToolDispatch {
         const unavailable = unavailableTools?.get(tc.function.name);
         if (unavailable) {
           this.postResult(tc, unavailable, undefined, convId);
-          messages.push(this.toolMessage(tc, unavailable, startedAt));
+          messages.push(this.toolMessage(tc, unavailable, startedAt, argumentRepair));
           continue;
         }
 
@@ -199,21 +217,29 @@ export class ToolDispatch {
             unavailableTools,
           );
           this.postResult(tc, toolResultText(result), undefined, convId);
-          messages.push(this.toolMessage(tc, toolResultContent(result), startedAt));
+          messages.push(this.toolMessage(tc, toolResultContent(result), startedAt, argumentRepair));
           continue;
         }
         args = coerceToolArgs(reg.definition, args);
+        const repairedFields = repairedToolArgumentFields(args);
+        if (repairedFields.length > 0) {
+          argumentRepair = {
+            wholeArguments: argumentRepair?.wholeArguments ?? false,
+            fields: [...(argumentRepair?.fields ?? []), ...repairedFields],
+          };
+        }
+        if (argumentRepair) tc.function.arguments = JSON.stringify(args);
         const invalid = this.toolRegistry.invalidArgs(reg, args);
         if (invalid) {
           this.failureTracker.record(convId);
           this.postResult(tc, invalid, undefined, convId);
-          messages.push(this.toolMessage(tc, invalid, startedAt));
+          messages.push(this.toolMessage(tc, invalid, startedAt, argumentRepair));
           continue;
         }
         const budgetBlock = budget?.check(tc.function.name);
         if (budgetBlock) {
           this.postResult(tc, budgetBlock, undefined, convId);
-          messages.push(this.toolMessage(tc, budgetBlock, startedAt));
+          messages.push(this.toolMessage(tc, budgetBlock, startedAt, argumentRepair));
           continue;
         }
 
@@ -250,7 +276,9 @@ export class ToolDispatch {
             if (approvalMetadata?.declineHint)
               result += ` — use this instead: ${approvalMetadata.declineHint}`;
             this.postResult(tc, toolResultText(result), undefined, convId);
-            messages.push(this.toolMessage(tc, toolResultContent(result), startedAt));
+            messages.push(
+              this.toolMessage(tc, toolResultContent(result), startedAt, argumentRepair),
+            );
             continue;
           }
         }
@@ -305,7 +333,7 @@ export class ToolDispatch {
       }
 
       this.postResult(tc, toolResultText(result), args, convId);
-      messages.push(this.toolMessage(tc, toolResultContent(result), startedAt));
+      messages.push(this.toolMessage(tc, toolResultContent(result), startedAt, argumentRepair));
     }
   }
 
@@ -320,11 +348,12 @@ export class ToolDispatch {
     tc: ToolCall,
     content: ChatMessage['content'],
     startedAt: number,
+    argumentRepair?: ToolArgumentRepairInfo,
   ): ChatMessage {
     // Same rule as the reasoning span: a zero is a clock that did not tick, not
     // a call that took no time, and it does not go on the message.
     const elapsed = Date.now() - startedAt;
-    return {
+    const message: ChatMessage = {
       role: 'tool',
       content,
       tool_call_id: tc.id,
@@ -335,6 +364,8 @@ export class ToolDispatch {
       // round -- see `stampToolResultClocks`.
       stampedAt: Date.now(),
     };
+    if (argumentRepair) recordToolArgumentRepair(message, argumentRepair);
+    return message;
   }
 
   async openFile(filePath: string, options?: OpenFileOptions): Promise<void> {

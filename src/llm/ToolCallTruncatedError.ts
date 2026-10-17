@@ -1,3 +1,5 @@
+import { parseJsonWithInvalidEscapeRepair } from '../tools/argCoercion';
+
 /**
  * A tool call whose arguments were cut off mid-generation.
  *
@@ -82,10 +84,5 @@ export function parseErrorColumn(message: string): number | undefined {
 /** True when `text` is not parseable as complete JSON — i.e. it was cut off. */
 export function argumentsAreIncomplete(text: string): boolean {
   if (text.trim().length === 0) return true;
-  try {
-    JSON.parse(text);
-    return false;
-  } catch {
-    return true;
-  }
+  return !parseJsonWithInvalidEscapeRepair(text).ok;
 }

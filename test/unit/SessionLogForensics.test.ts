@@ -2,7 +2,8 @@ import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
 import { afterAll, afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import type { ToolCall } from '../../src/llm/types';
+import type { ChatMessage, ToolCall } from '../../src/llm/types';
+import { recordToolArgumentRepair } from '../../src/tools/argCoercion';
 
 const { fakeHome, streamModelChatCompletion } = vi.hoisted(() => {
   const nodeFs = require('fs') as typeof import('fs');
@@ -154,6 +155,40 @@ describe('session log forensics', () => {
       internal: true,
     });
     expect(rows().find((row) => row['role'] === 'user')?.['internal']).toBe(true);
+  });
+
+  it('records repaired tool arguments in the session log', () => {
+    const raw = String.raw`{"path":"N:\vs code apps\Forge"}`;
+    const call: ToolCall = {
+      id: 'call-path',
+      type: 'function',
+      function: { name: 'read_file', arguments: raw },
+    };
+    const toolResult: ChatMessage = {
+      role: 'tool',
+      tool_call_id: call.id,
+      name: call.function.name,
+      content: '',
+    };
+    recordToolArgumentRepair(toolResult, { wholeArguments: true, fields: [] });
+
+    new SessionLogger(id, 'Forensics', 'model').flush(
+      [{ role: 'assistant', content: null, tool_calls: [call] }, toolResult],
+      'model',
+    );
+
+    const assistant = rows().find((row) => row['role'] === 'assistant');
+    const loggedCall = (assistant?.['tool_calls'] as Array<Record<string, unknown>> | undefined)?.[0];
+    expect(loggedCall).toMatchObject({
+      raw_arguments: raw,
+      input: { path: String.raw`N:\vs code apps\Forge` },
+      arguments_repaired: true,
+    });
+    expect(rows().find((row) => row['role'] === 'tool')?.['argument_repair']).toEqual({
+      method: 'double_invalid_escape_backslashes',
+      whole_arguments: true,
+      fields: [],
+    });
   });
 
   it('reads legacy logs without these fields and ignores unknown event rows', () => {

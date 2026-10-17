@@ -1,4 +1,5 @@
 import type { ChatMessage, ToolCall } from '../llm/types';
+import { isJsonObject, parseJsonWithInvalidEscapeRepair } from '../tools/argCoercion';
 
 interface ToolRoundRecord {
   call: string;
@@ -55,11 +56,8 @@ function canonicalize(value: unknown): unknown {
 }
 
 function canonicalArguments(raw: string): string {
-  try {
-    return JSON.stringify(canonicalize(JSON.parse(raw)));
-  } catch {
-    return raw.trim();
-  }
+  const parsed = parseJsonWithInvalidEscapeRepair(raw);
+  return parsed.ok ? JSON.stringify(canonicalize(parsed.value)) : raw.trim();
 }
 
 function callFingerprint(calls: ToolCall[]): string {
@@ -184,18 +182,8 @@ export class ToolLoopGuard {
   }
 
   private pathArgument(call: ToolCall): string | undefined {
-    try {
-      const args: unknown = JSON.parse(call.function.arguments);
-      if (
-        args &&
-        typeof args === 'object' &&
-        typeof (args as { path?: unknown }).path === 'string'
-      ) {
-        return (args as { path: string }).path;
-      }
-    } catch {
-      // Invalid arguments cannot identify a path, so they are not part of this streak.
-    }
-    return undefined;
+    const parsed = parseJsonWithInvalidEscapeRepair(call.function.arguments);
+    if (!parsed.ok || !isJsonObject(parsed.value)) return undefined;
+    return typeof parsed.value['path'] === 'string' ? parsed.value['path'] : undefined;
   }
 }

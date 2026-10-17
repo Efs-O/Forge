@@ -20,6 +20,7 @@ import {
   resetLazyToolGroups,
 } from '../../src/tools/lazyToolGroups';
 import { makeShellTool } from '../../src/tools/shellTool';
+import { toolArgumentRepairForMessage } from '../../src/tools/argCoercion';
 import { TEST_BASH } from '../support/bash';
 
 // vi.mock is hoisted — compute WS inside the factory using require
@@ -852,6 +853,70 @@ describe('ToolDispatch', () => {
     expect(transcript[1]?.content).toContain('read_file');
     expect(transcript[1]?.content).toContain(JSON.stringify(raw.slice(0, 200)));
     expect(transcript[1]?.content).toContain('Required fields: path, encoding');
+  });
+
+  it('repairs invalid escapes in whole tool arguments and dispatches the original path', async () => {
+    const handler = vi.fn().mockResolvedValue('contents');
+    toolRegistry.register({
+      definition: {
+        type: 'function',
+        function: {
+          name: 'read_file',
+          description: 'Read a file',
+          parameters: {
+            type: 'object',
+            properties: { path: { type: 'string' } },
+            required: ['path'],
+          },
+        },
+      },
+      permission: 'read',
+      handler,
+    });
+    const expectedPath = String.raw`N:\vs code apps\Forge\README.md`;
+    const raw = String.raw`{"path":"N:\vs code apps\Forge\README.md"}`;
+    const call: ToolCall = {
+      id: 'call-read-file',
+      type: 'function',
+      function: { name: 'read_file', arguments: raw },
+    };
+    const transcript: ChatMessage[] = [{ role: 'assistant', content: null, tool_calls: [call] }];
+
+    await dispatch.dispatch([call], allowed, transcript);
+
+    expect(handler).toHaveBeenCalledWith({ path: expectedPath }, expect.any(Object));
+    expect(call.function.arguments).toBe(JSON.stringify({ path: expectedPath }));
+    expect(transcript[1]?.content).toContain('contents');
+    expect(toolArgumentRepairForMessage(transcript[1]!)).toEqual({
+      wholeArguments: true,
+      fields: [],
+    });
+    expect(failureTracker.record).not.toHaveBeenCalled();
+  });
+
+  it('refuses a repaired top-level JSON value that is not an arguments object', async () => {
+    const handler = vi.fn().mockResolvedValue('contents');
+    toolRegistry.register({
+      definition: {
+        type: 'function',
+        function: { name: 'read_file', description: 'Read a file', parameters: { type: 'object' } },
+      },
+      permission: 'read',
+      handler,
+    });
+    const raw = String.raw`["N:\vs"]`;
+    const call: ToolCall = {
+      id: 'call-read-file-array',
+      type: 'function',
+      function: { name: 'read_file', arguments: raw },
+    };
+    const transcript: ChatMessage[] = [{ role: 'assistant', content: null, tool_calls: [call] }];
+
+    await dispatch.dispatch([call], allowed, transcript);
+
+    expect(handler).not.toHaveBeenCalled();
+    expect(transcript[1]?.content).toContain('malformed tool arguments');
+    expect(transcript[1]?.content).toContain(JSON.stringify(raw));
   });
 
   it('handles unknown tools gracefully', async () => {
