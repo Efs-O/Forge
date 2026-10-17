@@ -931,9 +931,11 @@ auto_compact:
   at: 0.85
   resume: true
 
+# DuckDuckGo needs no API key. Store the fallback provider's key with
+# "Forge: Set Search API Key"; keys remain in VS Code SecretStorage.
 search:
-  provider: tavily
-  secret_key_name: forge.tavily.apiKey
+  provider: duckduckgo
+  fallback: tavily
   max_results: 20
 
 embeddings:

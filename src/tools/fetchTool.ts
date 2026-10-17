@@ -2,6 +2,7 @@ import { lookup as dnsLookup } from 'dns/promises';
 import { isIP } from 'net';
 import type { RegisteredTool } from './ToolRegistry';
 import { Agent, fetch as undiciFetch } from 'undici';
+import { htmlToText } from '../util/htmlText';
 import { readTextCapped } from '../util/readTextCapped';
 
 // ── SSRF guard ────────────────────────────────────────────────────────────────
@@ -188,23 +189,6 @@ export function defaultPinnedFetch(
   } as unknown as Parameters<typeof undiciFetch>[1]) as unknown as Promise<Response>;
 }
 
-// ── HTML → plain text ─────────────────────────────────────────────────────────
-
-function htmlToText(html: string): string {
-  // Remove script and style blocks first
-  let text = html
-    .replace(/<script[^>]*>[\s\S]*?<\/script>/gi, ' ')
-    .replace(/<style[^>]*>[\s\S]*?<\/style>/gi, ' ');
-
-  // Strip all remaining tags
-  text = text.replace(/<[^>]+>/g, ' ');
-
-  // Collapse whitespace
-  text = text.replace(/\s+/g, ' ').trim();
-
-  return text;
-}
-
 // ── web_fetch ─────────────────────────────────────────────────────────────────
 
 export function makeWebFetchTool(dependencies: WebFetchDependencies = {}): RegisteredTool {
@@ -295,14 +279,11 @@ export function makeWebFetchTool(dependencies: WebFetchDependencies = {}): Regis
         );
       }
 
-      const contentType = response.headers.get('content-type') ?? '';
-      let text: string;
-      if (contentType.includes('text/html')) {
-        text = htmlToText(html);
-      } else {
-        // Plain text, JSON, etc. — strip any stray tags just in case
-        text = htmlToText(html);
-      }
+      // Plain text and JSON go through the same pass: stray tags are stripped
+      // whatever the content type claims. Decoding entities can rebuild the
+      // wrapper's closing tag from `&lt;/UNTRUSTED_CONTENT&gt;`, so the marker
+      // is defused after decoding, or a page could step outside its fence.
+      const text = htmlToText(html).replace(/<\/?\s*UNTRUSTED_CONTENT\s*>/giu, '[marker removed]');
 
       if (find === undefined) {
         // Say when the page was cut, or the model takes the first window for the whole page.

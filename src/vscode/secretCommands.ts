@@ -10,22 +10,25 @@ export function registerSecretCommands(
   context.subscriptions.push(
     vscode.commands.registerCommand('forge.setSearchApiKey', async () => {
       const config = getConfig();
-      let provider: string;
-      let secretKeyName: string;
-      if (config.search) {
-        provider = config.search.provider;
-        secretKeyName = config.search.secret_key_name;
-      } else {
-        const pick = await vscode.window.showQuickPick(
-          [
-            { label: 'Tavily', description: 'tavily.com — recommended', value: 'tavily' },
-            { label: 'Brave Search', description: 'brave.com/search/api', value: 'brave' },
-          ],
-          { title: 'Forge: Select Search Provider', placeHolder: 'Select a search provider' },
-        );
-        if (!pick) return;
-        provider = pick.value;
-        secretKeyName = `forge.${provider}.apiKey`;
+      const options = [
+        {
+          label: 'Tavily',
+          description: 'tavily.com — recommended',
+          value: 'tavily' as const,
+        },
+        { label: 'Brave Search', description: 'brave.com/search/api', value: 'brave' as const },
+      ];
+      const pick = await vscode.window.showQuickPick(options, {
+        title: 'Forge: Select Search Provider',
+        placeHolder: 'Select the provider whose API key to store',
+      });
+      if (!pick) return;
+      const provider = pick.value;
+      const secretKeyName =
+        provider === config.search?.provider && config.search.secret_key_name
+          ? config.search.secret_key_name
+          : `forge.${provider}.apiKey`;
+      if (!config.search) {
         try {
           const existing = fs.readFileSync(configPath, 'utf8');
           const block = `\nsearch:\n  provider: ${provider}\n  secret_key_name: ${secretKeyName}\n  max_results: 5\n`;

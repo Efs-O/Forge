@@ -58,8 +58,9 @@ const LlamaServerConfigSchema = z.object({
 const SharedRuntimeSchema = z.object({ enabled: z.boolean() }).optional();
 
 const SearchConfigSchema = z.object({
-  provider: z.enum(['tavily', 'brave']),
-  secret_key_name: z.string().min(1),
+  provider: z.enum(['duckduckgo', 'tavily', 'brave']),
+  fallback: z.enum(['tavily', 'brave']).optional(),
+  secret_key_name: z.string().min(1).optional(),
   max_results: z.number().int().positive().optional(),
 });
 
