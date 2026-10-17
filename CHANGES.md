@@ -63,6 +63,7 @@
 - **Stop during a cold model load cancels a summary or contact run (U12-01).** The run published its cancel handle only after the backend was up, so it started anyway once the model loaded.
 - **A tool row with an unknown call id no longer removes another call's progress row (U20-06).**
 - An unknown chat id now reports not found even when all 10 chat tabs are open.
+- When a later file write restores a file to its original contents, its pending added and removed line highlights are cleared at once.
 - Closing a tab now explains when an active delegation still holds its model and prevents it from being unloaded.
 
 ## 0.17.42
