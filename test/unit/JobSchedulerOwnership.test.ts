@@ -3,8 +3,15 @@ import * as os from 'os';
 import * as path from 'path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
-const { spawnAndWait } = vi.hoisted(() => ({ spawnAndWait: vi.fn() }));
+const { spawnAndWait, watchMock } = vi.hoisted(() => ({
+  spawnAndWait: vi.fn(),
+  watchMock: vi.fn(),
+}));
 vi.mock('../../src/util/processSpawn', () => ({ spawnAndWait }));
+vi.mock('fs', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('fs')>();
+  return { ...actual, watch: watchMock };
+});
 
 import { JobStore, isJobDefinitionName } from '../../src/jobs/JobStore';
 import { JobScheduler } from '../../src/jobs/JobScheduler';
@@ -66,6 +73,7 @@ beforeEach(async () => {
 });
 
 afterEach(async () => {
+  vi.useRealTimers();
   store.unwatch();
   // A tick may still be finishing its state write after stop().
   await fs.promises.rm(jobsRoot, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 });
@@ -119,7 +127,6 @@ describe('scheduler stop', () => {
     const tick = scheduler.tick();
     let stopped = false;
     const stop = scheduler.stop().then(() => (stopped = true));
-    await new Promise((resolve) => setTimeout(resolve, 20));
     // CI failure 2026-09-23: the test removed the directory under a live tick.
     expect(stopped).toBe(false);
     release();
@@ -140,18 +147,25 @@ describe('wake reconciliation churn (audit A4)', () => {
   it('a heartbeat temporary does not fire the store watch; a definition edit does', async () => {
     const onChange = vi.fn();
     await store.saveJob(makeJob());
+    let onFileChange: ((eventType: string, filename: string | Buffer | null) => void) | undefined;
+    watchMock.mockImplementation(
+      ((...args: unknown[]) => {
+        onFileChange = args[1] as typeof onFileChange;
+        return { close: vi.fn() } as unknown as fs.FSWatcher;
+      }) as typeof fs.watch,
+    );
+    vi.useFakeTimers();
     store.watch(onChange);
-    // macOS FSEvents can hand a new watcher the saveJob write from just before
-    // it started; let that (debounced) event land before counting.
-    await new Promise((r) => setTimeout(r, 1300));
-    onChange.mockClear();
-    const tmp = path.join(jobsRoot, 'jobs-scheduler.lease.json.tok.heartbeat-1.tmp');
-    await fs.promises.writeFile(tmp, '{}');
-    await fs.promises.unlink(tmp);
-    await new Promise((r) => setTimeout(r, 1300));
+    expect(onFileChange).toBeDefined();
+    onFileChange!('rename', 'jobs-scheduler.lease.json.tok.heartbeat-1.tmp');
+    await vi.advanceTimersByTimeAsync(1_500);
     expect(onChange).not.toHaveBeenCalled();
-    await store.saveJob(makeJob({ name: 'Disk 2' }));
-    await vi.waitFor(() => expect(onChange).toHaveBeenCalled(), { timeout: 2000 });
+    onFileChange!('rename', 'disk.json');
+    onFileChange!('change', 'disk.json');
+    await vi.advanceTimersByTimeAsync(999);
+    expect(onChange).not.toHaveBeenCalled();
+    await vi.advanceTimersByTimeAsync(1);
+    expect(onChange).toHaveBeenCalledOnce();
   });
 
   it('registers an unchanged schedule once, and again after reset', async () => {
