@@ -23,6 +23,20 @@ import { sleepWithAbort } from './agentTaskCap';
 
 /** The wall-clock cap on a single restart. A cap hit counts as a failed restart. */
 export const RESTART_CAP_MS = 5 * 60_000;
+/**
+ * How long a restart that hit the cap gets to settle before the rollback
+ * restart. The timed-out call keeps running; a rollback restart racing it
+ * could finish first and leave the backend on the new binary with config
+ * rolled back.
+ */
+export const RESTART_SETTLE_MS = 60_000;
+
+interface RestartResult {
+  ok: boolean;
+  error?: string | undefined;
+  /** Set when the cap fired: the restart call that is still running. */
+  running?: Promise<void>;
+}
 
 export interface RestartAfterTurnDeps {
   host: ForgeHostFacade;
@@ -64,13 +78,33 @@ export async function restartAfterTurn(
   const newBin = readBinaryFrom(deps.configPath) ?? 'the new';
   // Both paths are needed for a restore; without either nothing is put back.
   const hadBackup = deps.backupPath !== undefined && deps.configPath !== undefined;
-  let result: { ok: boolean; error?: string | undefined };
+  let result: RestartResult;
   try {
     result = await restartWithCap(deps.host, jobModel, deps.sleep);
   } catch (err) {
     result = { ok: false, error: err instanceof Error ? err.message : String(err) };
   }
   if (result.ok) return outcome;
+
+  if (result.running && !(await settlesWithin(result.running, RESTART_SETTLE_MS, deps.sleep))) {
+    // Still running: a second restart would race it. Put the old config back
+    // for the next load and say what state the backend may be in.
+    let restored = hadBackup ? `config.yaml was rolled back to ${old} for the next load` : '';
+    try {
+      await restoreConfig(deps.backupPath, deps.configPath);
+    } catch (err) {
+      restored = `restoring config.yaml also failed (${err instanceof Error ? err.message : String(err)})`;
+    }
+    return {
+      kind: 'failed',
+      sentence:
+        `new binary ${newBin} did not load (${result.error ?? 'unknown error'}) and its restart ` +
+        `is still running; ${restored || 'there is no snapshot to roll back to'} — check ` +
+        'the backend and llama_server.binary',
+      restart: false,
+      finalText: outcome.finalText,
+    };
+  }
 
   // Failed restart: restore config.yaml's bytes from the snapshot, then restart
   // once more. The restore restart is the post-check for the restored binary.
@@ -120,6 +154,8 @@ export async function restartAfterTurn(
   };
 }
 
+const CAP_ERROR = `restart timed out after ${RESTART_CAP_MS / 60000} minutes`;
+
 /**
  * Restart the model, racing it against the 5-minute cap. Resolves as soon as
  * either settles; a cap hit is a failed restart. The cap timer is aborted on a
@@ -129,20 +165,18 @@ async function restartWithCap(
   host: ForgeHostFacade,
   model: string,
   sleep?: (ms: number, signal?: AbortSignal) => Promise<void>,
-): Promise<{ ok: boolean; error?: string | undefined }> {
+): Promise<RestartResult> {
   const timer = sleep ?? sleepWithAbort;
   const controller = new AbortController();
   const cap = timer(RESTART_CAP_MS, controller.signal).then(
-    () => ({
-      ok: false as const,
-      error: `restart timed out after ${RESTART_CAP_MS / 60000} minutes`,
-    }),
+    () => ({ ok: false as const, error: CAP_ERROR }),
     () => {
       throw new Error('restart cap aborted');
     },
   );
   cap.catch(() => {}); // prevent unhandled rejection when the restart finishes first
-  const restart = host.restartModel(model).then(
+  const running = host.restartModel(model);
+  const restart = running.then(
     () => ({ ok: true as const, error: undefined as string | undefined }),
     (err: unknown) => ({
       ok: false as const,
@@ -151,7 +185,24 @@ async function restartWithCap(
   );
   const outcome = await Promise.race([restart, cap]);
   controller.abort(); // cancel the cap on a normal finish (no-op if it already fired)
-  return outcome;
+  if (outcome.ok || outcome.error !== CAP_ERROR) return outcome;
+  return { ...outcome, running: restart.then(() => undefined) };
+}
+
+/** True when `running` settles within `ms`; the timer is cancelled either way. */
+async function settlesWithin(
+  running: Promise<void>,
+  ms: number,
+  sleep?: (ms: number, signal?: AbortSignal) => Promise<void>,
+): Promise<boolean> {
+  const controller = new AbortController();
+  const expired = (sleep ?? sleepWithAbort)(ms, controller.signal).then(
+    () => false,
+    () => false,
+  );
+  const settled = await Promise.race([running.then(() => true), expired]);
+  controller.abort();
+  return settled;
 }
 
 /** Restore config.yaml's bytes from the pre-turn snapshot. A no-op with no backup. */

@@ -23,6 +23,7 @@ import {
 } from '../../src/jobs/agentTask';
 import {
   restartAfterTurn,
+  RESTART_CAP_MS,
   type RestartAfterTurnDeps,
 } from '../../src/jobs/agentTaskRestart';
 import { JobSchema, JobStateSchema, type Job, type JobFile } from '../../src/jobs/jobSchema';
@@ -1186,11 +1187,50 @@ describe('restartAfterTurn (step 7, phase 4)', () => {
       'qwen',
       ok,
     );
-    // The cap hit counts as a failed restart: the first (hanging) restart loses
-    // the race to the cap, so the runner rolls back and restarts once more.
+    // The cap hit counts as a failed restart. The first restart never settles,
+    // so a second one would race it (U07-03): config is restored for the next
+    // load and no rollback restart runs.
     expect(out.kind).toBe('failed');
+    expect(out.sentence).toContain('its restart is still running');
+    expect(out.sentence).toContain('config.yaml was rolled back to /old/binary');
+    expect(host.restartModel).toHaveBeenCalledTimes(1);
+    expect(await fs.promises.readFile(configPath, 'utf8')).toContain('/old/binary');
+  });
+
+  it('starts the rollback restart only after a timed-out restart settles (U07-03)', async () => {
+    const ok = outcomeOf('RESULT: ok — installed b1234\nRESTART: yes');
+    const backupPath = path.join(dir, 'config.bak');
+    const configPath = path.join(dir, 'config.yaml');
+    await fs.promises.writeFile(backupPath, 'llama_server:\n  binary: /old/binary\n');
+    await fs.promises.writeFile(configPath, 'llama_server:\n  binary: /new/binary\n');
+    const host = fakeHost([], { kind: 'completed', finalText: 'RESULT: ok — installed b1234\nRESTART: yes' });
+    const order: string[] = [];
+    let calls = 0;
+    host.restartModel = vi.fn().mockImplementation(async () => {
+      calls++;
+      if (calls === 1) {
+        // Finishes after the 50 ms cap but inside the settle window.
+        await new Promise((resolve) => setTimeout(resolve, 80));
+        order.push('first settled');
+        return;
+      }
+      order.push('rollback started');
+    });
+    const sleep = (ms: number, signal?: AbortSignal) =>
+      new Promise<void>((resolve, reject) => {
+        const t = setTimeout(resolve, ms === RESTART_CAP_MS ? 50 : 500);
+        signal?.addEventListener('abort', () => {
+          clearTimeout(t);
+          reject(new Error('aborted'));
+        }, { once: true });
+      });
+    const out = await restartAfterTurn(
+      { ...restartDeps(), host, backupPath, configPath, sleep },
+      'qwen',
+      ok,
+    );
+    expect(order).toEqual(['first settled', 'rollback started']);
     expect(out.sentence).toContain('rolled back to /old/binary');
-    expect(host.restartModel).toHaveBeenCalledTimes(2);
   });
 
   it('returns a failed outcome (never throws) when the first restart throws synchronously', async () => {
