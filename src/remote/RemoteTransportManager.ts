@@ -201,8 +201,17 @@ export class RemoteTransportManager {
       } catch (err) {
         subscriptions.dispose();
         this.onTransportStopped(controller);
-        contactService?.dispose();
         abort.abort();
+        // start() arms the recovery timer and the approval/question sinks
+        // before the channel starts, so a failed channel leaves them running.
+        // stop() also disposes the contact service.
+        await controller
+          .stop()
+          .catch((stopErr: Error) =>
+            this.options.notifyLocal(
+              `Forge remote ${channelName} cleanup failed: ${stopErr.message}`,
+            ),
+          );
         await voice?.dispose();
         throw err;
       }
