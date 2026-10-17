@@ -58,9 +58,7 @@ vi.mock('../../src/backend/DirectBackend', () => {
   return { DirectBackend: FakeDirectBackend };
 });
 
-const probeHttpMock = vi.hoisted(() =>
-  vi.fn(async () => ({ reachable: false, ok: false })),
-);
+const probeHttpMock = vi.hoisted(() => vi.fn(async () => ({ reachable: false, ok: false })));
 vi.mock('../../src/backend/HealthCheck', async (importOriginal) => {
   const actual = await importOriginal<typeof import('../../src/backend/HealthCheck')>();
   return { ...actual, probeHttp: probeHttpMock };
@@ -488,6 +486,36 @@ describe('ExternalModelServers', () => {
     }
   });
 
+  it('ensureStarted fails on a start command that cannot run, not at the timeout (U04-06)', async () => {
+    vi.useFakeTimers();
+    try {
+      const config = makeConfig();
+      const strata = config.models.find((model) => model.name === 'strata')!;
+      strata.start_command = ['no-such-start-strata'];
+      const spawnImpl = vi.fn(() => ({
+        unref: vi.fn(),
+        once: (_event: 'error', listener: (error: Error) => void) =>
+          setTimeout(() => listener(new Error('spawn no-such-start-strata ENOENT')), 0),
+      }));
+      probeHttpMock.mockResolvedValue({ reachable: false, ok: false });
+      const servers = new ExternalModelServers(
+        () => config,
+        async () => undefined,
+        undefined,
+        spawnImpl,
+      );
+
+      const start = servers.ensureStarted('strata');
+      start.catch(() => {});
+      await vi.advanceTimersByTimeAsync(START_POLL_MS * 2);
+      await expect(start).rejects.toThrow(
+        'Start command for "strata" failed: spawn no-such-start-strata ENOENT',
+      );
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   // Codex review follow-up: joining must not mean only ONE caller learns the
   // start failed. Both join the same promise, so both see the same failure,
   // and the next request still gets a fresh attempt.
@@ -513,7 +541,11 @@ describe('ExternalModelServers', () => {
       ]);
       await vi.advanceTimersByTimeAsync(START_TIMEOUT_MS + START_POLL_MS * 2);
       const outcomes = await joined;
-      expect(outcomes.map((outcome) => outcome.status)).toEqual(['rejected', 'rejected', 'rejected']);
+      expect(outcomes.map((outcome) => outcome.status)).toEqual([
+        'rejected',
+        'rejected',
+        'rejected',
+      ]);
       for (const outcome of outcomes) {
         expect((outcome as PromiseRejectedResult).reason.message).toMatch(
           /did not become reachable/,
@@ -701,7 +733,11 @@ describe('BackendPool with a managed external server', () => {
       urls.push(url);
       return ok();
     }) as unknown as typeof fetch;
-    const servers = new ExternalModelServers(() => config, async () => undefined, fetchImpl);
+    const servers = new ExternalModelServers(
+      () => config,
+      async () => undefined,
+      fetchImpl,
+    );
     const pool = new BackendPool(config, undefined, servers);
     servers.markInUse('strata');
     await pool.prepareExternal('strata-xxs');

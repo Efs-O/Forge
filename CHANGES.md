@@ -26,6 +26,7 @@
 - The control server's `/ensure` and `/unload` now see a provider set on a model's group. They read only the model's own entry, so a grouped Ollama model was treated as llama.cpp (and could evict a loaded local model to make room), and a grouped cloud model was not refused. `GET /models` already merged groups.
 - Two VS Code windows that point the same model at different llama-server builds no longer share one server. The sharing key covered the server's arguments but not its binary, so the second window could borrow the first window's build and never run its own.
 - Delegating to a model this window borrowed from another Forge window no longer fails with "no free slot" when every port is in use. The capacity check ignored borrowed servers, which use none of this window's ports.
+- A managed server whose `start_command` cannot run (a misspelled program, a missing file) now fails within a couple of seconds with the launch error. Forge used to log the error and keep polling for the full two-minute start timeout before reporting "did not become reachable".
 
 ## 0.17.42
 

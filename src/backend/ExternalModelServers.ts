@@ -238,8 +238,14 @@ export class ExternalModelServers {
           'Start it manually, or set start_command so Forge can start it.',
       );
     }
-    this.launchStart(model);
-    const ready = await this.waitReachable(model.endpoint);
+    // A command that cannot run (ENOENT, EACCES) fails asynchronously; stop
+    // polling on it rather than wait out START_TIMEOUT_MS.
+    let launchError: Error | undefined;
+    this.launchStart(model, (error) => (launchError = error));
+    const ready = await this.waitReachable(model.endpoint, () => launchError !== undefined);
+    if (launchError) {
+      throw new Error(`Start command for "${name}" failed: ${describe(launchError)}`);
+    }
     if (!ready) {
       throw new Error(
         `"${name}" was started but did not become reachable at ${model.endpoint} ` +
@@ -250,7 +256,7 @@ export class ExternalModelServers {
   }
 
   /** Launch `start_command` detached so it survives the extension host. */
-  private launchStart(model: ModelConfig): void {
+  private launchStart(model: ModelConfig, onError: (error: Error) => void): void {
     const [command, ...args] = model.start_command!;
     try {
       const resolvedArgs = args.map((arg) => {
@@ -268,9 +274,10 @@ export class ExternalModelServers {
         windowsHide: true,
         stdio: 'ignore',
       });
-      child.once?.('error', (error) =>
-        log.error(`[ExternalModelServers] start command failed for "${model.name}"`, error),
-      );
+      child.once?.('error', (error) => {
+        log.error(`[ExternalModelServers] start command failed for "${model.name}"`, error);
+        onError(error);
+      });
       child.unref();
       log.info(`[ExternalModelServers] launched start command for "${model.name}"`);
     } catch (error) {
@@ -279,11 +286,11 @@ export class ExternalModelServers {
   }
 
   /** Poll the endpoint until it accepts connections or the timeout is reached. */
-  private async waitReachable(endpoint: string): Promise<boolean> {
+  private async waitReachable(endpoint: string, failed: () => boolean): Promise<boolean> {
     const deadline = Date.now() + START_TIMEOUT_MS;
     for (;;) {
       if ((await probeHttp(endpoint)).reachable) return true;
-      if (Date.now() >= deadline) return false;
+      if (failed() || Date.now() >= deadline) return false;
       await new Promise((resolve) => setTimeout(resolve, START_POLL_MS));
     }
   }
