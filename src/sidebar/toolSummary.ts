@@ -1,7 +1,10 @@
+import { isJsonObject, parseJsonWithInvalidEscapeRepair } from '../tools/argCoercion';
+
 /** Extracts a human-readable detail string from a tool call's argument JSON. */
 export function extractToolDetail(argsJson: string): string {
-  try {
-    const args = JSON.parse(argsJson) as Record<string, unknown>;
+  const parsed = parseJsonWithInvalidEscapeRepair(argsJson);
+  if (parsed.ok && isJsonObject(parsed.value)) {
+    const args = parsed.value;
     const model = args['model'];
     if (typeof model === 'string') {
       const focus = args['focus'];
@@ -41,8 +44,6 @@ export function extractToolDetail(argsJson: string): string {
     const short =
       args['query'] ?? args['pattern'] ?? args['message'] ?? args['text'] ?? args['prompt'];
     if (typeof short === 'string') return short.length > 50 ? short.slice(0, 50) + '…' : short;
-  } catch {
-    /* malformed args — show nothing */
   }
   return '';
 }

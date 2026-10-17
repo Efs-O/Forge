@@ -4,6 +4,11 @@ import * as path from 'path';
 import { createHash } from 'crypto';
 import type { ChatMessage } from '../llm/types';
 import { requestPrefixRow, type RequestFingerprint } from '../sessions/requestFingerprint';
+import {
+  isJsonObject,
+  parseJsonWithInvalidEscapeRepair,
+  toolArgumentRepairForMessage,
+} from '../tools/argCoercion';
 
 const SESSIONS_DIR = path.join(os.homedir(), '.forge', 'sessions');
 
@@ -370,18 +375,18 @@ export class SessionLogger {
           // Moving to the renderer.") streamed to the chat and lives on this
           // turn; a hardcoded null left it in the sidebar and nowhere else.
           content: typeof msg.content === 'string' && msg.content ? msg.content : null,
-          tool_calls: msg.tool_calls.map((tc) => ({
-            id: tc.id,
-            name: tc.function.name,
-            raw_arguments: tc.function.arguments,
-            input: (() => {
-              try {
-                return JSON.parse(tc.function.arguments) as unknown;
-              } catch {
-                return {};
-              }
-            })(),
-          })),
+          tool_calls: msg.tool_calls.map((tc) => {
+            const parsed = parseJsonWithInvalidEscapeRepair(tc.function.arguments);
+            const acceptableRepair = parsed.ok && parsed.repaired && isJsonObject(parsed.value);
+            return {
+              id: tc.id,
+              name: tc.function.name,
+              raw_arguments: tc.function.arguments,
+              input:
+                parsed.ok && (!parsed.repaired || isJsonObject(parsed.value)) ? parsed.value : {},
+              ...(acceptableRepair ? { arguments_repaired: true } : {}),
+            };
+          }),
           timestamp_ms: Date.now(),
           model,
         };
@@ -408,7 +413,8 @@ export class SessionLogger {
 
       // A turn that produced only reasoning — cut off, refused, or interrupted
       // mid-thought — still says why. Requiring content dropped those entirely.
-      if (!content && !msg.reasoning) continue;
+      const argumentRepair = toolArgumentRepairForMessage(msg);
+      if (!content && !msg.reasoning && !argumentRepair) continue;
 
       const line: Record<string, unknown> = {
         role: msg.role,
@@ -420,6 +426,13 @@ export class SessionLogger {
       if (msg.role === 'user' && msg.internal === true) line['internal'] = true;
       if (msg.role === 'tool' && msg.tool_call_id) line['tool_call_id'] = msg.tool_call_id;
       if (msg.role === 'tool' && msg.name) line['name'] = msg.name;
+      if (argumentRepair) {
+        line['argument_repair'] = {
+          method: 'double_invalid_escape_backslashes',
+          whole_arguments: argumentRepair.wholeArguments,
+          fields: argumentRepair.fields,
+        };
+      }
       if (msg.role === 'user' && typeof msg.turnContext === 'string') {
         line['turn_context'] = msg.turnContext;
       }

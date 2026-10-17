@@ -333,6 +333,29 @@ describe('ToolRegistry.invalidArgs malformed array JSON refusal', () => {
     expect(message?.endsWith('Resend "paths" as a JSON array, not a string.')).toBe(true);
   });
 
+  it('accepts a Windows path in an ask_user questions array', () => {
+    const value = String.raw`[{"prompt":"Use N:\vs code apps\Forge"}]`;
+    const args = coerceToolArgs(askTool.definition, { questions: value });
+
+    expect(args['questions']).toEqual([
+      { prompt: String.raw`Use N:\vs code apps\Forge` },
+    ]);
+  });
+
+  it('does not repair a backslash outside a JSON string and shows the original excerpt', () => {
+    const tool = makeBoolTool('stage', {
+      paths: { type: 'array', items: { type: 'string' } },
+    } as never);
+    const value = String.raw`[\N]`;
+    const args = coerceToolArgs(tool.definition, { paths: value });
+    const diagnostic = invalidArrayJsonDiagnostic(value);
+    const message = registry.invalidArgs(tool, args);
+
+    expect(args['paths']).toBe(value);
+    expect(diagnostic).toBeDefined();
+    expect(message).toContain(`near: \`${diagnostic?.excerpt}\``);
+  });
+
   it.each(['[{"prompt":"unfinished', '[{"prompt":"pick"'])(
     'explains a cut-off array: %s',
     (value) => {

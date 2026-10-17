@@ -17,6 +17,7 @@
  */
 
 import type { ChatMessage } from '../llm/types';
+import { isJsonObject, parseJsonWithInvalidEscapeRepair } from '../tools/argCoercion';
 import { RECORDED_ACTION_KEY_MAX_CHARS, type RecordedCompactionAction } from './compactionTypes';
 import { renderRecordedActionsBlock } from './compactionRecordedState';
 import { isFailureResult } from './toolResultView';
@@ -107,12 +108,8 @@ function resultsByCallId(messages: readonly ChatMessage[]): Map<string, string> 
 }
 
 function parseArgs(raw: string): Record<string, unknown> | undefined {
-  try {
-    const parsed: unknown = JSON.parse(raw);
-    return parsed && typeof parsed === 'object' ? (parsed as Record<string, unknown>) : undefined;
-  } catch {
-    return undefined;
-  }
+  const parsed = parseJsonWithInvalidEscapeRepair(raw);
+  return parsed.ok && isJsonObject(parsed.value) ? parsed.value : undefined;
 }
 
 function truncate(text: string, limit: number): string {

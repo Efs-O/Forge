@@ -2,6 +2,97 @@ import type { ToolDefinition } from '../llm/types';
 
 type DeclaredProperty = { type?: unknown; items?: unknown };
 
+export type JsonEscapeRepairResult =
+  | { ok: true; value: unknown; repaired: boolean }
+  | { ok: false; error: unknown };
+
+export interface ToolArgumentRepairInfo {
+  wholeArguments: boolean;
+  fields: string[];
+}
+
+const repairedFieldsByArgs = new WeakMap<object, string[]>();
+const repairInfoByMessage = new WeakMap<object, ToolArgumentRepairInfo>();
+
+/**
+ * Parse JSON as sent first. Only after that fails, double invalid escapes
+ * inside string literals and accept the retry if it parses. A bad escape has
+ * exactly one reading: a literal backslash; valid JSON escapes are untouched.
+ * In particular, `C:\\new` is valid JSON and means a newline, so Forge cannot
+ * know it was intended as a literal path separator.
+ */
+export function parseJsonWithInvalidEscapeRepair(text: string): JsonEscapeRepairResult {
+  try {
+    return { ok: true, value: JSON.parse(text) as unknown, repaired: false };
+  } catch (error) {
+    const repaired = doubleInvalidJsonEscapes(text);
+    if (repaired === undefined) return { ok: false, error };
+    try {
+      return { ok: true, value: JSON.parse(repaired) as unknown, repaired: true };
+    } catch {
+      // Refusals and diagnostics must describe the original text, not a failed repair.
+      return { ok: false, error };
+    }
+  }
+}
+
+function doubleInvalidJsonEscapes(text: string): string | undefined {
+  let inString = false;
+  let changed = false;
+  let output = '';
+  for (let index = 0; index < text.length; index += 1) {
+    const character = text[index]!;
+    if (!inString) {
+      output += character;
+      if (character === '"') inString = true;
+      continue;
+    }
+    if (character === '"') {
+      output += character;
+      inString = false;
+      continue;
+    }
+    if (character !== '\\') {
+      output += character;
+      continue;
+    }
+
+    const escaped = text[index + 1];
+    if (escaped !== undefined && '"\\/bfnrt'.includes(escaped)) {
+      output += character + escaped;
+      index += 1;
+      continue;
+    }
+    if (escaped === 'u' && /^[\da-f]{4}$/iu.test(text.slice(index + 2, index + 6))) {
+      output += text.slice(index, index + 6);
+      index += 5;
+      continue;
+    }
+
+    // A trailing slash is invalid too; leave the following character for the
+    // next iteration, so quotes and escapes keep their normal string state.
+    output += '\\\\';
+    changed = true;
+  }
+  return changed ? output : undefined;
+}
+
+export function isJsonObject(value: unknown): value is Record<string, unknown> {
+  return value !== null && typeof value === 'object' && !Array.isArray(value);
+}
+
+export function repairedToolArgumentFields(args: object): readonly string[] {
+  return repairedFieldsByArgs.get(args) ?? [];
+}
+
+export function recordToolArgumentRepair(message: object, repair: ToolArgumentRepairInfo): void {
+  repairInfoByMessage.set(message, repair);
+}
+
+export function toolArgumentRepairForMessage(message: object): ToolArgumentRepairInfo | undefined {
+  return repairInfoByMessage.get(message);
+}
+
 /**
  * Lossless repair of the argument shapes local models most often send quoted:
  * `"true"`/`"False"` for a boolean, `"5"` for an integer, and `"[\"a\"]"` (a
@@ -18,32 +109,47 @@ export function coerceToolArgs(
   if (typeof args !== 'object' || args === null) return args;
   if (typeof properties !== 'object' || properties === null) return args;
   let result = args;
+  const repairedFields: string[] = [];
   for (const [key, schema] of Object.entries(properties as Record<string, DeclaredProperty>)) {
     const value = args[key];
     if (typeof value !== 'string') continue;
     const coerced = coerceValue(schema?.type, value);
     if (coerced === undefined) continue;
     if (result === args) result = { ...args };
-    result[key] = coerced;
+    result[key] = coerced.value;
+    if (coerced.repaired) repairedFields.push(key);
   }
+  if (repairedFields.length > 0) repairedFieldsByArgs.set(result, repairedFields);
   return result;
 }
 
-function coerceValue(type: unknown, value: string): unknown {
+function coerceValue(
+  type: unknown,
+  value: string,
+): { value: unknown; repaired: boolean } | undefined {
   const text = value.trim();
   switch (type) {
     case 'boolean':
-      if (text === 'true' || text === 'True') return true;
-      if (text === 'false' || text === 'False') return false;
+      if (text === 'true' || text === 'True') return { value: true, repaired: false };
+      if (text === 'false' || text === 'False') return { value: false, repaired: false };
       return undefined;
     case 'integer':
-      return /^-?\d+$/u.test(text) ? Number(text) : undefined;
+      return /^-?\d+$/u.test(text) ? { value: Number(text), repaired: false } : undefined;
     case 'number':
-      return /^-?\d+(?:\.\d+)?$/u.test(text) ? Number(text) : undefined;
+      return /^-?\d+(?:\.\d+)?$/u.test(text) ? { value: Number(text), repaired: false } : undefined;
     case 'array': {
       if (!text.startsWith('[')) return undefined;
-      const parsed = parseJsonArray(text);
-      return parsed.ok ? parsed.value : undefined;
+      const parsed = parseJsonWithInvalidEscapeRepair(text);
+      return parsed.ok && Array.isArray(parsed.value)
+        ? { value: parsed.value, repaired: parsed.repaired }
+        : undefined;
+    }
+    case 'object': {
+      if (!text.startsWith('{')) return undefined;
+      const parsed = parseJsonWithInvalidEscapeRepair(text);
+      return parsed.ok && parsed.repaired && isJsonObject(parsed.value)
+        ? { value: parsed.value, repaired: true }
+        : undefined;
     }
     default:
       return undefined;

@@ -77,6 +77,7 @@
 - **Malformed array arguments point to the bad character.** When a tool receives broken JSON as a string for an array field, the refusal now includes a marked excerpt and the likely syntax cause, then asks for a JSON array rather than a string.
 - HTML and shader inputs are read with a strict memory limit (U19-05). `render_html_to_image` now reads at most 10 MiB plus one byte to detect oversized files, instead of loading a file that grew after its size check.
 - **Messages sent into a running turn are no longer left queued when one source fails.** Messages can reach a running turn from several sources (the sidebar, Telegram, the agent bus). Once the transcript is saved, each source is told that its messages were delivered. If one of those steps failed, the later sources were never told, so their messages stayed queued. Every source is now told, and the first failure is still reported.
+- **Windows paths from local models served without an argument grammar (Strata) are now accepted instead of refused.** When those models write single backslashes in structured tool arguments, Forge doubles only invalid JSON escapes; valid JSON escapes keep their JSON meaning.
 
 ## 0.17.42
 

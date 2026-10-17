@@ -33,6 +33,7 @@ import {
 } from './turnModelBehavior';
 import { reasoningReserve } from '../util/contextBudget';
 import { getLogger } from '../util/logger';
+import { isJsonObject, parseJsonWithInvalidEscapeRepair } from '../tools/argCoercion';
 
 const log = getLogger();
 
@@ -342,7 +343,13 @@ export async function runPromptToMarkdown(
       for (const call of toolCalls) {
         let result: string;
         try {
-          const args = JSON.parse(call.function.arguments) as Record<string, unknown>;
+          const parsed = parseJsonWithInvalidEscapeRepair(call.function.arguments);
+          if (!parsed.ok || (parsed.repaired && !isJsonObject(parsed.value))) {
+            throw parsed.ok
+              ? new Error('Repaired tool arguments are not a JSON object')
+              : parsed.error;
+          }
+          const args = parsed.value as Record<string, unknown>;
           result = await options.dispatchContactTool(call.function.name, args);
         } catch (error) {
           result = `Contact web tool failed: ${error instanceof Error ? error.message : String(error)}`;

@@ -5,6 +5,7 @@ import { wireMessageContent, type StreamHandlers } from './OpenAIClient';
 import { StreamWatchdog } from './streamWatchdog';
 import { withDescribedCause } from '../util/describeError';
 import { ToolCallTruncatedError, argumentsAreIncomplete } from './ToolCallTruncatedError';
+import { isJsonObject, parseJsonWithInvalidEscapeRepair } from '../tools/argCoercion';
 
 interface OllamaToolCallChunk {
   function?: {
@@ -112,15 +113,8 @@ function contentPartsToOllama(parts: ContentPart[]): { content: string; images?:
 
 function parseToolArguments(argumentsJson: string): Record<string, unknown> {
   if (!argumentsJson.trim()) return {};
-  try {
-    const parsed = JSON.parse(argumentsJson) as unknown;
-    if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
-      return parsed as Record<string, unknown>;
-    }
-  } catch {
-    // Fall through to empty object so a malformed prior tool call does not break the request.
-  }
-  return {};
+  const parsed = parseJsonWithInvalidEscapeRepair(argumentsJson);
+  return parsed.ok && isJsonObject(parsed.value) ? parsed.value : {};
 }
 
 function toOllamaMessage(message: ChatMessage): OllamaChatMessage {
@@ -212,12 +206,7 @@ function argumentsAreWhole(value: unknown): boolean {
 /** True when accumulated text is a complete, non-empty argument object. */
 function argumentsAreComplete(argumentsText: string): boolean {
   if (!argumentsText || argumentsText === '{}') return false;
-  try {
-    JSON.parse(argumentsText);
-    return true;
-  } catch {
-    return false;
-  }
+  return parseJsonWithInvalidEscapeRepair(argumentsText).ok;
 }
 
 /**
