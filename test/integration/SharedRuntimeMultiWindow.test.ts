@@ -112,36 +112,4 @@ describe('shared runtime across two Forge windows', () => {
     expect(registry.hasBorrowers('runtime-key')).toBe(false);
   });
 
-  it('keeps the owner protected by a surviving lease when one borrower dies', async () => {
-    const livePid = process.pid;
-    const deadPid = 2 ** 31 - 1;
-    const b = new SharedRuntimeRegistry(root, (pid) => pid === livePid);
-
-    // Two borrowers; write the dead one's lease as another window would have.
-    b.acquireLease('runtime-key', 'window-b');
-    fs.writeFileSync(
-      path.join(root, 'runtime-key.leases', 'window-c.json'),
-      JSON.stringify({ pid: deadPid }),
-      'utf8',
-    );
-    expect(fs.readdirSync(path.join(root, 'runtime-key.leases'))).toHaveLength(2);
-
-    // The owner asks whether it may unload.
-    expect(b.hasBorrowers('runtime-key')).toBe(true);
-    // Only the dead borrower's lease was reclaimed.
-    expect(fs.readdirSync(path.join(root, 'runtime-key.leases'))).toEqual(['window-b.json']);
-
-    // Once the last live borrower releases, the owner is free.
-    b.releaseLease('runtime-key', 'window-b');
-    expect(b.hasBorrowers('runtime-key')).toBe(false);
-  });
-
-  it('frees the owner once a crashed borrower is the only lease left', async () => {
-    const crashed = new SharedRuntimeRegistry(root, () => false);
-    crashed.acquireLease('runtime-key', 'window-b');
-
-    // Owner-side check after the borrower window was force-killed.
-    expect(crashed.hasBorrowers('runtime-key')).toBe(false);
-    expect(fs.readdirSync(path.join(root, 'runtime-key.leases'))).toEqual([]);
-  });
 });

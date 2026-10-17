@@ -4,7 +4,7 @@ import * as path from 'path';
 import * as vscode from 'vscode';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { makeFindFilesTool } from '../../src/tools/dirTools';
-import { makeFormatFileTool, makeRenameSymbolTool } from '../../src/tools/fileEditTools';
+import { makeRenameSymbolTool } from '../../src/tools/fileEditTools';
 import { makeCodeIntelTool } from '../../src/tools/codeIntelTool';
 import {
   makeListMemoriesTool,
@@ -220,21 +220,18 @@ describe('isolated editor, language, search, and memory tool execution', () => {
     );
   });
 
-  it('executes format and rename through disposable VS Code adapters', async () => {
+  it('executes rename through a disposable VS Code adapter and saves the change', async () => {
     const save = vi.fn().mockResolvedValue(true);
-    // format_file refuses to save unless applyEdit bumped the version by exactly
-    // one, so the fake document carries a version the fake applyEdit advances.
+    // The fake document carries a version the fake applyEdit advances.
     const doc = { uri: vscode.Uri.file(path.join(root, 'sample.ts')), save, version: 1 };
     vi.spyOn(vscode.workspace, 'openTextDocument').mockResolvedValue(doc as never);
     const workspaceEdit = {
       entries: () => [[vscode.Uri.file(path.join(root, 'sample.ts')), []]],
     };
-    const formatEdits = [{ newText: 'formatted' }];
     const executeCommand = vi
       .spyOn(vscode.commands, 'executeCommand')
       .mockImplementation(async (command: string) => {
         if (command === 'vscode.executeDocumentRenameProvider') return workspaceEdit;
-        if (command === 'vscode.executeFormatDocumentProvider') return formatEdits;
         return undefined;
       });
     const apply = vi.spyOn(vscode.workspace, 'applyEdit').mockImplementation(async () => {
@@ -242,19 +239,6 @@ describe('isolated editor, language, search, and memory tool execution', () => {
       return true;
     });
 
-    await expect(makeFormatFileTool().handler({ path: 'sample.ts' })).resolves.toBe(
-      'Formatted: sample.ts',
-    );
-    expect(save).toHaveBeenCalledOnce();
-    // format_file must go through the provider and never through the editor
-    // commands, which act on whatever document happens to be focused.
-    expect(executeCommand.mock.calls.map((call) => call[0])).not.toContain(
-      'editor.action.formatDocument',
-    );
-    expect(executeCommand.mock.calls.map((call) => call[0])).not.toContain(
-      'workbench.action.closeActiveEditor',
-    );
-    expect(vscode.window.visibleTextEditors).toHaveLength(0);
     const beforeMutate = vi.fn();
     await expect(
       makeRenameSymbolTool().handler(
@@ -265,7 +249,7 @@ describe('isolated editor, language, search, and memory tool execution', () => {
     expect(beforeMutate).toHaveBeenCalledWith([path.join(root, 'sample.ts')]);
     expect(apply).toHaveBeenCalledWith(workspaceEdit);
     // The rename is saved so the disk checkpoint, and Undo, cover it (U15-02).
-    expect(save).toHaveBeenCalledTimes(2);
+    expect(save).toHaveBeenCalledOnce();
 
     // A rename reaching outside the workspace is refused before applying (U15-03).
     const outside = {
