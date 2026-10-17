@@ -1,7 +1,6 @@
 import type { AppMessage } from './messageOps';
-import { stepMessages, stepThoughts, type ActivityGroupItem, type Row } from './activityRows';
+import { stepMessages, type ActivityGroupItem, type ActivityStep, type Row } from './activityRows';
 import { diffStats } from '../../src/sidebar/diffMessages';
-import { formatDuration } from '../../src/util/formatDuration';
 
 const LONG_GROUP_AT = 10;
 const LONG_GROUP_TAIL = 6;
@@ -15,8 +14,6 @@ export interface GroupSummary {
   removed: number;
   failed: number;
   retries: number;
-  hasThinking: boolean;
-  thinking: string;
   pending: boolean;
 }
 
@@ -24,12 +21,12 @@ function isFailedAttempt(attempt: AppMessage[] | undefined): boolean {
   return Boolean(attempt?.some((tool) => tool.toolIsError));
 }
 
-function stepId(step: ActivityGroupItem & { kind: 'step' }): string {
-  return stepMessages(step.step)[0]!.id;
+function stepId(step: ActivityStep): string {
+  return stepMessages(step)[0]!.id;
 }
 
-function finalTools(step: ActivityGroupItem & { kind: 'step' }): AppMessage[] {
-  return step.step.attempts.at(-1)?.tools ?? [];
+function finalTools(step: ActivityStep): AppMessage[] {
+  return step.attempts.at(-1)?.tools ?? [];
 }
 
 function isSuccessfulTool(tool: AppMessage): boolean {
@@ -47,22 +44,19 @@ function sameTargetCall(failed: AppMessage, succeeded: AppMessage): boolean {
 
 /** Step ids whose final-attempt failures a later same-target success recovered. */
 export function recoveredFailures(items: ActivityGroupItem[]): ReadonlySet<string> {
-  const steps = items.filter(
-    (item): item is Extract<ActivityGroupItem, { kind: 'step' }> => item.kind === 'step',
-  );
   const recovered = new Set<string>();
 
-  for (let index = 0; index < steps.length; index++) {
-    const failedTools = finalTools(steps[index]!).filter((tool) => tool.toolIsError);
+  for (let index = 0; index < items.length; index++) {
+    const failedTools = finalTools(items[index]!.step).filter((tool) => tool.toolIsError);
     if (failedTools.length === 0) continue;
 
-    const laterTools = steps.slice(index + 1).flatMap(finalTools);
+    const laterTools = items.slice(index + 1).flatMap((item) => finalTools(item.step));
     if (
       failedTools.every((failed) =>
         laterTools.some((later) => isSuccessfulTool(later) && sameTargetCall(failed, later)),
       )
     ) {
-      recovered.add(stepId(steps[index]!));
+      recovered.add(stepId(items[index]!.step));
     }
   }
 
@@ -84,8 +78,7 @@ export type VisibleGroupItem = ActivityGroupItem | GroupGap;
  * that is still unrecovered, and every step the reader opened (`opened`, by
  * step id) - a step the reader is looking at must not slide into a gap as
  * later calls arrive. Hidden calls collapse into individually revealable
- * gaps. A thinking run belongs to the next call it led into (or the prior call
- * when it trails the group), so it folds with that call.
+ * gaps.
  */
 export function visibleGroupItems(
   items: ActivityGroupItem[],
@@ -93,42 +86,21 @@ export function visibleGroupItems(
   revealed: ReadonlySet<string>,
   opened: ReadonlySet<string> = new Set(),
 ): VisibleGroupItem[] {
-  const stepIndexes = items.flatMap((item, index) => (item.kind === 'step' ? [index] : []));
+  const stepIndexes = items.map((_, index) => index);
   if (stepIndexes.length <= LONG_GROUP_AT) return items;
 
   const visibleStepIds = new Set(
-    stepIndexes
-      .slice(-LONG_GROUP_TAIL)
-      .map((index) => stepId(items[index] as Extract<ActivityGroupItem, { kind: 'step' }>)),
+    stepIndexes.slice(-LONG_GROUP_TAIL).map((index) => stepId(items[index]!.step)),
   );
   for (const index of stepIndexes) {
     const item = items[index]!;
-    if (item.kind === 'step' && opened.has(stepId(item))) visibleStepIds.add(stepId(item));
-    if (item.kind === 'step' && isFailedAttempt(item.step.attempts.at(-1)?.tools)) {
-      const id = stepId(item);
+    const id = stepId(item.step);
+    if (opened.has(id)) visibleStepIds.add(id);
+    if (isFailedAttempt(item.step.attempts.at(-1)?.tools)) {
       if (!recovered.has(id)) visibleStepIds.add(id);
     }
   }
-
-  const nextStepId: Array<string | undefined> = new Array(items.length);
-  let nextId: string | undefined;
-  for (let index = items.length - 1; index >= 0; index--) {
-    const item = items[index]!;
-    if (item.kind === 'step') nextId = stepId(item);
-    nextStepId[index] = nextId;
-  }
-  const previousStepId: Array<string | undefined> = new Array(items.length);
-  let previousId: string | undefined;
-  for (let index = 0; index < items.length; index++) {
-    const item = items[index]!;
-    if (item.kind === 'step') previousId = stepId(item);
-    previousStepId[index] = previousId;
-  }
-
-  const itemIsVisible = items.map((item, index) => {
-    const id = item.kind === 'step' ? stepId(item) : (nextStepId[index] ?? previousStepId[index]);
-    return id !== undefined && visibleStepIds.has(id);
-  });
+  const itemIsVisible = items.map((item) => visibleStepIds.has(stepId(item.step)));
 
   const output: VisibleGroupItem[] = [];
   let shownCall = false;
@@ -136,7 +108,7 @@ export function visibleGroupItems(
     if (itemIsVisible[index]) {
       const item = items[index]!;
       output.push(item);
-      if (item.kind === 'step') shownCall = true;
+      shownCall = true;
       index++;
       continue;
     }
@@ -146,10 +118,8 @@ export function visibleGroupItems(
     let firstStepId: string | undefined;
     while (index < items.length && !itemIsVisible[index]) {
       const hidden = items[index]!;
-      if (hidden.kind === 'step') {
-        calls++;
-        firstStepId ??= stepId(hidden);
-      }
+      calls++;
+      firstStepId ??= stepId(hidden.step);
       index++;
     }
 
@@ -194,18 +164,9 @@ export function summarizeGroup(items: ActivityGroupItem[]): GroupSummary {
   let failed = 0;
   let retries = 0;
   let pending = false;
-  let hasThinking = false;
-  const reasoningTimes: number[] = [];
   const files = new Map<string, FileChange>();
 
   for (const item of items) {
-    const thoughts = item.kind === 'step' ? stepThoughts(item.step) : item.steps;
-    if (thoughts.length > 0) hasThinking = true;
-    for (const thought of thoughts) {
-      if (thought.reasoningMs !== undefined) reasoningTimes.push(thought.reasoningMs);
-    }
-
-    if (item.kind !== 'step') continue;
     const { step } = item;
     const tools = step.attempts.flatMap((attempt) => attempt.tools);
     toolCalls += tools.length;
@@ -234,10 +195,6 @@ export function summarizeGroup(items: ActivityGroupItem[]): GroupSummary {
     removed += net.removed;
   }
 
-  const seconds =
-    reasoningTimes.length > 0
-      ? (formatDuration(reasoningTimes.reduce((sum, ms) => sum + ms, 0)) ?? '')
-      : '';
   const fileLabel =
     files.size === 1 ? `to ${basename([...files.keys()][0]!)}` : `in ${files.size} files`;
 
@@ -250,13 +207,11 @@ export function summarizeGroup(items: ActivityGroupItem[]): GroupSummary {
     removed,
     failed,
     retries,
-    hasThinking,
-    thinking: seconds,
     pending,
   };
 }
 
-/** Groups each maximal step/thinking run with at least one tool step. */
+/** Groups adjacent tool steps, keeping thinking blocks at transcript level. */
 export function groupActivity(rows: Row[]): Row[] {
   const grouped: Row[] = [];
   let run: ActivityGroupItem[] = [];
@@ -277,8 +232,8 @@ export function groupActivity(rows: Row[]): Row[] {
       runRows.push(row);
       stepCount += 1;
     } else if (row.kind === 'thinkingGroup') {
-      run.push({ kind: 'thinkingGroup', steps: row.steps });
-      runRows.push(row);
+      flush();
+      grouped.push(row);
     } else {
       flush();
       grouped.push(row);

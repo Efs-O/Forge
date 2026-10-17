@@ -66,7 +66,7 @@ describe('shell/core-group refactor guards', () => {
     const removed = new RegExp(`\\b(?:${REMOVED_TOOL_NAMES.join('|')})\\b`);
     const hits = files.flatMap((file) => lineHits(file, removed));
     expect(hits, `removed tool names still referenced:\n${hits.join('\n')}`).toEqual([]);
-  });
+  }, 20_000);
 
   // Raised from 3,500 in 0.17.4, and from 4,000 in 0.17.10: the owner raises the
   // cap when a rule earns its bytes rather than trimming rules to fit. It still

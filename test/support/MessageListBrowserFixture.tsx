@@ -36,6 +36,7 @@ function Fixture(): React.ReactElement {
         conversationId="browser-scroll-regression"
         active
         activityView="full"
+        thinkingDisplay="preview"
       />
     </div>
   );

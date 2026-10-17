@@ -93,6 +93,8 @@ export function hostMessageToAction(msg: HostToWebview): Action | undefined {
       return { type: 'REMOTE_STATUS', transports: msg.transports, paired: msg.paired };
     case 'activityView':
       return { type: 'ACTIVITY_VIEW', mode: msg.mode };
+    case 'thinkingDisplay':
+      return { type: 'THINKING_DISPLAY', mode: msg.mode };
     default:
       return undefined;
   }

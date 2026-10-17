@@ -25,7 +25,7 @@ function tool(id: string, fields: Partial<AppMessage> = {}): AppMessage {
 
 /** Tool rounds as attempts with no reasoning before them. */
 function rounds(...tools: AppMessage[][]): ActivityStep['attempts'] {
-  return tools.map((round) => ({ thoughts: [], tools: round }));
+  return tools.map((round) => ({ tools: round }));
 }
 
 function step(overrides: Partial<ActivityStep> = {}): ActivityStep {
@@ -58,8 +58,8 @@ afterEach(() => {
   container.remove();
 });
 
-function render(activity: ActivityStep, streaming = false): void {
-  act(() => root.render(React.createElement(ActivityRow, { step: activity, streaming })));
+function render(activity: ActivityStep): void {
+  act(() => root.render(React.createElement(ActivityRow, { step: activity })));
 }
 
 function toggle(): void {
@@ -67,7 +67,7 @@ function toggle(): void {
 }
 
 describe('ActivityRow', () => {
-  it('renders one call row and folds its result behind its own Output toggle', () => {
+  it('renders one call row and shows a short result inline when opened', () => {
     render(step());
     expect(container.querySelector('.activity-row-body')).toBeNull();
     expect(container.querySelector('.activity-row-header')?.getAttribute('role')).toBe('button');
@@ -78,35 +78,30 @@ describe('ActivityRow', () => {
 
     toggle();
     expect(container.querySelector('.activity-row-body')).not.toBeNull();
-    const output = container.querySelector<HTMLElement>('.tool-row-output-toggle')!;
-    expect(output.textContent).toBe('▸ Output · 2 chars');
-    expect(output.getAttribute('aria-expanded')).toBe('false');
-    expect(container.querySelector('.tool-row-output-body')).toBeNull();
-
-    act(() => output.click());
-    expect(output.getAttribute('aria-expanded')).toBe('true');
-    expect(container.querySelector('.tool-row-output-body')?.textContent).toContain('ok');
+    expect(container.querySelector('.tool-row-verbatim')?.textContent).toBe('ok');
+    expect(container.querySelector('.tool-row-output-toggle')).toBeNull();
+    expect(container.querySelector('.folded-content-toggle')).toBeNull();
     expect(container.querySelectorAll('.tool-row-name')).toHaveLength(0);
   });
 
   it('keeps a running step closed after it completes unless the reader opens it', () => {
     const pending = step({ attempts: rounds([tool('pending', { toolResult: undefined, toolResultTotal: undefined })]) });
-    render(pending, true);
+    render(pending);
     expect(container.querySelector('.activity-row-body')).toBeNull();
     expect(container.querySelector('.tool-row-status')?.textContent).toBe('○');
     const completed = step({ attempts: rounds([tool('pending', { toolResult: 'done', toolResultTotal: 4 })]) });
-    render(completed, false);
+    render(completed);
     expect(container.querySelector('.activity-row-body')).toBeNull();
     expect(container.querySelector('.tool-row-status')?.textContent).toBe('✓');
   });
 
   it('honours a manual open and close of a running step after completion', () => {
     const pending = step({ attempts: rounds([tool('pending', { toolResult: undefined, toolResultTotal: undefined })]) });
-    render(pending, true);
+    render(pending);
     toggle();
     expect(container.querySelector('.activity-row-body')).not.toBeNull();
     toggle();
-    render(step({ attempts: rounds([tool('pending', { toolResult: 'done', toolResultTotal: 4 })]) }), false);
+    render(step({ attempts: rounds([tool('pending', { toolResult: 'done', toolResultTotal: 4 })]) }));
     expect(container.querySelector('.activity-row-body')).toBeNull();
   });
 
@@ -190,7 +185,7 @@ describe('ActivityRow', () => {
       .toEqual(['run_terminal', 'run_terminal']);
     expect(container.querySelectorAll('.activity-row-attempt')).toHaveLength(2);
     expect(container.querySelector('.activity-row-attempt-error')?.textContent).toBe('Error: first');
-    expect(container.querySelector('.tool-row-output')?.textContent).toContain('Output');
+    expect(container.querySelector('.tool-row-output')?.textContent).toContain('ok');
   });
 
   it('renders one named compact line per parallel call', () => {
@@ -265,7 +260,7 @@ describe('ActivityRow', () => {
     expect(container.querySelector('.tool-row-command code')?.textContent).toBe(command);
   });
 
-  it('renders a multi-edit detail once and keeps its short result hidden until opened', () => {
+  it('shows a short result inline with no nested output toggle', () => {
     render(step({ attempts: rounds([tool('edit', {
       toolName: 'edit_file', toolTarget: 'src/a.ts · 2 edits', toolDetail: 'src/a.ts · 2 edits',
       toolResult: 'Replaced in src/a.ts', toolResultTotal: 21,
@@ -273,9 +268,9 @@ describe('ActivityRow', () => {
     expect(container.textContent?.match(/2 edits/gu)).toHaveLength(1);
     expect(container.textContent).not.toContain('Replaced in src/a.ts');
     toggle();
-    expect(container.textContent).not.toContain('Replaced in src/a.ts');
-    act(() => container.querySelector<HTMLElement>('.tool-row-output-toggle')!.click());
     expect(container.textContent).toContain('Replaced in src/a.ts');
+    expect(container.querySelector('.tool-row-output-label')).toBeNull();
+    expect(container.querySelector('.folded-content-toggle')).toBeNull();
   });
 
   it('keeps a manual expand choice when a retry appends to the step', () => {
@@ -290,15 +285,12 @@ describe('ActivityRow', () => {
     expect(container.querySelector('.activity-row-retry')?.textContent).toBe('1 retry');
   });
 
-  it("renders each retry's reasoning before that attempt's compact line", () => {
+  it('renders retry attempts without nested thinking markup', () => {
     const first = tool('first', { toolIsError: true, toolResultTotal: 3 });
     const retry = tool('retry', { toolCallId: 'retry-id', toolResultTotal: 2 });
-    const thought: AppMessage = { id: 'why', role: 'assistant', content: '', reasoning: 'fix it' };
-    render(step({ attempts: [{ thoughts: [], tools: [first] }, { thoughts: [thought], tools: [retry] }] }));
+    render(step({ attempts: [{ tools: [first] }, { tools: [retry] }] }));
     toggle();
-    const body = container.querySelector('.activity-row-body')!;
-    expect(body.children[0]?.classList.contains('activity-row-attempts')).toBe(true);
-    expect(body.children[1]?.classList.contains('thinking-row')).toBe(true);
-    expect(body.children[2]?.classList.contains('activity-row-attempts')).toBe(true);
+    expect(container.querySelectorAll('.activity-row-attempts')).toHaveLength(2);
+    expect(container.querySelector('.thinking-block')).toBeNull();
   });
 });

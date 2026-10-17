@@ -83,7 +83,6 @@ describe('groupImages', () => {
         step: {
           attempts: [
             {
-              thoughts: [],
               tools: [
                 toolMessage(
                   'image_search',
@@ -104,7 +103,6 @@ describe('groupImages', () => {
         step: {
           attempts: [
             {
-              thoughts: [],
               tools: [
                 toolMessage(
                   'generate_image',

@@ -1,5 +1,5 @@
 import React from 'react';
-import { openedReasoning, readDisclosure, useDisclosure } from '../disclosureState';
+import { readDisclosure, useDisclosure } from '../disclosureState';
 import type { ActivityGroupItem } from '../activityRows';
 import { displayDetail, groupMessages, stepMessages } from '../activityRows';
 import { sameRowList, toolNameAndDetail } from '../messageOps';
@@ -11,7 +11,6 @@ import {
   type VisibleGroupItem,
 } from '../activityGroups';
 import { ActivityRow, stepRevealed } from './ActivityRow';
-import { ThinkingGroup } from './ThinkingGroup';
 import type { PendingToolCall } from '../pendingToolCalls';
 import { groupImages } from '../toolImages';
 import { GroupImageStrip } from './ToolThumbnails';
@@ -20,8 +19,6 @@ export interface ActivityGroupProps {
   items: ActivityGroupItem[];
   /** This group holds the last message and its conversation is streaming. */
   live: boolean;
-  /** The conversation is streaming (passed through to each `ActivityRow`). */
-  streaming: boolean;
   /** Calls whose arguments are still streaming, before a transcript row exists. */
   pendingCalls?: readonly PendingToolCall[];
 }
@@ -64,14 +61,12 @@ function GroupGapButton({
 }
 
 function itemKey(item: ActivityGroupItem): string {
-  if (item.kind === 'step') return stepMessages(item.step)[0]!.id;
-  return item.steps[0]!.id;
+  return stepMessages(item.step)[0]!.id;
 }
 
 function ActivityGroupView({
   items,
   live,
-  streaming,
   pendingCalls = [],
 }: ActivityGroupProps): React.ReactElement {
   const firstId =
@@ -84,9 +79,7 @@ function ActivityGroupView({
   const recovered = recoveredFailures(items);
   const unrecovered = Math.max(0, summary.failed - recovered.size);
   const opened = new Set(
-    items.flatMap((item) =>
-      item.kind === 'step' && stepRevealed(item.step) ? [stepMessages(item.step)[0]!.id] : [],
-    ),
+    items.flatMap((item) => (stepRevealed(item.step) ? [stepMessages(item.step)[0]!.id] : [])),
   );
   const initialItems = visibleGroupItems(items, recovered, new Set(), opened);
   const revealed = new Set(
@@ -98,17 +91,12 @@ function ActivityGroupView({
   );
   const visibleItems = visibleGroupItems(items, recovered, revealed, opened);
   const imageCount = groupImages(items).length;
-  // An opened step, or an opened reasoning bubble that folded into this group
-  // (inside a step or as a reasoning run), keeps the group open on remount.
-  const openedItem = items.some((item) =>
-    item.kind === 'step' ? stepRevealed(item.step) : openedReasoning(item.steps),
-  );
+  // An explicitly opened call keeps the group open on remount.
+  const openedItem = items.some((item) => item.kind === 'step' && stepRevealed(item.step));
   const expanded = choice ?? openedItem;
   const status = unrecovered > 0 ? '✕' : summary.pending ? '○' : '✓';
   const recordedTools = live
-    ? items.flatMap((item) =>
-        item.kind === 'step' ? item.step.attempts.flatMap((attempt) => attempt.tools) : [],
-      )
+    ? items.flatMap((item) => item.step.attempts.flatMap((attempt) => attempt.tools))
     : [];
   const recorded =
     recordedTools
@@ -185,11 +173,6 @@ function ActivityGroupView({
             <span className="activity-group-edits">{summary.fileLabel}</span>
           </>
         )}
-        {!live && summary.hasThinking && (
-          <span className="activity-group-thinking">
-            · ◔{summary.thinking ? ` ${summary.thinking}` : ''} thinking
-          </span>
-        )}
         {imageCount > 0 && (
           <span className="activity-group-images">
             · {imageCount} {imageCount === 1 ? 'image' : 'images'}
@@ -238,11 +221,7 @@ function ActivityGroupView({
                 />
               );
             }
-            return item.kind === 'step' ? (
-              <ActivityRow key={itemKey(item)} step={item.step} streaming={streaming} />
-            ) : (
-              <ThinkingGroup key={itemKey(item)} steps={item.steps} />
-            );
+            return <ActivityRow key={itemKey(item)} step={item.step} />;
           })}
         </div>
       )}
@@ -255,7 +234,6 @@ export const ActivityGroup = React.memo(
   ActivityGroupView,
   (a, b) =>
     a.live === b.live &&
-    a.streaming === b.streaming &&
     a.pendingCalls === b.pendingCalls &&
     sameRowList(groupMessages(a.items), groupMessages(b.items)),
 );

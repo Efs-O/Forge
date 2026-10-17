@@ -1,30 +1,53 @@
 import { useCallback, useState } from 'react';
 
 /**
- * Open/closed choices keyed by message id, for the
- * life of the webview. Never persisted (ACTIVITY_VIEW_PLAN § Expand state).
+ * Open/closed choices keyed by message id for the life of the webview. Never
+ * persisted; user preferences live in VS Code settings, while row choices are
+ * intentionally temporary.
  *
- * Component state alone is not enough: as a turn streams, the same messages
- * move between components - a trailing thinking row folds into the next tool
- * call's step, and a lone step is pulled into a group when a second one
- * arrives. React remounts on each move, so a reasoning bubble the reader had
- * open snapped shut the moment the next tool call landed. Only reader choices
- * are stored; live work stays compact until the reader opens it.
+ * Component state alone is not enough: rows can remount as transcripts update
+ * or the user switches conversations. Display defaults come from the current
+ * setting; this map stores explicit reader choices.
  */
 const choices = new Map<string, boolean>();
 
+export interface FoldChoice {
+  collapsed?: boolean;
+  showAll?: boolean;
+}
+
+const foldChoices = new Map<string, FoldChoice>();
+
 export type DisclosureKind =
-  | 'thinking'
-  | 'thinkingGroup'
   | 'step'
   | 'run'
   | 'group'
   | 'tool'
   | 'toolGroup'
   | 'diff'
-  | 'output'
   | 'command'
   | 'gap';
+
+export function readFoldChoice(id: string): FoldChoice | undefined {
+  return foldChoices.get(id);
+}
+
+export function writeFoldChoice(id: string, choice: FoldChoice): void {
+  foldChoices.set(id, choice);
+}
+
+export function useFoldChoice(id: string): [FoldChoice, (choice: FoldChoice) => void] {
+  const [choice, setChoice] = useState(() => readFoldChoice(id) ?? {});
+  const set = useCallback(
+    (next: FoldChoice) => {
+      const merged = { ...(readFoldChoice(id) ?? {}), ...next };
+      writeFoldChoice(id, merged);
+      setChoice(merged);
+    },
+    [id],
+  );
+  return [choice, set];
+}
 
 function keyOf(kind: DisclosureKind, id: string): string {
   return `${kind}:${id}`;
@@ -33,18 +56,6 @@ function keyOf(kind: DisclosureKind, id: string): string {
 /** The remembered choice for this element, or undefined if it has none. */
 export function readDisclosure(kind: DisclosureKind, id: string): boolean | undefined {
   return choices.get(keyOf(kind, id));
-}
-
-/**
- * True when the reader opened any of these reasoning messages, as a lone
- * bubble (`thinking`) or as the run they first appeared in (`thinkingGroup`,
- * keyed on the run's first id). Every container a reasoning run can fold into -
- * a step, a group, a longer run - asks this, so an opened bubble keeps its
- * container open wherever it lands.
- */
-export function openedReasoning(thoughts: readonly { id: string }[]): boolean {
-  if (thoughts[0] && readDisclosure('thinkingGroup', thoughts[0].id) === true) return true;
-  return thoughts.some((thought) => readDisclosure('thinking', thought.id) === true);
 }
 
 /**
@@ -78,4 +89,5 @@ export function useDisclosure(
 /** Test hook: forget every choice. */
 export function resetDisclosures(): void {
   choices.clear();
+  foldChoices.clear();
 }

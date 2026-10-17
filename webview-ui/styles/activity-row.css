@@ -20,7 +20,9 @@
   font-size: 13px;
 }
 
-.activity-row-header:hover { background: transparent; }
+.activity-row-header:hover {
+  background: transparent;
+}
 .activity-row-header:focus-visible {
   outline: 1px solid var(--forge-accent);
   outline-offset: 2px;
@@ -31,7 +33,10 @@
   flex: 0 0 10px;
   color: var(--vscode-descriptionForeground);
 }
-.activity-row-name { flex: 0 0 auto; white-space: nowrap; }
+.activity-row-name {
+  flex: 0 0 auto;
+  white-space: nowrap;
+}
 .activity-row-detail {
   flex: 1 1 auto;
   min-width: 0;
@@ -81,18 +86,22 @@
   outline-offset: 2px;
 }
 .activity-row-repeat,
-.activity-row-reasoning,
 .activity-row-time,
 .activity-row-parallel {
   flex: 0 0 auto;
   color: var(--vscode-descriptionForeground);
   white-space: nowrap;
 }
-.activity-row-reasoning,
 .activity-row-time,
-.activity-row-parallel { font-size: 11px; }
-.activity-row-time { font-variant-numeric: tabular-nums; }
-.activity-row-parallel { font-family: var(--vscode-font-family); }
+.activity-row-parallel {
+  font-size: 11px;
+}
+.activity-row-time {
+  font-variant-numeric: tabular-nums;
+}
+.activity-row-parallel {
+  font-family: var(--vscode-font-family);
+}
 .activity-row-retry {
   flex: 0 0 auto;
   padding: 0 4px;
@@ -103,7 +112,9 @@
   font-size: 11.5px;
   white-space: nowrap;
 }
-.activity-row.is-error .activity-row-name { color: var(--forge-tool-bad); }
+.activity-row.is-error .activity-row-name {
+  color: var(--forge-tool-bad);
+}
 
 .activity-row-error-line {
   display: block;
@@ -116,8 +127,12 @@
   font-size: 11px;
 }
 
-.activity-row-collapsed-thumbnails { padding-left: 28px; }
-.activity-row-collapsed-thumbnails .tool-row-thumbs { margin: 2px 0; }
+.activity-row-collapsed-thumbnails {
+  padding-left: 28px;
+}
+.activity-row-collapsed-thumbnails .tool-row-thumbs {
+  margin: 2px 0;
+}
 .activity-row-body {
   margin: 2px 0 5px 31px;
   min-width: 0;
@@ -127,10 +142,8 @@
   padding: 0 0 6px;
   border-bottom: 1px solid var(--vscode-panel-border, #333);
 }
-.activity-row-body .tool-row-output { margin: 2px 0 6px; }
-/* An opened step names its output and size; the text waits for its own click. */
-.tool-row-output-toggle {
-  display: block;
+.activity-row-body .tool-row-output {
+  margin: 2px 0 6px;
 }
 .tool-row-content-toggle {
   padding: 0;
@@ -140,7 +153,9 @@
   text-align: left;
   cursor: pointer;
 }
-.tool-row-content-toggle:hover { color: var(--vscode-foreground); }
+.tool-row-content-toggle:hover {
+  color: var(--vscode-foreground);
+}
 .tool-row-command-toggle {
   display: flex;
   align-items: center;
@@ -160,7 +175,7 @@
   text-overflow: ellipsis;
   white-space: nowrap;
 }
-/* Opened commands and folded outputs scroll instead of pushing the chat down. */
+/* An opened command scrolls instead of pushing the chat down. */
 .tool-row-scroll-body {
   max-height: 20em;
   overflow-y: auto;
@@ -179,7 +194,10 @@
   font-family: var(--vscode-editor-font-family, 'Cascadia Code', monospace);
   font-size: 11px;
 }
-.activity-row-attempt-name { flex: 0 0 auto; color: var(--vscode-foreground); }
+.activity-row-attempt-name {
+  flex: 0 0 auto;
+  color: var(--vscode-foreground);
+}
 .activity-row-attempt-target,
 .activity-row-attempt-error {
   min-width: 0;
@@ -187,14 +205,20 @@
   text-overflow: ellipsis;
   white-space: nowrap;
 }
-.activity-row-attempt-target { flex: 1 1 auto; }
-.activity-row-attempt-error { color: var(--forge-tool-bad); }
+.activity-row-attempt-target {
+  flex: 1 1 auto;
+}
+.activity-row-attempt-error {
+  color: var(--forge-tool-bad);
+}
 .activity-row-attempt-time {
   flex: 0 0 auto;
   color: var(--vscode-descriptionForeground);
   font-variant-numeric: tabular-nums;
 }
-.activity-row-attempt.is-error .activity-row-attempt-name { color: var(--forge-tool-bad); }
+.activity-row-attempt.is-error .activity-row-attempt-name {
+  color: var(--forge-tool-bad);
+}
 
 .activity-pending-progress {
   flex: 0 0 auto;
@@ -204,13 +228,23 @@
 }
 /* A call still being written: dim, with a slow pulse on the ring so a long
    write reads as work in progress. */
-.activity-pending .tool-row-status { animation: forge-pending-pulse 1.6s ease-in-out infinite; }
-@keyframes forge-pending-pulse { 50% { opacity: 0.35; } }
+.activity-pending .tool-row-status {
+  animation: forge-pending-pulse 1.6s ease-in-out infinite;
+}
+@keyframes forge-pending-pulse {
+  50% {
+    opacity: 0.35;
+  }
+}
 @media (prefers-reduced-motion: reduce) {
-  .activity-pending .tool-row-status { animation: none; }
+  .activity-pending .tool-row-status {
+    animation: none;
+  }
 }
 
 @container (max-width: 360px) {
   .activity-row .activity-row-time,
-  .activity-row .activity-row-tag { display: none; }
+  .activity-row .activity-row-tag {
+    display: none;
+  }
 }

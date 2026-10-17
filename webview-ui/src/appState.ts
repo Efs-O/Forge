@@ -9,6 +9,7 @@ import type {
 import type { AppMessage, MessageAttachment, PersistedRow } from './messageOps';
 import type { AgentSenderMetadata } from '../../src/agentLinks/chatAgentLinks';
 import type { ActivityViewMode } from './activityRows';
+import type { ThinkingDisplayMode } from '../../src/sidebar/activityViewSetting';
 
 export interface State {
   messagesById: Record<string, AppMessage[]>;
@@ -51,6 +52,7 @@ export interface State {
   /** Whether anything outside this window can drive it. Host-owned. */
   remote: { transports: string[]; paired: boolean };
   activityView: ActivityViewMode;
+  thinkingDisplay: ThinkingDisplayMode;
   /** Tool calls still being written, per conversation (`pendingToolCalls.ts`). */
   pendingToolCallsById: PendingToolCalls;
 }
@@ -74,6 +76,7 @@ export const initialState: State = {
   clankerMode: false,
   remote: { transports: [], paired: false },
   activityView: 'full',
+  thinkingDisplay: 'preview',
 };
 
 /** Derived view helpers — used by App.tsx */
@@ -157,6 +160,7 @@ export type Action =
   | { type: 'CLANKER_CHANGED'; enabled: boolean }
   | { type: 'REMOTE_STATUS'; transports: string[]; paired: boolean }
   | { type: 'ACTIVITY_VIEW'; mode: ActivityViewMode }
+  | { type: 'THINKING_DISPLAY'; mode: ThinkingDisplayMode }
   | {
       type: 'SESSION_SYNC';
       activeId: string;

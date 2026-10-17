@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useRef, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import { toolNameAndDetail } from '../messageOps';
 import Markdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
@@ -11,6 +11,7 @@ import { useDisclosure } from '../disclosureState';
 import { foldConsecutiveLines } from '../toolResultLines';
 import { displayDetail } from '../activityRows';
 import { ToolRowThumbnails } from './ToolThumbnails';
+import { FoldedContent, isShortToolOutput } from './FoldedContent';
 
 export { ToolRowThumbnails } from './ToolThumbnails';
 
@@ -80,54 +81,41 @@ function CommandBlock({
 
 /**
  * Renders a call's result without adding another call row around it.
- * `folded`: the result sits behind its own `Output` toggle, closed until the
- * reader opens it - an opened step (or reasoning that folded into one) shows
- * the call, not every byte it returned.
+ * Short results stay inline; longer results share the tail preview used by
+ * finished thinking blocks.
  */
 export function ToolResultContent({
   message,
   command,
-  folded = false,
 }: {
   message: AppMessage;
   command?: string;
-  folded?: boolean;
 }): React.ReactElement {
-  const [choice, setChoice] = useDisclosure('output', message.id);
   const result = message.toolResult ?? '';
-  const showBody = !folded || choice === true;
-  const body = useMemo(
-    () => (showBody ? normalizeMarkdownForRender(foldConsecutiveLines(result)) : ''),
-    [result, showBody],
-  );
+  const displayResult = foldConsecutiveLines(result);
+  const short = isShortToolOutput(result);
   const asMarkdown = rendersAsMarkdown(message.toolName ?? '');
 
   return (
     <>
       {command && <CommandBlock messageId={message.id} command={command} />}
       {result && (
-        <div className={`tool-row-output${folded ? ' is-folded' : ''}`}>
-          {folded ? (
-            <button
-              className="tool-row-output-label tool-row-output-toggle tool-row-content-toggle"
-              type="button"
-              aria-expanded={showBody}
-              onClick={() => setChoice(!showBody)}
-            >
-              {showBody ? '▾' : '▸'} Output · {formatSize(message.toolResultTotal ?? result.length)}
-            </button>
-          ) : (
-            <div className="tool-row-output-label">Output</div>
-          )}
-          {showBody && (
-            <div className={`tool-row-output-body${folded ? ' tool-row-scroll-body' : ''}`}>
-              {asMarkdown ? (
-                <Markdown remarkPlugins={[remarkGfm]}>{body}</Markdown>
+        <div className={`tool-row-output${message.toolIsError ? ' is-error' : ''}`}>
+          <FoldedContent
+            key={`output:${message.id}`}
+            id={`output:${message.id}`}
+            content={displayResult}
+            foldable={!short}
+            defaultShowAll={short}
+            className="tool-row-output-content"
+            renderContent={(text) =>
+              asMarkdown ? (
+                <Markdown remarkPlugins={[remarkGfm]}>{normalizeMarkdownForRender(text)}</Markdown>
               ) : (
-                <pre className="tool-row-verbatim">{body}</pre>
-              )}
-            </div>
-          )}
+                <pre className="tool-row-verbatim">{text}</pre>
+              )
+            }
+          />
         </div>
       )}
     </>

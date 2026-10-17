@@ -1,7 +1,7 @@
 import type { QuestionGroup } from '../util/questionAnswers';
 import type { ChatAttachmentRef } from '../llm/types';
 import type { AgentLinks, AgentSenderMetadata } from '../agentLinks/chatAgentLinks';
-import type { ActivityViewMode } from './activityViewSetting';
+import type { ActivityViewMode, ThinkingDisplayMode } from './activityViewSetting';
 import type { DisplayPersistMessage } from './sessionTypes';
 export type { ChatAttachmentRef };
 
@@ -253,10 +253,9 @@ interface RemoteStatusMsg {
   paired: boolean;
 }
 
-interface ActivityViewMsg {
-  type: 'activityView';
-  mode: ActivityViewMode;
-}
+type ActivityViewMsg =
+  | { type: 'activityView'; mode: ActivityViewMode }
+  | { type: 'thinkingDisplay'; mode: ThinkingDisplayMode };
 type SetInputMsg = { type: 'setInput'; text: string; conversationId?: string };
 /** @deprecated Replaced by sessionSync on load. */
 interface HistoryRestoreMsg {

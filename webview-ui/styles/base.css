@@ -1,8 +1,8 @@
 /* ── Design tokens ──────────────────────────────────────────────────────── */
 :root {
-  --forge-radius-sm:   6px;
-  --forge-radius-md:   10px;
-  --forge-radius-lg:   14px;
+  --forge-radius-sm: 6px;
+  --forge-radius-md: 10px;
+  --forge-radius-lg: 14px;
   --forge-radius-pill: 999px;
   --forge-space-1: 4px;
   --forge-space-2: 8px;
@@ -10,51 +10,59 @@
   --forge-space-4: 16px;
   /* Forest greens for Forge controls and status. Text and small marks use a
      lighter, desaturated value so they stay legible on a dark editor surface. */
-  --forge-green-deep:  #053b34;
-  --forge-green-dark:  #0b5b4e;
+  --forge-green-deep: #053b34;
+  --forge-green-dark: #0b5b4e;
   --forge-green-hover: #0f6e5e;
-  --forge-green:       #678f75;
-  --forge-accent:      #79a989;
-  --forge-accent-fill:       var(--forge-green-dark);
+  --forge-green: #678f75;
+  --forge-accent: #79a989;
+  --forge-accent-fill: var(--forge-green-dark);
   --forge-accent-fill-hover: var(--forge-green-hover);
-  --forge-accent-fill-fg:    #ecfdf5;
-  --forge-link:        #79a989;
+  --forge-accent-fill-fg: #ecfdf5;
+  --forge-link: #79a989;
   /* The remote chip stays visible for the session, so use a quiet green with
      enough contrast for its small label on dark backgrounds. */
-  --forge-remote:      #678f75;
+  --forge-remote: #678f75;
   --forge-link-active: #a9c5ad;
-  --forge-diff-added:  #79a989;
-  --forge-selection:   var(--forge-green-deep);
+  --forge-diff-added: #79a989;
+  --forge-selection: var(--forge-green-deep);
   --forge-surface-1: var(--vscode-editorWidget-background, #252526);
   --forge-surface-2: var(--vscode-editor-inactiveSelectionBackground, #3a3a3a);
-  --forge-border:    var(--vscode-widget-border, #444);
+  --forge-border: var(--vscode-widget-border, #444);
   /* Clanker's warning hue. Deliberately NOT editorWarning-foreground: that
      token is a squint-bright mustard tuned to be seen once, on a squiggle a
      few characters wide. Clanker arms the whole composer border and stays
      armed for the session, so the same value reads as a defect. This is the
      desaturated end of the same hue - still unmistakably a warning, quiet
      enough to sit in the corner of the eye for an hour. */
-  --forge-clanker:   var(--vscode-charts-orange, #cd9178);
+  --forge-clanker: var(--vscode-charts-orange, #cd9178);
   /* Tool outcome. Green and red carry no meaning on their own here - each glyph
      differs in shape as well as hue (✓ / ✕ / ○) and carries a title, so the row
      still reads without colour. */
-  --forge-tool-ok:   #79a989;
-  --forge-tool-bad:  var(--vscode-errorForeground, #f48771);
+  --forge-tool-ok: #79a989;
+  --forge-tool-bad: var(--vscode-errorForeground, #f48771);
+  --forge-thinking: #b49aff;
 }
 
 /* Light surfaces need darker text and status marks from the same palette. */
 body.vscode-light {
-  --forge-green:       #2f6e4b;
-  --forge-accent:      #2f6e4b;
-  --forge-remote:      #2f6e4b;
-  --forge-link:        #2f6e4b;
+  --forge-green: #2f6e4b;
+  --forge-accent: #2f6e4b;
+  --forge-remote: #2f6e4b;
+  --forge-link: #2f6e4b;
   --forge-link-active: #225c3e;
-  --forge-diff-added:  #2f6e4b;
-  --forge-tool-ok:     #2f6e4b;
-  --forge-selection:   #dceade;
+  --forge-diff-added: #2f6e4b;
+  --forge-tool-ok: #2f6e4b;
+  --forge-selection: #dceade;
+  --forge-thinking: #6842a6;
 }
 
-*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+  margin: 0;
+  padding: 0;
+}
 
 /* ── Global button baseline ──────────────────────────────────────────────── */
 
@@ -69,8 +77,13 @@ button {
   border-radius: var(--forge-radius-sm);
   align-self: auto;
 }
-button:hover    { background: var(--forge-accent-fill-hover); }
-button:disabled { opacity: 0.4; cursor: default; }
+button:hover {
+  background: var(--forge-accent-fill-hover);
+}
+button:disabled {
+  opacity: 0.4;
+  cursor: default;
+}
 
 /* Present for assistive tech, absent for the eye. */
 .visually-hidden {

@@ -1,171 +1,94 @@
 import React from 'react';
-import { useSecondsSince } from '../useSecondsSince';
-import type { AppMessage } from '../reducer';
-import { isReasoningOnly } from '../activityRows';
-import { sameRowList } from '../messageOps';
+import type { ThinkingDisplayMode } from '../../../src/sidebar/activityViewSetting';
 import { formatDuration } from '../../../src/util/formatDuration';
-import { openedReasoning, useDisclosure } from '../disclosureState';
+import { sameRowList } from '../messageOps';
+import { useFoldChoice } from '../disclosureState';
+import { FoldedContent, isLongThinking } from './FoldedContent';
+import type { AppMessage } from '../reducer';
 
-const ChevronDown = (): React.ReactElement => (
-  <svg width="10" height="6" viewBox="0 0 10 6" fill="currentColor" aria-hidden="true">
-    <path d="M0 0l5 6 5-6z" />
-  </svg>
-);
-
-const ChevronRight = (): React.ReactElement => (
-  <svg width="6" height="10" viewBox="0 0 6 10" fill="currentColor" aria-hidden="true">
-    <path d="M0 0l6 5-6 5z" />
-  </svg>
-);
-
-/**
- * True for an assistant message that carries only reasoning. The agent loop opens
- * a fresh assistant message every round (a tool row lands between rounds), so a
- * long turn produces one of these per round — rendered with the full role label
- * and bubble chrome they buried the actual work.
- */
-export { isReasoningOnly };
-
-/**
- * `Thought for 4.2 s`, or plain `Thinking` when there is no measurement.
- *
- * Past tense on purpose: the row is written once the span is sealed, and a
- * present-tense label on a finished span reads as a turn that is still running.
- * A bare chevron gives no reason to open the row and no signal that reasoning
- * was expensive - and on a shared output budget, where thinking and the answer
- * draw on the same pool, that is the number worth seeing. Rows rehydrated from
- * the host carry no timing, hence the fallback.
- */
-function thinkingLabel(ms: number | undefined): string {
-  const elapsed = formatDuration(ms);
-  return elapsed ? `Thought for ${elapsed}` : 'Thinking';
-}
-
-/**
- * The label of one reasoning span. While the span is still open (stamped by its
- * first token, not yet sealed) it counts up, `Thinking… 42 s`, so a long think
- * reads as work in progress instead of a frozen screen; once sealed it is the
- * static `Thought for …`. The span is sealed on TOKEN, tool activity, DONE and
- * ERROR, which is what stops the interval.
- */
-export function ThinkingLabel({
-  startedAt,
-  ms,
+function ThinkingBlock({
+  step,
+  displayMode,
+  streaming,
 }: {
-  startedAt: number | undefined;
-  ms: number | undefined;
+  step: AppMessage;
+  displayMode: ThinkingDisplayMode;
+  streaming: boolean;
 }): React.ReactElement {
-  const live = startedAt !== undefined && ms === undefined;
-  const seconds = useSecondsSince(startedAt, live);
-  if (!live) return <>{thinkingLabel(ms)}</>;
-  return <>{`Thinking… ${seconds} s`}</>;
-}
-
-/** `Step 2 · 1.8 s` inside an expanded group; bare when unmeasured. */
-function stepLabel(base: string, ms: number | undefined): string {
-  const elapsed = formatDuration(ms);
-  return elapsed ? `${base} · ${elapsed}` : base;
-}
-
-/** Total measured reasoning across a run of steps; undefined when none is. */
-function totalReasoningMs(steps: AppMessage[]): number | undefined {
-  const measured = steps.filter((step) => step.reasoningMs !== undefined);
-  if (measured.length === 0) return undefined;
-  return measured.reduce((sum, step) => sum + (step.reasoningMs ?? 0), 0);
-}
-
-export function ThinkingRow({
-  id,
-  label,
-  reasoning,
-}: {
-  /** The reasoning message's id; keys the reader's open/closed choice. */
-  id: string;
-  label: React.ReactNode;
-  reasoning: string;
-}): React.ReactElement {
-  const [choice, setChoice] = useDisclosure('thinking', id);
-  const open = choice ?? false;
+  const reasoning = step.reasoning ?? '';
+  const storageId = `thinking:${step.id}`;
+  const [choice, setChoice] = useFoldChoice(storageId);
+  const live = streaming && step.reasoningStartedAt !== undefined && step.reasoningMs === undefined;
+  const long = isLongThinking(reasoning);
+  const collapsed = choice.collapsed ?? displayMode === 'collapsed';
+  const foldable = displayMode === 'preview' && !live && long;
+  const defaultShowAll = displayMode !== 'preview' || live || !long;
+  const duration = formatDuration(step.reasoningMs);
 
   return (
-    <div className="thinking-row">
-      <button
-        className="thinking-row-toggle"
-        type="button"
-        onClick={() => setChoice(!open)}
-        aria-expanded={open}
-      >
-        <span className="thinking-row-chevron">{open ? <ChevronDown /> : <ChevronRight />}</span>
-        <span className="thinking-row-label">{label}</span>
-      </button>
-      {open && (
-        <pre className="thinking-content" data-inner-scroll="false">
-          {reasoning}
-        </pre>
+    <section className="thinking-block" aria-label="Model thinking" data-thinking-id={step.id}>
+      <header className="thinking-block-header">
+        <span className="thinking-block-title">
+          {live ? (
+            <>
+              Thinking…{' '}
+              <span className="thinking-pulse" aria-hidden="true">
+                ●
+              </span>
+            </>
+          ) : (
+            <>◔ Thinking{duration ? ` · ${duration}` : ''}</>
+          )}
+        </span>
+        <button
+          type="button"
+          className="thinking-block-collapse"
+          aria-expanded={!collapsed}
+          onClick={() => setChoice({ collapsed: !collapsed })}
+        >
+          {collapsed ? 'Expand' : 'Collapse'}
+        </button>
+      </header>
+      {!collapsed && (
+        <FoldedContent
+          id={`${storageId}:body`}
+          content={reasoning}
+          foldable={foldable}
+          defaultShowAll={defaultShowAll}
+          className="thinking-block-content"
+        />
       )}
-    </div>
+    </section>
   );
 }
 
 interface Props {
-  /** A run of adjacent reasoning-only assistant messages, in order. */
+  /** Adjacent reasoning messages, each rendered as its own top-level block. */
   steps: AppMessage[];
+  displayMode: ThinkingDisplayMode;
+  streaming: boolean;
 }
 
-function ThinkingGroupView({ steps }: Props): React.ReactElement | null {
-  const [choice, setChoice] = useDisclosure('thinkingGroup', steps[0]?.id ?? '');
-  // A lone bubble the reader opened keeps the run open once a second step joins.
-  const expanded = choice ?? openedReasoning(steps);
-
+function ThinkingGroupView({ steps, displayMode, streaming }: Props): React.ReactElement | null {
   if (steps.length === 0) return null;
-
-  if (steps.length === 1) {
-    return (
-      <ThinkingRow
-        id={steps[0]!.id}
-        label={
-          <ThinkingLabel startedAt={steps[0]!.reasoningStartedAt} ms={steps[0]!.reasoningMs} />
-        }
-        reasoning={steps[0]!.reasoning ?? ''}
-      />
-    );
-  }
-
   return (
-    <div className="thinking-group">
-      <button
-        className="thinking-row-toggle"
-        type="button"
-        onClick={() => setChoice(!expanded)}
-        aria-expanded={expanded}
-      >
-        <span className="thinking-row-chevron">
-          {expanded ? <ChevronDown /> : <ChevronRight />}
-        </span>
-        <span className="thinking-row-label">
-          {`${thinkingLabel(totalReasoningMs(steps))} (${steps.length} steps)`}
-        </span>
-      </button>
-      {expanded && (
-        <div className="thinking-group-body">
-          {steps.map((step, i) => (
-            <ThinkingRow
-              key={step.id}
-              id={step.id}
-              label={stepLabel(`Step ${i + 1}`, step.reasoningMs)}
-              reasoning={step.reasoning ?? ''}
-            />
-          ))}
-        </div>
-      )}
-    </div>
+    <>
+      {steps.map((step) => (
+        <ThinkingBlock key={step.id} step={step} displayMode={displayMode} streaming={streaming} />
+      ))}
+    </>
   );
 }
 
-/**
- * Memoized for the same reason `Message` is: the list is not virtualized, so
- * every group is a live component. `mergeSyncedMessages` rebuilds every row
- * object on each sync, so the array prop is always a new reference and the
- * default shallow compare would never hit - hence the explicit row compare.
- */
-export const ThinkingGroup = React.memo(ThinkingGroupView, (a, b) => sameRowList(a.steps, b.steps));
+export const ThinkingGroup = React.memo(
+  ThinkingGroupView,
+  (a, b) =>
+    a.displayMode === b.displayMode &&
+    a.streaming === b.streaming &&
+    sameRowList(a.steps, b.steps) &&
+    a.steps.every(
+      (step, index) =>
+        step.reasoningMs === b.steps[index]?.reasoningMs &&
+        step.reasoningStartedAt === b.steps[index]?.reasoningStartedAt,
+    ),
+);

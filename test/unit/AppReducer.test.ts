@@ -17,6 +17,7 @@ interface AppModule {
     history: unknown[];
     activeConversationId: string;
     activityView: 'grouped' | 'compact' | 'full';
+    thinkingDisplay: 'preview' | 'open' | 'collapsed';
   };
   reducer: (
     state: AppModule['initialState'],
@@ -43,6 +44,7 @@ interface AppModule {
       | { type: 'BACKEND_STARTING'; message: string; convId?: string }
       | { type: 'BACKEND_DOWN'; message: string; convId?: string }
       | { type: 'ACTIVITY_VIEW'; mode: 'grouped' | 'compact' | 'full' }
+      | { type: 'THINKING_DISPLAY'; mode: 'preview' | 'open' | 'collapsed' }
       | {
           type: 'SESSION_SYNC';
           activeId: string;
@@ -100,6 +102,17 @@ describe('webview App reducer', () => {
       mode: 'grouped',
     });
     expect(next.activityView).toBe('grouped');
+  });
+
+  it('stores the thinking display mode and preserves state when it is unchanged', () => {
+    const opened = appModule.reducer(appModule.initialState, {
+      type: 'THINKING_DISPLAY',
+      mode: 'open',
+    });
+    expect(opened.thinkingDisplay).toBe('open');
+    expect(
+      appModule.reducer(opened, { type: 'THINKING_DISPLAY', mode: 'open' }),
+    ).toBe(opened);
   });
 
   it('tracks command-started generation until completion', () => {

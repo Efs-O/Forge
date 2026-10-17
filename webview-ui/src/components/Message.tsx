@@ -6,24 +6,8 @@ import type { AppMessage } from '../App';
 import { vscode } from '../vscode';
 import { normalizeMarkdownForRender } from '../markdown';
 import { FILE_LINK_SCHEME, linkifyForRender, parseFileLink } from '../linkify';
-// Same formatter the standalone reasoning rows use. Two renderers reached the
-// screen saying "Thinking" - this one, for a turn that reasoned *and* answered,
-// was the unmeasured one, so the rows that cost the most said the least.
-import { ThinkingLabel } from './ThinkingGroup';
 import { MessageAttachments } from './MessageAttachments';
 import { formatMessageTimestamp } from '../messageTimestamp';
-
-const ChevronDown = (): React.ReactElement => (
-  <svg width="10" height="6" viewBox="0 0 10 6" fill="currentColor" aria-hidden="true">
-    <path d="M0 0l5 6 5-6z" />
-  </svg>
-);
-
-const ChevronRight = (): React.ReactElement => (
-  <svg width="6" height="10" viewBox="0 0 6 10" fill="currentColor" aria-hidden="true">
-    <path d="M0 0l6 5-6 5z" />
-  </svg>
-);
 
 const CopyIcon = (): React.ReactElement => (
   <svg width="16" height="16" viewBox="0 0 16 16" fill="none" aria-hidden="true">
@@ -206,15 +190,11 @@ function MessageView({
   role,
   content,
   createdAt,
-  reasoning,
-  reasoningMs,
-  reasoningStartedAt,
   streaming,
   preformatted,
   attachments,
   agentSender,
 }: MessageProps): React.ReactElement {
-  const [thinkingOpen, setThinkingOpen] = useState(false);
   const [copied, setCopied] = useState(false);
   const timestampText = formatMessageTimestamp(createdAt);
   const timestampDateTime =
@@ -254,25 +234,6 @@ function MessageView({
             {agentSender.title}
           </div>
         )}
-        {role === 'assistant' && reasoning && (
-          <div className={`thinking-bubble${thinkingOpen ? ' thinking-bubble-open' : ''}`}>
-            <button
-              className="thinking-toggle"
-              type="button"
-              onClick={() => setThinkingOpen((open) => !open)}
-              aria-expanded={thinkingOpen}
-            >
-              <span>
-                <ThinkingLabel startedAt={reasoningStartedAt} ms={reasoningMs} />
-              </span>
-              <span className="thinking-chevron">
-                {thinkingOpen ? <ChevronDown /> : <ChevronRight />}
-              </span>
-            </button>
-            {thinkingOpen && <pre className="thinking-content">{reasoning}</pre>}
-          </div>
-        )}
-
         {role === 'assistant' && content ? (
           <AssistantContent content={content} streaming={streaming} />
         ) : role === 'user' ? (
