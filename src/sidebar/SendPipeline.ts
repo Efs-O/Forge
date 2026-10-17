@@ -229,6 +229,9 @@ export class SendPipeline {
         log.warn(`[SendPipeline] chat attachments were not saved: ${(err as Error).message}`);
       }
     }
+    // Closing or deleting the chat during either await above or the admission
+    // check below invalidates the chain; it must not reach runTurn.
+    if (!deps.requestChains.isCurrent(chain)) return { kind: 'cancelled' };
     let outcome: ForgeRequestOutcome;
     const pendingTellBatches: TellBatch[] = [];
     // Set when "Send now" interrupted the turn: its batches run after release.
@@ -258,6 +261,7 @@ export class SendPipeline {
             deps.post({ type: 'done', finishReason: 'stop', conversationId: conv.id });
             return { kind: 'failed', error: decision.reason };
           }
+          if (!deps.requestChains.isCurrent(chain)) return { kind: 'cancelled' };
         }
         for (;;) {
           let turn: ForgeTurnOutcome;

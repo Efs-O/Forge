@@ -220,6 +220,9 @@ export class ConversationTabs {
     const conv = this.deps.getSidebar().conversations.find((c) => c.id === id);
     const modelName = conv?.active_model;
 
+    // Before the stop, as in delete(): a send still saving attachments or
+    // checking admission has no turn to stop yet.
+    this.deps.requestChains.invalidateConversation(id);
     await this.deps.agentLoop.stopStreamingIfNeeded(id);
     await this.deps.agentLoop.disposeConversation(id);
     await this.deps.checkpoints.disposeConversation(id);

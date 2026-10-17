@@ -486,6 +486,32 @@ describe('SendPipeline.send', () => {
     expect(h.deps.evaluateAfterTurn).not.toHaveBeenCalled();
   });
 
+  it('does not run a send whose chat closed while its attachments were saving', async () => {
+    const h = harness();
+    let saved = (): void => {};
+    h.deps.attachmentStore = {
+      save: () => new Promise((resolve) => (saved = () => resolve([]))),
+    } as unknown as SendPipelineDeps['attachmentStore'];
+    const file = { name: 'notes.txt', mediaType: 'text/plain', data: 'hi' };
+    const sent = h.pipeline.send('look', [file], 'conv-1');
+    await vi.waitFor(() => expect(h.requestChains.isReserved('conv-1')).toBe(true));
+    // What ConversationTabs.close does before it stops the (not yet running) turn.
+    h.requestChains.invalidateConversation('conv-1');
+    saved();
+    expect((await sent).kind).toBe('cancelled');
+    expect(h.runTurn).not.toHaveBeenCalled();
+  });
+
+  it('does not run a send whose chat closed during the admission check', async () => {
+    const h = harness();
+    h.deps.evaluateAtAdmission = async () => {
+      h.requestChains.invalidateConversation('conv-1');
+      return { kind: 'proceed' };
+    };
+    expect((await h.pipeline.send('hello', undefined, 'conv-1')).kind).toBe('cancelled');
+    expect(h.runTurn).not.toHaveBeenCalled();
+  });
+
   it('only writes a session log for a conversation that has messages', async () => {
     const h = harness();
     await h.pipeline.send('hello');
