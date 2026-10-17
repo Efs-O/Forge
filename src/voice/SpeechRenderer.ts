@@ -11,9 +11,9 @@
  * message is already in the chat; speech is a second channel for the gist, not
  * a substitute for reading it.
  *
- * Deliberately deterministic and dependency-free -- no model, no lexicon yet.
- * §14's pronunciation lexicon and §15's raw-phoneme injection layer on top of
- * this later; neither is needed for a reply to be worth listening to.
+ * Deliberately deterministic -- no model. The §14 pronunciation lexicon
+ * (`applyLexicon`) runs as the last step; §15's raw-phoneme injection is not
+ * built.
  *
  * Plan: docs/VOICE_STT_TTS_IMPLEMENTATION_PLAN.md §12, §13.
  */

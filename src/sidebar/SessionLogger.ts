@@ -30,13 +30,6 @@ export interface SessionUsage {
   activeTimeMs?: number;
 }
 
-/**
- * Written once into `session_start`. `~/.forge/sessions` is flat, so a reader
- * has no parent folder to attribute a session to the way one file per project
- * would give it — without the workspace recorded here every Forge session is
- * indistinguishable from every other. `forgeVersion` is for the reader that
- * meets a format change years from now.
- */
 /** One completed compaction, as recorded in the session transcript. */
 export interface CompactionLogEntry {
   /** How many times this conversation has been compacted, including this one. */
@@ -94,6 +87,13 @@ export interface CompactionAttemptLogEntry {
   salvagedFromLength?: boolean;
 }
 
+/**
+ * Written once into `session_start`. `~/.forge/sessions` is flat, so a reader
+ * has no parent folder to attribute a session to the way one file per project
+ * would give it — without the workspace recorded here every Forge session is
+ * indistinguishable from every other. `forgeVersion` is for the reader that
+ * meets a format change years from now.
+ */
 export interface SessionContext {
   workspaceName?: string;
   workspacePath?: string;

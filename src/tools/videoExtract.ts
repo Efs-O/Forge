@@ -21,7 +21,7 @@ export type RunFfmpeg = (
   opts: { timeoutMs: number; signal?: AbortSignal },
 ) => Promise<{ code: number; stdout: string; stderr: string }>;
 
-export const defaultRunFfmpeg: RunFfmpeg = async (bin, argv, opts) => {
+const defaultRunFfmpeg: RunFfmpeg = async (bin, argv, opts) => {
   const result = await spawnAndWait(bin, argv, path.dirname(bin), opts.timeoutMs, {}, opts.signal);
   return { code: result.exitCode ?? -1, stdout: result.stdout, stderr: result.stderr };
 };
@@ -36,7 +36,7 @@ export interface VideoProbe {
 // ── probe ────────────────────────────────────────────────────────────────────
 
 /** ffprobe is a metadata read; a clip that needs longer than this is pathological. */
-export const PROBE_TIMEOUT_MS = 20_000;
+const PROBE_TIMEOUT_MS = 20_000;
 
 interface FfprobeStream {
   codec_type?: string;
@@ -145,7 +145,7 @@ export async function probeVideo(
 // ── frame extraction ─────────────────────────────────────────────────────────
 
 /** A single ffmpeg frame decode. Generous, but bounded: a hung ffmpeg must not hang the round. */
-export const FRAME_TIMEOUT_MS = 30_000;
+const FRAME_TIMEOUT_MS = 30_000;
 
 /** Backstop on the summed base64, mirroring MAX_VIEW_IMAGE_BYTES for a single image. */
 export const MAX_VIDEO_FRAMES_BYTES = 12 * 1024 * 1024;
@@ -207,7 +207,7 @@ export function resolveWindow(probe: VideoProbe, options: VideoOptions): SampleW
   };
 }
 
-export interface ExtractedFrame {
+interface ExtractedFrame {
   jpegBase64: string;
   timeSeconds: number;
 }

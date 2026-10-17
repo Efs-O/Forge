@@ -143,9 +143,6 @@ public static class Win32 {
   [DllImport("user32.dll")] public static extern IntPtr WindowFromPoint(POINT pt);
   [DllImport("user32.dll")] public static extern IntPtr GetAncestor(IntPtr hWnd, uint flags);
   [DllImport("user32.dll")] public static extern short GetAsyncKeyState(int vKey);
-  [DllImport("user32.dll")] public static extern IntPtr OpenInputDesktop(uint dwFlags, bool fInherit, uint dwDesiredAccess);
-  [DllImport("user32.dll")] public static extern bool CloseDesktop(IntPtr hDesktop);
-  [DllImport("user32.dll")] public static extern bool GetUserObjectInformation(IntPtr hObj, int nIndex, IntPtr pvInfo, int nLength, out int pnLengthNeeded);
 
   [DllImport("gdi32.dll")] public static extern IntPtr CreateCompatibleDC(IntPtr hdc);
   [DllImport("gdi32.dll")] public static extern IntPtr CreateCompatibleBitmap(IntPtr hdc, int w, int h);
@@ -205,7 +202,6 @@ public static class Win32 {
 
 # --- Constants Claude required (1c/1d/2/3) ---
 $GA_ROOT = 2
-$DESKTOP_READ_OBJECTS = 1
 $MOUSEEVENTF_HWHEEL = 0x1000
 $VK = @{
   'ctrl' = 0x11; 'alt' = 0x12; 'shift' = 0x10; 'win' = 0x5B; 'enter' = 0x0D; 'tab' = 0x09
@@ -267,23 +263,6 @@ function Focus-Window([IntPtr]$h) {
   } finally { if ($attached) { [void][Forge.Win32]::AttachThreadInput($me, $fgThread, $false) } }
   if (Wait-Foreground $h 500) { return 'ok_attached' }
   return 'refused_focus_lock'
-}
-function Get-InputDesktopName {
-  $desk = [Forge.Win32]::OpenInputDesktop(0, $false, $DESKTOP_READ_OBJECTS)
-  if ($desk -eq [IntPtr]::Zero) { return 'Unknown' }
-  try {
-    $size = 520  # 260 chars * 2 bytes (Unicode)
-    $buf = [System.Runtime.InteropServices.Marshal]::AllocHGlobal($size)
-    # Zero-initialize the buffer (AllocHGlobal does not zero)
-    $zero = New-Object byte[] $size
-    [System.Runtime.InteropServices.Marshal]::Copy($zero, 0, $buf, $size)
-    $needed = 0
-    $ok = [Forge.Win32]::GetUserObjectInformation($desk, 2, $buf, $size, [ref]$needed)
-    if (-not $ok) { [System.Runtime.InteropServices.Marshal]::FreeHGlobal($buf); return 'Unknown' }
-    $name = [System.Runtime.InteropServices.Marshal]::PtrToStringUni($buf)
-    [System.Runtime.InteropServices.Marshal]::FreeHGlobal($buf)
-    return $name
-  } finally { [void][Forge.Win32]::CloseDesktop($desk) }
 }
 function Get-WindowInfo([IntPtr]$h) {
   $rect = New-Object Forge.RECT
@@ -482,12 +461,6 @@ function Get-MonitorCapture([int]$index) {
   $cap.title = "monitor $index ($($m.device))"
   return $cap
 }
-function Capture-VirtualDesktop {
-  $vx = [int][Forge.Win32]::GetSystemMetrics(76); $vy = [int][Forge.Win32]::GetSystemMetrics(77)
-  $vw = [int][Forge.Win32]::GetSystemMetrics(78); $vh = [int][Forge.Win32]::GetSystemMetrics(79)
-  if ($vw -le 0 -or $vh -le 0) { throw 'no display' }
-  return Capture-Region $vx $vy $vw $vh
-}
 function Test-Target($expectedHwnd, $expectedPid, $expectedStartTime, $point) {
   $expectedPtr = [IntPtr]$expectedHwnd
   $fg = [Forge.Win32]::GetForegroundWindow()
@@ -516,12 +489,8 @@ function Test-Target($expectedHwnd, $expectedPid, $expectedStartTime, $point) {
   if ([Forge.Win32]::IsIconic($fg)) {
     return @{ ok = $false; reason = 'target window is minimized: restore it, then call desktop_capture to re-capture' }
   }
-  # Desktop name check disabled: GetUserObjectInformation returns garbled text
-  # on some systems. The primary gate (TS wrapper approval) is sufficient.
-  # $deskName = Get-InputDesktopName
-  # if ($deskName -ne 'Default') {
-  #   return @{ ok = $false; reason = "not on the default desktop ('$deskName' - UAC/lock screen): cannot act" }
-  # }
+  # No input-desktop (UAC/lock screen) check: GetUserObjectInformation returned
+  # garbled names on some systems. The TS wrapper's approval is the gate.
   if ($point) {
     $pt = New-Object Forge.POINT
     $pt.x = [int]$point.x; $pt.y = [int]$point.y

@@ -13,7 +13,7 @@ import { ToolRegistry } from '../tools/ToolRegistry';
 import { ToolFailureTracker } from '../tools/StripTools';
 import type { ToolBudget } from '../tools/ToolBudget';
 import type { DiffDecorations } from './DiffDecorations';
-import { resolveWorkspacePath, type ResolveWorkspacePathOptions } from '../util/WorkspacePaths';
+import { resolveWorkspacePath } from '../util/WorkspacePaths';
 import { capDisplayText } from '../tools/resultCap';
 import { describeDelete } from './deletePreview';
 import { isFailureResult, readPathArg, resultLabel } from './toolResultView';
@@ -35,7 +35,6 @@ function isExistingDirectory(target: string): boolean {
   }
 }
 const WRITE_PERMISSIONS = new Set<ToolPermission>(['write', 'delete']);
-export type ResolveToolPathOptions = ResolveWorkspacePathOptions;
 export const resolveToolPath = resolveWorkspacePath;
 
 export interface RecordedFileDiff {

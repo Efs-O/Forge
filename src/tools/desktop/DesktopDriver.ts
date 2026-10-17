@@ -1,11 +1,9 @@
 /**
  * The contract for the Windows desktop input/capture driver (plan §4.2, §4.5).
  *
- * Phase 0 defines the interface only. The long-lived PowerShell implementation
- * (SendInput + GDI, per-monitor-DPI-aware, physical pixels) lands in Phase 2
- * with the desktop tools that call it (Claude adjustment #2: no body without a
- * caller). A native `SendInput` driver is the documented future swap-in behind
- * this same interface.
+ * The implementation is `PowerShellDesktopDriver.ts`: a long-lived PowerShell
+ * process (SendInput + GDI, per-monitor-DPI-aware, physical pixels). A native
+ * `SendInput` driver is the documented future swap-in behind this interface.
  *
  * Invariants the implementation MUST uphold (the gate tests in Phase 2/3 sign
  * against these):
@@ -14,9 +12,11 @@
  *   reported, not a term in the transform (B6).
  * - The target-window gate (B2): before every input call the driver checks the
  *   foreground window is the approved HWND and the point is inside its rect,
- *   and always refuses any VS Code window, the secure desktop / UAC, and the
- *   taskbar. `press` is never auto-approved for system chords (`win+*`,
- *   `alt+f4`, `ctrl+alt+*`).
+ *   and refuses (`policyRefusalFor`) the UAC prompt by title, the taskbar, VS
+ *   Code forks always, and VS Code itself unless
+ *   `permissions.desktop.allow_vscode` is on (then each input asks).
+ *   `press` is never auto-approved for system chords (`win+*`, `alt+f4`,
+ *   `ctrl+alt+*`).
  * - OS input state (B3): a held key / mouse button is released in the driver's
  *   `finally`; on abort, timeout, or driver death a "release all" is sent so no
  *   key/button is left held on the live desktop.
@@ -222,8 +222,9 @@ export interface DesktopDriver {
   /** Type text (KEYEVENTF_UNICODE). `consequential` is a tool-layer hint. */
   typeText(text: string): Promise<void>;
   /**
-   * Press a chord of key names (e.g. `['ctrl','c']`). The driver refuses
-   * system chords (`win+*`, `alt+f4`, `ctrl+alt+*`) — never auto-approved.
+   * Press a chord of key names (e.g. `['ctrl','c']`). System chords (`win+*`,
+   * `alt+f4`, `ctrl+alt+*`) are never auto-approved; one the user approved at
+   * the tool layer is forwarded like any other chord.
    */
   press(keys: readonly string[]): Promise<void>;
   /** Dispose the driver process. Idempotent; sends "release all" first (B3). */

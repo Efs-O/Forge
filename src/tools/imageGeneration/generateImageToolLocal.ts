@@ -27,9 +27,6 @@ import {
  * 500-line gate while it still owns dispatch, saving and delivery.
  */
 
-/** The async job request shape, re-exported so the tool layer needs no second import. */
-export type SdcppJobRequest = Parameters<typeof runSdcppImageJob>[0];
-
 export interface LocalRenderDeps {
   generateLocal?: (request: SdcppImageRequest) => Promise<SdcppGeneratedImage>;
   generateJob?: (request: Parameters<typeof runSdcppImageJob>[0]) => Promise<SdcppJobResult>;

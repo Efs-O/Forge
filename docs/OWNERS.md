@@ -477,7 +477,8 @@ overlaps with an existing owner, extend the owner instead.
 | Code-point length counting (schema/Telegram char limits) | `src/util/codePoints.ts` |
 | `generate_image` tool + save/deliver       | `src/tools/imageGeneration/generateImageTool.ts` |
 | Cloud `/v1/images/generations` backend     | `src/tools/imageGeneration/cloudImageBackend.ts` |
-| Local `/sdapi/v1/txt2img` backend + VRAM gate | `src/tools/imageGeneration/sdcppImageBackend.ts` |
+| Local `/sdapi/v1/txt2img` backend          | `src/tools/imageGeneration/sdcppImageBackend.ts` |
+| VRAM gate shared by local generation and `upscale_image` | `src/tools/imageGeneration/sdcppVramGate.ts` |
 | `image_generation:` config schema          | `src/config/imageGenerationSchema.ts` |
 | `upscale_image` tool (input cap, VRAM gate, one-shot `sd-cli` pass, `_x4.png` naming/delivery) | `src/tools/imageGeneration/upscaleImageTool.ts` |
 | `image_generation.upscale:` config schema   | `src/config/imageUpscaleSchema.ts` |

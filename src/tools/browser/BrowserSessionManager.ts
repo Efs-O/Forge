@@ -9,12 +9,6 @@ import {
 } from './browserActionGuards';
 import { typeIntoLocator, typeIntoTarget } from './browserTextInput';
 import type { BrowserChannel, BrowserScreenshot } from './browserPrimitives';
-export {
-  DEFAULT_INSPECT_MAX,
-  MAX_INSPECT_ELEMENTS,
-  clampInspectMax,
-  type BrowserElement,
-} from './browserInspect';
 // Re-exported so existing import sites — `renderEngine`, `renderHtmlToImageTool`,
 // `browserTools`, and the `vi.mock` seam the render tests use on THIS module —
 // keep working after the primitives moved to `browserPrimitives.ts`.
@@ -460,8 +454,4 @@ export async function closeBrowserSessionOnShutdown(
 ): Promise<void> {
   if (!singleton) return;
   await singleton.close().catch(onError);
-}
-/** Test seam: replace the singleton with a fake. */
-export function setBrowserSessionManagerForTest(mgr: BrowserSessionManager | null): void {
-  singleton = mgr;
 }

@@ -3,10 +3,6 @@ import * as path from 'path';
 import * as vscode from 'vscode';
 import { isPathInside } from './pathContainment';
 
-// Re-exported so the many callers that reach for containment via this module
-// keep working; the implementation lives in the vscode-free leaf module.
-export { isPathInside };
-
 export interface ResolveWorkspacePathOptions {
   workspaceRoot?: string;
   allowAbsolute?: boolean;

@@ -3,7 +3,7 @@ import * as os from 'os';
 import * as path from 'path';
 import type { ForgeConfig } from '../../config/types';
 import { writeFileAtomic } from '../../util/atomicWrite';
-import type { MultimodalToolResult, RegisteredTool, ToolApprovalMetadata } from '../ToolRegistry';
+import type { RegisteredTool, ToolApprovalMetadata } from '../ToolRegistry';
 import {
   BrowserSessionManager,
   getBrowserSessionManager,
@@ -355,6 +355,3 @@ export function makeBrowserTools(
   const ctx = buildBrowserToolContext(getConfig, mgr);
   return [...makeBrowserSessionTools(ctx), ...makeBrowserActionTools(ctx)];
 }
-
-// Re-exported for the action tools (avoids a circular import of the helpers).
-export type { MultimodalToolResult };
