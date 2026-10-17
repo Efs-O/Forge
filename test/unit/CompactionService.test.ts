@@ -213,7 +213,9 @@ describe('isUsableSummary', () => {
 
 describe('summary prompt anchoring', () => {
   it('always asks for Next, so RESUME_PROMPT cannot point at a missing section', () => {
-    const prompt = buildSummaryPrompt('test local time', undefined, [{ role: 'user', content: 'do the thing' }]);
+    const prompt = buildSummaryPrompt('test local time', undefined, [
+      { role: 'user', content: 'do the thing' },
+    ]);
 
     expect(prompt).toContain('ALWAYS include Next');
     expect(prompt).toContain('nothing pending');
@@ -950,6 +952,24 @@ describe('runCompaction', () => {
     expect(c.compaction?.fromIndex).toBe(4);
   });
 
+  it('records each successful compaction boundary and its auto or manual source', async () => {
+    const c = conv([...base]);
+    const h = harness(c, async () => long('summary'));
+
+    await runCompaction(h.deps, c.id, { auto: true, trigger: 'auto' });
+    const first = c.compaction!;
+    c.messages.push(
+      { role: 'user', content: 'third task' },
+      { role: 'assistant', content: 'still working' },
+    );
+    await runCompaction(h.deps, c.id, { auto: false, trigger: 'sidebar' });
+
+    expect(c.compaction?.dividers).toEqual([
+      { generation: 1, fromIndex: first.fromIndex, source: 'auto' },
+      { generation: 2, fromIndex: c.compaction.fromIndex, source: 'manual' },
+    ]);
+  });
+
   it('after Clear Chat, a new compaction reads only the new conversation', async () => {
     const c = conv([...base]);
     c.compaction = { summary: 'stale secret summary', fromIndex: 20, generation: 1 };
@@ -1179,7 +1199,9 @@ describe('summary prompt continuation fidelity', () => {
   });
 
   it('omits the plan block entirely when there is no plan', () => {
-    expect(buildSummaryPrompt('test local time', undefined, base)).not.toContain('AGENT-MAINTAINED PLAN');
+    expect(buildSummaryPrompt('test local time', undefined, base)).not.toContain(
+      'AGENT-MAINTAINED PLAN',
+    );
   });
 
   it('cuts the source to whole messages and says how many were dropped', () => {

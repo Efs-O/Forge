@@ -4,6 +4,27 @@
   container-type: inline-size;
 }
 
+.compaction-divider {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 10px 0;
+  color: var(--vscode-descriptionForeground);
+  font-size: 10px;
+  line-height: 1.2;
+}
+
+.compaction-divider::before,
+.compaction-divider::after {
+  content: '';
+  flex: 1;
+  border-top: 1px solid var(--vscode-widget-border, currentColor);
+}
+
+.compaction-divider span {
+  white-space: nowrap;
+}
+
 .msg-wrapper {
   display: flex;
   flex-direction: column;

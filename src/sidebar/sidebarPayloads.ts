@@ -16,7 +16,7 @@ import { isManagedExternalModel } from '../backend/ExternalModelServers';
 import type { ConversationRuntime, SidebarRuntime } from './sessionTypes';
 import {
   historyMetasFromSession,
-  slimMessagesById,
+  displayTranscriptRowsById,
   tabMetasFromSession,
 } from './sessionProjections';
 import { describeModelPickerModel } from './ModelPickerGroups';
@@ -123,7 +123,7 @@ export function buildSessionSyncMessage(
         ...(active_model ? { active_model } : {}),
       })),
     waitingIds: [...waitingIds].filter(Boolean),
-    messagesById: slimMessagesById(sidebar, wanted),
+    messagesById: displayTranscriptRowsById(sidebar, wanted),
     ...(attachmentsRoot ? { attachmentsRoot } : {}),
   };
 }

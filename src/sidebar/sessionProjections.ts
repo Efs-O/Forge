@@ -12,13 +12,16 @@ import { capDisplayText } from '../tools/resultCap';
 import { isFailureResult, resultLabel } from './toolResultView';
 import { extractToolDetail } from './toolSummary';
 import { displayTitle } from './conversationTitle';
-import type { SessionHistoryMeta, SessionTabMeta } from './messageBridge';
+import type { CompactionDividerMessage, SessionHistoryMeta, SessionTabMeta } from './messageBridge';
+import type { CompactionDivider, CompactionState } from './compactionTypes';
 import type {
   ConversationDisplayDiff,
   ConversationRuntime,
   DisplayPersistMessage,
   SidebarRuntime,
 } from './sessionTypes';
+
+export type DisplayTranscriptRow = DisplayPersistMessage | CompactionDividerMessage;
 
 function textContent(content: ChatMessage['content']): string | null {
   if (typeof content === 'string') return content;
@@ -44,15 +47,59 @@ export function displayPersistMessages(
   messages: ChatMessage[],
   displayDiffs: ConversationDisplayDiff[] = [],
 ): DisplayPersistMessage[] {
-  const out: DisplayPersistMessage[] = [];
+  return buildDisplayTranscriptRows(messages, displayDiffs, []).filter(
+    (row): row is DisplayPersistMessage => row.role !== 'compaction',
+  );
+}
+
+/** Webview-only transcript projection, including durable compaction boundaries. */
+export function displayTranscriptRows(
+  messages: ChatMessage[],
+  displayDiffs: ConversationDisplayDiff[] = [],
+  compaction?: Pick<CompactionState, 'fromIndex' | 'generation' | 'dividers'>,
+): DisplayTranscriptRow[] {
+  const dividers = compaction?.dividers?.length
+    ? compaction.dividers
+    : compaction
+      ? [{ generation: compaction.generation ?? 1, fromIndex: compaction.fromIndex }]
+      : [];
+  return buildDisplayTranscriptRows(messages, displayDiffs, dividers);
+}
+
+function buildDisplayTranscriptRows(
+  messages: ChatMessage[],
+  displayDiffs: ConversationDisplayDiff[],
+  dividers: CompactionDivider[],
+): DisplayTranscriptRow[] {
+  const out: DisplayTranscriptRow[] = [];
   const diffsByToolCall = new Map<string, ConversationDisplayDiff[]>();
   const toolDetailsByCall = new Map<string, string>();
+  const dividersByIndex = new Map<number, CompactionDivider[]>();
+  for (const divider of dividers) {
+    const index = Math.min(messages.length, Math.max(0, divider.fromIndex));
+    const atIndex = dividersByIndex.get(index);
+    if (atIndex) atIndex.push(divider);
+    else dividersByIndex.set(index, [divider]);
+  }
+  for (const atIndex of dividersByIndex.values()) {
+    atIndex.sort((a, b) => a.generation - b.generation);
+  }
   for (const diff of displayDiffs) {
     const current = diffsByToolCall.get(diff.toolCallId);
     if (current) current.push(diff);
     else diffsByToolCall.set(diff.toolCallId, [diff]);
   }
-  for (const m of messages) {
+  for (let index = 0; index <= messages.length; index++) {
+    for (const divider of dividersByIndex.get(index) ?? []) {
+      out.push({
+        role: 'compaction',
+        content: 'Context compacted',
+        generation: divider.generation,
+        ...(divider.source ? { source: divider.source } : {}),
+      });
+    }
+    if (index === messages.length) break;
+    const m = messages[index]!;
     if (m.internal) continue;
     if (m.role === 'assistant') {
       for (const call of m.tool_calls ?? []) {
@@ -227,14 +274,14 @@ export function historyMetasFromSession(session: SidebarRuntime): SessionHistory
  * pin and tool round, to render one of them. A transcript the webview has not
  * been sent is requested by id when it becomes renderable.
  */
-export function slimMessagesById(
+export function displayTranscriptRowsById(
   session: SidebarRuntime,
   ids: ReadonlySet<string>,
-): Record<string, DisplayPersistMessage[]> {
-  const out: Record<string, DisplayPersistMessage[]> = {};
+): Record<string, DisplayTranscriptRow[]> {
+  const out: Record<string, DisplayTranscriptRow[]> = {};
   for (const c of [...session.conversations, ...session.history]) {
     if (!ids.has(c.id)) continue;
-    out[c.id] = displayPersistMessages(c.messages, c.displayDiffs);
+    out[c.id] = displayTranscriptRows(c.messages, c.displayDiffs, c.compaction);
   }
   return out;
 }

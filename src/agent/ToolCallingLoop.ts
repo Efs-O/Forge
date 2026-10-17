@@ -163,7 +163,10 @@ export async function runToolCallingLoop(
       const withoutMarkers = structured.push(token);
       const withoutHtml = html.push(withoutMarkers);
       const visible = thinking ? thinking.push(withoutHtml) : withoutHtml;
-      if (visible) options.onToken?.(visible, streamedAssistant.createdAt);
+      if (visible) {
+        streamedAssistant.appendContent(visible);
+        options.onToken?.(visible, streamedAssistant.createdAt);
+      }
     };
     const reasoningHandler = (token: string): void => {
       if (options.stripThinkingChannels) return;
@@ -260,7 +263,10 @@ export async function runToolCallingLoop(
     const trailingTool = structured.flush();
     const trailingHtml = html.push(trailingTool) + html.flush();
     const trailing = thinking ? thinking.push(trailingHtml) : trailingHtml;
-    if (trailing) options.onToken?.(trailing, streamedAssistant.createdAt);
+    if (trailing) {
+      streamedAssistant.appendContent(trailing);
+      options.onToken?.(trailing, streamedAssistant.createdAt);
+    }
 
     // Only a ```json block naming a real tool is a call; any other is shown.
     const toolNames = new Set(toolDefinitions.map((d) => d.function.name));

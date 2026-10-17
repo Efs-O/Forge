@@ -383,6 +383,18 @@ export function MessageList({
               pendingInLastGroup && rowIndex === rows.length - 1 ? pendingToolCalls : undefined
             }
           />
+        ) : row.message.role === 'compaction' ? (
+          <div
+            key={rowKey(row)}
+            className="compaction-divider"
+            role="separator"
+            data-generation={row.message.compactionGeneration}
+          >
+            <span>
+              {row.message.content} · generation {row.message.compactionGeneration ?? '?'}
+              {row.message.compactionSource ? ` · ${row.message.compactionSource}` : ''}
+            </span>
+          </div>
         ) : (
           <Message
             key={rowKey(row)}

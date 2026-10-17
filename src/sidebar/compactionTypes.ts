@@ -18,6 +18,15 @@ export interface RecordedCompactionAction {
   toolCallId?: string;
 }
 
+/** Durable sidebar marker for one completed compaction generation. */
+export interface CompactionDivider {
+  generation: number;
+  /** Index of the first message retained verbatim after this compaction. */
+  fromIndex: number;
+  /** Absent only for legacy compactions whose trigger was not persisted. */
+  source?: 'auto' | 'manual';
+}
+
 /**
  * Model-facing replacement context recorded by one compaction generation.
  *
@@ -28,6 +37,8 @@ export interface CompactionState {
   summary: string;
   fromIndex: number;
   generation?: number;
+  /** All transcript boundaries, since this state's summary replaces older ones. */
+  dividers?: CompactionDivider[];
   userMessages?: string[];
   recordedActions?: RecordedCompactionAction[];
   repoState?: string;

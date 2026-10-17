@@ -73,6 +73,7 @@
 - `ask_user` questions and tool approvals now dock above the composer, leaving the transcript visible and scrollable while the agent waits. The composer draft returns after the question is answered or dismissed.
 - **DuckDuckGo is the primary `web_search` provider, with Tavily or Brave as an optional fallback.** DuckDuckGo results are paced, parsed from its HTML endpoint, and labeled with their source; empty or blocked pages are clearly flagged so they cannot be mistaken for proof that nothing exists.
 - **`web_fetch` decodes HTML entities.** Pages read as `Events & webinars` instead of `Events &amp; webinars`, and a page that spells out the closing `UNTRUSTED_CONTENT` tag as entities cannot end the fence around it early.
+- **The sidebar keeps the agent's words across a compaction, and marks where it happened.** Reply text streamed before an automatic mid-turn compaction used to be missing from the chat afterwards while the tool rows stayed, because the text reached the conversation only when the turn ended; it is now stored as it streams. A turn that only thought, with no reply or tool call, also survives a reload now. Each compaction leaves a divider row ("Context compacted · generation N · auto/manual") that is still there after a reload and is never sent to the model.
 
 ## 0.17.42
 

@@ -156,6 +156,26 @@ describe('sessionTypes', () => {
     expect(slimPersistMessages(messages)).toEqual([]);
   });
 
+  it('slimPersistMessages keeps a reasoning-only assistant turn with null content', () => {
+    const messages: ChatMessage[] = [
+      {
+        role: 'assistant',
+        content: null,
+        reasoning: 'The previous attempt established the cause.',
+      },
+    ];
+
+    const persisted = slimPersistMessages(messages);
+    expect(persisted).toEqual([
+      {
+        role: 'assistant',
+        content: null,
+        reasoning: 'The previous attempt established the cause.',
+      },
+    ]);
+    expect(chatMessagesFromSlim(persisted)).toEqual(messages);
+  });
+
   it('displayPersistMessages restores completed tool rows without raw unbounded output', () => {
     const messages: ChatMessage[] = [
       { role: 'user', content: 'hi' },
@@ -452,6 +472,35 @@ describe('sessionTypes', () => {
     });
     // The transcript itself must come back whole — compaction is not a deletion.
     expect(restored.conversations[0]!.messages).toHaveLength(2);
+  });
+
+  it('restores every compaction divider boundary from durable session state', () => {
+    const session = createDefaultSession();
+    const conversation = session.conversations[0]!;
+    conversation.messages = [
+      { role: 'user', content: 'first task' },
+      { role: 'assistant', content: 'first result' },
+      { role: 'user', content: 'second task' },
+      { role: 'assistant', content: 'second result' },
+    ];
+    conversation.compaction = {
+      summary: 'earlier work',
+      fromIndex: 4,
+      generation: 2,
+      dividers: [
+        { generation: 1, fromIndex: 2, source: 'auto' },
+        { generation: 2, fromIndex: 4, source: 'manual' },
+      ],
+    };
+
+    const restored = loadSidebarSession(
+      makeMemento({ [SESSION_KEY_V1]: runtimeToPersisted(session) }),
+    );
+
+    expect(restored.conversations[0]!.compaction?.dividers).toEqual([
+      { generation: 1, fromIndex: 2, source: 'auto' },
+      { generation: 2, fromIndex: 4, source: 'manual' },
+    ]);
   });
 
   it('round-trips structured replacement context without aliasing its arrays', () => {
