@@ -204,9 +204,6 @@ export async function runPromptToMarkdown(
   // Request-time resolution (defaults + base + @profile, F6).
   const selectedModel = resolveRequestModel(config, requested, (m) => log.info(m));
 
-  const target = await resolveRunTarget(ctx, selectedModel, options.backend);
-  ctx.events.onBackendReady?.(target.loadedModel);
-
   const activeFile = vscode.window.activeTextEditor?.document.uri.fsPath;
   const replacement = replacementPrompt(ctx, options);
   let messages: ChatMessage[] = replacement
@@ -224,10 +221,15 @@ export async function runPromptToMarkdown(
         selectedModel.system_prompt,
         selectedModel.system_prompt_mode,
       );
+  // Published before the backend wait, so a Stop during a cold load cancels
+  // the run instead of letting it start once the model is up (U12-01).
   const ctrl = new AbortController();
   ctx.setController(ctrl, conversationId);
   const maxToolRounds = Math.max(0, Math.min(options.maxContactToolRounds ?? 3, 3));
   try {
+    const target = await resolveRunTarget(ctx, selectedModel, options.backend);
+    if (ctrl.signal.aborted) throw new Error('Forge: the run was cancelled before it started.');
+    ctx.events.onBackendReady?.(target.loadedModel);
     for (let toolRound = 0; ; toolRound += 1) {
       const base: ChatCompletionRequest = {
         model: selectedModel.name,

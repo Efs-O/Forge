@@ -112,6 +112,7 @@ describe('runPromptToMarkdown options', () => {
   it('posts cancelled done for a conversation-owned prompt run', async () => {
     const post = vi.fn();
     let active: AbortController | undefined;
+    streamModelChatCompletion.mockClear();
     streamModelChatCompletion.mockImplementation((
       _url: string, _request: ChatCompletionRequest, _model: unknown,
       handlers: { onDone: (reason: string) => void }, signal: AbortSignal,
@@ -119,10 +120,43 @@ describe('runPromptToMarkdown options', () => {
       signal.addEventListener('abort', () => handlers.onDone('cancelled'), { once: true });
     });
     const run = runPromptToMarkdown({ ...ctx(), post, setController: (ctrl) => { active = ctrl; } }, 'summarize', 'conv-1');
-    await vi.waitFor(() => expect(active).toBeDefined());
+    await vi.waitFor(() => expect(streamModelChatCompletion).toHaveBeenCalled());
     active?.abort();
     await run;
     expect(post).toHaveBeenCalledOnce();
+    expect(post).toHaveBeenCalledWith({ type: 'done', conversationId: 'conv-1', finishReason: 'cancelled' });
+  });
+
+  // The controller was published only after the backend was up, so a Stop
+  // during a cold load was lost and the run started anyway (U12-01).
+  it('a Stop during the backend wait cancels the run before it streams', async () => {
+    const post = vi.fn();
+    let active: AbortController | undefined;
+    let loaded!: () => void;
+    const slowPool = {
+      acquire: () =>
+        new Promise((resolve) => {
+          loaded = () =>
+            resolve({
+              isReady: () => true,
+              start: async () => undefined,
+              loadedModel: () => 'm',
+              baseUrl: () => 'http://127.0.0.1:8080',
+            });
+        }),
+    } as unknown as IBackendPool;
+    streamModelChatCompletion.mockClear();
+    const run = runPromptToMarkdown(
+      { ...ctx(), pool: slowPool, post, setController: (ctrl) => { active = ctrl; } },
+      'summarize',
+      'conv-1',
+    );
+    await vi.waitFor(() => expect(loaded).toBeDefined());
+    active?.abort();
+    loaded();
+
+    await expect(run).rejects.toThrow(/cancelled before it started/);
+    expect(streamModelChatCompletion).not.toHaveBeenCalled();
     expect(post).toHaveBeenCalledWith({ type: 'done', conversationId: 'conv-1', finishReason: 'cancelled' });
   });
 

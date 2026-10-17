@@ -60,6 +60,7 @@
 - **`Forge: Restart Backend` with no model selected says the backends stopped (U20-03).** It reported "backend restarted" and a ready status bar; it now matches `/restartBackend`.
 - **The authenticator QR panel closes after a wrong code (U20-04).** An invalid TOTP code left the QR code and the manual secret on screen.
 - **A jobs-scheduler lease that fails to release on shutdown is reported (U20-05)** instead of becoming an unhandled rejection.
+- **Stop during a cold model load cancels a summary or contact run (U12-01).** The run published its cancel handle only after the backend was up, so it started anyway once the model loaded.
 - **A tool row with an unknown call id no longer removes another call's progress row (U20-06).**
 
 ## 0.17.42
