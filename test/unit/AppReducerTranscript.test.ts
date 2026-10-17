@@ -264,6 +264,53 @@ describe('webview App reducer — transcript rows', () => {
     expect(state.messagesById['tab-1']).toEqual([live]);
   });
 
+  it('hydrates history when a prompt reached a chat evicted from the cache', () => {
+    const tab = (id: string, streaming = false) => ({
+      id,
+      title: id,
+      createdAt: 1,
+      updatedAt: 2,
+      messageCount: 2,
+      streaming,
+    });
+    const history = [
+      { role: 'user' as const, content: 'Earlier question' },
+      { role: 'assistant' as const, content: 'Earlier answer' },
+    ];
+    let state = appModule.reducer(appModule.initialState, {
+      type: 'SESSION_SYNC',
+      activeId: 'chat-a',
+      tabs: [tab('chat-a')],
+      history: [],
+      messagesById: { 'chat-a': history },
+    });
+    // Single-view: switching away evicts chat-a's rows.
+    state = appModule.reducer(state, {
+      type: 'SESSION_SYNC',
+      activeId: 'chat-b',
+      tabs: [tab('chat-b')],
+      history: [],
+      messagesById: { 'chat-b': [] },
+    });
+    expect(state.messagesById['chat-a']).toBeUndefined();
+
+    state = appModule.reducer(state, { type: 'USER_SEND', text: 'New question', convId: 'chat-a' });
+    state = appModule.reducer(state, { type: 'GENERATION_STARTED', convId: 'chat-a' });
+    state = appModule.reducer(state, {
+      type: 'SESSION_SYNC',
+      activeId: 'chat-a',
+      tabs: [tab('chat-a', true)],
+      history: [],
+      messagesById: { 'chat-a': [...history, { role: 'user', content: 'New question' }] },
+    });
+
+    expect(state.messagesById['chat-a']!.map((m) => m.content)).toEqual([
+      'Earlier question',
+      'Earlier answer',
+      'New question',
+    ]);
+  });
+
   describe('checkpoint bar visibility', () => {
     it('keeps the host net stats per conversation for the bar', () => {
       const stats = { fileCount: 1, added: 2136, removed: 0, uncountedFiles: 0 };

@@ -13,15 +13,20 @@ export function applySessionSync(
   // because shipping all 52 was costing a second per tab switch. An absent id
   // means "unchanged", never "empty".
   const messagesById: Record<string, AppMessage[]> = { ...state.messagesById };
+  const syncedIds = new Set(state.syncedIds);
   for (const [id, rows] of Object.entries(action.messagesById)) {
     const local = state.messagesById[id] ?? [];
     // Stream tokens and tool events are the newest presentation state. A
     // periodic host checkpoint can be older; hydrate an empty/restored webview,
-    // but keep an established live transcript until DONE.
+    // but keep an established live transcript until DONE. A cache that only
+    // holds live rows - a prompt that reached a chat evicted below - is not
+    // established while the host has more rows: keeping it hid the history.
+    const established = state.syncedIds.has(id) || rows.length <= local.length;
     messagesById[id] =
-      liveConversationIds.has(id) && local.length > 0
+      liveConversationIds.has(id) && local.length > 0 && established
         ? local
         : mergeSyncedMessages(local, rows, action.attachmentsRoot);
+    syncedIds.add(id);
   }
   // Keep the visible active id even during a partial tab-list reconciliation,
   // so an undo the reader can still see files for is never stranded.
@@ -31,6 +36,9 @@ export function applySessionSync(
   // open tabs for the lifetime of the webview.
   for (const id of Object.keys(messagesById)) {
     if (!openIds.has(id)) delete messagesById[id];
+  }
+  for (const id of syncedIds) {
+    if (!(id in messagesById)) syncedIds.delete(id);
   }
   return {
     ...state,
@@ -44,5 +52,6 @@ export function applySessionSync(
     archived: action.archived,
     activeConversationId: action.activeId,
     messagesById,
+    syncedIds,
   };
 }

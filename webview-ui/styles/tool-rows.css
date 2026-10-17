@@ -276,7 +276,8 @@
 }
 
 .thinking-block-title {
-  color: var(--forge-thinking);
+  /* The bar's dark green is too dim for 11px text on a dark sidebar. */
+  color: var(--forge-green);
   font-size: 11px;
   font-weight: 600;
 }

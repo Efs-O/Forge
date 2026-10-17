@@ -1,5 +1,10 @@
 # Forge — Recent Changes
 
+## 0.17.44
+
+- A chat's earlier messages no longer disappear from the sidebar when a prompt reaches it while you are viewing another chat (from Telegram, the agent bus, a queued prompt, or by switching back and sending at once). The sidebar keeps only the chat on screen in memory, so it rebuilt the other chat from the new prompt alone, and the guard that protects text still streaming then refused the full history the host sent. Only the new exchange showed until a reload. Nothing was lost on disk. The guard now protects only chats the sidebar has loaded from the host.
+- Thinking blocks use Forge's dark green instead of mauve. The bar beside the block is the dark green the buttons use; the "Thinking" label uses the lighter Forge green, which stays readable at its small size.
+
 ## 0.17.43
 
 - A Telegram photo album can carry up to 10 images into one prompt, up from 3. Ten is Telegram's own album maximum and the same as the sidebar's per-message attachment limit. The 10 MiB per-image and 25 MiB total limits are unchanged, and `/help` now takes the number from the code instead of repeating it.

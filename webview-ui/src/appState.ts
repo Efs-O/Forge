@@ -13,6 +13,8 @@ import type { ThinkingDisplayMode } from '../../src/sidebar/activityViewSetting'
 
 export interface State {
   messagesById: Record<string, AppMessage[]>;
+  /** Conversations whose cached rows were hydrated from a host sync (`sessionSyncReducer.ts`). */
+  syncedIds: ReadonlySet<string>;
   streamingIds: Set<string>;
   generatingIds: Set<string>;
   models: ModelEntry[];
@@ -59,6 +61,7 @@ export interface State {
 
 export const initialState: State = {
   messagesById: {},
+  syncedIds: new Set(),
   streamingIds: new Set(),
   generatingIds: new Set(),
   pendingToolCallsById: new Map(),
