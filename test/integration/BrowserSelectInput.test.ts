@@ -1,5 +1,10 @@
 import { afterAll, describe, expect, it } from 'vitest';
-import { RICH_PAGE, SELECT_PAGE, createBrowserHarness } from '../support/browserHarness';
+import {
+  RICH_PAGE,
+  SELECT_PAGE,
+  createBrowserHarness,
+  isBrowserUnavailable,
+} from '../support/browserHarness';
 
 /**
  * `browser_type` against a real `<select>`, in headless Chrome.
@@ -31,8 +36,11 @@ describe('browser_type on a <select> (dropdown input)', () => {
       h.opened = true;
     } catch (err) {
       h.skipReason = `browser_open failed (no Chrome on this host?): ${(err as Error).message}`;
-      t.skip(h.skipReason);
-      return;
+      if (isBrowserUnavailable(err)) {
+        t.skip(h.skipReason);
+        return;
+      }
+      throw err;
     }
     expect(openRes).toMatch(/Browser ready/);
   }, 60000);

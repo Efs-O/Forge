@@ -81,6 +81,13 @@ export const SELECT_PAGE =
       '</body></html>',
   );
 
+/** True only for recognized Playwright errors that mean no usable browser is installed. */
+export function isBrowserUnavailable(error: unknown): boolean {
+  return /Executable doesn't exist|please run.*install|channel .*not found|browserType\.launch:.*(?:executable|browser)|(?:chrome|msedge) could not be launched/i.test(
+    error instanceof Error ? error.message : String(error),
+  );
+}
+
 type HandlerCtx = Parameters<RegisteredTool['handler']>[1];
 
 const getConfig = (): ForgeConfig =>
