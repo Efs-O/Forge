@@ -2,6 +2,7 @@ import * as fs from 'fs';
 import * as path from 'path';
 import { randomUUID } from 'crypto';
 import { busPaths } from '../agentBus/agentBus';
+import { writeFileAtomicSync } from '../util/atomicWrite';
 import type { RemoteAuth } from './RemoteAuth';
 import { appendHostNotification } from './remoteOutboxDraft';
 import type { RemoteRequestStore } from './RemoteRequestStore';
@@ -176,21 +177,8 @@ function writeRemoteSessionAnswer(
   const file = remoteSessionAnswerPath(questionId, busRoot);
   fs.mkdirSync(path.dirname(file), { recursive: true });
   if (fs.existsSync(file)) return { fresh: false, text: fs.readFileSync(file, 'utf8') };
-  const tmp = `${file}.${process.pid}.tmp`;
-  try {
-    fs.writeFileSync(tmp, answer, 'utf8');
-    fs.renameSync(tmp, file);
-    return { fresh: true, text: answer };
-  } finally {
-    try {
-      fs.unlinkSync(tmp);
-    } catch (err) {
-      if ((err as NodeJS.ErrnoException).code !== 'ENOENT') {
-        // The answer was already atomically published; cleanup cannot undo it.
-        console.error('Forge could not remove a remote answer temp file', err); // eslint-disable-line no-console -- cleanup after durable publication
-      }
-    }
-  }
+  writeFileAtomicSync(file, answer);
+  return { fresh: true, text: answer };
 }
 
 function isTarget(value: string): value is RemoteSessionTarget {

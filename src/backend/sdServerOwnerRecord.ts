@@ -2,7 +2,7 @@ import { execFile } from 'child_process';
 import * as fs from 'fs/promises';
 import * as path from 'path';
 import { promisify } from 'util';
-import { randomUUID } from 'crypto';
+import { writeFileAtomic } from '../util/atomicWrite';
 import { z } from 'zod';
 
 const execFileAsync = promisify(execFile);
@@ -81,25 +81,10 @@ export async function writeSdServerRecord(
   if (!parsed.success) {
     throw new Error(`Refusing to write invalid sd-server owner record: ${parsed.error.message}`);
   }
-  const temporary = `${recordPath}.${process.pid}.${randomUUID()}.tmp`;
   await fs.mkdir(path.dirname(recordPath), { recursive: true });
   try {
-    await fs.writeFile(temporary, `${JSON.stringify(parsed.data)}\n`, {
-      encoding: 'utf8',
-      flag: 'wx',
-    });
-    await fs.rename(temporary, recordPath);
+    await writeFileAtomic(recordPath, `${JSON.stringify(parsed.data)}\n`);
   } catch (error) {
-    try {
-      await fs.unlink(temporary);
-    } catch (cleanupError) {
-      if (!isErrno(cleanupError, 'ENOENT')) {
-        throw new Error(
-          `Could not write sd-server owner record "${recordPath}" (${errorMessage(error)}); ` +
-            `temporary record cleanup also failed: ${errorMessage(cleanupError)}`,
-        );
-      }
-    }
     throw new Error(
       `Could not atomically write sd-server owner record "${recordPath}": ${errorMessage(error)}`,
     );

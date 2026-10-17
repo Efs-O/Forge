@@ -157,7 +157,7 @@ export function makeApplyLineEditsTool(
         throw new Error(`apply_line_edits: cannot read file — ${(error as Error).message}`);
       }
       const result = applyLineEditsToContent(content, operations);
-      writeFileAtomicSync(filePath, result.content, fileState);
+      writeFileAtomicSync(filePath, result.content, { expected: fileState });
       return JSON.stringify({
         path: suppliedPath,
         operationsApplied: operations.length,

@@ -1,6 +1,7 @@
 import * as fs from 'fs/promises';
 import * as path from 'path';
 import { randomUUID } from 'crypto';
+import { writeFileAtomic } from '../util/atomicWrite';
 import type { AttachmentData } from './messageBridge';
 // Owned by the message shape, not by this store: the transcript, the persistence
 // schema and the webview bridge all name it, and only one of them may define it.
@@ -62,11 +63,9 @@ export class ChatAttachmentStore {
       const bytes = Buffer.from(attachment.data, isText ? 'utf8' : 'base64');
       const filename = `${randomUUID()}${extensionFor(attachment.name, attachment.mediaType)}`;
       const target = path.join(directory, filename);
-      // Written through a temporary: a half-flushed file behind a reference the
+      // Written atomically: a half-flushed file behind a reference the
       // transcript already shows would render as a broken image forever.
-      const temporary = `${target}.${randomUUID()}.tmp`;
-      await fs.writeFile(temporary, bytes, { mode: 0o600 });
-      await fs.rename(temporary, target);
+      await writeFileAtomic(target, bytes, { mode: 0o600 });
       refs.push({
         name: attachment.name,
         mediaType: attachment.mediaType,

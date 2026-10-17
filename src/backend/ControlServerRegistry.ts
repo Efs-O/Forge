@@ -1,5 +1,6 @@
 import * as fs from 'fs';
 import * as path from 'path';
+import { writeFileAtomicSync } from '../util/atomicWrite';
 
 export interface ControlServerRecord {
   url: string;
@@ -24,16 +25,7 @@ export class ControlServerRegistry implements IControlServerRegistry {
   publish(record: ControlServerRecord): void {
     const dir = path.dirname(this.filePath);
     fs.mkdirSync(dir, { recursive: true });
-    const temporary = `${this.filePath}.${process.pid}.${Date.now()}.tmp`;
-    try {
-      fs.writeFileSync(temporary, `${JSON.stringify(record, null, 2)}\n`, {
-        encoding: 'utf8',
-        mode: 0o600,
-      });
-      fs.renameSync(temporary, this.filePath);
-    } finally {
-      fs.rmSync(temporary, { force: true });
-    }
+    writeFileAtomicSync(this.filePath, `${JSON.stringify(record, null, 2)}\n`, { mode: 0o600 });
   }
 
   removeIfOwned(pid: number): void {

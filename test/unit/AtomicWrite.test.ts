@@ -6,6 +6,7 @@ import {
   RENAME_BUDGET_MS,
   renameContendedSync,
   setRenameContentionListener,
+  writeFileAtomic,
   writeFileAtomicSync,
 } from '../../src/util/atomicWrite';
 
@@ -37,9 +38,7 @@ describe('writeFileAtomicSync', () => {
 
     expect(() =>
       writeFileAtomicSync(target, 'agent change', {
-        size: stat.size,
-        mtimeMs: stat.mtimeMs,
-        ctimeMs: stat.ctimeMs,
+        expected: { size: stat.size, mtimeMs: stat.mtimeMs, ctimeMs: stat.ctimeMs },
       }),
     ).toThrow(/changed while Forge was writing/i);
     expect(fs.readFileSync(target, 'utf8')).toBe('user change');
@@ -85,7 +84,8 @@ describe('writeFileAtomicSync', () => {
 
     // A read-only handle makes Windows' FlushFileBuffers fail with EPERM.
     expect(synced.length).toBeGreaterThan(0);
-    expect(opened.get(synced[0])).toBe('w');
+    // `wx`: a link planted at the temp name fails the write instead of redirecting it.
+    expect(opened.get(synced[0])).toBe('wx');
     expect(fs.readFileSync(target, 'utf8')).toBe('durable');
   });
 
@@ -101,6 +101,43 @@ describe('writeFileAtomicSync', () => {
     expect(() => writeFileAtomicSync(target, 'after')).toThrow(/operation not permitted/);
     expect(fs.readFileSync(target, 'utf8')).toBe('before');
     expect(fs.readdirSync(root)).toEqual(['value.txt']);
+  });
+});
+
+describe('writeFileAtomic', () => {
+  it('flushes, retries a contended rename and lands the file', async () => {
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), 'forge-atomic-'));
+    roots.push(root);
+    const target = path.join(root, 'value.json');
+    fs.writeFileSync(target, 'before');
+    const realRename = fs.renameSync;
+    let attempts = 0;
+    vi.spyOn(fs, 'renameSync').mockImplementation((from, to) => {
+      attempts += 1;
+      if (attempts === 1) throw errno('EBUSY', 'rename: resource busy');
+      realRename(from, to);
+    });
+
+    await writeFileAtomic(target, Buffer.from('after'), { mode: 0o600 });
+
+    expect(attempts).toBe(2);
+    expect(fs.readFileSync(target, 'utf8')).toBe('after');
+    expect(fs.readdirSync(root)).toEqual(['value.json']);
+    if (process.platform !== 'win32') expect(fs.statSync(target).mode & 0o777).toBe(0o600);
+  });
+
+  it('surfaces a non-contention failure and leaves no temp file', async () => {
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), 'forge-atomic-'));
+    roots.push(root);
+    const target = path.join(root, 'value.json');
+    fs.writeFileSync(target, 'before');
+    vi.spyOn(fs, 'renameSync').mockImplementation(() => {
+      throw errno('ENOSPC', 'rename: no space left on device');
+    });
+
+    await expect(writeFileAtomic(target, 'after')).rejects.toThrow(/no space left/);
+    expect(fs.readFileSync(target, 'utf8')).toBe('before');
+    expect(fs.readdirSync(root)).toEqual(['value.json']);
   });
 });
 

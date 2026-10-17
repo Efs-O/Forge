@@ -1,6 +1,7 @@
 import * as fs from 'fs/promises';
 import * as path from 'path';
-import { createHmac, randomBytes, randomUUID } from 'crypto';
+import { createHmac, randomBytes } from 'crypto';
+import { writeFileAtomic } from '../util/atomicWrite';
 import { z } from 'zod';
 import type * as vscode from 'vscode';
 import type { RemoteInboundEvent } from './types';
@@ -60,9 +61,7 @@ export class RemoteAuditLog {
 
   private async persist(): Promise<void> {
     await fs.mkdir(path.dirname(this.filePath), { recursive: true });
-    const temporary = `${this.filePath}.${randomUUID()}.tmp`;
-    await fs.writeFile(temporary, JSON.stringify(this.state), { encoding: 'utf8', mode: 0o600 });
-    await fs.rename(temporary, this.filePath);
+    await writeFileAtomic(this.filePath, JSON.stringify(this.state), { mode: 0o600 });
   }
 
   private async hashKey(): Promise<Buffer> {

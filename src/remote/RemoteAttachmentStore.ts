@@ -2,6 +2,7 @@ import * as fs from 'fs/promises';
 import type { Dirent } from 'fs';
 import * as path from 'path';
 import { randomUUID } from 'crypto';
+import { writeFileAtomic } from '../util/atomicWrite';
 import {
   attachmentKind,
   MAX_ATTACHMENT_TOTAL_BYTES,
@@ -36,9 +37,7 @@ export class RemoteAttachmentStore {
       const extension = prepared.kind === 'text' ? '.txt' : extensionFor(prepared.mediaType);
       const filename = `${refs.length + 1}-${randomUUID()}${extension}`;
       const target = path.join(root, filename);
-      const temporary = `${target}.${randomUUID()}.tmp`;
-      await fs.writeFile(temporary, prepared.bytes, { mode: 0o600 });
-      await fs.rename(temporary, target);
+      await writeFileAtomic(target, prepared.bytes, { mode: 0o600 });
       refs.push({
         name: prepared.name,
         mediaType: prepared.mediaType,

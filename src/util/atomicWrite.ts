@@ -1,12 +1,18 @@
+import { randomUUID } from 'crypto';
 import * as fs from 'fs';
 import * as path from 'path';
-
-let sequence = 0;
 
 export interface ExpectedFileState {
   size: number;
   mtimeMs: number;
   ctimeMs: number;
+}
+
+export interface AtomicWriteOptions {
+  /** Refuse the replace if the target no longer matches this stat (edit tools). */
+  expected?: ExpectedFileState;
+  /** Permission bits for the new file, e.g. 0o600 for tokens; POSIX only. */
+  mode?: number;
 }
 
 function fileState(stat: fs.Stats): ExpectedFileState {
@@ -24,6 +30,12 @@ function assertUnchanged(target: string, expected: ExpectedFileState): void {
   }
 }
 
+/** An unguessable sibling, created with `wx`, so a link planted at a
+ *  predictable name cannot redirect the write. */
+function temporaryPathFor(target: string): string {
+  return path.join(path.dirname(target), `.${path.basename(target)}.forge-${randomUUID()}.tmp`);
+}
+
 /**
  * Write `content` to a new file and flush it to disk through the same
  * writable handle. Windows' FlushFileBuffers needs write access: an fsync on a
@@ -31,10 +43,35 @@ function assertUnchanged(target: string, expected: ExpectedFileState): void {
  * write unflushed — after a power loss NTFS kept the renamed file's size but
  * not its data, and an open conversation came back as all NUL bytes.
  */
-function writeAndSync(file: string, content: string | Buffer): void {
-  const handle = fs.openSync(file, 'w');
+function writeAndSync(file: string, content: string | Buffer, mode: number | undefined): void {
+  const handle = fs.openSync(file, 'wx', mode);
   try {
     fs.writeFileSync(handle, content);
+    fs.fsyncSync(handle);
+  } finally {
+    fs.closeSync(handle);
+  }
+}
+
+async function writeAndSyncAsync(
+  file: string,
+  content: string | Buffer,
+  mode: number | undefined,
+): Promise<void> {
+  const handle = await fs.promises.open(file, 'wx', mode);
+  try {
+    await handle.writeFile(content);
+    await handle.sync();
+  } finally {
+    await handle.close();
+  }
+}
+
+/** POSIX: flush the directory entry the rename created. Windows has no equivalent. */
+function syncDirectory(directory: string): void {
+  if (process.platform === 'win32') return;
+  const handle = fs.openSync(directory, 'r');
+  try {
     fs.fsyncSync(handle);
   } finally {
     fs.closeSync(handle);
@@ -77,13 +114,43 @@ function sleepSync(ms: number): void {
 }
 
 /**
+ * The retry policy both rename loops share: the delay before the next attempt,
+ * or undefined when `error` must be surfaced (not contention, or the budget is
+ * spent). A genuine permission problem is never swallowed.
+ */
+function retryDelay(
+  error: unknown,
+  target: string,
+  elapsed: number,
+  attempt: number,
+): number | undefined {
+  if (!CONTENDED.has((error as NodeJS.ErrnoException).code ?? '')) return undefined;
+  if (elapsed >= RENAME_BUDGET_MS) {
+    contentionListener?.(
+      `[atomicWrite] rename onto ${target} still blocked after ${elapsed} ms (${attempt} retries); giving up`,
+    );
+    return undefined;
+  }
+  return Math.min(
+    RENAME_MAX_BACKOFF_MS,
+    RENAME_BASE_BACKOFF_MS * 2 ** attempt,
+    RENAME_BUDGET_MS - elapsed,
+  );
+}
+
+function reportContended(target: string, elapsed: number, attempt: number): void {
+  if (attempt > 0)
+    contentionListener?.(
+      `[atomicWrite] rename onto ${target} was blocked for ${elapsed} ms (${attempt} retries) before it succeeded`,
+    );
+}
+
+/**
  * Rename `temporary` over `target`, retrying the transient Windows
  * EPERM/EBUSY/EACCES a concurrent reader raises while it briefly still has the
  * destination open. The synchronous sleep blocks the extension host only
- * while the OS reports transient rename contention. A genuine
- * permission problem, or the last contended attempt, is surfaced — never
- * swallowed. `rename` is injectable so the retry can be tested without holding
- * a real file open across processes.
+ * while the OS reports transient rename contention. `rename` is injectable so
+ * the retry can be tested without holding a real file open across processes.
  */
 export function renameContendedSync(
   temporary: string,
@@ -92,68 +159,80 @@ export function renameContendedSync(
   now: () => number = Date.now,
   sleep: (ms: number) => void = sleepSync,
 ): void {
-  let lastError: unknown;
   const startedAt = now();
-  let attempt = 0;
-  while (true) {
+  for (let attempt = 0; ; attempt += 1) {
     try {
       rename(temporary, target);
-      if (attempt > 0)
-        contentionListener?.(
-          `[atomicWrite] rename onto ${target} was blocked for ${now() - startedAt} ms (${attempt} retries) before it succeeded`,
-        );
+      reportContended(target, now() - startedAt, attempt);
       return;
     } catch (error) {
-      lastError = error;
-      if (!CONTENDED.has((error as NodeJS.ErrnoException).code ?? '')) throw error;
-      const elapsed = now() - startedAt;
-      if (elapsed >= RENAME_BUDGET_MS) {
-        contentionListener?.(
-          `[atomicWrite] rename onto ${target} still blocked after ${elapsed} ms (${attempt} retries); giving up`,
-        );
-        break;
-      }
-      const delay = Math.min(
-        RENAME_MAX_BACKOFF_MS,
-        RENAME_BASE_BACKOFF_MS * 2 ** attempt,
-        RENAME_BUDGET_MS - elapsed,
-      );
+      const delay = retryDelay(error, target, now() - startedAt, attempt);
+      if (delay === undefined) throw error;
       sleep(delay);
-      attempt += 1;
     }
   }
-  throw lastError;
 }
 
-/** Replace one regular file without exposing a truncate-then-write window. */
+/** {@link renameContendedSync} without blocking the host between attempts.
+ *  Each attempt is still `renameSync`: Node's async rename on Windows raises
+ *  a transient EPERM against a concurrent reader that the sync call does not. */
+async function renameContended(temporary: string, target: string): Promise<void> {
+  const startedAt = Date.now();
+  for (let attempt = 0; ; attempt += 1) {
+    try {
+      fs.renameSync(temporary, target);
+      reportContended(target, Date.now() - startedAt, attempt);
+      return;
+    } catch (error) {
+      const delay = retryDelay(error, target, Date.now() - startedAt, attempt);
+      if (delay === undefined) throw error;
+      await new Promise<void>((resolve) => setTimeout(resolve, delay));
+    }
+  }
+}
+
+/** Removes the temp file after a failed write, keeping the write's own error. */
+function discardTemporary(temporary: string): void {
+  try {
+    fs.rmSync(temporary, { force: true });
+  } catch {
+    // Preserve the original write error; cleanup failure is non-destructive.
+  }
+}
+
+/** Replace one regular file without exposing a truncate-then-write window.
+ *  The one write path for any file that must survive a crash or power loss. */
 export function writeFileAtomicSync(
   target: string,
   content: string | Buffer,
-  expected?: ExpectedFileState,
+  options: AtomicWriteOptions = {},
 ): void {
-  const directory = path.dirname(target);
-  const temporary = path.join(
-    directory,
-    `.${path.basename(target)}.forge-${process.pid}-${sequence++}.tmp`,
-  );
+  const temporary = temporaryPathFor(target);
   try {
-    writeAndSync(temporary, content);
-    if (expected) assertUnchanged(target, expected);
+    writeAndSync(temporary, content, options.mode);
+    if (options.expected) assertUnchanged(target, options.expected);
     renameContendedSync(temporary, target);
-    if (process.platform !== 'win32') {
-      const directoryHandle = fs.openSync(directory, 'r');
-      try {
-        fs.fsyncSync(directoryHandle);
-      } finally {
-        fs.closeSync(directoryHandle);
-      }
-    }
+    syncDirectory(path.dirname(target));
   } catch (error) {
-    try {
-      if (fs.existsSync(temporary)) fs.unlinkSync(temporary);
-    } catch {
-      // Preserve the original write error; cleanup failure is non-destructive.
-    }
+    discardTemporary(temporary);
+    throw error;
+  }
+}
+
+/** {@link writeFileAtomicSync} for async callers; it never blocks the host. */
+export async function writeFileAtomic(
+  target: string,
+  content: string | Buffer,
+  options: AtomicWriteOptions = {},
+): Promise<void> {
+  const temporary = temporaryPathFor(target);
+  try {
+    await writeAndSyncAsync(temporary, content, options.mode);
+    if (options.expected) assertUnchanged(target, options.expected);
+    await renameContended(temporary, target);
+    syncDirectory(path.dirname(target));
+  } catch (error) {
+    discardTemporary(temporary);
     throw error;
   }
 }

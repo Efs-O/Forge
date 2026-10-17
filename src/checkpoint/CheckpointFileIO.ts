@@ -24,17 +24,6 @@ export function formatCheckpointBytes(bytes: number): string {
   return `${value.toFixed(value >= 10 ? 1 : 2)} ${unit}`;
 }
 
-export async function writeCheckpointJsonAtomic(target: string, value: unknown): Promise<void> {
-  const temporary = `${target}.${crypto.randomUUID()}.tmp`;
-  try {
-    await fs.promises.writeFile(temporary, JSON.stringify(value), { encoding: 'utf8', flag: 'wx' });
-    await fs.promises.rename(temporary, target);
-  } catch (err) {
-    await fs.promises.rm(temporary, { force: true });
-    throw err;
-  }
-}
-
 export async function readAndHashCheckpointFile(
   sourcePath: string,
   destinationPath: string | undefined,

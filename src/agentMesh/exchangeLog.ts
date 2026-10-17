@@ -3,15 +3,7 @@ import * as path from 'path';
 import { randomUUID } from 'crypto';
 import { getHostIdentity, type HostId, type HostLivenessDeps } from './hostIdentity';
 import { acquireLock, releaseLock } from './lock';
-
-/** Remove a tmp file, ignoring ENOENT (a compaction rewrite that failed mid-way). */
-function unlinkQuietFile(file: string): void {
-  try {
-    fs.unlinkSync(file);
-  } catch (err) {
-    if ((err as NodeJS.ErrnoException).code !== 'ENOENT') throw err;
-  }
-}
+import { writeFileAtomicSync } from '../util/atomicWrite';
 import { canTransition, deriveLatestState, isTerminal, type ExchangeState } from './deliveryState';
 
 /**
@@ -358,18 +350,10 @@ export function compact(
         return { removedExchanges: 0, removedEvents: 0, timedOut };
       }
 
-      // Rewrite to a tmp file and rename over the log (M1). Readers open/read/
-      // close, so a held handle is not the failure mode; a failed rename leaves
-      // the old log in place and the next compaction retries.
-      const tmp = `${paths.log}.tmp`;
+      // Replace the log atomically (M1); a failed write leaves the old log in
+      // place and the next compaction retries.
       const body = keptEvents.map((e) => JSON.stringify(e)).join('\n');
-      fs.writeFileSync(tmp, body === '' ? '' : `${body}\n`, 'utf8');
-      try {
-        fs.renameSync(tmp, paths.log);
-      } catch (err) {
-        unlinkQuietFile(tmp);
-        throw err;
-      }
+      writeFileAtomicSync(paths.log, body === '' ? '' : `${body}\n`);
       return { removedExchanges, removedEvents, timedOut };
     } finally {
       releaseLock(paths.lock, holder);

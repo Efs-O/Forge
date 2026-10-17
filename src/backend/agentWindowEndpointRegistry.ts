@@ -11,6 +11,7 @@ import {
   writeWindowEndpoint,
   type WindowEndpoint,
 } from '../agentBus/windowEndpoints';
+import { writeFileAtomicSync } from '../util/atomicWrite';
 import { getLogger } from '../util/logger';
 
 const log = getLogger();
@@ -98,11 +99,9 @@ export class AgentWindowEndpointRegistry {
   private publishClientEndpoint(endpoint: WindowEndpoint): void {
     const paths = this.paths();
     ensureBus(paths);
-    const temporary = `${paths.endpoint}.tmp`;
     const { url, token, pid, windowId } = endpoint;
     const text = `${JSON.stringify({ url, token, pid, windowId }, null, 2)}\n`;
-    fs.writeFileSync(temporary, text, { encoding: 'utf8', mode: 0o600 });
-    fs.renameSync(temporary, paths.endpoint);
+    writeFileAtomicSync(paths.endpoint, text, { mode: 0o600 });
   }
 
   private publishWindowEndpoint(url: string): void {

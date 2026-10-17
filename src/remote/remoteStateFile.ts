@@ -1,35 +1,27 @@
 /**
- * Atomic replacement of the shared remote-state document.
+ * Lock and atomic replacement of the shared remote-state document.
  *
- * Temp file plus rename, with one Windows-specific concession: a rename over a
- * file another process has open for reading fails with EPERM there, and since
- * every window watches this file for arriving workspace handoffs, that overlap
- * is now ordinary rather than exotic. The retry is short and bounded — a real
- * permission problem still surfaces, it just takes a few milliseconds longer.
+ * Every window watches this file for arriving workspace handoffs, so a rename
+ * over it while another process reads it (EPERM on Windows) is ordinary; the
+ * shared atomic writer retries that briefly and still surfaces a real
+ * permission problem.
  */
 
 import * as fs from 'fs/promises';
 import * as path from 'path';
-import { randomUUID } from 'crypto';
+import { writeFileAtomic } from '../util/atomicWrite';
 
 const LOCK_WAIT_MS = 25;
 const LOCK_TIMEOUT_MS = 15_000;
 const LOCK_STALE_MS = 60_000;
 
 /**
- * Whether an errno means "someone else is in this file right now", for both
- * the lock-acquisition loop and the atomic rename.
+ * Whether an errno means "someone else holds this lock right now".
  *
  * Windows does not reserve one code for contention. A create-exclusive race on
- * a lock file, and a rename over a file another process has open for reading,
- * both surface as EPERM; EBUSY and EACCES appear too. Treating only EEXIST as
- * contention (which is what the lock loop used to do) turned an ordinary
- * overlap into a raw EPERM thrown out of a store write — while the rename
- * helper a few lines below already retried this exact set. One predicate, so
- * the two cannot drift apart again.
- *
- * `EEXIST` is contention for `open(path, 'wx')` and is also safe to retry for a
- * rename, where it means the target appeared between attempts.
+ * a lock file surfaces as EPERM; EBUSY and EACCES appear too. Treating only
+ * EEXIST as contention (which is what the lock loop used to do) turned an
+ * ordinary overlap into a raw EPERM thrown out of a store write.
  *
  * A genuine permission problem is not hidden: it burns the bounded wait and
  * then reports the real error.
@@ -78,23 +70,5 @@ export async function withRemoteStateLock<T>(
 
 export async function writeRemoteStateFile(filePath: string, contents: string): Promise<void> {
   await fs.mkdir(path.dirname(filePath), { recursive: true });
-  const temporary = `${filePath}.${randomUUID()}.tmp`;
-  try {
-    await fs.writeFile(temporary, contents, { encoding: 'utf8', mode: 0o600 });
-    for (let attempt = 0; ; attempt += 1) {
-      try {
-        await fs.rename(temporary, filePath);
-        return;
-      } catch (err) {
-        const code = (err as NodeJS.ErrnoException).code;
-        if (attempt >= 9 || !isLockContention(code)) throw err;
-        await new Promise((resolve) => setTimeout(resolve, 10 * (attempt + 1)));
-      }
-    }
-  } catch (err) {
-    // A temp file left behind would be indistinguishable from the ones a crash
-    // leaves, and this directory is the extension's own global storage.
-    await fs.unlink(temporary).catch(() => undefined);
-    throw err;
-  }
+  await writeFileAtomic(filePath, contents, { mode: 0o600 });
 }

@@ -1,6 +1,7 @@
 import * as fs from 'fs/promises';
 import * as path from 'path';
-import { createCipheriv, createDecipheriv, randomBytes, randomUUID } from 'crypto';
+import { createCipheriv, createDecipheriv, randomBytes } from 'crypto';
+import { writeFileAtomic } from '../../util/atomicWrite';
 import { BufferJSON, initAuthCreds, proto } from '@whiskeysockets/baileys';
 import type {
   AuthenticationState,
@@ -138,9 +139,7 @@ export class WhatsAppAuthStore {
       ciphertext: ciphertext.toString('base64'),
     };
     await fs.mkdir(path.dirname(this.filePath), { recursive: true });
-    const temporary = `${this.filePath}.${randomUUID()}.tmp`;
-    await fs.writeFile(temporary, JSON.stringify(envelope), { encoding: 'utf8', mode: 0o600 });
-    await fs.rename(temporary, this.filePath);
+    await writeFileAtomic(this.filePath, JSON.stringify(envelope), { mode: 0o600 });
   }
 
   private async encryptionKey(): Promise<Buffer> {

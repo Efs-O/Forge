@@ -185,7 +185,7 @@ export function makeEditFileTool(extraRoots: () => readonly string[] = () => [])
             describeMisses(misses, edits.length),
         );
       }
-      writeFileAtomicSync(filepath, updated, fileState);
+      writeFileAtomicSync(filepath, updated, { expected: fileState });
       const suppliedPath = args['path'] as string;
       const adjusted = shifted.length > 0 ? ` (${shifted.join('; ')})` : '';
       const joined =

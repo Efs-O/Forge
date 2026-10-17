@@ -3,6 +3,7 @@ import * as os from 'os';
 import * as path from 'path';
 import { randomBytes } from 'crypto';
 import { BUS_README, CLIENT_SCRIPT } from './busContent';
+import { writeFileAtomicSync } from '../util/atomicWrite';
 import { getLogger } from '../util/logger';
 
 /**
@@ -165,16 +166,11 @@ function unlinkQuiet(file: string): void {
 /** Replies are ids from any asker, so they are checked before they name a file. */
 export const BUS_ID_PATTERN = /^[A-Za-z0-9][A-Za-z0-9_-]{0,80}$/;
 
-function writeAtomic(file: string, text: string): void {
-  fs.writeFileSync(`${file}.tmp`, text, 'utf8');
-  fs.renameSync(`${file}.tmp`, file);
-}
-
 /** The answer a waiting {@link waitForReply} picks up (the `/agent/reply` route). */
 export function writeReply(paths: BusPaths, id: string, text: string): void {
   if (!BUS_ID_PATTERN.test(id)) throw new Error(`not a bus id: ${id}`);
   fs.mkdirSync(paths.outbox, { recursive: true });
-  writeAtomic(replyFile(paths, id), text);
+  writeFileAtomicSync(replyFile(paths, id), text);
 }
 
 /** The record that a question is still waited on: {@link takeOrphans} leaves
@@ -183,7 +179,7 @@ export function writeQuestion(paths: BusPaths, id: string, subject: string, body
   const text =
     `Subject: ${subject}\n\n${body}\n\n` +
     `(Reply with forge.sh reply ${id}, or write outbox/${id}-reply.md via a .tmp file and a rename.)\n`;
-  writeAtomic(questionFile(paths, id), text);
+  writeFileAtomicSync(questionFile(paths, id), text);
 }
 
 /** Remove the question. A reply that lands after this is an orphan,

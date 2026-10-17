@@ -19,8 +19,8 @@ import {
   formatCheckpointBytes,
   readAndHashCheckpointFile,
   throwIfCheckpointAborted,
-  writeCheckpointJsonAtomic,
 } from './CheckpointFileIO';
+import { writeFileAtomic } from '../util/atomicWrite';
 import { isPathInside } from '../util/pathContainment';
 import {
   checkpointEntryChanged,
@@ -168,15 +168,18 @@ export class DiskCheckpointStore {
         `[Checkpoint] prepared turn=${turnId} files=${inventory.fileCount} bytes=${inventory.totalBytes} durationMs=${Date.now() - startedAt}`,
       );
       const pendingManifestPath = path.join(checkpointDir, 'manifest.pending.json');
-      await writeCheckpointJsonAtomic(pendingManifestPath, {
-        version: CHECKPOINT_MANIFEST_VERSION,
-        status: 'pending',
-        turnId,
-        workspaceRoot: inventory.workspaceRoot,
-        createdAt: Date.now(),
-        coverage,
-        baseline,
-      });
+      await writeFileAtomic(
+        pendingManifestPath,
+        JSON.stringify({
+          version: CHECKPOINT_MANIFEST_VERSION,
+          status: 'pending',
+          turnId,
+          workspaceRoot: inventory.workspaceRoot,
+          createdAt: Date.now(),
+          coverage,
+          baseline,
+        }),
+      );
       const state: PreparedState = {
         checkpointDir,
         pendingManifestPath,
@@ -312,7 +315,7 @@ export class DiskCheckpointStore {
       })),
     };
     const manifestPath = path.join(state.checkpointDir, 'manifest.committed.json');
-    await writeCheckpointJsonAtomic(manifestPath, manifest);
+    await writeFileAtomic(manifestPath, JSON.stringify(manifest));
     await fs.promises.rm(state.pendingManifestPath, { force: true });
     const changedPaths = [...new Set([...changedSet, ...createdPaths])].map((relativePath) =>
       this.resolveWorkspaceTarget(state.workspaceRoot, relativePath),

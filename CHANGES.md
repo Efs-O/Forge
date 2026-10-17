@@ -9,6 +9,7 @@
 - On Windows, stopping or timing out a shell command, or cancelling a CLI agent, now ends the whole process tree. Forge killed the top process first, which left `taskkill /T` no tree to walk, so its children kept running and held their files and folder. The result now waits until the tree is gone (at most 6 seconds). Background jobs started with `&` inside Git Bash are still out of reach, a limit of Git Bash.
 - The first-run wizard can save config.yaml to `<workspace>/.forge` or to Forge's storage folder when that folder does not exist yet. The save took its lock file inside the folder before creating it, so on a fresh setup it failed with ENOENT.
 - config.yaml is now flushed to disk before it replaces the old copy, as every other Forge file has been since 0.17.42. It had a separate writer that 0.17.42 did not reach, so a power loss during a settings change could leave config.yaml empty.
+- Thirteen other files 0.17.42 missed are now flushed the same way. They include the Telegram/remote state, the encrypted WhatsApp login, checkpoint manifests, saved chat and Telegram attachments, the agent-exchange log and the agent bus's question and reply files. Each had its own copy of the save code, and none flushed. They now share Forge's one atomic writer.
 
 ## 0.17.42
 

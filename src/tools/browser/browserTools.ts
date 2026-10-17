@@ -2,6 +2,7 @@ import * as fs from 'fs/promises';
 import * as os from 'os';
 import * as path from 'path';
 import type { ForgeConfig } from '../../config/types';
+import { writeFileAtomic } from '../../util/atomicWrite';
 import type { MultimodalToolResult, RegisteredTool, ToolApprovalMetadata } from '../ToolRegistry';
 import {
   BrowserSessionManager,
@@ -20,7 +21,7 @@ type GetConfig = () => ForgeConfig;
  *  `.forge/` is gitignored in Forge but not in other repos the agent works in. */
 export const SCREENSHOT_DIR = path.join(os.homedir(), '.forge', 'screenshots');
 
-/** Atomic temp→rename so a failed write never leaves a torn PNG (ledger row). */
+/** Written atomically so a failed write never leaves a torn PNG (ledger row). */
 export async function saveScreenshot(
   conversationId: string | undefined,
   png: Buffer,
@@ -29,9 +30,7 @@ export async function saveScreenshot(
   await fs.mkdir(dir, { recursive: true });
   const stamp = `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
   const finalPath = path.join(dir, `${stamp}.png`);
-  const tmpPath = `${finalPath}.tmp`;
-  await fs.writeFile(tmpPath, png);
-  await fs.rename(tmpPath, finalPath);
+  await writeFileAtomic(finalPath, png, { mode: 0o600 });
   return finalPath;
 }
 
