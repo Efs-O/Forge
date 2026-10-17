@@ -40,6 +40,13 @@ export interface RemoteCommandContext {
   currentWorkspaceAlias?: string | undefined;
   /** Display name of the folder this window has open, alias or not. */
   currentWorkspaceName?: string | undefined;
+  /**
+   * Set by handleRemoteCommand for one command: a command calls it once its
+   * side effects are durable, so a later failure (the ack send) finishes the
+   * control event rather than discarding it, and a redelivery is answered as
+   * handled instead of repeating them.
+   */
+  markCommitted?: () => void;
   /** Per-chat notify_user mute, backed by RemoteController's in-memory set. */
   notifyMute?: { get: (chatId: string) => boolean; set: (chatId: string, on: boolean) => void };
   /** Per-chat turn-echo toggle, backed the same way. Separate from notifyMute
@@ -110,12 +117,17 @@ export async function handleRemoteCommand(
   if (admission === 'unknown') {
     return { kind: 'rejected', reason: 'previous command outcome is unknown; resend it' };
   }
+  let committed = false;
+  const markCommitted = (): void => {
+    committed = true;
+  };
   try {
-    const result = await executeRemoteCommand(event, context, dedupKey);
+    const result = await executeRemoteCommand(event, { ...context, markCommitted }, dedupKey);
     await context.store.finishControlEvent(dedupKey);
     return result;
   } catch (err) {
-    await context.store.discardControlEvent(dedupKey);
+    if (committed) await context.store.finishControlEvent(dedupKey);
+    else await context.store.discardControlEvent(dedupKey);
     throw err;
   }
 }
@@ -223,6 +235,8 @@ async function executeRemoteCommand(
       workspaceId: context.workspaceId,
       conversationId: conv.id,
     });
+    // A redelivery after a failed ack must not create a second conversation.
+    context.markCommitted?.();
     await context.channel.send(event.chatId, `Forge: bound to a new chat (${shortId(conv.id)}).`, {
       signal: context.signal,
     });
