@@ -24,18 +24,16 @@ describe('resultCap', () => {
   });
 
   it('should handle multibyte/unicode string near the boundary without corruption', () => {
-    // Create a string with multibyte characters
     const unicodeText = '🚀'.repeat(30); // Each rocket emoji is 2 bytes in UTF-16
     const maxLength = 10;
-    
-    // Get the actual length in characters
-    const originalLength = unicodeText.length;
-    
+
     const result = capResultText(unicodeText, maxLength);
-    
-    // Should truncate at character boundary, not byte boundary
-    expect(result).toContain('[truncated by Forge MCP bridge');
-    expect(result.length).toBeGreaterThan(maxLength); // Because of the added marker text
+
+    const keptPrefix = result.slice(0, maxLength);
+    expect(keptPrefix).toBe('🚀'.repeat(5));
+    expect(keptPrefix.charCodeAt(keptPrefix.length - 2)).toBe(0xd83d);
+    expect(keptPrefix.charCodeAt(keptPrefix.length - 1)).toBe(0xde80);
+    expect(result).toContain('\n\n[truncated by Forge MCP bridge — showing 10 of 60 chars]');
   });
 
   it('should use default max chars constant', () => {
