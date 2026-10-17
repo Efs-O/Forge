@@ -30,4 +30,15 @@ describe('desktop driver release safety', () => {
     expect(emptyGuard).toBeGreaterThanOrEqual(0);
     expect(send).toBeGreaterThan(emptyGuard);
   });
+
+  it('a failed release is reported, never answered ok (U18-04)', () => {
+    const releaseAll = functionBody('Send-ReleaseAll');
+    expect(releaseAll).not.toMatch(/catch \{\s*\}/);
+    expect(releaseAll).toMatch(/catch \{ throw "could not release held keys\/buttons/);
+    // The one-shot and the end-of-script cleanup exit non-zero on failure.
+    expect(driverScript).toMatch(
+      /-ReleaseAll'\) \{\r?\n {2}try \{ Send-ReleaseAll \} catch \{[^\n]*exit 5 \}/,
+    );
+    expect(driverScript).toMatch(/try \{ Send-ReleaseAll \} catch \{\r?\n[^\n]*\r?\n {2}exit 5/);
+  });
 });

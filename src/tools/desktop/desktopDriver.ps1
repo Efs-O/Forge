@@ -370,7 +370,9 @@ function Send-ReleaseAll {
     if (Test-InputDown $vk) { [void]$ups.Add((New-VkInput $vk $true)) }
   }
   if ($ups.Count -eq 0) { return }
-  try { Send-Inputs $ups } catch { }
+  # A failed release must be reported: an ok reply makes the transport skip its
+  # one-shot fallback, and the key or button stays held system-wide.
+  try { Send-Inputs $ups } catch { throw "could not release held keys/buttons: $($_.Exception.Message)" }
 }
 $MAX_EDGE = 1344
 function New-ResizedPng([System.Drawing.Bitmap]$img, [int]$maxEdge) {
@@ -680,7 +682,10 @@ function Invoke-Op($req) {
 # kill if the long-lived driver was unresponsive, so a held button/key is
 # released system-wide even though the owning process is gone. Kept BEFORE the
 # stdin reader is constructed, so one-shot mode never opens the input stream.
-if ($args -contains '-ReleaseAll') { Send-ReleaseAll; exit 0 }
+if ($args -contains '-ReleaseAll') {
+  try { Send-ReleaseAll } catch { [Console]::Error.WriteLine("desktop driver: $($_.Exception.Message)"); exit 5 }
+  exit 0
+}
 
 # --- stdin: strict UTF-8 decoding (plan Phase 2 item 1; report §3.10) ---
 # [Console]::In decodes a REDIRECTED pipe using the console's input code page,
@@ -719,6 +724,9 @@ try {
   $stdinBroken = $true
   [Console]::Error.WriteLine("desktop driver: stdin is not valid UTF-8 ($($_.Exception.Message))")
 }
-Send-ReleaseAll
+try { Send-ReleaseAll } catch {
+  [Console]::Error.WriteLine("desktop driver: $($_.Exception.Message)")
+  exit 5
+}
 if ($stdinBroken) { exit 4 }
 exit 0

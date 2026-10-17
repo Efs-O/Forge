@@ -263,7 +263,8 @@ export class PowerShellTransport implements DesktopTransport {
       const oneShot = this.spawn(this.executable, this.args(['-ReleaseAll']));
       oneShot.on('error', () => resolve());
       oneShot.on('exit', () => resolve());
-      setTimeout(resolve, 2000);
+      // A hung one-shot is killed, not left behind holding its own console.
+      setTimeout(() => (oneShot.kill(), resolve()), 2000);
     });
   }
 
