@@ -1,6 +1,6 @@
 # Forge — Recent Changes
 
-## Unreleased
+## 0.17.47
 
 - Thinking block fold links, diff links and image "more" links are now white in dark themes and follow the VS Code foreground in light themes.
 - The "Thinking" title now uses the same 13px editor font as the "Working" row and stays green.
