@@ -390,6 +390,11 @@ export function InputRow({
           >
             <PaperclipIcon />
           </button>
+          {/* Armed Clanker shares the paperclip's lane: it describes the field
+              you are typing into, so it sits in the field, not under the row. */}
+          {clankerMode && (
+            <span id="clanker-notice">⏵⏵ Clanker — no confirmations · /clanker to stop</span>
+          )}
         </div>
 
         <input
@@ -433,16 +438,12 @@ export function InputRow({
           </span>
         </div>
 
-        {/* One line carries both facts, and only one can apply at a time: armed
-            is the louder of the two and wins the row. Enter's behaviour is
-            stated rather than built into a second button - the queue confirms
-            itself in the transcript, as a QueuedPromptRow. */}
-        <p id="composer-hint" className={clankerMode ? 'clanker-armed' : undefined}>
-          {clankerMode
-            ? '⏵⏵ Clanker — no confirmations · /clanker to stop'
-            : streaming
-              ? 'Enter tells Forge at its next step'
-              : 'Enter to send · Shift+Enter for a newline'}
+        {/* Enter's behaviour is stated rather than built into a second button -
+            the queue confirms itself in the transcript, as a QueuedPromptRow. */}
+        <p id="composer-hint">
+          {streaming
+            ? 'Enter tells Forge at its next step'
+            : 'Enter to send · Shift+Enter for a newline'}
         </p>
       </div>
     </div>

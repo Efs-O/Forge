@@ -1,5 +1,9 @@
 # Forge — Recent Changes
 
+## Unreleased
+
+- The Clanker notice now sits inside the prompt box, next to the paperclip, at 12px. The line under Send always shows the Enter hint.
+
 ## 0.17.47
 
 - Thinking block fold links, diff links and image "more" links are now white in dark themes and follow the VS Code foreground in light themes.

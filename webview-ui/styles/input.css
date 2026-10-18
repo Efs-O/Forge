@@ -191,8 +191,7 @@
   }
 }
 
-/* One line under the actions, carrying what Enter does - or, when Clanker is
-   armed, that it is. Never both: armed is the louder fact and takes the row. */
+/* One line under the actions, carrying what Enter does. */
 #composer-hint {
   margin: 0;
   font-size: 10px;
@@ -202,10 +201,6 @@
   overflow: hidden;
   text-overflow: ellipsis;
   user-select: none;
-}
-
-#composer-hint.clanker-armed {
-  color: var(--forge-clanker);
 }
 
 /* No border. Inside the field's own box a second bordered box reads as a
@@ -312,6 +307,23 @@
    up to full strength there and nowhere else. */
 #prompt.clanker-armed:focus {
   border-color: var(--forge-clanker);
+}
+
+/* Right of the paperclip, in the lane the field's bottom padding reserves, and
+   centred on the paperclip's 24px box. Clicks fall through to the field. */
+#clanker-notice {
+  position: absolute;
+  left: 34px;
+  right: 10px;
+  bottom: 9px;
+  font-size: 12px;
+  line-height: 16px;
+  color: var(--forge-clanker);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  pointer-events: none;
+  user-select: none;
 }
 
 /* ── Slash command menu ──────────────────────────────────────────────────── */
