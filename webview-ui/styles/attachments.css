@@ -204,13 +204,13 @@
   border: 1px solid var(--vscode-panel-border, #444);
   border-radius: 4px;
   background: var(--vscode-editorWidget-background, #252526);
-  color: var(--vscode-descriptionForeground);
+  color: var(--forge-control-fg);
   font-size: 10px;
   cursor: pointer;
 }
 
 .group-image-more:hover {
-  color: var(--vscode-foreground);
+  color: var(--forge-control-fg);
   background: var(--vscode-toolbar-hoverBackground, rgba(255, 255, 255, 0.08));
 }
 

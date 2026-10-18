@@ -1,5 +1,14 @@
 # Forge — Recent Changes
 
+## Unreleased
+
+- Thinking block fold links, diff links and image "more" links are now white in dark themes and follow the VS Code foreground in light themes.
+- The "Thinking" title now uses the same 13px editor font as the "Working" row and stays green.
+- Forge controls, links, status marks and added diff lines now share one green; filled controls use darker shades of it with white text.
+- The agent link button now matches the history and new chat buttons.
+- Chat text now follows VS Code's chat font size and family settings.
+- An empty activity bubble keeps its background when hovered.
+
 ## 0.17.46
 
 - A long thinking block no longer shrinks when it finishes. It used to stream fully open and then fold to its last lines, which made the chat jump. It now streams as its last 4 lines, with "Show all", and keeps that size when it ends.

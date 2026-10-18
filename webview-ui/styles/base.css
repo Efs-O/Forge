@@ -8,22 +8,23 @@
   --forge-space-2: 8px;
   --forge-space-3: 12px;
   --forge-space-4: 16px;
-  /* Forest greens for Forge controls and status. Text and small marks use a
-     lighter, desaturated value so they stay legible on a dark editor surface. */
-  --forge-green-deep: #053b34;
-  --forge-green-dark: #0b5b4e;
-  --forge-green-hover: #0f6e5e;
+  /* One green hue for text, icons and borders; darker shades are only for
+     fills that sit under white text. */
+  --forge-green-deep: #1f2b23;
+  --forge-green-dark: #394f40;
+  --forge-green-hover: #466150;
   --forge-green: #678f75;
-  --forge-accent: #79a989;
+  --forge-accent: var(--forge-green);
   --forge-accent-fill: var(--forge-green-dark);
   --forge-accent-fill-hover: var(--forge-green-hover);
-  --forge-accent-fill-fg: #ecfdf5;
-  --forge-link: #79a989;
+  --forge-accent-fill-fg: #ffffff;
+  --forge-control-fg: #ffffff;
+  --forge-link: var(--forge-green);
   /* The remote chip stays visible for the session, so use a quiet green with
      enough contrast for its small label on dark backgrounds. */
-  --forge-remote: #678f75;
-  --forge-link-active: #a9c5ad;
-  --forge-diff-added: #79a989;
+  --forge-remote: var(--forge-green);
+  --forge-link-active: #95b19e;
+  --forge-diff-added: var(--forge-green);
   --forge-selection: var(--forge-green-deep);
   --forge-surface-1: var(--vscode-editorWidget-background, #252526);
   --forge-surface-2: var(--vscode-editor-inactiveSelectionBackground, #3a3a3a);
@@ -38,8 +39,10 @@
   /* Tool outcome. Green and red carry no meaning on their own here - each glyph
      differs in shape as well as hue (✓ / ✕ / ○) and carries a title, so the row
      still reads without colour. */
-  --forge-tool-ok: #79a989;
+  --forge-tool-ok: var(--forge-green);
   --forge-tool-bad: var(--vscode-errorForeground, #f48771);
+  --forge-text-size: var(--vscode-chat-font-size, var(--vscode-font-size, 13px));
+  --forge-text-font: var(--vscode-chat-font-family, var(--vscode-font-family, sans-serif));
 }
 
 /* Light surfaces need darker text and status marks from the same palette. */
@@ -52,6 +55,11 @@ body.vscode-light {
   --forge-diff-added: #2f6e4b;
   --forge-tool-ok: #2f6e4b;
   --forge-selection: #dceade;
+  --forge-green-dark: #2f6e4b;
+  --forge-green-hover: #225c3e;
+  --forge-accent-fill: #2f6e4b;
+  --forge-accent-fill-hover: #225c3e;
+  --forge-control-fg: var(--vscode-foreground);
 }
 
 *,

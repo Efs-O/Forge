@@ -116,7 +116,7 @@
 .diff-toggle {
   background: transparent;
   border: none;
-  color: var(--forge-link);
+  color: var(--forge-control-fg);
   font-size: 10px;
   font-family: inherit;
   cursor: pointer;

@@ -277,9 +277,9 @@
 }
 
 .thinking-block-title {
-  /* The bar's dark green is too dim for 11px text on a dark sidebar. */
   color: var(--forge-green);
-  font-size: 11px;
+  font-size: 13px;
+  font-family: var(--vscode-editor-font-family, 'Cascadia Code', monospace);
   font-weight: 600;
 }
 
@@ -287,7 +287,7 @@
 .folded-content-toggle {
   padding: 0;
   background: transparent;
-  color: var(--vscode-descriptionForeground);
+  color: var(--forge-control-fg);
   font-size: 10px;
   line-height: 1.4;
 }
@@ -295,7 +295,7 @@
 .thinking-block-collapse:hover,
 .folded-content-toggle:hover {
   background: transparent;
-  color: var(--vscode-foreground);
+  color: var(--forge-control-fg);
   text-decoration: underline;
 }
 

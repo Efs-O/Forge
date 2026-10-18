@@ -69,7 +69,8 @@ button#chat-header-title:hover {
 }
 
 #history-toolbar-btn,
-#tab-new-btn {
+#tab-new-btn,
+#agent-link-toolbar-btn {
   width: 32px;
   height: 32px;
   padding: 0;
@@ -88,7 +89,8 @@ button#chat-header-title:hover {
 }
 
 #history-toolbar-btn:hover:not(:disabled),
-#tab-new-btn:hover:not(:disabled) {
+#tab-new-btn:hover:not(:disabled),
+#agent-link-toolbar-btn:hover:not(:disabled) {
   background: var(--vscode-toolbar-hoverBackground, rgba(90, 90, 90, 0.2));
   color: var(--vscode-foreground);
   border-color: var(--forge-accent);
@@ -101,6 +103,10 @@ button#chat-header-title:hover {
 
 #tab-new-btn {
   border-color: var(--forge-border);
+}
+
+#agent-link-toolbar-btn {
+  font-size: 15px;
 }
 
 #agent-links-strip {
