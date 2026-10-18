@@ -1,6 +1,6 @@
 # Forge — Recent Changes
 
-## Unreleased
+## 0.17.48
 
 - The Clanker notice now sits inside the prompt box, next to the paperclip, at 12px. The line under Send always shows the Enter hint.
 
