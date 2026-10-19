@@ -473,7 +473,9 @@ describe('render_html_to_image preview against real Chrome', () => {
     }
     expect(String(result)).toContain('log: down');
     const moved = Number(/up x=(\d+)/.exec(String(result))?.[1]);
-    expect(moved).toBeGreaterThan(30);
+    // x starts at 10 and moves 2 px a frame while the key is down. Three frames
+    // prove it was held across frames; a loaded macOS runner drew only 8 in 1 s.
+    expect(moved).toBeGreaterThan(14);
   }, 90_000);
 
   it('a held key reaches a game listening on its canvas', async (ctx) => {

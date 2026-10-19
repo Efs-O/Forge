@@ -12,6 +12,7 @@ import {
 } from '../../src/agentBus/claudePeer';
 
 let dir: string;
+let sockets: string[] = [];
 
 beforeEach(async () => {
   dir = await fs.promises.mkdtemp(path.join(os.tmpdir(), 'forge-claude-peer-'));
@@ -19,17 +20,23 @@ beforeEach(async () => {
 
 afterEach(async () => {
   await fs.promises.rm(dir, { recursive: true, force: true });
+  for (const socket of sockets) await fs.promises.rm(socket, { force: true });
+  sockets = [];
 });
 
 function register(pid: number, entry: Record<string, unknown>): void {
   fs.writeFileSync(path.join(dir, `${pid}.json`), JSON.stringify({ pid, ...entry }));
 }
 
+// macOS caps a Unix socket path at 104 bytes, and the temp guard's per-file
+// folder under /var/folders/… is longer than that: listen() failed and the test
+// hung to its timeout. Sockets go straight under /tmp instead.
 function pipePath(): string {
   const id = crypto.randomBytes(8).toString('hex');
-  return process.platform === 'win32'
-    ? `\\\\.\\pipe\\LOCAL\\forge-test-${id}`
-    : path.join(dir, `p-${id}.sock`);
+  if (process.platform === 'win32') return `\\\\.\\pipe\\LOCAL\\forge-test-${id}`;
+  const pipe = path.join('/tmp', `forge-peer-${id}.sock`);
+  sockets.push(pipe);
+  return pipe;
 }
 
 function live(name: string, pipe: string, extra: Partial<ClaudeSession> = {}): ClaudeSession {
