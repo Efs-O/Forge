@@ -79,10 +79,7 @@ describe.skipIf(!TEST_BASH)('shell bash execution', () => {
       }
     };
     const expectExited = (pidFile: string): Promise<void> =>
-      vi.waitFor(
-        () => expect(alive(pidFile)).toBe(false),
-        { interval: 10, timeout: 3_000 },
-      );
+      vi.waitFor(() => expect(alive(pidFile)).toBe(false), { interval: 10, timeout: 3_000 });
     const pidWritten = async (pidFile: string): Promise<void> => {
       const file = path.join(root, pidFile);
       const isWritten = (): boolean => {
@@ -210,6 +207,9 @@ describe('shell tool validation and PowerShell', () => {
         fs.rmSync(root, { recursive: true, force: true });
       }
     },
+    // A cold pwsh start passed 5 s on a loaded ubuntu runner; killed mid-start it
+    // also left its .NET pipes in os.tmpdir() and tripped the temp guard.
+    30_000,
   );
 
   it('validates notify_on_exit and wires a background shell invocation', async () => {
