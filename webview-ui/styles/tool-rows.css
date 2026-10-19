@@ -338,6 +338,11 @@
   margin-top: 2px;
 }
 
+/* Breathing room under the "✓ Thought" header; flush, the two lines ran together. */
+.thinking-block-content {
+  margin-top: 6px;
+}
+
 .thinking-block-content .folded-content-body {
   font-size: 12px;
   line-height: 1.5;
