@@ -133,8 +133,8 @@ scripts/forge-tools-bench/
 scripts/strata-bench/
 
 # Rebuildable browser bundle for the activity view screenshots.
-artifacts/activity-view-mockups/actual-entry.js
-artifacts/activity-view-mockups/actual-entry.css
+# Local design mockups and renders; not part of the repo.
+artifacts/
 
 # Local test scratch directory.
 .test-tmp/
