@@ -408,50 +408,77 @@ export function InputRow({
             onPaste={handlePaste}
             rows={2}
           />
+          {/* Three cells: controls left, the model in the true centre, the
+              action button right. The side cells share the leftover width
+              equally, so the model stays centred whatever sits beside it. */}
           <div id="prompt-lane">
-            <button
-              id="attach-btn"
-              type="button"
-              title="Attach files — or drop them here, or paste a screenshot. Images up to 10 MiB, text and code up to 2 MiB, 10 files / 25 MiB per message."
-              aria-label="Attach files"
-              onClick={() => fileInputRef.current?.click()}
-            >
-              <PaperclipIcon />
-            </button>
-            <RemoteChip transports={remote.transports} paired={remote.paired} />
-            {/* Armed Clanker describes the field you are typing into, so it
-                sits in the field. It is the first thing to ellipsise. */}
-            {clankerMode && (
-              <span id="clanker-notice">⏵⏵ Clanker — no confirmations · /clanker to stop</span>
-            )}
-            {showStop ? (
+            <div className="lane-start">
               <button
-                id="btn-stop"
+                id="attach-btn"
                 type="button"
-                onClick={onCancel}
-                title="Stop (Esc)"
-                aria-label="Stop"
+                title="Attach files — or drop them here, or paste a screenshot. Images up to 10 MiB, text and code up to 2 MiB, 10 files / 25 MiB per message."
+                aria-label="Attach files"
+                onClick={() => fileInputRef.current?.click()}
               >
-                <StopIcon />
+                <PaperclipIcon />
               </button>
-            ) : (
-              // A queued message confirms itself in the transcript, as a
-              // QueuedPromptRow, so the tooltip is the only place to say so.
+              <RemoteChip transports={remote.transports} paired={remote.paired} />
+              {/* Always present so it can be switched on from here, dim when
+                  off. It runs /clanker, so both routes share one code path.
+                  It is the first thing to ellipsise. */}
               <button
-                id="btn-send"
+                id="clanker-toggle"
                 type="button"
-                onClick={submit}
-                disabled={!canSend}
+                className={clankerMode ? 'is-on' : 'is-off'}
+                aria-pressed={clankerMode}
                 title={
-                  streaming
-                    ? 'Send (Enter): Forge reads it at its next step · Esc stops'
-                    : 'Send (Enter) · Shift+Enter for a newline'
+                  clankerMode
+                    ? 'Clanker mode is on: tools run without confirmation prompts. Recursive deletes still confirm. Click to turn it off.'
+                    : 'Turn on Clanker mode: tools run without confirmation prompts. Recursive deletes still confirm.'
                 }
-                aria-label="Send"
+                // Keep the caret in the field.
+                onMouseDown={(e) => e.preventDefault()}
+                onClick={() => onRunSlashCommand('clanker')}
               >
-                <SendIcon />
+                {clankerMode ? 'Clanker mode - No confirmations' : 'Clanker mode'}
               </button>
-            )}
+            </div>
+            <ModelSelector
+              models={models}
+              activeModel={activeModel}
+              onModelChange={onModelChange}
+              disabled={modelPickerDisabled}
+            />
+            <div className="lane-end">
+              {showStop ? (
+                <button
+                  id="btn-stop"
+                  type="button"
+                  onClick={onCancel}
+                  title="Stop (Esc)"
+                  aria-label="Stop"
+                >
+                  <StopIcon />
+                </button>
+              ) : (
+                // A queued message confirms itself in the transcript, as a
+                // QueuedPromptRow, so the tooltip is the only place to say so.
+                <button
+                  id="btn-send"
+                  type="button"
+                  onClick={submit}
+                  disabled={!canSend}
+                  title={
+                    streaming
+                      ? 'Send (Enter): Forge reads it at its next step · Esc stops'
+                      : 'Send (Enter) · Shift+Enter for a newline'
+                  }
+                  aria-label="Send"
+                >
+                  <SendIcon />
+                </button>
+              )}
+            </div>
           </div>
         </div>
 
@@ -463,15 +490,6 @@ export function InputRow({
           style={{ display: 'none' }}
           onChange={handleFileChange}
         />
-
-        <div id="input-actions">
-          <ModelSelector
-            models={models}
-            activeModel={activeModel}
-            onModelChange={onModelChange}
-            disabled={modelPickerDisabled}
-          />
-        </div>
       </div>
     </div>
   );

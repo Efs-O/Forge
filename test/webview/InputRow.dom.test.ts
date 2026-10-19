@@ -48,6 +48,7 @@ function renderInput(
   remote: { transports: string[]; paired: boolean } = { transports: [], paired: false },
   prefillText: string | null = '/',
   onCancel = vi.fn(),
+  clankerMode = false,
 ): typeof onRunSlashCommand {
   act(() => {
     root.render(
@@ -58,7 +59,7 @@ function renderInput(
         backendReady: true,
         prefillText,
         onPrefillConsumed: vi.fn(),
-        clankerMode: false,
+        clankerMode,
         onRunSlashCommand,
         slashCommands: COMMANDS,
         models: [],
@@ -189,5 +190,38 @@ describe('action button', () => {
       prompt().dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
     });
     expect(onCancel).not.toHaveBeenCalled();
+  });
+});
+
+describe('Clanker toggle', () => {
+  const toggle = (): HTMLButtonElement => container.querySelector('#clanker-toggle')!;
+
+  // Off it must still render: it is the only way to switch Clanker on from
+  // the box, short of typing /clanker.
+  it('shows a dim switch while off and turns Clanker on through /clanker', () => {
+    const onRunSlashCommand = renderInput(false, vi.fn(), undefined, null);
+    expect(toggle().textContent).toBe('Clanker mode');
+    expect(toggle().className).toBe('is-off');
+    expect(toggle().getAttribute('aria-pressed')).toBe('false');
+    act(() => toggle().click());
+    expect(onRunSlashCommand).toHaveBeenCalledWith('clanker');
+  });
+
+  it('says what it does while on, and turns off mid-turn too', () => {
+    const onRunSlashCommand = renderInput(true, vi.fn(), undefined, null, vi.fn(), true);
+    expect(toggle().textContent).toBe('Clanker mode - No confirmations');
+    expect(toggle().getAttribute('aria-pressed')).toBe('true');
+    act(() => toggle().click());
+    expect(onRunSlashCommand).toHaveBeenCalledWith('clanker');
+  });
+});
+
+describe('prompt lane', () => {
+  // Left cell, model, right cell: the grid's middle column is what centres it.
+  it('holds the model selector between the controls and the action button', () => {
+    renderInput(false, vi.fn(), undefined, null);
+    const cells = Array.from(container.querySelector('#prompt-lane')!.children);
+    expect(cells.map((cell) => cell.className)).toEqual(['lane-start', 'ms-root', 'lane-end']);
+    expect(cells[2]!.querySelector('#btn-send')).not.toBeNull();
   });
 });

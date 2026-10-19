@@ -1,5 +1,11 @@
 # Forge — Recent Changes
 
+## 0.17.50
+
+- Clanker mode is now a toggle in the prompt box: a dim "Clanker mode" while off, "Clanker mode - No confirmations" while on. Click it to switch, mid-turn too; `/clanker` still works.
+- The model selector moved inside the prompt box, centred in the bottom strip between the controls and the Send button. The line under the box is gone.
+- The idle Send arrow is readable again; a global disabled-button fade had dimmed it to about a quarter strength.
+
 ## 0.17.49
 
 - The prompt box starts at two lines and grows as you type, up to eight, then scrolls.

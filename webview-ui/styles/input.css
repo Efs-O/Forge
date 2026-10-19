@@ -32,10 +32,9 @@
 }
 
 /*
- * A column, not a row. The buttons used to stack to the right of the field,
- * spending ~150px of a 382px panel on chrome and squeezing the textarea to
- * roughly half its width. Everything that is not the field is now one
- * horizontal row beneath it, at the width it actually needs.
+ * The field and its controls. The buttons used to stack to the right of the
+ * field, spending ~150px of a 382px panel on chrome and squeezing the textarea
+ * to roughly half its width; they now live in a strip inside the field's box.
  */
 #prompt-area {
   display: flex;
@@ -82,9 +81,11 @@
 }
 
 /*
- * Paperclip, remote chip, Clanker notice, then the action button pinned right.
- * The strip itself lets clicks through to the field; only its controls take
- * them.
+ * Paperclip, remote chip and Clanker toggle on the left, the model in the
+ * centre, the action button on the right. The two side columns are equal
+ * fractions of what the model leaves, which is what keeps it on the centre
+ * line. The strip itself lets clicks through to the field; only its controls
+ * take them.
  */
 #prompt-lane {
   position: absolute;
@@ -92,25 +93,54 @@
   right: 5px;
   bottom: 5px;
   height: 24px;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr);
+  align-items: center;
+  gap: 6px;
+  pointer-events: none;
+}
+#prompt-lane button,
+#prompt-lane #remote-chip {
+  pointer-events: auto;
+}
+.lane-start,
+.lane-end {
   display: flex;
   align-items: center;
   gap: 6px;
   min-width: 0;
-  pointer-events: none;
 }
-#prompt-lane > button,
-#prompt-lane > #remote-chip {
-  pointer-events: auto;
-}
-#prompt-lane > :last-child {
-  margin-left: auto;
+.lane-end {
+  justify-content: flex-end;
 }
 
-/* The model sits centred under the field, alone on its line. */
-#input-actions {
-  display: flex;
-  justify-content: center;
-  min-width: 0;
+/* Inside the box the model is a quiet label until hovered: a bordered dropdown
+   there reads as a second input. Capped so the side columns keep room for the
+   paperclip and the action button on a narrow panel; the name ellipsises. */
+#prompt-lane .ms-root {
+  max-width: min(200px, 45vw);
+}
+#prompt-lane .ms-trigger {
+  height: 20px;
+  padding: 0 18px;
+  font-size: 11px;
+  background: transparent;
+  border-color: transparent;
+  color: var(--vscode-descriptionForeground);
+}
+#prompt-lane .ms-trigger:not(:disabled):hover {
+  background: var(--vscode-toolbar-hoverBackground, rgba(255, 255, 255, 0.07));
+  border-color: transparent;
+  color: var(--vscode-foreground);
+}
+#prompt-lane .ms-chevron {
+  right: 5px;
+}
+/* Opens upward over the transcript, centred on the trigger so a wide list
+   does not run off the panel's right edge. */
+#prompt-lane .ms-panel {
+  left: 50%;
+  transform: translateX(-50%);
 }
 
 /*
@@ -221,6 +251,9 @@
  * foreground so it tracks the theme and stays legible in both.
  */
 #btn-send:disabled {
+  /* base.css fades every disabled button to 0.4, which multiplied the 60%
+     below down to a barely visible arrow. The 60% is the intended level. */
+  opacity: 1;
   border-color: color-mix(in srgb, var(--vscode-foreground) 35%, transparent);
   background: none;
   color: color-mix(in srgb, var(--vscode-foreground) 60%, transparent);
@@ -254,7 +287,7 @@
  * pointer-width from Stop, and the highest-contrast element in the panel.
  *
  * So it arms the field instead. The thing you are about to type into is the
- * thing whose behaviour changed, and off, none of this renders at all.
+ * thing whose behaviour changed; off, only the dim toggle in the strip shows.
  */
 #prompt.clanker-armed {
   border-color: color-mix(in srgb, var(--forge-clanker) 55%, transparent);
@@ -267,19 +300,41 @@
   border-color: var(--forge-clanker);
 }
 
-/* In the control strip, after the paperclip and the remote chip. It gives way
-   first when the strip is tight. Clicks fall through to the field. */
-#clanker-notice {
+/* In the control strip, after the paperclip and the remote chip, and the
+   first thing to give way when the strip is tight. Dim text when off - present
+   so it can be switched on from here, quiet so it does not compete with the
+   field - and the Clanker colour when on. */
+#clanker-toggle {
   flex: 0 1 auto;
   min-width: 0;
+  height: 18px;
+  padding: 0 4px;
+  border: none;
+  border-radius: var(--forge-radius-sm);
+  background: transparent;
   font-size: 10px;
-  line-height: 16px;
-  color: var(--forge-clanker);
+  line-height: 18px;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
-  pointer-events: none;
+  cursor: pointer;
   user-select: none;
+  transition:
+    background 0.12s ease,
+    color 0.12s ease;
+}
+#clanker-toggle.is-off {
+  color: color-mix(in srgb, var(--vscode-descriptionForeground) 70%, transparent);
+}
+#clanker-toggle.is-off:hover {
+  background: var(--vscode-toolbar-hoverBackground, rgba(255, 255, 255, 0.07));
+  color: var(--vscode-foreground);
+}
+#clanker-toggle.is-on {
+  color: var(--forge-clanker);
+}
+#clanker-toggle.is-on:hover {
+  background: color-mix(in srgb, var(--forge-clanker) 14%, transparent);
 }
 
 /* ── Slash command menu ──────────────────────────────────────────────────── */
