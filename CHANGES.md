@@ -1,5 +1,10 @@
 # Forge — Recent Changes
 
+## 0.17.51
+
+- Messaging Forge from a Claude, Codex or Copilot session no longer fails for good with "linked chat … is unavailable" after its linked chat was closed while empty. Closing or leaving an empty chat now frees the session's link.
+- With several Forge windows open, a message from an agent session that is not yet linked goes to the window whose workspace contains the session's folder. It used to go to whichever window was focused last, so a new chat could open in an unrelated repo.
+
 ## 0.17.50
 
 - Clanker mode is now a toggle in the prompt box: a dim "Clanker mode" while off, "Clanker mode - No confirmations" while on. Click it to switch, mid-turn too; `/clanker` still works.
