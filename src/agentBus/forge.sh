@@ -335,19 +335,26 @@ esac
 TMP="$(mktemp)"; trap 'rm -f "$TMP"' EXIT
 if [ "$SRC" = "-" ]; then cat > "$TMP"; else cp "$SRC" "$TMP" || exit 2; fi
 if [ -n "$SENDER_KIND" ]; then
-  HOLDER=""
+  # The window holding this session's link wins; else the one whose workspace
+  # holds the current folder (longest root), so a new chat opens in the
+  # sender's repo; else endpoint.json, the last focused window.
+  HOLDER=""; NEAREST=""; NEAREST_LEN=0; SENDER_CWD="$PWD"
+  if command -v cygpath >/dev/null 2>&1; then SENDER_CWD="$(cygpath -w "$PWD")"
+  elif [ -n "${WSL_DISTRO_NAME:-}" ] && command -v wslpath >/dev/null 2>&1; then SENDER_CWD="$(wslpath -w "$PWD" 2>/dev/null || printf '%s' "$PWD")"; fi
   for WINDOW_EP in "$ROOT"/endpoints/*.json; do
     [ -f "$WINDOW_EP" ] || continue
     WINDOW_URL="$(grep '"url"' "$WINDOW_EP" | cut -d'"' -f4)"
     WINDOW_TOKEN="$(grep '"token"' "$WINDOW_EP" | cut -d'"' -f4)"
     [ -n "$WINDOW_URL" ] && [ -n "$WINDOW_TOKEN" ] || continue
-    HELD="$(curl -sS --connect-timeout 1 --max-time 3 -G -H "Authorization: Bearer $WINDOW_TOKEN" --data-urlencode "kind=$SENDER_KIND" --data-urlencode "sessionId=$SENDER_ID" "$WINDOW_URL/agent/holds-link" 2>/dev/null)" || continue
+    HELD="$(curl -sS --connect-timeout 1 --max-time 3 -G -H "Authorization: Bearer $WINDOW_TOKEN" --data-urlencode "kind=$SENDER_KIND" --data-urlencode "sessionId=$SENDER_ID" --data-urlencode "cwd=$SENDER_CWD" "$WINDOW_URL/agent/holds-link" 2>/dev/null)" || continue
     case "$HELD" in *'"holdsLink":true'*)
       [ -z "$HOLDER" ] || { echo "forge.sh: more than one live Forge window claims this session" >&2; exit 1; }
       HOLDER="$WINDOW_EP";;
     esac
+    MATCH="$(printf '%s' "$HELD" | sed -n 's/.*"cwdMatch":\([0-9][0-9]*\).*/\1/p')"
+    if [ -n "$MATCH" ] && [ "$MATCH" -gt "$NEAREST_LEN" ]; then NEAREST="$WINDOW_EP"; NEAREST_LEN="$MATCH"; fi
   done
-  [ -z "$HOLDER" ] || EP="$HOLDER"
+  if [ -n "$HOLDER" ]; then EP="$HOLDER"; elif [ -n "$NEAREST" ]; then EP="$NEAREST"; fi
 fi
 if [ -f "$EP" ]; then
   URL="$(grep '"url"' "$EP" | cut -d'"' -f4)"

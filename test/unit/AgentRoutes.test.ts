@@ -132,11 +132,45 @@ describe('endpoint.json', () => {
         `${base}/agent/holds-link?kind=codex&sessionId=00000000-0000-4000-8000-000000000071`,
         { headers: { Authorization: `Bearer ${TOKEN}` } },
       );
-      expect(await good.json()).toEqual({ holdsLink: true });
+      expect(await good.json()).toEqual({ holdsLink: true, cwdMatch: 0 });
       const bad = await fetch(`${base}/agent/holds-link?kind=codex&sessionId=bad`, {
         headers: { Authorization: `Bearer ${TOKEN}` },
       });
       expect(bad.status).toBe(400);
+    } finally {
+      held.dispose();
+    }
+  });
+
+  it("answers cwdMatch with the workspace root's length only for a folder inside it", async () => {
+    const root = path.join(home, 'repo');
+    const held = new AgentRoutes({
+      paths: () => paths,
+      token: TOKEN,
+      inbox: stubInbox(),
+      workspaceRoot: root,
+      holdsLink: () => false,
+    });
+    held.setEnabled(true);
+    held.onListening(base);
+    routes = held;
+    const match = async (cwd: string) => {
+      const query = new URLSearchParams({
+        kind: 'claude',
+        sessionId: '00000000-0000-4000-8000-000000000072',
+        cwd,
+      });
+      const res = await fetch(`${base}/agent/holds-link?${query}`, {
+        headers: { Authorization: `Bearer ${TOKEN}` },
+      });
+      return ((await res.json()) as { cwdMatch: number }).cwdMatch;
+    };
+    try {
+      expect(await match(root)).toBe(path.resolve(root).length);
+      expect(await match(path.join(root, 'src', 'deep'))).toBe(path.resolve(root).length);
+      expect(await match(path.join(home, 'repo-other'))).toBe(0);
+      expect(await match(home)).toBe(0);
+      expect(await match('repo')).toBe(0);
     } finally {
       held.dispose();
     }
@@ -174,7 +208,9 @@ describe('endpoint.json', () => {
     });
     routes.setEnabled(true);
     routes.onListening(base);
-    expect(JSON.parse(fs.readFileSync(paths.endpoint, 'utf8'))).toMatchObject({ token: other.token });
+    expect(JSON.parse(fs.readFileSync(paths.endpoint, 'utf8'))).toMatchObject({
+      token: other.token,
+    });
 
     focused = true;
     routes.claim();
@@ -436,7 +472,9 @@ describe('routes', () => {
 });
 
 describe('POST /agent/stop', () => {
-  function install(stopForge: NonNullable<ConstructorParameters<typeof AgentRoutes>[0]['stopForge']>): void {
+  function install(
+    stopForge: NonNullable<ConstructorParameters<typeof AgentRoutes>[0]['stopForge']>,
+  ): void {
     routes.dispose();
     routes = new AgentRoutes({ paths: () => paths, inbox: stubInbox(), token: TOKEN, stopForge });
     routes.setEnabled(true);
@@ -461,7 +499,11 @@ describe('POST /agent/stop', () => {
   it('returns 409 for an idle chat and 400 for a closed chat or exchange id', async () => {
     const stopForge = vi.fn(async (_from: string, conversationId: string | undefined) => {
       if (conversationId === 'closed')
-        return { ok: false as const, status: 400 as const, error: 'Forge chat "closed" is no longer open' };
+        return {
+          ok: false as const,
+          status: 400 as const,
+          error: 'Forge chat "closed" is no longer open',
+        };
       if (conversationId === 'exchange-1')
         return { ok: false as const, status: 400 as const, error: 'exchange id is not a chat id' };
       return {
@@ -495,13 +537,14 @@ function runClient(
   input: string,
   env: Record<string, string> = {},
   timeoutMs = 20_000,
+  cwd?: string,
 ): Promise<{ code: number; out: string }> {
   const bash = TEST_BASH!;
   return new Promise((resolve) => {
     const child = execFile(
       bash,
       [paths.script.replace(/\\/g, '/'), ...args],
-      { timeout: timeoutMs, env: { ...process.env, ...env } },
+      { timeout: timeoutMs, env: { ...process.env, ...env }, cwd },
       (err, stdout, stderr) => {
         const code = err ? ((err as { code?: number }).code ?? 1) : 0;
         resolve({ code: typeof code === 'number' ? code : 1, out: stdout + stderr });
@@ -616,9 +659,14 @@ describe.skipIf(!TEST_BASH)('forge.sh against the routes', () => {
           : { ok: false, error: 'unknown linked sender' },
       sendFile,
     });
-    const identity = { sender_kind: 'codex', sender_session_id: '00000000-0000-4000-8000-000000000001' };
+    const identity = {
+      sender_kind: 'codex',
+      sender_session_id: '00000000-0000-4000-8000-000000000001',
+    };
     const request = (fields: Record<string, unknown>, query = '') =>
-      post(`/agent/send-file${query}`, JSON.stringify({ ...identity, ...fields }), { type: 'application/json' });
+      post(`/agent/send-file${query}`, JSON.stringify({ ...identity, ...fields }), {
+        type: 'application/json',
+      });
 
     expect(
       (
@@ -784,6 +832,70 @@ describe.skipIf(!TEST_BASH)('forge.sh against the routes', () => {
     expect(said.out).toContain(
       '"receipt":"Forge received your message (chat \\\"Holder chat\\\")"',
     );
+  }, 30_000);
+
+  it('sends an unlinked session to the window whose workspace holds its folder, not the focused one', async (ctx) => {
+    if (!usable) ctx.skip();
+    const repo = path.join(home, 'repo');
+    const inside = path.join(repo, 'src');
+    fs.mkdirSync(inside, { recursive: true });
+    installClientRoutes({
+      paths: () => paths,
+      inbox: stubInbox(),
+      token: TOKEN,
+      pendingReplies: new PendingAgentReplies(paths.root),
+      workspaceRoot: repo,
+      holdsLink: () => false,
+      resolveInboundAgent: async (sender) => ({
+        conversationId: 'repo-chat',
+        title: 'Repo chat',
+        sender: { ...sender, title: 'Claude session' },
+        link: {
+          ...sender,
+          cwd: repo,
+          title: 'Claude session',
+          linkedAt: 1,
+          lastUsedAt: 1,
+          origin: 'first-inbound',
+        },
+      }),
+    });
+    fs.rmSync(path.join(paths.root, 'endpoints'), { recursive: true, force: true });
+    fs.mkdirSync(path.join(paths.root, 'endpoints'), { recursive: true });
+    const endpoint = (windowId: string, url: string) =>
+      JSON.stringify({ windowId, url, token: TOKEN, pid: 2_000_000_000 }, null, 2);
+    const repoWindow = '00000000-0000-4000-8000-000000000002';
+    fs.writeFileSync(
+      path.join(paths.root, 'endpoints', `${repoWindow}.json`),
+      endpoint(repoWindow, base),
+    );
+    // The focused window (endpoint.json) is unreachable: choosing it fails.
+    fs.writeFileSync(
+      paths.endpoint,
+      endpoint('00000000-0000-4000-8000-000000000003', 'http://127.0.0.1:1'),
+    );
+    const env = { CLAUDE_CODE_SESSION_ID: '00000000-0000-4000-8000-000000000098' };
+
+    const said = await runClient(
+      ['say', 'claude', '--new'],
+      'from the repo\n',
+      env,
+      20_000,
+      inside,
+    );
+    expect(said.code, said.out).toBe(0);
+    expect(accepted).toHaveLength(1);
+    expect(said.out).toContain('Repo chat');
+
+    const outside = await runClient(
+      ['say', 'claude', '--new'],
+      'from elsewhere\n',
+      env,
+      20_000,
+      home,
+    );
+    expect(outside.code, outside.out).not.toBe(0);
+    expect(accepted).toHaveLength(1);
   }, 30_000);
 
   it('writes a durable pending reply before accepting an agent turn', async () => {
@@ -1073,12 +1185,7 @@ describe.skipIf(!TEST_BASH)('forge.sh against the routes', () => {
       },
       view: () => ({ ok: true, text: 'the answer' }),
     });
-    const res = await runClient(
-      ['wait', 'x'],
-      '',
-      { FORGE_WAIT_POLL_MS: '1' },
-      10_000,
-    );
+    const res = await runClient(['wait', 'x'], '', { FORGE_WAIT_POLL_MS: '1' }, 10_000);
     expect(res.code, res.out).toBe(0);
     expect(res.out).toContain('State: idle');
     expect(res.out).toContain('Queued from you: 0');
@@ -1109,12 +1216,7 @@ describe.skipIf(!TEST_BASH)('forge.sh against the routes', () => {
       },
       view: () => ({ ok: true, text: 'the answer' }),
     });
-    const res = await runClient(
-      ['wait', 'x'],
-      '',
-      { FORGE_WAIT_POLL_MS: '1' },
-      10_000,
-    );
+    const res = await runClient(['wait', 'x'], '', { FORGE_WAIT_POLL_MS: '1' }, 10_000);
     expect(res.code, res.out).toBe(0);
     expect(res.out).toContain('Queued from you: 0');
     expect(res.out).toContain('the answer');
@@ -1141,12 +1243,7 @@ describe.skipIf(!TEST_BASH)('forge.sh against the routes', () => {
       },
       view: () => ({ ok: true, text: 'the answer' }),
     });
-    const res = await runClient(
-      ['wait', 'x'],
-      '',
-      { FORGE_WAIT_POLL_MS: '1' },
-      10_000,
-    );
+    const res = await runClient(['wait', 'x'], '', { FORGE_WAIT_POLL_MS: '1' }, 10_000);
     expect(res.code, res.out).toBe(0);
     expect(polls).toBe(2);
   }, 30_000);
@@ -1168,10 +1265,15 @@ describe.skipIf(!TEST_BASH)('forge.sh against the routes', () => {
           `Work: 1 model request(s), 0 tool call(s), 0 compaction(s) in this chat`,
       }),
     });
-    const res = await runClient(['wait', 'x', '1'], '', {
-      FORGE_WAIT_TIMEOUT_SECONDS: '1',
-      FORGE_WAIT_POLL_MS: '1',
-    }, 10_000);
+    const res = await runClient(
+      ['wait', 'x', '1'],
+      '',
+      {
+        FORGE_WAIT_TIMEOUT_SECONDS: '1',
+        FORGE_WAIT_POLL_MS: '1',
+      },
+      10_000,
+    );
     expect(res.code).toBe(124);
     expect(res.out).toContain('still not idle after 1 minute(s); last status:');
     expect(res.out).toContain('State: busy');
@@ -1449,7 +1551,12 @@ describe('forge.sh who against the routes (§11)', () => {
       inbox: stubInbox(),
       token: TOKEN,
       who: () => [
-        { session: 'claude · Review', attachment: 'linked', activity: 'idle', detail: 'Review chat' },
+        {
+          session: 'claude · Review',
+          attachment: 'linked',
+          activity: 'idle',
+          detail: 'Review chat',
+        },
         { session: 'codex · Build', attachment: 'linked', activity: 'busy', detail: 'Build chat' },
       ],
     });
@@ -1473,5 +1580,4 @@ describe('forge.sh who against the routes (§11)', () => {
     const res = await runClient(['who', 'extra'], '');
     expect(res.code).toBe(2);
   }, 30_000);
-
 });

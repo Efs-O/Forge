@@ -1,4 +1,5 @@
 import type * as http from 'http';
+import * as path from 'path';
 import { timingSafeEqual } from 'crypto';
 import { BUS_ID_PATTERN, writeReply, type BusPaths } from '../agentBus/agentBus';
 import { MAX_INBOUND_CHARS, forgeInboundPrompt } from '../agentBus/busContent';
@@ -22,6 +23,7 @@ import { dispatchAgentRelay } from './agentRelayDispatch';
 import { handleAgentRemoteSessionRoute } from './agentRemoteSessionRoute';
 import type { RemoteSessionActionResult } from '../remote/RemoteSessionBridge';
 import type { AgentSender } from '../agentLinks/chatAgentLinks';
+import { isPathInside } from '../util/pathContainment';
 import type { InboundAgentSelection, InboundAgentTarget } from '../agentLinks/inboundAgentRouting';
 import { PendingAgentReplies } from '../agentLinks/pendingAgentReplies';
 import { AgentWindowEndpointRegistry } from './agentWindowEndpointRegistry';
@@ -184,6 +186,18 @@ export class AgentRoutes {
     this.endpoints.dispose();
   }
 
+  /**
+   * How closely this window's workspace contains the sender's folder: its
+   * root's length, or 0. forge.sh sends an unlinked session to the window with
+   * the longest match before falling back to the focused one, so a new chat
+   * opens in the sender's repo, not whichever window was clicked last.
+   */
+  private cwdMatch(cwd: string | null): number {
+    const root = this.deps.workspaceRoot;
+    if (!cwd || !root || !path.isAbsolute(cwd) || !isPathInside(root, cwd)) return 0;
+    return path.resolve(root).length;
+  }
+
   async handle(req: http.IncomingMessage, res: http.ServerResponse): Promise<void> {
     const url = new URL(req.url ?? '/', 'http://127.0.0.1');
     const route = url.pathname;
@@ -217,7 +231,10 @@ export class AgentRoutes {
           kind: url.searchParams.get('kind'),
           sessionId: url.searchParams.get('sessionId'),
         });
-        return sendJson(res, 200, { holdsLink: this.deps.holdsLink?.(sender) === true });
+        return sendJson(res, 200, {
+          holdsLink: this.deps.holdsLink?.(sender) === true,
+          cwdMatch: this.cwdMatch(url.searchParams.get('cwd')),
+        });
       } catch (error) {
         if (error instanceof HttpError)
           return sendJson(res, error.status, { error: error.message });

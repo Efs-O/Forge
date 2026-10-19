@@ -47,9 +47,11 @@ Copilot sessions message each other, each message shown in the receiving window.
 - **Forge**: \`forge.sh\`, or HTTP (below). An idle Forge starts a turn at
   once; a busy one queues the message until its turn ends.
 
-When several Forge windows are open, the client reaches the last focused
-Forge window; if that one closes, another open window takes over without being
-focused. \`forge.sh say <name> --new\` opens and selects a new chat there;
+When several Forge windows are open, the client reaches the window that holds
+the sender's session link; failing that, the window whose workspace contains
+the sender's current folder; failing that, the last focused Forge window (if
+that one closes, another open window takes over without being focused).
+\`forge.sh say <name> --new\` opens and selects a new chat there;
 ordinary \`say\` follows that sender's previous chat without changing the view.
 Use \`say <name> --to <conversationId>\` to select a specific Forge chat, or
 \`say <name> --to-running\` to select the currently running chat. The same flags
