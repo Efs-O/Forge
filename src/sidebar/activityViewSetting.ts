@@ -75,12 +75,12 @@ export function publishThinkingDisplay(
   post: (message: HostToWebview) => void,
 ): string | undefined {
   const parsed = parseThinkingDisplayMode(value);
-  const mode = parsed.success ? parsed.mode : 'preview';
+  const mode = parsed.success ? parsed.mode : 'collapsed';
   post({ type: 'thinkingDisplay', mode });
   if (parsed.success) return undefined;
   return (
     `Forge: invalid forge.thinkingDisplay value ${parsed.received}. ` +
-    'Accepted values are preview, open, and collapsed. Using preview.'
+    'Accepted values are preview, open, and collapsed. Using collapsed.'
   );
 }
 

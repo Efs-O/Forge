@@ -2,7 +2,7 @@
   "name": "forge-llm",
   "displayName": "Forge LLM",
   "description": "Run your own models in VS Code: full llama.cpp/GGUF control, 60+ agent tools, undo any turn, no telemetry.",
-  "version": "0.17.51",
+  "version": "0.17.52",
   "publisher": "Efsoo",
   "icon": "assets/publisher-logo.png",
   "galleryBanner": {
@@ -418,7 +418,7 @@
             "Keep thinking blocks open unless you collapse an individual block.",
             "Show thinking headers only until you expand an individual block."
           ],
-          "default": "preview",
+          "default": "collapsed",
           "description": "Choose how Forge displays model thinking in the sidebar. Changes apply immediately."
         },
         "forge.terminal.watchUserCommands": {

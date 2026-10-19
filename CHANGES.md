@@ -1,5 +1,9 @@
 # Forge — Recent Changes
 
+## 0.17.52
+
+- Thinking blocks now start collapsed: only the "✓ Thought" header shows until you click it. Set `forge.thinkingDisplay` to `preview` to get the old five-line fold back.
+
 ## 0.17.51
 
 - Messaging Forge from a Claude, Codex or Copilot session no longer fails for good with "linked chat … is unavailable" after its linked chat was closed while empty. Closing or leaving an empty chat now frees the session's link.

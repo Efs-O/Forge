@@ -79,7 +79,7 @@ export const initialState: State = {
   clankerMode: false,
   remote: { transports: [], paired: false },
   activityView: 'full',
-  thinkingDisplay: 'preview',
+  thinkingDisplay: 'collapsed',
 };
 
 /** Derived view helpers — used by App.tsx */
