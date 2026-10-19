@@ -6,9 +6,29 @@
  */
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import { once } from 'node:events';
+import * as fs from 'node:fs';
+import * as os from 'node:os';
+import * as path from 'node:path';
 import { PowerShellTransport } from '../../src/tools/desktop/PowerShellTransport';
 import { PowerShellDesktopDriver } from '../../src/tools/desktop/PowerShellDesktopDriver';
 import type { DesktopMonitorCapture } from '../../src/tools/desktop/DesktopDriver';
+
+// Windows PowerShell 5.1's Add-Type compiles through .NET Framework CodeDom,
+// which names its temp files after 8 random lowercase characters; on the
+// windows-latest runner two were left behind and failed the temp guard. They
+// are the child's, not Forge's, and os.tmpdir() here is this file's own folder.
+afterAll(() => {
+  for (const name of fs.readdirSync(os.tmpdir())) {
+    if (/^[a-z0-9]{8}(\.|$)/u.test(name)) {
+      fs.rmSync(path.join(os.tmpdir(), name), {
+        recursive: true,
+        force: true,
+        maxRetries: 5,
+        retryDelay: 100,
+      });
+    }
+  }
+});
 
 describe.skipIf(process.platform !== 'win32')('PowerShellTransport (real child)', () => {
   it('answers list_windows and respawns after the child dies', async () => {

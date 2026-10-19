@@ -21,6 +21,9 @@ import type { MultimodalToolResult, RegisteredTool } from '../../src/tools/ToolR
  */
 
 const CHANNEL = 'chrome';
+// shaderCheck.ts's answer when Chrome offers no WebGPU adapter, as on the
+// windows-latest runner.
+const NO_ADAPTER = 'WebGPU software adapter unavailable';
 
 function skipIfNoBrowser(ctx: { skip: (msg: string) => void }, err: unknown): never | void {
   const message = err instanceof Error ? err.message : String(err);
@@ -186,6 +189,7 @@ describe('render_html_to_image preview against real Chrome', () => {
       } catch (err) {
         return skipIfNoBrowser(ctx, err);
       }
+      if (result.includes(NO_ADAPTER)) return ctx.skip('no WebGPU software adapter on this host');
       expect(result).toContain('shader 1: 0 compiler message(s)');
       expect(tcp).toBe(0);
       expect(udp).toBe(0);
@@ -219,8 +223,9 @@ describe('render_html_to_image preview against real Chrome', () => {
           { beforeMutate: () => undefined },
         ),
       );
-      expect(wgsl).toMatch(/embedded\.js:3:\d+:.*'ref'.*reserved keyword/i);
       expect(glsl).toContain('broken.frag:6:3:');
+      if (wgsl.includes(NO_ADAPTER)) return ctx.skip('no WebGPU software adapter on this host');
+      expect(wgsl).toMatch(/embedded\.js:3:\d+:.*'ref'.*reserved keyword/i);
     } catch (err) {
       return skipIfNoBrowser(ctx, err);
     }
