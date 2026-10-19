@@ -73,19 +73,22 @@ describe('writeFileAtomicSync', () => {
       opened.set(fd, String(flags));
       return fd;
     });
-    const synced: number[] = [];
+    // Flags are captured at sync time: POSIX reuses the closed file's fd for
+    // the directory handle syncDirectory opens next, so a later lookup by fd
+    // reads the directory's 'r'.
+    const syncedFlags: (string | undefined)[] = [];
     const realSync = fs.fsyncSync;
     vi.spyOn(fs, 'fsyncSync').mockImplementation((fd) => {
-      synced.push(fd);
+      syncedFlags.push(opened.get(fd));
       realSync(fd);
     });
 
     writeFileAtomicSync(target, 'durable');
 
     // A read-only handle makes Windows' FlushFileBuffers fail with EPERM.
-    expect(synced.length).toBeGreaterThan(0);
+    expect(syncedFlags.length).toBeGreaterThan(0);
     // `wx`: a link planted at the temp name fails the write instead of redirecting it.
-    expect(opened.get(synced[0])).toBe('wx');
+    expect(syncedFlags[0]).toBe('wx');
     expect(fs.readFileSync(target, 'utf8')).toBe('durable');
   });
 

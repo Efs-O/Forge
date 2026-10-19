@@ -56,6 +56,14 @@ export function quoteWindowsArg(arg: string): string {
 const NPM_NODE_SCRIPT_LINE = /"%_prog%"\s+"%dp0%\\([^"]+)"\s+%\*\s*$/;
 const NPM_NATIVE_EXE_LINE = /^"%dp0%\\([^"]+\.exe)"\s+%\*\s*$/i;
 
+/**
+ * A shim names its target with `\`. Windows' `path.join` splits on either
+ * separator, POSIX's only on `/`, so normalise before joining.
+ */
+function toPathSeparators(shimRelative: string): string {
+  return shimRelative.replace(/\\/g, '/');
+}
+
 /** Reads an npm cmd-shim and returns what it would launch, so the target can
  *  be spawned directly with no cmd.exe in between. Through cmd.exe a line
  *  break ends the command: every multi-line `codex queue --message` arrived
@@ -73,7 +81,7 @@ export function unwrapNpmCmdShim(shimPath: string): { file: string; args: string
   const dir = path.dirname(shimPath);
   const script = NPM_NODE_SCRIPT_LINE.exec(lastLine)?.[1];
   if (script !== undefined) {
-    const target = path.join(dir, script);
+    const target = path.join(dir, toPathSeparators(script));
     if (!fs.existsSync(target)) return undefined;
     // The shim's own rule: a node.exe beside it wins, else `node` from PATH.
     const bundledNode = path.join(dir, 'node.exe');
@@ -81,7 +89,7 @@ export function unwrapNpmCmdShim(shimPath: string): { file: string; args: string
   }
   const exe = NPM_NATIVE_EXE_LINE.exec(lastLine)?.[1];
   if (exe !== undefined) {
-    const target = path.join(dir, exe);
+    const target = path.join(dir, toPathSeparators(exe));
     return fs.existsSync(target) ? { file: target, args: [] } : undefined;
   }
   return undefined;

@@ -359,6 +359,8 @@ describe('render_html_to_image preview against real Chrome', () => {
     } catch (err) {
       return skipIfNoBrowser(ctx, err);
     }
+    // A GPU-less runner (GitHub's ubuntu) gives the page no adapter at all.
+    if (String(result).includes('log: no-adapter')) return ctx.skip('no WebGPU adapter');
     expect(String(result)).toMatch(/Page errors \(\d+\):[\s\S]*webgpu: \d+:\d+:/i);
   }, 90_000);
 

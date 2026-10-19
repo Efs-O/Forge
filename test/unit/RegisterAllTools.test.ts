@@ -226,7 +226,10 @@ describe('registerAllTools canonical coordinator catalog', () => {
           // ask_agent needs the absent agent_bus block.
           name !== 'ask_agent' &&
           // set_checkin needs the absent elapsed_time_note block.
-          name !== 'set_checkin',
+          name !== 'set_checkin' &&
+          // desktop_* drive Win32 input and capture; registered everywhere,
+          // advertised on Windows only.
+          (process.platform === 'win32' || !name.startsWith('desktop_')),
       ),
     );
   });

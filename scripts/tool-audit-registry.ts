@@ -49,6 +49,21 @@ function maximalConfig(): ForgeConfig {
   };
 }
 
+/**
+ * desktop_* and install_llamacpp advertise on Windows only. The catalog prices
+ * the maximal set, and Windows advertises the most, so a Linux or macOS CI
+ * runner must read it as Windows does or the committed coverage matrix drifts.
+ */
+function asWindows<T>(read: () => T): T {
+  const platform = Object.getOwnPropertyDescriptor(process, 'platform')!;
+  Object.defineProperty(process, 'platform', { ...platform, value: 'win32' });
+  try {
+    return read();
+  } finally {
+    Object.defineProperty(process, 'platform', platform);
+  }
+}
+
 export function buildToolAuditSnapshot() {
   const registry = new ToolRegistry();
   const workspaceState = {
@@ -83,7 +98,7 @@ export function buildToolAuditSnapshot() {
 
   resetLazyToolGroups();
   recordLazyGroupTool('halluscribe', 'search_sessions');
-  const definitions = registry.definitions(new Set(ALL_TOOL_PERMISSIONS));
+  const definitions = asWindows(() => registry.definitions(new Set(ALL_TOOL_PERMISSIONS)));
   return {
     names: registry.names().sort(),
     registryDefinitions: definitions,

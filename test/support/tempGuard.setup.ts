@@ -8,8 +8,9 @@ import { afterAll, inject } from 'vitest';
 const TEMP_VARS = process.platform === 'win32' ? ['TEMP', 'TMP'] : ['TMPDIR'];
 const REPO_ROOT = path.resolve(import.meta.dirname, '..', '..');
 // Left by programs the tests start, not by Forge code: Node's shared compile
-// cache (from a node child process), and Chrome's url-fetcher scratch folder.
-const NOT_OURS = [/^node-compile-cache$/u, /^chrome_.*url_fetcher/u];
+// cache (from a node child process), and Chrome's url-fetcher scratch folder
+// (prefixed with the app id on Linux: `com.google.Chrome.chrome_…`).
+const NOT_OURS = [/^node-compile-cache$/u, /^([\w.]+\.)?chrome_.*url_fetcher/u];
 
 const fileDir = fs.mkdtempSync(path.join(inject('tempGuardRunDir'), 'file-'));
 for (const name of TEMP_VARS) process.env[name] = fileDir;
