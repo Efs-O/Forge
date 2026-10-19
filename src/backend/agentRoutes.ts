@@ -1,3 +1,4 @@
+import * as fs from 'fs';
 import type * as http from 'http';
 import * as path from 'path';
 import { timingSafeEqual } from 'crypto';
@@ -145,6 +146,20 @@ export interface AgentRoutesDeps {
   chatCapBlockers?: (options?: { activate?: boolean }) => string[];
 }
 
+/**
+ * The path with symlinks resolved, or as given when it cannot be resolved
+ * (missing, unreadable): the caller then has only the lexical comparison. Not
+ * thrown, because a 500 here would make forge.sh skip this window entirely,
+ * link holder included.
+ */
+function realOrSelf(target: string): string {
+  try {
+    return fs.realpathSync.native(target);
+  } catch {
+    return target;
+  }
+}
+
 function requireText(fields: Fields, max: number): string {
   const text = typeof fields['text'] === 'string' ? fields['text'] : undefined;
   if (!text || !text.trim()) throw new HttpError(400, 'text is required');
@@ -191,11 +206,14 @@ export class AgentRoutes {
    * root's length, or 0. forge.sh sends an unlinked session to the window with
    * the longest match before falling back to the focused one, so a new chat
    * opens in the sender's repo, not whichever window was clicked last.
+   * Compared as written and resolved: a shell reports its folder through
+   * symlinks resolved (macOS `/var` is `/private/var`), the workspace may not.
    */
   private cwdMatch(cwd: string | null): number {
     const root = this.deps.workspaceRoot;
-    if (!cwd || !root || !path.isAbsolute(cwd) || !isPathInside(root, cwd)) return 0;
-    return path.resolve(root).length;
+    if (!cwd || !root || !path.isAbsolute(cwd)) return 0;
+    const inside = isPathInside(root, cwd) || isPathInside(realOrSelf(root), realOrSelf(cwd));
+    return inside ? path.resolve(root).length : 0;
   }
 
   async handle(req: http.IncomingMessage, res: http.ServerResponse): Promise<void> {

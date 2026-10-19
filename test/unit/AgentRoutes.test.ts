@@ -176,6 +176,36 @@ describe('endpoint.json', () => {
     }
   });
 
+  it('matches a folder reported through the symlinked workspace resolved (macOS /var)', async () => {
+    const real = path.join(home, 'real-repo');
+    const linked = path.join(home, 'linked-repo');
+    fs.mkdirSync(path.join(real, 'src'), { recursive: true });
+    fs.symlinkSync(real, linked, 'junction');
+    const held = new AgentRoutes({
+      paths: () => paths,
+      token: TOKEN,
+      inbox: stubInbox(),
+      workspaceRoot: linked,
+      holdsLink: () => false,
+    });
+    held.setEnabled(true);
+    held.onListening(base);
+    routes = held;
+    try {
+      const query = new URLSearchParams({
+        kind: 'claude',
+        sessionId: '00000000-0000-4000-8000-000000000073',
+        cwd: fs.realpathSync.native(path.join(real, 'src')),
+      });
+      const res = await fetch(`${base}/agent/holds-link?${query}`, {
+        headers: { Authorization: `Bearer ${TOKEN}` },
+      });
+      expect(await res.json()).toEqual({ holdsLink: false, cwdMatch: path.resolve(linked).length });
+    } finally {
+      held.dispose();
+    }
+  });
+
   it("is never removed when another window's token is in it", () => {
     fs.writeFileSync(paths.endpoint, JSON.stringify({ url: 'x', token: 'other' }));
     routes.dispose();
