@@ -30,6 +30,7 @@ import type { StructuralSettings } from './poolStructuralConfig';
 import type { PortClaim, PoolSlot, SlotTable } from './poolSlots';
 import type { BackendTurnLease, IBackendPool } from './poolTypes';
 import type { BackendProcess } from '../system/SystemReport';
+import { DEFAULT_LLAMA_PARALLEL } from '../util/contextBudget';
 import type { ExternalModelServers } from './ExternalModelServers';
 import { reconcileDeadSlot, restartSlot, startSlot, type SlotStartContext } from './poolStart';
 
@@ -106,7 +107,7 @@ export class BackendPool implements IBackendPool {
    *  the request-time model never sees it and reported 4 for 1-slot servers. */
   parallelCapacity(modelName: string): number {
     const model = resolveSpawnModel(this.config, this.poolKey(modelName));
-    return model.n_parallel ?? this.config.llama_server.n_parallel ?? 4;
+    return model.n_parallel ?? this.config.llama_server.n_parallel ?? DEFAULT_LLAMA_PARALLEL;
   }
 
   acquire(modelName: string): Promise<BackendController> {

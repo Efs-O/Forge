@@ -128,9 +128,11 @@ export class ControlServer implements vscode.Disposable {
         forgeVersion: this.version,
         contextLimitFor: (model) => {
           try {
+            const resolved = resolveRequestModel(this.config, model);
             return perSlotContext(
-              resolveRequestModel(this.config, model),
+              resolved,
               this.config.llama_server,
+              resolved.provider ?? 'llama.cpp',
             );
           } catch {
             return null;

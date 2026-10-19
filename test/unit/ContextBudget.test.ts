@@ -1,8 +1,12 @@
 import { describe, expect, it } from 'vitest';
-import type { ModelConfig } from '../../src/config/types';
+import type { ForgeConfig, LlamaServerConfig, ModelConfig } from '../../src/config/types';
+import { mergeGroupsIntoModel } from '../../src/config/ConfigResolver';
+import { composeLlamaServerArgs } from '../../src/backend/LlamaServerArgs';
 import type { ChatCompletionRequest, ChatMessage, ToolDefinition } from '../../src/llm/types';
 import {
   CHARS_PER_TOKEN,
+  DEFAULT_LLAMA_CTX,
+  DEFAULT_LLAMA_PARALLEL,
   IMAGE_PART_TOKENS,
   computeContextBudget,
   createOutputBudgetTracker,
@@ -21,34 +25,112 @@ describe('perSlotContext', () => {
   // --ctx-size is the TOTAL and --parallel divides it (LlamaServerArgs). Reading
   // num_ctx alone reported every multi-slot model at several times its window.
   it('divides the configured window by the slot count', () => {
-    const model = { name: 'm', num_ctx: 131072, spawn: { n_parallel: 4 } } as ModelConfig;
-    expect(perSlotContext(model)).toBe(32768);
+    const model = {
+      name: 'm',
+      provider: 'llama.cpp',
+      gguf_path: 'm.gguf',
+      num_ctx: 131072,
+      spawn: { n_parallel: 4 },
+    } as ModelConfig;
+    expect(perSlotContext(model, undefined, 'llama.cpp')).toBe(32768);
   });
 
   it('gives a single-slot model the whole window', () => {
-    const model = { name: 'm', num_ctx: 49152, spawn: { n_parallel: 1 } } as ModelConfig;
-    expect(perSlotContext(model)).toBe(49152);
+    const model = {
+      name: 'm',
+      provider: 'llama.cpp',
+      gguf_path: 'm.gguf',
+      num_ctx: 49152,
+      spawn: { n_parallel: 1 },
+    } as ModelConfig;
+    expect(perSlotContext(model, undefined, 'llama.cpp')).toBe(49152);
   });
 
   it('falls back to the server defaults when the model sets neither', () => {
-    const model = { name: 'm' } as ModelConfig;
-    expect(perSlotContext(model, { default_num_ctx: 65536, n_parallel: 2 } as never)).toBe(32768);
+    const model = { name: 'm', provider: 'llama.cpp', gguf_path: 'm.gguf' } as ModelConfig;
+    expect(
+      perSlotContext(model, { default_num_ctx: 65536, n_parallel: 2 }, 'llama.cpp'),
+    ).toBe(32768);
   });
 
   it('gives every slot the whole window under --kv-unified, last flag winning', () => {
     const args = (extra: string[]) =>
       ({
         name: 'm',
+        provider: 'llama.cpp',
+        gguf_path: 'm.gguf',
         num_ctx: 131072,
         spawn: { n_parallel: 4, extra_llama_server_args: extra },
       }) as ModelConfig;
-    expect(perSlotContext(args(['--kv-unified']))).toBe(131072);
-    expect(perSlotContext(args(['-kvu', '--checkpoint-min-step', '1024']))).toBe(131072);
-    expect(perSlotContext(args(['--kv-unified', '--no-kv-unified']))).toBe(32768);
+    expect(perSlotContext(args(['--kv-unified']), undefined, 'llama.cpp')).toBe(131072);
+    expect(perSlotContext(args(['-kvu', '--checkpoint-min-step', '1024']), undefined, 'llama.cpp')).toBe(131072);
+    expect(perSlotContext(args(['--kv-unified', '--no-kv-unified']), undefined, 'llama.cpp')).toBe(32768);
   });
 
   it('reports 0 for a model with no configured window', () => {
-    expect(perSlotContext({ name: 'gpt', provider: 'openai' } as ModelConfig)).toBe(0);
+    expect(perSlotContext({ name: 'gpt', provider: 'openai' } as ModelConfig, undefined, 'openai')).toBe(0);
+  });
+
+  it('uses the launcher defaults for a llama.cpp entry without an explicit parallel count', () => {
+    const model = {
+      name: 'long-context',
+      provider: 'llama.cpp',
+      gguf_path: 'model.gguf',
+      num_ctx: 131072,
+    } as ModelConfig;
+    expect(perSlotContext(model, undefined, 'llama.cpp')).toBe(32768);
+    expect(
+      perSlotContext(
+        { ...model, spawn: { extra_llama_server_args: ['--kv-unified'] } },
+        undefined,
+        'llama.cpp',
+      ),
+    ).toBe(131072);
+  });
+
+  it('uses the launcher context default when a llama.cpp entry has no window configured', () => {
+    const model = { name: 'm', provider: 'llama.cpp', gguf_path: 'm.gguf' } as ModelConfig;
+    expect(perSlotContext(model, undefined, 'llama.cpp')).toBe(1024);
+  });
+
+  it('does not apply llama-server defaults to an Ollama provider inherited from its group', () => {
+    const raw = { name: 'ollama-model', group: 'ollama', num_ctx: 131072 } as ModelConfig;
+    const config = {
+      models: [raw],
+      groups: { ollama: { provider: 'ollama' } },
+    } as ForgeConfig;
+    const merged = mergeGroupsIntoModel(config, raw);
+    const provider = merged.provider ?? 'llama.cpp';
+    const server = { default_num_ctx: 4096, n_parallel: 4 } as LlamaServerConfig;
+    expect(provider).toBe('ollama');
+    expect(perSlotContext(raw, server, provider)).toBe(131072);
+    expect(perSlotContext(merged, server, provider)).toBe(131072);
+  });
+
+  it('does not divide or use llama-server defaults for external providers', () => {
+    const server = { default_num_ctx: 4096, n_parallel: 4 } as LlamaServerConfig;
+    expect(
+      perSlotContext(
+        { name: 'compatible', provider: 'openai-compatible', num_ctx: 131072 } as ModelConfig,
+        server,
+        'openai-compatible',
+      ),
+    ).toBe(131072);
+    expect(perSlotContext({ name: 'cloud', provider: 'openai' } as ModelConfig, server, 'openai')).toBe(0);
+  });
+
+  it('builds llama-server context and parallel defaults from the shared constants', () => {
+    const args = composeLlamaServerArgs(
+      'llama-server',
+      { name: 'm', provider: 'llama.cpp', gguf_path: 'm.gguf' } as ModelConfig,
+      {} as LlamaServerConfig,
+      '127.0.0.1',
+      8080,
+    );
+    expect(DEFAULT_LLAMA_CTX).toBe(4096);
+    expect(DEFAULT_LLAMA_PARALLEL).toBe(4);
+    expect(args[args.indexOf('--ctx-size') + 1]).toBe(String(DEFAULT_LLAMA_CTX));
+    expect(args[args.indexOf('--parallel') + 1]).toBe(String(DEFAULT_LLAMA_PARALLEL));
   });
 });
 
@@ -126,7 +208,7 @@ describe('estimateTokens', () => {
 });
 
 describe('reported prompt anchors', () => {
-  const model = { name: 'm', num_ctx: 200_000 } as ModelConfig;
+  const model = { name: 'm', num_ctx: 200_000, spawn: { n_parallel: 1 } } as ModelConfig;
   const tools: ToolDefinition[] = [
     {
       type: 'function',
@@ -396,7 +478,7 @@ describe('promptEstimateScale', () => {
   });
 
   it('shrinks the output room computeContextBudget reports', () => {
-    const model = { name: 'm', num_ctx: 154_624 } as ModelConfig;
+    const model = { name: 'm', num_ctx: 154_624, spawn: { n_parallel: 1 } } as ModelConfig;
     const messages = [{ role: 'user' as const, content: 'x'.repeat(310_000) }];
     const plain = computeContextBudget({ messages, model });
     const scaled = computeContextBudget({ messages, model, estimateScale: 1.08 });

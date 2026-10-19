@@ -1,4 +1,4 @@
-import type { ForgeConfig, LlamaServerConfig, ModelConfig } from '../config/types';
+import type { ForgeConfig, LlamaServerConfig, ModelConfig, ModelProvider } from '../config/types';
 import { MIN_ROUND_HEADROOM_TOKENS, perSlotContext, reasoningReserve } from '../util/contextBudget';
 
 /** Minimum recovery ceiling when the model window cannot be estimated. */
@@ -27,8 +27,9 @@ export function writeChunkLimit(
   model: ModelConfig,
   server: LlamaServerConfig | undefined,
   autoCompact: ForgeConfig['auto_compact'],
+  provider: ModelProvider,
 ): number {
-  const window = perSlotContext(model, server);
+  const window = perSlotContext(model, server, provider);
   if (window <= 0 || autoCompact?.enabled !== true) return MAX_SINGLE_WRITE_CHARS;
   const at = autoCompact.at ?? 0.85;
   let room = Math.floor(window * (1 - at));

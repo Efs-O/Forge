@@ -16,6 +16,21 @@ export class CompactionFailure extends Error {
   }
 }
 
+interface PromptIncompleteLike {
+  name: 'PromptIncompleteError';
+  finishReason: unknown;
+}
+
+function isPromptIncompleteError(error: unknown): error is PromptIncompleteLike {
+  return (
+    typeof error === 'object' &&
+    error !== null &&
+    'name' in error &&
+    error.name === 'PromptIncompleteError' &&
+    'finishReason' in error
+  );
+}
+
 export function compactionFailureCategory(error: unknown): CompactionFailureCategory {
   if (error instanceof CompactionFailure) return error.category;
   if (
@@ -24,5 +39,9 @@ export function compactionFailureCategory(error: unknown): CompactionFailureCate
   ) {
     return 'cancelled';
   }
-  return 'unknown';
+  if (isPromptIncompleteError(error)) {
+    if (error.finishReason === 'cancelled') return 'cancelled';
+    if (error.finishReason === 'length') return 'incomplete-output';
+  }
+  return 'model-error';
 }

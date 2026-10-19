@@ -90,7 +90,7 @@ overlaps with an existing owner, extend the owner instead.
 | Compaction attempt hold/rearm + suppressed-attempt log row | `src/sidebar/compactionAttemptPolicy.ts` |
 | Compaction attempt log rows (`compaction_attempt`)   | `src/sidebar/SessionLogger.ts`           |
 | Admission-time auto-compact check                    | `src/sidebar/ContextBudgetPublisher.ts`  |
-| Compaction failure categories                        | `src/sidebar/compactionFailure.ts`       |
+| Compaction error-to-category mapping (`compactionFailureCategory`) | `src/sidebar/compactionFailure.ts` |
 | Host-fact fit (shed optional, then required to floors) | `src/sidebar/compactionHostFit.ts`       |
 | Compaction service contract types (deps/options)     | `src/sidebar/compactionServiceTypes.ts`  |
 | One-shot vs staged summary run, output cap           | `src/sidebar/compactionSummaryRunner.ts` |
@@ -98,6 +98,7 @@ overlaps with an existing owner, extend the owner instead.
 | Compaction budget math, `planOutput`, prompt fit     | `src/sidebar/compactionBudget.ts`        |
 | Compaction tokenizer selection and per-model counter cache | `src/sidebar/compactionCounter.ts` |
 | Applying the compaction window to a request          | `src/sidebar/compactionWindow.ts`        |
+| Compaction message cost used by window measurement and split selection | `src/sidebar/compactionWindow.ts` |
 | Host-recorded summary facts (from messages)          | `src/sidebar/compactionLedger.ts`        |
 | Ledger merge, retention cap, omission count          | `src/sidebar/compactionRecordedState.ts` |
 | Agent's last reply carried past a compaction         | `src/sidebar/compactionLastReply.ts`     |
@@ -388,7 +389,7 @@ overlaps with an existing owner, extend the owner instead.
 | Local llama.cpp fetch (30 min headers wait)  | `src/llm/localLlamaFetch.ts`                 |
 | Cut-off tool call: type + classification     | `src/llm/ToolCallTruncatedError.ts`          |
 | No-projector backend error classification    | `src/llm/imageUnsupportedError.ts`           |
-| Context measured + output budget estimate    | `src/util/contextBudget.ts`                  |
+| Context measured + output budget estimate, per-slot context, `DEFAULT_LLAMA_CTX` and `DEFAULT_LLAMA_PARALLEL` | `src/util/contextBudget.ts` |
 | Token-count display formatting               | `src/util/formatTokens.ts`                   |
 | Elapsed-duration display formatting          | `src/util/formatDuration.ts`                 |
 | Local date + wall clock for the model        | `src/util/localClock.ts`                     |

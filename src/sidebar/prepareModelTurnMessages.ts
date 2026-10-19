@@ -100,6 +100,7 @@ export function prepareModelTurnMessages(
     toolTokens: estimateToolTokens(input.getToolDefinitions()),
     model: input.model,
     server: input.config.llama_server,
+    provider: input.model.provider ?? 'llama.cpp',
     state: input.contextTrimState,
   });
 }

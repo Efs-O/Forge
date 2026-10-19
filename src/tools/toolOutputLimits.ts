@@ -1,4 +1,4 @@
-import type { ForgeConfig, LlamaServerConfig, ModelConfig } from '../config/types';
+import type { ForgeConfig, LlamaServerConfig, ModelConfig, ModelProvider } from '../config/types';
 import { COMPACTION_CHARS_PER_TOKEN } from '../sidebar/compactionBudget';
 import { perSlotContext } from '../util/contextBudget';
 
@@ -27,8 +27,9 @@ export function toolOutputLimits(
   model: ModelConfig,
   server: LlamaServerConfig | undefined,
   autoCompact: ForgeConfig['auto_compact'],
+  provider: ModelProvider,
 ): ToolOutputLimits {
-  const window = perSlotContext(model, server);
+  const window = perSlotContext(model, server, provider);
   if (window <= 0 || autoCompact?.enabled !== true) return { ...DEFAULT_TOOL_OUTPUT_LIMITS };
   const chars = (fraction: number): number =>
     Math.floor(window * fraction * COMPACTION_CHARS_PER_TOKEN);

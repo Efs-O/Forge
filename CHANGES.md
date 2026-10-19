@@ -1,5 +1,18 @@
 # Forge — Recent Changes
 
+## 0.17.53
+
+- Auto-compaction no longer fails again and again during long agent turns. Picking the recent messages to keep and checking the final result measured message size differently, so a turn full of large writes, tool output and thinking looked small enough to keep, then the result was refused after a full summary call. Both now use one measure; mid-turn, the whole turn is summarized and compaction succeeds in one call.
+- A compaction that fails because the connection dropped, or the token counter could not be reached, now retries after 30 s instead of waiting until the chat grows another 2%. Stopping a compaction is recorded as cancelled, not as bad output.
+- Context sizes now match how llama-server is actually started: a llama.cpp model with no `n_parallel` counts the 4 slots it is launched with, and Ollama and cloud models are never divided by llama.cpp's slot count.
+
+## 0.17.53
+
+- Auto-compaction no longer fails again and again during long agent turns. Picking the recent messages to keep and checking the final result measured message size differently, so a turn full of large writes, tool output and thinking looked small enough to keep, then the result was refused after a full summary call. Both now use one measure; mid-turn, the whole turn is summarized and compaction succeeds in one call.
+- A compaction that fails because the connection dropped, or the token counter could not be reached, now retries after 30 s instead of waiting until the chat grows another 2%. Stopping a compaction is recorded as cancelled, not as bad output.
+- Context sizes now match how llama-server is actually started: a llama.cpp model with no `n_parallel` counts the 4 slots it is launched with, and Ollama and cloud models are never divided by llama.cpp's slot count.
+- The Forge sidebar view has its own icon.
+
 ## 0.17.52
 
 - Thinking blocks now start collapsed: only the "✓ Thought" header shows until you click it. Set `forge.thinkingDisplay` to `preview` to get the old five-line fold back.

@@ -1,5 +1,5 @@
 import type { ChatCompletionRequest, ChatMessage, ContentPart, ToolDefinition } from '../llm/types';
-import type { ModelConfig, LlamaServerConfig } from '../config/types';
+import type { ModelConfig, ModelProvider, LlamaServerConfig } from '../config/types';
 
 /**
  * Context accounting for the agent loop and the sidebar's token bar.
@@ -25,6 +25,10 @@ export interface ReportedUsage {
   /** Completion tokens in the most recent model request. */
   last_output_tokens?: number;
 }
+
+/** llama.cpp launch defaults shared by argv construction and context sizing. */
+export const DEFAULT_LLAMA_CTX = 4096;
+export const DEFAULT_LLAMA_PARALLEL = 4;
 
 /**
  * Context the model actually holds, as the inference server reported it.
@@ -222,11 +226,20 @@ function kvUnified(model: ModelConfig): boolean {
  * Returns 0 when the model has no configured window (cloud providers), which
  * callers treat as "budget unknown, do not gate on it".
  */
-export function perSlotContext(model: ModelConfig, server?: LlamaServerConfig): number {
-  const total = model.spawn?.num_ctx ?? model.num_ctx ?? server?.default_num_ctx ?? 0;
+export function perSlotContext(
+  model: ModelConfig,
+  server: LlamaServerConfig | undefined,
+  provider: ModelProvider,
+): number {
+  const isSpawnedLlamaCpp = provider === 'llama.cpp';
+  const total = isSpawnedLlamaCpp
+    ? (model.spawn?.num_ctx ?? model.num_ctx ?? server?.default_num_ctx ?? DEFAULT_LLAMA_CTX)
+    : (model.spawn?.num_ctx ?? model.num_ctx ?? 0);
   if (total <= 0) return 0;
-  if (kvUnified(model)) return total;
-  const parallel = model.spawn?.n_parallel ?? model.n_parallel ?? server?.n_parallel ?? 1;
+  if (isSpawnedLlamaCpp && kvUnified(model)) return total;
+  const parallel = isSpawnedLlamaCpp
+    ? (model.spawn?.n_parallel ?? model.n_parallel ?? server?.n_parallel ?? DEFAULT_LLAMA_PARALLEL)
+    : 1;
   return Math.floor(total / Math.max(1, parallel));
 }
 
@@ -312,6 +325,7 @@ export function createOutputBudgetTracker(
   state: PromptBudgetState,
   model: ModelConfig,
   server?: LlamaServerConfig,
+  provider?: ModelProvider,
 ): {
   onUsage: (
     usage: { prompt_tokens: number; completion_tokens: number },
@@ -345,6 +359,7 @@ export function createOutputBudgetTracker(
         toolTokens: estimateToolTokens(tools),
         model,
         server,
+        provider: provider ?? model.provider ?? 'llama.cpp',
         estimateScale: state.promptEstimateScale,
         anchor: state.promptAnchor,
       });
@@ -364,6 +379,8 @@ export function computeContextBudget(input: {
   anchor?: PromptAnchor | undefined;
   model: ModelConfig | undefined;
   server?: LlamaServerConfig | undefined;
+  /** Resolved from the model/group configuration before per-slot sizing. */
+  provider?: ModelProvider | undefined;
   /** From `promptEstimateScale`; 1 when the server has not reported yet. */
   estimateScale?: number | undefined;
 }): ContextBudget {
@@ -390,7 +407,13 @@ export function computeContextBudget(input: {
     used = anchor.promptTokens + anchor.completionTokens + estimatedNewPart;
     extraMarginTokens = Math.ceil(1.0 * estimatedNewPart);
   }
-  const max = input.model ? perSlotContext(input.model, input.server) : 0;
+  const max = input.model
+    ? perSlotContext(
+        input.model,
+        input.server,
+        input.provider ?? input.model.provider ?? 'llama.cpp',
+      )
+    : 0;
   if (max <= 0) return { used, extraMarginTokens, max: 0, outputRoom: 0, headroom: 0 };
   const outputRoom = Math.max(0, max - used);
   const reserve = input.model ? reasoningReserve(input.model) : 0;

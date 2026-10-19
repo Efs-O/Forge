@@ -1,12 +1,10 @@
 /** Select the summarized prefix and safe, complete recent protocol tail. */
 
 import type { ChatMessage } from '../llm/types';
-import { contentPartCostChars } from '../util/contextBudget';
-import { COMPACTION_CHARS_PER_TOKEN } from './compactionBudget';
+import { messageCostChars } from './compactionWindow';
 
-/** Cap on the model-facing tail. Tool results are costed at their later excerpt size. */
+/** Cap on the model-facing tail, measured with the window's own message cost. */
 export const RETAINED_TAIL_MAX_CHARS = 4000;
-const RETAINED_TOOL_RESULT_COST_MAX_CHARS = 2000;
 const MIN_SUMMARIZED_MESSAGES = 2;
 
 /**
@@ -21,24 +19,6 @@ function isSummarizable(message: ChatMessage): boolean {
     (message.role === 'assistant' &&
       (typeof message.content === 'string' || Boolean(message.tool_calls?.length)))
   );
-}
-
-export function retainedTailCost(message: ChatMessage): number {
-  if (Array.isArray(message.content)) {
-    // Same image cost as the window measurement; costing images at 0 kept a
-    // photo-heavy exchange in the tail, where no summary could shrink it.
-    return message.content.reduce(
-      (sum, part) => sum + contentPartCostChars(part, COMPACTION_CHARS_PER_TOKEN),
-      0,
-    );
-  }
-  if (typeof message.content !== 'string') return 0;
-  // ModelTurn excerpts oversized tool results after the compaction window is
-  // applied. Cost that bounded form, otherwise one 120k result creates a false
-  // zero-tail cliff even though it will never be sent in full.
-  return message.role === 'tool'
-    ? Math.min(message.content.length, RETAINED_TOOL_RESULT_COST_MAX_CHARS)
-    : message.content.length;
 }
 
 export interface CompactionSplit {
@@ -58,7 +38,7 @@ export function selectCompactionSplit(
   for (let index = pending.length - 1; index >= 0; index--) {
     if (pending[index]?.role !== 'user') continue;
     const candidate = pending.slice(index);
-    const chars = candidate.reduce((sum, message) => sum + retainedTailCost(message), 0);
+    const chars = candidate.reduce((sum, message) => sum + messageCostChars(message), 0);
     if (chars > tailMaxChars) break;
     if (pending.slice(0, index).filter(isSummarizable).length < MIN_SUMMARIZED_MESSAGES) break;
     tailStart = index;

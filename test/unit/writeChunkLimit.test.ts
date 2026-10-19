@@ -16,30 +16,30 @@ const strata = {
 
 describe('writeChunkLimit', () => {
   it('keeps the full computed recovery ceiling for a large single-slot window', () => {
-    expect(writeChunkLimit(strata, undefined, compact)).toBe(36000);
+    expect(writeChunkLimit(strata, undefined, compact, 'openai-compatible')).toBe(36000);
   });
 
   it('keeps 6000 for a multi-slot llama.cpp entry', () => {
     const model = { name: 'q', spawn: { num_ctx: 32768, n_parallel: 4 } } as unknown as ModelConfig;
-    expect(writeChunkLimit(model, undefined, compact)).toBe(MAX_SINGLE_WRITE_CHARS);
+    expect(writeChunkLimit(model, undefined, compact, 'llama.cpp')).toBe(MAX_SINGLE_WRITE_CHARS);
   });
 
   it('keeps 6000 when the window is unknown or compaction does not bound it', () => {
     const cloud = { name: 'cloud' } as unknown as ModelConfig;
-    expect(writeChunkLimit(cloud, undefined, compact)).toBe(MAX_SINGLE_WRITE_CHARS);
-    expect(writeChunkLimit(strata, undefined, undefined)).toBe(MAX_SINGLE_WRITE_CHARS);
-    expect(writeChunkLimit(strata, undefined, { enabled: false })).toBe(MAX_SINGLE_WRITE_CHARS);
+    expect(writeChunkLimit(cloud, undefined, compact, 'openai')).toBe(MAX_SINGLE_WRITE_CHARS);
+    expect(writeChunkLimit(strata, undefined, undefined, 'openai-compatible')).toBe(MAX_SINGLE_WRITE_CHARS);
+    expect(writeChunkLimit(strata, undefined, { enabled: false }, 'openai-compatible')).toBe(MAX_SINGLE_WRITE_CHARS);
   });
 
   it('is capped by the model output limit and spends its reasoning budget', () => {
     const capped = { ...strata, sampling: { max_tokens: 16000 } } as ModelConfig;
     // 16000 - 8000 thinking - 4000 headroom = 4000 tokens -> 8000 chars.
-    expect(writeChunkLimit(capped, undefined, compact)).toBe(8000);
+    expect(writeChunkLimit(capped, undefined, compact, 'openai-compatible')).toBe(8000);
     const budgeted = {
       ...capped,
       extra_llama_server_args: ['--reasoning-budget', '10000'],
     } as ModelConfig;
-    expect(writeChunkLimit(budgeted, undefined, compact)).toBe(MAX_SINGLE_WRITE_CHARS);
+    expect(writeChunkLimit(budgeted, undefined, compact, 'openai-compatible')).toBe(MAX_SINGLE_WRITE_CHARS);
   });
 });
 

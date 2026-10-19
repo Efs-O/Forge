@@ -1,6 +1,6 @@
 import type { ChatMessage } from '../llm/types';
 import { computeContextBudget, minimumOutputReserve } from '../util/contextBudget';
-import type { LlamaServerConfig, ModelConfig } from '../config/types';
+import type { LlamaServerConfig, ModelConfig, ModelProvider } from '../config/types';
 import { getLogger } from '../util/logger';
 import { dropOldestReasoning } from './preserveThinking';
 
@@ -114,6 +114,7 @@ export function prepareToolResultContext(input: {
   toolTokens: number;
   model: ModelConfig;
   server?: LlamaServerConfig;
+  provider?: ModelProvider;
   responseReserve?: number;
   state?: ContextTrimState;
 }): ToolResultContextResult {
@@ -129,6 +130,7 @@ export function prepareToolResultContext(input: {
       toolTokens: input.toolTokens,
       model: input.model,
       server: input.server,
+      provider: input.provider ?? input.model.provider ?? 'llama.cpp',
     });
   const first = estimate(input.messages);
   const inputBudget = Math.max(0, first.max - responseReserve);

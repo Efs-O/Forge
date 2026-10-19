@@ -340,7 +340,11 @@ describe('anchored output budgets across actual requests', () => {
         }
       },
     );
-    const largeModel = { ...model, num_ctx: 200_000, spawn: { num_ctx: 200_000 } } as ModelConfig;
+    const largeModel = {
+      ...model,
+      num_ctx: 200_000,
+      spawn: { num_ctx: 200_000, n_parallel: 1 },
+    } as ModelConfig;
     const state: { promptEstimateScale?: number; promptAnchor?: PromptAnchor } = {};
     const tracker = createOutputBudgetTracker(state, largeModel);
     const result = await runToolCallingLoop({

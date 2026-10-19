@@ -87,7 +87,7 @@ describe('preserve_thinking', () => {
   });
 
   it('gives up thinking before it excerpts any tool result', () => {
-    const model = { name: 'local', num_ctx: 12_000 } as never;
+    const model = { name: 'local', num_ctx: 12_000, n_parallel: 1 } as never;
     const messages: ChatMessage[] = [
       { role: 'user', content: 'go' },
       { role: 'assistant', content: null, tool_calls: call('a'), reasoning_content: 'r'.repeat(20_000) },

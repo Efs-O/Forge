@@ -151,7 +151,7 @@ function warnAboutModel(
       `Forge: model "${model.name}" does not expose a usable chat template. Prompt formatting may be mismatched.`,
     );
   }
-  const perSlot = perSlotContext(model, config.llama_server);
+  const perSlot = perSlotContext(model, config.llama_server, model.provider ?? 'llama.cpp');
   const configuredMaxTokens = model.sampling?.max_tokens;
   if (perSlot > 0 && configuredMaxTokens !== undefined && configuredMaxTokens > perSlot) {
     ctx.warnOnce(
@@ -218,8 +218,9 @@ export async function runModelTurn(
   );
   // Config-derived, never per round: a per-round value would change the tool
   // list mid-turn and cost a cold prefill each time.
-  const writeLimit = writeChunkLimit(model, config.llama_server, config.auto_compact);
-  const outputLimits = toolOutputLimits(model, config.llama_server, config.auto_compact);
+  const provider = model.provider ?? 'llama.cpp';
+  const writeLimit = writeChunkLimit(model, config.llama_server, config.auto_compact, provider);
+  const outputLimits = toolOutputLimits(model, config.llama_server, config.auto_compact, provider);
   // Rebuilt on every round rather than snapshotted once per turn: a lazy tool
   // group activates mid-turn via `load_tool_group`, and its schemas have to
   // reach the request that immediately follows.
@@ -278,9 +279,8 @@ export async function runModelTurn(
   const workspaceIsProjectRoot = ctx.forgeLoader?.root
     ? isProjectRoot(ctx.forgeLoader.root)
     : false;
-
   const compactor = ctx.compactMidTurn;
-  const outputBudget = createOutputBudgetTracker(conv, model, config.llama_server);
+  const outputBudget = createOutputBudgetTracker(conv, model, config.llama_server, provider);
   const result = await trackTurnCompletion(ctx.lifecycle, conv.id, () =>
     runToolCallingLoop({
       resolveBaseUrl,

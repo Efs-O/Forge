@@ -383,8 +383,7 @@ async function compactOnce(
     attemptFinish = attemptSalvaged ? 'length' : 'stop';
     return outcome;
   } catch (err) {
-    const category =
-      err instanceof PromptIncompleteError ? 'incomplete-output' : compactionFailureCategory(err);
+    const category = compactionFailureCategory(err);
     if (err instanceof PromptIncompleteError) attemptFinish = err.finishReason ?? 'none';
     options.onFailureCategory?.(category);
     deps.post({

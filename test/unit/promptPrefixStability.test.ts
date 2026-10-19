@@ -228,7 +228,7 @@ describe('strict chat-template safety', () => {
 
   describe('context-trim prefix stability', () => {
     it('keeps earlier prepared messages byte-identical between watermark advances', () => {
-      const model: ModelConfig = { name: 'trim-test', num_ctx: 131_072 } as ModelConfig;
+      const model: ModelConfig = { name: 'trim-test', num_ctx: 131_072, n_parallel: 1 } as ModelConfig;
       const state = { reasoningDropped: 0, excerpts: new Map<string, number>() };
       const messages: ChatMessage[] = [
         { role: 'user', content: 'u'.repeat(10_000) },

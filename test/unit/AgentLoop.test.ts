@@ -54,6 +54,8 @@ function makeConfig(model: Partial<ModelConfig> = {}): ForgeConfig {
         name: 'test-model',
         provider: 'llama.cpp',
         gguf_path: '/models/test.gguf',
+        num_ctx: 131_072,
+        spawn: { n_parallel: 1 },
         ...model,
       },
     ],

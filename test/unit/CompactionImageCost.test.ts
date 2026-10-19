@@ -14,8 +14,8 @@ import {
   compactionWindowChars,
   messageCostChars,
 } from '../../src/sidebar/compactionWindow';
-import { retainedTailCost, selectCompactionSplit } from '../../src/sidebar/compactionSplit';
-import { COMPACTION_CHARS_PER_TOKEN } from '../../src/sidebar/compactionBudget';
+import { selectCompactionSplit } from '../../src/sidebar/compactionSplit';
+import { COMPACTION_CHARS_PER_TOKEN, compactionBudget } from '../../src/sidebar/compactionBudget';
 import { contentPartCostChars, IMAGE_PART_TOKENS } from '../../src/util/contextBudget';
 import type { ChatMessage, ContentPart } from '../../src/llm/types';
 import type { ConversationRuntime } from '../../src/sidebar/sessionTypes';
@@ -66,7 +66,12 @@ function photoConversation(): ChatMessage[] {
   return messages;
 }
 
-function deps(conv: ConversationRuntime, prompts: string[], posted: HostToWebview[]): CompactionDeps {
+function deps(
+  conv: ConversationRuntime,
+  prompts: string[],
+  posted: HostToWebview[],
+  modelMax = 200_000,
+): CompactionDeps {
   return {
     post: (msg) => posted.push(msg),
     getConversation: (id) => (id === conv.id ? conv : undefined),
@@ -81,7 +86,7 @@ function deps(conv: ConversationRuntime, prompts: string[], posted: HostToWebvie
       return SUMMARY;
     },
     currentLocalTime: () => 'test local time',
-    compactionMetrics: () => ({ max: 200_000 }),
+    compactionMetrics: () => ({ max: modelMax }),
   };
 }
 
@@ -100,14 +105,62 @@ describe('image cost single owner', () => {
     expect(contentPartCostChars({ type: 'text', text: 'abc' }, COMPACTION_CHARS_PER_TOKEN)).toBe(3);
   });
 
-  it('prices an image identically in the window measurement and the tail cost', () => {
-    // Pins both sites to the one function: reverting either to 0 (the old tail
-    // cost) or to the base64 length (the old window cost) fails here.
+  it('uses the window message measure at the exact tail boundary', () => {
     const message: ChatMessage = { role: 'user', content: [image] };
-    expect(retainedTailCost(message)).toBe(expected);
-    expect(messageCostChars(message) - message.role.length).toBe(expected);
-    expect(retainedTailCost(message)).not.toBe(0);
+    const cost = messageCostChars(message);
+    expect(cost - message.role.length).toBe(expected);
+    const messages: ChatMessage[] = [
+      { role: 'user', content: 'first task' },
+      { role: 'assistant', content: 'first result' },
+      message,
+    ];
+    expect(selectCompactionSplit(messages, cost - 1)?.tailStart).toBe(messages.length);
+    expect(selectCompactionSplit(messages, cost)?.tailStart).toBe(2);
     expect(messageCostChars(message)).toBeLessThan(PAYLOAD_CHARS);
+  });
+});
+
+describe('2026-10-19 synthetic compaction shape', () => {
+  it('drops the over-budget live exchange before summarizing once', async () => {
+    const userText = 'write the requested file';
+    const messages: ChatMessage[] = [
+      { role: 'user', content: 'first task' },
+      { role: 'assistant', content: 'first result' },
+      { role: 'user', content: userText },
+      {
+        role: 'assistant',
+        content: null,
+        reasoning: 'r'.repeat(6_000),
+        tool_calls: [
+          {
+            id: 'write',
+            type: 'function',
+            function: {
+              name: 'write_file',
+              arguments: JSON.stringify({ path: 'src/example.ts', content: 'x'.repeat(14_900) }),
+            },
+          },
+        ],
+      },
+      { role: 'tool', tool_call_id: 'write', content: 'w'.repeat(14_000) },
+    ];
+    const tail = messages.slice(2);
+    const oldEstimate = userText.length + 2_000;
+    const actualCost = tail.reduce((sum, message) => sum + messageCostChars(message), 0);
+    const budget = compactionBudget(131_072, actualCost, 131_072, 0, undefined, 131_072);
+    const tailMaxChars = budget.tailMaxChars;
+    expect(tailMaxChars).toBe(3_932);
+    expect(oldEstimate).toBeLessThan(tailMaxChars);
+    expect(tailMaxChars).toBeLessThan(actualCost);
+    expect(selectCompactionSplit(messages, tailMaxChars)?.tailStart).toBe(messages.length);
+
+    const conv = conversation(messages);
+    const prompts: string[] = [];
+    await expect(
+      runCompaction(deps(conv, prompts, [], 131_072), conv.id, { auto: true }),
+    ).resolves.toBe('compacted');
+    expect(prompts).toHaveLength(1);
+    expect(conv.compaction?.fromIndex).toBe(conv.messages.length);
   });
 });
 

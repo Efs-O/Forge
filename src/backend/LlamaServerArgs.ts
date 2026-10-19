@@ -1,4 +1,5 @@
 import type { ModelConfig, LlamaServerConfig } from '../config/types';
+import { DEFAULT_LLAMA_CTX, DEFAULT_LLAMA_PARALLEL } from '../util/contextBudget';
 
 function normalizeCacheType(value: number | string): string {
   if (typeof value === 'string') return value;
@@ -41,7 +42,7 @@ export function composeLlamaServerArgs(
   const gpuLayers = model.n_gpu_layers ?? server.n_gpu_layers ?? 999;
   args.push('--n-gpu-layers', String(gpuLayers));
 
-  const ctx = model.num_ctx ?? server.default_num_ctx ?? 4096;
+  const ctx = model.num_ctx ?? server.default_num_ctx ?? DEFAULT_LLAMA_CTX;
   args.push('--ctx-size', String(ctx));
 
   const batch = model.n_batch ?? server.n_batch ?? 512;
@@ -52,7 +53,7 @@ export function composeLlamaServerArgs(
   // NOTE: --ctx-size below is the TOTAL context split across these slots, so each
   // slot gets ctx / n_parallel — size default_num_ctx/num_ctx accordingly
   // (per-worker-ctx × n_parallel).
-  const parallel = model.n_parallel ?? server.n_parallel ?? 4;
+  const parallel = model.n_parallel ?? server.n_parallel ?? DEFAULT_LLAMA_PARALLEL;
   args.push('--parallel', String(parallel));
 
   const typeK = model.type_k ?? server.type_k ?? 8;

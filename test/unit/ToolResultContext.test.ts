@@ -9,7 +9,7 @@ import { CONTEXT_INPUT_EXHAUSTED_MESSAGE, runToolCallingLoop } from '../../src/a
 import type { ChatMessage } from '../../src/llm/types';
 import { makeReadToolResultTool, MAX_TOOL_RESULT_READ_CHARS } from '../../src/tools/toolResultTools';
 
-const model = { name: 'local', num_ctx: 12_000 } as never;
+const model = { name: 'local', num_ctx: 12_000, spawn: { n_parallel: 1 } } as never;
 
 function longResult(): string {
   return `START FACT\n${'diagnostic line\n'.repeat(8_000)}END FACT`;
@@ -57,7 +57,7 @@ describe('context trim state', () => {
     const first = prepareToolResultContext({
       messages,
       toolTokens: 0,
-      model: { name: 'local', num_ctx: 30_000 } as never,
+      model: { name: 'local', num_ctx: 30_000, spawn: { n_parallel: 1 } } as never,
       state,
     });
     const firstExcerpt = first.messages[1]?.content;
@@ -65,7 +65,7 @@ describe('context trim state', () => {
     const second = prepareToolResultContext({
       messages,
       toolTokens: 0,
-      model: { name: 'local', num_ctx: 30_000 } as never,
+      model: { name: 'local', num_ctx: 30_000, spawn: { n_parallel: 1 } } as never,
       state,
     });
 

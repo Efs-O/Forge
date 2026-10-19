@@ -13,7 +13,7 @@ const strata = { name: 'strata', num_ctx: 200_000 } as unknown as ModelConfig;
 
 describe('toolOutputLimits', () => {
   it('scales the Strata limits from its single-slot context window', () => {
-    expect(toolOutputLimits(strata, undefined, compact)).toEqual({
+    expect(toolOutputLimits(strata, undefined, compact, 'openai-compatible')).toEqual({
       searchLines: 200,
       resultPageChars: 20_000,
       shellInlineChars: 50_000,
@@ -27,11 +27,13 @@ describe('toolOutputLimits', () => {
       name: 'small',
       spawn: { num_ctx: 32_768, n_parallel: 4 },
     } as unknown as ModelConfig;
-    expect(toolOutputLimits(cloud, undefined, compact)).toEqual(DEFAULT_TOOL_OUTPUT_LIMITS);
-    expect(toolOutputLimits(strata, undefined, { enabled: false })).toEqual(
+    expect(toolOutputLimits(cloud, undefined, compact, 'openai')).toEqual(DEFAULT_TOOL_OUTPUT_LIMITS);
+    expect(toolOutputLimits(strata, undefined, { enabled: false }, 'openai-compatible')).toEqual(
       DEFAULT_TOOL_OUTPUT_LIMITS,
     );
-    expect(toolOutputLimits(fourSlots, undefined, compact)).toEqual(DEFAULT_TOOL_OUTPUT_LIMITS);
+    expect(toolOutputLimits(fourSlots, undefined, compact, 'llama.cpp')).toEqual(
+      DEFAULT_TOOL_OUTPUT_LIMITS,
+    );
   });
 
   it('reports exact omitted search snippets and leaves complete output unchanged', () => {

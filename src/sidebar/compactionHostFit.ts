@@ -158,7 +158,7 @@ export async function fitCompactionHostBlock(options: {
     } catch (err) {
       const where = endpoint ? ` at ${endpoint}` : '';
       throw new CompactionFailure(
-        'budget-refusal',
+        'model-error',
         `Configured ${counter} counter${where} failed: ${(err as Error).message}; previous context kept.`,
       );
     }

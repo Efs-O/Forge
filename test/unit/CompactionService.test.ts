@@ -20,9 +20,16 @@ import { applyCompactionWindow, messageCostChars } from '../../src/sidebar/compa
 import type { ChatMessage } from '../../src/llm/types';
 import type { ConversationRuntime } from '../../src/sidebar/sessionTypes';
 import type { HostToWebview } from '../../src/sidebar/messageBridge';
-import type { CompactionLogEntry } from '../../src/sidebar/SessionLogger';
-import type { PromptRunOptions } from '../../src/sidebar/PromptRun';
-import { CompactionFailure } from '../../src/sidebar/compactionFailure';
+import type {
+  CompactionAttemptLogEntry,
+  CompactionLogEntry,
+} from '../../src/sidebar/SessionLogger';
+import { PromptIncompleteError, type PromptRunOptions } from '../../src/sidebar/PromptRun';
+import {
+  CompactionFailure,
+  compactionFailureCategory,
+  type CompactionFailureCategory,
+} from '../../src/sidebar/compactionFailure';
 import { opClearMessages } from '../../src/sidebar/ConversationOps';
 import {
   activateLazyGroup,
@@ -118,7 +125,7 @@ describe('selectCompactionSplit', () => {
     expect(split?.tailStart).toBe(messages.length);
   });
 
-  it('retains a complete tool exchange when only the result is oversized', () => {
+  it('summarizes a complete tool exchange when its full result exceeds the tail cap', () => {
     const messages: ChatMessage[] = [
       { role: 'user', content: 'first task' },
       { role: 'assistant', content: 'did the first task' },
@@ -138,8 +145,10 @@ describe('selectCompactionSplit', () => {
     ];
 
     const split = selectCompactionSplit(messages);
-    expect(split?.tailStart).toBe(2);
-    expect(messages.slice(split!.tailStart).map((message) => message.role)).toEqual([
+    expect(split?.tailStart).toBe(messages.length);
+    expect(split?.summarize.map((message) => message.role)).toEqual([
+      'user',
+      'assistant',
       'user',
       'assistant',
       'tool',
@@ -1069,31 +1078,18 @@ describe('runCompaction', () => {
 
 describe('compaction fit guard', () => {
   it('refuses a compaction that would not shrink a large window', async () => {
-    // A summary plus preserved state plus a retained tail can add up to more
-    // than it replaced. Committing that and auto-resuming is how a
-    // compact/resume loop starts: a model call per pass, and no reduction.
-    // The bulk is in tool-call ARGUMENTS, which the split's own tail cost
-    // scores as zero — so the tail passes RETAINED_TAIL_MAX_CHARS while
-    // actually costing 30,000 characters. That is what makes a non-reducing
-    // compaction reachable at all.
+    // The returned summary is deliberately longer than this source. This
+    // reaches the final fit guard after a split that does not rely on an
+    // under-counted retained tail.
     const c = conv([
-      { role: 'user', content: 'first task' },
-      { role: 'assistant', content: 'working' },
-      { role: 'user', content: 'second task' },
-      {
-        role: 'assistant',
-        content: null,
-        tool_calls: [
-          {
-            id: 'a',
-            type: 'function',
-            function: { name: 'write_file', arguments: 'x'.repeat(30000) },
-          },
-        ],
-      },
-      { role: 'tool', content: 'ok', tool_call_id: 'a' },
+      { role: 'user', content: 'source request ' + 'u'.repeat(12_100) },
+      { role: 'assistant', content: 'source work ' + 'a'.repeat(12_100) },
     ]);
-    const h = harness(c, async () => long('summary'));
+    c.last_input_tokens = 200_000;
+    const oversizedSummary =
+      `Goal: summary\nState: recorded. ${'detail. '.repeat(3_500)}\nNext: continue.` +
+      '\nFiles: none.\nConstraints: none recorded.\nErrors: none recorded.\nReference: none recorded.';
+    const h = harness(c, async () => oversizedSummary);
 
     await expect(runCompaction(h.deps, c.id, { auto: true })).resolves.toBe('failed');
     expect(c.compaction).toBeUndefined();
@@ -1160,6 +1156,139 @@ describe('compaction fit guard', () => {
       ],
     } as ChatMessage;
     expect(messageCostChars(withAttachment)).toBeGreaterThan(400);
+  });
+});
+
+describe('compaction failure category mapping', () => {
+  it.each<CompactionFailureCategory>([
+    'incomplete-output',
+    'budget-refusal',
+    'invalid-summary',
+    'model-error',
+    'cancelled',
+    'unknown',
+  ])('preserves CompactionFailure category %s', (category) => {
+    expect(compactionFailureCategory(new CompactionFailure(category, 'failure'))).toBe(category);
+  });
+
+  it.each(['AbortError', 'CancellationError'])('maps %s to cancelled', (name) => {
+    const error = new Error('cancelled');
+    error.name = name;
+    expect(compactionFailureCategory(error)).toBe('cancelled');
+  });
+
+  it('maps a cancelled incomplete prompt to cancelled', () => {
+    expect(compactionFailureCategory(new PromptIncompleteError('cancelled'))).toBe('cancelled');
+  });
+
+  it('maps a length-limited incomplete prompt to incomplete-output', () => {
+    expect(compactionFailureCategory(new PromptIncompleteError('length'))).toBe('incomplete-output');
+  });
+
+  it.each([null, 'stop', 'content_filter'])('maps incomplete finish reason %s to model-error', (reason) => {
+    expect(compactionFailureCategory(new PromptIncompleteError(reason))).toBe('model-error');
+  });
+
+  it('maps other errors to model-error', () => {
+    expect(compactionFailureCategory(new Error('connection reset'))).toBe('model-error');
+  });
+});
+
+describe('compaction failure retry policy', () => {
+  it('retries no-finish output immediately and after 30 seconds without context growth', async () => {
+    vi.useFakeTimers();
+    try {
+      const c = conv([
+        { role: 'user', content: 'first task' },
+        { role: 'assistant', content: 'first answer' },
+        { role: 'user', content: 'second task' },
+        { role: 'assistant', content: 'working' },
+      ]);
+      c.last_input_tokens = 500;
+      const attempts: CompactionAttemptLogEntry[] = [];
+      let calls = 0;
+      const h = harness(c, async () => {
+        calls += 1;
+        throw new PromptIncompleteError(null);
+      });
+      h.deps.logCompactionAttempt = (_conversation, entry) => attempts.push(entry);
+      const options = { auto: true };
+
+      await expect(runCompaction(h.deps, c.id, options)).resolves.toBe('failed');
+      expect(attempts.find((entry) => entry.phase === 'finished')?.category).toBe('model-error');
+      await expect(runCompaction(h.deps, c.id, options)).resolves.toBe('failed');
+      expect(calls).toBe(2);
+      await expect(runCompaction(h.deps, c.id, options)).resolves.toBe('skipped');
+      expect(calls).toBe(2);
+
+      await vi.advanceTimersByTimeAsync(30_000);
+      await expect(runCompaction(h.deps, c.id, options)).resolves.toBe('failed');
+      expect(calls).toBe(3);
+      expect(attempts.filter((entry) => entry.phase === 'finished').map((entry) => entry.category)).toEqual([
+        'model-error',
+        'model-error',
+        'model-error',
+      ]);
+      expect(attempts.find((entry) => entry.phase === 'suppressed')?.category).toBe('model-error');
+      expect(c.last_input_tokens).toBe(500);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('classifies a rejected counter as model-error without a floor retry', async () => {
+    const c = conv([
+      { role: 'user', content: 'first task' },
+      { role: 'assistant', content: 'first answer' },
+      { role: 'user', content: 'second task' },
+      { role: 'assistant', content: 'working' },
+    ]);
+    const h = harness(c, async () => long('summary'));
+    const attempts: CompactionAttemptLogEntry[] = [];
+    let counterCalls = 0;
+    h.deps.logCompactionAttempt = (_conversation, entry) => attempts.push(entry);
+    h.deps.tokenCountMode = () => 'count_tokens';
+    h.deps.countTokens = async () => {
+      counterCalls += 1;
+      throw new Error('counter unavailable');
+    };
+
+    await expect(
+      runCompaction(h.deps, c.id, { auto: true }),
+    ).resolves.toBe('failed');
+    expect(counterCalls).toBe(1);
+    expect(h.promptOptions).toBeUndefined();
+    expect(attempts.find((entry) => entry.phase === 'finished')?.category).toBe('model-error');
+  });
+
+  it('keeps length-limited output on the growth-only hold without a partial', async () => {
+    vi.useFakeTimers();
+    try {
+      const c = conv([
+        { role: 'user', content: 'first task' },
+        { role: 'assistant', content: 'first answer' },
+        { role: 'user', content: 'second task' },
+        { role: 'assistant', content: 'working' },
+      ]);
+      const attempts: CompactionAttemptLogEntry[] = [];
+      let calls = 0;
+      const h = harness(c, async () => {
+        calls += 1;
+        throw new PromptIncompleteError('length');
+      });
+      h.deps.logCompactionAttempt = (_conversation, entry) => attempts.push(entry);
+      const options = { auto: true };
+
+      await expect(runCompaction(h.deps, c.id, options)).resolves.toBe('failed');
+      expect(attempts.find((entry) => entry.phase === 'finished')?.category).toBe('incomplete-output');
+      await expect(runCompaction(h.deps, c.id, options)).resolves.toBe('skipped');
+      await vi.advanceTimersByTimeAsync(5 * 60_000);
+      await expect(runCompaction(h.deps, c.id, options)).resolves.toBe('skipped');
+      expect(attempts.find((entry) => entry.phase === 'suppressed')?.category).toBe('incomplete-output');
+      expect(calls).toBe(1);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 });
 

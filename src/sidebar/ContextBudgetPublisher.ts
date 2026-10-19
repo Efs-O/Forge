@@ -130,7 +130,9 @@ export class ContextBudgetPublisher {
     // `max` is the PER-SLOT window: --ctx-size is the total and --parallel
     // divides it, so every n_parallel > 1 model used to report several times
     // the context it actually had, here and on the HalluMeter bridge.
-    const max = activeModel ? perSlotContext(activeModel, config.llama_server) : 0;
+    const max = activeModel
+      ? perSlotContext(activeModel, config.llama_server, activeModel.provider ?? 'llama.cpp')
+      : 0;
     const used = reportedContextTokens(conv);
     this.deps.post({ type: 'tokenBudget', used, max });
     if (activeSelection && max > 0) {
@@ -167,7 +169,10 @@ export class ContextBudgetPublisher {
     const selection = conv.active_model ?? config.active_model;
     const model = this.resolveModel(config, this.deps.baseOf(selection));
     if (!model) return undefined;
-    return { used: reportedContextTokens(conv), max: perSlotContext(model, config.llama_server) };
+    return {
+      used: reportedContextTokens(conv),
+      max: perSlotContext(model, config.llama_server, model.provider ?? 'llama.cpp'),
+    };
   }
 
   /**
@@ -182,7 +187,9 @@ export class ContextBudgetPublisher {
     if (auto?.enabled !== true || !this.deps.admissionCompact) return { kind: 'proceed' };
     const selection = conv.active_model ?? config.active_model;
     const model = this.resolveModel(config, this.deps.baseOf(selection));
-    const max = model ? perSlotContext(model, config.llama_server) : 0;
+    const max = model
+      ? perSlotContext(model, config.llama_server, model.provider ?? 'llama.cpp')
+      : 0;
     if (max <= 0) return { kind: 'proceed' };
     const fraction = reportedContextTokens(conv) / max;
     if (fraction < (auto.at ?? DEFAULT_AUTO_COMPACT_AT)) return { kind: 'proceed' };
@@ -216,7 +223,9 @@ export class ContextBudgetPublisher {
     const config = this.deps.getConfig();
     const selection = conv.active_model ?? config.active_model;
     const model = this.resolveModel(config, this.deps.baseOf(selection));
-    const max = model ? perSlotContext(model, config.llama_server) : 0;
+    const max = model
+      ? perSlotContext(model, config.llama_server, model.provider ?? 'llama.cpp')
+      : 0;
     const used = reportedContextTokens(conv);
     const action = await this.evaluateThresholds(config, conv, used, max, chain);
     // Publication remains active-tab-only, independently of evaluation.
