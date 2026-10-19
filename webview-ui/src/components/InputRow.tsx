@@ -61,10 +61,18 @@ function omit(record: Record<string, string>, key: string): Record<string, strin
 }
 
 const SendIcon = (): React.ReactElement => (
-  // 11px, not 13: the icon must stay inside the 16px line box the composer row
-  // pins, or send grows taller than the remote chip beside it.
-  <svg width="11" height="11" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true">
-    <path d="M15.854.146a.5.5 0 0 1 .11.54l-5.819 14.547a.75.75 0 0 1-1.329.124l-3.178-4.995L.643 7.184a.75.75 0 0 1 .124-1.33L15.314.037a.5.5 0 0 1 .54.11z" />
+  <svg
+    width="13"
+    height="13"
+    viewBox="0 0 16 16"
+    fill="none"
+    stroke="currentColor"
+    strokeWidth="1.8"
+    strokeLinecap="round"
+    strokeLinejoin="round"
+    aria-hidden="true"
+  >
+    <path d="M8 13V3M3.5 7.5 8 3l4.5 4.5" />
   </svg>
 );
 
@@ -98,7 +106,8 @@ function RemoteChip({
 }): React.ReactElement | null {
   if (transports.length === 0) return null;
   const via = transports.join(' · ');
-  const label = paired ? 'Remote active' : 'Remote waiting';
+  // One word for both states: the dot's colour says paired or waiting, and the
+  // tooltip says which, so the chip stays small beside the paperclip.
   const title = paired
     ? `Remote control is paired on ${via}. Messages from there drive this window.`
     : `${via} is running but no owner is paired. Run “Forge: Pair Remote Device” to bind one.`;
@@ -110,7 +119,7 @@ function RemoteChip({
       role="status"
     >
       <span className="remote-chip-dot" aria-hidden="true" />
-      <span className="remote-chip-label">{label}</span>
+      <span className="remote-chip-label">Remote</span>
     </span>
   );
 }
@@ -296,18 +305,37 @@ export function InputRow({
           return;
         }
       }
+      // With text typed the one action button is Send, so Esc is the way to
+      // stop without clearing the draft.
+      if (e.key === 'Escape' && streaming) {
+        e.preventDefault();
+        onCancel();
+        return;
+      }
       if (e.key === 'Enter' && !e.shiftKey) {
         e.preventDefault();
         submit();
       }
     },
-    [activeIndex, runSlashCommand, runnable, slashMatches, showSlashMenu, submit, setText],
+    [
+      activeIndex,
+      runSlashCommand,
+      runnable,
+      slashMatches,
+      showSlashMenu,
+      submit,
+      setText,
+      streaming,
+      onCancel,
+    ],
   );
 
   const canSend = text.trim().length > 0 || attachments.length > 0;
-  // The key hints moved to #composer-hint below the field, so the placeholder
-  // stops repeating them - it is the widest text in the panel and was spending
-  // that width on a shortcut the hint row now states permanently.
+  // One button, like Claude Code's: while a turn runs it is Stop until there is
+  // something to queue, then Send. Esc stops in either case.
+  const showStop = streaming && !canSend;
+  // The placeholder does not repeat the key hints - it is the widest text in
+  // the panel. The action button's tooltip carries them.
   const placeholder = backendReady
     ? 'Ask, or / for commands…'
     : 'Ask anything… first send starts the backend';
@@ -364,11 +392,10 @@ export function InputRow({
       />
 
       <div id="prompt-area">
-        {/* The paperclip sits inside the field's own box rather than in the
-            action row: attaching is something you do *to* the message being
-            composed, and the row below is for what happens to it afterwards.
-            The field reserves the corner with its bottom padding, so a full
-            prompt scrolls above the button instead of under it. */}
+        {/* Everything that acts on the message being composed sits inside the
+            field's own box, in a strip along its bottom edge. The field
+            reserves the strip with its bottom padding, so a full prompt
+            scrolls above the buttons instead of under them. */}
         <div id="prompt-shell">
           <textarea
             ref={textareaRef}
@@ -379,22 +406,53 @@ export function InputRow({
             onChange={handleTextChange}
             onKeyDown={handleKeyDown}
             onPaste={handlePaste}
-            rows={5}
+            rows={2}
           />
-          <button
-            id="attach-btn"
-            type="button"
-            title="Attach files — or drop them here, or paste a screenshot. Images up to 10 MiB, text and code up to 2 MiB, 10 files / 25 MiB per message."
-            aria-label="Attach files"
-            onClick={() => fileInputRef.current?.click()}
-          >
-            <PaperclipIcon />
-          </button>
-          {/* Armed Clanker shares the paperclip's lane: it describes the field
-              you are typing into, so it sits in the field, not under the row. */}
-          {clankerMode && (
-            <span id="clanker-notice">⏵⏵ Clanker — no confirmations · /clanker to stop</span>
-          )}
+          <div id="prompt-lane">
+            <button
+              id="attach-btn"
+              type="button"
+              title="Attach files — or drop them here, or paste a screenshot. Images up to 10 MiB, text and code up to 2 MiB, 10 files / 25 MiB per message."
+              aria-label="Attach files"
+              onClick={() => fileInputRef.current?.click()}
+            >
+              <PaperclipIcon />
+            </button>
+            <RemoteChip transports={remote.transports} paired={remote.paired} />
+            {/* Armed Clanker describes the field you are typing into, so it
+                sits in the field. It is the first thing to ellipsise. */}
+            {clankerMode && (
+              <span id="clanker-notice">⏵⏵ Clanker — no confirmations · /clanker to stop</span>
+            )}
+            {showStop ? (
+              <button
+                id="btn-stop"
+                type="button"
+                onClick={onCancel}
+                title="Stop (Esc)"
+                aria-label="Stop"
+              >
+                <StopIcon />
+              </button>
+            ) : (
+              // A queued message confirms itself in the transcript, as a
+              // QueuedPromptRow, so the tooltip is the only place to say so.
+              <button
+                id="btn-send"
+                type="button"
+                onClick={submit}
+                disabled={!canSend}
+                title={
+                  streaming
+                    ? 'Send (Enter): Forge reads it at its next step · Esc stops'
+                    : 'Send (Enter) · Shift+Enter for a newline'
+                }
+                aria-label="Send"
+              >
+                <SendIcon />
+              </button>
+            )}
+          </div>
         </div>
 
         <input
@@ -406,45 +464,14 @@ export function InputRow({
           onChange={handleFileChange}
         />
 
-        {/* Three columns rather than a flex spacer: `1fr auto 1fr` keeps the
-            model at the row's true centre no matter how wide the left chip
-            gets, where a spacer would shove it off-axis the moment the chip
-            appeared. The side cells collapse to nothing when empty. */}
         <div id="input-actions">
-          <span className="input-actions-left">
-            <RemoteChip transports={remote.transports} paired={remote.paired} />
-          </span>
-
           <ModelSelector
             models={models}
             activeModel={activeModel}
             onModelChange={onModelChange}
             disabled={modelPickerDisabled}
           />
-
-          <span className="input-actions-right">
-            {streaming && (
-              // The labels are wrapped so the narrow-panel rule can drop the
-              // word and keep the glyph. A bare text node cannot be targeted.
-              <button id="btn-stop" type="button" onClick={onCancel} title="Stop">
-                <StopIcon />
-                <span>Stop</span>
-              </button>
-            )}
-            <button id="btn-send" type="button" onClick={submit} disabled={!canSend} title="Send">
-              <SendIcon />
-              <span>Send</span>
-            </button>
-          </span>
         </div>
-
-        {/* Enter's behaviour is stated rather than built into a second button -
-            the queue confirms itself in the transcript, as a QueuedPromptRow. */}
-        <p id="composer-hint">
-          {streaming
-            ? 'Enter tells Forge at its next step'
-            : 'Enter to send · Shift+Enter for a newline'}
-        </p>
       </div>
     </div>
   );

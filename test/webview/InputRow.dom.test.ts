@@ -46,15 +46,17 @@ function renderInput(
   streaming: boolean,
   onRunSlashCommand = vi.fn(),
   remote: { transports: string[]; paired: boolean } = { transports: [], paired: false },
+  prefillText: string | null = '/',
+  onCancel = vi.fn(),
 ): typeof onRunSlashCommand {
   act(() => {
     root.render(
       React.createElement(InputRow, {
         onSend: vi.fn(),
-        onCancel: vi.fn(),
+        onCancel,
         streaming,
         backendReady: true,
-        prefillText: '/',
+        prefillText,
         onPrefillConsumed: vi.fn(),
         clankerMode: false,
         onRunSlashCommand,
@@ -124,9 +126,9 @@ describe('remote-control chip', () => {
     expect(chip()).toBeNull();
   });
 
-  it('reads active only once an owner is paired', () => {
+  it('reads paired only once an owner is paired', () => {
     renderInput(false, vi.fn(), { transports: ['telegram'], paired: true });
-    expect(chip()?.textContent).toBe('Remote active');
+    expect(chip()?.textContent).toBe('Remote');
     expect(chip()?.className).toContain('is-paired');
   });
 
@@ -134,7 +136,7 @@ describe('remote-control chip', () => {
   // paired answers /pair and nothing else, so it must not claim to be reachable.
   it('reads waiting while a running transport has no owner', () => {
     renderInput(false, vi.fn(), { transports: ['whatsapp'], paired: false });
-    expect(chip()?.textContent).toBe('Remote waiting');
+    expect(chip()?.textContent).toBe('Remote');
     expect(chip()?.className).toContain('is-unpaired');
     expect(chip()?.getAttribute('title')).toContain('no owner is paired');
   });
@@ -143,5 +145,49 @@ describe('remote-control chip', () => {
     renderInput(false, vi.fn(), { transports: ['telegram', 'whatsapp'], paired: true });
     expect(container.querySelectorAll('#remote-chip')).toHaveLength(1);
     expect(chip()?.getAttribute('title')).toContain('telegram · whatsapp');
+  });
+});
+
+describe('action button', () => {
+  const send = (): HTMLButtonElement | null => container.querySelector('#btn-send');
+  const stop = (): HTMLButtonElement | null => container.querySelector('#btn-stop');
+  const prompt = (): HTMLTextAreaElement => container.querySelector('#prompt')!;
+
+  it('is Send, disabled, while idle with nothing typed', () => {
+    renderInput(false, vi.fn(), undefined, null);
+    expect(stop()).toBeNull();
+    expect(send()?.disabled).toBe(true);
+  });
+
+  it('is Stop while a turn runs with nothing typed', () => {
+    const onCancel = vi.fn();
+    renderInput(true, vi.fn(), undefined, null, onCancel);
+    expect(send()).toBeNull();
+    act(() => stop()!.click());
+    expect(onCancel).toHaveBeenCalledTimes(1);
+  });
+
+  // Typed text turns the button into Send, which queues; Esc must still stop
+  // the turn, and must not clear the draft.
+  it('is Send while a turn runs with text typed, and Esc still stops', () => {
+    const onCancel = vi.fn();
+    renderInput(true, vi.fn(), undefined, 'check the Ollama path', onCancel);
+    expect(stop()).toBeNull();
+    expect(send()?.disabled).toBe(false);
+
+    act(() => {
+      prompt().dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
+    });
+    expect(onCancel).toHaveBeenCalledTimes(1);
+    expect(prompt().value).toBe('check the Ollama path');
+  });
+
+  it('leaves Esc alone while idle', () => {
+    const onCancel = vi.fn();
+    renderInput(false, vi.fn(), undefined, 'draft', onCancel);
+    act(() => {
+      prompt().dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
+    });
+    expect(onCancel).not.toHaveBeenCalled();
   });
 });

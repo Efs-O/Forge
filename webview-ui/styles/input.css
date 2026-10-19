@@ -43,28 +43,34 @@
   gap: 6px;
 }
 
-/* Positioning context for the paperclip, which lives inside the field's box. */
+/* Positioning context for the strip of controls inside the field's box. */
 #prompt-shell {
   position: relative;
   display: flex;
 }
 
+/*
+ * Starts at two lines and grows with the text, up to eight, then scrolls.
+ * `field-sizing: content` does the growing - no measuring script. The 40px in
+ * both bounds is the 8px top padding, the 30px strip and the 2px border.
+ */
 #prompt {
   width: 100%;
   resize: none;
+  field-sizing: content;
   background: var(--vscode-input-background);
   color: var(--vscode-input-foreground);
   border: 1px solid var(--vscode-input-border, #555);
-  /* Bottom padding is the paperclip's lane. A textarea honours it after the
-     last line, so a prompt long enough to scroll still stops above the button
-     rather than running behind it. */
+  /* Bottom padding is the control strip's lane. A textarea honours it after
+     the last line, so a prompt long enough to scroll still stops above the
+     buttons rather than running behind them. */
   padding: 8px 10px 30px;
   font-family: inherit;
   font-size: inherit;
-  min-height: 42px;
-  max-height: 140px;
-  border-radius: var(--forge-radius-md);
   line-height: 1.45;
+  min-height: calc(2 * 1.45em + 40px);
+  max-height: calc(8 * 1.45em + 40px);
+  border-radius: var(--forge-radius-md);
   transition: border-color 0.15s ease;
 }
 #prompt:focus {
@@ -76,68 +82,55 @@
 }
 
 /*
- * `1fr auto 1fr`, not flex with a spacer. The model sits in the middle cell and
- * therefore at the row's true centre whatever the side cells hold - a spacer
- * would push it off-axis the moment the remote chip appeared, so the selector
- * would shift sideways when a phone paired. Both side cells collapse to zero
- * when empty, so a window with no remote transport looks the same as before
- * except that the model is centred.
+ * Paperclip, remote chip, Clanker notice, then the action button pinned right.
+ * The strip itself lets clicks through to the field; only its controls take
+ * them.
  */
-#input-actions {
-  display: grid;
-  grid-template-columns: 1fr auto 1fr;
-  align-items: center;
-  gap: 6px;
-  min-width: 0;
-}
-
-.input-actions-left,
-.input-actions-right {
+#prompt-lane {
+  position: absolute;
+  left: 5px;
+  right: 5px;
+  bottom: 5px;
+  height: 24px;
   display: flex;
   align-items: center;
+  gap: 6px;
   min-width: 0;
+  pointer-events: none;
 }
-.input-actions-right {
-  justify-content: flex-end;
+#prompt-lane > button,
+#prompt-lane > #remote-chip {
+  pointer-events: auto;
+}
+#prompt-lane > :last-child {
+  margin-left: auto;
 }
 
-/*
- * The row's two ends. Their geometry is declared once, here, rather than three
- * times in three skins: the chip and send must sit at exactly the same height,
- * and stop must match send or the row would change height the moment a turn
- * starts. Written separately they drifted - the chip was 4px/11px against
- * send's 6px/12px - and nothing failed, it just looked wrong. Only the skin
- * varies below.
- *
- * line-height is pinned so the glyphs cannot set the content height: an 11px
- * icon is shorter than the text's box, so send and the text-only chip agree.
- */
-#remote-chip,
-#btn-send,
-#btn-stop {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  padding: 4px 9px;
-  border-radius: var(--forge-radius-sm);
-  border: 1px solid transparent;
-  font-family: inherit;
-  font-size: inherit;
-  line-height: 16px;
-  white-space: nowrap;
+/* The model sits centred under the field, alone on its line. */
+#input-actions {
+  display: flex;
+  justify-content: center;
   min-width: 0;
-  flex-shrink: 0;
-  align-self: auto;
 }
 
 /*
  * A readout, not a button: bordered rather than filled, so it never reads as
- * something to press.
+ * something to press, and smaller than the action button for the same reason.
  */
 #remote-chip {
-  border-color: var(--forge-remote);
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  height: 18px;
+  padding: 0 6px;
+  border-radius: var(--forge-radius-sm);
+  border: 1px solid var(--forge-remote);
   background: color-mix(in srgb, var(--forge-remote) 10%, transparent);
   color: var(--forge-remote);
+  font-size: 10px;
+  line-height: 16px;
+  white-space: nowrap;
+  flex-shrink: 0;
   cursor: default;
   user-select: none;
 }
@@ -151,8 +144,8 @@
 }
 
 .remote-chip-dot {
-  width: 6px;
-  height: 6px;
+  width: 5px;
+  height: 5px;
   border-radius: 50%;
   background: currentColor;
   flex-shrink: 0;
@@ -166,50 +159,17 @@
   }
 }
 
-.remote-chip-label {
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-
-/*
- * Below this the three cells cannot all keep their words: the model name is the
- * one that ellipsises to nothing first, and it is the one the row exists for.
- * The chip keeps its dot and hands the words to the tooltip; send keeps its
- * glyph. Measured against the 380px the sidebar opens at and the ~320px it can
- * be dragged to.
- */
+/* On a narrow panel the chip keeps its dot and hands the word to the tooltip. */
 @media (max-width: 360px) {
-  .remote-chip-label,
-  #btn-send span,
-  #btn-stop span {
+  .remote-chip-label {
     display: none;
   }
-  #remote-chip,
-  #btn-send,
-  #btn-stop {
-    padding: 4px 7px;
-  }
-}
-
-/* One line under the actions, carrying what Enter does. */
-#composer-hint {
-  margin: 0;
-  font-size: 10px;
-  line-height: 1.3;
-  color: var(--vscode-descriptionForeground);
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  user-select: none;
 }
 
 /* No border. Inside the field's own box a second bordered box reads as a
    nested input; the glyph alone is enough, and the hover fill gives back the
    hit-target feedback the border was carrying. */
 #attach-btn {
-  position: absolute;
-  left: 5px;
-  bottom: 5px;
   width: 24px;
   height: 24px;
   padding: 0;
@@ -231,44 +191,44 @@
   color: var(--vscode-foreground);
 }
 
-/*
- * Built like the remote chip on purpose: outlined, 10% accent fill, accent
- * text. Enter already sends, so this is the slower of two ways to do the same
- * thing and does not need to be the loudest object in the composer. Disabled
- * borrows the unpaired chip's grey rather than dimming the accent, so an empty
- * field reads as "not yet" instead of "broken".
- */
-#btn-send {
-  border-color: var(--forge-accent);
-  background: color-mix(in srgb, var(--forge-accent) 10%, transparent);
-  color: var(--forge-accent);
-  font-weight: 500;
+/* The one action button: Send, or Stop while a turn runs with nothing typed.
+   Both share this box so the strip never shifts when one replaces the other. */
+#btn-send,
+#btn-stop {
+  width: 24px;
+  height: 24px;
+  padding: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: var(--forge-radius-sm);
+  border: 1px solid transparent;
+  flex-shrink: 0;
   cursor: pointer;
-  transition:
-    background 0.12s ease,
-    border-color 0.12s ease,
-    color 0.12s ease;
+}
+
+#btn-send {
+  background: var(--forge-accent-fill);
+  color: var(--forge-accent-fill-fg);
+  transition: background 0.12s ease;
 }
 #btn-send:hover:not(:disabled) {
-  background: color-mix(in srgb, var(--forge-accent) 22%, transparent);
+  background: var(--forge-accent-fill-hover);
 }
 /*
  * Send is disabled whenever the prompt is empty, which is most of the time -
- * so this, not the accent, is the composer's resting appearance. It was first
- * given the unpaired chip's input-border grey and vanished against the panel:
- * correct as a semantic ("not the accent"), wrong as a colour. Mixed off the
- * foreground instead, so it tracks the theme and stays legible in both.
+ * so this, not the accent, is the composer's resting appearance. Mixed off the
+ * foreground so it tracks the theme and stays legible in both.
  */
 #btn-send:disabled {
-  border-color: color-mix(in srgb, var(--vscode-foreground) 42%, transparent);
+  border-color: color-mix(in srgb, var(--vscode-foreground) 35%, transparent);
   background: none;
-  color: color-mix(in srgb, var(--vscode-foreground) 72%, transparent);
+  color: color-mix(in srgb, var(--vscode-foreground) 60%, transparent);
   cursor: default;
 }
 
-/* Stop keeps its red and its fill. It is the one control in the row that must
-   never be mistaken for another, so it does not join the outlined family - it
-   only borrows the shared geometry above so the row height holds steady. */
+/* Stop keeps its red and its fill. It is the one control that must never be
+   mistaken for another. */
 #btn-stop {
   background: color-mix(
     in srgb,
@@ -277,8 +237,6 @@
   );
   color: var(--vscode-errorForeground, #f48771);
   border-color: var(--vscode-inputValidation-errorBorder, #be1100);
-  font-weight: 500;
-  cursor: pointer;
   transition: background 0.12s ease;
 }
 #btn-stop:hover {
@@ -309,14 +267,12 @@
   border-color: var(--forge-clanker);
 }
 
-/* Right of the paperclip, in the lane the field's bottom padding reserves, and
-   centred on the paperclip's 24px box. Clicks fall through to the field. */
+/* In the control strip, after the paperclip and the remote chip. It gives way
+   first when the strip is tight. Clicks fall through to the field. */
 #clanker-notice {
-  position: absolute;
-  left: 34px;
-  right: 10px;
-  bottom: 9px;
-  font-size: 12px;
+  flex: 0 1 auto;
+  min-width: 0;
+  font-size: 10px;
   line-height: 16px;
   color: var(--forge-clanker);
   white-space: nowrap;

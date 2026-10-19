@@ -1,5 +1,13 @@
 # Forge — Recent Changes
 
+## 0.17.49
+
+- The prompt box starts at two lines and grows as you type, up to eight, then scrolls.
+- The paperclip, the remote chip, the Clanker notice and the Send button now share one strip inside the prompt box. The model selector sits centred alone under the box, and the Enter hint line is gone; the button's tooltip carries it.
+- Send and Stop are one icon button. While a turn runs it is Stop until you type, then Send, which queues the message for Forge's next step. Esc in the prompt box stops a running turn.
+- The remote chip reads "Remote" and is smaller; its dot is green when paired and grey while waiting, and the tooltip names the transport.
+- The Clanker notice is 10px.
+
 ## 0.17.48
 
 - The Clanker notice now sits inside the prompt box, next to the paperclip, at 12px. The line under Send always shows the Enter hint.
