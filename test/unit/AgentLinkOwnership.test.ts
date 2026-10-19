@@ -3,6 +3,7 @@ import * as os from 'os';
 import * as path from 'path';
 import { describe, expect, it, vi } from 'vitest';
 import {
+  findBySession,
   forgetConversation,
   link,
   rebuildIndex,
@@ -216,6 +217,81 @@ describe('chat agent link ownership', () => {
     expect(sidebar.conversations[0]?.agentLinks).toEqual(linksBeforeClear);
     const created = tabs.create();
     expect(created?.agentLinks).toBeUndefined();
+  });
+
+  // An empty chat is dropped, not archived. Its link stayed in the index, and
+  // every later message from that session failed with "linked chat … is
+  // unavailable", `--new` and `--to` included (2026-10-19).
+  describe('a dropped empty chat frees its session', () => {
+    const sessionId = '00000000-0000-4000-8000-000000000006';
+
+    function tabsOver(chats: ConversationRuntime[]): {
+      tabs: ConversationTabs;
+      sidebar: () => SidebarRuntime;
+    } {
+      rebuildIndex([]);
+      let sidebar: SidebarRuntime = {
+        activeConversationId: chats[0]!.id,
+        conversations: chats,
+        history: [],
+      };
+      const tabs = new ConversationTabs({
+        isStreaming: () => false,
+        getConfig: () => ({ active_model: null }),
+        getSidebar: () => sidebar,
+        setSidebar: (next) => {
+          sidebar = next;
+        },
+        failureTracker: { reset: vi.fn() },
+        refreshUi: vi.fn(),
+        isConversationEvictable: () => true,
+        evictionBlockers: () => [],
+        agentLoop: { stopStreamingIfNeeded: vi.fn(), disposeConversation: vi.fn() },
+        checkpoints: { disposeConversation: vi.fn() },
+        requestChains: { invalidateConversation: vi.fn() },
+        events: {},
+        post: vi.fn(),
+      } as unknown as ConversationTabsDeps);
+      return { tabs, sidebar: () => sidebar };
+    }
+
+    it('when it is closed', async () => {
+      const empty = conversation('empty', 'Untitled chat');
+      const other = conversation('other');
+      const { tabs } = tabsOver([empty, other]);
+      link(empty, sessionLink('claude', sessionId), [empty, other]);
+
+      await tabs.close(empty.id);
+
+      expect(findBySession(sessionId)).toBeUndefined();
+    });
+
+    it('when the user switches away from it', () => {
+      const empty = conversation('empty', 'Untitled chat');
+      const other = conversation('other');
+      const { tabs, sidebar } = tabsOver([empty, other]);
+      link(empty, sessionLink('claude', sessionId), [empty, other]);
+
+      tabs.switch(other.id);
+
+      expect(sidebar().conversations.map((chat) => chat.id)).toEqual(['other']);
+      expect(findBySession(sessionId)).toBeUndefined();
+    });
+
+    it('but an archived chat keeps it', async () => {
+      const used: ConversationRuntime = {
+        ...conversation('used', 'Used chat'),
+        messages: [{ role: 'user', content: 'push main' }],
+      };
+      const other = conversation('other');
+      const { tabs, sidebar } = tabsOver([used, other]);
+      link(used, sessionLink('claude', sessionId), [used, other]);
+
+      await tabs.close(used.id);
+
+      expect(sidebar().history.map((chat) => chat.id)).toEqual(['used']);
+      expect(findBySession(sessionId)).toBe('used');
+    });
   });
 
   it('validates agent kind and session id shapes', () => {

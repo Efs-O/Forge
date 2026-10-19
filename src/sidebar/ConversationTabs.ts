@@ -40,7 +40,7 @@ import { persistedToRuntime } from './sessionPersistence';
 import { TabModelRelease } from './TabModelRelease';
 import { retainLiveMemoryKeys } from './compactionWindow';
 import { deactivateLazyGroups } from '../tools/lazyToolGroups';
-import { forgetConversation } from '../agentLinks/chatAgentLinks';
+import { forgetConversation, forgetIfDropped } from '../agentLinks/chatAgentLinks';
 import { checkpointReadyMessage } from './checkpointStats';
 
 const log = getLogger();
@@ -132,7 +132,7 @@ export class ConversationTabs {
         )?.id;
         sidebar = archived;
         this.deps.setSidebar(sidebar);
-        if (evictedId) this.disposeEvictedConversation(evictedId);
+        if (evictedId) this.disposeEvictedConversation(evictedId, sidebar);
         result = opNewConversation(sidebar, this.deps.getConfig().active_model, options);
       }
     }
@@ -228,6 +228,7 @@ export class ConversationTabs {
     await this.deps.checkpoints.disposeConversation(id);
     const result = opCloseConversation(this.deps.getSidebar(), id);
     if (!result) return;
+    forgetIfDropped(id, result.sidebar);
     this.deps.setSidebar(result.sidebar);
     this.deps.failureTracker.reset(id);
     // Closing a tab hands focus to another one, which is a change of active
@@ -242,7 +243,8 @@ export class ConversationTabs {
   }
 
   /** Eviction keeps create/restore synchronous; begin scoped cleanup immediately. */
-  private disposeEvictedConversation(id: string): void {
+  private disposeEvictedConversation(id: string, remaining: SidebarRuntime): void {
+    forgetIfDropped(id, remaining);
     void (async () => {
       await this.deps.agentLoop.stopStreamingIfNeeded(id);
       await this.deps.agentLoop.disposeConversation(id);
@@ -283,7 +285,7 @@ export class ConversationTabs {
     if (!this.deps.isConversationEvictable(id)) return sidebar;
     const closed = opCloseConversation(sidebar, id);
     if (!closed) return sidebar;
-    this.disposeEvictedConversation(id);
+    this.disposeEvictedConversation(id, closed.sidebar);
     return closed.sidebar;
   }
   async deleteConversation(id: string): Promise<void> {
@@ -428,7 +430,7 @@ export class ConversationTabs {
         )?.id;
         sidebar = archived;
         this.deps.setSidebar(sidebar);
-        if (evictedId) this.disposeEvictedConversation(evictedId);
+        if (evictedId) this.disposeEvictedConversation(evictedId, sidebar);
         result = opRestoreConversation(sidebar, id, options);
       }
     }

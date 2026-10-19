@@ -236,3 +236,17 @@ export function forgetConversation(conversationId: string): void {
   }
   titlesByConversation.delete(conversationId);
 }
+
+/**
+ * Closing an empty chat drops it rather than archiving it, so no restart will
+ * rebuild its links. Left in the index, the linked session's every message
+ * failed with "linked chat … is unavailable", `--new` and `--to` included.
+ */
+export function forgetIfDropped(
+  conversationId: string,
+  remaining: { conversations: readonly { id: string }[]; history: readonly { id: string }[] },
+): void {
+  const kept = [...remaining.conversations, ...remaining.history];
+  if (!kept.some((conversation) => conversation.id === conversationId))
+    forgetConversation(conversationId);
+}
