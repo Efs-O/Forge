@@ -58,7 +58,7 @@ describe('top-level thinking blocks', () => {
 
     expect(container.querySelectorAll('.thinking-block')).toHaveLength(2);
     expect(container.querySelectorAll('.thinking-block-title')[1]?.textContent).toContain(
-      '◔ Thinking · 2.0 s',
+      '✓ Thought · 2.0 s',
     );
     expect(container.querySelectorAll('.folded-content-body')).toHaveLength(2);
     expect(container.textContent).toContain('check the file');
@@ -82,7 +82,7 @@ describe('top-level thinking blocks', () => {
 
     render([{ ...live, reasoning: 'first live line\nnew live line', reasoningMs: 3_000 }], 'preview', true);
     expect(container.querySelector('.thinking-pulse')).toBeNull();
-    expect(container.querySelector('.thinking-block-title')?.textContent).toContain('Thinking · 3.0 s');
+    expect(container.querySelector('.thinking-block-title')?.textContent).toContain('✓ Thought · 3.0 s');
   });
 
   it('streams a long preview block as its tail and keeps that shape when it finishes', () => {

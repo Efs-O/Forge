@@ -38,7 +38,9 @@ function ThinkingBlock({
               </span>
             </>
           ) : (
-            <>◔ Thinking{duration ? ` · ${duration}` : ''}</>
+            // Past tense and a check: a present-tense "Thinking" behind a
+            // quarter-circle read as still running after the turn ended.
+            <>✓ Thought{duration ? ` · ${duration}` : ''}</>
           )}
         </span>
         <button
