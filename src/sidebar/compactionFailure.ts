@@ -1,3 +1,5 @@
+import type { UnusableSummaryReason } from './compactionPrompt';
+
 export type CompactionFailureCategory =
   | 'incomplete-output'
   | 'budget-refusal'
@@ -6,10 +8,23 @@ export type CompactionFailureCategory =
   | 'cancelled'
   | 'unknown';
 
+/**
+ * Which check rejected a summary as invalid. Fixed labels, Forge's own section
+ * names and a length — never model text, because it goes to the session log.
+ * Keys are the `compaction_attempt` row's, so the row spreads it unchanged.
+ */
+export interface InvalidSummaryDetail {
+  invalid_reason: 'unusable' | 'missing-sections';
+  invalid_check?: UnusableSummaryReason;
+  missing_sections?: string[];
+  written_chars: number;
+}
+
 export class CompactionFailure extends Error {
   constructor(
     readonly category: CompactionFailureCategory,
     message: string,
+    readonly invalidSummary?: InvalidSummaryDetail,
   ) {
     super(message);
     this.name = 'CompactionFailure';

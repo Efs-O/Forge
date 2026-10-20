@@ -9,7 +9,7 @@ import {
 import {
   buildSummaryPrompt,
   COMPACTION_SUMMARY_MAX_CHARS,
-  isUsableSummary,
+  unusableSummaryReason,
 } from '../../src/sidebar/compactionPrompt';
 import {
   collectWrittenFiles,
@@ -189,20 +189,26 @@ describe('selectCompactionSplit', () => {
   });
 });
 
-describe('isUsableSummary', () => {
+describe('unusableSummaryReason', () => {
   // Measured: under the agent persona the model answered a summarization
   // request with this exact shape, 117 characters, which capSummary accepted
   // and which would then have BEEN the conversation's working context.
   it('rejects a tool call returned in place of a summary', () => {
     expect(
-      isUsableSummary('{ "tool": "read_file", "arguments": { "path": "UPGRADES_PLAN.md" } }'),
-    ).toBe(false);
+      unusableSummaryReason('{ "tool": "read_file", "arguments": { "path": "UPGRADES_PLAN.md" } }'),
+    ).toBe('too-short');
+    const path = 'a'.repeat(300);
+    expect(
+      unusableSummaryReason(`{ "tool": "read_file", "arguments": { "path": "${path}" } }`),
+    ).toBe('tool-call');
   });
 
-  it('rejects a fenced JSON block and anything too short to be a summary', () => {
-    expect(isUsableSummary('```json\n{"a": 1}\n```')).toBe(false);
-    expect(isUsableSummary('Goal: ship it.')).toBe(false);
-    expect(isUsableSummary('')).toBe(false);
+  it('rejects a fenced JSON block, bare JSON, and anything too short to be a summary', () => {
+    const value = 'b'.repeat(300);
+    expect(unusableSummaryReason('```json\n{"a": "' + value + '"}\n```')).toBe('fenced-json');
+    expect(unusableSummaryReason(`["${value}"]`)).toBe('json');
+    expect(unusableSummaryReason('Goal: ship it.')).toBe('too-short');
+    expect(unusableSummaryReason('')).toBe('too-short');
   });
 
   // Found stored as an 817-message conversation's working context on
@@ -211,12 +217,12 @@ describe('isUsableSummary', () => {
   it('rejects a non-JSON tool call at any length', () => {
     const real =
       '<tool_call>\n<function=git_log>\n<parameter=max_entries>\n5\n</parameter>\n</function>\n</tool_call>';
-    expect(isUsableSummary(real)).toBe(false);
-    expect(isUsableSummary([real, real, real, real].join('\n'))).toBe(false);
+    expect(unusableSummaryReason(real)).toBe('too-short');
+    expect(unusableSummaryReason([real, real, real, real].join('\n'))).toBe('xml-tool-call');
   });
 
   it('accepts real prose that merely mentions a tool', () => {
-    expect(isUsableSummary(long('Goal: finish the read_file fix'))).toBe(true);
+    expect(unusableSummaryReason(long('Goal: finish the read_file fix'))).toBeUndefined();
   });
 });
 
@@ -1182,12 +1188,17 @@ describe('compaction failure category mapping', () => {
   });
 
   it('maps a length-limited incomplete prompt to incomplete-output', () => {
-    expect(compactionFailureCategory(new PromptIncompleteError('length'))).toBe('incomplete-output');
+    expect(compactionFailureCategory(new PromptIncompleteError('length'))).toBe(
+      'incomplete-output',
+    );
   });
 
-  it.each([null, 'stop', 'content_filter'])('maps incomplete finish reason %s to model-error', (reason) => {
-    expect(compactionFailureCategory(new PromptIncompleteError(reason))).toBe('model-error');
-  });
+  it.each([null, 'stop', 'content_filter'])(
+    'maps incomplete finish reason %s to model-error',
+    (reason) => {
+      expect(compactionFailureCategory(new PromptIncompleteError(reason))).toBe('model-error');
+    },
+  );
 
   it('maps other errors to model-error', () => {
     expect(compactionFailureCategory(new Error('connection reset'))).toBe('model-error');
@@ -1224,11 +1235,9 @@ describe('compaction failure retry policy', () => {
       await vi.advanceTimersByTimeAsync(30_000);
       await expect(runCompaction(h.deps, c.id, options)).resolves.toBe('failed');
       expect(calls).toBe(3);
-      expect(attempts.filter((entry) => entry.phase === 'finished').map((entry) => entry.category)).toEqual([
-        'model-error',
-        'model-error',
-        'model-error',
-      ]);
+      expect(
+        attempts.filter((entry) => entry.phase === 'finished').map((entry) => entry.category),
+      ).toEqual(['model-error', 'model-error', 'model-error']);
       expect(attempts.find((entry) => entry.phase === 'suppressed')?.category).toBe('model-error');
       expect(c.last_input_tokens).toBe(500);
     } finally {
@@ -1253,9 +1262,7 @@ describe('compaction failure retry policy', () => {
       throw new Error('counter unavailable');
     };
 
-    await expect(
-      runCompaction(h.deps, c.id, { auto: true }),
-    ).resolves.toBe('failed');
+    await expect(runCompaction(h.deps, c.id, { auto: true })).resolves.toBe('failed');
     expect(counterCalls).toBe(1);
     expect(h.promptOptions).toBeUndefined();
     expect(attempts.find((entry) => entry.phase === 'finished')?.category).toBe('model-error');
@@ -1280,11 +1287,15 @@ describe('compaction failure retry policy', () => {
       const options = { auto: true };
 
       await expect(runCompaction(h.deps, c.id, options)).resolves.toBe('failed');
-      expect(attempts.find((entry) => entry.phase === 'finished')?.category).toBe('incomplete-output');
+      expect(attempts.find((entry) => entry.phase === 'finished')?.category).toBe(
+        'incomplete-output',
+      );
       await expect(runCompaction(h.deps, c.id, options)).resolves.toBe('skipped');
       await vi.advanceTimersByTimeAsync(5 * 60_000);
       await expect(runCompaction(h.deps, c.id, options)).resolves.toBe('skipped');
-      expect(attempts.find((entry) => entry.phase === 'suppressed')?.category).toBe('incomplete-output');
+      expect(attempts.find((entry) => entry.phase === 'suppressed')?.category).toBe(
+        'incomplete-output',
+      );
       expect(calls).toBe(1);
     } finally {
       vi.useRealTimers();

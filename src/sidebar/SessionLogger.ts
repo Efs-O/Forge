@@ -90,6 +90,7 @@ export interface CompactionAttemptLogEntry {
   floorMode?: boolean;
   /** The summary was cut off by the output cap and its complete part kept. */
   salvagedFromLength?: boolean;
+  invalidSummary?: import('./compactionFailure').InvalidSummaryDetail;
 }
 
 /**
@@ -281,6 +282,7 @@ export class SessionLogger {
         ...(entry.shed !== undefined ? { shed: entry.shed } : {}),
         ...(entry.floorMode ? { floor_mode: true } : {}),
         ...(entry.salvagedFromLength ? { salvaged_from_length: true } : {}),
+        ...entry.invalidSummary,
         timestamp_ms: Date.now(),
         model,
       }) + '\n',

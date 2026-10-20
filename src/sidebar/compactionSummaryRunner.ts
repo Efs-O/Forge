@@ -4,7 +4,7 @@ import { fitSummaryPrompt, planOutput, type CompactionBudget } from './compactio
 import {
   buildSummaryPrompt,
   fitSummaryToChars,
-  isUsableSummary,
+  unusableSummaryReason,
   missingSummarySections,
   salvageCutSummary,
 } from './compactionPrompt';
@@ -233,10 +233,12 @@ async function summarizeCompactionCounted(
       `Summary exceeds its ${input.maximumSummaryChars}-character allocation even with every section cut; previous context kept.`,
     );
   }
-  if (!isUsableSummary(summary)) {
+  const unusable = unusableSummaryReason(summary);
+  if (unusable !== undefined) {
     throw new CompactionFailure(
       'invalid-summary',
       'The summarizer returned no usable summary; previous context kept.',
+      { invalid_reason: 'unusable', invalid_check: unusable, written_chars: written.length },
     );
   }
   // The same heading rule the cut used, so a cut can never drop a heading the
@@ -246,6 +248,11 @@ async function summarizeCompactionCounted(
     throw new CompactionFailure(
       'invalid-summary',
       `Summary is missing required sections: ${missing.join(', ')}; previous context kept.`,
+      {
+        invalid_reason: 'missing-sections',
+        missing_sections: missing,
+        written_chars: written.length,
+      },
     );
   }
   return {

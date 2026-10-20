@@ -199,6 +199,50 @@ describe('compaction attempt rows (A48)', () => {
     expect(JSON.stringify(h.rows)).not.toContain('detail.');
   });
 
+  // 10-20: three invalid-summary failures in one night, and the row could not
+  // say which check rejected them.
+  it('an unusable summary logs which check rejected it, without its text', async () => {
+    const reply = `{ "tool": "read_file", "arguments": { "path": "${SECRET}.md" } }`;
+    const h = setup(async () => reply);
+    await expect(runCompaction(h.deps, 'c1', { auto: true })).resolves.toBe('failed');
+    expect(h.rows[1]).toMatchObject({
+      category: 'invalid-summary',
+      invalidSummary: {
+        invalid_reason: 'unusable',
+        invalid_check: 'too-short',
+        written_chars: reply.length,
+      },
+    });
+    expect(JSON.stringify(h.rows)).not.toContain('read_file');
+  });
+
+  it('a long tool-call reply is told apart from a short one', async () => {
+    const reply = `{ "tool": "read_file", "arguments": { "path": "${'a'.repeat(300)}" } }`;
+    const h = setup(async () => reply);
+    await runCompaction(h.deps, 'c1', { auto: true });
+    expect(h.rows[1]!.invalidSummary).toMatchObject({ invalid_check: 'tool-call' });
+  });
+
+  it('a summary missing sections logs their names, not the summary', async () => {
+    const h = setup(
+      async () => `Goal: complete the request.
+State: ${'detail. '.repeat(40)}`,
+    );
+    await expect(runCompaction(h.deps, 'c1', { auto: true })).resolves.toBe('failed');
+    expect(h.rows[1]!.invalidSummary).toEqual({
+      invalid_reason: 'missing-sections',
+      missing_sections: ['Next', 'Files', 'Constraints', 'Errors', 'Reference'],
+      written_chars: expect.any(Number),
+    });
+    expect(JSON.stringify(h.rows)).not.toContain('detail.');
+  });
+
+  it('a successful attempt carries no invalid-summary detail', async () => {
+    const h = setup(good);
+    await runCompaction(h.deps, 'c1', { auto: true });
+    expect(h.rows[1]!.invalidSummary).toBeUndefined();
+  });
+
   it('a throwing log sink does not break compaction but surfaces a warning', async () => {
     const warn = vi.spyOn(vscode.window, 'showWarningMessage');
     const h = setup(good);

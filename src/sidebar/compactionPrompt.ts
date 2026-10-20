@@ -344,8 +344,17 @@ const XML_TOOL_CALL_SHAPED = /<\/?tool_call>|<function=|<\|tool_call\|>/i;
 
 const FENCED_JSON_ONLY = /^```(?:json)?\s*[[{][\s\S]*[\]}]\s*```$/;
 
+export type UnusableSummaryReason =
+  | 'too-short'
+  | 'tool-call'
+  | 'xml-tool-call'
+  | 'fenced-json'
+  | 'json';
+
 /**
- * Is this candidate a summary at all?
+ * Is this candidate a summary at all? Undefined when it is; otherwise which
+ * check rejected it — a fixed label, since the session log records it and
+ * never carries summary text.
  *
  * Measured failure: under the agent persona the model answered the
  * summarization request with `{ "tool": "read_file", "arguments": {...} }` —
@@ -353,16 +362,16 @@ const FENCED_JSON_ONLY = /^```(?:json)?\s*[[{][\s\S]*[\]}]\s*```$/;
  * conversation's working context for every following turn. A bad summary is
  * recoverable; a summary that is a tool call is a silently poisoned window.
  */
-export function isUsableSummary(candidate: string): boolean {
+export function unusableSummaryReason(candidate: string): UnusableSummaryReason | undefined {
   const text = candidate.trim();
-  if (text.length < MIN_PLAUSIBLE_SUMMARY_CHARS) return false;
-  if (TOOL_CALL_SHAPED.test(text)) return false;
-  if (XML_TOOL_CALL_SHAPED.test(text)) return false;
-  if (FENCED_JSON_ONLY.test(text)) return false;
+  if (text.length < MIN_PLAUSIBLE_SUMMARY_CHARS) return 'too-short';
+  if (TOOL_CALL_SHAPED.test(text)) return 'tool-call';
+  if (XML_TOOL_CALL_SHAPED.test(text)) return 'xml-tool-call';
+  if (FENCED_JSON_ONLY.test(text)) return 'fenced-json';
   try {
     JSON.parse(text);
-    return false;
+    return 'json';
   } catch {
-    return true;
+    return undefined;
   }
 }

@@ -52,15 +52,48 @@ describe('session log forensics', () => {
     fs.rmSync(path.join(fakeHome.dir, 'archive-test'), { recursive: true, force: true });
   });
 
+  it('writes an invalid summary reason into the compaction_attempt row', () => {
+    const logger = new SessionLogger(id, 'title', 'm1');
+    const base = { attemptId: 'a1', trigger: 'auto', usedTokens: 1, maxTokens: 2 };
+    logger.logCompactionAttempt({ ...base, phase: 'start' }, 'm1');
+    logger.logCompactionAttempt(
+      {
+        ...base,
+        phase: 'finished',
+        outcome: 'failed',
+        category: 'invalid-summary',
+        invalidSummary: {
+          invalid_reason: 'missing-sections',
+          missing_sections: ['Next', 'Errors'],
+          written_chars: 4_210,
+        },
+      },
+      'm1',
+    );
+    const [start, finished] = rows().filter((row) => row['type'] === 'compaction_attempt');
+    expect(start).not.toHaveProperty('invalid_reason');
+    expect(finished).toMatchObject({
+      invalid_reason: 'missing-sections',
+      missing_sections: ['Next', 'Errors'],
+      written_chars: 4_210,
+    });
+    expect(finished).not.toHaveProperty('invalidSummary');
+  });
+
   it('logs sorted offered tool names only when the request tool set changes', async () => {
     const logger = new SessionLogger(id, 'Forensics', 'model');
     let groupLoaded = false;
     let round = 0;
     streamModelChatCompletion.mockImplementation(
-      async (_url: string, _request: unknown, _model: unknown, handlers: {
-        onDone: (reason: string | null) => void;
-        onToolCalls: (calls: ToolCall[]) => void;
-      }) => {
+      async (
+        _url: string,
+        _request: unknown,
+        _model: unknown,
+        handlers: {
+          onDone: (reason: string | null) => void;
+          onToolCalls: (calls: ToolCall[]) => void;
+        },
+      ) => {
         round += 1;
         if (round === 1) {
           handlers.onToolCalls([
@@ -178,7 +211,9 @@ describe('session log forensics', () => {
     );
 
     const assistant = rows().find((row) => row['role'] === 'assistant');
-    const loggedCall = (assistant?.['tool_calls'] as Array<Record<string, unknown>> | undefined)?.[0];
+    const loggedCall = (
+      assistant?.['tool_calls'] as Array<Record<string, unknown>> | undefined
+    )?.[0];
     expect(loggedCall).toMatchObject({
       raw_arguments: raw,
       input: { path: String.raw`N:\vs code apps\Forge` },

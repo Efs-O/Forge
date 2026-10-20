@@ -1,5 +1,11 @@
 # Forge — Recent Changes
 
+## 0.17.55
+
+- A long chat is no longer re-read from the start at midnight. Today's date moved out of the system prompt into the short context block each turn opens with, so the model still sees the date every turn, but the date rolling over no longer changes the start of the prompt that the model server keeps cached.
+- `load_tool_group` is about 280 tokens smaller on every request: it describes each group with one purpose line instead of listing every tool in it. Loading a group names its tools in the result, and a tool from an unloaded group still runs when called by its exact name.
+- A compaction summary that is refused now says why in the session log: the `compaction_attempt` row carries `invalid_reason` (`unusable` or `missing-sections`), which check failed (`invalid_check`: too short, a tool call, XML tool call, fenced JSON, or JSON), the `missing_sections` names, and `written_chars`. No summary text is logged.
+
 ## 0.17.54
 
 - The model list in the prompt box scrolls with the mouse wheel again, and its scrollbar can be dragged. Since the selector moved inside the box, the wheel scrolled the chat behind the list instead.

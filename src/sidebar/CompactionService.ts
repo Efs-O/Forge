@@ -17,12 +17,13 @@ import type {
 } from './compactionServiceTypes';
 import { logAttemptSafely, runCompactionWithPolicy } from './compactionAttemptPolicy';
 import { compactionRefusalNotice } from './compactionRefusal';
-import { capSummary, isUsableSummary } from './compactionPrompt';
+import { capSummary, unusableSummaryReason } from './compactionPrompt';
 import { COMPACTION_CHARS_PER_TOKEN, compactionBudget } from './compactionBudget';
 import {
   CompactionFailure,
   compactionFailureCategory,
   type CompactionFailureCategory,
+  type InvalidSummaryDetail,
 } from './compactionFailure';
 import { PromptIncompleteError, type PromptRunOptions } from './PromptRun';
 import { getLogger } from '../util/logger';
@@ -88,6 +89,7 @@ async function compactOnce(
   let attemptFinish: string | undefined;
   let attemptSalvaged = false;
   let attemptCandidateChars: number | undefined;
+  let attemptInvalid: InvalidSummaryDetail | undefined;
   let attemptHostFields: Partial<CompactionAttemptLogEntry> = {};
   options = {
     ...options,
@@ -260,7 +262,13 @@ async function compactOnce(
       );
     }
     const trimmed = capSummary(proposed, budget.summaryCeilingChars);
-    if (!isUsableSummary(trimmed)) {
+    const unusable = unusableSummaryReason(trimmed);
+    if (unusable !== undefined) {
+      attemptInvalid = {
+        invalid_reason: 'unusable',
+        invalid_check: unusable,
+        written_chars: trimmed.length,
+      };
       log.info(`[compact] rejected unusable summary (${trimmed.length} chars)`);
       options.onFailureCategory?.('invalid-summary');
       void vscode.window.showWarningMessage(
@@ -385,6 +393,7 @@ async function compactOnce(
   } catch (err) {
     const category = compactionFailureCategory(err);
     if (err instanceof PromptIncompleteError) attemptFinish = err.finishReason ?? 'none';
+    if (err instanceof CompactionFailure) attemptInvalid = err.invalidSummary;
     options.onFailureCategory?.(category);
     deps.post({
       type: 'error',
@@ -403,6 +412,7 @@ async function compactOnce(
       ...(attemptFinish ? { finishReason: attemptFinish } : {}),
       ...(attemptCandidateChars !== undefined ? { candidateChars: attemptCandidateChars } : {}),
       ...attemptHostFields,
+      ...(attemptInvalid ? { invalidSummary: attemptInvalid } : {}),
       ...(floorMode ? { floorMode: true } : {}),
       ...(attemptSalvaged ? { salvagedFromLength: true } : {}),
     });
