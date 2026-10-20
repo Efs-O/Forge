@@ -54,6 +54,7 @@ export async function drainRemoteQueue(
       await abortableSleep(250, deps.signal);
       continue;
     }
+    await deps.channel.retireQueuedReceipt?.(next.id);
     if (deps.signal.aborted) {
       await persistResult(() => deps.store.requeue(next.id));
       return;

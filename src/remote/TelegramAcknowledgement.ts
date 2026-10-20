@@ -23,12 +23,17 @@ export type EphemeralMessageHandler = (
   messageIds: string[],
   kind: EphemeralKind,
 ) => void;
+export type SendQueuedReceipt = (
+  chatId: string,
+  text: string,
+  requestId: string,
+  signal: AbortSignal,
+) => Promise<string | undefined>;
 
 /**
- * How long a "got it" queued acknowledgement stays in the chat before
- * auto-deleting. Fixed, not the config-driven `delete_command_replies_after`:
- * the transient queue notice should clear quickly, independent of how long
- * command replies linger.
+ * How long a text-only fallback "got it" receipt stays in the chat before
+ * auto-deleting. Button receipts live until their queued request is claimed.
+ * Fixed, not the config-driven command-reply delay.
  */
 export const QUEUED_ACK_DELETE_SECONDS = 10;
 
@@ -40,6 +45,7 @@ export async function acknowledgeTelegramDisposition(
   send: SendTelegramText,
   onError: ((message: string) => void) | undefined,
   onEphemeral?: EphemeralMessageHandler,
+  sendQueuedReceipt?: SendQueuedReceipt,
 ): Promise<void> {
   if (event.chatType !== 'private') return;
   let text: string | undefined;
@@ -48,14 +54,26 @@ export async function acknowledgeTelegramDisposition(
     // even though the parameter now admits other kinds.
     const hasAttachments = event.kind === 'text' && (event.attachments?.length ?? 0) > 0;
     text = hasAttachments
-      ? `Forge: got it — attachments wait, so this runs when the current turn ends. /drop ${disposition.position} to cancel.`
-      : `Forge: got it — Forge reads this after its current step. /drop ${disposition.position} to cancel.`;
+      ? `Forge: got it — attachments wait for the turn to end. Send now ends it early. /drop ${disposition.position} to cancel.`
+      : `Forge: got it — Forge reads this after its current step. Send now stops the turn and runs it next. /drop ${disposition.position} to cancel.`;
   } else if (disposition.kind === 'rejected') {
     text = disposition.reason.startsWith('Forge:')
       ? disposition.reason
       : `Forge: ${disposition.reason}`;
   }
   if (!text) return;
+  if (disposition.kind === 'queued' && sendQueuedReceipt) {
+    try {
+      const messageId = await sendQueuedReceipt(event.chatId, text, disposition.requestId, signal);
+      if (messageId) return;
+    } catch (err) {
+      if (!signal.aborted) {
+        onError?.(
+          `Forge Telegram Send now receipt failed: ${err instanceof Error ? err.message : String(err)}`,
+        );
+      }
+    }
+  }
   const messageIds = await send(event.chatId, text, { signal }).catch((err) => {
     if (!signal.aborted) {
       onError?.(
@@ -78,6 +96,7 @@ export class TelegramAcknowledgement {
   constructor(
     private readonly send: SendTelegramText,
     private readonly onError: ((message: string) => void) | undefined,
+    private readonly sendQueuedReceipt?: SendQueuedReceipt,
   ) {}
 
   setEphemeralHandler(handler: EphemeralMessageHandler | undefined): void {
@@ -100,6 +119,7 @@ export class TelegramAcknowledgement {
       this.send,
       this.onError,
       (chatId, messageIds, kind) => this.notifyEphemeral(chatId, messageIds, kind),
+      this.sendQueuedReceipt,
     );
   }
 }

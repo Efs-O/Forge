@@ -1,5 +1,11 @@
 # Forge — Recent Changes
 
+## 0.17.58
+
+- Telegram's "got it" receipt for a message sent during a turn now has a **Send now** button, like the sidebar's. Tapping it stops the current turn and runs that message next, without unloading the model. If Forge already picked the message up, the tap answers "Too late — Forge already picked this up." The receipt is removed once the message is delivered, run or dropped with `/drop`.
+- `/help` now says that plain text reaches a running turn at its next step and that photos and other attachments wait for the turn to end. It also lists every `/contact` subcommand. `/start` shows the same help.
+- `ask_user` choices sent to Telegram keep their full text on the buttons. Forge used to cut button labels at 64 bytes, so a longer option fell back to a numbered plain-text list. The 64-byte limit applies only to the button's hidden data, which stays short.
+
 ## 0.17.57
 
 - A compaction summary of a very long chat no longer drops a section. A 225K-token chat failed compaction with "missing required sections: Reference". The summary prompt now repeats the seven headings after the conversation, where the model starts writing, and says every heading is required even when its section is empty (write the heading, then "none recorded"). Reference is also told to take only the room its material needs rather than fill up to the size target, and each finished item in State names its proof on the same line.

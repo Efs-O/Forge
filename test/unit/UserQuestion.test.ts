@@ -388,22 +388,41 @@ describe('RemoteQuestionBridge', () => {
     });
   });
 
-  it('falls back to numbered text when buttons fail, leaving the question open', async () => {
-    // A choice past the 64-byte button limit used to cancel the question
-    // everywhere, closing the sidebar dialog the user was reading.
+  it('keeps full long labels on buttons and answers button 2 as option 2', async () => {
     const { bridge, channel, service } = bridgeRig({ channelName: 'telegram' });
-    const long = 'x'.repeat(80);
+    const option77 = 'a'.repeat(77);
+    const option164 = '🚀'.repeat(41);
     const pending = service.ask({
-      prompt: 'Which backend?',
-      options: ['llama.cpp', long],
+      prompt: 'Choose',
+      options: [option77, option164],
       conversationId: 'c1',
     });
-    await vi.waitFor(() =>
-      expect(channel.sent.some((item) => item.text.includes(`2. ${long}`))).toBe(true),
-    );
+    await vi.waitFor(() => expect(channel.inlineKeyboards).toHaveLength(1));
+    const questionId = channel.inlineKeyboards[0]?.buttons[1]?.[0]?.callbackData.split(':')[1];
+    expect(channel.inlineKeyboards[0]?.buttons.flat().map((button) => button.text)).toEqual([
+      option77,
+      option164,
+      'Other…',
+    ]);
     expect(service.hasPending('c1')).toBe(true);
-    expect(bridge.answerText('chat-1', '2')).toBe(true);
-    await expect(pending).resolves.toBe(long);
+    expect(questionId).toBeTruthy();
+    await expect(
+      bridge.handleAction(questionAction(questionId!, 'select', 'keyboard-1', 1)),
+    ).resolves.toEqual({ kind: 'handled' });
+    await expect(pending).resolves.toBe(option164);
+  });
+
+  it('falls back to numbered text when there are more than 100 options', async () => {
+    const { bridge, channel, service } = bridgeRig({ channelName: 'telegram' });
+    const options = Array.from({ length: 101 }, (_, index) => `option-${index + 1}`);
+    const pending = service.ask({ prompt: 'Choose', options, conversationId: 'c1' });
+    await vi.waitFor(() =>
+      expect(channel.sent.some((item) => item.text.includes('101. option-101'))).toBe(true),
+    );
+    expect(channel.inlineKeyboards).toHaveLength(0);
+    expect(service.hasPending('c1')).toBe(true);
+    expect(bridge.answerText('chat-1', '101')).toBe(true);
+    await expect(pending).resolves.toBe('option-101');
   });
 
   it('does not report cancellation when another surface wins during button delivery', async () => {

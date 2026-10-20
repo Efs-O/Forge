@@ -42,7 +42,7 @@ Session: /agents · /chat <n-or-name> · /chats [page] · /context · /help · /
 
 Queue: /drop <n|all> · /queue
 
-• Anything you send while a turn is running waits its turn — it never interrupts. /queue numbers what is waiting
+• Plain text reaches the running turn at its next step (👀 receipt). Photos and other attachments wait for the turn to end. Tap Send now on the receipt to stop the turn and run it next. /queue numbers what is waiting
 
 • /stop cancels the running Forge request and any linked-agent ask; everything queued stays queued. /drop <n|all> is what clears the queue
 
@@ -78,7 +78,7 @@ Jobs: /job <n|name> pause|resume|run|delete|chat · /jobs
 
 • /jobs lists the persistent agent jobs, numbered; /job <n|name> pause|resume|run|delete|chat acts on one. /job <n> run runs it on the next scheduler tick, in whichever window holds the jobs lease; /job <n> delete asks for "/job <n> delete confirm" first, like /sleep; /job <n> chat opens (or reuses) the job's discuss chat, seeded with the job, its recent runs, and the last observation
 
-Contacts: /contact approve|disable · /contacts pending|list · /send <name>: <message>
+Contacts: /contact approve|bind|link|disable|unbind · /contacts pending|list · /send <name>: <message>
 
 Machine: /sleep [8h|07:00] · /system · /wake [8h|07:00|off]
 

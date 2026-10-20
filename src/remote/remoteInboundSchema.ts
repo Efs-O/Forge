@@ -126,6 +126,11 @@ export const RemoteInboundEventSchema = z.discriminatedUnion('kind', [
     messageId: z.string().min(1).max(256),
     control: z.boolean().optional(),
   }),
+  InboundBaseSchema.extend({
+    kind: z.literal('send_now_action'),
+    requestId: z.string().regex(/^[0-9a-f-]{36}$/),
+    messageId: z.string().min(1).max(256),
+  }),
 ]);
 
 export type RemoteInboundEvent = z.infer<typeof RemoteInboundEventSchema>;

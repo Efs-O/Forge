@@ -68,7 +68,7 @@ export async function handleRemoteSessionCommand(
   event: TextEvent,
   context: RemoteCommandContext,
 ): Promise<RemoteInboundDisposition | undefined> {
-  if (command === '/help' || command === '/commands') {
+  if (command === '/help' || command === '/commands' || command === '/start') {
     // Per-command descriptions already ship as Telegram's native command menu,
     // so repeating them here only doubled the length of the message. What is
     // left is a map, and a map is only useful if it is scannable: one group per
@@ -286,7 +286,7 @@ export async function handleRemoteSessionCommand(
     const notes = [
       ...(queued.length > 0
         ? [
-            'Text reaches Forge at the next step of the running turn; items with attachments run in order once it ends. Use /drop <number|all> to cancel.',
+            'Text reaches the running turn at its next step; photos and other attachments wait for the turn to end. Tap Send now on its receipt to stop the turn and run it next. Use /drop <number|all> to cancel.',
           ]
         : []),
     ];
@@ -320,6 +320,11 @@ export async function handleRemoteSessionCommand(
       selected = new Set([item.id]);
     }
     const cancelled = await context.store.cancelQueued(binding.conversationId, selected);
+    for (const requestId of selected) {
+      if (context.store.getRequest(requestId)?.state === 'cancelled') {
+        await context.channel.retireQueuedReceipt?.(requestId);
+      }
+    }
     await context.channel.send(
       event.chatId,
       `Forge: cancelled ${cancelled} queued prompt${cancelled === 1 ? '' : 's'}.`,

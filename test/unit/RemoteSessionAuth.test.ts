@@ -103,6 +103,30 @@ describe('RemoteSessionAuth', () => {
     expect(await auth.gate(note, 'owner', now + 1)).toMatchObject({ kind: 'authorized' });
   });
 
+  it('authorizes Send now callbacks only after the owner session is authenticated', async () => {
+    const secrets = new MemorySecrets();
+    const auth = new RemoteSessionAuth(secrets as unknown as vscode.SecretStorage, {
+      inactivityTimeoutMinutes: 30,
+    });
+    const secret = auth.createEnrollmentSecret();
+    const now = 1_234_567_890_000;
+    await auth.confirmEnrollment('fake', 'owner', secret, generateTotp(secret, now).code, now);
+    const action: Extract<RemoteInboundEvent, { kind: 'send_now_action' }> = {
+      channel: 'fake',
+      kind: 'send_now_action',
+      providerMessageId: 'callback',
+      senderId: 'owner',
+      chatId: 'chat',
+      chatType: 'private',
+      receivedAt: now,
+      requestId: '11111111-1111-4111-8111-111111111111',
+      messageId: '1',
+    };
+    expect(await auth.gate(action, 'owner', now)).toEqual({ kind: 'blocked' });
+    await auth.gate(event(generateTotp(secret, now + 30_000).code), 'owner', now + 30_000);
+    expect(await auth.gate(action, 'owner', now + 30_001)).toMatchObject({ kind: 'authorized' });
+  });
+
   it('expires inactivity, rejects replay, and permits local-only enrollment removal', async () => {
     const secrets = new MemorySecrets();
     const auth = new RemoteSessionAuth(secrets as unknown as vscode.SecretStorage, {
@@ -115,7 +139,9 @@ describe('RemoteSessionAuth', () => {
     await auth.gate(event(code), 'owner', now);
     expect(auth.canUse('fake', 'owner', 'chat', now + 59_999)).toBe(true);
     expect(auth.canUse('fake', 'owner', 'chat', now + 60_000)).toBe(false);
-    await expect(auth.gate(event(code), 'owner', now + 60_000)).resolves.toEqual({ kind: 'failed' });
+    await expect(auth.gate(event(code), 'owner', now + 60_000)).resolves.toEqual({
+      kind: 'failed',
+    });
 
     await auth.disable('fake', 'owner');
     expect(await auth.isEnrolled('fake', 'owner')).toBe(false);
@@ -134,7 +160,9 @@ describe('RemoteSessionAuth', () => {
     const now = 1_234_567_890_000;
     await auth.confirmEnrollment('fake', 'owner', secret, generateTotp(secret, now).code, now);
     for (let index = 0; index < 4; index++) {
-      await expect(auth.gate(event('000000'), 'owner', now + index)).resolves.toEqual({ kind: 'failed' });
+      await expect(auth.gate(event('000000'), 'owner', now + index)).resolves.toEqual({
+        kind: 'failed',
+      });
     }
     await expect(auth.gate(event('000000'), 'owner', now + 5)).resolves.toEqual({
       kind: 'locked_out',

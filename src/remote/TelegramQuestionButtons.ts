@@ -2,7 +2,6 @@ import type { RemoteContactButton } from './types';
 
 const QUESTION_ID_PATTERN = /^[A-Za-z0-9_-]{1,48}$/;
 const MAX_QUESTION_OPTIONS = 100;
-const MAX_BUTTON_TEXT_BYTES = 64;
 const MAX_CALLBACK_DATA_BYTES = 64;
 
 export interface TelegramQuestionCallback {
@@ -21,10 +20,13 @@ export function telegramQuestionButtons(
     throw new Error('Forge Telegram question has an unsupported number of choices.');
   }
   const rows = options.map((label, choice) => {
-    if (!label.trim() || Buffer.byteLength(label, 'utf8') > MAX_BUTTON_TEXT_BYTES) {
-      throw new Error('Forge Telegram question choice exceeds the button text limit.');
-    }
-    return [{ text: label, callbackData: encodeQuestionCallback(questionId, choice) }];
+    if (!label.trim()) throw new Error('Forge Telegram question choice is empty.');
+    return [
+      {
+        text: label,
+        callbackData: encodeQuestionCallback(questionId, choice),
+      },
+    ];
   });
   rows.push([{ text: 'Other…', callbackData: encodeQuestionCallback(questionId, 'o') }]);
   return rows;

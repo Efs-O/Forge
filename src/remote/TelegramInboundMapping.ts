@@ -5,6 +5,7 @@ import { parseTelegramSelectionCallback } from './TelegramSelectionPagination';
 import { parseTelegramQuestionCallback } from './TelegramQuestionButtons';
 import { parseTelegramHelpCallback } from './TelegramHelpButtons';
 import { isTelegramStopCallback, isTelegramStopControlCallback } from './TelegramStopButton';
+import { parseTelegramSendNowCallback } from './TelegramSendNowButton';
 
 /**
  * Bot API update -> `RemoteInboundEvent`, and the media-type guesses that go
@@ -298,6 +299,20 @@ export function telegramUpdateToEvent(
   }
   const callback = update.callback_query;
   if (!callback || !callback.message || !callback.data) return undefined;
+  const sendNow = parseTelegramSendNowCallback(callback.data);
+  if (sendNow) {
+    return {
+      channel: 'telegram',
+      kind: 'send_now_action',
+      providerMessageId: callback.id,
+      senderId: String(callback.from.id),
+      chatId: String(callback.message.chat.id),
+      chatType: telegramChatType(callback.message.chat.type),
+      receivedAt: Date.now(),
+      requestId: sendNow,
+      messageId: String(callback.message.message_id),
+    };
+  }
   const selection = parseTelegramSelectionCallback(callback.data);
   if (selection) {
     return {

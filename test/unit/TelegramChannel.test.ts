@@ -338,7 +338,8 @@ describe('TelegramChannel', () => {
 
     await channel.start(abort.signal);
     await vi.waitFor(() => expect(acknowledgements[0]).toContain('/drop 1'));
-    expect(acknowledgements[0]).toContain('runs when the current turn ends');
+    expect(acknowledgements[0]).toContain('attachments wait for the turn to end');
+    expect(acknowledgements[0]).toContain('Send now ends it early');
     expect(acknowledgements[0]).not.toContain('current step');
   });
 

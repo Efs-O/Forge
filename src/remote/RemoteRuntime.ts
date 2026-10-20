@@ -252,6 +252,7 @@ export class RemoteRuntime {
       (channel, chatId) => this.auth.canDeliver(channel, chatId),
       conversationId,
       (channel) => this.manager.get(channel)?.controller.outbox.kick(),
+      (channel, requestId) => this.manager.get(channel)?.controller.retireQueuedReceipt(requestId),
     );
   }
 

@@ -38,6 +38,7 @@ import type { RemoteSpeechDelivery } from './RemoteSpeechDelivery';
 import { handleRemoteSelectionAction } from './RemoteSelectionPager';
 import type { RemoteControllerOptions } from './remoteControllerOptions';
 import type { TelegramContactService } from './TelegramContactService';
+import { handleRemoteSendNow } from './remoteSendNow';
 export type { RemoteControllerOptions };
 const log = getLogger();
 /** Durable transport-independent admission, FIFO execution, and notification. */
@@ -249,6 +250,9 @@ export class RemoteController {
   isNotifyOn(chatId: string): boolean {
     return this.fanout.isNotifyOn(chatId);
   }
+  retireQueuedReceipt(requestId: string): Promise<void> {
+    return this.channel.retireQueuedReceipt?.(requestId) ?? Promise.resolve();
+  }
   async handle(raw: RemoteInboundEvent): Promise<RemoteInboundDisposition> {
     if (!this.accepting) return { kind: 'retry', reason: 'remote runtime is stopping' };
     const parsed = RemoteInboundEventSchema.safeParse(raw);
@@ -320,6 +324,18 @@ export class RemoteController {
     if (event.kind === 'stop_action') {
       const owner = this.progress.conversationForBubble(event.chatId, event.messageId);
       return this.stopTurn(event, `bubble ${event.messageId}`, owner);
+    }
+    if (event.kind === 'send_now_action') {
+      return handleRemoteSendNow(event, {
+        channel: this.channel,
+        store: this.store,
+        auth: this.auth,
+        host: this.host,
+        ...(this.audit ? { audit: this.audit } : {}),
+        isBusy: (conversationId) => this.isBusy(conversationId),
+        kickDrain: (conversationId) => this.kickDrain(conversationId),
+        ...(this.options.onError ? { onError: this.options.onError } : {}),
+      });
     }
     if (event.kind === 'unsupported_media') {
       // An explicit answer beats silence. The old behaviour was to drop the

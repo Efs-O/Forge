@@ -25,9 +25,17 @@ function fixture() {
 
 function request(id: string, order: number): RemoteRequestRecord {
   return {
-    id, dedupKey: id, channel: 'telegram', chatId: 'chat', providerMessageId: id,
-    conversationId: 'conv', text: id, receivedAt: order, admittedAt: order,
-    state: 'queued', updatedAt: Date.now(),
+    id,
+    dedupKey: id,
+    channel: 'telegram',
+    chatId: 'chat',
+    providerMessageId: id,
+    conversationId: 'conv',
+    text: id,
+    receivedAt: order,
+    admittedAt: order,
+    state: 'queued',
+    updatedAt: Date.now(),
   };
 }
 
@@ -35,8 +43,11 @@ describe('remote claim ownership and recovery', () => {
   it('does not steal another live window’s long claim; recovers after its lease ends', async () => {
     const f = fixture();
     const lease = await FileLease.acquire({
-      directory: f.leaseDir, key: 'telegram', workspaceId: 'work',
-      instanceId: 'window-a', onLost: () => undefined,
+      directory: f.leaseDir,
+      key: 'telegram',
+      workspaceId: 'work',
+      instanceId: 'window-a',
+      onLost: () => undefined,
     });
     try {
       const first = new RemoteRequestStore(f.file);
@@ -62,8 +73,11 @@ describe('remote claim ownership and recovery', () => {
   it('migrates an older ownerless running row without stealing a live lease', async () => {
     const f = fixture();
     const lease = await FileLease.acquire({
-      directory: f.leaseDir, key: 'telegram', workspaceId: 'work',
-      instanceId: 'legacy-window', onLost: () => undefined,
+      directory: f.leaseDir,
+      key: 'telegram',
+      workspaceId: 'work',
+      instanceId: 'legacy-window',
+      onLost: () => undefined,
     });
     try {
       const old = new RemoteRequestStore(f.file);
@@ -88,10 +102,14 @@ describe('remote claim ownership and recovery', () => {
     const controller = new AbortController();
     const warning = vi.fn();
     let attempts = 0;
-    const settled = await settleRemoteClaim(async () => {
-      attempts += 1;
-      if (attempts < 3) throw new Error('disk unavailable');
-    }, controller.signal, warning);
+    const settled = await settleRemoteClaim(
+      async () => {
+        attempts += 1;
+        if (attempts < 3) throw new Error('disk unavailable');
+      },
+      controller.signal,
+      warning,
+    );
     expect(settled).toBe(true);
     expect(attempts).toBe(3);
     expect(warning).toHaveBeenCalledTimes(1);
@@ -118,7 +136,10 @@ describe('remote claim ownership and recovery', () => {
     const warnings: string[] = [];
     const deps = {
       signal: new AbortController().signal,
-      channel: { name: 'telegram' },
+      channel: {
+        name: 'telegram',
+        retireQueuedReceipt: async (id: string) => order.push(`retire-${id}`),
+      },
       store,
       auth: { canDeliver: async () => true },
       host: {
@@ -136,7 +157,13 @@ describe('remote claim ownership and recovery', () => {
     } as unknown as RemoteQueueDrainDeps;
     await drainRemoteQueue('conv', deps);
     expect(order).toEqual([
-      'send-one', 'settle-one-failed', 'settle-one', 'send-two', 'settle-two',
+      'retire-one',
+      'send-one',
+      'settle-one-failed',
+      'settle-one',
+      'retire-two',
+      'send-two',
+      'settle-two',
     ]);
     expect(store.getRequest('one')?.state).toBe('completed');
     expect(store.getRequest('two')?.state).toBe('completed');

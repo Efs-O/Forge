@@ -281,6 +281,10 @@ export interface RemoteChannel {
     messageId: string,
     options?: { signal?: AbortSignal },
   ): Promise<void>;
+  /** Retire the queued Telegram receipt for a request, if it had a button. */
+  retireQueuedReceipt?(requestId: string): Promise<void>;
+  /** Retire or clear the exact receipt that produced a callback, including after restart. */
+  retireTappedQueuedReceipt?(requestId: string, chatId: string, messageId: string): Promise<void>;
   /** Telegram-only rich-text delivery. Other transports keep plain text. */
   sendHtml?(
     chatId: string,

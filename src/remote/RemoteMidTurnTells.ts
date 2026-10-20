@@ -19,6 +19,10 @@ export type CanDeliver = (
   chatId: string,
 ) => Promise<boolean>;
 export type KickOutbox = (channel: RemoteRequestRecord['channel']) => void;
+export type RetireReceipt = (
+  channel: RemoteRequestRecord['channel'],
+  requestId: string,
+) => Promise<void> | void;
 
 /**
  * Claim every queued, text-only, normal-priority request for a conversation
@@ -33,6 +37,7 @@ export async function claimRemoteMidTurnTell(
   canDeliver: CanDeliver,
   conversationId: string,
   kickOutbox?: KickOutbox,
+  retireReceipt?: RetireReceipt,
 ): Promise<MidTurnDrainResult> {
   const candidates = store.queued(conversationId).sort(compareQueuedRequests);
   const claimed: RemoteRequestRecord[] = [];
@@ -61,6 +66,7 @@ export async function claimRemoteMidTurnTell(
           // A receipt, not news: it clears itself like the other transient replies.
           ephemeral: true,
         });
+        await retireReceipt?.(record.channel, record.id);
       }
       for (const channel of new Set(claimed.map((record) => record.channel))) {
         kickOutbox?.(channel);

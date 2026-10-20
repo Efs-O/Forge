@@ -250,6 +250,8 @@ overlaps with an existing owner, extend the owner instead.
 | Queue order, promote/cancel/claim rules       | `src/remote/remoteQueueOrdering.ts`             |
 | Lease owner liveness and claim recovery        | `src/remote/remoteClaimLiveness.ts`             |
 | Claim a queued request as a mid-turn tell     | `src/remote/RemoteMidTurnTells.ts`              |
+| Telegram Send now receipt callbacks + registry | `src/remote/TelegramSendNowButton.ts`            |
+| Promote a queued request from its receipt      | `src/remote/remoteSendNow.ts`                    |
 | Turn outcome echoed to bound chats            | `src/sidebar/turnMirrorWiring.ts`               |
 | Live progress message for a sidebar turn      | `src/remote/remoteHostProgress.ts`              |
 | Remote turn progress (event routing, footer state, out-of-band sends) and pure status-footer rendering | `src/remote/RemoteAgentProgress.ts`, `src/remote/remoteProgressRender.ts` |

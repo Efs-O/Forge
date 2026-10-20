@@ -24,6 +24,22 @@ function queuedFor(requests: RemoteRequestRecord[], conversationId: string): Rem
   );
 }
 
+/** Promote one queued request ahead of every other queued item atomically. */
+export function promoteQueuedInDraft(
+  requests: RemoteRequestRecord[],
+  conversationId: string,
+  requestId: string,
+): boolean {
+  const queued = queuedFor(requests, conversationId);
+  const target = queued.find((item) => item.id === requestId);
+  if (!target) return false;
+  const earliest = Math.min(...queued.map((item) => item.admittedAt ?? item.receivedAt));
+  target.priority = 'steer';
+  target.admittedAt = earliest - 1;
+  target.updatedAt = Date.now();
+  return true;
+}
+
 /** Mark selected queued prompts cancelled without deleting their audit record. */
 export function cancelQueuedInDraft(
   requests: RemoteRequestRecord[],

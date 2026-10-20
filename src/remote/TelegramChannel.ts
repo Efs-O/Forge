@@ -7,6 +7,7 @@ import type { RemoteChannel, RemoteInboundDisposition, RemoteInboundEvent } from
 import { createTelegramSelectionPages } from './TelegramSelectionPagination';
 import { postTelegram, TelegramChatQueue } from './telegramSendQueue';
 import { TelegramOutbound } from './TelegramOutbound';
+import { TelegramSendNowReceipts } from './TelegramSendNowButton';
 
 type Fetch = typeof fetch;
 export const TELEGRAM_BOT_TOKEN_SECRET = 'forge.remote.telegram.botToken';
@@ -84,6 +85,7 @@ export class TelegramChannel implements RemoteChannel {
    * an entry per prompt for the life of the window.
    */
   private readonly outbound: TelegramOutbound;
+  private readonly sendNowReceipts: TelegramSendNowReceipts;
   /** Serializes every chat-addressed call so sends cannot overtake each other. */
   private readonly sendQueue = new TelegramChatQueue();
   private readonly albumCoordinator: TelegramAlbumCoordinator;
@@ -100,9 +102,18 @@ export class TelegramChannel implements RemoteChannel {
       this.sendQueue,
       options.onError,
     );
+    this.sendNowReceipts = new TelegramSendNowReceipts(
+      (chatId, text, buttons, sendOptions) =>
+        this.outbound.sendInlineKeyboard(chatId, text, buttons, sendOptions),
+      (chatId, messageId) => this.outbound.deleteMessage(chatId, messageId),
+      (chatId, messageId) => this.outbound.clearInlineKeyboard(chatId, messageId),
+      options.onError,
+    );
     this.acknowledgement = new TelegramAcknowledgement(
       (chatId, text, sendOptions) => this.send(chatId, text, sendOptions),
       options.onError,
+      (chatId, text, requestId, signal) =>
+        this.sendNowReceipts.send(chatId, text, requestId, signal),
     );
     this.albumCoordinator = new TelegramAlbumCoordinator({
       handle: async (event) => {
@@ -201,6 +212,12 @@ export class TelegramChannel implements RemoteChannel {
   }
   deleteMessage(...args: Parameters<TelegramOutbound['deleteMessage']>) {
     return this.outbound.deleteMessage(...args);
+  }
+  retireQueuedReceipt(requestId: string): Promise<void> {
+    return this.sendNowReceipts.retire(requestId);
+  }
+  retireTappedQueuedReceipt(requestId: string, chatId: string, messageId: string): Promise<void> {
+    return this.sendNowReceipts.retireTapped(requestId, chatId, messageId);
   }
   retractPrompt(...args: Parameters<TelegramOutbound['retractPrompt']>) {
     return this.outbound.retractPrompt(...args);

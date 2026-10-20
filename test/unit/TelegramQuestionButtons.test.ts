@@ -50,10 +50,30 @@ describe('Telegram question buttons', () => {
   });
 
   it('rejects unsafe button labels and malformed callbacks', () => {
-    expect(() => telegramQuestionButtons('ask-123', [' '.repeat(65)])).toThrow(
-      'button text limit',
-    );
+    expect(() => telegramQuestionButtons('ask-123', [' '])).toThrow('empty');
     expect(parseTelegramQuestionCallback('q:ask-123:100')).toBeUndefined();
     expect(parseTelegramQuestionCallback('q:ask-123:free text')).toBeUndefined();
+  });
+
+  it('keeps full long labels and bounded callbacks', () => {
+    const option77 = 'a'.repeat(77);
+    const option164 = '🚀'.repeat(41);
+    expect(Buffer.byteLength(option77, 'utf8')).toBe(77);
+    expect(Buffer.byteLength(option164, 'utf8')).toBe(164);
+    const buttons = telegramQuestionButtons('ask-123', [option77, option164]).flat();
+    expect(buttons.map((button) => button.text)).toEqual([option77, option164, 'Other…']);
+    expect(buttons.every((button) => Buffer.byteLength(button.callbackData, 'utf8') <= 64)).toBe(
+      true,
+    );
+    expect(parseTelegramQuestionCallback(buttons[1]!.callbackData)).toMatchObject({
+      action: 'select',
+      choice: 1,
+    });
+    expect(() =>
+      telegramQuestionButtons(
+        'ask-123',
+        Array.from({ length: 101 }, () => 'A'),
+      ),
+    ).toThrow('unsupported number');
   });
 });

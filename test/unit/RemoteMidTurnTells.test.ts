@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import { claimRemoteMidTurnTell, type CanDeliver } from '../../src/remote/RemoteMidTurnTells';
 import type { RemoteRequestRecord } from '../../src/remote/types';
 
@@ -68,9 +68,21 @@ const deliverAll: CanDeliver = async () => true;
 describe('claimRemoteMidTurnTell', () => {
   it('claims a queued text-only request and finishes it completed after settle', async () => {
     const store = makeStore([makeRecord()]);
-    const result = await claimRemoteMidTurnTell(store, deliverAll, 'conv-1');
+    const retire = vi.fn(async () => undefined);
+    const result = await claimRemoteMidTurnTell(
+      store,
+      deliverAll,
+      'conv-1',
+      undefined,
+      (channel, id) => {
+        expect(channel).toBe('telegram');
+        return retire(id);
+      },
+    );
 
-    expect(result.messages).toEqual([{ role: 'user', content: 'also update the changelog', midTurn: true }]);
+    expect(result.messages).toEqual([
+      { role: 'user', content: 'also update the changelog', midTurn: true },
+    ]);
     expect(store.records[0]?.state).toBe('running');
     expect(result.settle).toBeDefined();
 
@@ -79,6 +91,7 @@ describe('claimRemoteMidTurnTell', () => {
     expect(store.records[0]?.notification).toBe('Seen by the running turn.');
     // The receipt clears itself from the chat like the other transient replies.
     expect(store.ephemeral.get('req-1')).toBe(true);
+    expect(retire).toHaveBeenCalledWith('req-1');
   });
 
   it('claims every eligible request in queue order and finishes each after settle', async () => {
@@ -153,7 +166,11 @@ describe('claimRemoteMidTurnTell', () => {
 
   it('leaves a /claude session ask queued for the drain instead of feeding it to the running turn', async () => {
     const store = makeStore([
-      makeRecord({ id: 'req-claude', sessionTarget: 'claude', text: 'check the screenshot approval' }),
+      makeRecord({
+        id: 'req-claude',
+        sessionTarget: 'claude',
+        text: 'check the screenshot approval',
+      }),
       makeRecord({ id: 'req-normal', text: 'normal text' }),
     ]);
 

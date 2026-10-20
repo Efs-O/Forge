@@ -103,6 +103,7 @@ describe('remote command map', () => {
     '/models',
     // Contact onboarding is intentionally not an owner command/menu entry.
     '/start',
+    '/owner',
   ]);
   const EXTRA_IMPLEMENTED = [
     '/contact',
@@ -143,6 +144,21 @@ describe('remote command map', () => {
   it('documents every implemented command in /help', () => {
     const documented = new Set([...HELP_TEXT.matchAll(/(?<![\w/])(\/[a-z]+)/gu)].map((m) => m[1]!));
     expect([...implemented].filter((command) => !documented.has(command))).toEqual([]);
+  });
+
+  it('lists every Telegram menu command in /help and keeps accepted aliases explicit', () => {
+    const documented = new Set([...HELP_TEXT.matchAll(/(?<![\w/])(\/[a-z]+)/gu)].map((m) => m[1]!));
+    const menu = new Set(TELEGRAM_BOT_COMMANDS.map((entry) => `/${entry.command}`));
+    expect([...menu].filter((command) => !documented.has(command))).toEqual([]);
+    expect([...UNDOCUMENTED_ALIASES]).toEqual(
+      expect.arrayContaining(['/commands', '/list', '/select', '/models', '/start', '/owner']),
+    );
+  });
+
+  it('describes the queue and contact verbs accurately', () => {
+    expect(HELP_TEXT).toContain('Plain text reaches the running turn at its next step');
+    expect(HELP_TEXT).toContain('Tap Send now on the receipt');
+    expect(HELP_TEXT).toContain('/contact approve|bind|link|disable|unbind');
   });
 
   it("offers every implemented command in Telegram's native menu", () => {
