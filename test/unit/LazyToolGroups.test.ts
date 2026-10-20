@@ -36,10 +36,7 @@ const OTHER_MCP_TOOLS = ['fetch_page', 'list_repos'];
  * composes it: everything the registry advertises, minus the lazy tools this
  * conversation has not activated.
  */
-function modelFacingTools(
-  registry: ToolRegistry,
-  conversationId: string | undefined,
-): string[] {
+function modelFacingTools(registry: ToolRegistry, conversationId: string | undefined): string[] {
   const hidden = hiddenLazyToolNames(conversationId);
   return registry
     .definitions(ALL_PERMISSIONS)
@@ -139,8 +136,10 @@ describe('lazy tool groups', () => {
     );
 
     expect(result).toContain('enabled');
-    // The result must not restate the schemas -- they arrive via `tools`.
-    for (const name of HALLUSCRIBE_TOOLS) expect(result).not.toContain(name);
+    // The result names the members (the group list no longer does) but must
+    // not restate the schemas -- they arrive via `tools`.
+    for (const name of HALLUSCRIBE_TOOLS) expect(result).toContain(name);
+    expect(result).not.toMatch(/"type"|parameters|properties/u);
 
     const tools = modelFacingTools(registry, 'conv-a');
     for (const name of HALLUSCRIBE_TOOLS) expect(tools).toContain(name);
@@ -297,11 +296,12 @@ describe('lazy tool groups', () => {
       properties: { group: { enum: expect.arrayContaining(['memory', 'agents']) } },
     });
     expect(loader?.function.description).toContain(
-      'memory: notes kept across conversations; tools: remember',
+      'memory: remember, recall, forget notes kept across conversations\n',
     );
     expect(loader?.function.description).toContain(
-      'system: this PC: power, sleep/wake, status, llama.cpp; tools: get_power_info',
+      'system: this PC: power, sleep/wake, status, llama.cpp',
     );
+    expect(loader?.function.description).not.toContain('get_power_info');
     expect(loader?.function.description.split(/\s+/).length).toBeLessThanOrEqual(350);
     const staticDefinition = makeLoadToolGroupTool().definition;
     expect(staticDefinition.function.parameters).toMatchObject({
@@ -324,7 +324,11 @@ describe('lazy tool groups', () => {
       permission: 'read',
       handler: async () => 'should not run',
     });
-    const result = await registry.dispatch('load_tool_group', { group: 'computer_use' }, ALL_PERMISSIONS, {
+    const result = await registry.dispatch(
+      'load_tool_group',
+      { group: 'computer_use' },
+      ALL_PERMISSIONS,
+      {
         beforeMutate: () => undefined,
         conversationId: 'conv-a',
         modelName: 'qwen38-no-vision',
@@ -368,7 +372,9 @@ describe('lazy tool groups', () => {
     expect(hiddenLazyToolNames('conv-a', new Set(), new Set(['memory']))).toEqual(new Set());
   });
 
-  it('describes available groups with their registered member names', () => {
+  // Member names cost 283 tokens per request on Flash-Next (2026-10-20); the
+  // load result names them instead, on the one round that needs them.
+  it('describes groups by purpose and names the members only when one loads', async () => {
     const registry = new ToolRegistry();
     registry.register(makeLoadToolGroupTool());
     for (const name of ['create_directory', 'move_file']) {
@@ -382,9 +388,15 @@ describe('lazy tool groups', () => {
       });
     }
     const description = registry.get('load_tool_group')?.describe?.().function.description;
-    expect(description).toContain('files:');
-    expect(description).toContain(
-      'files: move, mkdir, line-number edits, restore a file; tools: create_directory, move_file',
+    expect(description).toContain('files: move, mkdir, line-number edits, restore a file');
+    expect(description).not.toContain('create_directory');
+    const result = await registry.dispatch('load_tool_group', { group: 'files' }, ALL_PERMISSIONS, {
+      beforeMutate: () => undefined,
+      conversationId: 'conv-a',
+    });
+    expect(result).toBe(
+      'files tools enabled for this conversation: create_directory, move_file. ' +
+        'They are listed on the next step.',
     );
   });
 
@@ -407,7 +419,8 @@ describe('lazy tool groups', () => {
       .split('\n')
       .slice(1);
     expect(lines).toHaveLength(6);
-    for (const line of lines) expect(line).toMatch(/^[a-z_]+: [^;]+; tools: /);
+    for (const line of lines) expect(line).toMatch(/^[a-z_]+: [^;]+$/);
+    expect(lines.join('\n')).not.toMatch(/move_file|read_notebook|tools:/);
   });
 
   it('appends the loaded schemas after the existing prefix, leaving it byte-identical', () => {

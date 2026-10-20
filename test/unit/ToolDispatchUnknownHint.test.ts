@@ -133,6 +133,17 @@ describe('unknown tool name hints', () => {
     expect(handler).not.toHaveBeenCalled();
   });
 
+  // load_tool_group's description no longer lists member names, so a model
+  // that knows one must still be able to use it without loading the group.
+  it("runs an unloaded group's tool when called by its exact name", async () => {
+    const registry = new ToolRegistry();
+    const handler = vi.fn(async () => 'image');
+    registerMedia(registry, handler);
+
+    expect(await dispatchUnknown({ name: 'generate_image', registry })).toBe('image');
+    expect(handler).toHaveBeenCalledOnce();
+  });
+
   it('suggests the candidate without a loader instruction once its group is active', async () => {
     const registry = new ToolRegistry();
     registerMedia(registry);

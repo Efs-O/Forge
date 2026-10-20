@@ -136,20 +136,22 @@ function makeMaximalRegistry(): ToolRegistry {
   // load_tool_group advertises only once a lazy group is bridged in. Record one
   // so the maximally-advertised set includes it, matching a config that has
   // HalluScribe configured (the worst case for schema size).
-    resetLazyToolGroups();
-    recordLazyGroupTool('halluscribe', 'search_sessions');
-    for (const name of registry.names()) recordNativeLazyTool(name);
-    return registry;
+  resetLazyToolGroups();
+  recordLazyGroupTool('halluscribe', 'search_sessions');
+  for (const name of registry.names()) recordNativeLazyTool(name);
+  return registry;
 }
 
 function advertisedChars(registry: ToolRegistry): number {
   return JSON.stringify(
-    registry.definitions(ALL_PERMISSIONS).filter(
-      (definition) =>
-        !COMPUTER_USE_TOOLS_EXCLUDED_PENDING_DECISION.some((prefix) =>
-          definition.function.name.startsWith(prefix),
-        ),
-    ),
+    registry
+      .definitions(ALL_PERMISSIONS)
+      .filter(
+        (definition) =>
+          !COMPUTER_USE_TOOLS_EXCLUDED_PENDING_DECISION.some((prefix) =>
+            definition.function.name.startsWith(prefix),
+          ),
+      ),
   ).length;
 }
 
@@ -157,14 +159,19 @@ describe('tool schema CI budget (TOOL_SCHEMA_GROWTH_PLAN.md Step 1)', () => {
   // Windows advertises the most (shell, install_llamacpp), so the
   // worst case is measured as Windows whatever the CI host is.
   const realPlatform = process.platform;
-  beforeEach(() => Object.defineProperty(process, 'platform', { value: 'win32', configurable: true }));
+  beforeEach(() =>
+    Object.defineProperty(process, 'platform', { value: 'win32', configurable: true }),
+  );
   afterEach(() =>
     Object.defineProperty(process, 'platform', { value: realPlatform, configurable: true }),
   );
 
   it('advertises every registered tool under the maximal config', () => {
     const registry = makeMaximalRegistry();
-    const names = registry.definitions(ALL_PERMISSIONS).map((d) => d.function.name).sort();
+    const names = registry
+      .definitions(ALL_PERMISSIONS)
+      .map((d) => d.function.name)
+      .sort();
     expect(names).toHaveLength(registry.names().length);
     expect(names).toHaveLength(90);
     expect(names.filter((name) => name.startsWith('browser_'))).toHaveLength(15);
@@ -184,33 +191,33 @@ describe('tool schema CI budget (TOOL_SCHEMA_GROWTH_PLAN.md Step 1)', () => {
     }
   });
 
-  it('keeps load_tool_group discovery under 450 estimated tokens', () => {
+  // 450 while it listed every member; purposes alone measured ~304 on Flash-Next.
+  // The lower ceiling keeps a member list from creeping back unnoticed.
+  it('keeps load_tool_group discovery under 320 estimated tokens', () => {
     const registry = makeMaximalRegistry();
     const description = registry.get('load_tool_group')?.describe?.().function.description ?? '';
     // CI has no model tokenizer. Use the measured ~4.62 chars/token ratio
     // above, rounding up so this remains a conservative character gate.
-    expect(Math.ceil(description.length / 4.62)).toBeLessThanOrEqual(450);
+    expect(Math.ceil(description.length / 4.62)).toBeLessThanOrEqual(320);
   });
 
   it('keeps the 64-tool non-computer-use schema under the character budget', () => {
     const registry = makeMaximalRegistry();
     const chars = advertisedChars(registry);
-    expect(
-      {
-        chars,
-        budget: TOOL_SCHEMA_CHAR_BUDGET,
-        measured: MEASURED_CHARS,
-        message:
-          chars > TOOL_SCHEMA_CHAR_BUDGET
-            ? `Tool schema is ${chars} chars, over the ${TOOL_SCHEMA_CHAR_BUDGET}-char budget. ` +
-              `Two sanctioned responses (TOOL_SCHEMA_GROWTH_PLAN.md): ` +
-              `(1) merge the new tool into a family tool with an operation enum (Step 2), or ` +
-              `(2) scope it by model/conversation so it is not advertised to every model (Step 3). ` +
-              `Raising TOOL_SCHEMA_CHAR_BUDGET without one of those requires a note in CHANGES.md ` +
-              `stating why.`
-            : '',
-      },
-    ).toMatchObject({ chars, budget: TOOL_SCHEMA_CHAR_BUDGET });
+    expect({
+      chars,
+      budget: TOOL_SCHEMA_CHAR_BUDGET,
+      measured: MEASURED_CHARS,
+      message:
+        chars > TOOL_SCHEMA_CHAR_BUDGET
+          ? `Tool schema is ${chars} chars, over the ${TOOL_SCHEMA_CHAR_BUDGET}-char budget. ` +
+            `Two sanctioned responses (TOOL_SCHEMA_GROWTH_PLAN.md): ` +
+            `(1) merge the new tool into a family tool with an operation enum (Step 2), or ` +
+            `(2) scope it by model/conversation so it is not advertised to every model (Step 3). ` +
+            `Raising TOOL_SCHEMA_CHAR_BUDGET without one of those requires a note in CHANGES.md ` +
+            `stating why.`
+          : '',
+    }).toMatchObject({ chars, budget: TOOL_SCHEMA_CHAR_BUDGET });
     expect(chars).toBeLessThanOrEqual(TOOL_SCHEMA_CHAR_BUDGET);
   });
 
