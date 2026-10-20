@@ -9,6 +9,7 @@ import {
 import {
   buildSummaryPrompt,
   COMPACTION_SUMMARY_MAX_CHARS,
+  SUMMARY_PROMPT_CLOSING,
   unusableSummaryReason,
 } from '../../src/sidebar/compactionPrompt';
 import {
@@ -242,6 +243,21 @@ describe('summary prompt anchoring', () => {
     // The blanket "omit empty sections" is what removed Next from a finished
     // task's summary and sent the resumed agent hunting for it.
     expect(prompt).not.toContain('omit empty sections');
+  });
+
+  it('requires every heading and repeats the list after the transcript', () => {
+    const prompt = buildSummaryPrompt('test local time', undefined, [
+      { role: 'user', content: 'do the thing' },
+    ]);
+
+    // Reference went missing from a 225K-token summary while every rule sat
+    // before the transcript and only Next said ALWAYS.
+    expect(prompt).toContain('Every heading is required even when its section is empty');
+    expect(prompt.endsWith(SUMMARY_PROMPT_CLOSING)).toBe(true);
+    expect(SUMMARY_PROMPT_CLOSING).toContain(
+      'Goal, State, Next, Files, Constraints, Errors, Reference.',
+    );
+    expect(prompt.indexOf('do the thing')).toBeLessThan(prompt.indexOf('End of conversation.'));
   });
 
   it('keeps the first user message outside the truncated transcript', () => {

@@ -290,7 +290,8 @@ export function buildSummaryPrompt(
     // conclusions of finished investigations were lost, so the resumed agent
     // re-ran the reads and searches that had produced them.
     'In State, record what is already DONE and what investigation already ' +
-    'concluded, naming the file, command or tool result that establishes each. ' +
+    'concluded, naming the file, command or tool result that establishes each ' +
+    'on the same line. ' +
     'In Errors, list blockers that are still unresolved; for failures that were ' +
     'fixed, keep only the lesson, stated once as a rule (merge any lesson the ' +
     'earlier summary already has), with no history of fixed typos. ' +
@@ -306,18 +307,31 @@ export function buildSummaryPrompt(
     'already show finished. ' +
     'In Reference, copy concrete data from the conversation exactly when the ' +
     'Next step depends on it, such as signatures, identifiers, file paths with ' +
-    'line numbers, or command results. Use the room up to the target for ' +
-    'Reference material Next actually needs; never pad it or copy whole files. ' +
-    'The summary ceiling remains a hard limit. Write "none recorded" when Next ' +
-    'needs no reference material. ' +
-    'Write "none recorded" for an empty section. Do not retell the conversation. ' +
+    'line numbers, or command results. Give Reference only the room that ' +
+    'material takes, up to the target; never fill it to reach the target, ' +
+    'never pad it or copy whole files. ' +
+    'The summary ceiling remains a hard limit. ' +
+    // A summary of a 225K-token chat dropped Reference: "write none recorded
+    // for an empty section" read as leave-able, since only Next said ALWAYS.
+    'Every heading is required even when its section is empty: write the ' +
+    'heading, then "none recorded" (in Reference, when Next needs no ' +
+    'reference material). Do not retell the conversation. ' +
     'Historical Next and PAUSE instructions must be labeled historical. For each ' +
     'earlier restriction, name the task it governed; apply it to the latest ' +
     'request only if that request continues the same task.\n\n' +
     `${verbatimUserContext}${previous}${facts}${planSnapshotBlock(plan)}` +
-    `${anchorRequest(messages)}Conversation:\n${transcript}`
+    `${anchorRequest(messages)}Conversation:\n${transcript}` +
+    // Every rule above sits before a transcript that can run past 200K tokens;
+    // the heading list is repeated after it, where the model starts writing.
+    `${SUMMARY_PROMPT_CLOSING}`
   );
 }
+
+/** Follows the transcript; the names come from the same list the check uses. */
+export const SUMMARY_PROMPT_CLOSING =
+  '\n\nEnd of conversation. Now write the summary with exactly these seven ' +
+  `headings in this order: ${REQUIRED_SECTIONS.map(([name]) => name).join(', ')}. ` +
+  'Under a section with nothing to record, write its heading, then "none recorded".';
 
 export function capSummary(summary: string, maxChars = COMPACTION_SUMMARY_MAX_CHARS): string {
   const text = summary.trim();

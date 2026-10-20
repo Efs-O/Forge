@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { buildSummaryPrompt } from '../../src/sidebar/compactionPrompt';
+import { buildSummaryPrompt, SUMMARY_PROMPT_CLOSING } from '../../src/sidebar/compactionPrompt';
 import { CompactionFailure, compactionFailureCategory } from '../../src/sidebar/compactionFailure';
 import {
   compactionBudget,
@@ -95,7 +95,10 @@ describe('compaction summary content', () => {
     const prompt = buildSummaryPrompt('test time', undefined, messages, '', '', undefined, {
       sourceMaxChars: 12_000,
     });
-    const source = prompt.slice(prompt.indexOf('Conversation:\n') + 'Conversation:\n'.length);
+    const source = prompt.slice(
+      prompt.indexOf('Conversation:\n') + 'Conversation:\n'.length,
+      -SUMMARY_PROMPT_CLOSING.length,
+    );
 
     expect(source.length).toBeLessThanOrEqual(12_000);
     expect(source).toContain('[for space: reasoning notes dropped from');

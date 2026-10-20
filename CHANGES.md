@@ -1,5 +1,9 @@
 # Forge — Recent Changes
 
+## 0.17.57
+
+- A compaction summary of a very long chat no longer drops a section. A 225K-token chat failed compaction with "missing required sections: Reference". The summary prompt now repeats the seven headings after the conversation, where the model starts writing, and says every heading is required even when its section is empty (write the heading, then "none recorded"). Reference is also told to take only the room its material needs rather than fill up to the size target, and each finished item in State names its proof on the same line.
+
 ## 0.17.56
 
 - Installing a llama.cpp build no longer leaves the old ones behind. When `install_llamacpp` or a `llamacpp_update` job switches `llama_server.binary`, it deletes every older `llama.cpp-b<N>` folder under `%LOCALAPPDATA%\Forge` except the build it replaced, which stays as the rollback, and any build a model names in its own `llama_server_binary`. Each build is about 700 MB. A switch whose post-check fails deletes nothing, and a folder that cannot be removed is named in the result.
