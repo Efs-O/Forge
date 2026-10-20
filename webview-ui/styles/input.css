@@ -99,8 +99,12 @@
   gap: 6px;
   pointer-events: none;
 }
+/* The model list is the lane's scroll container. Left at `none` it let the
+   wheel, its headers and its scrollbar fall through to the transcript behind,
+   so only its buttons were reachable and the list would not scroll. */
 #prompt-lane button,
-#prompt-lane #remote-chip {
+#prompt-lane #remote-chip,
+#prompt-lane .ms-panel {
   pointer-events: auto;
 }
 .lane-start,
