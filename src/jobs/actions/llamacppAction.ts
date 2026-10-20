@@ -19,6 +19,8 @@ export interface LlamacppActionDeps {
   /** The config slice the action reads (current binary, embeddings, host). */
   getLlamacppConfig: () => {
     currentBinary: string | undefined;
+    /** Every model's own `llama_server_binary`; a build one names is never pruned. */
+    modelBinaries: readonly string[];
     embeddings: { enabled?: boolean; model_path?: string } | undefined;
     llama_server: { host?: string; port?: number } | undefined;
   };

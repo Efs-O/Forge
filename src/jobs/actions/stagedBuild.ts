@@ -61,6 +61,71 @@ export function newBinaryPath(root: string, tag: string): string {
   return path.join(buildDirForTag(root, tag), 'llama-server.exe');
 }
 
+/** A build folder this pipeline extracts: `llama.cpp-b<N>`. */
+const BUILD_DIR_NAME = /^llama\.cpp-b\d+$/u;
+
+/** What `pruneOldBuilds` did, for the caller's user-facing summary. */
+export interface PruneResult {
+  removed: string[];
+  /** Folders that could not be removed, with the reason (a running server holds its exe). */
+  failed: string[];
+}
+
+/**
+ * Delete every `llama.cpp-b<N>` build folder under `root` except the ones
+ * holding a binary in `keep`: the build just switched to, the one it
+ * replaced (the restore target, which may still be loaded by a running
+ * server), and any build a model pins with its own `llama_server_binary`
+ * (`modelPinnedBinaries`). Each release is ~700 MB, so without this they pile up.
+ *
+ * Kept builds are matched by folder name, so a relative or differently cased
+ * binary path still protects its build. Only folders named like this
+ * pipeline's own are touched — a binary configured anywhere else is never
+ * deleted. A folder that cannot be removed is reported, not thrown: by the
+ * time this runs the switch has already succeeded.
+ */
+export function pruneOldBuilds(root: string, keep: readonly (string | undefined)[]): PruneResult {
+  const kept = new Set(
+    keep
+      .filter((binary): binary is string => binary !== undefined && binary !== '')
+      .map((binary) => path.basename(path.dirname(binary)).toLowerCase()),
+  );
+  const result: PruneResult = { removed: [], failed: [] };
+  let entries: fs.Dirent[];
+  try {
+    entries = fs.readdirSync(root, { withFileTypes: true });
+  } catch (err) {
+    if ((err as NodeJS.ErrnoException).code === 'ENOENT') return result;
+    throw err;
+  }
+  for (const entry of entries) {
+    if (!entry.isDirectory() || !BUILD_DIR_NAME.test(entry.name)) continue;
+    if (kept.has(entry.name.toLowerCase())) continue;
+    try {
+      fs.rmSync(path.join(root, entry.name), { recursive: true, force: true });
+      result.removed.push(entry.name);
+    } catch (err) {
+      result.failed.push(`${entry.name} (${(err as Error).message})`);
+    }
+  }
+  return result;
+}
+
+/** The binaries models pin with their own `llama_server_binary`, which a prune must keep. */
+export function modelPinnedBinaries(
+  models: readonly { llama_server_binary?: string | undefined }[],
+): string[] {
+  return models.flatMap((m) => (m.llama_server_binary ? [m.llama_server_binary] : []));
+}
+
+/** Sentences for a user-facing summary, or '' when nothing was pruned. */
+export function describePrune(result: PruneResult): string {
+  const parts: string[] = [];
+  if (result.removed.length) parts.push(`Removed old builds: ${result.removed.join(', ')}.`);
+  if (result.failed.length) parts.push(`Could not remove: ${result.failed.join('; ')}.`);
+  return parts.join(' ');
+}
+
 /** The staged-metadata file for a job. */
 function stagedFile(jobsRoot: string, jobId: string): string {
   return path.join(jobsRoot, 'staged', `${jobId}.json`);

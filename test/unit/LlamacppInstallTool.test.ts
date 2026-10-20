@@ -1,3 +1,6 @@
+import * as fs from 'fs';
+import * as os from 'os';
+import * as path from 'path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
 vi.mock('vscode', () => ({ workspace: { workspaceFolders: undefined } }));
@@ -59,6 +62,7 @@ function makeTool(config: Partial<ForgeConfig>, path: string | null = 'C:\\c.yam
 
 const CONFIG: Partial<ForgeConfig> = {
   llama_server: { binary: 'C:\\old\\llama-server.exe' },
+  models: [],
   jobs: { allowed_hosts: ['api.github.com', 'github.com'] } as ForgeConfig['jobs'],
 };
 
@@ -76,6 +80,33 @@ describe.runIf(process.platform === 'win32')('install_llamacpp', () => {
     expect(setBinary).toHaveBeenCalledWith(INSTALLED.newBinary);
     expect(out).toMatch(/switched from C:\\old\\llama-server\.exe/);
     expect(out).toMatch(/NOT restarted/);
+  });
+
+  it('a switch deletes the older builds but keeps the one it replaced', async () => {
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), 'forge-llama-tool-'));
+    try {
+      for (const tag of ['b11000', 'b11050', 'b11077']) {
+        fs.mkdirSync(path.join(root, `llama.cpp-${tag}`));
+      }
+      const previous = path.join(root, 'llama.cpp-b11050', 'llama-server.exe');
+      const install = vi.fn(async () => ({
+        ...INSTALLED,
+        newBinary: path.join(root, 'llama.cpp-b11077', 'llama-server.exe'),
+      }));
+      const tool = makeInstallLlamacppTool({
+        getConfig: () => ({ ...CONFIG, llama_server: { binary: previous } }) as ForgeConfig,
+        configPath: 'C:\\c.yaml',
+        install,
+        latestTag: async () => 'b11077',
+        localRoot: () => root,
+        setBinary: vi.fn(),
+      });
+      const out = String(await tool.handler({}));
+      expect(fs.readdirSync(root).sort()).toEqual(['llama.cpp-b11050', 'llama.cpp-b11077']);
+      expect(out).toMatch(/Removed old builds: llama\.cpp-b11000\./);
+    } finally {
+      fs.rmSync(root, { recursive: true, force: true });
+    }
   });
 
   it('leaves config.yaml alone with switch_config false', async () => {

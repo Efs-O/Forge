@@ -20,7 +20,8 @@ import { buildDirForTag, newBinaryPath, stagingDir } from './stagedBuild';
  *      embeddings are configured) one embedding round-trip on a free port.
  *
  * The zips are deleted on success and on failure; a build folder this run
- * created is removed on failure. Old build folders are never deleted.
+ * created is removed on failure. Older build folders are not this stage's
+ * business: the caller prunes them after a successful switch (`pruneOldBuilds`).
  */
 
 export interface LlamacppInstallEnv {
@@ -31,6 +32,8 @@ export interface LlamacppInstallEnv {
   /** The current config, for the old binary and the embeddings smoke test. */
   getConfig: () => {
     currentBinary: string | undefined;
+    /** Every model's own `llama_server_binary`; a build one names is never pruned. */
+    modelBinaries: readonly string[];
     embeddings: { enabled?: boolean; model_path?: string } | undefined;
     llama_server: { host?: string; port?: number } | undefined;
   };
@@ -65,7 +68,7 @@ export async function installLlamacppBuild(
 ): Promise<InstalledBuild> {
   const downloaded: { name: string; path: string; digest: string }[] = [];
   // Whether THIS run created the build dir. A pre-existing `llama.cpp-<tag>\`
-  // is never ours to delete (old builds are kept on purpose); a partial one we
+  // is never ours to delete here; a partial one we
   // created and then failed to fill must be removed, or it blocks every retry
   // of the tag at the "already exists" guard below (audit F3).
   let createdBuildDir = false;

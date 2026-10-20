@@ -3,14 +3,20 @@ import { githubReleaseCheck } from '../jobs/checks/github';
 import { jobsFetch } from '../jobs/jobsFetch';
 import { installLlamacppBuild } from '../jobs/actions/llamacppInstall';
 import { extractZip, makeSetBinary, runCommand, sha256File } from '../jobs/actions/llamacppIo';
-import { forgeLocalRoot } from '../jobs/actions/stagedBuild';
+import {
+  describePrune,
+  forgeLocalRoot,
+  modelPinnedBinaries,
+  pruneOldBuilds,
+} from '../jobs/actions/stagedBuild';
 import type { RegisteredTool } from './ToolRegistry';
 
 /**
  * `install_llamacpp`: the on-demand twin of the `llamacpp_update` job action.
  * Same pipeline (`installLlamacppBuild`: download, digest check, extract into
  * `%LOCALAPPDATA%\Forge\llama.cpp-<tag>\`, smoke test, zips deleted), then an
- * optional write of `llama_server.binary`. It never restarts the backend — the
+ * optional write of `llama_server.binary`; a switch also deletes every older
+ * build except the one it replaced (`pruneOldBuilds`). It never restarts the backend — the
  * model running this turn IS that backend — so the new build takes effect on
  * the next model load or `/restartBackend`.
  *
@@ -66,7 +72,7 @@ export function makeInstallLlamacppTool(deps: LlamacppInstallDeps): RegisteredTo
       function: {
         name: 'install_llamacpp',
         description:
-          'Install a llama.cpp Windows CUDA release in one call: downloads the zip and its cudart, verifies SHA-256, extracts to %LOCALAPPDATA%\\Forge\\llama.cpp-<tag>\\, smoke-tests llama-server, and by default points llama_server.binary at it. It does NOT restart the backend: the build takes effect on the next model load or /restartBackend.',
+          'Install a llama.cpp Windows CUDA release in one call: downloads the zip and its cudart, verifies SHA-256, extracts to %LOCALAPPDATA%\\Forge\\llama.cpp-<tag>\\, smoke-tests llama-server, and by default points llama_server.binary at it and deletes the older builds there, keeping the one it replaced. It does NOT restart the backend: the build takes effect on the next model load or /restartBackend.',
         parameters: {
           type: 'object',
           properties: {
@@ -122,6 +128,7 @@ export function makeInstallLlamacppTool(deps: LlamacppInstallDeps): RegisteredTo
         fetchOptions: () => ({ allowedHosts, etagCache: new Map<string, string>() }),
         getConfig: () => ({
           currentBinary: previous,
+          modelBinaries: modelPinnedBinaries(config.models),
           embeddings: config.embeddings,
           llama_server: config.llama_server,
         }),
@@ -140,6 +147,16 @@ export function makeInstallLlamacppTool(deps: LlamacppInstallDeps): RegisteredTo
         lines.push(
           `llama_server.binary switched from ${previous ?? '(unset)'}. It takes effect on the next model load or /restartBackend — the backend was NOT restarted.`,
         );
+        // The previous build is kept: it is the rollback, and the running
+        // backend may still have it loaded. A build a model pins is kept too.
+        const pruned = describePrune(
+          pruneOldBuilds(localRoot(), [
+            installed.newBinary,
+            previous,
+            ...modelPinnedBinaries(config.models),
+          ]),
+        );
+        if (pruned) lines.push(pruned);
       } else {
         lines.push('config.yaml was not changed.');
       }

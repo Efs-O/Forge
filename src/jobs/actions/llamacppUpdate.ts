@@ -6,7 +6,15 @@ import {
   type InstalledBuild,
   type LlamacppInstallEnv,
 } from './llamacppInstall';
-import { clearStaged, isStale, readStaged, writeStaged, type StagedBuild } from './stagedBuild';
+import {
+  clearStaged,
+  describePrune,
+  isStale,
+  pruneOldBuilds,
+  readStaged,
+  writeStaged,
+  type StagedBuild,
+} from './stagedBuild';
 
 /**
  * The `llamacpp_update` action (B5) — the only mutating job action. Fixed
@@ -28,8 +36,8 @@ import { clearStaged, isStale, readStaged, writeStaged, type StagedBuild } from 
  *
  * Stages 2-5 are `installLlamacppBuild` (llamacppInstall.ts, shared with the
  * `install_llamacpp` tool); stage 6 is `stageLlamacppUpdate`; stages 7-8 are `performSwitch`, driven
- * by `processPendingSwitches` on the scheduler's idle tick. Old build folders
- * are never deleted.
+ * by `processPendingSwitches` on the scheduler's idle tick. A successful switch
+ * deletes the older build folders except the one it replaced (`pruneOldBuilds`).
  */
 
 export interface LlamacppUpdateEnv extends LlamacppInstallEnv {
@@ -139,7 +147,11 @@ export async function performSwitch(
     // No model is loaded, so there is no backend to restart or post-check. The
     // config write is done; the next model load uses the new binary.
     clearStaged(jobsRoot, staged.job_id);
-    const summary = `switched llama_server.binary to ${staged.tag} (no model loaded; takes effect on next load)`;
+    const summary = withPrune(
+      `switched llama_server.binary to ${staged.tag} (no model loaded; takes effect on next load)`,
+      env.localRoot,
+      [staged.new_binary, oldBinary, ...env.getConfig().modelBinaries],
+    );
     await env.deliver(staged.job_id, summary);
     return { ok: true, summary };
   }
@@ -170,8 +182,8 @@ export async function performSwitch(
     }
     env.setBinary(oldBinary);
     // Clear the stage so the next idle tick does not retry the same broken
-    // binary in a loop. The extracted build folder stays on disk (old builds
-    // are never deleted); the job re-stages on the next release.
+    // binary in a loop. The extracted build folder stays on disk (a failed
+    // switch never prunes); the job re-stages on the next release.
     clearStaged(jobsRoot, staged.job_id);
     const detail = err instanceof Error ? err.message : String(err);
     const summary = `post-check failed after switching to ${staged.tag} (${detail}); restored ${oldBinary ?? 'previous'} binary`;
@@ -189,9 +201,24 @@ export async function performSwitch(
     return { ok: false, summary };
   }
   clearStaged(jobsRoot, staged.job_id);
-  const summary = `switched llama_server.binary to ${staged.tag}`;
+  const summary = withPrune(`switched llama_server.binary to ${staged.tag}`, env.localRoot, [
+    staged.new_binary,
+    oldBinary,
+    ...env.getConfig().modelBinaries,
+  ]);
   await env.deliver(staged.job_id, summary);
   return { ok: true, summary };
+}
+
+/**
+ * After a successful switch, delete the older builds and say so. The replaced
+ * build is kept as the rollback, and so is any build a model names in its own
+ * `llama_server_binary`; a failed post-check never prunes, because the
+ * restore needs every candidate it might fall back to.
+ */
+function withPrune(summary: string, localRoot: string, keep: (string | undefined)[]): string {
+  const pruned = describePrune(pruneOldBuilds(localRoot, keep));
+  return pruned ? `${summary}. ${pruned}` : summary;
 }
 
 /**

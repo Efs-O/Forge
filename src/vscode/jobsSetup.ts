@@ -10,7 +10,7 @@ import type { IBackendPool } from '../backend/poolTypes';
 import { clearWakesIfUnowned } from '../jobs/schedulerWakes';
 import { PowerControl } from '../system/PowerControl';
 import type { SidebarProvider } from '../sidebar/SidebarProvider';
-import { forgeLocalRoot } from '../jobs/actions/stagedBuild';
+import { forgeLocalRoot, modelPinnedBinaries } from '../jobs/actions/stagedBuild';
 import { cliAgentSkip } from '../jobs/cliAgentGate';
 import { jobDefaultModel } from '../config/jobsSchema';
 import { extractZip, makeSetBinary, runCommand, sha256File } from '../jobs/actions/llamacppIo';
@@ -141,6 +141,7 @@ export function setupJobs(
                 const c = getConfig();
                 return {
                   currentBinary: c.llama_server?.binary,
+                  modelBinaries: modelPinnedBinaries(c.models),
                   embeddings: c.embeddings,
                   llama_server: c.llama_server,
                 };

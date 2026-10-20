@@ -24,6 +24,7 @@ import {
   STAGE_TTL_MS,
   buildDirForTag,
   newBinaryPath,
+  pruneOldBuilds,
   readStaged,
   writeStaged,
   type StagedBuild,
@@ -46,6 +47,7 @@ let restartCalls: string[];
 let restartFail: boolean;
 let activeModel: string | undefined;
 let currentBinary: string | undefined;
+let modelBinaries: string[] = [];
 let versionOut: string;
 let versionCode: number | null;
 let devicesCode: number | null;
@@ -76,6 +78,7 @@ function makeEnv() {
     fetchOptions: () => ({ allowedHosts: ['api.github.com'], etagCache: new Map() }),
     getConfig: () => ({
       currentBinary,
+      modelBinaries,
       embeddings: undefined,
       llama_server: undefined,
     }),
@@ -137,6 +140,7 @@ beforeEach(() => {
   restartFail = false;
   activeModel = 'test-model';
   currentBinary = 'llama.cpp-b10894';
+  modelBinaries = [];
   versionOut = `llama.cpp version ${TAG}`;
   versionCode = 0;
   devicesCode = 0;
@@ -450,6 +454,79 @@ describe('performSwitch (stages 7-8)', () => {
   });
 });
 
+describe('old build pruning after a switch', () => {
+  function makeBuild(tag: string): string {
+    const binary = newBinaryPath(localRoot, tag);
+    fs.mkdirSync(path.dirname(binary), { recursive: true });
+    fs.writeFileSync(binary, 'binary');
+    return binary;
+  }
+  const builds = (): string[] =>
+    fs.readdirSync(localRoot).filter((name) => name.startsWith('llama.cpp-')).sort();
+
+  it('a passing switch keeps the new build and the one it replaced, and deletes the rest', async () => {
+    makeBuild('b10800');
+    makeBuild('b10850');
+    currentBinary = makeBuild('b10894');
+    makeBuild(TAG);
+    const staged = writeStagedFor('llama', { switch_pending: true });
+    const result = await performSwitch(jobsRoot, staged, makeEnv());
+    expect(result.ok).toBe(true);
+    expect(builds()).toEqual(['llama.cpp-b10894', `llama.cpp-${TAG}`]);
+    expect(delivered[0]).toMatch(/Removed old builds: llama\.cpp-b10800, llama\.cpp-b10850\./);
+  });
+
+  it('a passing switch keeps a build a model pins with its own llama_server_binary', async () => {
+    const pinned = makeBuild('b10800');
+    makeBuild('b10850');
+    currentBinary = makeBuild('b10894');
+    makeBuild(TAG);
+    modelBinaries = [pinned];
+    const staged = writeStagedFor('llama', { switch_pending: true });
+    await performSwitch(jobsRoot, staged, makeEnv());
+    expect(builds()).toEqual(['llama.cpp-b10800', 'llama.cpp-b10894', `llama.cpp-${TAG}`]);
+  });
+
+  it('the no-model switch prunes too', async () => {
+    activeModel = undefined;
+    makeBuild('b10800');
+    currentBinary = makeBuild('b10894');
+    makeBuild(TAG);
+    const staged = writeStagedFor('llama', { switch_pending: true });
+    await performSwitch(jobsRoot, staged, makeEnv());
+    expect(builds()).toEqual(['llama.cpp-b10894', `llama.cpp-${TAG}`]);
+  });
+
+  it('a failed post-check deletes nothing: the restore needs every candidate', async () => {
+    restartFail = true;
+    makeBuild('b10800');
+    currentBinary = makeBuild('b10894');
+    makeBuild(TAG);
+    const staged = writeStagedFor('llama', { switch_pending: true });
+    await performSwitch(jobsRoot, staged, makeEnv());
+    expect(builds()).toEqual(['llama.cpp-b10800', 'llama.cpp-b10894', `llama.cpp-${TAG}`]);
+  });
+
+  it('touches only llama.cpp-b<N> folders, and protects a kept build whatever its case', () => {
+    makeBuild('b10800');
+    for (const other of ['staging', 'sdcpp', 'llama.cpp-custom']) {
+      fs.mkdirSync(path.join(localRoot, other));
+    }
+    const kept = newBinaryPath(localRoot, 'B10800').toUpperCase();
+    expect(pruneOldBuilds(localRoot, [kept, undefined])).toEqual({ removed: [], failed: [] });
+    expect(fs.readdirSync(localRoot).sort()).toEqual([
+      'llama.cpp-b10800',
+      'llama.cpp-custom',
+      'sdcpp',
+      'staging',
+    ]);
+  });
+
+  it('a missing root prunes nothing and does not throw', () => {
+    expect(pruneOldBuilds(path.join(localRoot, 'absent'), [])).toEqual({ removed: [], failed: [] });
+  });
+});
+
 describe('approveStaged (/job <n> approve)', () => {
   it('reports when there is no staged build to approve', () => {
     expect(approveStaged(jobsRoot, 'none', nowMs)).toMatch(/no staged build/);
@@ -483,6 +560,7 @@ describe('LlamacppAction (scheduler-facing wrapper)', () => {
       localRoot,
       getLlamacppConfig: () => ({
         currentBinary,
+        modelBinaries,
         embeddings: undefined,
         llama_server: undefined,
       }),

@@ -1,5 +1,9 @@
 # Forge — Recent Changes
 
+## 0.17.56
+
+- Installing a llama.cpp build no longer leaves the old ones behind. When `install_llamacpp` or a `llamacpp_update` job switches `llama_server.binary`, it deletes every older `llama.cpp-b<N>` folder under `%LOCALAPPDATA%\Forge` except the build it replaced, which stays as the rollback, and any build a model names in its own `llama_server_binary`. Each build is about 700 MB. A switch whose post-check fails deletes nothing, and a folder that cannot be removed is named in the result.
+
 ## 0.17.55
 
 - A long chat is no longer re-read from the start at midnight. Today's date moved out of the system prompt into the short context block each turn opens with, so the model still sees the date every turn, but the date rolling over no longer changes the start of the prompt that the model server keeps cached.
