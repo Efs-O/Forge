@@ -49,12 +49,15 @@ describe('TemplateEngine currentDate', () => {
     }
   });
 
-  it('ships the date in the real execute template', () => {
+  // The date moved to the per-turn context (turnContext.ts): in the system
+  // prompt it rolled over at midnight and forced a full re-read of the chat.
+  it('keeps the date out of the real execute template', () => {
     const builtin = path.resolve(__dirname, '../../config/templates/builtin');
-    const engine = new TemplateEngine(builtin);
-    const rendered = engine.render('execute', { workspaceRoot: '/w' });
-    expect(rendered).toContain("Today's date is ");
-    expect(rendered).toMatch(/Today's date is \d{4}-\d{2}-\d{2}\./u);
+    const source = fs.readFileSync(path.join(builtin, 'execute.njk'), 'utf8');
+    expect(source).not.toContain('currentDate');
+    const rendered = new TemplateEngine(builtin).render('execute', { workspaceRoot: '/w' });
+    expect(rendered).not.toMatch(/\d{4}-\d{2}-\d{2}/u);
+    expect(rendered).toContain('Workspace root: /w');
   });
 });
 

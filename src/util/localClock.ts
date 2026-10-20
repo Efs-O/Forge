@@ -4,10 +4,10 @@
  *
  * Two consumers, two different rules, and the split is the point:
  *
- * - `localDate()` goes in the system prompt (TemplateEngine). DATE only. The
- *   system prompt is the KV cache's prefix, so anything in it that ticks
- *   re-processes the whole prompt every turn; a date moves once a day, at an
- *   hour nobody is mid-turn.
+ * - `localDate()` goes in the per-turn context (turnContext.ts), snapshotted
+ *   once per turn. DATE only. It used to sit in the system prompt on the
+ *   theory that it moves at an hour nobody is mid-turn; long unattended chats
+ *   were, and each midnight cost a full re-read of the conversation.
  * - `localTimeOfDay()` goes in a TOOL RESULT, never the prompt. A tool result
  *   is appended after everything already cached, so a clock there costs no
  *   re-evaluation, and it arrives at the one moment it is true.

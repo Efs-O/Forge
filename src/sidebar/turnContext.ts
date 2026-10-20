@@ -34,6 +34,13 @@ const CLOSE = '[/Forge turn context]';
 export interface TurnContextState {
   /** Absolute path of the active editor, if any. */
   activeFile?: string | undefined;
+  /**
+   * Today, `YYYY-MM-DD`. Here and not in the system prompt: the system prompt
+   * is the head of the KV prefix, and its date rolling over at midnight forced
+   * a full re-read of conversations 140-176 messages long (4 seen on Strata,
+   * 2026-10). Snapshotted per turn, so a turn's own rounds never see it change.
+   */
+  currentDate?: string | undefined;
   plan?: ConversationPlan | undefined;
   /** Live cwd snapshot for the terminal the user last had active, if VS Code reports it. */
   activeTerminalCwd?: string | undefined;
@@ -48,10 +55,14 @@ export interface TurnContextState {
 /**
  * Delimited so the model can tell Forge-generated state from something the
  * user typed. Deterministic in its inputs — nothing here reads the clock, or
- * the prompt would change on its own between rounds of a single turn.
+ * the prompt would change on its own between rounds of a single turn. The date
+ * arrives in the state, read once when the turn is snapshotted.
  */
 function renderTurnContext(state: TurnContextState): string | undefined {
   const parts: string[] = [];
+  if (state.currentDate) {
+    parts.push(`Today's date: ${state.currentDate} (monitor_execution reports the wall clock).`);
+  }
   if (state.activeFile) parts.push(`Active file: ${state.activeFile}`);
   if (state.unattended) parts.push(UNATTENDED_NOTE);
   const remote = renderRemoteReach(state.remoteChats);

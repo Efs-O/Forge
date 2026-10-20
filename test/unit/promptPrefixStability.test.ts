@@ -112,6 +112,32 @@ describe('C - plan unchanged, clock advanced', () => {
   });
 });
 
+// Measured on Strata, 2026-10: with the date in the system prompt, midnight
+// changed the head of the prefix and re-read chats 140-176 messages long.
+describe('C2 - date rolls over between turns', () => {
+  it('leaves the system message and every earlier message byte-identical', () => {
+    const history = conversation().slice(0, 5);
+    freezeTurnContext(history, { currentDate: '2026-10-19' });
+    const yesterday = injectTurnContext(history, {});
+    const today = [
+      ...history.map((message) => ({ ...message })),
+      { role: 'user', content: 'second request' },
+    ] satisfies ChatMessage[];
+    freezeTurnContext(today, { currentDate: '2026-10-20' });
+    const prepared = injectTurnContext(today, {});
+
+    expect(prepared[0]).toEqual({ role: 'system', content: SYSTEM });
+    expect(prepared.slice(0, yesterday.length)).toEqual(yesterday);
+    expect(String(yesterday[1]?.content)).toContain("Today's date: 2026-10-19");
+    expect(String(prepared.at(-1)?.content)).toContain("Today's date: 2026-10-20");
+  });
+
+  it('renders no date line when the state carries none', () => {
+    const out = injectTurnContext(conversation(), { activeFile: '/repo/a.ts' });
+    expect(JSON.stringify(out)).not.toContain("Today's date");
+  });
+});
+
 describe('D - plan changed', () => {
   it('diverges at the latest user message, not the first', () => {
     const before = injectTurnContext(conversation(), { plan: PLAN });
@@ -228,7 +254,11 @@ describe('strict chat-template safety', () => {
 
   describe('context-trim prefix stability', () => {
     it('keeps earlier prepared messages byte-identical between watermark advances', () => {
-      const model: ModelConfig = { name: 'trim-test', num_ctx: 131_072, n_parallel: 1 } as ModelConfig;
+      const model: ModelConfig = {
+        name: 'trim-test',
+        num_ctx: 131_072,
+        n_parallel: 1,
+      } as ModelConfig;
       const state = { reasoningDropped: 0, excerpts: new Map<string, number>() };
       const messages: ChatMessage[] = [
         { role: 'user', content: 'u'.repeat(10_000) },
@@ -269,9 +299,9 @@ describe('strict chat-template safety', () => {
         }
         if (result.trimAdvanced) advances += 1;
         if (previous && !result.trimAdvanced) {
-          expect(JSON.stringify(result.messages.slice(0, previous.length)) === JSON.stringify(previous)).toBe(
-            true,
-          );
+          expect(
+            JSON.stringify(result.messages.slice(0, previous.length)) === JSON.stringify(previous),
+          ).toBe(true);
         }
         previous = result.messages;
       }
@@ -355,14 +385,16 @@ describe('the stored transcript', () => {
     const once = injectTurnContext(conversation(), { activeFile: '/a.ts', plan: PLAN });
     const twice = injectTurnContext(conversation(), { activeFile: '/a.ts', plan: PLAN });
     expect(twice).toEqual(once);
-    const blocks = JSON.stringify(once).split('[Forge turn context, as of this message]').length - 1;
+    const blocks =
+      JSON.stringify(once).split('[Forge turn context, as of this message]').length - 1;
     expect(blocks).toBe(1);
 
     // With a frozen message: one frozen block + one live block.
     const msgs = conversation();
     freezeTurnContext(msgs, { activeFile: '/a.ts', plan: PLAN });
     const withFrozen = injectTurnContext(msgs, { activeFile: '/b.ts', plan: PLAN });
-    const frozenBlocks = JSON.stringify(withFrozen).split('[Forge turn context, as of this message]').length - 1;
+    const frozenBlocks =
+      JSON.stringify(withFrozen).split('[Forge turn context, as of this message]').length - 1;
     expect(frozenBlocks).toBe(2);
   });
 
@@ -434,10 +466,20 @@ describe('Fix A: annotateRereads prefix property', () => {
         role: 'assistant',
         content: null,
         tool_calls: [
-          { id: 'r1', type: 'function', function: { name: 'read_file', arguments: JSON.stringify({ path: 'src/app.ts' }) } },
+          {
+            id: 'r1',
+            type: 'function',
+            function: { name: 'read_file', arguments: JSON.stringify({ path: 'src/app.ts' }) },
+          },
         ],
       },
-      { role: 'tool', tool_call_id: 'r1', name: 'read_file', content: 'export const version = 1;', stampedAt: 1000 },
+      {
+        role: 'tool',
+        tool_call_id: 'r1',
+        name: 'read_file',
+        content: 'export const version = 1;',
+        stampedAt: 1000,
+      },
       { role: 'assistant', content: 'I see the bug.' },
     ];
 
@@ -448,10 +490,20 @@ describe('Fix A: annotateRereads prefix property', () => {
         role: 'assistant',
         content: null,
         tool_calls: [
-          { id: 'r2', type: 'function', function: { name: 'read_file', arguments: JSON.stringify({ path: 'src/app.ts' }) } },
+          {
+            id: 'r2',
+            type: 'function',
+            function: { name: 'read_file', arguments: JSON.stringify({ path: 'src/app.ts' }) },
+          },
         ],
       },
-      { role: 'tool', tool_call_id: 'r2', name: 'read_file', content: 'export const version = 2;', stampedAt: 2000 },
+      {
+        role: 'tool',
+        tool_call_id: 'r2',
+        name: 'read_file',
+        content: 'export const version = 2;',
+        stampedAt: 2000,
+      },
       { role: 'assistant', content: 'Fixed.' },
     ];
 
@@ -470,10 +522,20 @@ describe('Fix A: annotateRereads prefix property', () => {
         role: 'assistant',
         content: null,
         tool_calls: [
-          { id: 'r1', type: 'function', function: { name: 'read_file', arguments: JSON.stringify({ path: 'src/app.ts' }) } },
+          {
+            id: 'r1',
+            type: 'function',
+            function: { name: 'read_file', arguments: JSON.stringify({ path: 'src/app.ts' }) },
+          },
         ],
       },
-      { role: 'tool', tool_call_id: 'r1', name: 'read_file', content: 'export const version = 1;', stampedAt: 1000 },
+      {
+        role: 'tool',
+        tool_call_id: 'r1',
+        name: 'read_file',
+        content: 'export const version = 1;',
+        stampedAt: 1000,
+      },
     ];
 
     const extended: ChatMessage[] = [
@@ -482,10 +544,20 @@ describe('Fix A: annotateRereads prefix property', () => {
         role: 'assistant',
         content: null,
         tool_calls: [
-          { id: 'r2', type: 'function', function: { name: 'read_file', arguments: JSON.stringify({ path: 'src/app.ts' }) } },
+          {
+            id: 'r2',
+            type: 'function',
+            function: { name: 'read_file', arguments: JSON.stringify({ path: 'src/app.ts' }) },
+          },
         ],
       },
-      { role: 'tool', tool_call_id: 'r2', name: 'read_file', content: 'export const version = 2;', stampedAt: 2000 },
+      {
+        role: 'tool',
+        tool_call_id: 'r2',
+        name: 'read_file',
+        content: 'export const version = 2;',
+        stampedAt: 2000,
+      },
     ];
 
     const short = runChain(base);
@@ -560,7 +632,9 @@ describe('injectTurnContext with frozen blocks', () => {
     expect(target.content).toContain(frozen);
     // The live block is NOT folded into the same message (it already has a frozen one).
     // Step 2 should not fire because the message has turnContext.
-    expect(target.content).not.toContain('[Forge turn context, as of this message]\n\n[Forge turn context, as of this message]');
+    expect(target.content).not.toContain(
+      '[Forge turn context, as of this message]\n\n[Forge turn context, as of this message]',
+    );
   });
 
   it('pre-change conversations (no turnContext anywhere) behave exactly as today', () => {
@@ -586,7 +660,12 @@ describe('injectTurnContext with frozen blocks', () => {
 describe('persistence round-trip', () => {
   it('slimPersistMessages + chatMessagesFromSlim round-trips turnContext byte-identically', () => {
     const msgs: ChatMessage[] = [
-      { role: 'user', content: 'hello', turnContext: '[Forge turn context, as of this message]\n- Active file: /a.ts\n[/Forge turn context, as of this message]' },
+      {
+        role: 'user',
+        content: 'hello',
+        turnContext:
+          '[Forge turn context, as of this message]\n- Active file: /a.ts\n[/Forge turn context, as of this message]',
+      },
       { role: 'assistant', content: 'hi' },
     ];
     const slim = slimPersistMessages(msgs);

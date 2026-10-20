@@ -37,6 +37,7 @@ import { terminalCommandTracker } from '../tools/TerminalCommandTracker';
 import { formatPromptCacheStats, readPromptCacheStats } from '../llm/promptCacheStats';
 import { toolOutputLimits } from '../tools/toolOutputLimits';
 import { getLogger } from '../util/logger';
+import { localDate } from '../util/localClock';
 import { buildVisionRefusals } from './visionGate';
 import { unattendedConversations, withUnattendedRefusals } from './unattendedConversations';
 import {
@@ -256,16 +257,15 @@ export async function runModelTurn(
   // two consecutive rounds that grew the prompt by 186 tokens re-evaluated
   // 15401 of them (~20 s of prefill each).
   //
-  // The model does not need the block re-rendered to know what it just did:
-  // update_plan returns a tool result confirming the write, and the new plan
-  // reaches the prompt on the next USER turn, where the prefix is being
-  // extended anyway. `items` is copied so a later in-place mutation of
-  // conv.plan cannot reach back into this turn's prompt.
+  // It need not be re-rendered: update_plan's result confirms the write, and the
+  // new plan reaches the next USER turn, which extends the prefix anyway. `items`
+  // is copied so a later in-place edit of conv.plan cannot reach this prompt.
   const remoteChats = ctx.remoteReach?.(conv.id) ?? 0;
   const userTerminalCommands = terminalCommandTracker.recentUserCommands();
   const terminalCwd = userTerminalCommands.length > 0 ? activeTerminalCwd() : undefined;
   const turnContext: TurnContextState = {
     activeFile,
+    currentDate: localDate(),
     ...(userTerminalCommands.length > 0 ? { userTerminalCommands } : {}),
     ...(terminalCwd ? { activeTerminalCwd: terminalCwd } : {}),
     ...(conv.plan ? { plan: { items: [...conv.plan.items], updatedAt: conv.plan.updatedAt } } : {}),

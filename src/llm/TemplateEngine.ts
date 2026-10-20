@@ -36,9 +36,10 @@ export class TemplateEngine {
    */
   render(name: string, context: TemplateContext): string {
     const templateName = `${name}.njk`;
-    // Injected here rather than at each call site: a model with no clock has
-    // no way to date anything it writes, and asking for one cost a round to a
-    // banned `powershell -Command "Get-Date"` and a fallback to `node -e`.
+    // Injected for user templates under .forge/templates/ that reference it.
+    // The builtin no longer does: the model gets the date in the per-turn
+    // context (turnContext.ts), because a date in the system prompt rolls over
+    // at midnight and forces a full re-read of the whole conversation.
     const withDate = { currentDate: localDate(), ...context };
     // A user template that fails to render throws: falling back to the builtin
     // would run the turn on a prompt the user did not write, with no sign of it.
