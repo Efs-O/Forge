@@ -17,6 +17,7 @@
   --q-opt-hover: #2a2e35;
   --q-answer-fg: #1b1e23;
   --q-chip-fg: var(--q-accent);
+  --q-rec-fg: var(--q-ok);
   width: 100%;
   max-width: 720px;
   margin: 0 auto;
@@ -46,6 +47,8 @@ body.vscode-light .question-card {
   --q-opt-hover: #f2f4f7;
   --q-answer-fg: #ffffff;
   --q-chip-fg: #9a4510;
+  /* --q-ok is 4.27:1 on the light selection; this clears 4.5:1 on all three. */
+  --q-rec-fg: #2a7046;
   box-shadow: 0 4px 18px rgb(24 31 40 / 12%);
 }
 
@@ -63,6 +66,7 @@ body.vscode-high-contrast-light .question-card {
   --q-opt-hover: var(--vscode-editorWidget-background);
   --q-answer-fg: var(--vscode-foreground);
   --q-chip-fg: var(--vscode-foreground);
+  --q-rec-fg: var(--vscode-foreground);
   box-shadow: none;
 }
 
@@ -251,6 +255,21 @@ body.vscode-high-contrast-light .question-header-chip {
 
 .question-option-label {
   color: var(--q-fg);
+}
+
+/* Green, not the orange accent: a recommendation is not a selection. */
+.question-option-badge {
+  display: inline-block;
+  margin-left: 7px;
+  padding: 0 6px;
+  border: 1px solid currentColor;
+  border-radius: var(--forge-radius-pill);
+  color: var(--q-rec-fg);
+  font-size: 0.82em;
+  font-weight: 600;
+  line-height: 1.5;
+  vertical-align: 1px;
+  white-space: nowrap;
 }
 
 .question-option-key {

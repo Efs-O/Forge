@@ -170,6 +170,24 @@ describe('renderQuestionAsText', () => {
     expect(text).toContain('or send free text instead');
   });
 
+  it('tags the recommended option on every text path, but answers with the bare label', () => {
+    const [spec] = normalizeQuestions({
+      prompt: 'Which backend?',
+      options: ['ollama', { label: 'llama.cpp', recommended: true, description: 'fastest here' }],
+    });
+    expect(renderQuestionAsText('Which backend?', spec!)).toContain(
+      '2. llama.cpp (Recommended) — fastest here',
+    );
+    expect(
+      renderQuestionAsText('Which backend?', [{ label: 'llama.cpp', recommended: true }, 'x']),
+    ).toContain('1. llama.cpp (Recommended)');
+    expect(renderQuestionAsText('Which backend?', undefined, [spec!])).toContain(
+      '   2. llama.cpp (Recommended) — fastest here',
+    );
+    expect(formatStructuredAnswer([spec!], { answers: [{ picks: [1] }] })).toBe('llama.cpp');
+    expect(resolveAnswerText('llama.cpp', spec!)).toBe('llama.cpp');
+  });
+
   it('keeps flat string and legacy grouped renderings', () => {
     expect(renderQuestionAsText('Which backend?', ['llama.cpp', 'ollama'])).toBe(
       'Which backend?\n1. llama.cpp\n2. ollama\n\nReply with the number or the text.',

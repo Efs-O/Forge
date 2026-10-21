@@ -29,7 +29,7 @@ export function telegramQuestionButtons(
     const mark = selected ? (spec.multiSelect ? '✓ ' : '● ') : '';
     return [
       {
-        text: `${mark}${option.label}`,
+        text: `${mark}${option.label}${option.recommended ? ' (Recommended)' : ''}`,
         callbackData: encodeQuestionCallback(questionId, String(index + 1)),
       },
     ];

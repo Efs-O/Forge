@@ -33,6 +33,7 @@ describe('question card theme', () => {
     expect(css).toContain('--q-muted: #5b6470;');
     expect(css).toContain('--q-accent: #c25a1c;');
     expect(css).toContain('--q-chip-fg: #9a4510;');
+    expect(css).toContain('--q-rec-fg: #2a7046;');
     expect(css).toContain('body.vscode-high-contrast .question-card');
     expect(css).toContain('--q-card-line: var(--vscode-contrastBorder);');
     expect(css).toContain('--q-accent: var(--vscode-focusBorder);');
@@ -55,6 +56,12 @@ describe('question card theme', () => {
       ['dark muted on selection', '#98a0ab', '#3a2418'],
       ['dark accent button', '#1b1e23', '#f08a4b'],
       ['dark completion mark', '#6cc28f', '#22262c'],
+      ['light recommended tag on option', '#2a7046', '#ffffff'],
+      ['light recommended tag on selection', '#2a7046', '#fbe9dd'],
+      ['light recommended tag on hover', '#2a7046', '#f2f4f7'],
+      ['dark recommended tag on option', '#6cc28f', '#1b1e23'],
+      ['dark recommended tag on selection', '#6cc28f', '#3a2418'],
+      ['dark recommended tag on hover', '#6cc28f', '#2a2e35'],
     ] as const;
 
     for (const [label, foreground, background] of readablePairs) {

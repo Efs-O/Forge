@@ -74,6 +74,24 @@ describe('structured user questions', () => {
     await expect(pending).resolves.toBe('Postgres\nNote: keep the old schema');
   });
 
+  it('marks the recommended item in the quick pick and answers with the bare label', async () => {
+    const service = new UserQuestionService();
+    const specs = normalizeQuestions({
+      prompt: 'Bump?',
+      options: [{ label: 'Bump', recommended: true, description: 'new VSIX name' }, 'Keep'],
+    });
+    const pending = service.ask({ prompt: 'Bump?', specs });
+    const picker = openQuickInputs[0]!;
+    expect(picker.items.slice(0, 2)).toMatchObject([
+      { label: 'Bump', description: 'Recommended · new VSIX name' },
+      { label: 'Keep' },
+    ]);
+    expect(picker.items[1]!.description).toBeUndefined();
+    picker.selectedItems = [{ label: 'Bump', questionKind: 'option', optionIndex: 0 }];
+    picker.accept();
+    await expect(pending).resolves.toBe('Bump');
+  });
+
   it('lists every pending question with its conversation id', () => {
     const service = new UserQuestionService();
     service.addSink({

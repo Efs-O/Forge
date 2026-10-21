@@ -1,5 +1,9 @@
 # Forge — Recent Changes
 
+## 0.17.60
+
+- `ask_user` options can carry `recommended: true`. The sidebar card shows a green "Recommended" tag on that option, Telegram buttons and the plain-text question read "Label (Recommended)", and the VS Code quick pick shows "Recommended" beside it. Nothing is preselected, and choosing it returns the bare label. The agent is told to list the recommended option first and put the reason in its description, instead of writing "recommended" into the label in a different form each time. A single-select question can recommend one option; a multi-select question can recommend several.
+
 ## 0.17.59
 
 - The `ask_user` question card in the sidebar has been redesigned. It is now a framed card: you pick options, change your mind, deselect or pick nothing, and only **Answer** (or Enter) sends. A click never sends on its own, and the card stays open until you answer or press Skip. Escape no longer dismisses it. Every question can take a note or your own answer in place of an "Other" option. Several questions in one call show as tabs, with a Review step before Answer.

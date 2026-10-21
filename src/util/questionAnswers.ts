@@ -7,6 +7,8 @@ export interface QuestionOption {
   label: string;
   description?: string;
   exclusive?: boolean;
+  /** Shown as "Recommended" on every surface; the answer is still the bare label. */
+  recommended?: boolean;
 }
 
 export interface QuestionSpec {
@@ -20,6 +22,7 @@ export interface QuestionOptionObjectInput {
   label: string;
   description?: string | undefined;
   exclusive?: boolean | undefined;
+  recommended?: boolean | undefined;
 }
 
 export type QuestionOptionInput = string | QuestionOptionObjectInput;
@@ -79,7 +82,14 @@ function normalizeOption(option: QuestionOptionInput): QuestionOption {
   const normalized: QuestionOption = { label: option.label };
   if (option.description !== undefined) normalized.description = option.description;
   if (option.exclusive !== undefined) normalized.exclusive = option.exclusive;
+  if (option.recommended) normalized.recommended = true;
   return normalized;
+}
+
+/** One plain-text option line, shared by every text rendering. */
+function optionLine(option: QuestionOption): string {
+  const tag = option.recommended ? ' (Recommended)' : '';
+  return `${option.label}${tag}${option.description ? ` — ${option.description}` : ''}`;
 }
 
 /** Validates and adapts the old string-only `questions` form. */
@@ -332,10 +342,7 @@ export function renderQuestionAsText(
     const body = specs
       .map((spec, index) => {
         const optionsText = spec.options
-          .map(
-            (option, optionIndex) =>
-              `   ${optionIndex + 1}. ${option.label}${option.description ? ` — ${option.description}` : ''}`,
-          )
+          .map((option, optionIndex) => `   ${optionIndex + 1}. ${optionLine(option)}`)
           .join('\n');
         return `${index + 1}) ${spec.prompt}\n${optionsText}`;
       })
@@ -349,10 +356,7 @@ export function renderQuestionAsText(
   if (optionsOrSpec?.length) {
     const normalized = optionsOrSpec.map(normalizeOption);
     const body = normalized
-      .map(
-        (option, index) =>
-          `${index + 1}. ${option.label}${option.description ? ` — ${option.description}` : ''}`,
-      )
+      .map((option, index) => `${index + 1}. ${optionLine(option)}`)
       .join('\n');
     return `${prompt}\n${body}\n\nReply with the number or the text.`;
   }
@@ -362,10 +366,7 @@ export function renderQuestionAsText(
 function renderSpecAsText(prompt: string, spec: QuestionSpec): string {
   if (spec.options.length === 0) return `${prompt}\n\nReply with your answer.`;
   const body = spec.options
-    .map(
-      (option, index) =>
-        `${index + 1}. ${option.label}${option.description ? ` — ${option.description}` : ''}`,
-    )
+    .map((option, index) => `${index + 1}. ${optionLine(option)}`)
     .join('\n');
   const guidance = spec.multiSelect
     ? 'Reply with the numbers, e.g. 1,3, or send free text instead.'

@@ -16,11 +16,7 @@ describe('Telegram question buttons', () => {
   it('shows selected single and multi picks and step controls', () => {
     const single = telegramQuestionButtons('ask-123', spec(), [1], 0, 2);
     expect(single[1]![0]?.text).toBe('● B');
-    expect(single.at(-1)?.map((button) => button.text)).toEqual([
-      'Note…',
-      'Skip',
-      'Next ›',
-    ]);
+    expect(single.at(-1)?.map((button) => button.text)).toEqual(['Note…', 'Skip', 'Next ›']);
     const multi = telegramQuestionButtons('ask-123', spec(true), [0, 2], 1, 2);
     expect(multi[0]![0]?.text).toBe('✓ A');
     expect(multi[2]![0]?.text).toBe('✓ C');
@@ -30,6 +26,17 @@ describe('Telegram question buttons', () => {
       'Skip',
       'Send ✓',
     ]);
+  });
+
+  it('labels the recommended choice and keeps its mark when picked', () => {
+    const [recommended] = normalizeQuestions({
+      prompt: 'Choose',
+      options: ['A', { label: 'B', recommended: true }],
+    });
+    const rows = telegramQuestionButtons('ask-123', recommended!, [], 0, 1);
+    expect(rows.slice(0, 2).map((row) => row[0]?.text)).toEqual(['A', 'B (Recommended)']);
+    const picked = telegramQuestionButtons('ask-123', recommended!, [1], 0, 1);
+    expect(picked[1]![0]?.text).toBe('● B (Recommended)');
   });
 
   it('parses one-based option and control callbacks', () => {

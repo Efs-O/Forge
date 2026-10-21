@@ -57,7 +57,12 @@ export function QuestionBody({
                   {selected ? (spec.multiSelect ? '✓' : '●') : spec.multiSelect ? '□' : '○'}
                 </span>
                 <span className="question-option-copy">
-                  <span className="question-option-label">{option.label}</span>
+                  <span className="question-option-label">
+                    {option.label}
+                    {option.recommended && (
+                      <span className="question-option-badge">Recommended</span>
+                    )}
+                  </span>
                   {option.description && (
                     <span className="question-option-description">{option.description}</span>
                   )}

@@ -14,27 +14,45 @@ const questionOptionSchema = z.union([
       label: z.string().max(80),
       description: z.string().max(200).optional(),
       exclusive: z.boolean().optional(),
+      recommended: z.boolean().optional(),
     })
     .strict(),
 ]);
+
+const optionListSchema = z.array(questionOptionSchema).min(2).max(9);
+
+function recommendedCount(options: readonly z.infer<typeof questionOptionSchema>[]): number {
+  return options.filter((option) => typeof option !== 'string' && option.recommended).length;
+}
+
+const ONE_RECOMMENDED =
+  'A single-select question can recommend only one option; use multiSelect to recommend a combination.';
 
 const questionSpecSchema = z
   .object({
     prompt: z.string(),
     header: z.string().max(16).optional(),
     multiSelect: z.boolean().optional(),
-    options: z.array(questionOptionSchema).min(2).max(9),
+    options: optionListSchema,
   })
-  .strict();
+  .strict()
+  .refine((spec) => spec.multiSelect || recommendedCount(spec.options) <= 1, {
+    message: ONE_RECOMMENDED,
+    path: ['options'],
+  });
 
 const askUserArgsSchema = z
   .object({
     prompt: z.string().optional(),
     placeholder: z.string().optional(),
-    options: z.array(questionOptionSchema).min(2).max(9).optional(),
+    options: optionListSchema.optional(),
     questions: z.array(questionSpecSchema).min(1).max(4).optional(),
   })
-  .strict();
+  .strict()
+  .refine((args) => recommendedCount(args.options ?? []) <= 1, {
+    message: ONE_RECOMMENDED,
+    path: ['options'],
+  });
 
 const questionOptionJsonSchema = {
   anyOf: [
@@ -45,6 +63,10 @@ const questionOptionJsonSchema = {
         label: { type: 'string', maxLength: 80 },
         description: { type: 'string', maxLength: 200 },
         exclusive: { type: 'boolean' },
+        recommended: {
+          type: 'boolean',
+          description: 'The option you recommend; one per single-select question.',
+        },
       },
       required: ['label'],
       additionalProperties: false,
@@ -71,7 +93,9 @@ export function makeAskUserTool(
           'options, and the top-level prompt only heads them. Use multiSelect only ' +
           'when the choices can be combined; choices that contradict each other ' +
           'belong in a single-select question. Mark an option such as "None of these" ' +
-          'as exclusive. The user can always add a note or write their own answer; ' +
+          'as exclusive. Mark the option you recommend with recommended: true, list it ' +
+          'first, and put the reason in its description; do not write "recommended" into ' +
+          'the label. The user can always add a note or write their own answer; ' +
           'do not add an “Other” option.',
         parameters: {
           type: 'object',

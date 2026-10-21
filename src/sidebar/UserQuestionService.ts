@@ -6,6 +6,7 @@ import {
   renderQuestionAsText,
   resolveAnswerText,
   type QuestionGroup,
+  type QuestionOption,
   type QuestionSpec,
   type StructuredAnswer,
 } from '../util/questionAnswers';
@@ -248,7 +249,7 @@ export class UserQuestionService {
     picker.items = [
       ...spec.options.map((option, optionIndex) => ({
         label: option.label,
-        ...(option.description ? { description: option.description } : {}),
+        ...optionDescription(option),
         questionKind: 'option' as const,
         optionIndex,
       })),
@@ -322,6 +323,12 @@ export class UserQuestionService {
     box.show();
     return box;
   }
+}
+
+/** The quick pick's dim text; the label stays bare because it is the answer. */
+function optionDescription(option: QuestionOption): { description?: string } {
+  const parts = [option.recommended ? 'Recommended' : '', option.description ?? ''].filter(Boolean);
+  return parts.length ? { description: parts.join(' · ') } : {};
 }
 
 function resolveSpecsAnswer(text: string, specs: readonly QuestionSpec[]): string {

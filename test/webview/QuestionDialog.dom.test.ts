@@ -108,6 +108,28 @@ describe('QuestionDialog', () => {
     expect(onSkip).not.toHaveBeenCalled();
   });
 
+  it('tags the recommended option without preselecting it', () => {
+    const { onAnswer } = render([
+      {
+        prompt: 'Bump the version?',
+        multiSelect: false,
+        options: [{ label: 'Bump', recommended: true }, { label: 'Keep' }],
+      },
+    ]);
+    const options = [...container.querySelectorAll<HTMLButtonElement>('.question-option')];
+    expect(options[0]!.querySelector('.question-option-badge')?.textContent).toBe('Recommended');
+    expect(options[1]!.querySelector('.question-option-badge')).toBeNull();
+    expect(options.map((option) => option.getAttribute('aria-checked'))).toEqual([
+      'false',
+      'false',
+    ]);
+    const answer = container.querySelector<HTMLButtonElement>('.question-answer')!;
+    expect(answer.disabled).toBe(true);
+    act(() => options[0]!.click());
+    act(() => answer.click());
+    expect(onAnswer).toHaveBeenCalledWith({ answers: [{ picks: [0] }] });
+  });
+
   it('keeps multi-picks with a note and sends option indexes in spec order', () => {
     const { onAnswer } = render([
       {
