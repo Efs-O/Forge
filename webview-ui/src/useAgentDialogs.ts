@@ -1,49 +1,71 @@
-import type { QuestionGroup } from '../../src/util/questionAnswers';
-import { useCallback, useState } from 'react';
+import { useCallback, useRef, useState } from 'react';
 import type { HostToWebview } from '../../src/sidebar/messageBridge';
+import type { StructuredAnswer } from '../../src/util/questionAnswers';
 import { vscode } from './vscode';
 
-/**
- * The two dialogs a turn can raise: a tool approval, and an `ask_user`
- * question.
- *
- * Extracted from `App` because they are one concern with a shared rule -- both
- * can be settled by a surface other than this webview, so both need a `resolved`
- * message to close the dialog without answering it, and both must ignore a late
- * resolve that names an older request than the one on screen. Keeping the pair
- * together is what makes that rule visible; in `App` it was two unrelated
- * `useState`s forty lines apart.
- */
+type QuestionMessage = Extract<HostToWebview, { type: 'question' }>;
 
-interface ConfirmRequestState {
-  id: string;
-  toolName: string;
-  detail: string;
-  isDangerous?: boolean;
+export interface AgentQuestion extends QuestionMessage {
+  focusOnOpen: boolean;
 }
 
-interface QuestionState {
-  id: string;
-  prompt: string;
-  placeholder?: string | undefined;
-  options?: readonly string[] | undefined;
-  questions?: readonly QuestionGroup[] | undefined;
+export interface QuestionDraft {
+  tab: number;
+  picks: number[][];
+  notes: string[];
 }
 
 export interface AgentDialogs {
-  confirmRequest: ConfirmRequestState | null;
-  question: QuestionState | null;
-  /** Returns true when the message was a dialog message and is fully handled. */
+  confirmRequest: {
+    id: string;
+    toolName: string;
+    detail: string;
+    isDangerous?: boolean;
+  } | null;
+  questions: ReadonlyMap<string, AgentQuestion>;
+  drafts: ReadonlyMap<string, QuestionDraft>;
   handleHostMessage: (msg: HostToWebview) => boolean;
   approveConfirm: () => void;
   denyConfirm: () => void;
-  answerQuestion: (text: string) => void;
-  dismissQuestion: () => void;
+  updateQuestionDraft: (id: string, draft: QuestionDraft) => void;
+  answerQuestion: (id: string, answer: StructuredAnswer) => void;
+  skipQuestion: (id: string) => void;
 }
 
-export function useAgentDialogs(): AgentDialogs {
-  const [confirmRequest, setConfirmRequest] = useState<ConfirmRequestState | null>(null);
-  const [question, setQuestion] = useState<QuestionState | null>(null);
+/** The oldest unresolved request that belongs to the active conversation. */
+export function selectVisibleQuestion(
+  questions: Iterable<AgentQuestion>,
+  activeConversationId: string,
+): AgentQuestion | undefined {
+  for (const question of questions) {
+    if (!question.conversationId || question.conversationId === activeConversationId) {
+      return question;
+    }
+  }
+  return undefined;
+}
+
+function initialDraft(specs: QuestionMessage['specs']): QuestionDraft {
+  return {
+    tab: 0,
+    picks: specs.map(() => []),
+    notes: specs.map(() => ''),
+  };
+}
+
+function removeQuestion<V>(values: Map<string, V>, id: string): Map<string, V> {
+  if (!values.has(id)) return values;
+  const next = new Map(values);
+  next.delete(id);
+  return next;
+}
+
+export function useAgentDialogs(activeConversationId: string): AgentDialogs {
+  const activeConversationIdRef = useRef(activeConversationId);
+  activeConversationIdRef.current = activeConversationId;
+  const [confirmRequest, setConfirmRequest] = useState<AgentDialogs['confirmRequest']>(null);
+  const [questions, setQuestions] = useState<Map<string, AgentQuestion>>(() => new Map());
+  const [drafts, setDrafts] = useState<Map<string, QuestionDraft>>(() => new Map());
 
   const handleHostMessage = useCallback((msg: HostToWebview): boolean => {
     switch (msg.type) {
@@ -56,23 +78,31 @@ export function useAgentDialogs(): AgentDialogs {
         });
         return true;
       case 'confirmResolved':
-        // Only clear the dialog we are actually showing: a late resolve for an
-        // older approval must not dismiss the one now on screen.
         setConfirmRequest((current) => (current?.id === msg.id ? null : current));
         return true;
       case 'question':
-        setQuestion({
-          id: msg.id,
-          prompt: msg.prompt,
-          placeholder: msg.placeholder,
-          options: msg.options,
-          questions: msg.questions,
+        setQuestions((current) => {
+          if (current.has(msg.id)) return current;
+          const next = new Map(current);
+          next.set(msg.id, {
+            ...msg,
+            focusOnOpen:
+              typeof document === 'undefined' ||
+              document.activeElement?.id !== 'prompt' ||
+              Boolean(msg.conversationId && msg.conversationId !== activeConversationIdRef.current),
+          });
+          return next;
+        });
+        setDrafts((current) => {
+          if (current.has(msg.id)) return current;
+          const next = new Map(current);
+          next.set(msg.id, initialDraft(msg.specs));
+          return next;
         });
         return true;
       case 'questionResolved':
-        // Settled somewhere else — a paired chat answered it, or the turn was
-        // cancelled. Same guard as confirmResolved, for the same reason.
-        setQuestion((current) => (current?.id === msg.id ? null : current));
+        setQuestions((current) => removeQuestion(current, msg.id));
+        setDrafts((current) => removeQuestion(current, msg.id));
         return true;
       default:
         return false;
@@ -91,30 +121,40 @@ export function useAgentDialogs(): AgentDialogs {
     setConfirmRequest(null);
   }, [confirmRequest]);
 
+  const updateQuestionDraft = useCallback((id: string, draft: QuestionDraft) => {
+    setDrafts((current) => {
+      if (!current.has(id)) return current;
+      const next = new Map(current);
+      next.set(id, draft);
+      return next;
+    });
+  }, []);
+
   const answerQuestion = useCallback(
-    (text: string) => {
-      if (!question) return;
-      vscode.postMessage({ type: 'questionResponse', id: question.id, text });
-      setQuestion(null);
+    (id: string, answer: StructuredAnswer) => {
+      if (!questions.has(id)) return;
+      vscode.postMessage({ type: 'questionResponse', id, kind: 'answer', answer });
     },
-    [question],
+    [questions],
   );
 
-  const dismissQuestion = useCallback(() => {
-    if (!question) return;
-    // No `text` at all, not an empty one: the host reports a dismissal to the
-    // model as "the user did not answer", where a blank string would read as one.
-    vscode.postMessage({ type: 'questionResponse', id: question.id });
-    setQuestion(null);
-  }, [question]);
+  const skipQuestion = useCallback(
+    (id: string) => {
+      if (!questions.has(id)) return;
+      vscode.postMessage({ type: 'questionResponse', id, kind: 'skip' });
+    },
+    [questions],
+  );
 
   return {
     confirmRequest,
-    question,
+    questions,
+    drafts,
     handleHostMessage,
     approveConfirm,
     denyConfirm,
+    updateQuestionDraft,
     answerQuestion,
-    dismissQuestion,
+    skipQuestion,
   };
 }

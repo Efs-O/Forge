@@ -14,6 +14,10 @@ import type {
   WebviewToHost,
 } from './messageBridge';
 import type { AttachmentData } from './messageBridge';
+import type { StructuredAnswer } from '../util/questionAnswers';
+import { buildApprovalRequestMessage, type ToolApprovalRequestEvent } from './ToolApprovalService';
+import { buildQuestionMessage } from './sidebarPayloads';
+import type { UserQuestionRequestEvent } from './UserQuestionService';
 
 export interface WebviewActions {
   post: (msg: HostToWebview) => void;
@@ -25,6 +29,8 @@ export interface WebviewActions {
   isBackendReady: () => boolean;
   getClankerMode: () => boolean;
   getRemoteStatus: () => { transports: string[]; paired: boolean };
+  pendingQuestions: () => UserQuestionRequestEvent[];
+  pendingApproval: () => ToolApprovalRequestEvent | undefined;
   send: (
     text: string,
     attachments?: AttachmentData[],
@@ -54,8 +60,8 @@ export interface WebviewActions {
   openFile: (path: string, line?: number, beside?: boolean) => Promise<void>;
   openAttachment: (relativePath: string) => Promise<void>;
   resolveConfirmation: (id: string, approved: boolean) => void;
-  /** `text: undefined` is a dismissal, which the tool reports as no answer. */
-  answerQuestion: (id: string, text: string | undefined) => void;
+  answerQuestion: (id: string, answer: StructuredAnswer) => void;
+  skipQuestion: (id: string) => void;
   recordWebviewDiagnostic: (message: WebviewDiagnosticMsg) => void;
   queuedConversationIds: (ids: string[]) => void;
 }
@@ -82,6 +88,15 @@ export function routeWebviewMessage(actions: WebviewActions, msg: WebviewToHost)
       // shows no chip until the next transport or pairing change, which on a
       // stable setup is never.
       actions.post({ type: 'remoteStatus', ...actions.getRemoteStatus() });
+      // A reloaded webview starts empty while the agent still waits on these;
+      // without the re-post the turn hangs on a card nobody can see.
+      for (const question of actions.pendingQuestions()) {
+        actions.post(buildQuestionMessage(question));
+      }
+      {
+        const approval = actions.pendingApproval();
+        if (approval) actions.post(buildApprovalRequestMessage(approval));
+      }
       break;
 
     case 'queuedConversationIds':
@@ -190,7 +205,8 @@ export function routeWebviewMessage(actions: WebviewActions, msg: WebviewToHost)
       break;
 
     case 'questionResponse':
-      actions.answerQuestion(msg.id, msg.text);
+      if (msg.kind === 'answer') actions.answerQuestion(msg.id, msg.answer);
+      else actions.skipQuestion(msg.id);
       break;
 
     case 'webviewDiagnostic':

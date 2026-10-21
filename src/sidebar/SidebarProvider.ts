@@ -450,6 +450,8 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
         isBackendReady: () => this.pool.isAnyReady(),
         getClankerMode: () => this.agentLoop.getClankerMode(),
         getRemoteStatus: () => this.remoteStatus,
+        pendingQuestions: () => this.questions.pendingQuestions(),
+        pendingApproval: () => this.agentLoop.pendingApproval(),
         send: (text, attachments, conversationId, tellId, createdAt) => {
           if (createdAt === undefined)
             this.promptRouter.route(text, attachments, conversationId, tellId);
@@ -461,10 +463,8 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
           this.requestChains.markCancelling(this.sidebar.activeConversationId);
           void this.agentLoop.cancel(this.sidebar.activeConversationId);
         },
-        answerQuestion: (id, text) => {
-          if (text === undefined) this.questions.dismiss(id);
-          else this.questions.answer(id, text);
-        },
+        answerQuestion: (id, answer) => this.questions.answerStructured(id, answer),
+        skipQuestion: (id) => this.questions.skip(id),
         switchModel: (name) => this.tabs.pinModel(name),
         undo: () => this.undo(),
         keep: () => this.keep(),

@@ -32,7 +32,8 @@ import { deriveStaticCapabilities } from '../config/ConfigResolver';
 import { applyToolCalls } from './transcriptMutations';
 import { mirrorLiveSessionAnswers } from './liveSessionMirror';
 import { extractToolDetail } from './toolSummary';
-import { freezeTurnContext, type TurnContextState } from './turnContext';
+import { freezeTurnContextAndConsumeResumeNote, type TurnContextState } from './turnContext';
+import { formatCompactionResumeNote } from './compactionTypes';
 import { terminalCommandTracker } from '../tools/TerminalCommandTracker';
 import { formatPromptCacheStats, readPromptCacheStats } from '../llm/promptCacheStats';
 import { toolOutputLimits } from '../tools/toolOutputLimits';
@@ -254,9 +255,7 @@ export async function runModelTurn(
   // the system prompt -- the block folds into the last USER message, and on
   // round N that is the request that opened the turn. Measured on a 4-round
   // turn with three update_plan calls: cache reuse fell from 76% to 39%, and
-  // two consecutive rounds that grew the prompt by 186 tokens re-evaluated
-  // 15401 of them (~20 s of prefill each).
-  //
+  // two consecutive 186-token prompt growths re-evaluated 15401 tokens (~20 s).
   // It need not be re-rendered: update_plan's result confirms the write, and the
   // new plan reaches the next USER turn, which extends the prefix anyway. `items`
   // is copied so a later in-place edit of conv.plan cannot reach this prompt.
@@ -274,8 +273,9 @@ export async function runModelTurn(
     // own tool rounds.
     ...(remoteChats > 0 ? { remoteChats } : {}),
     ...(unattended ? { unattended } : {}),
+    compactionResume: formatCompactionResumeNote(conv.compaction?.resumeNote),
   };
-  freezeTurnContext(conv.messages, turnContext);
+  freezeTurnContextAndConsumeResumeNote(conv.messages, turnContext, conv.compaction);
   const workspaceIsProjectRoot = ctx.forgeLoader?.root
     ? isProjectRoot(ctx.forgeLoader.root)
     : false;

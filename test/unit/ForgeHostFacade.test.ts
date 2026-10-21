@@ -37,6 +37,8 @@ describe('SidebarHostFacade', () => {
       addApprovalSink: vi.fn(() => ({ dispose: vi.fn() })),
       addQuestionSink: () => ({ dispose: () => undefined }),
       answerQuestion: () => false,
+      answerQuestionStructured: vi.fn(() => true),
+      skipQuestion: vi.fn(() => true),
       dismissQuestion: () => false,
       resolveApproval: vi.fn(),
       getPendingApproval: () => undefined,
@@ -76,6 +78,8 @@ describe('SidebarHostFacade', () => {
       addApprovalSink: () => ({ dispose: () => undefined }),
       addQuestionSink: () => ({ dispose: () => undefined }),
       answerQuestion: () => false,
+      answerQuestionStructured: () => false,
+      skipQuestion: () => false,
       dismissQuestion: () => false,
       resolveApproval: () => undefined,
       getPendingApproval: () => undefined,
@@ -102,6 +106,8 @@ describe('SidebarHostFacade', () => {
       addApprovalSink: () => ({ dispose: () => undefined }),
       addQuestionSink: () => ({ dispose: () => undefined }),
       answerQuestion: () => false,
+      answerQuestionStructured: () => false,
+      skipQuestion: () => false,
       dismissQuestion: () => false,
       resolveApproval: () => undefined,
       getPendingApproval: () => undefined,
@@ -154,6 +160,8 @@ describe('SidebarHostFacade', () => {
       addApprovalSink: vi.fn(() => ({ dispose: vi.fn() })),
       addQuestionSink: () => ({ dispose: () => undefined }),
       answerQuestion: () => false,
+      answerQuestionStructured: vi.fn(() => true),
+      skipQuestion: vi.fn(() => true),
       dismissQuestion: () => false,
       resolveApproval: vi.fn(),
       getPendingApproval: () => undefined,
@@ -185,6 +193,8 @@ describe('SidebarHostFacade', () => {
       addApprovalSink: vi.fn(() => ({ dispose: vi.fn() })),
       addQuestionSink: () => ({ dispose: () => undefined }),
       answerQuestion: () => false,
+      answerQuestionStructured: () => false,
+      skipQuestion: () => false,
       dismissQuestion: () => false,
       resolveApproval: vi.fn(),
       getPendingApproval: () => undefined,
@@ -218,6 +228,8 @@ describe('SidebarHostFacade', () => {
       addApprovalSink: vi.fn(() => ({ dispose: vi.fn() })),
       addQuestionSink: () => ({ dispose: () => undefined }),
       answerQuestion: () => false,
+      answerQuestionStructured: vi.fn(() => true),
+      skipQuestion: vi.fn(() => true),
       dismissQuestion: () => false,
       resolveApproval: vi.fn(),
       getPendingApproval: () => undefined,
@@ -230,11 +242,17 @@ describe('SidebarHostFacade', () => {
     };
     // Unwired sink: the count is 0, so the mesh buffer treats it as not ready.
     expect(new SidebarHostFacade(deps).hostActivityListenerCount()).toBe(0);
+    const facade = new SidebarHostFacade(deps);
+    const answer = { answers: [{ picks: [1], note: 'keep the old schema' }] };
+    expect(facade.answerQuestionStructured('q1', answer)).toBe(true);
+    expect(deps.answerQuestionStructured).toHaveBeenCalledWith('q1', answer);
+    expect(facade.skipQuestion('q1')).toBe(true);
+    expect(deps.skipQuestion).toHaveBeenCalledWith('q1');
     // Wired sink: the count is the transport's, read live on each call.
     let n = 0;
-    const facade = new SidebarHostFacade({ ...deps, hostActivityListenerCount: () => n });
-    expect(facade.hostActivityListenerCount()).toBe(0);
+    const activityFacade = new SidebarHostFacade({ ...deps, hostActivityListenerCount: () => n });
+    expect(activityFacade.hostActivityListenerCount()).toBe(0);
     n = 1;
-    expect(facade.hostActivityListenerCount()).toBe(1);
+    expect(activityFacade.hostActivityListenerCount()).toBe(1);
   });
 });

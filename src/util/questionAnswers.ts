@@ -1,24 +1,91 @@
 /**
- * The single owner of how an `ask_user` answer is written and read back.
- *
- * A question can carry sub-questions, each with its own choice list, and every
- * surface has to agree on two things: how the options are numbered when they
- * are shown as text, and what the assembled answer looks like when it reaches
- * the model. The sidebar dialog, the VS Code input box and the remote chat all
- * resolve through here, so a reply of "1 2" means the same thing whichever one
- * typed it -- and the model reads one answer format regardless.
+ * The single owner of how an `ask_user` question is normalized, displayed and
+ * answered. The sidebar, local quick pick and Telegram all use this shape.
  */
 
-/** One sub-question: its own prompt, its own mutually exclusive choices. */
+export interface QuestionOption {
+  label: string;
+  description?: string;
+  exclusive?: boolean;
+}
+
+export interface QuestionSpec {
+  prompt: string;
+  header?: string;
+  multiSelect: boolean;
+  options: QuestionOption[];
+}
+
+export interface QuestionOptionObjectInput {
+  label: string;
+  description?: string | undefined;
+  exclusive?: boolean | undefined;
+}
+
+export type QuestionOptionInput = string | QuestionOptionObjectInput;
+
+export interface QuestionSpecInput {
+  prompt: string;
+  header?: string | undefined;
+  multiSelect?: boolean | undefined;
+  options: readonly QuestionOptionInput[];
+}
+
+export interface QuestionInput {
+  prompt?: string | undefined;
+  options?: readonly QuestionOptionInput[] | undefined;
+  questions?: readonly QuestionSpecInput[] | undefined;
+}
+
+/** Compatibility shape for the older grouped-question callers. */
 export interface QuestionGroup {
   prompt: string;
   options: readonly string[];
 }
 
-/** Validates the tool's `questions` arg. Undefined when it is not usable. */
+export interface StructuredAnswer {
+  skipped?: true;
+  /** One entry per spec, in the same order. */
+  answers: { picks: number[]; note?: string }[];
+}
+
+export const QUESTION_SKIP_TEXT =
+  'The user skipped this question without answering. Continue with your best judgement and state the assumption you made.';
+
+/** Flat `options` becomes one spec; `questions` becomes one spec per entry. */
+export function normalizeQuestions(input: QuestionInput): QuestionSpec[] {
+  if (input.questions?.length) {
+    return input.questions.map((question) => ({
+      prompt: question.prompt,
+      ...(question.header === undefined ? {} : { header: question.header }),
+      multiSelect: question.multiSelect ?? false,
+      options: question.options.map(normalizeOption),
+    }));
+  }
+  if (!input.options?.length) {
+    return [{ prompt: input.prompt ?? '', multiSelect: false, options: [] }];
+  }
+  return [
+    {
+      prompt: input.prompt ?? '',
+      multiSelect: false,
+      options: input.options.map(normalizeOption),
+    },
+  ];
+}
+
+function normalizeOption(option: QuestionOptionInput): QuestionOption {
+  if (typeof option === 'string') return { label: option };
+  const normalized: QuestionOption = { label: option.label };
+  if (option.description !== undefined) normalized.description = option.description;
+  if (option.exclusive !== undefined) normalized.exclusive = option.exclusive;
+  return normalized;
+}
+
+/** Validates and adapts the old string-only `questions` form. */
 export function parseQuestionGroups(value: unknown): QuestionGroup[] | undefined {
   if (!Array.isArray(value) || value.length === 0) return undefined;
-  const groups: QuestionGroup[] = [];
+  const specs: QuestionSpecInput[] = [];
   for (const item of value) {
     if (typeof item !== 'object' || item === null) return undefined;
     const record = item as Record<string, unknown>;
@@ -27,122 +94,281 @@ export function parseQuestionGroups(value: unknown): QuestionGroup[] | undefined
     if (typeof prompt !== 'string' || !prompt.trim()) return undefined;
     if (!Array.isArray(options) || options.length === 0) return undefined;
     if (!options.every((option) => typeof option === 'string')) return undefined;
-    groups.push({ prompt, options: options as string[] });
+    specs.push({ prompt, options: options as string[] });
   }
-  return groups;
+  return normalizeQuestions({ prompt: '', questions: specs }).map((spec) => ({
+    prompt: spec.prompt,
+    options: spec.options.map((option) => option.label),
+  }));
 }
 
-/**
- * The question text to show, from whatever the call actually sent.
- *
- * `prompt` is deliberately not schema-required: a call that sends `questions`
- * usually puts the real text in each sub-question and skips the shared preamble,
- * and an agent that only wants to put a choice list in front of the user has no
- * preamble either. Refusing those calls costs a round for a question that is
- * perfectly answerable, so the text is read from the entry that is there: the
- * preamble, else the first sub-question, else the options themselves. A
- * last-resort line is shown rather than a blank box, so the user is never left
- * guessing what was asked.
- */
+/** Resolve the user-facing prompt when an agent omitted the shared preamble. */
 export function resolveQuestionText(
-  args: Record<string, unknown>,
-  groups?: readonly QuestionGroup[],
+  args: { prompt?: unknown; options?: unknown },
+  specs?: readonly QuestionSpec[],
 ): string {
-  const preamble = typeof args['prompt'] === 'string' ? args['prompt'].trim() : '';
+  const preamble = typeof args.prompt === 'string' ? args.prompt.trim() : '';
   if (preamble) return preamble;
-  const subQuestion = groups?.find((group) => group.prompt.trim())?.prompt.trim();
+  const subQuestion = specs?.find((spec) => spec.prompt.trim())?.prompt.trim();
   if (subQuestion) return subQuestion;
-  const options = Array.isArray(args['options']) ? args['options'] : undefined;
-  const firstOption = options?.find((option) => typeof option === 'string' && option.trim());
-  if (typeof firstOption === 'string') {
-    return `Choose one: ${firstOption.trim()}${options!.length > 1 ? ' …' : ''}`;
+  if (Array.isArray(args.options)) {
+    const first = args.options.find((option) => {
+      const label = typeof option === 'string' ? option : readOptionLabel(option);
+      return label?.trim();
+    });
+    const label = typeof first === 'string' ? first : readOptionLabel(first);
+    if (label) return `Choose one: ${label.trim()}${args.options.length > 1 ? ' …' : ''}`;
   }
   return 'The agent has a question for you (it sent no question text). Reply with your answer.';
 }
 
+function readOptionLabel(option: unknown): string | undefined {
+  if (typeof option !== 'object' || option === null) return undefined;
+  const label = (option as Record<string, unknown>)['label'];
+  return typeof label === 'string' ? label : undefined;
+}
+
+/** Format indexes as option labels; a written note can accompany the picks. */
+export function formatStructuredAnswer(
+  specs: readonly QuestionSpec[],
+  answer: StructuredAnswer,
+): string {
+  if (answer.skipped) return QUESTION_SKIP_TEXT;
+  if (answer.answers.length !== specs.length) {
+    throw new RangeError('Structured answer count must match question count.');
+  }
+  const formatted = specs.map((spec, specIndex) => {
+    const entry = answer.answers[specIndex]!;
+    const picks = [...entry.picks].sort((a, b) => a - b);
+    const labels = picks.map((index) => {
+      const option = spec.options[index];
+      if (!Number.isInteger(index) || option === undefined) {
+        throw new RangeError(`Question ${specIndex + 1} has an invalid option index.`);
+      }
+      return option.label;
+    });
+    const pickedText = labels.join(', ');
+    const note = entry.note?.trim() ?? '';
+    if (specs.length === 1) {
+      if (pickedText && note) return `${pickedText}\nNote: ${note}`;
+      return pickedText || note;
+    }
+    const answerText = pickedText || note;
+    return `${spec.prompt}: ${answerText}${pickedText && note ? `\n  Note: ${note}` : ''}`;
+  });
+  return formatted.join('\n');
+}
+
 /**
- * The assembled answer, one line per sub-question.
- *
- * Labelled rather than bare, because the model has to attribute each choice to
- * the question it answers -- "0.15.35" and "yes" on their own say nothing about
- * which was the version and which was the install.
+ * Compatibility wrapper for grouped answers. New callers should pass indexes
+ * through `formatStructuredAnswer`.
  */
 export function formatGroupAnswer(
   groups: readonly QuestionGroup[],
   picks: readonly string[],
 ): string {
-  return groups.map((group, index) => `${group.prompt}: ${picks[index] ?? ''}`).join('\n');
+  const specs = normalizeQuestions({
+    prompt: '',
+    questions: groups.map((group) => ({
+      prompt: group.prompt,
+      options: group.options,
+    })),
+  });
+  const answers = specs.map((spec, index) => {
+    const pick = picks[index];
+    const optionIndex =
+      pick === undefined ? undefined : spec.options.findIndex((option) => option.label === pick);
+    if (optionIndex !== undefined && optionIndex >= 0) return { picks: [optionIndex] };
+    return pick?.trim() ? { picks: [], note: pick } : { picks: [] };
+  });
+  return formatStructuredAnswer(specs, { answers });
 }
 
 /**
- * Reads a typed reply against the question's shape.
- *
- * Flat options: a bare index picks that option, anything else is verbatim.
- * Sub-questions: one index per sub-question, in order, separated by spaces or
- * commas -- "1 2", "1,2". Anything that is not exactly that many in-range
- * indices is passed through verbatim, so a user who wants to write prose still
- * can and is never told their answer was malformed.
+ * Resolve typed input with exact labels taking precedence over numeric indexes.
+ * A QuestionSpec also enables the multi-select numeric-list form.
  */
+export function resolveAnswerText(text: string, spec: QuestionSpec): string;
 export function resolveAnswerText(
   text: string,
-  options?: readonly string[],
-  groups?: readonly QuestionGroup[],
+  options?: readonly QuestionOptionInput[],
+  groups?: readonly QuestionGroup[] | readonly QuestionSpec[],
+): string;
+export function resolveAnswerText(
+  text: string,
+  optionsOrSpec?: readonly QuestionOptionInput[] | QuestionSpec,
+  groups?: readonly QuestionGroup[] | readonly QuestionSpec[],
 ): string {
-  if (groups?.length) {
-    const picks = pickIndices(text, groups);
-    return picks ? formatGroupAnswer(groups, picks) : text;
-  }
-  if (!options?.length) return text;
-  const index = /^\s*([0-9]+)\s*$/.exec(text);
-  if (!index) return text;
-  return options[Number(index[1]) - 1] ?? text;
+  if (isQuestionSpec(optionsOrSpec)) return resolveSpecText(text, optionsOrSpec);
+  if (groups?.length) return resolveGroupText(text, groups);
+  if (!optionsOrSpec?.length) return text;
+  const options = optionsOrSpec.map(normalizeOption);
+  return resolveLabelsOrIndexes(text, options, false) ?? text;
 }
 
-function pickIndices(text: string, groups: readonly QuestionGroup[]): string[] | undefined {
+/** Resolve typed input into option indexes, preserving exact-label precedence. */
+export function resolveAnswerPicks(text: string, spec: QuestionSpec): number[] | undefined {
+  return resolveOptionPicks(text, spec.options, spec.multiSelect);
+}
+
+function isQuestionSpec(value: unknown): value is QuestionSpec {
+  return typeof value === 'object' && value !== null && 'multiSelect' in value;
+}
+
+function resolveSpecText(text: string, spec: QuestionSpec): string {
+  const picks = resolveAnswerPicks(text, spec);
+  return picks?.map((index) => spec.options[index]!.label).join(', ') ?? text;
+}
+
+function resolveLabelsOrIndexes(
+  text: string,
+  options: readonly QuestionOption[],
+  multiSelect: boolean,
+): string | undefined {
+  const picks = resolveOptionPicks(text, options, multiSelect);
+  return picks?.map((index) => options[index]!.label).join(', ');
+}
+
+function resolveOptionPicks(
+  text: string,
+  options: readonly QuestionOption[],
+  multiSelect: boolean,
+): number[] | undefined {
+  const trimmed = text.trim();
+  const exactIndex = options.findIndex(
+    (option) => option.label.trim().toLocaleLowerCase() === trimmed.toLocaleLowerCase(),
+  );
+  if (exactIndex >= 0) return [exactIndex];
+
+  const tokens = multiSelect ? trimmed.split(/[\s,+]+/u).filter(Boolean) : [trimmed];
+  if (!tokens.length || tokens.some((token) => !/^\d+$/u.test(token))) return undefined;
+  const indexes = tokens.map((token) => Number(token) - 1);
+  if (
+    indexes.some(
+      (index) => !Number.isSafeInteger(index) || index < 0 || options[index] === undefined,
+    )
+  ) {
+    return undefined;
+  }
+  return [...new Set(indexes)].sort((a, b) => a - b);
+}
+
+function resolveGroupText(
+  text: string,
+  groups: readonly QuestionGroup[] | readonly QuestionSpec[],
+): string {
+  const specs = groups.map((group) =>
+    isQuestionSpec(group)
+      ? group
+      : {
+          prompt: group.prompt,
+          multiSelect: false,
+          options: group.options.map((label) => ({ label })),
+        },
+  );
+  if (specs.length === 1) {
+    const spec = specs[0]!;
+    const exact = spec.options.find(
+      (option) => option.label.trim().toLocaleLowerCase() === text.trim().toLocaleLowerCase(),
+    );
+    const tokens = exact
+      ? []
+      : text
+          .trim()
+          .split(/[\s,+]+/u)
+          .filter(Boolean);
+    const indexes = exact
+      ? [spec.options.indexOf(exact)]
+      : tokens.map((token) => (/^\d+$/u.test(token) ? Number(token) - 1 : -1));
+    if (
+      !indexes.length ||
+      indexes.some(
+        (index) => !Number.isSafeInteger(index) || index < 0 || spec.options[index] === undefined,
+      )
+    ) {
+      return text;
+    }
+    return formatStructuredAnswer(specs, { answers: [{ picks: indexes }] });
+  }
   const tokens = text
     .trim()
-    .split(/[\s,]+/)
+    .split(/[\s,]+/u)
     .filter(Boolean);
-  if (tokens.length !== groups.length) return undefined;
-  const picks: string[] = [];
-  for (const [index, token] of tokens.entries()) {
-    if (!/^[0-9]+$/.test(token)) return undefined;
-    const picked = groups[index]?.options[Number(token) - 1];
-    if (picked === undefined) return undefined;
-    picks.push(picked);
+  if (tokens.length !== specs.length) return text;
+  const answers: StructuredAnswer['answers'] = [];
+  for (const [index, spec] of specs.entries()) {
+    const value = resolveLabelsOrIndexes(tokens[index]!, spec.options, false);
+    const optionIndex =
+      value === undefined ? -1 : spec.options.findIndex((option) => option.label === value);
+    if (optionIndex < 0) return text;
+    answers.push({ picks: [optionIndex] });
   }
-  return picks;
+  return formatStructuredAnswer(specs, { answers });
 }
 
-/**
- * The question as plain text, for surfaces with no buttons -- a chat message,
- * or the VS Code input box that serves a window whose sidebar never resolved.
- */
+/** The plain-text rendering used by Telegram and the local input fallback. */
+export function renderQuestionAsText(prompt: string, spec: QuestionSpec): string;
 export function renderQuestionAsText(
   prompt: string,
-  options?: readonly string[],
-  groups?: readonly QuestionGroup[],
+  options?: readonly QuestionOptionInput[],
+  groups?: readonly QuestionGroup[] | readonly QuestionSpec[],
+): string;
+export function renderQuestionAsText(
+  prompt: string,
+  optionsOrSpec?: readonly QuestionOptionInput[] | QuestionSpec,
+  groups?: readonly QuestionGroup[] | readonly QuestionSpec[],
 ): string {
+  if (isQuestionSpec(optionsOrSpec)) return renderSpecAsText(prompt, optionsOrSpec);
   if (groups?.length) {
-    const body = groups
-      .map(
-        (group, index) =>
-          `${index + 1}) ${group.prompt}\n` +
-          group.options.map((option, i) => `   ${i + 1}. ${option}`).join('\n'),
-      )
+    const specs: QuestionSpec[] = groups.map((group) =>
+      isQuestionSpec(group)
+        ? group
+        : {
+            prompt: group.prompt,
+            multiSelect: false,
+            options: group.options.map((label) => ({ label })),
+          },
+    );
+    const body = specs
+      .map((spec, index) => {
+        const optionsText = spec.options
+          .map(
+            (option, optionIndex) =>
+              `   ${optionIndex + 1}. ${option.label}${option.description ? ` — ${option.description}` : ''}`,
+          )
+          .join('\n');
+        return `${index + 1}) ${spec.prompt}\n${optionsText}`;
+      })
       .join('\n');
-    const example = groups.map(() => '1').join(' ');
-    // A call that sent no shared preamble is headed by its first sub-question
-    // (see `questionText` in the tool), so the header can already be one of the
-    // questions; printing it again above "1) Version" reads as two questions.
-    const headed = groups.some((group) => group.prompt.trim() === prompt.trim())
+    const example = specs.map(() => '1').join(' ');
+    const headed = specs.some((spec) => spec.prompt.trim() === prompt.trim())
       ? ''
       : `${prompt}\n\n`;
     return `${headed}${body}\n\nReply with one number per question, in order — e.g. "${example}" — or send free text instead.`;
   }
-  if (options?.length) {
-    const body = options.map((option, index) => `${index + 1}. ${option}`).join('\n');
+  if (optionsOrSpec?.length) {
+    const normalized = optionsOrSpec.map(normalizeOption);
+    const body = normalized
+      .map(
+        (option, index) =>
+          `${index + 1}. ${option.label}${option.description ? ` — ${option.description}` : ''}`,
+      )
+      .join('\n');
     return `${prompt}\n${body}\n\nReply with the number or the text.`;
   }
   return `${prompt}\n\nReply with your answer.`;
+}
+
+function renderSpecAsText(prompt: string, spec: QuestionSpec): string {
+  if (spec.options.length === 0) return `${prompt}\n\nReply with your answer.`;
+  const body = spec.options
+    .map(
+      (option, index) =>
+        `${index + 1}. ${option.label}${option.description ? ` — ${option.description}` : ''}`,
+    )
+    .join('\n');
+  const guidance = spec.multiSelect
+    ? 'Reply with the numbers, e.g. 1,3, or send free text instead.'
+    : 'Reply with the number or the exact text.';
+  return `${prompt}\n${spec.multiSelect ? 'Choose any' : 'Choose one'}\n${body}\n\n${guidance}`;
 }

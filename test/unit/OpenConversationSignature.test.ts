@@ -41,9 +41,12 @@ describe('open conversation signature', () => {
     value.compaction.memoryKeys = ['retained-key'];
     expect(openConversationSignature(value)).not.toBe(withCompaction);
     const withMemoryKeys = openConversationSignature(value);
+    value.compaction.resumeNote = { generation: 2, usedTokens: 1_200, maxTokens: 8_192 };
+    expect(openConversationSignature(value)).not.toBe(withMemoryKeys);
+    const withResumeNote = openConversationSignature(value);
 
     value.last_input_tokens = 120;
-    expect(openConversationSignature(value)).not.toBe(withMemoryKeys);
+    expect(openConversationSignature(value)).not.toBe(withResumeNote);
     const withUsage = openConversationSignature(value);
 
     value.messages[0] = { role: 'assistant', content: 'a longer answer' };

@@ -13,6 +13,18 @@ export interface ToolApprovalRequestEvent {
   conversationId?: string;
 }
 
+/** The one host-to-webview representation used for live and re-posted approvals. */
+export function buildApprovalRequestMessage(event: ToolApprovalRequestEvent): HostToWebview {
+  return {
+    type: 'confirmRequest',
+    id: event.id,
+    toolName: event.toolName,
+    detail: event.detail,
+    ...(event.dangerous ? { isDangerous: true } : {}),
+    ...(event.conversationId ? { conversationId: event.conversationId } : {}),
+  };
+}
+
 export interface ToolApprovalResolvedEvent extends ToolApprovalRequestEvent {
   approved: boolean;
   reason: 'resolved' | 'cancelled';
@@ -208,14 +220,7 @@ export class ToolApprovalService {
     const event = this.eventOf(next);
     if (this.getView()) {
       void vscode.commands.executeCommand('workbench.view.extension.forge-sidebar');
-      this.post({
-        type: 'confirmRequest',
-        id: next.id,
-        toolName: next.toolName,
-        detail: next.detail,
-        ...(next.dangerous ? { isDangerous: true } : {}),
-        ...(next.conversationId ? { conversationId: next.conversationId } : {}),
-      });
+      this.post(buildApprovalRequestMessage(event));
     }
     for (const sink of this.sinks) sink.requested(event);
   }

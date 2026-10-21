@@ -1,24 +1,22 @@
 import * as vscode from 'vscode';
+import { z } from 'zod';
 import {
+  formatStructuredAnswer,
+  normalizeQuestions,
   renderQuestionAsText,
   resolveAnswerText,
   type QuestionGroup,
+  type QuestionSpec,
+  type StructuredAnswer,
 } from '../util/questionAnswers';
+import { isAnswered } from '../util/questionPicks';
 
 export interface UserQuestionRequestEvent {
   id: string;
   prompt: string;
+  /** Every question normalized; a flat `options` list arrives as one spec. */
+  specs: readonly QuestionSpec[];
   placeholder?: string;
-  options?: readonly string[];
-  /**
-   * Sub-questions, each with its own choice list, answered in one round.
-   *
-   * A single flat `options` list forced two decisions to be crossed into their
-   * combinations -- four buttons for two yes/no choices -- which grows
-   * multiplicatively and reads as one question the user has to decode. When
-   * present, `options` is ignored.
-   */
-  questions?: readonly QuestionGroup[];
   conversationId?: string;
 }
 
@@ -47,6 +45,8 @@ export interface UserQuestionSink {
 export interface UserQuestion {
   prompt: string;
   placeholder?: string | undefined;
+  specs?: readonly QuestionSpec[] | undefined;
+  /** Shorthand for `specs`, normalized by `normalizeQuestions`. */
   options?: readonly string[] | undefined;
   questions?: readonly QuestionGroup[] | undefined;
   conversationId?: string | undefined;
@@ -55,6 +55,11 @@ export interface UserQuestion {
 
 interface PendingQuestion extends UserQuestionRequestEvent {
   settle: (answer: string | undefined, reason: 'answered' | 'cancelled') => void;
+}
+
+interface QuestionPickItem extends vscode.QuickPickItem {
+  questionKind: 'option' | 'write';
+  optionIndex?: number;
 }
 
 /**
@@ -86,14 +91,27 @@ export class UserQuestionService {
   pendingConversationIds(): Set<string> {
     const ids = new Set<string>();
     for (const question of this.pending.values()) {
-      if (question.conversationId) ids.add(question.conversationId);
-      else ids.add('');
+      ids.add(question.conversationId ?? '');
     }
     return ids;
   }
 
+  /** Snapshot all pending requests in their original ask order for webviewReady. */
+  pendingQuestions(): UserQuestionRequestEvent[] {
+    return [...this.pending.values()].map(eventOf);
+  }
+
   ask(request: UserQuestion): Promise<string | undefined> {
     if (request.signal?.aborted) return Promise.resolve(undefined);
+    const specs =
+      request.specs ??
+      normalizeQuestions({
+        prompt: request.prompt,
+        ...(request.options ? { options: request.options } : {}),
+        ...(request.questions ? { questions: request.questions } : {}),
+      });
+    const normalizedRequest: UserQuestion = { ...request, specs };
+
     const id = `ask-${Date.now()}-${Math.random().toString(36).slice(2)}`;
     return new Promise<string | undefined>((resolve) => {
       let done = false;
@@ -113,10 +131,9 @@ export class UserQuestionService {
       const entry: PendingQuestion = {
         id,
         prompt: request.prompt,
+        specs,
         settle,
         ...(request.placeholder !== undefined ? { placeholder: request.placeholder } : {}),
-        ...(request.options ? { options: request.options } : {}),
-        ...(request.questions ? { questions: request.questions } : {}),
         ...(request.conversationId ? { conversationId: request.conversationId } : {}),
       };
       this.pending.set(id, entry);
@@ -127,7 +144,7 @@ export class UserQuestionService {
       const input = this.presentedLocally()
         ? new vscode.Disposable(() => {})
         : this.showLocal(
-            request,
+            normalizedRequest,
             (text) => settle(text, 'answered'),
             () => settle(undefined, 'cancelled'),
           );
@@ -138,21 +155,45 @@ export class UserQuestionService {
     });
   }
 
-  /** Answers a pending question from a non-local surface. False when it is gone. */
+  /** Resolves typed text using the pending spec and exact-label-first rules. */
   answer(id: string, text: string): boolean {
     const question = this.pending.get(id);
     if (!question) return false;
-    question.settle(resolveAnswerText(text, question.options, question.questions), 'answered');
+    question.settle(resolveSpecsAnswer(text, question.specs), 'answered');
+    return true;
+  }
+
+  /** Validates option indexes and notes before settling a structured answer. */
+  answerStructured(id: string, answer: StructuredAnswer): boolean {
+    const question = this.pending.get(id);
+    if (!question) return false;
+    const result = validateStructuredAnswer(question.specs, answer);
+    if (!result.success) {
+      // eslint-disable-next-line no-console -- Invalid host payloads must be visible for diagnosis.
+      console.error('Forge: rejected invalid structured question answer', result.error.issues);
+      return false;
+    }
+    question.settle(formatStructuredAnswer(question.specs, answer), 'answered');
+    return true;
+  }
+
+  /** Settles with the explicit skip instruction, distinct from cancellation. */
+  skip(id: string): boolean {
+    const question = this.pending.get(id);
+    if (!question) return false;
+    question.settle(
+      formatStructuredAnswer(question.specs, { skipped: true, answers: [] }),
+      'answered',
+    );
     return true;
   }
 
   /**
-   * Dismisses a pending question without an answer.
+   * Dismisses a pending question without an answer (an aborted turn).
    *
-   * Separate from `answer` because the two settle differently: the tool reports
-   * a dismissal as "the user did not answer", and passing an empty string
-   * through `answer` would instead hand the model a blank reply it reads as
-   * one. False when the question is already gone.
+   * Separate from `skip`: the tool reports a dismissal as "the user did not
+   * answer", while a skip is the user's explicit choice and tells the model to
+   * proceed on a stated assumption. False when the question is already gone.
    */
   dismiss(id: string): boolean {
     const question = this.pending.get(id);
@@ -161,7 +202,6 @@ export class UserQuestionService {
     return true;
   }
 
-  /** True while some sink is showing the question at the machine itself. */
   private presentedLocally(): boolean {
     for (const sink of this.sinks) {
       if (sink.presentsLocally?.()) return true;
@@ -177,52 +217,179 @@ export class UserQuestionService {
     // createInputBox/createQuickPick rather than the show* wrappers: only these
     // can be hidden programmatically when a remote answer wins the race.
     //
-    // Sub-questions get the box, not the picker: a quick pick answers exactly
-    // one list, and chaining several would leave the earlier ones unanswerable
-    // once the user moved on. The box takes all of them at once as numbers,
-    // the same reply a chat would send.
-    if (request.questions?.length) {
+    // Several questions get the box, not the picker: a quick pick answers
+    // exactly one list, and chaining several would leave the earlier ones
+    // unanswerable once the user moved on. The box takes all of them at once
+    // as numbers, the same reply a chat would send.
+    const specs = request.specs ?? normalizeQuestions({ prompt: request.prompt });
+    if (specs.length > 1) {
       const box = vscode.window.createInputBox();
-      box.prompt = renderQuestionAsText(request.prompt, undefined, request.questions);
+      let completing = false;
+      box.prompt = renderQuestionAsText(request.prompt, undefined, specs);
       box.ignoreFocusOut = true;
-      box.onDidAccept(() => accept(resolveAnswerText(box.value, undefined, request.questions)));
-      box.onDidHide(() => dismiss());
+      box.onDidAccept(() => {
+        if (!box.value.trim()) return;
+        const answer = resolveSpecsAnswer(box.value, specs);
+        completing = true;
+        box.dispose();
+        accept(answer);
+      });
+      box.onDidHide(() => {
+        if (!completing) dismiss();
+      });
       box.show();
       return box;
     }
-    if (request.options?.length) {
-      const picker = vscode.window.createQuickPick();
-      picker.items = request.options.map((label) => ({ label }));
-      picker.placeholder = request.prompt;
-      picker.ignoreFocusOut = true;
-      picker.onDidAccept(() => {
-        const selected = picker.selectedItems[0]?.label;
-        if (selected !== undefined) accept(selected);
-      });
-      picker.onDidHide(() => dismiss());
-      picker.show();
-      return picker;
-    }
+
+    const spec = specs[0]!;
+    if (!spec.options.length) return this.showLocalText(request, specs, accept, dismiss, []);
+
+    const picker = vscode.window.createQuickPick<QuestionPickItem>();
+    picker.items = [
+      ...spec.options.map((option, optionIndex) => ({
+        label: option.label,
+        ...(option.description ? { description: option.description } : {}),
+        questionKind: 'option' as const,
+        optionIndex,
+      })),
+      {
+        label: 'Write my own answer…',
+        description: 'Type a response instead',
+        questionKind: 'write',
+        alwaysShow: true,
+      },
+    ];
+    picker.canSelectMany = spec.multiSelect;
+    picker.placeholder = spec.prompt;
+    picker.ignoreFocusOut = true;
+    let completing = false;
+    let active: vscode.Disposable = picker;
+    picker.onDidAccept(() => {
+      const selected = picker.selectedItems;
+      const picks = selected
+        .filter((item) => item.questionKind === 'option' && item.optionIndex !== undefined)
+        .map((item) => item.optionIndex!)
+        .sort((a, b) => a - b);
+      const writeOwn = selected.some((item) => item.questionKind === 'write');
+      if (!picks.length && !writeOwn) return;
+      completing = true;
+      picker.dispose();
+      if (writeOwn) {
+        active = this.showLocalText(request, specs, accept, dismiss, picks);
+      } else {
+        accept(formatStructuredAnswer(specs, { answers: [{ picks }] }));
+      }
+    });
+    picker.onDidHide(() => {
+      if (!completing) dismiss();
+    });
+    picker.show();
+    return new vscode.Disposable(() => active.dispose());
+  }
+
+  private showLocalText(
+    request: UserQuestion,
+    specs: readonly QuestionSpec[],
+    accept: (text: string) => void,
+    dismiss: () => void,
+    picks: number[],
+  ): vscode.InputBox {
     const box = vscode.window.createInputBox();
-    box.prompt = request.prompt;
-    if (request.placeholder !== undefined) box.placeholder = request.placeholder;
+    const spec = specs[0]!;
+    box.prompt = spec.prompt || request.prompt;
+    box.placeholder =
+      request.placeholder ?? (spec.options.length ? 'Add a note (optional)' : 'Your answer…');
     // Without this the box is dismissed the moment focus moves -- it is raised
     // mid-turn while the sidebar streams -- and the question is never seen.
     box.ignoreFocusOut = true;
-    box.onDidAccept(() => accept(box.value));
-    box.onDidHide(() => dismiss());
+    let completing = false;
+    box.onDidAccept(() => {
+      const note = box.value;
+      if (!isAnswered(picks, note)) return;
+      completing = true;
+      box.dispose();
+      const answer =
+        specs.length === 1
+          ? formatStructuredAnswer(specs, {
+              answers: [{ picks, ...(note.trim() ? { note } : {}) }],
+            })
+          : resolveSpecsAnswer(note, specs);
+      accept(answer);
+    });
+    box.onDidHide(() => {
+      if (!completing) dismiss();
+    });
     box.show();
     return box;
   }
+}
+
+function resolveSpecsAnswer(text: string, specs: readonly QuestionSpec[]): string {
+  return specs.length === 1
+    ? resolveAnswerText(text, specs[0]!)
+    : resolveAnswerText(text, undefined, specs);
+}
+
+function validateStructuredAnswer(
+  specs: readonly QuestionSpec[],
+  answer: StructuredAnswer,
+): ReturnType<ReturnType<typeof structuredAnswerSchema>['safeParse']> {
+  return structuredAnswerSchema(specs).safeParse(answer);
+}
+
+function structuredAnswerSchema(specs: readonly QuestionSpec[]) {
+  const answer = z
+    .object({
+      picks: z.array(z.number().int().min(0)),
+      note: z.string().max(4000).optional(),
+    })
+    .strict();
+  return z
+    .object({
+      skipped: z.literal(true).optional(),
+      answers: z.array(answer).length(specs.length),
+    })
+    .strict()
+    .superRefine((value, context) => {
+      value.answers.forEach((entry, questionIndex) => {
+        const spec = specs[questionIndex]!;
+        // The card keeps Answer disabled until every question is answered; a
+        // payload that slips past it must not reach the model as a blank line.
+        if (!isAnswered(entry.picks, entry.note)) {
+          context.addIssue({
+            code: 'custom',
+            path: ['answers', questionIndex],
+            message: 'Question is unanswered.',
+          });
+        }
+        const seen = new Set<number>();
+        entry.picks.forEach((pick, pickIndex) => {
+          if (pick >= spec.options.length) {
+            context.addIssue({
+              code: 'custom',
+              path: ['answers', questionIndex, 'picks', pickIndex],
+              message: 'Option index is out of range.',
+            });
+          }
+          if (seen.has(pick)) {
+            context.addIssue({
+              code: 'custom',
+              path: ['answers', questionIndex, 'picks', pickIndex],
+              message: 'Option indexes must be unique.',
+            });
+          }
+          seen.add(pick);
+        });
+      });
+    });
 }
 
 function eventOf(question: PendingQuestion): UserQuestionRequestEvent {
   return {
     id: question.id,
     prompt: question.prompt,
+    specs: question.specs,
     ...(question.placeholder !== undefined ? { placeholder: question.placeholder } : {}),
-    ...(question.options ? { options: question.options } : {}),
-    ...(question.questions ? { questions: question.questions } : {}),
     ...(question.conversationId ? { conversationId: question.conversationId } : {}),
   };
 }

@@ -1,93 +1,123 @@
-import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { formatGroupAnswer, type QuestionGroup } from '../../../src/util/questionAnswers';
-import { QuestionGroups } from './QuestionGroups';
-import { useDockedDialogEscape } from '../useDockedDialogEscape';
+import React, { useCallback, useEffect, useRef } from 'react';
+import type { StructuredAnswer } from '../../../src/util/questionAnswers';
+import { isAnswered, togglePick } from '../../../src/util/questionPicks';
+import type { AgentQuestion, QuestionDraft } from '../useAgentDialogs';
+import { QuestionBody } from './QuestionBody';
+import { QuestionReview } from './QuestionReview';
 
 interface Props {
-  prompt: string;
-  placeholder?: string | undefined;
-  options?: readonly string[] | undefined;
-  questions?: readonly QuestionGroup[] | undefined;
-  onAnswer: (text: string) => void;
-  onDismiss: () => void;
+  question: AgentQuestion;
+  draft: QuestionDraft;
+  autoFocus: boolean;
+  onDraftChange: (draft: QuestionDraft) => void;
+  onAnswer: (answer: StructuredAnswer) => void;
+  onSkip: () => void;
 }
 
-const QuestionIcon = (): React.ReactElement => (
-  <svg
-    className="question-icon"
-    width="16"
-    height="16"
-    viewBox="0 0 16 16"
-    fill="currentColor"
-    aria-hidden="true"
-  >
-    <path d="M8 1a7 7 0 1 0 0 14A7 7 0 0 0 8 1zm.02 10.25a.9.9 0 1 1 0 1.8.9.9 0 0 1 0-1.8zM8.1 3.6c1.47 0 2.55.9 2.55 2.16 0 .87-.42 1.44-1.2 1.98-.6.42-.79.66-.79 1.14v.3H7.36v-.45c0-.84.3-1.29 1.02-1.8.6-.42.79-.69.79-1.14 0-.54-.45-.93-1.09-.93-.66 0-1.13.42-1.17 1.05H5.55C5.6 4.5 6.63 3.6 8.1 3.6z" />
-  </svg>
-);
+function tabLabel(header: string | undefined, prompt: string, index: number): string {
+  const label = (header || prompt || `Question ${index + 1}`).trim();
+  return label.length > 22 ? `${label.slice(0, 21)}…` : label;
+}
 
-/**
- * An agent question, asked where the rest of the turn is.
- *
- * `ask_user` used to reach only `vscode.window`, so a multiple-choice question
- * opened the command palette's quick pick over the editor while the sidebar --
- * the surface the user was actually reading -- showed nothing. Modelled on
- * ConfirmationDialog so the two modals behave and look the same; the one real
- * difference is that a question can want free text back.
- */
 export function QuestionDialog({
-  prompt,
-  placeholder,
-  options,
-  questions,
+  question,
+  draft,
+  autoFocus,
+  onDraftChange,
   onAnswer,
-  onDismiss,
+  onSkip,
 }: Props): React.ReactElement {
-  const [text, setText] = useState('');
-  const [showOther, setShowOther] = useState(false);
-  const [picks, setPicks] = useState<Record<number, string>>({});
-  const inputRef = useRef<HTMLTextAreaElement>(null);
   const panelRef = useRef<HTMLDivElement>(null);
-  const groups = questions?.length ? questions : undefined;
-  const showFreeText = (!options?.length && !groups) || showOther;
-  // Sub-questions are answered together or not at all: a partial set would
-  // reach the model as a decision it never made on the group left blank.
-  const groupAnswer = useMemo(() => {
-    if (!groups) return undefined;
-    const chosen = groups.map((_, index) => picks[index]);
-    if (chosen.some((pick) => pick === undefined)) return undefined;
-    return formatGroupAnswer(groups, chosen as string[]);
-  }, [groups, picks]);
+  const specs = question.specs;
+  const hasTabs = specs.length > 1;
+  const reviewTab = specs.length;
+  const tab = Math.max(0, Math.min(draft.tab, hasTabs ? reviewTab : 0));
+  const answeredCount = specs.reduce(
+    (count, _spec, index) =>
+      count + (isAnswered(draft.picks[index] ?? [], draft.notes[index]) ? 1 : 0),
+    0,
+  );
+  const allAnswered = answeredCount === specs.length;
 
-  // The question is raised mid-turn while the transcript streams, so nothing
-  // else is going to hand it focus. `Other…` changes this component in place,
-  // so its textarea needs the same focus hand-off after it appears.
   useEffect(() => {
-    if (showFreeText) {
-      inputRef.current?.focus();
-      return;
-    }
-    panelRef.current?.querySelector<HTMLButtonElement>('button:not(:disabled)')?.focus();
-  }, [showFreeText]);
+    if (autoFocus) panelRef.current?.focus();
+  }, [autoFocus, question.id]);
 
-  useDockedDialogEscape(panelRef, onDismiss);
+  const updateTab = useCallback(
+    (nextTab: number) => onDraftChange({ ...draft, tab: nextTab }),
+    [draft, onDraftChange],
+  );
 
-  // Typed text wins when there is any: opening `Other…` and writing in it is an
-  // explicit override of whatever was clicked above.
-  const submit = useCallback(() => {
-    const answer = text.trim() || groupAnswer;
-    if (answer) onAnswer(answer);
-  }, [text, groupAnswer, onAnswer]);
+  const answer = useCallback(() => {
+    if (!allAnswered) return;
+    const result: StructuredAnswer = {
+      answers: specs.map((_spec, index) => {
+        const note = draft.notes[index] ?? '';
+        return {
+          picks: [...(draft.picks[index] ?? [])],
+          ...(note.trim() ? { note } : {}),
+        };
+      }),
+    };
+    onAnswer(result);
+  }, [allAnswered, draft, onAnswer, specs]);
 
-  const pick = useCallback((groupIndex: number, option: string) => {
-    setPicks((current) => ({ ...current, [groupIndex]: option }));
-  }, []);
+  const primaryAction = useCallback(() => {
+    if (!hasTabs || tab === reviewTab) answer();
+    else updateTab(tab + 1);
+  }, [answer, hasTabs, reviewTab, tab, updateTab]);
+
+  const toggleOption = useCallback(
+    (optionIndex: number) => {
+      const spec = specs[tab];
+      if (!spec) return;
+      const picks = togglePick(spec, draft.picks[tab] ?? [], optionIndex);
+      onDraftChange({
+        ...draft,
+        picks: draft.picks.map((current, index) => (index === tab ? picks : current)),
+      });
+    },
+    [draft, onDraftChange, specs, tab],
+  );
 
   const onPanelKeyDown = useCallback(
-    (event: React.KeyboardEvent): void => {
-      // Number keys mirror the labels beside the choices. In grouped questions
-      // they pick from the first unanswered group, then Enter submits the set.
-      if (!/^[1-9]$/u.test(event.key)) return;
+    (event: React.KeyboardEvent<HTMLDivElement>): void => {
       const target = event.target;
+      if (event.key === 'Escape') {
+        event.preventDefault();
+        if (target instanceof HTMLTextAreaElement) {
+          target.blur();
+          panelRef.current?.focus();
+        }
+        return;
+      }
+      if (
+        (event.key === 'ArrowLeft' || event.key === 'ArrowRight') &&
+        target instanceof HTMLElement &&
+        target.closest('[role="tablist"]')
+      ) {
+        event.preventDefault();
+        const delta = event.key === 'ArrowRight' ? 1 : -1;
+        const count = specs.length + 1;
+        const nextTab = (tab + delta + count) % count;
+        updateTab(nextTab);
+        panelRef.current
+          ?.querySelector<HTMLButtonElement>(`[data-question-tab="${nextTab}"]`)
+          ?.focus();
+        return;
+      }
+      if (event.key === 'Enter' && target instanceof HTMLTextAreaElement) {
+        if (event.shiftKey) return;
+        event.preventDefault();
+        primaryAction();
+        return;
+      }
+      if (event.key === 'Enter' && !(target instanceof HTMLButtonElement)) {
+        event.preventDefault();
+        primaryAction();
+        return;
+      }
+      if (tab >= specs.length || !/^[1-9]$/u.test(event.key)) return;
       if (
         target instanceof HTMLElement &&
         target.closest('textarea, input, [contenteditable="true"]')
@@ -95,96 +125,133 @@ export function QuestionDialog({
         return;
       }
       const optionIndex = Number(event.key) - 1;
-      const groupIndex = groups?.findIndex((_, index) => picks[index] === undefined) ?? -1;
-      const option = groups ? groups[groupIndex]?.options[optionIndex] : options?.[optionIndex];
-      if (!option) return;
+      if (!specs[tab]?.options[optionIndex]) return;
       event.preventDefault();
-      if (groups) pick(groupIndex, option);
-      else onAnswer(option);
+      toggleOption(optionIndex);
     },
-    [groups, onAnswer, options, pick, picks],
+    [primaryAction, specs, tab, toggleOption, updateTab],
   );
+
+  const currentSpec = tab < specs.length ? specs[tab] : undefined;
+  // With several questions the top-level prompt is their shared preamble; with
+  // one it is that question's own prompt, already shown in the body.
+  const preamble = specs.some((spec) => spec.prompt.trim() === question.prompt.trim())
+    ? ''
+    : question.prompt.trim();
+  const showAnswer = !hasTabs || tab === reviewTab;
+  const primaryLabel = showAnswer ? 'Answer' : 'Next';
+  const primaryDisabled = showAnswer && !allAnswered;
 
   return (
     <div
       ref={panelRef}
-      className="docked-dialog-panel"
+      className="docked-dialog-panel question-docked-panel"
       role="dialog"
       aria-labelledby="question-dialog-title"
+      tabIndex={-1}
       onKeyDown={onPanelKeyDown}
     >
-      <div className="confirm-dialog question-dialog">
-        <div className="confirm-header">
-          <QuestionIcon />
-          <span id="question-dialog-title" className="confirm-tool-name">
-            Forge asks
-          </span>
-        </div>
-        <div className="question-prompt">{prompt}</div>
-
-        {groups && <QuestionGroups groups={groups} picks={picks} onPick={pick} />}
-
-        {/* The options stay mounted once `Other…` is open. Swapping them out for
-            the textarea stranded the user: the choices they were reading were
-            gone and nothing offered them back, so a mis-click became a forced
-            essay. */}
-        {!groups && options?.length ? (
-          <div className="question-options">
-            {options.map((option, index) => (
-              <button
-                key={`${index}-${option}`}
-                className="question-option"
-                type="button"
-                onClick={() => onAnswer(option)}
-              >
-                <span className="question-option-index">{index + 1}</span>
-                <span className="question-option-label">{option}</span>
-              </button>
-            ))}
+      <section className="question-card">
+        <header className="question-card-header">
+          <div className="question-card-title">
+            <span id="question-dialog-title">Forge asks</span>
+            <span className="question-progress">
+              {answeredCount} of {specs.length} answered
+            </span>
           </div>
-        ) : null}
+          <span className="question-card-mark" aria-hidden="true">
+            ?
+          </span>
+        </header>
 
-        {!showOther && (options?.length || groups) ? (
-          <button className="question-other" type="button" onClick={() => setShowOther(true)}>
-            Other…
-          </button>
-        ) : null}
+        {hasTabs && preamble && <p className="question-preamble">{preamble}</p>}
 
-        {showFreeText && (
-          <textarea
-            ref={inputRef}
-            className="question-input"
-            rows={3}
-            value={text}
-            placeholder={placeholder ?? 'Your answer…'}
-            onChange={(event) => setText(event.target.value)}
-            onKeyDown={(event) => {
-              // Enter sends, Shift+Enter breaks the line — the same contract
-              // as the main input row, so the muscle memory carries over.
-              if (event.key === 'Enter' && !event.shiftKey) {
-                event.preventDefault();
-                submit();
-              }
-            }}
-          />
+        {hasTabs && (
+          <div className="question-tabs" role="tablist" aria-label="Question steps">
+            {specs.map((spec, index) => {
+              const complete = isAnswered(draft.picks[index] ?? [], draft.notes[index]);
+              return (
+                <button
+                  key={`${index}-${spec.header ?? spec.prompt}`}
+                  id={`question-tab-${index}`}
+                  data-question-tab={index}
+                  type="button"
+                  role="tab"
+                  aria-selected={tab === index}
+                  aria-controls="question-panel-content"
+                  className={`question-tab${tab === index ? ' is-active' : ''}`}
+                  onClick={() => updateTab(index)}
+                >
+                  {complete && (
+                    <span className="question-tab-check" aria-hidden="true">
+                      ✓
+                    </span>
+                  )}
+                  {tabLabel(spec.header, spec.prompt, index)}
+                </button>
+              );
+            })}
+            <button
+              id="question-tab-review"
+              data-question-tab={reviewTab}
+              type="button"
+              role="tab"
+              aria-selected={tab === reviewTab}
+              aria-controls="question-panel-content"
+              className={`question-tab${tab === reviewTab ? ' is-active' : ''}`}
+              onClick={() => updateTab(reviewTab)}
+            >
+              Review
+            </button>
+          </div>
         )}
 
-        <div className="confirm-actions">
-          <button className="confirm-btn-deny" type="button" onClick={onDismiss}>
-            Dismiss
-          </button>
-          {(showFreeText || groups) && (
-            <button
-              className="confirm-btn-approve"
-              type="button"
-              onClick={submit}
-              disabled={!text.trim() && !groupAnswer}
-            >
-              Answer
-            </button>
+        <div id="question-panel-content" className="question-card-content">
+          {currentSpec ? (
+            <QuestionBody
+              key={tab}
+              spec={currentSpec}
+              questionIndex={tab}
+              picks={draft.picks[tab] ?? []}
+              note={draft.notes[tab] ?? ''}
+              placeholder={question.placeholder}
+              onToggle={toggleOption}
+              onNoteChange={(note) =>
+                onDraftChange({
+                  ...draft,
+                  notes: draft.notes.map((current, index) => (index === tab ? note : current)),
+                })
+              }
+            />
+          ) : (
+            <QuestionReview
+              specs={specs}
+              picks={draft.picks}
+              notes={draft.notes}
+              onJump={updateTab}
+            />
           )}
         </div>
-      </div>
+
+        <footer className="question-footer">
+          <span className="question-key-hint">
+            1–9 to choose · Enter {showAnswer ? 'to send' : 'for next'}
+          </span>
+          <div className="question-actions">
+            <button className="question-skip" type="button" onClick={onSkip}>
+              Skip
+            </button>
+            <button
+              className="question-answer"
+              type="button"
+              disabled={primaryDisabled}
+              onClick={primaryAction}
+            >
+              {primaryLabel}
+            </button>
+          </div>
+        </footer>
+      </section>
     </div>
   );
 }

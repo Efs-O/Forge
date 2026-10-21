@@ -67,6 +67,8 @@ overlaps with an existing owner, extend the owner instead.
 | Unattended conversation registry                      | `src/sidebar/unattendedConversations.ts` |
 | Agent question: local box + remote answer            | `src/sidebar/UserQuestionService.ts`     |
 | Question numbering, reply parsing, answer format     | `src/util/questionAnswers.ts`            |
+| Shared question option selection rules | `src/util/questionPicks.ts` |
+| `ask_user` schema and tool handoff | `src/tools/askUserTool.ts` |
 | Agent notification: toast + remote fan-out           | `src/sidebar/UserNotificationService.ts` |
 | Model residency polling timer                        | `src/sidebar/ResidencyPoller.ts`         |
 | Timed pause for the agent loop                       | `src/tools/waitTool.ts`                  |
@@ -102,9 +104,10 @@ overlaps with an existing owner, extend the owner instead.
 | Host-recorded summary facts (from messages)          | `src/sidebar/compactionLedger.ts`        |
 | Ledger merge, retention cap, omission count          | `src/sidebar/compactionRecordedState.ts` |
 | Agent's last reply carried past a compaction         | `src/sidebar/compactionLastReply.ts`     |
+| Compaction state contract and one-shot resume-note text | `src/sidebar/compactionTypes.ts` |
 | Working-tree snapshot for a compaction               | `src/sidebar/repoSnapshot.ts`            |
 | Agent task plan tool + plan rendering                | `src/tools/planTools.ts`                 |
-| Volatile turn context (file, plan, remote)           | `src/sidebar/turnContext.ts`             |
+| Volatile turn context (file, plan, remote, compaction resume note)           | `src/sidebar/turnContext.ts`             |
 | Prompt KV-cache reuse stats from `usage`             | `src/llm/promptCacheStats.ts`            |
 | Webview HTML builder                                 | `src/sidebar/WebviewBuilder.ts`          |
 | Multi-conversation session types + persist           | `src/sidebar/sessionTypes.ts`            |
@@ -168,8 +171,11 @@ overlaps with an existing owner, extend the owner instead.
 | Pending prompts, queue flush, and mid-turn tells | `webview-ui/src/usePendingPrompts.ts`           |
 | Fire-and-forget webview→host commands           | `webview-ui/src/hostCommands.ts`                |
 | Host message → reducer action mapping           | `webview-ui/src/hostActions.ts`                 |
-| Approval + agent-question modal state           | `webview-ui/src/useAgentDialogs.ts`             |
-| Agent question dialog (ask_user in the sidebar) | `webview-ui/src/components/QuestionDialog.tsx`  |
+| Approval + per-question state and drafts | `webview-ui/src/useAgentDialogs.ts` |
+| Agent question shell, tabs and keyboard | `webview-ui/src/components/QuestionDialog.tsx` |
+| Agent question body and options | `webview-ui/src/components/QuestionBody.tsx` |
+| Agent question review step | `webview-ui/src/components/QuestionReview.tsx` |
+| Agent question card theme | `webview-ui/styles/question-card.css` |
 | Escape rule for the docked agent dialogs        | `webview-ui/src/useDockedDialogEscape.ts`       |
 | Transcript row folding (diff / thinking runs)   | `webview-ui/src/components/MessageList.tsx`     |
 | One mounted transcript pane per visited tab     | `webview-ui/src/components/TranscriptPanes.tsx` |
@@ -236,6 +242,7 @@ overlaps with an existing owner, extend the owner instead.
 | TOTP session state + enrollment boundary      | `src/remote/RemoteSessionAuth.ts`               |
 | Prompt held across a TOTP challenge           | `src/remote/RemotePendingPrompt.ts`             |
 | Agent question presented in the remote chat   | `src/remote/RemoteQuestionBridge.ts`            |
+| Pure remote question step state and transitions | `src/remote/RemoteQuestionSteps.ts` |
 | RFC 6238 generation/verification              | `src/remote/RemoteTotp.ts`                      |
 | Durable requests, bindings, cursors, outbox   | `src/remote/RemoteRequestStore.ts`              |
 | Host outbox notification draft mutation        | `src/remote/remoteOutboxDraft.ts`               |

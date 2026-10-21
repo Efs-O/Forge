@@ -64,6 +64,7 @@ function copyCompaction(compaction: {
   memoryKeys?: string[] | undefined;
   omittedActions?: { file: number; command: number } | undefined;
   lastReplyFollowedByTools?: boolean | undefined;
+  resumeNote?: CompactionState['resumeNote'] | undefined;
 }): CompactionState {
   return {
     summary: compaction.summary,
@@ -105,6 +106,7 @@ function copyCompaction(compaction: {
     ...(compaction.lastReplyFollowedByTools !== undefined
       ? { lastReplyFollowedByTools: compaction.lastReplyFollowedByTools }
       : {}),
+    ...(compaction.resumeNote ? { resumeNote: { ...compaction.resumeNote } } : {}),
   };
 }
 

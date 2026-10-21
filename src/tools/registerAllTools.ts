@@ -19,13 +19,13 @@ import { makeEditNotebookCellTool, makeReadNotebookTool } from './notebookTools'
 import {
   makeShowDiffTool,
   makeOpenFileTool,
-  makeAskUserTool,
   makeNotifyUserTool,
   makeShowNotificationTool,
   makeCopyToClipboardTool,
   makeReadClipboardTool,
   makeOpenUrlTool,
 } from './uxTools';
+import { makeAskUserTool } from './askUserTool';
 import { PowerControl } from '../system/PowerControl';
 import { makeGetPowerInfoTool, makeScheduleWakeTool, makeSleepComputerTool } from './powerTools';
 import { makeWebFetchTool } from './fetchTool';

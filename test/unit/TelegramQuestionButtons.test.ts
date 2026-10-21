@@ -1,39 +1,66 @@
 import { describe, expect, it } from 'vitest';
+import { normalizeQuestions } from '../../src/util/questionAnswers';
 import {
   parseTelegramQuestionCallback,
   telegramQuestionButtons,
 } from '../../src/remote/TelegramQuestionButtons';
 import { telegramUpdateToEvent } from '../../src/remote/TelegramInboundMapping';
 
+const spec = (multiSelect = false) =>
+  normalizeQuestions({
+    prompt: 'Choose',
+    questions: [{ prompt: 'Backend', multiSelect, options: ['A', 'B', 'C'] }],
+  })[0]!;
+
 describe('Telegram question buttons', () => {
-  it('builds bounded callbacks for each option and Other', () => {
-    const buttons = telegramQuestionButtons('ask-123', ['A', 'B']).flat();
-    expect(buttons.map((button) => button.callbackData)).toEqual([
-      'q:ask-123:0',
-      'q:ask-123:1',
-      'q:ask-123:o',
+  it('shows selected single and multi picks and step controls', () => {
+    const single = telegramQuestionButtons('ask-123', spec(), [1], 0, 2);
+    expect(single[1]![0]?.text).toBe('● B');
+    expect(single.at(-1)?.map((button) => button.text)).toEqual([
+      'Note…',
+      'Skip',
+      'Next ›',
     ]);
-    expect(buttons.every((button) => Buffer.byteLength(button.callbackData, 'utf8') <= 64)).toBe(
-      true,
-    );
-    expect(parseTelegramQuestionCallback('q:ask-123:1')).toEqual({
-      questionId: 'ask-123',
-      action: 'select',
-      choice: 1,
-    });
-    expect(parseTelegramQuestionCallback('q:ask-123:o')).toEqual({
-      questionId: 'ask-123',
-      action: 'other',
-    });
+    const multi = telegramQuestionButtons('ask-123', spec(true), [0, 2], 1, 2);
+    expect(multi[0]![0]?.text).toBe('✓ A');
+    expect(multi[2]![0]?.text).toBe('✓ C');
+    expect(multi.at(-1)?.map((button) => button.text)).toEqual([
+      '‹ Back',
+      'Note…',
+      'Skip',
+      'Send ✓',
+    ]);
   });
 
-  it('maps a Telegram callback into a question action event', () => {
+  it('parses one-based option and control callbacks', () => {
+    expect(parseTelegramQuestionCallback('q:ask-123:2')).toEqual({
+      questionId: 'ask-123',
+      action: 'select',
+      choice: 2,
+    });
+    for (const [code, action] of [
+      ['o', 'note'],
+      ['d', 'next'],
+      ['b', 'back'],
+      ['s', 'skip'],
+    ] as const) {
+      expect(parseTelegramQuestionCallback(`q:ask-123:${code}`)).toEqual({
+        questionId: 'ask-123',
+        action,
+      });
+    }
+    for (const data of ['q:ask-123:0', 'q:ask-123:100', 'q:ask-123:n', 'q:ask-123:free text']) {
+      expect(parseTelegramQuestionCallback(data)).toBeUndefined();
+    }
+  });
+
+  it('maps Telegram callbacks into question action events', () => {
     expect(
       telegramUpdateToEvent({
         update_id: 1,
         callback_query: {
           id: 'callback-1',
-          data: 'q:ask-123:1',
+          data: 'q:ask-123:3',
           from: { id: 42 },
           message: { message_id: 7, chat: { id: 99, type: 'private' } },
         },
@@ -43,36 +70,38 @@ describe('Telegram question buttons', () => {
       kind: 'question_action',
       questionId: 'ask-123',
       action: 'select',
-      choice: 1,
+      choice: 3,
       chatId: '99',
       messageId: '7',
     });
   });
 
-  it('rejects unsafe button labels and malformed callbacks', () => {
-    expect(() => telegramQuestionButtons('ask-123', [' '])).toThrow('empty');
-    expect(parseTelegramQuestionCallback('q:ask-123:100')).toBeUndefined();
-    expect(parseTelegramQuestionCallback('q:ask-123:free text')).toBeUndefined();
+  it('keeps callbacks within 64 bytes for the longest supported id and choice', () => {
+    const questionId = 'q'.repeat(48);
+    const buttons = telegramQuestionButtons(
+      questionId,
+      { ...spec(), options: Array.from({ length: 99 }, (_, i) => ({ label: `Option ${i + 1}` })) },
+      [],
+      0,
+      1,
+    );
+    const last = buttons[98]![0]!;
+    expect(last.callbackData).toBe(`q:${questionId}:99`);
+    expect(Buffer.byteLength(last.callbackData, 'utf8')).toBeLessThanOrEqual(64);
   });
 
-  it('keeps full long labels and bounded callbacks', () => {
-    const option77 = 'a'.repeat(77);
-    const option164 = '🚀'.repeat(41);
-    expect(Buffer.byteLength(option77, 'utf8')).toBe(77);
-    expect(Buffer.byteLength(option164, 'utf8')).toBe(164);
-    const buttons = telegramQuestionButtons('ask-123', [option77, option164]).flat();
-    expect(buttons.map((button) => button.text)).toEqual([option77, option164, 'Other…']);
-    expect(buttons.every((button) => Buffer.byteLength(button.callbackData, 'utf8') <= 64)).toBe(
-      true,
-    );
-    expect(parseTelegramQuestionCallback(buttons[1]!.callbackData)).toMatchObject({
-      action: 'select',
-      choice: 1,
-    });
+  it('rejects malformed ids, empty labels, and unsupported option counts', () => {
+    expect(() => telegramQuestionButtons('bad id', spec(), [], 0, 1)).toThrow('identifier');
+    expect(() =>
+      telegramQuestionButtons('ask-123', { ...spec(), options: [{ label: ' ' }] }, [], 0, 1),
+    ).toThrow('empty');
     expect(() =>
       telegramQuestionButtons(
         'ask-123',
-        Array.from({ length: 101 }, () => 'A'),
+        { ...spec(), options: Array.from({ length: 100 }, () => ({ label: 'A' })) },
+        [],
+        0,
+        1,
       ),
     ).toThrow('unsupported number');
   });

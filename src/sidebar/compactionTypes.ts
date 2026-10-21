@@ -27,6 +27,37 @@ export interface CompactionDivider {
   source?: 'auto' | 'manual';
 }
 
+export interface CompactionResumeNote {
+  generation: number;
+  usedTokens: number;
+  /** Absent when the model has no configured window. */
+  maxTokens?: number | undefined;
+}
+
+/** Short one-shot guidance for the first request after this compaction. */
+export function formatCompactionResumeNote(note: CompactionResumeNote): string;
+export function formatCompactionResumeNote(note: undefined): undefined;
+export function formatCompactionResumeNote(
+  note: CompactionResumeNote | undefined,
+): string | undefined;
+export function formatCompactionResumeNote(
+  note: CompactionResumeNote | undefined,
+): string | undefined {
+  if (!note) return undefined;
+  // A fixed locale: this text is frozen into the prompt.
+  const size =
+    note.maxTokens === undefined
+      ? `, at ${note.usedTokens.toLocaleString('en-US')} tokens`
+      : `, at ${note.usedTokens.toLocaleString('en-US')} of ` +
+        `${note.maxTokens.toLocaleString('en-US')} tokens`;
+  return (
+    `Context was compacted just now (compaction ${note.generation}${size}). ` +
+    'The two messages at the start replace the earlier transcript; they are a summary, ' +
+    'not the full history. Start from its Next section, and check a file or result before ' +
+    'relying on a part the summary marks as uncertain.'
+  );
+}
+
 /**
  * Model-facing replacement context recorded by one compaction generation.
  *
@@ -70,4 +101,6 @@ export interface CompactionState {
    * `list_memories` for the rest.
    */
   memoryKeys?: string[];
+  /** Cleared after this compaction is delivered to the first subsequent request. */
+  resumeNote?: CompactionResumeNote;
 }

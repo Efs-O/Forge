@@ -343,7 +343,7 @@ export function telegramUpdateToEvent(
       receivedAt: Date.now(),
       questionId: question.questionId,
       action: question.action,
-      ...(question.choice === undefined ? {} : { choice: question.choice }),
+      ...(question.action === 'select' ? { choice: question.choice } : {}),
       messageId: String(callback.message.message_id),
     };
   }

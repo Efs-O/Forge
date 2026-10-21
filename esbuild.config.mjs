@@ -72,6 +72,7 @@ const CSS_PARTIALS = [
   'webview-ui/styles/input.css',
   'webview-ui/styles/attachments.css',
   'webview-ui/styles/dialogs.css',
+  'webview-ui/styles/question-card.css',
   'webview-ui/styles/model-selector.css',
   'webview-ui/styles/empty-state.css',
 ];

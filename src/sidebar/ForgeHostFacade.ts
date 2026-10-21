@@ -11,6 +11,7 @@ import { recentExchanges, type ForgeExchange } from './sessionProjections';
 import type { AgentKind, AgentLink, AgentSender } from '../agentLinks/chatAgentLinks';
 import type { InboundAgentSelection, InboundAgentTarget } from '../agentLinks/inboundAgentRouting';
 import type { AskAgentRequest, AskAgentResult } from '../agentLinks/askAgentService';
+import type { StructuredAnswer } from '../util/questionAnswers';
 
 type AskAgentFacadeHandler = (
   conversationId: string,
@@ -60,14 +61,7 @@ export interface ForgeHostFacade {
     conversationId: string,
     options?: { activate?: boolean },
   ): Promise<ForgeConversationSummary>;
-  /**
-   * Why a new chat cannot be opened, as counts per reason; EMPTY when one can.
-   *
-   * The bus pre-flight asks this before accepting a `--new` message, so a
-   * sender is told the truth at the moment it asks instead of after a 202.
-   * `activate: false` matches a background open, which may not archive the
-   * visible chat.
-   */
+  /** Why opening a new chat is blocked, by reason; `activate: false` matches background opens. */
   chatCapBlockers(options?: { activate?: boolean }): string[];
   routeInboundAgent(
     sender: AgentSender,
@@ -101,6 +95,8 @@ export interface ForgeHostFacade {
   addQuestionSink(sink: UserQuestionSink): { dispose(): void };
   /** Answers an outstanding agent question from a non-local surface. */
   answerQuestion(id: string, text: string): boolean;
+  answerQuestionStructured(id: string, answer: StructuredAnswer): boolean;
+  skipQuestion(id: string): boolean;
   /** Cancels an outstanding agent question when its remote presentation fails. */
   dismissQuestion(id: string): boolean;
   status(): ForgeHostStatus;
@@ -128,27 +124,13 @@ export interface ForgeHostFacade {
   ): Promise<{ model: string; wasLoaded: boolean; serverStopped?: boolean }>;
   restartModel(modelName: string): Promise<void>;
   backendProcesses?(): readonly BackendProcess[];
-  /**
-   * Subscribe to compaction progress events emitted by the sidebar.
-   * Optional: fakes that omit it keep compiling; the runtime uses optional
-   * chaining so a missing method is a no-op, not an error.
-   */
+  /** Optional compaction progress subscription; the runtime treats omission as a no-op. */
   onCompactionEvent?(listener: (event: CompactionEvent) => void): { dispose(): void };
-  /**
-   * Subscribe to host state changes a paired chat cannot otherwise learn
-   * about: a model unloaded, the backend restarted, a turn finished that the
-   * chat did not ask for. Optional on the same terms as the hook above.
-   */
+  /** Optional host state subscription for paired chats (model, backend, or turn changes). */
   onHostActivity?(listener: HostActivityListener): { dispose(): void };
   /** Publish host news from outside the sidebar (the agent mesh's stand-in notice). */
   emitHostActivity?(event: HostActivityEvent): void;
-  /**
-   * How many transports are subscribed to host activity. The mesh's
-   * pending-activity buffer reads this as delivery readiness: a facade that
-   * exists but has no subscribed sink would deliver into the void, so the
-   * buffer only flushes once this is > 0. Optional on the same terms as the
-   * hooks above; unregistered means 0 (not ready).
-   */
+  /** Optional subscribed transport count; an omitted hook means 0 (not ready). */
   hostActivityListenerCount?(): number;
   /**
    * Subscribe to agent-authored notify_user messages.
@@ -208,6 +190,8 @@ export interface SidebarHostFacadeDeps {
   resolveApproval: (id: string, approved: boolean) => void;
   addQuestionSink: (sink: UserQuestionSink) => { dispose(): void };
   answerQuestion: (id: string, text: string) => boolean;
+  answerQuestionStructured: (id: string, answer: StructuredAnswer) => boolean;
+  skipQuestion: (id: string) => boolean;
   dismissQuestion: (id: string) => boolean;
   getPendingApproval: () => ToolApprovalRequestEvent | undefined;
   getActiveConversationId: () => string;
@@ -389,6 +373,14 @@ export class SidebarHostFacade implements ForgeHostFacade {
 
   answerQuestion(id: string, text: string): boolean {
     return this.deps.answerQuestion(id, text);
+  }
+
+  answerQuestionStructured(id: string, answer: StructuredAnswer): boolean {
+    return this.deps.answerQuestionStructured(id, answer);
+  }
+
+  skipQuestion(id: string): boolean {
+    return this.deps.skipQuestion(id);
   }
 
   dismissQuestion(id: string): boolean {

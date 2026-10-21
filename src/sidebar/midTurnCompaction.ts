@@ -11,6 +11,7 @@ import type { ForgeConfig } from '../config/types';
 import type { ConversationRuntime } from './sessionTypes';
 import type { CompactionOutcome } from './CompactionService';
 import { DEFAULT_AUTO_COMPACT_AT } from './ContextBudgetPublisher';
+import { formatCompactionResumeNote } from './compactionTypes';
 import { getLogger } from '../util/logger';
 
 const log = getLogger();
@@ -59,6 +60,11 @@ export async function compactMidTurn(
     log.info('[auto-compact] next round cannot fit — compacting mid-turn');
   }
   if ((await deps.compact(conv.id)) !== 'compacted') return false;
-  conv.messages.push({ role: 'user', content: MID_TURN_RESUME_NUDGE, internal: true });
+  const resumeNote = conv.compaction?.resumeNote;
+  const content = resumeNote
+    ? `${MID_TURN_RESUME_NUDGE}\n\n${formatCompactionResumeNote(resumeNote)}`
+    : MID_TURN_RESUME_NUDGE;
+  conv.messages.push({ role: 'user', content, internal: true });
+  if (resumeNote && conv.compaction) delete conv.compaction.resumeNote;
   return true;
 }

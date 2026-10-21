@@ -207,6 +207,9 @@ export class TelegramChannel implements RemoteChannel {
   clearInlineKeyboard(...args: Parameters<TelegramOutbound['clearInlineKeyboard']>) {
     return this.outbound.clearInlineKeyboard(...args);
   }
+  replaceInlineKeyboard(...args: Parameters<TelegramOutbound['replaceInlineKeyboard']>) {
+    return this.outbound.replaceInlineKeyboard(...args);
+  }
   editMessage(...args: Parameters<TelegramOutbound['editMessage']>) {
     return this.outbound.editMessage(...args);
   }

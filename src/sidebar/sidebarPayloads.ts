@@ -140,9 +140,8 @@ export function buildQuestionMessage(event: UserQuestionRequestEvent): HostToWeb
     type: 'question',
     id: event.id,
     prompt: event.prompt,
+    specs: event.specs,
     ...(event.placeholder !== undefined ? { placeholder: event.placeholder } : {}),
-    ...(event.options ? { options: event.options } : {}),
-    ...(event.questions ? { questions: event.questions } : {}),
     ...(event.conversationId ? { conversationId: event.conversationId } : {}),
   };
 }

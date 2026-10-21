@@ -14,7 +14,6 @@ import {
 import { makeSearchCodebaseTool } from '../../src/tools/semanticSearchTool';
 import type { UserQuestionService } from '../../src/sidebar/UserQuestionService';
 import {
-  makeAskUserTool,
   makeCopyToClipboardTool,
   makeOpenUrlTool,
   makeReadClipboardTool,
@@ -22,6 +21,7 @@ import {
   makeShowDiffTool,
   makeShowNotificationTool,
 } from '../../src/tools/uxTools';
+import { makeAskUserTool } from '../../src/tools/askUserTool';
 import type { IndexManager } from '../../src/search/IndexManager';
 
 describe('isolated editor, language, search, and memory tool execution', () => {

@@ -94,6 +94,7 @@ export class CompactionHostContext {
 
   candidate(summary: string): CompactionState {
     // Built before the summary so the floor check can run before the summarization request.
+    // A successful new compaction replaces any undelivered resumeNote afterward.
     return {
       summary,
       fromIndex: this.fromIndex,

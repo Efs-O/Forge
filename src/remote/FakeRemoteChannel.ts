@@ -38,6 +38,11 @@ export class FakeRemoteChannel implements RemoteChannel {
     buttons: readonly RemoteContactButton[][];
     parseMode?: 'HTML';
   }> = [];
+  readonly inlineKeyboardReplacements: Array<{
+    chatId: string;
+    messageId: string;
+    buttons: readonly RemoteContactButton[][];
+  }> = [];
   readonly callbackAnswers: Array<{ callbackId: string; text?: string }> = [];
   readonly clearedKeyboards: Array<{ chatId: string; messageId: string }> = [];
   readonly edits: Array<{ chatId: string; messageId: string; text: string }> = [];
@@ -187,6 +192,14 @@ export class FakeRemoteChannel implements RemoteChannel {
 
   async clearInlineKeyboard(chatId: string, messageId: string): Promise<void> {
     this.clearedKeyboards.push({ chatId, messageId });
+  }
+
+  async replaceInlineKeyboard(
+    chatId: string,
+    messageId: string,
+    buttons: readonly RemoteContactButton[][],
+  ): Promise<void> {
+    this.inlineKeyboardReplacements.push({ chatId, messageId, buttons });
   }
 
   async editMessage(

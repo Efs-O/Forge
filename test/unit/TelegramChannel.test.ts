@@ -21,6 +21,39 @@ function response(result: unknown): Response {
 }
 
 describe('TelegramChannel', () => {
+  it('replaces a question keyboard in place and accepts a no-change edit', async () => {
+    const calls: Array<{ method: string; body: Record<string, unknown> }> = [];
+    const channel = new TelegramChannel({
+      token: 'secret-token',
+      getCursor: () => undefined,
+      setCursor: async () => undefined,
+      fetch: (async (url: string | URL | Request, init?: RequestInit) => {
+        const method = String(url).split('/').at(-1)!;
+        const body = JSON.parse(String(init?.body)) as Record<string, unknown>;
+        calls.push({ method, body });
+        return {
+          ok: false,
+          status: 400,
+          json: async () => ({ ok: false, description: 'Bad Request: message is not modified' }),
+        } as Response;
+      }) as typeof fetch,
+    });
+
+    await expect(
+      channel.replaceInlineKeyboard('chat', '42', [[{ text: '✓ A', callbackData: 'q:id:1' }]]),
+    ).resolves.toBeUndefined();
+    expect(calls).toEqual([
+      {
+        method: 'editMessageReplyMarkup',
+        body: {
+          chat_id: 'chat',
+          message_id: 42,
+          reply_markup: { inline_keyboard: [[{ text: '✓ A', callback_data: 'q:id:1' }]] },
+        },
+      },
+    ]);
+  });
+
   it('registers the supported command menu when polling starts', async () => {
     const abort = new AbortController();
     const calls: Array<{ method: string; body: Record<string, unknown> }> = [];

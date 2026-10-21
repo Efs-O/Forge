@@ -27,6 +27,7 @@ import type { ChatMessage } from '../llm/types';
 import type { ConversationPlan } from './sessionTypes';
 import { PLAN_GUIDANCE, PLAN_RENDER_MAX_CHARS, renderPlan } from '../tools/planTools';
 import type { UserTerminalCommand } from '../tools/TerminalCommandTracker';
+import { formatCompactionResumeNote, type CompactionState } from './compactionTypes';
 
 const OPEN = '[Forge turn context, as of this message]';
 const CLOSE = '[/Forge turn context]';
@@ -50,6 +51,8 @@ export interface TurnContextState {
   remoteChats?: number | undefined;
   /** Nobody is present: a job run or an unattended agent-bus turn. */
   unattended?: boolean | undefined;
+  /** One-shot note attached to the first request after compaction. */
+  compactionResume?: string | undefined;
 }
 
 /**
@@ -65,6 +68,7 @@ function renderTurnContext(state: TurnContextState): string | undefined {
   }
   if (state.activeFile) parts.push(`Active file: ${state.activeFile}`);
   if (state.unattended) parts.push(UNATTENDED_NOTE);
+  if (state.compactionResume) parts.push(state.compactionResume);
   const remote = renderRemoteReach(state.remoteChats);
   if (remote) parts.push(remote);
   const userTerminal = renderUserTerminalCommands(state.userTerminalCommands);
@@ -199,9 +203,9 @@ function foldInto(messages: ChatMessage[], index: number, block: string): ChatMe
  * alone. A retry that reuses the same user message is byte-identical to the
  * first attempt.
  */
-export function freezeTurnContext(messages: ChatMessage[], state: TurnContextState): void {
+export function freezeTurnContext(messages: ChatMessage[], state: TurnContextState): boolean {
   const block = renderTurnContext(state);
-  if (!block) return;
+  if (!block) return false;
 
   // Find the last non-midTurn user message — the turn-opening request.
   for (let i = messages.length - 1; i >= 0; i -= 1) {
@@ -209,10 +213,26 @@ export function freezeTurnContext(messages: ChatMessage[], state: TurnContextSta
     if (msg?.role === 'user' && !msg?.midTurn) {
       if (msg.turnContext === undefined) {
         msg.turnContext = block;
+        return true;
       }
-      return;
+      return false;
     }
   }
+  return false;
+}
+
+/** Consume the durable note only when it was frozen onto a new turn message. */
+export function freezeTurnContextAndConsumeResumeNote(
+  messages: ChatMessage[],
+  state: TurnContextState,
+  compaction: CompactionState | undefined,
+): boolean {
+  const note = compaction?.resumeNote;
+  const frozen = freezeTurnContext(messages, state);
+  if (frozen && note && state.compactionResume === formatCompactionResumeNote(note) && compaction) {
+    delete compaction.resumeNote;
+  }
+  return frozen;
 }
 
 /**

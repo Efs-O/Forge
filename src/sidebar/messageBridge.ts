@@ -1,4 +1,4 @@
-import type { QuestionGroup } from '../util/questionAnswers';
+import type { QuestionSpec, StructuredAnswer } from '../util/questionAnswers';
 import type { ChatAttachmentRef } from '../llm/types';
 import type { AgentLinks, AgentSenderMetadata } from '../agentLinks/chatAgentLinks';
 import type { ActivityViewMode, ThinkingDisplayMode } from './activityViewSetting';
@@ -165,9 +165,7 @@ interface QuestionRequestMsg {
   id: string;
   prompt: string;
   placeholder?: string;
-  options?: readonly string[];
-  /** Sub-questions with their own choice lists; `options` is ignored with these. */
-  questions?: readonly QuestionGroup[];
+  specs: readonly QuestionSpec[];
   conversationId?: string;
 }
 /** A question something else settled — a paired chat, or a cancelled turn. */
@@ -435,12 +433,19 @@ interface ConfirmResponseMsg {
   id: string;
   approved: boolean;
 }
-/** The sidebar's answer to a `question`. `text: undefined` means dismissed. */
-interface QuestionResponseMsg {
-  type: 'questionResponse';
-  id: string;
-  text?: string;
-}
+/** The sidebar's answer or explicit skip for a pending question. */
+type QuestionResponseMsg =
+  | {
+      type: 'questionResponse';
+      id: string;
+      kind: 'answer';
+      answer: StructuredAnswer;
+    }
+  | {
+      type: 'questionResponse';
+      id: string;
+      kind: 'skip';
+    };
 interface RunSlashCommandMsg {
   type: 'runSlashCommand';
   commandId: ForgeSlashCommandId;

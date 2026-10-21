@@ -348,6 +348,11 @@ async function compactOnce(
     // Before invalidateExactTokenBudget below: that deletes the very counters
     // this row exists to preserve.
     const usedBefore = reportedContextTokens(conv);
+    conv.compaction.resumeNote = {
+      generation,
+      usedTokens: usedBefore,
+      ...(metrics && metrics.max > 0 ? { maxTokens: metrics.max } : {}),
+    };
     deps.logCompaction?.(conv, {
       generation,
       fromIndex: stage.fromIndex,

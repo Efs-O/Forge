@@ -27,12 +27,23 @@ function setTextareaValue(textarea: HTMLTextAreaElement, value: string): void {
   textarea.dispatchEvent(new Event('input', { bubbles: true }));
 }
 
-function question(id: string): HostToWebview {
+function question(
+  id: string,
+  conversationId?: string,
+  prompt = 'Which reviewer should continue?',
+): HostToWebview {
   return {
     type: 'question',
     id,
-    prompt: 'Which reviewer should continue?',
-    options: ['Codex', 'Claude'],
+    prompt,
+    ...(conversationId ? { conversationId } : {}),
+    specs: [
+      {
+        prompt,
+        multiSelect: false,
+        options: [{ label: 'Codex' }, { label: 'Claude' }],
+      },
+    ],
   };
 }
 
@@ -76,27 +87,35 @@ describe('App docked agent dialogs', () => {
     expect(container.querySelector('.composer-slot')?.hasAttribute('hidden')).toBe(true);
   });
 
-  it('restores the composer draft after answering or dismissing a question', () => {
+  it('restores the composer draft after answering or skipping a question', () => {
     const prompt = container.querySelector<HTMLTextAreaElement>('#prompt')!;
     act(() => setTextareaValue(prompt, 'keep this draft'));
 
     act(() => hostMessage(question('question-answer')));
     act(() => container.querySelector<HTMLButtonElement>('.question-option')!.click());
+    act(() => container.querySelector<HTMLButtonElement>('.question-answer')!.click());
+    act(() => hostMessage({ type: 'questionResolved', id: 'question-answer' }));
 
     expect(prompt.value).toBe('keep this draft');
     expect(container.querySelector('.composer-slot')?.hasAttribute('hidden')).toBe(false);
     expect(posted).toContainEqual({
       type: 'questionResponse',
       id: 'question-answer',
-      text: 'Codex',
+      kind: 'answer',
+      answer: { answers: [{ picks: [0] }] },
     });
 
     act(() => hostMessage(question('question-dismiss')));
-    act(() => container.querySelector<HTMLButtonElement>('.confirm-btn-deny')!.click());
+    act(() => container.querySelector<HTMLButtonElement>('.question-skip')!.click());
+    act(() => hostMessage({ type: 'questionResolved', id: 'question-dismiss' }));
 
     expect(prompt.value).toBe('keep this draft');
     expect(container.querySelector('.composer-slot')?.hasAttribute('hidden')).toBe(false);
-    expect(posted).toContainEqual({ type: 'questionResponse', id: 'question-dismiss' });
+    expect(posted).toContainEqual({
+      type: 'questionResponse',
+      id: 'question-dismiss',
+      kind: 'skip',
+    });
   });
 
   it('docks approvals, focuses the first control, and preserves question priority order', () => {
@@ -120,6 +139,72 @@ describe('App docked agent dialogs', () => {
     dialog = container.querySelector<HTMLElement>('[role="dialog"]')!;
     expect(dialog.getAttribute('aria-labelledby')).toBe('question-dialog-title');
     expect(container.querySelector('.composer-slot')?.hasAttribute('hidden')).toBe(true);
+  });
+
+  it('keeps questions scoped to their conversations and shows the oldest one for the active chat', () => {
+    act(() => hostMessage(question('question-oldest', 'chat-1', 'First question?')));
+    act(() => hostMessage(question('question-next', 'chat-1', 'Second question?')));
+    expect(container.querySelector('.question-prompt')?.textContent).toBe('First question?');
+
+    act(() => hostMessage({ type: 'questionResolved', id: 'question-oldest' }));
+    expect(container.querySelector('.question-prompt')?.textContent).toBe('Second question?');
+
+    act(() => hostMessage({ type: 'questionResolved', id: 'question-next' }));
+    act(() => hostMessage(question('question-chat-1', 'chat-1', 'Question for chat one?')));
+    act(() => hostMessage(question('question-chat-2', 'chat-2', 'Question for chat two?')));
+    expect(container.querySelector('.question-prompt')?.textContent).toBe('Question for chat one?');
+    expect(container.querySelector('.composer-slot')?.hasAttribute('hidden')).toBe(true);
+
+    act(() =>
+      hostMessage({
+        type: 'sessionSync',
+        activeId: 'chat-2',
+        tabs: [
+          { id: 'chat-1', title: 'One', createdAt: 1, updatedAt: 1 },
+          { id: 'chat-2', title: 'Two', createdAt: 2, updatedAt: 2 },
+        ],
+        history: [],
+        archived: [],
+        waitingIds: [],
+        messagesById: {
+          'chat-1': [{ role: 'assistant', content: 'One' }],
+          'chat-2': [{ role: 'assistant', content: 'Two' }],
+        },
+      }),
+    );
+    expect(container.querySelector('.question-prompt')?.textContent).toBe('Question for chat two?');
+    expect(container.querySelector('.question-docked-panel')).not.toBeNull();
+  });
+
+  it('preserves question picks and notes while an approval pre-empts the card', () => {
+    act(() => hostMessage(question('question-draft')));
+    act(() => container.querySelector<HTMLButtonElement>('.question-option')!.click());
+    const note = container.querySelector<HTMLTextAreaElement>('.question-note')!;
+    act(() => setTextareaValue(note, 'keep this choice'));
+    act(() =>
+      hostMessage({
+        type: 'confirmRequest',
+        id: 'approval-over-question',
+        toolName: 'write_file',
+        detail: 'Update the requested file',
+      }),
+    );
+    act(() => hostMessage({ type: 'confirmResolved', id: 'approval-over-question' }));
+
+    expect(
+      container.querySelector<HTMLButtonElement>('.question-option')?.getAttribute('aria-checked'),
+    ).toBe('true');
+    expect(container.querySelector<HTMLTextAreaElement>('.question-note')?.value).toBe(
+      'keep this choice',
+    );
+  });
+
+  it('does not move focus from the composer when a question arrives while typing', () => {
+    const prompt = container.querySelector<HTMLTextAreaElement>('#prompt')!;
+    act(() => prompt.focus());
+    act(() => hostMessage(question('question-while-typing')));
+
+    expect(document.activeElement).not.toBe(container.querySelector('.question-docked-panel'));
   });
 
   it('keeps Escape available for confirmation and denies the pending approval', () => {

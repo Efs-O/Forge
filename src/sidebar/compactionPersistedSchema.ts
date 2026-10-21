@@ -80,5 +80,13 @@ export const compactionPersistedSchema = z
       .min(1)
       .max(LAST_REPLY_MAX_CHARS + 20)
       .optional(),
+    resumeNote: z
+      .object({
+        generation: z.number().int().min(1),
+        usedTokens: z.number().int().min(0),
+        maxTokens: z.number().int().min(1).optional(),
+      })
+      .strict()
+      .optional(),
   })
   .strict();

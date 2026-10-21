@@ -1,9 +1,7 @@
-import { parseQuestionGroups, resolveQuestionText } from '../util/questionAnswers';
 import * as path from 'path';
 import * as vscode from 'vscode';
 import type { RegisteredTool } from './ToolRegistry';
 import { resolveWorkspaceUri } from '../util/WorkspacePaths';
-import type { UserQuestionService } from '../sidebar/UserQuestionService';
 import {
   NOTIFY_IDLE_RESET_MS,
   NOTIFY_TURN_LIMIT,
@@ -185,100 +183,6 @@ export function makeOpenFileTool(): RegisteredTool {
       return zeroBased === undefined
         ? `Opened ${suppliedPath} in the editor.`
         : `Opened ${suppliedPath} in the editor at line ${zeroBased + 1}.`;
-    },
-  };
-}
-
-// ── ask_user ──────────────────────────────────────────────────────────────────
-
-export function makeAskUserTool(
-  questions: UserQuestionService,
-  unattended: UnattendedConversationRegistry = unattendedConversations,
-): RegisteredTool {
-  return {
-    definition: {
-      type: 'function',
-      function: {
-        name: 'ask_user',
-        description:
-          'Ask the user a question and BLOCK until they answer, with no timeout -- ' +
-          'do not use it to check in during unattended work; when work can continue ' +
-          'under a stated assumption, state it, notify_user, and keep going. One ' +
-          'decision group per call; keep options short and mutually exclusive. For ' +
-          'two related decisions in one round, pass `questions` rather than one ' +
-          'combined options list: each entry carries its own prompt and options, ' +
-          'and the top-level prompt only heads them.',
-        parameters: {
-          type: 'object',
-          properties: {
-            prompt: { type: 'string', description: 'Question or prompt shown to the user.' },
-            placeholder: {
-              type: 'string',
-              description: 'Placeholder text for a free-text input box.',
-            },
-            options: {
-              type: 'array',
-              items: { type: 'string' },
-              description:
-                'If provided, offers a fixed choice instead of free text. Ignored ' +
-                'when `questions` is present.',
-            },
-            questions: {
-              type: 'array',
-              description:
-                'Two or more sub-questions answered in one round, each with its ' +
-                'own choice list. The answer comes back as one labelled line per ' +
-                'sub-question. Use `prompt` as the shared preamble.',
-              items: {
-                type: 'object',
-                properties: {
-                  prompt: { type: 'string', description: 'This sub-question.' },
-                  options: {
-                    type: 'array',
-                    items: { type: 'string' },
-                    description: 'Its mutually exclusive choices.',
-                  },
-                },
-                required: ['prompt', 'options'],
-                additionalProperties: false,
-              },
-            },
-          },
-          additionalProperties: false,
-        },
-      },
-    },
-    permission: 'read',
-    handler: async (args, context) => {
-      if (context?.conversationId && unattended.has(context.conversationId)) {
-        return (
-          'unattended: no user present — Nobody is attending this job run, so no answer will come. ' +
-          'Make the safest assumption and continue, or stop and report RESULT: failed with the question.'
-        );
-      }
-      // `parseQuestionGroups` returning undefined selects the flat prompt/options
-      // shape. This covers missing `questions`, an empty array, and valid arrays
-      // of objects whose prompt/options fields fail its checks. ToolRegistry
-      // rejects malformed JSON strings and non-object entries before this handler.
-      const groups = parseQuestionGroups(args['questions']);
-      const answer = await questions.ask({
-        prompt: resolveQuestionText(args, groups),
-        placeholder: args['placeholder'] as string | undefined,
-        options: groups ? undefined : (args['options'] as string[] | undefined),
-        questions: groups,
-        conversationId: context?.conversationId,
-        // Without this a cancelled turn leaves the question open forever: the
-        // box no longer self-dismisses on blur, and a remote asker has no Esc.
-        signal: context?.abortSignal,
-      });
-      // Say what happened rather than returning a bare "(cancelled)" the model
-      // reads as an answer -- and name the alternative, so a dismissal ends the
-      // turn in chat instead of re-asking into the same dead end.
-      return (
-        answer ??
-        'The user did not answer: the question was dismissed without a response. ' +
-          'Do not call ask_user again for this question -- ask it in your chat reply and end the turn.'
-      );
     },
   };
 }

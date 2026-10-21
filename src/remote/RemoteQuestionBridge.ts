@@ -3,50 +3,44 @@ import type {
   UserQuestionRequestEvent,
 } from '../sidebar/UserQuestionService';
 import type { ForgeHostFacade } from '../sidebar/ForgeHostFacade';
+import { renderQuestionAsText } from '../util/questionAnswers';
 import type { CommandCleanupScheduler } from './CommandCleanupScheduler';
 import type { RemoteAuth } from './RemoteAuth';
 import type { RemoteRequestStore } from './RemoteRequestStore';
 import type { RemoteChannel, RemoteInboundDisposition, RemoteInboundEvent } from './types';
 import {
-  formatGroupAnswer,
-  renderQuestionAsText,
-  resolveAnswerText,
-  type QuestionGroup,
-} from '../util/questionAnswers';
-import { telegramQuestionButtons } from './TelegramQuestionButtons';
+  applyRemoteQuestionStep,
+  applyRemoteQuestionText,
+  buildRemoteQuestionKeyboard,
+  createRemoteQuestionStepState,
+  questionStepAction,
+  renderRemoteQuestionNotePrompt,
+  renderRemoteQuestionStep,
+  renderRemoteQuestionStepReceipt,
+  type RemoteQuestionStepState,
+} from './RemoteQuestionSteps';
+
+type QuestionActionEvent = Extract<RemoteInboundEvent, { kind: 'question_action' }>;
 
 interface RemoteQuestionEntry {
   chatId: string;
   event: UserQuestionRequestEvent;
-  messageId?: string;
-  freeTextMode: boolean;
-  /** The "send your answer as text" prompt, deleted once the question closes. */
+  state: RemoteQuestionStepState;
+  messageId?: string | undefined;
+  messageTexts: Map<string, string>;
   textPromptIds?: string[];
-  /** False until the chat has been shown it; a locked chat is shown it on unlock. */
   delivered: boolean;
-  /**
-   * Sub-questions asked one keyboard at a time (Telegram only). A keyboard
-   * answers one list, so several lists become several messages in turn.
-   */
-  steps?: readonly QuestionGroup[];
-  /** Answers given so far, one per step; its length is the current step. */
-  picks?: string[];
-  /** The step whose keyboard is on screen, so a step is never shown twice. */
-  shownStep?: number;
-  /** Serialises step keyboards: two quick replies must not race two sends. */
-  sending?: Promise<void>;
+  skipReceipt: boolean;
+  callbackIds: Set<string>;
+  actionQueue: Promise<void>;
 }
 
-type QuestionActionEvent = Extract<RemoteInboundEvent, { kind: 'question_action' }>;
+interface ActionOutcome {
+  disposition: RemoteInboundDisposition;
+  callbackText?: string;
+}
 
-/**
- * Presents an agent question in the chat that started the turn.
- *
- * The approval bridge cannot serve this: an approval is a two-button callback,
- * while a question needs free text back. So the question is sent as an ordinary
- * message and the chat's next non-command text is routed here as its answer --
- * see RemoteController.handle().
- */
+/** Sends questions to the bound chat and arbitrates button and typed replies. */
 export class RemoteQuestionBridge {
   private readonly questions = new Map<string, RemoteQuestionEntry>();
   private subscription: { dispose(): void } | undefined;
@@ -59,7 +53,6 @@ export class RemoteQuestionBridge {
     private readonly signal: AbortSignal,
     private maxMessageChars: number,
     private readonly onError?: (message: string) => void,
-    /** Deletes a routine receipt after the command-reply delay; absent in rigs = kept. */
     private readonly cleanup?: CommandCleanupScheduler,
   ) {}
 
@@ -69,200 +62,282 @@ export class RemoteQuestionBridge {
       answered: (event) => this.onAnswered(event),
     });
   }
-
   stop(): void {
     this.subscription?.dispose();
     this.subscription = undefined;
     this.questions.clear();
   }
-
   updateMaxMessageChars(maxMessageChars: number): void {
     this.maxMessageChars = maxMessageChars;
   }
-
-  /** True while this chat owes an answer, so the controller routes text here. */
   hasPending(chatId: string): boolean {
-    for (const entry of this.questions.values()) {
-      if (entry.chatId === chatId) return true;
-    }
-    return false;
+    return [...this.questions.values()].some((entry) => entry.chatId === chatId);
   }
-
-  /**
-   * Shows a newly authenticated chat the questions it could not be handed while
-   * locked. `publish` drops a question for a locked chat, so without this an
-   * ask_user raised before the owner unlocked (e.g. just after a window reload)
-   * never reaches the phone while the turn waits on it.
-   */
+  /** Shows a locked chat each question it missed after owner authentication. */
   republish(chatId: string): void {
     for (const [id, entry] of this.questions) {
-      if (entry.chatId === chatId && !entry.delivered) void this.publish(id);
+      if (entry.chatId === chatId && !entry.delivered) {
+        void this.enqueue(entry, () => this.publish(id));
+      }
     }
   }
-
-  /** Answers the chat's outstanding question. False when there is none. */
+  /** Routes typed text for the first outstanding question in this chat. */
   answerText(chatId: string, text: string): boolean {
-    for (const [id, entry] of this.questions) {
+    for (const entry of this.questions.values()) {
       if (entry.chatId !== chatId) continue;
-      if (this.buttonsOwnText(entry)) {
-        // Buttons are on screen (or the next step's are being sent) and Other…
-        // was not tapped: only an option's
-        // number or its exact label answers. Prose here is usually chat ("did
-        // you get my reply?"), and claiming it once handed the agent that line
-        // as a Plan C verdict.
-        const options = this.currentOptions(entry) ?? [];
-        const index = /^\s*([0-9]+)\s*$/.exec(text);
-        const typed = text.trim().toLowerCase();
-        const picked = index
-          ? options[Number(index[1]) - 1]
-          : options.find((option) => option.toLowerCase() === typed);
-        if (picked === undefined) {
-          void this.refuseProse(entry);
-          return true;
-        }
-        if (entry.steps) return this.takeAnswer(entry, picked);
-        return this.settle(id, entry, picked);
-      }
-      if (entry.steps) {
-        // Typed text answers the sub-question on screen; a bare number picks its option.
-        const group = entry.steps[entry.picks?.length ?? 0];
-        return this.takeAnswer(entry, resolveAnswerText(text, group?.options));
-      }
-      return this.settle(id, entry, text);
+      void this.enqueue(entry, () => this.answerTextForEntry(entry, text)).catch((err: unknown) => {
+        this.report('question text handling', err);
+      });
+      return true;
     }
     return false;
   }
-
-  /**
-   * True while typed prose must not answer: a keyboard is up, or a stepped
-   * question is between keyboards. A text fallback (`failDelivery`) leaves no
-   * keyboard and sets `shownStep`, so prose still answers there.
-   */
-  private buttonsOwnText(entry: RemoteQuestionEntry): boolean {
-    if (entry.freeTextMode) return false;
-    if (entry.messageId) return true;
-    return !!entry.steps && entry.shownStep !== (entry.picks?.length ?? 0);
-  }
-
-  private settle(id: string, entry: RemoteQuestionEntry, text: string): boolean {
-    const accepted = this.host.answerQuestion(id, text);
-    if (accepted) {
-      this.questions.delete(id);
-      void this.clearKeyboard(entry);
-    }
-    return accepted;
-  }
-
-  /** Settles a Telegram button action only against its exact pending question. */
+  /** Applies one callback and acknowledges it so Telegram never spins. */
   async handleAction(event: QuestionActionEvent): Promise<RemoteInboundDisposition> {
-    if (event.channel !== this.channel.name) {
-      return { kind: 'rejected', reason: 'question belongs to another transport' };
+    let outcome: ActionOutcome;
+    try {
+      const entry = this.questions.get(event.questionId);
+      outcome = entry
+        ? await this.enqueue(entry, () => this.applyCallback(entry, event))
+        : rejected('question is stale or not owned by this chat');
+    } catch (err) {
+      this.report('question button update', err);
+      outcome = {
+        disposition: { kind: 'handled' },
+        callbackText: 'Forge could not update this question.',
+      };
     }
-    const pending = this.questions.get(event.questionId);
-    if (!pending || pending.chatId !== event.chatId) {
-      return { kind: 'rejected', reason: 'question is stale or not owned by this chat' };
+    try {
+      await this.channel.answerCallbackQuery?.(event.providerMessageId, outcome.callbackText, {
+        signal: this.signal,
+      });
+    } catch (err) {
+      this.report('question callback acknowledgement', err);
     }
-    // A stepped question clears each keyboard before the next one is sent, so
-    // an absent message id there means "between steps", not "not yet known".
-    if ((pending.messageId || pending.steps) && pending.messageId !== event.messageId) {
-      return { kind: 'rejected', reason: 'question button is stale' };
+    return outcome.disposition;
+  }
+
+  private async applyCallback(
+    entry: RemoteQuestionEntry,
+    event: QuestionActionEvent,
+  ): Promise<ActionOutcome> {
+    if (event.channel !== this.channel.name)
+      return rejected('question belongs to another transport');
+    if (this.questions.get(event.questionId) !== entry || entry.chatId !== event.chatId) {
+      return rejected('question is stale or not owned by this chat');
     }
-    const options = this.currentOptions(pending);
-    if (!options) {
-      return { kind: 'rejected', reason: 'question does not have a Telegram choice list' };
+    if (!entry.messageId || entry.messageId !== event.messageId) {
+      return rejected('question button is stale');
     }
-    if (event.action === 'other') {
-      if (pending.freeTextMode) return { kind: 'handled' };
-      pending.freeTextMode = true;
-      await this.clearKeyboard(pending);
-      const step = pending.steps ? ` to question ${(pending.picks?.length ?? 0) + 1}` : '';
-      const ids = await this.sendNotice(pending.chatId, `Forge: send your answer${step} as text.`);
-      if (ids?.length) pending.textPromptIds = ids;
-      return { kind: 'handled' };
+    if (entry.callbackIds.has(event.providerMessageId)) return { disposition: { kind: 'handled' } };
+    entry.callbackIds.add(event.providerMessageId);
+    if (entry.callbackIds.size > 256) {
+      const oldest = entry.callbackIds.values().next();
+      if (!oldest.done) entry.callbackIds.delete(oldest.value);
     }
-    if (event.choice === undefined) {
-      return { kind: 'rejected', reason: 'question choice is missing' };
+
+    const action = questionStepAction(event.action, event.choice);
+    if (!action) return rejected('question action is invalid');
+    const previous = entry.state;
+    const result = applyRemoteQuestionStep(previous, action);
+    if (result.effect.kind === 'toast') {
+      return { disposition: { kind: 'handled' }, callbackText: result.effect.text };
     }
-    const answer = options[event.choice];
-    if (answer === undefined) return { kind: 'rejected', reason: 'question choice is invalid' };
-    if (pending.steps) {
-      // Cleared before the next step is sent, so a double tap finds no keyboard.
-      await this.clearKeyboard(pending);
-      if (!this.takeAnswer(pending, answer)) {
-        return { kind: 'rejected', reason: 'question is already settled' };
+    entry.state = result.state;
+    const callbackText = await this.applyEffect(entry, previous, result.effect);
+    return {
+      disposition: { kind: 'handled' },
+      ...(callbackText ? { callbackText } : {}),
+    };
+  }
+
+  private async applyEffect(
+    entry: RemoteQuestionEntry,
+    previous: RemoteQuestionStepState,
+    effect: ReturnType<typeof applyRemoteQuestionStep>['effect'],
+  ): Promise<string | undefined> {
+    switch (effect.kind) {
+      case 'rerender': {
+        const noteChanged = previous.notes[previous.step] !== entry.state.notes[entry.state.step];
+        if (previous.freeTextStep !== undefined && entry.state.freeTextStep === undefined) {
+          await this.deleteTextPrompt(entry);
+        }
+        await this.replaceCurrentKeyboard(entry, noteChanged);
+        return undefined;
       }
-      await pending.sending;
-      return { kind: 'handled' };
+      case 'needNote': {
+        await this.deleteTextPrompt(entry);
+        const ids = await this.sendNotice(
+          entry.chatId,
+          renderRemoteQuestionNotePrompt(entry.state),
+        );
+        if (!ids) {
+          entry.state = previous;
+          return 'Forge could not start note entry. Try Note… again.';
+        }
+        entry.textPromptIds = ids;
+        return undefined;
+      }
+      case 'sendStep':
+        await this.finishCurrentStep(entry, previous);
+        await this.sendStep(entry, effect.step);
+        return undefined;
+      case 'settle':
+        if (!this.host.answerQuestionStructured(entry.event.id, effect.answer)) {
+          return 'This question has already been answered.';
+        }
+        return undefined;
+      case 'skip':
+        entry.skipReceipt = true;
+        if (!this.host.skipQuestion(entry.event.id)) {
+          entry.skipReceipt = false;
+          return 'This question has already been answered.';
+        }
+        return undefined;
+      case 'toast':
+        return effect.text;
     }
-    const accepted = this.host.answerQuestion(event.questionId, answer);
-    if (!accepted) return { kind: 'rejected', reason: 'question is already settled' };
-    this.questions.delete(event.questionId);
-    await this.clearKeyboard(pending);
-    return { kind: 'handled' };
   }
 
-  /** The choice list on screen: the flat options, or the current step's. */
-  private currentOptions(pending: RemoteQuestionEntry): readonly string[] | undefined {
-    if (pending.steps) return pending.steps[pending.picks?.length ?? 0]?.options;
-    if (pending.event.questions?.length) return undefined;
-    return pending.event.options?.length ? pending.event.options : undefined;
-  }
-
-  /**
-   * Records one step's answer, then shows the next step or settles the whole
-   * question with the same labelled lines the sidebar dialog sends.
-   */
-  private takeAnswer(pending: RemoteQuestionEntry, answer: string): boolean {
-    const steps = pending.steps!;
-    const picks = [...(pending.picks ?? []), answer];
-    if (picks.length >= steps.length) {
-      return this.host.answerQuestion(pending.event.id, formatGroupAnswer(steps, picks));
+  private async answerTextForEntry(entry: RemoteQuestionEntry, text: string): Promise<void> {
+    if (this.questions.get(entry.event.id) !== entry) return;
+    const spec = entry.state.specs[entry.state.step]!;
+    const noteMode = entry.state.freeTextStep === entry.state.step;
+    const input = applyRemoteQuestionText(
+      entry.state,
+      text,
+      this.channel.name === 'telegram' && spec.options.length > 0,
+      !entry.messageId,
+    );
+    if (input.kind === 'plain') {
+      // Raw text: the host resolves numbers and labels once. Resolving here too
+      // re-read an already-resolved numeric label as an index.
+      this.host.answerQuestion(entry.event.id, text);
+      return;
     }
-    pending.picks = picks;
-    pending.freeTextMode = false;
-    void this.deleteTextPrompt(pending);
-    void this.showStep(pending);
-    return true;
+    const { previous, result } = input;
+    if (result.effect.kind === 'toast') {
+      await this.refuseProse(entry, result.effect.text);
+      return;
+    }
+    entry.state = result.state;
+    if (result.effect.kind === 'rerender') {
+      if (noteMode) await this.deleteTextPrompt(entry);
+      await this.replaceCurrentKeyboard(entry, noteMode);
+    } else {
+      await this.applyEffect(entry, previous, result.effect);
+    }
   }
-
-  private showStep(pending: RemoteQuestionEntry): Promise<void> {
-    pending.sending = (pending.sending ?? Promise.resolve()).then(async () => {
-      const step = pending.picks?.length ?? 0;
-      if (this.questions.get(pending.event.id) !== pending || pending.shownStep === step) return;
-      await this.clearKeyboard(pending);
-      await this.sendKeyboard(pending);
+  private async replaceCurrentKeyboard(
+    entry: RemoteQuestionEntry,
+    editText: boolean,
+  ): Promise<void> {
+    const messageId = entry.messageId;
+    if (!messageId) {
+      if (editText) await this.updateCurrentText(entry);
+      return;
+    }
+    const replace = this.channel.replaceInlineKeyboard;
+    if (!replace) throw new Error('Telegram question keyboard updates are unavailable.');
+    if (editText) await this.updateCurrentText(entry);
+    await replace.call(this.channel, entry.chatId, messageId, this.keyboard(entry), {
+      signal: this.signal,
     });
-    return pending.sending;
+  }
+
+  private async updateCurrentText(entry: RemoteQuestionEntry): Promise<void> {
+    const messageId = entry.messageId;
+    if (!messageId || !this.channel.editMessage) return;
+    const text = renderRemoteQuestionStep(entry.state);
+    await this.channel.editMessage(entry.chatId, messageId, text, { signal: this.signal });
+    entry.messageTexts.set(messageId, text);
+  }
+
+  private keyboard(entry: RemoteQuestionEntry) {
+    return buildRemoteQuestionKeyboard(entry.event.id, entry.state);
+  }
+
+  private async sendStep(entry: RemoteQuestionEntry, step: number): Promise<void> {
+    if (this.questions.get(entry.event.id) !== entry || entry.state.step !== step) return;
+    const send = this.channel.sendInlineKeyboard;
+    if (!send) {
+      await this.failDelivery(entry, 'Telegram inline choices are unavailable.');
+      return;
+    }
+    const text = renderRemoteQuestionStep(entry.state, step);
+    try {
+      const messageId = await send.call(
+        this.channel,
+        entry.chatId,
+        text.slice(0, this.maxMessageChars),
+        this.keyboard(entry),
+        { signal: this.signal },
+      );
+      if (!messageId) {
+        await this.failDelivery(entry, 'Telegram did not return the question message id.');
+        return;
+      }
+      if (this.questions.get(entry.event.id) !== entry) {
+        await this.channel.clearInlineKeyboard?.(entry.chatId, messageId, { signal: this.signal });
+        return;
+      }
+      entry.delivered = true;
+      entry.messageId = messageId;
+      entry.messageTexts.set(messageId, text.slice(0, this.maxMessageChars));
+    } catch (err) {
+      await this.failDelivery(entry, err instanceof Error ? err.message : String(err));
+    }
+  }
+
+  private async finishCurrentStep(
+    entry: RemoteQuestionEntry,
+    previous: RemoteQuestionStepState,
+  ): Promise<void> {
+    const messageId = entry.messageId;
+    if (!messageId) return;
+    entry.messageId = undefined;
+    await this.channel.clearInlineKeyboard?.(entry.chatId, messageId, { signal: this.signal });
+    const text = renderRemoteQuestionStepReceipt(previous, previous.step).slice(
+      0,
+      this.maxMessageChars,
+    );
+    await this.editMessage(entry, messageId, text);
+  }
+
+  private async failDelivery(entry: RemoteQuestionEntry, detail: string): Promise<void> {
+    if (this.questions.get(entry.event.id) !== entry) return;
+    entry.messageId = undefined;
+    const step = entry.state.step;
+    const text = renderRemoteQuestionStep(entry.state, step);
+    try {
+      const ids = await this.channel.send(entry.chatId, text.slice(0, this.maxMessageChars), {
+        signal: this.signal,
+      });
+      for (const id of ids ?? []) entry.messageTexts.set(id, text.slice(0, this.maxMessageChars));
+      entry.delivered = true;
+    } catch (err) {
+      this.report(`question delivery failed (${detail})`, err);
+    }
   }
 
   private onAsked(event: UserQuestionRequestEvent): void {
-    // An unaddressed question cannot be attributed to a chat: the sidebar and
-    // the desktop prompt stay its only surfaces.
     if (!event.conversationId) return;
     const chatId = this.chatFor(event.conversationId);
     if (!chatId) return;
-    const steps = this.channel.name === 'telegram' ? event.questions : undefined;
-    this.questions.set(event.id, {
+    const entry: RemoteQuestionEntry = {
       chatId,
       event,
-      freeTextMode: false,
+      state: createRemoteQuestionStepState(event.specs),
+      messageTexts: new Map(),
       delivered: false,
-      ...(steps?.length ? { steps } : {}),
-    });
-    void this.publish(event.id);
+      skipReceipt: false,
+      callbackIds: new Set(),
+      actionQueue: Promise.resolve(),
+    };
+    this.questions.set(event.id, entry);
+    void this.enqueue(entry, () => this.publish(event.id));
   }
 
-  /**
-   * Which chat is asked the question.
-   *
-   * The queued request first, then the conversation's binding. The fallback is
-   * the case this used to refuse: a turn started in the sidebar blocks on
-   * ask_user with nothing said remotely, so a phone watching it sees the work
-   * stop and never learns it is waiting on an answer only the keyboard can
-   * give. The cost is that `answerText` can now claim a plain message sent
-   * while such a question is open -- bounded to the seconds a gate is up, and
-   * `/`-prefixed commands are never claimed.
-   */
   private chatFor(conversationId: string): string | undefined {
     const chain = this.host
       .status()
@@ -275,139 +350,104 @@ export class RemoteQuestionBridge {
   }
 
   private onAnswered(event: UserQuestionAnsweredEvent): void {
-    const pending = this.questions.get(event.id);
-    if (!pending) return;
+    const entry = this.questions.get(event.id);
+    if (!entry) return;
     this.questions.delete(event.id);
-    void this.clearKeyboard(pending);
-    void this.deleteTextPrompt(pending);
-    // Only worth reporting when the answer came from somewhere else; a remote
-    // answer already echoes as the message the user just sent.
-    void this.publishResolution(pending, event);
+    entry.state = applyRemoteQuestionStep(entry.state, { type: 'resolved' }).state;
+    void this.closeMessages(entry, event);
+    void this.deleteTextPrompt(entry);
+    void this.publishResolution(entry, event);
   }
 
   private async publish(id: string): Promise<void> {
-    const pending = this.questions.get(id);
-    if (!pending) return;
-    // An expired session must not be handed the question text.
-    if (!(await this.auth.canDeliver(this.channel.name, pending.chatId))) return;
-    // A sidebar answer may have won while the session check was awaiting.
-    if (this.questions.get(id) !== pending) return;
-    if (this.channel.name === 'telegram' && this.currentOptions(pending)) {
-      await this.showStep(pending);
+    const entry = this.questions.get(id);
+    if (!entry || entry.delivered) return;
+    if (!(await this.auth.canDeliver(this.channel.name, entry.chatId))) return;
+    if (this.questions.get(id) !== entry) return;
+    const canUseTelegramChoices = entry.state.specs.every(
+      (spec) => spec.options.length > 0 && spec.options.length <= 99,
+    );
+    if (this.channel.name === 'telegram' && canUseTelegramChoices) {
+      await this.sendStep(entry, entry.state.step);
       return;
     }
-    // Rendered by the shared owner so a "1 2" typed here means exactly what
-    // it means clicked in the sidebar -- the numbering is the contract.
-    const body = renderQuestionAsText(
-      pending.event.prompt,
-      pending.event.options,
-      pending.event.questions,
-    );
+    const body =
+      entry.state.specs.length === 1
+        ? renderQuestionAsText(entry.event.prompt, entry.state.specs[0]!)
+        : renderQuestionAsText(entry.event.prompt, undefined, entry.state.specs);
     try {
-      await this.channel.send(
-        pending.chatId,
+      const ids = await this.channel.send(
+        entry.chatId,
         `Forge asks: ${body}`.slice(0, this.maxMessageChars),
         { signal: this.signal },
       );
-      pending.delivered = true;
-    } catch (err) {
-      this.onError?.(
-        `Forge remote question delivery failed: ${err instanceof Error ? err.message : String(err)}`,
-      );
-    }
-  }
-
-  /**
-   * The line above a sub-question, or empty when it would add nothing.
-   *
-   * A call that sent no shared preamble takes its text from the first
-   * sub-question (see `questionText` in the tool), so that headline is one of
-   * the questions rather than a title over them — printing it above
-   * "Question 1 of 2: Version" reads as two different questions, and above
-   * step 2 it reads as a stray label. A real preamble differs from every
-   * question, so it still heads every step.
-   */
-  private stepHeadline(pending: RemoteQuestionEntry): string {
-    const head = pending.event.prompt.trim();
-    if (!head) return '';
-    if ((pending.steps ?? []).some((group) => group.prompt.trim() === head)) return '';
-    return `${head}\n\n`;
-  }
-
-  /** Sends the keyboard for the flat choice list, or for the current step. */
-  private async sendKeyboard(pending: RemoteQuestionEntry): Promise<void> {
-    const sendInlineKeyboard = this.channel.sendInlineKeyboard;
-    if (!sendInlineKeyboard) {
-      await this.failDelivery(pending, 'Telegram inline choices are unavailable.');
-      return;
-    }
-    const step = pending.picks?.length ?? 0;
-    const group = pending.steps?.[step];
-    const text = group
-      ? `Forge asks: ${this.stepHeadline(pending)}Question ${step + 1} of ${pending.steps!.length}: ${group.prompt}`
-      : `Forge asks: ${renderQuestionAsText(pending.event.prompt, pending.event.options)}`;
-    try {
-      const messageId = await sendInlineKeyboard.call(
-        this.channel,
-        pending.chatId,
-        text.slice(0, this.maxMessageChars),
-        telegramQuestionButtons(pending.event.id, group?.options ?? pending.event.options!),
-        { signal: this.signal },
-      );
-      pending.delivered = true;
-      pending.shownStep = step;
-      if (this.questions.get(pending.event.id) === pending) {
-        if (messageId) pending.messageId = messageId;
-      } else if (messageId) {
-        await this.clearKeyboard({ ...pending, messageId });
+      for (const messageId of ids ?? []) {
+        entry.messageTexts.set(messageId, `Forge asks: ${body}`.slice(0, this.maxMessageChars));
       }
+      entry.delivered = true;
     } catch (err) {
-      await this.failDelivery(pending, err instanceof Error ? err.message : String(err));
+      this.report('question delivery failed', err);
     }
   }
 
-  /**
-   * The buttons could not be drawn (a choice past Telegram's 64-byte label
-   * limit, or no inline keyboard): ask the same step as numbered text, which
-   * `answerText` already resolves. Never dismiss -- the question is open in the
-   * sidebar too, and cancelling it because the phone could not draw buttons
-   * closed that dialog under the user mid-read.
-   */
-  private async failDelivery(pending: RemoteQuestionEntry, detail: string): Promise<void> {
-    if (this.questions.get(pending.event.id) !== pending) return;
-    const step = pending.picks?.length ?? 0;
-    const group = pending.steps?.[step];
-    const body = group
-      ? `${this.stepHeadline(pending)}Question ${step + 1} of ${pending.steps!.length}: ${renderQuestionAsText(group.prompt, group.options)}`
-      : renderQuestionAsText(pending.event.prompt, pending.event.options);
+  private async editMessage(
+    entry: RemoteQuestionEntry,
+    messageId: string,
+    text: string,
+  ): Promise<void> {
+    await this.channel.editMessage?.(entry.chatId, messageId, text, { signal: this.signal });
+    entry.messageTexts.set(messageId, text);
+  }
+
+  private async closeMessages(
+    entry: RemoteQuestionEntry,
+    event: UserQuestionAnsweredEvent,
+  ): Promise<void> {
+    const status = entry.skipReceipt
+      ? 'Forge: skipped'
+      : event.reason === 'answered'
+        ? 'Forge: answered elsewhere.'
+        : 'Forge: the question was dismissed without an answer.';
+    for (const messageId of entry.messageTexts.keys()) {
+      try {
+        await this.channel.clearInlineKeyboard?.(entry.chatId, messageId, { signal: this.signal });
+        const current = entry.messageTexts.get(messageId);
+        if (current) await this.editMessage(entry, messageId, `${current}\n\n${status}`);
+      } catch (err) {
+        this.report('question keyboard cleanup', err);
+      }
+    }
+    entry.messageId = undefined;
+  }
+
+  private async publishResolution(
+    entry: RemoteQuestionEntry,
+    event: UserQuestionAnsweredEvent,
+  ): Promise<void> {
+    if (!(await this.auth.canDeliver(this.channel.name, entry.chatId))) return;
+    const text = entry.skipReceipt
+      ? 'Forge: skipped'
+      : event.reason === 'answered'
+        ? `Forge: answered — “${(event.answer ?? '').slice(0, 800)}”`
+        : 'Forge: the question was dismissed without an answer.';
     try {
-      await this.channel.send(
-        pending.chatId,
-        `Forge asks: ${body}`.slice(0, this.maxMessageChars),
-        {
-          signal: this.signal,
-        },
-      );
-      pending.delivered = true;
-      pending.shownStep = step;
+      const sent = await this.channel.send(entry.chatId, text, { signal: this.signal });
+      if (event.reason === 'answered') this.cleanup?.armEphemeral(entry.chatId, sent ?? []);
     } catch (err) {
-      this.onError?.(
-        `Forge remote question delivery failed: ${detail}; text fallback: ${err instanceof Error ? err.message : String(err)}`,
-      );
+      this.report('question resolution notice', err);
     }
   }
 
-  /** Says why a typed message was held back instead of answering or reaching the agent. */
-  private async refuseProse(pending: RemoteQuestionEntry): Promise<void> {
-    const step = pending.steps
-      ? ` question ${(pending.picks?.length ?? 0) + 1} of ${pending.steps.length}`
-      : ' a question';
-    const ids = await this.sendNotice(
-      pending.chatId,
-      `Forge is waiting on${step}. Tap a button, or Other… to type an answer — ` +
-        'your message was not sent to the agent.',
-    );
-    this.cleanup?.armEphemeral(pending.chatId, ids ?? []);
+  private async refuseProse(entry: RemoteQuestionEntry, detail?: string): Promise<void> {
+    const step =
+      entry.state.specs.length > 1
+        ? ` question ${entry.state.step + 1} of ${entry.state.specs.length}`
+        : ' this question';
+    const message = detail
+      ? `Forge is waiting on${step}. ${detail} Your message was not sent to the agent.`
+      : `Forge is waiting on${step}. Tap a choice, or Note… to type an answer — your message was not sent to the agent.`;
+    const ids = await this.sendNotice(entry.chatId, message);
+    this.cleanup?.armEphemeral(entry.chatId, ids ?? []);
   }
 
   private async sendNotice(chatId: string, text: string): Promise<string[] | undefined> {
@@ -417,14 +457,11 @@ export class RemoteQuestionBridge {
       });
       return sent ?? undefined;
     } catch (err) {
-      this.onError?.(
-        `Forge remote question notice failed: ${err instanceof Error ? err.message : String(err)}`,
-      );
+      this.report('question notice', err);
       return undefined;
     }
   }
 
-  /** Best-effort: the prompt is presentation only, so a failed delete is reported, not retried. */
   private async deleteTextPrompt(entry: RemoteQuestionEntry): Promise<void> {
     const ids = entry.textPromptIds ?? [];
     delete entry.textPromptIds;
@@ -432,44 +469,30 @@ export class RemoteQuestionBridge {
       try {
         await this.channel.deleteMessage?.(entry.chatId, id, { signal: this.signal });
       } catch (err) {
-        this.onError?.(
-          `Forge remote question prompt cleanup failed: ${err instanceof Error ? err.message : String(err)}`,
-        );
+        this.report('question note prompt cleanup', err);
       }
     }
   }
 
-  private async clearKeyboard(entry: RemoteQuestionEntry): Promise<void> {
-    const messageId = entry.messageId;
-    if (!messageId) return;
-    delete entry.messageId;
-    try {
-      await this.channel.clearInlineKeyboard?.(entry.chatId, messageId, { signal: this.signal });
-    } catch (err) {
-      this.onError?.(
-        `Forge remote question keyboard cleanup failed: ${err instanceof Error ? err.message : String(err)}`,
-      );
-    }
+  private enqueue<T>(entry: RemoteQuestionEntry, operation: () => Promise<T>): Promise<T> {
+    const current = entry.actionQueue.then(operation);
+    entry.actionQueue = current.then(
+      () => undefined,
+      () => undefined,
+    );
+    return current;
   }
 
-  private async publishResolution(
-    pending: RemoteQuestionEntry,
-    event: UserQuestionAnsweredEvent,
-  ): Promise<void> {
-    if (!(await this.auth.canDeliver(this.channel.name, pending.chatId))) return;
-    const text =
-      event.reason === 'answered'
-        ? // Whole answer, so a wrong sub-answer is visible, not cut off after the first.
-          `Forge: answered — "${(event.answer ?? '').slice(0, 800)}"`
-        : 'Forge: the question was dismissed without an answer.';
-    try {
-      const sent = await this.channel.send(pending.chatId, text, { signal: this.signal });
-      // An answer is a receipt; a dismissal means the turn got nothing, so it stays.
-      if (event.reason === 'answered') this.cleanup?.armEphemeral(pending.chatId, sent ?? []);
-    } catch (err) {
-      this.onError?.(
-        `Forge remote question update failed: ${err instanceof Error ? err.message : String(err)}`,
-      );
-    }
+  private report(operation: string, err: unknown): void {
+    this.onError?.(
+      `Forge remote ${operation}: ${err instanceof Error ? err.message : String(err)}`,
+    );
   }
+}
+
+function rejected(reason: string): ActionOutcome {
+  return {
+    disposition: { kind: 'rejected', reason },
+    callbackText: 'This question is no longer active.',
+  };
 }

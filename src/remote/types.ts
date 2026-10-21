@@ -281,6 +281,13 @@ export interface RemoteChannel {
     messageId: string,
     options?: { signal?: AbortSignal },
   ): Promise<void>;
+  /** Telegram-only in-place question keyboard update; other transports omit it. */
+  replaceInlineKeyboard?(
+    chatId: string,
+    messageId: string,
+    buttons: readonly RemoteContactButton[][],
+    options?: { signal?: AbortSignal },
+  ): Promise<void>;
   /** Retire the queued Telegram receipt for a request, if it had a button. */
   retireQueuedReceipt?(requestId: string): Promise<void>;
   /** Retire or clear the exact receipt that produced a callback, including after restart. */

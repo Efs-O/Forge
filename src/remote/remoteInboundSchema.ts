@@ -100,9 +100,9 @@ export const RemoteInboundEventSchema = z.discriminatedUnion('kind', [
   }),
   InboundBaseSchema.extend({
     kind: z.literal('question_action'),
-    action: z.enum(['select', 'other']),
+    action: z.enum(['select', 'note', 'next', 'back', 'skip']),
     questionId: z.string().regex(/^[A-Za-z0-9_-]{1,48}$/),
-    choice: z.number().int().min(0).max(99).optional(),
+    choice: z.number().int().min(1).max(99).optional(),
     messageId: z.string().min(1).max(256),
   }),
   InboundBaseSchema.extend({

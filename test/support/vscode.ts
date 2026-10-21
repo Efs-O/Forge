@@ -124,8 +124,9 @@ export interface FakeQuickInput {
   prompt?: string;
   placeholder?: string;
   ignoreFocusOut: boolean;
-  items: Array<{ label: string }>;
-  selectedItems: Array<{ label: string }>;
+  canSelectMany: boolean;
+  items: FakeQuickItem[];
+  selectedItems: FakeQuickItem[];
   visible: boolean;
   disposed: boolean;
   show(): void;
@@ -136,6 +137,14 @@ export interface FakeQuickInput {
   accept(text?: string): void;
 }
 
+export interface FakeQuickItem {
+  label: string;
+  description?: string;
+  alwaysShow?: boolean;
+  questionKind?: string;
+  optionIndex?: number;
+}
+
 export const openQuickInputs: FakeQuickInput[] = [];
 
 function makeQuickInput(): FakeQuickInput {
@@ -144,6 +153,7 @@ function makeQuickInput(): FakeQuickInput {
   const input: FakeQuickInput = {
     value: '',
     ignoreFocusOut: false,
+    canSelectMany: false,
     items: [],
     selectedItems: [],
     visible: false,

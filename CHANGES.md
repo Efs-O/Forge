@@ -1,5 +1,19 @@
 # Forge — Recent Changes
 
+## 0.17.59
+
+- The `ask_user` question card in the sidebar has been redesigned. It is now a framed card: you pick options, change your mind, deselect or pick nothing, and only **Answer** (or Enter) sends. A click never sends on its own, and the card stays open until you answer or press Skip. Escape no longer dismisses it. Every question can take a note or your own answer in place of an "Other" option. Several questions in one call show as tabs, with a Review step before Answer.
+- Questions can be multi-select. Choices that contradict each other belong in a single-select question, and an option such as "None of these" can be marked exclusive, which clears the other picks.
+- Six question bugs are fixed:
+  - Typing in "Other" no longer discards the options you picked, and clicking an option after typing no longer drops the text.
+  - An option whose label is a number, such as `5` in `["10","5","3"]`, is no longer read back as an index, which picked the wrong option.
+  - A question from one chat no longer replaces another chat's question or shows on the wrong chat.
+  - A tool approval that arrives while a question is open no longer wipes its picks and text.
+  - Escape pressed anywhere in the sidebar no longer dismisses the question.
+  - Reloading the window no longer hides a pending question or tool approval while the agent waits for it.
+- Telegram uses the same rules. Multi-select buttons toggle with ✓ marks, and a step has Back, Note…, Skip and Next/Send. A typed reply such as `1,3` picks options 1 and 3.
+- The first request after a compaction now tells the agent that the context was just compacted, which compaction it was and at what size. It also tells the agent that the opening messages are a summary, not the full history. The note is sent once, inside the per-turn context block, so the cached prompt prefix is unchanged.
+
 ## 0.17.58
 
 - Telegram's "got it" receipt for a message sent during a turn now has a **Send now** button, like the sidebar's. Tapping it stops the current turn and runs that message next, without unloading the model. If Forge already picked the message up, the tap answers "Too late — Forge already picked this up." The receipt is removed once the message is delivered, run or dropped with `/drop`.

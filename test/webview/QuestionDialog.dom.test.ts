@@ -2,6 +2,8 @@
 import { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import type { QuestionSpec, StructuredAnswer } from '../../src/util/questionAnswers';
+import type { AgentQuestion, QuestionDraft } from '../../webview-ui/src/useAgentDialogs';
 
 (globalThis as unknown as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 
@@ -10,6 +12,61 @@ const React = await import('react');
 
 let container: HTMLDivElement;
 let root: Root;
+
+interface HarnessProps {
+  question: AgentQuestion;
+  autoFocus?: boolean;
+  onAnswer: (answer: StructuredAnswer) => void;
+  onSkip: () => void;
+}
+
+function initialDraft(specs: readonly QuestionSpec[]): QuestionDraft {
+  return { tab: 0, picks: specs.map(() => []), notes: specs.map(() => '') };
+}
+
+function Harness({
+  question,
+  autoFocus = true,
+  onAnswer,
+  onSkip,
+}: HarnessProps): React.ReactElement {
+  const [draft, setDraft] = React.useState(() => initialDraft(question.specs));
+  return React.createElement(QuestionDialog, {
+    question,
+    draft,
+    autoFocus,
+    onDraftChange: setDraft,
+    onAnswer,
+    onSkip,
+  });
+}
+
+function question(specs: QuestionSpec[]): AgentQuestion {
+  return {
+    type: 'question',
+    id: `question-${specs.length}`,
+    prompt: specs[0]?.prompt ?? 'Question?',
+    specs,
+    focusOnOpen: true,
+  };
+}
+
+function render(specs: QuestionSpec[], autoFocus = true) {
+  const onAnswer = vi.fn<(answer: StructuredAnswer) => void>();
+  const onSkip = vi.fn();
+  act(() =>
+    root.render(
+      React.createElement(Harness, { question: question(specs), autoFocus, onAnswer, onSkip }),
+    ),
+  );
+  return { onAnswer, onSkip };
+}
+
+function type(element: HTMLTextAreaElement, value: string): void {
+  const setter = Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value')?.set;
+  setter?.call(element, value);
+  element.dispatchEvent(new Event('input', { bubbles: true }));
+}
 
 beforeEach(() => {
   container = document.createElement('div');
@@ -22,189 +79,145 @@ afterEach(() => {
   container.remove();
 });
 
-/**
- * React tracks a controlled input's value on the node itself, so a bare
- * `el.value = x` is ignored as "no change" and onChange never fires. Going
- * through the prototype setter is what makes the event real.
- */
-function type(element: HTMLTextAreaElement, value: string): void {
-  const setter = Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value')?.set;
-  setter?.call(element, value);
-  element.dispatchEvent(new Event('input', { bubbles: true }));
-}
-
-function render(onAnswer = vi.fn()): typeof onAnswer {
-  act(() => {
-    root.render(
-      React.createElement(QuestionDialog, {
-        prompt: 'Which reviewer should continue?',
-        options: ['Codex', 'Claude'],
-        onAnswer,
-        onDismiss: vi.fn(),
-      }),
-    );
-  });
-  return onAnswer;
-}
-
 describe('QuestionDialog', () => {
-  it('uses a docked non-modal dialog and focuses its first control', () => {
-    render();
-
-    const dialog = container.querySelector<HTMLElement>('[role="dialog"]')!;
-    expect(dialog.classList.contains('docked-dialog-panel')).toBe(true);
-    expect(dialog.classList.contains('confirm-overlay')).toBe(false);
-    expect(dialog.hasAttribute('aria-modal')).toBe(false);
-    expect(dialog.getAttribute('aria-labelledby')).toBe('question-dialog-title');
-    expect(document.activeElement).toBe(container.querySelector('.question-option'));
-  });
-
-  it('keeps numbered options as immediate answers', () => {
-    const onAnswer = render();
-
-    act(() => container.querySelector<HTMLButtonElement>('.question-option')!.click());
-
-    expect(onAnswer).toHaveBeenCalledWith('Codex');
-  });
-
-  it('offers Other… and switches it to the focused free-text answer path', () => {
-    render();
-
-    expect(container.querySelector('.question-input')).toBeNull();
-    act(() => container.querySelector<HTMLButtonElement>('.question-other')!.click());
-
-    const input = container.querySelector<HTMLTextAreaElement>('.question-input');
-    expect(input).not.toBeNull();
-    expect(document.activeElement).toBe(input);
-    expect(container.querySelector<HTMLButtonElement>('.confirm-btn-approve')).not.toBeNull();
-  });
-
-  it('submits typed answers with Enter while Shift+Enter remains available for a newline', () => {
-    const onAnswer = render();
-    act(() => container.querySelector<HTMLButtonElement>('.question-other')!.click());
-    const input = container.querySelector<HTMLTextAreaElement>('.question-input')!;
-    act(() => type(input, 'custom reviewer'));
-
+  it('focuses the card only when requested and never dismisses on Escape', () => {
+    const spec: QuestionSpec = {
+      prompt: 'Which reviewer?',
+      multiSelect: false,
+      options: [{ label: 'Codex' }, { label: 'Claude' }],
+    };
+    const { onSkip } = render([spec], false);
+    expect(document.activeElement).not.toBe(container.querySelector('[role="dialog"]'));
     act(() =>
-      input.dispatchEvent(
+      root.render(
+        React.createElement(Harness, {
+          question: question([spec]),
+          autoFocus: true,
+          onAnswer: vi.fn(),
+          onSkip,
+        }),
+      ),
+    );
+    const panel = container.querySelector<HTMLElement>('[role="dialog"]')!;
+    expect(document.activeElement).toBe(panel);
+
+    const note = container.querySelector<HTMLTextAreaElement>('.question-note')!;
+    act(() => note.focus());
+    act(() => note.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true })));
+    expect(document.activeElement).toBe(panel);
+    expect(onSkip).not.toHaveBeenCalled();
+  });
+
+  it('keeps multi-picks with a note and sends option indexes in spec order', () => {
+    const { onAnswer } = render([
+      {
+        prompt: 'Which stores?',
+        header: 'Database',
+        multiSelect: true,
+        options: [
+          { label: 'Postgres', description: 'Relational store' },
+          { label: 'Redis', description: 'Cache only' },
+        ],
+      },
+    ]);
+    expect(document.activeElement).toBe(container.querySelector('[role="dialog"]'));
+    expect(container.querySelector('.question-header-chip')?.textContent).toBe('Database');
+    expect(container.querySelector('.question-choice-hint')?.textContent).toBe('Choose any');
+    expect(container.querySelector('.question-option-description')?.textContent).toBe(
+      'Relational store',
+    );
+    const options = [...container.querySelectorAll<HTMLButtonElement>('.question-option')];
+    act(() => options[1]!.click());
+    act(() => options[0]!.click());
+    const note = container.querySelector<HTMLTextAreaElement>('.question-note')!;
+    act(() => type(note, 'keep the old schema'));
+
+    const answer = container.querySelector<HTMLButtonElement>('.question-answer')!;
+    expect(answer.disabled).toBe(false);
+    act(() => answer.click());
+    expect(onAnswer).toHaveBeenCalledWith({
+      answers: [{ picks: [0, 1], note: 'keep the old schema' }],
+    });
+  });
+
+  it('allows a note-only own answer and the single-question Answer button stays disabled otherwise', () => {
+    const { onAnswer } = render([
+      { prompt: 'Choose a language', multiSelect: false, options: [{ label: 'TypeScript' }] },
+    ]);
+    const answer = container.querySelector<HTMLButtonElement>('.question-answer')!;
+    expect(answer.disabled).toBe(true);
+    const panel = container.querySelector<HTMLElement>('[role="dialog"]')!;
+    act(() => panel.dispatchEvent(new KeyboardEvent('keydown', { key: '1', bubbles: true })));
+    expect(container.querySelector('.question-option')?.getAttribute('aria-checked')).toBe('true');
+    act(() => panel.dispatchEvent(new KeyboardEvent('keydown', { key: '1', bubbles: true })));
+    expect(container.querySelector('.question-option')?.getAttribute('aria-checked')).toBe('false');
+    act(() => container.querySelector<HTMLButtonElement>('.question-write-link')!.click());
+    const note = container.querySelector<HTMLTextAreaElement>('.question-note')!;
+    expect(note.placeholder).toBe('Your answer…');
+    act(() => type(note, 'Rust'));
+    expect(answer.disabled).toBe(false);
+    act(() => answer.click());
+    expect(onAnswer).toHaveBeenCalledWith({ answers: [{ picks: [], note: 'Rust' }] });
+  });
+
+  it('moves through tabs to Review and lets unanswered rows jump back', () => {
+    const specs: QuestionSpec[] = [
+      {
+        prompt: 'Which database?',
+        header: 'Database',
+        multiSelect: false,
+        options: [{ label: 'SQLite' }, { label: 'Postgres' }],
+      },
+      { prompt: 'Enable cache?', header: 'Cache', multiSelect: false, options: [{ label: 'Yes' }] },
+    ];
+    const { onAnswer } = render(specs);
+    const next = (): HTMLButtonElement => container.querySelector('.question-answer')!;
+    expect(next().textContent).toBe('Next');
+    const firstTab = container.querySelector<HTMLButtonElement>('#question-tab-0')!;
+    act(() => firstTab.focus());
+    act(() =>
+      firstTab.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowRight', bubbles: true })),
+    );
+    expect(document.activeElement).toBe(container.querySelector('#question-tab-1'));
+    act(() =>
+      container
+        .querySelector<HTMLButtonElement>('#question-tab-1')!
+        .dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowLeft', bubbles: true })),
+    );
+    expect(document.activeElement).toBe(container.querySelector('#question-tab-0'));
+    act(() => next().click());
+    expect(container.querySelector('.question-prompt')?.textContent).toBe('Enable cache?');
+    act(() => container.querySelector<HTMLButtonElement>('.question-option')!.click());
+    act(() => next().click());
+    expect(container.querySelector('[role="tab"][aria-selected="true"]')?.textContent).toBe(
+      'Review',
+    );
+    expect(container.querySelector('.question-review-unanswered')?.textContent).toBe(
+      'Not answered',
+    );
+    expect(next().disabled).toBe(true);
+    act(() => container.querySelector<HTMLButtonElement>('.question-review-row')!.click());
+    expect(container.querySelector('.question-prompt')?.textContent).toBe('Which database?');
+    act(() => container.querySelectorAll<HTMLButtonElement>('.question-option')[1]!.click());
+    act(() => container.querySelector<HTMLButtonElement>('#question-tab-review')!.click());
+    expect(next().disabled).toBe(false);
+    act(() => next().click());
+    expect(onAnswer).toHaveBeenCalledWith({
+      answers: [{ picks: [1] }, { picks: [0] }],
+    });
+  });
+
+  it('uses Enter to submit from a card field and Shift+Enter remains a newline', () => {
+    const { onAnswer } = render([{ prompt: 'Your answer?', multiSelect: false, options: [] }]);
+    const note = container.querySelector<HTMLTextAreaElement>('.question-note')!;
+    act(() => type(note, 'A written answer'));
+    act(() =>
+      note.dispatchEvent(
         new KeyboardEvent('keydown', { key: 'Enter', shiftKey: true, bubbles: true }),
       ),
     );
     expect(onAnswer).not.toHaveBeenCalled();
-
-    act(() => input.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true })));
-    expect(onAnswer).toHaveBeenCalledWith('custom reviewer');
-  });
-
-  it('leaves the options answerable after Other… opens the text box', () => {
-    const onAnswer = render();
-
-    act(() => container.querySelector<HTMLButtonElement>('.question-other')!.click());
-
-    const shown = [...container.querySelectorAll('.question-option-label')].map(
-      (el) => el.textContent,
-    );
-    expect(shown).toEqual(['Codex', 'Claude']);
-    // The link is spent once its box is open -- nothing left for it to reveal.
-    expect(container.querySelector('.question-other')).toBeNull();
-
-    act(() => container.querySelectorAll<HTMLButtonElement>('.question-option')[1]!.click());
-    expect(onAnswer).toHaveBeenCalledWith('Claude');
-  });
-
-  it('keeps number shortcuts and Escape available from the focused panel', () => {
-    const onAnswer = render();
-    const onDismiss = vi.fn();
-    act(() => {
-      root.render(
-        React.createElement(QuestionDialog, {
-          prompt: 'Which reviewer should continue?',
-          options: ['Codex', 'Claude'],
-          onAnswer,
-          onDismiss,
-        }),
-      );
-    });
-
-    act(() =>
-      container
-        .querySelector<HTMLElement>('[role="dialog"]')!
-        .dispatchEvent(new KeyboardEvent('keydown', { key: '2', bubbles: true })),
-    );
-    expect(onAnswer).toHaveBeenCalledWith('Claude');
-
-    act(() =>
-      container
-        .querySelector<HTMLElement>('[role="dialog"]')!
-        .dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true })),
-    );
-    expect(onDismiss).toHaveBeenCalledOnce();
-  });
-});
-
-describe('QuestionDialog with sub-questions', () => {
-  const onAnswer = vi.fn();
-
-  function renderGroups(): void {
-    act(() => {
-      root.render(
-        React.createElement(QuestionDialog, {
-          prompt: 'Two decisions:',
-          questions: [
-            { prompt: 'Version', options: ['bump', 'keep'] },
-            { prompt: 'Install', options: ['open', 'skip'] },
-          ],
-          onAnswer,
-          onDismiss: vi.fn(),
-        }),
-      );
-    });
-  }
-
-  beforeEach(() => onAnswer.mockClear());
-
-  it('holds the answer until every sub-question has a pick', () => {
-    renderGroups();
-    const buttons = [...container.querySelectorAll<HTMLButtonElement>('.question-option')];
-    const answer = (): HTMLButtonElement =>
-      container.querySelector<HTMLButtonElement>('.confirm-btn-approve')!;
-
-    // A click selects here rather than answering: a partial set would reach the
-    // model as a decision that was never made.
-    act(() => buttons[1]!.click());
-    expect(onAnswer).not.toHaveBeenCalled();
-    expect(answer().disabled).toBe(true);
-    expect(buttons[1]!.className).toContain('question-option-selected');
-
-    act(() => buttons[2]!.click());
-    expect(answer().disabled).toBe(false);
-    act(() => answer().click());
-    expect(onAnswer).toHaveBeenCalledWith('Version: keep\nInstall: open');
-  });
-
-  it('lets a typed answer override the picks', () => {
-    renderGroups();
-    const buttons = [...container.querySelectorAll<HTMLButtonElement>('.question-option')];
-    act(() => buttons[0]!.click());
-    act(() => buttons[2]!.click());
-    act(() => container.querySelector<HTMLButtonElement>('.question-other')!.click());
-
-    const input = container.querySelector<HTMLTextAreaElement>('.question-input')!;
-    act(() => type(input, 'neither — ship it unversioned'));
-    act(() => container.querySelector<HTMLButtonElement>('.confirm-btn-approve')!.click());
-    expect(onAnswer).toHaveBeenCalledWith('neither — ship it unversioned');
-  });
-
-  it('uses numbered shortcuts to fill the next unanswered group', () => {
-    renderGroups();
-    const panel = container.querySelector<HTMLElement>('[role="dialog"]')!;
-    const press = (key: string): void =>
-      panel.dispatchEvent(new KeyboardEvent('keydown', { key, bubbles: true }));
-
-    act(() => press('2'));
-    act(() => press('1'));
-    act(() => container.querySelector<HTMLButtonElement>('.confirm-btn-approve')!.click());
-
-    expect(onAnswer).toHaveBeenCalledWith('Version: keep\nInstall: open');
+    act(() => note.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true })));
+    expect(onAnswer).toHaveBeenCalledWith({ answers: [{ picks: [], note: 'A written answer' }] });
   });
 });

@@ -222,9 +222,27 @@ export class TelegramOutbound {
     messageId: string,
     options?: { signal?: AbortSignal },
   ): Promise<void> {
-    await this.call(
-      'editMessageReplyMarkup',
-      { chat_id: chatId, message_id: Number(messageId), reply_markup: { inline_keyboard: [] } },
+    await this.editReplyMarkup(chatId, messageId, { inline_keyboard: [] }, options?.signal);
+  }
+
+  async replaceInlineKeyboard(
+    chatId: string,
+    messageId: string,
+    buttons: readonly RemoteContactButton[][],
+    options?: { signal?: AbortSignal },
+  ): Promise<void> {
+    const inlineKeyboard = buttons.map((row) =>
+      row.map((button) => {
+        if (Buffer.byteLength(button.callbackData, 'utf8') > TELEGRAM_CALLBACK_DATA_LIMIT_BYTES) {
+          throw new Error('Forge Telegram callback identifier exceeds the Bot API limit.');
+        }
+        return { text: button.text, callback_data: button.callbackData };
+      }),
+    );
+    await this.editReplyMarkup(
+      chatId,
+      messageId,
+      { inline_keyboard: inlineKeyboard },
       options?.signal,
     );
   }
@@ -267,13 +285,10 @@ export class TelegramOutbound {
     const failures: string[] = [];
     for (const messageId of messageIds) {
       try {
-        await this.call(
-          'editMessageReplyMarkup',
-          {
-            chat_id: chatId,
-            message_id: Number(messageId),
-            reply_markup: { inline_keyboard: [[resolvedApprovalButton(approved)]] },
-          },
+        await this.editReplyMarkup(
+          chatId,
+          messageId,
+          { inline_keyboard: [[resolvedApprovalButton(approved)]] },
           options?.signal,
         );
       } catch (err) {
@@ -324,11 +339,23 @@ export class TelegramOutbound {
     const messageId = this.promptMessages.get(correlationId);
     this.promptMessages.delete(correlationId);
     if (messageId === undefined) return;
+    await this.editReplyMarkup(chatId, String(messageId), { inline_keyboard: [] }, signal).catch(
+      () => undefined,
+    );
+  }
+
+  private async editReplyMarkup(
+    chatId: string,
+    messageId: string,
+    replyMarkup: Record<string, unknown>,
+    signal?: AbortSignal,
+  ): Promise<void> {
+    // postTelegram already treats Telegram's "message is not modified" as success.
     await this.call(
       'editMessageReplyMarkup',
-      { chat_id: chatId, message_id: messageId, reply_markup: { inline_keyboard: [] } },
+      { chat_id: chatId, message_id: Number(messageId), reply_markup: replyMarkup },
       signal,
-    ).catch(() => undefined);
+    );
   }
 
   private rememberPrompt(correlationId: string, sent: unknown): void {

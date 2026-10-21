@@ -25,7 +25,7 @@ import { InputRow } from './components/InputRow';
 import { toMessageAttachments } from './components/useAttachments';
 import { ConfirmationDialog } from './components/ConfirmationDialog';
 import { QuestionDialog } from './components/QuestionDialog';
-import { useAgentDialogs } from './useAgentDialogs';
+import { selectVisibleQuestion, useAgentDialogs } from './useAgentDialogs';
 import { ChatHeader } from './components/ChatHeader';
 import { HistoryList } from './components/HistoryList';
 import { EmptyState } from './components/EmptyState';
@@ -46,7 +46,11 @@ export function App(): React.ReactElement {
 
   // A tool approval and an ask_user question: two dialogs with one shared rule,
   // which is why they live together. See useAgentDialogs.
-  const dialogs = useAgentDialogs();
+  const dialogs = useAgentDialogs(state.activeConversationId);
+  const visibleQuestion = selectVisibleQuestion(
+    dialogs.questions.values(),
+    state.activeConversationId,
+  );
   const [tokenUsed, setTokenUsed] = useState(0);
   const [tokenMax, setTokenMax] = useState(0);
   const [workspace, setWorkspace] = useState<WorkspaceContextInfo | undefined>(undefined);
@@ -389,7 +393,7 @@ export function App(): React.ReactElement {
         <div id="composer-area">
           <div
             className="composer-slot"
-            hidden={Boolean(dialogs.question || dialogs.confirmRequest)}
+            hidden={Boolean(visibleQuestion || dialogs.confirmRequest)}
           >
             <InputRow
               onSend={handleComposerSend}
@@ -420,14 +424,15 @@ export function App(): React.ReactElement {
               onApprove={dialogs.approveConfirm}
               onDeny={dialogs.denyConfirm}
             />
-          ) : dialogs.question ? (
+          ) : visibleQuestion ? (
             <QuestionDialog
-              prompt={dialogs.question.prompt}
-              placeholder={dialogs.question.placeholder}
-              options={dialogs.question.options}
-              questions={dialogs.question.questions}
-              onAnswer={dialogs.answerQuestion}
-              onDismiss={dialogs.dismissQuestion}
+              key={visibleQuestion.id}
+              question={visibleQuestion}
+              draft={dialogs.drafts.get(visibleQuestion.id)!}
+              autoFocus={visibleQuestion.focusOnOpen}
+              onDraftChange={(draft) => dialogs.updateQuestionDraft(visibleQuestion.id, draft)}
+              onAnswer={(answer) => dialogs.answerQuestion(visibleQuestion.id, answer)}
+              onSkip={() => dialogs.skipQuestion(visibleQuestion.id)}
             />
           ) : null}
         </div>

@@ -119,6 +119,7 @@ async function liveTurn(
   const errors: string[] = [];
   let progressListener: ((event: AgentProgressEvent) => void) | undefined;
   const answerQuestion = vi.fn(() => true);
+  const answerQuestionStructured = vi.fn(() => true);
   let ask!: (event: UserQuestionRequestEvent) => void;
   let askApproval!: (event: ToolApprovalRequestEvent) => void;
   let resolveApprovalSink!: (event: ToolApprovalResolvedEvent) => void;
@@ -174,6 +175,8 @@ async function liveTurn(
       return { dispose: () => undefined };
     },
     answerQuestion,
+    answerQuestionStructured,
+    skipQuestion: vi.fn(() => true),
     status: () => ({
       activeConversationId: 'c1',
       conversations: [],
@@ -212,6 +215,7 @@ async function liveTurn(
       ),
     askQuestion: (event) => ask(event),
     answerQuestion,
+    answerQuestionStructured,
     askApproval: (event) => askApproval(event),
     errors,
   };
@@ -568,6 +572,13 @@ describe('remote stop_action through the controller', () => {
       id: 'q1',
       prompt: 'Which build?',
       options: ['debug', 'release'],
+      specs: [
+        {
+          prompt: 'Which build?',
+          multiSelect: false,
+          options: [{ label: 'debug' }, { label: 'release' }],
+        },
+      ],
       conversationId: 'c1',
     });
     await vi.waitFor(() => expect(f.channel.inlineKeyboards).toHaveLength(1));
@@ -582,7 +593,18 @@ describe('remote stop_action through the controller', () => {
     await expect(
       f.channel.emit({ ...base, kind: 'text', providerMessageId: 'answer-1', text: 'debug' }),
     ).resolves.toEqual({ kind: 'handled' });
-    expect(f.answerQuestion).toHaveBeenCalledWith('q1', 'debug');
+    expect(f.answerQuestion).not.toHaveBeenCalled();
+    await expect(
+      f.channel.emit({
+        ...base,
+        kind: 'question_action',
+        providerMessageId: 'send-1',
+        questionId: 'q1',
+        action: 'next',
+        messageId: 'keyboard-1',
+      }),
+    ).resolves.toEqual({ kind: 'handled' });
+    expect(f.answerQuestionStructured).toHaveBeenCalledWith('q1', { answers: [{ picks: [0] }] });
 
     f.release();
     await f.drainDone();
