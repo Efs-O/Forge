@@ -72,7 +72,10 @@ const SdcppImageBackendSchema = z.object({
    * is the pre-0.16 behaviour on every card. Raise it when a multi-reference
    * render drops the prefix cache (`insufficient memory for prefix caching`).
    * The cache fits only when the render is small enough; on the RTX 3060,
-   * 864x1536 at 10.25 GiB keeps the cache and decodes untiled.
+   * 864x1536 at 10.25 GiB keeps the cache. It does not keep the VAE decode
+   * whole: from the second render on that runs out of device memory whatever
+   * this is set to, which `--vae-tiling --vae-relative-tile-size 2` in
+   * `extra_args` avoids (AI_SETUP.md step 10).
    */
   max_vram_gib: z.number().min(1).max(64).optional(),
   /**

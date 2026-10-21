@@ -171,7 +171,10 @@ current Forge chat, or creates a Forge-owned session when none is linked — see
 [the agent mesh](#the-agent-mesh).
 
 **Images.** `generate_image` appears only when an `image_generation:` backend
-is configured; every call asks for approval because each image is billed.
+is configured. A cloud backend asks for approval on every call because each
+image is billed; a local stable-diffusion.cpp backend is free per image and asks
+once before it occupies the GPU (`confirm_on_start`). Setup for both is in
+[AI_SETUP.md](AI_SETUP.md), step 10.
 
 **Editor context.** `get_editor_context` lets the agent read the file and
 selection you are actually looking at; `replace_selection` and `show_diff`

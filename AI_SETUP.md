@@ -234,6 +234,93 @@ The user stores a Tavily or Brave key with **Forge: Set Search API Key**
 (`forge.setSearchApiKey`). You add the `search:` block (see
 `config.example.yaml`) and set `permissions.net.search: true`.
 
+## Step 10 — Optional: image generation
+
+`generate_image` appears only when an `image_generation:` block exists, and it
+needs `permissions.net.fetch: true` (a local backend is fetched over localhost
+too). Ask which route the user wants.
+
+**Cloud (xAI Grok Imagine, billed per image).** The user stores an xAI key with
+**Forge: Set Cloud Provider Token** (`forge.setCloudToken`). You copy the
+`image_generation:` block with the `grok-imagine` backend from
+`config.example.yaml`. Every call asks for approval.
+
+**Local (stable-diffusion.cpp + Qwen-Image-2.1 Turbo, free per image).** Forge
+does not ship the image server or the models; it starts `sd-server` when the
+first image is asked for and stops it after `idle_timeout_ms`. Tested on
+Windows with an RTX 3060 12 GB. It needs **one NVIDIA GPU with about 12 GB the
+chat model is not using**. On a smaller or shared card, tell the user it is
+untested and expect it to fail or to fall back to slow tiling.
+
+1. **The server.** The tested build is release `master-929-3f8527a` from
+   `https://github.com/leejet/stable-diffusion.cpp/releases/tag/master-929-3f8527a`.
+   Newer releases usually work; if one refuses a flag below or edits fail,
+   use 929. On Windows + NVIDIA download both and extract them into **one**
+   folder (for example `%LOCALAPPDATA%\Forge\sd.cpp-master-929\`):
+   - `sd-master-3f8527a-bin-win-cuda12-x64.zip` — `sha256:217d6dead9abd3f827fc338268555cc179234e7e6330ef21ecb1c985e19d2dc7`
+   - `cudart-sd-bin-win-cu12-x64.zip` — `sha256:fe20366827d357c00797eebb58244dddab7fd9a348d70090c3871004c320f38d`
+
+   Check each file's SHA-256 against these (the GitHub releases API reports
+   the same `digest`); stop if either differs. The release has no Linux CUDA
+   build: on Linux, build from source with `-DSD_CUDA=ON` (untested by us).
+   **Check:** `sd-server.exe --help` lists `--vae-relative-tile-size`.
+
+2. **The four model files** (about 11 GB), all from the official repos. Do not
+   substitute a fine-tuned or "abliterated" text encoder: the vision file must
+   match the text encoder, and `sd-server` exits within ~5 s when it does not.
+
+   | config key | file | from |
+   |---|---|---|
+   | `diffusion_model` | `qwen-image-2.1-turbo-Q4_K_M.gguf` (4.2 GB) | `https://huggingface.co/unsloth/Qwen-Image-2.1-Turbo-GGUF` |
+   | `text_encoder` | `Qwen3VL-8B-Instruct-Q4_K_M.gguf` (5.0 GB) | `https://huggingface.co/Qwen/Qwen3-VL-8B-Instruct-GGUF` |
+   | `vision_encoder` | `mmproj-Qwen3VL-8B-Instruct-F16.gguf` (1.2 GB) | same Qwen repo |
+   | `vae` | `vae/qwen_image_2.1_vae_bf16.safetensors` (0.7 GB) | `https://huggingface.co/Comfy-Org/Qwen-Image-2.1` |
+
+   Download URL pattern: `https://huggingface.co/<repo>/resolve/main/<file>`.
+   `vision_encoder` is optional for text-to-image but required for edits
+   (`reference_paths`).
+
+3. **The config.** Copy the commented `qwen-image-local` backend from
+   `config.example.yaml` into `image_generation.backends`, fill in the five
+   absolute paths, and set `image_generation.default` to it. Then:
+   - `cuda_device`: the GPU's index in `nvidia-smi` (PCI-bus order), not the
+     CUDA runtime's order. Pick the card the chat model is not on.
+   - `min_free_vram_mb: 11200` and `max_vram_gib: 10.25` are measured for a
+     12 GB card. Forge refuses to start the server when the card has less
+     free than `min_free_vram_mb` — if a display is plugged into that card,
+     read its free VRAM with `nvidia-smi` and set the value about 300 MB lower.
+   - Keep `steps: 8`, `cfg_scale: 1.0`, `sampler: euler` and the `--sigmas`
+     list in `extra_args`: the Turbo model is trained for exactly that 8-step
+     schedule.
+   - Keep `--vae-tiling --vae-relative-tile-size 2` in `extra_args`. Without
+     them, on a 12 GB card every image after the first runs out of memory on
+     the final decode and falls back to 55 small tiles (12-25 s instead of
+     ~7 s, same picture). A server log line `VAE decode ran out of memory;
+     retrying with spatial tiling` means these flags are missing; it is slow,
+     not broken.
+   - `idle_timeout_ms` must be at least `request_timeout_ms + 60000`.
+   - `confirm_on_start: true` asks once before the GPU is occupied;
+     `confirm_each: false` because local images cost nothing.
+
+**Check:** after **Forge: Validate Config** and a window reload, the user asks
+in the Forge sidebar:
+
+> Generate a landscape image with seed 42: A wide green field in the
+> countryside at sunrise, soft morning mist over the grass, wildflowers in the
+> foreground, a single oak tree on a gentle hill, warm golden light, a dramatic
+> sky full of big white cumulus clouds lit pink and gold by the rising sun,
+> photorealistic landscape photograph
+
+On an RTX 3060 it takes 40-45 s once the model files are in the disk cache,
+and up to ~70 s the very first time; an edit with a reference picture takes
+about 65 s. With the official files it should look like
+[assets/readme/image-sample-green-field.jpg](assets/readme/image-sample-green-field.jpg)
+(the same seed on a different GPU or build gives a similar, not identical,
+picture). If the server fails to start, the user runs **Forge: Show Backend
+Console** (`forge.showBackendConsole`) and pastes the `sd-server` output to you.
+Common causes: CUDA runtime DLLs not next to `sd-server.exe`, a mismatched
+vision file, a wrong `cuda_device`, or too little free VRAM.
+
 ## Finish
 
 Report to the user:

@@ -9,6 +9,7 @@ import {
   ACCEPTED_REFERENCE_FORMATS,
   DIMENSION_MULTIPLE,
   MAX_REFERENCE_INPUT_BYTES,
+  REFERENCE_SHAPE_TOLERANCE,
   computeReferenceScale,
   describePreparedReferences,
   prepareReferences,
@@ -120,6 +121,31 @@ describe('reference downscale rule (A7, A27)', () => {
     expect(height % DIMENSION_MULTIPLE).toBe(0);
     // Aspect kept: 1253/1280 is 0.979, so the short edge lands just under.
     expect(height).toBeLessThan(width);
+  });
+
+  it('keeps the source shape instead of flooring each edge on its own', () => {
+    // [source w, source h, expected w, expected h]. Flooring both edges gave
+    // 768x416 for 1536x864 (3.8 % off); build 929 then stretched that reference
+    // to 1568x832 for a 1536x864 canvas, while 736x416 lands on 1536x864 exactly.
+    const cases: Array<[number, number, number, number]> = [
+      [864, 1536, 416, 736],
+      [1536, 864, 736, 416],
+      [1920, 1080, 736, 416],
+      [916, 564, 672, 416],
+      [4032, 3024, 768, 576],
+      [1024, 1536, 512, 768],
+    ];
+    for (const [w, h, ew, eh] of cases) {
+      const scale = computeReferenceScale(w, h, 768);
+      expect(scale, `${w}x${h}`).toEqual({ width: ew, height: eh });
+      const error = Math.abs(ew / eh / (w / h) - 1);
+      expect(error, `${w}x${h}`).toBeLessThanOrEqual(REFERENCE_SHAPE_TOLERANCE);
+    }
+  });
+
+  it('takes the closest shape available when none on the grid is within 1 %', () => {
+    // 1253/1280 sits between grid ratios at every long edge down to 576.
+    expect(computeReferenceScale(1280, 1253, 768)).toEqual({ width: 768, height: 736 });
   });
 
   it('leaves a source that already fits untouched, and never upscales', () => {

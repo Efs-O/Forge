@@ -149,6 +149,9 @@ describe('sdcpp size mapping', () => {
       '--offload-to-cpu',
       '--sigmas',
       '1.0,0.978453,0.95418,0.926626,0.89508,0.845148,0.704534,0.414568,0.0',
+      '--vae-tiling',
+      '--vae-relative-tile-size',
+      '2',
     ]);
     for (const size of Object.values(local.sizes ?? {})) {
       expect(size.width % 16).toBe(0);

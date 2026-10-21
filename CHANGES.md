@@ -1,5 +1,12 @@
 # Forge — Recent Changes
 
+## 0.17.62
+
+- A reference picture for a local image edit keeps its shape when Forge shrinks it. Forge used to round each side down to a multiple of 32 on its own, so a 1536×864 picture was sent as 768×416, 3.8 % squashed. stable-diffusion.cpp then stretched it to 1568×832 for a 1536×864 image. Forge now picks the largest size on the 32-pixel grid within 1 % of the original shape: 1536×864 is sent as 736×416, which the server scales to exactly 1536×864.
+- AI_SETUP.md has a new step 10 for image generation, so a coding agent can set it up. The cloud route uses an xAI key. The local route lists the tested stable-diffusion.cpp release (master-929-3f8527a) with checksums, the four official model files (including the official Qwen3-VL text encoder), the GPU settings, and a sample prompt with its expected picture.
+- The local image backend in `config.example.yaml` now includes the vision file needed for edits and two new `extra_args`: `--vae-tiling --vae-relative-tile-size 2`. On a 12 GB card, every image after the first used to run out of memory in its last step and retry in 55 small tiles. With the flags, that step takes about 7 s instead of 12–25 s, peak VRAM drops from 11.2 GB to 5.8 GB, and the picture is the same.
+- The README no longer says every image is billed. That is true only for cloud backends; a local backend asks once before it occupies the GPU.
+
 ## 0.17.61
 
 - The message box no longer lets your text run under its buttons. The paperclip, Remote, Clanker mode, model and Send now sit in their own strip below the text, with a line between them. Before, the strip was laid over the text field, so once a long draft scrolled, lines passed behind the buttons and the line you were typing could be cut off at the bottom.

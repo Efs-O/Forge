@@ -33,9 +33,11 @@ export const ACCEPTED_REFERENCE_FORMATS = ['PNG', 'JPEG', 'GIF', 'BMP', 'WEBP'] 
 export const MAX_REFERENCE_INPUT_BYTES = 24 * 1024 * 1024;
 
 /**
- * sd.cpp rejects latent dimensions that are not a multiple of this. Note this
- * differs from `videoExtract.computeScale`'s even-dimension rule: mod-32
- * rounding is new to image editing and has its own tests.
+ * sd.cpp requires Qwen Image 2.1 reference dimensions to be a multiple of this
+ * (build 929: "reference dimensions must be multiples of 32"; the vision tower
+ * also asserts each edge divides by its patch grid). Note this differs from
+ * `videoExtract.computeScale`'s even-dimension rule: mod-32 rounding is new to
+ * image editing and has its own tests.
  */
 export const DIMENSION_MULTIPLE = 32;
 
@@ -85,8 +87,20 @@ export interface PrepareReferencesOptions {
   onSpawn?: (argv: string[]) => void;
 }
 
+/** A downscaled reference within this of the source's shape is accepted as is. */
+export const REFERENCE_SHAPE_TOLERANCE = 0.01;
+
+/** The long edge may shrink to this share of the cap while searching for a true shape. */
+const MIN_LONG_EDGE_SHARE = 0.75;
+
 /**
- * Longest-edge fit rounded so both dimensions satisfy sd.cpp's mod-32 rule.
+ * Longest-edge fit with both dimensions on sd.cpp's mod-32 grid, keeping the
+ * source's shape. Flooring each edge on its own squashed a 1536x864 picture to
+ * 768x416 (3.8 % off), and build 929 then stretched that reference to
+ * 1568x832 for a 1536x864 canvas. So this walks the long edge down one
+ * multiple at a time, rounds the short edge to the nearest multiple, and takes
+ * the first pair within `REFERENCE_SHAPE_TOLERANCE` (1536x864 -> 736x416).
+ * Below `MIN_LONG_EDGE_SHARE` of the cap it stops and takes the closest pair seen.
  * Returns undefined when the source already fits, exactly like
  * `computeScale`, so the caller can tell "unchanged" from "rescaled".
  */
@@ -97,16 +111,22 @@ export function computeReferenceScale(
 ): { width: number; height: number } | undefined {
   const longest = Math.max(width, height);
   if (longest <= maxEdgePx) return undefined;
-  const ratio = maxEdgePx / longest;
-  // Floor to the multiple, then clamp up: a 0 or sub-32 dimension is rejected by
-  // the engine. Flooring can never push an edge above `maxEdgePx`, and the ratio
-  // is < 1 here, so the result never upscales either.
-  const fit = (value: number): number =>
-    Math.max(
-      DIMENSION_MULTIPLE,
-      Math.floor((value * ratio) / DIMENSION_MULTIPLE) * DIMENSION_MULTIPLE,
-    );
-  return { width: fit(width), height: fit(height) };
+  const shape = Math.min(width, height) / longest;
+  const step = DIMENSION_MULTIPLE;
+  // The cap is below the source's long edge here, so no candidate upscales it.
+  const top = Math.max(step, Math.floor(maxEdgePx / step) * step);
+  const bottom = Math.max(step, Math.ceil((maxEdgePx * MIN_LONG_EDGE_SHARE) / step) * step);
+  let best = { long: top, short: step, error: Number.POSITIVE_INFINITY };
+  for (let long = top; long >= bottom; long -= step) {
+    // A 0 or sub-32 edge is rejected by the engine, so the short edge clamps up.
+    const short = Math.max(step, Math.round((long * shape) / step) * step);
+    const error = Math.abs(short / long / shape - 1);
+    if (error < best.error) best = { long, short, error };
+    if (error <= REFERENCE_SHAPE_TOLERANCE) break;
+  }
+  return width >= height
+    ? { width: best.long, height: best.short }
+    : { width: best.short, height: best.long };
 }
 
 /**

@@ -974,12 +974,15 @@ image_generation:
     # voice.compute.device. idle_timeout_ms must be at least
     # request_timeout_ms + 60000. `size` selects a shape; this backend's
     # optional `sizes` table sets its pixel dimensions.
+    # Tested with stable-diffusion.cpp release master-929-3f8527a and Qwen-Image-2.1
+    # Turbo; AI_SETUP.md step 10 lists the official download for every file.
     # - name: qwen-image-local
     #   provider: sdcpp
     #   binary: "path/to/sd-server.exe"
-    #   diffusion_model: "path/to/diffusion-model.gguf"
-    #   text_encoder: "path/to/text-encoder.gguf"
-    #   vae: "path/to/vae.safetensors"
+    #   diffusion_model: "path/to/qwen-image-2.1-turbo-Q4_K_M.gguf"
+    #   text_encoder: "path/to/Qwen3VL-8B-Instruct-Q4_K_M.gguf"
+    #   vision_encoder: "path/to/mmproj-Qwen3VL-8B-Instruct-F16.gguf"  # needed for reference_paths edits
+    #   vae: "path/to/qwen_image_2.1_vae_bf16.safetensors"
     #   cuda_device: 2
     #   text_encoder_on_cpu: false
     #   port: 8093
@@ -992,7 +995,11 @@ image_generation:
     #     square: { width: 1152, height: 1152 }
     #     portrait: { width: 864, height: 1536 }
     #     landscape: { width: 1536, height: 864 }
-    #   extra_args: ["--offload-to-cpu", "--sigmas", "1.0,0.978453,0.95418,0.926626,0.89508,0.845148,0.704534,0.414568,0.0"] # 8-step Turbo needs its own sigma schedule; startup flag is enough, no request field
+    #   # 8-step Turbo needs its own sigma schedule; startup flag is enough, no request field.
+    #   # --vae-tiling + --vae-relative-tile-size 2 decode in 2 big tiles: on a 12 GB card the
+    #   # whole-frame decode runs out of memory from the second render on and falls back to
+    #   # 55 small tiles (12-15 s); 2 tiles take ~7 s every time with the same picture.
+    #   extra_args: ["--offload-to-cpu", "--sigmas", "1.0,0.978453,0.95418,0.926626,0.89508,0.845148,0.704534,0.414568,0.0", "--vae-tiling", "--vae-relative-tile-size", "2"]
     #   confirm_on_start: true    # ask once before the GPU is occupied
     #   confirm_each: false       # free per image, so no per-call prompt
   # upscale_image (ESRGAN x4, one sd-cli run per call; frees its VRAM on exit).
