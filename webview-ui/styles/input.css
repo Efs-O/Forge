@@ -4,7 +4,9 @@
   display: flex;
   flex-direction: column;
   gap: 5px;
-  padding: 6px 8px 10px;
+  /* The side inset keeps the composer visibly narrower than the transcript
+     above it, which runs the panel's full width. */
+  padding: 6px 24px 10px;
   border-top: 1px solid var(--vscode-sideBarSectionHeader-border, #333);
   flex-shrink: 0;
 }
@@ -42,39 +44,45 @@
   gap: 6px;
 }
 
-/* Positioning context for the strip of controls inside the field's box. */
+/*
+ * The field's box: the text on top, a rule, then the strip of controls. The
+ * border and background live here, not on the textarea, so the strip sits
+ * inside the same box. No overflow clip: the model list opens upward out of it.
+ */
 #prompt-shell {
-  position: relative;
   display: flex;
+  flex-direction: column;
+  background: var(--vscode-input-background);
+  border: 1px solid var(--vscode-input-border, #555);
+  border-radius: var(--forge-radius-md);
+  transition: border-color 0.15s ease;
+}
+#prompt-shell:focus-within {
+  border-color: var(--forge-accent);
 }
 
 /*
  * Starts at two lines and grows with the text, up to eight, then scrolls.
- * `field-sizing: content` does the growing - no measuring script. The 40px in
- * both bounds is the 8px top padding, the 30px strip and the 2px border.
+ * `field-sizing: content` does the growing - no measuring script. The 16px in
+ * both bounds is the 8px top and bottom padding.
  */
 #prompt {
   width: 100%;
   resize: none;
   field-sizing: content;
-  background: var(--vscode-input-background);
+  background: transparent;
   color: var(--vscode-input-foreground);
-  border: 1px solid var(--vscode-input-border, #555);
-  /* Bottom padding is the control strip's lane. A textarea honours it after
-     the last line, so a prompt long enough to scroll still stops above the
-     buttons rather than running behind them. */
-  padding: 8px 10px 30px;
+  border: none;
+  padding: 8px 10px;
   font-family: inherit;
   font-size: inherit;
   line-height: 1.45;
-  min-height: calc(2 * 1.45em + 40px);
-  max-height: calc(8 * 1.45em + 40px);
-  border-radius: var(--forge-radius-md);
-  transition: border-color 0.15s ease;
+  min-height: calc(2 * 1.45em + 16px);
+  max-height: calc(8 * 1.45em + 16px);
+  border-radius: var(--forge-radius-md) var(--forge-radius-md) 0 0;
 }
 #prompt:focus {
   outline: none;
-  border-color: var(--forge-accent);
 }
 #prompt:disabled {
   opacity: 0.5;
@@ -84,28 +92,17 @@
  * Paperclip, remote chip and Clanker toggle on the left, the model in the
  * centre, the action button on the right. The two side columns are equal
  * fractions of what the model leaves, which is what keeps it on the centre
- * line. The strip itself lets clicks through to the field; only its controls
- * take them.
+ * line. It is a row of its own under the text, divided from it by a rule -
+ * laid over the textarea instead, a scrolled prompt ran behind the buttons.
  */
 #prompt-lane {
-  position: absolute;
-  left: 5px;
-  right: 5px;
-  bottom: 5px;
-  height: 24px;
+  height: 32px;
+  padding: 0 5px;
+  border-top: 1px solid var(--forge-border);
   display: grid;
   grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr);
   align-items: center;
   gap: 6px;
-  pointer-events: none;
-}
-/* The model list is the lane's scroll container. Left at `none` it let the
-   wheel, its headers and its scrollbar fall through to the transcript behind,
-   so only its buttons were reachable and the list would not scroll. */
-#prompt-lane button,
-#prompt-lane #remote-chip,
-#prompt-lane .ms-panel {
-  pointer-events: auto;
 }
 .lane-start,
 .lane-end {
@@ -293,14 +290,14 @@
  * So it arms the field instead. The thing you are about to type into is the
  * thing whose behaviour changed; off, only the dim toggle in the strip shows.
  */
-#prompt.clanker-armed {
+#prompt-shell.clanker-armed {
   border-color: color-mix(in srgb, var(--forge-clanker) 55%, transparent);
   background: color-mix(in srgb, var(--forge-clanker) 7%, var(--vscode-input-background));
 }
 
 /* Focus is the one moment the field should assert itself, so the border comes
    up to full strength there and nowhere else. */
-#prompt.clanker-armed:focus {
+#prompt-shell.clanker-armed:focus-within {
   border-color: var(--forge-clanker);
 }
 

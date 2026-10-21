@@ -62,12 +62,12 @@ function omit(record: Record<string, string>, key: string): Record<string, strin
 
 const SendIcon = (): React.ReactElement => (
   <svg
-    width="13"
-    height="13"
+    width="16"
+    height="16"
     viewBox="0 0 16 16"
     fill="none"
     stroke="currentColor"
-    strokeWidth="1.8"
+    strokeWidth="1.9"
     strokeLinecap="round"
     strokeLinejoin="round"
     aria-hidden="true"
@@ -393,14 +393,13 @@ export function InputRow({
 
       <div id="prompt-area">
         {/* Everything that acts on the message being composed sits inside the
-            field's own box, in a strip along its bottom edge. The field
-            reserves the strip with its bottom padding, so a full prompt
-            scrolls above the buttons instead of under them. */}
-        <div id="prompt-shell">
+            field's own box, in a strip below the text with a rule between
+            them. The strip is its own row, not laid over the textarea, so a
+            prompt long enough to scroll can never run under the buttons. */}
+        <div id="prompt-shell" className={clankerMode ? 'clanker-armed' : undefined}>
           <textarea
             ref={textareaRef}
             id="prompt"
-            className={clankerMode ? 'clanker-armed' : undefined}
             value={text}
             placeholder={placeholder}
             onChange={handleTextChange}

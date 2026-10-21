@@ -1,5 +1,10 @@
 # Forge — Recent Changes
 
+## 0.17.61
+
+- The message box no longer lets your text run under its buttons. The paperclip, Remote, Clanker mode, model and Send now sit in their own strip below the text, with a line between them. Before, the strip was laid over the text field, so once a long draft scrolled, lines passed behind the buttons and the line you were typing could be cut off at the bottom.
+- The message box sits 24 px in from each side of the panel instead of 8 px, so it is narrower than the chat above it. The Send arrow is a little bigger.
+
 ## 0.17.60
 
 - `ask_user` options can carry `recommended: true`. The sidebar card shows a green "Recommended" tag on that option, Telegram buttons and the plain-text question read "Label (Recommended)", and the VS Code quick pick shows "Recommended" beside it. Nothing is preselected, and choosing it returns the bare label. The agent is told to list the recommended option first and put the reason in its description, instead of writing "recommended" into the label in a different form each time. A single-select question can recommend one option; a multi-select question can recommend several.
