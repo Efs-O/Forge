@@ -143,6 +143,16 @@ describe('update_plan', () => {
 });
 
 describe('renderPlan', () => {
+  it('keeps the schema caps at 500 characters per item and 20 items', () => {
+    expect(PLAN_ITEM_MAX_CHARS).toBe(500);
+    expect(PLAN_MAX_ITEMS).toBe(20);
+    const items = Array.from({ length: PLAN_MAX_ITEMS }, (_, index) => ({
+      text: `${index}`.padEnd(PLAN_ITEM_MAX_CHARS, 'x'),
+      status: 'pending' as const,
+    }));
+    expect(renderPlan(items)).toContain(items[19]!.text);
+  });
+
   it('keeps the largest valid plan whole through turn-context injection', () => {
     const items: PlanItem[] = Array.from({ length: PLAN_MAX_ITEMS }, (_, index) => {
       const prefix = `item-${index + 1} `;

@@ -32,6 +32,8 @@ describe('loss-aware tool-result context', () => {
 
     expect(result.fits).toBe(true);
     expect(result.excerptedToolCallIds).toEqual(['large']);
+    expect(result.trimmedUsed).toBe(result.used);
+    expect(result.trimmedUsed).toBeLessThan(result.rawUsed);
     expect(messages[2]?.content).toBe(raw);
     expect(result.messages[2]?.content).not.toBe(raw);
     expect(result.messages[2]?.content).toContain('START FACT');
@@ -43,6 +45,7 @@ describe('loss-aware tool-result context', () => {
     const messages: ChatMessage[] = [{ role: 'user', content: 'small request' }];
     const result = prepareToolResultContext({ messages, toolTokens: 0, model });
     expect(result.messages).toBe(messages);
+    expect(result.trimmedUsed).toBe(result.rawUsed);
     expect(result.excerptedToolCallIds).toEqual([]);
   });
 });

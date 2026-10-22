@@ -386,6 +386,7 @@ describe('reported prompt anchors', () => {
     expect(createOutputBudgetTracker(state, model).getOutputRoom(messages, tools)).toEqual({
       outputRoom: 45_984,
       extraMarginTokens: 16,
+      used: 154_016,
     });
     expect(
       createOutputBudgetTracker({}, model).getOutputRoom(messages, tools).extraMarginTokens,
@@ -399,6 +400,7 @@ describe('reported prompt anchors', () => {
     expect(
       createOutputBudgetTracker({}, unknown).getOutputRoom(messages, []).outputRoom,
     ).toBeUndefined();
+    expect(createOutputBudgetTracker({}, unknown).getOutputRoom(messages, []).used).toBeUndefined();
   });
 });
 

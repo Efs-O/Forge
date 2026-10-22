@@ -130,6 +130,28 @@ describe('ContextBudgetPublisher reports measured context only', () => {
     const conv = conversation({ last_input_tokens: 100, last_output_tokens: 0 });
     expect(budgetOf(publish(conv, { getConfig: parallel })).max).toBe(8192);
   });
+
+  it('publishes the compaction threshold only when auto_compact is enabled', () => {
+    const conv = conversation({ last_input_tokens: 12_000, last_output_tokens: 345 });
+    const enabledConfig = {
+      ...config(),
+      auto_compact: { enabled: true, at: 0.85 },
+    } as ForgeConfig;
+    const disabledConfig = {
+      ...config(),
+      auto_compact: { enabled: false, at: 0.85 },
+    } as ForgeConfig;
+    const enabled = publish(conv, { getConfig: () => enabledConfig }).find(
+      (message) => message.type === 'tokenBudget',
+    );
+    const disabled = publish(conv, { getConfig: () => disabledConfig }).find(
+      (message) => message.type === 'tokenBudget',
+    );
+
+    expect(enabled).toMatchObject({ type: 'tokenBudget', compactAt: 0.85 });
+    expect(disabled).toMatchObject({ type: 'tokenBudget' });
+    expect(disabled).not.toHaveProperty('compactAt');
+  });
 });
 
 describe('ContextBudgetPublisher thresholds', () => {

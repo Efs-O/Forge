@@ -53,6 +53,7 @@ export function App(): React.ReactElement {
   );
   const [tokenUsed, setTokenUsed] = useState(0);
   const [tokenMax, setTokenMax] = useState(0);
+  const [compactAt, setCompactAt] = useState<number | undefined>(undefined);
   const [workspace, setWorkspace] = useState<WorkspaceContextInfo | undefined>(undefined);
   const [prefillText, setPrefillText] = useState<string | null>(null);
   const [historyExpanded, setHistoryExpanded] = useState(false);
@@ -166,6 +167,7 @@ export function App(): React.ReactElement {
         case 'tokenBudget':
           setTokenUsed(msg.used);
           setTokenMax(msg.max);
+          setCompactAt(msg.compactAt);
           break;
         case 'setInput':
           clearTellPrompts(msg.conversationId);
@@ -328,7 +330,12 @@ export function App(): React.ReactElement {
   return (
     <WorkspaceUrisProvider rootUri={workspace?.rootUri} screenshotsUri={workspace?.screenshotsUri}>
       <div id="forge-root">
-        <Header tokenUsed={tokenUsed} tokenMax={tokenMax} workspace={workspace} />
+        <Header
+          tokenUsed={tokenUsed}
+          tokenMax={tokenMax}
+          compactAt={compactAt}
+          workspace={workspace}
+        />
         <aside id="chats-panel" aria-label="Forge sessions">
           {!state.sessionHydrated && (
             <span id="chats-loading" role="status">

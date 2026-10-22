@@ -77,6 +77,20 @@ export function runCompaction(
   return runCompactionWithPolicy(deps, conversationId, options, compactOnce);
 }
 
+/** Uses the shared automatic policy and streaming-safe path between tool rounds. */
+export function runMidTurnCompaction(
+  deps: CompactionDeps,
+  conversationId: string,
+  decisionTokens?: number,
+): Promise<CompactionOutcome> {
+  return runCompaction(deps, conversationId, {
+    auto: true,
+    trigger: 'auto',
+    midTurn: true,
+    ...(decisionTokens !== undefined ? { decisionTokens } : {}),
+  });
+}
+
 async function compactOnce(
   deps: CompactionDeps,
   conversationId: string,
@@ -171,7 +185,10 @@ async function compactOnce(
       windowChars: beforeChars,
       ...entry,
     });
-  logAttempt({ phase: 'start' });
+  logAttempt({
+    phase: 'start',
+    ...(options.decisionTokens !== undefined ? { decisionTokens: options.decisionTokens } : {}),
+  });
   let stage: Extract<CompactionStageResult, { kind: 'summarized' }>;
   let floorMode = false;
   let outcome: CompactionOutcome = 'failed';

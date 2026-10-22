@@ -145,6 +145,11 @@ export function applyCompactionWindow(
   return buildCompactionWindow(messages, compaction);
 }
 
+/** The transcript index where a summary-backed model window begins. */
+export function compactionWindowStart(compaction: CompactionState | undefined): number {
+  return compaction?.summary ? Math.max(0, compaction.fromIndex) : 0;
+}
+
 /**
  * The window a state would produce, built unconditionally.
  *

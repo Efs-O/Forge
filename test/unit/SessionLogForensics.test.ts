@@ -55,7 +55,7 @@ describe('session log forensics', () => {
   it('writes an invalid summary reason into the compaction_attempt row', () => {
     const logger = new SessionLogger(id, 'title', 'm1');
     const base = { attemptId: 'a1', trigger: 'auto', usedTokens: 1, maxTokens: 2 };
-    logger.logCompactionAttempt({ ...base, phase: 'start' }, 'm1');
+    logger.logCompactionAttempt({ ...base, phase: 'start', decisionTokens: 340 }, 'm1');
     logger.logCompactionAttempt(
       {
         ...base,
@@ -72,6 +72,7 @@ describe('session log forensics', () => {
     );
     const [start, finished] = rows().filter((row) => row['type'] === 'compaction_attempt');
     expect(start).not.toHaveProperty('invalid_reason');
+    expect(start).toHaveProperty('decision_tokens', 340);
     expect(finished).toMatchObject({
       invalid_reason: 'missing-sections',
       missing_sections: ['Next', 'Errors'],

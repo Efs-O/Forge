@@ -87,6 +87,7 @@ export async function runToolCallingLoop(
         outputRoom:
           serverRoom === undefined ? estimated : Math.min(serverRoom, estimated ?? serverRoom),
         extraMarginTokens: typeof budget === 'object' ? budget.extraMarginTokens : 0,
+        sentForecast: typeof budget === 'object' ? budget.used : undefined,
       };
     };
     const measure = () => {
@@ -111,11 +112,14 @@ export async function runToolCallingLoop(
       return {
         built,
         ...measureOutput(built.request),
-        ...(Array.isArray(preparedResult) ? {} : { rawUsed: preparedResult.rawUsed }),
+        ...(Array.isArray(preparedResult)
+          ? {}
+          : { rawUsed: preparedResult.rawUsed, trimmedUsed: preparedResult.trimmedUsed }),
         trimAdvanced: !Array.isArray(preparedResult) && preparedResult.trimAdvanced,
       };
     };
-    let { built, outputRoom, extraMarginTokens, rawUsed, trimAdvanced } = measure();
+    let { built, outputRoom, extraMarginTokens, rawUsed, trimmedUsed, sentForecast, trimAdvanced } =
+      measure();
     const exhaustion = (): string | undefined =>
       contextExhaustionReason({
         outputRoom,
@@ -130,14 +134,30 @@ export async function runToolCallingLoop(
     if (round - lastCompactionRound >= MID_TURN_COMPACTION_RESET_ROUNDS) midTurnCompactions = 0;
     if (options.compactMidTurn && midTurnCompactions < MAX_MID_TURN_COMPACTIONS) {
       const exhausted = forceCompaction || exhaustion() !== undefined;
-      if (await options.compactMidTurn({ exhausted, rawUsed, trimAdvanced })) {
+      if (
+        await options.compactMidTurn({
+          exhausted,
+          rawUsed,
+          trimmedUsed,
+          sentForecast,
+          trimAdvanced,
+        })
+      ) {
         midTurnCompactions++;
         lastCompactionRound = round;
         // Room changed, so a pending retry starts a fresh (thinking-off) streak.
         truncationRecoveries = Math.min(truncationRecoveries, 1);
         options.onMessagesChanged?.();
         serverRoom = undefined;
-        ({ built, outputRoom, extraMarginTokens, rawUsed, trimAdvanced } = measure());
+        ({
+          built,
+          outputRoom,
+          extraMarginTokens,
+          rawUsed,
+          trimmedUsed,
+          sentForecast,
+          trimAdvanced,
+        } = measure());
       } else if (forceCompaction) {
         throw new Error(CONTEXT_EXHAUSTED_MESSAGE);
       }

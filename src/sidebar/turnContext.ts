@@ -25,9 +25,16 @@
 
 import type { ChatMessage } from '../llm/types';
 import type { ConversationPlan } from './sessionTypes';
-import { PLAN_GUIDANCE, PLAN_RENDER_MAX_CHARS, renderPlan } from '../tools/planTools';
+import {
+  PLAN_GUIDANCE,
+  PLAN_RENDER_MAX_CHARS,
+  PLAN_UNCHANGED_NOTE,
+  renderPlan,
+} from '../tools/planTools';
 import type { UserTerminalCommand } from '../tools/TerminalCommandTracker';
 import { formatCompactionResumeNote, type CompactionState } from './compactionTypes';
+import { compactionWindowStart } from './compactionWindow';
+import { shouldUsePlanUnchangedNote } from './turnContextPlanDedup';
 
 const OPEN = '[Forge turn context, as of this message]';
 const CLOSE = '[/Forge turn context]';
@@ -55,13 +62,15 @@ export interface TurnContextState {
   compactionResume?: string | undefined;
 }
 
+type TurnContextRenderState = TurnContextState & { planUnchanged?: boolean };
+
 /**
  * Delimited so the model can tell Forge-generated state from something the
  * user typed. Deterministic in its inputs — nothing here reads the clock, or
  * the prompt would change on its own between rounds of a single turn. The date
  * arrives in the state, read once when the turn is snapshotted.
  */
-function renderTurnContext(state: TurnContextState): string | undefined {
+function renderTurnContext(state: TurnContextRenderState): string | undefined {
   const parts: string[] = [];
   if (state.currentDate) {
     parts.push(`Today's date: ${state.currentDate} (monitor_execution reports the wall clock).`);
@@ -80,7 +89,9 @@ function renderTurnContext(state: TurnContextState): string | undefined {
     // The cap is derived to fit every schema-valid plan; this slice is only a
     // backstop for corrupted session state. Guidance stays outside that bound.
     parts.push(
-      `${renderPlan(state.plan.items).slice(0, PLAN_RENDER_MAX_CHARS)}\n\n${PLAN_GUIDANCE}`,
+      state.planUnchanged
+        ? PLAN_UNCHANGED_NOTE
+        : `${renderPlan(state.plan.items).slice(0, PLAN_RENDER_MAX_CHARS)}\n\n${PLAN_GUIDANCE}`,
     );
   }
   if (parts.length === 0) return undefined;
@@ -203,8 +214,19 @@ function foldInto(messages: ChatMessage[], index: number, block: string): ChatMe
  * alone. A retry that reuses the same user message is byte-identical to the
  * first attempt.
  */
-export function freezeTurnContext(messages: ChatMessage[], state: TurnContextState): boolean {
-  const block = renderTurnContext(state);
+export function freezeTurnContext(
+  messages: ChatMessage[],
+  state: TurnContextState,
+  compaction?: CompactionState,
+): boolean {
+  const block = renderTurnContext({
+    ...state,
+    planUnchanged: shouldUsePlanUnchangedNote(
+      messages,
+      state.plan,
+      compactionWindowStart(compaction),
+    ),
+  });
   if (!block) return false;
 
   // Find the last non-midTurn user message — the turn-opening request.
@@ -228,7 +250,7 @@ export function freezeTurnContextAndConsumeResumeNote(
   compaction: CompactionState | undefined,
 ): boolean {
   const note = compaction?.resumeNote;
-  const frozen = freezeTurnContext(messages, state);
+  const frozen = freezeTurnContext(messages, state, compaction);
   if (frozen && note && state.compactionResume === formatCompactionResumeNote(note) && compaction) {
     delete compaction.resumeNote;
   }

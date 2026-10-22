@@ -305,6 +305,8 @@ export interface OutputRoomBudget {
   /** Undefined only for an unknown window; zero means exhausted. */
   outputRoom: number | undefined;
   extraMarginTokens: number;
+  /** Anchored and scaled estimate of the request being sent. */
+  used: number | undefined;
 }
 
 export function snapshotPromptRequest(request: ChatCompletionRequest): PromptRequestSnapshot {
@@ -366,6 +368,7 @@ export function createOutputBudgetTracker(
       return {
         outputRoom: budget.max > 0 ? budget.outputRoom : undefined,
         extraMarginTokens: budget.extraMarginTokens,
+        used: budget.max > 0 ? budget.used : undefined,
       };
     },
   };

@@ -68,6 +68,17 @@ body {
   background: var(--vscode-editor-inactiveSelectionBackground, #3a3a3a);
   border-radius: 2px;
   overflow: hidden;
+  position: relative;
+}
+
+/* Auto-compact threshold; `left` is set inline from `compactAt`. */
+#token-budget-compact-at {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  width: 1px;
+  background: var(--vscode-foreground);
+  opacity: 0.6;
 }
 
 #token-budget-bar-fill {

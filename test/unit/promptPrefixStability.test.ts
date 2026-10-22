@@ -16,14 +16,19 @@
  */
 
 import { describe, expect, it } from 'vitest';
-import { injectTurnContext, freezeTurnContext } from '../../src/sidebar/turnContext';
+import {
+  injectTurnContext,
+  freezeTurnContext,
+  freezeTurnContextAndConsumeResumeNote,
+} from '../../src/sidebar/turnContext';
+import { expandOrphanPlanMarkers } from '../../src/sidebar/turnContextPlanDedup';
 import { slimPersistMessages, chatMessagesFromSlim } from '../../src/sidebar/sessionTypes';
-import { PLAN_GUIDANCE, renderPlan } from '../../src/tools/planTools';
+import { PLAN_GUIDANCE, PLAN_UNCHANGED_NOTE, renderPlan } from '../../src/tools/planTools';
 import { annotateRereads } from '../../src/agent/staleReadSupersede';
 import { nudgeTruncatedResults } from '../../src/agent/truncatedResultNudge';
 import { stampToolResultClocks } from '../../src/agent/toolResultClock';
 import { prepareToolResultContext } from '../../src/agent/toolResultContext';
-import { applyCompactionWindow } from '../../src/sidebar/compactionWindow';
+import { applyCompactionWindow, compactionWindowStart } from '../../src/sidebar/compactionWindow';
 import { ageOutImageParts } from '../../src/sidebar/imageParts';
 import { injectSystemPrompt } from '../../src/llm/SystemPromptInjector';
 import type { ChatMessage } from '../../src/llm/types';
@@ -439,8 +444,12 @@ describe('Fix A: annotateRereads prefix property', () => {
    * `stampToolResultClocks` (image aging included, `prepareToolResultContext`
    * with room to spare) and returns the model-facing messages.
    */
-  function runChain(messages: ChatMessage[]): ChatMessage[] {
-    const windowed = applyCompactionWindow(messages, undefined);
+  function runChain(
+    messages: ChatMessage[],
+    compaction?: { summary: string; fromIndex: number },
+  ): ChatMessage[] {
+    const expanded = expandOrphanPlanMarkers(messages, compactionWindowStart(compaction));
+    const windowed = applyCompactionWindow(expanded, compaction);
     const visible = ageOutImageParts(windowed, undefined);
     const injected = injectSystemPrompt(visible, {
       render: () => 'Forge rules. Workspace root: /repo',
@@ -513,6 +522,92 @@ describe('Fix A: annotateRereads prefix property', () => {
     // The first output must be a byte prefix of the second.
     const divergence = firstDivergence(short, long);
     expect(divergence === -1 || divergence >= short.length).toBe(true);
+  });
+
+  it('freezes a full plan once and uses the marker for unchanged turns', () => {
+    const messages: ChatMessage[] = [
+      { role: 'user', content: 'first request' },
+      { role: 'assistant', content: 'first answer' },
+    ];
+    freezeTurnContextAndConsumeResumeNote(messages, { plan: PLAN }, undefined);
+    messages.push({ role: 'user', content: 'second request' });
+    freezeTurnContextAndConsumeResumeNote(messages, { plan: PLAN }, undefined);
+    messages.push({ role: 'assistant', content: 'second answer' });
+    messages.push({ role: 'user', content: 'third request' });
+    freezeTurnContextAndConsumeResumeNote(messages, { plan: PLAN }, undefined);
+
+    expect(messages[0]?.turnContext).toContain(renderPlan(ITEMS));
+    expect(messages[2]?.turnContext).toContain(PLAN_UNCHANGED_NOTE);
+    expect(messages[2]?.turnContext).not.toContain(PLAN_GUIDANCE);
+    expect(messages[4]?.turnContext).toContain(PLAN_UNCHANGED_NOTE);
+    expect(messages[4]?.turnContext).not.toContain(PLAN_GUIDANCE);
+
+    const changed = [...messages.slice(0, 4), { role: 'user', content: 'third request' }];
+    const changedPlan = {
+      items: [...ITEMS, { text: 'ship the fix', status: 'pending' as const }],
+      updatedAt: 2_000,
+    };
+    freezeTurnContextAndConsumeResumeNote(changed, { plan: changedPlan }, undefined);
+    expect(changed[4]?.turnContext).toContain(renderPlan(changedPlan.items));
+    expect(changed[4]?.turnContext).not.toContain(PLAN_UNCHANGED_NOTE);
+  });
+
+  it('keeps prepared prefixes byte-identical when the next turn adds an unchanged plan marker', () => {
+    const messages: ChatMessage[] = [
+      { role: 'user', content: 'first request' },
+      { role: 'assistant', content: 'first answer' },
+    ];
+    freezeTurnContextAndConsumeResumeNote(messages, { plan: PLAN }, undefined);
+    const first = runChain(messages);
+    expect(runChain(messages)).toEqual(first);
+
+    messages.push({ role: 'user', content: 'second request' });
+    freezeTurnContextAndConsumeResumeNote(messages, { plan: PLAN }, undefined);
+    expect(runChain(messages).slice(0, first.length)).toEqual(first);
+  });
+
+  it('expands only the first visible orphan marker from the frozen full copy', () => {
+    const messages: ChatMessage[] = [
+      { role: 'user', content: 'first', turnContext: `before\n${renderPlan(ITEMS)}\n\n${PLAN_GUIDANCE}` },
+      { role: 'assistant', content: 'one' },
+      { role: 'user', content: 'second', turnContext: `before\n${PLAN_UNCHANGED_NOTE}` },
+      { role: 'assistant', content: 'two' },
+      { role: 'user', content: 'third', turnContext: `before\n${PLAN_UNCHANGED_NOTE}` },
+    ];
+    const before = JSON.stringify(messages);
+    const compaction = { summary: 'summary', fromIndex: 2, generation: 1 };
+    const expanded = expandOrphanPlanMarkers(messages, compactionWindowStart(compaction));
+    const prepared = runChain(messages, compaction);
+    const repeated = runChain(messages, compaction);
+
+    expect(expanded).not.toBe(messages);
+    expect(expanded[2]?.turnContext).toBe(`before\n${renderPlan(ITEMS)}\n\n${PLAN_GUIDANCE}`);
+    expect(expanded[4]?.turnContext).toContain(PLAN_UNCHANGED_NOTE);
+    expect(prepared.map((message) => String(message.content)).join('\n')).toContain(renderPlan(ITEMS));
+    expect(prepared.map((message) => String(message.content)).join('\n').match(/Task plan: unchanged/g))
+      .toHaveLength(1);
+    expect(prepared).toEqual(repeated);
+    expect(JSON.stringify(messages)).toBe(before);
+  });
+
+  it('freezes a full plan when compaction hides every earlier full copy', () => {
+    const messages: ChatMessage[] = [
+      { role: 'user', content: 'first', turnContext: `old\n${renderPlan(ITEMS)}\n\n${PLAN_GUIDANCE}` },
+      { role: 'assistant', content: 'one' },
+      { role: 'user', content: 'second', turnContext: `old\n${PLAN_UNCHANGED_NOTE}` },
+      { role: 'assistant', content: 'two' },
+      { role: 'user', content: 'third request' },
+    ];
+
+    freezeTurnContextAndConsumeResumeNote(
+      messages,
+      { plan: PLAN },
+      { summary: 'summary', fromIndex: 2, generation: 1 },
+    );
+
+    expect(messages[4]?.turnContext).toContain(renderPlan(ITEMS));
+    expect(messages[4]?.turnContext).toContain(PLAN_GUIDANCE);
+    expect(messages[4]?.turnContext).not.toContain(PLAN_UNCHANGED_NOTE);
   });
 
   it('the earlier read_file result is byte-identical before and after the re-read', () => {

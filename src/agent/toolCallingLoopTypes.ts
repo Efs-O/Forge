@@ -67,6 +67,8 @@ export interface ToolCallingLoopOptions {
   compactMidTurn?: (request: {
     exhausted: boolean;
     rawUsed?: number | undefined;
+    trimmedUsed?: number | undefined;
+    sentForecast?: number | undefined;
     trimAdvanced?: boolean;
   }) => Promise<boolean>;
 }

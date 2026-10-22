@@ -225,6 +225,7 @@ interface TokenBudgetMsg {
   type: 'tokenBudget';
   used: number;
   max: number;
+  compactAt?: number;
 }
 
 export type {

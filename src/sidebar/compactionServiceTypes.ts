@@ -93,6 +93,8 @@ export type CompactionOutcome = 'compacted' | 'skipped' | 'failed';
 export interface CompactionOptions {
   auto: boolean;
   trigger?: CompactionTrigger;
+  /** Mid-turn forecast compared with the configured threshold, when known. */
+  decisionTokens?: number;
   remoteOrigin?: { channel: string; chatId: string };
   /**
    * Called by the tool loop between two rounds of a turn that is still

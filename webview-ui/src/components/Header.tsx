@@ -12,6 +12,7 @@ export interface WorkspaceInfo {
 interface Props {
   tokenUsed: number;
   tokenMax: number;
+  compactAt?: number | undefined;
   workspace?: WorkspaceInfo | undefined;
 }
 
@@ -66,9 +67,16 @@ const ForgeMark = (): React.ReactElement => (
  * one `streaming` flag was redundant, and this row collapsing and re-expanding
  * around them shifted the transcript on every turn.
  */
-export function Header({ tokenUsed, tokenMax, workspace }: Props): React.ReactElement {
+export function Header({ tokenUsed, tokenMax, compactAt, workspace }: Props): React.ReactElement {
   const showBudget = tokenMax > 0;
   const fillPct = tokenMax > 0 ? Math.min(100, (tokenUsed / tokenMax) * 100) : 0;
+  const budgetTitle =
+    compactAt === undefined
+      ? `${tokenUsed.toLocaleString()} / ${tokenMax.toLocaleString()} tokens used`
+      : `${tokenUsed.toLocaleString()} / ${tokenMax.toLocaleString()} tokens in the last request. ` +
+        `Auto-compact runs when the next request is forecast at ≥ ${Math.round(compactAt * tokenMax).toLocaleString()} ` +
+        `(${Math.round(compactAt * 100)}%) — that forecast includes the newest reply and tool results, ` +
+        'so it can fire while this bar reads lower.';
 
   return (
     <div id="forge-header">
@@ -99,15 +107,15 @@ export function Header({ tokenUsed, tokenMax, workspace }: Props): React.ReactEl
         {workspace?.stale && <span id="workspace-root-stale">reload needed</span>}
       </div>
       {showBudget && (
-        <div
-          id="token-budget"
-          title={`${tokenUsed.toLocaleString()} / ${tokenMax.toLocaleString()} tokens used`}
-        >
+        <div id="token-budget" title={budgetTitle}>
           <div id="token-budget-bar-track">
             <div
               id="token-budget-bar-fill"
               style={{ width: `${fillPct}%`, background: budgetColor(tokenUsed, tokenMax) }}
             />
+            {compactAt !== undefined && (
+              <div id="token-budget-compact-at" style={{ left: `${compactAt * 100}%` }} />
+            )}
           </div>
           <span id="token-budget-label">
             {formatTokens(tokenUsed)} / {formatTokens(tokenMax)}

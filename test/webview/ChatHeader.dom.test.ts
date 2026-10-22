@@ -6,6 +6,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 (globalThis as unknown as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 
 const { ChatHeader } = await import('../../webview-ui/src/components/ChatHeader');
+const { Header } = await import('../../webview-ui/src/components/Header');
 import type { AgentLinks } from '../../src/agentLinks/chatAgentLinks';
 const React = await import('react');
 
@@ -101,5 +102,27 @@ describe('ChatHeader title rename', () => {
     expect(container.querySelector('#agent-links-strip')?.textContent).toContain('claude');
     expect(container.querySelector('#agent-links-strip')?.textContent).toContain('Forge · hello man');
     expect(container.querySelector('#agent-links-strip')?.textContent).toContain('Last used');
+  });
+});
+
+describe('Header compaction forecast hint', () => {
+  it('shows the threshold tick and explains the next-request forecast in the title', () => {
+    act(() => root.render(React.createElement(Header, { tokenUsed: 12_000, tokenMax: 32_768, compactAt: 0.85 })));
+
+    const budget = container.querySelector<HTMLElement>('#token-budget');
+    const tick = container.querySelector<HTMLElement>('#token-budget-compact-at');
+    expect(tick).not.toBeNull();
+    expect(tick?.style.left).toBe('85%');
+    expect(budget?.title).toBe(
+      `${(12_000).toLocaleString()} / ${(32_768).toLocaleString()} tokens in the last request. ` +
+        `Auto-compact runs when the next request is forecast at ≥ ${(27_853).toLocaleString()} ` +
+        `(85%) — that forecast includes the newest reply and tool results, so it can fire while this bar reads lower.`,
+    );
+
+    act(() => root.render(React.createElement(Header, { tokenUsed: 12_000, tokenMax: 32_768 })));
+    expect(container.querySelector('#token-budget-compact-at')).toBeNull();
+    expect(container.querySelector<HTMLElement>('#token-budget')?.title).toBe(
+      `${(12_000).toLocaleString()} / ${(32_768).toLocaleString()} tokens used`,
+    );
   });
 });

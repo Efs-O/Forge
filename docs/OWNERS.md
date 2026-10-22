@@ -91,6 +91,7 @@ overlaps with an existing owner, extend the owner instead.
 | One compaction summarize stage (host fit → summary; floor-mode retry runs it twice) | `src/sidebar/compactionStage.ts` |
 | Compaction attempt hold/rearm + suppressed-attempt log row | `src/sidebar/compactionAttemptPolicy.ts` |
 | Compaction attempt log rows (`compaction_attempt`)   | `src/sidebar/SessionLogger.ts`           |
+| Compaction log row entry contracts                   | `src/sidebar/compactionLogTypes.ts`      |
 | Admission-time auto-compact check                    | `src/sidebar/ContextBudgetPublisher.ts`  |
 | Compaction error-to-category mapping (`compactionFailureCategory`) | `src/sidebar/compactionFailure.ts` |
 | Host-fact fit (shed optional, then required to floors) | `src/sidebar/compactionHostFit.ts`       |
@@ -101,6 +102,7 @@ overlaps with an existing owner, extend the owner instead.
 | Compaction tokenizer selection and per-model counter cache | `src/sidebar/compactionCounter.ts` |
 | Applying the compaction window to a request          | `src/sidebar/compactionWindow.ts`        |
 | Compaction message cost used by window measurement and split selection | `src/sidebar/compactionWindow.ts` |
+| Frozen plan de-duplication and orphan-marker repair | `src/sidebar/turnContextPlanDedup.ts` |
 | Host-recorded summary facts (from messages)          | `src/sidebar/compactionLedger.ts`        |
 | Ledger merge, retention cap, omission count          | `src/sidebar/compactionRecordedState.ts` |
 | Agent's last reply carried past a compaction         | `src/sidebar/compactionLastReply.ts`     |

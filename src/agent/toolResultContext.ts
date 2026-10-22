@@ -39,6 +39,8 @@ export interface ToolResultContextResult {
   used: number;
   /** Estimate before any context trimming. */
   rawUsed: number;
+  /** Estimate of the exact model-facing copy after any context trimming. */
+  trimmedUsed: number;
   /** Input budget after reserving enough room for a useful reply. */
   inputBudget: number;
   /** True when the prepared request has room for both prompt and reply. */
@@ -196,6 +198,7 @@ export function prepareToolResultContext(input: {
     messages: applied.messages,
     used: applied.used,
     rawUsed: first.used,
+    trimmedUsed: applied.used,
     inputBudget,
     fits: first.max <= 0 || applied.used <= inputBudget,
     excerptedToolCallIds: applied.excerptedToolCallIds,

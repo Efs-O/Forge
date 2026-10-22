@@ -3,6 +3,7 @@ import {
   RESUME_PROMPT,
   RETAINED_TAIL_MAX_CHARS,
   runCompaction,
+  runMidTurnCompaction,
   selectCompactionSplit,
   type CompactionDeps,
 } from '../../src/sidebar/CompactionService';
@@ -849,6 +850,20 @@ describe('runCompaction', () => {
       fromIndex: c.compaction?.fromIndex,
     });
     expect(rows[0]?.summaryChars).toBe(c.compaction?.summary.length);
+  });
+
+  it('records the mid-turn decision token count on the attempt start row', async () => {
+    const c = conv([...base]);
+    const h = harness(c, async () => long('summary'));
+    const attempts: CompactionAttemptLogEntry[] = [];
+    const deps: CompactionDeps = {
+      ...h.deps,
+      compactionMetrics: () => ({ max: 58_000, threshold: 0.85 }),
+      logCompactionAttempt: (_target, entry) => attempts.push(entry),
+    };
+
+    expect(await runMidTurnCompaction(deps, c.id, 50_300)).toBe('compacted');
+    expect(attempts[0]).toMatchObject({ phase: 'start', decisionTokens: 50_300 });
   });
 
   it('names the size at the cut in the notice, using the pre-invalidation figure', async () => {

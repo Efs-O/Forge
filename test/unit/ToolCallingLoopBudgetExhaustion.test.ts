@@ -384,7 +384,7 @@ describe('anchored output budgets across actual requests', () => {
       getOutputRoom: (messages, tools) => {
         measuredMessages = messages;
         measuredTools = tools;
-        return { outputRoom: 20_000, extraMarginTokens: 2_000 };
+        return { outputRoom: 20_000, extraMarginTokens: 2_000, used: 3_000 };
       },
     });
     expect(measuredTools).toEqual([]);
@@ -395,7 +395,7 @@ describe('anchored output budgets across actual requests', () => {
     await expect(
       runToolCallingLoop({
         ...baseOptions([{ role: 'user', content: 'go' }]),
-        getOutputRoom: () => ({ outputRoom: 9_000, extraMarginTokens: 5_000 }),
+        getOutputRoom: () => ({ outputRoom: 9_000, extraMarginTokens: 5_000, used: 3_000 }),
       }),
     ).rejects.toThrow(/context/i);
     expect(streamModelChatCompletion).not.toHaveBeenCalled();
@@ -435,6 +435,7 @@ describe('anchored output budgets across actual requests', () => {
         return {
           outputRoom: tools.length ? 20_000 : 15_000,
           extraMarginTokens: tools.length ? 1000 : 0,
+          used: tools.length ? 3_000 : 4_000,
         };
       },
     });

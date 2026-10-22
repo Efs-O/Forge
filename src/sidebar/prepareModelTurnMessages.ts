@@ -16,10 +16,11 @@ import { stampToolResultClocks } from '../agent/toolResultClock';
 import { prepareToolResultContext, type ContextTrimState } from '../agent/toolResultContext';
 import { annotateRereads } from '../agent/staleReadSupersede';
 import { nudgeTruncatedResults } from '../agent/truncatedResultNudge';
-import { applyCompactionWindow } from './compactionWindow';
+import { applyCompactionWindow, compactionWindowStart } from './compactionWindow';
 import { ageOutImageParts, stripImageParts } from './imageParts';
 import { injectSystemPrompt } from '../llm/SystemPromptInjector';
 import { injectTurnContext, type TurnContextState } from './turnContext';
+import { expandOrphanPlanMarkers } from './turnContextPlanDedup';
 import { buildTemplateContext, hasWebTools } from './turnModelBehavior';
 import { attachReasoning, preservesThinking } from '../agent/preserveThinking';
 
@@ -45,7 +46,8 @@ export function prepareModelTurnMessages(
   // Compaction shrinks what the MODEL sees, never the stored transcript.
   // The loop hands us a copy and re-runs this every round, so the window
   // holds for the whole turn without touching conv.messages.
-  const windowed = applyCompactionWindow(messages, input.compaction);
+  const expanded = expandOrphanPlanMarkers(messages, compactionWindowStart(input.compaction));
+  const windowed = applyCompactionWindow(expanded, input.compaction);
   // The one place images ever leave the model-facing copy. Aging and the
   // no-vision strip are mutually exclusive: on a projector-less model the
   // `no-vision` note wins, because it explains why the image is missing

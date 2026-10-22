@@ -26,7 +26,7 @@ import type { CliSessionRegistry } from '../agents/CliSessionRegistry';
 import { AgentLoop, type SidebarProviderEvents } from './AgentLoop';
 import { SlashCommandHandler } from './SlashCommandHandler';
 import { wireTurnMirror } from './turnMirrorWiring';
-import { runCompaction, type CompactionDeps } from './CompactionService';
+import { runMidTurnCompaction, type CompactionDeps } from './CompactionService';
 import { runAddressedAutoCompact } from './autoCompactionPolicy';
 import { runManualCompactResume } from './compactionPolicy';
 import { compactMidTurn } from './midTurnCompaction';
@@ -322,12 +322,8 @@ export function wireSidebar(host: SidebarHost, parts: SidebarParts): SidebarRunt
       {
         getConfig: host.getConfig,
         snapshot: (c) => budget.snapshot(c),
-        compact: (conversationId) =>
-          runCompaction(compactionDeps, conversationId, {
-            auto: true,
-            trigger: 'auto',
-            midTurn: true,
-          }),
+        compact: (conversationId, decisionTokens) =>
+          runMidTurnCompaction(compactionDeps, conversationId, decisionTokens),
       },
       conv,
       request,

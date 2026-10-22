@@ -177,6 +177,10 @@ export const PLAN_GUIDANCE =
   'conformance — check every requirement and edge case, including the failure ' +
   'paths, against a test or a named manual step.';
 
+/** Smaller frozen context when the same full plan is already visible above. */
+export const PLAN_UNCHANGED_NOTE =
+  'Task plan: unchanged since the last full copy above (re-read it there).';
+
 export function makeUpdatePlanTool(): RegisteredTool {
   return {
     definition: {

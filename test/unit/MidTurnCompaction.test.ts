@@ -256,26 +256,58 @@ describe('compactMidTurn policy', () => {
     await expect(compactMidTurn(forced.deps, conv(), { exhausted: true })).resolves.toBe(true);
   });
 
-  it('uses the raw prompt estimate when the reported trimmed count is below threshold', async () => {
-    const enabled = deps({ enabled: true, at: 0.9 }, 830);
-    await expect(
-      compactMidTurn(enabled.deps, conv(), { exhausted: false, rawUsed: 1_050 } as never),
-    ).resolves.toBe(true);
-    expect(enabled.compact).toHaveBeenCalledOnce();
+  it('decides on the anchored forecast plus trim savings and preserves trim advancement', async () => {
+    const make = (used: number, max: number, at = 0.85) => {
+      const compact = vi.fn(
+        async (_conversationId: string, _decisionTokens?: number) => 'compacted' as const,
+      );
+      return {
+        compact,
+        deps: {
+          getConfig: () => ({ auto_compact: { enabled: true, at } }) as ForgeConfig,
+          snapshot: () => ({ used, max }),
+          compact,
+        },
+      };
+    };
+    const request = (sentForecast: number, rawUsed = 340_000, trimmedUsed = rawUsed) => ({
+      exhausted: false,
+      sentForecast,
+      rawUsed,
+      trimmedUsed,
+    });
 
-    const disabled = deps({ enabled: false, at: 0.9 }, 830);
+    const below = make(298_462, 400_000);
     await expect(
-      compactMidTurn(disabled.deps, conv(), { exhausted: false, rawUsed: 1_050 } as never),
+      compactMidTurn(below.deps, conv(), request(300_000)),
     ).resolves.toBe(false);
-    expect(disabled.compact).not.toHaveBeenCalled();
+    expect(below.compact).not.toHaveBeenCalled();
 
-    const advanced = deps({ enabled: true, at: 0.9 }, 500);
+    const above = make(298_462, 400_000);
     await expect(
-      compactMidTurn(advanced.deps, conv(), {
+      compactMidTurn(above.deps, conv(), request(345_000)),
+    ).resolves.toBe(true);
+    expect(above.compact).toHaveBeenCalledWith('c1', 345_000);
+
+    const fallback = make(298_462, 400_000);
+    await expect(
+      compactMidTurn(fallback.deps, conv(), {
         exhausted: false,
-        rawUsed: 500,
-        trimAdvanced: true,
-      } as never),
+        rawUsed: 340_000,
+        trimmedUsed: 340_000,
+      }),
+    ).resolves.toBe(true);
+    expect(fallback.compact).toHaveBeenCalledWith('c1', 340_000);
+
+    const trimmed = make(298_462, 400_000);
+    await expect(
+      compactMidTurn(trimmed.deps, conv(), request(305_000, 340_000, 300_000)),
+    ).resolves.toBe(true);
+    expect(trimmed.compact).toHaveBeenCalledWith('c1', 345_000);
+
+    const advanced = make(100_000, 400_000);
+    await expect(
+      compactMidTurn(advanced.deps, conv(), { ...request(100_000), trimAdvanced: true }),
     ).resolves.toBe(true);
     expect(advanced.compact).toHaveBeenCalledOnce();
   });
@@ -287,21 +319,33 @@ describe('compactMidTurn policy', () => {
         h.onDone('stop');
       },
     );
-    let checked: { exhausted: boolean; rawUsed?: number; trimAdvanced?: boolean } | undefined;
+    let checked:
+      | {
+          exhausted: boolean;
+          rawUsed?: number;
+          trimmedUsed?: number;
+          sentForecast?: number;
+          trimAdvanced?: boolean;
+        }
+      | undefined;
     await runToolCallingLoop(
       runOptions([{ role: 'user', content: 'go' }], {
         prepareMessages: () => ({
           messages: [{ role: 'user', content: 'trimmed' }],
           used: 100,
           rawUsed: 1_050,
+          trimmedUsed: 900,
           inputBudget: 500,
           fits: true,
           excerptedToolCallIds: [],
           trimAdvanced: true,
         }),
+        getOutputRoom: () => ({ outputRoom: 10_000, extraMarginTokens: 0, used: 980 }),
         compactMidTurn: async (request: {
           exhausted: boolean;
           rawUsed?: number;
+          trimmedUsed?: number;
+          sentForecast?: number;
           trimAdvanced?: boolean;
         }) => {
           checked = request;
@@ -310,7 +354,13 @@ describe('compactMidTurn policy', () => {
       }) as never,
     );
 
-    expect(checked).toEqual({ exhausted: false, rawUsed: 1_050, trimAdvanced: true });
+    expect(checked).toEqual({
+      exhausted: false,
+      rawUsed: 1_050,
+      trimmedUsed: 900,
+      sentForecast: 980,
+      trimAdvanced: true,
+    });
   });
 
   it('adds no nudge when compaction did not happen', async () => {

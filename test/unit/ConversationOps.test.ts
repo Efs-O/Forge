@@ -12,6 +12,7 @@ import {
 import type { SidebarRuntime } from '../../src/sidebar/sessionTypes';
 import { UNTITLED_TITLE } from '../../src/sidebar/sessionTypes';
 import { applyCompactionWindow } from '../../src/sidebar/compactionWindow';
+import { freezeTurnContextAndConsumeResumeNote } from '../../src/sidebar/turnContext';
 import {
   evictionBlockers,
   isConversationEvictable,
@@ -297,6 +298,19 @@ describe('opClearMessages', () => {
     expect(conv.last_output_tokens).toBeUndefined();
     expect(applyCompactionWindow(conv.messages, conv.compaction)).toEqual(conv.messages);
     expect(conv.active_model).toBe('claude');
+  });
+
+  it('clears the plan so the next frozen turn cannot inherit it', () => {
+    const conv = sidebar().conversations[0]!;
+    conv.plan = { items: [{ text: 'finish unrelated task', status: 'active' }], updatedAt: 1 };
+    conv.messages = [{ role: 'user', content: 'old request' }];
+
+    opClearMessages(conv);
+    conv.messages.push({ role: 'user', content: 'new request' });
+    freezeTurnContextAndConsumeResumeNote(conv.messages, { plan: conv.plan }, conv.compaction);
+
+    expect(conv.plan).toBeUndefined();
+    expect(conv.messages[0]?.turnContext).toBeUndefined();
   });
 });
 

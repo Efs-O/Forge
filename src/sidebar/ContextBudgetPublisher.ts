@@ -134,7 +134,14 @@ export class ContextBudgetPublisher {
       ? perSlotContext(activeModel, config.llama_server, activeModel.provider ?? 'llama.cpp')
       : 0;
     const used = reportedContextTokens(conv);
-    this.deps.post({ type: 'tokenBudget', used, max });
+    this.deps.post({
+      type: 'tokenBudget',
+      used,
+      max,
+      ...(config.auto_compact?.enabled === true
+        ? { compactAt: config.auto_compact.at ?? DEFAULT_AUTO_COMPACT_AT }
+        : {}),
+    });
     if (activeSelection && max > 0) {
       // Write the BASE name, not the raw selection: an `@profile` suffix would
       // never match a curve id on HalluMeter's side and would churn its session id.

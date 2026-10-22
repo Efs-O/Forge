@@ -4,6 +4,7 @@ import * as path from 'path';
 import { createHash } from 'crypto';
 import type { ChatMessage } from '../llm/types';
 import { requestPrefixRow, type RequestFingerprint } from '../sessions/requestFingerprint';
+import type { CompactionAttemptLogEntry, CompactionLogEntry } from './compactionLogTypes';
 import {
   isJsonObject,
   parseJsonWithInvalidEscapeRepair,
@@ -16,6 +17,8 @@ const SESSIONS_DIR = path.join(os.homedir(), '.forge', 'sessions');
 export function sessionsDirectory(): string {
   return SESSIONS_DIR;
 }
+
+export type { CompactionAttemptLogEntry, CompactionLogEntry } from './compactionLogTypes';
 
 /**
  * Session-to-date token totals, as accumulated on the conversation by
@@ -33,64 +36,6 @@ export interface SessionUsage {
    * ten minutes from one that sat waiting for a confirmation click.
    */
   activeTimeMs?: number;
-}
-
-/** One completed compaction, as recorded in the session transcript. */
-export interface CompactionLogEntry {
-  /** How many times this conversation has been compacted, including this one. */
-  generation: number;
-  /** Index into `conv.messages` from which the model still sees real turns. */
-  fromIndex: number;
-  /** Exact server-reported context at the moment of the cut, prompt + completion. */
-  usedTokens: number;
-  /** Per-slot window, 0 when the model has no configured context. */
-  maxTokens: number;
-  /** Size of the summary that replaced the cut turns. */
-  summaryChars: number;
-  /**
-   * The summary text itself.
-   *
-   * `summaryChars` alone was not an audit trail. When a resumed agent
-   * misbehaves, the summary IS its working context — the one artifact that
-   * determines every following turn — and reconstructing a misread meant
-   * digging the live record out of workspaceState, which survives only until
-   * the tab is cleared. Anything absent from the session log is undiagnosable
-   * after the fact.
-   */
-  summary: string;
-  /** Which path started this compaction. */
-  trigger: string;
-  /** Configured `auto_compact.at` when the event fired; absent when unset. */
-  threshold?: number;
-}
-
-export interface CompactionAttemptLogEntry {
-  /** Shared by the start row and its terminal row; an unmatched start means a crash. */
-  attemptId: string;
-  phase: 'start' | 'finished' | 'suppressed';
-  trigger: string;
-  outcome?: string;
-  /** CompactionFailureCategory, on a failed attempt or the category behind a suppression. */
-  category?: string;
-  finishReason?: string;
-  calls?: number;
-  usedTokens: number;
-  maxTokens: number;
-  /** Estimated characters of the window being compacted (known at start). */
-  windowChars?: number;
-  /** Estimated characters of the replacement window; unknown until a candidate exists. */
-  candidateChars?: number;
-  hostChars?: number;
-  hostMaxChars?: number;
-  charsPerToken?: number;
-  counter?: 'tokenize' | 'count_tokens' | 'estimate';
-  components?: Record<string, number>;
-  shed?: string[];
-  /** The attempt succeeded or failed on its single floor-mode retry: no tail, every fact at its floor. */
-  floorMode?: boolean;
-  /** The summary was cut off by the output cap and its complete part kept. */
-  salvagedFromLength?: boolean;
-  invalidSummary?: import('./compactionFailure').InvalidSummaryDetail;
 }
 
 /**
@@ -272,6 +217,7 @@ export class SessionLogger {
         ...(entry.calls !== undefined ? { calls: entry.calls } : {}),
         used_tokens: entry.usedTokens,
         max_tokens: entry.maxTokens,
+        ...(entry.decisionTokens !== undefined ? { decision_tokens: entry.decisionTokens } : {}),
         ...(entry.windowChars !== undefined ? { window_chars: entry.windowChars } : {}),
         ...(entry.candidateChars !== undefined ? { candidate_chars: entry.candidateChars } : {}),
         ...(entry.hostChars !== undefined ? { host_chars: entry.hostChars } : {}),

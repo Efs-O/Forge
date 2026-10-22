@@ -1,5 +1,12 @@
 # Forge — Recent Changes
 
+## 0.17.64
+
+- An unchanged task plan is no longer re-sent in full at the start of every turn. Each turn used to carry its own copy of the plan and its guidance, about 3,200 characters for a 15-item plan, and none were ever removed. In one long chat, 76 of 107 copies were identical to the one before. Now, when the plan has not changed since the last full copy the model can still see, the turn carries a one-line note pointing back to that copy. After a compaction removes the full copy from view, the first note still visible is expanded back to the full plan in what the model sees. The saved chat is not changed.
+- `/clearChat` now clears the task plan too. A cleared chat used to start its next turn with the old plan, so the model was told an unrelated task was still in progress.
+- Compaction between tool rounds now fires at the threshold you set. With `at: 0.85`, the check used a rough character-count estimate of the next request, which read 4–14 % high, so compaction ran when the server's real count was as low as 75 %. The check now starts from the server's own count of the previous request and estimates only what was added since, which is usually about 1,000 tokens. When there is no server count to start from (after a model switch, a tool-list change or a compaction), it uses the old estimate. The log line now shows each number behind the decision, and the session log's `compaction_attempt` row records the number that was compared with the threshold (`decision_tokens`).
+- The context bar has a thin mark at the auto-compact threshold. Its tooltip explains that compaction is decided on a forecast of the next request, so it can run while the bar, which shows the previous request, reads a little lower.
+
 ## 0.17.63
 
 - `update_plan` accepts item text up to 500 characters, up from 300. A 338-character step was the first rejection over the old limit. A full plan is still bounded at 20 items, now about 10,400 characters as the model sees it.
