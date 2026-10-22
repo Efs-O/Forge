@@ -30,6 +30,7 @@ import {
 import { messageCostChars } from './compactionWindow';
 import { reportedContextTokens } from '../util/contextBudget';
 import { getLogger } from '../util/logger';
+import { isPlanFinished } from '../tools/planTools';
 
 const log = getLogger();
 
@@ -154,7 +155,10 @@ export async function runCompactionStage(
     return { kind: 'not-smaller', floorChars };
   }
 
-  const groupsNote = compactionResumeNote('', Boolean(conv.plan?.items?.length));
+  const hasOpenPlan = Boolean(
+    conv.plan && conv.plan.items.length > 0 && !isPlanFinished(conv.plan.items),
+  );
+  const groupsNote = compactionResumeNote('', hasOpenPlan);
   const summaryAllowance = compactionSummaryAllowance(budget.summaryCeilingChars, groupsNote);
   const summaryRun = await summarizeCompaction({
     messages: split.summarize,

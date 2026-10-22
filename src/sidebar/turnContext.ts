@@ -34,10 +34,10 @@ import {
 import type { UserTerminalCommand } from '../tools/TerminalCommandTracker';
 import { formatCompactionResumeNote, type CompactionState } from './compactionTypes';
 import { compactionWindowStart } from './compactionWindow';
-import { shouldUsePlanUnchangedNote } from './turnContextPlanDedup';
+import { shouldUsePlanUnchangedNote, TURN_CONTEXT_CLOSE } from './turnContextPlanDedup';
+import { isPlanFinished } from '../tools/planTools';
 
 const OPEN = '[Forge turn context, as of this message]';
-const CLOSE = '[/Forge turn context]';
 
 export interface TurnContextState {
   /** Absolute path of the active editor, if any. */
@@ -85,7 +85,7 @@ function renderTurnContext(state: TurnContextRenderState): string | undefined {
   if (state.activeTerminalCwd) {
     parts.push(`Active VS Code terminal working directory: ${state.activeTerminalCwd}`);
   }
-  if (state.plan && state.plan.items.length > 0) {
+  if (state.plan && state.plan.items.length > 0 && !isPlanFinished(state.plan.items)) {
     // The cap is derived to fit every schema-valid plan; this slice is only a
     // backstop for corrupted session state. Guidance stays outside that bound.
     parts.push(
@@ -95,7 +95,7 @@ function renderTurnContext(state: TurnContextRenderState): string | undefined {
     );
   }
   if (parts.length === 0) return undefined;
-  return `${OPEN}\n${parts.join('\n\n')}\n${CLOSE}`;
+  return `${OPEN}\n${parts.join('\n\n')}\n${TURN_CONTEXT_CLOSE}`;
 }
 
 /**

@@ -28,7 +28,7 @@ const argsSchema = z
   })
   .strict();
 
-const PLAN_RENDER_HEADER = '**Task plan (recorded by Forge):**';
+export const PLAN_RENDER_HEADER = '**Task plan (recorded by Forge):**';
 const PLAN_STATUS_MARKS: Record<PlanItem['status'], string> = {
   done: '[x] done',
   active: '[>] in progress',
@@ -39,6 +39,11 @@ const PLAN_RETRY_RULE =
   'status pending/active/done; no extra fields.';
 const PLAN_REFUSAL_PREFIX = 'Error: update_plan rejected: ';
 const PLAN_REFUSAL_MAX_CHARS = 200;
+
+/** The one predicate for whether a recorded plan is finished. */
+export function isPlanFinished(items: readonly PlanItem[]): boolean {
+  return items.length > 0 && items.every((item) => item.status === 'done');
+}
 
 /**
  * One line per item, with the status leading so it survives a skim.
@@ -170,7 +175,9 @@ export const PLAN_GUIDANCE =
   'summaries, tool-limit continuations, and test failures do not replace it: ' +
   're-read it after any compaction or forced continuation and before declaring ' +
   'the work done. Keep it current — when an item turns out to be wrong, change ' +
-  'it with update_plan instead of working around it. A requirement the user gave ' +
+  'it with update_plan instead of working around it. ' +
+  'If the user says the task is finished or no longer needed, mark the remaining items done. ' +
+  'A requirement the user gave ' +
   'is not overridden by the shape of existing code: when it calls for a different ' +
   'lifetime, ordering, error boundary, or ownership model, restructure the code ' +
   'and test that distinction directly. A green test suite is not proof of ' +
@@ -240,6 +247,12 @@ export function makeUpdatePlanTool(): RegisteredTool {
       }
       context.setPlan(parsed.data.items);
       const done = parsed.data.items.filter((i) => i.status === 'done').length;
+      if (isPlanFinished(parsed.data.items)) {
+        return (
+          `Plan recorded: all ${parsed.data.items.length} items done. Forge stops showing it ` +
+          'from the next turn. If more work comes, start a new plan with update_plan.'
+        );
+      }
       return `Plan recorded: ${parsed.data.items.length} items, ${done} done.`;
     },
   };

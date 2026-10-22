@@ -1,5 +1,12 @@
 # Forge — Recent Changes
 
+## 0.17.65
+
+- A finished task plan is no longer sent to the model. Once every item is marked done, Forge stops adding the plan and its guidance to the start of each turn. The same goes for the plan sent to Claude and Codex CLI turns and for the after-compaction note that tells the model to check its plan. The plan is still saved and still shown in the sidebar, and the compaction summary still sees it, so the record of what was done is kept. In 94 recorded sessions, 19 had carried a fully finished plan into three or more later turns.
+- When the model marks every item done, `update_plan` now replies that Forge will stop showing the plan from the next turn, and that any further work should start a new plan.
+- The plan guidance has one new sentence: if you say the task is finished or no longer needed, the model marks the remaining items done. Only you end a task early; the model does not clear a plan on its own.
+- The one-line "plan unchanged, see the full copy above" note from 0.17.64 now finds full copies written by earlier versions too. It used to recognise a copy by the exact guidance wording, so changing that wording (as this release does) could leave the note pointing at a copy it could no longer find once a compaction moved the copy out of view.
+
 ## 0.17.64
 
 - An unchanged task plan is no longer re-sent in full at the start of every turn. Each turn used to carry its own copy of the plan and its guidance, about 3,200 characters for a 15-item plan, and none were ever removed. In one long chat, 76 of 107 copies were identical to the one before. Now, when the plan has not changed since the last full copy the model can still see, the turn carries a one-line note pointing back to that copy. After a compaction removes the full copy from view, the first note still visible is expanded back to the full plan in what the model sees. The saved chat is not changed.

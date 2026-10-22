@@ -21,7 +21,10 @@ import {
   freezeTurnContext,
   freezeTurnContextAndConsumeResumeNote,
 } from '../../src/sidebar/turnContext';
-import { expandOrphanPlanMarkers } from '../../src/sidebar/turnContextPlanDedup';
+import {
+  expandOrphanPlanMarkers,
+  shouldUsePlanUnchangedNote,
+} from '../../src/sidebar/turnContextPlanDedup';
 import { slimPersistMessages, chatMessagesFromSlim } from '../../src/sidebar/sessionTypes';
 import { PLAN_GUIDANCE, PLAN_UNCHANGED_NOTE, renderPlan } from '../../src/tools/planTools';
 import { annotateRereads } from '../../src/agent/staleReadSupersede';
@@ -41,6 +44,10 @@ const ITEMS: PlanItem[] = [
   { text: 'add regression tests', status: 'pending' },
 ];
 const PLAN: ConversationPlan = { items: ITEMS, updatedAt: 1_000 };
+const FINISHED_PLAN: ConversationPlan = {
+  items: ITEMS.map((item) => ({ ...item, status: 'done' as const })),
+  updatedAt: 2_000,
+};
 
 const SYSTEM = 'Forge rules. Workspace root: /repo';
 
@@ -610,6 +617,28 @@ describe('Fix A: annotateRereads prefix property', () => {
     expect(messages[4]?.turnContext).not.toContain(PLAN_UNCHANGED_NOTE);
   });
 
+  it('recognizes and expands an older full plan section after its guidance changes', () => {
+    const oldGuidance = 'Older build guidance that differs from the current version.';
+    const oldFullCopy =
+      `before\n${renderPlan(ITEMS)}\n\n${oldGuidance}\n[/Forge turn context]`;
+    const messages: ChatMessage[] = [
+      { role: 'user', content: 'first', turnContext: oldFullCopy },
+      { role: 'assistant', content: 'one' },
+      {
+        role: 'user',
+        content: 'second',
+        turnContext: `before\n${PLAN_UNCHANGED_NOTE}\n[/Forge turn context]`,
+      },
+    ];
+
+    expect(shouldUsePlanUnchangedNote(messages, PLAN, 0)).toBe(false);
+    const expanded = expandOrphanPlanMarkers(messages, 2);
+
+    expect(expanded[2]?.turnContext).toBe(
+      `before\n${renderPlan(ITEMS)}\n\n${oldGuidance}\n[/Forge turn context]`,
+    );
+  });
+
   it('the earlier read_file result is byte-identical before and after the re-read', () => {
     const base: ChatMessage[] = [
       { role: 'user', content: 'Read the file.' },
@@ -671,6 +700,39 @@ describe('Fix A: annotateRereads prefix property', () => {
 });
 
 describe('freezeTurnContext', () => {
+  it('omits a finished plan and leaves no empty frozen block', () => {
+    const withOtherState: ChatMessage[] = [{ role: 'user', content: 'finished task' }];
+    expect(
+      freezeTurnContext(withOtherState, { activeFile: '/repo/a.ts', plan: FINISHED_PLAN }),
+    ).toBe(true);
+    const block = withOtherState[0]?.turnContext;
+    expect(block).toContain('Active file: /repo/a.ts');
+    expect(block).not.toContain('Task plan (recorded by Forge)');
+    expect(block).not.toContain(PLAN_GUIDANCE);
+    expect(block).not.toContain(PLAN_UNCHANGED_NOTE);
+
+    const onlyFinishedPlan: ChatMessage[] = [{ role: 'user', content: 'finished task' }];
+    expect(freezeTurnContext(onlyFinishedPlan, { plan: FINISHED_PLAN })).toBe(false);
+    expect(onlyFinishedPlan[0]?.turnContext).toBeUndefined();
+  });
+
+  it('starts a new full plan after a finished plan turn', () => {
+    const messages: ChatMessage[] = [{ role: 'user', content: 'finish the old task' }];
+    expect(freezeTurnContext(messages, { plan: FINISHED_PLAN })).toBe(false);
+    messages.push(
+      { role: 'assistant', content: 'The old task is complete.' },
+      { role: 'user', content: 'start new work' },
+    );
+    const newItems: PlanItem[] = [{ text: 'begin the new task', status: 'active' }];
+
+    expect(freezeTurnContext(messages, { plan: { items: newItems, updatedAt: 3_000 } })).toBe(
+      true,
+    );
+    expect(messages[2]?.turnContext).toContain(renderPlan(newItems));
+    expect(messages[2]?.turnContext).toContain(PLAN_GUIDANCE);
+    expect(messages[2]?.turnContext).not.toContain(PLAN_UNCHANGED_NOTE);
+  });
+
   it('is idempotent: a second freeze leaves the block unchanged', () => {
     const msgs = conversation();
     freezeTurnContext(msgs, { activeFile: '/a.ts', plan: PLAN });
@@ -714,6 +776,16 @@ describe('freezeTurnContext', () => {
 });
 
 describe('injectTurnContext with frozen blocks', () => {
+  it('does not add a finished plan through the live fallback', () => {
+    const messages: ChatMessage[] = [{ role: 'user', content: 'continue after finishing' }];
+
+    const injected = injectTurnContext(messages, { plan: FINISHED_PLAN });
+
+    expect(injected).toEqual(messages);
+    expect(JSON.stringify(injected)).not.toContain(renderPlan(FINISHED_PLAN.items));
+    expect(JSON.stringify(injected)).not.toContain(PLAN_GUIDANCE);
+  });
+
   it('folds frozen blocks in place and does not move them', () => {
     const msgs = conversation();
     freezeTurnContext(msgs, { activeFile: '/a.ts', plan: PLAN });

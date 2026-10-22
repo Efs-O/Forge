@@ -486,7 +486,7 @@ overlaps with an existing owner, extend the owner instead.
 | `list_delegation_targets` + target ranking | `src/tools/localAgentTool.ts`         |
 | Delegation target VRAM classification      | `src/delegation/eligibility.ts`       |
 | Per-turn tool allowlist + call-budget      | `src/tools/ToolBudget.ts`             |
-| Plan rendering + `PLAN_GUIDANCE`           | `src/tools/planTools.ts`              |
+| Plan rendering + `isPlanFinished` + `PLAN_GUIDANCE` | `src/tools/planTools.ts`              |
 | `view_image` tool                          | `src/tools/imageTool.ts`              |
 | `send_file` tool (workspace + screenshot-dir delivery) | `src/tools/sendFileTool.ts` |
 | `render_html_to_image` tool (schema, mode dispatch, image-mode naming and delivery) | `src/tools/renderHtmlToImageTool.ts` |

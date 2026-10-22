@@ -176,6 +176,12 @@ describe('unattended turns', () => {
     expect(PLAN_GUIDANCE).toContain('change it with update_plan');
   });
 
+  it('guides the agent to finish the plan when the user ends the task', () => {
+    expect(PLAN_GUIDANCE).toContain(
+      'If the user says the task is finished or no longer needed, mark the remaining items done.',
+    );
+  });
+
   it('withholds ask_user, keeping any other refusal', () => {
     const vision = new Map([['view_image', 'no projector']]);
     const merged = withUnattendedRefusals(vision, true);

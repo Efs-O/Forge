@@ -54,6 +54,37 @@ function compactionDeps(conv: ConversationRuntime, max: () => number): Compactio
 }
 
 describe('one-shot compaction resume note', () => {
+  it('adds the plan refresh note only for an open plan', async () => {
+    const finished = conversation();
+    finished.plan = {
+      items: [
+        { text: 'finish the code', status: 'done' },
+        { text: 'add regression coverage', status: 'done' },
+      ],
+      updatedAt: 2,
+    };
+    const open = conversation();
+    open.plan = {
+      items: [
+        { text: 'finish the code', status: 'done' },
+        { text: 'add regression coverage', status: 'active' },
+      ],
+      updatedAt: 2,
+    };
+    const planRefreshNote =
+      'If a plan is shown, check it against the State section and update it with `update_plan` before continuing.';
+
+    await expect(
+      runCompaction(compactionDeps(finished, () => 32_000), finished.id, { auto: true }),
+    ).resolves.toBe('compacted');
+    await expect(
+      runCompaction(compactionDeps(open, () => 32_000), open.id, { auto: true }),
+    ).resolves.toBe('compacted');
+
+    expect(finished.compaction?.summary).not.toContain(planRefreshNote);
+    expect(open.compaction?.summary).toContain(planRefreshNote);
+  });
+
   it('records exact usage on success and replaces it with the next generation', async () => {
     const conv = conversation();
     let max = 32_000;

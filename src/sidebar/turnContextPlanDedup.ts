@@ -1,18 +1,21 @@
 import type { ChatMessage } from '../llm/types';
 import {
   PLAN_GUIDANCE,
+  PLAN_RENDER_HEADER,
   PLAN_RENDER_MAX_CHARS,
   PLAN_UNCHANGED_NOTE,
+  isPlanFinished,
   renderPlan,
 } from '../tools/planTools';
 import type { ConversationPlan } from './sessionTypes';
 
+export const TURN_CONTEXT_CLOSE = '[/Forge turn context]';
+
 function fullPlanSection(context: string): string | undefined {
-  const header = '**Task plan (recorded by Forge):**';
-  const start = context.indexOf(header);
-  const guidance = context.lastIndexOf(`\n\n${PLAN_GUIDANCE}`);
-  if (start < 0 || guidance < start) return undefined;
-  return context.slice(start, guidance + 2 + PLAN_GUIDANCE.length);
+  const start = context.indexOf(PLAN_RENDER_HEADER);
+  if (start < 0) return undefined;
+  const close = context.indexOf(`\n${TURN_CONTEXT_CLOSE}`, start);
+  return context.slice(start, close < 0 ? context.length : close);
 }
 
 /** True when the newest visible frozen plan section exactly matches this snapshot. */
@@ -21,7 +24,7 @@ export function shouldUsePlanUnchangedNote(
   plan: ConversationPlan | undefined,
   windowStart: number,
 ): boolean {
-  if (!plan || plan.items.length === 0) return false;
+  if (!plan || plan.items.length === 0 || isPlanFinished(plan.items)) return false;
   const section = `${renderPlan(plan.items).slice(0, PLAN_RENDER_MAX_CHARS)}\n\n${PLAN_GUIDANCE}`;
   for (let index = messages.length - 1; index >= windowStart; index -= 1) {
     const message = messages[index];

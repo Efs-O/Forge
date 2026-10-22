@@ -1,6 +1,7 @@
 import type { Memento } from 'vscode';
 import { describe, expect, it } from 'vitest';
 import {
+  isPlanFinished,
   makeUpdatePlanTool,
   PLAN_RENDER_MAX_CHARS,
   renderPlan,
@@ -59,6 +60,19 @@ describe('update_plan', () => {
     const result = await tool.handler({ items: ITEMS }, ctx);
     expect(written).toEqual([ITEMS]);
     expect(result).toBe('Plan recorded: 3 items, 1 done.');
+  });
+
+  it('keeps an all-done plan and returns the finished-plan reply verbatim', async () => {
+    const tool = makeUpdatePlanTool();
+    const { ctx, written } = context();
+    const items = ITEMS.map((item) => ({ ...item, status: 'done' as const }));
+
+    const result = await tool.handler({ items }, ctx);
+
+    expect(result).toBe(
+      'Plan recorded: all 3 items done. Forge stops showing it from the next turn. If more work comes, start a new plan with update_plan.',
+    );
+    expect(written).toEqual([items]);
   });
 
   it('is auto-approved and read-permissioned, so marking work done is never gated', () => {
@@ -139,6 +153,14 @@ describe('update_plan', () => {
     const tool = makeUpdatePlanTool();
     const result = await tool.handler({ items: ITEMS }, { beforeMutate: () => undefined });
     expect(result).toContain('unavailable outside a conversation turn');
+  });
+});
+
+describe('isPlanFinished', () => {
+  it('requires at least one item and every item to be done', () => {
+    expect(isPlanFinished([])).toBe(false);
+    expect(isPlanFinished(ITEMS)).toBe(false);
+    expect(isPlanFinished(ITEMS.map((item) => ({ ...item, status: 'done' as const })))).toBe(true);
   });
 });
 
