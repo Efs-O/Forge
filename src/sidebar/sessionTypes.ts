@@ -180,7 +180,7 @@ const displayDiffSchema = z.object({
  * that compounds each round rather than a one-off mistake.
  */
 export const PLAN_MAX_ITEMS = 20;
-export const PLAN_ITEM_MAX_CHARS = 300;
+export const PLAN_ITEM_MAX_CHARS = 500;
 
 // `.strict()`, not the Zod default: an object schema that silently STRIPS
 // unknown keys would accept the arbitrary blob the advertised

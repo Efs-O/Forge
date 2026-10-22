@@ -1,5 +1,9 @@
 # Forge — Recent Changes
 
+## 0.17.63
+
+- `update_plan` accepts item text up to 500 characters, up from 300. A 338-character step was the first rejection over the old limit. A full plan is still bounded at 20 items, now about 10,400 characters as the model sees it.
+
 ## 0.17.62
 
 - A reference picture for a local image edit keeps its shape when Forge shrinks it. Forge used to round each side down to a multiple of 32 on its own, so a 1536×864 picture was sent as 768×416, 3.8 % squashed. stable-diffusion.cpp then stretched it to 1568×832 for a 1536×864 image. Forge now picks the largest size on the 32-pixel grid within 1 % of the original shape: 1536×864 is sent as 736×416, which the server scales to exactly 1536×864.
