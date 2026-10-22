@@ -6,6 +6,7 @@
 
 import type { SystemReport, VramProcess } from './SystemReport';
 import { escapeTelegramHtml } from '../remote/telegramHtml';
+import { textBar } from '../remote/telegramReportFormat';
 
 export interface FormatOptions {
   /** Telegram and tool results: drop column padding that a phone would wrap. */
@@ -14,6 +15,8 @@ export interface FormatOptions {
   sidebar?: boolean;
   /** Telegram HTML: emphasize Forge's registered backend/model without trusting its name as markup. */
   telegramHtml?: boolean;
+  /** Telegram `/system` phone cards; never used by the tool or sidebar. */
+  telegramCards?: boolean;
 }
 
 const GIB = 1024 * 1024 * 1024;
@@ -164,6 +167,7 @@ function formatSidebarSystemReport(report: SystemReport): string {
 }
 
 export function formatSystemReport(report: SystemReport, options: FormatOptions = {}): string {
+  if (options.telegramCards) return formatTelegramCards(report);
   if (options.sidebar) return formatSidebarSystemReport(report);
   const compact = options.compact === true;
   const lines = gpuSection(report, compact);
@@ -179,6 +183,80 @@ export function formatSystemReport(report: SystemReport, options: FormatOptions 
 
   const text = lines.join('\n');
   return options.telegramHtml ? withTelegramForgeBackendEmphasis(text, report.vramProcesses) : text;
+}
+
+function formatTelegramCards(report: SystemReport): string {
+  const lines: string[] = [];
+  if (report.gpuError)
+    lines.push(`<i>GPUs unavailable — ${escapeTelegramHtml(report.gpuError)}</i>`);
+  const attributed = new Set<number>();
+  for (const gpu of report.gpus) {
+    const processes = report.vramProcesses.filter((process) => process.gpuIndex === gpu.index);
+    processes.forEach((process) => attributed.add(process.pid));
+    const vram =
+      gpu.memoryUsedMb === null || gpu.memoryTotalMb === null
+        ? 'VRAM n/a'
+        : `VRAM ${textBar(gpu.memoryUsedMb / gpu.memoryTotalMb, 12)} ${gpuGb(gpu.memoryUsedMb / 1024)}/${gpuGb(gpu.memoryTotalMb / 1024)} GB`;
+    const idle =
+      processes.length === 0 && gpu.utilizationPercent !== null && gpu.utilizationPercent < 5;
+    const load = gpu.utilizationPercent === null ? 'n/a' : `${gpu.utilizationPercent}%`;
+    const temp = gpu.temperatureC === null ? 'n/a' : `${gpu.temperatureC}°C`;
+    const detail = [vram, `Load ${load}${idle ? ' · idle' : ''} · ${temp}`];
+    for (const process of processes) {
+      const name = process.name ?? '(exited)';
+      const model = process.forgeModel ? ` · ${process.forgeModel}` : '';
+      detail.push(`└ ${name}${model}  ${gpuGb(process.bytes / (1024 * 1024 * 1024))} GB`);
+    }
+    lines.push(`<b>GPU ${gpu.index} · ${escapeTelegramHtml(shortGpuName(gpu.name))}</b>`);
+    lines.push(`<pre>${escapeTelegramHtml(detail.join('\n'))}</pre>`);
+  }
+  const unattributed = report.vramProcesses.filter((process) => !attributed.has(process.pid));
+  if (unattributed.length > 0) {
+    const heading = report.gpus.length > 0 ? 'VRAM (card not resolved)' : 'VRAM by process';
+    lines.push(`<b>${heading}</b>`);
+    lines.push(
+      `<pre>${escapeTelegramHtml(
+        unattributed
+          .map(
+            (process) =>
+              `└ ${process.name ?? '(exited)'}${process.forgeModel ? ` · ${process.forgeModel}` : ''}  ${gpuGb(process.bytes / (1024 * 1024 * 1024))} GB`,
+          )
+          .join('\n'),
+      )}</pre>`,
+    );
+  }
+  if (report.vramProcessError) {
+    lines.push(
+      `<i>Per-process VRAM unavailable — ${escapeTelegramHtml(report.vramProcessError)}</i>`,
+    );
+  } else if (report.vramProcesses.length === 0 && !report.gpuError && report.gpus.length === 0) {
+    lines.push(
+      `<i>No process is holding more than ${(report.minVramBytes / GIB).toFixed(2)} GB of VRAM.</i>`,
+    );
+  }
+  const usedRam = report.ram.totalBytes - report.ram.freeBytes;
+  lines.push('<b>Memory</b>');
+  lines.push(
+    `<pre>RAM  ${textBar(usedRam / report.ram.totalBytes, 12)}  ${gpuGb(usedRam / GIB)}/${gpuGb(report.ram.totalBytes / GIB)} GB</pre>`,
+  );
+  lines.push('<b>Drives</b>');
+  const drives = report.drives.filter((drive) => drive.totalBytes > 0);
+  const hiddenDrives = drives.length !== report.drives.length;
+  for (const drive of drives) {
+    const used = drive.totalBytes - drive.freeBytes;
+    const freeGb = drive.freeBytes / GIB;
+    const free =
+      freeGb >= 1_000 ? `${(freeGb / 1_000).toFixed(1)} TB free` : `${freeGb.toFixed(0)} GB free`;
+    lines.push(
+      `<pre>${escapeTelegramHtml(drive.drive)}  ${textBar(used / drive.totalBytes, 12)}  ${free}</pre>`,
+    );
+  }
+  if (hiddenDrives) lines.push('<i>Empty drives (0 GB) are hidden.</i>');
+  return lines.join('\n');
+}
+
+function gpuGb(value: number): string {
+  return value.toFixed(1);
 }
 
 /** Escape the complete report, then re-insert only Forge-owned backend labels as Telegram HTML. */

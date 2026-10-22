@@ -83,6 +83,7 @@ describe('RemoteHelpBridge', () => {
 
   it('routes /help through the persistent surface instead of the auto-cleaned reply path', async () => {
     const channel = new FakeRemoteChannel('telegram');
+    channel.declareHtmlSupport();
     const sendHelp = vi.fn(async () => undefined);
     const context = {
       channel: { ...channel, sendHelp } as unknown as RemoteChannel,
@@ -92,7 +93,42 @@ describe('RemoteHelpBridge', () => {
     await handleRemoteSessionCommand('/help', undefined, event, context);
 
     expect(sendHelp).toHaveBeenCalledOnce();
-    expect(sendHelp.mock.calls[0]?.[1]).toContain('<b>Forge commands:</b>');
+    expect(sendHelp.mock.calls[0]?.[1]).toContain('<b>Forge commands</b>');
     expect(channel.sent).toHaveLength(0);
   });
+
+  it('edits a tapped help section, then sends it as new messages if the edit fails', async () => {
+    const channel = new FakeRemoteChannel('telegram');
+    const sectionEvent: Extract<RemoteInboundEvent, { kind: 'help_action' }> = {
+      ...eventBase,
+      kind: 'help_action',
+      action: 'section',
+      helpToken: 'session',
+      sectionKey: 'session',
+      messageId: '42',
+    };
+
+    await channel.handleHelpAction(sectionEvent);
+    expect(channel.inlineEdits[0]).toMatchObject({
+      messageId: '42',
+      text: expect.stringContaining('<b>Session</b>'),
+      parseMode: 'HTML',
+    });
+    expect(channel.inlineKeyboards).toHaveLength(0);
+
+    channel.inlineEditError = 'message cannot be edited';
+    const result = await channel.handleHelpAction(sectionEvent);
+    expect(result).toEqual({ kind: 'handled' });
+    expect(channel.inlineKeyboards[0]?.text).toContain('<b>Session</b>');
+    expect(channel.inlineKeyboards[0]?.parseMode).toBe('HTML');
+  });
 });
+
+const eventBase = {
+  channel: 'telegram',
+  providerMessageId: 'callback-2',
+  senderId: 'owner',
+  chatId: 'chat',
+  chatType: 'private' as const,
+  receivedAt: 3,
+};

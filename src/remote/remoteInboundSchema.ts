@@ -38,6 +38,8 @@ export const RemoteInboundEventSchema = z.discriminatedUnion('kind', [
   InboundBaseSchema.extend({
     kind: z.literal('text'),
     text: z.string(),
+    /** Original Telegram message carrying a callback button, when this is a command shortcut. */
+    callbackMessageId: z.string().min(1).max(256).optional(),
     attachments: z.array(RemoteInboundAttachmentSchema).max(10).optional(),
     /** Set when the message replies to another; a reply to a session question answers it. */
     replyToMessageId: z.string().min(1).max(256).optional(),
@@ -107,18 +109,37 @@ export const RemoteInboundEventSchema = z.discriminatedUnion('kind', [
   }),
   InboundBaseSchema.extend({
     kind: z.literal('help_action'),
-    action: z.literal('close'),
-    helpToken: z.literal('x'),
+    action: z.enum(['close', 'menu', 'section']),
+    helpToken: z.string().max(8),
+    sectionKey: z.string().max(8).optional(),
     messageId: z.string().min(1).max(256),
   }),
   InboundBaseSchema.extend({
     kind: z.literal('selection'),
     selectionKind: z.enum(['models', 'conversations', 'workspaces']),
     selectionToken: z.string().regex(/^[A-Za-z0-9_-]{12}$/),
-    action: z.enum(['show', 'close', 'select']),
+    action: z.enum(['show', 'close', 'select', 'pick', 'noop']),
     page: z.number().int().min(0).max(9).optional(),
     choice: z.number().int().min(0).max(99).optional(),
+    index: z.number().int().min(0).max(999).optional(),
     messageId: z.string().min(1).max(256),
+  }),
+  InboundBaseSchema.extend({
+    kind: z.literal('job_action'),
+    index: z.number().int().min(0).max(99_999_999),
+    hash: z.string().regex(/^[a-f0-9]{8}$/),
+    action: z.enum(['show', 'r', 'p', 'u', 'c', 'd', 'D', 'l']),
+    messageId: z.string().min(1).max(256),
+  }),
+  InboundBaseSchema.extend({
+    kind: z.literal('queue_action'),
+    requestId: z.string().min(1).max(60).optional(),
+    all: z.boolean().optional(),
+    messageId: z.string().min(1).max(256),
+  }),
+  InboundBaseSchema.extend({
+    kind: z.literal('agent_ask_action'),
+    agentKind: z.enum(['claude', 'codex', 'copilot']),
   }),
   /** Inline Stop callbacks resolve by message; reply-keyboard taps resolve by bound chat. */
   InboundBaseSchema.extend({

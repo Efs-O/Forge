@@ -72,6 +72,7 @@ export interface TelegramChannelOptions {
 /** Telegram Bot API long polling with disposition-before-cursor ordering. */
 export class TelegramChannel implements RemoteChannel {
   readonly name = 'telegram' as const;
+  readonly parseMode = 'HTML' as const;
   readonly selectionPages = createTelegramSelectionPages((method, body, signal) =>
     this.call(method, body, signal),
   );
@@ -200,6 +201,12 @@ export class TelegramChannel implements RemoteChannel {
   }
   sendInlineKeyboard(...args: Parameters<TelegramOutbound['sendInlineKeyboard']>) {
     return this.outbound.sendInlineKeyboard(...args);
+  }
+  editInlineKeyboardMessage(...args: Parameters<TelegramOutbound['editInlineKeyboardMessage']>) {
+    return this.outbound.editInlineKeyboardMessage(...args);
+  }
+  sendForceReply(...args: Parameters<TelegramOutbound['sendForceReply']>) {
+    return this.outbound.sendForceReply(...args);
   }
   sendHelp(...args: Parameters<TelegramOutbound['sendHelp']>) {
     return this.outbound.sendHelp(...args);

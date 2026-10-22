@@ -6,6 +6,7 @@ import { sendTelegramPhoto } from './TelegramPhoto';
 import { plainTelegramText, splitTelegramText } from './TelegramText';
 import { sendTelegramVoice } from './TelegramVoice';
 import { styleTelegramNotice } from './telegramNoticeStyle';
+import { inlineKeyboardMarkup, TELEGRAM_CALLBACK_DATA_LIMIT_BYTES } from './telegramInlineKeyboard';
 import type { TelegramChatQueue } from './telegramSendQueue';
 import {
   telegramRemoveStopReplyKeyboard,
@@ -16,7 +17,6 @@ import type { ProgressMessageOptions, RemoteContactButton, RemoteInboundAttachme
 
 const TelegramSentMessageSchema = z.object({ message_id: z.number().int() });
 const PROMPT_MESSAGE_LIMIT = 256;
-const TELEGRAM_CALLBACK_DATA_LIMIT_BYTES = 64;
 
 /**
  * The one button a resolved approval leaves behind, greyed out by Telegram's
@@ -60,12 +60,17 @@ export class TelegramOutbound {
   async send(
     chatId: string,
     text: string,
-    options?: { correlationId?: string; signal?: AbortSignal },
+    options?: { correlationId?: string; signal?: AbortSignal; parseMode?: 'HTML' },
   ): Promise<string[]> {
-    const notice = styleTelegramNotice(text);
+    const notice = options?.parseMode ? undefined : styleTelegramNotice(text);
     return notice
       ? this.sendText(chatId, notice, options, 'HTML')
-      : this.sendText(chatId, plainTelegramText(text), options);
+      : this.sendText(
+          chatId,
+          options?.parseMode ? text : plainTelegramText(text),
+          options,
+          options?.parseMode,
+        );
   }
 
   async sendHtml(
@@ -200,14 +205,7 @@ export class TelegramOutbound {
   ): Promise<string | undefined> {
     const notice = options?.parseMode ? undefined : styleTelegramNotice(text);
     const chunks = splitTelegramText(notice ?? text);
-    const keyboard = buttons.map((row) =>
-      row.map((button) => {
-        if (Buffer.byteLength(button.callbackData, 'utf8') > TELEGRAM_CALLBACK_DATA_LIMIT_BYTES) {
-          throw new Error('Forge Telegram callback identifier exceeds the Bot API limit.');
-        }
-        return { text: button.text, callback_data: button.callbackData };
-      }),
-    );
+    const replyMarkup = inlineKeyboardMarkup(buttons);
     let firstMessageId: string | undefined;
     for (let index = 0; index < chunks.length; index++) {
       const sent = await this.call(
@@ -218,7 +216,7 @@ export class TelegramOutbound {
           ...(notice || options?.parseMode
             ? { parse_mode: notice ? 'HTML' : options?.parseMode }
             : {}),
-          ...(index === 0 ? { reply_markup: { inline_keyboard: keyboard } } : {}),
+          ...(index === 0 ? { reply_markup: replyMarkup } : {}),
         },
         options?.signal,
       );
@@ -228,6 +226,50 @@ export class TelegramOutbound {
       }
     }
     return firstMessageId;
+  }
+
+  async editInlineKeyboardMessage(
+    chatId: string,
+    messageId: string,
+    text: string,
+    buttons: readonly RemoteContactButton[][],
+    options?: { signal?: AbortSignal; parseMode?: 'HTML' },
+  ): Promise<void> {
+    const replyMarkup = inlineKeyboardMarkup(buttons);
+    await this.call(
+      'editMessageText',
+      {
+        chat_id: chatId,
+        message_id: Number(messageId),
+        text,
+        ...(options?.parseMode ? { parse_mode: options.parseMode } : {}),
+        reply_markup: replyMarkup,
+      },
+      options?.signal,
+    );
+  }
+
+  async sendForceReply(
+    chatId: string,
+    text: string,
+    placeholder: string,
+    options?: { signal?: AbortSignal },
+  ): Promise<string | undefined> {
+    const sent = await this.call(
+      'sendMessage',
+      {
+        chat_id: chatId,
+        text,
+        reply_markup: {
+          force_reply: true,
+          input_field_placeholder: placeholder,
+          selective: true,
+        },
+      },
+      options?.signal,
+    );
+    const parsed = TelegramSentMessageSchema.safeParse(sent);
+    return parsed.success ? String(parsed.data.message_id) : undefined;
   }
 
   sendHelp(
@@ -268,20 +310,7 @@ export class TelegramOutbound {
     buttons: readonly RemoteContactButton[][],
     options?: { signal?: AbortSignal },
   ): Promise<void> {
-    const inlineKeyboard = buttons.map((row) =>
-      row.map((button) => {
-        if (Buffer.byteLength(button.callbackData, 'utf8') > TELEGRAM_CALLBACK_DATA_LIMIT_BYTES) {
-          throw new Error('Forge Telegram callback identifier exceeds the Bot API limit.');
-        }
-        return { text: button.text, callback_data: button.callbackData };
-      }),
-    );
-    await this.editReplyMarkup(
-      chatId,
-      messageId,
-      { inline_keyboard: inlineKeyboard },
-      options?.signal,
-    );
+    await this.editReplyMarkup(chatId, messageId, inlineKeyboardMarkup(buttons), options?.signal);
   }
 
   /**

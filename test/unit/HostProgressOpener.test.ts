@@ -65,7 +65,9 @@ describe('HostProgressOpener', () => {
     opener.handle(status('Running tests…'));
     await settle();
     // The words stream into the bubble, with the status as its footer.
-    expect(channel.edits.at(-1)?.text).toMatch(/^I have strong evidence\n\n⏳ Running tests… · /);
+    expect(channel.edits.at(-1)?.text).toMatch(
+      /^I have strong evidence\n\n⏳ Running tests…\n<1 min · 0 tool calls · active /,
+    );
     expect(channel.stopButtons.has('1')).toBe(true);
   });
 

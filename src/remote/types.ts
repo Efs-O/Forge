@@ -192,6 +192,8 @@ export interface RemoteSelectionControls {
   token: string;
   page: number;
   pageCount: number;
+  /** Absolute, zero-based selection indices shown on this page. */
+  pickIndexes?: readonly number[] | undefined;
 }
 
 export interface RemoteSelectionChoice {
@@ -253,8 +255,10 @@ export interface RemoteChannel {
   send(
     chatId: string,
     text: string,
-    options?: { correlationId?: string; signal?: AbortSignal },
+    options?: { correlationId?: string; signal?: AbortSignal; parseMode?: 'HTML' },
   ): Promise<string[] | void>;
+  /** Set only by transports whose Bot API accepts Telegram HTML. */
+  readonly parseMode?: 'HTML' | undefined;
   /** Optional typed inline keyboard used by Telegram contact approvals. */
   sendInlineKeyboard?(
     chatId: string,
@@ -266,7 +270,11 @@ export interface RemoteChannel {
   sendHelp?(
     chatId: string,
     text: string,
-    options?: { signal?: AbortSignal; parseMode?: 'HTML' },
+    options?: {
+      signal?: AbortSignal;
+      parseMode?: 'HTML';
+      buttons?: readonly RemoteContactButton[][];
+    },
   ): Promise<void>;
   /** Handles the close callback for a help message owned by this channel. */
   handleHelpAction(
@@ -325,6 +333,21 @@ export interface RemoteChannel {
     text: string,
     options?: ProgressMessageOptions,
   ): Promise<void>;
+  /** Telegram-only edit for a report/card that owns an inline keyboard. */
+  editInlineKeyboardMessage?(
+    chatId: string,
+    messageId: string,
+    text: string,
+    buttons: readonly RemoteContactButton[][],
+    options?: { signal?: AbortSignal; parseMode?: 'HTML' },
+  ): Promise<void>;
+  /** Telegram force-reply prompt; resolves to the provider message id. */
+  sendForceReply?(
+    chatId: string,
+    text: string,
+    placeholder: string,
+    options?: { signal?: AbortSignal },
+  ): Promise<string | undefined>;
   /**
    * Delete a previously sent message. Optional: channels with no such
    * affordance simply do not implement it, and command auto-cleanup is skipped.
@@ -344,18 +367,7 @@ export interface RemoteChannel {
   selectionPages?: RemoteSelectionPages;
   /** Fetches attachment bytes only after the controller has authenticated the sender. */
   downloadAttachment?(attachment: RemoteInboundAttachment): Promise<RemoteInboundAttachment>;
-  /**
-   * Stream a provider file straight to `targetPath` and report what landed.
-   *
-   * Separate from `downloadAttachment` because that one returns the payload as
-   * a string on the event, which audio must never become (§9.2). The caller
-   * owns `targetPath` -- in the voice path that is a `VoiceOperation` temp file,
-   * so cleanup stays keyed to the operation rather than to a stray `finally`.
-   */
-  /**
-   * Deliver a spoken reply as a playable voice message. Optional: channels with
-   * no such affordance simply do not implement it, and speech is skipped.
-   */
+  /** Deliver a playable voice reply; channels without support skip speech. */
   sendVoice?(chatId: string, oggPath: string, signal?: AbortSignal): Promise<void>;
   /** Deliver a local image file with a caption. Optional, like `sendVoice`. */
   sendPhoto?(
@@ -364,6 +376,7 @@ export interface RemoteChannel {
     caption: string,
     signal?: AbortSignal,
   ): Promise<void>;
+  /** Stream to a caller-owned file so voice cleanup stays operation-scoped. */
   downloadAttachmentToFile?(
     providerFileId: string,
     targetPath: string,

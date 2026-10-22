@@ -22,6 +22,9 @@ import { openDiscussChat } from '../jobs/jobDiscuss';
 import { approveStaged } from '../jobs/actions/llamacppUpdate';
 import type { ForgeHostFacade } from '../sidebar/ForgeHostFacade';
 import type { RemoteChannel, RemoteInboundDisposition, RemoteInboundEvent } from './types';
+import { escapeTelegramHtml } from './telegramHtml';
+import { telegramJobButton, telegramJobHash } from './TelegramJobButtons';
+import { renderRemoteJobCard, renderRemoteJobList } from './remoteJobReport';
 
 /** How long a `/job <n> delete` stays confirmable. Short: it is destructive. */
 const CONFIRM_WINDOW_MS = 90_000;
@@ -42,6 +45,15 @@ export interface RemoteJobContext {
   store: JobStore;
   /** True when `jobs.enabled` in the active config. */
   jobsEnabled: boolean;
+  telegramEditMessageId?: string | undefined;
+  telegramJobTarget?:
+    | {
+        index: number;
+        hash: string;
+        messageId: string;
+        action: 'show' | 'r' | 'p' | 'u' | 'c' | 'd' | 'D' | 'l';
+      }
+    | undefined;
 }
 
 /**
@@ -73,7 +85,16 @@ export async function handleRemoteJobCommand(
   context: RemoteJobContext,
 ): Promise<RemoteInboundDisposition | undefined> {
   if (command === '/jobs') return handleJobsList(event, context);
-  if (command === '/job') return handleJob(operands, event, context);
+  if (command === '/job') {
+    const result = await handleJob(operands, event, context);
+    const action = context.telegramJobTarget?.action;
+    if (action === 'r' || action === 'p' || action === 'u' || action === 'c') {
+      await editJobCard(event, context);
+    } else if (action === 'D' && result.kind === 'handled') {
+      await editJobsList(event, context, await context.store.loadAll());
+    }
+    return result;
+  }
   return undefined;
 }
 
@@ -91,6 +112,15 @@ async function handleJobsList(
     return { kind: 'handled' };
   }
   const all = await context.store.loadAll();
+  if (context.telegramJobTarget?.action === 'show') {
+    return editJobCard(event, context, all);
+  }
+  if (context.telegramJobTarget?.action === 'l') {
+    return editJobsList(event, context, all);
+  }
+  if (context.channel.parseMode && context.channel.sendInlineKeyboard) {
+    return editJobsList(event, context, all);
+  }
   if (all.length === 0) {
     await reply(
       context,
@@ -307,12 +337,98 @@ async function handleDelete(
     updatedAt: jobFile.job.updated_at,
     expiresAt: Date.now() + CONFIRM_WINDOW_MS,
   });
+  if (context.telegramJobTarget && context.channel.editInlineKeyboardMessage) {
+    const target = context.telegramJobTarget;
+    const question = `<b>About to delete “${escapeTelegramHtml(jobFile.job.name)}”</b>\nIts definition, state, and run log will be removed. Confirm within 90 seconds.`;
+    const buttons = [
+      [
+        telegramJobButton('Confirm delete', target.index, jobFile.job.id, 'D'),
+        telegramJobButton('‹ Jobs', target.index, jobFile.job.id, 'l'),
+      ],
+    ];
+    await context.channel.editInlineKeyboardMessage(
+      event.chatId,
+      target.messageId,
+      question,
+      buttons,
+      { signal: context.signal, parseMode: 'HTML' },
+    );
+    return { kind: 'handled' };
+  }
   await reply(
     context,
     event.chatId,
     `Forge: about to delete "${jobFile.job.name}" [${jobFile.job.id}]. Its definition, state, and run log will be removed.\n\nSend /job ${jobFile.job.id} delete confirm within 90 seconds to go ahead.`,
   );
   return { kind: 'handled' };
+}
+
+async function editJobsList(
+  event: Extract<RemoteInboundEvent, { kind: 'text' }>,
+  context: RemoteJobContext,
+  all: readonly JobFile[],
+): Promise<RemoteInboundDisposition> {
+  const report = renderRemoteJobList(all);
+  try {
+    if (context.telegramEditMessageId && context.channel.editInlineKeyboardMessage) {
+      await context.channel.editInlineKeyboardMessage(
+        event.chatId,
+        context.telegramEditMessageId,
+        report.html,
+        report.buttons,
+        { signal: context.signal, parseMode: 'HTML' },
+      );
+    } else if (context.channel.sendInlineKeyboard) {
+      await context.channel.sendInlineKeyboard(event.chatId, report.html, report.buttons, {
+        signal: context.signal,
+        parseMode: 'HTML',
+      });
+    } else {
+      await context.channel.send(event.chatId, report.plain, { signal: context.signal });
+    }
+    return { kind: 'handled' };
+  } catch (err) {
+    return {
+      kind: 'rejected',
+      reason: `job list could not be updated: ${err instanceof Error ? err.message : String(err)}`,
+    };
+  }
+}
+
+async function editJobCard(
+  event: Extract<RemoteInboundEvent, { kind: 'text' }>,
+  context: RemoteJobContext,
+  all?: readonly JobFile[],
+): Promise<RemoteInboundDisposition> {
+  const target = context.telegramJobTarget;
+  if (!target) return { kind: 'rejected', reason: 'job card target is unavailable' };
+  const file = (all ?? (await context.store.loadAll()))[target.index];
+  if (!file || telegramJobHash(file.job.id) !== target.hash) {
+    await context.channel.send(event.chatId, 'The job list changed. Run /jobs again.', {
+      signal: context.signal,
+    });
+    return { kind: 'handled' };
+  }
+  const report = renderRemoteJobCard(file, target.index);
+  try {
+    if (context.channel.editInlineKeyboardMessage) {
+      await context.channel.editInlineKeyboardMessage(
+        event.chatId,
+        target.messageId,
+        report.html,
+        report.buttons,
+        { signal: context.signal, parseMode: 'HTML' },
+      );
+    } else {
+      await context.channel.send(event.chatId, report.plain, { signal: context.signal });
+    }
+    return { kind: 'handled' };
+  } catch (err) {
+    return {
+      kind: 'rejected',
+      reason: `job card could not be updated: ${err instanceof Error ? err.message : String(err)}`,
+    };
+  }
 }
 
 /** Resolve a job by number (1-based, as listed by /jobs), exact id, exact name, or unique substring. */

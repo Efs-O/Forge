@@ -1,15 +1,8 @@
 import { z } from 'zod';
 import * as path from 'path';
 import type { RemoteInboundEvent } from './types';
-import { parseTelegramSelectionCallback } from './TelegramSelectionPagination';
-import { parseTelegramQuestionCallback } from './TelegramQuestionButtons';
-import { parseTelegramHelpCallback } from './TelegramHelpButtons';
-import {
-  isTelegramStopCallback,
-  isTelegramStopControlCallback,
-  STOP_KEY_LABEL,
-} from './TelegramStopButton';
-import { parseTelegramSendNowCallback } from './TelegramSendNowButton';
+import { mapTelegramCallbackQuery } from './telegramCallbackMapping';
+import { STOP_KEY_LABEL } from './TelegramStopButton';
 
 /**
  * Bot API update -> `RemoteInboundEvent`, and the media-type guesses that go
@@ -116,6 +109,10 @@ export const TelegramUpdateSchema = z.object({
     })
     .optional(),
 });
+
+export type TelegramCallbackQuery = NonNullable<
+  z.infer<typeof TelegramUpdateSchema>['callback_query']
+>;
 
 /**
  * Types whose bytes really are text. Everything else is base64: see the note in
@@ -319,111 +316,7 @@ export function telegramUpdateToEvent(
         : {}),
     };
   }
-  const callback = update.callback_query;
-  if (!callback || !callback.message || !callback.data) return undefined;
-  const sendNow = parseTelegramSendNowCallback(callback.data);
-  if (sendNow) {
-    return {
-      channel: 'telegram',
-      kind: 'send_now_action',
-      providerMessageId: callback.id,
-      senderId: String(callback.from.id),
-      chatId: String(callback.message.chat.id),
-      chatType: telegramChatType(callback.message.chat.type),
-      receivedAt: Date.now(),
-      requestId: sendNow,
-      messageId: String(callback.message.message_id),
-    };
-  }
-  const selection = parseTelegramSelectionCallback(callback.data);
-  if (selection) {
-    return {
-      channel: 'telegram',
-      kind: 'selection',
-      providerMessageId: callback.id,
-      senderId: String(callback.from.id),
-      chatId: String(callback.message.chat.id),
-      chatType: telegramChatType(callback.message.chat.type),
-      receivedAt: Date.now(),
-      selectionKind: selection.kind,
-      selectionToken: selection.token,
-      action: selection.action,
-      ...(selection.page === undefined ? {} : { page: selection.page }),
-      ...(selection.choice === undefined ? {} : { choice: selection.choice }),
-      messageId: String(callback.message.message_id),
-    };
-  }
-  const question = parseTelegramQuestionCallback(callback.data);
-  if (question) {
-    return {
-      channel: 'telegram',
-      kind: 'question_action',
-      providerMessageId: callback.id,
-      senderId: String(callback.from.id),
-      chatId: String(callback.message.chat.id),
-      chatType: telegramChatType(callback.message.chat.type),
-      receivedAt: Date.now(),
-      questionId: question.questionId,
-      action: question.action,
-      ...(question.action === 'select' ? { choice: question.choice } : {}),
-      messageId: String(callback.message.message_id),
-    };
-  }
-  const help = parseTelegramHelpCallback(callback.data);
-  if (help) {
-    return {
-      channel: 'telegram',
-      kind: 'help_action',
-      providerMessageId: callback.id,
-      senderId: String(callback.from.id),
-      chatId: String(callback.message.chat.id),
-      chatType: telegramChatType(callback.message.chat.type),
-      receivedAt: Date.now(),
-      action: 'close',
-      helpToken: help.token,
-      messageId: String(callback.message.message_id),
-    };
-  }
-  if (isTelegramStopCallback(callback.data)) {
-    return {
-      channel: 'telegram',
-      kind: 'stop_action',
-      providerMessageId: callback.id,
-      senderId: String(callback.from.id),
-      chatId: String(callback.message.chat.id),
-      chatType: telegramChatType(callback.message.chat.type),
-      receivedAt: Date.now(),
-      messageId: String(callback.message.message_id),
-      source: isTelegramStopControlCallback(callback.data) ? 'control' : 'bubble',
-      ...(isTelegramStopControlCallback(callback.data) ? { control: true } : {}),
-    };
-  }
-  const contact = /^c:([A-Za-z0-9_-]{16,48}):([sc])$/.exec(callback.data);
-  if (contact) {
-    return {
-      channel: 'telegram',
-      kind: 'contact_action',
-      providerMessageId: callback.id,
-      senderId: String(callback.from.id),
-      chatId: String(callback.message.chat.id),
-      chatType: telegramChatType(callback.message.chat.type),
-      receivedAt: Date.now(),
-      action: contact[2] === 's' ? 'send' : 'cancel',
-      correlationId: contact[1]!,
-      messageId: String(callback.message.message_id),
-    };
-  }
-  const match = /^([ad]):(.+)$/.exec(callback.data);
-  if (!match) return undefined;
-  return {
-    channel: 'telegram',
-    kind: 'action',
-    providerMessageId: callback.id,
-    senderId: String(callback.from.id),
-    chatId: String(callback.message.chat.id),
-    chatType: telegramChatType(callback.message.chat.type),
-    receivedAt: Date.now(),
-    action: match[1] === 'a' ? 'approve' : 'deny',
-    correlationId: match[2]!,
-  };
+  return update.callback_query
+    ? mapTelegramCallbackQuery(update.callback_query, telegramChatType)
+    : undefined;
 }

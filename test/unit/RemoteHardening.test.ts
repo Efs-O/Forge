@@ -217,7 +217,7 @@ describe('remote owner commands', () => {
     await channel.emit(event({ providerMessageId: 'new', text: '/new' }));
     await channel.emit(event({ providerMessageId: 'status', text: '/status' }));
     const reply = channel.sent.at(-1)?.text ?? '';
-    expect(reply).toContain('1000/4000 tokens (25%)');
+    expect(reply).toContain('1K of 4K · 3K left');
     // A remote owner cannot see the sidebar, so a disabled gate must be stated.
     expect(reply).toContain('CLANKER');
     await controller.stop();

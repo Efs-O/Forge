@@ -29,14 +29,12 @@ import { createWebviewSendAction } from './turnMirrorWiring';
 import { logWebviewDiagnostic } from './webviewDiagnostics';
 import {
   buildModelsMessage,
-  buildSessionMetrics,
-  liveStreamMetrics,
+  buildFollowedSessionMetrics,
   buildSessionSyncMessage,
 } from './sidebarPayloads';
 import { workspaceInfoMessage } from './workspaceInfo';
 import { buildWebviewHtml, webviewResourceRoots } from './WebviewBuilder';
 import type { IndexManager } from '../search/IndexManager';
-import type { SessionTimeSnapshot } from '../vscode/SessionTimeStatusBar';
 import type { RequestChainLifecycle } from './RequestChainLifecycle';
 import type { ForgeHostFacade } from './ForgeHostFacade';
 import { createSidebarHostFacade } from './sidebarFacadeWiring';
@@ -417,26 +415,20 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
     return splitModelProfile(expandAlias(this.config, id)).base;
   }
 
-  /** Recomputes and posts the budget for the ACTIVE conversation. */
   private postTokenBudget(): void {
     this.budget.publish(this.getActive());
   }
 
-  private getActive(): ConversationRuntime {
-    return this.tabs.active();
-  }
+  private getActive = (): ConversationRuntime => this.tabs.active();
 
-  /** Metrics for the followed open chat, else active; names disambiguate background chats. */
-  getSessionMetrics(followedId: string | undefined): SessionTimeSnapshot {
-    const active = this.getActive();
-    // Open chats only: an archived one has stopped, and its numbers are not news.
-    const followed = this.sidebar.conversations.find((c) => c.id === followedId);
-    const conv = followed ?? active;
-    return {
-      ...buildSessionMetrics(conv, this.agentLoop.getSessionActiveMs(conv)),
-      ...(conv.id !== active.id ? { following: conv.title } : {}),
-      ...liveStreamMetrics(this.agentLoop.getLiveStream(conv.id)),
-    };
+  getSessionMetrics(followedId: string | undefined) {
+    return buildFollowedSessionMetrics(
+      this.sidebar,
+      this.getActive(),
+      followedId,
+      (conversation) => this.agentLoop.getSessionActiveMs(conversation),
+      (conversationId) => this.agentLoop.getLiveStream(conversationId),
+    );
   }
 
   private handleMessage(msg: WebviewToHost): void {

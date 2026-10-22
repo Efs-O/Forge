@@ -11,6 +11,8 @@ import {
   computeContextBudget,
   createOutputBudgetTracker,
   estimateTokens,
+  estimateContextParts,
+  scaleContextParts,
   estimateToolTokens,
   perSlotContext,
   type PromptAnchor,
@@ -131,6 +133,33 @@ describe('perSlotContext', () => {
     expect(DEFAULT_LLAMA_PARALLEL).toBe(4);
     expect(args[args.indexOf('--ctx-size') + 1]).toBe(String(DEFAULT_LLAMA_CTX));
     expect(args[args.indexOf('--parallel') + 1]).toBe(String(DEFAULT_LLAMA_PARALLEL));
+  });
+});
+
+describe('context report breakdown', () => {
+  it('scales measured prompt parts so the estimate sums exactly to the used total', () => {
+    const messages: ChatMessage[] = [
+      { role: 'system', content: 'Follow the repository instructions carefully.' },
+      { role: 'user', content: 'Review this source and explain the risk.' },
+    ];
+    const tools: ToolDefinition[] = [
+      {
+        type: 'function',
+        function: {
+          name: 'read_file',
+          description: 'Read a workspace file.',
+          parameters: { type: 'object', properties: { path: { type: 'string' } } },
+        },
+      },
+    ];
+    const parts = scaleContextParts(
+      estimateContextParts(messages, estimateToolTokens(tools)),
+      12_345,
+    );
+    expect(parts.instructions + parts.tools + parts.conversation).toBe(12_345);
+    expect(parts.instructions).toBeGreaterThan(0);
+    expect(parts.tools).toBeGreaterThan(0);
+    expect(parts.conversation).toBeGreaterThan(0);
   });
 });
 

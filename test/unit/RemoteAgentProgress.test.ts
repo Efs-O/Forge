@@ -54,7 +54,7 @@ describe('RemoteAgentProgress', () => {
       {
         chatId: 'chat-a',
         messageId: 'message-1',
-        text: 'I read the file. Now I will update it.\n\n⏳ Running read_file… · <1 min · 1 tool call · last activity 1 s ago',
+        text: 'I read the file. Now I will update it.\n\n⏳ Running read_file…\n<1 min · 1 tool call · active 1 s ago',
       },
     ]);
     expect(channel.stopButtons.has('message-1')).toBe(true);
@@ -115,7 +115,7 @@ describe('RemoteAgentProgress', () => {
     // The status-only bubble above the warning goes; the footer, with its
     // standing copy of the warning, moves below it.
     expect(channel.deleted).toEqual([{ chatId: 'chat-a', messageId: 'message-1' }]);
-    expect(channel.progress.at(-1)?.text).toContain(`⚠ ${warning}\n⏳ Forge: working…`);
+    expect(channel.progress.at(-1)?.text).toContain(`⚠ ${warning}\n⏳ Working…\n`);
     const deleted = new Set(channel.deleted.map((d) => d.messageId));
     expect([...channel.stopButtons].filter((id) => !deleted.has(id))).toEqual(['1']);
 
@@ -146,7 +146,7 @@ describe('RemoteAgentProgress', () => {
       {
         chatId: 'chat-a',
         messageId: 'message-1',
-        text: '⏳ Forge: loading the model… · <1 min · 0 tool calls · last activity 1 s ago',
+        text: '⏳ Forge: loading the model…\n<1 min · 0 tool calls · active 1 s ago',
       },
     ]);
 
@@ -156,7 +156,7 @@ describe('RemoteAgentProgress', () => {
     expect(channel.edits.at(-1)).toEqual({
       chatId: 'chat-a',
       messageId: 'message-1',
-      text: 'On it.\n\n⏳ Forge: working… · <1 min · 0 tool calls · last activity 1 s ago',
+      text: 'On it.\n\n⏳ Working…\n<1 min · 0 tool calls · active 1 s ago',
     });
   });
 
@@ -319,7 +319,7 @@ describe('RemoteAgentProgress', () => {
     expect(channel.edits.at(-1)).toEqual({
       chatId: 'chat-a',
       messageId: 'message-1',
-      text: '⏳ Running run_build… · 1 min · 1 tool call · last activity 31 s ago',
+      text: '⏳ Running run_build…\n1 min · 1 tool call · active 31 s ago',
     });
     expect(channel.sent).toEqual([]);
 
@@ -335,7 +335,7 @@ describe('RemoteAgentProgress', () => {
       60_000,
     );
     expect(truncated.length).toBeLessThanOrEqual(90);
-    expect(truncated).toContain('· 1 min · 2 tool calls · last activity 1 min ago');
+    expect(truncated).toContain('1 min · 2 tool calls · active 1 min ago');
   });
 
   it('counts every tool and treats reasoning as activity only', async () => {
@@ -358,7 +358,7 @@ describe('RemoteAgentProgress', () => {
 
     const bubble = channel.edits.at(-1)?.text ?? '';
     expect(bubble).toContain('2 tool calls');
-    expect(bubble).toContain('last activity 2 min ago');
+    expect(bubble).toContain('active 2 min ago');
     expect(bubble).not.toContain('reasoning');
     expect(channel.sent).toEqual([]);
   });

@@ -71,7 +71,7 @@ export async function routeRemoteText(
   if (isRemoteCommand(event.text)) {
     const result = touched(await handleRemoteCommand(event, deps.commandContext(event), key));
     if (result.kind === 'handled' || result.kind === 'rejected') {
-      deps.scheduleCommandCleanup(event);
+      if (!event.callbackMessageId) deps.scheduleCommandCleanup(event);
     }
     return result;
   }

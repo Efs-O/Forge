@@ -3,9 +3,10 @@ import type { RemoteSelectionChoice, RemoteSelectionControls, RemoteSelectionPag
 export interface TelegramSelectionCallback {
   kind: RemoteSelectionControls['kind'];
   token: string;
-  action: 'show' | 'close' | 'select';
+  action: 'show' | 'close' | 'select' | 'pick' | 'noop';
   page?: number;
   choice?: number;
+  index?: number;
 }
 
 /**
@@ -55,20 +56,36 @@ export function createTelegramSelectionPages(call: TelegramBotCall): RemoteSelec
 export function telegramSelectionKeyboard(controls: RemoteSelectionControls): {
   inline_keyboard: TelegramButton[][];
 } {
+  const rows: TelegramButton[][] = [];
+  const picks = controls.pickIndexes ?? [];
+  for (let offset = 0; offset < picks.length; offset += 5) {
+    rows.push(
+      picks.slice(offset, offset + 5).map((index) => ({
+        text: String(index + 1),
+        callback_data: encodeSelectionPick(controls, index),
+      })),
+    );
+  }
   const navigation: TelegramButton[] = [];
-  if (controls.page > 0) {
-    navigation.push({
-      text: '◀ Previous',
-      callback_data: encodeSelectionCallback(controls, controls.page - 1),
-    });
-  }
-  if (controls.page + 1 < controls.pageCount) {
-    navigation.push({
-      text: 'Next ▶',
-      callback_data: encodeSelectionCallback(controls, controls.page + 1),
-    });
-  }
-  const rows = navigation.length > 0 ? [navigation] : [];
+  navigation.push({
+    text: '‹ Prev',
+    callback_data:
+      controls.page > 0
+        ? encodeSelectionCallback(controls, controls.page - 1)
+        : encodeSelectionNoop(controls),
+  });
+  navigation.push({
+    text: `${controls.page + 1} / ${controls.pageCount}`,
+    callback_data: encodeSelectionNoop(controls),
+  });
+  navigation.push({
+    text: 'Next ›',
+    callback_data:
+      controls.page + 1 < controls.pageCount
+        ? encodeSelectionCallback(controls, controls.page + 1)
+        : encodeSelectionNoop(controls),
+  });
+  rows.push(navigation);
   rows.push([
     {
       text: '✕ Close',
@@ -103,10 +120,14 @@ function telegramChoiceKeyboard(
 export function parseTelegramSelectionCallback(
   data: string,
 ): TelegramSelectionCallback | undefined {
-  const match = /^s:([A-Za-z0-9_-]{12}):([cmw]):(x|[0-9]|p[0-9]{1,2})$/.exec(data);
+  const match = /^s:([A-Za-z0-9_-]{12}):([cmw]):(x|z|n\d{1,3}|[0-9]|p[0-9]{1,2})$/.exec(data);
   if (!match) return undefined;
   const kind = KIND_BY_CODE[match[2] as keyof typeof KIND_BY_CODE];
   if (match[3] === 'x') return { kind, token: match[1]!, action: 'close' };
+  if (match[3] === 'z') return { kind, token: match[1]!, action: 'noop' };
+  if (match[3]!.startsWith('n')) {
+    return { kind, token: match[1]!, action: 'pick', index: Number(match[3]!.slice(1)) };
+  }
   if (match[3]!.startsWith('p')) {
     return {
       kind,
@@ -175,6 +196,21 @@ function encodeSelectionCallback(controls: RemoteSelectionControls, target: numb
     throw new Error('Forge Telegram selection callback exceeds the Bot API limit.');
   }
   return data;
+}
+
+function encodeSelectionPick(controls: RemoteSelectionControls, index: number): string {
+  if (!Number.isInteger(index) || index < 0 || index > 999) {
+    throw new Error('Forge Telegram selection index is invalid.');
+  }
+  const data = `s:${controls.token}:${CODE_BY_KIND[controls.kind]}:n${index}`;
+  if (Buffer.byteLength(data, 'utf8') > 64) {
+    throw new Error('Forge Telegram selection callback exceeds the Bot API limit.');
+  }
+  return data;
+}
+
+function encodeSelectionNoop(controls: RemoteSelectionControls): string {
+  return `s:${controls.token}:${CODE_BY_KIND[controls.kind]}:z`;
 }
 
 function encodeSelectionChoice(controls: RemoteSelectionControls, choice: number): string {

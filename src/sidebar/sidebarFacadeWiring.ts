@@ -16,6 +16,7 @@ import { get } from '../agentLinks/chatAgentLinks';
 import { resolveInboundAgentTarget } from '../agentLinks/inboundAgentRouting';
 import type { AskAgentRequest, AskAgentResult } from '../agentLinks/askAgentService';
 import type { AgentLink } from '../agentLinks/chatAgentLinks';
+import { reportedContextTokens, scaleContextParts } from '../util/contextBudget';
 
 export interface SidebarFacadeDeps {
   runtime: SidebarRuntimeParts;
@@ -135,6 +136,11 @@ export function createSidebarHostFacade(deps: SidebarFacadeDeps): ForgeHostFacad
     contextBudget: (conversationId) => {
       const conv = findConversation(deps.getSidebar(), conversationId);
       return conv ? budget.resolvedSnapshot(conv) : undefined;
+    },
+    contextBreakdown: (conversationId) => {
+      const conv = findConversation(deps.getSidebar(), conversationId);
+      const parts = conv?.contextTrimState?.lastRequestParts;
+      return conv && parts ? scaleContextParts(parts, reportedContextTokens(conv)) : undefined;
     },
     onCompactionEvent: (listener) => slashHandler.onCompactionEvent(listener),
     onHostActivity: (listener) => slashHandler.onHostActivity(listener),

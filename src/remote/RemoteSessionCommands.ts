@@ -1,17 +1,13 @@
 import type { RemoteCommandContext } from './RemoteCommandHandler';
-import { HELP_TEXT, decorateHelpLine } from './remoteHelpText';
-import {
-  boldLeadingNumber,
-  boldLineLabel,
-  markupTelegramLines,
-  sendRichText,
-} from './telegramHtml';
+import { HELP_TEXT, renderRemoteHelpMenu } from './remoteHelpText';
+import { escapeTelegramHtml } from './telegramHtml';
+import { handleRemoteStatusReportCommand, remoteQueueForChat } from './remoteStatusReport';
+import { telegramQueueButton } from './TelegramQueueButtons';
 import type { RemoteInboundDisposition, RemoteInboundEvent } from './types';
 import { formatElapsed } from './remoteProgressRender';
 import { MAX_VIEW_COUNT, parseViewCount, sendTranscriptView } from './RemoteTranscriptView';
-import { getBoardContext } from '../agentMesh/meshContext';
-import { readEvents, type ExchangeEvent } from '../agentMesh/exchangeLog';
 import { isAskAgentRunning } from '../agentLinks/askAgentService';
+import { formatRemoteRelativeDate } from './RemoteDateTime';
 
 type TextEvent = Extract<RemoteInboundEvent, { kind: 'text' }>;
 
@@ -25,42 +21,6 @@ type TextEvent = Extract<RemoteInboundEvent, { kind: 'text' }>;
  */
 const RELOAD_SETTLE_MS = 1_000;
 
-/** Line labels `/status` owns; bolding them makes the report scannable. */
-const STATUS_LABELS = new Set([
-  'Workspace',
-  'Chat',
-  'Model',
-  'Work',
-  'Active time',
-  'Forge',
-  'Context',
-  'Board',
-  'Sessions',
-  'Approvals',
-]);
-
-/** Line labels `/context` owns. */
-const CONTEXT_LABELS = new Set(['Forge context', 'Remaining']);
-
-/**
- * Recent exchange lines for `/status`, scoped to the bound chat.
- */
-function describeAgentBoard(conversation: string | undefined): string | undefined {
-  const ctx = getBoardContext();
-  if (!ctx) return undefined;
-  if (conversation === undefined) return undefined;
-  const latest = new Map<string, ExchangeEvent>();
-  for (const event of readEvents(ctx.log)) {
-    if (event.workspace !== ctx.workspace || event.conversation !== conversation) continue;
-    const prior = latest.get(event.exchangeId);
-    if (!prior || event.seq > prior.seq) latest.set(event.exchangeId, event);
-  }
-  const rows = [...latest.values()].sort((left, right) => right.seq - left.seq).slice(0, 3);
-  return rows.length === 0
-    ? 'Exchanges: none'
-    : `Exchanges: ${rows.map((row) => `${row.from}${row.to ? `→${row.to}` : ''} ${row.state}`).join(', ')}`;
-}
-
 /** Queue/session commands split from model, workspace, and lifecycle controls. */
 export async function handleRemoteSessionCommand(
   command: string,
@@ -68,70 +28,19 @@ export async function handleRemoteSessionCommand(
   event: TextEvent,
   context: RemoteCommandContext,
 ): Promise<RemoteInboundDisposition | undefined> {
+  const reportCommand = await handleRemoteStatusReportCommand(command, event, context);
+  if (reportCommand) return reportCommand;
   if (command === '/help' || command === '/commands' || command === '/start') {
-    // Per-command descriptions already ship as Telegram's native command menu,
-    // so repeating them here only doubled the length of the message. What is
-    // left is a map, and a map is only useful if it is scannable: one group per
-    // paragraph, one note per paragraph, nothing wrapping into its neighbour.
-    if (context.channel.sendHelp) {
-      await context.channel.sendHelp(
-        event.chatId,
-        markupTelegramLines(HELP_TEXT, decorateHelpLine),
-        { signal: context.signal, parseMode: 'HTML' },
-      );
-    } else {
-      await sendRichText(context.channel, event.chatId, HELP_TEXT, decorateHelpLine, {
+    if (context.channel.parseMode && context.channel.sendHelp) {
+      const menu = renderRemoteHelpMenu();
+      await context.channel.sendHelp(event.chatId, menu.html, {
         signal: context.signal,
+        parseMode: 'HTML',
+        buttons: menu.buttons,
       });
+    } else {
+      await context.channel.send(event.chatId, HELP_TEXT, { signal: context.signal });
     }
-    return { kind: 'handled' };
-  }
-  if (command === '/status') {
-    const status = context.host.status();
-    const binding = context.store.binding(event.channel, event.chatId);
-    const queued = binding ? ownQueue(event, context, binding.conversationId).length : 0;
-    const outbox = context.store.outboxHealth();
-    const conversation = status.conversations.find((item) => item.id === binding?.conversationId);
-    // §5/M9: the crash-unknown count is scoped to *this chat's* conversation.
-    // An unbound chat shows no count and never falls back to the global total.
-    const crashUnknown = binding
-      ? `${context.store.requestHealthForConversation(binding.conversationId).unknown} crash-unknown`
-      : 'no conversation bound (crash-unknown not shown)';
-    // P2: the agent board (scoped to this conversation, M9) + the live-session
-    // line. Absent when the agent bus is not up — /status never invents a board.
-    const boardLines = describeAgentBoard(binding?.conversationId);
-    await sendRichText(
-      context.channel,
-      event.chatId,
-      // The workspace leads: a chat reached through /new could be sitting in
-      // any project on disk, and nothing else in the session says which.
-      `Workspace: ${context.currentWorkspaceName ?? 'unknown'}${
-        context.currentWorkspaceAlias ? ` (${context.currentWorkspaceAlias})` : ''
-      }\n` +
-        `Chat: ${conversation ? `${conversation.title} · ${conversation.id}` : 'none bound'}\n` +
-        `Model: ${conversation?.activeModel ?? 'default'}\n` +
-        `Forge: ${status.requestChains.length} active request(s), ${queued} queued here, ${status.streamingConversationIds.length} streaming, ${crashUnknown}, ${outbox.pending} notifications pending, ${outbox.abandoned} abandoned.\n` +
-        `Context: ${describeBudget(binding && context.host.contextBudget(binding.conversationId))}\n` +
-        // Sits under Context because it answers the same question: what this
-        // chat has spent.
-        `${describeWork(conversation)}\n` +
-        (boardLines ? `${boardLines}\n` : '') +
-        `Approvals: ${context.host.clankerMode() ? 'CLANKER — non-dangerous tools auto-approved' : 'gated'}`,
-      (line) => boldLineLabel(line, STATUS_LABELS),
-      { signal: context.signal },
-    );
-    return { kind: 'handled' };
-  }
-  if (command === '/context') {
-    const binding = context.store.binding(event.channel, event.chatId);
-    if (!binding) return { kind: 'rejected', reason: 'no conversation is bound' };
-    await sendRichText(
-      context.channel,
-      event.chatId,
-      describeDetailedBudget(context.host.contextBudget(binding.conversationId)),
-      (line) => boldLineLabel(line, CONTEXT_LABELS),
-      { signal: context.signal },
-    );
     return { kind: 'handled' };
   }
   if (command === '/view') {
@@ -166,19 +75,34 @@ export async function handleRemoteSessionCommand(
   if (command === '/agents') {
     const binding = context.store.binding(event.channel, event.chatId);
     if (!binding) return { kind: 'rejected', reason: 'no conversation is bound' };
-    const links = (['claude', 'codex', 'copilot'] as const)
-      .map((kind) => {
-        const link = context.host.getAgentLink(binding.conversationId, kind);
-        return link
-          ? `${kind}: ${link.title} · last used ${new Date(link.lastUsedAt).toLocaleString()} · ${isAskAgentRunning(binding.conversationId) ? 'running' : 'idle'}`
-          : undefined;
-      })
-      .filter((line): line is string => line !== undefined);
-    await context.channel.send(
-      event.chatId,
-      links.length ? links.join('\n') : 'No agent sessions are linked to this chat.',
-      { signal: context.signal },
-    );
+    const status = isAskAgentRunning(binding.conversationId) ? 'running' : 'idle';
+    const lines = (['claude', 'codex', 'copilot'] as const).map((kind) => {
+      const title = kind[0]!.toUpperCase() + kind.slice(1);
+      const link = context.host.getAgentLink(binding.conversationId, kind);
+      if (!link) return { html: `<b>${title}</b> · not linked`, plain: `${title} · not linked` };
+      const meta = `${link.title} · ${formatRemoteRelativeDate(link.lastUsedAt)}`;
+      return {
+        html: `<b>${title} · ${status}</b>\n${escapeTelegramHtml(meta)}`,
+        plain: `${title} · ${status}\n${meta}`,
+      };
+    });
+    const html = `<b>Linked agents</b> <i>· this chat</i>\n\n${lines.map((line) => line.html).join('\n\n')}`;
+    const plain = `Linked agents · this chat\n\n${lines.map((line) => line.plain).join('\n\n')}`;
+    const buttons = [
+      [
+        { text: 'Ask Claude', callbackData: 'a:claude' },
+        { text: 'Ask Codex', callbackData: 'a:codex' },
+        { text: 'Ask Copilot', callbackData: 'a:copilot' },
+      ],
+    ];
+    if (context.channel.parseMode && context.channel.sendInlineKeyboard) {
+      await context.channel.sendInlineKeyboard(event.chatId, html, buttons, {
+        signal: context.signal,
+        parseMode: 'HTML',
+      });
+    } else {
+      await context.channel.send(event.chatId, plain, { signal: context.signal });
+    }
     return { kind: 'handled' };
   }
   if (command === '/notify') {
@@ -279,43 +203,59 @@ export async function handleRemoteSessionCommand(
   if (command === '/queue') {
     const binding = context.store.binding(event.channel, event.chatId);
     if (!binding) return { kind: 'rejected', reason: 'no conversation is bound' };
-    const queued = ownQueue(event, context, binding.conversationId);
-    const entries = queued.map(
-      (item) => `${item.priority === 'steer' ? '[steer] ' : ''}${truncate(item.text, 160)}`,
-    );
-    const notes = [
-      ...(queued.length > 0
-        ? [
-            'Text reaches the running turn at its next step; photos and other attachments wait for the turn to end. Tap Send now on its receipt to stop the turn and run it next. Use /drop <number|all> to cancel.',
-          ]
-        : []),
-    ];
-    await sendRichText(
-      context.channel,
-      event.chatId,
-      entries.length === 0
-        ? 'Forge: no queued prompts for this chat.'
-        : entries.map((entry, index) => `${index + 1}. ${entry}`).join('\n\n') +
-            (notes.length > 0 ? `\n\n${notes.join('\n\n')}` : ''),
-      (line) => (line.startsWith('These run') ? `<i>${line}</i>` : boldLeadingNumber(line)),
-      { signal: context.signal },
-    );
+    const queued = remoteQueueForChat(event, context, binding.conversationId);
+    const report = renderQueueReport(queued);
+    if (context.telegramEditMessageId && context.channel.editInlineKeyboardMessage) {
+      await context.channel.editInlineKeyboardMessage(
+        event.chatId,
+        context.telegramEditMessageId,
+        report.html,
+        report.buttons,
+        { signal: context.signal, parseMode: 'HTML' },
+      );
+    } else if (
+      context.channel.parseMode &&
+      context.channel.sendInlineKeyboard &&
+      report.buttons.length > 0
+    ) {
+      await context.channel.sendInlineKeyboard(event.chatId, report.html, report.buttons, {
+        signal: context.signal,
+        parseMode: 'HTML',
+      });
+    } else if (context.channel.parseMode && context.channel.sendHtml) {
+      await context.channel.sendHtml(event.chatId, report.html, { signal: context.signal });
+    } else {
+      await context.channel.send(event.chatId, report.plain, { signal: context.signal });
+    }
     return { kind: 'handled' };
   }
   if (command === '/drop') {
     const binding = context.store.binding(event.channel, event.chatId);
     if (!binding) return { kind: 'rejected', reason: 'no conversation is bound' };
     if (!argument) return { kind: 'rejected', reason: 'usage: /drop <number|all>' };
-    const queued = ownQueue(event, context, binding.conversationId);
-    if (queued.length === 0) return { kind: 'rejected', reason: 'no queued prompts to cancel' };
+    const queued = remoteQueueForChat(event, context, binding.conversationId);
+    if (queued.length === 0) {
+      if (context.telegramEditMessageId) {
+        await context.channel.send(event.chatId, 'Already gone.', { signal: context.signal });
+        await editQueueBoard(event, context, binding.conversationId);
+        return { kind: 'handled' };
+      }
+      return { kind: 'rejected', reason: 'no queued prompts to cancel' };
+    }
     let selected: ReadonlySet<string>;
     if (argument.toLowerCase() === 'all') {
       selected = new Set(queued.map((item) => item.id));
     } else {
-      if (!/^\d+$/.test(argument)) {
+      const byId = queued.find((item) => item.id === argument);
+      if (!byId && context.telegramEditMessageId) {
+        await context.channel.send(event.chatId, 'Already gone.', { signal: context.signal });
+        await editQueueBoard(event, context, binding.conversationId);
+        return { kind: 'handled' };
+      }
+      if (!byId && !/^\d+$/.test(argument)) {
         return { kind: 'rejected', reason: 'usage: /drop <number|all>' };
       }
-      const item = queued[Number(argument) - 1];
+      const item = byId ?? queued[Number(argument) - 1];
       if (!item) return { kind: 'rejected', reason: 'queue number is out of range' };
       selected = new Set([item.id]);
     }
@@ -330,6 +270,9 @@ export async function handleRemoteSessionCommand(
       `Forge: cancelled ${cancelled} queued prompt${cancelled === 1 ? '' : 's'}.`,
       { signal: context.signal },
     );
+    if (context.telegramEditMessageId) {
+      await editQueueBoard(event, context, binding.conversationId);
+    }
     return { kind: 'handled' };
   }
   return undefined;
@@ -365,20 +308,70 @@ export function describeBudget(budget: { used: number; max: number } | undefined
   return `${budget.used}/${budget.max} tokens (${percent}%)`;
 }
 
-function describeDetailedBudget(budget: { used: number; max: number } | undefined): string {
-  if (!budget || budget.max <= 0) return 'Forge context: unavailable (no num_ctx for this model).';
-  const remaining = Math.max(0, budget.max - budget.used);
-  const percent = Math.round((budget.used / budget.max) * 100);
-  return (
-    `Forge context: ${budget.used}/${budget.max} tokens (${percent}%).\n` +
-    `Remaining: ${remaining} tokens. Auto-compaction uses the configured threshold and also runs after a recoverable context-exhaustion failure.`
-  );
+function renderQueueReport(queued: ReturnType<RemoteCommandContext['store']['queued']>): {
+  html: string;
+  plain: string;
+  buttons: Array<Array<{ text: string; callbackData: string }>>;
+} {
+  const rows = queued.map((item, index) => {
+    const text = truncate(item.text.replace(/[\r\n]+/gu, ' '), 120);
+    const photoCount =
+      item.attachments?.filter((attachment) => attachment.mediaType.startsWith('image/')).length ??
+      0;
+    const fileCount = (item.attachments?.length ?? 0) - photoCount;
+    const attachment =
+      photoCount > 0 ? `${photoCount} photos` : fileCount > 0 ? `${fileCount} files` : undefined;
+    const tags = [
+      ...(item.priority === 'steer' ? ['<b>steer</b>'] : []),
+      ...(attachment ? [`<b>${escapeTelegramHtml(attachment)}</b>`] : []),
+    ];
+    return {
+      html: `<b>${index + 1}.</b> ${escapeTelegramHtml(text)}${tags.length ? ` · ${tags.join(' · ')}` : ''}`,
+      plain: `${index + 1}. ${text}${item.priority === 'steer' ? ' · steer' : ''}${attachment ? ` · ${attachment}` : ''}`,
+    };
+  });
+  const headerHtml = `<b>Queue</b> <i>· ${queued.length} waiting</i>`;
+  const headerPlain = `Queue · ${queued.length} waiting`;
+  const bodyHtml =
+    queued.length === 0
+      ? 'Nothing queued.'
+      : `${rows.map((row) => row.html).join('\n')}\n\n<i>Text reaches the turn at its next step; photos wait for it to end.</i>`;
+  const bodyPlain =
+    queued.length === 0
+      ? 'Nothing queued.'
+      : `${rows.map((row) => row.plain).join('\n')}\n\nText reaches the turn at its next step; photos wait for it to end.`;
+  const buttons: Array<Array<{ text: string; callbackData: string }>> = [];
+  if (queued.length > 0 && queued.length <= 10) {
+    for (let offset = 0; offset < queued.length; offset += 3) {
+      buttons.push(
+        queued
+          .slice(offset, offset + 3)
+          .map((item, index) => telegramQueueButton(`Drop ${offset + index + 1}`, item.id)),
+      );
+    }
+    buttons.push([telegramQueueButton('Drop all', 'all')]);
+  }
+  return {
+    html: `${headerHtml}\n${bodyHtml}`,
+    plain: `${headerPlain}\n${bodyPlain}`,
+    buttons,
+  };
 }
 
-function ownQueue(event: TextEvent, context: RemoteCommandContext, conversationId: string) {
-  return context.store
-    .queued(conversationId)
-    .filter((item) => item.channel === event.channel && item.chatId === event.chatId);
+async function editQueueBoard(
+  event: TextEvent,
+  context: RemoteCommandContext,
+  conversationId: string,
+): Promise<void> {
+  if (!context.telegramEditMessageId || !context.channel.editInlineKeyboardMessage) return;
+  const report = renderQueueReport(remoteQueueForChat(event, context, conversationId));
+  await context.channel.editInlineKeyboardMessage(
+    event.chatId,
+    context.telegramEditMessageId,
+    report.html,
+    report.buttons,
+    { signal: context.signal, parseMode: 'HTML' },
+  );
 }
 
 function truncate(value: string, maximum: number): string {

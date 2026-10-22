@@ -7,6 +7,7 @@ import { sendModelProfileSelection } from './RemoteModelProfileSelection';
 import { resolveModelSelection } from './remoteCommandSelectors';
 import { globalBusyReason } from './remoteCommandShared';
 import type { RemoteCommandContext } from './RemoteCommandHandler';
+import { telegramCommandButton } from './TelegramCommandButtons';
 
 /**
  * The model-management remote commands: `/models`, `/model`, `/system`,
@@ -64,10 +65,17 @@ export async function handleRemoteModelCommand(
     const report = await collectSystemReport({
       backendProcesses: () => context.host.backendProcesses?.() ?? [],
     });
-    const text = formatSystemReport(report, {
-      compact: true,
-      telegramHtml: context.channel.sendHtml !== undefined,
-    });
+    if (context.channel.parseMode && context.channel.sendInlineKeyboard) {
+      const text = formatSystemReport(report, { telegramCards: true });
+      await context.channel.sendInlineKeyboard(
+        event.chatId,
+        text,
+        [[telegramCommandButton('system', 'Refresh')]],
+        { signal: context.signal, parseMode: 'HTML' },
+      );
+      return { kind: 'handled' };
+    }
+    const text = formatSystemReport(report, { compact: true });
     if (context.channel.sendHtml) {
       await context.channel.sendHtml(event.chatId, text, { signal: context.signal });
     } else {

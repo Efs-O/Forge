@@ -155,6 +155,40 @@ export function estimateToolTokens(definitions: unknown[]): number {
   return Math.ceil(JSON.stringify(definitions).length / CHARS_PER_TOKEN);
 }
 
+export interface EstimatedContextParts {
+  instructions: number;
+  tools: number;
+  conversation: number;
+}
+
+/** Estimated composition of one model-facing request: system prompt, tool schemas, the rest. */
+export function estimateContextParts(
+  messages: ChatMessage[],
+  toolTokens: number,
+): EstimatedContextParts {
+  return {
+    instructions: estimateTokens(messages.filter((message) => message.role === 'system')),
+    tools: toolTokens,
+    conversation: estimateTokens(messages.filter((message) => message.role !== 'system')),
+  };
+}
+
+/**
+ * Attribute a measured context total by the proportions of an estimate. The
+ * returned values always sum to the provider-reported total.
+ */
+export function scaleContextParts(
+  parts: EstimatedContextParts,
+  used: number,
+): EstimatedContextParts {
+  const totalEstimate = parts.instructions + parts.tools + parts.conversation;
+  const measured = Math.max(0, Math.round(used));
+  if (totalEstimate <= 0) return { instructions: 0, tools: 0, conversation: measured };
+  const instructions = Math.floor((measured * parts.instructions) / totalEstimate);
+  const tools = Math.floor((measured * parts.tools) / totalEstimate);
+  return { instructions, tools, conversation: measured - instructions - tools };
+}
+
 function spawnArgs(model: ModelConfig): string[] {
   return [
     ...(model.spawn?.extra_llama_server_args ?? []),

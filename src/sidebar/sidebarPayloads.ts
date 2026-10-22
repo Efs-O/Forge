@@ -175,3 +175,19 @@ export function buildSessionMetrics(
       : {}),
   };
 }
+
+/** Metrics for a followed open chat, else the active tab. */
+export function buildFollowedSessionMetrics(
+  sidebar: SidebarRuntime,
+  active: ConversationRuntime,
+  followedId: string | undefined,
+  activeMs: (conversation: ConversationRuntime) => number,
+  live: (conversationId: string) => LiveStreamEstimate | undefined,
+): SessionTimeSnapshot {
+  const conversation = sidebar.conversations.find((item) => item.id === followedId) ?? active;
+  return {
+    ...buildSessionMetrics(conversation, activeMs(conversation)),
+    ...(conversation.id !== active.id ? { following: conversation.title } : {}),
+    ...liveStreamMetrics(live(conversation.id)),
+  };
+}

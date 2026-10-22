@@ -656,7 +656,7 @@ describe('TelegramChannel', () => {
       // The apostrophe arrives HTML-escaped: the notice is sent with
       // parse_mode HTML, so any quote in a reason must be escaped or it would
       // break the markup.
-      text: '<blockquote>ℹ️ Forge: This media type isn&#39;t supported yet: live_photo.</blockquote>',
+      text: '<blockquote>ℹ️ This media type isn&#39;t supported yet: live_photo.</blockquote>',
       parse_mode: 'HTML',
     });
     expect(armed).toEqual([{ chatId: '99', messageIds: ['12'], kind: 'transient' }]);
@@ -743,15 +743,16 @@ describe('TelegramChannel', () => {
     expect(calls[0]!.body).toMatchObject({
       chat_id: 'chat',
       text: 'page two',
-      reply_markup: {
-        inline_keyboard: [
-          [
-            { text: '◀ Previous', callback_data: 's:abcdefghijkl:c:0' },
-            { text: 'Next ▶', callback_data: 's:abcdefghijkl:c:2' },
+        reply_markup: {
+          inline_keyboard: [
+            [
+              { text: '‹ Prev', callback_data: 's:abcdefghijkl:c:0' },
+              { text: '2 / 3', callback_data: 's:abcdefghijkl:c:z' },
+              { text: 'Next ›', callback_data: 's:abcdefghijkl:c:2' },
+            ],
+            [{ text: '✕ Close', callback_data: 's:abcdefghijkl:c:x' }],
           ],
-          [{ text: '✕ Close', callback_data: 's:abcdefghijkl:c:x' }],
-        ],
-      },
+        },
     });
     expect(calls[1]!.body).toMatchObject({ message_id: 42, text: 'page three' });
     expect(calls[2]!.body).toEqual({ chat_id: 'chat', message_id: 42 });
@@ -780,9 +781,17 @@ describe('TelegramChannel', () => {
       token: 'abcdefghijkl',
       page: 0,
       pageCount: 2,
+      pickIndexes: [0, 1],
     });
-    const next = keyboard.inline_keyboard[0]![0]!.callback_data;
-    const close = keyboard.inline_keyboard[1]![0]!.callback_data;
+    const pick = keyboard.inline_keyboard[0]![0]!.callback_data;
+    const next = keyboard.inline_keyboard[1]![2]!.callback_data;
+    const close = keyboard.inline_keyboard[2]![0]!.callback_data;
+    expect(parseTelegramSelectionCallback(pick)).toEqual({
+      kind: 'models',
+      token: 'abcdefghijkl',
+      action: 'pick',
+      index: 0,
+    });
     expect(Buffer.byteLength(next, 'utf8')).toBeLessThanOrEqual(64);
     expect(parseTelegramSelectionCallback(next)).toEqual({
       kind: 'models',
@@ -1035,7 +1044,7 @@ describe('TelegramChannel', () => {
     await vi.waitFor(() => expect(sent).toHaveLength(1));
     expect(sent[0]).toMatchObject({
       chat_id: '99',
-      text: '<blockquote>ℹ️ Forge: voice input is disabled (set voice.enabled in config)</blockquote>',
+      text: '<blockquote>ℹ️ voice input is disabled (set voice.enabled in config)</blockquote>',
       parse_mode: 'HTML',
     });
     expect(armed).toEqual([{ chatId: '99', messageIds: ['7'], kind: 'transient' }]);
@@ -1094,7 +1103,7 @@ describe('TelegramChannel', () => {
     await vi.waitFor(() => expect(sent).toHaveLength(1));
     expect(sent[0]).toMatchObject({
       chat_id: '99',
-      text: '<blockquote>⚠️ Forge: conversation could not be restored.</blockquote>',
+      text: '<blockquote>⚠️ conversation could not be restored.</blockquote>',
       parse_mode: 'HTML',
     });
   });

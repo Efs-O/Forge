@@ -91,6 +91,17 @@ export interface RemoteCommandContext {
    * store's full surface for a config read.
    */
   jobs?: { store: JobStore; enabled: boolean } | undefined;
+  /** Callback board message to update after a button runs an existing command. */
+  telegramEditMessageId?: string | undefined;
+  /** Stable job position passed only by a job-card action callback. */
+  telegramJobTarget?:
+    | {
+        index: number;
+        hash: string;
+        messageId: string;
+        action: 'show' | 'r' | 'p' | 'u' | 'c' | 'd' | 'D' | 'l';
+      }
+    | undefined;
   /**
    * Telegram contact-management commands, kept out of the normal command list.
    * Given `channel` so their replies are cleaned up like every other command's.
@@ -159,6 +170,10 @@ async function executeRemoteCommand(
       signal: context.signal,
       store: context.jobs.store,
       jobsEnabled: context.jobs.enabled,
+      ...(context.telegramEditMessageId
+        ? { telegramEditMessageId: context.telegramEditMessageId }
+        : {}),
+      ...(context.telegramJobTarget ? { telegramJobTarget: context.telegramJobTarget } : {}),
     });
     if (jobCommand) return jobCommand;
   }

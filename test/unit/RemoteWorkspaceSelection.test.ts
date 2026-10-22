@@ -91,7 +91,7 @@ describe('workspace selection', () => {
     });
 
     const sent = channel.selectionPageSends[0]!;
-    expect(sent.text).toContain('1. forge — Forge · current');
+    expect(sent.text).toContain('1. forge — Forge · ● current');
     expect(sent.text).toContain('2. qwen — Qwen Testing');
     expect(sent.text).not.toContain('Qwen Testing · current');
     // The numbering is the point of reusing the pager at all, and the command
@@ -110,7 +110,7 @@ describe('workspace selection', () => {
     // workspace, and reading it as a page is the collision this list caused.
     await sendWorkspaceSelection(textEvent('/workspace list'), ctx);
     const first = channel.selectionPageSends[0]!;
-    expect(first.text).toContain('page 1/3');
+    expect(first.text).toContain('Workspaces · 1–10 of 23');
     expect(first.text).toContain('10. ws-10');
     expect(first.text).not.toContain('11. ws-11');
     expect(first.controls).toMatchObject({ kind: 'workspaces', page: 0, pageCount: 3 });
@@ -232,7 +232,7 @@ describe('/workspace command shape', () => {
       ...ctx,
       currentWorkspaceName: 'Qwen testing',
     });
-    expect(channel.selectionPageSends[0]?.text).toContain('You are in: Qwen testing');
+    expect(channel.selectionPageSends[0]?.text).toContain('Use /workspace <number>.');
   });
 
   it('blames the expired list, not the workspace, when a number resolves to nothing', async () => {

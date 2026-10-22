@@ -128,12 +128,18 @@ export async function pollTelegramUpdates(
         await dependencies.acknowledge(event, disposition, signal);
       }
       if (update.callback_query) {
+        const callbackAnswer =
+          disposition.kind === 'rejected'
+            ? disposition.reason.slice(0, 200)
+            : event === undefined || (event.kind === 'selection' && event.action === 'noop')
+              ? undefined
+              : 'Received';
         await dependencies
           .call(
             'answerCallbackQuery',
             {
               callback_query_id: update.callback_query.id,
-              text: disposition.kind === 'rejected' ? disposition.reason.slice(0, 200) : 'Received',
+              ...(callbackAnswer ? { text: callbackAnswer } : {}),
             },
             signal,
           )

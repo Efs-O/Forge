@@ -109,6 +109,10 @@ export interface ForgeHostFacade {
   setClankerMode(on: boolean): void;
   /** Per-slot context for one conversation — `num_ctx / n_parallel`, not num_ctx. */
   contextBudget(conversationId: string): { used: number; max: number } | undefined;
+  /** Measured context apportioned across system instructions, tools and transcript. */
+  contextBreakdown(
+    conversationId: string,
+  ): { instructions: number; tools: number; conversation: number } | undefined;
   compact(
     conversationId: string,
     options?: {
@@ -212,6 +216,9 @@ export interface SidebarHostFacadeDeps {
   clankerMode: () => boolean;
   setClankerMode: (on: boolean) => void;
   contextBudget: (conversationId: string) => { used: number; max: number } | undefined;
+  contextBreakdown?: (
+    conversationId: string,
+  ) => { instructions: number; tools: number; conversation: number } | undefined;
   compact: (
     conversationId: string,
     options?: {
@@ -398,6 +405,8 @@ export class SidebarHostFacade implements ForgeHostFacade {
   contextBudget(conversationId: string): { used: number; max: number } | undefined {
     return this.deps.contextBudget(conversationId);
   }
+
+  contextBreakdown = (conversationId: string) => this.deps.contextBreakdown?.(conversationId);
 
   compact(
     conversationId: string,

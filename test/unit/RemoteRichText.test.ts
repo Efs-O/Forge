@@ -2,7 +2,14 @@ import { readFileSync } from 'fs';
 import { join } from 'path';
 import { describe, expect, it } from 'vitest';
 import { TELEGRAM_BOT_COMMANDS } from '../../src/remote/TelegramChannel';
-import { HELP_SECTIONS, HELP_TEXT, decorateHelpLine } from '../../src/remote/remoteHelpText';
+import {
+  HELP_SECTIONS,
+  HELP_TEXT,
+  REMOTE_HELP_SECTIONS,
+  decorateHelpLine,
+  renderRemoteHelpMenu,
+  renderRemoteHelpSection,
+} from '../../src/remote/remoteHelpText';
 import { boldLineLabel, markupTelegramLines, sendRichText } from '../../src/remote/telegramHtml';
 
 describe('remote rich text', () => {
@@ -49,6 +56,25 @@ describe('remote rich text', () => {
         .map((entry) => entry.toLowerCase());
       expect(commands, `section "${label}" is not sorted`).toEqual([...commands].sort());
     }
+  });
+
+  it('renders the Telegram section menu and keeps every section within the Bot API limit', () => {
+    const menu = renderRemoteHelpMenu();
+    expect(menu.html).toContain('<b>Forge commands</b>');
+    expect(menu.html).toContain('Tap a section for its commands.');
+    expect(menu.html).toContain('<code>/status</code>');
+    expect(menu.html).toContain('<code>/chats</code>');
+    expect(menu.html).toContain('<code>/model</code>');
+    expect(menu.html).toContain('<code>/stop</code>');
+    expect(menu.buttons.flat().map((button) => button.callbackData)).toContain('h:s:session');
+    expect(menu.buttons.at(-1)?.[0]?.callbackData).toBe('h:x');
+    expect([...menu.html].length).toBeLessThan(4096);
+    for (const section of REMOTE_HELP_SECTIONS) {
+      const messages = renderRemoteHelpSection(section.key);
+      expect(messages, section.key).toBeDefined();
+      for (const message of messages ?? []) expect([...message].length).toBeLessThan(4096);
+    }
+    expect(renderRemoteHelpSection('missing')).toBeUndefined();
   });
 
   it('falls back to the plain build on a transport that does not parse HTML', async () => {
@@ -106,6 +132,8 @@ describe('remote command map', () => {
     '/owner',
   ]);
   const EXTRA_IMPLEMENTED = [
+    '/context',
+    '/status',
     '/contact',
     '/contacts',
     '/send',

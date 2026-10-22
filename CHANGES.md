@@ -1,5 +1,22 @@
 # Forge — Recent Changes
 
+## 0.17.68
+
+Telegram reports are rewritten for a phone screen. Only Telegram changes: other transports, the `get_system_status` tool and the sidebar `/system` notice read exactly as before.
+
+- `/status` is a short card with bold labels for workspace, chat, model and current activity, plus a context bar. Buttons under it open `/context`, `/system` and `/chats`.
+- `/context` shows a usage bar and what fills the context: system instructions, tool schemas and the conversation. The parts come from the last request Forge actually sent and add up to the server's own count. The card says when auto-compaction will run, and a `Compact now` button does the same as typing `/compact`.
+- `/system` is one card per GPU, with a VRAM bar, load, temperature and the processes holding memory, then a RAM bar and one bar per drive. Empty drives are hidden. A `Refresh` button sends a fresh report.
+- `/chats`, `/models` and `/workspace` share one picker layout: a heading with the range shown, one entry per item with the current one marked, and number buttons. Tapping a number does the same as typing `/chat 3`, `/model 3` or `/workspace 3`. Model entries show their `@profile` names.
+- `/help` opens a menu of section buttons. Tapping a section changes the same message to that section, with a button back to the menu.
+- Approval requests read `Approve <tool>?`, or `⚠ Dangerous: <tool>`, with the details in a code block. The buttons and how they work are unchanged.
+- `/jobs` lists each job with its schedule, last run and next run, and number buttons. Tapping a number opens that job's card in the same message, with Run now, Pause or Resume, Chat, Delete and back-to-list buttons. Delete asks for confirmation within 90 seconds, as typing `/job N delete` does. If the job list has changed since the message was sent, a tap replies "The job list changed. Run /jobs again." and does nothing.
+- `/queue` has a `Drop N` button per waiting message and a `Drop all` button. The list updates in place after a drop.
+- `/agents` shows Claude, Codex and Copilot as running, idle or not linked, with an `Ask` button for each. Tapping one opens a reply box ("Question for Claude:"). Your reply is sent as `/claude <text>`. The box expires after 10 minutes, and only a direct reply to it counts.
+- The progress message shows the current step on one line, then elapsed time, tool calls and last activity on another.
+- Notices no longer start with `Forge: ` in Telegram. The text stored in logs and the outbox keeps the prefix.
+- Every button goes through the same owner and session check as the command it stands for. Taps on old messages after the list has changed or expired are refused with a message telling you which command to run again.
+
 ## 0.17.67
 
 - A Telegram chat that is locked behind the 6-digit code no longer receives a "Forge: working…" message for every turn you run in VS Code. Those messages were sent even while the chat was locked, and because a locked chat gets no edits, each one stayed in the chat forever. Now nothing is sent to a locked chat while a turn runs. If the chat unlocks during a turn, it starts following the turn within about 10 seconds. If the chat locks during a turn, the status message is deleted when the turn ends.

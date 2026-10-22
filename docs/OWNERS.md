@@ -270,6 +270,7 @@ overlaps with an existing owner, extend the owner instead.
 | Opening a turn's first progress bubble, shared by the queue drain and the sidebar mirror | `src/remote/remoteProgressOpen.ts` |
 | `/view` transcript replay rendering           | `src/remote/RemoteTranscriptView.ts`            |
 | Paged /list, /models, /workspace selections   | `src/remote/RemoteSelectionPager.ts`            |
+| Direct HTML formatting for numeric picker pages | `src/remote/remoteSelectionFormat.ts`          |
 | Selection list identity, token, expiry        | `src/remote/RemoteSelectionState.ts`            |
 | Sibling-workspace discovery + alias merge     | `src/remote/RemoteWorkspaceDiscovery.ts`        |
 | Chat handoff between workspace windows        | `src/remote/RemoteWorkspaceHandoff.ts`          |
@@ -277,6 +278,17 @@ overlaps with an existing owner, extend the owner instead.
 | Live handoff claim + switch rollback          | `src/remote/RemoteHandoffCoordinator.ts`        |
 | Atomic write of the shared remote state file  | `src/remote/remoteStateFile.ts`                 |
 | Telegram selection keyboard + callback codec  | `src/remote/TelegramSelectionPagination.ts`     |
+| Telegram command shortcut callback codec      | `src/remote/TelegramCommandButtons.ts`          |
+| Telegram job callback codec                    | `src/remote/TelegramJobButtons.ts`              |
+| Telegram queue callback codec                  | `src/remote/TelegramQueueButtons.ts`            |
+| Telegram callback query mapping                | `src/remote/telegramCallbackMapping.ts`         |
+| Telegram report button action routing           | `src/remote/RemoteReportCallbacks.ts`            |
+| Telegram job list and card rendering             | `src/remote/remoteJobReport.ts`                  |
+| Telegram status/context report and commands      | `src/remote/remoteStatusReport.ts`              |
+| Telegram report bars and short token counts      | `src/remote/telegramReportFormat.ts`             |
+| Memory-only linked-agent force-reply rendezvous  | `src/remote/remoteAgentAsk.ts`                  |
+| Bot API inline keyboard markup and callback limit | `src/remote/telegramInlineKeyboard.ts`          |
+| Remote absolute and relative date formatting      | `src/remote/RemoteDateTime.ts`                   |
 | Forge approval presentation + correlation     | `src/remote/RemoteApprovalBridge.ts`            |
 | Telegram Bot API transport                    | `src/remote/TelegramChannel.ts`                 |
 | Telegram group-contact workflow (link, /owner) | `src/remote/TelegramGroupContacts.ts`          |

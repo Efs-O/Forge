@@ -11,7 +11,7 @@ import type { ConversationRuntime } from './sessionTypes';
 import type { TemplateEngine } from '../llm/TemplateEngine';
 import type { ForgeInstructionsLoader } from '../llm/ForgeInstructionsLoader';
 import type { ToolDefinition, ChatMessage } from '../llm/types';
-import { estimateToolTokens } from '../util/contextBudget';
+import { estimateContextParts, estimateToolTokens } from '../util/contextBudget';
 import { stampToolResultClocks } from '../agent/toolResultClock';
 import { prepareToolResultContext, type ContextTrimState } from '../agent/toolResultContext';
 import { annotateRereads } from '../agent/staleReadSupersede';
@@ -97,12 +97,17 @@ export function prepareModelTurnMessages(
   const withThinking = preservesThinking(input.model)
     ? attachReasoning(withTurnContext)
     : withTurnContext;
-  return prepareToolResultContext({
+  const toolTokens = estimateToolTokens(input.getToolDefinitions());
+  const prepared = prepareToolResultContext({
     messages: stampToolResultClocks(nudgeTruncatedResults(annotateRereads(withThinking))),
-    toolTokens: estimateToolTokens(input.getToolDefinitions()),
+    toolTokens,
     model: input.model,
     server: input.config.llama_server,
     provider: input.model.provider ?? 'llama.cpp',
     state: input.contextTrimState,
   });
+  // The system prompt and tool schemas exist only in this request copy, never
+  // in conv.messages, so /context reads its breakdown from here.
+  input.contextTrimState.lastRequestParts = estimateContextParts(prepared.messages, toolTokens);
+  return prepared;
 }

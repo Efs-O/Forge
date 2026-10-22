@@ -36,6 +36,7 @@ export function noticeEmoji(text: string): string | undefined {
 export function styleTelegramNotice(text: string): string | undefined {
   const emoji = noticeEmoji(text);
   if (!emoji) return undefined;
-  const html = `<blockquote>${emoji} ${escapeTelegramHtml(text)}</blockquote>`;
+  const displayed = text.replace(/^Forge: /u, '');
+  const html = `<blockquote>${emoji} ${escapeTelegramHtml(displayed)}</blockquote>`;
   return [...html].length <= TELEGRAM_MESSAGE_LIMIT ? html : undefined;
 }

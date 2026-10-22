@@ -9,6 +9,8 @@ import type { RemoteAuth } from './RemoteAuth';
 import type { RemoteRequestStore } from './RemoteRequestStore';
 import type { RemoteChannel, RemoteInboundEvent } from './types';
 import type { PendingGate } from '../voice/VoiceGrammar';
+import { escapeTelegramHtml } from './telegramHtml';
+import { codePointLength } from '../util/codePoints';
 
 interface RemoteApprovalEntry {
   chatId: string;
@@ -221,15 +223,19 @@ export class RemoteApprovalBridge {
     if (nonce) pending.nonce = nonce;
     else delete pending.nonce;
     pending.actionId = newActionId();
-    const danger = pending.event.dangerous ? ' DANGEROUS' : '';
     try {
       const sent = await this.channel.send(
         pending.chatId,
-        `Forge approval${danger}: ${pending.event.toolName}\n${pending.event.detail}`.slice(
-          0,
+        formatApprovalPrompt(
+          pending.event,
           this.maxMessageChars,
+          this.channel.parseMode === 'HTML',
         ),
-        { correlationId: pending.actionId, signal: this.signal },
+        {
+          correlationId: pending.actionId,
+          signal: this.signal,
+          ...(this.channel.parseMode ? { parseMode: this.channel.parseMode } : {}),
+        },
       );
       // A republish shows the gate again; a reply to either message names it.
       if (sent) {
@@ -290,4 +296,30 @@ export class RemoteApprovalBridge {
       );
     }
   }
+}
+
+function formatApprovalPrompt(
+  event: ToolApprovalRequestEvent,
+  maximum: number,
+  telegramHtml: boolean,
+): string {
+  const danger = event.dangerous ? ' DANGEROUS' : '';
+  const plain = `Forge approval${danger}: ${event.toolName}\n${event.detail}`;
+  if (!telegramHtml) return plain.slice(0, maximum);
+  const heading = event.dangerous
+    ? `<b>⚠ Dangerous: ${escapeTelegramHtml(event.toolName)}</b>`
+    : `<b>Approve ${escapeTelegramHtml(event.toolName)}?</b>`;
+  const prefix = `${heading}\n<pre>`;
+  const suffix = '</pre>';
+  const budget = Math.max(0, maximum - codePointLength(prefix) - codePointLength(suffix));
+  let detail = '';
+  let escapedLength = 0;
+  for (const character of event.detail) {
+    const escapedCharacter = escapeTelegramHtml(character);
+    const cost = codePointLength(escapedCharacter);
+    if (escapedLength + cost > budget) break;
+    detail += character;
+    escapedLength += cost;
+  }
+  return `${prefix}${escapeTelegramHtml(detail)}${suffix}`;
 }

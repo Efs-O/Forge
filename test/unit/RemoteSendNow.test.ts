@@ -172,7 +172,7 @@ describe('owner /start command', () => {
   it('returns the same help response as /help', async () => {
     const sendHelp = vi.fn(async () => undefined);
     const context = {
-      channel: { sendHelp },
+      channel: { parseMode: 'HTML', sendHelp },
       signal: new AbortController().signal,
     } as unknown as RemoteCommandContext;
     const ownerEvent = {
@@ -190,10 +190,11 @@ describe('owner /start command', () => {
     ).resolves.toEqual({
       kind: 'handled',
     });
-    expect(sendHelp).toHaveBeenCalledWith('chat', expect.any(String), {
+    expect(sendHelp).toHaveBeenCalledWith('chat', expect.any(String), expect.objectContaining({
       signal: expect.any(AbortSignal),
       parseMode: 'HTML',
-    });
+      buttons: expect.any(Array),
+    }));
   });
 
   it('retires a receipt when /drop cancels its queued request', async () => {

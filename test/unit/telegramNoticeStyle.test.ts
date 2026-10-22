@@ -25,6 +25,18 @@ describe('Telegram notice styling', () => {
     );
   });
 
+  it('strips only the display prefix from a generic Forge notice', () => {
+    expect(styleTelegramNotice('Forge: Request failed: <tag>')).toBe(
+      '<blockquote>⚠️ Request failed: &lt;tag&gt;</blockquote>',
+    );
+    expect(styleTelegramNotice('Forge: asks: <tag>')).toBe(
+      '<blockquote>ℹ️ asks: &lt;tag&gt;</blockquote>',
+    );
+    expect(styleTelegramNotice('Forge approval: run_command\n<tag>')).toContain(
+      'Forge approval: run_command',
+    );
+  });
+
   it('sends a notice that would split across messages plain', () => {
     expect(styleTelegramNotice(`Forge request failed: ${'x'.repeat(4100)}`)).toBeUndefined();
   });

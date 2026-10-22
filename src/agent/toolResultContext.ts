@@ -1,5 +1,9 @@
 import type { ChatMessage } from '../llm/types';
-import { computeContextBudget, minimumOutputReserve } from '../util/contextBudget';
+import {
+  computeContextBudget,
+  minimumOutputReserve,
+  type EstimatedContextParts,
+} from '../util/contextBudget';
 import type { LlamaServerConfig, ModelConfig, ModelProvider } from '../config/types';
 import { getLogger } from '../util/logger';
 import { dropOldestReasoning } from './preserveThinking';
@@ -22,6 +26,8 @@ export interface ContextTrimState {
   reasoningDropped: number;
   /** Tool call IDs and their fixed excerpt sizes in chars. */
   excerpts: Map<string, number>;
+  /** Estimated composition of the last request sent, scaled by Telegram /context. */
+  lastRequestParts?: EstimatedContextParts;
 }
 
 export function createContextTrimState(): ContextTrimState {

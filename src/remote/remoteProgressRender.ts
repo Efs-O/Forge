@@ -9,7 +9,7 @@ export interface RemoteProgressRenderState {
 }
 
 /** What the footer says when nothing more specific is happening. */
-export const DEFAULT_STATUS = 'Forge: working…';
+export const DEFAULT_STATUS = 'Working…';
 
 /** Pure formatting keeps the clock stable under fake time and reusable in tests. */
 export function formatElapsed(milliseconds: number): string {
@@ -38,10 +38,13 @@ export function renderProgressFooter(
 ): string {
   const doing = [state.phase, state.milestone].filter(Boolean).join(' · ') || DEFAULT_STATUS;
   const calls = state.toolCalls === 1 ? '1 tool call' : `${state.toolCalls} tool calls`;
-  const line = `⏳ ${doing} · ${formatElapsed(now - state.startedAt)} · ${calls} · last activity ${formatLastActivity(
-    now - state.lastActivityAt,
-  )} ago`;
-  const lines = [...state.warnings.map((warning) => `⚠ ${warning}`), line].join('\n');
+  const lines = [
+    ...state.warnings.map((warning) => `⚠ ${warning}`),
+    `⏳ ${doing}`,
+    `${formatElapsed(now - state.startedAt)} · ${calls} · active ${formatLastActivity(
+      now - state.lastActivityAt,
+    )} ago`,
+  ].join('\n');
   if (lines.length <= maximum) return lines;
   return `…${lines.slice(-Math.max(1, maximum - 1))}`;
 }

@@ -119,7 +119,7 @@ describe('remote selection pagination', () => {
       kind: 'handled',
     });
     const first = channel.selectionPageSends[0]!;
-    expect(first.text).toContain('Forge conversations 1-10 of 23 · page 1/3');
+    expect(first.text).toContain('Chats · 1–10 of 23');
     expect(first.text).toContain('10. Conversation 10');
     expect(first.text).not.toContain('11. Conversation 11');
     expect(first.controls).toMatchObject({
@@ -138,7 +138,7 @@ describe('remote selection pagination', () => {
     ).resolves.toEqual({ kind: 'handled' });
     const second = channel.selectionEdits[0]!;
     expect(second.messageId).toBe('42');
-    expect(second.text).toContain('Forge conversations 11-20 of 23 · page 2/3');
+    expect(second.text).toContain('Chats · 11–20 of 23');
     expect(second.text).toContain('11. Conversation 11');
     expect(second.text).not.toContain('21. Conversation 21');
 
@@ -395,7 +395,7 @@ describe('remote selection pagination', () => {
       kind: 'handled',
     });
     const page = channel.selectionPageSends[0]!;
-    expect(page.text).toContain('Forge models 11-20 of 25 · page 2/3');
+    expect(page.text).toContain('Models · 11–20 of 25');
     expect(page.text).toContain('11. model-19');
     expect(page.text).not.toContain('21. model-3');
     expect(store.selection('fake', 'chat', 'models')?.values[16]).toBe('model-24');
@@ -552,14 +552,14 @@ describe('remote selection pagination', () => {
     });
 
     const page = channel.selectionPageSends[0]!;
-    expect(page.text.indexOf('LOCAL — LLAMA.CPP')).toBeLessThan(
-      page.text.indexOf('OLLAMA CLOUD'),
+    expect(page.text.indexOf('Local — llama.cpp')).toBeLessThan(
+      page.text.indexOf('Ollama Cloud'),
     );
-    expect(page.text.indexOf('OLLAMA CLOUD')).toBeLessThan(page.text.indexOf('OPENAI'));
+    expect(page.text.indexOf('Ollama Cloud')).toBeLessThan(page.text.indexOf('OpenAI'));
     // A blank line before every group but the first, and no markup: this
-    // channel declares no `sendHtml`, so the page stays literal text.
+    // channel declares no HTML support, so the page stays literal text.
     expect(page.text).toContain(
-      'LOCAL — LLAMA.CPP\n1. alpha-local\n2. zeta-local\n\nOLLAMA CLOUD\n3. qwen-cloud\n\nOPENAI\n4. alpha-openai\n5. zeta-openai',
+      'Local — llama.cpp\n1. alpha-local\n2. zeta-local\n\nOllama Cloud\n3. qwen-cloud\n\nOpenAI\n4. alpha-openai\n5. zeta-openai',
     );
     expect(page.parseMode).toBeUndefined();
     expect(store.selection('fake', 'chat', 'models')?.values).toEqual([
@@ -586,7 +586,7 @@ describe('remote selection pagination', () => {
     await sendModelSelection(textEvent('/models'), ctx);
 
     expect(channel.selectionPageSends[0]!.text).toContain(
-      'LOCAL — LLAMA.CPP\n1. plain-model\n2. Qwen fast\n3. Qwen quality',
+      'Local — llama.cpp\n1. plain-model\n2. Qwen fast\n3. Qwen quality',
     );
     expect(store.selection('fake', 'chat', 'models')?.values).toEqual([
       'plain-model',
@@ -609,7 +609,7 @@ describe('remote selection pagination', () => {
       kind: 'handled',
     });
     expect(store.selection('fake', 'chat', 'models')?.values).toEqual(['qwen']);
-    expect(channel.selectionPageSends[0]?.text).toContain('1. qwen · profiles: @audit');
+    expect(channel.selectionPageSends[0]?.text).toContain('1. qwen · @audit');
     expect(resolveModelSelection(ctx, textEvent('/model qwen@audit'), 'qwen@audit')).toBe(
       'qwen@audit',
     );
@@ -633,7 +633,7 @@ describe('remote selection pagination', () => {
     expect(store.selection('fake', 'chat', 'models')?.values).toHaveLength(100);
   });
 
-  it('underlines group headings on an HTML transport without trusting a model name', async () => {
+  it('bolds group headings on an HTML transport without trusting a model name', async () => {
     const store = await requestStore();
     const channel = new FakeRemoteChannel();
     channel.declareHtmlSupport();
@@ -653,15 +653,13 @@ describe('remote selection pagination', () => {
 
     const page = channel.selectionPageSends[0]!;
     expect(page.parseMode).toBe('HTML');
-    expect(page.text).toContain('<b><u>LOCAL — LLAMA.CPP</u></b>');
-    expect(page.text).toContain('<b><u>OPENAI</u></b>');
+    expect(page.text).toContain('<b>Local — llama.cpp</b>');
+    expect(page.text).toContain('<b>OpenAI</b>');
     expect(page.text).toContain('<b>2.</b> a&lt;b&gt;&amp;c');
-    // The usage footer names a placeholder in angle brackets, so it has to
-    // survive escaping too or Telegram eats it as an unknown tag.
-    expect(page.text).toContain('Use /model &lt;number&gt;.');
+    expect(page.text).toContain('<i>Tap a number to switch</i>');
   });
 
-  it('pages a long model list by keyboard only, and keeps the text fallback for plain text', async () => {
+  it('keeps picker hints readable on transports without Telegram buttons', async () => {
     const store = await requestStore();
 
     // A keyboard transport (Telegram) pages with the inline buttons, so the
@@ -673,8 +671,8 @@ describe('remote selection pagination', () => {
     });
     expect(channel.selectionPageSends[0]!.text).not.toContain('Page fallback');
 
-    // A plain-text transport (WhatsApp) has no keyboard, so the footer is the
-    // only way to page past the first ten — it must stay.
+    // A plain-text transport has no keyboard, so the footer names the typed
+    // selection command and does not show Telegram-specific markup.
     const sent: string[] = [];
     const plain = {
       name: 'fake' as const,
@@ -687,7 +685,7 @@ describe('remote selection pagination', () => {
     await expect(sendModelSelection(textEvent('/models'), plainCtx)).resolves.toEqual({
       kind: 'handled',
     });
-    expect(sent[0]).toContain('Page fallback: /models <page>.');
+    expect(sent[0]).toContain('Use /model <number>.');
   });
 
   it('gives each conversation its own block, and bolds the title on an HTML transport', async () => {
@@ -702,32 +700,34 @@ describe('remote selection pagination', () => {
 
     const page = channel.selectionPageSends[0]!;
     expect(page.parseMode).toBe('HTML');
-    // The title owns its line; the ids, model and timestamp sit under it, and
-    // a blank line separates one conversation from the next.
-    expect(page.text).toContain('<b>1. Conversation 1</b>\n    con');
-    expect(page.text).toMatch(/\n\n<b>2\. Conversation 2<\/b>\n {4}con/u);
+    // The title owns its line and the model/date metadata sits under it; a
+    // blank line separates one conversation from the next.
+    expect(page.text).toContain('<b>1.</b> Conversation 1\nmodel-1 ·');
+    expect(page.text).toMatch(/\n\n<b>2\.<\/b> Conversation 2\nmodel-2 ·/u);
   });
 
-  it('names the workspace a /chats list is in, and omits the line when unknown', async () => {
+  it('names the workspace in a button picker, with an unknown label when unavailable', async () => {
     const store = await requestStore();
     const channel = new FakeRemoteChannel();
+    channel.declareHtmlSupport();
 
     // With a workspace name, the page says where the conversations live — the
-    // same "You are in:" line /workspace already prints, so a switch is
-    // confirmable without a second command.
+    // name helps confirm a switch without a second command.
     const withName = { ...context(channel, store, 3), currentWorkspaceName: 'Forge' };
     await expect(sendConversationSelection(textEvent('/chats'), withName)).resolves.toEqual({
       kind: 'handled',
     });
-    expect(channel.selectionPageSends[0]!.text).toContain('You are in: Forge');
+    expect(channel.selectionPageSends[0]!.text).toContain('Workspace: Forge · tap a number to open');
 
-    // Without one the line is absent, not blank: the context has no
-    // currentWorkspaceName, so the footer must not print a bare label.
+    // The button footer states the field that is unavailable rather than
+    // hiding the picker affordance.
     const withoutName = context(channel, store, 3);
     await expect(sendConversationSelection(textEvent('/chats'), withoutName)).resolves.toEqual({
       kind: 'handled',
     });
-    expect(channel.selectionPageSends[1]!.text).not.toContain('You are in:');
+    expect(channel.selectionPageSends[1]!.text).toContain(
+      'Workspace: unknown · tap a number to open',
+    );
   });
 
   it('rejects stale tokens and out-of-range callback pages', async () => {
@@ -796,7 +796,7 @@ describe('remote selection pagination', () => {
           }),
         ),
       ).resolves.toEqual({ kind: 'handled' });
-      expect(channel.selectionEdits[0]?.text).toContain('Forge models 11-12 of 12');
+      expect(channel.selectionEdits[0]?.text).toContain('Models · 11–12 of 12');
     } finally {
       await controller.stop();
     }
@@ -834,7 +834,7 @@ describe('remote selection pagination', () => {
       await expect(channel.emit(textEvent('/workspace list'))).resolves.toEqual({
         kind: 'handled',
       });
-      expect(channel.selectionPageSends[0]?.text).toContain('1. forge — Forge · current');
+      expect(channel.selectionPageSends[0]?.text).toContain('1. forge — Forge · ● current');
 
       await expect(channel.emit(textEvent('/workspace 1'))).resolves.toEqual({
         kind: 'rejected',

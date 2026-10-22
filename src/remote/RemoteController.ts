@@ -37,6 +37,8 @@ import type { RemoteControllerOptions } from './remoteControllerOptions';
 import type { TelegramContactService } from './TelegramContactService';
 import { handleRemoteSendNow } from './remoteSendNow';
 import { handleRemoteStopAction } from './RemoteStopActions';
+import { RemoteAgentAsk } from './remoteAgentAsk';
+import { handleRemoteReportCallback } from './RemoteReportCallbacks';
 export type { RemoteControllerOptions };
 /** Durable transport-independent admission, FIFO execution, and notification. */
 export class RemoteController {
@@ -55,6 +57,7 @@ export class RemoteController {
   /** Live draft previews shared by progress and Stop. */
   private readonly hostProgress: HostProgressOpener;
   private readonly pending = new RemotePendingPrompt();
+  private readonly agentAsk = new RemoteAgentAsk();
   private readonly agentOriginTurns = new Set<string>();
   /** Best-effort deletion of processed owner commands from Telegram. */
   private readonly commandCleanup: CommandCleanupScheduler;
@@ -197,6 +200,7 @@ export class RemoteController {
     this.accepting = false;
     this.commandCleanup.dispose();
     this.abort.abort();
+    this.agentAsk.dispose();
     this.subscription?.dispose();
     this.subscription = undefined;
     this.progressSubscription?.dispose();
@@ -296,6 +300,34 @@ export class RemoteController {
     if (!this.rateLimiter.allow(`${event.channel}:${event.senderId}:${event.chatId}`)) {
       return ephemeralRejection('remote rate limit exceeded');
     }
+    if (
+      event.kind === 'job_action' ||
+      event.kind === 'queue_action' ||
+      event.kind === 'agent_ask_action'
+    ) {
+      const result = await handleRemoteReportCallback(event, {
+        channel: this.channel,
+        store: this.store,
+        agentAsk: this.agentAsk,
+        commandContext: (textEvent) => this.commandContext(textEvent),
+        routeText: (textEvent, overrides) => this.routeText(textEvent, overrides),
+      });
+      if (!result) return ephemeralRejection('unsupported report callback');
+      if (result.kind !== 'rejected' && result.kind !== 'retry') this.auth.touch(event);
+      return result;
+    }
+    if (event.kind === 'selection' && event.action === 'pick') {
+      const result = await handleRemoteReportCallback(event, {
+        channel: this.channel,
+        store: this.store,
+        agentAsk: this.agentAsk,
+        commandContext: (textEvent) => this.commandContext(textEvent),
+        routeText: (textEvent, overrides) => this.routeText(textEvent, overrides),
+      });
+      if (!result) return ephemeralRejection('selection pick is unavailable');
+      if (result.kind !== 'rejected' && result.kind !== 'retry') this.auth.touch(event);
+      return result;
+    }
     if (event.kind === 'selection') {
       const result = await handleRemoteSelectionAction(
         event,
@@ -381,6 +413,16 @@ export class RemoteController {
       if (result.kind !== 'rejected' && result.kind !== 'retry') this.auth.touch(event);
       return result;
     }
+    const redirected = this.agentAsk.consume(event);
+    return this.routeText(redirected ?? event);
+  }
+  private routeText(
+    event: Extract<RemoteInboundEvent, { kind: 'text' }>,
+    overrides?: Pick<
+      import('./RemoteCommandHandler').RemoteCommandContext,
+      'telegramEditMessageId' | 'telegramJobTarget'
+    >,
+  ): Promise<RemoteInboundDisposition> {
     return routeRemoteText(event, {
       maxMessageChars: this.options.maxMessageChars,
       promptDeps: this.promptDeps,
@@ -392,7 +434,7 @@ export class RemoteController {
         this.channel.send(chatId, text, { signal: this.abort.signal }).then(() => undefined),
       rerun: (next) => this.handle(next),
       touch: (touched) => this.auth.touch(touched),
-      commandContext: (command) => this.commandContext(command),
+      commandContext: (command) => ({ ...this.commandContext(command), ...overrides }),
       scheduleCommandCleanup: (command) => this.commandCleanup.schedule(command),
     });
   }
@@ -424,7 +466,6 @@ export class RemoteController {
     await this.store.notifyOutbox(this.channel.name, chatId, text);
     this.outbox.kick();
   }
-
   private isBusy(conversationId: string): boolean {
     const status = this.host.status();
     return (

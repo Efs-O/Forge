@@ -14,6 +14,9 @@ function rig(
     remoteRequestId?: string | undefined;
     boundChatId?: string;
     cleanup?: CommandCleanupScheduler;
+    toolName?: string;
+    detail?: string;
+    dangerous?: boolean;
   } = {},
 ) {
   const channel = new FakeRemoteChannel();
@@ -65,9 +68,9 @@ function rig(
   const request = (): void =>
     sink?.requested({
       id: 'gate-1',
-      toolName: 'write_file',
-      detail: 'src/index.ts',
-      dangerous: false,
+      toolName: options.toolName ?? 'write_file',
+      detail: options.detail ?? 'src/index.ts',
+      dangerous: options.dangerous ?? false,
       conversationId: 'c1',
     });
   const resolve = (approved: boolean): void =>
@@ -146,6 +149,37 @@ describe('RemoteApprovalBridge', () => {
     await vi.waitFor(() => expect(channel.sent).toHaveLength(1));
     expect(channel.sent[0]?.chatId).toBe('chat-1');
     expect(channel.sent[0]?.text).toContain('write_file');
+  });
+
+  it('uses escaped, clipped Telegram approval cards and keeps the plain prompt unchanged', async () => {
+    const regular = rig();
+    regular.channel.declareHtmlSupport();
+    regular.request();
+    await vi.waitFor(() => expect(regular.channel.sent).toHaveLength(1));
+    expect(regular.channel.sent[0]).toMatchObject({
+      text: '<b>Approve write_file?</b>\n<pre>src/index.ts</pre>',
+      parseMode: 'HTML',
+    });
+
+    const dangerous = rig({
+      dangerous: true,
+      toolName: 'write<&>',
+      detail: '<script>alert(1)</script>'.repeat(2_000),
+    });
+    dangerous.channel.declareHtmlSupport();
+    dangerous.request();
+    await vi.waitFor(() => expect(dangerous.channel.sent).toHaveLength(1));
+    const html = dangerous.channel.sent[0]!.text;
+    expect(html.startsWith('<b>⚠ Dangerous: write&lt;&amp;&gt;</b>\n<pre>')).toBe(true);
+    expect(html.endsWith('</pre>')).toBe(true);
+    expect([...html].length).toBeLessThanOrEqual(4_000);
+    expect(html).not.toContain('<script>');
+
+    const plain = rig({ dangerous: true });
+    plain.request();
+    await vi.waitFor(() => expect(plain.channel.sent).toHaveLength(1));
+    expect(plain.channel.sent[0]?.text).toBe('Forge approval DANGEROUS: write_file\nsrc/index.ts');
+    expect(plain.channel.sent[0]?.parseMode).toBeUndefined();
   });
 
   it('asks the bound chat when the turn was started in the sidebar', async () => {

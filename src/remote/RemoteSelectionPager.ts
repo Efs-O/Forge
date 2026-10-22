@@ -1,14 +1,8 @@
 import type { ForgeHostFacade } from '../sidebar/ForgeHostFacade';
-import {
-  MODEL_PICKER_GROUP_ORDER,
-  modelPickerLabel,
-  sortModelPickerEntries,
-  type ModelPickerDescriptor,
-} from '../sidebar/ModelPickerGroups';
+import { sortModelPickerEntries, type ModelPickerDescriptor } from '../sidebar/ModelPickerGroups';
 import { selectModelProfile } from './RemoteModelProfileSelection';
 import { SELECTION_TTL_MS } from './RemoteSelectionConstants';
-import { boldLeadingNumber, boldNumberedLine, markupTelegramLines } from './telegramHtml';
-import { formatRemoteDateTime } from './RemoteDateTime';
+import { formatSelectionPage } from './remoteSelectionFormat';
 import type { RemoteRequestStore } from './RemoteRequestStore';
 import type {
   RemoteChannel,
@@ -16,9 +10,6 @@ import type {
   RemoteInboundEvent,
   RemoteSelectionControls,
 } from './types';
-
-/** Heading for a model whose group the picker could not classify. */
-const OTHER_MODELS_GROUP = 'Other models';
 
 const PAGE_SIZE = 10;
 
@@ -164,6 +155,10 @@ async function executeSelectionAction(
   if (event.action === 'select') {
     return selectModelProfile(event, context);
   }
+  if (event.action === 'noop') return { kind: 'handled' };
+  if (event.action === 'pick') {
+    return { kind: 'rejected', reason: 'selection pick was not routed through its command path' };
+  }
   // Close is dismissal of a message, not an operation on a list, so it must
   // never be gated on the list still being live. Gating it left every expired
   // or superseded list -- a second /models supersedes the first -- with a
@@ -201,7 +196,14 @@ async function executeSelectionAction(
   if (!context.channel.selectionPages) {
     return { kind: 'rejected', reason: 'this transport cannot navigate selection lists' };
   }
-  const rendered = renderPage(context, event.selectionKind, selection.values, event.page);
+  const rendered = renderPage(
+    context,
+    event.selectionKind,
+    selection.values,
+    event.page,
+    event.channel,
+    event.chatId,
+  );
   await context.channel.selectionPages.edit(
     event.chatId,
     event.messageId,
@@ -220,7 +222,7 @@ async function sendPage(
   values: string[],
   page: number,
 ): Promise<void> {
-  const rendered = renderPage(context, kind, values, page);
+  const rendered = renderPage(context, kind, values, page, context.channel.name, chatId);
   if (context.channel.selectionPages) {
     await context.channel.selectionPages.send(chatId, rendered.text, rendered.controls(token), {
       signal: context.signal,
@@ -231,77 +233,39 @@ async function sendPage(
   await context.channel.send(chatId, rendered.text, { signal: context.signal });
 }
 
-/** Every heading `formatModels` can emit, as it appears once uppercased. */
-const MODEL_GROUP_HEADINGS = new Set(
-  [...MODEL_PICKER_GROUP_ORDER, OTHER_MODELS_GROUP].map((group) => group.toUpperCase()),
-);
-
-/**
- * Re-inserts the markup a selection page owns: its heading, its group headings
- * and its entry numbers.
- *
- * The text is escaped whole first, so a model name is content and nothing else.
- * Group headings are matched as complete lines against a fixed set, and entries
- * always start with "N. " -- which is why a name can never be mistaken for
- * either.
- */
-function withSelectionMarkup(text: string, kind: SelectionKind): string {
-  // A conversation entry is a number and a title on one line, with its ids and
-  // timestamps on the next; bolding the whole line there bolds exactly the
-  // title. A model or workspace entry carries its path or provider on the same
-  // line, so only the number -- the part typed back -- is bolded.
-  const entry = kind === 'conversations' ? boldNumberedLine : boldLeadingNumber;
-  return markupTelegramLines(text, (line, index) => {
-    if (index === 0) return `<b>${line}</b>`;
-    if (MODEL_GROUP_HEADINGS.has(line)) return `<b><u>${line}</u></b>`;
-    if (line.startsWith('You are in: '))
-      return `<b>You are in:</b>${line.slice('You are in:'.length)}`;
-    // The footer is instructions, not content: italic keeps it present without
-    // letting it compete with the entries above it.
-    if (line.startsWith('Use /')) return `<i>${line}</i>`;
-    return entry(line);
-  });
-}
-
 function renderPage(
   context: RemoteSelectionContext,
   kind: SelectionKind,
   values: string[],
   page: number,
+  channel: RemoteInboundEvent['channel'],
+  chatId: string,
 ): {
   text: string;
   parseMode?: 'HTML';
   controls: (token: string) => RemoteSelectionControls;
 } {
-  const pages = pageCount(values.length);
-  const start = page * PAGE_SIZE;
-  const end = Math.min(start + PAGE_SIZE, values.length);
-  const entries =
-    kind === 'models'
-      ? formatModels(context, values, start, end)
-      : kind === 'workspaces'
-        ? formatWorkspaces(context, values, start, end)
-        : formatConversations(context, values, start, end);
-  const heading = `Forge ${kind} ${start + 1}-${end} of ${values.length} · page ${page + 1}/${pages}`;
-  const command = `${pickCommandFor(kind)} <number>`;
-  // No page fallback for workspaces: the number after /workspace is a
-  // workspace, not a page, so naming one here would re-create the collision
-  // this list exists to avoid. The inline keyboard is the only pager.
-  // And no fallback line on a transport that has a keyboard: there the
-  // Previous/Next buttons already page, so the text is dead weight (it is the
-  // only pager on a plain-text transport like WhatsApp, which keeps it).
-  const fallback =
-    pages > 1 && kind !== 'workspaces' && !context.channel.selectionPages
-      ? ` Page fallback: ${commandFor(kind)} <page>.`
-      : '';
-  // A workspace or conversation list that does not say where you are answers
-  // half the question: /chats only ever shows this window's conversations, so
-  // the line costs nothing and saves a /workspace round-trip after a switch.
-  const here =
-    (kind === 'workspaces' || kind === 'conversations') && context.currentWorkspaceName
-      ? `\n\nYou are in: ${clip(context.currentWorkspaceName, 180)}`
-      : '';
-  const text = `${heading}\n\n${entries.join('\n')}${here}\n\nUse ${command}.${fallback} Selection expires in 10 minutes.`;
+  const binding = context.store.binding(channel, chatId);
+  const status = context.host.status();
+  const currentConversation = status.conversations.find(
+    (conversation) => conversation.id === binding?.conversationId,
+  );
+  const formatted = formatSelectionPage(
+    {
+      modelEntries: context.modelEntries,
+      workspaceAliases: context.workspaceAliases,
+      currentWorkspaceAlias: context.currentWorkspaceAlias,
+      currentWorkspaceName: context.currentWorkspaceName,
+      currentModel: currentConversation?.activeModel,
+      currentConversationId: binding?.conversationId,
+      conversations: status.conversations,
+      buttons:
+        context.channel.parseMode !== undefined && context.channel.selectionPages !== undefined,
+    },
+    kind,
+    values,
+    page,
+  );
   // Rich text needs both capabilities: `sendHtml` says the transport parses it,
   // `selectionPages` says the page is delivered through the call that carries
   // the parse mode. Without the second, the plain-text fallback would print the
@@ -309,84 +273,10 @@ function renderPage(
   const rich =
     context.channel.sendHtml !== undefined && context.channel.selectionPages !== undefined;
   return {
-    text: rich ? withSelectionMarkup(text, kind) : text,
+    text: rich ? formatted.html : formatted.plain,
     ...(rich ? { parseMode: 'HTML' as const } : {}),
-    controls: (token) => ({ kind, token, page, pageCount: pages }),
+    controls: formatted.controls,
   };
-}
-
-function formatModels(
-  context: RemoteSelectionContext,
-  values: string[],
-  start: number,
-  end: number,
-): string[] {
-  const byName = new Map(context.modelEntries.map((model) => [model.name, model]));
-  const lines: string[] = [];
-  let previousGroup: string | undefined;
-  for (const [offset, name] of values.slice(start, end).entries()) {
-    const group = byName.get(name)?.group ?? OTHER_MODELS_GROUP;
-    if (group !== previousGroup) {
-      // Blank line before every group but the first: caps and underline make a
-      // heading legible, whitespace is what makes the list scannable.
-      if (previousGroup !== undefined) lines.push('');
-      lines.push(group.toUpperCase());
-      previousGroup = group;
-    }
-    const profiles = byName.get(name)?.profiles;
-    const profileHint = profiles?.length
-      ? ` · profiles: ${profiles.map((profile) => `@${profile}`).join(', ')}`
-      : '';
-    const label = modelPickerLabel(byName.get(name) ?? { name });
-    lines.push(`${start + offset + 1}. ${clip(label, 220)}${profileHint}`);
-  }
-  return lines;
-}
-
-/** The current workspace is marked so the list also answers "where am I?",
- *  which otherwise costs a second command. */
-function formatWorkspaces(
-  context: RemoteSelectionContext,
-  values: string[],
-  start: number,
-  end: number,
-): string[] {
-  return values.slice(start, end).map((alias, index) => {
-    const marker = alias === context.currentWorkspaceAlias ? ' · current' : '';
-    return `${start + index + 1}. ${alias} — ${clip(context.workspaceAliases[alias] ?? alias, 180)}${marker}`;
-  });
-}
-
-function formatConversations(
-  context: RemoteSelectionContext,
-  values: string[],
-  start: number,
-  end: number,
-): string[] {
-  const byId = new Map(
-    context.host.status().conversations.map((conversation) => [conversation.id, conversation]),
-  );
-  const lines: string[] = [];
-  for (const [offset, id] of values.slice(start, end).entries()) {
-    // Two lines and a blank between entries: a conversation carries a title,
-    // an id, a model and a timestamp, and on a phone all four on one line wrap
-    // into an unreadable block where no entry has a visible beginning.
-    if (offset > 0) lines.push('');
-    const number = start + offset + 1;
-    const conversation = byId.get(id);
-    if (!conversation) {
-      lines.push(`${number}. Unavailable conversation`);
-      lines.push(`    ${shortId(id)}`);
-      continue;
-    }
-    lines.push(`${number}. ${clip(conversation.title, 180)}`);
-    lines.push(
-      `    ${shortId(id)} · ${conversation.activeModel ?? 'default model'} · ${formatRemoteDateTime(
-        conversation.updatedAt,
-      )}${conversation.archived ? ' · archived' : ''}`,
-    );
-  }
-  return lines;
 }
 
 /**
@@ -458,10 +348,6 @@ function pickCommandFor(kind: SelectionKind): '/chat' | '/model' | '/workspace' 
 function kindLabel(kind: SelectionKind): 'conversation' | 'model' | 'workspace' {
   if (kind === 'conversations') return 'conversation';
   return kind === 'models' ? 'model' : 'workspace';
-}
-
-function shortId(id: string): string {
-  return id.length > 7 ? `${id.slice(0, 3)}…${id.slice(-3)}` : id;
 }
 
 function clip(value: string, maxCharacters: number): string {

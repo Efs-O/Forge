@@ -13,7 +13,12 @@ import { makeSendFileTool } from '../../src/tools/sendFileTool';
 // send_file resolves its path through WorkspacePaths, which reads the vscode
 // workspace root. This suite otherwise never touches vscode, so the mock exists
 // only to give that resolver a folder to contain the temp file.
-vi.mock('vscode', () => ({ workspace: { workspaceFolders: undefined } }));
+vi.mock('vscode', () => ({
+  workspace: { workspaceFolders: undefined },
+  window: {
+    createOutputChannel: () => ({ appendLine: vi.fn(), show: vi.fn(), dispose: vi.fn() }),
+  },
+}));
 
 function setWorkspace(folder: string): void {
   (

@@ -1572,7 +1572,13 @@ describe('remote compaction progress notifications', () => {
     const context = {
       channel,
       store: state,
-      host: { contextBudget: () => ({ used: 75, max: 100 }) },
+      host: {
+        contextBudget: () => ({ used: 75, max: 100 }),
+        contextBreakdown: () => undefined,
+        status: () => ({
+          conversations: [{ id: 'c1', activeModel: 'model', title: 'Chat', requestCount: 0, toolCallCount: 0, compactCount: 0, activeMs: 0 }],
+        }),
+      },
       workspaceId: 'workspace',
       signal: new AbortController().signal,
       inactivityTimeoutMinutes: 30,
@@ -1597,7 +1603,7 @@ describe('remote compaction progress notifications', () => {
       );
 
     await command('/context', 'context-command');
-    expect(channel.sent.at(-1)?.text).toContain('Remaining: 25 tokens');
+    expect(channel.sent.at(-1)?.text).toContain('25 left');
     await command('/queue', 'queue-command');
     expect(channel.sent.at(-1)?.text).toContain('hello');
     await command('/drop all', 'drop-command');
