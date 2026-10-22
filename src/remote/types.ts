@@ -313,18 +313,13 @@ export interface RemoteChannel {
     text: string,
     options?: ProgressMessageOptions,
   ): Promise<string | undefined>;
-  /** Telegram-only, silent Stop-control bubble placed above the working status. */
-  sendProgressStopControl?(
-    chatId: string,
-    options?: { signal?: AbortSignal },
-  ): Promise<string | undefined>;
-  /** Telegram reply-keyboard carrier for a mirrored sidebar prompt. */
+  /** Telegram-only: a mirrored sidebar prompt, sent silently above the status. */
   sendProgressPrompt?(
     chatId: string,
     text: string,
     options?: { signal?: AbortSignal },
   ): Promise<string | undefined>;
-  /** Remove Telegram's reply keyboard, independent of the auth lock. */
+  /** Remove the legacy 0.17.67 Telegram Stop key, independent of the auth lock. */
   removeProgressStopKeyboard?(chatId: string): Promise<void>;
   /** Best-effort presentation only; a reload may lose the provider message id. */
   editMessage?(

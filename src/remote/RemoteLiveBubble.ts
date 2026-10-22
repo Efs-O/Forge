@@ -16,8 +16,6 @@ export interface LiveBubbleDeps {
   footer: (maximum: number) => string;
   /** Minimum gap between two refreshes: Telegram allows ~1 edit/s per chat. */
   intervalMs: number;
-  /** False when the Stop button lives in the separate row above the status. */
-  stopButtonOnBubble?: boolean;
   report: (err: unknown) => void;
 }
 
@@ -28,8 +26,6 @@ interface Bubble {
   text: string;
   /** What the chat last showed for it, footer included. */
   shown?: string;
-  /** Whether its Stop is inline, fixed when it is sent so later edits keep it. */
-  inlineStop?: boolean;
 }
 
 /**
@@ -330,11 +326,9 @@ export class RemoteLiveBubble {
     const { channel, chatId, signal } = this.deps;
     const sendProgress = channel.sendProgress?.bind(channel);
     if (bubble.id === undefined && !sendProgress) return;
-    const showStopButton =
-      stopButton && (bubble.inlineStop ?? this.deps.stopButtonOnBubble !== false);
     const options = {
       signal,
-      stopButton: showStopButton,
+      stopButton,
       retryRateLimit: false,
     };
     if (bubble.id === undefined) {
@@ -342,7 +336,6 @@ export class RemoteLiveBubble {
       const id = await sendProgress(chatId, text, options);
       if (id) {
         bubble.id = id;
-        if (stopButton) bubble.inlineStop = showStopButton;
         this.ids.add(id);
       }
     } else {

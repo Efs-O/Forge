@@ -12,9 +12,6 @@ export type ProgressOpen =
   | {
       kind: 'plain';
       messageId: string;
-      stopButtonOnStatus: boolean;
-      stopMessageId?: string;
-      stopMessageIsControl?: boolean;
       promptSent?: boolean;
       error?: string;
     }
@@ -27,22 +24,17 @@ export interface ProgressCapableChannel {
     text: string,
     options?: { signal?: AbortSignal; stopButton?: boolean },
   ): Promise<string | undefined>;
-  sendProgressStopControl?(
-    chatId: string,
-    options?: { signal?: AbortSignal },
-  ): Promise<string | undefined>;
   sendProgressPrompt?(
     chatId: string,
     text: string,
     options?: { signal?: AbortSignal },
   ): Promise<string | undefined>;
   send?(chatId: string, text: string, options?: { signal?: AbortSignal }): Promise<unknown>;
-  removeProgressStopKeyboard?(chatId: string): Promise<void>;
   deleteMessage?(chatId: string, messageId: string): Promise<void>;
   clearInlineKeyboard?(chatId: string, messageId: string): Promise<void>;
 }
 
-/** Delete an obsolete Stop carrier, falling back to leaving only inert text. */
+/** Delete a legacy Stop control row, falling back to leaving only inert text. */
 export async function removeProgressStopControl(
   channel: ProgressCapableChannel,
   chatId: string,
@@ -94,28 +86,18 @@ export async function openProgressBubble(
     return { kind: 'declined', error: describeError(err) };
   }
   if (!channel.sendProgress) return { kind: 'declined' };
-  let stopMessageId: string | undefined;
-  let stopMessageIsControl = true;
-  let stopButtonOnStatus = !channel.sendProgressStopControl;
   let promptSent = false;
-  let error: string | undefined;
   if (promptText) {
     try {
+      // Silent where the transport can: it echoes the owner's own words.
       if (channel.sendProgressPrompt) {
-        stopMessageId = await channel.sendProgressPrompt(chatId, promptText, { signal });
-        promptSent = true;
-        if (stopMessageId) {
-          stopMessageIsControl = false;
-          stopButtonOnStatus = false;
-        } else {
-          error = 'Mirrored prompt keyboard could not be opened: no message id was returned';
-        }
+        await channel.sendProgressPrompt(chatId, promptText, { signal });
       } else if (channel.send) {
         await channel.send(chatId, promptText, { signal });
-        promptSent = true;
       } else {
         return { kind: 'declined', error: 'This transport cannot send a mirrored prompt.' };
       }
+      promptSent = true;
     } catch (err) {
       return {
         kind: 'declined',
@@ -123,81 +105,17 @@ export async function openProgressBubble(
       };
     }
   }
-  if (!stopMessageId && channel.sendProgressStopControl) {
-    try {
-      stopMessageId = await channel.sendProgressStopControl(chatId, { signal });
-      if (!stopMessageId) {
-        error = 'Stop control could not be opened: no message id was returned';
-        stopButtonOnStatus = true;
-      }
-    } catch (err) {
-      error = `Stop control could not be opened: ${describeError(err)}`;
-      stopButtonOnStatus = true;
-    }
-  }
   try {
-    const messageId = await channel.sendProgress(chatId, text, {
-      signal,
-      stopButton: stopButtonOnStatus,
-    });
-    if (!messageId) {
-      if (stopMessageId && stopMessageIsControl) {
-        try {
-          await removeProgressStopControl(channel, chatId, stopMessageId);
-        } catch (cleanupError) {
-          error = `Stop control cleanup failed: ${describeError(cleanupError)}`;
-        }
-      }
-      if (stopMessageId && !stopMessageIsControl) {
-        try {
-          await channel.removeProgressStopKeyboard?.(chatId);
-        } catch (cleanupError) {
-          error = `Stop keyboard cleanup failed: ${describeError(cleanupError)}`;
-        }
-      }
-      return {
-        kind: 'declined',
-        ...(promptSent ? { promptSent: true } : {}),
-        ...(error ? { error } : {}),
-      };
-    }
-    return {
-      kind: 'plain',
-      messageId,
-      stopButtonOnStatus,
-      ...(stopMessageId ? { stopMessageId } : {}),
-      ...(stopMessageId ? { stopMessageIsControl } : {}),
-      ...(promptSent ? { promptSent: true } : {}),
-      ...(error ? { error } : {}),
-    };
+    // Stop rides inline on the status message (owner's call, 0.17.69): the
+    // 0.17.67 reply-keyboard key sat where a swipe lands and got pressed.
+    const messageId = await channel.sendProgress(chatId, text, { signal, stopButton: true });
+    if (!messageId) return { kind: 'declined', ...(promptSent ? { promptSent: true } : {}) };
+    return { kind: 'plain', messageId, ...(promptSent ? { promptSent: true } : {}) };
   } catch (err) {
-    const openingError = describeError(err);
-    if (stopMessageId && stopMessageIsControl) {
-      try {
-        await removeProgressStopControl(channel, chatId, stopMessageId);
-      } catch (cleanupError) {
-        return {
-          kind: 'declined',
-          ...(promptSent ? { promptSent: true } : {}),
-          error: `${openingError}; Stop control cleanup failed: ${describeError(cleanupError)}`,
-        };
-      }
-    }
-    if (stopMessageId && !stopMessageIsControl) {
-      try {
-        await channel.removeProgressStopKeyboard?.(chatId);
-      } catch (cleanupError) {
-        return {
-          kind: 'declined',
-          ...(promptSent ? { promptSent: true } : {}),
-          error: `${openingError}; Stop keyboard cleanup failed: ${describeError(cleanupError)}`,
-        };
-      }
-    }
     return {
       kind: 'declined',
       ...(promptSent ? { promptSent: true } : {}),
-      error: error ? `${error}; ${openingError}` : openingError,
+      error: describeError(err),
     };
   }
 }

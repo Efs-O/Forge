@@ -159,13 +159,7 @@ export async function drainRemoteQueue(
       () => deps.auth.canDeliver(next.channel, next.chatId),
     );
     if (bubble.kind === 'plain') {
-      deps.progress.begin(
-        conversationId,
-        next.chatId,
-        bubble.messageId,
-        'remote',
-        bubble.stopMessageId,
-      );
+      deps.progress.begin(conversationId, next.chatId, bubble.messageId, 'remote');
       if (bubble.error)
         deps.onError?.(`Forge remote progress could not fully open: ${bubble.error}`);
     } else if (bubble.error) {

@@ -13,6 +13,7 @@ import {
 } from '../../src/remote/TelegramSelectionPagination';
 import { RemoteAttachmentStore } from '../../src/remote/RemoteAttachmentStore';
 import { openProgressBubble } from '../../src/remote/remoteProgressOpen';
+import { RemoteAgentProgress } from '../../src/remote/RemoteAgentProgress';
 import { HELP_SECTIONS, HELP_TEXT } from '../../src/remote/remoteHelpText';
 import type { RemoteInboundDisposition, RemoteInboundEvent } from '../../src/remote/types';
 
@@ -1636,39 +1637,64 @@ describe('TelegramChannel — progress bubble', () => {
       async () => true,
     );
 
-    expect(bubble).toEqual({
-      kind: 'plain',
-      messageId: expect.any(String),
-      stopButtonOnStatus: false,
-      stopMessageId: expect.any(String),
-      stopMessageIsControl: true,
-    });
-    expect(Number(bubble.messageId)).toBe(Number(bubble.stopMessageId) + 1);
-    expect(methods.filter((method) => method === 'sendMessage')).toHaveLength(2);
+    expect(bubble).toEqual({ kind: 'plain', messageId: expect.any(String) });
+    expect(methods.filter((method) => method === 'sendMessage')).toHaveLength(1);
     expect(methods).not.toContain('sendRichMessageDraft');
-    // The keyboard carrier is silent; the ordinary status send remains the
-    // turn's one push notification.
-    const controlBody = bodies.find((body) => body.text === '\u2063');
-    const controlIndex = bodies.indexOf(controlBody!);
-    expect(controlBody).toMatchObject({
-      text: '\u2063',
-      disable_notification: true,
-      reply_markup: {
-        keyboard: [[{ text: '⏹ Stop' }]],
-        resize_keyboard: true,
-        is_persistent: true,
-        input_field_placeholder: 'Forge is working — tap Stop to cancel',
-      },
+    // Stop rides inline on the status, which is padded wide so the button is
+    // too (0.17.69). The status stays the turn's one push notification.
+    const statusBody = bodies.find((body) => String(body.text).startsWith('Forge: working…'))!;
+    expect(statusBody.text).toBe(`Forge: working…${'\u2800'.repeat(38 - 15)}`);
+    expect(statusBody.reply_markup).toEqual({
+      inline_keyboard: [[{ text: '⏹ Stop', callback_data: 'x' }]],
     });
-    const statusBody = bodies.find((body) => body.text === 'Forge: working…');
-    const statusIndex = bodies.indexOf(statusBody!);
-    expect(statusIndex).toBeGreaterThan(controlIndex);
     expect(statusBody).not.toHaveProperty('disable_notification');
-    expect(statusBody).not.toHaveProperty('reply_markup');
     abort.abort();
   });
 
-  it('uses a mirrored prompt as the keyboard carrier and removes the keyboard silently', async () => {
+  it('never sends the retired Stop reply keyboard during a turn', async () => {
+    // State x lifecycle ledger, CI row: the 0.17.67 reply keyboard sat where
+    // the thumb lands while swiping. No send in a turn may carry it again.
+    const abort = new AbortController();
+    const bodies: Record<string, unknown>[] = [];
+    let nextMessageId = 1;
+    const channel = new TelegramChannel({
+      token: 'secret-token',
+      getCursor: () => undefined,
+      setCursor: async () => undefined,
+      fetch: (async (url: string | URL | Request, init?: RequestInit) => {
+        bodies.push(JSON.parse(String(init?.body ?? '{}')) as Record<string, unknown>);
+        return response(String(url).endsWith('/sendMessage') ? { message_id: nextMessageId++ } : true);
+      }) as typeof fetch,
+    });
+    await channel.start(abort.signal);
+    const progress = new RemoteAgentProgress(channel, abort.signal, () => true, 3_900, 0);
+
+    const bubble = await openProgressBubble(
+      channel,
+      CHAT,
+      'Forge: working…',
+      abort.signal,
+      async () => true,
+      'You (VS Code): inspect this',
+    );
+    if (bubble.kind !== 'plain') throw new Error('expected a plain bubble');
+    progress.begin('c1', CHAT, bubble.messageId, 'host');
+    progress.handle({ conversationId: 'c1', kind: 'narration', text: 'Looking now.' });
+    await progress.finish('c1', 'Forge: completed.');
+
+    expect(bodies.length).toBeGreaterThan(2);
+    for (const body of bodies) {
+      const markup = (body.reply_markup ?? {}) as Record<string, unknown>;
+      expect(markup).not.toHaveProperty('keyboard');
+      expect(markup).not.toHaveProperty('is_persistent');
+    }
+    const prompt = bodies.find((body) => body.text === 'You (VS Code): inspect this');
+    expect(prompt).toMatchObject({ disable_notification: true });
+    expect(prompt).not.toHaveProperty('reply_markup');
+    abort.abort();
+  });
+
+  it('removes a leftover 0.17.67 Stop key silently and deletes the carrier', async () => {
     const abort = new AbortController();
     const calls: Array<{ method: string; body: Record<string, unknown> }> = [];
     let nextMessageId = 1;
@@ -1685,19 +1711,9 @@ describe('TelegramChannel — progress bubble', () => {
     });
     await channel.start(abort.signal);
 
-    await channel.sendProgressPrompt(CHAT, 'You (VS Code): inspect this', { signal: abort.signal });
     await channel.removeProgressStopKeyboard(CHAT);
 
-    const prompt = calls.find((call) => call.body.text === 'You (VS Code): inspect this');
-    expect(prompt?.body.reply_markup).toEqual({
-      keyboard: [[{ text: '⏹ Stop' }]],
-      resize_keyboard: true,
-      is_persistent: true,
-      input_field_placeholder: 'Forge is working — tap Stop to cancel',
-    });
-    const removal = calls.find(
-      (call) => call.body.text === '\u2063' && call.body.reply_markup !== undefined,
-    );
+    const removal = calls.find((call) => call.method === 'sendMessage');
     expect(removal).toMatchObject({
       method: 'sendMessage',
       body: {
@@ -1708,7 +1724,7 @@ describe('TelegramChannel — progress bubble', () => {
     });
     expect(calls).toContainEqual({
       method: 'deleteMessage',
-      body: { chat_id: CHAT, message_id: 2 },
+      body: { chat_id: CHAT, message_id: Number(nextMessageId - 1) },
     });
     abort.abort();
   });
@@ -1736,7 +1752,10 @@ describe('TelegramChannel — progress bubble', () => {
     expect(edits[0]).toMatchObject({
       reply_markup: { inline_keyboard: [[{ callback_data: 'x' }]] },
     });
+    expect(String(edits[0]!.text).endsWith('\u2800')).toBe(true);
+    // The final edit drops Stop, and with it the padding.
     expect(edits[1]).not.toHaveProperty('reply_markup');
+    expect(edits[1]!.text).toBe('Forge: completed.');
     abort.abort();
   });
 });

@@ -20,9 +20,10 @@ import type {
 } from '../../src/sidebar/UserQuestionService';
 
 /**
- * Telegram's reply-keyboard Stop plus legacy inline callbacks, end to end
- * through the controller. A keyboard tap resolves by bound chat; an old inline
- * callback resolves by message id. Both cancel only the turn they name.
+ * Telegram's inline Stop, end to end through the controller. An inline
+ * callback resolves by message id; a tap on a leftover 0.17.67 reply-keyboard
+ * key resolves by bound chat and clears that key. Both cancel only the turn
+ * they name.
  */
 
 const tempDirs: string[] = [];
@@ -51,7 +52,6 @@ const base = {
 
 interface Fixture {
   channel: FakeRemoteChannel;
-  progressSends: string[];
   keyboardRemovals: string[];
   controller: RemoteController;
   auth: RemoteAuth;
@@ -78,41 +78,19 @@ interface Fixture {
  * blocks so the turn is still live while the Stop taps arrive.
  */
 async function liveTurn(
-  options: { separateStopControl?: boolean; failStopControl?: boolean } = {},
+  options: { legacyKeyboard?: boolean; failKeyboardRemoval?: boolean } = {},
 ): Promise<Fixture> {
   const state = await store();
   const secrets = new MemorySecrets();
   const auth = new RemoteAuth(secrets as unknown as vscode.SecretStorage);
   const channel = new FakeRemoteChannel('telegram');
-  const progressSends: string[] = [];
   const keyboardRemovals: string[] = [];
-  const sendProgress = channel.sendProgress.bind(channel);
-  channel.sendProgress = async (...args: Parameters<FakeRemoteChannel['sendProgress']>) => {
-    const messageId = await sendProgress(...args);
-    progressSends.push(`send:${messageId}:bubble`);
-    return messageId;
-  };
-  const deleteMessage = channel.deleteMessage.bind(channel);
-  channel.deleteMessage = async (chatId, messageId) => {
-    progressSends.push(`delete:${messageId}`);
-    await deleteMessage(chatId, messageId);
-  };
-  if (options.separateStopControl) {
+  if (options.legacyKeyboard) {
     const controllable = channel as FakeRemoteChannel & {
-      sendProgressStopControl: (chatId: string) => Promise<string | undefined>;
       removeProgressStopKeyboard: (chatId: string) => Promise<void>;
     };
-    controllable.sendProgressStopControl = async (chatId) => {
-      if (options.failStopControl) {
-        throw new Error('Stop keyboard send denied');
-      }
-      channel.progress.push({ chatId, text: '\u2063' });
-      const messageId = String(channel.progress.length);
-      channel.stopButtons.add(messageId);
-      progressSends.push(`send:${messageId}:stop`);
-      return messageId;
-    };
     controllable.removeProgressStopKeyboard = async (chatId: string) => {
+      if (options.failKeyboardRemoval) throw new Error('keyboard removal denied');
       keyboardRemovals.push(chatId);
     };
   }
@@ -204,7 +182,6 @@ async function liveTurn(
 
   return {
     channel,
-    progressSends,
     keyboardRemovals,
     controller,
     auth,
@@ -255,101 +232,19 @@ describe('remote stop_action (keyboard and legacy callbacks)', () => {
     await f.controller.stop();
   });
 
-  it('owns the separate control row, maps its Stop callback, and deletes it on finish', async () => {
-    const f = await liveTurn({ separateStopControl: true });
-    const stopRow = String(f.channel.progress.findIndex((p) => p.text === '\u2063') + 1);
-    const status = bubbleId(f.channel);
-    expect(stopRow).toBe('1');
-    expect(status).toBe('2');
-    expect(f.channel.stopButtons.has(stopRow)).toBe(true);
-    expect(f.channel.stopButtons.has(status)).toBe(false);
-
-    await expect(f.channel.emit(tap(stopRow, 'cb-control', { control: true }))).resolves.toEqual({
-      kind: 'handled',
-    });
-    expect(f.cancel).toHaveBeenCalledWith('c1');
-
+  it('never removes a keyboard during an ordinary turn', async () => {
+    const f = await liveTurn({ legacyKeyboard: true });
     f.release();
     await f.drainDone();
-    expect(f.channel.deleted).toContainEqual({ chatId: 'chat-1', messageId: stopRow });
-    await expect(
-      f.channel.emit(tap(stopRow, 'cb-control-stale', { control: true })),
-    ).resolves.toEqual({
-      kind: 'rejected',
-      reason: 'This turn has already ended.',
-    });
+    expect(f.keyboardRemovals).toEqual([]);
+    expect(f.channel.deleted).toEqual([]);
     await f.controller.stop();
   });
 
-  it('keeps one Stop keyboard carrier while the footer moves to a new bubble', async () => {
-    const f = await liveTurn({ separateStopControl: true });
-    const initialStop = String(f.channel.progress.findIndex((p) => p.text === '\u2063') + 1);
-
-    f.emitProgress({
-      conversationId: 'c1',
-      kind: 'notice',
-      severity: 'warning',
-      text: 'agent is repeating the same tool call',
-    });
-    await vi.waitFor(
-      () => {
-        expect(f.channel.sent.some((item) => item.text.includes('agent is repeating'))).toBe(true);
-        expect(f.channel.progress.length).toBeGreaterThan(2);
-      },
-      { timeout: 3_000 },
-    );
-
-    expect(f.channel.progress.filter((message) => message.text === '\u2063')).toHaveLength(1);
-    expect(f.channel.deleted).not.toContainEqual({ chatId: 'chat-1', messageId: initialStop });
-    expect(f.progressSends.filter((sent) => sent.endsWith(':stop'))).toEqual([
-      `send:${initialStop}:stop`,
-    ]);
-
-    await expect(
-      f.channel.emit(tap(initialStop, 'stop-original-control', { control: true })),
-    ).resolves.toEqual({ kind: 'handled' });
-    expect(f.cancel).toHaveBeenCalledWith('c1');
-
+  it('answers a leftover key with nothing running and removes the key', async () => {
+    const f = await liveTurn({ legacyKeyboard: true });
     f.release();
     await f.drainDone();
-    expect(f.channel.deleted).toContainEqual({ chatId: 'chat-1', messageId: initialStop });
-    expect(f.keyboardRemovals).toEqual(['chat-1']);
-    await f.controller.stop();
-  });
-
-  it('keeps the inline status Stop fallback when the initial keyboard send fails', async () => {
-    const f = await liveTurn({ separateStopControl: true, failStopControl: true });
-    const status = bubbleId(f.channel);
-    expect(f.channel.progress.filter((message) => message.text === '\u2063')).toHaveLength(0);
-    expect(f.channel.stopButtons.has(status)).toBe(true);
-    expect(f.errors.some((error) => error.includes('Stop keyboard send denied'))).toBe(true);
-
-    await expect(f.channel.emit(tap(status, 'stop-inline-fallback'))).resolves.toEqual({
-      kind: 'handled',
-    });
-    expect(f.cancel).toHaveBeenCalledWith('c1');
-
-    f.release();
-    await f.drainDone();
-    await f.controller.stop();
-  });
-
-  it('heals a stale keyboard after a failed finish removal', async () => {
-    const f = await liveTurn({ separateStopControl: true });
-    const initialStop = String(f.channel.progress.findIndex((p) => p.text === '\u2063') + 1);
-    let removalAttempts = 0;
-    const controllable = f.channel as FakeRemoteChannel & {
-      removeProgressStopKeyboard: (chatId: string) => Promise<void>;
-    };
-    controllable.removeProgressStopKeyboard = async (chatId) => {
-      removalAttempts += 1;
-      if (removalAttempts === 1) throw new Error('keyboard removal denied');
-      f.keyboardRemovals.push(chatId);
-    };
-    f.release();
-    await f.drainDone();
-    expect(f.errors.some((error) => error.includes('keyboard removal denied'))).toBe(true);
-    expect(f.channel.deleted).toContainEqual({ chatId: 'chat-1', messageId: initialStop });
 
     await expect(
       f.channel.emit({ ...base, kind: 'stop_action', source: 'keyboard', providerMessageId: 'stale-key' }),
@@ -359,28 +254,28 @@ describe('remote stop_action (keyboard and legacy callbacks)', () => {
     await f.controller.stop();
   });
 
-  it('deletes the control row at finish even when a status edit fails', async () => {
-    const f = await liveTurn({ separateStopControl: true });
-    const stopRow = String(f.channel.progress.findIndex((p) => p.text === '\u2063') + 1);
-    const edit = f.channel.editMessage.bind(f.channel);
-    let failEdit = true;
-    f.channel.editMessage = async (...args: Parameters<FakeRemoteChannel['editMessage']>) => {
-      if (failEdit) throw new Error('edit denied');
-      return edit(...args);
-    };
+  it('reports a failed leftover-key removal and still stops the turn', async () => {
+    const f = await liveTurn({ legacyKeyboard: true, failKeyboardRemoval: true });
+    await expect(
+      f.channel.emit({ ...base, kind: 'stop_action', source: 'keyboard', providerMessageId: 'key-x' }),
+    ).resolves.toEqual({ kind: 'handled' });
+    expect(f.cancel).toHaveBeenCalledWith('c1');
+    expect(f.errors.some((error) => error.includes('keyboard removal denied'))).toBe(true);
 
-    f.emitProgress({ kind: 'commentary', conversationId: 'c1', text: 'A streamed answer' });
-    await vi.waitFor(
-      () => expect(f.errors.some((message) => message.includes('edit denied'))).toBe(true),
-      {
-        timeout: 3_000,
-      },
-    );
-    failEdit = false;
+    f.release();
+    await f.drainDone();
+    await f.controller.stop();
+  });
+
+  it('rejects a tap on an old control row and deletes the row', async () => {
+    const f = await liveTurn();
     f.release();
     await f.drainDone();
 
-    expect(f.channel.deleted).toContainEqual({ chatId: 'chat-1', messageId: stopRow });
+    await expect(
+      f.channel.emit(tap('42', 'cb-control-stale', { control: true, source: 'control' })),
+    ).resolves.toEqual({ kind: 'rejected', reason: 'This turn has already ended.' });
+    expect(f.channel.deleted).toContainEqual({ chatId: 'chat-1', messageId: '42' });
     await f.controller.stop();
   });
 
@@ -488,8 +383,8 @@ describe('remote stop_action through the controller', () => {
     await f.controller.stop();
   });
 
-  it('cancels the live conversation bound to the chat from a reply-keyboard Stop', async () => {
-    const f = await liveTurn({ separateStopControl: true });
+  it('cancels the live conversation from a leftover 0.17.67 key and removes the key', async () => {
+    const f = await liveTurn({ legacyKeyboard: true });
     await expect(
       f.channel.emit({
         ...base,
@@ -499,6 +394,7 @@ describe('remote stop_action through the controller', () => {
       }),
     ).resolves.toEqual({ kind: 'handled' });
     expect(f.cancel).toHaveBeenCalledWith('c1');
+    expect(f.keyboardRemovals).toEqual(['chat-1']);
 
     f.release();
     await f.drainDone();

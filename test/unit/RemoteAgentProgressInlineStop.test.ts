@@ -20,38 +20,31 @@ function rig(): {
   return { channel, removed, progress };
 }
 
-describe('RemoteAgentProgress Stop keyboard lifecycle', () => {
+describe('RemoteAgentProgress inline Stop lifecycle (0.17.69)', () => {
   it.each([
     ['completed', 'Forge: completed.'],
     ['failed', 'Forge: failed.'],
     ['cancelled', 'Forge: cancelled.'],
-  ] as const)('removes and deletes a control carrier on %s', async (_outcome, terminal) => {
+  ] as const)('drops Stop from the status on %s and touches no keyboard', async (_outcome, terminal) => {
     const { channel, removed, progress } = rig();
-    progress.begin('c1', 'chat-1', 'status-id', 'remote', 'control-id');
+    const status = await channel.sendProgress('chat-1', 'Forge: working…', { stopButton: true });
+    progress.begin('c1', 'chat-1', status!, 'remote');
+    expect(progress.conversationForBubble('chat-1', status!)).toBe('c1');
 
     await progress.finish('c1', terminal);
 
-    expect(removed).toEqual(['chat-1']);
-    expect(channel.deleted).toContainEqual({ chatId: 'chat-1', messageId: 'control-id' });
+    expect(channel.stopButtons.has(status!)).toBe(false);
+    expect(removed).toEqual([]);
+    expect(channel.deleted).toEqual([]);
   });
 
-  it('removes the prompt carrier keyboard but keeps the prompt message', async () => {
+  it('touches no keyboard and deletes nothing on dispose', async () => {
     const { channel, removed, progress } = rig();
-    progress.begin('c1', 'chat-1', 'status-id', 'host', 'prompt-id', false);
-
-    await progress.finish('c1', 'Forge: completed.');
-
-    expect(removed).toEqual(['chat-1']);
-    expect(channel.deleted).not.toContainEqual({ chatId: 'chat-1', messageId: 'prompt-id' });
-  });
-
-  it('removes and deletes the control carrier on dispose', async () => {
-    const { channel, removed, progress } = rig();
-    progress.begin('c1', 'chat-1', 'status-id', 'remote', 'control-id');
+    progress.begin('c1', 'chat-1', 'status-id', 'host');
 
     await progress.dispose();
 
-    expect(removed).toEqual(['chat-1']);
-    expect(channel.deleted).toContainEqual({ chatId: 'chat-1', messageId: 'control-id' });
+    expect(removed).toEqual([]);
+    expect(channel.deleted).toEqual([]);
   });
 });

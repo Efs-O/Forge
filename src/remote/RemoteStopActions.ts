@@ -47,6 +47,9 @@ export async function handleRemoteStopAction(
   } catch (err) {
     deps.onError?.(`Forge remote Stop could not cancel the turn: ${describeError(err)}`);
   }
+  // A key tap can only come from the 0.17.67 reply keyboard; Forge no longer
+  // sends it, so the first tap clears it for good.
+  if (keyboard) await removeLegacyStopKeyboard(event, deps);
   deps.auth.touch(event);
   return { kind: 'handled' };
 }
@@ -62,11 +65,7 @@ async function rejectOrHealStaleStop(
     } catch (err) {
       deps.onError?.(`Forge stale Stop reply failed: ${describeError(err)}`);
     }
-    try {
-      await deps.channel.removeProgressStopKeyboard?.(event.chatId);
-    } catch (err) {
-      deps.onError?.(`Forge stale Stop keyboard cleanup failed: ${describeError(err)}`);
-    }
+    await removeLegacyStopKeyboard(event, deps);
     return { kind: 'handled' };
   }
   if (event.source === 'control' || event.control) {
@@ -79,4 +78,15 @@ async function rejectOrHealStaleStop(
     }
   }
   return { kind: 'rejected', reason: 'This turn has already ended.' };
+}
+
+async function removeLegacyStopKeyboard(
+  event: Extract<RemoteInboundEvent, { kind: 'stop_action' }>,
+  deps: RemoteStopActionDeps,
+): Promise<void> {
+  try {
+    await deps.channel.removeProgressStopKeyboard?.(event.chatId);
+  } catch (err) {
+    deps.onError?.(`Forge legacy Stop keyboard cleanup failed: ${describeError(err)}`);
+  }
 }

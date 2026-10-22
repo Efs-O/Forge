@@ -1,5 +1,11 @@
 # Forge — Recent Changes
 
+## 0.17.69
+
+- The Telegram `⏹ Stop` key under the message box is gone. It sat where the thumb lands when scrolling, so it was easy to press by accident. Stop is back as a button on the newest status message, as before 0.17.67, and is now nearly as wide as the screen: Forge pads the status message's last line with invisible blank characters (U+2800) so the message, and the button under it, spans the chat. The button moves to the newest message as the answer grows and disappears when the turn ends.
+- Sidebar prompts mirrored to Telegram still arrive silently above the status message; they no longer carry a keyboard.
+- If the old key is still on your phone, tapping it once stops a running turn, or replies "nothing is running", and removes the key either way. Stop buttons on messages from earlier versions still work.
+
 ## 0.17.68
 
 Telegram reports are rewritten for a phone screen. Only Telegram changes: other transports, the `get_system_status` tool and the sidebar `/system` notice read exactly as before.
