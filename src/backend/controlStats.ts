@@ -18,6 +18,7 @@ export const controlStatsSchema = z.object({
     input_tokens: z.number(),
     output_tokens: z.number(),
     turn_errors: z.number(),
+    turns_without_end: z.number(),
   }),
   last_request: z
     .object({
@@ -195,6 +196,41 @@ function usageDelta(previous: UsageTotals, current: UsageTotals): UsageTotals {
   };
 }
 
+/**
+ * Count started turns that were displaced by another turn or a later run
+ * without a matching end row. A final open turn may still be running, and
+ * blocked admissions have an end row without a user-message opener.
+ */
+function countTurnsWithoutEnd(rows: Array<Record<string, unknown>>, day: string): number {
+  // Older session logs have no end markers at all; they predate this counter.
+  if (!rows.some((row) => row['type'] === 'turn_end')) return 0;
+
+  let openedAt: number | undefined;
+  let missing = 0;
+  const markMissing = (): void => {
+    if (openedAt !== undefined && localDay(openedAt) === day) missing += 1;
+    openedAt = undefined;
+  };
+
+  for (const row of rows) {
+    const timestampMs = row['timestamp_ms'];
+    if (typeof timestampMs !== 'number' || !Number.isFinite(timestampMs)) continue;
+    if (row['type'] === 'session_start') {
+      markMissing();
+    } else if (row['role'] === 'user' && row['delivered'] !== 'mid_turn') {
+      // Forge's own notes (a stop-while-thinking nudge, a mid-turn compaction
+      // resume) land inside a running turn without the mid-turn flag; only a
+      // turn with nothing open can start from one (a check-in, a resume send).
+      if (openedAt !== undefined && row['internal'] === true) continue;
+      markMissing();
+      openedAt = timestampMs;
+    } else if (row['type'] === 'turn_end' && row['outcome'] !== 'blocked') {
+      openedAt = undefined;
+    }
+  }
+  return missing;
+}
+
 /** Builds a counts-only summary; persisted row text is never copied to the reply. */
 export class ControlStatsBuilder {
   private readonly fileCache = new Map<string, FileCacheEntry>();
@@ -234,6 +270,7 @@ export class ControlStatsBuilder {
         input_tokens: 0,
         output_tokens: 0,
         turn_errors: 0,
+        turns_without_end: 0,
       },
       last_request: null,
       session: null,
@@ -258,9 +295,17 @@ export class ControlStatsBuilder {
       if (!rows.some((row) => row['type'] === 'session_start')) continue;
 
       const [counted, requestAtMs] = countRows(rows, day, this.options.contextLimitFor);
-      for (const key of Object.keys(result.today) as Array<keyof typeof result.today>) {
-        result.today[key] += counted[key];
-      }
+      result.today.turns_without_end += countTurnsWithoutEnd(rows, day);
+      result.today.turns += counted.turns;
+      result.today.requests += counted.requests;
+      result.today.compactions += counted.compactions;
+      result.today.compaction_attempts_failed += counted.compaction_attempts_failed;
+      result.today.compactions_suppressed += counted.compactions_suppressed;
+      result.today.tool_calls += counted.tool_calls;
+      result.today.tool_failures += counted.tool_failures;
+      result.today.input_tokens += counted.input_tokens;
+      result.today.output_tokens += counted.output_tokens;
+      result.today.turn_errors += counted.turn_errors;
       if (counted.last_request && requestAtMs > lastRequestAtMs) {
         lastRequestAtMs = requestAtMs;
         result.last_request = counted.last_request;

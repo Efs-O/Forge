@@ -1,5 +1,12 @@
 # Forge — Recent Changes
 
+## 0.17.66
+
+- When a model calls a tool that has been retired or merged into another, the error now names the replacement and how to call it, for example `it was replaced by "shell" (one command line in "command")`. It used to say only `unknown tool "exec_command"`. Resumed chats and models trained on older Forge sessions kept calling old names: on 0.17, 11 calls to `exec_command` got the bare error. The list covers the old command tools (`exec_command`, `run_terminal`, `query_powershell`, `run_tests`, `run_build`), the five old git tools (now `git_read`) and the eight old code-intelligence tools (now `code_intel`). When the replacement is in a tool group that is not loaded yet, the error also says to load that group.
+- The session log now records how every turn ended. A new `turn_end` row gives the outcome (`completed`, `failed`, `cancelled`, `interrupted`, or `blocked` when the context was too full to start), the number of model requests the turn made and, when the model finished normally, its finish reason. A turn that finished normally used to write nothing, so a turn that stopped silently looked the same in the log as one that finished. A message refused before its turn started wrote nothing at all; it now writes a `blocked` row.
+- Messages that arrive while the model is working are marked `delivered: "mid_turn"` in the session log, so they are no longer mistaken for the start of a new turn.
+- The control server's `GET /stats` reports `turns_without_end` for today: turns that started but have no `turn_end` row before the next turn or a window reload. Logs written before this version are not counted.
+
 ## 0.17.65
 
 - A finished task plan is no longer sent to the model. Once every item is marked done, Forge stops adding the plan and its guidance to the start of each turn. The same goes for the plan sent to Claude and Codex CLI turns and for the after-compaction note that tells the model to check its plan. The plan is still saved and still shown in the sidebar, and the compaction summary still sees it, so the record of what was done is kept. In 94 recorded sessions, 19 had carried a fully finished plan into three or more later turns.

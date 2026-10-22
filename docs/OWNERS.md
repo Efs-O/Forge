@@ -79,6 +79,7 @@ overlaps with an existing owner, extend the owner instead.
 | Guarded apply + save of a language-server WorkspaceEdit | `src/tools/workspaceEditApply.ts`     |
 | Filesystem-miss error text for tools                 | `src/tools/pathErrorHint.ts`             |
 | Tool call execution + result formatting              | `src/sidebar/ToolDispatch.ts`            |
+| Retired tool-name replacement hints                  | `src/sidebar/retiredTools.ts`            |
 | Delete approval preview and bounded inventory        | `src/sidebar/deletePreview.ts`           |
 | Conversation CRUD pure ops                           | `src/sidebar/ConversationOps.ts`         |
 | Slash command dispatch                               | `src/sidebar/SlashCommandHandler.ts`     |

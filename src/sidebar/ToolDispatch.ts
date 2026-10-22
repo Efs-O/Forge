@@ -31,6 +31,7 @@ import {
 } from '../tools/argCoercion';
 import type { ToolArgumentRepairInfo } from '../tools/argCoercion';
 import { isLazyGroupActive, lazyGroupForTool, lazyGroupNames } from '../tools/lazyToolGroups';
+import { retiredToolResult } from './retiredTools';
 
 const log = getLogger();
 /** A directory has no text to diff, and `readFileSync` on one throws EISDIR. */
@@ -72,6 +73,14 @@ function unknownToolResult(
   unavailableTools: ReadonlyMap<string, string> | undefined,
 ): string {
   const result = `Error: unknown tool "${name}"`;
+  const retired = retiredToolResult(name, UNKNOWN_TOOL_HINT_MAX_CHARS, {
+    registry,
+    allowed,
+    budget,
+    convId,
+    unavailableTools,
+  });
+  if (retired) return retired;
   if (name.length < UNKNOWN_TOOL_HINT_MIN_PREFIX_CHARS) return result;
 
   const definitions = registry

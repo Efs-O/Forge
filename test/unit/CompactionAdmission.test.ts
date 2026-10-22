@@ -7,6 +7,7 @@ vi.mock('../../src/sidebar/SessionLogger', () => ({
       updateTitle: vi.fn(),
       logTurnError: vi.fn(),
       logTurnStopped: vi.fn(),
+      logTurnEnd: vi.fn(),
     };
   }),
 }));

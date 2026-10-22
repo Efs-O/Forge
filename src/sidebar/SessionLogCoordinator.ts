@@ -6,6 +6,7 @@ import {
   type CompactionLogEntry,
 } from './SessionLogger';
 import type { ConversationRuntime, SidebarRuntime } from './sessionTypes';
+import type { ForgeTurnEndKind } from './turnOutcome';
 
 /** Undefined outside a real host (tests, or an unresolvable extension id). */
 function forgeVersion(): string | undefined {
@@ -59,6 +60,17 @@ export class SessionLogCoordinator {
     const conv = this.getSidebar().conversations.find((c) => c.id === convId);
     if (!conv) return;
     this.loggerFor(conv).logTurnStopped(kind, conv.active_model ?? '');
+  }
+
+  logTurnEnd(
+    convId: string,
+    outcome: ForgeTurnEndKind,
+    rounds: number,
+    finishReason?: string | null,
+  ): void {
+    const conv = this.getSidebar().conversations.find((c) => c.id === convId);
+    if (!conv) return;
+    this.loggerFor(conv).logTurnEnd(outcome, rounds, finishReason, conv.active_model ?? '');
   }
 
   private loggerFor(conv: ConversationRuntime): SessionLogger {

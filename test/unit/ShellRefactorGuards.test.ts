@@ -22,6 +22,7 @@ const SCAN_EXTENSIONS = new Set(['.ts', '.tsx', '.njk', '.yaml', '.json', '.md']
 const ALLOWED_EXCEPTIONS = [
   'src/agents/adapters/codexAdapter.ts',
   'src/sidebar/compactionLedger.ts',
+  'src/sidebar/retiredTools.ts',
 ];
 
 function walk(dir: string): string[] {

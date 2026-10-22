@@ -4,6 +4,7 @@ import * as path from 'path';
 import { createHash } from 'crypto';
 import type { ChatMessage } from '../llm/types';
 import { requestPrefixRow, type RequestFingerprint } from '../sessions/requestFingerprint';
+import type { ForgeTurnEndKind } from './turnOutcome';
 import type { CompactionAttemptLogEntry, CompactionLogEntry } from './compactionLogTypes';
 import {
   isJsonObject,
@@ -307,6 +308,24 @@ export class SessionLogger {
     this.append({ type: 'turn_stopped', kind, timestamp_ms: Date.now(), model });
   }
 
+  /** Records the terminal outcome for one provider turn or blocked admission. */
+  logTurnEnd(
+    outcome: ForgeTurnEndKind,
+    rounds: number,
+    finishReason: string | null | undefined,
+    model: string,
+  ): void {
+    this.ensureHeader(model);
+    this.append({
+      type: 'turn_end',
+      outcome,
+      rounds,
+      ...(finishReason !== undefined ? { finish_reason: finishReason } : {}),
+      timestamp_ms: Date.now(),
+      model,
+    });
+  }
+
   flush(messages: ChatMessage[], model: string, usage?: SessionUsage): void {
     const startedAt = this.writtenCount;
     this.ensureHeader(model);
@@ -372,6 +391,7 @@ export class SessionLogger {
       };
       if (msg.reasoning) line['reasoning'] = msg.reasoning;
       if (msg.role === 'user' && msg.internal === true) line['internal'] = true;
+      if (msg.role === 'user' && msg.midTurn === true) line['delivered'] = 'mid_turn';
       if (msg.role === 'tool' && msg.tool_call_id) line['tool_call_id'] = msg.tool_call_id;
       if (msg.role === 'tool' && msg.name) line['name'] = msg.name;
       if (argumentRepair) {

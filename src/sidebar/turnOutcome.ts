@@ -18,6 +18,9 @@ export type ForgeRequestOutcome =
   | { kind: 'cancelled'; finalText?: string; incompleteReason?: string }
   | { kind: 'interrupted'; finalText?: string; incompleteReason?: string };
 
+/** Session-log outcomes also include an admission refusal before a provider turn. */
+export type ForgeTurnEndKind = ForgeTurnOutcome['kind'] | ForgeRequestOutcome['kind'] | 'blocked';
+
 export function toRequestOutcome(turn: ForgeTurnOutcome): ForgeRequestOutcome {
   switch (turn.kind) {
     case 'completed':

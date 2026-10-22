@@ -4,10 +4,11 @@ const flush = vi.fn();
 const updateTitle = vi.fn();
 const logTurnError = vi.fn();
 const logTurnStopped = vi.fn();
+const logTurnEnd = vi.fn();
 // The real logger writes a transcript under ~/.forge on every finished turn.
 vi.mock('../../src/sidebar/SessionLogger', () => ({
   SessionLogger: vi.fn().mockImplementation(function SessionLoggerMock() {
-    return { flush, updateTitle, logTurnError, logTurnStopped };
+    return { flush, updateTitle, logTurnError, logTurnStopped, logTurnEnd };
   }),
 }));
 
@@ -15,6 +16,7 @@ import { SendPipeline, type SendPipelineDeps } from '../../src/sidebar/SendPipel
 import type { ForgeConfig } from '../../src/config/types';
 import type { ConversationRuntime, SidebarRuntime } from '../../src/sidebar/sessionTypes';
 import type { HostToWebview } from '../../src/sidebar/messageBridge';
+import type { ForgeTurnOutcome } from '../../src/sidebar/turnOutcome';
 import { RequestChainLifecycle } from '../../src/sidebar/RequestChainLifecycle';
 import { CONTEXT_EXHAUSTED_MESSAGE } from '../../src/agent/truncationRecovery';
 import { MidTurnInbox } from '../../src/agent/MidTurnInbox';
@@ -362,6 +364,44 @@ describe('SendPipeline.send', () => {
 
     expect(outcome).toEqual({ kind: 'cancelled' });
     expect(logTurnStopped).toHaveBeenCalledWith('cancelled', expect.any(String));
+  });
+
+  it.each([
+    { kind: 'completed', finalText: 'done', finishReason: 'stop' },
+    { kind: 'failed', error: 'provider failed', finalText: '' },
+    { kind: 'cancelled', finalText: '' },
+    { kind: 'interrupted', finalText: '' },
+  ] satisfies ForgeTurnOutcome[])(
+    'writes one turn_end for the $kind outcome',
+    async (turn) => {
+      const h = harness();
+      h.conv.model_request_count = 4;
+      h.runTurn.mockImplementationOnce(async () => {
+        h.conv.model_request_count = 7;
+        return turn;
+      });
+
+      await h.pipeline.send('turn');
+
+      expect(logTurnEnd).toHaveBeenCalledOnce();
+      expect(logTurnEnd).toHaveBeenCalledWith(
+        turn.kind,
+        3,
+        turn.kind === 'completed' ? turn.finishReason : undefined,
+        expect.any(String),
+      );
+    },
+  );
+
+  it('writes a blocked admission turn_end without running a provider turn', async () => {
+    const h = harness();
+    h.deps.evaluateAtAdmission = async () => ({ kind: 'blocked', reason: 'context is full' });
+
+    expect(await h.pipeline.send('too large')).toMatchObject({ kind: 'failed' });
+
+    expect(h.runTurn).not.toHaveBeenCalled();
+    expect(logTurnEnd).toHaveBeenCalledOnce();
+    expect(logTurnEnd).toHaveBeenCalledWith('blocked', 0, undefined, expect.any(String));
   });
 
   it('writes no error row for a turn that succeeded', async () => {

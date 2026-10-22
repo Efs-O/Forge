@@ -80,4 +80,27 @@ describe('SessionLogger turn errors', () => {
     expect(row?.['message']).toBe('Stream stalled after 120s idle');
     expect(row?.['stall']).toEqual(stall);
   });
+
+  it('marks a delivered mid-turn user row', () => {
+    const logger = new SessionLogger('c-mid-turn', 'title', 'm1');
+    logger.flush([{ role: 'user', content: 'follow up', midTurn: true }], 'm1');
+
+    expect(readRows('c-mid-turn').find((row) => row['role'] === 'user')).toMatchObject({
+      content: 'follow up',
+      delivered: 'mid_turn',
+    });
+  });
+
+  it('records turn outcome, provider rounds, and finish reason', () => {
+    const logger = new SessionLogger('c-end', 'title', 'm1');
+    logger.logTurnEnd('completed', 3, 'stop', 'm1');
+
+    expect(readRows('c-end').at(-1)).toMatchObject({
+      type: 'turn_end',
+      outcome: 'completed',
+      rounds: 3,
+      finish_reason: 'stop',
+      model: 'm1',
+    });
+  });
 });

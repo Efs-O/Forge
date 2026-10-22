@@ -6,6 +6,7 @@ import type { KeepUndoCodeLensProvider } from '../../src/sidebar/KeepUndoCodeLen
 import type { ChatMessage, ToolCall } from '../../src/llm/types';
 import { ToolBudget } from '../../src/tools/ToolBudget';
 import { ToolRegistry } from '../../src/tools/ToolRegistry';
+import { RETIRED_TOOLS } from '../../src/sidebar/retiredTools';
 import {
   hasAvailableLazyGroup,
   resetLazyToolGroups,
@@ -118,6 +119,33 @@ describe('unknown tool name hints', () => {
   afterEach(() => {
     vi.clearAllMocks();
     resetLazyToolGroups();
+  });
+
+  it('names the current replacement for every known retired tool name', async () => {
+    const registry = new ToolRegistry();
+    const replacements = new Set(Object.values(RETIRED_TOOLS).map(({ tool: name }) => name));
+    for (const name of replacements) registry.register(tool(name));
+    registry.register(tool('load_tool_group', { advertise: hasAvailableLazyGroup }));
+
+    for (const [retired, replacement] of Object.entries(RETIRED_TOOLS)) {
+      const result = await dispatchUnknown({ name: retired, registry });
+      expect(result, retired).toContain(`was replaced by "${replacement.tool}"`);
+      expect(result.length, retired).toBeLessThanOrEqual(200);
+    }
+  });
+
+  it('keeps the load_tool_group instruction for a retired lazy-group tool', async () => {
+    const registry = new ToolRegistry();
+    registry.register(tool('code_intel'));
+    registry.register(tool('load_tool_group', { advertise: hasAvailableLazyGroup }));
+
+    const result = await dispatchUnknown({ name: 'get_diagnostics', registry });
+
+    expect(result).toContain('was replaced by "code_intel"');
+    expect(result).toContain(
+      'group "code_intel" is unloaded; call load_tool_group with "code_intel"',
+    );
+    expect(result.length).toBeLessThanOrEqual(200);
   });
 
   it('suggests a unique eligible truncated name and explains an unloaded group', async () => {

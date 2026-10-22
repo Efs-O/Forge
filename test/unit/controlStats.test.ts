@@ -95,6 +95,7 @@ describe('control stats', () => {
       input_tokens: 32,
       output_tokens: 10,
       turn_errors: 1,
+      turns_without_end: 0,
     });
     expect(result.last_request).toEqual({
       model: 'unknown',
@@ -141,6 +142,31 @@ describe('control stats', () => {
       context_limit: 8192,
       at: Math.floor((FIXED_NOW + 2) / 1_000),
     });
+  });
+
+  it('counts today turns without an end and ignores mid-turn delivery, blocked ends, and a live tail', () => {
+    const env = setup();
+    env.write('gaps.jsonl', [
+      { type: 'session_start', timestamp_ms: FIXED_NOW },
+      { role: 'user', content: 'first', timestamp_ms: FIXED_NOW + 1 },
+      { role: 'user', content: 'nudge', internal: true, timestamp_ms: FIXED_NOW + 1 },
+      { type: 'turn_end', outcome: 'completed', timestamp_ms: FIXED_NOW + 2 },
+      { role: 'user', content: 'tell', delivered: 'mid_turn', timestamp_ms: FIXED_NOW + 3 },
+      { role: 'user', content: 'missing before next', timestamp_ms: FIXED_NOW + 4 },
+      { role: 'user', content: 'next request', timestamp_ms: FIXED_NOW + 5 },
+      { type: 'turn_end', outcome: 'completed', timestamp_ms: FIXED_NOW + 6 },
+      { role: 'user', content: 'crashed before restart', timestamp_ms: FIXED_NOW + 7 },
+      { type: 'turn_end', outcome: 'blocked', timestamp_ms: FIXED_NOW + 8 },
+      { type: 'session_start', timestamp_ms: FIXED_NOW + 9 },
+      { role: 'user', content: 'still running', timestamp_ms: FIXED_NOW + 10 },
+    ]);
+    env.write('legacy.jsonl', [
+      { type: 'session_start', timestamp_ms: FIXED_NOW },
+      { role: 'user', timestamp_ms: FIXED_NOW + 1 },
+      { role: 'user', timestamp_ms: FIXED_NOW + 2 },
+    ]);
+
+    expect(builder(env.dir).build().today.turns_without_end).toBe(2);
   });
 
   it('counts replayed session rows once', () => {
@@ -200,6 +226,7 @@ describe('control stats', () => {
       input_tokens: 0,
       output_tokens: 0,
       turn_errors: 0,
+      turns_without_end: 0,
     });
     expect(result.skipped_files).toBe(0);
   });

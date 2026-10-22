@@ -22,7 +22,12 @@ import { validateAttachments } from './attachmentValidation';
 import type { ModelConfig } from '../config/types';
 import type { RequestChainLifecycle } from './RequestChainLifecycle';
 import type { RequestChainContext } from './RequestChainLifecycle';
-import { toRequestOutcome, type ForgeRequestOutcome, type ForgeTurnOutcome } from './turnOutcome';
+import {
+  toRequestOutcome,
+  type ForgeRequestOutcome,
+  type ForgeTurnEndKind,
+  type ForgeTurnOutcome,
+} from './turnOutcome';
 import type { AdmissionDecision, ContextThresholdAction } from './ContextBudgetPublisher';
 import { isContextExhaustionReason } from '../agent/truncationRecovery';
 import type { ChatAttachmentStore } from './ChatAttachmentStore';
@@ -32,6 +37,29 @@ import { groupTellBatches, inputTextOf, runsAfterStop, type TellBatch } from './
 
 const log = getLogger();
 export const CONVERSATION_BUSY_ERROR = 'Forge: this conversation is still generating.';
+
+function turnEndDetails(turn: ForgeTurnOutcome | ForgeRequestOutcome): {
+  outcome: ForgeTurnEndKind;
+  finishReason?: string | null;
+} {
+  switch (turn.kind) {
+    case 'completed':
+      return {
+        outcome: 'completed',
+        ...('finishReason' in turn ? { finishReason: turn.finishReason } : {}),
+      };
+    case 'failed':
+      return { outcome: 'failed' };
+    case 'cancelled':
+      return { outcome: 'cancelled' };
+    case 'interrupted':
+      return { outcome: 'interrupted' };
+    default: {
+      const exhaustive: never = turn;
+      return exhaustive;
+    }
+  }
+}
 
 export interface SendPipelineDeps {
   getConfig: () => ForgeConfig;
@@ -247,6 +275,7 @@ export class SendPipeline {
             deps.post({ type: 'error', message: decision.reason, conversationId: conv.id });
             deps.post({ type: 'setInput', text, conversationId: conv.id });
             deps.post({ type: 'done', finishReason: 'stop', conversationId: conv.id });
+            this.sessionLogs.logTurnEnd(conv.id, 'blocked', 0);
             return { kind: 'failed', error: decision.reason };
           }
           if (!deps.requestChains.isCurrent(chain)) return { kind: 'cancelled' };
@@ -255,6 +284,7 @@ export class SendPipeline {
         }
         for (;;) {
           let turn: ForgeTurnOutcome;
+          const requestCountBeforeTurn = conv.model_request_count ?? 0;
           try {
             turn = await deps.agentLoop.runTurn(
               conv,
@@ -275,6 +305,12 @@ export class SendPipeline {
           if (turn.kind === 'cancelled' || turn.kind === 'interrupted') {
             this.sessionLogs.logTurnStopped(conv.id, turn.kind);
           }
+          const end = turnEndDetails(turn);
+          const rounds = Math.max(
+            0,
+            (conv.model_request_count ?? requestCountBeforeTurn) - requestCountBeforeTurn,
+          );
+          this.sessionLogs.logTurnEnd(conv.id, end.outcome, rounds, end.finishReason);
           const undelivered = deps.midTurnInbox.takeUndelivered(conv.id);
           pendingTellBatches.push(...groupTellBatches(undelivered));
           if (pendingTellBatches.length > 0) {
