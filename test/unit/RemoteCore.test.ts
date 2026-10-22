@@ -156,10 +156,7 @@ describe('RemoteRequestStore', () => {
     // The drain should pick up the steer-priority record and deliver it.
     await vi.waitFor(() => expect(send).toHaveBeenCalledTimes(2));
     // The steer record runs first (priority ordering), then the normal one.
-    expect(send.mock.calls.map((call) => call[1])).toEqual([
-      'steer-legacy text',
-      'normal text',
-    ]);
+    expect(send.mock.calls.map((call) => call[1])).toEqual(['steer-legacy text', 'normal text']);
     await controller.stop();
   });
 });
@@ -173,6 +170,7 @@ describe('remote configuration and lease', () => {
     expect(parsed.remote).toEqual({
       enabled: true,
       queue_limit: 5,
+      unlock_backlog_max: 5,
       max_message_chars: 12_000,
       rate_limit_per_minute: 30,
       delete_command_messages_after: 5,

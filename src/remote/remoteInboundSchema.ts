@@ -120,10 +120,11 @@ export const RemoteInboundEventSchema = z.discriminatedUnion('kind', [
     choice: z.number().int().min(0).max(99).optional(),
     messageId: z.string().min(1).max(256),
   }),
-  /** The Stop button's message; the controller cancels only its owning turn. */
+  /** Inline Stop callbacks resolve by message; reply-keyboard taps resolve by bound chat. */
   InboundBaseSchema.extend({
     kind: z.literal('stop_action'),
-    messageId: z.string().min(1).max(256),
+    source: z.enum(['bubble', 'control', 'keyboard']).default('bubble'),
+    messageId: z.string().min(1).max(256).optional(),
     control: z.boolean().optional(),
   }),
   InboundBaseSchema.extend({

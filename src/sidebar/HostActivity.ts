@@ -32,7 +32,7 @@ export interface HostActivityEvent {
    * `/mirror off` is about not wanting answers repeated, and must never
    * suppress the news that the work stopped.
    */
-  kind?: 'turn' | 'failure';
+  kind?: 'turn' | 'failure' | 'prompt';
   /** This activity opens the agent-originated answer sequence; skip progress edits for that turn. */
   suppressProgress?: boolean;
   /**

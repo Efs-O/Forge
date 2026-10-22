@@ -60,6 +60,7 @@ async function drainWith(
     | { kind: 'completed'; finalText: string }
     | { kind: 'cancelled' }
     | { kind: 'failed'; error: string },
+  canDeliver: () => Promise<boolean> = async () => true,
 ): Promise<DrainResult> {
   const state = await store();
   await state.enqueue(request());
@@ -91,7 +92,7 @@ async function drainWith(
     signal: new AbortController().signal,
     channel,
     store: state,
-    auth: { canDeliver: async () => true },
+    auth: { canDeliver },
     host,
     progress,
     outbox: { kick: () => undefined },
@@ -135,5 +136,18 @@ describe('queue drain status bubble', () => {
     expect(channel.edits.map((e) => e.text).join('\n')).not.toContain('backend exploded');
     // The error still reaches the user — on the notification path, once.
     expect(JSON.stringify(state.pendingOutbox())).toContain('backend exploded');
+  });
+
+  it('runs without a bubble if the chat locks after claim and queues the answer', async () => {
+    const authChecks = [true, true, false];
+    const { state, channel } = await drainWith(
+      { kind: 'completed', finalText: 'Here is the answer.' },
+      async () => authChecks.shift() ?? false,
+    );
+
+    expect(channel.progress).toEqual([]);
+    expect(state.pendingOutbox('telegram')).toEqual([
+      expect.objectContaining({ text: expect.stringContaining('Here is the answer.') }),
+    ]);
   });
 });

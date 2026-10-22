@@ -1619,31 +1619,88 @@ describe('TelegramChannel — progress bubble', () => {
     });
     await channel.start(abort.signal);
 
-    const bubble = await openProgressBubble(channel, CHAT, 'Forge: working…', abort.signal);
+    const bubble = await openProgressBubble(
+      channel,
+      CHAT,
+      'Forge: working…',
+      abort.signal,
+      async () => true,
+    );
 
     expect(bubble).toEqual({
       kind: 'plain',
       messageId: expect.any(String),
       stopButtonOnStatus: false,
       stopMessageId: expect.any(String),
+      stopMessageIsControl: true,
     });
     expect(Number(bubble.messageId)).toBe(Number(bubble.stopMessageId) + 1);
     expect(methods.filter((method) => method === 'sendMessage')).toHaveLength(2);
     expect(methods).not.toContain('sendRichMessageDraft');
-    // The control row is above the status and silent; the ordinary status send
-    // remains the turn's one push notification.
+    // The keyboard carrier is silent; the ordinary status send remains the
+    // turn's one push notification.
     const controlBody = bodies.find((body) => body.text === '\u2063');
     const controlIndex = bodies.indexOf(controlBody!);
     expect(controlBody).toMatchObject({
       text: '\u2063',
       disable_notification: true,
-      reply_markup: { inline_keyboard: [[{ text: '⏹ Stop', callback_data: 'y' }]] },
+      reply_markup: {
+        keyboard: [[{ text: '⏹ Stop' }]],
+        resize_keyboard: true,
+        is_persistent: true,
+        input_field_placeholder: 'Forge is working — tap Stop to cancel',
+      },
     });
     const statusBody = bodies.find((body) => body.text === 'Forge: working…');
     const statusIndex = bodies.indexOf(statusBody!);
     expect(statusIndex).toBeGreaterThan(controlIndex);
     expect(statusBody).not.toHaveProperty('disable_notification');
     expect(statusBody).not.toHaveProperty('reply_markup');
+    abort.abort();
+  });
+
+  it('uses a mirrored prompt as the keyboard carrier and removes the keyboard silently', async () => {
+    const abort = new AbortController();
+    const calls: Array<{ method: string; body: Record<string, unknown> }> = [];
+    let nextMessageId = 1;
+    const channel = new TelegramChannel({
+      token: 'secret-token',
+      getCursor: () => undefined,
+      setCursor: async () => undefined,
+      fetch: (async (url: string | URL | Request, init?: RequestInit) => {
+        const method = String(url).split('/').at(-1)!;
+        const body = JSON.parse(String(init?.body ?? '{}')) as Record<string, unknown>;
+        calls.push({ method, body });
+        return response(method === 'sendMessage' ? { message_id: nextMessageId++ } : true);
+      }) as typeof fetch,
+    });
+    await channel.start(abort.signal);
+
+    await channel.sendProgressPrompt(CHAT, 'You (VS Code): inspect this', { signal: abort.signal });
+    await channel.removeProgressStopKeyboard(CHAT);
+
+    const prompt = calls.find((call) => call.body.text === 'You (VS Code): inspect this');
+    expect(prompt?.body.reply_markup).toEqual({
+      keyboard: [[{ text: '⏹ Stop' }]],
+      resize_keyboard: true,
+      is_persistent: true,
+      input_field_placeholder: 'Forge is working — tap Stop to cancel',
+    });
+    const removal = calls.find(
+      (call) => call.body.text === '\u2063' && call.body.reply_markup !== undefined,
+    );
+    expect(removal).toMatchObject({
+      method: 'sendMessage',
+      body: {
+        text: '\u2063',
+        disable_notification: true,
+        reply_markup: { remove_keyboard: true },
+      },
+    });
+    expect(calls).toContainEqual({
+      method: 'deleteMessage',
+      body: { chat_id: CHAT, message_id: 2 },
+    });
     abort.abort();
   });
 

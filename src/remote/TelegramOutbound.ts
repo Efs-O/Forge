@@ -7,7 +7,11 @@ import { plainTelegramText, splitTelegramText } from './TelegramText';
 import { sendTelegramVoice } from './TelegramVoice';
 import { styleTelegramNotice } from './telegramNoticeStyle';
 import type { TelegramChatQueue } from './telegramSendQueue';
-import { telegramStopKeyboard as stopKeyboard } from './TelegramStopButton';
+import {
+  telegramRemoveStopReplyKeyboard,
+  telegramStopKeyboard as stopKeyboard,
+  telegramStopReplyKeyboard,
+} from './TelegramStopButton';
 import type { ProgressMessageOptions, RemoteContactButton, RemoteInboundAttachment } from './types';
 
 const TelegramSentMessageSchema = z.object({ message_id: z.number().int() });
@@ -134,6 +138,26 @@ export class TelegramOutbound {
     return parsed.success ? String(parsed.data.message_id) : undefined;
   }
 
+  async sendProgressPrompt(
+    chatId: string,
+    text: string,
+    options?: { signal?: AbortSignal },
+  ): Promise<string | undefined> {
+    const sent = await this.call(
+      'sendMessage',
+      // Silent: it echoes the owner's own words, so it must not buzz the phone.
+      {
+        chat_id: chatId,
+        text,
+        disable_notification: true,
+        reply_markup: telegramStopReplyKeyboard(),
+      },
+      options?.signal,
+    );
+    const parsed = TelegramSentMessageSchema.safeParse(sent);
+    return parsed.success ? String(parsed.data.message_id) : undefined;
+  }
+
   /** Sends the separate Stop row without adding a second push notification. */
   async sendProgressStopControl(
     chatId: string,
@@ -147,12 +171,25 @@ export class TelegramOutbound {
         // separator leaves the button as the only visible content in the row.
         text: '\u2063',
         disable_notification: true,
-        ...stopKeyboard({ stopButton: true, control: true }),
+        reply_markup: telegramStopReplyKeyboard(),
       },
       options?.signal,
     );
     const parsed = TelegramSentMessageSchema.safeParse(sent);
     return parsed.success ? String(parsed.data.message_id) : undefined;
+  }
+
+  /** Removes the reply keyboard with a silent carrier, then deletes that carrier. */
+  async removeProgressStopKeyboard(chatId: string): Promise<void> {
+    const sent = await this.call('sendMessage', {
+      chat_id: chatId,
+      text: '\u2063',
+      disable_notification: true,
+      reply_markup: telegramRemoveStopReplyKeyboard(),
+    });
+    const parsed = TelegramSentMessageSchema.safeParse(sent);
+    if (!parsed.success) throw new Error('Telegram Stop keyboard removal returned no message id.');
+    await this.deleteMessage(chatId, String(parsed.data.message_id));
   }
 
   async sendInlineKeyboard(

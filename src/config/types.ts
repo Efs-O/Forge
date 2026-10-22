@@ -223,6 +223,8 @@ export interface ForgeConfig {
      * Telegram; 0 disables.
      */
     delete_command_replies_after: number;
+    /** Maximum non-transient messages delivered from a locked-chat backlog. */
+    unlock_backlog_max: number;
     /** Remote TOTP session policy. Enrollment/secrets remain in SecretStorage. */
     auth: {
       /** 0 disables inactivity expiry; otherwise 1–1440 minutes. */

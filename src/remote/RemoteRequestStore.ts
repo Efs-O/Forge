@@ -41,7 +41,7 @@ import {
   replaceSelection,
 } from './RemoteSelectionState';
 import { pruneRemoteState } from './remoteStateRetention';
-import { appendHostNotification } from './remoteOutboxDraft';
+import { appendHostNotification, updateOutboxStates } from './remoteOutboxDraft';
 import { recoverDeadClaims, recoverInterruptedRemoteState } from './remoteClaimLiveness';
 import {
   outboxHealth as queryOutboxHealth,
@@ -50,9 +50,7 @@ import {
   requestHealthForConversation as queryRequestHealthForConversation,
 } from './remoteStoreQueries';
 
-export function remoteDedupKey(channel: string, chatId: string, messageId: string): string {
-  return `${channel}\u0000${chatId}\u0000${messageId}`;
-}
+export { remoteDedupKey } from './remoteStoreQueries';
 
 export class RemoteRequestStore {
   private state: RemoteStoreState = structuredClone(EMPTY_REMOTE_STATE);
@@ -177,6 +175,13 @@ export class RemoteRequestStore {
     await this.mutate((draft) =>
       appendHostNotification(draft, channel, chatId, text, options?.ephemeral),
     );
+  }
+
+  async coalesceOutbox(
+    ids: readonly string[],
+    state: Extract<RemoteOutboxRecord['state'], 'pending' | 'coalesced'> = 'coalesced',
+  ): Promise<void> {
+    await this.mutate((draft) => updateOutboxStates(draft, ids, state));
   }
 
   async setBinding(binding: RemoteBinding): Promise<void> {
@@ -321,7 +326,7 @@ export class RemoteRequestStore {
   }
 
   async requeue(id: string): Promise<void> {
-    await this.setRequestState(id, 'queued');
+    await this.mutate((draft) => setRequestStateInDraft(draft.requests, id, 'queued'));
   }
 
   /** Atomically claim one queued request as a mid-turn tell (Phase 3); see `claimMidTurnTellInDraft`. */
@@ -436,10 +441,6 @@ export class RemoteRequestStore {
     });
   }
 
-  private async setRequestState(id: string, state: RemoteExecutionState): Promise<void> {
-    await this.mutate((draft) => setRequestStateInDraft(draft.requests, id, state));
-  }
-
   async refresh(): Promise<void> {
     const operation = this.mutationTail.then(() => this.reload());
     this.mutationTail = operation.catch(() => undefined);
@@ -464,7 +465,7 @@ export class RemoteRequestStore {
         mutator(draft);
         pruneRemoteState(draft);
         RemoteStateSchema.parse(draft);
-        await this.persist(draft);
+        await writeRemoteStateFile(this.filePath, JSON.stringify(draft));
         this.state = draft;
       });
     });
@@ -491,10 +492,7 @@ export class RemoteRequestStore {
           if ((err as NodeJS.ErrnoException).code !== 'ENOENT') throw err;
         }
       }
-      await this.persist(this.state);
+      await writeRemoteStateFile(this.filePath, JSON.stringify(this.state));
     });
-  }
-  private persist(state: RemoteStoreState): Promise<void> {
-    return writeRemoteStateFile(this.filePath, JSON.stringify(state));
   }
 }

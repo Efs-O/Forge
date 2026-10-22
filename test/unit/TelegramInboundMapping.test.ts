@@ -4,6 +4,7 @@ import {
   TelegramUpdateSchema,
   telegramUpdateToEvent,
 } from '../../src/remote/TelegramInboundMapping';
+import { STOP_KEY_LABEL } from '../../src/remote/TelegramStopButton';
 
 function message(overrides: Record<string, unknown>): unknown {
   return {
@@ -226,6 +227,7 @@ describe('Telegram inbound mapping — status bubble Stop button', () => {
       chatType: 'private',
       receivedAt: expect.any(Number),
       messageId: '55',
+      source: 'bubble',
     });
   });
 
@@ -235,7 +237,22 @@ describe('Telegram inbound mapping — status bubble Stop button', () => {
       kind: 'stop_action',
       messageId: '55',
       control: true,
+      source: 'control',
     });
+  });
+
+  it('maps the reply-keyboard label to a chat-scoped Stop without a message id', () => {
+    const event = telegramUpdateToEvent(
+      TelegramUpdateSchema.parse(message({ text: `  ${STOP_KEY_LABEL}  ` })),
+    );
+    expect(event).toMatchObject({
+      kind: 'stop_action',
+      source: 'keyboard',
+      providerMessageId: '10',
+      senderId: '123',
+      chatId: '99',
+    });
+    expect(event).not.toHaveProperty('messageId');
   });
 
   it('does not read a longer callback that starts with x as Stop', () => {

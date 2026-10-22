@@ -18,8 +18,6 @@ export interface LiveBubbleDeps {
   intervalMs: number;
   /** False when the Stop button lives in the separate row above the status. */
   stopButtonOnBubble?: boolean;
-  /** Moves a separate Stop control before a new footer bubble; true means it is live. */
-  refreshStopControl?: () => Promise<boolean>;
   report: (err: unknown) => void;
 }
 
@@ -171,7 +169,8 @@ export class RemoteLiveBubble {
     if (this.timer) clearTimeout(this.timer);
     this.timer = undefined;
     await this.inFlight;
-    if (this.deps.signal.aborted || !(await this.deps.canDeliver())) return [];
+    if (this.deps.signal.aborted) return [];
+    if (!(await this.deps.canDeliver())) return this.statusOnlyIds();
     if (this.block === 'streaming') {
       // An unfinished block is the final answer, which reaches the chat as its
       // own message; its words here would be a second copy.
@@ -237,6 +236,16 @@ export class RemoteLiveBubble {
 
   private footerRoom(): number {
     return Math.min(MAX_FOOTER_CHARS, Math.floor(this.deps.maxChars() / 2));
+  }
+
+  private statusOnlyIds(): string[] {
+    return [
+      ...new Set(
+        [...this.retiring, this.current]
+          .filter((bubble) => !bubble.text.trim() && bubble.id !== undefined)
+          .map((bubble) => bubble.id!),
+      ),
+    ];
   }
 
   /** Splits the current bubble before its words and the footer outgrow a message. */
@@ -321,11 +330,8 @@ export class RemoteLiveBubble {
     const { channel, chatId, signal } = this.deps;
     const sendProgress = channel.sendProgress?.bind(channel);
     if (bubble.id === undefined && !sendProgress) return;
-    let showStopButton =
+    const showStopButton =
       stopButton && (bubble.inlineStop ?? this.deps.stopButtonOnBubble !== false);
-    if (stopButton && bubble.id === undefined && this.deps.refreshStopControl) {
-      showStopButton = !(await this.deps.refreshStopControl());
-    }
     const options = {
       signal,
       stopButton: showStopButton,

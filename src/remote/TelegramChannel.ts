@@ -192,6 +192,12 @@ export class TelegramChannel implements RemoteChannel {
   sendProgressStopControl(...args: Parameters<TelegramOutbound['sendProgressStopControl']>) {
     return this.outbound.sendProgressStopControl(...args);
   }
+  sendProgressPrompt(...args: Parameters<TelegramOutbound['sendProgressPrompt']>) {
+    return this.outbound.sendProgressPrompt(...args);
+  }
+  removeProgressStopKeyboard(...args: Parameters<TelegramOutbound['removeProgressStopKeyboard']>) {
+    return this.outbound.removeProgressStopKeyboard(...args);
+  }
   sendInlineKeyboard(...args: Parameters<TelegramOutbound['sendInlineKeyboard']>) {
     return this.outbound.sendInlineKeyboard(...args);
   }

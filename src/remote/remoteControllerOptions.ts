@@ -37,6 +37,8 @@ export interface RemoteControllerOptions {
   deleteCommandMessagesAfter?: number;
   /** Seconds to keep Forge's reply to a /command before deleting it; 0/absent disables. */
   deleteCommandRepliesAfter?: number;
+  /** Maximum non-transient messages delivered from a locked-chat backlog. */
+  unlockBacklogMax: number;
   setInactivityTimeout?: ((minutes: number) => Promise<void>) | undefined;
   setRateLimit?: ((perMinute: number) => Promise<void>) | undefined;
   reloadWindow?: (() => Promise<void>) | undefined;
@@ -176,6 +178,7 @@ export function buildRemoteControllerOptions(
     inactivityTimeoutMinutes: remote.auth.inactivity_timeout_minutes,
     deleteCommandMessagesAfter: remote.delete_command_messages_after,
     deleteCommandRepliesAfter: remote.delete_command_replies_after,
+    unlockBacklogMax: remote.unlock_backlog_max,
     setInactivityTimeout: deps.setInactivityTimeout,
     setRateLimit: deps.setRateLimit,
     reloadWindow: deps.reloadWindow,

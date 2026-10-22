@@ -29,6 +29,9 @@ export function routeHostActivity(
   if (event.conversationId === undefined) {
     return controller.broadcastHostNotification(event.text, event.ephemeral);
   }
+  if (event.kind === 'prompt') {
+    return controller.mirrorPrompt(event.conversationId, event.text);
+  }
   if (event.kind === 'turn') return controller.mirrorTurn(event.conversationId, event.text);
   if (event.kind === 'failure') {
     return controller.reportTurnFailure(event.conversationId, event.text);

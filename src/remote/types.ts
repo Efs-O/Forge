@@ -2,6 +2,7 @@ import type * as vscode from 'vscode';
 import type { ForgeHostFacade } from '../sidebar/ForgeHostFacade';
 import type { RemoteRequestStore } from './RemoteRequestStore';
 import type { RemoteInboundAttachment, RemoteInboundEvent } from './remoteInboundSchema';
+import type { OutboxState } from './RemoteStoreSchemas';
 
 /**
  * The inbound event contract lives in `remoteInboundSchema.ts` and is
@@ -170,7 +171,7 @@ export interface RemoteOutboxRecord {
   channel: RemoteInboundEvent['channel'];
   chatId: string;
   text: string;
-  state: 'pending' | 'sending' | 'delivered' | 'abandoned';
+  state: OutboxState;
   attempts: number;
   updatedAt: number;
   /**
@@ -309,6 +310,14 @@ export interface RemoteChannel {
     chatId: string,
     options?: { signal?: AbortSignal },
   ): Promise<string | undefined>;
+  /** Telegram reply-keyboard carrier for a mirrored sidebar prompt. */
+  sendProgressPrompt?(
+    chatId: string,
+    text: string,
+    options?: { signal?: AbortSignal },
+  ): Promise<string | undefined>;
+  /** Remove Telegram's reply keyboard, independent of the auth lock. */
+  removeProgressStopKeyboard?(chatId: string): Promise<void>;
   /** Best-effort presentation only; a reload may lose the provider message id. */
   editMessage?(
     chatId: string,

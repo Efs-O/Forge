@@ -43,6 +43,8 @@ export const RemoteConfigSchema = z
     delete_command_messages_after: z.number().int().min(0).max(3600).default(5),
     /** Seconds to keep command replies and ephemeral host notifications; 0 disables. */
     delete_command_replies_after: z.number().int().min(0).max(3600).default(10),
+    /** Maximum non-transient messages delivered from a locked-chat backlog. */
+    unlock_backlog_max: z.number().int().min(1).max(50).default(5),
     auth: z
       .object({
         inactivity_timeout_minutes: z.number().int().min(0).max(1_440).default(30),

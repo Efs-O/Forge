@@ -265,6 +265,7 @@ overlaps with an existing owner, extend the owner instead.
 | Turn outcome echoed to bound chats            | `src/sidebar/turnMirrorWiring.ts`               |
 | Live progress message for a sidebar turn      | `src/remote/remoteHostProgress.ts`              |
 | Remote turn progress (event routing, footer state, out-of-band sends) and pure status-footer rendering | `src/remote/RemoteAgentProgress.ts`, `src/remote/remoteProgressRender.ts` |
+| Remote Stop action resolution                  | `src/remote/RemoteStopActions.ts`              |
 | A turn's live chat bubbles: one per text block, status footer and Stop only on the newest, throttled coalesced edits, 429 re-render, 4096-char split | `src/remote/RemoteLiveBubble.ts` |
 | Opening a turn's first progress bubble, shared by the queue drain and the sidebar mirror | `src/remote/remoteProgressOpen.ts` |
 | `/view` transcript replay rendering           | `src/remote/RemoteTranscriptView.ts`            |

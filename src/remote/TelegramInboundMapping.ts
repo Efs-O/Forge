@@ -4,7 +4,11 @@ import type { RemoteInboundEvent } from './types';
 import { parseTelegramSelectionCallback } from './TelegramSelectionPagination';
 import { parseTelegramQuestionCallback } from './TelegramQuestionButtons';
 import { parseTelegramHelpCallback } from './TelegramHelpButtons';
-import { isTelegramStopCallback, isTelegramStopControlCallback } from './TelegramStopButton';
+import {
+  isTelegramStopCallback,
+  isTelegramStopControlCallback,
+  STOP_KEY_LABEL,
+} from './TelegramStopButton';
 import { parseTelegramSendNowCallback } from './TelegramSendNowButton';
 
 /**
@@ -266,6 +270,24 @@ export function telegramUpdateToEvent(
     };
   }
   if (
+    message?.from &&
+    message.text?.trim() === STOP_KEY_LABEL &&
+    !message.document &&
+    !message.photo
+  ) {
+    return {
+      channel: 'telegram',
+      kind: 'stop_action',
+      source: 'keyboard',
+      providerMessageId: String(message.message_id),
+      senderId: String(message.from.id),
+      chatId: String(message.chat.id),
+      chatType: telegramChatType(message.chat.type),
+      receivedAt: message.date * 1000,
+      ...(message.chat.title ? { chatTitle: message.chat.title } : {}),
+    };
+  }
+  if (
     message &&
     message.from &&
     (message.text !== undefined || message.document || message.photo)
@@ -372,6 +394,7 @@ export function telegramUpdateToEvent(
       chatType: telegramChatType(callback.message.chat.type),
       receivedAt: Date.now(),
       messageId: String(callback.message.message_id),
+      source: isTelegramStopControlCallback(callback.data) ? 'control' : 'bubble',
       ...(isTelegramStopControlCallback(callback.data) ? { control: true } : {}),
     };
   }

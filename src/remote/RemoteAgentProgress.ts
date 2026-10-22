@@ -44,8 +44,9 @@ interface ActiveProgress {
   chatId: string;
   /** The turn's words and status footer; absent on a transport that cannot edit. */
   bubble?: RemoteLiveBubble;
-  /** Separate Telegram Stop row, when this transport supports it. */
+  /** Telegram reply-keyboard carrier, when this transport supports it. */
   stopMessageId?: string;
+  stopMessageIsControl: boolean;
   /** Replaces the default status while the turn waits on something else. */
   phase?: string;
   milestone?: string;
@@ -81,8 +82,9 @@ interface ActiveProgress {
  *
  * The agent's words stream into real messages, one per text block, and the
  * status footer rides on the newest of them (see `RemoteLiveBubble`). Telegram
- * keeps Stop in its own row above the status; other channels retain their
- * inline control when they support one. A separate status message was tried first and failed:
+ * keeps Stop in the keyboard area, carried by a prompt or an invisible control
+ * message; other channels retain their inline control when they support one.
+ * A separate status message was tried first and failed:
  * Telegram never moves a message, so it stayed where it was opened while every
  * later bubble appeared below it and the live status scrolled out of view.
  *
@@ -124,6 +126,7 @@ export class RemoteAgentProgress {
     messageId: string,
     origin: ProgressOrigin = 'remote',
     stopMessageId?: string,
+    stopMessageIsControl = true,
   ): void {
     this.drop(conversationId);
     const now = Date.now();
@@ -131,6 +134,7 @@ export class RemoteAgentProgress {
       origin,
       chatId,
       ...(stopMessageId ? { stopMessageId } : {}),
+      stopMessageIsControl: stopMessageId !== undefined && stopMessageIsControl,
       warnings: [],
       narrations: [],
       startedAt: now,
@@ -151,36 +155,6 @@ export class RemoteAgentProgress {
         footer: (maximum) => renderProgressFooter(state, maximum, Date.now()),
         intervalMs: this.editIntervalMs,
         stopButtonOnBubble: !stopMessageId,
-        ...(this.channel.sendProgressStopControl
-          ? {
-              refreshStopControl: async () => {
-                if (state.stopMessageId) {
-                  try {
-                    await removeProgressStopControl(
-                      this.channel,
-                      state.chatId,
-                      state.stopMessageId,
-                    );
-                    delete state.stopMessageId;
-                  } catch (err) {
-                    this.report(err);
-                    return false;
-                  }
-                }
-                try {
-                  const nextId = await this.channel.sendProgressStopControl!(chatId, {
-                    signal: this.signal,
-                  });
-                  if (!nextId) throw new Error('Telegram Stop control send returned no message id');
-                  state.stopMessageId = nextId;
-                  return true;
-                } catch (err) {
-                  this.report(err);
-                  return false;
-                }
-              },
-            }
-          : {}),
         report: (err) => this.report(err),
       },
       messageId,
@@ -333,6 +307,29 @@ export class RemoteAgentProgress {
     return undefined;
   }
 
+  /** The live turn watching this chat, if any; reply-keyboard taps use chat identity. */
+  conversationForChat(chatId: string): string | undefined {
+    for (const [conversationId, state] of this.active) {
+      if (!state.closed && state.chatId === chatId) return conversationId;
+    }
+    return undefined;
+  }
+
+  /** Sends a sidebar prompt after earlier out-of-band lines and moves the footer below it. */
+  mirrorPrompt(
+    conversationId: string,
+    text: string,
+    enqueueIfLocked: (chatId: string, text: string) => Promise<void>,
+  ): boolean {
+    const state = this.active.get(conversationId);
+    if (!state || state.closed) return false;
+    this.queueOutbound(conversationId, state, text, {
+      prompt: true,
+      enqueueIfLocked,
+    });
+    return true;
+  }
+
   async finish(conversationId: string, terminalText: string): Promise<void> {
     const state = this.active.get(conversationId);
     if (!state) return;
@@ -371,20 +368,57 @@ export class RemoteAgentProgress {
   }
 
   /** Send one line of its own into the chat, in order behind earlier ones. */
-  private queueOutbound(conversationId: string, state: ActiveProgress, text: string): void {
+  private queueOutbound(
+    conversationId: string,
+    state: ActiveProgress,
+    text: string,
+    options?: {
+      prompt?: boolean;
+      enqueueIfLocked?: (chatId: string, text: string) => Promise<void>;
+    },
+  ): void {
     state.tail = state.tail
       .then(async () => {
-        if (state.closed || this.signal.aborted) return;
+        if ((state.closed && !options?.prompt) || this.signal.aborted) return;
         if (this.active.get(conversationId) !== state) return;
-        if (!(await this.safeCanDeliver(state.chatId))) return;
+        if (!(await this.safeCanDeliver(state.chatId))) {
+          await options?.enqueueIfLocked?.(state.chatId, text);
+          return;
+        }
         await state.bubble?.flushNow();
-        await this.channel.send(state.chatId, text.slice(0, this.maxMessageChars), {
-          signal: this.signal,
-        });
+        if (options?.prompt && state.origin === 'host' && this.channel.sendProgressPrompt) {
+          const previousId = state.stopMessageId;
+          const previousWasControl = state.stopMessageIsControl;
+          const messageId = await this.channel.sendProgressPrompt(state.chatId, text, {
+            signal: this.signal,
+          });
+          if (!messageId) throw new Error('Telegram mirrored prompt returned no message id.');
+          state.stopMessageId = messageId;
+          state.stopMessageIsControl = false;
+          if (previousId && previousWasControl) {
+            try {
+              await removeProgressStopControl(this.channel, state.chatId, previousId);
+            } catch (err) {
+              this.report(err);
+            }
+          }
+        } else {
+          await this.channel.send(state.chatId, text.slice(0, this.maxMessageChars), {
+            signal: this.signal,
+          });
+        }
         // The line now sits under the newest bubble; the footer moves below it.
         state.bubble?.strand();
       })
-      .catch((err) => this.report(err));
+      .catch(async (err) => {
+        this.report(err);
+        if (!options?.prompt) return;
+        try {
+          await options.enqueueIfLocked?.(state.chatId, text);
+        } catch (fallbackError) {
+          this.report(fallbackError);
+        }
+      });
   }
 
   private drop(conversationId: string): void {
@@ -399,10 +433,19 @@ export class RemoteAgentProgress {
     const messageId = state.stopMessageId;
     if (!messageId) return;
     delete state.stopMessageId;
-    try {
-      await removeProgressStopControl(this.channel, state.chatId, messageId);
-    } catch (err) {
-      this.report(err);
+    if (this.channel.removeProgressStopKeyboard) {
+      try {
+        await this.channel.removeProgressStopKeyboard(state.chatId);
+      } catch (err) {
+        this.report(err);
+      }
+    }
+    if (state.stopMessageIsControl) {
+      try {
+        await removeProgressStopControl(this.channel, state.chatId, messageId);
+      } catch (err) {
+        this.report(err);
+      }
     }
   }
 

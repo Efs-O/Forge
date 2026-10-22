@@ -25,6 +25,7 @@ import type { ContextBudgetPublisher } from './ContextBudgetPublisher';
 import type { ConversationTabs } from './ConversationTabs';
 import type { SendPipeline } from './SendPipeline';
 import { routeWebviewMessage } from './webviewMessageRouter';
+import { createWebviewSendAction } from './turnMirrorWiring';
 import { logWebviewDiagnostic } from './webviewDiagnostics';
 import {
   buildModelsMessage,
@@ -452,11 +453,11 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
         getRemoteStatus: () => this.remoteStatus,
         pendingQuestions: () => this.questions.pendingQuestions(),
         pendingApproval: () => this.agentLoop.pendingApproval(),
-        send: (text, attachments, conversationId, tellId, createdAt) => {
-          if (createdAt === undefined)
-            this.promptRouter.route(text, attachments, conversationId, tellId);
-          else this.promptRouter.route(text, attachments, conversationId, tellId, createdAt);
-        },
+        send: createWebviewSendAction(
+          (event) => this.hostFacade.emitHostActivity?.(event),
+          () => this.sidebar.activeConversationId,
+          this.promptRouter.route.bind(this.promptRouter),
+        ),
         cancelTell: (id, tellId) => this.promptRouter.cancelTell(id, tellId),
         sendQueuedNow: (id, tellId) => this.promptRouter.sendQueuedNow(id, tellId),
         cancel: () => {

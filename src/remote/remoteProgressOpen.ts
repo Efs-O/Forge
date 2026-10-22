@@ -14,9 +14,11 @@ export type ProgressOpen =
       messageId: string;
       stopButtonOnStatus: boolean;
       stopMessageId?: string;
+      stopMessageIsControl?: boolean;
+      promptSent?: boolean;
       error?: string;
     }
-  | { kind: 'declined'; error?: string | undefined };
+  | { kind: 'declined'; locked?: boolean; promptSent?: boolean; error?: string | undefined };
 
 /** The slice of a transport the opener needs. */
 export interface ProgressCapableChannel {
@@ -29,11 +31,18 @@ export interface ProgressCapableChannel {
     chatId: string,
     options?: { signal?: AbortSignal },
   ): Promise<string | undefined>;
+  sendProgressPrompt?(
+    chatId: string,
+    text: string,
+    options?: { signal?: AbortSignal },
+  ): Promise<string | undefined>;
+  send?(chatId: string, text: string, options?: { signal?: AbortSignal }): Promise<unknown>;
+  removeProgressStopKeyboard?(chatId: string): Promise<void>;
   deleteMessage?(chatId: string, messageId: string): Promise<void>;
   clearInlineKeyboard?(chatId: string, messageId: string): Promise<void>;
 }
 
-/** Remove the standalone Stop row, falling back to leaving only inert text. */
+/** Delete an obsolete Stop carrier, falling back to leaving only inert text. */
 export async function removeProgressStopControl(
   channel: ProgressCapableChannel,
   chatId: string,
@@ -76,20 +85,54 @@ export async function openProgressBubble(
   chatId: string,
   text: string,
   signal: AbortSignal,
+  canDeliver: () => Promise<boolean>,
+  promptText?: string,
 ): Promise<ProgressOpen> {
+  try {
+    if (!(await canDeliver())) return { kind: 'declined', locked: true };
+  } catch (err) {
+    return { kind: 'declined', error: describeError(err) };
+  }
   if (!channel.sendProgress) return { kind: 'declined' };
   let stopMessageId: string | undefined;
-  let stopButtonOnStatus = true;
+  let stopMessageIsControl = true;
+  let stopButtonOnStatus = !channel.sendProgressStopControl;
+  let promptSent = false;
   let error: string | undefined;
-  if (channel.sendProgressStopControl) {
+  if (promptText) {
+    try {
+      if (channel.sendProgressPrompt) {
+        stopMessageId = await channel.sendProgressPrompt(chatId, promptText, { signal });
+        promptSent = true;
+        if (stopMessageId) {
+          stopMessageIsControl = false;
+          stopButtonOnStatus = false;
+        } else {
+          error = 'Mirrored prompt keyboard could not be opened: no message id was returned';
+        }
+      } else if (channel.send) {
+        await channel.send(chatId, promptText, { signal });
+        promptSent = true;
+      } else {
+        return { kind: 'declined', error: 'This transport cannot send a mirrored prompt.' };
+      }
+    } catch (err) {
+      return {
+        kind: 'declined',
+        error: `Mirrored prompt could not be opened: ${describeError(err)}`,
+      };
+    }
+  }
+  if (!stopMessageId && channel.sendProgressStopControl) {
     try {
       stopMessageId = await channel.sendProgressStopControl(chatId, { signal });
-      stopButtonOnStatus = !stopMessageId;
-      if (!stopMessageId) error = 'Stop control could not be opened: no message id was returned';
+      if (!stopMessageId) {
+        error = 'Stop control could not be opened: no message id was returned';
+        stopButtonOnStatus = true;
+      }
     } catch (err) {
-      // Still open the status with its original inline Stop button if the
-      // separate Telegram control row could not be created.
       error = `Stop control could not be opened: ${describeError(err)}`;
+      stopButtonOnStatus = true;
     }
   }
   try {
@@ -98,34 +141,63 @@ export async function openProgressBubble(
       stopButton: stopButtonOnStatus,
     });
     if (!messageId) {
-      if (stopMessageId) {
+      if (stopMessageId && stopMessageIsControl) {
         try {
           await removeProgressStopControl(channel, chatId, stopMessageId);
         } catch (cleanupError) {
           error = `Stop control cleanup failed: ${describeError(cleanupError)}`;
         }
       }
-      return { kind: 'declined', ...(error ? { error } : {}) };
+      if (stopMessageId && !stopMessageIsControl) {
+        try {
+          await channel.removeProgressStopKeyboard?.(chatId);
+        } catch (cleanupError) {
+          error = `Stop keyboard cleanup failed: ${describeError(cleanupError)}`;
+        }
+      }
+      return {
+        kind: 'declined',
+        ...(promptSent ? { promptSent: true } : {}),
+        ...(error ? { error } : {}),
+      };
     }
     return {
       kind: 'plain',
       messageId,
       stopButtonOnStatus,
       ...(stopMessageId ? { stopMessageId } : {}),
+      ...(stopMessageId ? { stopMessageIsControl } : {}),
+      ...(promptSent ? { promptSent: true } : {}),
       ...(error ? { error } : {}),
     };
   } catch (err) {
     const openingError = describeError(err);
-    if (stopMessageId) {
+    if (stopMessageId && stopMessageIsControl) {
       try {
         await removeProgressStopControl(channel, chatId, stopMessageId);
       } catch (cleanupError) {
         return {
           kind: 'declined',
+          ...(promptSent ? { promptSent: true } : {}),
           error: `${openingError}; Stop control cleanup failed: ${describeError(cleanupError)}`,
         };
       }
     }
-    return { kind: 'declined', error: error ? `${error}; ${openingError}` : openingError };
+    if (stopMessageId && !stopMessageIsControl) {
+      try {
+        await channel.removeProgressStopKeyboard?.(chatId);
+      } catch (cleanupError) {
+        return {
+          kind: 'declined',
+          ...(promptSent ? { promptSent: true } : {}),
+          error: `${openingError}; Stop keyboard cleanup failed: ${describeError(cleanupError)}`,
+        };
+      }
+    }
+    return {
+      kind: 'declined',
+      ...(promptSent ? { promptSent: true } : {}),
+      error: error ? `${error}; ${openingError}` : openingError,
+    };
   }
 }

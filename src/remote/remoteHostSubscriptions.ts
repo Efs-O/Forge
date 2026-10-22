@@ -62,6 +62,12 @@ export function subscribeHostToRemote(
     // turn echo arrives on this hook too and routes through mirrorTurn, so a
     // prompt that came from a chat is not answered there twice.
     host.onHostActivity?.((event: HostActivityEvent) => {
+      if (event.kind === 'prompt') {
+        void routeHostActivity(event, controller).catch((err) => {
+          handlers.onActivityError((err as Error).message);
+        });
+        return;
+      }
       void (async () => {
         if (event.suppressProgress && event.conversationId !== undefined) {
           controller.suppressAgentOriginProgress(event.conversationId);

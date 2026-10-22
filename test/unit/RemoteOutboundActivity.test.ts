@@ -8,7 +8,11 @@ import { RemoteNotificationFanout } from '../../src/remote/RemoteNotificationFan
 import { FakeRemoteChannel } from '../../src/remote/FakeRemoteChannel';
 import { routeHostActivity } from '../../src/remote/remoteActivityRouting';
 import type { RemoteController } from '../../src/remote/RemoteController';
-import { wireTurnMirror } from '../../src/sidebar/turnMirrorWiring';
+import {
+  createWebviewSendAction,
+  emitWebviewPrompt,
+  wireTurnMirror,
+} from '../../src/sidebar/turnMirrorWiring';
 import { HostProgressOpener } from '../../src/remote/remoteHostProgress';
 import type { HostActivityEvent } from '../../src/sidebar/HostActivity';
 import type { ConversationRuntime } from '../../src/sidebar/sessionTypes';
@@ -87,7 +91,10 @@ describe('window-scoped fan-out', () => {
 describe('window-scoped ephemeral host notifications', () => {
   // The flag must land on the durable outbox record: delivery happens later,
   // possibly after a restart, and only the record can carry it that far.
-  async function makeFanout(): Promise<{ fanout: RemoteNotificationFanout; store: RemoteRequestStore }> {
+  async function makeFanout(): Promise<{
+    fanout: RemoteNotificationFanout;
+    store: RemoteRequestStore;
+  }> {
     const state = await store();
     await state.setBinding({
       channel: 'telegram',
@@ -127,6 +134,7 @@ describe('routeHostActivity ephemeral forwarding', () => {
     return {
       broadcastHostNotification: vi.fn(async () => 1),
       mirrorTurn: vi.fn(async () => 1),
+      mirrorPrompt: vi.fn(async () => 1),
       reportTurnFailure: vi.fn(async () => 1),
       enqueueHostNotification: vi.fn(async () => 1),
     };
@@ -164,6 +172,55 @@ describe('routeHostActivity ephemeral forwarding', () => {
     );
     expect(controller.enqueueHostNotification).toHaveBeenCalledWith('c1', 'compacted');
     expect(controller.broadcastHostNotification).not.toHaveBeenCalled();
+  });
+
+  it('routes prompt activity through the dedicated mirror path', async () => {
+    const controller = fakeController();
+    await routeHostActivity(
+      { text: 'You (VS Code): check this', conversationId: 'c1', kind: 'prompt' },
+      controller as unknown as RemoteController,
+    );
+    expect(controller.mirrorPrompt).toHaveBeenCalledWith('c1', 'You (VS Code): check this');
+    expect(controller.enqueueHostNotification).not.toHaveBeenCalled();
+  });
+});
+
+describe('webview prompt activity formatting', () => {
+  it('emits one prompt event with attachment count before the turn starts', () => {
+    const emitted: HostActivityEvent[] = [];
+    emitWebviewPrompt((event) => emitted.push(event), 'c1', 'look here', 2);
+    expect(emitted).toEqual([
+      { text: 'You (VS Code): look here [+2 attachments]', conversationId: 'c1', kind: 'prompt' },
+    ]);
+  });
+
+  it('skips slash commands and empty text and truncates prompt text at 500 characters', () => {
+    const emitted: HostActivityEvent[] = [];
+    const emit = (event: HostActivityEvent) => emitted.push(event);
+    emitWebviewPrompt(emit, 'c1', '/status', 0);
+    emitWebviewPrompt(emit, 'c1', '   ', 0);
+    emitWebviewPrompt(emit, 'c1', 'x'.repeat(501), 0);
+    expect(emitted).toHaveLength(1);
+    expect(emitted[0]?.text).toBe(`You (VS Code): ${'x'.repeat(499)}…`);
+    expect(emitted[0]?.text.slice('You (VS Code): '.length)).toHaveLength(500);
+  });
+
+  it('emits the prompt before routing can start the turn', () => {
+    const order: string[] = [];
+    const send = createWebviewSendAction(
+      (event) => order.push(event.text),
+      () => 'active-conversation',
+      (text, _attachments, conversationId) => {
+        order.push(`route:${conversationId}:${text}`);
+      },
+    );
+
+    send('inspect this', [{ name: 'note.txt', mediaType: 'text/plain', data: 'hello' }]);
+
+    expect(order).toEqual([
+      'You (VS Code): inspect this [+1 attachments]',
+      'route:undefined:inspect this',
+    ]);
   });
 });
 
@@ -411,8 +468,13 @@ describe('progress ownership', () => {
       signal,
       progress: tracker,
       target: () => 'chat-agent',
+      canDeliver: async () => true,
     });
-    opener.handle({ conversationId: 'agent-chat', kind: 'narration', text: 'Claude (review) says: ready' });
+    opener.handle({
+      conversationId: 'agent-chat',
+      kind: 'narration',
+      text: 'Claude (review) says: ready',
+    });
     await vi.waitFor(() => expect(channel.progress).toHaveLength(1));
     expect(channel.progress[0]).toMatchObject({ chatId: 'chat-agent', text: 'Forge: working…' });
     opener.dispose();

@@ -9,6 +9,7 @@ import { RemoteAuth } from '../../src/remote/RemoteAuth';
 import { RemoteController } from '../../src/remote/RemoteController';
 import { CommandCleanupScheduler } from '../../src/remote/CommandCleanupScheduler';
 import { RemoteRequestStore } from '../../src/remote/RemoteRequestStore';
+import { generateTotp } from '../../src/remote/RemoteTotp';
 import {
   buildRemoteControllerOptions,
   type RemoteControllerOptions,
@@ -94,6 +95,7 @@ function textEvent(
 interface Harness {
   channel: FakeRemoteChannel;
   controller: RemoteController;
+  auth: RemoteAuth;
   onError: ReturnType<typeof vi.fn>;
 }
 
@@ -119,7 +121,7 @@ async function buildController(
     ...optionsOverrides,
   });
   await controller.start();
-  return { channel, controller, onError };
+  return { channel, controller, auth, onError };
 }
 
 describe('RemoteController command auto-cleanup', () => {
@@ -170,10 +172,19 @@ describe('RemoteController command auto-cleanup', () => {
 
   it('deletes the inline /lock command after the delay', async () => {
     vi.useFakeTimers();
-    const { channel, controller } = await buildController(5);
+    const { channel, controller, auth } = await buildController(5);
     try {
+      const secret = await auth.createTotpEnrollmentSecret('fake');
+      const now = Date.now();
+      const code = generateTotp(secret, now).code;
+      await auth.confirmTotpEnrollment('fake', secret, code, now);
+      const authentication = textEvent(code, { receivedAt: now });
+      await auth.gate(authentication);
+      auth.touch(authentication);
+
       const disposition = await controller.handle(textEvent('/lock'));
       expect(disposition).toEqual({ kind: 'handled' });
+      expect(await auth.canDeliver('fake', 'chat')).toBe(false);
       await vi.advanceTimersByTimeAsync(5_000);
       expect(channel.deleted).toEqual([{ chatId: 'chat', messageId: 'msg-1' }]);
     } finally {

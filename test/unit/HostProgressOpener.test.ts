@@ -1,10 +1,19 @@
-import { describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import { FakeRemoteChannel } from '../../src/remote/FakeRemoteChannel';
 import { RemoteAgentProgress } from '../../src/remote/RemoteAgentProgress';
 import { HostProgressOpener } from '../../src/remote/remoteHostProgress';
 import type { AgentProgressEvent } from '../../src/sidebar/AgentProgress';
 
-function rig(options: { target?: string | undefined; separateStopControl?: boolean } = {}) {
+afterEach(() => {
+  vi.useRealTimers();
+});
+
+function rig(options: {
+  target?: string | undefined;
+  separateStopControl?: boolean;
+  canDeliver?: () => Promise<boolean>;
+  enqueuePrompt?: (chatId: string, text: string) => Promise<void>;
+} = {}) {
   const channel = new FakeRemoteChannel();
   if (options.separateStopControl) {
     const controllable = channel as FakeRemoteChannel & {
@@ -24,6 +33,8 @@ function rig(options: { target?: string | undefined; separateStopControl?: boole
     signal,
     progress,
     target: () => ('target' in options ? options.target : 'chat-1'),
+    canDeliver: options.canDeliver ?? (async () => true),
+    enqueuePrompt: options.enqueuePrompt,
   });
   return { channel, progress, opener };
 }
@@ -124,6 +135,7 @@ describe('HostProgressOpener', () => {
       signal,
       progress,
       target: () => chatId,
+      canDeliver: async () => true,
     });
     opener.handle(token('unheard'));
     await settle();
@@ -142,7 +154,7 @@ describe('HostProgressOpener', () => {
     const signal = new AbortController().signal;
     const progress = new RemoteAgentProgress(channel, signal, () => true, 3_900, 0);
     let chatId: string | undefined;
-    const opener = new HostProgressOpener({ channel, signal, progress, target: () => chatId });
+    const opener = new HostProgressOpener({ channel, signal, progress, target: () => chatId, canDeliver: async () => true });
     opener.handle(token('before pairing'));
     await settle();
     expect(channel.progress).toHaveLength(0);
@@ -167,12 +179,73 @@ describe('HostProgressOpener', () => {
     await settle();
     expect(progress.owns('c1')).toBe(true);
   });
+
+  it('opens no progress message while the chat is locked and holds the prompt until the turn ends', async () => {
+    const queued: Array<{ chatId: string; text: string }> = [];
+    const { channel, opener } = rig({
+      canDeliver: async () => false,
+      enqueuePrompt: async (chatId, text) => queued.push({ chatId, text }),
+    });
+    opener.stashPrompt('c1', 'chat-1', 'You (VS Code): hello');
+    opener.handle(token('private while locked'));
+    await settle();
+    expect(channel.progress).toEqual([]);
+
+    opener.handle({ conversationId: 'c1', kind: 'end', ok: true });
+    await settle();
+    expect(queued).toEqual([{ chatId: 'chat-1', text: 'You (VS Code): hello' }]);
+  });
+
+  it('sends a held prompt before the first working status', async () => {
+    const { channel, opener } = rig();
+    const promptChannel = channel as FakeRemoteChannel & {
+      sendProgressPrompt: (chatId: string, text: string) => Promise<string>;
+    };
+    promptChannel.sendProgressPrompt = async (chatId, text) => {
+      channel.progress.push({ chatId, text });
+      return 'prompt-id';
+    };
+    opener.stashPrompt('c1', 'chat-1', 'You (VS Code): hello');
+
+    opener.handle(token('first progress event'));
+    await settle();
+
+    expect(channel.progress.map((message) => message.text)).toEqual([
+      'You (VS Code): hello',
+      'Forge: working…',
+    ]);
+  });
+
+  it('rechecks a locked chat after ten seconds and opens on the next event', async () => {
+    vi.useFakeTimers();
+    let deliverable = false;
+    const canDeliver = vi.fn(async () => deliverable);
+    const { channel, progress, opener } = rig({ canDeliver });
+    try {
+      opener.handle(token('first event while locked'));
+      await vi.advanceTimersByTimeAsync(0);
+      opener.handle(token('second event inside cooldown'));
+      await vi.advanceTimersByTimeAsync(0);
+      expect(canDeliver).toHaveBeenCalledTimes(1);
+      expect(channel.progress).toEqual([]);
+
+      deliverable = true;
+      vi.setSystemTime(Date.now() + 10_001);
+      opener.handle(token('event after unlock'));
+      await vi.advanceTimersByTimeAsync(0);
+      expect(canDeliver).toHaveBeenCalledTimes(2);
+      expect(channel.progress).toEqual([{ chatId: 'chat-1', text: 'Forge: working…' }]);
+    } finally {
+      opener.dispose();
+      await progress.dispose();
+    }
+  });
   it('stops streaming to a chat switched to another conversation mid-turn', async () => {
     const channel = new FakeRemoteChannel();
     const signal = new AbortController().signal;
     const progress = new RemoteAgentProgress(channel, signal, () => true, 3_900, 0);
     let chatId: string | undefined = 'chat-1';
-    const opener = new HostProgressOpener({ channel, signal, progress, target: () => chatId });
+    const opener = new HostProgressOpener({ channel, signal, progress, target: () => chatId, canDeliver: async () => true });
     opener.handle(status('Running tests…'));
     await settle();
     expect(channel.progress).toHaveLength(1);
@@ -194,7 +267,7 @@ describe('HostProgressOpener', () => {
     const signal = new AbortController().signal;
     const progress = new RemoteAgentProgress(channel, signal, () => true, 3_900, 0);
     let chatId = 'chat-1';
-    const opener = new HostProgressOpener({ channel, signal, progress, target: () => chatId });
+    const opener = new HostProgressOpener({ channel, signal, progress, target: () => chatId, canDeliver: async () => true });
     opener.handle(status('Running tests…'));
     await settle();
 

@@ -1,12 +1,18 @@
 import type { RemoteOutboxRecord, RemoteRequestRecord } from './types';
-import type { RemoteStoreState } from './RemoteStoreSchemas';
+import { OUTBOX_STATE_ROLE, type RemoteStoreState } from './RemoteStoreSchemas';
+
+export function remoteDedupKey(channel: string, chatId: string, messageId: string): string {
+  return `${channel}\u0000${chatId}\u0000${messageId}`;
+}
 
 export function pendingOutbox(
   state: RemoteStoreState,
   channel?: RemoteOutboxRecord['channel'],
 ): RemoteOutboxRecord[] {
   return state.outbox.filter(
-    (item) => item.state === 'pending' && (channel === undefined || item.channel === channel),
+    (item) =>
+      OUTBOX_STATE_ROLE[item.state] === 'deliverable' &&
+      (channel === undefined || item.channel === channel),
   );
 }
 
@@ -15,9 +21,11 @@ export function outboxHealth(state: RemoteStoreState): {
   sending: number;
   abandoned: number;
 } {
+  const roleCount = (role: 'deliverable' | 'in_flight') =>
+    state.outbox.filter((item) => OUTBOX_STATE_ROLE[item.state] === role).length;
   return {
-    pending: state.outbox.filter((item) => item.state === 'pending').length,
-    sending: state.outbox.filter((item) => item.state === 'sending').length,
+    pending: roleCount('deliverable'),
+    sending: roleCount('in_flight'),
     abandoned: state.outbox.filter((item) => item.state === 'abandoned').length,
   };
 }

@@ -29,6 +29,7 @@ export function createRemoteOutboxDelivery(input: {
     (chatId) => auth.canDeliver(channel.name, chatId),
     speech ? (chatId, text) => speech.speak(chatId, text) : undefined,
     (chatId, messageIds) => commandCleanup.armEphemeral(chatId, messageIds),
+    options.unlockBacklogMax,
   );
 }
 
@@ -59,6 +60,7 @@ export class RemoteOutboxDelivery {
      * already-delivered item.
      */
     private readonly armEphemeral?: (chatId: string, messageIds: string[]) => void,
+    private maxBacklog = 5,
   ) {}
 
   start(): void {
@@ -68,6 +70,10 @@ export class RemoteOutboxDelivery {
 
   updateMaxMessageChars(maxMessageChars: number): void {
     this.maxMessageChars = maxMessageChars;
+  }
+
+  updateUnlockBacklogMax(maxBacklog: number): void {
+    this.maxBacklog = maxBacklog;
   }
 
   kick(): void {
@@ -92,51 +98,93 @@ export class RemoteOutboxDelivery {
   }
 
   private async deliver(): Promise<void> {
+    const groups = new Map<string, ReturnType<RemoteRequestStore['pendingOutbox']>>();
     for (const item of this.store.pendingOutbox(this.channel.name)) {
+      const group = groups.get(item.chatId) ?? [];
+      group.push(item);
+      groups.set(item.chatId, group);
+    }
+    for (const [chatId, items] of groups) {
       if (this.stopped) return;
-      if (!(await this.canDeliver(item.chatId))) continue;
-      await this.store.markOutbox(item.id, 'sending');
-      let sentIds: string[] | void;
-      try {
-        sentIds = await this.channel.send(item.chatId, item.text.slice(0, this.maxMessageChars), {
-          signal: this.signal,
-        });
-        await this.store.markOutbox(item.id, 'delivered');
-        // Never inside the try that owns delivery state: `speak` swallows its
-        // own errors, but the ordering has to make that impossible to get wrong
-        // if it ever stops doing so.
-        await this.speak?.(item.chatId, item.text).catch(() => false);
-      } catch {
-        await this.store.markOutbox(
-          item.id,
-          item.attempts + 1 >= MAX_ATTEMPTS ? 'abandoned' : 'pending',
-        );
-        return;
-      }
-      // Same rule: a failed record only costs reply-to-answer; /answer <id> still works.
-      await recordSessionQuestionMessages(this.store, item.id, sentIds ?? []).catch((err) =>
-        this.onError?.(`Forge could not record a session question's messages: ${String(err)}`),
-      );
-      // Best-effort, and OUTSIDE the try that owns delivery state: an
-      // already-delivered item must never be requeued because arming its
-      // ephemeral cleanup failed.
-      if (item.ephemeral && this.armEphemeral) {
-        try {
-          this.armEphemeral(item.chatId, sentIds ?? []);
-        } catch (err) {
+      if (!(await this.canDeliver(chatId))) continue;
+      const backlog =
+        items.length > this.maxBacklog ? coalesceBacklog(items, this.maxBacklog) : undefined;
+      if (backlog?.coalesced.length) {
+        const ids = backlog.coalesced.map((item) => item.id);
+        await this.store.coalesceOutbox(ids);
+        const summarized = backlog.coalesced.filter((item) => !item.ephemeral);
+        if (summarized.length) {
           try {
-            this.onError?.(
-              `Forge remote ephemeral notification cleanup failed: ${
-                err instanceof Error ? err.message : String(err)
-              }`,
+            await this.channel.send(
+              chatId,
+              formatBacklogSummary(summarized, backlog.deliverable.length, this.maxMessageChars),
+              { signal: this.signal },
             );
-          } catch {
-            // Best-effort: the item is already delivered; a broken reporter
-            // must not reject deliver() or disrupt subsequent deliveries.
+          } catch (err) {
+            try {
+              await this.store.coalesceOutbox(ids, 'pending');
+            } catch (rollbackError) {
+              throw new Error(
+                `Unlock backlog summary failed (${String(err)}) and its items could not be restored (${String(rollbackError)}).`,
+              );
+            }
+            throw err;
           }
         }
       }
+      for (const item of backlog?.deliverable ?? items) {
+        if (this.stopped) return;
+        if (!(await this.canDeliver(chatId))) continue;
+        if (!(await this.deliverItem(item))) return;
+      }
     }
+  }
+
+  private async deliverItem(
+    item: ReturnType<RemoteRequestStore['pendingOutbox']>[number],
+  ): Promise<boolean> {
+    await this.store.markOutbox(item.id, 'sending');
+    let sentIds: string[] | void;
+    try {
+      sentIds = await this.channel.send(item.chatId, item.text.slice(0, this.maxMessageChars), {
+        signal: this.signal,
+      });
+      await this.store.markOutbox(item.id, 'delivered');
+      // Never inside the try that owns delivery state: `speak` swallows its
+      // own errors, but the ordering has to make that impossible to get wrong
+      // if it ever stops doing so.
+      await this.speak?.(item.chatId, item.text).catch(() => false);
+    } catch {
+      await this.store.markOutbox(
+        item.id,
+        item.attempts + 1 >= MAX_ATTEMPTS ? 'abandoned' : 'pending',
+      );
+      return false;
+    }
+    // Same rule: a failed record only costs reply-to-answer; /answer <id> still works.
+    await recordSessionQuestionMessages(this.store, item.id, sentIds ?? []).catch((err) =>
+      this.onError?.(`Forge could not record a session question's messages: ${String(err)}`),
+    );
+    // Best-effort, and OUTSIDE the try that owns delivery state: an
+    // already-delivered item must never be requeued because arming its
+    // ephemeral cleanup failed.
+    if (item.ephemeral && this.armEphemeral) {
+      try {
+        this.armEphemeral(item.chatId, sentIds ?? []);
+      } catch (err) {
+        try {
+          this.onError?.(
+            `Forge remote ephemeral notification cleanup failed: ${
+              err instanceof Error ? err.message : String(err)
+            }`,
+          );
+        } catch {
+          // Best-effort: the item is already delivered; a broken reporter
+          // must not reject deliver() or disrupt subsequent deliveries.
+        }
+      }
+    }
+    return true;
   }
 
   private async scheduleRetry(): Promise<void> {
@@ -164,4 +212,59 @@ export class RemoteOutboxDelivery {
     }
     return undefined;
   }
+}
+
+function coalesceBacklog(
+  items: ReturnType<RemoteRequestStore['pendingOutbox']>,
+  maximum: number,
+): {
+  coalesced: typeof items;
+  deliverable: typeof items;
+} {
+  const persistent = items.filter((item) => !item.ephemeral);
+  return {
+    coalesced: [
+      ...items.filter((item) => item.ephemeral),
+      ...persistent.slice(0, Math.max(0, persistent.length - maximum)),
+    ],
+    deliverable: persistent.slice(-maximum),
+  };
+}
+
+function formatBacklogSummary(
+  coalesced: ReturnType<RemoteRequestStore['pendingOutbox']>,
+  followCount: number,
+  maximumChars: number,
+): string {
+  const lines = coalesced.map(
+    (item) => `${formatOutboxTime(item.updatedAt)} · ${firstLine(item.text, 80)}`,
+  );
+  const header = `Forge: ${coalesced.length} earlier messages were held back. The last ${followCount} follow in full. Earlier ones:`;
+  let text = header;
+  for (let index = 0; index < lines.length; index += 1) {
+    const candidate = `${text}\n${lines[index]}`;
+    const hasMore = index < lines.length - 1;
+    const suffix = hasMore ? `\n… and ${lines.length - index - 1} more` : '';
+    if (candidate.length + suffix.length > maximumChars) {
+      return appendSummaryRemainder(text, lines.length - index, maximumChars);
+    }
+    text = candidate;
+  }
+  return text.length <= maximumChars ? text : text.slice(0, maximumChars);
+}
+
+function appendSummaryRemainder(text: string, remaining: number, maximumChars: number): string {
+  const suffix = `… and ${remaining} more`;
+  const prefixLength = Math.max(0, maximumChars - suffix.length - 1);
+  return `${text.slice(0, prefixLength).trimEnd()}\n${suffix}`.slice(0, maximumChars);
+}
+
+function firstLine(text: string, maximum: number): string {
+  const first = text.split(/\r?\n/, 1)[0] ?? '';
+  return first.length > maximum ? `${first.slice(0, maximum - 1)}…` : first;
+}
+
+function formatOutboxTime(timestamp: number): string {
+  const date = new Date(timestamp);
+  return `${String(date.getHours()).padStart(2, '0')}:${String(date.getMinutes()).padStart(2, '0')}`;
 }

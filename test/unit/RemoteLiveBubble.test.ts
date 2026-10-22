@@ -8,14 +8,18 @@ afterEach(() => {
 
 const FOOTER = '⏳ working';
 
-function rig(channel = new FakeRemoteChannel(), maxChars = 3_900) {
+function rig(
+  channel = new FakeRemoteChannel(),
+  maxChars = 3_900,
+  canDeliver: () => Promise<boolean> = async () => true,
+) {
   const report = vi.fn();
   const bubble = new RemoteLiveBubble(
     {
       channel,
       chatId: 'chat-a',
       signal: new AbortController().signal,
-      canDeliver: async () => true,
+      canDeliver,
       maxChars: () => maxChars,
       footer: () => FOOTER,
       intervalMs: 1_000,
@@ -185,6 +189,16 @@ describe('RemoteLiveBubble', () => {
       text: 'Forge: completed.',
     });
     expect(live(channel)).toEqual([]);
+  });
+
+  it('returns every status-only id without editing when the chat locks mid-turn', async () => {
+    vi.useFakeTimers();
+    let deliverable = true;
+    const { channel, bubble } = rig(new FakeRemoteChannel(), 3_900, async () => deliverable);
+    deliverable = false;
+
+    await expect(bubble.close('Forge: completed.')).resolves.toEqual(['m0']);
+    expect(channel.edits).toEqual([]);
   });
 
   it('keeps refreshing nothing after abandon', async () => {

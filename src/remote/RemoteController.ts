@@ -1,6 +1,4 @@
 import type { ForgeHostFacade } from '../sidebar/ForgeHostFacade';
-import { describeError } from '../util/describeError';
-import { getLogger } from '../util/logger';
 import type { RemoteAuth } from './RemoteAuth';
 import type { RemoteRequestStore } from './RemoteRequestStore';
 import { remoteDedupKey } from './RemoteRequestStore';
@@ -25,7 +23,6 @@ import { RemoteApprovalBridge } from './RemoteApprovalBridge';
 import { RemoteQuestionBridge } from './RemoteQuestionBridge';
 import { CommandCleanupScheduler } from './CommandCleanupScheduler';
 import { RemoteAgentProgress, CLOCK_INTERVAL_MS } from './RemoteAgentProgress';
-import { removeProgressStopControl } from './remoteProgressOpen';
 import { HostProgressOpener } from './remoteHostProgress';
 import { RemoteNotificationFanout } from './RemoteNotificationFanout';
 import type { RemotePromptAdmissionDeps } from './RemotePromptAdmission';
@@ -39,8 +36,8 @@ import { handleRemoteSelectionAction } from './RemoteSelectionPager';
 import type { RemoteControllerOptions } from './remoteControllerOptions';
 import type { TelegramContactService } from './TelegramContactService';
 import { handleRemoteSendNow } from './remoteSendNow';
+import { handleRemoteStopAction } from './RemoteStopActions';
 export type { RemoteControllerOptions };
-const log = getLogger();
 /** Durable transport-independent admission, FIFO execution, and notification. */
 export class RemoteController {
   private readonly abort = new AbortController();
@@ -154,6 +151,8 @@ export class RemoteController {
         this.agentOriginTurns.has(conversationId)
           ? undefined
           : this.fanout.mirrorTarget(conversationId),
+      canDeliver: (chatId) => this.auth.canDeliver(this.channel.name, chatId),
+      enqueuePrompt: (chatId, text) => this.enqueuePromptOutbox(chatId, text),
       ...(options.onError ? { onError: options.onError } : {}),
     });
   }
@@ -188,6 +187,7 @@ export class RemoteController {
     this.approvals.updateMaxMessageChars(options.maxMessageChars);
     this.questions.updateMaxMessageChars(options.maxMessageChars);
     this.progress.updateMaxMessageChars(Math.min(options.maxMessageChars, 3_900));
+    this.outbox.updateUnlockBacklogMax(options.unlockBacklogMax);
   }
   /** Drops held prompts on unpair so a new owner cannot inherit the old owner's queued work. */
   forgetChannel(channel: RemoteInboundEvent['channel']): void {
@@ -231,6 +231,19 @@ export class RemoteController {
   }
   async mirrorTurn(conversationId: string, text: string): Promise<number> {
     return this.fanout.mirrorTurn(conversationId, text);
+  }
+  mirrorPrompt(conversationId: string, text: string): Promise<number> {
+    if (this.agentOriginTurns.has(conversationId)) return Promise.resolve(0);
+    const chatId = this.fanout.mirrorTarget(conversationId);
+    if (!chatId) return Promise.resolve(0);
+    if (
+      !this.progress.mirrorPrompt(conversationId, text, (target, prompt) =>
+        this.enqueuePromptOutbox(target, prompt),
+      )
+    ) {
+      this.hostProgress.stashPrompt(conversationId, chatId, text);
+    }
+    return Promise.resolve(1);
   }
   suppressAgentOriginProgress(conversationId: string): void {
     this.agentOriginTurns.add(conversationId);
@@ -322,8 +335,14 @@ export class RemoteController {
       );
     }
     if (event.kind === 'stop_action') {
-      const owner = this.progress.conversationForBubble(event.chatId, event.messageId);
-      return this.stopTurn(event, `bubble ${event.messageId}`, owner);
+      return handleRemoteStopAction(event, {
+        channel: this.channel,
+        progress: this.progress,
+        store: this.store,
+        auth: this.auth,
+        host: this.host,
+        ...(this.options.onError ? { onError: this.options.onError } : {}),
+      });
     }
     if (event.kind === 'send_now_action') {
       return handleRemoteSendNow(event, {
@@ -401,47 +420,9 @@ export class RemoteController {
       },
     );
   }
-  /**
-   * The ⏹ Stop button under the newest bubble of a turn.
-   *
-   * The caller resolved the tapped message to the live turn it belongs to; a
-   * press that resolves to nothing is stale or foreign and must do nothing, or
-   * it would stop a turn the user never pressed Stop on. It reaches this point
-   * only after the owner gate, so it carries the paired owner's authority.
-   */
-  private async stopTurn(
-    event: Extract<RemoteInboundEvent, { kind: 'stop_action' }>,
-    pressed: string,
-    conversationId: string | undefined,
-  ): Promise<RemoteInboundDisposition> {
-    log.info(
-      `[remote:telegram] Stop on ${pressed}: ` +
-        (conversationId ? `cancelling ${conversationId}` : 'no live turn, ignored'),
-    );
-    // Not retried: redelivery would only find the same nothing. A tapped button
-    // shows the rejection reason as its toast; a native Stop has no toast.
-    if (!conversationId) {
-      if (event.control) {
-        try {
-          await removeProgressStopControl(this.channel, event.chatId, event.messageId);
-        } catch (err) {
-          this.options.onError?.(`Forge stale Stop control cleanup failed: ${describeError(err)}`);
-        }
-      }
-      return event.kind === 'stop_action'
-        ? { kind: 'rejected', reason: 'This turn has already ended.' }
-        : { kind: 'handled' };
-    }
-    // The same action `/stop` takes, reached directly. Awaited, so a host that
-    // answers with nothing cannot turn a `.catch` into a failed disposition.
-    try {
-      await this.host.cancel(conversationId);
-    } catch (err) {
-      // Reported, not swallowed: a failed cancel means the turn still runs.
-      this.options.onError?.(`Forge remote Stop could not cancel the turn: ${describeError(err)}`);
-    }
-    this.auth.touch(event);
-    return { kind: 'handled' };
+  private async enqueuePromptOutbox(chatId: string, text: string): Promise<void> {
+    await this.store.notifyOutbox(this.channel.name, chatId, text);
+    this.outbox.kick();
   }
 
   private isBusy(conversationId: string): boolean {

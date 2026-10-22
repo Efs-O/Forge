@@ -1,6 +1,8 @@
 import { describe, expect, it, vi } from 'vitest';
 import { openProgressBubble, removeProgressStopControl } from '../../src/remote/remoteProgressOpen';
 
+const canDeliver = async (): Promise<boolean> => true;
+
 describe('openProgressBubble', () => {
   it('sends the optional Stop control before status and leaves the button on it', async () => {
     const calls: string[] = [];
@@ -23,12 +25,13 @@ describe('openProgressBubble', () => {
     };
 
     await expect(
-      openProgressBubble(channel, 'chat', 'Forge: working…', new AbortController().signal),
+      openProgressBubble(channel, 'chat', 'Forge: working…', new AbortController().signal, canDeliver),
     ).resolves.toEqual({
       kind: 'plain',
       messageId: 'status-id',
       stopButtonOnStatus: false,
       stopMessageId: 'control-id',
+      stopMessageIsControl: true,
     });
     expect(calls).toEqual(['control', 'status']);
   });
@@ -52,7 +55,7 @@ describe('openProgressBubble', () => {
     };
 
     await expect(
-      openProgressBubble(channel, 'chat', 'Forge: working…', new AbortController().signal),
+      openProgressBubble(channel, 'chat', 'Forge: working…', new AbortController().signal, canDeliver),
     ).resolves.toMatchObject({
       kind: 'plain',
       messageId: 'status-id',
@@ -68,7 +71,7 @@ describe('openProgressBubble', () => {
     };
 
     await expect(
-      openProgressBubble(channel, 'chat', 'Forge: working…', new AbortController().signal),
+      openProgressBubble(channel, 'chat', 'Forge: working…', new AbortController().signal, canDeliver),
     ).resolves.toMatchObject({
       kind: 'plain',
       stopButtonOnStatus: true,
@@ -85,7 +88,7 @@ describe('openProgressBubble', () => {
     const channel = { sendProgress };
 
     await expect(
-      openProgressBubble(channel, 'chat', 'Forge: working…', new AbortController().signal),
+      openProgressBubble(channel, 'chat', 'Forge: working…', new AbortController().signal, canDeliver),
     ).resolves.toEqual({
       kind: 'plain',
       messageId: 'status-id',
@@ -108,7 +111,7 @@ describe('openProgressBubble', () => {
     };
 
     await expect(
-      openProgressBubble(channel, 'chat', 'Forge: working…', new AbortController().signal),
+      openProgressBubble(channel, 'chat', 'Forge: working…', new AbortController().signal, canDeliver),
     ).resolves.toMatchObject({
       kind: 'declined',
       error: expect.stringContaining('status send failed'),
@@ -126,5 +129,65 @@ describe('openProgressBubble', () => {
       removeProgressStopControl({ deleteMessage, clearInlineKeyboard }, 'chat', 'control-id'),
     ).resolves.toBeUndefined();
     expect(clearInlineKeyboard).toHaveBeenCalledWith('chat', 'control-id');
+  });
+
+  it('does not send a prompt, Stop row, or status while the chat is locked', async () => {
+    const sendProgress = vi.fn(async () => 'status-id');
+    const sendProgressPrompt = vi.fn(async () => 'prompt-id');
+    const sendProgressStopControl = vi.fn(async () => 'control-id');
+    await expect(
+      openProgressBubble(
+        { sendProgress, sendProgressPrompt, sendProgressStopControl },
+        'chat',
+        'Forge: working…',
+        new AbortController().signal,
+        async () => false,
+        'You (VS Code): hello',
+      ),
+    ).resolves.toEqual({ kind: 'declined', locked: true });
+    expect(sendProgressPrompt).not.toHaveBeenCalled();
+    expect(sendProgressStopControl).not.toHaveBeenCalled();
+    expect(sendProgress).not.toHaveBeenCalled();
+  });
+
+  it('sends the mirrored prompt with its keyboard before the first progress status', async () => {
+    const calls: string[] = [];
+    const channel = {
+      sendProgressPrompt: vi.fn(async () => {
+        calls.push('prompt');
+        return 'prompt-id';
+      }),
+      sendProgressStopControl: vi.fn(async () => {
+        calls.push('control');
+        return 'control-id';
+      }),
+      sendProgress: vi.fn(async () => {
+        calls.push('status');
+        return 'status-id';
+      }),
+    };
+    await expect(
+      openProgressBubble(
+        channel,
+        'chat',
+        'Forge: working…',
+        new AbortController().signal,
+        canDeliver,
+        'You (VS Code): hello',
+      ),
+    ).resolves.toMatchObject({
+      kind: 'plain',
+      messageId: 'status-id',
+      stopButtonOnStatus: false,
+      stopMessageId: 'prompt-id',
+      stopMessageIsControl: false,
+      promptSent: true,
+    });
+    expect(calls).toEqual(['prompt', 'status']);
+    expect(channel.sendProgressPrompt).toHaveBeenCalledWith(
+      'chat',
+      'You (VS Code): hello',
+      { signal: expect.any(AbortSignal) },
+    );
   });
 });

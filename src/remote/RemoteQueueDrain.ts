@@ -149,13 +149,14 @@ export async function drainRemoteQueue(
       deps.outbox.kick();
       continue;
     }
-    // Always a plain status message edited in place. Telegram's separate
-    // silent Stop control is opened by openProgressBubble before this message.
+    // Always a plain status message edited in place. Opening checks auth again
+    // after the request claim so a lock in that small window sends no bubble.
     const bubble = await openProgressBubble(
       deps.channel,
       next.chatId,
       'Forge: working…',
       deps.signal,
+      () => deps.auth.canDeliver(next.channel, next.chatId),
     );
     if (bubble.kind === 'plain') {
       deps.progress.begin(

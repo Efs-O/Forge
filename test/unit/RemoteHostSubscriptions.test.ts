@@ -3,6 +3,7 @@ import type { UserNotificationSink } from '../src/sidebar/UserNotificationServic
 import type { ForgeHostFacade } from '../src/sidebar/ForgeHostFacade';
 import { subscribeHostToRemote } from '../../src/remote/remoteHostSubscriptions';
 import type { RemoteController } from '../src/remote/RemoteController';
+import type { HostActivityEvent, HostActivityListener } from '../../src/sidebar/HostActivity';
 
 /**
  * The production join between `UserNotificationService` and the remote runtime.
@@ -73,6 +74,42 @@ describe('subscribeHostToRemote notification routing', () => {
       expect(controller.deliverHostImage).not.toHaveBeenCalled();
       expect(controller.enqueueHostNotification).not.toHaveBeenCalled();
       expect(flush).not.toHaveBeenCalled();
+    } finally {
+      subscriptions.dispose();
+    }
+  });
+
+  it('routes a prompt synchronously before the async activity flush can delay progress', () => {
+    let activity: HostActivityListener | undefined;
+    const order: string[] = [];
+    const host = {
+      onHostActivity: (listener: HostActivityListener) => {
+        activity = listener;
+        return { dispose: () => (activity = undefined) };
+      },
+    } as unknown as ForgeHostFacade;
+    const controller = {
+      mirrorPrompt: vi.fn((_conversationId: string, _text: string) => {
+        order.push('prompt');
+        return Promise.resolve(1);
+      }),
+    } as unknown as RemoteController;
+    const subscriptions = subscribeHostToRemote(host, controller, {
+      onCompaction: vi.fn(),
+      onActivityError: vi.fn(),
+      onBeforeConversationNotify: async () => {
+        order.push('async flush');
+      },
+    });
+    try {
+      const event: HostActivityEvent = {
+        kind: 'prompt',
+        conversationId: 'c1',
+        text: 'You (VS Code): check this',
+      };
+      activity?.(event);
+      expect(order).toEqual(['prompt']);
+      expect(controller.mirrorPrompt).toHaveBeenCalledWith('c1', event.text);
     } finally {
       subscriptions.dispose();
     }

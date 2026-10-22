@@ -2,10 +2,12 @@ import type { ConversationRuntime } from './sessionTypes';
 import type { HostActivityEvent } from './HostActivity';
 import type { SidebarProviderEvents } from './AgentLoop';
 import type { HostToWebview } from './messageBridge';
+import type { WebviewActions } from './webviewMessageRouter';
 import type { AgentProgressEvent } from './AgentProgress';
 
 /** Telegram's own cap is 4096; leave room for the prefix and an ellipsis. */
 const MAX_MIRRORED_CHARS = 3_500;
+const MAX_MIRRORED_PROMPT_CHARS = 500;
 
 export interface TurnMirrorWiring {
   lookup: (conversationId: string) => ConversationRuntime | undefined;
@@ -25,6 +27,44 @@ export interface TurnMirrorWiring {
    * a minute later is what made the 2026-09-15 Telegram thread contradict itself.
    */
   willAutoResume?: (failureMessage: string) => boolean;
+}
+
+/** Emit the sidebar prompt before SendPipeline can start this turn's progress. */
+export function emitWebviewPrompt(
+  emit: (event: HostActivityEvent) => void,
+  conversationId: string,
+  text: string,
+  attachmentCount: number,
+): void {
+  if (!text.trim() || text.startsWith('/')) return;
+  const prompt =
+    text.length > MAX_MIRRORED_PROMPT_CHARS
+      ? `${text.slice(0, MAX_MIRRORED_PROMPT_CHARS - 1)}…`
+      : text;
+  const attachments = attachmentCount > 0 ? ` [+${attachmentCount} attachments]` : '';
+  emit({
+    text: `You (VS Code): ${prompt}${attachments}`,
+    conversationId,
+    kind: 'prompt',
+  });
+}
+
+/** Mirror a webview send synchronously before routing can start turn progress. */
+export function createWebviewSendAction(
+  emit: (event: HostActivityEvent) => void,
+  activeConversationId: () => string,
+  route: WebviewActions['send'],
+): WebviewActions['send'] {
+  return (text, attachments, conversationId, tellId, createdAt) => {
+    emitWebviewPrompt(
+      emit,
+      conversationId ?? activeConversationId(),
+      text,
+      attachments?.length ?? 0,
+    );
+    if (createdAt === undefined) route(text, attachments, conversationId, tellId);
+    else route(text, attachments, conversationId, tellId, createdAt);
+  };
 }
 
 /**

@@ -43,13 +43,25 @@ const RequestSchema = z.object({
   error: z.string().optional(),
 });
 
-const OutboxSchema = z.object({
+const OutboxStateSchema = z.enum(['pending', 'sending', 'delivered', 'abandoned', 'coalesced']);
+
+export type OutboxState = z.infer<typeof OutboxStateSchema>;
+
+export const OUTBOX_STATE_ROLE: Record<OutboxState, 'deliverable' | 'in_flight' | 'terminal'> = {
+  pending: 'deliverable',
+  sending: 'in_flight',
+  delivered: 'terminal',
+  abandoned: 'terminal',
+  coalesced: 'terminal',
+};
+
+export const OutboxSchema = z.object({
   id: z.string(),
   requestId: z.string(),
   channel: ChannelSchema,
   chatId: z.string(),
   text: z.string(),
-  state: z.enum(['pending', 'sending', 'delivered', 'abandoned']),
+  state: OutboxStateSchema,
   attempts: z.number().int().nonnegative(),
   updatedAt: z.number(),
   /** Optional: records written before this field exist still parse. */
