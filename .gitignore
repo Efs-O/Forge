@@ -138,3 +138,4 @@ artifacts/
 
 # Local test scratch directory.
 .test-tmp/
+/.forge-watch-*.txt
