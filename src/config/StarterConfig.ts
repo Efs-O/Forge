@@ -16,6 +16,8 @@ export interface StarterLlamaCppModel {
 // Code itself stays off (`allow_vscode`). Search needs a key and stays off, as
 // do the visible terminal and shell scripts. Existing configs are unchanged:
 // an absent key still means off.
+// `approval_timeout_minutes` stays absent so unanswered approvals wait forever
+// unless the owner opts in through config.yaml.
 const DEFAULT_PERMISSIONS: NonNullable<ForgeConfig['permissions']> = {
   fs: { read: true, write: true, delete: true },
   net: { search: false, fetch: true },

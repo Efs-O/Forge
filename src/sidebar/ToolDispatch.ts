@@ -15,13 +15,17 @@ import type { ToolBudget } from '../tools/ToolBudget';
 import type { DiffDecorations } from './DiffDecorations';
 import { resolveWorkspacePath } from '../util/WorkspacePaths';
 import { capDisplayText } from '../tools/resultCap';
-import { describeDelete } from './deletePreview';
+import { describeDelete, isDangerousDelete } from './deletePreview';
 import { isFailureResult, readPathArg, resultLabel } from './toolResultView';
 import type { PlanItem } from './sessionTypes';
 import type { CheckinStage } from '../agent/elapsedTimeNote';
 import type { ToolOutputLimits } from '../tools/toolOutputLimits';
 import { getLogger } from '../util/logger';
-import { ToolApprovalPolicyDenied } from './ToolApprovalService';
+import {
+  ToolApprovalPolicyDenied,
+  toolApprovalResult,
+  type ToolApprovalOutcome,
+} from './ToolApprovalService';
 import {
   coerceToolArgs,
   isJsonObject,
@@ -133,7 +137,7 @@ export class ToolDispatch {
       isDangerous?: boolean,
       convId?: string,
       signal?: AbortSignal,
-    ) => Promise<boolean>,
+    ) => Promise<ToolApprovalOutcome>,
     private readonly diffDecorations: DiffDecorations,
   ) {}
 
@@ -273,17 +277,12 @@ export class ToolDispatch {
             (tc.function.name === 'delete_file' ? await describeDelete(args) : fallbackDetail);
           const isDangerous =
             approvalMetadata?.dangerous ??
-            (tc.function.name === 'delete_file' && args['recursive'] === true);
-          const approved = signal
+            (tc.function.name === 'delete_file' && isDangerousDelete(args));
+          const outcome = signal
             ? await this.requestApproval(tc.function.name, detail, isDangerous, convId, signal)
             : await this.requestApproval(tc.function.name, detail, isDangerous, convId);
-          if (!approved) {
-            result = `User declined: ${tc.function.name}`;
-            // A declined dangerous command used to tell the agent nothing beyond
-            // "declined", so the next call was often the same command. The rule
-            // already names a sanctioned alternative; hand it over.
-            if (approvalMetadata?.declineHint)
-              result += ` — use this instead: ${approvalMetadata.declineHint}`;
+          if (outcome !== 'approved') {
+            result = toolApprovalResult(tc.function.name, outcome, approvalMetadata?.declineHint);
             this.postResult(tc, toolResultText(result), undefined, convId);
             messages.push(
               this.toolMessage(tc, toolResultContent(result), startedAt, argumentRepair),

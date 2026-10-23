@@ -110,6 +110,7 @@ const VideoConfigSchema = z
 
 const PermissionsSchema = z
   .object({
+    approval_timeout_minutes: z.number().int().min(1).max(1440).optional(),
     fs: z
       .object({
         read: z.boolean().default(true),

@@ -18,6 +18,14 @@ import {
 import { makeEditFileTool } from '../../src/tools/editFileTool';
 import { makeApplyLineEditsTool } from '../../src/tools/structuredEditTool';
 import { MAX_READ_FILE_CHARS } from '../../src/tools/resultCap';
+import { describeDelete } from '../../src/sidebar/deletePreview';
+import * as trashRefusal from '../../src/tools/trashRefusal';
+
+function extendedPath(targetPath: string): string {
+  if (process.platform !== 'win32' || targetPath.startsWith('\\\\?\\')) return targetPath;
+  if (targetPath.startsWith('\\\\')) return `\\\\?\\UNC\\${targetPath.slice(2)}`;
+  return `\\\\?\\${targetPath}`;
+}
 
 describe('isolated file and directory tool execution', () => {
   let root: string;
@@ -29,7 +37,8 @@ describe('isolated file and directory tool execution', () => {
 
   afterEach(() => {
     vscode.workspace.workspaceFolders.splice(0);
-    fs.rmSync(root, { recursive: true, force: true });
+    fs.rmSync(extendedPath(root), { recursive: true, force: true });
+    trashRefusal.clearTrashRefusals();
     vi.restoreAllMocks();
   });
 
@@ -129,12 +138,19 @@ describe('isolated file and directory tool execution', () => {
 
   it('routes deletions through the recycle bin unless to_trash is false', async () => {
     fs.writeFileSync(path.join(root, 'recycled.txt'), 'bin me', 'utf8');
+    trashRefusal.rememberTrashRefusal(path.join(root, 'recycled.txt'), 'old refusal');
+    const diagnose = vi.spyOn(trashRefusal, 'diagnoseTrashRefusal');
     vscode.workspace.fs.lastDeleteOptions = undefined;
 
     const trashed = await makeDeleteFileTool().handler({ path: 'recycled.txt' });
     expect(vscode.workspace.fs.lastDeleteOptions).toEqual({ recursive: false, useTrash: true });
     expect(trashed).toContain('recycle bin');
     expect(fs.existsSync(path.join(root, 'recycled.txt'))).toBe(false);
+    expect(diagnose).not.toHaveBeenCalled();
+    expect(trashRefusal.trashRefusalForPath(path.join(root, 'recycled.txt'))).toBeUndefined();
+    expect(
+      await describeDelete({ path: path.join(root, 'recycled.txt'), to_trash: false }),
+    ).not.toContain('Recycle bin refused it:');
 
     fs.writeFileSync(path.join(root, 'gone.txt'), 'forever', 'utf8');
     vscode.workspace.fs.lastDeleteOptions = undefined;
@@ -146,14 +162,37 @@ describe('isolated file and directory tool execution', () => {
 
   it('does not silently delete permanently when the recycle bin is unavailable', async () => {
     fs.writeFileSync(path.join(root, 'onshare.txt'), 'keep me', 'utf8');
+    const diagnose = vi.spyOn(trashRefusal, 'diagnoseTrashRefusal');
     vi.spyOn(vscode.workspace.fs, 'delete').mockRejectedValueOnce(
       new Error('trash is not supported on this filesystem'),
     );
 
     await expect(makeDeleteFileTool().handler({ path: 'onshare.txt' })).rejects.toThrow(
-      /to_trash: false/,
+      /Cause unknown.*file open in another program.*recycle bin's size limit.*to_trash: false/u,
     );
     expect(fs.existsSync(path.join(root, 'onshare.txt'))).toBe(true);
+    expect(diagnose).toHaveBeenCalledOnce();
+    const diagnosis = trashRefusal.trashRefusalForPath(path.join(root, 'onshare.txt'));
+    expect(diagnosis).toContain('Cause unknown');
+    expect(diagnosis).not.toMatch(/network shares/iu);
+    const preview = await describeDelete({ path: path.join(root, 'onshare.txt'), to_trash: false });
+    expect(preview).toContain(`Recycle bin refused it: ${diagnosis}`);
+  });
+
+  it('reports overlong descendants when a recycle-bin move is refused', async () => {
+    let directory = path.join(root, 'long-folder');
+    for (let index = 0; index < 10; index++) {
+      directory = path.join(directory, `segment-${'x'.repeat(20)}`);
+    }
+    fs.mkdirSync(extendedPath(directory), { recursive: true });
+    fs.writeFileSync(extendedPath(path.join(directory, 'trajectory.json')), '{}');
+    vi.spyOn(vscode.workspace.fs, 'delete').mockRejectedValueOnce(
+      new Error('Failed to perform delete operation'),
+    );
+
+    await expect(
+      makeDeleteFileTool().handler({ path: 'long-folder', recursive: true }),
+    ).rejects.toThrow(/Found \d+ paths of 260\+ characters \(longest \d+: .*trajectory\.json\)/u);
   });
 
   it('rejects stale structured edits without modifying the fixture', async () => {

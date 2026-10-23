@@ -129,7 +129,7 @@ describe('ToolDispatch', () => {
     diffDecorations = { apply: vi.fn() } as unknown as DiffDecorations;
 
     post = vi.fn();
-    requestApproval = vi.fn().mockResolvedValue(true);
+    requestApproval = vi.fn().mockResolvedValue('approved');
 
     dispatch = new ToolDispatch(
       toolRegistry,
@@ -221,7 +221,7 @@ describe('ToolDispatch', () => {
   });
 
   it('does not clear the streak for a refusal or a declined call', async () => {
-    requestApproval.mockResolvedValue(false);
+    requestApproval.mockResolvedValue('declined');
     toolRegistry.register({
       definition: {
         type: 'function',
@@ -685,7 +685,7 @@ describe('ToolDispatch', () => {
         getConfig: () => ({ permissions: { exec: { shell: 'bash' } } }) as never,
       });
       toolRegistry.register(shell);
-      requestApproval.mockResolvedValue(false);
+      requestApproval.mockResolvedValue('declined');
 
       const messages: ChatMessage[] = [];
       await dispatch.dispatch(
@@ -734,7 +734,7 @@ describe('ToolDispatch', () => {
     );
   });
 
-  it('flags delete_file with recursive=true as dangerous', async () => {
+  it('marks only permanent delete_file calls as dangerous', async () => {
     toolRegistry.register({
       definition: {
         type: 'function',
@@ -749,21 +749,24 @@ describe('ToolDispatch', () => {
       handler: vi.fn().mockResolvedValue('deleted'),
     });
 
-    const messages: Array<{ role: string; content: string; tool_call_id?: string; name?: string }> =
-      [];
-    const toolCalls = [makeToolCall('delete_file', { path: 'src/', recursive: true })];
-
-    await dispatch.dispatch(toolCalls, allowed, messages as never);
-
-    expect(requestApproval).toHaveBeenCalledWith(
-      'delete_file',
-      expect.any(String),
-      true,
-      undefined,
-    );
-    expect(requestApproval.mock.calls[0]?.[1]).toContain(
-      'Scope requested: recursive — all contents would be deleted if the target is accessible.',
-    );
+    for (const [args, dangerous] of [
+      [{ path: 'src/', recursive: true }, false],
+      [{ path: 'src/', recursive: true, to_trash: true }, false],
+      [{ path: 'src/', recursive: true, to_trash: false }, true],
+      [{ path: 'src/', to_trash: false }, true],
+    ] as const) {
+      requestApproval.mockClear();
+      await dispatch.dispatch([makeToolCall('delete_file', args)], allowed, [] as never);
+      expect(requestApproval).toHaveBeenCalledWith(
+        'delete_file',
+        expect.any(String),
+        dangerous,
+        undefined,
+      );
+      if (args['recursive']) {
+        expect(requestApproval.mock.calls[0]?.[1]).toContain('Scope requested: recursive');
+      }
+    }
   });
 
   it('skips execution when user declines approval', async () => {
@@ -781,7 +784,7 @@ describe('ToolDispatch', () => {
       handler: vi.fn().mockResolvedValue('written'),
     });
 
-    requestApproval.mockResolvedValue(false);
+    requestApproval.mockResolvedValue('declined');
 
     const messages: Array<{ role: string; content: string; tool_call_id?: string; name?: string }> =
       [];
@@ -791,6 +794,41 @@ describe('ToolDispatch', () => {
 
     expect(toolRegistry.get('write_file')?.handler).not.toHaveBeenCalled();
     expect(messages[0].content).toMatch(/declined/);
+  });
+
+  it('returns the timeout instruction as the tool result and does not execute the action', async () => {
+    const handler = vi.fn().mockResolvedValue('written');
+    toolRegistry.register({
+      definition: {
+        type: 'function',
+        function: {
+          name: 'write_file',
+          description: 'Write a file',
+          parameters: { type: 'object' },
+        },
+      },
+      permission: 'write',
+      approval: () => ({ declineHint: 'use a safe replacement' }),
+      mutation: { paths: (args) => [args['path'] as string], showDiff: true },
+      handler,
+    });
+    requestApproval.mockResolvedValue({ kind: 'timeout', minutes: 7 });
+    const messages: Array<{ role: string; content: string }> = [];
+
+    await dispatch.dispatch(
+      [makeToolCall('write_file', { path: 'timed-out.txt', content: 'x' })],
+      allowed,
+      messages as never,
+      'conv-timeout',
+    );
+
+    expect(handler).not.toHaveBeenCalled();
+    expect(messages[0]?.content).toContain(
+      'Not run: nobody answered the approval for write_file within 7 min.',
+    );
+    expect(messages[0]?.content).toContain('Do not retry it this turn.');
+    expect(messages[0]?.content).toContain('list this one as not done in your final reply.');
+    expect(messages[0]?.content).toContain('use this instead: use a safe replacement');
   });
 
   it('returns unattended policy denial guidance without counting a tool failure', async () => {

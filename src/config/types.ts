@@ -246,6 +246,7 @@ export interface ForgeConfig {
   };
   /** Tool permission gates. Defaults to read-only fs, no net/exec/git-write. */
   permissions?: {
+    approval_timeout_minutes?: number;
     fs?: { read?: boolean; write?: boolean; delete?: boolean };
     net?: { search?: boolean; fetch?: boolean };
     exec?: { terminal?: boolean; headless?: boolean; shell?: 'pwsh' | 'powershell' | 'bash' };

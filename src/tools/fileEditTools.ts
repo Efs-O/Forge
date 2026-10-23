@@ -3,6 +3,7 @@ import * as path from 'path';
 import * as vscode from 'vscode';
 import type { RegisteredTool } from './ToolRegistry';
 import { resolveRealWorkspacePath } from '../util/WorkspacePaths';
+import { diagnoseTrashRefusal, forgetTrashRefusal, rememberTrashRefusal } from './trashRefusal';
 import { applyAndSaveWorkspaceEdit } from './workspaceEditApply';
 
 /** Join a result line to its optional follow-up sentence. */
@@ -134,7 +135,8 @@ export function makeDeleteFileTool(extraRoots: () => readonly string[] = () => [
           'Delete exactly one path or provide paths to delete 1–50 files or directories. Each ' +
           'path must be in the workspace or inside extra_file_roots. By default targets are ' +
           'moved to the OS recycle bin / trash so they can be restored; set to_trash=false to ' +
-          'delete them permanently. Set recursive=true to delete non-empty directories.',
+          'delete them permanently. Only to_trash: false is a dangerous delete. Set recursive=true ' +
+          'to delete non-empty directories.',
         parameters: {
           type: 'object',
           properties: {
@@ -212,6 +214,7 @@ export function makeDeleteFileTool(extraRoots: () => readonly string[] = () => [
 
           if (args['to_trash'] === false) {
             fs.rmSync(resolved, { recursive });
+            forgetTrashRefusal(resolved);
             results.push(withWarning(`Permanently deleted: ${filePath}`, warning));
             deleted++;
             continue;
@@ -223,12 +226,14 @@ export function makeDeleteFileTool(extraRoots: () => readonly string[] = () => [
             });
           } catch (err) {
             const reason = err instanceof Error ? err.message : String(err);
+            const diagnosis = diagnoseTrashRefusal(resolved);
+            rememberTrashRefusal(resolved, diagnosis);
             throw new Error(
-              `could not move it to the recycle bin: ${reason}. ` +
-                'Filesystems such as network shares have no recycle bin — ' +
-                'call delete_file again with to_trash: false to delete it permanently.',
+              `could not move it to the recycle bin: ${reason}. ${diagnosis} ` +
+                'Call delete_file again with to_trash: false to delete it permanently.',
             );
           }
+          forgetTrashRefusal(resolved);
           results.push(withWarning(`Moved to recycle bin: ${filePath}`, warning));
           deleted++;
         } catch (err) {

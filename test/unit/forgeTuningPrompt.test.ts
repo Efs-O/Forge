@@ -133,7 +133,10 @@ describe('builtin execute template', () => {
     expect(prompt).toContain(
       'Before adding a function, module or dependency to an existing codebase, search for one that already does it.',
     );
-    expect(prompt).toContain('Never run destructive commands');
+    expect(prompt).toContain('Never run destructive shell commands');
+    expect(prompt).toContain(
+      'A `delete_file` recycle-bin move is recoverable; only `to_trash: false` is a dangerous delete.',
+    );
     expect(prompt).toContain('write code into files with write_file or edit_file');
     expect(prompt).toContain('Final answer: at most 12 lines.');
     // When to preview is the agent's call; the tool description says what preview shows.

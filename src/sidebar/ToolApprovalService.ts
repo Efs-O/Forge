@@ -27,7 +27,23 @@ export function buildApprovalRequestMessage(event: ToolApprovalRequestEvent): Ho
 
 export interface ToolApprovalResolvedEvent extends ToolApprovalRequestEvent {
   approved: boolean;
-  reason: 'resolved' | 'cancelled';
+  reason: 'resolved' | 'cancelled' | 'timeout';
+}
+
+export type ToolApprovalOutcome = 'approved' | 'declined' | { kind: 'timeout'; minutes: number };
+
+/** Format a declined or timed-out approval for the model's tool-result row. */
+export function toolApprovalResult(
+  toolName: string,
+  outcome: Exclude<ToolApprovalOutcome, 'approved'>,
+  declineHint?: string,
+): string {
+  const result =
+    typeof outcome === 'string'
+      ? `User declined: ${toolName}`
+      : `Not run: nobody answered the approval for ${toolName} within ${outcome.minutes} min. ` +
+        'Do not retry it this turn. Finish the remaining steps, then list this one as not done in your final reply.';
+  return declineHint ? `${result} — use this instead: ${declineHint}` : result;
 }
 
 export interface ToolApprovalSink {
@@ -43,9 +59,9 @@ export class ToolApprovalPolicyDenied extends Error {
       `unattended: dangerous tool denied by policy: "${toolName}". ` +
         (job
           ? 'Stop and report RESULT: failed naming the action you needed.'
-          : 'Nobody is present to approve it, so do not retry it. Continue with a ' +
-            'non-destructive alternative (delete_file with paths for files you created, a fresh directory ' +
-            'instead of clearing one), or report the step as not done.'),
+          : 'Nobody is present to approve it, so do not retry it. Recycle-bin deletes are allowed; ' +
+            'only a permanent delete (to_trash: false) is dangerous. Continue with safe steps or ' +
+            'report the step as not done.'),
     );
     this.name = 'ToolApprovalPolicyDenied';
   }
@@ -57,8 +73,10 @@ interface PendingApproval extends ToolApprovalRequestEvent {
   detail: string;
   dangerous: boolean;
   conversationId?: string;
-  resolve: (approved: boolean) => void;
+  resolve: (outcome: ToolApprovalOutcome) => void;
   signal?: AbortSignal;
+  abortListener?: () => void;
+  timer?: ReturnType<typeof setTimeout>;
 }
 
 export class ToolApprovalService {
@@ -68,11 +86,14 @@ export class ToolApprovalService {
   private onApprovalStart?: (conversationId: string) => void;
   private onApprovalEnd?: (conversationId: string) => void;
   private readonly sinks = new Set<ToolApprovalSink>();
+  private readonly timedOutConversations = new Set<string>();
+  private readonly timeoutMinutesByConversation = new Map<string, number>();
 
   constructor(
     private readonly post: (message: HostToWebview) => void,
     private readonly getView: () => vscode.WebviewView | undefined,
     private readonly unattended: UnattendedConversationRegistry = unattendedConversations,
+    private readonly getTimeoutMinutes: () => number | undefined = () => undefined,
   ) {}
 
   addSink(sink: ToolApprovalSink): { dispose(): void } {
@@ -103,6 +124,18 @@ export class ToolApprovalService {
     this.onApprovalEnd = onEnd;
   }
 
+  /** Start a user turn and allow that conversation's next approval to wait. */
+  beginTurn(conversationId: string): void {
+    this.timedOutConversations.delete(conversationId);
+    this.timeoutMinutesByConversation.delete(conversationId);
+  }
+
+  /** Drop turn-local state when a conversation is closed or deleted. */
+  clearConversationState(conversationId: string): void {
+    this.timedOutConversations.delete(conversationId);
+    this.timeoutMinutesByConversation.delete(conversationId);
+  }
+
   /**
    * Sole writer of the flag. It always announces the new value to the webview:
    * a remote `/clanker` changes the same gate the sidebar composer advertises,
@@ -130,22 +163,29 @@ export class ToolApprovalService {
     dangerous = false,
     conversationId?: string,
     signal?: AbortSignal,
-  ): Promise<boolean> {
-    if (signal?.aborted) return Promise.resolve(false);
+  ): Promise<ToolApprovalOutcome> {
+    if (signal?.aborted) return Promise.resolve('declined');
+    if (conversationId && this.timedOutConversations.has(conversationId)) {
+      return Promise.resolve({
+        kind: 'timeout',
+        minutes: this.timeoutMinutesByConversation.get(conversationId)!,
+      });
+    }
     if (conversationId && this.unattended.has(conversationId)) {
       if (dangerous) {
         const job = this.unattended.jobMeta(conversationId) !== undefined;
         return Promise.reject(new ToolApprovalPolicyDenied(toolName, job));
       }
-      return Promise.resolve(true);
+      return Promise.resolve('approved');
     }
-    if (this.clankerMode && !dangerous) return Promise.resolve(true);
+    if (this.clankerMode && !dangerous) return Promise.resolve('approved');
     if (!this.getView() && this.sinks.size === 0) {
       return Promise.reject(
         new Error(`Forge: sidebar is unavailable for tool approval (${toolName}).`),
       );
     }
-    return new Promise<boolean>((resolve) => {
+    return new Promise<ToolApprovalOutcome>((resolve) => {
+      const timeoutMinutes = this.getTimeoutMinutes();
       const pending: PendingApproval = {
         id: `confirm-${Date.now()}-${Math.random().toString(36).slice(2)}`,
         toolName,
@@ -155,7 +195,16 @@ export class ToolApprovalService {
         ...(conversationId ? { conversationId } : {}),
         ...(signal ? { signal } : {}),
       };
-      signal?.addEventListener('abort', () => this.cancel(pending.id), { once: true });
+      if (timeoutMinutes !== undefined) {
+        pending.timer = setTimeout(
+          () => this.timeout(pending, timeoutMinutes),
+          timeoutMinutes * 60_000,
+        );
+      }
+      if (signal) {
+        pending.abortListener = () => this.cancel(pending.id);
+        signal.addEventListener('abort', pending.abortListener, { once: true });
+      }
       this.queue.push(pending);
       if (pending.conversationId) this.onApprovalStart?.(pending.conversationId);
       this.pump();
@@ -163,59 +212,100 @@ export class ToolApprovalService {
   }
 
   resolve(id: string, approved: boolean): void {
-    if (this.active?.id === id) {
-      const current = this.active;
-      this.active = null;
-      if (current.conversationId) this.onApprovalEnd?.(current.conversationId);
-      this.emitResolved(current, approved, 'resolved');
-      current.resolve(approved);
-      this.pump();
-      return;
-    }
-    const index = this.queue.findIndex((item) => item.id === id);
-    if (index >= 0) {
-      const item = this.queue.splice(index, 1)[0];
-      if (item.conversationId) this.onApprovalEnd?.(item.conversationId);
-      this.emitResolved(item, approved, 'resolved');
-      item.resolve(approved);
-    }
+    const item = this.findPending(id);
+    if (!item || !this.removePending(item)) return;
+    this.finish(item, approved ? 'approved' : 'declined', 'resolved');
+    this.pump();
   }
 
   cancelConversation(conversationId?: string): void {
-    if (this.active && (!conversationId || this.active.conversationId === conversationId)) {
-      const current = this.active;
-      this.active = null;
-      if (current.conversationId) this.onApprovalEnd?.(current.conversationId);
-      this.emitResolved(current, false, 'cancelled');
-      current.resolve(false);
+    const pending = [...(this.active ? [this.active] : []), ...this.queue].filter(
+      (item) => !conversationId || item.conversationId === conversationId,
+    );
+    for (const item of pending) {
+      if (this.removePending(item)) this.finish(item, 'declined', 'cancelled');
     }
-    for (let index = this.queue.length - 1; index >= 0; index--) {
-      const item = this.queue[index];
-      if (item && (!conversationId || item.conversationId === conversationId)) {
-        this.queue.splice(index, 1);
-        if (item.conversationId) this.onApprovalEnd?.(item.conversationId);
-        this.emitResolved(item, false, 'cancelled');
-        item.resolve(false);
+    this.pump();
+  }
+
+  cancelAll(): void {
+    this.cancelConversation();
+  }
+
+  dispose(): void {
+    this.cancelAll();
+    this.timedOutConversations.clear();
+    this.timeoutMinutesByConversation.clear();
+    this.sinks.clear();
+  }
+
+  private cancel(id: string): void {
+    const item = this.findPending(id);
+    if (!item || !this.removePending(item)) return;
+    this.finish(item, 'declined', 'cancelled');
+    this.pump();
+  }
+
+  private timeout(item: PendingApproval, minutes: number): void {
+    if (!this.removePending(item)) return;
+    const conversationId = item.conversationId;
+    if (conversationId) {
+      this.timedOutConversations.add(conversationId);
+      this.timeoutMinutesByConversation.set(conversationId, minutes);
+    }
+    this.finish(item, { kind: 'timeout', minutes }, 'timeout');
+    if (conversationId) {
+      for (const queued of [...this.queue]) {
+        if (queued.conversationId !== conversationId || !this.removePending(queued)) continue;
+        this.finish(queued, { kind: 'timeout', minutes }, 'timeout');
       }
     }
     this.pump();
   }
 
-  private cancel(id: string): void {
-    this.resolve(id, false);
+  private findPending(id: string): PendingApproval | undefined {
+    return this.active?.id === id ? this.active : this.queue.find((item) => item.id === id);
+  }
+
+  private removePending(item: PendingApproval): boolean {
+    if (this.active?.id === item.id) this.active = null;
+    else {
+      const index = this.queue.findIndex((queued) => queued.id === item.id);
+      if (index < 0) return false;
+      this.queue.splice(index, 1);
+    }
+    if (item.timer !== undefined) clearTimeout(item.timer);
+    if (item.signal && item.abortListener)
+      item.signal.removeEventListener('abort', item.abortListener);
+    if (item.conversationId) this.onApprovalEnd?.(item.conversationId);
+    return true;
+  }
+
+  private finish(
+    item: PendingApproval,
+    outcome: ToolApprovalOutcome,
+    reason: ToolApprovalResolvedEvent['reason'],
+  ): void {
+    this.emitResolved(item, outcome === 'approved', reason);
+    item.resolve(outcome);
   }
 
   private pump(): void {
     if (this.active) return;
-    const next = this.queue.shift();
+    const next = this.queue[0];
     if (!next) return;
     if (next.signal?.aborted) {
+      this.queue.shift();
+      if (next.timer !== undefined) clearTimeout(next.timer);
+      if (next.signal && next.abortListener)
+        next.signal.removeEventListener('abort', next.abortListener);
       if (next.conversationId) this.onApprovalEnd?.(next.conversationId);
       this.emitResolved(next, false, 'cancelled');
-      next.resolve(false);
+      next.resolve('declined');
       this.pump();
       return;
     }
+    this.queue.shift();
     this.active = next;
     const event = this.eventOf(next);
     if (this.getView()) {

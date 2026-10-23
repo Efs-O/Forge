@@ -2,6 +2,7 @@ import * as fs from 'fs';
 import * as path from 'path';
 import { resolveWorkspacePath } from '../util/WorkspacePaths';
 import { describeGitLineForDelete } from '../tools/gitTrackedStatus';
+import { trashRefusalForPath } from '../tools/trashRefusal';
 
 const DELETE_PREVIEW_LIMIT = 8;
 const DELETE_SCAN_LIMIT = 2_000;
@@ -33,7 +34,7 @@ export async function describeDelete(args: Record<string, unknown>): Promise<str
   // approving deletes the user never saw.
   for (const [index, requestedPath] of targets.entries()) {
     if (index > 0) lines.push('');
-    lines.push(...(await describeTarget(requestedPath, recursive)));
+    lines.push(...(await describeTarget(requestedPath, recursive, !toTrash)));
   }
   lines.push(
     toTrash
@@ -45,11 +46,22 @@ export async function describeDelete(args: Record<string, unknown>): Promise<str
   return lines.join('\n');
 }
 
-async function describeTarget(requestedPath: string, recursive: boolean): Promise<string[]> {
+/** Recycle-bin moves are recoverable; only an explicit permanent delete is dangerous. */
+export function isDangerousDelete(args: Record<string, unknown>): boolean {
+  return args['to_trash'] === false;
+}
+
+async function describeTarget(
+  requestedPath: string,
+  recursive: boolean,
+  permanent: boolean,
+): Promise<string[]> {
   const lines = [`Target: ${requestedPath}`];
 
   try {
     const target = resolveWorkspacePath(requestedPath);
+    const refusal = permanent ? trashRefusalForPath(target) : undefined;
+    if (refusal) lines.push(`Recycle bin refused it: ${refusal}`);
     const stat = fs.lstatSync(target);
     if (!stat.isDirectory() || stat.isSymbolicLink()) {
       const kind = stat.isSymbolicLink() ? 'symbolic link' : 'file';

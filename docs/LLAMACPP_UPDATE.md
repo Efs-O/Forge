@@ -62,9 +62,9 @@ install_llamacpp
 
 `install_llamacpp` keeps the old build folders under
 `%LOCALAPPDATA%\Forge\llama.cpp-<tag>\`. Do **not** try to delete them: pruning
-is the owner's job, and a recursive delete is a dangerous action that is denied
-in an unattended run. If you want to note that old builds are accumulating, say
-so in the `RESULT` sentence; the owner prunes.
+is the owner's job. Recycle-bin deletes are allowed by policy, but these
+installed builds are owner-managed. If you want to note that old builds are
+accumulating, say so in the `RESULT` sentence; the owner prunes.
 
 ## Do not
 

@@ -7,6 +7,7 @@ false` to turn either one off:
 
 ```yaml
 permissions:
+  # approval_timeout_minutes: 30 # Optional: stop waiting for unanswered approvals after 30 minutes.
   browser:
     enabled: true
   desktop:
@@ -135,6 +136,7 @@ it to drive VS Code deliberately, set both switches:
 
 ```yaml
 permissions:
+  # approval_timeout_minutes: 30 # Optional: stop waiting for unanswered approvals after 30 minutes.
   desktop:
     enabled: true
     allow_vscode: true

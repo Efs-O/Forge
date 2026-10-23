@@ -23,6 +23,7 @@ export class FakeRemoteChannel implements RemoteChannel {
     correlationId: string;
     keyboardMessageIds: readonly string[];
     approved: boolean;
+    reason?: 'resolved' | 'cancelled' | 'timeout';
   }> = [];
   /** When set, the resolved-keyboard edit fails with this message. */
   resolveKeyboardError?: string;
@@ -171,9 +172,17 @@ export class FakeRemoteChannel implements RemoteChannel {
     correlationId: string,
     keyboardMessageIds: readonly string[],
     approved: boolean,
+    _options?: { signal?: AbortSignal },
+    reason?: 'resolved' | 'cancelled' | 'timeout',
   ): Promise<void> {
     if (this.resolveKeyboardError) throw new Error(this.resolveKeyboardError);
-    this.resolvedKeyboards.push({ chatId, correlationId, keyboardMessageIds, approved });
+    this.resolvedKeyboards.push({
+      chatId,
+      correlationId,
+      keyboardMessageIds,
+      approved,
+      ...(reason ? { reason } : {}),
+    });
   }
 
   async deleteMessage(chatId: string, messageId: string): Promise<void> {

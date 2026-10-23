@@ -47,6 +47,7 @@ custom_instructions: >-
 # that off with /clanker. Review this block before your first session and set
 # anything you do not want to false (or delete the line).
 permissions:
+  # approval_timeout_minutes: 30 # Optional: stop waiting for unanswered approvals after 30 minutes.
   fs:
     delete: true
   exec:

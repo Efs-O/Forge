@@ -71,7 +71,7 @@ function createDispatch(registry: ToolRegistry): ToolDispatch {
     {} as KeepUndoCodeLensProvider,
     { record: vi.fn(), reset: vi.fn() } as unknown as ToolFailureTracker,
     vi.fn(),
-    vi.fn(async () => true),
+    vi.fn(async () => 'approved' as const),
     {} as DiffDecorations,
   );
 }

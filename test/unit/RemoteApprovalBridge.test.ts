@@ -73,7 +73,10 @@ function rig(
       dangerous: options.dangerous ?? false,
       conversationId: 'c1',
     });
-  const resolve = (approved: boolean): void =>
+  const resolve = (
+    approved: boolean,
+    reason: 'resolved' | 'cancelled' | 'timeout' = 'resolved',
+  ): void =>
     sink?.resolved({
       id: 'gate-1',
       toolName: 'write_file',
@@ -81,7 +84,7 @@ function rig(
       dangerous: false,
       conversationId: 'c1',
       approved,
-      reason: 'resolved',
+      reason,
     });
   return { bridge, channel, request, resolve, resolveApproval };
 }
@@ -277,6 +280,22 @@ describe('RemoteApprovalBridge', () => {
     resolve(true);
     await vi.waitFor(() => expect(channel.resolvedKeyboards).toHaveLength(1));
     expect(channel.resolvedKeyboards[0]?.keyboardMessageIds).toEqual(['sent-1', 'sent-2']);
+  });
+
+  it('edits a timed-out approval card and does not send a second message', async () => {
+    const { channel, request, resolve } = rig();
+    request();
+    await vi.waitFor(() => expect(channel.sent).toHaveLength(1));
+
+    resolve(false, 'timeout');
+
+    await vi.waitFor(() => expect(channel.resolvedKeyboards).toHaveLength(1));
+    expect(channel.resolvedKeyboards[0]).toMatchObject({
+      approved: false,
+      reason: 'timeout',
+      keyboardMessageIds: ['sent-1'],
+    });
+    expect(channel.sent).toHaveLength(1);
   });
 
   /**

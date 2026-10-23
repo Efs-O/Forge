@@ -268,6 +268,7 @@ export class RemoteApprovalBridge {
           pending.keyboardMessageIds ?? [],
           event.approved,
           { signal: this.signal },
+          event.reason === 'timeout' ? 'timeout' : undefined,
         );
       } catch (err) {
         this.onError?.(
@@ -281,6 +282,9 @@ export class RemoteApprovalBridge {
         .retractPrompt?.(pending.chatId, correlationId, this.signal)
         .catch(() => undefined);
     }
+    // Telegram's disabled button is the edited receipt. A second message would
+    // duplicate the timeout result without adding a new decision surface.
+    if (event.reason === 'timeout' && this.channel.resolvePromptKeyboard) return;
     try {
       const sent = await this.channel.send(
         pending.chatId,

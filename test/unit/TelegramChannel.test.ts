@@ -518,6 +518,37 @@ describe('TelegramChannel', () => {
     expect(calls.map((call) => call.body.message_id)).toEqual([11, 12]);
   });
 
+  it('edits a timed-out approval card to say it was not run', async () => {
+    const calls: Array<{ method: string; body: Record<string, unknown> }> = [];
+    const channel = new TelegramChannel({
+      token: 'secret-token',
+      getCursor: () => undefined,
+      setCursor: async () => undefined,
+      fetch: (async (url: string | URL | Request, init?: RequestInit) => {
+        calls.push({
+          method: String(url).split('/').at(-1)!,
+          body: JSON.parse(String(init?.body)) as Record<string, unknown>,
+        });
+        return response({ message_id: 77 });
+      }) as typeof fetch,
+    });
+
+    await channel.resolvePromptKeyboard('chat', 'action-timeout', ['77'], false, undefined, 'timeout');
+
+    expect(calls).toEqual([
+      {
+        method: 'editMessageReplyMarkup',
+        body: {
+          chat_id: 'chat',
+          message_id: 77,
+          reply_markup: {
+            inline_keyboard: [[{ text: 'Timed out — not run', disabled: {} }]],
+          },
+        },
+      },
+    ]);
+  });
+
   it('greys the keyboard message the transport remembered, even if the bridge lost it', async () => {
     const calls: Array<{ method: string; body: Record<string, unknown> }> = [];
     const channel = new TelegramChannel({

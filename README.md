@@ -716,8 +716,8 @@ Type `/` in chat to open the built-in command list. Forge also contributes comma
 - If workspace contents change concurrently while Forge is preparing or finalizing a checkpoint, Forge stops and surfaces the conflict rather than claiming unsafe rollback coverage.
 - Undo restores each requested mutation path to its state at the start of the turn. For tools that create missing parent directories, those empty implementation-created parents may remain after undo; requested files and directories are restored or removed exactly.
 - File writes produce inline diff cards in the chat.
-- Confirmation gates protect writes, terminal actions, and git actions.
-- `/clanker` disables those prompts for the session, except recursive deletes which still require approval.
+- Confirmation gates protect writes, deletes, terminal actions, and git actions.
+- `/clanker` auto-approves recoverable recycle-bin deletes; permanent deletes still require approval.
 
 ## Responsibility and Risk
 
@@ -733,8 +733,9 @@ sections 7 and 8 of [LICENSE](LICENSE).
 Forge takes the safety measures it reasonably can, and you should understand
 what each one does and does not cover:
 
-- **Confirmation gates** on writes, terminal actions, and git actions. `/clanker`
-  turns these off for the session — recursive deletes still ask.
+- **Confirmation gates** on writes, terminal actions, git actions, and deletes.
+  `/clanker` auto-approves recoverable recycle-bin deletes; permanent deletes
+  still ask.
 - **Per-turn checkpoints** with Keep/Undo. Undo restores the paths a turn
   mutated; it is not a backup. Keep/Undo covers Forge's file tools only.
   Changes made by a command — anything run through `shell`, or a build — are

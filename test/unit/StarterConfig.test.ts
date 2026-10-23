@@ -47,6 +47,7 @@ describe('starter config generation', () => {
     expect(ForgeConfigSchema.parse(config).models).toHaveLength(2);
     expect(config.active_model).toBe('a');
     expect(config.defaults?.tool_groups).toBeUndefined();
+    expect(config.permissions?.approval_timeout_minutes).toBeUndefined();
   });
 
   it('generates a schema-valid multi-model Ollama config', () => {

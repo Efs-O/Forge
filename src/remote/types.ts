@@ -402,6 +402,7 @@ export interface RemoteChannel {
     keyboardMessageIds: readonly string[],
     approved: boolean,
     options?: { signal?: AbortSignal },
+    reason?: 'resolved' | 'cancelled' | 'timeout',
   ): Promise<void>;
   start(signal: AbortSignal): Promise<void>;
   requestPairingCode?(phoneNumber: string): Promise<string>;

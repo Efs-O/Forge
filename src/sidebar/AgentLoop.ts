@@ -29,6 +29,7 @@ import { runCloudProviderTurn, runLocalProviderTurn } from './ProviderTurn';
 import type { ForgeTurnOutcome } from './turnOutcome';
 import type { DiffDecorations } from './DiffDecorations';
 import { ToolApprovalService } from './ToolApprovalService';
+import { clearTrashRefusals } from '../tools/trashRefusal';
 import type { ToolApprovalSink, ToolApprovalRequestEvent } from './ToolApprovalService';
 import { recordModelUsage } from './modelManager/usageTracker';
 import type { AgentProgressEvent, AgentProgressListener } from './AgentProgress';
@@ -183,7 +184,12 @@ export class AgentLoop {
         config.max_cli_agents ?? DEFAULT_MAX_CLI_AGENTS,
         config.cli_idle_timeout_ms ?? DEFAULT_CLI_IDLE_TIMEOUT_MS,
       );
-    this.approvals = new ToolApprovalService(post, getView);
+    this.approvals = new ToolApprovalService(
+      post,
+      getView,
+      undefined,
+      () => getConfig().permissions?.approval_timeout_minutes,
+    );
     this.approvals.setApprovalLifecycle(
       (convId) => this.sessionTimer.pauseApproval(convId),
       (convId) => this.sessionTimer.resumeApproval(convId),
@@ -248,6 +254,8 @@ export class AgentLoop {
   }
 
   disposeConversation(id: string): Promise<void> {
+    this.approvals.cancelConversation(id);
+    this.approvals.clearConversationState(id);
     const conv = this.conversationLookup?.(id);
     if (conv) this.sessionTimer.disposeConversation(conv);
     this.streamMeter.reset(id);
@@ -255,6 +263,8 @@ export class AgentLoop {
   }
 
   dispose(): Promise<void> {
+    this.approvals.dispose();
+    clearTrashRefusals();
     this.sessionTimer.dispose();
     this.progress.clear();
     return this.cliSessions.dispose();
@@ -333,6 +343,7 @@ export class AgentLoop {
   ): Promise<ForgeTurnOutcome> {
     await this.waitForCancelledTurns();
     const convId = conv.id;
+    if (!promptOptions?.internal) this.approvals.beginTurn(convId);
     // A new turn supersedes whatever the previous one ended as; auto-compact
     // resume reads this and must never act on a stale verdict.
     this.lifecycle.clearIncomplete(convId);

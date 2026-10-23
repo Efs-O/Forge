@@ -22,11 +22,17 @@ const PROMPT_MESSAGE_LIMIT = 256;
  * The one button a resolved approval leaves behind, greyed out by Telegram's
  * `DisabledButton` — an object with no fields, not a Boolean.
  */
-function resolvedApprovalButton(approved: boolean): {
+function resolvedApprovalButton(
+  approved: boolean,
+  reason?: 'resolved' | 'cancelled' | 'timeout',
+): {
   text: string;
   disabled: Record<string, never>;
 } {
-  return { text: approved ? 'Approved ✓' : 'Denied ✗', disabled: {} };
+  return {
+    text: reason === 'timeout' ? 'Timed out — not run' : approved ? 'Approved ✓' : 'Denied ✗',
+    disabled: {},
+  };
 }
 
 type TelegramCall = (
@@ -313,6 +319,7 @@ export class TelegramOutbound {
     keyboardMessageIds: readonly string[],
     approved: boolean,
     options?: { signal?: AbortSignal },
+    reason?: 'resolved' | 'cancelled' | 'timeout',
   ): Promise<void> {
     const remembered = this.promptMessages.get(correlationId);
     this.promptMessages.delete(correlationId);
@@ -328,7 +335,7 @@ export class TelegramOutbound {
         await this.editReplyMarkup(
           chatId,
           messageId,
-          { inline_keyboard: [[resolvedApprovalButton(approved)]] },
+          { inline_keyboard: [[resolvedApprovalButton(approved, reason)]] },
           options?.signal,
         );
       } catch (err) {

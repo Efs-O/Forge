@@ -131,9 +131,10 @@ function renderRemoteReach(chats: number | undefined): string | undefined {
  * scratch files, was denied, and spent rounds working out the alternative.
  */
 const UNATTENDED_NOTE =
-  'Unattended: nobody is present this turn. Dangerous commands (recursive deletes, ' +
+  'Unattended: nobody is present this turn. Dangerous commands (permanent delete_file calls ' +
+  'with to_trash: false, recursive shell deletes, ' +
   '`git reset --hard`, force push, killing processes) are denied, not sent for approval. ' +
-  'So is delete_file with recursive: true. To remove files you created, list them all in ' +
+  'Recycle-bin delete_file calls are allowed. To remove files you created, list them all in ' +
   "one delete_file call's paths.";
 
 /** Newest command always; earlier ones only when they failed. */
