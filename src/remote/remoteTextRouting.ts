@@ -67,7 +67,16 @@ export async function routeRemoteText(
     deps.acknowledge,
     deps.onError,
   );
-  if (sessionAsk) return touched(sessionAsk);
+  if (sessionAsk) {
+    if (
+      sessionAsk.kind === 'rejected' &&
+      !event.callbackMessageId &&
+      event.text.trim().startsWith('/')
+    ) {
+      deps.scheduleCommandCleanup(event);
+    }
+    return touched(sessionAsk);
+  }
   if (isRemoteCommand(event.text)) {
     const result = touched(await handleRemoteCommand(event, deps.commandContext(event), key));
     if (result.kind === 'handled' || result.kind === 'rejected') {

@@ -11,7 +11,7 @@ import { formatSelectionPage } from '../../src/remote/remoteSelectionFormat';
 import { formatRemoteRelativeDate } from '../../src/remote/RemoteDateTime';
 import { renderRemoteJobCard, renderRemoteJobList } from '../../src/remote/remoteJobReport';
 import { parseTelegramJobCallback, telegramJobHash } from '../../src/remote/TelegramJobButtons';
-import { textBar, formatTokensShort } from '../../src/remote/telegramReportFormat';
+import { textBar, formatTokensShort, contextRing } from '../../src/remote/telegramReportFormat';
 import { formatSystemReport } from '../../src/system/formatSystemReport';
 import type { SystemReport } from '../../src/system/SystemReport';
 import type { RemoteInboundEvent } from '../../src/remote/types';
@@ -33,6 +33,17 @@ describe('Telegram readable report formatters', () => {
     expect(textBar(4, 2)).toBe('██');
     expect(formatTokensShort(167_012)).toBe('167K');
     expect(formatTokensShort(1_500_000)).toBe('1.5M');
+  });
+
+  it('maps the context percentage to the five ring glyphs without capping truth', () => {
+    const cases: Array<[number, string]> = [
+      [0, '○ 0%'], [12, '○ 12%'], [13, '◔ 13%'], [37, '◔ 37%'],
+      [38, '◑ 38%'], [62, '◑ 62%'], [63, '◕ 63%'], [87, '◕ 87%'],
+      [88, '● 88%'], [100, '● 100%'], [104, '● 104%'],
+    ];
+    for (const [percent, expected] of cases) expect(contextRing(percent, 100)).toBe(expected);
+    expect(contextRing(1, 0)).toBeUndefined();
+    expect(contextRing(1, -1)).toBeUndefined();
   });
 
   it('renders status counts in order, drops zeros, and escapes every dynamic value', () => {
@@ -87,6 +98,21 @@ describe('Telegram readable report formatters', () => {
     expect(report.html).not.toContain('crash-unknown');
     expect(report.html).not.toContain('Exchanges');
     expect(report.plain).toContain('Approvals: CLANKER');
+  });
+
+  it('adds the context ring to the /status title in HTML and plain text only when available', () => {
+    const withBudget = renderRemoteStatusReport({
+      running: 0, queued: 0, streaming: 0, notificationsPending: 0, abandoned: 0,
+      context: { used: 31, max: 100 }, clanker: false, exchanges: 'Exchanges: none',
+    });
+    expect(withBudget.html.split('\n')[0]).toBe('<b>Status</b> · ◔ 31%');
+    expect(withBudget.plain.split('\n')[0]).toBe('Status · ◔ 31%');
+    const withoutBudget = renderRemoteStatusReport({
+      running: 0, queued: 0, streaming: 0, notificationsPending: 0, abandoned: 0,
+      clanker: false, exchanges: 'Exchanges: none',
+    });
+    expect(withoutBudget.html.split('\n')[0]).toBe('<b>Status</b>');
+    expect(withoutBudget.plain.split('\n')[0]).toBe('Status');
   });
 
   it('omits an unavailable context bar and omits missing breakdown data', () => {
@@ -243,7 +269,7 @@ describe('Telegram readable report formatters', () => {
     expect(card.html).toContain('&lt;result &amp;&gt;');
     expect(card.html.length).toBeLessThan(3_200);
     expect(card.buttons.flat().map((button) => parseTelegramJobCallback(button.callbackData)?.action)).toEqual([
-      'r', 'p', 'c', 'd', 'l',
+      'r', 'p', 'c', 'd', 'l', undefined,
     ]);
   });
 });

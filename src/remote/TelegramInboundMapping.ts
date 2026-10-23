@@ -309,7 +309,7 @@ export function telegramUpdateToEvent(
       chatType: telegramChatType(message.chat.type),
       receivedAt: message.date * 1000,
       ...(message.chat.title ? { chatTitle: message.chat.title } : {}),
-      text: message.text ?? message.caption ?? '',
+      text: normalizeTelegramCommand(message.text ?? message.caption ?? ''),
       ...(attachment ? { attachments: [attachment] } : {}),
       ...(message.reply_to_message
         ? { replyToMessageId: String(message.reply_to_message.message_id) }
@@ -319,4 +319,8 @@ export function telegramUpdateToEvent(
   return update.callback_query
     ? mapTelegramCallbackQuery(update.callback_query, telegramChatType)
     : undefined;
+}
+
+function normalizeTelegramCommand(text: string): string {
+  return text.replace(/^(\/[A-Za-z0-9_]+)@[A-Za-z0-9_]+(?=\s|$)/u, '$1');
 }

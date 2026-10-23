@@ -8,6 +8,7 @@ import { resolveModelSelection } from './remoteCommandSelectors';
 import { globalBusyReason } from './remoteCommandShared';
 import type { RemoteCommandContext } from './RemoteCommandHandler';
 import { telegramCommandButton } from './TelegramCommandButtons';
+import { telegramCloseButton } from './TelegramHelpButtons';
 
 /**
  * The model-management remote commands: `/models`, `/model`, `/system`,
@@ -67,12 +68,24 @@ export async function handleRemoteModelCommand(
     });
     if (context.channel.parseMode && context.channel.sendInlineKeyboard) {
       const text = formatSystemReport(report, { telegramCards: true });
-      await context.channel.sendInlineKeyboard(
-        event.chatId,
-        text,
-        [[telegramCommandButton('system', 'Refresh')]],
-        { signal: context.signal, parseMode: 'HTML' },
-      );
+      const buttons = [[telegramCommandButton('system', 'Refresh')], [telegramCloseButton()]];
+      if (context.telegramEditMessageId && context.channel.editInlineKeyboardMessage) {
+        await context.channel.editInlineKeyboardMessage(
+          event.chatId,
+          context.telegramEditMessageId,
+          text,
+          buttons,
+          {
+            signal: context.signal,
+            parseMode: 'HTML',
+          },
+        );
+      } else {
+        await context.channel.sendInlineKeyboard(event.chatId, text, buttons, {
+          signal: context.signal,
+          parseMode: 'HTML',
+        });
+      }
       return { kind: 'handled' };
     }
     const text = formatSystemReport(report, { compact: true });

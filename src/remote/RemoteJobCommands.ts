@@ -25,6 +25,7 @@ import type { RemoteChannel, RemoteInboundDisposition, RemoteInboundEvent } from
 import { escapeTelegramHtml } from './telegramHtml';
 import { telegramJobButton, telegramJobHash } from './TelegramJobButtons';
 import { renderRemoteJobCard, renderRemoteJobList } from './remoteJobReport';
+import { telegramCloseButton } from './TelegramHelpButtons';
 
 /** How long a `/job <n> delete` stays confirmable. Short: it is destructive. */
 const CONFIRM_WINDOW_MS = 90_000;
@@ -345,6 +346,7 @@ async function handleDelete(
         telegramJobButton('Confirm delete', target.index, jobFile.job.id, 'D'),
         telegramJobButton('‹ Jobs', target.index, jobFile.job.id, 'l'),
       ],
+      [telegramCloseButton()],
     ];
     await context.channel.editInlineKeyboardMessage(
       event.chatId,

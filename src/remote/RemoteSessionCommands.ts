@@ -8,6 +8,7 @@ import { formatElapsed } from './remoteProgressRender';
 import { MAX_VIEW_COUNT, parseViewCount, sendTranscriptView } from './RemoteTranscriptView';
 import { isAskAgentRunning } from '../agentLinks/askAgentService';
 import { formatRemoteRelativeDate } from './RemoteDateTime';
+import { telegramCloseButton } from './TelegramHelpButtons';
 
 type TextEvent = Extract<RemoteInboundEvent, { kind: 'text' }>;
 
@@ -94,12 +95,26 @@ export async function handleRemoteSessionCommand(
         { text: 'Ask Codex', callbackData: 'a:codex' },
         { text: 'Ask Copilot', callbackData: 'a:copilot' },
       ],
+      [telegramCloseButton()],
     ];
     if (context.channel.parseMode && context.channel.sendInlineKeyboard) {
-      await context.channel.sendInlineKeyboard(event.chatId, html, buttons, {
-        signal: context.signal,
-        parseMode: 'HTML',
-      });
+      if (context.telegramEditMessageId && context.channel.editInlineKeyboardMessage) {
+        await context.channel.editInlineKeyboardMessage(
+          event.chatId,
+          context.telegramEditMessageId,
+          html,
+          buttons,
+          {
+            signal: context.signal,
+            parseMode: 'HTML',
+          },
+        );
+      } else {
+        await context.channel.sendInlineKeyboard(event.chatId, html, buttons, {
+          signal: context.signal,
+          parseMode: 'HTML',
+        });
+      }
     } else {
       await context.channel.send(event.chatId, plain, { signal: context.signal });
     }
@@ -351,6 +366,7 @@ function renderQueueReport(queued: ReturnType<RemoteCommandContext['store']['que
     }
     buttons.push([telegramQueueButton('Drop all', 'all')]);
   }
+  buttons.push([telegramCloseButton()]);
   return {
     html: `${headerHtml}\n${bodyHtml}`,
     plain: `${headerPlain}\n${bodyPlain}`,

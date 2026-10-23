@@ -1,8 +1,9 @@
 import { escapeTelegramHtml } from './telegramHtml';
-import { formatTokensShort, textBar } from './telegramReportFormat';
+import { contextRing, formatTokensShort, textBar } from './telegramReportFormat';
 import type { RemoteCommandContext } from './RemoteCommandHandler';
 import type { RemoteInboundDisposition, RemoteInboundEvent } from './types';
 import { telegramCommandButton } from './TelegramCommandButtons';
+import { telegramCloseButton } from './TelegramHelpButtons';
 import { getBoardContext } from '../agentMesh/meshContext';
 import { readEvents, type ExchangeEvent } from '../agentMesh/exchangeLog';
 
@@ -85,18 +86,31 @@ export async function handleRemoteStatusReportCommand(
       exchanges: describeAgentBoard(binding?.conversationId) ?? 'Exchanges: none',
     });
     if (context.channel.parseMode && context.channel.sendInlineKeyboard) {
-      await context.channel.sendInlineKeyboard(
-        event.chatId,
-        report.html,
+      const buttons = [
         [
-          [
-            telegramCommandButton('context', 'Context'),
-            telegramCommandButton('system', 'System'),
-            telegramCommandButton('chats', 'Chats'),
-          ],
+          telegramCommandButton('context', 'Context'),
+          telegramCommandButton('system', 'System'),
+          telegramCommandButton('chats', 'Chats'),
         ],
-        { signal: context.signal, parseMode: 'HTML' },
-      );
+        [telegramCloseButton()],
+      ];
+      if (context.telegramEditMessageId && context.channel.editInlineKeyboardMessage) {
+        await context.channel.editInlineKeyboardMessage(
+          event.chatId,
+          context.telegramEditMessageId,
+          report.html,
+          buttons,
+          {
+            signal: context.signal,
+            parseMode: 'HTML',
+          },
+        );
+      } else {
+        await context.channel.sendInlineKeyboard(event.chatId, report.html, buttons, {
+          signal: context.signal,
+          parseMode: 'HTML',
+        });
+      }
     } else {
       await context.channel.send(event.chatId, report.plain, { signal: context.signal });
     }
@@ -114,12 +128,24 @@ export async function handleRemoteStatusReportCommand(
     breakdown: context.host.contextBreakdown(binding.conversationId),
   });
   if (context.channel.parseMode && context.channel.sendInlineKeyboard) {
-    await context.channel.sendInlineKeyboard(
-      event.chatId,
-      report.html,
-      [[telegramCommandButton('compact', 'Compact now')]],
-      { signal: context.signal, parseMode: 'HTML' },
-    );
+    const buttons = [[telegramCommandButton('compact', 'Compact now')], [telegramCloseButton()]];
+    if (context.telegramEditMessageId && context.channel.editInlineKeyboardMessage) {
+      await context.channel.editInlineKeyboardMessage(
+        event.chatId,
+        context.telegramEditMessageId,
+        report.html,
+        buttons,
+        {
+          signal: context.signal,
+          parseMode: 'HTML',
+        },
+      );
+    } else {
+      await context.channel.sendInlineKeyboard(event.chatId, report.html, buttons, {
+        signal: context.signal,
+        parseMode: 'HTML',
+      });
+    }
   } else {
     await context.channel.send(event.chatId, report.plain, { signal: context.signal });
   }
@@ -167,6 +193,7 @@ export function renderRemoteStatusReport(input: RemoteStatusReportInput): Remote
         : 'Idle';
   const problemLine = problems.length > 0 ? problems.join(' · ') : undefined;
   const budget = input.context;
+  const ring = budget ? contextRing(budget.used, budget.max) : undefined;
   const contextHtml =
     budget && budget.max > 0
       ? `<b>Context</b>\n<pre>${textBar(budget.used / budget.max, 16)}  ${Math.round((budget.used / budget.max) * 100)}%\n${formatTokensShort(budget.used)} of ${formatTokensShort(budget.max)} · ${formatTokensShort(Math.max(0, budget.max - budget.used))} left</pre>`
@@ -183,7 +210,7 @@ export function renderRemoteStatusReport(input: RemoteStatusReportInput): Remote
     ? 'Approvals: CLANKER — non-dangerous tools auto-approved'
     : `Approvals: gated · ${input.exchanges}`;
   const html = [
-    '<b>Status</b>',
+    `<b>Status</b>${ring ? ` · ${escapeTelegramHtml(ring)}` : ''}`,
     `<b>Workspace</b> ${escapeTelegramHtml(workspace)}`,
     `<b>Chat</b> ${escapeTelegramHtml(chat)}`,
     `<b>Model</b> ${escapeTelegramHtml(model)}`,
@@ -194,7 +221,7 @@ export function renderRemoteStatusReport(input: RemoteStatusReportInput): Remote
     approvalsHtml,
   ].join('\n');
   const plain = [
-    'Status',
+    `Status${ring ? ` · ${ring}` : ''}`,
     `Workspace ${workspace}`,
     `Chat ${chat}`,
     `Model ${model}`,

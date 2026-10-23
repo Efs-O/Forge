@@ -5,7 +5,8 @@ export type TelegramHelpCallback =
   | { action: 'menu' }
   | { action: 'section'; sectionKey: string };
 
-export function telegramHelpButton(): RemoteContactButton {
+/** Shared Close button for every Forge Telegram card. */
+export function telegramCloseButton(): RemoteContactButton {
   return { text: '✕ Close', callbackData: encodeHelpCallback('h:x') };
 }
 

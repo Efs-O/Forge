@@ -157,6 +157,7 @@ async function liveTurn(
     },
     answerQuestion,
     answerQuestionStructured,
+    contextBudget: () => undefined,
     skipQuestion: vi.fn(() => true),
     status: () => ({
       activeConversationId: 'c1',

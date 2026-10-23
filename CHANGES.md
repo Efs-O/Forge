@@ -1,5 +1,13 @@
 # Forge — Recent Changes
 
+## 0.17.70
+
+- Telegram shows how full the context is as a small filling ring and a percentage, for example `◔ 31%`, on the live status message while a turn runs and on the `/status` card's title line. The ring goes ○ ◔ ◑ ◕ ● as the context fills.
+- `/status`, `/context`, `/system`, `/agents`, `/queue`, `/jobs` and the job card now have a `✕ Close` button that deletes the card, like the one on `/help`. It stays when a card refreshes in place.
+- Error replies to commands, such as `unknown command`, a usage line or "no conversation is bound", now delete themselves after `remote.delete_command_replies_after` seconds, like other command replies. A rejected `/tell`, `/answer`, `/claude`, `/codex` or `/copilot` also deletes your command message. A refusal of a plain message (for example "the bound conversation is already running") is still kept, because it is the only sign your words were not delivered.
+- A command sent as `/tell@yourbot …`, the form some Telegram clients use for command links, now works like `/tell …` instead of replying `unknown command`.
+- The Forge output channel logs one line per Telegram update: the command word, or the text length, voice, media or button type, how late it arrived, and what Forge did with it. Message text and chat or sender ids are never logged. A reply that takes 3 seconds or more to send is logged with its time.
+
 ## 0.17.69
 
 - The Telegram `⏹ Stop` key under the message box is gone. It sat where the thumb lands when scrolling, so it was easy to press by accident. Stop is back as a button on the newest status message, as before 0.17.67, and is now nearly as wide as the screen: Forge pads the status message's last line with invisible blank characters (U+2800) so the message, and the button under it, spans the chat. The button moves to the newest message as the answer grows and disappears when the turn ends.

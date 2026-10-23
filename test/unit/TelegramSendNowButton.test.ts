@@ -11,6 +11,29 @@ import { RemoteInboundEventSchema } from '../../src/remote/remoteInboundSchema';
 const REQUEST_ID = 'abcdef12-abcd-4abc-8def-abcdefabcdef';
 
 describe('Telegram Send now receipt', () => {
+  it('arms transient deletion for command and callback rejections, but preserves plain prompt rejection', async () => {
+    const send = vi.fn(async () => ['reply']);
+    const ephemeral = vi.fn();
+    const base = {
+      channel: 'telegram' as const, providerMessageId: 'm', senderId: '42', chatId: '99',
+      chatType: 'private' as const, receivedAt: 1,
+    };
+    for (const event of [
+      { ...base, kind: 'text' as const, text: '/unknown' },
+      { ...base, kind: 'text' as const, text: 'unknown', callbackMessageId: 'card' },
+    ]) {
+      await acknowledgeTelegramDisposition(event, { kind: 'rejected', reason: 'unknown command' },
+        new AbortController().signal, send, vi.fn(), ephemeral);
+    }
+    await acknowledgeTelegramDisposition(
+      { ...base, kind: 'text', text: 'hello' },
+      { kind: 'rejected', reason: 'remote queue is full' },
+      new AbortController().signal, send, vi.fn(), ephemeral,
+    );
+    expect(ephemeral).toHaveBeenCalledTimes(2);
+    expect(ephemeral).toHaveBeenNthCalledWith(1, '99', ['reply'], 'transient');
+    expect(ephemeral).toHaveBeenNthCalledWith(2, '99', ['reply'], 'transient');
+  });
   it('parses only bounded UUID callbacks and maps them to an authenticated action event', () => {
     expect(parseTelegramSendNowCallback(`n:${REQUEST_ID}`)).toBe(REQUEST_ID);
     expect(parseTelegramSendNowCallback(`n:${REQUEST_ID}x`)).toBeUndefined();

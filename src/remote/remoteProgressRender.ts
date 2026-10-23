@@ -1,3 +1,5 @@
+import { contextRing } from './telegramReportFormat';
+
 export interface RemoteProgressRenderState {
   /** Set only while the turn is stuck on something that is not the model. */
   phase?: string;
@@ -6,6 +8,7 @@ export interface RemoteProgressRenderState {
   startedAt: number;
   lastActivityAt: number;
   toolCalls: number;
+  context?: { used: number; max: number };
 }
 
 /** What the footer says when nothing more specific is happening. */
@@ -36,7 +39,10 @@ export function renderProgressFooter(
   maximum: number,
   now: number,
 ): string {
-  const doing = [state.phase, state.milestone].filter(Boolean).join(' · ') || DEFAULT_STATUS;
+  const doing = [
+    [state.phase, state.milestone].filter(Boolean).join(' · ') || DEFAULT_STATUS,
+    ...(state.context ? [contextRing(state.context.used, state.context.max)].filter(Boolean) : []),
+  ].join(' · ');
   const calls = state.toolCalls === 1 ? '1 tool call' : `${state.toolCalls} tool calls`;
   const lines = [
     ...state.warnings.map((warning) => `⚠ ${warning}`),

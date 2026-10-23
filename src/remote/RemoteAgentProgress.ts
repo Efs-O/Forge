@@ -109,6 +109,9 @@ export class RemoteAgentProgress {
       delaySeconds: number,
     ) => void,
     private readonly clockIntervalMs = CLOCK_INTERVAL_MS,
+    private readonly contextBudget?: (
+      conversationId: string,
+    ) => { used: number; max: number } | undefined,
   ) {}
 
   updateMaxMessageChars(maxMessageChars: number): void {
@@ -143,7 +146,14 @@ export class RemoteAgentProgress {
         signal: this.signal,
         canDeliver: () => this.safeCanDeliver(chatId),
         maxChars: () => this.maxMessageChars,
-        footer: (maximum) => renderProgressFooter(state, maximum, Date.now()),
+        footer: (maximum) => {
+          const context = this.contextBudget?.(conversationId);
+          return renderProgressFooter(
+            { ...state, ...(context ? { context } : {}) },
+            maximum,
+            Date.now(),
+          );
+        },
         intervalMs: this.editIntervalMs,
         report: (err) => this.report(err),
       },

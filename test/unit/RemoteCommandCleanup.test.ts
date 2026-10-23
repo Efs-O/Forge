@@ -170,6 +170,41 @@ describe('RemoteController command auto-cleanup', () => {
     }
   });
 
+  it('deletes a rejected typed /tell but keeps an accepted /tell as the note', async () => {
+    vi.useFakeTimers();
+    const noTarget = await buildController(5);
+    try {
+      expect(await noTarget.controller.handle(textEvent('/tell codex hi'))).toMatchObject({
+        kind: 'rejected',
+      });
+      await vi.advanceTimersByTimeAsync(5_000);
+      expect(noTarget.channel.deleted).toEqual([{ chatId: 'chat', messageId: 'msg-1' }]);
+    } finally {
+      await noTarget.controller.stop();
+    }
+
+    const bound = await buildController(5, {
+      getAgentLink: () => undefined,
+      status: () => ({
+        activeConversationId: 'c1',
+        conversations: [{ id: 'c1', title: 'Remote' }],
+        requestChains: [], streamingConversationIds: [], pendingApproval: undefined,
+      }),
+    });
+    try {
+      await bound.controller['store'].setBinding({
+        channel: 'fake', chatId: 'chat', workspaceId: 'workspace', conversationId: 'c1',
+      });
+      expect(await bound.controller.handle(textEvent('/tell codex hi'))).toMatchObject({
+        kind: 'accepted',
+      });
+      await vi.advanceTimersByTimeAsync(60_000);
+      expect(bound.channel.deleted).toEqual([]);
+    } finally {
+      await bound.controller.stop();
+    }
+  });
+
   it('deletes the inline /lock command after the delay', async () => {
     vi.useFakeTimers();
     const { channel, controller, auth } = await buildController(5);

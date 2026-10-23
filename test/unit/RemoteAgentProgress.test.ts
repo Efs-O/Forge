@@ -326,6 +326,25 @@ describe('RemoteAgentProgress', () => {
     expect(truncated).toContain('1 min · 2 tool calls · active 1 min ago');
   });
 
+  it('reads the current context budget every time the footer is rendered', async () => {
+    vi.useFakeTimers();
+    let budget = { used: 31, max: 100 };
+    const channel = new FakeRemoteChannel();
+    const progress = new RemoteAgentProgress(
+      channel, new AbortController().signal, () => true, 3_900, 100,
+      undefined, undefined, 1_000, () => budget,
+    );
+    progress.begin('c1', 'chat-a', 'message-1');
+    progress.handle({ conversationId: 'c1', kind: 'status', text: 'Working…' });
+    await vi.advanceTimersByTimeAsync(100);
+    expect(channel.edits.at(-1)?.text).toContain('⏳ Working… · ◔ 31%');
+    budget = { used: 63, max: 100 };
+    progress.handle({ conversationId: 'c1', kind: 'status', text: 'Still working…' });
+    await vi.advanceTimersByTimeAsync(100);
+    expect(channel.edits.at(-1)?.text).toContain('⏳ Still working… · ◕ 63%');
+    await progress.dispose();
+  });
+
   it('counts every tool and treats reasoning as activity only', async () => {
     vi.useFakeTimers();
     vi.setSystemTime(0);

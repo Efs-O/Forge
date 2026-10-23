@@ -2,6 +2,7 @@ import type { JobFile } from '../jobs/jobSchema';
 import { describeSchedule, formatWhen } from '../jobs/jobDescribe';
 import { escapeTelegramHtml } from './telegramHtml';
 import { telegramJobButton } from './TelegramJobButtons';
+import { telegramCloseButton } from './TelegramHelpButtons';
 
 export interface RemoteJobReport {
   html: string;
@@ -40,6 +41,7 @@ export function renderRemoteJobList(all: readonly JobFile[], now = new Date()): 
   for (let offset = 0; offset < lines.length; offset += 5) {
     buttons.push(lines.slice(offset, offset + 5).map((line) => line.button));
   }
+  buttons.push([telegramCloseButton()]);
   return {
     html: `<b>Jobs</b> <i>· ${all.length}</i>\n\n${
       lines.length
@@ -94,6 +96,7 @@ export function renderRemoteJobCard(
       telegramJobButton('‹ Jobs', index, job.id, 'l'),
     ],
   ];
+  buttons.push([telegramCloseButton()]);
   return {
     html: `<b>${escapeTelegramHtml(clip(job.name, 120))}</b>\n<pre>${escapeTelegramHtml(details)}</pre>${observation}`,
     plain: `${clip(job.name, 120)}\n${details}${state.last_observation ? `\n\nLast observation\n${state.last_observation}` : ''}`,

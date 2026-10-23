@@ -1,4 +1,4 @@
-import { telegramHelpButton, telegramHelpMenuButton } from './TelegramHelpButtons';
+import { telegramCloseButton, telegramHelpMenuButton } from './TelegramHelpButtons';
 import { renderRemoteHelpMenu, renderRemoteHelpSection } from './remoteHelpText';
 import type { RemoteContactButton, RemoteInboundDisposition, RemoteInboundEvent } from './types';
 
@@ -41,7 +41,7 @@ export class TelegramHelpMessages {
     await this.transport.sendInlineKeyboard(
       chatId,
       text,
-      options?.buttons ?? [[telegramHelpButton()]],
+      options?.buttons ?? [[telegramCloseButton()]],
       options,
     );
   }
@@ -75,7 +75,7 @@ export class TelegramHelpMessages {
     const section = event.sectionKey ? renderRemoteHelpSection(event.sectionKey) : undefined;
     if (!section) return { kind: 'rejected', reason: 'help section is unavailable' };
     const sectionName = event.sectionKey;
-    const buttons = [[telegramHelpMenuButton(), telegramHelpButton()]];
+    const buttons = [[telegramHelpMenuButton(), telegramCloseButton()]];
     try {
       await this.transport.editInlineKeyboardMessage(
         event.chatId,

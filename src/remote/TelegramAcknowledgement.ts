@@ -84,7 +84,12 @@ export async function acknowledgeTelegramDisposition(
   });
   if (messageIds.length > 0) {
     if (disposition.kind === 'queued') onEphemeral?.(event.chatId, messageIds, 'queued');
-    else if (disposition.kind === 'rejected' && disposition.ephemeral) {
+    else if (
+      disposition.kind === 'rejected' &&
+      (disposition.ephemeral ||
+        (event.kind === 'text' &&
+          (event.callbackMessageId !== undefined || event.text.trim().startsWith('/'))))
+    ) {
       onEphemeral?.(event.chatId, messageIds, 'transient');
     }
   }

@@ -272,3 +272,14 @@ describe('Telegram inbound mapping — replies', () => {
     expect(plain).not.toHaveProperty('replyToMessageId');
   });
 });
+
+describe('Telegram inbound mapping — command suffix', () => {
+  it('strips a bot suffix from a leading command only', () => {
+    expect(telegramUpdateToEvent(TelegramUpdateSchema.parse(message({ text: '/tell@forge_bot codex hi' }))))
+      .toMatchObject({ kind: 'text', text: '/tell codex hi' });
+    expect(telegramUpdateToEvent(TelegramUpdateSchema.parse(message({ text: '/status@forge_bot' }))))
+      .toMatchObject({ kind: 'text', text: '/status' });
+    expect(telegramUpdateToEvent(TelegramUpdateSchema.parse(message({ text: 'hello @someone' }))))
+      .toMatchObject({ kind: 'text', text: 'hello @someone' });
+  });
+});
