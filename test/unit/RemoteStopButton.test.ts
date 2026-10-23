@@ -191,9 +191,12 @@ async function liveTurn(
     cancel,
     release,
     emitProgress: (event) => progressListener?.(event),
+    // 5 s, not waitFor's 1 s default: a loaded CI runner missed the final edit
+    // by the default deadline (ubuntu-latest, 2026-10-23). It returns as soon as it lands.
     drainDone: () =>
-      vi.waitFor(() =>
-        expect(channel.edits.map((edit) => edit.text)).toContain('Forge: cancelled.'),
+      vi.waitFor(
+        () => expect(channel.edits.map((edit) => edit.text)).toContain('Forge: cancelled.'),
+        { timeout: 5_000 },
       ),
     askQuestion: (event) => ask(event),
     answerQuestion,
