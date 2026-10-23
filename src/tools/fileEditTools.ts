@@ -226,7 +226,7 @@ export function makeDeleteFileTool(extraRoots: () => readonly string[] = () => [
             });
           } catch (err) {
             const reason = err instanceof Error ? err.message : String(err);
-            const diagnosis = diagnoseTrashRefusal(resolved);
+            const diagnosis = await diagnoseTrashRefusal(resolved);
             rememberTrashRefusal(resolved, diagnosis);
             throw new Error(
               `could not move it to the recycle bin: ${reason}. ${diagnosis} ` +

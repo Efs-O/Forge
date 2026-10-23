@@ -1,8 +1,14 @@
 # Forge — Recent Changes
 
-## 0.17.70
+## 0.17.71
 
 - Session logs record each agent-loop request's server timings and client stream measurements. Optional `record_requests` dumps preserve the exact request body with a size cap and expiry; they are off unless enabled in config.
+- A `delete_file` that moves to the recycle bin is no longer a dangerous action: `/clanker` and unattended runs allow it, recursive or not. Only a permanent delete (`to_trash: false`) still asks, and unattended runs still refuse it.
+- New `permissions.approval_timeout_minutes`: an approval nobody answers in that time is not run, the agent is told to finish the rest and list it as not done, and the rest of that turn's approvals in the conversation are skipped the same way. Absent, approvals wait as before. The sidebar card closes and the Telegram card is edited to say it was not run.
+- When the recycle bin refuses a move, `delete_file` says why: it counts paths of 260+ characters and names the longest, mentions network or WSL only for UNC paths, and otherwise says the cause is unknown with the common ones. The permanent-delete approval card shows the same reason for an hour.
+
+## 0.17.70
+
 - Telegram shows how full the context is as a small filling ring and a percentage, for example `◔ 31%`, on the live status message while a turn runs and on the `/status` card's title line. The ring goes ○ ◔ ◑ ◕ ● as the context fills.
 - `/status`, `/context`, `/system`, `/agents`, `/queue`, `/jobs` and the job card now have a `✕ Close` button that deletes the card, like the one on `/help`. It stays when a card refreshes in place.
 - Error replies to commands, such as `unknown command`, a usage line or "no conversation is bound", now delete themselves after `remote.delete_command_replies_after` seconds, like other command replies. A rejected `/tell`, `/answer`, `/claude`, `/codex` or `/copilot` also deletes your command message. A refusal of a plain message (for example "the bound conversation is already running") is still kept, because it is the only sign your words were not delivered.

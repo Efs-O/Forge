@@ -27,11 +27,12 @@ function extendedPath(targetPath: string): string {
 afterEach(() => {
   vi.useRealTimers();
   clearTrashRefusals();
-  for (const root of temporaryRoots.splice(0)) fs.rmSync(extendedPath(root), { recursive: true, force: true });
+  for (const root of temporaryRoots.splice(0))
+    fs.rmSync(extendedPath(root), { recursive: true, force: true });
 });
 
 describe('recycle-bin refusal diagnosis', () => {
-  it('finds long paths and reports their count and longest relative path', () => {
+  it('finds long paths and reports their count and longest relative path', async () => {
     const root = makeTempRoot();
     let directory = path.join(root, 'long');
     for (let index = 0; index < 10; index++) {
@@ -41,16 +42,16 @@ describe('recycle-bin refusal diagnosis', () => {
     const target = path.join(directory, 'trajectory.json');
     fs.writeFileSync(extendedPath(target), '{}');
 
-    const diagnosis = diagnoseTrashRefusal(path.join(root, 'long'));
+    const diagnosis = await diagnoseTrashRefusal(path.join(root, 'long'));
 
     expect(diagnosis).toMatch(/Found \d+ paths of 260\+ characters/u);
     expect(diagnosis).toMatch(/longest \d+: .*trajectory\.json/u);
   });
 
-  it('mentions network or WSL only for UNC paths and names common unknown causes', () => {
+  it('mentions network or WSL only for UNC paths and names common unknown causes', async () => {
     const readDirectory = (): fs.Dirent[] => [];
-    const local = diagnoseTrashRefusal('N:\\workspace\\results', { readDirectory });
-    const unc = diagnoseTrashRefusal('\\\\wsl.localhost\\Ubuntu\\home\\results', {
+    const local = await diagnoseTrashRefusal('N:\\workspace\\results', { readDirectory });
+    const unc = await diagnoseTrashRefusal('\\\\wsl.localhost\\Ubuntu\\home\\results', {
       readDirectory,
     });
 
@@ -61,19 +62,21 @@ describe('recycle-bin refusal diagnosis', () => {
     expect(unc).toContain('UNC network/WSL path');
   });
 
-  it('reports when the bounded walk reaches its entry cap', () => {
+  it('reports when the bounded walk reaches its entry cap', async () => {
     const root = makeTempRoot();
     for (const name of ['one', 'two', 'three']) fs.writeFileSync(path.join(root, name), 'x');
 
-    expect(diagnoseTrashRefusal(root, { entryLimit: 2 })).toContain('Checked the first 2 entries.');
+    expect(await diagnoseTrashRefusal(root, { entryLimit: 2 })).toContain(
+      'Checked the first 2 entries.',
+    );
   });
 
-  it('reports when the bounded walk reaches its time limit', () => {
+  it('reports when the bounded walk reaches its time limit', async () => {
     const root = makeTempRoot();
     fs.writeFileSync(path.join(root, 'one'), 'x');
     let now = 0;
 
-    expect(diagnoseTrashRefusal(root, { timeLimitMs: 2, now: () => now++ })).toContain(
+    expect(await diagnoseTrashRefusal(root, { timeLimitMs: 2, now: () => now++ })).toContain(
       'Stopped after 2 ms.',
     );
   });

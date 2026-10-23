@@ -17,7 +17,7 @@ export interface TrashRefusalScanOptions {
   entryLimit?: number;
   timeLimitMs?: number;
   now?: () => number;
-  readDirectory?: (directory: string) => fs.Dirent[];
+  readDirectory?: (directory: string) => fs.Dirent[] | Promise<fs.Dirent[]>;
 }
 
 const refusals = new Map<string, CachedRefusal>();
@@ -52,18 +52,19 @@ function extendedPath(targetPath: string): string {
 
 /**
  * Inspect a refused recycle-bin target and return only facts Forge can check.
- * This runs only on the failure path; successful trash moves never walk the tree.
+ * This runs only on the failure path; successful trash moves never walk the tree. The walk is
+ * async so a slow drive cannot block the extension host for the whole time limit.
  */
-export function diagnoseTrashRefusal(
+export async function diagnoseTrashRefusal(
   targetPath: string,
   options: TrashRefusalScanOptions = {},
-): string {
+): Promise<string> {
   const entryLimit = options.entryLimit ?? DEFAULT_ENTRY_LIMIT;
   const timeLimitMs = options.timeLimitMs ?? DEFAULT_TIME_LIMIT_MS;
   const now = options.now ?? Date.now;
   const readDirectory =
     options.readDirectory ??
-    ((directory: string) => fs.readdirSync(extendedPath(directory), { withFileTypes: true }));
+    ((directory: string) => fs.promises.readdir(extendedPath(directory), { withFileTypes: true }));
   const startedAt = now();
   const root = path.resolve(targetPath);
   const pending = [root];
@@ -95,7 +96,7 @@ export function diagnoseTrashRefusal(
     if (!directory) break;
     let entries: fs.Dirent[];
     try {
-      entries = readDirectory(directory);
+      entries = await readDirectory(directory);
     } catch (error) {
       scanErrorCount++;
       if (scanErrors.length < 3)
