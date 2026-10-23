@@ -22,6 +22,13 @@ export interface PromptCacheStats {
   hitRate: number;
 }
 
+/** The provider's raw cache count, shared by UI reporting and request logs. */
+export function readCachedPromptTokens(usage: unknown): number | undefined {
+  if (typeof usage !== 'object' || usage === null) return undefined;
+  const details = (usage as Record<string, unknown>)['prompt_tokens_details'];
+  return readNumber(details, 'cached_tokens');
+}
+
 /** The `usage` shape is provider-defined, so every field is probed, not typed. */
 function readNumber(source: unknown, key: string): number | undefined {
   if (typeof source !== 'object' || source === null) return undefined;
@@ -38,8 +45,7 @@ export function readPromptCacheStats(usage: unknown): PromptCacheStats | undefin
   const promptTokens = readNumber(usage, 'prompt_tokens');
   if (promptTokens === undefined) return undefined;
 
-  const details = (usage as Record<string, unknown>)['prompt_tokens_details'];
-  const cachedTokens = readNumber(details, 'cached_tokens');
+  const cachedTokens = readCachedPromptTokens(usage);
   if (cachedTokens === undefined) return undefined;
 
   // Clamped: a provider reporting cached > prompt would otherwise produce a

@@ -32,6 +32,7 @@ import type { AgentProgressEvent } from './AgentProgress';
 import type { LiveStreamMeter } from './LiveStreamMeter';
 import type { CheckinStage } from '../agent/elapsedTimeNote';
 import type { RequestOfferedListener } from '../sessions/requestFingerprint';
+import type { RequestCapture } from '../sessions/requestStats';
 
 export interface TurnServices {
   pool: IBackendPool;
@@ -56,6 +57,7 @@ export interface TurnServices {
   onContextChanged: (convId: string) => void;
   onUsage: (conv: ConversationRuntime, inputTokens: number, outputTokens: number) => void;
   onToolsOffered?: RequestOfferedListener;
+  onRequestStats?: (conversationId: string, capture: RequestCapture) => void;
   /** Persists a transcript mutation immediately, including an in-flight turn. */
   onTranscriptChanged: (conv: ConversationRuntime) => void;
   /** Streamed-so-far estimate per conversation, for the status bar. */

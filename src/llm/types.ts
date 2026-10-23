@@ -97,6 +97,8 @@ export interface StreamChunk {
     delta: ChatDelta;
     finish_reason: string | null;
   }>;
+  /** Server-side prompt/generation timings, when the provider reports them. */
+  timings?: unknown;
   /** Present in the final stream frame when stream_options.include_usage is enabled. */
   usage?: {
     prompt_tokens: number;

@@ -931,6 +931,14 @@ auto_compact:
   at: 0.85
   resume: true
 
+# Off unless this block is present and enabled. Dumps contain complete model
+# request bodies (messages and tool schemas); authorization headers are never
+# recorded. Expired files are removed on extension activation.
+# record_requests:
+#   enabled: true
+#   max_mb: 500
+#   keep_hours: 24
+
 # DuckDuckGo needs no API key. Store the fallback provider's key with
 # "Forge: Set Search API Key"; keys remain in VS Code SecretStorage.
 search:

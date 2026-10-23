@@ -202,6 +202,8 @@ export interface ForgeConfig {
    *  none. Absent block = off: no tool, no note, no schema tokens. 5–240;
    *  read live at every drain, so removing it stops the note mid-task. */
   elapsed_time_note?: { after_minutes: number };
+  /** Exact agent-loop request bodies, retained only when explicitly enabled. */
+  record_requests?: { enabled: boolean; max_mb: number; keep_hours: number };
   /** Optional localhost model-control API so an external orchestrator can ask
    *  Forge to load the right model on demand and discover its endpoint. */
   control_server?: {

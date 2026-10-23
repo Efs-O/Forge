@@ -35,9 +35,7 @@ import { extractToolDetail } from './toolSummary';
 import { freezeTurnContextAndConsumeResumeNote, type TurnContextState } from './turnContext';
 import { formatCompactionResumeNote } from './compactionTypes';
 import { terminalCommandTracker } from '../tools/TerminalCommandTracker';
-import { formatPromptCacheStats, readPromptCacheStats } from '../llm/promptCacheStats';
 import { toolOutputLimits } from '../tools/toolOutputLimits';
-import { getLogger } from '../util/logger';
 import { localDate } from '../util/localClock';
 import { buildVisionRefusals } from './visionGate';
 import { unattendedConversations, withUnattendedRefusals } from './unattendedConversations';
@@ -54,8 +52,8 @@ import type { LiveStreamMeter } from './LiveStreamMeter';
 import { writeChunkLimit } from '../tools/writeChunking';
 import { toolCallProgressMsg } from './toolCallProgress';
 import type { RequestOfferedListener } from '../sessions/requestFingerprint';
-
-const log = getLogger();
+import type { RequestCapture } from '../sessions/requestStats';
+import { reportRequestUsage } from './requestUsageReporting';
 
 function activeTerminalCwd(): string | undefined {
   const cwd = vscode.window.activeTerminal?.shellIntegration?.cwd;
@@ -98,6 +96,7 @@ export interface ModelTurnContext {
   onContextChanged?: (convId: string) => void;
   onUsage?: (conv: ConversationRuntime, inputTokens: number, outputTokens: number) => void;
   onToolsOffered?: RequestOfferedListener;
+  onRequestStats?: (conversationId: string, capture: RequestCapture) => void;
   onTranscriptChanged?: (conv: ConversationRuntime) => void;
   emitAgentProgress: (event: AgentProgressEvent) => void;
   streamMeter?: LiveStreamMeter;
@@ -288,6 +287,7 @@ export async function runModelTurn(
       messages: conv.messages,
       getToolDefinitions: buildToolDefinitions,
       onToolsOffered: (names, fingerprint) => ctx.onToolsOffered?.(conv.id, names, fingerprint),
+      onRequestStats: (capture) => ctx.onRequestStats?.(conv.id, capture),
       signal: ctrl.signal,
       maxRounds,
       writeChunkLimit: writeLimit,
@@ -412,20 +412,15 @@ export async function runModelTurn(
           `Forge: llama-server rejected this model's native tool-call JSON. Retrying with Forge's JSON fallback tool format.`,
         ),
       onUsage: (usage, request) => {
-        // The server's own slot counters, covering prompt evaluation and
-        // generation including hidden thinking. Every context display reads
-        // what this writes, so publish the bar from here: an agentic turn
-        // reports usage once per round and the bar stays live mid-turn.
-        ctx.onUsage?.(conv, usage.prompt_tokens, usage.completion_tokens);
-        ctx.streamMeter?.reset(conv.id);
-        outputBudget.onUsage(usage, request);
-        ctx.onContextChanged?.(conv.id);
-        // How much of the prompt llama-server served from its KV cache. A turn
-        // that only grew should sit in the high 90s; a drop to 0 means
-        // something rewrote the prompt head. Debug-level and contents-free --
-        // this fires on every round of every turn.
-        const cache = readPromptCacheStats(usage);
-        if (cache) log.debug(formatPromptCacheStats(cache));
+        reportRequestUsage({
+          conv,
+          usage,
+          request,
+          outputBudget,
+          onUsage: ctx.onUsage,
+          streamMeter: ctx.streamMeter,
+          onContextChanged: ctx.onContextChanged,
+        });
       },
       // A status line, not an error: the turn continues and the model is being
       // asked for the same write in chunks.

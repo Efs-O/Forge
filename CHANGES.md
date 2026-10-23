@@ -2,6 +2,7 @@
 
 ## 0.17.70
 
+- Session logs record each agent-loop request's server timings and client stream measurements. Optional `record_requests` dumps preserve the exact request body with a size cap and expiry; they are off unless enabled in config.
 - Telegram shows how full the context is as a small filling ring and a percentage, for example `◔ 31%`, on the live status message while a turn runs and on the `/status` card's title line. The ring goes ○ ◔ ◑ ◕ ● as the context fills.
 - `/status`, `/context`, `/system`, `/agents`, `/queue`, `/jobs` and the job card now have a `✕ Close` button that deletes the card, like the one on `/help`. It stays when a card refreshes in place.
 - Error replies to commands, such as `unknown command`, a usage line or "no conversation is bound", now delete themselves after `remote.delete_command_replies_after` seconds, like other command replies. A rejected `/tell`, `/answer`, `/claude`, `/codex` or `/copilot` also deletes your command message. A refusal of a plain message (for example "the bound conversation is already running") is still kept, because it is the only sign your words were not delivered.

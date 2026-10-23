@@ -60,6 +60,7 @@ import type { RemoteRuntime } from './remote/RemoteRuntime';
 import { workspaceIdFor } from './remote/RemoteWorkspaceHandoff';
 import { setupJobs } from './vscode/jobsSetup';
 import { JobStore } from './jobs/JobStore';
+import { pruneRequestDumps, requestDumpsDirectory } from './sessions/requestDump';
 
 let activeRemoteRuntime: RemoteRuntime | undefined;
 const EXTERNAL_LIFECYCLE_LEASE_KEY = 'external-model-stop-on-exit';
@@ -100,6 +101,14 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
 
   // ── Find or create config ─────────────────────────────────────────────────
   const bootstrapped = bootstrapConfig(context, statusBar, storagePath);
+  const pruneOptions = bootstrapped?.config.record_requests
+    ? { maxBytes: bootstrapped.config.record_requests.max_mb * 1024 * 1024 }
+    : {};
+  void pruneRequestDumps(requestDumpsDirectory(), pruneOptions).catch((error: unknown) =>
+    log.warn(
+      `[requestDump] activation prune failed: ${error instanceof Error ? error.message : String(error)}`,
+    ),
+  );
   if (!bootstrapped) return;
   const activeConfigPath = bootstrapped.configPath;
   let config: ForgeConfig = bootstrapped.config;

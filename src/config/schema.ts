@@ -215,6 +215,13 @@ export const ForgeConfigSchema = z
         after_minutes: z.number().int().min(5).max(240),
       })
       .optional(),
+    record_requests: z
+      .object({
+        enabled: z.boolean(),
+        max_mb: z.number().int().min(1).max(10_000),
+        keep_hours: z.number().int().min(1).max(720),
+      })
+      .optional(),
     control_server: z
       .object({
         enabled: z.boolean().optional(),

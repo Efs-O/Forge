@@ -4,6 +4,7 @@ import type { ChatMessage, ToolCall, ToolDefinition } from '../llm/types';
 import type { ToolResultContextResult } from './toolResultContext';
 import type { OutputRoomBudget, PromptRequestSnapshot } from '../util/contextBudget';
 import type { RequestFingerprint } from '../sessions/requestFingerprint';
+import type { RequestStatsHandler } from '../sessions/requestStats';
 
 /** Inputs and outputs shared by the tool-calling loop and its turn adapter. */
 export interface ToolCallingLoopOptions {
@@ -45,6 +46,8 @@ export interface ToolCallingLoopOptions {
    * with the request's head as hashes (see requestFingerprint.ts).
    */
   onToolsOffered?: (names: readonly string[], fingerprint: RequestFingerprint) => void;
+  /** Finished client-side measurements and the exact serialized request body. */
+  onRequestStats?: RequestStatsHandler;
   /** Finished narration for a round that calls tools. */
   onRoundNarration?: (text: string) => void;
   /** Request exact provider usage in the final stream frame. */

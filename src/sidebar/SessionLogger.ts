@@ -4,6 +4,11 @@ import * as path from 'path';
 import { createHash } from 'crypto';
 import type { ChatMessage } from '../llm/types';
 import { requestPrefixRow, type RequestFingerprint } from '../sessions/requestFingerprint';
+import {
+  requestStatsRow,
+  type RequestStatsInput,
+  type RequestStatsRow,
+} from '../sessions/requestStats';
 import type { ForgeTurnEndKind } from './turnOutcome';
 import type { CompactionAttemptLogEntry, CompactionLogEntry } from './compactionLogTypes';
 import {
@@ -262,6 +267,14 @@ export class SessionLogger {
       model,
     });
     this.lastRequestFingerprint = fingerprint;
+  }
+
+  /** One numbers-only completion row for each request-prefix row. */
+  logRequestStats(stats: RequestStatsInput, model: string): RequestStatsRow {
+    this.ensureHeader(model);
+    const row = requestStatsRow(stats, model, Date.now());
+    this.append({ ...row });
+    return row;
   }
 
   /**

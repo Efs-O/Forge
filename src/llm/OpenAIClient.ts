@@ -1,4 +1,4 @@
-import type { ChatCompletionRequest, ChatMessage, StreamChunk, ToolCall } from './types';
+import type { ChatCompletionRequest, StreamChunk, ToolCall } from './types';
 import {
   ToolCallTruncatedError,
   argumentsAreIncomplete,
@@ -10,19 +10,15 @@ import { getLogger } from '../util/logger';
 import { withDescribedCause } from '../util/describeError';
 import { StreamWatchdog } from './streamWatchdog';
 import { createStallProbe } from './stallProbe';
+import { toWireRequest } from './wireRequest';
+import {
+  createRequestClientClock,
+  createRequestStatsReporter,
+  type RequestStatsHandler,
+} from '../sessions/requestStats';
 
 const log = getLogger();
 let requestSequence = 0;
-const MID_TURN_WIRE_LABEL =
-  '[Sent by the user while you were working. If it changes the task, adjust; otherwise acknowledge it in one line and continue.]';
-
-export function wireMessageContent(
-  message: Pick<ChatMessage, 'content' | 'midTurn'>,
-): ChatMessage['content'] {
-  if (!message.midTurn || typeof message.content !== 'string') return message.content;
-  return `${MID_TURN_WIRE_LABEL}\n\n${message.content}`;
-}
-
 function requestTarget(baseUrl: string): string {
   try {
     return new URL(baseUrl).host;
@@ -53,28 +49,6 @@ function messageStats(request: ChatCompletionRequest): {
   return { chars, imageParts, toolCalls };
 }
 
-/**
- * Reduce a ChatMessage to the fields the OpenAI chat-completions wire format
- * defines. `ChatMessage` also carries sidebar-only bookkeeping — `reasoning`,
- * `reasoningMs`, `toolMs`, `internal` — that Forge persists for its own UI and
- * agent loop but must never send upstream. llama-server and Ollama silently
- * drop unknown fields; strict validators (Cerebras) reject the whole request
- * with `wrong_api_format`, e.g. `messages.2.assistant.reasoningMs: property ...
- * is unsupported`. Whitelisting the wire fields keeps every provider happy.
- */
-function toWireMessage(message: ChatMessage): ChatMessage {
-  const wire: ChatMessage = { role: message.role, content: wireMessageContent(message) };
-  if (message.tool_call_id !== undefined) wire.tool_call_id = message.tool_call_id;
-  if (message.name !== undefined) wire.name = message.name;
-  if (message.tool_calls !== undefined) wire.tool_calls = message.tool_calls;
-  if (message.reasoning_content !== undefined) wire.reasoning_content = message.reasoning_content;
-  return wire;
-}
-
-export function toWireRequest(request: ChatCompletionRequest): ChatCompletionRequest {
-  return { ...request, messages: request.messages.map(toWireMessage) };
-}
-
 type TokenHandler = (token: string) => void;
 type ReasoningHandler = (token: string) => void;
 type DoneHandler = (finishReason: string | null) => void;
@@ -102,6 +76,8 @@ export interface StreamHandlers {
   onToolCallProgress?: ToolCallProgressHandler;
   /** Exact usage emitted by servers when stream_options.include_usage is enabled. */
   onUsage?: UsageHandler;
+  /** Numbers-only request stats plus the exact body already sent to fetch. */
+  onRequestStats?: RequestStatsHandler;
 }
 
 /** Some servers (including some Ollama OpenAI-compat paths) emit `finish_reason: ""` on interim chunks — must not terminate the stream. */
@@ -134,6 +110,8 @@ export async function streamChatCompletion(
   const startedAt = Date.now();
   const stats = messageStats(request);
   const target = requestTarget(baseUrl);
+  const requestUrl = `${baseUrl}/v1/chat/completions`;
+  const requestBody = JSON.stringify(toWireRequest(request));
   log.info(
     `[OpenAIClient] request start id=${requestId} target=${target} model=${request.model} ` +
       `messages=${request.messages.length} message_chars=${stats.chars} ` +
@@ -150,11 +128,37 @@ export async function streamChatCompletion(
   }, 15_000);
   const headers: Record<string, string> = { 'Content-Type': 'application/json' };
   if (apiKey) headers['Authorization'] = `Bearer ${apiKey}`;
+  const sentAtMs = Date.now();
+  const clientClock = createRequestClientClock();
+  let terminalFinishReason: string | null = null;
+  const reporter = createRequestStatsReporter({
+    body: requestBody,
+    url: requestUrl,
+    model: request.model,
+    sentAtMs,
+    clientClock,
+    handler: handlers.onRequestStats,
+    isAborted: () => Boolean(signal?.aborted),
+    onCallbackError: (error) =>
+      log.warn(
+        `[OpenAIClient] request stats callback failed id=${requestId}: ` +
+          `${error instanceof Error ? error.message : String(error)}`,
+      ),
+  });
+  const complete = (finishReason: string | null): void => {
+    if (finishReason) terminalFinishReason = finishReason;
+    reporter.complete(finishReason);
+    handlers.onDone(finishReason);
+  };
+  const fail = (error: Error): void => {
+    reporter.fail(error);
+    handlers.onError(error);
+  };
   try {
-    response = await fetchImpl(`${baseUrl}/v1/chat/completions`, {
+    response = await fetchImpl(requestUrl, {
       method: 'POST',
       headers,
-      body: JSON.stringify(toWireRequest(request)),
+      body: requestBody,
       signal: signal ?? null,
     });
   } catch (err) {
@@ -163,14 +167,14 @@ export async function streamChatCompletion(
       log.info(
         `[OpenAIClient] request aborted id=${requestId} elapsed_ms=${Date.now() - startedAt}`,
       );
-      handlers.onDone('cancelled');
+      complete('cancelled');
     } else {
       log.error(
         `[OpenAIClient] request transport failure id=${requestId} ` +
           `elapsed_ms=${Date.now() - startedAt}`,
         err,
       );
-      handlers.onError(withDescribedCause(err));
+      fail(withDescribedCause(err));
     }
     return;
   }
@@ -193,7 +197,7 @@ export async function streamChatCompletion(
     // deciding the model cannot do native tool calls.
     if (isTruncationParseError(body)) {
       const column = parseErrorColumn(body);
-      handlers.onError(
+      fail(
         new ToolCallTruncatedError({
           finishReason: 'length',
           ...(column !== undefined ? { approxBytes: column } : {}),
@@ -204,23 +208,22 @@ export async function streamChatCompletion(
     }
     // Same server, same 500, different cause: no mmproj. Nothing to retry.
     if (isImageUnsupportedError(body)) {
-      handlers.onError(new Error(imageUnsupportedMessage(request.model, response.status)));
+      fail(new Error(imageUnsupportedMessage(request.model, response.status)));
       return;
     }
-    handlers.onError(new Error(msg));
+    fail(new Error(msg));
     return;
   }
 
   if (!response.body) {
     log.error(`[OpenAIClient] response body missing id=${requestId}`);
-    handlers.onError(new Error('Response body is null'));
+    fail(new Error('Response body is null'));
     return;
   }
 
   const reader = response.body.getReader();
   const decoder = new TextDecoder();
   let buffer = '';
-  let terminalFinishReason: string | null = null;
   let toolCallsFlushed = false;
   let readCount = 0;
   let sseFrameCount = 0;
@@ -239,7 +242,7 @@ export async function streamChatCompletion(
     startedAt,
     streamSummary,
     () => void reader.cancel().catch(() => undefined),
-    (err) => handlers.onError(err),
+    fail,
     createStallProbe(baseUrl, fetchImpl),
   );
   // key = index, accumulates partial tool call fragments
@@ -288,6 +291,7 @@ export async function streamChatCompletion(
     while (true) {
       const { done, value } = await reader.read();
       if (done) break;
+      if (value.byteLength > 0) clientClock.firstByte();
       readCount += 1;
       bytesRead += value.byteLength;
       watchdog.activity();
@@ -306,12 +310,13 @@ export async function streamChatCompletion(
 
         const data = trimmed.slice(isErrorLine ? 6 : 5).trim();
         sseFrameCount += 1;
+        clientClock.chunk();
         if (data === '[DONE]') {
           // Some backends (notably Ollama OpenAI-compat) end streams here without a prior
           // finish_reason chunk carrying tool_calls — flush any accumulated deltas first.
           flushAccumulatedToolCalls();
           log.info(`[OpenAIClient] stream done ${streamSummary()}`);
-          handlers.onDone(terminalFinishReason);
+          complete(terminalFinishReason);
           return;
         }
 
@@ -330,7 +335,7 @@ export async function streamChatCompletion(
           log.error(`[OpenAIClient] stream error frame ${streamSummary()} — ${detail}`);
           if (isTruncationParseError(detail)) {
             const column = parseErrorColumn(detail);
-            handlers.onError(
+            fail(
               new ToolCallTruncatedError({
                 finishReason: 'length',
                 ...(column !== undefined ? { approxBytes: column } : {}),
@@ -339,14 +344,16 @@ export async function streamChatCompletion(
             );
           } else if (isImageUnsupportedError(detail)) {
             // No status: the stream is already HTTP 200 and the frame carries none.
-            handlers.onError(new Error(imageUnsupportedMessage(request.model)));
+            fail(new Error(imageUnsupportedMessage(request.model)));
           } else {
-            handlers.onError(new Error(detail));
+            fail(new Error(detail));
           }
           return;
         }
 
         const usage = chunk.usage;
+        if (usage !== undefined) reporter.setUsage(usage);
+        if (chunk.timings !== undefined) reporter.setTimings(chunk.timings);
         if (
           usage &&
           Number.isFinite(usage.prompt_tokens) &&
@@ -363,6 +370,7 @@ export async function streamChatCompletion(
         const content = delta?.content;
         if (typeof content === 'string' && content.length > 0) {
           watchdog.delta('content');
+          clientClock.firstToken();
           textChars += content.length;
           handlers.onToken(content);
         } else if (
@@ -370,11 +378,13 @@ export async function streamChatCompletion(
           delta.reasoning_content.length > 0
         ) {
           watchdog.delta('reasoning');
+          clientClock.firstToken();
           reasoningChars += delta.reasoning_content.length;
           if (handlers.onReasoning) handlers.onReasoning(delta.reasoning_content);
           else handlers.onToken(delta.reasoning_content);
         } else if (typeof delta?.reasoning === 'string' && delta.reasoning.length > 0) {
           watchdog.delta('reasoning');
+          clientClock.firstToken();
           reasoningChars += delta.reasoning.length;
           if (handlers.onReasoning) handlers.onReasoning(delta.reasoning);
           else handlers.onToken(delta.reasoning);
@@ -432,7 +442,7 @@ export async function streamChatCompletion(
               `[OpenAIClient] truncated tool call ${streamSummary()} ` +
                 `tool=${truncated.name || '?'} approx_arg_chars=${truncated.arguments.length}`,
             );
-            handlers.onError(
+            fail(
               new ToolCallTruncatedError({
                 toolName: truncated.name,
                 toolCallId: truncated.id,
@@ -455,7 +465,7 @@ export async function streamChatCompletion(
     // dropped connection) — settle anyway so the agent loop never hangs.
     const incomplete = [...toolAccum.values()].find((acc) => argumentsAreIncomplete(acc.arguments));
     if (incomplete) {
-      handlers.onError(
+      fail(
         new ToolCallTruncatedError({
           toolName: incomplete.name,
           toolCallId: incomplete.id,
@@ -466,15 +476,15 @@ export async function streamChatCompletion(
     }
     flushAccumulatedToolCalls();
     log.warn(`[OpenAIClient] stream ended without terminal frame ${streamSummary()}`);
-    handlers.onDone(terminalFinishReason);
+    complete(terminalFinishReason);
   } catch (err) {
     if (watchdog.stalled) return;
     if ((err as Error)?.name === 'AbortError') {
       log.info(`[OpenAIClient] stream aborted ${streamSummary()}`);
-      handlers.onDone('cancelled');
+      complete('cancelled');
     } else {
       log.error(`[OpenAIClient] stream failure ${streamSummary()}`, err);
-      handlers.onError(withDescribedCause(err));
+      fail(withDescribedCause(err));
     }
   } finally {
     watchdog.stop();

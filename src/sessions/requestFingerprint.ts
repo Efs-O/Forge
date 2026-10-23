@@ -1,5 +1,5 @@
 import { createHash } from 'crypto';
-import { toWireRequest } from '../llm/OpenAIClient';
+import { toWireRequest } from '../llm/wireRequest';
 import type { ChatCompletionRequest } from '../llm/types';
 
 /**

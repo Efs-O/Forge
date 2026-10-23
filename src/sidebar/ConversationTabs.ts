@@ -42,6 +42,7 @@ import { retainLiveMemoryKeys } from './compactionWindow';
 import { deactivateLazyGroups } from '../tools/lazyToolGroups';
 import { forgetConversation, forgetIfDropped } from '../agentLinks/chatAgentLinks';
 import { checkpointReadyMessage } from './checkpointStats';
+import { deleteRequestDumps } from '../sessions/requestDump';
 
 const log = getLogger();
 
@@ -319,7 +320,6 @@ export class ConversationTabs {
       'Delete',
     );
     if (choice !== 'Delete') return;
-
     const modelName = conversation?.active_model;
     if (conversation) {
       this.deps.requestChains.invalidateConversation(id);
@@ -329,6 +329,7 @@ export class ConversationTabs {
     }
     const result = opDeleteConversation(sidebar, id);
     if (!('ok' in result)) return;
+    await deleteRequestDumps(id);
     this.deps.archivedSessions?.purge(id);
     deactivateLazyGroups(id);
     this.deps.setSidebar(result.sidebar);

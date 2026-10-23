@@ -1,5 +1,8 @@
 import * as vscode from 'vscode';
+import type { ForgeConfig } from '../config/types';
 import type { RequestFingerprint } from '../sessions/requestFingerprint';
+import type { RequestCapture } from '../sessions/requestStats';
+import { RequestDumpWriter } from '../sessions/requestDump';
 import {
   SessionLogger,
   type CompactionAttemptLogEntry,
@@ -20,8 +23,12 @@ function forgeVersion(): string | undefined {
  */
 export class SessionLogCoordinator {
   private readonly sessionLoggers = new Map<string, SessionLogger>();
+  private readonly requestDumps = new RequestDumpWriter();
 
-  constructor(private readonly getSidebar: () => SidebarRuntime) {}
+  constructor(
+    private readonly getSidebar: () => SidebarRuntime,
+    private readonly getConfig: () => ForgeConfig,
+  ) {}
 
   /** Records a completed compaction on the same transcript as the turns. */
   logCompaction(convId: string, entry: CompactionLogEntry): void {
@@ -47,6 +54,29 @@ export class SessionLogCoordinator {
     logger.updateTitle(conv.title);
     logger.logToolsOffered(names, conv.active_model ?? '');
     logger.logRequestPrefix(fingerprint, conv.active_model ?? '');
+  }
+
+  /** Appends request stats and queues an opt-in exact-body dump. */
+  logRequestStats(convId: string, capture: RequestCapture): void {
+    const conv = this.getSidebar().conversations.find((c) => c.id === convId);
+    if (!conv) return;
+    const model = conv.active_model ?? '';
+    const logger = this.loggerFor(conv);
+    logger.updateTitle(conv.title);
+    const row = logger.logRequestStats(capture.stats, model);
+    const settings = this.getConfig().record_requests;
+    if (!settings?.enabled) return;
+    this.requestDumps.enqueue(
+      {
+        conversationId: convId,
+        request: capture.body,
+        url: capture.url,
+        model: capture.model,
+        sentAtMs: capture.sentAtMs,
+        stats: row,
+      },
+      { maxBytes: settings.max_mb * 1024 * 1024, keepHours: settings.keep_hours },
+    );
   }
 
   /** Records why a turn stopped, next to the rows it produced before stopping. */

@@ -38,6 +38,7 @@ overlaps with an existing owner, extend the owner instead.
 | Live streamed-token estimate (status bar)            | `src/sidebar/LiveStreamMeter.ts`         |
 | Host facade construction (remote/extension seam)     | `src/sidebar/sidebarFacadeWiring.ts`     |
 | Ctx bar, HalluMeter bridge, thresholds               | `src/sidebar/ContextBudgetPublisher.ts`  |
+| Per-request usage effects (token bar, output budget, cache stats) | `src/sidebar/requestUsageReporting.ts` |
 | Chat create/switch/close/restore, auto-archive, leave-to-history + startup idle sweep | `src/sidebar/ConversationTabs.ts` |
 | A tab's model VRAM release (switch, close, `/unloadModel`) | `src/sidebar/TabModelRelease.ts` |
 | Chat-cap refusal wording (`chatCapMessage`) | `src/sidebar/sessionTypes.ts` |
@@ -160,6 +161,8 @@ overlaps with an existing owner, extend the owner instead.
 | Session transcript logging (~/.forge)                | `src/sidebar/SessionLogger.ts`           |
 | Replay-aware session-log row reading                 | `src/sessions/sessionLogRows.ts`         |
 | Per-request prompt-head fingerprint (`request_prefix` rows: hashes and counts, no text) | `src/sessions/requestFingerprint.ts` |
+| Per-request server/client stats (`request_stats` rows: numbers only) | `src/sessions/requestStats.ts` |
+| Opt-in request-body dump writes, pruning and conversation deletion | `src/sessions/requestDump.ts` |
 | Tool visibility and shell-workaround audit (daily files in ~/.forge/tool-usage/) | `src/sessions/toolUsage.ts` |
 | Tool-call argument summary labels                    | `src/sidebar/toolSummary.ts`             |
 | Runtime capability memo + warn-once ledger           | `src/sidebar/CapabilityCache.ts`         |
@@ -409,6 +412,7 @@ overlaps with an existing owner, extend the owner instead.
 | FORGE.md workspace instructions loader       | `src/llm/ForgeInstructionsLoader.ts`         |
 | FORGE.md chain assembly + byte budget        | `src/llm/forgeInstructionsChain.ts`          |
 | Streaming OpenAI-compat client               | `src/llm/OpenAIClient.ts`                    |
+| Provider wire-message filtering and mid-turn text | `src/llm/wireRequest.ts`                  |
 | Stream idle watchdog + stall budgets         | `src/llm/streamWatchdog.ts`                  |
 | Local-server stall probe (/slots, /v1/status; loopback only) | `src/llm/stallProbe.ts` |
 | Local llama.cpp fetch (30 min headers wait)  | `src/llm/localLlamaFetch.ts`                 |
@@ -423,6 +427,7 @@ overlaps with an existing owner, extend the owner instead.
 | Host activity event shape                    | `src/sidebar/HostActivity.ts`                |
 | Finished-turn mirroring to remote chats      | `src/sidebar/turnMirrorWiring.ts`            |
 | Streaming Ollama native client               | `src/llm/OllamaNativeClient.ts`              |
+| Ollama response-frame schema, safe body and usage normalization | `src/llm/ollamaResponse.ts` |
 | Request normalization (per-provider)         | `src/llm/RequestNormalizer.ts`               |
 | llama-server media-marker neutralization     | `src/llm/mediaMarkerGuard.ts`                |
 | Sampling parameter merge                     | `src/llm/SamplingMerge.ts`                   |

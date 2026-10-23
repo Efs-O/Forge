@@ -1,61 +1,21 @@
 import type { ModelConfig } from '../config/types';
 import { getLogger } from '../util/logger';
 import type { ChatCompletionRequest, ChatMessage, ContentPart, ToolCall } from './types';
-import { wireMessageContent, type StreamHandlers } from './OpenAIClient';
+import type { StreamHandlers } from './OpenAIClient';
+import { wireMessageContent } from './wireRequest';
 import { StreamWatchdog } from './streamWatchdog';
 import { withDescribedCause } from '../util/describeError';
 import { ToolCallTruncatedError, argumentsAreIncomplete } from './ToolCallTruncatedError';
 import { isJsonObject, parseJsonWithInvalidEscapeRepair } from '../tools/argCoercion';
-
-interface OllamaToolCallChunk {
-  function?: {
-    /** Ollama's own call slot. Unreliable: see `accumulateToolCalls`. */
-    index?: number;
-    name?: string;
-    arguments?: Record<string, unknown> | string;
-  };
-}
+import { createRequestClientClock, createRequestStatsReporter } from '../sessions/requestStats';
+import {
+  reportOllamaUsage,
+  safeResponseBody,
+  type OllamaStreamChunk,
+  type OllamaToolCallChunk,
+} from './ollamaResponse';
 
 const log = getLogger();
-
-function safeResponseBody(body: string): string {
-  return body
-    .replace(/(authorization|api[_-]?key|token|secret)(["'\s:=]+)[^\s,"'}]+/gi, '$1$2[REDACTED]')
-    .slice(0, 4_000);
-}
-
-interface OllamaStreamChunk {
-  message?: {
-    content?: string;
-    thinking?: string;
-    tool_calls?: OllamaToolCallChunk[];
-  };
-  done?: boolean;
-  done_reason?: string;
-  error?: string;
-  /** Ollama's own token counters, present on the `done: true` frame. */
-  prompt_eval_count?: number;
-  eval_count?: number;
-}
-
-/**
- * Forward Ollama's token counters in the OpenAI `usage` shape.
- *
- * Ollama has no `stream_options.include_usage`; it puts the counts on the final
- * frame instead. Without this every context display — token bar, status bar,
- * HalluMeter bridge — and the auto-compaction trigger read 0 forever on an
- * Ollama model, because all of them refuse to substitute an estimate.
- */
-function reportUsage(chunk: OllamaStreamChunk, handlers: StreamHandlers): void {
-  const prompt = chunk.prompt_eval_count;
-  const completion = chunk.eval_count;
-  if (!Number.isFinite(prompt) || !Number.isFinite(completion)) return;
-  handlers.onUsage?.({
-    prompt_tokens: prompt as number,
-    completion_tokens: completion as number,
-    total_tokens: (prompt as number) + (completion as number),
-  });
-}
 
 interface OllamaChatMessage {
   role: ChatMessage['role'];
@@ -314,30 +274,56 @@ export async function streamOllamaChatCompletion(
   const explicitThink = (request as ChatCompletionRequest & { think?: boolean }).think;
   const think = explicitThink ?? toOllamaThink(model);
   const startedAt = Date.now();
+  const requestUrl = `${baseUrl}/api/chat`;
+  const requestBody = JSON.stringify({
+    model: request.model,
+    messages: request.messages.map(toOllamaMessage),
+    stream: true,
+    ...(request.tools ? { tools: request.tools } : {}),
+    ...(options ? { options } : {}),
+    ...(think !== undefined ? { think } : {}),
+  });
+  const sentAtMs = Date.now();
+  const clientClock = createRequestClientClock();
+  const reporter = createRequestStatsReporter({
+    body: requestBody,
+    url: requestUrl,
+    model: request.model,
+    sentAtMs,
+    clientClock,
+    handler: handlers.onRequestStats,
+    isAborted: () => Boolean(signal?.aborted),
+    onCallbackError: (error) =>
+      log.warn(
+        `[OllamaNativeClient] request stats callback failed: ` +
+          `${error instanceof Error ? error.message : String(error)}`,
+      ),
+  });
+  const complete = (finishReason: string | null): void => {
+    reporter.complete(finishReason);
+    handlers.onDone(finishReason);
+  };
+  const fail = (error: Error): void => {
+    reporter.fail(error);
+    handlers.onError(error);
+  };
   let response: Response;
   try {
-    response = await fetch(`${baseUrl}/api/chat`, {
+    response = await fetch(requestUrl, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        model: request.model,
-        messages: request.messages.map(toOllamaMessage),
-        stream: true,
-        ...(request.tools ? { tools: request.tools } : {}),
-        ...(options ? { options } : {}),
-        ...(think !== undefined ? { think } : {}),
-      }),
+      body: requestBody,
       signal: signal ?? null,
     });
   } catch (err) {
     if ((err as Error)?.name === 'AbortError') {
-      handlers.onDone('cancelled');
+      complete('cancelled');
     } else {
       const error = err instanceof Error ? err : new Error(String(err));
       log.error(
         `[OllamaNativeClient] request failed endpoint=${baseUrl}/api/chat model=${request.model}: ${error.message}`,
       );
-      handlers.onError(error);
+      fail(error);
     }
     return;
   }
@@ -349,12 +335,12 @@ export async function streamOllamaChatCompletion(
     log.error(
       `[OllamaNativeClient] request failed endpoint=${baseUrl}/api/chat model=${request.model}: ${message}`,
     );
-    handlers.onError(new Error(message));
+    fail(new Error(message));
     return;
   }
 
   if (!response.body) {
-    handlers.onError(new Error('Response body is null'));
+    fail(new Error('Response body is null'));
     return;
   }
 
@@ -380,10 +366,11 @@ export async function streamOllamaChatCompletion(
     startedAt,
     streamSummary,
     () => void reader.cancel().catch(() => undefined),
-    (err) => handlers.onError(err),
+    fail,
     undefined,
   );
   const handleFrame = (raw: string): 'continue' | 'terminal' | 'error' => {
+    clientClock.chunk();
     let chunk: OllamaStreamChunk;
     try {
       chunk = JSON.parse(raw) as OllamaStreamChunk;
@@ -391,17 +378,19 @@ export async function streamOllamaChatCompletion(
       return 'continue';
     }
     if (chunk.error) {
-      handlers.onError(new Error(chunk.error));
+      fail(new Error(chunk.error));
       return 'error';
     }
     if (typeof chunk.message?.thinking === 'string' && chunk.message.thinking.length > 0) {
       watchdog.delta('reasoning');
+      clientClock.firstToken();
       reasoningChars += chunk.message.thinking.length;
       if (handlers.onReasoning) handlers.onReasoning(chunk.message.thinking);
       else handlers.onToken(chunk.message.thinking);
     }
     if (typeof chunk.message?.content === 'string' && chunk.message.content.length > 0) {
       watchdog.delta('content');
+      clientClock.firstToken();
       textChars += chunk.message.content.length;
       handlers.onToken(chunk.message.content);
     }
@@ -412,8 +401,9 @@ export async function streamOllamaChatCompletion(
     accumulateToolCalls(chunk.message?.tool_calls, toolAccum);
     if (!chunk.done) return 'continue';
     flushToolCalls(toolAccum, handlers.onToolCalls);
-    reportUsage(chunk, handlers);
-    handlers.onDone(chunk.done_reason ?? null);
+    reporter.setUsage(reportOllamaUsage(chunk, handlers));
+    reporter.setOllamaDurations(chunk);
+    complete(chunk.done_reason ?? null);
     return 'terminal';
   };
 
@@ -421,6 +411,7 @@ export async function streamOllamaChatCompletion(
     while (true) {
       const { done, value } = await reader.read();
       if (done) break;
+      if (value.byteLength > 0) clientClock.firstByte();
       readCount += 1;
       bytesRead += value.byteLength;
       watchdog.activity();
@@ -447,7 +438,7 @@ export async function streamOllamaChatCompletion(
     );
     if (incomplete) {
       const [index, acc] = incomplete;
-      handlers.onError(
+      fail(
         new ToolCallTruncatedError({
           toolName: acc.name,
           toolCallId: `call_ollama_${index}`,
@@ -457,13 +448,13 @@ export async function streamOllamaChatCompletion(
       return;
     }
     flushToolCalls(toolAccum, handlers.onToolCalls);
-    handlers.onDone(null);
+    complete(null);
   } catch (err) {
     if (watchdog.stalled) return;
     if ((err as Error)?.name === 'AbortError') {
-      handlers.onDone('cancelled');
+      complete('cancelled');
     } else {
-      handlers.onError(withDescribedCause(err));
+      fail(withDescribedCause(err));
     }
   } finally {
     watchdog.stop();

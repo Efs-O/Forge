@@ -2,7 +2,9 @@ import * as fs from 'fs';
 import * as path from 'path';
 import { afterAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { ChatMessage } from '../../src/llm/types';
+import type { ForgeConfig } from '../../src/config/types';
 import type { ConversationRuntime, SidebarRuntime } from '../../src/sidebar/sessionTypes';
+import type { RequestCapture } from '../../src/sessions/requestStats';
 
 const { fakeHome } = vi.hoisted(() => {
   const nodeFs = require('fs') as typeof import('fs');
@@ -39,7 +41,7 @@ describe('SessionLogCoordinator settled transcript flushes', () => {
       .filter((row) => typeof row['role'] === 'string');
   }
 
-  function runtime(messages: ChatMessage[]): {
+  function runtime(messages: ChatMessage[], config: ForgeConfig = {} as ForgeConfig): {
     coordinator: SessionLogCoordinator;
     conversation: ConversationRuntime;
   } {
@@ -55,7 +57,10 @@ describe('SessionLogCoordinator settled transcript flushes', () => {
       conversations: [conversation],
       history: [],
     };
-    return { coordinator: new SessionLogCoordinator(() => sidebar), conversation };
+    return {
+      coordinator: new SessionLogCoordinator(() => sidebar, () => config),
+      conversation,
+    };
   }
 
   it('holds back a trailing assistant message that may still be streaming', () => {
@@ -91,5 +96,27 @@ describe('SessionLogCoordinator settled transcript flushes', () => {
       'user',
       'assistant',
     ]);
+  });
+
+  it.each([
+    ['absent', {} as ForgeConfig],
+    [
+      'disabled',
+      { record_requests: { enabled: false, max_mb: 10, keep_hours: 1 } } as ForgeConfig,
+    ],
+  ])('does not write request dumps when recording is %s', async (label, config) => {
+    const { coordinator, conversation } = runtime([], config);
+    const capture: RequestCapture = {
+      body: '{"messages":[]}',
+      url: '/v1/chat/completions',
+      model: 'm',
+      sentAtMs: 1,
+      stats: { outcome: 'ok', client: { total_ms: 1, chunks: 1 } },
+    };
+
+    coordinator.logRequestStats(conversation.id, capture);
+    await new Promise((resolve) => setTimeout(resolve, 20));
+
+    expect(fs.existsSync(path.join(fakeHome.dir, '.forge', 'requests')), label).toBe(false);
   });
 });

@@ -89,7 +89,7 @@ export class SendPipeline {
   readonly sessionLogs: SessionLogCoordinator;
 
   constructor(private readonly deps: SendPipelineDeps) {
-    this.sessionLogs = new SessionLogCoordinator(deps.getSidebar);
+    this.sessionLogs = new SessionLogCoordinator(deps.getSidebar, deps.getConfig);
   }
 
   async send(

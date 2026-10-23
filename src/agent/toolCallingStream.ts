@@ -56,6 +56,7 @@ export async function streamOnce(
           completionTokens = usage.completion_tokens;
           if (promptSnapshot) options.onUsage?.(usage, promptSnapshot);
         },
+        ...(options.onRequestStats ? { onRequestStats: options.onRequestStats } : {}),
       },
       options.signal,
       options.apiKey,

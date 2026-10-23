@@ -216,6 +216,38 @@ describe('ArchivedSessions', () => {
     expect(fs.existsSync(path.join(logs, 'gone.jsonl'))).toBe(false);
   });
 
+  it('does not count request_stats rows as archived messages', () => {
+    root = fs.mkdtempSync(path.join(os.tmpdir(), 'forge-archived-'));
+    const logs = path.join(root, 'logs');
+    fs.mkdirSync(logs);
+    const start = { type: 'session_start', timestamp_ms: 1, workspace_path: 'C:/repo' };
+    const transcript = [
+      { role: 'user', content: 'question' },
+      { role: 'assistant', content: 'answer' },
+    ];
+    fs.writeFileSync(
+      path.join(logs, 'with-stats.jsonl'),
+      [
+        start,
+        transcript[0],
+        { type: 'request_stats', outcome: 'ok', timestamp_ms: 2, model: 'm' },
+        transcript[1],
+      ]
+        .map((row) => JSON.stringify(row))
+        .join('\n'),
+    );
+    fs.writeFileSync(
+      path.join(logs, 'without-stats.jsonl'),
+      [start, ...transcript].map((row) => JSON.stringify(row)).join('\n'),
+    );
+
+    const rows = new ArchivedSessions(path.join(root, 'storage'), 'C:/repo', logs)
+      .list()
+      .sort((a, b) => a.id.localeCompare(b.id));
+
+    expect(rows.map((row) => row.messageCount)).toEqual([2, 2]);
+  });
+
   it('pairs tool rows for legacy and id-bearing logs before interrupted-call repair', () => {
     root = fs.mkdtempSync(path.join(os.tmpdir(), 'forge-archived-'));
     const logs = path.join(root, 'logs');
