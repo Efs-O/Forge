@@ -1,10 +1,19 @@
 name: Diagnose render preview
 
-# Manual only. Runs the real-Chrome socket-wall test alone on windows-latest
-# with Playwright's API trace, after printing the runner's Chrome version and
-# how long the host takes to resolve `localhost` (preview's SSRF guard looks it
-# up with no timeout of its own).
-on: workflow_dispatch
+# Manual only. Runs the real-Chrome socket-wall test on windows-latest with
+# Playwright's API trace, after printing the runner's Chrome version, CPU count
+# and how long the host takes to resolve `localhost` (preview's SSRF guard
+# looks it up with no timeout of its own). `scope: full` runs the whole unit
+# suite under the same trace, so a timeout that only happens under load is
+# caught with its phase timings.
+on:
+  workflow_dispatch:
+    inputs:
+      scope:
+        description: 'single = the socket-wall test alone; full = the whole test suite'
+        type: choice
+        options: [single, full]
+        default: single
 
 jobs:
   diag:
@@ -24,9 +33,17 @@ jobs:
         shell: pwsh
         run: |
           (Get-Item "C:\Program Files\Google\Chrome\Application\chrome.exe").VersionInfo.ProductVersion
+          "CPUs: $([Environment]::ProcessorCount)"
           node -e "const d=require('dns').promises;(async()=>{for(const h of ['localhost','127.0.0.1']){const t=Date.now();try{const a=await d.lookup(h,{all:true});console.log(h,JSON.stringify(a),(Date.now()-t)+' ms')}catch(e){console.log(h,'failed',e.code,(Date.now()-t)+' ms')}}})()"
 
       - name: Socket-wall test with Playwright API trace
+        if: inputs.scope == 'single'
         env:
           DEBUG: 'pw:api,pw:browser'
         run: npx vitest run test/integration/RenderHtmlPreviewLive.test.ts -t "reaches no local socket" --reporter=verbose
+
+      - name: Whole suite with Playwright API trace
+        if: inputs.scope == 'full'
+        env:
+          DEBUG: 'pw:api,pw:browser'
+        run: npx vitest run --reporter=verbose
