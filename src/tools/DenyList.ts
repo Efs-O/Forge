@@ -214,11 +214,6 @@ export function getBuiltinDenyList(): ShellTokenRule[] {
       ),
     ),
     dangerous(
-      'process termination',
-      'Use stop_execution for Forge jobs; identify other processes before stopping them.',
-      (t) => commandIndexes(t, ['stop-process', 'taskkill', 'kill', 'pkill']).length > 0,
-    ),
-    dangerous(
       'PowerShell expression evaluation',
       'Use a reviewed local script file.',
       (t) => commandIndexes(t, ['invoke-expression', 'iex']).length > 0,

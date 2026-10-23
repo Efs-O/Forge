@@ -105,8 +105,6 @@ const cases: Array<[string, string, 'read_only' | 'normal' | 'dangerous' | 'refu
   ['/usr/bin/git reset --hard', 'bash', 'dangerous'],
   ['./rm -rf x', 'bash', 'dangerous'],
   ['rm.exe -rf x', 'bash', 'dangerous'],
-  ['C:\\Windows\\System32\\taskkill.exe /PID 1', 'pwsh', 'dangerous'],
-  ['Stop-Process -Name app', 'pwsh', 'dangerous'],
   ['git rebase main', 'bash', 'dangerous'],
   ['git -C x rebase main', 'bash', 'dangerous'],
   ['git -C x branch -D y', 'bash', 'dangerous'],
@@ -130,7 +128,11 @@ const cases: Array<[string, string, 'read_only' | 'normal' | 'dangerous' | 'refu
   // The stash rule must check the subcommand: a path named `drop` is not a stash.
   ['git show drop', 'bash', 'read_only'],
   ['git add drop', 'bash', 'normal'],
-  ['taskkill /PID 123', 'pwsh', 'dangerous'],
+  // Process termination is an ordinary command: it asks in a normal chat, /clanker runs it.
+  ['taskkill /PID 123', 'pwsh', 'normal'],
+  ['C:\\Windows\\System32\\taskkill.exe /IM app.exe /F', 'pwsh', 'normal'],
+  ['Stop-Process -Name app', 'pwsh', 'normal'],
+  ['pkill node', 'bash', 'normal'],
   ['git checkout -- file.txt', 'bash', 'dangerous'],
   ['format D:', 'pwsh', 'refused'],
   ['diskpart', 'pwsh', 'refused'],

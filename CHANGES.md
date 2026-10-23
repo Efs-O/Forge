@@ -1,5 +1,9 @@
 # Forge — Recent Changes
 
+## 0.17.72
+
+- Process-kill commands in `shell` (`taskkill`, `Stop-Process`, `kill`, `pkill`) are no longer dangerous. In a normal chat they still ask like any other command; `/clanker` runs them without asking, and unattended runs and jobs allow them instead of refusing. Recursive deletes, `git reset --hard`, force pushes, SQL `DROP` and the other destructive rules are unchanged.
+
 ## 0.17.71
 
 - Session logs record each agent-loop request's server timings and client stream measurements. Optional `record_requests` dumps preserve the exact request body with a size cap and expiry; they are off unless enabled in config.
