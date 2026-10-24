@@ -19,14 +19,14 @@ beforeEach(() => {
   fs.mkdirSync(root, { recursive: true });
 });
 
-async function waitForDump(conversationId: string): Promise<void> {
+async function waitForDump(conversationId: string, timeoutMs = 5_000): Promise<void> {
   const directory = path.join(root, conversationId);
   await vi.waitFor(
     () => {
       expect(fs.existsSync(directory)).toBe(true);
       expect(fs.readdirSync(directory).some((name) => name.endsWith('.json'))).toBe(true);
     },
-    { timeout: 5_000, interval: 10 },
+    { timeout: timeoutMs, interval: 10 },
   );
 }
 
@@ -75,7 +75,10 @@ describe('request dump writer', () => {
     expect(warn).not.toHaveBeenCalled();
   });
 
-  it('flushes the dump through its own handle before renaming it into place', async () => {
+  // Room for the flush: `npm run ci` runs the whole suite in the same two
+  // workers, and a real fsync of the dump under that load can pass 5 s, which
+  // is the default per-test timeout. The assertion itself is not timing-based.
+  it('flushes the dump through its own handle before renaming it into place', { timeout: 20_000 }, async () => {
     // The defect BL-002 is about: this writer had its own temp file plus rename
     // with no flush, so 0.17.42's power-loss fix reached none of it. Order
     // matters: a rename that is not preceded by a sync can land a file whose
@@ -94,7 +97,7 @@ describe('request dump writer', () => {
 
     const writer = new RequestDumpWriter(root, vi.fn());
     writer.enqueue(dumpInput(), { maxBytes: 10_000, keepHours: 24 });
-    await waitForDump('c1');
+    await waitForDump('c1', 15_000);
 
     // The shared writer opens its temp file with `wx` and syncs through that
     // same handle before renaming (src/util/atomicWrite.ts writeAndSyncAsync);
