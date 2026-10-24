@@ -99,6 +99,23 @@ describe('withRemoteStateLock', () => {
     await expect(fs.stat(`${file}.lock`)).rejects.toMatchObject({ code: 'ENOENT' });
   });
 
+  it('leaves a lock another window took over while this one held it', async () => {
+    const file = await tempFile();
+    const lockPath = `${file}.lock`;
+    const foreign = '987654321:9999999\n';
+    await withRemoteStateLock(file, async () => {
+      // What a second window does when it judges this holder stale mid-write
+      // (remoteStateFile.ts:80 reclaims a live holder once its mtime age passes
+      // LOCK_STALE_MS, and the age is never refreshed): rename the record aside
+      // and publish its own, exactly as agentMesh/lock.ts `reclaim` does.
+      await fs.rename(lockPath, `${lockPath}.stale-taken-over`);
+      await fs.writeFile(lockPath, foreign);
+    });
+    // The old holder must not unlink the new lock on release, or a third window
+    // enters while two are writing the shared state document.
+    expect(await fs.readFile(lockPath, 'utf8')).toBe(foreign);
+  });
+
   it('recovers a lock left behind by a dead process instead of waiting out the timeout', async () => {
     const file = await tempFile();
     // A crash can leave the lock file; its mtime is what marks it stale.

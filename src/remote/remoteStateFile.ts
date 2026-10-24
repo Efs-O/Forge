@@ -61,10 +61,12 @@ export async function withRemoteStateLock<T>(
   await fs.mkdir(path.dirname(filePath), { recursive: true });
   const started = Date.now();
   let handle: fs.FileHandle | undefined;
+  let record = '';
   while (!handle) {
     try {
       handle = await fs.open(lockPath, 'wx', 0o600);
-      await handle.writeFile(`${process.pid}:${Date.now()}\n`, 'utf8');
+      record = `${process.pid}:${Date.now()}\n`;
+      await handle.writeFile(record, 'utf8');
     } catch (err) {
       await handle?.close().catch(() => undefined);
       handle = undefined;
@@ -95,8 +97,28 @@ export async function withRemoteStateLock<T>(
     return await operation();
   } finally {
     await handle.close();
-    await fs.unlink(lockPath).catch(() => undefined);
+    await releaseOwnLock(lockPath, record);
   }
+}
+
+/**
+ * Release the lock only when it is still the record this call wrote. A holder
+ * whose lock was reclaimed as stale — a live holder past the 60 s age rule, or
+ * a clock jump that makes the age cross it — must not unlink the lock the
+ * reclaimer then created, which is how two windows end up writing the state
+ * document at once. The agent-mesh lock's `releaseLock` has the same rule.
+ * A lock that cannot be read is left alone: it is either gone already or
+ * mid-delete on Windows, and in both cases it is not this call's to remove.
+ */
+async function releaseOwnLock(lockPath: string, record: string): Promise<void> {
+  let current: string | undefined;
+  try {
+    current = await fs.readFile(lockPath, 'utf8');
+  } catch {
+    return;
+  }
+  if (current !== record) return;
+  await fs.unlink(lockPath).catch(() => undefined);
 }
 
 export async function writeRemoteStateFile(filePath: string, contents: string): Promise<void> {
