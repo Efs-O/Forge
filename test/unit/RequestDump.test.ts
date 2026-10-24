@@ -1,7 +1,7 @@
 import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
-import { afterAll, beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, afterAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import {
   deleteRequestDumps,
   pruneRequestDumps,
@@ -11,6 +11,9 @@ import {
 const root = fs.mkdtempSync(path.join(os.tmpdir(), 'forge-request-dumps-'));
 
 afterAll(() => fs.rmSync(root, { recursive: true, force: true }));
+afterEach(() => {
+  vi.restoreAllMocks();
+});
 beforeEach(() => {
   fs.rmSync(root, { recursive: true, force: true });
   fs.mkdirSync(root, { recursive: true });
@@ -70,6 +73,35 @@ describe('request dump writer', () => {
     expect(dump).not.toHaveProperty('headers');
     expect(serialized).not.toContain('Authorization');
     expect(warn).not.toHaveBeenCalled();
+  });
+
+  it('flushes the dump through its own handle before renaming it into place', async () => {
+    // The defect BL-002 is about: this writer had its own temp file plus rename
+    // with no flush, so 0.17.42's power-loss fix reached none of it. Order
+    // matters: a rename that is not preceded by a sync can land a file whose
+    // size is right and whose body is NUL after a power loss.
+    const order: string[] = [];
+    const realOpen = fs.promises.open;
+    vi.spyOn(fs.promises, 'open').mockImplementation(async (...args) => {
+      const handle = await realOpen(...args);
+      const sync = handle.sync.bind(handle);
+      handle.sync = async () => {
+        order.push('sync');
+        return sync();
+      };
+      return handle;
+    });
+
+    const writer = new RequestDumpWriter(root, vi.fn());
+    writer.enqueue(dumpInput(), { maxBytes: 10_000, keepHours: 24 });
+    await waitForDump('c1');
+
+    // The shared writer opens its temp file with `wx` and syncs through that
+    // same handle before renaming (src/util/atomicWrite.ts writeAndSyncAsync);
+    // this writer's own temp-plus-rename opened nothing observable, so on the
+    // old code `order` stays empty. Rename-after-sync is pinned by
+    // test/unit/AtomicWrite.test.ts, so only the flush is asserted here.
+    expect(order).toEqual(['sync']);
   });
 
   it('skips an oversized dump and warns once per conversation', async () => {

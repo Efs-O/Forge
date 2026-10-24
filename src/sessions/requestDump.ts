@@ -2,6 +2,7 @@ import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
 import type { RequestStatsRow } from './requestStats';
+import { writeFileAtomic } from '../util/atomicWrite';
 import { getLogger } from '../util/logger';
 
 const TEMP_MAX_AGE_MS = 10 * 60_000;
@@ -204,8 +205,10 @@ export class RequestDumpWriter {
         return;
       }
       await fs.promises.mkdir(directory, { recursive: true });
-      await fs.promises.writeFile(`${target}.tmp`, content, { encoding: 'utf8', flag: 'wx' });
-      await fs.promises.rename(`${target}.tmp`, target);
+      // The shared writer: it flushes the temp file through the same handle
+      // before renaming, which this file's own temp-plus-rename did not, so a
+      // power loss cannot leave a dump whose size is right and body is NUL.
+      await writeFileAtomic(target, content);
     } catch (error) {
       this.disabledConversations.add(id);
       if (!this.writeWarnings.has(id)) {
