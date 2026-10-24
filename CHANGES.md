@@ -1,5 +1,42 @@
 # Forge — Recent Changes
 
+## 0.17.78
+
+Five fixes from the first weekly bug hunt (2026-10-24). All five were confirmed by a second
+reader, each has a regression test that fails without the fix, and `npm run ci` is green
+(535 files, 5 437 tests).
+
+- `message_chat` `steer` no longer claims the target's turn was interrupted when nothing was
+  interrupted (BL-008). The router interrupts only a chat that is generating, so steering a chat
+  that is still saving attachments, checking context or loading a model now reads: "it reads this
+  at its next round, and its turn is interrupted only if it is generating one". The Telegram
+  mirror line says the same thing. The delivery itself was always correct; only the report was not.
+- A workspace switch whose binding write fails now says so (BL-009). Losing the write to a
+  contended `remote-state-v2.json.lock` used to throw out of the arrival claim before the
+  transports started, so the chat heard nothing and its next message was refused with the
+  bound-workspace error. Now the chat gets: `now in <workspace>, but this chat could not be bound
+  here (<error>). It is still bound where it was — send /workspace <alias> again.`, the rest of
+  the arriving batch still runs, and a failure that happens only while marking the handoff
+  complete is logged and reported as the successful switch it was.
+- The shared remote-state lock is released only by the window that still holds it (BL-010). A
+  holder that another window reclaimed as stale — a live holder whose lock age passes the 60 s
+  rule, or a clock jump after sleep — used to delete the reclaimer's lock on release, which let a
+  third window write `remote-state-v2.json` at the same time as the second and lose a cursor, a
+  claim or a handoff record. Release now compares the record it wrote, as the agent-mesh lock
+  already does.
+- `/chatMode` finds its model entry by name in the file it writes, not by a position computed from
+  the read it made before the config lock (BL-007). A second window that added or removed a model
+  in between shifts every position after it, so solo/multi could be written into another model's
+  entry — silently on the Strata path, which has no verifier, and reported as the model you asked
+  about. The "they share one spawn block" list now names the models it actually paired, and a model
+  that vanished from the file in between fails with its name instead of editing a neighbour.
+- Opt-in request dumps go through the shared crash-safe writer (BL-002). They had their own temp
+  file plus rename with no flush, so 0.17.42's power-loss fix never reached them: after a power
+  loss a dump could come back with the right size and a body of NUL bytes.
+
+Not changed this run: BL-003 and BL-004 were fixed by `6dae2fe2` (in 0.17.75), and BL-005 and
+BL-006 turned out not to be bugs as written — all four are dropped in the ledger.
+
 ## 0.17.77
 
 - Telegram `/workspace` no longer leaves the chat silent. The window that switched folders was killed while it held the shared remote-state lock (`remote-state-v2.json.lock`). The new window started about a second later, waited 15 s for a lock it would only treat as stale after 60 s, and gave up with a toast. Nothing retried, so the handoff expired. Now:
