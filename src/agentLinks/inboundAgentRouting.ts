@@ -1,6 +1,7 @@
 import type { AgentKind, AgentLink, AgentSender, AgentSenderMetadata } from './chatAgentLinks';
 import { agentDisplayName, findBySession, get, link, move } from './chatAgentLinks';
 import type { SidebarRuntime, ConversationRuntime } from '../sidebar/sessionTypes';
+import { isUntitled } from '../sidebar/conversationTitle';
 
 export interface InboundAgentSelection {
   conversationId?: string;
@@ -145,5 +146,7 @@ export function formatMovedSessionNotice(
   link: AgentLink,
   newTitle: string,
 ): string {
-  return `${agentDisplayName(kind)} session "${link.title}" moved to chat "${newTitle}".`;
+  // A chat opened for this message is still untitled here: its first prompt names it later.
+  const destination = isUntitled(newTitle) ? 'a new chat' : `chat "${newTitle}"`;
+  return `${agentDisplayName(kind)} session "${link.title}" moved to ${destination}.`;
 }

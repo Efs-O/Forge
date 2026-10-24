@@ -22,7 +22,6 @@ import { Header, type WorkspaceInfo } from './components/Header';
 import { TranscriptPanes } from './components/TranscriptPanes';
 import { CheckpointBar } from './components/CheckpointBar';
 import { InputRow } from './components/InputRow';
-import { toMessageAttachments } from './components/useAttachments';
 import { ConfirmationDialog } from './components/ConfirmationDialog';
 import { QuestionDialog } from './components/QuestionDialog';
 import { selectVisibleQuestion, useAgentDialogs } from './useAgentDialogs';
@@ -35,7 +34,7 @@ import { SLASH_COMMANDS } from './slashCommands';
 import { webviewDiagnostics } from './WebviewDiagnostics';
 import { useHostCommands } from './hostCommands';
 import { usePendingPrompts } from './usePendingPrompts';
-import { hostMessageToAction } from './hostActions';
+import { hostMessageToAction, hostUserPromptToAction } from './hostActions';
 export type { QueuedPrompt } from './usePendingPrompts';
 
 type WorkspaceContextInfo = WorkspaceInfo & { screenshotsUri?: string };
@@ -96,51 +95,34 @@ export function App(): React.ReactElement {
       // Consumes the approval/question messages and reports that it did, so the
       // switch below never has to know they exist.
       if (dialogs.handleHostMessage(msg)) return;
+      if (msg.type === 'userPrompt') {
+        const promptAction = hostUserPromptToAction(msg);
+        if (!promptAction) return;
+        if (msg.midTurn) {
+          // Retire the matching queued chip; the bubble below replaces it.
+          reconcileSessionSync({
+            [msg.conversationId]: [
+              {
+                role: 'user',
+                content: msg.text,
+                midTurn: true,
+                ...(msg.createdAt !== undefined ? { createdAt: msg.createdAt } : {}),
+              },
+            ],
+          });
+        } else {
+          // A prompt sent from a paired chat or VS Code command.
+          clearTellPrompts(msg.conversationId);
+        }
+        dispatch(promptAction);
+        return;
+      }
       const action = hostMessageToAction(msg);
       if (action) {
         dispatch(action);
         return;
       }
       switch (msg.type) {
-        case 'userPrompt':
-          if (msg.midTurn) {
-            // Retire the matching queued chip: the bubble below replaces it.
-            if (msg.conversationId) {
-              reconcileSessionSync({
-                [msg.conversationId]: [
-                  {
-                    role: 'user',
-                    content: msg.text,
-                    midTurn: true,
-                    ...(msg.createdAt !== undefined ? { createdAt: msg.createdAt } : {}),
-                  },
-                ],
-              });
-            }
-            dispatch({
-              type: 'MID_TURN_TELL',
-              text: msg.text,
-              ...(msg.createdAt !== undefined ? { createdAt: msg.createdAt } : {}),
-              convId: msg.conversationId,
-            });
-            break;
-          }
-          // A prompt sent from a paired chat or a VS Code command. Reuses
-          // USER_SEND rather than adding a reducer case, so a remote prompt
-          // performs the same stale-diff and stale-error stripping a typed one
-          // does -- the bubble is identical because the action is.
-          clearTellPrompts(msg.conversationId);
-          dispatch({
-            type: 'USER_SEND',
-            text: msg.text,
-            ...(msg.createdAt !== undefined ? { createdAt: msg.createdAt } : {}),
-            convId: msg.conversationId,
-            ...(msg.sender ? { sender: msg.sender } : {}),
-            ...(msg.attachments?.length
-              ? { attachments: toMessageAttachments(msg.attachments) }
-              : {}),
-          });
-          break;
         case 'workspaceInfo':
           setWorkspace({
             name: msg.name,

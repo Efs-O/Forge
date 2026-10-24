@@ -6,7 +6,10 @@ import {
   type AgentLink,
   type AgentSender,
 } from '../../src/agentLinks/chatAgentLinks';
-import { resolveInboundAgentTarget } from '../../src/agentLinks/inboundAgentRouting';
+import {
+  formatMovedSessionNotice,
+  resolveInboundAgentTarget,
+} from '../../src/agentLinks/inboundAgentRouting';
 import type { ConversationRuntime, SidebarRuntime } from '../../src/sidebar/sessionTypes';
 
 function chat(id: string, title = id): ConversationRuntime {
@@ -30,6 +33,15 @@ function state(active: ConversationRuntime, others: ConversationRuntime[] = []):
 }
 
 describe('inbound session routing', () => {
+  it('names an untitled destination as a new chat in the moved-session notice', () => {
+    expect(formatMovedSessionNotice('claude', linkValue(sender.sessionId), 'Untitled chat')).toBe(
+      'Claude session "Source session" moved to a new chat.',
+    );
+    expect(formatMovedSessionNotice('claude', linkValue(sender.sessionId), 'Review notes')).toBe(
+      'Claude session "Source session" moved to chat "Review notes".',
+    );
+  });
+
   it('links an unclaimed sender to the active chat with first-inbound origin', () => {
     const active = chat('active', 'Active chat');
     const sidebar = state(active);

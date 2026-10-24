@@ -96,7 +96,7 @@ interface UserPromptMsg {
   type: 'userPrompt';
   text: string;
   createdAt?: number;
-  conversationId?: string;
+  conversationId: string;
   /** A tell the running turn just took in: shown inline, it opens no turn. */
   midTurn?: boolean;
   /** Files sent with a prompt from outside the webview (a paired chat), for its bubble. */

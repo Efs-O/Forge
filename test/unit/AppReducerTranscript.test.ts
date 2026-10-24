@@ -81,6 +81,7 @@ interface AppModule {
 }
 
 let appModule: AppModule;
+let hostUserPromptToAction: typeof import('../../webview-ui/src/hostActions').hostUserPromptToAction;
 
 beforeAll(async () => {
   (
@@ -98,6 +99,7 @@ beforeAll(async () => {
   });
 
   appModule = (await import('../../webview-ui/src/reducer')) as AppModule;
+  ({ hostUserPromptToAction } = await import('../../webview-ui/src/hostActions'));
 });
 
 describe('webview App reducer — transcript rows', () => {
@@ -211,6 +213,27 @@ describe('webview App reducer — transcript rows', () => {
       { role: 'user', content: 'also check the jobs', midTurn: true },
       { role: 'assistant', content: 'Checking jobs.' },
     ]);
+  });
+
+  it('routes a host prompt to chat B while chat C is active and drops an unaddressed prompt', () => {
+    const state = { ...appModule.initialState, activeConversationId: 'chat-c' };
+    const action = hostUserPromptToAction({
+      type: 'userPrompt',
+      text: 'message from B',
+      conversationId: 'chat-b',
+    });
+
+    expect(action).toMatchObject({ type: 'USER_SEND', convId: 'chat-b' });
+    if (!action || action.type !== 'USER_SEND') throw new Error('Expected a user send action');
+    const routed = appModule.reducer(state, action);
+    expect(routed.messagesById['chat-b']?.map((row) => row.content)).toEqual(['message from B']);
+    expect(routed.messagesById['chat-c']).toBeUndefined();
+
+    const unaddressed = hostUserPromptToAction({
+      type: 'userPrompt',
+      text: 'message with its destination missing',
+    } as unknown as Parameters<typeof hostUserPromptToAction>[0]);
+    expect(unaddressed).toBeUndefined();
   });
 
   it('keeps streamed reasoning separate when final answer tokens arrive', () => {

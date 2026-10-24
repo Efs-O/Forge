@@ -1,5 +1,29 @@
 import type { HostToWebview } from '../../src/sidebar/messageBridge';
 import type { Action } from './appState';
+import { toMessageAttachments } from './components/useAttachments';
+
+type UserPromptMsg = Extract<HostToWebview, { type: 'userPrompt' }>;
+
+/** Maps an addressed host prompt. A missing runtime id must never fall back to the active chat. */
+export function hostUserPromptToAction(msg: UserPromptMsg): Action | undefined {
+  if (!msg.conversationId) return undefined;
+  if (msg.midTurn) {
+    return {
+      type: 'MID_TURN_TELL',
+      text: msg.text,
+      ...(msg.createdAt !== undefined ? { createdAt: msg.createdAt } : {}),
+      convId: msg.conversationId,
+    };
+  }
+  return {
+    type: 'USER_SEND',
+    text: msg.text,
+    ...(msg.createdAt !== undefined ? { createdAt: msg.createdAt } : {}),
+    convId: msg.conversationId,
+    ...(msg.sender ? { sender: msg.sender } : {}),
+    ...(msg.attachments?.length ? { attachments: toMessageAttachments(msg.attachments) } : {}),
+  };
+}
 
 /**
  * Host messages that map one-to-one onto a reducer action. Returns `undefined`
