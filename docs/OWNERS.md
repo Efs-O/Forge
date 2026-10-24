@@ -44,6 +44,8 @@ overlaps with an existing owner, extend the owner instead.
 | Chat-cap refusal wording (`chatCapMessage`) | `src/sidebar/sessionTypes.ts` |
 | Hidden conversation notifications                    | `src/sidebar/hiddenChatAlerts.ts`        |
 | Background process exit notice + end-of-turn still-running notice text | `src/sidebar/backgroundExitNotice.ts` |
+| Shared typed/background/tool prompt delivery router | `src/sidebar/backgroundExitNotice.ts` |
+| Tool-authored prompt entry into the shared router | `src/sidebar/SidebarProvider.ts` |
 | Send admission, model resolution and request-chain orchestration | `src/sidebar/SendPipeline.ts`            |
 | Per-conversation session-log lifecycle, event routing and cursor flush | `src/sidebar/SessionLogCoordinator.ts` |
 | /reindex progress interaction                        | `src/sidebar/reindexCommand.ts`          |
@@ -132,6 +134,8 @@ overlaps with an existing owner, extend the owner instead.
 | Inbound session identity validation | `src/backend/agentSenderParsing.ts` |
 | Sidebar link-routing facade dependencies | `src/sidebar/agentLinkFacadeDeps.ts` |
 | `ask_agent` strict tool boundary | `src/tools/askAgentTool.ts` |
+| `message_chat` schema, delivery, and per-sender in-memory caps | `src/tools/messageChatTool.ts` |
+| `message_chat` reference resolution and chat-list formatting | `src/tools/chatMessageResolver.ts` |
 | Copilot one-shot CLI argv and output parsing | `src/agents/adapters/copilotAdapter.ts` |
 | Conversation titles: placeholder + derive            | `src/sidebar/conversationTitle.ts`       |
 | Image content parts: count/strip/age out             | `src/sidebar/imageParts.ts`              |

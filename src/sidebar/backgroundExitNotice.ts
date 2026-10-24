@@ -3,6 +3,7 @@ import type {
   BackgroundExecutionManager,
 } from '../tools/BackgroundExecutionManager';
 import type { AttachmentData } from './messageBridge';
+import type { ForgeRequestOutcome } from './turnOutcome';
 import { backgroundExecutionManager } from '../tools/BackgroundExecutionManager';
 import { logger } from '../util/logger';
 
@@ -76,7 +77,7 @@ export function routeSidebarPrompt(
     echoPrompt?: boolean,
     internal?: boolean,
     createdAt?: number,
-  ) => void,
+  ) => Promise<ForgeRequestOutcome> | void,
   echoPrompt = false,
   internal = false,
 ): void {
@@ -87,9 +88,16 @@ export function routeSidebarPrompt(
     return;
   }
   if (target.createdAt === undefined)
-    send(text, target.attachments, target.conversationId, echoPrompt, internal);
+    void send(text, target.attachments, target.conversationId, echoPrompt, internal);
   else
-    send(text, target.attachments, target.conversationId, echoPrompt, internal, target.createdAt);
+    void send(
+      text,
+      target.attachments,
+      target.conversationId,
+      echoPrompt,
+      internal,
+      target.createdAt,
+    );
 }
 
 export function deliverBackgroundExitNotice(
@@ -116,6 +124,11 @@ function subscribeBackgroundExitNotices(
   );
 }
 
+export type ChatMessageDelivery =
+  | { kind: 'tell' }
+  | { kind: 'turn' }
+  | { kind: 'refused'; error: string };
+
 export interface SidebarPromptRouter {
   route: (
     text: string,
@@ -124,6 +137,12 @@ export interface SidebarPromptRouter {
     tellId?: string,
     createdAt?: number,
   ) => void;
+  /**
+   * A message from another chat (`message_chat`): a tell when `id` is busy,
+   * else a visible turn there. Resolves once delivery is known: `turn` on
+   * admission, `refused` when the send was turned away before it started.
+   */
+  deliverChatMessage: (text: string, id: string) => Promise<ChatMessageDelivery>;
   /** False when the tell had already reached the turn. */
   cancelTell: (conversationId: string, tellId: string) => boolean;
   /**
@@ -137,6 +156,47 @@ export interface SidebarPromptRouter {
   interruptForSteering: (conversationId: string) => Promise<void>;
   /** Stops delivering background exit notices. */
   dispose(): void;
+}
+
+type ChatMessageRouterOptions = Pick<
+  Parameters<typeof createSidebarPromptRouter>[0],
+  'isReserved' | 'addTell' | 'send'
+>;
+
+function deliverChatMessage(
+  options: ChatMessageRouterOptions,
+  text: string,
+  id: string,
+): Promise<ChatMessageDelivery> {
+  if (options.isReserved(id)) {
+    options.addTell(id, text, false);
+    return Promise.resolve({ kind: 'tell' });
+  }
+  return new Promise((resolve) => {
+    let admitted = false;
+    const sent = options.send(text, undefined, id, true, false, undefined, () => {
+      admitted = true;
+      resolve({ kind: 'turn' });
+    });
+    if (!sent) {
+      if (!admitted) resolve({ kind: 'refused', error: 'Forge: the chat could not start a turn.' });
+      return;
+    }
+    // A send settles only when its turn ends; before admission that is a refusal.
+    sent.then(
+      (outcome) => {
+        if (admitted) return;
+        resolve({
+          kind: 'refused',
+          error: outcome.kind === 'failed' ? outcome.error : `the turn ended as ${outcome.kind}`,
+        });
+      },
+      (err: unknown) => {
+        if (!admitted)
+          resolve({ kind: 'refused', error: err instanceof Error ? err.message : String(err) });
+      },
+    );
+  });
 }
 
 export function createSidebarPromptRouter(options: {
@@ -160,7 +220,8 @@ export function createSidebarPromptRouter(options: {
     echoPrompt?: boolean,
     internal?: boolean,
     createdAt?: number,
-  ) => void;
+    onAdmitted?: () => void,
+  ) => Promise<ForgeRequestOutcome> | void;
   isOpen: (id: string) => boolean;
 }): SidebarPromptRouter {
   const route = (
@@ -193,6 +254,7 @@ export function createSidebarPromptRouter(options: {
   return {
     route: (text, attachments, id, tellId, createdAt) =>
       route(text, attachments, id, false, false, tellId, createdAt),
+    deliverChatMessage: (text, id) => deliverChatMessage(options, text, id),
     cancelTell: options.removeTell,
     sendQueuedNow: (conversationId, tellId) => {
       if (tellId && !options.markSendNow(conversationId, tellId)) return false;

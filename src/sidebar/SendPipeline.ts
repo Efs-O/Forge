@@ -97,7 +97,13 @@ export class SendPipeline {
     attachments?: AttachmentData[],
     conversationId?: string,
     promptOptions?: UserPromptOptions,
-    metadata?: { remoteRequestId?: string; echoPrompt?: boolean; createdAt?: number },
+    metadata?: {
+      remoteRequestId?: string;
+      echoPrompt?: boolean;
+      createdAt?: number;
+      /** Called once the turn is admitted; a refusal before that resolves `send` as `failed`. */
+      onAdmitted?: () => void;
+    },
   ): Promise<ForgeRequestOutcome> {
     const { deps } = this;
     const refuse = (message: string, error: string, id?: string): ForgeRequestOutcome => {
@@ -181,6 +187,7 @@ export class SendPipeline {
       return refuse(busyAgain, CONVERSATION_BUSY_ERROR, conv.id);
     }
     const chain = deps.requestChains.accept(admission.reservation, metadata?.remoteRequestId);
+    metadata?.onAdmitted?.();
     const createdAt = messageCreatedAt(metadata?.createdAt);
     const initialPromptOptions = { ...(promptOptions ?? {}), createdAt };
     // Persist the full selection (incl. @profile) on the conversation so tab

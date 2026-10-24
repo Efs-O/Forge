@@ -143,6 +143,7 @@ describe('local tool harness canonical inventory', () => {
         'apply_code_action',
         'manage_jobs',
         'ask_agent',
+        'message_chat',
         'apply_line_edits',
         'ask_local_agent',
         'edit_notebook_cell',

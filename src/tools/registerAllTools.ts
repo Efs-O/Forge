@@ -52,6 +52,7 @@ import { makeLoadToolGroupTool } from './toolGroupTools';
 import { makeInstallLlamacppTool } from './llamacppInstallTool';
 import { makeManageJobsTool } from './jobTools';
 import { makeAskAgentTool } from './askAgentTool';
+import { makeMessageChatTool, type MessageChatSidebar } from './messageChatTool';
 import { makeAskAgentRuntime } from '../agentLinks/askAgentRuntime';
 import { makeReadToolResultTool } from './toolResultTools';
 import { makeUpdatePlanTool } from './planTools';
@@ -109,6 +110,7 @@ export function registerAllTools(
     configPath?: string;
   },
   onForgetMemory?: (key: string) => void,
+  messageChatSidebar?: () => MessageChatSidebar | undefined,
 ): SdServerRegistry | undefined {
   // config.yaml `extra_file_roots`: absolute folders outside the workspace that
   // create_directory / delete_file may also reach. A getter, so a
@@ -277,6 +279,7 @@ export function registerAllTools(
 
   // Agent messaging. Self-suppressing until `agent_bus.enabled`, so a config
   // without it keeps the tool list unchanged.
+  registry.register(makeMessageChatTool({ getSidebar: messageChatSidebar ?? (() => undefined) }));
   if (getConfig) {
     registry.register(
       makeAskAgentTool({

@@ -47,9 +47,16 @@ function sse(data: unknown): string {
 }
 
 async function readDump(conversationId: string): Promise<Record<string, unknown>> {
-  await new Promise((resolve) => setTimeout(resolve, 25));
   const directory = path.join(root, conversationId);
-  const filename = fs.readdirSync(directory).find((name) => name.endsWith('.json'));
+  let filename: string | undefined;
+  await vi.waitFor(
+    () => {
+      expect(fs.existsSync(directory)).toBe(true);
+      filename = fs.readdirSync(directory).find((name) => name.endsWith('.json'));
+      expect(filename).toBeDefined();
+    },
+    { timeout: 5_000, interval: 10 },
+  );
   if (!filename) throw new Error(`no dump written for ${conversationId}`);
   return JSON.parse(fs.readFileSync(path.join(directory, filename), 'utf8')) as Record<
     string,

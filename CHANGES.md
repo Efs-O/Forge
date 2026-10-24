@@ -1,5 +1,10 @@
 # Forge — Recent Changes
 
+## 0.17.73
+
+- New tool `message_chat`: a chat can message another open chat in the same window. `to` takes a chat id, a tab number (`#2`), or words from the title (`"the bug hunt chat"`). If `to` is omitted, the message goes to the only other running chat. A busy chat gets the message at its next tool round. An idle chat starts a turn with the message shown as a prompt, and the active tab does not change. The tool says what actually happened: delivered as a tell, delivered as a new turn, refused (with the target's reason; nothing is counted), or unconfirmed after 20 s. Each sending chat is limited to 30 sends and 6 idle-chat wakes per rolling hour. The always-available schema measures 58,149 characters; the CI ceiling is now 58,750.
+- Tests: request-recording tests wait for the async dump instead of sleeping a fixed 25–30 ms, which lost the race under full-suite load.
+
 ## 0.17.72
 
 - Process-kill commands in `shell` (`taskkill`, `Stop-Process`, `kill`, `pkill`) are no longer dangerous. In a normal chat they still ask like any other command; `/clanker` runs them without asking, and unattended runs and jobs allow them instead of refusing. Recursive deletes, `git reset --hard`, force pushes, SQL `DROP` and the other destructive rules are unchanged.

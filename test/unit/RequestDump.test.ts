@@ -16,8 +16,15 @@ beforeEach(() => {
   fs.mkdirSync(root, { recursive: true });
 });
 
-async function flushWrites(): Promise<void> {
-  await new Promise((resolve) => setTimeout(resolve, 25));
+async function waitForDump(conversationId: string): Promise<void> {
+  const directory = path.join(root, conversationId);
+  await vi.waitFor(
+    () => {
+      expect(fs.existsSync(directory)).toBe(true);
+      expect(fs.readdirSync(directory).some((name) => name.endsWith('.json'))).toBe(true);
+    },
+    { timeout: 5_000, interval: 10 },
+  );
 }
 
 function dumpInput(conversationId = 'c1', request = '{"messages":[]}') {
@@ -45,7 +52,7 @@ describe('request dump writer', () => {
     const writer = new RequestDumpWriter(root, warn);
     const input = dumpInput('c1', request);
     writer.enqueue(input, { maxBytes: 10_000, keepHours: 24 });
-    await flushWrites();
+    await waitForDump('c1');
 
     const files = fs.readdirSync(path.join(root, 'c1'));
     expect(files).toHaveLength(1);
@@ -70,7 +77,7 @@ describe('request dump writer', () => {
     const writer = new RequestDumpWriter(root, warn);
     writer.enqueue(dumpInput(), { maxBytes: 1, keepHours: 1 });
     writer.enqueue(dumpInput(), { maxBytes: 1, keepHours: 1 });
-    await flushWrites();
+    await vi.waitFor(() => expect(warn).toHaveBeenCalledTimes(1), { timeout: 5_000, interval: 10 });
 
     expect(fs.existsSync(path.join(root, 'c1'))).toBe(false);
     expect(warn).toHaveBeenCalledTimes(1);
@@ -84,7 +91,7 @@ describe('request dump writer', () => {
     const writer = new RequestDumpWriter(blockedRoot, warn);
     writer.enqueue(dumpInput(), { maxBytes: 10_000, keepHours: 24 });
     writer.enqueue(dumpInput(), { maxBytes: 10_000, keepHours: 24 });
-    await flushWrites();
+    await vi.waitFor(() => expect(warn).toHaveBeenCalledTimes(1), { timeout: 5_000, interval: 10 });
 
     expect(warn).toHaveBeenCalledTimes(1);
     expect(warn.mock.calls[0]?.[0]).toContain('disabled request dumps');

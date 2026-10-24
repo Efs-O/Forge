@@ -191,11 +191,17 @@ describe('request recording through the tool-calling loop', () => {
     const record = capture('ok');
     record.body = JSON.stringify({ messages: [{ role: 'user', content: 'exact body' }] });
     logs.logRequestStats(id, record);
-    await new Promise((resolve) => setTimeout(resolve, 30));
 
+    // The dump is written asynchronously; a fixed sleep lost the race under
+    // full-suite load and left the write running into the next test.
     const directory = path.join(fakeHome.dir, '.forge', 'requests', id);
-    const filename = fs.readdirSync(directory).find((name) => name.endsWith('.json'));
-    expect(filename).toBeDefined();
+    const filename = await vi.waitFor(() => {
+      const found = fs.existsSync(directory)
+        ? fs.readdirSync(directory).find((name) => name.endsWith('.json'))
+        : undefined;
+      expect(found).toBeDefined();
+      return found;
+    });
     const dump = JSON.parse(fs.readFileSync(path.join(directory, filename!), 'utf8')) as {
       request: unknown;
     };
@@ -226,11 +232,12 @@ describe('request recording through the tool-calling loop', () => {
 
     const result = await runToolCallingLoop(options as never);
     expect(result.finalText).toBe('completed despite dump failure');
-    await new Promise((resolve) => setTimeout(resolve, 30));
+    const warning = `disabled request dumps for conversation ${id}`;
+    await vi.waitFor(() => expect(outputLines.some((line) => line.includes(warning))).toBe(true));
     const turnDoneAt = outputLines.indexOf('turn-done');
-    const warningAt = outputLines.findIndex((line) => line.includes('disabled request dumps'));
+    const warningAt = outputLines.findIndex((line) => line.includes(warning));
     expect(turnDoneAt).toBeGreaterThanOrEqual(0);
     expect(warningAt).toBeGreaterThan(turnDoneAt);
-    expect(outputLines.filter((line) => line.includes('disabled request dumps'))).toHaveLength(1);
+    expect(outputLines.filter((line) => line.includes(warning))).toHaveLength(1);
   });
 });

@@ -46,7 +46,7 @@ import type { UserNotificationService } from './UserNotificationService';
 import { createSidebarAgentAsk } from './sidebarAgentAsk';
 import type { MidTurnTellDrain } from '../agent/MidTurnTellDrain';
 import { HiddenChatAlerts } from './hiddenChatAlerts';
-import type { SidebarPromptRouter } from './backgroundExitNotice';
+import type { ChatMessageDelivery, SidebarPromptRouter } from './backgroundExitNotice';
 import { attachmentsRootUri, openAttachment } from './attachmentAccess';
 import { listMemoryKeys } from '../tools/memoryTools';
 import { retainSessionMemoryKeys } from './memorySnapshotLifecycle';
@@ -274,6 +274,11 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
   /** Stable addressed seam for the extension-scoped remote runtime. */
   getHostFacade(): ForgeHostFacade {
     return this.hostFacade;
+  }
+
+  /** Route tool-authored chat messages through the same path as typed prompts. */
+  deliverChatMessage(text: string, conversationId: string): Promise<ChatMessageDelivery> {
+    return this.promptRouter.deliverChatMessage(text, conversationId);
   }
 
   sweepIdleConversations = (): void => this.tabs.sweepIdleConversations();

@@ -477,10 +477,11 @@ export function wireSidebar(host: SidebarHost, parts: SidebarParts): SidebarRunt
       requestChains.markCancelling(id, 'interrupted');
       await agentLoop.interrupt(id);
     },
-    send: (text, attachments, id, echo, internal, createdAt) =>
-      void send.send(text, attachments, id, internal ? { internal: true } : undefined, {
+    send: (text, attachments, id, echo, internal, createdAt, onAdmitted) =>
+      send.send(text, attachments, id, internal ? { internal: true } : undefined, {
         ...(echo ? { echoPrompt: true } : {}),
         ...(createdAt !== undefined ? { createdAt } : {}),
+        ...(onAdmitted ? { onAdmitted } : {}),
       }),
     isOpen: (id) => host.getSidebar().conversations.some((conversation) => conversation.id === id),
   });
