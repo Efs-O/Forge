@@ -13,6 +13,9 @@ import type { RemoteSessionTarget } from './remoteSessionTellCommands';
 
 interface RemotePromptAdmissionOptions {
   workspaceId: string;
+  workspaceNamesById?: Readonly<Record<string, string>>;
+  currentWorkspaceName?: string | undefined;
+  currentWorkspaceAlias?: string | undefined;
   queueLimit: number;
   attachmentsEnabled: boolean;
   acceptPdfAttachments: boolean;
@@ -41,6 +44,13 @@ export function isRemoteCommand(text: string): boolean {
   return text.trim().startsWith('/');
 }
 
+function boundWorkspaceRefusal(options: RemotePromptAdmissionOptions, boundId: string): string {
+  const name = options.workspaceNamesById?.[boundId] ?? boundId;
+  return options.currentWorkspaceAlias
+    ? `this chat is bound to ${name} — send /workspace ${options.currentWorkspaceAlias} to move it here, or /workspace to pick`
+    : `this chat is bound to ${name} — send /workspace to pick where it goes`;
+}
+
 /** Durable prompt admission. */
 export async function admitRemotePrompt(
   event: Extract<RemoteInboundEvent, { kind: 'text' }>,
@@ -55,7 +65,7 @@ export async function admitRemotePrompt(
   }
   let binding = deps.store.binding(event.channel, event.chatId);
   if (binding && binding.workspaceId !== deps.options.workspaceId) {
-    return { kind: 'rejected', reason: 'chat is bound to a different workspace' };
+    return { kind: 'rejected', reason: boundWorkspaceRefusal(deps.options, binding.workspaceId) };
   }
   if (!binding) {
     const conversation = await deps.host.createConversation({ activate: false });
@@ -137,7 +147,7 @@ export async function resumeRemoteConversation(
   const binding = deps.store.binding(event.channel, event.chatId);
   if (!binding) return { kind: 'rejected', reason: 'no conversation is bound' };
   if (binding.workspaceId !== deps.options.workspaceId) {
-    return { kind: 'rejected', reason: 'chat is bound to a different workspace' };
+    return { kind: 'rejected', reason: boundWorkspaceRefusal(deps.options, binding.workspaceId) };
   }
   if (deps.isBusy(binding.conversationId)) {
     return { kind: 'rejected', reason: 'the bound conversation is already running' };

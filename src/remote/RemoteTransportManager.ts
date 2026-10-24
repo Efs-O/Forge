@@ -10,7 +10,7 @@ import { RemoteRequestStore } from './RemoteRequestStore';
 import { RemoteContactStore } from './RemoteContactStore';
 import { ContactInstructionsLoader } from './ContactInstructionsLoader';
 import { TelegramContactService } from './TelegramContactService';
-import { RemoteTransportLease } from './RemoteTransportLease';
+import { RemoteLeaseError, RemoteTransportLease } from './RemoteTransportLease';
 import type { RemoteChannel, RemoteRuntimeOptions } from './types';
 import { RemoteAuditLog } from './RemoteAuditLog';
 import { subscribeHostToRemote, type HostSubscriptions } from './remoteHostSubscriptions';
@@ -220,6 +220,36 @@ export class RemoteTransportManager {
       this.store.setClaimOwner(channelName, undefined);
       await lease.release();
       throw err;
+    }
+  }
+
+  /** Starts every configured transport, or none: a partial start is stopped again. */
+  async startAll(config: ForgeConfig): Promise<void> {
+    try {
+      for (const channelName of ['telegram', 'whatsapp'] as const) {
+        await this.startTransport(channelName, config);
+      }
+    } catch (err) {
+      await this.stopActive();
+      throw err;
+    }
+  }
+
+  /**
+   * The source window releases its lease before opening the target folder, but
+   * the two windows are separate processes: a few seconds of overlap is normal
+   * and is not a reason to refuse the chat.
+   */
+  async takeOver(config: ForgeConfig): Promise<void> {
+    for (let attempt = 0; attempt < 5; attempt += 1) {
+      if (this.active.size > 0) return;
+      try {
+        await this.startAll(config);
+        return;
+      } catch (err) {
+        if (!(err instanceof RemoteLeaseError)) throw err;
+        await new Promise((resolve) => setTimeout(resolve, 2_000));
+      }
     }
   }
 

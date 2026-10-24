@@ -399,6 +399,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
         // a schedule (re-register it). Reconcile either way.
         jobsSetup?.onConfigReloaded();
         void remoteRuntime.applyConfig(config).catch((err) => {
+          getLogger().error(`[remote] start failed: ${(err as Error).message}`);
           void vscode.window.showErrorMessage(
             `Forge remote failed to reload: ${(err as Error).message}`,
           );

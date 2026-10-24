@@ -77,7 +77,9 @@ export interface RemoteCommandContext {
     event: Extract<RemoteInboundEvent, { kind: 'text' }>,
     dedupKey: string,
   ) => Promise<RemoteInboundDisposition>;
-  switchWorkspace?: ((alias: string, channel: string, chatId: string) => Promise<void>) | undefined;
+  switchWorkspace?:
+    | ((alias: string, channel: string, chatId: string) => Promise<() => Promise<void>>)
+    | undefined;
   setInactivityTimeout?: ((minutes: number) => Promise<void>) | undefined;
   setRateLimit?: ((perMinute: number) => Promise<void>) | undefined;
   reloadWindow?: (() => Promise<void>) | undefined;

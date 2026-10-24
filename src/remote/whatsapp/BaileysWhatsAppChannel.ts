@@ -187,6 +187,7 @@ export class BaileysWhatsAppChannel implements RemoteChannel {
         `Forge WhatsApp could not durably admit an event and may require resend: ${disposition.reason}`,
       );
     }
+    if (disposition.kind === 'handled') await disposition.afterHandled?.();
   }
 
   private scheduleReconnect(): void {

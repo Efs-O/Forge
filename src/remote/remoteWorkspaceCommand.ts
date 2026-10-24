@@ -19,7 +19,9 @@ export interface WorkspaceSwitchContext {
   signal: AbortSignal;
   workspaceAliases: Readonly<Record<string, string>>;
   currentWorkspaceAlias?: string | undefined;
-  switchWorkspace?: ((alias: string, channel: string, chatId: string) => Promise<void>) | undefined;
+  switchWorkspace?:
+    | ((alias: string, channel: string, chatId: string) => Promise<() => Promise<void>>)
+    | undefined;
 }
 
 export async function switchWorkspaceCommand(
@@ -58,6 +60,6 @@ export async function switchWorkspaceCommand(
     `Forge: switching to ${context.workspaceAliases[alias]}… the window reloads, so this chat goes quiet for a few seconds — I will message you when it is back.`,
     { signal: context.signal },
   );
-  await context.switchWorkspace(alias, event.channel, event.chatId);
-  return { kind: 'handled' };
+  const finishSwitch = await context.switchWorkspace(alias, event.channel, event.chatId);
+  return { kind: 'handled', afterHandled: finishSwitch };
 }

@@ -33,7 +33,10 @@ export interface RemoteControllerOptions {
   currentWorkspaceAlias?: string | undefined;
   /** Display name of the folder this window has open, alias or not. */
   currentWorkspaceName?: string | undefined;
-  switchWorkspace?: ((alias: string, channel: string, chatId: string) => Promise<void>) | undefined;
+  workspaceNamesById?: Readonly<Record<string, string>>;
+  switchWorkspace?:
+    | ((alias: string, channel: string, chatId: string) => Promise<() => Promise<void>>)
+    | undefined;
   inactivityTimeoutMinutes?: number;
   /** Seconds to keep a recognized /command before deleting it from Telegram; 0/absent disables. */
   deleteCommandMessagesAfter?: number;
@@ -121,7 +124,7 @@ export interface RemoteControllerOptionsDeps {
     alias: string,
     channel: string,
     chatId: string,
-  ) => Promise<void>;
+  ) => Promise<() => Promise<void>>;
   /**
    * The shared `JobStore` (B3), created once in extension.ts and passed to
    * both the scheduler and the `manage_jobs` tool. Stable across config
@@ -165,6 +168,12 @@ export function buildRemoteControllerOptions(
     acceptPdfAttachments: remote.attachments.accept_pdf,
     workspaceAliases: Object.fromEntries(
       Object.entries(aliases).map(([alias, value]) => [alias, value.display_name]),
+    ),
+    workspaceNamesById: Object.fromEntries(
+      Object.entries(aliases).map(([alias, value]) => [
+        workspaceIdFor(value.path),
+        value.display_name || alias,
+      ]),
     ),
     ...(() => {
       const { alias, name } = currentWorkspaceIdentity(

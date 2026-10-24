@@ -1,4 +1,3 @@
-import * as fs from 'fs/promises';
 import { randomUUID } from 'crypto';
 import type {
   RemoteBinding,
@@ -8,16 +7,19 @@ import type {
 } from './types';
 import {
   EMPTY_REMOTE_STATE,
-  LegacyRemoteStateSchema,
   MAX_RECORDS,
-  migrateLegacyState,
   RemoteStateSchema,
   type RemoteSelection,
   type RemoteStoreState,
   type WorkspaceHandoff,
 } from './RemoteStoreSchemas';
 import { bindingsForConversation, bindingsForWorkspace } from './remoteBindingQueries';
-import { withRemoteStateLock, writeRemoteStateFile } from './remoteStateFile';
+import {
+  openRemoteState,
+  readRemoteState,
+  withRemoteStateLock,
+  writeRemoteStateFile,
+} from './remoteStateFile';
 import {
   claimHandoffs,
   completeHandoff,
@@ -68,12 +70,7 @@ export class RemoteRequestStore {
 
   async load(): Promise<void> {
     if (this.loaded) return;
-    try {
-      this.state = RemoteStateSchema.parse(JSON.parse(await fs.readFile(this.filePath, 'utf8')));
-    } catch (err) {
-      if ((err as NodeJS.ErrnoException).code !== 'ENOENT') throw err;
-      await this.importLegacyOrCreate();
-    }
+    this.state = await openRemoteState(this.filePath, this.legacyFilePath);
     await this.mutate((draft) => recoverInterruptedRemoteState(draft, this.filePath));
     this.loaded = true;
   }
@@ -447,12 +444,13 @@ export class RemoteRequestStore {
     return operation;
   }
 
+  /** Settles every queued write, so a window about to die has nothing in flight. */
+  async drainMutations(): Promise<void> {
+    await this.mutationTail;
+  }
+
   private async reload(): Promise<void> {
-    try {
-      this.state = RemoteStateSchema.parse(JSON.parse(await fs.readFile(this.filePath, 'utf8')));
-    } catch (err) {
-      if ((err as NodeJS.ErrnoException).code !== 'ENOENT') throw err;
-    }
+    this.state = (await readRemoteState(this.filePath)) ?? this.state;
   }
 
   /** Windows share the file: each write starts from disk, or a cursor save
@@ -471,28 +469,5 @@ export class RemoteRequestStore {
     });
     this.mutationTail = operation.catch(() => undefined);
     return operation;
-  }
-
-  private async importLegacyOrCreate(): Promise<void> {
-    await withRemoteStateLock(this.filePath, async () => {
-      try {
-        this.state = RemoteStateSchema.parse(JSON.parse(await fs.readFile(this.filePath, 'utf8')));
-        return;
-      } catch (err) {
-        if ((err as NodeJS.ErrnoException).code !== 'ENOENT') throw err;
-      }
-      if (this.legacyFilePath) {
-        try {
-          this.state = migrateLegacyState(
-            LegacyRemoteStateSchema.parse(
-              JSON.parse(await fs.readFile(this.legacyFilePath, 'utf8')),
-            ),
-          );
-        } catch (err) {
-          if ((err as NodeJS.ErrnoException).code !== 'ENOENT') throw err;
-        }
-      }
-      await writeRemoteStateFile(this.filePath, JSON.stringify(this.state));
-    });
   }
 }

@@ -8,26 +8,22 @@ import { RemoteRequestStore } from './RemoteRequestStore';
 import { remoteSessionAction, type RemoteSessionActionResult } from './RemoteSessionBridge';
 import { claimRemoteMidTurnTell } from './RemoteMidTurnTells';
 import type { MidTurnDrainResult } from '../agent/MidTurnInbox';
-import { RemoteLeaseError } from './RemoteTransportLease';
 import { RemoteAuditLog } from './RemoteAuditLog';
 import { RemoteAttachmentStore } from './RemoteAttachmentStore';
 import { RemoteTransportManager } from './RemoteTransportManager';
 import {
   buildRemoteControllerOptions,
-  currentWorkspaceIdentity,
   workspaceAliases,
   transportNames,
   type RemoteControllerOptionsDeps,
 } from './remoteControllerOptions';
 import { RemoteHandoffCoordinator } from './RemoteHandoffCoordinator';
-import {
-  recordWorkspaceHandoff,
-  resumeWorkspaceHandoffs,
-  announceWorkspaceArrivals,
-} from './RemoteWorkspaceHandoff';
+import { resumeWorkspaceHandoffs, announceWorkspaceArrivals } from './RemoteWorkspaceHandoff';
 import type { WorkspaceArrival } from './RemoteWorkspaceHandoff';
 import { RemoteCompactionNoticeBuffers } from './compactionNoticeBuffer';
 import { voiceRuntimeSignature } from './voiceRuntimeSignature';
+import { RemoteStartRetry } from './RemoteStartRetry';
+import { prepareRemoteWorkspaceSwitch } from './remoteWorkspaceSwitch';
 import { buildRemoteValidationStatus } from './remoteValidationStatus';
 import { sendRemoteWorkspaceFile } from './remoteFileDelivery';
 import {
@@ -60,6 +56,17 @@ export class RemoteRuntime {
   private appliedConfig: ForgeConfig | undefined;
   /** Retained even if transport startup fails, for later handoff recovery. */
   private requestedConfig: ForgeConfig | undefined;
+  private readonly startRetry = new RemoteStartRetry({
+    serialize: (task) => this.enqueue(task),
+    wanted: (config) =>
+      !this.disposed &&
+      config.remote?.enabled === true &&
+      this.requestedConfig === config &&
+      this.manager.names().length === 0,
+    start: (config) => this.replace(config),
+  });
+  /** Claimed by a start that then failed; announced by the start that succeeds. */
+  private unannouncedArrivals: WorkspaceArrival[] = [];
 
   constructor(private readonly options: RemoteRuntimeOptions) {
     this.auth = new RemoteAuth(options.secrets, undefined, () => this.notifyStatus());
@@ -126,7 +133,8 @@ export class RemoteRuntime {
   }
 
   applyConfig(config: ForgeConfig): Promise<void> {
-    return this.enqueue(() => this.replace(config));
+    this.startRetry.cancel();
+    return this.enqueue(() => this.replaceWithRetry(config));
   }
 
   /**
@@ -138,7 +146,7 @@ export class RemoteRuntime {
     return this.enqueue(async () => {
       if (this.disposed) return;
       if (!this.appliedConfig) {
-        await this.replace(config);
+        await this.replaceWithRetry(config);
         return;
       }
       await this.manager.stopTransport(name);
@@ -262,6 +270,7 @@ export class RemoteRuntime {
 
   async dispose(): Promise<void> {
     this.disposed = true;
+    this.startRetry.cancel();
     this.coordinator.dispose();
     await this.applySerializedStop();
   }
@@ -287,8 +296,17 @@ export class RemoteRuntime {
       );
       const config = loadConfig(path.dirname(this.options.configPath!));
       this.appliedConfig = config;
-      return this.replace(config);
+      return this.replaceWithRetry(config);
     });
+  }
+
+  private async replaceWithRetry(config: ForgeConfig): Promise<void> {
+    try {
+      await this.replace(config);
+    } catch (err) {
+      this.startRetry.failed(config, err);
+      throw err;
+    }
   }
 
   private async replace(config: ForgeConfig): Promise<void> {
@@ -327,16 +345,12 @@ export class RemoteRuntime {
       this.options.workspaceId,
       this.options.host,
     );
-    try {
-      for (const channelName of ['telegram', 'whatsapp'] as const) {
-        await this.manager.startTransport(channelName, config);
-      }
-    } catch (err) {
-      await this.manager.stopActive();
-      throw err;
-    }
+    this.unannouncedArrivals.push(...arrivals);
+    await this.manager.startAll(config);
     this.appliedConfig = config;
-    await this.announce(arrivals, config);
+    await this.announce(this.unannouncedArrivals, config);
+    this.unannouncedArrivals = [];
+    this.startRetry.cancel();
   }
 
   private announce(arrivals: readonly WorkspaceArrival[], config: ForgeConfig): Promise<void> {
@@ -362,7 +376,7 @@ export class RemoteRuntime {
   private async claimArrivals(): Promise<void> {
     const config = this.requestedConfig;
     if (this.disposed || config?.remote?.enabled !== true) return;
-    await this.takeOverTransports(config);
+    await this.manager.takeOver(config);
     if (this.manager.names().length === 0) return;
     const arrivals = await resumeWorkspaceHandoffs(
       this.store,
@@ -371,27 +385,6 @@ export class RemoteRuntime {
     );
     this.appliedConfig = config;
     await this.announce(arrivals, config);
-  }
-
-  /**
-   * The source window releases its lease before opening the target folder, but
-   * the two windows are separate processes: a few seconds of overlap is normal
-   * and is not a reason to refuse the chat.
-   */
-  private async takeOverTransports(config: ForgeConfig): Promise<void> {
-    for (let attempt = 0; attempt < 5; attempt += 1) {
-      if (this.manager.names().length > 0) return;
-      try {
-        for (const channelName of ['telegram', 'whatsapp'] as const) {
-          await this.manager.startTransport(channelName, config);
-        }
-        return;
-      } catch (err) {
-        await this.manager.stopActive();
-        if (!(err instanceof RemoteLeaseError)) throw err;
-        await new Promise((resolve) => setTimeout(resolve, 2_000));
-      }
-    }
   }
 
   /** Puts this window back the way it was after a switch that never happened. */
@@ -432,39 +425,21 @@ export class RemoteRuntime {
     alias: string,
     channel: string,
     chatId: string,
-  ): Promise<void> {
-    const target = workspaceAliases(config, this.options.workspaceRoot)[alias];
-    if (!target || !this.options.openWorkspace)
-      throw new Error(`workspace “${alias}” was not found.`);
-    const handoffId = await recordWorkspaceHandoff(
-      this.store,
-      this.options.workspaceId,
-      target,
+  ): Promise<() => Promise<void>> {
+    if (!this.options.openWorkspace)
+      throw new Error('workspace switching is unavailable in this window.');
+    return prepareRemoteWorkspaceSwitch({
+      config,
       alias,
       channel,
       chatId,
-    );
-    await this.manager.stopActive();
-    const rollback = {
-      handoffId,
-      channel: channel as 'telegram' | 'whatsapp',
-      chatId,
-      targetName: target.display_name,
-      currentName:
-        currentWorkspaceIdentity(
-          workspaceAliases(config, this.options.workspaceRoot),
-          this.options.workspaceId,
-          this.options.workspaceRoot,
-        ).name ?? 'this workspace',
-    };
-    // The target window's claim handles a reload; otherwise this timer does.
-    this.coordinator.armRollback(rollback);
-    try {
-      await this.options.openWorkspace(target.path);
-    } catch (err) {
-      await this.coordinator.rollbackNow(rollback);
-      throw err;
-    }
+      workspaceId: this.options.workspaceId,
+      ...(this.options.workspaceRoot ? { workspaceRoot: this.options.workspaceRoot } : {}),
+      store: this.store,
+      coordinator: this.coordinator,
+      stopTransports: () => this.manager.stopActive(),
+      openWorkspace: this.options.openWorkspace,
+    });
   }
 
   /** Current transport and pairing status for the sidebar chip. */

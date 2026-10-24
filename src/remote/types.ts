@@ -22,7 +22,7 @@ export {
 export type RemoteInboundDisposition =
   | { kind: 'accepted'; requestId: string }
   | { kind: 'queued'; requestId: string; position: number }
-  | { kind: 'handled' }
+  | { kind: 'handled'; afterHandled?: () => Promise<void> }
   | { kind: 'duplicate'; requestId: string; state: RemoteExecutionState }
   | { kind: 'rejected'; reason: string; ephemeral?: boolean }
   | { kind: 'retry'; reason: string };

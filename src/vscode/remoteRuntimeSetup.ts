@@ -10,6 +10,9 @@ import { startWakeRelay } from './wakeRelaySetup';
 import { disposeLocalLlamaFetch } from '../llm/localLlamaFetch';
 import type { JobStore } from '../jobs/JobStore';
 import type { SidebarProvider } from '../sidebar/SidebarProvider';
+import { getLogger } from '../util/logger';
+
+const log = getLogger();
 
 /**
  * Build and start the remote runtime: the channel factories (Telegram from
@@ -119,7 +122,9 @@ export async function setupRemoteRuntime(
     sidebarProvider.setRemoteStatus(await remoteRuntime.status());
   };
   await remoteRuntime.applyConfig(deps.getConfig()).catch((err) => {
-    void vscode.window.showErrorMessage(`Forge remote failed to start: ${(err as Error).message}`);
+    const message = (err as Error).message;
+    log.error(`[remote] start failed: ${message}`);
+    void vscode.window.showErrorMessage(`Forge remote failed to start: ${message}`);
   });
   await publishRemoteStatus();
   context.subscriptions.push({ dispose: () => void sidebarProvider.dispose() });

@@ -1,7 +1,7 @@
 import * as fs from 'fs/promises';
 import * as os from 'os';
 import * as path from 'path';
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import {
   isLockContention,
   withRemoteStateLock,
@@ -106,7 +106,77 @@ describe('withRemoteStateLock', () => {
     const stale = Date.now() - 120_000;
     await fs.utimes(`${file}.lock`, new Date(stale), new Date(stale));
 
-    await expect(withRemoteStateLock(file, async () => 'took over')).resolves.toBe('took over');
+    await expect(
+      withRemoteStateLock(file, async () => 'took over', { isAlive: vi.fn(() => false) }),
+    ).resolves.toBe('took over');
+  });
+
+  it('reclaims a fresh dead-pid lock on the first contention check', async () => {
+    const file = await tempFile();
+    await fs.writeFile(`${file}.lock`, '987654321:1234\n');
+    const started = Date.now();
+    await withRemoteStateLock(file, async () => undefined, { isAlive: vi.fn(() => false) });
+    expect(Date.now() - started).toBeLessThan(1_000);
+  });
+
+  it('does not steal a fresh live foreign-pid lock', async () => {
+    const file = await tempFile();
+    const lockPath = `${file}.lock`;
+    await fs.writeFile(lockPath, '987654321:1234\n');
+    await expect(
+      withRemoteStateLock(file, async () => undefined, {
+        isAlive: vi.fn(() => true),
+        timeoutMs: 60,
+      }),
+    ).rejects.toThrow('timed out');
+    expect(await fs.readFile(lockPath, 'utf8')).toBe('987654321:1234\n');
+  });
+
+  it('reclaims an empty lock after the grace period but not before it', async () => {
+    const file = await tempFile();
+    const lockPath = `${file}.lock`;
+    await fs.writeFile(lockPath, '');
+    const old = new Date(Date.now() - 3_000);
+    await fs.utimes(lockPath, old, old);
+    await withRemoteStateLock(file, async () => undefined, { timeoutMs: 100 });
+
+    await fs.writeFile(lockPath, '');
+    await expect(
+      withRemoteStateLock(file, async () => undefined, { timeoutMs: 60 }),
+    ).rejects.toThrow('timed out');
+  });
+
+  it('serializes concurrent acquirers that see one dead-holder lock', async () => {
+    const file = await tempFile();
+    await fs.writeFile(`${file}.lock`, '987654321:1234\n');
+    let inside = 0;
+    let peak = 0;
+    const acquire = () =>
+      withRemoteStateLock(
+        file,
+        async () => {
+          inside += 1;
+          peak = Math.max(peak, inside);
+          await new Promise((resolve) => setTimeout(resolve, 30));
+          inside -= 1;
+        },
+        { isAlive: () => false },
+      );
+    await Promise.all([acquire(), acquire()]);
+    expect(peak).toBe(1);
+  });
+
+  it('continues to parse the installed pid:ms record format', async () => {
+    const file = await tempFile();
+    const record = '987654321:1792852379004\n';
+    await fs.writeFile(`${file}.lock`, record);
+    await expect(
+      withRemoteStateLock(file, async () => undefined, {
+        isAlive: () => true,
+        timeoutMs: 40,
+      }),
+    ).rejects.toThrow('timed out');
+    expect(await fs.readFile(`${file}.lock`, 'utf8')).toBe(record);
   });
 
   it('lets a non-contention error from the open path surface rather than retrying', async () => {

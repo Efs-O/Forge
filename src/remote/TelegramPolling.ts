@@ -158,6 +158,7 @@ export async function pollTelegramUpdates(
       if (disposition.kind === 'retry') break;
       offset = update.update_id + 1;
       await dependencies.setCursor(TELEGRAM_CURSOR_KEY, String(offset));
+      if (disposition.kind === 'handled') await disposition.afterHandled?.();
     }
   }
 }

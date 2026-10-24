@@ -74,7 +74,7 @@ function tryPublish(lockPath: string, holder: HostId): boolean {
  * is no longer what was judged (a new holder published in between), it is
  * linked back rather than deleted.
  */
-function reclaim(lockPath: string, seen: string): void {
+export function reclaim(lockPath: string, seen: string): void {
   const aside = `${lockPath}.stale-${randomUUID()}`;
   try {
     fs.renameSync(lockPath, aside);

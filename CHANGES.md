@@ -1,5 +1,14 @@
 # Forge — Recent Changes
 
+## 0.17.77
+
+- Telegram `/workspace` no longer leaves the chat silent. The window that switched folders was killed while it held the shared remote-state lock (`remote-state-v2.json.lock`). The new window started about a second later, waited 15 s for a lock it would only treat as stale after 60 s, and gave up with a toast. Nothing retried, so the handoff expired. Now:
+  - A lock whose holder process no longer exists is taken over at once, renamed aside the same way the agent-mesh lock is. A live holder still gets the 60 s rule.
+  - The switch runs only after the `/workspace` update is answered and its cursor is saved, with every pending state write finished. The window that dies holds no lock, and the update cannot be replayed.
+  - A remote start that fails is written to the Forge log and retried after 5 s, 15 s and 60 s, then every 60 s. A retry that succeeds picks up the handoff and sends the "now in …" message. Losing the transport lease to another window is normal and is not retried.
+- "chat is bound to a different workspace" now names the workspace and says how to move the chat: `this chat is bound to auto prompt — send /workspace acemar to move it here, or /workspace to pick`.
+- On load, Forge removes temp files and set-aside locks left next to the remote state file by killed writers once they are more than 10 minutes old.
+
 ## 0.17.76
 
 - `/chatMode` now selects solo or multi for Strata and llama.cpp. The sidebar marks the current choice, and Telegram shows Solo, Multi and Close buttons; llama.cpp replies include the effective per-chat context.

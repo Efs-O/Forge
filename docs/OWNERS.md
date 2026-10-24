@@ -244,6 +244,9 @@ overlaps with an existing owner, extend the owner instead.
 | Concern                                       | Owner                                           |
 | --------------------------------------------- | ----------------------------------------------- |
 | Extension-scoped transport lifecycle          | `src/remote/RemoteRuntime.ts`                   |
+| Transport start/stop, lease takeover          | `src/remote/RemoteTransportManager.ts`          |
+| Retry timer + policy for failed remote starts | `src/remote/RemoteStartRetry.ts`                |
+| `/workspace` move, run after the cursor save  | `src/remote/remoteWorkspaceSwitch.ts`           |
 | Bound-chat workspace file delivery            | `src/remote/remoteFileDelivery.ts`              |
 | Remote transport validation status projection | `src/remote/remoteValidationStatus.ts`          |
 | Inbound admission, queue drain, notifications | `src/remote/RemoteController.ts`                |
@@ -289,7 +292,7 @@ overlaps with an existing owner, extend the owner instead.
 | Chat handoff between workspace windows        | `src/remote/RemoteWorkspaceHandoff.ts`          |
 | Handoff record state transitions              | `src/remote/RemoteHandoffState.ts`              |
 | Live handoff claim + switch rollback          | `src/remote/RemoteHandoffCoordinator.ts`        |
-| Atomic write of the shared remote state file  | `src/remote/remoteStateFile.ts`                 |
+| Remote state file: lock, reclaim, first read  | `src/remote/remoteStateFile.ts`                 |
 | Telegram selection keyboard + callback codec  | `src/remote/TelegramSelectionPagination.ts`     |
 | Telegram command shortcut callback codec      | `src/remote/TelegramCommandButtons.ts`          |
 | Telegram job callback codec                    | `src/remote/TelegramJobButtons.ts`              |

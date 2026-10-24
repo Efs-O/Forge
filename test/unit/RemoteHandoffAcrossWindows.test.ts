@@ -189,7 +189,8 @@ describe('workspace handoff between two live windows', { timeout: 15_000 }, () =
     const applied = config(elsewhere);
     await source.applyConfig(applied);
 
-    await source.switchWorkspace(applied, 'other', 'telegram', 'chat-a');
+    const finishSwitch = await source.switchWorkspace(applied, 'other', 'telegram', 'chat-a');
+    await finishSwitch();
     expect(source.activeTransports()).toEqual([]);
 
     await vi.waitFor(
