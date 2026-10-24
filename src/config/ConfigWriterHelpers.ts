@@ -41,7 +41,7 @@ export function ensureModelsSeq(doc: YAML.Document): YAML.YAMLSeq {
   return seq;
 }
 
-function findModelItem(doc: YAML.Document, modelName: string): YAML.YAMLMap | undefined {
+export function findModelItem(doc: YAML.Document, modelName: string): YAML.YAMLMap | undefined {
   const models = ensureModelsSeq(doc);
   const item = models.items.find((it) => YAML.isMap(it) && it.get('name') === modelName);
   return item && YAML.isMap(item) ? item : undefined;

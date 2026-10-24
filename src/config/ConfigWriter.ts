@@ -11,6 +11,7 @@ export {
   deepEqual,
   deleteModelSubField,
   ensureModelsSeq,
+  findModelItem,
   removeModel,
   setModelField,
   setNestedField,
