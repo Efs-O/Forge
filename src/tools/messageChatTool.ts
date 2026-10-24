@@ -2,6 +2,8 @@ import { z } from 'zod';
 import type { ChatMessageDelivery } from '../sidebar/backgroundExitNotice';
 import type { ForgeHostFacade, ForgeHostStatus } from '../sidebar/ForgeHostFacade';
 import type { RegisteredTool, ToolHandlerContext } from './ToolRegistry';
+import { logger } from '../util/logger';
+import { clipMirroredPrompt } from '../sidebar/turnMirrorWiring';
 import {
   formatChatId,
   formatChatList,
@@ -29,9 +31,27 @@ interface SendWindow {
 }
 
 export interface MessageChatSidebar {
-  getHostFacade(): Pick<ForgeHostFacade, 'status'>;
+  getHostFacade(): Pick<ForgeHostFacade, 'status' | 'emitHostActivity'>;
   /** The shared prompt router: a tell for a busy chat, a visible turn for an idle one. */
   deliverChatMessage(text: string, conversationId: string): Promise<ChatMessageDelivery>;
+}
+
+function emitPromptActivity(
+  facade: Pick<ForgeHostFacade, 'emitHostActivity'> | undefined,
+  conversationId: string,
+  text: string,
+): void {
+  try {
+    facade?.emitHostActivity?.({ kind: 'prompt', conversationId, text });
+  } catch (error) {
+    try {
+      logger.warn(
+        `message_chat: failed to emit prompt activity for ${conversationId}: ${error instanceof Error ? error.message : String(error)}`,
+      );
+    } catch {
+      // Logging failure must not change the result of an already-delivered message.
+    }
+  }
 }
 
 function chatRefs(status: ForgeHostStatus): ChatRef[] {
@@ -147,8 +167,10 @@ export function makeMessageChatTool(options: {
       }
 
       let status: ForgeHostStatus;
+      let hostFacade: Pick<ForgeHostFacade, 'status' | 'emitHostActivity'>;
       try {
-        status = sidebar.getHostFacade().status();
+        hostFacade = sidebar.getHostFacade();
+        status = hostFacade.status();
       } catch (error) {
         return `Error: message_chat could not read the open chats: ${String(error)}. Reopen the Forge sidebar and retry.`;
       }
@@ -231,6 +253,25 @@ export function makeMessageChatTool(options: {
           selfId,
         );
       }
+      const body = clipMirroredPrompt(parsed.message);
+      const quotedSenderTitle = JSON.stringify(sender.title);
+      const quotedTargetTitle = JSON.stringify(target.title);
+      const senderStatus =
+        delivery.kind === 'tell'
+          ? '(running)'
+          : delivery.kind === 'turn'
+            ? '(idle, turn started)'
+            : '(not confirmed yet)';
+      emitPromptActivity(
+        hostFacade,
+        target.id,
+        `📨 from #${sender.position} ${quotedSenderTitle}: ${body}`,
+      );
+      emitPromptActivity(
+        hostFacade,
+        sender.id,
+        `📤 to #${target.position} ${quotedTargetTitle} ${senderStatus}: ${body}`,
+      );
       // An unconfirmed send may still start, so it counts against both caps.
       window.sentAt.push(at);
       if (delivery.kind !== 'tell') window.wakesAt.push(at);

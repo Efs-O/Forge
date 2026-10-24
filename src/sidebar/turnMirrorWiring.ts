@@ -9,6 +9,13 @@ import type { AgentProgressEvent } from './AgentProgress';
 const MAX_MIRRORED_CHARS = 3_500;
 const MAX_MIRRORED_PROMPT_CHARS = 500;
 
+/** Clip prompt text to the same limit used by every mirrored sidebar prompt. */
+export function clipMirroredPrompt(text: string): string {
+  return text.length > MAX_MIRRORED_PROMPT_CHARS
+    ? `${text.slice(0, MAX_MIRRORED_PROMPT_CHARS - 1)}…`
+    : text;
+}
+
 export interface TurnMirrorWiring {
   lookup: (conversationId: string) => ConversationRuntime | undefined;
   emit: (event: HostActivityEvent) => void;
@@ -37,10 +44,7 @@ export function emitWebviewPrompt(
   attachmentCount: number,
 ): void {
   if (!text.trim() || text.startsWith('/')) return;
-  const prompt =
-    text.length > MAX_MIRRORED_PROMPT_CHARS
-      ? `${text.slice(0, MAX_MIRRORED_PROMPT_CHARS - 1)}…`
-      : text;
+  const prompt = clipMirroredPrompt(text);
   const attachments = attachmentCount > 0 ? ` [+${attachmentCount} attachments]` : '';
   emit({
     text: `You (VS Code): ${prompt}${attachments}`,

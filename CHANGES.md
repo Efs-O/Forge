@@ -1,5 +1,9 @@
 # Forge — Recent Changes
 
+## 0.17.74
+
+- Telegram now shows `message_chat` traffic for the chat it is bound to: `📨 from #2 "Bug hunt": …` when a message arrives, and `📤 to #2 "Bug hunt" (running): …` when one is sent. The second line ends in `(idle, turn started)` or `(not confirmed yet)` instead when that is what happened. Bodies are clipped to the same 500 characters as mirrored VS Code prompts, and `/mirror off` silences them. Refused sends show nothing. A send made during a turn that an external agent started (via `forge.sh`) is not shown, because prompt mirroring already skips those turns.
+
 ## 0.17.73
 
 - New tool `message_chat`: a chat can message another open chat in the same window. `to` takes a chat id, a tab number (`#2`), or words from the title (`"the bug hunt chat"`). If `to` is omitted, the message goes to the only other running chat. A busy chat gets the message at its next tool round. An idle chat starts a turn with the message shown as a prompt, and the active tab does not change. The tool says what actually happened: delivered as a tell, delivered as a new turn, refused (with the target's reason; nothing is counted), or unconfirmed after 20 s. Each sending chat is limited to 30 sends and 6 idle-chat wakes per rolling hour. The always-available schema measures 58,149 characters; the CI ceiling is now 58,750.

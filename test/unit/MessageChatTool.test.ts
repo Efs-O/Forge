@@ -54,9 +54,12 @@ type DeliverMock = ReturnType<
 /** Mirrors the router: a busy (streaming or reserved) chat takes a tell, an idle one a turn. */
 function makeSidebar(status: ForgeHostStatus): MessageChatSidebar & {
   deliverChatMessage: DeliverMock;
+  emitHostActivity: ReturnType<typeof vi.fn>;
 } {
+  const emitHostActivity = vi.fn();
   return {
-    getHostFacade: () => ({ status: () => status }) as Pick<ForgeHostFacade, 'status'>,
+    getHostFacade: () => ({ status: () => status, emitHostActivity }),
+    emitHostActivity,
     deliverChatMessage: vi.fn((_text: string, id: string) =>
       Promise.resolve<ChatMessageDelivery>(
         status.streamingConversationIds.includes(id) ||
@@ -142,6 +145,68 @@ describe('message_chat tool contract and handler', () => {
     );
     expect(status.activeConversationId).toBe('sender');
     expect(result).toBe('Delivered to #3 "Release notes" (idle): a turn started there.');
+  });
+
+  it('emits target and sender prompt activity for a tell with the clipped message body', async () => {
+    const { tool, sidebar } = makeTool(hostStatus({ running: ['running'] }));
+    const body = 'x'.repeat(501);
+    await tool.handler({ action: 'send', to: '#2', message: body }, context());
+    expect(sidebar.emitHostActivity.mock.calls).toEqual([
+      [{ kind: 'prompt', conversationId: 'running', text: `📨 from #1 "Sender": ${'x'.repeat(499)}…` }],
+      [{ kind: 'prompt', conversationId: 'sender', text: `📤 to #2 "Bug hunt" (running): ${'x'.repeat(499)}…` }],
+    ]);
+  });
+
+  it('uses the delivery outcome in the sender activity line', async () => {
+    const { tool, sidebar } = makeTool();
+    sidebar.deliverChatMessage.mockResolvedValue({ kind: 'turn' });
+    await tool.handler({ action: 'send', to: 'idle', message: 'Please review.' }, context());
+    expect(sidebar.emitHostActivity.mock.calls).toEqual([
+      [{ kind: 'prompt', conversationId: 'idle', text: '📨 from #1 "Sender": Please review.' }],
+      [{ kind: 'prompt', conversationId: 'sender', text: '📤 to #3 "Release notes" (idle, turn started): Please review.' }],
+    ]);
+  });
+
+  it('does not emit activity for a refused delivery', async () => {
+    const { tool, sidebar } = makeTool();
+    sidebar.deliverChatMessage.mockResolvedValue({ kind: 'refused', error: 'not available' });
+    await tool.handler({ action: 'send', to: 'idle', message: 'hello' }, context());
+    expect(sidebar.emitHostActivity).not.toHaveBeenCalled();
+  });
+
+  it('emits activity for an unconfirmed delivery timeout', async () => {
+    vi.useFakeTimers();
+    try {
+      const { tool, sidebar } = makeTool();
+      sidebar.deliverChatMessage.mockReturnValue(new Promise<ChatMessageDelivery>(() => {}));
+      const pending = tool.handler({ action: 'send', to: 'idle', message: 'Please review.' }, context());
+      await vi.advanceTimersByTimeAsync(20_000);
+      await expect(pending).resolves.toContain('had not started after 20 s');
+      expect(sidebar.emitHostActivity.mock.calls).toEqual([
+        [{ kind: 'prompt', conversationId: 'idle', text: '📨 from #1 "Sender": Please review.' }],
+        [{ kind: 'prompt', conversationId: 'sender', text: '📤 to #3 "Release notes" (not confirmed yet): Please review.' }],
+      ]);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('still returns successful delivery text when host activity is absent or throws', async () => {
+    const absentSidebar = makeSidebar(hostStatus({ running: ['running'] }));
+    absentSidebar.getHostFacade = () => ({ status: () => hostStatus({ running: ['running'] }) });
+    const absentTool = makeMessageChatTool({ getSidebar: () => absentSidebar });
+    await expect(
+      absentTool.handler({ action: 'send', to: 'running', message: 'hello' }, context()),
+    ).resolves.toBe('Delivered to #2 "Bug hunt" (running): it reads this at its next tool round.');
+
+    const throwing = makeSidebar(hostStatus({ running: ['running'] }));
+    throwing.emitHostActivity.mockImplementation(() => {
+      throw new Error('activity listener failed');
+    });
+    const throwingTool = makeMessageChatTool({ getSidebar: () => throwing });
+    await expect(
+      throwingTool.handler({ action: 'send', to: 'running', message: 'hello' }, context()),
+    ).resolves.toBe('Delivered to #2 "Bug hunt" (running): it reads this at its next tool round.');
   });
 
   it('treats a reserved target as running and still routes through the shared prompt router', async () => {
