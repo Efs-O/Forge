@@ -134,7 +134,10 @@ overlaps with an existing owner, extend the owner instead.
 | Inbound session identity validation | `src/backend/agentSenderParsing.ts` |
 | Sidebar link-routing facade dependencies | `src/sidebar/agentLinkFacadeDeps.ts` |
 | `ask_agent` strict tool boundary | `src/tools/askAgentTool.ts` |
-| `message_chat` schema, delivery, and per-sender in-memory caps | `src/tools/messageChatTool.ts` |
+| `message_chat` schema, config-gated advertisement, and list/send dispatch | `src/tools/messageChatTool.ts` |
+| `message_chat` delivery caps, new/steer actions, and steering guards | `src/tools/messageChatActions.ts` |
+| Chat-to-chat message text: header format/parse (incl. 0.17.73-74 legacy), short titles, Telegram mirror lines | `src/sidebar/chatMessageText.ts` |
+| Strata launch mode (`start_command[3]` solo/pair) for `/strataMode` | `src/config/StrataMode.ts` |
 | `message_chat` reference resolution and chat-list formatting | `src/tools/chatMessageResolver.ts` |
 | Copilot one-shot CLI argv and output parsing | `src/agents/adapters/copilotAdapter.ts` |
 | Conversation titles: placeholder + derive            | `src/sidebar/conversationTitle.ts`       |

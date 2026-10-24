@@ -1,5 +1,15 @@
 # Forge — Recent Changes
 
+## 0.17.75
+
+- `message_chat` messages read like a note from a coworker. The receiving chat sees `📨 Message from Meeting room A (id 08fb1bcd):`, then the text, then a one-line reminder to reply only if needed. The `message` field asks the model to write in the first person and call the other chat "you". Tool results quote titles plainly instead of printing `\"`. Title shortening drops a leading `Claude: `/`Codex: `/`Copilot: `, keeps the first sentence and cuts at 40 characters.
+- Telegram lines for chat-to-chat messages name both sides: `📨 Meeting room A → this chat` and `📤 this chat → Meeting room A  (busy · reads it mid-turn)`, with the body on the next line. The other statuses are `idle · started a turn` and `not confirmed yet`. List numbers are gone.
+- In the sidebar, a chat-to-chat message gets its own tinted bubble with a `📨 From <chat>` label, and shows only the text. This includes queued and mid-turn messages, reloaded chats, and messages saved by 0.17.73–74. Copying the bubble copies only the text.
+- New `/strataMode` (sidebar picker; `/stratamode solo|multi|status` on Telegram). For a Strata model entry whose `start_command` has a fourth `solo`/`pair` element, it sets that element (`multi` writes `pair`) with the comment-preserving atomic config writer, and `status` reports the mode and whether the backend is running. Nothing restarts: the reply says to run `/unloadModel` when no chat is running. Other models are refused.
+- `message_chat` gains `new` (open a background chat with a first message) and `steer` (interrupt another chat's turn, through the same path as "Send now"). Both are **off** unless `permissions.chats.new_chat` / `permissions.chats.steer` is set; while off, the tool definition is byte-identical to before. New chats: the chat cap applies, plus 2 per sender per hour, and the view never changes. Steer: 3 per sender per hour, never twice within 2 minutes on the same chat, refused while the target waits for an approval or is still on a turn the same caller's steer started, and asks the owner each time outside clanker mode.
+- Host prompts sent to the webview must carry their conversation id (now required by the message type), and the webview drops one without it instead of showing it in the open chat.
+- "Claude session … moved to chat" says "a new chat" when the destination has no title yet.
+
 ## 0.17.74
 
 - Telegram now shows `message_chat` traffic for the chat it is bound to: `📨 from #2 "Bug hunt": …` when a message arrives, and `📤 to #2 "Bug hunt" (running): …` when one is sent. The second line ends in `(idle, turn started)` or `(not confirmed yet)` instead when that is what happened. Bodies are clipped to the same 500 characters as mirrored VS Code prompts, and `/mirror off` silences them. Refused sends show nothing. A send made during a turn that an external agent started (via `forge.sh`) is not shown, because prompt mirroring already skips those turns.
