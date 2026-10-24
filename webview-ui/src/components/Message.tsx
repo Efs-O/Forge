@@ -200,17 +200,20 @@ function MessageView({
   const timestampText = formatMessageTimestamp(createdAt);
   const timestampDateTime =
     createdAt !== undefined && timestampText ? new Date(createdAt).toISOString() : undefined;
-  const chatMessage = role === 'user' ? parseChatMessage(content) : undefined;
+  const chatMessage = useMemo(
+    () => (role === 'user' ? parseChatMessage(content) : undefined),
+    [role, content],
+  );
 
   const handleCopy = useCallback(() => {
     navigator.clipboard
-      .writeText(content)
+      .writeText(chatMessage?.body ?? content)
       .then(() => {
         setCopied(true);
         setTimeout(() => setCopied(false), 1500);
       })
       .catch(() => undefined);
-  }, [content]);
+  }, [chatMessage, content]);
 
   if (role === 'system') {
     // A report's columns are its structure. The default system row is centred,
