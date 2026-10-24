@@ -32,15 +32,20 @@ export {
 /**
  * Load `configPath` (or start from an empty document if it doesn't exist
  * yet) into a `yaml` `Document`, run `mutate`, validate the resulting object
- * against the config schema, and atomically replace the file. Throws — and
- * writes nothing — on a YAML parse error in the existing file, a mutation
- * that leaves the config schema-invalid, or an atomic-write failure.
+ * against the config schema, and atomically replace the file. An optional
+ * verifier runs while the config lock is still held; false or a thrown error
+ * restores the exact original bytes with a second atomic write. Throws on a
+ * YAML parse error, schema error, or atomic-write failure.
  */
-export function updateConfigFile(configPath: string, mutate: (doc: YAML.Document) => void): void {
+export function updateConfigFile(
+  configPath: string,
+  mutate: (doc: YAML.Document) => void,
+  verify?: () => boolean,
+): boolean {
   // The lock file lives beside the config, so its folder must exist first: the
   // first-run wizard offers `<workspace>/.forge` and global storage, both new.
   fs.mkdirSync(path.dirname(configPath), { recursive: true });
-  withConfigFileLock(configPath, () => {
+  return withConfigFileLock(configPath, () => {
     const raw = fs.existsSync(configPath) ? fs.readFileSync(configPath, 'utf8') : '';
     const doc = raw.trim().length > 0 ? YAML.parseDocument(raw) : new YAML.Document({});
     if (doc.errors.length > 0) {
@@ -53,10 +58,20 @@ export function updateConfigFile(configPath: string, mutate: (doc: YAML.Document
     mutate(doc);
     ForgeConfigSchema.parse(doc.toJS() ?? {});
     atomicWrite(configPath, doc.toString({ lineWidth: 0 }));
+    if (!verify) return true;
+    let verified: boolean;
+    try {
+      verified = verify();
+    } catch (error) {
+      writeFileAtomicSync(configPath, raw);
+      throw error;
+    }
+    if (!verified) writeFileAtomicSync(configPath, raw);
+    return verified;
   });
 }
 
-function withConfigFileLock(configPath: string, operation: () => void): void {
+function withConfigFileLock<T>(configPath: string, operation: () => T): T {
   const lockPath = `${configPath}.lock`;
   const started = Date.now();
   const sleeper = new Int32Array(new SharedArrayBuffer(4));
@@ -78,7 +93,7 @@ function withConfigFileLock(configPath: string, operation: () => void): void {
     }
   }
   try {
-    operation();
+    return operation();
   } finally {
     fs.closeSync(handle);
     fs.rmSync(lockPath, { force: true });

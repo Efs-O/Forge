@@ -6,6 +6,8 @@ const COMMANDS = {
   system: '/system',
   chats: '/chats',
   compact: '/compact',
+  chatSolo: '/chatmode solo',
+  chatMulti: '/chatmode multi',
 } as const;
 
 export type TelegramCommandName = keyof typeof COMMANDS;
@@ -27,7 +29,7 @@ export function parseTelegramCommandCallback(data: string):
       text: string;
     }
   | undefined {
-  const match = /^k:(status|context|system|chats|compact)$/.exec(data);
+  const match = /^k:(status|context|system|chats|compact|chatSolo|chatMulti)$/.exec(data);
   if (!match) return undefined;
   const name = match[1] as TelegramCommandName;
   return { name, text: COMMANDS[name] };

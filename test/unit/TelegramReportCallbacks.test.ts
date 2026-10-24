@@ -49,6 +49,8 @@ describe('Telegram callback families and report actions', () => {
     expect(parseTelegramHelpCallback('h:s:session')).toEqual({ action: 'section', sectionKey: 'session' });
     expect(parseTelegramCommandCallback('k:status')?.text).toBe('/status');
     expect(parseTelegramCommandCallback('k:system')?.text).toBe('/system');
+    expect(parseTelegramCommandCallback('k:chatSolo')?.text).toBe('/chatmode solo');
+    expect(parseTelegramCommandCallback('k:chatMulti')?.text).toBe('/chatmode multi');
     expect(parseTelegramJobCallback('j:0:deadbeef:r')?.action).toBe('r');
     expect(parseTelegramQueueCallback('q:request-1')).toEqual({ kind: 'one', requestId: 'request-1' });
     expect(parseTelegramQueueCallback('q:question-id:1')).toBeUndefined();
@@ -69,6 +71,8 @@ describe('Telegram callback families and report actions', () => {
       ['s:abcdefghijkl:c:n7', 'selection'],
       ['h:s:session', 'help_action'],
       ['k:status', 'text'],
+      ['k:chatSolo', 'text'],
+      ['k:chatMulti', 'text'],
       ['j:0:deadbeef:r', 'job_action'],
       ['q:request-1', 'queue_action'],
       ['a:claude', 'agent_ask_action'],
@@ -114,6 +118,11 @@ describe('Telegram callback families and report actions', () => {
       text: '/status',
       callbackMessageId: '42',
     });
+    expect(map('k:chatMulti')).toMatchObject({
+      kind: 'text',
+      text: '/chatmode multi',
+      callbackMessageId: '42',
+    });
     expect(map('k:delete')).toBeUndefined();
   });
 
@@ -127,6 +136,8 @@ describe('Telegram callback families and report actions', () => {
     }).inline_keyboard[0]![0]!.callback_data;
     const data = [
       telegramCommandButton('context', 'Context').callbackData,
+      telegramCommandButton('chatSolo', 'Solo').callbackData,
+      telegramCommandButton('chatMulti', 'Multi').callbackData,
       telegramHelpSectionButton('12345678', 'Long key').callbackData,
       telegramJobCallback(99_999_999, 'job-id', 'D'),
       telegramQueueCallback('x'.repeat(60)),
@@ -134,10 +145,12 @@ describe('Telegram callback families and report actions', () => {
     ];
     expect(data.every((item) => Buffer.byteLength(item, 'utf8') <= 64)).toBe(true);
     expect(parseTelegramCommandCallback(data[0]!)).toBeDefined();
-    expect(parseTelegramHelpCallback(data[1]!)).toBeDefined();
-    expect(parseTelegramJobCallback(data[2]!)).toBeDefined();
-    expect(parseTelegramQueueCallback(data[3]!)).toBeDefined();
-    expect(parseTelegramSelectionCallback(data[4]!)?.index).toBe(999);
+    expect(parseTelegramCommandCallback(data[1]!)).toBeDefined();
+    expect(parseTelegramCommandCallback(data[2]!)).toBeDefined();
+    expect(parseTelegramHelpCallback(data[3]!)).toBeDefined();
+    expect(parseTelegramJobCallback(data[4]!)).toBeDefined();
+    expect(parseTelegramQueueCallback(data[5]!)).toBeDefined();
+    expect(parseTelegramSelectionCallback(data[6]!)?.index).toBe(999);
     expect(() => telegramQueueCallback('x'.repeat(61))).toThrow('request id is invalid');
   });
 

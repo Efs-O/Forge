@@ -48,7 +48,7 @@ vi.mock('vscode', () => ({
 }));
 
 describe('SlashCommandHandler', () => {
-  it('offers /strataMode choices and reports its write to the active chat', async () => {
+  it('offers two chat-mode choices with the current mode checked and reports its write', async () => {
     const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'forge-strata-slash-'));
     const configPath = path.join(directory, 'config.yaml');
     fs.writeFileSync(configPath, STRATA_FIXTURE, 'utf8');
@@ -68,13 +68,52 @@ describe('SlashCommandHandler', () => {
         isStreamingConv: (conversationId) => conversationId === 'chat-2',
         pool: { isLoaded } as unknown as IBackendPool,
         post,
-      } as unknown as SlashCommandDeps).handle('strataMode');
+      } as unknown as SlashCommandDeps).handle('chatMode');
 
       expect(isLoaded).toHaveBeenCalledWith('strata');
-      expect(loadConfig(directory).models[0]?.start_command?.[3]).toBe('pair');
+      expect(loadConfig(directory).models[0]?.start_command?.[3]).toBe('multi');
+      expect(vscode.window.showQuickPick).toHaveBeenCalledWith(
+        [
+          { label: '$(check) solo', choice: 'solo', description: 'One chat at a time.' },
+          {
+            label: 'multi',
+            choice: 'multi',
+            description: 'Two chats at once. A lone chat ~10-20% slower.',
+          },
+        ],
+        { title: 'Chat mode: strata (now solo)' },
+      );
       expect(post).toHaveBeenCalledWith({
         type: 'notice',
-        message: expect.stringContaining('1 chat currently running.'),
+        message: expect.stringContaining('Chat mode set to multi'),
+        conversationId: 'chat-1',
+      });
+    } finally {
+      fs.rmSync(directory, { recursive: true, force: true });
+    }
+  });
+
+  it('posts a refusal without opening the picker', async () => {
+    const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'forge-chat-mode-refusal-'));
+    const configPath = path.join(directory, 'config.yaml');
+    fs.writeFileSync(configPath, STRATA_FIXTURE.replace('solo]', 'pair]'), 'utf8');
+    const post = vi.fn();
+    vi.mocked(vscode.window.showQuickPick).mockClear();
+    try {
+      await new SlashCommandHandler({
+        getConfigPath: () => configPath,
+        getConfig: () => ({ active_model: 'strata' }) as ForgeConfig,
+        getActiveConv: () => ({ id: 'chat-1', active_model: 'strata' }) as ConversationRuntime,
+        getConversations: () => [{ id: 'chat-1' }] as ConversationRuntime[],
+        isStreamingConv: () => false,
+        pool: { isLoaded: vi.fn(() => false) } as unknown as IBackendPool,
+        post,
+      } as unknown as SlashCommandDeps).handle('chatMode');
+
+      expect(vscode.window.showQuickPick).not.toHaveBeenCalled();
+      expect(post).toHaveBeenCalledWith({
+        type: 'notice',
+        message: 'Forge: strata start_command[3] is "pair"; set it to solo or multi.',
         conversationId: 'chat-1',
       });
     } finally {

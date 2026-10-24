@@ -1,5 +1,9 @@
 # Forge — Recent Changes
 
+## 0.17.76
+
+- `/chatMode` now selects solo or multi for Strata and llama.cpp. The sidebar marks the current choice, and Telegram shows Solo, Multi and Close buttons; llama.cpp replies include the effective per-chat context.
+
 ## 0.17.75
 
 - `message_chat` messages read like a note from a coworker. The receiving chat sees `📨 Message from Meeting room A (id 08fb1bcd):`, then the text, then a one-line reminder to reply only if needed. The `message` field asks the model to write in the first person and call the other chat "you". Tool results quote titles plainly instead of printing `\"`. Title shortening drops a leading `Claude: `/`Codex: `/`Copilot: `, keeps the first sentence and cuts at 40 characters.

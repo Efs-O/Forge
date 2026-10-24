@@ -33,7 +33,7 @@ export interface SessionHistoryMeta {
 /** Slash commands from the sidebar input (`/` menu); kept in sync with `webview-ui/src/slashCommands.ts`. */
 export type ForgeSlashCommandId =
   | 'unloadModel'
-  | 'strataMode'
+  | 'chatMode'
   | 'unloadAll'
   | 'restartBackend'
   | 'reindex'

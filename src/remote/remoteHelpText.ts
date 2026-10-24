@@ -76,9 +76,9 @@ export const REMOTE_HELP_SECTIONS: RemoteHelpSection[] = [
     key: 'models',
     title: 'Models',
     commands: [
+      { usage: '/chatmode [solo|multi|status]', summary: 'Set or report solo or multi-chat mode.' },
       { usage: '/model [n-or-name]', summary: 'List models or pin one to this chat.' },
       { usage: '/restart', summary: 'Restart the running backend.' },
-      { usage: '/stratamode solo|multi|status', summary: 'Set or report Strata launch mode.' },
       { usage: '/unload', summary: 'Release this chat’s model.' },
       { usage: '/unloadall', summary: 'Release every loaded model.' },
     ],

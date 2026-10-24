@@ -9,7 +9,7 @@ import { globalBusyReason } from './remoteCommandShared';
 import type { RemoteCommandContext } from './RemoteCommandHandler';
 import { telegramCommandButton } from './TelegramCommandButtons';
 import { telegramCloseButton } from './TelegramHelpButtons';
-import { runStrataModeCommand } from '../config/StrataMode';
+import { runChatModeCommand } from '../config/ChatMode';
 
 /**
  * The model-management remote commands: `/models`, `/model`, `/system`,
@@ -23,13 +23,13 @@ export async function handleRemoteModelCommand(
   event: Extract<RemoteInboundEvent, { kind: 'text' }>,
   context: RemoteCommandContext,
 ): Promise<RemoteInboundDisposition | undefined> {
-  if (command === '/stratamode') {
+  if (command === '/chatmode') {
     const choice = argument?.toLowerCase();
-    if (choice !== 'solo' && choice !== 'multi' && choice !== 'status') {
-      return { kind: 'rejected', reason: 'usage: /stratamode solo|multi|status' };
+    if (choice !== undefined && choice !== 'solo' && choice !== 'multi' && choice !== 'status') {
+      return { kind: 'rejected', reason: 'usage: /chatmode [solo|multi|status]' };
     }
     if (!context.configPath) {
-      return { kind: 'rejected', reason: 'Strata mode config path is unavailable.' };
+      return { kind: 'rejected', reason: 'Chat mode config path is unavailable.' };
     }
     const binding = context.store.binding(event.channel, event.chatId);
     const status = context.host.status();
@@ -37,14 +37,31 @@ export async function handleRemoteModelCommand(
       ? (status.conversations.find((conversation) => conversation.id === binding.conversationId)
           ?.activeModel ?? undefined)
       : undefined;
-    const result = runStrataModeCommand(
+    const result = runChatModeCommand(
       context.configPath,
       fallbackModelName,
-      choice,
+      choice === 'solo' || choice === 'multi' ? choice : 'status',
       (modelName) => context.isModelLoaded?.(modelName) ?? false,
       status.streamingConversationIds.length,
     );
     if (result.changed) context.markCommitted?.();
+    if (
+      (choice === undefined || choice === 'status') &&
+      result.mode &&
+      context.channel.sendInlineKeyboard
+    ) {
+      const buttons = [
+        [
+          telegramCommandButton('chatSolo', result.mode === 'solo' ? '✓ Solo' : 'Solo'),
+          telegramCommandButton('chatMulti', result.mode === 'multi' ? '✓ Multi' : 'Multi'),
+        ],
+        [telegramCloseButton()],
+      ];
+      await context.channel.sendInlineKeyboard(event.chatId, result.message, buttons, {
+        signal: context.signal,
+      });
+      return { kind: 'handled' };
+    }
     await context.channel.send(event.chatId, result.message, { signal: context.signal });
     return { kind: 'handled' };
   }

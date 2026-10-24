@@ -87,6 +87,7 @@ overlaps with an existing owner, extend the owner instead.
 | Delete approval preview and bounded inventory        | `src/sidebar/deletePreview.ts`           |
 | Conversation CRUD pure ops                           | `src/sidebar/ConversationOps.ts`         |
 | Slash command dispatch                               | `src/sidebar/SlashCommandHandler.ts`     |
+| `/chatMode` model picker and choice descriptions      | `src/sidebar/chatModeCommand.ts`          |
 | `/init` (`/initForge`) agent turn that fills in FORGE.md | `src/sidebar/initForgeCommand.ts`      |
 | Compaction: cut point, run, resume                   | `src/sidebar/CompactionService.ts`       |
 | Compaction host-context assembly (preserved facts + candidate state) | `src/sidebar/compactionHostContext.ts` |
@@ -137,7 +138,8 @@ overlaps with an existing owner, extend the owner instead.
 | `message_chat` schema, config-gated advertisement, and list/send dispatch | `src/tools/messageChatTool.ts` |
 | `message_chat` delivery caps, new/steer actions, and steering guards | `src/tools/messageChatActions.ts` |
 | Chat-to-chat message text: header format/parse (incl. 0.17.73-74 legacy), short titles, Telegram mirror lines | `src/sidebar/chatMessageText.ts` |
-| Strata launch mode (`start_command[3]` solo/pair) for `/strataMode` | `src/config/StrataMode.ts` |
+| Solo/multi chat mode for Strata launchers and llama.cpp slots | `src/config/ChatMode.ts` |
+| Effective llama.cpp request-slot count shared by pool and chat mode | `src/backend/parallelCapacity.ts` |
 | `message_chat` reference resolution and chat-list formatting | `src/tools/chatMessageResolver.ts` |
 | Copilot one-shot CLI argv and output parsing | `src/agents/adapters/copilotAdapter.ts` |
 | Conversation titles: placeholder + derive            | `src/sidebar/conversationTitle.ts`       |

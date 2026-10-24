@@ -140,10 +140,10 @@ export const SLASH_COMMANDS: SlashCommand[] = [
     description: 'Review the selection, current file, or current changes and run immediately.',
   },
   {
-    id: 'strataMode',
-    trigger: 'strataMode',
-    title: 'Strata Mode',
-    description: 'Set or report solo or multi-chat Strata launch mode.',
+    id: 'chatMode',
+    trigger: 'chatMode',
+    title: 'Chat Mode',
+    description: 'Set solo or multi-chat mode for Strata or llama.cpp.',
   },
   {
     id: 'system',
