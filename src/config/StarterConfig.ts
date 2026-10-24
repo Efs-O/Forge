@@ -16,6 +16,7 @@ export interface StarterLlamaCppModel {
 // Code itself stays off (`allow_vscode`). Search needs a key and stays off, as
 // do the visible terminal and shell scripts. Existing configs are unchanged:
 // an absent key still means off.
+// Chat-to-chat new-chat and steer actions also stay off until opted in.
 // `approval_timeout_minutes` stays absent so unanswered approvals wait forever
 // unless the owner opts in through config.yaml.
 const DEFAULT_PERMISSIONS: NonNullable<ForgeConfig['permissions']> = {
@@ -24,6 +25,7 @@ const DEFAULT_PERMISSIONS: NonNullable<ForgeConfig['permissions']> = {
   exec: { headless: true },
   git: { read: true, write: true },
   agents: { delegate: true },
+  chats: { new_chat: false, steer: false },
   browser: { enabled: true },
   desktop: { enabled: true },
 };

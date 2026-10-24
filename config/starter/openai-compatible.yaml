@@ -24,6 +24,8 @@ permissions:
   exec: { headless: true }
   git: { read: true, write: true }
   agents: { delegate: true }
+  # New-chat and steer actions stay off until explicitly enabled.
+  chats: { new_chat: false, steer: false }
   browser: { enabled: true }
   desktop: { enabled: true }
 

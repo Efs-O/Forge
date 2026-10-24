@@ -279,7 +279,12 @@ export function registerAllTools(
 
   // Agent messaging. Self-suppressing until `agent_bus.enabled`, so a config
   // without it keeps the tool list unchanged.
-  registry.register(makeMessageChatTool({ getSidebar: messageChatSidebar ?? (() => undefined) }));
+  registry.register(
+    makeMessageChatTool({
+      getSidebar: messageChatSidebar ?? (() => undefined),
+      ...(getConfig ? { getConfig } : {}),
+    }),
+  );
   if (getConfig) {
     registry.register(
       makeAskAgentTool({

@@ -6,6 +6,8 @@ const MESSAGE_TRAILER =
 const LEGACY_MESSAGE_TRAILER =
   '(Answer with message_chat to {id} only if a reply is needed; do not reply just to acknowledge.)';
 
+export type ChatMessageMirrorStatus = 'tell' | 'turn' | 'unconfirmed' | 'steer' | undefined;
+
 /** A compact title for chat-to-chat messages and their Telegram mirror. */
 export function shortChatTitle(title: string, max = DEFAULT_CHAT_TITLE_LENGTH): string {
   let short = title
@@ -83,7 +85,7 @@ export function parseChatMessage(
 export function formatChatMirrorLine(
   direction: 'in' | 'out',
   otherTitle: string,
-  status: 'tell' | 'turn' | 'unconfirmed' | undefined,
+  status: ChatMessageMirrorStatus,
   body: string,
 ): string {
   const title = shortChatTitle(otherTitle);
@@ -95,6 +97,8 @@ export function formatChatMirrorLine(
         ? 'idle · started a turn'
         : status === 'unconfirmed'
           ? 'not confirmed yet'
-          : undefined;
+          : status === 'steer'
+            ? 'steering · interrupts its turn'
+            : undefined;
   return `${label}${statusText ? `  (${statusText})` : ''}\n${body}`;
 }

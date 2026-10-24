@@ -88,6 +88,7 @@ describe('chat-to-chat message text', () => {
     ['tell', 'busy · reads it mid-turn'],
     ['turn', 'idle · started a turn'],
     ['unconfirmed', 'not confirmed yet'],
+    ['steer', 'steering · interrupts its turn'],
   ] as const)('formats %s status for both mirror directions', (status, statusText) => {
     expect(formatChatMirrorLine('in', 'Codex: Meeting room A', status, 'hello')).toBe(
       `📨 Meeting room A → this chat  (${statusText})\nhello`,

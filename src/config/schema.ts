@@ -111,6 +111,9 @@ const VideoConfigSchema = z
 const PermissionsSchema = z
   .object({
     approval_timeout_minutes: z.number().int().min(1).max(1440).optional(),
+    chats: z
+      .object({ new_chat: z.boolean().default(false), steer: z.boolean().default(false) })
+      .optional(),
     fs: z
       .object({
         read: z.boolean().default(true),

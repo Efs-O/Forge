@@ -1,8 +1,19 @@
 import { z } from 'zod';
-import type { ChatMessageDelivery } from '../sidebar/backgroundExitNotice';
 import type { ForgeHostFacade, ForgeHostStatus } from '../sidebar/ForgeHostFacade';
+import type { ForgeConfig } from '../config/types';
 import type { RegisteredTool, ToolHandlerContext } from './ToolRegistry';
 import { logger } from '../util/logger';
+import {
+  awaitMessageChatDelivery,
+  createMessageChatActions,
+  MESSAGE_CHAT_DELIVERY_CONFIRM_MS,
+  messageChatSendLimit,
+  pruneMessageChatWindow,
+  type MessageChatActionContext,
+  type MessageChatActionSidebar,
+  type MessageChatWindow,
+  type MessageChatDeliveryResult,
+} from './messageChatActions';
 import { clipMirroredPrompt } from '../sidebar/turnMirrorWiring';
 import { formatChatMessage, formatChatMirrorLine, quoteTitle } from '../sidebar/chatMessageText';
 import {
@@ -12,29 +23,90 @@ import {
   type ChatRef,
 } from './chatMessageResolver';
 
-const requestSchema = z
+const requestShapeSchema = z
   .object({
-    action: z.enum(['list', 'send']),
+    action: z.string().min(1),
     to: z.string().min(1).max(200).optional(),
     message: z.string().min(1).max(4000).optional(),
   })
   .strict();
 
-const HOUR_MS = 60 * 60 * 1000;
-const SENDS_PER_HOUR = 30;
-const IDLE_WAKES_PER_HOUR = 6;
-/** How long a send waits for the target to admit its turn before reporting "not confirmed". */
-const DELIVERY_CONFIRM_MS = 20_000;
-
-interface SendWindow {
-  sentAt: number[];
-  wakesAt: number[];
+interface MessageChatActionFlags {
+  newChat: boolean;
+  steer: boolean;
 }
 
-export interface MessageChatSidebar {
-  getHostFacade(): Pick<ForgeHostFacade, 'status' | 'emitHostActivity'>;
-  /** The shared prompt router: a tell for a busy chat, a visible turn for an idle one. */
-  deliverChatMessage(text: string, conversationId: string): Promise<ChatMessageDelivery>;
+export type MessageChatSidebar = MessageChatActionSidebar;
+
+function actionFlags(getConfig: (() => ForgeConfig) | undefined): MessageChatActionFlags {
+  const permissions = getConfig?.().permissions?.chats;
+  return { newChat: permissions?.new_chat ?? false, steer: permissions?.steer ?? false };
+}
+
+function requestSchema(flags: MessageChatActionFlags) {
+  const actions = new Set([
+    'list',
+    'send',
+    ...(flags.newChat ? ['new'] : []),
+    ...(flags.steer ? ['steer'] : []),
+  ]);
+  return requestShapeSchema.superRefine((request, context) => {
+    if (!actions.has(request.action)) {
+      context.addIssue({ code: 'custom', path: ['action'], message: 'Action is not available.' });
+    }
+    if (request.action === 'new' && request.to !== undefined) {
+      context.addIssue({ code: 'custom', path: ['to'], message: 'new does not take to.' });
+    }
+    if ((request.action === 'new' || request.action === 'steer') && request.message === undefined) {
+      context.addIssue({
+        code: 'custom',
+        path: ['message'],
+        message: `${request.action} requires message.`,
+      });
+    }
+  });
+}
+
+function messageChatDefinition(flags: MessageChatActionFlags): RegisteredTool['definition'] {
+  const actions = [
+    'list',
+    'send',
+    ...(flags.newChat ? ['new'] : []),
+    ...(flags.steer ? ['steer'] : []),
+  ];
+  const additions = [
+    flags.newChat
+      ? '`new`: create a fresh chat with the window default title and send its first message; a title cannot be set here.'
+      : '',
+    flags.steer
+      ? '`steer`: send a message to a chat, interrupting its active turn when it is busy; an idle chat starts a turn.'
+      : '',
+  ].filter(Boolean);
+  return {
+    type: 'function',
+    function: {
+      name: 'message_chat',
+      description:
+        "Message another Forge chat in this window. `send`: `to` is a chat id, `#N` from `list`, or words from the chat's title; omit `to` to reach the other chat when exactly one other chat is running (or open). No `list` needed first. A running chat reads it at its next tool round; an idle chat starts a turn. Replies arrive the same way. `list`: show the chats." +
+        (additions.length > 0 ? ` ${additions.join(' ')}` : ''),
+      parameters: {
+        type: 'object',
+        properties: {
+          action: { type: 'string', enum: actions },
+          to: { type: 'string', minLength: 1, maxLength: 200 },
+          message: {
+            type: 'string',
+            minLength: 1,
+            maxLength: 4000,
+            description:
+              "Write it as you would to a coworker: first person, call the other chat 'you', no formalities, no reports about yourself in the third person.",
+          },
+        },
+        required: ['action'],
+        additionalProperties: false,
+      },
+    },
+  };
 }
 
 function emitPromptActivity(
@@ -72,90 +144,57 @@ function listRefusal(message: string, chats: ChatRef[], selfId: string): string 
   return `${message}\n\n${formatChatList(chats, selfId)}`;
 }
 
-function nextAllowedText(at: number): string {
-  return new Date(at).toISOString();
-}
-
-function nextAllowedAt(times: number[]): number {
-  return Math.min(...times) + HOUR_MS;
-}
-
-function prune(window: SendWindow, now: number): void {
-  const cutoff = now - HOUR_MS;
-  window.sentAt = window.sentAt.filter((at) => at > cutoff);
-  window.wakesAt = window.wakesAt.filter((at) => at > cutoff);
-}
-
-type DeliveryResult = ChatMessageDelivery | { kind: 'unconfirmed'; why: 'timeout' | 'aborted' };
-
-/** Bounded wait: a turn admission can wait on cancelled turns, possibly this caller's own. */
-function awaitDelivery(
-  delivery: Promise<ChatMessageDelivery>,
-  signal: AbortSignal | undefined,
-): Promise<DeliveryResult> {
-  return new Promise((resolve, reject) => {
-    const timer = setTimeout(
-      () => finish({ kind: 'unconfirmed', why: 'timeout' }),
-      DELIVERY_CONFIRM_MS,
-    );
-    const onAbort = (): void => finish({ kind: 'unconfirmed', why: 'aborted' });
-    function finish(result: DeliveryResult): void {
-      clearTimeout(timer);
-      signal?.removeEventListener('abort', onAbort);
-      resolve(result);
-    }
-    if (signal?.aborted) return finish({ kind: 'unconfirmed', why: 'aborted' });
-    signal?.addEventListener('abort', onAbort, { once: true });
-    delivery.then(finish, (error: unknown) => {
-      clearTimeout(timer);
-      signal?.removeEventListener('abort', onAbort);
-      reject(error instanceof Error ? error : new Error(String(error)));
-    });
-  });
-}
-
 function messageFrom(sender: ChatRef, chats: ChatRef[], text: string): string {
   const senderId = formatChatId(sender.id, chats);
   return formatChatMessage(sender.title, senderId, text);
 }
 
+function formatChatName(chat: ChatRef): string {
+  return `#${chat.position} ${quoteTitle(chat.title)}`;
+}
+
 export function makeMessageChatTool(options: {
   getSidebar: () => MessageChatSidebar | undefined;
+  getConfig?: () => ForgeConfig;
   now?: () => number;
 }): RegisteredTool {
-  const windows = new Map<string, SendWindow>();
+  const windows = new Map<string, MessageChatWindow>();
   const now = options.now ?? Date.now;
+  const actions = createMessageChatActions();
+  const windowFor = (senderId: string): MessageChatWindow => {
+    let window = windows.get(senderId);
+    if (!window) {
+      window = { sentAt: [], wakesAt: [], newChatsAt: [], steersAt: [] };
+      windows.set(senderId, window);
+    }
+    return window;
+  };
 
   return {
-    definition: {
-      type: 'function',
-      function: {
-        name: 'message_chat',
-        description:
-          "Message another Forge chat in this window. `send`: `to` is a chat id, `#N` from `list`, or words from the chat's title; omit `to` to reach the other chat when exactly one other chat is running (or open). No `list` needed first. A running chat reads it at its next tool round; an idle chat starts a turn. Replies arrive the same way. `list`: show the chats.",
-        parameters: {
-          type: 'object',
-          properties: {
-            action: { type: 'string', enum: ['list', 'send'] },
-            to: { type: 'string', minLength: 1, maxLength: 200 },
-            message: {
-              type: 'string',
-              minLength: 1,
-              maxLength: 4000,
-              description:
-                "Write it as you would to a coworker: first person, call the other chat 'you', no formalities, no reports about yourself in the third person.",
-            },
-          },
-          required: ['action'],
-          additionalProperties: false,
-        },
-      },
-    },
+    definition: messageChatDefinition({ newChat: false, steer: false }),
+    describe: () => messageChatDefinition(actionFlags(options.getConfig)),
     permission: 'delegate',
     // Sending a bounded text message is intentional and must not prompt once per send.
     autoApprove: true,
+    approval: (args) => {
+      if (args['action'] !== 'steer' || !actionFlags(options.getConfig).steer) return undefined;
+      const sidebar = options.getSidebar();
+      if (!sidebar || sidebar.getHostFacade().clankerMode()) return undefined;
+      return {
+        detail: 'Allow this chat to interrupt another chat and send it a steering message?',
+        dangerous: true,
+      };
+    },
     handler: async (args, context?: ToolHandlerContext) => {
-      const parsed = requestSchema.parse(args);
+      const draft = requestShapeSchema.parse(args);
+      const flags = actionFlags(options.getConfig);
+      if (draft.action === 'new' && !flags.newChat) {
+        return 'Error: `new` is not enabled in this window.';
+      }
+      if (draft.action === 'steer' && !flags.steer) {
+        return 'Error: `steer` is not enabled in this window.';
+      }
+      const parsed = requestSchema(flags).parse(args);
       let sidebar: MessageChatSidebar | undefined;
       try {
         sidebar = options.getSidebar();
@@ -167,7 +206,7 @@ export function makeMessageChatTool(options: {
       }
 
       let status: ForgeHostStatus;
-      let hostFacade: Pick<ForgeHostFacade, 'status' | 'emitHostActivity'>;
+      let hostFacade: ReturnType<MessageChatSidebar['getHostFacade']>;
       try {
         hostFacade = sidebar.getHostFacade();
         status = hostFacade.status();
@@ -199,6 +238,61 @@ export function makeMessageChatTool(options: {
         return formatChatList(chats, selfId);
       }
 
+      const window = windowFor(selfId);
+      const at = now();
+      pruneMessageChatWindow(window, at);
+      if (parsed.action === 'new') {
+        const actionContext: MessageChatActionContext = {
+          sidebar,
+          sender,
+          chats,
+          selfId,
+          window,
+          at,
+          message: parsed.message ?? '',
+          ...(context?.abortSignal ? { signal: context.abortSignal } : {}),
+          formatMessage: () => messageFrom(sender, chats, parsed.message ?? ''),
+          formatName: formatChatName,
+          refuse: (message) => listRefusal(message, chats, selfId),
+          emitActivity: (id, text) => emitPromptActivity(hostFacade, id, text),
+          formatMirrorLine: formatChatMirrorLine,
+        };
+        return actions.createNewChat(actionContext);
+      }
+
+      if (parsed.action === 'steer') {
+        if (parsed.message === undefined) {
+          return listRefusal(
+            'Error: `steer` requires `message`. Pass `message` with the text to deliver.',
+            chats,
+            selfId,
+          );
+        }
+        const steerMessage = parsed.message;
+        const resolution = resolveChatReference(parsed.to, chats, selfId);
+        if (!resolution.ok) return listRefusal(`Error: ${resolution.reason}`, chats, selfId);
+        const actionContext: MessageChatActionContext = {
+          sidebar,
+          sender,
+          chats,
+          selfId,
+          window,
+          at,
+          message: steerMessage,
+          ...(context?.abortSignal ? { signal: context.abortSignal } : {}),
+          formatMessage: () => messageFrom(sender, chats, steerMessage),
+          formatName: formatChatName,
+          refuse: (message) => listRefusal(message, chats, selfId),
+          emitActivity: (id, text) => emitPromptActivity(hostFacade, id, text),
+          formatMirrorLine: formatChatMirrorLine,
+        };
+        return actions.steer({
+          ...actionContext,
+          target: resolution.chat,
+          ...(parsed.to ? { to: parsed.to } : {}),
+        });
+      }
+
       if (parsed.message === undefined) {
         return listRefusal(
           'Error: `send` requires `message`. Pass `message` with the text to deliver.',
@@ -210,31 +304,12 @@ export function makeMessageChatTool(options: {
       const resolution = resolveChatReference(parsed.to, chats, selfId);
       if (!resolution.ok) return listRefusal(`Error: ${resolution.reason}`, chats, selfId);
       const target = resolution.chat;
-      const at = now();
-      let window = windows.get(selfId);
-      if (!window) {
-        window = { sentAt: [], wakesAt: [] };
-        windows.set(selfId, window);
-      }
-      prune(window, at);
-      if (window.sentAt.length >= SENDS_PER_HOUR) {
-        return listRefusal(
-          `Error: the ${SENDS_PER_HOUR}-send-per-hour limit for this chat was reached; the next send is allowed at ${nextAllowedText(nextAllowedAt(window.sentAt))}.`,
-          chats,
-          selfId,
-        );
-      }
-      if (!target.running && window.wakesAt.length >= IDLE_WAKES_PER_HOUR) {
-        return listRefusal(
-          `Error: the ${IDLE_WAKES_PER_HOUR}-idle-chat-wake-per-hour limit for this chat was reached; the next idle wake is allowed at ${nextAllowedText(nextAllowedAt(window.wakesAt))}.`,
-          chats,
-          selfId,
-        );
-      }
+      const sendLimit = messageChatSendLimit(window, !target.running);
+      if (sendLimit) return listRefusal(sendLimit, chats, selfId);
 
-      let delivery: DeliveryResult;
+      let delivery: MessageChatDeliveryResult;
       try {
-        delivery = await awaitDelivery(
+        delivery = await awaitMessageChatDelivery(
           sidebar.deliverChatMessage(messageFrom(sender, chats, parsed.message), target.id),
           context.abortSignal,
         );
@@ -245,7 +320,7 @@ export function makeMessageChatTool(options: {
           selfId,
         );
       }
-      const name = `#${target.position} ${quoteTitle(target.title)}`;
+      const name = formatChatName(target);
       if (delivery.kind === 'refused') {
         return listRefusal(
           `Error: ${name} did not accept the message: ${delivery.error} Nothing was delivered; retry later or pick another chat.`,
@@ -272,7 +347,7 @@ export function makeMessageChatTool(options: {
       if (delivery.kind === 'tell')
         return `Delivered to ${name} (running): it reads this at its next tool round.`;
       if (delivery.kind === 'turn') return `Delivered to ${name} (idle): a turn started there.`;
-      return `Sent to ${name}, but its turn had not started after ${delivery.why === 'timeout' ? `${DELIVERY_CONFIRM_MS / 1000} s` : 'this turn was stopped'}; it may still start. Do not resend; check with \`list\` later.`;
+      return `Sent to ${name}, but its turn had not started after ${delivery.why === 'timeout' ? `${MESSAGE_CHAT_DELIVERY_CONFIRM_MS / 1000} s` : 'this turn was stopped'}; it may still start. Do not resend; check with \`list\` later.`;
     },
   };
 }

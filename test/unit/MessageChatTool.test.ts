@@ -48,7 +48,7 @@ function hostStatus(
 }
 
 type DeliverMock = ReturnType<
-  typeof vi.fn<(text: string, id: string) => Promise<ChatMessageDelivery>>
+  typeof vi.fn<(text: string, id: string, steer?: boolean) => Promise<ChatMessageDelivery>>
 >;
 
 /** Mirrors the router: a busy (streaming or reserved) chat takes a tell, an idle one a turn. */
@@ -57,10 +57,18 @@ function makeSidebar(status: ForgeHostStatus): MessageChatSidebar & {
   emitHostActivity: ReturnType<typeof vi.fn>;
 } {
   const emitHostActivity = vi.fn();
+  const createConversation = vi.fn(async () => conversation('new-chat', 'Untitled chat'));
   return {
-    getHostFacade: () => ({ status: () => status, emitHostActivity }),
+    getHostFacade: () => ({
+      status: () => status,
+      emitHostActivity,
+      chatCapBlockers: vi.fn(() => []),
+      createConversation,
+      clankerMode: () => false,
+    }),
     emitHostActivity,
-    deliverChatMessage: vi.fn((_text: string, id: string) =>
+    createConversation,
+    deliverChatMessage: vi.fn((_text: string, id: string, _steer?: boolean) =>
       Promise.resolve<ChatMessageDelivery>(
         status.streamingConversationIds.includes(id) ||
           status.requestChains.some((chain) => chain.conversationId === id)

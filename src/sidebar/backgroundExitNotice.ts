@@ -6,6 +6,7 @@ import type { AttachmentData } from './messageBridge';
 import type { ForgeRequestOutcome } from './turnOutcome';
 import { backgroundExecutionManager } from '../tools/BackgroundExecutionManager';
 import { logger } from '../util/logger';
+import { randomUUID } from 'node:crypto';
 
 function formatBackgroundExitNotice(notice: BackgroundExecutionExitNotice): string {
   const command = [notice.command, ...notice.args].join(' ').slice(0, 200);
@@ -142,7 +143,7 @@ export interface SidebarPromptRouter {
    * else a visible turn there. Resolves once delivery is known: `turn` on
    * admission, `refused` when the send was turned away before it started.
    */
-  deliverChatMessage: (text: string, id: string) => Promise<ChatMessageDelivery>;
+  deliverChatMessage: (text: string, id: string, steer?: boolean) => Promise<ChatMessageDelivery>;
   /** False when the tell had already reached the turn. */
   cancelTell: (conversationId: string, tellId: string) => boolean;
   /**
@@ -152,6 +153,8 @@ export interface SidebarPromptRouter {
    * interrupts.
    */
   sendQueuedNow: (conversationId: string, tellId?: string) => boolean;
+  /** Holds a tell and uses the same Send now path to interrupt the active turn. */
+  steerChatMessage: (text: string, conversationId: string) => boolean;
   /** Interrupt only the active turn, keeping its backend, so a steering prompt runs next. */
   interruptForSteering: (conversationId: string) => Promise<void>;
   /** Stops delivering background exit notices. */
@@ -251,18 +254,35 @@ export function createSidebarPromptRouter(options: {
   const subscription = subscribeBackgroundExitNotices(options.isOpen, (text, id, echo) =>
     route(text, undefined, id, echo, true),
   );
+  const sendQueuedNow = (conversationId: string, tellId?: string): boolean => {
+    if (tellId && !options.markSendNow(conversationId, tellId)) return false;
+    // Only a turn the agent loop is running: a chain that is evaluating or
+    // compacting runs the held tell as its follow-up once it releases.
+    if (options.isStreaming(conversationId)) void options.interruptForSteering(conversationId);
+    return true;
+  };
+  const steerChatMessage = (text: string, conversationId: string): boolean => {
+    const tellId = randomUUID();
+    options.addTell(conversationId, text, false, tellId);
+    return sendQueuedNow(conversationId, tellId);
+  };
   return {
     route: (text, attachments, id, tellId, createdAt) =>
       route(text, attachments, id, false, false, tellId, createdAt),
-    deliverChatMessage: (text, id) => deliverChatMessage(options, text, id),
+    deliverChatMessage: (text, id, steer = false) =>
+      steer
+        ? Promise.resolve(
+            steerChatMessage(text, id)
+              ? { kind: 'tell' }
+              : {
+                  kind: 'refused',
+                  error: 'Forge: the chat could not accept the steering message.',
+                },
+          )
+        : deliverChatMessage(options, text, id),
     cancelTell: options.removeTell,
-    sendQueuedNow: (conversationId, tellId) => {
-      if (tellId && !options.markSendNow(conversationId, tellId)) return false;
-      // Only a turn the agent loop is running: a chain that is evaluating or
-      // compacting runs the held tell as its follow-up once it releases.
-      if (options.isStreaming(conversationId)) void options.interruptForSteering(conversationId);
-      return true;
-    },
+    sendQueuedNow,
+    steerChatMessage,
     interruptForSteering: options.interruptForSteering,
     dispose: () => {
       subscription.dispose();
