@@ -9,6 +9,7 @@ import { globalBusyReason } from './remoteCommandShared';
 import type { RemoteCommandContext } from './RemoteCommandHandler';
 import { telegramCommandButton } from './TelegramCommandButtons';
 import { telegramCloseButton } from './TelegramHelpButtons';
+import { runStrataModeCommand } from '../config/StrataMode';
 
 /**
  * The model-management remote commands: `/models`, `/model`, `/system`,
@@ -22,6 +23,31 @@ export async function handleRemoteModelCommand(
   event: Extract<RemoteInboundEvent, { kind: 'text' }>,
   context: RemoteCommandContext,
 ): Promise<RemoteInboundDisposition | undefined> {
+  if (command === '/stratamode') {
+    const choice = argument?.toLowerCase();
+    if (choice !== 'solo' && choice !== 'multi' && choice !== 'status') {
+      return { kind: 'rejected', reason: 'usage: /stratamode solo|multi|status' };
+    }
+    if (!context.configPath) {
+      return { kind: 'rejected', reason: 'Strata mode config path is unavailable.' };
+    }
+    const binding = context.store.binding(event.channel, event.chatId);
+    const status = context.host.status();
+    const fallbackModelName = binding
+      ? (status.conversations.find((conversation) => conversation.id === binding.conversationId)
+          ?.activeModel ?? undefined)
+      : undefined;
+    const result = runStrataModeCommand(
+      context.configPath,
+      fallbackModelName,
+      choice,
+      (modelName) => context.isModelLoaded?.(modelName) ?? false,
+      status.streamingConversationIds.length,
+    );
+    if (result.changed) context.markCommitted?.();
+    await context.channel.send(event.chatId, result.message, { signal: context.signal });
+    return { kind: 'handled' };
+  }
   if (command === '/models') {
     return sendModelSelection(event, context, argument);
   }

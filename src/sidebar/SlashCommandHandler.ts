@@ -22,6 +22,7 @@ import { collectSystemReport } from '../system/SystemReport';
 import { formatSystemReport } from '../system/formatSystemReport';
 import { agentKindSchema, link, parseAgentIdentity, unlink } from '../agentLinks/chatAgentLinks';
 import { updateConfigFile } from '../config/ConfigWriter';
+import { runStrataModeCommand, type StrataModeChoice } from '../config/StrataMode';
 
 function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
@@ -47,6 +48,7 @@ export interface SlashCommandDeps extends CompactionDeps {
   keep: () => Promise<void>;
   toggleClanker: () => boolean;
   incompleteTurnReason: (conversationId: string) => string | undefined;
+  isStreamingConv: (conversationId: string) => boolean;
   resumeAfterManualCompact: (conversationId: string, reason: string) => Promise<void>;
 }
 
@@ -97,6 +99,9 @@ export class SlashCommandHandler {
         });
       case 'unloadAll':
         return this.runUnload(() => deps.unloadModels().then(() => 'Forge: all models unloaded.'));
+
+      case 'strataMode':
+        return this.runStrataMode();
 
       case 'restartBackend':
         try {
@@ -372,6 +377,52 @@ export class SlashCommandHandler {
       this.deps.post({
         type: 'error',
         message: `Could not update check-in reminder: ${errorMessage(error)}`,
+      });
+    }
+  }
+
+  private async runStrataMode(): Promise<void> {
+    const selection = await vscode.window.showQuickPick(
+      [
+        {
+          label: 'status',
+          choice: 'status' as const,
+          description: 'Show configured mode and backend state.',
+        },
+        { label: 'solo', choice: 'solo' as const, description: 'Run one chat at a time.' },
+        { label: 'multi', choice: 'multi' as const, description: 'Allow two chats at once.' },
+      ],
+      { title: 'Strata Mode', placeHolder: 'Choose status, solo, or multi' },
+    );
+    if (!selection) return;
+    const choice: StrataModeChoice = selection.choice;
+    const configPath = this.deps.getConfigPath?.();
+    if (!configPath) {
+      this.deps.post({ type: 'error', message: 'Strata mode: config path is unavailable.' });
+      return;
+    }
+    try {
+      const runningChatCount = this.deps
+        .getConversations()
+        .filter((conversation) => this.deps.isStreamingConv(conversation.id)).length;
+      const result = runStrataModeCommand(
+        configPath,
+        this.deps.getActiveConv().active_model,
+        choice,
+        (modelName) => this.deps.pool.isLoaded(modelName),
+        runningChatCount,
+      );
+      this.deps.post({
+        type: 'notice',
+        message: result.message,
+        conversationId: this.deps.getActiveConv().id,
+      });
+      this.emitActivity({ text: result.message, ephemeral: true });
+    } catch (error) {
+      this.deps.post({
+        type: 'error',
+        message: `Strata mode: ${errorMessage(error)}`,
+        conversationId: this.deps.getActiveConv().id,
       });
     }
   }

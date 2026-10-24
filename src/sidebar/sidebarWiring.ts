@@ -296,6 +296,7 @@ export function wireSidebar(host: SidebarHost, parts: SidebarParts): SidebarRunt
       return [...sidebar.conversations, ...sidebar.history];
     },
     incompleteTurnReason: (conversationId) => agentLoop.incompleteTurnReason(conversationId),
+    isStreamingConv: (conversationId) => agentLoop.isStreamingConv(conversationId),
     resumeAfterManualCompact: (conversationId, reason) =>
       runManualCompactResume(
         {
@@ -485,7 +486,6 @@ export function wireSidebar(host: SidebarHost, parts: SidebarParts): SidebarRunt
       }),
     isOpen: (id) => host.getSidebar().conversations.some((conversation) => conversation.id === id),
   });
-
   return {
     agentLoop,
     slashHandler,

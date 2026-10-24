@@ -342,6 +342,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
     workspaceRoot,
     workspaceId,
     configPath: activeConfigPath,
+    isModelLoaded: (modelName) => pool.isLoaded(modelName),
     getConfig: () => config,
     setConfig: (next) => {
       config = next;

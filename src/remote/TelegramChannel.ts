@@ -50,6 +50,7 @@ export const TELEGRAM_BOT_COMMANDS = [
   { command: 'sleep', description: 'Suspend this machine (needs /sleep confirm)' },
   { command: 'status', description: 'Session, model, queue' },
   { command: 'stop', description: 'Stop Forge and linked-agent ask' },
+  { command: 'stratamode', description: 'Set or report solo or multi-chat Strata mode' },
   { command: 'system', description: 'GPU, VRAM by process, RAM, drives' },
   { command: 'tell', description: 'Send a one-way note to claude, codex or copilot' },
   { command: 'timeout', description: 'Show/set session timeout' },

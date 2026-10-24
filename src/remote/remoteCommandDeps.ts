@@ -57,6 +57,8 @@ export function buildRemoteCommandDeps(
     inactivityTimeoutMinutes: options.inactivityTimeoutMinutes ?? 30,
     rateLimitPerMinute: options.rateLimitPerMinute,
     modelEntries: options.modelEntries,
+    ...(options.configPath ? { configPath: options.configPath } : {}),
+    ...(options.isModelLoaded ? { isModelLoaded: options.isModelLoaded } : {}),
     workspaceAliases: options.workspaceAliases,
     totpEnrolled: deps.totpEnrolled,
     ...workspaceContextOf(options),

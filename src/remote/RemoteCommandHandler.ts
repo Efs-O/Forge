@@ -35,6 +35,10 @@ export interface RemoteCommandContext {
   /** Current `remote.rate_limit_per_minute`, so `/ratelimit` can report it. */
   rateLimitPerMinute: number;
   modelEntries: readonly ModelPickerDescriptor[];
+  /** Absolute config path for comment-preserving window-level config commands. */
+  configPath?: string | undefined;
+  /** Live backend residency from the owning window's BackendPool. */
+  isModelLoaded?: ((modelName: string) => boolean) | undefined;
   workspaceAliases: Readonly<Record<string, string>>;
   /** The alias whose configured path is this window's root, when one matches. */
   currentWorkspaceAlias?: string | undefined;

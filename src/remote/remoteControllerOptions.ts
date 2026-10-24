@@ -23,6 +23,8 @@ export interface RemoteControllerOptions {
   rateLimitPerMinute: number;
   /** Snapshot of grouped model descriptors from the active Forge config. */
   modelEntries: readonly ModelPickerDescriptor[];
+  configPath?: string | undefined;
+  isModelLoaded?: ((modelName: string) => boolean) | undefined;
   attachmentStore?: RemoteAttachmentStore | undefined;
   attachmentsEnabled: boolean;
   acceptPdfAttachments: boolean;
@@ -102,6 +104,8 @@ export function transportNames(config: ForgeConfig): string[] {
 export interface RemoteControllerOptionsDeps {
   workspaceId: string;
   workspaceRoot?: string | undefined;
+  configPath?: string | undefined;
+  isModelLoaded?: ((modelName: string) => boolean) | undefined;
   setInactivityTimeout?: ((minutes: number) => Promise<void>) | undefined;
   setRateLimit?: ((perMinute: number) => Promise<void>) | undefined;
   reloadWindow?: (() => Promise<void>) | undefined;
@@ -152,6 +156,8 @@ export function buildRemoteControllerOptions(
         return profiles.length > 0 ? { profiles } : {};
       })(),
     })),
+    ...(deps.configPath ? { configPath: deps.configPath } : {}),
+    ...(deps.isModelLoaded ? { isModelLoaded: deps.isModelLoaded } : {}),
     ...(deps.workspaceRoot
       ? { attachmentStore: new RemoteAttachmentStore(deps.workspaceRoot) }
       : {}),

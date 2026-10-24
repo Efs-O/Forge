@@ -483,6 +483,8 @@ export class RemoteRuntime {
     return {
       workspaceId: this.options.workspaceId,
       workspaceRoot: this.options.workspaceRoot,
+      configPath: this.options.configPath,
+      isModelLoaded: this.options.isModelLoaded,
       setInactivityTimeout: this.options.setInactivityTimeout,
       setRateLimit: this.options.setRateLimit,
       reloadWindow: this.options.reloadWindow,

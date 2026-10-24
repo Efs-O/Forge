@@ -22,6 +22,18 @@ models:
 other_setting: preserved
 `;
 
+const STRATA_FIXTURE = `active_model: strata
+llama_server:
+  binary: /path/to/llama-server
+models:
+  - name: strata
+    model: strata
+    provider: openai-compatible
+    endpoint: http://localhost:3333/v1
+    unload_path: /unload
+    start_command: [python, start_strata.py, --mode, solo]
+`;
+
 vi.mock('vscode', () => ({
   window: {
     showInputBox: vi.fn(),
@@ -36,6 +48,40 @@ vi.mock('vscode', () => ({
 }));
 
 describe('SlashCommandHandler', () => {
+  it('offers /strataMode choices and reports its write to the active chat', async () => {
+    const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'forge-strata-slash-'));
+    const configPath = path.join(directory, 'config.yaml');
+    fs.writeFileSync(configPath, STRATA_FIXTURE, 'utf8');
+    const post = vi.fn();
+    const isLoaded = vi.fn(() => true);
+    vi.mocked(vscode.window.showQuickPick).mockResolvedValueOnce({
+      label: 'multi',
+      choice: 'multi',
+      description: 'Allow two chats at once.',
+    });
+    try {
+      await new SlashCommandHandler({
+        getConfigPath: () => configPath,
+        getConfig: () => ({ active_model: 'strata' }) as ForgeConfig,
+        getActiveConv: () => ({ id: 'chat-1', active_model: 'strata' }) as ConversationRuntime,
+        getConversations: () => [{ id: 'chat-1' }, { id: 'chat-2' }] as ConversationRuntime[],
+        isStreamingConv: (conversationId) => conversationId === 'chat-2',
+        pool: { isLoaded } as unknown as IBackendPool,
+        post,
+      } as unknown as SlashCommandDeps).handle('strataMode');
+
+      expect(isLoaded).toHaveBeenCalledWith('strata');
+      expect(loadConfig(directory).models[0]?.start_command?.[3]).toBe('pair');
+      expect(post).toHaveBeenCalledWith({
+        type: 'notice',
+        message: expect.stringContaining('1 chat currently running.'),
+        conversationId: 'chat-1',
+      });
+    } finally {
+      fs.rmSync(directory, { recursive: true, force: true });
+    }
+  });
+
   it('sets the check-in reminder through the config writer and confirms in chat', async () => {
     const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'forge-checkin-'));
     const configPath = path.join(directory, 'config.yaml');

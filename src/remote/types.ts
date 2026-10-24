@@ -465,6 +465,8 @@ export interface RemoteRuntimeOptions {
   confirmWhisperServerStart?: ((detail: string) => Promise<boolean>) | undefined;
   /** Absolute path to `.forge/config.yaml`; enables the persisted /voice toggle. */
   configPath?: string | undefined;
+  /** Live BackendPool residency for window-level model status commands. */
+  isModelLoaded?: ((modelName: string) => boolean) | undefined;
   /**
    * The shared `JobStore` (B3), created once in extension.ts. Passed to the
    * controller-options builder so `/jobs` and `/job` can read and write the

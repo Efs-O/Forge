@@ -30,19 +30,21 @@ export async function setupRemoteRuntime(
     workspaceRoot: string;
     workspaceId: string;
     configPath: string;
+    isModelLoaded: (modelName: string) => boolean;
     getConfig: () => ForgeConfig;
     setConfig: (next: ForgeConfig) => void;
     sidebarProvider: SidebarProvider;
     jobStore: JobStore;
   },
 ): Promise<RemoteRuntime> {
-  const { workspaceRoot, workspaceId, configPath, sidebarProvider, jobStore } = deps;
+  const { workspaceRoot, workspaceId, configPath, isModelLoaded, sidebarProvider, jobStore } = deps;
 
   const remoteRuntime = new RemoteRuntime({
     storageDirectory: context.globalStorageUri.fsPath,
     ...(workspaceRoot ? { workspaceRoot } : {}),
     workspaceId,
     configPath,
+    isModelLoaded,
     host: sidebarProvider.getHostFacade(),
     secrets: context.secrets,
     // Shared job store (B3): /jobs and /job edit the same files the scheduler and manage_jobs use.
