@@ -98,7 +98,7 @@ export function formatChatMirrorLine(
         : status === 'unconfirmed'
           ? 'not confirmed yet'
           : status === 'steer'
-            ? 'steering · interrupts its turn'
+            ? 'steering · interrupts its turn if it is generating'
             : undefined;
   return `${label}${statusText ? `  (${statusText})` : ''}\n${body}`;
 }

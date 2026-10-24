@@ -186,7 +186,7 @@ function formatDeliveryResult(
   action: 'new' | 'steer',
 ): string {
   if (action === 'steer' && result.kind === 'tell') {
-    return `Steering message delivered to ${name}: the current turn was interrupted and the chat will read it next.`;
+    return `Steering message delivered to ${name}: it reads this at its next round, and its turn is interrupted only if it is generating one.`;
   }
   if (result.kind === 'tell')
     return `Delivered to ${name} (running): it reads this at its next tool round.`;

@@ -212,9 +212,14 @@ describe('message_chat new and steer actions', () => {
       'target',
       true,
     );
-    expect(result).toContain('current turn was interrupted');
+    // The router interrupts only a chat that is generating, so the result must
+    // not claim an interrupt that may not have happened (BL-008).
+    expect(result).toContain('interrupted only if it is generating');
+    expect(result).not.toContain('the current turn was interrupted');
     expect(rig.emitHostActivity.mock.calls[1]?.[0]).toMatchObject({
-      text: expect.stringContaining('(steering · interrupts its turn)'),
+      text: expect.stringContaining(
+        '(steering · interrupts its turn if it is generating)',
+      ),
     });
   });
 
