@@ -10,11 +10,14 @@
 import { createHash } from 'crypto';
 import { realpathSync } from 'fs';
 import * as path from 'path';
+import { getLogger } from '../util/logger';
 import type { ForgeHostFacade } from '../sidebar/ForgeHostFacade';
 import type { RemoteRequestStore } from './RemoteRequestStore';
 import type { WorkspaceHandoff } from './RemoteStoreSchemas';
 import type { WorkspaceAliasTarget } from './RemoteWorkspaceDiscovery';
 import type { RemoteChannel } from './types';
+
+const log = getLogger();
 
 /** Exactly how extension.ts derives a workspace id, so the target window
  *  recognises the record as its own. */
@@ -69,6 +72,10 @@ export interface WorkspaceArrival {
   /** Set when no chat could be opened (every open chat busy at the cap). The
    *  handoff still completes: this window serves the chat now, just unbound. */
   failure?: string;
+  /** Set when the chat was opened here but the binding write failed, so the
+   *  record still names the workspace that sent it and every message from the
+   *  chat is refused until `/workspace` runs again. */
+  bindingFailure?: string;
 }
 
 /**
@@ -101,13 +108,38 @@ export async function resumeWorkspaceHandoffs(
       arrivals.push({ handoff, conversationTitle: '', created: false, failure });
       continue;
     }
-    await store.setBinding({
-      channel: handoff.channel,
-      chatId: handoff.chatId,
-      workspaceId,
-      conversationId: conversation.id,
-    });
-    await store.completeWorkspaceHandoff(handoff.id);
+    // A failed binding write used to throw out of `claimArrivals` and out of
+    // `replace`, so the transports never came up, no receipt was sent, and the
+    // chat learned about the switch only by sending a message that got refused
+    // with the bound-workspace error. Report it here instead and let the rest
+    // of the batch run.
+    let boundHere = false;
+    try {
+      await store.setBinding({
+        channel: handoff.channel,
+        chatId: handoff.chatId,
+        workspaceId,
+        conversationId: conversation.id,
+      });
+      boundHere = true;
+      await store.completeWorkspaceHandoff(handoff.id);
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      if (!boundHere) {
+        arrivals.push({
+          handoff,
+          conversationTitle: conversation.title,
+          created: resumed === undefined,
+          bindingFailure: message,
+        });
+        continue;
+      }
+      // The chat is bound here, so the switch happened; only the completion
+      // record failed, and `pruneRemoteState` drops it at its TTL anyway.
+      log.warn(
+        `[remote] workspace handoff ${handoff.id} could not be marked completed: ${message}`,
+      );
+    }
     arrivals.push({
       handoff,
       conversationTitle: conversation.title,
@@ -166,6 +198,17 @@ export async function announceWorkspaceArrivals(
     // "did it put me somewhere useful?": the receipt used to say "a new chat
     // is bound here" whatever it bound, so there was no way to tell a resumed
     // conversation from a blank one without running /view.
+    if (arrival.bindingFailure) {
+      // The chat is open here but still bound to where it came from, so the
+      // next message would be refused: name the command that finishes the move.
+      await sendReceipt(
+        channel,
+        handoff,
+        `Forge: now in ${name}, but this chat could not be bound here (${arrival.bindingFailure.replace(/^Forge: /, '')}). It is still bound where it was — send /workspace ${handoff.targetAlias} again.`,
+        deps,
+      );
+      continue;
+    }
     if (arrival.failure) {
       await sendReceipt(
         channel,

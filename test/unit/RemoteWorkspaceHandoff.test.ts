@@ -144,6 +144,54 @@ describe('workspace arrival', () => {
     expect(arrivals[0]).toMatchObject({ created: true });
   });
 
+  it('tells the chat when the binding write fails, instead of leaving it silent', async () => {
+    const store = await storeWithPendingHandoff('target');
+    const { host } = arrivalHost([{ id: 'newest', title: 'Game build', updatedAt: 99 }]);
+    // What a contended shared state lock does to a claim that already happened:
+    // the record is claimed, the chat is open here, and only the binding write
+    // fails. This used to throw out of claimArrivals and out of replace, so the
+    // transports never came up and the chat heard nothing at all.
+    (store as unknown as { setBinding: () => Promise<never> }).setBinding = async () => {
+      throw new Error('Forge remote state lock timed out: remote-state-v2.json.lock');
+    };
+
+    const arrivals = await resumeWorkspaceHandoffs(store, 'target', host);
+    expect(arrivals).toHaveLength(1);
+    expect(arrivals[0]).toMatchObject({
+      conversationTitle: 'Game build',
+      created: false,
+      bindingFailure: expect.stringContaining('lock timed out'),
+    });
+    expect(store.binding('fake', 'chat')).toBeUndefined();
+
+    const channel = new FakeRemoteChannel();
+    await announceWorkspaceArrivals(arrivals, {
+      channelFor: () => channel,
+      displayNameFor: () => 'Qwen testing',
+      totpEnrolled: async () => false,
+      notifyLocal: () => undefined,
+    });
+    expect(channel.sent[0]?.text).toContain('could not be bound here');
+    expect(channel.sent[0]?.text).toContain('send /workspace qwen again');
+  });
+
+  it('reports the switch as done when only the completion record fails', async () => {
+    const store = await storeWithPendingHandoff('target');
+    const { host } = arrivalHost([{ id: 'newest', title: 'Game build', updatedAt: 99 }]);
+    // The binding moved, so the chat really is here: only the record did not
+    // reach 'completed', and pruneRemoteState drops it at its TTL. That must
+    // not be reported as a failed switch, and must not abort the batch.
+    (store as unknown as { completeWorkspaceHandoff: () => Promise<never> })
+      .completeWorkspaceHandoff = async () => {
+      throw new Error('Forge remote state lock timed out: remote-state-v2.json.lock');
+    };
+
+    const arrivals = await resumeWorkspaceHandoffs(store, 'target', host);
+    expect(arrivals[0]).toMatchObject({ conversationTitle: 'Game build', created: false });
+    expect(arrivals[0]?.bindingFailure).toBeUndefined();
+    expect(store.binding('fake', 'chat')?.conversationId).toBe('newest');
+  });
+
   it('names the conversation it landed in, so the receipt is checkable', async () => {
     const store = await storeWithPendingHandoff('target');
     const { host } = arrivalHost([{ id: 'newest', title: 'Game build', updatedAt: 99 }]);
