@@ -4,7 +4,7 @@ import { effectiveParallelCapacity } from '../backend/parallelCapacity';
 import { DEFAULT_LLAMA_CTX, perSlotContext } from '../util/contextBudget';
 import { expandAlias, resolveSpawnModel, splitModelProfile } from './ConfigResolver';
 import { loadConfig } from './ConfigLoader';
-import { updateConfigFile } from './ConfigWriter';
+import { type ScalarEdit, updateConfigFile } from './ConfigWriter';
 import type { ForgeConfig } from './types';
 
 export type ChatModeChoice = 'solo' | 'multi';
@@ -77,7 +77,9 @@ export function runChatModeCommand(
   const modelIndex = config.models.findIndex((model) => model.name === state.modelName);
   if (state.kind === 'strata') {
     updateConfigFile(configPath, (doc) => {
-      doc.setIn(['models', modelIndex, 'start_command', 3], choice);
+      const node = doc.getIn(['models', modelIndex, 'start_command', 3], true);
+      if (!YAML.isScalar(node)) throw new Error('Forge: start_command[3] is not a plain value.');
+      return [{ node, value: choice }];
     });
     return {
       message: `${strataChangeMessage(choice)}${runningSuffix}`,
@@ -92,7 +94,9 @@ export function runChatModeCommand(
   const written = updateConfigFile(
     configPath,
     (doc) => {
-      sharedModels = writeLlamaParallel(doc, modelIndex, config, targetParallel);
+      const write = writeLlamaParallel(doc, modelIndex, config, targetParallel);
+      sharedModels = write.sharedModels;
+      return write.edits;
     },
     () => {
       const after = loadConfig(path.dirname(configPath));
@@ -222,24 +226,22 @@ function writeLlamaParallel(
   modelIndex: number,
   config: ForgeConfig,
   targetParallel: number,
-): string[] {
+): { edits: ScalarEdit[]; sharedModels: string[] } {
   const modelNode = doc.getIn(['models', modelIndex], true);
   if (!YAML.isMap(modelNode))
     throw new Error('Forge: selected model config is not a YAML mapping.');
 
-  if (modelNode.has('n_parallel')) {
-    modelNode.set('n_parallel', doc.createNode(targetParallel));
-    return [];
-  }
+  if (modelNode.has('n_parallel'))
+    return { edits: setParallel(doc, modelNode, targetParallel), sharedModels: [] };
 
   const existingSpawn = modelNode.get('spawn', true);
   if (existingSpawn === undefined) {
     modelNode.set('spawn', doc.createNode({ n_parallel: targetParallel }));
-    return [];
+    return { edits: [], sharedModels: [] };
   }
   const spawnNode = resolveYamlNode(existingSpawn, doc);
   if (!YAML.isMap(spawnNode)) throw new Error('Forge: model spawn config is not a YAML mapping.');
-  spawnNode.set('n_parallel', doc.createNode(targetParallel));
+  const edits = setParallel(doc, spawnNode, targetParallel);
 
   const sharedModels = config.models.flatMap((model, index) => {
     if (index === modelIndex) return [];
@@ -248,7 +250,15 @@ function writeLlamaParallel(
       ? [model.name]
       : [];
   });
-  return sharedModels;
+  return { edits, sharedModels };
+}
+
+/** An existing scalar is edited in place (keeping its comment); a missing key is added. */
+function setParallel(doc: YAML.Document, map: YAML.YAMLMap, targetParallel: number): ScalarEdit[] {
+  const node = map.get('n_parallel', true);
+  if (YAML.isScalar(node)) return [{ node, value: targetParallel }];
+  map.set('n_parallel', doc.createNode(targetParallel));
+  return [];
 }
 
 function resolveYamlNode(node: unknown, doc: YAML.Document): unknown {

@@ -3,6 +3,8 @@
 ## 0.17.76
 
 - `/chatMode` now selects solo or multi for Strata and llama.cpp. The sidebar marks the current choice, and Telegram shows Solo, Multi and Close buttons; llama.cpp replies include the effective per-chat context.
+- `/strataMode` is renamed `/chatMode`, and the launcher argument is `multi` instead of `pair` (the N:\Strata launcher rejects `pair`). For llama.cpp it sets `n_parallel` 1 or 2 and leaves `num_ctx` alone, so two chats each get half the context. When the model's `spawn` block is a shared YAML anchor, every model using that anchor switches, and the reply names them. `n_parallel` values other than 1 or 2 are refused.
+- `/chatMode` edits the changed value in place (new `ScalarEdit` path in `updateConfigFile`), so the rest of `config.yaml` stays byte-identical. A whole-document write re-padded flow lists (`[0, 1, 2]` became `[ 0, 1, 2 ]`) and dropped a changed value's trailing comment.
 
 ## 0.17.75
 

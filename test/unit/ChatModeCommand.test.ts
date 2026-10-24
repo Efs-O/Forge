@@ -54,7 +54,8 @@ function configFile(contents: string): string {
 }
 
 afterEach(() => {
-  for (const directory of tempDirs.splice(0)) fs.rmSync(directory, { recursive: true, force: true });
+  for (const directory of tempDirs.splice(0))
+    fs.rmSync(directory, { recursive: true, force: true });
 });
 
 describe('/chatMode config behavior', () => {
@@ -221,6 +222,46 @@ models:
     expect(fs.readFileSync(file, 'utf8')).toBe(fixture);
   });
 
+  it('changes only the edited value, keeping flow-list spacing, blank lines and trailing comments', () => {
+    const llama = `active_model: llama
+jobs:
+
+  gpu_gate:
+    gpus: [0, 1, 2] # unpadded flow list stays unpadded
+llama_server:
+  binary: /path/to/llama-server
+
+models:
+  - name: llama
+    provider: llama.cpp
+    gguf_path: /models/llama.gguf
+    spawn: &shared
+      n_parallel: 1 # --ctx-size is divided by slots.
+  - name: sibling
+    provider: llama.cpp
+    gguf_path: /models/sibling.gguf
+    spawn: *shared
+  - name: strata
+    model: strata
+    provider: openai-compatible
+    endpoint: http://localhost:3333/v1
+    unload_path: /unload
+    start_command: [ "wscript.exe", "start.vbs", "{num_ctx}", "solo" ] # padded stays padded
+`;
+    const file = configFile(llama);
+
+    runChatModeCommand(file, 'llama', 'multi', () => false, 0);
+    expect(fs.readFileSync(file, 'utf8')).toBe(llama.replace('n_parallel: 1 #', 'n_parallel: 2 #'));
+
+    fs.writeFileSync(file, llama.replace('active_model: llama', 'active_model: strata'), 'utf8');
+    runChatModeCommand(file, undefined, 'multi', () => false, 0);
+    expect(fs.readFileSync(file, 'utf8')).toBe(
+      llama
+        .replace('active_model: llama', 'active_model: strata')
+        .replace('"{num_ctx}", "solo" ]', '"{num_ctx}", "multi" ]'),
+    );
+  });
+
   it('refuses unsupported llama slot counts for status and writes', () => {
     const file = configFile(LLAMA_CONFIG().replace('n_parallel: 1', 'n_parallel: 4'));
 
@@ -279,7 +320,12 @@ describe('/chatmode Telegram controls and registration', () => {
       ],
       { signal: context.signal },
     );
-    await handleRemoteModelCommand('/chatmode', 'status', { ...event, text: '/chatmode status' }, context);
+    await handleRemoteModelCommand(
+      '/chatmode',
+      'status',
+      { ...event, text: '/chatmode status' },
+      context,
+    );
     expect(channel.sendInlineKeyboard).toHaveBeenCalledTimes(2);
 
     const mapped = mapTelegramCallbackQuery(
@@ -304,7 +350,9 @@ describe('/chatmode Telegram controls and registration', () => {
     );
     expect(channel.sendInlineKeyboard).toHaveBeenCalledTimes(2);
     expect(YAML.parse(fs.readFileSync(file, 'utf8'))).toMatchObject({
-      models: [{ start_command: ['python', 'start_strata.py', '--mode', 'multi', '--port', '8000'] }],
+      models: [
+        { start_command: ['python', 'start_strata.py', '--mode', 'multi', '--port', '8000'] },
+      ],
     });
   });
 
@@ -339,11 +387,9 @@ describe('/chatmode Telegram controls and registration', () => {
 
     await handleRemoteModelCommand('/chatmode', undefined, event, context);
 
-    expect(channel.send).toHaveBeenCalledWith(
-      'chat',
-      'Forge: strata has no solo/multi setting.',
-      { signal: context.signal },
-    );
+    expect(channel.send).toHaveBeenCalledWith('chat', 'Forge: strata has no solo/multi setting.', {
+      signal: context.signal,
+    });
     expect(channel.sendInlineKeyboard).not.toHaveBeenCalled();
   });
 
@@ -351,9 +397,7 @@ describe('/chatmode Telegram controls and registration', () => {
     expect(SLASH_COMMANDS).toContainEqual(
       expect.objectContaining({ id: 'chatMode', trigger: 'chatMode' }),
     );
-    expect(TELEGRAM_BOT_COMMANDS).toContainEqual(
-      expect.objectContaining({ command: 'chatmode' }),
-    );
+    expect(TELEGRAM_BOT_COMMANDS).toContainEqual(expect.objectContaining({ command: 'chatmode' }));
     expect(HELP_TEXT).toContain('/chatmode [solo|multi|status]');
   });
 });

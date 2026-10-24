@@ -36,10 +36,20 @@ export {
  * verifier runs while the config lock is still held; false or a thrown error
  * restores the exact original bytes with a second atomic write. Throws on a
  * YAML parse error, schema error, or atomic-write failure.
+ *
+ * A mutate that only changes existing scalars should return them as
+ * `ScalarEdit`s instead of setting them: those are spliced into the source
+ * text, so every other byte survives. `doc.toString()` re-pads flow lists
+ * (`[0, 1]` becomes `[ 0, 1 ]`) and drops a replaced scalar's trailing comment.
  */
+export interface ScalarEdit {
+  node: YAML.Scalar;
+  value: string | number;
+}
+
 export function updateConfigFile(
   configPath: string,
-  mutate: (doc: YAML.Document) => void,
+  mutate: (doc: YAML.Document) => ScalarEdit[] | void,
   verify?: () => boolean,
 ): boolean {
   // The lock file lives beside the config, so its folder must exist first: the
@@ -55,9 +65,16 @@ export function updateConfigFile(
           .join('\n')}`,
       );
     }
-    mutate(doc);
-    ForgeConfigSchema.parse(doc.toJS() ?? {});
-    atomicWrite(configPath, doc.toString({ lineWidth: 0 }));
+    const edits = mutate(doc);
+    const text =
+      edits && edits.length > 0 ? spliceScalars(raw, edits) : doc.toString({ lineWidth: 0 });
+    const written = edits && edits.length > 0 ? YAML.parseDocument(text) : doc;
+    if (written.errors.length > 0)
+      throw new Error(
+        `Forge: config.yaml edit produced invalid YAML: ${written.errors[0].message}`,
+      );
+    ForgeConfigSchema.parse(written.toJS() ?? {});
+    atomicWrite(configPath, text);
     if (!verify) return true;
     let verified: boolean;
     try {
@@ -69,6 +86,27 @@ export function updateConfigFile(
     if (!verified) writeFileAtomicSync(configPath, raw);
     return verified;
   });
+}
+
+function spliceScalars(raw: string, edits: ScalarEdit[]): string {
+  const spans = edits.map(({ node, value }) => {
+    if (!node.range) throw new Error('Forge: config value has no source position to edit.');
+    return { start: node.range[0], end: node.range[1], text: scalarSource(node, value) };
+  });
+  spans.sort((a, b) => b.start - a.start);
+  return spans.reduce(
+    (text, span) => text.slice(0, span.start) + span.text + text.slice(span.end),
+    raw,
+  );
+}
+
+/** Source text for `value`, keeping the replaced scalar's quote style. */
+function scalarSource(node: YAML.Scalar, value: string | number): string {
+  if (typeof value === 'number') return String(value);
+  if (node.type === YAML.Scalar.QUOTE_SINGLE) return `'${value.replace(/'/g, "''")}'`;
+  const plainSafe = /^[A-Za-z0-9_./-]+$/.test(value) && YAML.parse(value) === value;
+  if (node.type === YAML.Scalar.PLAIN && plainSafe) return value;
+  return JSON.stringify(value);
 }
 
 function withConfigFileLock<T>(configPath: string, operation: () => T): T {
