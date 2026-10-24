@@ -89,7 +89,13 @@ describe('message_chat tool contract and handler', () => {
       properties: {
         action: { type: 'string', enum: ['list', 'send'] },
         to: { type: 'string', minLength: 1, maxLength: 200 },
-        message: { type: 'string', minLength: 1, maxLength: 4000 },
+        message: {
+          type: 'string',
+          minLength: 1,
+          maxLength: 4000,
+          description:
+            "Write it as you would to a coworker: first person, call the other chat 'you', no formalities, no reports about yourself in the third person.",
+        },
       },
       required: ['action'],
       additionalProperties: false,
@@ -123,9 +129,9 @@ describe('message_chat tool contract and handler', () => {
     const [delivered, targetId] = sidebar.deliverChatMessage.mock.calls[0] as [string, string];
     expect(targetId).toBe('running');
     expect(delivered).toBe(
-      '[message_chat from #1 "Sender" (id sender)]\n' +
+      '📨 Message from Sender (id sender):\n' +
         'The parser test is ready.\n\n' +
-        '(Answer with message_chat to "sender" only if a reply is needed; do not reply just to acknowledge.)',
+        '(Reply with message_chat to "sender" if you need to; no need to just acknowledge.)',
     );
     expect(result).toBe(
       'Delivered to #2 "Bug hunt" (running): it reads this at its next tool round.',
@@ -140,7 +146,7 @@ describe('message_chat tool contract and handler', () => {
       context(),
     );
     expect(sidebar.deliverChatMessage).toHaveBeenCalledWith(
-      expect.stringContaining('[message_chat from #1'),
+      expect.stringContaining('📨 Message from Sender (id sender):'),
       'idle',
     );
     expect(status.activeConversationId).toBe('sender');
@@ -152,8 +158,8 @@ describe('message_chat tool contract and handler', () => {
     const body = 'x'.repeat(501);
     await tool.handler({ action: 'send', to: '#2', message: body }, context());
     expect(sidebar.emitHostActivity.mock.calls).toEqual([
-      [{ kind: 'prompt', conversationId: 'running', text: `📨 from #1 "Sender": ${'x'.repeat(499)}…` }],
-      [{ kind: 'prompt', conversationId: 'sender', text: `📤 to #2 "Bug hunt" (running): ${'x'.repeat(499)}…` }],
+      [{ kind: 'prompt', conversationId: 'running', text: `📨 Sender → this chat\n${'x'.repeat(499)}…` }],
+      [{ kind: 'prompt', conversationId: 'sender', text: `📤 this chat → Bug hunt  (busy · reads it mid-turn)\n${'x'.repeat(499)}…` }],
     ]);
   });
 
@@ -162,9 +168,43 @@ describe('message_chat tool contract and handler', () => {
     sidebar.deliverChatMessage.mockResolvedValue({ kind: 'turn' });
     await tool.handler({ action: 'send', to: 'idle', message: 'Please review.' }, context());
     expect(sidebar.emitHostActivity.mock.calls).toEqual([
-      [{ kind: 'prompt', conversationId: 'idle', text: '📨 from #1 "Sender": Please review.' }],
-      [{ kind: 'prompt', conversationId: 'sender', text: '📤 to #3 "Release notes" (idle, turn started): Please review.' }],
+      [{ kind: 'prompt', conversationId: 'idle', text: '📨 Sender → this chat\nPlease review.' }],
+      [{ kind: 'prompt', conversationId: 'sender', text: '📤 this chat → Release notes  (idle · started a turn)\nPlease review.' }],
     ]);
+  });
+
+  it('uses plain quotes in model-facing result titles and mirror lines', async () => {
+    const status = hostStatus({ running: ['running'] });
+    status.conversations[0]!.title = 'Sender "one"';
+    status.conversations[1]!.title = 'Bug "hunt"';
+    const { tool, sidebar } = makeTool(status);
+    const result = await tool.handler(
+      { action: 'send', to: 'running', message: 'Use plain quotes.' },
+      context(),
+    );
+    const [delivered] = sidebar.deliverChatMessage.mock.calls[0]!;
+
+    expect(result).toBe(
+      'Delivered to #2 "Bug \'hunt\'" (running): it reads this at its next tool round.',
+    );
+    expect(sidebar.emitHostActivity.mock.calls).toEqual([
+      [
+        {
+          kind: 'prompt',
+          conversationId: 'running',
+          text: '📨 Sender "one" → this chat\nUse plain quotes.',
+        },
+      ],
+      [
+        {
+          kind: 'prompt',
+          conversationId: 'sender',
+          text: '📤 this chat → Bug "hunt"  (busy · reads it mid-turn)\nUse plain quotes.',
+        },
+      ],
+    ]);
+    const emittedText = sidebar.emitHostActivity.mock.calls.map((call) => call[0].text);
+    expect([result, delivered, ...emittedText].some((text) => text.includes('\\\"'))).toBe(false);
   });
 
   it('does not emit activity for a refused delivery', async () => {
@@ -183,8 +223,8 @@ describe('message_chat tool contract and handler', () => {
       await vi.advanceTimersByTimeAsync(20_000);
       await expect(pending).resolves.toContain('had not started after 20 s');
       expect(sidebar.emitHostActivity.mock.calls).toEqual([
-        [{ kind: 'prompt', conversationId: 'idle', text: '📨 from #1 "Sender": Please review.' }],
-        [{ kind: 'prompt', conversationId: 'sender', text: '📤 to #3 "Release notes" (not confirmed yet): Please review.' }],
+        [{ kind: 'prompt', conversationId: 'idle', text: '📨 Sender → this chat\nPlease review.' }],
+        [{ kind: 'prompt', conversationId: 'sender', text: '📤 this chat → Release notes  (not confirmed yet)\nPlease review.' }],
       ]);
     } finally {
       vi.useRealTimers();

@@ -4,6 +4,7 @@ import type { ForgeHostFacade, ForgeHostStatus } from '../sidebar/ForgeHostFacad
 import type { RegisteredTool, ToolHandlerContext } from './ToolRegistry';
 import { logger } from '../util/logger';
 import { clipMirroredPrompt } from '../sidebar/turnMirrorWiring';
+import { formatChatMessage, formatChatMirrorLine, quoteTitle } from '../sidebar/chatMessageText';
 import {
   formatChatId,
   formatChatList,
@@ -115,14 +116,7 @@ function awaitDelivery(
 
 function messageFrom(sender: ChatRef, chats: ChatRef[], text: string): string {
   const senderId = formatChatId(sender.id, chats);
-  const quotedTitle = JSON.stringify(sender.title);
-  const quotedId = JSON.stringify(senderId);
-  return [
-    `[message_chat from #${sender.position} ${quotedTitle} (id ${senderId})]`,
-    text,
-    '',
-    `(Answer with message_chat to ${quotedId} only if a reply is needed; do not reply just to acknowledge.)`,
-  ].join('\n');
+  return formatChatMessage(sender.title, senderId, text);
 }
 
 export function makeMessageChatTool(options: {
@@ -144,7 +138,13 @@ export function makeMessageChatTool(options: {
           properties: {
             action: { type: 'string', enum: ['list', 'send'] },
             to: { type: 'string', minLength: 1, maxLength: 200 },
-            message: { type: 'string', minLength: 1, maxLength: 4000 },
+            message: {
+              type: 'string',
+              minLength: 1,
+              maxLength: 4000,
+              description:
+                "Write it as you would to a coworker: first person, call the other chat 'you', no formalities, no reports about yourself in the third person.",
+            },
           },
           required: ['action'],
           additionalProperties: false,
@@ -245,7 +245,7 @@ export function makeMessageChatTool(options: {
           selfId,
         );
       }
-      const name = `#${target.position} ${JSON.stringify(target.title)}`;
+      const name = `#${target.position} ${quoteTitle(target.title)}`;
       if (delivery.kind === 'refused') {
         return listRefusal(
           `Error: ${name} did not accept the message: ${delivery.error} Nothing was delivered; retry later or pick another chat.`,
@@ -254,23 +254,17 @@ export function makeMessageChatTool(options: {
         );
       }
       const body = clipMirroredPrompt(parsed.message);
-      const quotedSenderTitle = JSON.stringify(sender.title);
-      const quotedTargetTitle = JSON.stringify(target.title);
-      const senderStatus =
-        delivery.kind === 'tell'
-          ? '(running)'
-          : delivery.kind === 'turn'
-            ? '(idle, turn started)'
-            : '(not confirmed yet)';
+      const mirrorStatus =
+        delivery.kind === 'tell' ? 'tell' : delivery.kind === 'turn' ? 'turn' : 'unconfirmed';
       emitPromptActivity(
         hostFacade,
         target.id,
-        `📨 from #${sender.position} ${quotedSenderTitle}: ${body}`,
+        formatChatMirrorLine('in', sender.title, undefined, body),
       );
       emitPromptActivity(
         hostFacade,
         sender.id,
-        `📤 to #${target.position} ${quotedTargetTitle} ${senderStatus}: ${body}`,
+        formatChatMirrorLine('out', target.title, mirrorStatus, body),
       );
       // An unconfirmed send may still start, so it counts against both caps.
       window.sentAt.push(at);
