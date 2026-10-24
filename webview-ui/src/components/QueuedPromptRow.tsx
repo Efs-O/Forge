@@ -1,4 +1,5 @@
 import React from 'react';
+import { parseChatMessage } from '../../../src/sidebar/chatMessageText';
 
 interface Props {
   text: string;
@@ -18,13 +19,23 @@ export function QueuedPromptRow({
   onSendNow,
   onCancel,
 }: Props): React.ReactElement {
+  const chatMessage = parseChatMessage(text);
   const attachmentLabel = attachmentCount
     ? ` · ${attachmentCount} attachment${attachmentCount === 1 ? '' : 's'}`
     : '';
   return (
     <div className="msg-wrapper queued-prompt">
-      <div className="queued-prompt-card">
-        <div className="msg user msg-queued">{text || 'Attachment queued'}</div>
+      <div className={`queued-prompt-card${chatMessage ? ' msg-chat-message' : ''}`}>
+        <div className="msg user msg-queued">
+          {chatMessage ? (
+            <>
+              <div className="agent-sender-badge">📨 From {chatMessage.fromTitle}</div>
+              {chatMessage.body}
+            </>
+          ) : (
+            text || 'Attachment queued'
+          )}
+        </div>
         <div className="queued-prompt-actions">
           <span className="queued-prompt-status">
             {sendingNow

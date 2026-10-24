@@ -8,6 +8,7 @@ import { normalizeMarkdownForRender } from '../markdown';
 import { FILE_LINK_SCHEME, linkifyForRender, parseFileLink } from '../linkify';
 import { MessageAttachments } from './MessageAttachments';
 import { formatMessageTimestamp } from '../messageTimestamp';
+import { parseChatMessage } from '../../../src/sidebar/chatMessageText';
 
 const CopyIcon = (): React.ReactElement => (
   <svg width="16" height="16" viewBox="0 0 16 16" fill="none" aria-hidden="true">
@@ -199,6 +200,7 @@ function MessageView({
   const timestampText = formatMessageTimestamp(createdAt);
   const timestampDateTime =
     createdAt !== undefined && timestampText ? new Date(createdAt).toISOString() : undefined;
+  const chatMessage = role === 'user' ? parseChatMessage(content) : undefined;
 
   const handleCopy = useCallback(() => {
     navigator.clipboard
@@ -227,18 +229,20 @@ function MessageView({
 
   return (
     <div className={`msg-wrapper msg-wrapper-${role}`}>
-      <div className={`msg ${role}`}>
-        {role === 'user' && agentSender && (
+      <div className={`msg ${role}${chatMessage ? ' msg-chat-message' : ''}`}>
+        {chatMessage ? (
+          <div className="agent-sender-badge">📨 From {chatMessage.fromTitle}</div>
+        ) : role === 'user' && agentSender ? (
           <div className="agent-sender-badge">
             From {agentSender.kind[0]!.toUpperCase() + agentSender.kind.slice(1)} ·{' '}
             {agentSender.title}
           </div>
-        )}
+        ) : null}
         {role === 'assistant' && content ? (
           <AssistantContent content={content} streaming={streaming} />
         ) : role === 'user' ? (
           <>
-            {content}
+            {chatMessage?.body ?? content}
             {attachments?.length ? <MessageAttachments attachments={attachments} /> : null}
           </>
         ) : null}

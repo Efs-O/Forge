@@ -6,6 +6,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 (globalThis as unknown as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 
 const { QueuedPromptRow } = await import('../../webview-ui/src/components/QueuedPromptRow');
+const { formatChatMessage } = await import('../../src/sidebar/chatMessageText');
 const React = await import('react');
 
 let container: HTMLDivElement;
@@ -71,6 +72,27 @@ describe('QueuedPromptRow', () => {
       'Send now',
       'Cancel',
     ]);
+  });
+
+  it('shows only the body and sender badge for queued chat messages', () => {
+    const text = formatChatMessage('Sender chat', 'e712', 'Please review this next.');
+    act(() => {
+      root.render(
+        React.createElement(QueuedPromptRow, {
+          text,
+          attachmentCount: 0,
+          tell: true,
+          onSendNow: vi.fn(),
+          onCancel: vi.fn(),
+        }),
+      );
+    });
+
+    const card = container.querySelector('.queued-prompt-card.msg-chat-message');
+    const message = card?.querySelector('.msg.user.msg-queued');
+    expect(message?.querySelector('.agent-sender-badge')?.textContent).toBe('📨 From Sender chat');
+    expect(message?.textContent).toBe('📨 From Sender chatPlease review this next.');
+    expect(message?.textContent).not.toContain('Reply with message_chat');
   });
 
   it('sends now once, then says the turn is stopping', () => {

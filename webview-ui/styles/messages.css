@@ -65,6 +65,19 @@
   overflow-wrap: anywhere;
 }
 
+.msg.user.msg-chat-message,
+.queued-prompt-card.msg-chat-message {
+  background: color-mix(in srgb, var(--forge-accent) 7%, var(--vscode-editor-background));
+  border-color: color-mix(in srgb, var(--forge-accent) 28%, var(--forge-border));
+}
+
+.agent-sender-badge {
+  margin-bottom: 3px;
+  color: var(--vscode-descriptionForeground);
+  font-size: 0.78em;
+  font-weight: 500;
+}
+
 /* Queued local prompts share the bubble position and hold their own controls. */
 .queued-prompt {
   align-items: flex-end;
