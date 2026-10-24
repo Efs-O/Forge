@@ -100,4 +100,37 @@ describe('recycle-bin refusal diagnosis', () => {
     clearTrashRefusals();
     expect(trashRefusalForPath(root)).toBeUndefined();
   });
+
+  it('keys a refusal by the real path, so the preview finds it under either spelling', () => {
+    const root = makeTempRoot();
+    const real = path.join(root, 'real');
+    const link = path.join(root, 'link');
+    const linkType = process.platform === 'win32' ? 'junction' : 'dir';
+    try {
+      fs.mkdirSync(real);
+      fs.symlinkSync(real, link, linkType);
+    } catch {
+      // Links are unavailable on some filesystems; skip rather than fail.
+      return;
+    }
+    // The delete tool keys a refusal by the real path it resolved; the sidebar
+    // preview passes the path the user asked for, which may go through a link —
+    // and on macOS the whole temp root is under a link (`/var` is
+    // `/private/var`), so the two spellings differ for every path there.
+    const inReal = path.join(real, 'result.txt');
+    const inLink = path.join(link, 'result.txt');
+    fs.writeFileSync(inReal, 'result');
+    rememberTrashRefusal(inReal, 'diagnosis under the real path');
+    expect(trashRefusalForPath(inLink)).toBe('diagnosis under the real path');
+
+    // The same lookup after the target is gone: a deleted (or never-created)
+    // target must still resolve through the nearest existing ancestor, because
+    // that is where the tool wrote the key while the file existed.
+    const goneReal = path.join(real, 'gone.txt');
+    const goneLink = path.join(link, 'gone.txt');
+    fs.writeFileSync(goneReal, 'gone');
+    rememberTrashRefusal(goneReal, 'diagnosis for a deleted target');
+    fs.rmSync(goneReal);
+    expect(trashRefusalForPath(goneLink)).toBe('diagnosis for a deleted target');
+  });
 });

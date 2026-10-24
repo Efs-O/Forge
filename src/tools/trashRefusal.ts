@@ -22,18 +22,56 @@ export interface TrashRefusalScanOptions {
 
 const refusals = new Map<string, CachedRefusal>();
 
+/**
+ * Real-path the nearest existing ancestor and re-append the missing tail, so a
+ * target that does not exist yet — or has just been deleted — lands on the same
+ * key the writer used while it did exist.
+ */
+function canonicalExistingAncestor(resolved: string): string {
+  const tail: string[] = [];
+  let current = resolved;
+  for (;;) {
+    try {
+      const real =
+        process.platform === 'win32' ? fs.realpathSync.native(current) : fs.realpathSync(current);
+      return path.join(real, ...tail);
+    } catch (error) {
+      const code = (error as NodeJS.ErrnoException).code;
+      if (code !== 'ENOENT' && code !== 'ENOTDIR') throw error;
+      const parent = path.dirname(current);
+      if (parent === current) return resolved;
+      tail.unshift(path.basename(current));
+      current = parent;
+    }
+  }
+}
+
+/**
+ * One key per file, whatever spelling the caller brings. The delete tool keys a
+ * refusal by the real path it resolved; the sidebar preview, the approval
+ * preview and every lookup pass the path the user asked for. Real-pathing only
+ * on Windows (as this used to) left macOS and Linux with two keys for one file
+ * — on macOS `/var/folders/…` and `/private/var/folders/…` are the same
+ * folder, so a refusal was written under one spelling and never found under the
+ * other, and a stale refusal survived the successful delete that should have
+ * cleared it.
+ */
 function cacheKey(targetPath: string): string {
   let resolved = path.resolve(targetPath);
-  if (process.platform !== 'win32') return resolved;
   try {
-    resolved = fs.realpathSync.native(resolved);
-  } catch (error) {
-    const code = (error as NodeJS.ErrnoException).code;
-    if (code !== 'ENOENT' && code !== 'ENOTDIR') throw error;
+    resolved = canonicalExistingAncestor(resolved);
+  } catch {
+    // A path we cannot inspect at all (a permission error, a symlink loop, an
+    // unavailable drive) still gets one stable key: a lookup must never throw.
   }
   if (resolved.startsWith('\\\\?\\UNC\\')) resolved = `\\\\${resolved.slice(8)}`;
   else if (resolved.startsWith('\\\\?\\')) resolved = resolved.slice(4);
-  return resolved.toLowerCase();
+  // Windows and macOS both default to case-insensitive filesystems, so two
+  // spellings of one file must not become two cache entries.
+  if (process.platform === 'win32' || process.platform === 'darwin') {
+    resolved = resolved.toLowerCase();
+  }
+  return resolved;
 }
 
 function oneLine(value: string): string {
