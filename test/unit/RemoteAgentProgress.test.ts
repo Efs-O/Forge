@@ -326,7 +326,7 @@ describe('RemoteAgentProgress', () => {
     expect(truncated).toContain('1 min · 2 tool calls · active 1 min ago');
   });
 
-  it('reads the current context budget every time the footer is rendered', async () => {
+  it('shows the current context percentage in plain text every time the footer is rendered', async () => {
     vi.useFakeTimers();
     let budget = { used: 31, max: 100 };
     const channel = new FakeRemoteChannel();
@@ -337,11 +337,12 @@ describe('RemoteAgentProgress', () => {
     progress.begin('c1', 'chat-a', 'message-1');
     progress.handle({ conversationId: 'c1', kind: 'status', text: 'Working…' });
     await vi.advanceTimersByTimeAsync(100);
-    expect(channel.edits.at(-1)?.text).toContain('⏳ Working… · ◔ 31%');
+    expect(channel.edits.at(-1)?.text).toContain('Context 31%');
     budget = { used: 63, max: 100 };
     progress.handle({ conversationId: 'c1', kind: 'status', text: 'Still working…' });
     await vi.advanceTimersByTimeAsync(100);
-    expect(channel.edits.at(-1)?.text).toContain('⏳ Still working… · ◕ 63%');
+    expect(channel.edits.at(-1)?.text).toContain('Context 63%');
+    expect(channel.edits.at(-1)?.text).not.toMatch(/[\u25CB\u25D4\u25D1\u25D5\u25CF]/u);
     await progress.dispose();
   });
 

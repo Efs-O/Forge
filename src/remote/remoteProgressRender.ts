@@ -1,4 +1,4 @@
-import { contextRing } from './telegramReportFormat';
+import { contextPercent } from './telegramReportFormat';
 
 export interface RemoteProgressRenderState {
   /** Set only while the turn is stuck on something that is not the model. */
@@ -41,7 +41,11 @@ export function renderProgressFooter(
 ): string {
   const doing = [
     [state.phase, state.milestone].filter(Boolean).join(' · ') || DEFAULT_STATUS,
-    ...(state.context ? [contextRing(state.context.used, state.context.max)].filter(Boolean) : []),
+    ...(state.context
+      ? [contextPercent(state.context.used, state.context.max)]
+          .filter((percent): percent is number => percent !== undefined)
+          .map((percent) => `Context ${percent}%`)
+      : []),
   ].join(' · ');
   const calls = state.toolCalls === 1 ? '1 tool call' : `${state.toolCalls} tool calls`;
   const lines = [

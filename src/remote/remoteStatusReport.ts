@@ -1,5 +1,5 @@
 import { escapeTelegramHtml } from './telegramHtml';
-import { contextRing, formatTokensShort, textBar } from './telegramReportFormat';
+import { contextPercent, formatContextUsage, formatTokensShort } from './telegramReportFormat';
 import type { RemoteCommandContext } from './RemoteCommandHandler';
 import type { RemoteInboundDisposition, RemoteInboundEvent } from './types';
 import { telegramCommandButton } from './TelegramCommandButtons';
@@ -193,14 +193,17 @@ export function renderRemoteStatusReport(input: RemoteStatusReportInput): Remote
         : 'Idle';
   const problemLine = problems.length > 0 ? problems.join(' · ') : undefined;
   const budget = input.context;
-  const ring = budget ? contextRing(budget.used, budget.max) : undefined;
+  const contextUsage =
+    budget && budget.max > 0 ? formatContextUsage(budget.used, budget.max) : undefined;
+  const contextPercentUsed =
+    budget && budget.max > 0 ? contextPercent(budget.used, budget.max) : undefined;
   const contextHtml =
     budget && budget.max > 0
-      ? `<b>Context</b>\n<pre>${textBar(budget.used / budget.max, 16)}  ${Math.round((budget.used / budget.max) * 100)}%\n${formatTokensShort(budget.used)} of ${formatTokensShort(budget.max)} · ${formatTokensShort(Math.max(0, budget.max - budget.used))} left</pre>`
+      ? `<b>Context</b>\n${escapeTelegramHtml(contextUsage ?? '')}`
       : '<b>Context</b>\nContext unavailable (no num_ctx for this model)';
   const contextPlain =
     budget && budget.max > 0
-      ? `Context\n${textBar(budget.used / budget.max, 16)}  ${Math.round((budget.used / budget.max) * 100)}%\n${formatTokensShort(budget.used)} of ${formatTokensShort(budget.max)} · ${formatTokensShort(Math.max(0, budget.max - budget.used))} left`
+      ? `Context\n${contextUsage ?? ''}`
       : 'Context\nContext unavailable (no num_ctx for this model)';
   const work = formatWork(input.conversation);
   const approvalsHtml = input.clanker
@@ -210,7 +213,7 @@ export function renderRemoteStatusReport(input: RemoteStatusReportInput): Remote
     ? 'Approvals: CLANKER — non-dangerous tools auto-approved'
     : `Approvals: gated · ${input.exchanges}`;
   const html = [
-    `<b>Status</b>${ring ? ` · ${escapeTelegramHtml(ring)}` : ''}`,
+    `<b>Status</b>${contextPercentUsed === undefined ? '' : ` · Context ${contextPercentUsed}%`}`,
     `<b>Workspace</b> ${escapeTelegramHtml(workspace)}`,
     `<b>Chat</b> ${escapeTelegramHtml(chat)}`,
     `<b>Model</b> ${escapeTelegramHtml(model)}`,
@@ -221,7 +224,7 @@ export function renderRemoteStatusReport(input: RemoteStatusReportInput): Remote
     approvalsHtml,
   ].join('\n');
   const plain = [
-    `Status${ring ? ` · ${ring}` : ''}`,
+    `Status${contextPercentUsed === undefined ? '' : ` · Context ${contextPercentUsed}%`}`,
     `Workspace ${workspace}`,
     `Chat ${chat}`,
     `Model ${model}`,
@@ -243,11 +246,9 @@ export function renderRemoteContextReport(input: RemoteContextReportInput): Remo
     const unavailable = 'Context unavailable (no num_ctx for this model)';
     return { html: `${heading}\n${unavailable}`, plain: `${plainHeading}\n${unavailable}` };
   }
-  const ratio = budget.used / budget.max;
-  const percent = Math.round(ratio * 100);
-  const remaining = Math.max(0, budget.max - budget.used);
-  const total = `${textBar(ratio, 16)}  ${percent}%\n${formatTokensShort(budget.used)} of ${formatTokensShort(budget.max)} · ${formatTokensShort(remaining)} left`;
-  const plainTotal = `${textBar(ratio, 16)}  ${percent}%\n${formatTokensShort(budget.used)} of ${formatTokensShort(budget.max)} · ${formatTokensShort(remaining)} left`;
+  const percent = Math.round((budget.used / budget.max) * 100);
+  const total = formatContextUsage(budget.used, budget.max) ?? `${percent}%`;
+  const plainTotal = total;
   const threshold = input.compactAt;
   const footer =
     threshold !== undefined
@@ -256,7 +257,7 @@ export function renderRemoteContextReport(input: RemoteContextReportInput): Remo
   const parts = input.breakdown;
   if (!parts) {
     return {
-      html: `${heading}\n<pre>${total}</pre>\n<i>${escapeTelegramHtml(footer)}</i>`,
+      html: `${heading}\n${escapeTelegramHtml(total)}\n<i>${escapeTelegramHtml(footer)}</i>`,
       plain: `${plainHeading}\n${plainTotal}\n${footer}`,
     };
   }
@@ -265,27 +266,15 @@ export function renderRemoteContextReport(input: RemoteContextReportInput): Remo
     ['Tools', parts.tools],
     ['Conversation', parts.conversation],
   ] as const;
-  const largest = Math.max(1, ...rows.map(([, count]) => count));
   const renderedRows = rows.map(
-    ([label, count]) =>
-      `${label.padEnd(13)} ${formatTokensShort(count).padStart(4)}  ${fractionBar(count / largest)}`,
+    ([label, count]) => `${label.padEnd(13)} ${formatTokensShort(count).padStart(4)}`,
   );
-  const breakdownHtml = `<b>What fills it</b>\n<pre>${renderedRows.map(escapeTelegramHtml).join('\n')}</pre>`;
+  const breakdownHtml = `<b>What fills it</b>\n${renderedRows.map(escapeTelegramHtml).join('\n')}`;
   const breakdownPlain = `What fills it\n${renderedRows.join('\n')}`;
   return {
-    html: `${heading}\n<pre>${total}</pre>\n${breakdownHtml}\n<i>${escapeTelegramHtml(footer)}</i>`,
+    html: `${heading}\n${escapeTelegramHtml(total)}\n${breakdownHtml}\n<i>${escapeTelegramHtml(footer)}</i>`,
     plain: `${plainHeading}\n${plainTotal}\n${breakdownPlain}\n${footer}`,
   };
-}
-
-function fractionBar(fraction: number): string {
-  const marks = ['▏', '▎', '▍', '▌', '▋', '▊', '▉'];
-  const width = Math.max(0, Math.min(8, fraction * 8));
-  const whole = Math.floor(width);
-  const remainder = width - whole;
-  const partial =
-    remainder > 0 && whole < 8 ? marks[Math.max(0, Math.ceil(remainder * marks.length) - 1)] : '';
-  return `${'█'.repeat(whole)}${partial || (fraction > 0 && whole === 0 ? '▏' : '')}`;
 }
 
 function formatWork(conversation: RemoteStatusReportInput['conversation']): string {

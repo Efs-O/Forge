@@ -11,7 +11,7 @@ import { formatSelectionPage } from '../../src/remote/remoteSelectionFormat';
 import { formatRemoteRelativeDate } from '../../src/remote/RemoteDateTime';
 import { renderRemoteJobCard, renderRemoteJobList } from '../../src/remote/remoteJobReport';
 import { parseTelegramJobCallback, telegramJobHash } from '../../src/remote/TelegramJobButtons';
-import { textBar, formatTokensShort, contextRing } from '../../src/remote/telegramReportFormat';
+import { contextPercent, formatContextUsage, formatTokensShort } from '../../src/remote/telegramReportFormat';
 import { formatSystemReport } from '../../src/system/formatSystemReport';
 import type { SystemReport } from '../../src/system/SystemReport';
 import type { RemoteInboundEvent } from '../../src/remote/types';
@@ -26,24 +26,14 @@ import { escapeTelegramHtml } from '../../src/remote/telegramHtml';
 afterEach(() => vi.useRealTimers());
 
 describe('Telegram readable report formatters', () => {
-  it('formats bounded bars and short token counts', () => {
-    expect(textBar(0.5, 12)).toBe('██████░░░░░░');
-    expect(textBar(0.5, 16)).toBe('████████░░░░░░░░');
-    expect(textBar(Number.NaN, 4)).toBe('░░░░');
-    expect(textBar(4, 2)).toBe('██');
+  it('formats plain context usage and short token counts', () => {
+    expect(contextPercent(0, 100)).toBe(0);
+    expect(contextPercent(31, 100)).toBe(31);
+    expect(contextPercent(104, 100)).toBe(104);
+    expect(contextPercent(1, 0)).toBeUndefined();
+    expect(formatContextUsage(167_012, 400_000)).toBe('42% · 167K of 400K · 233K left');
     expect(formatTokensShort(167_012)).toBe('167K');
     expect(formatTokensShort(1_500_000)).toBe('1.5M');
-  });
-
-  it('maps the context percentage to the five ring glyphs without capping truth', () => {
-    const cases: Array<[number, string]> = [
-      [0, '○ 0%'], [12, '○ 12%'], [13, '◔ 13%'], [37, '◔ 37%'],
-      [38, '◑ 38%'], [62, '◑ 62%'], [63, '◕ 63%'], [87, '◕ 87%'],
-      [88, '● 88%'], [100, '● 100%'], [104, '● 104%'],
-    ];
-    for (const [percent, expected] of cases) expect(contextRing(percent, 100)).toBe(expected);
-    expect(contextRing(1, 0)).toBeUndefined();
-    expect(contextRing(1, -1)).toBeUndefined();
   });
 
   it('renders status counts in order, drops zeros, and escapes every dynamic value', () => {
@@ -100,13 +90,18 @@ describe('Telegram readable report formatters', () => {
     expect(report.plain).toContain('Approvals: CLANKER');
   });
 
-  it('adds the context ring to the /status title in HTML and plain text only when available', () => {
+  it('shows a plain context percentage and usage details in both channels', () => {
     const withBudget = renderRemoteStatusReport({
       running: 0, queued: 0, streaming: 0, notificationsPending: 0, abandoned: 0,
       context: { used: 31, max: 100 }, clanker: false, exchanges: 'Exchanges: none',
     });
-    expect(withBudget.html.split('\n')[0]).toBe('<b>Status</b> · ◔ 31%');
-    expect(withBudget.plain.split('\n')[0]).toBe('Status · ◔ 31%');
+    expect(withBudget.html.split('\n')[0]).toBe('<b>Status</b> · Context 31%');
+    expect(withBudget.html).toContain('31% · 31 of 100 · 69 left');
+    expect(withBudget.html).not.toContain('<pre>');
+    expect(withBudget.plain.split('\n')[0]).toBe('Status · Context 31%');
+    expect(withBudget.plain).toContain('31% · 31 of 100 · 69 left');
+    expect(withBudget.html).not.toMatch(/[\u2588\u2591\u25CB\u25D4\u25D1\u25D5\u25CF]/u);
+    expect(withBudget.plain).not.toMatch(/[\u2588\u2591\u25CB\u25D4\u25D1\u25D5\u25CF]/u);
     const withoutBudget = renderRemoteStatusReport({
       running: 0, queued: 0, streaming: 0, notificationsPending: 0, abandoned: 0,
       clanker: false, exchanges: 'Exchanges: none',
@@ -126,6 +121,8 @@ describe('Telegram readable report formatters', () => {
       budget: { used: 75_000, max: 100_000 },
     });
     expect(withoutParts.html).toContain('75K of 100K · 25K left');
+    expect(withoutParts.html).not.toMatch(/[\u2588\u2591\u25CB\u25D4\u25D1\u25D5\u25CF]/u);
+    expect(withoutParts.plain).not.toMatch(/[\u2588\u2591\u25CB\u25D4\u25D1\u25D5\u25CF]/u);
     expect(withoutParts.html).not.toContain('What fills it');
 
     const withParts = renderRemoteContextReport({
@@ -135,6 +132,9 @@ describe('Telegram readable report formatters', () => {
       compactAt: 0.8,
     });
     expect(withParts.html).toContain('<b>What fills it</b>');
+    expect(withParts.html).not.toContain('<pre>');
+    expect(withParts.html).not.toMatch(/[\u2588\u2591\u25CB\u25D4\u25D1\u25D5\u25CF]/u);
+    expect(withParts.plain).not.toMatch(/[\u2588\u2591\u25CB\u25D4\u25D1\u25D5\u25CF]/u);
     expect(withParts.html).toContain('Auto-compaction at 80% (80K).');
     expect(withParts.plain).toContain('Conversation');
   });
@@ -230,6 +230,10 @@ describe('Telegram readable report formatters', () => {
     expect(cards).toContain('llama&lt;&amp;&gt;.exe · qwen&lt;&amp;&gt;');
     expect(cards).toContain('<b>Memory</b>');
     expect(cards).toContain('<b>Drives</b>');
+    expect(cards).toContain('VRAM 7.8/15.6 GB');
+    expect(cards).toContain('RAM  8.0/16.0 GB');
+    expect(cards).not.toMatch(/[\u2588\u2591]/u);
+    expect(cards).not.toContain('<pre>');
     expect(cards).toContain('312 GB free');
     expect(cards).toContain('Empty drives (0 GB) are hidden.');
     expect(cards).not.toContain('pid 7');

@@ -30,6 +30,7 @@ export const REMOTE_HELP_SECTIONS: RemoteHelpSection[] = [
       { usage: '/new', summary: 'Start a new chat.' },
       { usage: '/notify on|off', summary: 'Mute agent notices for this chat.' },
       { usage: '/resume', summary: 'Continue the conversation bound here.' },
+      { usage: '/speed', summary: 'Show speed from the latest completed local model request.' },
       { usage: '/status', summary: 'Show the model, context and queued prompts.' },
       { usage: '/stop', summary: 'Stop the running request and linked-agent ask.' },
       { usage: '/view [n]', summary: 'Replay recent answers in this conversation.' },

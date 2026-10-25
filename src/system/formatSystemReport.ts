@@ -6,7 +6,6 @@
 
 import type { SystemReport, VramProcess } from './SystemReport';
 import { escapeTelegramHtml } from '../remote/telegramHtml';
-import { textBar } from '../remote/telegramReportFormat';
 
 export interface FormatOptions {
   /** Telegram and tool results: drop column padding that a phone would wrap. */
@@ -196,7 +195,7 @@ function formatTelegramCards(report: SystemReport): string {
     const vram =
       gpu.memoryUsedMb === null || gpu.memoryTotalMb === null
         ? 'VRAM n/a'
-        : `VRAM ${textBar(gpu.memoryUsedMb / gpu.memoryTotalMb, 12)} ${gpuGb(gpu.memoryUsedMb / 1024)}/${gpuGb(gpu.memoryTotalMb / 1024)} GB`;
+        : `VRAM ${gpuGb(gpu.memoryUsedMb / 1024)}/${gpuGb(gpu.memoryTotalMb / 1024)} GB`;
     const idle =
       processes.length === 0 && gpu.utilizationPercent !== null && gpu.utilizationPercent < 5;
     const load = gpu.utilizationPercent === null ? 'n/a' : `${gpu.utilizationPercent}%`;
@@ -208,21 +207,21 @@ function formatTelegramCards(report: SystemReport): string {
       detail.push(`└ ${name}${model}  ${gpuGb(process.bytes / (1024 * 1024 * 1024))} GB`);
     }
     lines.push(`<b>GPU ${gpu.index} · ${escapeTelegramHtml(shortGpuName(gpu.name))}</b>`);
-    lines.push(`<pre>${escapeTelegramHtml(detail.join('\n'))}</pre>`);
+    lines.push(escapeTelegramHtml(detail.join('\n')));
   }
   const unattributed = report.vramProcesses.filter((process) => !attributed.has(process.pid));
   if (unattributed.length > 0) {
     const heading = report.gpus.length > 0 ? 'VRAM (card not resolved)' : 'VRAM by process';
     lines.push(`<b>${heading}</b>`);
     lines.push(
-      `<pre>${escapeTelegramHtml(
+      escapeTelegramHtml(
         unattributed
           .map(
             (process) =>
               `└ ${process.name ?? '(exited)'}${process.forgeModel ? ` · ${process.forgeModel}` : ''}  ${gpuGb(process.bytes / (1024 * 1024 * 1024))} GB`,
           )
           .join('\n'),
-      )}</pre>`,
+      ),
     );
   }
   if (report.vramProcessError) {
@@ -236,20 +235,15 @@ function formatTelegramCards(report: SystemReport): string {
   }
   const usedRam = report.ram.totalBytes - report.ram.freeBytes;
   lines.push('<b>Memory</b>');
-  lines.push(
-    `<pre>RAM  ${textBar(usedRam / report.ram.totalBytes, 12)}  ${gpuGb(usedRam / GIB)}/${gpuGb(report.ram.totalBytes / GIB)} GB</pre>`,
-  );
+  lines.push(`RAM  ${gpuGb(usedRam / GIB)}/${gpuGb(report.ram.totalBytes / GIB)} GB`);
   lines.push('<b>Drives</b>');
   const drives = report.drives.filter((drive) => drive.totalBytes > 0);
   const hiddenDrives = drives.length !== report.drives.length;
   for (const drive of drives) {
-    const used = drive.totalBytes - drive.freeBytes;
     const freeGb = drive.freeBytes / GIB;
     const free =
       freeGb >= 1_000 ? `${(freeGb / 1_000).toFixed(1)} TB free` : `${freeGb.toFixed(0)} GB free`;
-    lines.push(
-      `<pre>${escapeTelegramHtml(drive.drive)}  ${textBar(used / drive.totalBytes, 12)}  ${free}</pre>`,
-    );
+    lines.push(`${escapeTelegramHtml(drive.drive)}  ${free}`);
   }
   if (hiddenDrives) lines.push('<i>Empty drives (0 GB) are hidden.</i>');
   return lines.join('\n');

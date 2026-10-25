@@ -49,6 +49,7 @@ export const TELEGRAM_BOT_COMMANDS = [
   { command: 'resume', description: 'Continue the current conversation' },
   { command: 'send', description: 'Prepare a confirmed message to a contact' },
   { command: 'sleep', description: 'Suspend this machine (needs /sleep confirm)' },
+  { command: 'speed', description: 'Latest completed local model speed' },
   { command: 'status', description: 'Session, model, queue' },
   { command: 'stop', description: 'Stop Forge and linked-agent ask' },
   { command: 'system', description: 'GPU, VRAM by process, RAM, drives' },

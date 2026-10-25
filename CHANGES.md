@@ -1,5 +1,14 @@
 # Forge — Recent Changes
 
+## 0.17.80
+
+- Telegram status, context, progress, and system cards show the same measurements
+  without block bars, context-ring glyphs, or per-line code-block controls.
+- `/speed` gives one timestamped snapshot of the latest completed request on
+  the chat's configured local Strata-compatible model. The reply identifies the
+  model-wide scope; unsupported providers or unavailable timings are reported
+  as unavailable.
+
 ## 0.17.79
 
 Scheduled agent jobs can join a free serving slot on the exact Strata model

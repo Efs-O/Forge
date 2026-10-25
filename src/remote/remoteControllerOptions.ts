@@ -7,6 +7,7 @@ import { RemoteAttachmentStore } from './RemoteAttachmentStore';
 import type { ModelPickerDescriptor } from '../sidebar/ModelPickerGroups';
 import { resolveWorkspaceAliases, type WorkspaceAliasTarget } from './RemoteWorkspaceDiscovery';
 import { workspaceIdFor } from './RemoteWorkspaceHandoff';
+import { createRemoteModelSpeedReader } from './remoteModelSpeed';
 
 /**
  * What a RemoteController is configured with.
@@ -23,6 +24,7 @@ export interface RemoteControllerOptions {
   rateLimitPerMinute: number;
   /** Snapshot of grouped model descriptors from the active Forge config. */
   modelEntries: readonly ModelPickerDescriptor[];
+  getLatestModelSpeed?: ReturnType<typeof createRemoteModelSpeedReader> | undefined;
   configPath?: string | undefined;
   isModelLoaded?: ((modelName: string) => boolean) | undefined;
   attachmentStore?: RemoteAttachmentStore | undefined;
@@ -159,6 +161,7 @@ export function buildRemoteControllerOptions(
         return profiles.length > 0 ? { profiles } : {};
       })(),
     })),
+    getLatestModelSpeed: createRemoteModelSpeedReader(config),
     ...(deps.configPath ? { configPath: deps.configPath } : {}),
     ...(deps.isModelLoaded ? { isModelLoaded: deps.isModelLoaded } : {}),
     ...(deps.workspaceRoot

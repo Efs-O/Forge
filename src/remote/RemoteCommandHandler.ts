@@ -4,6 +4,7 @@ import { describeBudget, handleRemoteSessionCommand } from './RemoteSessionComma
 import { sendConversationSelection, sendWorkspaceSelection } from './RemoteSelectionPager';
 import type { RemoteRequestStore } from './RemoteRequestStore';
 import type { RemoteChannel, RemoteInboundDisposition, RemoteInboundEvent } from './types';
+import type { ModelSpeedSnapshot } from './remoteModelSpeed';
 import { QUEUED_ACK_DELETE_SECONDS } from './TelegramAcknowledgement';
 import type { ModelPickerDescriptor } from '../sidebar/ModelPickerGroups';
 import { PowerControl } from '../system/PowerControl';
@@ -35,6 +36,10 @@ export interface RemoteCommandContext {
   /** Current `remote.rate_limit_per_minute`, so `/ratelimit` can report it. */
   rateLimitPerMinute: number;
   modelEntries: readonly ModelPickerDescriptor[];
+  /** One-shot latest completed request metrics for a configured local model. */
+  getLatestModelSpeed?:
+    | ((modelName: string, signal: AbortSignal) => Promise<ModelSpeedSnapshot | undefined>)
+    | undefined;
   /** Absolute config path for comment-preserving window-level config commands. */
   configPath?: string | undefined;
   /** Live backend residency from the owning window's BackendPool. */

@@ -68,6 +68,27 @@ export async function handleRemoteModelCommand(
   if (command === '/models') {
     return sendModelSelection(event, context, argument);
   }
+  if (command === '/speed') {
+    const binding = context.store.binding(event.channel, event.chatId);
+    const modelName = binding
+      ? context.host.status().conversations.find((item) => item.id === binding.conversationId)
+          ?.activeModel
+      : undefined;
+    if (!modelName) {
+      await context.channel.send(
+        event.chatId,
+        'Forge: latest completed model request speed is unavailable (no model is bound to this chat).',
+        { signal: context.signal },
+      );
+      return { kind: 'handled' };
+    }
+    const metrics = await context.getLatestModelSpeed?.(modelName, context.signal);
+    const text = metrics
+      ? `Forge: latest completed model request (model-global) for ${metrics.model}: ${metrics.predictedN} output tokens at ${metrics.predictedPerSecond.toFixed(1)} tok/s; ${metrics.promptN} prompt tokens at ${metrics.promptPerSecond.toFixed(1)} tok/s. Measured at ${metrics.at}.`
+      : `Forge: latest completed model request speed is unavailable for ${modelName}.`;
+    await context.channel.send(event.chatId, text, { signal: context.signal });
+    return { kind: 'handled' };
+  }
   if (command === '/model' && argument) {
     const binding = context.store.binding(event.channel, event.chatId);
     if (!binding) return { kind: 'rejected', reason: 'no conversation is bound' };
