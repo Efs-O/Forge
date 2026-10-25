@@ -4,18 +4,22 @@ import { runFirstRunWizard } from './FirstRunWizard';
 import { SidebarProvider } from './SidebarProvider';
 import { SETUP_WITH_AGENT_COMMAND } from '../vscode/agentSetupCommand';
 
-class SetupPlaceholderProvider implements vscode.WebviewViewProvider {
-  resolveWebviewView(view: vscode.WebviewView): void {
-    view.webview.options = { enableScripts: true };
-    view.webview.html = `<!DOCTYPE html><html><body style="padding:20px;font-family:sans-serif;">
+export function setupPlaceholderHtml(): string {
+  return `<!DOCTYPE html><html><body style="padding:20px;font-family:sans-serif;">
       <p style="margin-bottom:12px;">No <code>config.yaml</code> found.</p>
-      <button onclick="acquireVsCodeApi().postMessage({type:'wizard'})"
+      <button onclick="vscode.postMessage({type:'wizard'})"
         style="padding:8px 16px;cursor:pointer;">Run Setup Wizard</button>
       <p style="margin:12px 0;">Or let Claude Code / Codex set everything up:</p>
-      <button onclick="acquireVsCodeApi().postMessage({type:'agent'})"
+      <button onclick="vscode.postMessage({type:'agent'})"
         style="padding:8px 16px;cursor:pointer;">Copy AI Setup Prompt</button>
       <script>const vscode = acquireVsCodeApi();</script>
     </body></html>`;
+}
+
+class SetupPlaceholderProvider implements vscode.WebviewViewProvider {
+  resolveWebviewView(view: vscode.WebviewView): void {
+    view.webview.options = { enableScripts: true };
+    view.webview.html = setupPlaceholderHtml();
     view.webview.onDidReceiveMessage((message) => {
       if (message.type === 'wizard') void vscode.commands.executeCommand('forge.setupWizard');
       if (message.type === 'agent') void vscode.commands.executeCommand(SETUP_WITH_AGENT_COMMAND);

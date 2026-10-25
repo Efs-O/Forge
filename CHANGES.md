@@ -2,6 +2,9 @@
 
 ## 0.17.80
 
+- The no-config sidebar's "Copy AI Setup Prompt" button now uses its existing
+  VS Code webview API instance, so the click reaches the extension and writes
+  the setup prompt to the clipboard.
 - Telegram status, context, progress, and system cards show the same measurements
   without block bars, context-ring glyphs, or per-line code-block controls.
 - `/speed` gives one timestamped snapshot of the latest completed request on
