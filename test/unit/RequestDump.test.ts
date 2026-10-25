@@ -1,22 +1,21 @@
 import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
-import { afterEach, afterAll, beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import {
   deleteRequestDumps,
   pruneRequestDumps,
   RequestDumpWriter,
 } from '../../src/sessions/requestDump';
 
-const root = fs.mkdtempSync(path.join(os.tmpdir(), 'forge-request-dumps-'));
+let root: string;
 
-afterAll(() => fs.rmSync(root, { recursive: true, force: true }));
 afterEach(() => {
   vi.restoreAllMocks();
+  fs.rmSync(root, { recursive: true, force: true });
 });
 beforeEach(() => {
-  fs.rmSync(root, { recursive: true, force: true });
-  fs.mkdirSync(root, { recursive: true });
+  root = fs.mkdtempSync(path.join(os.tmpdir(), 'forge-request-dumps-'));
 });
 
 async function waitForDump(conversationId: string, timeoutMs = 5_000): Promise<void> {
