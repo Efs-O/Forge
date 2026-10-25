@@ -192,6 +192,17 @@ describe('canStartNow', () => {
     const pool = fakePool(['qwen'], 2);
     expect(canStartNow('qwen', null, pool, ['a', 'b'])).toMatchObject({ start: false });
   });
+
+  it('uses verified external serving slots across Forge windows', () => {
+    const pool = fakePool([], 1);
+    expect(canStartNow('strata', null, pool, [], { capacity: 2, inFlight: 1 })).toMatchObject({
+      start: true,
+    });
+    expect(canStartNow('strata', null, pool, [], { capacity: 2, inFlight: 2 })).toMatchObject({
+      start: false,
+      reason: 'all 2 parallel slot(s) are streaming',
+    });
+  });
 });
 
 // ── parseResult (AC5) ────────────────────────────────────────────────────────
@@ -546,6 +557,49 @@ describe('AgentTaskRunner', () => {
 
     expect(host.unloadModels).not.toHaveBeenCalled();
     expect(release).not.toHaveBeenCalled();
+  });
+
+  it('joins a verified Strata slot without unloading its server from another window', async () => {
+    const job = baseJob({ action: { kind: 'agent_task', task: 't', model: 'strata' } });
+    await store.saveJob(job);
+    pool = fakePool(['other'], 1);
+    const originalStatus = host.status;
+    Object.assign(host, {
+      status: () => ({
+        ...originalStatus(),
+        conversations: [{
+          ...fakeConversation('active-user'),
+          updatedAt: Date.parse('2026-01-01T02:59:59'),
+        }],
+      }),
+    });
+    const probe = vi.fn(async () => [{
+      index: 0, name: 'GPU', memoryUsedMb: 14742, memoryTotalMb: 16000,
+      utilizationPercent: 95, temperatureC: 40,
+    }]);
+    vi.stubGlobal('fetch', vi.fn<typeof fetch>().mockResolvedValue(new Response(JSON.stringify({
+      service: 'strata', model: 'iq2_xs', loaded: true,
+      concurrency: { serving: 2 }, activity: { in_flight: 1 },
+    }), { status: 200 })));
+    try {
+      const deps = makeDeps({
+        gpuGate: {
+          config: () => ({ gpus: [0], max_util_percent: 25, max_idle_vram_mb: 2048, sample_seconds: 15 }),
+          model: () => ({
+            name: 'strata', provider: 'openai-compatible', endpoint: 'http://127.0.0.1:8092',
+            model: 'iq2_xs', unload_path: '/unload',
+          }),
+          loadedModels: () => [],
+          probe,
+        },
+      });
+      await new AgentTaskRunner(deps).run({ job, state: JobStateSchema.parse({}) }, false);
+      expect(host.unloadModels).not.toHaveBeenCalled();
+      expect(probe).not.toHaveBeenCalled();
+      expect((await store.readRuns('agent-task'))[0]!.outcome).toBe('ok');
+    } finally {
+      vi.unstubAllGlobals();
+    }
   });
 
   it('the prompt carries the observation it was handed, and success saves it', async () => {

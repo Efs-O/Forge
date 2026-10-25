@@ -12,6 +12,7 @@ vi.mock('../../src/jobs/jobsFetch', () => ({ jobsFetch }));
 
 import { JobStore } from '../../src/jobs/JobStore';
 import { JobScheduler } from '../../src/jobs/JobScheduler';
+import { AgentTaskRunner } from '../../src/jobs/agentTask';
 import { PowerControl, PowerControlUnsupportedError } from '../../src/system/PowerControl';
 import { JobSchema, type Job } from '../../src/jobs/jobSchema';
 import { FileLease } from '../../src/util/FileLease';
@@ -55,7 +56,11 @@ function issueBody(comments: number): string {
 
 let scheduler: JobScheduler;
 
-function makeScheduler(options: { maxConcurrent?: number; leaseDirectory?: string } = {}) {
+function makeScheduler(options: {
+  maxConcurrent?: number;
+  leaseDirectory?: string;
+  agentTask?: ConstructorParameters<typeof JobScheduler>[0]['agentTask'];
+} = {}) {
   scheduler = new JobScheduler({
     store,
     power,
@@ -75,6 +80,7 @@ function makeScheduler(options: { maxConcurrent?: number; leaseDirectory?: strin
     },
     notifyLocal: (message) => toasts.push(message),
     tickMs: 30_000,
+    ...(options.agentTask ? { agentTask: options.agentTask } : {}),
   });
 }
 
@@ -385,6 +391,40 @@ describe('JobScheduler run_now markers (AC5)', () => {
 });
 
 describe('JobScheduler maxConcurrent (AC4)', () => {
+  it('counts detached agent tasks against the limit across ticks', async () => {
+    for (const id of ['a', 'b', 'c']) {
+      await store.saveJob(makeJob({
+        id,
+        name: id,
+        check: { kind: 'none' },
+        action: { kind: 'agent_task', task: 'run' },
+      }));
+      store.patchState(id, { task_pending: true });
+    }
+    let finish: () => void = () => undefined;
+    const heldRun = new Promise<void>((resolve) => { finish = resolve; });
+    const run = vi.spyOn(AgentTaskRunner.prototype, 'run').mockReturnValue(heldRun);
+    makeScheduler({
+      maxConcurrent: 1,
+      agentTask: {
+        store, power, outboxDir,
+        notifyLocal: vi.fn(), busy: () => undefined, now: () => nowMs,
+        host: () => undefined, pool: () => undefined, defaultModel: () => undefined,
+      },
+    });
+    await scheduler.start({ immediate: false });
+    try {
+      await scheduler.tick();
+      expect(run).toHaveBeenCalledTimes(1);
+      await scheduler.tick();
+      expect(run).toHaveBeenCalledTimes(1);
+    } finally {
+      finish();
+      await scheduler.stop();
+      run.mockRestore();
+    }
+  });
+
   /** Three jobs whose checks block, so overlap is observable. */
   async function seedThreeBlockingJobs(): Promise<void> {
     for (const id of ['a', 'b', 'c']) {

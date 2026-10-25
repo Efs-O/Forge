@@ -193,6 +193,55 @@ describe('gpu.hold', () => {
 });
 
 describe('sampled GPU probe', () => {
+  const sharedStrata: ModelConfig = {
+    name: 'strata-iq2',
+    provider: 'openai-compatible',
+    endpoint: 'http://127.0.0.1:8092',
+    model: 'iq2_xs',
+    unload_path: '/unload',
+  };
+
+  it('shares only the exact loaded Strata model and its reported serving slots', async () => {
+    const fetchImpl = vi.fn<typeof fetch>().mockResolvedValue(
+      new Response(JSON.stringify({
+        service: 'strata', model: 'iq2_xs', loaded: true,
+        concurrency: { serving: 2 }, activity: { in_flight: 1 },
+      }), { status: 200 }),
+    );
+    const probe = vi.fn(async () => [gpu({ utilizationPercent: 95, memoryUsedMb: 14742 })]);
+    const cheap = vi.fn(async () => undefined);
+    const result = await gpuGateReason(options({ model: sharedStrata, fetchImpl, probe }), cheap);
+    expect(result).toBeUndefined();
+    expect(cheap).toHaveBeenCalledWith({ capacity: 2, inFlight: 1 });
+    expect(probe).not.toHaveBeenCalled();
+    expect(fetchImpl.mock.calls[0]![0].toString()).toBe('http://127.0.0.1:8092/v1/status');
+  });
+
+  it('keeps the GPU gate when the server serves a different quant', async () => {
+    const fetchImpl = vi.fn<typeof fetch>().mockResolvedValue(
+      new Response(JSON.stringify({
+        service: 'strata', model: 'iq3_s', loaded: true,
+        concurrency: { serving: 2 }, activity: { in_flight: 0 },
+      }), { status: 200 }),
+    );
+    const probe = vi.fn(async () => [gpu({ memoryUsedMb: 14742 })]);
+    const cheap = vi.fn(async () => undefined);
+    const result = await gpuGateReason(options({
+      model: sharedStrata, fetchImpl, probe,
+      gpuGate: { ...gateConfig, sample_seconds: 1 },
+    }), cheap);
+    expect(result).toContain('14742 MiB in use by another process');
+    expect(cheap).toHaveBeenCalledWith(undefined);
+  });
+
+  it('honors an explicit GPU hold before checking a shared model', async () => {
+    await fs.promises.writeFile(path.join(root, 'gpu.hold'), '');
+    const fetchImpl = vi.fn<typeof fetch>();
+    const result = await gpuGateReason(options({ model: sharedStrata, fetchImpl }), async () => undefined);
+    expect(result).toMatch(/^GPU hold/u);
+    expect(fetchImpl).not.toHaveBeenCalled();
+  });
+
   it('stops on the first over-limit sample', async () => {
     const probe = vi
       .fn<() => Promise<GpuInfo[]>>()

@@ -1,5 +1,17 @@
 # Forge — Recent Changes
 
+## 0.17.79
+
+Scheduled agent jobs can join a free serving slot on the exact Strata model
+already loaded, including when another Forge workspace is using it. Admission
+checks Strata's live model identity and slot count. A verified shared job does
+not unload that server; an unavailable or mismatched status keeps the existing
+sampled GPU gate. Explicit GPU holds still apply. The recent-chat quiet rule is
+skipped only for a verified job that shares an existing serving slot.
+The scheduler also counts active detached agent turns against
+`jobs.max_concurrent` across ticks, so queued jobs wait for a running job to
+finish before taking another slot.
+
 ## 0.17.78
 
 Five fixes from the first weekly bug hunt (2026-10-24). All five were confirmed by a second

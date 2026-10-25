@@ -317,7 +317,9 @@ export class JobScheduler {
     const limit = this.getConfig().maxConcurrent;
     let cursor = 0;
     const workers = Array.from({ length: Math.min(limit, toRun.length) }, async () => {
-      while (cursor < toRun.length) {
+      // Detached agent turns remain in runningJobs after runJob returns.
+      // Count them across ticks as well as synchronous checks in this tick.
+      while (cursor < toRun.length && this.runningJobs.size < limit) {
         const index = cursor++;
         const jobFile = toRun[index]!;
         if (this.runningJobs.has(jobFile.job.id)) continue;

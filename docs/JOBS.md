@@ -43,7 +43,8 @@ jobs:
   `llamacpp_update` job needs `api.github.com` (release metadata) **and**
   `objects.githubusercontent.com` (the CDN the asset download 302-redirects
   to — the gate is re-checked at every redirect hop).
-- `max_concurrent` 1–8. The scheduler runs at most this many jobs per tick.
+- `max_concurrent` 1–8. The scheduler runs at most this many jobs at once,
+  including agent turns that continue after the scheduling tick ends.
 - `allow_cli_agents` controls whether a job may run a CLI agent (Claude Code /
   Codex) unattended, on your own subscription and its usage limits. The
   setup wizard writes `true`; a `jobs:` block without the key means `false`.
@@ -111,6 +112,14 @@ stay at or below `max_idle_vram_mb`. A missing probe or unlisted GPU fails
 closed and defers the task. Invalid indices surface as probe errors; they do
 not silently allow a task to start. If the scheduler is disposed or loses its
 lease during sampling, the sample is aborted and the task remains pending.
+
+When an agent task targets a managed local Strata server, Forge first reads its
+`/v1/status`. If the loaded model exactly matches the configured model and a
+serving slot is free, the job shares that server without a GPU sample or an
+unload. This works across Forge windows. A full server, a different model, or
+an unavailable status does not receive this exception. An explicit `gpu.hold`
+still applies. The recent-chat quiet check is skipped only when the job shares
+the verified model, since it does not switch or load a model under that chat.
 
 On Windows WDDM, per-process VRAM is not available, so the idle-VRAM check
 uses per-GPU totals only when Forge has no local model loaded. When Forge does

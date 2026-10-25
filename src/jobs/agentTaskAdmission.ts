@@ -2,6 +2,7 @@ import type { JobStore } from './JobStore';
 import type { IBackendPool } from '../backend/poolTypes';
 import { nextDue } from './schedule';
 import type { JobFile, Schedule } from './jobSchema';
+import type { SharedModelSlots } from './gpuIdleGate';
 
 /**
  * Decide whether a slot is free for the job to start now (step 1). The job does
@@ -13,8 +14,11 @@ export function canStartNow(
   ownConversationId: string | null,
   pool: IBackendPool,
   streamingConversationIds: readonly string[],
+  sharedSlots?: SharedModelSlots,
 ): { start: boolean; reason: string } {
-  const streaming = streamingConversationIds.length;
+  const streaming = sharedSlots
+    ? Math.max(sharedSlots.inFlight, streamingConversationIds.length)
+    : streamingConversationIds.length;
   const others = pool.loadedModelsExcept(jobModel);
 
   // Hard wait: its own chat is busy (two turns in one conversation interleave).
@@ -24,11 +28,11 @@ export function canStartNow(
   // Hard wait: another model is loaded and a chat is streaming. The job may not
   // unload it mid-turn, and loading beside it spills VRAM (2026-09-23: two
   // resident models plus a job's third server took every GPU down).
-  if (others.length > 0 && streaming > 0) {
+  if (others.length > 0 && streamingConversationIds.length > 0) {
     return { start: false, reason: `another model (${others.join(', ')}) is in use` };
   }
   // Nothing else streams: step 3 unloads every other model before the turn.
-  const capacity = pool.parallelCapacity(jobModel);
+  const capacity = sharedSlots?.capacity ?? pool.parallelCapacity(jobModel);
   if (streaming >= capacity) {
     return { start: false, reason: `all ${capacity} parallel slot(s) are streaming` };
   }

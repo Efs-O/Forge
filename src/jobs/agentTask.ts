@@ -14,7 +14,7 @@ import { restartAfterTurn } from './agentTaskRestart';
 import type { Action, JobFile, RunRow } from './jobSchema';
 import type { ModelConfig, GpuGateConfig } from '../config/types';
 import type { GpuInfo } from '../system/systemProbes';
-import { gpuGateReason } from './gpuIdleGate';
+import { gpuGateReason, type SharedModelSlots } from './gpuIdleGate';
 import { buildAgentTaskPrompt } from './agentTaskPrompt';
 import {
   canStartNow,
@@ -126,6 +126,7 @@ export class AgentTaskRunner {
     }
     const status = host.status();
     const gpu = this.deps.gpuGate;
+    let sharedSlots: SharedModelSlots | undefined;
     const admissionReason = await gpuGateReason(
       {
         jobsRoot: this.deps.store.root,
@@ -137,18 +138,20 @@ export class AgentTaskRunner {
         ...(gpu?.probe ? { probe: gpu.probe } : {}),
         ...(gpu?.wait ? { wait: gpu.wait } : {}),
       },
-      async () => {
+      async (slots) => {
+        sharedSlots = slots;
         const slot = canStartNow(
           jobModel,
           state.conversation_id,
           pool,
           status.streamingConversationIds,
+          slots,
         );
         // Only a recent conversation can hold the job back; read which ones are
         // the jobs' own (they must not) only when there is one.
         const recent = status.conversations.filter((c) => startedAt - c.updatedAt < USER_QUIET_MS);
         const quiet =
-          recent.length === 0
+          slots || recent.length === 0
             ? undefined
             : userQuietGate(
                 recent,
@@ -192,6 +195,7 @@ export class AgentTaskRunner {
       // Step 3: unload every other idle model, then open this job's chat. The
       // job runs on one server; a model it had to load is released afterwards.
       if (
+        !sharedSlots &&
         pool.loadedModelsExcept(jobModel).length > 0 &&
         host.status().streamingConversationIds.length === 0
       ) {
