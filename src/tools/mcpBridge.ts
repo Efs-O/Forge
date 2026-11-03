@@ -56,6 +56,13 @@ export function mcpToolToRegisteredTool(
       },
     },
     permission: toolPermissions[tool.name] ?? 'read',
+    /** Every MCP server is a program Forge did not write, and its reply is its
+     *  own text — often fetched from the internet by that program — so a bridged
+     *  tool's result counts as outside content whatever its name is. Declared
+     *  here rather than matched by name, because these names come from the server
+     *  and cannot be spelled in advance (`exfilTaint.ts` derives the flag from the
+     *  transcript through this same declaration). */
+    untrustedResult: true,
     handler: async (args) => {
       const result = await callTool(args);
       const text = extractTextContent(result.content);

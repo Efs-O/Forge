@@ -1,0 +1,262 @@
+[
+  {
+    "concern": "agent-ergonomics-traps",
+    "source": {
+      "file": "CLAUDE.md",
+      "heading": "## Agent-Ergonomics Traps (learned the hard way, 0.12.47)"
+    },
+    "copies": [],
+    "general": [
+      {
+        "file": "docs/AGENT_TOOL_TRAPS.md",
+        "anchor": "A tool that lies costs more than a tool that fails"
+      },
+      {
+        "file": "docs/AGENT_TOOL_TRAPS.md",
+        "anchor": "The workspace root is not the project root."
+      },
+      {
+        "file": "docs/AGENT_TOOL_TRAPS.md",
+        "anchor": "Refusals must name the sanctioned alternative."
+      }
+    ]
+  },
+  {
+    "concern": "plan-ledger",
+    "source": {
+      "file": "CLAUDE.md",
+      "heading": "## Plan Docs: the state × lifecycle ledger"
+    },
+    "copies": [
+      {
+        "file": "AGENTS.md",
+        "mode": "pointer",
+        "pointer": "`CLAUDE.md` § `## Plan Docs: the state × lifecycle ledger`"
+      }
+    ],
+    "general": [
+      {
+        "file": "src/llm/ForgeInstructionsLoader.ts",
+        "anchor": "A plan whose feature writes state that outlives its turn lists every artifact"
+      }
+    ]
+  },
+  {
+    "concern": "output-budget-and-truncation",
+    "source": {
+      "file": "CLAUDE.md",
+      "heading": "## Output Budget & Tool-Call Truncation (validated 2026-08-16)"
+    },
+    "copies": [
+      {
+        "file": "AGENTS.md",
+        "mode": "pointer",
+        "pointer": "`CLAUDE.md` § `## Output Budget & Tool-Call Truncation (validated 2026-08-16)`"
+      }
+    ],
+    "general": []
+  },
+  {
+    "concern": "cli-agent-delegation",
+    "source": {
+      "file": "CLAUDE.md",
+      "heading": "## CLI Agent Delegation (validated 2026-08-15)"
+    },
+    "copies": [
+      {
+        "file": "AGENTS.md",
+        "mode": "pointer",
+        "pointer": "`CLAUDE.md` § `## CLI Agent Delegation (validated 2026-08-15)`"
+      }
+    ],
+    "general": []
+  },
+  {
+    "concern": "division-of-labour",
+    "source": {
+      "file": "CLAUDE.md",
+      "heading": "## Division of labour (owner, 2026-10-28)"
+    },
+    "copies": [
+      {
+        "file": "AGENTS.md",
+        "mode": "pointer",
+        "pointer": "`CLAUDE.md` § `## Division of labour (owner, 2026-10-28)`"
+      }
+    ],
+    "general": [
+      {
+        "file": "src/agentBus/agentMeshNote.ts",
+        "anchor": "**Who does what.**"
+      },
+      {
+        "file": "AI_SETUP.md",
+        "anchor": "The mesh is how Claude Code, Codex and Copilot message, steer and stop Forge"
+      }
+    ]
+  },
+  {
+    "concern": "agent-session-links",
+    "source": {
+      "file": "CLAUDE.md",
+      "heading": "## Agent session links and direct file delivery"
+    },
+    "copies": [
+      {
+        "file": "AGENTS.md",
+        "mode": "pointer",
+        "pointer": "`CLAUDE.md` § `## Agent session links and direct file delivery`"
+      }
+    ],
+    "general": [
+      {
+        "file": "src/agentBus/agentMeshNote.ts",
+        "anchor": "**Read before first use:**"
+      },
+      {
+        "file": "AI_SETUP.md",
+        "anchor": "**Check:** `forge.sh who` reports the linked agent sessions"
+      }
+    ]
+  },
+  {
+    "concern": "stack-overview",
+    "source": { "file": "CLAUDE.md", "heading": "## Stack" },
+    "copies": [
+      { "file": "AGENTS.md", "mode": "pointer", "pointer": "`CLAUDE.md` § `## Stack`" }
+    ],
+    "general": []
+  },
+  {
+    "concern": "project-overview",
+    "source": { "file": "CLAUDE.md", "heading": "## What This Project Is" },
+    "copies": [
+      { "file": "AGENTS.md", "mode": "pointer", "pointer": "`CLAUDE.md` § `## What This Project Is`" }
+    ],
+    "general": []
+  },
+  {
+    "concern": "hard-stops",
+    "source": { "file": "CLAUDE.md", "heading": "## Hard Stops - Never Do These" },
+    "copies": [
+      { "file": "AGENTS.md", "mode": "pointer", "pointer": "`CLAUDE.md` § `## Hard Stops - Never Do These`" }
+    ],
+    "general": []
+  },
+  {
+    "concern": "investigation-limit",
+    "source": { "file": "CLAUDE.md", "heading": "## Investigation Hard Limit" },
+    "copies": [
+      { "file": "AGENTS.md", "mode": "pointer", "pointer": "`CLAUDE.md` § `## Investigation Hard Limit`" }
+    ],
+    "general": []
+  },
+  {
+    "concern": "file-size-rules",
+    "source": { "file": "CLAUDE.md", "heading": "## File Size Limit" },
+    "copies": [
+      { "file": "AGENTS.md", "mode": "pointer", "pointer": "`CLAUDE.md` § `## File Size Limit`" }
+    ],
+    "general": []
+  },
+  {
+    "concern": "single-point-of-truth",
+    "source": { "file": "CLAUDE.md", "heading": "## Single Point of Truth" },
+    "copies": [
+      { "file": "AGENTS.md", "mode": "pointer", "pointer": "`CLAUDE.md` § `## Single Point of Truth`" }
+    ],
+    "general": []
+  },
+  {
+    "concern": "architecture-rules",
+    "source": { "file": "CLAUDE.md", "heading": "## Architecture Rules" },
+    "copies": [
+      { "file": "AGENTS.md", "mode": "pointer", "pointer": "`CLAUDE.md` § `## Architecture Rules`" }
+    ],
+    "general": []
+  },
+  {
+    "concern": "code-quality-gates",
+    "source": { "file": "CLAUDE.md", "heading": "## Code Quality Gates" },
+    "copies": [
+      { "file": "AGENTS.md", "mode": "pointer", "pointer": "`CLAUDE.md` § `## Code Quality Gates`" }
+    ],
+    "general": []
+  },
+  {
+    "concern": "ask-vs-proceed",
+    "source": { "file": "CLAUDE.md", "heading": "## Ask vs Proceed" },
+    "copies": [
+      { "file": "AGENTS.md", "mode": "pointer", "pointer": "`CLAUDE.md` § `## Ask vs Proceed`" }
+    ],
+    "general": []
+  },
+  {
+    "concern": "shared-hard-stops-text",
+    "source": { "file": "CLAUDE.md", "heading": "## No Fallbacks Unless Requested" },
+    "copies": [
+      { "file": "AGENTS.md", "mode": "pointer", "pointer": "`CLAUDE.md` § `## No Fallbacks Unless Requested`" }
+    ],
+    "general": []
+  },
+  {
+    "concern": "shared-typescript-rules",
+    "source": { "file": "CLAUDE.md", "heading": "## TypeScript Rules" },
+    "copies": [
+      { "file": "AGENTS.md", "mode": "verbatim", "after": "## TypeScript Rules" }
+    ],
+    "general": []
+  },
+  {
+    "concern": "shared-agent-collaboration",
+    "source": { "file": "CLAUDE.md", "heading": "## Other agents in this repo" },
+    "copies": [
+      { "file": "AGENTS.md", "mode": "verbatim", "after": "## Other agents in this repo" }
+    ],
+    "general": []
+  },
+  {
+    "concern": "shared-worktree-lifecycle",
+    "source": { "file": "CLAUDE.md", "heading": "## Git Worktrees — the creator removes them" },
+    "copies": [
+      { "file": "AGENTS.md", "mode": "verbatim", "after": "## Git Worktrees — the creator removes them" }
+    ],
+    "general": []
+  },
+  {
+    "concern": "same-repository-agent-collaboration",
+    "source": {
+      "file": "FORGE.md",
+      "heading": "## Other agents in this repo"
+    },
+    "copies": [],
+    "general": [
+      {
+        "file": "src/llm/ForgeInstructionsLoader.ts",
+        "anchor": "## Other agents in the same repository"
+      },
+      {
+        "file": "AI_SETUP.md",
+        "anchor": "If several agents will work in the same project at once"
+      }
+    ]
+  },
+  {
+    "concern": "plan-doc-rules",
+    "source": {
+      "file": "FORGE.md",
+      "heading": "## Plan docs"
+    },
+    "copies": [],
+    "general": [
+      {
+        "file": "src/llm/ForgeInstructionsLoader.ts",
+        "anchor": "A plan whose feature writes state that outlives its turn lists every artifact"
+      },
+      {
+        "file": "src/llm/ForgeInstructionsLoader.ts",
+        "anchor": "Every plan has acceptance criteria listing the invariants and edge cases"
+      }
+    ]
+  }
+]

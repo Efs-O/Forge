@@ -6,6 +6,8 @@
  */
 import * as vscode from 'vscode';
 import { isLocalModel } from '../backend/ModelHeuristics';
+import { unloadModelOnRemote } from '../llm/RemoteStarterClient';
+import { resolveModelEntry } from '../config/ConfigResolver';
 import { getLogger } from '../util/logger';
 import type { ConversationTabsDeps } from './ConversationTabs';
 
@@ -50,7 +52,10 @@ export class TabModelRelease {
    */
   private unloadCandidate(modelName: string): string | null {
     const base = this.deps.baseOf(modelName) ?? modelName;
-    const modelConfig = this.deps.getConfig().models.find((m) => m.name === base);
+    // Folded, not `models.find`: `isLocalModel` asks whether this model holds
+    // VRAM, and since phase 2 an `openai-compatible` model can get its
+    // `unload_path` from its engine, which a raw entry would report as absent.
+    const modelConfig = resolveModelEntry(this.deps.getConfig(), base);
     if (!isLocalModel(modelConfig)) return null;
     const stillInUse = this.deps
       .getSidebar()
@@ -116,8 +121,32 @@ export class TabModelRelease {
     if (this.streamingHolder(model, convId)) {
       throw new Error(`a turn is still running on "${base}" — stop it first`);
     }
+    // A `remote_start` model is another machine's server: this window has no
+    // backend to free, so the desktop's starter is asked instead and its answer
+    // is what gets reported. `wasLoaded` from the local pool would always say
+    // "was not loaded" here, which is not true of the desktop.
+    const remote = await unloadModelOnRemote(base);
+    if (remote) {
+      log.info(
+        `[TabModelRelease] asked the desktop to unload "${base}" for conversation ${convId}: ` +
+          `${remote.unloaded ? 'unloaded' : 'was not loaded'}`,
+      );
+      this.deps.events.onBackendStopped?.(base);
+      if (convId === sidebar.activeConversationId) {
+        this.deps.post({
+          type: 'backendDown',
+          message: remote.unloaded
+            ? `${base} unloaded on the desktop. Send a prompt to start it again.`
+            : `${base} was not loaded on the desktop.`,
+        });
+      }
+      return { model: base, wasLoaded: remote.unloaded };
+    }
     await this.deps.pool.release(base, true);
-    const configured = this.deps.getConfig().models.find((entry) => entry.name === base);
+    // Folded for the same reason as `unloadCandidate`: "did the server stop" is
+    // answered from `unload_path` + `stop_command`, both of which a migrated model
+    // now inherits from its engine instead of declaring itself.
+    const configured = resolveModelEntry(this.deps.getConfig(), base);
     const serverStopped = !!configured?.unload_path && !!configured.stop_command;
     log.info(`[TabModelRelease] unloaded "${base}" for conversation ${convId}`);
     this.deps.events.onBackendStopped?.(base);

@@ -6,6 +6,9 @@ import type {
   CliAgentSessionSendOptions,
   CliAgentSessionState,
 } from './CliAgentSession';
+import { cliProcessFailureLine, waitForCliSpawn } from './cliStartFailure';
+import { collectStderrTail } from './CliAgentDriver';
+import { getLogger } from '../util/logger';
 import type { CliAgentRunResult } from './types';
 import { JsonRpcPending, routeJsonRpcLine } from './jsonRpcStdio';
 import {
@@ -20,6 +23,8 @@ import {
   type ActiveTurn,
 } from './codexTurnText';
 
+const log = getLogger();
+
 /** Warm Codex `app-server --stdio` JSON-RPC session. */
 export class CodexAppServerSession {
   private currentState: CliAgentSessionState = 'starting';
@@ -29,6 +34,10 @@ export class CodexAppServerSession {
   private threadId: string | undefined;
   private readonly pending = new JsonRpcPending();
   private startPromise: Promise<void> | undefined;
+  /** The start-failure message. `stop()` prefers it over any write or protocol
+   *  error, because those are consequences of the same missing program; it is
+   *  cleared whenever a new app-server starts. */
+  private startError: string | undefined;
 
   constructor(private readonly options: CliAgentSessionOptions) {
     this.threadId = options.confirmedSessionId;
@@ -64,9 +73,18 @@ export class CodexAppServerSession {
     };
     this.active = placeholder;
     try {
-      await this.ensureStarted();
+      await this.ensureStarted(options.signal);
     } catch (err) {
       if (this.active === placeholder) this.active = undefined;
+      // The abort arrived during the cold start, so no turn of Codex's ever
+      // began: that is the outcome Stop produces for a turn that did, and
+      // reporting it as `cancelled` rather than rethrowing is what lets the
+      // calling turn unwind. `send()` used to await the start with no abort
+      // listener at all — `ensureStarted()` took no signal, and the listener
+      // was only attached afterwards — so an app-server that never answered
+      // `initialize` held the caller open for as long as it lived (audit F5).
+      if (options.signal?.aborted)
+        return { status: 'cancelled', finalText: '', error: 'Cancelled.' };
       throw err;
     }
     this.currentState = 'running';
@@ -108,18 +126,53 @@ export class CodexAppServerSession {
   }
 
   /**
-   * Eager-start seam (CODEX_STAND_IN_PLAN Phase 1): run the spawn +
-   * `initialize` + `thread/resume` (or `thread/start`) now, so a caller can
-   * learn the resume result at resolve time rather than on the first `send`.
-   * Idempotent: `send()` awaits the same `startPromise`, so it does not start
-   * twice. Refuses after `dispose()` — `stop()` clears `startPromise`, so
-   * without this guard a post-dispose eager start would spawn a fresh
-   * app-server (the stand-in's dispose-then-resolve race, Phase 2).
+   * Eager-start seam: run the spawn + `initialize` + `thread/resume` (or
+   * `thread/start`) now, so a caller can learn the resume result at resolve
+   * time rather than on the first `send`. Idempotent: `send()` awaits the same
+   * `startPromise`, so it does not start twice. Refuses after `dispose()` —
+   * `stop()` clears `startPromise`, so without this guard a post-dispose eager
+   * start would spawn a fresh app-server nobody is waiting on.
+   *
+   * `signal` is what makes a cold start cancellable. Without it, an
+   * app-server that accepts the connection and then never answers is
+   * uncancellable: the await has nothing to abort, because the request itself
+   * has no timeout and no listener. Cancelling terminates the child, which is
+   * the only thing that unwinds a start that is waiting on a reply that will
+   * never come — the exit watcher then fails every in-flight request.
    */
-  async ensureStarted(): Promise<void> {
+  async ensureStarted(signal?: AbortSignal): Promise<void> {
     if (this.currentState === 'disposed') throw new Error('CLI agent session is disposed.');
     if (!this.startPromise) this.startPromise = this.start();
-    await this.startPromise;
+    const start = this.startPromise;
+    if (!signal) {
+      await start;
+      return;
+    }
+    let onAbort: (() => void) | undefined;
+    try {
+      await new Promise<void>((resolve, reject) => {
+        const cancelStart = (): void => {
+          // End the start, do not merely stop waiting for it: a caller that
+          // gives up while the child keeps running leaves an app-server nobody
+          // owns. `stop()` terminates it and fails the requests it was waiting
+          // on, so the start itself unwinds.
+          void this.stop('Codex app-server start was cancelled.');
+          reject(new Error('Cancelled.'));
+        };
+        if (signal.aborted) {
+          cancelStart();
+          return;
+        }
+        onAbort = cancelStart;
+        signal.addEventListener('abort', onAbort, { once: true });
+        start.then(
+          () => resolve(),
+          (error: unknown) => reject(error instanceof Error ? error : new Error(String(error))),
+        );
+      });
+    } finally {
+      if (onAbort) signal.removeEventListener('abort', onAbort);
+    }
   }
 
   private async start(): Promise<void> {
@@ -130,18 +183,44 @@ export class CodexAppServerSession {
       stdin: 'pipe',
     });
     this.child = child;
+    this.startError = undefined;
     this.input = child.stdout
       ? readline.createInterface({ input: child.stdout, crlfDelay: Infinity })
       : undefined;
     this.input?.on('line', (line) => this.handleLine(line));
+    // Nothing read stderr before this, so a chatty app-server could fill the OS
+    // pipe buffer and stall, and none of it survived to be logged.
+    const stderr = collectStderrTail(child);
     void waitForCliProcessExit(child).then((exit) => {
       if (this.child !== child) return;
-      void this.failProtocol(
-        exit.error
-          ? `Codex app-server transport failed: ${exit.error.message}`
-          : `Codex app-server exited with code ${exit.code ?? '?'}.`,
-      );
+      const detail = exit.error
+        ? `Codex app-server transport failed: ${exit.error.message}`
+        : `Codex app-server exited with code ${exit.code ?? '?'}.`;
+      // Exactly one channel line per failed process. A child this class ended
+      // itself already has its message, and a clean exit is no failure: `stop()`
+      // clears the child synchronously, so neither case reaches here.
+      if (exit.error || exit.code !== 0) {
+        log.warn(
+          cliProcessFailureLine(
+            'codex app-server',
+            detail,
+            this.options.executable,
+            exit,
+            child.signalCode,
+            stderr.tail(),
+          ),
+        );
+      }
+      void this.failProtocol(detail);
     });
+    // Gate the first write on the start outcome, so a missing executable is
+    // reported as one instead of as the `write EPIPE` a write to a stream with
+    // no reader produces. The exit watcher above owns the stop, the termination
+    // and the channel line, so this path adds no second terminate.
+    const failure = await waitForCliSpawn(child, 'Codex', this.options.executable, (message) => {
+      this.startError = message;
+    });
+    if (failure) throw new Error(failure);
     await this.request('initialize', {
       clientInfo: { name: 'forge', title: 'Forge', version: '1' },
       capabilities: null,
@@ -292,6 +371,11 @@ export class CodexAppServerSession {
    * F-06: interrupt the active turn (a `priority=steer` message). Sends the
    * `turn/interrupt` RPC so the running turn stops and resolves as `cancelled`,
    * letting the FIFO proceed to the steer. A no-op when no turn is active.
+   *
+   * The live path for this is `send()`'s own abort listener, which reaches the
+   * same `sendInterrupt` through the turn's signal; nothing calls this method
+   * directly any more, so it is not a second way to stop a turn — see
+   * `WarmCliSession`, which does not declare it.
    */
   interrupt(): void {
     if (this.active) {
@@ -366,14 +450,19 @@ export class CodexAppServerSession {
     this.startPromise = undefined;
     this.input?.close();
     this.input = undefined;
-    this.pending.rejectAll(new Error(message));
+    // A process that never started outranks every later message: the write
+    // error, the protocol error and the exit message are all consequences of
+    // the same missing program, and until now whichever handler ran first
+    // decided which one the user saw.
+    const reported = this.startError ?? message;
+    this.pending.rejectAll(new Error(reported));
     const active = this.active;
     if (active) {
       this.clearActive(active);
       active.resolve({
         status: 'failed',
         finalText: active.text,
-        error: message,
+        error: reported,
         ...(this.threadId ? { sessionId: this.threadId } : {}),
       });
     }

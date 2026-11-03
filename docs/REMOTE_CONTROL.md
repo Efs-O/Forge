@@ -60,13 +60,22 @@ provider reachability, durable request health, and notification delivery. The
 complete release checklist is in
 [real-device validation](REMOTE_CONTROL_VALIDATION.md).
 
-Remote commands are `/help`, `/status`, `/context`, `/system`, `/view [n]`,
-`/stop`, `/steer <prompt>`, `/new`, `/chats`, `/chat <number-or-title>`,
-`/resume <number-or-id>`, `/model [number-or-name]` (bare `/model` lists),
-`/queue`, `/drop <number|all>`, `/ratelimit`, `/unload`, `/restart`, `/reload`,
-`/compact`, `/lock`, `/timeout [1-1440|off]`, `/notify`, `/mirror`, `/voice`,
-`/clanker on|off`, `/workspace`, `/sleep`, and `/wake`. `/commands`, `/list`,
-`/select`, and `/models` still parse as silent aliases.
+Remote commands come from one source, `src/remote/remoteHelpText.ts`, and `/help`
+on Telegram prints the same list grouped this way. **Session:** `/help`,
+`/status`, `/context`, `/view [n]`, `/chats`, `/chat <number-or-title>`,
+`/resume <number-or-id>`, `/new`, `/agents`, `/approvals [reset]`, `/mirror on|off`, `/notify on|off`,
+`/speed`, `/stop`, `/voice on|off`. **Queue:** `/queue`, `/drop <number|all>`.
+**Linked sessions:** `/answer <question-id> <text>`, `/claude <msg>`,
+`/codex <msg>`, `/copilot <msg>`, `/tell <agent> <msg>`. **Models:**
+`/model [number-or-name]` (bare `/model` lists), `/chatmode [solo|multi|status]`,
+`/unload`, `/unloadall`, `/restart`. **Workspace:** `/workspace`,
+`/workspace <number-or-alias>`. **Window:** `/compact`, `/lock`,
+`/clanker on|off`, `/ratelimit`, `/reload`, `/timeout [1-1440|off]`. **Jobs:**
+`/jobs`, `/job <n|name> pause|resume|run|delete|chat`. **Contacts:**
+`/contacts pending|list`, `/contact approve|bind|link|disable|unbind`,
+`/send <name>: <message>`. **Machine:** `/system`, `/sleep [8h|07:00]`,
+`/wake [8h|07:00|off]`. `/commands`, `/list`, `/select`, and `/models` still
+parse as silent aliases, as does `/new <n>` for a workspace switch.
 Telegram publishes the main commands in its native slash-command menu.
 Workspaces are listed with `/workspace` (`/workspace list` still parses) and
 opened with `/workspace <number-or-alias>`; the number after `/workspace` is a
@@ -77,9 +86,14 @@ names it; only a workspace with no history at all gets a new chat. The list
 marks the entry this chat is in and names the open folder underneath it;
 `/status` reports the same workspace on its first line. `/stop` cancels the active
 addressed request; it does not unload the model, and durable queued requests
-remain queued. `/steer` first saves its prompt durably, interrupts only the
-active turn, and runs before ordinary queued prompts. `/drop` changes queued
-records to cancelled instead of deleting their durable history. `/clanker on`
+remain queued. Plain text sent while a turn is running reaches that turn at its
+next step (👀 receipt); photos and other attachments wait for the turn to end,
+and *Send now* on the receipt stops the turn and runs that message next.
+`/steer` was withdrawn: a record that was saved with steer priority before it
+went away still runs ahead of ordinary queued prompts, because
+`compareQueuedRequests` in `src/remote/remoteQueueOrdering.ts` keeps that
+ordering. `/drop` changes queued records to cancelled instead of deleting their
+durable history. `/clanker on`
 removes the normal confirmation step for
 non-dangerous Forge-native tools and should be used deliberately.
 

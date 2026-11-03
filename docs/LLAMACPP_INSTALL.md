@@ -24,12 +24,17 @@ The call needs your approval. Then it:
    the file's comments (pass `switch_config: false` to skip this).
 
 It does **not** restart the backend, because the model running the turn is that
-backend. The new build takes effect on the next model load or `/restartBackend`.
+backend. The new build takes effect on the next model load, or at once if you
+type `/restart` in the chat — the same command as **Forge: Restart Backend** in
+the palette (`webview-ui/src/slashCommands.ts:132`).
 Old build folders are kept, so rolling back means pointing `llama_server.binary`
 at the previous folder.
 
 It needs `jobs.allowed_hosts` in `config.yaml` to list `api.github.com`,
-`github.com` and `release-assets.githubusercontent.com`. This is the same
+`github.com`, `objects.githubusercontent.com` and
+`release-assets.githubusercontent.com`: the gate is re-checked on every
+redirect, and GitHub serves a release asset from one CDN or the other, so
+adding only three still fails at the hop. This is the same
 download gate the scheduled `llamacpp_update` job uses, and both run the same
 pipeline (`src/jobs/actions/llamacppInstall.ts`).
 
@@ -44,8 +49,9 @@ The tool is advertised only when `llama_server.binary` is set.
 
 ## Reaching folders outside the workspace
 
-`read_file` and `view_image` read any path on disk. `create_directory` and
-`delete_file` normally stay inside the workspace. To let them reach other folders, such as `%LOCALAPPDATA%\Forge` for
+`read_file` and `view_image` read any path on disk. `delete_file` and the
+file-writing tools normally stay inside the workspace. To let them reach other
+folders, such as `%LOCALAPPDATA%\Forge` for
 cleaning up old builds, list those folders in `config.yaml`:
 
 ```yaml
@@ -54,5 +60,4 @@ extra_file_roots:
 ```
 
 Entries must be absolute paths. Every write and delete still asks for approval.
-`list_directory` also accepts any absolute path, and `query_powershell` does
-not reach outside the workspace.
+`list_directory` also accepts any absolute path.

@@ -11,6 +11,8 @@ import type { ForgeConfig } from '../config/types';
 import type { ArchivedSessionMeta } from './ArchivedSessions';
 import { availableProfilesFor, mergeGroupsIntoModel } from '../config/ConfigResolver';
 import type { HostToWebview, ModelResidency, SessionSyncMsg } from './messageBridge';
+import type { HistoryPanelSize } from './historyPanelSize';
+import type { RemoteOriginChannel } from '../remote/remoteInboundSchema';
 import { classifyModelRoute } from '../llm/ModelRouteClassifier';
 import { isManagedExternalModel } from '../backend/ExternalModelServers';
 import type { ConversationRuntime, SidebarRuntime } from './sessionTypes';
@@ -24,6 +26,24 @@ import { reportedContextTokens } from '../util/contextBudget';
 import type { SessionTimeSnapshot } from '../vscode/SessionTimeStatusBar';
 import type { LiveStreamEstimate } from './LiveStreamMeter';
 import type { UserQuestionRequestEvent } from './UserQuestionService';
+
+/**
+ * The picker payload for a live session: `buildModelsMessage` plus which
+ * conversation's pin applies. The active tab's pin beats the config default
+ * because that is what sending does, and this is the projection that has the
+ * session in hand — `SidebarProvider` used to do the lookup itself, and the
+ * provider is at this repo's 500-line stop while a new panel bridge needs room.
+ */
+export function modelsMessageFor(
+  sidebar: SidebarRuntime,
+  config: ForgeConfig,
+  pool?: ModelResidencySource,
+): HostToWebview {
+  const active = sidebar.conversations.find(
+    (conversation) => conversation.id === sidebar.activeConversationId,
+  );
+  return buildModelsMessage(config, pool, active?.active_model ?? config.active_model);
+}
 
 /**
  * The model list and current selection for the picker.
@@ -83,6 +103,26 @@ export function buildModelsMessage(
 }
 
 /**
+ * The rows that came in from a phone: the channel the remote store binds to a
+ * conversation id, stamped onto the row that panel is about to draw. The
+ * caller's reader may name any channel (`fake` is the test transport's); a
+ * channel outside `RemoteOriginChannel` leaves its row exactly as it was, since
+ * a badge that says the wrong thing is worse than a badge that is missing.
+ */
+function withOriginChannel<T extends { id: string }>(
+  rows: T[],
+  originChannelOf?: (conversationId: string) => string | undefined,
+): Array<T & { origin_channel?: RemoteOriginChannel }> {
+  if (!originChannelOf) return rows;
+  return rows.map((row): T & { origin_channel?: RemoteOriginChannel } => {
+    const channel = originChannelOf(row.id);
+    return channel === 'telegram' || channel === 'whatsapp'
+      ? { ...row, origin_channel: channel }
+      : row;
+  });
+}
+
+/**
  * Tabs, history and slimmed transcripts — everything the webview redraws from.
  *
  * Transcripts are limited to what the webview can render this instant: the
@@ -100,32 +140,85 @@ export function buildSessionSyncMessage(
   attachmentsRoot?: string,
   waitingIds: ReadonlySet<string> = new Set<string>(),
   archived: ArchivedSessionMeta[] = [],
+  historyPanelSize?: HistoryPanelSize,
+  /** Which remote chat each conversation id is bound to, for the phone badge. */
+  originChannelOf?: (conversationId: string) => string | undefined,
 ): SessionSyncMsg {
   const wanted = new Set<string>([sidebar.activeConversationId, ...streamingIds]);
-  return {
-    type: 'sessionSync',
-    activeId: sidebar.activeConversationId,
-    tabs: tabMetasFromSession(sidebar, streamingIds, sessionActiveMs),
-    history: historyMetasFromSession(sidebar),
-    // A row can briefly duplicate a chat that was just restored; the open/recent copy wins.
-    archived: archived
-      .filter(
-        (row) =>
-          !sidebar.conversations.some((c) => c.id === row.id) &&
-          !sidebar.history.some((c) => c.id === row.id),
-      )
-      .map(({ id, title, createdAt, updatedAt, messageCount, active_model }) => ({
+  // A row can briefly duplicate a chat that was just restored; the open/recent copy wins.
+  const overflowRows = archived
+    .filter(
+      (row) =>
+        !sidebar.conversations.some((c) => c.id === row.id) &&
+        !sidebar.history.some((c) => c.id === row.id),
+    )
+    .map(
+      ({
+        id,
+        title,
+        createdAt,
+        updatedAt,
+        messageCount,
+        active_model,
+        title_source,
+        origin_agent,
+      }) => ({
         id,
         title,
         createdAt,
         updatedAt,
         messageCount,
         ...(active_model ? { active_model } : {}),
-      })),
+        // Both provenance fields ride along, so an archived row badges exactly
+        // like the same chat would have when it was still in recent history.
+        ...(title_source ? { title_source } : {}),
+        ...(origin_agent ? { origin_agent } : {}),
+      }),
+    );
+  return {
+    type: 'sessionSync',
+    activeId: sidebar.activeConversationId,
+    // The phone badge is stamped here rather than in the projections: this is
+    // the one place holding both the ids the panel will draw and the binding
+    // read the caller brought along.
+    tabs: withOriginChannel(
+      tabMetasFromSession(sidebar, streamingIds, sessionActiveMs),
+      originChannelOf,
+    ),
+    history: withOriginChannel(historyMetasFromSession(sidebar), originChannelOf),
+    archived: withOriginChannel(overflowRows, originChannelOf),
     waitingIds: [...waitingIds].filter(Boolean),
     messagesById: displayTranscriptRowsById(sidebar, wanted),
     ...(attachmentsRoot ? { attachmentsRoot } : {}),
+    // Read from `globalState` by the caller: this file projects, it does not own
+    // the store the size lives in.
+    ...(historyPanelSize ? { historyPanelSize } : {}),
   };
+}
+
+/** The slice of the agent loop the status-bar metrics projection needs. */
+export interface SessionActivitySource {
+  getSessionActiveMs(conversation: ConversationRuntime): number;
+  getLiveStream(conversationId: string): LiveStreamEstimate | undefined;
+}
+
+/**
+ * `buildFollowedSessionMetrics` with the agent loop handed over whole, so the
+ * provider's status-bar call is one line rather than five thunks.
+ */
+export function followedSessionMetricsFor(
+  sidebar: SidebarRuntime,
+  active: ConversationRuntime,
+  activity: SessionActivitySource,
+  followedId: string | undefined,
+): SessionTimeSnapshot {
+  return buildFollowedSessionMetrics(
+    sidebar,
+    active,
+    followedId,
+    (conversation) => activity.getSessionActiveMs(conversation),
+    (conversationId) => activity.getLiveStream(conversationId),
+  );
 }
 
 /**

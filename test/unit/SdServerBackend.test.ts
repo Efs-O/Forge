@@ -19,6 +19,7 @@ import {
 import { ImageGenerationConfigSchema } from '../../src/config/imageGenerationSchema';
 import type { SdcppImageBackendConfig } from '../../src/config/types';
 import { SDCPP_MODEL_FIELDS, sdcppBackendConfig } from '../support/sdServerFixtures';
+import { logger } from '../../src/util/logger';
 
 vi.mock('vscode', () => ({
   window: {
@@ -43,6 +44,7 @@ beforeEach(() => {
 
 afterEach(async () => {
   vi.useRealTimers();
+  vi.restoreAllMocks();
   for (const backend of backendInstances) await backend.dispose();
   fs.rmSync(root, { recursive: true, force: true });
 });
@@ -69,6 +71,10 @@ interface Rig {
   spawn: ReturnType<typeof vi.fn>;
   kill: ReturnType<typeof vi.fn>;
   terminate: ReturnType<typeof vi.fn>;
+  lookup: ReturnType<typeof vi.fn>;
+  acquireMediaLease: ReturnType<typeof vi.fn>;
+  transferMediaLease: ReturnType<typeof vi.fn>;
+  releaseMediaLease: ReturnType<typeof vi.fn>;
   processes: Map<number, SdProcessIdentity>;
   recordDir: string;
 }
@@ -82,6 +88,7 @@ function rig(
     processes?: Map<number, SdProcessIdentity>;
     nextPid?: number;
     terminate?: (pid: number) => Promise<void>;
+    acquireMediaGpuLease?: SdServerBackendDeps['acquireMediaGpuLease'];
   } = {},
 ): Rig {
   const processes =
@@ -107,6 +114,7 @@ function rig(
     if (options.terminate) await options.terminate(pid);
     else processes.delete(pid);
   });
+  const lookup = vi.fn(async (pid: number) => processes.get(pid));
   const ready = new Response(JSON.stringify({ model: { path: config.diffusion_model } }));
   const fetchImpl =
     options.fetch ??
@@ -119,19 +127,48 @@ function rig(
       return ready.clone();
     }) as unknown as typeof fetch);
   const recordDir = path.join(root, 'records');
+  const transferMediaLease = vi.fn(async () => {});
+  const releaseMediaLease = vi.fn(async () => {});
+  const acquireMediaLease = vi.fn(
+    options.acquireMediaGpuLease ??
+      (async () => ({ record: { pid: 100, process_start_time: 1000, owner: 'test', gpu: 2,
+        started_at: '2026-10-29T12:00:00.000Z' }, transfer: transferMediaLease,
+        release: releaseMediaLease })),
+  );
   const deps: SdServerBackendDeps = {
     spawn,
     fetch: fetchImpl,
-    lookupProcess: async (pid) => processes.get(pid),
+    lookupProcess: lookup,
     terminateProcess: terminate,
     killProcess: kill,
     now: options.now,
     recordDir,
     ownerPid,
+    acquireMediaGpuLease: acquireMediaLease,
   };
   const backend = new SdServerBackend(config, deps);
   backendInstances.push(backend);
-  return { backend, config, spawn, kill, terminate, processes, recordDir };
+  return { backend, config, spawn, kill, terminate, lookup, acquireMediaLease, transferMediaLease,
+    releaseMediaLease, processes, recordDir };
+}
+
+async function writeOrphanRecord(server: Rig, lastUsedAt: number): Promise<string> {
+  const recordPath = sdServerRecordPath(server.recordDir, server.config.name);
+  await fs.promises.mkdir(server.recordDir, { recursive: true });
+  await writeSdServerRecord(recordPath, {
+    pid: 200,
+    pidCreatedAt: 2000,
+    port: server.config.port,
+    binary: server.config.binary,
+    diffusionModel: server.config.diffusion_model,
+    signature: 'a'.repeat(64),
+    ownerPid: 100,
+    ownerCreatedAt: 1000,
+    startedAt: 1500,
+    lastUsedAt,
+  });
+  server.processes.set(200, { executablePath: server.config.binary, createdAt: 2000 });
+  return recordPath;
 }
 
 describe('sdcpp image_generation schema', () => {
@@ -140,6 +177,7 @@ describe('sdcpp image_generation schema', () => {
       backends: [{ name: 'xai-image', provider: 'xai', model: 'grok-imagine-image-2.0' }],
     });
     expect(cloud.backends[0]).toMatchObject({ provider: 'xai', confirm_each: true });
+    expect(sdcppBackendConfig(root).media_gpu_lease_enabled).toBe(false);
 
     expect(() =>
       ImageGenerationConfigSchema.parse({
@@ -295,6 +333,107 @@ describe('SdServerBackend startup and lifecycle', () => {
     expect(fs.existsSync(recordPath)).toBe(false);
   });
 
+  it('holds the opt-in media lease through the idle stop and then releases it', async () => {
+    vi.useFakeTimers();
+    const order: string[] = [];
+    const serverRelease = vi.fn(async () => {});
+    const server = rig(localConfig({ media_gpu_lease_enabled: true }), {
+      acquireMediaGpuLease: async (owner, gpu) => {
+        order.push('lease');
+        return {
+          record: { pid: 100, process_start_time: 1000, owner, gpu,
+            started_at: '2026-10-29T12:00:00.000Z' },
+          release: serverRelease,
+          transfer: async () => {},
+        };
+      },
+    });
+    await server.backend.start({ beforeSpawn: async () => { order.push('vram-gate'); } });
+    expect(order).toEqual(['vram-gate', 'lease']);
+    expect(server.acquireMediaLease).toHaveBeenCalledWith('sd-server:qwen-local', 2);
+    expect(serverRelease).not.toHaveBeenCalled();
+    await vi.advanceTimersByTimeAsync(server.config.idle_timeout_ms);
+    await vi.waitFor(() => expect(server.kill).toHaveBeenCalledTimes(1));
+    expect(serverRelease).toHaveBeenCalledTimes(1);
+  });
+
+  it('transfers the media lease to the spawned sd-server, using the owner record identity', async () => {
+    const serverRelease = vi.fn(async () => {});
+    let transferredTo: { pid: number; processStartTime: number } | undefined;
+    const server = rig(localConfig({ media_gpu_lease_enabled: true }), {
+      acquireMediaGpuLease: async (owner, gpu) => ({
+        record: { pid: 100, process_start_time: 1000, owner, gpu,
+          started_at: '2026-10-29T12:00:00.000Z' },
+        transfer: async (pid: number, processStartTime: number) => {
+          transferredTo = { pid, processStartTime };
+        },
+        release: serverRelease,
+      }),
+    });
+    await server.backend.start();
+    const record = JSON.parse(
+      fs.readFileSync(sdServerRecordPath(server.recordDir, server.config.name), 'utf8'),
+    ) as { pid: number; pidCreatedAt: number };
+    expect(transferredTo).toEqual({ pid: record.pid, processStartTime: record.pidCreatedAt });
+    expect(serverRelease).not.toHaveBeenCalled();
+    await server.backend.dispose();
+    expect(serverRelease).toHaveBeenCalledTimes(1);
+  });
+
+  it('stops the spawned child and releases the lease when the transfer fails', async () => {
+    const serverRelease = vi.fn(async () => {});
+    const server = rig(localConfig({ media_gpu_lease_enabled: true }), {
+      acquireMediaGpuLease: async (owner, gpu) => ({
+        record: { pid: 100, process_start_time: 1000, owner, gpu,
+          started_at: '2026-10-29T12:00:00.000Z' },
+        transfer: async (pid: number) => {
+          throw new Error(`simulated transfer failure for pid ${pid}`);
+        },
+        release: serverRelease,
+      }),
+    });
+    await expect(server.backend.start()).rejects.toThrow(/simulated transfer failure for pid /);
+    expect(server.kill).toHaveBeenCalledOnce();
+    expect(serverRelease).toHaveBeenCalledOnce();
+    expect(fs.existsSync(sdServerRecordPath(server.recordDir, server.config.name))).toBe(false);
+    expect(server.acquireMediaLease).toHaveBeenCalledOnce();
+  });
+
+  it('deletes the owner record after a lease release fails on unexpected exit', async () => {
+    const server = rig(localConfig({ media_gpu_lease_enabled: true }));
+    await server.backend.start();
+    const recordPath = sdServerRecordPath(server.recordDir, server.config.name);
+    const child = server.spawn.mock.results[0]?.value as ChildProcess;
+    server.releaseMediaLease.mockRejectedValueOnce(new Error('lease busy'));
+    server.processes.delete(child.pid ?? -1);
+    child.emit('exit', 1, null);
+    await vi.waitFor(() => expect(fs.existsSync(recordPath)).toBe(false));
+    expect(server.releaseMediaLease).toHaveBeenCalledOnce();
+  });
+
+  it('retries a failed lease release on the next start after an idle stop', async () => {
+    vi.useFakeTimers();
+    const config = localConfig({ media_gpu_lease_enabled: true });
+    const processes = new Map<number, SdProcessIdentity>([
+      [100, { executablePath: 'Forge.exe', createdAt: 1000 }],
+    ]);
+    const fetchImpl = (async () => {
+      if (![...processes.values()].some((identity) => identity.executablePath === config.binary))
+        throw new TypeError('fetch failed', {
+          cause: Object.assign(new Error('connect ECONNREFUSED'), { code: 'ECONNREFUSED' }),
+        });
+      return new Response(JSON.stringify({ model: { path: config.diffusion_model } }));
+    }) as typeof fetch;
+    const server = rig(config, { processes, fetch: fetchImpl });
+    await server.backend.start();
+    server.releaseMediaLease.mockRejectedValueOnce(new Error('lease busy'));
+    await vi.advanceTimersByTimeAsync(server.config.idle_timeout_ms);
+    await vi.waitFor(() => expect(server.kill).toHaveBeenCalledOnce());
+    expect(server.releaseMediaLease).toHaveBeenCalledOnce();
+    await server.backend.start();
+    expect(server.acquireMediaLease).toHaveBeenCalledTimes(2);
+  });
+
   it('names the config key and unavailable path when a configured model file is missing', async () => {
     const missing = path.join(root, 'missing-diffusion.gguf');
     const server = rig(localConfig({ diffusion_model: missing }));
@@ -338,6 +477,120 @@ describe('SdServerBackend startup and lifecycle', () => {
 });
 
 describe('SdServerBackend orphan reaping and adoption', () => {
+  it('keeps an expired record while the recorded starter process is still alive', async () => {
+    vi.useFakeTimers();
+    const server = rig();
+    const recordPath = await writeOrphanRecord(
+      server,
+      Date.now() - server.config.idle_timeout_ms - 1,
+    );
+
+    await vi.advanceTimersByTimeAsync(30_000);
+    await vi.waitFor(() => expect(server.lookup).toHaveBeenCalledWith(100));
+
+    expect(server.terminate).not.toHaveBeenCalled();
+    expect(fs.existsSync(recordPath)).toBe(true);
+  });
+
+  it('waits for an orphan record to reach the idle deadline before stopping it', async () => {
+    vi.useFakeTimers();
+    const server = rig();
+    const recordPath = await writeOrphanRecord(
+      server,
+      Date.now() - server.config.idle_timeout_ms + 45_000,
+    );
+    server.processes.delete(100);
+
+    await vi.advanceTimersByTimeAsync(30_000);
+    expect(server.terminate).not.toHaveBeenCalled();
+    expect(fs.existsSync(recordPath)).toBe(true);
+
+    await vi.advanceTimersByTimeAsync(15_000);
+    await vi.waitFor(() => expect(server.terminate).toHaveBeenCalledWith(200));
+    expect(fs.existsSync(recordPath)).toBe(false);
+  });
+
+  it('logs a failed stop, preserves the record, and retries at the next sweep', async () => {
+    vi.useFakeTimers();
+    const config = localConfig();
+    const processes = new Map<number, SdProcessIdentity>([
+      [200, { executablePath: config.binary, createdAt: 2000 }],
+    ]);
+    let attempts = 0;
+    const server = rig(config, {
+      processes,
+      terminate: async (pid) => {
+        attempts++;
+        if (attempts === 1) throw new Error('simulated stop failure');
+        processes.delete(pid);
+      },
+    });
+    const recordPath = await writeOrphanRecord(
+      server,
+      Date.now() - server.config.idle_timeout_ms - 1,
+    );
+    server.processes.delete(100);
+    const error = vi.spyOn(logger, 'error');
+
+    await vi.advanceTimersByTimeAsync(30_000);
+    await vi.waitFor(() => expect(error).toHaveBeenCalledWith(
+      expect.stringContaining('Idle owner sweep failed'),
+      expect.any(Error),
+    ));
+    expect(server.terminate).toHaveBeenCalledTimes(1);
+    expect(fs.existsSync(recordPath)).toBe(true);
+
+    await vi.advanceTimersByTimeAsync(30_000);
+    await vi.waitFor(() => expect(server.terminate).toHaveBeenCalledTimes(2));
+    expect(fs.existsSync(recordPath)).toBe(false);
+  });
+
+  it('does not run another sweep after dispose', async () => {
+    vi.useFakeTimers();
+    const server = rig();
+    const recordPath = await writeOrphanRecord(
+      server,
+      Date.now() - server.config.idle_timeout_ms - 1,
+    );
+    server.processes.delete(100);
+    await server.backend.dispose();
+    server.lookup.mockClear();
+
+    await vi.advanceTimersByTimeAsync(60_000);
+
+    expect(server.lookup).not.toHaveBeenCalled();
+    expect(server.terminate).not.toHaveBeenCalled();
+    expect(fs.existsSync(recordPath)).toBe(true);
+  });
+
+  it('a surviving backend reaps an expired record after its starter dies', async () => {
+    vi.useFakeTimers();
+    const config = localConfig();
+    const server = rig(config);
+    const recordPath = sdServerRecordPath(server.recordDir, config.name);
+    await fs.promises.mkdir(server.recordDir, { recursive: true });
+    await writeSdServerRecord(recordPath, {
+      pid: 200,
+      pidCreatedAt: 2000,
+      port: config.port,
+      binary: config.binary,
+      diffusionModel: config.diffusion_model,
+      signature: 'a'.repeat(64),
+      ownerPid: 100,
+      ownerCreatedAt: 1000,
+      startedAt: 1500,
+      lastUsedAt: Date.now() - config.idle_timeout_ms - 1,
+    });
+    server.processes.set(200, { executablePath: config.binary, createdAt: 2000 });
+    server.processes.delete(100);
+
+    await vi.advanceTimersByTimeAsync(30_000);
+    await vi.waitFor(() => expect(server.terminate).toHaveBeenCalledWith(200));
+
+    expect(server.spawn).not.toHaveBeenCalled();
+    expect(fs.existsSync(recordPath)).toBe(false);
+  });
+
   it('reaps a live matching binary after its owner process dies', async () => {
     const config = localConfig();
     const processes = new Map<number, SdProcessIdentity>([

@@ -8,13 +8,54 @@
  * discrimination and the recovery text live together, away from the loop.
  */
 
-import type { ChatCompletionRequest, ChatMessage } from '../llm/types';
+import type { ChatCompletionRequest, ChatMessage, ToolDefinition } from '../llm/types';
 import { MAX_SINGLE_WRITE_CHARS } from '../tools/writeChunking';
 import {
   ToolCallTruncatedError,
   isToolCallTruncatedError,
   isTruncationParseError,
 } from '../llm/ToolCallTruncatedError';
+
+/** A schema property to keep out of the offer until a call is cut off. */
+export interface HeldSchemaProperty {
+  readonly tool: string;
+  readonly property: string;
+}
+
+/**
+ * Until a tool call is cut off this turn, the held schema properties are not
+ * offered — in production, `write_file` without its `mode` property. Offering
+ * the append choice up front made the model split new files into a write plus
+ * appends it did not need (5/5 runs on one task on the bench), each chunk a
+ * separate request, and one round per tool call is the scarcest resource.
+ * Unlocking mid-turn costs one cold re-prefill, paid only on a turn that was
+ * actually cut off.
+ *
+ * `structuredClone` rather than a delete in place: these definitions belong to
+ * the registry, and deleting `mode` from the object it owns would hide the
+ * property from every later conversation instead of just this turn. The handler
+ * is deliberately left alone — it keeps accepting `mode`, so a replayed call and
+ * the recovery calls still work while the schema holds the choice back.
+ */
+export function holdSchemaPropertiesUntilTruncation(
+  definitions: ToolDefinition[],
+  held: readonly HeldSchemaProperty[] | undefined,
+  unlocked: boolean,
+): ToolDefinition[] {
+  if (unlocked || !held?.length) return definitions;
+  return definitions.map((definition) => {
+    const rule = held.find((entry) => entry.tool === definition.function.name);
+    const properties = (
+      definition.function.parameters as { properties?: Record<string, unknown> } | undefined
+    )?.properties;
+    if (!rule || !properties?.[rule.property]) return definition;
+    const trimmed = structuredClone(definition);
+    delete (trimmed.function.parameters as { properties?: Record<string, unknown> }).properties?.[
+      rule.property
+    ];
+    return trimmed;
+  });
+}
 
 export function isNativeToolJsonParseError(err: unknown): boolean {
   return (err instanceof Error ? err.message : String(err)).includes(
@@ -79,8 +120,9 @@ export function truncationGuidance(
     `HARD LIMIT for your next call: the "content" argument must be at most ${ceiling} characters. ` +
     `This overrides any earlier instruction to write the whole file in one go — the file still ` +
     `ends up complete, just written across several calls.\n` +
-    `Do this now: write the first ${ceiling} characters or fewer, then append_file the rest, ` +
-    `one call per chunk. Keep thinking short; it spends the same budget as the write.`
+    `Do this now: write the first ${ceiling} characters or fewer, then write_file again with ` +
+    `mode "append" for the rest, one call per chunk. Keep thinking short; it spends the same ` +
+    `budget as the write.`
   );
 }
 

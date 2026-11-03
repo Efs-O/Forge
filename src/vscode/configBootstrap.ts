@@ -1,8 +1,10 @@
 import * as path from 'path';
 import * as vscode from 'vscode';
 import type { ForgeConfig } from '../config/types';
-import { loadConfig, findConfigPath } from '../config/ConfigLoader';
+import { loadConfig, findConfigPath, resolveExplicitConfigPath } from '../config/ConfigLoader';
 import { getLogger } from '../util/logger';
+import { noticeStaleBuildOnConfigFailure } from './staleBuild';
+import { registerPolicyMigrationRecovery } from './policyMigrationRecovery';
 import { enterSetupMode } from '../sidebar/SetupMode';
 import type { BackendStatusBar } from './BackendStatusBar';
 
@@ -26,6 +28,22 @@ export function bootstrapConfig(
   const explicitConfig = vscode.workspace.getConfiguration('forge').get<string>('configFile');
   const configPath = findConfigPath(storagePath, explicitConfig);
 
+  // A `forge.configFile` that resolves to nothing used to be invisible:
+  // `resolveExplicitConfigPath` returns null for a missing path, and the window
+  // quietly used the workspace config — or setup mode — instead. That is how a
+  // setting copied onto the wrong machine sat unused for a whole session: the
+  // scope was `application`, so a remote window read it from the machine being
+  // typed on rather than the one being worked on. Name the setting, the value
+  // and what is used instead. Once per activation: `jobsSetup.ts` repeats the
+  // same lookup and stays silent on purpose, so the warning is not doubled.
+  if (explicitConfig?.trim() && !resolveExplicitConfigPath(explicitConfig)) {
+    const message =
+      `Forge: forge.configFile is "${explicitConfig}", which is not a config.yaml ` +
+      `or a folder holding one. Using ${configPath ?? 'setup mode'} instead.`;
+    log.warn(message);
+    void vscode.window.showWarningMessage(message);
+  }
+
   if (!configPath) {
     enterSetupMode(
       context,
@@ -41,6 +59,15 @@ export function bootstrapConfig(
   } catch (err) {
     const msg = (err as Error).message;
     log.error(msg);
+    // A config that the installed build would accept can still fail here: this
+    // window may be running last night's rules because it was never reloaded
+    // after an upgrade. Say that before the user goes looking for a config error.
+    noticeStaleBuildOnConfigFailure();
+    // The message shown below tells the owner to run a command this window has
+    // not registered, because activation stops here — so register the one they
+    // were just told to run before showing the message. `policyMigrationRecovery.ts`
+    // owns why it has to be this window's own config path.
+    context.subscriptions.push(registerPolicyMigrationRecovery(configPath));
     // A broken global fallback config must not brick every workspace. Surface
     // the reason, then drop into setup mode rather than aborting activation.
     // For an explicit/workspace config the user is actively editing, surface a

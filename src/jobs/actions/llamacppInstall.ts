@@ -1,6 +1,8 @@
 import { spawn } from 'child_process';
 import * as fs from 'fs';
+import * as net from 'net';
 import * as path from 'path';
+import { isFetchBlockedPort } from '../../util/fetchBlockedPorts';
 import { pickAssets } from './llamacppAssets';
 import { jobsDownloadBinary, jobsFetchReleaseByTag, type JobsFetchOptions } from '../jobsFetch';
 import { buildDirForTag, newBinaryPath, stagingDir } from './stagedBuild';
@@ -208,16 +210,67 @@ async function embeddingsRoundTrip(
   }
 }
 
-/** A free TCP port on the host. */
-async function findFreePort(host: string): Promise<number> {
-  const net = await import('net');
-  return new Promise((resolve, reject) => {
-    const server = net.createServer();
+/** How many ephemeral binds one `findFreePort` makes before it calls that host
+ *  unusable. The OS draws from a range tens of thousands wide, so a run of
+ *  blocked draws means the range itself is mostly blocked: a clear error beats
+ *  a bind loop that never ends. */
+const MAX_PORT_ATTEMPTS = 32;
+
+/** The slice of `net.Server` `findFreePort` uses, so a test can hand in a
+ *  socket that reports the ports it wants. `net.Server` satisfies it. */
+export interface FreePortProbe {
+  once(event: 'error', listener: (err: Error) => void): unknown;
+  listen(port: 0, host: string, onListening?: () => void): unknown;
+  address(): { port: number } | string | null;
+  close(onClosed: (err?: Error) => void): unknown;
+}
+
+/**
+ * A port on `host` that this process can bind AND `fetch()`.
+ *
+ * `listen(0)` lets the OS choose, and this machine's dynamic range starts at
+ * 1024, so it can answer with a port the Fetch standard blocks (6000, 6566,
+ * 6665-6669, 6697, 10080, …). `waitHealthy` below polls with `fetch`, which
+ * refuses such a port before contacting anything, so a perfectly good build
+ * read as "embedding server did not become healthy" — the same trap 8198f960
+ * fixed in the tests (`test/support/listenLoopback.ts`). Rebind until the
+ * answer is a port `fetch` accepts; port 0 is in that list, so this never
+ * resolves 0, which the old code reported whenever `address()` was no object
+ * and the caller then polled a URL naming port 0 while the server started on
+ * the port the OS had really given it.
+ *
+ * `createServer` is injectable for tests; production binds a real socket.
+ */
+export async function findFreePort(
+  host: string,
+  createServer: () => FreePortProbe = () => net.createServer(),
+): Promise<number> {
+  for (let attempt = 0; attempt < MAX_PORT_ATTEMPTS; attempt++) {
+    const port = await bindThenRelease(host, createServer);
+    if (!isFetchBlockedPort(port)) return port;
+  }
+  throw new Error(
+    `Forge: smoke test found no port fetch can reach on ${host} after ${MAX_PORT_ATTEMPTS} binds`,
+  );
+}
+
+/** Bind one ephemeral port, let go of it, and report the number. Throws when
+ *  the socket did not report a TCP port: 0 is not a free port, it is an
+ *  unknown one, and binding again is the only honest next move. */
+async function bindThenRelease(host: string, createServer: () => FreePortProbe): Promise<number> {
+  return new Promise<number>((resolve, reject) => {
+    const server = createServer();
     server.once('error', reject);
     server.listen(0, host, () => {
       const address = server.address();
-      const port = typeof address === 'object' && address ? address.port : 0;
-      server.close(() => resolve(port));
+      if (address === null || typeof address === 'string') {
+        server.close(() =>
+          reject(new Error(`Forge: smoke test could not read the port it bound on ${host}`)),
+        );
+        return;
+      }
+      const { port } = address;
+      server.close((err) => (err ? reject(err) : resolve(port)));
     });
   });
 }

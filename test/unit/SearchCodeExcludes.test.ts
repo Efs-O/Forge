@@ -4,11 +4,13 @@ import * as os from 'os';
 import * as path from 'path';
 import {
   SEARCH_EXCLUDES,
+  exclusionsCoveringRoot,
   namedExistingPath,
   resolveSearchCodeScope,
   rgScopeArgs,
 } from '../../src/tools/searchScope';
-import { SNIPPETS_PER_FILE_LIMIT } from '../../src/tools/dirTools';
+import { SNIPPETS_PER_FILE_LIMIT } from '../../src/tools/searchCodeTool';
+import { searchCodeRgArgs, type SearchCodeOptions } from '../../src/tools/searchCodeCrawl';
 
 describe('search_code excludes', () => {
   // Bare `.git/**` is anchored to the search root, so a monorepo's
@@ -44,6 +46,75 @@ describe('search_code excludes', () => {
   });
 });
 
+describe('searchCodeRgArgs', () => {
+  const root = path.resolve(__dirname, '..', '..');
+  const argsFor = (over: Partial<SearchCodeOptions> = {}): string[] =>
+    searchCodeRgArgs(
+      {
+        query: 'needle',
+        literal: false,
+        include: '**/*',
+        maxResults: 20,
+        offset: 0,
+        output: 'content',
+        context: 2,
+        ignoreCase: false,
+        ...over,
+      },
+      resolveSearchCodeScope(over.include ?? '**/*', root),
+    );
+
+  // 1,164 shell greps in the audit window carried -A/-B most of the time, and
+  // the tool could only ever answer two lines. One number, because before/after
+  // is two numbers for a local model to get wrong.
+  it('asks ripgrep for the context the caller named', () => {
+    expect(argsFor()).toEqual(expect.arrayContaining(['--context', '2']));
+    expect(argsFor({ context: 0 })).toEqual(expect.arrayContaining(['--context', '0']));
+    expect(argsFor({ context: 7 })).toEqual(expect.arrayContaining(['--context', '7']));
+  });
+
+  // A path or count list prints no lines, so context is not merely unused there:
+  // ripgrep would print lines the tool throws away, doubling the crawl's work
+  // for the cheapest answer it gives.
+  it('sends no context to ripgrep for a path or count list, whatever was asked', () => {
+    expect(argsFor({ output: 'files', context: 5 })).toEqual(
+      expect.arrayContaining(['--context', '0']),
+    );
+    expect(argsFor({ output: 'count', context: 5 })).toEqual(
+      expect.arrayContaining(['--context', '0']),
+    );
+  });
+
+  // `-i` was the other common flag. Sent unconditionally it would have made
+  // every search case-blind, which is not what a search for an identifier means.
+  it('sends --ignore-case only when the caller asked for it', () => {
+    expect(argsFor({ ignoreCase: true })).toContain('--ignore-case');
+    expect(argsFor()).not.toContain('--ignore-case');
+  });
+
+  it('sends --fixed-strings for a literal query and plain regex otherwise', () => {
+    expect(argsFor({ literal: true })).toContain('--fixed-strings');
+    expect(argsFor()).not.toContain('--fixed-strings');
+  });
+
+  // The `--new` failure: a query that begins with dashes reached ripgrep as a
+  // flag and the search died before it started.
+  it('puts --regexp immediately before the query, so a query is never read as a flag', () => {
+    const args = argsFor({ query: '--new' });
+    const at = args.indexOf('--regexp');
+    expect(args[at + 1]).toBe('--new');
+    expect(args[at + 2]).toBe('.');
+    expect(args.indexOf('--new')).toBe(at + 1);
+  });
+
+  it('carries the caller glob and every exclusion beside the new flags', () => {
+    const args = argsFor({ include: 'src/**/*.ts', ignoreCase: true });
+    expect(args).toContain('--glob');
+    expect(args.slice(args.indexOf('--glob') + 1)).toContain('src/**/*.ts');
+    for (const glob of SEARCH_EXCLUDES) expect(args).toContain(glob);
+  });
+});
+
 describe('namedExistingPath', () => {
   // This repo's own tree: `.gitignore` lists `.forge/`, so ripgrep skips it
   // while crawling. Naming the file makes it a search root instead, which
@@ -75,6 +146,7 @@ describe('namedExistingPath', () => {
 
 describe('resolveSearchCodeScope', () => {
   const root = path.resolve(__dirname, '..', '..');
+  const forward = (value: string): string => value.replace(/\\/gu, '/');
 
   it('keeps relative globs rooted at the workspace', () => {
     expect(resolveSearchCodeScope('src/**/*.ts', root)).toEqual({
@@ -82,7 +154,12 @@ describe('resolveSearchCodeScope', () => {
       glob: 'src/**/*.ts',
       explicitPath: false,
       applyExcludes: true,
+      rootDir: forward(root),
     });
+  });
+
+  it('records the directory a named relative path is searched from', () => {
+    expect(resolveSearchCodeScope('src', root).rootDir).toBe(forward(path.join(root, 'src')));
   });
 
   it('allows an explicitly named absolute file outside the workspace', () => {
@@ -93,6 +170,9 @@ describe('resolveSearchCodeScope', () => {
         target: externalFile,
         explicitPath: true,
         applyExcludes: false,
+        // A file is searched as its own path, and the recorded root is the folder
+        // it sits in, because that is what an exclusion has to be asked against.
+        rootDir: forward(path.dirname(externalFile)),
       });
     } finally {
       fs.rmSync(externalFile, { force: true });
@@ -106,6 +186,7 @@ describe('resolveSearchCodeScope', () => {
         target: externalRoot,
         explicitPath: true,
         applyExcludes: true,
+        rootDir: forward(externalRoot),
       });
     } finally {
       fs.rmSync(externalRoot, { recursive: true, force: true });
@@ -120,6 +201,7 @@ describe('resolveSearchCodeScope', () => {
         glob: '**/*.py',
         explicitPath: false,
         applyExcludes: true,
+        rootDir: forward(externalRoot),
       });
     } finally {
       fs.rmSync(externalRoot, { recursive: true, force: true });
@@ -159,6 +241,7 @@ describe('resolveSearchCodeScope', () => {
         target: dir,
         explicitPath: true,
         applyExcludes: true,
+        rootDir: forward(dir),
       });
     } finally {
       fs.rmSync(dir, { recursive: true, force: true });
@@ -213,5 +296,87 @@ describe('rgScopeArgs', () => {
     } finally {
       fs.rmSync(dir, { recursive: true, force: true });
     }
+  });
+});
+
+describe('a search rooted inside one of the exclusions', () => {
+  const root = path.resolve(__dirname, '..', '..');
+  const forward = (value: string): string => value.replace(/\\/gu, '/');
+  /** A folder outside the workspace whose name has a space in it, holding a
+   *  `.forge/sessions` subfolder — the shape of the owner's real session logs, and
+   *  the shape that made the answer wrong twice: a space breaks nothing in the
+   *  resolver, but the exclusion prunes the folder the caller named. */
+  function outsideSessions(): { base: string; sessions: string } {
+    const base = fs.mkdtempSync(path.join(os.tmpdir(), 'forge search inside-'));
+    const sessions = path.join(base, '.forge', 'sessions');
+    fs.mkdirSync(sessions, { recursive: true });
+    fs.writeFileSync(path.join(sessions, 'a.jsonl'), 'session_start {"role":"user"}\n');
+    return { base, sessions };
+  }
+  const globsIn = (args: string[]): string[] =>
+    args.filter((_, index) => args[index - 1] === '--glob');
+
+  // The false answer this fixes: `include` named the session-log folder, the
+  // exclusion list prunes `.forge/sessions/`, and the tool reported "No matches
+  // found" for `session_start` — text every session log begins with. A tool that
+  // reports absence for files it never opened is worse than one that refuses.
+  it('drops the exclusion that would prune the folder the caller named', () => {
+    const { base, sessions } = outsideSessions();
+    try {
+      const scope = resolveSearchCodeScope(sessions, root);
+      expect(scope.rootDir).toBe(forward(sessions));
+      const args = rgScopeArgs(scope);
+      expect(globsIn(args)).not.toContain('!**/.forge/sessions/**');
+      // Only the rule that prunes the root is dropped: the rest still keeps
+      // node_modules, dist and .git out of a crawl of that folder.
+      expect(globsIn(args)).toContain('!**/.git/**');
+      expect(globsIn(args)).toContain('!**/node_modules/**');
+      expect(args).toContain('--no-ignore-vcs');
+    } finally {
+      fs.rmSync(base, { recursive: true, force: true });
+    }
+  });
+
+  it('keeps the exclusion for a search rooted above it', () => {
+    const { base, sessions } = outsideSessions();
+    try {
+      const scope = resolveSearchCodeScope(path.join(base, '**', '*.jsonl'), root);
+      expect(globsIn(rgScopeArgs(scope))).toContain('!**/.forge/sessions/**');
+      // And the deeper root inside the same exclusion drops it, which is the same
+      // rule at one level down.
+      const deep = resolveSearchCodeScope(path.join(sessions, '**', '*.jsonl'), root);
+      expect(globsIn(rgScopeArgs(deep))).not.toContain('!**/.forge/sessions/**');
+    } finally {
+      fs.rmSync(base, { recursive: true, force: true });
+    }
+  });
+
+  it('names which rule was dropped and which root made it drop', () => {
+    const { base, sessions } = outsideSessions();
+    try {
+      const covering = exclusionsCoveringRoot(forward(sessions));
+      expect(covering.dropped).toEqual(['!**/.forge/sessions/**']);
+      expect(covering.keep).toContain('!**/.git/**');
+      expect(covering.keep).toContain('!**/.forge/embeddings.index.json');
+      // A search rooted at the workspace, or at the `.forge` folder itself, prunes
+      // nothing: `sessions/` is below those roots, not part of their names, so
+      // `.forge/config.yaml` is still searched while the logs under it are not.
+      expect(exclusionsCoveringRoot(forward(root)).dropped).toEqual([]);
+      expect(exclusionsCoveringRoot(forward(path.join(root, '.forge'))).dropped).toEqual([]);
+    } finally {
+      fs.rmSync(base, { recursive: true, force: true });
+    }
+  });
+
+  it('does not read a file exclusion as a pruned directory', () => {
+    // `!**/.forge/embeddings.index.json` names one file. A directory root can be
+    // inside a pruned DIRECTORY but never inside a pruned FILE, so this glob is
+    // kept for every root — otherwise naming the index folder would switch the
+    // duplicate-match guard off.
+    const covering = exclusionsCoveringRoot(
+      path.join(root, '.forge', 'embeddings.index.json').replace(/\\/gu, '/').replace(/\/[^/]*$/u, ''),
+    );
+    expect(covering.dropped).toEqual([]);
+    expect(covering.keep).toContain('!**/.forge/embeddings.index.json');
   });
 });

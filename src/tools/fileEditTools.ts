@@ -1,8 +1,10 @@
 import * as fs from 'fs';
+import * as os from 'os';
 import * as path from 'path';
 import * as vscode from 'vscode';
 import type { RegisteredTool } from './ToolRegistry';
-import { resolveRealWorkspacePath } from '../util/WorkspacePaths';
+import { resolveRealWorkspacePath, resolveWorkspacePath } from '../util/WorkspacePaths';
+import { commonFolderOf } from '../sidebar/approvalKeyGrammar';
 import { diagnoseTrashRefusal, forgetTrashRefusal, rememberTrashRefusal } from './trashRefusal';
 import { applyAndSaveWorkspaceEdit } from './workspaceEditApply';
 
@@ -31,51 +33,11 @@ async function trackedWarningFor(filePath: string): Promise<string> {
   }
 }
 
-// ── create_directory ───────────────────────────────────────────────────────────
+// ── move_file ──────────────────────────────────────────────────────────────────
 
 /** `extraRoots` (here and in every file-writing tool) is config.yaml `extra_file_roots`:
  *  folders outside the workspace the tool may also change. Every writer must take
  *  it: write_file once ignored it and refused a configured folder. */
-export function makeCreateDirectoryTool(
-  extraRoots: () => readonly string[] = () => [],
-): RegisteredTool {
-  return {
-    definition: {
-      type: 'function',
-      function: {
-        name: 'create_directory',
-        description: 'Create a directory (including any missing parent directories).',
-        parameters: {
-          type: 'object',
-          properties: {
-            path: {
-              type: 'string',
-              description:
-                'Directory path (absolute or workspace-relative). Outside the workspace only ' +
-                'inside a folder listed under extra_file_roots in config.yaml.',
-            },
-          },
-          required: ['path'],
-          additionalProperties: false,
-        },
-      },
-    },
-    permission: 'write',
-    mutation: { paths: (args) => [args['path'] as string] },
-    handler: async (args) => {
-      const dirPath = args['path'] as string;
-      const resolvedPath = await resolveRealWorkspacePath(dirPath, undefined, {
-        allowMissing: true,
-        extraRoots: extraRoots(),
-      });
-      fs.mkdirSync(resolvedPath, { recursive: true });
-      return `Created: ${dirPath}`;
-    },
-  };
-}
-
-// ── move_file ──────────────────────────────────────────────────────────────────
-
 export function makeMoveFileTool(extraRoots: () => readonly string[] = () => []): RegisteredTool {
   return {
     definition: {
@@ -176,6 +138,49 @@ export function makeDeleteFileTool(extraRoots: () => readonly string[] = () => [
       },
     },
     permission: 'delete',
+    /**
+     * The key for a permanent delete, from the gate that knows the targets.
+     *
+     * `isDangerousDelete` is `to_trash: false` — a permanent delete of paths the call
+     * names, not a recursive one specifically — so a recycle-bin move gets nothing
+     * here (it is recoverable and stays card-free as before) and a permanent delete
+     * gets `rdelete:` with the folder its targets sit in, which is the folder the
+     * card shows. One judgement call worth stating: a permanent delete of a single
+     * FILE is keyed the same way, so a chat allowed `rdelete:D:/Downloads` also lets
+     * future permanent deletes of other files in `D:/Downloads` through. That follows
+     * the plan's rule that the key is the target's parent and the owner may only pick
+     * narrower, and it is why `approvalKeysFor` re-checks every target against the
+     * folder the key names before trusting it.
+     *
+     * A path this tool cannot resolve gets no key at all, and the call asks.
+     */
+    approval: (args) => {
+      if (args['to_trash'] !== false) return undefined;
+      const requested = Array.isArray(args['paths'])
+        ? (args['paths'] as unknown[])
+        : [args['path']];
+      const targets: string[] = [];
+      for (const value of requested) {
+        if (typeof value !== 'string' || value.trim().length === 0) return { dangerous: true };
+        try {
+          targets.push(resolveWorkspacePath(value));
+        } catch {
+          return { dangerous: true };
+        }
+      }
+      if (targets.length === 0) return { dangerous: true };
+      const folder = commonFolderOf(targets, {
+        platform: process.platform,
+        home: os.homedir(),
+        workspaceRoot: undefined,
+        ownerOnly: [],
+        extraFileRoots: [],
+      });
+      return {
+        dangerous: true,
+        ...(folder ? { approvalKey: `rdelete:${folder}`, approvalTargets: targets } : {}),
+      };
+    },
     mutation: {
       paths: (args) =>
         Array.isArray(args['paths']) ? (args['paths'] as string[]) : [args['path'] as string],

@@ -38,4 +38,17 @@ describe('publish workflow contract (audit A11)', () => {
     };
     expect(pkg.scripts.package).toMatch(/^node scripts\/check-vsix-version\.mjs && /);
   });
+
+  it('checks the VSIX allow-list after changelog sync and before packaging', () => {
+    const pkg = JSON.parse(fs.readFileSync(path.resolve('package.json'), 'utf8')) as {
+      scripts: Record<string, string>;
+    };
+    const command = pkg.scripts.package ?? '';
+    const synced = command.indexOf('node scripts/sync-changelog.mjs');
+    const checked = command.indexOf('node scripts/check-vsix-contents.mjs');
+    const packaged = command.indexOf('vsce package');
+    expect(synced).toBeGreaterThan(-1);
+    expect(checked).toBeGreaterThan(synced);
+    expect(packaged).toBeGreaterThan(checked);
+  });
 });

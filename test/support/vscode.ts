@@ -115,7 +115,7 @@ export const window = {
 };
 
 /**
- * Minimal stand-in for a VS Code quick input. Tests drive it by calling the
+ * Minimal fake of a VS Code quick input. Tests drive it by calling the
  * captured accept/hide handlers, which is how the real widget reports a typed
  * answer or an Escape.
  */
@@ -190,6 +190,7 @@ function makeQuickInput(): FakeQuickInput {
 let clipboardText = '';
 export const env = {
   appRoot: undefined as string | undefined,
+  remoteName: undefined as string | undefined,
   clipboard: {
     writeText: async (value: string): Promise<void> => {
       clipboardText = value;

@@ -9,9 +9,9 @@ import {
 import { DEFAULT_TOOL_OUTPUT_LIMITS } from './toolOutputLimits';
 import {
   backgroundExecutionManager,
-  MAX_BACKGROUND_OUTPUT_CHARS,
   type BackgroundExecutionObservation,
 } from './BackgroundExecutionManager';
+import { MAX_BACKGROUND_OUTPUT_CHARS } from './backgroundOutput';
 
 /** Default wait for a fresh monitor call, and the value backoff resets to. */
 const DEFAULT_MONITOR_WAIT_MS = 10_000;
@@ -19,16 +19,23 @@ const DEFAULT_MONITOR_WAIT_MS = 10_000;
 const MAX_MONITOR_WAIT_MS = 60_000;
 
 /**
- * shell's `notify_on_exit` description, used by both shell variants. The
- * negative cases are the point: a model that expects a notice which never
- * comes waits forever, so it must know exactly when none is sent. The shell
- * rewrite once replaced this with a one-liner that dropped them (U15-10).
+ * shell's `notify_on_exit` description, used by both shell variants. It has been
+ * on by default for a background command since 2026-10-30, so the negative
+ * cases still have to be spelled out in full: a model that expects a notice
+ * which never comes waits forever, so it must know exactly when none is sent.
+ * The shell rewrite once replaced this with a one-liner that dropped them
+ * (U15-10).
  */
 export const NOTIFY_ON_EXIT_DESCRIPTION =
-  'Only with background=true. On exit, Forge posts status and last output into this chat, ' +
-  'starting a new turn if idle. For a job you do not need now, or a watcher script that exits ' +
-  'when what it watches changes: start it, tell the user, end your turn instead of polling. ' +
-  'No notice if the window reloads, you stop the job, or monitor_execution already saw it end.';
+  'On by default with background=true; pass false to opt out (a server you do not ' +
+  'want to hear about, for example). Only a background command can notify: true ' +
+  'without background=true, or with no chat, is an error. On exit, Forge posts ' +
+  'status and last output into this chat, starting a new turn if idle. For a job ' +
+  'you do not need now, or a watcher script that exits when what it watches ' +
+  'changes: start it, tell the user, end your turn instead of polling. No notice ' +
+  'if the window reloads, you stop the job, monitor_execution already saw it end, ' +
+  'or the owner stopped the turn — a stopped chat is never restarted by a job ' +
+  'finishing, though its jobs keep running and list_executions still shows them.';
 
 export function makeMonitorExecutionTool(): RegisteredTool {
   return {
@@ -37,7 +44,7 @@ export function makeMonitorExecutionTool(): RegisteredTool {
       function: {
         name: 'monitor_execution',
         description:
-          "Wait for a background shell command and return new output plus status. Use it when the result is needed in this turn; otherwise prefer `shell`'s `notify_on_exit` parameter. Reuse the returned cursors and suggested_next_wait_ms; *_dropped_chars means that output is gone. A running job with no output may be silent: inspect its artifact, including nearby or nested .part/.tmp files, instead of polling rapidly.",
+          'Wait for a background shell command and return new output plus status when this turn must see the output: a background job wakes the chat on its own when it ends, so watching one does not have to hold a turn open. Reuse the returned cursors and suggested_next_wait_ms; *_dropped_chars means that output is gone. A running job with no output may be silent: inspect its artifact, including nearby or nested .part/.tmp files, instead of polling rapidly.',
         parameters: {
           type: 'object',
           properties: {

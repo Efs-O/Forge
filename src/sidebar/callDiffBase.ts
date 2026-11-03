@@ -24,3 +24,17 @@ export function readCallDiffBase(paths: readonly string[]): Map<string, string |
   }
   return base;
 }
+
+/**
+ * A directory has no text to diff, and `readFileSync` on one throws EISDIR, so a
+ * per-call diff card for a folder is not a card waiting to be drawn. Moved here
+ * from `ToolDispatch.ts`, which had run past ESLint's 500-line stop; it belongs
+ * beside `readCallDiffBase`, the other question about what a path held.
+ */
+export function isExistingDirectory(target: string): boolean {
+  try {
+    return fs.statSync(target).isDirectory();
+  } catch {
+    return false;
+  }
+}

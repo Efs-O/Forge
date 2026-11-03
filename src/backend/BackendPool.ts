@@ -9,17 +9,14 @@ import {
 } from '../config/ConfigResolver';
 import { DelegationGate } from './DelegationGate';
 import type { DelegationCheck, DelegationHold } from './DelegationGate';
-import { getLogger } from '../util/logger';
-import { SharedRuntimeRegistry, sharedRuntimeKey } from './SharedRuntimeRegistry';
 import {
-  acquireOllamaSlot,
-  borrowSharedRuntime,
-  freeVramForExternal,
-  settleAll,
-  stopAllSlots,
-} from './poolAcquisition';
+  SharedRuntimeRegistry,
+  sharedRuntimeKey,
+  type ExternalTurnLease,
+} from './SharedRuntimeRegistry';
+import { acquireOllamaSlot, borrowSharedRuntime, settleAll } from './poolAcquisition';
 import { claimPort, freeSlot, mostRecentSlot } from './poolSlots';
-import { anyBackendReady, backendResidencySignature } from './poolReadiness';
+import { anyBackendReady, backendResidencySignature, ownedBackendProcesses } from './poolReadiness';
 import {
   changedStructuralSettings,
   readStructuralSettings,
@@ -28,16 +25,23 @@ import {
 } from './poolStructuralConfig';
 import type { StructuralSettings } from './poolStructuralConfig';
 import type { PortClaim, PoolSlot, SlotTable } from './poolSlots';
-import type { BackendTurnLease, IBackendPool } from './poolTypes';
+import type { BackendTurnLease, IBackendPool, RemoteLeaseReleaser } from './poolTypes';
 import type { BackendProcess } from '../system/SystemReport';
 import { effectiveParallelCapacity } from './parallelCapacity';
 import type { ExternalModelServers } from './ExternalModelServers';
 import { reconcileDeadSlot, restartSlot, startSlot, type SlotStartContext } from './poolStart';
+import {
+  noteExternalsHeldElsewhere,
+  prepareExternalForRequest,
+  releaseModelBackend,
+  sharesGpusWith,
+  stopOwnedSlots,
+  unloadManagedForLocalLoad,
+  type ExternalCoordinationContext,
+} from './BackendPoolExternal';
 
 export type { DelegationCheck, DelegationHold } from './DelegationGate';
-export type { IBackendPool } from './poolTypes';
-
-const log = getLogger();
+export type { IBackendPool, RemoteLeaseReleaser } from './poolTypes';
 
 export class BackendPool implements IBackendPool {
   private readonly slots = new Map<string, PoolSlot>();
@@ -68,6 +72,8 @@ export class BackendPool implements IBackendPool {
     sharedRegistry: SharedRuntimeRegistry = new SharedRuntimeRegistry(),
     /** Local servers Forge does not spawn but unloads (Strata). */
     private readonly external?: ExternalModelServers,
+    /** Remote (laptop) leases pinned in this window; see ModelStarterLeases. */
+    private readonly remoteLeases?: RemoteLeaseReleaser,
   ) {
     this.sharedRegistry = sharedRegistry;
     const max = config.max_simultaneous_models ?? 1;
@@ -102,9 +108,7 @@ export class BackendPool implements IBackendPool {
     return this.gate.acquire(primaryModel, targetModel);
   }
 
-  /** Slots on the server this model runs on. `n_parallel` is a spawn field
-   *  (usually under `spawn:`), so it must come from the spawn-time flatten —
-   *  the request-time model never sees it and reported 4 for 1-slot servers. */
+  /** Spawn-time `n_parallel` capacity; request-time config omits it. */
   parallelCapacity(modelName: string): number {
     return effectiveParallelCapacity(this.config, this.poolKey(modelName));
   }
@@ -133,15 +137,27 @@ export class BackendPool implements IBackendPool {
     );
   }
 
+  acquireExternalTurnHold(model: string, chat: string, title: string): Promise<ExternalTurnLease> {
+    const key = this.poolKey(model);
+    const shares = this.external?.isManaged(key) ? sharesGpusWith(this.external, key) : undefined;
+    return shares
+      ? this.sharedRegistry.acquireExternalTurnHold(key, chat, title, shares)
+      : Promise.resolve({ release: () => undefined });
+  }
+
   /** `key` must already be a pool key. `allowEvict: false` never evicts —
    *  used by DelegationGate, whose synchronous capacity check must stay valid
    *  through the synchronous slot claim below. */
   private async acquireByKey(key: string, allowEvict: boolean): Promise<BackendController> {
     const pendingReleases = this.pendingReleaseWait();
     if (pendingReleases) await pendingReleases;
-    // A new local model never loads beside a managed external one (Strata).
-    if (!this.isLoaded(key) && this.external?.loadedNames().length) {
-      await this.external.unloadAll();
+    // A new local model never loads beside a managed external one (Strata), and
+    // it must not do so by cutting off a chat holding one for a turn (BL-023).
+    // Residency is not the gate: a claim for a model still starting is not in
+    // `loadedNames()` yet, so the check has to happen whenever managed servers
+    // are configured at all (BL-020).
+    if (!this.isLoaded(key) && this.external) {
+      await unloadManagedForLocalLoad(key, this.externalContext());
     }
 
     if (this.isOllamaModel(key)) {
@@ -179,6 +195,9 @@ export class BackendPool implements IBackendPool {
 
   async release(modelName: string, stopExternal = false): Promise<void> {
     const key = this.poolKey(modelName);
+    // A desktop unload is the owner's call, and it wins over a remote lease: drop
+    // the lease BEFORE releasing, so a pin does not outlive the release it caused.
+    this.remoteLeases?.releaseLeasesFor(key);
     const existingRelease = this.releasing.get(key);
     if (existingRelease) {
       await existingRelease;
@@ -195,52 +214,7 @@ export class BackendPool implements IBackendPool {
     }
   }
   private async releaseKey(key: string, stopExternal = false): Promise<void> {
-    if (this.gate.isPinned(key)) {
-      throw new Error(`Cannot release "${key}": an active delegation hold is using it.`);
-    }
-    if (this.external?.isManaged(key))
-      return stopExternal ? this.external.unloadAndStop(key) : this.external.unload(key);
-    if (this.isOllamaModel(key)) {
-      const backend = this.ollamaSlots.get(key);
-      if (backend) {
-        await backend.stop();
-        this.ollamaSlots.delete(key);
-      }
-    } else if (this.sharedSlots.has(key)) {
-      const shared = this.sharedSlots.get(key)!;
-      // Borrowed: detach this client only — the process belongs to another
-      // window. The finally is load-bearing: the lease and the slot entry must
-      // be cleaned up even if detach fails, or the owner can never unload.
-      try {
-        await shared.backend.detach();
-      } finally {
-        this.sharedRegistry.releaseLease(shared.key, shared.leaseId);
-        this.sharedSlots.delete(key);
-      }
-    } else {
-      const slot = this.slots.get(key);
-      if (slot) {
-        const runtimeKey = this.runtimeKey(key);
-        const shared = this.config.shared_runtime?.enabled === true;
-        const draining = shared && this.sharedRegistry.beginDraining(runtimeKey);
-        if (shared && this.sharedRegistry.hasBorrowers(runtimeKey)) {
-          if (draining) this.sharedRegistry.resumeBorrowing(runtimeKey);
-          throw new Error(
-            `Cannot unload "${key}": another Forge workspace is using this shared runtime.`,
-          );
-        }
-        try {
-          if (slot.starting) await slot.starting.catch(() => {});
-          await slot.backend.stop();
-          this.freeSlot(key, slot);
-          if (shared) this.sharedRegistry.removeOwner(runtimeKey);
-        } catch (error) {
-          if (draining) this.sharedRegistry.resumeBorrowing(runtimeKey);
-          throw error;
-        }
-      }
-    }
-    log.info(`[BackendPool] released: ${key}`);
+    await releaseModelBackend(key, this.externalContext(), stopExternal);
   }
 
   /**
@@ -260,6 +234,12 @@ export class BackendPool implements IBackendPool {
 
   /** Every local model AND every managed external server. */
   async stopAll(stopExternal = false): Promise<void> {
+    // As in release(): a still-leased model would look busy after this, and
+    // nothing could ever stop it again.
+    this.remoteLeases?.releaseAllLeases();
+    // An explicit unload may still cut a held model off — the alternative is a
+    // model no window could ever free — but it must name the chat (BL-023).
+    noteExternalsHeldElsewhere(this.externalContext());
     await settleAll([
       this.stopLocal(),
       stopExternal ? this.external?.unloadAllAndStop() : this.external?.unloadAll(),
@@ -268,25 +248,22 @@ export class BackendPool implements IBackendPool {
 
   /**
    * Before a request to a managed external server: free every local model and
-   * every other managed server (two Strata entries share GPUs), never under a running turn.
+   * every other managed server (two Strata entries share GPUs), never under a
+   * running turn or a live remote lease. `BackendPoolExternal` owns the rules.
    */
   async prepareExternal(modelName: string): Promise<void> {
-    const key = this.poolKey(modelName);
-    const external = this.external;
-    if (!external?.isManaged(key)) return;
-    await freeVramForExternal(key, {
-      local: [...this.slots.keys(), ...this.sharedSlots.keys(), ...this.ollamaSlots.keys()],
-      otherExternal: external.loadedNames().filter((name) => name !== key),
-      busy: (m) => this.isBusy(m),
-      stopLocal: () => this.stopLocal(),
-      unloadExternal: (name) => external.unload(name),
-    });
-    await external.ensureStarted(key);
-    external.markInUse(key);
+    await prepareExternalForRequest(this.poolKey(modelName), this.externalContext());
   }
 
   private async stopLocal(): Promise<void> {
-    await stopAllSlots({
+    await stopOwnedSlots(this.externalContext());
+  }
+
+  /** Rebuilt per call: `config`, and so `shared_runtime.enabled`, is replaced
+   *  wholesale by a hot reload. */
+  private externalContext(): ExternalCoordinationContext {
+    return {
+      external: this.external,
       slots: this.slots,
       ollamaSlots: this.ollamaSlots,
       sharedSlots: this.sharedSlots,
@@ -294,7 +271,10 @@ export class BackendPool implements IBackendPool {
       sharedRuntimeEnabled: this.config.shared_runtime?.enabled === true,
       runtimeKey: (model) => this.runtimeKey(model),
       freeSlot: (model, slot) => this.freeSlot(model, slot),
-    });
+      isBusy: (model) => this.isBusy(model),
+      isDelegationPinned: (model) => this.gate.isPinned(this.poolKey(model)),
+      isOllamaModel: (model) => this.isOllamaModel(model),
+    };
   }
 
   /**
@@ -324,6 +304,34 @@ export class BackendPool implements IBackendPool {
   isBusy(modelName: string): boolean {
     const key = this.poolKey(modelName);
     return this.gate.isPinned(key) || (this.turnPins.get(key) ?? 0) > 0;
+  }
+
+  /**
+   * Pin a model for a holder that is not a sidebar turn — today a remote
+   * (laptop) lease — and return the matching unpin. It is the SAME counter
+   * `acquireForTurn` uses, so `isBusy` is true for the pin's whole life and
+   * `makeRoom`, `freeVramForExternal` and the shared-runtime gate leave the
+   * model alone, exactly as during a desktop turn. The unpin is idempotent.
+   */
+  pinModel(modelName: string): () => void {
+    const key = this.poolKey(modelName);
+    this.turnPins.set(key, (this.turnPins.get(key) ?? 0) + 1);
+    let released = false;
+    return () => {
+      if (released) return;
+      released = true;
+      this.unpinTurn(key);
+    };
+  }
+
+  /** The port this model's backend answers on, or null when it is not resident
+   *  here. A runtime borrowed from another window is still the port a client
+   *  must use, so it is reported too. */
+  modelPort(modelName: string): number | null {
+    const backend = this.backendFor(this.poolKey(modelName));
+    if (!backend) return null;
+    const port = Number(new URL(backend.baseUrl()).port);
+    return Number.isInteger(port) && port > 0 ? port : null;
   }
 
   /** Readiness across owned, borrowed, and Ollama backends. */
@@ -369,18 +377,9 @@ export class BackendPool implements IBackendPool {
     return this.backendFor(key)?.isReady() ?? this.external?.isConfirmedLoaded(key) ?? false;
   }
 
-  /**
-   * Only owned slots are reported. A borrowed shared runtime is another
-   * window's process — we know its port, not its pid — and Ollama models live
-   * in the daemon, so neither can be named here without inventing a number.
-   */
+  /** Only owned slots are reported — see `ownedBackendProcesses`. */
   backendProcesses(): readonly BackendProcess[] {
-    const processes: BackendProcess[] = [];
-    for (const [model, slot] of this.slots) {
-      const pid = slot.backend.serverPid();
-      if (pid !== null) processes.push({ model, pid });
-    }
-    return processes;
+    return ownedBackendProcesses(this.slots);
   }
 
   /**

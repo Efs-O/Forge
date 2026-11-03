@@ -2,7 +2,7 @@ import * as fs from 'fs';
 import * as vscode from 'vscode';
 import type { HostToWebview } from './messageBridge';
 import { diffContents } from './DiffUtils';
-import { readCallDiffBase } from './callDiffBase';
+import { isExistingDirectory, readCallDiffBase } from './callDiffBase';
 import type { DiffHunk } from './messageBridge';
 import type { ChatMessage, ToolCall } from '../llm/types';
 import type { CheckpointStack } from '../checkpoint/CheckpointStack';
@@ -13,19 +13,21 @@ import { ToolRegistry } from '../tools/ToolRegistry';
 import { ToolFailureTracker } from '../tools/StripTools';
 import type { ToolBudget } from '../tools/ToolBudget';
 import type { DiffDecorations } from './DiffDecorations';
-import { resolveWorkspacePath } from '../util/WorkspacePaths';
+import { resolveWorkspacePath, pathIsInWorkspace } from '../util/WorkspacePaths';
 import { capDisplayText } from '../tools/resultCap';
 import { describeDelete, isDangerousDelete } from './deletePreview';
-import { isFailureResult, readPathArg, resultLabel } from './toolResultView';
+import { isFailureResult, readPathArg, resultLabel, touchedFilePath } from './toolResultView';
 import type { PlanItem } from './sessionTypes';
+import type { ChatRuleApproval } from './chatApprovalRules';
 import type { CheckinStage } from '../agent/elapsedTimeNote';
 import type { ToolOutputLimits } from '../tools/toolOutputLimits';
 import { getLogger } from '../util/logger';
 import {
   ToolApprovalPolicyDenied,
   toolApprovalResult,
+  type ToolApprovalCallOptions,
   type ToolApprovalOutcome,
-} from './ToolApprovalService';
+} from './toolApprovalOutcome';
 import {
   coerceToolArgs,
   isJsonObject,
@@ -34,19 +36,17 @@ import {
   repairedToolArgumentFields,
 } from '../tools/argCoercion';
 import type { ToolArgumentRepairInfo } from '../tools/argCoercion';
-import { isLazyGroupActive, lazyGroupForTool, lazyGroupNames } from '../tools/lazyToolGroups';
-import { retiredToolResult } from './retiredTools';
+import { unknownToolResult } from './retiredTools';
+import { toolErrorText } from '../tools/toolErrorText';
+import { decideUntrustedExit, type UntrustedExitInput } from './untrustedExitPolicy';
+import { approvalCallOptions } from './approvalCallOptions';
+import {
+  carriesUntrustedContent,
+  hasConversationReadSecret,
+  markConversationReadUntrusted,
+} from '../tools/exfilTaint';
 
 const log = getLogger();
-/** A directory has no text to diff, and `readFileSync` on one throws EISDIR. */
-function isExistingDirectory(target: string): boolean {
-  try {
-    return fs.statSync(target).isDirectory();
-  } catch {
-    return false;
-  }
-}
-const WRITE_PERMISSIONS = new Set<ToolPermission>(['write', 'delete']);
 export const resolveToolPath = resolveWorkspacePath;
 
 export interface RecordedFileDiff {
@@ -63,58 +63,6 @@ function toolResultText(result: ToolHandlerResult): string {
 
 function toolResultContent(result: ToolHandlerResult): ChatMessage['content'] {
   return typeof result === 'string' ? result : result.content;
-}
-
-const UNKNOWN_TOOL_HINT_MAX_CHARS = 200;
-const UNKNOWN_TOOL_HINT_MIN_PREFIX_CHARS = 5;
-
-function unknownToolResult(
-  name: string,
-  registry: ToolRegistry,
-  allowed: Set<ToolPermission>,
-  budget: ToolBudget | undefined,
-  convId: string | undefined,
-  unavailableTools: ReadonlyMap<string, string> | undefined,
-): string {
-  const result = `Error: unknown tool "${name}"`;
-  const retired = retiredToolResult(name, UNKNOWN_TOOL_HINT_MAX_CHARS, {
-    registry,
-    allowed,
-    budget,
-    convId,
-    unavailableTools,
-  });
-  if (retired) return retired;
-  if (name.length < UNKNOWN_TOOL_HINT_MIN_PREFIX_CHARS) return result;
-
-  const definitions = registry
-    .definitions(allowed)
-    .filter((definition) => !unavailableTools?.has(definition.function.name));
-  const eligible = budget?.filterDefinitions(definitions) ?? definitions;
-  const matches = eligible.filter(
-    (definition) => definition.function.name !== name && definition.function.name.startsWith(name),
-  );
-  if (matches.length !== 1) return result;
-
-  const candidate = matches[0]?.function.name;
-  if (!candidate) return result;
-  const group = lazyGroupForTool(candidate);
-  const groupUnloaded =
-    group !== undefined &&
-    (!convId || (!isLazyGroupActive(convId, group) && !budget?.isExplicitlyAllowed(candidate)));
-  let hint: string;
-  if (groupUnloaded && group) {
-    const canLoadGroup =
-      convId !== undefined &&
-      lazyGroupNames().includes(group) &&
-      eligible.some((definition) => definition.function.name === 'load_tool_group');
-    if (!canLoadGroup) return result;
-    hint = `; group "${group}" is unloaded; call load_tool_group with "${group}" first to use "${candidate}"`;
-  } else {
-    hint = `; did you mean "${candidate}"?`;
-  }
-  const withHint = `${result}${hint}`;
-  return withHint.length <= UNKNOWN_TOOL_HINT_MAX_CHARS ? withHint : result;
 }
 
 /** How a transcript file reference should be revealed in the editor. */
@@ -137,8 +85,12 @@ export class ToolDispatch {
       isDangerous?: boolean,
       convId?: string,
       signal?: AbortSignal,
+      options?: ToolApprovalCallOptions,
     ) => Promise<ToolApprovalOutcome>,
     private readonly diffDecorations: DiffDecorations,
+    /** A chat rule that already covers this call answers it before the card opens,
+     *  and says which key covered it. Absent: chat rules are never consulted. */
+    private readonly chatRuleApproval?: ChatRuleApproval,
   ) {}
 
   async dispatch(
@@ -256,33 +208,76 @@ export class ToolDispatch {
           continue;
         }
 
-        const requiredPermissions = this.toolRegistry.requiredPermissions(reg, args);
-        const approvalMetadata = await reg.approval?.(args);
-        const autoApproved = reg.autoApprove === true || reg.autoApproveIf?.(args) === true;
-        const needsConfirm =
-          approvalMetadata !== undefined ||
-          (!autoApproved &&
-            requiredPermissions.some(
-              (permission) =>
-                WRITE_PERMISSIONS.has(permission) ||
-                permission === 'terminal' ||
-                permission === 'headless' ||
-                permission === 'git-write',
-            ));
-        if (needsConfirm) {
+        const approvalMetadata = await reg.approval?.(
+          args,
+          convId ? { conversationId: convId } : undefined,
+        );
+        const isDangerous =
+          approvalMetadata?.dangerous ??
+          (tc.function.name === 'delete_file' && isDangerousDelete(args));
+        const rawMutationPaths = reg.mutation?.paths(args) ?? [];
+        const mutationPaths = rawMutationPaths.map((p) => resolveToolPath(p));
+        const outsideMutationPaths = mutationPaths.filter((p) => !pathIsInWorkspace(p));
+        /* Phase 4 moved the card's reason out of the permission table and into
+         * `untrustedExitPolicy.ts`: a card is for content the owner did not choose.
+         * The same inputs go to `approvalKey.ts` below, so the two cannot disagree
+         * about what this call does.
+         */
+        const exitInput: UntrustedExitInput = {
+          toolName: tc.function.name,
+          dangerous: isDangerous,
+          // `cardTextOnly` metadata is the card's TEXT, not a gate: see `shellTool.ts`.
+          toolGate: approvalMetadata !== undefined && approvalMetadata.cardTextOnly !== true,
+          outsideWorkspace: outsideMutationPaths.length > 0,
+          declaredSafe: reg.autoApprove === true || reg.autoApproveIf?.(args) === true,
+          reachesOut: approvalMetadata?.reachesOut ?? reg.reachesOut ?? 'none',
+          // Asked fresh at every decision, from every source that still holds it,
+          // and each row judged by ITS OWN tool — `reg` is this call's entry.
+          untrustedContent: carriesUntrustedContent(
+            convId,
+            modelContext?.conversation,
+            this.toolRegistry,
+          ),
+          readSecret: hasConversationReadSecret(convId),
+        };
+        const exitVerdict = decideUntrustedExit(exitInput);
+        // A chat rule that covers every key this call needs answers the card before
+        // it opens and writes the `gate` row saying who answered it;
+        // `createChatRuleApproval` itself refuses to consult rules for an unattended
+        // run, so a job or an unattended bus turn behaves exactly as it does today.
+        // What it answers with when NOTHING covered the call is the other half: the
+        // keys the owner could have allowed and what they say in plain words, which
+        // is what makes the card that opens offer "Allow for this chat" — or not, for
+        // a call whose key the rules refused, like `git rebase`.
+        const chatRule =
+          exitVerdict.card && convId !== undefined
+            ? this.chatRuleApproval?.decide({
+                ...exitInput,
+                args,
+                approvalMetadata,
+                exitVerdict,
+                mutationPaths,
+                outsideMutationPaths,
+                conversationId: convId,
+                conversation: modelContext?.conversation,
+              })
+            : undefined;
+        if (exitVerdict.card && chatRule?.kind !== 'answered') {
           const raw = JSON.stringify(args, null, 2);
           const fallbackDetail = raw.length > 300 ? raw.slice(0, 300) + '\n…' : raw;
           const detail =
             approvalMetadata?.detail ??
             (tc.function.name === 'delete_file' ? await describeDelete(args) : fallbackDetail);
-          const isDangerous =
-            approvalMetadata?.dangerous ??
-            (tc.function.name === 'delete_file' && isDangerousDelete(args));
-          const outcome = signal
-            ? await this.requestApproval(tc.function.name, detail, isDangerous, convId, signal)
-            : await this.requestApproval(tc.function.name, detail, isDangerous, convId);
+          const outcome = await this.requestApproval(
+            tc.function.name,
+            detail,
+            isDangerous,
+            convId,
+            signal,
+            approvalCallOptions(approvalMetadata, exitVerdict, chatRule),
+          );
           if (outcome !== 'approved') {
-            result = toolApprovalResult(tc.function.name, outcome, approvalMetadata?.declineHint);
+            result = toolApprovalResult(tc.function.name, outcome);
             this.postResult(tc, toolResultText(result), undefined, convId);
             messages.push(
               this.toolMessage(tc, toolResultContent(result), startedAt, argumentRepair),
@@ -291,8 +286,6 @@ export class ToolDispatch {
           }
         }
 
-        const rawMutationPaths = reg.mutation?.paths(args) ?? [];
-        const mutationPaths = rawMutationPaths.map((p) => resolveToolPath(p));
         this.snapshotPaths(mutationPaths, checkpoint);
         const callBase = reg.mutation?.showDiff ? readCallDiffBase(mutationPaths) : undefined;
 
@@ -334,10 +327,29 @@ export class ToolDispatch {
         // bad calls was still one call from losing its tools for the rest of
         // the chat. Refusals and declines are not successes and do not reset.
         if (!isFailureResult(toolResultText(result))) this.failureTracker.reset(convId);
+        /* The flag this chat now carries: `untrustedResult` means the tool brought
+         * content in from outside, and a model can be told what to do by the text it
+         * is reading. Marked after the handler ran, and only for a result that is not
+         * a failure: a declined call produced no content to flag with.
+         */
+        if (
+          reg.untrustedResult === true &&
+          convId !== undefined &&
+          !isFailureResult(toolResultText(result))
+        ) {
+          markConversationReadUntrusted(convId);
+          // The stamp the conversation's record carries, written in the same round as
+          // the row that brought the content in, so the next save keeps both.
+          if (modelContext?.conversation) modelContext.conversation.untrusted_since_ms = Date.now();
+        }
       } catch (err) {
         const policyDenied = err instanceof ToolApprovalPolicyDenied;
         if (!policyDenied) this.failureTracker.record(convId);
-        result = policyDenied ? err.message : `Error: ${(err as Error).message}`;
+        // A schema refusal is formatted, not printed: Zod's own message is a JSON
+        // array of issues, which the model reads as data and re-sends unchanged.
+        // `toolErrorText.ts` owns the one place every thrown tool error becomes a
+        // result string, so no tool has to word its own refusals.
+        result = policyDenied ? err.message : toolErrorText(tc.function.name, err, args);
       }
 
       this.postResult(tc, toolResultText(result), args, convId);
@@ -451,7 +463,7 @@ export class ToolDispatch {
   ): void {
     const toolName = tc.function.name;
     const pathArg = readPathArg(args);
-    const touchedFile = this.touchedFilePath(toolName, result, args);
+    const touchedFile = touchedFilePath(toolName, result, args, resolveToolPath);
     const { text, totalChars } = capDisplayText(result);
     const isError = isFailureResult(result);
 
@@ -472,17 +484,5 @@ export class ToolDispatch {
       .getConfiguration('forge.editor')
       .get<boolean>('autoOpenChangedFiles', false);
     if (autoOpenChangedFiles) void this.openFile(pathArg);
-  }
-
-  /** Absolute path a write-style tool just changed, for the row's open link. */
-  private touchedFilePath(
-    toolName: string,
-    result: string,
-    args?: Record<string, unknown>,
-  ): string | null {
-    if (isFailureResult(result)) return null;
-    if (!['write_file', 'append_file', 'edit_file', 'format_file'].includes(toolName)) return null;
-    const rawPath = readPathArg(args);
-    return rawPath ? resolveToolPath(rawPath) : null;
   }
 }

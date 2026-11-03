@@ -24,6 +24,19 @@ const MAX_SEEN_NARRATIONS = 32;
 type CanDeliver = (chatId: string) => boolean | Promise<boolean>;
 
 /**
+ * The part of the progress owner a bridge needs when its own message stops the
+ * turn until the owner answers it.
+ *
+ * A question board and an approval card both sit below the bubble carrying the
+ * `Forge: working…` line, and Telegram never moves a message, so the line has
+ * to come off for the length of the wait and reopen below the board and its
+ * receipt. `RemoteController` hands this to each bridge's `start()`; a bridge
+ * that gets nothing (a rig, a transport with no progress bubble) changes
+ * nothing.
+ */
+export type RemoteWaitFooter = Pick<RemoteAgentProgress, 'suspendFooter' | 'resumeFooter'>;
+
+/**
  * Who asked for the turn this message reports.
  *
  * `remote` is a prompt RemoteQueueDrain admitted from a chat: that path opens
@@ -175,6 +188,32 @@ export class RemoteAgentProgress {
   }
 
   /**
+   * Hides this conversation's working line while its turn waits on the owner.
+   *
+   * Called by the bridge that put the board or card on screen. Idempotent, so a
+   * multi-step question that sends a second board does nothing the second time;
+   * a no-op once the turn has closed, and on an aborted controller.
+   */
+  suspendFooter(conversationId: string): void {
+    const state = this.active.get(conversationId);
+    if (!state || state.closed || this.signal.aborted) return;
+    state.bubble?.suspend();
+  }
+
+  /**
+   * Reopens the working line below the board and its receipt, once the answer
+   * has landed. A bubble that is not suspended is not this call's to move: that
+   * is what makes a stale resume (the turn ended, or a new turn started for the
+   * same conversation while a board was pending) a no-op rather than a spurious
+   * bubble under the new turn.
+   */
+  resumeFooter(conversationId: string): void {
+    const state = this.active.get(conversationId);
+    if (!state || state.closed || this.signal.aborted) return;
+    state.bubble?.resume();
+  }
+
+  /**
    * Whether ANY live message reports this turn, whoever started it.
    *
    * Distinct from `owns` on purpose: this is the guard that stops a second
@@ -217,6 +256,10 @@ export class RemoteAgentProgress {
       return;
     }
     if (event.kind === 'reasoning') return;
+    // A turn-start event carries no text: it exists so the bus can time a turn
+    // that never speaks. The line above already kept this message alive, and
+    // the milestone stays whatever the turn last said, so nothing is edited.
+    if (event.kind === 'start') return;
     if (event.kind === 'narration') {
       const text = sanitize(event.text).trim();
       if (!text || (!bubble.streaming && state.narrations.includes(text))) return;
@@ -326,7 +369,13 @@ export class RemoteAgentProgress {
     return true;
   }
 
-  async finish(conversationId: string, terminalText: string): Promise<void> {
+  /**
+   * Closes one turn's bubbles. `terminalText` absent means the answer is
+   * already on screen, so no outcome line is written and no status-only message
+   * is left for the delete timer — the caller delivers first for exactly that
+   * reason.
+   */
+  async finish(conversationId: string, terminalText?: string): Promise<void> {
     const state = this.active.get(conversationId);
     if (!state) return;
     state.closed = true;

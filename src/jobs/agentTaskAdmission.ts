@@ -2,7 +2,8 @@ import type { JobStore } from './JobStore';
 import type { IBackendPool } from '../backend/poolTypes';
 import { nextDue } from './schedule';
 import type { JobFile, Schedule } from './jobSchema';
-import type { SharedModelSlots } from './gpuIdleGate';
+import type { SharedModelSlots } from '../backend/strataStatus';
+import type { ExternalTurnHold } from '../backend/SharedRuntimeRegistry';
 
 /**
  * Decide whether a slot is free for the job to start now (step 1). The job does
@@ -15,6 +16,8 @@ export function canStartNow(
   pool: IBackendPool,
   streamingConversationIds: readonly string[],
   sharedSlots?: SharedModelSlots,
+  /** Live managed-external turn holds — see `blockingExternalHolds`. */
+  externalHolds?: readonly ExternalTurnHold[],
 ): { start: boolean; reason: string } {
   const streaming = sharedSlots
     ? Math.max(sharedSlots.inFlight, streamingConversationIds.length)
@@ -31,12 +34,55 @@ export function canStartNow(
   if (others.length > 0 && streamingConversationIds.length > 0) {
     return { start: false, reason: `another model (${others.join(', ')}) is in use` };
   }
+  // Hard wait: a chat is holding a managed server this job would have to
+  // unload, and a hold belonging to ANOTHER window is not in
+  // `streamingConversationIds` — that list is only this window's chats. Without
+  // shared slots step 3 unloads everything this window can see, so a live hold
+  // means the turn waiting on that server would be cut off (BL-025).
+  const held = externalHolds ? blockingExternalHolds(externalHolds, jobModel) : [];
+  if (!sharedSlots && others.length > 0 && held.length > 0) {
+    return {
+      start: false,
+      reason: holdWaitReason(held[0]!),
+    };
+  }
   // Nothing else streams: step 3 unloads every other model before the turn.
   const capacity = sharedSlots?.capacity ?? pool.parallelCapacity(jobModel);
   if (streaming >= capacity) {
     return { start: false, reason: `all ${capacity} parallel slot(s) are streaming` };
   }
   return { start: true, reason: '' };
+}
+
+/**
+ * The holds that stop a job from unloading: every live managed-external turn
+ * hold except one on the model this job is about to use — two chats may share
+ * one managed server, and the pool already refuses a load that wants a
+ * DIFFERENT held model. `stopAll(true)`, which is what a job's pre-run
+ * `unloadModels()` runs, treats a held model as the owner's explicit command and
+ * only logs the chat it cuts off: right for `/unloadAll` and for a window
+ * exiting, wrong for a run nobody typed (BL-025).
+ *
+ * No process filter, deliberately. `ProviderTurn.ts:142` takes the hold BEFORE
+ * `markStreaming` at `:162` — an awaited target resolution sits between them —
+ * so a hold in THIS window can exist while its chat reads as not streaming, and
+ * `streamingConversationIds` is only one window's list, so it cannot see another
+ * window's turn at all. Adding a pid filter here would reopen the hole this rule
+ * exists to close. Pool keys never carry an `@profile`, so the job model is
+ * compared by its base name — an alias that resolves to another base blocks
+ * conservatively: the job defers, and nobody's turn is cut off.
+ */
+export function blockingExternalHolds(
+  holds: readonly ExternalTurnHold[],
+  jobModel: string,
+): ExternalTurnHold[] {
+  const base = jobModel.split('@')[0];
+  return holds.filter((hold) => hold.model !== base);
+}
+
+/** The deferral reason, naming the server and the chat that is holding it. */
+export function holdWaitReason(hold: ExternalTurnHold): string {
+  return `"${hold.model}" is held for a turn by chat '${hold.title}'`;
 }
 
 /**

@@ -22,7 +22,7 @@ import { createContextTrimState } from '../agent/toolResultContext';
 import type { ToolDispatch } from './ToolDispatch';
 import type { ToolFailureTracker } from '../tools/StripTools';
 import type { TurnLifecycle } from './TurnLifecycle';
-import { createOutputBudgetTracker, perSlotContext } from '../util/contextBudget';
+import { createOutputBudgetTracker } from '../util/contextBudget';
 import { announceMissingImages } from './imageNotices';
 import { prepareModelTurnMessages } from './prepareModelTurnMessages';
 import { resolveToolPermissions } from '../tools/PermissionResolver';
@@ -33,6 +33,7 @@ import { applyToolCalls } from './transcriptMutations';
 import { mirrorLiveSessionAnswers } from './liveSessionMirror';
 import { extractToolDetail } from './toolSummary';
 import { freezeTurnContextAndConsumeResumeNote, type TurnContextState } from './turnContext';
+import { pinForgeInstructions } from './forgeInstructionsPin';
 import { formatCompactionResumeNote } from './compactionTypes';
 import { terminalCommandTracker } from '../tools/TerminalCommandTracker';
 import { toolOutputLimits } from '../tools/toolOutputLimits';
@@ -46,6 +47,7 @@ import {
   type ToolCallingLoopResult,
 } from '../agent/ToolCallingLoop';
 import { canUseThinkingKwargs, isProjectRoot, shouldStripThinking } from './turnModelBehavior';
+import { warnAboutModel } from './modelMismatchWarnings';
 import { runningBackgroundExecutionsNotice } from './backgroundExitNotice';
 import type { AgentProgressEvent } from './AgentProgress';
 import type { LiveStreamMeter } from './LiveStreamMeter';
@@ -54,6 +56,7 @@ import { toolCallProgressMsg } from './toolCallProgress';
 import type { RequestOfferedListener } from '../sessions/requestFingerprint';
 import type { RequestCapture } from '../sessions/requestStats';
 import { reportRequestUsage } from './requestUsageReporting';
+import { startStrataBusyWarning } from './strataBusyWarning';
 
 function activeTerminalCwd(): string | undefined {
   const cwd = vscode.window.activeTerminal?.shellIntegration?.cwd;
@@ -126,43 +129,6 @@ export interface ModelTurnRequest {
 }
 
 /**
- * Warns about model/config mismatches that change how the request is built.
- * Each is `warnOnce`-keyed: they are properties of the model, so repeating them
- * every turn would be noise.
- */
-function warnAboutModel(
-  ctx: ModelTurnContext,
-  model: ModelConfig,
-  config: ForgeConfig,
-  runtimeCaps: RuntimeModelCapabilities | undefined,
-  thinkingKwargs: boolean,
-): void {
-  if (
-    !thinkingKwargs &&
-    (model.think !== undefined || model.sampling?.preserve_thinking !== undefined)
-  ) {
-    ctx.warnOnce(
-      `${model.name}:thinking`,
-      `Forge: model "${model.name}" does not appear to support thinking template toggles. Thinking kwargs will be omitted for this request.`,
-    );
-  }
-  if (runtimeCaps?.hasChatTemplate === false) {
-    ctx.warnOnce(
-      `${model.name}:template`,
-      `Forge: model "${model.name}" does not expose a usable chat template. Prompt formatting may be mismatched.`,
-    );
-  }
-  const perSlot = perSlotContext(model, config.llama_server, model.provider ?? 'llama.cpp');
-  const configuredMaxTokens = model.sampling?.max_tokens;
-  if (perSlot > 0 && configuredMaxTokens !== undefined && configuredMaxTokens > perSlot) {
-    ctx.warnOnce(
-      `${model.name}:max-tokens`,
-      `Forge: model "${model.name}" sets max_tokens ${configuredMaxTokens}, above its ${perSlot}-token per-slot context. Forge will cap output at the room actually left in each turn.`,
-    );
-  }
-}
-
-/**
  * Records turns that ended for want of room. `runToolCallingLoop` *throws* on
  * the round cap and on exhausted context, so both have to be caught here —
  * only `finish_reason: length` comes back through a normal return.
@@ -185,6 +151,7 @@ export async function runModelTurn(
   { resolveBaseUrl, conv, model, activeFile, ctrl, postC, apiKey, checkpoint }: ModelTurnRequest,
 ): Promise<ToolCallingLoopResult> {
   const config = ctx.getConfig();
+  startStrataBusyWarning(model, conv.id, ctx.lifecycle.streamingIds(), postC, ctrl.signal);
   // A cancelled request never reports usage; its leftover estimate must not
   // carry into this turn's first request.
   ctx.streamMeter?.reset(conv.id);
@@ -261,7 +228,9 @@ export async function runModelTurn(
   const remoteChats = ctx.remoteReach?.(conv.id) ?? 0;
   const userTerminalCommands = terminalCommandTracker.recentUserCommands();
   const terminalCwd = userTerminalCommands.length > 0 ? activeTerminalCwd() : undefined;
+  const instructions = pinForgeInstructions(conv, ctx.forgeLoader?.instructionsFor(activeFile));
   const turnContext: TurnContextState = {
+    ...(instructions.note ? { forgeInstructionsNote: instructions.note } : {}),
     activeFile,
     currentDate: localDate(),
     ...(userTerminalCommands.length > 0 ? { userTerminalCommands } : {}),
@@ -278,6 +247,12 @@ export async function runModelTurn(
   const workspaceIsProjectRoot = ctx.forgeLoader?.root
     ? isProjectRoot(ctx.forgeLoader.root)
     : false;
+  // Read once per turn, beside the other prompt-head snapshots. The service
+  // freezes the catalog for the conversation, so a skill installed between this
+  // turn's rounds cannot rewrite the system prompt and cost the rest of the turn
+  // a cold re-prefill. `?.()` because a turn-context engine may be a bare render
+  // stub in the prompt-shape tests; a missing catalog means no block.
+  const skillsCatalog = ctx.templateEngine?.skillsCatalogFor?.(conv);
   const compactor = ctx.compactMidTurn;
   const outputBudget = createOutputBudgetTracker(conv, model, config.llama_server, provider);
   const result = await trackTurnCompletion(ctx.lifecycle, conv.id, () =>
@@ -291,7 +266,7 @@ export async function runModelTurn(
       signal: ctrl.signal,
       maxRounds,
       writeChunkLimit: writeLimit,
-      offerAfterTruncation: ['append_file'],
+      holdUntilTruncation: [{ tool: 'write_file', property: 'mode' }],
       nativeTools,
       stripAllTools: useStrip || model.strip_tools === true,
       includeUsage: true,
@@ -310,7 +285,9 @@ export async function runModelTurn(
           config,
           forgeLoader: ctx.forgeLoader,
           activeFile,
+          forgeInstructions: instructions.system,
           workspaceIsProjectRoot,
+          ...(skillsCatalog !== undefined ? { skillsCatalog } : {}),
           turnContext,
           getToolDefinitions: buildToolDefinitions,
         });

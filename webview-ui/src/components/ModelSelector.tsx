@@ -206,6 +206,9 @@ export function ModelSelector({
                     >
                       <ResidencyDot residency={m.residency} />
                       <ModelName name={m.displayName ?? m.name} />
+                      {m.provider === 'cli' && (
+                        <span className="ms-profile-hint"> · no Forge Undo</span>
+                      )}
                       {m.profiles && m.profiles.length > 0 && (
                         <span className="ms-profile-hint"> + profile</span>
                       )}

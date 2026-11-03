@@ -68,7 +68,15 @@ function readRange(args: Record<string, unknown>, context?: ToolHandlerContext):
   if (typeof range === 'string') return range;
   const text = rawResult(context?.conversationMessages, toolCallId);
   if (text === undefined) {
-    return `Error: no text tool result with call ID "${toolCallId}" exists in this conversation.`;
+    // A bare "not found" left an agent passing a background execution id here and
+    // then retrying it, so name the two ways an id misses and the way back.
+    return (
+      `Error: no text tool result with call ID "${toolCallId}" exists in this conversation. ` +
+      'The id must be a `tool_call_id` from a result still in this conversation — a background ' +
+      'execution id (`exec-…`) is not one, use `list_executions` or `monitor_execution` for ' +
+      'those. To find an earlier result, call `read_tool_result` with `query`, or re-run the ' +
+      'tool you need.'
+    );
   }
   const clampNote = range.clamped
     ? `max_chars clamped to ${String(limit)}; use offset to page further.\n`

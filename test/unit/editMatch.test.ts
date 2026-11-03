@@ -3,6 +3,7 @@ import {
   applyEol,
   describeEditMiss,
   dominantEol,
+  findAllEditMatches,
   findEditMatch,
   findIndentShiftedMatch,
 } from '../../src/tools/editMatch';
@@ -50,6 +51,87 @@ describe('findEditMatch', () => {
     const match = findEditMatch(content, 'b\nc')!;
     const updated = content.slice(0, match.index) + 'X' + content.slice(match.index + match.length);
     expect(updated).toBe('a\r\nX\r\n');
+  });
+});
+
+describe('findAllEditMatches', () => {
+  // `replace_all` (item 1.2) asks for every copy, and the tool also needs to
+  // know how many it did NOT replace, so both come out of one scan.
+  it('finds every occurrence in ascending order with its own length', () => {
+    const content = 'alpha\nbeta\nalpha\nbeta\nalpha\n';
+    const hits = findAllEditMatches(content, 'alpha');
+    expect(hits).toEqual([
+      { index: 0, length: 5 },
+      { index: 11, length: 5 },
+      { index: 22, length: 5 },
+    ]);
+    for (const hit of hits) {
+      expect(content.slice(hit.index, hit.index + hit.length)).toBe('alpha');
+    }
+  });
+
+  it('reports original offsets that splice every copy on a CRLF file', () => {
+    const content = 'alpha\r\nbeta\r\nalpha\r\nbeta\r\nalpha\r\n';
+    const hits = findAllEditMatches(content, 'alpha\nbeta');
+    expect(hits).toHaveLength(2);
+    for (const hit of hits) {
+      expect(content.slice(hit.index, hit.index + hit.length)).toBe('alpha\r\nbeta');
+    }
+  });
+
+  it('replaces every copy when the splices are applied last to first', () => {
+    const content = 'alpha\r\nbeta\r\nalpha\r\n';
+    const hits = findAllEditMatches(content, 'alpha');
+    expect(hits).toHaveLength(2);
+    let updated = content;
+    for (const hit of [...hits].reverse()) {
+      updated = updated.slice(0, hit.index) + 'X' + updated.slice(hit.index + hit.length);
+    }
+    expect(updated).toBe('X\r\nbeta\r\nX\r\n');
+  });
+
+  // Claude's review of 5de6d8b4, item 3: a single-line old_str cannot straddle a
+  // line ending, so line endings cannot matter to where it matches — yet every
+  // edit on a CRLF file used to pay a full normalisation of the file first, and
+  // a 200-item edits[] paid it 200 times. The plain scan has to give the same
+  // offsets into the original text, or the cheaper path is just a different bug.
+  it('gives the same original offsets for a single-line old_str on a CRLF file', () => {
+    const content = 'alpha\r\nbeta\r\nalpha\r\nbeta\r\nalpha\r\n';
+    const hits = findAllEditMatches(content, 'alpha');
+    expect(hits).toEqual([
+      { index: 0, length: 5 },
+      { index: 13, length: 5 },
+      { index: 26, length: 5 },
+    ]);
+    for (const hit of hits) {
+      expect(content.slice(hit.index, hit.index + hit.length)).toBe('alpha');
+    }
+  });
+
+  // The other side of the same guard: a needle that DOES carry a line ending
+  // still goes through the normalising scan, because that is the case where the
+  // byte length of a match differs from old_str's.
+  it('still normalises when old_str itself carries a line ending on a CRLF file', () => {
+    const content = 'alpha\r\nbeta\r\n';
+    expect(findAllEditMatches(content, 'alpha\r\nbeta')).toEqual([{ index: 0, length: 11 }]);
+    expect(content.slice(0, 11)).toBe('alpha\r\nbeta');
+  });
+
+  it('does not return overlapping matches', () => {
+    // 'aa' in 'aaaa': the second hit starts after the first ends, so no byte is
+    // replaced twice and no splice lands inside text another splice just wrote.
+    expect(findAllEditMatches('aaaa', 'aa')).toEqual([
+      { index: 0, length: 2 },
+      { index: 2, length: 2 },
+    ]);
+  });
+
+  it('returns nothing when the text genuinely differs', () => {
+    expect(findAllEditMatches('alpha\nbeta\n', 'delta')).toEqual([]);
+  });
+
+  it('treats an empty old_str as one zero-length match at 0, not one per character', () => {
+    expect(findAllEditMatches('alpha\r\nbeta\r\n', '')).toEqual([{ index: 0, length: 0 }]);
   });
 });
 

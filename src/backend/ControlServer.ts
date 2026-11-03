@@ -219,7 +219,7 @@ export class ControlServer implements vscode.Disposable {
 
   /** Ensure a model is loaded + warm; same result shape as POST /ensure. */
   ensureModel(model: string): Promise<EnsureResult> {
-    return this.serialize(() => ensureModelLoaded(this.lifecycle(), model));
+    return this.serialize(() => ensureModelLoaded(this.lifecycleContext(), model));
   }
 
   /** Release one hold on a model (mirror of POST /release). Serialized so it
@@ -233,7 +233,7 @@ export class ControlServer implements vscode.Disposable {
         const body = resolved.body as { error: string; candidates?: string[] };
         throw new AmbiguousModelError(model, body.candidates ?? []);
       }
-      return releaseHold(this.lifecycle(), resolved.name);
+      return releaseHold(this.lifecycleContext(), resolved.name);
     });
   }
 
@@ -271,7 +271,9 @@ export class ControlServer implements vscode.Disposable {
       if (method === 'POST' && path === '/ensure') {
         const model = requireModel(await readJson(req));
         if (!model) return sendJson(res, 400, { error: 'model is required' });
-        const result = await this.serialize(() => ensureModelLoaded(this.lifecycle(), model));
+        const result = await this.serialize(() =>
+          ensureModelLoaded(this.lifecycleContext(), model),
+        );
         return sendJson(res, result.status, result.body);
       }
       if (method === 'POST' && path === '/release') {
@@ -280,14 +282,14 @@ export class ControlServer implements vscode.Disposable {
         const resolved = this.resolveBase(model);
         if (!('name' in resolved)) return sendJson(res, resolved.status, resolved.body);
         const released = await this.serialize(async () =>
-          releaseHold(this.lifecycle(), resolved.name),
+          releaseHold(this.lifecycleContext(), resolved.name),
         );
         return sendJson(res, 200, { released });
       }
       if (method === 'POST' && path === '/unload') {
         const model = requireModel(await readJson(req));
         if (!model) return sendJson(res, 400, { error: 'model is required' });
-        const result = await this.serialize(() => unloadModel(this.lifecycle(), model));
+        const result = await this.serialize(() => unloadModel(this.lifecycleContext(), model));
         return sendJson(res, result.status, result.body);
       }
       if (method === 'POST' && path === '/chat') {
@@ -346,8 +348,16 @@ export class ControlServer implements vscode.Disposable {
     }
   }
 
-  /** The state the lifecycle operations mutate on this server's behalf. */
-  private lifecycle(): ModelLifecycleContext {
+  /**
+   * The lifecycle state, exposed for the model starter (`ModelStarterEnsure`).
+   * The maps are shared BY DESIGN: one `holds` ref count, one `loadingModels`
+   * set and one `resolveBase` for :8799 and :8798, so a remote ensure cannot
+   * double-load what the control server is already loading, and a hold taken
+   * over :8798 is visible to a `POST /unload` over :8799. `serialize` is this
+   * server's own chain, so a starter ensure is atomic with every other
+   * consumer's. No routes are added to :8799 by this.
+   */
+  lifecycleContext(): ModelLifecycleContext {
     return {
       config: this.config,
       pool: this.pool,
@@ -359,6 +369,7 @@ export class ControlServer implements vscode.Disposable {
       readinessIntervalMs: this.readinessIntervalMs,
       evictionGraceMs: this.evictionGraceMs,
       resolveBase: (requested) => this.resolveBase(requested),
+      serialize: <T>(fn: () => Promise<T>) => this.serialize(fn),
     };
   }
 

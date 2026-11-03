@@ -40,6 +40,13 @@ export async function queueToCodex(
   signal?: AbortSignal,
 ): Promise<void> {
   const executable = await resolveCliExecutable(cli, 'codex');
+  // An abort that arrived before this call has to be seen here as well: the
+  // listener below only fires on a *later* abort, so a Stop that landed while
+  // the executable was still being resolved was missed entirely — the message
+  // was delivered to the session anyway and the call sat on `codex queue` for
+  // its whole 30-second bound, which is how `/agent/stop` stayed open past the
+  // caller's 20 seconds (audit F5). Withdrawing is not delivering.
+  if (signal?.aborted) throw new Error('The request was withdrawn before it was sent.');
   const options = {
     executable,
     args: ['queue', '--thread', thread, '--message', message],

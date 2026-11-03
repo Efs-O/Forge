@@ -34,12 +34,18 @@ describe('describePathMiss', () => {
     expect(describePathMiss('list_directory', 'src', enoent)).toContain('list_directory:');
   });
 
-  // Acceptance #8 -- do not invent advice for errors that already explain themselves.
-  it('passes non-ENOENT errors through untouched', () => {
+  it('names directory-reading alternatives for read_file EISDIR errors', () => {
     const eisdir = new Error('EISDIR: illegal operation on a directory, read');
-    const text = describePathMiss('read_file', 'src', eisdir);
-    expect(text).toBe('read_file: EISDIR: illegal operation on a directory, read');
-    expect(text).not.toContain('find_files');
+    const text = describePathMiss('read_file', 'docs/plans', eisdir);
+    expect(text).toContain('"docs/plans" is a directory');
+    expect(text).toContain('list_directory');
+    expect(text).toContain('find_files');
+  });
+
+  it('passes EISDIR through untouched for non-read callers', () => {
+    const eisdir = new Error('EISDIR: illegal operation on a directory, read');
+    expect(describePathMiss('list_directory', 'src', eisdir))
+      .toBe('list_directory: EISDIR: illegal operation on a directory, read');
   });
 
   it('handles a non-Error throw', () => {

@@ -92,6 +92,83 @@ describe('resolveChatReference', () => {
     });
   });
 
+  it('never resolves a tab number against a closed chat', () => {
+    const values: ChatRef[] = [
+      { id: 'self', title: 'Caller', position: 1, running: false },
+      { id: 'open-2', title: 'Open worker', position: 2, running: false },
+      {
+        id: 'closed-3',
+        title: 'Closed worker',
+        position: 0,
+        running: false,
+        closed: true,
+      },
+    ];
+    expect(chosen('#2', values).id).toBe('open-2');
+    // A closed chat has no tab, so neither the number its position holds nor any
+    // other number reaches it.
+    for (const ref of ['#3', '#0', '3']) {
+      const miss = resolveChatReference(ref, values, 'self');
+      expect(miss.ok).toBe(false);
+      if (!miss.ok) expect(miss.reasonCode).toBe('unmatched');
+    }
+  });
+
+  it('lists closed candidates by title and id, with no tab number to pass back', () => {
+    const values: ChatRef[] = [
+      { id: 'self', title: 'Caller', position: 1, running: false },
+      {
+        id: 'closed-1',
+        title: 'Sender: Worker report',
+        position: 0,
+        running: false,
+        closed: true,
+      },
+      {
+        id: 'closed-2',
+        title: 'Sender: Worker report 2',
+        position: 0,
+        running: false,
+        closed: true,
+      },
+    ];
+    const result = resolveChatReference('worker report', values, 'self');
+    expect(result.ok).toBe(false);
+    if (!result.ok) {
+      expect(result.reasonCode).toBe('ambiguous');
+      expect(result.candidates.map((chat) => chat.id)).toEqual(['closed-1', 'closed-2']);
+      expect(result.reason).toContain('"Sender: Worker report" (id closed-1, closed)');
+      expect(result.reason).toContain('"Sender: Worker report 2" (id closed-2, closed)');
+      expect(result.reason).toContain("Pass `to` as one of those chats' ids.");
+      expect(result.reason).not.toContain('#N');
+    }
+  });
+
+  it('says why a reference was refused, so only an unmatched one is tried again', () => {
+    const ambiguous: ChatRef[] = [
+      { id: 'self', title: 'Caller', position: 1, running: false },
+      { id: 'task-1111', title: 'First task', position: 2, running: false },
+      { id: 'task-2222', title: 'Second task', position: 3, running: false },
+    ];
+    const codes = [
+      [resolveChatReference('nonexistent', chats, 'self-id-0001'), 'unmatched'],
+      [resolveChatReference('Current work', chats, 'self-id-0001'), 'self'],
+      [resolveChatReference('task-', ambiguous, 'self'), 'ambiguous'],
+      [
+        resolveChatReference(
+          undefined,
+          chats.map((chat) => ({ ...chat, running: false })),
+          'self-id-0001',
+        ),
+        'omitted',
+      ],
+    ] as const;
+    for (const [resolution, expected] of codes) {
+      expect(resolution.ok).toBe(false);
+      if (!resolution.ok) expect(resolution.reasonCode).toBe(expected);
+    }
+  });
+
   it('treats omitted, blank, quoted filler-only and “other chat” references alike', () => {
     expect(chosen(undefined).id).toBe('bug-hunt-0002');
     expect(chosen('   ').id).toBe('bug-hunt-0002');

@@ -16,9 +16,9 @@ const HEALTHY: WakeInfo = {
     {
       name: 'Ethernet',
       description: 'Intel(R) Ethernet Connection (7) I219-V',
-      macAddress: 'E0-D5-5E-73-F7-88',
-      ipAddress: '192.168.1.70',
-      broadcast: '192.168.1.255',
+      macAddress: '00-00-5E-00-53-01',
+      ipAddress: '192.0.2.10',
+      broadcast: '192.0.2.255',
       wakeArmed: true,
       magicPacketEnabled: true,
     },
@@ -75,8 +75,8 @@ describe('get_power_info', () => {
   it('reports the address a magic packet has to be sent to', async () => {
     const power = fakePower();
     const result = await makeGetPowerInfoTool(power.control).handler({});
-    expect(String(result)).toContain('E0-D5-5E-73-F7-88');
-    expect(String(result)).toContain('192.168.1.255');
+    expect(String(result)).toContain('00-00-5E-00-53-01');
+    expect(String(result)).toContain('192.0.2.255');
   });
 
   it('is read-only and argument-free, so it needs no approval', () => {

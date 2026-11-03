@@ -79,6 +79,73 @@ export interface SearchCodeScope {
    * skips it — see `rgScopeArgs`.
    */
   applyExcludes: boolean;
+  /**
+   * The directory this search is rooted at, absolute and in forward-slash form:
+   * the workspace root for `target: '.'`, otherwise the named or derived
+   * directory. It is recorded because the exclusion list has to be asked against
+   * it — `SEARCH_EXCLUDES` prunes `.forge/sessions/`, and a search whose ROOT is
+   * that very folder came back "no matches" for text every file in it held.
+   */
+  rootDir: string;
+}
+
+/**
+ * The exclusion globs that would prune the search root itself, split out of
+ * `rgScopeArgs` because the caller has to be told about them as well as not
+ * being filtered by them.
+ *
+ * An exclusion glob prunes a subtree; a search rooted INSIDE that subtree has
+ * nothing left to search once the glob applies, and ripgrep says so by matching
+ * nothing — which reads exactly like "this text is not here". Naming a folder is
+ * an explicit request for that folder, the same reason `--no-ignore-vcs` is
+ * handed to a named path: an ignore rule decides what to CRAWL, it does not
+ * overrule what the caller asked for.
+ *
+ * Only an exclusion ending in `…/**` prunes a directory, so a file exclusion
+ * like `!…embeddings.index.json` never covers a root and is always kept.
+ */
+export function exclusionsCoveringRoot(
+  rootDir: string,
+  platform: NodeJS.Platform = process.platform,
+): { keep: string[]; dropped: string[] } {
+  const fold = platform === 'win32' || platform === 'darwin';
+  const rootSegments = rootDir
+    .split(/[/\\]/u)
+    .filter(Boolean)
+    .map((part) => (fold ? part.toLowerCase() : part));
+  const keep: string[] = [];
+  const dropped: string[] = [];
+  for (const glob of SEARCH_EXCLUDES) {
+    const pattern = glob.startsWith('!') ? glob.slice(1) : glob;
+    if (!pattern.endsWith('/**')) {
+      keep.push(glob);
+      continue;
+    }
+    const run = pattern
+      .slice(0, -3)
+      .split('/')
+      .filter((part) => part !== '**')
+      .map((part) => (fold ? part.toLowerCase() : part));
+    if (run.length === 0 || containsRun(rootSegments, run)) dropped.push(glob);
+    else keep.push(glob);
+  }
+  return { keep, dropped };
+}
+
+/** Does `haystack` contain `needle` as a contiguous run of path segments? */
+function containsRun(haystack: readonly string[], needle: readonly string[]): boolean {
+  if (needle.length > haystack.length) return false;
+  for (let start = 0; start + needle.length <= haystack.length; start += 1) {
+    let matched = true;
+    for (let index = 0; index < needle.length; index += 1) {
+      if (haystack[start + index] !== needle[index]) {
+        matched = false;
+        break;
+      }
+    }
+    if (matched) return true;
+  }
+  return false;
 }
 
 /**
@@ -105,17 +172,22 @@ export function rgScopeArgs(scope: SearchCodeScope): string[] {
   // would filter out every one of them.
   if (scope.glob) args.push('--glob', scope.glob);
   if (scope.applyExcludes) {
-    args.push(...SEARCH_EXCLUDES.flatMap((glob) => ['--glob', glob]));
+    // The exclusions that prune the search root itself are dropped rather than
+    // applied — `exclusionsCoveringRoot` says which, and `searchCodeTool.ts`
+    // reports them, so a search that skipped a rule is never a silent one.
+    args.push(...exclusionsCoveringRoot(scope.rootDir).keep.flatMap((glob) => ['--glob', glob]));
   }
   return args;
 }
 
 /** Build the shared scope for an existing named path (file or directory). */
 export function namedPathScope(named: string, workspaceRoot: string): SearchCodeScope {
+  const absolute = path.resolve(workspaceRoot, named);
   return {
     target: named,
     explicitPath: true,
-    applyExcludes: isDirectory(path.resolve(workspaceRoot, named)),
+    applyExcludes: isDirectory(absolute),
+    rootDir: absolute.replace(/\\/gu, '/'),
   };
 }
 
@@ -124,11 +196,18 @@ export function namedPathScope(named: string, workspaceRoot: string): SearchCode
  * remain workspace-scoped; absolute paths explicitly name an external target.
  */
 export function resolveSearchCodeScope(include: string, workspaceRoot: string): SearchCodeScope {
+  const forward = (value: string): string => value.replace(/\\/gu, '/');
   if (!path.isAbsolute(include)) {
     const named = namedExistingPath(include, workspaceRoot);
     return named
       ? namedPathScope(named, workspaceRoot)
-      : { target: '.', glob: include, explicitPath: false, applyExcludes: true };
+      : {
+          target: '.',
+          glob: include,
+          explicitPath: false,
+          applyExcludes: true,
+          rootDir: forward(path.resolve(workspaceRoot)),
+        };
   }
 
   const absolute = path.resolve(include);
@@ -139,7 +218,12 @@ export function resolveSearchCodeScope(include: string, workspaceRoot: string): 
     } catch {
       throw new Error(`search_code: absolute include path does not exist: ${absolute}`);
     }
-    return { target: absolute, explicitPath: true, applyExcludes: stat.isDirectory() };
+    return {
+      target: absolute,
+      explicitPath: true,
+      applyExcludes: stat.isDirectory(),
+      rootDir: forward(stat.isDirectory() ? absolute : path.dirname(absolute)),
+    };
   }
 
   const parsed = path.parse(absolute);
@@ -166,7 +250,13 @@ export function resolveSearchCodeScope(include: string, workspaceRoot: string): 
   if (!targetStat.isDirectory()) {
     throw new Error(`search_code: absolute include root is not a directory: ${target}`);
   }
-  return { target, glob, explicitPath: false, applyExcludes: true };
+  return {
+    target,
+    glob,
+    explicitPath: false,
+    applyExcludes: true,
+    rootDir: forward(target),
+  };
 }
 
 /** Best-effort "is this a directory"; a stat failure is treated as "not one". */

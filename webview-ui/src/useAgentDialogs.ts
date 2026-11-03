@@ -1,5 +1,6 @@
 import { useCallback, useRef, useState } from 'react';
 import type { HostToWebview } from '../../src/sidebar/messageBridge';
+import type { ApprovalOffer } from '../../src/sidebar/approvalMessages';
 import type { StructuredAnswer } from '../../src/util/questionAnswers';
 import { vscode } from './vscode';
 
@@ -21,11 +22,15 @@ export interface AgentDialogs {
     toolName: string;
     detail: string;
     isDangerous?: boolean;
+    allowForChat?: ApprovalOffer;
+    alwaysInProject?: ApprovalOffer;
   } | null;
   questions: ReadonlyMap<string, AgentQuestion>;
   drafts: ReadonlyMap<string, QuestionDraft>;
   handleHostMessage: (msg: HostToWebview) => boolean;
   approveConfirm: () => void;
+  allowConfirmForChat: () => void;
+  alwaysConfirmInProject: () => void;
   denyConfirm: () => void;
   updateQuestionDraft: (id: string, draft: QuestionDraft) => void;
   answerQuestion: (id: string, answer: StructuredAnswer) => void;
@@ -75,6 +80,8 @@ export function useAgentDialogs(activeConversationId: string): AgentDialogs {
           toolName: msg.toolName,
           detail: msg.detail,
           isDangerous: msg.isDangerous,
+          ...(msg.allowForChat ? { allowForChat: msg.allowForChat } : {}),
+          ...(msg.alwaysInProject ? { alwaysInProject: msg.alwaysInProject } : {}),
         });
         return true;
       case 'confirmResolved':
@@ -111,13 +118,29 @@ export function useAgentDialogs(activeConversationId: string): AgentDialogs {
 
   const approveConfirm = useCallback(() => {
     if (!confirmRequest) return;
-    vscode.postMessage({ type: 'confirmResponse', id: confirmRequest.id, approved: true });
+    vscode.postMessage({ type: 'confirmResponse', id: confirmRequest.id, decision: 'approve' });
+    setConfirmRequest(null);
+  }, [confirmRequest]);
+
+  const allowConfirmForChat = useCallback(() => {
+    if (!confirmRequest?.allowForChat) return;
+    vscode.postMessage({ type: 'confirmResponse', id: confirmRequest.id, decision: 'allowChat' });
+    setConfirmRequest(null);
+  }, [confirmRequest]);
+
+  const alwaysConfirmInProject = useCallback(() => {
+    if (!confirmRequest?.alwaysInProject) return;
+    vscode.postMessage({
+      type: 'confirmResponse',
+      id: confirmRequest.id,
+      decision: 'alwaysProject',
+    });
     setConfirmRequest(null);
   }, [confirmRequest]);
 
   const denyConfirm = useCallback(() => {
     if (!confirmRequest) return;
-    vscode.postMessage({ type: 'confirmResponse', id: confirmRequest.id, approved: false });
+    vscode.postMessage({ type: 'confirmResponse', id: confirmRequest.id, decision: 'decline' });
     setConfirmRequest(null);
   }, [confirmRequest]);
 
@@ -152,6 +175,8 @@ export function useAgentDialogs(activeConversationId: string): AgentDialogs {
     drafts,
     handleHostMessage,
     approveConfirm,
+    allowConfirmForChat,
+    alwaysConfirmInProject,
     denyConfirm,
     updateQuestionDraft,
     answerQuestion,

@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import * as net from 'net';
 import {
   CacheTypeSchema,
   CapabilitiesSchema,
@@ -42,6 +43,90 @@ export const ProfileSchema = z.object({
   max_tool_rounds: z.number().int().positive().optional(),
 });
 
+/**
+ * `remote_start:` — a laptop entry whose model is served by ANOTHER machine's
+ * Forge (docs/plans/LAPTOP_MODEL_STARTER_PLAN.md Phase 2). The laptop cannot
+ * start a desktop server itself: `start_command` runs on the machine Forge runs
+ * on, so it asks the desktop's model starter instead and uses the port that
+ * answer reports — which is how a llama.cpp slot on an arbitrary 808x port
+ * becomes reachable without guessing which quant loaded first.
+ *
+ * Every address must be an `http://` URL with an IP-literal host, not a name: a
+ * name would be refused by Strata's DNS-rebinding rule and by the starter's own
+ * Host check, so a `tailscale` DNS name would fail every request. `net.isIP`
+ * accepts v4 and v6; the brackets URL parsing gives an IPv6 host are stripped
+ * before the check.
+ *
+ * It may also be an ordered list of 1-4 addresses (docs/plans/
+ * LAPTOP_LAN_ACCESS_PLAN.md): the laptop tries them in config order and uses the
+ * one that answers, so a home laptop lists the LAN forwarder first and the
+ * tailnet address second, and a laptop that moves networks changes route with no
+ * one editing config.yaml. Config order is probe order every time — there is no
+ * remembered preference that would keep a home laptop on the tailnet for no
+ * reason.
+ */
+function isHttpIpLiteralUrl(value: string): boolean {
+  try {
+    const url = new URL(value);
+    if (url.protocol !== 'http:') return false;
+    return net.isIP(url.hostname.replace(/^\[|\]$/g, '')) !== 0;
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * `remote_start.starter` as written in YAML: one URL, or an ordered list of 1-4.
+ * The checks are ordered so the address shape is reported before the count and
+ * the duplicate — a list that is both too long and holds a name is the name's
+ * fault first, and that is the one the user has to fix.
+ */
+const StarterListSchema = z
+  .union([z.string(), z.array(z.string())])
+  .refine(
+    (value) => (Array.isArray(value) ? value.every(isHttpIpLiteralUrl) : isHttpIpLiteralUrl(value)),
+    'remote_start.starter must be an http:// URL with an IP host',
+  )
+  .refine(
+    (value) => !Array.isArray(value) || (value.length >= 1 && value.length <= 4),
+    'remote_start.starter accepts one URL or a list of 1-4 URLs',
+  )
+  .refine(
+    (value) => !Array.isArray(value) || new Set(value).size === value.length,
+    'remote_start.starter must not repeat an address',
+  );
+
+/** The host part of a starter or endpoint URL, with the brackets URL parsing
+ *  puts on an IPv6 literal stripped, so the two can be compared. */
+function hostOf(url: string): string {
+  try {
+    return new URL(url).hostname.replace(/^\[|\]$/g, '');
+  } catch {
+    return '';
+  }
+}
+
+export const RemoteStartSchema = z
+  .object({
+    /** Where to reach the desktop's model starter: `http://100.64.0.10:8798`
+     *  is the tailnet address `tailscale serve` forwards to the desktop's
+     *  loopback; a home laptop puts `http://192.0.2.10:8798` — the desktop's
+     *  LAN address, through the port forwarder — before it. One URL or a list of
+     *  1-4, tried in this order (see `RemoteStarterRoute.ts`). */
+    starter: StarterListSchema,
+    /** The name the DESKTOP's config knows this model by. It is not this
+     *  machine's name: the two configs name the same server differently. */
+    model: z.string().min(1),
+  })
+  .strict();
+
+/** `remote_start.starter` as the ordered list of addresses it always is: one URL
+ *  is a one-element list, so no caller has to handle two shapes. A copy, so a
+ *  caller can sort or filter it without touching the parsed config. */
+export function starterUrls(remote: { starter: string | string[] }): string[] {
+  return Array.isArray(remote.starter) ? [...remote.starter] : [remote.starter];
+}
+
 export const ModelConfigSchema = z.object({
   name: z.string().min(1),
   model: z.string().min(1).optional(),
@@ -51,6 +136,25 @@ export const ModelConfigSchema = z.object({
   cli_model: z.string().min(1).optional(),
   gguf_path: z.string().min(1).optional(),
   mmproj_path: z.string().min(1).optional(),
+  /** Named engine in `~/.forge/policy.yaml` that supplies this model's exec
+   *  facts. The model's own fields still win, so an un-migrated config.yaml keeps
+   *  working unchanged. Folded by `ConfigResolver.mergeGroupsIntoModel`; an
+   *  unknown engine name is a load error naming the model and the engine. */
+  engine: z.string().min(1).optional(),
+  /**
+   * Rejected, not stripped: which cards a server occupies is a fact about how it
+   * is STARTED, and the start command lives on the engine, so `gpus` belongs under
+   * `engines.<name>:` in `~/.forge/policy.yaml` (`engineSchema.ts`). Spelled out here
+   * because this schema is not `.strict()`, so an unlisted key would otherwise be
+   * dropped silently — and a dropped `gpus` reads as "overlaps every card", which
+   * unloads a server that shares none. `z.never` rather than an `any`-based check:
+   * the inferred entry type then carries `gpus?: never`, not `gpus?: any`.
+   */
+  gpus: z
+    .never({
+      error: 'gpus belongs on the engine in ~/.forge/policy.yaml, not on a model entry',
+    })
+    .optional(),
   // Per-model llama-server executable override (e.g. a patched fork for one
   // model). Absent = the global llama_server.binary. See ModelConfig.
   llama_server_binary: z.string().min(1).optional(),
@@ -89,6 +193,9 @@ export const ModelConfigSchema = z.object({
   // than silently meaning "off" — opting in is explicit.
   image_retention_turns: z.number().int().nonnegative().optional(),
   endpoint: z.string().url().optional(),
+  /** Laptop-side: ask another machine's model starter to start or load this
+   *  model before each request and use the port it reports (see above). */
+  remote_start: RemoteStartSchema.optional(),
   n_gpu_layers: z.number().int().optional(),
   num_ctx: z.number().int().positive().optional(),
   n_batch: z.number().int().positive().optional(),
@@ -136,10 +243,21 @@ export const ModelConfigSchema = z.object({
 // them), so they still resolve purely from the model itself.
 type ModelConfigLike = z.infer<typeof ModelConfigSchema>;
 
+/** What `effectiveGroupField` reads: the name, the group list, and the three
+ *  fields a group may supply. Spelled as a `Pick` rather than the whole parsed
+ *  entry because `gpus` is typed `never` in this schema (it belongs on the engine)
+ *  and `ModelConfig` types it `number[] | undefined` — those two are disjoint, so
+ *  a hand-written entry could not be passed at all, even though every field this
+ *  function touches matches exactly. */
+type GroupFieldSource = Pick<
+  ModelConfigLike,
+  'name' | 'group' | 'groups' | 'provider' | 'endpoint' | 'token_count'
+>;
+
 /** Last group in the model's `group`/`groups` list that defines `field`
  *  wins — matches ConfigResolver.mergeGroupsIntoModel's merge order. */
 export function effectiveGroupField<K extends 'provider' | 'endpoint' | 'token_count'>(
-  model: ModelConfigLike,
+  model: GroupFieldSource,
   groups: Record<string, z.infer<typeof GroupSchema>> | undefined,
   field: K,
 ): ModelConfigLike[K] | undefined {
@@ -151,4 +269,86 @@ export function effectiveGroupField<K extends 'provider' | 'endpoint' | 'token_c
     if (fieldValue !== undefined) value = fieldValue as ModelConfigLike[K];
   }
   return value;
+}
+
+/** Fields that would make THIS window the owner of a server it cannot own. */
+const REMOTE_START_FORBIDDEN_FIELDS = [
+  'unload_path',
+  'start_command',
+  'stop_command',
+  'stop_on_exit',
+] as const;
+
+/** What `validateRemoteStartEntry` reads. Every field is optional and
+ *  explicitly `| undefined` so a caller can pass a parsed config entry under
+ *  `exactOptionalPropertyTypes`. `starter` is one URL or the list of them, as
+ *  the schema leaves it. */
+export interface RemoteStartEntryShape {
+  remote_start?: { starter: string | string[]; model: string } | undefined;
+  unload_path?: string | undefined;
+  start_command?: string[] | undefined;
+  stop_command?: string[] | undefined;
+  stop_on_exit?: boolean | undefined;
+}
+
+/**
+ * Refusals for a `remote_start` entry — a laptop's view of ANOTHER machine's
+ * server. Everything that would make this window manage it has to be absent:
+ * with `unload_path` present the entry becomes a managed external here, so
+ * `freeVramForExternal` tries to unload the other desktop entries before every
+ * request — and through `tailscale serve` a stopped server RESETS the
+ * connection instead of refusing it, so that unload throws and the request
+ * never goes out (found 2026-10-26, LAPTOP_MODEL_STARTER_PLAN problem 4). The
+ * desktop's starter starts, unloads and stops these servers; the laptop only
+ * asks, and `isManagedExternalModel` stays false for them because there is no
+ * `unload_path` to make them managed.
+ *
+ * `provider` and `endpoint` are passed in rather than read from the entry
+ * because either may be inherited from a referenced group, which only the
+ * top-level refine can see.
+ */
+export function validateRemoteStartEntry(
+  model: RemoteStartEntryShape,
+  provider: string | undefined,
+  endpoint: string | undefined,
+  path: [string, number],
+  ctx: z.RefinementCtx,
+): void {
+  if (!model.remote_start) return;
+  if (provider !== 'openai-compatible') {
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      path: [...path, 'remote_start'],
+      message: `remote_start is only for provider: openai-compatible (got ${provider ?? 'no provider'})`,
+    });
+  }
+  for (const managedField of REMOTE_START_FORBIDDEN_FIELDS) {
+    if (model[managedField] !== undefined) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: [...path, managedField],
+        message:
+          `remote_start forbids ${managedField}: the desktop's own starter starts, ` +
+          'unloads and stops this model',
+      });
+    }
+  }
+  // The base URL is rebuilt on the host of the starter that ANSWERED, so an
+  // endpoint pointing at another host is a route this client cannot take: the
+  // two addresses have to name the same machine. Checked here so a typo in
+  // either fails at config load, not on the first request.
+  const endpointHost = endpoint === undefined ? '' : hostOf(endpoint);
+  if (endpointHost) {
+    const hosts = new Set(starterUrls(model.remote_start).map(hostOf));
+    if (!hosts.has(endpointHost)) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: [...path, 'endpoint'],
+        message:
+          `endpoint host ${endpointHost} is not one of the remote_start.starter hosts ` +
+          `(${[...hosts].join(', ')}): the laptop dials the address that answered, so ` +
+          'endpoint and starter must name the same machine',
+      });
+    }
+  }
 }

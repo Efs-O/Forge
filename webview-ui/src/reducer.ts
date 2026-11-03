@@ -13,6 +13,7 @@ export {
   selectGenerating,
   selectCheckpointPending,
   selectCheckpointStats,
+  selectClankerActive,
 } from './appState';
 
 function appendToConv(state: State, convId: string, msg: AppMessage): State {
@@ -433,8 +434,15 @@ export function reducer(state: State, action: Action): State {
       return { ...state, checkpointPendingIds: withoutId(state.checkpointPendingIds, cid) };
     }
 
-    case 'CLANKER_CHANGED':
-      return { ...state, clankerMode: action.enabled };
+    case 'CLANKER_CHANGED': {
+      const flags = new Map(state.clankerByConversationId);
+      // Only an armed chat takes an entry, so an off message is a delete: a chat
+      // shown as armed before a reload must not stay shown that way when the host
+      // posts its state again as off.
+      if (action.enabled) flags.set(action.conversationId, true);
+      else flags.delete(action.conversationId);
+      return { ...state, clankerByConversationId: flags };
+    }
 
     case 'REMOTE_STATUS':
       return { ...state, remote: { transports: action.transports, paired: action.paired } };

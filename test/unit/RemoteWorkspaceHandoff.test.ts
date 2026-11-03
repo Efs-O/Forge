@@ -6,6 +6,9 @@ import * as path from 'path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { FakeRemoteChannel } from '../../src/remote/FakeRemoteChannel';
 import { RemoteRequestStore } from '../../src/remote/RemoteRequestStore';
+import { handoffMode } from '../../src/remote/RemoteHandoffState';
+import type { WorkspaceHandoff } from '../../src/remote/RemoteStoreSchemas';
+import { z } from 'zod';
 import {
   announceWorkspaceArrivals,
   resumeWorkspaceHandoffs,
@@ -43,6 +46,9 @@ describe('workspaceIdFor', () => {
 });
 
 const tempDirs: string[] = [];
+/** Where each fixture store keeps its state, so one test can read the file the
+ *  next window would read. */
+const stateFiles = new WeakMap<object, string>();
 
 afterEach(async () => {
   for (const directory of tempDirs.splice(0)) {
@@ -53,7 +59,9 @@ afterEach(async () => {
 async function storeWithPendingHandoff(targetWorkspaceId: string): Promise<RemoteRequestStore> {
   const directory = await fs.mkdtemp(path.join(os.tmpdir(), 'forge-arrival-'));
   tempDirs.push(directory);
-  const store = new RemoteRequestStore(path.join(directory, 'state.json'));
+  const file = path.join(directory, 'state.json');
+  const store = new RemoteRequestStore(file);
+  stateFiles.set(store, file);
   await store.load();
   await store.beginWorkspaceHandoff({
     channel: 'fake',
@@ -147,11 +155,16 @@ describe('workspace arrival', () => {
   it('tells the chat when the binding write fails, instead of leaving it silent', async () => {
     const store = await storeWithPendingHandoff('target');
     const { host } = arrivalHost([{ id: 'newest', title: 'Game build', updatedAt: 99 }]);
-    // What a contended shared state lock does to a claim that already happened:
-    // the record is claimed, the chat is open here, and only the binding write
-    // fails. This used to throw out of claimArrivals and out of replace, so the
-    // transports never came up and the chat heard nothing at all.
-    (store as unknown as { setBinding: () => Promise<never> }).setBinding = async () => {
+    // What a contended shared state lock does to the one write that claims,
+    // binds and completes: the chat is open here, and only the write fails. It
+    // used to be two writes with a window between them, and this case used to
+    // throw out of `claimArrivals` and out of `replace`, so the transports never
+    // came up and the chat heard nothing at all.
+    (
+      store as unknown as {
+        claimAndBindWorkspaceHandoff: () => Promise<never>;
+      }
+    ).claimAndBindWorkspaceHandoff = async () => {
       throw new Error('Forge remote state lock timed out: remote-state-v2.json.lock');
     };
 
@@ -175,21 +188,27 @@ describe('workspace arrival', () => {
     expect(channel.sent[0]?.text).toContain('send /workspace qwen again');
   });
 
-  it('reports the switch as done when only the completion record fails', async () => {
+  /**
+   * The record reaches `completed` in the **same** write as the binding, so
+   * there is no middle state a reload or crash can strand: a `claimed` record
+   * with nothing bound to it is no longer a state this build can produce.
+   * Reading the file rather than the store is the point — it is what the next
+   * window sees.
+   */
+  it('claims, binds and completes in one write, so no window can land between them', async () => {
     const store = await storeWithPendingHandoff('target');
     const { host } = arrivalHost([{ id: 'newest', title: 'Game build', updatedAt: 99 }]);
-    // The binding moved, so the chat really is here: only the record did not
-    // reach 'completed', and pruneRemoteState drops it at its TTL. That must
-    // not be reported as a failed switch, and must not abort the batch.
-    (store as unknown as { completeWorkspaceHandoff: () => Promise<never> })
-      .completeWorkspaceHandoff = async () => {
-      throw new Error('Forge remote state lock timed out: remote-state-v2.json.lock');
-    };
 
     const arrivals = await resumeWorkspaceHandoffs(store, 'target', host);
-    expect(arrivals[0]).toMatchObject({ conversationTitle: 'Game build', created: false });
     expect(arrivals[0]?.bindingFailure).toBeUndefined();
     expect(store.binding('fake', 'chat')?.conversationId).toBe('newest');
+
+    const written = JSON.parse(await fs.readFile(stateFiles.get(store)!, 'utf8')) as {
+      workspaceHandoffs: Array<{ state: string; mode?: string }>;
+    };
+    expect(written.workspaceHandoffs).toHaveLength(1);
+    expect(written.workspaceHandoffs[0]).toMatchObject({ state: 'completed' });
+    expect(written.workspaceHandoffs[0]?.mode).toBeUndefined();
   });
 
   it('names the conversation it landed in, so the receipt is checkable', async () => {
@@ -263,5 +282,81 @@ describe('workspace arrival', () => {
     });
     expect(channel.sent[0]?.text).toContain('all 10 open chats are busy');
     expect(channel.sent[0]?.text).toContain('/chats');
+  });
+});
+
+/**
+ * Windows do not reload at the same time: a build that has not restarted yet
+ * reads a record this build wrote, and it must **degrade** rather than refuse.
+ * A state-file parse that throws leaves every window still running the old
+ * build unable to load, refresh or claim for as long as the record lives, so
+ * the unknown field has to be stripped and the missing one has to mean today's
+ * behaviour.
+ */
+describe('records one build writes and another reads', () => {
+  /**
+   * The record shape a window that has not reloaded yet still parses: the same
+   * fields with no `mode`. Written out here rather than derived from the live
+   * schema, because the point of the test is what the *other* build accepts,
+   * not what this one exports.
+   */
+  const olderWindowRecordSchema = z.object({
+    id: z.string(),
+    channel: z.enum(['telegram', 'whatsapp', 'fake']),
+    chatId: z.string(),
+    sourceWorkspaceId: z.string(),
+    targetWorkspaceId: z.string(),
+    targetAlias: z.string(),
+    state: z.enum(['pending', 'claimed', 'completed', 'failed', 'expired']),
+    createdAt: z.number(),
+    updatedAt: z.number(),
+    expiresAt: z.number(),
+  });
+
+  it('an older window reads a new-mode record, and no mode means replace', async () => {
+    const store = await storeWithPendingHandoff('target');
+    await store.beginWorkspaceHandoff({
+      channel: 'fake',
+      chatId: 'chat',
+      sourceWorkspaceId: 'source',
+      targetWorkspaceId: 'other-target',
+      targetAlias: 'qwen',
+      mode: 'new-window',
+    });
+    const written = JSON.parse(await fs.readFile(stateFiles.get(store)!, 'utf8')) as {
+      workspaceHandoffs: Array<Record<string, unknown>>;
+    };
+    // The older window's parse strips the field it does not know instead of
+    // throwing, which is the only reason a mixed-version window group can keep
+    // loading, refreshing and claiming at all.
+    const readByOlderWindow = olderWindowRecordSchema.parse(written.workspaceHandoffs[0]);
+    expect((readByOlderWindow as { mode?: string }).mode).toBeUndefined();
+    expect(handoffMode(readByOlderWindow as unknown as WorkspaceHandoff)).toBe('replace');
+  });
+
+  it('a claimed record with no claimedBy is never claimable, and expires anyway', async () => {
+    const store = await storeWithPendingHandoff('target');
+    const file = stateFiles.get(store)!;
+    const written = JSON.parse(await fs.readFile(file, 'utf8')) as {
+      workspaceHandoffs: Array<Record<string, unknown>>;
+    };
+    // Exactly what an older build leaves behind when it reloads between
+    // claiming and binding: `claimed`, and no `claimedBy` naming who claimed
+    // it. Reclaiming it would let two windows bind the same chat, so the
+    // deliberate degrade is to leave it alone until its TTL prunes it — and
+    // this build no longer writes that state at all, because claim, bind and
+    // complete happen in one write.
+    written.workspaceHandoffs[0]!.state = 'claimed';
+    await fs.writeFile(file, JSON.stringify(written), 'utf8');
+    const reader = new RemoteRequestStore(file);
+    await reader.load();
+    const id = String(written.workspaceHandoffs[0]?.id);
+    expect(reader.hasPendingWorkspaceHandoff('target')).toBe(false);
+    expect(reader.peekWorkspaceHandoffs('target')).toHaveLength(0);
+    expect((await reader.claimAndBindWorkspaceHandoff(id, 'target')).ok).toBe(false);
+    expect(written.workspaceHandoffs[0]?.claimedBy).toBeUndefined();
+    // The expiry is what makes this a temporary silence instead of a chat
+    // stuck to a window that no longer exists.
+    expect(Number(written.workspaceHandoffs[0]?.expiresAt)).toBeGreaterThan(Date.now());
   });
 });

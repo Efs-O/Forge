@@ -21,20 +21,17 @@ import { BackendPool } from '../../src/backend/BackendPool';
 import { SharedRuntimeRegistry, sharedRuntimeKey } from '../../src/backend/SharedRuntimeRegistry';
 import type { DirectBackend } from '../../src/backend/DirectBackend';
 import type { ForgeConfig } from '../../src/config/types';
+import { listenLoopback } from '../support/listenLoopback';
 
 const GGUF = 'N:/models/shared.gguf';
 
-function startFakeServer(): Promise<{ port: number; server: http.Server }> {
+async function startFakeServer(): Promise<{ port: number; server: http.Server }> {
   const server = http.createServer((_req, res) => {
     res.writeHead(200, { 'content-type': 'application/json' });
     res.end(JSON.stringify({ data: [{ id: GGUF }] }));
   });
-  return new Promise((resolve) => {
-    server.listen(0, '127.0.0.1', () => {
-      const address = server.address();
-      resolve({ port: typeof address === 'object' && address ? address.port : 0, server });
-    });
-  });
+  const port = await listenLoopback(server);
+  return { port, server };
 }
 
 describe('re-borrowing a shared runtime', () => {

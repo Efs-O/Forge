@@ -1,8 +1,34 @@
 import type { AgentKind, AgentLink, AgentSender, AgentSenderMetadata } from './chatAgentLinks';
-import { agentDisplayName, findBySession, get, link, move } from './chatAgentLinks';
+import {
+  addChatForSession,
+  agentDisplayName,
+  chatsForSession,
+  findSessionChatIn,
+  get,
+  link,
+  touch,
+} from './chatAgentLinks';
 import type { SidebarRuntime, ConversationRuntime } from '../sidebar/sessionTypes';
 import { isUntitled } from '../sidebar/conversationTitle';
 
+/**
+ * Where an inbound `forge.sh` message lands, and which link it uses.
+ *
+ * One agent session may now be linked to several Forge chats
+ * (docs/plans/V1_FINISH_PLAN.md lane 4 phase 5), so this file decides between
+ * chats rather than between "linked" and "not linked":
+ * - `say` with no `--to` goes to the chat the session last addressed.
+ * - `--to <id>` is legal for any chat already linked to this session, and for
+ *   an open chat that holds no link of this kind (that one gets linked). A chat
+ *   whose link of this kind names a different session is still refused.
+ * - `--new` adds a chat to the set instead of moving the link, so the chat the
+ *   session was addressing keeps its link and stays reachable with `--to`.
+ *
+ * The index in `chatAgentLinks.ts` is process-wide, so the current chat may
+ * belong to another window: every choice here is proven against this window's
+ * own chat list, and the newest chat this window holds is used when the current
+ * one is not here.
+ */
 export interface InboundAgentSelection {
   conversationId?: string;
   runningConversationId?: string;
@@ -14,7 +40,11 @@ export interface InboundAgentTarget {
   title: string;
   sender: AgentSenderMetadata;
   link: AgentLink;
-  movedFrom?: { conversationId: string; title: string };
+  /**
+   * The chat this session was addressing when it asked for a new one. It keeps
+   * its link, so the notice is written on it and `--to` still reaches it.
+   */
+  alsoLinkedFrom?: { conversationId: string; title: string };
 }
 
 export interface InboundAgentRoutingDeps {
@@ -56,47 +86,53 @@ function createInboundLink(sender: AgentSender, cwd: string | undefined): AgentL
 function linkNewSender(
   sender: AgentSender,
   chat: ConversationRuntime,
-  sidebar: SidebarRuntime,
   cwd: string | undefined,
 ): AgentLink {
-  return link(chat, createInboundLink(sender, cwd), conversations(sidebar));
+  return link(chat, createInboundLink(sender, cwd));
 }
 
 function makeTarget(
   chat: ConversationRuntime,
   sender: AgentSender,
   linked: AgentLink,
-  movedFrom?: { conversationId: string; title: string },
+  alsoLinkedFrom?: { conversationId: string; title: string },
 ): InboundAgentTarget {
   return {
     conversationId: chat.id,
     title: chat.title,
     sender: { kind: sender.kind, sessionId: sender.sessionId, title: linked.title },
     link: linked,
-    ...(movedFrom ? { movedFrom } : {}),
+    ...(alsoLinkedFrom ? { alsoLinkedFrom } : {}),
   };
 }
 
 export function resolveInboundAgentTarget(deps: InboundAgentRoutingDeps): InboundAgentTarget {
   const { sidebar, sender, selection } = deps;
   const all = conversations(sidebar);
-  const ownerId = findBySession(sender.sessionId);
+  const ownedIds = chatsForSession(sender.sessionId);
+  // Newest first, but only chats this window actually holds: the index is
+  // shared across windows, so the session's current chat may live in another
+  // one and this window must still be able to act on its own chat.
+  const ownerId = findSessionChatIn(sender.sessionId, sender.kind, (id, kind) => {
+    const chat = all.find((item) => item.id === id);
+    return chat ? get(chat, kind) : undefined;
+  });
   const owner = ownerId ? all.find((chat) => chat.id === ownerId) : undefined;
-  if (ownerId && !owner)
-    throw new Error(`The linked chat "${ownerId}" for ${sender.kind} is unavailable.`);
+
+  if (ownedIds.length > 0 && !owner)
+    throw new Error(`The linked chat "${ownedIds[0]}" for ${sender.kind} is unavailable.`);
 
   if (selection.newChat) {
-    const old = owner;
     const chat = requireChat(deps.createChat(), 'a new chat');
-    const linked = old
-      ? move(old, chat, sender.kind, [...all, chat])
-      : linkNewSender(sender, chat, sidebar, deps.workspaceRoot);
+    const linked = owner
+      ? addChatForSession(owner, chat, sender.kind)
+      : linkNewSender(sender, chat, deps.workspaceRoot);
     deps.persist();
     return makeTarget(
       chat,
       sender,
       linked,
-      old ? { conversationId: old.id, title: old.title } : undefined,
+      owner ? { conversationId: owner.id, title: owner.title } : undefined,
     );
   }
 
@@ -104,16 +140,21 @@ export function resolveInboundAgentTarget(deps: InboundAgentRoutingDeps): Inboun
   if (requestedId) {
     const selected = byId(sidebar, requestedId);
     if (!selected) throw new Error(`Forge chat "${requestedId}" is no longer open.`);
-    if (owner && owner.id !== selected.id)
-      throw new Error(`This session is linked to chat "${owner.title}".`);
     const existing = get(selected, sender.kind);
+    // The one thing still refused: this chat is somebody else's link of this
+    // kind. Being linked to a different chat of the same session is not a
+    // reason to refuse — that is the whole point of `--to` after `say --new`.
     if (existing && existing.sessionId !== sender.sessionId)
       throw new Error(`Chat "${selected.title}" already links a different ${sender.kind} session.`);
     const chat = sidebar.conversations.some((item) => item.id === selected.id)
       ? selected
       : requireChat(deps.restoreChat(selected.id), `chat "${selected.title}"`);
-    const linked = existing ?? linkNewSender(sender, chat, sidebar, deps.workspaceRoot);
-    if (!existing) deps.persist();
+    const linked = existing
+      ? touch(chat, sender.kind)
+      : linkNewSender(sender, chat, deps.workspaceRoot);
+    // Both paths changed this chat's link: `touch` makes it the chat the
+    // session addresses next, and a fresh link has to be saved to survive.
+    deps.persist();
     return makeTarget(chat, sender, linked);
   }
 
@@ -130,23 +171,19 @@ export function resolveInboundAgentTarget(deps: InboundAgentRoutingDeps): Inboun
   const active = byId(sidebar, sidebar.activeConversationId);
   if (!active) throw new Error('Forge has no active chat for this message.');
   if (!get(active, sender.kind)) {
-    const linked = linkNewSender(sender, active, sidebar, deps.workspaceRoot);
+    const linked = linkNewSender(sender, active, deps.workspaceRoot);
     deps.persist();
     return makeTarget(active, sender, linked);
   }
 
   const chat = requireChat(deps.createChat(), 'a new chat for this session');
-  const linked = linkNewSender(sender, chat, sidebar, deps.workspaceRoot);
+  const linked = linkNewSender(sender, chat, deps.workspaceRoot);
   deps.persist();
   return makeTarget(chat, sender, linked);
 }
 
-export function formatMovedSessionNotice(
-  kind: AgentKind,
-  link: AgentLink,
-  newTitle: string,
-): string {
+export function formatAlsoLinkedNotice(kind: AgentKind, link: AgentLink, newTitle: string): string {
   // A chat opened for this message is still untitled here: its first prompt names it later.
   const destination = isUntitled(newTitle) ? 'a new chat' : `chat "${newTitle}"`;
-  return `${agentDisplayName(kind)} session "${link.title}" moved to ${destination}.`;
+  return `${agentDisplayName(kind)} session "${link.title}" started ${destination} as well; this chat keeps its link and stays reachable with --to.`;
 }

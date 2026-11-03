@@ -54,9 +54,9 @@ export const CLOUD_PHRASES = [
 
 /**
  * Added to whichever pool applies while Clanker Mode is on. Deliberately about
- * the *absence of confirmation*, never about destruction: recursive deletes
- * still confirm, and a joke promising otherwise stops being funny the once
- * somebody believes it.
+ * the *absence of confirmation*, never about destruction: the deny list still
+ * asks, and a joke promising otherwise stops being funny the once somebody
+ * believes it.
  */
 export const CLANKER_PHRASES = [
   'Clanking…',
@@ -67,6 +67,9 @@ export const CLANKER_PHRASES = [
   'Permission? Never…',
   'Unsupervised…',
   'Yeeting…',
+  'Trust me bro…',
+  'What could go wrong…',
+  'Hold my beer…',
 ] as const;
 
 /**

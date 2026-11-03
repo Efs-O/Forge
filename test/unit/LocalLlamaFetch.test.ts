@@ -1,7 +1,7 @@
 import { createServer, type Server } from 'node:http';
-import type { AddressInfo } from 'node:net';
 import { afterEach, describe, expect, it } from 'vitest';
 import { disposeLocalLlamaFetch, localLlamaFetch } from '../../src/llm/localLlamaFetch';
+import { listenLoopback } from '../support/listenLoopback';
 
 // A real server, because the point is undici interop: Node's AbortSignal, the
 // streamed body and the shared Agent all have to work outside the mocks.
@@ -16,8 +16,8 @@ describe('localLlamaFetch', () => {
 
   async function listen(handler: Parameters<typeof createServer>[1]): Promise<string> {
     server = createServer(handler);
-    await new Promise<void>((resolve) => server!.listen(0, '127.0.0.1', resolve));
-    return `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
+    const port = await listenLoopback(server!);
+    return `http://127.0.0.1:${port}`;
   }
 
   it('waits for late headers like a queued llama-server and streams the body', async () => {

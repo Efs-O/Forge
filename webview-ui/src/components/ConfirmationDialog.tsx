@@ -1,11 +1,16 @@
 import React, { useEffect, useRef } from 'react';
+import type { ApprovalOffer } from '../../../src/sidebar/approvalMessages';
 import { useDockedDialogEscape } from '../useDockedDialogEscape';
 
 interface Props {
   toolName: string;
   detail: string;
   isDangerous?: boolean;
+  allowForChat?: ApprovalOffer;
+  alwaysInProject?: ApprovalOffer;
   onApprove: () => void;
+  onAllowForChat: () => void;
+  onAlwaysInProject: () => void;
   onDeny: () => void;
 }
 
@@ -26,7 +31,11 @@ export function ConfirmationDialog({
   toolName,
   detail,
   isDangerous,
+  allowForChat,
+  alwaysInProject,
   onApprove,
+  onAllowForChat,
+  onAlwaysInProject,
   onDeny,
 }: Props): React.ReactElement {
   const panelRef = useRef<HTMLDivElement>(null);
@@ -53,10 +62,25 @@ export function ConfirmationDialog({
           </span>
         </div>
         <pre className="confirm-detail">{detail}</pre>
+        {allowForChat ? (
+          <p className="confirm-allow-chat-copy">
+            Allow for this chat covers: {allowForChat.label}.
+          </p>
+        ) : null}
         <div className="confirm-actions">
           <button className="confirm-btn-deny" type="button" onClick={onDeny}>
-            Deny
+            Decline
           </button>
+          {allowForChat ? (
+            <button className="confirm-btn-approve" type="button" onClick={onAllowForChat}>
+              Allow for this chat
+            </button>
+          ) : null}
+          {alwaysInProject ? (
+            <button className="confirm-btn-approve" type="button" onClick={onAlwaysInProject}>
+              Always in this project
+            </button>
+          ) : null}
           <button className="confirm-btn-approve" type="button" onClick={onApprove}>
             {isDangerous ? 'Run (I understand the risk)' : 'Approve'}
           </button>

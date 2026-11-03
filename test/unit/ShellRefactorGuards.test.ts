@@ -72,10 +72,43 @@ describe('shell/core-group refactor guards', () => {
   // Raised from 3,500 in 0.17.4, and from 4,000 in 0.17.10: the owner raises the
   // cap when a rule earns its bytes rather than trimming rules to fit. It still
   // catches accidental bloat.
-  it('config/templates/builtin/execute.njk is at most 5,000 bytes', () => {
+  //
+  // Raised to 5,600 on 2026-10-27 (lane 5 phase 5.3, 5,000 → 5,600): the
+  // delegation rules added 1,042 bytes of file, which is what the plan asked for
+  // and no shorter wording reaches all seven points. Those bytes are inside
+  // `{% if agentTools %}`, so a workspace without Claude Code or a local target
+  // never pays them — the cap is a file-size proxy, and the thing it was
+  // protecting is now gated directly: test/unit/DelegationPromptBlock.test.ts
+  // measures the RENDERED delta and refuses it above 1,100 bytes. The file is
+  // 5,557 bytes as of this change, so 5,600 still catches a stray paragraph.
+  //
+  // Raised to 5,800 on 2026-10-28 (Lane B item 7 of OWNER_GUARDS_PLAN): the
+  // secret-decline line is 161 bytes, outside any `{% if %}` block, so every
+  // chat pays it. It earns those bytes because an agent whose secret read was
+  // declined went and got the same content through the shell instead of telling
+  // the user — a refusal the user gave became a round the user never agreed to.
+  // The file is 5,718 bytes as of that change, so 5,800 still catches a stray
+  // paragraph. Lane F2 (2026-10-29) added the 23-byte `{% if skillsCatalog %}`
+  // gate around the skills block: the catalog itself is rendered content, not
+  // template bytes, so the template grew by the gate only. That cap still did
+  // its job — catching a paragraph nobody meant to put in the prompt.
+  // 2026-10-30, +2 bytes (5,825): the notify_on_exit lane reworded the
+  // background-shell line to "(wakes you when it ends)", because the flag is on
+  // by default now.
+  // 2026-10-30, +410 bytes (6,235): the final answer's plain opening moved here
+  // from FORGE.md, because user instructions outrank project instructions and a
+  // lane brief asking for a hash beat it. The cap is 6,260, 25 bytes above the
+  // file, so a stray paragraph is still caught.
+  // 2026-10-31, +317 bytes (6,552): the reply now says to keep the part after the
+  // plain opening in everyday words too — name a file, a number or a test only
+  // when the user needs it to act — and to put a requesting agent's technical
+  // detail (hashes, paths, counts) at the end under "Detail for the record", so
+  // an agent still gets the exact numbers without the owner wading through them.
+  // Cap 6,577 keeps the same 25 bytes above the file.
+  it('config/templates/builtin/execute.njk is at most 6,577 bytes', () => {
     const file = path.join(root, 'config', 'templates', 'builtin', 'execute.njk');
     const size = fs.statSync(file).size;
-    expect(size, `execute.njk is ${size} bytes; the cap is 5000`).toBeLessThanOrEqual(5000);
+    expect(size, `execute.njk is ${size} bytes; the cap is 6577`).toBeLessThanOrEqual(6577);
   });
 
   it('the dead src/templates/builtin copy is deleted', () => {

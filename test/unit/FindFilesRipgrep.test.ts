@@ -67,6 +67,32 @@ describe('find_files backed by ripgrep', () => {
     expect(String(out)).toContain('**/');
   });
 
+  it('finds a gitignored file only when include_ignored is true', async () => {
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), 'forge-find-ignored-'));
+    const relative = 'docs/plans/local-plan.md';
+    try {
+      fs.mkdirSync(path.join(root, 'docs', 'plans'), { recursive: true });
+      fs.writeFileSync(path.join(root, '.gitignore'), 'docs/plans/\n');
+      fs.writeFileSync(path.join(root, relative), 'local plan');
+      vscode.workspace.workspaceFolders.splice(0, Infinity, { uri: vscode.Uri.file(root) });
+
+      const script = path.join(scriptDir, 'ignore-aware-rg.js');
+      fs.writeFileSync(
+        script,
+        `if (process.argv.includes('--no-ignore-vcs')) process.stdout.write(${JSON.stringify(relative)});`,
+        'utf8',
+      );
+      const tool = makeFindFilesTool(() => ({ command: process.execPath, argsPrefix: [script] }));
+      const missed = String(await tool.handler({ pattern: 'docs/plans/*' }, undefined));
+      expect(missed).toContain('include_ignored: true');
+      expect(await tool.handler({ pattern: 'docs/plans/*', include_ignored: true }, undefined)).toBe(
+        relative,
+      );
+    } finally {
+      fs.rmSync(root, { recursive: true, force: true });
+    }
+  });
+
   it('rejects an empty pattern before spawning anything', async () => {
     const tool = makeFindFilesTool(stubRipgrep([]));
     await expect(tool.handler({ pattern: '  ' }, undefined)).rejects.toThrow('non-empty string');

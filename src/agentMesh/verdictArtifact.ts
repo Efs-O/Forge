@@ -48,7 +48,17 @@ function authorizeRecipient(
   if (!first || first.from.toLowerCase() !== from.toLowerCase()) {
     throw new Error('no verdict for this sender and exchange');
   }
-  if (senderSessionId !== undefined && first.senderSessionId !== senderSessionId)
+  // The reader's identity has to be exactly the one the exchange recorded —
+  // the same, or neither. Two gaps used to sit in this check: a caller that
+  // named `from=claude` and left its own id out passed for any Claude session's
+  // exchange, and a caller that brought an id passed for an exchange that
+  // recorded none. `forge.sh read-verdict`/`ack-verdict` send the
+  // kind-specific identity for every agent name (`set_sender_identity`), so an
+  // honest agent always presents the pair that matches: the relay records
+  // `senderSessionId` in its `created` row, and an inbound reply records it in
+  // its `accepted` row. An exchange with no recorded session stays readable by
+  // a caller that presents none, as before.
+  if (first.senderSessionId !== senderSessionId)
     throw new Error('no verdict for this session and exchange');
   if (!events.some((event) => event.eventId === verdictEventId(exchangeId))) {
     throw new Error('the verdict is not yet recorded for this exchange');

@@ -76,7 +76,7 @@ function tokenize(text: string): number | null {
 }
 
 function mcpTools(): Array<{ name: string; description: string; inputSchema: unknown }> {
-  const exe = 'C:\\Users\\efso office\\.halluscribe-mcp\\halluscribe-mcp.exe';
+  const exe = 'C:\\Users\\jo smith\\.halluscribe-mcp\\halluscribe-mcp.exe';
   const script = [
     'const { spawn } = require("child_process");',
     'const child = spawn(process.argv[1], [], { stdio: ["pipe", "pipe", "pipe"] });',

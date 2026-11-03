@@ -67,3 +67,32 @@ export const VoiceConfigSchema = z
       .optional(),
   })
   .optional();
+
+/** Cross-field requirements for enabled voice input and resident-server mode. */
+export function validateVoiceConfig(
+  voice: z.infer<typeof VoiceConfigSchema>,
+  ctx: z.RefinementCtx,
+): void {
+  if (!voice?.enabled) return;
+  if (!voice.whisper_model) {
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      path: ['voice', 'whisper_model'],
+      message: 'voice.whisper_model is required when voice.enabled: true',
+    });
+  }
+  if (voice.server?.enabled && !voice.server.binary) {
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      path: ['voice', 'server', 'binary'],
+      message: 'voice.server.binary is required when voice.server.enabled: true',
+    });
+  }
+  if (voice.server?.enabled !== true && !voice.whisper_binary) {
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      path: ['voice', 'whisper_binary'],
+      message: 'voice.whisper_binary is required when voice.enabled: true',
+    });
+  }
+}

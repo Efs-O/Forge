@@ -15,7 +15,7 @@ const CLOUD_PROVIDER_BASE_URLS: Record<'xai' | 'openrouter' | 'openai', string> 
   openai: 'https://api.openai.com',
 };
 
-function normalizeOpenAiCompatibleBaseUrl(baseUrl: string): string {
+export function normalizeOpenAiCompatibleBaseUrl(baseUrl: string): string {
   return baseUrl.replace(/\/v1\/?$/i, '').replace(/\/$/, '');
 }
 

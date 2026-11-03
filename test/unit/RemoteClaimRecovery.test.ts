@@ -149,7 +149,9 @@ describe('remote claim ownership and recovery', () => {
         },
       },
       progress: {},
-      outbox: { kick: () => undefined },
+      // `false`: the answer is modelled as not yet delivered, which is what
+      // keeps the drain writing its outcome line, as these tests assert.
+      outbox: { kick: () => undefined, flush: async () => false },
       activeConversations: new Set<string>(),
       attachmentStore: () => undefined,
       isBusy: () => false,

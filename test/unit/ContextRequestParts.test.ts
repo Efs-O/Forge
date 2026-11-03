@@ -33,6 +33,7 @@ describe('Telegram /context request parts', () => {
       config: { models: [model] } as unknown as ForgeConfig,
       forgeLoader: undefined,
       activeFile: undefined,
+      forgeInstructions: undefined,
       workspaceIsProjectRoot: true,
       turnContext: {},
       getToolDefinitions: () => tools,

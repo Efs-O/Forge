@@ -84,10 +84,10 @@ describe('Telegram readable report formatters', () => {
     });
     expect(report.html).toContain('<b>Chat</b> No chat bound');
     expect(report.html).toContain('<b>Now</b> Idle · nothing queued');
-    expect(report.html).toContain('<b>Approvals: CLANKER</b>');
+    expect(report.html).toContain('<b>Approvals: CLANKER · this chat</b>');
     expect(report.html).not.toContain('crash-unknown');
     expect(report.html).not.toContain('Exchanges');
-    expect(report.plain).toContain('Approvals: CLANKER');
+    expect(report.plain).toContain('Approvals: CLANKER (this chat)');
   });
 
   it('shows a plain context percentage and usage details in both channels', () => {
@@ -258,6 +258,8 @@ describe('Telegram readable report formatters', () => {
         last_observation: '<result &>'.repeat(500),
         consecutive_failures: 2,
         next_due_at: 2_000,
+        task_pending: true,
+        task_pending_reason: 'waiting for a free GPU',
       }),
     };
     const list = renderRemoteJobList([file], new Date(10_000));
@@ -269,6 +271,11 @@ describe('Telegram readable report formatters', () => {
     });
     const card = renderRemoteJobCard(file, 0, new Date(10_000));
     expect(card.html).toContain('<b>Disk &lt;watch&gt;</b>');
+    // The card has to say why a job that is due is not running, the same fact
+    // the typed `/job <id>` answers with (`describeJob`), or the two surfaces
+    // describe one job two different ways.
+    expect(card.plain).toContain('Status: enabled · pending: waiting for a free GPU');
+    expect(card.html).toContain('pending: waiting for a free GPU');
     expect(card.html).toContain('<blockquote expandable>');
     expect(card.html).toContain('&lt;result &amp;&gt;');
     expect(card.html.length).toBeLessThan(3_200);

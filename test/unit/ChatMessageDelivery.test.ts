@@ -35,7 +35,9 @@ describe('SidebarPromptRouter.deliverChatMessage', () => {
     const send = vi.fn<Send>();
     const { router, addTell } = makeRouter(true, send);
     await expect(router.deliverChatMessage('hello', 'target')).resolves.toEqual({ kind: 'tell' });
-    expect(addTell).toHaveBeenCalledWith('target', 'hello', false);
+    expect(addTell).toHaveBeenCalledWith('target', 'hello', false, undefined, undefined, {
+      kind: 'chat',
+    });
     expect(send).not.toHaveBeenCalled();
   });
 

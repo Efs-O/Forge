@@ -2,6 +2,8 @@ import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
 import { writeFileAtomicSync } from '../../util/atomicWrite';
+import { resolveModelEntry } from '../../config/ConfigResolver';
+import type { ForgeConfig } from '../../config/types';
 
 /**
  * The staged metadata for a `llamacpp_update` action (B5). When the action
@@ -111,11 +113,18 @@ export function pruneOldBuilds(root: string, keep: readonly (string | undefined)
   return result;
 }
 
-/** The binaries models pin with their own `llama_server_binary`, which a prune must keep. */
-export function modelPinnedBinaries(
-  models: readonly { llama_server_binary?: string | undefined }[],
-): string[] {
-  return models.flatMap((m) => (m.llama_server_binary ? [m.llama_server_binary] : []));
+/** The binaries models pin with their own `llama_server_binary`, which a prune must keep.
+ *
+ *  It takes the whole config, not just the model list, because since phase 2 a
+ *  model can inherit `llama_server_binary` from its `engine` in
+ *  `~/.forge/policy.yaml`: a prune that read `config.models` raw would delete the
+ *  build a migrated model is still running, one rename away from being a
+ *  rollback the owner cannot make.
+ */
+export function modelPinnedBinaries(config: ForgeConfig): string[] {
+  return config.models
+    .map((model) => resolveModelEntry(config, model.name) ?? model)
+    .flatMap((model) => (model.llama_server_binary ? [model.llama_server_binary] : []));
 }
 
 /** Sentences for a user-facing summary, or '' when nothing was pruned. */

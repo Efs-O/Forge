@@ -1,4 +1,5 @@
 import { useCallback } from 'react';
+import type { ForgeSlashCommandId } from '../../src/sidebar/messageBridge';
 import type { Action } from './reducer';
 import { vscode } from './vscode';
 
@@ -16,6 +17,8 @@ export function useHostCommands(dispatch: React.Dispatch<Action>): {
   handleRestoreConversation: (id: string) => void;
   handleDeleteConversation: (id: string) => void;
   handleRenameConversation: (id: string, title: string) => void;
+  handleRunSlashCommand: (commandId: ForgeSlashCommandId) => void;
+  handleResetApprovals: (conversationId: string) => void;
 } {
   const handleCancel = useCallback(() => {
     vscode.postMessage({ type: 'cancel' });
@@ -47,6 +50,23 @@ export function useHostCommands(dispatch: React.Dispatch<Action>): {
   const handleRenameConversation = useCallback((id: string, title: string) => {
     vscode.postMessage({ type: 'renameConversation', id, title });
   }, []);
+  const handleRunSlashCommand = useCallback(
+    (commandId: ForgeSlashCommandId, approvalAction?: 'reset') => {
+      // The popup row for `/approvals reset` carries its subcommand; typed
+      // `/approvals reset` posts the same field from `composerSend.ts`, so both
+      // routes reach `SlashCommandHandler` with the action and neither has to
+      // know the other exists.
+      vscode.postMessage({
+        type: 'runSlashCommand',
+        commandId,
+        ...(approvalAction ? { approvalAction } : {}),
+      });
+    },
+    [],
+  );
+  const handleResetApprovals = useCallback((conversationId: string) => {
+    vscode.postMessage({ type: 'resetApprovals', conversationId });
+  }, []);
   return {
     handleCancel,
     handleModelChange,
@@ -56,5 +76,7 @@ export function useHostCommands(dispatch: React.Dispatch<Action>): {
     handleRestoreConversation,
     handleDeleteConversation,
     handleRenameConversation,
+    handleRunSlashCommand,
+    handleResetApprovals,
   };
 }

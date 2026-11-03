@@ -1,6 +1,40 @@
 import { baseProgram } from './shellCommandTokens';
 
 type NestedShellKind = 'bash' | 'pwsh';
+
+/** Expand only literal bash assignments for later statements on this command
+ *  line. Runtime values remain opaque so the guards do not guess what the shell
+ *  will compute. */
+export function expandLiteralBashAssignments(source: readonly (readonly string[])[]): string[][] {
+  const variables = new Map<string, string>();
+  return source.map((original) => {
+    const statement = [...original];
+    const assignmentIndex = statement[0] === 'export' ? 1 : 0;
+    const assignment = statement[assignmentIndex] ?? '';
+    const match = /^([A-Za-z_][A-Za-z0-9_]*)=(.*)$/su.exec(assignment);
+    if (match && statement.length === assignmentIndex + 1) {
+      const [, name = '', value = ''] = match;
+      if (!/[$`]/u.test(value)) variables.set(name, value);
+      return statement;
+    }
+    return statement.map((token) =>
+      token.replace(
+        /\$([A-Za-z_][A-Za-z0-9_]*|\{[A-Za-z_][A-Za-z0-9_]*\})/gu,
+        (raw, named: string) => {
+          const name = named.startsWith('{') ? named.slice(1, -1) : named;
+          return variables.get(name) ?? raw;
+        },
+      ),
+    );
+  });
+}
+
+/** A PowerShell block that is only an expression over `$` variables. */
+export function isPurePwshExpression(block: string): boolean {
+  const unquoted = block.replace(/'[^']*'|"[^"$`]*"/gu, '""').trim();
+  return /^\$/u.test(unquoted) && !/[()=;|&{}[\]`]/u.test(unquoted);
+}
+
 export interface NestedShellCommand {
   command: string;
   shell: NestedShellKind;

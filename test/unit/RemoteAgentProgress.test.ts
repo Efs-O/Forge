@@ -371,6 +371,109 @@ describe('RemoteAgentProgress', () => {
     expect(channel.sent).toEqual([]);
   });
 
+  it('hides the working line for as long as the turn waits on the owner', async () => {
+    vi.useFakeTimers();
+    const { channel, progress } = rig();
+    progress.handle({ conversationId: 'c1', kind: 'narration', text: 'Choosing now.' });
+    await vi.advanceTimersByTimeAsync(1_000);
+    expect(channel.edits.at(-1)?.text).toContain('Working…');
+
+    progress.suspendFooter('c1');
+    await vi.advanceTimersByTimeAsync(1_000);
+    // The footer is gone and nothing else is drawn, so the line cannot reappear
+    // above the board the owner is being asked to answer.
+    expect(channel.edits.at(-1)?.text).toBe('Choosing now.');
+    expect(channel.progress).toEqual([]);
+    // Stop still works from the bubble the board sits under.
+    expect(channel.stopButtons.has('message-1')).toBe(true);
+    expect(progress.conversationForBubble('chat-a', 'message-1')).toBe('c1');
+
+    progress.resumeFooter('c1');
+    await vi.advanceTimersByTimeAsync(1_000);
+    // A fresh bubble at the bottom carries the working line again, with the
+    // status it had before the wait.
+    expect(channel.progress).toHaveLength(1);
+    expect(channel.progress.at(-1)?.text).toContain('Working…');
+    expect(channel.stopButtons.has('1')).toBe(true);
+    expect(channel.edits.at(-1)?.text).toBe('Choosing now.');
+  });
+
+  it('does not reopen a working line after the turn has closed', async () => {
+    vi.useFakeTimers();
+    const { channel, progress } = rig();
+    progress.handle({ conversationId: 'c1', kind: 'narration', text: 'Waiting on you.' });
+    await vi.advanceTimersByTimeAsync(1_000);
+    progress.suspendFooter('c1');
+    await vi.advanceTimersByTimeAsync(1_000);
+
+    await progress.finish('c1', undefined);
+    // The answer lands after the turn is already gone — cancelled, or answered
+    // from the sidebar. A late resume must not put a working line under a
+    // finished turn, and must not delete anything the next turn owns.
+    progress.resumeFooter('c1');
+    progress.resumeFooter('c1');
+    await vi.advanceTimersByTimeAsync(5_000);
+    expect(channel.progress).toEqual([]);
+    // Footer on, footer off for the wait, then the same words with the keyboard
+    // taken off: close() still removes every button it kept during the wait.
+    expect(channel.edits).toHaveLength(3);
+    expect(channel.edits.at(-1)?.text).toBe('Waiting on you.');
+    expect(channel.stopButtons.size).toBe(0);
+    expect(vi.getTimerCount()).toBe(0);
+  });
+
+  it('writes no outcome line and arms no delete when the answer is on screen', async () => {
+    vi.useFakeTimers();
+    const { channel, progress, armAfter } = rig();
+
+    await progress.finish('c1', undefined);
+
+    expect(channel.edits).toEqual([]);
+    expect(armAfter).not.toHaveBeenCalled();
+    // The working line goes at once instead of becoming a status that is
+    // deleted ten seconds later — the second churn point the owner watched.
+    expect(channel.deleted).toEqual([{ chatId: 'chat-a', messageId: 'message-1' }]);
+  });
+
+  it('leaves a newer turn of the same conversation out of an older finish', async () => {
+    vi.useFakeTimers();
+    const { channel, progress, armAfter } = rig();
+    progress.handle({ conversationId: 'c1', kind: 'narration', text: 'One.' });
+    await vi.advanceTimersByTimeAsync(1_000);
+    // A mirrored sidebar prompt rides the turn's tail, and finish waits for that
+    // tail. Hold its send, so a new turn for the same conversation really can
+    // begin while the old finish is still running.
+    const send = channel.send.bind(channel);
+    let release: () => void = () => undefined;
+    const held = new Promise<void>((resolve) => (release = resolve));
+    channel.send = async (chatId, text, options) => {
+      await held;
+      return send(chatId, text, options);
+    };
+    expect(
+      progress.mirrorPrompt('c1', 'do the next thing', async () => undefined),
+    ).toBe(true);
+    const finishing = progress.finish('c1', 'Forge: cancelled.');
+    progress.begin('c1', 'chat-a', 'message-9', 'remote');
+    release();
+    await finishing;
+
+    // The old finish touched only its own message. The newer turn's bubble is
+    // neither edited nor deleted nor armed for deletion by it.
+    expect(channel.edits.map((e) => e.messageId)).not.toContain('message-9');
+    expect(channel.deleted.map((d) => d.messageId)).not.toContain('message-9');
+    expect(armAfter).not.toHaveBeenCalledWith(
+      'chat-a',
+      expect.arrayContaining(['message-9']),
+      expect.any(Number),
+    );
+    // And the new turn is still live: its next refresh lands on its own bubble.
+    progress.handle({ conversationId: 'c1', kind: 'status', text: 'Running tests…' });
+    await vi.advanceTimersByTimeAsync(1_000);
+    expect(channel.edits.at(-1)?.messageId).toBe('message-9');
+    await progress.dispose();
+  });
+
   it('clears timers on finish, dispose and replacement, and does not start one without edits', async () => {
     vi.useFakeTimers();
     const { channel, progress } = rig(1_000, 1_000);

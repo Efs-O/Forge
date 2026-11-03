@@ -1,15 +1,50 @@
 import * as fs from 'fs';
 import * as path from 'path';
-import * as yaml from 'js-yaml';
 import * as vscode from 'vscode';
 import { ForgeConfigSchema } from './schema';
+import { ENGINE_EXEC_FIELDS, engineNameForModel } from './engineSchema';
+import {
+  defaultPolicyPath,
+  readPolicyFile,
+  readYamlMapFile,
+  assertPolicyKeys,
+  assertPolicyValues,
+  assertNoSharedKeys,
+  assertConfigFileKeys,
+  assertNoExecFieldsInConfig,
+  policyEnforced,
+  policyKeysInConfig,
+  mergeConfigAndPolicy,
+} from './PolicyLoader';
+import type { YamlFileState } from './PolicyLoader';
 import type { ForgeConfig } from './types';
-import { availableProfilesFor, splitModelProfile } from './ConfigResolver';
+import { checkConfigCrossRefs } from './configChecks';
+import { effectiveGroupField } from './modelSchema';
+import { endpointHostOf, isLoopbackHost } from './policyYamlNodes';
+import { leftoverWarningText, modelRefKey, type ModelReference } from './modelReferences';
 import { permissionsSuppressedByBlock } from '../tools/PermissionResolver';
+import { getLogger } from '../util/logger';
 
 const CONFIG_FILENAME = 'config.yaml';
 
-export function loadConfig(storagePath: string): ForgeConfig {
+export interface LoadConfigOptions {
+  /** `~/.forge/policy.yaml` by default. A test passes a fixture copy — that is
+   *  the only reason this is open, since the policy file is machine-wide by
+   *  contract (`policySchema.ts`) and a workspace copy would be in an agent's
+   *  reach.
+   */
+  policyPath?: string;
+}
+
+/**
+ * Load the pair every consumer sees: `config.yaml` in `storagePath`, with
+ * `~/.forge/policy.yaml` layered beside it. Absent policy file = today's
+ * behaviour, key for key, which is what phase 2 promises: the split is only real
+ * once the owner runs the migration command, and until then both files may hold
+ * any key — except the same key in both at once, which is refused by name
+ * (`PolicyLoader.ts`) rather than merged.
+ */
+export function loadConfig(storagePath: string, options: LoadConfigOptions = {}): ForgeConfig {
   const filePath = path.join(storagePath, CONFIG_FILENAME);
 
   if (!fs.existsSync(filePath)) {
@@ -19,122 +54,225 @@ export function loadConfig(storagePath: string): ForgeConfig {
     );
   }
 
-  const raw = fs.readFileSync(filePath, 'utf8');
-  const parsed = (yaml.load(raw) ?? {}) as Record<string, unknown>;
+  const configState = readYamlMapFile(filePath);
+  const policyPath = options.policyPath ?? defaultPolicyPath();
+  const policyState = readPolicyFile(policyPath);
+  if (policyState.exists) {
+    assertPolicyKeys(policyState);
+    assertPolicyValues(policyState);
+    assertNoSharedKeys(configState, policyState);
+  }
+
+  // Phase 3's two config-side rules, both keyed to the same fact as the opening of
+  // `config.yaml` itself: the policy file exists. Before it does, these keys have
+  // nowhere else to live and `ownerPaths.ts` keeps `config.yaml` owner-only, so the
+  // load stays as phase 2 left it. After it does, an agent owns this file, and a
+  // key that says what an agent may do — or a program Forge runs — cannot be allowed
+  // to sit in the file the agent can rewrite.
+  assertConfigFileKeys(configState, policyState);
+  assertNoExecFieldsInConfig(configState, policyState);
+
+  const parsed = mergeConfigAndPolicy(configState, policyState);
 
   const result = ForgeConfigSchema.safeParse(parsed);
   if (!result.success) {
-    const issues = result.error.issues
-      .map((i) => `  • ${i.path.join('.')}: ${i.message}`)
-      .join('\n');
-    throw new Error(`Forge: config.yaml validation failed:\n${issues}`);
+    // Each line names the file that holds the top-level key, because "config.yaml
+    // validation failed" pointing at a line the owner cannot find in config.yaml
+    // is how a mis-placed policy block gets debugged by an hour of searching.
+    const lines = result.error.issues.map((issue) => {
+      const top = issue.path[0];
+      const source =
+        policyState.exists && typeof top === 'string' && policyState.raw[top] !== undefined
+          ? policyPath
+          : filePath;
+      return `  • ${source}: ${issue.path.join('.')}: ${issue.message}`;
+    });
+    const first = result.error.issues[0];
+    const firstTop = first?.path[0];
+    const failingFile =
+      policyState.exists && typeof firstTop === 'string' && policyState.raw[firstTop] !== undefined
+        ? policyPath
+        : filePath;
+    throw new Error(`Forge: ${path.basename(failingFile)} validation failed:\n${lines.join('\n')}`);
   }
 
   const config = result.data as ForgeConfig;
+  assertEnginesExist(config, policyPath);
+  assertModelEndpoints(config, policyState);
+  // An absent policy file is not an error: the owner has simply not run the
+  // migration yet. It is the state in which `config.yaml` is still owner-only, and
+  // the owner needs to be able to find out why their own config file is refusing
+  // edits. It is logged, and `/config` says it out loud (`nativeCommands.ts`
+  // `forge.openConfig` → `policyLockSentence` for an absent file), rather than
+  // toasted: a toast that appears at every launch until the owner acts is noise
+  // that trains them to dismiss the warnings that do mean something, and
+  // `loadConfig` runs on a hot reload every 150 ms.
+  if (!policyState.exists) {
+    getLogger().info(policySetupMessage(policyPath, policyKeysInConfig(configState)));
+  }
   warnOnDeprecatedKeys(parsed);
-  const seen = new Set<string>();
-  for (const model of config.models) {
-    if (seen.has(model.name)) {
-      throw new Error(`Forge: duplicate model name "${model.name}" in config.yaml`);
-    }
-    seen.add(model.name);
-  }
-  const modelNames = new Set(config.models.map((m) => m.name));
-  const profileNames = new Set(Object.keys(config.profiles ?? {}));
-  for (const model of config.models) {
-    for (const profile of model.profiles ?? []) {
-      if (!profileNames.has(profile)) {
-        throw new Error(
-          `Forge: model "${model.name}" references unknown profile "${profile}" (available: ${[...profileNames].join(', ') || 'none'})`,
-        );
-      }
-    }
-  }
-
-  // active_model may carry a trailing @profile (F6). Aliases are resolved at use
-  // time, so an active_model that is an alias key is valid too.
-  if (config.active_model) {
-    const { base, profile } = splitModelProfile(config.active_model);
-    const isAlias = Boolean(config.aliases?.[base]);
-    if (!isAlias && !modelNames.has(base)) {
-      throw new Error(
-        `Forge: active_model "${config.active_model}" does not match any configured model (${config.models.map((m) => m.name).join(', ')})`,
-      );
-    }
-    if (!isAlias && profile && !profileNames.has(profile)) {
-      throw new Error(
-        `Forge: active_model "${config.active_model}" references unknown profile "${profile}" (available: ${[...profileNames].join(', ') || 'none'})`,
-      );
-    }
-    if (!isAlias && profile && !availableProfilesFor(config, base).includes(profile)) {
-      throw new Error(
-        `Forge: active_model "${config.active_model}" uses a profile unavailable for model "${base}"`,
-      );
-    }
-  }
-
-  // Every alias target must resolve to a known base (+ known profile if present).
-  for (const [key, target] of Object.entries(config.aliases ?? {})) {
-    const { base, profile } = splitModelProfile(target);
-    if (!modelNames.has(base)) {
-      throw new Error(`Forge: alias "${key}" → "${target}" targets unknown model "${base}"`);
-    }
-    if (profile && !profileNames.has(profile)) {
-      throw new Error(
-        `Forge: alias "${key}" → "${target}" references unknown profile "${profile}"`,
-      );
-    }
-    if (profile && !availableProfilesFor(config, base).includes(profile)) {
-      throw new Error(`Forge: alias "${key}" uses a profile unavailable for model "${base}"`);
-    }
-  }
-
-  // Every model's group/groups reference must resolve to a defined group (F7).
-  const groupNames = new Set(Object.keys(config.groups ?? {}));
-  for (const model of config.models) {
-    const referenced = model.groups ?? (model.group ? [model.group] : []);
-    for (const name of referenced) {
-      if (!groupNames.has(name)) {
-        throw new Error(
-          `Forge: model "${model.name}" references unknown group "${name}" (defined: ${[...groupNames].join(', ') || 'none'})`,
-        );
-      }
-    }
-  }
-
-  // short_name must be globally unique against every model name, alias key,
-  // and other short_name (F7) — the fuzzy resolver depends on this.
-  const aliasKeys = Object.keys(config.aliases ?? {});
-  const seenShortNames = new Map<string, string>();
-  for (const model of config.models) {
-    if (!model.short_name) continue;
-    const short = model.short_name;
-    if (modelNames.has(short) && short !== model.name) {
-      throw new Error(
-        `Forge: short_name "${short}" on model "${model.name}" collides with a configured model name`,
-      );
-    }
-    if (aliasKeys.includes(short)) {
-      throw new Error(
-        `Forge: short_name "${short}" on model "${model.name}" collides with alias "${short}"`,
-      );
-    }
-    const owner = seenShortNames.get(short);
-    if (owner) {
-      throw new Error(
-        `Forge: short_name "${short}" is used by both "${owner}" and "${model.name}" — short_name must be unique`,
-      );
-    }
-    seenShortNames.set(short, model.name);
-  }
+  // The cross-block checks `ConfigWriter.updateConfigFile` also runs, so a
+  // write can never produce a file this loader then refuses. A reference that
+  // names a deleted model is not one of these errors: it comes back as a
+  // leftover and is reported below, never silently rewritten away.
+  const leftovers = checkConfigCrossRefs(config);
+  // A selection naming a deleted model becomes "no model active" — the state
+  // `active_model: none` already produces, which the send path ("Pick a model
+  // before sending") and the model picker handle. Nothing here guesses a
+  // replacement for a choice the user made.
+  if (leftovers.some((row) => row.kind === 'active_model')) config.active_model = null;
 
   warnOnSuppressedPermissions(config);
+  warnOnModelExecFields(config, policyPath);
+  reportLeftoverModelRefs(filePath, leftovers);
   return config;
 }
 
+/** A model naming an engine Forge cannot find would start the wrong program, or
+ *  none, and the only symptom would be a chat that never answers. The name is
+ *  checked here, where the owner can read it, not at spawn time. */
+function assertEnginesExist(config: ForgeConfig, policyPath: string): void {
+  const engines = config.engines ?? {};
+  for (const model of config.models) {
+    if (!model.engine || engines[model.engine]) continue;
+    throw new Error(
+      `Forge: model "${model.name}" names engine "${model.engine}", which is not in\n` +
+        `${policyPath} (configured engines: ${Object.keys(engines).join(', ') || 'none'}).\n` +
+        "Add that engine to policy.yaml, or change the model's `engine:` line.",
+    );
+  }
+}
+
+/**
+ * Phase 3: a model in `config.yaml` may reach only a host the owner allowed.
+ *
+ * `model_hosts` lives in policy.yaml, so without this rule an agent could add a
+ * model pointing at any server on the internet and the chat — including any secret
+ * it has read — would go there on the next message. Loopback is exempt: a server on
+ * this machine is not a way out, and `policyMigration.ts` writes the non-loopback
+ * hosts the config already uses into `model_hosts` as it moves, so a migrated owner
+ * does not get this error for a tailnet server they have been using for months.
+ */
+function assertModelEndpoints(config: ForgeConfig, policyState: YamlFileState): void {
+  if (!policyEnforced(policyState)) return;
+  const allowed = new Set((config.model_hosts ?? []).map((entry) => hostListEntry(entry)));
+  const rows: string[] = [];
+  for (const model of config.models) {
+    const endpoint = model.endpoint ?? effectiveGroupField(model, config.groups, 'endpoint');
+    const host = endpointHostOf(endpoint);
+    if (!host || isLoopbackHost(host) || allowed.has(host)) continue;
+    rows.push(`  • model "${model.name}": ${endpoint} → ${host}`);
+  }
+  if (rows.length === 0) return;
+  throw new Error(
+    'Forge: these models name a host that is not this machine and is not in model_hosts\n' +
+      `in ${policyState.path} (the owner's file):\n${rows.join('\n')}\n` +
+      'Add each host to model_hosts there, or run "Forge: Move security settings to policy.yaml"\n' +
+      'again, which writes the hosts these models already talk to for you. A model and its\n' +
+      'host in the file an agent can edit would let that agent send the chat, and any\n' +
+      `secret the chat has read, to a server the owner never chose.\n(${policyState.path})`,
+  );
+}
+
+/** One entry of `model_hosts`, judged as a host: the owner may write either
+ *  `100.64.0.10` or the full endpoint, and a list that refused the second spelling
+ *  would send them back to the error it was supposed to solve. */
+function hostListEntry(value: string): string {
+  return (endpointHostOf(value) ?? value).toLowerCase();
+}
+
+/** The setup message phase 3 promises when there is no policy file: the file, what
+ *  is still being read out of `config.yaml`, and the one command that fixes it. It
+ *  warns rather than refuses because the state is legal — nothing has been moved
+ *  yet — and because refusing it would stop a fresh install from starting at all.
+ *  While this is the case `ownerPaths.ts` keeps `config.yaml` owner-only, so the
+ *  guards are not open: the file is closed instead of moved. */
+function policySetupMessage(policyPath: string, keysInConfig: string[]): string {
+  const shown = keysInConfig.slice(0, 6).join(', ');
+  const more = keysInConfig.length > 6 ? `, and ${keysInConfig.length - 6} more` : '';
+  const held = keysInConfig.length
+    ? `holding ${keysInConfig.length} security key${keysInConfig.length === 1 ? '' : 's'}\n  (${shown}${more})`
+    : 'holding no security keys';
+  return (
+    `Forge: ${policyPath} does not exist, so config.yaml is still ${held}\n` +
+    'and is therefore owner-only: an agent may not edit the file that says what an\n' +
+    'agent may do. Run "Forge: Move security settings to policy.yaml" to split the\n' +
+    'pair: that opens config.yaml to agents, and lets "Forge: Lock policy.yaml"\n' +
+    'protect the policy file afterwards.'
+  );
+}
+
+/** Phase 2: a model that still carries its own server programs loads and works
+ *  exactly as before, but those lines are what the migration command turns into
+ *  engines, and an owner who has never seen the engine list has no reason to
+ *  expect the names it will get. Warn once, naming each model and the engine its
+ *  fields belong in — the same rule `policyMigration.ts` uses, so the warning and
+ *  the file it produces agree. */
+function warnOnModelExecFields(config: ForgeConfig, policyPath: string): void {
+  const rows = config.models.filter((model) =>
+    ENGINE_EXEC_FIELDS.some((field) => model[field] !== undefined),
+  );
+  if (rows.length === 0) return;
+  const shown = rows
+    .slice(0, 6)
+    .map((model) => `${model.name} → engine "${engineNameForModel(model)}"`);
+  const more = rows.length > shown.length ? ` and ${rows.length - shown.length} more` : '';
+  warnOnce(
+    `Forge: ${rows.length} model${rows.length === 1 ? '' : 's'} in config.yaml still name their own\n` +
+      `server programs (${shown.join(', ')}${more}). Each belongs in ${policyPath} as an engine.\n` +
+      'Run "Forge: Move security settings to policy.yaml" to move them; until then they load\n' +
+      'as they are.',
+  );
+}
+
+/**
+ * Report the references naming a model that is gone: one toast per distinct
+ * set, the same lines in the output log, and an `Open config.yaml` button.
+ * The watcher reloads on every save, so an unconditional toast would fire on
+ * each keystroke-to-disk: the same set on a hot reload is not repeated, and a
+ * load that finds none clears the set so a later regression can warn again.
+ *
+ * This is the rule that invalid config must never be masked — the config still
+ * loads (a stale name must not brick every other config change) and the user
+ * is told which paths are stale and what to do about them.
+ */
+const shownLeftoverSets = new Set<string>();
+
+function reportLeftoverModelRefs(configPath: string, leftovers: ModelReference[]): void {
+  if (leftovers.length === 0) {
+    shownLeftoverSets.clear();
+    return;
+  }
+  const setKey = leftovers
+    .map((row) => modelRefKey(row))
+    .sort()
+    .join('\n');
+  if (shownLeftoverSets.has(setKey)) return;
+  shownLeftoverSets.add(setKey);
+  const message = leftoverWarningText(leftovers);
+  getLogger().warn(message);
+  const choice = vscode.window.showWarningMessage(message, 'Open config.yaml');
+  if (!choice) return;
+  void choice
+    .then((picked) =>
+      picked === 'Open config.yaml'
+        ? vscode.workspace.openTextDocument(vscode.Uri.file(configPath))
+        : undefined,
+    )
+    .then((doc) => (doc ? vscode.window.showTextDocument(doc, { preview: false }) : undefined));
+}
 // The config watcher reloads on every save, so an unconditional toast would
 // fire on each keystroke-to-disk. Warn once per distinct message per session.
 const warnedMessages = new Set<string>();
+
+/** One toast per distinct message per session, for a load-time warning that is
+ *  not about a stale model reference (those get their own set, so a clean load
+ *  can clear them and a later regression can warn again). */
+function warnOnce(message: string): void {
+  if (warnedMessages.has(message)) return;
+  warnedMessages.add(message);
+  void vscode.window.showWarningMessage(message);
+}
 
 /**
  * A permissions block is all-or-nothing: naming one group makes the schema
@@ -148,11 +286,10 @@ function warnOnSuppressedPermissions(config: ForgeConfig): void {
   const message =
     'Forge: a permissions block is present, so these capabilities are OFF by ' +
     `schema default rather than by choice: ${suppressed.join(', ')}. Their tools are ` +
-    'not advertised to the model at all. Set each one explicitly in config.yaml ' +
-    'if you want it.';
-  if (warnedMessages.has(message)) return;
-  warnedMessages.add(message);
-  void vscode.window.showWarningMessage(message);
+    'not advertised to the model at all. Set each one explicitly in the permissions ' +
+    'block — config.yaml, or ~/.forge/policy.yaml once you have run "Forge: Move ' +
+    'security settings to policy.yaml" — if you want it.';
+  warnOnce(message);
 }
 
 /**
@@ -178,10 +315,13 @@ export function resolveExplicitConfigPath(raw: string): string | null {
 }
 
 /**
- * Find config.yaml: optional absolute override (settings), then workspace .forge/, then global storage.
- * Returns the path if found, null otherwise.
+ * The same order as `findConfigPath` — explicit setting, then the workspace's
+ * `.forge/config.yaml`, then global storage — for a folder this window does not
+ * have open, which is what the target window of a workspace switch resolves.
+ * One implementation, so the two cannot drift apart.
  */
-export function findConfigPath(
+export function findConfigPathFor(
+  workspaceRoot: string | null,
   globalStoragePath: string,
   explicitConfigPathSetting?: string | null,
 ): string | null {
@@ -189,17 +329,31 @@ export function findConfigPath(
     ? resolveExplicitConfigPath(explicitConfigPathSetting)
     : null;
   if (fromSetting) return fromSetting;
-
   // Check workspace root first
-  const workspaceFolders = vscode.workspace.workspaceFolders;
-  if (workspaceFolders?.length) {
-    const wsConfig = path.join(workspaceFolders[0].uri.fsPath, '.forge', CONFIG_FILENAME);
+  if (workspaceRoot) {
+    const wsConfig = path.join(workspaceRoot, '.forge', CONFIG_FILENAME);
     if (fs.existsSync(wsConfig)) return wsConfig;
   }
   // Fall back to global storage
   const globalConfig = path.join(globalStoragePath, CONFIG_FILENAME);
   if (fs.existsSync(globalConfig)) return globalConfig;
   return null;
+}
+
+/**
+ * Find config.yaml: optional absolute override (settings), then workspace .forge/, then global storage.
+ * Returns the path if found, null otherwise.
+ */
+export function findConfigPath(
+  globalStoragePath: string,
+  explicitConfigPathSetting?: string | null,
+): string | null {
+  const workspaceFolders = vscode.workspace.workspaceFolders;
+  return findConfigPathFor(
+    workspaceFolders?.length ? workspaceFolders[0].uri.fsPath : null,
+    globalStoragePath,
+    explicitConfigPathSetting,
+  );
 }
 
 /**
@@ -248,6 +402,10 @@ export function watchForgeConfigPaths(
   };
 
   watchOne(primaryConfigYamlPath);
+  // The policy file is machine-wide, so it is watched wherever it lives: an edit
+  // to it reloads the same way an edit to config.yaml does, and a save that
+  // touches both produces one reload, not two, because the debounce is shared.
+  watchOne(defaultPolicyPath());
   for (const p of extraAbsolutePaths) watchOne(p);
 
   watchers.push(

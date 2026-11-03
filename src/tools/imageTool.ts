@@ -5,6 +5,8 @@ import type { ContentPart } from '../llm/types';
 import { isPathInside } from '../util/pathContainment';
 import { resolveWorkspacePath } from '../util/WorkspacePaths';
 import type { MultimodalToolResult, RegisteredTool } from './ToolRegistry';
+import type { ForgeConfig } from '../config/types';
+import { MAX_PDF_BYTES } from '../documents/pdfRenderer';
 
 /** Keep tool-loaded images within the same practical envelope as UI uploads. */
 export const MAX_VIEW_IMAGE_BYTES = 10 * 1024 * 1024;
@@ -91,20 +93,42 @@ export function visionUnavailableMessage(modelName: string): string {
   );
 }
 
-export function makeViewImageTool(): RegisteredTool {
+interface RenderedPdfPage {
+  page: number;
+  png: Buffer;
+  width: number;
+  height: number;
+}
+
+export type PdfPageRenderer = (
+  bytes: Buffer,
+  pageNumbers: readonly number[],
+  getConfig: (() => ForgeConfig) | undefined,
+  abortSignal: AbortSignal | undefined,
+) => Promise<RenderedPdfPage[]>;
+
+export function makeViewImageTool(
+  getConfig?: () => ForgeConfig,
+  injectedPdfRenderer?: PdfPageRenderer,
+): RegisteredTool {
   return {
     definition: {
       type: 'function',
       function: {
         name: 'view_image',
         description:
-          'Load an image file from the workspace so you can see it. Needs a vision model; on a text-only model report that you cannot see it and ask the user to switch models. The path may be workspace-relative or absolute. Supported formats: PNG, JPEG, GIF, BMP, and WebP. Maximum file size is 10 MB.',
+          'Load an image or PDF page so you can see it. Needs a vision model; on a text-only model report that you cannot see it and ask the user to switch models. The path may be workspace-relative or absolute. Images: PNG, JPEG, GIF, BMP, WebP, maximum 10 MB. For PDF, pages is optional (default 1), a page or range such as "2-4", at most 4 pages per call.',
         parameters: {
           type: 'object',
           properties: {
             path: {
               type: 'string',
               description: 'Image path, relative to the workspace root or absolute.',
+            },
+            pages: {
+              type: 'string',
+              description:
+                'PDF only: 1-based page or inclusive range such as "2-4"; at most 4 pages.',
             },
           },
           required: ['path'],
@@ -114,14 +138,58 @@ export function makeViewImageTool(): RegisteredTool {
     },
     permission: 'read',
     requiresVision: (name) => visionUnavailableMessage(name),
-    handler: async (args): Promise<MultimodalToolResult> => {
+    handler: async (args, context): Promise<MultimodalToolResult> => {
       const requestedPath = args['path'];
       if (typeof requestedPath !== 'string') {
         throw new Error('view_image: path must be a string.');
       }
       const { root, file } = await resolveImagePath(requestedPath);
+      const extension = path.extname(file).toLowerCase();
       const stat = await fs.stat(file);
       if (!stat.isFile()) throw new Error(`view_image: not a file: ${requestedPath}`);
+      if (extension === '.pdf') {
+        if (stat.size > MAX_PDF_BYTES)
+          throw new Error(
+            `view_image: PDF is too large (${stat.size.toLocaleString()} bytes; maximum ${MAX_PDF_BYTES.toLocaleString()}).`,
+          );
+        const pageSpec = typeof args['pages'] === 'string' ? args['pages'] : '1';
+        const match = pageSpec.match(/^(\d+)(?:-(\d+))?$/);
+        if (!match)
+          throw new Error('view_image: pages must be a 1-based page or range such as "2-4".');
+        const first = Number(match[1]);
+        const last = Number(match[2] ?? match[1]);
+        if (first < 1 || last < first || last - first > 3)
+          throw new Error(
+            'view_image: request no more than 4 PDF pages in an increasing 1-based range.',
+          );
+        const renderPdfPages = injectedPdfRenderer;
+        if (!renderPdfPages)
+          throw new Error(
+            'view_image: PDF page rendering is not available in this extension session.',
+          );
+        const rendered = await renderPdfPages(
+          await fs.readFile(file),
+          Array.from({ length: last - first + 1 }, (_, i) => first + i),
+          getConfig,
+          context?.abortSignal,
+        );
+        const relative = isPathInside(root, file)
+          ? path.relative(root, file) || path.basename(file)
+          : file;
+        const text = `Loaded PDF pages ${rendered.map((page) => page.page).join(', ')} from ${relative}.`;
+        return {
+          text,
+          content: [
+            { type: 'text', text },
+            ...rendered.map((page) => ({
+              type: 'image_url' as const,
+              image_url: { url: `data:image/png;base64,${page.png.toString('base64')}` },
+            })),
+          ],
+        };
+      }
+      if (args['pages'] !== undefined)
+        throw new Error('view_image: pages is only available when path names a PDF.');
       if (stat.size > MAX_VIEW_IMAGE_BYTES) {
         throw new Error(
           `view_image: image is too large (${stat.size.toLocaleString()} bytes; maximum is ${MAX_VIEW_IMAGE_BYTES.toLocaleString()}).`,

@@ -36,6 +36,15 @@ export interface HostActivityEvent {
   /** This activity opens the agent-originated answer sequence; skip progress edits for that turn. */
   suppressProgress?: boolean;
   /**
+   * The turn's own speed line, carried beside the text rather than inside it.
+   *
+   * It is display-only: the answer text that becomes the conversation's message,
+   * the persisted transcript and the model's next request never see it, because
+   * a model that reads its own speed lines learns to write fake ones. Only the
+   * transport that shows speeds appends it, to the last part of the answer.
+   */
+  speedLine?: string;
+  /**
    * Transient status the user does not need to keep — a model unloaded, the
    * backend restarted. True means the transport deletes the delivered message
    * after `delete_command_replies_after`, the same delay that governs command

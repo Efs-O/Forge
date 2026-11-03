@@ -83,6 +83,7 @@ async function sendToPanelOwnedCodex(
   prompt: string,
   signal: AbortSignal,
   timeoutMessage: string,
+  waitMs: number,
   onAccepted?: () => void,
 ): Promise<AskAgentRunResult> {
   const paths = busPaths();
@@ -93,7 +94,7 @@ async function sendToPanelOwnedCodex(
     const message = codexMessage(replyFile(paths, id), id, link.title, prompt);
     await queueToCodex(busConfig(config()).codex_cli, link.sessionId, message, signal);
     onAccepted?.();
-    const reply = await waitForReply(paths, id, 20 * 60_000, signal);
+    const reply = await waitForReply(paths, id, waitMs, signal);
     if (reply !== undefined) {
       clearExchange(paths, id);
       return { status: 'completed', finalText: reply };
@@ -128,8 +129,14 @@ export function makeAskAgentRuntime(options: {
   getConfig: () => ForgeConfig;
   driver?: CliAgentDriver;
   panelCommands?: AskAgentPanelCommands;
+  /**
+   * How long one ask may run, live or headless. Unset: a live session gets
+   * 20 minutes and a headless run the CLI driver's own default.
+   */
+  waitLimitMs?: number;
 }): AskAgentRuntime {
   const driver = options.driver ?? new CliAgentDriver();
+  const liveWaitMs = options.waitLimitMs ?? 20 * 60_000;
   const open = makeAskAgentPanelOpener(
     options.panelCommands ?? {
       getCommands: () => vscode.commands.getCommands(true),
@@ -161,6 +168,7 @@ export function makeAskAgentRuntime(options: {
           prompt,
           signal,
           'The linked Codex thread did not reply before the wait limit.',
+          liveWaitMs,
           onAccepted,
         );
       }
@@ -184,7 +192,7 @@ export function makeAskAgentRuntime(options: {
             claudeQuestion(paths.script, id, link.title, prompt),
           );
           onAccepted?.();
-          const reply = await waitForReply(paths, id, 20 * 60_000, signal);
+          const reply = await waitForReply(paths, id, liveWaitMs, signal);
           if (reply !== undefined) {
             clearExchange(paths, id);
             return { status: 'completed', finalText: reply };
@@ -238,6 +246,7 @@ export function makeAskAgentRuntime(options: {
           ...(onAccepted ? { onSpawned: onAccepted } : {}),
           onSessionId,
           ...(model ? { model } : {}),
+          ...(options.waitLimitMs ? { timeoutMs: options.waitLimitMs } : {}),
         });
         const mapped = toRunResult(result);
         if (mapped.status === 'failed' && isGoneMessage(mapped.error ?? ''))

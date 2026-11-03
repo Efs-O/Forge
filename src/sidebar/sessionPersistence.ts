@@ -1,17 +1,11 @@
-/**
- * Reading and writing the multi-conversation session in workspace state.
- *
- * Split out of `sessionTypes`, which keeps the shapes and the pure derivations.
- * Everything here touches the Memento or migrates an older record — including
- * the legacy single-history migration that must keep working for anyone who
- * skipped a version.
- */
-
 import type { Memento } from 'vscode';
-import type { ChatMessage } from '../llm/types';
+import { repairInterruptedToolCalls } from './interruptedToolCalls';
 import type { CompactionState } from './compactionTypes';
-import { rebuildIndex, type AgentLinkConflict } from '../agentLinks/chatAgentLinks';
+import type { ForgeInstructionsPin } from './forgeInstructionsPin';
+import { rebuildIndex } from '../agentLinks/chatAgentLinks';
 import type { HistoryArchive } from './HistoryArchive';
+import { persistedRetentionState, runtimeRetentionState } from './conversationRetentionState';
+import { seedChatHostApprovals } from './chatApprovalRules';
 import { openConversationsPersistenceFor, persistMemento } from './openConversationsPersistence';
 import {
   ACTIVE_ID_KEY,
@@ -35,7 +29,21 @@ function emptyConversation(id: string, now: number): ConversationRuntime {
     title: UNTITLED_TITLE,
     createdAt: now,
     updatedAt: now,
+    retention_activity_at: now,
+    keep_open: false,
     messages: [],
+  };
+}
+
+function copyPin(pin: {
+  text: string;
+  windowStart: number;
+  announced?: { text: string; messageIndex: number } | undefined;
+}): ForgeInstructionsPin {
+  return {
+    text: pin.text,
+    windowStart: pin.windowStart,
+    ...(pin.announced ? { announced: { ...pin.announced } } : {}),
   };
 }
 
@@ -121,18 +129,23 @@ export function createDefaultSession(): SidebarRuntime {
 }
 
 export function persistedToRuntime(p: ConversationPersisted): ConversationRuntime {
-  return {
+  const conversation: ConversationRuntime = {
     id: p.id,
     title: p.title,
     createdAt: p.createdAt,
     updatedAt: p.updatedAt,
+    ...persistedRetentionState(p),
     messages: repairInterruptedToolCalls(chatMessagesFromSlim(p.messages)),
     ...(p.agentLinks !== undefined ? { agentLinks: { ...p.agentLinks } } : {}),
+    ...(p.opened_by !== undefined ? { opened_by: p.opened_by } : {}),
     ...(p.active_model !== undefined ? { active_model: p.active_model } : {}),
     ...(p.cli_sessions !== undefined ? { cli_sessions: { ...p.cli_sessions } } : {}),
     ...(p.compaction !== undefined ? { compaction: copyCompaction(p.compaction) } : {}),
     ...(p.plan !== undefined
       ? { plan: { ...p.plan, items: p.plan.items.map((i) => ({ ...i })) } }
+      : {}),
+    ...(p.forge_instructions_pin !== undefined
+      ? { forgeInstructionsPin: copyPin(p.forge_instructions_pin) }
       : {}),
     ...(p.display_diffs !== undefined
       ? { displayDiffs: p.display_diffs.map((diff) => ({ ...diff })) }
@@ -145,64 +158,40 @@ export function persistedToRuntime(p: ConversationPersisted): ConversationRuntim
     ...(p.last_output_tokens !== undefined ? { last_output_tokens: p.last_output_tokens } : {}),
     ...(p.model_request_count !== undefined ? { model_request_count: p.model_request_count } : {}),
     ...(p.tool_call_count !== undefined ? { tool_call_count: p.tool_call_count } : {}),
+    ...(p.untrusted_since_ms !== undefined ? { untrusted_since_ms: p.untrusted_since_ms } : {}),
+    ...(p.approval_rules !== undefined ? { approval_rules: [...(p.approval_rules ?? [])] } : {}),
+    ...(p.clanker !== undefined ? { clanker: p.clanker } : {}),
   };
+  seedChatHostApprovals(conversation);
+  return conversation;
 }
 
-/**
- * Result synthesized for a tool call that was still running when Forge was
- * reloaded.
- *
- * Exported because `compactionLedger.ts` must classify it as an UNKNOWN
- * outcome: it is not a failure (it carries no `Error:`/`User declined:`
- * prefix), so a classifier that only checks `isFailureResult` would record the
- * interrupted call as a completed one, in a block that vouches for being
- * host-recorded truth.
- */
-export const TOOL_INTERRUPTED_RESULT =
-  'Forge was reloaded while this tool call was running. Its result is unknown; inspect the workspace before deciding whether to rerun it.';
-
-/**
- * A reload can occur after the assistant has announced tool calls but before
- * the host has appended every result. Close those calls with an explicit
- * unknown outcome so strict chat templates remain valid and the next turn does
- * not pretend the tool completed.
- */
-function repairInterruptedToolCalls(messages: ChatMessage[]): ChatMessage[] {
-  const answered = new Set(
-    messages
-      .filter((m) => m.role === 'tool' && typeof m.tool_call_id === 'string')
-      .map((m) => m.tool_call_id!),
-  );
-  const repaired: ChatMessage[] = [];
-  for (const message of messages) {
-    repaired.push(message);
-    if (message.role !== 'assistant' || !message.tool_calls?.length) continue;
-    for (const call of message.tool_calls) {
-      if (answered.has(call.id)) continue;
-      repaired.push({
-        role: 'tool',
-        content: TOOL_INTERRUPTED_RESULT,
-        tool_call_id: call.id,
-        name: call.function.name,
-      });
-    }
-  }
-  return repaired;
-}
+/** The reload repair lives in `interruptedToolCalls.ts`; re-exported so
+ *  `compactionLedger.ts` and the archive tests keep one import path. */
+export { TOOL_INTERRUPTED_RESULT } from './interruptedToolCalls';
 
 function conversationToPersisted(c: ConversationRuntime): ConversationPersisted {
   return {
     id: c.id,
     title: c.title,
+    // Who started the chat, when a bus prompt did. It has to travel with the
+    // record: the sessions panel badges a chat from it, and the overflow
+    // archive's index row is built from this same object.
+    ...(c.origin_agent !== undefined ? { origin_agent: c.origin_agent } : {}),
     createdAt: c.createdAt,
     updatedAt: c.updatedAt,
+    ...runtimeRetentionState(c),
     messages: slimPersistMessages(c.messages),
     ...(c.agentLinks !== undefined ? { agentLinks: { ...c.agentLinks } } : {}),
+    ...(c.opened_by !== undefined ? { opened_by: c.opened_by } : {}),
     ...(c.active_model !== undefined ? { active_model: c.active_model } : {}),
     ...(c.cli_sessions !== undefined ? { cli_sessions: { ...c.cli_sessions } } : {}),
     ...(c.compaction !== undefined ? { compaction: copyCompaction(c.compaction) } : {}),
     ...(c.plan !== undefined
       ? { plan: { ...c.plan, items: c.plan.items.map((i) => ({ ...i })) } }
+      : {}),
+    ...(c.forgeInstructionsPin !== undefined
+      ? { forge_instructions_pin: copyPin(c.forgeInstructionsPin) }
       : {}),
     ...(c.displayDiffs !== undefined
       ? { display_diffs: c.displayDiffs.map((diff) => ({ ...diff })) }
@@ -215,6 +204,9 @@ function conversationToPersisted(c: ConversationRuntime): ConversationPersisted 
     ...(c.last_output_tokens !== undefined ? { last_output_tokens: c.last_output_tokens } : {}),
     ...(c.model_request_count !== undefined ? { model_request_count: c.model_request_count } : {}),
     ...(c.tool_call_count !== undefined ? { tool_call_count: c.tool_call_count } : {}),
+    ...(c.untrusted_since_ms !== undefined ? { untrusted_since_ms: c.untrusted_since_ms } : {}),
+    ...(c.approval_rules !== undefined ? { approval_rules: [...(c.approval_rules ?? [])] } : {}),
+    ...(c.clanker !== undefined ? { clanker: c.clanker } : {}),
   };
 }
 
@@ -269,8 +261,13 @@ function migrateLegacyHistory(
       {
         id,
         title,
+        // The name came from the first prompt of the migrated session, so it is
+        // marked `prompt` and the daily retitle job may replace it.
+        title_source: 'prompt',
         createdAt: now,
         updatedAt: now,
+        retention_activity_at: now,
+        keep_open: false,
         messages: chatMessagesFromSlim(legacy),
       },
     ],
@@ -287,12 +284,18 @@ function migrateLegacyHistory(
 export function loadSidebarSession(
   workspaceState: Memento,
   archive?: HistoryArchive,
-  notifyWarning?: (message: string) => void,
 ): SidebarRuntime {
   const openPersistence = openConversationsPersistenceFor(
     workspaceState,
     archive?.openConversations,
   );
+  // Clanker used to be a window-wide key here, armed by one tab and felt by every
+  // one. It is a chat's now, stored on the chat's own record (`chatClanker.ts`), so
+  // the old value is cleared once: nothing reads it, and a leftover would be a mode
+  // the owner can neither see nor turn off. Written directly rather than through
+  // `persistMemento`, because that chains writes behind each other and this one has
+  // to land before the flag is first read, not after the last save.
+  void workspaceState.update('forge.clankerMode', undefined);
   const loaded = openPersistence.load(workspaceState);
   const d = loaded.v1;
   if (loaded.hasSession) {
@@ -331,7 +334,6 @@ export function loadSidebarSession(
         history,
       },
       archive,
-      notifyWarning,
     );
   }
 
@@ -343,7 +345,7 @@ export function loadSidebarSession(
     // here could erase the only durable copy when the replacement hits quota.
     persistMemento(workspaceState, SESSION_KEY_V1, runtimeToPersisted(migrated));
     archive?.overflow.list(migrated.conversations.map((conversation) => conversation.id));
-    return indexSession(migrated, archive, notifyWarning);
+    return indexSession(migrated, archive);
   }
 
   const session = createDefaultSession();
@@ -352,21 +354,19 @@ export function loadSidebarSession(
     ...session.conversations.map((conversation) => conversation.id),
     ...session.history.map((conversation) => conversation.id),
   ]);
-  return indexSession(session, archive, notifyWarning);
+  return indexSession(session, archive);
 }
 
-function indexSession(
-  session: SidebarRuntime,
-  archive?: HistoryArchive,
-  notifyWarning?: (message: string) => void,
-): SidebarRuntime {
-  const conflicts = rebuildIndex(agentLinkRecords(session, archive));
-  for (const conflict of conflicts) notifyWarning?.(conflictWarning(conflict));
+/**
+ * Rebuild the agent-session index from every record this load brings in.
+ * Several chats may hold the same agent session now, so there is no conflict
+ * left to report: the newest `lastUsedAt` is simply the chat the session
+ * addresses next, and the rest stay reachable with `--to`
+ * (docs/plans/V1_FINISH_PLAN.md lane 4 phase 5).
+ */
+function indexSession(session: SidebarRuntime, archive?: HistoryArchive): SidebarRuntime {
+  rebuildIndex(agentLinkRecords(session, archive));
   return session;
-}
-
-function conflictWarning(conflict: AgentLinkConflict): string {
-  return `Forge: agent session ${conflict.sessionId} is linked to chats "${conflict.firstChat}" and "${conflict.secondChat}"; keeping it with "${conflict.keptChat}" (newest last used).`;
 }
 
 function agentLinkRecords(
@@ -429,7 +429,7 @@ export function saveSidebarSession(
   session: SidebarRuntime,
   archive?: HistoryArchive,
   changedId?: string,
-): void {
+): Promise<boolean> {
   session.history.sort((a, b) => b.updatedAt - a.updatedAt);
   // Past the cap, chats are evicted to the archive, not dropped. Without a
   // folder (no archive) they are dropped, as they always were.
@@ -439,7 +439,7 @@ export function saveSidebarSession(
   session.history = session.history.slice(0, MAX_HISTORY_CONVERSATIONS);
   const inFile = archive?.save(session.history, conversationToPersisted);
   const historyFallback = inFile === true ? [] : session.history.map(conversationToPersisted);
-  openConversationsPersistenceFor(workspaceState, archive?.openConversations).save(
+  return openConversationsPersistenceFor(workspaceState, archive?.openConversations).save(
     workspaceState,
     session,
     conversationToPersisted,

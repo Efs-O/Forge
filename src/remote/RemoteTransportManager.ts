@@ -42,6 +42,43 @@ export interface ActiveTransport {
 }
 
 /**
+ * How long a window keeps trying for the transport lease when a chat has been
+ * handed to it. It has to outlast the 20 s stale horizon, because the window
+ * that released the lease may still be shutting down, and because a cold VS
+ * Code window on a project this machine has not opened recently reached its
+ * remote endpoint 11.7 s after it opened — 73 s after the other window asked
+ * for it in the worst case measured 2026-10-29 (`docs/reports/
+ * WORKSPACE_SWITCH_PHASE0_TIMINGS.md`), which is also where the rollback delay
+ * comes from. Giving up earlier would strand a chat whose window is merely
+ * slow, and two windows that both give up leave nothing serving the phone.
+ */
+export const TAKEOVER_CLAIM_DEADLINE_MS = 90_000;
+
+/**
+ * How long an ordinary start waits for the lease when no chat is waiting for
+ * this window: one retry, because the holder is serving the phone right now and
+ * a longer wait would only stall this window's own lifecycle chain — activation
+ * awaits `applyConfig`, so a window with nothing to claim must fail fast, the
+ * way it always did, and be retried by `RemoteWindowWatch` if the lease comes
+ * free later.
+ */
+export const TAKEOVER_RACE_DEADLINE_MS = 2_000;
+
+const TAKEOVER_RETRY_MS = 2_000;
+
+/** The last lease refusal, handed on unchanged. A second window has always
+ *  seen this text in its start failure, and phase 2 must not give it a new
+ *  wording along with the new behaviour: what changed is that `takeOver` now
+ *  **throws** it instead of returning quietly after five attempts.
+ */
+function lastTakeoverFailure(last: unknown): RemoteLeaseError {
+  if (last instanceof RemoteLeaseError) return last;
+  return new RemoteLeaseError(
+    `Forge could not take over the transports: ${last instanceof Error ? last.message : String(last ?? 'no attempt was made')}`,
+  );
+}
+
+/**
  * Owns the lifecycle of running transports: lease acquisition, channel
  * construction, voice/speech wiring, controller startup and teardown. The
  * runtime keeps the reads (pairing, status, validation), the lifecycle
@@ -236,21 +273,51 @@ export class RemoteTransportManager {
   }
 
   /**
+   * Take the lease and start every configured transport, retrying until
+   * `deadlineMs` passes, then **throwing** the last lease refusal instead of
+   * returning quietly — a caller that cannot tell success from giving up cannot
+   * tell whether the chat it just claimed is being served.
+   *
    * The source window releases its lease before opening the target folder, but
    * the two windows are separate processes: a few seconds of overlap is normal
-   * and is not a reason to refuse the chat.
+   * and is not a reason to refuse the chat, which is why this waits at all.
+   * `signal` is what `dispose()` aborts, so a window that is going away stops
+   * retrying instead of holding the lifecycle chain for the whole deadline.
    */
-  async takeOver(config: ForgeConfig): Promise<void> {
-    for (let attempt = 0; attempt < 5; attempt += 1) {
+  async takeOver(
+    config: ForgeConfig,
+    opts: { deadlineMs?: number; signal?: AbortSignal } = {},
+  ): Promise<void> {
+    const deadlineMs = opts.deadlineMs ?? TAKEOVER_CLAIM_DEADLINE_MS;
+    const startedAt = Date.now();
+    let last: unknown;
+    for (;;) {
       if (this.active.size > 0) return;
       try {
         await this.startAll(config);
         return;
       } catch (err) {
         if (!(err instanceof RemoteLeaseError)) throw err;
-        await new Promise((resolve) => setTimeout(resolve, 2_000));
+        last = err;
       }
+      const remaining = deadlineMs - (Date.now() - startedAt);
+      if (remaining <= 0 || opts.signal?.aborted) throw lastTakeoverFailure(last);
+      await this.sleep(Math.min(TAKEOVER_RETRY_MS, remaining), opts.signal);
+      if (opts.signal?.aborted) throw lastTakeoverFailure(last);
     }
+  }
+
+  /** Bounded sleep that ends early on abort, so `dispose()` is not a wait. */
+  private sleep(ms: number, signal?: AbortSignal): Promise<void> {
+    return new Promise((resolve) => {
+      function done(): void {
+        clearTimeout(timer);
+        signal?.removeEventListener('abort', done);
+        resolve();
+      }
+      const timer = setTimeout(done, ms);
+      signal?.addEventListener('abort', done, { once: true });
+    });
   }
 
   async stopTransport(name: string): Promise<void> {

@@ -1,3 +1,4 @@
+import * as path from 'path';
 import { afterAll, describe, expect, it } from 'vitest';
 import type { MultimodalToolResult } from '../../src/tools/ToolRegistry';
 import { EMPTY_PAGE, PAGE, RICH_PAGE, createBrowserHarness } from '../support/browserHarness';
@@ -28,13 +29,20 @@ import { EMPTY_PAGE, PAGE, RICH_PAGE, createBrowserHarness } from '../support/br
  *
  * A `data:` URL is used for every fixture so the origin-approval gate never
  * fires (a data: URL has no origin), keeping the loop deterministic. The
- * screenshot lands in the real `~/.forge/screenshots/<conv>/` path by design
- * (plan §4.3).
+ * screenshot goes to the harness's temp screenshot root, NOT the owner's real
+ * `~/.forge/screenshots`: the harness sets `FORGE_SCREENSHOT_DIR` and removes
+ * the folder at `afterAll`. It used to write into the owner's home folder under
+ * this file's `browser-integration-test` id, which filled it with 2,604 PNGs in
+ * a month (ledger BL-011); the assertion in the Phase 1 gate is what keeps that
+ * from coming back.
  */
 
 /** One shared session: the tests below are ordered and build on each other. */
 const h = createBrowserHarness('browser-integration-test');
 const { mgr, call, callText, pngFromShot, parseInspect, requireBrowser } = h;
+
+/** Windows and POSIX both appear in these paths, so compare in one shape. */
+const comparable = (p: string): string => p.split(path.sep).join('/').toLowerCase();
 
 describe('browser tools: inspect, index identity, coordinate bounds (Phase 1)', () => {
   afterAll(async () => {
@@ -58,6 +66,14 @@ describe('browser tools: inspect, index identity, coordinate bounds (Phase 1)', 
     expect(shot1.content).toBeDefined();
     expect(shot1.text).toMatch(/coord_space=image_px/);
     expect(shot1.text).toMatch(/Saved to /);
+    // The capture has to land in this run's temp screenshot root, not in the
+    // owner's `~/.forge/screenshots` under an id that is not a chat (BL-011).
+    // `Saved to <path>.` is the last sentence of the result text, and the path
+    // can contain spaces (a user folder named "efso office" here), so take the
+    // rest of the text rather than matching to a punctuation character.
+    const savedPath = (shot1.text.split('Saved to ')[1] ?? '').replace(/\.+$/u, '');
+    expect(comparable(savedPath).startsWith(`${comparable(h.screenshotRoot)}/`)).toBe(true);
+    expect(comparable(savedPath)).toContain('browser-integration-test');
     const img1 = shot1.content!.find((p) => p.type === 'image_url') as {
       image_url: { url: string };
     };

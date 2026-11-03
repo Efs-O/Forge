@@ -1,0 +1,464 @@
+/* ── Sessions panel: the rows ────────────────────────────────────────────── */
+/* What the panel's one scroll container scrolls: a chat row, its badge, its
+   kebab menu, the rename box, and a job row with its status dot. Split out of
+   `sessions-panel.css` on the seam that was already there — the panel's shell
+   and the rows inside it changed for different reasons and at different speeds.
+   Row class names are unchanged, so the panel's tests and its styles both
+   address the same things they always did. */
+
+/* Chat rows use the mockup's consistent sender column and open space; Jobs
+   retains its compact stacking because its rows carry a separate three-line
+   outcome summary. */
+#history-open-list,
+#history-list {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+#history-jobs-list {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+}
+
+.history-item-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: stretch;
+  gap: 4px;
+  min-width: 0;
+  min-height: 28px;
+  height: auto;
+  flex: 0 0 auto;
+}
+
+.history-item {
+  width: 100%;
+  min-width: 0;
+  min-height: 28px;
+  height: auto;
+  padding: 4px;
+  text-align: left;
+  display: flex;
+  flex-direction: row;
+  align-items: center;
+  gap: 8px;
+  border-radius: var(--forge-radius-sm);
+  border: none;
+  border-left: 2px solid transparent;
+  background: transparent;
+  align-self: auto;
+  transition: background 0.1s ease, border-color 0.1s ease;
+}
+
+.history-item-row .history-item {
+  flex: 1;
+}
+
+.history-chat-item {
+  display: grid;
+  grid-template-columns: 60px minmax(0, 1fr) max-content;
+  gap: 10px;
+}
+
+.history-chat-item .history-item-meta {
+  max-width: none;
+  margin-left: 0;
+}
+
+.history-item-sender {
+  min-width: 0;
+  display: flex;
+  align-items: center;
+}
+
+.history-item-status {
+  justify-self: end;
+  align-self: center;
+}
+
+.history-item-status .history-row-dot {
+  margin-right: 6px;
+}
+
+.history-item-row-actions {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+}
+
+.history-item:hover:not(:disabled) {
+  background: var(--vscode-list-hoverBackground, #2a2d2e);
+  border-left-color: var(--forge-accent);
+}
+
+.history-item-menu-wrap {
+  position: relative;
+  display: flex;
+  align-items: center;
+  flex-shrink: 0;
+}
+
+/*
+ * The four pixels that used to put a horizontal scrollbar on Recent History and
+ * Archived — measured, not guessed: `#history-list` reported scrollWidth 410
+ * against clientWidth 406 in a 420px sidebar, and the row that made it was the
+ * one carrying a kebab. `base.css` gives every button `padding: 4px 10px`; this
+ * control is 22px wide and holds a 16px icon, so that padding left it a 2px
+ * content box, the icon overflowed it, and the overflow climbed through the row
+ * (which clips nothing) into each list — which had `overflow-y: auto`, so its
+ * `overflow-x` computed to `auto` too and drew a bar for four pixels of content
+ * that was already inside the row. The Open list never showed the bar because
+ * its trailing control is the × button, whose glyph fits; the Jobs list has no
+ * trailing control at all. That is exactly the pair of sections the owner saw.
+ *
+ * `padding: 0` is the fix. A 22px square control does not need 10px of
+ * horizontal padding to be a comfortable target, and with none the icon fits
+ * inside its own box, so there is nothing left to overflow.
+ */
+.history-item-kebab {
+  width: 22px;
+  height: 22px;
+  flex: 0 0 22px;
+  padding: 0;
+  display: grid;
+  place-items: center;
+  border: none;
+  border-radius: var(--forge-radius-sm);
+  background: transparent;
+  color: var(--vscode-descriptionForeground);
+  cursor: pointer;
+  /* Keep the control in the tab order while letting the row stay quiet. */
+  opacity: 0.6;
+  transition: opacity 0.1s ease, background 0.1s ease, color 0.1s ease;
+}
+
+.history-item-keep-open {
+  width: 22px;
+  height: 22px;
+  flex: 0 0 22px;
+  padding: 0;
+  display: grid;
+  place-items: center;
+  border: 1px solid transparent;
+  border-radius: var(--forge-radius-sm);
+  background: transparent;
+  color: var(--vscode-descriptionForeground);
+  cursor: pointer;
+  opacity: 0.45;
+  transition: opacity 0.1s ease, background 0.1s ease, color 0.1s ease;
+}
+
+.history-item-row:hover .history-item-keep-open,
+.history-item-row:focus-within .history-item-keep-open {
+  opacity: 1;
+}
+
+.history-item-keep-open:hover,
+.history-item-keep-open:focus-visible,
+.history-item-keep-open.is-pinned {
+  opacity: 1;
+  color: var(--vscode-charts-blue, var(--vscode-foreground));
+  background: color-mix(in srgb, var(--vscode-charts-blue, #4ca2ef) 14%, transparent);
+}
+
+.history-item-keep-open:focus-visible {
+  outline: 1px solid var(--forge-accent);
+  outline-offset: 1px;
+}
+
+.history-item-row:hover .history-item-kebab,
+.history-item-row:focus-within .history-item-kebab,
+.history-item-row-active .history-item-kebab {
+  opacity: 1;
+  pointer-events: auto;
+}
+
+.history-item-kebab:focus-visible {
+  outline: 1px solid var(--forge-accent);
+  outline-offset: 1px;
+}
+
+.history-item-kebab:hover,
+.history-item-row-active .history-item-kebab {
+  color: var(--vscode-foreground);
+  background: var(--vscode-toolbar-hoverBackground, rgba(90, 90, 90, 0.2));
+}
+
+.history-item-menu {
+  position: absolute;
+  right: 2px;
+  top: calc(100% + 2px);
+  z-index: 20;
+  min-width: 150px;
+  padding: 4px;
+  display: flex;
+  flex-direction: column;
+  background: var(--vscode-menu-background, #252526);
+  border: 1px solid var(--vscode-menu-border, #454545);
+  border-radius: var(--forge-radius-sm);
+  box-shadow: 0 4px 14px rgba(0, 0, 0, 0.5);
+}
+
+.history-menu-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 5px 8px;
+  border: none;
+  border-radius: 3px;
+  background: transparent;
+  color: var(--vscode-menu-foreground, var(--vscode-foreground));
+  font-size: 12px;
+  text-align: left;
+  cursor: pointer;
+}
+
+.history-menu-item:hover {
+  background: var(--forge-selection);
+  color: var(--vscode-foreground);
+}
+
+.history-menu-item-danger {
+  color: var(--vscode-errorForeground, #f48771);
+}
+
+.history-menu-item-danger:hover {
+  background: var(--vscode-inputValidation-errorBackground, #5a1d1d);
+  color: var(--vscode-errorForeground, #f48771);
+}
+
+.history-menu-sep {
+  height: 1px;
+  margin: 4px 2px;
+  background: var(--vscode-menu-separatorBackground, #3c3c3c);
+}
+
+.history-item-row-editing {
+  grid-template-columns: minmax(0, 1fr);
+  min-height: 28px;
+  background: var(--vscode-list-hoverBackground, #2a2d2e);
+  border-radius: var(--forge-radius-sm);
+}
+
+.history-rename-input {
+  flex: 1;
+  min-width: 0;
+  height: 22px;
+  margin: 1px 4px;
+  padding: 2px 5px;
+  font: inherit;
+  font-size: 12px;
+  color: var(--vscode-input-foreground, #fff);
+  background: var(--vscode-input-background, #3c3c3c);
+  border: 1px solid var(--forge-accent);
+  border-radius: 3px;
+  outline: none;
+}
+
+.history-item-title {
+  flex: 1 1 auto;
+  min-width: 0;
+  /* A plain block, not a flex container: `text-overflow` only produces an
+     ellipsis at the end of a line box, and text inside a flex container becomes
+     an anonymous flex item, which is not a line box. It still showed an ellipsis
+     here, but on a container that could not shrink below the text's min-content
+     — one more way for a long title to push a bar onto the list. */
+  display: block;
+  font-size: 13px;
+  color: var(--vscode-foreground);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* The row's right-hand column: how many messages and how long ago, and for an
+   Open row its live state. One line on purpose — `nowrap` is what stops a long
+   title from pushing a horizontal bar onto the list, and a meta that wrapped
+   would make every row taller than the 24 px the panel's rows are fixed to.
+   `max-width` gives the title the room first: the age is the part that may be
+   cut short, the chat's name is the part you opened the panel to read. */
+.history-item-meta {
+  /* Never shrunk: the title is the part that gives way. A meta that shrinks
+     loses the age first — `12 msg · J…` — and the age is the only number on the
+     row that says which chat this was. `max-width` still caps it, so a long
+     last-run line cannot push the title out and open a bar on the list. */
+  flex: 0 0 auto;
+  max-width: 45%;
+  margin-left: auto;
+  font-size: 10px;
+  text-align: right;
+  color: var(--vscode-descriptionForeground);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* Running means a turn is answering right now, so it wears the row's own text
+   size and colour rather than the grey age it replaces — that is what tells it
+   apart from an idle Open at a glance. Waiting (a card needs the owner) is the
+   one that asks for action, so it takes the warning colour. */
+.history-item-meta-running {
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--vscode-foreground);
+}
+
+.history-item-meta-waiting {
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--vscode-editorWarning-foreground, #cca700);
+}
+   row's title has to stay the title, for a screen reader reading the row's name
+   and for anything that reads a title out of the DOM. */
+.history-row-badge {
+  flex: 0 0 auto;
+  padding: 0 5px;
+  border: 1px solid var(--forge-border);
+  border-radius: var(--forge-radius-pill);
+  font-size: 9px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--vscode-descriptionForeground);
+  background: transparent;
+}
+
+@media (max-width: 360px) {
+  .history-chat-item {
+    grid-template-columns: 56px minmax(0, 1fr) auto;
+    gap: 6px;
+  }
+}
+/* An agent chat gets a colour of its own, mixed with the colour the row already
+   has so the same rule is legible on a light surface and a dark one: the theme
+   variable is the accent, `currentColor` is whatever the row is wearing, and the
+   mix only decides how strong the accent is against it. `currentColor` rather
+   than `var(--vscode-foreground)` because the mix is invalid — not merely
+   weaker — if the variable it names has no value, and an invalid `color` falls
+   back to the inherited one: every badge would then read as plain row text. */
+.history-row-badge-agent {
+  --badge-fg: color-mix(
+    in srgb,
+    var(--vscode-charts-orange, #cd9178) 75%,
+    currentColor
+  );
+  color: var(--badge-fg);
+  border-color: color-mix(in srgb, var(--badge-fg) 55%, transparent);
+}
+.history-row-badge-claude {
+  --badge-fg: color-mix(
+    in srgb,
+    var(--vscode-charts-orange, #cd9178) 75%,
+    currentColor
+  );
+}
+.history-row-badge-codex {
+  --badge-fg: color-mix(
+    in srgb,
+    var(--vscode-charts-cyan, #049fa5) 75%,
+    currentColor
+  );
+}
+.history-row-badge-copilot {
+  --badge-fg: color-mix(
+    in srgb,
+    var(--vscode-charts-purple, #b18cd1) 75%,
+    currentColor
+  );
+}
+/* A chat bound to a phone conversation is not an agent chat, but it was not
+   opened at this machine either, so it wears the same outlined shape in the
+   remote accent. The badge answers "who is this chat answering", and a phone is
+   an answer: it is the one row label that comes from state the host already
+   keeps for another reason (the Telegram binding that pins the chat). */
+.history-row-badge-telegram,
+.history-row-badge-whatsapp {
+  --badge-fg: color-mix(
+    in srgb,
+    var(--vscode-charts-blue, #4ca2ef) 75%,
+    currentColor
+  );
+}
+
+/* ── Status dots ─────────────────────────────────────────────────────────── */
+/* Hollow for "nothing has gone out and nothing has come back" (no runs yet, or a
+   run that was skipped), filled for a result. A failing job's outcome line takes
+   the error colour below, so the row says the same thing two ways: the dot is
+   where you look, the line is what you read. */
+.history-row-dot {
+  flex: 0 0 9px;
+  display: inline-block;
+  width: 9px;
+  height: 9px;
+  border: 1px solid transparent;
+  border-radius: 50%;
+  vertical-align: middle;
+}
+.history-row-dot--ok {
+  background: var(--forge-tool-ok);
+  border-color: var(--forge-tool-ok);
+}
+.history-row-dot--failing {
+  background: var(--vscode-errorForeground, #f48771);
+  border-color: var(--vscode-errorForeground, #f48771);
+}
+.history-row-dot--none {
+  background: transparent;
+  border-color: var(--vscode-descriptionForeground);
+}
+.history-row-dot--running {
+  background: transparent;
+  border-color: var(--forge-accent);
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--forge-accent) 25%, transparent);
+}
+
+/* A dot that sits inside a title — a job row, whose lines stack so a sibling
+   would land on a line of its own — needs its own gap: the row's flex gap
+   cannot separate it from the name it is drawn in front of, and a dot with no
+   gap reads as the first letter of that name. */
+.history-item-title .history-row-dot {
+  margin-right: 6px;
+}
+
+/* ── Jobs rows ─────────────────────────────────────────────────────────────── */
+/* A job row carries three lines — its name, its schedule or live state, and its
+   last run — so it grows past the 24px every conversation row is fixed to and
+   stacks them instead of putting the state beside the name. The Running marker
+   reuses the Open rows' class: same colour, same weight, so a job whose
+   agent_task turn is streaming in this window reads like an open chat that is. */
+.history-job-row {
+  height: auto;
+  flex: 0 0 auto;
+}
+
+.history-job-row .history-item {
+  height: auto;
+  min-height: 24px;
+  padding: 2px 6px 2px 8px;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 1px;
+}
+
+.history-job-row .history-item-title,
+.history-job-row .history-item-meta {
+  max-width: 100%;
+}
+
+/* Stacked, the auto margin would push each meta line to the right edge of the
+   row and leave the text ragged against the name above it. */
+.history-job-row .history-item-meta {
+  margin-left: 0;
+  text-align: left;
+}
+
+.history-job-last {
+  /* The schedule barely changes between renders; the outcome is the line worth
+     reading after the name, so it gets its own line and the description colour. */
+  color: var(--vscode-descriptionForeground);
+}
+.history-job-status-failing .history-job-last {
+  color: var(--vscode-errorForeground, #f48771);
+}

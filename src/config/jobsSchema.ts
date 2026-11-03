@@ -1,5 +1,6 @@
 import { z } from 'zod';
 import * as path from 'path';
+import { resolvesToConfiguredModel } from './modelReferences';
 import type { ForgeConfig } from './types';
 
 const GpuGateConfigSchema = z.object({
@@ -46,9 +47,25 @@ export const JobsConfigSchema = z
 /**
  * The model an agent task with no `model` of its own runs on:
  * `jobs.default_model`, else `active_model` (the behaviour before the field).
+ *
+ * `jobs.default_model` is hand-edited and never moved by a chat-tab switch, so
+ * it is the field most likely to name a model that has since been deleted — and
+ * then every job died with the generic "unknown model" from the backend, which
+ * reads as a broken job rather than as stale config. This is the one place that
+ * resolves it, so it is also the place that says what to do: a removed jobs
+ * model throws here, at the job start the runner already asks this question at,
+ * instead of three turns later.
  */
 export function jobDefaultModel(config: ForgeConfig): string | undefined {
-  return config.jobs?.default_model ?? config.active_model ?? undefined;
+  const configured = config.jobs?.default_model;
+  if (configured === undefined) return config.active_model ?? undefined;
+  if (!resolvesToConfiguredModel(config, configured)) {
+    throw new Error(
+      `the jobs model "${configured}" was removed from config.yaml; set ` +
+        '`jobs.default_model` to a configured model.',
+    );
+  }
+  return configured;
 }
 
 /**

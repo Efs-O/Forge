@@ -1,21 +1,16 @@
 import * as path from 'path';
-import { createHash, randomUUID } from 'crypto';
 import * as vscode from 'vscode';
-import { UserQuestionService } from './sidebar/UserQuestionService';
-import { UserNotificationService } from './sidebar/UserNotificationService';
 import { SidebarProvider } from './sidebar/SidebarProvider';
-import { ChatAttachmentStore } from './sidebar/ChatAttachmentStore';
 import { HistoryArchive } from './sidebar/HistoryArchive';
 import { watchWorkspaceFolders } from './sidebar/workspaceInfo';
-import { BackendPool } from './backend/BackendPool';
-import { ExternalModelServers, setExternalRequestHook } from './backend/ExternalModelServers';
-import { SharedRuntimeRegistry } from './backend/SharedRuntimeRegistry';
+import { buildStatusBarTurnEvents } from './sidebar/statusBarTurnEvents';
+import { setExternalRequestHook } from './backend/ExternalModelServers';
 import { disposeServerChannel } from './backend/DirectBackend';
-import { ControlServer } from './backend/ControlServer';
-import { ControlServerRegistry, controlServerRegistryPath } from './backend/ControlServerRegistry';
-import { buildControlChatProxy } from './llm/ControlChatProxy';
-import { registerControlServerCommands } from './vscode/controlCommands';
-import { setupAgentMessaging } from './vscode/agentMessagingSetup';
+import { wireTailnetServices, type TailnetServicesWiring } from './vscode/tailnetServicesSetup';
+import { wireControlServer } from './vscode/controlServerSetup';
+import { wireRemoteStarter, releaseRemoteStarterLeases } from './llm/RemoteStarterClient';
+import { configureRemoteWindowRoute } from './llm/RemoteWindowRoute';
+import { thisWindowHostedElsewhere } from './vscode/remoteWindowKind';
 import { registerAgentSetupCommand } from './vscode/agentSetupCommand';
 import { bootstrapConfig } from './vscode/configBootstrap';
 import { setupRemoteRuntime } from './vscode/remoteRuntimeSetup';
@@ -24,56 +19,36 @@ import { registerIndexWatchers } from './vscode/indexWatchers';
 import type { ForgeConfig } from './config/types';
 import { initLogger, getLogger } from './util/logger';
 import { setRenameContentionListener } from './util/atomicWrite';
-import { ToolRegistry } from './tools/ToolRegistry';
 import { createCheckpointStack } from './vscode/checkpointSetup';
 import { watchForgeConfig } from './vscode/configReload';
-import { KeepUndoCodeLensProvider } from './sidebar/KeepUndoCodeLens';
-import { DiffDecorations } from './sidebar/DiffDecorations';
 import { TemplateEngine } from './llm/TemplateEngine';
 import { createForgeInstructionsLoader } from './llm/ForgeInstructionsLoader';
-import { registerAllTools } from './tools/registerAllTools';
 import { closeBrowserSessionOnShutdown } from './tools/browser/BrowserSessionManager';
 import { getDesktopDriver } from './tools/desktop/PowerShellDesktopDriver';
-import { connectMcpServers } from './tools/mcpBridge';
 import { BackendStatusBar } from './vscode/BackendStatusBar';
 import { SessionTimeStatusBar } from './vscode/SessionTimeStatusBar';
-import { ForgeCodeActionProvider } from './vscode/codeActions';
-import { registerNativeCommands } from './vscode/nativeCommands';
-import { EmbeddingBackend } from './backend/EmbeddingBackend';
 import { ServerLogFollowers } from './backend/serverLogFollower';
-import { IndexManager } from './search/IndexManager';
-import { registerSecretCommands } from './vscode/secretCommands';
-import { LocalDelegationService } from './delegation/LocalDelegationService';
-import {
-  CliSessionRegistry,
-  DEFAULT_CLI_IDLE_TIMEOUT_MS,
-  DEFAULT_MAX_CLI_AGENTS,
-} from './agents/CliSessionRegistry';
 import { ModelManagerPanel } from './sidebar/modelManager/ModelManagerPanel';
-import { registerSidebarCommands } from './vscode/sidebarCommands';
 import { flushPendingModelUsage } from './sidebar/modelManager/usageTracker';
 import { backgroundExecutionManager } from './tools/BackgroundExecutionManager';
 import { backgroundRegistry } from './tools/backgroundRegistry';
 import { sweepShellOutput } from './tools/shellOutput';
-import { terminalCommandTracker } from './tools/TerminalCommandTracker';
 import type { RemoteRuntime } from './remote/RemoteRuntime';
-import { workspaceIdFor } from './remote/RemoteWorkspaceHandoff';
 import { setupJobs } from './vscode/jobsSetup';
-import { JobStore } from './jobs/JobStore';
 import { pruneRequestDumps, requestDumpsDirectory } from './sessions/requestDump';
+import {
+  deactivateExternalModelLifecycle,
+  registerExternalModelLifecycleLease,
+  setupBackendPool,
+  trackExternalModelLifecycle,
+} from './vscode/backendPoolSetup';
+import { registerActivationCommands } from './vscode/commandRegistrationSetup';
+import { setupKeepUndo } from './vscode/keepUndoSetup';
+import { setupToolActivation } from './vscode/toolActivationSetup';
 
 let activeRemoteRuntime: RemoteRuntime | undefined;
-const EXTERNAL_LIFECYCLE_LEASE_KEY = 'external-model-stop-on-exit';
-
-interface ActiveExternalLifecycle {
-  pool: BackendPool;
-  servers: ExternalModelServers;
-  registry: SharedRuntimeRegistry;
-  leaseId: string;
-  isBusy: (modelName: string) => boolean;
-}
-
-let activeExternalLifecycle: ActiveExternalLifecycle | undefined;
+/** Kept for `deactivate()`, which closes the starter BEFORE `stopOnExit`. */
+let activeTailnetServices: TailnetServicesWiring | undefined;
 
 export async function activate(context: vscode.ExtensionContext): Promise<void> {
   initLogger(context);
@@ -112,6 +87,14 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
   if (!bootstrapped) return;
   const activeConfigPath = bootstrapped.configPath;
   let config: ForgeConfig = bootstrapped.config;
+  // A VS Code tunnel or SSH window holds no cloud keys of its own, so a
+  // key-based model goes through the desktop's cloud relay rather than reading
+  // this window's keychain. Set once here, before any request can be made, on
+  // the live config, so a reload changes what the rule sees. Which remote kinds
+  // that covers is `vscode/remoteWindowKind.ts`'s decision — WSL, a container
+  // and Codespaces are local. `vscode/tailnetServicesSetup.ts` is the other
+  // half: a hosted window never binds the relay, so it never forwards to itself.
+  configureRemoteWindowRoute(thisWindowHostedElsewhere(), () => config);
 
   // ── Template engine (v0.8) ────────────────────────────────────────────────
   const builtinDir = path.join(context.extensionPath, 'config', 'templates', 'builtin');
@@ -127,139 +110,65 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
 
   // ── Backend pool ──────────────────────────────────────────────────────────
   // Created before the tool registry so LocalDelegationService can be injected.
-  const externalServers = new ExternalModelServers(
-    () => config,
-    async (key) => context.secrets.get(key),
-  );
-  // Reuse the shared-runtime lease registry for cross-window liveness. Its
-  // existing PID cleanup means a crashed extension host cannot block shutdown.
-  const sharedRegistry = new SharedRuntimeRegistry();
-  const externalLifecycleLeaseId = randomUUID();
-  sharedRegistry.acquireLease(EXTERNAL_LIFECYCLE_LEASE_KEY, externalLifecycleLeaseId);
-  const pool = new BackendPool(config, sharedRegistry, externalServers);
-  setExternalRequestHook((model) => pool.prepareExternal(model.name));
+  const backendSetup = setupBackendPool(context, config, () => config);
+  const { pool, externalServers, sharedRegistry, remoteLeases, externalLifecycleLeaseId } =
+    backendSetup;
 
-  // ── Tool registry ─────────────────────────────────────────────────────────
-  const embeddingBackend = new EmbeddingBackend(config);
-  context.subscriptions.push(embeddingBackend);
-  const indexManager = new IndexManager(config, embeddingBackend);
-  const workspaceRoot = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath ?? '';
-  const workspaceId = workspaceRoot
-    ? workspaceIdFor(workspaceRoot)
-    : createHash('sha256').update(`no-workspace:${activeConfigPath}`).digest('hex');
-  // Selected CLI chat models own resumable sessions; CLI delegation is one-shot.
-  const cliSessions = new CliSessionRegistry(
-    config.max_cli_agents ?? DEFAULT_MAX_CLI_AGENTS,
-    config.cli_idle_timeout_ms ?? DEFAULT_CLI_IDLE_TIMEOUT_MS,
-  );
-  const delegationService = new LocalDelegationService({
+  // Declared early (closures use it); assigned after CodeLens, so an early route sees it unset.
+  // eslint-disable-next-line prefer-const
+  let sidebarProvider: SidebarProvider;
+  const toolSetup = setupToolActivation({
+    context,
+    config,
     getConfig: () => config,
-    backendPool: pool,
-    workspaceRoot,
-    secrets: context.secrets,
+    activeConfigPath,
+    templateEngine,
+    pool,
+    getSidebarProvider: () => sidebarProvider,
+    log,
   });
-  const toolRegistry = new ToolRegistry();
-  // One job store, shared by the scheduler and the `manage_jobs` tool.
-  const jobsStore = new JobStore();
-  const jobsHostFacade = (): import('./sidebar/ForgeHostFacade').ForgeHostFacade | undefined =>
-    sidebarProvider.getHostFacade();
-  // One owner for agent questions, shared by ask_user and the sidebar facade so
-  // a remotely driven turn can answer from the chat that started it.
-  const userQuestions = new UserQuestionService();
-  // One owner for agent-authored notifications, shared by notify_user and the
-  // sidebar facade so a remotely driven turn reaches the chat that started it.
-  const userNotifications = new UserNotificationService(
-    (message) => void vscode.window.showWarningMessage(message),
-  );
-  terminalCommandTracker.start();
-  context.subscriptions.push(terminalCommandTracker);
-  const chatAttachments = new ChatAttachmentStore(
-    path.join(context.globalStorageUri.fsPath, 'chat-attachments'),
-    workspaceId,
-  );
-  const sdServers = registerAllTools(
-    toolRegistry,
-    context.workspaceState,
-    context.secrets,
-    config.search,
+  const {
     indexManager,
+    workspaceRoot,
+    workspaceId,
+    cliSessions,
+    toolRegistry,
+    jobsStore,
     userQuestions,
     userNotifications,
-    delegationService,
-    () => config,
-    () => pool.backendProcesses(),
-    (relativePath) => chatAttachments.resolve(relativePath),
-    { store: jobsStore, hostFacade: jobsHostFacade, configPath: activeConfigPath },
-    (key) => sidebarProvider.forgetMemoryKey(key),
-    () => sidebarProvider,
-  );
-  // The sd-server children built for `generate_image`. Teardown on deactivate,
-  // and reconciliation on a config reload that removes or edits an sdcpp
-  // backend -- `applyForgeConfig` below. Same lifecycle EmbeddingBackend has.
-  if (sdServers) context.subscriptions.push(sdServers);
-
-  // External MCP stdio servers (e.g. halluscribe-mcp). Bridged as a
-  // non-blocking background task: ToolRegistry.definitions() is re-read every
-  // agent turn (see AgentLoop.ts), so a slow or missing server binary never
-  // delays activation — its tools simply appear on a later turn once
-  // connected, and connectMcpServers never throws out of this call.
-  if (config.mcp_servers?.length) {
-    void connectMcpServers(config.mcp_servers, toolRegistry, log)
-      .then((disposable) => context.subscriptions.push(disposable))
-      .catch((err) => log.error('MCP bridge failed unexpectedly', err));
-  }
+    chatAttachments,
+    sdServers,
+  } = toolSetup;
 
   const checkpoints = createCheckpointStack(context);
 
-  // Localhost control API (models, chat proxy, agent messages); listens only when enabled.
-  const registryPath = controlServerRegistryPath();
-  const registry = registryPath ? new ControlServerRegistry(registryPath) : undefined;
-  const packageVersion = context.extension.packageJSON['version'];
-  // Declared early (closures here and above use it); assigned after CodeLens
-  // construction. An agent route can arrive first, so its getter may see it unset.
-  // eslint-disable-next-line prefer-const
-  let sidebarProvider: SidebarProvider;
-  const controlServer = new ControlServer(pool, config, {
-    agentRoutes: setupAgentMessaging(
-      context,
-      () => sidebarProvider,
-      () => config,
-      workspaceRoot,
-      () => activeRemoteRuntime,
-    ),
-    chatProxy: buildControlChatProxy(() => config, context.secrets),
-    ...(registry ? { registry } : {}),
-    version: typeof packageVersion === 'string' ? packageVersion : 'unknown',
+  const { controlServer, recoverPendingReplies } = wireControlServer({
+    context,
+    pool,
+    getConfig: () => config,
+    workspaceRoot,
+    getSidebarProvider: () => sidebarProvider,
+    getRemoteRuntime: () => activeRemoteRuntime,
   });
-  if (config.control_server?.enabled) controlServer.start();
-  context.subscriptions.push(controlServer);
-  registerControlServerCommands(context, controlServer);
+  const getConfig = () => config;
+  const tailnetServices = wireTailnetServices(
+    context,
+    getConfig,
+    pool,
+    controlServer,
+    remoteLeases,
+  );
+  activeTailnetServices = tailnetServices;
 
   // ── KeepUndo CodeLens + Diff Decorations ─────────────────────────────────
-  const diffDecorations = new DiffDecorations();
-  context.subscriptions.push(diffDecorations);
-
-  const codeLensProvider = new KeepUndoCodeLensProvider(
-    () => {
-      void sidebarProvider.keep();
-    },
-    () => {
-      void sidebarProvider.undo();
-    },
-    diffDecorations,
-  );
-  context.subscriptions.push(
-    vscode.languages.registerCodeLensProvider({ scheme: 'file' }, codeLensProvider),
-    codeLensProvider,
-  );
+  const { diffDecorations, codeLensProvider } = setupKeepUndo(context, () => sidebarProvider);
 
   // ── Workspace bootstrap: session migration (v2) + FORGE.md auto-create ──
-  await bootstrapWorkspace(context, workspaceRoot, config.forge_instructions?.auto_create);
+  await bootstrapWorkspace(context, workspaceRoot, config, activeConfigPath);
 
   // ── Sidebar ───────────────────────────────────────────────────────────────
   const forgeLoader = createForgeInstructionsLoader();
   if (forgeLoader) context.subscriptions.push(forgeLoader);
-
   let refreshSessionTime = (): void => {};
   let followSessionTime: (conversationId: string | undefined) => void = () => {};
   const activeTurnModels = new Map<string, string>();
@@ -276,38 +185,16 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
     codeLensProvider,
     diffDecorations,
     templateEngine,
-    {
-      onGenerationStarted: (modelName, conversationId) => {
-        if (modelName && conversationId) activeTurnModels.set(conversationId, modelName);
-        statusBar.setGenerating(modelName);
-        // Turn START, not end: a cancelled or thrown turn never reaches its end,
-        // and a leaked counter would silently mute the agent from then on.
-        // Unconditional, including the no-conversation key: a conversation-less
-        // turn still charges that bucket (notify_user from a /compact summary,
-        // send_file with no chat bound), so guarding this call on a defined id
-        // would let that budget fill once and never drain again.
-        userNotifications.resetTurn(conversationId);
-        // The bar follows the chat that just started, so a chat run in the
-        // background (`forge.sh --new`) is the one it shows.
-        if (conversationId !== undefined) followSessionTime(conversationId);
-        refreshSessionTime();
-      },
-      onGenerationFinished: (modelName, conversationId) => {
-        if (conversationId) activeTurnModels.delete(conversationId);
-        if (pool.isAnyReady()) statusBar.setReady(modelName);
-        else statusBar.setStopped(modelName);
-        refreshSessionTime();
-      },
-      onBackendError: (message) => statusBar.setError(message),
-      onBackendReady: (modelName) => statusBar.setReady(modelName),
-      onConversationSwitched: (modelName) => {
-        if (pool.isAnyReady()) statusBar.setReady(modelName);
-        else statusBar.setStopped(modelName);
-        // Picking a chat is the user saying which one they want to see.
-        followSessionTime(undefined);
-        refreshSessionTime();
-      },
-    },
+    buildStatusBarTurnEvents({
+      statusBar,
+      pool,
+      userNotifications,
+      activeTurnModels,
+      // Thunks, not values: both `let`s are reassigned later in activate(), and a
+      // captured value would freeze the no-op initialisation behind the bar.
+      followSessionTime: (conversationId) => followSessionTime(conversationId),
+      refreshSessionTime: () => refreshSessionTime(),
+    }),
     forgeLoader,
     context.secrets,
     workspaceRoot,
@@ -315,14 +202,21 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
     cliSessions,
     chatAttachments,
     HistoryArchive.inStorageDir(context.storageUri?.fsPath, workspaceRoot),
+    jobsStore,
+    context.globalState,
   );
-  activeExternalLifecycle = {
+  trackExternalModelLifecycle({
     pool,
     servers: externalServers,
     registry: sharedRegistry,
     leaseId: externalLifecycleLeaseId,
-    isBusy: (modelName) => [...activeTurnModels.values()].includes(modelName),
-  };
+    isBusy: (modelName) =>
+      [...activeTurnModels.values()].includes(modelName) || remoteLeases.hasLease(modelName),
+  });
+  // The laptop side: before a request to a `remote_start` model, ask the desktop
+  // to start or load it and hold a lease, renewed only while a turn runs here.
+  wireRemoteStarter(() => config, activeTurnModels);
+  void recoverPendingReplies();
   // globalStorage is shared across all workspaces. Prune only after session load
   // and only in a real workspace: windows without one share a derived id, so
   // each would take the other's chats for dead ones.
@@ -350,8 +244,8 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
     sidebarProvider,
     jobStore: jobsStore,
   });
-  sidebarProvider.sweepIdleConversations();
   activeRemoteRuntime = remoteRuntime;
+  sidebarProvider.startConversationRetention();
   const sessionTimeBar = new SessionTimeStatusBar((followed) =>
     sidebarProvider.getSessionMetrics(followed),
   );
@@ -391,6 +285,8 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
         // pool.applyForgeConfig is called inside sidebarProvider.applyForgeConfig
         controlServer.applyForgeConfig(config);
         if (config.control_server?.enabled) controlServer.start();
+        // Disabling the starter closes the listener and releases every lease.
+        tailnetServices.applyConfig();
         statusBar.setStopped(config.active_model);
         serverLogs.apply(config);
         sdServers?.applyForgeConfig(config);
@@ -408,58 +304,33 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
     }),
   );
 
-  registerNativeCommands(context, {
+  registerActivationCommands(context, {
     backend: pool,
     sidebar: sidebarProvider,
     statusBar,
     getConfig: () => config,
-    getConfigPath: () => activeConfigPath,
+    configPath: activeConfigPath,
     setConfig: (next) => {
       config = next;
-      sidebarProvider.applyForgeConfig(config);
-      statusBar.setStopped(config.active_model);
     },
   });
-  registerSecretCommands(context, () => config, activeConfigPath);
-  context.subscriptions.push(
-    vscode.languages.registerCodeActionsProvider(
-      { scheme: 'file' },
-      new ForgeCodeActionProvider(),
-      { providedCodeActionKinds: ForgeCodeActionProvider.providedCodeActionKinds },
-    ),
-  );
-
-  registerSidebarCommands(context, {
-    pool,
-    sidebar: sidebarProvider,
-    getConfig: () => config,
-    getConfigPath: () => activeConfigPath,
-  });
-
-  context.subscriptions.push({
-    dispose: () =>
-      sharedRegistry.releaseLease(EXTERNAL_LIFECYCLE_LEASE_KEY, externalLifecycleLeaseId),
-  });
+  registerExternalModelLifecycleLease(context, backendSetup);
 
   log.info('Forge activated');
 }
 
 export async function deactivate(): Promise<void> {
   await backgroundExecutionManager.dispose();
-  const lifecycle = activeExternalLifecycle;
-  activeExternalLifecycle = undefined;
-  if (lifecycle) {
-    lifecycle.registry.releaseLease(EXTERNAL_LIFECYCLE_LEASE_KEY, lifecycle.leaseId);
-    const lastWindow = !lifecycle.registry.hasBorrowers(EXTERNAL_LIFECYCLE_LEASE_KEY);
-    await lifecycle.servers.stopOnExit({
-      lastWindow,
-      isBusy: lifecycle.isBusy,
-      leaseDir: lifecycle.registry.leaseDir(EXTERNAL_LIFECYCLE_LEASE_KEY),
-    });
-    await lifecycle.pool
-      .stopAll()
-      .catch((error) => getLogger().error('[BackendPool] deactivate stop failed', error));
-  }
+  // Before `stopOnExit`: an in-flight ensure must not race the exit, and
+  // releasing the leases here is what lets the last-window stop see them idle.
+  const tailnetServices = activeTailnetServices;
+  activeTailnetServices = undefined;
+  tailnetServices?.dispose();
+  // Give up any lease this window held on a desktop model, best effort: a missed
+  // release lapses by TTL there, and a closing window must not wait on a machine
+  // that may be asleep.
+  await releaseRemoteStarterLeases();
+  await deactivateExternalModelLifecycle();
   setExternalRequestHook(undefined);
   disposeServerChannel();
   await closeBrowserSessionOnShutdown((err) => getLogger().error('browser close failed', err));

@@ -10,17 +10,10 @@ import * as path from 'path';
 import * as vscode from 'vscode';
 import type { ForgeConfig } from '../config/types';
 import { defaultState, type JobStore } from '../jobs/JobStore';
-import { JobSchema, type JobFile } from '../jobs/jobSchema';
+import { JobSchema, type Job, type JobFile } from '../jobs/jobSchema';
 import { appendHomeNote } from '../jobs/jobsHome';
 import { nextDue } from '../jobs/schedule';
-import {
-  describeAction,
-  describeCheck,
-  describeOnChange,
-  describeSchedule,
-  formatWhen,
-  truncate,
-} from '../jobs/jobDescribe';
+import { describeJob, describeSchedule, formatWhen, lastRunOutcome } from '../jobs/jobDescribe';
 import { openDiscussChat } from '../jobs/jobDiscuss';
 import type { ForgeHostFacade } from '../sidebar/ForgeHostFacade';
 import { CLI_AGENT_CONSENT_DETAIL, needsCliConsent } from '../jobs/cliAgentGate';
@@ -194,14 +187,23 @@ export function makeManageJobsTool(deps: ManageJobsDeps): RegisteredTool {
   return tool;
 }
 
-/** The agent_task model a create/update would run on (an unset model takes the job default). */
+/** The agent_task model a create/update would run on (an unset model takes the job default).
+ *  A `jobs.default_model` naming a removed model is NOT reported here: this runs
+ *  in the approval-card builder, where a throw would fail the tool call before
+ *  the user sees anything. The runner reports it at the job start that actually
+ *  needs the model (`AgentTaskRunner.run`), naming the field to fix. */
 function jobModelOf(deps: ManageJobsDeps, args: Record<string, unknown>): string | undefined {
   if (args['action'] !== 'create' && args['action'] !== 'update') return undefined;
   const def = args['definition'] as Record<string, unknown> | undefined;
   const action = def?.['action'] as Record<string, unknown> | null | undefined;
   if (action?.['kind'] !== 'agent_task') return undefined;
   const model = action['model'];
-  return typeof model === 'string' ? model : jobDefaultModel(deps.getConfig());
+  if (typeof model === 'string') return model;
+  try {
+    return jobDefaultModel(deps.getConfig());
+  } catch {
+    return undefined;
+  }
 }
 
 async function runManageJobs(deps: ManageJobsDeps, args: Record<string, unknown>): Promise<string> {
@@ -297,7 +299,7 @@ async function listJobs(deps: ManageJobsDeps): Promise<string> {
         ? ` · pending: ${state.task_pending_reason}`
         : '';
     const last = state.last_run_at === null ? 'never' : formatWhen(state.last_run_at, now);
-    const outcome = lastOutcome(state);
+    const outcome = lastRunOutcome(state);
     const next =
       state.next_due_at === null
         ? 'not scheduled'
@@ -307,13 +309,6 @@ async function listJobs(deps: ManageJobsDeps): Promise<string> {
     return `- ${job.name} [${job.id}] — ${status}${pending} · ${describeSchedule(job.schedule)} · last ${last} (${outcome}) · ${next}`;
   });
   return lines.join('\n');
-}
-
-/** The outcome of the most recent run, or 'no runs yet'. */
-function lastOutcome(state: JobFile['state']): string {
-  if (state.last_run_at === null) return 'no runs yet';
-  if (state.consecutive_failures > 0) return `failing ×${state.consecutive_failures}`;
-  return 'ok';
 }
 
 /** Create a job from a full definition. The id is generated; the name is required. */
@@ -356,13 +351,31 @@ async function createJob(deps: ManageJobsDeps, args: Record<string, unknown>): P
   const firstRun = nextDue(result.data.schedule, now);
   await deps.store.saveState(id, { ...defaultState(), next_due_at: firstRun.getTime() });
   const action = result.data.action;
-  const runsOn =
-    action?.kind !== 'agent_task'
-      ? ''
-      : action.model
-        ? ` Its agent runs on ${action.model}.`
-        : ` Its agent runs on jobs.default_model (${jobDefaultModel(deps.getConfig()) ?? 'unset'}).`;
-  return `Created job "${result.data.name}" [${id}]. First run: ${firstRun.toLocaleString()}.${runsOn}`;
+  return `Created job "${result.data.name}" [${id}]. First run: ${firstRun.toLocaleString()}.${jobsModelSentence(deps.getConfig(), action)}`;
+}
+
+/**
+ * The create confirmation's sentence about which model the agent will run on.
+ *
+ * A `jobs.default_model` naming a model that has been deleted is NOT rethrown
+ * here: the job is already saved and its first run seeded by the time this
+ * sentence is built, so a throw would report a half-written file as a failed
+ * create. The runner names that failure at the job start instead
+ * (`AgentTaskRunner.run`), and the user still needs to see it now — this is the
+ * moment they could fix the field.
+ */
+function jobsModelSentence(config: ForgeConfig, action: Job['action']): string {
+  if (action?.kind !== 'agent_task') return '';
+  if (action.model) return ` Its agent runs on ${action.model}.`;
+  try {
+    return ` Its agent runs on jobs.default_model (${jobDefaultModel(config) ?? 'unset'}).`;
+  } catch {
+    return (
+      ` Its agent runs on jobs.default_model (${config.jobs?.default_model ?? 'unset'}). ` +
+      'That model is no longer in config.yaml, so this job will fail until ' +
+      '`jobs.default_model` names a configured model.'
+    );
+  }
 }
 
 /** Build a stable id from the name: a slug, suffixed if taken (so two "llama.cpp" jobs can coexist). */
@@ -446,28 +459,6 @@ async function setEnabled(
   // The job is already a validated `Job`; flipping `enabled` cannot make it invalid.
   await deps.store.setEnabled(jobFile, enabled, (deps.now ?? (() => new Date()))());
   return `${enabled ? 'Resumed' : 'Paused'} job "${jobFile.job.name}" [${jobFile.job.id}].`;
-}
-
-/** A human-readable description of a job (for `get`). */
-function describeJob(jobFile: JobFile): string {
-  const { job, state } = jobFile;
-  const lines = [
-    `Job "${job.name}" [${job.id}]`,
-    `  status: ${job.enabled ? 'enabled' : 'paused'}${state.task_pending && state.task_pending_reason ? ` · pending: ${state.task_pending_reason}` : ''}`,
-    `  schedule: ${describeSchedule(job.schedule)}`,
-    `  check: ${describeCheck(job.check)}`,
-    `  on_change: ${describeOnChange(job.on_change)}`,
-    `  action: ${job.action ? describeAction(job.action) : 'none'}`,
-    `  wake: ${job.wake ? `yes (${job.after})` : 'no'}`,
-    `  last run: ${state.last_run_at === null ? 'never' : formatWhen(state.last_run_at, new Date())}`,
-    `  last ok: ${state.last_ok_at === null ? 'never' : formatWhen(state.last_ok_at, new Date())}`,
-    `  consecutive failures: ${state.consecutive_failures}`,
-    `  next due: ${state.next_due_at === null ? 'not scheduled' : formatWhen(state.next_due_at, new Date())}`,
-  ];
-  if (state.last_observation) {
-    lines.push(`  last observation: ${truncate(state.last_observation, 400)}`);
-  }
-  return lines.join('\n');
 }
 
 /** Open (or reuse) the job's discuss chat and seed it (B.6). */

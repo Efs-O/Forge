@@ -21,8 +21,8 @@ import {
   writeRemoteStateFile,
 } from './remoteStateFile';
 import {
-  claimHandoffs,
-  completeHandoff,
+  claimBindAndComplete,
+  peekClaimable,
   failUnclaimedHandoff,
   hasPendingHandoff,
   replaceHandoffForChat,
@@ -167,10 +167,18 @@ export class RemoteRequestStore {
     channel: RemoteOutboxRecord['channel'],
     chatId: string,
     text: string,
-    options?: { ephemeral?: boolean },
+    options?: { ephemeral?: boolean; speedLine?: string },
   ): Promise<void> {
     await this.mutate((draft) =>
-      appendHostNotification(draft, channel, chatId, text, options?.ephemeral),
+      appendHostNotification(
+        draft,
+        channel,
+        chatId,
+        text,
+        options?.ephemeral,
+        undefined,
+        options?.speedLine,
+      ),
     );
   }
 
@@ -253,17 +261,32 @@ export class RemoteRequestStore {
     return hasPendingHandoff(this.state.workspaceHandoffs, workspaceId, Date.now());
   }
 
-  /** Two windows on one folder must not both claim (mutate rereads). */
-  async claimWorkspaceHandoffs(workspaceId: string): Promise<WorkspaceHandoff[]> {
-    let claimed: WorkspaceHandoff[] = [];
-    await this.mutate((draft) => {
-      claimed = claimHandoffs(draft.workspaceHandoffs, workspaceId, Date.now());
-    });
-    return claimed;
+  /**
+   * The handoffs this window may take, read **without** claiming them, so the
+   * target window can open the conversation it intends to bind before any
+   * durable change lands.
+   */
+  peekWorkspaceHandoffs(workspaceId: string): WorkspaceHandoff[] {
+    return peekClaimable(this.state.workspaceHandoffs, workspaceId, Date.now());
   }
 
-  async completeWorkspaceHandoff(id: string): Promise<void> {
-    await this.mutate((draft) => completeHandoff(draft.workspaceHandoffs, id, Date.now()));
+  /**
+   * Claims, binds and completes one handoff in one write, re-checking
+   * claimability inside the lock, so two windows on one folder cannot both
+   * claim. Omitting `binding` is the case where no chat could be opened here —
+   * the switch still happened, so the source must not roll it back.
+   */
+  async claimAndBindWorkspaceHandoff(
+    id: string,
+    workspaceId: string,
+    binding?: RemoteBinding,
+  ): Promise<{ ok: true; handoff: WorkspaceHandoff } | { ok: false }> {
+    let outcome: { ok: true; handoff: WorkspaceHandoff } | { ok: false } = { ok: false };
+    await this.mutate((draft) => {
+      const taken = claimBindAndComplete(draft, id, workspaceId, Date.now(), binding);
+      if (taken.ok) outcome = taken;
+    });
+    return outcome;
   }
 
   /** The source window undoing a switch whose target never came up. Rereads
@@ -358,6 +381,8 @@ export class RemoteRequestStore {
       announceConversationId?: string;
       /** Deleted from the chat after the command-reply delay, like a transient reply. */
       ephemeral?: boolean;
+      /** This turn's speed line; see `OutboxSchema`. It is never part of `text`. */
+      speedLine?: string;
     },
   ): Promise<void> {
     await this.mutate((draft) => {
@@ -378,6 +403,7 @@ export class RemoteRequestStore {
         attempts: 0,
         updatedAt: Date.now(),
         ...(payload.ephemeral ? { ephemeral: true } : {}),
+        ...(payload.speedLine ? { speedLine: payload.speedLine } : {}),
       });
       if (payload.announceConversationId) {
         const binding = draft.bindings.find(

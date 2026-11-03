@@ -17,6 +17,7 @@ import { HostProgressOpener } from '../../src/remote/remoteHostProgress';
 import type { HostActivityEvent } from '../../src/sidebar/HostActivity';
 import type { ConversationRuntime } from '../../src/sidebar/sessionTypes';
 import type { SidebarProviderEvents } from '../../src/sidebar/AgentLoop';
+import { createTurnSpeedLedger } from '../../src/sessions/turnSpeedTotals';
 
 const tempDirs: string[] = [];
 
@@ -237,6 +238,7 @@ describe('turn mirroring', () => {
       lookup: () => conv,
       emit: (event) => emitted.push(event),
       endProgress: () => undefined,
+      turnSpeeds: createTurnSpeedLedger(),
     });
     return { events, emitted, inner };
   }
@@ -339,6 +341,7 @@ describe('failed-turn fan-out', () => {
       lookup: () => undefined,
       emit: (event) => emitted.push(event),
       endProgress: () => undefined,
+      turnSpeeds: createTurnSpeedLedger(),
     });
     return { events, emitted };
   }
@@ -362,6 +365,7 @@ describe('failed-turn fan-out', () => {
       emit: (event) => emitted.push(event),
       endProgress: () => undefined,
       willAutoResume: (message) => message === 'out of room',
+      turnSpeeds: createTurnSpeedLedger(),
     });
     events.onTurnFailed?.('conv-1', 'out of room');
     expect(emitted[0]!.text).not.toContain('Nothing further is running');
@@ -376,6 +380,7 @@ describe('failed-turn fan-out', () => {
       lookup: () => undefined,
       emit: (event) => emitted.push(event),
       endProgress: () => undefined,
+      turnSpeeds: createTurnSpeedLedger(),
     });
     events.onTurnFailed?.('conv-1', 'boom');
     expect(inner).toHaveBeenCalledWith('conv-1', 'boom');

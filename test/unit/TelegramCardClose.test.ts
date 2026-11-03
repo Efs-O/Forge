@@ -36,7 +36,11 @@ function expectClose(channel: FakeRemoteChannel): void {
 }
 
 describe('Telegram inline card Close row', () => {
-  it('adds Close to every listed card and preserves it on in-place refreshes', async () => {
+  // Room for the cards: ten handler calls, two dynamic imports and a JobStore
+  // write, all against a disk the rest of the suite is hammering, so 5 s (the
+  // default per-test timeout) is not enough under `npm run ci`. Nothing in the
+  // test waits on the clock; the assertions are on the keyboards.
+  it('adds Close to every listed card and preserves it on in-place refreshes', { timeout: 20_000 }, async () => {
     const channel = new FakeRemoteChannel('telegram');
     channel.declareHtmlSupport();
     const root = await fs.mkdtemp(path.join(os.tmpdir(), 'forge-card-close-'));

@@ -14,6 +14,7 @@ export function senderConversation(
   from: string,
   status: Pick<ForgeHostStatus, 'conversations'>,
   exchanges: (conversationId: string) => ForgeExchange[],
+  hasSenderLink?: (conversationId: string, sender: string) => boolean,
 ): string | undefined {
   const sender = from.trim().toLowerCase();
   const candidates = status.conversations
@@ -24,6 +25,7 @@ export function senderConversation(
     // compaction has since folded into a summary.
     const fromSender =
       conv.title.toLowerCase().startsWith(`${sender}: `) ||
+      hasSenderLink?.(conv.id, sender) === true ||
       exchanges(conv.id).some(
         (exchange) => parseForgeInboundPrompt(exchange.prompt)?.from.toLowerCase() === sender,
       );

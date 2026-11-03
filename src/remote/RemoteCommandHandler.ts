@@ -3,7 +3,12 @@ import type { ForgeHostFacade } from '../sidebar/ForgeHostFacade';
 import { describeBudget, handleRemoteSessionCommand } from './RemoteSessionCommands';
 import { sendConversationSelection, sendWorkspaceSelection } from './RemoteSelectionPager';
 import type { RemoteRequestStore } from './RemoteRequestStore';
-import type { RemoteChannel, RemoteInboundDisposition, RemoteInboundEvent } from './types';
+import type {
+  RemoteChannel,
+  RemoteInboundDisposition,
+  RemoteInboundEvent,
+  WorkspaceSwitchModeChoice,
+} from './types';
 import type { ModelSpeedSnapshot } from './remoteModelSpeed';
 import { QUEUED_ACK_DELETE_SECONDS } from './TelegramAcknowledgement';
 import type { ModelPickerDescriptor } from '../sidebar/ModelPickerGroups';
@@ -49,6 +54,8 @@ export interface RemoteCommandContext {
   currentWorkspaceAlias?: string | undefined;
   /** Display name of the folder this window has open, alias or not. */
   currentWorkspaceName?: string | undefined;
+  /** Live owner policy approval entries that apply to the active project. */
+  getApprovalPolicyLines?: (() => readonly string[]) | undefined;
   /**
    * Set by handleRemoteCommand for one command: a command calls it once its
    * side effects are durable, so a later failure (the ack send) finishes the
@@ -83,8 +90,15 @@ export interface RemoteCommandContext {
     dedupKey: string,
   ) => Promise<RemoteInboundDisposition>;
   switchWorkspace?:
-    | ((alias: string, channel: string, chatId: string) => Promise<() => Promise<void>>)
+    | ((
+        alias: string,
+        channel: string,
+        chatId: string,
+        mode: WorkspaceSwitchModeChoice,
+      ) => Promise<() => Promise<void>>)
     | undefined;
+  /** Checked before a switch is announced: see `remoteWorkspacePreflight`. */
+  workspacePreflight?: (alias: string, channel: string) => string | undefined;
   setInactivityTimeout?: ((minutes: number) => Promise<void>) | undefined;
   setRateLimit?: ((perMinute: number) => Promise<void>) | undefined;
   reloadWindow?: (() => Promise<void>) | undefined;
@@ -245,13 +259,17 @@ async function executeRemoteCommand(
     const [first, second] = operands;
     const selector = first === 'list' ? second : first;
     if (selector === undefined) return sendWorkspaceSelection(event, context);
-    return switchWorkspaceCommand(selector, event, context);
+    // The word after the workspace is the answer to a busy refusal
+    // (`/workspace 27 replace`), not part of the alias. Passing it lets the
+    // verbs work on a transport without choice buttons.
+    return switchWorkspaceCommand(selector, event, context, first === 'list' ? undefined : second);
   }
   // `/new <n>` is retained as a silent alias: it is in muscle memory and in
   // older help screenshots. `/workspace <n>` is the documented spelling,
   // because `/new` reads as "make me a new one" and never joined anything.
   if (command === '/new' && argument) {
-    return switchWorkspaceCommand(argument, event, context);
+    const [firstNew, secondNew] = argument.trim().split(/\s+/);
+    return switchWorkspaceCommand(firstNew ?? argument, event, context, secondNew);
   }
   if (command === '/new') {
     const conv = await context.host.createConversation({ activate: false });

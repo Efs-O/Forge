@@ -8,11 +8,26 @@ const log = getLogger();
 /**
  * Read complete JSON object rows, skipping torn lines and collapsing transcript
  * replays from both legacy append-on-resume logs and cursor-based logs.
+ *
+ * The file is read synchronously here because every caller that restores or
+ * analyses a transcript needs the whole log at once. A reader that must not
+ * block the extension host — the sessions panel's content search walks hundreds
+ * of these logs during one debounced query — reads with `fs.promises` and hands
+ * the text to `parseSessionLogRows`, so the torn-line and replay rules below
+ * stay in this one owner instead of being reimplemented per reader.
  */
 export function readSessionLogRows(file: string): Array<Record<string, unknown>> {
+  return parseSessionLogRows(fs.readFileSync(file, 'utf8'), file);
+}
+
+/**
+ * The same decode applied to text already in hand. `source` is where the text
+ * came from and appears only in the warning about skipped lines.
+ */
+export function parseSessionLogRows(raw: string, source?: string): Array<Record<string, unknown>> {
   const parsedRows: Array<Record<string, unknown>> = [];
   let unreadable = 0;
-  for (const line of fs.readFileSync(file, 'utf8').split(/\r?\n/)) {
+  for (const line of raw.split(/\r?\n/)) {
     if (!line.trim()) continue;
     let value: unknown;
     try {
@@ -26,7 +41,7 @@ export function readSessionLogRows(file: string): Array<Record<string, unknown>>
     parsedRows.push(value as Record<string, unknown>);
   }
   if (unreadable > 0) {
-    log.warn(`[sessionLogRows] ${file}: skipped ${unreadable} unreadable line(s)`);
+    log.warn(`[sessionLogRows] ${source ?? 'log text'}: skipped ${unreadable} unreadable line(s)`);
   }
   const rows: Array<Record<string, unknown>> = [];
   const historyHashes: string[] = [];

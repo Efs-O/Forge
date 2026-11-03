@@ -54,13 +54,16 @@ jobs:
   - a run of such a job is recorded as `skipped`;
   - a job's turn cannot delegate to a CLI agent.
 
-  Attended chat is never gated. See `docs/plans/CLI_AGENT_JOBS_GATE_PLAN.md`.
+  Attended chat is never gated. The gate design is in
+  `docs/plans/CLI_AGENT_JOBS_GATE_PLAN.md`, which is local history and not in
+  the repo.
 - `default_model` (optional) is the model an `agent_task` runs on when its
   action names no `model`. Only you set it, so switching a chat tab's model
   never moves a job. While it is set, `manage_jobs create` leaves `model` out
   and the job follows this field; without it, create writes the current
-  `active_model` into the job. A `model` on the action always wins.
-  See `docs/plans/JOB_DEFAULT_MODEL_PLAN.md`.
+  `active_model` into the job. A `model` on the action always wins. The design
+  is in `docs/plans/JOB_DEFAULT_MODEL_PLAN.md`, which is local history and not
+  in the repo.
 
 After editing, **Reload Window** so the scheduler picks up the change (a config
 hot-reload also reconciles it, but a reload is the clean way to start).

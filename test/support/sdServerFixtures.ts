@@ -32,6 +32,7 @@ export function sdcppBackendConfig(
         extra_args: [],
         confirm_on_start: true,
         confirm_each: false,
+        media_gpu_lease_enabled: false,
         ...overrides,
       },
     ],

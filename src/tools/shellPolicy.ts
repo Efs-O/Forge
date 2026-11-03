@@ -1,325 +1,86 @@
-import { getBuiltinDenyList, type ShellTokenRule } from './DenyList';
-import { extractHeredocs, feedsHeredocToShell } from './shellHeredoc';
-import { baseProgram, splitGitGlobals } from './shellCommandTokens';
-import { executableStatements, extractCommandStrings } from './shellCommandStrings';
+import * as os from 'os';
+import { getBuiltinDenyList, rdeleteTargetsFor, type ShellTokenRule } from './DenyList';
+import { extractHeredocs, feedsHeredocToShell, openHeredocRule } from './shellHeredoc';
+import { baseProgram, type ShellKind } from './shellCommandTokens';
+import { parseCommand } from './shellCommandParse';
+import { commandIsAllReadOnly, isReadOnly } from './shellReadOnlyRules';
+import {
+  executableStatements,
+  expandLiteralBashAssignments,
+  extractCommandStrings,
+  isPurePwshExpression,
+} from './shellCommandStrings';
+import { argumentLooksComputed, secretDeclineHint } from './secretPaths';
+import { secretReadInStatements } from './shellSecretReads';
+import { statementNetworkProgram } from './shellNetworkPrograms';
+import { firstOwnerOnlyRedirect } from './ownerPaths';
+import { commonFolderOf } from '../sidebar/approvalKeyGrammar';
+import { ownerOnlySetForGuard, ownerOnlyShellRule } from './shellOwnerRule';
+import type { ForgeConfig } from '../config/types';
 
 type ShellClass = 'read_only' | 'normal' | 'dangerous' | 'refused';
-export type ShellKind = 'pwsh' | 'powershell' | 'bash';
+
+/** What the gates need to judge a command: the config's extra secret patterns,
+ *  the home folder `~` expands against, the folder the command's relative paths
+ *  resolve against, and the owner-only roots (injectable throughout, so tests do
+ *  not depend on who is logged in or on which window loaded which config). */
+export interface ShellSecretCheck {
+  getConfig?: () => ForgeConfig;
+  home?: string;
+  platform?: NodeJS.Platform;
+  /** The shell tool's cwd. Without it a relative token cannot be judged, and
+   *  only absolute paths in the command are checked — which is what a window
+   *  with no folder open gets. */
+  cwd?: string;
+  /** The normalised absolute roots an agent may not change (`ownerPaths.ts`).
+   *  Absent or empty: the owner guard is inert, so a wiring that never supplies
+   *  it keeps the classifications it always had. */
+  ownerOnly?: readonly string[];
+}
 
 export interface ShellClassification {
   classification: ShellClass;
   rule?: ShellTokenRule;
-}
-
-interface ParsedCommand {
-  statements: string[][];
-  separators: Array<'pipe' | 'other'>;
-  redirection: boolean;
-  disqualifiesReadOnly: boolean;
-}
-
-const READ_ONLY_UNIX = new Set([
-  'ls',
-  'cat',
-  'head',
-  'tail',
-  'grep',
-  'rg',
-  'find',
-  'wc',
-  'sort',
-  'uniq',
-  'cut',
-  'tr',
-  'awk',
-  'sed',
-  'echo',
-  'pwd',
-  'which',
-  'file',
-  'stat',
-  'diff',
-  'jq',
-  'realpath',
-  'dirname',
-  'basename',
-  'date',
-]);
-const READ_ONLY_PS = new Set([
-  'get-childitem',
-  'get-content',
-  'get-item',
-  'get-location',
-  'select-string',
-  'select-object',
-  'sort-object',
-  'group-object',
-  'measure-object',
-  'format-table',
-  'format-list',
-  'out-string',
-  'test-path',
-  'resolve-path',
-  'split-path',
-  'join-path',
-  'get-command',
-  'get-process',
-  'get-date',
-  'convertfrom-json',
-  'write-output',
-  'ls',
-  'dir',
-  'cat',
-  'type',
-  'gci',
-  'gc',
-  'sls',
-  'select',
-  'where',
-  'sort',
-  'measure',
-  'echo',
-]);
-const READ_ONLY_BOTH = new Set(['rg', 'git', 'node', 'npm']);
-
-function parseCommand(command: string, shell: ShellKind): ParsedCommand {
-  const statements: string[][] = [[]];
-  const separators: Array<'pipe' | 'other'> = [];
-  let token = '';
-  let quote: 'single' | 'double' | 'backtick' | undefined;
-  let escaped = false;
-  let redirection = false;
-  let disqualifiesReadOnly = false;
-  const pushToken = (): void => {
-    if (token) (statements[statements.length - 1]?.push(token), (token = ''));
-  };
-  const pushStatement = (separator: 'pipe' | 'other'): void => {
-    pushToken();
-    if (statements[statements.length - 1]?.length) {
-      separators.push(separator);
-      statements.push([]);
-    }
-  };
-  for (let i = 0; i < command.length; i += 1) {
-    const char = command[i] ?? '';
-    const next = command[i + 1] ?? '';
-    if (escaped) {
-      // bash: backslash-newline is a line continuation, not a character.
-      if (char !== '\n') token += char;
-      escaped = false;
-      continue;
-    }
-    if (quote === 'single') {
-      if (char === "'") quote = undefined;
-      else token += char;
-      continue;
-    }
-    if (quote === 'double') {
-      if (char === '"') quote = undefined;
-      else if (
-        shell === 'bash' &&
-        char === '\\' &&
-        (next === '$' || next === '`' || next === '"' || next === '\\' || next === '\n')
-      ) {
-        if (next === '\n') i += 1;
-        else escaped = true;
-      } else if ((char === '$' && next === '(') || (shell === 'bash' && char === '`')) {
-        disqualifiesReadOnly = true;
-      } else token += char;
-      continue;
-    }
-    if (quote === 'backtick') {
-      token += char;
-      quote = undefined;
-      continue;
-    }
-    if (char === "'") {
-      quote = 'single';
-      continue;
-    }
-    if (char === '"') {
-      quote = 'double';
-      continue;
-    }
-    if (char === '`') {
-      // bash: command substitution, classified separately by nestedShellCommands.
-      if (shell === 'bash' || next === '(') disqualifiesReadOnly = true;
-      if (shell === 'bash') {
-        token += char;
-        continue;
-      } else quote = 'backtick';
-      continue;
-    }
-    if (shell === 'bash' && char === '\\') {
-      escaped = true;
-      continue;
-    }
-    if (char === '$' && next === '(') {
-      disqualifiesReadOnly = true;
-      token += '$(';
-      i += 1;
-      continue;
-    }
-    if (char === '&') {
-      if (next === '&') {
-        pushStatement('other');
-        i += 1;
-        continue;
-      }
-      if (shell === 'bash') {
-        pushStatement('other');
-        continue;
-      }
-      disqualifiesReadOnly = true;
-    }
-    if (char === '|' && next === '|') {
-      pushStatement('other');
-      i += 1;
-      continue;
-    }
-    if (char === '|') {
-      pushStatement('pipe');
-      continue;
-    }
-    if (char === ';' || char === '\n') {
-      pushStatement('other');
-      continue;
-    }
-    if (char === '>' || char === '<') {
-      redirection = true;
-      pushToken();
-      if (next === char) i += 1;
-      continue;
-    }
-    if (/\s/u.test(char)) {
-      pushToken();
-      continue;
-    }
-    token += char;
-  }
-  pushToken();
-  return {
-    statements: statements.filter((statement) => statement.length),
-    separators,
-    redirection,
-    disqualifiesReadOnly,
-  };
-}
-
-function isReadOnly(tokens: readonly string[], shell: ShellKind): boolean {
-  if (tokens.length === 0) return true;
-  const program = baseProgram(tokens[0] ?? '');
-  const args = tokens.slice(1).map((token) => token.toLowerCase());
-  if (READ_ONLY_BOTH.has(program)) {
-    if (program === 'node' || program === 'npm')
-      return args.length === 1 && args[0] === '--version';
-    if (program === 'git') {
-      if (!gitArgsReadOnly(tokens.slice(1))) return false;
-      const { command, globals, unknownGlobal } = splitGitGlobals(tokens);
-      // `-c core.pager=<cmd>` (or an alias, or core.sshCommand) makes any subcommand run a
-      // program, and so can a global this check does not know (`--exec-path=<dir>`).
-      if (unknownGlobal) return false;
-      if (globals.some((token) => /^(?:-c|--config-env)/u.test(token))) return false;
-      const [subcommand, ...rest] = command.slice(1).map((token) => token.toLowerCase());
-      if (
-        [
-          'status',
-          'diff',
-          'log',
-          'show',
-          'blame',
-          'ls-files',
-          'rev-parse',
-          'describe',
-          'grep',
-        ].includes(subcommand ?? '')
-      )
-        return true;
-      if (subcommand === 'branch')
-        return rest.every((arg) => ['-a', '-r', '-v', '--list', '--show-current'].includes(arg));
-      if (subcommand === 'remote') return rest.join(' ') === '-v';
-      if (subcommand === 'config') return rest[0] === '--get';
-      return false;
-    }
-    return unixArgsReadOnly(program, args, tokens.slice(1));
-  }
-  if (shell === 'bash') {
-    if (!READ_ONLY_UNIX.has(program)) return false;
-    return unixArgsReadOnly(program, args, tokens.slice(1));
-  }
-  // Script-block cmdlets are read-only only with a block; the blocks themselves
-  // are checked by classifyShellCommand's nested pass (`% Delete` calls a method).
-  if (SCRIPT_BLOCK_PS.has(program)) return tokens.slice(1).some((token) => token.includes('{'));
-  return READ_ONLY_PS.has(program);
-}
-
-const SCRIPT_BLOCK_PS = new Set(['foreach-object', 'where-object', '%', '?', 'foreach']);
-
-/** sed scripts that only print/delete lines or substitute without the `w`/`e` flags. */
-const SAFE_SED = /^(?:(?:\d+|\$)(?:,(?:\d+|\$))?[pd]|\d*p|s(.).*\1.*\1[gip\d]*)$/u;
-
-/** Arguments that make an otherwise read-only Unix program write files or run commands. */
-function unixArgsReadOnly(program: string, args: string[], raw: string[]): boolean {
-  switch (program) {
-    case 'find':
-      return !args.some((arg) =>
-        [
-          '-delete',
-          '-exec',
-          '-execdir',
-          '-ok',
-          '-okdir',
-          '-fprint',
-          '-fprint0',
-          '-fprintf',
-          '-fls',
-        ].includes(arg),
-      );
-    case 'sed': {
-      if (args.some((arg) => /^-[a-z]*i/u.test(arg) || arg.startsWith('--in-place'))) return false;
-      // Scripts follow -e; without -e the first operand is the script.
-      const scripts = raw.flatMap((arg, index) => (raw[index - 1] === '-e' ? [arg] : []));
-      if (scripts.length === 0) scripts.push(raw.find((arg) => !arg.startsWith('-')) ?? '');
-      return scripts.every((script) =>
-        script.split(';').every((part) => SAFE_SED.test(part.trim())),
-      );
-    }
-    case 'awk':
-      // `system()`, pipes and `print > file` run or write; comparisons like `$3 > 9` stay read-only.
-      return !raw.some((arg) => /system\s*\(|\||\bprintf?\b[^;}]*>|getline/u.test(arg));
-    case 'rg':
-      return !args.some((arg) => arg.startsWith('--pre'));
-    case 'sort':
-      return !args.some(
-        (arg) => arg === '-o' || arg.startsWith('--output') || /^-[a-z]*o/u.test(arg),
-      );
-    case 'uniq':
-      return raw.filter((arg) => !arg.startsWith('-')).length <= 1;
-    case 'date':
-      return !args.some((arg) => arg === '-s' || arg.startsWith('--set'));
-    default:
-      return true;
-  }
-}
-
-/** git flags that write a file or run a configured program (case-sensitive: `-O` is the pager). */
-function gitArgsReadOnly(raw: string[]): boolean {
-  return !raw.some(
-    (arg) =>
-      arg.startsWith('--output') ||
-      arg.startsWith('--open-files-in-pager') ||
-      arg.startsWith('-O') ||
-      arg === '--ext-diff',
-  );
-}
-
-/**
- * A PowerShell block that is only an expression over `$` variables, such as
- * `$_.Name -eq "node"`: no calls, assignments, pipes or nested blocks.
- */
-function isPureExpression(block: string): boolean {
-  const unquoted = block.replace(/'[^']*'|"[^"$`]*"/gu, '""').trim();
-  return /^\$/u.test(unquoted) && !/[()=;|&{}[\]`]/u.test(unquoted);
+  /** The secret path this command reads even though the owner put that exact
+   *  path in `permissions.secret_paths_allow`: the allow list may skip the card,
+   *  never the chat's taint, so the tool marks the chat from this field. */
+  readSecretIgnoringAllowList?: string;
+  /**
+   * True when something in this command reaches a host outside this machine:
+   * `curl`, `wget`, `Invoke-WebRequest`, `ssh`, `scp`, a `git push`, a package
+   * install or publish. Additive — it never changes the classification, only
+   * what the card rule does with it: `src/sidebar/untrustedExitPolicy.ts` puts a
+   * card on a network-reaching command only in a chat that has outside content
+   * or a secret in it, and lets a clean chat run it asking nothing, because a
+   * clean chat has nothing there for an outside page to have chosen to send.
+   */
+  networkReaching?: boolean;
+  /**
+   * The one program this command reaches a host through, when there is exactly one
+   * and it did not reach there through a nested shell: `curl`, `git-push`,
+   * `npm-install`. Set alongside `networkReaching` and read only to build the key
+   * `net:prog:<program>` (`shellTool.ts`), which is what lets a chat that has taken
+   * in outside content be asked once about `curl` instead of once about every
+   * command that runs `curl`.
+   *
+   * Two programs in one command (`curl x && npm install y`), or a network-reaching
+   * block inside `$(…)`, `\`…\``, an `iex` string or a here-doc a shell reads, and
+   * this stays unset: the card would name a program the owner cannot see the whole
+   * of, and a key that only covers half a card is a card half-answered.
+   */
+  networkProgram?: string;
+  /** The approval key this call's own gate knows: `rdelete:<folder>` for a
+   *  recursive delete whose targets can be read out of the command, `secret:<file>`
+   *  for a read of one file this matcher can locate. Set only when the gate knows
+   *  the answer, and read only by `approvalKey.ts`; a dangerous call whose gate names
+   *  nothing gets no key and asks every time.
+   */
+  approvalKey?: string;
+  /** The resolved targets behind an `rdelete:` key. Every one must lie inside the
+   *  key's folder, or the key is wider than the card and `approvalKeysFor` refuses
+   *  it rather than trusting the gate that made it.
+   */
+  approvalTargets?: readonly string[];
 }
 
 function precedence(classification: ShellClass): number {
@@ -411,13 +172,38 @@ function nestedShellCommands(command: string, shell: ShellKind): string[] {
   return nested;
 }
 
-export function classifyShellCommand(command: string, shell: ShellKind): ShellClassification {
+export function classifyShellCommand(
+  command: string,
+  shell: ShellKind,
+  check: ShellSecretCheck = {},
+): ShellClassification {
   // A here-document body is stdin, not commands, unless a shell reads it or bash expands `$(` in it.
-  const heredocs = shell === 'bash' ? extractHeredocs(command) : { command, bodies: [] };
+  const heredocs = extractHeredocs(command, shell);
+  // `<<'PY` with the quote never closed is bash's own parse error, refused here
+  // so no rule below can mistake a path in the body for a write to Forge's files.
+  if (heredocs.unterminated)
+    return { classification: 'refused', rule: openHeredocRule(heredocs.unterminated) };
   command = heredocs.command;
   const parsed = parseCommand(command, shell);
-  const statements = executableStatements(parsed.statements);
+  const sourceStatements =
+    shell === 'bash' ? expandLiteralBashAssignments(parsed.statements) : parsed.statements;
+  const statements = executableStatements(sourceStatements);
   const rules = getBuiltinDenyList();
+  /**
+   * The two facts `commonFolderOf` needs to name the folder a recursive delete sits
+   * in. The rest of the key context — the owner-only roots, `extra_file_roots`, the
+   * workspace root — belongs to the window, not to a command, and it arrives in
+   * `approvalKeysFor`, which is where every key this file proposes is finally
+   * validated. So this file resolves the folder and that function decides whether a
+   * chat may be asked to allow it.
+   */
+  const folderContext = {
+    platform: check.platform ?? process.platform,
+    home: check.home ?? os.homedir(),
+    workspaceRoot: undefined,
+    ownerOnly: [] as readonly string[],
+    extraFileRoots: [] as readonly string[],
+  };
   const downloaders = new Set(['curl', 'wget', 'iwr', 'invoke-webrequest']);
   const shellPrograms = new Set(['sh', 'bash', 'iex', 'invoke-expression']);
   const downloadPipe = parsed.separators.some(
@@ -434,6 +220,20 @@ export function classifyShellCommand(command: string, shell: ShellKind): ShellCl
     if (rule) return { classification: 'refused', rule };
   }
   let strongest: ShellClassification = { classification: 'read_only' };
+  let networkSeen = false;
+  /** Every distinct network-reaching program this command names. More than one means
+   *  no key, so the set stays small and the answer is a name or nothing. */
+  const networkPrograms = new Set<string>();
+  /** True when a `$(…)`, a backtick, an `iex` string or a here-doc a shell reads
+   *  reached a host: the bytes still left, but the program that sent them is inside
+   *  a block this card cannot show the owner the whole of, so no program is named. */
+  let networkThroughNestedShell = false;
+  /** How many statements matched an `rdelete` rule. Two of them means the folder
+   *  this function could name covers only one of the two cards' worth of targets. */
+  let rdeleteStatements = 0;
+  let rdeleteKey: { key: string; targets: readonly string[] } | undefined;
+  /** The one file the secret gate can locate, when it is what raised this card. */
+  let secretApprovalFile: string | undefined;
   const shellReadsHeredoc = parsed.statements.some((statement) => feedsHeredocToShell(statement));
   const nestedCommands = [
     ...heredocs.bodies.filter((body) => shellReadsHeredoc || body.expands).map((body) => body.text),
@@ -444,28 +244,190 @@ export function classifyShellCommand(command: string, shell: ShellKind): ShellCl
     const nestedText = typeof nestedCommand === 'string' ? nestedCommand : nestedCommand.command;
     // A block that only compares `$_` properties stays read-only; any other
     // nested command (a call, an assignment) ranks like a top-level one.
-    if (shell !== 'bash' && isPureExpression(nestedText)) continue;
+    if (shell !== 'bash' && isPurePwshExpression(nestedText)) continue;
     const nested = classifyShellCommand(
       nestedText,
       typeof nestedCommand === 'string' ? shell : nestedCommand.shell,
+      check,
     );
-    if (precedence(nested.classification) > precedence(strongest.classification))
-      strongest = nested;
+    if (precedence(nested.classification) > precedence(strongest.classification)) {
+      // The nested block's OWN approval key is dropped rather than inherited. The
+      // outer command cannot show the owner the targets a nested shell worked out, so
+      // a key from inside `$(…)`, a backtick or an `iex` string would name a folder
+      // the card never displayed — which is the one thing a key may not do.
+      strongest = {
+        classification: nested.classification,
+        ...(nested.rule ? { rule: nested.rule } : {}),
+        ...(nested.readSecretIgnoringAllowList
+          ? { readSecretIgnoringAllowList: nested.readSecretIgnoringAllowList }
+          : {}),
+      };
+    }
+    // A nested command's network reach travels up: `$(curl -d @notes.txt https://x)`
+    // sends bytes out even though the outer program is `echo`. It travels up WITHOUT
+    // a program name, because the program is inside a block the owner cannot see the
+    // whole of on this card, and a key for half a card is a card half-answered.
+    if (nested.networkReaching) {
+      networkSeen = true;
+      networkThroughNestedShell = true;
+    }
   }
+  // A `cd` writes nothing, so it may count as a read — but only when nothing in
+  // the same command writes INTO Forge's own files. A redirection is the trap:
+  // `cd ~/.forge && echo hi > notes.txt` is made of two read-only programs and
+  // still creates a file, and its target is relative, so it lands in the folder
+  // the `cd` just moved to. It is now judged there, by `firstOwnerOnlyRedirect`,
+  // rather than refusing every command that contains a `>`: `cd ~/.forge/sessions
+  // && ls > /tmp/out.txt` writes outside Forge's files and used to be refused as
+  // if it wrote inside them.
+  const ownerSet = ownerOnlySetForGuard(check);
+  const redirectHit =
+    ownerSet && parsed.redirection
+      ? firstOwnerOnlyRedirect(sourceStatements, parsed.redirects, ownerSet, check.cwd)
+      : undefined;
+  const cdReadonly = commandIsAllReadOnly(statements, shell) && redirectHit === undefined;
   for (const statement of statements) {
+    const networkProgram = statementNetworkProgram(statement);
+    if (networkProgram !== undefined) {
+      networkSeen = true;
+      networkPrograms.add(networkProgram);
+    }
     const rule = rules.find((candidate) => candidate.match(statement));
+    if (rule?.keyKind === 'rdelete') {
+      rdeleteStatements += 1;
+      if (rdeleteStatements === 1) {
+        const targets = rdeleteTargetsFor(statement, check);
+        if (targets) {
+          const folder = commonFolderOf(targets, folderContext);
+          if (folder) rdeleteKey = { key: `rdelete:${folder}`, targets };
+        }
+      }
+    }
     const current: ShellClassification = rule
       ? { classification: rule.class, rule }
       : {
           classification:
-            parsed.disqualifiesReadOnly || parsed.redirection || !isReadOnly(statement, shell)
+            parsed.disqualifiesReadOnly ||
+            parsed.redirection ||
+            !isReadOnly(statement, shell, cdReadonly)
               ? 'normal'
               : 'read_only',
         };
     if (precedence(current.classification) > precedence(strongest.classification))
       strongest = current;
   }
+  // The two questions asked of one matcher, and the answers are not the same:
+  // `honorAllowList` false is the TAINT question (an owner-allowed `.env` still costs
+  // this chat its next fetch), true is the CARD question (that same path asks for
+  // nothing). Both are read before the rewrites below, because a path inside `$(…)`
+  // or a here-document only surfaces in a nested classification.
+  const cardSecretRead = secretReadInStatements(statements, secretScan(check, true));
+  const readSecret =
+    secretReadInStatements(statements, secretScan(check, false))?.pattern ??
+    strongest.readSecretIgnoringAllowList;
   if (parsed.redirection && strongest.classification === 'read_only')
     strongest = { classification: 'normal' };
-  return strongest;
+  // The owner guard, ahead of the secret gate: a command that both reads a
+  // secret and writes Forge's own config is refused outright, and a `refused`
+  // already won from a nested shell keeps its own, more specific rule.
+  const ownerRule = ownerSet
+    ? ownerOnlyShellRule({
+        statements,
+        shell,
+        ...(check.cwd ? { cwd: check.cwd } : {}),
+        cdReadonly,
+        set: ownerSet,
+        ...(redirectHit ? { redirectHit } : {}),
+      })
+    : undefined;
+  if (ownerRule && precedence('refused') > precedence(strongest.classification))
+    strongest = { classification: 'refused', rule: ownerRule };
+  const secretRule = secretRuleFor(cardSecretRead?.pattern);
+  if (secretRule && precedence('dangerous') > precedence(strongest.classification)) {
+    strongest = { classification: 'dangerous', rule: secretRule };
+    // The key is the file, not the pattern: `*.pem` says which rule matched, and a
+    // chat rule has to name the one file the owner is agreeing to let this chat read.
+    // When the command reads two secret files, or reads one whose path it builds at
+    // run time, there is no file to name and the card stays unkeyable.
+    secretApprovalFile = cardSecretRead?.file;
+  }
+  // A read-only command whose PATH argument is built at run time cannot be
+  // judged by tokens at all, so it asks: `Get-Content ("~/.s" + "sh/id_rsa")`
+  // names no secret to this classifier, and neither does `cat $(printf …)`.
+  if (
+    strongest.classification === 'read_only' &&
+    statements.some((statement) => argumentLooksComputed(statement))
+  )
+    strongest = { classification: 'normal' };
+  /** The key this call's own gate knows, if it knows one: the folder a readable
+   *  recursive delete is inside, or the one file the secret gate located. The deny
+   *  list's other dangerous rules, and any gate that names neither, get nothing and
+   *  ask the owner every time. */
+  const gateKey: { key: string; targets?: readonly string[] } | undefined =
+    strongest.rule?.keyKind === 'rdelete' && rdeleteStatements === 1 && rdeleteKey
+      ? rdeleteKey
+      : secretApprovalFile !== undefined
+        ? { key: `secret:${secretApprovalFile}` }
+        : undefined;
+  /** One program, reached directly, is a key. Two programs, or a host reached from
+   *  inside a nested shell, is not: see `networkProgram` above. */
+  const singleNetworkProgram =
+    networkSeen && !networkThroughNestedShell && networkPrograms.size === 1
+      ? [...networkPrograms][0]
+      : undefined;
+  return {
+    ...strongest,
+    ...(readSecret ? { readSecretIgnoringAllowList: readSecret } : {}),
+    ...(networkSeen && !strongest.networkReaching ? { networkReaching: true } : {}),
+    ...(singleNetworkProgram ? { networkProgram: singleNetworkProgram } : {}),
+    ...(gateKey
+      ? {
+          approvalKey: gateKey.key,
+          ...(gateKey.targets ? { approvalTargets: gateKey.targets } : {}),
+        }
+      : {}),
+  };
+}
+
+/**
+ * The secret scan's options for one command: its config, the home `~` expands
+ * against, the platform being judged, the folder the command's relative paths
+ * resolve against, and which of the two questions is being asked. Built here rather
+ * than inside the scanner so `shellPolicy.ts` stays the place that knows what a
+ * command's environment is, and the scanner stays the place that knows what a
+ * secret path is.
+ */
+function secretScan(
+  check: ShellSecretCheck,
+  honorAllowList: boolean,
+): {
+  config?: ForgeConfig;
+  home?: string;
+  platform?: NodeJS.Platform;
+  cwd?: string;
+  honorAllowList: boolean;
+} {
+  return {
+    ...(check.getConfig ? { config: check.getConfig() } : {}),
+    ...(check.home ? { home: check.home } : {}),
+    ...(check.platform ? { platform: check.platform } : {}),
+    ...(check.cwd ? { cwd: check.cwd } : {}),
+    honorAllowList,
+  };
+}
+
+/**
+ * The rule for a secret path the owner has not allowed. The command is then
+ * dangerous, not merely `normal`, because in `/clanker` and unattended runs a
+ * `normal` call would be approved without anyone looking.
+ */
+function secretRuleFor(pattern: string | undefined): ShellTokenRule | undefined {
+  if (!pattern) return undefined;
+  return {
+    match: () => true,
+    description: `reads a secret path (${pattern})`,
+    alternative: secretDeclineHint(pattern),
+    class: 'dangerous',
+    gateKind: 'ownerGate',
+  };
 }

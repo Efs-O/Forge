@@ -2,6 +2,7 @@ import * as fs from 'fs/promises';
 import * as path from 'path';
 import * as vscode from 'vscode';
 import { isPathInside } from './pathContainment';
+import { foldDrivePath } from './drivePath';
 
 export interface ResolveWorkspacePathOptions {
   workspaceRoot?: string;
@@ -21,18 +22,35 @@ function defaultWorkspaceRoot(): string | undefined {
   return vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
 }
 
+/**
+ * Is a resolved path inside the open workspace folder?
+ *
+ * A separate question from `resolveWorkspacePath`'s `mustBeInsideWorkspace`, and
+ * it needs its own answer: that one throws for a path outside the workspace —
+ * which is a tool's refusal — while a path in `extra_file_roots` is allowed and
+ * still not ordinary. The card rule (`src/sidebar/untrustedExitPolicy.ts`) asks
+ * THIS one, because the plan keeps a write outside the workspace exactly as it is
+ * today: allowed by the owner's root list, and still needing the owner's approval.
+ */
+export function pathIsInWorkspace(resolvedPath: string): boolean {
+  const root = defaultWorkspaceRoot();
+  if (!root) return false;
+  return isPathInside(path.normalize(root), foldDrivePath(resolvedPath));
+}
+
 export function resolveWorkspacePath(
   filePath: string,
   options: ResolveWorkspacePathOptions = {},
 ): string {
   const root = options.workspaceRoot ?? defaultWorkspaceRoot();
-  if (path.isAbsolute(filePath) && options.allowAbsolute === false) {
+  const input = foldDrivePath(filePath);
+  if (path.isAbsolute(input) && options.allowAbsolute === false) {
     throw new Error(`Absolute paths are not allowed: ${filePath}`);
   }
-  const resolved = path.isAbsolute(filePath)
-    ? path.normalize(filePath)
+  const resolved = path.isAbsolute(input)
+    ? path.normalize(input)
     : root
-      ? path.resolve(root, filePath)
+      ? path.resolve(root, input)
       : (() => {
           throw new Error('No workspace folder open; use an explicit absolute path.');
         })();

@@ -85,6 +85,39 @@ function syncDirectory(directory: string): void {
  * ever fire on Windows.
  */
 const CONTENDED = new Set(['EPERM', 'EBUSY', 'EACCES']);
+/** Is this errno one of the transient rename-contention codes this module retries? */
+function isContended(error: unknown): boolean {
+  return CONTENDED.has((error as NodeJS.ErrnoException).code ?? '');
+}
+
+/**
+ * The error a spent rename budget surfaces, instead of the bare errno.
+ *
+ * `EPERM: operation not permitted, rename '…'` names nothing the agent can act
+ * on, so one session retried the same dead name under four different file names
+ * and burned four calls before it asked the user. The message says what is
+ * blocking it, that the budget is already spent, and what to do instead — and
+ * keeps `code` set, because callers branch on it (`mediaGpuLease.ts`,
+ * `remoteStateFile.ts`) rather than on the text.
+ */
+function contentionGiveUpError(target: string, cause: unknown): Error {
+  const errno = cause as NodeJS.ErrnoException;
+  const code = errno.code ?? 'EPERM';
+  // The errno's own sentence stays at the front, because `AtomicWrite.test.ts` and
+  // any caller that matches on the text expect `operation not permitted` to be
+  // there, and an agent that read only the guidance would lose what the OS said.
+  const original = errno.message ?? `${code}: operation not permitted`;
+  const error = new Error(
+    `${original} — rename onto ${target} was retried for ${RENAME_BUDGET_MS} ms and gave up. ` +
+      'Most likely another process — an editor, a watcher, a running script or antivirus — still ' +
+      'holds that file open, so retrying it, or writing under another name in the same folder, ' +
+      'will likely fail the same way; EACCES can also be a read-only file or an ACL. Tell the ' +
+      'user which file you wanted to change and what the change was. The destination is unchanged.',
+  ) as NodeJS.ErrnoException;
+  error.code = code;
+  error.path = target;
+  return error;
+}
 /** Maximum time spent retrying a contended rename. */
 export const RENAME_BUDGET_MS = 2_500;
 const RENAME_BASE_BACKOFF_MS = 25;
@@ -167,7 +200,8 @@ export function renameContendedSync(
       return;
     } catch (error) {
       const delay = retryDelay(error, target, now() - startedAt, attempt);
-      if (delay === undefined) throw error;
+      if (delay === undefined)
+        throw isContended(error) ? contentionGiveUpError(target, error) : error;
       sleep(delay);
     }
   }
@@ -185,7 +219,8 @@ async function renameContended(temporary: string, target: string): Promise<void>
       return;
     } catch (error) {
       const delay = retryDelay(error, target, Date.now() - startedAt, attempt);
-      if (delay === undefined) throw error;
+      if (delay === undefined)
+        throw isContended(error) ? contentionGiveUpError(target, error) : error;
       await new Promise<void>((resolve) => setTimeout(resolve, delay));
     }
   }

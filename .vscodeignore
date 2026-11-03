@@ -43,6 +43,15 @@ vitest.config.*
 # Read by the user's Claude Code / Codex via forge.setupWithAgent.
 !AI_SETUP.md
 !config/contact-instructions.example.md
+# The shipped skills folder (`resources/skills/`). `**/*.md` below the root strips
+# every `SKILL.md`, and `SKILL.md` IS the skill: without these lines the scripts
+# ship with no way to learn what they do, or that they exist. The `.py` exception
+# is here because a shipped skill's script is the feature too, and `*.json` and
+# `*.txt` at the root would otherwise leave nothing to check. What actually lands
+# in the VSIX is checked by `test/unit/ShippedSkills.test.ts`.
+!resources/skills/**/SKILL.md
+!resources/skills/**/*.md
+!resources/skills/**/*.py
 # Generated from CHANGES.md by scripts/sync-changelog.mjs. Without this line the
 # `*.md` rule above strips it and both registries show "No changelog available".
 !CHANGELOG.md
@@ -71,6 +80,7 @@ dist/qa-layout/**
 !package.json
 *.txt
 !LICENSE.txt
+*.log
 .coordination/**
 smoke3d/**
 prodtest-md2html/**
@@ -87,3 +97,10 @@ assets/publisher-logo.svg
 generated-images/**
 images/**
 artifacts/**
+
+# Python tool caches. pytest run from the repo root writes .pytest_cache/ with a
+# self-ignoring .gitignore, so git status never shows it, and a local 0.17.96
+# build carried one holding the test names of a private skill outside this repo.
+**/.pytest_cache/**
+**/__pycache__/**
+**/*.pyc

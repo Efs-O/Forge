@@ -1,5 +1,960 @@
 # Forge — Recent Changes
 
+## 0.17.117
+
+Removed the approval stand-in (`permissions.approval_stand_in`); a leftover key is now a load error.
+
+- The gate classification that used to say whether a model may answer a card
+  (`standInPolicy: allow | forbid | deny`) is now `gateKind: ownerGate | taintGate | denyList`,
+  and it only says what an unattended turn or a job refuses without a card. Anyone
+  who never configured the stand-in sees the same behaviour as before, and a
+  `permissions.approval_stand_in` left in `config.yaml` or `policy.yaml` now fails to load with
+  a message naming the key and the version that removed it.
+- Tool calls carry approval keys, and each chat can remember a covered action. Approval cards in
+  the sidebar and Telegram offer **Allow for this chat** when the call has a key;
+  `/approvals` lists the chat's rules and matching project rules, and `/approvals reset` clears
+  the chat's remembered rules. An owner can click **Always in this project** to write
+  `approvals.always` to `~/.forge/policy.yaml`; if that file is locked, the rule stays chat-only.
+- Unattended jobs and `--unattended` bus turns remain cardless and ignore chat rules and Clanker.
+  The owner can allow keyed actions in `approvals.jobs.<id>.allow` or
+  `approvals.unattended_bus.allow`; an unmatched refusal names the exact line, and stale job ids
+  raise a load warning. The owner may set `permissions.approval_timeout_minutes` for cards; 30
+  minutes is suggested, but Forge adds no hidden timeout.
+- Clanker mode is one chat's, not one window's. It is saved on the chat's own record, so
+  arming a chat arms only that chat, and a window reload keeps it armed. **Every chat
+  starts with Clanker off after this update**: the window-wide key
+  `workspaceState['forge.clankerMode']` is cleared once at startup, so a mode an older
+  Forge left armed for a whole workspace does not come back on its own, and a chat
+  nobody armed is gated. The composer toggle and `/clanker` act on the chat you are
+  typing in; Telegram `/clanker` acts on the chat your phone is bound to and refuses
+  when none is. `/clear` clears the mode with the history it was armed for, and turning
+  it off revokes nothing the chat was already allowed to do.
+- What Clanker now allows, and what it no longer does: a call the owner could have
+  allowed by key runs with no card, dangerous calls and secret-tainted fetches
+  included; a deny-list command, or any call with no key the owner could allow, gets its
+  card and waits — under `permissions.approval_timeout_minutes` when you set it,
+  indefinitely when you did not — and the turn carries on after the timeout. Clanker
+  refuses nothing without a card any more, so a `git rebase` in a Clanker chat is a card
+  you can answer, not a refusal. Jobs and `--unattended` turns still have no cards; their
+  owner policy allow lists decide which keyed actions run.
+- Every call answered with no card writes one `gate` row saying who answered it
+  (`chat_rule` or `clanker`) and which key covered it, so the session log can still show
+  what an owner allowed. A call with no key that Clanker runs leaves a row with no key,
+  rather than a key nobody allowed.
+- The llama.cpp install smoke test no longer picks a port `fetch` refuses (6000, 10080, …):
+  `findFreePort` binds again until it gets a port off the WHATWG blocked list, which now has one
+  owner, `src/util/fetchBlockedPorts.ts`, shared with the test helper.
+- An unattended refusal is now recorded as the refusal it is. A call a policy denied while
+  nobody was present begins its result with `unattended:`, and three readers did not know that
+  prefix: the transcript and the stats counted the call as a success, the gate log wrote no row
+  for it (five of six refusals in the live ask-once run of 2026-11-03 left no row), and a
+  `web_fetch` that never ran still marked the chat as having read outside content, so its next
+  `message_chat` paid an egress card for a page it never fetched. Refusals count as failures and
+  write a `gate` row naming which wall stopped them — `policy_deny` when the key was not on your
+  allow list, `deny_list` when no key could ever have allowed it — and a call refused before its
+  handler ran brought nothing in, so it no longer flags the chat. A `shell` command the deny list
+  refuses now says `(deny list)` in its message, which is what tells those two causes apart.
+- Nine defects from the same day's live testing of ask-once approvals, every one of
+  them about what a refusal, a command or a button says, and every one found by
+  pressing it: a declined card answered `User declined: shell — use this
+  instead: delete_file`, and the agent took the hint as an instruction and deleted
+  the folder with the other tool — a human no means no, so a decline now says so
+  and the safer way stays on the card, where it can change what you click;
+  commands ignore the case they are typed in, so `/APPROVALS RESET` resets and
+  `/ChatMode` shows in the menu; an unknown `/word` is refused where it is typed,
+  with the notice in the chat and your text left in the box, instead of costing a
+  turn that could only guess at it; the menu offers `/approvals reset` and does
+  what typing it does; the lock notices stopped pasting `icacls`'s lines into a
+  toast that closes — they go to the Forge log — and their buttons now run the
+  opposite command instead of printing and doing nothing; a Telegram chat whose
+  bound chat had closed says to send `/new` or `/chats` rather than naming a
+  "queued conversation" nothing on a handset recognises; a card that offers a rule
+  shows two rows, because `Always in this project` was the label Telegram cut
+  short; a resolved card says `Allowed for this chat ✓` or
+  `Always in this project ✓` rather than `Approved ✓`, which could not tell an
+  approval that wrote a rule from one that did not; and `/job <id> run` on an
+  agent task names the waits it still has to pass — your chats quiet for 10
+  minutes, a free GPU for a local model — and `/job <id>` now says what a waiting
+  job is waiting for.
+
+## 0.17.116
+
+Bug hunt 2026-11-02. Five fixes, each confirmed by review before it was made.
+
+- A scheduled job no longer cuts off a chat in another window. Before, a job's
+  pre-run unload stopped every model this window could see, including a Strata
+  server another window's chat was holding between two requests: `stopAll` took a
+  held model as the owner's explicit command and only logged the chat it cut off,
+  which is right for `/unloadAll` and for a window exiting and wrong for a run
+  nobody typed. The job now waits for its next scheduled time while a hold lives,
+  and the skip is recorded naming the chat that holds the server.
+- A chat that has taken in a page, a search answer, a browser snapshot or an MCP
+  reply keeps that flag across a window reload. Before, the flag was re-derived
+  after a reload using the answer of the tool being called right now for every
+  row in the transcript, so a flagged chat's next `curl`, `message_chat` or
+  `ask_agent` sent its content to another host with no card, and a chat that had
+  read nothing outside was carded for its first fetch.
+- A window whose `config.yaml` will not load can still run
+  `Forge: Move security settings to policy.yaml`. Before, a crash between the
+  migration's two writes — or an agent's `write_file` putting a policy key back
+  into `config.yaml` — left the same key in both files, which the loader refuses
+  by name, and the command the error message tells you to run was never
+  registered, because activation had already stopped: Forge stayed inert until
+  someone hand-edited a YAML file, which is what the migration exists to avoid.
+- `test -f ~/.forge/policy.yaml`, `[ -s … ]` and `[[ … ]]` inspections are
+  read-only under the owner-only guard, as `ls` and `cat` already were. They were
+  refused with words claiming they had changed a file they never touched, and the
+  alternative told the agent to ask the owner for a change nobody wanted. Shapes
+  bash would run through arithmetic or array-subscript evaluation (`test -v 'a[…]'`,
+  `[[ x -eq 'a[$(cmd)]'`) are still refused.
+- A restored chat keeps the time each tool result was produced at, so it can still
+  tell how long its own work has been taking. The stamp was written to disk and
+  never read back, so after a reload only the calls made after the reload carried
+  `[tool result produced at …]`.
+
+## 0.17.115
+
+- A managed server is unloaded only for one that shares a GPU with it. An engine
+  in `~/.forge/policy.yaml` may now say `gpus: [0, 1]`; before a request to a
+  Strata server, Forge unloads another one (and waits on another window's turn
+  on it) only when their device lists overlap, so a coder on the RTX 3060 runs
+  beside production on the two 5060 Tis. An engine without `gpus` still overlaps
+  every other one, as before. `gpus` on a `config.yaml` model entry is an error.
+
+## 0.17.114
+
+- A shell redirect into Forge's own files is refused when a separator follows
+  the file name with no space. Before, `echo x >> ~/.forge/policy.yaml; echo hi`
+  changed `policy.yaml`: the parser stopped waiting for the redirect target before
+  it recorded the word the `;` ended (also `|`, `&`, `&&`, `||`). Found by the
+  2026-11-02 red-team.
+
+## 0.17.113
+
+- A write that a `cd` carries into `~/.forge/` is now refused. Before, the target
+  was judged from the folder the command started in, so
+  `cd ~ && cp evil.yaml .forge/policy.yaml` named `<workspace>/.forge/policy.yaml`,
+  passed the owner-only guard, and the shell wrote the real policy file. Each
+  write is now judged again from the folder the `cd`s before it moved to (`~`,
+  `$HOME`, `$env:USERPROFILE` and `%USERPROFILE%` are followed). After a `cd` the
+  guard cannot follow (`cd $X`), a write that names a `.forge` or `config.yaml`
+  path is refused as "cannot judge" and asks for the folder in full.
+- `ask_agent`'s 20,000-character limit now has one owner, `MAX_QUESTION_CHARS`,
+  which the tool schema imports instead of repeating the number.
+
+## 0.17.112
+
+- A chat now pays for the ways OUT, not for every write. A chat that has read
+  nothing outside its own workspace runs its edits, builds, recycle-bin deletes and
+  shell asking nothing at all — the permission card is gone, in both clean and
+  flagged chats, which is the cost the weekend sweep measured and phase 1 made
+  countable. A chat that has taken in a page, a search answer, a browser snapshot or
+  an MCP reply (or read a secret) is asked only where the call leaves the machine:
+  a command that reaches a host (`curl`, `wget`, `Invoke-WebRequest`, `ssh`, `scp`,
+  `git push`, a package install or publish), a message to another chat, a
+  delegation, a fetch or browser origin this chat has not approved, a secret read,
+  or a write outside the workspace. That card is a plain owner card: the approval
+  stand-in may not answer it, because a judge that cannot see what the chat has
+  already read cannot approve the sending half of an exfiltration. In an unattended
+  or `/clanker` run such an exit is refused with the way forward named, never
+  auto-approved — `/clanker`'s "answers safe calls itself" shortcut is exactly where
+  it would otherwise have been approved silently.
+- The flag that decides this is `untrusted_since_ms`, stored with the conversation,
+  so a window reload cannot clear it while the page is still in context; compaction
+  keeps it, and only a new chat or `/clear` clears it. If the stored number is ever
+  lost, Forge re-derives it from any untrusted tool row still in the transcript, so
+  a lost save fails CLOSED.
+- What the lock does is now stated where you can read it: `Forge: Lock policy.yaml`
+  stops Forge's own writers being used as a proxy for the agent, and stops your
+  accidental edits. It does not stop a program running as you — you can always
+  rewrite a file's permissions, and `~/.forge` lets you replace a file you may only
+  read — so what keeps the agent out is still that nothing under `~/.forge/` is
+  writable by it.
+
+- Reading Forge's own files no longer costs a refusal. `ls`, `du` and a plain
+  `icacls` on something under `~/.forge/` now run; `icacls` is refused only when
+  the switch you gave it rewrites the permissions (`/grant`, `/reset`,
+  `/inheritance:r`). A `cd` into `~/.forge` is refused only when that command
+  really writes inside it, and the refusal now names the write instead of blaming
+  the folder. Where nothing in the command was classed as a change, the refusal
+  says so instead of saying "refuses to change" — that one sentence is what made
+  an agent believe its read of a session log had been refused as a write.
+- `search_code` no longer reports absence for a folder it never opened. Naming a
+  folder that the tool's own noise list prunes — `~/.forge/sessions`,
+  `node_modules`, `dist` — now searches it, because naming a path is an explicit
+  request for that path; a search rooted above such a folder still prunes it. A
+  miss now says what was skipped and why, and an `include` that names one path
+  that does not exist says that instead of "no matches found", which an agent
+  otherwise reads as "this text is not in the tree".
+- `update_plan` accepts `in_progress` and `completed` and stores them as `active`
+  and `done`. Any other word is still refused, with the three it wants named.
+- `ask_agent` now carries a 20,000-character brief (the ceiling was 6,000, and a
+  delegation brief is routinely longer than that), and an `ask_user` option may
+  explain itself in up to 500 characters (it was 200). Neither is trimmed
+  silently — over the limit is still refused, because that text is what the next
+  agent or the user reads, and shortening it behind their back changes the
+  question or the task without anyone noticing.
+
+## 0.17.111
+
+- `config.yaml` is now a file an agent may edit, and the file that says what an
+  agent may do is `~/.forge/policy.yaml` — which an agent may not write, and which
+  you can make read-only even for yourself with `Forge: Lock policy.yaml`
+  (`Forge: Unlock policy.yaml` puts it back; `/config` shows which state it is in,
+  and Forge never locks on its own). The wall opened because the guards moved out:
+  once a policy file exists, a policy key left in `config.yaml`, a model that names
+  its own `start_command`, or a model `endpoint` on a host that is not loopback and
+  not in `model_hosts` makes the load fail, naming the key and the command that
+  fixes it. Until you run `Forge: Move security settings to policy.yaml`, the old
+  behaviour stands: `config.yaml` keeps those keys and is owner-only itself.
+- Two things measured while building the lock changed the command it runs. A
+  read-only grant alone does not stop a replacement — an owner has DELETE on their
+  own file implicitly and the folder's "delete child" grant outranks it — so the
+  lock now also denies delete, and Forge's own writers ask about the lock before
+  they write instead of trusting the ACL to stop an atomic rename. And the plan's
+  `"<user>:R"` with a bare name resolved to the wrong account here, so the grant
+  now uses the current user's SID.
+- The same fact stated plainly, because the lock is easy to over-trust: `Forge: Lock
+  policy.yaml` guards against Forge's own writers being used as a proxy for the agent,
+  and against your own accidental edits. It does not guard against a program running
+  as you — you can always rewrite a file's permissions without elevation, and
+  `~/.forge` lets you replace a file you may only read — so what keeps the agent out
+  is still that nothing under `~/.forge/` is writable by it. A wall that survives a
+  script means the file inside a folder owned by Administrators you cannot delete
+  from, which takes an elevated prompt: that is proposed for you to decide, not built.
+- `test/unit/ConfigPolicyKeyCensus.test.ts` walks the config.yaml side of the
+  schema and fails if a policy key becomes acceptable there, or if any field named
+  `binary`, `executable`, `command`, `*_binary`, `*_executable` or `*_command`
+  shows up outside the four engine fields. That is how a future phase that adds a
+  `video.ffmpeg_binary` would otherwise reopen the wall with every other test still
+  green.
+
+## 0.17.110
+
+- The owner's policy now has its own file, `~/.forge/policy.yaml`: the
+  permissions, the host and root lists, the agent bus, the remote and job
+  settings, the MCP servers, and — new — `engines`, which say how a server
+  process is started and stopped and which executable runs it. A model says
+  `engine: strata-8090` instead of carrying its own `start_command`, so a new
+  model on an existing engine is a free edit while a new engine is an owner
+  edit, and twenty models that start the same program share one engine instead
+  of twenty copies of the same argv. Nothing moved by itself: run
+  `Forge: Move security settings to policy.yaml`, which backs up `config.yaml`
+  first, keeps every comment, and refuses to overwrite a policy file you wrote
+  by hand. Until you run it, both files accept the policy keys, and the same
+  key in both at once is a load error that names it rather than a merge.
+- `test/unit/ExecFieldReads.test.ts` fails if a consumer reads a model's
+  `start_command`, `stop_command`, `unload_path` or `llama_server_binary`
+  straight out of `config.models` again. That is how this split could have made
+  `/chatMode` answer "no solo/multi setting" for a migrated Strata with no
+  error anywhere.
+
+## 0.17.109
+
+- Every approval card, stand-in answer and guard refusal now writes a `gate`
+  row into the chat's session log, saying who answered it and how long the chat
+  waited for the answer. Until now nothing on disk recorded that a gate fired at
+  all — no row in the session log, nothing in Forge's own logs, and Saturday's
+  VS Code logs were already rotated away — so the plan to cut the gates that
+  slow the local agents had no numbers to order itself by.
+- A Windows drive written the way Git Bash or Cygwin writes it (`/n/...`,
+  `/cygdrive/n/...`) is folded to `N:/...` in one shared function, so the path
+  sandbox and the secret matcher now read the same file as the same path. Before
+  this they each had their own rules, and the same file could be refused by one
+  and reported as "nothing exists there" by the other.
+- `cd`, `pushd`, `popd`, `Set-Location` and `sl` no longer cost a refusal when
+  nothing else in the command writes: `cd ~/.forge/agent-bus && ls` reads free.
+  A `cd` followed by a write, or by a `>` into a file, is still refused, because
+  the guard judges a relative write against the folder the command started in,
+  not the one the `cd` moved to, and it says so with the alternative that works:
+  an absolute path, or the folder as the shell tool's `cwd` argument.
+- Moved `GET /agent/status` and `GET /agent/view` into their own file so the
+  cross-window chat can add its routes to `agentRoutes.ts`.
+
+## 0.17.108
+
+- Increased the startup wait for managed Maya and Strata servers from 120 to
+  180 seconds.
+
+## 0.17.107
+
+- Fixed the missing Forge icon in installed VS Code windows by allowing its
+  packaged asset directory in the webview resource roots. Removed the repeated
+  Forge workspace label beside the wordmark.
+- Reduced the session title and header sizes, tightened the session rows and
+  gap below the tabs, and stopped Open/status/message counts being clipped by
+  an obsolete width limit.
+- Row actions stay visible and clickable without hover. Archived-chat menus
+  stay within the viewport, including on the last row of a scrolling list.
+- Browser checks now exercise pin/unpin, close, switch, restore, rename, delete,
+  agent unlink, job navigation, History and New chat, including a 150% zoom view.
+
+## 0.17.106
+
+- Session search now finds user and assistant message text in open and archived
+  chats, alongside titles and sender labels, with progressive results for large
+  archives.
+- Switching chats no longer immediately archives the conversation you leave.
+  Eligible background chats archive after 30 minutes of inactivity by default;
+  running turns, drafts, attachments, queued work and remote bindings stay
+  protected. Keep open pins survive reloads, and
+  `forge.sessions.autoArchiveMinutes` adjusts the grace period or disables it
+  with 0. Manual Close remains available.
+- The sidebar has a larger Forge icon, muted Forge lettering and session title,
+  compact linked-agent controls, aligned sender columns and roomier session
+  rows. Chats counts are green and Archived counts neutral gray; Jobs retains
+  its red failing-job count.
+- Retention preserves live conversation objects during streaming, waits for
+  remote startup state before expiring chats, and protects a chat while its
+  Keep open setting is saving.
+
+## 0.17.105
+
+- Model servers: loading a local GGUF or Ollama model, closing a tab or
+  releasing a model now refuses while **any** window has a chat holding a
+  managed server for a turn, and names the chat and what to do. The cross-window
+  hold added in 0.17.103 was only consulted when one managed server replaced
+  another, so an ordinary model switch in one window could unload the model
+  another window's chat was still using — between its requests, which is where
+  most of an agent turn spends. (BL-023)
+- Model servers: a chat that starts a turn on a managed model whose server is
+  not up no longer blocks every other window for the two minutes that start can
+  take. The start now runs with the machine-wide lock free, and the model is
+  claimed inside the same critical section as the GPU frees, so nothing can
+  take the memory it just freed. The wait that does time out now says what it is
+  waiting on instead of failing a turn with a sentence that named nothing.
+  (BL-020)
+- Model servers: a machine sleep longer than 90 seconds no longer ends every
+  managed turn hold, so the model a resumed turn is about to ask for is still
+  loaded. A hold is now reclaimed only when the window that wrote it has gone;
+  the cost, said in the code, is that a window that leaks a hold keeps it until
+  it closes. (BL-021)
+- Chats: a turn that finishes no longer hangs its chat when its checkpoint
+  cannot be committed — a file an editor, watcher or antivirus is holding was
+  enough to trigger this. The reply arrives, a warning row names the file and
+  says Undo will not cover that turn, and the conversation is released either
+  way, so Stop, closing the tab and the next prompt all work instead of waiting
+  for ever. (BL-024)
+- Disk: the empty per-runtime folders under
+  `%LOCALAPPDATA%\forge-llm\shared-runtimes` now go with the runtime they
+  belonged to. Before, any change to `n_ctx`, `n_parallel`, `--threads`, the
+  model path or the llama.cpp build left one behind for good, and nothing could
+  delete it. (BL-022)
+
+## 0.17.104
+
+- Replies: everything after the first plain sentences now stays in everyday
+  language too — a file, a number or a test gets named only when you need it to
+  act, and what it means comes first. What a requesting agent needs (hashes,
+  paths, counts) goes at the end under "Detail for the record", three lines or
+  fewer unless an agent asked for more, so you can skip that part without an
+  agent losing its detail. This covers every reply, including one another agent
+  triggered, because the owner reads all of them.
+- New workspaces: the starter instruction file Forge writes for a project that
+  has no `FORGE.md` now says **how** to search, not only where to look: read the
+  record a screen symptom is drawn from (Forge's own state under `~/.forge/`, a
+  config field) before grepping the chat logs, then git for the commit that
+  changed it — its message is usually the diagnosis — and search for words the
+  code actually uses instead of words that describe the symptom. The shipped
+  `FORGE.md.example` carries the same rule, so a workspace that starts from the
+  template gets it too.
+
+## 0.17.103
+
+- Model servers: a chat that asks for a different Forge-managed model while a
+  turn in **any** Forge window is still using the loaded one is now refused,
+  naming the model, the busy chat and what to do (use the loaded model, or wait
+  for that turn to end). Before, the swap unloaded the server between two
+  rounds of the other window's turn, which then died with a bare
+  `I/O operation on closed file`. A turn holds its model for its whole length
+  through a short-lived file under the shared-runtimes folder; a hold whose
+  window died or that stopped being refreshed for 90 seconds is reclaimed.
+- Model servers: when a managed server's connection drops mid-turn, the error
+  says the server stopped or was unloaded during the turn, before the raw text.
+- Agent bus: `say --new` without `--model` starts the chat on the configured
+  default model (`active_model`) instead of whatever model the active chat had
+  loaded.
+
+## 0.17.102
+
+- Shell guards: a copy that **reads** Forge's own files is no longer refused.
+  `cp ~/.forge/skills/x.py N:/models/` and `Copy-Item -Path ~/.forge/a.py
+  N:/b.py` now run, and so does a script that `python`, `python3`, `py`,
+  `node`, `zsh` or `dash` is told to run from the skills folder — which is how
+  the documented Hugging Face download was meant to work, and it had been
+  refused outright (BL-014, BL-015). The rule fails closed: an argument shape
+  the guard is not sure about judges every path instead of skipping one, so a
+  false positive costs one round while a skipped destination would have let a
+  write to Forge's own files through.
+- Shell guards: `git check-ignore`, `check-attr`, `ls-tree`, `show-ref` and
+  `merge-base` count as reads, so naming `.forge/config.yaml` while asking
+  whether a file is ignored no longer reads as rewriting the config;
+  `git cat-file` counts as a read only with `-t`, `-s`, `-p` or `-e`, because
+  `--textconv` and `--filters` run the repository's configured programs (BL-016).
+- File writes: a rename that spends its 2.5-second contention budget now says
+  what is most likely blocking it — another process still holding the file, and
+  that writing under another name in the same folder will probably fail the
+  same way — instead of a bare `EPERM` that made an agent retry the same
+  content under four different names (BL-017).
+- Recovery: `read_tool_result` now says an `exec-…` id is a background job and
+  not a tool result, and `unknown execution id` names `list_executions` and the
+  ten minutes after which a finished job leaves its list (BL-018).
+- Shell: a here-document whose delimiter quote is never closed (`<<'PY`) is
+  refused for that fault, naming the delimiter as written, instead of refusing
+  a path inside its body as a write to Forge's own files. Bash rejects the same
+  command itself, so the refusal is not new — only its reason and its message.
+
+## 0.17.101
+
+- Backend: an adopted llama-server — one another VS Code window started — is no
+  longer declared dead while it is merely busy. `/slots` waits on the server's
+  own main loop, so one long prompt read missed the 3 s probe, the model was
+  reported unloaded while it was still answering, and the port it held went to
+  the next model, which then refused to start there. Two unanswered `/health`
+  checks in a row are what say a server is gone (BL-013).
+- Screenshots: a permanently deleted chat now takes its browser and desktop
+  captures with it. They can hold secrets, so they must not outlive the chat;
+  until now its capture folder stayed forever (BL-012).
+- Internal: the browser integration tests no longer write into
+  `~/.forge/screenshots`. They filled it with 2,604 PNGs (28.8 MB) in a month
+  and nothing deleted them; one module now owns the screenshot path and
+  `FORGE_SCREENSHOT_DIR` points it at a test folder (BL-011).
+
+## 0.17.100
+
+- History panel: the panel no longer opens by itself when VS Code starts, and
+  it closes again when you pick a chat, press Escape or click outside it. In
+  0.17.99 it was always drawn, full width, and its corner grip could not resize
+  it.
+- History panel: Chats lists only the chats open as tabs. Every closed chat,
+  newest first, is under Archived; before, the last 40 closed chats showed
+  under Chats and only older ones under Archived.
+- History panel: the resize grip is a three-line corner handle instead of a
+  single diagonal line.
+
+## 0.17.99
+
+- History panel: the clock flyout has Chats, Archived and Jobs tabs with
+  counts, one scrolling list and a search box that filters the open tab. Rows
+  show who started a chat (Claude, Codex, Copilot, Telegram or You), and chats
+  an agent starts are named from the first line of its message without a
+  "Claude: " prefix. Job rows have a status dot, a failing job shows its result
+  in red, and the row menu appears on hover or focus. Drag the corner grip to
+  resize the panel; every window remembers the size, and a double-click resets
+  it. The stray horizontal scrollbars are gone.
+- Agent bus: after a crash or reload, replies that were still pending are now
+  finished with "Forge restarted before answering" instead of showing one
+  "could not recover pending reply" warning each.
+- Answers: a final answer opens in plain words even when another agent or
+  chat asked for it.
+- Internal: activation and the sd-server backend are split into smaller
+  modules; no behaviour change.
+
+## 0.17.98
+
+- Sessions: the Jobs panel lists scheduled jobs and their latest run; selecting
+  a row opens the chat for that job.
+- Shell: background commands wake the chat with their result when they finish.
+  Set `notify_on_exit: false` to opt out; scheduled jobs keep the opt-in default.
+- Strata: when a chat starts while the engine is already at its full-speed
+  capacity, Forge warns that the running chats will share the engine and slow
+  down.
+- Agent guidance: plans now need acceptance criteria, and plans that write
+  lasting state must cover its lifecycle. Setup instructions also use the
+  documented Ollama endpoint and control-server default port.
+- Tool fixes: running scripts in `~/.forge` no longer looks like a write;
+  install, read_file and find_files results now give recovery guidance.
+- Build: `npm run ci` runs one at a time per machine. A second run waits and
+  names the run it is waiting for, then gives up after 45 minutes with exit
+  code 75. A lock whose processes are gone or is older than three hours is
+  taken over. GitHub Actions skip the lock; `npm run ci:steps` is the unlocked
+  chain.
+- Image generation: a surviving Forge window checks sd-server owner records
+  and stops an expired server after its starter window exits, verifying the
+  PID, process creation time, and executable before termination. Failed
+  cleanup is logged and the record remains available for retry.
+
+## 0.17.97
+
+The shell guards catch Git Bash path spellings, and a release build refuses to
+package any file that is not on the shipping allow-list.
+
+- Shell: the owner-only and secret-file guards now recognise Git Bash drive
+  spellings on Windows (`/c/Users/...`, `/C/...`, `/cygdrive/c/...`) as the same
+  paths as `C:/Users/...`, and expand literal same-line bash variables
+  (`D="/c/.../.forge/skills" && rm "$D/a.py"`) before matching. Before this, a
+  `shell` call could edit `~/.forge/**` or read a listed secret file by spelling
+  the path the Git Bash way. A path computed at run time (a script, `python -c`,
+  command substitution, a non-literal variable) is still the documented
+  residual gap.
+- Build: `npm run package` checks `vsce ls` against an allow-list in
+  `scripts/check-vsix-contents.mjs` and fails, naming each file, before a VSIX is
+  written. Log files and Python caches never pass. 0.17.94-0.17.96 shipped four
+  root CI logs that held only test names; `.vscodeignore` now drops `*.log` too.
+## 0.17.96
+
+Forge reads PDF, Word, Excel and PowerPoint files and writes PDF and Word, loads
+skills on demand, and tells the agent what an edit broke in the round that broke
+it.
+
+- Tools: write results say what the edit introduced. After `write_file`,
+  `edit_file` or `apply_line_edits`, the result ends with the errors and warnings
+  the language service reports that were not there before the write, so a broken
+  edit is visible in the round that made it instead of costing a `tsc`/`eslint`
+  shell round. A file no editor has open is opened (unshown) first so the service
+  checks it; when the service did not re-check the file in time the note says the
+  edit was not checked rather than calling it clean, and problems on a file that
+  was never checked before are listed as "may predate this edit". On by default;
+  `tools.edit_diagnostics: { enabled, settle_ms (default 2000), max_items }`.
+- Tools: `edit_file` takes `replace_all` (top level and per `edits[]` item) and
+  names how many copies it replaced; without it, a result that replaced only the
+  first copy says how many are still in the file.
+- Tools: `search_code` takes `output: "files" | "count"`, `context` (0-10 lines),
+  `ignore_case` and `offset` (pages by file). A full page says which offset to
+  call next, and only when more files really matched.
+- Tools: skills. A skill is a folder with a `SKILL.md` (frontmatter `name` equal
+  to the folder name, a one-line `description`, the workflow in the body) plus
+  tested `scripts/` and optional `references/` — the same format Claude Code and
+  Codex use, so a skill written for Forge runs in them unchanged. Forge reads
+  them from three roots and a later root wins by name: the skills it ships in
+  `resources/skills/`, `~/.forge/skills/` for this PC, and `.forge/skills/` in the
+  open workspace. Each catalog line names the root it came from and says so when
+  it shadows a skill of the same name, because a workspace skill comes from
+  whatever repo is open. One line per skill goes into the system prompt, rendered
+  from `config/templates/builtin/skills.njk` and capped at 4,000 characters with
+  the number cut said out loud; the catalog is built once per conversation and
+  frozen for its life, so installing a skill cannot rewrite a running chat's
+  prompt prefix and cost it a cold re-read (measured: one changed line near the
+  head re-evaluates ~5,000 tokens). `load_skill {"name": "..."}` returns the body
+  plus the real paths of its scripts and references; the scripts run through
+  `shell` under unchanged approvals, because a skill grants nothing — its text is
+  instructions read from a file, trusted no more than the workspace `FORGE.md`,
+  and its `config.json` (that skill's own paths and ports) is never returned to
+  the model. A folder whose frontmatter does not parse, or whose `SKILL.md`
+  resolves outside the folder, is skipped with a logged reason while its
+  neighbours load. Skills are OFF unless a workspace writes
+  `skills: { enabled: true }`, because the cost is one catalog line in the prompt
+  plus a 455-character `load_skill` schema on every round; when they are on the
+  tool is eager and ungrouped, so a skill the model can see is a skill it can
+  open in the same round. `hf-download` is the first skill Forge ships
+  (`resources/skills/hf-download/`, its script byte-identical to the user skill
+  the owner installed on 2026-10-29), and the `tools/user/` helper-script folder
+  it lived in is retired — that folder shipped scripts with a README, this one
+  ships a skill with instructions, and the starter `FORGE.md` a new workspace
+  gets now points at `load_skill` instead of at a folder of loose scripts.
+  `src/extension.ts` and `src/sidebar/ModelTurn.ts` had each reached this repo's
+  500-line gate, so wiring the catalog in required a seam first: the status-bar
+  turn events and the model-mismatch warnings are now `statusBarTurnEvents.ts`
+  and `modelMismatchWarnings.ts`, and the skills-catalog getter hangs on the
+  template engine because that is the one object that already reaches every path
+  that renders a system prompt.
+
+- Tools: `read_file` extracts per-page PDF text and reads DOCX, XLSX and PPTX
+  files with page/sheet markers; legacy Office formats, password-required PDFs,
+  encrypted Office files and unsafe or malformed ZIP archives are refused.
+  Telegram attachment extraction now uses the same PDF parser, preserving its
+  existing flattened text limit.
+- Tools: `view_image` can render up to four selected PDF pages as images through
+  PDF.js in the headless browser renderer; it writes no page files and applies
+  the renderer's network and disk walls.
+- Tools: `export_document` writes Markdown as PDF or DOCX with atomic writes and
+  workspace/secret/owner-path guards; `open_url_in_browser` opens workspace
+  HTML/PDF and renders Markdown to a styled local preview.
+- Media: `image_generation.media_gpu_lease_enabled` (off by default, Windows
+  only) makes sd-server take `~/.forge/media-gpu/lease.json` before it starts
+  and give it back when it stops, so the media skills and Forge never load a
+  model onto the same GPU at once. It is one lock for every media GPU. A lease
+  whose process has died is reclaimed; a lease that is not valid JSON is refused
+  with its path rather than guessed at.
+- Agents: `status` and `view` find a sender's linked chat while its first `--new`
+  turn is running, before the title or an answered exchange can identify it;
+  when a client session id is available, reads resolve through that session's
+  own link so parallel sessions of the same agent do not read each other's chat.
+- Tools: `read_file` reads several files and ranges in one call. 901 of the
+  3,530 `shell` commands in the 53 sessions since 0.17.80 read files, and `sed -n`
+  was in 639 of them, so one round now covers what used to take several:
+  `reads: [{path, start_line?, end_line?}]` takes up to 10 items, each answer is
+  headed `--- path (lines a-b of c) ---`, `numbered` applies per item, an item
+  that fails is reported under its own header instead of losing the rest, and
+  the whole reply is capped like a single read. `path` and `reads` cannot be
+  mixed in one call. The tool moved to `src/tools/readFileTool.ts` because
+  `builtinTools.ts` had reached the 500-line limit, and the secret-path approval
+  card and the per-chat secret grant now check every item of a batch.
+- Tools: the `files` lazy group no longer advertises a folder-maker. Its purpose
+  line still said "move, mkdir, line-number edits, restore a file", and that
+  "mkdir" sent a model looking for a folder into a group that stopped holding
+  one when `create_directory` was retired; it now reads "move or rename a file,
+  line-number edits, restore a file from a commit", and the retired name is out
+  of the group map and out of the tests that used it as a stand-in member.
+- Tools: `git_read` is no longer advertised to every conversation either; it
+  joins the lazy `git` group, whose purpose line now names the read operations
+  (status, log, diff, blame, show) as well as stage, commit and branch. Measured
+  over the 53 sessions since 0.17.80 (`docs/reports/TOOL_AUDIT_2026_10_29.md`):
+  6 `git_read` calls against 418 `git` commands typed into `shell` (`status`
+  177, `diff` 159, `log` 139, `commit` 97, `add` 65), so the always-on
+  1,799-character schema bought nothing. Loading `git` brings it back, and a
+  `git_read` call made while the group is unloaded still runs — the
+  registered-but-unadvertised rule is unchanged. Keep it advertised with
+  `tool_groups.eager: [git]`.
+- Tools: `web_search` names only the providers that can answer on this machine.
+  After a DuckDuckGo failure the retry text offered `"tavily" or "brave"` no
+  matter which keys were stored, and 2 of 11 audited calls died on
+  `API key not found … "forge.brave.apiKey"` on a machine with no Brave key
+  (`docs/reports/TOOL_AUDIT_2026_10_29.md`). The retry sentence now lists the
+  providers with a key in SecretStorage (DuckDuckGo needs none), and a request
+  for a provider without one says which providers do work.
+- Tools: `append_file` is gone, and `write_file` took its job as
+  `mode: "append"`. The separate tool had 0 calls in the 53 sessions since
+  0.17.80 while costing a schema on every round, and its truncation-recovery
+  text now tells the model to re-issue `write_file` with `mode: "append"`.
+  An old chat that replays the name gets the retired-tool message naming the
+  mode. The benchmark tool host and the tool harness follow; `append_file`
+  stays readable in `toolUsage.ts` and `compactionLedger.ts` so logs written
+  before this still reconstruct the file the agent built. The `mode` choice is
+  deliberately not offered until a call is cut off: a model that can see an
+  append splits new files into a write plus appends it does not need (5/5 runs
+  on one bench task), each chunk a separate request.
+- Tools: `create_directory` is gone. `write_file` already makes every folder a
+  file needs, as does `move_file`, and the tool had 0 calls in the 53 sessions
+  since 0.17.80 while costing a schema on every round. `shell`'s missing-cwd
+  error now says "write_file to a file inside it, or mkdir in the command"
+  rather than pointing at a tool that is not there, and an old chat that
+  replays the name gets the retired-tool message. `extra_file_roots` is
+  documented as the `delete_file` and writer roots, which is what it already
+  was.
+- Tools: the `media` group is no longer advertised to every conversation.
+  `load_tool_group: media` brings it back for that chat; `tool_groups.eager:
+  [media]` keeps it on for a profile. Measured over 53 sessions since 0.17.80
+  (`docs/reports/TOOL_AUDIT_2026_10_29.md`): `render_html_to_image`, `view_video`,
+  `image_search` and `upscale_image` were called 0 times and `generate_image`
+  once, while `view_image` (94 calls) and `send_file` (52) came from a single
+  session — about 2,300 tokens paid on every coding round. `render_html_to_image`
+  joined the group, so a conversation that never renders pays its 3,905-character
+  schema only after it loads `media`, and the group's purpose line now names the
+  verbs (render, preview a page, upscale, video stills, image search, send
+  files) instead of the tool names.
+
+## 0.17.95
+
+A worker chat wakes the chat that opened it, an agent's message reaches a busy
+chat mid-turn, and the approval stand-in can judge with the model already
+running.
+
+- Agents: a chat opened with `message_chat action=new` wakes its opener once,
+  when the worker's whole chain of turns settles, so a supervisor no longer polls
+  `view` to learn a worker is done. A worker chat waiting on its opener is not
+  archived.
+- Agents: a `forge.sh say` to a busy chat is read at that chat's next tool round,
+  and its answer arrives when the turn ends, instead of queueing behind the whole
+  turn. A `say` with `--unattended`, `--model` or `--new` still needs a turn of
+  its own and waits. Stopping a turn keeps the messages it had already been told.
+- Tools: `message_chat view` also reads a chat that has closed its tab, marked
+  `closed`; `send`, `steer` and `new` still refuse a closed chat. A second send
+  to a chat whose first send has not started yet is refused rather than
+  delivered twice, and a message may be 12,000 characters (was 4,000); an
+  oversize one is told how many parts to split into.
+- History: a worker chat keeps the name of its task instead of being renamed
+  from its first prompt, and Running stands out in a narrower history panel.
+- Telegram: the "Forge: working…" line comes off while a question board or
+  approval card waits, and reopens below it once answered.
+- Permissions: `permissions.approval_stand_in.model` accepts `running`, the
+  model already serving the chat whose card it is, so the judge cannot go stale
+  when you switch models. As before, the judge is asked only while it is loaded,
+  and nothing is started, loaded or swapped to judge a card. A new `order`
+  (`[claude, model]` or `[model, claude]`) says which judge to ask first; with no
+  `order`, the chain is the same as before. `order: [claude, model]` spends your
+  Claude Code usage on every card it judges.
+- Agents: the note Forge writes into a workspace's AGENTS.md and CLAUDE.md is
+  refreshed when its text changes, but only in a file that still holds it; a
+  section you deleted stays deleted. The note now tells a CLI agent to plan and
+  review and to delegate the implementing, and how to remove a worktree it made.
+- Docs: the agent bus README, the `forge.sh` usage header and the agent note now
+  agree on every verb: what `steer` does to an agent session, the 409 when
+  `--new` finds no free tab, the 429 at 20 unread messages, `status` before the
+  first answer, who may answer an approval card, and what `--unattended` refuses.
+  The README, the example config and the install docs closed the gaps the audit
+  found (`/restart`, not `/restartBackend`; no `/jobs`; the stand-in and
+  `permissions.chats` documented).
+- Tests: three new doc checks fail the build when a gap returns: the agent-note
+  ownership text, every `/command` and **Forge:** title named in the docs, and
+  every top-level, `permissions` and `agent_bus` config key appearing in
+  `config/config.example.yaml`. Tool schema measured 58,873 of the
+  64,625-character budget.
+
+## 0.17.94
+
+`ask_agent` no longer freezes the chat that asked it.
+
+- Agents: asking a linked Claude, Codex or Copilot session now returns at once
+  with an exchange id, and the answer arrives later as a message in the chat that
+  asked — read mid-turn if that chat is busy, a new visible turn if it is idle.
+  The ask runs on its own checkpoint, so its edits can be kept or undone apart
+  from the turn that asked. The tool now says: carry on with other work, do not
+  ask the same question again, and leave the files the other agent was asked to
+  change alone.
+- Agents: one pending ask per agent per chat; asking the same agent again while
+  one is pending starts nothing and says it is still working. Stop — the sidebar
+  button as well as the remote one — and closing the chat cancel every pending
+  ask, and a cancelled ask delivers nothing. The end-of-turn notice names the asks
+  still pending, and a chat waiting on one is not archived.
+- Agents: a background ask may run 30 minutes before it times out, headless and
+  live sessions alike, because it no longer holds a chat's turn while it runs.
+  The blocking Telegram ask, `ask_local_agent` delegation and the benchmark runs
+  keep their old limits.
+- Tests: the tool-schema ceiling (`TOOL_SCHEMA_CHAR_BUDGET`) goes up 10%, from
+  58,750 to 64,625 characters, and the 65-tool catalog measures 58,741, so about
+  5,900 characters are free. This is the owner's call: the catalog sat 9
+  characters under the old ceiling, so every description fix had to be paid for
+  by cutting another description. The gate still bites — the canary that proves
+  it does is now sized from the headroom rather than a fixed block of text — and
+  the next tool that grows past 64,625 needs Step 2 or 3 of the growth plan
+  (merge into a family tool, or scope it).
+
+## 0.17.93
+
+A chat can open a worker chat, choose the model it runs on, and read what it
+did.
+
+- Tools: `message_chat` gains `view` — read one named chat's last prompt/answer
+  pairs (at most 10) without sending anything. It is read-only and always on,
+  and `to` is required, so a supervisor watching two workers reads the one it
+  asked for rather than whichever happens to be busy.
+- Tools: `message_chat action=new` pins the chat it opens to a model — the model
+  the asking chat is on, unless `model` names one in `config.yaml`. Before this
+  a new chat took `active_model`, which is stale while the sidebar is open, and
+  loading that model started a second engine beside the one already serving. A
+  name that does not resolve is refused before anything opens, and a pin that
+  fails is refused before the first message goes, so a worker never starts on
+  the wrong model.
+- Tools: a chat opened this way is named after its sender and the first words of
+  its task (`Hello: Take the build.`) instead of `Untitled chat`, so two workers
+  can be told apart in the tab list without reading both transcripts.
+- Config: `permissions.chats.new_chats_per_hour` (default 2, at most 6) says how
+  many chats one chat may open in an hour. `new_chat` and `steer` still default
+  off, so a window that sets nothing behaves exactly as it did before. Six is
+  the ceiling because a new chat also counts as an idle wake, and six wakes an
+  hour is the cap that binds first.
+- Agents: the agent bus's `--new` and `message_chat action=new` now take the
+  same lock around create-and-pin, so two openers cannot interleave and leave a
+  chat unpinned.
+- System: the `--status` card on a phone puts a blank line between each device
+  block, so two graphics cards and the drives are readable.
+
+## 0.17.92
+
+Fixes from the 0.17.91 security re-run.
+
+- Approvals: under `/clanker`, a fetch in a chat that has read a secret is
+  refused at once instead of waiting on a card nobody watches. Attended mode
+  still shows the card and waits for the owner.
+- Approvals: policy refusals read as whole sentences before "Use this
+  instead".
+- Secrets: a file on `secret_paths_allow` is allowed however the agent spells
+  it (`.env`, `./.env` or the full path), in the file tools and the shell.
+  Other files are gated as before, and the read still marks the chat.
+- Tools: owner-only refusals say "Forge's own files", name which part was hit
+  (the loaded config, or `~/.forge/` such as session logs and jobs), and point
+  to `read_file` / `search_code` for reading them.
+- Agents: finding the `claude`/`codex` CLI no longer flashes a console window.
+
+## 0.17.91
+
+Owner guards from the 10-28 security test.
+
+- Tools: Forge's own config (the loaded `config.yaml`, the workspace's
+  `.forge/config.yaml`, everything under `~/.forge/`) is changed by the owner
+  only. Write, edit, move and delete tools and shell writes onto it are refused
+  in every mode, with no card. Reading it still works.
+- Approvals: in an unattended or `/clanker` run, a deny-list command
+  (`git checkout --`, `git restore`, `git reset --hard`, `git clean -f`,
+  `rm -rf`) is refused at once and names `edit_file`, `restore_file` or
+  `delete_file`. Attended mode still shows the card.
+- Approvals: the stand-in never starts, loads or swaps an engine to judge a
+  card. It uses a model that is already running, else the Claude CLI, else the
+  card waits for the owner.
+- Prompt: if a secret read is declined, the agent does not get it another way.
+- Sidebar: the 🔗 link button is gone from the chat header. Chats still link
+  on the first message from an agent, and `/link` links or relinks one by hand.
+
+## 0.17.90
+
+Fixes from the live security test of 0.17.89.
+
+- Secrets: reading a file on `secret_paths_allow` skips the card but still
+  marks the chat as having read a secret, in `read_file`, the git read tools,
+  `search_code` and `shell`. After such a read, fetching a new host waits for
+  the owner.
+- Secrets: `**/credentials.json` and `**/client_secret*.json` are on the
+  default secret-file list.
+- Approvals: the Claude fallback after the stand-in model now runs in the
+  real extension; before, it was never wired. When `fallback: claude` is set
+  but not used, the Forge log says why.
+- Approvals: the stand-in sees the card's reason for a fetch (for example
+  "URL carries 96 characters of encoded data").
+- Telegram: when neither stand-in can answer a card, Telegram says once that
+  it waits for the owner, with no second set of buttons.
+- Startup: Forge no longer waits for the agent-note notification to be
+  clicked. Before, a new workspace could leave the sidebar and the agent mesh
+  stuck until someone clicked it.
+
+## 0.17.89
+
+- Laptop: "Forge: Connect to my desktop" adds every model the desktop serves
+  in one config write. It never stores a key on the laptop and never starts a
+  model. "Forge: Check connection" walks the path link by link and names the
+  first one that is broken. Both work in a window with no folder open.
+- Desktop: "Forge: Share this computer" and "Forge: Stop sharing" turn on or
+  off the model starter and cloud relay switches and their two Tailscale
+  shares. Each asks first and validates the config before changing anything.
+  They never share the control port or Ollama, and never touch the ACL,
+  Tailnet Lock or sign-in. Stop sharing names any other shares it leaves on.
+- Model starter: one shared port. Model traffic passes through to the port the
+  model runs on, and `GET /models` reports that port.
+- Approvals: a card nobody answers goes to the stand-in model, then Claude,
+  then the owner. A stand-in answer takes the card out of the queue.
+- Secrets: reading a secret file needs a card in every tool that prints file
+  contents. After a secret was read, `/clanker` chats and jobs cannot fetch.
+- Fetch: each chat approves each host it fetches from. A payload in the host
+  name, the user info, the path or the query asks first. Lower-case base32 and
+  hex subdomains count as a payload.
+- Page preview: the page's scripts follow the same host rules as `web_fetch`.
+- Telegram: each reply ends with one line showing its own turn's speed, when
+  the engine reported timings. The line never enters the conversation.
+  `/speed` reads Strata's timings again. A six-digit code sent to a chat that
+  is already unlocked is answered there and no longer becomes a prompt.
+- Agent links: one agent session can hold several Forge chats. A relay answers
+  from the chat this window holds. A linked agent whose panel never opens
+  resumes headless. The 🔗 button picks a session from a list.
+- Agent bus: steer reaches linked agents; stop ends an `ask_agent` call that
+  waits on Codex; clearer errors and cancelled exchanges are logged as such.
+- FORGE.md: editing it no longer makes every open chat re-read its whole
+  conversation (each chat keeps its own pinned copy plus one change note).
+  New workspaces get the general rules and a helper-scripts folder shipped in
+  the VSIX. Forge writes the workspace agent note itself.
+- Jobs: a retitle action renames chats still named after their first prompt.
+  A window running an older build than the installed one says so.
+- Tools: a write result says when the file passes the line cap. Three common
+  argument mistakes are absorbed, and refusals are plain one-line messages.
+  `message_chat` with no action sends.
+- Config: a stale model name warns instead of refusing the whole config. A
+  model delete removes its references in the same write.
+- Sessions panel: the open chats keep their order while the panel is open, so
+  two running chats no longer swap rows under the pointer. Rows are one line.
+
+## 0.17.87
+
+- Remote windows: a VS Code tunnel or SSH window connected to the main
+  computer no longer starts Telegram, WhatsApp, the wake relay, the model
+  starter or the cloud relay. The main computer's own Forge window runs them.
+  The window logs one line saying so instead of failing on a missing bot
+  token. WSL, Dev Container, attached-container and Codespaces windows keep
+  the local behaviour.
+- Remote windows: key-based cloud models in a tunnel or SSH window go through
+  the main computer's cloud relay (`cloud_relay.port` on loopback), because
+  that window reads the keychain of the computer you are typing on. Image
+  generation through the relay is refused with a clear message.
+- Settings: `forge.configFile` is now machine-scoped, so a Remote window reads
+  it from Remote settings. Forge warns when the setting points at a file that
+  does not exist.
+- Missing-key messages (cloud models, web search, image search) now say that
+  keys are stored per computer.
+- Cloud relay: Ollama cloud models with a `-cloud` suffix (for example
+  `gemma4:31b-cloud`) are accepted. Before, only `:cloud` was.
+- README: new section "Use Forge from another computer". Personal addresses
+  and names were removed from sources and tests.
+
+## 0.17.86
+
+- Agent bus: messages for different chats now run at the same time. Messages
+  for one chat still run one turn at a time, in order, and a steer still goes
+  to the front of its own chat's line. Two `--new` messages each get their own
+  chat. A bus turn's status id now includes the message id, so two turns that
+  start in the same millisecond no longer share one.
+- Model picker: models served by the desktop (entries with `remote_start`) are
+  listed under a new "Desktop" group, right after "Ollama Cloud". Before, they
+  appeared under "Other OpenAI-compatible". Routing is unchanged.
+
+## 0.17.85
+
+- CLI agents (Windows): Claude and Codex are found when they were installed
+  after VS Code started. Each CLI lookup and spawn reads the machine and user
+  `Path` from the registry, the PATH a newly opened terminal gets, and the
+  child gets that PATH too, so the CLIs' own subprocesses see it. If the
+  registry cannot be read, the startup PATH is kept and the start line says
+  `pathSource=startup`. Behaviour change: a CLI's shell commands now run with
+  the refreshed PATH.
+- CLI agents (Windows): an npm `.cmd` shim's Node is resolved to an absolute
+  `node.exe`, either the one beside the shim or the first on PATH. A missing
+  Node is now reported as "Node.js not found ... install Node, or set `cli` to
+  the CLI's own executable", not as `spawn node ENOENT`.
+- CLI agents: a CLI that fails to start is reported as "Couldn't start
+  Claude/Codex: ENOENT (...). Executable: ...", no longer as `write EPIPE`. The
+  first stdin write now waits until the process has really started. A warm
+  session's next send no longer waits for a start event that already fired.
+- CLI agents: every cold start writes one `[cli-agent] start` line (file,
+  argv, cwd, pathSource). Argv values that look like secrets are redacted,
+  including the value after `--token` or `--api-key`, and environment values
+  are never logged. A CLI process that fails on its own writes one warn line
+  with its exit code or signal and its last stderr. A failed CLI setup now logs
+  `[AgentLoop] cli setup failed`.
+- The "CLI not found" error tells you to quit and reopen VS Code only when no
+  refreshed PATH was searched.
+- Model starter (laptop): `remote_start.starter` now accepts a list of 1-4
+  addresses as well as one URL, tried in config order, so a laptop can list the
+  desktop's LAN forwarder first and its Tailscale address second and change route
+  by itself between home and away. Each address wins only by answering
+  `GET /models` with 200 and a `models` list (2.5 s timeout), so a device that
+  happens to hold the desktop's LAN address on someone else's network does not
+  capture the route; the LAST address is never probed because the `/ensure` sent
+  to it reports its own failure. The base URL is rebuilt on whichever address
+  answered, each lease records the starter that earned it (renew, `/unload` and
+  `/release` go back that way, and `/release` now posts once per distinct
+  starter), and a call that fails as unreachable re-chooses once and is retried
+  once — an HTTP status from the desktop is never a reason to switch. The
+  `endpoint` host must now be one of the starter hosts. A `starter` with one
+  address makes no probe and behaves exactly as it did.
+- Model starter (laptop): the 422 refusal now names the desktop's LAN firewall
+  rule as well as the Tailscale ACL, because the laptop may be reaching the
+  desktop through the LAN forwarder rather than the tailnet.
+
+## 0.17.84
+
+- Cloud relay (desktop): with `cloud_relay.enabled`, Forge listens on
+  127.0.0.1:8797 for a laptop on the tailnet (via `tailscale serve`) and
+  forwards chat requests for the cloud models listed in `cloud_relay.models`,
+  using the desktop's own keys. The laptop needs no API key. Off by default.
+- Model starter (laptop): a model entry with `remote_start: {starter, model}`
+  asks the desktop's model starter to start or load the model before each
+  request and uses the port it reports. Stop cancels a slow start, and
+  `/unloadModel` unloads the model on the desktop.
+
+## 0.17.83
+
+- Model starter (desktop half): with `model_starter.enabled`, Forge listens on
+  127.0.0.1:8798 for a laptop on the tailnet (via `tailscale serve`) and serves
+  four routes: `GET /models`, `POST /ensure`, `POST /release`, `POST /unload`.
+  `/ensure` loads or starts the model through the same path a desktop turn uses
+  and holds a lease on it, so eviction, VRAM freeing and stop-on-exit leave it
+  alone until the lease expires (`lease_ttl_s`, default 600). No key, no token,
+  no inference routes; off by default.
+
+## 0.17.82
+
+- A parallel tool row whose failed call is not the first one now names the
+  failed call and its target on the error line (`read_file docs/plans — ...`),
+  and adds `(+N more failed)` when several failed. Before, a red row headed by a
+  successful `shell` command showed another call's error under it.
+- `read_file` on a directory says it is a directory and points to
+  `list_directory` and `find_files`, in place of a bare EISDIR error.
+
+## 0.17.81
+
+- Direct Claude Code and Codex CLI chats and linked agent asks no longer scan the
+  workspace for a Forge rollback checkpoint. Their edits affect the live
+  workspace and have no Forge Keep/Undo; the model picker says so.
+- Remaining disk-backed workspace checkpoints copy files with bounded
+  concurrency, reducing preparation time for large workspaces.
+
 ## 0.17.80
 
 - The no-config sidebar's "Copy AI Setup Prompt" button now uses its existing
@@ -2652,10 +3607,10 @@ Codex window left open.
 - **`cmd /s /c` stripped the quotes off spaced executable paths.** Forge wraps
   npm `.cmd` shims in `cmd.exe /d /s /c <line>`; the `/s` switch strips the
   first and last quote of the whole line. When the shim path contains a space
-  (`C:\Users\efso office\AppData\Roaming\npm\codex.cmd`), those outer quotes
-  were the executable's own — so cmd ran `C:\Users\efso` as a command and
+  (`C:\Users\jo smith\AppData\Roaming\npm\codex.cmd`), those outer quotes
+  were the executable's own — so cmd ran `C:\Users\jo` as a command and
   `ask_live_session` / delegation to Codex failed with
-  `'C:\Users\efso' is not recognized`. The command line is now wrapped in an
+  `'C:\Users\jo' is not recognized`. The command line is now wrapped in an
   outer quote pair (the documented `/s /c` contract), so the executable's
   quotes survive. Same fix covers every CLI spawn that goes through the shim
   (`claude`, `codex`, `npm` shims).

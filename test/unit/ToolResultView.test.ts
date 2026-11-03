@@ -7,6 +7,7 @@ import {
   IMAGE_SEARCH_THUMBNAILS_PREFIX,
   imageSearchThumbnails,
   isFailureResult,
+  neverRanResult,
   readPathArg,
   rendersAsMarkdown,
   resultLabel,
@@ -80,7 +81,23 @@ describe('readPathArg / isFailureResult', () => {
   it('detects tool failures and refusals', () => {
     expect(isFailureResult('Error: nope')).toBe(true);
     expect(isFailureResult('User declined: write_file')).toBe(true);
+    // An unattended policy denial is a refusal too (`ToolApprovalPolicyDenied`),
+    // so the row, the failure streak and the stats all read it as one.
+    expect(isFailureResult('unattended: dangerous tool denied by policy: "shell".')).toBe(true);
     expect(isFailureResult('wrote 12 lines')).toBe(false);
+  });
+
+  it('tells a call that never ran from one that ran and failed', () => {
+    expect(neverRanResult('unattended: approval key denied by policy: "web_fetch".')).toBe(true);
+    expect(neverRanResult('User declined: write_file')).toBe(true);
+    expect(neverRanResult('Not run: nobody answered the approval for shell within 5 min.')).toBe(
+      true,
+    );
+    // A tool that ran and then failed may still have read a page into its message,
+    // so `Error:` is not here: the untrusted flag in `exfilTaint.ts` keeps counting
+    // it, and only a call that never started is excused.
+    expect(neverRanResult('Error: web_fetch: fetch failed')).toBe(false);
+    expect(neverRanResult('exit 0 · 0.1 s\nno matches here')).toBe(false);
   });
 });
 
@@ -153,11 +170,11 @@ describe('renderedImagePath', () => {
 
 describe('screenshotPath', () => {
   const browserScreenshot =
-    'Screenshot of tab t1 (example.com), 1280x800 px, coord_space=image_px. Saved to C:\\Users\\efso office\\.forge\\screenshots\\conv1\\1700000000000-abc123.png.';
+    'Screenshot of tab t1 (example.com), 1280x800 px, coord_space=image_px. Saved to C:\\Users\\jo smith\\.forge\\screenshots\\conv1\\1700000000000-abc123.png.';
 
   it('reads a browser screenshot path with Windows separators and spaces', () => {
     expect(screenshotPath('browser_screenshot', browserScreenshot)).toBe(
-      'C:\\Users\\efso office\\.forge\\screenshots\\conv1\\1700000000000-abc123.png',
+      'C:\\Users\\jo smith\\.forge\\screenshots\\conv1\\1700000000000-abc123.png',
     );
   });
 
@@ -165,9 +182,9 @@ describe('screenshotPath', () => {
     expect(
       screenshotPath(
         'desktop_capture',
-        'Desktop capture saved. Saved to C:\\Users\\efso office\\.forge\\screenshots\\desktop.jpg.',
+        'Desktop capture saved. Saved to C:\\Users\\jo smith\\.forge\\screenshots\\desktop.jpg.',
       ),
-    ).toBe('C:\\Users\\efso office\\.forge\\screenshots\\desktop.jpg');
+    ).toBe('C:\\Users\\jo smith\\.forge\\screenshots\\desktop.jpg');
   });
 
   it('ignores other tools, failures, and results without a saved path', () => {

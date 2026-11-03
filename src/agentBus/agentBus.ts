@@ -177,6 +177,16 @@ export function writeReply(paths: BusPaths, id: string, text: string): void {
   writeFileAtomicSync(replyFile(paths, id), text);
 }
 
+/** Whether someone is still waiting on `<id>`: the question file is the record
+ *  of that, written by {@link writeQuestion} and withdrawn by
+ *  {@link withdrawQuestion} the moment the ask ends, so a reply that arrives
+ *  after it has nowhere to go. `id` is checked before it names a file.
+ */
+export function questionIsWaiting(paths: BusPaths, id: string): boolean {
+  if (!BUS_ID_PATTERN.test(id)) throw new Error(`not a bus id: ${id}`);
+  return fs.existsSync(questionFile(paths, id));
+}
+
 /** The record that a question is still waited on. Written via .tmp and a
  *  rename, like every bus file. */
 export function writeQuestion(paths: BusPaths, id: string, subject: string, body: string): void {

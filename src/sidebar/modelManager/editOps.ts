@@ -2,7 +2,15 @@ import * as fs from 'fs';
 import * as path from 'path';
 import * as YAML from 'yaml';
 import type { ForgeConfig } from '../../config/types';
-import { updateConfigFile, removeModel, setModelField } from '../../config/ConfigWriter';
+import {
+  isEmptyBlock,
+  removeListItem,
+  removeMapEntry,
+  removeModel,
+  setModelField,
+  updateConfigFile,
+} from '../../config/ConfigWriter';
+import { findModelReferences } from '../../config/modelReferences';
 import { expandAlias, splitModelProfile } from '../../config/ConfigResolver';
 import { samePath } from '../../tools/gitDiscovery';
 
@@ -58,10 +66,43 @@ export function editModelField(
   });
 }
 
-/** Remove a model entry from config.yaml only — no disk deletion. Caller
- *  (the panel) is responsible for the native confirmation prompt. */
+/**
+ * Remove a model entry from config.yaml, and every reference that should go
+ * with it, in ONE atomic write — no disk deletion here. The panel's native
+ * confirm prompt is built from `referenceRemovalNote` and must be shown first.
+ *
+ * The references used to survive this delete silently: an entry of the laptop
+ * cloud list or an alias key left pointing at a model that no longer exists
+ * then refused every later config write, which is how the 2026-10-27 llama.cpp
+ * switch failed at 08:04. `active_model` and `jobs.default_model` are
+ * deliberately NOT rewritten — a delete must not guess a replacement model — and
+ * a config that still names the removed model there loads with a warning
+ * instead of failing.
+ *
+ * Removals go through the `yaml` Document node graph, so the comments on the
+ * entries that stay survive: the cloud list is hand-annotated. (A comment above
+ * the FIRST entry of a block lives on the block in `yaml`, so that one note is
+ * left behind — see `ConfigWriterHelpers.removeListItem`.) Removing the last
+ * allowlisted name drops the whole `cloud_relay` block, because its `models:`
+ * must name at least one model.
+ */
 export function removeModelFromConfig(configPath: string, modelName: string): void {
-  updateConfigFile(configPath, (doc: YAML.Document) => removeModel(doc, modelName));
+  updateConfigFile(configPath, (doc: YAML.Document) => {
+    // Snapshot the references while the model entry is still in the file: once
+    // it is gone they no longer resolve to it, and there would be nothing left
+    // to recognise as the model's own.
+    const references = findModelReferences((doc.toJS() ?? {}) as unknown as ForgeConfig, modelName);
+    removeModel(doc, modelName);
+    for (const row of references) {
+      if (!row.removedWithModel) continue;
+      if (row.kind === 'cloud_relay_model')
+        removeListItem(doc, ['cloud_relay', 'models'], row.value);
+      else if (row.kind === 'alias' && row.key !== undefined)
+        removeMapEntry(doc, ['aliases'], row.key);
+    }
+    if (isEmptyBlock(doc, ['cloud_relay', 'models'])) doc.delete('cloud_relay');
+    if (isEmptyBlock(doc, ['aliases'])) doc.delete('aliases');
+  });
 }
 
 /** Delete `target` if it exists; swallows fs errors (best-effort — caller

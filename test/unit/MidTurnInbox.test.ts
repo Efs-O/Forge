@@ -46,4 +46,35 @@ describe('MidTurnInbox', () => {
     ]);
     expect(inbox.markSendNow('one', 'b')).toBe(false);
   });
+
+  it('replaces a pending wake from the same worker in place', () => {
+    const inbox = new MidTurnInbox();
+    inbox.add('opener', {
+      id: 'wake-1',
+      text: 'first worker result',
+      internal: true,
+      origin: { kind: 'worker-wake', workerId: 'worker' },
+    });
+    inbox.add('opener', {
+      id: 'other',
+      text: 'another notice',
+      internal: true,
+    });
+    inbox.add('opener', {
+      id: 'wake-2',
+      text: 'second worker result',
+      internal: true,
+      origin: { kind: 'worker-wake', workerId: 'worker' },
+    });
+
+    expect(inbox.takeUndelivered('opener')).toMatchObject([
+      {
+        id: 'wake-1',
+        text: 'second worker result',
+        internal: true,
+        origin: { kind: 'worker-wake', workerId: 'worker' },
+      },
+      { id: 'other', text: 'another notice', internal: true },
+    ]);
+  });
 });

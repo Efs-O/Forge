@@ -6,6 +6,7 @@ import type {
   RemoteSelectionChoice,
   RemoteSelectionControls,
 } from './types';
+import type { ApprovalDecision } from '../sidebar/approvalMessages';
 import { TelegramHelpMessages } from './TelegramHelpMessages';
 
 export class FakeRemoteChannel implements RemoteChannel {
@@ -14,6 +15,8 @@ export class FakeRemoteChannel implements RemoteChannel {
     chatId: string;
     text: string;
     correlationId?: string;
+    approvalAllowChat?: boolean;
+    approvalAlwaysInProject?: boolean;
     parseMode?: 'HTML';
   }> = [];
   readonly retracted: Array<{ chatId: string; correlationId: string }> = [];
@@ -24,6 +27,7 @@ export class FakeRemoteChannel implements RemoteChannel {
     keyboardMessageIds: readonly string[];
     approved: boolean;
     reason?: 'resolved' | 'cancelled' | 'timeout';
+    decision?: ApprovalDecision;
   }> = [];
   /** When set, the resolved-keyboard edit fails with this message. */
   resolveKeyboardError?: string;
@@ -150,13 +154,21 @@ export class FakeRemoteChannel implements RemoteChannel {
   async send(
     chatId: string,
     text: string,
-    options?: { correlationId?: string; signal?: AbortSignal; parseMode?: 'HTML' },
+    options?: {
+      correlationId?: string;
+      approvalAllowChat?: boolean;
+      approvalAlwaysInProject?: boolean;
+      signal?: AbortSignal;
+      parseMode?: 'HTML';
+    },
   ): Promise<string[]> {
     if (this.sendError) throw new Error(this.sendError);
     this.sent.push({
       chatId,
       text,
       ...(options?.correlationId ? { correlationId: options.correlationId } : {}),
+      ...(options?.approvalAllowChat ? { approvalAllowChat: true } : {}),
+      ...(options?.approvalAlwaysInProject ? { approvalAlwaysInProject: true } : {}),
       ...(options?.parseMode ? { parseMode: options.parseMode } : {}),
     });
     // Addressable like Telegram, so reply cleanup has an id to delete.
@@ -174,6 +186,7 @@ export class FakeRemoteChannel implements RemoteChannel {
     approved: boolean,
     _options?: { signal?: AbortSignal },
     reason?: 'resolved' | 'cancelled' | 'timeout',
+    decision?: ApprovalDecision,
   ): Promise<void> {
     if (this.resolveKeyboardError) throw new Error(this.resolveKeyboardError);
     this.resolvedKeyboards.push({
@@ -182,6 +195,7 @@ export class FakeRemoteChannel implements RemoteChannel {
       keyboardMessageIds,
       approved,
       ...(reason ? { reason } : {}),
+      ...(decision ? { decision } : {}),
     });
   }
 

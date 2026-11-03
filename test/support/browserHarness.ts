@@ -15,6 +15,10 @@
  * A `data:` URL is used for every fixture so the origin-approval gate never
  * fires (a data: URL has no origin), keeping the loop deterministic.
  */
+import * as fs from 'fs';
+import * as os from 'os';
+import * as path from 'path';
+import { afterAll } from 'vitest';
 import type { ForgeConfig } from '../../src/config/types';
 import { BrowserSessionManager } from '../../src/tools/browser/BrowserSessionManager';
 import { makeBrowserActionTools } from '../../src/tools/browser/browserActionTools';
@@ -117,14 +121,37 @@ export interface BrowserHarness {
   pngFromShot(shot: MultimodalToolResult): Buffer;
   parseInspect(text: string): InspectedEntry[];
   requireBrowser(t: { skip(message?: string): void }): void;
+  /**
+   * The temp folder this file's captures go into (`FORGE_SCREENSHOT_DIR` is set
+   * to it while the harness lives). A test asserts its own `Saved to` path is
+   * inside it, which is what keeps the owner's real screenshot folder clean.
+   */
+  screenshotRoot: string;
   close(): Promise<void>;
 }
 
 /**
  * Build one isolated session with every browser tool registered under its own
  * name, so a test calls the tool exactly as the model would.
+ *
+ * The screenshot root is moved into this run's temp folder (tempGuard has
+ * already pointed `os.tmpdir()` at it) and removed with the file. Before this
+ * the harness passed its `browser-integration-test` id straight through as a
+ * conversation, so every CI run wrote its PNGs into the owner's real
+ * `~/.forge/screenshots` and nothing deleted them — 2,604 files, 28.8 MB, by
+ * the 2026-10-30 hunt (ledger BL-011), and invisible to the temp guard because
+ * they were not under `os.tmpdir()`.
  */
 export function createBrowserHarness(conversationId: string): BrowserHarness {
+  const screenshotRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'forge-browser-shots-'));
+  const savedOverride = process.env.FORGE_SCREENSHOT_DIR;
+  process.env.FORGE_SCREENSHOT_DIR = screenshotRoot;
+  afterAll(() => {
+    if (savedOverride === undefined) delete process.env.FORGE_SCREENSHOT_DIR;
+    else process.env.FORGE_SCREENSHOT_DIR = savedOverride;
+    // A Chrome child can hold a PNG for a moment after the session closes.
+    fs.rmSync(screenshotRoot, { recursive: true, force: true, maxRetries: 10, retryDelay: 200 });
+  });
   const mgr = new BrowserSessionManager();
   const ctx = buildBrowserToolContext(getConfig, mgr);
   const tools = new Map<string, RegisteredTool>(
@@ -141,6 +168,7 @@ export function createBrowserHarness(conversationId: string): BrowserHarness {
 
   return {
     mgr,
+    screenshotRoot,
     get opened() {
       return state.opened;
     },

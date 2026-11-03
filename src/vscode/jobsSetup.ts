@@ -1,4 +1,6 @@
 import { randomUUID } from 'crypto';
+import * as os from 'os';
+import * as path from 'path';
 import * as vscode from 'vscode';
 import { findConfigPath } from '../config/ConfigLoader';
 import type { ForgeConfig } from '../config/types';
@@ -7,6 +9,7 @@ import { JobStore } from '../jobs/JobStore';
 import { JobScheduler } from '../jobs/JobScheduler';
 import { isHomeWindow } from '../jobs/jobsHome';
 import type { IBackendPool } from '../backend/poolTypes';
+import { SharedRuntimeRegistry } from '../backend/SharedRuntimeRegistry';
 import { clearWakesIfUnowned } from '../jobs/schedulerWakes';
 import { PowerControl } from '../system/PowerControl';
 import type { SidebarProvider } from '../sidebar/SidebarProvider';
@@ -14,6 +17,7 @@ import { forgeLocalRoot, modelPinnedBinaries } from '../jobs/actions/stagedBuild
 import { cliAgentSkip } from '../jobs/cliAgentGate';
 import { jobDefaultModel } from '../config/jobsSchema';
 import { extractZip, makeSetBinary, runCommand, sha256File } from '../jobs/actions/llamacppIo';
+import { detectStaleBuild, showStaleBuildWarning } from './staleBuild';
 import { getLogger } from '../util/logger';
 
 /**
@@ -73,6 +77,14 @@ export function setupJobs(
   // commands: PowerControl is stateless, so a second instance would be a
   // second owner of the same `schtasks`/`powercfg` sites.
   const power = new PowerControl();
+  // The machine-wide managed-external turn holds, so a job's pre-run unload does
+  // not cut off a chat another window is holding for a turn (BL-025). This is a
+  // second, stateless instance of the reader the pool uses: `backendPoolSetup.ts`
+  // creates its own with the same default root, so both read one folder, and
+  // `externalTurnHolders()` only reads records and reclaims dead ones. It is not
+  // passed in: `store` and `pool` are both optional, so a seventh argument could
+  // only be optional too, and an unwired one would make the check vanish.
+  const externalTurnHolds = new SharedRuntimeRegistry();
   const instanceId = randomUUID();
   const log = getLogger();
 
@@ -87,6 +99,7 @@ export function setupJobs(
           maxConcurrent: jobs?.max_concurrent ?? 2,
         };
       },
+      getApprovalPolicy: () => getConfig().approvals,
       workspaceId,
       instanceId,
       leaseDirectory: store.root,
@@ -108,7 +121,17 @@ export function setupJobs(
         power,
         host: () => sidebar.getHostFacade(),
         pool: () => pool,
+        externalTurnHolds: () => externalTurnHolds.externalTurnHolders(),
         defaultModel: () => jobDefaultModel(getConfig()),
+        // Asked at every job start. The toast is the wiring's side effect, so
+        // the runner only has to prepend what comes back: a job that fails in a
+        // window that has not been reloaded since an upgrade reports the real
+        // cause, not the config error the old build produced.
+        staleWindow: () => {
+          const notice = detectStaleBuild();
+          if (notice) void showStaleBuildWarning(notice);
+          return notice;
+        },
         gpuGate: {
           config: () => getConfig().jobs?.gpu_gate,
           model: (name) => modelForGpuGate(getConfig(), name),
@@ -130,6 +153,49 @@ export function setupJobs(
         now: () => Date.now(),
         ...(configPath ? { configPath } : {}),
       },
+      // The `retitle` action: the daily pass that names the chats still called
+      // after their first prompt. Wired only when this window has a workspace
+      // and a storage folder, because both are what the scan reads.
+      retitle: {
+        store,
+        host: () => sidebar.getHostFacade(),
+        dirs: () => {
+          const storageDir = context.storageUri?.fsPath;
+          const workspacePath = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
+          return storageDir && workspacePath
+            ? {
+                storageDir,
+                logsDirectory: path.join(os.homedir(), '.forge', 'sessions'),
+              }
+            : undefined;
+        },
+        summarize: async (prompt) => sidebar.runPromptToMarkdown(prompt),
+        defaultModel: () => jobDefaultModel(getConfig()),
+        outboxDir: store.outboxDir,
+        notifyLocal: (message) => void vscode.window.showInformationMessage(message),
+        busy: () => {
+          const { streamingConversationIds } = sidebar.getHostFacade().status();
+          return streamingConversationIds.length > 0 ? 'a turn is streaming' : undefined;
+        },
+        now: () => Date.now(),
+        gpuGate: {
+          config: () => getConfig().jobs?.gpu_gate,
+          model: (name) => modelForGpuGate(getConfig(), name),
+          loadedModels: () => {
+            const config = getConfig();
+            return (pool?.loadedModelNames() ?? []).flatMap((name) => {
+              const model = modelForGpuGate(config, name);
+              return model ? [model] : [];
+            });
+          },
+        },
+        cliAgentSkip: (model, at, late) => cliAgentSkip(getConfig(), model, at, late),
+        staleWindow: () => {
+          const notice = detectStaleBuild();
+          if (notice) void showStaleBuildWarning(notice);
+          return notice;
+        },
+      },
       // The only mutating action (B5). Wired only when a config path is known:
       // without it there is no `llama_server.binary` to switch, so a
       // llamacpp_update job records the change but does not mutate the machine.
@@ -141,7 +207,7 @@ export function setupJobs(
                 const c = getConfig();
                 return {
                   currentBinary: c.llama_server?.binary,
-                  modelBinaries: modelPinnedBinaries(c.models),
+                  modelBinaries: modelPinnedBinaries(c),
                   embeddings: c.embeddings,
                   llama_server: c.llama_server,
                 };

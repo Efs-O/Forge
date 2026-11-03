@@ -126,10 +126,20 @@ describe('RemoteTransportManager failed start (U09-02)', () => {
     });
     try {
       await runtime.applyConfig(config).catch(() => undefined);
-      await vi.waitFor(() => expect(channel.starts).toBe(2), { timeout: 7_000, interval: 25 });
+      // The retry is scheduled at 5 s, and this suite runs 600+ files in
+      // parallel on one machine, so the allowance has to be wider than the
+      // delay it is waiting for; the assertion itself is unchanged.
+      await vi.waitFor(() => expect(channel.starts).toBe(2), { timeout: 12_000, interval: 25 });
       expect(channel.starts).toBe(2);
-      expect(channel.sent.some((message) => message.text.startsWith('Forge: now in here'))).toBe(
-        true,
+      // The receipt lands on a later tick than the transport coming up
+      // (start → claim → announce), so it is polled for rather than asserted
+      // against the moment `start()` was called.
+      await vi.waitFor(
+        () =>
+          expect(
+            channel.sent.some((message) => message.text.startsWith('Forge: now in here')),
+          ).toBe(true),
+        { timeout: 12_000, interval: 25 },
       );
       const reader = new RemoteRequestStore(path.join(directory, 'remote-state-v2.json'));
       await reader.load();
@@ -138,5 +148,5 @@ describe('RemoteTransportManager failed start (U09-02)', () => {
     } finally {
       await runtime.dispose();
     }
-  }, 15_000);
+  }, 40_000);
 });

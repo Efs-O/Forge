@@ -18,7 +18,9 @@ import { FakeRemoteChannel } from '../../src/remote/FakeRemoteChannel';
 import { RemoteHandoffCoordinator } from '../../src/remote/RemoteHandoffCoordinator';
 import { RemoteRequestStore } from '../../src/remote/RemoteRequestStore';
 import { RemoteRuntime } from '../../src/remote/RemoteRuntime';
+import { claimWorkspaceArrivals, createAnnounceGate } from '../../src/remote/remoteWorkspaceSwitch';
 import { RemoteTransportLease } from '../../src/remote/RemoteTransportLease';
+import { RemoteTransportManager } from '../../src/remote/RemoteTransportManager';
 import type { ForgeHostFacade } from '../../src/sidebar/ForgeHostFacade';
 
 const tempDirs: string[] = [];
@@ -87,6 +89,7 @@ function config(aliasPath?: string): ForgeConfig {
 async function recordDepartureFromAnotherWindow(
   directory: string,
   targetWorkspaceId: string,
+  mode: 'replace' | 'new-window' = 'replace',
 ): Promise<string> {
   const otherWindow = new RemoteRequestStore(statePath(directory));
   await otherWindow.load();
@@ -96,6 +99,7 @@ async function recordDepartureFromAnotherWindow(
     sourceWorkspaceId: 'source-workspace',
     targetWorkspaceId,
     targetAlias: 'here',
+    mode,
   });
 }
 
@@ -176,6 +180,54 @@ describe('workspace handoff between two live windows', { timeout: 15_000 }, () =
     await target.dispose();
   });
 
+  /**
+   * What the forced new window used to do: activate, find the lease held by the
+   * window that already had that folder open, and sit in `takeOver` for 90 s —
+   * holding everything after `setupRemoteRuntime` in `extension.ts` behind it,
+   * and showing "Forge remote failed to start" for a switch that is working as
+   * planned. The window's own watch owns that wait now, so activation comes
+   * back in about 2 s, says nothing, and the chat is claimed once the lease
+   * comes free.
+   */
+  it('does not wait on a contested lease at activation when a chat is coming', async () => {
+    const directory = await storageDirectory();
+    const channel = new FakeRemoteChannel();
+    const notified: string[] = [];
+    const heldByTheOtherWindow = await RemoteTransportLease.acquire({
+      directory: path.join(directory, 'remote-leases'),
+      key: 'telegram',
+      workspaceId: 'source-workspace',
+      instanceId: 'other-window',
+      onLost: vi.fn(),
+    });
+    // The record first, so this window knows a chat is on its way before it
+    // finds the lease taken — that is the case that used to be either silent
+    // for 90 s or a toast about a switch that had not gone wrong.
+    await recordDepartureFromAnotherWindow(directory, 'workspace', 'new-window');
+    const target = runtime(directory, channel, {
+      notifyLocal: (message) => notified.push(message),
+    });
+    const startedAt = Date.now();
+    await target.applyConfig(config());
+    expect(Date.now() - startedAt).toBeLessThan(5_000);
+    expect(target.activeTransports()).toEqual([]);
+    // Silent both ways: nothing went wrong here, and the window that has the
+    // lease is the one answering this chat until the lease comes free.
+    expect(notified).toEqual([]);
+    expect(channel.sent.map((message) => message.text)).toEqual([]);
+    await heldByTheOtherWindow.release();
+    await vi.waitFor(() => expect(target.activeTransports()).toEqual(['telegram']), {
+      timeout: 5_000,
+    });
+    await vi.waitFor(
+      () =>
+        expect(channel.sent.some((message) => message.text.startsWith('Forge: now in'))).toBe(true),
+      { timeout: 10_000 },
+    );
+    expect(notified).toEqual([]);
+    await target.dispose();
+  });
+
   it('takes the chat back when opening the target folder does not reload', async () => {
     const directory = await storageDirectory();
     const channel = new FakeRemoteChannel();
@@ -206,6 +258,73 @@ describe('workspace handoff between two live windows', { timeout: 15_000 }, () =
     expect(reader.hasPendingWorkspaceHandoff('workspace')).toBe(false);
     await source.dispose();
   });
+
+  /**
+   * The defect phase 2 exists to prevent: in `new-window` mode this window is
+   * still alive, so an unclaimed switch has to put the phone back here —
+   * transports up **and** the lease re-taken, because another window that is
+   * still holding the lease is the one answering — and say which of the two
+   * windows is serving.
+   */
+  it('a new-window switch nobody claims puts the phone back and says so', async () => {
+    const directory = await storageDirectory();
+    const channel = new FakeRemoteChannel();
+    const elsewhere = await storageDirectory();
+    const source = runtime(directory, channel, {
+      // The second window opened; nothing reloaded this one, so the rollback
+      // timer is the only thing that can answer the chat.
+      openWorkspace: async () => undefined,
+      workspaceRoot: elsewhere,
+    });
+    const applied = config(elsewhere);
+    await source.applyConfig(applied);
+
+    const finishSwitch = await source.switchWorkspace(
+      applied,
+      'other',
+      'telegram',
+      'chat-a',
+      'new-window',
+    );
+    await finishSwitch();
+    expect(source.activeTransports()).toEqual([]);
+
+    await vi.waitFor(
+      () =>
+        expect(channel.sent.some((message) => message.text.includes('could not switch'))).toBe(
+          true,
+        ),
+      { timeout: 10_000 },
+    );
+    // Transports up means the lease is held: no transport starts without it, so
+    // this is the proof the phone is really answering here and not in the new
+    // window that never claimed.
+    expect(source.activeTransports()).toEqual(['telegram']);
+    const undo = channel.sent.find((message) => message.text.includes('could not switch'))!;
+    expect(undo.text).toContain('still open and answering');
+    expect(undo.text).toContain('Other window is open too');
+    await source.dispose();
+  });
+
+  it('a new-window arrival names the mode and the window still open', async () => {
+    const directory = await storageDirectory();
+    const channel = new FakeRemoteChannel();
+    const target = runtime(directory, channel);
+    await target.applyConfig(config());
+    await recordDepartureFromAnotherWindow(directory, 'workspace', 'new-window');
+
+    await vi.waitFor(
+      () =>
+        expect(channel.sent.some((message) => message.text.startsWith('Forge: now in'))).toBe(true),
+      { timeout: 10_000 },
+    );
+    const arrival = channel.sent.find((message) => message.text.startsWith('Forge: now in'))!;
+    // The owner cannot see which window is which from the phone: the receipt is
+    // the only thing that says whether their old window is still there.
+    expect(arrival.text).toContain('opened as a new window');
+    expect(arrival.text).toContain('is still open');
+    await target.dispose();
+  });
 });
 
 describe('handoff rollback', () => {
@@ -220,8 +339,9 @@ describe('handoff rollback', () => {
       targetWorkspaceId: 'target-workspace',
       targetAlias: 'other',
     });
-    await store.claimWorkspaceHandoffs('target-workspace');
-    const restoreTransports = vi.fn(async () => undefined);
+    await store.claimAndBindWorkspaceHandoff(handoffId, 'target-workspace');
+    const takeTransports = vi.fn(async () => true);
+    const releaseTransports = vi.fn(async () => undefined);
     const sendToChat = vi.fn(async () => undefined);
     const coordinator = new RemoteHandoffCoordinator({
       store,
@@ -229,7 +349,8 @@ describe('handoff rollback', () => {
       workspaceId: 'source-workspace',
       serialize: (task) => task(),
       claimArrivals: async () => undefined,
-      restoreTransports,
+      takeTransports,
+      releaseTransports,
       sendToChat,
       notifyLocal: vi.fn(),
     });
@@ -242,9 +363,156 @@ describe('handoff rollback', () => {
       currentName: 'Here',
     });
 
-    expect(restoreTransports).not.toHaveBeenCalled();
+    // It took the lease to ask, and must give it back: the window that claimed
+    // the chat needs it to serve, and a rollback that keeps it would leave the
+    // phone answering in a window that has no claim on the chat.
+    expect(takeTransports).toHaveBeenCalledTimes(1);
+    expect(releaseTransports).toHaveBeenCalledTimes(1);
     expect(sendToChat).not.toHaveBeenCalled();
     coordinator.dispose();
+  });
+
+  it('a rollback that cannot take the lease leaves the record alone and says nothing', async () => {
+    const directory = await storageDirectory();
+    const store = new RemoteRequestStore(statePath(directory));
+    await store.load();
+    const handoffId = await store.beginWorkspaceHandoff({
+      channel: 'telegram',
+      chatId: 'chat-a',
+      sourceWorkspaceId: 'source-workspace',
+      targetWorkspaceId: 'target-workspace',
+      targetAlias: 'other',
+    });
+    const takeTransports = vi.fn(async () => false);
+    const releaseTransports = vi.fn(async () => undefined);
+    const sendToChat = vi.fn(async () => undefined);
+    const coordinator = new RemoteHandoffCoordinator({
+      store,
+      storePath: statePath(directory),
+      workspaceId: 'source-workspace',
+      serialize: (task) => task(),
+      claimArrivals: async () => undefined,
+      takeTransports,
+      releaseTransports,
+      sendToChat,
+      notifyLocal: vi.fn(),
+    });
+
+    await coordinator.rollbackNow({
+      handoffId,
+      channel: 'telegram',
+      chatId: 'chat-a',
+      targetName: 'Other',
+      currentName: 'Here',
+    });
+
+    // A third window holds the lease and is serving this chat: stealing it
+    // would cut off a chat that is answering, and saying "you are still here"
+    // would be a lie. The record is left for whoever holds the lease to claim.
+    expect(store.peekWorkspaceHandoffs('target-workspace')).toHaveLength(1);
+    expect(sendToChat).not.toHaveBeenCalled();
+    expect(releaseTransports).not.toHaveBeenCalled();
+    coordinator.dispose();
+  });
+
+  it('a cold target that starts after the rollback fired claims nothing', async () => {
+    const directory = await storageDirectory();
+    const source = new RemoteRequestStore(statePath(directory));
+    await source.load();
+    const handoffId = await source.beginWorkspaceHandoff({
+      channel: 'telegram',
+      chatId: 'chat-a',
+      sourceWorkspaceId: 'source-workspace',
+      targetWorkspaceId: 'target-workspace',
+      targetAlias: 'other',
+    });
+    const sendToChat = vi.fn(async () => undefined);
+    const coordinator = new RemoteHandoffCoordinator({
+      store: source,
+      storePath: statePath(directory),
+      workspaceId: 'source-workspace',
+      serialize: (task) => task(),
+      claimArrivals: async () => undefined,
+      takeTransports: async () => true,
+      releaseTransports: async () => undefined,
+      sendToChat,
+      notifyLocal: vi.fn(),
+    });
+    await coordinator.rollbackNow({
+      handoffId,
+      channel: 'telegram',
+      chatId: 'chat-a',
+      targetName: 'Other',
+      currentName: 'Here',
+    });
+    expect(sendToChat).toHaveBeenCalledTimes(1);
+
+    // The window that was still starting now finds the record failed, not
+    // pending: claiming it would contradict the "you are still here" the source
+    // has already sent, and would land the chat in a window with no lease.
+    const late = new RemoteRequestStore(statePath(directory));
+    await late.load();
+    expect(late.peekWorkspaceHandoffs('target-workspace')).toHaveLength(0);
+    expect((await late.claimAndBindWorkspaceHandoff(handoffId, 'target-workspace')).ok).toBe(false);
+    coordinator.dispose();
+  });
+
+  /**
+   * A binding write that throws leaves the record pending, so this window's own
+   * watch re-attempts the claim every tick. The receipt for that failure has to
+   * be said once: a chat told "could not be bound here, send /workspace again"
+   * every five seconds until the record's TTL would be told to repeat itself
+   * hundreds of times.
+   */
+  it('says the binding failure once across the retry ticks', async () => {
+    const directory = await storageDirectory();
+    const store = new RemoteRequestStore(statePath(directory));
+    await store.load();
+    await store.beginWorkspaceHandoff({
+      channel: 'telegram',
+      chatId: 'chat-a',
+      sourceWorkspaceId: 'source-workspace',
+      targetWorkspaceId: 'workspace',
+      targetAlias: 'here',
+    });
+    const channel = new FakeRemoteChannel();
+    const deps = {
+      store,
+      // The lease is already ours in this fixture: `takeOver` returning at once
+      // is what a window that holds it does.
+      manager: {
+        takeOver: async () => undefined,
+        get: () => ({ channel }),
+      } as unknown as RemoteTransportManager,
+      coordinator: {} as RemoteHandoffCoordinator,
+      workspaceId: 'workspace',
+      host: host(),
+      isDisposed: () => false,
+      requestedConfig: () => config(),
+      activeTransports: () => ['telegram'],
+      announceOnce: createAnnounceGate(),
+      totpEnrolled: async () => false,
+      notifyLocal: vi.fn(),
+      stopTransports: async () => undefined,
+    } as unknown as Parameters<typeof claimWorkspaceArrivals>[0];
+    // Every attempt fails the same way, which is what a contended state lock
+    // does to the one write that claims, binds and completes.
+    (
+      store as unknown as { claimAndBindWorkspaceHandoff: () => Promise<never> }
+    ).claimAndBindWorkspaceHandoff = async () => {
+      throw new Error('Forge remote state lock timed out');
+    };
+
+    await claimWorkspaceArrivals(deps);
+    await claimWorkspaceArrivals(deps);
+    await claimWorkspaceArrivals(deps);
+
+    expect(
+      channel.sent.filter((message) => message.text.includes('could not be bound here')),
+    ).toHaveLength(1);
+    expect(
+      channel.sent.filter((message) => message.text.includes('send /workspace here again')),
+    ).toHaveLength(1);
   });
 
   it("keeps the target window's claim through the source window's later writes", async () => {
@@ -260,7 +528,9 @@ describe('handoff rollback', () => {
       targetWorkspaceId: 'target-workspace',
       targetAlias: 'other',
     });
-    expect(await target.claimWorkspaceHandoffs('target-workspace')).toHaveLength(1);
+    expect((await target.claimAndBindWorkspaceHandoff(handoffId, 'target-workspace')).ok).toBe(
+      true,
+    );
     // The polling cursor is saved on every poll; it must not write back the
     // source window's stale copy over the claim.
     await source.setCursor('telegram', '42');

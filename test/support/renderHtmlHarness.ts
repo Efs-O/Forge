@@ -1,5 +1,5 @@
 /**
- * A stand-in for Playwright's chromium, shared by the two
+ * A fake for Playwright's chromium, shared by the two
  * `render_html_to_image` suites (input/rendering vs cleanup/delivery).
  *
  * The tool reaches the browser ONLY through `getPlaywright()`, so replacing

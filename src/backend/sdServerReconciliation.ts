@@ -16,8 +16,10 @@ import {
  * means for this window, and what a freshly spawned child must be proven to be
  * before it gets a record. Both exist because Windows reuses PIDs, so "alive"
  * means pid plus creation time, and killing the wrong pid is the worst failure
- * this backend has. `SdServerBackend` stays the only owner of the child, the
- * idle timer, and the record file; these functions only decide.
+ * this backend has. `SdServerBackend` owns the child and its record writes;
+ * the two watchers that stop an idle server — the owner window's local deadline
+ * timer and the sweep for a record whose starter died — both live in
+ * `sdServerIdle.ts`, which comes back here for the identity decision.
  */
 
 export interface SdProcessLookup {

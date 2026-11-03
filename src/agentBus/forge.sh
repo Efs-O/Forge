@@ -1,20 +1,23 @@
 #!/usr/bin/env bash
 #   forge.sh reply <id> [file]        answer a question Forge is waiting on
-#   forge.sh say <your-name> [--model <name>] [--new] [--unattended] [--to <conversationId>|--to-running] [file]  message Forge
+#   forge.sh say <your-name> [--model <name>] [--new] [--unattended] [--to <conversationId>|--to-running] [file]  message Forge (the chat this session last addressed; --to any chat this session is linked to, or an open chat that holds none; --new starts and links a second chat, the first keeps its link; --to-running selects the chat running a turn now; set at most one of --to, --to-running and --new, or the bus refuses the message)
 #   forge.sh send <your-name> <to> [--to <conversationId>|--to-running] [file]  relay (the verdict wakes the sending Forge chat when it is open), or target a Forge chat when <to> is forge
-#   forge.sh send-file <your-name> --to <conversationId> <workspace-relative-path> [--caption-file <file>]  send a file directly to its Telegram chat (no Forge model turn)
+#   forge.sh send-file <your-name> --to <conversationId> <workspace-relative-path> [--caption-file <file>]  send a file directly to its Telegram chat (no Forge model turn); --to is required, --caption-file holds the caption (1,024 code points)
 #   forge.sh remote-notify <claude|codex|copilot> <exchangeId> [file]  notify the Telegram chat that opened this exchange
 #   forge.sh remote-ask <claude|codex|copilot> <exchangeId> [file]  ask that chat and wait up to 20 minutes for /answer
 #   forge.sh read-verdict <your-name> <exchangeId>  read the full retained verdict without consuming it
 #   forge.sh ack-verdict <your-name> <exchangeId>   acknowledge a read verdict and remove its retained copy
-#   forge.sh steer <your-name> <to> [--to <conversationId>] [file] interrupt <to>'s running turn (forge/claude/codex/copilot); runs next
+#   forge.sh steer <your-name> <to> [--to <conversationId>] [file] forge: interrupt the running turn and run this next (--to only here); claude/codex/copilot: withdraw this chat's earlier ask to that agent and ask this instead
 #   forge.sh stop <your-name> [--to <conversationId>]  cancel a running Forge turn; queued messages may still start
 #   forge.sh cancel <your-name> <id|all>  withdraw your queued message(s) to Forge not yet started
 #   forge.sh who                      linked agent sessions held by Forge windows
-#   forge.sh status <your-name>       what your chat with Forge is doing now (tool, last words, context)
+#   forge.sh status <your-name>       what your chat with Forge is doing now (tool, last words, context); before your first turn starts, your queue
 #   forge.sh view <your-name> [n]     the last n answers in your chat (default 3, max 10)
 #   forge.sh wait <your-name> [minutes]  block until your chat is idle with nothing queued (default 60 min, exit 124 on timeout)
 #   Agent sessions identify themselves from their kind-specific session environment variable.
+#   --unattended means nobody is watching: dangerous tools are refused, other confirmations are auto-approved, ask_user is refused, and a Claude/Codex ask is refused unless jobs.allow_cli_agents is true.
+#   A say to a busy chat is read at its next tool round; its answer arrives when the turn ends; use steer only to stop the current work.
+#   A say with --unattended, --model or --new needs its own turn, so it waits until the running turn ends.
 # The text comes from the file, or from stdin when no file is given.
 # Written by Forge on every start; edits are overwritten.
 
@@ -40,6 +43,13 @@ set_sender_identity() {
     copilot:*) case "$SENDER_ID" in *[!A-Za-z0-9._:-]*|'') echo "forge.sh: invalid $SENDER_VAR session id" >&2; exit 2;; esac;;
   esac
   SENDER_QUERY="&sender=%7B%22kind%22%3A%22$SENDER_KIND%22%2C%22sessionId%22%3A%22$SENDER_ID%22%7D"
+}
+set_optional_sender_identity() {
+  case "$1" in
+    claude) [ -n "${CLAUDE_CODE_SESSION_ID:-}" ] && set_sender_identity "$1";;
+    codex) [ -n "${CODEX_SESSION_ID:-}" ] && set_sender_identity "$1";;
+    copilot) [ -n "${COPILOT_AGENT_SESSION_ID:-}" ] && set_sender_identity "$1";;
+  esac
 }
 # Under WSL2 (NAT on Windows 10) 127.0.0.1 is the Linux VM, not Windows where
 # Forge listens; Windows' curl.exe (via interop) reaches Windows' loopback.
@@ -102,7 +112,9 @@ if [ "$VERB" = "status" ] || [ "$VERB" = "view" ]; then
   NAME="${2:-}"; COUNT="${3:-}"
   { [ "$VERB" = "status" ] && [ $# -eq 2 ]; } || { [ "$VERB" = "view" ] && [ $# -ge 2 ] && [ $# -le 3 ]; } || usage
   case "$NAME" in ""|*[!A-Za-z0-9._-]*) echo "forge.sh: a name is letters, digits, . _ - only" >&2; exit 2;; esac
+  set_optional_sender_identity "$NAME"
   QUERY="from=$NAME"
+  [ -n "$SENDER_KIND" ] && QUERY="$QUERY&kind=$SENDER_KIND&sessionId=$SENDER_ID"
   if [ -n "$COUNT" ]; then
     case "$COUNT" in *[!0-9]*) echo "forge.sh: n is a number (1-10)" >&2; exit 2;; esac
     QUERY="$QUERY&count=$COUNT"
@@ -157,6 +169,11 @@ if [ "$VERB" = "wait" ]; then
   [ -f "$EP" ] || { echo "forge.sh: not reachable: open Forge with control_server and agent_bus enabled" >&2; exit 1; }
   URL="$(grep '"url"' "$EP" | cut -d'"' -f4)"
   TOKEN="$(grep '"token"' "$EP" | cut -d'"' -f4)"
+  set_optional_sender_identity "$NAME"
+  IDENTITY_ARGS=()
+  if [ -n "$SENDER_KIND" ]; then
+    IDENTITY_ARGS+=(--data-urlencode "kind=$SENDER_KIND" --data-urlencode "sessionId=$SENDER_ID")
+  fi
   # ~55 s between polls: cheap for Forge, and a turn that ends between polls is
   # picked up on the next one. The test-only overrides keep route integration
   # tests deterministic without waiting for the production interval.
@@ -184,14 +201,14 @@ if [ "$VERB" = "wait" ]; then
   LIMIT=$((START + TIMEOUT_SECONDS))
   LAST=""
   while :; do
-    if LAST="$(curl -sS --fail-with-body -X GET -H "Authorization: Bearer $TOKEN" "$URL/agent/status?from=$NAME")"; then
+    if LAST="$(curl -sS --fail-with-body -G -H "Authorization: Bearer $TOKEN" --data-urlencode "from=$NAME" "${IDENTITY_ARGS[@]}" "$URL/agent/status")"; then
       STATE="$(printf '%s\n' "$LAST" | sed -n 's/^State: //p' | head -n 1)"
       QUEUED="$(printf '%s\n' "$LAST" | sed -n 's/^Queued from you: //p' | head -n 1)"
       case "$STATE" in
         idle*)
           if [ "$QUEUED" = "0" ]; then
             printf '%s\n' "$LAST"
-            curl -sS --fail-with-body -X GET -H "Authorization: Bearer $TOKEN" "$URL/agent/view?from=$NAME&count=1" \
+            curl -sS --fail-with-body -G -H "Authorization: Bearer $TOKEN" --data-urlencode "from=$NAME" --data-urlencode "count=1" "${IDENTITY_ARGS[@]}" "$URL/agent/view" \
               || { echo "forge.sh: Forge's endpoint did not accept it (see above)." >&2; exit 1; }
             exit 0
           fi;;

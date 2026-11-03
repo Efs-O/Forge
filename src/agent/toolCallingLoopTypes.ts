@@ -1,6 +1,7 @@
 import type { ModelConfig } from '../config/types';
 import type { ToolCallProgressHandler, UsageHandler } from '../llm/OpenAIClient';
 import type { ChatMessage, ToolCall, ToolDefinition } from '../llm/types';
+import type { HeldSchemaProperty } from './truncationRecovery';
 import type { ToolResultContextResult } from './toolResultContext';
 import type { OutputRoomBudget, PromptRequestSnapshot } from '../util/contextBudget';
 import type { RequestFingerprint } from '../sessions/requestFingerprint';
@@ -22,12 +23,17 @@ export interface ToolCallingLoopOptions {
   /** The model's `writeChunkLimit`; truncation recovery stays under it. */
   writeChunkLimit?: number;
   /**
-   * Tools held back until a tool call is cut off this turn. Offering
-   * `append_file` up front made the model split new files into write + append
-   * calls it did not need (5/5 runs on one task), each a separate request; with
-   * no append tool on offer, the same model wrote them in one call.
+   * Schema properties held back until a tool call is cut off this turn, so the
+   * model cannot see a way to split a write it does not need to split. Offering
+   * `write_file`'s `mode` up front — and, before it, the separate append tool —
+   * made the model split new files into a write plus appends it did not need:
+   * 5/5 runs on one task on the bench, each chunk a separate request, and one
+   * round per tool call is the scarcest resource. With nothing on offer, the
+   * same model wrote the file in one call. The tool stays advertised and its
+   * handler keeps accepting the property, so what is hidden is the choice, not
+   * the ability: a replayed call that still sends `mode` dispatches fine.
    */
-  offerAfterTruncation?: readonly string[];
+  holdUntilTruncation?: readonly HeldSchemaProperty[];
   maxOutputTokens?: number;
   nativeTools: boolean;
   stripAllTools?: boolean;

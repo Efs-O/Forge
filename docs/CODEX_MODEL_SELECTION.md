@@ -64,20 +64,25 @@ per-task knob Forge exposes.
 
 ## 4. There is no per-call model argument
 
-- `ask_live_session` takes `subject` / `question` / `target` / `session` /
-  `wait_minutes` — **no `model`**.
+- `ask_agent` takes `agent` / `message` / optional `subject` — **no `model`**
+  (`src/tools/askAgentTool.ts`; `ask_live_session` and its `wait_minutes` were
+  removed).
 - `ask_local_agent`'s `model` names a **delegation target** from
   `list_delegation_targets`, not an arbitrary Codex model.
 
 So "use sol medium for this task" resolves to: edit the two config keys →
-re-create the owned session → verify. Not a per-call flag.
+release the linked session → verify. Not a per-call flag.
 
 ## 5. Config edits need a session re-creation
 
-`createOwnedCodex()` reads `agent_bus` only at creation, and the live session
-is cached in `OwnedSessionFactory.owned`. Editing the keys does **nothing** to
-an already-running owned session. The alias must be closed / parked / reaped
-first; the next `ask_live_session` then re-creates it with the new values.
+`agent_bus.codex_model` and `agent_bus.codex_effort` are read when the linked
+session is created (`src/agentLinks/askAgentRuntime.ts`), so editing the keys
+does **nothing** to a session that is already running. The link has to go first
+— unlink it, or let the registry's idle timeout reap it
+(`DEFAULT_CLI_IDLE_TIMEOUT_MS`, `src/agents/CliSessionRegistry.ts`) — and the
+next `ask_agent` then creates a session with the new values. A *resumed* thread
+is the other case: `codexThreadResumeParams` (`src/agents/codexAppServerArgs.ts`)
+re-applies both keys on every `thread/resume`, which is the override §6 proves.
 
 ## 6. Verify by reading the rollout, never the reply
 

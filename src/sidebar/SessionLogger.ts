@@ -11,11 +11,13 @@ import {
 } from '../sessions/requestStats';
 import type { ForgeTurnEndKind } from './turnOutcome';
 import type { CompactionAttemptLogEntry, CompactionLogEntry } from './compactionLogTypes';
+import { buildGateRefusalRow, type GateEventRow } from './gateEventLog';
 import {
   isJsonObject,
   parseJsonWithInvalidEscapeRepair,
   toolArgumentRepairForMessage,
 } from '../tools/argCoercion';
+import { readResumeCursor } from '../sessions/sessionCursor';
 
 const SESSIONS_DIR = path.join(os.homedir(), '.forge', 'sessions');
 
@@ -55,53 +57,6 @@ export interface SessionContext {
   workspaceName?: string;
   workspacePath?: string;
   forgeVersion?: string;
-}
-
-/**
- * How much of the file's tail is scanned for the resume cursor. The cursor is
- * appended at the end of every flush that wrote anything, so it sits within a
- * few hundred bytes of EOF in practice; the window only has to be wider than
- * one turn's worth of trailing lines.
- */
-const CURSOR_SCAN_BYTES = 1024 * 1024;
-
-/**
- * Recover `writtenCount` from a file an earlier run left behind.
- *
- * Returns 0 when there is nothing to recover, which reproduces the old
- * behaviour (re-write the history) rather than risking the opposite error of
- * skipping messages that were never logged.
- */
-function readResumeCursor(filePath: string): number {
-  let fd: number | undefined;
-  try {
-    const size = fs.statSync(filePath).size;
-    if (size === 0) return 0;
-    const start = Math.max(0, size - CURSOR_SCAN_BYTES);
-    const buf = Buffer.alloc(size - start);
-    fd = fs.openSync(filePath, 'r');
-    fs.readSync(fd, buf, 0, buf.length, start);
-    const lines = buf.toString('utf8').split('\n');
-    for (let i = lines.length - 1; i >= 0; i--) {
-      const line = lines[i]?.trim();
-      if (!line || !line.includes('"cursor"')) continue;
-      const parsed = JSON.parse(line) as { type?: string; written_count?: unknown };
-      if (parsed.type === 'cursor' && typeof parsed.written_count === 'number') {
-        return parsed.written_count;
-      }
-    }
-    return 0;
-  } catch {
-    return 0;
-  } finally {
-    if (fd !== undefined) {
-      try {
-        fs.closeSync(fd);
-      } catch {
-        /* non-fatal */
-      }
-    }
-  }
 }
 
 export class SessionLogger {
@@ -418,6 +373,14 @@ export class SessionLogger {
         line['turn_context'] = msg.turnContext;
       }
       this.append(line);
+      // The gate ledger. A guard refusal is thrown inside the tool and comes back
+      // as this row's text, so recording it here is one place instead of one per
+      // guard — and a guard added later is recorded without touching it. Cards are
+      // recorded by `gateEventLog.ts` through the approval sink, not here.
+      if (msg.role === 'tool') {
+        const refusal = buildGateRefusalRow(msg.name ?? '', content ?? '', this.sessionId, model);
+        if (refusal) this.append({ ...refusal });
+      }
     }
 
     this.appendUsage(usage, model);
@@ -467,6 +430,18 @@ export class SessionLogger {
       timestamp_ms: Date.now(),
       model,
     });
+  }
+
+  /**
+   * One row of the gate ledger (`gateEventLog.ts`): a card and who answered it,
+   * or the guard refusal that stopped a call. Written through the same append as
+   * the turns, so a card, the refusal that replaced it, and the tool call it
+   * stopped are in one file in the order they happened — which is the only way a
+   * reader can tell a two-minute wait from a two-hour one.
+   */
+  logGate(row: GateEventRow, model: string): void {
+    this.ensureHeader(model);
+    this.append({ ...row, model: row.model ?? model });
   }
 
   private append(obj: Record<string, unknown>): void {

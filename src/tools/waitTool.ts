@@ -42,7 +42,7 @@ export function makeWaitTool(): RegisteredTool {
           'command, use monitor_execution instead. Each return reports the local ' +
           'wall-clock time: time an interval against that clock, not by counting ' +
           `waits -- an hour is four calls of ${MAX_WAIT_SECONDS}s, not one. ` +
-          'Use notify_on_exit with a background command to hear when it finishes. ' +
+          'A background command says when it ends on its own; do not park a wait on one. ' +
           'Ends early when a new message arrives.',
         parameters: {
           type: 'object',

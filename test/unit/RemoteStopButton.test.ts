@@ -111,7 +111,12 @@ async function liveTurn(
   const cancel = vi.fn(async () => {
     for (const event of [...pendingApprovals.values()]) {
       pendingApprovals.delete(event.id);
-      resolveApprovalSink({ ...event, approved: false, reason: 'cancelled' });
+      resolveApprovalSink({
+        ...event,
+        approved: false,
+        decision: 'decline',
+        reason: 'cancelled',
+      });
     }
   });
   const host = {
@@ -142,11 +147,17 @@ async function liveTurn(
       resolveApprovalSink = (event) => sink.resolved(event);
       return { dispose: () => undefined };
     },
-    resolveApproval: vi.fn((id: string, approved: boolean) => {
+    resolveApproval: vi.fn((id: string, decision: 'approve' | 'allowChat' | 'decline') => {
+      const approved = decision !== 'decline';
       const event = pendingApprovals.get(id);
       if (!event) return;
       pendingApprovals.delete(id);
-      resolveApprovalSink({ ...event, approved, reason: 'resolved' as const });
+      resolveApprovalSink({
+        ...event,
+        approved,
+        decision,
+        reason: 'resolved' as const,
+      });
     }),
     addQuestionSink: (sink: {
       asked(event: UserQuestionRequestEvent): void;
@@ -193,9 +204,20 @@ async function liveTurn(
     emitProgress: (event) => progressListener?.(event),
     // 5 s, not waitFor's 1 s default: a loaded CI runner missed the final edit
     // by the default deadline (ubuntu-latest, 2026-10-23). It returns as soon as it lands.
+    //
+    // The final status is a message of its own, never the answer. It is an edit
+    // while the bubble that carried the working line is still on screen, and a
+    // send of its own when a question board took that bubble away — Telegram
+    // rejects an empty message, so the line is deleted for the length of the
+    // wait and there is nothing left to edit afterwards.
     drainDone: () =>
       vi.waitFor(
-        () => expect(channel.edits.map((edit) => edit.text)).toContain('Forge: cancelled.'),
+        () =>
+          expect([
+            ...channel.edits.map((edit) => edit.text),
+            ...channel.progress.map((item) => item.text),
+            ...channel.sent.map((item) => item.text),
+          ]).toContain('Forge: cancelled.'),
         { timeout: 5_000 },
       ),
     askQuestion: (event) => ask(event),

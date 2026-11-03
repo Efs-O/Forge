@@ -1,27 +1,35 @@
-import { spawn, spawnSync } from 'child_process';
 import * as fs from 'fs';
 import * as path from 'path';
-import { terminateCliProcessTree } from '../agents/cliProcess';
 import type { ForgeConfig } from '../config/types';
 import type { ToolDefinition } from '../llm/types';
-import { normalizeSpawnCwd } from '../util/processSpawn';
+import { unattendedConversations } from '../sidebar/unattendedConversations';
 import {
   BackgroundExecutionManager,
   backgroundExecutionManager,
 } from './BackgroundExecutionManager';
-import { resolveExecCwd } from './execHelpers';
+import { execCwdPreview, resolveExecCwd, runShellInForeground } from './execHelpers';
 import { NOTIFY_ON_EXIT_DESCRIPTION } from './backgroundExecutionTools';
-import { resolveGitBash } from './execProgramResolver';
-import { classifyShellCommand, type ShellClassification, type ShellKind } from './shellPolicy';
+import { resolveGitBash, systemProbe } from './execProgramResolver';
+import {
+  classifyShellCommand,
+  type ShellClassification,
+  type ShellSecretCheck,
+} from './shellPolicy';
+import type { ShellKind } from './shellCommandTokens';
 import { ShellOutputCollector } from './shellOutput';
 import { DEFAULT_TOOL_OUTPUT_LIMITS } from './toolOutputLimits';
 import type { RegisteredTool } from './ToolRegistry';
+import { markConversationReadSecret } from './exfilTaint';
 
 export interface ShellToolOptions {
   getConfig?: () => ForgeConfig;
   manager?: BackgroundExecutionManager;
   platform?: NodeJS.Platform;
   env?: NodeJS.ProcessEnv;
+  /** The home folder `~` and `$env:USERPROFILE` expand against, for the
+   *  secret-path gate. Absent means `os.homedir()`; injectable so a test does
+   *  not depend on who is logged in on this machine. */
+  home?: string;
   /** Test seam; production resolves Git Bash by location. */
   bashPath?: string;
   /**
@@ -29,66 +37,45 @@ export interface ShellToolOptions {
    * bundled `rg`, since most machines have none on PATH.
    */
   ripgrepDir?: () => string | undefined;
+  /**
+   * The normalised absolute roots an agent may not change (`ownerPaths.ts`), read
+   * live so a config reload that moves `config.yaml` needs no re-registration.
+   * Absent, or an empty list: the owner guard is inert and the classifications
+   * stay exactly what they were.
+   */
+  ownerOnly?: () => readonly string[];
 }
 
-/**
- * Adds `dir` to PATH (key case varies on Windows). Appending lets a
- * user-installed program win; prepending makes `dir` win.
- */
-export function withPathEntry(
-  env: NodeJS.ProcessEnv,
-  dir: string | undefined,
-  position: 'append' | 'prepend' = 'append',
-): NodeJS.ProcessEnv {
-  if (!dir) return env;
-  const key = Object.keys(env).find((name) => name.toUpperCase() === 'PATH') ?? 'PATH';
-  const entries = (env[key] ?? '').split(path.delimiter).filter(Boolean);
-  if (position === 'append') {
-    if (entries.includes(dir)) return env;
-    return { ...env, [key]: [...entries, dir].join(path.delimiter) };
-  }
-  if (entries[0] === dir) return env;
-  return { ...env, [key]: [dir, ...entries.filter((entry) => entry !== dir)].join(path.delimiter) };
-}
-
-function windowsProbe(): { which: (name: string) => string[]; exists: (p: string) => boolean } {
-  return {
-    which: (name: string) => {
-      const result = spawnSync('where.exe', [name], { encoding: 'utf8' });
-      return (result.stdout ?? '')
-        .split(/\r?\n/u)
-        .map((value) => value.trim())
-        .filter(Boolean);
-    },
-    exists: (candidate: string) => fs.existsSync(candidate),
-  };
-}
-
-/**
- * Git Bash's folder, put FIRST on a Windows child's PATH: `bash x.sh` inside a
- * pwsh command line would otherwise resolve System32's WSL launcher, the
- * WSL#41592 crash path.
- */
-export function gitBashDir(
-  options: Pick<ShellToolOptions, 'bashPath' | 'env'>,
-): string | undefined {
-  if (options.bashPath) return path.win32.dirname(options.bashPath);
-  try {
-    return path.win32.dirname(resolveGitBash(windowsProbe(), options.env ?? process.env));
-  } catch {
-    // No Git for Windows: nothing to put first; `shell: bash` itself still refuses.
-    return undefined;
-  }
-}
+/** Adds `dir` to PATH (key case varies on Windows): appending lets a user-installed program win, prepending makes `dir` win. */
+/** The PATH helpers live in `shellPathEnv.ts`; re-exported so the tests that
+ *  name them keep one import path. */
+export { gitBashDir, withPathEntry } from './shellPathEnv';
+import { gitBashDir, withPathEntry } from './shellPathEnv';
 
 const classifications = new WeakMap<Record<string, unknown>, ShellClassification>();
 
-function getClassification(args: Record<string, unknown>, shell: ShellKind): ShellClassification {
+function getClassification(
+  args: Record<string, unknown>,
+  shell: ShellKind,
+  check?: ShellSecretCheck,
+): ShellClassification {
   const existing = classifications.get(args);
   if (existing) return existing;
-  const value = classifyShellCommand(String(args['command'] ?? ''), shell);
+  const value = classifyShellCommand(String(args['command'] ?? ''), shell, check ?? {});
   classifications.set(args, value);
   return value;
+}
+
+/**
+ * True when this turn is a scheduled job run. The agent_task runner marks its
+ * conversation with the job's meta for the whole turn, so the shell tool reads
+ * that marker instead of threading a "is this a job" argument through every
+ * caller: a job turn has already written its RESULT: line, and a wake turn
+ * would report the same run again, so a job run keeps the opt-in default.
+ */
+function isAgentTaskTurn(conversationId: string | undefined): boolean {
+  if (!conversationId) return false;
+  return unattendedConversations.jobMeta(conversationId) !== undefined;
 }
 
 /**
@@ -159,7 +146,7 @@ function resolveShell(
   if (platform === 'win32') {
     if (options.bashPath)
       return { command: options.bashPath, args: ['--noprofile', '--norc', '-c'] };
-    return { command: resolveGitBash(windowsProbe(), env), args: ['--noprofile', '--norc', '-c'] };
+    return { command: resolveGitBash(systemProbe(), env), args: ['--noprofile', '--norc', '-c'] };
   }
   return { command: fs.existsSync('/bin/bash') ? '/bin/bash' : 'bash', args: ['-c'] };
 }
@@ -277,61 +264,6 @@ function pwshHint(shell: ShellKind, code: number | null, command: string): strin
   return `\nThis ran in PowerShell, but the command uses POSIX syntax (${idioms.join(', ')}). Rerun it with shell: "bash".`;
 }
 
-async function runForeground(
-  executable: string,
-  args: string[],
-  cwd: string,
-  timeoutMs: number,
-  env: NodeJS.ProcessEnv,
-  signal: AbortSignal | undefined,
-  output: ShellOutputCollector,
-): Promise<{ code: number | null; timedOut: boolean; seconds: number }> {
-  const started = Date.now();
-  return new Promise((resolve, reject) => {
-    const proc = spawn(executable, args, {
-      shell: false,
-      cwd: normalizeSpawnCwd(cwd),
-      stdio: ['ignore', 'pipe', 'pipe'],
-      windowsHide: true,
-      env: {
-        ...env,
-        FORGE_CONVERSATION_ID: env.FORGE_CONVERSATION_ID,
-        GIT_TERMINAL_PROMPT: '0',
-        NO_COLOR: '1',
-        FORCE_COLOR: '0',
-      },
-      ...(process.platform !== 'win32' ? { detached: true } : {}),
-    });
-    let timedOut = false;
-    let settled = false;
-    const finish = (code: number | null): void => {
-      if (settled) return;
-      settled = true;
-      clearTimeout(timer);
-      signal?.removeEventListener('abort', stop);
-      resolve({ code, timedOut, seconds: (Date.now() - started) / 1000 });
-    };
-    // Resolve only once the tree is dead, or the next command races its files.
-    let killing = false;
-    const stop = (): void => {
-      if (killing || settled) return;
-      killing = true;
-      clearTimeout(timer);
-      void terminateCliProcessTree(proc).then(() => finish(null));
-    };
-    const timer = setTimeout(() => {
-      timedOut = true;
-      stop();
-    }, timeoutMs);
-    signal?.addEventListener('abort', stop, { once: true });
-    if (signal?.aborted) stop();
-    output.collect(proc.stdout);
-    output.collect(proc.stderr);
-    proc.once('error', reject);
-    proc.once('close', (code) => !killing && finish(code));
-  });
-}
-
 export function makeShellTool(options: ShellToolOptions = {}): RegisteredTool {
   const platform = options.platform ?? process.platform;
   const manager = options.manager ?? backgroundExecutionManager;
@@ -341,6 +273,34 @@ export function makeShellTool(options: ShellToolOptions = {}): RegisteredTool {
     (bashDir === undefined ? (bashDir = gitBashDir(options) ?? null) : bashDir) ?? undefined;
   const shellFor = (requested: unknown): ShellKind =>
     configuredShell(options, requested, () => gitBash() !== undefined);
+  /**
+   * The gates' view of one call: the tool's config, home and platform, plus the
+   * two things only this call knows — the folder its relative paths resolve
+   * against, and the owner-only roots. Both are read here rather than in
+   * `classifyShellCommand` because `approval`, `autoApproveIf` and the handler
+   * are three calls of the same classifier and must give the same answer for the
+   * same `args`: a refusal the handler alone saw would be a card first.
+   */
+  const checkFor = (args: Record<string, unknown>): ShellSecretCheck => {
+    const roots = options.ownerOnly?.();
+    const base = execCwdPreview(typeof args['cwd'] === 'string' ? args['cwd'] : undefined);
+    return {
+      ...(options.getConfig ? { getConfig: options.getConfig } : {}),
+      ...(options.home ? { home: options.home } : {}),
+      ...(options.platform ? { platform: options.platform } : {}),
+      ...(roots && roots.length > 0 ? { ownerOnly: roots } : {}),
+      ...(base ? { cwd: base } : {}),
+    };
+  };
+  /**
+   * The approval key for one classified call. The key the GATE knows (`rdelete:`,
+   * `secret:`) wins over the key the EXIT knows (`net:prog:`), because the gate is
+   * what raised this card: a command that both reads a secret file and runs `curl`
+   * must not be answerable by a rule for `curl`, or the secret read goes unasked.
+   */
+  const approvalKeyFor = (classified: ShellClassification): string | undefined =>
+    classified.approvalKey ??
+    (classified.networkProgram ? `net:prog:${classified.networkProgram}` : undefined);
   const tool: RegisteredTool = {
     // A literal on purpose: scripts/tool-audit-catalog.mjs reads it from source.
     // describe() is what is advertised, with the Windows-only `shell` override.
@@ -384,24 +344,54 @@ export function makeShellTool(options: ShellToolOptions = {}): RegisteredTool {
     permission: 'headless',
     approval: (args) => {
       const shell = shellFor(args['shell']);
-      const result = getClassification(args, shell);
+      const result = getClassification(args, shell, checkFor(args));
+      const approvalKey = approvalKeyFor(result);
       if (result.classification === 'normal')
         return {
           detail: `${String(args['command'])}\ncwd: ${String(args['cwd'] ?? '(workspace root)')}\nshell: ${shell}`,
+          // The classifier matched no rule, so this is the card's text, not a gate:
+          // `untrustedExitPolicy.ts` decides whether a card opens, and a clean chat
+          // runs the command with none.
+          cardTextOnly: true,
+          ...(result.networkReaching ? { reachesOut: 'network' } : {}),
+          ...(approvalKey ? { approvalKey } : {}),
         };
+      if (result.classification === 'refused') return undefined;
+      if (result.classification === 'read_only')
+        // A read-only command can still reach a host (`curl -I https://x`), and the
+        // classifier lets it through. In a flagged chat the egress rule still wants
+        // the owner, so the way out is reported even though this metadata asks for no
+        // card of its own — and the program is named with it, so that card is the one
+        // a chat rule can answer.
+        return result.networkReaching
+          ? {
+              cardTextOnly: true,
+              reachesOut: 'network',
+              ...(approvalKey ? { approvalKey } : {}),
+            }
+          : undefined;
       if (result.classification === 'dangerous')
         return {
           detail: `${String(args['command'])}\nMatched rule: ${result.rule?.description ?? 'destructive command'}${
             result.rule?.alternative ? `\nSafer way: ${result.rule.alternative}` : ''
           }`,
           dangerous: true,
+          ...(result.networkReaching ? { reachesOut: 'network' } : {}),
+          ...(approvalKey ? { approvalKey } : {}),
+          ...(result.approvalTargets ? { approvalTargets: result.approvalTargets } : {}),
           ...(result.rule?.alternative ? { declineHint: result.rule.alternative } : {}),
+          ...(result.rule?.gateKind
+            ? {
+                gateKind: result.rule.gateKind,
+                cardReason: `Matched rule: ${result.rule.description}`,
+              }
+            : {}),
         };
       return undefined;
     },
     autoApproveIf: (args) =>
       ['read_only', 'refused'].includes(
-        getClassification(args, shellFor(args['shell'])).classification,
+        getClassification(args, shellFor(args['shell']), checkFor(args)).classification,
       ),
     handler: async (args, context) => {
       if (typeof args['command'] !== 'string' || args['command'].length === 0)
@@ -424,17 +414,27 @@ export function makeShellTool(options: ShellToolOptions = {}): RegisteredTool {
       }
       const command = args['command'];
       const shell = shellFor(args['shell']);
-      const classified = getClassification(args, shell);
+      const classified = getClassification(args, shell, checkFor(args));
       if (classified.classification === 'refused') {
         throw new Error(
-          `shell: ${classified.rule?.description ?? 'command refused'} — ${classified.rule?.alternative ?? 'choose a safe alternative'}`,
+          `shell: ${classified.rule?.description ?? 'command refused'} (deny list) — ${classified.rule?.alternative ?? 'choose a safe alternative'}`,
         );
       }
       const background = args['background'] === true;
-      if (args['notify_on_exit'] === true && !background)
+      const notifyOnExit = args['notify_on_exit'];
+      if (notifyOnExit === true && !background)
         throw new Error('shell: notify_on_exit requires background=true.');
-      if (args['notify_on_exit'] === true && !context?.conversationId)
+      if (notifyOnExit === true && !context?.conversationId)
         throw new Error('shell: notify_on_exit requires a conversation.');
+      // On by default for a background command in a chat: a flag that has to be
+      // remembered at launch and cannot be added later made an agent that
+      // forgot it spend four rounds polling. `false` is the opt-out (a server
+      // the agent does not want to hear about); a scheduled job run keeps the
+      // opt-in default (see isAgentTaskTurn); an explicit flag wins either way,
+      // and an omitted flag with no conversation arms nothing and errors nothing.
+      const wakeOnExit =
+        notifyOnExit !== false &&
+        (notifyOnExit === true || !isAgentTaskTurn(context?.conversationId));
       const cwd = resolveExecCwd(typeof args['cwd'] === 'string' ? args['cwd'] : undefined);
       const timeout = typeof args['timeout_ms'] === 'number' ? args['timeout_ms'] : 120_000;
       const resolved = invocation(shell, command, options);
@@ -454,7 +454,7 @@ export function makeShellTool(options: ShellToolOptions = {}): RegisteredTool {
           cwd,
           ...(typeof args['timeout_ms'] === 'number' ? { timeoutMs: timeout } : {}),
           env: environment,
-          ...(args['notify_on_exit'] === true && context?.conversationId
+          ...(wakeOnExit && context?.conversationId
             ? { notifyConversationId: context.conversationId }
             : {}),
         });
@@ -466,7 +466,7 @@ export function makeShellTool(options: ShellToolOptions = {}): RegisteredTool {
         context?.outputLimits?.shellInlineChars ?? DEFAULT_TOOL_OUTPUT_LIMITS.shellInlineChars,
       );
       try {
-        const result = await runForeground(
+        const result = await runShellInForeground(
           resolved.command,
           resolved.args,
           cwd,
@@ -476,6 +476,11 @@ export function makeShellTool(options: ShellToolOptions = {}): RegisteredTool {
           output,
         );
         const capped = await output.finish();
+        // The command printed a secret path into this chat, allow list or not,
+        // so its next fetch is judged; a background run is not marked, as its
+        // output never reaches the chat.
+        if (classified.readSecretIgnoringAllowList)
+          markConversationReadSecret(context?.conversationId);
         return (
           formatResult(result.code, result.seconds, result.timedOut, capped.text) +
           pwshHint(shell, result.code, command)

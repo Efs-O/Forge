@@ -1,5 +1,5 @@
 import type { AgentSender } from '../agentLinks/chatAgentLinks';
-import { formatMovedSessionNotice } from '../agentLinks/inboundAgentRouting';
+import { formatAlsoLinkedNotice } from '../agentLinks/inboundAgentRouting';
 import type { InboxMessageOptions, ChatTargetResult } from '../agentBus/agentInbox';
 import type { AgentRoutesDeps } from './agentRoutes';
 import { AgentRouteHttpError } from './agentRouteFields';
@@ -40,10 +40,10 @@ export async function admitInboundMessage(options: {
       targetConversationId: routed.conversationId,
       sender: routed.sender,
     };
-    if (routed.movedFrom)
-      deps.showMovedNotice?.(
-        routed.movedFrom.conversationId,
-        formatMovedSessionNotice(sender.kind, routed.link, routed.title),
+    if (routed.alsoLinkedFrom)
+      deps.showAlsoLinkedNotice?.(
+        routed.alsoLinkedFrom.conversationId,
+        formatAlsoLinkedNotice(sender.kind, routed.link, routed.title),
       );
     const workspace = deps.workspaceRoot;
     if (!workspace) throw new AgentRouteHttpError(500, 'workspace is unavailable');

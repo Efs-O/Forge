@@ -1,6 +1,7 @@
 import { isRemoteCommand } from './RemotePromptAdmission';
 import { previewPrompt, type RemotePendingPrompt } from './RemotePendingPrompt';
 import { ephemeralRejection } from './RemoteEphemeralMessages';
+import { extractCode } from './RemoteSessionAuth';
 import type { RemoteAuth } from './RemoteAuth';
 import type { RemoteRequestStore } from './RemoteRequestStore';
 import type { RemoteApprovalBridge } from './RemoteApprovalBridge';
@@ -9,6 +10,13 @@ import type { RemoteOutboxDelivery } from './RemoteOutboxDelivery';
 import type { TelegramContactService } from './TelegramContactService';
 import type { RemoteAuditLog } from './RemoteAuditLog';
 import type { RemoteInboundDisposition, RemoteInboundEvent } from './types';
+
+type TextEvent = Extract<RemoteInboundEvent, { kind: 'text' }>;
+
+/** What an already-unlocked chat says when a code arrives that nothing asked for. */
+const ALREADY_UNLOCKED_REPLY =
+  'Forge: this chat is already unlocked, so that code was not sent to the model. ' +
+  'To send the number to the model, add a word to it.';
 
 export type RemoteAuthGateOutcome =
   | RemoteInboundDisposition
@@ -91,6 +99,28 @@ export async function applyRemoteAuthGate(
     );
     return deps.rehandle(heldPrompt);
   }
+  // A code that reaches a chat which is already unlocked answers nothing, and
+  // it is not work for the agent either. On 2026-10-27 the owner sent 095190 to
+  // an unlocked chat: the log shows `update 931343637 text(6 chars) -> accepted`
+  // and a turn started with the number as its prompt, so the model answered a
+  // TOTP code. It is answered here instead and never admitted.
+  //
+  // Only the code-shaped message is held out — `Order 123456` is a sentence and
+  // still reaches the model. A number a waiting question asked for is still an
+  // answer, so `awaitingAnswer` is checked first and those numbers go on to the
+  // question, approval and reply-to paths below.
+  if (
+    event.kind === 'text' &&
+    !gate.newlyAuthenticated &&
+    extractCode(event.text) !== undefined &&
+    !awaitingAnswer(deps, event)
+  ) {
+    await deps.audit?.record(event, 'redundant_unlock_code').catch(() => undefined);
+    // Deliberately no `deps.auth.touch`: an ignored message must not buy the
+    // session another stretch of inactivity time.
+    await deps.sendTransientMessage(event.chatId, ALREADY_UNLOCKED_REPLY);
+    return { kind: 'handled' };
+  }
   if (event.kind === 'text' && event.text === '/lock') {
     deps.auth.lock(event);
     deps.pending.clear(event.channel, event.chatId);
@@ -100,4 +130,24 @@ export async function applyRemoteAuthGate(
     return { kind: 'handled' };
   }
   return { continue: true, nonce: gate.nonce };
+}
+
+/**
+ * Whether a six-digit number in this chat is the answer to something rather
+ * than a stray code. Every branch is an answer path that exists below this
+ * gate, so the check stays conservative: when a number could plausibly be an
+ * answer, it is left to the path that already handles it.
+ */
+function awaitingAnswer(deps: RemoteAuthGateDeps, event: TextEvent): boolean {
+  // An ask_user or remote-ask question waiting in this chat claims plain text.
+  if (deps.questions.hasPending(event.chatId)) return true;
+  // An approval still open in this chat: buttons, a spoken word or typed text
+  // can all resolve it, so the number may be that answer. Recently-closed gates
+  // come back from `pendingGates` too and are not answers still owed.
+  if (deps.approvals.pendingGates(event.chatId).some((gate) => gate.resolvedAt === undefined))
+    return true;
+  // A message sent as a reply is addressed to the message it quotes — a session
+  // question, an agent-ask question or an approval — and those paths own it
+  // below. Swallowing it here would eat an answer the owner meant to send.
+  return event.replyToMessageId !== undefined;
 }

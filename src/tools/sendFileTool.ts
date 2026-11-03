@@ -1,5 +1,4 @@
 import * as fs from 'fs/promises';
-import * as os from 'os';
 import * as path from 'path';
 import * as vscode from 'vscode';
 import { DEFAULT_IMAGE_OUTPUT_DIR } from '../config/imageGenerationSchema';
@@ -9,6 +8,7 @@ import { codePointLength } from '../util/codePoints';
 import { fileDeliveryRefusal, inspectFileForDelivery } from '../util/fileDeliveryValidation';
 import { isPathInside } from '../util/pathContainment';
 import { resolveRealWorkspacePath } from '../util/WorkspacePaths';
+import { screenshotRoot } from './browser/screenshotPaths';
 import type { RegisteredTool, ToolHandlerContext } from './ToolRegistry';
 
 const PATH_REFUSAL =
@@ -52,7 +52,7 @@ async function screenshotDirectory(
     // has no conversation, so it is never a per-conversation root. Compared
     // case-insensitively: the filesystem is case-insensitive on Windows and
     // macOS, so `Default` is the same directory as `default`.
-    const screenshotBase = path.join(os.homedir(), '.forge', 'screenshots');
+    const screenshotBase = screenshotRoot();
     const realScreenshotBase = await fs.realpath(screenshotBase);
     const screenshotDir = path.join(realScreenshotBase, conversationId);
     const realScreenshotDir = await fs.realpath(screenshotDir);

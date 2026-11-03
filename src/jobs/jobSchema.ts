@@ -152,6 +152,24 @@ export const ActionSchema = z.discriminatedUnion('kind', [
     /** When to report: "failures_and_changes" or "always". */
     report: z.enum(['failures_and_changes', 'always']).default('failures_and_changes'),
   }),
+  /**
+   * The daily retitle pass (`src/jobs/retitleRun.ts`): gives a name to the chats
+   * still called after their first prompt. There is no tool here: the model
+   * returns a name as plain text and the host validates and applies it, so a
+   * run cannot touch a chat its own filter refused.
+   */
+  z.object({
+    kind: z.literal('retitle'),
+    /** Optional model override; default: the default chat model. */
+    model: z.string().min(1).optional(),
+    /** Chats renamed at most per run, so one job cannot rewrite the history list. */
+    max_chats: z.number().int().min(1).max(200).default(20),
+    /** A chat updated less than this many minutes ago is left alone. */
+    min_idle_minutes: z.number().int().min(0).max(1440).default(60),
+    /** Report what would be renamed and change nothing. */
+    dry_run: z.boolean().default(false),
+    report: z.enum(['failures_and_changes', 'always']).default('failures_and_changes'),
+  }),
 ]);
 export type Action = z.infer<typeof ActionSchema>;
 

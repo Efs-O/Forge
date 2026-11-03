@@ -23,7 +23,12 @@ import type {
 
 export type DisplayTranscriptRow = DisplayPersistMessage | CompactionDividerMessage;
 
-function textContent(content: ChatMessage['content']): string | null {
+/**
+ * The text a transcript row carries, from either shape it can be stored in.
+ * Exported because the sessions panel's content search matches on exactly this
+ * and must not grow a second rule for what counts as a message's text.
+ */
+export function textContent(content: ChatMessage['content']): string | null {
   if (typeof content === 'string') return content;
   if (!Array.isArray(content)) return null;
   const text = content
@@ -237,9 +242,13 @@ export function tabMetasFromSession(
       title: displayTitle(c.title),
       createdAt: c.createdAt,
       updatedAt: c.updatedAt,
+      retention_activity_at: c.retention_activity_at ?? c.updatedAt,
+      keep_open: c.keep_open === true,
       messageCount: countDisplayMessages(c.messages, c.displayDiffs),
       ...(c.active_model !== undefined ? { active_model: c.active_model } : {}),
       ...(c.agentLinks !== undefined ? { agentLinks: { ...c.agentLinks } } : {}),
+      ...(c.title_source !== undefined ? { title_source: c.title_source } : {}),
+      ...(c.origin_agent !== undefined ? { origin_agent: c.origin_agent } : {}),
       active_time_ms: getActiveTimeMs?.(c) ?? c.active_time_ms ?? 0,
       ...(streamingIds?.has(c.id) ? { streaming: true } : {}),
     };
@@ -257,8 +266,12 @@ export function historyMetasFromSession(session: SidebarRuntime): SessionHistory
         title: displayTitle(c.title),
         createdAt: c.createdAt,
         updatedAt: c.updatedAt,
+        retention_activity_at: c.retention_activity_at ?? c.updatedAt,
+        keep_open: c.keep_open === true,
         messageCount: countDisplayMessages(c.messages, c.displayDiffs),
         ...(c.active_model !== undefined ? { active_model: c.active_model } : {}),
+        ...(c.title_source !== undefined ? { title_source: c.title_source } : {}),
+        ...(c.origin_agent !== undefined ? { origin_agent: c.origin_agent } : {}),
         active_time_ms: c.active_time_ms ?? 0,
       };
     });

@@ -4,14 +4,42 @@ import { resumeRemoteConversation, type RemotePromptAdmissionDeps } from './Remo
 import type { RemoteControllerOptions } from './remoteControllerOptions';
 import type { RemoteInboundEvent } from './types';
 
+/**
+ * The workspace fields every command and every selection keyboard needs.
+ *
+ * `switchWorkspace` rides along because the workspace confirm keyboard must be
+ * able to run the switch it was offering: a `select` tap arrives through the
+ * selection path, not the command path, and without this it could only say
+ * "workspace switching is unavailable in this window" after the owner accepted
+ * the warning. `RemoteController.ts` sits at the ESLint line stop, so the field
+ * joins the shared spread here rather than being added to its call site.
+ */
 export function workspaceContextOf(
   options: RemoteControllerOptions,
-): Pick<RemoteCommandContext, 'currentWorkspaceAlias' | 'currentWorkspaceName'> {
+): Pick<
+  RemoteCommandContext,
+  | 'workspaceId'
+  | 'currentWorkspaceAlias'
+  | 'currentWorkspaceName'
+  | 'getApprovalPolicyLines'
+  | 'switchWorkspace'
+  | 'workspacePreflight'
+> {
   return {
+    // The workspace this window has open: a `new-window` switch has to know
+    // which conversations are bound here to say what moving the channel does to
+    // them. It rides along here because `RemoteController.ts` is at the ESLint
+    // line stop and cannot take another field at its own call site.
+    workspaceId: options.workspaceId,
+    ...(options.workspacePreflight ? { workspacePreflight: options.workspacePreflight } : {}),
     ...(options.currentWorkspaceAlias
       ? { currentWorkspaceAlias: options.currentWorkspaceAlias }
       : {}),
     ...(options.currentWorkspaceName ? { currentWorkspaceName: options.currentWorkspaceName } : {}),
+    ...(options.getApprovalPolicyLines
+      ? { getApprovalPolicyLines: options.getApprovalPolicyLines }
+      : {}),
+    ...(options.switchWorkspace ? { switchWorkspace: options.switchWorkspace } : {}),
   };
 }
 
@@ -47,7 +75,6 @@ export function buildRemoteCommandDeps(
     channel: deps.commandCleanup.trackReplies(deps.channel, event.text),
     store: deps.store,
     host: deps.host,
-    workspaceId: options.workspaceId,
     signal: deps.signal,
     commandCleanup: deps.commandCleanup,
     // Read through deps.options() rather than the `options` captured above, so

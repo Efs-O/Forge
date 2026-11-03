@@ -10,6 +10,8 @@
 import type {
   ForgeSlashCommandId,
   HostToWebview,
+  HistoryPanelSize,
+  SessionSearchQueryMsg,
   WebviewDiagnosticMsg,
   WebviewToHost,
 } from './messageBridge';
@@ -27,7 +29,10 @@ export interface WebviewActions {
   postTokenBudget: () => void;
   postWorkspaceInfo: () => void;
   isBackendReady: () => boolean;
-  getClankerMode: () => boolean;
+  /** Every chat this window can reach, with its own Clanker state — a reloaded
+   *  webview has no flags, and Clanker is armed one chat at a time.
+   */
+  getClankerStates: () => Array<{ conversationId: string; enabled: boolean }>;
   getRemoteStatus: () => { transports: string[]; paired: boolean };
   pendingQuestions: () => UserQuestionRequestEvent[];
   pendingApproval: () => ToolApprovalRequestEvent | undefined;
@@ -53,17 +58,43 @@ export interface WebviewActions {
   restoreConversation: (id: string) => void;
   deleteConversation: (id: string) => void;
   renameConversation: (id: string, title: string) => void;
+  resetApprovals: (conversationId: string) => void;
   runSlashCommand: (
     id: ForgeSlashCommandId,
-    agent?: { agentKind?: string; sessionId?: string },
+    agent?: { agentKind?: string; sessionId?: string; approvalAction?: 'reset' | 'invalid' },
   ) => void;
   openFile: (path: string, line?: number, beside?: boolean) => Promise<void>;
   openAttachment: (relativePath: string) => Promise<void>;
-  resolveConfirmation: (id: string, approved: boolean) => void;
+  resolveConfirmation: (
+    id: string,
+    decision: import('./approvalMessages').ApprovalDecision,
+  ) => void;
   answerQuestion: (id: string, answer: StructuredAnswer) => void;
   skipQuestion: (id: string) => void;
   recordWebviewDiagnostic: (message: WebviewDiagnosticMsg) => void;
   queuedConversationIds: (ids: string[]) => void;
+  draftBearingConversationIds: (ids: string[]) => void;
+  setConversationKeepOpen: (id: string, keepOpen: boolean) => void;
+  /** The sessions panel's Jobs section opened, carrying its panel generation. */
+  jobsPanelOpened: (panelId: number) => void;
+  jobsPanelClosed: (panelId: number) => void;
+  /** A job row was clicked; the host navigates and answers with `jobOpened`. */
+  openJob: (panelId: number, id: string) => void;
+  /**
+   * The search box changed on a chat tab: the host walks the saved transcripts
+   * and publishes what it reaches. The message is validated inside the bridge,
+   * keeping this switch a one-line hand-off like every other case.
+   */
+  sessionSearchQuery: (query: SessionSearchQueryMsg) => void;
+  /**
+   * The panel closed. `jobsPanelClosed` is the panel's close, not the Jobs
+   * tab's, so it releases the content-search scan as well as the store push —
+   * otherwise a scan started a moment before the close would keep reading
+   * hundreds of archived chats for a panel nobody is looking at.
+   */
+  sessionSearchClosed: (panelId: number) => void;
+  /** The panel was dragged, keyed or reset: remember the size, or forget it. */
+  historyPanelSize: (size: HistoryPanelSize | null) => void;
 }
 
 export function routeWebviewMessage(actions: WebviewActions, msg: WebviewToHost): void {
@@ -83,7 +114,12 @@ export function routeWebviewMessage(actions: WebviewActions, msg: WebviewToHost)
       // Which root the tools will aim at, before the first turn rather than after.
       actions.postWorkspaceInfo();
       if (actions.isBackendReady()) actions.post({ type: 'ready' });
-      actions.post({ type: 'clankerChanged', enabled: actions.getClankerMode() });
+      // Every open chat's own state, off included: a reloaded webview starts with no
+      // flags, and posting only the armed ones would leave a chat that was armed
+      // before the reload showing armed after it, with nothing to clear it.
+      for (const state of actions.getClankerStates()) {
+        actions.post({ type: 'clankerChanged', ...state });
+      }
       // The chip is host state the webview cannot derive. Without this a reload
       // shows no chip until the next transport or pairing change, which on a
       // stable setup is never.
@@ -101,6 +137,14 @@ export function routeWebviewMessage(actions: WebviewActions, msg: WebviewToHost)
 
     case 'queuedConversationIds':
       actions.queuedConversationIds(msg.ids);
+      break;
+
+    case 'draftBearingConversationIds':
+      actions.draftBearingConversationIds(msg.ids);
+      break;
+
+    case 'setConversationKeepOpen':
+      actions.setConversationKeepOpen(msg.id, msg.keepOpen);
       break;
 
     case 'send':
@@ -180,6 +224,10 @@ export function routeWebviewMessage(actions: WebviewActions, msg: WebviewToHost)
       actions.renameConversation(msg.id, msg.title);
       break;
 
+    case 'resetApprovals':
+      actions.resetApprovals(msg.conversationId);
+      break;
+
     case 'runSlashCommand':
       actions.runSlashCommand(msg.commandId as ForgeSlashCommandId, msg);
       break;
@@ -201,7 +249,7 @@ export function routeWebviewMessage(actions: WebviewActions, msg: WebviewToHost)
       break;
 
     case 'confirmResponse':
-      actions.resolveConfirmation(msg.id, msg.approved);
+      actions.resolveConfirmation(msg.id, msg.decision);
       break;
 
     case 'questionResponse':
@@ -211,6 +259,31 @@ export function routeWebviewMessage(actions: WebviewActions, msg: WebviewToHost)
 
     case 'webviewDiagnostic':
       actions.recordWebviewDiagnostic(msg);
+      break;
+
+    case 'jobsPanelOpened':
+      actions.jobsPanelOpened(msg.panelId);
+      break;
+
+    case 'jobsPanelClosed':
+      actions.jobsPanelClosed(msg.panelId);
+      actions.sessionSearchClosed(msg.panelId);
+      break;
+
+    case 'sessionSearchQuery':
+      actions.sessionSearchQuery(msg);
+      break;
+
+    case 'openJob':
+      // The bridge reports its own failures to the panel that clicked, so a
+      // deleted job or a refused discuss leaves the panel open with the reason.
+      actions.openJob(msg.panelId, msg.id);
+      break;
+
+    case 'historyPanelSize':
+      // One message per resize, not one per pointer move: the webview sends at
+      // the end of a drag, on a grip key press, or on a reset.
+      actions.historyPanelSize(msg.size);
       break;
   }
 }

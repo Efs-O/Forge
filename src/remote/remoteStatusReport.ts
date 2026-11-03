@@ -82,7 +82,7 @@ export async function handleRemoteStatusReportCommand(
       notificationsPending: outbox.pending,
       abandoned: outbox.abandoned,
       context: binding ? context.host.contextBudget(binding.conversationId) : undefined,
-      clanker: context.host.clankerMode(),
+      clanker: binding ? context.host.clankerMode(binding.conversationId) : false,
       exchanges: describeAgentBoard(binding?.conversationId) ?? 'Exchanges: none',
     });
     if (context.channel.parseMode && context.channel.sendInlineKeyboard) {
@@ -207,10 +207,10 @@ export function renderRemoteStatusReport(input: RemoteStatusReportInput): Remote
       : 'Context\nContext unavailable (no num_ctx for this model)';
   const work = formatWork(input.conversation);
   const approvalsHtml = input.clanker
-    ? '<b>Approvals: CLANKER</b> — non-dangerous tools auto-approved'
+    ? '<b>Approvals: CLANKER · this chat</b> — a call the owner could allow by key runs with no card; the deny list still asks'
     : `<i>Approvals: gated · ${escapeTelegramHtml(input.exchanges)}</i>`;
   const approvalsPlain = input.clanker
-    ? 'Approvals: CLANKER — non-dangerous tools auto-approved'
+    ? 'Approvals: CLANKER (this chat) — a call the owner could allow by key runs with no card; the deny list still asks'
     : `Approvals: gated · ${input.exchanges}`;
   const html = [
     `<b>Status</b>${contextPercentUsed === undefined ? '' : ` · Context ${contextPercentUsed}%`}`,

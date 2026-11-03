@@ -12,6 +12,8 @@ import {
   type Job,
 } from '../../src/jobs/jobSchema';
 import { runCheck, buildCheckContext } from '../../src/jobs/checks/runCheck';
+import { jobDefaultModel } from '../../src/config/jobsSchema';
+import type { ForgeConfig } from '../../src/config/types';
 import { PowerControl } from '../../src/system/PowerControl';
 
 let jobsRoot: string | undefined;
@@ -123,5 +125,48 @@ describe('agent task phase 1 check and scheduler guard', () => {
     await expect(
       fs.promises.access(path.join(jobsRoot, 'outbox', 'agent-task.json')),
     ).rejects.toThrow();
+  });
+});
+
+/**
+ * `jobs.default_model` is the one model setting no chat-tab switch ever moves,
+ * so it is the one most likely to outlive the model it names. It used to fail
+ * three turns later as the backend's generic "unknown model", which read as a
+ * broken job; the resolver now says what happened, and `AgentTaskRunner` asks it
+ * at the start instead of mid-turn.
+ */
+describe('jobDefaultModel', () => {
+  function jobsConfig(defaultModel?: string): ForgeConfig {
+    return {
+      models: [
+        { name: 'keep', provider: 'llama.cpp', gguf_path: '/models/keep.gguf', short_name: 'k' },
+      ],
+      active_model: 'keep',
+      llama_server: { binary: 'llama-server' },
+      ...(defaultModel === undefined
+        ? {}
+        : { jobs: { enabled: true, default_model: defaultModel } }),
+    } as ForgeConfig;
+  }
+
+  it('uses jobs.default_model when it names a configured model', () => {
+    expect(jobDefaultModel(jobsConfig('keep'))).toBe('keep');
+  });
+
+  it('accepts a jobs model written as its short_name', () => {
+    expect(jobDefaultModel(jobsConfig('k'))).toBe('k');
+  });
+
+  it('falls back to active_model when the field is absent', () => {
+    expect(jobDefaultModel(jobsConfig())).toBe('keep');
+    const noActive = jobsConfig();
+    noActive.active_model = null;
+    expect(jobDefaultModel(noActive)).toBeUndefined();
+  });
+
+  it('names the field to set when the jobs model was removed', () => {
+    expect(() => jobDefaultModel(jobsConfig('strata-flashnext-iq2xs'))).toThrow(
+      'the jobs model "strata-flashnext-iq2xs" was removed from config.yaml; set `jobs.default_model` to a configured model.',
+    );
   });
 });

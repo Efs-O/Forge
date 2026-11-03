@@ -72,6 +72,68 @@ export function removeModel(doc: YAML.Document, modelName: string): void {
   if (idx >= 0) models.items.splice(idx, 1);
 }
 
+/**
+ * Delete one scalar item from a nested sequence by value, e.g. an entry of
+ * `cloud_relay.models`. Done through the live `Document` node graph so the
+ * comments on the neighbouring items survive — the laptop cloud list is
+ * hand-maintained and annotated, and a delete that rewrote it cost the user
+ * those notes. Returns true when an item was removed.
+ *
+ * One measured quirk of the `yaml` library: a comment written above the FIRST
+ * item of a block is stored on the block, not on the item, so removing that
+ * first item leaves its comment behind as the next item's leading comment. A
+ * comment above any later item goes with it. Callers must not assume the file
+ * is otherwise byte-for-byte unchanged; nothing else moves.
+ */
+export function removeListItem(
+  doc: YAML.Document,
+  seqPath: readonly string[],
+  value: string,
+): boolean {
+  const seq = doc.getIn(seqPath, true);
+  if (!seq || !YAML.isSeq(seq)) return false;
+  const idx = seq.items.findIndex(
+    (item) => YAML.isScalar(item) && String((item as YAML.Scalar).value) === value,
+  );
+  if (idx < 0) return false;
+  seq.items.splice(idx, 1);
+  return true;
+}
+
+/**
+ * Delete one key from a nested map block, e.g. `aliases.<key>`, leaving the
+ * neighbouring keys and their comments untouched. Returns true when the key
+ * was there. Callers that must not leave an empty block behind check
+ * `isEmptyBlock` and delete the parent themselves — which block to drop is a
+ * config decision (`cloud_relay:` with no `models:` is invalid, `aliases:` with
+ * no keys is merely untidy), not a YAML one.
+ *
+ * The same first-entry quirk as `removeListItem`: a comment above the first key
+ * of a block lives on the block, so deleting that first key leaves its comment
+ * above the one that follows.
+ */
+export function removeMapEntry(
+  doc: YAML.Document,
+  mapPath: readonly string[],
+  key: string,
+): boolean {
+  const map = doc.getIn(mapPath, true);
+  if (!map || !YAML.isMap(map)) return false;
+  if (!map.has(key)) return false;
+  map.delete(key);
+  return true;
+}
+
+/** True when the node at `path` is an empty map or sequence — the state a
+ *  removal can leave behind when it takes the last entry with it. */
+export function isEmptyBlock(doc: YAML.Document, path: readonly string[]): boolean {
+  const node = doc.getIn(path, true);
+  if (!node) return false;
+  if (YAML.isMap(node)) return node.items.length === 0;
+  if (YAML.isSeq(node)) return node.items.length === 0;
+  return false;
+}
+
 /** Set (or delete, when `value` is `undefined`) a single field on the named
  *  model entry, preserving that entry's own comments/formatting otherwise.
  *  Throws if the model does not exist. */

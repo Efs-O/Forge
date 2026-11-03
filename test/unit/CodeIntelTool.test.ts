@@ -42,12 +42,7 @@ describe('code_intel', () => {
     ].map((tool) => tool.definition.function.description);
     oldDescriptions.push('List available LSP code actions at a zero-based position in a file.');
     for (const description of oldDescriptions) {
-      expect(merged).toContain(
-        description.replace(
-          'Prefer this over find_references',
-          'Prefer this over the references operation',
-        ),
-      );
+      expect(merged).toContain(description);
     }
   });
 

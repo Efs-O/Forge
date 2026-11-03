@@ -156,8 +156,27 @@ function ActivityRowView({ step }: ActivityRowProps): React.ReactElement | null 
   const tag =
     step.diffs.length === 0 ? '' : step.diffs.some((diff) => diff.diffIsNew) ? 'NEW' : 'MODIFIED';
   const rowTitle = [tag, elapsed].filter(Boolean).join(' · ');
-  const failedMessage = final.find((message) => message.toolIsError);
-  const errorLine = failedMessage ? firstErrorLine(failedMessage) : '';
+  const failedMessages = final.filter((message) => message.toolIsError);
+  const failedMessage = failedMessages[0];
+  let errorLine = failedMessage ? firstErrorLine(failedMessage) : '';
+  if (failedMessage && (failedMessage !== primary || failedMessages.length > 1)) {
+    const { name: failedName } = toolNameAndDetail(failedMessage);
+    const failedTarget = callTarget(failedMessage);
+    const label = [
+      failedMessage.toolName ?? failedName,
+      failedTarget ? displayDetail(failedTarget) : '',
+    ]
+      .filter(Boolean)
+      .join(' ');
+    // Results read "Error: read_file: ..."; the label already names the tool.
+    const escapedName = (failedMessage.toolName ?? failedName).replace(
+      /[.*+?^${}()|[\]\\]/gu,
+      '\\$&',
+    );
+    const repeatedName = new RegExp(`^(?:Error:\\s*)?${escapedName}:\\s*`, 'u');
+    errorLine = `${label}${label ? ' — ' : ''}${errorLine.replace(repeatedName, '')}`;
+  }
+  if (failedMessages.length > 1) errorLine += ` (+${failedMessages.length - 1} more failed)`;
   const hasCounts = edits.measured && (edits.added > 0 || edits.removed > 0);
   const diffLabel = hasCounts ? (
     <>

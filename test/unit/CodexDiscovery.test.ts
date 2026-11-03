@@ -1,7 +1,32 @@
 import * as path from 'path';
 import type { ChildProcess } from 'node:child_process';
 import { describe, expect, it, vi } from 'vitest';
+import type { FakeCliChildBehaviour } from '../support/fakeCli';
 import { CodexDiscovery, matchThread } from '../../src/agentMesh/codexDiscovery';
+
+/** Faked `spawnCliProcess` for the outcome the fixture cannot produce: a
+ *  program that is not there. `behaviour` unset means the real spawn, so the
+ *  thread-listing suites above are untouched. */
+const fake = vi.hoisted(() => ({
+  behaviour: undefined as FakeCliChildBehaviour | undefined,
+}));
+
+vi.mock('../../src/agents/cliProcess', async (importOriginal) => {
+  const real = await importOriginal<typeof import('../../src/agents/cliProcess')>();
+  const { fakeCliChild } = await import('../support/fakeCli');
+  return {
+    ...real,
+    spawnCliProcess: (options: Parameters<typeof real.spawnCliProcess>[0]) => {
+      if (!fake.behaviour) return real.spawnCliProcess(options);
+      return fakeCliChild(options.executable, fake.behaviour).child;
+    },
+    // The real one runs `taskkill` against a faked pid.
+    terminateProcessTree: async (child: Parameters<typeof real.terminateProcessTree>[0]) => {
+      if (!fake.behaviour) return real.terminateProcessTree(child);
+      child.kill();
+    },
+  };
+});
 
 const fixture = path.resolve(__dirname, '../fixtures/fake-codex-cli.mjs');
 
@@ -51,10 +76,8 @@ describe('CodexDiscovery (P4: scriptable thread/list against the app-server)', (
     // No cwd filter: both threads are candidates → ambiguous, never guessed.
     const res = matchThread(threads, {});
     expect('ambiguous' in res).toBe(true);
-    if ('ambiguous' in res) expect(res.ambiguous.map((t) => t.id)).toEqual([
-      'fixture-thread-1',
-      'fixture-thread-2',
-    ]);
+    if ('ambiguous' in res)
+      expect(res.ambiguous.map((t) => t.id)).toEqual(['fixture-thread-1', 'fixture-thread-2']);
   });
 
   it('matches by name (substring, case-insensitive)', async () => {
@@ -77,5 +100,27 @@ describe('CodexDiscovery (P4: scriptable thread/list against the app-server)', (
     } finally {
       await d.dispose();
     }
+  });
+});
+
+describe('CodexDiscovery start failures (pinned)', () => {
+  // Discovery reports the spawn error today only because it overwrites
+  // `protocolError` unconditionally before rejecting everything, so the
+  // `write EPIPE` that follows cannot win. That is the pattern the two warm
+  // sessions lacked; these tests pin the message here so a refactor toward
+  // "first message wins" cannot quietly regress it.
+  it('reports the spawn error, not the write error that follows it', async () => {
+    fake.behaviour = { spawnError: { code: 'ENOENT' } };
+    const d = new CodexDiscovery({
+      executable: 'forge_probe_missing_program',
+      cwd: process.cwd(),
+    });
+    const failure = await d.discover().catch((error) => error as Error);
+    expect(failure).toBeInstanceOf(Error);
+    expect(failure.message).toContain('Codex app-server transport failed');
+    expect(failure.message).toContain('ENOENT');
+    expect(failure.message).toContain('forge_probe_missing_program');
+    expect(failure.message).not.toContain('write failed');
+    await d.dispose();
   });
 });

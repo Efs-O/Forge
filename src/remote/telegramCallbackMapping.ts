@@ -104,12 +104,19 @@ export function mapTelegramCallbackQuery(
   }
   // Approval ids are generated as 24-byte base64url handles. Their fixed shape
   // keeps a:claude/codex/copilot in the ask-button family only.
-  const approval = /^([ad]):([A-Za-z0-9_-]{24})$/.exec(data);
+  const approval = /^([adrp]):([A-Za-z0-9_-]{24})$/.exec(data);
   if (approval) {
     return {
       ...common,
       kind: 'action',
-      action: approval[1] === 'a' ? 'approve' : 'deny',
+      action:
+        approval[1] === 'a'
+          ? 'approve'
+          : approval[1] === 'd'
+            ? 'deny'
+            : approval[1] === 'r'
+              ? 'allow_chat'
+              : 'always_project',
       correlationId: approval[2]!,
     };
   }

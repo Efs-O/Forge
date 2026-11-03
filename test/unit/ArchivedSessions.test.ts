@@ -208,9 +208,23 @@ describe('ArchivedSessions', () => {
     const start = { type: 'session_start', timestamp_ms: 1, workspace_path: 'C:/repo' };
     fs.writeFileSync(path.join(logs, 'gone.jsonl'), JSON.stringify(start));
     const storage = path.join(root, 'storage');
-    const archive = new ArchivedSessions(storage, 'C:/repo', logs);
-    expect(archive.list().map((row) => row.id)).toEqual(['gone']);
-    archive.purge('gone');
+    // The captures go with the chat too (BL-012): they can hold secrets. Point
+    // the screenshot root inside this test's temp folder, the way the harness
+    // does for a browser run, and make a capture the chat would otherwise leave.
+    const shots = path.join(root, 'shots');
+    const previousOverride = process.env.FORGE_SCREENSHOT_DIR;
+    process.env.FORGE_SCREENSHOT_DIR = shots;
+    try {
+      fs.mkdirSync(path.join(shots, 'gone'), { recursive: true });
+      fs.writeFileSync(path.join(shots, 'gone', '1-shot.png'), 'png');
+      const archive = new ArchivedSessions(storage, 'C:/repo', logs);
+      expect(archive.list().map((row) => row.id)).toEqual(['gone']);
+      archive.purge('gone');
+      expect(fs.existsSync(path.join(shots, 'gone'))).toBe(false);
+    } finally {
+      if (previousOverride === undefined) delete process.env.FORGE_SCREENSHOT_DIR;
+      else process.env.FORGE_SCREENSHOT_DIR = previousOverride;
+    }
     fs.rmSync(path.join(storage, 'archive', 'index.json'));
     expect(new ArchivedSessions(storage, 'C:/repo', logs).list()).toEqual([]);
     expect(fs.existsSync(path.join(logs, 'gone.jsonl'))).toBe(false);
@@ -364,6 +378,125 @@ describe('ArchivedSessions', () => {
         .map((row) => row.id)
         .sort(),
     ).toEqual(['body', 'kept']);
+  });
+
+  it('records who chose a name when a chat is renamed', () => {
+    root = fs.mkdtempSync(path.join(os.tmpdir(), 'forge-archived-'));
+    const archive = new ArchivedSessions(root);
+    fs.mkdirSync(archive.directory, { recursive: true });
+    const conversation = {
+      id: 'chat-1',
+      title: 'hello man',
+      createdAt: 1,
+      updatedAt: 2,
+      messages: [{ role: 'user', content: 'hello' }],
+    };
+    fs.writeFileSync(
+      path.join(archive.directory, 'chat-1.json'),
+      JSON.stringify(conversation),
+    );
+    fs.writeFileSync(
+      path.join(archive.directory, 'index.json'),
+      JSON.stringify([
+        { id: 'chat-1', title: 'hello man', createdAt: 1, updatedAt: 2, messageCount: 1, source: 'body' },
+      ]),
+    );
+
+    archive.rename('chat-1', 'Orbital salvage beam fix', 'auto');
+
+    expect(archive.list()[0]?.title_source).toBe('auto');
+    expect(archive.read('chat-1')?.title).toBe('Orbital salvage beam fix');
+    // The default stays `user`: a rename from the sidebar is the owner's name.
+    archive.rename('chat-1', 'My own words');
+    expect(archive.list()[0]?.title_source).toBe('user');
+  });
+
+  it('carries origin_agent into the index row, the body, and an index rebuilt from bodies', () => {
+    root = fs.mkdtempSync(path.join(os.tmpdir(), 'forge-archived-'));
+    const archive = new ArchivedSessions(root);
+    const conversation = {
+      id: 'agent-chat',
+      title: 'Split SdServerBackend.ts',
+      title_source: 'prompt' as const,
+      origin_agent: 'claude',
+      createdAt: 1,
+      updatedAt: 2,
+      messages: [{ role: 'user' as const, content: 'hello' }],
+    };
+    archive.put(conversation);
+    // The index row is what the sessions panel reads for an archived chat, so a
+    // field that lived only in the body would cost an archived agent chat its
+    // badge while its body still said who started it.
+    expect(archive.list()[0]?.origin_agent).toBe('claude');
+    expect(archive.read('agent-chat')?.origin_agent).toBe('claude');
+    // An index rebuilt from the bodies on disk — the path a corrupt or missing
+    // index takes — still knows who started the chat.
+    fs.rmSync(path.join(archive.directory, 'index.json'));
+    expect(archive.list()[0]?.origin_agent).toBe('claude');
+  });
+
+  it('a rebuilt index keeps a name a person typed or the retitle job gave', () => {
+    root = fs.mkdtempSync(path.join(os.tmpdir(), 'forge-archived-'));
+    const logs = path.join(root, 'logs');
+    const storage = path.join(root, 'storage');
+    fs.mkdirSync(path.join(logs), { recursive: true });
+    fs.writeFileSync(
+      path.join(logs, 'named.jsonl'),
+      [
+        JSON.stringify({ type: 'session_start', timestamp_ms: 1, workspace_path: 'N:\\repo' }),
+        JSON.stringify({ role: 'user', content: 'fix the beam please', timestamp_ms: 2 }),
+      ].join('\n'),
+    );
+    const archive = new ArchivedSessions(storage, 'N:\\repo', logs);
+    fs.mkdirSync(archive.directory, { recursive: true });
+    // A damaged index that still holds the chosen name in its text: the array
+    // parses, and one entry in it is what the schema refuses, so the good entry
+    // can be carried across the rebuild.
+    fs.writeFileSync(
+      path.join(archive.directory, 'index.json'),
+      JSON.stringify([
+        {
+          id: 'named',
+          title: 'My own name',
+          title_source: 'user',
+          createdAt: 1,
+          updatedAt: 2,
+          messageCount: 1,
+        },
+        { id: 'broken', title: null, createdAt: 1, updatedAt: 2, messageCount: 1 },
+      ]),
+    );
+
+    // The corrupt file is quarantined and rebuilt from the log, and the rebuild
+    // carries the name over: recomputing `deriveTitle` would undo a rename the
+    // owner made, and the chat would be offered to the retitle job again.
+    expect(archive.list().map((row) => row.id)).toEqual(['named']);
+    expect(archive.list()[0]?.title).toBe('My own name');
+    expect(archive.list()[0]?.title_source).toBe('user');
+  });
+
+  it('a rebuilt index does not carry a derived name forward', () => {
+    root = fs.mkdtempSync(path.join(os.tmpdir(), 'forge-archived-'));
+    const logs = path.join(root, 'logs');
+    const storage = path.join(root, 'storage');
+    fs.mkdirSync(logs, { recursive: true });
+    fs.writeFileSync(
+      path.join(logs, 'plain.jsonl'),
+      [
+        JSON.stringify({ type: 'session_start', timestamp_ms: 1, workspace_path: 'N:\\repo' }),
+        JSON.stringify({ role: 'user', content: 'fix the beam please', timestamp_ms: 2 }),
+      ].join('\n'),
+    );
+    const archive = new ArchivedSessions(storage, 'N:\\repo', logs);
+    fs.mkdirSync(archive.directory, { recursive: true });
+    fs.writeFileSync(
+      path.join(archive.directory, 'index.json'),
+      JSON.stringify([
+        { id: 'plain', title: 'half a sentence', createdAt: 1, updatedAt: 2, messageCount: 1 },
+        { id: 'broken', title: null, createdAt: 1, updatedAt: 2, messageCount: 1 },
+      ]),
+    );
+    expect(archive.list()[0]?.title).toContain('fix the beam');
   });
 
   it.runIf(process.platform === 'win32')('matches a log whose drive letter is lower-cased', () => {

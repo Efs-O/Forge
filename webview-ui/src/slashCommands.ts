@@ -15,6 +15,78 @@ export interface SlashCommand {
    * move files the agent is still writing.
    */
   availableWhileStreaming?: boolean;
+  /**
+   * The subcommand this popup row runs, for a command whose host handler takes
+   * one. `/approvals reset` and typed `/approvals reset` must reach the host the
+   * same way, or picking the row from the menu would list the rules instead of
+   * clearing them (`approvalsSlashCommand` below is what the typed form does).
+   */
+  approvalAction?: 'reset';
+}
+
+/**
+ * Parse `/approvals` and its one supported subcommand before model dispatch.
+ *
+ * The command word is matched case-insensitively because the owner typed
+ * `/APPROVALS RESET` in the 0.17.117 live test and it went to the model: a
+ * command the product has must not depend on the shift key being down. The
+ * subcommand word is compared lower-cased for the same reason, while everything
+ * a command takes as an argument keeps the case it was typed in.
+ */
+export function approvalsSlashCommand(
+  text: string,
+): { commandId: 'approvals'; approvalAction?: 'reset' | 'invalid' } | undefined {
+  const trimmed = text.trim();
+  if (!/^\/approvals(?:\s|$)/iu.test(trimmed)) return undefined;
+  const words = trimmed.split(/\s+/u).slice(1);
+  return {
+    commandId: 'approvals',
+    ...(words.length > 0
+      ? {
+          approvalAction:
+            words.length === 1 && words[0]!.toLowerCase() === 'reset' ? 'reset' : 'invalid',
+        }
+      : {}),
+  };
+}
+
+/** Parse the target arguments for `/link` without sending the text to a model. */
+export function linkSlashCommand(
+  text: string,
+): { commandId: 'linkAgent'; agentKind?: string; sessionId?: string } | undefined {
+  const trimmed = text.trim();
+  if (!/^\/link(?:\s|$)/iu.test(trimmed)) return undefined;
+  const words = trimmed.split(/\s+/u).slice(1);
+  return {
+    commandId: 'linkAgent',
+    ...(words[0] ? { agentKind: words[0] } : {}),
+    ...(words.length > 1 ? { sessionId: words.slice(1).join(' ') } : {}),
+  };
+}
+
+/**
+ * A `/word` the composer has no command for, so it can be refused before it
+ * reaches the model. An unknown command used to be sent like any prompt: the
+ * owner got a whole turn of tokens for a word nothing recognises, and the one
+ * thing they needed to know — that the name is wrong — never appeared.
+ *
+ * Only the FIRST token is judged, and only when it is a slash and letters:
+ * `/usr/bin is broken` has a second slash in its first token, so it is prose
+ * about a path and still goes to the model. The word is compared against the
+ * triggers case-insensitively, exactly as the popup matches it.
+ */
+export function unknownSlashCommand(
+  text: string,
+  commands: readonly SlashCommand[] = SLASH_COMMANDS,
+): { command: string } | undefined {
+  const first = text.trim().split(/\s+/u)[0] ?? '';
+  const word = /^\/([a-z][a-z-]*)$/iu.exec(first)?.[1];
+  if (word === undefined) return undefined;
+  const lowered = word.toLowerCase();
+  if (commands.some((cmd) => cmd.trigger.toLowerCase() === lowered)) return undefined;
+  // The notice quotes what the owner typed, not the lower-case copy it was
+  // matched with: they need to see the name they got wrong.
+  return { command: first };
 }
 
 /**
@@ -25,6 +97,21 @@ export interface SlashCommand {
  * new entries in place rather than appending.
  */
 export const SLASH_COMMANDS: SlashCommand[] = [
+  {
+    id: 'approvals',
+    trigger: 'approvals',
+    title: 'Chat Approvals',
+    description: 'List this chat’s approvals, or reset them with /approvals reset.',
+    availableWhileStreaming: true,
+  },
+  {
+    id: 'approvals',
+    trigger: 'approvals reset',
+    title: 'Reset Chat Approvals',
+    description: 'Forget every approval remembered for this chat.',
+    availableWhileStreaming: true,
+    approvalAction: 'reset',
+  },
   {
     id: 'checkin',
     trigger: 'checkin',

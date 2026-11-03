@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import type { ChatMessage } from '../../src/llm/types';
 import { stampToolResultClocks } from '../../src/agent/toolResultClock';
+import { chatMessagesFromSlim, slimPersistMessages } from '../../src/sidebar/sessionTypes';
 
 const at = (h: number, m: number): number => new Date(2026, 8, 9, h, m, 0).getTime();
 
@@ -56,5 +57,25 @@ describe('stampToolResultClocks', () => {
       { role: 'tool', tool_call_id: 'a', content: 'legacy row' },
     ];
     expect(stampToolResultClocks(messages)).toEqual(messages);
+  });
+
+  /**
+   * BL-029. The persisted form wrote `stampedAt` and the restore never read it
+   * back, so every tool result from BEFORE a window reload lost its clock line
+   * while the ones after it kept theirs — which is exactly the case the header of
+   * `toolResultClock.ts` says the per-round stamp exists for: letting the model
+   * see how long its own work has been taking. A tool row carries no `createdAt`
+   * either, so after a reload there was nothing left to render from.
+   */
+  it('keeps the stamp through the persisted round trip', () => {
+    const messages: ChatMessage[] = [
+      { role: 'user', content: 'go' },
+      { role: 'tool', tool_call_id: 'a', content: 'first', stampedAt: at(20, 46) },
+    ];
+    const restored = chatMessagesFromSlim(slimPersistMessages(messages));
+    expect(restored[1]?.stampedAt).toBe(at(20, 46));
+    expect(stampToolResultClocks(restored)[1]?.content).toBe(
+      'first\n\n[tool result produced at 20:46 local]',
+    );
   });
 });

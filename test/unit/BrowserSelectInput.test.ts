@@ -18,7 +18,7 @@ import {
   selectOptionRefusal,
 } from '../../src/tools/browser/browserActionGuards';
 
-/** Build a page-shaped `<select>` stand-in for `readSelectState`. */
+/** Build a page-shaped `<select>` fake for `readSelectState`. */
 const pageSelect = (
   entries: { label: string; value?: string }[],
   over: { multiple?: boolean; selectedIndex?: number } = {},

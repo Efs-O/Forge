@@ -11,6 +11,7 @@ import {
   type UserNotificationService,
 } from '../../src/sidebar/UserNotificationService';
 import type { RegisteredTool, ToolHandlerContext } from '../../src/tools/ToolRegistry';
+import { listenLoopback } from '../support/listenLoopback';
 
 /**
  * The plan's "→ integration" rows for `render_html_to_image`. The unit suite
@@ -168,8 +169,7 @@ describe('render_html_to_image against real Chrome', () => {
       res.writeHead(200, { 'content-type': 'image/png' });
       res.end(Buffer.from('89504e470d0a1a0a', 'hex'));
     });
-    await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve));
-    const port = (server.address() as { port: number }).port;
+    const port = await listenLoopback(server);
     try {
       let result: string;
       try {

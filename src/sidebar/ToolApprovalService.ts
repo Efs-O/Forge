@@ -1,104 +1,110 @@
 import * as vscode from 'vscode';
 import type { HostToWebview } from './messageBridge';
 import {
+  buildApprovalRequestMessage,
+  type ToolApprovalAutoApprovedEvent,
+  type ToolApprovalRequestEvent,
+  type ToolApprovalResolvedEvent,
+  type ToolApprovalSink,
+} from './toolApprovalEvents';
+import type { ApprovalDecision, ApprovalOffer } from './approvalMessages';
+import type { ChatRuleApproval } from './chatApprovalRules';
+import type { AlwaysApprovalWriteResult } from './approvalPolicyRules';
+import { applyAlwaysProjectApproval } from './approvalProjectWriter';
+import { applyChatApprovalRule } from './approvalChatWriter';
+import {
   unattendedConversations,
   type UnattendedConversationRegistry,
 } from './unattendedConversations';
+import {
+  ToolApprovalPolicyDenied,
+  type ToolApprovalCallOptions,
+  type ToolApprovalOutcome,
+} from './toolApprovalOutcome';
+import { refusalReasonForGate } from './untrustedExitPolicy';
+import { ApprovalTimeoutState } from './approvalTimeoutState';
 
-export interface ToolApprovalRequestEvent {
-  id: string;
-  toolName: string;
-  detail: string;
-  dangerous: boolean;
-  conversationId?: string;
-}
-
-/** The one host-to-webview representation used for live and re-posted approvals. */
-export function buildApprovalRequestMessage(event: ToolApprovalRequestEvent): HostToWebview {
-  return {
-    type: 'confirmRequest',
-    id: event.id,
-    toolName: event.toolName,
-    detail: event.detail,
-    ...(event.dangerous ? { isDangerous: true } : {}),
-    ...(event.conversationId ? { conversationId: event.conversationId } : {}),
-  };
-}
-
-export interface ToolApprovalResolvedEvent extends ToolApprovalRequestEvent {
-  approved: boolean;
-  reason: 'resolved' | 'cancelled' | 'timeout';
-}
-
-export type ToolApprovalOutcome = 'approved' | 'declined' | { kind: 'timeout'; minutes: number };
-
-/** Format a declined or timed-out approval for the model's tool-result row. */
-export function toolApprovalResult(
-  toolName: string,
-  outcome: Exclude<ToolApprovalOutcome, 'approved'>,
-  declineHint?: string,
-): string {
-  const result =
-    typeof outcome === 'string'
-      ? `User declined: ${toolName}`
-      : `Not run: nobody answered the approval for ${toolName} within ${outcome.minutes} min. ` +
-        'Do not retry it this turn. Finish the remaining steps, then list this one as not done in your final reply.';
-  return declineHint ? `${result} — use this instead: ${declineHint}` : result;
-}
-
-export interface ToolApprovalSink {
-  requested(event: ToolApprovalRequestEvent): void;
-  resolved(event: ToolApprovalResolvedEvent): void;
-}
-
-/** A tool was refused by unattended policy, rather than by a human. */
-export class ToolApprovalPolicyDenied extends Error {
-  /** `job` is false for an unattended bus turn, which has no RESULT contract. */
-  constructor(toolName: string, job = true) {
-    super(
-      `unattended: dangerous tool denied by policy: "${toolName}". ` +
-        (job
-          ? 'Stop and report RESULT: failed naming the action you needed.'
-          : 'Nobody is present to approve it, so do not retry it. Recycle-bin deletes are allowed; ' +
-            'only a permanent delete (to_trash: false) is dangerous. Continue with safe steps or ' +
-            'report the step as not done.'),
-    );
-    this.name = 'ToolApprovalPolicyDenied';
-  }
-}
+/**
+ * The card contract lives in `toolApprovalEvents.ts` — the webview bridge, the
+ * Telegram mirror and the desktop bridge read the same shapes this queue emits.
+ * Re-exported so every consumer that imports them from here keeps working.
+ */
+export {
+  buildApprovalRequestMessage,
+  type ToolApprovalAutoApprovedEvent,
+  type ToolApprovalRequestEvent,
+  type ToolApprovalResolvedEvent,
+  type ToolApprovalSink,
+};
+export type { ApprovalDecision, ApprovalOffer };
 
 interface PendingApproval extends ToolApprovalRequestEvent {
-  id: string;
-  toolName: string;
-  detail: string;
-  dangerous: boolean;
-  conversationId?: string;
+  /** The card's identity and text come from the event type it extends: this adds
+   *  only what the queue needs and a mirror never sees.
+   */
   resolve: (outcome: ToolApprovalOutcome) => void;
   signal?: AbortSignal;
   abortListener?: () => void;
   timer?: ReturnType<typeof setTimeout>;
+  /** The card is now waiting for the owner and has said so once. */
+  waitingForOwner?: boolean;
+  cardReason?: string;
 }
 
 export class ToolApprovalService {
   private readonly queue: PendingApproval[] = [];
   private active: PendingApproval | null = null;
-  private clankerMode = false;
+  /** Clanker is a chat's, not a window's: `conversation.clanker` on the chat's own
+   *  record is where it lives, and this is the queue's read-through cache of it —
+   *  so it can answer for a chat without hunting for the record each call, and can
+   *  tell a real change from a repeat before it announces one. A chat the window
+   *  has not spoken to yet answers from its own record, which is what lets a tab
+   *  restored from the archive mid-window keep the mode its owner armed. */
+  private readonly clankerFlags = new Map<string, boolean>();
   private onApprovalStart?: (conversationId: string) => void;
   private onApprovalEnd?: (conversationId: string) => void;
   private readonly sinks = new Set<ToolApprovalSink>();
-  private readonly timedOutConversations = new Set<string>();
-  private readonly timeoutMinutesByConversation = new Map<string, number>();
+  private readonly timeouts = new ApprovalTimeoutState();
 
   constructor(
     private readonly post: (message: HostToWebview) => void,
     private readonly getView: () => vscode.WebviewView | undefined,
     private readonly unattended: UnattendedConversationRegistry = unattendedConversations,
     private readonly getTimeoutMinutes: () => number | undefined = () => undefined,
+    /** The conversation records behind this window's chats. Read to answer for a
+     *  chat this queue has never been told about, and written so a toggle survives a
+     *  window reload: a mode that only lived in memory would be off again after a
+     *  reload while the banner still claimed it was armed. Absent means no records
+     *  behind it — a window that has loaded no conversations, and the shape a test
+     *  that arms one chat from here replaces. */
+    private readonly chatRecords?: {
+      read: (conversationId: string) => boolean | undefined;
+      write: (conversationId: string, on: boolean) => void;
+    },
+    /** The chat rules' write half (`chatApprovalRules.ts`'s `allow`): what an
+     *  "Allow for this chat" answer stores, plus the save that carries it. Absent
+     *  means this window has nowhere to store a chat rule — the shape a window that
+     *  has loaded no conversations has, and the shape a test that arms one replaces.
+     */
+    private readonly chatRuleAllow?: ChatRuleApproval['allow'],
+    private readonly chatRuleAlways?: (keys: readonly string[]) => AlwaysApprovalWriteResult,
   ) {}
 
   addSink(sink: ToolApprovalSink): { dispose(): void } {
     this.sinks.add(sink);
     return { dispose: () => this.sinks.delete(sink) };
+  }
+
+  /** A gate call a chat rule answered with no card, forwarded to the sinks.
+   *
+   * The queue answers nothing here and holds nothing: no id, no timer, no
+   * `requested`/`resolved` pair, and no Telegram mirror to answer. It exists so the
+   * one writer of the gate ledger stays `GateEventLog`, which is already a sink —
+   * `ToolDispatch` does not know a session log exists, and a second writer would be
+   * a ledger that can disagree with itself.
+   */
+  autoApproved(event: ToolApprovalAutoApprovedEvent): void {
+    for (const sink of [...this.sinks]) sink.autoApproved?.(event);
   }
 
   pending(): ToolApprovalRequestEvent | undefined {
@@ -126,35 +132,52 @@ export class ToolApprovalService {
 
   /** Start a user turn and allow that conversation's next approval to wait. */
   beginTurn(conversationId: string): void {
-    this.timedOutConversations.delete(conversationId);
-    this.timeoutMinutesByConversation.delete(conversationId);
+    this.timeouts.beginTurn(conversationId);
   }
 
   /** Drop turn-local state when a conversation is closed or deleted. */
   clearConversationState(conversationId: string): void {
-    this.timedOutConversations.delete(conversationId);
-    this.timeoutMinutesByConversation.delete(conversationId);
+    this.timeouts.clear(conversationId);
+    // The cached Clanker flag goes with it. A chat that still exists reads its own
+    // record again on the next call, so this only forgets what is already forgotten;
+    // a deleted chat has no record left to read, and must not answer for its id.
+    this.clankerFlags.delete(conversationId);
   }
 
   /**
-   * Sole writer of the flag. It always announces the new value to the webview:
-   * a remote `/clanker` changes the same gate the sidebar composer advertises,
-   * and a banner that still reads "gated" while writes land unconfirmed is the
-   * worse half of the bug.
+   * Sole writer of one chat's Clanker flag. It announces the value it ends with to
+   * that chat: a remote `/clanker` changes the same gate the composer in that tab
+   * advertises, and a banner that still reads "gated" while writes land unconfirmed
+   * is the worse half of the bug. Setting it to what it already is announces
+   * nothing, because there is nothing for the tab to see change.
    */
-  setClankerMode(enabled: boolean): void {
-    if (this.clankerMode === enabled) return;
-    this.clankerMode = enabled;
-    this.post({ type: 'clankerChanged', enabled });
+  setClankerMode(conversationId: string, enabled: boolean): void {
+    const current = this.getClankerMode(conversationId);
+    if (current === enabled) return;
+    this.clankerFlags.set(conversationId, enabled);
+    // The durable copy is the chat's own record: a toggle that lived only in this
+    // map would be off again at the next reload, and the caller that owns the
+    // conversation saves it, exactly as the chat-rule writes do.
+    this.chatRecords?.write(conversationId, enabled);
+    this.post({ type: 'clankerChanged', enabled, conversationId });
   }
 
-  getClankerMode(): boolean {
-    return this.clankerMode;
+  /** This chat's Clanker mode — its own, never another tab's. The chat's record wins
+   *  over the cache, because the record is the one copy everything else reads: a
+   *  `/clear` that empties the chat clears the flag in its record, and a queue that
+   *  answered from a stale cache would keep running calls the cleared chat no longer
+   *  earned. The cache is what lets a window with no conversation records loaded —
+   *  a test, or a chat this window cannot see — still arm and answer.
+   */
+  getClankerMode(conversationId: string): boolean {
+    const stored = this.chatRecords?.read(conversationId);
+    return stored ?? this.clankerFlags.get(conversationId) ?? false;
   }
 
-  toggleClankerMode(): boolean {
-    this.setClankerMode(!this.clankerMode);
-    return this.clankerMode;
+  toggleClankerMode(conversationId: string): boolean {
+    const enabled = !this.getClankerMode(conversationId);
+    this.setClankerMode(conversationId, enabled);
+    return enabled;
   }
 
   request(
@@ -163,22 +186,69 @@ export class ToolApprovalService {
     dangerous = false,
     conversationId?: string,
     signal?: AbortSignal,
+    options?: ToolApprovalCallOptions,
   ): Promise<ToolApprovalOutcome> {
     if (signal?.aborted) return Promise.resolve('declined');
-    if (conversationId && this.timedOutConversations.has(conversationId)) {
-      return Promise.resolve({
-        kind: 'timeout',
-        minutes: this.timeoutMinutesByConversation.get(conversationId)!,
-      });
+    if (conversationId) {
+      const timedOut = this.timeouts.timedOutResult(conversationId);
+      if (timedOut) return Promise.resolve(timedOut);
+    }
+    if (conversationId && this.unattended.has(conversationId) && options?.policyAllowPath) {
+      return Promise.reject(
+        new ToolApprovalPolicyDenied(toolName, {
+          job: this.unattended.jobMeta(conversationId) !== undefined,
+          allowPath: options.policyAllowPath,
+          ...(options.policyApprovalKey ? { approvalKey: options.policyApprovalKey } : {}),
+          ...(options?.cardReason ? { why: options.cardReason } : {}),
+          ...(options?.alternative ? { alternative: options.alternative } : {}),
+        }),
+      );
+    }
+    /* An unattended taint gate requires an owner. Refuse before the dangerous-call
+     * branch below can approve it without a card nobody is there to answer. */
+    if (
+      options?.gateKind === 'taintGate' &&
+      conversationId &&
+      this.unattended.has(conversationId)
+    ) {
+      return Promise.reject(
+        new ToolApprovalPolicyDenied(toolName, {
+          job: this.unattended.jobMeta(conversationId) !== undefined,
+          why: refusalReasonForGate(conversationId, options.cardReason),
+          ...(options.alternative ? { alternative: options.alternative } : {}),
+        }),
+      );
     }
     if (conversationId && this.unattended.has(conversationId)) {
       if (dangerous) {
         const job = this.unattended.jobMeta(conversationId) !== undefined;
-        return Promise.reject(new ToolApprovalPolicyDenied(toolName, job));
+        // Nothing here can answer it, so refuse at once — naming the pattern and
+        // the alternative — and let the run carry on. A deny-list command
+        // (`gateKind: 'denyList'`) lands here too, refused whatever an
+        // automated answer would have said, with the tool it should use in
+        // `options.alternative`.
+        return Promise.reject(
+          new ToolApprovalPolicyDenied(toolName, {
+            job,
+            ...(options?.cardReason ? { why: options.cardReason } : {}),
+            ...(options?.alternative ? { alternative: options.alternative } : {}),
+          }),
+        );
       }
       return Promise.resolve('approved');
     }
-    if (this.clankerMode && !dangerous) return Promise.resolve('approved');
+    /* Keyed calls were answered by policy/chat rules before reaching the queue.
+     * Clanker covers only remaining non-dangerous calls; dangerous calls keep a
+     * card, while the deny list and owner-only wall refuse before this branch. */
+    if (conversationId && !dangerous && this.getClankerMode(conversationId)) {
+      this.autoApproved({
+        toolName,
+        ...(detail ? { detail } : {}),
+        conversationId,
+        answeredBy: 'clanker',
+      });
+      return Promise.resolve('approved');
+    }
     if (!this.getView() && this.sinks.size === 0) {
       return Promise.reject(
         new Error(`Forge: sidebar is unavailable for tool approval (${toolName}).`),
@@ -186,6 +256,10 @@ export class ToolApprovalService {
     }
     return new Promise<ToolApprovalOutcome>((resolve) => {
       const timeoutMinutes = this.getTimeoutMinutes();
+      // A gate no automated answer is allowed for is marked as waiting for the
+      // owner when it opens, not after five minutes of waiting for something
+      // that was never going to arrive.
+      const ownerOnly = options?.gateKind === 'taintGate';
       const pending: PendingApproval = {
         id: `confirm-${Date.now()}-${Math.random().toString(36).slice(2)}`,
         toolName,
@@ -194,6 +268,10 @@ export class ToolApprovalService {
         resolve,
         ...(conversationId ? { conversationId } : {}),
         ...(signal ? { signal } : {}),
+        ...(ownerOnly ? { waitingForOwner: true } : {}),
+        ...(options?.cardReason ? { cardReason: options.cardReason } : {}),
+        ...(options?.allowForChat ? { allowForChat: options.allowForChat } : {}),
+        ...(options?.alwaysInProject ? { alwaysInProject: options.alwaysInProject } : {}),
       };
       if (timeoutMinutes !== undefined) {
         pending.timer = setTimeout(
@@ -208,14 +286,60 @@ export class ToolApprovalService {
       this.queue.push(pending);
       if (pending.conversationId) this.onApprovalStart?.(pending.conversationId);
       this.pump();
+      if (ownerOnly) this.announceWaitingForOwner(pending);
     });
   }
 
-  resolve(id: string, approved: boolean): void {
+  /** Resolve every surface through one queue. Rule decisions store only the keys
+   *  offered on this card; cancellation and timeout never store an allow. */
+  resolve(id: string, decision: ApprovalDecision): void {
     const item = this.findPending(id);
     if (!item || !this.removePending(item)) return;
-    this.finish(item, approved ? 'approved' : 'declined', 'resolved');
+    // A stale or forged webview cannot turn an Approve/Decline-only card into a
+    // chat-wide rule: only the offer carried by this pending card is storable.
+    const answer =
+      (decision === 'allowChat' && !item.allowForChat) ||
+      (decision === 'alwaysProject' && !item.alwaysInProject)
+        ? 'decline'
+        : decision;
+    let resolution:
+      | {
+          chatRuleErrors?: readonly string[];
+          approvalNotice?: string;
+        }
+      | undefined;
+    if (answer === 'allowChat') {
+      const chatRuleErrors = this.applyChatAllow(item);
+      if (chatRuleErrors) resolution = { chatRuleErrors };
+    } else if (answer === 'alwaysProject') {
+      resolution = applyAlwaysProjectApproval({
+        offer: item.alwaysInProject,
+        chatOffer: item.allowForChat,
+        conversationId: item.conversationId,
+        ...(this.chatRuleAlways ? { writeAlways: this.chatRuleAlways } : {}),
+        ...(this.chatRuleAllow ? { allowChat: this.chatRuleAllow } : {}),
+        post: this.post,
+      });
+    }
+    this.finish(
+      item,
+      answer === 'decline' ? 'declined' : 'approved',
+      'resolved',
+      answer,
+      resolution?.chatRuleErrors,
+      resolution?.approvalNotice,
+    );
     this.pump();
+  }
+
+  /** Store the offer this queue placed on the card, never a surface's re-derived key. */
+  private applyChatAllow(item: PendingApproval): readonly string[] | undefined {
+    return applyChatApprovalRule({
+      offer: item.allowForChat,
+      conversationId: item.conversationId,
+      ...(this.chatRuleAllow ? { allow: this.chatRuleAllow } : {}),
+      post: this.post,
+    });
   }
 
   cancelConversation(conversationId?: string): void {
@@ -234,8 +358,7 @@ export class ToolApprovalService {
 
   dispose(): void {
     this.cancelAll();
-    this.timedOutConversations.clear();
-    this.timeoutMinutesByConversation.clear();
+    this.timeouts.clearAll();
     this.sinks.clear();
   }
 
@@ -249,10 +372,7 @@ export class ToolApprovalService {
   private timeout(item: PendingApproval, minutes: number): void {
     if (!this.removePending(item)) return;
     const conversationId = item.conversationId;
-    if (conversationId) {
-      this.timedOutConversations.add(conversationId);
-      this.timeoutMinutesByConversation.set(conversationId, minutes);
-    }
+    if (conversationId) this.timeouts.record(conversationId, minutes);
     this.finish(item, { kind: 'timeout', minutes }, 'timeout');
     if (conversationId) {
       for (const queued of [...this.queue]) {
@@ -281,12 +401,28 @@ export class ToolApprovalService {
     return true;
   }
 
+  /** Tell every mirror, once, that only the owner can answer this card now. */
+  private announceWaitingForOwner(item: PendingApproval): void {
+    const event = this.eventOf(item);
+    for (const sink of this.sinks) sink.waitingForOwner?.(event);
+  }
+
   private finish(
     item: PendingApproval,
     outcome: ToolApprovalOutcome,
     reason: ToolApprovalResolvedEvent['reason'],
+    decision: ApprovalDecision = 'decline',
+    chatRuleErrors?: readonly string[],
+    approvalNotice?: string,
   ): void {
-    this.emitResolved(item, outcome === 'approved', reason);
+    this.emitResolved(
+      item,
+      outcome === 'approved',
+      reason,
+      decision,
+      chatRuleErrors,
+      approvalNotice,
+    );
     item.resolve(outcome);
   }
 
@@ -300,7 +436,7 @@ export class ToolApprovalService {
       if (next.signal && next.abortListener)
         next.signal.removeEventListener('abort', next.abortListener);
       if (next.conversationId) this.onApprovalEnd?.(next.conversationId);
-      this.emitResolved(next, false, 'cancelled');
+      this.emitResolved(next, false, 'cancelled', 'decline');
       next.resolve('declined');
       this.pump();
       return;
@@ -322,6 +458,13 @@ export class ToolApprovalService {
       detail: item.detail,
       dangerous: item.dangerous,
       ...(item.conversationId ? { conversationId: item.conversationId } : {}),
+      ...(item.waitingForOwner ? { waitingForOwner: true } : {}),
+      // The offer travels with every announce of the card — the first `requested`,
+      // the re-announce that says only the owner may answer it, and the copy the
+      // mirror keeps — so a card re-posted after a webview reload still shows the
+      // buttons its keys earned, and the receipt can name what was allowed.
+      ...(item.allowForChat ? { allowForChat: item.allowForChat } : {}),
+      ...(item.alwaysInProject ? { alwaysInProject: item.alwaysInProject } : {}),
     };
   }
 
@@ -329,8 +472,19 @@ export class ToolApprovalService {
     item: PendingApproval,
     approved: boolean,
     reason: ToolApprovalResolvedEvent['reason'],
+    decision: ApprovalDecision,
+    chatRuleErrors?: readonly string[],
+    approvalNotice?: string,
   ): void {
-    const event = { ...this.eventOf(item), approved, reason };
+    const event = {
+      ...this.eventOf(item),
+      approved,
+      decision,
+      reason,
+      ...(item.waitingForOwner ? { waitingForOwner: true } : {}),
+      ...(chatRuleErrors ? { chatRuleErrors } : {}),
+      ...(approvalNotice ? { approvalNotice } : {}),
+    };
     // The webview is not a sink, so tell it separately: an approval settled from
     // a remote transport (or cancelled) must not leave live-looking buttons in
     // the sidebar for a decision that has already been made.

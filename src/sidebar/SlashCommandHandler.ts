@@ -1,5 +1,6 @@
 import * as vscode from 'vscode';
 import type { IBackendPool } from '../backend/BackendPool';
+import { restartBackend } from '../backend/restartBackend';
 import type { ForgeConfig } from '../config/types';
 import type { ForgeSlashCommandId } from './messageBridge';
 import type { SidebarProviderEvents } from './AgentLoop';
@@ -21,19 +22,26 @@ import { deriveTitle, isUntitled, type ConversationRuntime } from './sessionType
 import { collectSystemReport } from '../system/SystemReport';
 import { formatSystemReport } from '../system/formatSystemReport';
 import { agentKindSchema, link, parseAgentIdentity, unlink } from '../agentLinks/chatAgentLinks';
+import { pickAgentSession, type AgentSessionListers } from './linkAgentPicker';
 import { updateConfigFile } from '../config/ConfigWriter';
 import { runChatModePicker } from './chatModeCommand';
+import { resetChatApprovals } from './chatApprovalRules';
+import {
+  handleApprovalsSlashCommand,
+  resetApprovalsForConversation,
+} from './approvalSlashCommands';
+import { clearChatClanker } from './chatClanker';
+import { clearConversationExfilState } from '../tools/exfilTaint';
 
-function errorMessage(error: unknown): string {
-  return error instanceof Error ? error.message : String(error);
-}
+const errorMessage = (error: unknown): string =>
+  error instanceof Error ? error.message : String(error);
 
 export interface SlashCommandDeps extends CompactionDeps {
   /** UI-only commands still target the selected tab. */
   getActiveConv: () => ConversationRuntime;
   getConversations: () => ConversationRuntime[];
   getConfig: () => ForgeConfig;
-  /** The active Forge config path used by the sole comment-preserving writer. */
+  workspaceRoot?: string;
   getConfigPath?: () => string | undefined;
   pool: IBackendPool;
   events: SidebarProviderEvents;
@@ -46,10 +54,15 @@ export interface SlashCommandDeps extends CompactionDeps {
   submitPrompt: (text: string) => Promise<void>;
   undo: () => Promise<string[]>;
   keep: () => Promise<void>;
-  toggleClanker: () => boolean;
+  toggleClanker: (conversationId: string) => boolean;
+  resetApprovals?: (conversationId: string) => Promise<boolean>;
   incompleteTurnReason: (conversationId: string) => string | undefined;
   isStreamingConv: (conversationId: string) => boolean;
   resumeAfterManualCompact: (conversationId: string, reason: string) => Promise<void>;
+  /** Session listers for the 🔗 button and `/link`. The picker module owns the
+   *  real ones (Claude Code's registry, the Codex daemon's thread list); this
+   *  lets a test hand in fakes so no real CLI or daemon runs. */
+  agentSessionListers?: AgentSessionListers;
 }
 
 export class SlashCommandHandler {
@@ -88,7 +101,7 @@ export class SlashCommandHandler {
 
   async handle(
     commandId: ForgeSlashCommandId,
-    agent?: { agentKind?: string; sessionId?: string },
+    agent?: { agentKind?: string; sessionId?: string; approvalAction?: 'reset' | 'invalid' },
   ): Promise<void> {
     const { deps } = this;
     switch (commandId) {
@@ -105,12 +118,15 @@ export class SlashCommandHandler {
 
       case 'restartBackend':
         try {
-          await deps.pool.stopAll();
-          deps.events.onBackendStopped?.(deps.getConfig().active_model);
           const modelName = deps.getConfig().active_model;
           if (modelName) {
-            await deps.pool.acquire(modelName);
+            await restartBackend(deps.pool, deps.getConfig(), modelName, () =>
+              deps.events.onBackendStopped?.(modelName),
+            );
             deps.events.onBackendReady?.(modelName);
+          } else {
+            await deps.pool.stopAll();
+            deps.events.onBackendStopped?.(modelName);
           }
           const outcome = modelName
             ? 'Forge: backend restarted.'
@@ -184,6 +200,17 @@ export class SlashCommandHandler {
           // lost their history, and only they need to know why it is empty.
           const conversationId = deps.getActiveConv().id;
           deps.clearMessages();
+          // The "this chat has read a secret" flag, the hosts this chat approved and
+          // phase 4's untrusted-content flag are conversation-scoped like the
+          // history: a cleared chat starts clean, or its next fetch would be gated
+          // for a read that is no longer even in the transcript. `/clear` is one of
+          // the only two things that clears the flag — the other is a new chat.
+          resetChatApprovals(deps.getActiveConv());
+          clearConversationExfilState(conversationId);
+          // Approval rules and Clanker go with that history too; the tab must see
+          // Clanker drop, so the flag is posted like any other queue change.
+          clearChatClanker(deps.getActiveConv());
+          deps.post({ type: 'clankerChanged', enabled: false, conversationId });
           this.emitActivity({ text: 'Forge: chat cleared.', conversationId });
         }
         return;
@@ -251,22 +278,33 @@ export class SlashCommandHandler {
         return;
 
       case 'clanker': {
-        const on = deps.toggleClanker();
+        const conversationId = deps.getActiveConv().id;
+        const on = deps.toggleClanker(conversationId);
         deps.post({
           type: 'token',
           text: on
-            ? '\n> 💥 **Clanker Mode ON** — every tab in this window, and this workspace only. No confirmation prompts until you run `/clanker` again; it survives a reload. Permanent deletes still require approval.\n'
-            : '\n> 💥 **Clanker Mode OFF** — confirmation restored in this workspace.\n',
+            ? "\n> 💥 **Clanker Mode ON** — this chat only. A call the owner could have allowed by key runs with no card; the deny list's dangerous commands and anything with no key still get one, and it waits or times out like any other card. `/clanker` again turns it off.\n"
+            : '\n> 💥 **Clanker Mode OFF** — this chat is gated again. The approvals this chat earned are not revoked.\n',
         });
         return;
       }
+      case 'approvals':
+        return handleApprovalsSlashCommand(deps, agent?.approvalAction);
     }
+  }
+
+  async resetApprovals(conversationId = this.deps.getActiveConv().id): Promise<boolean> {
+    return resetApprovalsForConversation(this.deps, conversationId);
   }
 
   private async linkAgent(input?: { agentKind?: string; sessionId?: string }): Promise<void> {
     try {
       let kind: unknown = input?.agentKind;
       let sessionId: unknown = input?.sessionId;
+      let sessionTitle: string | undefined;
+      const conversation = this.deps.getActiveConv();
+      const cwd = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
+      if (!cwd) throw new Error('Open a workspace folder before linking a session.');
       if (kind === undefined && sessionId === undefined) {
         const picked = await vscode.window.showQuickPick(['claude', 'codex', 'copilot'] as const, {
           title: 'Link an agent session',
@@ -274,37 +312,39 @@ export class SlashCommandHandler {
         });
         if (!picked) return;
         kind = picked;
-        sessionId = await vscode.window.showInputBox({
-          title: `Link ${picked} session`,
-          prompt: 'Enter the session id',
-          validateInput: (value) => {
-            try {
-              parseAgentIdentity(picked, value);
-              return undefined;
-            } catch {
-              return `Enter a valid ${picked} session id.`;
-            }
+      }
+      if (sessionId === undefined) {
+        // A name from that kind's own list, not a typed id: Claude Code's
+        // registry of live sessions started in this folder, or the Codex
+        // daemon's thread list. Copilot has no lister, so it still goes to the
+        // by-hand box it always used. `/link claude <id>` arrives here with an
+        // id already, and is not asked to pick anything.
+        const picked = await pickAgentSession(agentKindSchema.parse(kind), {
+          config: this.deps.getConfig(),
+          deps: {
+            workspaceFolder: cwd,
+            activeConversationId: conversation.id,
+            conversations: this.deps.getConversations(),
           },
+          ...(this.deps.agentSessionListers ? { listers: this.deps.agentSessionListers } : {}),
         });
-        if (sessionId === undefined) return;
+        if (!picked) return;
+        sessionId = picked.sessionId;
+        sessionTitle = picked.title;
       }
       const identity = parseAgentIdentity(kind, sessionId);
-      const conversation = this.deps.getActiveConv();
-      const cwd = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
-      if (!cwd) throw new Error('Open a workspace folder before linking a session.');
       const now = Date.now();
-      link(
-        conversation,
-        {
-          ...identity,
-          cwd,
-          title: identity.sessionId,
-          linkedAt: now,
-          lastUsedAt: now,
-          origin: 'user-set',
-        },
-        this.deps.getConversations(),
-      );
+      link(conversation, {
+        ...identity,
+        cwd,
+        // The session's own name, so the header strip reads like the rows
+        // Forge creates itself. The by-hand path has no name to show, so it
+        // keeps the id as its title, exactly as before.
+        title: sessionTitle ?? identity.sessionId,
+        linkedAt: now,
+        lastUsedAt: now,
+        origin: 'user-set',
+      });
       this.deps.persistSession();
       this.deps.postSessionSync();
     } catch (error) {
@@ -333,6 +373,8 @@ export class SlashCommandHandler {
     if (title === undefined) return;
 
     conversation.title = deriveTitle(title);
+    // A name typed here is the owner's, so no automatic job may change it again.
+    conversation.title_source = 'user';
     conversation.updatedAt = Date.now();
     this.deps.persistSession();
     this.deps.postSessionSync();

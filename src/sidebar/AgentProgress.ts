@@ -1,5 +1,14 @@
 /** Visible, conversation-addressed progress that may be mirrored to an authorized surface. */
 export type AgentProgressEvent =
+  /**
+   * A turn began. Emitted once per turn, before anything the turn says, and
+   * the only signal that separates one turn from the next: a model-only turn
+   * emits nothing else until it ends, so a sink that times turns had to build
+   * its record from the closing event and reported every such turn as lasting
+   * 0 s (audit F4). Mirrored surfaces ignore it - it carries no text, and
+   * opening a progress message here would open one for every turn.
+   */
+  | { conversationId: string; kind: 'start' }
   /** Activity only. Reasoning text must never cross this event boundary. */
   | { conversationId: string; kind: 'reasoning' }
   | { conversationId: string; kind: 'commentary'; text: string }
@@ -50,12 +59,6 @@ export type AgentProgressListener = (event: AgentProgressEvent) => void;
 
 /** Redacts CLI tool arguments while retaining a useful user-facing milestone. */
 export function summarizeCliProgress(cliName: string, detail: string): string {
-  if (/^(Preparing|Finalizing) rollback checkpoint \(\d+\/\d+ files\)$/.test(detail)) {
-    return detail;
-  }
-  if (detail.startsWith('Warning: external CLI rollback protection is disabled.')) {
-    return 'External CLI rollback protection is disabled.';
-  }
   const action = /^\[[^:\]]+:\s*([a-zA-Z_][a-zA-Z0-9_-]*)/.exec(detail)?.[1]?.toLowerCase();
   if (action === 'exec' || action === 'bash') return `${cliName}: running a command…`;
   if (action === 'edit' || action === 'write') return `${cliName}: editing files…`;

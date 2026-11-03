@@ -6,7 +6,9 @@ import { sendTelegramPhoto } from './TelegramPhoto';
 import { plainTelegramText, splitTelegramText } from './TelegramText';
 import { sendTelegramVoice } from './TelegramVoice';
 import { styleTelegramNotice } from './telegramNoticeStyle';
-import { inlineKeyboardMarkup, TELEGRAM_CALLBACK_DATA_LIMIT_BYTES } from './telegramInlineKeyboard';
+import { inlineKeyboardMarkup } from './telegramInlineKeyboard';
+import { resolvedApprovalButton, telegramApprovalKeyboard } from './telegramApprovalKeyboard';
+import type { ApprovalDecision } from '../sidebar/approvalMessages';
 import type { TelegramChatQueue } from './telegramSendQueue';
 import {
   telegramRemoveStopReplyKeyboard,
@@ -17,23 +19,6 @@ import type { ProgressMessageOptions, RemoteContactButton, RemoteInboundAttachme
 
 const TelegramSentMessageSchema = z.object({ message_id: z.number().int() });
 const PROMPT_MESSAGE_LIMIT = 256;
-
-/**
- * The one button a resolved approval leaves behind, greyed out by Telegram's
- * `DisabledButton` — an object with no fields, not a Boolean.
- */
-function resolvedApprovalButton(
-  approved: boolean,
-  reason?: 'resolved' | 'cancelled' | 'timeout',
-): {
-  text: string;
-  disabled: Record<string, never>;
-} {
-  return {
-    text: reason === 'timeout' ? 'Timed out — not run' : approved ? 'Approved ✓' : 'Denied ✗',
-    disabled: {},
-  };
-}
 
 type TelegramCall = (
   method: string,
@@ -66,7 +51,14 @@ export class TelegramOutbound {
   async send(
     chatId: string,
     text: string,
-    options?: { correlationId?: string; signal?: AbortSignal; parseMode?: 'HTML' },
+    options?: {
+      correlationId?: string;
+      approvalAllowChat?: boolean;
+      approvalAlwaysInProject?: boolean;
+      signal?: AbortSignal;
+      parseMode?: 'HTML';
+      speedLine?: string;
+    },
   ): Promise<string[]> {
     const notice = options?.parseMode ? undefined : styleTelegramNotice(text);
     return notice
@@ -90,40 +82,44 @@ export class TelegramOutbound {
   private async sendText(
     chatId: string,
     text: string,
-    options?: { correlationId?: string; signal?: AbortSignal },
+    options?: {
+      correlationId?: string;
+      approvalAllowChat?: boolean;
+      approvalAlwaysInProject?: boolean;
+      signal?: AbortSignal;
+      speedLine?: string;
+    },
     parseMode?: 'HTML',
   ): Promise<string[]> {
     const messageIds: string[] = [];
     const chunks = splitTelegramText(text);
+    const line = options?.speedLine;
+    if (line) {
+      // One line, on the last part only, and never cut in half: re-splitting the
+      // last chunk with the line appended keeps the line whole. When the answer
+      // already filled its 4096 characters, the overflow and the line become one
+      // further message, which is still the last part of the answer.
+      const last = chunks.length - 1;
+      chunks.splice(last, 1, ...splitTelegramText(`${chunks[last]}\n\n${line}`));
+    }
     for (let index = 0; index < chunks.length; index++) {
       const correlationId = index === 0 ? options?.correlationId : undefined;
-      const approveData = correlationId ? `a:${correlationId}` : undefined;
-      const denyData = correlationId ? `d:${correlationId}` : undefined;
-      if (
-        (approveData &&
-          Buffer.byteLength(approveData, 'utf8') > TELEGRAM_CALLBACK_DATA_LIMIT_BYTES) ||
-        (denyData && Buffer.byteLength(denyData, 'utf8') > TELEGRAM_CALLBACK_DATA_LIMIT_BYTES)
-      ) {
-        throw new Error('Forge Telegram approval identifier exceeds the Bot API limit.');
-      }
+      // Only the first chunk of a send carries buttons, and their layout is
+      // `telegramApprovalKeyboard`'s: two rows once the card offers a rule, so
+      // the longest label is not the one Telegram truncates.
+      const keyboard = correlationId
+        ? telegramApprovalKeyboard(correlationId, {
+            ...(options?.approvalAllowChat ? { allowChat: true } : {}),
+            ...(options?.approvalAlwaysInProject ? { alwaysInProject: true } : {}),
+          })
+        : undefined;
       const sent = await this.call(
         'sendMessage',
         {
           chat_id: chatId,
           text: chunks[index],
           ...(parseMode ? { parse_mode: parseMode } : {}),
-          ...(correlationId
-            ? {
-                reply_markup: {
-                  inline_keyboard: [
-                    [
-                      { text: 'Approve', callback_data: approveData },
-                      { text: 'Deny', callback_data: denyData },
-                    ],
-                  ],
-                },
-              }
-            : {}),
+          ...(keyboard ? { reply_markup: { inline_keyboard: keyboard } } : {}),
         },
         options?.signal,
       );
@@ -308,6 +304,11 @@ export class TelegramOutbound {
    * that clears it for a resolved prompt, and it must not blank the button it
    * just resolved.
    *
+   * `decision` is the answer as the four choices every surface uses, carried
+   * down from the bridge that has it. Without it a card allowed for the chat
+   * reads `Approved ✓`, which says nothing was remembered when a rule was just
+   * written.
+   *
    * Throws when an edit failed, naming both the resolved-button failure and the
    * empty-keyboard fallback's failure when that failed too — a swallowed
    * failure here means the user keeps staring at a live Approve button with no
@@ -320,6 +321,7 @@ export class TelegramOutbound {
     approved: boolean,
     options?: { signal?: AbortSignal },
     reason?: 'resolved' | 'cancelled' | 'timeout',
+    decision?: ApprovalDecision,
   ): Promise<void> {
     const remembered = this.promptMessages.get(correlationId);
     this.promptMessages.delete(correlationId);
@@ -335,7 +337,7 @@ export class TelegramOutbound {
         await this.editReplyMarkup(
           chatId,
           messageId,
-          { inline_keyboard: [[resolvedApprovalButton(approved, reason)]] },
+          { inline_keyboard: [[resolvedApprovalButton(approved, reason, decision)]] },
           options?.signal,
         );
       } catch (err) {

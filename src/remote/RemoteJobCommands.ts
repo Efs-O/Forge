@@ -17,7 +17,8 @@
 
 import type { JobStore } from '../jobs/JobStore';
 import type { JobFile } from '../jobs/jobSchema';
-import { describeSchedule, formatWhen } from '../jobs/jobDescribe';
+import { describeJob, describeSchedule, formatWhen } from '../jobs/jobDescribe';
+import { USER_QUIET_MS } from '../jobs/agentTaskAdmission';
 import { openDiscussChat } from '../jobs/jobDiscuss';
 import { approveStaged } from '../jobs/actions/llamacppUpdate';
 import type { ForgeHostFacade } from '../sidebar/ForgeHostFacade';
@@ -177,8 +178,13 @@ async function handleJob(
     actionTokens = operands.slice(0, -1);
   }
   const rawAction = actionTokens[actionTokens.length - 1];
-  const ref = actionTokens.slice(0, -1).join(' ');
-  const action = (rawAction ?? '').toLowerCase();
+  // One token is a bare reference, not an action: `/job 4` and `/job disk` are
+  // how the owner asks what a job is, and the run reply now points at them for
+  // the waits it names. It used to answer with the usage line, which repeated
+  // the menu and said nothing about the job they had just asked about.
+  const bareReference = actionTokens.length === 1;
+  const ref = bareReference ? rawAction : actionTokens.slice(0, -1).join(' ');
+  const action = bareReference ? 'show' : (rawAction ?? '').toLowerCase();
   if (!ref || !action) {
     await reply(
       context,
@@ -206,7 +212,8 @@ async function handleJob(
     action !== 'resume' &&
     action !== 'run' &&
     action !== 'delete' &&
-    action !== 'chat'
+    action !== 'chat' &&
+    action !== 'show'
   ) {
     await reply(
       context,
@@ -232,6 +239,13 @@ async function handleJob(
   }
   const jobFile = match.jobFile;
   switch (action) {
+    case 'show':
+      // The same description the `manage_jobs` tool prints, so the two surfaces
+      // cannot disagree about one job. Its status line carries
+      // `pending: <reason>` while the job is waiting, which is the thing the
+      // `run` reply now promises the owner will find here.
+      await reply(context, event.chatId, describeJob(jobFile));
+      return { kind: 'handled' };
     case 'pause':
       await context.store.setEnabled(jobFile, false);
       await reply(
@@ -276,14 +290,28 @@ async function handleJob(
       );
       return { kind: 'handled' };
     }
-    case 'run':
+    case 'run': {
       await context.store.requestRun(jobFile.job.id);
+      // "Runs on the next scheduler tick" is only the whole truth for a check.
+      // An agent task waits for more: its own chat quiet for `USER_QUIET_MS`,
+      // and a free GPU when its model is local (`agentTaskAdmission.ts`).
+      // Naming those waits here is what makes `run requested` mean "eventually,
+      // and this is why it might not", instead of "now" followed by silence.
+      const agentTask = jobFile.job.action?.kind === 'agent_task';
       await reply(
         context,
         event.chatId,
-        `Forge: run requested for "${jobFile.job.name}" [${jobFile.job.id}]. It runs on the next scheduler tick, in whichever window holds the jobs lease.`,
+        `Forge: run requested for "${jobFile.job.name}" [${jobFile.job.id}]. It runs on the next scheduler tick, in whichever window holds the jobs lease.` +
+          (agentTask
+            ? `\n\nAn agent task also waits until your own chats have been quiet for ${Math.round(
+                USER_QUIET_MS / 60_000,
+              )} minutes, and for a free GPU when its model is local; send /job ${
+                jobFile.job.id
+              } to see what it is waiting for.`
+            : ''),
       );
       return { kind: 'handled' };
+    }
     case 'delete':
       return handleDelete(jobFile, event, context);
     default:

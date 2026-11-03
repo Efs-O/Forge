@@ -112,7 +112,11 @@ export function hostMessageToAction(msg: HostToWebview): Action | undefined {
         convId: msg.conversationId,
       };
     case 'clankerChanged':
-      return { type: 'CLANKER_CHANGED', enabled: msg.enabled };
+      return {
+        type: 'CLANKER_CHANGED',
+        enabled: msg.enabled,
+        conversationId: msg.conversationId,
+      };
     case 'remoteStatus':
       return { type: 'REMOTE_STATUS', transports: msg.transports, paired: msg.paired };
     case 'activityView':

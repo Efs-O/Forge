@@ -30,13 +30,22 @@ import {
 } from './turnOutcome';
 import type { AdmissionDecision, ContextThresholdAction } from './ContextBudgetPublisher';
 import { isContextExhaustionReason } from '../agent/truncationRecovery';
+import { backgroundExecutionManager } from '../tools/BackgroundExecutionManager';
 import type { ChatAttachmentStore } from './ChatAttachmentStore';
 import type { ChatAttachmentRef } from '../llm/types';
 import type { MidTurnInbox } from '../agent/MidTurnInbox';
-import { groupTellBatches, inputTextOf, runsAfterStop, type TellBatch } from './undeliveredTells';
+import { notifyConversationSettled } from './workerChatWake';
+import {
+  groupTellBatches,
+  heldTellsOf,
+  inputTextOf,
+  runsAfterStop,
+  type TellBatch,
+} from './undeliveredTells';
 
 const log = getLogger();
 export const CONVERSATION_BUSY_ERROR = 'Forge: this conversation is still generating.';
+export const CONVERSATION_GONE_ERROR = 'Forge: the queued conversation is no longer open.'; // `RemoteQueueDrain.ts` answers this one with what to send next: "the queued conversation" is nothing on a handset.
 
 function turnEndDetails(turn: ForgeTurnOutcome | ForgeRequestOutcome): {
   outcome: ForgeTurnEndKind;
@@ -60,7 +69,6 @@ function turnEndDetails(turn: ForgeTurnOutcome | ForgeRequestOutcome): {
     }
   }
 }
-
 export interface SendPipelineDeps {
   getConfig: () => ForgeConfig;
   getSidebar: () => SidebarRuntime;
@@ -69,7 +77,8 @@ export interface SendPipelineDeps {
   requestChains: RequestChainLifecycle;
   events: SidebarProviderEvents;
   post: (msg: HostToWebview) => void;
-  persistSession: () => void;
+  persistSession: (changedId?: string) => void | Promise<boolean>;
+  onConversationActivity?: (conversationId: string) => void;
   postSessionSync: () => void;
   evaluateAfterTurn: (
     conv: ConversationRuntime,
@@ -103,6 +112,8 @@ export class SendPipeline {
       createdAt?: number;
       /** Called once the turn is admitted; a refusal before that resolves `send` as `failed`. */
       onAdmitted?: () => void;
+      /** Nested tell sends share their parent's final wake. */
+      suppressWorkerWake?: boolean;
     },
   ): Promise<ForgeRequestOutcome> {
     const { deps } = this;
@@ -110,7 +121,6 @@ export class SendPipeline {
       deps.post({ type: 'error', message, ...(id ? { conversationId: id } : {}) });
       return { kind: 'failed', error, finalText: '' };
     };
-    const gone = 'Forge: the queued conversation is no longer open.';
     const busyAgain =
       'Forge: this conversation is still generating. Cancel it before sending again.';
     let conv = conversationId
@@ -120,7 +130,7 @@ export class SendPipeline {
       // Deliberately unaddressed: the conversation this referred to is gone, so
       // there is no tab to route it to. The active tab is the only place the
       // user can actually see it, and nothing is left streaming to clear.
-      return refuse(gone, gone);
+      return refuse(CONVERSATION_GONE_ERROR, CONVERSATION_GONE_ERROR);
     }
     // Any sender, not only the webview, may label a text file by extension.
     attachments = attachments?.map((a) => ({
@@ -148,7 +158,7 @@ export class SendPipeline {
     conv = conversationId
       ? deps.getSidebar().conversations.find((candidate) => candidate.id === conversationId)
       : deps.getActive();
-    if (!conv) return refuse(gone, gone);
+    if (!conv) return refuse(CONVERSATION_GONE_ERROR, CONVERSATION_GONE_ERROR);
     const finalAttachmentError = validateAttachments(attachments);
     if (finalAttachmentError) return refuse(finalAttachmentError, finalAttachmentError, conv.id);
     if (deps.agentLoop.isStreamingConv(conv.id)) {
@@ -187,6 +197,7 @@ export class SendPipeline {
       return refuse(busyAgain, CONVERSATION_BUSY_ERROR, conv.id);
     }
     const chain = deps.requestChains.accept(admission.reservation, metadata?.remoteRequestId);
+    deps.onConversationActivity?.(conv.id);
     metadata?.onAdmitted?.();
     const createdAt = messageCreatedAt(metadata?.createdAt);
     const initialPromptOptions = { ...(promptOptions ?? {}), createdAt };
@@ -245,7 +256,11 @@ export class SendPipeline {
     // Closing or deleting the chat during either await above or the admission
     // check below invalidates the chain; it must not reach runTurn. A Stop then
     // only marks the chain (no turn to abort): stoppedBeforeTurn honours it.
-    if (!deps.requestChains.isCurrent(chain)) return { kind: 'cancelled' };
+    if (!deps.requestChains.isCurrent(chain)) {
+      const outcome: ForgeRequestOutcome = { kind: 'cancelled' };
+      if (!metadata?.suppressWorkerWake) await this.notifyFinalOutcome(conv.id, outcome);
+      return outcome;
+    }
     let outcome: ForgeRequestOutcome;
     const pendingTellBatches: TellBatch[] = [];
     // Set when "Send now" interrupted the turn: its batches run after release.
@@ -323,9 +338,6 @@ export class SendPipeline {
           if (pendingTellBatches.length > 0) {
             if (turn.kind === 'cancelled' || turn.kind === 'interrupted') {
               sendNowHeld = runsAfterStop(turn.kind, undelivered);
-              const userText = sendNowHeld ? undefined : inputTextOf(pendingTellBatches);
-              if (userText)
-                deps.post({ type: 'setInput', text: userText, conversationId: conv.id });
               return toRequestOutcome(turn);
             }
             const nextBatch = pendingTellBatches.shift()!;
@@ -378,45 +390,83 @@ export class SendPipeline {
         }
       });
     } catch (error) {
-      this.returnUndeliveredTells(conv.id);
+      this.returnUndeliveredTells(conv.id, pendingTellBatches);
+      if (!metadata?.suppressWorkerWake) {
+        await this.notifyFinalOutcome(conv.id, {
+          kind: 'failed',
+          error: error instanceof Error ? error.message : String(error),
+        });
+      }
       throw error;
     }
+    // A cancelled chain (Stop, forge.sh stop, a remote Stop) keeps its jobs
+    // running and visible to monitor_execution; only their wake is cleared. An
+    // interrupted chain is not disarmed: its steering turn still wants the notice.
+    if (outcome.kind === 'cancelled') backgroundExecutionManager.disarmNotify(conv.id);
     const undeliveredAfterRelease = deps.midTurnInbox.takeUndelivered(conv.id);
     const tellBatches = [
-      ...(sendNowHeld ? pendingTellBatches : []),
+      ...(sendNowHeld || outcome.kind === 'cancelled' || outcome.kind === 'interrupted'
+        ? pendingTellBatches
+        : []),
       ...groupTellBatches(undeliveredAfterRelease),
     ];
-    if (tellBatches.length === 0) return outcome;
+    if (tellBatches.length === 0) {
+      if (!metadata?.suppressWorkerWake) await this.notifyFinalOutcome(conv.id, outcome);
+      return outcome;
+    }
     const stopped = outcome.kind === 'cancelled' || outcome.kind === 'interrupted';
     if (stopped && !sendNowHeld && !runsAfterStop(outcome.kind, undeliveredAfterRelease)) {
       const userText = inputTextOf(tellBatches);
       if (userText) deps.post({ type: 'setInput', text: userText, conversationId: conv.id });
+      for (const tell of heldTellsOf(tellBatches)) deps.midTurnInbox.add(conv.id, tell);
+      if (!metadata?.suppressWorkerWake) await this.notifyFinalOutcome(conv.id, outcome);
       return outcome;
     }
     // The chain has released here. A tell that arrived during evaluation or
     // compaction becomes a new addressed send, so it cannot be stranded in the
     // inbox after the original request has settled.
     let followUpOutcome: ForgeRequestOutcome = outcome;
-    for (const batch of tellBatches) {
-      followUpOutcome = await this.send(
-        batch.text,
-        undefined,
-        conv.id,
-        batch.internal ? { internal: true } : undefined,
-        batch.internal ? undefined : { echoPrompt: true },
-      );
+    try {
+      for (const batch of tellBatches) {
+        followUpOutcome = await this.send(
+          batch.text,
+          undefined,
+          conv.id,
+          batch.internal ? { internal: true } : undefined,
+          {
+            suppressWorkerWake: true,
+            ...(batch.internal ? {} : { echoPrompt: true }),
+          },
+        );
+      }
+    } catch (error) {
+      if (!metadata?.suppressWorkerWake) {
+        await this.notifyFinalOutcome(conv.id, {
+          kind: 'failed',
+          error: error instanceof Error ? error.message : String(error),
+        });
+      }
+      throw error;
+    }
+    if (!metadata?.suppressWorkerWake) {
+      await this.notifyFinalOutcome(conv.id, followUpOutcome);
     }
     return followUpOutcome;
   }
 
-  private returnUndeliveredTells(conversationId: string): void {
+  private async notifyFinalOutcome(
+    conversationId: string,
+    outcome: ForgeRequestOutcome,
+  ): Promise<void> {
+    await notifyConversationSettled(conversationId, outcome);
+  }
+
+  private returnUndeliveredTells(conversationId: string, pending: readonly TellBatch[] = []): void {
     const undelivered = this.deps.midTurnInbox.takeUndelivered(conversationId);
-    if (undelivered.length === 0) return;
-    this.deps.post({
-      type: 'setInput',
-      text: undelivered.map((tell) => tell.text).join('\n\n'),
-      conversationId,
-    });
+    const batches = [...pending, ...groupTellBatches(undelivered)];
+    const userText = inputTextOf(batches);
+    if (userText) this.deps.post({ type: 'setInput', text: userText, conversationId });
+    for (const tell of heldTellsOf(batches)) this.deps.midTurnInbox.add(conversationId, tell);
   }
 
   /**

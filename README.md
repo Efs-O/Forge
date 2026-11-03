@@ -66,10 +66,15 @@ telemetry, analytics, or auto-update pings.
 
 - Single execute-style workflow with no mode switching
 - Multiple conversations with independent streaming, all available from history
-- Per-action confirmation gate, plus `/clanker` full-auto mode
+- Per-action confirmation gate, plus `/clanker`, which turns confirmations off for
+  one chat at a time
 - Per-turn checkpoints with Keep and Undo
 - Inline chat diffs after write tools
 - Background execution: start a long command, keep working, monitor it as it runs
+- Persistent agent jobs that outlive the window: a scheduled wake that can run
+  an agent turn, and a job you pause, run or delete from the phone
+  (`manage_jobs`, `/jobs` and `/job`) — see
+  [jobs](docs/JOBS.md)
 - A task plan the agent keeps, re-injected verbatim so a context compaction cannot lose it
 - Demand-loaded tool groups, so a large tool surface costs starting context only when used
 - Terminal awareness: the agent sees the commands you run and how its own turned out
@@ -78,7 +83,7 @@ telemetry, analytics, or auto-update pings.
 - Ollama local and Ollama cloud routing through the local daemon
 - Optional cloud or self-hosted providers: `xai`, `openrouter`, `openai`, `openai-compatible`
 - External CLI agents (`provider: cli` — Claude Code, Codex) as full-rights agents — both in direct chat and as `ask_local_agent` delegation targets, where they can read and edit the workspace with their own tools — using each CLI's own authentication. See [delegation](docs/DELEGATION.md) for which runs Keep/Undo covers
-- Agent mesh: two-way messaging between Forge and Claude Code, Codex and Copilot sessions (`ask_agent`, `forge.sh say`/`send`/`steer`/`stop`/`who`)
+- Agent mesh: two-way messaging between Forge and Claude Code, Codex and Copilot sessions (`ask_agent`, plus the fifteen verbs in `forge.sh`'s own usage header)
 - Localhost control server for external orchestrators and shared model lifecycle
 - Reasoning token display and optional thinking-channel stripping
 - Optional Tavily or Brave web search with keys stored in VS Code SecretStorage
@@ -94,33 +99,39 @@ telemetry, analytics, or auto-update pings.
 ## What's New
 
 Forge ships a **Changelog** tab next to this one — that is the full account,
-every release. The short version of the latest releases: 0.16.35 moved
-archived chats out of VS Code workspace storage so saving a tool round no
-longer reserializes the whole archive; 0.16.33 and 0.16.32 made compaction
-work for thinking and cloud models and made failures stop cleanly; 0.16 added
-`generate_image` for configured image APIs, `restore_file`, commit amend and
-multi-question `ask_user`, made semantic indexing survive any workspace, and
-tidied Telegram — photo albums as one prompt, one `/model` command, commands
-that clean up after themselves; 0.15 cut the system prompt, made VRAM-loading
-delegation ask first, and grew the phone into a real second seat — voice in and
-out, a readable transcript, a machine report, and sleep/wake; 0.14 made tool
-schemas demand-loaded and the prompt prefix stable.
+every release. The short version of the current 0.17 line: persistent scheduled
+agent jobs, listed and acted on from the phone with `/jobs` and `/job`, or by
+asking the agent with `manage_jobs` (the sidebar has no jobs command); two-way
+messaging with Claude Code, Codex and Copilot sessions (`ask_agent`,
+`forge.sh`); local stable-diffusion image generation and upscaling beside the
+billed cloud one; browser and desktop tools; terminal awareness in both
+directions; a jobs scheduler that owns the machine's wake timer; and remote
+VS Code windows that hand a phone session to the desktop window that owns the
+models.
 
 ## What the agent can do
 
-More than sixty native tools, all strict-schema, all permission-gated, and all
+Ninety native tools, all strict-schema, all permission-gated, and all
 advertised per round rather than per turn — so a capability you enable becomes
 usable immediately. Groups an agent rarely needs are demand-loaded through
 `load_tool_group` and cost no context until called.
 
 The first load in a conversation pauses while the model re-reads its context:
 about **100 seconds at 70K tokens** and **190 seconds at 120K tokens** on the
-reference machine (Qwen3.8-27B, llama.cpp b11243). Only rare tool groups use this
-path; frequently used code and git tools stay available by default.
+reference machine (Qwen3.8-27B, measured on llama.cpp b11243). Only rarely used
+groups use this path; reading, writing, editing, searching, `shell` and the
+background tools stay available by default. As of this build the `git` group —
+including `git_read` — and the `media` group (images, video, rendering,
+`send_file`) also load on demand, because 53 sessions since 0.17.80 used
+`git_read` 6 times against 418 `git` commands typed into `shell`, and used four
+of the media tools 0 times. A profile that runs git through the tools, or
+reviews and makes images, keeps them advertised with
+`tool_groups.eager: [git, media]`.
 
-**Files and edits.** `read_file`, `write_file`, `append_file`, `edit_file` with
-batched `edits[]`, `apply_line_edits`, `insert_code`, `create_directory`,
-`move_file`, `list_directory`. `delete_file` moves to the recycle bin rather
+**Files and edits.** `read_file`, `write_file` — `mode: "append"` adds to the
+end of a file, which is how a write that was cut off is finished — `edit_file` with
+batched `edits[]`, `apply_line_edits`, `insert_code`, `move_file`,
+`list_directory`. `delete_file` moves to the recycle bin rather
 than destroying. Every write is checkpointed and shown as a diff.
 
 **Code intelligence, through VS Code's own language servers** — not grep
@@ -140,8 +151,9 @@ own embeddings.
 Bash and never WSL, or pwsh on a Windows machine without Git for Windows; a
 single call can pick the other). Every
 command is classified first: reads (`git status`, `rg`, `Get-Content`, `ls`)
-run without asking, ordinary commands ask unless `/clanker` is on, destructive
-ones always ask, and a few are refused outright. Output over 30K characters
+run without asking, ordinary commands ask unless the chat you are in has
+`/clanker` on, destructive ones always ask (in a Clanker chat too), and a few are
+refused outright. Output over 30K characters
 keeps its head and tail and spills the full text to a file the agent can read.
 
 **Background execution.** `shell` with `background: true` starts a
@@ -181,7 +193,10 @@ selection you are actually looking at; `replace_selection` and `show_diff`
 write back into it.
 
 **Vision.** `view_image` for screenshots and diagrams, `view_video` for frames
-sampled out of a workspace clip (needs ffmpeg).
+sampled out of a workspace clip (needs ffmpeg), and `image_search` for finding
+where a picture appears online — a reverse search against Google Lens or Yandex
+on an attachment or a public URL, needing an `image_search:` block with a
+SerpApi key.
 
 **Browser and desktop.** Computer-use tools require a vision model and the
 corresponding `permissions.browser.enabled` or `permissions.desktop.enabled`
@@ -243,12 +258,16 @@ was asleep sees the final state and never the edits it missed — `/view` is the
 pull that covers that gap. `/system` reports GPU, VRAM by process, RAM and
 drives, which is how you find out from a train why the model will not load.
 
-**Commands.** `/status`, `/context`, `/system`, `/view`, `/stop`,
-`/steer <prompt>` (jumps the queue and interrupts the active turn), `/new`,
-`/chats`, `/chat`, `/resume`, `/model`, `/queue`, `/drop`,
-`/ratelimit`, `/unload`, `/unloadall`, `/restart`, `/reload`, `/compact`, `/lock`,
-`/timeout`, `/notify`, `/mirror`, `/voice`, `/clanker on|off`, `/workspace`,
-`/sleep`, `/wake`, `/help`. Telegram shows them in its native command menu.
+**Commands.** `/status`, `/context`, `/system`, `/view`, `/stop` (cancels the
+running turn; plain text reaches it at its next step), `/new`,
+`/chats`, `/chat`, `/resume`, `/agents`, `/answer`, `/claude`, `/codex`,
+`/copilot`, `/tell`, `/model`, `/chatmode`, `/queue`, `/drop`,
+`/ratelimit`, `/unload`, `/unloadall`, `/restart`, `/jobs`, `/job`, `/reload`,
+`/compact`, `/lock`, `/speed`, `/timeout`, `/notify`, `/mirror`, `/voice`,
+`/clanker on|off`, `/workspace`, `/contacts`, `/contact`, `/send`,
+`/sleep`, `/wake`, `/approvals`, `/help`. Telegram shows them in its native command menu, and
+`/help` prints the same list grouped by section; the list itself lives in
+`src/remote/remoteHelpText.ts`.
 
 **`/sleep` and `/wake` need hardware Forge does not ship.** `/sleep` suspends
 the machine; waking one that is suspended cannot be done by software running on
@@ -262,6 +281,139 @@ The audit log is metadata only — timestamps, channel, action, request id, and
 truncated identity hashes. No prompt text, no responses, no secrets, no paths.
 
 WhatsApp exists as a separately opt-in experimental linked-device adapter.
+
+## Use Forge from another computer
+
+Two ways to work when the models, the files and the GPU live on one computer —
+the **main** machine — and you are typing on a second one.
+
+**A. A VS Code Remote window onto the main machine.** Start a tunnel on the main
+machine (`code tunnel`), pick it in Remote Explorer on the second computer and
+open the workspace there. The extension host runs on the main machine, so Forge
+sees its files, its models and its GPUs; the machine you type on only draws the
+sidebar.
+
+- `forge.configFile` is **machine**-scoped: a Remote window reads it from the
+  **Remote settings** of the machine it connects to, not from the one you type
+  on. Unset, the workspace's own `.forge/config.yaml` is used.
+- **Keys are per computer.** A window reads the keychain of the machine you are
+  typing on — VS Code stores secrets on the client, wherever the extension host
+  runs — so the main machine's own window is the one that already holds them: a
+  key-based cloud model in a remote window goes through that window's cloud
+  relay, and key-based image generation is not available in a remote window.
+- **Only a tunnel or SSH window is that case.** A WSL, Dev Container, attached
+  container or Codespaces window runs on the machine being typed on, or in a VM
+  with no second Forge window, so it keeps its own transports, wake relay,
+  starter, cloud relay and keyed cloud models.
+- **Telegram stays in the main machine's own window:** a remote window starts no
+  transport and takes no lease, so the phone bot keeps answering.
+
+**B. Forge on the second computer, with entries that point at the main one.**
+The second machine keeps its own window, conversations and workspace, and asks
+the main machine for models — the shape for a laptop you carry.
+
+Set it up with three commands. The only thing Forge cannot do for you is the ACL
+rule, and that is one line in the Tailscale admin page:
+
+1. **On the main machine, in its own Forge window:** `Forge: Share this computer`.
+   It turns on `model_starter` and `cloud_relay` in that machine's config (one
+   comment-preserving write) and shares exactly those two ports with
+   `tailscale serve`, after showing you the commands and asking you to confirm
+   them. It never shares Forge's control port or Ollama's daemon port, never
+   changes the Tailscale ACL, Tailnet Lock or sign-in, and does nothing in a
+   tunnel or SSH window — run it in the desktop's own window. Until an ACL rule
+   lets the second computer reach those two ports, sharing is on and the laptop
+   still cannot connect. `Forge: Stop sharing this computer` turns both switches
+   off, removes the two shares Forge made, and leaves every other share this
+   computer has on the tailnet exactly as it was.
+2. **On the second computer:** `Forge: Connect to my desktop`. It finds the
+   desktop through `tailscale status --json` (or the starter addresses already in
+   your config), reads the models the desktop reports and the cloud models its
+   relay allows, and writes all of them into your `config.yaml` in one
+   comment-preserving write: no keys, and nothing started, so a sleeping desktop
+   stays asleep. An entry that already exists is left exactly as it was, so
+   running it again adds nothing and says "already there".
+3. **On the second computer, when something does not work:** `Forge: Check
+   connection`. It walks the path — Tailscale here, the desktop online in
+   Tailscale, the model starter, the cloud relay, the models the desktop will
+   serve — and names the first link that is broken, in words you can act on. It
+   starts nothing to make that answer, and writes nothing.
+
+A laptop that has connected also says once per window when the desktop has gained
+a model this laptop does not list, with `Add them` to write it.
+
+Set up by hand instead — the fallback for a machine that cannot run the commands
+(older build, or a headless window). The main machine publishes two services,
+both loopback-only:
+
+```yaml
+# partial: the model_starter and cloud_relay blocks only, not a whole config
+# the main machine's .forge/config.yaml
+model_starter:
+  enabled: true                     # absent block or false = nothing listens
+  port: 8798                        # must equal `tailscale serve --tcp 8798`
+  shared_ports: [8080, 8081, 8090]  # must equal the ACL's dst ports
+  lease_ttl_s: 600                  # how long a started model stays held
+
+cloud_relay:
+  enabled: true
+  port: 8797                        # chat only; no key leaves this machine
+  models: [grok-code-fast, llama3:cloud]  # names THIS config knows
+```
+
+- `model_starter` lets the other computer **start** a model it cannot start
+  itself: `POST /ensure` loads or starts it and answers with the port to use;
+  `POST /release` and `POST /unload` give it back. The lease protects the model
+  from eviction, and from `stop_on_exit`, until it lapses.
+- `cloud_relay` lets it **use** key-based cloud models with no keys on it: it
+  forwards chat requests and resolves the token here.
+
+Both bind `127.0.0.1` only, like every Forge listener. Reach them through
+`tailscale serve`, which forwards a shared port to that loopback address, with
+the ACL limited to the second computer. Never expose Forge's control port
+(`control_server`, 8799): it is loopback-only.
+
+The second computer's entries:
+
+```yaml
+# the second computer's .forge/config.yaml
+models:
+  - name: strata-iq3s
+    provider: openai-compatible
+    endpoint: http://100.64.0.10:8090   # host only; /ensure reports the port
+    remote_start:
+      starter: [http://192.0.2.10:8798, http://100.64.0.10:8798]  # LAN first
+      model: strata-iq3s                # the name the MAIN config knows it by
+    num_ctx: 32768                      # = the `context` /models reports
+
+  - name: grok-code-fast                # must be spelled the same on both machines
+    provider: openai-compatible
+    endpoint: http://100.64.0.10:8797   # the cloud relay, not the provider
+```
+
+`starter` is one address or 1-4 of them, tried in the order written, each an
+`http://` URL with an IP host — a name fails the listener's own anti-rebinding
+check. `endpoint` must name one of those hosts, and `/ensure` replaces its port,
+so a llama.cpp slot port is never guessed. A `Forge: Connect to my desktop`
+entry names the shared port instead — `endpoint: http://100.64.0.10:8798/strata-iq3s`
+— and the starter forwards that request to the model's own port one loopback hop
+away, so no model port has to be shared at all. Only models the main machine marks
+`remote: true` start this way: its own llama.cpp models and the servers it
+manages, with every slot port in `shared_ports`; Ollama, cloud, CLI-agent and
+unshared-port models answer `remote: false` with a reason. A cloud entry with no
+`remote_start` dials the relay, and the relay looks the model up by the name in
+the request — what Forge sends is the entry's name, so the two machines must
+spell it the same; a `model:` field on the entry does not change that.
+
+**Waking the main machine.** Nothing on a sleeping machine can wake it, and a
+magic packet does not cross a router, so pick how it gets woken:
+
+| Option | Needs | Who asks for it |
+|---|---|---|
+| Wake-on-LAN magic packet | the adapter armed for WoL, and an always-on device on the same LAN | a phone WoL app, another machine, a small board |
+| Forge's wake relay (`remote.wake_relay`) | an always-on device on the same LAN holding the Telegram side and the magic packet; Forge binds `host`:`port` on the machine to be slept and accepts a signed `/v1/sleep` only from `relay_ip` | Telegram `/sleep` and `/wake` from your phone |
+| An RTC wake timer | wake timers allowed in the power scheme, armed **before** it sleeps | `schedule_wake` in a turn, or `/sleep 8h` on Telegram |
+| A recurring wake task | the same permission; the jobs scheduler owns `ForgeScheduledWake` and deletes it when no job asks for a wake | a scheduled job with a wake time |
 
 ## Requirements
 
@@ -299,10 +451,10 @@ extensions, so:
    models:
      - name: claude-code
        provider: cli
-       cli: claude   # bare name, looked up on PATH; an absolute path also works
+       cli: claude   # bare name, or a full path to the executable. A .cmd shim is run through its launcher, which needs Node on PATH
      - name: codex
        provider: cli
-       cli: codex
+       cli: codex    # bare name, or a full path to the executable. A .cmd shim is run through its launcher, which needs Node on PATH
    ```
    For `ask_local_agent` delegation, also set `permissions.agents.delegate: true`.
 3. **If you run Claude Code in bypass-permissions mode**, add
@@ -315,29 +467,45 @@ extensions, so:
 5. **For the agent mesh** (`forge.sh`), check that the control server and bus are
    enabled. New starter configs enable both; older configs may need:
    ```yaml
+   # partial: the control_server and agent_bus blocks only, not a whole config
    control_server:
      enabled: true
    agent_bus:
      enabled: true
    ```
 
-Nothing needs to go into Claude's memory or a user's `AGENTS.md`: Forge writes
-its agent-bus notes to `~/.forge/agent-bus/`, and every question it sends carries
-reply instructions. Read the live `forge.sh` usage header before using it; there
-is no `join` command.
+Nothing needs to go into Claude's memory: Forge writes its agent-bus notes to
+`~/.forge/agent-bus/`, and every question it sends carries reply instructions.
+Read the live `forge.sh` usage header before using it; there is no `join`
+command.
 
-For Codex or Claude Code to discover the mesh in every new session, a user may
-add this optional note to their own `AGENTS.md` or `CLAUDE.md`, respectively.
-Forge never edits either file:
+For Codex or Claude Code to discover the mesh in every new session, Forge
+writes its own agent-bus note into a marked section between two
+`forge-agent-mesh` comment lines — `<!-- forge-agent-mesh:start -->` and
+`<!-- forge-agent-mesh:end -->` — in every `AGENTS.md` and `CLAUDE.md` the
+workspace has, creating `AGENTS.md` when neither exists. The first start in a
+workspace with `agent_bus` on does this, and a later start refreshes that section
+when Forge's note text changes, so the section is Forge's to keep current, not
+yours: everything outside the two comment lines is yours, and deleting the text
+between them keeps it deleted. **Forge: Set Up Agent Note** re-runs the install
+on demand. The section reads:
 
 > When asked to message Forge or another agent, read
 > `~/.forge/agent-bus/README.md` and the leading usage header of
 > `~/.forge/agent-bus/forge.sh` first. Use your own agent name with `say` or
 > `send` (`claude` in Claude Code, `codex` in Codex). `send` to another agent
-> reaches only the recipient linked to your current Forge chat; check `who`
-> and the intended chat's links before sending. A 202 exchange id confirms
+> reaches only the recipient linked to the Forge chat your session last
+> addressed (one session may hold several chats); check `who` and the intended
+> chat's links before sending. A 202 exchange id confirms
 > acceptance, not an answer; read the verdict or failure. There is no `join`
-> command.
+> command. `send` goes to that agent's session for your current Forge chat: the
+> session already linked if there is one, a new Forge-started one if there is
+> none, and you cannot choose which instance answers. On Windows run the client
+> through Git Bash by full path — `& "$(git --exec-path)/../../../bin/bash.exe"`
+> or `C:\Program Files\Git\bin\bash.exe` — never a bare `bash`: in PowerShell
+> that is usually WSL, whose home is not the Windows `~/.forge` folder, and if
+> `Get-Command git.exe` finds nothing the mesh needs Git for Windows first
+> (`winget install --id Git.Git -e`).
 
 **Model and effort for a Forge-owned Codex/Claude session.** With no session
 linked to the chat, Forge may create its own Codex or Claude CLI process (the
@@ -345,6 +513,7 @@ agent-bus mesh, above); by default it runs each CLI's own configured default
 model and effort. These optional `agent_bus:` keys pick them instead:
 
 ```yaml
+# partial: the agent_bus block only, not a whole config
 agent_bus:
   codex_model: gpt-6-luna
   codex_effort: high # low | medium | high | xhigh | max
@@ -409,6 +578,7 @@ This is opt-in. Nothing uses a cloud provider unless you configure a model that 
 Opt-in, off unless you enable it:
 
 ```yaml
+# partial: the shared_runtime block only, not a whole config
 shared_runtime:
   enabled: true
 ```
@@ -442,6 +612,57 @@ step needs you: a window reload, a login, or a key, which you enter into VS Code
 yourself and never into a file or the chat. The steps below are the manual
 route.
 
+### The two files: `config.yaml` and `~/.forge/policy.yaml`
+
+Forge reads a pair. `config.yaml` — in the workspace, or in global storage — holds
+the models, their tuning, profiles, aliases and groups: the things an agent may
+edit. `~/.forge/policy.yaml` holds every setting that says what an agent may do:
+the `permissions` block, the exec deny list, the fetch and search providers, the
+host list (`model_hosts`), the MCP servers, the remote and job settings, and the
+`engines` that say how a server process is started and stopped. Nothing under
+`~/.forge/` is writable by an agent, so an agent cannot loosen the rules it is
+judged by.
+
+Until the split has been run, `config.yaml` still holds all of those keys, and that
+file is owner-only as well. Run **`Forge: Move security settings to policy.yaml`**
+to move them out — it backs up `config.yaml` first and refuses to overwrite a
+policy file you wrote by hand — and that is what opens `config.yaml` to agents.
+After it, a policy key left in `config.yaml`, a model that names its own
+`start_command`, or a model `endpoint` on a host that is not loopback and not in
+`model_hosts` makes the load fail, naming the key and the command that fixes it.
+
+**`Forge: Lock policy.yaml`** makes the policy file read-only for this user, so an
+in-place write is refused; **`Forge: Unlock policy.yaml`** puts it back. Both commands
+are yours — Forge never locks on its own — and `/config` tells you which state the
+file is in. While it is locked, any Forge feature that writes a policy key (a
+llama.cpp install, `/chatMode`, a remote toggle) refuses with the unlock command
+named instead of writing into `config.yaml` behind your back.
+
+**Ask-once approvals.** A card's **Allow for this chat** button remembers only the
+action the card showed, for that conversation; `/approvals` lists the chat's rules
+and matching project rules, and `/approvals reset` clears the chat's remembered
+rules. The owner can click **Always in this project** to save a matching rule in
+`approvals.always` in `~/.forge/policy.yaml`. This is an owner action, not a model
+tool. If the file is locked, Forge says **Unlock policy.yaml** and keeps the rule
+for this chat only. Project policy rules are checked before chat rules and Clanker.
+
+Jobs and `--unattended` agent-bus turns cannot show an approval card or use chat
+rules or Clanker. To allow a keyed action there, the owner adds it under
+`approvals.jobs.<job-id>.allow` or `approvals.unattended_bus.allow` in
+`~/.forge/policy.yaml`; a refusal names the exact line, and a rule for a removed
+job produces a load warning naming that job id. Approval cards have no hidden
+timeout: set `permissions.approval_timeout_minutes` in policy.yaml if you want
+one. Thirty minutes is suggested; when unset, a card waits until you answer.
+
+Say plainly what that lock does and does not do, because it is easy to over-trust. It
+stops Forge's own writers being used as a proxy for the agent, and it stops your own
+accidental edits. It does not stop a program running as you: you can always rewrite
+the file's permissions without elevation, and `~/.forge` lets you replace a file you
+may only read, so a script can still overwrite the policy. What actually keeps the
+agent out is that nothing under `~/.forge/` is writable by it. A wall that would
+survive a script needs the file moved into a folder owned by Administrators you
+cannot delete from, which takes an elevated prompt — proposed, not built.
+
 ### 2. Create `.forge/config.yaml`
 
 Forge looks for:
@@ -459,7 +680,7 @@ llama_server:
   binary: /path/to/llama-server
   host: 127.0.0.1
   port: 8080
-  n_gpu_layers: -1
+  n_gpu_layers: 999 # -1 is auto-fit on current llama.cpp, not "all"
   default_num_ctx: 32768
   n_batch: 512
   n_parallel: 4
@@ -468,7 +689,7 @@ llama_server:
   flash_attn_default: true
 
 models:
-  my-model:
+  - name: my-model
     gguf_path: /path/to/model.gguf
     num_ctx: 8192
     flash_attn: true
@@ -485,7 +706,7 @@ Ollama example:
 
 ```yaml
 models:
-  gemma4:26b:
+  - name: "gemma4:26b"
     provider: ollama
     endpoint: http://127.0.0.1:11434
     num_ctx: 262144
@@ -497,7 +718,7 @@ Already-running OpenAI-compatible server example:
 
 ```yaml
 models:
-  my-local-server:
+  - name: my-local-server
     provider: openai-compatible
     endpoint: http://127.0.0.1:8080/v1
     api_key_secret: my-local-server-token # only if the server requires one
@@ -513,6 +734,10 @@ Click the Forge icon in the activity bar and send a prompt.
 If the config is missing or invalid, Forge will guide you through setup instead of silently failing.
 
 The agent's tool activity is grouped by default: each run of steps folds into one summary row (open while the agent works, collapsed when the answer starts), and every step and diff expands on click. `forge.sidebar.activityView` switches to `compact` (one row per step, no grouping) or `full` (every call, thought and diff as its own row).
+
+`forge.sidebar.retainContextWhenHidden` (on by default) keeps the chat's state when you hide the panel, `forge.sessions.autoArchiveMinutes` (30 by default) archives eligible background chats after that many inactive minutes (`0` disables it), `forge.thinkingDisplay` chooses how a model's reasoning is shown (`preview`, `open` or `collapsed`), `forge.editor.autoOpenChangedFiles` (off by default) opens each file Forge changes in the editor, and `forge.logLevel` sets how much the Forge output channel records (`trace`, `debug`, `info`, `warn`, `error`).
+
+Switching chats does not archive the chat you leave. The selected chat stays open, and Keep open on a chat's row pins it until you choose Allow auto-archive. Running turns, pending work, drafts and staged attachments also prevent automatic archiving. Closing a chat with an unsent draft or attachments asks before discarding them. Composer drafts and staged attachments live only in the webview and do not survive a VS Code reload.
 
 ## Coding benchmark smoke test
 
@@ -556,11 +781,11 @@ Example:
 
 ```yaml
 models:
-  grok-code-fast:
+  - name: grok-code-fast
     provider: xai
     api_key_secret: xai
 
-  hosted-coder:
+  - name: hosted-coder
     provider: openai-compatible
     endpoint: https://example-host/v1
     api_key_secret: hosted-coder-token
@@ -573,17 +798,22 @@ Forge can expose a localhost model-control API so an external orchestrator can a
 Example:
 
 ```yaml
+# partial: the control_server block only, not a whole config
 control_server:
   enabled: true
   port: 8799
 ```
 
-Routes:
+Routes (loopback only):
 
-- `GET /healthz`
+- `GET /healthz` → `{"ok":true}`
+- `GET /stats`
 - `GET /models`
 - `POST /ensure` with `{ "model": "..." }`
 - `POST /release` with `{ "model": "..." }`
+- `POST /unload` and `POST /chat` (the same chat API the model starter uses)
+- `/agent/*` — the agent-bus routes, token-guarded and only present when
+  `agent_bus.enabled`
 
 This is especially useful in multi-process local setups where an external process needs Forge to warm or release a model on demand.
 
@@ -614,6 +844,7 @@ shows this setup guidance when an image is attached to a text-only model.
 Forge can consume tools from external [MCP](https://modelcontextprotocol.io) stdio servers. Configure them in `config.yaml`:
 
 ```yaml
+# partial: the mcp_servers block only, not a whole config
 mcp_servers:
   - name: my-mcp-server
     command: C:/path/to/my-mcp-server.exe
@@ -627,6 +858,8 @@ On activation Forge spawns each server, auto-discovers its tools via the MCP han
 
 Tool results are capped at `max_result_chars` (default 24000) before entering the conversation — oversized payloads are truncated with a visible marker so a verbose MCP server cannot overflow a local model's per-slot context window (`num_ctx / n_parallel` in direct llama.cpp mode).
 
+When writing an MCP tool, see [Agent Tool Traps](docs/AGENT_TOOL_TRAPS.md) for failure modes to avoid.
+
 ## Local Delegation
 
 Set `permissions.agents.delegate: true` and the primary agent can use
@@ -634,17 +867,18 @@ Set `permissions.agents.delegate: true` and the primary agent can use
 Ollama delegate receives only the task and the workspace files you allow, has no
 tools, and its answer comes back as advisory analysis. A `provider: cli`
 delegate (Claude Code, Codex) runs unrestricted with the CLI's own tools and can
-edit the workspace itself; Forge checkpoints the workspace before it starts, so
-Keep/Undo can roll the run back. Delegation is capped at
-120 seconds and 24,000 characters, and a target that would load weights into
+edit the workspace itself without Forge Keep/Undo coverage. A delegated run is
+capped at 120 seconds for a local model, 300 seconds for a cloud one and 600
+seconds for a CLI agent (`src/delegation/limits.ts`), and at 24,000 characters
+of answer; a target that would load weights into
 local VRAM asks you first.
 
 A `provider: cli` model (Claude Code, Codex) is also a **full-rights direct
 chat model**: Forge spawns the already-authenticated CLI locally and it runs
 with its OWN tools — Forge does not inject its registry or run its tool loop for
 it. Authentication is the CLI's own login, never a key held by Forge, and a
-full-access CLI chat is still covered by Forge's checkpoint engine so Keep/Undo
-can roll it back.
+full-access CLI chat edits the live workspace without Forge Keep/Undo. Use the
+CLI's own recovery features or Git for those changes.
 
 ## The agent mesh
 
@@ -656,15 +890,38 @@ Enable `control_server.enabled` and `agent_bus.enabled` (setup above).
   to the current chat and waits for its answer. If none is linked, Forge creates
   a session for that chat. Use **Forge: Show Live Claude Sessions** to copy an
   existing Claude session id, then `/link` in the intended Forge chat to bind it.
-- **Them → Forge.** From any terminal, `~/.forge/agent-bus/forge.sh` lets a
-  session `say` something to Forge, `steer` (interrupt) its running turn and
-  run new text next, `stop` a running turn the way the sidebar Stop button
-  does, check its `status`, `view` its last answers, and see `who` is in the
-  mesh and what each member is doing. `steer` and `stop` take
-  `--to <conversationId>` to reach a chat other than the sender's default.
+- **Them → Forge.** From any terminal, `~/.forge/agent-bus/forge.sh` is the
+  client, and its own leading comment block is the complete list of its fifteen
+  verbs - Forge rewrites that header on every start, so read it before you
+  message. It covers `say`, `send` and `send-file`, `steer` (interrupt) and
+  `stop`, `reply`, `cancel`, `status`, `view`, `who`, `wait` (block until your
+  chat is idle with nothing queued), `read-verdict` and `ack-verdict`, and
+  `remote-ask` / `remote-notify`, which send a message or a question back to
+  the Telegram chat that opened an exchange. `steer` and `stop` take
+  `--to <conversationId>` to reach a chat other than the sender's default. One
+  session may be linked to several Forge chats: `say` without `--to` goes to the
+  chat that session last addressed, `--to` reaches any chat already linked to it
+  (and links an open chat holding none), and `--new` starts a second chat while
+  the first keeps its link.
+- **`say` flags.** `--to <chat>` and `--to-running` pick which Forge chat gets
+  the message and `--new` asks for a second chat; the three are mutually
+  exclusive and the bus refuses a message that sets more than one with
+  `choose one Forge chat target; new_chat cannot be combined with a target`
+  (`src/backend/agentMessageOptions.ts:17-19`). `--new` needs a free chat tab:
+  if that window is at its chat cap the client exits non-zero with a 409 naming
+  what holds every tab and your message is **not** queued — close a chat and
+  send again, or send it without `--new`. `--model <name>` runs this message on
+  that model instead of the chat's current one; an unknown name is refused with
+  the list of configured models, so read the 400 instead of guessing again.
+  `--unattended` says nobody will answer this turn's approval cards:
+  non-dangerous confirmations are auto-approved, a dangerous tool is refused at
+  once, `ask_user` is refused outright, and an ask to a Claude or Codex
+  session is refused unless `jobs.allow_cli_agents` is on. `send-file` needs
+  `--to` and takes an optional `--caption-file` (capped at 1,024 code points).
 - **Agent → agent.** `forge.sh send claude codex` and `forge.sh send codex claude`
   (or either sender to `copilot`) reach only the recipient linked to the
-  sender's current Forge chat. Check the intended link first; the returned
+  sender's current Forge chat — the chat that session last addressed. Check the
+  intended link first; the returned
   exchange id confirms acceptance, not an answer. Read the verdict or failure
   before reporting success. `--to <conversationId>` and `--to-running` select
   a Forge chat only when addressing Forge.
@@ -676,8 +933,8 @@ Enable `control_server.enabled` and `agent_bus.enabled` (setup above).
 
 A typical hybrid loop: Codex plans with file paths and checks → sends the plan
 to Forge → your local model implements → it asks Codex to review the diff →
-Codex steers the fixes. Every file change, including the CLI agents', is
-covered by Keep/Undo.
+Codex steers the fixes. Forge's own file tools have Keep/Undo; external CLI
+edits need the CLI's recovery features or Git.
 
 [Delegation and CLI agents in detail](docs/DELEGATION.md) covers warm-process
 lifecycle, cancellation, capacity limits, and the checkpoint settings.
@@ -699,24 +956,35 @@ Type `/` in chat to open the built-in command list. Forge also contributes comma
 | `/config`     | Open the active Forge config                     |
 | `/logs`       | Show the Forge backend output                    |
 | `/clear`      | Clear the current conversation                   |
+| `/approvals`  | List approvals for this chat; `/approvals reset` clears them |
 | `/review`     | Run an immediate review prompt                   |
 | `/compact`    | Summarize and compress the current chat          |
 | `/undo`       | Restore files from the last checkpoint           |
 | `/keep`       | Keep current checkpoint changes                  |
 | `/reload`     | Reload the VS Code window                        |
 | `/init`       | Have the agent read the repo and fill in its `FORGE.md` (alias `/initForge`) |
-| `/clanker`    | Toggle full-auto mode for confirmations          |
+| `/clanker`    | Turn Clanker on or off for THIS chat: no confirmations in it; the deny list still asks |
+| `/link`       | Link an existing agent session to this chat      |
+| `/chatMode`   | Set solo or multi-chat mode for Strata or llama.cpp |
+| `/system`     | Report GPU, VRAM by process, RAM and drive space |
+
+`/checkin` and the agent's own `set_checkin` tool set the same reminder; the
+`elapsed_time_note` config block is what lets the agent use it.
 
 ## Checkpoints, Diffs, and Clanker Mode
 
 - Every write turn can produce a checkpoint that you can Keep or Undo.
-- External Claude/Codex turns become backend-ready only after their rollback checkpoint is safely prepared. Preparation and finalization progress appears in the chat activity stream.
-- When `forge.checkpoint.externalCliEnabled` is explicitly disabled, external Claude/Codex turns start without scanning the workspace and without Forge Keep/Undo coverage; the chat activity stream displays a warning.
-- External CLI checkpoints are isolated by conversation, stored outside the workspace, and removed on Keep, successful Undo, conversation close, or normal extension shutdown.
-- If workspace contents change concurrently while Forge is preparing or finalizing a checkpoint, Forge stops and surfaces the conflict rather than claiming unsafe rollback coverage.
+- Direct Claude/Codex CLI chats run without Forge workspace snapshots or Keep/Undo. Their edits affect the live workspace. Forge does not post routine checkpoint progress into these chats.
+- Other external-agent paths that use Forge disk-backed checkpoints are isolated by conversation and retain their existing rollback policy. `ask_local_agent` CLI delegation has no Forge Keep/Undo coverage.
+- If workspace contents change concurrently while Forge prepares or finalizes a checkpointed agent path, Forge stops and surfaces the conflict rather than claiming unsafe rollback coverage.
 - Undo restores each requested mutation path to its state at the start of the turn. For tools that create missing parent directories, those empty implementation-created parents may remain after undo; requested files and directories are restored or removed exactly.
 - File writes produce inline diff cards in the chat.
 - Confirmation gates protect writes, deletes, terminal actions, and git actions.
+- Clanker is one chat's: toggling it in a tab, or `/clanker on` from a bound phone,
+  arms that chat and no other, and the mode is saved with that chat, so a window
+  reload keeps it and every chat starts off. A call the owner could have allowed by
+  key runs with no card; the deny list's dangerous commands, and anything with no
+  key to allow, still get their card.
 - `/clanker` auto-approves recoverable recycle-bin deletes; permanent deletes still require approval.
 
 ## Responsibility and Risk
@@ -736,11 +1004,19 @@ what each one does and does not cover:
 - **Confirmation gates** on writes, terminal actions, git actions, and deletes.
   `/clanker` auto-approves recoverable recycle-bin deletes; permanent deletes
   still ask.
+- **Who can answer a confirmation.** Only the owner, from the sidebar or from
+  that chat's bound Telegram chat — the first answer wins, and `stop` or `steer`
+  cancels the card. Nobody there? The card keeps waiting: with no
+  `permissions.approval_timeout_minutes` set that is a turn held open
+  indefinitely, which is why an unattended run refuses a dangerous tool instead
+  of asking nobody. A chat with Clanker on does not refuse instead: it keeps the
+  same card for the calls Clanker cannot answer with a key, because there is a
+  human in that chat, in the tab the mode was armed in.
 - **Per-turn checkpoints** with Keep/Undo. Undo restores the paths a turn
   mutated; it is not a backup. Keep/Undo covers Forge's file tools only.
   Changes made by a command — anything run through `shell`, or a build — are
-  not captured; git is the only way back. External
-  CLI turns are only covered when checkpoint preparation succeeds.
+  not captured; git is the only way back. Claude and Codex CLI turns are not
+  covered by Forge Keep/Undo.
 - **Shell commands are classified, not sandboxed.** The classifier decides
   whether a command asks first; it does not limit what an approved command or
   script can do. Commit before letting the agent run commands you have not
@@ -753,8 +1029,12 @@ what each one does and does not cover:
   file edits and deletes, command execution, git writes, web fetch, CLI-agent
   delegation and the browser and desktop tools, each behind the confirmation
   gate above; every new browser origin is approved once per session. Web search
-  (needs a key), the visible terminal and shell scripts stay off until you turn
-  them on. A config that omits a permission keeps it off.
+  (needs a key) and `permissions.exec.terminal` (typing into a real terminal)
+  stay off until you turn them on; watching your own terminal is on by default
+  and `forge.terminal.watchUserCommands` turns it off. A config that omits a
+  permission keeps it off. It also keeps `permissions.chats` off, so a new
+  install's agent cannot open (`new_chat`) or interrupt (`steer`) another chat
+  until you set them true.
 - **An SSRF-guarded, GET-only fetch** and no outbound traffic beyond the
   endpoints you configure.
 

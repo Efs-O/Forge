@@ -14,12 +14,16 @@ import { restartAfterTurn } from './agentTaskRestart';
 import type { Action, JobFile, RunRow } from './jobSchema';
 import type { ModelConfig, GpuGateConfig } from '../config/types';
 import type { GpuInfo } from '../system/systemProbes';
-import { gpuGateReason, type SharedModelSlots } from './gpuIdleGate';
+import { gpuGateReason } from './gpuIdleGate';
+import type { SharedModelSlots } from '../backend/strataStatus';
+import type { ExternalTurnHold } from '../backend/SharedRuntimeRegistry';
 import { buildAgentTaskPrompt } from './agentTaskPrompt';
 import {
+  blockingExternalHolds,
   canStartNow,
   CLEAR_PENDING,
   deferBusyTask,
+  holdWaitReason,
   USER_QUIET_MS,
   userQuietGate,
 } from './agentTaskAdmission';
@@ -47,6 +51,13 @@ export interface AgentTaskDeps {
   pool: () => IBackendPool | undefined;
   /** The model when the action names none (`jobDefaultModel`: jobs.default_model, else active_model). */
   defaultModel: () => string | undefined;
+  /** Recomputed at the job start: the "this window still runs an older Forge
+   *  than the installed build" sentence, or undefined when the window is current
+   *  or unknowable. A job that fails while the window is stale gets it prepended
+   *  to its result: the config rules that refused the job are not the ones the
+   *  installed build uses, and the 2026-10-27 morning report blamed the config
+   *  for exactly that. */
+  staleWindow?: () => string | undefined;
   /** A skipped row when this model is a CLI agent jobs may not use (cliAgentGate). */
   cliAgentSkip?: (model: string, at: number, late: boolean) => RunRow | undefined;
   outboxDir: string;
@@ -57,6 +68,12 @@ export interface AgentTaskDeps {
   configPath?: string;
   /** Injectable abortable timer for the `max_minutes` cap. Defaults to setTimeout. */
   sleep?: (ms: number, signal?: AbortSignal) => Promise<void>;
+  /** Live managed-external turn holds, read from the same machine-wide record
+   *  the pool consults before it frees a managed server. A job's pre-run unload
+   *  may not cut off a chat another window is holding for a turn (BL-025), so
+   *  the runner asks before it admits the job and again before it unloads.
+   *  Required: an unwired answer would quietly restore the old behaviour. */
+  externalTurnHolds: () => readonly ExternalTurnHold[];
   /** Model and optional probe config used only for local-GPU admission. */
   gpuGate?: {
     config: () => GpuGateConfig | undefined;
@@ -93,6 +110,9 @@ export class AgentTaskRunner {
     if (action?.kind !== 'agent_task') return;
 
     const startedAt = this.deps.now();
+    // Asked once, at the start: a window that has not been reloaded since an
+    // upgrade validates this config with last night's rules.
+    const staleWindow = this.deps.staleWindow?.();
     const pool = this.deps.pool();
     const host = this.deps.host();
     if (!pool || !host) {
@@ -109,11 +129,36 @@ export class AgentTaskRunner {
         },
         null,
         undefined,
+        staleWindow,
       );
       return;
     }
 
-    const jobModel = action.model ?? this.deps.defaultModel() ?? '';
+    // The jobs model is resolved here, at the start, because this is the one
+    // place that asks the question. A `jobs.default_model` naming a deleted
+    // model therefore fails the run with the message `jobDefaultModel` gives —
+    // naming the field to edit — instead of dying mid-turn with the backend's
+    // generic "unknown model", which read as a broken job.
+    let jobModel: string;
+    try {
+      jobModel = action.model ?? this.deps.defaultModel() ?? '';
+    } catch (err) {
+      return this.finish(
+        jobFile,
+        action,
+        wasLate,
+        startedAt,
+        {
+          kind: 'failed',
+          sentence: err instanceof Error ? err.message : String(err),
+          restart: false,
+          finalText: '',
+        },
+        null,
+        undefined,
+        staleWindow,
+      );
+    }
     const blocked = this.deps.cliAgentSkip?.(jobModel, startedAt, wasLate);
     if (blocked) {
       // Wait for the next scheduled time: without it the job stays due (or
@@ -146,6 +191,7 @@ export class AgentTaskRunner {
           pool,
           status.streamingConversationIds,
           slots,
+          this.deps.externalTurnHolds(),
         );
         // Only a recent conversation can hold the job back; read which ones are
         // the jobs' own (they must not) only when there is one.
@@ -165,6 +211,30 @@ export class AgentTaskRunner {
     );
     if (admissionReason !== undefined) {
       await deferBusyTask(this.deps.store, jobFile, startedAt, wasLate, admissionReason);
+      return;
+    }
+    // The holds are read again here instead of carried from admission:
+    // `gpuGateReason` awaits a GPU probe and a Strata status fetch between the
+    // two, and another window's chat can take a managed server in that time.
+    // This is the last read before the unload — from here to `unloadModels()`
+    // every step is synchronous, so this window cannot take a hold in between.
+    // A hold that turns up late gets the same answer admission would have given:
+    // wait for the next scheduled time, rather than either cutting that chat's
+    // turn off or loading a second server beside servers nobody freed (BL-025).
+    const heldNow = blockingExternalHolds(this.deps.externalTurnHolds(), jobModel);
+    if (
+      !sharedSlots &&
+      heldNow.length > 0 &&
+      pool.loadedModelsExcept(jobModel).length > 0 &&
+      host.status().streamingConversationIds.length === 0
+    ) {
+      await deferBusyTask(
+        this.deps.store,
+        jobFile,
+        startedAt,
+        wasLate,
+        holdWaitReason(heldNow[0]!),
+      );
       return;
     }
     // A previously-pending task that can now start: clear the pending flag.
@@ -194,6 +264,9 @@ export class AgentTaskRunner {
     try {
       // Step 3: unload every other idle model, then open this job's chat. The
       // job runs on one server; a model it had to load is released afterwards.
+      // The gate above read the machine-wide holds immediately before this, so
+      // no server a chat in any window is holding for a turn is stopped here
+      // (BL-025).
       if (
         !sharedSlots &&
         pool.loadedModelsExcept(jobModel).length > 0 &&
@@ -264,7 +337,16 @@ export class AgentTaskRunner {
       marker?.dispose();
       hold?.dispose();
       await this.releaseJobModel(jobModel, host, pool);
-      await this.finish(jobFile, action, wasLate, startedAt, outcome, conversationId, backupPath);
+      await this.finish(
+        jobFile,
+        action,
+        wasLate,
+        startedAt,
+        outcome,
+        conversationId,
+        backupPath,
+        staleWindow,
+      );
     }
   }
 
@@ -298,19 +380,40 @@ export class AgentTaskRunner {
     outcome: AgentTaskOutcome,
     conversationId: string | null,
     backupPath: string | undefined,
+    staleWindow?: string,
   ): Promise<void> {
     const { job } = jobFile;
     if (!(await this.deps.store.load(job.id))) return;
     const now = this.deps.now();
     const durationMs = now - startedAt;
     const failed = outcome.kind === 'failed' || outcome.kind === 'timeout';
+    /**
+     * A `skipped` outcome is neither a failure nor an action: the turn ran and
+     * deliberately did nothing because something outside it was busy (Maya up
+     * at the scheduled minute, a locked file). It is not counted against the
+     * job and gets no backoff, but the observation it was handed is NOT saved
+     * either: the change is still pending, so the next check reports it again
+     * and the run is retried once whatever blocked it is gone.
+     */
+    const skipped = outcome.kind === 'skipped';
+    // A stale window is the cause the user can act on, so it goes first: the
+    // config error below is what last night's build said about a config the
+    // installed build may well accept.
+    if (failed && staleWindow) {
+      outcome = { ...outcome, sentence: `${staleWindow} ${outcome.sentence}` };
+    }
     const report = action.report;
 
-    // Deliver: every failure immediately and every change (`ok`) under either
-    // setting; `no_change` only under `always`, else the run log alone.
+    // Deliver: every failure immediately, every change (`ok`), and every skip
+    // under either setting — only the owner can clear what blocked a skipped
+    // run, so silence would mean the pending change is never tried again.
+    // `no_change` only under `always`, else the run log alone.
     let delivered = 0;
     const shouldReport =
-      failed || outcome.kind === 'ok' || (outcome.kind === 'no_change' && report === 'always');
+      failed ||
+      outcome.kind === 'ok' ||
+      skipped ||
+      (outcome.kind === 'no_change' && report === 'always');
     if (shouldReport) {
       const message = reportMessage(outcome, startedAt, durationMs, conversationId);
       delivered = await this.delivery.tryDeliver(job, message);
@@ -329,8 +432,11 @@ export class AgentTaskRunner {
       ...CLEAR_PENDING,
       last_run_at: now,
       // Success records the observation the agent acted on, so the next check
-      // compares against it; a failure keeps the old one and is retried.
-      ...(failed ? {} : { last_ok_at: now, last_observation: jobFile.state.last_observation }),
+      // compares against it; a failure keeps the old one and is retried, and so
+      // does a skip — the turn never got to act on it.
+      ...(failed || skipped
+        ? {}
+        : { last_ok_at: now, last_observation: jobFile.state.last_observation }),
       next_due_at: nextDueAt,
       consecutive_failures: consecutive,
     });
@@ -342,7 +448,7 @@ export class AgentTaskRunner {
     const row: RunRow = {
       at: startedAt,
       late: wasLate,
-      outcome: failed ? 'failed' : 'ok',
+      outcome: failed ? 'failed' : skipped ? 'skipped' : 'ok',
       changed: outcome.kind === 'ok',
       summary: outcome.sentence,
       ...(failed ? { error: outcome.sentence } : {}),

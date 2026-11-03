@@ -1,7 +1,7 @@
 import { spawn } from 'child_process';
 import { createHash } from 'crypto';
 import { createReadStream } from 'fs';
-import { updateConfigFile, setNestedField } from '../../config/ConfigWriter';
+import { updateForgeKeyFile, setNestedField } from '../../config/ConfigWriter';
 
 /**
  * The real (machine-touching) I/O for the `llamacpp_update` action (B5). Kept
@@ -125,6 +125,8 @@ export function extractZip(zipPath: string, destDir: string): Promise<void> {
  */
 export function makeSetBinary(configPath: string): (binary: string | undefined) => void {
   return (binary: string | undefined): void => {
-    updateConfigFile(configPath, (doc) => setNestedField(doc, ['llama_server', 'binary'], binary));
+    updateForgeKeyFile(configPath, 'llama_server', (doc) =>
+      setNestedField(doc, ['llama_server', 'binary'], binary),
+    );
   };
 }

@@ -14,7 +14,7 @@ function makeActions(overrides: Partial<WebviewActions> = {}): WebviewActions {
     postTokenBudget: vi.fn(),
     postWorkspaceInfo: vi.fn(),
     isBackendReady: vi.fn(() => false),
-    getClankerMode: vi.fn(() => false),
+    getClankerStates: vi.fn(() => []),
     getRemoteStatus: vi.fn(() => ({ transports: [], paired: false })),
     pendingQuestions: vi.fn(() => []),
     pendingApproval: vi.fn(() => undefined),
@@ -67,6 +67,28 @@ describe('question messages from the sidebar', () => {
       isDangerous: true,
       conversationId: 'chat-1',
     });
+  });
+
+  it('posts every open chat its own state on webviewReady, off included', () => {
+    // A reloaded webview holds no flags at all, so posting only the armed chats
+    // would leave a chat that had been armed showing armed with nothing to clear
+    // it, and it would be the next chat's turn to inherit somebody else's mode.
+    const post = vi.fn<(message: HostToWebview) => void>();
+    const actions = makeActions({
+      post,
+      getClankerStates: () => [
+        { conversationId: 'chat-1', enabled: true },
+        { conversationId: 'chat-2', enabled: false },
+      ],
+    });
+
+    routeWebviewMessage(actions, { type: 'webviewReady' });
+
+    expect(post.mock.calls.map(([message]) => message).filter((m) => m.type === 'clankerChanged'))
+      .toEqual([
+        { type: 'clankerChanged', conversationId: 'chat-1', enabled: true },
+        { type: 'clankerChanged', conversationId: 'chat-2', enabled: false },
+      ]);
   });
 
   it('routes structured answers and explicit skips to separate host actions', () => {

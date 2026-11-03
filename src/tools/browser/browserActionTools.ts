@@ -39,6 +39,10 @@ export function makeBrowserActionTools(ctx: BrowserToolContext): RegisteredTool[
         },
       },
       permission: 'browser',
+      /** A browser result is a page: its text, image and element names come from a
+       *  site this chat did not choose, so the chat's next egress costs an approval
+       *  (`exfilTaint.ts` marks the chat from this declaration). */
+      untrustedResult: true,
       autoApprove: true,
       requiresVision: (name) => visionRefusal(name),
       handler: async (args, toolCtx): Promise<MultimodalToolResult> => {
@@ -89,6 +93,10 @@ export function makeBrowserActionTools(ctx: BrowserToolContext): RegisteredTool[
         },
       },
       permission: 'browser',
+      /** A browser result is a page: its text, image and element names come from a
+       *  site this chat did not choose, so the chat's next egress costs an approval
+       *  (`exfilTaint.ts` marks the chat from this declaration). */
+      untrustedResult: true,
       autoApprove: true,
       handler: async (args) => {
         // The clamp lives in one place (`clampInspectMax`) so an explicit `max`
@@ -131,6 +139,10 @@ export function makeBrowserActionTools(ctx: BrowserToolContext): RegisteredTool[
         },
       },
       permission: 'browser',
+      /** A browser result is a page: its text, image and element names come from a
+       *  site this chat did not choose, so the chat's next egress costs an approval
+       *  (`exfilTaint.ts` marks the chat from this declaration). */
+      untrustedResult: true,
       autoApprove: true,
       approval: ctx.inputApproval('browser_click'),
       handler: async (args) => {
@@ -167,6 +179,10 @@ export function makeBrowserActionTools(ctx: BrowserToolContext): RegisteredTool[
         },
       },
       permission: 'browser',
+      /** A browser result is a page: its text, image and element names come from a
+       *  site this chat did not choose, so the chat's next egress costs an approval
+       *  (`exfilTaint.ts` marks the chat from this declaration). */
+      untrustedResult: true,
       autoApprove: true,
       approval: ctx.inputApproval('browser_type'),
       handler: async (args) => {
@@ -203,6 +219,10 @@ export function makeBrowserActionTools(ctx: BrowserToolContext): RegisteredTool[
         },
       },
       permission: 'browser',
+      /** A browser result is a page: its text, image and element names come from a
+       *  site this chat did not choose, so the chat's next egress costs an approval
+       *  (`exfilTaint.ts` marks the chat from this declaration). */
+      untrustedResult: true,
       autoApprove: true,
       approval: ctx.inputApproval('browser_press'),
       handler: async (args) => {
@@ -236,6 +256,10 @@ export function makeBrowserActionTools(ctx: BrowserToolContext): RegisteredTool[
         },
       },
       permission: 'browser',
+      /** A browser result is a page: its text, image and element names come from a
+       *  site this chat did not choose, so the chat's next egress costs an approval
+       *  (`exfilTaint.ts` marks the chat from this declaration). */
+      untrustedResult: true,
       autoApprove: true,
       handler: async (args) => {
         const result = await ctx.mgr.scroll(
@@ -269,6 +293,10 @@ export function makeBrowserActionTools(ctx: BrowserToolContext): RegisteredTool[
         },
       },
       permission: 'browser',
+      /** A browser result is a page: its text, image and element names come from a
+       *  site this chat did not choose, so the chat's next egress costs an approval
+       *  (`exfilTaint.ts` marks the chat from this declaration). */
+      untrustedResult: true,
       autoApprove: true,
       handler: async (args) => {
         const result = await ctx.mgr.hover(ctx.str(args, 'tab_id'), {
@@ -302,6 +330,10 @@ export function makeBrowserActionTools(ctx: BrowserToolContext): RegisteredTool[
         },
       },
       permission: 'browser',
+      /** A browser result is a page: its text, image and element names come from a
+       *  site this chat did not choose, so the chat's next egress costs an approval
+       *  (`exfilTaint.ts` marks the chat from this declaration). */
+      untrustedResult: true,
       autoApprove: true,
       handler: async (args) => {
         const req = (k: string): number => {

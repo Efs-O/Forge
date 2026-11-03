@@ -40,6 +40,9 @@ if (process.argv.includes('app-server')) {
     }
     if (message.method === 'initialized') return;
     if (message.method === 'initialize') {
+      // A daemon that starts, accepts the connection and then never answers
+      // `initialize` — the blocked cold start a Stop has to be able to end.
+      if (process.argv.includes('NEVER_ANSWER_INITIALIZE')) return;
       line({ id: message.id, result: { userAgent: 'fake-codex' } });
       return;
     }

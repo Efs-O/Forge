@@ -1,12 +1,10 @@
 import type { ModelConfig } from '../config/types';
 import type { ChatMessage, ContentPart } from '../llm/types';
-import type { CheckpointSession } from '../checkpoint/CheckpointStack';
 import { CliAgentDriver } from './CliAgentDriver';
 import type { CliAgentSessionOptions } from './CliAgentSession';
 import { CliSessionRegistry, type CliSessionKey } from './CliSessionRegistry';
 import { resolveCliExecutable } from './resolveCliExecutable';
 import { inferCliAgentName, type CliAgentName, type CliAgentRunResult } from './types';
-import { snapshotWorkspaceBefore } from './WorkspaceCheckpoint';
 
 export interface PreparedCliChatAgent {
   /** The direct CLI chat runner currently supports Claude and Codex. */
@@ -19,7 +17,6 @@ export interface RunCliChatOptions {
   model: ModelConfig;
   messages: readonly ChatMessage[];
   workspaceRoot: string;
-  checkpoint: CheckpointSession;
   signal: AbortSignal;
   onText(text: string): void;
   onStatus(text: string): void;
@@ -29,10 +26,6 @@ export interface RunCliChatOptions {
   /** Host-recorded Forge plan supplied on every CLI turn. CLI agents own their
    * tools, so this is context only; it is not a native Forge tool definition. */
   planPrompt?: string;
-  /** When false, suppress the disabled-rollback warning — used for resumed
-   *  warm turns that already surfaced it on the first prompt. Defaults to
-   *  announcing so one-shot callers keep the warning. */
-  announceRollback?: boolean;
 }
 
 export interface CliChatResult extends CliAgentRunResult {
@@ -105,26 +98,51 @@ function appendFinalText(streamed: string, finalText: string): string {
 }
 
 export async function runCliChat(options: RunCliChatOptions): Promise<CliChatResult> {
-  reportDisabledRollback(options);
-  const capture = await snapshotWorkspaceBefore(
-    options.checkpoint,
-    options.workspaceRoot,
-    options.signal,
-    checkpointProgressReporter(options.onStatus),
-  );
   let streamed = '';
-  let result: CliAgentRunResult;
-  try {
-    options.onPrepared?.();
-    result = await (options.driver ?? new CliAgentDriver()).run({
-      cliName: options.prepared.cliName,
-      executable: options.prepared.executable,
-      task: options.sessionId
-        ? buildCliResumeTask(options.messages, options.planPrompt)
-        : buildCliChatTask(options.messages),
-      ...(options.sessionId ? { sessionId: options.sessionId } : {}),
-      ...(options.model.cli_model ? { model: options.model.cli_model } : {}),
-      cwd: options.workspaceRoot,
+  options.onPrepared?.();
+  const result = await (options.driver ?? new CliAgentDriver()).run({
+    cliName: options.prepared.cliName,
+    executable: options.prepared.executable,
+    task: options.sessionId
+      ? buildCliResumeTask(options.messages, options.planPrompt)
+      : buildCliChatTask(options.messages),
+    ...(options.sessionId ? { sessionId: options.sessionId } : {}),
+    ...(options.model.cli_model ? { model: options.model.cli_model } : {}),
+    cwd: options.workspaceRoot,
+    signal: options.signal,
+    onEvent: (event) => {
+      if (event.kind === 'status') {
+        options.onStatus(event.text);
+        return;
+      }
+      streamed += event.text;
+      options.onText(event.text);
+    },
+  });
+
+  const assistantText = appendFinalText(streamed, result.finalText);
+  if (assistantText.length > streamed.length) options.onText(assistantText.slice(streamed.length));
+  return { ...result, assistantText };
+}
+
+export async function runWarmCliChat(options: RunWarmCliChatOptions): Promise<CliChatResult> {
+  let streamed = '';
+  const confirmedId = options.registry.getConfirmedSessionId(options.key) ?? options.sessionId;
+  const sessionOptions: CliAgentSessionOptions = {
+    cliName: options.prepared.cliName,
+    executable: options.prepared.executable,
+    cwd: options.workspaceRoot,
+    ...(options.model.cli_model ? { model: options.model.cli_model } : {}),
+    ...(confirmedId ? { confirmedSessionId: confirmedId } : {}),
+  };
+  options.onPrepared?.();
+  const result = await options.registry.run(
+    options.key,
+    sessionOptions,
+    confirmedId
+      ? buildCliResumeTask(options.messages, options.planPrompt)
+      : buildCliChatTask(options.messages),
+    {
       signal: options.signal,
       onEvent: (event) => {
         if (event.kind === 'status') {
@@ -134,85 +152,9 @@ export async function runCliChat(options: RunCliChatOptions): Promise<CliChatRes
         streamed += event.text;
         options.onText(event.text);
       },
-    });
-  } finally {
-    await capture.finish();
-  }
-
-  const assistantText = appendFinalText(streamed, result.finalText);
-  if (assistantText.length > streamed.length) options.onText(assistantText.slice(streamed.length));
-  return { ...result, assistantText };
-}
-
-export async function runWarmCliChat(options: RunWarmCliChatOptions): Promise<CliChatResult> {
-  reportDisabledRollback(options);
-  const capture = await snapshotWorkspaceBefore(
-    options.checkpoint,
-    options.workspaceRoot,
-    options.signal,
-    checkpointProgressReporter(options.onStatus),
+    },
   );
-  let streamed = '';
-  let result: CliAgentRunResult;
-  const confirmedId = options.registry.getConfirmedSessionId(options.key) ?? options.sessionId;
-  const sessionOptions: CliAgentSessionOptions = {
-    cliName: options.prepared.cliName,
-    executable: options.prepared.executable,
-    cwd: options.workspaceRoot,
-    ...(options.model.cli_model ? { model: options.model.cli_model } : {}),
-    ...(confirmedId ? { confirmedSessionId: confirmedId } : {}),
-  };
-  try {
-    options.onPrepared?.();
-    result = await options.registry.run(
-      options.key,
-      sessionOptions,
-      confirmedId
-        ? buildCliResumeTask(options.messages, options.planPrompt)
-        : buildCliChatTask(options.messages),
-      {
-        signal: options.signal,
-        onEvent: (event) => {
-          if (event.kind === 'status') {
-            options.onStatus(event.text);
-            return;
-          }
-          streamed += event.text;
-          options.onText(event.text);
-        },
-      },
-    );
-  } finally {
-    await capture.finish();
-  }
   const assistantText = appendFinalText(streamed, result.finalText);
   if (assistantText.length > streamed.length) options.onText(assistantText.slice(streamed.length));
   return { ...result, assistantText };
-}
-
-function checkpointProgressReporter(
-  onStatus: (text: string) => void,
-): (progress: import('../checkpoint/DiskCheckpointStore').CheckpointProgress) => void {
-  let lastReport = 0;
-  return (progress) => {
-    const now = Date.now();
-    const complete = progress.totalFiles > 0 && progress.completedFiles >= progress.totalFiles;
-    if (!complete && now - lastReport < 500) return;
-    lastReport = now;
-    const detail = `${progress.completedFiles}/${progress.totalFiles || progress.completedFiles} files`;
-    onStatus(
-      progress.phase === 'finalize'
-        ? `Finalizing rollback checkpoint (${detail})`
-        : `Preparing rollback checkpoint (${detail})`,
-    );
-  };
-}
-
-function reportDisabledRollback(options: RunCliChatOptions): void {
-  if (options.announceRollback === false) return;
-  if (!options.checkpoint.externalCliRollbackEnabled) {
-    options.onStatus(
-      'Warning: external CLI rollback protection is disabled. Keep/Undo will not cover CLI file changes.',
-    );
-  }
 }

@@ -3,6 +3,7 @@ import type { BusPaths } from '../agentBus/agentBus';
 import { acknowledgeVerdict, readVerdictArtifact } from '../agentMesh/verdictArtifact';
 import { sendJson } from './controlHttp';
 import { agentSenderSchema } from '../agentLinks/chatAgentLinks';
+import { BUS_SENDER_NAME } from './agentSenderParsing';
 
 export interface VerdictRouteDeps {
   paths: () => BusPaths;
@@ -13,8 +14,6 @@ export interface VerdictRouteDeps {
     | { ok: false; error: string }
     | Promise<{ ok: true } | { ok: false; error: string }>;
 }
-
-const FROM_PATTERN = /^[A-Za-z0-9][A-Za-z0-9 ._-]{0,39}$/u;
 
 function sessionIdentity(
   kind: string | undefined,
@@ -35,7 +34,7 @@ async function allowed(
   deps: VerdictRouteDeps,
   senderSessionId?: string,
 ): Promise<string | undefined> {
-  if (!FROM_PATTERN.test(from)) return 'invalid sender';
+  if (!BUS_SENDER_NAME.test(from)) return 'invalid sender';
   if (senderSessionId !== undefined) return undefined;
   const sender = await deps.validateFrom?.(from);
   return sender && !sender.ok ? sender.error : undefined;

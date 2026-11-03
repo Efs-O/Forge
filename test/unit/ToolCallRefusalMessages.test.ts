@@ -1,9 +1,13 @@
 import * as fs from 'fs';
 import * as path from 'path';
+import { z } from 'zod';
 import { describe, expect, it, vi } from 'vitest';
 import { ToolRegistry, type RegisteredTool } from '../../src/tools/ToolRegistry';
 import { makeApplyLineEditsTool } from '../../src/tools/structuredEditTool';
 import { coerceToolArgs, invalidArrayJsonDiagnostic } from '../../src/tools/argCoercion';
+import { toolErrorText } from '../../src/tools/toolErrorText';
+import { makeAskUserTool } from '../../src/tools/askUserTool';
+import { UserQuestionService } from '../../src/sidebar/UserQuestionService';
 
 vi.mock('vscode', () => ({
   workspace: { workspaceFolders: [{ uri: { fsPath: process.cwd() } }] },
@@ -38,6 +42,65 @@ function makeRequiredTool(name: string, required: string[]): RegisteredTool {
     handler: async () => 'should not run',
   };
 }
+
+describe('ToolRegistry.invalidArgs missing-argument refusal', () => {
+  const registry = new ToolRegistry();
+
+  /** A tool whose static schema offers four actions and whose `describe()` narrows
+   * them to the two this window actually has — the message_chat case. */
+  const enumTool = (offered: string[]): RegisteredTool => ({
+    definition: {
+      type: 'function',
+      function: {
+        name: 'message_chat',
+        description: 'test tool',
+        parameters: {
+          type: 'object',
+          properties: { action: { type: 'string', enum: ['list', 'send', 'new', 'steer'] } },
+          required: ['action'],
+        },
+      },
+    },
+    describe: () => ({
+      type: 'function',
+      function: {
+        name: 'message_chat',
+        description: 'test tool',
+        parameters: {
+          type: 'object',
+          properties: { action: { type: 'string', enum: offered } },
+          required: [],
+        },
+      },
+    }),
+    permission: 'read',
+    handler: async () => 'should not run',
+  });
+
+  it('names the values the model was offered, not the ones config switched off', () => {
+    // The static schema lists four actions; this window has two. Offering `new`
+    // to a window where it is off would be a second refusal for the price of
+    // the first, so the values come from `describe()` — the definition the turn
+    // was actually shown.
+    expect(registry.invalidArgs(enumTool(['list', 'send']), { message: 'hi' })).toBe(
+      'Error: message_chat is missing required argument "action" (one of: list, send). ' +
+        'Resend the call with it set.',
+    );
+    expect(registry.invalidArgs(enumTool(['list', 'send', 'new', 'steer']), {})).toContain(
+      '(one of: list, send, new, steer)',
+    );
+  });
+
+  it('says the same thing as before for a field with no enum, and for two fields', () => {
+    expect(registry.invalidArgs(makeRequiredTool('fetch_page', ['url']), {})).toBe(
+      'Error: fetch_page is missing required argument "url". Resend the call with it set.',
+    );
+    expect(registry.invalidArgs(makeRequiredTool('fetch_page', ['url', 'max_chars']), {})).toBe(
+      'Error: fetch_page is missing required arguments "url", "max_chars". ' +
+        'Resend the call with them set.',
+    );
+  });
+});
 
 describe('ToolRegistry.invalidArgs boolean refusal (Fix B)', () => {
   const registry = new ToolRegistry();
@@ -182,10 +245,7 @@ describe('tool argument field locations (PTF F5)', () => {
   const registry = new ToolRegistry();
 
   it('names the missing path first and shows accepted shapes for file writers', () => {
-    for (const tool of [
-      makeRequiredTool('append_file', ['path', 'content']),
-      makeRequiredTool('write_file', ['path', 'content']),
-    ]) {
+    for (const tool of [makeRequiredTool('write_file', ['path', 'content'])]) {
       const message = registry.invalidArgs(tool, { content: 'x' });
       expect(message).toMatch(/^Error: missing required `path`\./u);
       expect(message).toContain('Accepted shape: { "path": "...", "content": "..." }');
@@ -337,9 +397,7 @@ describe('ToolRegistry.invalidArgs malformed array JSON refusal', () => {
     const value = String.raw`[{"prompt":"Use N:\vs code apps\Forge"}]`;
     const args = coerceToolArgs(askTool.definition, { questions: value });
 
-    expect(args['questions']).toEqual([
-      { prompt: String.raw`Use N:\vs code apps\Forge` },
-    ]);
+    expect(args['questions']).toEqual([{ prompt: String.raw`Use N:\vs code apps\Forge` }]);
   });
 
   it('does not repair a backslash outside a JSON string and shows the original excerpt', () => {
@@ -524,5 +582,108 @@ describe('apply_line_edits missing nested field (Fix C)', () => {
         'const value = 1;\n',
       );
     });
+  });
+});
+
+/**
+ * Lane 5 phase 5.5 (docs/plans/V1_FINISH_PLAN.md): two tools used to answer a
+ * limit breach with the raw Zod issue array — hundreds of characters of JSON for
+ * one wrong field — and the model read that as data and re-sent the same shape.
+ * These are the three shapes the audit found (`too_big`, `invalid_type`,
+ * `unrecognized_keys`) plus the ones the formatter must not touch: a custom
+ * rule's own advice, and an ordinary thrown error.
+ */
+describe('a schema refusal comes back as plain lines', () => {
+  const askTool = makeAskUserTool(new UserQuestionService());
+  const context = { beforeMutate: vi.fn() };
+
+  async function thrownFromAskUser(args: Record<string, unknown>): Promise<unknown> {
+    try {
+      await askTool.handler(args, context);
+      return undefined;
+    } catch (error) {
+      return error;
+    }
+  }
+
+  it('a too-long description names its own length, the limit and the fix', async () => {
+    const args = {
+      prompt: 'Deploy?',
+      questions: [
+        {
+          prompt: 'Which?',
+          options: [{ label: 'a', description: 'z'.repeat(512) }, 'b'],
+        },
+      ],
+    };
+    const error = await thrownFromAskUser(args);
+    expect(error).toBeInstanceOf(z.ZodError);
+    expect(toolErrorText('ask_user', error, args)).toBe(
+      'Error: ask_user questions[0].options[0].description is 512 characters; the limit is 500. ' +
+        'Shorten it and resend.',
+    );
+  });
+
+  it('a wrong type says what arrived and what was wanted', async () => {
+    const args = { prompt: 'x', questions: 42 };
+    const text = toolErrorText('ask_user', await thrownFromAskUser(args), args);
+    expect(text.split('\n')[0]).toBe(
+      'Error: ask_user questions is a number, not an array. ' +
+        'Resend it in the shape the schema declares.',
+    );
+  });
+
+  it('an undeclared field is named and told to go', async () => {
+    const args = { prompt: 'x', hidden: true };
+    const text = toolErrorText('ask_user', await thrownFromAskUser(args), args);
+    expect(text).toBe(
+      'Error: ask_user has a field it did not declare: "hidden". Remove it and resend.',
+    );
+  });
+
+  it('one line per problem, and never the JSON block', async () => {
+    const args = { questions: 'not an array', bogus: 1 };
+    const text = toolErrorText('ask_user', await thrownFromAskUser(args), args);
+    const lines = text.split('\n');
+    expect(lines.length).toBeGreaterThan(2);
+    expect(
+      lines.every(
+        (line) =>
+          line.startsWith('Error: ask_user ') || line === 'Resend the call with these fixed.',
+      ),
+    ).toBe(true);
+    // The thing this phase exists to stop: a JSON array of issues as the result.
+    expect(text).not.toMatch(/"code"\s*:|"path"\s*:|"message"\s*:|\{/u);
+  });
+
+  it('a custom rule keeps its own advice, because it already names the fix', async () => {
+    const args = {
+      prompt: 'p',
+      options: [
+        { label: 'a', recommended: true },
+        { label: 'b', recommended: true },
+      ],
+    };
+    const text = toolErrorText('ask_user', await thrownFromAskUser(args), args);
+    expect(text).toContain('can recommend only one option');
+    expect(text).toContain('Error: ask_user options');
+  });
+
+  it('an ordinary thrown error keeps its own message', () => {
+    expect(toolErrorText('shell', new Error('bash exited with code 1'))).toBe(
+      'Error: bash exited with code 1',
+    );
+    expect(toolErrorText('shell', 'a string thrown')).toBe('Error: a string thrown');
+  });
+
+  it('prints eight problems and counts the rest', () => {
+    const args = { values: Array.from({ length: 10 }, () => 42) };
+    const parsed = z.object({ values: z.array(z.string()) }).safeParse(args);
+    expect(parsed.success).toBe(false);
+    if (parsed.success) throw new Error('expected refusal');
+    const text = toolErrorText('probe', parsed.error, args);
+    const lines = text.split('\n');
+    expect(lines.filter((line) => line.startsWith('Error: probe values['))).toHaveLength(8);
+    expect(text).toContain('has 2 more argument problem(s).');
   });
 });

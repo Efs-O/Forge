@@ -1,6 +1,7 @@
 import type { ConversationRuntime } from './sessionTypes';
 import type { HostActivityEvent } from './HostActivity';
 import type { SidebarProviderEvents } from './AgentLoop';
+import type { TurnSpeedLedger } from '../sessions/turnSpeedTotals';
 import type { HostToWebview } from './messageBridge';
 import type { WebviewActions } from './webviewMessageRouter';
 import type { AgentProgressEvent } from './AgentProgress';
@@ -34,6 +35,15 @@ export interface TurnMirrorWiring {
    * a minute later is what made the 2026-09-15 Telegram thread contradict itself.
    */
   willAutoResume?: (failureMessage: string) => boolean;
+  /**
+   * This turn's server timings, summed by the turn runner as its requests settle.
+   *
+   * Decorated here because this is the one place that knows when a turn began
+   * and when it ended: the sums have to be opened and closed at those two
+   * moments, and a failed turn has to drop them rather than leave them for the
+   * next answer to wear.
+   */
+  turnSpeeds: TurnSpeedLedger;
 }
 
 /** Emit the sidebar prompt before SendPipeline can start this turn's progress. */
@@ -86,6 +96,18 @@ export function createWebviewSendAction(
  * whole turn path to answer the same question worse.
  */
 export function wireTurnMirror(events: SidebarProviderEvents, deps: TurnMirrorWiring): void {
+  // The turn's speed sums open and close with the turn, on the same events that
+  // already mark its beginning and its end.
+  const originalStarted = events.onGenerationStarted;
+  events.onGenerationStarted = (modelName, conversationId) => {
+    originalStarted?.(modelName, conversationId);
+    if (conversationId === undefined) return;
+    // Anything left from a turn that never ended — a crash, a window closed
+    // mid-request — belongs to no answer, so it is dropped here instead of
+    // riding into this turn's line.
+    deps.turnSpeeds.beginTurn(conversationId);
+  };
+
   const original = events.onGenerationFinished;
   events.onGenerationFinished = (modelName, conversationId, finalText) => {
     original?.(modelName, conversationId, finalText);
@@ -96,7 +118,22 @@ export function wireTurnMirror(events: SidebarProviderEvents, deps: TurnMirrorWi
     // session sync or a continuation could make the callback see a different
     // tail even though the turn had just completed successfully.
     const text = finalText?.trim() || finalAnswer(deps.lookup(conversationId));
-    if (text) deps.emit({ text, conversationId, kind: 'turn' });
+    if (!text) {
+      // A turn with no answer has no reply to carry a speed line, so the sums
+      // are dropped rather than kept for something that will never be sent.
+      deps.turnSpeeds.abandonTurn(conversationId);
+      return;
+    }
+    const line = deps.turnSpeeds.finishTurn(conversationId);
+    // The line travels beside the text, never inside it: the text is what
+    // becomes the conversation's message, the transcript and the model's next
+    // request, and a model that reads its own speed lines starts writing them.
+    deps.emit({
+      text,
+      conversationId,
+      kind: 'turn',
+      ...(line ? { speedLine: line } : {}),
+    });
   };
 
   // A failed turn fires onGenerationFinished too, but with no final text — so
@@ -109,6 +146,9 @@ export function wireTurnMirror(events: SidebarProviderEvents, deps: TurnMirrorWi
     originalFailed?.(conversationId, message);
     if (conversationId === undefined) return;
     deps.endProgress(conversationId, false);
+    // No answer, no line: a turn that died leaves no sums behind for the next
+    // answer of the same chat to wear as its own speed.
+    deps.turnSpeeds.abandonTurn(conversationId);
     const next = deps.willAutoResume?.(message)
       ? 'Forge will compact the context and resume the task automatically.'
       : 'Nothing further is running. Send a new instruction to pick it back up.';

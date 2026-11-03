@@ -60,11 +60,29 @@ describe('updateConfigFile (comment-preserving Document API)', () => {
   it('preserves an untouched model entry comment while editing a sibling field', () => {
     updateConfigFile(configPath, (doc) => {
       setModelField(doc, 'gemma-a', 'group', 'gemma-board');
+      // The group has to be defined in the same write: `updateConfigFile` now
+      // runs the cross-block checks `loadConfig` runs, so a write that points a
+      // model at an undefined group is refused rather than saved and left for
+      // the next window to fail on.
+      setTopLevel(doc, 'groups', { 'gemma-board': { spawn: { n_batch: 256 } } });
     });
     const raw = fs.readFileSync(configPath, 'utf8');
     expect(raw).toContain('# gemma-a: primary coding driver');
     expect(raw).toContain('# gemma-b: headless worker twin');
     expect(raw).toContain('group: gemma-board');
+    expect(loadConfig(directory).models[0]?.group).toBe('gemma-board');
+  });
+
+  /** The writer gap that used to exist: `updateConfigFile` validated only
+   *  against the schema, so it happily wrote a file its own `loadConfig` then
+   *  refused. The shared cross-block checks close it. */
+  it('refuses a write that points a model at an undefined group', () => {
+    expect(() =>
+      updateConfigFile(configPath, (doc) => {
+        setModelField(doc, 'gemma-a', 'group', 'no-such-board');
+      }),
+    ).toThrow(/references unknown group "no-such-board"/);
+    expect(fs.readFileSync(configPath, 'utf8')).toBe(FIXTURE);
   });
 
   it('adds and removes model entries via the typed helpers', () => {

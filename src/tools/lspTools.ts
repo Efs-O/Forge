@@ -28,7 +28,8 @@ async function openForAnalysis(pathArg: string): Promise<vscode.Uri> {
   return uri;
 }
 
-function severityLabel(s: vscode.DiagnosticSeverity): string {
+/** Severity as a word, the way a model reads it in a result. */
+export function severityLabel(s: vscode.DiagnosticSeverity): string {
   switch (s) {
     case vscode.DiagnosticSeverity.Error:
       return 'error';
@@ -41,6 +42,38 @@ function severityLabel(s: vscode.DiagnosticSeverity): string {
     default:
       return 'unknown';
   }
+}
+
+/**
+ * The single owner of the `path:line: severity code: message` spelling
+ * (tools-expansion lane F1, item 1.3): `__code_intel_get_diagnostics` and the
+ * "new problems after this edit" note that `edit_file`, `write_file` and
+ * `apply_line_edits` append (`editDiagnostics.ts`) both call it, so the same
+ * problem cannot reach a model written two ways. The code sits between the
+ * severity and the message because `TS2345` is what a model looks up, and a
+ * problem with no code prints exactly what it used to. Whitespace inside a
+ * message is flattened so one problem stays one line — otherwise the cap on how
+ * many problems a result may name stops counting problems.
+ */
+export function formatDiagnosticLine(
+  relativePath: string,
+  problem: {
+    /** One-based line, the way a result and an editor both show it. */
+    line: number;
+    severity: vscode.DiagnosticSeverity;
+    message: string;
+    code?: string | number | { value: string | number; target?: vscode.Uri | string };
+  },
+): string {
+  const raw = problem.code;
+  const code =
+    raw === undefined || raw === ''
+      ? ''
+      : ` ${typeof raw === 'object' ? String(raw.value) : String(raw)}`;
+  return (
+    `${relativePath}:${problem.line}: ` +
+    `${severityLabel(problem.severity)}${code}: ${problem.message.replace(/\s+/gu, ' ')}`
+  );
 }
 
 function symbolKindLabel(k: vscode.SymbolKind): string {
@@ -107,9 +140,13 @@ export function makeGetDiagnosticsTool(): RegisteredTool {
       const lines: string[] = [];
       for (const [uri, diags] of pairs) {
         for (const d of diags) {
-          const rel = vscode.workspace.asRelativePath(uri);
           lines.push(
-            `${rel}:${d.range.start.line + 1}: ${severityLabel(d.severity)}: ${d.message}`,
+            formatDiagnosticLine(vscode.workspace.asRelativePath(uri), {
+              line: d.range.start.line + 1,
+              severity: d.severity,
+              message: d.message,
+              ...(d.code === undefined ? {} : { code: d.code }),
+            }),
           );
         }
       }
@@ -322,7 +359,7 @@ export function makeFindReferencesTool(): RegisteredTool {
 // ── Implementations handler ────────────────────────────────────────────────────
 
 /**
- * "Who implements this?" — the question find_references answers badly.
+ * "Who implements this?" — the question the `references` operation answers badly.
  *
  * On an interface or abstract method, references returns every call site mixed
  * in with the implementations, and the implementations are usually the few
@@ -339,8 +376,8 @@ export function makeFindImplementationsTool(): RegisteredTool {
         name: '__code_intel_find_implementations',
         description:
           'Find the implementations of the interface, abstract class, or abstract method at the ' +
-          'given position (max 50). Prefer this over find_references when you want the concrete ' +
-          'types implementing something rather than every call site.',
+          'given position (max 50). Prefer this over the references operation when you want the ' +
+          'concrete types implementing something rather than every call site.',
         parameters: {
           type: 'object',
           properties: {

@@ -3,11 +3,59 @@ import * as vscode from 'vscode';
 import { loadConfig } from '../config/ConfigLoader';
 import type { NativeCommandDeps } from './commandDeps';
 import { runBackendAction } from './commandHelpers';
+import { restartBackend, startBackend } from '../backend/restartBackend';
 import { registerEditorCommands } from './editorCommands';
 import { registerAgentBusCommands } from './agentBusCommands';
 import { runAddModelWizard } from '../sidebar/AddModelWizard';
 import { migrateConfig } from '../config/ConfigMigrator';
+import { runPolicyMigration } from '../config/policyMigration';
 import { availableProfilesFor, mergeGroupsIntoModel } from '../config/ConfigResolver';
+import { defaultPolicyPath } from '../config/PolicyLoader';
+import {
+  lockPolicyFile,
+  policyLockSentence,
+  readPolicyLockState,
+  unlockPolicyFile,
+  type PolicyLockReport,
+} from '../config/policyLock';
+import { getLogger } from '../util/logger';
+
+/**
+ * Report a lock change in the one sentence that says what the file is now, and
+ * offer the way back.
+ *
+ * Two defects the 0.17.117 live test found, both fixed here because both are
+ * about this pair of notices:
+ * - The raw access-control lines used to be pasted under the sentence. Four
+ *   lines of `icacls` output in a toast close before they can be read, and the
+ *   owner who needs them can open the Forge log at any time — so the detail
+ *   goes there now, and the notice stays the one sentence that is decidable.
+ * - `void showInformationMessage(...)` threw the answer away, so `Unlock it
+ *   again` printed and did nothing when pressed. The choice is awaited now, and
+ *   it runs the opposite COMMAND rather than a copy of its body: that command
+ *   reports the state it reads back off the file afterwards, which is the only
+ *   thing a lock claim can be checked against, and it is what keeps this notice
+ *   from asserting something the next click proved false.
+ */
+async function reportPolicyLock(
+  report: PolicyLockReport,
+  label: string,
+  oppositeCommand: string,
+): Promise<void> {
+  getLogger().info(`Forge policy lock: ${report.policyPath} — ${report.detail}`);
+  const choice = await vscode.window.showInformationMessage(
+    `Forge: ${policyLockSentence(report)}`,
+    label,
+  );
+  if (choice !== label) return;
+  try {
+    await vscode.commands.executeCommand(oppositeCommand);
+  } catch (err) {
+    // Say which step failed. Blaming the lock that just worked would be the wrong
+    // report for a follow-up unlock that did not.
+    void vscode.window.showErrorMessage(`Forge: ${label} failed — ${(err as Error).message}`);
+  }
+}
 
 export function registerNativeCommands(
   context: vscode.ExtensionContext,
@@ -24,7 +72,7 @@ export function registerNativeCommands(
         deps,
         'starting',
         async () => {
-          await deps.backend.acquire(modelName);
+          await startBackend(deps.backend, deps.getConfig(), modelName);
         },
         'Forge: backend started',
       );
@@ -41,17 +89,17 @@ export function registerNativeCommands(
       const modelName = deps.getConfig().active_model;
       deps.statusBar.setStarting(modelName);
       try {
-        await deps.backend.stopAll();
         // With no model selected nothing restarts; say so, as /restartBackend
         // does, rather than reporting a ready backend (U20-03).
         if (!modelName) {
+          await deps.backend.stopAll();
           deps.statusBar.setStopped(modelName);
           void vscode.window.showInformationMessage(
             'Forge: all backends stopped. Pick a model to start again.',
           );
           return;
         }
-        await deps.backend.acquire(modelName);
+        await restartBackend(deps.backend, deps.getConfig(), modelName);
         deps.statusBar.setReady(modelName);
         void vscode.window.showInformationMessage('Forge: backend restarted');
       } catch (err) {
@@ -63,6 +111,37 @@ export function registerNativeCommands(
     vscode.commands.registerCommand('forge.openConfig', async () => {
       const doc = await vscode.workspace.openTextDocument(vscode.Uri.file(deps.getConfigPath()));
       await vscode.window.showTextDocument(doc, { preview: false });
+      // `/config` lands here, and the owner asking "what does my config say" needs
+      // the one thing config.yaml cannot answer: whether the file that says what an
+      // agent may do is protected, and from whom. Read from the file rather than
+      // from memory, so a lock set by another window — or by hand, or by an
+      // elevated prompt — shows up here as the state it actually is.
+      const report = readPolicyLockState(defaultPolicyPath());
+      void vscode.window.showInformationMessage(`Forge: ${policyLockSentence(report)}`);
+    }),
+    // Both lock commands are the owner's, and nothing in Forge calls them: a lock the
+    // protected code could set could also be undone by it, which is the whole point
+    // of locking. Each reports the state it READ BACK afterwards, because the change
+    // lives in the file's permissions and not in anything Forge remembers.
+    vscode.commands.registerCommand('forge.lockPolicy', async () => {
+      try {
+        const report = lockPolicyFile(defaultPolicyPath());
+        await reportPolicyLock(report, 'Unlock it again', 'forge.unlockPolicy');
+      } catch (err) {
+        void vscode.window.showErrorMessage(
+          `Forge: could not lock policy.yaml — ${(err as Error).message}`,
+        );
+      }
+    }),
+    vscode.commands.registerCommand('forge.unlockPolicy', async () => {
+      try {
+        const report = unlockPolicyFile(defaultPolicyPath());
+        await reportPolicyLock(report, 'Lock it again', 'forge.lockPolicy');
+      } catch (err) {
+        void vscode.window.showErrorMessage(
+          `Forge: could not unlock policy.yaml — ${(err as Error).message}`,
+        );
+      }
     }),
     vscode.commands.registerCommand('forge.validateConfig', () => {
       try {
@@ -183,6 +262,42 @@ export function registerNativeCommands(
       } catch (err) {
         void vscode.window.showErrorMessage(
           `Forge: compact config failed — ${(err as Error).message}`,
+        );
+      }
+    }),
+    // The healthy-path half of a pair: the failed-load half is registered by
+    // `policyMigrationRecovery.ts` from inside `configBootstrap.ts`, and only one
+    // of the two can run in a window — `extension.ts:87` returns before this file
+    // when the config would not load. Move either side and check that still holds.
+    vscode.commands.registerCommand('forge.movePolicy', async () => {
+      const configPath = deps.getConfigPath();
+      try {
+        const result = runPolicyMigration(configPath);
+        deps.setConfig(loadConfig(path.dirname(configPath)));
+        const keys =
+          result.movedKeys.length > 0
+            ? `moved ${result.movedKeys.length} policy key(s): ${result.movedKeys.join(', ')}`
+            : 'found no policy key left in config.yaml';
+        const engines =
+          result.engines.length > 0
+            ? ` and wrote ${result.engines.length} engine(s): ${result.engines
+                .map((row) => row.name)
+                .join(', ')}`
+            : '';
+        void vscode.window.showInformationMessage(
+          `Forge: ${keys}${engines} into ${result.policyPath}. Backup: ${result.backupPath}.` +
+            (result.policyWritten
+              ? ''
+              : '\npolicy.yaml already held exactly this content, so it was left untouched; ' +
+                'the config side of the move is now finished.') +
+            (result.model_hosts.length > 0
+              ? `\nmodel_hosts: ${result.model_hosts.join(', ')} — the hosts your models already ` +
+                'talk to, so the phase-3 host rule does not refuse them.'
+              : ''),
+        );
+      } catch (err) {
+        void vscode.window.showErrorMessage(
+          `Forge: policy split failed — ${(err as Error).message}`,
         );
       }
     }),

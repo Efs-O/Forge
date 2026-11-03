@@ -20,9 +20,36 @@ export function readPathArg(args?: Record<string, unknown>): string | null {
   return null;
 }
 
-/** True for a result the tool layer reports as a failure or a refusal. */
+/** True for a result the tool layer reports as a failure or a refusal. The
+ *  `unattended:` prefix is `ToolApprovalPolicyDenied` (`toolApprovalOutcome.ts`):
+ *  a call a policy stopped while nobody was present is a refusal, not a success,
+ *  so the transcript row, the failure streak and the stats must all read it as
+ *  one. */
 export function isFailureResult(result: string): boolean {
-  return result.startsWith('Error:') || result.startsWith('User declined:');
+  return (
+    result.startsWith('Error:') ||
+    result.startsWith('User declined:') ||
+    result.startsWith('unattended:')
+  );
+}
+
+/**
+ * True for a call that was refused before its handler ran, so it brought no
+ * content in: an unattended policy denial, a card the owner declined, or a card
+ * nobody answered.
+ *
+ * `Error:` is deliberately NOT in this list. A tool that ran and then failed may
+ * still have read outside content into its message — a `web_fetch` that fetched
+ * a page and then choked on the redirect — so the untrusted flag in
+ * `src/tools/exfilTaint.ts` stays fail-closed for it: only a call that never
+ * started can be proved to have read nothing.
+ */
+export function neverRanResult(result: string): boolean {
+  return (
+    result.startsWith('unattended:') ||
+    result.startsWith('User declined:') ||
+    result.startsWith('Not run:')
+  );
 }
 
 /**
@@ -166,4 +193,26 @@ export function imageSearchThumbnails(toolName: string, result: string): ImageSe
     thumbnails.push({ path, ...(match[2] ? { original: match[2] } : {}) });
   }
   return thumbnails;
+}
+
+/** The write-style tools whose result names the file the row should link to. */
+const TOUCHED_FILE_TOOLS = new Set(['write_file', 'edit_file', 'format_file']);
+
+/**
+ * The absolute path a write-style tool just changed, for the transcript row's open
+ * link — moved here from `ToolDispatch.ts` so the rule about which tools count as
+ * writes has one owner next to the rest of how a finished call is labelled, and can
+ * be tested without the VS Code surface. `resolvePath` is the dispatch's own
+ * resolver, so this file stays free of VS Code.
+ */
+export function touchedFilePath(
+  toolName: string,
+  result: string,
+  args: Record<string, unknown> | undefined,
+  resolvePath: (value: string) => string,
+): string | null {
+  if (isFailureResult(result)) return null;
+  if (!TOUCHED_FILE_TOOLS.has(toolName)) return null;
+  const rawPath = readPathArg(args);
+  return rawPath ? resolvePath(rawPath) : null;
 }

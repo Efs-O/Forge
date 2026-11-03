@@ -1,6 +1,6 @@
 import * as path from 'path';
 import { loadConfig } from '../config/ConfigLoader';
-import { updateConfigFile } from '../config/ConfigWriter';
+import { updateForgeKeyFile } from '../config/ConfigWriter';
 import { setNestedField } from '../config/ConfigWriterHelpers';
 import type { ForgeConfig } from '../config/types';
 import { RemoteAuth } from './RemoteAuth';
@@ -13,21 +13,29 @@ import { RemoteAttachmentStore } from './RemoteAttachmentStore';
 import { RemoteTransportManager } from './RemoteTransportManager';
 import {
   buildRemoteControllerOptions,
-  workspaceAliases,
   transportNames,
   type RemoteControllerOptionsDeps,
 } from './remoteControllerOptions';
 import { RemoteHandoffCoordinator } from './RemoteHandoffCoordinator';
-import { resumeWorkspaceHandoffs, announceWorkspaceArrivals } from './RemoteWorkspaceHandoff';
-import type { WorkspaceArrival } from './RemoteWorkspaceHandoff';
 import { RemoteCompactionNoticeBuffers } from './compactionNoticeBuffer';
 import { voiceRuntimeSignature } from './voiceRuntimeSignature';
 import { RemoteStartRetry } from './RemoteStartRetry';
-import { prepareRemoteWorkspaceSwitch } from './remoteWorkspaceSwitch';
+import {
+  claimWorkspaceArrivals,
+  createAnnounceGate,
+  releaseTransportsAfterRollback,
+  switchRemoteWorkspace,
+  switchWorkspacePreflight,
+  takeTransportsForActivation,
+  takeTransportsForRollback,
+  type WorkspaceHandoffRuntimeDeps,
+} from './remoteWorkspaceSwitch';
+import { RemoteWindowWatch } from './RemoteWindowWatch';
 import { buildRemoteValidationStatus } from './remoteValidationStatus';
 import { sendRemoteWorkspaceFile } from './remoteFileDelivery';
 import {
   type RemoteRuntimeOptions,
+  type WorkspaceSwitchModeChoice,
   type RemoteFileSendResult,
   type RemoteValidationStatus,
   type RemoteChannelFactory,
@@ -65,8 +73,12 @@ export class RemoteRuntime {
       this.manager.names().length === 0,
     start: (config) => this.replace(config),
   });
-  /** Claimed by a start that then failed; announced by the start that succeeds. */
-  private unannouncedArrivals: WorkspaceArrival[] = [];
+  /** Handoff machinery, built once so the runtime is a thin caller of it. */
+  private readonly handoff: WorkspaceHandoffRuntimeDeps;
+  /** This window's own 5 s watch: retries a refused claim; `dispose()` clears it. */
+  private readonly windowWatch: RemoteWindowWatch;
+  /** Aborted by `dispose()`, which is what cancels an activation lease retry. */
+  private readonly lifecycleAbort = new AbortController();
 
   constructor(private readonly options: RemoteRuntimeOptions) {
     this.auth = new RemoteAuth(options.secrets, undefined, () => this.notifyStatus());
@@ -100,8 +112,9 @@ export class RemoteRuntime {
       storePath,
       workspaceId: options.workspaceId,
       serialize: (task) => this.enqueue(task),
-      claimArrivals: () => this.claimArrivals(),
-      restoreTransports: () => this.restoreTransports(),
+      claimArrivals: () => claimWorkspaceArrivals(this.handoff),
+      takeTransports: () => takeTransportsForRollback(this.handoff),
+      releaseTransports: () => releaseTransportsAfterRollback(this.handoff),
       sendToChat: (channel, chatId, text) =>
         this.manager
           .get(channel)
@@ -110,16 +123,53 @@ export class RemoteRuntime {
       notifyLocal: options.notifyLocal,
       ...(options.handoffWatch ?? {}),
     });
+    this.handoff = {
+      store: this.store,
+      manager: this.manager,
+      coordinator: this.coordinator,
+      workspaceId: options.workspaceId,
+      ...(options.workspaceRoot ? { workspaceRoot: options.workspaceRoot } : {}),
+      host: options.host,
+      isDisposed: () => this.disposed,
+      requestedConfig: () => this.requestedConfig,
+      activeTransports: () => this.manager.names(),
+      announceOnce: createAnnounceGate(),
+      totpEnrolled: (channel) => this.auth.totpEnrolled(channel),
+      notifyLocal: options.notifyLocal,
+      stopTransports: () => this.manager.stopActive(),
+      globalStoragePath: options.storageDirectory,
+      userConfigFileSetting: () => options.userConfigFileSetting?.() ?? undefined,
+      ...(options.openWorkspace ? { openWorkspace: options.openWorkspace } : {}),
+    };
+    this.windowWatch = new RemoteWindowWatch({
+      ...(options.handoffWatch?.pollIntervalMs
+        ? { tickIntervalMs: options.handoffWatch.pollIntervalMs }
+        : {}),
+      handoffPending: () => this.store.hasPendingWorkspaceHandoff(options.workspaceId),
+      // From disk, not from this window's copy — see `WindowWatchDeps.refreshHandoff`.
+      refreshHandoff: () => this.store.refresh(),
+      serving: () => this.manager.names().length > 0,
+      // Through the lifecycle chain, or a retry could interleave a second
+      // `startAll` over the active map and leak a lease.
+      retryClaim: (signal) => this.enqueue(() => claimWorkspaceArrivals(this.handoff, { signal })),
+      isDisposed: () => this.disposed,
+      notifyLocal: options.notifyLocal,
+    });
   }
 
   /**
    * Undefined until the remote store has loaded; callers must fail closed.
-   * Remote turned off never loads the store, so it pins nothing — otherwise
-   * every chat would read as pinned for as long as remote stays off.
+   * Remote turned off never loads the store, so it pins nothing — and a remote
+   * window runs no transports of its own, so answering `undefined` there would
+   * make every chat in it read as "unreachable remote runtime" and never sweep.
    */
   blocksConversationEviction(conversationId: string): boolean | undefined {
+    if (this.options.hostedElsewhere) return false;
     if (this.store.isLoaded()) return this.store.blocksConversationEviction(conversationId);
     return this.appliedConfig && this.appliedConfig.remote?.enabled !== true ? false : undefined;
+  }
+  conversationOriginChannel(id: string): string | undefined {
+    return this.store.bindingsForConversation(id)[0]?.channel;
   }
 
   /** Serializes operations that touch the active transport map. */
@@ -145,6 +195,9 @@ export class RemoteRuntime {
   refreshTransport(name: 'telegram' | 'whatsapp', config: ForgeConfig): Promise<void> {
     return this.enqueue(async () => {
       if (this.disposed) return;
+      // A remote window runs no transports, so there is no provider to rebuild;
+      // a new token stored here belongs to the desktop's window, not to this one.
+      if (this.options.hostedElsewhere) return;
       if (!this.appliedConfig) {
         await this.replaceWithRetry(config);
         return;
@@ -162,6 +215,7 @@ export class RemoteRuntime {
   }
 
   beginPairing(channel: 'telegram' | 'whatsapp'): string {
+    if (this.options.hostedElsewhere) throw new Error(this.options.hostedElsewhere);
     if (!this.manager.has(channel)) {
       throw new Error(`Forge remote ${channel} is not running.`);
     }
@@ -271,6 +325,9 @@ export class RemoteRuntime {
   async dispose(): Promise<void> {
     this.disposed = true;
     this.startRetry.cancel();
+    // Abort first: a still-looping lease retry starts transports on the way out.
+    this.lifecycleAbort.abort();
+    this.windowWatch.dispose();
     this.coordinator.dispose();
     await this.applySerializedStop();
   }
@@ -278,7 +335,7 @@ export class RemoteRuntime {
   /**
    * Persist `voice.output.enabled` to config.yaml and apply it without a window
    * reload. The write is schema-validated and atomic (temp + rename, .bak
-   * backup) by updateConfigFile. Re-reading the file keeps the in-memory config
+   * backup) by updateForgeKeyFile. Re-reading the file keeps the in-memory config
    * and the file in agreement. `output.enabled` is excluded from the voice
    * runtime signature, so this takes the in-place path (speech.setEnabled) and
    * the controller -- with the pending auto-deletes of this very command --
@@ -291,7 +348,7 @@ export class RemoteRuntime {
   async setVoiceOutput(on: boolean): Promise<void> {
     if (!this.options.configPath) throw new Error('config path is not available');
     return this.enqueue(() => {
-      updateConfigFile(this.options.configPath!, (doc) =>
+      updateForgeKeyFile(this.options.configPath!, 'voice', (doc) =>
         setNestedField(doc, ['voice', 'output', 'enabled'], on),
       );
       const config = loadConfig(path.dirname(this.options.configPath!));
@@ -311,6 +368,20 @@ export class RemoteRuntime {
 
   private async replace(config: ForgeConfig): Promise<void> {
     this.requestedConfig = config;
+    if (this.options.hostedElsewhere) {
+      // A VS Code Remote window: the desktop's own Forge window owns the
+      // transports, so this window must not load the store, sweep attachments,
+      // take a lease or watch for handoffs — all of it would only collide with
+      // the window that does own them. Same disabled path as `remote.enabled:
+      // false`, decided before `canUpdateInPlace` so a config that looks
+      // unchanged cannot smuggle a start through this branch either.
+      await this.manager.stopActive();
+      this.coordinator.dispose();
+      this.windowWatch.dispose();
+      this.auth.updateSessionPolicy({ inactivityTimeoutMinutes: 30 });
+      this.appliedConfig = config;
+      return;
+    }
     if (this.canUpdateInPlace(config)) {
       this.updateActiveOptions(config);
       this.appliedConfig = config;
@@ -319,6 +390,7 @@ export class RemoteRuntime {
     await this.manager.stopActive();
     if (this.disposed || config.remote?.enabled !== true) {
       this.coordinator.dispose();
+      this.windowWatch.dispose();
       this.auth.updateSessionPolicy({ inactivityTimeoutMinutes: 30 });
       this.appliedConfig = config;
       return;
@@ -340,57 +412,20 @@ export class RemoteRuntime {
     // window that loses the lease race still has to be able to claim a chat
     // handed to it later, which is exactly the case that used to go silent.
     this.coordinator.watch();
-    const arrivals = await resumeWorkspaceHandoffs(
-      this.store,
-      this.options.workspaceId,
-      this.options.host,
-    );
-    this.unannouncedArrivals.push(...arrivals);
-    await this.manager.startAll(config);
-    this.appliedConfig = config;
-    await this.announce(this.unannouncedArrivals, config);
-    this.unannouncedArrivals = [];
-    this.startRetry.cancel();
-  }
-
-  private announce(arrivals: readonly WorkspaceArrival[], config: ForgeConfig): Promise<void> {
-    return announceWorkspaceArrivals(arrivals, {
-      channelFor: (name) => this.manager.get(name)?.channel,
-      displayNameFor: (alias) =>
-        workspaceAliases(config, this.options.workspaceRoot)[alias]?.display_name ?? alias,
-      totpEnrolled: (channel) => this.auth.totpEnrolled(channel),
-      notifyLocal: this.options.notifyLocal,
+    this.windowWatch.start();
+    // Lease before claim (plan phase 2, audit 1.2): a window that cannot serve
+    // the phone must not bind the chat, so it leaves the record for the window
+    // that holds the lease, or for its own `RemoteWindowWatch` retry later.
+    const leaseRefused = await takeTransportsForActivation(this.manager, config, {
+      waitingForAChat: this.store.hasPendingWorkspaceHandoff(this.options.workspaceId),
+      signal: this.lifecycleAbort.signal,
     });
-  }
-
-  /**
-   * A handoff addressed here while this window was already running. The
-   * transport lease is taken *before* the record is claimed: it is the only
-   * cross-process mutex there is, so letting it decide keeps two windows on the
-   * same folder from both binding the chat, and leaves the record pending for
-   * the source window to take back when this window cannot serve it at all.
-   *
-   * Runs inside the lifecycle chain (the coordinator serializes it), so it must
-   * not enqueue again.
-   */
-  private async claimArrivals(): Promise<void> {
-    const config = this.requestedConfig;
-    if (this.disposed || config?.remote?.enabled !== true) return;
-    await this.manager.takeOver(config);
-    if (this.manager.names().length === 0) return;
-    const arrivals = await resumeWorkspaceHandoffs(
-      this.store,
-      this.options.workspaceId,
-      this.options.host,
-    );
     this.appliedConfig = config;
-    await this.announce(arrivals, config);
-  }
-
-  /** Puts this window back the way it was after a switch that never happened. */
-  private async restoreTransports(): Promise<void> {
-    if (this.disposed || !this.requestedConfig) return;
-    await this.replace(this.requestedConfig);
+    this.startRetry.cancel();
+    // Skipped rather than awaited: a claim retries the lease for 90 s, and that
+    // wait belongs to the watch, which re-claims on its own timer.
+    if (!leaseRefused)
+      await claimWorkspaceArrivals(this.handoff, { signal: this.lifecycleAbort.signal });
   }
 
   private canUpdateInPlace(config: ForgeConfig): boolean {
@@ -420,26 +455,14 @@ export class RemoteRuntime {
   }
 
   /** Move one chat to another project's window with a rollback on failure. */
-  async switchWorkspace(
+  switchWorkspace(
     config: ForgeConfig,
     alias: string,
     channel: string,
     chatId: string,
+    mode: WorkspaceSwitchModeChoice,
   ): Promise<() => Promise<void>> {
-    if (!this.options.openWorkspace)
-      throw new Error('workspace switching is unavailable in this window.');
-    return prepareRemoteWorkspaceSwitch({
-      config,
-      alias,
-      channel,
-      chatId,
-      workspaceId: this.options.workspaceId,
-      ...(this.options.workspaceRoot ? { workspaceRoot: this.options.workspaceRoot } : {}),
-      store: this.store,
-      coordinator: this.coordinator,
-      stopTransports: () => this.manager.stopActive(),
-      openWorkspace: this.options.openWorkspace,
-    });
+    return switchRemoteWorkspace(this.handoff, { config, alias, channel, chatId, mode });
   }
 
   /** Current transport and pairing status for the sidebar chip. */
@@ -467,8 +490,10 @@ export class RemoteRuntime {
       voiceOutputEnabled: () => this.appliedConfig?.voice?.output?.enabled === true,
       setVoiceOutput: (on: boolean) => this.setVoiceOutput(on),
       hasConfigPath: this.options.configPath !== undefined,
-      switchWorkspace: (config, alias, channel, chatId) =>
-        this.switchWorkspace(config, alias, channel, chatId),
+      switchWorkspace: (config, alias, channel, chatId, mode) =>
+        this.switchWorkspace(config, alias, channel, chatId, mode),
+      workspacePreflight: (config, alias, channel) =>
+        switchWorkspacePreflight(this.handoff, { config, alias, channel }),
       ...(this.options.jobStore ? { jobsStore: this.options.jobStore } : {}),
     };
   }

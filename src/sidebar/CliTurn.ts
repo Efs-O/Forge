@@ -10,7 +10,6 @@
 import type { ModelConfig } from '../config/types';
 import type { AttachmentData, HostToWebview } from './messageBridge';
 import type { ConversationRuntime } from './sessionTypes';
-import type { CheckpointStack } from '../checkpoint/CheckpointStack';
 import type { CliAgentDriver } from '../agents/CliAgentDriver';
 import type { CliSessionRegistry } from '../agents/CliSessionRegistry';
 import { prepareCliChatAgent, runCliChat, runWarmCliChat } from '../agents/CliChatRunner';
@@ -23,14 +22,12 @@ import { isPlanFinished, renderPlan } from '../tools/planTools';
 import { injectTurnContext } from './turnContext';
 import type { ForgeTurnOutcome } from './turnOutcome';
 import { summarizeCliProgress, type AgentProgressEvent } from './AgentProgress';
-import { checkpointReadyMessage } from './checkpointStats';
 
 const log = getLogger();
 
 export interface CliTurnContext {
   workspaceRoot: string;
   lifecycle: TurnLifecycle;
-  checkpoints: CheckpointStack;
   events: SidebarProviderEvents;
   cliSessions: CliSessionRegistry;
   cliDriver?: CliAgentDriver;
@@ -65,6 +62,11 @@ export async function runCliTurn(
     prepared = await prepareCliChatAgent(model, ctx.workspaceRoot);
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
+    // The cloud turn has this line (ProviderTurn.ts:109); the CLI turn was
+    // written as a copy of it minus the logging, so a CLI that could not be
+    // started left red text in the chat and nothing in the Forge channel —
+    // nothing to read after the fact, and the status bar had already moved on.
+    log.error(`[AgentLoop] cli setup failed model=${model.name}: ${message}`);
     ctx.events.onBackendError?.(message);
     postC({ type: 'backendDown', message });
     return { kind: 'failed', error: message, finalText: '' };
@@ -77,7 +79,6 @@ export async function runCliTurn(
   const configPath = ctx.getConfigPath?.();
   if (configPath) recordModelUsage(configPath, model.name);
 
-  const checkpoint = ctx.checkpoints.beginTurn(`cli-chat-${Date.now()}`, convId);
   ctx.lifecycle.markStreaming(convId);
   let generationStarted = false;
   let finalText = '';
@@ -98,7 +99,6 @@ export async function runCliTurn(
       messages: injectTurnContext(conv.messages, { plan: conv.plan }),
       ...(planPrompt ? { planPrompt } : {}),
       workspaceRoot: ctx.workspaceRoot,
-      checkpoint,
       signal: ctrl.signal,
       onText: (chunk: string) => {
         assistantCreatedAt ??= Date.now();
@@ -137,7 +137,6 @@ export async function runCliTurn(
         if (firstCliPrompt) postC({ type: 'ready' });
         postC({ type: 'generationStarted' });
       },
-      announceRollback: firstCliPrompt,
       ...(sessionId ? { sessionId } : {}),
     };
     const result = ctx.cliDriver
@@ -201,10 +200,6 @@ export async function runCliTurn(
   } finally {
     ctx.lifecycle.clearStreaming(convId);
     conv.updatedAt = Date.now();
-    const depthBefore = ctx.checkpoints.depth(convId);
-    ctx.checkpoints.commitTurn(checkpoint);
-    if (ctx.checkpoints.depth(convId) > depthBefore)
-      postC(checkpointReadyMessage(ctx.checkpoints, convId));
     if (generationStarted) {
       ctx.events.onGenerationFinished?.(model.name, convId, finalText);
     }

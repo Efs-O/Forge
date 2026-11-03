@@ -1,5 +1,17 @@
 import * as nunjucks from 'nunjucks';
 import { localDate } from '../util/localClock';
+import type { ConversationRuntime } from '../sidebar/sessionTypes';
+
+/**
+ * Who can say what skills catalog a conversation should be shown.
+ *
+ * A getter rather than a string, because the answer is per conversation and per
+ * activation: `src/skills/skillsService.ts` freezes one catalog for the life of a
+ * chat, and `undefined` (a one-shot prompt run) means build fresh.
+ */
+export type SkillsCatalogGetter = (
+  conversation: ConversationRuntime | undefined,
+) => string | undefined;
 
 export interface TemplateContext {
   workspaceName?: string;
@@ -12,13 +24,22 @@ export interface TemplateContext {
   forgeInstructions?: string;
   /** Set when web_search or web_fetch is in the request's tools. */
   webTools?: string;
+  /** Set when `ask_agent` or `ask_local_agent` is in the request's tools, so the
+   *  delegation rules reach only a workspace that has someone to delegate to. */
+  agentTools?: string;
+  /**
+   * The skills catalog for this conversation, rendered once and frozen for its
+   * life (`src/skills/skillsService.ts`). Absent means no block: a user with no
+   * skills, or skills off, keeps the prompt they always had.
+   */
+  skillsCatalog?: string;
   /** Filled in by `render`; callers do not pass it. */
   currentDate?: string;
 }
-
 export class TemplateEngine {
   private env: nunjucks.Environment;
   private templateDirs: string[];
+  private skillsCatalogGetter: SkillsCatalogGetter | undefined;
 
   constructor(builtinDir: string, userDirs: string[] = []) {
     this.templateDirs = [...userDirs, builtinDir];
@@ -51,5 +72,26 @@ export class TemplateEngine {
     this.templateDirs = [...userDirs, this.templateDirs[this.templateDirs.length - 1]];
     const loader = new nunjucks.FileSystemLoader(this.templateDirs, { noCache: true });
     this.env = new nunjucks.Environment(loader, { autoescape: false, throwOnUndefined: false });
+  }
+
+  /**
+   * The object that says which skills catalog each conversation should render.
+   *
+   * Set once by `extension.ts` after the skills service exists. It hangs here
+   * rather than being threaded as a new argument through `SidebarProvider`,
+   * `sidebarWiring`, `AgentLoop`, `turnServices` and `ModelTurn`, because this is
+   * the one object that already reaches every path that renders a system prompt
+   * (`ModelTurn` and `PromptRun` both take it), and those four files sit at the
+   * 500-line gate this repo lints — threading one string through them would have
+   * cost three file splits for no behaviour change. The engine still renders no
+   * catalog by itself: callers pass the string into `render` as `skillsCatalog`.
+   */
+  setSkillsCatalogProvider(getter: SkillsCatalogGetter | undefined): void {
+    this.skillsCatalogGetter = getter;
+  }
+
+  /** The catalog for `conversation`, or undefined when skills are off or none. */
+  skillsCatalogFor(conversation?: ConversationRuntime): string | undefined {
+    return this.skillsCatalogGetter?.(conversation);
   }
 }

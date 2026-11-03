@@ -1,7 +1,7 @@
 import * as fs from 'fs';
 import * as path from 'path';
 import * as vscode from 'vscode';
-import { SCREENSHOT_DIR } from '../tools/browser/browserTools';
+import { screenshotRoot } from '../tools/browser/screenshotPaths';
 
 export function buildWebviewHtml(extensionUri: vscode.Uri, webview: vscode.Webview): string {
   const distDir = path.join(extensionUri.fsPath, 'dist', 'webview');
@@ -46,10 +46,11 @@ export function webviewResourceRoots(
 ): vscode.Uri[] {
   return [
     vscode.Uri.joinPath(extensionUri, 'dist', 'webview'),
+    vscode.Uri.joinPath(extensionUri, 'assets'),
     // Without this the transcript's thumbnails are silently blocked: a webview
     // URI outside every root does not load and reports nothing.
     ...(attachmentsRoot ? [vscode.Uri.file(attachmentsRoot)] : []),
-    vscode.Uri.file(SCREENSHOT_DIR),
+    vscode.Uri.file(screenshotRoot()),
     // generate_image thumbnails load straight from where the image was saved.
     ...(vscode.workspace.workspaceFolders?.[0] ? [vscode.workspace.workspaceFolders[0].uri] : []),
   ];

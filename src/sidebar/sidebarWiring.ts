@@ -32,9 +32,10 @@ import { runManualCompactResume } from './compactionPolicy';
 import { compactMidTurn } from './midTurnCompaction';
 import { isContextExhaustionReason } from '../agent/truncationRecovery';
 import { ContextBudgetPublisher } from './ContextBudgetPublisher';
-import { ConversationTabs } from './ConversationTabs';
+import type { ConversationTabs } from './ConversationTabs';
 import type { ChatAttachmentStore } from './ChatAttachmentStore';
 import { SendPipeline } from './SendPipeline';
+import { GateEventLog } from './gateEventLog';
 import { opResetReportedContext } from './ConversationOps';
 import { snapshotRepoState } from './repoSnapshot';
 import { listMemoryKeys } from '../tools/memoryTools';
@@ -47,14 +48,13 @@ import { MidTurnTellDrain } from '../agent/MidTurnTellDrain';
 import { ElapsedTimeNote } from '../agent/elapsedTimeNote';
 import { randomUUID } from 'crypto';
 import { createSidebarPromptRouter, type SidebarPromptRouter } from './backgroundExitNotice';
+import { registerWorkerChatWake } from './workerChatWake';
+import { createTurnSpeedLedger, type TurnSpeedLedger } from '../sessions/turnSpeedTotals';
 import { unattendedConversations } from './unattendedConversations';
 import type { ArchivedSessions } from './ArchivedSessions';
-import {
-  evictionBlockers,
-  isConversationEvictable,
-  remoteEvictionSignals,
-  type ConversationEvictionSignals,
-} from './evictionGate';
+import { createConversationEvictionSignals } from './conversationEvictionSignals';
+import type { ConversationRetentionScheduler } from './ConversationRetentionScheduler';
+import { wireConversationTabs } from './conversationTabsWiring';
 
 /** What the provider lends its collaborators. */
 export interface SidebarHost {
@@ -68,7 +68,8 @@ export interface SidebarHost {
   postModels: () => void;
   postSessionSync: () => void;
   postTokenBudget: () => void;
-  persistSession: (changedId?: string) => void;
+  persistSession: (changedId?: string) => void | Promise<boolean>;
+  persistSidebar: (next: SidebarRuntime) => Promise<boolean>;
   /** Writes only the active-conversation pointer — see `saveActiveConversationId`. */
   persistActiveId: () => void;
   baseOf: (id: string | null | undefined) => string | null;
@@ -78,11 +79,11 @@ export interface SidebarHost {
   submitPrompt: (text: string) => Promise<void>;
   undo: () => Promise<string[]>;
   keep: () => Promise<void>;
-  rememberClankerMode: (on: boolean) => void;
   /** Sole owner of the unload sequence; the slash command routes through it. */
   unloadModels: () => Promise<void>;
   unloadActiveModel: () => Promise<{ model: string; wasLoaded: boolean; serverStopped?: boolean }>;
   isConversationQueued: (id: string) => boolean | undefined;
+  isConversationDrafted: (id: string) => boolean | undefined;
   /**
    * Whether remote state (a chat binding, queued remote messages) pins this
    * conversation: `undefined` while the remote store has not loaded, `false`
@@ -120,6 +121,7 @@ export interface SidebarRuntimeParts {
   slashHandler: SlashCommandHandler;
   budget: ContextBudgetPublisher;
   tabs: ConversationTabs;
+  retention: ConversationRetentionScheduler;
   send: SendPipeline;
   requestChains: RequestChainLifecycle;
   midTurnInbox: MidTurnInbox;
@@ -127,6 +129,9 @@ export interface SidebarRuntimeParts {
   tellDrain: MidTurnTellDrain;
   /** The one routing decision for a prompt: a busy chat's inbox, or a new turn. */
   promptRouter: SidebarPromptRouter;
+  /** Each turn's server timings, summed as its requests settle, read by whoever
+   *  delivers that turn's answer: only the turn runner knows what the turn cost. */
+  turnSpeeds: TurnSpeedLedger;
 }
 
 export function wireSidebar(host: SidebarHost, parts: SidebarParts): SidebarRuntimeParts {
@@ -166,7 +171,6 @@ export function wireSidebar(host: SidebarHost, parts: SidebarParts): SidebarRunt
     undefined,
     parts.cliSessions,
   );
-  if (workspaceState.get<boolean>('forge.clankerMode', false)) agentLoop.setClankerMode(true);
   tellDrain.registerSource('sidebar', (conversationId) =>
     Promise.resolve({
       messages: midTurnInbox.drain(conversationId).map((tell) => ({
@@ -275,10 +279,10 @@ export function wireSidebar(host: SidebarHost, parts: SidebarParts): SidebarRunt
     // another hour unnoticed. Only a COMMITTED compaction reaches this dep.
     onCompacted: (conversationId) => elapsedTimeNote.compacted(conversationId),
   };
-
   const slashHandler = new SlashCommandHandler({
     ...compactionDeps,
     getConfig: host.getConfig,
+    ...(parts.workspaceRoot ? { workspaceRoot: parts.workspaceRoot } : {}),
     ...(parts.getConfigPath ? { getConfigPath: parts.getConfigPath } : {}),
     unloadModels: host.unloadModels,
     unloadActiveModel: host.unloadActiveModel,
@@ -308,15 +312,17 @@ export function wireSidebar(host: SidebarHost, parts: SidebarParts): SidebarRunt
         conversationId,
         reason,
       ),
-    toggleClanker: () => {
-      const on = agentLoop.toggleClanker();
-      host.rememberClankerMode(on);
+    toggleClanker: (conversationId) => {
+      const on = !agentLoop.getClankerMode(conversationId);
+      // The queue writes the chat's record; this save is the only one a toggle gets.
+      agentLoop.setClankerMode(conversationId, on);
+      host.persistSession(conversationId);
       return on;
     },
+    resetApprovals: (conversationId) => tabs.resetApprovals(conversationId),
   });
 
-  // Keeps the ctx bar and the HalluMeter bridge live during a turn instead of
-  // frozen until it ends. Fired once per tool round, never per token.
+  // Keeps the ctx bar and HalluMeter bridge live per round, not frozen until the turn ends.
   agentLoop.setContextChangedListener((convId) => budget.onTurnContextChanged(convId));
   agentLoop.setMidTurnCompactor((conv, request) =>
     compactMidTurn(
@@ -338,6 +344,11 @@ export function wireSidebar(host: SidebarHost, parts: SidebarParts): SidebarRunt
     send.sessionLogs.flushSessionLog(convId, true);
   });
 
+  registerWorkerChatWake({
+    openConversations: () => host.getSidebar().conversations,
+    routeInternal: (text, id, origin) => promptRouter.routeInternal(text, id, origin),
+  });
+  const retentionRef: { current?: ConversationRetentionScheduler } = {};
   const send = new SendPipeline({
     getConfig: host.getConfig,
     getSidebar: host.getSidebar,
@@ -347,6 +358,7 @@ export function wireSidebar(host: SidebarHost, parts: SidebarParts): SidebarRunt
     events,
     post: host.post,
     persistSession: host.persistSession,
+    onConversationActivity: (id) => retentionRef.current?.markActivity(id),
     postSessionSync: host.postSessionSync,
     evaluateAfterTurn: (conv, chain) => budget.evaluateAfterTurn(conv, chain),
     evaluateAtAdmission: (conv) => budget.evaluateAtAdmission(conv),
@@ -354,71 +366,48 @@ export function wireSidebar(host: SidebarHost, parts: SidebarParts): SidebarRunt
     attachmentStore: parts.attachmentStore,
     midTurnInbox,
   });
+  // One sum per conversation, opened and closed by `wireTurnMirror` below: this
+  // listener is where every model request of every turn already passes.
+  const turnSpeeds = createTurnSpeedLedger();
   agentLoop.setToolsOfferedListener((conversationId, names, fingerprint) =>
     send.sessionLogs.logToolsOffered(conversationId, names, fingerprint),
   );
-  agentLoop.setRequestStatsListener((conversationId, capture) =>
-    send.sessionLogs.logRequestStats(conversationId, capture),
-  );
+  agentLoop.setRequestStatsListener((conversationId, capture) => {
+    // Every request of a turn already passes here, so this is where the turn's
+    // speed is built — not in the transport, which cannot see requests.
+    turnSpeeds.record(conversationId, capture);
+    send.sessionLogs.logRequestStats(conversationId, capture);
+  });
 
   // One reading of the eviction gate, shared by the yes/no decision and the
   // explanation of a refusal. Both come from the same object so a reason can
   // never drift from the rule that produced it.
-  const evictionSignals = (id: string): ConversationEvictionSignals => {
-    const queued = host.isConversationQueued(id);
-    const approvals = agentLoop.pendingApprovalConversationIds();
-    const questions = parts.questions.pendingConversationIds();
-    const remote = host.remoteEvictionBlocks(id);
-    const chains = requestChains.status();
-    return {
-      // Every signal here is activity or an unresolved prompt. A Keep/Undo
-      // still undecided is deliberately absent: `disposeEvictedConversation`
-      // keeps the checkpoint stack, so archiving no longer hides the undo.
-      streaming: agentLoop.isStreamingConv(id),
-      activeRequestChain: chains.some((chain) => chain.conversationId === id),
-      unattended: unattendedConversations.has(id),
-      pendingApprovalActive: approvals.has(id),
-      pendingApprovalQueued: approvals.has(id),
-      pendingQuestion: parts.questions.hasPending(id),
-      unattributedRequest: approvals.has('') || questions.has(''),
-      // An unreported queue is `beforeWebviewQueueReport` alone; passing the
-      // undefined here too made a refusal claim "12 with messages queued".
-      hostQueue: queued === true,
-      webviewQueue: queued === true,
-      beforeWebviewQueueReport: queued === undefined,
-      ...remoteEvictionSignals(remote),
-    };
-  };
+  const evictionSignals = createConversationEvictionSignals({
+    isStreaming: (id) => agentLoop.isStreamingConv(id),
+    isConversationQueued: (id) => host.isConversationQueued(id),
+    isConversationDrafted: (id) => host.isConversationDrafted(id),
+    remoteEvictionBlocks: (id) => host.remoteEvictionBlocks(id),
+    pendingApprovalConversationIds: () => agentLoop.pendingApprovalConversationIds(),
+    pendingQuestionConversationIds: () => parts.questions.pendingConversationIds(),
+    hasPendingQuestion: (id) => parts.questions.hasPending(id),
+    requestChainConversations: () => requestChains.status(),
+    openConversations: () => host.getSidebar().conversations,
+    isUnattended: (id) => unattendedConversations.has(id),
+  });
 
-  const tabs = new ConversationTabs({
-    liveMemoryKeys: () => listMemoryKeys(workspaceState),
-    isStreaming: () => agentLoop.streaming,
-    getConfig: host.getConfig,
-    getSidebar: host.getSidebar,
-    setSidebar: host.setSidebar,
-    setActiveModel: host.setActiveModel,
-    persistSession: host.persistSession,
-    postModels: host.postModels,
-    postSessionSync: host.postSessionSync,
+  const { tabs, retention } = wireConversationTabs({
+    host,
+    parts,
     pool,
-    agentLoop,
-    requestChains,
     checkpoints,
     failureTracker,
     events,
-    post: host.post,
-    baseOf: host.baseOf,
-    refreshUi: (options) => {
-      if (options?.pointerOnly) host.persistActiveId();
-      else host.persistSession();
-      host.postModels();
-      host.postSessionSync();
-      host.postTokenBudget();
-    },
-    isConversationEvictable: (id) => isConversationEvictable(evictionSignals(id)),
-    evictionBlockers: (id) => evictionBlockers(evictionSignals(id)),
-    ...(parts.archivedSessions ? { archivedSessions: parts.archivedSessions } : {}),
+    agentLoop,
+    requestChains,
+    workspaceState,
+    evictionSignals,
   });
+  retentionRef.current = retention;
 
   // Last, because it needs both halves: the events object AgentLoop decorates
   // and the slashHandler that owns the activity listeners a transport hangs
@@ -432,6 +421,7 @@ export function wireSidebar(host: SidebarHost, parts: SidebarParts): SidebarRunt
       const auto = host.getConfig().auto_compact;
       return auto?.enabled === true && auto.resume !== false && isContextExhaustionReason(message);
     },
+    turnSpeeds,
   });
 
   // The session timer resolves conversation ids through this lookup.
@@ -459,6 +449,14 @@ export function wireSidebar(host: SidebarHost, parts: SidebarParts): SidebarRunt
     requested: () => host.postSessionSync(),
     resolved: () => host.postSessionSync(),
   });
+  // The gate ledger: one `gate` row per card and per guard refusal, into the
+  // same transcript as the turns. It answers nothing.
+  agentLoop.addApprovalSink(
+    new GateEventLog({
+      write: (row) => send.sessionLogs.logGate(row.conversation_id ?? '', row),
+      now: () => Date.now(),
+    }),
+  );
   // Webview sends and background exit notices share this router, so a notice
   // reaches a busy chat exactly the way a typed message does.
   const promptRouter = createSidebarPromptRouter({
@@ -491,10 +489,12 @@ export function wireSidebar(host: SidebarHost, parts: SidebarParts): SidebarRunt
     slashHandler,
     budget,
     tabs,
+    retention,
     send,
     requestChains,
     midTurnInbox,
     tellDrain,
     promptRouter,
+    turnSpeeds,
   };
 }

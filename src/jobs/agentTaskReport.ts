@@ -2,8 +2,8 @@ import { formatAthensDateTime, parseResult } from './agentTaskPrompt';
 
 /** The parsed outcome of an agent turn's final message. */
 export interface AgentTaskOutcome {
-  /** ok | no_change | failed | timeout. */
-  kind: 'ok' | 'no_change' | 'failed' | 'timeout';
+  /** ok | no_change | skipped | failed | timeout. */
+  kind: 'ok' | 'no_change' | 'skipped' | 'failed' | 'timeout';
   /** The RESULT sentence (after the `RESULT:` line), or a fallback. */
   sentence: string;
   /** Whether the final message asked for a backend restart. */
@@ -15,7 +15,8 @@ export interface AgentTaskOutcome {
 /**
  * Step 8: map a request outcome + timeout flag to the report outcome. A cap
  * hit is always a timeout; a failed/cancelled/interrupted turn is a failure;
- * otherwise the RESULT line in the final text decides (ok / no_change).
+ * otherwise the RESULT line in the final text decides; `parseResult` in
+ * `agentTaskPrompt.ts` lists the words it takes and what each one means.
  */
 export function outcomeOf(
   result:

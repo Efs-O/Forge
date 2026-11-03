@@ -18,6 +18,8 @@
 
 import * as fs from 'fs';
 import * as path from 'path';
+import { CliAgentError } from './CliAgentError';
+import { systemProbe } from '../tools/execProgramResolver';
 
 const CMD_METACHARACTERS = /([()\][%!^"`<>&|;, *?])/g;
 
@@ -64,12 +66,94 @@ function toPathSeparators(shimRelative: string): string {
   return shimRelative.replace(/\\/g, '/');
 }
 
+/** Seam for locating the program an npm shim needs, so a unit test never
+ *  spawns `where.exe` or reads a real tree. */
+export interface ShimNodeLookupDeps {
+  exists?: (candidate: string) => boolean;
+  /** Searches `pathValue` for `program` and returns its full path, or
+   *  `undefined`. Defaults to `systemProbe().which` in
+   *  `src/tools/execProgramResolver.ts` — the repo's only synchronous
+   *  `where.exe` probe — with `pathValue` in the probe's own environment block,
+   *  because `where` follows the PATH it is handed, not the caller's: that is
+   *  what makes a refreshed PATH usable here. Injected so a unit test never
+   *  spawns it. */
+  which?: (program: string, pathValue: string) => string | undefined;
+}
+
+/** Locates the Node that runs an npm shim's node script, in the order npm's own
+ *  cmd-shim uses it: a `node.exe` beside the shim wins (npm puts one there when
+ *  the package ships its own runtime), otherwise `node.exe` on `pathValue` —
+ *  normally the refreshed Windows PATH from `windowsUserPath.ts`, so the
+ *  launcher is found the way a freshly opened terminal would find it — and then
+ *  a refusal that names the fix.
+ *
+ *  It never returns the bare name `node`. `spawn` resolves a name against the
+ *  child's PATH, and that PATH is VS Code's startup snapshot unless the caller
+ *  refreshed it, so `'node'` was a hidden fallback (CLAUDE.md: no fallbacks
+ *  unless requested) that reported `spawn node ENOENT` — a stream error — where
+ *  the truth is "Node is not installed". Nothing here picks a substitute
+ *  program silently: the vendored `codex.exe` inside the npm package is the
+ *  *user's* fix, named in the refusal, not Forge's choice.
+ *
+ *  `path.join` (not `path.win32.join`) is deliberate: this module is called on
+ *  Windows in production, and its unit tests run on the ubuntu and macOS CI
+ *  runners too, where a backslash-joined path would not be the file the test
+ *  just created. `toPathSeparators` above already normalises the shim's own
+ *  `\` separators for that reason. */
+export function resolveShimNodeExecutable(
+  shimDir: string,
+  cliLabel: string,
+  pathValue: string,
+  deps: ShimNodeLookupDeps = {},
+): string {
+  const exists = deps.exists ?? fs.existsSync;
+  const bundledNode = path.join(shimDir, 'node.exe');
+  if (exists(bundledNode)) return bundledNode;
+  const launcher = (deps.which ?? defaultWhichOnPath)('node.exe', pathValue);
+  if (launcher) return launcher;
+  throw new CliAgentError(
+    `Node.js not found, needed to run ${cliLabel}. Install Node ` +
+      "(winget install OpenJS.NodeJS.LTS), or set `cli` to the CLI's own executable.",
+  );
+}
+
+/** `where.exe <program>` searching `pathValue`, through the repo's one
+ *  synchronous probe (`systemProbe` in `src/tools/execProgramResolver.ts`) so
+ *  this file does not grow its own copy of it. `where` follows the PATH in the
+ *  environment block it is given — verified against the real program
+ *  2026-10-26: a stripped PATH exits 1 with `INFO: Could not find files for the
+ *  given pattern(s).` — so a refreshed PATH can be searched without mutating
+ *  `process.env`, which would change the whole extension host. */
+function defaultWhichOnPath(program: string, pathValue: string): string | undefined {
+  return systemProbe().which(program, pathValue)[0];
+}
+
+/** Seam for reading a shim and locating the program it needs, so a unit test
+ *  never touches disk, `where.exe` or the registry. */
+export interface ShimUnwrapDeps extends ShimNodeLookupDeps {
+  /** PATH searched for `node.exe` when none sits beside the shim — normally the
+   *  refreshed Windows PATH, so the launcher resolves the way a freshly opened
+   *  terminal resolves it. Defaults to the inherited PATH, which is the one the
+   *  child would have been given anyway. */
+  nodePath?: string;
+  /** Name the Node-missing refusal should blame: the `cli` config value, or the
+   *  shim's own basename when nothing names it. */
+  cliLabel?: string;
+}
+
 /** Reads an npm cmd-shim and returns what it would launch, so the target can
  *  be spawned directly with no cmd.exe in between. Through cmd.exe a line
  *  break ends the command: every multi-line `codex queue --message` arrived
  *  as its first line only. `undefined` when the file is not an npm shim or
- *  its target is missing; the caller then takes the escaped cmd.exe path. */
-export function unwrapNpmCmdShim(shimPath: string): { file: string; args: string[] } | undefined {
+ *  its target is missing; the caller then takes the escaped cmd.exe path.
+ *  A node-script shim whose launcher cannot be found *throws* instead: that is
+ *  not a "not an npm shim" answer, and running the same file through cmd.exe
+ *  would only repeat the failure with worse diagnostics. */
+export function unwrapNpmCmdShim(
+  shimPath: string,
+  deps: ShimUnwrapDeps = {},
+): { file: string; args: string[] } | undefined {
+  const exists = deps.exists ?? fs.existsSync;
   let text: string;
   try {
     text = fs.readFileSync(shimPath, 'utf8');
@@ -82,15 +166,21 @@ export function unwrapNpmCmdShim(shimPath: string): { file: string; args: string
   const script = NPM_NODE_SCRIPT_LINE.exec(lastLine)?.[1];
   if (script !== undefined) {
     const target = path.join(dir, toPathSeparators(script));
-    if (!fs.existsSync(target)) return undefined;
-    // The shim's own rule: a node.exe beside it wins, else `node` from PATH.
-    const bundledNode = path.join(dir, 'node.exe');
-    return { file: fs.existsSync(bundledNode) ? bundledNode : 'node', args: [target] };
+    if (!exists(target)) return undefined;
+    return {
+      file: resolveShimNodeExecutable(
+        dir,
+        deps.cliLabel ?? path.win32.basename(shimPath),
+        deps.nodePath ?? process.env['PATH'] ?? '',
+        { exists, ...(deps.which ? { which: deps.which } : {}) },
+      ),
+      args: [target],
+    };
   }
   const exe = NPM_NATIVE_EXE_LINE.exec(lastLine)?.[1];
   if (exe !== undefined) {
     const target = path.join(dir, toPathSeparators(exe));
-    return fs.existsSync(target) ? { file: target, args: [] } : undefined;
+    return exists(target) ? { file: target, args: [] } : undefined;
   }
   return undefined;
 }
@@ -106,7 +196,7 @@ export function needsWindowsCmdShellWrap(executable: string): boolean {
  * The line is wrapped in an OUTER quote pair, the documented `cmd /s /c`
  * contract: `/s` strips the first and last quote of the line, and with the
  * wrap those are the outer ones. Every quote inside is caret-escaped, so a
- * spaced executable path (`C:\Users\efso office\npm\codex.cmd`) is held
+ * spaced executable path (`C:\Users\jo smith\npm\codex.cmd`) is held
  * together by its escaped spaces rather than by quotes.
  */
 export function buildWindowsCmdShellInvocation(

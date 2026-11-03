@@ -21,4 +21,18 @@ describe('delete approval prompt copy', () => {
     expect(copy).not.toContain('Recursive deletes still confirm.');
     expect(copy).toContain('only `to_trash: false` is a dangerous delete');
   });
+
+  /** Item 7 of `docs/plans/OWNER_GUARDS_PLAN.md`: an agent whose secret read was
+   *  declined went and got the same content through the shell, which turned a
+   *  refusal the user gave into a round the user never agreed to. The fix is one
+   *  line in the prompt, so it is pinned here against the template itself.
+   */
+  it('tells the agent what to do when a secret read is declined', () => {
+    const template = fs.readFileSync(
+      path.resolve('config/templates/builtin/execute.njk'),
+      'utf8',
+    );
+    expect(template).toContain('If a read of a secret path is declined, do not get it another way');
+    expect(template).toContain('tell the user it was declined');
+  });
 });

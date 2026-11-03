@@ -16,6 +16,7 @@ export const TELEGRAM_BOT_TOKEN_SECRET = 'forge.remote.telegram.botToken';
 export const TELEGRAM_BOT_COMMANDS = [
   { command: 'agents', description: 'List sessions linked to this chat' },
   { command: 'answer', description: 'Answer a linked session question by id' },
+  { command: 'approvals', description: 'List or reset approvals for this chat' },
   { command: 'chat', description: 'Switch to an existing conversation by number or name' },
   { command: 'chatmode', description: 'Set or report solo or multi-chat mode' },
   { command: 'chats', description: 'List recent conversations' },

@@ -9,9 +9,8 @@ actions are denied at once. Follow it, then end your final message with the
 
 Point `llama_server.binary` in `config.yaml` at the newest llama.cpp Windows
 CUDA build, and tell the runner to restart the backend on it. The runner does
-the restart (step 7 of `docs/plans/AGENT_TASK_JOBS_PLAN.md`) *after* your turn
-ends — you must not restart the backend yourself, because you are running on
-it.
+the restart *after* your turn ends — you must not restart the backend yourself,
+because you are running on it.
 
 ## The one call: `install_llamacpp`
 
@@ -68,7 +67,7 @@ accumulating, say so in the `RESULT` sentence; the owner prunes.
 
 ## Do not
 
-- Do not restart the backend or call `/restartBackend`. You are running on it.
+- Do not restart the backend or call `/restart`. You are running on it.
 - Do not hand-download, hash or extract. Use `install_llamacpp`.
 - Do not edit `config.yaml` by hand. The tool switches the binary for you.
 - Do not ask the owner anything. If you cannot proceed, report `RESULT: failed`

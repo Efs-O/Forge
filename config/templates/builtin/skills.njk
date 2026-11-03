@@ -1,0 +1,5 @@
+{% if header %}{% for line in header() %}{{ line }}
+{% endfor %}
+{% endif %}{% for entry in entries %}{{ describe(entry) }}
+{% endfor %}{% if omitted > 0 %}- (catalog capped at {{ cap }} chars: {{ entries.length }} of {{ entries.length + omitted }} skills shown, {{ omitted }} not listed)
+{% endif %}

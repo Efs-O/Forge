@@ -18,24 +18,20 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { DirectBackend } from '../../src/backend/DirectBackend';
 import { SharedRuntimeRegistry } from '../../src/backend/SharedRuntimeRegistry';
 import type { ForgeConfig } from '../../src/config/types';
+import { listenLoopback } from '../support/listenLoopback';
 
 const GGUF = 'N:/models/shared.gguf';
 
 /** An owner window's llama-server: healthy, and identifies the served GGUF. */
-function startFakeServer(): Promise<{ port: number; server: http.Server; requests: string[] }> {
+async function startFakeServer(): Promise<{ port: number; server: http.Server; requests: string[] }> {
   const requests: string[] = [];
   const server = http.createServer((req, res) => {
     requests.push(req.url ?? '');
     res.writeHead(200, { 'content-type': 'application/json' });
     res.end(JSON.stringify({ data: [{ id: GGUF }] }));
   });
-  return new Promise((resolve) => {
-    server.listen(0, '127.0.0.1', () => {
-      const address = server.address();
-      const port = typeof address === 'object' && address ? address.port : 0;
-      resolve({ port, server, requests });
-    });
-  });
+  const port = await listenLoopback(server);
+  return { port, server, requests };
 }
 
 const closeServer = (server: http.Server): Promise<void> =>

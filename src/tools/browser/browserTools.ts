@@ -1,5 +1,4 @@
 import * as fs from 'fs/promises';
-import * as os from 'os';
 import * as path from 'path';
 import type { ForgeConfig } from '../../config/types';
 import { writeFileAtomic } from '../../util/atomicWrite';
@@ -13,20 +12,26 @@ import {
   type BrowserTab,
 } from './BrowserSessionManager';
 import { makeBrowserActionTools } from './browserActionTools';
+import { screenshotDirectory } from './screenshotPaths';
 
 type GetConfig = () => ForgeConfig;
 
-/** Screenshots live under the user's home Forge dir, never the workspace's
- *  `.forge/` (plan §4.3): desktop captures can hold secrets, and a repo's
- *  `.forge/` is gitignored in Forge but not in other repos the agent works in. */
-export const SCREENSHOT_DIR = path.join(os.homedir(), '.forge', 'screenshots');
-
-/** Written atomically so a failed write never leaves a torn PNG (ledger row). */
+/**
+ * Screenshots live under the user's home Forge dir, never the workspace's
+ * `.forge/` (plan §4.3): desktop captures can hold secrets, and a repo's
+ * `.forge/` is gitignored in Forge but not in other repos the agent works in.
+ * The path itself, the `FORGE_SCREENSHOT_DIR` override that keeps the
+ * integration tests out of it, and the delete that takes a chat's captures
+ * with the chat are all in `screenshotPaths.ts` — the webview's image roots,
+ * `send_file` and the chat purge read that file, not this one.
+ *
+ * Written atomically so a failed write never leaves a torn PNG (ledger row).
+ */
 export async function saveScreenshot(
   conversationId: string | undefined,
   png: Buffer,
 ): Promise<string> {
-  const dir = path.join(SCREENSHOT_DIR, conversationId ?? 'default');
+  const dir = screenshotDirectory(conversationId);
   await fs.mkdir(dir, { recursive: true });
   const stamp = `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
   const finalPath = path.join(dir, `${stamp}.png`);
@@ -183,6 +188,11 @@ export function makeBrowserSessionTools(ctx: BrowserToolContext): RegisteredTool
         },
       },
       permission: 'browser',
+      /** A browser result is a page: the text, the image and the element names all
+       *  come from a site this chat did not choose. `ToolDispatch` marks the chat
+       *  from this declaration after the handler runs (`exfilTaint.ts`), so the
+       *  chat's next egress costs an approval. */
+      untrustedResult: true,
       autoApprove: true,
       approval: ctx.originApproval,
       handler: async (args, toolCtx) => {
@@ -217,6 +227,11 @@ export function makeBrowserSessionTools(ctx: BrowserToolContext): RegisteredTool
         },
       },
       permission: 'browser',
+      /** A browser result is a page: the text, the image and the element names all
+       *  come from a site this chat did not choose. `ToolDispatch` marks the chat
+       *  from this declaration after the handler runs (`exfilTaint.ts`), so the
+       *  chat's next egress costs an approval. */
+      untrustedResult: true,
       autoApprove: true,
       handler: async () => {
         await mgr.close();
@@ -243,6 +258,11 @@ export function makeBrowserSessionTools(ctx: BrowserToolContext): RegisteredTool
         },
       },
       permission: 'browser',
+      /** A browser result is a page: the text, the image and the element names all
+       *  come from a site this chat did not choose. `ToolDispatch` marks the chat
+       *  from this declaration after the handler runs (`exfilTaint.ts`), so the
+       *  chat's next egress costs an approval. */
+      untrustedResult: true,
       autoApprove: true,
       approval: ctx.originApproval,
       handler: async (args) => {
@@ -263,6 +283,11 @@ export function makeBrowserSessionTools(ctx: BrowserToolContext): RegisteredTool
         },
       },
       permission: 'browser',
+      /** A browser result is a page: the text, the image and the element names all
+       *  come from a site this chat did not choose. `ToolDispatch` marks the chat
+       *  from this declaration after the handler runs (`exfilTaint.ts`), so the
+       *  chat's next egress costs an approval. */
+      untrustedResult: true,
       autoApprove: true,
       handler: async () => {
         const tabs = await mgr.tabs();
@@ -287,6 +312,11 @@ export function makeBrowserSessionTools(ctx: BrowserToolContext): RegisteredTool
         },
       },
       permission: 'browser',
+      /** A browser result is a page: the text, the image and the element names all
+       *  come from a site this chat did not choose. `ToolDispatch` marks the chat
+       *  from this declaration after the handler runs (`exfilTaint.ts`), so the
+       *  chat's next egress costs an approval. */
+      untrustedResult: true,
       autoApprove: true,
       handler: async (args) => {
         const tab = await mgr.selectTab(ctx.str(args, 'tab_id') ?? '');
@@ -308,6 +338,11 @@ export function makeBrowserSessionTools(ctx: BrowserToolContext): RegisteredTool
         },
       },
       permission: 'browser',
+      /** A browser result is a page: the text, the image and the element names all
+       *  come from a site this chat did not choose. `ToolDispatch` marks the chat
+       *  from this declaration after the handler runs (`exfilTaint.ts`), so the
+       *  chat's next egress costs an approval. */
+      untrustedResult: true,
       autoApprove: true,
       approval: ctx.originApproval,
       handler: async (args) => {
@@ -332,6 +367,11 @@ export function makeBrowserSessionTools(ctx: BrowserToolContext): RegisteredTool
         },
       },
       permission: 'browser',
+      /** A browser result is a page: the text, the image and the element names all
+       *  come from a site this chat did not choose. `ToolDispatch` marks the chat
+       *  from this declaration after the handler runs (`exfilTaint.ts`), so the
+       *  chat's next egress costs an approval. */
+      untrustedResult: true,
       autoApprove: true,
       handler: async (args) => {
         await mgr.closeTab(ctx.str(args, 'tab_id') ?? '');

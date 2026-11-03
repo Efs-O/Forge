@@ -12,7 +12,7 @@ the fix plan being applied in full auto. Keep this for follow-up investigation /
 
 ```
 Could not deliver to Codex, so the question was NOT sent:
-spawn C:\Users\efso office\AppData\Roaming\npm\codex ENOENT
+spawn C:\Users\jo smith\AppData\Roaming\npm\codex ENOENT
 ```
 
 The tool refused to fall back to `ask_local_agent` (correctly — that starts a fresh, empty session
@@ -24,7 +24,7 @@ that does not know this work).
   That path is used for **delegation** (`ask_local_agent` / `codex exec`), which is fine.
 - But the **live-session** door (`ask_live_session` → `src/tools/liveSessionTool.ts` →
   `src/agentBus/codexDelivery.ts`) runs `codex queue --thread <id> --message <text>`. On this Windows
-  host it resolves `codex` to the npm global shim `C:\Users\efso office\AppData\Roaming\npm\codex` —
+  host it resolves `codex` to the npm global shim `C:\Users\jo smith\AppData\Roaming\npm\codex` —
   an **extensionless Unix shell script** (421 bytes), not a Windows executable. Node's `spawn` cannot
   execute it directly → `ENOENT`. The runnable entry points are `codex.cmd` / `codex.ps1` /
   `node_modules\@openai\codex\bin\codex.js`.
@@ -35,7 +35,7 @@ that does not know this work).
 The documented agent-bus door, driven directly from Git Bash:
 
 ```
-node "C:/Users/efso office/AppData/Roaming/npm/node_modules/@openai/codex/bin/codex.js" \
+node "C:/Users/jo smith/AppData/Roaming/npm/node_modules/@openai/codex/bin/codex.js" \
   queue --thread 01a0a9a1-2e7b-7713-af2f-d6cb159bf510 --message "<text>"
 ```
 

@@ -7,7 +7,10 @@ import { RemoteAttachmentStore } from './RemoteAttachmentStore';
 import type { ModelPickerDescriptor } from '../sidebar/ModelPickerGroups';
 import { resolveWorkspaceAliases, type WorkspaceAliasTarget } from './RemoteWorkspaceDiscovery';
 import { workspaceIdFor } from './RemoteWorkspaceHandoff';
+import type { WorkspaceSwitchModeChoice } from './types';
 import { createRemoteModelSpeedReader } from './remoteModelSpeed';
+import { approvalEnvFor } from '../sidebar/chatApprovalRules';
+import { approvalPolicyLinesForWorkspace } from '../sidebar/approvalPolicyRules';
 
 /**
  * What a RemoteController is configured with.
@@ -35,10 +38,22 @@ export interface RemoteControllerOptions {
   currentWorkspaceAlias?: string | undefined;
   /** Display name of the folder this window has open, alias or not. */
   currentWorkspaceName?: string | undefined;
+  getApprovalPolicyLines?: (() => readonly string[]) | undefined;
   workspaceNamesById?: Readonly<Record<string, string>>;
   switchWorkspace?:
-    | ((alias: string, channel: string, chatId: string) => Promise<() => Promise<void>>)
+    | ((
+        alias: string,
+        channel: string,
+        chatId: string,
+        mode: WorkspaceSwitchModeChoice,
+      ) => Promise<() => Promise<void>>)
     | undefined;
+  /**
+   * What the target window will load, checked before a switch is recorded: a
+   * reason string means do not switch, `undefined` means the target can answer
+   * the phone. See `remoteWorkspacePreflight`.
+   */
+  workspacePreflight?: (alias: string, channel: string) => string | undefined;
   inactivityTimeoutMinutes?: number;
   /** Seconds to keep a recognized /command before deleting it from Telegram; 0/absent disables. */
   deleteCommandMessagesAfter?: number;
@@ -126,7 +141,10 @@ export interface RemoteControllerOptionsDeps {
     alias: string,
     channel: string,
     chatId: string,
+    mode: WorkspaceSwitchModeChoice,
   ) => Promise<() => Promise<void>>;
+  /** The same preflight, with the alias resolved against the applied config. */
+  workspacePreflight?: (config: ForgeConfig, alias: string, channel: string) => string | undefined;
   /**
    * The shared `JobStore` (B3), created once in extension.ts and passed to
    * both the scheduler and the `manage_jobs` tool. Stable across config
@@ -149,6 +167,11 @@ export function buildRemoteControllerOptions(
   const remote = config.remote;
   if (!remote) throw new Error('Forge remote configuration is unavailable.');
   const aliases = workspaceAliases(config, deps.workspaceRoot);
+  const approvalContext = approvalEnvFor({
+    getConfig: () => config,
+    ...(deps.workspaceRoot ? { workspaceRoot: deps.workspaceRoot } : {}),
+    ...(deps.configPath ? { configPath: deps.configPath } : {}),
+  }).ctx;
   return {
     workspaceId: deps.workspaceId,
     queueLimit: remote.queue_limit,
@@ -163,6 +186,8 @@ export function buildRemoteControllerOptions(
     })),
     getLatestModelSpeed: createRemoteModelSpeedReader(config),
     ...(deps.configPath ? { configPath: deps.configPath } : {}),
+    getApprovalPolicyLines: () =>
+      approvalPolicyLinesForWorkspace(config.approvals, deps.workspaceRoot, approvalContext),
     ...(deps.isModelLoaded ? { isModelLoaded: deps.isModelLoaded } : {}),
     ...(deps.workspaceRoot
       ? { attachmentStore: new RemoteAttachmentStore(deps.workspaceRoot) }
@@ -191,8 +216,14 @@ export function buildRemoteControllerOptions(
     })(),
     // The config is applied here, not by the caller: deps.switchWorkspace is
     // stable and the builder binds the current config at build time.
-    switchWorkspace: (alias, channel, chatId) =>
-      deps.switchWorkspace(config, alias, channel, chatId),
+    switchWorkspace: (alias, channel, chatId, mode) =>
+      deps.switchWorkspace(config, alias, channel, chatId, mode),
+    ...(deps.workspacePreflight
+      ? {
+          workspacePreflight: (alias: string, channel: string) =>
+            deps.workspacePreflight!(config, alias, channel),
+        }
+      : {}),
     inactivityTimeoutMinutes: remote.auth.inactivity_timeout_minutes,
     deleteCommandMessagesAfter: remote.delete_command_messages_after,
     deleteCommandRepliesAfter: remote.delete_command_replies_after,

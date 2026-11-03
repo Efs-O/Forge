@@ -261,6 +261,25 @@ describe('Telegram inbound mapping — status bubble Stop button', () => {
   });
 });
 
+describe('Telegram inbound mapping — approval buttons', () => {
+  it('maps the allow-for-chat callback into the shared action decision', () => {
+    const callback = {
+      update_id: 79,
+      callback_query: {
+        id: 'cb-allow-chat',
+        from: { id: 123 },
+        data: `r:${'A'.repeat(24)}`,
+        message: { message_id: 56, date: 1_700_000_000, chat: { id: 99, type: 'private' } },
+      },
+    };
+    expect(telegramUpdateToEvent(TelegramUpdateSchema.parse(callback))).toMatchObject({
+      kind: 'action',
+      action: 'allow_chat',
+      correlationId: 'A'.repeat(24),
+    });
+  });
+});
+
 /** A reply to a session question is how a phone answers it without the question id. */
 describe('Telegram inbound mapping — replies', () => {
   it('keeps the replied-to message id on a text message, and omits it otherwise', () => {

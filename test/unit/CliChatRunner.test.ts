@@ -2,18 +2,10 @@ import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { CheckpointStack } from '../../src/checkpoint/CheckpointStack';
 import { buildCliChatTask, buildCliResumeTask, runCliChat } from '../../src/agents/CliChatRunner';
 import type { CliAgentDriver } from '../../src/agents/CliAgentDriver';
 
 const roots: string[] = [];
-
-/** Checkpoint storage outside the workspace root, so the snapshot does not see it. */
-function checkpointRoot(): string {
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'forge-cli-checkpoints-'));
-  roots.push(root);
-  return root;
-}
 
 afterEach(() => {
   for (const root of roots.splice(0)) fs.rmSync(root, { recursive: true, force: true });
@@ -61,14 +53,12 @@ describe('CliChatRunner', () => {
     expect(prompt).not.toContain('First request');
   });
 
-  it('runs one-shot Codex chat unrestricted, streams activity, and joins streamed and final text', async () => {
+  it('runs one-shot Codex chat without Forge rollback and joins streamed and final text', async () => {
     const root = fs.mkdtempSync(path.join(os.tmpdir(), 'forge-cli-chat-'));
     roots.push(root);
     fs.writeFileSync(path.join(root, 'existing.txt'), 'before');
     fs.mkdirSync(path.join(root, '.forge'));
     fs.writeFileSync(path.join(root, '.forge', 'config.yaml'), 'live-config');
-    const stack = new CheckpointStack({ storageRoot: checkpointRoot() });
-    const checkpoint = stack.beginTurn('turn-1');
     const onText = vi.fn();
     const onStatus = vi.fn();
     const run = vi.fn(async (options: Parameters<CliAgentDriver['run']>[0]) => {
@@ -85,7 +75,6 @@ describe('CliChatRunner', () => {
       model: { name: 'codex', provider: 'cli', cli: 'codex' },
       messages: [{ role: 'user', content: 'Edit the file' }],
       workspaceRoot: root,
-      checkpoint,
       signal: new AbortController().signal,
       onText,
       onStatus,
@@ -97,11 +86,9 @@ describe('CliChatRunner', () => {
     expect(result.assistantText).toBe('Working.\n\nDone.');
     expect(onText).toHaveBeenLastCalledWith('\nDone.');
 
-    stack.commitTurn(checkpoint);
-    expect(stack.canUndo()).toBe(true);
-    await stack.undo();
-    expect(fs.readFileSync(path.join(root, 'existing.txt'), 'utf8')).toBe('before');
-    expect(fs.existsSync(path.join(root, 'created.txt'))).toBe(false);
+    expect(onStatus.mock.calls.flat().join('\n')).not.toMatch(/rollback checkpoint/i);
+    expect(fs.readFileSync(path.join(root, 'existing.txt'), 'utf8')).toBe('after');
+    expect(fs.existsSync(path.join(root, 'created.txt'))).toBe(true);
     expect(fs.readFileSync(path.join(root, '.forge', 'config.yaml'), 'utf8')).toBe(
       'not-checkpointed',
     );
@@ -110,8 +97,6 @@ describe('CliChatRunner', () => {
   it('forwards session and model selection to the CLI driver', async () => {
     const root = fs.mkdtempSync(path.join(os.tmpdir(), 'forge-cli-resume-'));
     roots.push(root);
-    const stack = new CheckpointStack({ storageRoot: checkpointRoot() });
-    const checkpoint = stack.beginTurn('turn-resume');
     const run = vi.fn(async () => ({
       status: 'completed' as const,
       finalText: 'Continued.',
@@ -133,7 +118,6 @@ describe('CliChatRunner', () => {
       ],
       sessionId: 'session-1',
       workspaceRoot: root,
-      checkpoint,
       signal: new AbortController().signal,
       onText: vi.fn(),
       onStatus: vi.fn(),
@@ -149,17 +133,11 @@ describe('CliChatRunner', () => {
     );
   });
 
-  it('runs without scanning when external CLI rollback is explicitly disabled', async () => {
+  it('does not scan or emit checkpoint status on a direct Claude turn', async () => {
     const root = fs.mkdtempSync(path.join(os.tmpdir(), 'forge-cli-no-rollback-'));
     roots.push(root);
     const target = path.join(root, 'large.txt');
     fs.writeFileSync(target, '12345');
-    const stack = new CheckpointStack({
-      storageRoot: checkpointRoot(),
-      limits: { maxBytes: 4, maxFiles: 100 },
-      externalCliRollbackEnabled: false,
-    });
-    const checkpoint = stack.beginTurn('turn-no-rollback');
     const onStatus = vi.fn();
     const run = vi.fn(async () => {
       fs.writeFileSync(target, 'changed');
@@ -171,19 +149,14 @@ describe('CliChatRunner', () => {
       model: { name: 'claude-code', provider: 'cli', cli: 'claude' },
       messages: [{ role: 'user', content: 'hello' }],
       workspaceRoot: root,
-      checkpoint,
       signal: new AbortController().signal,
       onText: vi.fn(),
       onStatus,
       driver: { run } as unknown as CliAgentDriver,
     });
 
-    stack.commitTurn(checkpoint);
     expect(run).toHaveBeenCalledOnce();
-    expect(onStatus).toHaveBeenCalledWith(
-      expect.stringMatching(/rollback protection is disabled/i),
-    );
-    expect(stack.canUndo()).toBe(false);
+    expect(onStatus).not.toHaveBeenCalled();
     expect(fs.readFileSync(target, 'utf8')).toBe('changed');
   });
 });

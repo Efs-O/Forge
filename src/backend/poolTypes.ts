@@ -8,11 +8,20 @@ import type { BackendController } from './BackendController';
 import type { ForgeConfig } from '../config/types';
 import type { DelegationCheck, DelegationHold } from './DelegationGate';
 import type { BackendProcess } from '../system/SystemReport';
+import type { ExternalTurnLease } from './SharedRuntimeRegistry';
 
 export interface IBackendPool {
   acquire(modelName: string): Promise<BackendController>;
+  /** Free VRAM for a managed external server (Strata) and start it if it is down. */
+  prepareExternal?(modelName: string): Promise<void>;
   /** Acquire a backend for an active turn and pin its slot until release. */
   acquireForTurn?(modelName: string): Promise<BackendTurnLease>;
+  /** Hold a managed external server across a full sidebar turn in every window. */
+  acquireExternalTurnHold?(
+    modelName: string,
+    conversationId: string,
+    title: string,
+  ): Promise<ExternalTurnLease>;
   /** Read-only capacity query: would delegating from `primaryModel` to
    *  `targetModel` be possible without evicting any loaded backend? Never
    *  mutates pool state and never triggers the LRU eviction in acquire(). */
@@ -62,4 +71,17 @@ export interface IBackendPool {
 export interface BackendTurnLease {
   readonly backend: BackendController;
   release(): Promise<void>;
+}
+
+/**
+ * Remote (laptop) lease bookkeeping BackendPool must consult before it frees a
+ * model. Implemented by `ModelStarterLeases`, called by `BackendPool.release`
+ * and `stopAll` so a desktop unload can never leave a lease's pin behind — a
+ * pin with no lease would report the model busy for the rest of the window.
+ */
+export interface RemoteLeaseReleaser {
+  /** Drop every remote lease held on this pool key. */
+  releaseLeasesFor(modelKey: string): void;
+  /** Drop every remote lease this window holds, for `stopAll` and `/unloadall`. */
+  releaseAllLeases(): void;
 }

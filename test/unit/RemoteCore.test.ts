@@ -381,9 +381,11 @@ describe('RemoteController with fake channel', () => {
     await vi.waitFor(() =>
       expect(channel.sent.some((item) => item.text === 'real answer')).toBe(true),
     );
-    await vi.waitFor(() =>
-      expect(channel.edits.some((item) => item.text === 'Forge: completed.')).toBe(true),
-    );
+    // Delivered first, then torn down: with the answer on screen the working
+    // line goes at once instead of becoming a `Forge: completed.` the phone then
+    // has to watch disappear ten seconds later.
+    expect(channel.edits.some((item) => item.text === 'Forge: completed.')).toBe(false);
+    await vi.waitFor(() => expect(channel.deleted.length).toBeGreaterThan(0));
     const duplicate = await channel.emit(prompt);
     expect(duplicate).toMatchObject({ kind: 'duplicate', state: 'completed' });
     await controller.stop();
@@ -892,7 +894,8 @@ describe('RemoteController with fake channel', () => {
             : { kind: 'failed' as const, error: 'denied' };
         },
       ),
-      resolveApproval: (id: string, approved: boolean) => {
+      resolveApproval: (id: string, decision: 'approve' | 'allowChat' | 'decline') => {
+        const approved = decision !== 'decline';
         sink?.resolved({
           id,
           toolName: 'write_file',
@@ -900,6 +903,7 @@ describe('RemoteController with fake channel', () => {
           dangerous: false,
           conversationId: 'c1',
           approved,
+          decision,
           reason: 'resolved',
         });
         finishApproval?.(approved);
@@ -1206,12 +1210,21 @@ describe('remote compaction progress notifications', () => {
       await controller.enqueueHostNotification('c1', 'Forge: compacting…');
       // The delivery loop is async; wait for the outbox to drain. The old
       // fixed 50×10 ms poll expired under load; a waitFor budget does not
-      // (audit 2026-09-26 F1, correction from Codex review).
-      await vi.waitFor(() => expect(state.pendingOutbox()).toHaveLength(0), { timeout: 15_000 });
-      expect(channel.sent).toContainEqual(
-        expect.objectContaining({ chatId: 'chat-a', text: 'Forge: compacting…' }),
+      // (audit 2026-09-26 F1, correction from Codex review). The queue can leave
+      // `pendingOutbox()` before the channel has recorded the send, so the wait
+      // has to cover the send too: asserting on `channel.sent` straight after
+      // the queue check read a value that had not settled, and it failed under a
+      // loaded `npm run ci` with `expected [] to deep equally contain`.
+      await vi.waitFor(
+        () => {
+          expect(state.pendingOutbox()).toHaveLength(0);
+          expect(channel.sent).toContainEqual(
+            expect.objectContaining({ chatId: 'chat-a', text: 'Forge: compacting…' }),
+          );
+          expect(state.outboxHealth().pending).toBe(0);
+        },
+        { timeout: 15_000 },
       );
-      expect(state.outboxHealth().pending).toBe(0);
     } finally {
       await controller.stop();
     }

@@ -1,4 +1,14 @@
 import type { RegisteredTool } from './ToolRegistry';
+import type { ForgeConfig } from '../config/types';
+import {
+  secretApprovalKeyFor,
+  secretCardReason,
+  secretDeclineHint,
+  secretPatternForArgument,
+  secretPatternForTaint,
+} from './secretPaths';
+import { markConversationReadSecret } from './exfilTaint';
+import { resolveWorkspacePath } from '../util/WorkspacePaths';
 import { capShellOutput } from './shellOutput';
 import { DEFAULT_TOOL_OUTPUT_LIMITS } from './toolOutputLimits';
 import {
@@ -26,7 +36,34 @@ function requireParams(operation: Operation, args: Record<string, unknown>): voi
     throw new Error(`git_read operation "${operation}" needs ${missing.join(', ')}`);
 }
 
-export function makeGitReadTool(): RegisteredTool {
+export function makeGitReadTool(
+  deps: {
+    getConfig?: () => ForgeConfig;
+    home?: string;
+    platform?: NodeJS.Platform;
+  } = {},
+): RegisteredTool {
+  /** `git show HEAD:.env` and a diff limited to `.env` print the file's
+   *  contents, so they are a read of it: the same gate as `read_file`, and
+   *  `git status`/`log` name paths without printing their contents, so they
+   *  stay ungated. */
+  const secretPatternOf = (candidate: string): string | undefined =>
+    secretPatternForArgument(candidate, deps.getConfig?.(), resolveWorkspacePath, deps);
+  /** The taint question, with nothing allow-listed: the allow list may skip
+   *  this call's card, never the flag that marks the chat for its next fetch. */
+  const secretTaintOf = (candidate: string): string | undefined =>
+    secretPatternForTaint(candidate, deps.getConfig?.(), resolveWorkspacePath, deps);
+  /** The paths this call could print the contents of. `ref` accepts the
+   *  `ref:path` form, and `path` limits a `diff` or a `blame`, so all three are
+   *  reads of that file; `status` and `log` name paths without printing their
+   *  contents, and take neither of these arguments. */
+  const contentPaths = (args: Record<string, unknown>): string[] => {
+    const ref = typeof args['ref'] === 'string' ? args['ref'] : '';
+    const refPath = ref.includes(':') ? ref.slice(ref.indexOf(':') + 1) : '';
+    return [typeof args['path'] === 'string' ? args['path'] : '', refPath].filter(
+      (value) => value.length > 0,
+    );
+  };
   return {
     definition: {
       type: 'function',
@@ -73,6 +110,29 @@ export function makeGitReadTool(): RegisteredTool {
       },
     },
     permission: 'git-read',
+    approval: (args) => {
+      const candidates = contentPaths(args);
+      const secretReads = candidates.filter(
+        (candidate) => secretPatternOf(candidate) !== undefined,
+      );
+      if (secretReads.length === 0) return undefined;
+      const candidate = secretReads[0]!;
+      const pattern = secretPatternOf(candidate)!;
+      // The same rule as `read_file`: one file is a key, two files are not, because a
+      // rule for the first would leave the second printing its contents unasked.
+      const approvalKey =
+        secretReads.length === 1
+          ? secretApprovalKeyFor(candidate, resolveWorkspacePath, deps)
+          : undefined;
+      return {
+        detail: `${candidate}\nMatched secret path rule: ${pattern}`,
+        dangerous: true,
+        gateKind: 'ownerGate',
+        cardReason: secretCardReason(pattern),
+        declineHint: secretDeclineHint(pattern),
+        ...(approvalKey ? { approvalKey } : {}),
+      };
+    },
     handler: async (args, context) => {
       const operation = args['operation'] as Operation;
       requireParams(operation, args);
@@ -85,6 +145,12 @@ export function makeGitReadTool(): RegisteredTool {
         context?.toolCallId ?? 'unknown',
         context?.outputLimits?.shellInlineChars ?? DEFAULT_TOOL_OUTPUT_LIMITS.shellInlineChars,
       );
+      // A secret printed here is a secret this chat has read, allow-listed or
+      // not: `git show HEAD:.env` of a path the owner put in
+      // `permissions.secret_paths_allow` gets no card, and without the flag its
+      // next fetch would leave the machine as if nothing had been read.
+      if (contentPaths(args).some((candidate) => secretTaintOf(candidate)))
+        markConversationReadSecret(context?.conversationId);
       return capped.text;
     },
   };

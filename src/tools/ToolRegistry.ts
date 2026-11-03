@@ -1,147 +1,25 @@
-import type { ChatMessage, ContentPart, ToolDefinition } from '../llm/types';
-import type { PlanItem } from '../sidebar/sessionTypes';
-import type { CheckinStage } from '../agent/elapsedTimeNote';
+import type { ToolDefinition } from '../llm/types';
 import { recordNativeLazyTool } from './lazyToolGroups';
 import { invalidArrayJsonDiagnostic } from './argCoercion';
-import type { ToolOutputLimits } from './toolOutputLimits';
-import type { ConversationRuntime } from '../sidebar/sessionTypes';
-import type { CheckpointSession } from '../checkpoint/CheckpointStack';
-
-export const ALL_TOOL_PERMISSIONS = [
-  'read',
-  'write',
-  'delete',
-  'terminal',
-  'headless',
-  'search',
-  'fetch',
-  'git-read',
-  'git-write',
-  'browser',
-  'desktop',
-  'delegate',
-] as const;
-
-export type ToolPermission = (typeof ALL_TOOL_PERMISSIONS)[number];
-
-export interface ToolApprovalMetadata {
-  dangerous?: boolean;
-  detail?: string;
-  /**
-   * What the agent should do instead, shown back to it when the user declines.
-   *
-   * The shell classifier already knows the sanctioned alternative for every
-   * rule it matches, and that string used to be shown only for `refused`
-   * commands (`shellTool.ts`). A declined `dangerous` call came back as a bare
-   * `User declined: shell`, so the agent retried the same command or invented
-   * another one; the hint is what turns a refusal into a course change.
-   */
-  declineHint?: string;
-}
-
-export interface MultimodalToolResult {
-  text: string;
-  content: ContentPart[];
-}
-
-export type ToolHandlerResult = string | MultimodalToolResult;
-
-export interface ToolHandler {
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any -- tool args are schema-validated at call site
-  (args: Record<string, unknown>, context?: ToolHandlerContext): Promise<ToolHandlerResult>;
-}
-
-export interface ToolHandlerContext {
-  beforeMutate(paths: string[]): void;
-  /** Caller's AbortSignal, threaded through for long-running tools. */
-  abortSignal?: AbortSignal;
-  /** Conversation the call belongs to. */
-  conversationId?: string;
-  /** Current call id, used by shell spill files. */
-  toolCallId?: string;
-  /** Resolved model name, used by model-specific tool-group refusals. */
-  modelName?: string;
-  /** Whether the resolved model accepts image input. */
-  isVisionModel?: boolean;
-  /** Stable, configuration-derived output bounds for the selected model. */
-  outputLimits?: ToolOutputLimits;
-  /** Full raw transcript for the current conversation. Read-only tools may use
-   * this to recover an earlier result without widening the model prompt. */
-  conversationMessages?: readonly ChatMessage[];
-  /**
-   * Records the conversation's task plan (`update_plan`).
-   *
-   * A callback rather than a store handle, so `ToolDispatch` never gains one:
-   * `ModelTurn` owns the live conversation and supplies this closure, exactly
-   * as it already does for `recordFileDiff`. The host stamps the timestamp —
-   * the tool supplies items only.
-   */
-  setPlan?: (items: PlanItem[]) => void;
-  /**
-   * Sets this conversation's check-in (`set_checkin`) and says when it is due.
-   *
-   * The same shape as `setPlan`: the tool supplies the estimate, the host owns
-   * the clock — here `ElapsedTimeNote`, which also delivers the note at the
-   * next tool-round gap. Optional because the note is registered late and a
-   * prompt run outside a conversation turn has no clock to write to; the tool
-   * refuses when it gets nothing back.
-   */
-  setCheckin?: (minutes: number, byThen: CheckinStage) => { dueAt: number } | undefined;
-  tellArrived?: (callback: () => void) => () => void;
-  /** Active chat/checkpoint supplied by ModelTurn for session-scoped agent tools. */
-  conversation?: ConversationRuntime;
-  checkpoint?: CheckpointSession;
-  persistConversation?: () => void;
-}
-
-interface ToolMutation {
-  /** Paths known from arguments/editor state before the handler executes. */
-  paths(args: Record<string, unknown>): string[];
-  /** Whether Forge should render file diffs for these paths. */
-  showDiff?: boolean;
-}
-
-export interface RegisteredTool {
-  definition: ToolDefinition;
-  permission: ToolPermission;
-  additionalPermissions?: readonly ToolPermission[];
-  /** Extra permissions derived only after validated call arguments exist. Never used for advertisement. */
-  additionalPermissionsForArgs?: (args: Record<string, unknown>) => readonly ToolPermission[];
-  handler: ToolHandler;
-  mutation?: ToolMutation;
-  /** Mutates VS Code workspace state, which has no file path for a checkpoint. */
-  workspaceStateMutation?: boolean;
-  /** May resolve state first (the desktop focus approval names the window it found). */
-  approval?: (
-    args: Record<string, unknown>,
-  ) => ToolApprovalMetadata | undefined | Promise<ToolApprovalMetadata | undefined>;
-  /**
-   * The handler's inputs and effects are structurally bounded enough to run
-   * without the normal per-call confirmation. This must never be used for a
-   * general shell or a mutable operation.
-   */
-  autoApprove?: boolean;
-  /** Per-call auto approval for narrowly classified inputs such as read-only shell commands. */
-  autoApproveIf?: (args: Record<string, unknown>) => boolean;
-  /** When present, called during definitions() to suppress advertisement without removing the tool. */
-  advertise?: () => boolean;
-  /**
-   * When present, called during definitions() to advertise a definition built
-   * from current state instead of the static one — e.g. naming the delegation
-   * targets in the current config.yaml. `definition` stays the canonical
-   * literal (the tool-audit catalog extracts it statically), so this must
-   * return the same tool name and schema shape.
-   */
-  describe?: () => ToolDefinition;
-  /**
-   * When present, the tool requires a vision projector (mmproj). Returns the
-   * refusal message (naming the model) for a non-vision model. This is the
-   * single source of truth for the vision gate: both the advertise filter and
-   * the dispatch refusal derive from it, so the two halves cannot drift apart.
-   */
-  requiresVision?: (modelName: string) => string;
-}
-
+import { advertisedValues, missingArgumentError } from './toolErrorText';
+/** The declarations live in `toolContract.ts`; re-exported from here so every
+ *  consumer that has always imported them from the registry keeps working. */
+export {
+  ALL_TOOL_PERMISSIONS,
+  type ToolPermission,
+  type ToolApprovalMetadata,
+  type MultimodalToolResult,
+  type ToolHandlerResult,
+  type ToolHandler,
+  type ToolHandlerContext,
+  type RegisteredTool,
+} from './toolContract';
+import {
+  type ToolPermission,
+  type ToolHandlerResult,
+  type ToolHandlerContext,
+  type RegisteredTool,
+} from './toolContract';
 /** A declared property, narrowed to the two fields the refusals read. */
 type DeclaredProperty = { type?: unknown; items?: unknown };
 
@@ -291,6 +169,8 @@ export class ToolRegistry {
     const { name, parameters } = tool.definition.function;
     // JSON.parse can hand back `null` for a call whose arguments were "null".
     const present: Record<string, unknown> = typeof args === 'object' && args !== null ? args : {};
+    const preApproval = tool.refuseBeforeApproval?.(present);
+    if (preApproval) return preApproval;
     if (name === 'edit_file') {
       const stringArrayError = editFileStringArrayError(present);
       if (stringArrayError) return stringArrayError;
@@ -304,11 +184,18 @@ export class ToolRegistry {
       (key): key is string => typeof key === 'string' && present[key] === undefined,
     );
     if (missing.length > 0) {
-      if (missing.includes('path') && ['append_file', 'edit_file', 'write_file'].includes(name)) {
+      if (missing.includes('path') && ['edit_file', 'write_file'].includes(name)) {
         return missingPathError(name);
       }
-      const names = missing.map((key) => `"${key}"`).join(', ');
-      return `Error: ${name} is missing required argument${missing.length > 1 ? 's' : ''} ${names}. Resend the call with ${missing.length > 1 ? 'them' : 'it'} set.`;
+      return missingArgumentError(
+        name,
+        missing,
+        // The enum the model was shown this turn, not the one in the static
+        // schema — `toolErrorText.ts` owns that lookup and the sentence.
+        advertisedValues(
+          tool.describe ? tool.describe().function.parameters : tool.definition.function.parameters,
+        ),
+      );
     }
     const properties = parameters.properties;
     if (typeof properties !== 'object' || properties === null) return undefined;

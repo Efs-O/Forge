@@ -1,6 +1,8 @@
 import type { ForgeHostFacade } from '../sidebar/ForgeHostFacade';
 import { sortModelPickerEntries, type ModelPickerDescriptor } from '../sidebar/ModelPickerGroups';
 import { selectModelProfile } from './RemoteModelProfileSelection';
+import { dropWorkspaceConfirm } from './remoteWorkspaceCommand';
+import { selectWorkspaceMode } from './remoteWorkspaceModeChoice';
 import { SELECTION_TTL_MS } from './RemoteSelectionConstants';
 import { formatSelectionPage } from './remoteSelectionFormat';
 import type { RemoteRequestStore } from './RemoteRequestStore';
@@ -9,6 +11,7 @@ import type {
   RemoteInboundDisposition,
   RemoteInboundEvent,
   RemoteSelectionControls,
+  WorkspaceSwitchModeChoice,
 } from './types';
 
 const PAGE_SIZE = 10;
@@ -18,6 +21,8 @@ export interface RemoteSelectionContext {
   store: RemoteRequestStore;
   host: ForgeHostFacade;
   signal: AbortSignal;
+  /** The workspace this window has open — see `workspaceContextOf`. */
+  workspaceId: string;
   modelEntries: readonly ModelPickerDescriptor[];
   /** alias -> display name, from `remote.workspace_aliases`. */
   workspaceAliases: Readonly<Record<string, string>>;
@@ -25,6 +30,21 @@ export interface RemoteSelectionContext {
   currentWorkspaceAlias?: string | undefined;
   /** Display name of the folder this window has open, alias or not. */
   currentWorkspaceName?: string | undefined;
+  /**
+   * Present when a `/workspace` refusal can be answered by a tap: the
+   * workspace confirm keyboard runs the switch it was offering, so the
+   * selection context has to be able to reach it.
+   */
+  switchWorkspace?:
+    | ((
+        alias: string,
+        channel: string,
+        chatId: string,
+        mode: WorkspaceSwitchModeChoice,
+      ) => Promise<() => Promise<void>>)
+    | undefined;
+  /** Checked before a tapped confirmation is acted on: see `remoteWorkspacePreflight`. */
+  workspacePreflight?: (alias: string, channel: string) => string | undefined;
 }
 
 type TextEvent = Extract<RemoteInboundEvent, { kind: 'text' }>;
@@ -153,7 +173,15 @@ async function executeSelectionAction(
   context: RemoteSelectionContext,
 ): Promise<RemoteInboundDisposition> {
   if (event.action === 'select') {
-    return selectModelProfile(event, context);
+    // Two different keyboards send `select`: a model profile pick, and the
+    // answer to a refused `/workspace`. Routing both through
+    // `selectModelProfile` made a workspace tap read "profile choice is
+    // invalid" and left the refused switch waiting for an answer that never
+    // came. The kind is what tells them apart, and it is part of the callback
+    // the transport already validated.
+    return event.selectionKind === 'workspaces'
+      ? selectWorkspaceMode(event, context)
+      : selectModelProfile(event, context);
   }
   if (event.action === 'noop') return { kind: 'handled' };
   if (event.action === 'pick') {
@@ -164,6 +192,12 @@ async function executeSelectionAction(
   // or superseded list -- a second /models supersedes the first -- with a
   // permanently dead x Close button and no way out but Telegram's own delete.
   if (event.action === 'close') {
+    // A workspace keyboard's ✕ Close sits next to its ✕ Cancel and reads as
+    // "no", so it must drop the confirmation too — otherwise a typed `replace`
+    // still switches for the rest of the confirmation's 90 seconds after the
+    // owner closed the question. Dropping it on a numbered list is harmless:
+    // the next /workspace re-asks, and a stale yes is worse than an extra tap.
+    if (event.selectionKind === 'workspaces') dropWorkspaceConfirm(event.channel, event.chatId);
     await context.store.clearSelection(
       event.channel,
       event.chatId,

@@ -33,16 +33,21 @@ import {
   chatCapMessage,
   MAX_CONVERSATIONS,
   type ConversationRuntime,
+  type TitleSource,
 } from './sessionTypes';
 import { getLogger } from '../util/logger';
 import type { ArchivedSessions } from './ArchivedSessions';
+import type { ConversationRetentionScheduler } from './ConversationRetentionScheduler';
 import { persistedToRuntime } from './sessionPersistence';
 import { TabModelRelease } from './TabModelRelease';
+import { archiveExpiredConversation } from './ConversationTabRetention';
 import { retainLiveMemoryKeys } from './compactionWindow';
 import { deactivateLazyGroups } from '../tools/lazyToolGroups';
 import { forgetConversation, forgetIfDropped } from '../agentLinks/chatAgentLinks';
-import { checkpointReadyMessage } from './checkpointStats';
 import { deleteRequestDumps } from '../sessions/requestDump';
+import { confirmDraftClose, confirmDraftDeletion } from './conversationDraftDisposition';
+import { resetConversationTabApprovals } from './ConversationTabApprovals';
+import { repostPendingCheckpoint } from './ConversationTabCheckpoints';
 
 const log = getLogger();
 
@@ -53,7 +58,8 @@ export interface ConversationTabsDeps {
   getSidebar: () => SidebarRuntime;
   setSidebar: (next: SidebarRuntime) => void;
   setActiveModel: (name: string | null) => void;
-  persistSession: () => void;
+  persistSession: () => void | Promise<boolean>;
+  persistSidebar: (next: SidebarRuntime) => Promise<boolean>;
   postModels: () => void;
   postSessionSync: () => void;
   pool: IBackendPool;
@@ -65,19 +71,21 @@ export interface ConversationTabsDeps {
   post: (msg: HostToWebview) => void;
   baseOf: (id: string | null | undefined) => string | null;
   /**
-   * Republishes models, session, and the context budget after a tab change.
+   * Republishes models, session, and the context budget after a tab or model change.
    *
    * `pointerOnly` says the transcripts are untouched and only the active id
    * moved, so the session can be persisted as a single string instead of a
    * full 16 MB rebuild on the extension host.
    */
-  refreshUi: (options?: { pointerOnly?: boolean }) => void;
+  refreshUi: (options?: { pointerOnly?: boolean; sessionPersisted?: boolean }) => void;
   isConversationEvictable: (id: string) => boolean;
   /**
    * The labels for what blocks archiving `id`, empty when nothing does.
    * Same source as `isConversationEvictable`, so a refusal names real reasons.
    */
   evictionBlockers: (id: string) => string[];
+  isConversationDrafted: (id: string) => boolean | undefined;
+  retention: ConversationRetentionScheduler;
   archivedSessions?: ArchivedSessions;
   liveMemoryKeys?: () => readonly string[];
 }
@@ -108,21 +116,12 @@ export class ConversationTabs {
 
   create(options: { activate?: boolean } = {}): ConversationRuntime | undefined {
     const leavingId = this.deps.getSidebar().activeConversationId;
-    let leftActiveBeforeCreate = false;
+    if (options.activate !== false) this.deps.retention.markActivity(leavingId);
     // Pin the current selection onto the new tab. Left unpinned it tracked the
     // global default, so switching to another tab and back silently re-pointed
     // this one at that tab's model.
     let sidebar = this.deps.getSidebar();
     let result = opNewConversation(sidebar, this.deps.getConfig().active_model, options);
-    if (result.atCap && options.activate !== false && leavingId) {
-      const left = this.leaveActiveConversation(sidebar, leavingId);
-      if (left !== sidebar) {
-        sidebar = left;
-        this.deps.setSidebar(sidebar);
-        leftActiveBeforeCreate = true;
-        result = opNewConversation(sidebar, this.deps.getConfig().active_model, options);
-      }
-    }
     if (result.atCap) {
       // Archive first, then persist the updated open set. Load-time dedupe in
       // sessionPersistence keeps the open copy if a crash splits those writes.
@@ -141,12 +140,9 @@ export class ConversationTabs {
       void vscode.window.showWarningMessage(chatCapMessage(this.capBlockers()));
       return undefined;
     }
-    const nextSidebar =
-      options.activate === false || leftActiveBeforeCreate
-        ? result.sidebar
-        : this.leaveActiveConversation(result.sidebar, leavingId);
-    this.deps.setSidebar(nextSidebar);
-    const created = nextSidebar.conversations.find((conv) => conv.id === result.newId);
+    this.deps.setSidebar(result.sidebar);
+    const created = result.sidebar.conversations.find((conv) => conv.id === result.newId);
+    this.deps.retention.refresh();
     if (options.activate === false) {
       this.deps.persistSession();
       this.deps.postSessionSync();
@@ -178,9 +174,7 @@ export class ConversationTabs {
     const outgoing = conv.active_model ?? this.deps.getConfig().active_model ?? null;
     this.deps.setActiveModel(name);
     opSetActiveConversationModel(this.deps.getSidebar(), name);
-    this.deps.persistSession();
-    this.deps.postModels();
-    this.deps.postSessionSync();
+    this.deps.refreshUi();
     // `max_simultaneous_models` is cross-conversation headroom (worker fleet,
     // delegation, a second tab). Swapping the model *within* one tab is not a
     // request for a second resident model: without this, picking a 27B while a
@@ -193,32 +187,39 @@ export class ConversationTabs {
   setModelById(id: string, name: string | null): boolean {
     const updated = opSetConversationModel(this.deps.getSidebar(), id, name);
     if (!updated) return false;
-    this.deps.persistSession();
-    this.deps.postSessionSync();
-    if (id === this.deps.getSidebar().activeConversationId) this.deps.postModels();
+    if (id === this.deps.getSidebar().activeConversationId) this.deps.refreshUi();
+    else {
+      this.deps.persistSession();
+      this.deps.postSessionSync();
+    }
     return true;
   }
 
   switch(id: string): void {
     const sidebar = this.deps.getSidebar();
     const leavingId = sidebar.activeConversationId;
-    const result = opSwitchConversation(sidebar, id);
+    if (!sidebar.conversations.some((conversation) => conversation.id === id)) return;
+    if (id !== leavingId) this.deps.retention.markActivity(leavingId);
+    const result = opSwitchConversation(this.deps.getSidebar(), id);
     if (!result) return;
-    const nextSidebar =
-      id === leavingId ? result.sidebar : this.leaveActiveConversation(result.sidebar, leavingId);
-    const archived = nextSidebar !== result.sidebar;
-    this.deps.setSidebar(nextSidebar);
+    this.deps.setSidebar(result.sidebar);
+    if (id !== leavingId) this.deps.retention.markActivity(id);
+    this.deps.retention.refresh();
     if (result.activeModelOverride) this.deps.setActiveModel(result.activeModelOverride);
     // No failure-tracker reset: a streak belongs to its conversation and
     // survives a switch away and back.
     // Without an archive, a switch changes only the active id and can use the
     // pointer-only save. Archiving also changes the open set and history.
-    this.deps.refreshUi(archived ? undefined : { pointerOnly: true });
+    this.deps.refreshUi({ pointerOnly: true });
     this.deps.events.onConversationSwitched?.(this.deps.getConfig().active_model ?? null);
   }
 
   async close(id: string): Promise<void> {
     const conv = this.deps.getSidebar().conversations.find((c) => c.id === id);
+    if (!conv) return;
+    const draft = this.deps.isConversationDrafted(id);
+    if (!(await confirmDraftClose(conv.title, draft))) return;
+    this.deps.retention.markActivity(id);
     const modelName = conv?.active_model;
 
     // Before the stop, as in delete(): a send still saving attachments or
@@ -240,6 +241,7 @@ export class ConversationTabs {
       .conversations.find((c) => c.id === result.newActiveId);
     if (nextActive?.active_model) this.deps.setActiveModel(nextActive.active_model);
     this.deps.refreshUi();
+    this.deps.retention.refresh();
     if (modelName) this.release.offerUnload(modelName);
   }
 
@@ -268,26 +270,21 @@ export class ConversationTabs {
     });
   }
 
-  /** Sweep eligible background chats once the restored session and gates are ready. */
-  sweepIdleConversations(): void {
-    const initial = this.deps.getSidebar();
-    let updated = initial;
-    for (const conversation of initial.conversations) {
-      if (conversation.id === initial.activeConversationId) continue;
-      updated = this.leaveActiveConversation(updated, conversation.id);
-    }
-    if (updated === initial) return;
-    this.deps.setSidebar(updated);
-    this.deps.refreshUi();
+  /** Scheduler callback: re-read every mutable condition before archiving. */
+  archiveExpired(id: string, expectedActivityAt: number): Promise<boolean> {
+    return archiveExpiredConversation(this.deps, id, expectedActivityAt, (evictedId, remaining) =>
+      this.disposeEvictedConversation(evictedId, remaining),
+    );
   }
 
-  /** Apply the shared eviction gate and existing close/archive path to one chat. */
-  private leaveActiveConversation(sidebar: SidebarRuntime, id: string): SidebarRuntime {
-    if (!this.deps.isConversationEvictable(id)) return sidebar;
-    const closed = opCloseConversation(sidebar, id);
-    if (!closed) return sidebar;
-    this.disposeEvictedConversation(id, closed.sidebar);
-    return closed.sidebar;
+  refreshRetention = (): void => this.deps.retention.refresh();
+
+  startRetention = (): void => this.deps.retention.start();
+
+  disposeRetention = (): void => this.deps.retention.dispose();
+
+  async setKeepOpen(id: string, keepOpen: boolean): Promise<void> {
+    if (await this.deps.retention.setKeepOpen(id, keepOpen)) this.deps.postSessionSync();
   }
   async deleteConversation(id: string): Promise<void> {
     let sidebar = this.deps.getSidebar();
@@ -314,8 +311,11 @@ export class ConversationTabs {
     const target = conversation ?? archived;
     if (!target) return;
 
+    const draft = conversation ? this.deps.isConversationDrafted(id) : false;
+    if (!(await confirmDraftDeletion(target.title, draft))) return;
+
     const choice = await vscode.window.showWarningMessage(
-      `Permanently delete "${target.title}"? This conversation cannot be recovered.`,
+      `Permanently delete "${target.title}"? This conversation cannot be recovered.${draft ? ' Its unsent draft and attachments will also be discarded.' : ''}`,
       { modal: true },
       'Delete',
     );
@@ -340,6 +340,7 @@ export class ConversationTabs {
       .conversations.find((c) => c.id === result.newActiveId);
     if (nextActive?.active_model) this.deps.setActiveModel(nextActive.active_model);
     this.deps.refreshUi();
+    this.deps.retention.refresh();
     if (modelName) this.release.offerUnload(modelName);
   }
 
@@ -351,39 +352,45 @@ export class ConversationTabs {
    * excludes the visible chat from the candidate set exactly as
    * `archiveLeastRecent` does, and reports the cap when that leaves nothing.
    */
-  capBlockers(options: { activate?: boolean } = {}): string[] {
+  capBlockers(_options: { activate?: boolean } = {}): string[] {
     const sidebar = this.deps.getSidebar();
     if (sidebar.conversations.length < MAX_CONVERSATIONS) return [];
     const counts = new Map<string, number>();
+    if (!this.deps.retention.isEnabled()) counts.set('auto-archive is disabled', 1);
     for (const conversation of sidebar.conversations) {
-      if (options.activate === false && conversation.id === sidebar.activeConversationId) continue;
+      if (conversation.id === sidebar.activeConversationId) continue;
       const blockers = this.deps.evictionBlockers(conversation.id);
-      if (blockers.length === 0) return [];
+      if (blockers.length === 0 && this.deps.retention.isExpired(conversation)) return [];
       for (const label of blockers) counts.set(label, (counts.get(label) ?? 0) + 1);
+      if (conversation.keep_open) counts.set('kept open', (counts.get('kept open') ?? 0) + 1);
+      else if (this.deps.retention.isEnabled() && !this.deps.retention.isExpired(conversation))
+        counts.set(
+          'within the auto-archive grace period',
+          (counts.get('within the auto-archive grace period') ?? 0) + 1,
+        );
     }
     return [...counts].map(([label, count]) => `${count} ${label}`);
   }
 
   /**
-   * Retitle a tab or a history row. `deriveTitle` caps the length and collapses
-   * whitespace exactly as an auto-derived title is capped, so a hand-typed name
-   * cannot blow out the row it renders in. An all-whitespace title is a no-op
-   * rather than a reset to the untitled placeholder — the webview treats an empty box as cancel.
+   * Retitle a tab or a history row. `deriveTitle` caps the length as an
+   * auto-derived name is, so a typed name cannot blow out its row; a blank
+   * title is a no-op. `source` is `user` for the rename box, `auto` for the job.
    */
-  rename(id: string, title: string): void {
+  rename(id: string, title: string, source: TitleSource = 'user'): void {
     if (!title.trim()) return;
     const sidebar = this.deps.getSidebar();
     if (!sidebar.history.some((item) => item.id === id)) {
       const row = this.deps.archivedSessions?.list().find((item) => item.id === id);
       if (row) {
-        this.deps.archivedSessions?.rename(id, deriveTitle(title));
+        this.deps.archivedSessions?.rename(id, deriveTitle(title), source);
         this.deps.postSessionSync();
         return;
       }
     }
-    const result = opRenameConversation(sidebar, id, deriveTitle(title));
+    const result = opRenameConversation(sidebar, id, deriveTitle(title), source);
     if (!('ok' in result)) return;
-    this.deps.archivedSessions?.rename(id, deriveTitle(title));
+    this.deps.archivedSessions?.rename(id, deriveTitle(title), source);
     this.deps.setSidebar(result.sidebar);
     this.deps.refreshUi();
   }
@@ -394,12 +401,14 @@ export class ConversationTabs {
    */
   private archiveLeastRecent(
     sidebar: SidebarRuntime,
-    options: { activate?: boolean },
+    _options: { activate?: boolean },
   ): SidebarRuntime | undefined {
     return opArchiveLeastRecent(
       sidebar,
       (conversation) =>
-        !(options.activate === false && conversation.id === sidebar.activeConversationId) &&
+        conversation.id !== sidebar.activeConversationId &&
+        this.deps.retention.isExpired(conversation) &&
+        conversation.keep_open !== true &&
         this.deps.isConversationEvictable(conversation.id),
     );
   }
@@ -407,22 +416,15 @@ export class ConversationTabs {
   restore(id: string, options: { activate?: boolean } = {}): ConversationRuntime | undefined {
     let sidebar = this.deps.getSidebar();
     const leavingId = sidebar.activeConversationId;
-    let leftActiveBeforeRestore = false;
+    const leavingActive = options.activate !== false && leavingId !== id;
+    if (leavingActive) this.deps.retention.markActivity(leavingId);
+    if (leavingActive) sidebar = this.deps.getSidebar();
     if (!sidebar.history.some((item) => item.id === id)) {
       const stored = this.deps.archivedSessions?.read(id);
       if (stored)
         sidebar = { ...sidebar, history: [...sidebar.history, persistedToRuntime(stored)] };
     }
     let result = opRestoreConversation(sidebar, id, options);
-    if ('atCap' in result && result.atCap && options.activate !== false && leavingId !== id) {
-      const left = this.leaveActiveConversation(sidebar, leavingId);
-      if (left !== sidebar) {
-        sidebar = left;
-        this.deps.setSidebar(sidebar);
-        leftActiveBeforeRestore = true;
-        result = opRestoreConversation(sidebar, id, options);
-      }
-    }
     if ('atCap' in result && result.atCap) {
       const archived = this.archiveLeastRecent(sidebar, options);
       if (archived) {
@@ -441,16 +443,15 @@ export class ConversationTabs {
     }
     if ('notFound' in result) return undefined;
     if (!('ok' in result)) return undefined;
-    const nextSidebar =
-      options.activate === false || leftActiveBeforeRestore || leavingId === id
-        ? result.sidebar
-        : this.leaveActiveConversation(result.sidebar, leavingId);
+    const nextSidebar = result.sidebar;
     const restored = nextSidebar.conversations.find((conv) => conv.id === id);
     if (restored?.compaction && this.deps.liveMemoryKeys) {
       const retained = retainLiveMemoryKeys(restored.compaction, this.deps.liveMemoryKeys());
       if (retained) restored.compaction = retained;
     }
     this.deps.setSidebar(nextSidebar);
+    this.deps.retention.markActivity(id);
+    this.deps.retention.refresh();
     if (options.activate === false) {
       this.deps.persistSession();
       this.deps.postSessionSync();
@@ -458,26 +459,15 @@ export class ConversationTabs {
       if (result.activeModelOverride) this.deps.setActiveModel(result.activeModelOverride);
       this.deps.refreshUi();
     }
-    this.revivePendingCheckpoint(id);
+    repostPendingCheckpoint(this.deps.checkpoints, this.deps.post, id);
     this.deps.archivedSessions?.delete(id);
     return nextSidebar.conversations.find((conv) => conv.id === id);
   }
 
-  /**
-   * Bring back the Keep/Undo bar of a chat that was archived with changes
-   * still undecided.
-   *
-   * The stack never went away (see `disposeEvictedConversation`); only its
-   * affordance did — the webview drops a closed tab's pending id
-   * (`reducer.ts:411-415`). Re-post through the same call a freshly committed
-   * turn makes (`ProviderTurn.ts:81-83`), so a restored chat is
-   * indistinguishable from one that stayed open. The editor Keep/Undo lenses
-   * need nothing: `KeepUndoCodeLensProvider.pendingFiles` is keyed by file path
-   * and an archive never cleared it.
-   */
-  private revivePendingCheckpoint(id: string): void {
-    if (!this.deps.checkpoints.canUndo(id)) return;
-    this.deps.post(checkpointReadyMessage(this.deps.checkpoints, id));
+  /** Reset approvals for exactly this chat. It may be open, in recent history,
+   *  or in the overflow archive; none of those cases may clear the active tab. */
+  async resetApprovals(id: string): Promise<boolean> {
+    return resetConversationTabApprovals(this.deps, id);
   }
 
   hasConversation(id: string): boolean {

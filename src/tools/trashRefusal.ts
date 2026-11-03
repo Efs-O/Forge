@@ -1,5 +1,6 @@
 import * as fs from 'fs';
 import * as path from 'path';
+import { realPathOfNearestAncestor } from '../util/realPath';
 
 const TRASH_REFUSAL_TTL_MS = 60 * 60_000;
 const TRASH_REFUSAL_LIMIT = 100;
@@ -23,30 +24,6 @@ export interface TrashRefusalScanOptions {
 const refusals = new Map<string, CachedRefusal>();
 
 /**
- * Real-path the nearest existing ancestor and re-append the missing tail, so a
- * target that does not exist yet — or has just been deleted — lands on the same
- * key the writer used while it did exist.
- */
-function canonicalExistingAncestor(resolved: string): string {
-  const tail: string[] = [];
-  let current = resolved;
-  for (;;) {
-    try {
-      const real =
-        process.platform === 'win32' ? fs.realpathSync.native(current) : fs.realpathSync(current);
-      return path.join(real, ...tail);
-    } catch (error) {
-      const code = (error as NodeJS.ErrnoException).code;
-      if (code !== 'ENOENT' && code !== 'ENOTDIR') throw error;
-      const parent = path.dirname(current);
-      if (parent === current) return resolved;
-      tail.unshift(path.basename(current));
-      current = parent;
-    }
-  }
-}
-
-/**
  * One key per file, whatever spelling the caller brings. The delete tool keys a
  * refusal by the real path it resolved; the sidebar preview, the approval
  * preview and every lookup pass the path the user asked for. Real-pathing only
@@ -59,7 +36,7 @@ function canonicalExistingAncestor(resolved: string): string {
 function cacheKey(targetPath: string): string {
   let resolved = path.resolve(targetPath);
   try {
-    resolved = canonicalExistingAncestor(resolved);
+    resolved = realPathOfNearestAncestor(resolved);
   } catch {
     // A path we cannot inspect at all (a permission error, a symlink loop, an
     // unavailable drive) still gets one stable key: a lookup must never throw.

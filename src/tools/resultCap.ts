@@ -14,6 +14,22 @@ export const DEFAULT_MAX_RESULT_CHARS = 24000;
  */
 export const MAX_READ_FILE_CHARS = 120000;
 
+/** Room `read_file` keeps back for the header it prepends to each section of a
+ *  batch read: `--- <path> (<range>) ---`. */
+const SECTION_HEADER_RESERVE_CHARS = 128;
+
+/**
+ * The character budget `read_file` hands a document reader, below this file's
+ * own cap on purpose.
+ *
+ * `capResultText` cuts from the END, so a reader that filled
+ * `MAX_READ_FILE_CHARS` exactly had its own "pages not read" note cut away
+ * first — the one part of a capped read the model cannot act on without — and
+ * the section header pushed the whole result past the cap regardless. A reader
+ * that honours THIS budget, note included, arrives whole and nothing is cut.
+ */
+export const MAX_DOCUMENT_READ_CHARS = MAX_READ_FILE_CHARS - SECTION_HEADER_RESERVE_CHARS;
+
 /** The opening of the marker `capResultText` appends when it cuts a result. */
 const CAP_MARKER_PREFIX = '\n\n[truncated by ';
 

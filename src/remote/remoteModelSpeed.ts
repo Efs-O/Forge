@@ -69,11 +69,17 @@ export function createRemoteModelSpeedReader(
 function parseSpeedSnapshot(value: unknown, expectedModel: string): ModelSpeedSnapshot | undefined {
   if (typeof value !== 'object' || value === null) return undefined;
   const status = value as Record<string, unknown>;
-  const at = normalizeTimestamp(status['at']);
-  if (status['model'] !== expectedModel || at === undefined) return undefined;
+  if (status['model'] !== expectedModel) return undefined;
   const timings = status['last_timings'];
   if (typeof timings !== 'object' || timings === null) return undefined;
   const fields = timings as Record<string, unknown>;
+  // The measurement time belongs with the numbers it describes, so it is read
+  // from inside `last_timings` and nowhere else. Strata 0.1.50 has no
+  // top-level `at` at all — that is why `/speed` answered "unavailable" on
+  // 2026-10-27 while the engine was up and serving: the fixture had invented a
+  // top-level field the real `/v1/status` never sends.
+  const at = normalizeTimestamp(fields['at']);
+  if (at === undefined) return undefined;
   const predictedPerSecond = positiveFinite(fields['predicted_per_second']);
   const promptPerSecond = positiveFinite(fields['prompt_per_second']);
   const predictedN = nonNegativeInteger(fields['predicted_n']);

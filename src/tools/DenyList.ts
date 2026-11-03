@@ -1,12 +1,35 @@
 /** Whole-token destructive and refused shell rules. */
 
+import * as os from 'os';
 import { baseProgram, gitCommandTokens } from './shellCommandTokens';
+import { resolvePathForMatch, tokenPathCandidate } from './secretPaths';
 
 export interface ShellTokenRule {
   match(tokens: readonly string[]): boolean;
   description: string;
   alternative: string;
   class: 'dangerous' | 'refused';
+  /** How an autonomous run — unattended or `/clanker` — should treat this match.
+   *  `ownerGate` is the secret-path gate: the decision belongs to the owner, so
+   *  the run refuses at once rather than waiting on a card nobody is there to
+   *  answer. `denyList` is the deny list's own answer: refuse at once with no
+   *  card, because nobody is watching the cards, a card that waits for one
+   *  stops the run (the 2026-10-27 lane that hung 2 h on `git checkout`), and
+   *  the tool named in `alternative` is the way round. Attended mode is
+   *  unchanged either way: the card still opens and waits for the owner.
+   */
+  gateKind?: 'ownerGate' | 'denyList';
+  /** Which approval key this rule is able to name, if any. `rdelete` marks the
+   *  recursive-delete rules whose targets can be read straight out of the command
+   *  (`rdeleteTargetsFor` below resolves them), so `approvalKey.ts` can ask for
+   *  "recursive deletes inside this folder" instead of a card on every one.
+   *
+   *  It is a field and not a test on `description`, because rewording a rule is a
+   *  one-line change that would otherwise silently change what its call can be
+   *  keyed by — and a key that quietly disappears is a card that quietly comes
+   *  back, while one that quietly appears is an approval nobody made.
+   */
+  keyKind?: 'rdelete';
 }
 
 const PREFIXES = new Set(['sudo', 'doas', 'command', 'env']);
@@ -121,11 +144,23 @@ function isDestructiveGitPush(tokens: readonly string[]): boolean {
 }
 
 export function getBuiltinDenyList(): ShellTokenRule[] {
+  // Every `dangerous` entry carries `gateKind: 'denyList'`: in an autonomous run
+  // the deny list is policy, not a judgement — nobody is there to answer the card
+  // it would raise, and the sanctioned tool is named in `alternative`. A rule that
+  // is dangerous but has no safe counterpart would have to say so explicitly.
   const dangerous = (
     description: string,
     alternative: string,
     match: ShellTokenRule['match'],
-  ): ShellTokenRule => ({ class: 'dangerous', description, alternative, match });
+    keyKind?: ShellTokenRule['keyKind'],
+  ): ShellTokenRule => ({
+    class: 'dangerous',
+    description,
+    alternative,
+    gateKind: 'denyList',
+    ...(keyKind ? { keyKind } : {}),
+    match,
+  });
   const refused = (
     description: string,
     alternative: string,
@@ -136,11 +171,16 @@ export function getBuiltinDenyList(): ShellTokenRule[] {
       'recursive force delete',
       'Use delete_file for a specific path.',
       isRecursiveForceDelete,
+      'rdelete',
     ),
-    dangerous('git reset --hard', 'Use restore_file for tracked file restoration.', (t) =>
-      commandIndexes(t, ['git']).some(
-        (i) => lower(t.slice(i + 1, i + 3)).join(' ') === 'reset --hard',
-      ),
+    dangerous(
+      'git reset --hard',
+      'Use restore_file to put the tracked paths back to their committed content, ' +
+        'or edit_file to undo the edits you made yourself.',
+      (t) =>
+        commandIndexes(t, ['git']).some(
+          (i) => lower(t.slice(i + 1, i + 3)).join(' ') === 'reset --hard',
+        ),
     ),
     dangerous('git clean -f', 'Use delete_file for specific paths.', (t) =>
       commandIndexes(t, ['git']).some((i) => {
@@ -150,7 +190,8 @@ export function getBuiltinDenyList(): ShellTokenRule[] {
     ),
     dangerous(
       'git checkout/restore discarding work',
-      'Use restore_file to restore tracked paths.',
+      'To undo edits you made yourself, use edit_file; to put a tracked path back ' +
+        'the way git has it, use restore_file.',
       isDestructiveGitCheckout,
     ),
     dangerous(
@@ -208,10 +249,14 @@ export function getBuiltinDenyList(): ShellTokenRule[] {
           .some((arg, offset) => sqlStart.test(arg) || isSplitStatement(t, index + 1 + offset)),
       );
     }),
-    dangerous('recursive Remove-Item', 'Use delete_file for a specific path.', (t) =>
-      commandIndexes(t, ['remove-item', 'ri', 'rm']).some(
-        (i) => lower(t.slice(i + 1)).includes('-recurse') || lower(t.slice(i + 1)).includes('-r'),
-      ),
+    dangerous(
+      'recursive Remove-Item',
+      'Use delete_file for a specific path.',
+      (t) =>
+        commandIndexes(t, ['remove-item', 'ri', 'rm']).some(
+          (i) => lower(t.slice(i + 1)).includes('-recurse') || lower(t.slice(i + 1)).includes('-r'),
+        ),
+      'rdelete',
     ),
     dangerous(
       'PowerShell expression evaluation',
@@ -226,8 +271,14 @@ export function getBuiltinDenyList(): ShellTokenRule[] {
           lower(t.slice(i + 1)).some((v) => ['/s', '-s', '-r'].includes(v)),
         ) ||
         commandIndexes(t, ['remove-item']).some((i) => lower(t.slice(i + 1)).includes('-recurse')),
+      'rdelete',
     ),
-    dangerous('recursive rm delete', 'Use delete_file for a specific path.', isRecursiveDelete),
+    dangerous(
+      'recursive rm delete',
+      'Use delete_file for a specific path.',
+      isRecursiveDelete,
+      'rdelete',
+    ),
     refused(
       'disk format',
       'Use the operating system disk management UI after confirming the target.',
@@ -264,4 +315,123 @@ export function getBuiltinDenyList(): ShellTokenRule[] {
     ...rule,
     match: (tokens: readonly string[]) => rule.match(gitCommandTokens(tokens)),
   }));
+}
+
+// ── the recursive-delete key ──────────────────────────────────────────────────
+
+/** The programs the four `keyKind: 'rdelete'` rules match. */
+const RDELETE_PROGRAMS = ['rm', 'rd', 'rmdir', 'del', 'remove-item', 'ri'];
+
+/**
+ * `Remove-Item`'s switches this matcher understands, and whether each one takes a
+ * value. `-Path` and `-LiteralPath` take the next token as a target; `-Recurse` and
+ * `-Force` carry none.
+ *
+ * PowerShell abbreviates parameters (`-rec`, `-fo`, `-p`), and an abbreviation can
+ * name a different parameter the day the module adds one, so abbreviations are
+ * deliberately NOT here: an unknown switch is the answer that makes the call ask,
+ * where a guessed one is an approval the owner never made.
+ */
+const REMOVE_ITEM_SWITCHES: ReadonlyMap<string, 'flag' | 'value'> = new Map([
+  ['-recurse', 'flag'],
+  ['-force', 'flag'],
+  ['-path', 'value'],
+  ['-literalpath', 'value'],
+]);
+
+/** `cmd`'s switches for `rd`, `rmdir` and `del`: `/s` recurses, `/q` is quiet. */
+const CMD_SWITCHES = new Set(['/s', '-s', '-r', '/q', '-q']);
+
+/**
+ * Is this token a path this matcher can read to the end?
+ *
+ * No run-time expansion (`$`, `%`, a backtick, an opening `(`), no glob (`*`, `?`,
+ * `[`), and `~` only at the start — where `resolvePathForMatch` expands it and
+ * nowhere else, because a `~` in the middle is either a literal folder name or a
+ * spelling this resolver would leave alone and compare as if it were expanded.
+ */
+function targetIsLiteral(token: string): boolean {
+  if (token.length === 0) return false;
+  for (const char of ['$', '%', '`', '(', '*', '?', '[']) {
+    if (token.includes(char)) return false;
+  }
+  const firstTilde = token.indexOf('~');
+  return firstTilde < 0 || firstTilde === 0;
+}
+
+/**
+ * The targets of a matched recursive-delete statement, resolved to absolute paths,
+ * or undefined when this matcher cannot read them — which is the answer that makes
+ * the call ask.
+ *
+ * A key built from a token the shell may expand into something else would approve a
+ * folder the owner never saw, so every unreadable token, every switch this file
+ * does not know and every relative token with no folder to resolve against returns
+ * undefined rather than a guess. `check` is the same environment the secret and
+ * owner-only gates are given (the home `~` expands against, the platform being
+ * judged, the folder the command runs in): resolving a relative target against
+ * `process.cwd()` instead would be a guess about a folder this command is not in.
+ */
+export function rdeleteTargetsFor(
+  statement: readonly string[],
+  check: { home?: string; platform?: NodeJS.Platform; cwd?: string },
+): string[] | undefined {
+  const index = commandIndexes(statement, RDELETE_PROGRAMS)[0];
+  if (index === undefined) return undefined;
+  const program = baseProgram(statement[index] ?? '');
+  const isRemoveItem = program === 'remove-item' || program === 'ri';
+  const isCmdBuiltin = program === 'rd' || program === 'rmdir' || program === 'del';
+  const home = check.home ?? os.homedir();
+  const platform = check.platform ?? process.platform;
+  const rest = statement.slice(index + 1);
+  const targets: string[] = [];
+  /** `rm --`: after the separator every token is a path, not a switch. */
+  let pathsOnly = false;
+
+  const addTarget = (raw: string): boolean => {
+    const candidate = tokenPathCandidate(raw);
+    if (!targetIsLiteral(candidate)) return false;
+    const resolved = resolvePathForMatch(candidate, home, platform, check.cwd);
+    if (!resolved) return false;
+    targets.push(resolved);
+    return true;
+  };
+
+  for (let position = 0; position < rest.length; position += 1) {
+    const raw = rest[position] ?? '';
+    const token = tokenPathCandidate(raw);
+    if (token.length === 0) return undefined;
+    const folded = token.toLowerCase();
+    if (!pathsOnly && token.startsWith('-')) {
+      if (isRemoveItem) {
+        const shape = REMOVE_ITEM_SWITCHES.get(folded);
+        if (shape === undefined) return undefined;
+        if (shape === 'flag') continue;
+        const next = rest[position + 1];
+        if (next === undefined) return undefined;
+        position += 1;
+        if (!addTarget(next)) return undefined;
+        continue;
+      }
+      if (token === '--') {
+        pathsOnly = true;
+        continue;
+      }
+      if (isCmdBuiltin) {
+        if (!CMD_SWITCHES.has(folded)) return undefined;
+        continue;
+      }
+      // `rm`'s switches are letters, so `-$path` or `--$(flag)` is not one this
+      // matcher can read, and treating it as a path would put a stray word in the
+      // target list and widen the folder the key names.
+      if (!/^--?[a-z]+$/iu.test(token)) return undefined;
+      continue;
+    }
+    if (!pathsOnly && isCmdBuiltin && token.startsWith('/')) {
+      if (!CMD_SWITCHES.has(folded)) return undefined;
+      continue;
+    }
+    if (!addTarget(raw)) return undefined;
+  }
+  return targets.length > 0 ? targets : undefined;
 }

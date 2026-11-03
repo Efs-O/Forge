@@ -3,7 +3,9 @@ import * as os from 'os';
 import * as path from 'path';
 import { describe, expect, it, vi } from 'vitest';
 import {
+  chatsForSession,
   findBySession,
+  findSessionChatIn,
   forgetConversation,
   link,
   rebuildIndex,
@@ -25,7 +27,6 @@ import {
   type SidebarRuntime,
 } from '../../src/sidebar/sessionTypes';
 import type { Memento } from 'vscode';
-import { getLogger } from '../../src/util/logger';
 
 function conversation(id: string, title = id): ConversationRuntime {
   return { id, title, createdAt: 1, updatedAt: 1, messages: [] };
@@ -91,29 +92,42 @@ describe('chat agent link ownership', () => {
     expect(violations).toEqual([]);
   });
 
-  it('links, unlinks, and rebuilds the reverse index', () => {
+  it('links, unlinks, and rebuilds the session index', () => {
     const first = conversation('first');
     const second = conversation('second');
     const claude = sessionLink('claude', '00000000-0000-4000-8000-000000000001');
     rebuildIndex([]);
 
-    link(first, claude, [first, second]);
+    link(first, claude);
     expect(unlink(first, 'claude')).toEqual(claude);
-    link(second, claude, [first, second]);
-    expect(() => link(first, claude, [first, second])).toThrow('second');
+    expect(findBySession(claude.sessionId)).toBeUndefined();
+    link(second, claude);
+    // A second chat is no longer refused, and the first one can be linked
+    // beside it: both are now in the session's set.
+    link(first, claude);
+    expect(chatsForSession(claude.sessionId).sort()).toEqual(['first', 'second']);
+    expect(findBySession(claude.sessionId)).toBeDefined();
 
     rebuildIndex([first, second]);
-    expect(() => link(first, claude, [first, second])).toThrow('second');
+    expect(chatsForSession(claude.sessionId).sort()).toEqual(['first', 'second']);
   });
 
-  it('refuses one session being linked to another chat and names the existing chat', () => {
+  it('links the same session to two chats instead of refusing the second', () => {
     const first = conversation('first', 'First chat');
     const second = conversation('second', 'Second chat');
     const codex = sessionLink('codex', '00000000-0000-4000-8000-000000000002');
     rebuildIndex([]);
-    link(first, codex, [first, second]);
+    link(first, codex);
 
-    expect(() => link(second, codex, [first, second])).toThrow('First chat');
+    expect(() => link(second, codex)).not.toThrow();
+    expect(first.agentLinks?.codex?.sessionId).toBe(codex.sessionId);
+    expect(second.agentLinks?.codex?.sessionId).toBe(codex.sessionId);
+    // A chat still holds one link per kind, so re-linking a chat frees it from
+    // the session it was holding — and only that chat, not the other one.
+    const otherSession = sessionLink('codex', '00000000-0000-4000-8000-000000000009');
+    link(second, otherSession);
+    expect(chatsForSession(codex.sessionId)).toEqual(['first']);
+    expect(chatsForSession(otherSession.sessionId)).toEqual(['second']);
   });
 
   it('rebuilds archived reverse-index entries from metadata without reading bodies', () => {
@@ -140,18 +154,25 @@ describe('chat agent link ownership', () => {
 
       expect(read).not.toHaveBeenCalled();
       const other = conversation('other', 'Other chat');
-      expect(() => link(other, archived.agentLinks!.codex!, [other])).toThrow('Archived chat');
+      // Several chats holding one session is normal now, so the archived
+      // chat's claim does not stop another chat from being linked beside it.
+      link(other, archived.agentLinks!.codex!);
+      expect(chatsForSession(archived.agentLinks!.codex!.sessionId).sort()).toEqual([
+        'archived',
+        'other',
+      ]);
     } finally {
       fs.rmSync(directory, { recursive: true, force: true });
     }
   });
 
-  it('reports duplicate sessions and keeps the newest link during activation', () => {
+  it('rebuilds every chat link on load and makes the newest the current one', () => {
+    const sessionId = '00000000-0000-4000-8000-000000000005';
     const first: ConversationRuntime = {
       ...conversation('first', 'Older chat'),
       agentLinks: {
         claude: {
-          ...sessionLink('claude', '00000000-0000-4000-8000-000000000005'),
+          ...sessionLink('claude', sessionId),
           lastUsedAt: 10,
         },
       },
@@ -160,13 +181,11 @@ describe('chat agent link ownership', () => {
       ...conversation('second', 'Newer chat'),
       agentLinks: {
         claude: {
-          ...sessionLink('claude', '00000000-0000-4000-8000-000000000005'),
+          ...sessionLink('claude', sessionId),
           lastUsedAt: 20,
         },
       },
     };
-    const error = vi.spyOn(getLogger(), 'error');
-    const warnings: string[] = [];
     const state: SidebarRuntime = {
       activeConversationId: first.id,
       conversations: [first, second],
@@ -174,24 +193,80 @@ describe('chat agent link ownership', () => {
     };
 
     expect(() =>
-      loadSidebarSession(
-        memento({ [SESSION_KEY_V1]: runtimeToPersisted(state) }),
-        undefined,
-        (message) => warnings.push(message),
-      ),
+      loadSidebarSession(memento({ [SESSION_KEY_V1]: runtimeToPersisted(state) }), undefined),
     ).not.toThrow();
-    expect(error).toHaveBeenCalledWith(expect.stringContaining('keeping "Newer chat"'));
-    expect(warnings).toHaveLength(1);
-    expect(warnings[0]).toContain('Older chat');
-    expect(warnings[0]).toContain('Newer chat');
-    expect(warnings[0]).toContain('keeping it with "Newer chat"');
-    expect(() => link(first, first.agentLinks!.claude!, [first, second])).toThrow('Newer chat');
-    error.mockRestore();
+    // One session in two chats is no longer a conflict to report or to
+    // resolve: the load rebuilds both, newest `lastUsedAt` is the chat the
+    // session addresses next, and either chat can be addressed again.
+    expect(chatsForSession(sessionId).sort()).toEqual(['first', 'second']);
+    expect(findBySession(sessionId)).toBe('second');
+    expect(() => link(first, first.agentLinks!.claude!)).not.toThrow();
+  });
+
+  it('unlinking one chat leaves the rest linked and moves current to the newest', () => {
+    const sessionId = '00000000-0000-4000-8000-000000000008';
+    const older = conversation('older', 'Older chat');
+    const current = conversation('current', 'Current chat');
+    rebuildIndex([]);
+    link(older, { ...sessionLink('claude', sessionId), lastUsedAt: 10 });
+    link(current, { ...sessionLink('claude', sessionId), lastUsedAt: 20 });
+    expect(findBySession(sessionId)).toBe('current');
+
+    expect(unlink(current, 'claude')).toBeDefined();
+    expect(chatsForSession(sessionId)).toEqual(['older']);
+    expect(findBySession(sessionId)).toBe('older');
+    expect(older.agentLinks?.claude?.sessionId).toBe(sessionId);
+  });
+
+  it('findSessionChatIn takes the newest chat whose own link names the sender', () => {
+    const sessionId = '00000000-0000-4000-8000-000000000011';
+    const held: ConversationRuntime = {
+      ...conversation('held', 'Held chat'),
+      agentLinks: { claude: { ...sessionLink('claude', sessionId), lastUsedAt: 10 } },
+    };
+    const elsewhere: ConversationRuntime = {
+      ...conversation('elsewhere', 'Another window'),
+      agentLinks: { claude: { ...sessionLink('claude', sessionId), lastUsedAt: 99 } },
+    };
+    rebuildIndex([held, elsewhere]);
+    // Only the chats this window has are offered to `linkOf`; the index is
+    // process-wide and knows about both.
+    const windowLinks: Record<string, AgentLink | undefined> = {
+      held: held.agentLinks!.claude!,
+    };
+    const linkOf = (id: string): AgentLink | undefined => windowLinks[id];
+    expect(findSessionChatIn(sessionId, 'claude', linkOf)).toBe('held');
+    // Newest wins as soon as the window holds it too.
+    windowLinks['elsewhere'] = elsewhere.agentLinks!.claude!;
+    expect(findSessionChatIn(sessionId, 'claude', linkOf)).toBe('elsewhere');
+    // A link naming a different session is not this sender's, even when it is
+    // the newest, so the caller gets undefined rather than somebody else's chat.
+    expect(
+      findSessionChatIn(sessionId, 'claude', () =>
+        sessionLink('claude', '00000000-0000-4000-8000-000000000012'),
+      ),
+    ).toBeUndefined();
+  });
+
+  it('a deleted chat leaves the session linked to the chats that survive', () => {
+    const sessionId = '00000000-0000-4000-8000-000000000010';
+    const kept = conversation('kept', 'Kept chat');
+    const gone = conversation('gone', 'Gone chat');
+    rebuildIndex([]);
+    link(kept, { ...sessionLink('claude', sessionId), lastUsedAt: 10 });
+    link(gone, { ...sessionLink('claude', sessionId), lastUsedAt: 20 });
+    expect(findBySession(sessionId)).toBe('gone');
+
+    forgetConversation('gone');
+
+    expect(chatsForSession(sessionId)).toEqual(['kept']);
+    expect(findBySession(sessionId)).toBe('kept');
+    expect(kept.agentLinks?.claude?.sessionId).toBe(sessionId);
   });
 
   it('/clearChat keeps links and a newly created conversation starts without them', () => {
     const active = conversation('active', 'Active chat');
-    link(active, sessionLink('copilot', 'copilot-session-1'), [active]);
+    link(active, sessionLink('copilot', 'copilot-session-1'));
     const linksBeforeClear = { ...active.agentLinks };
     let sidebar: SidebarRuntime = {
       activeConversationId: active.id,
@@ -209,6 +284,9 @@ describe('chat agent link ownership', () => {
       refreshUi: vi.fn(),
       isConversationEvictable: () => true,
       evictionBlockers: () => [],
+      isConversationDrafted: () => false,
+      retention: { markActivity: vi.fn(), refresh: vi.fn(), isExpired: () => false, isEnabled: () => true },
+      persistSidebar: async () => true,
       agentLoop: { stopStreamingIfNeeded: vi.fn(), disposeConversation: vi.fn() },
       post: vi.fn(),
     } as unknown as ConversationTabsDeps);
@@ -246,6 +324,9 @@ describe('chat agent link ownership', () => {
         refreshUi: vi.fn(),
         isConversationEvictable: () => true,
         evictionBlockers: () => [],
+        isConversationDrafted: () => false,
+        retention: { markActivity: vi.fn(), refresh: vi.fn(), isExpired: () => false, isEnabled: () => true },
+        persistSidebar: async () => true,
         agentLoop: { stopStreamingIfNeeded: vi.fn(), disposeConversation: vi.fn() },
         checkpoints: { disposeConversation: vi.fn() },
         requestChains: { invalidateConversation: vi.fn() },
@@ -259,20 +340,25 @@ describe('chat agent link ownership', () => {
       const empty = conversation('empty', 'Untitled chat');
       const other = conversation('other');
       const { tabs } = tabsOver([empty, other]);
-      link(empty, sessionLink('claude', sessionId), [empty, other]);
+      link(empty, sessionLink('claude', sessionId));
 
       await tabs.close(empty.id);
 
       expect(findBySession(sessionId)).toBeUndefined();
     });
 
-    it('when the user switches away from it', () => {
+    it('when the user switches away from it, keeping it linked until an explicit close', async () => {
       const empty = conversation('empty', 'Untitled chat');
       const other = conversation('other');
       const { tabs, sidebar } = tabsOver([empty, other]);
-      link(empty, sessionLink('claude', sessionId), [empty, other]);
+      link(empty, sessionLink('claude', sessionId));
 
       tabs.switch(other.id);
+
+      expect(sidebar().conversations.map((chat) => chat.id)).toEqual(['empty', 'other']);
+      expect(findBySession(sessionId)).toBe('empty');
+
+      await tabs.close(empty.id);
 
       expect(sidebar().conversations.map((chat) => chat.id)).toEqual(['other']);
       expect(findBySession(sessionId)).toBeUndefined();
@@ -285,7 +371,7 @@ describe('chat agent link ownership', () => {
       };
       const other = conversation('other');
       const { tabs, sidebar } = tabsOver([used, other]);
-      link(used, sessionLink('claude', sessionId), [used, other]);
+      link(used, sessionLink('claude', sessionId));
 
       await tabs.close(used.id);
 
@@ -297,8 +383,8 @@ describe('chat agent link ownership', () => {
   it('validates agent kind and session id shapes', () => {
     const chat = conversation('chat');
     rebuildIndex([]);
-    expect(() => link(chat, { ...sessionLink('claude', 'not-a-uuid') }, [chat])).toThrow();
-    expect(() => link(chat, { ...sessionLink('copilot', 'bad session id') }, [chat])).toThrow();
+    expect(() => link(chat, { ...sessionLink('claude', 'not-a-uuid') })).toThrow();
+    expect(() => link(chat, { ...sessionLink('copilot', 'bad session id') })).toThrow();
   });
 
   it('persists and restores links through history files, then removes them with a deleted chat', async () => {
@@ -335,7 +421,7 @@ describe('chat agent link ownership', () => {
       expect(new HistoryArchive(archiveFile).load()).toEqual([]);
       expect(fs.existsSync(path.join(directory, 'history', 'linked-chat.json'))).toBe(false);
       const other = conversation('other', 'Other chat');
-      expect(() => link(other, stored.agentLinks!.claude!, [other])).not.toThrow();
+      expect(() => link(other, stored.agentLinks!.claude!)).not.toThrow();
     } finally {
       fs.rmSync(directory, { recursive: true, force: true });
     }

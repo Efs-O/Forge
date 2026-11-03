@@ -9,6 +9,7 @@ import {
   type CompactionLogEntry,
 } from './SessionLogger';
 import type { ConversationRuntime, SidebarRuntime } from './sessionTypes';
+import type { GateEventRow } from './gateEventLog';
 import type { ForgeTurnEndKind } from './turnOutcome';
 
 /** Undefined outside a real host (tests, or an unresolvable extension id). */
@@ -101,6 +102,19 @@ export class SessionLogCoordinator {
     const conv = this.getSidebar().conversations.find((c) => c.id === convId);
     if (!conv) return;
     this.loggerFor(conv).logTurnEnd(outcome, rounds, finishReason, conv.active_model ?? '');
+  }
+
+  /**
+   * A gate row into the transcript of the chat that raised it. A card naming no
+   * conversation, or one whose chat is gone, is dropped rather than guessed at:
+   * writing a wait into a chat where it never happened is worse than losing it.
+   */
+  logGate(convId: string, row: GateEventRow): void {
+    const conv = this.getSidebar().conversations.find((c) => c.id === convId);
+    if (!conv) return;
+    const logger = this.loggerFor(conv);
+    logger.updateTitle(conv.title);
+    logger.logGate(row, conv.active_model ?? '');
   }
 
   private loggerFor(conv: ConversationRuntime): SessionLogger {

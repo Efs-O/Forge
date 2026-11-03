@@ -52,6 +52,18 @@ describe('phrasePool', () => {
       expect(phrase).not.toMatch(/gpu|vram|credit|rent|datacenter|silicon|watt/i);
     }
   });
+
+  it('keeps the clanker phrases honest too, since they join both pools', () => {
+    // The Clanker deck is added to the cloud pool as well, so a hardware or
+    // billing claim here would be a lie on a cloud turn. And the mode still asks
+    // the deny list, so a phrase promising nothing dangerous survives would be
+    // the joke somebody believes.
+    for (const phrase of CLANKER_PHRASES) {
+      expect(phrase).not.toMatch(/gpu|vram|credit|rent|datacenter|silicon|watt/i);
+      expect(phrase).not.toMatch(/delete|destroy|wipe|dangerous|risk/i);
+    }
+    expect(CLANKER_PHRASES.length).toBeGreaterThanOrEqual(8);
+  });
 });
 
 describe('nextPhrase', () => {

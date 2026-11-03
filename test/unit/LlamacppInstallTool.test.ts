@@ -6,7 +6,13 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 vi.mock('vscode', () => ({ workspace: { workspaceFolders: undefined } }));
 
 import type { ForgeConfig } from '../../src/config/types';
-import { versionReportsTag, type InstalledBuild } from '../../src/jobs/actions/llamacppInstall';
+import {
+  findFreePort,
+  versionReportsTag,
+  type FreePortProbe,
+  type InstalledBuild,
+} from '../../src/jobs/actions/llamacppInstall';
+import { isFetchBlockedPort } from '../../src/util/fetchBlockedPorts';
 import { gitignoredNote } from '../../src/tools/dirTools';
 import { makeInstallLlamacppTool } from '../../src/tools/llamacppInstallTool';
 
@@ -23,6 +29,71 @@ describe('versionReportsTag', () => {
   it('rejects a different build number', () => {
     expect(versionReportsTag('version: 0.4.1-dev (build 110770, commit x)', 'b11077')).toBe(false);
     expect(versionReportsTag('version: 0.4.1-dev (build 11076, commit x)', 'b11077')).toBe(false);
+  });
+});
+
+describe('findFreePort', () => {
+  /**
+   * A `net.Server` stand-in that reports each entry of `addresses` in order,
+   * in the shapes the real socket reports: an object with a `port`, or `null`
+   * when nothing was bound. It never invents a port, so a test that expects a
+   *  rebind can count the binds exactly.
+   */
+  function fakeProbes(addresses: (number | null)[]): {
+    createServer: () => FreePortProbe;
+    binds: () => number;
+  } {
+    let binds = 0;
+    const next = (): number | null => {
+      if (binds >= addresses.length) throw new Error('fake probe ran out of addresses');
+      return addresses[binds++];
+    };
+    return {
+      binds: () => binds,
+      createServer: () => {
+        const address = next();
+        return {
+          once: (_event, _listener) => undefined,
+          listen: (_port, _host, onListening) => {
+            onListening?.();
+            return undefined;
+          },
+          address: () => (address === null ? null : { port: address }),
+          close: (onClosed) => {
+            onClosed();
+            return undefined;
+          },
+        };
+      },
+    };
+  }
+
+  it('binds again while the OS hands back ports fetch would block', async () => {
+    const probes = fakeProbes([6000, 6566, 6667, 10080, 41731]);
+    expect(await findFreePort('127.0.0.1', probes.createServer)).toBe(41731);
+    expect(probes.binds()).toBe(5);
+  });
+
+  it('gives up after 32 blocked binds instead of looping forever', async () => {
+    const probes = fakeProbes(new Array(32).fill(6000));
+    await expect(findFreePort('127.0.0.1', probes.createServer)).rejects.toThrow(
+      /no port fetch can reach on 127\.0\.0\.1 after 32 binds/,
+    );
+    expect(probes.binds()).toBe(32);
+  });
+
+  it('says so plainly when the socket reports no port, instead of resolving 0', async () => {
+    const probes = fakeProbes([null]);
+    await expect(findFreePort('127.0.0.1', probes.createServer)).rejects.toThrow(
+      /could not read the port it bound on 127\.0\.0\.1/,
+    );
+    expect(probes.binds()).toBe(1);
+  });
+
+  it('a real bind reports a port fetch can reach', async () => {
+    const port = await findFreePort('127.0.0.1');
+    expect(port).toBeGreaterThan(0);
+    expect(isFetchBlockedPort(port)).toBe(false);
   });
 });
 
@@ -104,6 +175,42 @@ describe.runIf(process.platform === 'win32')('install_llamacpp', () => {
       const out = String(await tool.handler({}));
       expect(fs.readdirSync(root).sort()).toEqual(['llama.cpp-b11050', 'llama.cpp-b11077']);
       expect(out).toMatch(/Removed old builds: llama\.cpp-b11000\./);
+    } finally {
+      fs.rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  it('reports an installed build as partial and skips pruning when the config switch fails', async () => {
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), 'forge-llama-partial-'));
+    const configError = 'cloud_relay entry gemma4:31b-cloud is invalid';
+    try {
+      for (const tag of ['b11000', 'b11050', 'b11077']) {
+        fs.mkdirSync(path.join(root, `llama.cpp-${tag}`));
+      }
+      const previous = path.join(root, 'llama.cpp-b11050', 'llama-server.exe');
+      const setBinary = vi.fn(() => {
+        throw new Error(configError);
+      });
+      const tool = makeInstallLlamacppTool({
+        getConfig: () => ({ ...CONFIG, llama_server: { binary: previous } }) as ForgeConfig,
+        configPath: 'C:\\c.yaml',
+        install: vi.fn(async () => ({
+          ...INSTALLED,
+          newBinary: path.join(root, 'llama.cpp-b11077', 'llama-server.exe'),
+        })),
+        latestTag: async () => 'b11077',
+        localRoot: () => root,
+        setBinary,
+      });
+
+      const out = String(await tool.handler({}));
+      expect(out).toMatch(/^Partial:/u);
+      expect(out).toContain(path.join(root, 'llama.cpp-b11077', 'llama-server.exe'));
+      expect(out).toContain('llama_server.binary was NOT switched');
+      expect(out).toContain(configError);
+      expect(out).toContain('fix the named config entry');
+      expect(fs.readdirSync(root).sort()).toEqual(['llama.cpp-b11000', 'llama.cpp-b11050', 'llama.cpp-b11077']);
+      expect(setBinary).toHaveBeenCalledOnce();
     } finally {
       fs.rmSync(root, { recursive: true, force: true });
     }

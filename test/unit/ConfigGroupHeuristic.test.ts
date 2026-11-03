@@ -9,7 +9,7 @@ import { loadConfig } from '../../src/config/ConfigLoader';
  * A gemma llama.cpp family that shares most — but not every — spawn/
  * sampling key (num_ctx/n_parallel/extra_llama_server_args genuinely differ
  * per model, exercising per-key lifting), one fine-tune outlier
- * ("gemma-efso") whose entire spawn+sampling disagrees with the majority
+ * ("gemma-tuned") whose entire spawn+sampling disagrees with the majority
  * (exercising the sub-clustering fallback), ollama entries sharing
  * endpoint/think/reasoning_effort but not sampling.max_tokens, and cloud
  * entries with nothing worth grouping.
@@ -40,8 +40,8 @@ models:
     spawn: { n_batch: 512, type_k: q8_0, type_v: q8_0, flash_attn: true, n_gpu_layers: -1, num_ctx: 8192, extra_llama_server_args: ["--reasoning-budget", "4096"] }
     sampling: { top_k: 64, min_p: 0.0, seed: 0, presence_penalty: 0.0, repetition_penalty: 1.0, repeat_last_n: 64, stop: "<end_of_turn>" }
 
-  - name: gemma-efso
-    gguf_path: /models/efso-gemma4-13b.gguf
+  - name: gemma-tuned
+    gguf_path: /models/tuned-gemma4-13b.gguf
     spawn: { n_batch: 256, flash_attn: false, n_gpu_layers: 20 }
     sampling: { top_k: 20, min_p: 0.05, stop: "<turn|>" }
     system_prompt_mode: replace
@@ -89,11 +89,11 @@ describe('computeGroups', () => {
     expect(computed.assignment['gemma-main']).toBe(computed.assignment['gemma-worker-1']);
     expect(computed.assignment['gemma-main']).toBe(computed.assignment['gemma-worker-2']);
     expect(computed.assignment['gemma-main']).toBe(computed.assignment['gemma-worker-3']);
-    // The efso fine-tune disagrees on every spawn/sampling key it shares with
-    // the majority (n_batch/flash_attn/n_gpu_layers/top_k/min_p/stop) — the
+    // The gemma-tuned fine-tune disagrees on every spawn/sampling key it shares
+    // with the majority (n_batch/flash_attn/n_gpu_layers/top_k/min_p/stop) — the
     // sub-clustering fallback isolates it into its own (size-1, dropped)
     // bucket rather than either blocking or diluting the majority's group.
-    expect(computed.assignment['gemma-efso']).toBeUndefined();
+    expect(computed.assignment['gemma-tuned']).toBeUndefined();
     expect(computed.assignment['qwen-solo']).toBeUndefined();
     expect(computed.assignment['gemma4:local-a']).toBeDefined();
     expect(computed.assignment['gemma4:local-a']).toBe(computed.assignment['gemma4:local-b']);

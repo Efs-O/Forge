@@ -40,6 +40,17 @@ function makeMemento(store: Record<string, unknown>): Memento {
 }
 
 describe('sessionTypes', () => {
+  it('persists and restores a worker chat opener id', () => {
+    const session = createDefaultSession();
+    session.conversations[0]!.opened_by = 'opener-1';
+
+    const persisted = runtimeToPersisted(session);
+    const restored = loadSidebarSession(makeMemento({ [SESSION_KEY_V1]: persisted }));
+
+    expect(persisted.conversations[0]?.opened_by).toBe('opener-1');
+    expect(restored.conversations[0]?.opened_by).toBe('opener-1');
+  });
+
   it('keeps the open copy when a crash leaves the id in history too', () => {
     const session = createDefaultSession();
     const open = session.conversations[0]!;

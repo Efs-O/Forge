@@ -66,6 +66,13 @@ export const OutboxSchema = z.object({
   updatedAt: z.number(),
   /** Optional: records written before this field exist still parse. */
   ephemeral: z.boolean().optional(),
+  /**
+   * The turn's speed line, kept apart from `text` on purpose. `text` is what
+   * the unlock-backlog summary coalesces, what speech reads aloud, and what
+   * every channel sends as it stands; the line is appended only when Telegram
+   * builds its last message, so none of those ever carries it.
+   */
+  speedLine: z.string().min(1).max(200).optional(),
 });
 
 const BindingSchema = z.object({
@@ -103,6 +110,14 @@ const WorkspaceHandoffSchema = z.object({
   sourceWorkspaceId: z.string(),
   targetWorkspaceId: z.string(),
   targetAlias: z.string(),
+  /**
+   * `new-window` opens the target in a second VS Code window and keeps this
+   * one; absent means `replace`, which is what has always happened. Optional
+   * rather than required so a window still running an older build can read the
+   * record it did not write — its schema strips unknown fields, and a record
+   * with no `mode` must mean today's behaviour, not an accident.
+   */
+  mode: z.enum(['replace', 'new-window']).optional(),
   state: z.enum(['pending', 'claimed', 'completed', 'failed', 'expired']),
   createdAt: z.number(),
   updatedAt: z.number(),

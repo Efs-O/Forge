@@ -181,6 +181,30 @@ describe('SidebarHostFacade', () => {
     expect(facade.status().activeConversationId).toBe('visible');
   });
 
+  it('forwards a worker opener and persists it before returning the conversation', async () => {
+    const created = conversation('worker');
+    const create = vi.fn(() => created);
+    const persistSession = vi.fn();
+    const postSessionSync = vi.fn();
+    const facade = createSidebarHostFacade({
+      runtime: {
+        tabs: { create },
+        agentLoop: { getSessionActiveMs: () => 0 },
+      } as never,
+      getSidebar: () =>
+        ({ activeConversationId: 'opener', conversations: [created], history: [] }) as never,
+      persistSession,
+      postSessionSync,
+    } as unknown as SidebarFacadeDeps);
+
+    await facade.createConversation({ activate: false, openedBy: 'opener' });
+
+    expect(create).toHaveBeenCalledWith({ activate: false });
+    expect(created.opened_by).toBe('opener');
+    expect(persistSession).toHaveBeenCalledOnce();
+    expect(postSessionSync).toHaveBeenCalledOnce();
+  });
+
   it('returns the addressed typed outcome and bounded status', async () => {
     const conv = conversation('c1');
     const send = vi.fn(async () => ({ kind: 'completed' as const, finalText: 'done' }));

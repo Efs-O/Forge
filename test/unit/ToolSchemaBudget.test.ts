@@ -36,13 +36,76 @@ import {
  * to stop.
  */
 
-// Reference measurement updated 2026-10-24: the 65-tool non-computer-use
-// catalog is 58,149 chars with the owner-approved, always-available
-// `message_chat` schema. That contract must remain eager for title/id targeting
-// in one send call, so the old 57,500-char ceiling is raised once to 58,750.
+// Reference measurement updated 2026-10-29 (tools-expansion lane F1, item 1.2):
+// `edit_file` takes `replace_all` — at the top level and inside each `edits[]`
+// item, because one batch often renames an identifier everywhere and fixes one
+// line once. +404 chars over lane F1 item 1.1's 60,344, so the gate number is
+// 60,748.
+// Reference measurement updated 2026-10-29 (tools-expansion lane F1, item 1.1):
+// `search_code` now takes `output` ("content" | "files" | "count"), `context`
+// (0-10), `ignore_case` and `offset`, because the audit's 1,164 shell greps
+// mostly carried `-l`, `-c`, `-i` and `-A`/`-B` and this tool could answer none
+// of them. +925 chars on the 89-tool catalog over the 59,419 that lane B's
+// `write_file` description fix measured, so the gate number is 60,344 — still
+// under the 64,625 ceiling, with 4,281 chars of headroom left for lanes F2 and
+// the parts still queued.
+// Reference measurement updated 2026-10-29 (skills lane F2): `load_skill` is
+// registered and advertised, +455 chars on the 89-tool catalog (90 tools, the
+// 300-char description plus the one-argument schema), so the gate number is
+// 61,203. Skills are off unless a workspace writes `skills: { enabled: true }`,
+// so a config that never asks for them still advertises nothing and pays
+// nothing -- the maximal config below is what turns it on.
+// Reference measurement updated 2026-10-29 (tool-trim lane B, follow-up to B2):
+// `write_file`'s top-level description no longer says that `mode "append"` adds
+// to the end — the hold-back strips the `mode` property from the offer until a
+// call is cut off, so a sentence beside it must not keep advertising the choice
+// on every round. -52 chars on the 89-tool catalog, so the gate number is 59,419.
+// Reference measurement updated 2026-10-29 (tool-trim lane A, items A3+A4):
+// `read_file` takes `reads` — up to 10 `{path, start_line?, end_line?}` items
+// in one call, because 901 shell commands read files in the 53 sessions since
+// 0.17.80 and `sed -n` was in 639 of them, one round covering several ranges.
+// +1,057 chars on the 89-tool catalog over lane B's 58,390 made 59,447; A4 then
+// dropped `create_directory` from the `files` group map and the word "mkdir"
+// from that group's purpose line, which is +24 chars on `load_tool_group`'s
+// description, so the gate number is 59,471. The "65-tool" title is still
+// exact: 89 registered tools minus the 24 browser/desktop schemas held out
+// pending the owner's decision.
+// Reference measurement updated 2026-10-29 (tool-trim lane B, items B2+B3):
+// `append_file` and `create_directory` are gone — `write_file` carries both jobs
+// (`mode: "append"`, and the parents every write makes), so the catalog is 89
+// tools and 58,390 chars: 412 less than the 58,802 at B2, and 617 less than the
+// 59,007 lane A measured earlier the same day. Measured with lane A's
+// uncommitted A3 out of the tree, so it is what this commit checks out to;
+// A4 re-measures once A3 is in.
+// Reference measurement updated 2026-10-29 (tool-trim lane A, items A1+A2):
+// `media` is no longer advertised by default and `render_html_to_image` joined
+// the group, and `git_read` moved into `git`, so both purpose lines now carry
+// their verbs — +87 then +47 chars on `load_tool_group`'s description, making
+// the non-computer-use catalog 59,007. Re-measured in A4 once A3 and lane B's
+// commits are in.
+// Reference measurement updated 2026-10-29: the 65-tool non-computer-use
+// catalog is 58,873 chars, 7 fewer than the 58,880 of earlier that day, because
+// `install_llamacpp` now names the typed `/restart` instead of the stale
+// `/restartBackend`. The 58,880 was 58,801 plus 79 for `message_chat`'s one
+// `view` clause saying it also reads a closed chat and marks the result
+// `closed`.
+// (2026-10-28: 58,741 after 0.17.93's `message_chat` actions and the
+// non-blocking `ask_agent` description, then 58,801 from that day's
+// `message_chat` send-duplication fix and 12,000-character message cap.
+// 2026-10-24: 58,149, when the eager `message_chat` schema raised the
+// 57,500-char ceiling to 58,750.)
 // The ≈4.62 chars/token ratio was measured 2026-09-30 with llama.cpp b11243
 // and Qwen3.8-27B Q6_K (50,439 chars / 10,913 tokens).
-const MEASURED_CHARS = 58_149;
+// 2026-10-29: 62,501 after merging lane C's `export_document` (91 tools) onto
+// main's `load_skill` and edit-diagnostics schemas (61,203 on 90 tools).
+// 2026-10-30: 62,883, +382. `notify_on_exit` is on by default for a background
+// command, so its description now states the default, the `false` opt-out and
+// the case where a stopped turn sends no notice; `monitor_execution` and `wait`
+// point at the automatic wake instead of at the flag. Still 1,742 under the
+// 64,625 ceiling, so nothing here had to be paid for by cutting another tool.
+// 2026-10-30: 62,978 after merging `find_files.include_ignored` (+95 chars)
+// from fix/tool-error-fixes onto the above.
+const MEASURED_CHARS = 63_065;
 // Phase 3 STOP: the historical full 88-tool wire schema was 67,128 chars.
 // Exclude computer_use (24 browser/desktop schemas) pending the owner's product
 // decision; the full and gated sizes are recorded in the report.
@@ -52,8 +115,11 @@ const COMPUTER_USE_TOOLS_EXCLUDED_PENDING_DECISION = ['browser_', 'desktop_'] as
 // 55,483 → 56,600 on 2026-10-13 (CHANGES.md 0.17.22): the
 // two additions are opt-in image tools, advertised only when configured.
 // Raised 56,600 → 57,500 for `set_checkin`, then 57,500 → 58,750 for the
-// required eager `message_chat` tool (CHANGES.md Unreleased).
-const TOOL_SCHEMA_CHAR_BUDGET = 58_750;
+// required eager `message_chat` tool (CHANGES.md 0.17.73), then by 10%,
+// 58,750 → 64,625, on 2026-10-28 (owner's call, CHANGES.md Unreleased): the
+// catalog sat 9 chars under the old ceiling, so every description fix had to
+// be paid for by cutting another one.
+const TOOL_SCHEMA_CHAR_BUDGET = 64_625;
 
 const ALL_PERMISSIONS = new Set(ALL_TOOL_PERMISSIONS);
 
@@ -131,6 +197,14 @@ function makeMaximalRegistry(): ToolRegistry {
     undefined,
     undefined,
     jobs,
+    // The skills provider, so the maximally-advertised set prices `load_skill` in:
+    // an unwired registry advertises it (nothing installed), which is exactly what
+    // a config with `skills: { enabled: true }` and no skill folders shows.
+    {
+      isEnabled: () => true,
+      listCatalogEntries: () => [],
+      loadSkillByName: async () => null,
+    },
   );
   // load_tool_group advertises only once a lazy group is bridged in. Record one
   // so the maximally-advertised set includes it, matching a config that has
@@ -200,7 +274,7 @@ describe('tool schema CI budget (TOOL_SCHEMA_GROWTH_PLAN.md Step 1)', () => {
     expect(Math.ceil(description.length / 4.62)).toBeLessThanOrEqual(320);
   });
 
-  it('keeps the 65-tool non-computer-use schema under the character budget', () => {
+  it('keeps the 66-tool non-computer-use schema under the character budget', () => {
     const registry = makeMaximalRegistry();
     const chars = advertisedChars(registry);
     expect({
@@ -218,19 +292,25 @@ describe('tool schema CI budget (TOOL_SCHEMA_GROWTH_PLAN.md Step 1)', () => {
           : '',
     }).toMatchObject({ chars, budget: TOOL_SCHEMA_CHAR_BUDGET });
     expect(chars).toBeLessThanOrEqual(TOOL_SCHEMA_CHAR_BUDGET);
+    // The recorded number is checked, not just reported. A `measured` that has
+    // gone stale is how a half-finished edit in a shared worktree once read as a
+    // flaky test: this line makes that impossible to miss.
+    expect(chars).toBe(MEASURED_CHARS);
   });
 
   it('fails the budget when a new tool is registered (the gate actually bites)', () => {
     const registry = makeMaximalRegistry();
     // A dummy tool large enough to push the schema over the ceiling. The real
     // point is that the check is not a no-op: it must fail when the schema
-    // grows, not just pass when it does not.
+    // grows, not just pass when it does not. Sized from the headroom, so a
+    // raised ceiling cannot quietly outgrow a fixed-size canary.
+    const headroom = TOOL_SCHEMA_CHAR_BUDGET - advertisedChars(registry);
     registry.register({
       definition: {
         type: 'function',
         function: {
           name: '_budget_canary',
-          description: 'x'.repeat(5_000),
+          description: 'x'.repeat(headroom + 1_000),
           parameters: { type: 'object', properties: {}, additionalProperties: false },
         },
       },

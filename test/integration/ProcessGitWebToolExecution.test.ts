@@ -6,6 +6,8 @@ import * as vscode from 'vscode';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { makeShellTool } from '../../src/tools/shellTool';
 import { TEST_BASH } from '../support/bash';
+import { clearConversationSecretState, hasConversationReadSecret } from '../../src/tools/exfilTaint';
+import type { ForgeConfig } from '../../src/config/types';
 import { makeWebFetchTool } from '../../src/tools/fetchTool';
 
 /**
@@ -126,6 +128,74 @@ describe('isolated process, Git, and web tool execution', () => {
     await expect(gitRead.handler({ operation: 'status' })).resolves.toBe('M tracked.txt [staged]');
     await expect(makeCommitTool().handler({ message: 'next' })).resolves.toBe('Committed: next');
   }, 15_000);
+
+  /** The exfil taint, tested at the seam that writes it: the handler, after the
+   *  read actually ran. `permissions.secret_paths_allow` skips that read's card
+   *  and nothing else (docs/plans/EXFIL_GATES_PLAN.md, and case 5 of the
+   *  2026-10-28 live security test, where an unattended chat read an allow-listed
+   *  `.env` and then fetched a new host with no card). An approval-hook test
+   *  cannot show this, because the hook never writes the flag. */
+  describe('a secret that really printed marks the chat that printed it', () => {
+    const allow = {
+      permissions: { secret_paths_allow: ['.env'] },
+    } as unknown as ForgeConfig;
+
+    beforeEach(() => {
+      execFileSync('git', ['init', '-b', 'main'], { cwd: root });
+      execFileSync('git', ['config', 'user.name', 'Forge Test'], { cwd: root });
+      execFileSync('git', ['config', 'user.email', 'forge@test.invalid'], { cwd: root });
+      fs.writeFileSync(path.join(root, '.env'), 'API_KEY=secret-value\n', 'utf8');
+      fs.writeFileSync(path.join(root, 'notes.md'), 'nothing secret\n', 'utf8');
+      execFileSync('git', ['add', '.env', 'notes.md'], { cwd: root });
+      execFileSync('git', ['commit', '-m', 'fixture'], { cwd: root });
+    });
+    afterEach(() => clearConversationSecretState());
+
+    it('git_read show of an allow-listed .env prints it and marks the chat', async () => {
+      const tool = makeGitReadTool({ getConfig: () => allow });
+      // No card: this is the path the owner allowed. It is still a secret read.
+      expect(tool.approval?.({ operation: 'show', ref: 'HEAD:.env' })).toBeUndefined();
+      await expect(
+        tool.handler(
+          { operation: 'show', ref: 'HEAD:.env' },
+          { beforeMutate: () => undefined, conversationId: 'git-allow' },
+        ),
+      ).resolves.toContain('API_KEY=secret-value');
+      expect(hasConversationReadSecret('git-allow')).toBe(true);
+      // What the allow list did not name is still gated, and still marks.
+      expect(tool.approval?.({ operation: 'show', ref: 'HEAD:notes.md' })).toBeUndefined();
+    });
+
+    it('a git_read that printed no file contents marks nothing', async () => {
+      const tool = makeGitReadTool({ getConfig: () => allow });
+      await expect(
+        tool.handler({ operation: 'log' }, { beforeMutate: () => {}, conversationId: 'git-log' }),
+      ).resolves.toContain('fixture');
+      expect(hasConversationReadSecret('git-log')).toBe(false);
+    });
+
+    it.skipIf(!TEST_BASH)(
+      'shell cat of an allow-listed .env marks the chat, and cat of an ordinary file does not',
+      async () => {
+        const tool = makeShellTool({ bashPath: TEST_BASH, getConfig: () => allow });
+        await expect(
+          tool.handler(
+            { command: 'cat .env', cwd: '.' },
+            { beforeMutate: () => undefined, conversationId: 'shell-allow' },
+          ),
+        ).resolves.toContain('API_KEY=secret-value');
+        expect(hasConversationReadSecret('shell-allow')).toBe(true);
+        await expect(
+          tool.handler(
+            { command: 'cat notes.md', cwd: '.' },
+            { beforeMutate: () => undefined, conversationId: 'shell-plain' },
+          ),
+        ).resolves.toContain('nothing secret');
+        expect(hasConversationReadSecret('shell-plain')).toBe(false);
+      },
+      15_000,
+    );
+  });
 
   it('never restores a file that shares the requested branch name', async () => {
     vi.spyOn(vscode.extensions, 'getExtension').mockReturnValue(undefined as never);

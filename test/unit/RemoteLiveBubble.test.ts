@@ -12,13 +12,14 @@ function rig(
   channel = new FakeRemoteChannel(),
   maxChars = 3_900,
   canDeliver: () => Promise<boolean> = async () => true,
+  controller = new AbortController(),
 ) {
   const report = vi.fn();
   const bubble = new RemoteLiveBubble(
     {
       channel,
       chatId: 'chat-a',
-      signal: new AbortController().signal,
+      signal: controller.signal,
       canDeliver,
       maxChars: () => maxChars,
       footer: () => FOOTER,
@@ -27,7 +28,7 @@ function rig(
     },
     'm0',
   );
-  return { channel, bubble, report };
+  return { channel, bubble, report, controller };
 }
 
 /** Every text each message id was ever shown, sends and edits alike, in order. */
@@ -209,5 +210,158 @@ describe('RemoteLiveBubble', () => {
     await vi.advanceTimersByTimeAsync(5_000);
     expect(channel.edits).toEqual([]);
     expect(vi.getTimerCount()).toBe(0);
+  });
+
+  // A question board or an approval card stops the turn until the owner answers
+  // it, and lands below the bubble carrying the working line. Telegram never
+  // moves a message, so the line has to come off for the length of the wait and
+  // reopen as a new message at the bottom: `strand()` alone would put it back
+  // under the buttons while the owner is still reading them.
+
+  it('takes the working line off a bubble with words and keeps its Stop button', async () => {
+    vi.useFakeTimers();
+    const { channel, bubble } = rig();
+    bubble.narrate('Checking the ports.');
+    await vi.advanceTimersByTimeAsync(1_000);
+    expect(channel.edits.at(-1)?.text).toBe(`Checking the ports.\n\n${FOOTER}`);
+    expect(live(channel)).toEqual(['m0']);
+
+    bubble.suspend();
+    await vi.advanceTimersByTimeAsync(1_000);
+    expect(channel.edits.at(-1)?.text).toBe('Checking the ports.');
+    // The button stays: an edit that does not re-attach it takes it away, and
+    // "Send now" has to keep working while a question is on screen.
+    expect(live(channel)).toEqual(['m0']);
+    expect(channel.deleted).toEqual([]);
+
+    // The clock, a status change and an immediate flush all draw nothing while
+    // the owner is answering, so the line cannot reappear above the board.
+    bubble.request();
+    await bubble.flushNow();
+    await vi.advanceTimersByTimeAsync(6_000);
+    // Two edits in all: the footer on, then off. Nothing else was drawn while
+    // the owner was answering, and no new message was sent.
+    expect(channel.edits).toHaveLength(2);
+    expect(channel.progress).toEqual([]);
+
+    bubble.resume();
+    await vi.advanceTimersByTimeAsync(1_000);
+    // The line reopens as a NEW message at the bottom, and the bubble above the
+    // board loses its keyboard, so exactly one Stop button exists at a time.
+    // The third edit is the same words with the keyboard taken off.
+    expect(channel.progress.at(-1)?.text).toBe(FOOTER);
+    expect(channel.edits).toHaveLength(3);
+    expect(channel.edits.at(-1)?.text).toBe('Checking the ports.');
+    expect(live(channel)).toEqual(['1']);
+    expect(bubble.owns('m0') && bubble.owns('1')).toBe(true);
+  });
+
+  it('deletes a working line that carried nothing but itself', async () => {
+    vi.useFakeTimers();
+    const { channel, bubble } = rig();
+    // 'm0' is the opened status bubble: no words, only the working line, which
+    // is what the owner sees when the agent asks before it says anything.
+    bubble.suspend();
+    await vi.advanceTimersByTimeAsync(1_000);
+    // Telegram rejects an empty message, so the line goes rather than staying
+    // above the buttons with nothing in it.
+    expect(channel.deleted).toEqual([{ chatId: 'chat-a', messageId: 'm0' }]);
+    expect(channel.edits).toEqual([]);
+
+    bubble.resume();
+    await vi.advanceTimersByTimeAsync(1_000);
+    expect(channel.progress.at(-1)?.text).toBe(FOOTER);
+    expect(live(channel)).toEqual(['1']);
+    const statusOnly = await bubble.close();
+    expect(statusOnly).toEqual([]);
+    // A line that is already gone is not deleted a second time when the turn
+    // closes, and its id is not handed to the cleanup scheduler.
+    expect(channel.deleted.filter((d) => d.messageId === 'm0')).toHaveLength(1);
+    expect(channel.deleted.filter((d) => d.messageId === '1')).toHaveLength(1);
+  });
+
+  it('writes no outcome line when the answer is already on screen', async () => {
+    vi.useFakeTimers();
+    const { channel, bubble } = rig();
+    bubble.narrate('Done.');
+    await vi.advanceTimersByTimeAsync(1_000);
+
+    await expect(bubble.close()).resolves.toEqual([]);
+
+    expect(channel.edits.at(-1)?.text).toBe('Done.');
+    expect(channel.edits.map((e) => e.text)).not.toContain('Forge: completed.');
+    expect(channel.deleted).toEqual([]);
+    expect(live(channel)).toEqual([]);
+  });
+
+  it('sends the outcome line when the working line went with its own bubble', async () => {
+    vi.useFakeTimers();
+    const { channel, bubble } = rig();
+    bubble.suspend();
+    await vi.advanceTimersByTimeAsync(1_000);
+    expect(channel.deleted).toEqual([{ chatId: 'chat-a', messageId: 'm0' }]);
+
+    // The turn fails with nobody answering: the outcome still has to reach the
+    // chat, and there is no message left to edit, so it is sent as its own.
+    const statusOnly = await bubble.close('Forge: failed.');
+    expect(statusOnly).toEqual(['1']);
+    expect(channel.progress.at(-1)?.text).toBe('Forge: failed.');
+    expect(channel.edits).toEqual([]);
+    expect(live(channel)).toEqual([]);
+  });
+
+  it('draws nothing and leaves no timer once the turn is cancelled', async () => {
+    vi.useFakeTimers();
+    const controller = new AbortController();
+    const { channel, bubble } = rig(new FakeRemoteChannel(), 3_900, async () => true, controller);
+    bubble.narrate('Half way there.');
+    await vi.advanceTimersByTimeAsync(1_000);
+    bubble.suspend();
+    await vi.advanceTimersByTimeAsync(1_000);
+    expect(channel.edits).toHaveLength(2);
+
+    controller.abort();
+    bubble.resume();
+    bubble.request();
+    await vi.advanceTimersByTimeAsync(6_000);
+    // Only the two edits that landed before the abort, and nothing scheduled.
+    expect(channel.edits.map((e) => e.text)).toEqual([
+      `Half way there.\n\n${FOOTER}`,
+      'Half way there.',
+    ]);
+    expect(channel.progress).toEqual([]);
+    expect(vi.getTimerCount()).toBe(0);
+  });
+
+  it('does not open a working line for a resume nobody suspended', async () => {
+    vi.useFakeTimers();
+    const { channel, bubble } = rig();
+    bubble.narrate('Words.');
+    await vi.advanceTimersByTimeAsync(1_000);
+    // A stale resume — the turn ended, or a new one started for the same
+    // conversation while a board was pending — must not put a second working
+    // line under a turn that never asked for one.
+    bubble.resume();
+    await vi.advanceTimersByTimeAsync(5_000);
+    expect(channel.progress).toEqual([]);
+    expect(channel.edits).toHaveLength(1);
+  });
+
+  it('removes the Stop button a suspended bubble kept when the turn closes', async () => {
+    vi.useFakeTimers();
+    const { channel, bubble } = rig();
+    bubble.narrate('Paused here.');
+    await vi.advanceTimersByTimeAsync(1_000);
+    bubble.suspend();
+    await vi.advanceTimersByTimeAsync(1_000);
+    expect(channel.edits.at(-1)?.text).toBe('Paused here.');
+
+    await bubble.close('Forge: cancelled.');
+    // The last bubble has words, so no outcome line; the button the suspend
+    // kept still goes, which is what close() is for — the third edit is the
+    // same words with the keyboard taken off.
+    expect(channel.edits).toHaveLength(3);
+    expect(channel.edits.at(-1)?.text).toBe('Paused here.');
+    expect(live(channel)).toEqual([]);
   });
 });

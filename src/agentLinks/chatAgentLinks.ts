@@ -1,8 +1,5 @@
 import { z } from 'zod';
 import type { ConversationRuntime } from '../sidebar/sessionTypes';
-import { getLogger } from '../util/logger';
-
-const log = getLogger();
 
 export const agentKindSchema = z.enum(['claude', 'codex', 'copilot']);
 export type AgentKind = z.infer<typeof agentKindSchema>;
@@ -105,15 +102,38 @@ export const agentLinksSchema = z
   });
 export type AgentLinks = z.infer<typeof agentLinksSchema>;
 
-export interface AgentLinkConflict {
-  sessionId: string;
-  firstChat: string;
-  secondChat: string;
-  keptChat: string;
+/**
+ * Every chat a session is linked to, with the last time that session was
+ * addressed there. A session may hold several chats
+ * (docs/plans/V1_FINISH_PLAN.md lane 4 phase 5), so this is a set, not one
+ * owner. The "current" chat is the entry with the newest `lastUsedAt`: it is
+ * what `say` without `--to` goes to, and because the same field is stored on
+ * every link, the newest entry after a reload is the current chat again with
+ * nothing extra to persist and nothing to lose when the host dies.
+ */
+const chatsBySession = new Map<string, Map<string, number>>();
+
+function rememberChat(sessionId: string, conversationId: string, lastUsedAt: number): void {
+  const chats = chatsBySession.get(sessionId) ?? new Map<string, number>();
+  chats.set(conversationId, lastUsedAt);
+  chatsBySession.set(sessionId, chats);
 }
 
-const reverseIndex = new Map<string, string>();
-const titlesByConversation = new Map<string, string>();
+function forgetChat(sessionId: string, conversationId: string): void {
+  const chats = chatsBySession.get(sessionId);
+  if (!chats) return;
+  chats.delete(conversationId);
+  if (chats.size === 0) chatsBySession.delete(sessionId);
+}
+
+/** Most recently used first, so `findBySession`'s answer is always the first. */
+function orderedChats(sessionId: string): string[] {
+  const chats = chatsBySession.get(sessionId);
+  if (!chats) return [];
+  return [...chats.entries()]
+    .sort((a, b) => b[1]! - a[1]!)
+    .map(([conversationId]) => conversationId);
+}
 
 /** Rebuild the process-local lookup from every open and recent history chat. */
 export function rebuildIndex(
@@ -122,65 +142,58 @@ export function rebuildIndex(
     title?: string;
     agentLinks?: AgentLinks | undefined;
   }[],
-): AgentLinkConflict[] {
-  const next = new Map<string, { conversationId: string; lastUsedAt: number }>();
-  const titles = new Map<string, string>();
-  const conflicts: AgentLinkConflict[] = [];
+): void {
+  const next = new Map<string, Map<string, number>>();
   for (const conversation of conversations) {
-    if (conversation.title) titles.set(conversation.id, conversation.title);
-    for (const link of Object.values(conversation.agentLinks ?? {})) {
-      if (!link) continue;
-      const parsed = agentLinkSchema.parse(link);
-      const existing = next.get(parsed.sessionId);
-      if (existing && existing.conversationId !== conversation.id) {
-        const incomingWins = parsed.lastUsedAt > existing.lastUsedAt;
-        const firstChat = titles.get(existing.conversationId) ?? existing.conversationId;
-        const secondChat = conversation.title ?? conversation.id;
-        const keptChat = incomingWins ? secondChat : firstChat;
-        const conflict = { sessionId: parsed.sessionId, firstChat, secondChat, keptChat };
-        conflicts.push(conflict);
-        log.error(
-          `[chatAgentLinks] session ${parsed.sessionId} is linked to chats "${firstChat}" and "${secondChat}"; keeping "${keptChat}" (newest lastUsedAt)`,
-        );
-        if (incomingWins)
-          next.set(parsed.sessionId, {
-            conversationId: conversation.id,
-            lastUsedAt: parsed.lastUsedAt,
-          });
-        continue;
-      }
-      next.set(parsed.sessionId, {
-        conversationId: conversation.id,
-        lastUsedAt: parsed.lastUsedAt,
-      });
+    for (const value of Object.values(conversation.agentLinks ?? {})) {
+      if (!value) continue;
+      const link = agentLinkSchema.parse(value);
+      const chats = next.get(link.sessionId) ?? new Map<string, number>();
+      // One entry per chat per session: a chat holds a single link per kind,
+      // and two kinds in the same chat naming the same session is the same
+      // chat reached two ways, not a second entry.
+      chats.set(conversation.id, link.lastUsedAt);
+      next.set(link.sessionId, chats);
     }
   }
-  reverseIndex.clear();
-  titlesByConversation.clear();
-  for (const [sessionId, owner] of next) reverseIndex.set(sessionId, owner.conversationId);
-  for (const [conversationId, title] of titles) titlesByConversation.set(conversationId, title);
-  return conflicts;
+  chatsBySession.clear();
+  for (const [sessionId, chats] of next) chatsBySession.set(sessionId, chats);
 }
 
-export function link(
-  conversation: ConversationRuntime,
-  value: AgentLink,
-  conversations: readonly Pick<ConversationRuntime, 'id' | 'title'>[],
-): AgentLink {
+/**
+ * Put a link on a chat. Several chats may hold the same session, so this no
+ * longer refuses a chat another one already links: `say --new`, `--to` an
+ * unlinked open chat and the 🔗 picker each add a chat to the session's set
+ * while the chat that held it keeps its link. A chat still holds one link per
+ * kind, so re-linking a chat to a different session frees this chat from the
+ * session it was holding.
+ */
+export function link(conversation: ConversationRuntime, value: AgentLink): AgentLink {
   const next = agentLinkSchema.parse(value);
-  const linkedConversationId = reverseIndex.get(next.sessionId);
-  if (linkedConversationId && linkedConversationId !== conversation.id) {
-    const other = conversations.find((item) => item.id === linkedConversationId);
-    const title =
-      other?.title ?? titlesByConversation.get(linkedConversationId) ?? linkedConversationId;
-    throw new Error(`That session is already linked to chat "${title}".`);
-  }
-
   const previous = conversation.agentLinks?.[next.kind];
-  if (previous && previous.sessionId !== next.sessionId) reverseIndex.delete(previous.sessionId);
+  if (previous && previous.sessionId !== next.sessionId)
+    forgetChat(previous.sessionId, conversation.id);
   conversation.agentLinks = { ...conversation.agentLinks, [next.kind]: next };
-  reverseIndex.set(next.sessionId, conversation.id);
+  rememberChat(next.sessionId, conversation.id, next.lastUsedAt);
   return next;
+}
+
+/**
+ * Link a second chat for a session that already holds one, keeping the first:
+ * this is `say --new`. The new chat becomes current because its `lastUsedAt`
+ * is newer, and the older chat stays reachable with `--to` for as long as it
+ * holds the link.
+ */
+export function addChatForSession(
+  from: ConversationRuntime,
+  to: ConversationRuntime,
+  kind: AgentKind,
+  lastUsedAt = Date.now(),
+): AgentLink {
+  if (from.id === to.id) throw new Error('Cannot link the same chat twice.');
+  const current = get(from, kind);
+  if (!current) throw new Error(`Chat "${from.title}" has no linked ${kind} session.`);
+  return link(to, { ...current, lastUsedAt });
 }
 
 export function unlink(conversation: ConversationRuntime, kind: AgentKind): AgentLink | undefined {
@@ -190,8 +203,9 @@ export function unlink(conversation: ConversationRuntime, kind: AgentKind): Agen
   delete next[kind];
   if (Object.keys(next).length > 0) conversation.agentLinks = next;
   else delete conversation.agentLinks;
-  if (reverseIndex.get(previous.sessionId) === conversation.id)
-    reverseIndex.delete(previous.sessionId);
+  // Only this chat leaves the session: the other chats it was linked to stay
+  // linked, and current moves to the newest of what is left.
+  forgetChat(previous.sessionId, conversation.id);
   return previous;
 }
 
@@ -210,31 +224,49 @@ export function touch(
 ): AgentLink {
   const current = get(conversation, kind);
   if (!current) throw new Error(`Chat "${conversation.title}" has no linked ${kind} session.`);
-  return link(conversation, { ...current, lastUsedAt }, [conversation]);
+  return link(conversation, { ...current, lastUsedAt });
 }
 
+/** The chat this session last addressed: what `say` with no `--to` reaches. */
 export function findBySession(sessionId: string): string | undefined {
-  return reverseIndex.get(sessionId);
+  return orderedChats(sessionId)[0];
 }
 
-export function move(
-  from: ConversationRuntime,
-  to: ConversationRuntime,
+/**
+ * Every chat this session may address, most recently used first. `--to` needs
+ * the whole set: any chat already linked to this session is a legal target,
+ * not only the current one. The set is process-wide, so a caller that can act
+ * only on its own window has to check these ids against its own chats — see
+ * `src/vscode/agentRouteDeps.ts` `linkedAgentOwner`.
+ */
+export function chatsForSession(sessionId: string): string[] {
+  return orderedChats(sessionId);
+}
+
+/**
+ * The chat this window can act on for a session: newest first, but only a chat
+ * whose own link names this sender. A caller that runs in one window cannot use
+ * `findBySession` alone — the index is process-wide, so the chat a session last
+ * addressed may belong to another window, and treating that as "not linked" was
+ * the trap phase 5 found (docs/plans/V1_FINISH_PLAN.md lane 4 phase 5). The
+ * link is read through `linkOf` so this module stays free of the host facade.
+ */
+export function findSessionChatIn(
+  sessionId: string,
   kind: AgentKind,
-  conversations: readonly Pick<ConversationRuntime, 'id' | 'title'>[],
-): AgentLink {
-  if (from.id === to.id) throw new Error('Cannot move a session link to the same chat.');
-  const current = get(from, kind);
-  if (!current) throw new Error(`Chat "${from.title}" has no linked ${kind} session.`);
-  unlink(from, kind);
-  return link(to, current, conversations);
+  linkOf: (conversationId: string, kind: AgentKind) => AgentLink | undefined,
+): string | undefined {
+  for (const conversationId of chatsForSession(sessionId)) {
+    if (linkOf(conversationId, kind)?.sessionId === sessionId) return conversationId;
+  }
+  return undefined;
 }
 
 export function forgetConversation(conversationId: string): void {
-  for (const [sessionId, owner] of reverseIndex) {
-    if (owner === conversationId) reverseIndex.delete(sessionId);
+  for (const [sessionId, chats] of chatsBySession) {
+    chats.delete(conversationId);
+    if (chats.size === 0) chatsBySession.delete(sessionId);
   }
-  titlesByConversation.delete(conversationId);
 }
 
 /**

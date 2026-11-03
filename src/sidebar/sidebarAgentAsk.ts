@@ -2,9 +2,32 @@ import { randomUUID } from 'crypto';
 import type { CheckpointStack } from '../checkpoint/CheckpointStack';
 import { AgentLinksConfigSchema } from '../config/agentBusSchema';
 import type { ForgeConfig } from '../config/types';
-import { makeAskAgentHandler, type AskAgentRequest } from '../agentLinks/askAgentService';
+import {
+  makeAskAgentHandler,
+  type AskAgentRequest,
+  type AskAgentResult,
+} from '../agentLinks/askAgentService';
 import { makeAskAgentRuntime } from '../agentLinks/askAgentRuntime';
+import {
+  renderAskAgentResult,
+  renderAskReplyMessage,
+  renderAskStarted,
+  renderAskStillPending,
+} from '../agentLinks/askAgentResult';
+import {
+  addPendingAgentAsk,
+  BACKGROUND_ASK_LIMIT_MS,
+  cancelPendingAgentAsks,
+  formatAskAge,
+  newExchangeId,
+  pendingAgentAsk,
+  removePendingAgentAsk,
+  type PendingAgentAsk,
+  type StartAgentAsk,
+} from '../agentLinks/pendingAgentAsks';
 import type { AgentLink } from '../agentLinks/chatAgentLinks';
+import { logger } from '../util/logger';
+import type { ChatMessageDelivery } from './backgroundExitNotice';
 import { findConversation, type SidebarRuntime } from './sessionTypes';
 
 export function createSidebarAgentAsk(options: {
@@ -13,23 +36,132 @@ export function createSidebarAgentAsk(options: {
   checkpoints: CheckpointStack;
   workspaceRoot?: string;
   persist(): void;
+  /** Pending asks pin their chat until the background reply settles. */
+  onPendingChanged?: (conversationId: string) => void;
+  /** The `message_chat` path: a tell when the chat is busy, else a visible turn. */
+  deliver: (text: string, conversationId: string) => Promise<ChatMessageDelivery>;
 }) {
   const controllers = new Map<string, AbortController>();
-  const handler = makeAskAgentHandler({
-    getConfig: options.getConfig,
-    runtime: makeAskAgentRuntime({ getConfig: options.getConfig }),
-    getLinkConfig: () => AgentLinksConfigSchema.parse(options.getConfig().agent_links),
-  });
+  const makeHandler = (waitLimitMs?: number) =>
+    makeAskAgentHandler({
+      getConfig: options.getConfig,
+      runtime: makeAskAgentRuntime({
+        getConfig: options.getConfig,
+        ...(waitLimitMs ? { waitLimitMs } : {}),
+      }),
+      getLinkConfig: () => AgentLinksConfigSchema.parse(options.getConfig().agent_links),
+    });
+  // The remote ask blocks its caller, so it keeps the default limits.
+  const handler = makeHandler();
+  const backgroundHandler = makeHandler(BACKGROUND_ASK_LIMIT_MS);
+
+  const deliverReply = (entry: PendingAgentAsk, result: AskAgentResult): void => {
+    const where = `ask ${entry.exchangeId} in ${entry.conversationId}`;
+    // Stop and close abort the ask; a reply then must not start a new turn.
+    if (entry.controller.signal.aborted || result.status === 'cancelled') {
+      logger.info(`[ask-agent] ${where} was cancelled; no reply delivered`);
+      return;
+    }
+    // Open chats only: `findConversation` also matches archived ones.
+    if (!options.getSidebar().conversations.some((c) => c.id === entry.conversationId)) {
+      logger.info(`[ask-agent] dropped the reply to ${where}: the chat is no longer open`);
+      return;
+    }
+    void options
+      .deliver(renderAskReplyMessage(entry.exchangeId, result), entry.conversationId)
+      .then(
+        (delivery) => {
+          if (delivery.kind === 'refused')
+            logger.warn(`[ask-agent] the reply to ${where} was refused: ${delivery.error}`);
+        },
+        (err: unknown) => logger.warn(`[ask-agent] the reply to ${where} failed: ${String(err)}`),
+      );
+  };
+
+  const start: StartAgentAsk = async (conversationId, request) => {
+    const conversation = findConversation(options.getSidebar(), conversationId);
+    if (!conversation) return 'Error: ask_agent: this chat is not available in this window.';
+    const busy = pendingAgentAsk(conversationId, request.agent);
+    if (busy)
+      return renderAskStillPending(
+        request.agent,
+        busy.exchangeId,
+        formatAskAge(busy.startedAt, Date.now()),
+      );
+    const entry: PendingAgentAsk = {
+      exchangeId: newExchangeId(),
+      conversationId,
+      agent: request.agent,
+      startedAt: Date.now(),
+      controller: new AbortController(),
+    };
+    // Registered before the first await, so a second call in the same round
+    // sees it and is refused instead of resuming the same CLI session twice.
+    addPendingAgentAsk(entry);
+    options.onPendingChanged?.(conversationId);
+    let started = false;
+    let markStarted!: () => void;
+    const startedSignal = new Promise<void>((resolve) => {
+      markStarted = resolve;
+    });
+    const checkpoint = options.checkpoints.beginTurn(
+      `agent-ask-${entry.exchangeId}`,
+      conversationId,
+    );
+    const run = (async (): Promise<AskAgentResult> => {
+      try {
+        return await backgroundHandler(request, {
+          conversation,
+          checkpoint,
+          signal: entry.controller.signal,
+          workspaceRoot: options.workspaceRoot ?? '',
+          persistConversation: options.persist,
+          onStarted: () => {
+            started = true;
+            markStarted();
+          },
+        });
+      } catch (err) {
+        return {
+          agent: request.agent,
+          status: 'failed',
+          finalText: '',
+          sessionTitle: '',
+          subject: '',
+          live: false,
+          error: err instanceof Error ? err.message : String(err),
+        };
+      } finally {
+        options.checkpoints.commitTurn(checkpoint);
+        removePendingAgentAsk(entry);
+        options.onPendingChanged?.(conversationId);
+        options.persist();
+      }
+    })();
+    void run.then((result) => {
+      if (started) deliverReply(entry, result);
+    });
+    // A refusal settles the run before it starts; that is the tool's answer.
+    const early = await Promise.race([
+      startedSignal.then(() => undefined),
+      run.then((result) => (started ? undefined : result)),
+    ]);
+    return early ? renderAskAgentResult(early) : renderAskStarted(request.agent, entry.exchangeId);
+  };
 
   return {
-    cancel: (conversationId: string) => controllers.get(conversationId)?.abort(),
+    start,
+    cancel: (conversationId: string) => {
+      controllers.get(conversationId)?.abort();
+      cancelPendingAgentAsks(conversationId);
+    },
     async ask(
       conversationId: string,
       request: AskAgentRequest,
       signal: AbortSignal,
       onSessionLinked?: (link: AgentLink) => void,
       onAccepted?: (link: AgentLink) => void,
-    ): Promise<import('../agentLinks/askAgentService').AskAgentResult> {
+    ): Promise<AskAgentResult> {
       const conversation = findConversation(options.getSidebar(), conversationId);
       if (!conversation) throw new Error('The bound chat is not available in this window.');
       const controller = new AbortController();

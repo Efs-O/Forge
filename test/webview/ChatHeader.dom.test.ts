@@ -1,4 +1,5 @@
 // @vitest-environment jsdom
+import { readFileSync } from 'node:fs';
 import { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -32,7 +33,6 @@ function render(onRename?: (title: string) => void, agentLinks?: AgentLinks): vo
         historyExpanded: false,
         onNew: vi.fn(),
         onToggleHistory: vi.fn(),
-        onLinkAgent: vi.fn(),
         onUnlinkAgent: vi.fn(),
         agentLinks,
         onRename,
@@ -44,6 +44,18 @@ function render(onRename?: (title: string) => void, agentLinks?: AgentLinks): vo
 const title = (): HTMLElement | null => container.querySelector('#chat-header-title');
 const input = (): HTMLInputElement | null =>
   container.querySelector<HTMLInputElement>('#chat-header-title-input');
+
+function link(kind: 'claude' | 'codex' | 'copilot', sessionId: string, title: string) {
+  return {
+    kind,
+    sessionId,
+    cwd: 'C:/repo',
+    title,
+    linkedAt: 1,
+    lastUsedAt: 1,
+    origin: 'forge-created' as const,
+  };
+}
 
 function edit(value: string, key: string): void {
   act(() => title()!.click());
@@ -81,33 +93,89 @@ describe('ChatHeader title rename', () => {
     expect(input()).toBeNull();
   });
 
-  it('keeps Link in the toolbar and hides the link strip until a session exists', () => {
+  it('has no Link button in the toolbar and hides the link strip until a session exists', () => {
     render(undefined);
-    expect(container.querySelector('#agent-link-toolbar-btn')).not.toBeNull();
+    expect(container.querySelector('#agent-link-toolbar-btn')).toBeNull();
     expect(container.querySelector('#agent-links-strip')).toBeNull();
   });
 
-  it('shows the linked session row with its kind, title and last-used time', () => {
+  it('shows compact linked state and a direct Unlink action without a duplicated title strip', () => {
     render(undefined, {
-      claude: {
-        kind: 'claude',
-        sessionId: '11111111-1111-4111-8111-111111111111',
-        cwd: 'C:/repo',
-        title: 'Forge · hello man',
-        linkedAt: 1,
-        lastUsedAt: 1,
-        origin: 'forge-created',
-      },
+      claude: link('claude', '11111111-1111-4111-8111-111111111111', 'Forge · hello man'),
     });
-    expect(container.querySelector('#agent-links-strip')?.textContent).toContain('claude');
-    expect(container.querySelector('#agent-links-strip')?.textContent).toContain('Forge · hello man');
-    expect(container.querySelector('#agent-links-strip')?.textContent).toContain('Last used');
+    const group = container.querySelector<HTMLElement>('.agent-link-group')!;
+    expect(group.textContent).toContain('Claude');
+    expect(group.textContent).toContain('Linked');
+    expect(group.textContent).not.toContain('Forge · hello man');
+    expect(group.textContent).not.toContain('Last used');
+    expect(group.title).toContain('Forge · hello man');
+    expect(group.title).toContain('Last used');
+    const unlink = container.querySelector<HTMLButtonElement>('.agent-link-group button')!;
+    expect(unlink.textContent).toBe('Unlink');
+    expect(unlink.getAttribute('aria-label')).toBe('Unlink Claude');
+  });
+
+  it('keeps linked agent groups side by side and unlinks only the selected kind', () => {
+    const onUnlink = vi.fn();
+    act(() => {
+      root.render(
+        React.createElement(ChatHeader, {
+          title: 'hello man',
+          historyExpanded: false,
+          onNew: vi.fn(),
+          onToggleHistory: vi.fn(),
+          onUnlinkAgent: onUnlink,
+          agentLinks: {
+            codex: link('codex', '22222222-2222-4222-8222-222222222222', 'Codex task'),
+            claude: link('claude', '11111111-1111-4111-8111-111111111111', 'Claude task'),
+          },
+        }),
+      );
+    });
+    const groups = Array.from(container.querySelectorAll('.agent-link-group'));
+    expect(groups).toHaveLength(2);
+    act(() => groups[0]!.querySelector('button')!.click());
+    expect(onUnlink).toHaveBeenCalledTimes(1);
+    expect(onUnlink).toHaveBeenCalledWith('codex');
+  });
+
+  it('uses the actual Forge icon asset and the agreed compact type sizes on the owned header', () => {
+    act(() =>
+      root.render(
+        React.createElement(Header, {
+          tokenUsed: 1,
+          tokenMax: 32,
+          workspace: {
+            name: 'Forge',
+            path: 'C:/repo',
+            extraRoots: 0,
+            stale: false,
+            forgeIconUri: 'vscode-webview://forge-icon.svg',
+          },
+        }),
+      ),
+    );
+    const mark = container.querySelector<HTMLElement>('#forge-mark');
+    expect(mark?.style.maskImage).toContain('forge-icon.svg');
+    expect(mark?.style.webkitMaskImage).toContain('forge-icon.svg');
+    expect(container.querySelector('#forge-wordmark')?.textContent).toBe('Forge');
+    const css = readFileSync('webview-ui/styles/layout.css', 'utf8');
+    expect(css).toContain('width: 24px;');
+    expect(css).toContain('font-size: 16px;');
+    expect(container.querySelector('#workspace-root-name')?.textContent).toBe('');
+    const chatCss = readFileSync('webview-ui/styles/chat-header.css', 'utf8');
+    expect(chatCss).toContain('min-height: 36px;');
+    expect(chatCss).toContain('font-size: 14px;');
   });
 });
 
 describe('Header compaction forecast hint', () => {
   it('shows the threshold tick and explains the next-request forecast in the title', () => {
-    act(() => root.render(React.createElement(Header, { tokenUsed: 12_000, tokenMax: 32_768, compactAt: 0.85 })));
+    act(() =>
+      root.render(
+        React.createElement(Header, { tokenUsed: 12_000, tokenMax: 32_768, compactAt: 0.85 }),
+      ),
+    );
 
     const budget = container.querySelector<HTMLElement>('#token-budget');
     const tick = container.querySelector<HTMLElement>('#token-budget-compact-at');

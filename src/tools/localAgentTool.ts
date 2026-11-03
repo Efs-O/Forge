@@ -183,6 +183,11 @@ export function makeLocalAgentTool(
     },
     describe: () => describeWithTargets(tool.definition, getConfig()),
     permission: 'delegate',
+    /** The task text, and any `context_files` content read into it, goes to
+     *  another model — a local engine, a cloud provider or a CLI agent with its
+     *  own tools. `untrustedExitPolicy.ts` cards that in a chat holding outside
+     *  content or a secret, and lets it run with no card in a clean chat. */
+    reachesOut: 'delegation',
     // Confirm before a delegation loads weights into local VRAM. DelegationGate
     // is a SLOT count (`max_simultaneous_models`), not a memory budget: with it
     // set to 4 on a single 16 GB card, delegating from a resident 27B to another

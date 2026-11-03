@@ -42,13 +42,13 @@ function fakeHandle(recheck: unknown) {
 }
 
 /**
- * A Page stand-in: `evaluate` returns whatever the scenario needs, and
+ * A Page fake: `evaluate` returns whatever the scenario needs, and
  * `evaluateHandle` hands back the pinned node list the inspect callback would
  * have published. Cast to `Page` at the call sites — the real interface is far
  * larger than the three members this store touches.
  */
 /**
- * A Page stand-in whose responses can be swapped between calls, so one Page
+ * A Page fake whose responses can be swapped between calls, so one Page
  * object can be inspected twice — which is what a replace has to be tested on,
  * since the store keys its snapshots by Page identity.
  */

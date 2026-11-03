@@ -2,6 +2,8 @@ import * as fs from 'fs';
 import type { RegisteredTool } from './ToolRegistry';
 import { resolveRealWorkspacePath } from '../util/WorkspacePaths';
 import { writeFileAtomicSync } from '../util/atomicWrite';
+import { withFileLengthWarning, type FileLengthWarningGetter } from './fileLengthWarning';
+import { NO_PROBLEM_WATCHER, withProblemNote, type ProblemWatcher } from './editDiagnostics';
 
 const MAX_EDIT_OPERATIONS = 20;
 const MAX_LINES_PER_OPERATION = 500;
@@ -96,6 +98,8 @@ export function applyLineEditsToContent(
 
 export function makeApplyLineEditsTool(
   extraRoots: () => readonly string[] = () => [],
+  lengthWarning: FileLengthWarningGetter = () => undefined,
+  watchProblems: ProblemWatcher = NO_PROBLEM_WATCHER,
 ): RegisteredTool {
   return {
     definition: {
@@ -103,7 +107,7 @@ export function makeApplyLineEditsTool(
       function: {
         name: 'apply_line_edits',
         description:
-          'Atomically apply non-overlapping replacements to one file using one-based inclusive line ranges; operations are applied in line order. Read the file first and copy the current lines exactly into expected_lines; stale or out-of-range edits are rejected. Give start_line, end_line, or both; a missing one is derived from the length of expected_lines.',
+          'Atomically apply non-overlapping replacements to one file using one-based inclusive line ranges; operations are applied in line order. Read the file first and copy the current lines exactly into expected_lines; stale or out-of-range edits are rejected. Give start_line, end_line, or both; a missing one is derived from the length of expected_lines. The file goes at the top level once, not inside each operation.',
         parameters: {
           type: 'object',
           properties: {
@@ -125,16 +129,43 @@ export function makeApplyLineEditsTool(
               },
             },
           },
-          required: ['path', 'operations'],
+          // `path` is not required: six of 81 audited calls (2026-10-27) named
+          // the file inside every operation instead of once here, and were
+          // refused for a field the tool can read from the operations it already
+          // has. Declaring it required would let `ToolRegistry.invalidArgs` refuse
+          // the call before this tool had a chance to lift it.
+          required: ['operations'],
           additionalProperties: false,
         },
       },
     },
     permission: 'write',
-    mutation: { paths: (args) => [args['path'] as string], showDiff: true },
-    handler: async (args) => {
-      const suppliedPath = requireString(args['path'], 'path');
-      const operations = parseOperations(args['operations']);
+    // The same lookup the handler uses, so the checkpoint and the diff see the
+    // file the call will actually write. Reading only `args.path` here would
+    // snapshot nothing for a lifted call, leaving a written file unrecoverable.
+    mutation: {
+      paths: (args) => {
+        const target = callPath(args);
+        return target === undefined ? [] : [target];
+      },
+      showDiff: true,
+    },
+    handler: async (args, context) => {
+      const suppliedPath = callPath(args);
+      // Thrown, not returned: `ToolDispatch` prefixes `Error:` and counts a thrown
+      // refusal in the consecutive-failure streak that can strip a model's tools.
+      // This branch replaced the thrown missing-`path` error, so it must still
+      // count as the failure it was.
+      if (suppliedPath === undefined) throw new Error(missingPathRefusal(args));
+      const liftedFromOperations =
+        typeof args['path'] === 'string' && args['path'].trim().length > 0
+          ? 0
+          : Array.isArray(args['operations'])
+            ? args['operations'].length
+            : 0;
+      const operations = parseOperations(
+        liftedFromOperations > 0 ? withoutOperationPaths(args['operations']) : args['operations'],
+      );
       const filePath = await resolveRealWorkspacePath(suppliedPath, undefined, {
         allowMissing: true,
         extraRoots: extraRoots(),
@@ -157,15 +188,94 @@ export function makeApplyLineEditsTool(
         throw new Error(`apply_line_edits: cannot read file — ${(error as Error).message}`);
       }
       const result = applyLineEditsToContent(content, operations);
+      // Snapshot before the write for the same reason `edit_file` does: this tool
+      // replaces whole line ranges, so it can delete a line a diagnostic was
+      // pointing at and move every problem below it. Awaiting the watcher is what
+      // opens the document first, so the service sees this tool's write.
+      const watch = await watchProblems(filePath);
       writeFileAtomicSync(filePath, result.content, { expected: fileState });
-      return JSON.stringify({
-        path: suppliedPath,
-        operationsApplied: operations.length,
-        replacedLines: result.replacedLines,
-        replacementLines: result.replacementLines,
-      });
+      // Said so the model knows the tool moved its argument rather than the call
+      // having been right, and can put the path where it belongs next time.
+      const liftedNote =
+        liftedFromOperations > 0
+          ? `\nNo "path" at the top level: taken from the operations ("${suppliedPath}").`
+          : '';
+      const note = watch ? await watch.settle(context?.abortSignal) : '';
+      return withFileLengthWarning(
+        withProblemNote(
+          JSON.stringify({
+            path: suppliedPath,
+            operationsApplied: operations.length,
+            replacedLines: result.replacedLines,
+            replacementLines: result.replacementLines,
+          }) + liftedNote,
+          note,
+        ),
+        filePath,
+        lengthWarning(),
+      );
     },
   };
+}
+
+/**
+ * The file this call edits: the top-level `path`, or the one path the operations
+ * name between them when the top level has none.
+ *
+ * The lift is safe only because this tool edits one file per call: operations
+ * that name different files are a real disagreement and `missingPathRefusal`
+ * says so instead of guessing one, while an operation that names none does not
+ * disagree with anything — it is silent about a file the other operations already
+ * named. Six of 81 audited calls (2026-10-27) put the path inside every
+ * operation instead of once at the top, and the call died on a field the tool
+ * could read from the arguments it already had.
+ */
+function callPath(args: Record<string, unknown>): string | undefined {
+  const top = args['path'];
+  if (typeof top === 'string' && top.trim().length > 0) return top;
+  const named = operationPathNames(args['operations']);
+  return named.length === 0 || new Set(named).size > 1 ? undefined : named[0];
+}
+
+/** Every `path` an operation carries, in order; operations without one are skipped. */
+function operationPathNames(value: unknown): string[] {
+  if (!Array.isArray(value)) return [];
+  return value.flatMap((operation) => {
+    const named =
+      operation && typeof operation === 'object' && !Array.isArray(operation)
+        ? (operation as Record<string, unknown>)['path']
+        : undefined;
+    return typeof named === 'string' && named.trim().length > 0 ? [named] : [];
+  });
+}
+
+/** Copies with `path` removed, so the lifted path has exactly one home. */
+function withoutOperationPaths(value: unknown): unknown {
+  if (!Array.isArray(value)) return value;
+  return value.map((operation) => {
+    if (!operation || typeof operation !== 'object' || Array.isArray(operation)) return operation;
+    const copy = { ...(operation as Record<string, unknown>) };
+    delete copy['path'];
+    return copy;
+  });
+}
+
+/** The refusal for a call with no usable file, naming what it did send. */
+function missingPathRefusal(args: Record<string, unknown>): string {
+  const distinct = [...new Set(operationPathNames(args['operations']))];
+  if (distinct.length > 1) {
+    return (
+      `apply_line_edits edits one file per call; the operations name ${distinct.length} ` +
+      `different files: ${distinct.map((found) => `"${found}"`).join(', ')}. Put one "path" at the ` +
+      'top level and resend.'
+    );
+  }
+  return (
+    'apply_line_edits is missing required "path". ' +
+    'Accepted shape: { "path": "...", "operations": [{ "start_line": 1, "end_line": 2, ' +
+    '"expected_lines": ["..."], "replacement_lines": ["..."] }] }. A "path" inside the ' +
+    'operations is lifted only when they all name the same file.'
+  );
 }
 
 function lineArraySchema(minItems: number): Record<string, unknown> {
@@ -267,13 +377,6 @@ function validLineArray(lines: readonly unknown[]): lines is readonly string[] {
 
 function sameLines(left: readonly string[], right: readonly string[]): boolean {
   return left.length === right.length && left.every((line, index) => line === right[index]);
-}
-
-function requireString(value: unknown, field: string): string {
-  if (typeof value !== 'string' || value.trim().length === 0) {
-    throw new Error(`apply_line_edits: ${field} must be a non-empty string`);
-  }
-  return value;
 }
 
 function requireInteger(value: unknown, field: string): number {

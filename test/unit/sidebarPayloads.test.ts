@@ -7,6 +7,7 @@ import {
 import type { ForgeConfig } from '../../src/config/types';
 import type { ModelEntry } from '../../src/sidebar/messageBridge';
 import type { ConversationRuntime, SidebarRuntime } from '../../src/sidebar/sessionTypes';
+import type { ArchivedSessionMeta } from '../../src/sidebar/ArchivedSessions';
 
 const conv = (over: Partial<ConversationRuntime> = {}): ConversationRuntime =>
   ({ id: 'c1', messages: [], ...over }) as ConversationRuntime;
@@ -57,9 +58,11 @@ describe('buildModelsMessage', () => {
   it('maps a local model through cold / loading / ready', () => {
     const config = { active_model: 'a', models: [{ name: 'a' }] } as ForgeConfig;
     const at = (loaded: boolean, ready: boolean): ModelEntry | undefined =>
-      (buildModelsMessage(config, { isLoaded: () => loaded, isModelReady: () => ready }) as {
-        models: ModelEntry[];
-      }).models[0];
+      (
+        buildModelsMessage(config, { isLoaded: () => loaded, isModelReady: () => ready }) as {
+          models: ModelEntry[];
+        }
+      ).models[0];
 
     expect(at(false, false)?.residency).toBe('cold');
     expect(at(true, false)?.residency).toBe('loading');
@@ -95,9 +98,11 @@ describe('buildModelsMessage', () => {
       models: [{ name: 's', provider: 'openai-compatible', unload_path: '/unload' }],
     } as ForgeConfig;
     const at = (ready: boolean): ModelEntry | undefined =>
-      (buildModelsMessage(config, { isLoaded: () => true, isModelReady: () => ready }) as {
-        models: ModelEntry[];
-      }).models[0];
+      (
+        buildModelsMessage(config, { isLoaded: () => true, isModelReady: () => ready }) as {
+          models: ModelEntry[];
+        }
+      ).models[0];
 
     expect(at(true)?.residency).toBe('ready');
     expect(at(false)?.residency).toBe('cold');
@@ -192,5 +197,98 @@ describe('buildSessionSyncMessage transcript scope', () => {
     };
 
     expect(msg.messagesById[msg.activeId]).toBeDefined();
+  });
+});
+
+describe('buildSessionSyncMessage phone badge', () => {
+  const conv = (id: string): ConversationRuntime =>
+    ({ id, title: id, createdAt: 0, updatedAt: 0, messages: [] }) as ConversationRuntime;
+  const phoneSession = (): SidebarRuntime => ({
+    activeConversationId: 'a',
+    conversations: [conv('a'), conv('b'), conv('c')],
+    history: [conv('h')],
+  });
+  const archivedRow = (id: string): ArchivedSessionMeta => ({
+    id,
+    title: `archived ${id}`,
+    createdAt: 0,
+    updatedAt: 0,
+    messageCount: 3,
+  });
+  type Stamped = { id: string; origin_channel?: string };
+  const syncWith = (
+    originChannelOf?: (conversationId: string) => string | undefined,
+  ): { tabs: Stamped[]; history: Stamped[]; archived: Stamped[] } =>
+    buildSessionSyncMessage(
+      phoneSession(),
+      new Set<string>(),
+      () => 0,
+      undefined,
+      new Set<string>(),
+      [archivedRow('gone')],
+      undefined,
+      originChannelOf,
+    ) as { tabs: Stamped[]; history: Stamped[]; archived: Stamped[] };
+
+  it('stamps the phone channel on the open tab, the closed chat and the archived row alike', () => {
+    const msg = syncWith((id) =>
+      id === 'b' || id === 'h' || id === 'gone' ? 'telegram' : undefined,
+    );
+    expect(msg.tabs.map((row) => [row.id, row.origin_channel])).toEqual([
+      ['a', undefined],
+      ['b', 'telegram'],
+      ['c', undefined],
+    ]);
+    expect(msg.history.map((row) => [row.id, row.origin_channel])).toEqual([['h', 'telegram']]);
+    expect(msg.archived.map((row) => [row.id, row.origin_channel])).toEqual([['gone', 'telegram']]);
+  });
+
+  it('badges only the conversation the binding names, never its neighbours', () => {
+    const msg = syncWith((id) => (id === 'h' ? 'whatsapp' : undefined));
+    expect(msg.tabs.map((row) => row.origin_channel)).toEqual([undefined, undefined, undefined]);
+    expect(msg.archived.map((row) => row.origin_channel)).toEqual([undefined]);
+    expect(msg.history.map((row) => row.origin_channel)).toEqual(['whatsapp']);
+  });
+
+  it('drops a channel the panel cannot show, and badges nothing when no reader was given', () => {
+    // `fake` is the test transport's channel. The host decides what may badge,
+    // so an unknown value never reaches a row as a badge, and a panel with no
+    // remote runtime to ask gets no phone badge at all.
+    const odd = syncWith(() => 'fake');
+    expect(odd.tabs.map((row) => 'origin_channel' in row)).toEqual([false, false, false]);
+    expect(odd.archived.map((row) => 'origin_channel' in row)).toEqual([false]);
+    expect(syncWith().tabs.map((row) => 'origin_channel' in row)).toEqual([false, false, false]);
+  });
+});
+
+describe('buildSessionSyncMessage stored panel size', () => {
+  const tinySession = (): SidebarRuntime => ({
+    activeConversationId: 'a',
+    conversations: [
+      { id: 'a', title: 'a', createdAt: 0, updatedAt: 0, messages: [] } as ConversationRuntime,
+    ],
+    history: [],
+  });
+
+  it('carries the size the host read from globalState, and says nothing when there is none', () => {
+    // This is the whole reload path: the panel size is not webview memory, it is
+    // state the host keeps for every window and hands back with the sync the
+    // panel already receives, so a second window or a reload opens the panel as
+    // it was last sized without asking for it.
+    const withSize = buildSessionSyncMessage(
+      tinySession(),
+      new Set<string>(),
+      () => 0,
+      undefined,
+      new Set<string>(),
+      [],
+      { width: 340, height: 520 },
+    ) as { historyPanelSize?: { width: number; height: number } };
+    expect(withSize.historyPanelSize).toEqual({ width: 340, height: 520 });
+
+    const without = buildSessionSyncMessage(tinySession(), new Set<string>(), () => 0) as {
+      historyPanelSize?: unknown;
+    };
+    expect('historyPanelSize' in without).toBe(false);
   });
 });

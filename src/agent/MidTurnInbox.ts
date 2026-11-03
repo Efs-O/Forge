@@ -11,9 +11,13 @@ export interface MidTurnTell {
   text: string;
   createdAt?: number;
   internal?: boolean;
+  /** Who delivered the tell; unmarked tells were typed by this chat's user. */
+  origin?: MidTurnTellOrigin;
   /** The user pressed "Send now": it needs a turn of its own, never a tool-round gap. */
   sendNow?: boolean;
 }
+
+export type MidTurnTellOrigin = { kind: 'chat' } | { kind: 'worker-wake'; workerId: string };
 
 /**
  * What a drain at a tool-round gap returns: the messages to inject into the
@@ -45,7 +49,17 @@ export class MidTurnInbox {
   add(conversationId: string, tell: MidTurnTell): void {
     const stamped = { ...tell, createdAt: tell.createdAt ?? Date.now() };
     const current = this.pending.get(conversationId);
-    if (current) current.push(stamped);
+    const workerId = stamped.origin?.kind === 'worker-wake' ? stamped.origin.workerId : undefined;
+    const existingWake = workerId
+      ? current?.find(
+          (candidate) =>
+            candidate.origin?.kind === 'worker-wake' && candidate.origin.workerId === workerId,
+        )
+      : undefined;
+    if (existingWake) {
+      existingWake.text = stamped.text;
+      existingWake.createdAt = stamped.createdAt;
+    } else if (current) current.push(stamped);
     else this.pending.set(conversationId, [stamped]);
     for (const listener of this.listeners.get(conversationId) ?? []) listener();
   }

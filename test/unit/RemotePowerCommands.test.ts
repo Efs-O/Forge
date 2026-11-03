@@ -11,9 +11,9 @@ const HEALTHY: WakeInfo = {
     {
       name: 'Ethernet',
       description: 'Intel(R) Ethernet Connection (7) I219-V',
-      macAddress: 'E0-D5-5E-73-F7-88',
-      ipAddress: '192.168.1.70',
-      broadcast: '192.168.1.255',
+      macAddress: '00-00-5E-00-53-01',
+      ipAddress: '192.0.2.10',
+      broadcast: '192.0.2.255',
       wakeArmed: true,
       magicPacketEnabled: true,
     },
@@ -90,7 +90,7 @@ describe('/sleep', () => {
     expect(h.channel.sent.at(-1)!.text).toContain('/sleep confirm');
     // The magic-packet address travels with the warning: after this lands, it
     // is the only way back in.
-    expect(h.channel.sent.at(-1)!.text).toContain('E0-D5-5E-73-F7-88');
+    expect(h.channel.sent.at(-1)!.text).toContain('00-00-5E-00-53-01');
   });
 
   it('suspends after the confirmation, once the reply has had time to leave', async () => {
@@ -190,7 +190,7 @@ describe('/wake', () => {
     const h = context();
     expect(await run(h, '/wake')).toEqual({ kind: 'handled' });
     const text = h.channel.sent.at(-1)!.text;
-    expect(text).toContain('E0-D5-5E-73-F7-88');
+    expect(text).toContain('00-00-5E-00-53-01');
     expect(text).toContain('Forge cannot wake this machine itself');
   });
 
@@ -209,11 +209,11 @@ describe('/wake', () => {
 
   it('explains that Wake-on-LAN destinations are not wake-time arguments', async () => {
     const h = context();
-    await expect(run(h, '/wake 192.168.1.255')).resolves.toMatchObject({
+    await expect(run(h, '/wake 192.0.2.255')).resolves.toMatchObject({
       kind: 'rejected',
       reason: expect.stringContaining('destination for a magic packet'),
     });
-    await expect(run(h, '/wake E0-D5-5E-73-F7-88')).resolves.toMatchObject({
+    await expect(run(h, '/wake 00-00-5E-00-53-01')).resolves.toMatchObject({
       kind: 'rejected',
       reason: expect.stringContaining('another device that stays awake'),
     });

@@ -26,6 +26,16 @@ interface Bubble {
   text: string;
   /** What the chat last showed for it, footer included. */
   shown?: string;
+  /**
+   * Whether that message currently shows the inline Stop keyboard.
+   *
+   * Telegram drops the keyboard on any edit that does not re-attach it, so the
+   * text alone does not say what is on screen: a suspended footer has the same
+   * words as a settled one and a different keyboard.
+   */
+  stopShown?: boolean;
+  /** Deleted from the chat: nothing left to edit, and nothing to delete again. */
+  gone?: boolean;
 }
 
 /**
@@ -51,6 +61,13 @@ type BlockState = 'none' | 'streaming' | 'finished' | 'narrated';
  * the current bubble object rather than clearing it, so an update composed for
  * the old bubble can only ever land on the old message: there is no shared
  * buffer for the next bubble to inherit.
+ *
+ * A question board or an approval card stops the turn while the owner reads it.
+ * `suspend()` takes the working line off the newest bubble and draws nothing
+ * until `resume()` reopens it below the board, because Telegram never moves a
+ * message: a footer left where it was would sit above the buttons, out of
+ * sight, and an edit in place would put it back under them while the owner is
+ * still answering.
  */
 export class RemoteLiveBubble {
   private current: Bubble;
@@ -65,6 +82,10 @@ export class RemoteLiveBubble {
   private block: BlockState = 'none';
   /** Whether the streaming block spans more than the current bubble. */
   private split = false;
+  /** True while the chat waits on the owner: the working line is off screen. */
+  private suspended = false;
+  /** The pass that took the line away has landed. */
+  private footerHidden = false;
   /** Every message this turn has used, so Stop works from any of them. */
   private readonly ids = new Set<string>();
   private timer: ReturnType<typeof setTimeout> | undefined;
@@ -137,14 +158,45 @@ export class RemoteLiveBubble {
    */
   strand(): void {
     if (this.closed || this.current.id === undefined) return;
-    const old = this.current;
-    this.retire(old);
-    if (this.block === 'streaming' && old.text.trim()) {
-      this.overflow.push(old);
-      this.split = true;
-    }
-    this.current = { text: '' };
+    this.relocate();
     this.request();
+  }
+
+  /**
+   * Takes the working line away for as long as the chat waits on the owner: a
+   * question board or an approval card has just been sent, and a footer left on
+   * the newest bubble would sit above the buttons, out of sight.
+   *
+   * A bubble carrying words is edited to those words alone and keeps its Stop
+   * button, so "Send now" still works while the owner is answering. A bubble
+   * carrying only the footer is deleted: Telegram rejects an empty message, and
+   * a status-only bubble is already what `settle()` treats as nothing worth
+   * keeping once the footer has moved on. Nothing is redrawn until `resume()`,
+   * so the agent's own words, a `request()` or the clock cannot bring the line
+   * back on the bubble above the board.
+   */
+  suspend(): void {
+    // No message drawn yet means no line to hide: the next send lands below the
+    // board anyway and carries the footer with it.
+    if (this.closed || this.suspended || this.current.id === undefined) return;
+    this.suspended = true;
+    // Through kick(), never a direct send: an in-flight flush would otherwise
+    // overwrite this, and the chat's ~1 edit/s throttle still applies.
+    this.kick();
+  }
+
+  /**
+   * Puts the working line back, below whatever the wait put on screen. Same
+   * relocation as `strand()`: the bubble that carried the line stops carrying
+   * it and loses its keyboard, so exactly one Stop button exists at a time, and
+   * the line reopens as a fresh message at the bottom of the chat.
+   */
+  resume(): void {
+    if (this.closed || !this.suspended) return;
+    this.suspended = false;
+    this.footerHidden = false;
+    this.relocate();
+    this.kick();
   }
 
   /** The footer changed; refresh it within the throttle. */
@@ -159,8 +211,13 @@ export class RemoteLiveBubble {
   /**
    * Ends the turn's bubbles: every footer and keyboard is removed. Returns the
    * messages left holding status only, for the caller to delete after a delay.
+   *
+   * `terminalText` absent means the answer is already on screen, so there is
+   * nothing left to say: the working line goes with the rest of them at once,
+   * instead of becoming a `Forge: completed.` the caller then deletes ten
+   * seconds later — the second churn point the owner watched.
    */
-  async close(terminalText: string): Promise<string[]> {
+  async close(terminalText?: string): Promise<string[]> {
     this.closed = true;
     if (this.timer) clearTimeout(this.timer);
     this.timer = undefined;
@@ -182,22 +239,36 @@ export class RemoteLiveBubble {
       await this.settle(bubble).catch((err) => this.deps.report(err));
     }
     const last = this.current;
+    if (terminalText === undefined) {
+      // The answer landed, so the last bubble is either the agent's own last
+      // paragraph (kept, footer off) or a working line worth nothing (deleted).
+      await this.settle(last).catch((err) => this.deps.report(err));
+      return [];
+    }
     if (last.text.trim()) {
       await this.settle(last).catch((err) => this.deps.report(err));
       return [];
     }
-    if (last.id === undefined || !this.deps.channel.editMessage) return [];
-    try {
-      await this.deps.channel.editMessage(
-        this.deps.chatId,
-        last.id,
-        terminalText.slice(0, this.deps.maxChars()),
-        { signal: this.deps.signal },
-      );
-    } catch (err) {
-      this.deps.report(err);
+    const outcome = terminalText.slice(0, this.deps.maxChars());
+    if (!last.gone && last.id !== undefined && this.deps.channel.editMessage) {
+      try {
+        await this.deps.channel.editMessage(this.deps.chatId, last.id, outcome, {
+          signal: this.deps.signal,
+        });
+      } catch (err) {
+        this.deps.report(err);
+      }
+      return [last.id];
     }
-    return [last.id];
+    // Nothing left to edit: the working line was hidden under a question board
+    // and went with the bubble that carried it. The outcome still has to reach
+    // the chat, so it is sent as its own message and armed for deletion like
+    // any other status line. A fresh bubble object, because the gone one must
+    // not be edited or deleted a second time.
+    if (!this.deps.channel.sendProgress) return [];
+    const outcomeBubble: Bubble = { text: '' };
+    await this.show(outcomeBubble, outcome, false).catch((err) => this.deps.report(err));
+    return outcomeBubble.id === undefined ? [] : [outcomeBubble.id];
   }
 
   /**
@@ -225,6 +296,17 @@ export class RemoteLiveBubble {
     this.current = { text: '' };
   }
 
+  /** The footer leaves the newest bubble; it will be drawn on a new message. */
+  private relocate(): void {
+    const old = this.current;
+    this.retire(old);
+    if (this.block === 'streaming' && old.text.trim()) {
+      this.overflow.push(old);
+      this.split = true;
+    }
+    this.current = { text: '' };
+  }
+
   private retire(bubble: Bubble): void {
     if (bubble.id === undefined && !bubble.text.trim()) return;
     this.retiring.push(bubble);
@@ -238,7 +320,7 @@ export class RemoteLiveBubble {
     return [
       ...new Set(
         [...this.retiring, this.current]
-          .filter((bubble) => !bubble.text.trim() && bubble.id !== undefined)
+          .filter((bubble) => !bubble.gone && !bubble.text.trim() && bubble.id !== undefined)
           .map((bubble) => bubble.id!),
       ),
     ];
@@ -299,6 +381,13 @@ export class RemoteLiveBubble {
       }
       this.retiring.shift();
     }
+    if (this.suspended) {
+      // The chat is waiting on the owner. Everything older than the board is
+      // settled above, the working line comes off last, and nothing new is
+      // sent until resume() relocates it below whatever the wait put there.
+      if (!this.footerHidden) await this.hideFooter();
+      return;
+    }
     const bubble = this.current;
     const footer = this.deps.footer(this.footerRoom());
     const words = bubble.text.trim();
@@ -306,26 +395,58 @@ export class RemoteLiveBubble {
     if (text !== bubble.shown) await this.show(bubble, text, true);
   }
 
-  /** A bubble's final form: its words only, no footer, no keyboard. */
-  private async settle(bubble: Bubble): Promise<void> {
+  /**
+   * The one pass `suspend()` waits for: the newest bubble stops carrying the
+   * working line. Its words stay, and so does its Stop button — an edit that
+   * does not re-attach the keyboard takes it away, and "Send now" has to keep
+   * working while a question is on screen.
+   */
+  private async hideFooter(): Promise<void> {
+    const bubble = this.current;
+    if (bubble.gone) {
+      this.footerHidden = true;
+      return;
+    }
     const words = bubble.text.trim();
     if (words) {
-      if (words !== bubble.shown) await this.show(bubble, words, false);
+      if (words !== bubble.shown || !bubble.stopShown) await this.show(bubble, words, true);
+    } else if (bubble.id !== undefined && this.deps.channel.deleteMessage) {
+      await this.deps.channel.deleteMessage(this.deps.chatId, bubble.id, {
+        signal: this.deps.signal,
+      });
+      bubble.gone = true;
+    }
+    // Only after the pass lands: a refused edit must be retried with the newest
+    // state, not marked done and left showing a working line above the board.
+    this.footerHidden = true;
+  }
+
+  /**
+   * A bubble's final form: its words only, no footer. `keepStop` keeps the
+   * inline Stop button, which is what a suspended footer needs while the chat
+   * waits on the owner; every other final edit takes it away.
+   */
+  private async settle(bubble: Bubble, keepStop = false): Promise<void> {
+    if (bubble.gone) return;
+    const words = bubble.text.trim();
+    if (words) {
+      if (words !== bubble.shown || keepStop !== bubble.stopShown)
+        await this.show(bubble, words, keepStop);
       return;
     }
     // Status only, or words dropped as a duplicate of the answer: nothing worth
     // keeping once the footer has moved on.
-    if (bubble.id !== undefined && this.deps.channel.deleteMessage) {
-      await this.deps.channel.deleteMessage(this.deps.chatId, bubble.id, {
-        signal: this.deps.signal,
-      });
-    }
+    if (bubble.id === undefined || !this.deps.channel.deleteMessage) return;
+    await this.deps.channel.deleteMessage(this.deps.chatId, bubble.id, {
+      signal: this.deps.signal,
+    });
+    bubble.gone = true;
   }
 
   private async show(bubble: Bubble, text: string, stopButton: boolean): Promise<void> {
     const { channel, chatId, signal } = this.deps;
     const sendProgress = channel.sendProgress?.bind(channel);
-    if (bubble.id === undefined && !sendProgress) return;
+    if (bubble.gone || (bubble.id === undefined && !sendProgress)) return;
     const options = {
       signal,
       stopButton,
@@ -343,6 +464,7 @@ export class RemoteLiveBubble {
       await channel.editMessage(chatId, bubble.id, text, options);
     }
     bubble.shown = text;
+    bubble.stopShown = stopButton;
   }
 }
 

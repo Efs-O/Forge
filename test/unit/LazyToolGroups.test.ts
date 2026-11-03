@@ -68,7 +68,7 @@ function registryWithHalluscribe(): ToolRegistry {
 describe('lazy tool groups', () => {
   beforeEach(() => resetLazyToolGroups());
 
-  it('offers media to vision models and files/background on the first request', () => {
+  it('withholds media until the conversation loads it, and offers files/background on the first request', () => {
     const registry = new ToolRegistry();
     const names = [
       'view_image',
@@ -76,8 +76,9 @@ describe('lazy tool groups', () => {
       'generate_image',
       'image_search',
       'send_file',
+      'render_html_to_image',
+      'export_document',
       'move_file',
-      'create_directory',
       'apply_line_edits',
       'restore_file',
       'stop_execution',
@@ -99,13 +100,10 @@ describe('lazy tool groups', () => {
       recordNativeLazyTool(name);
     }
 
-    const firstVisionRequest = modelFacingTools(registry, 'fresh-conversation');
-    expect(firstVisionRequest).toEqual(expect.arrayContaining(names));
-    const firstNonVisionRequest = modelFacingTools(registry, 'fresh-conversation');
-    expect(firstNonVisionRequest).toEqual(
+    const firstRequest = modelFacingTools(registry, 'fresh-conversation');
+    expect(firstRequest).toEqual(
       expect.arrayContaining([
         'move_file',
-        'create_directory',
         'apply_line_edits',
         'restore_file',
         'stop_execution',
@@ -113,8 +111,80 @@ describe('lazy tool groups', () => {
         'wait',
       ]),
     );
-    for (const name of ['view_image', 'view_video', 'generate_image', 'image_search', 'send_file'])
-      expect(firstNonVisionRequest).toContain(name);
+    // `media` left the eager-by-default set on 2026-10-29: across the 53
+    // sessions since 0.17.80 `view_video`, `image_search`, `upscale_image` and
+    // `render_html_to_image` had 0 calls and `generate_image` 1, and the
+    // group's only use (view_image 94, send_file 52) came from one session.
+    for (const name of [
+      'view_image',
+      'view_video',
+      'generate_image',
+      'image_search',
+      'send_file',
+      'render_html_to_image',
+    ])
+      expect(firstRequest).not.toContain(name);
+    activateLazyGroup('fresh-conversation', 'media');
+    const afterLoad = modelFacingTools(registry, 'fresh-conversation');
+    for (const name of [
+      'view_image',
+      'view_video',
+      'generate_image',
+      'image_search',
+      'send_file',
+      'render_html_to_image',
+    ])
+      expect(afterLoad).toContain(name);
+    // The owner's escape hatch stays: `tool_groups.eager: [media]` advertises
+    // the whole group from the first round without touching the active map.
+    const eagerMedia = hiddenLazyToolNames('other-conversation', new Set(), new Set(['media']));
+    for (const name of [
+      'view_image',
+      'view_video',
+      'generate_image',
+      'image_search',
+      'send_file',
+      'render_html_to_image',
+    ])
+      expect(eagerMedia).not.toContain(name);
+  });
+
+  // git_read moved into the lazy `git` group on 2026-10-29: 6 calls against 418
+  // shell git commands across the 53 sessions since 0.17.80, so the schema is
+  // not what the model reaches for when it wants git.
+  it('withholds git_read until the git group loads, and still dispatches it while hidden', async () => {
+    const registry = new ToolRegistry();
+    registry.register(makeLoadToolGroupTool());
+    for (const name of ['git_read', 'stage', 'commit', 'create_branch', 'switch_branch']) {
+      registry.register({
+        definition: {
+          type: 'function',
+          function: { name, description: '', parameters: { type: 'object' } },
+        },
+        permission: 'read',
+        handler: async () => `${name} ran`,
+      });
+      recordNativeLazyTool(name);
+    }
+    expect(lazyGroupForTool('git_read')).toBe('git');
+    expect(hiddenLazyToolNames('conv-a')).toContain('git_read');
+    expect(modelFacingTools(registry, 'conv-a')).not.toContain('git_read');
+    // The registered-but-unadvertised rule is unchanged: a model that calls a
+    // hidden tool by name still gets it run, not an unknown-tool error.
+    expect(
+      await registry.dispatch('git_read', { operation: 'status' }, ALL_PERMISSIONS, {
+        beforeMutate: () => undefined,
+        conversationId: 'conv-a',
+      }),
+    ).toBe('git_read ran');
+    activateLazyGroup('conv-a', 'git');
+    expect(hiddenLazyToolNames('conv-a')).not.toContain('git_read');
+    expect(modelFacingTools(registry, 'conv-a')).toContain('git_read');
+    // The purpose line has to name the read verbs, because the group used to be
+    // described by its write tools alone and `git_read` was never in it.
+    expect(registry.get('load_tool_group')?.describe?.().function.description).toMatch(
+      /git: [^\n]*(status|log|diff|blame|show)[^\n]*stage, commit[^\n]*shell runs git too/,
+    );
   });
 
   it('withholds every halluscribe schema from a fresh conversation but advertises the loader', () => {
@@ -278,13 +348,20 @@ describe('lazy tool groups', () => {
     expect(hiddenLazyToolNames('conv-a')).not.toContain('ask_user');
     expect(lazyGroupForTool('get_system_status')).toBe('system');
     expect(hiddenLazyToolNames('conv-a')).toContain('get_system_status');
-    // Media is eager for every model; computer_use stays a normal lazy group.
-    // render_html_to_image is outside the media group and always eager.
-    expect(lazyGroupForTool('render_html_to_image')).toBeUndefined();
-    expect(hiddenLazyToolNames('conv-a')).not.toContain('send_file');
-    expect(hiddenLazyToolNames('conv-a')).not.toContain('render_html_to_image');
+    // `media` is lazy since 2026-10-29; `computer_use` stays a normal lazy
+    // group. `render_html_to_image` joined `media` the same day, so a
+    // conversation that never renders or reviews an image pays none of its
+    // 3,905-char schema (it was ungrouped and always advertised).
+    expect(lazyGroupForTool('render_html_to_image')).toBe('media');
+    expect(lazyGroupForTool('export_document')).toBe('media');
+    recordNativeLazyTool('export_document');
+    expect(hiddenLazyToolNames('conv-a')).toContain('send_file');
+    expect(hiddenLazyToolNames('conv-a')).toContain('render_html_to_image');
+    expect(hiddenLazyToolNames('conv-a')).toContain('export_document');
     activateLazyGroup('conv-a', 'media');
     expect(hiddenLazyToolNames('conv-a')).not.toContain('send_file');
+    expect(hiddenLazyToolNames('conv-a')).not.toContain('render_html_to_image');
+    expect(hiddenLazyToolNames('conv-a')).not.toContain('export_document');
     deactivateLazyGroups('conv-a');
     const loader = registry
       .definitions(ALL_PERMISSIONS)
@@ -300,6 +377,11 @@ describe('lazy tool groups', () => {
     );
     expect(loader?.function.description).toContain(
       'system: this PC: power, sleep/wake, status, llama.cpp',
+    );
+    // The media line must carry the verbs a coding conversation would search
+    // for, because member names no longer appear anywhere in the schema.
+    expect(loader?.function.description).toMatch(
+      /media: [^\n]*(upscale|render|video|image search)[^\n]*send files/,
     );
     expect(loader?.function.description).not.toContain('get_power_info');
     expect(loader?.function.description.split(/\s+/).length).toBeLessThanOrEqual(350);
@@ -377,7 +459,9 @@ describe('lazy tool groups', () => {
   it('describes groups by purpose and names the members only when one loads', async () => {
     const registry = new ToolRegistry();
     registry.register(makeLoadToolGroupTool());
-    for (const name of ['create_directory', 'move_file']) {
+    // `create_directory` was retired on 2026-10-29 (lane B item B3), so the two
+    // members this registry stands in for are ones that still exist.
+    for (const name of ['move_file', 'restore_file']) {
       registry.register({
         definition: {
           type: 'function',
@@ -388,14 +472,16 @@ describe('lazy tool groups', () => {
       });
     }
     const description = registry.get('load_tool_group')?.describe?.().function.description;
-    expect(description).toContain('files: move, mkdir, line-number edits, restore a file');
-    expect(description).not.toContain('create_directory');
+    expect(description).toContain(
+      'files: move or rename a file, line-number edits, restore a file from a commit',
+    );
+    expect(description).not.toContain('restore_file');
     const result = await registry.dispatch('load_tool_group', { group: 'files' }, ALL_PERMISSIONS, {
       beforeMutate: () => undefined,
       conversationId: 'conv-a',
     });
     expect(result).toBe(
-      'files tools enabled for this conversation: create_directory, move_file. ' +
+      'files tools enabled for this conversation: move_file, restore_file. ' +
         'They are listed on the next step.',
     );
   });

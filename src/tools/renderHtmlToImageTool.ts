@@ -3,6 +3,7 @@ import * as path from 'path';
 import { DEFAULT_BROWSER_CHANNEL } from '../config/browserSchema';
 import { DEFAULT_IMAGE_OUTPUT_DIR } from '../config/imageGenerationSchema';
 import type { ForgeConfig } from '../config/types';
+import { hostApprovedForChat } from './fetchHostApprovals';
 import { writeFileAtomicSync } from '../util/atomicWrite';
 import { RENDERED_IMAGE_PREFIX } from '../sidebar/toolResultView';
 import type { UserNotificationService } from '../sidebar/UserNotificationService';
@@ -192,6 +193,9 @@ async function dispatch(
       channel: deps.getConfig?.().browser?.channel ?? DEFAULT_BROWSER_CHANNEL,
       baseTimeoutMs: deps.renderTimeoutMs ?? RENDER_TIMEOUT_MS,
       now: () => Date.now(),
+      // The preview page's scripts get the same host rules as `web_fetch`: a
+      // host the owner listed, or one this chat already approved.
+      hostAllowed: hostApprovedForChat(deps.getConfig?.(), context?.conversationId),
     });
   }
   if (mode !== 'image') {

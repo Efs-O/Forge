@@ -27,6 +27,8 @@ import {
   type RestartAfterTurnDeps,
 } from '../../src/jobs/agentTaskRestart';
 import { JobSchema, JobStateSchema, type Job, type JobFile } from '../../src/jobs/jobSchema';
+import { jobDefaultModel } from '../../src/config/jobsSchema';
+import type { ForgeConfig } from '../../src/config/types';
 import type { PowerControl } from '../../src/system/PowerControl';
 import type { IBackendPool } from '../../src/backend/poolTypes';
 import { userQuietGate, USER_QUIET_MS } from '../../src/jobs/agentTaskAdmission';
@@ -203,6 +205,34 @@ describe('canStartNow', () => {
       reason: 'all 2 parallel slot(s) are streaming',
     });
   });
+
+  it('waits when another window holds a managed server the job would unload', () => {
+    const pool = fakePool(['strata'], 1);
+    const hold = {
+      id: '4242-x',
+      model: 'strata',
+      pid: 4242,
+      conversationId: 'chat-in-the-other-window',
+      title: 'work chat',
+      expiresAt: 0,
+    };
+    expect(canStartNow('qwen', null, pool, [], undefined, [hold])).toMatchObject({
+      start: false,
+      reason: `"strata" is held for a turn by chat 'work chat'`,
+    });
+    // Nothing to unload, so nothing to wait for: the held server is not this
+    // window's to free, and a job may not be starved by an unrelated hold.
+    expect(canStartNow('qwen', null, fakePool(['qwen'], 1), [], undefined, [hold])).toMatchObject({
+      start: true,
+    });
+    // Two chats may share one managed server, so a hold on the model the job is
+    // about to use is not a reason to wait.
+    expect(canStartNow('strata', null, pool, [], undefined, [hold])).toMatchObject({ start: true });
+    // A verified shared Strata slot means step 3 unloads nothing at all.
+    expect(
+      canStartNow('qwen', null, pool, [], { capacity: 2, inFlight: 0 }, [hold]),
+    ).toMatchObject({ start: true });
+  });
 });
 
 // ── parseResult (AC5) ────────────────────────────────────────────────────────
@@ -226,6 +256,40 @@ describe('parseResult', () => {
     expect(parseResult('RESULT: failed — the install broke')).toMatchObject({
       kind: 'failed',
       sentence: 'the install broke',
+    });
+  });
+
+  /**
+   * A task that names its own kinds — the Maya updater prints
+   * `RESULT: updated - …` and its agent copies that line — used to land as
+   * `failed`, because the runner only knew ok / no_change / failed.
+   */
+  it("a script's own wording (`updated`) is a success, not a failure", () => {
+    expect(parseResult('RESULT: updated - Maya v1 -> v2; engine rebuilt')).toMatchObject({
+      kind: 'ok',
+      sentence: 'Maya v1 -> v2; engine rebuilt',
+    });
+  });
+
+  it('`skipped` is its own kind, not a failure', () => {
+    expect(parseResult('RESULT: skipped - Maya is running')).toMatchObject({
+      kind: 'skipped',
+      sentence: 'Maya is running',
+    });
+  });
+
+  /**
+   * The contract asks for an em dash; a script's own RESULT line uses an ASCII
+   * one, and the kind word used to ride along into the summary because of it.
+   */
+  it('an ASCII dash separates the kind from the sentence too', () => {
+    expect(parseResult('RESULT: failed - the patch does not apply')).toMatchObject({
+      kind: 'failed',
+      sentence: 'the patch does not apply',
+    });
+    expect(parseResult('RESULT: no_change - Maya v1.1.40 is the newest release')).toMatchObject({
+      kind: 'no_change',
+      sentence: 'Maya v1.1.40 is the newest release',
     });
   });
 
@@ -483,6 +547,7 @@ describe('AgentTaskRunner', () => {
       outboxDir,
       notifyLocal: (text) => toasts.push(text),
       busy: () => undefined,
+      externalTurnHolds: () => [],
       now: () => Date.parse('2026-01-01T03:00:00'),
       ...overrides,
     };
@@ -526,6 +591,83 @@ describe('AgentTaskRunner', () => {
     expect(item!.text).toContain('ok');
   });
 
+  /**
+   * A `jobs.default_model` naming a deleted model used to reach the backend and
+   * die there as "unknown model", which read as a broken job. The runner
+   * resolves the jobs model at the start, so the morning report names the field
+   * to edit instead, and no turn is spent to find out.
+   */
+  it('fails at the start with the jobs-model message when the default model is gone', async () => {
+    const job = baseJob({ action: { kind: 'agent_task', task: 't', report: 'always' } });
+    await store.saveJob(job);
+    const config = {
+      models: [{ name: 'qwen', provider: 'llama.cpp', gguf_path: '/models/qwen.gguf' }],
+      active_model: 'qwen',
+      jobs: { enabled: true, default_model: 'strata-flashnext-iq2xs' },
+      llama_server: { binary: 'llama-server' },
+    } as unknown as ForgeConfig;
+
+    await new AgentTaskRunner(makeDeps({ defaultModel: () => jobDefaultModel(config) })).run(
+      { job, state: JobStateSchema.parse({}) },
+      false,
+    );
+
+    const runs = await store.readRuns('agent-task');
+    expect(runs).toHaveLength(1);
+    expect(runs[0]!.outcome).toBe('failed');
+    expect(runs[0]!.summary).toContain('was removed from config.yaml');
+    expect(runs[0]!.summary).toContain('jobs.default_model');
+    expect(runs[0]!.summary).not.toMatch(/unknown model/);
+    expect(vi.mocked(host.send)).not.toHaveBeenCalled();
+    expect(vi.mocked(host.setConversationModel)).not.toHaveBeenCalled();
+    const item = await readOutboxItem(outboxDir, 'agent-task');
+    expect(item!.text).toContain('jobs.default_model');
+  });
+
+  /**
+   * A window that was never reloaded after an upgrade validates config.yaml with
+   * last night's rules. The 2026-10-27 08:04 job failed on a config the
+   * installed build accepted, and the morning report blamed the config; the
+   * stale window was the cause anyone could act on. A failed run in that state
+   * names it first, and an ok run does not mention it.
+   */
+  it('names the stale window before the symptom in a failed run', async () => {
+    const job = baseJob({ action: { kind: 'agent_task', task: 'switch the binary', report: 'always' } });
+    await store.saveJob(job);
+    const notice =
+      'Forge 0.17.87 is installed; this window still runs 0.17.86. Reload the window.';
+    host = fakeHost([], { kind: 'failed', error: 'config.yaml validation failed' });
+
+    await new AgentTaskRunner(makeDeps({ staleWindow: () => notice })).run(
+      { job, state: JobStateSchema.parse({}) },
+      false,
+    );
+
+    const runs = await store.readRuns('agent-task');
+    const summary = runs[0]!.summary ?? '';
+    expect(summary).toContain('Forge 0.17.87 is installed');
+    expect(summary.indexOf('Forge 0.17.87')).toBeLessThan(summary.indexOf('validation failed'));
+    const item = await readOutboxItem(outboxDir, 'agent-task');
+    expect(item!.text).toContain('Reload the window');
+  });
+
+  it('leaves a successful run alone when the window is stale', async () => {
+    const job = baseJob({ action: { kind: 'agent_task', task: 't', report: 'always' } });
+    await store.saveJob(job);
+    const notice =
+      'Forge 0.17.87 is installed; this window still runs 0.17.86. Reload the window.';
+
+    await new AgentTaskRunner(makeDeps({ staleWindow: () => notice })).run(
+      { job, state: JobStateSchema.parse({}) },
+      false,
+    );
+
+    const runs = await store.readRuns('agent-task');
+    expect(runs[0]!.outcome).toBe('ok');
+    expect(runs[0]!.summary).toContain('installed b1300');
+    expect(runs[0]!.summary).not.toContain('0.17.87');
+  });
+
   it('releases a model the job had to load once nothing streams', async () => {
     const job = baseJob({ action: { kind: 'agent_task', task: 't', model: 'qwen@main' } });
     await store.saveJob(job);
@@ -557,6 +699,99 @@ describe('AgentTaskRunner', () => {
 
     expect(host.unloadModels).not.toHaveBeenCalled();
     expect(release).not.toHaveBeenCalled();
+  });
+
+  it('defers instead of unloading a managed server another window is holding', async () => {
+    const job = baseJob({ action: { kind: 'agent_task', task: 't', model: 'qwen@main' } });
+    await store.saveJob(job);
+    pool = fakePool(['strata'], 1);
+    const hold = {
+      id: '4242-x',
+      model: 'strata',
+      pid: 4242,
+      conversationId: 'chat-in-the-other-window',
+      title: 'work chat',
+      expiresAt: 0,
+    };
+
+    await new AgentTaskRunner(makeDeps({ externalTurnHolds: () => [hold] })).run(
+      { job, state: JobStateSchema.parse({}) },
+      false,
+    );
+
+    expect(host.unloadModels).not.toHaveBeenCalled();
+    expect(host.send).not.toHaveBeenCalled();
+    const state = (await store.load('agent-task'))!.state;
+    expect(state.task_pending).toBe(true);
+    expect(state.task_pending_reason).toContain("held for a turn by chat 'work chat'");
+
+    // Bounded and visible, not silent starvation: a pending task older than one
+    // schedule period is dropped with a `skipped` run row that names the chat
+    // holding the server, so a hold a window leaked on purpose (BL-021 keeps an
+    // expired record of a live process) ends by itself once that window closes.
+    const ttlState = JobStateSchema.parse({
+      task_pending: true,
+      task_pending_since: Date.parse('2026-01-01T01:45:00'),
+    });
+    await new AgentTaskRunner(makeDeps({ externalTurnHolds: () => [hold] })).run(
+      { job, state: ttlState },
+      false,
+    );
+    const runs = await store.readRuns('agent-task');
+    expect(runs).toHaveLength(1);
+    expect(runs[0]!.outcome).toBe('skipped');
+    expect(runs[0]!.summary).toContain("held for a turn by chat 'work chat'");
+    expect(host.send).not.toHaveBeenCalled();
+  });
+
+  it('defers when a hold turns up between admission and the unload', async () => {
+    const job = baseJob({ action: { kind: 'agent_task', task: 't', model: 'qwen@main' } });
+    await store.saveJob(job);
+    pool = fakePool(['strata'], 1);
+    const hold = {
+      id: '4242-x',
+      model: 'strata',
+      pid: 4242,
+      conversationId: 'chat-in-the-other-window',
+      title: 'work chat',
+      expiresAt: 0,
+    };
+    // Empty at admission, taken by the other window before the unload gate.
+    const holds = vi.fn().mockReturnValueOnce([]).mockReturnValueOnce([hold]);
+
+    await new AgentTaskRunner(makeDeps({ externalTurnHolds: holds })).run(
+      { job, state: JobStateSchema.parse({}) },
+      false,
+    );
+
+    expect(holds).toHaveBeenCalledTimes(2);
+    expect(host.unloadModels).not.toHaveBeenCalled();
+    expect(host.send).not.toHaveBeenCalled();
+    const lateState = (await store.load('agent-task'))!.state;
+    expect(lateState.task_pending).toBe(true);
+    expect(lateState.task_pending_reason).toContain("held for a turn by chat 'work chat'");
+  });
+
+  it('runs on a managed server another chat is holding: two chats share one server', async () => {
+    const job = baseJob({ action: { kind: 'agent_task', task: 't', model: 'strata' } });
+    await store.saveJob(job);
+    pool = fakePool(['strata'], 1);
+    const hold = {
+      id: '4242-x',
+      model: 'strata',
+      pid: 4242,
+      conversationId: 'chat-in-the-other-window',
+      title: 'work chat',
+      expiresAt: 0,
+    };
+
+    await new AgentTaskRunner(makeDeps({ externalTurnHolds: () => [hold] })).run(
+      { job, state: JobStateSchema.parse({}) },
+      false,
+    );
+
+    expect(host.unloadModels).not.toHaveBeenCalled();
+    expect(host.send).toHaveBeenCalledTimes(1);
   });
 
   it('joins a verified Strata slot without unloading its server from another window', async () => {
@@ -728,6 +963,73 @@ describe('AgentTaskRunner', () => {
     // no_change is not delivered under failures_and_changes.
     const item = await readOutboxItem(outboxDir, 'agent-task');
     expect(item).toBeUndefined();
+  });
+
+  /**
+   * The same script wording, end to end: `updated` used to be recorded as a
+   * failed run — backoff, no observation saved, and a failure notice for work
+   * that went well. It is now the ordinary success path.
+   */
+  it('an `updated` RESULT copied from the task script is a delivered success', async () => {
+    const job = baseJob({
+      action: { kind: 'agent_task', task: 'update', report: 'failures_and_changes' },
+    });
+    await store.saveJob(job);
+    store.patchState('agent-task', { last_observation: '{"tag":"v1"}' });
+    host = fakeHost([], {
+      kind: 'completed',
+      finalText: 'RESULT: updated - Maya v1 -> v2; engine rebuilt; not started',
+    });
+
+    const runner = new AgentTaskRunner(makeDeps());
+    const saved = (await store.load('agent-task'))!.state;
+    await runner.run({ job, state: { ...saved, last_observation: '{"tag":"v2"}' } }, false);
+
+    const runs = await store.readRuns('agent-task');
+    expect(runs[0]!.outcome).toBe('ok');
+    expect(runs[0]!.changed).toBe(true);
+    expect(runs[0]!.summary).toBe('Maya v1 -> v2; engine rebuilt; not started');
+    expect((await store.load('agent-task'))!.state.last_observation).toBe('{"tag":"v2"}');
+    expect(await readOutboxItem(outboxDir, 'agent-task')).toBeDefined();
+  });
+
+  /**
+   * `RESULT: skipped` is the script saying "something outside me was busy" —
+   * Maya running at the scheduled minute. Counting it as a failure made the job
+   * back off and keep re-notifying a release it had never tried to install;
+   * ignoring it silently would have left that update never attempted. So it is
+   * reported, keeps the observation pending, and does not count against the job.
+   */
+  it('a `skipped` RESULT is reported, keeps the observation pending, is not a failure', async () => {
+    const job = baseJob({
+      action: { kind: 'agent_task', task: 'update', report: 'failures_and_changes' },
+    });
+    await store.saveJob(job);
+    store.patchState('agent-task', { last_observation: '{"tag":"v1"}', consecutive_failures: 2 });
+    host = fakeHost([], {
+      kind: 'completed',
+      finalText:
+        'RESULT: skipped - Maya is running (python 4321); stop it and run the update again',
+    });
+
+    const runner = new AgentTaskRunner(makeDeps());
+    const saved = (await store.load('agent-task'))!.state;
+    await runner.run({ job, state: { ...saved, last_observation: '{"tag":"v2"}' } }, false);
+
+    const state = (await store.load('agent-task'))!.state;
+    const runs = await store.readRuns('agent-task');
+    expect(runs[0]!.outcome).toBe('skipped');
+    expect(runs[0]!.changed).toBe(false);
+    expect(runs[0]!.summary).toBe(
+      'Maya is running (python 4321); stop it and run the update again',
+    );
+    // Not a failure: no backoff, the counter resets, and last_ok_at stays unset.
+    expect(state.consecutive_failures).toBe(0);
+    expect(state.last_ok_at).toBeNull();
+    // The release is still pending: the observation the run was handed is unsaved.
+    expect(state.last_observation).toBe('{"tag":"v1"}');
+    // And the owner is told, because only they can clear what blocked it.
+    expect(await readOutboxItem(outboxDir, 'agent-task')).toBeDefined();
   });
 
   it('records task_pending when no slot is free, and clears it on the next run', async () => {

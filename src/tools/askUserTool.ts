@@ -12,7 +12,7 @@ const questionOptionSchema = z.union([
   z
     .object({
       label: z.string().max(80),
-      description: z.string().max(200).optional(),
+      description: z.string().max(500).optional(),
       exclusive: z.boolean().optional(),
       recommended: z.boolean().optional(),
     })
@@ -61,7 +61,7 @@ const questionOptionJsonSchema = {
       type: 'object',
       properties: {
         label: { type: 'string', maxLength: 80 },
-        description: { type: 'string', maxLength: 200 },
+        description: { type: 'string', maxLength: 500 },
         exclusive: { type: 'boolean' },
         recommended: {
           type: 'boolean',
@@ -73,6 +73,55 @@ const questionOptionJsonSchema = {
     },
   ],
 };
+
+/**
+ * One question with no `prompt` borrows the shared top-level one.
+ *
+ * Eleven of 59 audited `ask_user` calls (2026-10-27) were refused over their
+ * arguments, and four of them put the question text in the top-level `prompt`
+ * and left the `questions` entries without their own — the model meant exactly
+ * what a single question needs, and the call died on a field it had written one
+ * level too high. A second shape, `questions` arriving as a string of
+ * hand-written JSON, is already handled ahead of here: the registry parses a
+ * string array before the call reaches this handler.
+ *
+ * Two questions with no prompt is a real disagreement about which text belongs
+ * to which question, so the call is refused with the shape shown instead of
+ * guessing. An over-long option description is NOT repaired: the text is what
+ * the user reads, so shortening it silently would change the question, and the
+ * plain-line refusal (`toolErrorText.ts`) is the fix.
+ */
+function questionPromptRepair(
+  args: Record<string, unknown>,
+): { args: Record<string, unknown> } | { refusal: string } {
+  const questions = args['questions'];
+  if (!Array.isArray(questions)) return { args };
+  const missing = questions
+    .map((question, index) => ({ question, index }))
+    .filter(
+      ({ question }) =>
+        question !== null &&
+        typeof question === 'object' &&
+        !Array.isArray(question) &&
+        (question as Record<string, unknown>)['prompt'] === undefined,
+    )
+    .map(({ index }) => index);
+  if (missing.length === 0) return { args };
+  const shared = typeof args['prompt'] === 'string' ? args['prompt'].trim() : '';
+  if (missing.length === 1 && shared) {
+    const at = missing[0]!;
+    const filled = [...questions];
+    filled[at] = { ...(filled[at] as Record<string, unknown>), prompt: args['prompt'] };
+    return { args: { ...args, questions: filled } };
+  }
+  const where = `questions[${missing.join('], questions[')}]`;
+  return {
+    refusal:
+      `ask_user ${where} ${missing.length === 1 ? 'is' : 'are'} missing "prompt". ` +
+      'Each question needs its own "prompt"; the top-level "prompt" is only a shared intro. ' +
+      'Resend as: {"questions":[{"prompt":"Which build?","options":["Fast","Full"]}]}',
+  };
+}
 
 /** Ask the user and wait for a response, using the shared question contract. */
 export function makeAskUserTool(
@@ -148,7 +197,12 @@ export function makeAskUserTool(
     },
     permission: 'read',
     handler: async (args, context) => {
-      const parsed = askUserArgsSchema.parse(args);
+      const call = questionPromptRepair(args);
+      // Thrown, not returned: `ToolDispatch` prefixes `Error:` and counts a thrown
+      // refusal in the consecutive-failure streak that can strip a model's tools,
+      // so a returned string would silently stop these calls from counting.
+      if ('refusal' in call) throw new Error(call.refusal);
+      const parsed = askUserArgsSchema.parse(call.args);
       if (context?.conversationId && unattended.has(context.conversationId)) {
         return (
           'unattended: no user present — Nobody is attending this job run, so no answer will come. ' +

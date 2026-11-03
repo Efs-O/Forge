@@ -180,9 +180,12 @@ async function resolveRunTarget(
   ctx: PromptRunContext,
   model: ReturnType<typeof resolveRequestModel>,
   reserved: BackendController | undefined,
+  /** The run's cancel signal, so a Stop cuts a waiting desktop `/ensure` rather
+   *  than leaving `/compact` hung for the full starter timeout. */
+  signal?: AbortSignal,
 ): Promise<RunTarget> {
   if (!reserved && isCloudProvider(model.provider)) {
-    const { baseUrl, apiKey } = await resolveCloudRequestTarget(model, ctx.secrets);
+    const { baseUrl, apiKey } = await resolveCloudRequestTarget(model, ctx.secrets, signal);
     return { baseUrl, apiKey, loadedModel: model.name };
   }
   const backend = reserved ?? (await ctx.pool.acquire(model.name));
@@ -218,7 +221,18 @@ export async function runPromptToMarkdown(
     : injectSystemPrompt(
         [{ role: 'user', content: text }],
         ctx.templateEngine,
-        buildTemplateContext(config, ctx.forgeLoader, activeFile),
+        buildTemplateContext(
+          config,
+          ctx.forgeLoader,
+          activeFile,
+          undefined,
+          // Built once here and captured in `messages`: a one-shot run keeps the
+          // same system prompt for every round it spends, exactly as a turn does.
+          // `?.()` rather than `()` because a caller may hand a bare render stub
+          // as the engine (several prompt-shape tests do), and a missing catalog
+          // is the same as no catalog: no block, no skills.
+          ctx.templateEngine?.skillsCatalogFor?.(undefined),
+        ),
         selectedModel.system_prompt,
         selectedModel.system_prompt_mode,
       );
@@ -228,7 +242,7 @@ export async function runPromptToMarkdown(
   ctx.setController(ctrl, conversationId);
   const maxToolRounds = Math.max(0, Math.min(options.maxContactToolRounds ?? 3, 3));
   try {
-    const target = await resolveRunTarget(ctx, selectedModel, options.backend);
+    const target = await resolveRunTarget(ctx, selectedModel, options.backend, ctrl.signal);
     if (ctrl.signal.aborted) throw new Error('Forge: the run was cancelled before it started.');
     ctx.events.onBackendReady?.(target.loadedModel);
     for (let toolRound = 0; ; toolRound += 1) {

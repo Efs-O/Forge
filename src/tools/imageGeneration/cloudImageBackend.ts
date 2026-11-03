@@ -55,6 +55,10 @@ export async function generateCloudImage(request: CloudImageRequest): Promise<Ge
       ...(backend.endpoint ? { endpoint: backend.endpoint } : {}),
     },
     request.secrets,
+    // `image`: the desktop's cloud relay forwards chat only, so a remote window
+    // is told that rather than sent to a chat endpoint that cannot render.
+    request.signal,
+    'image',
   );
 
   const response = await fetchImpl(`${baseUrl}/v1/images/generations`, {

@@ -1,9 +1,7 @@
 import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
-import { afterEach, describe, expect, it, vi } from 'vitest';
-import { runCliChat } from '../../src/agents/CliChatRunner';
-import type { CliAgentDriver } from '../../src/agents/CliAgentDriver';
+import { afterEach, describe, expect, it } from 'vitest';
 import { CheckpointStack } from '../../src/checkpoint/CheckpointStack';
 import { assertCheckpointWithinLimits } from '../../src/checkpoint/CheckpointPolicy';
 
@@ -26,7 +24,12 @@ afterEach(() => {
   for (const root of testRoots.splice(0)) fs.rmSync(root, { recursive: true, force: true });
 });
 
-describe('disk-backed workspace checkpoints', () => {
+// Room for the capture and the undo: every copied file is hashed and fsynced
+// through its own handle (src/checkpoint/CheckpointFileIO.ts), and `npm run ci`
+// runs the whole suite against the same disk, so a single test can pass the 5 s
+// default per-test timeout. The file takes 488 ms on its own, and no assertion
+// here is timing-based. Same remedy as test/unit/RequestDump.test.ts (6b8d7e7a).
+describe('disk-backed workspace checkpoints', { timeout: 20_000 }, () => {
   it('rejects a multi-gigabyte logical inventory without allocating its contents', () => {
     expect(() =>
       assertCheckpointWithinLimits(
@@ -84,6 +87,31 @@ describe('disk-backed workspace checkpoints', () => {
     expect(fs.readFileSync(target, 'utf8')).toBe('aaaa');
   });
 
+  it('restores changes across a bounded capture batch', async () => {
+    const { root, stack } = fixture();
+    const files = Array.from({ length: 20 }, (_, index) =>
+      path.join(root, `file-${String(index).padStart(2, '0')}.txt`),
+    );
+    files.forEach((file, index) => fs.writeFileSync(file, `before-${index}`));
+
+    const checkpoint = stack.beginTurn('turn-batches', 'batch-conversation');
+    const capture = await checkpoint.prepareWorkspace(root, new AbortController().signal);
+    for (const index of [0, 7, 8, 15, 19]) {
+      fs.writeFileSync(files[index]!, `after-${index}`);
+    }
+    fs.rmSync(files[16]!);
+    const created = path.join(root, 'created.txt');
+    fs.writeFileSync(created, 'new');
+    await capture.finish();
+    stack.commitTurn(checkpoint);
+
+    await stack.undo('batch-conversation');
+    files.forEach((file, index) => {
+      expect(fs.readFileSync(file, 'utf8')).toBe(`before-${index}`);
+    });
+    expect(fs.existsSync(created)).toBe(false);
+  });
+
   it('verifies every blob before deleting any workspace content', async () => {
     const { root, storage, stack } = fixture();
     const target = path.join(root, 'protected.txt');
@@ -135,29 +163,15 @@ describe('disk-backed workspace checkpoints', () => {
     expect(fs.readdirSync(storage)).toEqual([]);
   });
 
-  it('blocks an over-budget CLI turn before invoking the driver', async () => {
+  it('blocks an over-budget scoped checkpoint before the delegated work starts', async () => {
     const { root, stack } = fixture({ maxBytes: 4, maxFiles: 100 });
-    fs.writeFileSync(path.join(root, 'too-large.txt'), '12345');
+    const target = path.join(root, 'too-large.txt');
+    fs.writeFileSync(target, '12345');
     const checkpoint = stack.beginTurn('turn-limit', 'limit-conversation');
-    const run = vi.fn(async () => ({ status: 'completed' as const, finalText: 'should not run' }));
-    const onPrepared = vi.fn();
 
     await expect(
-      runCliChat({
-        prepared: { cliName: 'claude', executable: 'claude' },
-        model: { name: 'claude-code', provider: 'cli', cli: 'claude' },
-        messages: [{ role: 'user', content: 'inspect this' }],
-        workspaceRoot: root,
-        checkpoint,
-        signal: new AbortController().signal,
-        onText: vi.fn(),
-        onStatus: vi.fn(),
-        onPrepared,
-        driver: { run } as unknown as CliAgentDriver,
-      }),
+      checkpoint.preparePaths(root, [target], new AbortController().signal),
     ).rejects.toThrow(/did not start the external CLI.*maxBytes/i);
-    expect(run).not.toHaveBeenCalled();
-    expect(onPrepared).not.toHaveBeenCalled();
   });
 
   it('cancels preparation without leaving a pending checkpoint directory', async () => {

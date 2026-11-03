@@ -23,6 +23,7 @@ import {
   CONTEXT_INPUT_EXHAUSTED_MESSAGE,
   CONTEXT_EXHAUSTED_MESSAGE,
   contextExhaustionReason,
+  holdSchemaPropertiesUntilTruncation,
   isLlamaContextExhaustion,
   isNativeToolJsonParseError,
   serverReportedOutputRoom,
@@ -54,7 +55,8 @@ export async function runToolCallingLoop(
   let loopGuard = new ToolLoopGuard();
   let loopRecoveries = 0;
   let truncationRecoveries = 0;
-  // Sticky for the turn: the recovery's write + append chunks span several rounds.
+  // Sticky for the turn: the recovery's write + append chunks span several rounds,
+  // so once one call is cut off the held schema properties stay offered.
   let truncatedThisTurn = false;
   let reasoningStopRetries = 0;
   let midTurnCompactions = 0;
@@ -72,13 +74,11 @@ export async function runToolCallingLoop(
     const suppressesThinking =
       (truncationRecoveries > 0 || reasoningStopRetries > 0) &&
       (options.canUseThinkingKwargs ?? false);
-    // Unlocking mid-turn costs one cold re-prefill, paid only on a cut-off turn.
-    const toolDefinitions = options
-      .getToolDefinitions()
-      .filter(
-        ({ function: { name } }) =>
-          truncatedThisTurn || !options.offerAfterTruncation?.includes(name),
-      );
+    const toolDefinitions = holdSchemaPropertiesUntilTruncation(
+      options.getToolDefinitions(),
+      options.holdUntilTruncation,
+      truncatedThisTurn,
+    );
     const offeredToolNames = toolDefinitions.map((definition) => definition.function.name);
     const measureOutput = (request: ChatCompletionRequest) => {
       const budget = options.getOutputRoom?.(request.messages, request.tools ?? []);

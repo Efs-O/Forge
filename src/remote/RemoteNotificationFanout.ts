@@ -24,7 +24,8 @@ export interface NotificationFanoutDeps {
  * is what stops the agent claiming it notified a user whose phone never buzzed.
  *
  * Both toggles live here and are in memory: a remote switch must not outlive
- * the window it was set from, matching /clanker.
+ * the window it was set from. `/clanker` is the remote switch that does survive, and
+ * it survives with the chat it was armed for, not with the window (`chatClanker.ts`).
  */
 export class RemoteNotificationFanout {
   /** Chats that have run /notify off. */
@@ -76,7 +77,9 @@ export class RemoteNotificationFanout {
       .filter((binding) => !this.muted.has(binding.chatId));
     // A workspace can hold several chats bound to different conversations; a
     // window-scoped notice is one fact and must not arrive twice in one chat.
-    return this.send([...new Set(bindings.map((binding) => binding.chatId))], text, ephemeral);
+    return this.send([...new Set(bindings.map((binding) => binding.chatId))], text, {
+      ...(ephemeral ? { ephemeral: true } : {}),
+    });
   }
 
   /**
@@ -88,10 +91,14 @@ export class RemoteNotificationFanout {
    * holds the progress message is exact, and saves threading an origin flag
    * through the whole turn path to answer the same question worse.
    */
-  async mirrorTurn(conversationId: string, text: string): Promise<number> {
+  async mirrorTurn(
+    conversationId: string,
+    text: string,
+    speedLine?: string | undefined,
+  ): Promise<number> {
     if (this.deps.ownsProgress(conversationId)) return 0;
     const chatIds = this.chatsOn(conversationId).filter((id) => !this.unmirrored.has(id));
-    return this.send(chatIds, text);
+    return this.send(chatIds, text, speedLine ? { speedLine } : undefined);
   }
 
   /**
@@ -145,15 +152,14 @@ export class RemoteNotificationFanout {
       .map((binding) => binding.chatId);
   }
 
-  private async send(chatIds: string[], text: string, ephemeral?: boolean): Promise<number> {
+  private async send(
+    chatIds: string[],
+    text: string,
+    options?: { ephemeral?: boolean; speedLine?: string },
+  ): Promise<number> {
     if (chatIds.length === 0) return 0;
     for (const chatId of chatIds) {
-      await this.deps.store.notifyOutbox(
-        this.deps.channelName,
-        chatId,
-        text,
-        ephemeral ? { ephemeral: true } : undefined,
-      );
+      await this.deps.store.notifyOutbox(this.deps.channelName, chatId, text, options);
     }
     this.deps.kick();
     return chatIds.length;

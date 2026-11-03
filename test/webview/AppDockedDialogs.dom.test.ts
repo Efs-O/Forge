@@ -225,12 +225,12 @@ describe('App docked agent dialogs', () => {
     expect(posted).toContainEqual({
       type: 'confirmResponse',
       id: 'approval-escape',
-      approved: false,
+      decision: 'decline',
     });
     expect(container.querySelector('.composer-slot')?.hasAttribute('hidden')).toBe(false);
   });
 
-  it('posts approve and deny responses and explains the dangerous action', () => {
+  it('posts approve and decline responses and explains the dangerous action', () => {
     act(() =>
       hostMessage({
         type: 'confirmRequest',
@@ -250,7 +250,7 @@ describe('App docked agent dialogs', () => {
     expect(posted).toContainEqual({
       type: 'confirmResponse',
       id: 'approval-dangerous',
-      approved: true,
+      decision: 'approve',
     });
 
     act(() =>
@@ -265,7 +265,61 @@ describe('App docked agent dialogs', () => {
     expect(posted).toContainEqual({
       type: 'confirmResponse',
       id: 'approval-denied',
-      approved: false,
+      decision: 'decline',
+    });
+  });
+
+  it('offers Allow for this chat only when the card carries validated keys', () => {
+    act(() =>
+      hostMessage({
+        type: 'confirmRequest',
+        id: 'approval-chat-rule',
+        toolName: 'message_chat',
+        detail: 'Send the message',
+        allowForChat: { keys: ['cross_chat'], label: 'messages to other chats' },
+      }),
+    );
+    expect(container.querySelector('.confirm-allow-chat-copy')?.textContent).toBe(
+      'Allow for this chat covers: messages to other chats.',
+    );
+    expect(
+      [...container.querySelectorAll<HTMLButtonElement>('.confirm-actions button')].map(
+        (button) => button.textContent,
+      ),
+    ).toEqual(['Decline', 'Allow for this chat', 'Approve']);
+    act(() =>
+      [...container.querySelectorAll<HTMLButtonElement>('.confirm-actions button')][1]!.click(),
+    );
+    expect(posted).toContainEqual({
+      type: 'confirmResponse',
+      id: 'approval-chat-rule',
+      decision: 'allowChat',
+    });
+  });
+
+  it('offers Always in this project and sends its distinct owner decision', () => {
+    act(() =>
+      hostMessage({
+        type: 'confirmRequest',
+        id: 'approval-project-rule',
+        toolName: 'message_chat',
+        detail: 'Send the message',
+        allowForChat: { keys: ['cross_chat'], label: 'messages to other chats' },
+        alwaysInProject: { keys: ['cross_chat'], label: 'messages to other chats' },
+      }),
+    );
+    expect(
+      [...container.querySelectorAll<HTMLButtonElement>('.confirm-actions button')].map(
+        (button) => button.textContent,
+      ),
+    ).toEqual(['Decline', 'Allow for this chat', 'Always in this project', 'Approve']);
+    act(() =>
+      [...container.querySelectorAll<HTMLButtonElement>('.confirm-actions button')][2]!.click(),
+    );
+    expect(posted).toContainEqual({
+      type: 'confirmResponse',
+      id: 'approval-project-rule',
+      decision: 'alwaysProject',
     });
   });
 

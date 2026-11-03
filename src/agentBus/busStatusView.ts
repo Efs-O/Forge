@@ -63,6 +63,23 @@ function dur(ms: number): string {
   return `${Math.floor(minutes / 60)} h ${minutes % 60} min`;
 }
 
+/**
+ * A sender whose messages are accepted but have not started and have no open
+ * chat to report yet: a `--new` message opens its own chat when it runs, and a
+ * `--to` chat the user has since closed is restored then too, so there is
+ * nothing to show before then. `status` answers 200 with this instead of the
+ * 404 that `forge.sh wait` reads as a dead endpoint and exits on (audit F3).
+ * `State:` describes the queue, not a chat's turn: `wait` completes on
+ * `State: idle` with `Queued from you: 0`, and neither is true here.
+ */
+export function renderQueuedStatus(queued: number): string {
+  return [
+    'Chat: none yet — your message is accepted and has not started',
+    'State: queued',
+    `Queued from you: ${queued}`,
+  ].join('\n');
+}
+
 export function renderBusView(
   exchanges: readonly ForgeExchange[],
   options: { clamped: boolean; streaming: boolean },

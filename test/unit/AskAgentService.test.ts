@@ -1,10 +1,16 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import {
+  deliverAgentReply,
   makeAskAgentHandler,
   renderAskAgentResult,
   type AskAgentRuntime,
 } from '../../src/agentLinks/askAgentService';
-import { rebuildIndex, type AgentKind, type AgentLink } from '../../src/agentLinks/chatAgentLinks';
+import {
+  findBySession,
+  rebuildIndex,
+  type AgentKind,
+  type AgentLink,
+} from '../../src/agentLinks/chatAgentLinks';
 import type { ForgeConfig } from '../../src/config/types';
 import type { ConversationRuntime } from '../../src/sidebar/sessionTypes';
 import type { CheckpointSession } from '../../src/checkpoint/CheckpointStack';
@@ -86,16 +92,31 @@ describe('ask_agent session resolution', () => {
     expect(renderAskAgentResult(result)).toContain('reply');
     expect(state.runtime.sendLive).toHaveBeenCalledOnce();
     expect(state.runtime.runHeadless).not.toHaveBeenCalled();
-    expect(state.events[0]).toBe('checkpoint');
+    if (agent === 'copilot') expect(state.events[0]).toBe('checkpoint');
+    else expect(state.checkpoint.prepareWorkspace).not.toHaveBeenCalled();
     expect(state.events).toContain('persist');
   });
 
-  it('waits for a panel-opened session and never falls back after timeout', async () => {
-    const state = setup();
-    state.conv.agentLinks = { claude: linked('claude') };
+  // Laptop audit F10 (2026-10-26): a Forge-started Codex link answered once,
+  // then every later send failed with "the Codex panel did not come up …; the
+  // ask was not sent", while `who` and the chat header still showed the link as
+  // healthy. `openExternal` on a `vscode://` link reports 'opened' whatever the
+  // panel then does, so a thread that never appears in the thread list is the
+  // only thing actually observed — and this branch used to make that a dead
+  // end instead of the headless resume its `'unavailable'` sibling already was.
+  // It used to be pinned the other way: "never falls back after timeout".
+  it('resumes the same session headlessly when the opened panel never comes up', async () => {
+    const state = setup({
+      runHeadless: vi.fn(async (options) => {
+        expect(options.createSessionId).toBeUndefined(); // a resume, not a new session
+        expect(options.sessionTitle).toBe('Forge · Design chat');
+        return { status: 'completed', finalText: 'resumed answer' };
+      }),
+    });
+    state.conv.agentLinks = { codex: linked('codex') };
     rebuildIndex([state.conv]);
     const result = await state.handler(
-      { agent: 'claude', message: 'Review' },
+      { agent: 'codex', message: 'Continue' },
       {
         conversation: state.conv,
         checkpoint: state.checkpoint,
@@ -104,9 +125,175 @@ describe('ask_agent session resolution', () => {
         persistConversation: state.persistConversation,
       },
     );
-    expect(renderAskAgentResult(result)).toContain('did not come up');
-    expect(state.runtime.openPanel).toHaveBeenCalledWith('claude', otherId);
-    expect(state.runtime.runHeadless).not.toHaveBeenCalled();
+    const rendered = renderAskAgentResult(result);
+    expect(rendered).toContain(
+      'Codex panel did not come up for session "Forge · Design chat"; resumed headlessly.',
+    );
+    expect(rendered).toContain('resumed answer');
+    expect(result).toMatchObject({ status: 'completed', live: false });
+    expect(state.runtime.openPanel).toHaveBeenCalledWith('codex', otherId);
+    expect(state.runtime.runHeadless).toHaveBeenCalledWith(
+      expect.objectContaining({
+        agent: 'codex',
+        link: expect.objectContaining({ sessionId: otherId }),
+      }),
+    );
+    expect(state.runtime.sendLive).not.toHaveBeenCalled();
+    // The link is what the resume ran on, so it stays exactly where it was.
+    expect(state.conv.agentLinks?.codex?.sessionId).toBe(otherId);
+  });
+
+  it('a gone thread found by that resume unlinks the row and starts a fresh session', async () => {
+    const freshThread = 'c5a7c3a1-8cb0-427d-b3b7-8ca13d739c59';
+    const state = setup({
+      runHeadless: vi
+        .fn()
+        .mockResolvedValueOnce({
+          status: 'failed',
+          finalText: '',
+          error: 'no such thread',
+          sessionGone: true,
+        })
+        .mockImplementationOnce(async (options) => {
+          options.onSessionId(freshThread);
+          return { status: 'completed', finalText: 'new reply' };
+        }),
+    });
+    state.conv.agentLinks = { codex: linked('codex') };
+    rebuildIndex([state.conv]);
+    const result = await state.handler(
+      { agent: 'codex', message: 'Continue' },
+      {
+        conversation: state.conv,
+        checkpoint: state.checkpoint,
+        signal: new AbortController().signal,
+        workspaceRoot: 'C:/repo',
+        persistConversation: state.persistConversation,
+      },
+    );
+    const rendered = renderAskAgentResult(result);
+    expect(rendered).toContain('no longer exists; started a new one');
+    expect(rendered).toContain('new reply');
+    expect(state.runtime.runHeadless).toHaveBeenCalledTimes(2);
+    // The header strip's row is the new thread, not the dead one, and the dead
+    // id no longer resolves to this chat.
+    expect(state.conv.agentLinks?.codex?.sessionId).toBe(freshThread);
+    expect(findBySession(otherId)).toBeUndefined();
+    expect(findBySession(freshThread)).toBe(id);
+  });
+
+  // Suspect B of the same audit: the Codex thread list is read by spawning a
+  // throwaway app-server, and `CodexDiscovery` REJECTS when that process does
+  // not answer in time. Nothing caught it, so a slow app-server failed the ask
+  // with a discovery message — read as "the thread is gone" when all it proves
+  // is "I could not look".
+  it('a liveness check that fails is not read as a gone session; the ask goes straight to the headless resume', async () => {
+    const state = setup({
+      isLive: vi.fn(async () => {
+        throw new Error('Codex discovery timed out after 2000ms.');
+      }),
+      runHeadless: vi.fn(async () => ({ status: 'completed', finalText: 'resumed' })),
+    });
+    state.conv.agentLinks = { codex: linked('codex') };
+    rebuildIndex([state.conv]);
+    const result = await state.handler(
+      { agent: 'codex', message: 'Continue' },
+      {
+        conversation: state.conv,
+        checkpoint: state.checkpoint,
+        signal: new AbortController().signal,
+        workspaceRoot: 'C:/repo',
+        persistConversation: state.persistConversation,
+      },
+    );
+    const rendered = renderAskAgentResult(result);
+    expect(result.status).toBe('completed');
+    expect(rendered).toContain('resumed');
+    expect(rendered).toContain(
+      'could not be checked (Codex discovery timed out after 2000ms.); resumed headlessly.',
+    );
+    expect(rendered).not.toContain('did not come up');
+    // No point opening a panel this window cannot verify: the resume is the
+    // check that can answer, and it says sessionGone if the thread is really gone.
+    expect(state.runtime.openPanel).not.toHaveBeenCalled();
+    expect(state.runtime.runHeadless).toHaveBeenCalledOnce();
+    expect(state.conv.agentLinks?.codex?.sessionId).toBe(otherId);
+  });
+
+  it('a check that fails while waiting for the panel goes to the headless resume at once', async () => {
+    const isLive = vi
+      .fn()
+      .mockResolvedValueOnce(false)
+      .mockImplementationOnce(async () => {
+        throw new Error('Codex app-server exited with code 1 before thread/list completed.');
+      });
+    const state = setup({
+      isLive,
+      runHeadless: vi.fn(async () => ({ status: 'completed', finalText: 'resumed' })),
+    });
+    state.conv.agentLinks = { codex: linked('codex') };
+    rebuildIndex([state.conv]);
+    const result = await state.handler(
+      { agent: 'codex', message: 'Continue' },
+      {
+        conversation: state.conv,
+        checkpoint: state.checkpoint,
+        signal: new AbortController().signal,
+        workspaceRoot: 'C:/repo',
+        persistConversation: state.persistConversation,
+      },
+    );
+    const rendered = renderAskAgentResult(result);
+    expect(rendered).toContain('Codex session could not be checked; resumed headlessly.');
+    expect(rendered).toContain('resumed');
+    expect(state.runtime.openPanel).toHaveBeenCalledOnce();
+    expect(state.runtime.runHeadless).toHaveBeenCalledOnce();
+  });
+
+  it('a headless resume that also fails says what the owner can do, and keeps the link', async () => {
+    const state = setup({
+      runHeadless: vi.fn(async () => ({
+        status: 'failed',
+        finalText: '',
+        error: 'auth expired',
+      })),
+    });
+    state.conv.agentLinks = { codex: linked('codex') };
+    rebuildIndex([state.conv]);
+    const result = await state.handler(
+      { agent: 'codex', message: 'Continue' },
+      {
+        conversation: state.conv,
+        checkpoint: state.checkpoint,
+        signal: new AbortController().signal,
+        workspaceRoot: 'C:/repo',
+        persistConversation: state.persistConversation,
+      },
+    );
+    const rendered = renderAskAgentResult(result);
+    expect(rendered).toContain('auth expired');
+    expect(rendered).toContain('panel did not come up');
+    expect(rendered).toContain('unlink this session in the chat header');
+    expect(state.conv.agentLinks?.codex?.sessionId).toBe(otherId);
+  });
+
+  it('a live-check failure keeps the answer as a verdict instead of claiming a failed delivery', async () => {
+    const runtime = {
+      isLive: vi.fn(async () => {
+        throw new Error('Codex discovery timed out after 2000ms.');
+      }),
+      sendLive: vi.fn(),
+    } as unknown as AskAgentRuntime;
+    await expect(
+      deliverAgentReply(
+        runtime,
+        'codex',
+        linked('codex'),
+        'the answer',
+        new AbortController().signal,
+      ),
+    ).resolves.toBe(false);
+    expect(runtime.sendLive).not.toHaveBeenCalled();
   });
 
   it('sends through the live adapter after the opened panel becomes live', async () => {
@@ -199,7 +386,9 @@ describe('ask_agent session resolution', () => {
         },
       );
       expect(renderAskAgentResult(result)).toContain('done');
-      expect(state.events.indexOf('checkpoint')).toBeLessThan(state.events.indexOf('persist'));
+      if (agent === 'copilot')
+        expect(state.events.indexOf('checkpoint')).toBeLessThan(state.events.indexOf('persist'));
+      else expect(state.checkpoint.prepareWorkspace).not.toHaveBeenCalled();
     },
   );
 

@@ -1,5 +1,11 @@
 import { describe, expect, it } from 'vitest';
 import { makeGitReadTool } from '../../src/tools/gitReadTool';
+import { ToolRegistry } from '../../src/tools/ToolRegistry';
+import {
+  hiddenLazyToolNames,
+  lazyGroupForTool,
+  resetLazyToolGroups,
+} from '../../src/tools/lazyToolGroups';
 import {
   makeGitBlameTool,
   makeGitDiffTool,
@@ -49,5 +55,17 @@ describe('git_read', () => {
     await expect(makeGitReadTool().handler({ operation: 'show' })).rejects.toThrow(
       'git_read operation "show" needs ref',
     );
+  });
+
+  // 6 calls against 418 shell git commands across the 53 sessions since 0.17.80
+  // (docs/reports/TOOL_AUDIT_2026_10_29.md §5): the schema is not what the model
+  // reaches for when it wants git, so it now costs nothing until the group loads.
+  it('is a member of the lazy git group, so its schema is not advertised by default', () => {
+    resetLazyToolGroups();
+    const registry = new ToolRegistry();
+    registry.register(makeGitReadTool());
+    expect(lazyGroupForTool('git_read')).toBe('git');
+    expect(hiddenLazyToolNames('git-audit-conversation')).toContain('git_read');
+    resetLazyToolGroups();
   });
 });

@@ -7,12 +7,20 @@ import type { JobStore } from './JobStore';
 import { PowerControlUnsupportedError, type PowerControl } from '../system/PowerControl';
 import { LlamacppAction, type LlamacppActionDeps } from './actions/llamacppAction';
 import { AgentTaskRunner, type AgentTaskDeps } from './agentTask';
+import { RetitleRunner, type RetitleDeps } from './retitleRun';
 import { recoverInterruptedRuns } from './agentTaskState';
 import { WakeReconciler } from './schedulerWakes';
 import { acquireSchedulerLease } from './jobLease';
 import { describeError } from '../util/describeError';
 import { BACKOFF_THRESHOLD } from './backoff';
-import { runJobCheck, applyJobBackoff, sleepIfIdleIfRequested } from './jobRunLifecycle';
+import { makeApprovalWarnings } from './approvalJobRuleWarnings';
+import type { ForgeConfig } from '../config/types';
+import {
+  runJobCheck,
+  applyJobBackoff,
+  recordUnwiredActionRun,
+  sleepIfIdleIfRequested,
+} from './jobRunLifecycle';
 
 /** The tick loop that runs due jobs, holds the `jobs-scheduler` lease, and
  * delivers changes through the coalescing outbox. Deps are injected so the
@@ -21,11 +29,9 @@ import { runJobCheck, applyJobBackoff, sleepIfIdleIfRequested } from './jobRunLi
 export interface JobSchedulerDeps {
   store: JobStore;
   power: PowerControl;
-  /**
-   * The `jobs:` config, read through a getter so a config reload picks up new
-   * `allowed_hosts` / `max_concurrent` without recreating the scheduler.
-   */
+  /** Current `jobs:` config, read fresh on each use. */
   getConfig: () => { allowedHosts: readonly string[]; maxConcurrent: number };
+  getApprovalPolicy?: () => ForgeConfig['approvals'];
   /** The workspace id, for the lease. */
   workspaceId: string;
   /** The extension instance id, for the lease. */
@@ -52,6 +58,8 @@ export interface JobSchedulerDeps {
   llamacpp?: LlamacppActionDeps;
   /** The `agent_task` runner deps (phase 3); absent = the action records a failed run. */
   agentTask?: AgentTaskDeps;
+  /** The `retitle` runner deps; absent = the action records a failed run. */
+  retitle?: RetitleDeps;
 }
 
 const DEFAULT_TICK_MS = 30_000;
@@ -62,17 +70,20 @@ export class JobScheduler {
   private readonly store: JobStore;
   private readonly power: PowerControl;
   private readonly getConfig: () => { allowedHosts: readonly string[]; maxConcurrent: number };
+  private readonly getApprovalPolicy: () => ForgeConfig['approvals'] | undefined;
   private readonly workspaceId: string;
   private readonly instanceId: string;
   private readonly leaseDirectory: string;
   private readonly outboxDir: string;
   private readonly notifyLocal: (text: string) => void;
+  private readonly approvalRuleWarnings: ReturnType<typeof makeApprovalWarnings>;
   private readonly now: () => Date;
   private readonly busy: () => string | undefined;
   private readonly summarize: ((prompt: string) => Promise<string>) | undefined;
   private readonly tickMs: number;
   private readonly llamacpp: LlamacppAction | undefined;
   private readonly agentTask: AgentTaskRunner | undefined;
+  private readonly retitle: RetitleRunner | undefined;
   private gpuGateAbortController = new AbortController();
   private readonly etagCache = new Map<string, string>();
   /** User-facing delivery: the outbox, the toast, and the summarize timing (B.4). */
@@ -100,6 +111,8 @@ export class JobScheduler {
     this.leaseDirectory = deps.leaseDirectory;
     this.outboxDir = deps.outboxDir ?? defaultOutboxDir();
     this.notifyLocal = deps.notifyLocal ?? (() => undefined);
+    this.getApprovalPolicy = deps.getApprovalPolicy ?? (() => undefined);
+    this.approvalRuleWarnings = makeApprovalWarnings(this.getApprovalPolicy, this.notifyLocal);
     this.now = deps.now ?? (() => new Date());
     this.busy = deps.busy ?? (() => undefined);
     this.summarize = deps.summarize;
@@ -130,6 +143,19 @@ export class JobScheduler {
             ? {
                 gpuGate: {
                   ...deps.agentTask.gpuGate,
+                  signal: () => this.gpuGateAbortController.signal,
+                },
+              }
+            : {}),
+        })
+      : undefined;
+    this.retitle = deps.retitle
+      ? new RetitleRunner({
+          ...deps.retitle,
+          ...(deps.retitle.gpuGate
+            ? {
+                gpuGate: {
+                  ...deps.retitle.gpuGate,
                   signal: () => this.gpuGateAbortController.signal,
                 },
               }
@@ -273,6 +299,7 @@ export class JobScheduler {
     }
     const now = this.now();
     const jobs = await this.store.loadAll();
+    this.approvalRuleWarnings.observe(jobs);
     // Every tick, not just at start: a lease taken over from a dead window
     // inherits its stale `task_run` markers.
     const cleared = await this.recoverRuns(jobs);
@@ -308,9 +335,11 @@ export class JobScheduler {
       toRun.push(jobFile);
     }
     for (const jf of jobs) {
-      const pendingAgentTask = jf.state.task_pending && jf.job.action?.kind === 'agent_task';
+      const pendingTask =
+        jf.state.task_pending &&
+        (jf.job.action?.kind === 'agent_task' || jf.job.action?.kind === 'retitle');
       if (!jf.job.enabled || seen.has(jf.job.id) || busy(jf)) continue;
-      if (!pendingAgentTask && !isDue(jf.state, now)) continue;
+      if (!pendingTask && !isDue(jf.state, now)) continue;
       seen.add(jf.job.id);
       toRun.push(jf);
     }
@@ -363,35 +392,35 @@ export class JobScheduler {
       // etag cache may quite correctly report the same observation again, so
       // do not make the pending task pass through the check a second time.
       const result =
-        state.task_pending && job.action?.kind === 'agent_task'
+        state.task_pending && (job.action?.kind === 'agent_task' || job.action?.kind === 'retitle')
           ? {
               observation: state.task_pending_observation ?? state.last_observation,
               changed: true,
-              summary: 'retrying pending agent task',
+              summary: 'retrying pending task',
             }
           : await this.runCheck(jobFile);
-      if (result.changed && job.action?.kind === 'agent_task') {
+      const actionRunner =
+        job.action?.kind === 'agent_task'
+          ? this.agentTask
+          : job.action?.kind === 'retitle'
+            ? this.retitle
+            : undefined;
+      if (result.changed && (job.action?.kind === 'agent_task' || job.action?.kind === 'retitle')) {
         if (!(await this.store.load(job.id))) return;
-        if (this.agentTask) {
+        if (actionRunner) {
           // Started, not awaited: the runner owns the `runningJobs` guard until
           // it ends, so the next tick cannot start a second run (AC11).
           detached = true;
           // Hand over THIS check's observation; the runner saves it on success only.
           const runFile = { job, state: { ...state, last_observation: result.observation } };
-          void this.agentTask.run(runFile, wasLate).finally(() => this.runningJobs.delete(job.id));
+          void actionRunner.run(runFile, wasLate).finally(() => this.runningJobs.delete(job.id));
           return;
         }
-        const error = 'agent_task runner not wired (no host facade or backend pool)';
-        await this.store.appendRun(job.id, {
-          at: now.getTime(),
-          late: wasLate,
-          outcome: 'failed',
-          changed: true,
-          summary: error,
-          error,
-          delivered: 0,
-        });
-        await this.applyBackoff(jobFile, error);
+        const error =
+          job.action.kind === 'agent_task'
+            ? 'agent_task runner not wired (no host facade or backend pool)'
+            : 'retitle runner not wired (no storage folder for this workspace)';
+        await recordUnwiredActionRun(this.store, this.delivery, this.now, jobFile, wasLate, error);
         return;
       }
       if (!(await this.store.load(job.id))) return;
@@ -399,7 +428,11 @@ export class JobScheduler {
       let delivered = change.delivered;
       // Skip the "recovered" line for an agent task: it already reports every
       // failure, so one run must not yield two messages (AC10).
-      if (state.consecutive_failures >= BACKOFF_THRESHOLD && job.action?.kind !== 'agent_task') {
+      if (
+        state.consecutive_failures >= BACKOFF_THRESHOLD &&
+        job.action?.kind !== 'agent_task' &&
+        job.action?.kind !== 'retitle'
+      ) {
         await this.delivery.deliver(
           job,
           `recovered after ${state.consecutive_failures} consecutive failures`,

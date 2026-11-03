@@ -1,4 +1,5 @@
 import * as path from 'path';
+import { createHash } from 'crypto';
 import * as vscode from 'vscode';
 import type { RegisteredTool } from './ToolRegistry';
 import { resolveWorkspaceUri } from '../util/WorkspacePaths';
@@ -12,6 +13,12 @@ import {
   type UnattendedConversationRegistry,
 } from '../sidebar/unattendedConversations';
 import { defaultOutboxDir, writeOutboxItem } from '../jobs/JobOutbox';
+import * as fs from 'fs';
+import { resolveRealWorkspacePath, resolveWorkspacePath } from '../util/WorkspacePaths';
+import { markdownToHtml, localMarkdownImageResolver } from '../documents/markdownToHtml';
+import { writeFileAtomicSync } from '../util/atomicWrite';
+import type { ForgeConfig } from '../config/types';
+import { secretPatternForTaint } from './secretPaths';
 
 type UnattendedOutboxWriter = (
   conversationId: string,
@@ -356,19 +363,33 @@ export function makeReadClipboardTool(): RegisteredTool {
 
 // ── open_url_in_browser ───────────────────────────────────────────────────────
 
-export function makeOpenUrlTool(): RegisteredTool {
+/**
+ * Total inline image bytes a Markdown preview may carry. The PDF export path is
+ * bounded by printHtmlToPdf's 2 MiB HTML cap; a preview has no such cap, so
+ * without a budget of its own a Markdown file of screenshots writes a
+ * hundred-megabyte HTML page that takes minutes to open. 8 MB of data URIs is
+ * about 6 MB of image bytes, well past what reading a document in a browser
+ * needs, and keeps the preview file small enough to open at once.
+ */
+const PREVIEW_IMAGE_BUDGET_BYTES = 8 * 1024 * 1024;
+
+export function makeOpenUrlTool(
+  deps: { getConfig?: () => ForgeConfig; extraRoots?: () => readonly string[] } = {},
+): RegisteredTool {
   return {
     definition: {
       type: 'function',
       function: {
         name: 'open_url_in_browser',
-        description: 'Open a URL in the default external browser.',
+        description:
+          'Open an HTTP(S) URL or a workspace HTML, PDF, or Markdown file in the default browser. Markdown is rendered into a styled preview under .forge/tmp/preview/.',
         parameters: {
           type: 'object',
           properties: {
             url: {
               type: 'string',
-              description: 'URL to open. Must start with https:// or http://.',
+              description:
+                'HTTP(S) URL or workspace-relative/absolute .html, .pdf, .md, or .markdown path.',
             },
           },
           required: ['url'],
@@ -379,13 +400,68 @@ export function makeOpenUrlTool(): RegisteredTool {
     permission: 'read',
     handler: async (args) => {
       const url = args['url'] as string;
-      if (!url.startsWith('https://') && !url.startsWith('http://')) {
-        throw new Error(
-          `open_url_in_browser: URL must start with https:// or http://. Got: ${url}`,
-        );
+      if (url.startsWith('https://') || url.startsWith('http://')) {
+        await vscode.env.openExternal(vscode.Uri.parse(url));
+        return 'Opened.';
       }
-      await vscode.env.openExternal(vscode.Uri.parse(url));
-      return 'Opened.';
+      if (!/^[a-z]:[\\/]/i.test(url) && /^[a-z][a-z0-9+.-]*:/i.test(url))
+        throw new Error(
+          'open_url_in_browser: URL must start with http:// or https://, or be a workspace file path.',
+        );
+      const root = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
+      if (!root) throw new Error('open_url_in_browser: no workspace folder is open.');
+      const roots = deps.extraRoots?.() ?? [];
+      const secret = secretPatternForTaint(url, deps.getConfig?.(), (value) => {
+        try {
+          return resolveWorkspacePath(value, { workspaceRoot: root });
+        } catch {
+          return undefined;
+        }
+      });
+      if (secret)
+        throw new Error(
+          `open_url_in_browser: path matches secret path rule ${secret}; choose a non-secret file.`,
+        );
+      const file = await resolveRealWorkspacePath(url, root, { extraRoots: roots });
+      const extension = path.extname(file).toLowerCase();
+      if (!['.html', '.pdf', '.md', '.markdown'].includes(extension))
+        throw new Error(
+          'open_url_in_browser: workspace paths must end in .html, .pdf, .md, or .markdown.',
+        );
+      let openedPath = file;
+      let omittedNote = '';
+      if (extension === '.md' || extension === '.markdown') {
+        const stat = fs.statSync(file);
+        if (stat.size > 2 * 1024 * 1024)
+          throw new Error('open_url_in_browser: Markdown source exceeds the 2 MiB limit.');
+        const markdown = fs.readFileSync(file, 'utf8');
+        const omittedImages: string[] = [];
+        const html = await markdownToHtml(markdown, {
+          resolveImage: localMarkdownImageResolver(file, root, roots, deps.getConfig),
+          maxImageDataUriBytes: PREVIEW_IMAGE_BUDGET_BYTES,
+          omittedImageReason: 'over the preview image budget',
+          omittedImages,
+        });
+        const previewDir = path.join(root, '.forge', 'tmp', 'preview');
+        const relativeSource = path.relative(root, file).split(path.sep).join('/');
+        const sourceHash = createHash('sha256').update(relativeSource).digest('hex').slice(0, 8);
+        const previewName = `${path.basename(file, extension)}-${sourceHash}.html`;
+        openedPath = await resolveRealWorkspacePath(path.join(previewDir, previewName), root, {
+          allowMissing: true,
+        });
+        fs.mkdirSync(path.dirname(openedPath), { recursive: true });
+        const cutoff = Date.now() - 7 * 24 * 60 * 60 * 1000;
+        for (const entry of fs.readdirSync(previewDir, { withFileTypes: true })) {
+          if (!entry.isFile()) continue;
+          const candidate = path.join(previewDir, entry.name);
+          if (fs.statSync(candidate).mtimeMs < cutoff) fs.unlinkSync(candidate);
+        }
+        writeFileAtomicSync(openedPath, html);
+        if (omittedImages.length)
+          omittedNote = ` Left out of the preview over the image budget: ${omittedImages.join(', ')}.`;
+      }
+      await vscode.env.openExternal(vscode.Uri.file(openedPath));
+      return `Opened ${openedPath}.${omittedNote}`;
     },
   };
 }

@@ -13,6 +13,7 @@ import { probeHealthy } from './HealthCheck';
 import type { ForgeConfig } from '../config/types';
 import type { SharedRuntimeRegistry } from './SharedRuntimeRegistry';
 import type { PoolSlot } from './poolSlots';
+import { ExternalServerBusyError } from './ExternalModelServers';
 import { getLogger } from '../util/logger';
 
 const log = getLogger();
@@ -159,12 +160,49 @@ export async function stopAllSlots(ctx: StopAllContext): Promise<void> {
 }
 
 /**
- * Free every local model AND every other managed external server before a
- * request to one (Strata), so none of them share VRAM — two Strata entries
- * want the same GPUs. Refused, never forced, while a turn or delegation hold
- * in this window is using one; a server busy for another window answers the
- * unload with 409, which surfaces as ExternalServerBusyError. See
- * ExternalModelServers.
+ * `freeVramForExternal` refused because a model it would have to free is in
+ * use in this window. Typed rather than a plain `Error` so the model starter
+ * can report WHICH model is busy (and answer 409) without matching message
+ * text. Distinct from `ExternalServerBusyError` (ExternalModelServers.ts),
+ * which is a remote server's own HTTP 409 answer to an unload POST.
+ */
+export class ExternalBusyError extends Error {
+  constructor(
+    message: string,
+    /** The models that are loaded and in use, in the order they were found. */
+    readonly busyModels: readonly string[],
+  ) {
+    super(message);
+    this.name = 'ExternalBusyError';
+  }
+}
+
+/**
+ * Whether two managed servers want the SAME GPU, i.e. whether one has to be
+ * unloaded before the other is used. `undefined` on either side means that engine
+ * never said which cards it uses, so it is assumed to want them ALL — the behaviour
+ * every config had before the `gpus` field existed, and the safe default: a missing
+ * answer unloads, it never lets two servers share a card. Otherwise the two
+ * overlap only when their device indexes share a value, which is what lets a
+ * coder on the 3060 and production on the 5060s sit side by side.
+ */
+export function gpusOverlap(
+  a: readonly number[] | undefined,
+  b: readonly number[] | undefined,
+): boolean {
+  if (a === undefined || b === undefined) return true;
+  return a.some((gpu) => b.includes(gpu));
+}
+
+/**
+ * Free every local model AND every other managed external server whose GPUs
+ * overlap this one, before a request to it (Strata), so no two of them share VRAM
+ * — two Strata entries want the same cards, while an engine on its own card does
+ * not. Refused, never forced, while a turn or delegation hold in this window is
+ * using one; a server busy for another window answers the unload with 409, which
+ * surfaces as ExternalServerBusyError. The caller passes only the overlapping
+ * servers in `otherExternal` (see `BackendPoolExternal.prepareExternalForRequest`
+ * and `gpusOverlap`). See ExternalModelServers.
  */
 export async function freeVramForExternal(
   external: string,
@@ -178,12 +216,24 @@ export async function freeVramForExternal(
 ): Promise<void> {
   const busy = [...ctx.local, ...ctx.otherExternal].filter((model) => ctx.busy(model));
   if (busy.length) {
-    throw new Error(
+    throw new ExternalBusyError(
       `Cannot load "${external}" beside ${busy.join(', ')}: a turn is running on it. ` +
         'Wait for it to finish or stop it, then retry.',
+      busy,
     );
   }
-  for (const other of ctx.otherExternal) await ctx.unloadExternal(other);
+  for (const other of ctx.otherExternal) {
+    try {
+      await ctx.unloadExternal(other);
+    } catch (error) {
+      // The server itself answered the unload POST with 409 — a request is
+      // running on it that this window cannot see. Same refusal, same shape:
+      // carry the name so the caller does not have to read it out of the text.
+      if (error instanceof ExternalServerBusyError)
+        throw new ExternalBusyError(error.message, [other]);
+      throw error;
+    }
+  }
   if (ctx.local.length) await ctx.stopLocal();
   const freed = [...ctx.local, ...ctx.otherExternal];
   if (freed.length) log.info(`[BackendPool] freed ${freed.join(', ')} for "${external}"`);

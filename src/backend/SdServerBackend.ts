@@ -3,15 +3,22 @@ import * as path from 'path';
 import * as vscode from 'vscode';
 import type { SdcppImageBackendConfig } from '../config/types';
 import { touchAdoptedSdServerRecord } from './sdServerAdoption';
-import { composeSdServerArgs, sdServerSignature } from './sdServerArgs';
+import { composeSdServerArgs, sdServerBaseUrl, sdServerSignature } from './sdServerArgs';
 import { spawnLlamaServer, killLlamaProcess } from './llamaProcess';
 import { createSdServerRecord, reconcileSdServerRecord } from './sdServerReconciliation';
+import {
+  createSdServerIdleStopPolicy,
+  startSdServerOrphanMonitor,
+  type SdServerIdleStopPolicy,
+} from './sdServerIdle';
 import { verifyConfiguredPaths } from './sdServerPaths';
 import { isConnectionRefused, SdServerReadiness } from './sdServerReadiness';
+import { acquireMediaGpuLease, type MediaGpuLeaseHandle } from '../media/mediaGpuLease';
 import {
   deleteSdServerRecord,
   lookupWindowsProcess,
   readSdServerRecord,
+  sameServer,
   sdServerRecordPath,
   terminateWindowsProcessTree,
   writeSdServerRecord,
@@ -40,6 +47,7 @@ export interface SdServerBackendDeps {
   now?: () => number;
   recordDir?: string;
   ownerPid?: number;
+  acquireMediaGpuLease?: typeof acquireMediaGpuLease;
 }
 
 export class SdServerBackend {
@@ -50,16 +58,17 @@ export class SdServerBackend {
   private readonly killProcess: (proc: ChildProcess) => Promise<void>;
   private readonly now: () => number;
   private readonly ownerPid: number;
+  private readonly acquireMediaLease: typeof acquireMediaGpuLease;
   private proc: ChildProcess | null = null;
   private ready = false;
   private adopted = false;
   private disposed = false;
   private startPromise: Promise<void> | null = null;
   private startAbort: AbortController | null = null;
-  private idleTimer: ReturnType<typeof setTimeout> | null = null;
-  private activeUses = 0;
-  private lastLocalUseAt = 0;
+  private readonly idlePolicy: SdServerIdleStopPolicy;
+  private readonly orphanMonitor: { dispose: () => void };
   private record: SdServerOwnerRecord | null = null;
+  private mediaLease: MediaGpuLeaseHandle | null = null;
   private output: vscode.OutputChannel | null = null;
   private readonly recordPath: string;
 
@@ -74,6 +83,7 @@ export class SdServerBackend {
     this.killProcess = deps.killProcess ?? killLlamaProcess;
     this.now = deps.now ?? Date.now;
     this.ownerPid = deps.ownerPid ?? process.pid;
+    this.acquireMediaLease = deps.acquireMediaGpuLease ?? acquireMediaGpuLease;
     const directory =
       deps.recordDir ??
       (process.env['LOCALAPPDATA']
@@ -85,10 +95,33 @@ export class SdServerBackend {
       );
     }
     this.recordPath = sdServerRecordPath(directory, config.name);
+    this.orphanMonitor = startSdServerOrphanMonitor({
+      config,
+      recordPath: this.recordPath,
+      fetchImpl: this.fetchImpl,
+      lookupProcess: this.lookupProcess,
+      terminateProcess: this.terminateProcess,
+      now: this.now,
+    });
+    this.idlePolicy = createSdServerIdleStopPolicy({
+      idleTimeoutMs: config.idle_timeout_ms,
+      recordPath: this.recordPath,
+      now: this.now,
+      facts: () => ({
+        ownsProcess: Boolean(this.proc) && !this.adopted,
+        ready: this.ready,
+        disposed: this.disposed,
+      }),
+      readCurrentRecord: () =>
+        readSdServerRecord(this.recordPath, (message) => this.output?.appendLine(message)),
+      ownedRecord: () => this.record,
+      stopOwnedProcess: () => this.stopOwnedProcess(),
+      log: (line) => this.output?.appendLine(line),
+    });
   }
 
   baseUrl(): string {
-    return `http://127.0.0.1:${this.config.port}`;
+    return sdServerBaseUrl(this.config);
   }
 
   /** Approval copy for the caller that wires this backend in Phase 2. */
@@ -126,9 +159,7 @@ export class SdServerBackend {
   }
 
   async withActivity<T>(operation: () => Promise<T>, options: SdStartOptions = {}): Promise<T> {
-    this.activeUses++;
-    this.lastLocalUseAt = this.now();
-    this.clearIdleTimer();
+    this.idlePolicy.useStarted();
     try {
       await this.start(options);
       if (this.adopted) {
@@ -159,9 +190,7 @@ export class SdServerBackend {
           `[Forge] Could not record last use on the adopted sd-server: ${errorMessage(error)}`,
         );
       } finally {
-        this.lastLocalUseAt = this.now();
-        this.activeUses--;
-        this.scheduleIdleStop();
+        this.idlePolicy.useFinished();
       }
     }
   }
@@ -169,7 +198,8 @@ export class SdServerBackend {
   async dispose(): Promise<void> {
     if (this.disposed) return;
     this.disposed = true;
-    this.clearIdleTimer();
+    this.idlePolicy.clear();
+    this.orphanMonitor.dispose();
     this.startAbort?.abort();
     this.startAbort = null;
     try {
@@ -190,7 +220,7 @@ export class SdServerBackend {
    * has a render in flight. Returns the sentence the tool reports back.
    */
   async stopAfterAbort(): Promise<string> {
-    this.clearIdleTimer();
+    this.idlePolicy.clear();
     const idleMinutes = Math.ceil(this.config.idle_timeout_ms / 60_000);
     if (this.adopted) {
       return (
@@ -218,7 +248,7 @@ export class SdServerBackend {
   }
 
   private async startInternal(options: SdStartOptions): Promise<void> {
-    await this.verifyConfiguredPaths();
+    await verifyConfiguredPaths(this.config);
     this.output ??= vscode.window.createOutputChannel('Forge - image server');
     const readiness = new SdServerReadiness(
       this.fetchImpl,
@@ -251,6 +281,12 @@ export class SdServerBackend {
     }
 
     await options.beforeSpawn?.();
+    if (this.config.media_gpu_lease_enabled) {
+      this.mediaLease = await this.acquireMediaLease(
+        `sd-server:${this.config.name}`,
+        this.config.cuda_device,
+      );
+    }
     const args = composeSdServerArgs(this.config);
     const binary = this.config.binary;
     const processEnv = {
@@ -267,6 +303,7 @@ export class SdServerBackend {
       child = this.spawn(binary, args, processEnv);
     } catch (error) {
       this.startAbort = null;
+      await this.releaseMediaLease();
       throw new Error(
         `image_generation.backends.${this.config.name}.binary "${binary}" could not be started: ` +
           `${errorMessage(error)}. Verify the executable path and its Windows dependencies.`,
@@ -288,11 +325,18 @@ export class SdServerBackend {
         now: this.now,
         ownerPid: this.ownerPid,
       });
+      // The lease must name the server, not this window: a force-killed window
+      // leaves this child running with its VRAM, and a lease naming a dead pid
+      // reads as stale to every other taker, which then renders on a busy GPU.
+      // A failed transfer is fatal here, through the catch below: the child is
+      // stopped and the lease released, never a silent fallback to a stale lease.
+      const mediaLease = this.mediaLease;
+      if (mediaLease) await mediaLease.transfer(this.record.pid, this.record.pidCreatedAt);
       await writeSdServerRecord(this.recordPath, this.record);
       await readiness.waitUntilReady(child, startAbort.signal);
       this.ready = true;
       this.adopted = false;
-      this.scheduleIdleStop();
+      this.idlePolicy.schedule();
     } catch (error) {
       const failure = new Error(
         `image_generation.backends.${this.config.name}.binary "${binary}": ` +
@@ -338,50 +382,8 @@ export class SdServerBackend {
     return true;
   }
 
-  private async verifyConfiguredPaths(): Promise<void> {
-    await verifyConfiguredPaths(this.config);
-  }
-
-  private scheduleIdleStop(): void {
-    this.clearIdleTimer();
-    if (!this.proc || this.adopted || !this.ready || this.activeUses > 0 || this.disposed) return;
-    if (this.lastLocalUseAt === 0) this.lastLocalUseAt = this.now();
-    const localDeadline = this.lastLocalUseAt + this.config.idle_timeout_ms;
-    this.armIdleTimer(Math.max(0, localDeadline - this.now()));
-  }
-
-  private armIdleTimer(wait: number): void {
-    this.idleTimer = setTimeout(() => {
-      this.idleTimer = null;
-      void this.stopWhenIdle().catch((error: unknown) => {
-        this.output?.appendLine(`[Forge] Could not stop idle sd-server: ${errorMessage(error)}`);
-      });
-    }, wait);
-  }
-
-  private async stopWhenIdle(): Promise<void> {
-    if (this.activeUses > 0 || !this.proc || this.adopted) return;
-    const record = await readSdServerRecord(this.recordPath, (message) =>
-      this.output?.appendLine(message),
-    );
-    if (record && this.record) {
-      if (!sameServer(record, this.record)) {
-        throw new Error(
-          `sd-server owner record "${this.recordPath}" changed process identity while idle; ` +
-            'the running server was left untouched.',
-        );
-      }
-      const sharedDeadline = record.lastUsedAt + this.config.idle_timeout_ms;
-      if (sharedDeadline > this.now()) {
-        this.armIdleTimer(sharedDeadline - this.now());
-        return;
-      }
-    }
-    await this.stopOwnedProcess();
-  }
-
   private async stopOwnedProcess(): Promise<void> {
-    this.clearIdleTimer();
+    this.idlePolicy.clear();
     this.startAbort?.abort();
     this.startAbort = null;
     const child = this.proc;
@@ -396,18 +398,22 @@ export class SdServerBackend {
       this.ready = wasReady;
       throw error;
     }
-    const ownedRecord = this.record;
-    this.record = null;
-    const currentRecord = await readSdServerRecord(this.recordPath, (message) =>
-      this.output?.appendLine(message),
-    );
-    if (currentRecord && ownedRecord && !sameServer(currentRecord, ownedRecord)) {
-      throw new Error(
-        `sd-server stopped, but owner record "${this.recordPath}" now describes another process; ` +
-          'that record was preserved.',
+    try {
+      const ownedRecord = this.record;
+      this.record = null;
+      const currentRecord = await readSdServerRecord(this.recordPath, (message) =>
+        this.output?.appendLine(message),
       );
+      if (currentRecord && ownedRecord && !sameServer(currentRecord, ownedRecord)) {
+        throw new Error(
+          `sd-server stopped, but owner record "${this.recordPath}" now describes another process; ` +
+            'that record was preserved.',
+        );
+      }
+      if (currentRecord) await deleteSdServerRecord(this.recordPath);
+    } finally {
+      await this.releaseMediaLease();
     }
-    if (currentRecord) await deleteSdServerRecord(this.recordPath);
   }
 
   private async handleProcessExit(
@@ -418,13 +424,21 @@ export class SdServerBackend {
     if (this.proc !== child || this.adopted) return;
     this.proc = null;
     this.ready = false;
-    this.clearIdleTimer();
+    this.idlePolicy.clear();
     const exitedRecord = this.record;
     this.record = null;
     this.output?.appendLine(
       `[Forge] sd-server exited (${signal ? `signal ${signal}` : `code ${code ?? 'unknown'}`}); ` +
         'the next activity will attempt a restart.',
     );
+    try {
+      await this.releaseMediaLease();
+    } finally {
+      await this.cleanupExitedRecord(exitedRecord);
+    }
+  }
+
+  private async cleanupExitedRecord(exitedRecord: SdServerOwnerRecord | null): Promise<void> {
     if (!exitedRecord) return;
     const current = await readSdServerRecord(this.recordPath, (message) =>
       this.output?.appendLine(message),
@@ -438,17 +452,18 @@ export class SdServerBackend {
     await deleteSdServerRecord(this.recordPath);
   }
 
-  private clearIdleTimer(): void {
-    if (this.idleTimer) clearTimeout(this.idleTimer);
-    this.idleTimer = null;
+  private async releaseMediaLease(): Promise<void> {
+    const lease = this.mediaLease;
+    if (!lease) return;
+    try {
+      await lease.release();
+      this.mediaLease = null;
+    } catch (error) {
+      this.output?.appendLine(`[Forge] Could not release media GPU lease: ${errorMessage(error)}`);
+    }
   }
 }
 
 function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
-}
-
-/** Same server process under the same config: pid + creation time + signature. */
-function sameServer(a: SdServerOwnerRecord, b: SdServerOwnerRecord): boolean {
-  return a.pid === b.pid && a.pidCreatedAt === b.pidCreatedAt && a.signature === b.signature;
 }

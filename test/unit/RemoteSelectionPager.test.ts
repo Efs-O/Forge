@@ -252,9 +252,7 @@ describe('remote selection pagination', () => {
     });
     expect(channel.selectionPageSends[0]!.controls).toMatchObject({ kind: 'models' });
 
-    await expect(
-      handleRemoteCommand(textEvent('/select'), ctx, 'bare-select'),
-    ).resolves.toEqual({
+    await expect(handleRemoteCommand(textEvent('/select'), ctx, 'bare-select')).resolves.toEqual({
       kind: 'rejected',
       reason: 'usage: /chat <number-or-name>; /chats lists and numbers them',
     });
@@ -301,7 +299,9 @@ describe('remote selection pagination', () => {
       ctx.host as unknown as { restoreConversation: typeof restoreConversation }
     ).restoreConversation = restoreConversation;
 
-    await expect(handleRemoteCommand(textEvent('/chat 2'), ctx, 'chat-without-list')).resolves.toEqual({
+    await expect(
+      handleRemoteCommand(textEvent('/chat 2'), ctx, 'chat-without-list'),
+    ).resolves.toEqual({
       kind: 'handled',
     });
     expect(restoreConversation).toHaveBeenCalledWith('conversation-2', { activate: false });
@@ -475,9 +475,9 @@ describe('remote selection pagination', () => {
 
     // A number past the end of the list still cannot be a model, so it is
     // rejected rather than silently pinned to the wrong entry.
-    await expect(handleRemoteCommand(textEvent('/model 4'), handlerCtx, 'model-four')).resolves.toEqual(
-      { kind: 'rejected', reason: 'model is unavailable; use /models' },
-    );
+    await expect(
+      handleRemoteCommand(textEvent('/model 4'), handlerCtx, 'model-four'),
+    ).resolves.toEqual({ kind: 'rejected', reason: 'model is unavailable; use /models' });
   });
 
   it('uses a second profile choice before pinning a numbered model', async () => {
@@ -485,9 +485,7 @@ describe('remote selection pagination', () => {
     const channel = new FakeRemoteChannel();
     const ctx: RemoteSelectionContext = {
       ...context(channel, store, 0),
-      modelEntries: [
-        { name: 'qwen', group: 'Local — llama.cpp', profiles: ['main', 'audit'] },
-      ],
+      modelEntries: [{ name: 'qwen', group: 'Local — llama.cpp', profiles: ['main', 'audit'] }],
     };
     await store.setBinding({
       channel: 'fake',
@@ -496,8 +494,9 @@ describe('remote selection pagination', () => {
       conversationId: 'conversation-1',
     });
     const setConversationModel = vi.fn(async () => undefined);
-    (ctx.host as unknown as { setConversationModel: typeof setConversationModel }).setConversationModel =
-      setConversationModel;
+    (
+      ctx.host as unknown as { setConversationModel: typeof setConversationModel }
+    ).setConversationModel = setConversationModel;
     const handlerCtx = {
       ...ctx,
       workspaceId: 'workspace',
@@ -505,9 +504,9 @@ describe('remote selection pagination', () => {
       rateLimitPerMinute: 30,
     };
 
-    await expect(handleRemoteCommand(textEvent('/model 1'), handlerCtx, 'profile-step-one')).resolves.toEqual(
-      { kind: 'handled' },
-    );
+    await expect(
+      handleRemoteCommand(textEvent('/model 1'), handlerCtx, 'profile-step-one'),
+    ).resolves.toEqual({ kind: 'handled' });
     expect(setConversationModel).not.toHaveBeenCalled();
     expect(channel.selectionChoiceSends[0]?.choices.map((choice) => choice.label)).toEqual([
       '@main',
@@ -552,9 +551,7 @@ describe('remote selection pagination', () => {
     });
 
     const page = channel.selectionPageSends[0]!;
-    expect(page.text.indexOf('Local — llama.cpp')).toBeLessThan(
-      page.text.indexOf('Ollama Cloud'),
-    );
+    expect(page.text.indexOf('Local — llama.cpp')).toBeLessThan(page.text.indexOf('Ollama Cloud'));
     expect(page.text.indexOf('Ollama Cloud')).toBeLessThan(page.text.indexOf('OpenAI'));
     // A blank line before every group but the first, and no markup: this
     // channel declares no HTML support, so the page stays literal text.
@@ -600,9 +597,7 @@ describe('remote selection pagination', () => {
     const channel = new FakeRemoteChannel();
     const ctx: RemoteSelectionContext = {
       ...context(channel, store, 0),
-      modelEntries: [
-        { name: 'qwen', group: 'Local — llama.cpp', profiles: ['audit'] },
-      ],
+      modelEntries: [{ name: 'qwen', group: 'Local — llama.cpp', profiles: ['audit'] }],
     };
 
     await expect(sendModelSelection(textEvent('/models'), ctx)).resolves.toEqual({
@@ -717,7 +712,9 @@ describe('remote selection pagination', () => {
     await expect(sendConversationSelection(textEvent('/chats'), withName)).resolves.toEqual({
       kind: 'handled',
     });
-    expect(channel.selectionPageSends[0]!.text).toContain('Workspace: Forge · tap a number to open');
+    expect(channel.selectionPageSends[0]!.text).toContain(
+      'Workspace: Forge · tap a number to open',
+    );
 
     // The button footer states the field that is unavailable rather than
     // hiding the picker affordance.
@@ -843,8 +840,27 @@ describe('remote selection pagination', () => {
       });
       expect(switchWorkspace).not.toHaveBeenCalled();
 
+      // Phase 2c: an idle switch is a question now, not an automatic `replace`.
+      // The number still resolves to the alias the owner is actually reading —
+      // which is what this test exists to prove — and the move happens when the
+      // keyboard is answered, in the mode that was answered.
       await expect(channel.emit(textEvent('/workspace 2'))).resolves.toEqual({ kind: 'handled' });
-      expect(switchWorkspace).toHaveBeenCalledWith('qwen', 'fake', 'chat');
+      expect(switchWorkspace).not.toHaveBeenCalled();
+      const keyboard = channel.selectionChoiceSends.at(-1)!;
+      expect(keyboard.text).toContain('Qwen Testing');
+      expect(keyboard.controls.kind).toBe('workspaces');
+      await expect(
+        channel.emit(
+          selectionEvent(keyboard.controls.token, {
+            providerMessageId: 'tap-replace',
+            selectionKind: 'workspaces',
+            action: 'select',
+            page: undefined,
+            choice: 0,
+          }),
+        ),
+      ).resolves.toEqual({ kind: 'handled' });
+      expect(switchWorkspace).toHaveBeenCalledWith('qwen', 'fake', 'chat', 'replace');
     } finally {
       await controller.stop();
     }

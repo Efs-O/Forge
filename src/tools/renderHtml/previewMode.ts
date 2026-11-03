@@ -42,6 +42,9 @@ export interface PreviewOptions {
   /** Launch + load + screenshot budget; the settle wait is added on top. */
   baseTimeoutMs: number;
   now: () => number;
+  /** May the page's scripts reach this host without a card? See
+   *  `previewRenderer.ts`'s `PreviewRequest.hostAllowed`. */
+  hostAllowed: (host: string) => boolean;
 }
 
 export async function runPreview(
@@ -82,6 +85,7 @@ export async function runPreview(
       timeoutMs: options.baseTimeoutMs + waitMs + keys.reduce((sum, k) => sum + k.holdMs, 0),
       frames,
       keys,
+      hostAllowed: options.hostAllowed,
     },
     context?.abortSignal,
   );

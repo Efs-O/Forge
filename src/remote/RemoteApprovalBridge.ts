@@ -8,6 +8,7 @@ import type { CommandCleanupScheduler } from './CommandCleanupScheduler';
 import type { RemoteAuth } from './RemoteAuth';
 import type { RemoteRequestStore } from './RemoteRequestStore';
 import type { RemoteChannel, RemoteInboundEvent } from './types';
+import type { RemoteWaitFooter } from './RemoteAgentProgress';
 import type { PendingGate } from '../voice/VoiceGrammar';
 import { escapeTelegramHtml } from './telegramHtml';
 import { codePointLength } from '../util/codePoints';
@@ -30,6 +31,13 @@ interface RemoteApprovalEntry {
    * prompt leaves a live Approve button behind.
    */
   keyboardMessageIds?: string[];
+  /**
+   * The "only you can answer this" line has been sent for this gate. Written
+   * before the send, so the two paths that can raise it -- a `requested` for a
+   * card that opens already waiting, and the `waitingForOwner` sink -- cannot
+   * both post it, whichever one arrives first.
+   */
+  waitingNoticeSent?: boolean;
   /** When the gate opened. Half of the §22A R1 recording-window rule. */
   openedAt: number;
 }
@@ -67,6 +75,13 @@ export class RemoteApprovalBridge {
     resolvedAt: number;
   }> = [];
   private subscription: { dispose(): void } | undefined;
+  /**
+   * Who owns the turn's `Forge: working…` line, so a card the owner has to
+   * answer can take it off the bubble above the Approve/Deny row and put it
+   * back below the decision receipt. `start()` sets it; without it (a rig, or a
+   * transport with no progress bubble) the bridge changes nothing about the chat.
+   */
+  private workingLine: RemoteWaitFooter | undefined;
 
   constructor(
     private readonly channel: RemoteChannel,
@@ -80,10 +95,20 @@ export class RemoteApprovalBridge {
     private readonly cleanup?: CommandCleanupScheduler,
   ) {}
 
-  start(): void {
+  /**
+   * Starts rendering gates, and takes the owner of the turn's working line.
+   *
+   * An approval card is an owner wait like a question board: the turn stops
+   * until somebody answers it, and the card lands below the bubble carrying
+   * `Forge: working…`, so that line would sit above the Approve/Deny row and
+   * only ever be edited in place afterwards.
+   */
+  start(workingLine: RemoteWaitFooter): void {
+    this.workingLine = workingLine;
     this.subscription = this.host.addApprovalSink({
       requested: (event) => this.onRequested(event),
       resolved: (event) => this.onResolved(event),
+      waitingForOwner: (event) => this.onWaitingForOwner(event),
     });
   }
 
@@ -113,7 +138,16 @@ export class RemoteApprovalBridge {
       return false;
     }
     pending.resolving = true;
-    this.host.resolveApproval(pending.event.id, event.action === 'approve');
+    this.host.resolveApproval(
+      pending.event.id,
+      event.action === 'approve'
+        ? 'approve'
+        : event.action === 'deny'
+          ? 'decline'
+          : event.action === 'allow_chat'
+            ? 'allowChat'
+            : 'alwaysProject',
+    );
     return true;
   }
 
@@ -163,7 +197,7 @@ export class RemoteApprovalBridge {
       return false;
     }
     pending.resolving = true;
-    this.host.resolveApproval(pending.event.id, approve);
+    this.host.resolveApproval(pending.event.id, approve ? 'approve' : 'decline');
     return true;
   }
 
@@ -177,8 +211,44 @@ export class RemoteApprovalBridge {
     if (!event.conversationId) return;
     const chatId = this.chatFor(event.conversationId);
     if (!chatId) return;
+    const existing = this.approvals.get(event.id);
+    if (existing && !existing.resolving) {
+      // The same gate, re-announced because nobody but the owner can answer it
+      // now. Keep the entry -- its openedAt is half of the §22A R1 recording
+      // window, and its keyboardMessageIds are the only memory of every
+      // Approve button this gate has ever put up. A fresh entry would forget
+      // them and leave the older buttons live for a decision already made.
+      existing.event = event;
+      // A re-announce that says only the owner can answer it gets one plain
+      // line, not a second card. The card it was re-posting is still on screen
+      // with its Approve/Deny row live, so a second card would be a second
+      // keyboard for one decision -- and the "Waiting for you." sentence has
+      // to come from outside the detail, which is the part a long card gets
+      // clipped to the transport's limit first.
+      if (event.waitingForOwner) {
+        void this.publishWaitingForOwner(event.id);
+        return;
+      }
+      void this.publish(event.id);
+      return;
+    }
     this.approvals.set(event.id, { chatId, event, openedAt: Date.now() });
     void this.publish(event.id);
+  }
+
+  /**
+   * The gate is waiting for a person, and for nothing else: the card is one
+   *  no automated answer is allowed for.
+   *
+   * `requested` fires first in both cases, and for a card that opens already
+   * waiting it carries the same flag, so the card and this line come out of
+   * one entry and `waitingNoticeSent` makes the line exactly-once whichever of
+   * the two paths raises it. No entry means no chat was ever asked about this
+   * gate, so there is nobody to tell.
+   */
+  private onWaitingForOwner(event: ToolApprovalRequestEvent): void {
+    if (!this.approvals.get(event.id)) return;
+    void this.publishWaitingForOwner(event.id);
   }
 
   /**
@@ -212,7 +282,19 @@ export class RemoteApprovalBridge {
       openedAt: pending.openedAt,
       resolvedAt: Date.now(),
     });
-    void this.publishResolution(pending, event);
+    // The receipt for the decision goes first, then the working line reopens
+    // below it: it has to be the last thing on screen, not between the card and
+    // its receipt.
+    void this.publishResolution(pending, event)
+      .then(() => {
+        if (pending.event.conversationId)
+          this.workingLine?.resumeFooter(pending.event.conversationId);
+      })
+      .catch((err: unknown) =>
+        this.onError?.(
+          `Forge remote approval resolution failed: ${err instanceof Error ? err.message : String(err)}`,
+        ),
+      );
   }
 
   private async publish(id: string): Promise<void> {
@@ -233,6 +315,8 @@ export class RemoteApprovalBridge {
         ),
         {
           correlationId: pending.actionId,
+          ...(pending.event.allowForChat ? { approvalAllowChat: true } : {}),
+          ...(pending.event.alwaysInProject ? { approvalAlwaysInProject: true } : {}),
           signal: this.signal,
           ...(this.channel.parseMode ? { parseMode: this.channel.parseMode } : {}),
         },
@@ -242,10 +326,42 @@ export class RemoteApprovalBridge {
         pending.messageIds = [...(pending.messageIds ?? []), ...sent];
         // Only the first chunk of a send carries the keyboard.
         if (sent[0]) pending.keyboardMessageIds = [...(pending.keyboardMessageIds ?? []), sent[0]];
+        // The card is on screen and the turn is stopped on it: the working line
+        // above it has to come off, and reopen below the decision receipt.
+        if (pending.event.conversationId)
+          this.workingLine?.suspendFooter(pending.event.conversationId);
       }
     } catch (err) {
       this.onError?.(
         `Forge remote approval delivery failed: ${err instanceof Error ? err.message : String(err)}`,
+      );
+    }
+  }
+
+  /**
+   * The one message for a gate only the owner can answer: a plain line, with no
+   * keyboard of its own, sent at most once per gate.
+   *
+   * No `correlationId` is what keeps it from being a second decision surface --
+   * the transport hangs an Approve/Deny row on any message that carries one --
+   * so the card this gate already put up stays the thing the owner answers, and
+   * `resolveAction` still matches the actionId that card was sent with.
+   */
+  private async publishWaitingForOwner(id: string): Promise<void> {
+    const pending = this.approvals.get(id);
+    if (!pending || pending.resolving || pending.waitingNoticeSent) return;
+    pending.waitingNoticeSent = true;
+    if (!(await this.auth.canDeliver(this.channel.name, pending.chatId))) return;
+    try {
+      const sent = await this.channel.send(pending.chatId, waitingForOwnerLine(pending.event), {
+        signal: this.signal,
+      });
+      // A spoken "approve" answering this line names the gate it is answering,
+      // exactly as one answering the card does.
+      if (sent) pending.messageIds = [...(pending.messageIds ?? []), ...sent];
+    } catch (err) {
+      this.onError?.(
+        `Forge remote approval notice failed: ${err instanceof Error ? err.message : String(err)}`,
       );
     }
   }
@@ -269,6 +385,12 @@ export class RemoteApprovalBridge {
           event.approved,
           { signal: this.signal },
           event.reason === 'timeout' ? 'timeout' : undefined,
+          // The button a card keeps has to name the choice that was made: the
+          // bridge already knows it (it routed the tap at `resolveAction` and
+          // words the receipt below with the same field), so leaving it out
+          // would make `Allow for this chat` and `Approve` look identical on
+          // the one message still on screen afterwards.
+          event.decision,
         );
       } catch (err) {
         this.onError?.(
@@ -288,7 +410,21 @@ export class RemoteApprovalBridge {
     try {
       const sent = await this.channel.send(
         pending.chatId,
-        `Forge approval ${event.approved ? 'approved' : 'denied'} (${event.reason}).`,
+        event.approvalNotice
+          ? event.approvalNotice
+          : event.decision === 'allowChat'
+            ? 'Forge approval allowed for this chat (' +
+              (pending.event.allowForChat?.label ?? 'the offered rules') +
+              ').'
+            : event.decision === 'alwaysProject'
+              ? 'Forge approval always allowed in this project (' +
+                (pending.event.alwaysInProject?.label ?? 'the offered rules') +
+                ').'
+              : 'Forge approval ' +
+                (event.approved ? 'approved' : 'denied') +
+                ' (' +
+                event.reason +
+                ').',
         { signal: this.signal },
       );
       // An approval is a receipt for what the user just did; a denial changes
@@ -302,19 +438,53 @@ export class RemoteApprovalBridge {
   }
 }
 
+/**
+ * The line a phone gets when nobody but the owner can answer this gate.
+ *
+ * Short, plain, and outside the card's detail: the detail is where the causes
+ * are written, and it is also the part the transport clips first, so a sentence
+ * inside it is the first thing an owner with a long card stops seeing. This one
+ * cannot be clipped, and it says what the owner has to do and where.
+ */
+function waitingForOwnerLine(event: ToolApprovalRequestEvent): string {
+  return (
+    `Forge approval ${event.toolName} is waiting for you: nothing but your answer ` +
+    'settles it. Approve or Deny it here, or from the Forge sidebar.'
+  );
+}
+
 function formatApprovalPrompt(
   event: ToolApprovalRequestEvent,
   maximum: number,
   telegramHtml: boolean,
 ): string {
   const danger = event.dangerous ? ' DANGEROUS' : '';
-  const plain = `Forge approval${danger}: ${event.toolName}\n${event.detail}`;
-  if (!telegramHtml) return plain.slice(0, maximum);
+  const offerLine = event.allowForChat
+    ? '\nAllow for this chat covers: ' + event.allowForChat.label + '.'
+    : '';
+  const alwaysLine = event.alwaysInProject
+    ? '\nAlways in this project covers: ' + event.alwaysInProject.label + '.'
+    : '';
+  const fullOfferLine = offerLine + alwaysLine;
+  const plainPrefix = 'Forge approval' + danger + ': ' + event.toolName + '\n';
+  if (!telegramHtml) {
+    const budget = Math.max(
+      0,
+      maximum - codePointLength(plainPrefix) - codePointLength(fullOfferLine),
+    );
+    let detail = '';
+    for (const character of event.detail) {
+      if (codePointLength(detail) + codePointLength(character) > budget) break;
+      detail += character;
+    }
+    return plainPrefix + detail + fullOfferLine;
+  }
   const heading = event.dangerous
     ? `<b>⚠ Dangerous: ${escapeTelegramHtml(event.toolName)}</b>`
     : `<b>Approve ${escapeTelegramHtml(event.toolName)}?</b>`;
   const prefix = `${heading}\n<pre>`;
-  const suffix = '</pre>';
+  const suffix =
+    '</pre>' + (fullOfferLine ? '\n' + escapeTelegramHtml(fullOfferLine.slice(1)) : '');
   const budget = Math.max(0, maximum - codePointLength(prefix) - codePointLength(suffix));
   let detail = '';
   let escapedLength = 0;

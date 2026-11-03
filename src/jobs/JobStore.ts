@@ -68,6 +68,7 @@ export class JobStore {
   private watcher: fs.FSWatcher | undefined;
   private watchDebounce: ReturnType<typeof setTimeout> | undefined;
   private onChangeCallback: (() => void) | undefined;
+  private readonly localChangeListeners = new Set<() => void>();
   private readonly deletedJobs = new Set<string>();
 
   constructor(jobsRoot?: string) {
@@ -183,11 +184,37 @@ export class JobStore {
     return { job: result.data, state };
   }
 
+  /**
+   * Subscribe to successful durable writes made in this process. Returns an
+   * unsubscribe function. Independent of `watch()` (the scheduler's): adding
+   * a listener here never replaces or consumes the single `watch()` callback,
+   * so the panel and the scheduler can both follow the same store. Cross-
+   * window changes arrive through the panel's own `fs.watch`, not here.
+   */
+  addLocalChangeListener(onChange: () => void): () => void {
+    this.localChangeListeners.add(onChange);
+    return () => {
+      this.localChangeListeners.delete(onChange);
+    };
+  }
+
+  /** A listener must never break the write that triggered it. */
+  private notifyLocalChange(): void {
+    for (const listener of [...this.localChangeListeners]) {
+      try {
+        listener();
+      } catch {
+        // ignore: the write already succeeded
+      }
+    }
+  }
+
   /** Save a job's definition atomically. */
   async saveJob(job: Job): Promise<void> {
     await this.ensureDirs();
     this.deletedJobs.delete(job.id);
     writeFileAtomicSync(path.join(this.jobsDir, `${job.id}.json`), JSON.stringify(job, null, 2));
+    this.notifyLocalChange();
   }
 
   /**
@@ -213,6 +240,7 @@ export class JobStore {
     await this.ensureDirs();
     JobStateSchema.parse(state);
     writeFileAtomicSync(path.join(this.stateDir, `${id}.json`), JSON.stringify(state, null, 2));
+    this.notifyLocalChange();
   }
 
   /**
@@ -247,6 +275,7 @@ export class JobStore {
     }
     const next = JobStateSchema.parse({ ...current, ...patch });
     writeFileAtomicSync(full, `${JSON.stringify(next, null, 2)}\n`);
+    this.notifyLocalChange();
   }
 
   /** Read a job's state, or a default when the file is absent. */
@@ -310,6 +339,7 @@ export class JobStore {
     await removeConfigBackup(this.stateDir, id);
     clearStaged(this.jobsDir, id);
     await deleteOutboxItem(this.outboxDir, id);
+    this.notifyLocalChange();
   }
 
   /**
@@ -329,6 +359,7 @@ export class JobStore {
     } finally {
       await handle.close();
     }
+    this.notifyLocalChange();
   }
 
   /** Read the run log for a job, oldest first. Empty when no runs yet. */

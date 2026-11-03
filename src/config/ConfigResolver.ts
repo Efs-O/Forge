@@ -54,17 +54,23 @@ export function splitModelProfile(id: string): { base: string; profile?: string 
 }
 
 /** If `id`'s base matches an alias key, return the alias target. An explicit
- *  `@profile` on the input overrides the profile baked into the alias target. */
+ *  `@profile` on the input overrides the profile baked into the alias target.
+ *
+ *  A target whose model has been deleted is NOT followed: `id` comes back
+ *  unchanged, so the alias key reaches `resolveModelName`, which reports
+ *  "alias `k` points to removed model `X`" where the user can read it. Following
+ *  a dangling alias here would hand every caller (pool key, spawn lookup,
+ *  control server, the sidebar) a model name that exists nowhere, and the
+ *  failure would read as a broken model rather than as stale config. */
 export function expandAlias(config: ForgeConfig, id: string, log?: (msg: string) => void): string {
   const aliases = config.aliases ?? {};
   const { base, profile } = splitModelProfile(id);
   const target = aliases[base];
   if (!target) return id;
+  const { base: targetBase } = splitModelProfile(target);
+  if (!config.models.some((model) => model.name === targetBase)) return id;
   log?.(`F6: alias "${base}" → "${target}" (migrate config to the new model@profile form)`);
-  if (profile) {
-    const targetBase = splitModelProfile(target).base;
-    return `${targetBase}@${profile}`;
-  }
+  if (profile) return `${targetBase}@${profile}`;
   return target;
 }
 
@@ -89,7 +95,18 @@ export function resolveModelName(config: ForgeConfig, query: string): string {
   if (exactName) return exactName.name;
 
   const aliasTarget = config.aliases?.[query];
-  if (aliasTarget) return splitModelProfile(aliasTarget).base;
+  if (aliasTarget) {
+    const { base: targetBase } = splitModelProfile(aliasTarget);
+    // A dangling alias is reported by name rather than resolved to a model that
+    // is not there: "which alias did I type" is the question the user has, and
+    // `aliases.<key>` is the line of config.yaml they need to edit.
+    if (!models.some((model) => model.name === targetBase)) {
+      throw new Error(
+        `Forge: alias "${query}" points to removed model "${targetBase}" (config.yaml: aliases.${query})`,
+      );
+    }
+    return targetBase;
+  }
 
   const exactShort = models.find((m) => m.short_name === query);
   if (exactShort) return exactShort.name;
@@ -102,7 +119,11 @@ export function resolveModelName(config: ForgeConfig, query: string): string {
     if (m.short_name?.toLowerCase() === lowerQuery) ciCandidates.add(m.name);
   }
   for (const [key, target] of Object.entries(config.aliases ?? {})) {
-    if (key.toLowerCase() === lowerQuery) ciCandidates.add(splitModelProfile(target).base);
+    if (key.toLowerCase() !== lowerQuery) continue;
+    const { base: targetBase } = splitModelProfile(target);
+    // Only aliases that still resolve can be a candidate: a dangling one would
+    // report a model name that does not exist as if it were a match.
+    if (models.some((model) => model.name === targetBase)) ciCandidates.add(targetBase);
   }
   if (ciCandidates.size === 1) return [...ciCandidates][0];
   if (ciCandidates.size > 1) throw new AmbiguousModelError(query, [...ciCandidates].sort());
@@ -128,6 +149,22 @@ export function resolveModelName(config: ForgeConfig, query: string): string {
   throw new Error(
     `Forge: unknown model "${query}" (configured: ${models.map((m) => m.name).join(', ') || 'none'})`,
   );
+}
+
+/**
+ * The flattened model entry for `name`, or undefined when `name` is not
+ * configured. A consumer that needs a model's exec facts — `start_command`,
+ * `stop_command`, `unload_path`, `llama_server_binary` — or its `gpus` must read
+ * them here and not from `config.models`, because since phase 2 those fields live
+ * in `~/.forge/policy.yaml` under the model's `engine`: a raw entry for a migrated
+ * Strata would come back with no `unload_path`, and the release, stop-on-exit and
+ * solo/multi paths would read that as "this model has no server to stop" — and
+ * `gpus` would read as "overlaps everything", unloading a server that shares no
+ * card. `findBase` is this function plus a throw, so the two cannot drift.
+ */
+export function resolveModelEntry(config: ForgeConfig, name: string): ModelConfig | undefined {
+  const exact = config.models.find((m) => m.name === name);
+  return exact ? mergeGroupsIntoModel(config, exact) : undefined;
 }
 
 function findBase(config: ForgeConfig, base: string): ModelConfig {
@@ -156,14 +193,67 @@ function mergeSampling(...layers: (SamplingConfig | undefined)[]): SamplingConfi
 }
 
 /**
- * Fold a model's `group`/`groups` into itself: group(s) apply beneath the
- * model's own explicit fields (defaults < group(s) < model fields). Groups
- * are merged left-to-right when `groups` lists more than one (later wins).
- * `sampling`, `spawn`, and `tool_call_limits` are merged key-by-key across
- * every layer; every other field is a plain override (higher layer wins
- * wholesale, matching the existing `pick()` semantics used elsewhere).
+ * Fold a model's layers into one flat `ModelConfig`: its `group`/`groups` beneath
+ * its own fields, then its `engine` beneath those (defaults < group(s) < model
+ * fields; engine < model fields). Groups are merged left-to-right when `groups`
+ * lists more than one (later wins). `sampling`, `spawn`, and `tool_call_limits`
+ * are merged key-by-key across every layer; every other field is a plain override
+ * (higher layer wins wholesale, matching the existing `pick()` semantics used
+ * elsewhere).
+ *
+ * The engine fold lives here rather than in `findBase` because four consumers
+ * flatten a model themselves instead of going through the resolver
+ * (`ExternalModelServers`, `ControlModelLifecycle`, `ModelStarterEnsure`,
+ * `ModelStarterPassThrough`): one implementation means all of them, and `findBase`,
+ * see the engine's fields. `test/unit/ExecFieldReads.test.ts` fails if a new
+ * consumer reads an exec field straight out of `config.models`.
  */
 export function mergeGroupsIntoModel(config: ForgeConfig, model: ModelConfig): ModelConfig {
+  return applyEngine(config, foldGroups(config, model));
+}
+
+/**
+ * Fold a model's `engine` beneath its own fields. A model that declares
+ * `start_command` itself keeps it — that is what the phase-2 transition depends
+ * on, since an un-migrated config.yaml still carries its own exec fields. An
+ * unknown engine name is an error naming both the model and the engine: a model
+ * that resolved to a half-built engine would start the wrong program, or none,
+ * and nothing downstream would know the difference.
+ */
+function applyEngine(config: ForgeConfig, model: ModelConfig): ModelConfig {
+  if (!model.engine) return model;
+  const engine = config.engines?.[model.engine];
+  if (!engine) {
+    throw new Error(
+      `Forge: model "${model.name}" names engine "${model.engine}" (no such engine in policy.yaml; configured: ${Object.keys(config.engines ?? {}).join(', ') || 'none'})`,
+    );
+  }
+  const out: ModelConfig = { ...model };
+  // The resolved model is the flat legacy shape every consumer has always seen:
+  // `engine` is a config-file pointer, not a fact about the model, and a consumer
+  // that learned it exists would be tempted to look the engine up itself — which
+  // is exactly the two-file knowledge this fold was built to keep in one place.
+  delete out.engine;
+  if (out.start_command === undefined && engine.start_command !== undefined)
+    out.start_command = engine.start_command;
+  if (out.stop_command === undefined && engine.stop_command !== undefined)
+    out.stop_command = engine.stop_command;
+  if (out.unload_path === undefined && engine.unload_path !== undefined)
+    out.unload_path = engine.unload_path;
+  if (out.llama_server_binary === undefined && engine.llama_server_binary !== undefined)
+    out.llama_server_binary = engine.llama_server_binary;
+  // Which cards the engine occupies travels with the engine, for the same reason
+  // the start command does: it describes the process this engine starts. The
+  // GPU-overlap rule then reads it off this flat shape, so no consumer has to
+  // know `policy.yaml` exists. `modelSchema.ts` rejects `gpus` on a model entry,
+  // so the `out.gpus === undefined` guard is the same "model fields win" rule as
+  // every other field rather than a reachable override.
+  if (out.gpus === undefined && engine.gpus !== undefined) out.gpus = engine.gpus;
+  return out;
+}
+
+/** Groups only: the layer beneath the model's own fields. */
+function foldGroups(config: ForgeConfig, model: ModelConfig): ModelConfig {
   const groupNames = model.groups ?? (model.group ? [model.group] : []);
   if (groupNames.length === 0) return model;
 

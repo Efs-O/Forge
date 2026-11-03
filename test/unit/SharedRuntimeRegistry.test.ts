@@ -1,9 +1,32 @@
 import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import { SharedRuntimeRegistry, sharedRuntimeKey } from '../../src/backend/SharedRuntimeRegistry';
 import type { ModelConfig } from '../../src/config/types';
+
+/** Lets one test stand in for the owner removing the folder mid-lease-write. */
+const atomicHarness = vi.hoisted(() => ({ hook: undefined as undefined | (() => void) }));
+
+vi.mock('../../src/util/atomicWrite', async () => {
+  const actual = await vi.importActual<typeof import('../../src/util/atomicWrite')>(
+    '../../src/util/atomicWrite',
+  );
+  return {
+    ...actual,
+    writeFileAtomicSync: (file: string, content: string): void => {
+      const hook = atomicHarness.hook;
+      if (hook) {
+        atomicHarness.hook = undefined;
+        hook(); // the owner's delete lands here, between the mkdir and the write
+        const error = new Error(`ENOENT: no such file or directory, open '${file}'`) as unknown as NodeJS.ErrnoException;
+        error.code = 'ENOENT';
+        throw error;
+      }
+      actual.writeFileAtomicSync(file, content);
+    },
+  };
+});
 
 const roots: string[] = [];
 afterEach(() =>
@@ -100,6 +123,76 @@ describe('SharedRuntimeRegistry', () => {
     expect(current.acquireLeaseIfActive(record.key, 'late-borrower', discovered!)).toBe(false);
     expect(current.hasBorrowers(record.key)).toBe(false);
     expect(current.find(record.key)).toBeUndefined();
+  });
+
+  // BL-022 (bug hunt 2026-10-31): the key is a hash of the spawn argv, so every
+  // change to n_ctx, n_parallel, --threads, the GGUF path or the llama.cpp build
+  // made a new identity whose folder nothing deleted — one empty directory per
+  // identity this machine has ever published, with no size bound.
+  it('removes the lease folder with the owner so an old identity does not outlive it', () => {
+    const current = registry();
+    const key = 'old-identity';
+    current.publish({
+      key,
+      model: 'gemma',
+      endpoint: 'http://127.0.0.1:8080',
+      ownerPid: process.pid,
+      createdAt: 'now',
+    });
+    current.acquireLease(key, 'workspace-a');
+    current.releaseLease(key, 'workspace-a');
+    // What the bug left behind: the file is gone, the folder is not.
+    expect(fs.existsSync(leaseDir(current, key))).toBe(true);
+
+    current.removeOwner(key);
+
+    expect(
+      fs.existsSync(path.join((current as unknown as { root: string }).root, `${key}.json`)),
+    ).toBe(false);
+    expect(fs.existsSync(leaseDir(current, key))).toBe(false);
+  });
+
+  it('leaves the lease folder while a borrower still holds a lease', () => {
+    const current = registry();
+    const key = 'busy-identity';
+    current.publish({
+      key,
+      model: 'gemma',
+      endpoint: 'http://127.0.0.1:8080',
+      ownerPid: process.pid,
+      createdAt: 'now',
+    });
+    current.acquireLease(key, 'borrower');
+
+    current.removeOwner(key);
+
+    // Non-recursive rmdir is what makes this safe: the lease survives, and
+    // `hasBorrowers` can still read it.
+    expect(fs.existsSync(path.join(leaseDir(current, key), 'borrower.json'))).toBe(true);
+    expect(current.hasBorrowers(key)).toBe(true);
+  });
+
+  it('recreates a lease folder the owner removed mid-write, and answers inactive', () => {
+    const current = registry();
+    const key = 'raced-identity';
+    const record = {
+      key,
+      model: 'gemma',
+      endpoint: 'http://127.0.0.1:8080',
+      ownerPid: process.pid,
+      createdAt: 'now',
+    };
+    current.publish(record);
+    const discovered = current.find(record.key);
+    expect(discovered).toBeDefined();
+
+    // What the race looks like from the borrower's side: the folder exists for
+    // the mkdir, the owner's `removeOwner` deletes it, and the write then lands
+    // on a folder that is gone.
+    atomicHarness.hook = () => current.removeOwner(record.key);
+    expect(current.acquireLeaseIfActive(record.key, 'late-borrower', discovered!)).toBe(false);
+    expect(atomicHarness.hook).toBeUndefined();
+    expect(current.hasBorrowers(record.key)).toBe(false);
   });
 });
 

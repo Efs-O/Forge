@@ -116,7 +116,8 @@ describe('web_search DuckDuckGo provider', () => {
       'DuckDuckGo returned no results; this is NOT proof that nothing exists',
     );
     expect(result).toContain('blocked or changed its layout');
-    expect(result).toContain('call web_search with provider "tavily" to confirm');
+    expect(result).toContain('No Tavily or Brave key is stored on this machine');
+    expect(result).not.toContain('provider "tavily"');
   });
 
   it('reports a missing fallback key without presenting DuckDuckGo emptiness as proof', async () => {
@@ -221,6 +222,57 @@ describe('web_search DuckDuckGo provider', () => {
 
     await expect(pending).rejects.toThrow();
     expect((fetchMock.mock.calls[0]?.[1] as RequestInit).signal).toMatchObject({ aborted: true });
+  });
+
+  // TOOL_TRIM_PLAN.md B1: the retry text used to name `"tavily" or "brave"` no
+  // matter what keys exist, so on a machine with no Brave key it sent the model
+  // after a provider that could only answer `API key not found`.
+  it('after a DuckDuckGo failure, names only the providers that have a key', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async () => {
+        throw new Error('socket disconnected');
+      }),
+    );
+    const result = await tool(
+      { provider: 'duckduckgo' },
+      secrets({ 'forge.tavily.apiKey': 'tvly-test-key' }),
+    ).handler({ query: 'fixture query' });
+
+    expect(result).toContain('DuckDuckGo failed: socket disconnected');
+    expect(result).toContain('call web_search with provider "tavily" to confirm');
+    expect(result).not.toContain('Brave');
+  });
+
+  it('names both providers when both have keys', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async () => {
+        throw new Error('socket disconnected');
+      }),
+    );
+    const result = await tool(
+      { provider: 'duckduckgo' },
+      secrets({ 'forge.tavily.apiKey': 'tvly-test-key', 'forge.brave.apiKey': 'brave-test-key' }),
+    ).handler({ query: 'fixture query' });
+
+    expect(result).toContain('call web_search with provider "tavily" or "brave" to confirm');
+  });
+
+  it('a request for a provider with no key says which providers do work', async () => {
+    const keyStore = secrets({ 'forge.tavily.apiKey': 'tvly-test-key' });
+    const failure = String(
+      await tool({ provider: 'duckduckgo' }, keyStore)
+        .handler({ query: 'fixture query', provider: 'brave' })
+        .catch((error: unknown) => error),
+    );
+
+    expect(failure).toContain('API key not found in SecretStorage under "forge.brave.apiKey"');
+    expect(failure).toContain(
+      'Providers usable on this machine right now: DuckDuckGo (needs no key), Tavily ("tavily")',
+    );
+    expect(failure).not.toContain('Brave ("brave")');
+    expect(keyStore.get).toHaveBeenCalledWith('forge.brave.apiKey');
   });
 
   it('spaces request starts by at least one second', async () => {

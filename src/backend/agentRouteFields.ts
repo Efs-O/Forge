@@ -33,6 +33,24 @@ function readBody(req: http.IncomingMessage): Promise<string> {
   });
 }
 
+/** The text a route needs in the body: absent, blank, or over `max` is an error. */
+export function requireText(fields: AgentRouteFields, max: number): string {
+  const text = typeof fields['text'] === 'string' ? fields['text'] : undefined;
+  if (!text || !text.trim()) throw new AgentRouteHttpError(400, 'text is required');
+  if (text.length > max)
+    throw new AgentRouteHttpError(400, `text is ${text.length} chars; the limit is ${max}`);
+  return text;
+}
+
+/** Query values arrive as strings; these three route fields are read as booleans. */
+function coerceFlagFields(fields: AgentRouteFields): AgentRouteFields {
+  for (const key of ['new_chat', 'to_running', 'unattended'] as const) {
+    if (fields[key] === 'true') fields[key] = true;
+    else if (fields[key] === 'false') fields[key] = false;
+  }
+  return fields;
+}
+
 /** Plain text with query fields, form fields, or a JSON object body. */
 export async function readAgentRouteFields(
   req: http.IncomingMessage,
@@ -51,21 +69,23 @@ export async function readAgentRouteFields(
     return parsed as AgentRouteFields;
   }
   if ((req.headers['content-type'] ?? '').includes('application/x-www-form-urlencoded')) {
-    const fields: AgentRouteFields = {};
+    // The query string carries the addressing — every bus route is named as
+    // `?from=<name>&id=<id>` — and the body carries the payload. This branch
+    // used to read the body alone, so a POST that claims form data with an
+    // empty body (`curl -d ''`, or any client that puts its fields in the
+    // query) arrived with no fields at all, and the first validation then
+    // blamed `from`, the one field the request had sent (audit F7). A key in
+    // both places is refused rather than guessed at, so the same rule that
+    // already covers a repeated body field covers a query/body conflict.
+    const fields: AgentRouteFields = { ...Object.fromEntries(url.searchParams) };
     for (const [key, value] of new URLSearchParams(body)) {
       if (Object.hasOwn(fields, key)) {
         throw new AgentRouteHttpError(400, `duplicate field "${key}"`);
       }
       fields[key] = value;
     }
-    return fields;
+    return coerceFlagFields(fields);
   }
   const fields: AgentRouteFields = { ...Object.fromEntries(url.searchParams), text: body };
-  if (fields['new_chat'] === 'true') fields['new_chat'] = true;
-  if (fields['new_chat'] === 'false') fields['new_chat'] = false;
-  if (fields['to_running'] === 'true') fields['to_running'] = true;
-  if (fields['to_running'] === 'false') fields['to_running'] = false;
-  if (fields['unattended'] === 'true') fields['unattended'] = true;
-  if (fields['unattended'] === 'false') fields['unattended'] = false;
-  return fields;
+  return coerceFlagFields(fields);
 }

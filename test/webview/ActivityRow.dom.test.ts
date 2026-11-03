@@ -151,6 +151,37 @@ describe('ActivityRow', () => {
     expect(container.querySelector('.activity-row-header')?.getAttribute('title')).toBe('1.2 s');
   });
 
+  it('attributes a parallel failure to the failed call and target', () => {
+    render(step({ attempts: rounds([
+      tool('shell', { toolName: 'shell', toolTarget: 'echo "src files"', toolDetail: 'echo "src files"' }),
+      tool('read', {
+        toolName: 'read_file', toolTarget: 'docs/plans', toolDetail: 'docs/plans',
+        toolResult: 'Error: read_file: EISDIR: illegal operation on a directory, read',
+        toolIsError: true, toolResultTotal: 1,
+      }),
+    ]) }));
+    const line = container.querySelector<HTMLElement>('.activity-row-error-line');
+    expect(line?.textContent).toBe('read_file docs/plans — EISDIR: illegal operation on a directory, read');
+    expect(line?.textContent).not.toMatch(/^echo/);
+    expect(container.querySelector('.activity-row.is-error')).not.toBeNull();
+  });
+
+  it('keeps a primary single failure line unchanged and counts additional failures', () => {
+    const error = 'Error: permission denied';
+    const primaryFailure = tool('primary', { toolName: 'read_file', toolTarget: 'src/a.ts', toolResult: error, toolIsError: true });
+    render(step({ attempts: rounds([primaryFailure]) }));
+    expect(container.querySelector('.activity-row-error-line')?.textContent).toBe(error);
+
+    act(() => root.unmount());
+    root = createRoot(container);
+    render(step({ attempts: rounds([
+      primaryFailure,
+      tool('secondary', { toolName: 'list_directory', toolTarget: 'src', toolResult: 'Error: missing', toolIsError: true }),
+    ]) }));
+    expect(container.querySelector('.activity-row-error-line')?.textContent).toContain('(+1 more failed)');
+    expect(container.querySelector('.activity-row-error-line')?.textContent).toContain('read_file');
+  });
+
   it('never shows the error line as the target of a failed call without one', () => {
     // Live rows carry the result label as content when no target was extracted.
     render(step({ attempts: rounds([tool('failed', {

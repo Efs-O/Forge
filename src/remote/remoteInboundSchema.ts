@@ -67,7 +67,7 @@ export const RemoteInboundEventSchema = z.discriminatedUnion('kind', [
   }),
   InboundBaseSchema.extend({
     kind: z.literal('action'),
-    action: z.enum(['approve', 'deny']),
+    action: z.enum(['approve', 'deny', 'allow_chat', 'always_project']),
     correlationId: z.string().min(1).max(256),
   }),
   /**
@@ -156,3 +156,16 @@ export const RemoteInboundEventSchema = z.discriminatedUnion('kind', [
 ]);
 
 export type RemoteInboundEvent = z.infer<typeof RemoteInboundEventSchema>;
+
+/**
+ * The channels a history row may badge, read from the binding list the remote
+ * store already keeps: a chat bound to one of these arrived on a phone, not at
+ * this machine. `fake` is the test transport, and a binding naming anything
+ * else badges nothing — the panel owns what a channel is allowed to say.
+ *
+ * This sits beside the channel enum rather than in `types.ts` because the
+ * sessions panel reads it, and `types.ts` carries `ForgeHostFacade`: routing
+ * the webview through that would drag the agent-bus client script into a
+ * program that has no loader for a `.sh` import.
+ */
+export type RemoteOriginChannel = Extract<RemoteInboundEvent['channel'], 'telegram' | 'whatsapp'>;

@@ -65,7 +65,23 @@ export interface ProviderTurnRequest {
   postC: (msg: HostToWebview) => void;
 }
 
-/** Shared unwind: commit the checkpoint, release the turn, tell the status bar. */
+/**
+ * Shared unwind: commit the checkpoint, release the turn, tell the status bar.
+ *
+ * `settle` belongs in a `finally`, not last (BL-024). It is the only thing that
+ * resolves the promise `TurnLifecycle.stopStreaming` awaits, and the checkpoint
+ * commit re-reads every file the turn touched — `CheckpointSession.commit` →
+ * `fingerprintMemoryState`, which rethrows every read error except ENOENT — so
+ * a file an editor, watcher or antivirus is holding throws here. Left
+ * unsettled, the next Stop, tab close or `waitForCancelledTurns` waits on a
+ * promise whose resolver the next `register` has already replaced, and the chat
+ * cannot send again for the life of the window. The reply is worth more than
+ * the checkpoint, so a failed commit is reported as its own warning row — the
+ * raw errno text names the file — and the turn still completes. It is a notice
+ * with `severity: 'warning'`, not an error row: the webview maps `error` to
+ * ERROR and that reads as a failed turn when the reply arrived fine, and
+ * `warning` is what reaches a remote chat as its own message.
+ */
 function finishTurn(
   ctx: ProviderTurnContext,
   conv: ConversationRuntime,
@@ -79,12 +95,37 @@ function finishTurn(
   ctx.lifecycle.clearStreaming(convId);
   if (releaseBackend) ctx.lifecycle.clearBackend(convId);
   conv.updatedAt = Date.now();
-  const depthBefore = ctx.checkpoints.depth(convId);
-  ctx.checkpoints.commitTurn(checkpoint);
-  if (ctx.checkpoints.depth(convId) > depthBefore)
-    postC(checkpointReadyMessage(ctx.checkpoints, convId));
-  ctx.events.onGenerationFinished?.(model.name, convId, finalText);
-  ctx.lifecycle.settle(convId);
+  try {
+    const depthBefore = ctx.checkpoints.depth(convId);
+    ctx.checkpoints.commitTurn(checkpoint);
+    if (ctx.checkpoints.depth(convId) > depthBefore)
+      postC(checkpointReadyMessage(ctx.checkpoints, convId));
+  } catch (err) {
+    // What the user actually lost: `commit()` is what fires `onCommit`, so this
+    // turn's file changes get no Keep/Undo entry at all.
+    const message =
+      `Forge: the reply finished, but it could not record this turn's file ` +
+      `changes for Undo: ${describeError(err)}. Undo will not cover this turn; ` +
+      'check the files with git diff.';
+    log.error(
+      `[AgentLoop] checkpoint commit failed model=${model.name} conv=${convId}: ${message}`,
+    );
+    // A webview post must not be what leaves the conversation unsettled.
+    try {
+      postC({ type: 'notice', severity: 'warning', message });
+    } catch {
+      /* the reply and the settlement matter more than this row */
+    }
+  }
+  try {
+    ctx.events.onGenerationFinished?.(model.name, convId, finalText);
+  } catch (err) {
+    // The status-bar hook is also what clears `activeTurnModels`, so it runs
+    // even after a failed commit; a throw here must not skip settle either.
+    log.warn(`[AgentLoop] generation-finished hook failed model=${model.name}: ${String(err)}`);
+  } finally {
+    ctx.lifecycle.settle(convId);
+  }
 }
 
 /** Cloud providers (xai, openrouter): no local backend — resolve the token and
@@ -94,12 +135,15 @@ export async function runCloudProviderTurn(
   { conv, model, text, attachments, promptOptions, activeFile, ctrl, postC }: ProviderTurnRequest,
 ): Promise<ForgeTurnOutcome> {
   const convId = conv.id;
+  let externalHold: { release(): void } | undefined;
   let apiKey: string;
   let baseUrl: string;
   try {
-    ({ baseUrl, apiKey } = await resolveCloudRequestTarget(model, ctx.secrets));
+    externalHold = await ctx.pool.acquireExternalTurnHold?.(model.name, convId, conv.title);
+    ({ baseUrl, apiKey } = await resolveCloudRequestTarget(model, ctx.secrets, ctrl.signal));
     log.info(`[AgentLoop] ${model.provider} token resolved for model=${model.name}`);
   } catch (err) {
+    externalHold?.release();
     const msg = (err as Error).message;
     if (ctrl.signal.aborted) {
       postC({ type: 'done', finishReason: 'cancelled' });
@@ -149,15 +193,29 @@ export async function runCloudProviderTurn(
       // reset socket and a headers timeout all as "fetch failed" and keeps the
       // reason in `cause`. This is the line that produced the bare "fetch
       // failed" a remote user saw on 2026-09-09, with nothing left to diagnose.
-      const message = describeError(err);
+      const rawMessage = describeError(err);
+      const message =
+        model.unload_path && isManagedServerInterruption(rawMessage)
+          ? `the model server stopped or was unloaded during this turn (a crash, or another window loading a different model). ${rawMessage}`
+          : rawMessage;
       log.error(`[AgentLoop] ${model.provider} agent loop error: ${message}`);
       postC({ type: 'error', message });
       outcome = { kind: 'failed', error: message, finalText: '' };
     }
   } finally {
-    finishTurn(ctx, conv, model, checkpoint, postC, false, finalText);
+    try {
+      finishTurn(ctx, conv, model, checkpoint, postC, false, finalText);
+    } finally {
+      externalHold?.release();
+    }
   }
   return outcome;
+}
+
+function isManagedServerInterruption(message: string): boolean {
+  return /I\/O operation on closed file|ECONNRESET|socket hang up|fetch failed|connection reset|stream.*closed/i.test(
+    message,
+  );
 }
 
 /**

@@ -15,6 +15,14 @@ import {
 const log = getLogger();
 
 export const HISTORY_ARCHIVE_FILE = 'conversation-history.json';
+/**
+ * The body directories, named here because `HistoryArchive` is the only place
+ * that lays them out. The daily retitle job reads the same files (`src/jobs/
+ * retitleRun.ts`) rather than guessing the names, so a rename of one of these
+ * folders moves the job with it instead of leaving it reading an empty path.
+ */
+export const HISTORY_BODIES_DIR = 'history';
+export const OPEN_BODIES_DIR = 'open';
 
 function signatureOf(conversation: ConversationRuntime | ConversationPersisted): string {
   return `${conversation.updatedAt}:${conversation.title}:${conversation.messages.length}:${JSON.stringify(conversation.agentLinks ?? {})}`;
@@ -37,11 +45,11 @@ export class HistoryArchive {
   ) {
     const storageDirectory = path.dirname(filePath);
     this.bodies = new ConversationBodyStore(
-      path.join(storageDirectory, 'history'),
+      path.join(storageDirectory, HISTORY_BODIES_DIR),
       'HistoryArchive',
     );
     this.openConversations = new OpenConversationsPersistence(
-      new ConversationBodyStore(path.join(storageDirectory, 'open'), 'OpenConversations'),
+      new ConversationBodyStore(path.join(storageDirectory, OPEN_BODIES_DIR), 'OpenConversations'),
     );
     this.overflow = new ArchivedSessions(storageDirectory, workspacePath);
   }

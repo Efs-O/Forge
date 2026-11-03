@@ -6,6 +6,7 @@ import * as vscode from 'vscode';
 import { describe, expect, it, vi } from 'vitest';
 import { makeShellTool, withPathEntry, gitBashDir, posixIdioms } from '../../src/tools/shellTool';
 import { BackgroundExecutionManager } from '../../src/tools/BackgroundExecutionManager';
+import { unattendedConversations } from '../../src/sidebar/unattendedConversations';
 import { TEST_BASH } from '../support/bash';
 import type { ForgeConfig } from '../../src/config/types';
 
@@ -242,6 +243,57 @@ describe('shell tool validation and PowerShell', () => {
       );
     } finally {
       manager.dispose();
+      vscode.workspace.workspaceFolders?.splice(0, Infinity, ...previous);
+      fs.rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  it('arms the exit wake by default, opts out on false, and never arms a job run', async () => {
+    const manager = new BackgroundExecutionManager();
+    const start = vi
+      .spyOn(manager, 'start')
+      .mockReturnValue({ id: 'exec-shell', status: 'running', pid: 22, startedAt: Date.now() });
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), 'forge-shell-wake-'));
+    const previous = [...(vscode.workspace.workspaceFolders ?? [])];
+    vscode.workspace.workspaceFolders?.splice(0, Infinity, { uri: vscode.Uri.file(root) });
+    try {
+      const tool = makeShellTool({ manager, bashPath: TEST_BASH });
+      const mark = unattendedConversations.mark('job-chat', {
+        jobId: 'job-1',
+        jobName: 'morning check',
+      });
+      try {
+        // No flag at all: the chat is armed, because an agent that forgets a
+        // flag it cannot add later spent its rounds polling the job instead.
+        await tool.handler(
+          { ...bashArgs('echo hi'), background: true },
+          context({ conversationId: 'chat' }),
+        );
+        expect(start.mock.calls[0]?.[0]).toMatchObject({ notifyConversationId: 'chat' });
+        start.mockClear();
+        await tool.handler(
+          { ...bashArgs('echo hi'), background: true, notify_on_exit: false },
+          context({ conversationId: 'chat' }),
+        );
+        expect(start.mock.calls[0]?.[0]).not.toHaveProperty('notifyConversationId');
+        start.mockClear();
+        // No conversation to wake: nothing is armed and nothing is an error.
+        await tool.handler({ ...bashArgs('echo hi'), background: true }, context());
+        expect(start.mock.calls[0]?.[0]).not.toHaveProperty('notifyConversationId');
+        start.mockClear();
+        // A job run keeps the opt-in default, so its RESULT: line is not
+        // followed by an unscheduled turn that reports the same run again.
+        await tool.handler(
+          { ...bashArgs('echo hi'), background: true },
+          context({ conversationId: 'job-chat' }),
+        );
+        expect(start.mock.calls[0]?.[0]).not.toHaveProperty('notifyConversationId');
+      } finally {
+        mark.dispose();
+      }
+    } finally {
+      start.mockRestore();
+      void manager.dispose();
       vscode.workspace.workspaceFolders?.splice(0, Infinity, ...previous);
       fs.rmSync(root, { recursive: true, force: true });
     }

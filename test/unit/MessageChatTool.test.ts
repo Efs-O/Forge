@@ -7,6 +7,7 @@ import type {
 import type { ChatMessageDelivery } from '../../src/sidebar/backgroundExitNotice';
 import { makeMessageChatTool, type MessageChatSidebar } from '../../src/tools/messageChatTool';
 import type { ToolHandlerContext } from '../../src/tools/ToolRegistry';
+import type { ForgeConfig } from '../../src/config/types';
 
 function conversation(
   id: string,
@@ -58,16 +59,25 @@ function makeSidebar(status: ForgeHostStatus): MessageChatSidebar & {
 } {
   const emitHostActivity = vi.fn();
   const createConversation = vi.fn(async () => conversation('new-chat', 'Untitled chat'));
+  const setConversationModel = vi.fn(async (_id: string, _model: string | null) => {});
+  const applyAutoTitle = vi.fn(() => false);
+  const recentExchanges = vi.fn((_id: string, _limit: number) => []);
   return {
     getHostFacade: () => ({
       status: () => status,
       emitHostActivity,
       chatCapBlockers: vi.fn(() => []),
       createConversation,
+      setConversationModel,
+      applyAutoTitle,
+      recentExchanges,
       clankerMode: () => false,
     }),
     emitHostActivity,
     createConversation,
+    setConversationModel,
+    applyAutoTitle,
+    recentExchanges,
     deliverChatMessage: vi.fn((_text: string, id: string, _steer?: boolean) =>
       Promise.resolve<ChatMessageDelivery>(
         status.streamingConversationIds.includes(id) ||
@@ -95,20 +105,115 @@ describe('message_chat tool contract and handler', () => {
     expect(tool.definition.function.parameters).toEqual({
       type: 'object',
       properties: {
-        action: { type: 'string', enum: ['list', 'send'] },
+        action: { type: 'string', enum: ['list', 'send', 'view'] },
         to: { type: 'string', minLength: 1, maxLength: 200 },
         message: {
           type: 'string',
           minLength: 1,
-          maxLength: 4000,
+          maxLength: 12000,
           description:
-            "Write it as you would to a coworker: first person, call the other chat 'you', no formalities, no reports about yourself in the third person.",
+            "Write it as you would to a coworker: first person, call the other chat 'you', no formalities, no reports about yourself in the third person. At most 12,000 characters; send a longer message in parts.",
         },
       },
-      required: ['action'],
+      required: [],
       additionalProperties: false,
     });
+    // `action` is no longer required, and the description says what replaces it,
+    // so the model is not asked to guess why a message-only call worked.
+    expect(
+      (tool.definition.function as { description: string }).description,
+    ).toContain('`action` defaults to `send` when a `message` is given');
     await expect(tool.handler({ action: 'list', extra: true }, context())).rejects.toThrow();
+  });
+
+  it('refuses an oversize message by counting its parts, not by saying shorten it', async () => {
+    const { tool, sidebar } = makeTool(hostStatus({ running: ['running'] }));
+    const message = 'x'.repeat(12_500);
+    await expect(
+      tool.handler({ action: 'send', to: 'running', message }, context()),
+    ).rejects.toThrow(
+      'message_chat message is 12500 characters; the limit is 12000. Send it as 2 messages.',
+    );
+    // Refused before anything was routed, so a refused retry costs nothing.
+    expect(sidebar.deliverChatMessage).not.toHaveBeenCalled();
+  });
+
+  it('accepts a message the old 4,000 cap refused', async () => {
+    const { tool, sidebar } = makeTool(hostStatus({ running: ['running'] }));
+    const message = 'x'.repeat(11_000);
+    expect(message.length).toBeGreaterThan(4000);
+    const result = String(
+      await tool.handler({ action: 'send', to: 'running', message }, context()),
+    );
+    expect(result).toContain('Delivered to #2 "Bug hunt" (running)');
+    expect(sidebar.deliverChatMessage).toHaveBeenCalledTimes(1);
+  });
+
+  it('a message with no action is delivered as send, and the result says so', async () => {
+    const { tool, sidebar } = makeTool(hostStatus({ running: ['running'] }));
+    const result = String(await tool.handler({ to: '#2', message: 'Lane 5 here.' }, context()));
+    expect(sidebar.deliverChatMessage).toHaveBeenCalledTimes(1);
+    expect(sidebar.createConversation).not.toHaveBeenCalled();
+    expect(result).toContain('Delivered to #2 "Bug hunt" (running)');
+    expect(result).toContain('No `action` was given, so `send` was used.');
+  });
+
+  it('a message with no action still counts against the send caps', async () => {
+    // The inference must not be a way to send more than the tool allows: an
+    // inferred send is recorded in the window exactly as an explicit one, so the
+    // sixth idle wake is the last one and the seventh is refused.
+    const { tool } = makeTool();
+    const results: string[] = [];
+    for (let index = 0; index < 7; index += 1) {
+      results.push(String(await tool.handler({ to: 'idle', message: `wake ${index + 1}` }, context())));
+    }
+    expect(results.slice(0, 6).every((result) => result.includes('a turn started there'))).toBe(true);
+    expect(results[6]).toContain('idle-chat-wake-per-hour limit');
+    expect(results[6]).toContain('No `action` was given, so `send` was used.');
+  });
+
+  it('a call with neither action nor message is refused, naming the actions', async () => {
+    const { tool, sidebar } = makeTool();
+    // Thrown, as the missing-`action` ZodError was before: `ToolDispatch` prefixes
+    // `Error:` and counts the failure, so the streak that can strip a model's
+    // tools still sees this call as one.
+    let refusal = '';
+    try {
+      await tool.handler({}, context());
+    } catch (error) {
+      refusal = (error as Error).message;
+    }
+    expect(refusal).toContain('message_chat needs `action`');
+    expect(refusal).toContain('(one of: list, send, view)');
+    expect(sidebar.deliverChatMessage).not.toHaveBeenCalled();
+    expect(sidebar.createConversation).not.toHaveBeenCalled();
+  });
+
+  it('never infers new or steer, even when both are enabled', async () => {
+    const status = hostStatus({ running: ['running'] });
+    const sidebar = makeSidebar(status);
+    const config = {
+      permissions: { chats: { new_chat: true, steer: true } },
+    } as ForgeConfig;
+    const tool = makeMessageChatTool({ getSidebar: () => sidebar, getConfig: () => config });
+    // The advertised enum now offers four actions; a bare message still goes to
+    // the send path, because `new` would create a chat and `steer` would
+    // interrupt one, and neither is what a message-only call asked for.
+    const described = tool.describe!();
+    const advertisedActions = (
+      described.function.parameters.properties as { action: { enum: string[] } }
+    ).action.enum;
+    expect(advertisedActions).toEqual(['list', 'send', 'view', 'new', 'steer']);
+    const result = String(await tool.handler({ to: '#2', message: 'Lane 5 here.' }, context()));
+    expect(sidebar.createConversation).not.toHaveBeenCalled();
+    expect(sidebar.deliverChatMessage).toHaveBeenCalledTimes(1);
+    expect(result).toContain('Delivered to #2');
+    expect(result).toContain('No `action` was given, so `send` was used.');
+    // An explicit `new` is still `new`: the inference did not swallow the action
+    // that creates a chat, and its result does not claim it was inferred.
+    const created = String(await tool.handler({ action: 'new', message: 'hi' }, context()));
+    expect(sidebar.createConversation).toHaveBeenCalledTimes(1);
+    expect(created).not.toContain('No `action` was given');
   });
 
   it('lists open chats in tab order, marks the caller and rejects ignored fields', async () => {
@@ -125,6 +230,29 @@ describe('message_chat tool contract and handler', () => {
     expect(refused).toContain('send:');
     const targetRefused = await tool.handler({ action: 'list', to: '#2' }, context());
     expect(targetRefused).toContain('does not take `to` or `message`');
+  });
+
+  it('reads a closed chat with `view` and marks the read closed', async () => {
+    const { tool, sidebar } = makeTool(hostStatus({ archived: true }));
+    const view = await tool.handler({ action: 'view', to: 'Old notes' }, context());
+    expect(view).toContain('View of "Old notes" (id archived, closed):');
+    expect(view).toContain('No answers in this chat yet.');
+    expect(sidebar.recentExchanges).toHaveBeenCalledWith('archived', 11);
+    expect(sidebar.deliverChatMessage).not.toHaveBeenCalled();
+    // Reading a closed chat does not reopen it or wake it.
+    expect(sidebar.createConversation).not.toHaveBeenCalled();
+  });
+
+  it('tells a sender a closed chat is still readable, and never delivers to it', async () => {
+    const { tool, sidebar } = makeTool(hostStatus({ archived: true }));
+    const result = await tool.handler(
+      { action: 'send', to: 'archived', message: 'Report back.' },
+      context(),
+    );
+    expect(result).toContain('No open chat matches');
+    expect(result).toContain('That chat is closed; `view` can still read it.');
+    expect(sidebar.deliverChatMessage).not.toHaveBeenCalled();
+    expect(sidebar.emitHostActivity).not.toHaveBeenCalled();
   });
 
   it('routes a running-chat message visibly through the router with the sender header', async () => {

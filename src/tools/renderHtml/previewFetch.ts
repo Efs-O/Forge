@@ -7,12 +7,12 @@ import {
   USER_AGENT,
   blockedResolvedAddress,
   defaultPinnedFetch,
-  normalizedHostname,
   parseFetchUrl,
   ssrfCheck,
   type ResolvedAddress,
   type WebFetchDependencies,
 } from '../fetchTool';
+import { normalizedHostname } from '../fetchHostApprovals';
 
 /**
  * Preview mode's network transport: every request the page makes is fetched

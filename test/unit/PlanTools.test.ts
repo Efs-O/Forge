@@ -118,14 +118,56 @@ describe('update_plan', () => {
   it('names an invalid status value and the allowed values', async () => {
     const tool = makeUpdatePlanTool();
     const { ctx, written } = context();
-    const result = await tool.handler(
-      { items: [{ text: 'ok', status: 'in_progress' }] },
-      ctx,
-    );
-    expect(result).toContain('"in_progress"');
+    const result = await tool.handler({ items: [{ text: 'ok', status: 'doing' }] }, ctx);
+    expect(result).toContain('"doing"');
     expect(result).toContain('pending, active, or done');
     expect(result.length).toBeLessThanOrEqual(200);
     expect(written).toEqual([]);
+  });
+
+  it('accepts the two spellings models send and stores the canonical three', async () => {
+    // GLM-5.3 wrote `in_progress` in two chats on 2026-11-02 and one of them paid
+    // three refused calls for it. The refusal bought nothing: the plan it wanted
+    // to record was the plan it recorded one round later. So these two words are
+    // accepted, and stored as the words the schema declares.
+    const tool = makeUpdatePlanTool();
+    const { ctx, written } = context();
+    const result = await tool.handler(
+      {
+        items: [
+          { text: 'read the plan', status: 'in_progress' },
+          { text: 'run the gate', status: 'completed' },
+          { text: 'build the vsix', status: 'pending' },
+        ],
+      },
+      ctx,
+    );
+    expect(written).toEqual([
+      [
+        { text: 'read the plan', status: 'active' },
+        { text: 'run the gate', status: 'done' },
+        { text: 'build the vsix', status: 'pending' },
+      ],
+    ]);
+    expect(result).toBe('Plan recorded: 3 items, 1 done.');
+    // The advertised contract is still the canonical three — an alias is repaired
+    // at the door, not added to the enum, so nothing downstream (the webview,
+    // `renderPlan`, `isPlanFinished`) ever has to learn a fourth state.
+    const status = tool.definition.function.parameters?.properties as Record<
+      string,
+      Record<string, unknown>
+    >;
+    const item = (status['items'] as { items: { properties: Record<string, { enum: string[] }> } })
+      .items;
+    expect(item.properties['status']?.enum).toEqual(['pending', 'active', 'done']);
+    expect(String(item.properties['status']?.['description'])).toContain('in_progress');
+    // And the accepted list stays strict: a third synonym is still refused.
+    for (const word of ['doing', 'ongoing', 'complete', 'in progress']) {
+      const refused = context();
+      const text = await tool.handler({ items: [{ text: 'ok', status: word }] }, refused.ctx);
+      expect(text, word).toContain('is invalid; use pending, active, or done');
+      expect(refused.written).toEqual([]);
+    }
   });
 
   it('names an extra field and missing items without exceeding the refusal limit', async () => {
@@ -258,6 +300,40 @@ describe('plan persistence', () => {
     };
     const loaded = loadSidebarSession(makeMemento(store));
     expect(loaded.conversations[0]?.plan).toBeUndefined();
+  });
+
+  it('reads back an alias recorded by a model as the status it meant', () => {
+    // A plan is conversation state that survives a window, so the alias has to be
+    // canonical on the way IN and not merely on the way out: a record that stored
+    // `in_progress` would render as nothing in the webview and read as not-done
+    // forever, which is a plan that silently stops being a ledger.
+    const store: Record<string, unknown> = {
+      [SESSION_KEY_V1]: {
+        activeConversationId: 'c1',
+        conversations: [
+          {
+            id: 'c1',
+            title: 'Chat',
+            createdAt: 1,
+            updatedAt: 2,
+            messages: [],
+            plan: {
+              items: [
+                { text: 'read the plan', status: 'in_progress' },
+                { text: 'run the gate', status: 'completed' },
+              ],
+              updatedAt: 1,
+            },
+          },
+        ],
+      },
+    };
+    const loaded = loadSidebarSession(makeMemento(store));
+    expect(loaded.conversations[0]?.plan?.items).toEqual([
+      { text: 'read the plan', status: 'active' },
+      { text: 'run the gate', status: 'done' },
+    ]);
+    expect(isPlanFinished(loaded.conversations[0]?.plan?.items ?? [])).toBe(false);
   });
 
   it('drops a corrupted over-limit plan rather than re-injecting it every round', () => {

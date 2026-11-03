@@ -18,27 +18,46 @@ body {
 
 /* ── Header ─────────────────────────────────────────────────────────────── */
 
-/*
- * One row: mark, workspace root, budget. They were stacked, which spent two
- * rows of a 382px column on ambient facts. The mark is inline SVG in
- * Header.tsx rather than an <img>, so it needs no webview resource URI and
- * cannot 404 on a packaging mistake.
- */
+/* One row for the real packaged icon, wordmark, workspace root, and budget. */
 #forge-header {
   display: flex;
   align-items: center;
   gap: 8px;
-  padding: 5px 10px;
+  min-height: 34px;
+  padding: 4px 10px;
   border-bottom: 1px solid var(--vscode-sideBarSectionHeader-border, #333);
   flex-shrink: 0;
+}
+
+#forge-brand {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  flex: 0 0 auto;
+  user-select: none;
 }
 
 #forge-mark {
   flex-shrink: 0;
   display: block;
+  width: 24px;
+  height: 24px;
+  background-color: var(--vscode-charts-orange, #cd9178);
+  -webkit-mask-repeat: no-repeat;
+  mask-repeat: no-repeat;
+  -webkit-mask-position: center;
+  mask-position: center;
+  -webkit-mask-size: contain;
+  mask-size: contain;
 }
 
-
+#forge-wordmark {
+  color: var(--vscode-descriptionForeground);
+  font-size: 16px;
+  font-weight: 500;
+  line-height: 1;
+  white-space: nowrap;
+}
 
 
 /* ── Token budget bar ───────────────────────────────────────────────────── */

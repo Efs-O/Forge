@@ -1,5 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { BackendPool } from '../../src/backend/BackendPool';
+import { ModelStarterLeases } from '../../src/backend/ModelStarterLeases';
+import type { RemoteLeaseReleaser } from '../../src/backend/poolTypes';
 import type { ForgeConfig } from '../../src/config/types';
 
 const warnings: string[] = [];
@@ -13,7 +15,7 @@ vi.mock('vscode', () => ({
   },
 }));
 
-// Controllable stand-in for DirectBackend: each hotSwap parks a deferred the
+// Controllable fake of DirectBackend: each hotSwap parks a deferred the
 // test settles by hand, so we can interleave release() with a failing boot.
 const harness = vi.hoisted(() => ({
   pending: [] as Array<{ resolve: () => void; reject: (err: unknown) => void }>,
@@ -723,5 +725,127 @@ describe('residency reporting for the sidebar dot', () => {
 
     expect(pool.residencySignature()).not.toBe(withA);
     expect(pool.isLoaded('A')).toBe(false);
+  });
+});
+
+/**
+ * The half of docs/plans/LAPTOP_MODEL_STARTER_PLAN.md that lives in the pool:
+ * a remote lease is one entry in the SAME turn-pin counter a sidebar turn uses,
+ * and a release drops the lease before it stops the server. Both halves matter:
+ * the pin is what makes `makeRoom`, `freeVramForExternal` and the LRU eviction
+ * leave a laptop's model alone, and dropping the lease on release is what
+ * keeps a desktop `/unloadModel` from leaving a pin with nothing behind it — a
+ * pin like that would report the model busy for the rest of the window's life.
+ */
+describe('BackendPool remote pins and leases', () => {
+  beforeEach(resetHarness);
+
+  it('pinModel makes a model busy, and its unpin (called twice) clears it', async () => {
+    const pool = new BackendPool(makeConfig(1));
+    const acquireA = pool.acquire('A');
+    harness.pending[0].resolve();
+    await acquireA;
+    expect(pool.isBusy('A')).toBe(false);
+
+    const unpin = pool.pinModel('A');
+    expect(pool.isBusy('A')).toBe(true);
+    unpin();
+    unpin(); // idempotent: a double unpin must not go below the holder's count
+    expect(pool.isBusy('A')).toBe(false);
+  });
+
+  it('a pinned model is never the LRU eviction candidate', async () => {
+    const pool = new BackendPool(makeConfig(1)); // one port: the next load must evict
+    const acquireA = pool.acquire('A');
+    harness.pending[0].resolve();
+    await acquireA;
+    const unpin = pool.pinModel('A');
+
+    await expect(pool.acquire('B')).rejects.toThrow(/no free slot and no eviction candidate/);
+    expect(pool.loadedModelNames()).toEqual(['A']);
+    expect(harness.events.filter((event) => event.startsWith('stop:'))).toEqual([]);
+    unpin();
+  });
+
+  it('release drops the remote lease before it stops the server', async () => {
+    const releaser: RemoteLeaseReleaser = {
+      releaseLeasesFor: (model) => {
+        harness.events.push(`lease:${model}`);
+      },
+      releaseAllLeases: () => {
+        harness.events.push('lease:all');
+      },
+    };
+    const pool = new BackendPool(makeConfig(1), undefined, undefined, releaser);
+    const acquireA = pool.acquire('A');
+    harness.pending[0].resolve();
+    await acquireA;
+
+    await pool.release('A');
+    expect(harness.events).toEqual(['hotSwap:8080', 'lease:A', 'stop:8080']);
+  });
+
+  it('stopAll drops every lease before stopping any server', async () => {
+    const releaser: RemoteLeaseReleaser = {
+      releaseLeasesFor: (model) => {
+        harness.events.push(`lease:${model}`);
+      },
+      releaseAllLeases: () => {
+        harness.events.push('lease:all');
+      },
+    };
+    const pool = new BackendPool(makeConfig(1), undefined, undefined, releaser);
+    const acquireA = pool.acquire('A');
+    harness.pending[0].resolve();
+    await acquireA;
+    harness.events.length = 0;
+
+    await pool.stopAll();
+    expect(harness.events).toEqual(['lease:all', 'stop:8080']);
+  });
+
+  it('a desktop release drops a real lease and its pin in one call', async () => {
+    const leases = new ModelStarterLeases(() => 600_000);
+    const pool = new BackendPool(makeConfig(1), undefined, undefined, leases);
+    const acquireA = pool.acquire('A');
+    harness.pending[0].resolve();
+    await acquireA;
+
+    const unpin = vi.fn(pool.pinModel('A'));
+    leases.grant(
+      { client: 'laptop-1', model: 'A', port: 8080, kind: 'llama.cpp', release: unpin },
+    );
+    expect(pool.isBusy('A')).toBe(true);
+    expect(leases.hasLease('A')).toBe(true);
+
+    await pool.release('A');
+    expect(leases.hasLease('A')).toBe(false);
+    expect(unpin).toHaveBeenCalledOnce();
+    expect(pool.isBusy('A')).toBe(false);
+    expect(pool.loadedModelNames()).toEqual([]);
+    // Releasing a model nobody leased is a no-op, which is what makes the hook
+    // safe to call from every release path.
+    await pool.release('B');
+    expect(unpin).toHaveBeenCalledOnce();
+  });
+
+  it('stopAll releases every lease, so /unloadall is the owner winning', async () => {
+    const leases = new ModelStarterLeases(() => 600_000);
+    const pool = new BackendPool(makeConfig(2), undefined, undefined, leases);
+    const acquireA = pool.acquire('A');
+    harness.pending[0].resolve();
+    await acquireA;
+    leases.grant({
+      client: 'laptop-1',
+      model: 'A',
+      port: 8080,
+      kind: 'llama.cpp',
+      release: pool.pinModel('A'),
+    });
+    expect(leases.size).toBe(1);
+
+    await pool.stopAll();
+    expect(leases.size).toBe(0);
+    expect(pool.isBusy('A')).toBe(false);
   });
 });

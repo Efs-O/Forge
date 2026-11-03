@@ -1,44 +1,39 @@
 import { z } from 'zod';
 import type { RegisteredTool, ToolHandlerContext } from './ToolRegistry';
 import type { ForgeConfig } from '../config/types';
-import { AgentLinksConfigSchema } from '../config/agentBusSchema';
 import { agentKindSchema } from '../agentLinks/chatAgentLinks';
-import {
-  makeAskAgentHandler,
-  renderAskAgentResult,
-  type AskAgentRuntime,
-} from '../agentLinks/askAgentService';
+import type { StartAgentAsk } from '../agentLinks/pendingAgentAsks';
+import { MAX_QUESTION_CHARS } from '../agentBus/liveSessionLimit';
 
 const requestSchema = z
   .object({
     agent: agentKindSchema,
-    message: z.string().min(1).max(6000),
+    message: z.string().min(1).max(MAX_QUESTION_CHARS),
     subject: z.string().min(1).max(160).optional(),
   })
   .strict();
 
+/**
+ * `ask_agent` returns as soon as the ask is running: the sidebar's starter owns
+ * the run (its own checkpoint and controller) and delivers the reply into the
+ * chat as a message, so the asking turn keeps working instead of waiting.
+ */
 export function makeAskAgentTool(options: {
   getConfig: () => ForgeConfig;
-  runtime: AskAgentRuntime;
-  workspaceRoot: () => string;
+  getStarter: () => StartAgentAsk | undefined;
 }): RegisteredTool {
-  const handler = makeAskAgentHandler({
-    getConfig: options.getConfig,
-    runtime: options.runtime,
-    getLinkConfig: () => AgentLinksConfigSchema.parse(options.getConfig().agent_links),
-  });
   return {
     definition: {
       type: 'function',
       function: {
         name: 'ask_agent',
         description:
-          'Ask the Claude, Codex, or Copilot session linked to this chat and wait for its reply. A missing link creates a session for this chat.',
+          'Ask the Claude, Codex, or Copilot session linked to this chat (a missing link creates one). Returns at once; the reply arrives later as a message here. Keep working; do not ask again. If blocked on the answer, end your turn: the reply starts a new one. Do not edit files you asked it to change.',
         parameters: {
           type: 'object',
           properties: {
             agent: { type: 'string', enum: ['claude', 'codex', 'copilot'] },
-            message: { type: 'string', minLength: 1, maxLength: 6000 },
+            message: { type: 'string', minLength: 1, maxLength: MAX_QUESTION_CHARS },
             subject: { type: 'string', minLength: 1, maxLength: 160 },
           },
           required: ['agent', 'message'],
@@ -47,31 +42,22 @@ export function makeAskAgentTool(options: {
       },
     },
     permission: 'delegate',
+    /** The message goes to a session this chat does not control, and what comes
+     *  back is that session's answer: `untrustedExitPolicy.ts` cards this in a
+     *  chat that has read a page or a secret, and lets it run asking nothing in a
+     *  clean one. */
+    reachesOut: 'cross_chat',
     advertise: () => options.getConfig().agent_bus?.enabled === true,
     handler: async (args, context?: ToolHandlerContext) => {
       const parsed = requestSchema.parse(args);
-      if (
-        !context?.conversation ||
-        !context.checkpoint ||
-        !context.abortSignal ||
-        !context.persistConversation
-      )
-        return 'Error: ask_agent requires an active chat turn and checkpoint.';
-      const result = await handler(
-        {
-          agent: parsed.agent,
-          message: parsed.message,
-          ...(parsed.subject ? { subject: parsed.subject } : {}),
-        },
-        {
-          conversation: context.conversation,
-          checkpoint: context.checkpoint,
-          signal: context.abortSignal,
-          workspaceRoot: options.workspaceRoot(),
-          persistConversation: context.persistConversation,
-        },
-      );
-      return renderAskAgentResult(result);
+      if (!context?.conversation) return 'Error: ask_agent requires an active chat turn.';
+      const start = options.getStarter();
+      if (!start) return 'Error: ask_agent: the Forge sidebar is not ready in this window.';
+      return start(context.conversation.id, {
+        agent: parsed.agent,
+        message: parsed.message,
+        ...(parsed.subject ? { subject: parsed.subject } : {}),
+      });
     },
   };
 }

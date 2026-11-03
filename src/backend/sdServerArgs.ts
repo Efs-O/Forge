@@ -37,6 +37,15 @@ export function composeSdServerArgs(config: SdcppImageBackendConfig): string[] {
   return [...args, ...config.extra_args];
 }
 
+/**
+ * The loopback base URL every sd-server HTTP request is built from, so the
+ * address is written down once: `SdServerBackend.baseUrl()` and the idle
+ * module's orphan sweep both take it from here.
+ */
+export function sdServerBaseUrl(config: SdcppImageBackendConfig): string {
+  return `http://127.0.0.1:${config.port}`;
+}
+
 export function sdServerSignature(config: SdcppImageBackendConfig): string {
   const identity = {
     binary: config.binary,

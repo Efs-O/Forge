@@ -17,6 +17,7 @@ import {
   evictionBlockers,
   isConversationEvictable,
   remoteEvictionSignals,
+  retentionBlockState,
   WebviewQueueState,
   type ConversationEvictionSignals,
 } from '../../src/sidebar/evictionGate';
@@ -146,6 +147,7 @@ describe('conversation eviction ledger', () => {
   const clear: ConversationEvictionSignals = {
     streaming: false,
     activeRequestChain: false,
+    workerChatActive: false,
     unattended: false,
     pendingApprovalActive: false,
     pendingApprovalQueued: false,
@@ -153,14 +155,18 @@ describe('conversation eviction ledger', () => {
     unattributedRequest: false,
     hostQueue: false,
     webviewQueue: false,
+    webviewDraft: false,
     beforeWebviewQueueReport: false,
+    beforeWebviewDraftReport: false,
     remoteRuntimeUnavailable: false,
     remoteBinding: false,
     remoteIntakeQueue: false,
+    agentAskPending: false,
   };
   const signals: (keyof ConversationEvictionSignals)[] = [
     'streaming',
     'activeRequestChain',
+    'workerChatActive',
     'unattended',
     'pendingApprovalActive',
     'pendingApprovalQueued',
@@ -168,7 +174,9 @@ describe('conversation eviction ledger', () => {
     'unattributedRequest',
     'hostQueue',
     'webviewQueue',
+    'webviewDraft',
     'beforeWebviewQueueReport',
+    'beforeWebviewDraftReport',
     'remoteRuntimeUnavailable',
     'remoteBinding',
     'remoteIntakeQueue',
@@ -237,11 +245,23 @@ describe('conversation eviction ledger', () => {
     expect(queue.isQueued('a')).toBe(false);
     queue.viewResolved();
     expect(queue.isQueued('a')).toBeUndefined();
+    expect(queue.isDraftBearing('a')).toBeUndefined();
+    expect(queue.hasUnreportedRetentionState()).toBe(true);
     queue.report(['a']);
+    queue.reportDrafts(['a']);
     expect(queue.isQueued('a')).toBe(true);
+    expect(queue.isDraftBearing('a')).toBe(true);
     expect(queue.isQueued('b')).toBe(false);
+    expect(queue.hasUnreportedRetentionState()).toBe(false);
     queue.viewDisposed();
     expect(queue.isQueued('a')).toBe(false);
+    expect(queue.isDraftBearing('a')).toBe(false);
+  });
+
+  it('treats unreported queue or draft state as unknown but a reported draft as a blocker', () => {
+    expect(retentionBlockState({ ...clear, beforeWebviewDraftReport: true })).toBe('unknown');
+    expect(retentionBlockState({ ...clear, webviewDraft: true })).toBe('blocked');
+    expect(retentionBlockState({ ...clear, webviewQueue: true })).toBe('blocked');
   });
 
   it('names every signal in the gate, so an added one cannot go unexplained', () => {
@@ -381,6 +401,29 @@ describe('opRenameConversation', () => {
 
     if (!('ok' in result)) throw new Error('expected ok');
     expect(result.sidebar.conversations.map((c) => c.title)).toEqual(['Active', 'Renamed tab']);
+  });
+
+  it("marks a rename from the rename box as the owner's name", () => {
+    const state = sidebar();
+    state.history = [{ id: 'old', title: 'hello man', createdAt: 1, updatedAt: 2, messages: [] }];
+
+    const result = opRenameConversation(state, 'old', 'Tractor beam work');
+
+    if (!('ok' in result)) throw new Error('expected ok');
+    // The default is `user` because the only caller that does not say is the
+    // webview rename box, and a name typed there must never be overwritten.
+    expect(result.sidebar.history[0]?.title_source).toBe('user');
+  });
+
+  it('marks an automatic name as auto, so the daily job does not offer it again', () => {
+    const state = sidebar();
+    state.history = [{ id: 'old', title: 'hello man', createdAt: 1, updatedAt: 2, messages: [] }];
+
+    const result = opRenameConversation(state, 'old', 'Orbital salvage beam fix', 'auto');
+
+    if (!('ok' in result)) throw new Error('expected ok');
+    expect(result.sidebar.history[0]?.title_source).toBe('auto');
+    expect(result.sidebar.history[0]?.updatedAt).toBe(2);
   });
 
   it('reports notFound for an unknown id', () => {

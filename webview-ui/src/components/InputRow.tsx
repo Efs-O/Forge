@@ -6,6 +6,7 @@ import { webviewDiagnostics } from '../WebviewDiagnostics';
 import { ATTACHMENT_ACCEPT } from '../../../src/sidebar/attachmentLimits';
 import { AttachmentTray } from './AttachmentTray';
 import { useAttachments } from './useAttachments';
+import { useConversationDrafts } from './useConversationDrafts';
 
 interface Props {
   onSend: (text: string, attachments: AttachmentData[]) => void;
@@ -13,7 +14,7 @@ interface Props {
   streaming: boolean;
   backendReady: boolean;
   slashCommands: SlashCommand[];
-  onRunSlashCommand: (commandId: SlashCommand['id']) => void;
+  onRunSlashCommand: (commandId: SlashCommand['id'], approvalAction?: 'reset') => void;
   prefillText: string | null;
   onPrefillConsumed: () => void;
   clankerMode: boolean;
@@ -24,6 +25,9 @@ interface Props {
   /** Whether anything outside this window can drive it. */
   remote: { transports: string[]; paired: boolean };
   activeConversationId: string;
+  retentionReady: boolean;
+  openConversationIds: ReadonlySet<string>;
+  onDraftBearingConversationIds: (ids: string[]) => void;
 }
 
 /** A drag of selected text or a VS Code editor tab must not arm the drop target. */
@@ -50,14 +54,6 @@ function step(
     if (runnable(commands[next]!)) return next;
   }
   return from;
-}
-
-/** `record` without `key`, leaving `record` untouched. */
-function omit(record: Record<string, string>, key: string): Record<string, string> {
-  if (!(key in record)) return record;
-  const rest = { ...record };
-  delete rest[key];
-  return rest;
 }
 
 const SendIcon = (): React.ReactElement => (
@@ -140,23 +136,10 @@ export function InputRow({
   modelPickerDisabled,
   remote,
   activeConversationId,
+  retentionReady,
+  openConversationIds,
+  onDraftBearingConversationIds,
 }: Props): React.ReactElement {
-  // Drafts are per conversation, the same way staged attachments are. One
-  // shared `text` meant an unsent message typed in tab 1 appeared in tabs 2 and
-  // 3 — and would have been sent to whichever tab happened to be open. The
-  // composer is a property of the conversation, not of the panel.
-  const [draftByConversation, setDraftByConversation] = useState<Record<string, string>>({});
-  const text = draftByConversation[activeConversationId] ?? '';
-  const setText = useCallback(
-    (next: string) => {
-      setDraftByConversation((previous) =>
-        // Drop the key rather than storing '' so a cleared draft leaves nothing
-        // behind for a conversation id that may never come back.
-        next ? { ...previous, [activeConversationId]: next } : omit(previous, activeConversationId),
-      );
-    },
-    [activeConversationId],
-  );
   const [selectedCommandIndex, setSelectedCommandIndex] = useState(0);
   const [dragging, setDragging] = useState(false);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
@@ -166,6 +149,14 @@ export function InputRow({
   const dragDepth = useRef(0);
   const files = useAttachments(activeConversationId);
   const { attachments, addFiles, clear: clearAttachments } = files;
+  const { text, setText } = useConversationDrafts({
+    activeConversationId,
+    retentionReady,
+    openConversationIds,
+    onDraftBearingConversationIds,
+    attachmentDraftIds: files.draftBearingConversationIds,
+    pruneAttachments: files.pruneClosedConversations,
+  });
 
   const slashQuery = text.startsWith('/') ? text.slice(1).trim().toLowerCase() : '';
   const slashMatches = !text.startsWith('/')
@@ -173,7 +164,13 @@ export function InputRow({
     : !slashQuery
       ? slashCommands
       : slashCommands.filter(
-          (cmd) => cmd.trigger.includes(slashQuery) || cmd.title.toLowerCase().includes(slashQuery),
+          // Both sides lower-cased. The query was, the trigger was not, so
+          // `/chatmode` and `/initforge` — which the host accepts, because the
+          // host dispatches on the command id and not on the typed case —
+          // matched nothing here and the popup hid the commands entirely.
+          (cmd) =>
+            cmd.trigger.toLowerCase().includes(slashQuery) ||
+            cmd.title.toLowerCase().includes(slashQuery),
         );
   // Streaming-unsafe commands stay LISTED and are disabled instead of being
   // filtered out. Hiding them left a menu holding a single entry, which reads
@@ -272,7 +269,10 @@ export function InputRow({
   const runSlashCommand = useCallback(
     (command: SlashCommand) => {
       if (streaming && !command.availableWhileStreaming) return;
-      onRunSlashCommand(command.id);
+      // A row can carry the subcommand it stands for (`/approvals reset`), and
+      // the host cannot tell the two `/approvals` rows apart from the id alone:
+      // without the action it lists the rules instead of clearing them.
+      onRunSlashCommand(command.id, command.approvalAction);
       setText('');
       setSelectedCommandIndex(0);
       textareaRef.current?.focus();
@@ -432,14 +432,14 @@ export function InputRow({
                 aria-pressed={clankerMode}
                 title={
                   clankerMode
-                    ? 'Clanker mode is on: tools run without confirmation prompts. Recursive deletes still confirm. Click to turn it off.'
-                    : 'Turn on Clanker mode: tools run without confirmation prompts. Recursive deletes still confirm.'
+                    ? 'Clanker mode — no confirmations in this chat. The deny list still asks. Click to turn it off.'
+                    : 'Clanker mode — no confirmations in this chat. The deny list still asks. Click to turn it on.'
                 }
                 // Keep the caret in the field.
                 onMouseDown={(e) => e.preventDefault()}
                 onClick={() => onRunSlashCommand('clanker')}
               >
-                {clankerMode ? 'Clanker mode - No confirmations' : 'Clanker mode'}
+                {clankerMode ? 'Clanker mode — 110% YOLO' : 'Clanker mode'}
               </button>
             </div>
             <ModelSelector

@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { MAX_WEB_FETCH_BYTES, makeWebFetchTool } from '../../src/tools/fetchTool';
 import { guardedFetchResource } from '../../src/tools/renderHtml/previewFetch';
+import type { ForgeConfig } from '../../src/config/types';
 
 describe('web_fetch DNS SSRF protection', () => {
   afterEach(() => vi.unstubAllGlobals());
@@ -35,7 +36,17 @@ describe('web_fetch DNS SSRF protection', () => {
         }),
     );
     vi.stubGlobal('fetch', fetch);
-    const tool = makeWebFetchTool({ lookup, fetch });
+    // The host gate and the SSRF gate are two checks, and this one is about the
+    // SSRF one: `127.0.0.1.nip.io` resolves to loopback, and the point is that a
+    // redirect target is re-resolved and refused for its ADDRESS rather than for
+    // being a new host. So name the host in `fetch.allowed_hosts` and let the
+    // address check do the refusing (the host gate has its own case below).
+    const tool = makeWebFetchTool({
+      lookup,
+      fetch,
+      getConfig: () =>
+        ({ fetch: { allowed_hosts: ['127.0.0.1.nip.io'] } }) as unknown as ForgeConfig,
+    });
 
     await expect(tool.handler({ url: 'https://public.example.test/start' })).rejects.toThrow(
       /redirect target rejected.*127\.0\.0\.1/i,
@@ -147,7 +158,10 @@ describe('web_fetch DNS SSRF protection', () => {
       await tool.handler({ url: 'https://public.example.test/', max_chars: 100_000 }),
     );
     expect(expanded).toContain('showing 100000 of 110000 characters');
-    expect(expanded.match(/x/g)).toHaveLength(100_000);
+    // Measured inside the fence: the host note Forge adds above it names the
+    // hostname, and a hostname is made of letters that the page may also use.
+    const inside = expanded.match(/<UNTRUSTED_CONTENT>([\s\S]*)<\/UNTRUSTED_CONTENT>/u)![1];
+    expect(inside.match(/x/g)).toHaveLength(100_000);
     expect(tool.definition.function.parameters.properties.max_chars).toMatchObject({
       maximum: 100_000,
     });

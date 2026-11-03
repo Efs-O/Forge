@@ -26,4 +26,26 @@ describe('groupModels', () => {
       { label: 'CLI agents', entries: [{ name: 'codex', provider: 'cli', group: 'CLI agents' }] },
     ]);
   });
+
+  it('shows the Desktop group between Ollama Cloud and xAI', () => {
+    // The host sends `group` for every model, so a `remote_start` entry arrives
+    // as 'Desktop' and the sidebar orders it by MODEL_PICKER_GROUP_ORDER —
+    // which the webview imports, so it cannot fall out of step with the host.
+    const desktopModel = {
+      name: 'strata-flashnext-iq3_s',
+      provider: 'openai-compatible',
+      group: 'Desktop',
+    };
+    expect(
+      groupModels([
+        { name: 'grok', provider: 'xai', group: 'xAI / Grok' },
+        desktopModel,
+        { name: 'qwen:cloud', provider: 'ollama', group: 'Ollama Cloud' },
+      ]),
+    ).toEqual([
+      { label: 'Ollama Cloud', entries: [{ name: 'qwen:cloud', provider: 'ollama', group: 'Ollama Cloud' }] },
+      { label: 'Desktop', entries: [desktopModel] },
+      { label: 'xAI / Grok', entries: [{ name: 'grok', provider: 'xai', group: 'xAI / Grok' }] },
+    ]);
+  });
 });

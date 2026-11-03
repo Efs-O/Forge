@@ -3,7 +3,15 @@ import * as os from 'os';
 import * as path from 'path';
 import { describe, expect, it, vi } from 'vitest';
 import { readVerdictArtifact } from '../../src/agentMesh/verdictArtifact';
-import { makeAgentReplyLifecycle } from '../../src/agentLinks/agentReplyLifecycle';
+import { deriveLatestState } from '../../src/agentMesh/deliveryState';
+import {
+  EXCHANGES_LOG_NAME,
+  readEvents,
+} from '../../src/agentMesh/exchangeLog';
+import {
+  makeAgentReplyLifecycle,
+  recordAcceptedInboundReply,
+} from '../../src/agentLinks/agentReplyLifecycle';
 import type { AskAgentRuntime } from '../../src/agentLinks/askAgentService';
 import { PendingAgentReplies } from '../../src/agentLinks/pendingAgentReplies';
 import type { ForgeHostFacade } from '../../src/sidebar/ForgeHostFacade';
@@ -51,7 +59,94 @@ function fixture(root: string, live: boolean) {
   return { pending, lifecycle, notices, sendLive, facade };
 }
 
+/** The events one exchange got, in the order they were written. */
+function eventsFor(root: string, exchangeId: string) {
+  return readEvents(path.join(root, EXCHANGES_LOG_NAME)).filter(
+    (event) => event.exchangeId === exchangeId,
+  );
+}
+
 describe('inbound agent reply lifecycle', () => {
+  it('records a turn ended by stop as cancelled, not as completed work (audit F8)', async () => {
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), 'forge-agent-reply-stopped-'));
+    try {
+      const state = fixture(root, true);
+      const record = state.pending.create(sender, 'chat-1', '/workspace');
+      await recordAcceptedInboundReply(root, record);
+      await state.lifecycle.onAgentTurnFinished(
+        { pendingReplyId: record.exchangeId, targetConversationId: 'chat-1', sender },
+        { kind: 'cancelled', error: 'no final answer' },
+      );
+      // The verdict event used to say `completed` whatever the turn did, so a
+      // reader could not tell work that finished from work the user stopped.
+      const events = eventsFor(root, record.exchangeId);
+      expect(deriveLatestState(events)).toBe('cancelled');
+      expect(events.at(-1)?.type).toBe('verdict');
+      expect(events.at(-1)?.detail).toContain('cancelled');
+      // The answer text still says what happened to the sender that asked.
+      expect(state.sendLive.mock.calls[0]?.[2]).toContain('Forge cancelled');
+    } finally {
+      fs.rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  it('records a turn interrupted by a steer as cancelled too (audit F8)', async () => {
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), 'forge-agent-reply-steered-'));
+    try {
+      const state = fixture(root, true);
+      const record = state.pending.create(sender, 'chat-1', '/workspace');
+      await recordAcceptedInboundReply(root, record);
+      await state.lifecycle.onAgentTurnFinished(
+        { pendingReplyId: record.exchangeId, targetConversationId: 'chat-1', sender },
+        { kind: 'interrupted', error: 'steered' },
+      );
+      expect(deriveLatestState(eventsFor(root, record.exchangeId))).toBe('cancelled');
+    } finally {
+      fs.rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  it('keeps a finished turn completed, with the delivery it actually got', async () => {
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), 'forge-agent-reply-completed-'));
+    try {
+      const state = fixture(root, true);
+      const record = state.pending.create(sender, 'chat-1', '/workspace');
+      await recordAcceptedInboundReply(root, record);
+      await state.lifecycle.onAgentTurnFinished(
+        { pendingReplyId: record.exchangeId, targetConversationId: 'chat-1', sender },
+        { kind: 'completed', finalText: 'Forge answer' },
+      );
+      const events = eventsFor(root, record.exchangeId);
+      expect(deriveLatestState(events)).toBe('completed');
+      expect(events.at(-1)?.detail).toBe('reply delivered to the live sender session');
+    } finally {
+      fs.rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  it('records a message withdrawn with cancel, instead of leaving it accepted (audit F8)', async () => {
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), 'forge-agent-reply-cancelled-'));
+    try {
+      const state = fixture(root, false);
+      const record = state.pending.create(sender, 'chat-1', '/workspace');
+      await recordAcceptedInboundReply(root, record);
+      await state.lifecycle.onAgentTurnCancelled({
+        pendingReplyId: record.exchangeId,
+        targetConversationId: 'chat-1',
+        sender,
+      });
+      // The pending record is gone either way; the log used to say nothing, so
+      // the exchange stayed `accepted` forever and looked like work still
+      // queued in a chat that had nothing queued.
+      const events = eventsFor(root, record.exchangeId);
+      expect(deriveLatestState(events)).toBe('cancelled');
+      expect(events.at(-1)?.detail).toContain('cancel');
+      expect(state.pending.list()).toEqual([]);
+    } finally {
+      fs.rmSync(root, { recursive: true, force: true });
+    }
+  });
+
   it('sends a start receipt and delivers the final reply through the live runtime', async () => {
     const root = fs.mkdtempSync(path.join(os.tmpdir(), 'forge-agent-reply-live-'));
     try {

@@ -1,4 +1,4 @@
-import { CONVERSATION_BUSY_ERROR } from '../sidebar/SendPipeline';
+import { CONVERSATION_BUSY_ERROR, CONVERSATION_GONE_ERROR } from '../sidebar/SendPipeline';
 import type { ForgeHostFacade } from '../sidebar/ForgeHostFacade';
 import { getLogger } from '../util/logger';
 import type { RemoteAgentProgress } from './RemoteAgentProgress';
@@ -188,12 +188,17 @@ export async function drainRemoteQueue(
           next,
           outcome.finalText,
         );
+        // This turn's speed line, taken here rather than earlier: the answer is
+        // delivered by this path only when no mirrored echo took it, and the
+        // ledger hands a line out once so it cannot land on both.
+        const speedLine = deps.host.takeTurnSpeedLine?.(conversationId);
         if (
           !(await persistResult(() =>
             deps.store.finish(next.id, 'completed', {
               finalText: outcome.finalText,
               notification: notification ?? 'Forge request completed.',
               ...(notification ? { announceConversationId: next.conversationId } : {}),
+              ...(speedLine ? { speedLine } : {}),
             }),
           ))
         )
@@ -215,12 +220,23 @@ export async function drainRemoteQueue(
         await abortableSleep(250, deps.signal);
         continue;
       } else {
+        // A bound chat that has been closed is the one failure a phone owner can
+        // act on but cannot diagnose: the sidebar's wording names "the queued
+        // conversation", which is nothing on a handset, and the only useful
+        // answer there is what to send next. The stored `error` keeps the
+        // sidebar sentence, so the two surfaces do not disagree about what
+        // happened — only the reply that has to be acted on is rewritten. Every
+        // transport gets the same hint: `/new` and `/chats` are commands of the
+        // remote surface, not of Telegram.
+        const gone = outcome.error === CONVERSATION_GONE_ERROR;
         if (
           !(await persistResult(() =>
             deps.store.finish(next.id, 'failed', {
               error: outcome.error,
               ...(outcome.finalText ? { finalText: outcome.finalText } : {}),
-              notification: `Forge request failed: ${outcome.error}`,
+              notification: gone
+                ? 'Forge: the chat this Telegram chat was bound to is closed. Send /new for a new chat, or /chats to pick an open one.'
+                : `Forge request failed: ${outcome.error}`,
             }),
           ))
         )
@@ -240,7 +256,16 @@ export async function drainRemoteQueue(
         return;
     } finally {
       if (bubble.kind !== 'declined') {
-        await deps.progress.finish(conversationId, progressTerminalText(progressOutcome));
+        // The answer goes up first, then the teardown. `progress.finish` deletes
+        // the bubbles the owner was reading, and Telegram raises no
+        // notification for an edit, so a status line written before the reply
+        // lands makes their own message the last thing on screen and the answer
+        // then arrives below it — the drop-and-move-back-up they reported.
+        const delivered = await deps.outbox.flush(next.chatId);
+        await deps.progress.finish(
+          conversationId,
+          progressTerminalText(progressOutcome, delivered),
+        );
       }
       deps.activeConversations.delete(conversationId);
       log.info(
@@ -253,8 +278,18 @@ export async function drainRemoteQueue(
   }
 }
 
-function progressTerminalText(outcome: ProgressOutcome): string {
-  if (outcome === 'completed') return 'Forge: completed.';
+/**
+ * What the working line becomes at the end of a turn.
+ *
+ * Nothing, when the answer has landed for a completed request: the reply is
+ * already its own message on screen, so an outcome line would be a second
+ * message saying nothing, deleted ten seconds later for the owner's scroll.
+ * `failed`, `cancelled` and `queued` keep theirs, and so does a completed
+ * request whose answer could not be delivered — there the line is the only
+ * signal that the turn is over.
+ */
+function progressTerminalText(outcome: ProgressOutcome, delivered: boolean): string | undefined {
+  if (outcome === 'completed') return delivered ? undefined : 'Forge: completed.';
   if (outcome === 'cancelled') return 'Forge: cancelled.';
   if (outcome === 'queued') return 'Forge: queued.';
   return 'Forge: failed.';

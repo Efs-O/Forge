@@ -2,6 +2,7 @@ import * as vscode from 'vscode';
 import type { ForgeConfig } from '../config/types';
 import { RelaySleepServer } from '../remote/RelaySleepServer';
 import type { ForgeHostFacade } from '../sidebar/ForgeHostFacade';
+import { thisWindowHostedElsewhere } from './remoteWindowKind';
 
 /**
  * Start the wake relay if `remote.wake_relay.enabled`. Split out of
@@ -16,6 +17,12 @@ export async function startWakeRelay(
 ): Promise<void> {
   const wakeRelay = config.remote?.wake_relay;
   if (!wakeRelay?.enabled) return;
+  // The desktop's own Forge window already binds this port, and a tunnel or SSH
+  // window's SecretStorage is the keychain of the machine being typed on, which
+  // holds no relay secret. A WSL, container or Codespaces window is this
+  // computer's own, so `remoteWindowKind.ts` leaves it binding the relay.
+  // `remoteRuntimeSetup` logs the reason once, so stay silent here.
+  if (thisWindowHostedElsewhere()) return;
   const relayServer = new RelaySleepServer();
   try {
     await relayServer.start({

@@ -38,7 +38,7 @@ describe('availableStates', () => {
 
 describe('broadcastAddress', () => {
   it('computes the subnet broadcast a magic packet must target', () => {
-    expect(broadcastAddress('192.168.1.70', 24)).toBe('192.168.1.255');
+    expect(broadcastAddress('192.0.2.10', 24)).toBe('192.0.2.255');
     expect(broadcastAddress('10.20.30.40', 16)).toBe('10.20.255.255');
   });
 
@@ -51,8 +51,8 @@ describe('broadcastAddress', () => {
 
   it('rejects malformed input rather than guessing', () => {
     expect(broadcastAddress('192.168.1', 24)).toBeNull();
-    expect(broadcastAddress('192.168.1.999', 24)).toBeNull();
-    expect(broadcastAddress('192.168.1.1', 33)).toBeNull();
+    expect(broadcastAddress('192.0.2.999', 24)).toBeNull();
+    expect(broadcastAddress('192.0.2.1', 33)).toBeNull();
   });
 });
 
@@ -64,8 +64,8 @@ describe('parseWakeInfo', () => {
       {
         name: 'Ethernet',
         description: 'Intel(R) Ethernet Connection (7) I219-V',
-        mac: 'E0-D5-5E-73-F7-88',
-        ip: '192.168.1.70',
+        mac: '00-00-5E-00-53-01',
+        ip: '192.0.2.10',
         prefix: 24,
         magic: 'Enabled',
       },
@@ -77,7 +77,7 @@ describe('parseWakeInfo', () => {
     const info = parseWakeInfo(payload, true);
     expect(info.adapters).toHaveLength(1);
     expect(info.adapters[0]!.wakeArmed).toBe(true);
-    expect(info.adapters[0]!.broadcast).toBe('192.168.1.255');
+    expect(info.adapters[0]!.broadcast).toBe('192.0.2.255');
     expect(info.adapters[0]!.magicPacketEnabled).toBe(true);
     expect(info.armedWake).toBe('08/09/2026 07:00:00');
   });
@@ -175,9 +175,9 @@ describe('formatWakeInfo', () => {
       {
         name: 'Ethernet',
         description: 'Intel(R) Ethernet Connection (7) I219-V',
-        macAddress: 'E0-D5-5E-73-F7-88',
-        ipAddress: '192.168.1.70',
-        broadcast: '192.168.1.255',
+        macAddress: '00-00-5E-00-53-01',
+        ipAddress: '192.0.2.10',
+        broadcast: '192.0.2.255',
         wakeArmed: true,
         magicPacketEnabled: true,
       },
@@ -190,8 +190,8 @@ describe('formatWakeInfo', () => {
 
   it('leads with the details a WoL app needs', () => {
     const text = formatWakeInfo(base);
-    expect(text).toContain('E0-D5-5E-73-F7-88');
-    expect(text).toContain('192.168.1.255');
+    expect(text).toContain('00-00-5E-00-53-01');
+    expect(text).toContain('192.0.2.255');
     expect(text).toContain('UDP port 9');
   });
 

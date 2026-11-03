@@ -2,148 +2,27 @@ import * as fs from 'fs';
 import * as path from 'path';
 import * as vscode from 'vscode';
 import type { RegisteredTool } from './ToolRegistry';
-import { resolveRealWorkspacePath, resolveWorkspacePath } from '../util/WorkspacePaths';
-import { mimeFromHeader } from './imageTool';
-import { MAX_READ_FILE_CHARS, capResultText } from './resultCap';
-import { describePathMiss } from './pathErrorHint';
+import { resolveRealWorkspacePath } from '../util/WorkspacePaths';
 import { writeFileAtomicSync } from '../util/atomicWrite';
-
-/** How much of a file to sniff for NUL bytes before calling it binary. */
-const BINARY_SNIFF_BYTES = 8000;
+import { withFileLengthWarning, type FileLengthWarningGetter } from './fileLengthWarning';
+import { NO_PROBLEM_WATCHER, withProblemNote, type ProblemWatcher } from './editDiagnostics';
 
 /**
- * Binary files have no business being decoded as UTF-8 and fed to a model — a
- * 1.3 MB PNG became ~1.3 M characters of replacement glyphs and exhausted a
- * one-slot context in a single tool result. Refuse, and for an image name the
- * tool that does handle it rather than leaving the model to find a workaround.
+ * `read_file` moved to `src/tools/readFileTool.ts` on 2026-10-29 (tool-trim
+ * lane A, item A3): this file was 463 lines against the eslint `max-lines` gate
+ * at 500, and multi-range reads did not fit in the headroom that was left. The
+ * re-export is deliberate — `registerAllTools.ts`, `FileToolExecution`,
+ * `BatchEditExecution`, `OwnerOnlyFileTools` and the live capability harness all
+ * import `makeReadFileTool` from here, so the split cost no call-site churn.
+ * `docs/OWNERS.md` now names `readFileTool.ts` as the owner of file reads.
  */
-function binaryRefusal(bytes: Buffer, requestedPath: string): string | null {
-  const imageMime = mimeFromHeader(bytes);
-  if (imageMime) {
-    return (
-      `read_file: ${requestedPath} is an image (${imageMime}), not text. Use view_image to look at it; ` +
-      'view_image itself says so if the active model has no vision.'
-    );
-  }
-  if (!bytes.subarray(0, BINARY_SNIFF_BYTES).includes(0)) return null;
-  return `read_file: ${requestedPath} appears to be a binary file, not text. Refusing to decode it as UTF-8.`;
-}
+export { makeReadFileTool } from './readFileTool';
 
-/** Bound every read_file return path; a range re-read is the way to get more. */
-function capRead(text: string): string {
-  return capResultText(
-    text,
-    MAX_READ_FILE_CHARS,
-    'read_file',
-    'Re-read a smaller range with start_line and end_line to see the rest.',
-  );
-}
-
-/** `read_file`. Reads any path on disk: refusing outside the workspace bought
- *  nothing, because list_directory and shell already read anywhere —
- *  Strata spent ~15 calls on `Get-Content` workarounds after a refusal. Writes
- *  and deletes stay workspace-scoped; checkpoints only cover the workspace. */
-export function makeReadFileTool(): RegisteredTool {
-  return {
-    definition: {
-      type: 'function',
-      function: {
-        name: 'read_file',
-        description:
-          "Read a file's contents. Returns the whole file by default; pass start_line/end_line (1-based, inclusive) to read only a range — prefer a range for large files to save context.",
-        parameters: {
-          type: 'object',
-          properties: {
-            path: {
-              type: 'string',
-              description:
-                'Workspace-relative or absolute path; an absolute path may be anywhere on disk. ' +
-                'Include a nested repository directory prefix.',
-            },
-            start_line: {
-              type: 'integer',
-              minimum: 1,
-              description: 'Optional 1-based first line to read (inclusive).',
-            },
-            end_line: {
-              type: 'integer',
-              minimum: 1,
-              description:
-                'Optional 1-based last line to read (inclusive). Defaults to end of file.',
-            },
-            numbered: {
-              type: 'boolean',
-              description:
-                'Prefix each line with its number as "  12|text". Pass it when your answer will ' +
-                'cite line numbers (a review, an audit) or for apply_line_edits. ' +
-                'The line starts right after the first "|": never copy the prefix into ' +
-                'old_str or expected_lines.',
-            },
-          },
-          required: ['path'],
-          additionalProperties: false,
-        },
-      },
-    },
-    permission: 'read',
-    handler: async (args) => {
-      const filePath = resolveWorkspacePath(args['path'] as string);
-      let bytes: Buffer;
-      try {
-        bytes = fs.readFileSync(filePath);
-      } catch (err) {
-        throw new Error(describePathMiss('read_file', args['path'] as string, err));
-      }
-      const refusal = binaryRefusal(bytes, args['path'] as string);
-      if (refusal) throw new Error(refusal);
-      const content = bytes.toString('utf8');
-
-      const startLine = typeof args['start_line'] === 'number' ? args['start_line'] : undefined;
-      const endLine = typeof args['end_line'] === 'number' ? args['end_line'] : undefined;
-      const numbered = args['numbered'] === true;
-      if (startLine === undefined && endLine === undefined && !numbered) return capRead(content);
-
-      // A final newline ends the last line; it does not start another. Counting
-      // the empty tail showed a phantom line 501 on a 500-line file, which is
-      // exactly the off-by-one that sent Qwen splitting files ESLint accepted.
-      const lines = content.split('\n');
-      if (lines.length > 1 && lines[lines.length - 1] === '') lines.pop();
-      const start = Math.max(1, startLine ?? 1);
-      const end = Math.min(lines.length, endLine ?? lines.length);
-      if (start > lines.length) {
-        throw new Error(
-          `read_file: start_line ${start} is past the end of the file (${lines.length} lines).`,
-        );
-      }
-      if (start > end) {
-        throw new Error(
-          `read_file: start_line ${start} is past end_line ${end} (file has ${lines.length} lines).`,
-        );
-      }
-      const selected = lines.slice(start - 1, end);
-      if (!numbered) return capRead(selected.join('\n'));
-      // `apply_line_edits` wants 1-based line numbers, but the only way to read
-      // a file gave none — so the model counted them itself and got it wrong:
-      // 14 of its 19 calls failed on stale or miscounted `expected_lines`.
-      const width = String(end).length;
-      // No space after the "|". A separator of "| " is NOT reversible: the
-      // model cannot tell the separator's space from the line's first column,
-      // so every old_str composed from a numbered read carries one extra
-      // leading space and edit_file refuses text that was quoted perfectly.
-      // That is what stalled the 2026-09-05 config.yaml session — six edit
-      // attempts, all off by exactly one space, against a YAML file where
-      // indentation is load-bearing. The number is right-padded instead, so
-      // the "|" column still lines up and the character after it is column 1.
-      return capRead(
-        selected
-          .map((line, index) => `${String(start + index).padStart(width, ' ')}|${line}`)
-          .join('\n'),
-      );
-    },
-  };
-}
-
-export function makeWriteFileTool(extraRoots: () => readonly string[] = () => []): RegisteredTool {
+export function makeWriteFileTool(
+  extraRoots: () => readonly string[] = () => [],
+  lengthWarning: FileLengthWarningGetter = () => undefined,
+  watchProblems: ProblemWatcher = NO_PROBLEM_WATCHER,
+): RegisteredTool {
   return {
     definition: {
       type: 'function',
@@ -151,7 +30,9 @@ export function makeWriteFileTool(extraRoots: () => readonly string[] = () => []
         name: 'write_file',
         description:
           'Write content to a file, creating it (and any missing directories) if needed. ' +
-          'Overwrites any existing content. Write the whole file in one call, even when large; do not split it into part-files to join with the shell. If a call is cut off, Forge reports that and gives the retry size.',
+          'Overwrites any existing content. Write the whole file in one call, even when large; ' +
+          'do not split it into part-files to join with the shell. If a call is cut off, Forge ' +
+          'reports that and gives the retry size.',
         parameters: {
           type: 'object',
           properties: {
@@ -164,47 +45,13 @@ export function makeWriteFileTool(extraRoots: () => readonly string[] = () => []
               type: 'string',
               description: 'File content to write.',
             },
-          },
-          required: ['path', 'content'],
-          additionalProperties: false,
-        },
-      },
-    },
-    permission: 'write',
-    mutation: { paths: (args) => [args['path'] as string], showDiff: true },
-    handler: async (args) => {
-      const filePath = await resolveRealWorkspacePath(args['path'] as string, undefined, {
-        allowMissing: true,
-        extraRoots: extraRoots(),
-      });
-      const content = args['content'] as string;
-      fs.mkdirSync(path.dirname(filePath), { recursive: true });
-      writeFileAtomicSync(filePath, content);
-      return `Written ${filePath}`;
-    },
-  };
-}
-
-export function makeAppendFileTool(extraRoots: () => readonly string[] = () => []): RegisteredTool {
-  return {
-    definition: {
-      type: 'function',
-      function: {
-        name: 'append_file',
-        description:
-          'Append content to the end of a file, creating it (and any missing directories) ' +
-          'if it does not exist.',
-        parameters: {
-          type: 'object',
-          properties: {
-            path: {
+            mode: {
               type: 'string',
+              enum: ['overwrite', 'append'],
               description:
-                'Workspace-relative or absolute path. Include a nested repository directory prefix.',
-            },
-            content: {
-              type: 'string',
-              description: 'Content to append verbatim. No separator is inserted.',
+                '"overwrite" (default) replaces existing content; "append" adds to the end of ' +
+                'the file, creating it when absent. Use append only to continue a write that ' +
+                'was cut off.',
             },
           },
           required: ['path', 'content'],
@@ -214,18 +61,48 @@ export function makeAppendFileTool(extraRoots: () => readonly string[] = () => [
     },
     permission: 'write',
     mutation: { paths: (args) => [args['path'] as string], showDiff: true },
-    handler: async (args) => {
+    handler: async (args, context) => {
+      const mode = args['mode'];
+      if (mode !== undefined && mode !== 'overwrite' && mode !== 'append') {
+        throw new Error(
+          `write_file: mode must be "overwrite" or "append", not ${JSON.stringify(mode)}.`,
+        );
+      }
       const filePath = await resolveRealWorkspacePath(args['path'] as string, undefined, {
         allowMissing: true,
         extraRoots: extraRoots(),
       });
       const content = args['content'] as string;
       fs.mkdirSync(path.dirname(filePath), { recursive: true });
-      // appendFileSync creates the file when absent, so a chunked write can
-      // start with either tool.
-      fs.appendFileSync(filePath, content, 'utf8');
-      const total = fs.statSync(filePath).size;
-      return `Appended ${content.length} chars to ${filePath} (${total} bytes total)`;
+      // Snapshot before the write, whatever the mode: the append path is where a
+      // cut-off write resumes, and a resumed write can introduce an error too.
+      // Awaiting the watcher here is what opens the document first, so the
+      // language service sees the bytes this call is about to write.
+      const watch = await watchProblems(filePath);
+      if (mode === 'append') {
+        // The chunked-write path: appendFileSync creates the file when absent, so
+        // a resumed write can start with either mode, and the growing file has to
+        // be measured here too - not only on a full write - or the length warning
+        // never fires on a file built across calls.
+        fs.appendFileSync(filePath, content, 'utf8');
+        const total = fs.statSync(filePath).size;
+        const note = watch ? await watch.settle(context?.abortSignal) : '';
+        return withFileLengthWarning(
+          withProblemNote(
+            `Appended ${content.length} chars to ${filePath} (${total} bytes total)`,
+            note,
+          ),
+          filePath,
+          lengthWarning(),
+        );
+      }
+      writeFileAtomicSync(filePath, content);
+      const note = watch ? await watch.settle(context?.abortSignal) : '';
+      return withFileLengthWarning(
+        withProblemNote(`Written ${filePath}`, note),
+        filePath,
+        lengthWarning(),
+      );
     },
   };
 }

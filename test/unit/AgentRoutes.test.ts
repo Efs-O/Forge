@@ -1,13 +1,13 @@
 import { execFile } from 'child_process';
 import * as fs from 'fs';
 import * as http from 'http';
-import type { AddressInfo } from 'net';
 import * as os from 'os';
 import * as path from 'path';
-import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, inject, it, vi } from 'vitest';
 import {
   busPaths,
   clearExchange,
+  replyFile,
   waitForReply,
   writeQuestion,
   type BusPaths,
@@ -16,8 +16,27 @@ import { AgentRoutes } from '../../src/backend/agentRoutes';
 import { PendingAgentReplies } from '../../src/agentLinks/pendingAgentReplies';
 import { windowEndpointPath } from '../../src/agentBus/windowEndpoints';
 import { TEST_BASH } from '../support/bash';
+import { listenLoopback } from '../support/listenLoopback';
 
 const TOKEN = 'f'.repeat(64);
+
+function gitBashPath(windowsPath: string): string {
+  const match = /^([A-Za-z]):[\\/](.*)$/u.exec(windowsPath);
+  if (!match) return windowsPath.replace(/\\/gu, '/');
+  return `/${match[1].toLowerCase()}/${match[2].replace(/\\/gu, '/')}`;
+}
+
+/** Keep MSYS's /tmp mount alive until the whole Vitest run ends. */
+function gitBashEnvironment(overrides: Record<string, string> = {}): NodeJS.ProcessEnv {
+  const runDir = inject('tempGuardRunDir');
+  return {
+    ...process.env,
+    ...overrides,
+    ...(process.platform === 'win32' ? { TEMP: runDir, TMP: runDir } : {}),
+    TMPDIR: process.platform === 'win32' ? gitBashPath(runDir) : runDir,
+  };
+}
+
 let home: string;
 let paths: BusPaths;
 let accepted: string[];
@@ -33,8 +52,8 @@ let focused: boolean;
 beforeAll(async () => {
   home = await fs.promises.mkdtemp(path.join(os.tmpdir(), 'forge-agent-routes-'));
   server = http.createServer((req, res) => void routes.handle(req, res));
-  await new Promise<void>((r) => server.listen(0, '127.0.0.1', r));
-  base = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
+  const port = await listenLoopback(server);
+  base = `http://127.0.0.1:${port}`;
 });
 
 beforeEach(async () => {
@@ -471,6 +490,26 @@ describe('routes', () => {
     expect([...queuedFrom.keys()]).toEqual(['m3']);
   });
 
+  it('reads the query when the body claims form data and is empty (audit F7)', async () => {
+    await post('/agent/message?from=claude', 'one');
+    await post('/agent/message?from=claude', 'two');
+    // The request an agent types itself instead of running forge.sh: fields in
+    // the query string, and a POST whose Content-Type claims form data while
+    // its body is empty (curl sets that Content-Type for `-d ''`). The form
+    // branch read only the body, so the `from` the request did send went
+    // missing and the error blamed the one field that was there (audit F7).
+    const noId = await post('/agent/cancel?from=claude', '', {
+      type: 'application/x-www-form-urlencoded',
+    });
+    expect(noId.status).toBe(400);
+    expect(noId.body.error).toContain('id is required');
+    expect(noId.body.error).not.toContain('from must be');
+    const cancelled = await post('/agent/cancel?from=claude&id=m1', '', {
+      type: 'application/x-www-form-urlencoded',
+    });
+    expect(cancelled).toEqual({ status: 200, body: { cancelled: 1 } });
+  });
+
   it('delivers a reply to the waiting question, and the exchange leaves only the shipped files', async () => {
     writeQuestion(paths, 'fg1-abc', 's', 'q');
     const waiting = waitForReply(paths, 'fg1-abc', 5_000, undefined, 10);
@@ -490,6 +529,29 @@ describe('routes', () => {
     ]);
     expect(fs.readdirSync(paths.inbox)).toEqual([]);
     expect(fs.readdirSync(paths.outbox)).toEqual([]);
+  });
+
+  it('says so when a reply reaches a question nobody is waiting on (audit F7)', async () => {
+    // `reply` answered `delivered: true` for any well-formed id, whether or not
+    // Forge was still waiting for it. The question file is withdrawn the moment
+    // the ask ends (answered, timed out or aborted) and swept after 24 h, and
+    // nothing reads a reply file after that, so the caller kept an answer that
+    // had nowhere to go. It is not written either: the ledger row for the reply
+    // outbox says a finished exchange leaves nothing behind.
+    const res = await post('/agent/reply?id=nobody-waits', 'the answer');
+    expect(res).toEqual({
+      status: 200,
+      body: { accepted: true, live: false, note: expect.stringContaining('not waiting') },
+    });
+    expect(fs.existsSync(replyFile(paths, 'nobody-waits'))).toBe(false);
+    // The waiting case still answers the way a caller that has an answer to
+    // deliver needs: the question file is the record that someone is polling.
+    writeQuestion(paths, 'fg3-def', 's', 'q');
+    expect(await post('/agent/reply?id=fg3-def', 'the answer')).toEqual({
+      status: 200,
+      body: { delivered: true },
+    });
+    clearExchange(paths, 'fg3-def');
   });
 
   it('refuses other methods and paths', async () => {
@@ -574,7 +636,7 @@ function runClient(
     const child = execFile(
       bash,
       [paths.script.replace(/\\/g, '/'), ...args],
-      { timeout: timeoutMs, env: { ...process.env, ...env }, cwd },
+      { timeout: timeoutMs, env: gitBashEnvironment(env), cwd },
       (err, stdout, stderr) => {
         const code = err ? ((err as { code?: number }).code ?? 1) : 0;
         resolve({ code: typeof code === 'number' ? code : 1, out: stdout + stderr });
@@ -598,7 +660,7 @@ describe.skipIf(!TEST_BASH)('forge.sh against the routes', () => {
         execFile(
           bash,
           ['-c', 'test -f "$1" && command -v curl >/dev/null', '_', probe.replace(/\\/g, '/')],
-          { timeout: 10_000 },
+          { timeout: 10_000, env: gitBashEnvironment() },
           (err) => resolve(!err),
         ),
       ));
@@ -615,7 +677,7 @@ describe.skipIf(!TEST_BASH)('forge.sh against the routes', () => {
   it('say starts a message and reply answers a question', async (ctx) => {
     if (!usable) ctx.skip();
     const said = await runClient(['say', 'claude-review'], 'hello Forge\n');
-    expect(said).toMatchObject({ code: 0 });
+    expect(said, said.out).toMatchObject({ code: 0 });
     expect(accepted[0]).toContain('**claude-review says:**\n\nhello Forge');
     expect(said.out).toContain('"id":"m1"');
     const cancelled = await runClient(['cancel', 'claude-review', 'm1'], '');
@@ -1561,7 +1623,7 @@ describe('forge.sh who against the routes (§11)', () => {
         execFile(
           bash,
           ['-c', 'test -f "$1" && command -v curl >/dev/null', '_', probe.replace(/\\/g, '/')],
-          { timeout: 10_000 },
+          { timeout: 10_000, env: gitBashEnvironment() },
           (err) => resolve(!err),
         ),
       ));

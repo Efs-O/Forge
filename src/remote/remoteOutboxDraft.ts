@@ -10,6 +10,8 @@ export function appendHostNotification(
   text: string,
   ephemeral = false,
   requestId = `host-${randomUUID()}`,
+  /** Appended to the last Telegram part at send time; never part of `text`. */
+  speedLine?: string | undefined,
 ): string {
   const id = randomUUID();
   draft.outbox.push({
@@ -22,6 +24,7 @@ export function appendHostNotification(
     attempts: 0,
     updatedAt: Date.now(),
     ...(ephemeral ? { ephemeral: true } : {}),
+    ...(speedLine ? { speedLine } : {}),
   });
   return id;
 }

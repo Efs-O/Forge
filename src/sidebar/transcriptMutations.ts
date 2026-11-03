@@ -9,7 +9,7 @@ import type { AttachmentData } from './messageBridge';
 import type { ChatAttachmentRef } from '../llm/types';
 import type { ConversationRuntime } from './sessionTypes';
 import { buildUserContent } from './ConversationOps';
-import { deriveTitle } from './sessionTypes';
+import { deriveTitle, stripHeadingMarker } from './sessionTypes';
 import { parseForgeInboundPrompt } from '../agentBus/busContent';
 import type { AgentSenderMetadata } from '../agentLinks/chatAgentLinks';
 
@@ -49,18 +49,36 @@ export function appendUserPrompt(
     ...(options?.attachmentRefs?.length ? { attachments: options.attachmentRefs } : {}),
     ...(options?.sender ? { agentSender: options.sender } : {}),
   });
-  if (priorUserCount === 0) conv.title = deriveTitle(titleLine(text));
+  // A chat named before its first prompt keeps that name: `message_chat`
+  // `new_chat` names a worker after its task (`auto`), and the first prompt is
+  // the `📨 Message from …` wrapper, which named every worker the same.
+  if (priorUserCount === 0 && conv.title_source !== 'user' && conv.title_source !== 'auto') {
+    // Named from the prompt, and marked as such: the daily retitle job proposes
+    // new names only for chats still marked `prompt` (`retitleRun.ts`).
+    const named = titleLine(text);
+    conv.title = deriveTitle(named.line);
+    conv.title_source = 'prompt';
+    // Who started it, recorded next to the name rather than inside it, so the
+    // panel can show it as a badge without putting `claude: ` in front of every
+    // agent-started chat's title.
+    if (named.originAgent) conv.origin_agent = named.originAgent;
+  }
 }
 
 /**
- * The line a conversation is named from. A bus prompt's first line is its
- * `**codex says:**` header, which named every agent-started chat the same.
+ * The line a conversation is named from, and who sent the prompt it came from.
+ *
+ * A bus prompt's first line is its `**codex says:**` header, which named every
+ * agent-started chat the same thing; the header used to be pasted in front of
+ * the brief, so seven rows read `Claude: Claude here, with an owner-…`. The
+ * sender now travels as `origin_agent` instead, and the title is the brief's
+ * own first non-empty line, with any leading `# ` heading marker stripped.
  */
-function titleLine(text: string): string {
+function titleLine(text: string): { line: string; originAgent?: string } {
   const bus = parseForgeInboundPrompt(text);
-  if (!bus) return text.split('\n')[0] ?? text;
+  if (!bus) return { line: text.split('\n')[0] ?? text };
   const first = bus.text.split('\n').find((line) => line.trim()) ?? '';
-  return `${bus.from}: ${first}`;
+  return { line: stripHeadingMarker(first), originAgent: bus.from };
 }
 
 /** Fold one model request's token usage into the running totals. */

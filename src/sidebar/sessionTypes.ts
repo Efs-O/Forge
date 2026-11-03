@@ -4,15 +4,16 @@
 
 import { z } from 'zod';
 import type { CompactionState } from './compactionTypes';
+import type { ForgeInstructionsPin } from './forgeInstructionsPin';
 import type { ContextTrimState } from '../agent/toolResultContext';
 import type { PromptAnchor } from '../util/contextBudget';
 import {
   agentLinksSchema,
-  agentSenderMetadataSchema,
   type AgentLinks,
   type AgentSenderMetadata,
 } from '../agentLinks/chatAgentLinks';
 import { compactionPersistedSchema } from './compactionPersistedSchema';
+import { PLAN_STATUSES, canonicalPlanStatus } from './planStatus';
 export {
   createDefaultSession,
   loadSidebarSession,
@@ -22,12 +23,27 @@ export {
   upsertHistoryConversation,
 } from './sessionPersistence';
 import type { ChatAttachmentRef, ChatMessage } from '../llm/types';
-import { stripImageParts } from './imageParts';
 import type { DiffHunk } from './messageBridge';
+import { slimMsgSchema } from './slimPersist';
+// Only for the `title_source` field below; the same name is re-exported from
+// `conversationTitle.ts` at the bottom of this block, which does not bring it
+// into this file's scope.
+import type { TitleSource } from './conversationTitle';
 
 // Naming lives in its own module; re-exported here because sessionTypes is
 // the import site every caller already reaches for.
-export { UNTITLED_TITLE, deriveTitle, displayTitle, isUntitled } from './conversationTitle';
+export {
+  UNTITLED_TITLE,
+  deriveTitle,
+  displayTitle,
+  isUntitled,
+  stripHeadingMarker,
+  titleSourceOf,
+  type TitleSource,
+} from './conversationTitle';
+
+// The slim persisted message form lives in its own module; re-exported here for the same reason.
+export { type SlimPersistMessage, slimPersistMessages, chatMessagesFromSlim } from './slimPersist';
 
 /** Max open tabs — bounds workspaceState size and UI. */
 export const MAX_CONVERSATIONS = 12;
@@ -39,10 +55,11 @@ export const MAX_HISTORY_CONVERSATIONS = 40;
  * toast and every transport that surfaces the facade's error.
  */
 export function chatCapMessage(reasons: readonly string[]): string {
-  return reasons.length === 0
-    ? `Forge: all ${MAX_CONVERSATIONS} open chats are at the cap.`
-    : `Forge: no open chat can be archived — ${reasons.join(', ')}. ` +
-        'Archive one yourself (✕ on its tab) or unload its model, then try again.';
+  if (reasons.length === 0) return `Forge: all ${MAX_CONVERSATIONS} open chats are at the cap.`;
+  const nextStep = reasons.includes('auto-archive is disabled')
+    ? 'Archive one yourself (✕ on its tab) or enable inactivity archiving and wait for its grace period, then try again.'
+    : 'Archive one yourself (✕ on its tab) or wait for an eligible chat to expire, then try again.';
+  return `Forge: no open chat can be archived — ${reasons.join(', ')}. ${nextStep}`;
 }
 
 export const HISTORY_KEY_LEGACY = 'forge.conversation.history';
@@ -56,58 +73,6 @@ export const SESSION_KEY_V1_CORRUPT = 'forge.conversations.v1.corrupt';
  * switch does not have to rewrite it. See `saveActiveConversationId`.
  */
 export const ACTIVE_ID_KEY = 'forge.conversations.activeId';
-
-const toolCallSchema = z.object({
-  id: z.string(),
-  type: z.literal('function'),
-  function: z.object({ name: z.string(), arguments: z.string() }),
-});
-
-function textContent(content: ChatMessage['content']): string | null {
-  if (typeof content === 'string') return content;
-  if (!Array.isArray(content)) return null;
-  const text = content
-    .filter((part) => part.type === 'text')
-    .map((part) => part.text)
-    .join('\n');
-  return text || null;
-}
-
-/**
- * A tool-calling assistant turn carries `content: null` + `tool_calls`, and its
- * results come back as `role: 'tool'`; filtering those out dropped every trace
- * of tool activity at write time.
- *
- * Backward compatible: every field added here is optional and `content` only
- * widened, so records written by earlier versions still parse unchanged.
- */
-/** Metadata only — the bytes live under the ChatAttachmentStore root. */
-const attachmentRefSchema = z.object({
-  name: z.string(),
-  mediaType: z.string(),
-  bytes: z.number(),
-  relativePath: z.string(),
-});
-
-const slimMsgSchema = z.object({
-  role: z.enum(['user', 'assistant', 'tool']),
-  content: z.string().nullable(),
-  createdAt: z.number().optional(),
-  reasoning: z.string().optional(),
-  /** Measured spans. Optional, so records written before 0.15.12 still parse. */
-  reasoningMs: z.number().optional(),
-  toolMs: z.number().optional(),
-  stampedAt: z.number().optional(),
-  tool_calls: z.array(toolCallSchema).optional(),
-  tool_call_id: z.string().optional(),
-  name: z.string().optional(),
-  internal: z.boolean().optional(),
-  midTurn: z.boolean().optional(),
-  agentSender: agentSenderMetadataSchema.optional(),
-  attachments: z.array(attachmentRefSchema).optional(),
-  turnContext: z.string().optional(),
-});
-export type SlimPersistMessage = z.infer<typeof slimMsgSchema>;
 
 /** Subset of the transcript which can be safely restored into the webview. */
 export type DisplayPersistMessage =
@@ -189,7 +154,7 @@ export const PLAN_ITEM_MAX_CHARS = 500;
 export const planItemSchema = z
   .object({
     text: z.string().min(1).max(PLAN_ITEM_MAX_CHARS),
-    status: z.enum(['pending', 'active', 'done']),
+    status: z.preprocess(canonicalPlanStatus, z.enum(PLAN_STATUSES)),
   })
   .strict();
 
@@ -202,10 +167,21 @@ export interface ConversationPlan {
 export const conversationPersistedSchema = z.object({
   id: z.string().min(1),
   title: z.string(),
+  // The same three values as `TitleSource` in `conversationTitle.ts`, optional
+  // so every record written before it still parses. See `titleSourceOf` there.
+  title_source: z.enum(['prompt', 'user', 'auto']).optional(),
+  // Who started the chat, when a bus prompt did — the sender name as the bus
+  // wrote it. Optional: every record written before it must still parse.
+  origin_agent: z.string().min(1).max(64).optional(),
   createdAt: z.number(),
   updatedAt: z.number(),
+  /** Last user-facing conversation activity; independent of history ordering. */
+  retention_activity_at: z.number().finite().int().min(0).optional(),
+  /** Explicitly keep this open while automatic inactivity archiving is enabled. */
+  keep_open: z.boolean().optional(),
   messages: z.array(slimMsgSchema),
   agentLinks: agentLinksSchema.optional(),
+  opened_by: z.string().min(1).optional(),
   active_model: z.string().optional(),
   cli_sessions: z.record(z.string(), z.string().min(1)).optional(),
   // Optional, so records written before compaction existed still parse.
@@ -219,6 +195,14 @@ export const conversationPersistedSchema = z.object({
       updatedAt: z.number().int(),
     })
     .optional(),
+  forge_instructions_pin: z
+    .object({
+      text: z.string(),
+      windowStart: z.number().int().min(0),
+      announced: z.object({ text: z.string(), messageIndex: z.number().int() }).strict().optional(),
+    })
+    .strict()
+    .optional(),
   // Optional migration field: previews written by older Forge versions were
   // only live webview state and therefore were not recoverable after a sync.
   display_diffs: z.array(displayDiffSchema).optional(),
@@ -231,6 +215,33 @@ export const conversationPersistedSchema = z.object({
   last_output_tokens: z.number().int().min(0).optional(),
   model_request_count: z.number().int().min(0).optional(),
   tool_call_count: z.number().int().min(0).optional(),
+  /**
+   * Epoch ms of the moment content from outside this machine first entered this
+   * chat (`src/tools/exfilTaint.ts`). Optional so every record written before
+   * phase 4 parses unchanged; kept beside `compaction` rather than inside it, so
+   * a reload cannot clear the flag while the page that brought it in is still in
+   * context and compaction can still summarize that page away.
+   */
+  untrusted_since_ms: z.number().int().min(0).optional(),
+  /**
+   * The approval keys this chat has been allowed (`src/sidebar/chatApprovalRules.ts`),
+   * one string per key, each in the shape `src/sidebar/approvalKey.ts` validates.
+   * Optional so every record written before phase 2 parses unchanged, and bounded
+   * because a chat's rules are written by clicks, not by a model: 200 keys is more
+   * than a chat can click through, and an unbounded list would be a record a
+   * corrupted save could grow without end.
+   */
+  approval_rules: z.array(z.string().min(1).max(400)).max(200).optional(),
+  /**
+   * Whether THIS chat has Clanker on (`src/sidebar/ToolApprovalService.ts`).
+   * Optional so every record written before it parses unchanged, and stored here
+   * rather than in a window-wide `workspaceState` key because the mode is a
+   * property of one conversation: a window that kept it for every tab let a chat
+   * that never armed it run unconfirmed, and the owner could not see which chat
+   * was armed. Records written by older Forge have no field, so every chat starts
+   * off after this update — the safer side of a mode that skips confirmations.
+   */
+  clanker: z.boolean().optional(),
 });
 
 export const sidebarSessionPersistedSchema = z.object({
@@ -246,11 +257,28 @@ export type ConversationPersisted = z.infer<typeof conversationPersistedSchema>;
 export interface ConversationRuntime {
   id: string;
   title: string;
+  /** Who named this chat: `prompt`, a person, or the daily retitle job. */
+  title_source?: TitleSource;
+  /**
+   * Who started this chat, when an agent-bus prompt did: the sender name as the
+   * bus wrote it (`claude`, `codex`, `copilot`, or another peer's name).
+   *
+   * Provenance, not a name: it survives a rename and a retitle, because who
+   * opened the chat does not change when what it is called does. The sessions
+   * panel renders it as a badge; it is never pasted into the title.
+   */
+  origin_agent?: string;
   createdAt: number;
   updatedAt: number;
+  /** Inactivity clock; tool rounds, title edits and redraws do not change it. */
+  retention_activity_at?: number;
+  /** Persists across archive and restore; manual Close still works. */
+  keep_open?: boolean;
   messages: ChatMessage[];
   /** Per-chat agent session links; only chatAgentLinks.ts mutates this field. */
   agentLinks?: AgentLinks;
+  /** Conversation id that opened this worker through message_chat new_chat. */
+  opened_by?: string;
   active_model?: string;
   /** Persistent external CLI sessions keyed by configured Forge model name. */
   cli_sessions?: Record<string, string>;
@@ -272,6 +300,23 @@ export interface ConversationRuntime {
    * worthless if the writer could choose it.
    */
   plan?: ConversationPlan;
+  /** FORGE.md text this chat's system prompt renders; see forgeInstructionsPin.ts. */
+  forgeInstructionsPin?: ForgeInstructionsPin;
+  /**
+   * The skills catalog this conversation's system prompt renders, frozen when it
+   * was first built (`src/skills/skillsService.ts`).
+   *
+   * Deliberately NOT persisted — `runtimeToPersisted` is an allowlist and these
+   * two fields are not on it. A reload rebuilds it from the roots as they are
+   * then, which is the plan's "catalog re-read at each new conversation" cell;
+   * within a conversation it never changes, because a skill added mid-chat would
+   * otherwise rewrite the prompt prefix and cost a cold re-read of the whole
+   * transcript. `skillsCatalogSignature` is the roots-and-enabled-flag the text
+   * was built from, so a workspace switch or a config change can invalidate it
+   * without a skill install doing so.
+   */
+  skillsCatalog?: string;
+  skillsCatalogSignature?: string;
   /** Durable presentation previews, deliberately separate from LLM messages. */
   displayDiffs?: ConversationDisplayDiff[];
   /**
@@ -319,6 +364,30 @@ export interface ConversationRuntime {
    * worth looking at.
    */
   tool_call_count?: number;
+  /**
+   * Epoch ms when outside content first entered this chat, and the reason its
+   * next egress costs an approval card (`src/sidebar/untrustedExitPolicy.ts`).
+   * Persisted, unlike the secret flag, because a reload clears an in-memory flag
+   * while the page it came from stays in context. Stamped by `AgentLoop` from
+   * the stored number, the live mark and the transcript — see `exfilTaint.ts`.
+   */
+  untrusted_since_ms?: number;
+  /**
+   * The approval keys this chat has been allowed to run without a card
+   * (`src/sidebar/chatApprovalRules.ts`). Cleared by `/clear`, a new chat, Reset
+   * approvals or deleting the chat, and never by turning Clanker off: an approval
+   * the owner made outlives the shortcut they also have.
+   */
+  approval_rules?: string[];
+  /**
+   * Clanker mode for this chat and no other: keyed calls run with no card, and
+   * anything with no key still gets one (`src/sidebar/chatApprovalRules.ts` §2 of
+   * `docs/plans/ASK_ONCE_APPROVALS_PLAN.md`). Persisted with the chat, so a window
+   * reload keeps the mode the owner armed, and cleared by `/clear`, a new chat or
+   * deleting the chat. Turning it off revokes nothing: an approval the owner made
+   * outlives the shortcut they also have.
+   */
+  clanker?: boolean;
 }
 
 export interface SidebarRuntime {
@@ -341,75 +410,4 @@ export function newConversationId(): string {
   } catch {
     return `c-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
   }
-}
-
-/**
- * Persistence view: keeps tool-call turns and tool results so a reloaded
- * conversation still knows what the agent actually did.
- *
- * `system` is still dropped (rebuilt per request). Array `content` is reduced to
- * its text parts — base64 image data must never land in workspaceState — but the
- * message itself survives now: keying off `role === 'tool'` meant a user prompt
- * sent WITH an attachment had array content, failed the `typeof === 'string'`
- * test, and was dropped whole, losing what the user actually asked. Dropping the
- * pixels silently is its own hazard, so a restored turn carries a note saying the
- * image is gone rather than an intact-looking success line.
- */
-export function slimPersistMessages(messages: ChatMessage[]): SlimPersistMessage[] {
-  const out: SlimPersistMessage[] = [];
-  // One implementation of image-part replacement, shared with the model-facing
-  // strip in ModelTurn. The reason picks the note, and `persist` is the only one
-  // that may claim the pixels are actually gone.
-  for (const m of stripImageParts(messages, { reason: 'persist' })) {
-    if (m.role !== 'user' && m.role !== 'assistant' && m.role !== 'tool') continue;
-    const persistedText = typeof m.content === 'string' ? m.content : textContent(m.content);
-    const hasText = typeof persistedText === 'string';
-    const hasToolCalls = Array.isArray(m.tool_calls) && m.tool_calls.length > 0;
-    const hasReasoning =
-      m.role === 'assistant' && typeof m.reasoning === 'string' && m.reasoning.length > 0;
-    // An assistant turn with tool_calls legitimately has content: null.
-    // A reasoning-only turn may also have content: null, and must survive reload.
-    if (!hasText && !hasToolCalls && !hasReasoning) continue;
-    out.push({
-      role: m.role,
-      content: hasText ? (persistedText as string) : null,
-      ...(typeof m.createdAt === 'number' ? { createdAt: m.createdAt } : {}),
-      ...(typeof m.reasoning === 'string' && m.reasoning.length > 0
-        ? { reasoning: m.reasoning }
-        : {}),
-      ...(typeof m.reasoningMs === 'number' ? { reasoningMs: m.reasoningMs } : {}),
-      ...(typeof m.toolMs === 'number' ? { toolMs: m.toolMs } : {}),
-      ...(typeof m.stampedAt === 'number' ? { stampedAt: m.stampedAt } : {}),
-      ...(typeof m.turnContext === 'string' ? { turnContext: m.turnContext } : {}),
-      ...(hasToolCalls ? { tool_calls: m.tool_calls } : {}),
-      ...(typeof m.tool_call_id === 'string' ? { tool_call_id: m.tool_call_id } : {}),
-      ...(typeof m.name === 'string' ? { name: m.name } : {}),
-      ...(m.internal ? { internal: true } : {}),
-      ...(m.midTurn ? { midTurn: true } : {}),
-      ...(m.agentSender ? { agentSender: m.agentSender } : {}),
-      ...(m.attachments?.length ? { attachments: m.attachments } : {}),
-    });
-  }
-  return out;
-}
-
-export function chatMessagesFromSlim(slim: SlimPersistMessage[]): ChatMessage[] {
-  return slim.map((m) => ({
-    role: m.role,
-    content: m.content,
-    ...(typeof m.createdAt === 'number' ? { createdAt: m.createdAt } : {}),
-    ...(typeof m.reasoning === 'string' && m.reasoning.length > 0
-      ? { reasoning: m.reasoning }
-      : {}),
-    ...(typeof m.reasoningMs === 'number' ? { reasoningMs: m.reasoningMs } : {}),
-    ...(typeof m.toolMs === 'number' ? { toolMs: m.toolMs } : {}),
-    ...(typeof m.turnContext === 'string' ? { turnContext: m.turnContext } : {}),
-    ...(m.tool_calls ? { tool_calls: m.tool_calls } : {}),
-    ...(typeof m.tool_call_id === 'string' ? { tool_call_id: m.tool_call_id } : {}),
-    ...(typeof m.name === 'string' ? { name: m.name } : {}),
-    ...(m.internal ? { internal: true } : {}),
-    ...(m.midTurn ? { midTurn: true } : {}),
-    ...(m.agentSender ? { agentSender: m.agentSender } : {}),
-    ...(m.attachments?.length ? { attachments: m.attachments } : {}),
-  }));
 }

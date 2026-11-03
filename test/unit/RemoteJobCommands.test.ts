@@ -158,13 +158,35 @@ describe('/job — pause and resume', () => {
     expect(result).toEqual({ kind: 'rejected', reason: 'unknown action: explode' });
   });
 
-  it('rejects a missing action', async () => {
+  it('a bare reference shows the job instead of the usage line', async () => {
+    // `/job <id>` is what the `run` reply now points at for the waits it names,
+    // so it has to answer with the job. The usage line stays for `/job` with
+    // nothing after it.
     await store.saveJob(job());
     const result = await run('/job disk');
-    expect(result).toEqual({
+    expect(result).toEqual({ kind: 'handled' });
+    const text = channel.sent.at(-1)!.text;
+    expect(text).toContain('Job "Disk" [disk]');
+    expect(text).toContain('schedule: every 15 min');
+
+    const usage = await run('/job');
+    expect(usage).toEqual({
       kind: 'rejected',
       reason: 'usage: /job <n|name> pause|resume|run|delete|chat',
     });
+  });
+
+  it('the show form names what a waiting job is waiting for', async () => {
+    await store.saveJob(job());
+    store.patchState('disk', {
+      task_pending: true,
+      task_pending_reason: 'its own conversation is streaming',
+    });
+
+    await run('/job disk');
+    expect(channel.sent.at(-1)!.text).toContain(
+      'pending: its own conversation is streaming',
+    );
   });
 });
 
@@ -177,6 +199,28 @@ describe('/job — run', () => {
     expect(fs.existsSync(path.join(root, 'run_requests', 'disk'))).toBe(true);
     const consumed = await store.consumeRunRequests();
     expect(consumed).toEqual(['disk']);
+  });
+
+  it('an agent task names the waits it still has to pass', async () => {
+    await store.saveJob(job({ action: { kind: 'agent_task', task: 'Tidy the notes folder' } }));
+
+    const result = await run('/job disk run');
+    expect(result).toEqual({ kind: 'handled' });
+    const text = channel.sent.at(-1)!.text;
+    // "the next scheduler tick" alone is only the whole truth for a check: an
+    // agent task also waits for the owner's chats to be quiet, and for a GPU
+    // when its model is local. The number is `USER_QUIET_MS` divided by a
+    // minute, so moving the quiet gate fails here instead of leaving this
+    // sentence quietly wrong.
+    expect(text).toContain('An agent task also waits until your own chats have been quiet for 10 minutes');
+    expect(text).toContain('and for a free GPU when its model is local');
+    expect(text).toContain('send /job disk to see what it is waiting for');
+  });
+
+  it('a check that is not an agent task claims no agent-task wait', async () => {
+    await store.saveJob(job());
+    await run('/job disk run');
+    expect(channel.sent.at(-1)!.text).not.toContain('agent task');
   });
 });
 

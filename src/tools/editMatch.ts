@@ -63,6 +63,60 @@ export function findEditMatch(content: string, oldStr: string): EditMatch | unde
   return { index: start, length: end - start };
 }
 
+/**
+ * Every place `oldStr` occurs in `content`, non-overlapping and in ascending
+ * order, as offsets into the ORIGINAL text.
+ *
+ * `replace_all` (tools-expansion lane F1, item 1.2) needs all of them, and it
+ * is here rather than a loop over `findEditMatch` in the tool for two reasons:
+ * looping would re-normalize a CRLF file once per occurrence, and the tool also
+ * needs to know how many copies it did NOT replace — the warning that says
+ * "2 more copies are still in the file" is the same scan, not a second one.
+ * The single pass keeps the fast path free of the origin map entirely. Line
+ * endings can only matter to a needle that contains one, so a single-line
+ * `old_str` is scanned plainly even on a CRLF file: Claude's review of 5de6d8b4
+ * found that every edit used to pay a full normalisation there, which made a
+ * 200-item `edits[]` on a CRLF file normalise the file 200 times — a char-by-char
+ * string build plus an origin array as long as the file, each time.
+ */
+export function findAllEditMatches(content: string, oldStr: string): EditMatch[] {
+  // Same pre-existing semantics as findEditMatch: an empty old_str is a
+  // zero-length match at offset 0, so it inserts. Stopping after one such match
+  // is deliberate — an empty needle at every offset would replace nothing and
+  // loop for the length of the file.
+  if (!oldStr) return [{ index: 0, length: 0 }];
+  const hits: EditMatch[] = [];
+  // Either the file has no CR to worry about, or old_str has no line ending in
+  // it — and a single-line old_str cannot straddle a line ending, so the plain
+  // byte scan finds the same copies at the same original offsets. Normalising
+  // here anyway was Claude's review of 5de6d8b4, item 3: it made every edit on
+  // a CRLF file cost a full pass over the file for no possible difference in
+  // the answer.
+  if (!content.includes('\r') || !/[\r\n]/u.test(oldStr)) {
+    for (
+      let at = content.indexOf(oldStr);
+      at !== -1;
+      at = content.indexOf(oldStr, at + oldStr.length)
+    ) {
+      hits.push({ index: at, length: oldStr.length });
+    }
+    return hits;
+  }
+  const haystack = normalize(content);
+  const needle = normalize(oldStr).text;
+  if (!needle) return [{ index: 0, length: 0 }];
+  for (
+    let at = haystack.text.indexOf(needle);
+    at !== -1;
+    at = haystack.text.indexOf(needle, at + needle.length)
+  ) {
+    const start = haystack.originOf[at];
+    const end = haystack.originOf[at + needle.length];
+    hits.push({ index: start, length: end - start });
+  }
+  return hits;
+}
+
 export interface IndentShiftedMatch extends EditMatch {
   /** `new_str` with the same shift applied, ready to splice. */
   newStr: string;

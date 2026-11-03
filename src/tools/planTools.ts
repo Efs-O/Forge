@@ -218,7 +218,9 @@ export function makeUpdatePlanTool(): RegisteredTool {
                   status: {
                     type: 'string',
                     enum: ['pending', 'active', 'done'],
-                    description: 'Exactly one item should be "active" at a time.',
+                    description:
+                      'Exactly one item should be "active" at a time. "in_progress" and ' +
+                      '"completed" are accepted and stored as "active" and "done".',
                   },
                 },
                 required: ['text', 'status'],

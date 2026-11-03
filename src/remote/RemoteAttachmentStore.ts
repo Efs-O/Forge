@@ -13,6 +13,7 @@ import type { AttachmentData } from '../sidebar/messageBridge';
 import { isTextMediaType } from './TelegramInboundMapping';
 import { mimeFromHeader } from '../tools/imageTool';
 import type { RemoteAttachmentReference, RemoteInboundAttachment } from './types';
+import { extractPdfText as extractSharedPdfText } from '../documents';
 
 const MAX_PDF_BYTES = 10 * 1024 * 1024;
 
@@ -127,18 +128,7 @@ export class RemoteAttachmentStore {
 }
 
 async function extractPdfText(bytes: Buffer): Promise<string> {
-  const pdfjs = await import('pdfjs-dist/legacy/build/pdf.mjs');
-  const document = await pdfjs.getDocument({ data: new Uint8Array(bytes), useWorkerFetch: false })
-    .promise;
-  const parts: string[] = [];
-  for (let pageNumber = 1; pageNumber <= document.numPages; pageNumber++) {
-    const content = await (await document.getPage(pageNumber)).getTextContent();
-    parts.push(content.items.map((item) => ('str' in item ? item.str : '')).join(' '));
-  }
-  const text = parts.join('\n').trim();
-  if (!text)
-    throw new Error('PDF has no extractable text (scanned/image-only PDFs are unsupported)');
-  return text.slice(0, 2 * 1024 * 1024);
+  return extractSharedPdfText(bytes);
 }
 
 function extensionFor(mediaType: string): string {

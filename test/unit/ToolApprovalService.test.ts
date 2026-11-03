@@ -1,13 +1,38 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
-vi.mock('vscode', () => ({ commands: { executeCommand: vi.fn() } }));
+vi.mock('vscode', () => ({
+  commands: { executeCommand: vi.fn() },
+  // The approval service reaches the logger through the host facade, and
+  // the logger builds its output channel when the module is imported.
+  window: {
+    createOutputChannel: () => ({
+      appendLine: () => undefined,
+      clear: () => undefined,
+      show: () => undefined,
+      dispose: () => undefined,
+    }),
+  },
+}));
 
 import type { HostToWebview } from '../../src/sidebar/messageBridge';
-import {
-  ToolApprovalPolicyDenied,
-  ToolApprovalService,
-} from '../../src/sidebar/ToolApprovalService';
+import type { ConversationRuntime } from '../../src/sidebar/sessionTypes';
+import { ToolApprovalPolicyDenied } from '../../src/sidebar/toolApprovalOutcome';
+import { ToolApprovalService } from '../../src/sidebar/ToolApprovalService';
+import { chatClankerRecords } from '../../src/sidebar/chatClanker';
+import { chatRules } from '../../src/sidebar/chatApprovalRules';
 import { unattendedConversations } from '../../src/sidebar/unattendedConversations';
+
+/** A chat record, the shape a chat's Clanker flag is stored on. */
+function conversation(id: string, approval_rules?: string[]): ConversationRuntime {
+  return {
+    id,
+    title: 'Test',
+    createdAt: 1,
+    updatedAt: 2,
+    messages: [],
+    ...(approval_rules ? { approval_rules } : {}),
+  };
+}
 
 describe('ToolApprovalService', () => {
   afterEach(() => vi.useRealTimers());
@@ -18,8 +43,8 @@ describe('ToolApprovalService', () => {
       (message) => posted.push(message),
       () => ({}) as never,
     );
-    service.setClankerMode(true);
-    await expect(service.request('write_file', 'safe')).resolves.toBe('approved');
+    service.setClankerMode('conv', true);
+    await expect(service.request('write_file', 'safe', false, 'conv')).resolves.toBe('approved');
     await expect(
       service.request('delete_file', 'recycle-bin move', false, 'conv'),
     ).resolves.toBe('approved');
@@ -31,7 +56,7 @@ describe('ToolApprovalService', () => {
       isDangerous: true,
     });
     if (request?.type !== 'confirmRequest') throw new Error('confirmation was not posted');
-    service.resolve(request.id, false);
+    service.resolve(request.id, 'decline');
     await expect(pending).resolves.toBe('declined');
 
     const permanentDelete = service.request('delete_file', 'permanent delete', true, 'conv');
@@ -41,7 +66,7 @@ describe('ToolApprovalService', () => {
     if (permanentCard?.type !== 'confirmRequest')
       throw new Error('permanent delete approval was not posted');
     expect(permanentCard.isDangerous).toBe(true);
-    service.resolve(permanentCard.id, false);
+    service.resolve(permanentCard.id, 'decline');
     await expect(permanentDelete).resolves.toBe('declined');
   });
 
@@ -53,7 +78,7 @@ describe('ToolApprovalService', () => {
     );
     const marker = unattendedConversations.mark('job-conversation', { jobId: 'j1', jobName: 'Job' });
     try {
-      service.setClankerMode(true);
+      service.setClankerMode('job-conversation', true);
       await expect(
         service.request('install_llamacpp', 'switch config', true, 'job-conversation'),
       ).rejects.toMatchObject({
@@ -61,7 +86,7 @@ describe('ToolApprovalService', () => {
         message: expect.stringContaining('RESULT: failed'),
       });
       expect(posted.some((message) => message.type === 'confirmRequest')).toBe(false);
-      expect(service.getClankerMode()).toBe(true);
+      expect(service.getClankerMode('job-conversation')).toBe(true);
       expect(new ToolApprovalPolicyDenied('x').message).toContain('policy');
     } finally {
       marker.dispose();
@@ -106,27 +131,95 @@ describe('ToolApprovalService', () => {
       );
       expect(request).toBeDefined();
       if (request?.type !== 'confirmRequest') throw new Error('attended confirmation was not posted');
-      service.resolve(request.id, true);
+      service.resolve(request.id, 'approve');
       await expect(attended).resolves.toBe('approved');
     } finally {
       marker.dispose();
     }
   });
 
-  it('announces a remotely set clanker mode to the webview', () => {
+  it('announces a remotely set clanker mode to the webview, for that chat only', () => {
     const posted: HostToWebview[] = [];
     const service = new ToolApprovalService(
       (message) => posted.push(message),
       () => ({}) as never,
     );
-    // The remote /clanker path calls setClankerMode, not toggleClankerMode.
-    service.setClankerMode(true);
-    service.setClankerMode(true);
-    service.setClankerMode(false);
+    // The remote /clanker path calls setClankerMode, not toggleClankerMode, and a
+    // repeat of the same value announces nothing: there is nothing for the tab to
+    // see change. Arming a second chat is its own change, to its own tab.
+    service.setClankerMode('chat-1', true);
+    service.setClankerMode('chat-1', true);
+    service.setClankerMode('chat-2', true);
+    service.setClankerMode('chat-1', false);
     expect(posted.filter((message) => message.type === 'clankerChanged')).toEqual([
-      { type: 'clankerChanged', enabled: true },
-      { type: 'clankerChanged', enabled: false },
+      { type: 'clankerChanged', enabled: true, conversationId: 'chat-1' },
+      { type: 'clankerChanged', enabled: true, conversationId: 'chat-2' },
+      { type: 'clankerChanged', enabled: false, conversationId: 'chat-1' },
     ]);
+    expect(service.getClankerMode('chat-2')).toBe(true);
+    expect(service.getClankerMode('chat-1')).toBe(false);
+  });
+
+  it('arms one chat and leaves the next tab in the same window gated', async () => {
+    const posted: HostToWebview[] = [];
+    const service = new ToolApprovalService(
+      (message) => posted.push(message),
+      () => ({}) as never,
+    );
+    service.setClankerMode('chat-1', true);
+    await expect(service.request('write_file', 'one', false, 'chat-1')).resolves.toBe('approved');
+    const gated = service.request('write_file', 'two', false, 'chat-2');
+    const card = posted.find(
+      (message) =>
+        message.type === 'confirmRequest' && message.conversationId === 'chat-2',
+    );
+    if (card?.type !== 'confirmRequest')
+      throw new Error('a chat that did not arm Clanker was not gated');
+    service.resolve(card.id, 'approve');
+    await expect(gated).resolves.toBe('approved');
+  });
+
+  it('writes the flag to the chat record, so a window reload keeps it armed', () => {
+    const chats: Record<string, ConversationRuntime> = { 'chat-1': conversation('chat-1') };
+    const records = () => chatClankerRecords((conversationId) => chats[conversationId]);
+    const service = new ToolApprovalService(
+      () => undefined,
+      () => ({}) as never,
+      undefined,
+      () => undefined,
+      records(),
+    );
+    service.setClankerMode('chat-1', true);
+    expect(chats['chat-1']!.clanker).toBe(true);
+    // A reload is a new queue reading the same records, so this is the reload: the
+    // flag answers from the chat's record, with nothing in memory left to carry it.
+    const reloaded = new ToolApprovalService(
+      () => undefined,
+      () => ({}) as never,
+      undefined,
+      () => undefined,
+      records(),
+    );
+    expect(reloaded.getClankerMode('chat-1')).toBe(true);
+    // A chat whose record has no flag is off: the mode never spreads to a tab that
+    // did not arm it, and a record written before the flag existed starts ungated.
+    expect(reloaded.getClankerMode('chat-2')).toBe(false);
+  });
+
+  it('turning Clanker off revokes nothing this chat was allowed to do', () => {
+    const conv = conversation('chat-7', ['rdelete:D:/Downloads', 'cross_chat']);
+    const service = new ToolApprovalService(
+      () => undefined,
+      () => ({}) as never,
+      undefined,
+      () => undefined,
+      chatClankerRecords((conversationId) => (conversationId === conv.id ? conv : undefined)),
+    );
+    service.setClankerMode(conv.id, true);
+    service.setClankerMode(conv.id, false);
+    expect(conv.clanker).toBe(false);
+    // An approval the owner made outlives the shortcut they also have: the keys stay.
+    expect(chatRules(conv)).toEqual(['rdelete:D:/Downloads', 'cross_chat']);
   });
 
   it('tells the webview to drop a dialog a sink resolved', async () => {
@@ -139,9 +232,52 @@ describe('ToolApprovalService', () => {
     const request = posted.find((message) => message.type === 'confirmRequest');
     if (request?.type !== 'confirmRequest') throw new Error('confirmation was not posted');
     // Stands in for a remote transport button: the webview never clicked.
-    service.resolve(request.id, true);
+    service.resolve(request.id, 'approve');
     await expect(pending).resolves.toBe('approved');
     expect(posted).toContainEqual({ type: 'confirmResolved', id: request.id });
+  });
+
+  it('stores only the offer carried by the pending card and resolves it as allowChat', async () => {
+    const posted: HostToWebview[] = [];
+    const allow = vi.fn(() => []);
+    const requested = vi.fn();
+    const resolved = vi.fn();
+    const service = new ToolApprovalService(
+      (message) => posted.push(message),
+      () => ({}) as never,
+      undefined,
+      undefined,
+      undefined,
+      allow,
+    );
+    service.addSink({ requested, resolved });
+    const offer = { keys: ['cross_chat'], label: 'messages to other chats' };
+    const pending = service.request('message_chat', 'send a note', false, 'chat-1', undefined, {
+      allowForChat: offer,
+    });
+    const card = posted.find((message) => message.type === 'confirmRequest');
+    if (card?.type !== 'confirmRequest') throw new Error('confirmation was not posted');
+    expect(card.allowForChat).toEqual(offer);
+
+    service.resolve(card.id, 'allowChat');
+    await expect(pending).resolves.toBe('approved');
+    expect(allow).toHaveBeenCalledWith('chat-1', ['cross_chat']);
+    expect(resolved).toHaveBeenCalledWith(
+      expect.objectContaining({ decision: 'allowChat', approved: true, allowForChat: offer }),
+    );
+  });
+
+  it('declines a forged allowChat decision when the pending card had no offer', async () => {
+    const posted: HostToWebview[] = [];
+    const service = new ToolApprovalService(
+      (message) => posted.push(message),
+      () => ({}) as never,
+    );
+    const pending = service.request('shell', 'git rebase main', true, 'chat-1');
+    const card = posted.find((message) => message.type === 'confirmRequest');
+    if (card?.type !== 'confirmRequest') throw new Error('confirmation was not posted');
+    service.resolve(card.id, 'allowChat');
+    await expect(pending).resolves.toBe('declined');
   });
 
   it('queues approvals and cancels every approval for a conversation', async () => {
@@ -188,8 +324,8 @@ describe('ToolApprovalService', () => {
     const pending = service.request('write_file', 'src/a.ts', false, 'conv');
     expect(requested).toHaveBeenCalledOnce();
     const id = requested.mock.calls[0]?.[0].id as string;
-    service.resolve(id, true);
-    service.resolve(id, false);
+    service.resolve(id, 'approve');
+    service.resolve(id, 'decline');
     await expect(pending).resolves.toBe('approved');
     expect(resolved).toHaveBeenCalledOnce();
     expect(resolved).toHaveBeenCalledWith(
@@ -215,7 +351,7 @@ describe('ToolApprovalService', () => {
     expect(settled).toBe(false);
     const request = posted.find((message) => message.type === 'confirmRequest');
     if (request?.type !== 'confirmRequest') throw new Error('confirmation was not posted');
-    service.resolve(request.id, true);
+    service.resolve(request.id, 'approve');
     await expect(pending).resolves.toBe('approved');
   });
 
@@ -275,13 +411,13 @@ describe('ToolApprovalService', () => {
       (message) => message.type === 'confirmRequest' && message.conversationId === 'conv-2',
     );
     if (active?.type !== 'confirmRequest') throw new Error('other conversation was not prompted');
-    service.resolve(active.id, true);
+    service.resolve(active.id, 'approve');
     await expect(other).resolves.toBe('approved');
     const later = posted
       .filter((message) => message.type === 'confirmRequest' && message.conversationId === 'conv-1')
       .at(-1);
     if (later?.type !== 'confirmRequest') throw new Error('next turn was not prompted');
-    service.resolve(later.id, true);
+    service.resolve(later.id, 'approve');
     await expect(nextTurn).resolves.toBe('approved');
   });
 
@@ -298,7 +434,7 @@ describe('ToolApprovalService', () => {
     expect(service.pending()?.detail).toBe('after close');
     const pending = service.pending();
     if (!pending) throw new Error('conversation disposal did not clear its timeout latch');
-    service.resolve(pending.id, true);
+    service.resolve(pending.id, 'approve');
     await expect(next).resolves.toBe('approved');
   });
 
@@ -322,7 +458,7 @@ describe('ToolApprovalService', () => {
     expect(service.pending()?.conversationId).toBe('first');
     const request = service.pending();
     if (!request) throw new Error('first approval was not active');
-    service.resolve(request.id, true);
+    service.resolve(request.id, 'approve');
     await expect(active).resolves.toBe('approved');
   });
 
@@ -339,7 +475,7 @@ describe('ToolApprovalService', () => {
     const first = service.request('write_file', 'first', true, 'conv');
     const firstRequest = service.pending();
     if (!firstRequest) throw new Error('first approval was not active');
-    service.resolve(firstRequest.id, true);
+    service.resolve(firstRequest.id, 'approve');
     await expect(first).resolves.toBe('approved');
 
     minutes = 2;
@@ -369,7 +505,7 @@ describe('ToolApprovalService', () => {
       );
       const active = service.pending();
       if (!active) throw new Error(`${kind} approval was not active`);
-      if (kind === 'answer') service.resolve(active.id, true);
+      if (kind === 'answer') service.resolve(active.id, 'approve');
       else if (kind === 'cancel') service.cancelConversation('conv');
       else if (kind === 'abort') controller.abort();
       else if (kind === 'all') service.cancelAll();

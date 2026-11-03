@@ -7,6 +7,7 @@ import { getLogger } from '../../src/util/logger';
 import * as atomicWrites from '../../src/util/atomicWrite';
 import { HistoryArchive, HISTORY_ARCHIVE_FILE } from '../../src/sidebar/HistoryArchive';
 import { loadSidebarSession, saveSidebarSession } from '../../src/sidebar/sessionPersistence';
+import { opRestoreConversation } from '../../src/sidebar/ConversationOps';
 import { OPEN_CONVERSATIONS_KEY_V2 } from '../../src/sidebar/openConversationsPersistence';
 import {
   runtimeToPersisted,
@@ -73,8 +74,11 @@ describe('HistoryArchive', () => {
   });
 
   it('moves a memento-held history into per-conversation files on the first save', async () => {
+    const archived = conv('old', 'archived');
+    archived.retention_activity_at = 1_234;
+    archived.keep_open = true;
     const store: Record<string, unknown> = {
-      [SESSION_KEY_V1]: runtimeToPersisted(session([conv('old', 'archived')])),
+      [SESSION_KEY_V1]: runtimeToPersisted(session([archived])),
     };
     const memento = makeMemento(store);
     const archive = new HistoryArchive(file);
@@ -93,6 +97,11 @@ describe('HistoryArchive', () => {
     const reloaded = loadSidebarSession(memento, new HistoryArchive(file));
     expect(reloaded.history.map((conversation) => conversation.id)).toEqual(['old']);
     expect(reloaded.history[0]!.messages[0]!.content).toBe('archived');
+    expect(reloaded.history[0]).toMatchObject({ retention_activity_at: 1_234, keep_open: true });
+    const restored = opRestoreConversation(reloaded, 'old');
+    if (!('ok' in restored)) throw new Error('restore failed');
+    expect(restored.sidebar.conversations.find((conversation) => conversation.id === 'old'))
+      .toMatchObject({ retention_activity_at: 1_234, keep_open: true });
   });
 
   // ARCHIVED_SESSIONS_PLAN's CI row: the 41st chat used to delete the oldest.
@@ -110,12 +119,18 @@ describe('HistoryArchive', () => {
     const history = Array.from({ length: 41 }, (_, index) =>
       conv(`c${index}`, `text ${index}`, index + 1),
     );
+    history[0]!.retention_activity_at = 456;
+    history[0]!.keep_open = true;
     const current = session(history);
     saveSidebarSession(makeMemento({}), current, archive);
     expect(current.history).toHaveLength(40);
     expect(current.history.some((conversation) => conversation.id === 'c0')).toBe(false);
     expect(archive.overflow.list().map((row) => row.id)).toEqual(['c0']);
     expect(archive.overflow.read('c0')?.messages[0]?.content).toBe('text 0');
+    expect(archive.overflow.read('c0')).toMatchObject({
+      retention_activity_at: 456,
+      keep_open: true,
+    });
   });
 
   it('does not rewrite history bodies during an unchanged tool round', () => {

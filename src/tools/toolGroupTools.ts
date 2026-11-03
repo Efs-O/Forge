@@ -29,11 +29,15 @@ const GROUP_PURPOSE: Readonly<Record<(typeof NATIVE_LAZY_GROUP_NAMES)[number], s
   code_intel: 'definitions, references, renames, semantic search',
   computer_use: 'drive a browser or the desktop (screenshots need vision)',
   editor_ui: "the user's open editor, selection, clipboard, diffs",
-  files: 'move, mkdir, line-number edits, restore a file',
-  git: 'stage, commit, branch as tools (the shell runs git too)',
+  // `create_directory` is gone (2026-10-29, lane B item B3): `write_file` makes
+  // the folders it writes into, so "mkdir" here would have sent a model looking
+  // for a folder to a group that no longer holds one.
+  files: 'move or rename a file, line-number edits, restore a file from a commit',
+  git: 'git status, log, diff, blame and show, plus stage, commit and branch as tools (the shell runs git too)',
   halluscribe:
     'search previous AI coding sessions and historical workspace/user context: past implementation decisions, the exact wording of an earlier error or command, prior project history, the user profile/digest',
-  media: 'view/generate images, image search, send files',
+  media:
+    'view, generate and upscale images, reverse image search, video stills, render HTML to a PNG or preview, export documents, send files',
   memory: 'remember, recall, forget notes kept across conversations',
   notebook: 'Jupyter notebook cells',
   system: 'this PC: power, sleep/wake, status, llama.cpp',

@@ -91,13 +91,14 @@ function that writes the marker — is how the rest of the codebase asks whether
 result was cut; matching the marker text anywhere in the body instead treats any
 file quoting it as truncated.
 
-`exec_command` has its own bound in
-[`src/tools/execHelpers.ts`](../src/tools/execHelpers.ts): 60,000 characters per
-stream, or less when the call passes `max_output_chars`. What that function
-returns is what the round carries — the excerptor in `toolResultContext` shrinks
-it further only once the window is genuinely tight, so on a roomy 128k window
-this bound, not the excerptor, is what keeps one build log from costing tens of
-thousands of tokens.
+`monitor_execution` bounds what it returns — `parseExecOutputOptions` in
+[`src/tools/execHelpers.ts`](../src/tools/execHelpers.ts), the default from
+[`src/tools/toolOutputLimits.ts`](../src/tools/toolOutputLimits.ts): 16,000
+characters per stream, `max_output_chars` up to 32,000, and less when the
+model's window is small. What that function returns is what the round carries —
+the excerptor in `toolResultContext` shrinks it further only once the window is
+genuinely tight, so on a roomy 128k window this bound, not the excerptor, is
+what keeps one build log from costing tens of thousands of tokens.
 
 ## 5. Prompt-prefix stability
 

@@ -41,6 +41,7 @@ class DeterministicFileReader extends FileReader {
 let container: HTMLDivElement;
 let root: Root;
 let onSend: ReturnType<typeof vi.fn>;
+let onDraftBearingConversationIds: ReturnType<typeof vi.fn>;
 
 beforeEach(() => {
   vi.stubGlobal('FileReader', DeterministicFileReader);
@@ -48,6 +49,7 @@ beforeEach(() => {
   document.body.appendChild(container);
   root = createRoot(container);
   onSend = vi.fn();
+  onDraftBearingConversationIds = vi.fn();
   act(() => {
     root.render(
       React.createElement(InputRow, {
@@ -66,6 +68,9 @@ beforeEach(() => {
         modelPickerDisabled: false,
         remote: { transports: [], paired: false },
         activeConversationId: 'test-conversation',
+        retentionReady: true,
+        openConversationIds: new Set(['test-conversation']),
+        onDraftBearingConversationIds,
       }),
     );
   });
@@ -133,6 +138,7 @@ describe('InputRow attachments', () => {
     expect(container.textContent).toContain('notes.md');
     expect(container.textContent).toContain('main.ts');
     expect(errors()).toEqual([]);
+    expect(onDraftBearingConversationIds).toHaveBeenLastCalledWith(['test-conversation']);
   });
 
   it('stages files pasted into the textarea', async () => {
@@ -183,6 +189,7 @@ describe('InputRow attachments', () => {
 
     act(() => container.querySelector<HTMLButtonElement>('.attachment-clear')!.click());
     expect(tiles()).toHaveLength(0);
+    expect(onDraftBearingConversationIds).toHaveBeenLastCalledWith([]);
   });
 
   it('sends the staged files and empties the tray', async () => {
@@ -192,6 +199,7 @@ describe('InputRow attachments', () => {
     expect(onSend).toHaveBeenCalledTimes(1);
     expect(onSend.mock.calls[0]![1]).toHaveLength(1);
     expect(tiles()).toHaveLength(0);
+    expect(onDraftBearingConversationIds).toHaveBeenLastCalledWith([]);
   });
 
   it('arms the drop target for files and ignores a text drag', () => {

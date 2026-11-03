@@ -67,6 +67,11 @@ export class HostProgressOpener {
 
   handle(event: AgentProgressEvent): void {
     const { conversationId } = event;
+    // A turn-start event carries no text and opens nothing: it exists so the
+    // bus can time a turn that never speaks. Opening the mirrored message on it
+    // would open one for every turn, including the ones that produce nothing,
+    // and that is a change to what a phone sees, not to when the bus can time.
+    if (event.kind === 'start') return;
     const prompts = this.prompts.get(conversationId);
     if (prompts?.length && prompts[0]!.chatId !== this.deps.target(conversationId)) {
       this.prompts.delete(conversationId);

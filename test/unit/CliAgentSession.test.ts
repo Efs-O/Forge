@@ -1,5 +1,7 @@
 import * as path from 'path';
 import { describe, expect, it, vi } from 'vitest';
+import type { FakeCliChildBehaviour } from '../support/fakeCli';
+import { CliAgentError } from '../../src/agents/CliAgentError';
 import { CliAgentSession } from '../../src/agents/CliAgentSession';
 import type { CliAgentEvent, CliAgentRunResult } from '../../src/agents/types';
 
@@ -14,14 +16,50 @@ const stops = vi.hoisted(() => ({
   staleFinished: undefined as (() => void) | undefined,
 }));
 
+/** Faked `spawnCliProcess` for the outcomes the `process.execPath` fixture
+ *  cannot produce: a program that is not there, and one that starts and then
+ *  exits non-zero with something on stderr. `behaviour` unset means the real
+ *  spawn, so the warm-turn suites below are untouched. */
+const fake = vi.hoisted(() => ({
+  behaviour: undefined as FakeCliChildBehaviour | undefined,
+  /** A synchronous refusal from the spawn site itself: `buildCliProcessInvocation`
+   *  throws before any child exists when an npm shim's launcher is missing. */
+  startError: undefined as Error | undefined,
+  spawns: [] as Array<{ writes: string[] }>,
+  terminations: 0,
+}));
+
+/** The Forge channel, captured instead of created: `src/util/logger` builds a
+ *  VS Code output channel the moment it is imported. */
+const logged = vi.hoisted(() => ({
+  warn: [] as string[],
+  info: [] as string[],
+  error: [] as string[],
+}));
+
 vi.mock('../../src/agents/cliProcess', async (importOriginal) => {
   const real = await importOriginal<typeof import('../../src/agents/cliProcess')>();
+  const { fakeCliChild } = await import('../support/fakeCli');
   return {
     ...real,
+    spawnCliProcess: (options: Parameters<typeof real.spawnCliProcess>[0]) => {
+      if (fake.startError) throw fake.startError;
+      if (!fake.behaviour) return real.spawnCliProcess(options);
+      const { child, writes } = fakeCliChild(options.executable, fake.behaviour);
+      fake.spawns.push({ writes });
+      return child;
+    },
     terminateCliProcessTree: async (
       ...args: Parameters<typeof real.terminateCliProcessTree>
     ): Promise<void> => {
       const [child] = args;
+      // A faked child has no process to taskkill; the count is what these
+      // tests assert, so record the kill and return.
+      if (fake.behaviour) {
+        fake.terminations++;
+        child.kill();
+        return;
+      }
       const dead = child.exitCode !== null || child.signalCode !== null;
       if (stops.controlled) {
         await new Promise<void>((resolve) => {
@@ -43,6 +81,18 @@ vi.mock('../../src/agents/cliProcess', async (importOriginal) => {
       await stops.gate;
       stops.staleFinished?.();
     },
+  };
+});
+
+vi.mock('../../src/util/logger', async (importOriginal) => {
+  const real = await importOriginal<typeof import('../../src/util/logger')>();
+  return {
+    ...real,
+    getLogger: () => ({
+      info: (message: string) => logged.info.push(message),
+      warn: (message: string) => logged.warn.push(message),
+      error: (message: string) => logged.error.push(message),
+    }),
   };
 });
 
@@ -192,4 +242,121 @@ describe('CliAgentSession', () => {
     await pending;
     await session.dispose();
   }, 10_000);
+});
+
+describe('CliAgentSession start and process failures', () => {
+  function sessionWith(behaviour: FakeCliChildBehaviour, executable: string): CliAgentSession {
+    fake.behaviour = behaviour;
+    fake.startError = undefined;
+    fake.spawns.length = 0;
+    fake.terminations = 0;
+    logged.warn.length = 0;
+    logged.info.length = 0;
+    return new CliAgentSession({ executable, argsPrefix: [claudeFixture], cwd: process.cwd() });
+  }
+
+  it('reports a missing executable as a start failure, never as write EPIPE', async () => {
+    // The laptop's report said `Claude CLI write failed: write EPIPE` for a
+    // program that was never found: the write to a stdin with no reader was
+    // reported, and the ENOENT that caused it was computed and thrown away.
+    const session = sessionWith({ spawnError: { code: 'ENOENT' } }, 'forge_probe_missing_program');
+    const result = await session.send('probe');
+    expect(result.status).toBe('failed');
+    expect(result.error).toContain("Couldn't start Claude");
+    expect(result.error).toContain('ENOENT');
+    expect(result.error).toContain('forge_probe_missing_program');
+    expect(result.error).not.toContain('write failed');
+    // The gated write never happened, so no EPIPE was ever produced.
+    expect(fake.spawns).toHaveLength(1);
+    expect(fake.spawns[0].writes).toHaveLength(0);
+    // Terminated once: the spawn gate reports the failure and the exit watcher
+    // ends the process, so neither path may terminate on its own.
+    expect(fake.terminations).toBe(1);
+    // Exactly one channel line for the failure, carrying the code, the
+    // executable and no environment value.
+    expect(logged.warn).toHaveLength(1);
+    expect(logged.warn[0]).toContain('code=null');
+    expect(logged.warn[0]).toContain('signal=none');
+    expect(logged.warn[0]).toContain('exe=forge_probe_missing_program');
+    expect(logged.warn[0]).not.toContain('env=');
+    await session.dispose();
+    expect(fake.terminations).toBe(1);
+    expect(logged.warn).toHaveLength(1);
+  });
+
+  it('writes one line with the exit code and the stderr tail when the CLI exits non-zero', async () => {
+    const session = sessionWith(
+      { exit: { code: 1 }, stderrText: 'claude refused: no key configured' },
+      'forge_probe_closing_program',
+    );
+    const result = await session.send('probe');
+    expect(result.status).toBe('failed');
+    expect(result.error).toContain('exited with code 1');
+    expect(fake.spawns[0].writes).toHaveLength(1); // it did start, so it was written to
+    expect(logged.warn).toHaveLength(1);
+    expect(logged.warn[0]).toContain('code=1');
+    expect(logged.warn[0]).toContain('stderr=claude refused: no key configured');
+    await session.dispose();
+    expect(logged.warn).toHaveLength(1);
+  });
+
+  it('adds no process-failure line when Forge ended the child itself', async () => {
+    // A child killed on cancel is not a CLI failure: its turn already reports
+    // the cancel, and a second channel line for the same event is exactly the
+    // double logging this fix removes.
+    const session = sessionWith({}, 'forge_probe_hanging_program');
+    const controller = new AbortController();
+    const pending = session.send('probe', { signal: controller.signal });
+    controller.abort();
+    const result = await pending;
+    expect(result.status).toBe('cancelled');
+    expect(logged.warn).toHaveLength(0);
+    await session.dispose();
+  });
+
+  it('holds one turn reservation across the spawn gate', async () => {
+    const session = sessionWith({ spawnError: { code: 'ENOENT' } }, 'forge_probe_missing_program');
+    const settled = await Promise.allSettled([session.send('one'), session.send('two')]);
+    expect(settled[0].status).toBe('fulfilled');
+    expect((settled[0] as PromiseFulfilledResult<CliAgentRunResult>).value.status).toBe('failed');
+    expect((settled[1] as PromiseRejectedResult).reason.message).toContain(
+      'already has an active turn',
+    );
+    // The reservation is what keeps two first sends from spawning two Claude
+    // processes; the gate's await must not open that window again.
+    expect(fake.spawns).toHaveLength(1);
+    expect(fake.terminations).toBe(1);
+    await session.dispose();
+  });
+
+  it("reports the spawn site's own refusal as a failed send, not as EPIPE", async () => {
+    // `buildCliProcessInvocation` throws before any child exists when an npm
+    // node-script shim has no `node.exe` beside it and none on the PATH. The
+    // warm chat path reports that rejection verbatim (CliSessionRegistry ->
+    // CliChatRunner -> CliTurn's run-stage catch), so it must arrive intact and
+    // must not turn into `write EPIPE` on a stdin that was never written.
+    const session = sessionWith({}, 'C:\\npm\\codex.cmd');
+    fake.startError = new CliAgentError(
+      'Node.js not found, needed to run claude. Install Node ' +
+        "(winget install OpenJS.NodeJS.LTS), or set `cli` to the CLI's own executable.",
+    );
+    const failure = await session.send('probe').catch((error) => error as Error);
+    expect(failure).toBeInstanceOf(CliAgentError);
+    expect(failure.message).toContain('Node.js not found');
+    expect(failure.message).not.toContain('EPIPE');
+    expect(failure.message).not.toContain('write failed');
+    // Nothing was spawned: nothing to terminate, and no channel line for a
+    // process that never existed.
+    expect(fake.spawns).toHaveLength(0);
+    expect(fake.terminations).toBe(0);
+    expect(logged.warn).toHaveLength(0);
+    // The refused spawn left no child and no reserved turn, so the next send
+    // starts again and reports its own failure.
+    fake.startError = undefined;
+    fake.behaviour = { spawnError: { code: 'ENOENT' } };
+    const retry = await session.send('again');
+    expect(retry.status).toBe('failed');
+    expect(retry.error).toContain("Couldn't start Claude");
+    await session.dispose();
+  });
 });

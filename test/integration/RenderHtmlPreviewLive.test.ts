@@ -11,6 +11,7 @@ import type { ForgeConfig } from '../../src/config/types';
 import { makeRenderHtmlToImageTool } from '../../src/tools/renderHtmlToImageTool';
 import type { UserNotificationService } from '../../src/sidebar/UserNotificationService';
 import type { MultimodalToolResult, RegisteredTool } from '../../src/tools/ToolRegistry';
+import { listenLoopback } from '../support/listenLoopback';
 
 /**
  * Preview mode against real headless Chrome (RENDER_PREVIEW_PLAN.md). With the
@@ -78,6 +79,14 @@ describe('render_html_to_image preview against real Chrome', () => {
         llama_server: {},
         models: [{ name: 'primary', gguf_path: '/primary.gguf' }],
         browser: { channel: CHANNEL, headless: true },
+        // Since Part A of docs/plans/EXFIL_GATES_PLAN.md a preview may only reach
+        // a host `fetch.allowed_hosts` lists (or one this chat's `web_fetch` card
+        // approved). These are the hosts this file's pages ask for; `localtest.me`
+        // is deliberately NOT here, because its case is about the address behind
+        // the name, not about approval.
+        fetch: {
+          allowed_hosts: ['cdn.jsdelivr.net', 'example.com', 'unpkg.com', 'httpbin.org'],
+        },
       }) as ForgeConfig;
     tool = makeRenderHtmlToImageTool({ getConfig, notifications });
   });
@@ -105,8 +114,7 @@ describe('render_html_to_image preview against real Chrome', () => {
       tcp += 1;
       socket.destroy();
     });
-    await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve));
-    const port = (server.address() as net.AddressInfo).port;
+    const port = await listenLoopback(server);
     const udpSocket = dgram.createSocket('udp4');
     udpSocket.on('message', () => {
       udp += 1;
@@ -166,7 +174,7 @@ describe('render_html_to_image preview against real Chrome', () => {
       tcp += 1;
       socket.destroy();
     });
-    await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve));
+    await listenLoopback(server);
     const udpSocket = dgram.createSocket('udp4');
     udpSocket.on('message', () => {
       udp += 1;
@@ -427,8 +435,7 @@ describe('render_html_to_image preview against real Chrome', () => {
       tcp += 1;
       socket.destroy();
     });
-    await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve));
-    const port = (server.address() as net.AddressInfo).port;
+    const port = await listenLoopback(server);
     const target = encodeURIComponent(`http://127.0.0.1:${port}/steal.js`);
     try {
       let result: string | MultimodalToolResult;
@@ -443,6 +450,15 @@ describe('render_html_to_image preview against real Chrome', () => {
       }
       if (/httpbin\.org \((?!redirect to)/.test(String(result))) {
         ctx.skip('httpbin.org is not reachable from this host (offline?)');
+        return;
+      }
+      // httpbin.org sometimes answers an error (403 on 2026-10-28) instead of the
+      // redirect, so the guard is never reached; WebFetchSsrf.test.ts covers it offline.
+      if (
+        /responded with a status of [45]\d\d/.test(String(result)) &&
+        !String(result).includes('redirect to')
+      ) {
+        ctx.skip('httpbin.org answered an error instead of a redirect');
         return;
       }
       expect(String(result)).toContain('redirect-refused');

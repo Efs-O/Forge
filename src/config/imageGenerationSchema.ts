@@ -109,6 +109,11 @@ const SdcppImageBackendSchema = z.object({
   extra_args: z.array(z.string()),
   confirm_on_start: z.boolean(),
   confirm_each: z.boolean(),
+  /** Join the per-user Windows-only lease shared with private media skills. Explicit opt-in. */
+  media_gpu_lease_enabled: z
+    .boolean()
+    .default(false)
+    .describe('Windows only: join the shared media GPU lease.'),
 });
 
 /** Reference images an edit may carry. Cap enforced, not advisory: each one is

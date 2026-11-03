@@ -120,6 +120,62 @@ describe('daily tool usage', () => {
     expect(report.builds[0]!.models[0]!.shell_workarounds).toEqual([{ tool: 'commit', calls: 1 }]);
   });
 
+  it('counts an unattended refusal as a failure, not as a success', () => {
+    const { sessions } = fixtureRoot();
+    const day = '2026-11-03';
+    putSession(sessions, 'fixture', [
+      {
+        type: 'session_start',
+        timestamp_ms: stamp(day),
+        forge_version: '0.17.117',
+        model: 'local-qwen',
+      },
+      { type: 'tools_offered', timestamp_ms: stamp(day), names: ['web_fetch', 'shell'] },
+      {
+        role: 'assistant',
+        timestamp_ms: stamp(day, 12),
+        tool_calls: [{ id: 'c1', name: 'web_fetch', input: { url: 'https://example.com' } }],
+      },
+      {
+        role: 'tool',
+        timestamp_ms: stamp(day, 12) + 1,
+        tool_call_id: 'c1',
+        content:
+          'unattended: approval key denied by policy: "web_fetch". Add net:example.com to approvals.unattended_bus.allow in ~/.forge/policy.yaml.',
+      },
+      {
+        role: 'assistant',
+        timestamp_ms: stamp(day, 13),
+        tool_calls: [{ id: 'c2', name: 'shell', input: { command: 'rg note src' } }],
+      },
+      {
+        role: 'tool',
+        timestamp_ms: stamp(day, 13) + 1,
+        tool_call_id: 'c2',
+        content: 'exit 0 · 0.1 s\nno matches here',
+      },
+    ]);
+
+    const tools = computeToolUsageReports(sessions, day).at(-1)!.builds[0]!.models[0]!.tools;
+    // The refusal row is the one from the live ask-once run of 2026-11-03: the
+    // stats read it as a success, because `unattended:` was not a prefix this file
+    // knew. It now asks `isFailureResult` (`src/sidebar/toolResultView.ts`), which
+    // owns the failure prefixes, so the log and the transcript cannot disagree.
+    // The `shell` row proves the `exit N` branch still works the other way: a
+    // command that ran and exited 0 is a success whatever its text says.
+    expect(tools).toEqual([
+      { tool: 'shell', calls: 1, sessions: 1, failures: 0, offered_calls: 1, hidden_calls: 0 },
+      {
+        tool: 'web_fetch',
+        calls: 1,
+        sessions: 1,
+        failures: 1,
+        offered_calls: 1,
+        hidden_calls: 0,
+      },
+    ]);
+  });
+
   it('writes deterministic files atomically and backfills at most 30 days', () => {
     const { sessions, output } = fixtureRoot();
     const endDay = '2026-10-08';

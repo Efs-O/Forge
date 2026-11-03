@@ -118,6 +118,32 @@ export interface ModelConfig {
   /** Optional path to the vision projector .gguf (mmproj). Enables multimodal image input. */
   mmproj_path?: string;
   /**
+   * Named engine in `~/.forge/policy.yaml` (`policySchema.ts`) that supplies this
+   * model's `start_command`, `stop_command`, `unload_path` and
+   * `llama_server_binary`. The model's own copy of any of those still wins, so a
+   * config.yaml that has not been migrated behaves exactly as before. Folded in
+   * `ConfigResolver.mergeGroupsIntoModel`; read it there, not from `config.models`.
+   */
+  engine?: string;
+  /**
+   * Which GPUs this model's server occupies (CUDA device indexes as the engine
+   * numbers them). It ONLY ever comes from the engine: `modelSchema.ts` refuses
+   * `gpus` on a `config.yaml` model entry, because which cards a process uses is
+   * a fact about how it is started and the start command lives on the engine. Copied
+   * in by `ConfigResolver.applyEngine` alongside the exec fields, so read it through
+   * the resolver. Undefined = the engine said nothing, so this model overlaps EVERY
+   * other managed server — the behaviour before the field existed. Consumed by
+   * `poolAcquisition.gpusOverlap` via `ExternalModelServers.gpusOf`.
+   *
+   * `| undefined` is written out because `modelSchema.ts` validates the key with
+   * `z.never()` (it belongs on the engine), so a parsed config entry types its
+   * `gpus` as `never | undefined`, and under `exactOptionalPropertyTypes` that is
+   * not comparable to a bare `number[]` at the `ForgeConfigSchema.parse(...) as
+   * ForgeConfig` seams (`ConfigWriter.ts`, `policyMigration.ts`). Same reason
+   * `RemoteStartEntryShape` spells its optionals out.
+   */
+  gpus?: number[] | undefined;
+  /**
    * Per-model override of the llama-server executable, for a patched fork (e.g.
    * the Unsloth MTP fork). Absent = use the global `llama_server.binary`.
    */
@@ -153,6 +179,27 @@ export interface ModelConfig {
   start_command?: string[];
   /** Base URL for Ollama or OpenAI-compatible HTTP providers. */
   endpoint?: string;
+  /**
+   * This model is served by another machine's Forge (a laptop reaching the
+   * desktop over the LAN at home, or over Tailscale when away). Before each
+   * request Forge asks that machine's model starter to start or load it and
+   * holds a lease, then uses the port that answer reports — so a llama.cpp slot
+   * on an arbitrary 808x port is reachable without guessing which quant loaded
+   * first.
+   *
+   * `starter` is one URL or an ordered list of 1-4, tried in config order until
+   * one answers, so a laptop that moves networks changes route by itself
+   * (docs/plans/LAPTOP_LAN_ACCESS_PLAN.md). The last address is never probed —
+   * the `/ensure` sent to it reports its own failure.
+   *
+   * `remote_start` entries carry NO `unload_path`, `start_command`,
+   * `stop_command` or `stop_on_exit`: the desktop does all of that, and an
+   * `unload_path` here would make this window treat the entry as a server it
+   * manages itself (2026-10-26: through `tailscale serve` a stopped server
+   * RESETS the connection instead of refusing it, so that unload failed and the
+   * request never went out). Validated in schema.ts's superRefine.
+   */
+  remote_start?: { starter: string | string[]; model: string };
   /** Per-model GPU layer override. Falls back to LlamaServerConfig.n_gpu_layers. */
   n_gpu_layers?: number;
   /** Context window size override. Falls back to LlamaServerConfig.default_num_ctx. */

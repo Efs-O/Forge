@@ -18,53 +18,14 @@ import {
 import type { AskAgentResult } from './askAgentResult';
 export { renderAskAgentResult } from './askAgentResult';
 export type { AskAgentResult } from './askAgentResult';
+import { waitForLive, type AskAgentRunResult, type AskAgentRuntime } from './liveSessionDelivery';
+// The transport contract and the live-delivery helper belong to
+// `liveSessionDelivery.ts`, which the relay and the inbound reply lifecycle
+// also use. They are re-exported here so the ask lifecycle keeps one import
+// point for its consumers; that module is their owner and implementation.
+export { deliverAgentReply } from './liveSessionDelivery';
+export type { AskAgentRunResult, AskAgentRuntime } from './liveSessionDelivery';
 import type { ConversationRuntime } from '../sidebar/sessionTypes';
-
-export interface AskAgentRunResult {
-  status: 'completed' | 'failed' | 'cancelled' | 'timed_out';
-  finalText: string;
-  error?: string;
-  sessionGone?: boolean;
-  mayStillBeWorking?: boolean;
-}
-
-export interface AskAgentRuntime {
-  openPanel(agent: AgentKind, sessionId: string): Promise<'opened' | 'unavailable'>;
-  isLive(agent: AgentKind, link: AgentLink): Promise<boolean>;
-  sendLive(
-    agent: AgentKind,
-    link: AgentLink,
-    prompt: string,
-    signal: AbortSignal,
-    purpose?: 'ask' | 'reply',
-    onAccepted?: () => void,
-  ): Promise<AskAgentRunResult>;
-  runHeadless(options: {
-    agent: AgentKind;
-    link: AgentLink;
-    prompt: string;
-    createSessionId?: string;
-    sessionTitle: string;
-    signal: AbortSignal;
-    onAccepted?: () => void;
-    onSessionId(sessionId: string): void;
-  }): Promise<AskAgentRunResult>;
-}
-
-/** Deliver an inbound answer through the same live transport used by ask_agent. */
-export async function deliverAgentReply(
-  runtime: AskAgentRuntime,
-  agent: AgentKind,
-  link: AgentLink,
-  text: string,
-  signal: AbortSignal,
-): Promise<boolean> {
-  if (!(await runtime.isLive(agent, link))) return false;
-  const result = await runtime.sendLive(agent, link, text, signal, 'reply');
-  if (result.status !== 'completed')
-    throw new Error(result.error ?? `Live ${agent} session did not accept Forge's reply.`);
-  return true;
-}
 
 export interface AskAgentContext {
   conversation: ConversationRuntime;
@@ -74,6 +35,8 @@ export interface AskAgentContext {
   persistConversation(): void;
   onSessionLinked?(link: AgentLink): void;
   onAccepted?(link: AgentLink): void;
+  /** Validation passed and the ask now counts as running; nothing refused it. */
+  onStarted?(): void;
 }
 
 export interface AskAgentRequest {
@@ -90,7 +53,6 @@ export interface AskAgentServiceOptions {
   maxConcurrent?: number;
 }
 
-const LIVE_POLL_MS = 500;
 const MAX_SUBJECT_CHARS = 160;
 let activeAsks = 0;
 const activeConversations = new Map<string, number>();
@@ -123,49 +85,6 @@ function validateRequest(value: AskAgentRequest): AskAgentRequest {
       `ask_agent: "subject" must be one line of at most ${MAX_SUBJECT_CHARS} characters.`,
     );
   return value;
-}
-
-async function waitForLive(
-  runtime: AskAgentRuntime,
-  agent: AgentKind,
-  linked: AgentLink,
-  timeoutMs: number,
-  signal: AbortSignal,
-): Promise<boolean> {
-  const deadline = Date.now() + timeoutMs;
-  do {
-    signal.throwIfAborted();
-    const remaining = deadline - Date.now();
-    if (remaining <= 0) return false;
-    let timer: ReturnType<typeof setTimeout> | undefined;
-    let onAbort: (() => void) | undefined;
-    const live = await Promise.race([
-      runtime.isLive(agent, linked),
-      new Promise<boolean>((resolve) => {
-        timer = setTimeout(() => resolve(false), remaining);
-      }),
-      new Promise<boolean>((resolve) => {
-        onAbort = () => resolve(false);
-        signal.addEventListener('abort', onAbort, { once: true });
-      }),
-    ]).finally(() => {
-      if (timer) clearTimeout(timer);
-      if (onAbort) signal.removeEventListener('abort', onAbort);
-    });
-    signal.throwIfAborted();
-    if (live) return true;
-    if (Date.now() >= deadline) return false;
-    await new Promise<void>((resolve) => {
-      const finish = (): void => {
-        clearTimeout(timer);
-        signal.removeEventListener('abort', finish);
-        resolve();
-      };
-      const timer = setTimeout(finish, Math.min(LIVE_POLL_MS, remaining));
-      signal.addEventListener('abort', finish, { once: true });
-    });
-  } while (!signal.aborted);
-  return false;
 }
 
 function structuredResult(
@@ -256,7 +175,7 @@ export function makeAskAgentHandler(options: AskAgentServiceOptions) {
         {
           status: 'failed',
           finalText: '',
-          error: 'ask_agent requires an open workspace folder for its checkpoint.',
+          error: 'ask_agent requires an open workspace folder.',
         },
         false,
       );
@@ -265,9 +184,11 @@ export function makeAskAgentHandler(options: AskAgentServiceOptions) {
       context.conversation.id,
       (activeConversations.get(context.conversation.id) ?? 0) + 1,
     );
+    context.onStarted?.();
     let capture: Awaited<ReturnType<typeof snapshotWorkspaceBefore>> | undefined;
     try {
-      capture = await snapshotWorkspaceBefore(context.checkpoint, workspaceRoot, context.signal);
+      if (request.agent === 'copilot')
+        capture = await snapshotWorkspaceBefore(context.checkpoint, workspaceRoot, context.signal);
       return await ask(request, context, options, createSessionId);
     } catch (error) {
       return structuredResult(
@@ -294,6 +215,15 @@ export function makeAskAgentHandler(options: AskAgentServiceOptions) {
   };
 }
 
+/** What the owner can do when a resumed session also fails: the link is kept,
+ *  so the same ask would fail the same way until the row is removed. */
+const RESUME_FAILED_HINT =
+  ' If it keeps failing, unlink this session in the chat header and ask again to start a fresh one.';
+
+function errorMessage(error: unknown): string {
+  return error instanceof Error ? error.message : String(error);
+}
+
 async function ask(
   request: AskAgentRequest,
   context: AskAgentContext,
@@ -318,7 +248,22 @@ async function ask(
     linked = touch(context.conversation, agent);
     context.persistConversation();
     context.onSessionLinked?.(linked);
-    const live = await options.runtime.isLive(agent, linked);
+    // A liveness check can fail outright instead of answering: reading a Codex
+    // thread list means spawning a throwaway app-server, and that process not
+    // answering in time is an error, not a "no" (`codexThreadIsLive`). Read as
+    // "the session is gone", that used to hard-fail the ask with a discovery
+    // message nobody could act on. Here it means "cannot be verified", so the
+    // ask goes straight to the headless resume below, which reports
+    // `sessionGone` only when the CLI itself says the thread is gone.
+    let live: boolean;
+    let checked = true;
+    try {
+      live = await options.runtime.isLive(agent, linked);
+    } catch (error) {
+      live = false;
+      checked = false;
+      lead = `${label} session could not be checked (${errorMessage(error)}); resumed headlessly. `;
+    }
     let liveResult: AskAgentRunResult | undefined;
     if (live) {
       if (panel) {
@@ -334,38 +279,38 @@ async function ask(
         'ask',
         () => markAccepted(linked!),
       );
-    } else if (panel) {
+    } else if (panel && checked) {
       const opened = await options.runtime.openPanel(agent, linked.sessionId);
       if (opened === 'opened') {
-        if (
-          !(await waitForLive(
-            options.runtime,
-            agent,
-            linked,
-            options.getLinkConfig().panel_live_timeout_ms,
-            context.signal,
-          ))
-        ) {
-          return structuredResult(
-            agent,
-            title,
-            linked.title,
-            {
-              status: 'failed',
-              finalText: '',
-              error: `the ${label} panel did not come up for session "${linked.title}"; the ask was not sent.`,
-            },
-            false,
-          );
-        }
-        liveResult = await options.runtime.sendLive(
+        // Opening a `vscode://` link is not a promise anyone can keep: the
+        // opener reports `'opened'` whatever the panel then does, so the only
+        // honest reading of a thread that never appears in the list is "it did
+        // not come up". That used to be a dead end — the ask failed, the link
+        // stayed `linked`, and every later send failed the same way. Now it
+        // resumes the same session headlessly, exactly like the `'unavailable'`
+        // case beside it, and a `sessionGone` from that resume takes the
+        // existing unlink-and-start-a-new-session path.
+        const cameUp = await waitForLive(
+          options.runtime,
           agent,
           linked,
-          promptFor(request, linked, false),
+          options.getLinkConfig().panel_live_timeout_ms,
           context.signal,
-          'ask',
-          () => markAccepted(linked!),
         );
+        if (cameUp === true) {
+          liveResult = await options.runtime.sendLive(
+            agent,
+            linked,
+            promptFor(request, linked, false),
+            context.signal,
+            'ask',
+            () => markAccepted(linked!),
+          );
+        } else if (cameUp === 'unknown') {
+          lead = `${label} session could not be checked; resumed headlessly. `;
+        } else {
+          lead = `${label} panel did not come up for session "${linked.title}"; resumed headlessly. `;
+        }
       } else {
         lead = `${label} panel could not be opened; resumed headlessly. `;
       }
@@ -398,7 +343,18 @@ async function ask(
         },
       });
       if (!resumed.sessionGone)
-        return structuredResult(agent, title, linked.title, resumed, false, lead || undefined);
+        return structuredResult(
+          agent,
+          title,
+          linked.title,
+          resumed,
+          false,
+          resumed.status === 'completed'
+            ? lead || undefined
+            : lead
+              ? `${lead.trimEnd()}${RESUME_FAILED_HINT}`
+              : undefined,
+        );
       const goneTitle = linked.title;
       sessionCwd = linked.cwd;
       unlink(context.conversation, agent);
@@ -413,7 +369,7 @@ async function ask(
     ? createLink(agent, sessionId, sessionCwd, `Forge · ${context.conversation.title}`, now)
     : undefined;
   if (initial) {
-    linked = link(context.conversation, initial, [context.conversation]);
+    linked = link(context.conversation, initial);
     context.persistConversation();
     context.onSessionLinked?.(linked);
   }
@@ -449,7 +405,6 @@ async function ask(
         const saved = link(
           context.conversation,
           createLink(agent, reportedId, sessionCwd, placeholder.title, now),
-          [context.conversation],
         );
         acceptedId = saved.sessionId;
         linked = saved;

@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import type { ModelConfig } from '../../src/config/types';
 import { ToolCallTruncatedError } from '../../src/llm/ToolCallTruncatedError';
 import { truncationGuidance } from '../../src/agent/truncationRecovery';
-import { makeAppendFileTool, makeWriteFileTool } from '../../src/tools/builtinTools';
+import { makeWriteFileTool } from '../../src/tools/builtinTools';
 import { MAX_SINGLE_WRITE_CHARS, writeChunkLimit } from '../../src/tools/writeChunking';
 
 // docs/plans/WRITE_CHUNK_LIMIT_PLAN.md
@@ -44,7 +44,7 @@ describe('writeChunkLimit', () => {
 });
 
 describe('write tool descriptions', () => {
-  const definitions = [makeWriteFileTool().definition, makeAppendFileTool().definition];
+  const definitions = [makeWriteFileTool().definition];
 
   it('contains no proactive size or chunking advice', () => {
     for (const definition of definitions) {

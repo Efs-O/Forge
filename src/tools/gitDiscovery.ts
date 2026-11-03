@@ -57,8 +57,8 @@ export class GitDiscoveryError extends Error {
  *
  * Both sides of every comparison go through this. Realpathing only the existing
  * side is what breaks: `git rev-parse --show-toplevel` prints the long spelling
- * (`C:\\Users\\efso office\\…`) while VS Code's workspace root can carry the
- * short one (`C:\\Users\\EFSOOF~1\\…`), and `path.relative` between the two then
+ * (`C:\\Users\\jo smith\\…`) while VS Code's workspace root can carry the
+ * short one (`C:\\Users\\JOSMITH~1\\…`), and `path.relative` between the two then
  * walks out of the repository and produces a pathspec git rejects as "outside
  * repository". Leaving the missing tail alone is equally load-bearing: `stage`
  * is routinely called on a file the agent is about to create.

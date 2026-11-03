@@ -13,6 +13,7 @@ import {
 import { ToolCallTruncatedError } from '../../src/llm/ToolCallTruncatedError';
 import { ToolFailureTracker } from '../../src/tools/StripTools';
 import { truncationGuidance } from '../../src/agent/truncationRecovery';
+import { makeWriteFileTool } from '../../src/tools/builtinTools';
 
 interface Handlers {
   onToken: (t: string) => void;
@@ -111,9 +112,80 @@ describe('truncated tool calls', () => {
     const toolResult = messages.find((m) => m.role === 'tool');
     expect(toolResult?.tool_call_id).toBe('call_1');
     expect(toolResult?.content).toContain('was NOT executed');
-    expect(toolResult?.content).toContain('append_file');
+    expect(toolResult?.content).toContain('mode "append"');
     // The unanswered call id is closed off so the next request stays valid.
     expect(messages.some((m) => m.role === 'assistant' && m.tool_calls?.length === 1)).toBe(true);
+  });
+
+  // The append choice is the thing that must not be visible up front: measured
+  // 5/5 runs on one task, a model that can see a way to append splits a new file
+  // into a write plus appends it does not need, each chunk a separate request.
+  it("holds write_file's mode out of the offer until a call is cut off", async () => {
+    // The real definition, not a fake: the top-level description must not
+    // advertise the append choice either, or the hold would hide only the
+    // `mode` property while the sentence beside it kept offering it every round.
+    const definitions = [makeWriteFileTool().definition];
+    const offeredTools: { function: { parameters?: unknown } }[] = [];
+    let round = 0;
+    streamModelChatCompletion.mockImplementation(
+      async (
+        _url: string,
+        req: { tools?: { function: { parameters?: unknown } }[] },
+        _m: unknown,
+        h: Handlers,
+      ) => {
+        offeredTools.push(...(req.tools ?? []));
+        round += 1;
+        if (round === 1) {
+          h.onError(
+            new ToolCallTruncatedError({
+              toolName: 'write_file',
+              toolCallId: 'call_cut',
+              approxBytes: 9000,
+              finishReason: 'length',
+            }),
+          );
+          return;
+        }
+        if (round === 2) {
+          h.onToolCalls([
+            { id: 'c2', type: 'function', function: { name: 'write_file', arguments: '{}' } },
+          ]);
+          h.onDone('tool_calls');
+          return;
+        }
+        h.onToken('done');
+        h.onDone('stop');
+      },
+    );
+
+    await runToolCallingLoop(
+      runOptions([{ role: 'user', content: 'go' }], {
+        getToolDefinitions: () => definitions as never,
+        holdUntilTruncation: [{ tool: 'write_file', property: 'mode' }],
+      }) as never,
+    );
+
+    expect(offeredTools).toHaveLength(3);
+    // Round 1: "append" is nowhere in what the model is shown, so it has no way
+    // to split a file it does not need to split.
+    expect(JSON.stringify(offeredTools[0])).not.toContain('append');
+    // Round 2 and on: the call was cut off, so the choice is offered again.
+    expect(JSON.stringify(offeredTools[1])).toContain('append');
+    expect(JSON.stringify(offeredTools[2])).toContain('append');
+    const propertiesOf = (index: number) =>
+      (
+        offeredTools[index]?.function.parameters as
+          | { properties?: Record<string, unknown> }
+          | undefined
+      )?.properties;
+    expect(propertiesOf(0)).not.toHaveProperty('mode');
+    expect(propertiesOf(1)).toHaveProperty('mode');
+    // The trim is a copy per round: the registry's own definition still carries
+    // `mode`, so hiding it for this turn cannot hide it for the next chat.
+    expect(
+      (definitions[0].function.parameters as { properties?: Record<string, unknown> }).properties,
+    ).toHaveProperty('mode');
   });
 
   it('recovers from repeated truncations without downgrading the model', async () => {
@@ -140,60 +212,6 @@ describe('truncated tool calls', () => {
     await runToolCallingLoop(runOptions([{ role: 'user', content: 'go' }]) as never);
     // The turn recovered and produced output rather than failing.
     expect(round).toBe(3);
-  });
-
-  it('holds append_file back until a call is cut off, then keeps offering it', async () => {
-    const offered: string[][] = [];
-    let round = 0;
-    streamModelChatCompletion.mockImplementation(
-      async (
-        _url: string,
-        req: { tools?: { function: { name: string } }[] },
-        _m: unknown,
-        h: Handlers,
-      ) => {
-        offered.push((req.tools ?? []).map((t) => t.function.name));
-        round += 1;
-        if (round === 2) {
-          h.onError(
-            new ToolCallTruncatedError({
-              toolName: 'write_file',
-              toolCallId: 'call_cut',
-              approxBytes: 9000,
-              finishReason: 'length',
-            }),
-          );
-          return;
-        }
-        if (round < 4) {
-          h.onToolCalls([
-            {
-              id: `c${round}`,
-              type: 'function',
-              function: { name: 'write_file', arguments: '{}' },
-            },
-          ]);
-          h.onDone('tool_calls');
-          return;
-        }
-        h.onToken('done');
-        h.onDone('stop');
-      },
-    );
-
-    await runToolCallingLoop(
-      runOptions([{ role: 'user', content: 'go' }], {
-        getToolDefinitions: () =>
-          ['write_file', 'append_file'].map((name) => ({ type: 'function', function: { name } })),
-        offerAfterTruncation: ['append_file'],
-      }) as never,
-    );
-    expect(offered).toEqual([
-      ['write_file'],
-      ['write_file'],
-      ['write_file', 'append_file'],
-      ['write_file', 'append_file'],
-    ]);
   });
 
   it('fails the turn once recoveries are exhausted', async () => {
@@ -233,7 +251,7 @@ describe('truncated tool calls', () => {
     expect(nativeFallback).not.toHaveBeenCalled();
     // No call id survives a whole-request failure, so the nudge goes in as a user turn.
     const nudge = messages.filter((m) => m.role === 'user').at(-1);
-    expect(nudge?.content).toContain('append_file');
+    expect(nudge?.content).toContain('mode "append"');
   });
 
   it('does not charge the failure tracker for a truncated tool call', async () => {

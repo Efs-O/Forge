@@ -93,6 +93,21 @@ describe('expandAlias', () => {
     expect(msgs).toHaveLength(1);
     expect(msgs[0]).toMatch(/alias/i);
   });
+
+  /** A dangling alias is skipped, not followed. Returning the id unchanged is
+   *  what makes the point of use report it: the alias key reaches
+   *  `resolveModelName`, which names both the alias and the model it lost.
+   *  Following it would hand the pool key, the spawn lookup and the control
+   *  server a model name that exists nowhere. */
+  it('leaves a dangling alias unexpanded so the failure is named at the point of use', () => {
+    const cfg = baseConfig();
+    cfg.aliases = { 'gemma4-e4b-it-ud-q4kxl': 'gemma4-e4b-it-ud-q4kxl-vision' };
+    const msgs: string[] = [];
+    expect(expandAlias(cfg, 'gemma4-e4b-it-ud-q4kxl', (m) => msgs.push(m))).toBe(
+      'gemma4-e4b-it-ud-q4kxl',
+    );
+    expect(msgs).toEqual([]);
+  });
 });
 
 describe('resolveRequestModel', () => {
@@ -425,5 +440,28 @@ describe('resolveModelName — deterministic fuzzy resolution', () => {
   it('resolveRequestModel throws AmbiguousModelError (via findBase) for an ambiguous fuzzy base', () => {
     const cfg = realShapeConfig(false);
     expect(() => resolveRequestModel(cfg, 'gemma4')).toThrow(/Ambiguous model "gemma4"/);
+  });
+
+  /** The alias case the config warning already reported: using the alias must
+   *  say which alias and which model it lost, because `aliases.<key>` is the
+   *  line of config.yaml the user has to edit. "unknown model" alone sent two
+   *  people hunting for a model that was never typed there. */
+  it('names the alias and the model it lost', () => {
+    const cfg = realShapeConfig(false);
+    cfg.aliases = { 'gemma4-e4b-it-ud-q4kxl': 'gemma4-e4b-it-ud-q4kxl-vision' };
+    expect(() => resolveModelName(cfg, 'gemma4-e4b-it-ud-q4kxl')).toThrow(
+      /alias "gemma4-e4b-it-ud-q4kxl" points to removed model "gemma4-e4b-it-ud-q4kxl-vision" \(config\.yaml: aliases\.gemma4-e4b-it-ud-q4kxl\)/,
+    );
+  });
+
+  /** An exact alias hit on a dangling alias throws the message above. This is
+   *  the case-insensitive stage, where a dangling alias must not be offered as
+   *  a candidate at all: it would report a model name that does not exist as if
+   *  it were a match, and a real model that the same query prefixes should win. */
+  it('does not offer a dangling alias as a candidate', () => {
+    const cfg = realShapeConfig(false);
+    cfg.models = [cfg.models[0]!];
+    cfg.aliases = { GEMMA4: 'deleted-model' };
+    expect(resolveModelName(cfg, 'gemma4')).toBe('gemma4-26b-a4b-it-iq3s');
   });
 });

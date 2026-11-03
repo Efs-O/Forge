@@ -41,9 +41,10 @@ function codeBlockPhrase(lines: number, language: 'en' | 'el'): string {
  * separator rather than punctuation, because `and/or` must survive:
  *
  * 1. A drive letter settles it outright, so one segment is enough -- and only
- *    here are spaces allowed inside a segment. This user's home directory is
- *    `C:/Users/efso office/`, and without that the match stopped at the space
- *    and left the orphan word `efso` to be read aloud. It is confined to this
+ *    here are spaces allowed inside a segment. A home directory like
+ *    `C:/Users/jo smith/` is the case that forced it: without that the match
+ *    stopped at the space and left the orphan word `jo` to be read aloud. It is
+ *    confined to this
  *    branch because a space-tolerant segment elsewhere would happily swallow
  *    the prose in front of a path ("Open the src/a.ts file" -> "Open a.ts").
  * 2. Two or more separators.

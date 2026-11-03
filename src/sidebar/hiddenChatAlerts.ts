@@ -1,6 +1,6 @@
 import * as vscode from 'vscode';
 import type { SidebarProviderEvents } from './providerEvents';
-import type { ToolApprovalSink } from './ToolApprovalService';
+import type { ToolApprovalRequestEvent, ToolApprovalSink } from './ToolApprovalService';
 import type { UserQuestionSink } from './UserQuestionService';
 import { displayTitle } from './conversationTitle';
 
@@ -31,6 +31,7 @@ export class HiddenChatAlerts implements vscode.Disposable {
         requested: (event) =>
           this.notify('is waiting for tool approval.', event.conversationId, true),
         resolved: (event) => this.resolve(event.conversationId),
+        waitingForOwner: (event) => this.announceWaitingForOwner(event),
       }),
     );
     this.disposables.push(
@@ -96,6 +97,26 @@ export class HiddenChatAlerts implements vscode.Disposable {
     const actions = conversationId ? ['Open chat'] : [];
     void vscode.window.showInformationMessage(message, ...actions).then((action) => {
       if (action !== 'Open chat' || !conversationId) return;
+      void vscode.commands.executeCommand('workbench.view.extension.forge-sidebar').then(() => {
+        this.deps.switchConversation(conversationId);
+      });
+    });
+  }
+
+  /**
+   * A card only the owner can answer: the gate is one no automated answer is
+   * allowed for. A warning with a Show button, not the ordinary "waiting for
+   * approval" notice, because the chat is now stopped on a person rather than on
+   * a gate, and the owner has to be able to find it from another chat or another
+   * file.
+   */
+  private announceWaitingForOwner(event: ToolApprovalRequestEvent): void {
+    const conversationId = event.conversationId;
+    if (conversationId && this.isOnScreen(conversationId)) return;
+    const target = event.detail.split('\n')[0]?.slice(0, 120) ?? '';
+    const message = `${this.subject(conversationId)} needs your approval: ${event.toolName} ${target}`;
+    void vscode.window.showWarningMessage(message, 'Show').then((action) => {
+      if (action !== 'Show' || !conversationId) return;
       void vscode.commands.executeCommand('workbench.view.extension.forge-sidebar').then(() => {
         this.deps.switchConversation(conversationId);
       });

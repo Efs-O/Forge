@@ -18,7 +18,6 @@ export const BENCHMARK_TOOL_NAMES = [
   'find_files',
   'search_code',
   'write_file',
-  'append_file',
   'edit_file',
   'shell',
   'run_tests',
@@ -241,15 +240,21 @@ export function createBenchmarkToolHost(root: string): BenchmarkToolHost {
 
   const write = fileTool(
     'write_file',
-    `Write a UTF-8 file. Keep each call under ${MAX_SINGLE_WRITE_CHARS} characters; append_file builds larger files.`,
+    `Write a UTF-8 file. Keep each call under ${MAX_SINGLE_WRITE_CHARS} characters; ` +
+      `mode "append" writes the rest of a larger file.`,
     async (args) => {
       const content = stringArg(args, 'content');
       if (content.length > MAX_SINGLE_WRITE_CHARS)
         throw new Error(
-          `content is limited to ${MAX_SINGLE_WRITE_CHARS} characters; use append_file.`,
+          `content is limited to ${MAX_SINGLE_WRITE_CHARS} characters; write the first chunk and ` +
+            `send the rest with mode "append".`,
         );
       const target = filePath(args, root);
       fs.mkdirSync(path.dirname(target), { recursive: true });
+      if (args.mode === 'append') {
+        fs.appendFileSync(target, content, 'utf8');
+        return `Appended ${content.length} characters to ${relative(root, target)}`;
+      }
       fs.writeFileSync(target, content, 'utf8');
       return `Wrote ${relative(root, target)}`;
     },
@@ -261,36 +266,12 @@ export function createBenchmarkToolHost(root: string): BenchmarkToolHost {
     properties: {
       path: { type: 'string' },
       content: { type: 'string', maxLength: MAX_SINGLE_WRITE_CHARS },
+      mode: { type: 'string', enum: ['overwrite', 'append'] },
     },
     required: ['path', 'content'],
     additionalProperties: false,
   };
   registry.register(write);
-  const append = fileTool(
-    'append_file',
-    `Append a UTF-8 chunk to a file, under ${MAX_SINGLE_WRITE_CHARS} characters per call.`,
-    async (args) => {
-      const content = stringArg(args, 'content');
-      if (content.length > MAX_SINGLE_WRITE_CHARS)
-        throw new Error(`content is limited to ${MAX_SINGLE_WRITE_CHARS} characters.`);
-      const target = filePath(args, root);
-      fs.mkdirSync(path.dirname(target), { recursive: true });
-      fs.appendFileSync(target, content, 'utf8');
-      return `Appended ${content.length} characters to ${relative(root, target)}`;
-    },
-    'write',
-    (args) => [stringArg(args, 'path')],
-  );
-  append.definition.function.parameters = {
-    type: 'object',
-    properties: {
-      path: { type: 'string' },
-      content: { type: 'string', maxLength: MAX_SINGLE_WRITE_CHARS },
-    },
-    required: ['path', 'content'],
-    additionalProperties: false,
-  };
-  registry.register(append);
   const edit = fileTool(
     'edit_file',
     'Replace exact text in a UTF-8 file. Read the file first and make the smallest change.',

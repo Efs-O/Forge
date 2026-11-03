@@ -1,5 +1,10 @@
 /** Program and Git invocation normalization shared by shell classification rules. */
 
+/** Which shell a command line will actually be run in. Owned here because both
+ *  the classifier and its read-only rules need it, and neither should own the
+ *  other. */
+export type ShellKind = 'pwsh' | 'powershell' | 'bash';
+
 export function baseProgram(value: string): string {
   return (value.split(/[\\/]/u).pop() ?? value).replace(/\.(exe|cmd|bat)$/iu, '').toLowerCase();
 }

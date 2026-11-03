@@ -5,6 +5,7 @@ import { readTextCapped } from '../util/readTextCapped';
 import { DUCKDUCKGO_URL, extractDuckDuckGoResults } from './searchToolDuckDuckGo';
 import type { DuckDuckGoOutcome, SearchResult } from './searchToolDuckDuckGo';
 import type { RegisteredTool } from './ToolRegistry';
+import { PER_COMPUTER_SECRET_HINT } from '../util/secretHint';
 
 interface TavilyResult {
   title?: string;
@@ -60,6 +61,9 @@ export function makeWebSearchTool(
       },
     },
     permission: 'search',
+    /** A search engine's answer is another machine's text about this machine's
+     *  question, so it brings outside content in exactly as `web_fetch` does. */
+    untrustedResult: true,
     handler: async (args, context) => {
       const query = args['query'] as string;
       const requestedProvider = args['provider'];
@@ -91,6 +95,9 @@ async function searchDuckDuckGoWithFallback(
   maxResults: number,
   signal: AbortSignal | undefined,
 ): Promise<string> {
+  // What the model can actually do next, decided from the keys that exist rather
+  // than from the provider list: see `providersWithKeys`.
+  const retry = confirmWithProviders(await providersWithKeys(cfg, secrets));
   let outcome: DuckDuckGoOutcome | undefined;
   let duckDuckGoError: string | undefined;
   try {
@@ -112,8 +119,8 @@ async function searchDuckDuckGoWithFallback(
 
   if (!cfg.fallback) {
     return duckDuckGoError
-      ? `Results via DuckDuckGo (request failed)\n\n${reason}. Search again with provider "tavily" or "brave" to confirm.`
-      : unconfirmedEmptyResult(reason);
+      ? `Results via DuckDuckGo (request failed)\n\n${reason}. ${retry}`
+      : unconfirmedEmptyResult(reason, retry);
   }
 
   const fallback = cfg.fallback;
@@ -126,13 +133,15 @@ async function searchDuckDuckGoWithFallback(
       reason,
       fallback,
       `SecretStorage read failed: ${describeError(error)}`,
+      retry,
     );
   }
   if (!fallbackKey) {
     return fallbackUnavailable(
       reason,
       fallback,
-      `API key not found in SecretStorage under "${fallbackKeyName}". Run "Forge: Set Search API Key" to store it.`,
+      `API key not found in SecretStorage under "${fallbackKeyName}". Run "Forge: Set Search API Key" to store it. ${PER_COMPUTER_SECRET_HINT}`,
+      retry,
     );
   }
 
@@ -144,7 +153,7 @@ async function searchDuckDuckGoWithFallback(
     const fallbackError = `Fallback ${providerLabel(fallback)} failed: ${describeError(error)}`;
     return duckDuckGoError
       ? `Results via ${providerLabel(fallback)} (DuckDuckGo failed; fallback failed)\n\n${reason}. ${fallbackError}`
-      : unconfirmedEmptyResult(reason, fallbackError);
+      : unconfirmedEmptyResult(reason, retry, fallbackError);
   }
 
   if (fallbackResults.length > 0) {
@@ -164,7 +173,11 @@ async function searchDuckDuckGoWithFallback(
     );
   }
 
-  return unconfirmedEmptyResult(reason, `${providerLabel(fallback)} also returned no results.`);
+  return unconfirmedEmptyResult(
+    reason,
+    retry,
+    `${providerLabel(fallback)} also returned no results.`,
+  );
 }
 
 async function searchDuckDuckGo(
@@ -288,6 +301,55 @@ async function searchBrave(
   }));
 }
 
+/**
+ * Which providers this machine can answer with right now. DuckDuckGo needs no
+ * key; Tavily and Brave work only with one in SecretStorage. The retry text used
+ * to name `"tavily" or "brave"` unconditionally, and on a box with no Brave key
+ * 2 of 11 audited calls died on `API key not found … "forge.brave.apiKey"` — a
+ * hint pointing at a provider that could never answer. A store that cannot be
+ * read counts as "no key" for this hint; the real storage error still surfaces
+ * on the call that actually needs that provider.
+ */
+async function providersWithKeys(
+  cfg: SearchConfig,
+  secrets: vscode.SecretStorage,
+): Promise<SearchProvider[]> {
+  const usable: SearchProvider[] = ['duckduckgo'];
+  for (const provider of ['tavily', 'brave'] as const) {
+    try {
+      if (await secrets.get(secretKeyNameFor(provider, cfg))) usable.push(provider);
+    } catch {
+      // Unreadable store: treat it as no key here, and let the call that needs
+      // the provider report the real failure.
+    }
+  }
+  return usable;
+}
+
+/** Names the providers that answer, as the enum values the call must pass. */
+function confirmWithProviders(usable: readonly SearchProvider[]): string {
+  const others = usable.filter((provider) => provider !== 'duckduckgo');
+  if (others.length === 0) {
+    return (
+      'No Tavily or Brave key is stored on this machine, so DuckDuckGo is the only ' +
+      'provider: search again with different wording.'
+    );
+  }
+  const quoted = others.map((provider) => `"${provider}"`).join(' or ');
+  return `Search again with different wording, or call web_search with provider ${quoted} to confirm.`;
+}
+
+/** The same list, spelled out for an error that has to say what to call instead. */
+function usableList(usable: readonly SearchProvider[]): string {
+  return usable
+    .map((provider) =>
+      provider === 'duckduckgo'
+        ? 'DuckDuckGo (needs no key)'
+        : `${providerLabel(provider)} ("${provider}")`,
+    )
+    .join(', ');
+}
+
 async function readApiKey(
   provider: 'tavily' | 'brave',
   cfg: SearchConfig,
@@ -296,9 +358,11 @@ async function readApiKey(
   const keyName = secretKeyNameFor(provider, cfg);
   const apiKey = await secrets.get(keyName);
   if (!apiKey) {
+    const usable = await providersWithKeys(cfg, secrets);
     throw new Error(
       `Forge search: API key not found in SecretStorage under "${keyName}". ` +
-        'Run "Forge: Set Search API Key" to store it.',
+        `Providers usable on this machine right now: ${usableList(usable)}. ` +
+        `Run "Forge: Set Search API Key" to store it. ${PER_COMPUTER_SECRET_HINT}`,
     );
   }
   return apiKey;
@@ -326,21 +390,24 @@ function formatResults(
     .join('\n\n')}`;
 }
 
-function unconfirmedEmptyResult(reason: string, extra?: string): string {
+function unconfirmedEmptyResult(reason: string, retry: string, extra?: string): string {
   const lead = reason.startsWith('DuckDuckGo failed:')
     ? `${reason}; no fallback confirmed results.`
     : 'DuckDuckGo returned no results; this is NOT proof that nothing exists, because the page may have been blocked or changed its layout.';
   return (
-    `Results via DuckDuckGo (${reason})\n\n` +
-    `${lead} ` +
-    'Search again with different wording, or call web_search with provider "tavily" to confirm.' +
-    (extra ? ` ${extra}` : '')
+    `Results via DuckDuckGo (${reason})\n\n` + `${lead} ` + `${retry}` + (extra ? ` ${extra}` : '')
   );
 }
 
-function fallbackUnavailable(reason: string, provider: 'tavily' | 'brave', detail: string): string {
+function fallbackUnavailable(
+  reason: string,
+  provider: 'tavily' | 'brave',
+  detail: string,
+  retry: string,
+): string {
   return unconfirmedEmptyResult(
     reason,
+    retry,
     `Fallback ${providerLabel(provider)} was not available: ${detail}`,
   );
 }

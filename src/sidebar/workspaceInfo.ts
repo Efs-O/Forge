@@ -11,7 +11,7 @@
 
 import * as vscode from 'vscode';
 import type { HostToWebview } from './messageBridge';
-import { SCREENSHOT_DIR } from '../tools/browser/browserTools';
+import { screenshotRoot } from '../tools/browser/screenshotPaths';
 
 /**
  * `activationRoot` is the root every by-value consumer — delegation, the
@@ -22,6 +22,7 @@ import { SCREENSHOT_DIR } from '../tools/browser/browserTools';
 export function workspaceInfoMessage(
   activationRoot: string,
   toWebviewUri?: (uri: vscode.Uri) => string,
+  forgeIconUri?: string,
 ): HostToWebview {
   const folders = vscode.workspace.workspaceFolders ?? [];
   const root = folders[0]?.uri.fsPath ?? '';
@@ -32,8 +33,24 @@ export function workspaceInfoMessage(
     extraRoots: Math.max(0, folders.length - 1),
     stale: root !== activationRoot,
     ...(folders[0] && toWebviewUri ? { rootUri: toWebviewUri(folders[0].uri) } : {}),
-    ...(toWebviewUri ? { screenshotsUri: toWebviewUri(vscode.Uri.file(SCREENSHOT_DIR)) } : {}),
+    ...(toWebviewUri ? { screenshotsUri: toWebviewUri(vscode.Uri.file(screenshotRoot())) } : {}),
+    ...(forgeIconUri ? { forgeIconUri } : {}),
   };
+}
+
+/** Publish the resource URIs a resolved Forge webview can load. */
+export function workspaceInfoMessageForView(
+  activationRoot: string,
+  extensionUri: vscode.Uri,
+  webview: vscode.Webview | undefined,
+): HostToWebview {
+  const toWebviewUri = webview
+    ? (uri: vscode.Uri) => webview.asWebviewUri(uri).toString()
+    : undefined;
+  const iconUri = webview
+    ? webview.asWebviewUri(vscode.Uri.joinPath(extensionUri, 'assets', 'icon.svg')).toString()
+    : undefined;
+  return workspaceInfoMessage(activationRoot, toWebviewUri, iconUri);
 }
 
 /**

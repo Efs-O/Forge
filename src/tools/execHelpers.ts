@@ -1,5 +1,8 @@
+import { spawn } from 'child_process';
 import * as path from 'path';
 import * as vscode from 'vscode';
+import { terminateCliProcessTree } from '../agents/cliProcess';
+import { ShellOutputCollector } from './shellOutput';
 
 export const MAX_OUTPUT_CHARS = 16_000;
 export const MAX_OUTPUT_CHARS_CEILING = 32_000;
@@ -90,23 +93,36 @@ export function parseExecOutputOptions(
 
 // ── Workspace helpers ──────────────────────────────────────────────────────────
 
-function getWorkspaceRoot(): string {
-  const folders = vscode.workspace.workspaceFolders;
-  if (!folders?.length) throw new Error('No workspace folder open');
-  return folders[0].uri.fsPath;
+/**
+ * The folder a command's relative paths resolve against, decided lexically and
+ * without touching the file system: the workspace root, or `cwd` joined to it.
+ *
+ * `resolveExecCwd` below is this answer plus the existence checks. The split
+ * exists because the owner-only guard runs in `autoApproveIf` and `approval`,
+ * which `ToolDispatch.ts` calls before the handler has validated `cwd`: a guard
+ * that called the checked version would throw "cwd does not exist" from a hook,
+ * reporting the wrong thing for the wrong reason.
+ */
+export function execCwdPreview(cwd: string | undefined): string | undefined {
+  const root = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
+  if (!root) return undefined;
+  const requested = cwd?.trim();
+  return normalizeSpawnCwd(
+    !requested ? root : path.isAbsolute(requested) ? requested : path.join(root, requested),
+  );
 }
 
 export function resolveExecCwd(cwd: string | undefined): string {
   // normalizeSpawnCwd here as well as at the spawn, so the cwd reported back to
   // the model is the same spelling the process actually ran under.
-  const resolved = normalizeSpawnCwd(
-    !cwd ? getWorkspaceRoot() : path.isAbsolute(cwd) ? cwd : path.join(getWorkspaceRoot(), cwd),
-  );
+  const resolved = execCwdPreview(cwd);
+  if (resolved === undefined) throw new Error('No workspace folder open');
   const problem = cwdProblem(resolved);
   if (problem === 'missing') {
     throw new Error(
       `shell: cwd ${JSON.stringify(cwd ?? resolved)} does not exist (resolved to ${resolved}). ` +
-        'Create it first (create_directory, or mkdir in the command) or leave cwd out.',
+        'Create it first - write_file to a file inside it, or mkdir in the command - ' +
+        'or leave cwd out.',
     );
   }
   if (problem === 'not_folder') {
@@ -241,4 +257,76 @@ export function formatExecCommandOutput(
   if (stream !== 'stderr') emit('stdout', result.stdout);
   if (stream !== 'stdout') emit('stderr', result.stderr);
   return JSON.stringify(out);
+}
+
+// ── Foreground run ────────────────────────────────────────────────────────────
+
+/**
+ * Runs one command line in the foreground and resolves only once its process
+ * tree is dead — the next command must not race the files this one is writing.
+ *
+ * It lives here with the other exec child-process helpers, moved out of
+ * `shellTool.ts` when that file reached the 500-line gate. The two rules it
+ * carries are the ones a rewrite loses first:
+ * - Kill the TREE, not just the child. Windows used to kill bash first, so
+ *   `taskkill /T` found no parent, the native grandchild kept running, and it
+ *   held the cwd and the files the next command wanted.
+ * - `detached` only off Windows: without it an abort on POSIX kills the shell
+ *   and leaves `sleep 600` behind.
+ * `FORGE_CONVERSATION_ID` is passed through deliberately — a backgrounded
+ * command uses it to report which chat may be notified when it exits.
+ */
+export async function runShellInForeground(
+  executable: string,
+  args: string[],
+  cwd: string,
+  timeoutMs: number,
+  env: NodeJS.ProcessEnv,
+  signal: AbortSignal | undefined,
+  output: ShellOutputCollector,
+): Promise<{ code: number | null; timedOut: boolean; seconds: number }> {
+  const started = Date.now();
+  return new Promise((resolve, reject) => {
+    const proc = spawn(executable, args, {
+      shell: false,
+      cwd: normalizeSpawnCwd(cwd),
+      stdio: ['ignore', 'pipe', 'pipe'],
+      windowsHide: true,
+      env: {
+        ...env,
+        FORGE_CONVERSATION_ID: env.FORGE_CONVERSATION_ID,
+        GIT_TERMINAL_PROMPT: '0',
+        NO_COLOR: '1',
+        FORCE_COLOR: '0',
+      },
+      ...(process.platform !== 'win32' ? { detached: true } : {}),
+    });
+    let timedOut = false;
+    let settled = false;
+    const finish = (code: number | null): void => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      signal?.removeEventListener('abort', stop);
+      resolve({ code, timedOut, seconds: (Date.now() - started) / 1000 });
+    };
+    // Resolve only once the tree is dead, or the next command races its files.
+    let killing = false;
+    const stop = (): void => {
+      if (killing || settled) return;
+      killing = true;
+      clearTimeout(timer);
+      void terminateCliProcessTree(proc).then(() => finish(null));
+    };
+    const timer = setTimeout(() => {
+      timedOut = true;
+      stop();
+    }, timeoutMs);
+    signal?.addEventListener('abort', stop, { once: true });
+    if (signal?.aborted) stop();
+    output.collect(proc.stdout);
+    output.collect(proc.stderr);
+    proc.once('error', reject);
+    proc.once('close', (code) => !killing && finish(code));
+  });
 }

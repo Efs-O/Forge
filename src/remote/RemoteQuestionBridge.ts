@@ -8,6 +8,17 @@ import type { CommandCleanupScheduler } from './CommandCleanupScheduler';
 import type { RemoteAuth } from './RemoteAuth';
 import type { RemoteRequestStore } from './RemoteRequestStore';
 import type { RemoteChannel, RemoteInboundDisposition, RemoteInboundEvent } from './types';
+import type { RemoteWaitFooter } from './RemoteAgentProgress';
+import {
+  closeQuestionMessages,
+  deleteQuestionTextPrompt,
+  editQuestionMessage,
+  publishQuestionResolution,
+  refuseQuestionProse,
+  sendQuestionNotice,
+  type RemoteQuestionEntry,
+  type RemoteQuestionMessageDeps,
+} from './RemoteQuestionMessages';
 import {
   applyRemoteQuestionStep,
   applyRemoteQuestionText,
@@ -22,19 +33,6 @@ import {
 
 type QuestionActionEvent = Extract<RemoteInboundEvent, { kind: 'question_action' }>;
 
-interface RemoteQuestionEntry {
-  chatId: string;
-  event: UserQuestionRequestEvent;
-  state: RemoteQuestionStepState;
-  messageId?: string | undefined;
-  messageTexts: Map<string, string>;
-  textPromptIds?: string[];
-  delivered: boolean;
-  skipReceipt: boolean;
-  callbackIds: Set<string>;
-  actionQueue: Promise<void>;
-}
-
 interface ActionOutcome {
   disposition: RemoteInboundDisposition;
   callbackText?: string;
@@ -44,6 +42,12 @@ interface ActionOutcome {
 export class RemoteQuestionBridge {
   private readonly questions = new Map<string, RemoteQuestionEntry>();
   private subscription: { dispose(): void } | undefined;
+  /**
+   * Who owns the turn's `Forge: working…` line. Set by `start()` from the
+   * controller's progress owner; a bridge started without one — a rig, or a
+   * transport with no progress bubble — leaves the chat exactly as it was.
+   */
+  private workingLine: RemoteWaitFooter | undefined;
 
   constructor(
     private readonly channel: RemoteChannel,
@@ -56,7 +60,16 @@ export class RemoteQuestionBridge {
     private readonly cleanup?: CommandCleanupScheduler,
   ) {}
 
-  start(): void {
+  /**
+   * Starts rendering questions, and takes the owner of the turn's working line.
+   *
+   * A board stops the turn until the owner answers it, and Telegram never moves
+   * a message: the `Forge: working…` line that was sitting at the bottom would
+   * end up above the buttons, out of sight, and stay there. So it comes off for
+   * the length of the wait and reopens below the board and its receipt.
+   */
+  start(workingLine: RemoteWaitFooter): void {
+    this.workingLine = workingLine;
     this.subscription = this.host.addQuestionSink({
       asked: (event) => this.onAsked(event),
       answered: (event) => this.onAnswered(event),
@@ -160,14 +173,16 @@ export class RemoteQuestionBridge {
       case 'rerender': {
         const noteChanged = previous.notes[previous.step] !== entry.state.notes[entry.state.step];
         if (previous.freeTextStep !== undefined && entry.state.freeTextStep === undefined) {
-          await this.deleteTextPrompt(entry);
+          await deleteQuestionTextPrompt(this.messageDeps(), entry);
         }
         await this.replaceCurrentKeyboard(entry, noteChanged);
         return undefined;
       }
       case 'needNote': {
-        await this.deleteTextPrompt(entry);
-        const ids = await this.sendNotice(
+        const messages = this.messageDeps();
+        await deleteQuestionTextPrompt(messages, entry);
+        const ids = await sendQuestionNotice(
+          messages,
           entry.chatId,
           renderRemoteQuestionNotePrompt(entry.state),
         );
@@ -217,12 +232,12 @@ export class RemoteQuestionBridge {
     }
     const { previous, result } = input;
     if (result.effect.kind === 'toast') {
-      await this.refuseProse(entry, result.effect.text);
+      await refuseQuestionProse(this.messageDeps(), entry, result.effect.text);
       return;
     }
     entry.state = result.state;
     if (result.effect.kind === 'rerender') {
-      if (noteMode) await this.deleteTextPrompt(entry);
+      if (noteMode) await deleteQuestionTextPrompt(this.messageDeps(), entry);
       await this.replaceCurrentKeyboard(entry, noteMode);
     } else {
       await this.applyEffect(entry, previous, result.effect);
@@ -247,10 +262,13 @@ export class RemoteQuestionBridge {
 
   private async updateCurrentText(entry: RemoteQuestionEntry): Promise<void> {
     const messageId = entry.messageId;
-    if (!messageId || !this.channel.editMessage) return;
-    const text = renderRemoteQuestionStep(entry.state);
-    await this.channel.editMessage(entry.chatId, messageId, text, { signal: this.signal });
-    entry.messageTexts.set(messageId, text);
+    if (!messageId) return;
+    await editQuestionMessage(
+      this.messageDeps(),
+      entry,
+      messageId,
+      renderRemoteQuestionStep(entry.state),
+    );
   }
 
   private keyboard(entry: RemoteQuestionEntry) {
@@ -281,7 +299,7 @@ export class RemoteQuestionBridge {
         await this.channel.clearInlineKeyboard?.(entry.chatId, messageId, { signal: this.signal });
         return;
       }
-      entry.delivered = true;
+      this.markDelivered(entry);
       entry.messageId = messageId;
       entry.messageTexts.set(messageId, text.slice(0, this.maxMessageChars));
     } catch (err) {
@@ -301,7 +319,7 @@ export class RemoteQuestionBridge {
       0,
       this.maxMessageChars,
     );
-    await this.editMessage(entry, messageId, text);
+    await editQuestionMessage(this.messageDeps(), entry, messageId, text);
   }
 
   private async failDelivery(entry: RemoteQuestionEntry, detail: string): Promise<void> {
@@ -314,10 +332,22 @@ export class RemoteQuestionBridge {
         signal: this.signal,
       });
       for (const id of ids ?? []) entry.messageTexts.set(id, text.slice(0, this.maxMessageChars));
-      entry.delivered = true;
+      this.markDelivered(entry);
     } catch (err) {
       this.report(`question delivery failed (${detail})`, err);
     }
+  }
+
+  /**
+   * The question is on screen: say so, and take the working line off the bubble
+   * above it. Left in place, `Forge: working…` would sit above the buttons the
+   * owner is being asked to press, out of sight, and only ever be edited in
+   * place after they answered. `suspendFooter` is idempotent, so the second and
+   * later steps of one question do nothing here.
+   */
+  private markDelivered(entry: RemoteQuestionEntry): void {
+    entry.delivered = true;
+    this.workingLine?.suspendFooter(entry.conversationId);
   }
 
   private onAsked(event: UserQuestionRequestEvent): void {
@@ -326,6 +356,7 @@ export class RemoteQuestionBridge {
     if (!chatId) return;
     const entry: RemoteQuestionEntry = {
       chatId,
+      conversationId: event.conversationId,
       event,
       state: createRemoteQuestionStepState(event.specs),
       messageTexts: new Map(),
@@ -354,9 +385,16 @@ export class RemoteQuestionBridge {
     if (!entry) return;
     this.questions.delete(event.id);
     entry.state = applyRemoteQuestionStep(entry.state, { type: 'resolved' }).state;
-    void this.closeMessages(entry, event);
-    void this.deleteTextPrompt(entry);
-    void this.publishResolution(entry, event);
+    // In this order, on the entry's own queue: retire the board, drop the note
+    // prompt, say what the answer was, and only then reopen the working line,
+    // which has to land below the board and its receipt, not between them.
+    void this.enqueue(entry, async () => {
+      const messages = this.messageDeps();
+      await closeQuestionMessages(messages, entry, event);
+      await deleteQuestionTextPrompt(messages, entry);
+      await publishQuestionResolution(messages, entry, event);
+      this.workingLine?.resumeFooter(entry.conversationId);
+    }).catch((err: unknown) => this.report('question resolution', err));
   }
 
   private async publish(id: string): Promise<void> {
@@ -384,94 +422,22 @@ export class RemoteQuestionBridge {
       for (const messageId of ids ?? []) {
         entry.messageTexts.set(messageId, `Forge asks: ${body}`.slice(0, this.maxMessageChars));
       }
-      entry.delivered = true;
+      this.markDelivered(entry);
     } catch (err) {
       this.report('question delivery failed', err);
     }
   }
 
-  private async editMessage(
-    entry: RemoteQuestionEntry,
-    messageId: string,
-    text: string,
-  ): Promise<void> {
-    await this.channel.editMessage?.(entry.chatId, messageId, text, { signal: this.signal });
-    entry.messageTexts.set(messageId, text);
-  }
-
-  private async closeMessages(
-    entry: RemoteQuestionEntry,
-    event: UserQuestionAnsweredEvent,
-  ): Promise<void> {
-    const status = entry.skipReceipt
-      ? 'Forge: skipped'
-      : event.reason === 'answered'
-        ? 'Forge: answered elsewhere.'
-        : 'Forge: the question was dismissed without an answer.';
-    for (const messageId of entry.messageTexts.keys()) {
-      try {
-        await this.channel.clearInlineKeyboard?.(entry.chatId, messageId, { signal: this.signal });
-        const current = entry.messageTexts.get(messageId);
-        if (current) await this.editMessage(entry, messageId, `${current}\n\n${status}`);
-      } catch (err) {
-        this.report('question keyboard cleanup', err);
-      }
-    }
-    entry.messageId = undefined;
-  }
-
-  private async publishResolution(
-    entry: RemoteQuestionEntry,
-    event: UserQuestionAnsweredEvent,
-  ): Promise<void> {
-    if (!(await this.auth.canDeliver(this.channel.name, entry.chatId))) return;
-    const text = entry.skipReceipt
-      ? 'Forge: skipped'
-      : event.reason === 'answered'
-        ? `Forge: answered — “${(event.answer ?? '').slice(0, 800)}”`
-        : 'Forge: the question was dismissed without an answer.';
-    try {
-      const sent = await this.channel.send(entry.chatId, text, { signal: this.signal });
-      if (event.reason === 'answered') this.cleanup?.armEphemeral(entry.chatId, sent ?? []);
-    } catch (err) {
-      this.report('question resolution notice', err);
-    }
-  }
-
-  private async refuseProse(entry: RemoteQuestionEntry, detail?: string): Promise<void> {
-    const step =
-      entry.state.specs.length > 1
-        ? ` question ${entry.state.step + 1} of ${entry.state.specs.length}`
-        : ' this question';
-    const message = detail
-      ? `Forge is waiting on${step}. ${detail} Your message was not sent to the agent.`
-      : `Forge is waiting on${step}. Tap a choice, or Note… to type an answer — your message was not sent to the agent.`;
-    const ids = await this.sendNotice(entry.chatId, message);
-    this.cleanup?.armEphemeral(entry.chatId, ids ?? []);
-  }
-
-  private async sendNotice(chatId: string, text: string): Promise<string[] | undefined> {
-    try {
-      const sent = await this.channel.send(chatId, text.slice(0, this.maxMessageChars), {
-        signal: this.signal,
-      });
-      return sent ?? undefined;
-    } catch (err) {
-      this.report('question notice', err);
-      return undefined;
-    }
-  }
-
-  private async deleteTextPrompt(entry: RemoteQuestionEntry): Promise<void> {
-    const ids = entry.textPromptIds ?? [];
-    delete entry.textPromptIds;
-    for (const id of ids) {
-      try {
-        await this.channel.deleteMessage?.(entry.chatId, id, { signal: this.signal });
-      } catch (err) {
-        this.report('question note prompt cleanup', err);
-      }
-    }
+  /** The chat round-trip the notices and receipts around the board need. */
+  private messageDeps(): RemoteQuestionMessageDeps {
+    return {
+      channel: this.channel,
+      auth: this.auth,
+      signal: this.signal,
+      ...(this.cleanup ? { cleanup: this.cleanup } : {}),
+      maxMessageChars: () => this.maxMessageChars,
+      report: (operation, err) => this.report(operation, err),
+    };
   }
 
   private enqueue<T>(entry: RemoteQuestionEntry, operation: () => Promise<T>): Promise<T> {

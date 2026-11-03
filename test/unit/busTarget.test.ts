@@ -97,12 +97,52 @@ describe('bus-started chat titles', () => {
   it('names the chat from the message, not the sender header', () => {
     const c = { messages: [], title: 'Untitled chat' } as unknown as ConversationRuntime;
     appendUserPrompt(c, forgeInboundPrompt('codex', '\nRetry the v0.16.34 push now.\nMore.'));
-    expect(c.title).toBe('codex: Retry the v0.16.34 push now.');
+    // The sender used to be pasted in front of the brief, which named every
+    // agent-started chat `codex: …`; the sender now travels as `origin_agent`.
+    expect(c.title).toBe('Retry the v0.16.34 push now.');
+    expect(c.origin_agent).toBe('codex');
+    expect(c.title_source).toBe('prompt');
+  });
+
+  it('drops a leading heading marker from the line it names the chat from', () => {
+    // An agent brief that opens `# Split SdServerBackend.ts` is about that file;
+    // the `#` is its document structure, not part of its name.
+    const c = { messages: [], title: 'Untitled chat' } as unknown as ConversationRuntime;
+    appendUserPrompt(
+      c,
+      forgeInboundPrompt('claude', '\n# Split SdServerBackend.ts\n\nDo it carefully.'),
+    );
+    expect(c.title).toBe('Split SdServerBackend.ts');
+    expect(c.origin_agent).toBe('claude');
+    // A `#` with no space after it is a hashtag, and stays part of the name.
+    const other = { messages: [], title: 'Untitled chat' } as unknown as ConversationRuntime;
+    appendUserPrompt(other, forgeInboundPrompt('claude', '\n#hashtag work\n\nMore.'));
+    expect(other.title).toBe('#hashtag work');
+  });
+
+  it('records no origin_agent for a prompt the owner typed', () => {
+    const c = { messages: [], title: 'Untitled chat' } as unknown as ConversationRuntime;
+    appendUserPrompt(c, 'fix the build\nplease');
+    expect(c.title).toBe('fix the build');
+    expect(c.origin_agent).toBeUndefined();
   });
 
   it('leaves a typed prompt titled by its first line', () => {
     const c = { messages: [], title: 'Untitled chat' } as unknown as ConversationRuntime;
     appendUserPrompt(c, 'fix the build\nplease');
     expect(c.title).toBe('fix the build');
+  });
+
+  it('keeps a name given before the first prompt (new_chat worker, user rename)', () => {
+    for (const source of ['auto', 'user'] as const) {
+      const c = {
+        messages: [],
+        title: 'Hello: Fix the Telegram ring',
+        title_source: source,
+      } as unknown as ConversationRuntime;
+      appendUserPrompt(c, '📨 Message from Hello (id bb95134e):\nFix the Telegram ring.');
+      expect(c.title).toBe('Hello: Fix the Telegram ring');
+      expect(c.title_source).toBe(source);
+    }
   });
 });

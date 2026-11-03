@@ -1,35 +1,19 @@
 import type { QuestionSpec, StructuredAnswer } from '../util/questionAnswers';
 import type { ChatAttachmentRef } from '../llm/types';
-import type { AgentLinks, AgentSenderMetadata } from '../agentLinks/chatAgentLinks';
+import type { AgentSenderMetadata } from '../agentLinks/chatAgentLinks';
 import type { ActivityViewMode, ThinkingDisplayMode } from './activityViewSetting';
 import type { DisplayPersistMessage } from './sessionTypes';
 export type { ChatAttachmentRef };
 
-/** Tab row mirrored for host + webview. */
-export interface SessionTabMeta {
-  id: string;
-  title: string;
-  createdAt: number;
-  updatedAt: number;
-  messageCount?: number;
-  active_model?: string;
-  /** True while an agent turn is streaming in this conversation. */
-  streaming?: boolean;
-  /** Accumulated active-agent time for the tab badge. */
-  active_time_ms?: number;
-  agentLinks?: AgentLinks;
-}
-export interface SessionHistoryMeta {
-  id: string;
-  title: string;
-  createdAt: number;
-  updatedAt: number;
-  messageCount?: number;
-  active_model?: string;
-  /** Accumulated active-agent time for the history badge. */
-  active_time_ms?: number;
-}
-
+// Re-exported rather than moved out of reach, the way `conversationMessages.ts`
+// and `jobPanelMessages.ts` are: the bridge stays the single import for every
+// message shape, and the declarations live where the row's own fields do. Both
+// rows carry `title_source` and `origin_agent`, because a panel row cannot tell
+// an agent's brief from a person's sentence without them.
+export type { SessionTabMeta, SessionHistoryMeta } from './sessionMetaMessages';
+import type { SessionTabMeta, SessionHistoryMeta } from './sessionMetaMessages';
+export type { SessionSearchQueryMsg, SessionSearchResultMsg } from './sessionSearchMessages';
+import type { SessionSearchQueryMsg, SessionSearchResultMsg } from './sessionSearchMessages';
 /** Slash commands from the sidebar input (`/` menu); kept in sync with `webview-ui/src/slashCommands.ts`. */
 export type ForgeSlashCommandId =
   | 'unloadModel'
@@ -51,6 +35,7 @@ export type ForgeSlashCommandId =
   | 'reloadWindow'
   | 'initForge'
   | 'clanker'
+  | 'approvals'
   | 'system'
   | 'linkAgent'
   | 'unlinkAgent';
@@ -145,14 +130,17 @@ interface NewChatMsg {
   type: 'newChat';
 }
 
-interface ConfirmRequestMsg {
-  type: 'confirmRequest';
-  id: string;
-  toolName: string;
-  detail: string;
-  isDangerous?: boolean;
-  conversationId?: string;
-}
+// The approval card's own shapes — `confirmRequest`, `confirmResolved`,
+// `confirmResponse`, the offers the card carries and the ways it may be
+// answered — live in `approvalMessages.ts`, because the card is one concern that
+// the sidebar, the Telegram mirror and the gate ledger all read the same way.
+export type { ApprovalOffer, ApprovalDecision } from './approvalMessages';
+import type {
+  ConfirmRequestMsg,
+  ConfirmResolvedMsg,
+  ConfirmResponseMsg,
+  ResetApprovalsMsg,
+} from './approvalMessages';
 /**
  * An agent question raised by `ask_user`.
  *
@@ -172,15 +160,6 @@ interface QuestionRequestMsg {
 /** A question something else settled — a paired chat, or a cancelled turn. */
 interface QuestionResolvedMsg {
   type: 'questionResolved';
-  id: string;
-}
-/**
- * A pending approval that something OTHER than this webview settled — a remote
- * transport button, or a cancelled turn. Without it the sidebar keeps showing
- * live-looking Approve/Deny buttons for an approval that is already resolved.
- */
-interface ConfirmResolvedMsg {
-  type: 'confirmResolved';
   id: string;
 }
 /**
@@ -242,6 +221,8 @@ import type { CheckpointStats, FileDiffMsg } from './diffMessages';
 interface ClankerChangedMsg {
   type: 'clankerChanged';
   enabled: boolean;
+  /** Which chat: Clanker is armed one chat at a time. */
+  conversationId: string;
 }
 
 /** External reach, sent on handshake and transport or pairing changes. */
@@ -292,6 +273,12 @@ export interface SessionSyncMsg {
    * host has no attachment store — rows then render as plain file chips.
    */
   attachmentsRoot?: string;
+  /**
+   * The size the owner saved for the history panel, read from `globalState` on
+   * this window's load. Absent means "no saved size": the panel keeps its
+   * default rather than guessing one, so an absent field is not a zero.
+   */
+  historyPanelSize?: HistoryPanelSize;
 }
 
 /**
@@ -305,18 +292,27 @@ export interface SessionSyncMsg {
  */
 interface WorkspaceInfoMsg {
   type: 'workspaceInfo';
-  /** Basename of `workspaceFolders[0]`, or '' when no folder is open. */
   name: string;
-  /** Absolute path of `workspaceFolders[0]`, for the hover title. */
   path: string;
-  /** Count of additional roots; > 0 means the folder order is load-bearing. */
   extraRoots: number;
-  /** True once the roots changed since activation — the captured root is stale. */
   stale: boolean;
-  /** Webview URI of `path`, for thumbnails of workspace images (generate_image). */
   rootUri?: string;
-  screenshotsUri?: string; // Webview URI of Forge's screenshot directory.
+  screenshotsUri?: string;
+  forgeIconUri?: string;
 }
+
+import type {
+  JobsSnapshotMsg,
+  JobOpenedMsg,
+  JobsPanelOpenedMsg,
+  JobsPanelClosedMsg,
+  OpenJobMsg,
+} from './jobPanelMessages';
+export type { JobPanelMeta, JobsSnapshotMsg, JobOpenedMsg } from './jobPanelMessages';
+
+// The saved panel size travels inside `sessionSync`, so reloads need no extra message.
+export type { HistoryPanelSize, HistoryPanelSizeMsg } from './historyPanelSize';
+import type { HistoryPanelSize, HistoryPanelSizeMsg } from './historyPanelSize';
 
 export type HostToWebview =
   | TokenMsg
@@ -350,7 +346,10 @@ export type HostToWebview =
   | ClankerChangedMsg
   | RemoteStatusMsg
   | ActivityViewMsg
-  | WorkspaceInfoMsg;
+  | WorkspaceInfoMsg
+  | JobsSnapshotMsg
+  | JobOpenedMsg
+  | SessionSearchResultMsg;
 
 // ── Webview → Host ──────────────────────────────────────────────────────────
 
@@ -417,6 +416,8 @@ export type {
   RestoreConversationMsg,
   DeleteConversationMsg,
   RenameConversationMsg,
+  DraftBearingConversationIdsMsg,
+  SetConversationKeepOpenMsg,
 } from './conversationMessages';
 
 import type {
@@ -427,14 +428,11 @@ import type {
   RestoreConversationMsg,
   DeleteConversationMsg,
   RenameConversationMsg,
+  DraftBearingConversationIdsMsg,
+  SetConversationKeepOpenMsg,
 } from './conversationMessages';
 
 // v0.2+ additions
-interface ConfirmResponseMsg {
-  type: 'confirmResponse';
-  id: string;
-  approved: boolean;
-}
 /** The sidebar's answer or explicit skip for a pending question. */
 type QuestionResponseMsg =
   | {
@@ -453,6 +451,7 @@ interface RunSlashCommandMsg {
   commandId: ForgeSlashCommandId;
   agentKind?: string;
   sessionId?: string;
+  approvalAction?: 'reset' | 'invalid';
 }
 
 export type { OpenFileMsg, OpenAttachmentMsg } from './openMessages';
@@ -467,6 +466,8 @@ export type WebviewToHost =
   | SwitchModelMsg
   | WebviewReadyMsg
   | QueuedConversationIdsMsg
+  | DraftBearingConversationIdsMsg
+  | SetConversationKeepOpenMsg
   | UndoMsg
   | KeepMsg
   | ReviewCheckpointMsg
@@ -477,9 +478,15 @@ export type WebviewToHost =
   | RestoreConversationMsg
   | DeleteConversationMsg
   | RenameConversationMsg
+  | ResetApprovalsMsg
   | ConfirmResponseMsg
   | QuestionResponseMsg
   | OpenFileMsg
   | OpenAttachmentMsg
   | RunSlashCommandMsg
-  | WebviewDiagnosticMsg;
+  | WebviewDiagnosticMsg
+  | JobsPanelOpenedMsg
+  | JobsPanelClosedMsg
+  | OpenJobMsg
+  | HistoryPanelSizeMsg
+  | SessionSearchQueryMsg;

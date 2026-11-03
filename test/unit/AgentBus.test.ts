@@ -88,12 +88,39 @@ describe('CLIENT_SCRIPT usage block', () => {
     expect(BUS_README).toContain('read-verdict <name> <exchangeId>');
     expect(BUS_README).toContain('forge.sh stop <name> [--to <conversationId>]');
     expect(BUS_README).toContain('Queued messages are not withdrawn');
+    // The bus README has to tell the truth about what `status` answers before a
+    // sender's first turn starts (audit F3): it now reports the queue rather
+    // than refusing the request, and that is the line `wait` keeps polling.
+    expect(BUS_README).toContain('State: queued');
+    // The README has to tell an agent that an answer only lands while Forge is
+    // still waiting (audit F7): `reply` now says so instead of promising
+    // delivery, and the README says which answer means which.
+    expect(BUS_README).toContain('"live":false');
+    // Audit F8: the README told callers to relay to an agent only when that
+    // agent was already linked, but Forge starts its own link when the chat
+    // has none, and the caller cannot choose which instance answers.
+    expect(BUS_README).toContain('Forge starts its own');
+    expect(BUS_README).toContain('cannot pick which instance');
+    // The audited machine had no Git for Windows, so the client could not run
+    // and the README said nothing about that. It now names how to find the
+    // bash that ships with Git, and what to do when there is none.
+    expect(BUS_README).toContain('Get-Command git.exe');
+    expect(BUS_README).toContain('winget install --id Git.Git -e');
     // Implementation comments below the block are for maintainers, not users.
     expect(usage).not.toContain('usage prints');
   });
 });
 
 describe('forge.sh source usage block', () => {
+  it('sends optional session identity on status, view, and wait reads', () => {
+    const source = fs.readFileSync(path.resolve(process.cwd(), 'src/agentBus/forge.sh'), 'utf8');
+    expect(source).toContain('set_optional_sender_identity "$NAME"');
+    expect(source).toContain('QUERY="$QUERY&kind=$SENDER_KIND&sessionId=$SENDER_ID"');
+    expect(source).toContain('--data-urlencode "sessionId=$SENDER_ID"');
+    expect(source).toContain('"$URL/agent/status")');
+    expect(source).toContain('"$URL/agent/view"');
+  });
+
   it('says a verdict wakes the sending Forge chat when it is open', () => {
     const source = fs.readFileSync(path.resolve(process.cwd(), 'src/agentBus/forge.sh'), 'utf8');
     const sendLine = source.split(/\r?\n/).find((line) => line.includes('forge.sh send '));

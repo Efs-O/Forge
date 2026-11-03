@@ -1,5 +1,6 @@
 import type { RemoteInboundDisposition, RemoteInboundEvent } from './types';
 import type { RemoteCommandContext } from './RemoteCommandHandler';
+import { approvalLinesForChat } from '../sidebar/chatApprovalRules';
 
 /**
  * The owner-facing remote settings commands: `/clanker`, `/timeout`, and
@@ -18,13 +19,48 @@ export async function handleRemoteSettingsCommand(
       return { kind: 'rejected', reason: 'usage: /clanker on|off' };
     }
     // Owner-authenticated command, never a tool: a model that could call this
-    // would be able to switch off its own approval gate mid-turn.
-    context.host.setClankerMode(desired === 'on');
+    // would be able to switch off its own approval gate mid-turn. It acts on the
+    // chat this phone is bound to and on no other: the mode is a chat's, so arming
+    // it here cannot arm a tab the owner is watching in the sidebar.
+    const binding = context.store.binding(event.channel, event.chatId);
+    if (!binding) return { kind: 'rejected', reason: 'no conversation is bound' };
+    context.host.setClankerMode(binding.conversationId, desired === 'on');
     await context.channel.send(
       event.chatId,
       desired === 'on'
-        ? 'Forge: clanker mode ON — non-dangerous tools now run with no approval, here or in the sidebar, for every tab in this window. It covers this workspace, and stays armed across a window reload until it is turned off.'
-        : 'Forge: clanker mode OFF — tool approvals are gated again in this workspace, and stay gated across a reload.',
+        ? "Forge: clanker mode ON for this chat only. A call the owner could have allowed by key now runs with no approval; the deny list's dangerous commands and anything with no key still get a card, here or in the sidebar, and that card waits or times out like any other. The mode is saved with this chat and survives a window reload; /clanker off turns it off."
+        : 'Forge: clanker mode OFF for this chat. It is gated again, and the approvals this chat earned are not revoked.',
+      { signal: context.signal },
+    );
+    return { kind: 'handled' };
+  }
+  if (command === '/approvals') {
+    const binding = context.store.binding(event.channel, event.chatId);
+    if (!binding) return { kind: 'rejected', reason: 'no conversation is bound' };
+    if (argument === undefined || argument.trim() === '') {
+      const conversation = context.host.getConversation(binding.conversationId);
+      const lines = conversation
+        ? [
+            ...approvalLinesForChat(conversation.id, conversation),
+            ...(context.getApprovalPolicyLines?.() ?? []),
+          ]
+        : [];
+      await context.channel.send(
+        event.chatId,
+        lines.length ? lines.join('\n') : 'No approvals in this chat.',
+        { signal: context.signal },
+      );
+      return { kind: 'handled' };
+    }
+    if (argument.trim().toLowerCase() !== 'reset') {
+      return { kind: 'rejected', reason: 'usage: /approvals or /approvals reset' };
+    }
+    const saved = await context.host.resetApprovals(binding.conversationId);
+    await context.channel.send(
+      event.chatId,
+      saved
+        ? 'Forge: approvals reset for this chat. The next gated call asks again.'
+        : 'Forge: could not save the approval reset for this chat.',
       { signal: context.signal },
     );
     return { kind: 'handled' };

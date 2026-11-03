@@ -53,7 +53,7 @@ function live(name: string, pipe: string, extra: Partial<ClaudeSession> = {}): C
   };
 }
 
-/** A stand-in Claude inbox: collects the lines of each connection. */
+/** A fake Claude inbox: collects the lines of each connection. */
 async function inbox(
   pipe: string,
 ): Promise<{ lines: string[][]; received: Promise<void>; close: () => Promise<void> }> {

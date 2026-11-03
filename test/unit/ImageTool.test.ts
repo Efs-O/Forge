@@ -50,13 +50,30 @@ describe('view_image', () => {
     ]);
   });
 
+  it('renders a PDF page into multimodal image content and passes the requested pages', async () => {
+    const target = path.join(root, 'scan.pdf');
+    fs.copyFileSync(new URL('../fixtures/documents/scanned.pdf', import.meta.url), target);
+    const renderer = vi.fn(async (_bytes: Buffer, pageNumbers: readonly number[]) =>
+      pageNumbers.map((page) => ({ page, png: Buffer.from('png'), width: 1, height: 1 })),
+    );
+    const result = await makeViewImageTool(undefined, renderer).handler({
+      path: 'scan.pdf',
+      pages: '2-3',
+    });
+    expect(renderer).toHaveBeenCalledWith(expect.any(Buffer), [2, 3], undefined, undefined);
+    expect(typeof result === 'string' ? result : result.content).toHaveLength(3);
+    expect(typeof result === 'string' ? result : result.text).toContain('pages 2, 3');
+  });
+
   it('reads an image outside the workspace and names it by absolute path', async () => {
     const outside = fs.mkdtempSync(path.join(os.tmpdir(), 'forge-view-outside-'));
     const target = path.join(outside, 'outside.png');
     fs.writeFileSync(target, pngBytes());
     try {
       const result = await makeViewImageTool().handler({ path: target });
-      expect(typeof result === 'string' ? result : result.text).toContain(fs.realpathSync.native(target));
+      expect(typeof result === 'string' ? result : result.text).toContain(
+        fs.realpathSync.native(target),
+      );
     } finally {
       fs.rmSync(outside, { recursive: true, force: true });
     }

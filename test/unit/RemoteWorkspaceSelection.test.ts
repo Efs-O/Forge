@@ -174,7 +174,7 @@ describe('/workspace command shape', () => {
     expect(channel.selectionPageSends[0]?.text).toContain('1. forge — Forge');
   });
 
-  it('goes to the workspace a number names instead of reading it as a page', async () => {
+  it('reads a number as the workspace it names, not as a page, and asks which move', async () => {
     const store = await requestStore();
     const channel = new FakeRemoteChannel();
     const switched: string[] = [];
@@ -191,8 +191,14 @@ describe('/workspace command shape', () => {
     await expect(
       handleRemoteCommand(textEvent('/workspace 23'), ctx, 'ws-go'),
     ).resolves.toMatchObject({ kind: 'handled' });
-    expect(switched).toEqual(['ws-23']);
-    expect(channel.sent.at(-1)?.text).toContain('switching to Workspace 23');
+    // Phase 2c: a number that resolves is a question now, not a move — the
+    // keyboard naming Workspace 23 is the proof the number was read as that
+    // workspace and not as a page, and nothing was reloaded before an answer.
+    expect(switched).toEqual([]);
+    const keyboard = channel.selectionChoiceSends.at(-1)!;
+    expect(keyboard.text).toContain('Workspace 23');
+    expect(keyboard.text).not.toContain('takes a page number');
+    expect(keyboard.controls.kind).toBe('workspaces');
   });
 
   it('refuses a switch to the workspace the chat is already in', async () => {
@@ -244,17 +250,25 @@ describe('/workspace command shape', () => {
     expect(expired).toMatchObject({ kind: 'rejected' });
     expect((expired as { reason: string }).reason).toContain('expired');
 
-    // Bare /workspace stores every alias, so a number off any page resolves.
+    // Bare /workspace stores every alias, so a number off any page resolves —
+    // and a number outside the stored range says the range instead of sending
+    // the owner looking for a workspace that was never missing.
     await handleRemoteCommand(textEvent('/workspace'), ctx, 'new-list');
+    const outOfRange = await handleRemoteCommand(textEvent('/workspace 99'), ctx, 'new-range');
+    expect((outOfRange as { reason: string }).reason).toContain('1-30');
+
     // /new <n> is retained as a silent alias for the documented /workspace <n>.
+    // Since phase 2c a number that resolves is a **question**, not a move, so
+    // answering it puts the mode keyboard where the numbered list was — and a
+    // number typed afterwards has nothing to resolve against, which is the
+    // honest answer, not the stale range the old code would have quoted.
     await expect(handleRemoteCommand(textEvent('/new 26'), ctx, 'new-ok')).resolves.toMatchObject({
       kind: 'handled',
     });
-    await expect(
-      handleRemoteCommand(textEvent('/workspace 26'), ctx, 'ws-ok'),
-    ).resolves.toMatchObject({ kind: 'handled' });
-
-    const outOfRange = await handleRemoteCommand(textEvent('/workspace 99'), ctx, 'new-range');
-    expect((outOfRange as { reason: string }).reason).toContain('1-30');
+    const afterKeyboard = await handleRemoteCommand(textEvent('/workspace 26'), ctx, 'ws-ok');
+    expect(afterKeyboard).toMatchObject({ kind: 'rejected' });
+    expect((afterKeyboard as { reason: string }).reason).toContain(
+      'replaced by the switch question',
+    );
   });
 });

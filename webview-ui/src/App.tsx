@@ -1,11 +1,6 @@
 import React, { useEffect, useMemo, useReducer, useCallback, useRef, useState } from 'react';
 import { splitModelProfile } from '../../src/config/ConfigResolver';
-import type {
-  ForgeSlashCommandId,
-  HostToWebview,
-  SessionHistoryMeta,
-  SessionTabMeta,
-} from '../../src/sidebar/messageBridge';
+import type { HostToWebview, JobPanelMeta } from '../../src/sidebar/messageBridge';
 import { vscode } from './vscode';
 import { WorkspaceUrisProvider } from './workspaceRootUri';
 import {
@@ -16,6 +11,7 @@ import {
   selectGenerating,
   selectCheckpointPending,
   selectCheckpointStats,
+  selectClankerActive,
 } from './reducer';
 export type { AppMessage } from './reducer';
 import { Header, type WorkspaceInfo } from './components/Header';
@@ -31,10 +27,15 @@ import { EmptyState } from './components/EmptyState';
 import { resumedTabIds } from './resumedTabs';
 import { StreamingStatus } from './components/StreamingStatus';
 import { SLASH_COMMANDS } from './slashCommands';
+import { useComposerSend } from './composerSend';
 import { webviewDiagnostics } from './WebviewDiagnostics';
 import { useHostCommands } from './hostCommands';
 import { usePendingPrompts } from './usePendingPrompts';
 import { hostMessageToAction, hostUserPromptToAction } from './hostActions';
+import {
+  reportDraftBearingConversationIds,
+  setConversationKeepOpen,
+} from './sessionRetentionMessages';
 export type { QueuedPrompt } from './usePendingPrompts';
 
 type WorkspaceContextInfo = WorkspaceInfo & { screenshotsUri?: string };
@@ -42,6 +43,7 @@ type WorkspaceContextInfo = WorkspaceInfo & { screenshotsUri?: string };
 export function App(): React.ReactElement {
   webviewDiagnostics.recordRender();
   const [state, dispatch] = useReducer(reducer, initialState);
+  const openConversationIds = useMemo(() => new Set(state.tabs.map((tab) => tab.id)), [state.tabs]);
 
   // A tool approval and an ask_user question: two dialogs with one shared rule,
   // which is why they live together. See useAgentDialogs.
@@ -56,6 +58,18 @@ export function App(): React.ReactElement {
   const [workspace, setWorkspace] = useState<WorkspaceContextInfo | undefined>(undefined);
   const [prefillText, setPrefillText] = useState<string | null>(null);
   const [historyExpanded, setHistoryExpanded] = useState(false);
+  // The Jobs section's snapshot, and the generation of the panel it belongs to.
+  // `jobsPanelId.current` is the generation the host is answering (0 once the
+  // panel has closed), so a snapshot or a navigation acknowledgement for a panel
+  // that closed — or was replaced by a reopen — cannot act on this one.
+  const [jobs, setJobs] = useState<JobPanelMeta[]>([]);
+  const [jobsLoaded, setJobsLoaded] = useState(false);
+  const jobsPanelId = useRef(0);
+  const jobsSeq = useRef(0);
+  // The same generation, as state, so the panel can scope its content search to
+  // the panel the host is answering. A ref cannot be read by a component that
+  // only re-renders on sync, so this mirrors it rather than replacing it.
+  const [panelId, setPanelId] = useState(0);
   const [waitingIds, setWaitingIds] = useState<ReadonlySet<string>>(() => new Set());
   // Conversations restored from an earlier window session, snapshotted once at
   // hydration. State rather than a ref: the snapshot lands after the first
@@ -131,6 +145,7 @@ export function App(): React.ReactElement {
             stale: msg.stale,
             ...(msg.rootUri ? { rootUri: msg.rootUri } : {}),
             ...(msg.screenshotsUri ? { screenshotsUri: msg.screenshotsUri } : {}),
+            ...(msg.forgeIconUri ? { forgeIconUri: msg.forgeIconUri } : {}),
           });
           break;
         case 'sessionSync':
@@ -183,6 +198,8 @@ export function App(): React.ReactElement {
     handleRestoreConversation,
     handleDeleteConversation,
     handleRenameConversation,
+    handleRunSlashCommand,
+    handleResetApprovals,
   } = useHostCommands(dispatch);
 
   // Picking a session from the panel is a navigation, so the panel dismisses
@@ -218,50 +235,81 @@ export function App(): React.ReactElement {
     [handleSwitchTab, collapseHistory],
   );
 
+  // The Jobs section is panel-scoped: opening it asks the host for the store,
+  // closing it tells the host to stop pushing and release what it opened. The
+  // generation number goes with both, so the host can tell this panel from the
+  // one that came before it — and a window reload, which restarts the count on
+  // a brand-new webview, cannot be mistaken for the old panel still open.
+  useEffect(() => {
+    if (!historyExpanded) return;
+    const panelId = ++jobsSeq.current;
+    jobsPanelId.current = panelId;
+    setJobs([]);
+    setJobsLoaded(false);
+    setPanelId(panelId);
+    vscode.postMessage({ type: 'jobsPanelOpened', panelId });
+    return () => {
+      if (jobsPanelId.current !== panelId) return;
+      jobsPanelId.current = 0;
+      // 0 says there is no open panel: the search box stops asking, and a reply
+      // still on its way cannot be applied to a panel that has closed.
+      setPanelId(0);
+      vscode.postMessage({ type: 'jobsPanelClosed', panelId });
+    };
+  }, [historyExpanded]);
+
+  // The host's two jobs replies get their own listener: they address the panel
+  // this window has open rather than the transcript, and `jobOpened` is the
+  // host confirming the navigation worked. Only then does the panel dismiss — a
+  // deleted job or a refused discuss leaves it visible with the host's error.
+  useEffect(() => {
+    function handler(event: MessageEvent): void {
+      const msg = event.data as HostToWebview;
+      if (msg.type !== 'jobsSnapshot' && msg.type !== 'jobOpened') return;
+      if (msg.panelId !== jobsPanelId.current) return;
+      if (msg.type === 'jobsSnapshot') {
+        setJobs(msg.jobs);
+        setJobsLoaded(true);
+      } else collapseHistory();
+    }
+    window.addEventListener('message', handler);
+    return () => window.removeEventListener('message', handler);
+  }, [collapseHistory]);
+
+  // A window with no conversations at all still has a reason to open the panel:
+  // its jobs. Collapse only once the host has answered that there are no jobs
+  // either — collapsing on the still-empty list before the snapshot lands would
+  // close the panel milliseconds after it opened.
   useEffect(() => {
     if (
       state.history.length === 0 &&
       (state.archived?.length ?? 0) === 0 &&
-      state.tabs.length === 0
+      state.tabs.length === 0 &&
+      jobsLoaded &&
+      jobs.length === 0
     ) {
       setHistoryExpanded(false);
     }
-  }, [state.archived?.length, state.history.length, state.tabs.length]);
+  }, [state.archived?.length, state.history.length, state.tabs.length, jobs.length, jobsLoaded]);
 
-  const handleRunSlashCommand = useCallback((commandId: ForgeSlashCommandId) => {
-    vscode.postMessage({ type: 'runSlashCommand', commandId });
+  // A job row is a navigation, not a chat switch: the host resolves the id
+  // against the store again before it touches any conversation.
+  const handleOpenJob = useCallback((id: string) => {
+    vscode.postMessage({ type: 'openJob', panelId: jobsPanelId.current, id });
   }, []);
-  const handleComposerSend = useCallback(
-    (text: string, attachments: Parameters<typeof handleSend>[1]) => {
-      const trimmed = text.trim();
-      if (/^\/link(?:\s|$)/u.test(trimmed)) {
-        const words = trimmed.split(/\s+/u).slice(1);
-        vscode.postMessage({
-          type: 'runSlashCommand',
-          commandId: 'linkAgent',
-          ...(words[0] ? { agentKind: words[0] } : {}),
-          ...(words.length > 1 ? { sessionId: words.slice(1).join(' ') } : {}),
-        });
-        return;
-      }
-      handleSend(text, attachments);
-    },
-    [handleSend],
-  );
-  const handleLinkAgent = useCallback(
-    () => handleRunSlashCommand('linkAgent'),
-    [handleRunSlashCommand],
-  );
+  // What the send button does with the text, including the command it refuses
+  // instead of spending a turn on it (`composerSend.ts`).
+  const handleComposerSend = useComposerSend({
+    dispatch,
+    handleSend,
+    restoreDraft: setPrefillText,
+  });
   const handleUnlinkAgent = useCallback(
     (agentKind: import('../../src/agentLinks/chatAgentLinks').AgentKind) =>
       vscode.postMessage({ type: 'runSlashCommand', commandId: 'unlinkAgent', agentKind }),
     [],
   );
   const handlePrefillConsumed = useCallback(() => setPrefillText(null), []);
-
-  // Unused tab/history types satisfy TS — keep them aligned with SessionSyncMsg shape
-  void ([] as SessionTabMeta[]);
-  void ([] as SessionHistoryMeta[]);
 
   const messages = selectMessages(state);
   const streaming = selectStreaming(state);
@@ -336,7 +384,6 @@ export function App(): React.ReactElement {
                 agentLinks={
                   state.tabs.find((tab) => tab.id === state.activeConversationId)?.agentLinks
                 }
-                onLinkAgent={handleLinkAgent}
                 onUnlinkAgent={handleUnlinkAgent}
                 onNew={handleNewConversation}
                 onToggleHistory={() => setHistoryExpanded((expanded) => !expanded)}
@@ -359,8 +406,14 @@ export function App(): React.ReactElement {
                 onRestore={handleRestoreFromPanel}
                 onDelete={handleDeleteConversation}
                 onRename={handleRenameConversation}
+                onResetApprovals={handleResetApprovals}
                 onClose={handleCloseTab}
+                onSetKeepOpen={setConversationKeepOpen}
                 onSwitchOpen={handleSwitchFromPanel}
+                jobs={jobs}
+                jobsLoaded={jobsLoaded}
+                panelId={panelId}
+                onOpenJob={handleOpenJob}
               />
             </>
           )}
@@ -376,7 +429,7 @@ export function App(): React.ReactElement {
         <StreamingStatus
           streaming={streaming}
           local={activeModelIsLocal}
-          clanker={state.clankerMode}
+          clanker={selectClankerActive(state)}
         />
         <CheckpointBar visible={selectCheckpointPending(state)} stats={checkpointStats} />
         <div id="composer-area">
@@ -393,13 +446,16 @@ export function App(): React.ReactElement {
               onRunSlashCommand={handleRunSlashCommand}
               prefillText={prefillText}
               onPrefillConsumed={handlePrefillConsumed}
-              clankerMode={state.clankerMode}
+              clankerMode={selectClankerActive(state)}
               models={state.models}
               activeModel={state.activeModel}
               onModelChange={handleModelChange}
               modelPickerDisabled={uiBusy}
               remote={state.remote}
               activeConversationId={state.activeConversationId}
+              retentionReady={state.sessionHydrated}
+              openConversationIds={openConversationIds}
+              onDraftBearingConversationIds={reportDraftBearingConversationIds}
             />
           </div>
           {/* Confirmation was rendered after a question before docking, so it
@@ -410,7 +466,11 @@ export function App(): React.ReactElement {
               toolName={dialogs.confirmRequest.toolName}
               detail={dialogs.confirmRequest.detail}
               isDangerous={dialogs.confirmRequest.isDangerous}
+              allowForChat={dialogs.confirmRequest.allowForChat}
+              alwaysInProject={dialogs.confirmRequest.alwaysInProject}
               onApprove={dialogs.approveConfirm}
+              onAllowForChat={dialogs.allowConfirmForChat}
+              onAlwaysInProject={dialogs.alwaysConfirmInProject}
               onDeny={dialogs.denyConfirm}
             />
           ) : visibleQuestion ? (

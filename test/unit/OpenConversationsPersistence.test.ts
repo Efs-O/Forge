@@ -77,6 +77,8 @@ function chat(id: string, text: string, updatedAt = 1): ConversationRuntime {
     title: id,
     createdAt: 1,
     updatedAt,
+    retention_activity_at: updatedAt,
+    keep_open: false,
     messages: [{ role: 'user', content: text }],
   };
 }
@@ -124,6 +126,27 @@ describe('open conversations persistence', () => {
     directories.push(directory);
     return directory;
   }
+
+  it('migrates missing retention state once and keeps the saved grace timestamp on reload', async () => {
+    const directory = tempDirectory();
+    const archive = archiveFor(directory);
+    const legacy = runtimeToPersisted(sidebar([chat('legacy', 'old body')]), { withHistory: false });
+    delete legacy.conversations[0]!.retention_activity_at;
+    delete legacy.conversations[0]!.keep_open;
+    const store: Record<string, unknown> = { [SESSION_KEY_V1]: legacy };
+    const memento = makeMemento(store);
+
+    const loaded = loadSidebarSession(memento, archive);
+    const migratedAt = loaded.conversations[0]!.retention_activity_at;
+    expect(migratedAt).toBeGreaterThan(0);
+    expect(loaded.conversations[0]!.keep_open).toBe(false);
+    await saveSidebarSession(memento, loaded, archive);
+    await settle();
+
+    const reloaded = loadSidebarSession(makeMemento(store), archiveFor(directory));
+    expect(reloaded.conversations[0]!.retention_activity_at).toBe(migratedAt);
+    expect(reloaded.conversations[0]!.keep_open).toBe(false);
+  });
 
   afterEach(() => {
     vi.restoreAllMocks();
@@ -299,10 +322,18 @@ describe('open conversations persistence', () => {
     const directory = tempDirectory();
     const archive = archiveFor(directory);
     const current = sidebar([chat('keep', 'one'), chat('remove', 'two', 2)]);
+    current.conversations[0]!.retention_activity_at = 12_345;
+    current.conversations[0]!.keep_open = true;
+    current.conversations[1]!.retention_activity_at = 23_456;
+    current.conversations[1]!.keep_open = false;
     const store: Record<string, unknown> = {};
     const memento = makeMemento(store);
     saveSidebarSession(memento, current, archive);
     await settle();
+
+    const reloaded = loadSidebarSession(makeMemento(store), archiveFor(directory));
+    expect(reloaded.conversations.map(({ retention_activity_at, keep_open }) => [retention_activity_at, keep_open]))
+      .toEqual([[12_345, true], [23_456, false]]);
 
     const held = holdUpdate(store, OPEN_CONVERSATIONS_KEY_V2);
     current.conversations = [current.conversations[0]!];
@@ -314,6 +345,13 @@ describe('open conversations persistence', () => {
     await settle();
     expect(fs.existsSync(body(directory, 'remove'))).toBe(false);
     expect(fs.existsSync(body(directory, 'keep'))).toBe(true);
+    const afterDelete = loadSidebarSession(makeMemento(store), archiveFor(directory));
+    expect(afterDelete.conversations).toHaveLength(1);
+    expect(afterDelete.conversations[0]).toMatchObject({
+      id: 'keep',
+      retention_activity_at: 12_345,
+      keep_open: true,
+    });
   });
 
   it('rebuilds pending removals from orphan files after a crash', async () => {

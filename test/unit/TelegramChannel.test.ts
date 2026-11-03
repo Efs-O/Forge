@@ -395,6 +395,53 @@ describe('TelegramChannel', () => {
     expect(bodies[1]).not.toHaveProperty('reply_markup');
   });
 
+  it('adds Allow for this chat only to cards carrying an offer', async () => {
+    const bodies: Array<Record<string, unknown>> = [];
+    const channel = new TelegramChannel({
+      token: 'secret-token',
+      getCursor: () => undefined,
+      setCursor: async () => undefined,
+      fetch: (async (_url: string | URL | Request, init?: RequestInit) => {
+        bodies.push(JSON.parse(String(init?.body)) as Record<string, unknown>);
+        return response({ message_id: bodies.length });
+      }) as typeof fetch,
+    });
+    const correlationId = 'x'.repeat(24);
+    await channel.send('chat', 'approval', { correlationId });
+    await channel.send('chat', 'approval', { correlationId, approvalAllowChat: true });
+    await channel.send('chat', 'approval', {
+      correlationId,
+      approvalAllowChat: true,
+      approvalAlwaysInProject: true,
+    });
+
+    const rows = (index: number) =>
+      (
+        bodies[index]?.['reply_markup'] as {
+          inline_keyboard: Array<Array<{ text: string; callback_data: string }>>;
+        }
+      ).inline_keyboard;
+    const labels = (index: number): string[][] =>
+      rows(index).map((row) => row.map((button) => button.text));
+    // No offer: one row of two buttons, and no empty second row.
+    expect(labels(0)).toEqual([['Decline', 'Approve']]);
+    // An offer: the two answers that run or refuse THIS call stay together on
+    // the first row, and the rule that answers every call after it goes below.
+    // Four buttons across one row is what Telegram cuts short on a phone, and
+    // `Always in this project` was the longest label of the four.
+    expect(labels(1)).toEqual([
+      ['Decline', 'Approve'],
+      ['Allow for this chat'],
+    ]);
+    expect(labels(2)).toEqual([
+      ['Decline', 'Approve'],
+      ['Allow for this chat', 'Always in this project'],
+    ]);
+    expect(rows(1)[1]![0]?.callback_data).toBe(`r:${correlationId}`);
+    expect(rows(2)[1]![1]?.callback_data).toBe(`p:${correlationId}`);
+    expect(Buffer.byteLength(rows(1)[1]![0]!.callback_data, 'utf8')).toBeLessThanOrEqual(64);
+  });
+
   it('keeps Unicode code points intact at the Telegram message boundary', () => {
     const chunks = splitTelegramText(`${'x'.repeat(4095)}😀tail`);
     expect(chunks).toEqual([`${'x'.repeat(4095)}😀`, 'tail']);
@@ -572,6 +619,54 @@ describe('TelegramChannel', () => {
       method: 'editMessageReplyMarkup',
       body: { message_id: 55 },
     });
+  });
+
+  it('the resolved button names the rule choice, not just that it was approved', async () => {
+    const calls: Array<{ method: string; body: Record<string, unknown> }> = [];
+    const channel = new TelegramChannel({
+      token: 'secret-token',
+      getCursor: () => undefined,
+      setCursor: async () => undefined,
+      fetch: (async (url: string | URL | Request, init?: RequestInit) => {
+        calls.push({
+          method: String(url).split('/').at(-1)!,
+          body: JSON.parse(String(init?.body)) as Record<string, unknown>,
+        });
+        return response({ message_id: 1 });
+      }) as typeof fetch,
+    });
+
+    await channel.resolvePromptKeyboard(
+      'chat',
+      'action-allow-chat',
+      ['71'],
+      true,
+      undefined,
+      'resolved',
+      'allowChat',
+    );
+    await channel.resolvePromptKeyboard(
+      'chat',
+      'action-always-project',
+      ['72'],
+      true,
+      undefined,
+      'resolved',
+      'alwaysProject',
+    );
+    const textOf = (call: { body: Record<string, unknown> }): string =>
+      (
+        call.body.reply_markup as {
+          inline_keyboard: Array<Array<{ text: string }>>;
+        }
+      ).inline_keyboard[0]![0]!.text;
+    // `Approved ✓` was what both of these used to say, and it is not the fact:
+    // each of them wrote a rule that answers every later call, and the receipt
+    // still on screen has to say which one.
+    expect(calls.map(textOf)).toEqual([
+      'Allowed for this chat ✓',
+      'Always in this project ✓',
+    ]);
   });
 
   it('falls back to clearing the keyboard and reports both failures', async () => {

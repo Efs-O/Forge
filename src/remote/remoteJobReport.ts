@@ -71,9 +71,16 @@ export function renderRemoteJobCard(
       ? 'not scheduled'
       : formatWhen(state.next_due_at, now);
   const status = job.enabled ? 'enabled' : 'paused';
+  // The wait belongs on the status line, as it does in `describeJob`: a job that
+  // says "enabled, next in 4m" while it is actually being held reads as if
+  // nothing is wrong, and the owner has no way to ask why from the card.
+  const pending =
+    state.task_pending && state.task_pending_reason
+      ? ` · pending: ${state.task_pending_reason}`
+      : '';
   const details = [
     `Schedule: ${describeSchedule(job.schedule)}`,
-    `Status: ${status}`,
+    `Status: ${status}${pending}`,
     `Last run: ${last}`,
     `Next: ${next}`,
   ].join('\n');

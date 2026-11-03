@@ -5,16 +5,12 @@ import * as vscode from 'vscode';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import {
   makeInsertCodeTool,
-  makeReadFileTool,
   makeReplaceSelectionTool,
   makeWriteFileTool,
 } from '../../src/tools/builtinTools';
+import { makeReadFileTool } from '../../src/tools/readFileTool';
 import { makeListDirectoryTool } from '../../src/tools/listDirectoryTool';
-import {
-  makeCreateDirectoryTool,
-  makeDeleteFileTool,
-  makeMoveFileTool,
-} from '../../src/tools/fileEditTools';
+import { makeDeleteFileTool, makeMoveFileTool } from '../../src/tools/fileEditTools';
 import { makeEditFileTool } from '../../src/tools/editFileTool';
 import { makeApplyLineEditsTool } from '../../src/tools/structuredEditTool';
 import { MAX_READ_FILE_CHARS } from '../../src/tools/resultCap';
@@ -100,9 +96,86 @@ describe('isolated file and directory tool execution', () => {
     expect(result).toContain('start_line');
   });
 
-  it('executes create, list, replace, structured edit, move, and delete handlers', async () => {
-    await makeCreateDirectoryTool().handler({ path: 'work' });
-    fs.writeFileSync(path.join(root, 'work/source.txt'), 'alpha\nbeta\n', 'utf8');
+  // 901 shell commands read files in the 53 sessions since 0.17.80, and `sed -n`
+  // was in 639 of them, because one shell round covers several ranges while
+  // read_file gave one file per call. Round count, not tokens, is what
+  // separated Forge from the harnesses that ship only a shell — so the ranges
+  // now come in one call without the shell.
+  it('reads several files and ranges in one call, in order, each headed by its path', async () => {
+    await makeWriteFileTool().handler({ path: 'a.txt', content: 'one\ntwo\nthree\n' });
+    fs.writeFileSync(path.join(root, 'b.txt'), 'alpha\nbeta\ngamma\ndelta\n', 'utf8');
+    const out = (await makeReadFileTool().handler({
+      reads: [
+        { path: 'a.txt', start_line: 1, end_line: 2 },
+        { path: 'b.txt' },
+        { path: 'b.txt', start_line: 3, end_line: 4 },
+      ],
+    })) as string;
+    expect(out).toContain('--- a.txt (lines 1-2 of 3) ---\none\ntwo');
+    expect(out).toContain('--- b.txt (4 lines) ---\nalpha\nbeta\ngamma\ndelta');
+    expect(out).toContain('--- b.txt (lines 3-4 of 4) ---\ngamma\ndelta');
+    // The order asked for, not the order found on disk, and the same numbering
+    // a single read gives, so a `numbered` batch still feeds apply_line_edits.
+    expect(out.indexOf('--- a.txt')).toBeLessThan(out.indexOf('--- b.txt (4 lines)'));
+    const numbered = (await makeReadFileTool().handler({
+      reads: [{ path: 'b.txt', start_line: 2, end_line: 3 }],
+      numbered: true,
+    })) as string;
+    expect(numbered).toContain('2|beta');
+    expect(numbered).toContain('3|gamma');
+  });
+
+  it('refuses path and reads together, and neither, and names the fix', async () => {
+    await makeWriteFileTool().handler({ path: 'a.txt', content: 'one\n' });
+    await expect(
+      makeReadFileTool().handler({ path: 'a.txt', reads: [{ path: 'a.txt' }] }),
+    ).rejects.toThrow('path and reads cannot be used together');
+    await expect(makeReadFileTool().handler({})).rejects.toThrow(
+      'neither path nor reads was given; minimal valid call: {"path":"src/a.ts"}',
+    );
+    // A single read still behaves exactly as it did: the range errors are the
+    // same words, because the batching must not change what a lone read says.
+    await expect(
+      makeReadFileTool().handler({ path: 'a.txt', start_line: 5 }),
+    ).rejects.toThrow('start_line 5 is past the end of the file');
+  });
+
+  it('a missing path in reads fails only its own section', async () => {
+    await makeWriteFileTool().handler({ path: 'a.txt', content: 'one\ntwo\n' });
+    const out = (await makeReadFileTool().handler({
+      reads: [{ path: 'gone.txt' }, { path: 'a.txt' }],
+    })) as string;
+    expect(out).toContain('--- gone.txt (read failed) ---');
+    expect(out).toContain('nothing exists there');
+    // …and the item that could be read still arrives in the same round.
+    expect(out).toContain('--- a.txt (2 lines) ---\none\ntwo');
+  });
+
+  it('bounds reads so one round cannot swallow the context it saved', async () => {
+    await makeWriteFileTool().handler({ path: 'a.txt', content: 'one\n' });
+    await expect(
+      makeReadFileTool().handler({
+        reads: Array.from({ length: 11 }, () => ({ path: 'a.txt' })),
+      }),
+    ).rejects.toThrow('at most 10 per call');
+    await expect(
+      makeReadFileTool().handler({ reads: [{ path: 'a.txt' }], start_line: 2 }),
+    ).rejects.toThrow('start_line and end_line go with path');
+    await expect(
+      makeReadFileTool().handler({ reads: [{ path: 'a.txt', mode: 'append' }] }),
+    ).rejects.toThrow('unknown mode');
+    await expect(makeReadFileTool().handler({ reads: [] })).rejects.toThrow(
+      'reads must be a non-empty array',
+    );
+  });
+
+  it('executes list, replace, structured edit, move, and delete handlers', async () => {
+    // `create_directory` was retired on 2026-10-29 (lane B, item B3):
+    // `write_file` makes the folders it needs, so this fixture builds its
+    // folder by writing into it — which is also the check that parents are
+    // still created by the writer, not by a separate tool.
+    await makeWriteFileTool().handler({ path: 'work/source.txt', content: 'alpha\nbeta\n' });
+    expect(fs.existsSync(path.join(root, 'work'))).toBe(true);
 
     const listed = (await makeListDirectoryTool().handler({ path: 'work' })) as string;
     expect(listed).toContain('[file] source.txt');

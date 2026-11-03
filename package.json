@@ -1,8 +1,8 @@
 {
   "name": "forge-llm",
   "displayName": "Forge LLM",
-  "description": "Run your own models in VS Code: full llama.cpp/GGUF control, 60+ agent tools, undo any turn, no telemetry.",
-  "version": "0.17.80",
+  "description": "Run your own models in VS Code: full llama.cpp/GGUF control, 90+ agent tools, undo any turn, no telemetry.",
+  "version": "0.17.117",
   "publisher": "Efsoo",
   "icon": "assets/publisher-logo.png",
   "galleryBanner": {
@@ -128,6 +128,18 @@
       {
         "command": "forge.compactConfig",
         "title": "Forge: Compact config into groups"
+      },
+      {
+        "command": "forge.movePolicy",
+        "title": "Forge: Move security settings to policy.yaml"
+      },
+      {
+        "command": "forge.lockPolicy",
+        "title": "Forge: Lock policy.yaml"
+      },
+      {
+        "command": "forge.unlockPolicy",
+        "title": "Forge: Unlock policy.yaml"
       },
       {
         "command": "forge.clearChat",
@@ -294,6 +306,26 @@
       {
         "command": "forge.setupWithAgent",
         "title": "Forge: Set Up With Claude Code / Codex"
+      },
+      {
+        "command": "forge.agentMesh.installNote",
+        "title": "Forge: Set Up Agent Note"
+      },
+      {
+        "command": "forge.connectDesktop",
+        "title": "Forge: Connect to my desktop"
+      },
+      {
+        "command": "forge.shareComputer",
+        "title": "Forge: Share this computer"
+      },
+      {
+        "command": "forge.stopSharing",
+        "title": "Forge: Stop sharing this computer"
+      },
+      {
+        "command": "forge.checkConnection",
+        "title": "Forge: Check connection"
       }
     ],
     "menus": {
@@ -392,6 +424,13 @@
           "default": true,
           "description": "Keep webview state when sidebar is hidden"
         },
+        "forge.sessions.autoArchiveMinutes": {
+          "type": "integer",
+          "default": 30,
+          "minimum": 0,
+          "maximum": 1440,
+          "description": "Archive eligible background chats after this many inactive minutes. Set to 0 to disable automatic archiving; Close remains available."
+        },
         "forge.sidebar.activityView": {
           "type": "string",
           "enum": [
@@ -440,28 +479,28 @@
         "forge.configFile": {
           "type": "string",
           "default": "",
-          "scope": "application",
-          "description": "Absolute path to config.yaml or to a folder containing it. When set, Forge loads this file in every workspace (instead of workspace .forge/config.yaml). Use one shared dev config so bridge.yaml merges stay in sync. Reload the window after changing this."
+          "scope": "machine",
+          "description": "Absolute path to config.yaml or to a folder containing it. When set, Forge loads this file in every workspace (instead of workspace .forge/config.yaml). Use one shared dev config so bridge.yaml merges stay in sync. Per computer. In a VS Code Remote window, set it in Remote settings. Reload the window after changing this."
         },
         "forge.checkpoint.maxBytes": {
           "type": "number",
           "default": 2147483648,
           "minimum": 1048576,
           "scope": "application",
-          "description": "Maximum logical workspace bytes Forge may capture for an external CLI rollback checkpoint. The CLI is not started when this limit is exceeded. Reload the window after changing this."
+          "description": "Maximum logical workspace bytes for a checkpointed external-agent run. That run does not start when this limit is exceeded; direct CLI chat is excluded. Reload the window after changing this."
         },
         "forge.checkpoint.externalCliEnabled": {
           "type": "boolean",
           "default": true,
           "scope": "application",
-          "description": "Protect external Claude/Codex turns with disk-backed rollback checkpoints. Disable only as an explicit temporary opt-out: external CLI changes will not support Forge Keep/Undo. Reload the window after changing this."
+          "description": "Enable disk-backed rollback for checkpointed external-agent paths. Direct Claude/Codex CLI chats are excluded and have no Forge Keep/Undo. Reload the window after changing this."
         },
         "forge.checkpoint.maxFiles": {
           "type": "number",
           "default": 100000,
           "minimum": 1,
           "scope": "application",
-          "description": "Maximum number of files Forge may capture for an external CLI rollback checkpoint. The CLI is not started when this limit is exceeded. Reload the window after changing this."
+          "description": "Maximum number of files for a checkpointed external-agent run. That run does not start when this limit is exceeded; direct CLI chat is excluded. Reload the window after changing this."
         },
         "forge.checkpoint.storagePath": {
           "type": "string",
@@ -493,9 +532,10 @@
     "probe:codex-persistent": "node scripts/spike-codex-persistent-protocol.mjs",
     "test:watch": "vitest",
     "test:coverage": "vitest run --coverage",
-    "package": "node scripts/check-vsix-version.mjs && npm run build:release && node scripts/sync-changelog.mjs && vsce package --no-dependencies",
+    "package": "node scripts/check-vsix-version.mjs && npm run build:release && node scripts/sync-changelog.mjs && node scripts/check-vsix-contents.mjs && vsce package --no-dependencies",
     "publish": "npm run build:release && node scripts/sync-changelog.mjs && vsce publish --no-dependencies",
-    "ci": "npm run type-check && npm run lint && npm test && npm run build && npm run check:bundle",
+    "ci": "node scripts/ci-lock.mjs npm run ci:steps",
+    "ci:steps": "npm run type-check && npm run lint && npm test && npm run build && npm run check:bundle",
     "check:bundle": "node scripts/bundle-load-check.js",
     "check:changed": "node scripts/check-changed.mjs",
     "ab:compaction": "node scripts/compaction-ab.mjs",
@@ -529,8 +569,10 @@
     "@modelcontextprotocol/sdk": "^1.30.0",
     "@mozilla/readability": "^0.6.0",
     "@whiskeysockets/baileys": "7.0.0-rc14",
+    "docx": "^9.15.0",
     "highlight.js": "^11.11.1",
     "js-yaml": "^4.3.1",
+    "marked": "^18.1.2",
     "nunjucks": "^3.2.4",
     "pdfjs-dist": "5.5.207",
     "playwright-core": "1.63.0",

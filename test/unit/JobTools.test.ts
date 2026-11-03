@@ -235,6 +235,38 @@ describe('manage_jobs — create', () => {
     expect(action).not.toHaveProperty('model');
   });
 
+  /**
+   * `steady` is not in this fixture's `models:` — the jobs model names a model
+   * that has been deleted. The create must still succeed (the job is saved and
+   * its first run seeded before the sentence is built, and a throw there would
+   * report a half-written job as a failure), and it must still say the job
+   * cannot run: this is the moment the user can fix the field.
+   */
+  it('creates the job and says the jobs model is gone', async () => {
+    const config = makeConfig({
+      enabled: true,
+      allowed_hosts: [],
+      max_concurrent: 1,
+      default_model: 'steady',
+    });
+    const out = await call(
+      {
+        action: 'create',
+        definition: {
+          name: 'Watch',
+          schedule: { kind: 'daily', at: '08:00' },
+          check: { kind: 'none' },
+          on_change: { kind: 'notify' },
+          action: { kind: 'agent_task', task: 'look' },
+        },
+      },
+      { getConfig: () => config },
+    );
+    expect(out).toContain('jobs.default_model (steady)');
+    expect(out).toContain('no longer in config.yaml');
+    expect((await store.load('watch'))?.job.action).not.toHaveProperty('model');
+  });
+
   it('keeps the model an agent_task names', async () => {
     await call({
       action: 'create',
@@ -642,5 +674,71 @@ describe('manage_jobs — discuss', () => {
 describe('manage_jobs — argument validation', () => {
   it('rejects an unknown action', async () => {
     await expect(call({ action: 'explode' })).rejects.toThrow(/action must be one of/);
+  });
+});
+
+describe('manage_jobs — the store the sessions panel listens to', () => {
+  /**
+   * The panel subscribes to the one store instance the tool already writes, so
+   * no surface needs a callback of its own. This is the seam that test holds
+   * still: a tool that kept its own copy of the jobs would leave the panel
+   * showing a job that had just been deleted.
+   */
+  function watchStore(): { count: () => number; stop: () => void } {
+    let calls = 0;
+    const stop = store.addLocalChangeListener(() => {
+      calls += 1;
+    });
+    return { count: () => calls, stop };
+  }
+
+  const create = (name: string): Record<string, unknown> => ({
+    action: 'create',
+    definition: {
+      name,
+      schedule: { kind: 'interval', minutes: 30 },
+      check: { kind: 'disk_space', path: 'C:\\', min_free_gb: 10 },
+      on_change: { kind: 'notify' },
+    },
+  });
+
+  it('a create notifies the panel and lands in the same store', async () => {
+    const live = watchStore();
+    await call(create('Disk Watch'));
+    expect(live.count()).toBeGreaterThanOrEqual(1);
+    expect((await store.load('disk-watch'))?.job.name).toBe('Disk Watch');
+    live.stop();
+  });
+
+  it('a read notifies nothing, so opening the panel cannot make the store churn', async () => {
+    await call(create('Disk Watch'));
+    const live = watchStore();
+    await call({ action: 'list' });
+    await call({ action: 'get', job: 'disk-watch' });
+    expect(live.count()).toBe(0);
+    live.stop();
+  });
+
+  it('a delete notifies and the job is gone from that same store', async () => {
+    await call(create('Disk Watch'));
+    const live = watchStore();
+    await call({ action: 'delete', job: 'disk-watch' });
+    expect(live.count()).toBeGreaterThanOrEqual(1);
+    expect(await store.load('disk-watch')).toBeUndefined();
+    live.stop();
+  });
+
+  it('discuss persists the chat id through the same store', async () => {
+    await store.saveJob(job());
+    const live = watchStore();
+    const hostFacade = {
+      restoreConversation: async (id: string) => ({ id }),
+      createConversation: async () => ({ id: 'conv-panel' }),
+      send: async () => undefined,
+    };
+    await call({ action: 'discuss', job: 'disk' }, { hostFacade: () => hostFacade });
+    expect(live.count()).toBeGreaterThanOrEqual(1);
+    expect((await store.load('disk'))?.state.conversation_id).toBe('conv-panel');
+    live.stop();
   });
 });

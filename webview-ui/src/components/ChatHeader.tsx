@@ -1,5 +1,9 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
-import type { AgentKind, AgentLinks } from '../../../src/agentLinks/chatAgentLinks';
+import {
+  agentDisplayName,
+  type AgentKind,
+  type AgentLinks,
+} from '../../../src/agentLinks/chatAgentLinks';
 
 interface Props {
   title: string;
@@ -9,7 +13,6 @@ interface Props {
   /** Absent when there is no conversation to rename; the title is then plain text. */
   onRename?: (title: string) => void;
   agentLinks?: AgentLinks;
-  onLinkAgent: () => void;
   onUnlinkAgent: (kind: AgentKind) => void;
 }
 
@@ -20,7 +23,6 @@ export function ChatHeader({
   onToggleHistory,
   onRename,
   agentLinks,
-  onLinkAgent,
   onUnlinkAgent,
 }: Props): React.ReactElement {
   const [editing, setEditing] = useState(false);
@@ -72,16 +74,32 @@ export function ChatHeader({
             {title}
           </span>
         )}
+        {Object.values(agentLinks ?? {}).some((item) => item !== undefined) && (
+          <div id="agent-links-strip" aria-label="Linked agent sessions">
+            {Object.values(agentLinks ?? {})
+              .filter((item) => item !== undefined)
+              .map((item) => (
+                <div
+                  className="agent-link-group"
+                  key={item.kind}
+                  aria-label={`${agentDisplayName(item.kind)} linked`}
+                  title={`${item.title}\nLast used ${new Date(item.lastUsedAt).toLocaleString()}`}
+                >
+                  <span className="agent-link-name">{agentDisplayName(item.kind)}</span>
+                  <span className="agent-link-state">Linked</span>
+                  <button
+                    type="button"
+                    aria-label={`Unlink ${agentDisplayName(item.kind)}`}
+                    title={`Unlink ${agentDisplayName(item.kind)}`}
+                    onClick={() => onUnlinkAgent(item.kind)}
+                  >
+                    Unlink
+                  </button>
+                </div>
+              ))}
+          </div>
+        )}
         <div id="chats-toolbar-actions">
-          <button
-            id="agent-link-toolbar-btn"
-            type="button"
-            aria-label="Link an agent session"
-            title="Link to…"
-            onClick={onLinkAgent}
-          >
-            🔗
-          </button>
           <button
             id="history-toolbar-btn"
             type="button"
@@ -103,30 +121,6 @@ export function ChatHeader({
           </button>
         </div>
       </header>
-      {Object.values(agentLinks ?? {}).some((item) => item !== undefined) && (
-        <div id="agent-links-strip" aria-label="Linked agent sessions">
-          {Object.values(agentLinks ?? {})
-            .filter((item) => item !== undefined)
-            .map((item) => (
-              <div className="agent-link-row" key={item.kind}>
-                <span
-                  className="agent-link-label"
-                  title={`${item.title}\nLast used ${new Date(item.lastUsedAt).toLocaleString()}`}
-                >
-                  {item.kind} · {item.title} · Last used{' '}
-                  {new Date(item.lastUsedAt).toLocaleString()}
-                </span>
-                <button
-                  type="button"
-                  title={`Unlink ${item.kind}`}
-                  onClick={() => onUnlinkAgent(item.kind)}
-                >
-                  Unlink
-                </button>
-              </div>
-            ))}
-        </div>
-      )}
     </>
   );
 }

@@ -9,6 +9,13 @@ function fixture() {
     | {
         requested: (event: { conversationId?: string }) => void;
         resolved: (event: { conversationId?: string }) => void;
+        waitingForOwner?: (event: {
+          id: string;
+          toolName: string;
+          detail: string;
+          dangerous: boolean;
+          conversationId?: string;
+        }) => void;
       }
     | undefined;
   let question:
@@ -134,6 +141,51 @@ describe('HiddenChatAlerts', () => {
       'Forge chat "Fix the lease" is waiting for tool approval.',
     );
     expect(toast.mock.calls[1]?.[0]).toBe('A Forge chat failed: backend stopped');
+    state.alerts.dispose();
+  });
+
+  /** AC 1d: the owner has to be able to find a card that is stopped on them
+   *  from another chat or another file, so an owner-only card is a warning
+   *  with a Show button, not another "waiting for approval" toast. */
+  it('warns with Show when only the owner can answer a hidden card', async () => {
+    const state = fixture();
+    const warn = vi.spyOn(vscode.window, 'showWarningMessage').mockResolvedValue('Show');
+    const toast = vi.spyOn(vscode.window, 'showInformationMessage').mockResolvedValue(undefined);
+    const command = vi.spyOn(vscode.commands, 'executeCommand').mockResolvedValue(undefined);
+    state
+      .approval()
+      .waitingForOwner?.({
+        id: 'gate-1',
+        toolName: 'shell',
+        detail: 'Get-Content .env\nNothing but your answer settles this. Waiting for you.',
+        dangerous: true,
+        conversationId: 'background',
+      });
+    expect(warn).toHaveBeenCalledWith(
+      'Forge chat "Fix the lease" needs your approval: shell Get-Content .env',
+      'Show',
+    );
+    expect(toast).not.toHaveBeenCalled();
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(command).toHaveBeenCalledWith('workbench.view.extension.forge-sidebar');
+    expect(state.switchChat).toHaveBeenCalledWith('background');
+    state.alerts.dispose();
+  });
+
+  it('does not warn for a card the owner is already looking at', () => {
+    const state = fixture();
+    const warn = vi.spyOn(vscode.window, 'showWarningMessage').mockResolvedValue(undefined);
+    state.setActive('background');
+    state
+      .approval()
+      .waitingForOwner?.({
+        id: 'gate-1',
+        toolName: 'shell',
+        detail: 'Get-Content .env',
+        dangerous: true,
+        conversationId: 'background',
+      });
+    expect(warn).not.toHaveBeenCalled();
     state.alerts.dispose();
   });
 

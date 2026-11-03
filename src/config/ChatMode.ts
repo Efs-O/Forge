@@ -2,9 +2,19 @@ import * as path from 'path';
 import * as YAML from 'yaml';
 import { effectiveParallelCapacity } from '../backend/parallelCapacity';
 import { DEFAULT_LLAMA_CTX, perSlotContext } from '../util/contextBudget';
-import { expandAlias, resolveSpawnModel, splitModelProfile } from './ConfigResolver';
+import {
+  expandAlias,
+  resolveModelEntry,
+  resolveSpawnModel,
+  splitModelProfile,
+} from './ConfigResolver';
 import { loadConfig } from './ConfigLoader';
-import { findModelItem, type ScalarEdit, updateConfigFile } from './ConfigWriter';
+import {
+  findModelItem,
+  type ScalarEdit,
+  updateConfigFile,
+  updateForgeKeyFile,
+} from './ConfigWriter';
 import type { ForgeConfig } from './types';
 
 export type ChatModeChoice = 'solo' | 'multi';
@@ -79,16 +89,27 @@ export function runChatModeCommand(
   // window that added or removed a model between the two reads shifts every
   // index after it, and the mode lands on the wrong model.
   if (state.kind === 'strata') {
-    updateConfigFile(configPath, (doc) => {
-      const item = findModelItem(doc, state.modelName);
-      if (!item) throw new Error(`Forge: model "${state.modelName}" is not in config.yaml.`);
-      const launch = resolveYamlNode(item.get('start_command', true), doc);
-      if (!YAML.isSeq(launch))
-        throw new Error('Forge: selected model config has no start_command list.');
-      const node = launch.items[3];
-      if (!YAML.isScalar(node)) throw new Error('Forge: start_command[3] is not a plain value.');
-      return [{ node, value: choice }];
-    });
+    // The raw entry, not the folded one: `resolveModelEntry` would show the
+    // engine's `start_command` as if the model had it, and this write has to land
+    // in whichever file actually holds the line. Since the migration it lives in
+    // policy.yaml under the engine; writing it back into config.yaml would put
+    // `start_command` on a model that phase 3 refuses to load with one, and the
+    // mode would then read as never-changed for the rest of the owner's life.
+    const entry = config.models.find((model) => model.name === state.modelName);
+    if (entry?.engine && entry.start_command === undefined) {
+      writeEngineMode(configPath, entry.engine, choice);
+    } else {
+      updateConfigFile(configPath, (doc) => {
+        const item = findModelItem(doc, state.modelName);
+        if (!item) throw new Error(`Forge: model "${state.modelName}" is not in config.yaml.`);
+        const launch = resolveYamlNode(item.get('start_command', true), doc);
+        if (!YAML.isSeq(launch))
+          throw new Error('Forge: selected model config has no start_command list.');
+        const node = launch.items[3];
+        if (!YAML.isScalar(node)) throw new Error('Forge: start_command[3] is not a plain value.');
+        return [{ node, value: choice }];
+      });
+    }
     return {
       message: `${strataChangeMessage(choice)}${runningSuffix}`,
       modelName: state.modelName,
@@ -135,6 +156,36 @@ export function runChatModeCommand(
   };
 }
 
+/**
+ * Set the Strata launcher mode where it actually lives once the model's exec
+ * fields have been migrated: `engines.<name>.start_command[3]` in
+ * `~/.forge/policy.yaml`. It goes through `updateForgeKeyFile`, which picks the
+ * file that owns `engines` today, and it never falls back to writing
+ * `config.yaml`: a mode change that quietly landed on a model that cannot carry
+ * `start_command` would report success and do nothing.
+ *
+ * A locked policy file (phase 3) fails here as access denied naming
+ * `Forge: Unlock policy.yaml` — `ConfigWriter.atomicWrite` adds that sentence.
+ */
+function writeEngineMode(configPath: string, engineName: string, choice: ChatModeChoice): void {
+  updateForgeKeyFile(configPath, 'engines', (doc) => {
+    const engines = resolveYamlNode(doc.get('engines', true), doc);
+    if (!YAML.isMap(engines)) throw new Error('Forge: no `engines` map to write into.');
+    const entry = resolveYamlNode(engines.get(engineName, true), doc);
+    if (!YAML.isMap(entry))
+      throw new Error(
+        `Forge: engine "${engineName}" is not configured, so its mode cannot be set.`,
+      );
+    const launch = resolveYamlNode(entry.get('start_command', true), doc);
+    if (!YAML.isSeq(launch))
+      throw new Error(`Forge: engine "${engineName}" has no start_command list.`);
+    const node = launch.items[3];
+    if (!YAML.isScalar(node))
+      throw new Error(`Forge: engine "${engineName}" start_command[3] is not a plain value.`);
+    return [{ node, value: choice }];
+  });
+}
+
 function readChatModeFromConfig(
   config: ForgeConfig,
   fallbackModelName: string | undefined,
@@ -145,7 +196,10 @@ function readChatModeFromConfig(
   if (!selectedModel) return { message: 'No model is selected for /chatMode.' };
 
   const modelName = splitModelProfile(expandAlias(config, selectedModel)).base;
-  const model = config.models.find((entry) => entry.name === modelName);
+  // Folded, not `config.models.find`: after the migration the launcher line lives
+  // in the engine, and a raw read would tell the owner this model has no
+  // solo/multi setting at all.
+  const model = resolveModelEntry(config, modelName);
   if (!model) return { message: `Forge: ${modelName} has no solo/multi setting.` };
 
   const launcherMode = model.start_command?.[3];

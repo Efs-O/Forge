@@ -21,7 +21,7 @@ import { ageOutImageParts, stripImageParts } from './imageParts';
 import { injectSystemPrompt } from '../llm/SystemPromptInjector';
 import { injectTurnContext, type TurnContextState } from './turnContext';
 import { expandOrphanPlanMarkers } from './turnContextPlanDedup';
-import { buildTemplateContext, hasWebTools } from './turnModelBehavior';
+import { buildTemplateContext, hasDelegationTools, hasWebTools } from './turnModelBehavior';
 import { attachReasoning, preservesThinking } from '../agent/preserveThinking';
 
 export interface PrepareModelTurnMessagesInput {
@@ -33,8 +33,16 @@ export interface PrepareModelTurnMessagesInput {
   config: ForgeConfig;
   forgeLoader: ForgeInstructionsLoader | undefined;
   activeFile: string | undefined;
+  /** The chat's pinned FORGE.md text (forgeInstructionsPin.ts), not the live file. */
+  forgeInstructions: string | undefined;
   /** Turn-start snapshot, so the system prompt stays byte-identical across rounds. */
   workspaceIsProjectRoot: boolean;
+  /**
+   * The conversation's frozen skills catalog, snapshotted for the turn by
+   * `ModelTurn` from `src/skills/skillsService.ts`. Absent means skills are off
+   * or there are none, and the prompt gains no block.
+   */
+  skillsCatalog?: string;
   turnContext: TurnContextState;
   getToolDefinitions: () => ToolDefinition[];
 }
@@ -63,17 +71,23 @@ export function prepareModelTurnMessages(
       });
   // Let SystemPromptRenderError escape: the provider turn reports it in chat
   // and records the failed turn, and ToolCallingLoop sends no request.
+  const templateContext = buildTemplateContext(
+    input.config,
+    input.forgeLoader,
+    input.activeFile,
+    input.workspaceIsProjectRoot,
+    input.skillsCatalog,
+  );
+  // The live file would rewrite the prompt head on every FORGE.md edit.
+  delete templateContext['forgeInstructions'];
+  if (input.forgeInstructions) templateContext['forgeInstructions'] = input.forgeInstructions;
   const injected = injectSystemPrompt(
     visible,
     input.templateEngine,
     {
-      ...buildTemplateContext(
-        input.config,
-        input.forgeLoader,
-        input.activeFile,
-        input.workspaceIsProjectRoot,
-      ),
+      ...templateContext,
       ...(hasWebTools(input.getToolDefinitions()) ? { webTools: 'true' } : {}),
+      ...(hasDelegationTools(input.getToolDefinitions()) ? { agentTools: 'true' } : {}),
     },
     input.model.system_prompt,
     input.model.system_prompt_mode,

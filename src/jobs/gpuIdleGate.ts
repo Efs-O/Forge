@@ -2,6 +2,7 @@ import * as fs from 'fs';
 import * as path from 'path';
 import { z } from 'zod';
 import { usesLocalGpu } from '../backend/ModelHeuristics';
+import { sharedModelSlots, type SharedModelSlots } from '../backend/strataStatus';
 import { describeProbeFailure, probeGpus, type GpuInfo } from '../system/systemProbes';
 import type { GpuGateConfig, ModelConfig } from '../config/types';
 import { getLogger } from '../util/logger';
@@ -23,50 +24,6 @@ interface GpuIdleGateOptions {
   wait?: (ms: number, signal?: AbortSignal) => Promise<void>;
   processExists?: (pid: number) => boolean;
   fetchImpl?: typeof fetch;
-}
-
-/** Capacity reported by the exact local Strata model a job will use. */
-export interface SharedModelSlots {
-  capacity: number;
-  inFlight: number;
-}
-
-const StrataStatusSchema = z.object({
-  service: z.literal('strata'),
-  model: z.string(),
-  loaded: z.literal(true),
-  concurrency: z.object({ serving: z.number().int().positive() }),
-  activity: z.object({ in_flight: z.number().int().nonnegative() }),
-});
-
-async function sharedModelSlots(
-  options: GpuIdleGateOptions,
-): Promise<SharedModelSlots | undefined> {
-  const model = options.model;
-  if (
-    model?.provider !== 'openai-compatible' ||
-    !model.endpoint ||
-    !model.unload_path ||
-    !model.model
-  )
-    return undefined;
-  try {
-    const url = new URL('/v1/status', model.endpoint);
-    const signal = options.signal
-      ? AbortSignal.any([options.signal, AbortSignal.timeout(3000)])
-      : AbortSignal.timeout(3000);
-    const response = await (options.fetchImpl ?? fetch)(url, { signal });
-    if (!response.ok) return undefined;
-    const parsed = StrataStatusSchema.safeParse(await response.json());
-    if (!parsed.success || parsed.data.model !== model.model) return undefined;
-    return {
-      capacity: parsed.data.concurrency.serving,
-      inFlight: parsed.data.activity.in_flight,
-    };
-  } catch {
-    // An unverified server keeps the existing sampled GPU gate.
-    return undefined;
-  }
 }
 
 type HoldResult = { blocked: true; reason: string } | { blocked: false };
@@ -250,7 +207,12 @@ export async function gpuGateReason(
     if (hold.blocked) return hold.reason;
   }
 
-  const slots = localGpu ? await sharedModelSlots(options) : undefined;
+  const slots = localGpu
+    ? await sharedModelSlots(options.model, {
+        ...(options.signal ? { signal: options.signal } : {}),
+        ...(options.fetchImpl ? { fetchImpl: options.fetchImpl } : {}),
+      })
+    : undefined;
   const cheapReason = await checkCheapGates(slots);
   if (cheapReason !== undefined) return cheapReason;
   if (!localGpu) return undefined;

@@ -4,7 +4,9 @@ import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'no
 import { tmpdir } from 'node:os';
 import { resolve } from 'node:path';
 import { describe, expect, it } from 'vitest';
-import { greekMessages, greekSystemInfo, options } from '../../scripts/nemotron-bench.mjs';
+import { createBenchmarkToolHost } from '../../src/benchmark/toolHost';
+import { greekMessages, greekSystemInfo, options, scenarios } from '../../scripts/nemotron-bench.mjs';
+import { listenLoopback } from '../support/listenLoopback';
 
 const script = resolve(process.cwd(), 'scripts', 'nemotron-bench.mjs');
 const baseArgs = ['--base-url', 'http://127.0.0.1:1', '--model', 'test-model'];
@@ -49,11 +51,9 @@ async function fakeRun() {
     res.statusCode = 404;
     res.end();
   });
-  await new Promise<void>((resolveListen) => server.listen(0, '127.0.0.1', resolveListen));
-  const address = server.address();
-  if (!address || typeof address === 'string') throw new Error('Fake server did not bind');
+  const port = await listenLoopback(server);
   try {
-    const args = ['--base-url', `http://127.0.0.1:${address.port}`, '--model', 'test-model', '--quant', 'test-quant', '--greek-eval', evalFile, '--out', output, '--determinism', '2', '--rows-out', rowsOut];
+    const args = ['--base-url', `http://127.0.0.1:${port}`, '--model', 'test-model', '--quant', 'test-quant', '--greek-eval', evalFile, '--out', output, '--determinism', '2', '--rows-out', rowsOut];
     const result = await runAsync(args);
     return { result, bodies, rows: readFileSync(rowsOut, 'utf8').trim().split(/\r?\n/u).map((line) => JSON.parse(line) as Record<string, unknown>) };
   } finally {
@@ -176,5 +176,61 @@ describe('nemotron benchmark script', () => {
     expect(rows[0].type).toBe('header');
     expect(rows.slice(1).every((row) => row.type === 'row')).toBe(true);
   }, 120_000);
+
+  // Both the scenario list and the Greek fixture name tools by string, and
+  // `append_file` was retired under tool-trim lane B while both still asked for
+  // it: the model was told to call a tool that was not in the list it was given,
+  // so those scenarios could only ever fail, and a failing benchmark line that
+  // looks like a model problem is the expensive kind of bug. This is the check
+  // that would have caught it — every name and every argument is validated
+  // against the schemas the host actually offers.
+  it('names only tools the benchmark host offers, with arguments it accepts', () => {
+    const workspace = mkdtempSync(resolve(tmpdir(), 'forge-nemotron-host-test-'));
+    try {
+      const offered = new Map(
+        createBenchmarkToolHost(workspace)
+          .definitions()
+          .map((definition) => [definition.function.name, definition.function.parameters]),
+      );
+      const problems: string[] = [];
+      const check = (id: string, toolName: string, args: Record<string, unknown>): void => {
+        const parameters = offered.get(toolName) as
+          | { required?: string[]; properties?: Record<string, { enum?: unknown[] }>; additionalProperties?: boolean }
+          | undefined;
+        if (!parameters) {
+          problems.push(`${id}: asks for "${toolName}", which the benchmark host does not offer`);
+          return;
+        }
+        const missing = (parameters.required ?? []).filter((key) => !(key in args));
+        if (missing.length > 0) problems.push(`${id}: ${toolName} missing ${missing.join(', ')}`);
+        for (const [key, value] of Object.entries(args)) {
+          const declared = parameters.properties?.[key];
+          if (!declared) {
+            problems.push(`${id}: ${toolName} does not accept "${key}"`);
+            continue;
+          }
+          if (declared.enum && !declared.enum.includes(value)) {
+            problems.push(
+              `${id}: ${toolName}.${key}=${JSON.stringify(value)} is not one of ${declared.enum.map((item) => JSON.stringify(item)).join(', ')}`,
+            );
+          }
+        }
+      };
+      for (const test of scenarios()) {
+        // The arguments live inside the prompt the scenario builds: that JSON is
+        // what the model is told to send, so it is what has to be valid for the
+        // tool it is told to call.
+        const found = /exact arguments: (\{.*\})\. Do not explain\./u.exec(test.prompt);
+        check(test.id, test.expectedTool, JSON.parse(found?.[1] ?? '{}') as Record<string, unknown>);
+      }
+      const entries = JSON.parse(
+        readFileSync(resolve(process.cwd(), 'benchmarks', 'nemotron-greek-tool-calls.json'), 'utf8'),
+      ) as Array<{ id: string; expected_tool: string; expected_args: Record<string, unknown> }>;
+      for (const entry of entries) check(entry.id, entry.expected_tool, entry.expected_args);
+      expect(problems).toEqual([]);
+    } finally {
+      rmSync(workspace, { recursive: true, force: true });
+    }
+  });
 
 });

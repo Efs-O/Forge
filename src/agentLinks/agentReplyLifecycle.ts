@@ -2,7 +2,7 @@ import * as fs from 'fs';
 import * as path from 'path';
 import type { BusTurnEnd } from '../agentBus/agentInbox';
 import { processIsAlive } from '../agentBus/windowEndpoints';
-import { EXCHANGES_LOG_NAME, appendEvent } from '../agentMesh/exchangeLog';
+import { EXCHANGES_LOG_NAME, appendEvent, type ExchangeLogPaths } from '../agentMesh/exchangeLog';
 import { retainVerdict, verdictEventId } from '../agentMesh/verdictArtifact';
 import { writeFileAtomicSync } from '../util/atomicWrite';
 import type { ForgeHostFacade } from '../sidebar/ForgeHostFacade';
@@ -11,27 +11,29 @@ import type { AskAgentRuntime } from './askAgentService';
 import { deliverAgentReply } from './askAgentService';
 import { agentDisplayName } from './chatAgentLinks';
 
+/** The exchange log and its lock, beside the bus folder `root` names. */
+function busLogPaths(root: string): ExchangeLogPaths {
+  return {
+    log: path.join(root, EXCHANGES_LOG_NAME),
+    lock: path.join(root, 'exchanges.lock'),
+  };
+}
+
 export async function recordAcceptedInboundReply(
   root: string,
   record: PendingAgentReply,
 ): Promise<void> {
-  await appendEvent(
-    {
-      log: path.join(root, EXCHANGES_LOG_NAME),
-      lock: path.join(root, 'exchanges.lock'),
-    },
-    {
-      eventId: record.exchangeId,
-      ts: record.createdAt,
-      exchangeId: record.exchangeId,
-      workspace: record.workspace,
-      conversation: record.conversationId,
-      from: record.sender.kind,
-      senderSessionId: record.sender.sessionId,
-      type: 'message',
-      state: 'accepted',
-    },
-  );
+  await appendEvent(busLogPaths(root), {
+    eventId: record.exchangeId,
+    ts: record.createdAt,
+    exchangeId: record.exchangeId,
+    workspace: record.workspace,
+    conversation: record.conversationId,
+    from: record.sender.kind,
+    senderSessionId: record.sender.sessionId,
+    type: 'message',
+    state: 'accepted',
+  });
 }
 
 export function makeAgentReplyLifecycle(options: {
@@ -43,6 +45,7 @@ export function makeAgentReplyLifecycle(options: {
   isOwnerAlive?: (pid: number) => boolean;
   showWarning: (message: string) => void;
 }) {
+  const logPaths = busLogPaths(options.root);
   const handlers = {
     onAgentTurnStarted: (turn: {
       pendingReplyId?: string;
@@ -86,10 +89,6 @@ export function makeAgentReplyLifecycle(options: {
           : `Forge ${end.kind}: ${end.error ?? 'no final answer'}`);
       const record = options.pending.markFinished(turn.pendingReplyId, { kind: end.kind, text });
       const linked = facade.getAgentLink(record.conversationId, record.sender.kind);
-      const logPaths = {
-        log: path.join(options.root, EXCHANGES_LOG_NAME),
-        lock: path.join(options.root, 'exchanges.lock'),
-      };
       let delivered = false;
       if (linked?.sessionId === record.sender.sessionId) {
         try {
@@ -132,15 +131,67 @@ export function makeAgentReplyLifecycle(options: {
         conversation: record.conversationId,
         from: record.sender.kind,
         type: 'verdict',
-        state: 'completed',
-        detail: delivered
-          ? 'reply delivered to the live sender session'
-          : 'sender was not live; answer retained for read-verdict',
+        // Audit F8: this said `completed` whatever the turn actually did, so a
+        // turn the user stopped read back as finished work. `cancelled` is the
+        // state the delivery machine has for it (deliveryState.ts), and it is a
+        // legal step from `accepted` and from `started`. A failed turn keeps
+        // `completed` because the machine has no `failed` state and
+        // `accepted -> crashed` is not a legal transition, so its detail is
+        // what tells the reader the truth.
+        state: end.kind === 'completed' || end.kind === 'failed' ? 'completed' : 'cancelled',
+        detail:
+          end.kind === 'completed'
+            ? delivered
+              ? 'reply delivered to the live sender session'
+              : 'sender was not live; answer retained for read-verdict'
+            : end.kind === 'failed'
+              ? `turn failed (${end.error ?? 'no error given'}); ${
+                  delivered ? 'delivered to the live sender session' : 'retained for read-verdict'
+                }`
+              : `turn ${end.kind} before answering; ${
+                  delivered
+                    ? 'notice delivered to the live sender session'
+                    : 'retained for read-verdict'
+                }`,
       });
       options.pending.remove(record.exchangeId);
     },
-    onAgentTurnCancelled: (turn: { pendingReplyId?: string }) => {
-      if (turn.pendingReplyId) options.pending.remove(turn.pendingReplyId);
+    onAgentTurnCancelled: async (turn: {
+      pendingReplyId?: string;
+      targetConversationId?: string;
+      sender?: { kind: 'claude' | 'codex' | 'copilot'; sessionId: string; title: string };
+    }) => {
+      if (!turn.pendingReplyId) return;
+      // The record goes first: it is what recovery would otherwise replay as a
+      // reply still owed to a message that is no longer queued.
+      options.pending.remove(turn.pendingReplyId);
+      // Audit F8: a message withdrawn with `forge.sh cancel` left its exchange
+      // at `accepted` forever and said nothing about the withdrawal, so a reader
+      // could not tell withdrawn work from work still waiting in a chat that
+      // had nothing waiting.
+      if (!turn.sender || !turn.targetConversationId) return;
+      try {
+        await appendEvent(logPaths, {
+          eventId: `cancelled-${turn.pendingReplyId}`,
+          ts: Date.now(),
+          exchangeId: turn.pendingReplyId,
+          workspace: options.workspaceRoot,
+          conversation: turn.targetConversationId,
+          from: turn.sender.kind,
+          senderSessionId: turn.sender.sessionId,
+          type: 'message',
+          state: 'cancelled',
+          detail: 'withdrawn by the sender with forge.sh cancel before it started',
+        });
+      } catch (error) {
+        // The message is already withdrawn; a log failure cannot undo it and
+        // must not hold up the queue that is moving on without it.
+        options.showWarning(
+          `Withdrawn reply ${turn.pendingReplyId} could not be recorded: ${
+            error instanceof Error ? error.message : String(error)
+          }`,
+        );
+      }
     },
   };
   return {

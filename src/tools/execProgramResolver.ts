@@ -1,21 +1,38 @@
 import * as childProcess from 'child_process';
 import * as fs from 'fs';
 import * as path from 'path';
+import { withWindowsPath } from '../agents/windowsUserPath';
 
 /** Injectable PATH probe for locating Git Bash without ever resolving System32\bash.exe. */
 export interface RunnerProbe {
-  which(program: string): string[];
+  /** Every full path the lookup reports for `program`. `pathValue` searches that
+   *  PATH instead of the inherited one — `where` follows the environment block it
+   *  is given — so a refreshed PATH can be searched without mutating
+   *  `process.env`, which would change the whole extension host. Optional, so
+   *  existing probes and callers that take one argument are unchanged. */
+  which(program: string, pathValue?: string): string[];
   exists(candidate: string): boolean;
 }
 
-function systemProbe(): RunnerProbe {
+/** The repo's only synchronous `where.exe` probe. Both consumers take it from
+ *  here: `resolveGitBash` below, and `defaultWhichOnPath` in
+ *  `src/agents/windowsCmdShim.ts` for the Node that runs an npm shim's script.
+ *  `INFO:` lines are dropped because `where` prints them on stdout when it finds
+ *  nothing (exit 1, `INFO: Could not find files for the given pattern(s).`,
+ *  verified against the real program 2026-10-26) and they are not matches. */
+export function systemProbe(): RunnerProbe {
   return {
-    which: (program) => {
-      const lookup = childProcess.spawnSync('where.exe', [program], { encoding: 'utf8' });
+    which: (program, pathValue) => {
+      const lookup = childProcess.spawnSync('where.exe', [program], {
+        encoding: 'utf8',
+        ...(pathValue === undefined ? {} : { env: withWindowsPath(process.env, pathValue) }),
+        maxBuffer: 1024 * 1024,
+        windowsHide: true,
+      });
       return (lookup.stdout ?? '')
         .split(/\r?\n/u)
         .map((entry) => entry.trim())
-        .filter(Boolean);
+        .filter((entry) => entry.length > 0 && !/^INFO:/iu.test(entry));
     },
     exists: fs.existsSync,
   };

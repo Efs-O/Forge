@@ -42,6 +42,32 @@ import { reportExistingCheckpointRecoveryData } from './CheckpointRecovery';
 import { fingerprintMemoryState } from './MemoryCheckpointState';
 
 const log = getLogger();
+const CHECKPOINT_IO_BATCH_SIZE = 8;
+
+/** Bound open files while overlapping the small-file I/O in large workspaces. */
+async function mapCheckpointEntries<T, R>(
+  entries: readonly T[],
+  signal: AbortSignal,
+  visit: (entry: T) => Promise<R>,
+  onComplete?: (entry: T, result: R) => void,
+): Promise<R[]> {
+  const results: R[] = [];
+  for (let offset = 0; offset < entries.length; offset += CHECKPOINT_IO_BATCH_SIZE) {
+    throwIfCheckpointAborted(signal);
+    const batch = entries.slice(offset, offset + CHECKPOINT_IO_BATCH_SIZE);
+    // Wait for every in-flight write before a failure can clean up the checkpoint directory.
+    const settled = await Promise.allSettled(batch.map(visit));
+    for (let index = 0; index < settled.length; index += 1) {
+      const outcome = settled[index]!;
+      if (outcome.status === 'rejected') throw outcome.reason;
+      const entry = batch[index]!;
+      results.push(outcome.value);
+      onComplete?.(entry, outcome.value);
+      throwIfCheckpointAborted(signal);
+    }
+  }
+  return results;
+}
 
 export interface CheckpointProgress {
   phase: 'inventory' | 'capture' | 'finalize';
@@ -118,41 +144,43 @@ export class DiskCheckpointStore {
     try {
       const blobsDir = path.join(checkpointDir, 'blobs');
       await fs.promises.mkdir(blobsDir);
-      const baseline: StoredCheckpointEntry[] = [];
       let completedFiles = 0;
       let completedBytes = 0;
-      for (const entry of inventory.entries) {
-        throwIfCheckpointAborted(signal);
-        if (entry.kind !== 'file') {
-          baseline.push(storedMetadata(entry));
-          continue;
-        }
-        const blobName = `${crypto.createHash('sha256').update(entry.relativePath).digest('hex')}.bin`;
-        const blobPath = `blobs/${blobName}`;
-        const sha256 = await readAndHashCheckpointFile(
-          entry.absolutePath,
-          path.join(blobsDir, blobName),
-          entry,
-          signal,
-        );
-        baseline.push({
-          kind: 'file',
-          relativePath: entry.relativePath,
-          blobPath,
-          sha256,
-          size: entry.size,
-          mode: entry.mode,
-        });
-        completedFiles += 1;
-        completedBytes += entry.size;
-        onProgress?.({
-          phase: 'capture',
-          completedFiles,
-          totalFiles: inventory.fileCount,
-          completedBytes,
-          totalBytes: inventory.totalBytes,
-        });
-      }
+      const baseline = await mapCheckpointEntries(
+        inventory.entries,
+        signal,
+        async (entry): Promise<StoredCheckpointEntry> => {
+          if (entry.kind !== 'file') return storedMetadata(entry);
+          const blobName = `${crypto.createHash('sha256').update(entry.relativePath).digest('hex')}.bin`;
+          const blobPath = `blobs/${blobName}`;
+          const sha256 = await readAndHashCheckpointFile(
+            entry.absolutePath,
+            path.join(blobsDir, blobName),
+            entry,
+            signal,
+          );
+          return {
+            kind: 'file',
+            relativePath: entry.relativePath,
+            blobPath,
+            sha256,
+            size: entry.size,
+            mode: entry.mode,
+          };
+        },
+        (entry) => {
+          if (entry.kind !== 'file') return;
+          completedFiles += 1;
+          completedBytes += entry.size;
+          onProgress?.({
+            phase: 'capture',
+            completedFiles,
+            totalFiles: inventory.fileCount,
+            completedBytes,
+            totalBytes: inventory.totalBytes,
+          });
+        },
+      );
       const verifiedInventory = await inventoryCheckpointCoverage(
         workspaceRoot,
         coverage,
@@ -245,22 +273,24 @@ export class DiskCheckpointStore {
     const currentHashes = new Map<string, string>();
     let completedFiles = 0;
     let completedBytes = 0;
-    for (const entry of current.entries) {
-      if (entry.kind !== 'file') continue;
-      currentHashes.set(
-        entry.relativePath,
-        await readAndHashCheckpointFile(entry.absolutePath, undefined, entry, neverAborted),
-      );
-      completedFiles += 1;
-      completedBytes += entry.size;
-      state.onProgress?.({
-        phase: 'finalize',
-        completedFiles,
-        totalFiles: current.fileCount,
-        completedBytes,
-        totalBytes: current.totalBytes,
-      });
-    }
+    await mapCheckpointEntries(
+      current.entries.filter((entry) => entry.kind === 'file'),
+      neverAborted,
+      async (entry) =>
+        readAndHashCheckpointFile(entry.absolutePath, undefined, entry, neverAborted),
+      (entry, sha256) => {
+        currentHashes.set(entry.relativePath, sha256);
+        completedFiles += 1;
+        completedBytes += entry.size;
+        state.onProgress?.({
+          phase: 'finalize',
+          completedFiles,
+          totalFiles: current.fileCount,
+          completedBytes,
+          totalBytes: current.totalBytes,
+        });
+      },
+    );
     const verifiedCurrent = await inventoryCheckpointCoverage(
       state.workspaceRoot,
       state.coverage,

@@ -7,14 +7,20 @@
 export interface ConversationEvictionSignals {
   streaming: boolean;
   activeRequestChain: boolean;
+  workerChatActive: boolean;
   unattended: boolean;
+  /** An ask_agent reply is on its way; archiving the chat would drop it. */
+  agentAskPending: boolean;
   pendingApprovalActive: boolean;
   pendingApprovalQueued: boolean;
   pendingQuestion: boolean;
   unattributedRequest: boolean;
   hostQueue: boolean | undefined;
   webviewQueue: boolean;
+  /** A draft or staged attachment belongs to this conversation. */
+  webviewDraft: boolean;
   beforeWebviewQueueReport: boolean;
+  beforeWebviewDraftReport: boolean;
   remoteRuntimeUnavailable: boolean;
   remoteBinding: boolean;
   remoteIntakeQueue: boolean;
@@ -29,22 +35,37 @@ export interface ConversationEvictionSignals {
  */
 export class WebviewQueueState {
   private ids: ReadonlySet<string> | undefined = new Set();
+  private draftIds: ReadonlySet<string> | undefined = new Set();
 
   viewResolved(): void {
     this.ids = undefined;
+    this.draftIds = undefined;
   }
 
   viewDisposed(): void {
     this.ids = new Set();
+    this.draftIds = new Set();
   }
 
   report(ids: readonly string[]): void {
     this.ids = new Set(ids);
   }
 
+  reportDrafts(ids: readonly string[]): void {
+    this.draftIds = new Set(ids);
+  }
+
   /** `undefined` while a resolved view has not reported. */
   isQueued(id: string): boolean | undefined {
     return this.ids?.has(id);
+  }
+
+  isDraftBearing(id: string): boolean | undefined {
+    return this.draftIds?.has(id);
+  }
+
+  hasUnreportedRetentionState(): boolean {
+    return this.ids === undefined || this.draftIds === undefined;
   }
 }
 
@@ -60,14 +81,18 @@ export function isConversationEvictable(signals: ConversationEvictionSignals): b
 const EVICTION_BLOCKER_LABELS: Record<keyof ConversationEvictionSignals, string> = {
   streaming: 'running a turn',
   activeRequestChain: 'mid-request',
+  workerChatActive: 'waiting on a worker chat it opened',
   unattended: 'running unattended',
+  agentAskPending: 'waiting on an agent reply',
   pendingApprovalActive: 'waiting on a tool approval',
   pendingApprovalQueued: 'waiting on a tool approval',
   pendingQuestion: 'waiting on a question',
   unattributedRequest: 'holding an unattributed request',
   hostQueue: 'with messages queued',
   webviewQueue: 'with messages queued',
+  webviewDraft: 'with a draft or attachment',
   beforeWebviewQueueReport: 'not yet reporting a queue',
+  beforeWebviewDraftReport: 'not yet reporting drafts',
   remoteRuntimeUnavailable: 'with an unreachable remote runtime',
   remoteBinding: 'bound to a remote chat',
   remoteIntakeQueue: 'with remote messages queued',
@@ -107,4 +132,18 @@ export function evictionBlockers(signals: ConversationEvictionSignals): string[]
     if (!labels.includes(label)) labels.push(label);
   }
   return labels;
+}
+
+/** Retention treats initial webview hydration as unknown, not as new activity. */
+export function retentionBlockState(
+  signals: ConversationEvictionSignals,
+): 'clear' | 'blocked' | 'unknown' {
+  const unknown = signals.beforeWebviewQueueReport || signals.beforeWebviewDraftReport;
+  const blocked = Object.entries(signals).some(
+    ([key, value]) =>
+      key !== 'beforeWebviewQueueReport' &&
+      key !== 'beforeWebviewDraftReport' &&
+      (value === true || value === undefined),
+  );
+  return blocked ? 'blocked' : unknown ? 'unknown' : 'clear';
 }

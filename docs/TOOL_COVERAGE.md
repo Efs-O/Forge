@@ -1,12 +1,11 @@
 # Forge Tool Coverage Matrix
 
-Generated: 2026-10-24T11:34:52.603Z
+Generated: 2026-10-29T11:08:42.655Z
 
 This matrix covers native tools only; MCP servers are not started during generation. The inventory and permissions come from the live registry built by `registerAllTools.ts`. “Harness” means schema emission is available but not executed by default.
 
 | Tool | Origin | Permission | Model schema test | Handler test | Live test | Side effect |
 | --- | --- | --- | --- | --- | --- | --- |
-| append_file | native | write | harness | automated | opt-in | write |
 | apply_code_action | native | write | harness | automated | opt-in | write |
 | apply_line_edits | native | write | harness | automated | opt-in | write |
 | ask_agent | native | delegate | harness | automated | opt-in | delegate |
@@ -31,7 +30,6 @@ This matrix covers native tools only; MCP servers are not started during generat
 | commit | native | git-write | harness | automated | opt-in | git-write |
 | copy_to_clipboard | native | read | harness | automated | opt-in | read-only |
 | create_branch | native | git-write | harness | automated | opt-in | git-write |
-| create_directory | native | write | harness | automated | opt-in | write |
 | delete_file | native | delete | harness | automated | opt-in | delete |
 | desktop_capture | native | desktop | harness | automated | opt-in | desktop |
 | desktop_click | native | desktop | harness | automated | opt-in | desktop |
@@ -44,6 +42,7 @@ This matrix covers native tools only; MCP servers are not started during generat
 | desktop_windows | native | desktop | harness | automated | opt-in | desktop |
 | edit_file | native | write | harness | automated | opt-in | write |
 | edit_notebook_cell | native | write | harness | automated | opt-in | write |
+| export_document | native | write | harness | automated | opt-in | write |
 | find_files | native | read | harness | automated | opt-in | read-only |
 | forget | native | delete | harness | automated | opt-in | delete |
 | format_file | native | write | harness | automated | opt-in | write |
@@ -59,6 +58,7 @@ This matrix covers native tools only; MCP servers are not started during generat
 | list_directory | native | read | harness | automated | opt-in | read-only |
 | list_executions | native | headless | harness | automated | opt-in | headless |
 | list_memories | native | read | harness | automated | opt-in | read-only |
+| load_skill | native | read | harness | automated | opt-in | read-only |
 | load_tool_group | native | read | harness | automated | opt-in | read-only |
 | manage_jobs | native | read | harness | automated | opt-in | read-only |
 | message_chat | native | delegate | harness | automated | opt-in | delegate |

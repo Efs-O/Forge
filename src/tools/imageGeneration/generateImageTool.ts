@@ -468,7 +468,7 @@ async function runLocalVariations(
   return lines.join('\n');
 }
 
-/** A stand-in for the naming rules before the real format is known. */
+/** A placeholder for the naming rules before the real format is known. */
 const PNG_PROBE: GeneratedImage = { bytes: Buffer.alloc(0), mime: 'image/png' };
 
 /**

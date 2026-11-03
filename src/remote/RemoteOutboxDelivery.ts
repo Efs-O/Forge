@@ -77,7 +77,39 @@ export class RemoteOutboxDelivery {
   }
 
   kick(): void {
-    if (this.stopped || this.running) return;
+    if (this.stopped) return;
+    void this.ensureRunning();
+  }
+
+  /**
+   * Deliver what this chat has queued and wait for it to land, so a caller can
+   * put a reply on screen before it tears down the message that was standing in
+   * for it.
+   *
+   * `kick()` cannot be awaited: it is a no-op while a delivery is already
+   * running, and the queue drain needs the answer, not a promise that one was
+   * started. Two rounds, so a locked chat or a failing send returns instead of
+   * spinning — the exponential retry timer below already owns the long tail.
+   * False means nothing for this chat has landed, which is the caller's signal
+   * that something still has to say the turn is over.
+   */
+  async flush(chatId: string): Promise<boolean> {
+    if (this.stopped || this.signal.aborted) return false;
+    for (let round = 0; round < 2; round += 1) {
+      if (!this.hasQueuedFor(chatId)) return true;
+      await this.ensureRunning();
+    }
+    return !this.hasQueuedFor(chatId);
+  }
+
+  /** Items still waiting to be sent to this chat; `sending` is not `pendingOutbox`. */
+  private hasQueuedFor(chatId: string): boolean {
+    return this.store.pendingOutbox(this.channel.name).some((item) => item.chatId === chatId);
+  }
+
+  /** The delivery loop, started if nothing is running; the same promise each caller joins. */
+  private ensureRunning(): Promise<void> {
+    if (this.running) return this.running;
     this.running = this.deliver()
       .catch((err) =>
         this.onError?.(
@@ -88,6 +120,7 @@ export class RemoteOutboxDelivery {
         this.running = undefined;
         void this.scheduleRetry();
       });
+    return this.running;
   }
 
   async stop(): Promise<void> {
@@ -148,6 +181,11 @@ export class RemoteOutboxDelivery {
     try {
       sentIds = await this.channel.send(item.chatId, item.text.slice(0, this.maxMessageChars), {
         signal: this.signal,
+        // The speed line travels beside the text, never inside it: `speak` below
+        // reads `item.text`, and the backlog summary coalesces `item.text`, so
+        // an item that had the line in its text would have it read aloud and
+        // swallowed by a summary.
+        ...(item.speedLine ? { speedLine: item.speedLine } : {}),
       });
       await this.store.markOutbox(item.id, 'delivered');
       // Never inside the try that owns delivery state: `speak` swallows its

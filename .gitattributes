@@ -12,6 +12,7 @@
 *.md text eol=lf
 *.css text eol=lf
 *.html text eol=lf
+test/fixtures/documents/*.pdf binary
 .gitignore text eol=lf
 .prettierrc text eol=lf
 *.sh text eol=lf

@@ -1,4 +1,4 @@
-import { useCallback, useState } from 'react';
+import { useCallback, useMemo, useState } from 'react';
 import type { AttachmentData } from '../../../src/sidebar/messageBridge';
 import type { MessageAttachment } from '../messageOps';
 import {
@@ -11,6 +11,8 @@ import {
 
 export interface AttachmentsApi {
   attachments: AttachmentData[];
+  /** IDs derived from the hook's staged attachment state, never attachment bytes. */
+  draftBearingConversationIds: string[];
   /** Bytes already staged, measured the same way the host measures them. */
   totalBytes: number;
   /** Per-file rejection reasons from the last add; empty once dismissed. */
@@ -18,6 +20,7 @@ export interface AttachmentsApi {
   addFiles: (files: File[]) => void;
   remove: (index: number) => void;
   clear: () => void;
+  pruneClosedConversations: (openIds: ReadonlySet<string>) => void;
   dismissErrors: () => void;
 }
 
@@ -80,6 +83,10 @@ export function useAttachments(activeConversationId: string): AttachmentsApi {
   const [byConversation, setByConversation] = useState<Record<string, AttachmentData[]>>({});
   const [errors, setErrors] = useState<string[]>([]);
   const attachments = byConversation[activeConversationId] ?? [];
+  const draftBearingConversationIds = useMemo(
+    () => Object.keys(byConversation).filter((id) => (byConversation[id]?.length ?? 0) > 0),
+    [byConversation],
+  );
 
   const update = useCallback(
     (fn: (previous: AttachmentData[]) => AttachmentData[]) => {
@@ -147,16 +154,33 @@ export function useAttachments(activeConversationId: string): AttachmentsApi {
     (index: number) => update((prev) => prev.filter((_, i) => i !== index)),
     [update],
   );
-  const clear = useCallback(() => update(() => []), [update]);
+  const clear = useCallback(
+    () =>
+      setByConversation((previous) => {
+        if (!Object.prototype.hasOwnProperty.call(previous, activeConversationId)) return previous;
+        const next = { ...previous };
+        delete next[activeConversationId];
+        return next;
+      }),
+    [activeConversationId],
+  );
+  const pruneClosedConversations = useCallback((openIds: ReadonlySet<string>) => {
+    setByConversation((previous) => {
+      const next = Object.fromEntries(Object.entries(previous).filter(([id]) => openIds.has(id)));
+      return Object.keys(next).length === Object.keys(previous).length ? previous : next;
+    });
+  }, []);
   const dismissErrors = useCallback(() => setErrors([]), []);
 
   return {
     attachments,
+    draftBearingConversationIds,
     totalBytes: attachments.reduce((sum, item) => sum + attachmentBytes(item), 0),
     errors,
     addFiles,
     remove,
     clear,
+    pruneClosedConversations,
     dismissErrors,
   };
 }

@@ -336,6 +336,7 @@ describe('AgentTaskRunner GPU admission', () => {
       outboxDir: store.outboxDir,
       notifyLocal: vi.fn(),
       busy: () => undefined,
+      externalTurnHolds: () => [],
       now: () => NOW,
       gpuGate: {
         config: () => ({ ...gateConfig, sample_seconds: 2 }),

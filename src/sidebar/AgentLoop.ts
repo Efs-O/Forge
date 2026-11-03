@@ -8,7 +8,7 @@ import type { AttachmentData } from './messageBridge';
 import { appendUserPrompt, type UserPromptOptions } from './transcriptMutations';
 import type { TemplateEngine } from '../llm/TemplateEngine';
 import type { ForgeInstructionsLoader } from '../llm/ForgeInstructionsLoader';
-import { deriveStaticCapabilities } from '../config/ConfigResolver';
+import { visionTurnPreflight } from './turnPreflight';
 import { CheckpointStack } from '../checkpoint/CheckpointStack';
 import { ToolRegistry } from '../tools/ToolRegistry';
 import type { KeepUndoCodeLensProvider } from './KeepUndoCodeLens';
@@ -29,7 +29,13 @@ import { runCloudProviderTurn, runLocalProviderTurn } from './ProviderTurn';
 import type { ForgeTurnOutcome } from './turnOutcome';
 import type { DiffDecorations } from './DiffDecorations';
 import { ToolApprovalService } from './ToolApprovalService';
+import { clearConversationHostApprovals } from '../tools/fetchHostApprovals';
+import { clearChatRules, createChatRuleApproval } from './chatApprovalRules';
+import { writeApprovalAlways } from './approvalPolicyRules';
+import { chatClankerRecords } from './chatClanker';
+import { clearConversationExfilState } from '../tools/exfilTaint';
 import { clearTrashRefusals } from '../tools/trashRefusal';
+import type { ApprovalDecision } from './approvalMessages';
 import type { ToolApprovalSink, ToolApprovalRequestEvent } from './ToolApprovalService';
 import { recordModelUsage } from './modelManager/usageTracker';
 import type { AgentProgressEvent, AgentProgressListener } from './AgentProgress';
@@ -184,11 +190,29 @@ export class AgentLoop {
         config.max_cli_agents ?? DEFAULT_MAX_CLI_AGENTS,
         config.cli_idle_timeout_ms ?? DEFAULT_CLI_IDLE_TIMEOUT_MS,
       );
+    // Decision and storage share one key-rule seam beside the queue that settles clicks.
+    const chatRuleApproval = createChatRuleApproval({
+      getConfig,
+      ...(this.workspaceRoot ? { workspaceRoot: this.workspaceRoot } : {}),
+      ...(this.getConfigPath ? { configPath: this.getConfigPath() } : {}),
+      // The same reader the queue uses, so the seam and the queue cannot disagree.
+      clankerMode: (conversationId) => this.approvals.getClankerMode(conversationId),
+      recordAutoGate: (event) => this.approvals.autoApproved(event),
+      lookup: (conversationId) => this.conversationLookup?.(conversationId),
+      persist: (conversationId) => this.onTranscriptChanged?.(conversationId),
+      writeAlways: (keys) => writeApprovalAlways(this.getConfigPath?.(), keys, this.workspaceRoot),
+    });
     this.approvals = new ToolApprovalService(
       post,
       getView,
       undefined,
       () => getConfig().permissions?.approval_timeout_minutes,
+      // Clanker's durable home is the chat's own record; see `chatClanker.ts`.
+      chatClankerRecords((conversationId) => this.conversationLookup?.(conversationId)),
+      // An "Allow for this chat" answer writes through this queue alone, so a phone
+      // click and a sidebar click cannot store different rules for the same card.
+      chatRuleApproval.allow,
+      chatRuleApproval.always,
     );
     this.approvals.setApprovalLifecycle(
       (convId) => this.sessionTimer.pauseApproval(convId),
@@ -205,9 +229,18 @@ export class AgentLoop {
       codeLens,
       failureTracker,
       post,
-      (name, detail, isDangerous, convId, signal) =>
-        this.approvals.request(name, detail, isDangerous, convId, signal),
+      (name, detail, isDangerous, convId, signal, options) =>
+        // The sixth argument is the whole gate: `gateKind`, the card's own
+        // reason and the decline alternative. Written with five parameters
+        // against `ToolDispatch`'s six-parameter signature, this adapter type-checks
+        // and silently drops all three — which is how a dangerous `web_fetch`
+        // reached the queue without the reason the card was raised for, and how
+        // an unattended secret read was refused by policy instead of being
+        // classified as the gate that raised it.
+        this.approvals.request(name, detail, isDangerous, convId, signal, options),
       diffDecorations,
+      // Built above, next to the queue that answers the click it offers.
+      chatRuleApproval,
     );
     this.services = buildTurnServices({
       pool,
@@ -256,8 +289,19 @@ export class AgentLoop {
   disposeConversation(id: string): Promise<void> {
     this.approvals.cancelConversation(id);
     this.approvals.clearConversationState(id);
+    // The secret flag, the approved hosts and phase 4's untrusted-content flag are
+    // chat-scoped like the chat itself: a new chat asks again, and a flag outliving
+    // its chat would gate the next one for a page it never read.
+    clearConversationHostApprovals(id);
+    clearConversationExfilState(id);
     const conv = this.conversationLookup?.(id);
-    if (conv) this.sessionTimer.disposeConversation(conv);
+    if (conv) {
+      // The chat's approval rules are chat-scoped like the hosts it approved: a
+      // deleted chat takes its record with it, and a rule outliving its chat would
+      // answer a card for a chat that never earned it.
+      clearChatRules(conv);
+      this.sessionTimer.disposeConversation(conv);
+    }
     this.streamMeter.reset(id);
     return this.cliSessions.disposeConversation(id);
   }
@@ -300,20 +344,19 @@ export class AgentLoop {
     return this.lifecycle.waitForCancelledTurns();
   }
 
-  toggleClanker(): boolean {
-    return this.approvals.toggleClankerMode();
+  setClankerMode(conversationId: string, on: boolean): void {
+    this.approvals.setClankerMode(conversationId, on);
   }
 
-  setClankerMode(on: boolean): void {
-    this.approvals.setClankerMode(on);
+  getClankerMode(conversationId: string): boolean {
+    return this.approvals.getClankerMode(conversationId);
   }
 
-  getClankerMode(): boolean {
-    return this.approvals.getClankerMode();
-  }
-
-  resolveConfirmation(id: string, approved: boolean): void {
-    this.approvals.resolve(id, approved);
+  /** Settle a card with the owner's answer, from whichever surface answered it; the
+   *  queue alone turns an `allowChat` answer into a chat rule.
+   */
+  resolveConfirmation(id: string, decision: ApprovalDecision): void {
+    this.approvals.resolve(id, decision);
   }
 
   addApprovalSink(sink: ToolApprovalSink): { dispose(): void } {
@@ -350,19 +393,10 @@ export class AgentLoop {
     const postC = (msg: HostToWebview): void =>
       this.post({ ...msg, conversationId: convId } as HostToWebview);
     const hasImage = attachments?.some((attachment) => attachment.mediaType.startsWith('image/'));
-    if (hasImage && !deriveStaticCapabilities(model).includes('vision')) {
-      postC({
-        type: 'error',
-        message:
-          `Forge: model "${model.name}" is not configured for image input. ` +
-          'Choose a vision-capable model. For llama.cpp, set mmproj_path to its compatible ' +
-          'projector; for other providers, declare the vision capability only when supported.',
-      });
-      return {
-        kind: 'failed',
-        error: `Forge: model "${model.name}" is not configured for image input.`,
-        finalText: '',
-      };
+    const preflight = visionTurnPreflight(model, hasImage === true);
+    if (preflight) {
+      postC(preflight.notice);
+      return preflight.outcome;
     }
     // A user-typed prompt starts a task; a tell source that measures wall time
     // per task needs that boundary. An `internal` send (an auto-compaction
@@ -370,6 +404,14 @@ export class AgentLoop {
     // clock. Placed before the CLI branch so the clock stays right when the
     // conversation runs a CLI agent or its model is switched mid-task.
     if (!promptOptions?.internal) this.midTurnTells?.onTaskStart?.(convId);
+    // The turn's own beginning, published before anything it says. A turn that
+    // names no tool and says nothing emits only its closing event, so a sink
+    // that times turns could not tell when it started and reported it as 0 s
+    // (audit F4). Same boundary as `onTaskStart` above: an `internal` send is
+    // the auto-compaction resume of the task already running, so it opens no
+    // new turn. Placed before the CLI branch for the same reason as the clock -
+    // a conversation running a CLI agent must stay timed the same way.
+    if (!promptOptions?.internal) this.progress.emit({ conversationId: convId, kind: 'start' });
     if (model.provider === 'cli') {
       return runCliTurn(this.services, conv, model, text, attachments, postC, promptOptions);
     }

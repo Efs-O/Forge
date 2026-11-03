@@ -10,6 +10,7 @@
 import * as vscode from 'vscode';
 import type { ForgeConfig } from '../config/types';
 import { watchForgeConfigPaths } from '../config/ConfigLoader';
+import { noticeStaleBuildOnConfigFailure } from './staleBuild';
 import { expandAlias, splitModelProfile } from '../config/ConfigResolver';
 import { getLogger } from '../util/logger';
 
@@ -25,6 +26,10 @@ export interface ConfigReloadOptions {
 export function watchForgeConfig(options: ConfigReloadOptions): vscode.Disposable {
   return watchForgeConfigPaths(options.configPath, [], (newConfig, err) => {
     if (err) {
+      // Before blaming the file: a window that was not reloaded after an upgrade
+      // validates it with the old build's rules, and that is the difference
+      // between a config error and a stale window.
+      noticeStaleBuildOnConfigFailure();
       void vscode.window.showErrorMessage(`Forge: config reload failed — ${err.message}`);
       return;
     }

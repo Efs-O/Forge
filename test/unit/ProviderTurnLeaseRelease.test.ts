@@ -70,7 +70,11 @@ vi.mock('../../src/backend/DirectBackend', () => {
   return { DirectBackend: FakeDirectBackend };
 });
 
-import { runLocalProviderTurn, type ProviderTurnContext } from '../../src/sidebar/ProviderTurn';
+import {
+  runCloudProviderTurn,
+  runLocalProviderTurn,
+  type ProviderTurnContext,
+} from '../../src/sidebar/ProviderTurn';
 import { TurnLifecycle } from '../../src/sidebar/TurnLifecycle';
 import { SystemPromptRenderError } from '../../src/llm/SystemPromptInjector';
 import { BackendPool } from '../../src/backend/BackendPool';
@@ -148,7 +152,7 @@ function fakeHarness(pool: ProviderTurnContext['pool']): FakeTurnHarness {
   };
 }
 
-/** A pool stand-in whose acquireForTurn hands out a counting lease. */
+/** A pool fake whose acquireForTurn hands out a counting lease. */
 function countingPool(order?: string[]): ProviderTurnContext['pool'] {
   const state = { releases: 0 };
   const pool = {
@@ -322,5 +326,118 @@ describe('runLocalProviderTurn turn-lease release', () => {
     harness.pending[1].resolve();
     await acquireB;
     expect(pool.loadedModelNames()).toEqual(['B']);
+  });
+});
+
+describe('managed external turn failures', () => {
+  it('names an unloaded server and preserves the raw engine error', async () => {
+    const h = fakeHarness(countingPool());
+    h.ctx.runModelTurn = async () => {
+      throw new Error('I/O operation on closed file.');
+    };
+    const outcome = await runCloudProviderTurn(h.ctx, {
+      conv: { ...fakeConv(), title: 'Existing turn' },
+      model: {
+        name: 'iq2xs',
+        provider: 'openai-compatible',
+        endpoint: 'http://127.0.0.1:8080',
+        unload_path: '/unload',
+      } as ModelConfig,
+      text: 'hello',
+      attachments: undefined,
+      activeFile: undefined,
+      ctrl: new AbortController(),
+      postC: () => {},
+    });
+    expect(outcome.kind).toBe('failed');
+    if (outcome.kind === 'failed') {
+      expect(outcome.error).toContain('the model server stopped or was unloaded during this turn');
+      expect(outcome.error).toContain('I/O operation on closed file.');
+    }
+  });
+});
+
+/**
+ * BL-024 (bug hunt 2026-10-31): `finishTurn` used to run `settle` last and
+ * unguarded, so a checkpoint commit that throws — it re-reads every file the
+ * turn touched, and a file another process holds throws EPERM or EBUSY on
+ * Windows — skipped it. `settle` is the only resolver of the promise
+ * `TurnLifecycle.stopStreaming` awaits, so the next Stop, tab close or
+ * `waitForCancelledTurns` then waited on a promise nothing could resolve, and
+ * the chat could not send again in this window.
+ */
+describe('the turn unwind settles even when the checkpoint commit fails', () => {
+  /** The errno text a held file produces, path included — what the user must see. */
+  const heldFileError = (): Error =>
+    Object.assign(new Error("EPERM: operation not permitted, lstat 'N:\\work\\a.ts'"), {
+      code: 'EPERM',
+    });
+
+  function checkpointsThatThrow(): ProviderTurnContext['checkpoints'] {
+    return {
+      beginTurn: () => ({}),
+      commitTurn: () => {
+        throw heldFileError();
+      },
+      depth: () => 0,
+    } as unknown as ProviderTurnContext['checkpoints'];
+  }
+
+  it('completes the turn, names the file, and lets Stop resolve', async () => {
+    const h = fakeHarness(countingPool());
+    h.ctx.checkpoints = checkpointsThatThrow();
+    const ctrl = new AbortController();
+    h.ctx.lifecycle.register('conv-1', ctrl);
+    const post = vi.fn();
+
+    const outcome = await runTurn(h.ctx, ctrl, post);
+
+    // The reply survives: the turn is completed, not failed.
+    expect(outcome.kind).toBe('completed');
+    // A warning notice, not an error row: the webview maps `error` to ERROR,
+    // which would read as a failed turn when the answer arrived fine.
+    expect(post).toHaveBeenCalledWith(
+      expect.objectContaining({
+        type: 'notice',
+        severity: 'warning',
+        message: expect.stringContaining("lstat 'N:\\work\\a.ts'"),
+      }),
+    );
+    expect(post).toHaveBeenCalledWith(
+      expect.objectContaining({
+        message: expect.stringContaining('Undo will not cover this turn'),
+      }),
+    );
+    // The conversation is settled, so the cancel path resolves instead of
+    // awaiting a promise whose resolver the next turn already replaced.
+    await Promise.all([h.ctx.lifecycle.cancel('conv-1'), flush()]);
+    await h.ctx.lifecycle.waitForCancelledTurns();
+    expect(h.ctx.lifecycle.isCancellationPending('conv-1')).toBe(false);
+  });
+
+  it('settles the cloud path too, so a managed external turn cannot hang the chat', async () => {
+    const h = fakeHarness(countingPool());
+    h.ctx.checkpoints = checkpointsThatThrow();
+    const ctrl = new AbortController();
+    h.ctx.lifecycle.register('conv-1', ctrl);
+
+    const outcome = await runCloudProviderTurn(h.ctx, {
+      conv: { ...fakeConv(), title: 'Strata chat' },
+      model: {
+        name: 'iq2xs',
+        provider: 'openai-compatible',
+        endpoint: 'http://127.0.0.1:8080',
+        unload_path: '/unload',
+      } as ModelConfig,
+      text: 'hello',
+      attachments: undefined,
+      activeFile: undefined,
+      ctrl,
+      postC: () => {},
+    });
+
+    expect(outcome.kind).toBe('completed');
+    await Promise.all([h.ctx.lifecycle.cancel('conv-1'), flush()]);
+    await h.ctx.lifecycle.waitForCancelledTurns();
   });
 });

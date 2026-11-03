@@ -14,6 +14,7 @@ import { getLogger } from '../util/logger';
 import type { ForgeHostFacade } from '../sidebar/ForgeHostFacade';
 import type { RemoteRequestStore } from './RemoteRequestStore';
 import type { WorkspaceHandoff } from './RemoteStoreSchemas';
+import { handoffMode } from './RemoteHandoffState';
 import type { WorkspaceAliasTarget } from './RemoteWorkspaceDiscovery';
 import type { RemoteChannel } from './types';
 
@@ -44,7 +45,9 @@ export function workspaceIdFor(target: string): string {
 
 /** Records the departure and returns its id. The caller stops its transports
  *  and opens the target folder; this only makes the move durable first, and
- *  the id is what lets the caller undo it if no window ever claims. */
+ *  the id is what lets the caller undo it if no window ever claims. `mode` is
+ *  written so the window that arrives can tell the chat which window it is in
+ *  and whether the old one is still open. */
 export async function recordWorkspaceHandoff(
   store: RemoteRequestStore,
   sourceWorkspaceId: string,
@@ -52,6 +55,7 @@ export async function recordWorkspaceHandoff(
   alias: string,
   channel: string,
   chatId: string,
+  mode: 'replace' | 'new-window',
 ): Promise<string> {
   return store.beginWorkspaceHandoff({
     channel: channel as WorkspaceHandoff['channel'],
@@ -59,6 +63,7 @@ export async function recordWorkspaceHandoff(
     sourceWorkspaceId,
     targetWorkspaceId: workspaceIdFor(target.path),
     targetAlias: alias,
+    mode,
   });
 }
 
@@ -93,7 +98,16 @@ export async function resumeWorkspaceHandoffs(
   workspaceId: string,
   host: ForgeHostFacade,
 ): Promise<WorkspaceArrival[]> {
-  const handoffs = await store.claimWorkspaceHandoffs(workspaceId);
+  // Read, do not claim: the conversation this chat is going to continue has to
+  // be opened **before** anything durable lands, because the old order — claim,
+  // then await the open, then write the binding — left a `claimed` record
+  // behind whenever the window reloaded or crashed in that gap, and only
+  // `pending` records are claimable, so nothing could take the chat back while
+  // the source window had already stopped serving it.
+  const handoffs = store.peekWorkspaceHandoffs(workspaceId);
+  // `peek`, not claim: see the comment below and `claimBindAndComplete` in
+  // `RemoteHandoffState.ts`. The authoritative claimability check happens
+  // again inside the single write that claims, binds and completes.
   const arrivals: WorkspaceArrival[] = [];
   for (const handoff of handoffs) {
     const resumed = await resumeNewestConversation(host);
@@ -101,47 +115,51 @@ export async function resumeWorkspaceHandoffs(
     try {
       conversation = resumed ?? (await host.createConversation({ activate: false }));
     } catch (err) {
-      // One claimed handoff that cannot open a chat must not strand the rest
-      // of the batch, or abort the transport start it runs ahead of.
-      await store.completeWorkspaceHandoff(handoff.id);
+      // Nothing has landed yet, so this is still a claim: made and completed in
+      // one write, without a binding, so the source window does not undo a
+      // switch whose target window is up and serving. A window that beat us to
+      // the record says nothing at all.
+      const taken = await store.claimAndBindWorkspaceHandoff(handoff.id, workspaceId);
+      if (!taken.ok) {
+        log.debug(`[remote] handoff ${handoff.id} was taken by another window`);
+        continue;
+      }
       const failure = err instanceof Error ? err.message : String(err);
-      arrivals.push({ handoff, conversationTitle: '', created: false, failure });
+      arrivals.push({
+        handoff: taken.handoff,
+        conversationTitle: '',
+        created: false,
+        failure,
+      });
       continue;
     }
-    // A failed binding write used to throw out of `claimArrivals` and out of
-    // `replace`, so the transports never came up, no receipt was sent, and the
-    // chat learned about the switch only by sending a message that got refused
-    // with the bound-workspace error. Report it here instead and let the rest
-    // of the batch run.
-    let boundHere = false;
+    // Claim, bind and complete in one write. A throw means the write did not
+    // happen at all — the record is still pending, this window holds the lease,
+    // and the source's rollback will find it cannot take that lease back — so
+    // report it rather than pretending the chat moved.
+    let taken: { ok: true; handoff: WorkspaceHandoff } | { ok: false };
     try {
-      await store.setBinding({
+      taken = await store.claimAndBindWorkspaceHandoff(handoff.id, workspaceId, {
         channel: handoff.channel,
         chatId: handoff.chatId,
         workspaceId,
         conversationId: conversation.id,
       });
-      boundHere = true;
-      await store.completeWorkspaceHandoff(handoff.id);
     } catch (err) {
-      const message = err instanceof Error ? err.message : String(err);
-      if (!boundHere) {
-        arrivals.push({
-          handoff,
-          conversationTitle: conversation.title,
-          created: resumed === undefined,
-          bindingFailure: message,
-        });
-        continue;
-      }
-      // The chat is bound here, so the switch happened; only the completion
-      // record failed, and `pruneRemoteState` drops it at its TTL anyway.
-      log.warn(
-        `[remote] workspace handoff ${handoff.id} could not be marked completed: ${message}`,
-      );
+      arrivals.push({
+        handoff,
+        conversationTitle: conversation.title,
+        created: resumed === undefined,
+        bindingFailure: err instanceof Error ? err.message : String(err),
+      });
+      continue;
+    }
+    if (!taken.ok) {
+      log.debug(`[remote] handoff ${handoff.id} was taken by another window`);
+      continue;
     }
     arrivals.push({
-      handoff,
+      handoff: taken.handoff,
       conversationTitle: conversation.title,
       created: resumed === undefined,
     });
@@ -169,6 +187,11 @@ async function resumeNewestConversation(host: ForgeHostFacade) {
 export interface ArrivalAnnouncement {
   channelFor: (name: WorkspaceHandoff['channel']) => RemoteChannel | undefined;
   displayNameFor: (alias: string) => string;
+  /** Names the workspace a record came from, so a `new-window` receipt can say
+   *  which window is still open. Optional because a window whose config lists
+   *  no aliases cannot name it — the receipt then says "the window you came
+   *  from" rather than inventing a name. */
+  displayNameForWorkspaceId?: (workspaceId: string) => string | undefined;
   /** Enrolled TOTP means the arriving chat is locked: sessions are memory-only
    *  and live in the window that authenticated them, so they never cross into
    *  the window taking over — whether or not a reload was involved. */
@@ -193,6 +216,18 @@ export async function announceWorkspaceArrivals(
     const channel = deps.channelFor(handoff.channel);
     if (!channel) continue;
     const name = deps.displayNameFor(handoff.targetAlias);
+    // A `new-window` arrival is a second window, so the receipt has to say what
+    // happened to the first one: without this the owner cannot tell whether
+    // their old window is still serving other chats, and `replace` receipts
+    // stay exactly as they were (that mode writes no `mode` field of its own
+    // beyond today's, and an absent `mode` means `replace`).
+    const opening =
+      handoffMode(handoff) === 'new-window'
+        ? `opened as a new window, and ${
+            deps.displayNameForWorkspaceId?.(handoff.sourceWorkspaceId) ??
+            'the window you came from'
+          } is still open — `
+        : '';
     const locked = await deps.totpEnrolled(handoff.channel).catch(() => true);
     // Naming the conversation is the difference between "it worked" and
     // "did it put me somewhere useful?": the receipt used to say "a new chat
@@ -225,8 +260,8 @@ export async function announceWorkspaceArrivals(
       channel,
       handoff,
       locked
-        ? `Forge: now in ${name} — ${where}. Your session did not carry over, so this chat is locked: send your 6-digit code to unlock it.`
-        : `Forge: now in ${name} — ${where}.`,
+        ? `Forge: now in ${name} — ${opening}${where}. Your session did not carry over, so this chat is locked: send your 6-digit code to unlock it.`
+        : `Forge: now in ${name} — ${opening}${where}.`,
       deps,
     );
   }

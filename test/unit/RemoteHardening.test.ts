@@ -141,6 +141,71 @@ describe('remote authorization and privacy hardening', () => {
     await controller.stop();
   });
 
+  /**
+   * The whole of phase 0, seen from the phone.
+   *
+   * An authenticated owner who sent a sticker was told "remote authentication
+   * is required" instead of being told the media type is unsupported -- the
+   * voice-note defect again, from the same cause: `applyRemoteAuthGate` runs
+   * before the `unsupported_media` branch, and that kind was not in
+   * `ACTIONABLE_WHEN_AUTHENTICATED`, so the gate denied the event and named the
+   * one thing that was not wrong. Sticker is the kind this test names because
+   * it stays unsupported after video becomes work, so the sentence it checks
+   * will still be true next release.
+   */
+  it('names an unsupported media type to an authenticated owner instead of demanding authentication', async () => {
+    const { store } = await newStore();
+    const secrets = new MemorySecrets();
+    secrets.values.set('forge.remote.fake.ownerId', 'owner-raw-id');
+    const auth = new RemoteAuth(secrets as unknown as vscode.SecretStorage);
+    const secret = await auth.createTotpEnrollmentSecret('fake');
+    const now = Date.now();
+    const code = generateTotp(secret, now).code;
+    await auth.confirmTotpEnrollment('fake', secret, code, now);
+    const channel = new FakeRemoteChannel();
+    const forgeHost = host();
+    const controller = new RemoteController(channel, store, auth, forgeHost, {
+      workspaceId: 'workspace',
+      queueLimit: 5,
+      maxMessageChars: 12_000,
+      rateLimitPerMinute: 30,
+    });
+    await controller.start();
+    try {
+      await channel.emit(event({ providerMessageId: 'auth', text: code }));
+      await expect(
+        channel.emit(
+          event({ kind: 'unsupported_media', mediaType: 'sticker', providerMessageId: 'sticker' }),
+        ),
+      ).resolves.toEqual({
+        kind: 'rejected',
+        reason: "This media type isn't supported yet: sticker.",
+        ephemeral: true,
+      });
+      // Authentication is still required first, not instead: locking the chat
+      // puts the media notice back behind the gate, and a sticker cannot carry
+      // the code that would open it, so the owner has to send text.
+      await channel.emit(event({ providerMessageId: 'lock', text: '/lock' }));
+      await expect(
+        channel.emit(
+          event({
+            kind: 'unsupported_media',
+            mediaType: 'sticker',
+            providerMessageId: 'sticker-2',
+          }),
+        ),
+      ).resolves.toEqual({
+        kind: 'rejected',
+        reason: 'remote authentication is required',
+        ephemeral: true,
+      });
+      await channel.emit(event({ providerMessageId: 'note', text: 'do the thing' }));
+      expect(channel.sent.at(-1)?.text).toMatch(/6-digit code/i);
+    } finally {
+      await controller.stop();
+    }
+  });
+
   it('enforces pairing grammar, expiry, one-time use, and stable exact owner identity', async () => {
     const secrets = new MemorySecrets();
     const auth = new RemoteAuth(secrets as unknown as vscode.SecretStorage);
@@ -285,14 +350,19 @@ describe('remote owner commands', () => {
       correlationId: prompt!.correlationId!,
     });
     await expect(channel.emit(action)).resolves.toEqual({ kind: 'handled' });
-    expect(forgeHost.resolveApproval).toHaveBeenCalledWith(approvalId, true);
+    expect(forgeHost.resolveApproval).toHaveBeenCalledWith(approvalId, 'approve');
     // A second press of a button Telegram never takes away must not re-resolve.
     await expect(
       channel.emit({ ...action, providerMessageId: 'press-again' }),
     ).resolves.toMatchObject({ kind: 'rejected' });
     expect(forgeHost.resolveApproval).toHaveBeenCalledTimes(1);
 
-    sink?.resolved({ ...approval, approved: true, reason: 'remote' } as never);
+    sink?.resolved({
+      ...approval,
+      approved: true,
+      decision: 'approve',
+      reason: 'remote',
+    } as never);
     await vi.waitFor(() =>
       expect(channel.resolvedKeyboards).toEqual([
         {
@@ -300,6 +370,9 @@ describe('remote owner commands', () => {
           correlationId: prompt!.correlationId!,
           keyboardMessageIds: [promptMessageId],
           approved: true,
+          // The button has to say which of the four answers this was; the
+          // bridge knows, because it routed the tap.
+          decision: 'approve',
         },
       ]),
     );
@@ -312,16 +385,25 @@ describe('remote owner commands', () => {
     await controller.stop();
   });
 
-  it('toggles clanker mode only for the owner and only with a valid argument', async () => {
+  it('toggles clanker mode only for the owner, only with a valid argument, and only for the chat that is bound', async () => {
     const { channel, controller, forgeHost } = await ownerController();
     await expect(
       channel.emit(event({ providerMessageId: 'bad', text: '/clanker maybe' })),
     ).resolves.toMatchObject({ kind: 'rejected' });
     expect(forgeHost.setClankerMode).not.toHaveBeenCalled();
+    // An unbound chat has nothing to arm: Clanker is a chat's mode now, so the
+    // command refuses rather than arming every tab in the window beside a chat that
+    // does not exist yet.
+    await expect(
+      channel.emit(event({ providerMessageId: 'unbound', text: '/clanker on' })),
+    ).resolves.toMatchObject({ kind: 'rejected' });
+    expect(forgeHost.setClankerMode).not.toHaveBeenCalled();
+    await channel.emit(event({ providerMessageId: 'new', text: '/new' }));
     await expect(
       channel.emit(event({ providerMessageId: 'on', text: '/clanker on' })),
     ).resolves.toEqual({ kind: 'handled' });
-    expect(forgeHost.setClankerMode).toHaveBeenCalledWith(true);
+    // The bound chat and no other: the fake `/new` above binds conversation 'c1'.
+    expect(forgeHost.setClankerMode).toHaveBeenCalledWith('c1', true);
     await controller.stop();
   });
 

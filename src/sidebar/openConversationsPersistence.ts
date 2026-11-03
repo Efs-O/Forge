@@ -43,8 +43,11 @@ const OPEN_SIGNATURE_FIELDS = [
   'title',
   'createdAt',
   'updatedAt',
+  'retention_activity_at',
+  'keep_open',
   'messages',
   'agentLinks',
+  'opened_by',
   'active_model',
   'cli_sessions',
   'compaction',
@@ -58,6 +61,12 @@ const OPEN_SIGNATURE_FIELDS = [
   'last_output_tokens',
   'model_request_count',
   'tool_call_count',
+  'forge_instructions_pin',
+  'title_source',
+  'origin_agent',
+  'untrusted_since_ms',
+  'approval_rules',
+  'clanker',
 ] as const;
 
 /** No persisted field currently relies on an `updatedAt`-only classification. */
@@ -85,18 +94,25 @@ function lastToolCallCount(conversation: SignatureInput): number {
  * revision/summary size, model, most recent input size and last message shape.
  * Other persisted metadata is included too, so a save cannot skip it.
  */
-function signatureFor(conversation: SignatureInput, displayDiffs: unknown): string {
+function signatureFor(
+  conversation: SignatureInput,
+  displayDiffs: unknown,
+  forgeInstructionsPin: unknown,
+): string {
   const historySignature = `${conversation.updatedAt}:${conversation.title}:${conversation.messages.length}:${JSON.stringify(conversation.agentLinks ?? {})}`;
   const compaction = conversation.compaction;
   return JSON.stringify([
     historySignature,
     conversation.id,
     conversation.createdAt,
+    conversation.retention_activity_at ?? null,
+    conversation.keep_open ?? false,
     compaction?.summary.length ?? null,
     compaction?.generation ?? null,
     compaction?.fromIndex ?? null,
     compaction?.memoryKeys ?? null,
     compaction?.resumeNote ?? null,
+    conversation.opened_by ?? null,
     conversation.active_model ?? null,
     conversation.last_input_tokens ?? null,
     lastContentLength(conversation),
@@ -111,15 +127,39 @@ function signatureFor(conversation: SignatureInput, displayDiffs: unknown): stri
     conversation.last_output_tokens ?? null,
     conversation.model_request_count ?? null,
     conversation.tool_call_count ?? null,
+    forgeInstructionsPin ?? null,
+    conversation.title_source ?? null,
+    conversation.origin_agent ?? null,
+    // The untrusted-content flag is part of the signature because it is a fact
+    // about the chat that can change without any message changing: the stamp is
+    // written at the start of a turn from the stored value, the live mark and the
+    // transcript, and a save that skipped it would let a reload forget that a page
+    // was read — which is exactly the failure phase 4 exists to close.
+    conversation.untrusted_since_ms ?? null,
+    // The chat's approval rules are in the signature because they are a fact about
+    // what this chat may do that can change with no message changing: an "Allow for
+    // this chat" click, `/clear` or Reset rewrites it in place, and a save that
+    // skipped it would let a reload forget an approval the owner made — or keep one
+    // the owner just cleared.
+    conversation.approval_rules ?? null,
+    // Clanker is in the signature for the same reason and the same size: it is a
+    // fact about what this chat is allowed to do, it is written on the chat's own
+    // record by a toggle that changes no message, and a save that skipped it would
+    // let a reload forget which chat the owner armed — or keep one they cleared.
+    conversation.clanker ?? null,
   ]);
 }
 
 export function openConversationSignature(conversation: ConversationRuntime): string {
-  return signatureFor(conversation, conversation.displayDiffs);
+  return signatureFor(conversation, conversation.displayDiffs, conversation.forgeInstructionsPin);
 }
 
 function persistedOpenConversationSignature(conversation: ConversationPersisted): string {
-  return signatureFor(conversation, conversation.display_diffs);
+  return signatureFor(
+    conversation,
+    conversation.display_diffs,
+    conversation.forge_instructions_pin,
+  );
 }
 
 const pendingMementoWrites = new WeakMap<Memento, Promise<void>>();
@@ -279,7 +319,7 @@ export class OpenConversationsPersistence {
     historyFallback: readonly ConversationPersisted[],
     changedId?: string,
     pruneHistory?: () => void,
-  ): void {
+  ): Promise<boolean> {
     const openSave = this.bodies?.save(
       session.conversations,
       build,
@@ -295,12 +335,13 @@ export class OpenConversationsPersistence {
       inline: [...inline.values()],
     };
     const mementoWrite = persistMemento(workspaceState, OPEN_CONVERSATIONS_KEY_V2, value);
-    void mementoWrite.then((committed) => {
-      if (!committed) return;
+    return mementoWrite.then((committed) => {
+      if (!committed) return false;
       this.bodies?.pruneRemoved();
       pruneHistory?.();
       if (this.needsV1Shrink) void this.shrinkV1(workspaceState);
       this.forceMigrationIds.clear();
+      return true;
     });
   }
 

@@ -200,7 +200,7 @@ function greekEvaluation(file) {
   return rows;
 }
 
-function scenarios() {
+export function scenarios() {
   const strict = (tool, args) =>
     `Call only ${tool} with valid JSON. Use these exact arguments: ${JSON.stringify(args)}. Do not explain.`;
   return [
@@ -208,7 +208,15 @@ function scenarios() {
     scenario('tool-find-files', 'find_files', strict('find_files', { pattern: '**/*.ts', max_results: 5 })),
     scenario('tool-search-code', 'search_code', strict('search_code', { query: 'needle', include: '**/*.ts' })),
     scenario('tool-write-file', 'write_file', strict('write_file', { path: 'out.txt', content: 'written\n' })),
-    scenario('tool-append-file', 'append_file', strict('append_file', { path: 'seed.txt', content: 'append\n' })),
+    // `append_file` is retired: `write_file` carries mode "append" (tool-trim
+    // lane B, item B2/B3), and the benchmark host offers only write_file, so
+    // this scenario could never be passed — the model was asked for a tool that
+    // was not in the list it was given.
+    scenario(
+      'tool-append-file',
+      'write_file',
+      strict('write_file', { path: 'seed.txt', content: 'append\n', mode: 'append' }),
+    ),
     scenario('tool-edit-file', 'edit_file', strict('edit_file', { path: 'seed.txt', old_text: 'seed', new_text: 'edited' })),
     scenario('tool-run-terminal', 'shell', strict('shell', { command: 'echo forge', timeout_ms: 5000 })),
     scenario('tool-run-tests', 'run_tests', strict('run_tests', { command: 'node --version', timeout_ms: 5000 })),
@@ -220,9 +228,12 @@ function scenarios() {
     ),
     scenario(
       'coding-append-readme',
-      'append_file',
-      strict('append_file', { path: 'README.md', content: 'Nemotron benchmark\n' }),
-      (args) => args.path === 'README.md' && args.content === 'Nemotron benchmark\n',
+      'write_file',
+      strict('write_file', { path: 'README.md', content: 'Nemotron benchmark\n', mode: 'append' }),
+      (args) =>
+        args.path === 'README.md' &&
+        args.content === 'Nemotron benchmark\n' &&
+        args.mode === 'append',
     ),
     scenario(
       'coding-edit-constant',

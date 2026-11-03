@@ -2,9 +2,10 @@ import * as path from 'path';
 import * as fs from 'fs';
 import * as os from 'os';
 import * as vscode from 'vscode';
+import { z } from 'zod';
 import { afterAll, afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { ToolDispatch, resolveToolPath } from '../../src/sidebar/ToolDispatch';
-import { ToolApprovalPolicyDenied } from '../../src/sidebar/ToolApprovalService';
+import { ToolApprovalPolicyDenied } from '../../src/sidebar/toolApprovalOutcome';
 import type { ChatMessage, ToolCall } from '../../src/llm/types';
 import type { CheckpointStack } from '../../src/checkpoint/CheckpointStack';
 import type { KeepUndoCodeLensProvider } from '../../src/sidebar/KeepUndoCodeLens';
@@ -20,6 +21,10 @@ import {
   resetLazyToolGroups,
 } from '../../src/tools/lazyToolGroups';
 import { makeShellTool } from '../../src/tools/shellTool';
+import {
+  clearConversationUntrustedState,
+  markConversationReadUntrusted,
+} from '../../src/tools/exfilTaint';
 import { toolArgumentRepairForMessage } from '../../src/tools/argCoercion';
 import { TEST_BASH } from '../support/bash';
 
@@ -144,6 +149,9 @@ describe('ToolDispatch', () => {
 
   afterEach(() => {
     vi.clearAllMocks();
+    // Phase 4's card rule reads this flag, so a test that flagged a chat must not
+    // leave it flagged for the next one.
+    clearConversationUntrustedState();
   });
 
   it('dispatches a read tool without approval', async () => {
@@ -228,12 +236,18 @@ describe('ToolDispatch', () => {
         function: { name: 'budget_test_tool', description: 'Run', parameters: { type: 'object' } },
       },
       permission: 'terminal',
+      // The fake tool has no classifier, so the test says which way it leaves the
+      // machine: this is the flagged chat's way-out card, not a permission card.
+      reachesOut: 'network',
       handler: vi.fn().mockResolvedValue('should not run'),
     });
 
     const messages: ChatMessage[] = [];
+    // The declined call has to reach the queue first, and phase 4 opens a queue
+    // card only for a chat that has outside content or a secret in it.
+    markConversationReadUntrusted('conv-a');
     await dispatch.dispatch(
-      [makeToolCall('budget_test_tool', { command: 'ls' })],
+      [makeToolCall('budget_test_tool', { command: 'curl -s https://collector.example.net' })],
       allowed,
       messages,
       'conv-a',
@@ -369,7 +383,7 @@ describe('ToolDispatch', () => {
             await dispatch.dispatch(
               [makeToolCall(name, {})], allowed, messages, 'dispatch-contract', undefined,
               undefined, budget, undefined, undefined, undefined, undefined,
-              { modelName: isVisionModel ? 'vision' : 'text-only', isVisionModel, conversation: {} as never, persistConversation: vi.fn() },
+              { modelName: isVisionModel ? 'vision' : 'text-only', isVisionModel, conversation: { id: 'dispatch-contract', messages: [] } as never, persistConversation: vi.fn() },
             );
             expect(messages[0]?.content).toBe('ok');
           }
@@ -395,15 +409,19 @@ describe('ToolDispatch', () => {
 
     const messages: Array<{ role: string; content: string; tool_call_id?: string; name?: string }> =
       [];
-    const toolCalls = [makeToolCall('write_file', { path: 'test.txt', content: 'hello' })];
-
-    await dispatch.dispatch(toolCalls, allowed, messages as never);
+    const toolCalls = [makeToolCall('write_file', { path: '../forge-approval-outside.txt', content: 'hello' })];
+    // Phase 4: a clean chat runs a write asking nothing, so the chat whose card
+    // these tests assert is a flagged one — the card is the way-out card.
+    markConversationReadUntrusted('conv-flagged');
+    await dispatch.dispatch(toolCalls, allowed, messages as never, 'conv-flagged');
 
     expect(requestApproval).toHaveBeenCalledWith(
       'write_file',
       expect.stringContaining('hello'),
       false,
+      'conv-flagged',
       undefined,
+      expect.objectContaining({}),
     );
     expect(checkpoints.snapshotBefore).toHaveBeenCalled();
     expect(codeLens.markPending).toHaveBeenCalled();
@@ -566,6 +584,77 @@ describe('ToolDispatch', () => {
     expect(structuredEdit.handler).toHaveBeenCalledOnce();
   });
 
+  it('turns a schema refusal into one plain line, not the JSON block Zod prints', async () => {
+    // The one place a thrown tool error becomes the result string is this catch,
+    // so the formatting belongs to the dispatcher and no tool has to word its
+    // own refusals (docs/plans/V1_FINISH_PLAN.md lane 5 phase 5.5).
+    toolRegistry.register({
+      definition: {
+        type: 'function',
+        function: {
+          name: 'probe_tool',
+          description: 'test tool',
+          parameters: { type: 'object', properties: {}, required: [] },
+        },
+      },
+      permission: 'read',
+      handler: async () => {
+        z.object({ path: z.string() }).parse({});
+        return 'never reached';
+      },
+    });
+    const messages: Array<{ role: string; content: string }> = [];
+
+    await dispatch.dispatch([makeToolCall('probe_tool', {})], allowed, messages as never);
+
+    expect(messages.at(-1)?.content).toBe(
+      'Error: probe_tool path is missing; the schema wants a string.',
+    );
+    expect(messages.at(-1)?.content).not.toMatch(/"code"\s*:|\{/u);
+  });
+
+  it('counts an absorbed-then-refused argument as a failure, and checkpoints nothing', async () => {
+    // The argument repairs in lane 5 phase 5.5 must not quietly stop counting:
+    // a call this tool cannot resolve is still a failed call, and the streak of
+    // them is what strips a model its tools. It also names no file, so there is
+    // nothing to snapshot - `mutation.paths` returns [] rather than `undefined`.
+    toolRegistry.register(makeApplyLineEditsTool());
+    const messages: Array<{ role: string; content: string }> = [];
+
+    await dispatch.dispatch(
+      [
+        makeToolCall('apply_line_edits', {
+          operations: [
+            {
+              path: 'a.ts',
+              start_line: 1,
+              end_line: 1,
+              expected_lines: ['one'],
+              replacement_lines: ['ONE'],
+            },
+            {
+              path: 'b.ts',
+              start_line: 1,
+              end_line: 1,
+              expected_lines: ['two'],
+              replacement_lines: ['TWO'],
+            },
+          ],
+        }),
+      ],
+      allowed,
+      messages as never,
+      'conv-b',
+    );
+
+    expect(failureTracker.record).toHaveBeenCalledWith('conv-b');
+    expect(checkpoints.snapshotBefore).not.toHaveBeenCalled();
+    expect(messages.at(-1)?.content).toMatch(
+      /^Error: apply_line_edits edits one file per call/u,
+    );
+    expect(messages.at(-1)?.content).toContain('"a.ts", "b.ts"');
+  });
+
   it('requests approval for delete tools', async () => {
     toolRegistry.register({
       definition: {
@@ -583,18 +672,22 @@ describe('ToolDispatch', () => {
 
     const messages: Array<{ role: string; content: string; tool_call_id?: string; name?: string }> =
       [];
-    const toolCalls = [makeToolCall('delete_file', { path: 'test.txt' })];
-
-    await dispatch.dispatch(toolCalls, allowed, messages as never);
+    const toolCalls = [makeToolCall('delete_file', { path: '../forge-approval-outside.txt' })];
+    markConversationReadUntrusted('conv-flagged');
+    await dispatch.dispatch(toolCalls, allowed, messages as never, 'conv-flagged');
 
     expect(requestApproval).toHaveBeenCalledWith(
       'delete_file',
       expect.any(String),
       false,
+      'conv-flagged',
       undefined,
+      expect.objectContaining({}),
     );
     expect(requestApproval.mock.calls[0]?.[1]).toContain('About to move to the recycle bin:');
-    expect(requestApproval.mock.calls[0]?.[1]).toContain('Target: test.txt');
+    expect(requestApproval.mock.calls[0]?.[1]).toContain(
+      'Target: ../forge-approval-outside.txt',
+    );
   });
 
   it('requests approval for terminal tools', async () => {
@@ -608,20 +701,23 @@ describe('ToolDispatch', () => {
         },
       },
       permission: 'terminal',
+      reachesOut: 'network',
       handler: vi.fn().mockResolvedValue('done'),
     });
 
     const messages: Array<{ role: string; content: string; tool_call_id?: string; name?: string }> =
       [];
-    const toolCalls = [makeToolCall('budget_test_tool', { command: 'echo hello' })];
-
-    await dispatch.dispatch(toolCalls, allowed, messages as never);
+    const toolCalls = [makeToolCall('budget_test_tool', { command: 'curl -s https://collector.example.net' })];
+    markConversationReadUntrusted('conv-flagged');
+    await dispatch.dispatch(toolCalls, allowed, messages as never, 'conv-flagged');
 
     expect(requestApproval).toHaveBeenCalledWith(
       'budget_test_tool',
       expect.any(String),
       false,
+      'conv-flagged',
       undefined,
+      expect.objectContaining({}),
     );
   });
 
@@ -639,6 +735,9 @@ describe('ToolDispatch', () => {
       expect(messages.at(-1)?.content).toContain('exit 0');
 
       requestApproval.mockClear();
+      // Phase 4: a `normal` command that writes inside the workspace and reaches no
+      // host is not a way out, so even a flagged chat runs it asking nothing.
+      markConversationReadUntrusted('conv-flagged');
       await dispatch.dispatch(
         [
           makeToolCall('shell', {
@@ -648,14 +747,28 @@ describe('ToolDispatch', () => {
         ],
         allowed,
         messages,
+        'conv-flagged',
+      );
+      expect(requestApproval).not.toHaveBeenCalled();
+      await fs.promises.rm(path.join(process.cwd(), '.forge-shell-approval-test'), { force: true });
+
+      requestApproval.mockClear();
+      requestApproval.mockRejectedValueOnce(new ToolApprovalPolicyDenied('shell'));
+      await dispatch.dispatch(
+        [makeToolCall('shell', { command: 'curl -s https://collector.example.net' })],
+        allowed,
+        messages,
+        'conv-flagged',
       );
       expect(requestApproval).toHaveBeenCalledWith(
         'shell',
-        expect.stringContaining('touch .forge-shell-approval-test'),
+        expect.stringContaining('curl -s'),
         false,
+        'conv-flagged',
         undefined,
+        expect.objectContaining({ gateKind: 'taintGate' }),
       );
-      await fs.promises.rm(path.join(process.cwd(), '.forge-shell-approval-test'), { force: true });
+      expect(messages.at(-1)?.content).toContain('denied by policy');
 
       requestApproval.mockClear();
       requestApproval.mockRejectedValueOnce(new ToolApprovalPolicyDenied('shell'));
@@ -669,6 +782,8 @@ describe('ToolDispatch', () => {
         expect.stringContaining('recursive force delete'),
         true,
         undefined,
+        undefined,
+        expect.objectContaining({}),
       );
       expect(messages.at(-1)?.content).toContain('unattended: dangerous tool denied by policy');
     },
@@ -694,15 +809,29 @@ describe('ToolDispatch', () => {
         messages,
       );
 
-      // The dialog itself names the alternative, and so does the refusal text.
+      // The dialog names the alternative; the refusal no longer does. The
+      // wording is the deny list's own (`DenyList.ts`), so it is quoted here
+      // rather than paraphrased: a rewrite that drops `edit_file` or `restore_file`
+      // fails this test instead of leaving the agent with a refusal it cannot act
+      // on. `gateKind: 'denyList'` is the new half: the same call in an
+      // unattended turn or under `/clanker` is refused at once with no card.
       expect(requestApproval).toHaveBeenCalledWith(
         'shell',
-        expect.stringContaining('Safer way: Use restore_file'),
+        expect.stringContaining(
+          'Safer way: To undo edits you made yourself, use edit_file',
+        ),
         true,
         undefined,
+        undefined,
+        expect.objectContaining({ gateKind: 'denyList' }),
       );
+      // A human decline is a no, not a course correction: the hint used to ride
+      // into the tool result, and the agent did the declined thing with another
+      // tool. It stays on the card, where it can change what the owner clicks.
       expect(messages.at(-1)?.content).toContain('User declined: shell');
-      expect(messages.at(-1)?.content).toContain('use this instead: Use restore_file');
+      expect(messages.at(-1)?.content).toContain('do not do the same thing another way');
+      expect(messages.at(-1)?.content).not.toContain('use this instead');
+      expect(messages.at(-1)?.content).not.toContain('edit_file');
     },
   );
 
@@ -717,20 +846,25 @@ describe('ToolDispatch', () => {
         },
       },
       permission: 'git-write',
+      // A git write that carries the commit out is a way out, so the flagged chat's
+      // card is the way-out card this test asserts.
+      reachesOut: 'cross_chat',
       handler: vi.fn().mockResolvedValue('committed'),
     });
 
     const messages: Array<{ role: string; content: string; tool_call_id?: string; name?: string }> =
       [];
     const toolCalls = [makeToolCall('git_commit', { message: 'test' })];
-
-    await dispatch.dispatch(toolCalls, allowed, messages as never);
+    markConversationReadUntrusted('conv-flagged');
+    await dispatch.dispatch(toolCalls, allowed, messages as never, 'conv-flagged');
 
     expect(requestApproval).toHaveBeenCalledWith(
       'git_commit',
       expect.any(String),
       false,
+      'conv-flagged',
       undefined,
+      expect.objectContaining({}),
     );
   });
 
@@ -750,18 +884,26 @@ describe('ToolDispatch', () => {
     });
 
     for (const [args, dangerous] of [
-      [{ path: 'src/', recursive: true }, false],
-      [{ path: 'src/', recursive: true, to_trash: true }, false],
-      [{ path: 'src/', recursive: true, to_trash: false }, true],
-      [{ path: 'src/', to_trash: false }, true],
+      [{ path: '../src/', recursive: true }, false],
+      [{ path: '../src/', recursive: true, to_trash: true }, false],
+      [{ path: '../src/', recursive: true, to_trash: false }, true],
+      [{ path: '../src/', to_trash: false }, true],
     ] as const) {
       requestApproval.mockClear();
-      await dispatch.dispatch([makeToolCall('delete_file', args)], allowed, [] as never);
+      markConversationReadUntrusted('conv-flagged');
+      await dispatch.dispatch(
+        [makeToolCall('delete_file', args)],
+        allowed,
+        [] as never,
+        'conv-flagged',
+      );
       expect(requestApproval).toHaveBeenCalledWith(
         'delete_file',
         expect.any(String),
         dangerous,
+        'conv-flagged',
         undefined,
+        expect.objectContaining({}),
       );
       if (args['recursive']) {
         expect(requestApproval.mock.calls[0]?.[1]).toContain('Scope requested: recursive');
@@ -788,9 +930,9 @@ describe('ToolDispatch', () => {
 
     const messages: Array<{ role: string; content: string; tool_call_id?: string; name?: string }> =
       [];
-    const toolCalls = [makeToolCall('write_file', { path: 'test.txt', content: 'hello' })];
-
-    await dispatch.dispatch(toolCalls, allowed, messages as never);
+    const toolCalls = [makeToolCall('write_file', { path: '../forge-approval-outside.txt', content: 'hello' })];
+    markConversationReadUntrusted('conv-flagged');
+    await dispatch.dispatch(toolCalls, allowed, messages as never, 'conv-flagged');
 
     expect(toolRegistry.get('write_file')?.handler).not.toHaveBeenCalled();
     expect(messages[0].content).toMatch(/declined/);
@@ -828,7 +970,10 @@ describe('ToolDispatch', () => {
     );
     expect(messages[0]?.content).toContain('Do not retry it this turn.');
     expect(messages[0]?.content).toContain('list this one as not done in your final reply.');
-    expect(messages[0]?.content).toContain('use this instead: use a safe replacement');
+    // Nobody answered, so there is no decision to respect and no alternative to
+    // push: the gate's hint reaches the model only through the card it showed
+    // (and the unattended policy refusal), never through a timed-out result.
+    expect(messages[0]?.content).not.toContain('use this instead');
   });
 
   it('returns unattended policy denial guidance without counting a tool failure', async () => {
@@ -847,10 +992,13 @@ describe('ToolDispatch', () => {
       handler,
     });
     requestApproval.mockRejectedValue(new ToolApprovalPolicyDenied('write_file'));
+    // The card this chat would have been asked about is the flagged chat's way-out
+    // card; a clean chat's write runs without ever reaching the queue.
+    markConversationReadUntrusted('unattended-conversation');
 
     const messages: Array<{ role: string; content: string }> = [];
     await dispatch.dispatch(
-      [makeToolCall('write_file', { path: 'config.yaml', content: 'x' })],
+      [makeToolCall('write_file', { path: '../forge-unattended-outside.txt', content: 'x' })],
       allowed,
       messages as never,
       'unattended-conversation',

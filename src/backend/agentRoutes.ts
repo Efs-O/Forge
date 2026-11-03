@@ -2,7 +2,7 @@ import * as fs from 'fs';
 import type * as http from 'http';
 import * as path from 'path';
 import { timingSafeEqual } from 'crypto';
-import { BUS_ID_PATTERN, writeReply, type BusPaths } from '../agentBus/agentBus';
+import type { BusPaths } from '../agentBus/agentBus';
 import { MAX_INBOUND_CHARS, forgeInboundPrompt } from '../agentBus/busContent';
 import type {
   AgentInbox,
@@ -14,9 +14,12 @@ import type {
 import { sendJson, sendText } from './controlHttp';
 import { handleAgentFileRoute } from './agentFileRoute';
 import { handleVerdictAck, handleVerdictRead } from './agentVerdictRoute';
+import { handleAgentReplyRoute } from './agentReplyRoute';
+import { handleAgentChatReadRoute, type BusReadResult } from './agentChatReadRoute';
 import {
   AgentRouteHttpError as HttpError,
   readAgentRouteFields as readFields,
+  requireText,
   type AgentRouteFields as Fields,
 } from './agentRouteFields';
 import { parseAgentMessageOptions, parseOriginConversation } from './agentMessageOptions';
@@ -29,14 +32,21 @@ import type { InboundAgentSelection, InboundAgentTarget } from '../agentLinks/in
 import { PendingAgentReplies } from '../agentLinks/pendingAgentReplies';
 import { AgentWindowEndpointRegistry } from './agentWindowEndpointRegistry';
 import { admitInboundMessage } from './agentInboundAdmission';
-import { parseAgentSender, parseOptionalAgentSender } from './agentSenderParsing';
+import {
+  parseAgentSender,
+  parseOptionalAgentSender,
+  validateBusSenderName,
+} from './agentSenderParsing';
 import type { PendingAgentReply } from '../agentLinks/pendingAgentReplies';
 
-/** An answer may be longer than a new message: it is what Forge asked for. */
-const MAX_REPLY_CHARS = 32_000;
-const FROM_PATTERN = /^[A-Za-z0-9][A-Za-z0-9 ._-]{0,39}$/;
-
-type BusReadResult = { ok: true; text: string } | { ok: false; status: 400 | 404; error: string };
+/** What a relay, an agent relay and a steer all report: an exchange accepted,
+ *  how it was delivered, and `note` for a steer that withdrew an earlier
+ *  request from the same chat (audit F2: every agent steer answered
+ *  `no relay available to deliver to "<agent>"` because no window supplied a
+ *  steer handler at all). */
+export type AgentRelayResult =
+  | { ok: true; exchangeId?: string; deliveredTo?: string; note?: string }
+  | { ok: false; error: string };
 
 export interface AgentRoutesDeps {
   paths: () => BusPaths;
@@ -51,7 +61,7 @@ export interface AgentRoutesDeps {
     sender: AgentSender,
     selection: InboundAgentSelection,
   ) => Promise<InboundAgentTarget>;
-  showMovedNotice?: (conversationId: string, message: string) => void;
+  showAlsoLinkedNotice?: (conversationId: string, message: string) => void;
   pendingReplies?: PendingAgentReplies;
   workspaceRoot?: string;
   recordPendingAccepted?: (record: PendingAgentReply) => Promise<void>;
@@ -65,28 +75,22 @@ export interface AgentRoutesDeps {
     to: string,
     text: string,
     originConversation?: string,
-  ) => Promise<
-    { ok: true; exchangeId: string; deliveredTo?: string } | { ok: false; error: string }
-  >;
+  ) => Promise<AgentRelayResult>;
   relayAgent?: (
     sender: AgentSender,
     to: string,
     text: string,
     originConversation?: string,
-  ) => Promise<
-    { ok: true; exchangeId?: string; deliveredTo?: string } | { ok: false; error: string }
-  >;
+  ) => Promise<AgentRelayResult>;
   /**
-   * A `priority=steer` message to another named recipient interrupts its
-   * active turn and runs the steer next. Absent ⇒ it is an ordinary relay.
+   * A `priority=steer` message to another agent session: withdraw the request
+   * this chat has already put to that agent and run this text as the next
+   * relay. It takes the verified `AgentSender` like `relayAgent` does — the
+   * chat whose link is steered is found through the session id, not through a
+   * name. Absent ⇒ a steer to an agent is refused, not queued behind the very
+   * request it was meant to replace.
    */
-  steer?: (
-    from: string,
-    to: string,
-    text: string,
-  ) => Promise<
-    { ok: true; exchangeId: string; deliveredTo?: string } | { ok: false; error: string }
-  >;
+  steer?: (sender: AgentSender, to: string, text: string) => Promise<AgentRelayResult>;
   /**
    * Validate a non-agent sender name against the configured sender set.
    * Agent identities are validated by session id in `validateAgentSender`.
@@ -116,8 +120,12 @@ export interface AgentRoutesDeps {
    */
   who?: () => Promise<unknown> | unknown;
   /** Read-only view of the sender's chat; absent means the route is 404. */
-  status?: (from: string) => BusReadResult | Promise<BusReadResult>;
-  view?: (from: string, count: string | undefined) => BusReadResult | Promise<BusReadResult>;
+  status?: (from: string, sender?: AgentSender) => BusReadResult | Promise<BusReadResult>;
+  view?: (
+    from: string,
+    count: string | undefined,
+    sender?: AgentSender,
+  ) => BusReadResult | Promise<BusReadResult>;
   /** Direct, model-free delivery of a workspace file to the sender's bound chat. */
   sendFile?: (
     from: string,
@@ -158,14 +166,6 @@ function realOrSelf(target: string): string {
   } catch {
     return target;
   }
-}
-
-function requireText(fields: Fields, max: number): string {
-  const text = typeof fields['text'] === 'string' ? fields['text'] : undefined;
-  if (!text || !text.trim()) throw new HttpError(400, 'text is required');
-  if (text.length > max)
-    throw new HttpError(400, `text is ${text.length} chars; the limit is ${max}`);
-  return text;
 }
 
 export class AgentRoutes {
@@ -231,8 +231,14 @@ export class AgentRoutes {
       (route === '/agent/send-file' && !!this.deps.sendFile && !!this.deps.validateAgentSender) ||
       ((route === '/agent/remote-ask' || route === '/agent/remote-notify') &&
         !!this.deps.remoteSession) ||
-      ((route === '/agent/read-verdict' || route === '/agent/ack-verdict') &&
-        !!this.deps.validateFrom);
+      // The verdict routes depend on nothing but the bus folder: `readVerdictArtifact`
+      // and `acknowledgeVerdict` authorize the reader against the exchange's own
+      // sender (and its session id, when the caller supplied one), so a stranger
+      // gets 404 whatever this window thinks of the name. Gating them on
+      // `validateFrom` — an optional dependency neither one uses — is what made
+      // both answer `no route` in every production window (audit F1).
+      route === '/agent/read-verdict' ||
+      route === '/agent/ack-verdict';
     if (!this.endpoints.isEnabled() || !known) {
       return sendJson(res, 404, { error: `no route for ${req.method ?? 'GET'} ${route}` });
     }
@@ -267,22 +273,7 @@ export class AgentRoutes {
       return sendJson(res, 200, { participants });
     }
     if (route === '/agent/status' || route === '/agent/view') {
-      if (req.method !== 'GET') return sendJson(res, 405, { error: 'GET only' });
-      const from = (url.searchParams.get('from') ?? '').trim();
-      if (!FROM_PATTERN.test(from)) {
-        return sendJson(res, 400, {
-          error: 'from must be 1-40 chars: letters, digits, space . _ -',
-        });
-      }
-      const sender = await this.deps.validateFrom?.(from);
-      if (sender && !sender.ok) return sendJson(res, 400, { error: sender.error });
-      const result =
-        route === '/agent/status'
-          ? await this.deps.status?.(from)
-          : await this.deps.view?.(from, url.searchParams.get('count') ?? undefined);
-      if (!result) return sendJson(res, 404, { error: `no route for GET ${route}` });
-      if (result.ok) return sendText(res, 200, result.text);
-      return sendJson(res, result.status, { error: result.error });
+      return handleAgentChatReadRoute(req, res, url, route, this.deps);
     }
     if (route === '/agent/read-verdict') {
       return handleVerdictRead(req, res, url, this.deps);
@@ -320,15 +311,12 @@ export class AgentRoutes {
           : sendJson(res, 200, { queued: true });
       }
       if (route === '/agent/reply') {
-        const id = typeof fields['id'] === 'string' ? fields['id'] : '';
-        if (!BUS_ID_PATTERN.test(id)) throw new HttpError(400, 'id must be the question id');
-        writeReply(this.deps.paths(), id, requireText(fields, MAX_REPLY_CHARS));
-        return sendJson(res, 200, { delivered: true });
+        const result = handleAgentReplyRoute({ fields, paths: this.deps.paths() });
+        return sendJson(res, result.status, result.body);
       }
       const from = (typeof fields['from'] === 'string' ? fields['from'] : '').trim();
-      if (!FROM_PATTERN.test(from)) {
-        throw new HttpError(400, 'from must be 1-40 chars: letters, digits, space . _ -');
-      }
+      const name = validateBusSenderName(from);
+      if (!name.ok) throw new HttpError(400, name.error);
       const declaredSender = parseOptionalAgentSender(fields['sender']);
       if (declaredSender && declaredSender.kind !== from)
         throw new HttpError(400, 'sender.kind must match from');
@@ -410,6 +398,7 @@ export class AgentRoutes {
               }
             : {}),
           ...(result.deliveredTo ? { delivered_to: result.deliveredTo } : {}),
+          ...(result.note ? { note: result.note } : {}),
         });
       }
       const text = requireText(fields, MAX_INBOUND_CHARS);

@@ -6,8 +6,8 @@ import { assertSpawnCwd, normalizeSpawnCwd } from '../util/processSpawn';
 import { getLogger } from '../util/logger';
 import type { ExecOutputOptions } from './execHelpers';
 import { backgroundRegistry, type BackgroundRegistry } from './backgroundRegistry';
+import { readOutput, retainOutput, tailLines } from './backgroundOutput';
 
-export const MAX_BACKGROUND_OUTPUT_CHARS = 200_000;
 const MAX_BACKGROUND_EXECUTIONS = 32;
 const FINISHED_EXECUTION_TTL_MS = 10 * 60 * 1000;
 
@@ -33,7 +33,9 @@ interface BackgroundExecution {
   timeoutMs: number | undefined;
   timeoutTimer: NodeJS.Timeout | undefined;
   readonly waiters: Set<() => void>;
-  readonly notifyConversationId: string | undefined;
+  /** Cleared by `disarmNotify()` when the owner stops this chat's turn; the
+   *  exit notice is decided from this at `finish()`. */
+  notifyConversationId: string | undefined;
   readonly conversationId: string | undefined;
   readonly outputOptions: ExecOutputOptions | undefined;
   terminalObserved: boolean;
@@ -302,6 +304,24 @@ export class BackgroundExecutionManager {
     );
   }
 
+  /**
+   * Silence the exit wake for every still-running execution of one chat, called
+   * when that turn ends cancelled: the owner stopped it, so a job finishing
+   * later must not start a turn there. The job itself keeps running —
+   * list_executions, monitor_execution and stop_execution still see it, its
+   * output is still collected, and the end-of-turn notice still lists it,
+   * because that reads `conversationId`, not this flag. Executions that have
+   * already finished are left alone: their notice was decided in `finish()`,
+   * and one that reached the inbox before the Stop takes the existing
+   * undelivered-tell path.
+   */
+  disarmNotify(conversationId: string): void {
+    for (const execution of this.executions.values()) {
+      if (execution.status === 'running' && execution.conversationId === conversationId)
+        execution.notifyConversationId = undefined;
+    }
+  }
+
   async stop(id: string): Promise<BackgroundExecutionObservation> {
     const execution = this.get(id);
     execution.terminalObserved = true;
@@ -352,7 +372,12 @@ export class BackgroundExecutionManager {
 
   private get(id: string): BackgroundExecution {
     const execution = this.executions.get(id);
-    if (!execution) throw new Error(`unknown execution id "${id}"`);
+    if (!execution)
+      // A bare "unknown execution id" named nothing the agent could act on, so the
+      // refusal says how an id dies and which tool lists the ids that do exist.
+      throw new Error(
+        `unknown execution id "${id}". No job with that id is running in this window; call \`list_executions\` for the ids that are. A finished job leaves that list 10 minutes after it ends, and one started by another chat or window was never in it.`,
+      );
     return execution;
   }
 
@@ -470,31 +495,6 @@ export class BackgroundExecutionManager {
     }
     if (oldest) this.executions.delete(oldest.id);
   }
-}
-
-function tailLines(output: string, maxLines: number, maxChars: number): string {
-  return output.split(/\r?\n/u).slice(-maxLines).join('\n').slice(-maxChars);
-}
-
-function retainOutput(current: string, chunk: string, onTrim: (base: number) => void): string {
-  const combined = current + chunk;
-  if (combined.length <= MAX_BACKGROUND_OUTPUT_CHARS) return combined;
-  const trim = combined.length - MAX_BACKGROUND_OUTPUT_CHARS;
-  onTrim(trim);
-  return combined.slice(trim);
-}
-
-function readOutput(
-  output: string,
-  base: number,
-  cursor: number,
-): { text: string; start: number; dropped: number } {
-  const safeCursor = Number.isInteger(cursor) && cursor >= 0 ? cursor : 0;
-  // A cursor behind the retained window resumes at the window, not at the
-  // cursor — the characters in between are gone for good, and `dropped` counts
-  // exactly how many the caller lost.
-  const start = Math.max(safeCursor, base);
-  return { text: output.slice(start - base), start, dropped: Math.max(0, base - safeCursor) };
 }
 
 export const backgroundExecutionManager = new BackgroundExecutionManager();

@@ -32,7 +32,8 @@ export function routeHostActivity(
   if (event.kind === 'prompt') {
     return controller.mirrorPrompt(event.conversationId, event.text);
   }
-  if (event.kind === 'turn') return controller.mirrorTurn(event.conversationId, event.text);
+  if (event.kind === 'turn')
+    return controller.mirrorTurn(event.conversationId, event.text, event.speedLine);
   if (event.kind === 'failure') {
     return controller.reportTurnFailure(event.conversationId, event.text);
   }

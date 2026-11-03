@@ -1,17 +1,17 @@
 import * as vscode from 'vscode';
-import type { ToolRegistry } from './ToolRegistry';
+import type { RegisteredTool, ToolRegistry } from './ToolRegistry';
 import type { SearchConfig, ForgeConfig } from '../config/types';
 import type { LocalDelegationService } from '../delegation/LocalDelegationService';
 import { makeLocalAgentTool, makeListDelegationTargetsTool } from './localAgentTool';
 import {
   makeReadFileTool,
   makeWriteFileTool,
-  makeAppendFileTool,
   makeReplaceSelectionTool,
   makeInsertCodeTool,
   makeGetEditorContextTool,
 } from './builtinTools';
-import { makeSearchCodeTool, makeFindFilesTool } from './dirTools';
+import { makeFindFilesTool } from './dirTools';
+import { makeSearchCodeTool } from './searchCodeTool';
 import { makeListDirectoryTool } from './listDirectoryTool';
 import { makeCodeIntelTool } from './codeIntelTool';
 import { makeApplyCodeActionTool } from './codeActionTools';
@@ -26,6 +26,7 @@ import {
   makeOpenUrlTool,
 } from './uxTools';
 import { makeAskUserTool } from './askUserTool';
+import { makeLoadSkillTool, type LoadSkillProvider } from './loadSkillTool';
 import { PowerControl } from '../system/PowerControl';
 import { makeGetPowerInfoTool, makeScheduleWakeTool, makeSleepComputerTool } from './powerTools';
 import { makeWebFetchTool } from './fetchTool';
@@ -36,9 +37,9 @@ import {
   makeListMemoriesTool,
   makeForgetTool,
 } from './memoryTools';
+import { makeProblemWatcher } from './editDiagnostics';
 import { makeEditFileTool } from './editFileTool';
 import {
-  makeCreateDirectoryTool,
   makeMoveFileTool,
   makeDeleteFileTool,
   makeFormatFileTool,
@@ -52,8 +53,8 @@ import { makeLoadToolGroupTool } from './toolGroupTools';
 import { makeInstallLlamacppTool } from './llamacppInstallTool';
 import { makeManageJobsTool } from './jobTools';
 import { makeAskAgentTool } from './askAgentTool';
+import type { StartAgentAsk } from '../agentLinks/pendingAgentAsks';
 import { makeMessageChatTool, type MessageChatSidebar } from './messageChatTool';
-import { makeAskAgentRuntime } from '../agentLinks/askAgentRuntime';
 import { makeReadToolResultTool } from './toolResultTools';
 import { makeUpdatePlanTool } from './planTools';
 import { makeGitReadTool } from './gitReadTool';
@@ -69,7 +70,10 @@ import type { IndexManager } from '../search/IndexManager';
 import type { JobStore } from '../jobs/JobStore';
 import type { ForgeHostFacade } from '../sidebar/ForgeHostFacade';
 import { makeApplyLineEditsTool } from './structuredEditTool';
+import { applyOwnerOnlyWriteGuard, ownerOnlySetFor, type OwnerOnlySet } from './ownerPaths';
 import { makeViewImageTool } from './imageTool';
+import type { PdfPageRenderer } from './imageTool';
+import { makeExportDocumentTool } from './exportDocumentTool';
 import { makeSendFileTool } from './sendFileTool';
 import { makeWaitTool } from './waitTool';
 import { makeViewVideoTool } from './videoTool';
@@ -106,19 +110,75 @@ export function registerAllTools(
   jobs?: {
     store: JobStore;
     hostFacade: () => ForgeHostFacade | undefined;
-    /** The active config.yaml, for install_llamacpp's binary switch. */
+    /** The active config.yaml: install_llamacpp's binary switch, and the
+     *  owner-only guard below. Same value extension.ts passes to both. */
     configPath?: string;
   },
   onForgetMemory?: (key: string) => void,
-  messageChatSidebar?: () => MessageChatSidebar | undefined,
+  /** The sidebar, for `message_chat` and `ask_agent`'s background starter. */
+  messageChatSidebar?: () => (MessageChatSidebar & { startAgentAsk: StartAgentAsk }) | undefined,
+  /**
+   * The skills service (`src/skills/skillsService.ts`): the roots, the frozen
+   * catalog and the reader behind `load_skill`. Optional because the benchmark
+   * tool host and the audit registry build a registry without one; unwired, the
+   * tool still answers, and answers the same way a user with skills on and
+   * nothing installed does — "no skills installed".
+   */
+  skills?: LoadSkillProvider,
+  pdfPageRenderer?: PdfPageRenderer,
 ): SdServerRegistry | undefined {
   // config.yaml `extra_file_roots`: absolute folders outside the workspace that
-  // create_directory / delete_file may also reach. A getter, so a
+  // delete_file and every file-writing tool may also reach. A getter, so a
   // config reload applies without re-registering the tools.
   const extraRoots = (): readonly string[] => getConfig?.().extra_file_roots ?? [];
+  // `tools.file_length_warning`, read live for the same reason: a config edit
+  // changes the threshold without re-registering the tools. Absent block = off,
+  // so a workspace that never set it gets the results it always got.
+  const lengthWarning = () => getConfig?.().tools?.file_length_warning;
+  // `tools.edit_diagnostics`, read live for the same reason. ON when absent —
+  // the one `tools:` block that is, because two seconds per edit was priced
+  // against the 271 `tsc`/`eslint` shell rounds the note replaces (`
+  // editDiagnostics.ts`). A host with no language services gets a no-op watcher
+  // from the same call, so the benchmark tool host waits for nothing and appends
+  // nothing. `enabled: false` restores the write results these tools produced
+  // before 2026-10-29.
+  const watchProblems = makeProblemWatcher({
+    settings: () => getConfig?.().tools?.edit_diagnostics,
+  });
+  const secretDeps = getConfig ? { getConfig } : {};
+  /**
+   * The paths an agent may not change: the config file this window loaded, the
+   * workspace's `.forge/config.yaml`, and everything under `~/.forge/`
+   * (`ownerPaths.ts`, Lane A of `docs/plans/OWNER_GUARDS_PLAN.md` item 4). Every
+   * file-mutating tool below is wrapped to refuse one, in every mode, before any
+   * card. Read per call rather than once at registration, because a workspace
+   * folder can appear after activation and a wrapped tool must not refuse a path
+   * it was never shown.
+   *
+   * Deliberately NOT wrapped, each one checked: `install_llamacpp` switches one
+   * field of this same file through `ConfigWriter` under its own approval card,
+   * `manage_jobs` writes `~/.forge/jobs/<id>.json` as its own state, and the
+   * image tools declare no paths. Refusing those would refuse a feature, not a
+   * risk — the guard is about an agent rewriting the rules it is judged by.
+   * The config path comes from `jobs.configPath`, the same value extension.ts
+   * already threads to install_llamacpp. It matters only while the policy file is
+   * absent: `ownerOnlySetFor` asks whether `~/.forge/policy.yaml` exists on every
+   * call, from this closure, so the wall on `config.yaml` comes back the moment the
+   * owner deletes that file and goes the moment it exists — with no window reload
+   * and nothing cached between decisions.
+   */
+  const ownerOnly = (): OwnerOnlySet => {
+    const root = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
+    return ownerOnlySetFor({
+      ...(jobs?.configPath ? { configPath: jobs.configPath } : {}),
+      ...(root ? { workspaceRoot: root } : {}),
+    });
+  };
+  const guarded = (tool: RegisteredTool): RegisteredTool =>
+    applyOwnerOnlyWriteGuard(tool, ownerOnly);
   // v0.1 builtins
-  registry.register(makeReadFileTool());
-  registry.register(makeViewImageTool());
+  registry.register(makeReadFileTool(secretDeps));
+  registry.register(makeViewImageTool(getConfig, pdfPageRenderer));
   // Registered unconditionally, unlike generate_image: send_file reads a file
   // and delivers it, so it needs no config block to exist — the same reasoning
   // as view_image two lines up. Gating it on getConfig would silently drop the
@@ -140,16 +200,15 @@ export function registerAllTools(
   // Registered unconditionally: getConfig is optional on this signature, and
   // gating on it would silently drop the tool wherever it is not supplied.
   registry.register(makeViewVideoTool(getConfig ? () => getConfig().video : undefined));
-  registry.register(makeWriteFileTool(extraRoots));
-  registry.register(makeAppendFileTool(extraRoots));
-  registry.register(makeReplaceSelectionTool());
-  registry.register(makeInsertCodeTool());
+  registry.register(guarded(makeWriteFileTool(extraRoots, lengthWarning, watchProblems)));
+  registry.register(guarded(makeReplaceSelectionTool()));
+  registry.register(guarded(makeInsertCodeTool()));
   registry.register(makeGetEditorContextTool());
 
   // v0.5 read-only
   registry.register(makeListDirectoryTool());
   registry.register(makeFindFilesTool());
-  registry.register(makeSearchCodeTool());
+  registry.register(makeSearchCodeTool(undefined, secretDeps));
   registry.register(makeReadToolResultTool());
   registry.register(makeUpdatePlanTool());
   registry.register(makeSearchCodebaseTool(indexManager));
@@ -158,6 +217,21 @@ export function registerAllTools(
   registry.register(makeShowDiffTool());
   registry.register(makeOpenFileTool());
   registry.register(makeAskUserTool(questions));
+  // Skills: eager and ungrouped, beside `ask_user` (`lazyToolGroups.ts`'s
+  // membership map deliberately has no entry for it). A skill the model cannot
+  // see cannot be asked for, and its catalog line is already in the prompt, so
+  // holding this tool back would make half the catalog unreachable for a
+  // `load_tool_group` round. Ungrouped means the schema is on every turn when
+  // skills are on -- which is why `skills:` is off unless a workspace asks for it.
+  registry.register(
+    makeLoadSkillTool(
+      skills ?? {
+        isEnabled: () => true,
+        listCatalogEntries: () => [],
+        loadSkillByName: async () => null,
+      },
+    ),
+  );
   registry.register(makeNotifyUserTool(notifications));
 
   // Power control. One PowerControl instance for all three: it is stateless,
@@ -170,8 +244,8 @@ export function registerAllTools(
   registry.register(makeShowNotificationTool());
   registry.register(makeCopyToClipboardTool());
   registry.register(makeReadClipboardTool());
-  registry.register(makeOpenUrlTool());
-  registry.register(makeWebFetchTool());
+  registry.register(makeOpenUrlTool({ ...(getConfig ? { getConfig } : {}), extraRoots }));
+  registry.register(makeWebFetchTool(getConfig ? { getConfig } : {}));
   registry.register(makeRememberTool(workspaceState));
   registry.register(makeRecallTool(workspaceState));
   registry.register(makeListMemoriesTool(workspaceState));
@@ -181,33 +255,40 @@ export function registerAllTools(
   }
 
   // v0.6 write tools
-  registry.register(makeEditFileTool(extraRoots));
-  registry.register(makeApplyLineEditsTool(extraRoots));
-  registry.register(makeCreateDirectoryTool(extraRoots));
-  registry.register(makeMoveFileTool(extraRoots));
-  registry.register(makeDeleteFileTool(extraRoots));
-  registry.register(makeFormatFileTool(extraRoots));
-  registry.register(makeRenameSymbolTool(extraRoots));
-  registry.register(makeApplyCodeActionTool(extraRoots));
-  registry.register(makeEditNotebookCellTool());
+  registry.register(
+    guarded(makeExportDocumentTool({ ...(getConfig ? { getConfig } : {}), extraRoots })),
+  );
+  registry.register(guarded(makeEditFileTool(extraRoots, lengthWarning, watchProblems)));
+  registry.register(guarded(makeApplyLineEditsTool(extraRoots, lengthWarning, watchProblems)));
+  registry.register(guarded(makeMoveFileTool(extraRoots)));
+  registry.register(guarded(makeDeleteFileTool(extraRoots)));
+  registry.register(guarded(makeFormatFileTool(extraRoots)));
+  registry.register(guarded(makeRenameSymbolTool(extraRoots)));
+  registry.register(guarded(makeApplyCodeActionTool(extraRoots)));
+  registry.register(guarded(makeEditNotebookCellTool()));
 
   // v0.7 exec + git
   registry.register(
     makeShellTool({
       ...(getConfig ? { getConfig } : {}),
       ripgrepDir: () => bundledRipgrepDir(vscode.env.appRoot),
+      // The shell route onto the same paths: `Add-Content .forge/config.yaml`,
+      // `echo x > .forge/config.yaml`, `cp`, `mv`, `rm`. Refused as a `refused`
+      // classification, so `autoApproveIf` answers it and no card is raised in
+      // any mode, and the handler throws the rule's own text.
+      ownerOnly: () => ownerOnly().roots,
     }),
   );
   registry.register(makeMonitorExecutionTool());
   registry.register(makeStopExecutionTool());
   registry.register(makeListExecutionsTool());
   registry.register(makeSystemStatusTool(backendProcesses ? { backendProcesses } : {}));
-  registry.register(makeGitReadTool());
+  registry.register(makeGitReadTool(secretDeps));
   registry.register(makeCreateBranchTool());
   registry.register(makeSwitchBranchTool());
   registry.register(makeStageTool());
   registry.register(makeCommitTool());
-  registry.register(makeRestoreFileTool());
+  registry.register(guarded(makeRestoreFileTool()));
 
   // delegation — only registered when a LocalDelegationService is wired in
   if (delegationService && getConfig) {
@@ -289,8 +370,7 @@ export function registerAllTools(
     registry.register(
       makeAskAgentTool({
         getConfig,
-        runtime: makeAskAgentRuntime({ getConfig }),
-        workspaceRoot: () => vscode.workspace.workspaceFolders?.[0]?.uri.fsPath ?? '',
+        getStarter: () => messageChatSidebar?.()?.startAgentAsk,
       }),
     );
   }

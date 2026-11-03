@@ -65,7 +65,7 @@ function gpu(index: number, usedMb: number | null, totalMb: number | null = 3276
 }
 
 /**
- * Stand-in for `SdServerBackend`: it keeps the contract the module is written
+ * Fake of `SdServerBackend`: it keeps the contract the module is written
  * against (`withActivity` runs `beforeSpawn` exactly when a spawn is needed, and
  * `stopAfterAbort` implements the plan's cross-window rule) without a process, a
  * GPU or a port. `stopAfterAbort` counts its calls so the abort rule is asserted,

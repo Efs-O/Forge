@@ -69,6 +69,20 @@ const ACTIONABLE_WHEN_AUTHENTICATED = new Set<RemoteInboundEvent['kind']>([
   'send_now_action',
   'text',
   'voice',
+  /**
+   * A media type Forge does not handle yet: a sticker, an audio file, a poll.
+   *
+   * Missing for the same reason `voice` was -- this set predates the kind --
+   * with the same wrong answer: an authenticated owner who sent a sticker was
+   * told "remote authentication is required" rather than being told the type is
+   * unsupported, and went looking for a code that could never have helped.
+   *
+   * It is the weakest kind in this set, and deliberately still here after video
+   * became work: it never reaches the model, produces only the ephemeral
+   * "not supported yet" notice, and a locked chat still has to authenticate
+   * first, so admitting it teaches a stranger nothing it did not already know.
+   */
+  'unsupported_media',
 ]);
 
 export class RemoteSessionAuth {
@@ -316,7 +330,14 @@ function sessionKey(channel: RemoteInboundEvent['channel'], ownerId: string): st
   return `${channel}:${ownerId}`;
 }
 
-function extractCode(text: string): string | undefined {
+/**
+ * The one recogniser for a code-shaped message: a bare six digits, or
+ * `/auth <six digits>`. Exported because the auth gate needs the same answer
+ * for a different reason — a code that arrives in a chat that is already
+ * unlocked must be held out of the model — and a second regex there would
+ * drift from this one the first time either changes.
+ */
+export function extractCode(text: string): string | undefined {
   const direct = /^([0-9]{6})$/.exec(text);
   if (direct) return direct[1];
   const command = /^\/auth ([0-9]{6})$/.exec(text);

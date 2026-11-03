@@ -15,7 +15,10 @@ const LAZY_GROUP_BY_SERVER: ReadonlyMap<string, string> = new Map([['halluscribe
  * are grouped anyway, in `agents`, because they matter to remote-control
  * conversations, not coding ones: a profile that uses them keeps them eager
  * through `tool_groups.eager: [agents]` instead of every coding turn paying
- * their schemas. ask_user is ungrouped. view_image (17) is the exception: it stays in media because it works only on
+ * their schemas. ask_user is ungrouped, and so is `load_skill` (2026-10-29, lane
+ * F2): its one-line-per-skill catalog is already in the system prompt, so a skill
+ * the model can see but cannot open would cost a `load_tool_group` round before
+ * any skill could be read. view_image (17) is the exception: it stays in media because it works only on
  * vision models and most calls came from image-review sessions. delete_file
  * joined the eager set on 2026-10-07: the most-called grouped tool since 09-30
  * (79 calls, 25 of 127 sessions), and the alternative every rm / Remove-Item
@@ -24,6 +27,25 @@ const LAZY_GROUP_BY_SERVER: ReadonlyMap<string, string> = new Map([['halluscribe
  * as delete_file, and the read side of every git question. Other grouped
  * tools each had at most 7 calls. Rare tools stay grouped to avoid paying their
  * schema cost on every conversation.
+ *
+ * `media` left the eager-by-default set on 2026-10-29
+ * (`docs/reports/TOOL_AUDIT_2026_10_29.md` §7): across the 53 sessions since
+ * 0.17.80, `render_html_to_image`, `view_video`, `image_search` and
+ * `upscale_image` had 0 calls and `generate_image` 1, and the group's only use
+ * — `view_image` 94, `send_file` 52 — came from a single session. The group is
+ * ~2,300 tokens on every coding round, so it now loads on demand like the rest.
+ * `render_html_to_image` joined the group the same day: ungrouped, it paid its
+ * 3,905-char schema to conversations that never render, and 53 sessions used it
+ * 0 times. A profile that reviews or makes images keeps it eager through
+ * `tool_groups.eager: [media]`.
+ *
+ * `git_read` went back into `git` the same day. It was promoted out of the
+ * group on 2026-10-07 because the 2026-09-30 audit saw 70 calls in 25 sessions;
+ * the 53 sessions since 0.17.80 show 6 calls against 418 shell `git` commands
+ * (`status` 177, `diff` 159, `log` 139, `commit` 97, `add` 65), so the model
+ * reads git through `shell` whether or not the tool is offered, and an always-
+ * advertised 1,799-char schema does not change that. `git` now holds the reads
+ * and the writes, and its purpose line says so.
  *
  * Count calls only while offered; a never-offered tool is unmeasured, not 0.
  * Shell workarounds count as demand for hidden tools. Exclude cases ruled out
@@ -63,6 +85,10 @@ const NATIVE_GROUP_BY_TOOL: ReadonlyMap<string, string> = new Map([
     'upscale_image',
     'image_search',
     'send_file',
+    // Ungrouped until 2026-10-29: an always-advertised 3,905-char schema that
+    // 53 sessions called 0 times. Its verbs now ride in the media purpose line.
+    'render_html_to_image',
+    'export_document',
   ].map((name) => [name, 'media'] as const),
   ...[
     'get_editor_context',
@@ -79,10 +105,14 @@ const NATIVE_GROUP_BY_TOOL: ReadonlyMap<string, string> = new Map([
     (name) => [name, 'system'] as const,
   ),
   ...['read_notebook', 'edit_notebook_cell'].map((name) => [name, 'notebook'] as const),
-  ...['move_file', 'create_directory', 'apply_line_edits', 'restore_file'].map(
-    (name) => [name, 'files'] as const,
+  // `create_directory` left this map with the tool itself (2026-10-29, lane B
+  // item B3): the map is only consulted for registered names, so leaving the
+  // entry would have advertised nothing, but it would have told the next reader
+  // that a tool which no longer exists belongs to the `files` group.
+  ...['move_file', 'apply_line_edits', 'restore_file'].map((name) => [name, 'files'] as const),
+  ...['git_read', 'stage', 'commit', 'create_branch', 'switch_branch'].map(
+    (name) => [name, 'git'] as const,
   ),
-  ...['stage', 'commit', 'create_branch', 'switch_branch'].map((name) => [name, 'git'] as const),
   ...['code_intel', 'rename_symbol', 'apply_code_action', 'format_file', 'search_codebase'].map(
     (name) => [name, 'code_intel'] as const,
   ),
@@ -163,7 +193,14 @@ export function hiddenLazyToolNames(
 ): ReadonlySet<string> {
   const hidden = new Set<string>();
   for (const [group, members] of membersByGroup) {
-    const eagerByDefault = group === 'files' || group === 'background' || group === 'media';
+    // `files` and `background` stay eager: `files` holds the structured-edit,
+    // move and restore tools a coding turn reaches for, and `background` holds
+    // what a long turn needs without a load round (`delete_file` is eager for
+    // its own reason — it is ungrouped, and it is the alternative every rm /
+    // Remove-Item refusal names). `media` left this list on 2026-10-29; a
+    // profile that renders or reviews images restores it with
+    // `tool_groups.eager: [media]`.
+    const eagerByDefault = group === 'files' || group === 'background';
     if (
       eagerByDefault ||
       eagerGroups.has(group) ||

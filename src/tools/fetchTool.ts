@@ -4,6 +4,16 @@ import type { RegisteredTool } from './ToolRegistry';
 import { Agent, fetch as undiciFetch } from 'undici';
 import { htmlToText } from '../util/htmlText';
 import { readTextCapped } from '../util/readTextCapped';
+import type { ForgeConfig } from '../config/types';
+import {
+  allowedHostsFor,
+  fetchApprovalFor,
+  hostMatchesList,
+  isHostApproved,
+  markHostApproved,
+  normalizedHostname,
+  redirectGate,
+} from './fetchHostApprovals';
 
 // ── SSRF guard ────────────────────────────────────────────────────────────────
 
@@ -43,6 +53,9 @@ type PinnedFetch = (
 export interface WebFetchDependencies {
   lookup?: (hostname: string) => Promise<ResolvedAddress[]>;
   fetch?: PinnedFetch;
+  /** The config, for `fetch.allowed_hosts`. Absent means no host is
+   *  pre-approved, which is the safe direction: everything asks. */
+  getConfig?: () => ForgeConfig;
 }
 
 export function parseFetchUrl(value: string): URL | string {
@@ -62,10 +75,6 @@ export function parseFetchUrl(value: string): URL | string {
   if (!hostname.includes('.')) return `Blocked: hostname has no dot: ${hostname}`;
   if (isIP(hostname) !== 0) return `Blocked: raw IP address not permitted: ${hostname}`;
   return url;
-}
-
-export function normalizedHostname(url: URL): string {
-  return url.hostname.toLowerCase().replace(/^\[|\]$/g, '');
 }
 
 function parseIpv6(address: string): number[] | undefined {
@@ -194,6 +203,12 @@ export function defaultPinnedFetch(
 export function makeWebFetchTool(dependencies: WebFetchDependencies = {}): RegisteredTool {
   const lookup = dependencies.lookup ?? ((hostname) => dnsLookup(hostname, { all: true }));
   const pinnedFetch = dependencies.fetch ?? defaultPinnedFetch;
+  const approvalFor = (args: Record<string, unknown>, context?: { conversationId?: string }) =>
+    fetchApprovalFor(
+      typeof args['url'] === 'string' ? args['url'] : '',
+      dependencies.getConfig?.(),
+      context?.conversationId,
+    );
   return {
     definition: {
       type: 'function',
@@ -230,6 +245,13 @@ export function makeWebFetchTool(dependencies: WebFetchDependencies = {}): Regis
       },
     },
     permission: 'fetch',
+    /** The page's text is content this chat did not choose, and a model can be
+     *  told what to do by the text it is reading. `ToolDispatch` marks the chat
+     *  from this declaration after the handler runs, and `AgentLoop` asks the same
+     *  question of the transcript when the stored flag goes missing — see
+     *  `src/tools/exfilTaint.ts`. */
+    untrustedResult: true,
+    approval: approvalFor,
     handler: async (args, context) => {
       const url = args['url'] as string;
       const requestedMaxChars = args['max_chars'];
@@ -255,6 +277,22 @@ export function makeWebFetchTool(dependencies: WebFetchDependencies = {}): Regis
       if (httpsOnly && !url.toLowerCase().startsWith('https://')) {
         throw new ToolError('web_fetch: HTTPS is required for this capability.');
       }
+      // The host gate is per chat: one answered card covers the rest of this
+      // chat and nothing else. Both flags are read before the host is marked, so
+      // the note below says what the user actually approved, and an autonomous
+      // run that auto-approved the call gets the same note instead of a card.
+      const target = new URL(url);
+      const host = normalizedHostname(target);
+      const preApproved = hostMatchesList(host, allowedHostsFor(dependencies.getConfig?.()));
+      const alreadyApproved = isHostApproved(context?.conversationId, host);
+      markHostApproved(context?.conversationId, host);
+      // A host the owner put in `fetch.allowed_hosts`, or one this chat already
+      // approved, needs no note: the note exists to tell the model that a card
+      // was answered for this host and that later fetches to it are free.
+      const hostNote =
+        preApproved || alreadyApproved
+          ? ''
+          : `[host ${host} was new to this chat; approved for the rest of it]\n`;
 
       let result: { response: Response; body: string; bytesRead: number; truncated: boolean };
       try {
@@ -265,6 +303,7 @@ export function makeWebFetchTool(dependencies: WebFetchDependencies = {}): Regis
           pinnedFetch,
           MAX_WEB_FETCH_BYTES,
           context?.abortSignal,
+          redirectGate(dependencies.getConfig?.(), context?.conversationId),
         );
       } catch (err) {
         if (err instanceof ToolError) throw err;
@@ -291,10 +330,10 @@ export function makeWebFetchTool(dependencies: WebFetchDependencies = {}): Regis
           text.length > maxChars
             ? `\n[showing ${String(maxChars)} of ${String(text.length)} characters; pass find to jump to a phrase]`
             : '';
-        return `<UNTRUSTED_CONTENT>\n${text.slice(0, maxChars)}${more}${cutNotice}\n</UNTRUSTED_CONTENT>`;
+        return `${hostNote}<UNTRUSTED_CONTENT>\n${text.slice(0, maxChars)}${more}${cutNotice}\n</UNTRUSTED_CONTENT>`;
       }
       const excerpt = findWindow(text, find, maxChars);
-      return `<UNTRUSTED_CONTENT>\n${excerpt.header}${cutNotice}\n${excerpt.text}\n</UNTRUSTED_CONTENT>`;
+      return `${hostNote}<UNTRUSTED_CONTENT>\n${excerpt.header}${cutNotice}\n${excerpt.text}\n</UNTRUSTED_CONTENT>`;
     },
   };
 }
@@ -330,6 +369,7 @@ async function fetchPublicPage(
   pinnedFetch: PinnedFetch,
   maxBytes: number,
   signal?: AbortSignal,
+  hostGate?: (url: URL) => string | undefined,
 ): Promise<{ response: Response; body: string; bytesRead: number; truncated: boolean }> {
   let currentUrl = url;
   const pins = new Map<string, ResolvedAddress>();
@@ -401,7 +441,14 @@ async function fetchPublicPage(
       const location = response.headers.get('location');
       await response.body?.cancel();
       if (!location) throw new ToolError('web_fetch: redirect had no Location header.');
-      currentUrl = new URL(location, currentUrl).toString();
+      const redirectTarget = new URL(location, currentUrl);
+      // An open redirect on an approved host would otherwise launder the request
+      // to any host on the internet under a card the user answered for this one
+      // (docs/plans/EXFIL_GATES_PLAN.md example 5), so the target has to be
+      // approved on its own and the message says what to do instead.
+      const notApproved = hostGate?.(redirectTarget);
+      if (notApproved) throw new ToolError(`web_fetch: ${notApproved}`);
+      currentUrl = redirectTarget.toString();
     }
     throw new ToolError(`web_fetch: exceeded ${MAX_REDIRECT_HOPS} redirects.`);
   } finally {

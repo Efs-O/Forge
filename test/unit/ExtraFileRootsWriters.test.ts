@@ -3,7 +3,7 @@ import * as os from 'os';
 import * as path from 'path';
 import * as vscode from 'vscode';
 import { afterAll, afterEach, beforeEach, describe, expect, it } from 'vitest';
-import { makeAppendFileTool, makeWriteFileTool } from '../../src/tools/builtinTools';
+import { makeWriteFileTool } from '../../src/tools/builtinTools';
 import { makeDeleteFileTool, makeMoveFileTool } from '../../src/tools/fileEditTools';
 import { makeEditFileTool } from '../../src/tools/editFileTool';
 import { makeApplyLineEditsTool } from '../../src/tools/structuredEditTool';
@@ -33,7 +33,7 @@ describe('every file-writing tool honours extra_file_roots', () => {
   it('writes, appends, edits, line-edits and moves inside an extra root', async () => {
     const file = path.join(extra, 'note.txt');
     await makeWriteFileTool(roots).handler({ path: file, content: 'alpha\n' });
-    await makeAppendFileTool(roots).handler({ path: file, content: 'beta\n' });
+    await makeWriteFileTool(roots).handler({ path: file, content: 'beta\n', mode: 'append' });
     await makeEditFileTool(roots).handler({ path: file, old_str: 'alpha', new_str: 'first' });
     await makeApplyLineEditsTool(roots).handler({
       path: file,
@@ -102,7 +102,12 @@ describe('every file-writing tool honours extra_file_roots', () => {
     fs.writeFileSync(fromExtra, 'two');
 
     const result = await makeDeleteFileTool(roots).handler({
-      paths: [first, path.join(root, 'missing.txt'), path.join(os.tmpdir(), 'outside.txt'), fromExtra],
+      paths: [
+        first,
+        path.join(root, 'missing.txt'),
+        path.join(os.tmpdir(), 'outside.txt'),
+        fromExtra,
+      ],
     });
 
     expect(result).toContain(`Moved to recycle bin: ${first}`);

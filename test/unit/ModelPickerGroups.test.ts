@@ -3,6 +3,7 @@ import type { ModelConfig } from '../../src/config/types';
 import {
   compareModelPickerEntries,
   describeModelPickerModel,
+  MODEL_PICKER_GROUP_ORDER,
   modelPickerGroup,
   modelPickerSelectionEntries,
 } from '../../src/sidebar/ModelPickerGroups';
@@ -16,6 +17,21 @@ describe('modelPickerGroup', () => {
     [{}, 'Local — llama.cpp'],
     [{ provider: 'ollama' }, 'Ollama Local'],
     [{ provider: 'ollama', name: 'qwen:cloud' }, 'Ollama Cloud'],
+    [
+      {
+        provider: 'openai-compatible',
+        endpoint: 'http://100.64.1.20:8081/v1',
+        remote_start: { starter: 'http://100.64.1.20:8081', model: 'strata-flashnext-iq3_s' },
+      },
+      'Desktop',
+    ],
+    [
+      {
+        provider: 'openai-compatible',
+        endpoint: 'http://100.64.1.20:8081/v1',
+      },
+      'Other OpenAI-compatible',
+    ],
     [{ provider: 'xai' }, 'xAI / Grok'],
     [{ provider: 'openai-compatible', endpoint: 'https://api.cerebras.ai/v1' }, 'Cerebras'],
     [{ provider: 'openai' }, 'OpenAI'],
@@ -56,6 +72,48 @@ describe('display_name', () => {
       ['zzz', 'Alpha'],
       ['aaa', 'Zed'],
       ['aaa@audit', 'Zed@audit'],
+    ]);
+  });
+});
+
+describe('the Desktop group (models served by the desktop)', () => {
+  /** The laptop's entry for a model the desktop starts and serves. */
+  const remoteStart = {
+    name: 'strata-flashnext-iq3_s',
+    provider: 'openai-compatible',
+    endpoint: 'http://100.64.1.20:8081/v1',
+    remote_start: { starter: 'http://100.64.1.20:8081', model: 'strata-flashnext-iq3_s' },
+  } as const;
+
+  it('groups a remote_start entry as Desktop', () => {
+    expect(modelPickerGroup(model(remoteStart))).toBe('Desktop');
+    expect(describeModelPickerModel(model(remoteStart))).toEqual({
+      name: 'strata-flashnext-iq3_s',
+      group: 'Desktop',
+    });
+  });
+
+  it('leaves the very same entry without remote_start where it was', () => {
+    const { remote_start: remote, ...without } = remoteStart;
+    expect(remote).toBeDefined();
+    expect(modelPickerGroup(model(without))).toBe('Other OpenAI-compatible');
+  });
+
+  it('puts Desktop in the order right after Ollama Cloud', () => {
+    expect(MODEL_PICKER_GROUP_ORDER.indexOf('Desktop')).toBe(
+      MODEL_PICKER_GROUP_ORDER.indexOf('Ollama Cloud') + 1,
+    );
+    const ordered = modelPickerSelectionEntries([
+      { name: 'grok', group: 'xAI / Grok' },
+      { name: 'strata', group: 'Desktop' },
+      { name: 'qwen:cloud', group: 'Ollama Cloud' },
+      { name: 'local', group: 'Local — llama.cpp' },
+    ]);
+    expect(ordered.map((entry) => entry.group)).toEqual([
+      'Local — llama.cpp',
+      'Ollama Cloud',
+      'Desktop',
+      'xAI / Grok',
     ]);
   });
 });

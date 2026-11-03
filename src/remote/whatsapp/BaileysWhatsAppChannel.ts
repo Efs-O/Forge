@@ -66,7 +66,12 @@ export class BaileysWhatsAppChannel implements RemoteChannel {
   async send(
     chatId: string,
     text: string,
-    options?: { correlationId?: string; signal?: AbortSignal },
+    options?: {
+      correlationId?: string;
+      approvalAllowChat?: boolean;
+      approvalAlwaysInProject?: boolean;
+      signal?: AbortSignal;
+    },
   ): Promise<void> {
     const socket = this.socket;
     if (!socket || this.signal?.aborted || options?.signal?.aborted) {

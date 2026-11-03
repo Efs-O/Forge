@@ -1,5 +1,8 @@
 import { describe, expect, it } from 'vitest';
-import { conversationPersistedSchema, type ConversationRuntime } from '../../src/sidebar/sessionTypes';
+import {
+  conversationPersistedSchema,
+  type ConversationRuntime,
+} from '../../src/sidebar/sessionTypes';
 import {
   openConversationSignature,
   openConversationSignatureFields,
@@ -25,6 +28,16 @@ describe('open conversation signature', () => {
 
     expect(new Set(classified).size).toBe(classified.length);
     expect(classified.sort()).toEqual(schemaFields);
+  });
+
+  it('detects a pinned FORGE.md change, so the open chat is saved', () => {
+    const value = conversation();
+    const original = openConversationSignature(value);
+    value.forgeInstructionsPin = { text: 'v1', windowStart: 0 };
+    const pinned = openConversationSignature(value);
+    expect(pinned).not.toBe(original);
+    value.forgeInstructionsPin.announced = { text: 'v2', messageIndex: 0 };
+    expect(openConversationSignature(value)).not.toBe(pinned);
   });
 
   it('detects in-place model, compaction, usage and last-message changes', () => {
@@ -56,9 +69,7 @@ describe('open conversation signature', () => {
     value.messages[0] = {
       role: 'assistant',
       content: null,
-      tool_calls: [
-        { id: 'call-1', type: 'function', function: { name: 'tool', arguments: '{}' } },
-      ],
+      tool_calls: [{ id: 'call-1', type: 'function', function: { name: 'tool', arguments: '{}' } }],
     };
     expect(openConversationSignature(value)).not.toBe(withContent);
   });
@@ -70,7 +81,8 @@ describe('open conversation signature', () => {
     ['updatedAt', (value: ConversationRuntime) => (value.updatedAt = 3)],
     [
       'messages',
-      (value: ConversationRuntime) => (value.messages[0] = { role: 'assistant', content: 'changed' }),
+      (value: ConversationRuntime) =>
+        (value.messages[0] = { role: 'assistant', content: 'changed' }),
     ],
     [
       'agentLinks',
@@ -88,6 +100,7 @@ describe('open conversation signature', () => {
         };
       },
     ],
+    ['opened_by', (value: ConversationRuntime) => (value.opened_by = 'opener-chat')],
     ['active_model', (value: ConversationRuntime) => (value.active_model = 'local-model')],
     ['cli_sessions', (value: ConversationRuntime) => (value.cli_sessions = { codex: 'session-1' })],
     [
@@ -109,6 +122,11 @@ describe('open conversation signature', () => {
     ['last_output_tokens', (value: ConversationRuntime) => (value.last_output_tokens = 10)],
     ['model_request_count', (value: ConversationRuntime) => (value.model_request_count = 1)],
     ['tool_call_count', (value: ConversationRuntime) => (value.tool_call_count = 1)],
+    [
+      'approval_rules',
+      (value: ConversationRuntime) => (value.approval_rules = ['cross_chat']),
+    ],
+    ['clanker', (value: ConversationRuntime) => (value.clanker = true)],
   ] as const)('changes the signature when %s changes', (_field, mutate) => {
     const value = conversation();
     const original = openConversationSignature(value);

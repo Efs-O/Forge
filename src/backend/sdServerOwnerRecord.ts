@@ -175,6 +175,11 @@ export function sameProcessCreation(
   return identity !== undefined && identity.createdAt === expected;
 }
 
+/** Same server process under the same config: pid + creation time + signature. */
+export function sameServer(a: SdServerOwnerRecord, b: SdServerOwnerRecord): boolean {
+  return a.pid === b.pid && a.pidCreatedAt === b.pidCreatedAt && a.signature === b.signature;
+}
+
 export async function waitForSdProcessExit(
   lookupProcess: (pid: number) => Promise<SdProcessIdentity | undefined>,
   pid: number,

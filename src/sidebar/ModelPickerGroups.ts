@@ -6,6 +6,7 @@ export const MODEL_PICKER_GROUP_ORDER = [
   'Local — llama.cpp',
   'Ollama Local',
   'Ollama Cloud',
+  'Desktop',
   'xAI / Grok',
   'Cerebras',
   'OpenAI',
@@ -54,8 +55,19 @@ function titleCase(label: string): string {
   return label.replace(/\b\w/g, (letter) => letter.toUpperCase());
 }
 
-/** Classifies a resolved model for the sidebar picker without affecting routing. */
+/**
+ * Classifies a resolved model for the sidebar picker without affecting routing.
+ *
+ * `remote_start` is checked before the route: such an entry is this machine's
+ * view of ANOTHER machine's server — it routes as `direct-cloud` because its
+ * endpoint is an openai-compatible URL, and grouping it by provider buried the
+ * models served by the desktop under "Other OpenAI-compatible" next to Grok and
+ * Groq. The picker shows them as what they are: a desktop's models. Routing is
+ * untouched — `classifyModelRoute` still answers `direct-cloud`, and the
+ * request still goes through `RemoteStarterClient`.
+ */
 export function modelPickerGroup(model: ModelConfig): ModelPickerGroup {
+  if (model.remote_start) return 'Desktop';
   switch (classifyModelRoute(model)) {
     case 'local-llama':
       return 'Local — llama.cpp';

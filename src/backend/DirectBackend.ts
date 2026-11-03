@@ -238,7 +238,9 @@ export class DirectBackend implements BackendController {
         `[Forge] Adopted existing llama-server on port ${this.port} (started by another VS Code window).`,
       );
       adopted.appendLine(
-        `[Forge] Live output is in that window. Polling /health + /slots every 5 s...\n`,
+        `[Forge] Live output is in that window. Polling every 5 s: /health decides liveness ` +
+          `(two misses in a row = gone); /slots is read for the slot line and a busy server ` +
+          `does not answer it while it is prefilling.\n`,
       );
       adopted.show(true);
       this.adoptedServer = true;

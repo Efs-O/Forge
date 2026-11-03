@@ -13,7 +13,7 @@ import type { ForgeConfig } from '../../src/config/types';
  * blocks × 12 models"): several gemma workers that are FULL duplicates of
  * `gemma-main` (same GGUF spawned again for parallel worker capacity, per
  * config.example.yaml's own documented pattern), one genuine fine-tune
- * outlier ("gemma-efso" — see ConfigGroupHeuristic.test.ts for the per-key/
+ * outlier ("gemma-tuned" — see ConfigGroupHeuristic.test.ts for the per-key/
  * sub-clustering unit coverage), four ollama workers (three sharing
  * everything, one with its own token budget), a singleton, and two cloud
  * entries with nothing worth grouping.
@@ -59,8 +59,8 @@ models:
     spawn: { n_batch: 512, type_k: q8_0, type_v: q8_0, flash_attn: true, n_gpu_layers: -1 }
     sampling: { top_k: 64, min_p: 0.0, seed: 0, presence_penalty: 0.0, repetition_penalty: 1.0, repeat_last_n: 64, stop: "<end_of_turn>" }
 
-  - name: gemma-efso
-    gguf_path: /models/efso-gemma4-13b.gguf
+  - name: gemma-tuned
+    gguf_path: /models/tuned-gemma4-13b.gguf
     spawn: { n_batch: 256, flash_attn: false, n_gpu_layers: 20 }
     sampling: { top_k: 20, min_p: 0.05, stop: "<turn|>" }
     system_prompt_mode: replace
@@ -131,7 +131,7 @@ describe('migrateConfig', () => {
 
     expect(result.migrated).toBe(true);
     // 7 duplicate gemma workers and 4 local ollama entries each factor into
-    // one group; gemma-efso, qwen-solo, and the two xai entries stay inline
+    // one group; gemma-tuned, qwen-solo, and the two xai entries stay inline
     // (no group worth manufacturing for them).
     expect(result.groupCount).toBe(2);
     expect(result.linesBefore).toBe(linesBefore);
@@ -151,9 +151,9 @@ describe('migrateConfig', () => {
     expect(gemmaMain?.spawn).toBeUndefined();
     expect(gemmaMain?.sampling).toBeUndefined();
     // The outlier fine-tune is untouched — no group, full spawn/sampling inline.
-    const gemmaEfso = after.models.find((m) => m.name === 'gemma-efso');
-    expect(gemmaEfso?.group).toBeUndefined();
-    expect(gemmaEfso?.spawn).toEqual({ n_batch: 256, flash_attn: false, n_gpu_layers: 20 });
+    const gemmaTuned = after.models.find((m) => m.name === 'gemma-tuned');
+    expect(gemmaTuned?.group).toBeUndefined();
+    expect(gemmaTuned?.spawn).toEqual({ n_batch: 256, flash_attn: false, n_gpu_layers: 20 });
 
     // Every model + profile combination resolves identically before/after
     // (the verifier intentionally ignores the newly-added `group` ref itself

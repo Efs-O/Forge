@@ -40,6 +40,18 @@ const COMMANDS = [
     description: 'Open a new conversation tab.',
     availableWhileStreaming: true,
   },
+  // The two rows the 0.17.117 fixes are about: a mixed-case trigger the popup
+  // used to match only when typed lower-case, and a subcommand row that has to
+  // carry its action to the host.
+  { id: 'chatMode', trigger: 'chatMode', title: 'Chat Mode', description: 'Set solo or multi.' },
+  {
+    id: 'approvals',
+    trigger: 'approvals reset',
+    title: 'Reset Chat Approvals',
+    description: 'Forget every approval remembered for this chat.',
+    availableWhileStreaming: true,
+    approvalAction: 'reset',
+  },
 ];
 
 function renderInput(
@@ -49,6 +61,11 @@ function renderInput(
   prefillText: string | null = '/',
   onCancel = vi.fn(),
   clankerMode = false,
+  retention: {
+    ready?: boolean;
+    openIds?: ReadonlySet<string>;
+    report?: (ids: string[]) => void;
+  } = {},
 ): typeof onRunSlashCommand {
   act(() => {
     root.render(
@@ -68,6 +85,9 @@ function renderInput(
         modelPickerDisabled: false,
         remote,
         activeConversationId: 'test-conversation',
+        retentionReady: retention.ready ?? false,
+        openConversationIds: retention.openIds ?? new Set(['test-conversation']),
+        onDraftBearingConversationIds: retention.report ?? vi.fn(),
       }),
     );
   });
@@ -102,7 +122,24 @@ describe('InputRow slash commands', () => {
     expect(onRunSlashCommand).not.toHaveBeenCalled();
 
     act(() => newChat!.click());
-    expect(onRunSlashCommand).toHaveBeenCalledWith('newChat');
+    expect(onRunSlashCommand).toHaveBeenCalledWith('newChat', undefined);
+  });
+
+  it('matches a mixed-case query, so /ChatMode finds /chatMode', () => {
+    // The query was lower-cased and the trigger was not, so `/chatmode` and
+    // `/initforge` matched nothing and the menu vanished on a command that the
+    // host accepts in any case.
+    renderInput(false, vi.fn(), undefined, '/ChatMode');
+    expect(container.querySelector('#slash-menu')).not.toBeNull();
+    expect(container.textContent).toContain('Chat Mode');
+  });
+
+  it('carries a row\u2019s subcommand to the host, so the popup can reset', () => {
+    // Picking `/approvals reset` must do what typing it does; the id alone is
+    // just `/approvals`, which lists the rules instead of clearing them.
+    const onRunSlashCommand = renderInput(false, vi.fn(), undefined, '/approvals reset');
+    act(() => items()[0]!.click());
+    expect(onRunSlashCommand).toHaveBeenCalledWith('approvals', 'reset');
   });
 
   it('highlights the first runnable command rather than a disabled one', () => {
@@ -201,6 +238,11 @@ describe('Clanker toggle', () => {
   it('shows a dim switch while off and turns Clanker on through /clanker', () => {
     const onRunSlashCommand = renderInput(false, vi.fn(), undefined, null);
     expect(toggle().textContent).toBe('Clanker mode');
+    // The label is short; the hover text is where the mode is explained, so it has
+    // to say what the mode does and where it still asks, or nothing else does.
+    expect(toggle().getAttribute('title')).toBe(
+      'Clanker mode — no confirmations in this chat. The deny list still asks. Click to turn it on.',
+    );
     expect(toggle().className).toBe('is-off');
     expect(toggle().getAttribute('aria-pressed')).toBe('false');
     act(() => toggle().click());
@@ -209,7 +251,12 @@ describe('Clanker toggle', () => {
 
   it('says what it does while on, and turns off mid-turn too', () => {
     const onRunSlashCommand = renderInput(true, vi.fn(), undefined, null, vi.fn(), true);
-    expect(toggle().textContent).toBe('Clanker mode - No confirmations');
+    // The armed label is the joke the owner chose; the hover text carries the truth,
+    // including that the deny list still asks, and how to get out of the mode.
+    expect(toggle().textContent).toBe('Clanker mode — 110% YOLO');
+    expect(toggle().getAttribute('title')).toBe(
+      'Clanker mode — no confirmations in this chat. The deny list still asks. Click to turn it off.',
+    );
     expect(toggle().getAttribute('aria-pressed')).toBe('true');
     act(() => toggle().click());
     expect(onRunSlashCommand).toHaveBeenCalledWith('clanker');
@@ -217,11 +264,64 @@ describe('Clanker toggle', () => {
 });
 
 describe('prompt lane', () => {
+  const prompt = (): HTMLTextAreaElement => container.querySelector('#prompt')!;
+
   // Left cell, model, right cell: the grid's middle column is what centres it.
   it('holds the model selector between the controls and the action button', () => {
     renderInput(false, vi.fn(), undefined, null);
     const cells = Array.from(container.querySelector('#prompt-lane')!.children);
     expect(cells.map((cell) => cell.className)).toEqual(['lane-start', 'ms-root', 'lane-end']);
     expect(cells[2]!.querySelector('#btn-send')).not.toBeNull();
+  });
+
+  it('reports unsent text and clears its retention report after sending', () => {
+    const report = vi.fn();
+    renderInput(false, vi.fn(), undefined, null, vi.fn(), false, {
+      ready: true,
+      openIds: new Set(['test-conversation']),
+      report,
+    });
+    const textarea = prompt();
+    const setValue = Object.getOwnPropertyDescriptor(
+      Object.getPrototypeOf(textarea),
+      'value',
+    )!
+      .set!;
+    act(() => {
+      setValue.call(textarea, 'unfinished work');
+      textarea.dispatchEvent(new Event('input', { bubbles: true }));
+    });
+    expect(report).toHaveBeenLastCalledWith(['test-conversation']);
+
+    act(() => container.querySelector<HTMLButtonElement>('#btn-send')!.click());
+    expect(report).toHaveBeenLastCalledWith([]);
+  });
+
+  it('prunes drafts from a conversation only after the host closes that chat', () => {
+    const report = vi.fn();
+    renderInput(false, vi.fn(), undefined, null, vi.fn(), false, {
+      ready: true,
+      openIds: new Set(['test-conversation']),
+      report,
+    });
+    const textarea = prompt();
+    const setValue = Object.getOwnPropertyDescriptor(
+      Object.getPrototypeOf(textarea),
+      'value',
+    )!
+      .set!;
+    act(() => {
+      setValue.call(textarea, 'draft remains while open');
+      textarea.dispatchEvent(new Event('input', { bubbles: true }));
+    });
+    expect(report).toHaveBeenLastCalledWith(['test-conversation']);
+
+    renderInput(false, vi.fn(), undefined, null, vi.fn(), false, {
+      ready: true,
+      openIds: new Set(),
+      report,
+    });
+    expect(prompt().value).toBe('');
+    expect(report).toHaveBeenLastCalledWith([]);
   });
 });

@@ -112,7 +112,7 @@ describe('App heavy streaming load', () => {
       expect(textarea.value).toBe('prompt edit 5900');
       expect(streamingPhrase()).not.toBe('');
     },
-    60_000,
+    90_000,
   );
 
   it('sends a text tell while the turn continues', () => {

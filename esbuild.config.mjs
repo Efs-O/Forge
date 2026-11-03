@@ -63,6 +63,7 @@ const CSS_PARTIALS = [
   'webview-ui/styles/layout.css',
   'webview-ui/styles/chat-header.css',
   'webview-ui/styles/sessions-panel.css',
+  'webview-ui/styles/history-rows.css',
   'webview-ui/styles/messages.css',
   'webview-ui/styles/tool-rows.css',
   'webview-ui/styles/diff.css',
@@ -107,6 +108,17 @@ function copyPlaywrightCore() {
   cpSync(src, dest, { recursive: true });
 }
 
+// PDF pages are rendered from self-contained pdf.js modules loaded from blob
+// URLs in the isolated browser. Keep both beside the extension bundle because
+// node_modules is excluded from the VSIX.
+function copyPdfJs() {
+  const src = 'node_modules/pdfjs-dist/build';
+  const dest = 'dist/pdfjs';
+  mkdirSync(dest, { recursive: true });
+  copyFileSync(`${src}/pdf.mjs`, `${dest}/pdf.mjs`);
+  copyFileSync(`${src}/pdf.worker.mjs`, `${dest}/pdf.worker.mjs`);
+}
+
 async function build() {
   if (watchMode) {
     const extCtx = await esbuild.context(extensionConfig);
@@ -129,6 +141,7 @@ async function build() {
   await esbuild.build(extensionConfig);
   console.log('Extension built.');
   copyPlaywrightCore();
+  copyPdfJs();
 
   if (buildAll) {
     await esbuild.build(webviewConfig);

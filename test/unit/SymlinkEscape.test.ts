@@ -4,12 +4,8 @@ import * as path from 'path';
 import * as vscode from 'vscode';
 import { afterAll, afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { resolveRealWorkspacePath } from '../../src/util/WorkspacePaths';
-import { makeAppendFileTool, makeWriteFileTool } from '../../src/tools/builtinTools';
-import {
-  makeCreateDirectoryTool,
-  makeDeleteFileTool,
-  makeMoveFileTool,
-} from '../../src/tools/fileEditTools';
+import { makeWriteFileTool } from '../../src/tools/builtinTools';
+import { makeDeleteFileTool, makeMoveFileTool } from '../../src/tools/fileEditTools';
 import { makeEditFileTool } from '../../src/tools/editFileTool';
 import { makeApplyLineEditsTool } from '../../src/tools/structuredEditTool';
 import { makeGenerateImageTool } from '../../src/tools/imageGeneration/generateImageTool';
@@ -83,18 +79,11 @@ describe.runIf(linkSupported)('symlink escape is refused by every write/move/del
     expect(fs.existsSync(path.join(outside, 'evil.txt'))).toBe(false);
   });
 
-  it('refuses append_file through the link', async () => {
+  it('refuses mode "append" through the link', async () => {
     await expect(
-      makeAppendFileTool().handler({ path: 'link/evil.txt', content: 'x' }),
+      makeWriteFileTool().handler({ path: 'link/evil.txt', content: 'x', mode: 'append' }),
     ).rejects.toThrow(/outside the workspace/);
     expect(fs.existsSync(path.join(outside, 'evil.txt'))).toBe(false);
-  });
-
-  it('refuses create_directory through the link', async () => {
-    await expect(makeCreateDirectoryTool().handler({ path: 'link/subdir' })).rejects.toThrow(
-      /outside the workspace/,
-    );
-    expect(fs.existsSync(path.join(outside, 'subdir'))).toBe(false);
   });
 
   it('refuses move_file to a destination through the link, and keeps the source', async () => {

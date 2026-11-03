@@ -94,16 +94,18 @@ export const REMOTE_HELP_SECTIONS: RemoteHelpSection[] = [
     commands: [
       { usage: '/workspace', summary: 'List configured workspaces.' },
       { usage: '/workspace <n-or-alias>', summary: 'Switch to a workspace.' },
+      { usage: '/workspace <n-or-alias> replace|cancel', summary: 'Answer a busy refusal.' },
     ],
     notes: [
-      '/workspace lists the workspaces, numbers them, and says which one you are in; /workspace <n-or-alias> goes to one and continues its most recent conversation. The VS Code window reloads, so the chat goes quiet for a few seconds and the remote session does not survive it — expect to send your code again. /new <n> still works as an alias',
+      '/workspace lists the workspaces, numbers them, and says which one you are in; /workspace <n-or-alias> goes to one and continues its most recent conversation. The VS Code window reloads, so the chat goes quiet for a few seconds and the remote session does not survive it — expect to send your code again. While anything is running the switch is refused first: it stops that answer and moves your whole connection on this channel, so any other chat bound to this workspace is refused until someone switches back — answer with /workspace <n-or-alias> replace to go ahead or cancel to leave it alone, or tap the two choices. /new <n> still works as an alias',
     ],
   },
   {
     key: 'window',
     title: 'Window',
     commands: [
-      { usage: '/clanker on|off', summary: 'Set approval-gate mode.' },
+      { usage: '/approvals [reset]', summary: 'List or reset approvals for this chat.' },
+      { usage: '/clanker on|off', summary: 'Set approval-gate mode for this chat.' },
       { usage: '/compact', summary: 'Summarise the conversation in place.' },
       { usage: '/lock', summary: 'End this authenticated session.' },
       { usage: '/ratelimit [1-600|off]', summary: 'Set this chat’s message limit.' },
@@ -111,7 +113,7 @@ export const REMOTE_HELP_SECTIONS: RemoteHelpSection[] = [
       { usage: '/timeout [1-1440|off]', summary: 'Set the session idle timeout.' },
     ],
     notes: [
-      '/clanker on auto-approves non-dangerous tools for every tab of the VS Code window — writes then land with no confirmation anywhere, here or in the sidebar. It is remembered per workspace and survives a window reload, so it stays armed until someone turns it off; /clanker off, or the sidebar toggle, is the only thing that clears it',
+      "/clanker on arms THIS chat only: a call the owner could have allowed by key then runs with no approval, while the deny list's dangerous commands and anything with no key still get a card — here or in the sidebar — and that card waits, or times out if the owner set `permissions.approval_timeout_minutes`. The mode is saved with the chat and survives a window reload, so it stays armed until someone turns it off; /clanker off, or the sidebar toggle in that tab, is the only thing that clears it, and it revokes nothing this chat was already allowed to do",
       '/compact summarises the conversation in place to win back context; the chat and its queue survive it',
       '/lock ends this authenticated session and discards any held prompt; the next message asks for the code again',
       '/ratelimit sets how many messages this chat may send per minute (default 30); off raises it to the 600 ceiling rather than removing it, because the limit is also what stops a stuck message being retried forever',

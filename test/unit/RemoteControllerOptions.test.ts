@@ -34,4 +34,25 @@ describe('remote.unlock_backlog_max', () => {
     expect(buildRemoteControllerOptions(config({ unlock_backlog_max: 17 }), deps).unlockBacklogMax)
       .toBe(17);
   });
+
+  it('carries project-scoped approval policy lines to remote /approvals', () => {
+    const active = ForgeConfigSchema.parse({
+      models: [{ name: 'm', provider: 'ollama', endpoint: 'http://127.0.0.1:11434' }],
+      remote: { enabled: true },
+      approvals: {
+        always: [
+          { key: 'cross_chat', workspace: 'N:/ws/project' },
+          { key: 'tool:browser', workspace: 'N:/ws/other' },
+        ],
+      },
+    });
+    const options = buildRemoteControllerOptions(active, {
+      ...deps,
+      workspaceRoot: 'N:/ws/project',
+    });
+
+    expect(options.getApprovalPolicyLines?.()).toEqual([
+      'Always in this project: messages to other chats  (cross_chat)',
+    ]);
+  });
 });

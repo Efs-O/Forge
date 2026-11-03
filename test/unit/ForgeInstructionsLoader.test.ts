@@ -45,7 +45,60 @@ describe('ensureForgeInstructionsFile', () => {
     expect(content).not.toContain('exec_command');
     expect(content).toContain('reusing its suggested_next_wait_ms (each call waits up to 60 s)');
     expect(content).toContain('instead of polling in short steps');
-    expect(Buffer.byteLength(content, 'utf8')).toBeLessThan(25000);
+    // The starter is paid on EVERY turn in EVERY new workspace, so its size is
+    // the budget, not a loose sanity number. Measured 2026-10-27: 3,293 bytes
+    // before lane 5.2, 4,557 after the eight review items and the changelog
+    // blank were added (docs/plans/V1_FINISH_PLAN.md phase 5.2), which is about
+    // 273 tokens at the ~4.62 chars/token ratio the tool-schema budget test
+    // uses — inside the ~300 tokens the owner accepted. 4,700 is that
+    // measurement plus a little slack, so growth is noticed when it is added.
+    // 2026-10-30: 4,725 bytes after the notify_on_exit rewording of the waiting
+    // line. The flag is on by default for a background command, so the line no
+    // longer tells the agent to pass it: it says to start the command in the
+    // background, tell the user what is being waited for, end the turn or work
+    // on something else, and let the exit notice arrive on its own — an agent
+    // that forgot the flag spent four model rounds polling a job that would have
+    // woken it by itself. The cap is 4,800, 75 bytes of slack, so the next
+    // growth is still noticed when it is added.
+    // 2026-10-30, merge of docs/tool-traps-sync: 5,398 bytes. The instruction-
+    // file sync added three general rules (acceptance criteria per plan,
+    // separate worktrees for overlapping lanes, the durable-state ledger) on
+    // top of the 4,725 above. Cap 5,475 keeps the same 75 bytes of slack.
+    // 2026-10-31: 5,889 bytes. "Remembering past sessions" gained a second
+    // rule: read the record a screen symptom is drawn from (Forge's own state
+    // under ~/.forge/, a config field) before grepping the logs, then git log
+    // for the commit that changed it, whose message is usually the diagnosis;
+    // search mechanism words, not symptom phrasing. An agent that grepped for
+    // the symptom spent fourteen rounds on a discussion that the job state file
+    // and that commit message each named outright. 46 bytes came back out of
+    // the waiting line. Cap 5,964 keeps the same 75 bytes of slack.
+    expect(Buffer.byteLength(content, 'utf8')).toBeLessThan(5964);
+  });
+
+  it('carries the review items that took this repo to 0.8% failed calls', () => {
+    const root = makeRoot();
+    expect(ensureForgeInstructionsFile(root).status).toBe('created');
+    const content = fs.readFileSync(path.join(root, 'FORGE.md'), 'utf8');
+    // (a) and (b): the two questions this repo's reviews kept failing on.
+    expect(content).toMatch(/what cancels it .* test that path/u);
+    expect(content).toMatch(/right session, chat or sender/u);
+    // (c) the line cap, checked while editing rather than at the end of the turn.
+    expect(content).toMatch(/`wc -l`/u);
+    expect(content).toContain('real seam before the cap');
+    // (d) and (e): plan documents that disagree with the code, and durable state.
+    expect(content).toContain('acceptance criteria disagree with the code');
+    expect(content).toMatch(/outlives its turn/u);
+    expect(content).toContain('create, delete, crash and expiry');
+    // (f), (g), (h): one owner per concern, an audit's scope, and "reply only".
+    expect(content).toContain('already owns a concern');
+    expect(content).toContain('every reference to it');
+    expect(content).toContain('commit range and the baseline');
+    expect(content).toMatch(/"reply only".*no tool calls/u);
+    // The changelog line is a blank to fill in, not a rule: it ends at its
+    // colon, so a new workspace still has to say which file its changelog is.
+    expect(content).toContain(
+      '\n- Changelog (update it in the same change as a version bump):\n',
+    );
   });
 
   it('creates FORGE.md beside an AGENTS.md and leaves the AGENTS.md alone', () => {

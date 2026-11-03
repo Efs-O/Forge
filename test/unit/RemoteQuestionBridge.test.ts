@@ -1,8 +1,10 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { openQuickInputs } from '../support/vscode';
+import { callIndex, traceChatCalls, traceWorkingLine } from '../support/chatCalls';
 import { UserQuestionService } from '../../src/sidebar/UserQuestionService';
 import type { CommandCleanupScheduler } from '../../src/remote/CommandCleanupScheduler';
 import { RemoteQuestionBridge } from '../../src/remote/RemoteQuestionBridge';
+import { RemoteAgentProgress } from '../../src/remote/RemoteAgentProgress';
 import { FakeRemoteChannel } from '../../src/remote/FakeRemoteChannel';
 import { RemoteAuth } from '../../src/remote/RemoteAuth';
 import { RemoteRequestStore } from '../../src/remote/RemoteRequestStore';
@@ -83,6 +85,54 @@ function bridgeRig(
     await new Promise((resolve) => setImmediate(resolve));
   };
   return { bridge, channel, service, deliveryDecided };
+}
+
+/**
+ * The same bridge with the working-line pair wired, which is what
+ * `RemoteController.start()` does: the question and the turn's status bubble
+ * share one chat, and the order between them is the whole of Bug 1.
+ */
+function workingLineRig(
+  options: { channelName?: 'fake' | 'telegram'; words?: boolean } = {},
+) {
+  const channelName = options.channelName ?? 'telegram';
+  const channel = new FakeRemoteChannel(channelName);
+  const calls = traceChatCalls(channel);
+  const service = new UserQuestionService();
+  const store = {
+    getRequest: (id: string) =>
+      id === 'req-1' ? { id: 'req-1', channel: channelName, chatId: 'chat-1' } : undefined,
+    bindingsForConversation: () => [],
+  } as unknown as RemoteRequestStore;
+  const auth = { canDeliver: async () => true } as unknown as RemoteAuth;
+  const host = {
+    addQuestionSink: (sink: Parameters<ForgeHostFacade['addQuestionSink']>[0]) =>
+      service.addSink(sink),
+    answerQuestion: (id: string, text: string) => service.answer(id, text),
+    answerQuestionStructured: (
+      id: string,
+      answer: Parameters<UserQuestionService['answerStructured']>[1],
+    ) => service.answerStructured(id, answer),
+    skipQuestion: (id: string) => service.skip(id),
+    dismissQuestion: (id: string) => service.dismiss(id),
+    status: () => ({
+      activeConversationId: 'c1',
+      conversations: [],
+      requestChains: [{ conversationId: 'c1', remoteRequestId: 'req-1' }],
+      streamingConversationIds: [],
+    }),
+  } as unknown as ForgeHostFacade;
+  const signal = new AbortController().signal;
+  // The drain has already opened this turn's bubble; begin() stands in for it
+  // with the id `openProgressBubble` would have returned, so the question and
+  // the working line are in the same chat exactly as they are on a phone.
+  const progress = new RemoteAgentProgress(channel, signal, () => true, 4_000, 0);
+  progress.begin('c1', 'chat-1', 'message-1', 'remote');
+  if (options.words !== false)
+    progress.handle({ conversationId: 'c1', kind: 'narration', text: 'Let me check.' });
+  const bridge = new RemoteQuestionBridge(channel, store, auth, host, signal, 4_000);
+  bridge.start(traceWorkingLine(progress, calls));
+  return { bridge, channel, service, calls, progress };
 }
 
 let questionCallbackSequence = 0;
@@ -502,6 +552,86 @@ describe('RemoteQuestionBridge', () => {
   it('reports no pending question for an unknown chat', () => {
     const { bridge } = bridgeRig();
     expect(bridge.answerText('someone-else', 'hello')).toBe(false);
+  });
+
+  it('hides the working line for the length of a board and reopens it below the receipt', async () => {
+    const { bridge, channel, service, calls } = workingLineRig();
+    const asked = vi.fn();
+    service.addSink({ asked, answered: () => undefined });
+    const pending = service.ask({
+      prompt: 'Which backend?',
+      options: ['llama.cpp', 'ollama'],
+      conversationId: 'c1',
+    });
+    await vi.waitFor(() => expect(channel.inlineKeyboards).toHaveLength(1));
+
+    // The line comes off only once the board is really on screen, and the
+    // bubble keeps its words and its Stop button, so "Send now" still works
+    // while a question waits and nothing new is drawn under the buttons.
+    expect(callIndex(calls, 'keyboard ')).toBeLessThan(callIndex(calls, 'hide c1'));
+    expect(channel.edits.at(-1)?.text).toBe('Let me check.');
+    expect(channel.stopButtons.has('message-1')).toBe(true);
+    expect(channel.progress).toEqual([]);
+
+    const questionId = asked.mock.calls[0]?.[0].id as string;
+    await expect(
+      bridge.handleAction(questionAction(questionId, 'select', 'keyboard-1', 2)),
+    ).resolves.toEqual({ kind: 'handled' });
+    await bridge.handleAction(questionAction(questionId, 'next', 'keyboard-1'));
+    await expect(pending).resolves.toBe('ollama');
+    await vi.waitFor(() => expect(channel.progress).toHaveLength(1));
+
+    // Board, then its receipt, then the working line: below both, never between
+    // them, and as a new message rather than an edit of the old one.
+    const board = callIndex(calls, 'clear keyboard-1');
+    const receipt = callIndex(calls, 'send Forge: answered');
+    const show = callIndex(calls, 'show c1');
+    const reopened = callIndex(calls, 'progress ');
+    expect(board).toBeLessThan(receipt);
+    expect(receipt).toBeLessThan(show);
+    expect(show).toBeLessThan(reopened);
+    expect(channel.progress.at(-1)?.text).toContain('Working…');
+    expect(channel.edits.at(-1)?.text).toBe('Let me check.');
+  });
+
+  it('deletes a working line that carried nothing but itself', async () => {
+    const { bridge, channel, service, calls } = workingLineRig({ words: false });
+    const asked = vi.fn();
+    service.addSink({ asked, answered: () => undefined });
+    const pending = service.ask({
+      prompt: 'Which backend?',
+      options: ['llama.cpp', 'ollama'],
+      conversationId: 'c1',
+    });
+    await vi.waitFor(() => expect(channel.inlineKeyboards).toHaveLength(1));
+    await vi.waitFor(() => expect(calls).toContain('delete message-1'));
+    // The agent asked before it said anything, so the working line was the whole
+    // message. It goes, rather than sitting above the buttons with nothing in it
+    // — Telegram rejects an empty message, so it cannot be blanked out.
+    expect(callIndex(calls, 'keyboard ')).toBeLessThan(callIndex(calls, 'delete message-1'));
+    expect(channel.edits).toEqual([]);
+
+    const questionId = asked.mock.calls[0]?.[0].id as string;
+    await bridge.handleAction(questionAction(questionId, 'select', 'keyboard-1', 1));
+    await bridge.handleAction(questionAction(questionId, 'next', 'keyboard-1'));
+    await expect(pending).resolves.toBe('llama.cpp');
+    await vi.waitFor(() => expect(channel.progress).toHaveLength(1));
+    expect(callIndex(calls, 'show c1')).toBeGreaterThan(callIndex(calls, 'send Forge: answered'));
+    expect(channel.progress.at(-1)?.text).toContain('Working…');
+  });
+
+  it('hides the working line for a plain-text question too', async () => {
+    const { bridge, channel, service, calls } = workingLineRig({ channelName: 'fake' });
+    const pending = service.ask({ prompt: 'Which file?', conversationId: 'c1' });
+    await vi.waitFor(() => expect(channel.sent).toHaveLength(1));
+    // Not Telegram-specific: any question that stops the turn takes the line off,
+    // including the `Forge asks:` text fallback.
+    expect(callIndex(calls, 'send Forge asks')).toBeLessThan(callIndex(calls, 'hide c1'));
+    expect(bridge.answerText('chat-1', 'src/index.ts')).toBe(true);
+    await expect(pending).resolves.toBe('src/index.ts');
+    await vi.waitFor(() => expect(channel.progress).toHaveLength(1));
+    expect(callIndex(calls, 'show c1')).toBeGreaterThan(callIndex(calls, 'send Forge: answered'));
+    expect(channel.progress.at(-1)?.text).toContain('Working…');
   });
 });
 

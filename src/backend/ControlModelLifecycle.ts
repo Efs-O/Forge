@@ -31,6 +31,15 @@ export interface ModelLifecycleContext {
   evictionGraceMs: number;
   /** Resolves an alias/@profile/fuzzy id to a base model name. */
   resolveBase: (requested: string) => { name: string } | EnsureResult;
+  /**
+   * Runs a load or unload on the control server's own promise chain, so
+   * capacity and eviction decisions stay atomic across EVERY caller of these
+   * maps — including the model starter (:8798), which shares them but has its
+   * own listener. Anything that can evict a model or add a hold must run
+   * inside it; two unsynchronized /ensure calls would both `makeRoom` and both
+   * spawn.
+   */
+  serialize<T>(fn: () => Promise<T>): Promise<T>;
 }
 
 /** The config entry with its group's settings merged in: a provider is often only on the group. */

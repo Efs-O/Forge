@@ -5,11 +5,28 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import { loadConfig, resolveExplicitConfigPath } from '../../src/config/ConfigLoader';
 
 const showWarningMessage = vi.fn();
+const loggedLines: string[] = [];
+const openedDocuments: string[] = [];
 
 vi.mock('vscode', () => ({
-  workspace: {},
+  workspace: {
+    openTextDocument: async (uri: { fsPath: string }) => {
+      openedDocuments.push(uri.fsPath);
+      return { uri };
+    },
+  },
+  Uri: { file: (fsPath: string) => ({ fsPath }) },
   window: {
     showWarningMessage: (...args: unknown[]) => showWarningMessage(...args),
+    showTextDocument: async (document: { uri?: { fsPath?: string } }) => document,
+    // `ConfigLoader` logs the same lines the toast shows, so the real logger
+    // module loads: its constructor wants an output channel.
+    createOutputChannel: () => ({
+      appendLine: (line: string) => loggedLines.push(line),
+      clear: () => undefined,
+      show: () => undefined,
+      dispose: () => undefined,
+    }),
   },
 }));
 
@@ -385,7 +402,12 @@ models:
     expect(() => loadConfig(dir)).toThrow(/unknown profile "nope"/i);
   });
 
-  it('rejects an alias targeting an unknown model', () => {
+  /** A removed model used to make this a hard error, which meant the whole
+   *  config refused to load and every other config write failed with it. The
+   *  alias is now reported, not fatal: see `ConfigResolver.test.ts` for what a
+   *  user is told when they actually use it. */
+  it('loads a config whose alias targets a removed model and names the path', () => {
+    showWarningMessage.mockClear();
     const dir = mkTempDir();
     fs.writeFileSync(
       path.join(dir, 'config.yaml'),
@@ -401,7 +423,13 @@ aliases:
 `,
       'utf8',
     );
-    expect(() => loadConfig(dir)).toThrow(/targets unknown model "missing"/i);
+
+    const config = loadConfig(dir);
+    expect(config.active_model).toBe('gemma');
+    expect(config.aliases?.['old']).toBe('missing@main');
+    const warning = String(showWarningMessage.mock.calls[0]?.[0] ?? '');
+    expect(warning).toContain('aliases.old');
+    expect(warning).toContain('missing@main');
   });
 
   it('accepts a groups-based config and validates group references (F7)', () => {
@@ -665,6 +693,194 @@ aliases:
     );
     const config = loadConfig(dir);
     expect(config.active_model).toBe('old-name');
+  });
+
+  /**
+   * The 2026-10-27 `llama-updates` failure: one model name left behind in
+   * config.yaml made Forge refuse the WHOLE file, so the llama.cpp binary
+   * switch, the Models panel and `/chatMode` all failed on a config the
+   * installed build was happy with. A stale reference now loads, and the
+   * warning says which paths are stale — this is the rule that a config must
+   * never be silently repaired (`modelReferences.ts` is the owner of the set).
+   */
+  describe('leftover model references load with one warning', () => {
+    function writeFixture(dir: string, body: string): string {
+      const configPath = path.join(dir, 'config.yaml');
+      fs.writeFileSync(
+        configPath,
+        `llama_server:
+  binary: llama-server
+models:
+  - name: keep
+    provider: llama.cpp
+    gguf_path: C:/models/keep.gguf
+  - name: keep-cloud
+    provider: openrouter
+    api_key_secret: test.ref
+${body}`,
+        'utf8',
+      );
+      return configPath;
+    }
+
+    it('loads a config whose laptop cloud list names a removed model', () => {
+      showWarningMessage.mockClear();
+      const dir = mkTempDir();
+      const configPath = writeFixture(
+        dir,
+        `active_model: keep
+cloud_relay:
+  enabled: true
+  port: 8797
+  max_body_mb: 32
+  models:
+    - keep-cloud
+    - gone-model
+`,
+      );
+
+      const config = loadConfig(dir);
+      expect(config.models.map((model) => model.name)).toEqual(['keep', 'keep-cloud']);
+      expect(config.active_model).toBe('keep');
+      expect(config.cloud_relay?.models).toEqual(['keep-cloud', 'gone-model']);
+
+      const call = showWarningMessage.mock.calls[0];
+      const warning = String(call?.[0] ?? '');
+      expect(warning).toContain('cloud_relay.models[1]');
+      expect(warning).toContain('the laptop cloud list');
+      expect(warning).toContain('"gone-model"');
+      expect(call?.[1]).toBe('Open config.yaml');
+      // The same lines belong in the output log, for a user who dismissed the toast.
+      expect(loggedLines.join('\n')).toContain('cloud_relay.models[1]');
+      expect(configPath).toBeTruthy();
+    });
+
+    it('loads a config whose jobs model was removed', () => {
+      showWarningMessage.mockClear();
+      const dir = mkTempDir();
+      writeFixture(
+        dir,
+        `active_model: keep
+jobs:
+  enabled: true
+  default_model: gone-jobs-model
+`,
+      );
+
+      const config = loadConfig(dir);
+      expect(config.jobs?.default_model).toBe('gone-jobs-model');
+      const warning = String(showWarningMessage.mock.calls[0]?.[0] ?? '');
+      expect(warning).toContain('jobs.default_model');
+      expect(warning).toContain('the jobs model');
+    });
+
+    /** `active_model: none` is already a supported state: the send path refuses
+     *  with "Pick a model before sending" and the status bar shows no model, so
+     *  a selection naming a removed model becomes exactly that, not a new state
+     *  and not a guess at a replacement. */
+    it('leaves no model active when the selection names a removed one', () => {
+      showWarningMessage.mockClear();
+      const dir = mkTempDir();
+      writeFixture(
+        dir,
+        `active_model: gone-model
+`,
+      );
+
+      const config = loadConfig(dir);
+      expect(config.active_model).toBeNull();
+      const warning = String(showWarningMessage.mock.calls[0]?.[0] ?? '');
+      expect(warning).toContain('active_model');
+      expect(warning).toContain('"gone-model"');
+    });
+
+    it('lists every stale path in one warning', () => {
+      showWarningMessage.mockClear();
+      const dir = mkTempDir();
+      writeFixture(
+        dir,
+        `active_model: gone-model
+aliases:
+  gone-alias: gone-model
+cloud_relay:
+  enabled: true
+  port: 8797
+  max_body_mb: 32
+  models:
+    - gone-model
+jobs:
+  enabled: true
+  default_model: gone-jobs-model
+`,
+      );
+
+      loadConfig(dir);
+      expect(showWarningMessage).toHaveBeenCalledTimes(1);
+      const warning = String(showWarningMessage.mock.calls[0]?.[0] ?? '');
+      for (const path of [
+        'active_model',
+        'aliases.gone-alias',
+        'cloud_relay.models[0]',
+        'jobs.default_model',
+      ])
+        expect(warning).toContain(path);
+    });
+
+    /** The watcher reloads on every save, so an unconditional toast would fire on
+     *  each keystroke-to-disk. One warning per distinct set; a load that finds
+     *  none clears the set, so a stale name added later warns again. */
+    it('warns once per distinct set, not again on a hot reload', () => {
+      showWarningMessage.mockClear();
+      const dir = mkTempDir();
+      const configPath = writeFixture(
+        dir,
+        `active_model: keep
+cloud_relay:
+  enabled: true
+  port: 8797
+  max_body_mb: 32
+  models:
+    - gone-model
+`,
+      );
+
+      loadConfig(dir);
+      loadConfig(dir);
+      expect(showWarningMessage).toHaveBeenCalledTimes(1);
+
+      // A clean load clears the set (the ledger's "cleared when a load finds
+      // none" row), so the next regression is not swallowed.
+      fs.writeFileSync(
+        configPath,
+        fs.readFileSync(configPath, 'utf8').replace('gone-model', 'keep-cloud'),
+        'utf8',
+      );
+      loadConfig(dir);
+      expect(showWarningMessage).toHaveBeenCalledTimes(1);
+
+      fs.writeFileSync(configPath, `${fs.readFileSync(configPath, 'utf8')}    - gone-model\n`, 'utf8');
+      loadConfig(dir);
+      expect(showWarningMessage).toHaveBeenCalledTimes(2);
+    });
+
+    it('opens config.yaml when the button is picked', async () => {
+      showWarningMessage.mockClear();
+      openedDocuments.length = 0;
+      const dir = mkTempDir();
+      const configPath = writeFixture(
+        dir,
+        `active_model: keep
+jobs:
+  enabled: true
+  default_model: gone-for-button-test
+`,
+      );
+      showWarningMessage.mockResolvedValueOnce('Open config.yaml');
+
+      loadConfig(dir);
+      await new Promise((resolve) => setTimeout(resolve, 10));
+      expect(openedDocuments).toEqual([configPath]);
+    });
   });
 });
 

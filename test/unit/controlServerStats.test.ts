@@ -5,6 +5,7 @@ import { ControlServer } from '../../src/backend/ControlServer';
 import type { IBackendPool } from '../../src/backend/BackendPool';
 import type { ForgeConfig } from '../../src/config/types';
 import { createControlStatsBuilder, controlStatsSchema } from '../../src/backend/controlStats';
+import { findFreeLoopbackPort } from '../support/listenLoopback';
 
 const pool: IBackendPool = {
   acquire: async () => {
@@ -36,18 +37,19 @@ describe('ControlServer GET /stats', () => {
       contextLimitFor: () => null,
       forgeVersion: 'test-version',
     });
+    const port = await findFreeLoopbackPort();
     server = new ControlServer(
       pool,
       {
         models: [],
         llama_server: {},
-        control_server: { enabled: true, port: 0 },
+        control_server: { enabled: true, port },
       } as ForgeConfig,
       { stats, probe: async () => true },
     );
     server.start();
 
-    // Port 0: the OS picks a free one, so nothing else can hold or answer it.
+    // Pick a free, Fetch-safe port, so nothing else can hold or answer it.
     await vi.waitFor(() => expect(server?.status().port).toBeGreaterThan(0));
     const base = `http://127.0.0.1:${server.status().port}`;
     const response = await fetch(`${base}/stats`);

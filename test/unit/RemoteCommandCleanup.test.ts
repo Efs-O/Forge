@@ -103,6 +103,10 @@ async function buildController(
   deleteCommandMessagesAfter: number | undefined,
   hostOverrides: Partial<ForgeHostFacade> = {},
   optionsOverrides: Partial<RemoteControllerOptions> = {},
+  /** Bind the phone to a conversation. `/clanker` arms a chat now, and most of these
+   *  tests use it as their handled-command fixture, so it starts bound; the `/tell`
+   *  case below needs an unbound phone, and passes false. */
+  bind = true,
 ): Promise<Harness> {
   const channel = new FakeRemoteChannel();
   // Enroll the owner directly (no TOTP), so the session gate is `authorized`.
@@ -121,6 +125,14 @@ async function buildController(
     ...optionsOverrides,
   });
   await controller.start();
+  if (bind) {
+    await requestStore.setBinding({
+      channel: 'fake',
+      chatId: 'chat',
+      workspaceId: 'workspace',
+      conversationId: 'c1',
+    });
+  }
   return { channel, controller, auth, onError };
 }
 
@@ -172,7 +184,7 @@ describe('RemoteController command auto-cleanup', () => {
 
   it('deletes a rejected typed /tell but keeps an accepted /tell as the note', async () => {
     vi.useFakeTimers();
-    const noTarget = await buildController(5);
+    const noTarget = await buildController(5, {}, {}, false);
     try {
       expect(await noTarget.controller.handle(textEvent('/tell codex hi'))).toMatchObject({
         kind: 'rejected',

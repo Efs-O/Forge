@@ -27,6 +27,13 @@ export function reduceTurn(
   event: AgentProgressEvent,
   now: number,
 ): TurnSnapshot {
+  if (event.kind === 'start') {
+    // A turn's own start supersedes everything before it: the count, the
+    // warnings and the clock all belong to one turn, so the next turn's
+    // numbers must not be added to the last one's, and a turn that never got
+    // its closing event cannot hold the line for the turn after it.
+    return { state: 'running', startedAt: now, lastEventAt: now, toolCalls: 0, warnings: [] };
+  }
   if (prev === undefined && event.kind === 'end') {
     return {
       state: 'ended',

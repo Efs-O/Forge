@@ -1,8 +1,18 @@
 import type * as vscode from 'vscode';
+import type { ApprovalDecision } from '../sidebar/approvalMessages';
 import type { ForgeHostFacade } from '../sidebar/ForgeHostFacade';
 import type { RemoteRequestStore } from './RemoteRequestStore';
 import type { RemoteInboundAttachment, RemoteInboundEvent } from './remoteInboundSchema';
 import type { OutboxState } from './RemoteStoreSchemas';
+
+/**
+ * Which window a `/workspace <name>` switch gives up. `replace` reloads the
+ * window that asked for the switch — what has always happened — and `new-window`
+ * opens a second VS Code window beside it. Both stop this window's transports,
+ * so the phone follows the switch either way; what differs is whether this
+ * window survives it and whether a rollback has to say so.
+ */
+export type WorkspaceSwitchModeChoice = 'replace' | 'new-window';
 
 /**
  * The inbound event contract lives in `remoteInboundSchema.ts` and is
@@ -84,86 +94,21 @@ export interface RemoteAttachmentReference {
   bytes: number;
 }
 
-type RemoteContactStatus = 'active' | 'disabled';
-type RemoteContactGroupStatus = 'unbound' | 'link_pending' | 'bound';
-
-export interface RemoteContactRecord {
-  id: string;
-  displayName: string;
-  telegramChatId: string;
-  telegramUserId: string;
-  role: 'contact_only';
-  status: RemoteContactStatus;
-  groupStatus: RemoteContactGroupStatus;
-  groupChatId?: string | undefined;
-  groupTitle?: string | undefined;
-  groupBoundAt?: number | undefined;
-  groupVerifiedAt?: number | undefined;
-  createdAt: number;
-  updatedAt: number;
-}
-
-export interface RemoteContactGroupLinkRecord {
-  id: string;
-  contactId: string;
-  groupChatId: string;
-  groupTitle?: string | undefined;
-  ownerId: string;
-  createdAt: number;
-  expiresAt: number;
-  updatedAt: number;
-  state: 'pending' | 'confirmed' | 'cancelled' | 'expired';
-}
-
-export interface RemoteContactPendingRecord {
-  id: string;
-  telegramChatId: string;
-  telegramUserId: string;
-  createdAt: number;
-  updatedAt: number;
-  status: 'pending' | 'approved' | 'rejected';
-}
-
-/** Where an admitted contact request stands; see `RemoteContactStore.unfinished`. */
-export type RemoteContactDisposition = 'pending' | 'running' | 'answered' | 'failed';
-
-export interface RemoteContactThreadMessage {
-  id: string;
-  contactId: string;
-  role: 'contact' | 'owner' | 'assistant';
-  text: string;
-  createdAt: number;
-  /**
-   * Inbound rows: `<channel>:<chatId>:<providerMessageId>`, so a redelivered
-   * update is recognised rather than answered twice. Absent on assistant rows
-   * and on rows written before it existed.
-   */
-  inboundKey?: string | undefined;
-  /** Inbound rows: whether the request was answered. Survives a reload, unlike the burst timer. */
-  disposition?: RemoteContactDisposition | undefined;
-}
-
-export type RemoteContactOutboundState =
-  | 'pending'
-  | 'confirmed'
-  | 'cancelled'
-  | 'expired'
-  | 'sent'
-  | 'failed';
-
-export interface RemoteContactOutboundRecord {
-  id: string;
-  contactId: string;
-  ownerId: string;
-  ownerChatId: string;
-  recipientChatId: string;
-  recipientDisplayName: string;
-  text: string;
-  createdAt: number;
-  expiresAt: number;
-  updatedAt: number;
-  state: RemoteContactOutboundState;
-}
+/**
+ * The owner-approved contact records, kept in `remoteContactRecords.ts` and
+ * re-exported here for the same reason the inbound contract above is: this
+ * barrel is the one import site for the remote surface, and it had reached the
+ * lint line limit again. No import site changed — the names come back the same.
+ */
+export {
+  type RemoteContactRecord,
+  type RemoteContactGroupLinkRecord,
+  type RemoteContactPendingRecord,
+  type RemoteContactDisposition,
+  type RemoteContactThreadMessage,
+  type RemoteContactOutboundState,
+  type RemoteContactOutboundRecord,
+} from './remoteContactRecords';
 
 export interface RemoteOutboxRecord {
   id: string;
@@ -180,6 +125,8 @@ export interface RemoteOutboxRecord {
    * written before this field existed — they keep their message.
    */
   ephemeral?: boolean | undefined;
+  /** This turn's speed line; see `OutboxSchema`. It is never part of `text`. */
+  speedLine?: string | undefined;
 }
 
 interface RemoteTransportHealth {
@@ -255,7 +202,15 @@ export interface RemoteChannel {
   send(
     chatId: string,
     text: string,
-    options?: { correlationId?: string; signal?: AbortSignal; parseMode?: 'HTML' },
+    // `speedLine` is read only by Telegram, and only when it builds the last chunk.
+    options?: {
+      correlationId?: string;
+      approvalAllowChat?: boolean;
+      approvalAlwaysInProject?: boolean;
+      signal?: AbortSignal;
+      parseMode?: 'HTML';
+      speedLine?: string;
+    },
   ): Promise<string[] | void>;
   /** Set only by transports whose Bot API accepts Telegram HTML. */
   readonly parseMode?: 'HTML' | undefined;
@@ -395,6 +350,11 @@ export interface RemoteChannel {
    * the user just made. Optional: channels with no such affordance fall back to
    * `retractPrompt`. Rejects when a button could not be resolved — the caller
    * reports it, because a keyboard left pressable is worth a visible complaint.
+   *
+   * `decision` is the answer as the four choices every surface uses, so the
+   * button a card keeps says which of them was clicked: `Allow for this chat`
+   * wrote a rule, `Approve` did not, and a receipt that cannot tell them apart
+   * tells the owner nothing about what will happen next time.
    */
   resolvePromptKeyboard?(
     chatId: string,
@@ -403,6 +363,7 @@ export interface RemoteChannel {
     approved: boolean,
     options?: { signal?: AbortSignal },
     reason?: 'resolved' | 'cancelled' | 'timeout',
+    decision?: ApprovalDecision,
   ): Promise<void>;
   start(signal: AbortSignal): Promise<void>;
   requestPairingCode?(phoneNumber: string): Promise<string>;
@@ -449,6 +410,8 @@ export interface RemoteRuntimeOptions {
   host: ForgeHostFacade;
   secrets: vscode.SecretStorage;
   channelFactories?: Partial<Record<'telegram' | 'whatsapp', RemoteChannelFactory>>;
+  /** A VS Code Remote window: the desktop's own Forge window owns every transport, so this runtime starts none. The value is the reason a remote command shows. */
+  hostedElsewhere?: string;
   notifyLocal: (message: string) => void;
   /**
    * Fired whenever the set of running transports or the paired-owner state
@@ -461,7 +424,13 @@ export interface RemoteRuntimeOptions {
   /** Persist `remote.rate_limit_per_minute` and re-apply it live (`/ratelimit`). */
   setRateLimit?: ((perMinute: number) => Promise<void>) | undefined;
   reloadWindow?: (() => Promise<void>) | undefined;
-  openWorkspace?: ((directory: string) => Promise<void>) | undefined;
+  openWorkspace?: ((directory: string, forceNewWindow: boolean) => Promise<void>) | undefined;
+  /**
+   * The user-scope `forge.configFile`, read live. A workspace switch has to
+   * know what the **target** window will load, and the target reads the same
+   * user settings this window does unless it pins a config file of its own.
+   */
+  userConfigFileSetting?: (() => string | undefined) | undefined;
   confirmWhisperServerStart?: ((detail: string) => Promise<boolean>) | undefined;
   /** Absolute path to `.forge/config.yaml`; enables the persisted /voice toggle. */
   configPath?: string | undefined;

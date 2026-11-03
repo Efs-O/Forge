@@ -222,11 +222,36 @@ const heredocCases: Array<[string, string, string]> = [
   ['<<< is a here-string, not a heredoc', 'cat <<< x\nrm -rf /', 'dangerous'],
   ['<< inside quotes opens nothing', "echo '<<EOF'\nrm -rf /", 'dangerous'],
   ['an unterminated body runs to the end', "cat > f <<'EOF'\nrm -rf /", 'normal'],
+  [
+    "an unterminated delimiter ' is refused",
+    "python - <<'PY\nprint(~/.forge/skills)\nPY",
+    'refused',
+  ],
+  ['an unterminated delimiter " is refused', 'python - <<"PY\nprint(1)\nPY', 'refused'],
 ];
 
 describe('heredoc bodies (bash)', () => {
   it.each(heredocCases)('%s', (_name, command, expected) => {
     expect(classifyShellCommand(command, 'bash').classification).toBe(expected);
+  });
+
+  it('names the unterminated delimiter quote as the fault, not Forge own files', () => {
+    for (const command of [
+      "python - <<'PY\nrows = [~/.forge/skills]\nPY",
+      'python - <<"PY\nrows = [~/.forge/skills]\nPY',
+    ]) {
+      const result = classifyShellCommand(command, 'bash');
+      expect(result.classification, command).toBe('refused');
+      const text = `${result.rule?.description ?? ''} ${result.rule?.alternative ?? ''}`;
+      // It has to say what is wrong and how to fix it, and it must not send the
+      // agent off chasing the owner guard for a path inside the body.
+      expect(text).toMatch(/no closing quote/i);
+      expect(text).toMatch(/Close it as <<['"]PY['"]/);
+      // The fault is the delimiter WORD, so the message must not print the
+      // here-document back or name a path inside the body.
+      expect(text).not.toMatch(/\n|print\(|skills/);
+      expect(text).not.toMatch(/own files|owner only|changed by the owner/);
+    }
   });
 
   it('treats backslash-newline as a line continuation', () => {

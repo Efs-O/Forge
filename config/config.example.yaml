@@ -48,6 +48,10 @@ custom_instructions: >-
 # anything you do not want to false (or delete the line).
 permissions:
   # approval_timeout_minutes: 30 # Optional: stop waiting for unanswered approvals after 30 minutes.
+  # Secret-path patterns added to the built-in defaults, and the escape hatch:
+  # exact files something may still read despite them.
+  # secret_paths: ["**/.env.production"]
+  # secret_paths_allow: ["C:/path/to/project/.env.production"]
   fs:
     delete: true
   exec:
@@ -57,6 +61,14 @@ permissions:
     write: true
   agents:
     delegate: true
+  # What a chat may do to other chats in this window. A new install gets these
+  # off: `message_chat action=new` and `action=steer` are refused until you set
+  # them true, because both start or interrupt work the owner did not ask for.
+  # `view` is read-only and always on.
+  chats:
+    new_chat: false          # message_chat action=new (open a second chat)
+    steer: false             # message_chat action=steer (interrupt a running turn)
+    new_chats_per_hour: 2    # 1-6; raise it for a supervisor dispatching several workers
   net:
     search: true
     fetch: true
@@ -77,6 +89,9 @@ permissions:
     # again drops the VS Code approval and its captures immediately; other
     # windows keep theirs.
     # allow_vscode: false
+
+# Owner-only approval policy lives in `~/.forge/policy.yaml`, not config.yaml.
+# approvals:
 
 # Persistent agent jobs (docs/JOBS.md). The setup wizard turns the scheduler on
 # for a new install; a config without a `jobs:` block has no scheduler. With no
@@ -119,11 +134,17 @@ x_shared:
 defaults:
   max_tool_rounds: 1000
   # Groups can be loaded on demand. Each eager group adds its tool schemas to
-  # every request, increasing the prompt's prefill cost. Groups are files
-  # (delete/move/append/structured edits), git (read/stage/commit/branch),
-  # code_intel (LSP actions/search), memory, background (stop/list/wait),
-  # agents (delegation/live sessions/jobs/notifications), media (image/video),
-  # editor_ui, computer_use, notebook, system, and halluscribe (history search).
+  # every request, increasing the prompt's prefill cost; `files` (structured
+  # edits, move, restore) and `background` (stop/list/wait) are advertised
+  # without loading, so listing them here changes nothing. The groups are files,
+  # background, git (read/stage/commit/branch), code_intel (LSP actions and
+  # semantic search), memory, agents (delegation, live sessions, jobs,
+  # notifications), media (view, generate and upscale images, image search,
+  # video stills, render HTML to a PNG, send a file), editor_ui, computer_use,
+  # notebook, system, and halluscribe (history search). `media` is no longer
+  # advertised by default: 53 sessions used four of its tools 0 times and a
+  # fifth once, so every coding turn was paying about 2,300 tokens for it. List
+  # it below to keep it eager.
   tool_groups:
     eager: []
   sampling:
@@ -888,13 +909,13 @@ models:
 
   - name: claude-code
     provider: cli
-    cli: claude   # bare name, looked up on PATH at spawn (an absolute path also works)
+    cli: claude   # bare name, or a full path to the executable. A .cmd shim is run through its launcher, which needs Node on PATH
     comment: "Claude Code CLI — external agent, uses existing Claude subscription"
 
 
   - name: codex
     provider: cli
-    cli: codex
+    cli: codex    # bare name, or a full path to the executable. A .cmd shim is run through its launcher, which needs Node on PATH
     comment: "Codex CLI — external agent, uses existing OpenAI subscription"
 
 
@@ -1011,6 +1032,7 @@ image_generation:
     #   extra_args: ["--offload-to-cpu", "--sigmas", "1.0,0.978453,0.95418,0.926626,0.89508,0.845148,0.704534,0.414568,0.0", "--vae-tiling", "--vae-relative-tile-size", "2"]
     #   confirm_on_start: true    # ask once before the GPU is occupied
     #   confirm_each: false       # free per image, so no per-call prompt
+    #   media_gpu_lease_enabled: false  # opt in to sharing ~/.forge/media-gpu/lease.json with media skills
   # upscale_image (ESRGAN x4, one sd-cli run per call; frees its VRAM on exit).
   # Without this block the tool is not registered. Use sd-cli, not sd-server.
   # upscale:
@@ -1093,17 +1115,175 @@ remote:
       max_fetch_bytes: 100000
       timeout_ms: 15000
 
-# Agent bus enables ask_agent for the session linked to each chat.
+# Agent bus: turns on `ask_agent` **and** the `/agent/*` routes `forge.sh`
+# uses (`src/config/agentBusSchema.ts:5-9`). Enabling it is what lets a Claude
+# Code, Codex or Copilot session message this window at all; absent or disabled
+# means neither exists.
 agent_bus:
   enabled: true
-  # Optional CLI executable names/paths and linked-session model settings.
-  # claude_session: my-session   # pin one; list them with Forge: Show Live Claude Sessions
-  # codex_thread: <thread id>
-  # Copilot CLI executable: a bare name on PATH or an absolute path.
+  # CLI executables: a bare name on PATH or an absolute path.
+  # claude_cli: claude
+  # codex_cli: codex
   # copilot_cli: copilot
+  # Pin one live session instead of letting Forge pick or start one per chat.
+  # claude_session: my-session   # list them with Forge: Show Live Claude Sessions
+  # codex_thread: <thread id>
+  # Model and effort for the CLI sessions Forge starts. Unset = the CLI's own
+  # config decides; `copilot_model` defaults to `auto` so a premium model is not
+  # spent on every call.
+  # codex_model: gpt-6-luna
+  # codex_effort: high         # low | medium | high | xhigh | max
+  # claude_model: opus
+  # claude_effort: high
+  # copilot_model: auto
+  # How Forge reaches Claude Code: `pipe` is Forge's own stream-json pipe;
+  # `relay` runs a billed `claude -p` per message instead, for a Claude Code
+  # build that does not speak the pipe. `relay_model` is used only then.
+  # claude_transport: pipe     # pipe | relay
+  # relay_model: haiku         # the model the relay asks
 
 # Linked agent delivery behavior. By default a linked session's panel is opened
 # before each ask, then Forge waits briefly for its live adapter.
 agent_links:
   open_panel: every_ask # every_ask | never
   panel_live_timeout_ms: 20000
+
+# ===========================================================================
+# Optional top-level blocks. Every one is commented: uncomment to use it, and
+# a key the loader accepts but this example never names is a doc gap
+# (test/unit/ConfigKeysDocumented.test.ts), so this list is the rest of them.
+# ===========================================================================
+
+# Extra folders the first-run wizard and the model picker scan for GGUF files.
+# model_dirs:
+#   - C:/models
+
+# Absolute folders outside the workspace that delete_file and the file-writing
+# tools may reach (read_file reads anywhere). Each entry must be an absolute path.
+# extra_file_roots:
+#   - C:/Users/you/tools
+
+# Folder holding your own Nunjucks overrides of the built-in prompt templates.
+# templates_dir: C:/Users/you/forge-templates
+
+# Strip thinking and channel markers out of model responses. Default: on.
+# A model's own `think` / `reasoning_effort` still decide what is expected.
+# strip_thinking_channels: false
+
+# Warm direct-chat CLI processes (Claude Code / Codex) to keep alive, and how
+# long an idle one survives before it is disposed. Defaults: 4 and 900000 ms.
+# max_cli_agents: 4
+# cli_idle_timeout_ms: 900000
+
+# Ollama daemon supervision: Forge starts `ollama serve` itself when a model's
+# local Ollama endpoint refuses connection. Default: on.
+# ollama:
+#   auto_start: true
+#   executable: ollama
+
+# Let the agent set its own long-task check-in. `after_minutes` is 5-240 and
+# `/checkin` writes this key; removing the block stops the note mid-task.
+# elapsed_time_note: { after_minutes: 20 }
+
+# Keep the exact agent-loop request bodies on disk for debugging. Off unless
+# this block is present (max_mb 1-10000, keep_hours 1-720).
+# record_requests: { enabled: true, max_mb: 200, keep_hours: 24 }
+
+# Browser knobs that are not permissions. `channel` is used exactly as
+# configured (no silent fallback); `headless` is a config value, never a model
+# argument. Each new origin still asks for approval once per session.
+# browser:
+#   channel: chrome          # chrome | msedge | chromium
+#   headless: false
+#   allowed_origins: []
+
+# Hosts `web_fetch` may GET: exact hostnames or `*.suffix` wildcards. Default
+# is empty, so every host this chat has not approved asks once per chat. This
+# is a different gate from `jobs.allowed_hosts` above (a job is refused
+# outright), and a permanent exception is written here by you, never by an
+# approval clicked in a chat.
+# fetch:
+#   allowed_hosts:
+#     - api.github.com
+
+# Command execution settings that are not permissions: the per-call timeout
+# (default 30000 ms) and extra denylist patterns on top of the built-in one.
+# exec:
+#   timeout_ms: 30000
+#   denylist_extra: []
+
+# Tool-layer settings; absent means every tool behaves as it always has.
+# `warn_at` must be lower than `max`, so a long file gets the "plan where to
+# split" line instead of only the refusal.
+# tools:
+#   file_length_warning:
+#     warn_at: 350
+#     max: 500
+#   # The "new problems after this edit" note a write result carries: the file's
+#   # diagnostics are snapshotted before the write and only what the write
+#   # introduced is named after it — errors and warnings, capped, with the count
+#   # of what the cap left out. ON by default, the only `tools:` block that is:
+#   # two seconds per edit was priced against the 271 `tsc`/`eslint` shell rounds
+#   # in the audit window this replaces. `enabled: false` restores the results
+#   # these tools produced before 2026-10-29.
+#   edit_diagnostics:
+#     enabled: true
+#     settle_ms: 2000    # 0-15000; the ceiling on the wait, not a sleep — a
+#                        # matching diagnostics event settles in 300 ms, and 0
+#                        # reads once immediately after the write.
+#     max_items: 10      # 1-50 problems named per result; the rest are counted
+
+# Skills: folders of instructions plus tested scripts the model opens with
+# `load_skill`. It finds them in three places, and a later one wins by name (the
+# catalog line says which root a skill came from, and says so when it shadows
+# another): the skills shipped in the VSIX, `~/.forge/skills/` for this PC, and
+# `.forge/skills/` in the open workspace. A skill grants nothing — its scripts
+# run through `shell` under the same approvals as any other command.
+# Absent means OFF: one line per skill in the system prompt plus a `load_skill`
+# schema on every round is the cost, so a workspace with no skills keeps the
+# prompt it always had. Turn it on to get the catalog and the tool.
+# skills:
+#   enabled: false
+
+# A laptop on your tailnet asks this machine to load a model it cannot start
+# itself. Needs `tailscale serve --tcp <port>`, and `shared_ports` must mirror
+# what the tailnet actually forwards or the laptop gets `port_not_shared`.
+# Enabling it also requires `control_server.enabled: true`.
+# model_starter:
+#   enabled: false
+#   port: 8798               # must match `tailscale serve --tcp 8798`
+#   shared_ports: [8799]     # every port the laptop may reach
+#   lease_ttl_s: 600         # 30-86400; how long a remote lease survives
+
+# Desktop-side allowlist for laptop cloud requests; absent or disabled means no
+# listener. `models` is required — name at least one model the laptop may use.
+# cloud_relay:
+#   enabled: false
+#   port: 8797
+#   max_body_mb: 32
+#   models: [my-model]
+
+# ── The two keys that came with the policy split ────────────────────────────
+# `Forge: Move security settings to policy.yaml` moves these, plus permissions,
+# llama_server, jobs, remote, mcp_servers and the rest of the policy keys, into
+# `~/.forge/policy.yaml` — the owner's file, the one an agent cannot edit. Until
+# that command has been run, both files accept these keys; the same key in both
+# at once is a load error that names it, never a merge.
+#
+# An engine is a named set of facts about how a server process is started and
+# stopped, plus which executable runs it. A model then says `engine: strata-8090`
+# and nothing else about programs: a new model on an existing engine is a free
+# edit, a new engine is an owner edit. Models that start the SAME program share
+# one engine, so twenty llama.cpp models on one build become one engine plus
+# twenty one-line edits instead of twenty copies of the same argv.
+# engines:
+#   strata-8090:
+#     start_command: [python, N:/Strata/start_strata.py, --config, x.json, solo]
+#     stop_command: [python, N:/Strata/stop_strata.py]
+#     unload_path: /unload
+#   llamacpp-b10430:
+#     llama_server_binary: 'C:/Forge/llama.cpp-b10430/llama-server.exe'
+# Hosts a config.yaml model `endpoint` may name besides loopback. A model that
+# names a host not in this list fails to load once config.yaml opens to agents,
+# because otherwise an agent could add a model that sends the chat anywhere.
+# model_hosts: [100.64.0.10]

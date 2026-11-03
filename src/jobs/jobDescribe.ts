@@ -5,7 +5,7 @@
  * job differently.
  */
 
-import type { Job } from './jobSchema';
+import type { Job, JobFile, JobState } from './jobSchema';
 
 /** A short human-readable form of a schedule. */
 export function describeSchedule(schedule: Job['schedule']): string {
@@ -49,6 +49,8 @@ export function describeAction(action: NonNullable<Job['action']>): string {
       return `llamacpp_update [${action.mode}]`;
     case 'agent_task':
       return `agent_task [${action.report}]${action.model ? ` (${action.model})` : ''}${action.max_minutes ? ` (max ${action.max_minutes}m)` : ''}`;
+    case 'retitle':
+      return `retitle [${action.report}]${action.dry_run ? ' (dry run)' : ''} (at most ${action.max_chats} chats, skip chats idle under ${action.min_idle_minutes}m)${action.model ? ` (${action.model})` : ''}`;
   }
 }
 
@@ -60,6 +62,10 @@ export function formatWhen(epochMs: number, now: Date): string {
   const abs = Math.abs(diff);
   const minutes = Math.round(abs / 60_000);
   if (minutes < 1) return future ? 'now' : 'just now';
+  // A minute-scale gap read `0h ago` before this branch existed. The sessions
+  // panel shows these every minute, so minutes get their own line; a future
+  // time is phrased as one, not as a past tense.
+  if (minutes < 60) return future ? `in ${minutes}m` : `${minutes}m ago`;
   const hours = Math.round(abs / 3_600_000);
   if (hours < 24) return future ? `in ${hours}h` : `${hours}h ago`;
   const days = Math.round(abs / 86_400_000);
@@ -70,4 +76,33 @@ export function formatWhen(epochMs: number, now: Date): string {
 /** Truncate a string to `max` characters, adding an ellipsis when cut. */
 export function truncate(text: string, max: number): string {
   return text.length <= max ? text : text.slice(0, max - 1) + '…';
+}
+
+/** The outcome of the most recent run, or 'no runs yet'. */
+export function lastRunOutcome(state: JobState): string {
+  if (state.last_run_at === null) return 'no runs yet';
+  if (state.consecutive_failures > 0) return `failing ×${state.consecutive_failures}`;
+  return 'ok';
+}
+
+/** A human-readable description of a whole job (for `get`). */
+export function describeJob(jobFile: JobFile): string {
+  const { job, state } = jobFile;
+  const lines = [
+    `Job "${job.name}" [${job.id}]`,
+    `  status: ${job.enabled ? 'enabled' : 'paused'}${state.task_pending && state.task_pending_reason ? ` · pending: ${state.task_pending_reason}` : ''}`,
+    `  schedule: ${describeSchedule(job.schedule)}`,
+    `  check: ${describeCheck(job.check)}`,
+    `  on_change: ${describeOnChange(job.on_change)}`,
+    `  action: ${job.action ? describeAction(job.action) : 'none'}`,
+    `  wake: ${job.wake ? `yes (${job.after})` : 'no'}`,
+    `  last run: ${state.last_run_at === null ? 'never' : formatWhen(state.last_run_at, new Date())}`,
+    `  last ok: ${state.last_ok_at === null ? 'never' : formatWhen(state.last_ok_at, new Date())}`,
+    `  consecutive failures: ${state.consecutive_failures}`,
+    `  next due: ${state.next_due_at === null ? 'not scheduled' : formatWhen(state.next_due_at, new Date())}`,
+  ];
+  if (state.last_observation) {
+    lines.push(`  last observation: ${truncate(state.last_observation, 400)}`);
+  }
+  return lines.join('\n');
 }

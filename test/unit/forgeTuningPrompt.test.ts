@@ -152,6 +152,16 @@ describe('builtin execute template', () => {
     expect(prompt).toContain('Keep one point per bullet');
   });
 
+  it('keeps the plain opening when a request asks for detail (lane report, 2026-10-30)', () => {
+    // A lane reply opened with a hash because the brief asked for one and user
+    // instructions outrank project instructions, so the rule lives here.
+    expect(prompt).toContain('Open with a plain opening: one to three sentences in everyday words');
+    expect(prompt).toContain('with no commit hash, file path, code name or jargon in them');
+    expect(prompt).toContain('even when another agent or chat sent the request');
+    expect(prompt).toContain('It shapes what comes after the plain opening, never replaces it.');
+    expect(prompt).toContain("Neither does the final answer's plain opening.");
+  });
+
   it('leaves fallback-format and terminal guidance to the code that injects them', () => {
     // withFallbackToolInstructions and renderUserTerminalCommands carry these
     // exactly when they apply; a copy here is paid on every turn.

@@ -25,7 +25,7 @@ const DEFAULT_PERMISSIONS: NonNullable<ForgeConfig['permissions']> = {
   exec: { headless: true },
   git: { read: true, write: true },
   agents: { delegate: true },
-  chats: { new_chat: false, steer: false },
+  chats: { new_chat: false, steer: false, new_chats_per_hour: 2 },
   browser: { enabled: true },
   desktop: { enabled: true },
 };

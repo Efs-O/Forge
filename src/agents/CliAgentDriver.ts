@@ -1,4 +1,5 @@
 import * as readline from 'readline';
+import type { ChildProcess } from 'node:child_process';
 import { getLogger } from '../util/logger';
 import { getCliAdapter } from './adapters';
 import { spawnCliProcess, terminateCliProcessTree, waitForCliProcessExit } from './cliProcess';
@@ -7,7 +8,30 @@ import type { CliAgentEvent, CliAgentName, CliAgentRunResult, CliParseContext } 
 const log = getLogger();
 
 const DEFAULT_TIMEOUT_MS = 10 * 60 * 1000;
-const STDERR_TAIL_CHARS = 4000;
+
+/** Characters of CLI stderr a failed run keeps and reports. The single cap for
+ *  every CLI-agent path — this driver and both warm chat sessions — so a
+ *  verbose CLI cannot grow the retained tail without bound. */
+export const STDERR_TAIL_CHARS = 4000;
+
+/** Drains a child's stderr into a bounded tail.
+ *  A pipe nobody reads fills the OS buffer and stalls the writer, so every
+ *  path that spawns a CLI has to consume stderr even when only the last few
+ *  kilobytes are worth reporting. `sink` is the driver's live pass-through to
+ *  its caller; the warm sessions pass none. Only the last STDERR_TAIL_CHARS
+ *  characters survive. */
+export function collectStderrTail(
+  child: ChildProcess,
+  sink?: (text: string) => void,
+): { readonly tail: () => string } {
+  let buffered = '';
+  child.stderr?.setEncoding('utf8');
+  child.stderr?.on('data', (chunk: string) => {
+    buffered = (buffered + chunk).slice(-STDERR_TAIL_CHARS);
+    sink?.(chunk);
+  });
+  return { tail: () => buffered };
+}
 
 export interface CliAgentRunOptions {
   cliName: CliAgentName;
@@ -37,8 +61,9 @@ export interface CliAgentRunOptions {
  * Spawns a configured CLI (claude/codex) as a full-rights external agent for
  * one task, streams its parsed progress, and returns the final result. Forge
  * injects no tools here — the CLI runs its own agentic loop with its own
- * tools; this driver only relays stdout/exit status. Single owner of the
- * CLI-agent spawn/parse/cancel/timeout lifecycle (docs/plans/CONFIG_OVERHAUL_PLAN.md §4 step 7).
+ * tools; this driver only relays stdout/exit status.
+ * Single owner of the CLI-agent spawn/parse/cancel/timeout lifecycle
+ * (docs/plans/CONFIG_OVERHAUL_PLAN.md §4 step 7).
  */
 export class CliAgentDriver {
   async run(options: CliAgentRunOptions): Promise<CliAgentRunResult> {
@@ -46,7 +71,6 @@ export class CliAgentDriver {
     let finalText: string | undefined;
     let errorText: string | undefined;
     let sessionId: string | undefined = options.sessionId ?? options.createSessionId;
-    const stderrChunks: string[] = [];
     let protocolError: string | undefined;
 
     const ctx: CliParseContext = {
@@ -84,12 +108,7 @@ export class CliAgentDriver {
       ...(adapter.spawnEnv ? { env: adapter.spawnEnv } : {}),
     });
     options.onSpawned?.();
-
-    child.stderr?.setEncoding('utf8');
-    child.stderr?.on('data', (text: string) => {
-      stderrChunks.push(text);
-      options.onStderr?.(text);
-    });
+    const stderr = collectStderrTail(child, (text) => options.onStderr?.(text));
 
     const rl = child.stdout
       ? readline.createInterface({ input: child.stdout, crlfDelay: Infinity })
@@ -124,7 +143,7 @@ export class CliAgentDriver {
     options.signal?.removeEventListener('abort', onAbort);
     rl?.close();
 
-    const stderrTail = stderrChunks.join('').slice(-STDERR_TAIL_CHARS);
+    const stderrTail = stderr.tail();
 
     // Every terminal outcome is logged. Delegation used to fail in total silence:
     // two consecutive failures left no output-channel line and no coordination

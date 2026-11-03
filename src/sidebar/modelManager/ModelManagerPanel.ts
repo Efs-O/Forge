@@ -1,6 +1,8 @@
 import * as vscode from 'vscode';
 import type { IBackendPool } from '../../backend/BackendPool';
 import type { ForgeConfig } from '../../config/types';
+import { referenceRemovalNote } from '../../config/modelReferences';
+import { noticeStaleBuildOnConfigFailure } from '../../vscode/staleBuild';
 import { buildModelManagerHtml } from './panelHtml';
 import { buildModelManagerState } from './modelSnapshot';
 import { editModelField, purgeModel, purgeOrphanFile, removeModelFromConfig } from './editOps';
@@ -82,6 +84,10 @@ export class ModelManagerPanel {
   }
 
   private reportError(err: unknown, field?: string, modelName?: string): void {
+    // A refused write is often not the config's fault: a window that was never
+    // reloaded after an upgrade validates config.yaml with the old build's
+    // rules, and the panel is where that shows up most.
+    noticeStaleBuildOnConfigFailure();
     this.post({
       type: 'error',
       message: `Forge: ${(err as Error).message}`,
@@ -106,8 +112,13 @@ export class ModelManagerPanel {
         return;
 
       case 'removeModel': {
+        // The prompt has to say what the write will clean up: an allowlist entry
+        // or an alias key going with the model is the difference between a delete
+        // that leaves the config loadable and one that blocks the next change.
+        const note = referenceRemovalNote(this.getConfig(), msg.modelName);
         const choice = await vscode.window.showWarningMessage(
-          `Remove "${msg.modelName}" from config.yaml? This does not delete any files.`,
+          `Remove "${msg.modelName}" from config.yaml? This does not delete any files.` +
+            (note ? `\n${note}` : ''),
           { modal: true },
           'Remove',
         );
@@ -122,11 +133,19 @@ export class ModelManagerPanel {
 
       case 'purgeModel': {
         if (msg.typedName !== msg.modelName) {
-          this.reportError(new Error('typed name does not match — purge cancelled'));
+          // A cancelled purge is not a config failure: nothing was written, so
+          // this is not the moment to tell the user their window is behind an
+          // installed build. `reportError` does that, and means it.
+          this.post({
+            type: 'error',
+            message: 'Forge: typed name does not match — purge cancelled',
+          });
           return;
         }
+        const note = referenceRemovalNote(this.getConfig(), msg.modelName);
         const choice = await vscode.window.showWarningMessage(
-          `Permanently delete "${msg.modelName}" and its GGUF file(s) from disk? This cannot be undone.`,
+          `Permanently delete "${msg.modelName}" and its GGUF file(s) from disk? This cannot be undone.` +
+            (note ? `\n${note}` : ''),
           { modal: true },
           'Delete permanently',
         );

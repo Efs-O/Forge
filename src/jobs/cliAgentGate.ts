@@ -1,5 +1,5 @@
 import { resolveModelName, splitModelProfile } from '../config/ConfigResolver';
-import { updateConfigFile } from '../config/ConfigWriter';
+import { updateForgeKeyFile } from '../config/ConfigWriter';
 import type { ForgeConfig } from '../config/types';
 import { unattendedConversations } from '../sidebar/unattendedConversations';
 import type { RunRow } from './jobSchema';
@@ -34,7 +34,8 @@ function cliAgentsAllowed(config: ForgeConfig): boolean {
 
 /** The consent write: `jobs.allow_cli_agents: true`, comments preserved. */
 export function makeAllowCliAgents(configPath: string): () => void {
-  return () => updateConfigFile(configPath, (doc) => doc.setIn(['jobs', 'allow_cli_agents'], true));
+  return () =>
+    updateForgeKeyFile(configPath, 'jobs', (doc) => doc.setIn(['jobs', 'allow_cli_agents'], true));
 }
 
 /** True when the name resolves to a `provider: cli` model. Unknown names are not CLI. */

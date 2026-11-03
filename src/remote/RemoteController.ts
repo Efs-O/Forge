@@ -172,8 +172,8 @@ export class RemoteController {
     );
     this.accepting = true;
     this.subscription = this.channel.onEvent((event) => this.handle(event));
-    this.approvals.start();
-    this.questions.start();
+    this.approvals.start(this.progress);
+    this.questions.start(this.progress);
     await this.channel.start(this.abort.signal);
     this.progressSubscription = this.host.onAgentProgress?.((event) => {
       this.hostProgress.handle(event);
@@ -234,8 +234,8 @@ export class RemoteController {
   async broadcastHostNotification(text: string, ephemeral?: boolean): Promise<number> {
     return this.fanout.toWorkspace(text, ephemeral);
   }
-  async mirrorTurn(conversationId: string, text: string): Promise<number> {
-    return this.fanout.mirrorTurn(conversationId, text);
+  async mirrorTurn(conversationId: string, text: string, line?: string): Promise<number> {
+    return this.fanout.mirrorTurn(conversationId, text, line);
   }
   mirrorPrompt(conversationId: string, text: string): Promise<number> {
     if (this.agentOriginTurns.has(conversationId)) return Promise.resolve(0);

@@ -60,6 +60,8 @@ export interface TurnContextState {
   unattended?: boolean | undefined;
   /** One-shot note attached to the first request after compaction. */
   compactionResume?: string | undefined;
+  /** FORGE.md changed since the system prompt was pinned (forgeInstructionsPin.ts). */
+  forgeInstructionsNote?: string | undefined;
 }
 
 type TurnContextRenderState = TurnContextState & { planUnchanged?: boolean };
@@ -78,6 +80,7 @@ function renderTurnContext(state: TurnContextRenderState): string | undefined {
   if (state.activeFile) parts.push(`Active file: ${state.activeFile}`);
   if (state.unattended) parts.push(UNATTENDED_NOTE);
   if (state.compactionResume) parts.push(state.compactionResume);
+  if (state.forgeInstructionsNote) parts.push(state.forgeInstructionsNote);
   const remote = renderRemoteReach(state.remoteChats);
   if (remote) parts.push(remote);
   const userTerminal = renderUserTerminalCommands(state.userTerminalCommands);

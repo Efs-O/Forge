@@ -26,9 +26,11 @@ vi.mock('../../src/tools/renderHtml/previewFetch', () => ({
 }));
 
 import { isPreviewRequestAllowed } from '../../src/tools/renderHtml/previewRenderer';
+import { clearConversationHostApprovals, markHostApproved } from '../../src/tools/fetchHostApprovals';
 import { PREVIEW_LAUNCH_ARGS } from '../../src/tools/renderHtml/renderBrowser';
 import { makeRenderHtmlToImageTool } from '../../src/tools/renderHtmlToImageTool';
 import type { MultimodalToolResult } from '../../src/tools/ToolRegistry';
+import type { ForgeConfig } from '../../src/config/types';
 import { pngWith, renderFake, resetRenderFake } from '../support/renderHtmlHarness';
 import {
   context,
@@ -41,8 +43,8 @@ import {
 let root: string;
 const PAGE = '<html><head><title>Pagoda</title></head><body><canvas></canvas></body></html>';
 
-function rig() {
-  const { deps, deliverFile, remainingFileDeliveries } = rigDeps({});
+function rig(options: { config?: Partial<ForgeConfig> } = {}) {
+  const { deps, deliverFile, remainingFileDeliveries } = rigDeps(options);
   return { tool: makeRenderHtmlToImageTool(deps), deliverFile, remainingFileDeliveries };
 }
 
@@ -61,6 +63,9 @@ beforeEach(async () => {
 afterEach(async () => {
   vi.restoreAllMocks();
   await removeWorkspace(root);
+  // The approved-host set is in memory and keyed by chat: left over from one
+  // case it would let the next one reach a host it was never asked about.
+  clearConversationHostApprovals();
 });
 
 describe('render_html_to_image preview: launch hardening', () => {
@@ -96,7 +101,16 @@ describe('render_html_to_image preview: launch hardening', () => {
       { url: 'file:///C:/Windows/win.ini', method: 'GET' },
       { url: 'javascript:alert(1)', method: 'GET' },
     ];
-    const { tool } = rig();
+    // The public hosts are named in `fetch.allowed_hosts` so this test still
+    // tests what it was written to test — the shape and DNS refusals — and not
+    // the new chat-scoped host rule, which has its own two cases below.
+    const { tool } = rig({
+      config: {
+        fetch: {
+          allowed_hosts: ['cdn.jsdelivr.net', 'public.example.test', 'example.com'],
+        },
+      },
+    });
     const result = await tool.handler({ mode: 'preview', path: await writePage() }, context());
 
     expect(renderFake.routeSelectors).toEqual(['**/*']);
@@ -131,6 +145,59 @@ describe('render_html_to_image preview: launch hardening', () => {
     expect(result).toContain(
       'Requests that did not load: https://forge-preview.invalid (refused: preview serves only the page itself)',
     );
+  });
+
+  // A public host is no longer enough. Since Part A of docs/plans/EXFIL_GATES_PLAN.md
+  // the preview may only reach a host `fetch.allowed_hosts` lists, or a host this
+  // chat's `web_fetch` card already approved — otherwise the preview is the
+  // zero-prompt path `web_fetch` used to be, and a page can POST a form to a
+  // collector nobody was asked about.
+  it('refuses a public host this chat has not approved, and lists it in the result', async () => {
+    renderFake.pageRequests = [
+      { url: 'https://collector.example.net/form', method: 'POST' },
+      { url: 'https://cdn.jsdelivr.net/npm/three@0.160.1/build/three.module.js', method: 'GET' },
+    ];
+    const { tool } = rig({ config: { fetch: { allowed_hosts: ['cdn.jsdelivr.net'] } } });
+    const result = String(
+      await tool.handler({ mode: 'preview', path: await writePage() }, context()),
+    );
+    expect(renderFake.routeOutcomes).toEqual([
+      { url: 'https://forge-preview.invalid/', outcome: 'fulfill' },
+      { url: 'https://collector.example.net/form', outcome: 'abort' },
+      {
+        url: 'https://cdn.jsdelivr.net/npm/three@0.160.1/build/three.module.js',
+        outcome: 'fulfill',
+      },
+    ]);
+    // Listed, not swallowed: the agent has to be able to see what it lost and do
+    // something about it, which is why the message names the sanctioned next step.
+    expect(result).toContain(
+      'Requests that did not load: https://collector.example.net (refused: host not approved for this chat (fetch it with web_fetch, which asks))',
+    );
+    // Only the refused host is listed. A host that loaded is not a problem the
+    // agent has to see, and listing every host a page touched would bury the one
+    // that matters (`WebFetchSsrf.test.ts` pins the same rule for the leak case).
+    expect(result).not.toContain('https://cdn.jsdelivr.net');
+  });
+
+  // The same set and the same rules as `web_fetch`, from one owner
+  // (`fetchHostApprovals.ts`): a host the chat earned once is free in the preview
+  // too, with no second card.
+  it('lets a host this chat already approved through without another card', async () => {
+    markHostApproved('preview-1', 'collector.example.net');
+    renderFake.pageRequests = [{ url: 'https://collector.example.net/form', method: 'POST' }];
+    const { tool } = rig();
+    const result = String(
+      await tool.handler(
+        { mode: 'preview', path: await writePage() },
+        context({ conversationId: 'preview-1' }),
+      ),
+    );
+    expect(renderFake.routeOutcomes.at(-1)).toMatchObject({
+      url: 'https://collector.example.net/form',
+      outcome: 'fulfill',
+    });
+    expect(result).not.toContain('host not approved for this chat');
   });
 
   it('allows public web request shapes and uses the unchanged Chrome DNS wall', () => {

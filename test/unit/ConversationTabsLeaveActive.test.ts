@@ -10,6 +10,7 @@ import {
 const idleSignals: ConversationEvictionSignals = {
   streaming: false,
   activeRequestChain: false,
+  workerChatActive: false,
   unattended: false,
   pendingApprovalActive: false,
   pendingApprovalQueued: false,
@@ -17,7 +18,9 @@ const idleSignals: ConversationEvictionSignals = {
   unattributedRequest: false,
   hostQueue: false,
   webviewQueue: false,
+  webviewDraft: false,
   beforeWebviewQueueReport: false,
+  beforeWebviewDraftReport: false,
   remoteRuntimeUnavailable: false,
   remoteBinding: false,
   remoteIntakeQueue: false,
@@ -54,6 +57,21 @@ function harness(options: {
   const stopStreamingIfNeeded = vi.fn(async () => {});
   const disposeConversation = vi.fn(async () => {});
   const reset = vi.fn();
+  let clock = 10;
+  const markActivity = vi.fn((id: string) => {
+    state = {
+      ...state,
+      conversations: state.conversations.map((conversation) =>
+        conversation.id === id ? { ...conversation, retention_activity_at: ++clock } : conversation,
+      ),
+    };
+  });
+  const retention = {
+    markActivity,
+    isExpired: () => false,
+    isEnabled: () => true,
+    refresh: vi.fn(),
+  };
   const deps = {
     isStreaming: () => false,
     getConfig: () => ({ active_model: 'model' }) as ForgeConfig,
@@ -74,6 +92,9 @@ function harness(options: {
     refreshUi,
     isConversationEvictable: (id: string) => !(options.blocked?.(id) ?? false),
     evictionBlockers: () => [],
+    isConversationDrafted: () => false,
+    retention,
+    persistSidebar: async () => true,
   } as unknown as ConversationTabsDeps;
   return {
     tabs: new ConversationTabs(deps),
@@ -84,33 +105,37 @@ function harness(options: {
     refreshUi,
     stopStreamingIfNeeded,
     disposeConversation,
+    markActivity,
   };
 }
 
 describe('ConversationTabs leaving the active chat', () => {
-  it('archives the idle chat when creating a conversation', () => {
+  it('keeps the previous chat open when creating a conversation and gives it a fresh grace period', () => {
     const h = harness();
 
     const created = h.tabs.create();
 
     expect(created).toBeDefined();
-    expect(h.getState().history.map((chat) => chat.id)).toContain('tab0');
-    expect(h.getState().conversations.map((chat) => chat.id)).not.toContain('tab0');
+    expect(h.getState().history).toEqual([]);
+    expect(h.getState().conversations.map((chat) => chat.id)).toContain('tab0');
+    expect(h.getState().conversations.find((chat) => chat.id === 'tab0')?.retention_activity_at).toBe(11);
     expect(h.getState().activeConversationId).toBe(created?.id);
   });
 
-  it('archives the idle chat when switching to another open chat', () => {
+  it('keeps both chats open and resets activity on switch away and back', () => {
     const h = harness();
 
     h.tabs.switch('tab1');
 
-    expect(h.getState().history.map((chat) => chat.id)).toContain('tab0');
-    expect(h.getState().conversations.map((chat) => chat.id)).toEqual(['tab1']);
+    expect(h.getState().history).toEqual([]);
+    expect(h.getState().conversations.map((chat) => chat.id)).toEqual(['tab0', 'tab1']);
     expect(h.getState().activeConversationId).toBe('tab1');
-    expect(h.refreshUi).toHaveBeenCalledWith(undefined);
+    expect(h.getState().conversations.find((chat) => chat.id === 'tab0')?.retention_activity_at).toBe(11);
+    expect(h.getState().conversations.find((chat) => chat.id === 'tab1')?.retention_activity_at).toBe(12);
+    expect(h.refreshUi).toHaveBeenCalledWith({ pointerOnly: true });
   });
 
-  it('archives the idle chat when restoring a history conversation', () => {
+  it('keeps the previous chat open when restoring history', () => {
     const h = harness({
       history: [{ id: 'restored', title: 'Restored', createdAt: 0, updatedAt: 5, messages: [] }],
     });
@@ -118,7 +143,9 @@ describe('ConversationTabs leaving the active chat', () => {
     const restored = h.tabs.restore('restored');
 
     expect(restored?.id).toBe('restored');
-    expect(h.getState().history.map((chat) => chat.id)).toContain('tab0');
+    expect(h.getState().history.map((chat) => chat.id)).not.toContain('tab0');
+    expect(h.getState().conversations.map((chat) => chat.id)).toContain('tab0');
+    expect(h.getState().conversations.find((chat) => chat.id === 'tab0')?.retention_activity_at).toBe(11);
     expect(h.getState().history.map((chat) => chat.id)).not.toContain('restored');
     expect(h.getState().activeConversationId).toBe('restored');
   });
@@ -154,33 +181,21 @@ describe('ConversationTabs leaving the active chat', () => {
     },
   );
 
-  it('drops an empty chat without adding it to history', () => {
-    const h = harness({ messages: false });
+  it('keeps an empty chat open when creating a new tab', () => {
+    const h = harness({ ids: ['tab0'], messages: false });
 
     const created = h.tabs.create();
 
     expect(created).toBeDefined();
-    expect(h.getState().conversations.map((chat) => chat.id)).not.toContain('tab0');
+    expect(h.getState().conversations.map((chat) => chat.id)).toContain('tab0');
+    expect(h.getState().conversations).toHaveLength(2);
     expect(h.getState().history).toEqual([]);
   });
 
-  it('sweeps idle chats on each activation and does no work on a second sweep', () => {
+  it('does not expose an activation-time startup sweep', () => {
     const h = harness({ ids: ['tab0', 'tab1', 'tab2'] });
-
-    h.tabs.sweepIdleConversations();
-    const afterFirst = h.getState();
-    const historyAfterFirst = afterFirst.history.map((chat) => chat.id);
-    const openAfterFirst = afterFirst.conversations.map((chat) => chat.id);
-    const writes = h.refreshUi.mock.calls.length;
-
-    h.tabs.sweepIdleConversations();
-
-    expect(openAfterFirst).toEqual(['tab0']);
-    expect(historyAfterFirst).toEqual(expect.arrayContaining(['tab1', 'tab2']));
-    expect(h.getState().conversations.map((chat) => chat.id)).toEqual(openAfterFirst);
-    expect(h.getState().history.map((chat) => chat.id)).toEqual(historyAfterFirst);
-    expect(h.refreshUi).toHaveBeenCalledTimes(writes);
-    expect(h.stopStreamingIfNeeded).toHaveBeenCalledTimes(2);
+    expect((h.tabs as unknown as { sweepIdleConversations?: () => void }).sweepIdleConversations).toBeUndefined();
+    expect(h.getState().conversations.map((chat) => chat.id)).toEqual(['tab0', 'tab1', 'tab2']);
   });
 
   it('restores a moved chat from history', () => {

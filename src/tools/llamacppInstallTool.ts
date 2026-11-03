@@ -18,7 +18,7 @@ import type { RegisteredTool } from './ToolRegistry';
  * optional write of `llama_server.binary`; a switch also deletes every older
  * build except the one it replaced (`pruneOldBuilds`). It never restarts the backend — the
  * model running this turn IS that backend — so the new build takes effect on
- * the next model load or `/restartBackend`.
+ * the next model load or `/restart`.
  *
  * Exists because the agent's hand-rolled install (2026-09-21 session) took ~45
  * rounds: out-of-workspace mkdir/delete had no sanctioned tool, the staging
@@ -72,7 +72,7 @@ export function makeInstallLlamacppTool(deps: LlamacppInstallDeps): RegisteredTo
       function: {
         name: 'install_llamacpp',
         description:
-          'Install a llama.cpp Windows CUDA release in one call: downloads the zip and its cudart, verifies SHA-256, extracts to %LOCALAPPDATA%\\Forge\\llama.cpp-<tag>\\, smoke-tests llama-server, and by default points llama_server.binary at it and deletes the older builds there, keeping the one it replaced. It does NOT restart the backend: the build takes effect on the next model load or /restartBackend.',
+          'Install a llama.cpp Windows CUDA release in one call: downloads the zip and its cudart, verifies SHA-256, extracts to %LOCALAPPDATA%\\Forge\\llama.cpp-<tag>\\, smoke-tests llama-server, and by default points llama_server.binary at it and deletes the older builds there, keeping the one it replaced. It does NOT restart the backend: the build takes effect on the next model load or /restart.',
         parameters: {
           type: 'object',
           properties: {
@@ -113,7 +113,7 @@ export function makeInstallLlamacppTool(deps: LlamacppInstallDeps): RegisteredTo
       const config = deps.getConfig();
       const allowedHosts = config.jobs?.allowed_hosts ?? [];
       if (allowedHosts.length === 0) {
-        return 'Error: jobs.allowed_hosts in config.yaml is empty, so Forge may not download anything. Ask the user to add api.github.com, github.com and release-assets.githubusercontent.com to it.';
+        return 'Error: jobs.allowed_hosts in config.yaml is empty, so Forge may not download anything. Ask the user to add api.github.com, github.com, objects.githubusercontent.com and release-assets.githubusercontent.com to it: the gate is re-checked on every redirect, and GitHub serves a release asset from one CDN or the other.';
       }
       const switchConfig = args['switch_config'] !== false;
       if (switchConfig && !setBinary) {
@@ -128,7 +128,7 @@ export function makeInstallLlamacppTool(deps: LlamacppInstallDeps): RegisteredTo
         fetchOptions: () => ({ allowedHosts, etagCache: new Map<string, string>() }),
         getConfig: () => ({
           currentBinary: previous,
-          modelBinaries: modelPinnedBinaries(config.models),
+          modelBinaries: modelPinnedBinaries(config),
           embeddings: config.embeddings,
           llama_server: config.llama_server,
         }),
@@ -143,9 +143,21 @@ export function makeInstallLlamacppTool(deps: LlamacppInstallDeps): RegisteredTo
         'Smoke test passed.',
       ];
       if (switchConfig && setBinary) {
-        setBinary(installed.newBinary);
+        try {
+          setBinary(installed.newBinary);
+        } catch (err) {
+          const message = err instanceof Error ? err.message : String(err);
+          return [
+            `Partial: Installed llama.cpp ${tag}: ${installed.newBinary}`,
+            `Verified and removed: ${verified}`,
+            'Smoke test passed.',
+            `llama_server.binary was NOT switched and remains ${previous ?? '(unset)'}.`,
+            `Config error: ${message}`,
+            'Tell the user to fix the named config entry, then switch llama_server.binary to this build or call install_llamacpp again.',
+          ].join('\n');
+        }
         lines.push(
-          `llama_server.binary switched from ${previous ?? '(unset)'}. It takes effect on the next model load or /restartBackend — the backend was NOT restarted.`,
+          `llama_server.binary switched from ${previous ?? '(unset)'}. It takes effect on the next model load or /restart — the backend was NOT restarted.`,
         );
         // The previous build is kept: it is the rollback, and the running
         // backend may still have it loaded. A build a model pins is kept too.
@@ -153,7 +165,7 @@ export function makeInstallLlamacppTool(deps: LlamacppInstallDeps): RegisteredTo
           pruneOldBuilds(localRoot(), [
             installed.newBinary,
             previous,
-            ...modelPinnedBinaries(config.models),
+            ...modelPinnedBinaries(config),
           ]),
         );
         if (pruned) lines.push(pruned);

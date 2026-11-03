@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 const flush = vi.fn();
 const updateTitle = vi.fn();
@@ -20,6 +20,11 @@ import type { ForgeTurnOutcome } from '../../src/sidebar/turnOutcome';
 import { RequestChainLifecycle } from '../../src/sidebar/RequestChainLifecycle';
 import { CONTEXT_EXHAUSTED_MESSAGE } from '../../src/agent/truncationRecovery';
 import { MidTurnInbox } from '../../src/agent/MidTurnInbox';
+import {
+  createWorkerChatWake,
+  subscribeConversationSettled,
+} from '../../src/sidebar/workerChatWake';
+import { getLogger } from '../../src/util/logger';
 
 function conversation(overrides: Partial<ConversationRuntime> = {}): ConversationRuntime {
   return {
@@ -111,7 +116,17 @@ function errors(posted: HostToWebview[]): string[] {
 }
 
 describe('SendPipeline.send', () => {
+  const settledSubscriptions: { dispose(): void }[] = [];
+
   beforeEach(() => vi.clearAllMocks());
+  afterEach(() => {
+    for (const subscription of settledSubscriptions.splice(0)) subscription.dispose();
+  });
+
+  const listenForSettled = (listener: ReturnType<typeof vi.fn>) => {
+    settledSubscriptions.push(subscribeConversationSettled(listener));
+    return listener;
+  };
 
   it('echoes a prompt the webview did not type, before the turn starts', async () => {
     const h = harness();
@@ -212,6 +227,72 @@ describe('SendPipeline.send', () => {
     expect(text).toBe('hello');
     expect(errors(h.posted)).toEqual([]);
     expect(outcome).toEqual({ kind: 'completed', finalText: 'finished' });
+  });
+
+  it('notifies the final outcome once when a chain completes without tells', async () => {
+    const h = harness();
+    const onFinalOutcome = listenForSettled(vi.fn());
+
+    const outcome = await h.pipeline.send('hello');
+
+    expect(outcome.kind).toBe('completed');
+    expect(onFinalOutcome).toHaveBeenCalledExactlyOnceWith('conv-1', outcome);
+  });
+
+  it('notifies the stopped outcome once when tells are held for the next send', async () => {
+    const h = harness();
+    const onFinalOutcome = listenForSettled(vi.fn());
+    h.runTurn.mockResolvedValueOnce({ kind: 'cancelled', finalText: '' });
+    h.midTurnInbox.add('conv-1', { id: 'held', text: 'run after stop' });
+
+    const outcome = await h.pipeline.send('start');
+
+    expect(outcome.kind).toBe('cancelled');
+    expect(onFinalOutcome).toHaveBeenCalledExactlyOnceWith('conv-1', outcome);
+  });
+
+  it('notifies a failed outcome once when the request chain throws and rethrows', async () => {
+    const h = harness();
+    const onFinalOutcome = listenForSettled(vi.fn());
+    h.runTurn.mockRejectedValueOnce(new Error('turn exploded'));
+
+    await expect(h.pipeline.send('start')).rejects.toThrow('turn exploded');
+
+    expect(onFinalOutcome).toHaveBeenCalledExactlyOnceWith('conv-1', {
+      kind: 'failed',
+      error: 'turn exploded',
+    });
+  });
+
+  it('logs and ignores a throwing final outcome listener', async () => {
+    const h = harness();
+    const onFinalOutcome = listenForSettled(vi.fn(() => {
+      throw new Error('observer failed');
+    }));
+    const loggerError = vi.spyOn(getLogger(), 'error').mockImplementation(() => undefined);
+
+    const outcome = await h.pipeline.send('start');
+
+    expect(outcome.kind).toBe('completed');
+    expect(onFinalOutcome).toHaveBeenCalledOnce();
+    expect(loggerError).toHaveBeenCalledWith(
+      '[SendPipeline] final outcome listener failed: observer failed',
+    );
+  });
+
+  it('does not notify for nested tell sends', async () => {
+    const h = harness();
+    const onFinalOutcome = listenForSettled(vi.fn());
+    vi.mocked(h.deps.evaluateAfterTurn).mockImplementationOnce(async () => {
+      h.midTurnInbox.add('conv-1', { id: 'tell-after-release', text: 'continue' });
+      return undefined;
+    });
+
+    await h.pipeline.send('start');
+
+    expect(h.runTurn).toHaveBeenCalledTimes(2);
+    expect(onFinalOutcome).toHaveBeenCalledOnce();
+    expect(onFinalOutcome).toHaveBeenCalledWith('conv-1', expect.objectContaining({ kind: 'completed' }));
   });
 
   it('announces an accepted host-initiated turn so Stop is available', async () => {
@@ -437,6 +518,33 @@ describe('SendPipeline.send', () => {
     expect(echoIndex).toBeLessThan(started[1]!);
   });
 
+  it('wakes a worker opener once after a tell-driven turn finishes in the chain', async () => {
+    const h = harness({ conv: { opened_by: 'opener' } });
+    const routeInternal = vi.fn();
+    const reservedAtWake: boolean[] = [];
+    settledSubscriptions.push(subscribeConversationSettled(createWorkerChatWake({
+      openConversations: () => [conversation({ id: 'opener' }), h.conv],
+      routeInternal: (...args) => {
+        reservedAtWake.push(h.requestChains.isReserved('conv-1'));
+        routeInternal(...args);
+      },
+      logDrop: vi.fn(),
+    })));
+    h.midTurnInbox.add('conv-1', { id: 'follow-up', text: 'finish the second part' });
+
+    const outcome = await h.pipeline.send('start');
+
+    expect(outcome).toMatchObject({ kind: 'completed' });
+    expect(h.runTurn).toHaveBeenCalledTimes(2);
+    expect(routeInternal).toHaveBeenCalledOnce();
+    expect(routeInternal).toHaveBeenCalledWith(
+      expect.stringContaining('completed'),
+      'opener',
+      { kind: 'worker-wake', workerId: 'conv-1' },
+    );
+    expect(reservedAtWake).toEqual([false]);
+  });
+
   it('keeps an internal tell out of the visible prompt when drained after a turn', async () => {
     const h = harness();
     h.midTurnInbox.add('conv-1', {
@@ -522,6 +630,43 @@ describe('SendPipeline.send', () => {
     expect(h.midTurnInbox.takeUndelivered('conv-1')).toEqual([]);
   });
 
+  it('keeps an internal tell after Stop and delivers it on the next send without tool rounds', async () => {
+    const h = harness();
+    h.runTurn.mockResolvedValueOnce({ kind: 'cancelled', finalText: '' });
+    h.midTurnInbox.add('conv-1', {
+      id: 'notice',
+      text: 'background job finished',
+      internal: true,
+    });
+
+    await h.pipeline.send('start');
+
+    expect(h.posted.some((message) => message.type === 'setInput')).toBe(false);
+    await h.pipeline.send('continue');
+
+    expect(h.runTurn).toHaveBeenCalledTimes(3);
+    expect(h.runTurn.mock.calls[2]?.[2]).toBe('background job finished');
+    expect(h.runTurn.mock.calls[2]?.[4]).toMatchObject({ internal: true });
+  });
+
+  it('keeps a chat-delivered tell after Stop and never puts it in the composer', async () => {
+    const h = harness();
+    h.runTurn.mockResolvedValueOnce({ kind: 'interrupted', finalText: '' });
+    h.midTurnInbox.add('conv-1', {
+      id: 'chat-tell',
+      text: 'worker update',
+      origin: { kind: 'chat' },
+    });
+
+    await h.pipeline.send('start');
+
+    expect(h.posted.some((message) => message.type === 'setInput')).toBe(false);
+    await h.pipeline.send('continue');
+
+    expect(h.runTurn).toHaveBeenCalledTimes(3);
+    expect(h.runTurn.mock.calls[2]?.[2]).toBe('worker update');
+  });
+
   it('runs a "Send now" tell as the next turn after the interrupt it caused', async () => {
     const h = harness();
     h.runTurn.mockResolvedValueOnce({ kind: 'interrupted', finalText: '' });
@@ -577,11 +722,31 @@ describe('SendPipeline.send', () => {
   it('still refreshes and persists when the turn throws', async () => {
     const h = harness();
     h.runTurn.mockRejectedValue(new Error('backend died'));
+    h.midTurnInbox.add('conv-1', { id: 'typed', text: 'typed words' });
+    h.midTurnInbox.add('conv-1', {
+      id: 'notice',
+      text: 'background exit',
+      internal: true,
+    });
+    h.midTurnInbox.add('conv-1', {
+      id: 'chat',
+      text: 'another chat message',
+      origin: { kind: 'chat' },
+    });
 
     await expect(h.pipeline.send('hello')).rejects.toThrow('backend died');
     expect(h.deps.persistSession).toHaveBeenCalledOnce();
     expect(h.deps.postSessionSync).toHaveBeenCalledOnce();
     expect(h.deps.evaluateAfterTurn).not.toHaveBeenCalled();
+    expect(h.posted).toContainEqual({
+      type: 'setInput',
+      text: 'typed words',
+      conversationId: 'conv-1',
+    });
+    expect(h.midTurnInbox.takeUndelivered('conv-1')).toMatchObject([
+      { id: 'notice', text: 'background exit', internal: true },
+      { id: 'chat', text: 'another chat message', origin: { kind: 'chat' } },
+    ]);
   });
 
   it('does not run a send whose chat closed while its attachments were saving', async () => {

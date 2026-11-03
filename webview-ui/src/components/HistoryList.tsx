@@ -1,6 +1,20 @@
-import React, { useCallback, useEffect, useRef, useState } from 'react';
-import type { SessionHistoryMeta } from '../../../src/sidebar/messageBridge';
-import type { SessionTabMeta } from '../../../src/sidebar/messageBridge';
+import { useEffect, useMemo, useRef, useState } from 'react';
+import type { CSSProperties, KeyboardEvent as ReactKeyboardEvent, ReactElement } from 'react';
+import type {
+  JobPanelMeta,
+  SessionHistoryMeta,
+  SessionTabMeta,
+} from '../../../src/sidebar/messageBridge';
+import { orderOpenItems } from '../openItemOrder';
+import { useResizablePanel } from '../useResizablePanel';
+import { failingJobCount } from '../historyFilter';
+import { useSessionContentSearch } from '../sessionContentSearch';
+import { SESSION_SEARCH_QUERY_MAX_CHARS } from '../../../src/sidebar/sessionSearchMessages';
+import { HistoryTabContent, type PanelTab } from './HistoryTabContent';
+
+// The row-age wording is owned by the row that shows it; this re-export keeps
+// `TranscriptPanes`'s resumed marker reading the same single source it always did.
+export { relativeTime } from './HistoryChatRow';
 
 interface Props {
   items: SessionHistoryMeta[];
@@ -16,212 +30,43 @@ interface Props {
   onRestore: (id: string) => void;
   onDelete: (id: string) => void;
   onRename: (id: string, title: string) => void;
+  onResetApprovals: (id: string) => void;
   onClose?: (id: string) => void;
   onSwitchOpen?: (id: string) => void;
+  onSetKeepOpen?: (id: string, keepOpen: boolean) => void;
+  /** The job store, as the host read it for this panel's generation. */
+  jobs?: JobPanelMeta[];
+  /** False until the host has answered the panel that is open. */
+  jobsLoaded?: boolean;
+  /**
+   * The panel generation App is holding for this open panel; 0 means the panel
+   * is closed, so the search box asks the host for nothing. It is App's, not
+   * the panel's, because the same number already scopes the Jobs pushes and a
+   * second counter here could disagree with the one the host is answering.
+   */
+  panelId?: number;
+  /** A job row was clicked. App sends the navigation; the host's `jobOpened` is what dismisses the panel. */
+  onOpenJob?: (id: string) => void;
 }
 
-/** Shared with the resumed marker in App; single owner for this wording. */
-export function relativeTime(ts: number): string {
-  const diff = Date.now() - ts;
-  const mins = Math.floor(diff / 60_000);
-  if (mins < 2) return 'just now';
-  if (mins < 60) return `${mins}m ago`;
-  const hrs = Math.floor(mins / 60);
-  if (hrs < 24) return `${hrs}h ago`;
-  const days = Math.floor(hrs / 24);
-  if (days < 7) return `${days}d ago`;
-  return new Date(ts).toLocaleString([], { month: 'short', day: 'numeric' });
-}
+const TABS = [
+  { id: 'chats', label: 'Chats' },
+  { id: 'archived', label: 'Archived' },
+  { id: 'jobs', label: 'Jobs' },
+] as const;
 
-function absoluteTime(ts: number): string {
-  return new Date(ts).toLocaleString([], {
-    month: 'short',
-    day: 'numeric',
-    hour: '2-digit',
-    minute: '2-digit',
-  });
-}
+/** What each tab is searching, so the placeholder answers the question being asked. */
+const SEARCH_PLACEHOLDER: Record<PanelTab, string> = {
+  chats: 'Search chats',
+  archived: 'Search archived chats',
+  jobs: 'Search jobs',
+};
 
-const KebabIcon = (): React.ReactElement => (
-  <svg width="16" height="16" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true">
-    <circle cx="8" cy="3.5" r="1.4" />
-    <circle cx="8" cy="8" r="1.4" />
-    <circle cx="8" cy="12.5" r="1.4" />
-  </svg>
-);
-
-const RenameIcon = (): React.ReactElement => (
-  <svg
-    width="13"
-    height="13"
-    viewBox="0 0 16 16"
-    fill="none"
-    stroke="currentColor"
-    strokeWidth="1.3"
-    strokeLinejoin="round"
-    aria-hidden="true"
-  >
-    <path d="M11 2.5l2.5 2.5L6 12.5 3 13l.5-3z" />
-  </svg>
-);
-
-const TrashIcon = (): React.ReactElement => (
-  <svg
-    width="13"
-    height="13"
-    viewBox="0 0 16 16"
-    fill="none"
-    stroke="currentColor"
-    strokeWidth="1.3"
-    strokeLinecap="round"
-    aria-hidden="true"
-  >
-    <path d="M3 4.5h10M6 4.5V3h4v1.5m-5 2v6h6v-6" />
-  </svg>
-);
-
-interface RowProps {
-  item: SessionHistoryMeta;
-  renaming: boolean;
-  menuOpen: boolean;
-  onOpenMenu: (id: string | null) => void;
-  onStartRename: (id: string | null) => void;
-  onRestore: (id: string) => void;
-  onDelete: (id: string) => void;
-  onRename: (id: string, title: string) => void;
-}
-
-function HistoryRow({
-  item,
-  renaming,
-  menuOpen,
-  onOpenMenu,
-  onStartRename,
-  onRestore,
-  onDelete,
-  onRename,
-}: RowProps): React.ReactElement {
-  const menuRef = useRef<HTMLDivElement>(null);
-  const inputRef = useRef<HTMLInputElement>(null);
-
-  // Dismiss the menu on an outside click or Escape, the same contract the model
-  // selector uses. Without this the menu survives a click into the transcript.
-  useEffect(() => {
-    if (!menuOpen) return;
-    const onDown = (e: MouseEvent): void => {
-      if (menuRef.current && !menuRef.current.contains(e.target as Node)) onOpenMenu(null);
-    };
-    const onKey = (e: KeyboardEvent): void => {
-      if (e.key === 'Escape') onOpenMenu(null);
-    };
-    document.addEventListener('mousedown', onDown);
-    document.addEventListener('keydown', onKey);
-    return () => {
-      document.removeEventListener('mousedown', onDown);
-      document.removeEventListener('keydown', onKey);
-    };
-  }, [menuOpen, onOpenMenu]);
-
-  useEffect(() => {
-    if (renaming) inputRef.current?.select();
-  }, [renaming]);
-
-  const commit = useCallback((): void => {
-    const next = inputRef.current?.value ?? '';
-    // An unchanged or blank box is a cancel, not a rename: blank would otherwise
-    // round-trip to the host only to be rejected there.
-    if (next.trim() && next !== item.title) onRename(item.id, next);
-    onStartRename(null);
-  }, [item.id, item.title, onRename, onStartRename]);
-
-  if (renaming) {
-    return (
-      <div className="history-item-row history-item-row-editing">
-        <input
-          ref={inputRef}
-          className="history-rename-input"
-          defaultValue={item.title}
-          aria-label="Conversation title"
-          autoFocus
-          onBlur={commit}
-          onKeyDown={(e) => {
-            if (e.key === 'Enter') {
-              e.preventDefault();
-              commit();
-            } else if (e.key === 'Escape') {
-              e.preventDefault();
-              onStartRename(null);
-            }
-          }}
-        />
-      </div>
-    );
-  }
-
-  return (
-    <div className={`history-item-row${menuOpen ? ' history-item-row-active' : ''}`}>
-      <button
-        type="button"
-        className="history-item"
-        onClick={() => onRestore(item.id)}
-        title={[absoluteTime(item.updatedAt), item.active_model].filter(Boolean).join('\n')}
-      >
-        <span className="history-item-title">{item.title}</span>
-        {/* Model earns its place on this line specifically: the one thing you
-            need to know before resuming a session is which model it was held
-            by, and a title derived from an opening prompt rarely says. Full
-            name is in the row tooltip; the line ellipsises. */}
-        <span className="history-item-meta">
-          {item.messageCount ?? 0} msg · {relativeTime(item.updatedAt)}
-          {item.active_model ? ` · ${item.active_model}` : ''}
-        </span>
-      </button>
-      <div className="history-item-menu-wrap" ref={menuRef}>
-        <button
-          type="button"
-          className="history-item-kebab"
-          aria-label={`Actions for ${item.title}`}
-          aria-haspopup="menu"
-          aria-expanded={menuOpen}
-          title="More actions"
-          onClick={() => onOpenMenu(menuOpen ? null : item.id)}
-        >
-          <KebabIcon />
-        </button>
-        {menuOpen && (
-          <div className="history-item-menu" role="menu">
-            <button
-              type="button"
-              role="menuitem"
-              className="history-menu-item"
-              onClick={() => {
-                onOpenMenu(null);
-                onStartRename(item.id);
-              }}
-            >
-              <RenameIcon />
-              Rename
-            </button>
-            <div className="history-menu-sep" />
-            <button
-              type="button"
-              role="menuitem"
-              className="history-menu-item history-menu-item-danger"
-              onClick={() => {
-                onOpenMenu(null);
-                onDelete(item.id);
-              }}
-            >
-              <TrashIcon />
-              Delete…
-            </button>
-          </div>
-        )}
-      </div>
-    </div>
-  );
-}
-
+/**
+ * The sessions panel's shell: search box, tab strip, one scroll container, the
+ * resize grip, and the dismissal contract an overlay floating over the
+ * transcript needs. What each tab shows is `HistoryTabContent`'s.
+ */
 export function HistoryList({
   items,
   archived = [],
@@ -230,6 +75,7 @@ export function HistoryList({
   onRestore,
   onDelete,
   onRename,
+  onResetApprovals,
   openItems = [],
   activeId = '',
   streamingIds = new Set<string>(),
@@ -237,17 +83,57 @@ export function HistoryList({
   waitingIds = new Set<string>(),
   onClose = () => undefined,
   onSwitchOpen,
-}: Props): React.ReactElement {
-  // Only one row may be open or editing at a time, so both live here as an id
-  // rather than as per-row state that would survive the row being re-keyed.
-  const [menuId, setMenuId] = useState<string | null>(null);
-  const [renamingId, setRenamingId] = useState<string | null>(null);
-  const [archiveExpanded, setArchiveExpanded] = useState(false);
+  onSetKeepOpen = () => undefined,
+  jobs = [],
+  jobsLoaded = true,
+  panelId = 0,
+  onOpenJob = () => undefined,
+}: Props): ReactElement {
+  const [tab, setTab] = useState<PanelTab>('chats');
+  const [query, setQuery] = useState('');
+  // The saved chats the host has read so far for the text in the box. Titles
+  // and badges are matched in `historyFilter.ts`; only the host can say which
+  // transcripts contain a phrase, so this is the half that comes back from it.
+  const contentSearch = useSessionContentSearch({ panelId, tab, query });
+  // Relative last-run labels age by the minute without another store read. The
+  // tick runs only while the panel is open — a hidden panel has nothing to age,
+  // and the interval goes with the close.
+  const [nowTick, setNowTick] = useState(() => new Date());
+  useEffect(() => {
+    if (!expanded) return;
+    const timer = setInterval(() => setNowTick(new Date()), 60_000);
+    return () => clearInterval(timer);
+  }, [expanded]);
+
+  // Neither the tab nor the search text outlives the panel: the plan fixes that,
+  // because a panel that remembers where you left it three weeks ago is a panel
+  // you open on the wrong page. Only the *size* is remembered, and that is the
+  // resize hook's business.
+  useEffect(() => {
+    if (expanded) return;
+    setTab('chats');
+    setQuery('');
+  }, [expanded]);
+
   const panelRef = useRef<HTMLElement>(null);
+  const { size, gripProps } = useResizablePanel(panelRef, expanded);
+  // The Open rows' order is captured when the panel opens and held while it
+  // stays open, so two running chats bumping updatedAt cannot swap rows under
+  // the pointer. A ref, derived during render: `openItems` is a new array on
+  // every App render, and state set from an effect on it re-rendered on every
+  // streamed fragment until React gave up ("Maximum update depth exceeded").
+  const openOrderRef = useRef<string[] | null>(null);
+  let orderedOpenItems = openItems;
+  if (expanded) {
+    orderedOpenItems = orderOpenItems(openItems, openOrderRef.current ?? []);
+    openOrderRef.current = orderedOpenItems.map((item) => item.id);
+  } else {
+    openOrderRef.current = null;
+  }
 
   // The panel floats over the transcript now, so it needs the dismissal
-  // contract every overlay needs. Same shape as the row kebab's above; the
-  // kebab keeps its own because it must close without closing the panel.
+  // contract every overlay needs. Same shape as the row kebab's; the kebab keeps
+  // its own because it must close without closing the panel.
   useEffect(() => {
     if (!expanded) return;
     const onDown = (e: MouseEvent): void => {
@@ -269,101 +155,173 @@ export function HistoryList({
     };
   }, [expanded, onDismiss]);
 
+  // Chats is what is open as a tab; Archived is every closed chat. The host
+  // keeps closed chats in two lists — the recent history and the overflow past
+  // it — but that split is by age only, and the owner read a chat closed an
+  // hour ago under "Chats" as an archived chat shown in the wrong place.
+  // The host already drops overflow rows that duplicate a recent one; the id
+  // check here keeps a transient overlap from drawing a row twice.
+  const closedRows = useMemo(() => {
+    const recentIds = new Set(items.map((item) => item.id));
+    return [...items, ...archived.filter((row) => !recentIds.has(row.id))].sort(
+      (a, b) => b.updatedAt - a.updatedAt,
+    );
+  }, [items, archived]);
+  // The badges count what a tab holds, not what the search box is leaving in: a
+  // number that moved with every typed letter would read as a different panel.
+  const counts: Record<PanelTab, { total: number; failing: number }> = {
+    chats: { total: orderedOpenItems.length, failing: 0 },
+    archived: { total: closedRows.length, failing: 0 },
+    jobs: { total: jobs.length, failing: failingJobCount(jobs) },
+  };
+
+  const moveTab = (step: number): void => {
+    const index = TABS.findIndex((entry) => entry.id === tab);
+    const next = TABS[(index + step + TABS.length) % TABS.length]!;
+    setTab(next.id);
+    // Roving tabindex: only the selected tab is in the tab order, so the arrow
+    // keys have to carry focus with them or the next Tab lands back on the input.
+    document.getElementById(`history-tab-${next.id}`)?.focus();
+  };
+
+  const onTabListKeyDown = (event: ReactKeyboardEvent<HTMLDivElement>): void => {
+    if (event.key === 'ArrowRight' || event.key === 'ArrowDown') {
+      event.preventDefault();
+      moveTab(1);
+    } else if (event.key === 'ArrowLeft' || event.key === 'ArrowUp') {
+      event.preventDefault();
+      moveTab(-1);
+    } else if (event.key === 'Home' || event.key === 'End') {
+      event.preventDefault();
+      const edge = event.key === 'Home' ? TABS[0]! : TABS[TABS.length - 1]!;
+      setTab(edge.id);
+      document.getElementById(`history-tab-${edge.id}`)?.focus();
+    }
+  };
+
+  const panelStyle: CSSProperties | undefined = size
+    ? { width: `${size.width}px`, height: `${size.height}px` }
+    : undefined;
+
   return (
-    <section id="history-panel" ref={panelRef} aria-label="Conversation history" hidden={!expanded}>
-      {openItems.length > 0 && <h3 className="history-section-heading">Open</h3>}
-      {openItems.length > 0 && (
-        <div className="history-list-wrap">
-          <div id="history-open-list">
-            {openItems.map((item) => (
-              <div className="history-item-row" key={item.id}>
-                <button
-                  type="button"
-                  className="history-item"
-                  aria-current={item.id === activeId ? 'page' : undefined}
-                  onClick={() => (onSwitchOpen ?? onRestore)(item.id)}
-                >
-                  <span className="history-item-title">{item.title}</span>
-                  <span className="history-item-meta">
-                    {streamingIds.has(item.id)
-                      ? '◌ Running'
-                      : waitingIds.has(item.id)
-                        ? 'Waiting'
-                        : queuedIds.has(item.id)
-                          ? 'Queued'
-                          : 'Open'}
-                  </span>
-                </button>
-                <button
-                  type="button"
-                  className="history-item-kebab"
-                  aria-label={`Close ${item.title}`}
-                  title="Close"
-                  onClick={() => onClose(item.id)}
-                >
-                  ×
-                </button>
-              </div>
-            ))}
-          </div>
-        </div>
-      )}
-      {items.length === 0 && archived.length === 0 && openItems.length === 0 ? (
-        <p id="history-empty">No conversations yet.</p>
-      ) : items.length > 0 || archived.length > 0 ? (
-        <div className="history-list-wrap">
-          {items.length > 0 && <h3 className="history-section-heading">Recent history</h3>}
-          {items.length > 0 && (
-            <div id="history-list">
-              {items.map((item) => (
-                <HistoryRow
-                  key={item.id}
-                  item={item}
-                  renaming={renamingId === item.id}
-                  menuOpen={menuId === item.id}
-                  onOpenMenu={setMenuId}
-                  onStartRename={setRenamingId}
-                  onRestore={onRestore}
-                  onDelete={onDelete}
-                  onRename={onRename}
-                />
-              ))}
-            </div>
-          )}
-          {archived.length > 0 && (
-            <>
+    <section
+      id="history-panel"
+      ref={panelRef}
+      aria-label="Conversation history"
+      hidden={!expanded}
+      style={panelStyle}
+    >
+      <div className="history-panel-head">
+        <input
+          id="history-search"
+          className="history-search"
+          type="search"
+          maxLength={SESSION_SEARCH_QUERY_MAX_CHARS}
+          aria-label={`Search ${SEARCH_PLACEHOLDER[tab].replace(/^Search /, '').toLowerCase()}`}
+          placeholder={SEARCH_PLACEHOLDER[tab]}
+          value={query}
+          onChange={(event) => setQuery(event.target.value)}
+          onKeyDown={(event) => {
+            // Escape inside the box clears the search before it closes the
+            // panel: a person who mistyped a chat name should not have to
+            // reopen the panel to fix it.
+            if (event.key !== 'Escape' || !query) return;
+            event.stopPropagation();
+            event.preventDefault();
+            setQuery('');
+          }}
+        />
+        <div
+          role="tablist"
+          aria-label="Panel sections"
+          className="history-tablist"
+          onKeyDown={onTabListKeyDown}
+        >
+          {TABS.map((entry) => {
+            const selected = entry.id === tab;
+            const count = counts[entry.id];
+            // A failing job is the only count worth wearing the error colour:
+            // it is the one that means something went wrong while nobody was looking.
+            const shown = entry.id === 'jobs' && count.failing > 0 ? count.failing : count.total;
+            return (
               <button
+                key={entry.id}
+                id={`history-tab-${entry.id}`}
                 type="button"
-                className="history-section-heading history-archive-toggle"
-                aria-expanded={archiveExpanded}
-                onClick={() => setArchiveExpanded((value) => !value)}
+                role="tab"
+                className="history-tab"
+                aria-selected={selected}
+                aria-controls={`history-tabpanel-${entry.id}`}
+                tabIndex={selected ? 0 : -1}
+                onClick={() => setTab(entry.id)}
               >
-                <span>{archiveExpanded ? '▾' : '▸'} Archived sessions</span>
-                <span className="history-archive-count">{archived.length}</span>
+                <span className="history-tab-label">{entry.label}</span>
+                <span
+                  className={`history-tab-count${
+                    entry.id === 'jobs' && count.failing > 0
+                      ? ' history-tab-count--failing'
+                      : entry.id === 'chats'
+                        ? ' history-tab-count--chats'
+                        : entry.id === 'archived'
+                          ? ' history-tab-count--archived'
+                          : ''
+                  }`}
+                  title={
+                    entry.id === 'jobs' && count.failing > 0
+                      ? `${count.failing} of ${count.total} jobs failing`
+                      : undefined
+                  }
+                >
+                  {shown}
+                </span>
               </button>
-              {archiveExpanded && (
-                <div id="history-archive-list">
-                  {[...archived]
-                    .sort((a, b) => b.updatedAt - a.updatedAt)
-                    .map((item) => (
-                      <HistoryRow
-                        key={item.id}
-                        item={item}
-                        renaming={renamingId === item.id}
-                        menuOpen={menuId === item.id}
-                        onOpenMenu={setMenuId}
-                        onStartRename={setRenamingId}
-                        onRestore={onRestore}
-                        onDelete={onDelete}
-                        onRename={onRename}
-                      />
-                    ))}
-                </div>
-              )}
-            </>
-          )}
+            );
+          })}
         </div>
-      ) : null}
+      </div>
+      {/* One scroll container for all three sections: three nested scroll boxes
+          is three places to lose a row, and the Archived list used to open with
+          its first row cut in half inside its own fixed height. `overflow-x:
+          hidden` is the panel's promise, not a way to hide the old bar — the
+          row that used to overflow has had its overflow removed in CSS too. */}
+      <div
+        className="history-scroll"
+        id={`history-tabpanel-${tab}`}
+        role="tabpanel"
+        aria-labelledby={`history-tab-${tab}`}
+      >
+        {/* Keyed by tab: a menu left open in Archived must not still be open
+            when you come back to Chats, where a different row owns that id. */}
+        <HistoryTabContent
+          key={tab}
+          tab={tab}
+          query={query}
+          closed={closedRows}
+          openItems={orderedOpenItems}
+          activeId={activeId}
+          streamingIds={streamingIds}
+          queuedIds={queuedIds}
+          waitingIds={waitingIds}
+          jobs={jobs}
+          jobsLoaded={jobsLoaded}
+          contentMatches={contentSearch.ids}
+          contentSearchPending={contentSearch.pending}
+          contentSearchUnreadable={contentSearch.unreadable}
+          nowTick={nowTick}
+          onRestore={onRestore}
+          onDelete={onDelete}
+          onRename={onRename}
+          onResetApprovals={onResetApprovals}
+          onClose={onClose}
+          onSetKeepOpen={onSetKeepOpen}
+          onSwitchOpen={onSwitchOpen}
+          onOpenJob={onOpenJob}
+        />
+      </div>
+      {/* The grip is a child of the panel, so it sits at the panel's own corner
+          rather than at the sidebar's: a panel shorter than the sidebar still
+          has its resize handle where the panel ends. */}
+      <span {...gripProps} />
     </section>
   );
 }

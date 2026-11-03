@@ -1,5 +1,9 @@
 import { describe, expect, it } from 'vitest';
-import { renderBusStatus, renderBusView } from '../../src/agentBus/busStatusView';
+import {
+  renderBusStatus,
+  renderBusView,
+  renderQueuedStatus,
+} from '../../src/agentBus/busStatusView';
 import { describeBudget } from '../../src/remote/RemoteSessionCommands';
 import type { TurnSnapshot } from '../../src/agentBus/busTurnWatch';
 import type { ForgeExchange } from '../../src/sidebar/sessionProjections';
@@ -107,5 +111,24 @@ describe('renderBusView', () => {
     expect(output.match(/\n\n---\n\n/g)).toHaveLength(1);
     expect(output).toContain('first answer');
     expect(output).toContain('second answer');
+  });
+});
+
+describe('renderQueuedStatus', () => {
+  it('answers with the lines forge.sh wait reads, and no chat it cannot show yet', () => {
+    // Audit F3: `say --new` answers 202 and says the message is queued, but no
+    // chat exists until it runs, so `status` answered 404 and `wait` treated
+    // that as a dead endpoint and exited 1 on the queue it was told to watch.
+    expect(renderQueuedStatus(2).split('\n')).toEqual([
+      'Chat: none yet — your message is accepted and has not started',
+      'State: queued',
+      'Queued from you: 2',
+    ]);
+  });
+
+  it('does not claim idle while a message is still queued', () => {
+    // `wait` exits on `State: idle` with `Queued from you: 0`; a queued message
+    // must not read as an idle chat with nothing in it.
+    expect(renderQueuedStatus(1)).not.toContain('State: idle');
   });
 });

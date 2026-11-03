@@ -7,7 +7,8 @@ and the two places Forge looks for its config.
 
 Work through the steps in order. After each step, run its **Check** and report
 the result before moving on. Ask the user before every optional section — do
-not set up what they did not ask for.
+not set up what they did not ask for. Step 7 is not one of those sections: the
+agent mesh ships on, and the note Forge writes into the workspace is part of it.
 
 ## Ground rules
 
@@ -23,7 +24,9 @@ not set up what they did not ask for.
    record VRAM measurements in them.
 4. **Stay in scope.** Write only the Forge config, the llama.cpp install folder
    (step 2), and `~/.claude/settings.json` if the user asks for the mesh
-   (step 7). Kill no process you did not start.
+   (step 7). Forge writes the workspace agent note itself, so leave the user's
+   `AGENTS.md` and `CLAUDE.md` alone — check what Forge put there, do not
+   rewrite it. Kill no process you did not start.
 5. **Trust Forge, not yourself.** A step is done when its Check passes, not
    when the file looks right.
 
@@ -101,9 +104,9 @@ Write the config from `config/starter/llama-cpp.yaml`:
 ## Step 3 — Ollama backend (skip for llama.cpp / cloud)
 
 Start from `config/starter/ollama.yaml`. Use tags exactly as
-`ollama list` prints them, `endpoint: http://127.0.0.1:11434`, and a `num_ctx`
-the model supports. Ollama cloud models go through the local daemon once the
-user has signed in with the Ollama CLI; Forge sends no key.
+`ollama list` prints them, set `endpoint: http://127.0.0.1:11434`, and choose a
+`num_ctx` the model supports. Ollama cloud models go through the local daemon
+once the user has signed in with the Ollama CLI; Forge sends no key.
 
 ## Step 4 — Cloud or CLI models (only if asked)
 
@@ -114,7 +117,9 @@ user has signed in with the Ollama CLI; Forge sends no key.
 - Claude Code / Codex as a model: the user installs the CLI and logs in
   (`claude` once, `codex login`), then add
   `{ name: claude-code, provider: cli, cli: claude }` (same for `codex`) under
-  `models:`. For delegation from Forge also set
+  `models:`. `cli` is a bare name, or a full path to the executable. A `.cmd`
+  shim is run through its launcher, which needs Node on PATH. For delegation
+  from Forge also set
   `permissions.agents.delegate: true`.
 - **Windows:** Codex needs PowerShell 7 installed from the **MSI**; the
   Microsoft Store package does not work.
@@ -127,10 +132,15 @@ carries the agent mesh in step 7, which also needs
 `agent_bus.enabled`):
 
 ```yaml
+# partial: the control_server block only, not a whole config
 control_server:
   enabled: true
   port: 8799
 ```
+
+Use the port already recorded in the config, or choose an available loopback
+port if you are adding the block yourself. Read `control_server.port` from that
+same config for the checks in step 6 (8799 by default).
 
 Leave `permissions:` as the starter wrote it unless the user asks otherwise.
 Every write, shell command and network call still asks the user for approval
@@ -146,10 +156,10 @@ repeat.
 **Check**, from your shell (on Windows PowerShell use `curl.exe`, not `curl`):
 
 ```text
-GET  http://127.0.0.1:8799/healthz        → {"ok":true}
-GET  http://127.0.0.1:8799/models         → lists the configured models
-POST http://127.0.0.1:8799/ensure  {"model":"<active_model>"}   → 200 once loaded
-POST http://127.0.0.1:8799/chat    {"model":"<active_model>","messages":[{"role":"user","content":"Reply with the word ready."}]}
+GET  http://127.0.0.1:<control_server.port>/healthz        → {"ok":true}
+GET  http://127.0.0.1:<control_server.port>/models         → lists the configured models
+POST http://127.0.0.1:<control_server.port>/ensure  {"model":"<active_model>"}   → 200 once loaded
+POST http://127.0.0.1:<control_server.port>/chat    {"model":"<active_model>","messages":[{"role":"user","content":"Reply with the word ready."}]}
 ```
 
 `/ensure` can take minutes for a large model. If it fails, the user runs
@@ -157,41 +167,85 @@ POST http://127.0.0.1:8799/chat    {"model":"<active_model>","messages":[{"role"
 `llama-server` output to you. Common causes: wrong path, CUDA runtime DLLs not
 next to the exe, context too large for the VRAM.
 
-If port 8799 was taken, Forge used another one and said so in the Forge
-output channel; ask the user.
+If the port was taken, Forge reports the port it selected in the output
+channel; ask the user which value to use.
 
 Then ask the user to open the Forge sidebar and send a first prompt.
 
-## Step 7 — Optional: agent mesh (Forge ⇄ Claude Code ⇄ Codex)
+## Step 7 — Agent mesh (Forge ⇄ Claude Code ⇄ Codex): core, not optional
 
-Forge installs its message client at `~/.forge/agent-bus/forge.sh` and its own
-notes in `~/.forge/agent-bus/README.md`; read that README rather than this
-section for the command set. Requirements:
+The mesh is how Claude Code, Codex and Copilot message, steer and stop Forge
+chats, and every new starter config ships it on. Do not skip this step the way
+you may skip something the user did not ask for. Forge installs its message
+client at `~/.forge/agent-bus/forge.sh` and its own notes in
+`~/.forge/agent-bus/README.md`; read that README rather than this section for
+the command set.
+
+**Read the state, do not guess it.** From the config you wrote, report
+`control_server.enabled` and its port, `agent_bus.enabled`,
+`permissions.agents.delegate`, and the path of every agent CLI you found
+(`claude`, `codex`, `copilot`). If a switch is off, ask before turning it on:
+the mesh is *inbound* — it lets other agents act on this workspace's Forge
+chats — so enabling it is a trust change, not a preference. Requirements:
 
 - the control server from step 5, and the bus itself (enabled in new starter
   configs; add it to older configs if absent):
 
   ```yaml
+  # partial: the agent_bus block only, not a whole config
   agent_bus:
     enabled: true
   ```
 
 - the CLIs installed and logged in (step 4);
-- **Windows:** run `forge.sh` with Git Bash by full path
-  (`& "C:\Program Files\Git\bin\bash.exe" ~/.forge/agent-bus/forge.sh ...`),
-  not bare `bash`, which may be WSL;
+- **Windows:** `forge.sh` is a bash script, and VS Code ships no bash on
+  Windows — Git for Windows does — so look for it and check it exists before
+  anything else: `Get-Command git.exe`, then
+  `& "$(git --exec-path)/../../../bin/bash.exe"`, which is
+  `C:\Program Files\Git\bin\bash.exe` for an all-users install and
+  `%LOCALAPPDATA%\Programs\Git\bin\bash.exe` for a per-user one. Run the client
+  through that path: `& "<that bash.exe>" ~/.forge/agent-bus/forge.sh ...`. If
+  `Get-Command git.exe` finds nothing, say so plainly — the mesh client cannot
+  run without Git for Windows — and offer `winget install --id Git.Git -e`;
+  ask first, and never install unasked. Never fall back to bare `bash`: on
+  Windows it may be WSL, and WSL's `$HOME` is not the Windows profile that
+  holds `~/.forge/agent-bus`, so the client is not where that shell looks;
 - if the user runs Claude Code in bypass-permissions mode, add
   `"crossSessionInbound": "accept"` to `~/.claude/settings.json`, or messages
   from Forge wait for approval there. Ask first.
 
-Forge does not add or edit the user's `AGENTS.md` or `CLAUDE.md` for the mesh.
-If they want future Codex or Claude Code sessions to discover it automatically,
-show them the optional note for those files in the README; add it only if they
-ask.
+Forge writes the agent note itself, so you do not have to. On the first start in
+a workspace whose mesh is on, Forge adds one marked section
+(`<!-- forge-agent-mesh:start -->` … `<!-- forge-agent-mesh:end -->`) to
+`AGENTS.md` and `CLAUDE.md` — to every one of those two files that exists, or
+creates `AGENTS.md` when neither does. It never touches text outside the
+markers, never adds the section twice, and never deletes anything when the mesh
+is later turned off. **Verify it instead of writing it:** read the file, confirm
+exactly one marked section is there and that the user's own lines are untouched.
+If it is missing — the mesh was only just turned on, or the write failed — have
+the user run **Forge: Set Up Agent Note** (`forge.agentMesh.installNote`) and
+check again. Say plainly what the section allows: local coding agents can now
+message, steer and stop this workspace's Forge chats; `agent_bus:
+{ enabled: false }` turns that off; deleting everything between the two comment
+lines removes the note.
+
+Approval rules stay owner-controlled. The owner can click **Allow for this chat**
+on a card to remember its displayed action in that conversation; `/approvals`
+lists the chat and matching project rules, and `/approvals reset` clears only
+that chat's remembered rules. **Always in this project** is an owner button that
+writes `approvals.always` through Forge; no agent tool can write
+`~/.forge/policy.yaml`. If that file is locked, the rule remains chat-only. Jobs
+and `--unattended` bus turns have no card and use only their owner policy allow
+lists; an unmatched refusal names the exact line to add, so do not retry it.
+The owner may set `permissions.approval_timeout_minutes`; 30 minutes is
+suggested, but Forge adds no hidden timeout.
+
 Read the complete usage header of the installed `forge.sh`; there is no `join`
 command. `say` follows that agent's previously selected Forge chat, while
-`send` to Claude, Codex or Copilot reaches only a recipient linked to that same
-chat. Claude Code uses `say claude` and `send claude <recipient>`; Codex uses
+`send` to Claude, Codex or Copilot goes to that agent's session for that chat —
+the one already linked, or a new one Forge starts and links if none exists — so
+`who` shows what answered only after the send. Claude Code uses `say claude` and
+`send claude <recipient>`; Codex uses
 `say codex` and `send codex <recipient>`. A 202 exchange id confirms acceptance,
 not an answer; read the verdict or failure before reporting success.
 `stop <name> [--to <conversationId>]` cancels a running Forge turn like the
@@ -200,8 +254,23 @@ For a different Forge chat, use `say --to <conversationId>` or `--to-running`;
 for a specific live Claude session, use **Forge: Show Live Claude Sessions**
 to copy its id and `/link` in the intended Forge chat before `ask_agent`.
 
+If several agents will work in the same project at once, tell the user they can
+collide on files. Forge's starter `FORGE.md` already tells its own agent to check
+`git status` for changes it did not make before editing, to stop and agree on
+file ownership instead of undoing another agent's work, and to commit only named
+files. Overlapping edits, or a full gate running while someone edits, need
+separate worktrees and an agreed commit order; separate files and a short edit
+can share one worktree. Offer the same rule for their `AGENTS.md` / `CLAUDE.md`;
+add it only if they ask.
+
 **Check:** `forge.sh who` reports the linked agent sessions held by open Forge
-windows. An empty list is normal before any session is linked.
+windows. An empty list is normal before any session is linked. Then the
+end-to-end check that says setup is really done: start a **new** Claude Code or
+Codex session in this workspace, give it nothing but the instructions in the
+file Forge wrote, and have it run `who`, send `say --new` to a model you name
+explicitly, and read the answer back with `view`. A session that cannot find
+the bridge from that file means the note is not doing its job — say so, do not
+paper over it by explaining the bridge to it.
 
 ## Step 8 — Optional: Telegram remote control
 
@@ -213,6 +282,7 @@ All of it is done by the user; your part is the config and the instructions.
 3. You set, keeping any existing `remote:` settings:
 
    ```yaml
+   # partial: the remote block only, not a whole config
    remote:
      enabled: true
      telegram:
@@ -285,10 +355,13 @@ untested and expect it to fail or to fall back to slow tiling.
    absolute paths, and set `image_generation.default` to it. Then:
    - `cuda_device`: the GPU's index in `nvidia-smi` (PCI-bus order), not the
      CUDA runtime's order. Pick the card the chat model is not on.
-   - `min_free_vram_mb: 11200` and `max_vram_gib: 10.25` are measured for a
-     12 GB card. Forge refuses to start the server when the card has less
-     free than `min_free_vram_mb` — if a display is plugged into that card,
-     read its free VRAM with `nvidia-smi` and set the value about 300 MB lower.
+   - `min_free_vram_mb: 11200` and `max_vram_gib: 10.25` are starting values
+     for a 12 GB card, not measured limits. Forge refuses to start the server
+     when the card has less free than `min_free_vram_mb` — if a display is
+     plugged into that card, read its free VRAM with `nvidia-smi` and set the
+     value about 300 MB lower. On this machine's 12 GB card with the display
+     moved to it, 10300 is what works (2026-10-23: at 11200 a busy desktop
+     refused the render).
    - Keep `steps: 8`, `cfg_scale: 1.0`, `sampler: euler` and the `--sigmas`
      list in `extra_args`: the Turbo model is trained for exactly that 8-step
      schedule.
@@ -327,5 +400,7 @@ Report to the user:
 
 - the config path, the backend, and the active model;
 - the Check results, pass or fail, with the output;
+- whether the agent note is in `AGENTS.md` and/or `CLAUDE.md` (step 7), and
+  that the user's own lines in those files are untouched;
 - what you skipped and why;
 - anything left for them to do.

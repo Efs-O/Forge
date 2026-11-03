@@ -6,13 +6,20 @@ import type { IndexManager } from '../../src/search/IndexManager';
 import { UserQuestionService } from '../../src/sidebar/UserQuestionService';
 import { UserNotificationService } from '../../src/sidebar/UserNotificationService';
 import { registerAllTools } from '../../src/tools/registerAllTools';
-import { ALL_TOOL_PERMISSIONS, ToolRegistry, type ToolPermission } from '../../src/tools/ToolRegistry';
-import { activateLazyGroup, hiddenLazyToolNames, lazyGroupForTool } from '../../src/tools/lazyToolGroups';
+import {
+  ALL_TOOL_PERMISSIONS,
+  ToolRegistry,
+  type ToolPermission,
+} from '../../src/tools/ToolRegistry';
+import {
+  activateLazyGroup,
+  hiddenLazyToolNames,
+  lazyGroupForTool,
+} from '../../src/tools/lazyToolGroups';
 
 const ALL_PERMISSIONS = new Set(ALL_TOOL_PERMISSIONS);
 
 const EXPECTED_NATIVE_NAMES = [
-  'append_file',
   'apply_code_action',
   'apply_line_edits',
   'ask_agent',
@@ -37,7 +44,6 @@ const EXPECTED_NATIVE_NAMES = [
   'commit',
   'copy_to_clipboard',
   'create_branch',
-  'create_directory',
   'delete_file',
   'desktop_capture',
   'desktop_click',
@@ -50,6 +56,7 @@ const EXPECTED_NATIVE_NAMES = [
   'desktop_windows',
   'edit_file',
   'edit_notebook_cell',
+  'export_document',
   'find_files',
   'forget',
   'format_file',
@@ -65,6 +72,10 @@ const EXPECTED_NATIVE_NAMES = [
   'list_directory',
   'list_executions',
   'list_memories',
+  // Skills: eager, and registered even when no skills exist, so the catalog in
+  // the prompt has a tool behind it (`registerAllTools.ts`). Its own config block
+  // decides whether it is advertised.
+  'load_skill',
   'load_tool_group',
   'message_chat',
   'monitor_execution',
@@ -107,7 +118,6 @@ const CORE_TOOL_NAMES = [
   'read_file',
   'edit_file',
   'write_file',
-  'append_file',
   'search_code',
   'find_files',
   'list_directory',
@@ -244,8 +254,8 @@ describe('registerAllTools canonical coordinator catalog', () => {
     );
     expect(CORE_TOOL_NAMES).toContain('shell');
     const groups: Record<string, string[]> = {
-      files: ['move_file', 'create_directory', 'apply_line_edits', 'restore_file'],
-      git: ['stage', 'commit', 'create_branch', 'switch_branch'],
+      files: ['move_file', 'apply_line_edits', 'restore_file'],
+      git: ['git_read', 'stage', 'commit', 'create_branch', 'switch_branch'],
       code_intel: [
         'code_intel',
         'rename_symbol',
@@ -267,11 +277,18 @@ describe('registerAllTools canonical coordinator catalog', () => {
       for (const member of members) expect(lazyGroupForTool(member)).toBe(group);
     }
     expect(lazyGroupForTool('get_system_status')).toBe('system');
-    // Eager: the two most-called grouped tools; delete_file is also the alternative every rm refusal names.
+    // Eager, and stays so: `delete_file` is ungrouped and is the alternative
+    // every rm / Remove-Item refusal names, so hiding it made the refusal point
+    // at a tool the model could not see.
     expect(lazyGroupForTool('delete_file')).toBeUndefined();
-    expect(lazyGroupForTool('git_read')).toBeUndefined();
-    expect(lazyGroupForTool('append_file')).toBeUndefined();
-    expect(names).toContain('append_file');
+    // `load_skill` is eager for the reason in `lazyToolGroups.ts`: its catalog is
+    // already in the system prompt, so a skill the model can see but cannot open
+    // would cost a `load_tool_group` round before any skill could be read.
+    expect(lazyGroupForTool('load_skill')).toBeUndefined();
+    // `git_read` left the eager set on 2026-10-29: 6 calls against 418 shell git
+    // commands in the 53 sessions since 0.17.80, so advertising it bought
+    // nothing. It loads with `load_tool_group: git`, and dispatches while hidden.
+    expect(lazyGroupForTool('git_read')).toBe('git');
   });
 
   it('advertises generate_image once image_generation is configured', () => {
@@ -350,5 +367,49 @@ describe('registerAllTools canonical coordinator catalog', () => {
     const tool = registry.get('render_html_to_image');
     expect(tool?.permission).toBe('fetch');
     expect(tool?.additionalPermissions).toEqual(['write']);
+  });
+});
+
+describe('every tool that can reach the network is gated', () => {
+  // docs/plans/EXFIL_GATES_PLAN.md acceptance 10: `web_fetch` used to need no
+  // approval at all, which is how a chat could read `~/.ssh/id_ed25519` and then
+  // send it out with nobody answering a card. This test walks the registry rather
+  // than naming `web_fetch`, so a later phase that adds a network tool cannot
+  // ship it ungated by forgetting to add a hook.
+  const ungatedByChoice: Record<string, string> = {
+    generate_image:
+      'sends a prompt to a provider the owner configured and names in its own result, not to a host the model picked',
+    upscale_image: 'runs on this machine\u2019s own GPU; nothing leaves it',
+    render_html_to_image:
+      'renders locally from a page Forge authored; the page it renders fetches through previewFetch.ts, which has its own host gate',
+    send_file: 'hands a file to the user\u2019s own linked chat, not to a host the model chose',
+  };
+
+  it('every tool with permission fetch declares an approval hook, or records why it does not need one', () => {
+    const registry = makeRegistry({
+      search: true,
+      delegation: true,
+      images: true,
+      upscale: true,
+      agentBus: true,
+    });
+    const fetchTools = registry
+      .names()
+      .filter((name) => registry.get(name)?.permission === 'fetch')
+      .sort();
+    expect(fetchTools).toContain('web_fetch');
+    expect(registry.get('web_fetch')?.approval).toBeTypeOf('function');
+    for (const name of fetchTools) {
+      if (registry.get(name)?.approval) continue;
+      expect(
+        ungatedByChoice[name],
+        `${name} has permission fetch, no approval hook, and no reason`,
+      ).toBeDefined();
+    }
+    // An exception that outlives its tool is how a stale allowlist hides a real
+    // gap, so the exceptions have to be tools that are actually registered.
+    for (const name of Object.keys(ungatedByChoice)) {
+      expect(fetchTools, `${name} is excused but no longer registered`).toContain(name);
+    }
   });
 });

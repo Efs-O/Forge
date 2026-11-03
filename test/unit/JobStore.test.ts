@@ -365,3 +365,48 @@ describe('JobStore setEnabled', () => {
     expect(after.state.next_due_at).toBe(5);
   });
 });
+
+describe('JobStore local change listeners', () => {
+  it('notifies after every durable write, and stops when unsubscribed', async () => {
+    const seen: number[] = [];
+    const stop = store.addLocalChangeListener(() => seen.push(seen.length + 1));
+    await store.saveJob(job());
+    store.patchState('disk', { last_run_at: 1 });
+    await store.appendRun('disk', { at: 1, outcome: 'ok', summary: 'ran', delivered: 0 });
+    await store.saveState('disk', { last_run_at: 2, consecutive_failures: 0 });
+    await store.delete('disk');
+    // Definition, state patch, run row, state write, delete: five writes.
+    expect(seen).toHaveLength(5);
+    stop();
+    await store.saveJob(job({ updated_at: 5 }));
+    expect(seen).toHaveLength(5);
+  });
+
+  it('keeps the panel listener independent of the scheduler watch', async () => {
+    // The scheduler owns `watch()` and its single callback. The sessions panel
+    // subscribes here instead, so a panel opening or closing can never replace
+    // or cancel what makes jobs fire — and the scheduler releasing its watcher
+    // must not stop the panel from hearing about writes in this process.
+    await store.saveJob(job());
+    const scheduler: string[] = [];
+    store.watch(() => scheduler.push('tick'));
+    const panel: string[] = [];
+    const stop = store.addLocalChangeListener(() => panel.push('tick'));
+    store.patchState('disk', { last_run_at: 1 });
+    expect(panel).toHaveLength(1);
+    store.unwatch();
+    store.patchState('disk', { last_run_at: 2 });
+    expect(panel).toHaveLength(2);
+    stop();
+    store.patchState('disk', { last_run_at: 3 });
+    expect(panel).toHaveLength(2);
+  });
+
+  it('a listener that throws cannot fail the write that triggered it', async () => {
+    store.addLocalChangeListener(() => {
+      throw new Error('the panel blew up');
+    });
+    await store.saveJob(job());
+    expect((await store.load('disk'))?.job.name).toBe('Disk');
+  });
+});

@@ -1,5 +1,11 @@
 import type { AttachmentData } from './messageBridge';
-import { chatCapMessage, MAX_CONVERSATIONS, type ConversationRuntime } from './sessionTypes';
+import {
+  chatCapMessage,
+  MAX_CONVERSATIONS,
+  type ConversationRuntime,
+  type TitleSource,
+} from './sessionTypes';
+import { summarizeConversation } from './hostConversationSummary';
 import type { ForgeRequestOutcome } from './turnOutcome';
 import type { CompactionEvent, CompactionOutcome, CompactionTrigger } from './CompactionService';
 import type { HostActivityEvent, HostActivityListener } from './HostActivity';
@@ -10,20 +16,14 @@ import type { BackendProcess } from '../system/SystemReport';
 import { recentExchanges, type ForgeExchange } from './sessionProjections';
 import type { AgentKind, AgentLink, AgentSender } from '../agentLinks/chatAgentLinks';
 import type { InboundAgentSelection, InboundAgentTarget } from '../agentLinks/inboundAgentRouting';
-import type { AskAgentRequest, AskAgentResult } from '../agentLinks/askAgentService';
 import type { StructuredAnswer } from '../util/questionAnswers';
-
-type AskAgentFacadeHandler = (
-  conversationId: string,
-  request: AskAgentRequest,
-  signal: AbortSignal,
-  onSessionLinked?: (link: AgentLink) => void,
-  onAccepted?: (link: AgentLink) => void,
-) => Promise<AskAgentResult>;
+import type { AskAgentFacadeHandler, SidebarHostFacadeDeps } from './hostFacadeDeps';
 
 export interface ForgeConversationSummary {
   id: string;
   title: string;
+  /** Who the name came from: its first prompt, a person, or the retitle job. */
+  titleSource?: TitleSource;
   activeModel: string | null;
   archived: boolean;
   updatedAt: number;
@@ -56,7 +56,10 @@ import type { UserQuestionSink } from './UserQuestionService';
 import type { UserNotificationSink } from './UserNotificationService';
 
 export interface ForgeHostFacade {
-  createConversation(options?: { activate?: boolean }): Promise<ForgeConversationSummary>;
+  createConversation(options?: {
+    activate?: boolean;
+    openedBy?: string;
+  }): Promise<ForgeConversationSummary>;
   restoreConversation(
     conversationId: string,
     options?: { activate?: boolean },
@@ -91,22 +94,26 @@ export interface ForgeHostFacade {
   interrupt(conversationId: string): Promise<void>;
   queueIntent(conversationId: string): void;
   addApprovalSink(sink: ToolApprovalSink): { dispose(): void };
-  resolveApproval(id: string, approved: boolean): void;
+  resolveApproval(id: string, decision: import('./approvalMessages').ApprovalDecision): void;
+  resetApprovals(conversationId: string): Promise<boolean>;
   addQuestionSink(sink: UserQuestionSink): { dispose(): void };
   /** Answers an outstanding agent question from a non-local surface. */
   answerQuestion(id: string, text: string): boolean;
+  /** The addressed chat record, including one held in the overflow archive. */
+  getConversation(conversationId: string): ConversationRuntime | undefined;
   answerQuestionStructured(id: string, answer: StructuredAnswer): boolean;
   skipQuestion(id: string): boolean;
   /** Cancels an outstanding agent question when its remote presentation fails. */
   dismissQuestion(id: string): boolean;
   status(): ForgeHostStatus;
   /**
-   * Clanker mode auto-approves every non-dangerous tool. It is deliberately NOT
-   * a tool: a model able to switch it on could disable its own approval gate.
-   * Only owner-authenticated surfaces (the sidebar, a remote `/clanker`) reach it.
+   * Clanker mode for one chat and no other: keyed calls run with no card, and
+   * anything with no key still gets a card. It is deliberately NOT a tool: a model
+   * able to switch it on could disable its own approval gate. Only
+   * owner-authenticated surfaces (the sidebar, a remote `/clanker`) reach it.
    */
-  clankerMode(): boolean;
-  setClankerMode(on: boolean): void;
+  clankerMode(conversationId: string): boolean;
+  setClankerMode(conversationId: string, on: boolean): void;
   /** Per-slot context for one conversation — `num_ctx / n_parallel`, not num_ctx. */
   contextBudget(conversationId: string): { used: number; max: number } | undefined;
   /** Measured context apportioned across system instructions, tools and transcript. */
@@ -132,7 +139,7 @@ export interface ForgeHostFacade {
   onCompactionEvent?(listener: (event: CompactionEvent) => void): { dispose(): void };
   /** Optional host state subscription for paired chats (model, backend, or turn changes). */
   onHostActivity?(listener: HostActivityListener): { dispose(): void };
-  /** Publish host news from outside the sidebar (the agent mesh's stand-in notice). */
+  /** Publish host news from outside the sidebar (the agent bus's progress notice). */
   emitHostActivity?(event: HostActivityEvent): void;
   /** Optional subscribed transport count; an omitted hook means 0 (not ready). */
   hostActivityListenerCount?(): number;
@@ -154,6 +161,12 @@ export interface ForgeHostFacade {
    * same terms as the hooks above; unregistered means reach 0.
    */
   setReachProbe?(probe: (conversationId: string) => number): { dispose(): void };
+  /**
+   * Takes this turn's speed line for a conversation, once, or undefined: the
+   * turn runner sums that turn's own server timings, and asking twice gets
+   * undefined, so one turn's speed can only ever reach a phone once.
+   */
+  takeTurnSpeedLine?(conversationId: string): string | undefined;
   onAgentProgress?(listener: (event: AgentProgressEvent) => void): { dispose(): void };
   /**
    * The last `limit` prompt/answer pairs of a conversation, oldest first.
@@ -164,82 +177,10 @@ export interface ForgeHostFacade {
    * conversation this window does not hold.
    */
   recentExchanges(conversationId: string, limit: number): ForgeExchange[];
-}
-
-export interface SidebarHostFacadeDeps {
-  createConversation: (options: { activate?: boolean }) => ConversationRuntime | undefined;
-  restoreConversation: (
-    conversationId: string,
-    options: { activate?: boolean },
-  ) => ConversationRuntime | undefined;
-  send: (
-    conversationId: string,
-    text: string,
-    attachments?: AttachmentData[],
-    options?: {
-      remoteRequestId?: string;
-      sender?: import('../agentLinks/chatAgentLinks').AgentSenderMetadata;
-    },
-  ) => Promise<ForgeRequestOutcome>;
-  runContactPrompt?: (
-    text: string,
-    systemPromptText: string,
-    options?: { web?: boolean },
-  ) => Promise<string>;
-  cancelContactPrompts?: () => void;
-  cancel: (conversationId: string) => Promise<void>;
-  interrupt: (conversationId: string) => Promise<void>;
-  queueIntent: (conversationId: string) => void;
-  addApprovalSink: (sink: ToolApprovalSink) => { dispose(): void };
-  resolveApproval: (id: string, approved: boolean) => void;
-  addQuestionSink: (sink: UserQuestionSink) => { dispose(): void };
-  answerQuestion: (id: string, text: string) => boolean;
-  answerQuestionStructured: (id: string, answer: StructuredAnswer) => boolean;
-  skipQuestion: (id: string) => boolean;
-  dismissQuestion: (id: string) => boolean;
-  getPendingApproval: () => ToolApprovalRequestEvent | undefined;
-  getActiveConversationId: () => string;
-  getOpenConversations: () => ConversationRuntime[];
-  getArchivedConversations?: () => ConversationRuntime[];
-  getRequestChains: () => RequestChainStatus[];
-  getStreamingConversationIds: () => ReadonlySet<string>;
-  getSessionActiveMs: (conversation: ConversationRuntime) => number;
-  /** Counts per reason a slot cannot be freed; empty when a slot can be. */
-  capBlockers: (options?: { activate?: boolean }) => string[];
-  routeInboundAgent: (
-    sender: AgentSender,
-    selection: InboundAgentSelection,
-  ) => Promise<InboundAgentTarget>;
-  getAgentLink: (conversationId: string, kind: AgentKind) => AgentLink | undefined;
-  askAgent: AskAgentFacadeHandler;
-  showConversationNotice: (conversationId: string, message: string) => void;
-  clankerMode: () => boolean;
-  setClankerMode: (on: boolean) => void;
-  contextBudget: (conversationId: string) => { used: number; max: number } | undefined;
-  contextBreakdown?: (
-    conversationId: string,
-  ) => { instructions: number; tools: number; conversation: number } | undefined;
-  compact: (
-    conversationId: string,
-    options?: {
-      trigger?: CompactionTrigger;
-      remoteOrigin?: { channel: string; chatId: string };
-    },
-  ) => Promise<CompactionOutcome>;
-  setConversationModel: (conversationId: string, modelName: string | null) => boolean;
-  unloadModels: () => Promise<void>;
-  unloadConversationModel: (
-    conversationId: string,
-  ) => Promise<{ model: string; wasLoaded: boolean; serverStopped?: boolean }>;
-  restartModel: (modelName: string) => Promise<void>;
-  backendProcesses?: () => readonly BackendProcess[];
-  onCompactionEvent?: (listener: (event: CompactionEvent) => void) => { dispose(): void };
-  onHostActivity?: (listener: HostActivityListener) => { dispose(): void };
-  emitHostActivity?: (event: HostActivityEvent) => void;
-  hostActivityListenerCount?: () => number;
-  onUserNotification?: (sink: UserNotificationSink) => { dispose(): void };
-  setReachProbe?: (probe: (conversationId: string) => number) => { dispose(): void };
-  onAgentProgress: (listener: (event: AgentProgressEvent) => void) => { dispose(): void };
+  /** Renames a chat with a name the retitle job got from the model, marking the
+   *  record `auto` so the next run leaves it alone; false when this workspace
+   *  holds no chat with that id. Same path a rename from the sidebar uses. */
+  applyAutoTitle?(conversationId: string, title: string): boolean;
 }
 
 /**
@@ -250,7 +191,7 @@ export interface SidebarHostFacadeDeps {
  * phone and the bus needs to put the reasons in a JSON body. Existing callers
  * already catch a throw here, so only the error's shape changes.
  */
-class ChatCapacityError extends Error {
+export class ChatCapacityError extends Error {
   constructor(
     /** Counts per reason, e.g. `7 running a turn`. Never empty in practice. */
     readonly atCapReason: readonly string[],
@@ -261,37 +202,22 @@ class ChatCapacityError extends Error {
   }
 }
 
-function summarize(
-  conv: ConversationRuntime,
-  archived: boolean,
-  activeMs: number,
-): ForgeConversationSummary {
-  return {
-    id: conv.id,
-    title: conv.title,
-    activeModel: conv.active_model ?? null,
-    archived,
-    updatedAt: conv.updatedAt,
-    requestCount: conv.model_request_count ?? 0,
-    toolCallCount: conv.tool_call_count ?? 0,
-    compactCount: conv.compaction?.generation ?? 0,
-    activeMs,
-  };
-}
-
 /** Typed, addressed seam used by transports without manipulating sidebar focus. */
 export class SidebarHostFacade implements ForgeHostFacade {
   constructor(private readonly deps: SidebarHostFacadeDeps) {}
 
   async createConversation(
-    options: { activate?: boolean } = { activate: false },
+    options: { activate?: boolean; openedBy?: string } = { activate: false },
   ): Promise<ForgeConversationSummary> {
-    const conv = this.deps.createConversation({ activate: options.activate ?? false });
+    const conv = this.deps.createConversation({
+      activate: options.activate ?? false,
+      ...(options.openedBy ? { openedBy: options.openedBy } : {}),
+    });
     if (!conv) {
       const reasons = this.deps.capBlockers(options);
       throw new ChatCapacityError(reasons, chatCapMessage(reasons));
     }
-    return summarize(conv, false, this.deps.getSessionActiveMs(conv));
+    return summarizeConversation(conv, false, this.deps.getSessionActiveMs(conv));
   }
 
   async restoreConversation(
@@ -308,7 +234,7 @@ export class SidebarHostFacade implements ForgeHostFacade {
       }
       throw new Error('Forge: conversation could not be restored.');
     }
-    return summarize(conv, false, this.deps.getSessionActiveMs(conv));
+    return summarizeConversation(conv, false, this.deps.getSessionActiveMs(conv));
   }
 
   chatCapBlockers(options: { activate?: boolean } = {}): string[] {
@@ -370,8 +296,12 @@ export class SidebarHostFacade implements ForgeHostFacade {
     return this.deps.addApprovalSink(sink);
   }
 
-  resolveApproval(id: string, approved: boolean): void {
-    this.deps.resolveApproval(id, approved);
+  resolveApproval(id: string, decision: import('./approvalMessages').ApprovalDecision): void {
+    this.deps.resolveApproval(id, decision);
+  }
+
+  resetApprovals(conversationId: string): Promise<boolean> {
+    return this.deps.resetApprovals?.(conversationId) ?? Promise.resolve(false);
   }
 
   addQuestionSink(sink: UserQuestionSink): { dispose(): void } {
@@ -394,12 +324,12 @@ export class SidebarHostFacade implements ForgeHostFacade {
     return this.deps.dismissQuestion(id);
   }
 
-  clankerMode(): boolean {
-    return this.deps.clankerMode();
+  clankerMode(conversationId: string): boolean {
+    return this.deps.clankerMode(conversationId);
   }
 
-  setClankerMode(on: boolean): void {
-    this.deps.setClankerMode(on);
+  setClankerMode(conversationId: string, on: boolean): void {
+    this.deps.setClankerMode(conversationId, on);
   }
 
   contextBudget(conversationId: string): { used: number; max: number } | undefined {
@@ -466,6 +396,10 @@ export class SidebarHostFacade implements ForgeHostFacade {
     return this.deps.setReachProbe!(probe);
   }
 
+  takeTurnSpeedLine(conversationId: string): string | undefined {
+    return this.deps.takeTurnSpeedLine?.(conversationId);
+  }
+
   onAgentProgress(listener: (event: AgentProgressEvent) => void): { dispose(): void } {
     return this.deps.onAgentProgress(listener);
   }
@@ -478,6 +412,17 @@ export class SidebarHostFacade implements ForgeHostFacade {
     return conversation ? recentExchanges(conversation.messages, limit) : [];
   }
 
+  getConversation(conversationId: string): ConversationRuntime | undefined {
+    return [
+      ...this.deps.getOpenConversations(),
+      ...(this.deps.getArchivedConversations?.() ?? []),
+    ].find((conversation) => conversation.id === conversationId);
+  }
+
+  applyAutoTitle(conversationId: string, title: string): boolean {
+    return this.deps.applyAutoTitle!(conversationId, title);
+  }
+
   status(): ForgeHostStatus {
     const pendingApproval = this.deps.getPendingApproval();
     return {
@@ -486,10 +431,10 @@ export class SidebarHostFacade implements ForgeHostFacade {
         ...this.deps
           .getOpenConversations()
           .map((conversation) =>
-            summarize(conversation, false, this.deps.getSessionActiveMs(conversation)),
+            summarizeConversation(conversation, false, this.deps.getSessionActiveMs(conversation)),
           ),
         ...(this.deps.getArchivedConversations?.() ?? []).map((conversation) =>
-          summarize(conversation, true, this.deps.getSessionActiveMs(conversation)),
+          summarizeConversation(conversation, true, this.deps.getSessionActiveMs(conversation)),
         ),
       ],
       requestChains: this.deps.getRequestChains(),

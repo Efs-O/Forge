@@ -266,6 +266,20 @@ describe('formatSystemReport', () => {
     expect(text).toContain('N:  412 GB free / 1863 GB');
   });
 
+  it('separates each device block in the Telegram card', () => {
+    const text = formatSystemReport(base, { telegramCards: true });
+
+    // One blank line between the two GPU cards, and before Memory and Drives.
+    expect(text).toMatch(/<b>GPU 0 · [^<]*<\/b>\n[^\n]*\n[^\n]*\n\n<b>GPU 1 · /);
+    expect(text).toMatch(/\n\n<b>Memory<\/b>\nRAM/);
+    expect(text).toMatch(/\n\n<b>Drives<\/b>\nN:/);
+    // A heading never gets separated from its own lines, and no blank line is
+    // ever doubled or left at the start.
+    expect(text).toMatch(/<b>Memory<\/b>\nRAM  38\.4\/64\.0 GB/);
+    expect(text).not.toMatch(/^\n/);
+    expect(text).not.toMatch(/\n\n\n/);
+  });
+
   it('emphasizes an escaped Forge backend label for Telegram only', () => {
     const text = formatSystemReport(
       { ...base, vramProcesses: [{ ...base.vramProcesses[0], forgeModel: 'qwen <fast>' }] },

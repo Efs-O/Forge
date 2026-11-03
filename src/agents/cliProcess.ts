@@ -1,4 +1,12 @@
 import { spawn, type ChildProcess } from 'child_process';
+import * as path from 'path';
+import {
+  refreshWindowsPath,
+  withWindowsPath,
+  type WindowsPathRefresh,
+  type WindowsPathSource,
+  type WindowsUserPathDeps,
+} from './windowsUserPath';
 import {
   buildWindowsCmdShellInvocation,
   needsWindowsCmdShellWrap,
@@ -12,6 +20,9 @@ export interface SpawnCliProcessOptions {
   stdin?: 'ignore' | 'pipe';
   /** Variables layered over the inherited environment. */
   env?: Readonly<Record<string, string>>;
+  /** Names the CLI in the one-line start log. Defaults to the executable's
+   *  basename without its extension — derived from the path, not guessed. */
+  cliName?: string;
 }
 
 export interface CliProcessExit {
@@ -23,6 +34,39 @@ export interface CliProcessInvocation {
   file: string;
   args: string[];
   windowsCmdWrapped: boolean;
+  /** Which PATH the child resolves names against: `fresh` is the machine+user
+   *  PATH the registry holds right now (what a newly opened terminal gets),
+   *  `startup` is the snapshot VS Code started with. Travels with the
+   *  invocation so the node lookup, the child environment and the start log
+   *  line can never describe three different PATHs. */
+  pathSource: WindowsPathSource;
+  /** The refreshed PATH, present only when `pathSource === 'fresh'`.
+   *  Never logged: environment values are where the user's tokens sit. */
+  refreshedPath?: string;
+}
+
+/** Seams for {@link buildCliProcessInvocation}, so a unit test never reads the
+ *  registry, spawns `where.exe` or depends on the machine's real PATH. */
+export interface CliInvocationDeps {
+  /** `reg` reader for the Windows PATH refresh. */
+  execFile?: WindowsUserPathDeps['execFile'];
+  /** Filesystem probe for the shim's target and the `node.exe` beside it. */
+  exists?: (candidate: string) => boolean;
+  /** PATH search for `node.exe`. */
+  which?: (program: string, pathValue: string) => string | undefined;
+  /** Environment the refreshed PATH is merged against and the child is spawned
+   *  from. Defaults to `process.env`; a test that sets it must pass the same
+   *  value to {@link buildCliSpawnEnvironment}, or the two disagree.
+   *  Production callers never set it. */
+  env?: NodeJS.ProcessEnv;
+}
+
+/** The name to put in a message about this executable: the caller's `cliName`
+ *  when it has one, otherwise the basename without the extension the user typed
+ *  and will install. `path.win32.basename` so a `C:\…` path still splits on
+ *  Linux and macOS (CLAUDE.md's `path.basename` trap). */
+export function cliLabelFromExecutable(executable: string, cliName?: string): string {
+  return cliName ?? path.win32.basename(executable).replace(/\.(cmd|bat|exe|ps1|js)$/i, '');
 }
 
 const inheritedSessionVariables = [
@@ -31,47 +75,161 @@ const inheritedSessionVariables = [
   'COPILOT_AGENT_SESSION_ID',
 ] as const;
 
-/** The one child environment builder; agent identity never crosses Forge's boundary. */
+/** The one child environment builder; agent identity never crosses Forge's boundary.
+ *
+ *  `refreshedWindowsPath` is what `windowsUserPath.ts` read from the registry at
+ *  this spawn. An override that names PATH itself keeps its value — an explicit
+ *  setting beats a refreshed one — otherwise the child, and every subprocess the
+ *  CLI starts, resolves names the way a freshly opened terminal would instead of
+ *  the way VS Code did when it started. */
 export function buildCliSpawnEnvironment(
   inherited: NodeJS.ProcessEnv = process.env,
   overrides: Readonly<Record<string, string>> = {},
+  refreshedWindowsPath?: string,
 ): NodeJS.ProcessEnv {
   const environment = { ...inherited, ...overrides };
   for (const name of inheritedSessionVariables) delete environment[name];
+  const overrideNamesPath = Object.keys(overrides).some((key) => key.toLowerCase() === 'path');
+  // `withWindowsPath` drops whatever casing the inherited block happened to use,
+  // so the child gets one PATH, not two that Windows would have to choose
+  // between — the same rule `where`'s environment block and the probe's own
+  // block follow, so the three can never disagree.
+  if (refreshedWindowsPath && !overrideNamesPath) {
+    return withWindowsPath(environment, refreshedWindowsPath);
+  }
   return environment;
 }
 
 /** Builds the exact argv used by {@link spawnCliProcess}: an npm `.cmd` shim's
- *  target directly when it can be read, otherwise an escaped cmd.exe line. */
+ *  target directly when it can be read, otherwise an escaped cmd.exe line.
+ *  On Windows it also resolves the PATH the child will be given, because an npm
+ *  node-script shim needs an absolute `node.exe` rather than a name to be
+ *  resolved later (`resolveShimNodeExecutable` in `windowsCmdShim.ts`). */
 export function buildCliProcessInvocation(
   options: SpawnCliProcessOptions,
   platform: NodeJS.Platform = process.platform,
+  deps: CliInvocationDeps = {},
 ): CliProcessInvocation {
+  const baseEnv = deps.env ?? process.env;
+  // Explicit win32 gate, as in the argv branch below: nothing on POSIX pays for
+  // a registry read, and nothing on POSIX needs one.
+  const refresh: WindowsPathRefresh =
+    platform === 'win32'
+      ? refreshWindowsPath(baseEnv, deps.execFile ? { execFile: deps.execFile } : {})
+      : { source: 'startup' };
+  const pathFields: Pick<CliProcessInvocation, 'pathSource' | 'refreshedPath'> =
+    refresh.path !== undefined
+      ? { pathSource: 'fresh', refreshedPath: refresh.path }
+      : { pathSource: 'startup' };
   if (platform !== 'win32' || !needsWindowsCmdShellWrap(options.executable)) {
-    return { file: options.executable, args: [...options.args], windowsCmdWrapped: false };
+    return {
+      file: options.executable,
+      args: [...options.args],
+      windowsCmdWrapped: false,
+      ...pathFields,
+    };
   }
-  const direct = unwrapNpmCmdShim(options.executable);
+  const direct = unwrapNpmCmdShim(options.executable, {
+    ...(deps.exists ? { exists: deps.exists } : {}),
+    ...(deps.which ? { which: deps.which } : {}),
+    // Search the PATH the child is actually about to get: the refreshed one when
+    // the registry answered, otherwise the inherited one, which is what
+    // buildCliSpawnEnvironment keeps.
+    nodePath: refresh.path ?? baseEnv['PATH'] ?? baseEnv['Path'] ?? '',
+    cliLabel: cliLabelFromExecutable(options.executable, options.cliName),
+  });
   if (direct) {
-    return { file: direct.file, args: [...direct.args, ...options.args], windowsCmdWrapped: false };
+    return {
+      file: direct.file,
+      args: [...direct.args, ...options.args],
+      windowsCmdWrapped: false,
+      ...pathFields,
+    };
   }
   return {
     ...buildWindowsCmdShellInvocation(options.executable, [...options.args]),
     windowsCmdWrapped: true,
+    ...pathFields,
   };
+}
+
+/** Any argv token that looks like a credential is replaced rather than dropped,
+ *  so the start line still shows the shape of the call. These are the shapes the
+ *  CLIs actually carry: `--api-key`, `--anthropic-key`, `…token…`, `sk-…`. */
+const SECRET_ARGV_TOKEN = /token|key|secret|^sk-/i;
+const REDACTED_ARGV_TOKEN = '<redacted>';
+/** A token that begins with `-` is another flag, not the value of the one before
+ *  it, so it is never a secret to redact. */
+const IS_FLAG = /^-/u;
+
+/** Redacts every credential value in `argv` in both forms the CLIs use. A token
+ *  that names a secret carries its own value when it is `--token=X` or `sk-X`,
+ *  and puts it in the NEXT token when it is `--api-key X` — the second form was
+ *  the half the old per-token rule missed, and `abc123` went into the log line
+ *  and into `.forge/sessions/*.jsonl` in clear. A flag that does not name a
+ *  secret keeps its value: `--model gpt` still shows `gpt`, which is what makes
+ *  the line worth reading. */
+function redactArgvTokens(argv: readonly string[]): string[] {
+  const out = argv.map((arg) => (SECRET_ARGV_TOKEN.test(arg) ? REDACTED_ARGV_TOKEN : arg));
+  for (let i = 0; i + 1 < out.length; i++) {
+    if (IS_FLAG.test(argv[i]) && SECRET_ARGV_TOKEN.test(argv[i]) && !IS_FLAG.test(argv[i + 1])) {
+      out[i + 1] = REDACTED_ARGV_TOKEN;
+    }
+  }
+  return out;
+}
+
+/** The Forge output channel is loaded lazily, on purpose. `src/util/logger`
+ *  creates that channel the moment it is imported, and `cliProcess.ts` is pulled
+ *  in by modules that only want `terminateProcessTree` (`src/util/processSpawn.ts`,
+ *  `src/tools/shellTool.ts`) and by tests that mock `vscode` minimally — an
+ *  eager import here would make importing this module require VS Code. The line
+ *  lands one microtask after the spawn; every later CLI line comes from a
+ *  process event, a whole turn later, so the start line still precedes them.
+ *  A logging failure must never fail a spawn, and never goes unreported: when
+ *  the channel cannot be reached the line goes to `console.error` below, which
+ *  needs no vscode and still lands in the host's output. (`no-console` is
+ *  disabled for that one line: here the console is the report, not debug
+ *  chatter.) */
+function logCliStart(line: string): void {
+  void import('../util/logger')
+    .then(({ getLogger }) => getLogger().info(line))
+    .catch((error: unknown) => {
+      // eslint-disable-next-line no-console -- The channel was the report; this is its fallback.
+      console.error('[cli-agent] start line could not be logged:', error, line);
+    });
 }
 
 /**
  * Spawns an already-resolved CLI executable. npm-installed CLI `.cmd` shims
  * require an explicit cmd.exe invocation on Windows; real executables are
  * spawned directly.
+ *
+ * Every CLI cold start writes exactly one line to the Forge output channel.
+ * This is the only place that knows the argv, the cwd and which PATH the child
+ * was given, and the Windows report that started this work was written from red
+ * text alone because nothing said any of it. Only argv is printed, never an
+ * environment value: the child env is where the user's tokens sit
+ * (`CLAUDE_SPAWN_ENV`, an adapter's `spawnEnv`) and CLAUDE.md's Hard Stops put
+ * keys in SecretStorage, so an `env=…` dump would leak them into the channel and
+ * into `.forge/sessions/*.jsonl`.
  */
 export function spawnCliProcess(
   options: SpawnCliProcessOptions,
   invocation: CliProcessInvocation = buildCliProcessInvocation(options),
 ): ChildProcess {
+  const environment = buildCliSpawnEnvironment(process.env, options.env, invocation.refreshedPath);
+  logCliStart(
+    `[cli-agent] start ${cliLabelFromExecutable(options.executable, options.cliName)}` +
+      ` file=${invocation.file}` +
+      ` wrapped=${invocation.windowsCmdWrapped}` +
+      ` args=${JSON.stringify(redactArgvTokens(invocation.args))}` +
+      ` cwd=${options.cwd}` +
+      ` pathSource=${invocation.pathSource}`,
+  );
   return spawn(invocation.file, invocation.args, {
     cwd: options.cwd,
-    env: buildCliSpawnEnvironment(process.env, options.env),
+    env: environment,
     stdio: [options.stdin ?? 'ignore', 'pipe', 'pipe'],
     windowsHide: true,
     // POSIX: make the child a process-group leader so terminateProcessTree can

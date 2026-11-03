@@ -20,6 +20,11 @@ These commands are currently contributed by the extension.
 | `Forge: Show Backend Console` | Reveal backend logs or console       |
 | `Forge: Restart Backend`      | Restart the managed backend          |
 | `Forge: Show Live Claude Sessions` | Copy a live Claude Code session id to link it to the intended Forge chat with `/link` |
+| `Forge: Set Up Agent Note` | Write or update Forge's marked agent-mesh section in this workspace's `AGENTS.md` and `CLAUDE.md`, so other coding agents there know how to reach Forge chats |
+| `Forge: Connect to my desktop` | On a laptop: add every model the desktop offers to `config.yaml` in one comment-preserving write — the desktop's own models through its shared starter port, and the cloud models its relay allows, under the `ollama-cloud` / `desktop-relay` groups. Reads only, so a sleeping desktop stays asleep; writes no key; an entry that already exists is left exactly as it is |
+| `Forge: Share this computer` | On the desktop: turn on `model_starter` and `cloud_relay` in `config.yaml` and share only those two ports with `tailscale serve`, after showing the exact commands and the switches in a dialog you confirm. Never shares 8799 or Ollama's 11434, never changes the ACL, Tailnet Lock or sign-in, and does nothing in a tunnel or SSH window |
+| `Forge: Stop sharing this computer` | Turn off the two switches and the two `serve` shares Forge made, and leave every other share this computer has on the tailnet exactly as it was |
+| `Forge: Check connection` | On a laptop: walk the path to the desktop — Tailscale here, the desktop online in Tailscale, the model starter, the cloud relay, the models the desktop will serve — and name the first link that is broken in plain words. Reuses the address probe that every prompt already uses, reads only, and starts nothing |
 | `Forge: Open Config`          | Open the active config file          |
 | `Forge: Validate Config`      | Validate the active config           |
 | `Forge: Pick Model`           | Pick the active model                |
@@ -27,6 +32,9 @@ These commands are currently contributed by the extension.
 | `Forge: Model Manager`        | Open the Model Manager panel         |
 | `Forge: Add Models`           | Add model entries to the config      |
 | `Forge: Compact config into groups` | Migrate the config into shared groups (comment-preserving) |
+| `Forge: Move security settings to policy.yaml` | Move the policy keys and each model's server programs from `config.yaml` into `~/.forge/policy.yaml` (owner-run; backs up config.yaml first, refuses to overwrite an existing policy file) |
+| `Forge: Lock policy.yaml` | Make `~/.forge/policy.yaml` read-only for this user, so Forge's own writers and accidental edits are refused (owner-run; Forge never locks on its own, and reports the permissions it read back afterwards). It does not stop a program running as you — you can always unlock it or replace the file |
+| `Forge: Unlock policy.yaml` | Put `~/.forge/policy.yaml` back to the folder's default permissions so the owner's own tools and Forge can write it again (owner-run) |
 | `Forge: Setup Wizard`         | Run the first-run or repair flow     |
 | `Forge: Set Up With Claude Code / Codex` | Copy a prompt that has your Claude Code / Codex set Forge up from the shipped `AI_SETUP.md` |
 | `Forge: Unload Active Chat's Model` | Release only the active chat's model |

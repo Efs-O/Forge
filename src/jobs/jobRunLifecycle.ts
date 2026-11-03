@@ -59,6 +59,32 @@ export async function runJobCheck(
   return checkResult;
 }
 
+/**
+ * An action whose runner is absent in this window (no host facade, no storage
+ * folder, or a build too old to know the action): one failed run row naming
+ * what is missing, then the shared backoff. Written once because `agent_task`
+ * and `retitle` need exactly the same thing, and two copies would drift.
+ */
+export async function recordUnwiredActionRun(
+  store: JobStore,
+  delivery: JobDelivery,
+  now: () => Date,
+  jobFile: JobFile,
+  wasLate: boolean,
+  error: string,
+): Promise<void> {
+  await store.appendRun(jobFile.job.id, {
+    at: now().getTime(),
+    late: wasLate,
+    outcome: 'failed',
+    changed: true,
+    summary: error,
+    error,
+    delivered: 0,
+  });
+  await applyJobBackoff(store, delivery, now, jobFile, error);
+}
+
 /** Apply backoff after a failure: double the interval up to 24 h (B.3). */
 export async function applyJobBackoff(
   store: JobStore,

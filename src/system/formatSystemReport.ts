@@ -184,6 +184,11 @@ export function formatSystemReport(report: SystemReport, options: FormatOptions 
   return options.telegramHtml ? withTelegramForgeBackendEmphasis(text, report.vramProcesses) : text;
 }
 
+/** Blank line between report blocks: never first, never twice in a row. */
+function pushSeparator(lines: string[]): void {
+  if (lines.length > 0 && lines[lines.length - 1] !== '') lines.push('');
+}
+
 function formatTelegramCards(report: SystemReport): string {
   const lines: string[] = [];
   if (report.gpuError)
@@ -206,12 +211,14 @@ function formatTelegramCards(report: SystemReport): string {
       const model = process.forgeModel ? ` · ${process.forgeModel}` : '';
       detail.push(`└ ${name}${model}  ${gpuGb(process.bytes / (1024 * 1024 * 1024))} GB`);
     }
+    pushSeparator(lines);
     lines.push(`<b>GPU ${gpu.index} · ${escapeTelegramHtml(shortGpuName(gpu.name))}</b>`);
     lines.push(escapeTelegramHtml(detail.join('\n')));
   }
   const unattributed = report.vramProcesses.filter((process) => !attributed.has(process.pid));
   if (unattributed.length > 0) {
     const heading = report.gpus.length > 0 ? 'VRAM (card not resolved)' : 'VRAM by process';
+    pushSeparator(lines);
     lines.push(`<b>${heading}</b>`);
     lines.push(
       escapeTelegramHtml(
@@ -225,17 +232,21 @@ function formatTelegramCards(report: SystemReport): string {
     );
   }
   if (report.vramProcessError) {
+    pushSeparator(lines);
     lines.push(
       `<i>Per-process VRAM unavailable — ${escapeTelegramHtml(report.vramProcessError)}</i>`,
     );
   } else if (report.vramProcesses.length === 0 && !report.gpuError && report.gpus.length === 0) {
+    pushSeparator(lines);
     lines.push(
       `<i>No process is holding more than ${(report.minVramBytes / GIB).toFixed(2)} GB of VRAM.</i>`,
     );
   }
   const usedRam = report.ram.totalBytes - report.ram.freeBytes;
+  pushSeparator(lines);
   lines.push('<b>Memory</b>');
   lines.push(`RAM  ${gpuGb(usedRam / GIB)}/${gpuGb(report.ram.totalBytes / GIB)} GB`);
+  pushSeparator(lines);
   lines.push('<b>Drives</b>');
   const drives = report.drives.filter((drive) => drive.totalBytes > 0);
   const hiddenDrives = drives.length !== report.drives.length;

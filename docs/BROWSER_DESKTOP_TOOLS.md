@@ -172,26 +172,21 @@ action confirmation. It is a helpful hint, not the security boundary: the
 origin and target-window gates are the controls that enforce where an action
 can occur.
 
-## Visible background GUI launches
+## Background launches and windows
 
-`exec_command` normally starts a background process with no window. Add
-`show_window: true` when the point of launching it is to put a GUI on screen and
-then drive it with the desktop tools:
+`shell` with `background: true` spawns with `windowsHide: true`
+(`src/tools/BackgroundExecutionManager.ts`), so a console program gets no window
+at all. A GUI program still opens its own window when it creates one: Forge does
+not suppress it, does not focus it and does not capture it — driving that window
+is what the desktop tools are for.
 
-```json
-{ "command": "notepad.exe", "args": [], "background": true, "show_window": true }
-```
-
-- It requires `background: true` and Windows, and it must be a real boolean. A
-  request that violates either is refused before anything is spawned.
-- Console helpers keep the existing hidden default; the flag is never inferred
-  from the program name.
-- It changes visibility only. It grants no desktop target approval — focusing or
-  capturing the window is still what asks for that.
+- There is no flag that makes a background launch visible, and visibility is
+  never inferred from the program name.
+- A launch grants no desktop target approval — focusing or capturing the window
+  is still what asks for that.
 - The execution ID tracks the process Forge started, not any window or child GUI
   app it opens. A launcher such as `write.exe` can report `completed` while its
-  GUI stays open, and `stop` will not close that GUI. The tool result says this
-  whenever a visible launch is used.
+  GUI stays open, and `stop_execution` will not close that GUI.
 
 Desktop text input is UTF-8 end to end. Text sent to `desktop_type` is decoded
 explicitly by the desktop driver, so accents, Greek, CJK, and emoji arrive as the
@@ -217,4 +212,10 @@ invalid UTF-8 is refused instead of being typed as replacement characters.
 - Screenshots are stored under
   `~/.forge/screenshots/<conversation-id>/`, outside the workspace. This keeps
   potentially sensitive desktop captures out of project directories and source
-  control.
+  control. The path is decided in one place — `src/tools/browser/screenshotPaths.ts`
+  — which the webview's image roots, `send_file` and the archive purge all read,
+  so they cannot drift. A permanently deleted chat takes its captures with it
+  (`ArchivedSessions.purge`): these files can hold secrets, so they must not
+  outlive the conversation that made them. `FORGE_SCREENSHOT_DIR` overrides the
+  root at call time; the browser integration tests use it to keep their own
+  captures out of the owner's folder.

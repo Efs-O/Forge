@@ -1,6 +1,6 @@
 import type { AttachmentData } from './messageBridge';
 import type { ContentPart } from '../llm/types';
-import type { ConversationRuntime, SidebarRuntime } from './sessionTypes';
+import type { ConversationRuntime, SidebarRuntime, TitleSource } from './sessionTypes';
 import {
   MAX_CONVERSATIONS,
   UNTITLED_TITLE,
@@ -46,6 +46,8 @@ export function opNewConversation(
     title: UNTITLED_TITLE,
     createdAt: now,
     updatedAt: now,
+    retention_activity_at: now,
+    keep_open: false,
     messages: [],
     ...(defaultModel ? { active_model: defaultModel } : {}),
   };
@@ -90,6 +92,8 @@ export function opCloseConversation(
       title: UNTITLED_TITLE,
       createdAt: Date.now(),
       updatedAt: Date.now(),
+      retention_activity_at: Date.now(),
+      keep_open: false,
       messages: [],
     };
     updated.activeConversationId = freshId;
@@ -112,7 +116,9 @@ export function opArchiveLeastRecent(
 ): SidebarRuntime | undefined {
   const candidate = [...sidebar.conversations]
     .filter(evictable)
-    .sort((a, b) => a.updatedAt - b.updatedAt)[0];
+    .sort(
+      (a, b) => (a.retention_activity_at ?? a.updatedAt) - (b.retention_activity_at ?? b.updatedAt),
+    )[0];
   if (!candidate) return undefined;
   return opCloseConversation(sidebar, candidate.id)?.sidebar;
 }
@@ -141,6 +147,8 @@ export function opDeleteConversation(sidebar: SidebarRuntime, id: string): Delet
       title: UNTITLED_TITLE,
       createdAt: now,
       updatedAt: now,
+      retention_activity_at: now,
+      keep_open: false,
       messages: [],
     };
     updated.activeConversationId = updated.conversations[0].id;
@@ -169,6 +177,7 @@ export function opRenameConversation(
   sidebar: SidebarRuntime,
   id: string,
   title: string,
+  source: TitleSource = 'user',
 ): RenameConvResult {
   const conversationIndex = sidebar.conversations.findIndex((c) => c.id === id);
   const historyIndex = sidebar.history.findIndex((c) => c.id === id);
@@ -183,10 +192,15 @@ export function opRenameConversation(
     updated.conversations[conversationIndex] = {
       ...updated.conversations[conversationIndex]!,
       title,
+      title_source: source,
     };
   }
   if (historyIndex >= 0) {
-    updated.history[historyIndex] = { ...updated.history[historyIndex]!, title };
+    updated.history[historyIndex] = {
+      ...updated.history[historyIndex]!,
+      title,
+      title_source: source,
+    };
   }
   return { ok: true, sidebar: updated };
 }

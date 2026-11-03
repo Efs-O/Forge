@@ -77,12 +77,33 @@ export function hasWebTools(definitions: readonly ToolDefinition[]): boolean {
   );
 }
 
+/**
+ * Whether this turn was offered the agent-delegation tools, so the template can
+ * say who to delegate to only when there is someone to delegate to.
+ *
+ * The condition is the tools' own `advertise` predicates — `agent_bus.enabled`
+ * for `ask_agent`, a configured local or cloud target for `ask_local_agent`
+ * (`src/tools/askAgentTool.ts`, `src/tools/localAgentTool.ts`). This reads the
+ * definitions the registry has already filtered, exactly as `hasWebTools` above
+ * does, so the prompt and the tool list change together and cost the same
+ * re-prefill. A caller that re-read `config.agent_bus?.enabled` here would be a
+ * second owner of that one decision, and the two would drift the first time an
+ * advertise predicate gained a case.
+ */
+export function hasDelegationTools(definitions: readonly ToolDefinition[]): boolean {
+  return definitions.some(
+    ({ function: { name } }) => name === 'ask_agent' || name === 'ask_local_agent',
+  );
+}
+
 export function buildTemplateContext(
   config: ForgeConfig,
   forgeLoader: ForgeInstructionsLoader | undefined,
   activeFile: string | undefined,
   /** A full turn passes its turn-start snapshot; omitted, it is read now. */
   projectRoot?: boolean,
+  /** The conversation's frozen skills catalog; absent means no block at all. */
+  skillsCatalog?: string,
 ): Record<string, string> {
   const ctx: Record<string, string> = {};
   // `activeFile` is deliberately NOT a template variable any more. Rendering it
@@ -99,6 +120,9 @@ export function buildTemplateContext(
   }
   const projectInstructions = forgeLoader?.instructionsFor(activeFile);
   if (projectInstructions) ctx['forgeInstructions'] = projectInstructions;
+  // The caller passes the string it froze for this conversation, never a live
+  // re-read: re-rendering per round would move the prompt head on a skill install.
+  if (skillsCatalog) ctx['skillsCatalog'] = skillsCatalog;
   return ctx;
 }
 

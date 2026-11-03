@@ -17,6 +17,14 @@ export function formatAthensDateTime(epochMs: number): string {
   return `${values['year']}-${values['month']}-${values['day']} ${values['hour']}:${values['minute']}`;
 }
 
+/**
+ * The first line of every scheduled job turn. Exported because it outlives the
+ * job: `JobStore.delete` removes the job and the conversation id in its state,
+ * while the chat and its first line stay, so the daily retitle job recognizes a
+ * job's chat from this text (`src/jobs/retitleCandidates.ts`).
+ */
+export const JOB_TASK_PROMPT_MARKER = 'Scheduled task for job "';
+
 export async function buildAgentTaskPrompt(
   store: JobStore,
   jobFile: JobFile,
@@ -30,7 +38,7 @@ export async function buildAgentTaskPrompt(
     ? recent.map((row) => `- ${new Date(row.at).toLocaleString()}: ${row.outcome} — ${row.summary}`)
     : ['(no earlier runs)'];
   const parts = [
-    `Scheduled task for job "${job.name}":`,
+    `${JOB_TASK_PROMPT_MARKER}${job.name}":`,
     `Scheduled run time: ${runTime} (Europe/Athens, 24-hour format).`,
     '',
     action.task,
@@ -51,9 +59,26 @@ export async function buildAgentTaskPrompt(
   return parts.join('\n');
 }
 
-/** Parse the `RESULT:` line (and an optional `RESTART:` line) from final text. */
+/**
+ * What a RESULT line may say. `updated` (a success that changed something)
+ * arrives as `ok`; `skipped` means the turn ran but did not act, so the change
+ * the check reported is still pending. Anything else counts as a failure.
+ */
+export type ResultKind = 'ok' | 'no_change' | 'skipped' | 'failed';
+
+/**
+ * Parse the `RESULT:` line (and an optional `RESTART:` line) from final text.
+ *
+ * The contract asks for `RESULT: ok | no_change | failed — <one sentence>`, but
+ * a task that names its own kinds makes the agent copy those words: the Maya
+ * updater ends its log with `RESULT: updated - engine rebuilt`, and its task
+ * text says "copied from the script", so the turn sent `updated` and `skipped`
+ * with an ASCII dash. Both wordings are accepted, and the kind word is taken
+ * out of the sentence either way — leaving it in put `failed - ` inside every
+ * failure summary and a status prefix in front of every success one.
+ */
 export function parseResult(finalText: string): {
-  kind: 'ok' | 'no_change' | 'failed';
+  kind: ResultKind;
   sentence: string;
   restart: boolean;
 } {
@@ -70,12 +95,17 @@ export function parseResult(finalText: string): {
     };
   }
   const raw = line.replace(/^RESULT:\s*/i, '').trim();
-  const [head, ...rest] = raw.split('—');
-  const sentence = (rest.length ? rest.join('—') : head).trim() || head.trim();
-  const lower = raw.toLowerCase();
-  let kind: 'ok' | 'no_change' | 'failed';
-  if (lower.startsWith('no_change')) kind = 'no_change';
-  else if (lower.startsWith('ok')) kind = 'ok';
+  // Split on the FIRST dash that separates the kind from the sentence, in
+  // either dash family: an ASCII one is what a script's own RESULT line uses,
+  // and the sentence keeps everything after it, dashes and all.
+  const parts = raw.split(/\s(?:[—–-])\s/);
+  const head = (parts[0] ?? '').trim();
+  const sentence = (parts.length > 1 ? parts.slice(1).join(' - ') : '').trim() || raw;
+  const word = head.toLowerCase().replace(/[-_]/g, '');
+  let kind: ResultKind;
+  if (word.startsWith('nochange')) kind = 'no_change';
+  else if (word.startsWith('skip')) kind = 'skipped';
+  else if (word.startsWith('ok') || word.startsWith('updated')) kind = 'ok';
   else kind = 'failed';
   return { kind, sentence, restart };
 }

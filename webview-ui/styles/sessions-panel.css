@@ -1,14 +1,24 @@
-/* ── Sessions panel ──────────────────────────────────────────────────────── */
-/* The flyout behind the clock button. Split out of tabs.css when it grew a
-   second section (open tabs): the strip and the panel are separate concerns,
-   and tabs.css was already at 408 LOC.
-   Layout and rows below are unchanged from tabs.css — moved, not rewritten. */
+/* ── Sessions panel: the shell ───────────────────────────────────────────── */
+/* The flyout behind the clock button: its size, its head (search box and tab
+   strip), the one scroll container, and the resize grip. The rows it scrolls
+   are styled in `history-rows.css`, which is the other half of this split.
+
+   The flyout was split out of tabs.css when it grew a second section (open
+   tabs): the strip and the panel are separate concerns, and tabs.css was
+   already at 408 LOC. On 2026-10-30 it became tabs, a search box and one list,
+   and the owner's saved size replaced its 480px cap. */
 
 /*
  * An overlay, not a block in the column. As a sibling of the transcript it
  * pushed ~200px of chat off-screen for as long as it was open, in a panel where
  * the transcript was already the smallest region. Floating it costs the
  * transcript nothing, which is also what lets the list below be twice as tall.
+ *
+ * Width and height arrive as an inline size from `useResizablePanel.ts`: the
+ * size saved in `globalState`, clamped to this window. The `max-width: 480px`
+ * this used to carry is gone — a cap that refuses to be exceeded and a grip
+ * that drags it wider cannot both exist, and 480px is now the default instead
+ * of the ceiling.
  */
 #history-panel {
   position: absolute;
@@ -17,193 +27,191 @@
   right: 0;
   z-index: 20;
   margin-top: 1px;
-  padding: 4px 8px 6px;
+  padding: 3px 6px 4px;
+  display: flex;
+  flex-direction: column;
+  /* The scroll region is what flexes, so a long list cannot push the head out
+     of the panel. `min-height: 0` is what lets a flex child shrink below its
+     own content; without it the panel grows past the size it was given. */
+  min-height: 0;
   background: var(--vscode-editorWidget-background, #252526);
   border: 1px solid var(--vscode-editorWidget-border, #454545);
   border-radius: 0 0 var(--forge-radius-md) var(--forge-radius-md);
   box-shadow: 0 6px 16px rgba(0, 0, 0, 0.4);
 }
-
-.history-section-heading { margin: 8px 10px 4px; color: var(--vscode-descriptionForeground); font-size: 11px; font-weight: 600; text-transform: uppercase; }
-.history-archive-toggle { display: flex; width: calc(100% - 20px); justify-content: space-between; border: 0; padding: 6px 0; background: transparent; cursor: pointer; }
-.history-archive-count { min-width: 20px; padding: 1px 6px; border-radius: 10px; background: var(--vscode-badge-background); color: var(--vscode-badge-foreground); text-align: center; }
-
-#history-empty {
-  margin: 6px 0;
-  font-size: 10px;
-  color: var(--vscode-descriptionForeground);
+/* `display: flex` above outranks the UA sheet's `[hidden] { display: none }`.
+   0.17.99 shipped without this: the panel drew at startup, full width and
+   unsized, and no close (row pick, Escape, outside click) could hide it. */
+#history-panel[hidden] {
+  display: none;
 }
 
-.history-list-wrap {
-  margin-top: 6px;
-}
-
-#history-list {
+/* ── Head: search box and tab strip ──────────────────────────────────────── */
+.history-panel-head {
   display: flex;
   flex-direction: column;
-  gap: 1px;
-  /* A whole number of 38px rows (+1px gaps) so the list never renders a row
-     sliced through the middle at the scroll boundary. Taller than it was
-     because the panel floats now: length here costs the transcript nothing. */
-  max-height: 316px;
-  overflow-y: auto;
+  gap: 4px;
+  padding-bottom: 4px;
 }
 
-#history-archive-list { max-height: 316px; overflow-y: auto; }
-
-.history-item-row {
-  display: flex;
-  align-items: stretch;
-  min-width: 0;
-}
-
-.history-item {
-  width: 100%;
-  min-width: 0;
-  padding: 5px 8px 5px 10px;
-  text-align: left;
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-  border-radius: var(--forge-radius-sm);
-  border: none;
-  border-left: 2px solid transparent;
-  background: transparent;
-  align-self: auto;
-  transition: background 0.1s ease, border-color 0.1s ease;
-}
-
-.history-item-row .history-item {
-  flex: 1;
-}
-
-.history-item:hover:not(:disabled) {
-  background: var(--vscode-list-hoverBackground, #2a2d2e);
-  border-left-color: var(--forge-accent);
-}
-
-.history-item-menu-wrap {
-  position: relative;
-  display: flex;
-  align-items: center;
-  flex-shrink: 0;
-}
-
-/* Rests at half opacity rather than hidden. Delete is permanent, and a control
-   that only appears under the cursor mid-hover is one the pointer is already
-   on top of by the time it exists. */
-.history-item-kebab {
-  width: 28px;
-  height: 28px;
-  display: grid;
-  place-items: center;
-  border: none;
-  border-radius: var(--forge-radius-sm);
-  background: transparent;
-  color: var(--vscode-descriptionForeground);
-  cursor: pointer;
-  opacity: 0.5;
-  transition: opacity 0.1s ease, background 0.1s ease, color 0.1s ease;
-}
-
-.history-item-row:hover .history-item-kebab,
-.history-item-row:focus-within .history-item-kebab,
-.history-item-row-active .history-item-kebab {
-  opacity: 1;
-}
-
-.history-item-kebab:hover,
-.history-item-row-active .history-item-kebab {
-  color: var(--vscode-foreground);
-  background: var(--vscode-toolbar-hoverBackground, rgba(90, 90, 90, 0.2));
-}
-
-.history-item-menu {
-  position: absolute;
-  right: 2px;
-  top: calc(100% + 2px);
-  z-index: 20;
-  min-width: 150px;
-  padding: 4px;
-  display: flex;
-  flex-direction: column;
-  background: var(--vscode-menu-background, #252526);
-  border: 1px solid var(--vscode-menu-border, #454545);
-  border-radius: var(--forge-radius-sm);
-  box-shadow: 0 4px 14px rgba(0, 0, 0, 0.5);
-}
-
-.history-menu-item {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  padding: 5px 8px;
-  border: none;
-  border-radius: 3px;
-  background: transparent;
-  color: var(--vscode-menu-foreground, var(--vscode-foreground));
-  font-size: 12px;
-  text-align: left;
-  cursor: pointer;
-}
-
-.history-menu-item:hover {
-  background: var(--forge-selection);
-  color: var(--vscode-foreground);
-}
-
-.history-menu-item-danger {
-  color: var(--vscode-errorForeground, #f48771);
-}
-
-.history-menu-item-danger:hover {
-  background: var(--vscode-inputValidation-errorBackground, #5a1d1d);
-  color: var(--vscode-errorForeground, #f48771);
-}
-
-.history-menu-sep {
-  height: 1px;
-  margin: 4px 2px;
-  background: var(--vscode-menu-separatorBackground, #3c3c3c);
-}
-
-.history-item-row-editing {
-  background: var(--vscode-list-hoverBackground, #2a2d2e);
-  border-radius: var(--forge-radius-sm);
-}
-
-.history-rename-input {
-  flex: 1;
-  min-width: 0;
-  margin: 4px 6px;
-  padding: 4px 6px;
+#history-search {
+  height: 24px;
+  padding: 2px 6px;
   font: inherit;
   font-size: 12px;
   color: var(--vscode-input-foreground, #fff);
   background: var(--vscode-input-background, #3c3c3c);
-  border: 1px solid var(--forge-accent);
-  border-radius: 3px;
+  border: 1px solid var(--forge-border);
+  border-radius: var(--forge-radius-sm);
   outline: none;
 }
-
-.history-item-title {
-  display: flex;
-  align-items: center;
-  gap: 0;
-  font-size: 12px;
-  color: var(--vscode-foreground);
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+#history-search:focus-visible {
+  border-color: var(--forge-accent);
+}
+#history-search::placeholder {
+  color: var(--vscode-input-placeholderForeground, var(--vscode-descriptionForeground));
 }
 
-.history-item-meta {
+.history-tablist {
+  display: flex;
+  gap: 4px;
+}
+
+/* The tabs are buttons, and `base.css` gives every button a filled accent
+   background with white text. A strip of three filled buttons reads as three
+   commands, not as one choice, so the fill comes off and only the selected tab
+   keeps a quiet one. */
+.history-tab {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  padding: 2px 7px;
+  border: 1px solid var(--forge-border);
+  border-radius: var(--forge-radius-sm);
+  background: transparent;
+  color: var(--vscode-descriptionForeground);
+  font-size: 11px;
+  cursor: pointer;
+}
+.history-tab:hover {
+  color: var(--vscode-foreground);
+  background: var(--vscode-list-hoverBackground, #2a2d2e);
+}
+.history-tab[aria-selected='true'] {
+  color: var(--vscode-foreground);
+  border-color: var(--forge-accent);
+  background: color-mix(in srgb, var(--forge-accent) 14%, transparent);
+}
+.history-tab:focus-visible {
+  outline: 1px solid var(--forge-accent);
+  outline-offset: 1px;
+}
+
+.history-tab-count {
+  min-width: 18px;
+  padding: 0 5px;
+  border-radius: var(--forge-radius-pill);
+  background: var(--vscode-badge-background);
+  color: var(--vscode-badge-foreground);
+  text-align: center;
+  font-size: 10px;
+}
+
+.history-tab-count--chats {
+  color: var(--vscode-testing-iconPassed, var(--vscode-charts-green, #73c991));
+  background: color-mix(
+    in srgb,
+    var(--vscode-testing-iconPassed, var(--vscode-charts-green, #73c991)) 16%,
+    var(--vscode-sideBar-background)
+  );
+  border: 1px solid color-mix(
+    in srgb,
+    var(--vscode-testing-iconPassed, var(--vscode-charts-green, #73c991)) 36%,
+    transparent
+  );
+}
+
+.history-tab-count--archived {
+  color: var(--vscode-descriptionForeground);
+  background: color-mix(
+    in srgb,
+    var(--vscode-descriptionForeground) 12%,
+    var(--vscode-sideBar-background)
+  );
+  border: 1px solid color-mix(in srgb, var(--vscode-descriptionForeground) 28%, transparent);
+}
+/* The Jobs badge goes red with the failing count, because that number is the
+   only one in the panel that means something went wrong while nobody was looking. */
+.history-tab-count--failing {
+  background: var(--vscode-errorForeground, #f48771);
+  color: var(--vscode-editorWidget-background, #1e1e1e);
+}
+
+/* ── The one scroll container ────────────────────────────────────────────── */
+/* It used to be three: Recent, Archived and Jobs each capped themselves at
+   249px and scrolled on their own — three places for a row to be cut in half,
+   and Archived opened with its first row half-visible inside its own box. Now
+   the list scrolls once and each section takes the height its rows need.
+
+   `overflow-x: hidden` is half the horizontal-bar fix; the other half is in
+   `history-rows.css`, at `.history-item-kebab`, where the four pixels of
+   overflow that drew the bar are removed. Hiding the bar without removing the
+   overflow would have left the same four pixels of content unreachable. */
+.history-scroll {
+  flex: 1 1 auto;
+  min-height: 0;
+  padding-top: 8px;
+  overflow-y: auto;
+  overflow-x: hidden;
+}
+
+#history-empty,
+#history-archive-empty,
+#history-jobs-empty {
+  margin: 6px 2px;
   font-size: 10px;
   color: var(--vscode-descriptionForeground);
-  /* The model name joined this line and model names are long. It truncates
-     here rather than wrapping the row to two lines or widening the panel. */
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  min-width: 0;
+}
+/* The search's own answer, at the size of a row rather than of a caption, so a
+   mistyped name does not read as an empty store. */
+#history-no-match {
+  margin: 6px 2px;
+  font-size: 11px;
+  color: var(--vscode-foreground);
+}
+
+/* ── Resize grip ─────────────────────────────────────────────────────────── */
+/* The panel's own bottom-right corner, not the sidebar's: a panel shorter than
+   the sidebar has to have its handle where the panel ends. `touch-action: none`
+   is what lets a trackpad drag move the panel instead of scrolling the list. */
+.history-resize-grip {
+  position: absolute;
+  right: 0;
+  bottom: 0;
+  width: 15px;
+  height: 15px;
+  cursor: se-resize;
+  touch-action: none;
+  /* The usual corner grip: three short diagonal strokes packed into the
+     corner. One centred stroke read as a stray slash, not a handle. */
+  --grip-colour: var(--vscode-descriptionForeground, #888);
+  background: linear-gradient(
+    135deg,
+    transparent 0 42%,
+    var(--grip-colour) 42% 49%,
+    transparent 49% 62%,
+    var(--grip-colour) 62% 69%,
+    transparent 69% 82%,
+    var(--grip-colour) 82% 89%,
+    transparent 89%
+  );
+  border-radius: 0 0 var(--forge-radius-sm) 0;
+}
+.history-resize-grip:hover,
+.history-resize-grip:focus-visible {
+  --grip-colour: var(--forge-accent);
+}
+.history-resize-grip:focus-visible {
+  outline: 1px solid var(--forge-accent);
+  outline-offset: -1px;
 }

@@ -12,7 +12,7 @@ const UNLOAD_TIMEOUT_MS = 60_000;
 /** An explicit stop waits for the server to leave its port before reporting success. */
 const STOP_TIMEOUT_MS = 90_000;
 /** How long to wait for a started server to accept connections before giving up. */
-export const START_TIMEOUT_MS = 120_000;
+export const START_TIMEOUT_MS = 180_000;
 /** How often to probe while waiting for a started server. */
 export const START_POLL_MS = 2_000;
 
@@ -90,6 +90,19 @@ export class ExternalModelServers {
 
   isManaged(name: string): boolean {
     return this.managed(name) !== undefined;
+  }
+
+  /**
+   * Which GPUs the managed server `name` occupies, as its engine says in
+   * `~/.forge/policy.yaml`. Read through `managed`, which already folds the engine
+   * in via the resolver — reading `config.models` or `config.engines` here would
+   * miss an engine-supplied value. `undefined` = the engine named no cards, so
+   * this server overlaps EVERY other managed server, the behaviour before the
+   * field existed. Consumed by `poolAcquisition.gpusOverlap` at the one call site
+   * that decides whom to unload (`BackendPoolExternal`).
+   */
+  gpusOf(name: string): readonly number[] | undefined {
+    return this.managed(name)?.gpus;
   }
 
   /** Unknown counts as loaded: a server started by hand may hold VRAM. */

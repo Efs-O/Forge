@@ -2,6 +2,7 @@ import * as fs from 'fs';
 import * as path from 'path';
 import { readSessionLogRows } from './sessionLogRows';
 import { writeFileAtomicSync } from '../util/atomicWrite';
+import { isFailureResult } from '../sidebar/toolResultView';
 
 const MAX_DAYS = 30;
 
@@ -153,12 +154,17 @@ function workaroundTargets(command: unknown, scripts: Map<string, string>): stri
   return [...targets];
 }
 
+/** Whether this result says the call did not do its work. The prefixes have one
+ *  owner, `isFailureResult` in `src/sidebar/toolResultView.ts`, so a refusal this
+ *  file does not know yet — the `unattended:` policy denial added 2026-11-03 —
+ *  cannot be counted as a success here while the transcript counts it as a
+ *  failure there. The `exit N` branch stays here: a zero-exit command is a
+ *  success whatever its text says, and only `shell` reports exit codes. */
 function countFailure(result: UsageRow | undefined, name: string): boolean {
   const content = result?.['content'];
   return (
     typeof content === 'string' &&
-    (/^(?:Error:|User declined:)/u.test(content) ||
-      (name === 'shell' && /^exit (?!0\b)(?:\d+|null)\b/u.test(content)))
+    (isFailureResult(content) || (name === 'shell' && /^exit (?!0\b)(?:\d+|null)\b/u.test(content)))
   );
 }
 
@@ -254,6 +260,11 @@ function reportDay(
       const calls = row.tool_calls.filter(isRecord) as ToolCall[];
       for (const call of calls) {
         const input = callInput(call);
+        // append_file is retired in favour of write_file with mode "append"; the
+        // old name stays readable so logs written before the change still
+        // reconstruct the file the agent built across calls.
+        const append =
+          call.name === 'append_file' || (call.name === 'write_file' && input['mode'] === 'append');
         if (
           ['write_file', 'append_file'].includes(String(call.name)) &&
           typeof input['path'] === 'string' &&
@@ -262,7 +273,7 @@ function reportDay(
           const key = input['path'].replaceAll('\\', '/').replace(/^\.\//u, '');
           scripts.set(
             key.toLowerCase(),
-            call.name === 'append_file'
+            append
               ? `${scripts.get(key.toLowerCase()) ?? ''}${input['content']}`
               : input['content'],
           );

@@ -4,9 +4,11 @@ import type {
 } from '../tools/BackgroundExecutionManager';
 import type { AttachmentData } from './messageBridge';
 import type { ForgeRequestOutcome } from './turnOutcome';
+import type { MidTurnTellOrigin } from '../agent/MidTurnInbox';
 import { backgroundExecutionManager } from '../tools/BackgroundExecutionManager';
 import { logger } from '../util/logger';
 import { randomUUID } from 'node:crypto';
+import { pendingAgentAsksNotice } from '../agentLinks/pendingAgentAsks';
 
 function formatBackgroundExitNotice(notice: BackgroundExecutionExitNotice): string {
   const command = [notice.command, ...notice.args].join(' ').slice(0, 200);
@@ -15,7 +17,7 @@ function formatBackgroundExitNotice(notice: BackgroundExecutionExitNotice): stri
   return [
     `[Forge notice — not a message from the user] Background job ${notice.id} finished.`,
     `Command: ${command}`,
-    `Status: ${status} after ${duration}. Started by you in this chat with notify_on_exit.`,
+    `Status: ${status} after ${duration}. Started by you in this chat.`,
     ...(notice.error ? [`Error: ${notice.error}`] : []),
     ...(notice.stdoutTail ? [`Last stdout lines:\n${notice.stdoutTail}`] : []),
     ...(notice.stderrTail ? [`Last stderr lines:\n${notice.stderrTail}`] : []),
@@ -25,7 +27,8 @@ function formatBackgroundExitNotice(notice: BackgroundExecutionExitNotice): stri
 
 /**
  * The end-of-turn notice naming this chat's background executions that are
- * still running, or undefined when there are none. A notice, not answer text:
+ * still running and its ask_agent asks still pending, or undefined when there
+ * are none. A notice, not answer text:
  * the turn's `done` has already been posted, and the model must not read the
  * list back as its own words.
  */
@@ -38,7 +41,10 @@ export function runningBackgroundExecutionsNotice(
   > = backgroundExecutionManager,
 ): string | undefined {
   const running = manager.listRunningForConversation(conversationId);
-  if (running.length === 0) return undefined;
+  // An ask_agent reply still on its way is background work too: the notice
+  // says why the chat went idle and that the reply starts the next turn.
+  const asks = pendingAgentAsksNotice(conversationId, now);
+  if (running.length === 0) return asks;
   const lines = running.map((execution) => {
     const command = [execution.command, ...execution.args].join(' ').slice(0, 200);
     const elapsed = Math.max(0, now - execution.startedAt);
@@ -48,6 +54,7 @@ export function runningBackgroundExecutionsNotice(
   return [
     'Background executions still running (stop them with stop_execution, or ask the agent to):',
     ...lines,
+    ...(asks ? [asks] : []),
   ].join('\n');
 }
 
@@ -57,6 +64,7 @@ export interface SidebarPromptRoute {
   attachments?: AttachmentData[];
   /** The webview's chip id, so a cancel can name the tell it withdraws. */
   tellId?: string;
+  origin?: MidTurnTellOrigin;
 }
 
 export function routeSidebarPrompt(
@@ -70,6 +78,7 @@ export function routeSidebarPrompt(
     internal?: boolean,
     tellId?: string,
     createdAt?: number,
+    origin?: MidTurnTellOrigin,
   ) => void,
   send: (
     text: string,
@@ -81,10 +90,14 @@ export function routeSidebarPrompt(
   ) => Promise<ForgeRequestOutcome> | void,
   echoPrompt = false,
   internal = false,
+  origin?: MidTurnTellOrigin,
 ): void {
   const id = target.conversationId ?? activeConversationId;
   if (!target.attachments?.length && isReserved(id)) {
-    if (internal) addTell(id, text, true);
+    if (internal) {
+      if (origin) addTell(id, text, true, undefined, undefined, origin);
+      else addTell(id, text, true);
+    } else if (origin) addTell(id, text, false, target.tellId, target.createdAt, origin);
     else addTell(id, text, false, target.tellId, target.createdAt);
     return;
   }
@@ -138,6 +151,7 @@ export interface SidebarPromptRouter {
     tellId?: string,
     createdAt?: number,
   ) => void;
+  routeInternal: (text: string, id: string, origin?: MidTurnTellOrigin) => void;
   /**
    * A message from another chat (`message_chat`): a tell when `id` is busy,
    * else a visible turn there. Resolves once delivery is known: `turn` on
@@ -172,7 +186,7 @@ function deliverChatMessage(
   id: string,
 ): Promise<ChatMessageDelivery> {
   if (options.isReserved(id)) {
-    options.addTell(id, text, false);
+    options.addTell(id, text, false, undefined, undefined, { kind: 'chat' });
     return Promise.resolve({ kind: 'tell' });
   }
   return new Promise((resolve) => {
@@ -211,6 +225,7 @@ export function createSidebarPromptRouter(options: {
     internal?: boolean,
     tellId?: string,
     createdAt?: number,
+    origin?: MidTurnTellOrigin,
   ) => void;
   removeTell: (conversationId: string, tellId: string) => boolean;
   markSendNow: (conversationId: string, tellId: string) => boolean;
@@ -235,6 +250,7 @@ export function createSidebarPromptRouter(options: {
     internal = false,
     tellId?: string,
     createdAt?: number,
+    origin?: MidTurnTellOrigin,
   ) =>
     routeSidebarPrompt(
       text,
@@ -243,6 +259,7 @@ export function createSidebarPromptRouter(options: {
         ...(createdAt !== undefined ? { createdAt } : {}),
         ...(attachments ? { attachments } : {}),
         ...(tellId ? { tellId } : {}),
+        ...(origin ? { origin } : {}),
       },
       options.activeId(),
       options.isReserved,
@@ -250,6 +267,7 @@ export function createSidebarPromptRouter(options: {
       options.send,
       echoPrompt,
       internal,
+      origin,
     );
   const subscription = subscribeBackgroundExitNotices(options.isOpen, (text, id, echo) =>
     route(text, undefined, id, echo, true),
@@ -269,6 +287,8 @@ export function createSidebarPromptRouter(options: {
   return {
     route: (text, attachments, id, tellId, createdAt) =>
       route(text, attachments, id, false, false, tellId, createdAt),
+    routeInternal: (text, id, origin) =>
+      route(text, undefined, id, false, true, undefined, undefined, origin),
     deliverChatMessage: (text, id, steer = false) =>
       steer
         ? Promise.resolve(

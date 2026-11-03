@@ -90,7 +90,7 @@ function rig(config: ImageGenerationConfig | undefined = imageConfig()) {
 const noSnapshot = { beforeMutate: (): void => undefined };
 
 beforeEach(() => {
-  // Real-pathed: generate_image resolves symlinks and 8.3 short names (EFSOOF~1)
+  // Real-pathed: generate_image resolves symlinks and 8.3 short names (JOSMITH~1)
   // before writing, so expectations must use the same spelling.
   root = fs.realpathSync.native(fs.mkdtempSync(path.join(os.tmpdir(), 'forge-generate-image-')));
   (vscode.workspace as unknown as { workspaceFolders: unknown }).workspaceFolders = [

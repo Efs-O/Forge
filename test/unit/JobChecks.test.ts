@@ -246,7 +246,7 @@ describe('hfDiscussionCheck', () => {
     id,
     type: 'comment',
     createdAt: '2026-09-23T10:30:56.000Z',
-    author: { name: 'Efso' },
+    author: { name: 'octocat' },
     data: { latest: { raw } },
   });
   const thread = (status: string, events: object[]) =>

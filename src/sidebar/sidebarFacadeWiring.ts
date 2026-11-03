@@ -5,7 +5,6 @@
  * behaviour — every entry forwards to a collaborator `wireSidebar` already built.
  */
 
-import type * as vscode from 'vscode';
 import type { IBackendPool } from '../backend/BackendPool';
 import { findConversation, type SidebarRuntime } from './sessionTypes';
 import type { SidebarRuntimeParts } from './sidebarWiring';
@@ -24,7 +23,9 @@ export interface SidebarFacadeDeps {
   pool: IBackendPool;
   questions: UserQuestionService;
   notifications: UserNotificationService;
-  workspaceState: vscode.Memento;
+  /** Save one chat after its Clanker flag is written: a toggle has no turn running
+   *  to carry the save, so whoever armed the chat has to make it. */
+  persistConversation: (conversationId: string) => void;
   interrupt: (conversationId: string) => Promise<void>;
   unloadModels: () => Promise<void>;
   restartModel: (modelName: string) => Promise<void>;
@@ -43,10 +44,20 @@ export interface SidebarFacadeDeps {
 }
 
 export function createSidebarHostFacade(deps: SidebarFacadeDeps): ForgeHostFacade {
-  const { agentLoop, slashHandler, tabs, send, requestChains, budget } = deps.runtime;
+  const { agentLoop, slashHandler, tabs, send, requestChains, budget, turnSpeeds } = deps.runtime;
   const { questions, notifications } = deps;
   return new SidebarHostFacade({
-    createConversation: (options) => tabs.create(options),
+    createConversation: (options) => {
+      const conversation = tabs.create(
+        options.activate === undefined ? {} : { activate: options.activate },
+      );
+      if (conversation && options.openedBy) {
+        conversation.opened_by = options.openedBy;
+        deps.persistSession();
+        deps.postSessionSync();
+      }
+      return conversation;
+    },
     restoreConversation: (conversationId, options) => {
       if (!tabs.hasConversation(conversationId)) {
         throw new Error('Forge: conversation could not be restored.');
@@ -79,6 +90,7 @@ export function createSidebarHostFacade(deps: SidebarFacadeDeps): ForgeHostFacad
     queueIntent: (conversationId) => requestChains.suppressContinuation(conversationId),
     addApprovalSink: (sink) => agentLoop.addApprovalSink(sink),
     resolveApproval: (id, approved) => agentLoop.resolveConfirmation(id, approved),
+    resetApprovals: (conversationId) => slashHandler.resetApprovals(conversationId),
     addQuestionSink: (sink) => questions.addSink(sink),
     answerQuestion: (id, text) => questions.answer(id, text),
     answerQuestionStructured: (id, answer) => questions.answerStructured(id, answer),
@@ -118,17 +130,15 @@ export function createSidebarHostFacade(deps: SidebarFacadeDeps): ForgeHostFacad
     askAgent: (conversationId, request, signal, onSessionLinked, onAccepted) =>
       deps.askAgent(conversationId, request, signal, onSessionLinked, onAccepted),
     showConversationNotice: deps.postConversationNotice,
-    clankerMode: () => agentLoop.getClankerMode(),
-    // Remote and sidebar arming persist identically, to workspaceState. The
-    // asymmetry that used to live here — remote ON in memory only, so it died at
-    // the next reload — made the state unexplainable from either surface: a
-    // phone that armed clanker and a sidebar toggle that armed clanker disagreed
-    // about what a reload meant, and the owner could only find out by
-    // reloading. One rule, stated in both help texts, beats a safety default
-    // nobody can see.
-    setClankerMode: (on) => {
-      agentLoop.setClankerMode(on);
-      void deps.workspaceState.update('forge.clankerMode', on);
+    clankerMode: (conversationId) => agentLoop.getClankerMode(conversationId),
+    // Per chat, and saved with that chat: the flag is the chat's own record, so
+    // arming one chat no longer arms every tab in the window, and a phone and the
+    // sidebar cannot disagree about what a window reload means. The save is here
+    // because a `/clanker` that arrives from a phone has no turn to carry it.
+    setClankerMode: (conversationId, on) => {
+      agentLoop.setClankerMode(conversationId, on);
+      if (findConversation(deps.getSidebar(), conversationId))
+        deps.persistConversation(conversationId);
     },
     // Any conversation, not just the active one — the bar renders the active tab
     // only, but a remote chat can be bound to a background conversation and
@@ -148,7 +158,20 @@ export function createSidebarHostFacade(deps: SidebarFacadeDeps): ForgeHostFacad
     hostActivityListenerCount: () => slashHandler.hostActivityListenerCount(),
     onUserNotification: (sink) => notifications.addSink(sink),
     setReachProbe: (probe) => notifications.setReachProbe(probe),
+    // The line is taken here, at delivery time, and only once: a chat-originated
+    // turn's answer arrives through the queue drain, a sidebar turn's through the
+    // mirrored echo, and whichever got there first keeps the speed.
+    takeTurnSpeedLine: (conversationId) => turnSpeeds.takeLine(conversationId),
     onAgentProgress: (listener) => agentLoop.onAgentProgress(listener),
+    // The retitle job's write. It goes through `tabs.rename`, the same path the
+    // webview rename box uses, so an automatic name moves the in-memory list,
+    // the archive index and the body files together instead of only one of
+    // them. `auto` is what stops the job proposing the same name next run.
+    applyAutoTitle: (conversationId, title) => {
+      if (!tabs.hasConversation(conversationId)) return false;
+      tabs.rename(conversationId, title, 'auto');
+      return true;
+    },
     compact: (conversationId, options) =>
       slashHandler.compactConversation(conversationId, {
         auto: false,

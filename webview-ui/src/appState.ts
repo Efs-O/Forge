@@ -50,7 +50,13 @@ export interface State {
   history: SessionHistoryMeta[];
   archived: SessionHistoryMeta[];
   activeConversationId: string;
-  clankerMode: boolean;
+  /**
+   * Chats with Clanker armed, keyed by conversation id. Off is the absence of an
+   * entry, so the map holds only what is armed. It is keyed because the mode is one
+   * chat's: a window that held it as one flag armed every tab from the tab that
+   * toggled it, and the owner could not see which chat was actually armed.
+   */
+  clankerByConversationId: Map<string, boolean>;
   /** Whether anything outside this window can drive it. Host-owned. */
   remote: { transports: string[]; paired: boolean };
   activityView: ActivityViewMode;
@@ -76,7 +82,7 @@ export const initialState: State = {
   history: [],
   archived: [],
   activeConversationId: '',
-  clankerMode: false,
+  clankerByConversationId: new Map(),
   remote: { transports: [], paired: false },
   activityView: 'full',
   thinkingDisplay: 'collapsed',
@@ -97,6 +103,10 @@ export function selectCheckpointPending(state: State): boolean {
 }
 export function selectCheckpointStats(state: State): CheckpointStats | undefined {
   return state.checkpointStatsById.get(state.activeConversationId);
+}
+/** Clanker for the chat the owner is typing into, and for no other tab. */
+export function selectClankerActive(state: State): boolean {
+  return state.clankerByConversationId.get(state.activeConversationId) === true;
 }
 
 export type Action =
@@ -160,7 +170,7 @@ export type Action =
       isDeleted: boolean;
       convId?: string;
     }
-  | { type: 'CLANKER_CHANGED'; enabled: boolean }
+  | { type: 'CLANKER_CHANGED'; enabled: boolean; conversationId: string }
   | { type: 'REMOTE_STATUS'; transports: string[]; paired: boolean }
   | { type: 'ACTIVITY_VIEW'; mode: ActivityViewMode }
   | { type: 'THINKING_DISPLAY'; mode: ThinkingDisplayMode }

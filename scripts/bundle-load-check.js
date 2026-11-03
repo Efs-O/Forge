@@ -98,6 +98,12 @@ ext.deactivate();
 // .vscodeignore edit drops the shipped copy, or the build stops copying it — the
 // browser tools fail at runtime; fail CI now instead.
 const distDir = path.resolve(__dirname, '..', 'dist');
+for (const name of ['pdf.mjs', 'pdf.worker.mjs']) {
+  const file = path.join(distDir, 'pdfjs', name);
+  if (!require('fs').existsSync(file) || require('fs').statSync(file).size === 0) {
+    throw new Error(`pdf.js runtime file is missing or empty: ${file}`);
+  }
+}
 const pwResolved = require.resolve('playwright-core', { paths: [distDir] });
 if (!pwResolved.startsWith(path.join(distDir, 'node_modules'))) {
   throw new Error(`playwright-core resolved outside dist/node_modules: ${pwResolved}`);

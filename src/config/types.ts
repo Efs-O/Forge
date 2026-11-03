@@ -17,8 +17,13 @@ export type {
 import type { ToolPermission } from '../tools/ToolRegistry';
 import type { EmbeddingPromptStyle } from '../search/embeddingPrompts';
 import type { AgentBusConfig, AgentLinksConfig } from './agentBusSchema';
+import type { ModelStarterConfig } from './modelStarterSchema';
+import type { CloudRelayConfig } from './cloudRelaySchema';
+export type { CloudRelayConfig } from './cloudRelaySchema';
 import type { RemoteContactsConfig } from './RemoteContactsConfig';
 import type { DefaultsConfig, GroupConfig, ModelConfig, ProfileConfig } from './modelTypes';
+import type { EngineConfig } from './engineSchema';
+export type { EngineConfig } from './engineSchema';
 
 /**
  * The model-definition types live in `modelTypes.ts` (the same seam the Zod
@@ -127,6 +132,28 @@ interface JobsConfig {
 export interface ForgeConfig {
   models: ModelConfig[];
   active_model: string | null;
+  /** Owner-only approval policy from `~/.forge/policy.yaml` (or, before the
+   *  policy migration, the owner-only config file). Missing lists allow nothing. */
+  approvals?: {
+    always?: Array<{ key: string; workspace?: string }>;
+    jobs?: Record<string, { allow: string[] }>;
+    unattended_bus?: { allow: string[] };
+  };
+  /**
+   * Named engine definitions from `~/.forge/policy.yaml` (`policySchema.ts`).
+   * A model says `engine: <name>` and `ConfigResolver.mergeGroupsIntoModel`
+   * folds that engine's `start_command`, `stop_command`, `unload_path` and
+   * `llama_server_binary` beneath the model's own fields, so every consumer sees
+   * the same flat `ModelConfig` it always did. An unknown engine name is a load
+   * error naming the model and the engine.
+   */
+  engines?: Record<string, EngineConfig>;
+  /**
+   * Hosts a `config.yaml` model `endpoint` may name besides loopback. Defined
+   * and loaded in phase 2; enforced (a non-loopback host outside this list is a
+   * load error) in phase 3, when config.yaml opens to agents.
+   */
+  model_hosts?: string[];
   /** Named shared config bundles ("boards") models opt into via `group`/`groups`. */
   groups?: Record<string, GroupConfig>;
   /** Shared request-time defaults applied beneath base facts and profiles (F6). */
@@ -148,6 +175,15 @@ export interface ForgeConfig {
   image_generation?: ImageGenerationConfig;
   /** Persistent agent jobs. Absent means no scheduler, no lease, no tool. */
   jobs?: JobsConfig;
+  /**
+   * The laptop-facing model starter (`127.0.0.1:<port>`), validated by
+   * modelStarterSchema.ts. Absent means no listener: nothing is bound and no
+   * remote client can start or load a desktop model. Reached over Tailscale
+   * only through `tailscale serve`, which forwards to loopback.
+   */
+  model_starter?: ModelStarterConfig;
+  /** Desktop cloud relay allowlist; absent or disabled means no listener. */
+  cloud_relay?: CloudRelayConfig;
   agent_bus?: AgentBusConfig;
   agent_links: AgentLinksConfig;
   /** Reverse image search. Absent means `image_search` is not advertised. */
@@ -155,7 +191,7 @@ export interface ForgeConfig {
   log_level?: 'trace' | 'debug' | 'info' | 'warn' | 'error';
   /** Extra directories to scan for GGUF files (used by first-run wizard). */
   model_dirs?: string[];
-  /** Absolute folders outside the workspace that create_directory / delete_file may reach (read_file reads anywhere). */
+  /** Absolute folders outside the workspace that delete_file and the file-writing tools may reach (read_file reads anywhere). */
   extra_file_roots?: string[];
   /** Path to a directory containing user-defined Nunjucks template overrides. */
   templates_dir?: string;
@@ -247,7 +283,12 @@ export interface ForgeConfig {
   /** Tool permission gates. Defaults to read-only fs, no net/exec/git-write. */
   permissions?: {
     approval_timeout_minutes?: number;
-    chats?: { new_chat?: boolean; steer?: boolean };
+    /** Extra secret-path patterns, added to the defaults in `tools/secretPaths.ts`,
+     *  never replacing them. */
+    secret_paths?: string[];
+    /** Exact paths the secret gate may skip (a deploy job's one .env file). */
+    secret_paths_allow?: string[];
+    chats?: { new_chat?: boolean; steer?: boolean; new_chats_per_hour?: number };
     fs?: { read?: boolean; write?: boolean; delete?: boolean };
     net?: { search?: boolean; fetch?: boolean };
     exec?: { terminal?: boolean; headless?: boolean; shell?: 'pwsh' | 'powershell' | 'bash' };
@@ -268,11 +309,48 @@ export interface ForgeConfig {
     headless?: boolean;
     allowed_origins?: string[];
   };
+  /** Hosts `web_fetch` may reach without a card: exact hostnames or `*.suffix`
+   *  wildcards. An empty list (the default) means every new host asks once per
+   *  chat; see `src/tools/fetchHostApprovals.ts`. */
+  fetch?: { allowed_hosts?: string[] };
   /** Execution sandbox settings. */
   exec?: {
     timeout_ms?: number;
     denylist_extra?: string[];
   };
+  /**
+   * Settings the tool layer reads at call time, validated by
+   * `config/toolsSchema.ts`. Absent means off: no tool result changes for a
+   * workspace that never asked for one.
+   */
+  tools?: {
+    /**
+     * Warn in the write result when a matching file reaches `warn_at` lines,
+     * and say it is over the limit above `max` (`warn_at < max`, schema-checked).
+     * `globs` absent means every file a content-writing tool writes; an empty
+     * list matches nothing. Line count is what `wc -l` reports. Appended once,
+     * by `tools/fileLengthWarning.ts`; see `docs/plans/V1_FINISH_PLAN.md` lane 5.
+     */
+    file_length_warning?: { warn_at: number; max: number; globs?: string[] };
+    /**
+     * The "new problems after this edit" note `edit_file`, `write_file` and
+     * `apply_line_edits` append after their write: snapshot the file's
+     * diagnostics, wait for the language service to settle, report only what the
+     * write introduced (`tools/editDiagnostics.ts`). **On when absent** — the
+     * only `tools:` block that is, because two seconds per edit was priced
+     * against the shell rounds it replaces. `enabled: false` restores the old
+     * results; `settle_ms` is the ceiling on the wait (0 reads once, at once).
+     */
+    edit_diagnostics?: { enabled?: boolean; settle_ms?: number; max_items?: number };
+  };
+  /**
+   * Skills: folders of instructions plus tested scripts, discovered in the
+   * shipped `resources/skills/`, `~/.forge/skills/` and the workspace's
+   * `.forge/skills/` (`src/skills/`). Absent means off: no catalog in the system
+   * prompt and no `load_skill` schema, so a workspace with no skills keeps the
+   * prompt prefix and tool list it always had.
+   */
+  skills?: { enabled?: boolean };
   /** External MCP stdio servers whose tools are bridged into the tool registry. */
   mcp_servers?: McpServerConfig[];
 }

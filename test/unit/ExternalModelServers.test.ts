@@ -1,21 +1,29 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { spawn } from 'child_process';
 import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
 import { BackendPool } from '../../src/backend/BackendPool';
+import { deferredStopInvocation, STOP_GRACE_MS } from '../../src/backend/deferredStop';
+import { freeVramForExternal, ExternalBusyError } from '../../src/backend/poolAcquisition';
 import {
   ExternalModelServers,
+  ExternalServerBusyError,
   beforeExternalRequest,
   setExternalRequestHook,
   START_TIMEOUT_MS,
   START_POLL_MS,
 } from '../../src/backend/ExternalModelServers';
-import { deferredStopInvocation, STOP_GRACE_MS } from '../../src/backend/deferredStop';
-import { freeVramForExternal } from '../../src/backend/poolAcquisition';
+import { ModelStarterLeases } from '../../src/backend/ModelStarterLeases';
+import {
+  prepareExternalForRequest,
+  type ExternalCoordinationContext,
+} from '../../src/backend/BackendPoolExternal';
+import { SharedRuntimeRegistry } from '../../src/backend/SharedRuntimeRegistry';
 import { ForgeConfigSchema } from '../../src/config/schema';
 import { resolveRequestModel } from '../../src/config/ConfigResolver';
 import type { ForgeConfig } from '../../src/config/types';
+import { runCloudProviderTurn, type ProviderTurnContext } from '../../src/sidebar/ProviderTurn';
 
 vi.mock('vscode', () => ({
   window: {
@@ -87,6 +95,20 @@ function makeConfig(): ForgeConfig {
   } as ForgeConfig;
 }
 
+function twoManagedConfig(): ForgeConfig {
+  return {
+    models: ['iq2xs', 'iq3s'].map((name, index) => ({
+      name,
+      provider: 'openai-compatible',
+      endpoint: `http://127.0.0.1:${8080 + index}`,
+      unload_path: '/unload',
+      start_command: ['node', 'server.js'],
+    })),
+    active_model: 'iq2xs',
+    llama_server: { port: 9100 },
+  } as ForgeConfig;
+}
+
 function makeServers(respond: () => Promise<Response>): {
   servers: ExternalModelServers;
   calls: Array<{ url: string; init: RequestInit }>;
@@ -135,6 +157,121 @@ describe('ExternalModelServers', () => {
 
     servers.markInUse('strata');
     expect(servers.isLoaded('strata')).toBe(true);
+  });
+
+  it('refuses a real swap while another window holds the managed server for a turn', async () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'forge-external-turn-'));
+    try {
+      const config = twoManagedConfig();
+      const registryA = new SharedRuntimeRegistry(dir);
+      const registryB = new SharedRuntimeRegistry(dir);
+      const unloads: string[] = [];
+      probeHttpMock.mockResolvedValue({ reachable: true, ok: true });
+      const servers = new ExternalModelServers(
+        () => config,
+        async () => undefined,
+        (async (url) => {
+          unloads.push(String(url));
+          return new Response('{}', { status: 200 });
+        }) as typeof fetch,
+      );
+      const firstWindow = new BackendPool(config, registryA, servers);
+      const secondWindow = new BackendPool(config, registryB, servers);
+      let refused = '';
+      let unloadCountAtRefusal = -1;
+      setExternalRequestHook((model) => firstWindow.prepareExternal(model.name));
+      const turnContext = {
+        pool: firstWindow,
+        lifecycle: {
+          clearStreaming: () => {},
+          settle: () => {},
+          markStreaming: () => {},
+          incompleteReason: () => undefined,
+        },
+        checkpoints: { beginTurn: () => ({}), depth: () => 0, commitTurn: () => {} },
+        events: {},
+        emitAgentProgress: () => {},
+        commitUserPrompt: () => {},
+        runModelTurn: async () => {
+          unloadCountAtRefusal = unloads.length;
+          try {
+            await secondWindow.prepareExternal('iq3s');
+          } catch (error) {
+            refused = error instanceof Error ? error.message : String(error);
+          }
+          return {
+            finalText: 'done',
+            finishReason: 'stop',
+            rounds: 1,
+            repeatedCall: false,
+            hitRoundCap: false,
+          };
+        },
+      } as unknown as ProviderTurnContext;
+      try {
+        await runCloudProviderTurn(turnContext, {
+          conv: { id: 'chat-a', title: 'Build helper', updatedAt: Date.now() } as never,
+          model: config.models[0]!,
+          text: 'hello',
+          attachments: undefined,
+          activeFile: undefined,
+          ctrl: new AbortController(),
+          postC: () => {},
+        });
+      } finally {
+        setExternalRequestHook(undefined);
+      }
+      expect(refused).toContain(
+        "iq2xs is serving chat 'Build helper' right now. Loading iq3s would cut that turn off.",
+      );
+      expect(unloads).toHaveLength(unloadCountAtRefusal);
+
+      await secondWindow.prepareExternal('iq3s');
+      expect(unloads.length).toBeGreaterThan(unloadCountAtRefusal);
+    } finally {
+      fs.rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it('reclaims external turn holds from dead windows and keeps one across a sleep', async () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'forge-external-hold-expiry-'));
+    try {
+      const aliveRegistry = new SharedRuntimeRegistry(dir, () => true);
+      const deadWindowRegistry = new SharedRuntimeRegistry(dir, () => false);
+      const deadWindowHold = await aliveRegistry.acquireExternalTurnHold(
+        'iq2xs',
+        'dead',
+        'Dead window',
+        () => true,
+      );
+      expect(deadWindowRegistry.externalTurnHolders()).toEqual([]);
+      deadWindowHold.release();
+
+      let now = 1_000;
+      const ttlRegistry = new SharedRuntimeRegistry(dir, () => true, () => now);
+      const asleep = await ttlRegistry.acquireExternalTurnHold(
+        'iq2xs',
+        'asleep',
+        'Turn across a sleep',
+        () => true,
+      );
+      // BL-021: a suspension longer than the TTL. The refresh is a
+      // `setInterval`, which cannot fire while the machine is asleep, so an
+      // expired record is not evidence that the turn ended — reclaiming it here
+      // let another window unload the model the resumed turn is about to ask
+      // for. A record whose process is alive now survives, and the cost is
+      // bounded by that window's life: every turn path releases in its finally.
+      now += 200_000;
+      expect(ttlRegistry.externalTurnHolders().map((h) => h.conversationId)).toEqual(['asleep']);
+      // A dead process is reclaimed however fresh its record looks, so a window
+      // that went away during the sleep cannot keep protecting a model nobody
+      // is using.
+      const deadAfter = new SharedRuntimeRegistry(dir, () => false, () => now);
+      expect(deadAfter.externalTurnHolders()).toEqual([]);
+      asleep.release();
+    } finally {
+      fs.rmSync(dir, { recursive: true, force: true });
+    }
   });
 
   it('confirms loaded only after a request, not while residency is unknown', async () => {
@@ -645,16 +782,51 @@ describe('deferred stop watcher', () => {
 });
 
 describe('BackendPool with a managed external server', () => {
+  // A pool built without a registry falls back to this machine's shared
+  // "which model is loaded and whose turn holds it" board, and a real chat
+  // streaming on a managed model then refuses the very swap these tests ask
+  // for — the outcome depended on what the owner happened to be doing. Each
+  // test gets its own board in a temp folder instead.
+  let boardDir: string | undefined;
   beforeEach(() => {
     events.length = 0;
     // These tests exercise local-model freeing, not starting: keep the external
     // server "up" so prepareExternal's ensureStarted returns without spawning.
     probeHttpMock.mockResolvedValue({ reachable: true, ok: true });
+    boardDir = fs.mkdtempSync(path.join(os.tmpdir(), 'forge-external-pool-'));
   });
+  afterEach(() => {
+    // The folder leaves with the test; nothing here outlives it.
+    if (boardDir) fs.rmSync(boardDir, { recursive: true, force: true });
+  });
+
+  /**
+   * A turn hold belonging to ANOTHER window. `acquireExternalTurnHold` always
+   * records this process's pid, so the cross-window case has to be written into
+   * the board by hand, on a registry that reports the foreign pid alive.
+   */
+  function heldByOtherWindow(model: string, title: string): SharedRuntimeRegistry {
+    const registry = new SharedRuntimeRegistry(boardDir!, () => true);
+    const id = '999999-other-window';
+    const dir = path.join(boardDir!, 'external-turn-holds');
+    fs.mkdirSync(dir, { recursive: true });
+    fs.writeFileSync(
+      path.join(dir, `${id}.json`),
+      JSON.stringify({
+        id,
+        model,
+        pid: 999999,
+        conversationId: 'other-window-chat',
+        title,
+        expiresAt: Date.now() + 60_000,
+      }),
+    );
+    return registry;
+  }
 
   it('stopAll and release reach the external server', async () => {
     const { servers, calls } = makeServers(ok);
-    const pool = new BackendPool(makeConfig(), undefined, servers);
+    const pool = new BackendPool(makeConfig(), new SharedRuntimeRegistry(boardDir!), servers);
     await pool.stopAll();
     expect(calls).toHaveLength(1);
     servers.markInUse('strata');
@@ -667,7 +839,7 @@ describe('BackendPool with a managed external server', () => {
     // The sidebar re-posts the selector only when this signature changes, so
     // Strata loading or unloading must move it or the dot never updates.
     const { servers } = makeServers(ok);
-    const pool = new BackendPool(makeConfig(), undefined, servers);
+    const pool = new BackendPool(makeConfig(), new SharedRuntimeRegistry(boardDir!), servers);
     const before = pool.residencySignature();
     expect(pool.isModelReady('strata')).toBe(false);
 
@@ -683,7 +855,7 @@ describe('BackendPool with a managed external server', () => {
 
   it('unloads the external server before spawning a local model', async () => {
     const { servers } = makeServers(ok);
-    const pool = new BackendPool(makeConfig(), undefined, servers);
+    const pool = new BackendPool(makeConfig(), new SharedRuntimeRegistry(boardDir!), servers);
     await pool.acquire('llama');
     expect(events).toEqual(['unload:strata', 'spawn:9100']);
     // Already unloaded: a second local spawn does not POST again.
@@ -692,9 +864,203 @@ describe('BackendPool with a managed external server', () => {
     expect(events.filter((e) => e === 'unload:strata')).toHaveLength(1);
   });
 
+  // BL-023 (bug hunt 2026-10-31): the local-spawn path POSTed these unloads
+  // with no reference to the turn holds, so loading a GGUF model in one window
+  // cut off another window's chat between its requests — when the managed
+  // server is idle, its own 409 cannot protect a turn.
+  it('refuses to spawn a local model while another window holds the managed server', async () => {
+    const { servers, calls } = makeServers(ok);
+    const pool = new BackendPool(
+      makeConfig(),
+      heldByOtherWindow('strata', 'Other window chat'),
+      servers,
+    );
+
+    await expect(pool.acquire('llama')).rejects.toThrow(
+      /Loading llama needs the GPUs strata is using for chat 'Other window chat'/,
+    );
+    // Nothing was freed, so the other window's model is still resident.
+    expect(calls).toHaveLength(0);
+    expect(events).toEqual([]);
+    expect(pool.isLoaded('strata')).toBe(true);
+  });
+
+  it('refuses to release a managed server another window is serving a turn on', async () => {
+    const { servers, calls } = makeServers(ok);
+    const pool = new BackendPool(
+      makeConfig(),
+      heldByOtherWindow('strata', 'Other window chat'),
+      servers,
+    );
+    servers.markInUse('strata');
+
+    await expect(pool.release('strata')).rejects.toThrow(
+      /Unloading strata would cut off chat 'Other window chat' in another window/,
+    );
+    expect(calls).toHaveLength(0);
+    expect(pool.isLoaded('strata')).toBe(true);
+  });
+
+  // Codex's defect on the first BL-020 shape: both gates asked about residency,
+  // and a claim for a model that is still STARTING is not in `loadedNames()`
+  // yet, so a local load could bypass the check and compete for the VRAM.
+  it('refuses a local spawn while another window is starting a model it has not loaded yet', async () => {
+    const { servers, calls } = makeServers(ok);
+    const pool = new BackendPool(
+      makeConfig(),
+      heldByOtherWindow('strata', 'Starting elsewhere'),
+      servers,
+    );
+    await servers.unload('strata'); // residency unloaded: loadedNames() is empty
+    expect(servers.loadedNames()).toEqual([]);
+
+    await expect(pool.acquire('llama')).rejects.toThrow(
+      /Loading llama needs the GPUs strata is using for chat 'Starting elsewhere'/,
+    );
+    // Nothing was spawned, and no extra unload was POSTed past the one above.
+    expect(events.filter((event) => event === 'spawn:9100')).toEqual([]);
+    expect(calls).toHaveLength(1);
+  });
+
+  // Codex's second reject: the "nothing resident, nobody holding" test cannot
+  // be done outside the lock, because the window that holds the lock has not
+  // published its claim yet — so a local load must wait for that decision
+  // rather than answer from its own view of the board.
+  it('waits for the machine-wide lock before deciding, even with nothing resident', async () => {
+    const { servers } = makeServers(ok);
+    const registry = new SharedRuntimeRegistry(boardDir!);
+    const pool = new BackendPool(makeConfig(), registry, servers);
+    await servers.unload('strata'); // nothing resident, no holds
+
+    let releaseLock: () => void = () => {};
+    const held = registry.withExternalTurnHoldLock(
+      () =>
+        new Promise<void>((resolve) => {
+          releaseLock = resolve;
+        }),
+    );
+    await expect(pool.acquire('llama')).rejects.toThrow(
+      /Timed out waiting for managed-server turn holds/,
+    );
+    expect(events.filter((event) => event === 'spawn:9100')).toEqual([]);
+    releaseLock();
+    await held;
+  }, 15_000);
+
+  it('still unloads for an explicit stopAll while another window holds it', async () => {
+    // The owner's command may cut a held model off — the alternative is a model
+    // no window can free — but `noteExternalsHeldElsewhere` names the chat.
+    const { servers, calls } = makeServers(ok);
+    const pool = new BackendPool(
+      makeConfig(),
+      heldByOtherWindow('strata', 'Other window chat'),
+      servers,
+    );
+    await pool.stopAll();
+    expect(calls).toHaveLength(1);
+  });
+
+  // BL-020 (bug hunt 2026-10-31): `ensureStarted` used to sit inside the
+  // machine-wide lock. A cold start is up to START_TIMEOUT_MS of polling, and
+  // that lock is the only thing another window's first managed turn waits on,
+  // so the other turn failed after its 5 s wait with a message naming nothing.
+  it('starts the server with the lock free, and claims the model while it comes up', async () => {
+    const board = fs.mkdtempSync(path.join(os.tmpdir(), 'forge-external-start-lock-'));
+    try {
+      const registry = new SharedRuntimeRegistry(board);
+      let finishStart: () => void = () => {};
+      const order: string[] = [];
+      const external = {
+        isManaged: () => true,
+        loadedNames: () => ['strata'],
+        unload: async () => {},
+        ensureStarted: async () => {
+          order.push('ensureStarted');
+          await new Promise<void>((resolve) => {
+            finishStart = resolve;
+          });
+          order.push('reachable');
+        },
+        markInUse: () => order.push('markInUse'),
+      } as unknown as ExternalModelServers;
+      const ctx: ExternalCoordinationContext = {
+        external,
+        slots: new Map(),
+        ollamaSlots: new Map(),
+        sharedSlots: new Map(),
+        registry,
+        sharedRuntimeEnabled: false,
+        runtimeKey: () => 'k',
+        freeSlot: () => {},
+        isBusy: () => false,
+        isDelegationPinned: () => false,
+        isOllamaModel: () => false,
+      };
+
+      const request = prepareExternalForRequest('strata', ctx);
+      // Let the claim land, then measure while the start is still pending.
+      await new Promise((resolve) => setTimeout(resolve, 100));
+      const got = await Promise.race([
+        registry.withExternalTurnHoldLock(async () => 'lock'),
+        new Promise<string>((resolve) => setTimeout(() => resolve('still waiting'), 400)),
+      ]);
+      expect(got).toBe('lock');
+      // The model is claimed for this load, so another window cannot take the
+      // GPUs it is coming up on, even though the lock is free.
+      expect(registry.externalTurnHolders().map((hold) => hold.model)).toEqual(['strata']);
+
+      finishStart();
+      await request;
+      expect(order).toEqual(['ensureStarted', 'reachable', 'markInUse']);
+      // The claim leaves with the request, whether it succeeded or not.
+      expect(registry.externalTurnHolders()).toEqual([]);
+    } finally {
+      fs.rmSync(board, { recursive: true, force: true });
+    }
+  });
+
+  it('releases the claim when the start fails', async () => {
+    const board = fs.mkdtempSync(path.join(os.tmpdir(), 'forge-external-start-fail-'));
+    try {
+      const registry = new SharedRuntimeRegistry(board);
+      const external = {
+        isManaged: () => true,
+        loadedNames: () => ['strata'],
+        unload: async () => {},
+        ensureStarted: async () => {
+          throw new Error('nothing is listening at http://127.0.0.1:8080');
+        },
+        markInUse: () => {},
+      } as unknown as ExternalModelServers;
+      const ctx: ExternalCoordinationContext = {
+        external,
+        slots: new Map(),
+        ollamaSlots: new Map(),
+        sharedSlots: new Map(),
+        registry,
+        sharedRuntimeEnabled: false,
+        runtimeKey: () => 'k',
+        freeSlot: () => {},
+        isBusy: () => false,
+        isDelegationPinned: () => false,
+        isOllamaModel: () => false,
+      };
+
+      await expect(prepareExternalForRequest('strata', ctx)).rejects.toThrow(
+        /nothing is listening/,
+      );
+      // A failed start must not leave the claim behind: it would keep every
+      // other window off the GPUs until this window closes, because a hold whose
+      // process is alive is no longer reclaimed on expiry.
+      expect(registry.externalTurnHolders()).toEqual([]);
+    } finally {
+      fs.rmSync(board, { recursive: true, force: true });
+    }
+  });
+
   it('stops idle local models before a request to the external server', async () => {
     const { servers } = makeServers(ok);
-    const pool = new BackendPool(makeConfig(), undefined, servers);
+    const pool = new BackendPool(makeConfig(), new SharedRuntimeRegistry(boardDir!), servers);
     await pool.acquire('llama');
     events.length = 0;
     await pool.prepareExternal('strata');
@@ -740,7 +1106,7 @@ describe('BackendPool with a managed external server', () => {
       async () => undefined,
       fetchImpl,
     );
-    const pool = new BackendPool(config, undefined, servers);
+    const pool = new BackendPool(config, new SharedRuntimeRegistry(boardDir!), servers);
     servers.markInUse('strata');
     await pool.prepareExternal('strata-xxs');
     expect(urls).toEqual(['http://127.0.0.1:8080/unload']);
@@ -768,7 +1134,7 @@ describe('BackendPool with a managed external server', () => {
       fetchImpl,
       spawnImpl,
     );
-    const pool = new BackendPool(config, undefined, servers);
+    const pool = new BackendPool(config, new SharedRuntimeRegistry(boardDir!), servers);
     servers.markInUse('strata');
     await expect(pool.prepareExternal('strata-xxs')).rejects.toThrow(
       /Could not unload "strata": HTTP 409/,
@@ -811,7 +1177,7 @@ describe('BackendPool with a managed external server', () => {
       fetchImpl,
       spawnImpl,
     );
-    const pool = new BackendPool(config, undefined, servers);
+    const pool = new BackendPool(config, new SharedRuntimeRegistry(boardDir!), servers);
     await pool.acquire('llama');
     events.length = 0;
     await pool.prepareExternal('strata');
@@ -917,5 +1283,103 @@ describe('start_command config', () => {
     });
     expect(bad.success).toBe(false);
     expect(JSON.stringify(bad.error?.issues)).toContain('start_command requires unload_path');
+  });
+});
+
+/**
+ * `stopOnExit` and a remote lease (docs/plans/LAPTOP_MODEL_STARTER_PLAN.md
+ * problem 2). A lease is NOT a desktop turn: it lives in the pool's pin counter
+ * and in `ModelStarterLeases`, so the busy check `extension.ts` passes here has
+ * to OR in `hasLease` — otherwise closing the last desktop window unloads and
+ * stops the very server a laptop turn is running on, and the laptop's turn dies
+ * mid-generation with nothing at the desktop to fix it.
+ */
+describe('ExternalModelServers stopOnExit and remote leases', () => {
+  beforeEach(() => {
+    events.length = 0;
+    probeHttpMock.mockReset();
+  });
+
+  it('skips a leased model and launches no watcher, stops it once the lease is gone', async () => {
+    const config = makeConfig();
+    const strata = config.models.find((model) => model.name === 'strata')!;
+    strata.stop_on_exit = true;
+    strata.stop_command = ['stop-strata'];
+    const fetchImpl = vi.fn(async () => new Response('{"status":"unloaded"}', { status: 200 }));
+    const spawnImpl = vi.fn(() => ({ unref: vi.fn() }));
+    const servers = new ExternalModelServers(
+      () => config,
+      async () => undefined,
+      fetchImpl as unknown as typeof fetch,
+      spawnImpl,
+    );
+    let clock = 1_700_000_000_000;
+    const leases = new ModelStarterLeases(() => 600_000, () => clock);
+    const pool = new BackendPool(config, new SharedRuntimeRegistry(), servers, leases);
+    // What a laptop `POST /ensure` does to this window's pool: one pin, held by
+    // a lease, with no desktop turn anywhere near it.
+    const lease = leases.grant({
+      client: 'laptop-1',
+      model: 'strata',
+      port: 8080,
+      kind: 'managed-external',
+      release: pool.pinModel('strata'),
+    });
+    expect(lease.model).toBe('strata');
+    // The exact composition extension.ts uses for `stopOnExit`'s isBusy.
+    const desktopTurns: string[] = [];
+    const isBusy = (modelName: string) =>
+      desktopTurns.includes(modelName) || leases.hasLease(modelName);
+    expect(desktopTurns).toEqual([]);
+    expect(isBusy('strata')).toBe(true);
+
+    await servers.stopOnExit({ lastWindow: true, isBusy, leaseDir: 'leases' });
+    expect(fetchImpl).not.toHaveBeenCalled();
+    expect(spawnImpl).not.toHaveBeenCalled();
+
+    // The laptop stopped renewing (its window closed): the lease lapsed, so the
+    // last-window exit behaves exactly as it did before the starter existed.
+    clock += 600_001;
+    leases.expireNow();
+    expect(isBusy('strata')).toBe(false);
+    await servers.stopOnExit({ lastWindow: true, isBusy, leaseDir: 'leases' });
+    expect(fetchImpl).toHaveBeenCalledOnce();
+    expect(spawnImpl).toHaveBeenCalledOnce();
+    // The pin is gone with the lease, so the pool no longer calls it busy.
+    expect(pool.isBusy('strata')).toBe(false);
+  });
+
+  it('names the blocking model whichever way the refusal arrived', async () => {
+    const idle = { busy: () => false, local: [], otherExternal: [], stopLocal: async () => {} };
+    let caught: unknown;
+    try {
+      await freeVramForExternal('maya', {
+        ...idle,
+        otherExternal: ['strata'],
+        unloadExternal: () =>
+          Promise.reject(new ExternalServerBusyError('Could not unload "strata": HTTP 409')),
+      });
+    } catch (error) {
+      caught = error;
+    }
+    // The server's own 409 is turned into the same typed refusal, with the name
+    // the message would have had to be read out of.
+    expect(caught).toBeInstanceOf(ExternalBusyError);
+    expect((caught as ExternalBusyError).busyModels).toEqual(['strata']);
+
+    caught = undefined;
+    try {
+      await freeVramForExternal('maya', {
+        local: ['gemma'],
+        otherExternal: [],
+        busy: (model) => model === 'gemma',
+        stopLocal: async () => {},
+        unloadExternal: async () => {},
+      });
+    } catch (error) {
+      caught = error;
+    }
+    expect((caught as ExternalBusyError).busyModels).toEqual(['gemma']);
+    expect((caught as ExternalBusyError).message).toMatch(/a turn is running on it/);
   });
 });

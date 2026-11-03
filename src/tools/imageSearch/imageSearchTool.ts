@@ -6,6 +6,7 @@ import { formatThumbnailLine } from '../../sidebar/toolResultView';
 import type { UserNotificationService } from '../../sidebar/UserNotificationService';
 import { MAX_VIEW_IMAGE_BYTES, mimeFromHeader } from '../imageTool';
 import type { RegisteredTool, ToolHandlerContext } from '../ToolRegistry';
+import { PER_COMPUTER_SECRET_HINT } from '../../util/secretHint';
 import { downloadThumbnails, pickThumbnails, type ThumbnailCandidate } from './imageThumbnails';
 import { uploadTemporaryImage } from './litterboxUpload';
 import {
@@ -95,6 +96,9 @@ export function makeImageSearchTool(deps: ImageSearchDeps): RegisteredTool {
       },
     },
     permission: 'search',
+    /** An image-search answer is another machine's description of an image, so it
+     *  brings outside content in exactly as `web_fetch` and `web_search` do. */
+    untrustedResult: true,
     advertise: () => searchConfig() !== undefined,
     approval: (args) => {
       const config = searchConfig();
@@ -133,7 +137,7 @@ async function runImageSearch(
   if (!apiKey) {
     throw new Error(
       `image_search: no SerpApi key in SecretStorage under "${config.secret_key_name}". ` +
-        `Run "Forge: Set Cloud Provider Token" with that key name.`,
+        `Run "Forge: Set Cloud Provider Token" with that key name. ${PER_COMPUTER_SECRET_HINT}`,
     );
   }
 

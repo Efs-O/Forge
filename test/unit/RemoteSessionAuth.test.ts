@@ -103,6 +103,46 @@ describe('RemoteSessionAuth', () => {
     expect(await auth.gate(note, 'owner', now + 1)).toMatchObject({ kind: 'authorized' });
   });
 
+  /**
+   * The kind that used to be answered with the wrong sentence.
+   *
+   * An authenticated owner who sent a sticker got "remote authentication is
+   * required", the identical failure voice notes had from the identical cause:
+   * this set was written before `unsupported_media` existed, so the gate denied
+   * the event and named authentication -- the one thing that was not wrong. The
+   * notice it should have produced cannot reach the phone while the gate is
+   * denying the event that would have produced it.
+   */
+  it('authorizes an unsupported media notice from an authenticated owner', async () => {
+    const secrets = new MemorySecrets();
+    const auth = new RemoteSessionAuth(secrets as unknown as vscode.SecretStorage, {
+      inactivityTimeoutMinutes: 30,
+    });
+    const secret = auth.createEnrollmentSecret();
+    const now = 1_234_567_890_000;
+    const code = generateTotp(secret, now).code;
+    await auth.confirmEnrollment('fake', 'owner', secret, code, now);
+
+    const sticker: Extract<RemoteInboundEvent, { kind: 'unsupported_media' }> = {
+      channel: 'fake',
+      kind: 'unsupported_media',
+      mediaType: 'sticker',
+      providerMessageId: 'message',
+      senderId: 'owner',
+      chatId: 'chat',
+      chatType: 'private',
+      receivedAt: 1,
+    };
+
+    // A locked chat is still a locked chat. A sticker cannot carry a six-digit
+    // code, so it cannot open the session either: it is refused as
+    // unauthenticated, and the owner has to send text to be challenged.
+    expect(await auth.gate(sticker, 'owner', now)).toEqual({ kind: 'blocked' });
+
+    expect(await auth.gate(event(code), 'owner', now)).toMatchObject({ kind: 'authorized' });
+    expect(await auth.gate(sticker, 'owner', now + 1)).toMatchObject({ kind: 'authorized' });
+  });
+
   it('authorizes Send now callbacks only after the owner session is authenticated', async () => {
     const secrets = new MemorySecrets();
     const auth = new RemoteSessionAuth(secrets as unknown as vscode.SecretStorage, {

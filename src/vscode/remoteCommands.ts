@@ -1,6 +1,6 @@
 import * as vscode from 'vscode';
 import { toDataURL } from 'qrcode';
-import { updateConfigFile } from '../config/ConfigWriter';
+import { updateForgeKeyFile } from '../config/ConfigWriter';
 import type { ForgeConfig } from '../config/types';
 import type { RemoteRuntime } from '../remote/RemoteRuntime';
 import { TELEGRAM_BOT_TOKEN_SECRET } from '../remote/TelegramChannel';
@@ -124,7 +124,7 @@ export function registerRemoteCommands(
         return;
       }
       try {
-        updateConfigFile(configPath, (doc) => {
+        updateForgeKeyFile(configPath, 'remote', (doc) => {
           doc.setIn(['remote', 'auth', 'inactivity_timeout_minutes'], minutes);
         });
         const current = getConfig();

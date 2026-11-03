@@ -8,6 +8,7 @@ import type { IBackendPool } from '../../src/backend/BackendPool';
 import type { BackendController } from '../../src/backend/BackendController';
 import type { ForgeConfig } from '../../src/config/types';
 import type { IControlServerRegistry } from '../../src/backend/ControlServerRegistry';
+import { findFreeLoopbackPort } from '../support/listenLoopback';
 
 function fakeController(model: string): BackendController {
   return {
@@ -144,7 +145,7 @@ describe('ControlServer', () => {
   });
 
   it('publishes discovery after listening and removes only its PID on disposal', async () => {
-    const port = 0;
+    const port = await findFreeLoopbackPort();
     let base = '';
     const registry: IControlServerRegistry = {
       publish: vi.fn(),
@@ -190,7 +191,17 @@ describe('ControlServer', () => {
 
       const url = onListening.mock.calls[0]?.[0] as string;
       expect(server.status().port).not.toBe(port);
-      expect((await fetch(`${url}/healthz`)).ok).toBe(true);
+      const ok = await new Promise<boolean>((resolve, reject) => {
+        const request = http.get(`${url}/healthz`, (response) => {
+          response.resume();
+          response.once('end', () => {
+            const status = response.statusCode ?? 0;
+            resolve(status >= 200 && status < 300);
+          });
+        });
+        request.once('error', reject);
+      });
+      expect(ok).toBe(true);
       expect(registry.publish).not.toHaveBeenCalled();
     } finally {
       await new Promise<void>((resolve) => blocker.close(() => resolve()));
@@ -198,7 +209,7 @@ describe('ControlServer', () => {
   });
 
   it('ensures a model, ref-counts holders, and guards capacity against in-use eviction', async () => {
-    const port = 0;
+    const port = await findFreeLoopbackPort();
     let base = '';
     const pool = new FakePool();
     server = new ControlServer(pool, makeConfig(port), testDeps());
@@ -224,7 +235,7 @@ describe('ControlServer', () => {
   });
 
   it('never stops a model a sidebar turn is using to make room (U04-01)', async () => {
-    const port = 0;
+    const port = await findFreeLoopbackPort();
     let base = '';
     const pool = new FakePool();
     server = new ControlServer(pool, makeConfig(port), testDeps());
@@ -244,7 +255,7 @@ describe('ControlServer', () => {
   });
 
   it('strips @profile / expands aliases on /ensure and keys holds by base (F6)', async () => {
-    const port = 0;
+    const port = await findFreeLoopbackPort();
     let base = '';
     const pool = new FakePool();
     const cfg = makeConfig(port);
@@ -267,7 +278,7 @@ describe('ControlServer', () => {
   });
 
   it('/models lists profiles and derived capabilities per base (F6)', async () => {
-    const port = 0;
+    const port = await findFreeLoopbackPort();
     let base = '';
     const cfg = makeConfig(port);
     cfg.profiles = { main: {}, worker: {} };
@@ -283,7 +294,7 @@ describe('ControlServer', () => {
   });
 
   it('404s an unknown model and an unknown route', async () => {
-    const port = 0;
+    const port = await findFreeLoopbackPort();
     let base = '';
     server = new ControlServer(new FakePool(), makeConfig(port), testDeps());
     server.start();
@@ -294,7 +305,7 @@ describe('ControlServer', () => {
   });
 
   it('/ensure blocks until the readiness probe passes (cold load)', async () => {
-    const port = 0;
+    const port = await findFreeLoopbackPort();
     let base = '';
     let serving = false;
     server = new ControlServer(
@@ -324,7 +335,7 @@ describe('ControlServer', () => {
   });
 
   it('/ensure returns 502 when the backend never becomes ready', async () => {
-    const port = 0;
+    const port = await findFreeLoopbackPort();
     let base = '';
     server = new ControlServer(
       new FakePool(),
@@ -343,7 +354,7 @@ describe('ControlServer', () => {
   });
 
   it('serializes concurrent /ensure + /release; holds never goes negative', async () => {
-    const port = 0;
+    const port = await findFreeLoopbackPort();
     let base = '';
     const pool = new FakePool();
     pool.acquireDelayMs = 10; // force the ensure calls to overlap
@@ -365,7 +376,7 @@ describe('ControlServer', () => {
   });
 
   it('does not evict a model acquired within the eviction grace window', async () => {
-    const port = 0;
+    const port = await findFreeLoopbackPort();
     let base = '';
     const pool = new FakePool();
     server = new ControlServer(pool, makeConfig(port, 1), testDeps({ evictionGraceMs: 10_000 }));
@@ -384,7 +395,7 @@ describe('ControlServer', () => {
   });
 
   it('422s a cloud-provider model with the reason, without evicting a loaded local model', async () => {
-    const port = 0;
+    const port = await findFreeLoopbackPort();
     let base = '';
     const pool = new FakePool();
     server = new ControlServer(pool, makeConfig(port, 1), testDeps());
@@ -404,7 +415,7 @@ describe('ControlServer', () => {
   });
 
   it('GET /models golden shape: every pre-existing field survives, new fields are additive-only', async () => {
-    const port = 0;
+    const port = await findFreeLoopbackPort();
     let base = '';
     server = new ControlServer(new FakePool(), makeFuzzyConfig(port), testDeps());
     server.start();
@@ -453,7 +464,7 @@ describe('ControlServer', () => {
   });
 
   it('/ensure and /unload accept a fuzzy short_name and resolve to the base model', async () => {
-    const port = 0;
+    const port = await findFreeLoopbackPort();
     let base = '';
     const pool = new FakePool();
     server = new ControlServer(pool, makeFuzzyConfig(port), testDeps());
@@ -473,7 +484,7 @@ describe('ControlServer', () => {
   });
 
   it('/ensure, /release, and /unload 400 with candidates on an ambiguous fuzzy name', async () => {
-    const port = 0;
+    const port = await findFreeLoopbackPort();
     let base = '';
     server = new ControlServer(new FakePool(), makeFuzzyConfig(port), testDeps());
     server.start();
@@ -489,7 +500,7 @@ describe('ControlServer', () => {
   });
 
   it('publishes a versioned execution and availability contract on GET /models', async () => {
-    const port = 0;
+    const port = await findFreeLoopbackPort();
     let base = '';
     server = new ControlServer(new FakePool(), makeConfig(port), testDeps());
     server.start();
@@ -520,7 +531,7 @@ describe('ControlServer', () => {
   });
 
   it('resolves group-inherited providers before publishing model routing metadata', async () => {
-    const port = 0;
+    const port = await findFreeLoopbackPort();
     let base = '';
     server = new ControlServer(new FakePool(), makeGroupedProviderConfig(port), testDeps());
     server.start();
@@ -549,7 +560,7 @@ describe('ControlServer', () => {
   });
 
   it('marks CLI agents unservable — they are driven in-process, not over the control API', async () => {
-    const port = 0;
+    const port = await findFreeLoopbackPort();
     let base = '';
     const config = {
       models: [
@@ -577,7 +588,7 @@ describe('ControlServer', () => {
   });
 
   it('changes catalog revision and reports capacity-busy models', async () => {
-    const port = 0;
+    const port = await findFreeLoopbackPort();
     let base = '';
     server = new ControlServer(new FakePool(), makeConfig(port), testDeps());
     server.start();
@@ -608,7 +619,7 @@ describe('ControlServer', () => {
   });
 
   it('reports loading while a backend acquisition is in flight', async () => {
-    const port = 0;
+    const port = await findFreeLoopbackPort();
     let base = '';
     const pool = new FakePool();
     pool.acquireDelayMs = 100;
@@ -628,7 +639,7 @@ describe('ControlServer', () => {
   });
 
   it('reports cloud chat as ready when the in-host proxy is available', async () => {
-    const port = 0;
+    const port = await findFreeLoopbackPort();
     let base = '';
     const chatProxy = async () => ({ content: '', reasoning: '', finishReason: 'stop' });
     server = new ControlServer(new FakePool(), makeConfig(port), testDeps({ chatProxy }));
@@ -644,7 +655,7 @@ describe('ControlServer', () => {
   });
 
   it('evicts ALL idle local models before loading a different one, even under capacity', async () => {
-    const port = 0;
+    const port = await findFreeLoopbackPort();
     let base = '';
     const pool = new FakePool();
     // capacity 4: slots are NOT the constraint — VRAM-policy eviction must
@@ -665,7 +676,7 @@ describe('ControlServer', () => {
   });
 
   it('POST /unload tears down an idle model, refuses a held one, 422s cloud', async () => {
-    const port = 0;
+    const port = await findFreeLoopbackPort();
     let base = '';
     const pool = new FakePool();
     server = new ControlServer(pool, makeConfig(port, 4), testDeps());
@@ -694,7 +705,7 @@ describe('ControlServer', () => {
   });
 
   it('exposes per-model holds on GET /models', async () => {
-    const port = 0;
+    const port = await findFreeLoopbackPort();
     let base = '';
     server = new ControlServer(new FakePool(), makeConfig(port), testDeps());
     server.start();
@@ -711,7 +722,7 @@ describe('ControlServer', () => {
     fetch(`${base}/chat`, { method: 'POST', body: JSON.stringify(body) });
 
   it('POST /chat 501s when no chatProxy is wired', async () => {
-    const port = 0;
+    const port = await findFreeLoopbackPort();
     let base = '';
     server = new ControlServer(new FakePool(), makeConfig(port), testDeps());
     server.start();
@@ -722,7 +733,7 @@ describe('ControlServer', () => {
   });
 
   it('POST /chat validates model and messages, then delegates to the proxy', async () => {
-    const port = 0;
+    const port = await findFreeLoopbackPort();
     let base = '';
     const chatProxy = async (req: { model: string; messages: unknown[] }) => ({
       content: `echo:${req.model}:${req.messages.length}`,
@@ -749,7 +760,7 @@ describe('ControlServer', () => {
   });
 
   it('POST /chat forwards tools and returns buffered tool_calls in OpenAI shape', async () => {
-    const port = 0;
+    const port = await findFreeLoopbackPort();
     let base = '';
     const toolCalls = [
       { id: 'c1', type: 'function' as const, function: { name: 'read_file', arguments: '{}' } },
@@ -788,7 +799,7 @@ describe('ControlServer', () => {
   });
 
   it('POST /chat maps a ProxyError status faithfully', async () => {
-    const port = 0;
+    const port = await findFreeLoopbackPort();
     let base = '';
     const chatProxy = async () => {
       throw new ProxyError(422, 'use /ensure for local models');

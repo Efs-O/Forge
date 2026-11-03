@@ -1,4 +1,5 @@
 import { guardedFetchResource } from './previewFetch';
+import { normalizedHostname } from '../fetchHostApprovals';
 import type { BrowserChannel } from '../browser/BrowserSessionManager';
 import { PREVIEW_LAUNCH_ARGS, PREVIEW_ORIGIN, withRenderBrowser } from './renderBrowser';
 
@@ -32,6 +33,14 @@ export interface PreviewRequest {
   timeoutMs: number;
   frames: number[];
   keys: Array<{ key: string; holdMs: number }>;
+  /**
+   * May the page's scripts reach this host? `fetch.allowed_hosts` plus the hosts
+   * this chat's cards approved (`fetchHostApprovals.ts`). Anything else is
+   * refused and listed in the result, so a preview is not the zero-prompt path
+   * that `web_fetch` used to be: a page can no longer POST a form to a host
+   * nobody was asked about (docs/plans/EXFIL_GATES_PLAN.md, Part A knock-on).
+   */
+  hostAllowed: (host: string) => boolean;
 }
 
 export interface PreviewResult {
@@ -91,6 +100,16 @@ export async function renderPreview(
           blocked.set(
             originLabel(req.url()),
             `refused: ${req.method()} is not an HTTP(S) GET or POST`,
+          );
+          return void route.abort();
+        }
+        // The host gate runs before the fetch, so an unapproved host is refused
+        // without a DNS lookup or a byte sent: the page's own scripts cannot use
+        // a preview to reach a collector that `web_fetch` would have asked about.
+        if (!request.hostAllowed(normalizedHostname(requested))) {
+          blocked.set(
+            originLabel(req.url()),
+            'refused: host not approved for this chat (fetch it with web_fetch, which asks)',
           );
           return void route.abort();
         }

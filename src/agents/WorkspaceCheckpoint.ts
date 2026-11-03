@@ -3,7 +3,7 @@ import type { CheckpointProgress } from '../checkpoint/DiskCheckpointStore';
 
 export type { WorkspaceCheckpointCapture } from '../checkpoint/CheckpointStack';
 
-/** Creates a bounded, disk-backed workspace checkpoint before a full-access CLI starts. */
+/** Creates a bounded, disk-backed workspace checkpoint for a covered external-agent run. */
 export async function snapshotWorkspaceBefore(
   checkpoint: CheckpointSession,
   workspaceRoot: string,

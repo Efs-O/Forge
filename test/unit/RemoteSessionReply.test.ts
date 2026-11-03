@@ -322,7 +322,9 @@ describe('Telegram session reply route', () => {
         auth: { canDeliver: async () => true },
         host,
         progress,
-        outbox: { kick: vi.fn() },
+        // `false`: the answer is modelled as not yet delivered, so the drain
+        // still writes its outcome line, as these tests assert.
+        outbox: { kick: vi.fn(), flush: async () => false },
         activeConversations: new Set(),
         attachmentStore: () => undefined,
         isBusy: () => false,

@@ -9,6 +9,7 @@
 import clientScriptSource from './forge.sh';
 import type { AgentSenderMetadata } from '../agentLinks/chatAgentLinks';
 import { agentDisplayName } from '../agentLinks/chatAgentLinks';
+import { INBOX_CAP } from './agentInbox';
 
 /** Longest text a single message into Forge may carry. */
 export const MAX_INBOUND_CHARS = 8000;
@@ -36,6 +37,7 @@ Copilot sessions message each other, each message shown in the receiving window.
     forge.sh        the client: answer Forge, or send Forge a message
     inbox/          questions Forge is waiting on   <id>-forge.pending
     outbox/         file answers                    <id>-reply.md
+    remote-answers/ answers to remote-ask           <id>.md
 
 ## Doors
 
@@ -45,7 +47,10 @@ Copilot sessions message each other, each message shown in the receiving window.
   \`"crossSessionInbound": "accept"\` is set in ~/.claude/settings.json.
 - **Codex**: \`codex queue --thread <id> --message <text>\`.
 - **Forge**: \`forge.sh\`, or HTTP (below). An idle Forge starts a turn at
-  once; a busy one queues the message until its turn ends.
+  once. A \`say\` to a busy chat is read at its next tool round; its answer
+  arrives when the turn ends; use \`steer\` only to stop the current work. A
+  \`say\` with \`--unattended\`, \`--model\` or \`--new\` needs a turn of its own,
+  so it waits until the running turn ends.
 
 When several Forge windows are open, the client reaches the window that holds
 the sender's session link; failing that, the window whose workspace contains
@@ -56,6 +61,19 @@ ordinary \`say\` follows that sender's previous chat without changing the view.
 Use \`say <name> --to <conversationId>\` to select a specific Forge chat, or
 \`say <name> --to-running\` to select the currently running chat. The same flags
 work with \`send <name> forge\`; \`send\` to another agent remains a relay.
+\`say\` flags:
+- \`--unattended\`: nobody is watching; dangerous tools are refused at once with
+  a reason instead of opening an approval card that would hang the turn, while
+  other confirmations are auto-approved as for a job run. \`ask_user\` is
+  refused outright, and an ask to a Claude or Codex session is refused unless
+  \`jobs.allow_cli_agents\` is true. Use it whenever the owner may be away.
+- \`--model <name>\` selects the model for this turn. An unknown name is refused
+  with the list of configured models, so read the 400 instead of guessing again.
+- \`--new\` opens and links a second chat, keeping the sender's prior chat linked.
+- \`--to <conversationId>\` selects one linked Forge chat.
+- \`--to-running\` selects the currently running Forge chat.
+If a turn needs the owner's approval, it waits for the owner; \`stop\` or \`steer\`
+cancels that approval card.
 Use \`forge.sh stop <name> [--to <conversationId>]\` to cancel a running Forge
 turn like the Stop button. Queued messages are not withdrawn and may start after
 the turn stops; use \`forge.sh cancel\` for those.
@@ -71,8 +89,8 @@ active Telegram transport. It does not enter Forge's inbox, start a model turn,
 or change conversation context. The named conversation must be the sender's
 established Forge chat and have exactly one Telegram binding in this workspace;
 the client cannot choose a Telegram chat id. The path must resolve to a regular
-file inside this workspace, between 1 byte and 50 MB. The optional caption file
-is limited to 1,024 Unicode code points.
+file inside this workspace, between 1 byte and 50 MB. \`--caption-file <file>\`
+supplies the Telegram caption text and is limited to 1,024 Unicode code points.
 
 Telegram acceptance is reported as \`sent\`; a timeout or lost response is
 \`unknown\`, not success. There is no automatic retry because a manual retry
@@ -88,6 +106,9 @@ uses \`forge.sh read-verdict <name> <exchangeId>\` and then separately runs
 \`forge.sh ack-verdict <name> <exchangeId>\`. Reading does not delete
 the artifact; only the acknowledgment does. If a read response is lost, repeat
 the read before acknowledging. Unacknowledged verdicts remain for recovery.
+A \`--unattended\` turn that asks a Claude or Codex session is refused unless
+\`jobs.allow_cli_agents\` is true in the config; the refusal names the key, so
+pass it to the owner instead of retrying.
 
 A \`--new\` needs a free chat tab. If that window is at its chat cap and nothing
 can be archived, \`say --new\` exits non-zero with a 409 naming what is holding
@@ -106,7 +127,9 @@ relay. A 202 exchange id means accepted, not answered. Read its verdict or
 failure before reporting success. Do not repeat a failed relay through the
 same stale link. Forge's \`ask_agent\` reaches the agent linked to its current
 chat; use the Claude session picker and \`/link\` to bind a specific live
-Claude session to that chat.
+Claude session to that chat. \`bash ~/.forge/agent-bus/forge.sh who\` lists the
+linked sessions and the Forge window that holds each; \`/agents\` in Telegram
+shows the current chat's links and their last-use times.
 
 ## Small follow-ups
 
@@ -115,19 +138,16 @@ part of an hour. A reviewer that finds a small defect (about 20 changed lines
 or fewer, in files already reviewed) applies it itself or hands it to
 \`codex\`. Do not send it back to Forge.
 
-## Linked sessions
-
-\`bash ~/.forge/agent-bus/forge.sh who\` reports which Forge window holds a
-sender session. Use \`/agents\` in Telegram to see the current chat's linked
-sessions and their last-use times.
-
 ## Watching a running turn
 
 \`bash ~/.forge/agent-bus/forge.sh status <your-name>\` shows what YOUR chat with Forge is doing:
 busy or idle, how long the turn has run, seconds since its last activity, the tool it is on, how
 many tool calls so far, the last thing it said, any warnings, and context use. \`view <your-name> [n]\`
-replays the last n answers (default 3, max 10). Both read only the chat your own messages went to;
-if you have not sent Forge anything yet there is nothing to show. Each is one small request and
+replays the last n answers (default 3, max 10). Both read only the chat your own messages went to.
+Before your first message has started there is no chat to show: \`status\` then answers
+\`State: queued\` with how many of your messages are waiting (a \`--new\` message opens its own
+chat when it runs), while \`view\` still refuses until your first answer exists. Each is one
+small request and
 costs Forge no model tokens, so use it instead of messaging Forge to ask how it is going.
 
 ## Waiting for a turn to finish
@@ -142,9 +162,13 @@ exits 124. Ctrl-C stops it. Use it instead of re-asking Forge how it is going.
 
 ## Steering (interrupt a running turn)
 
-\`forge.sh steer <your-name> <to> [--to <conversationId>]\` stops \`<to>\`'s running turn and runs your
-text next — \`forge\` (Forge's own model), \`claude\`, \`codex\` or \`copilot\`.
-Use it to correct an agent mid-turn instead of waiting for it to finish.
+\`forge.sh steer <your-name> <to> [--to <conversationId>]\`: when \`<to>\` is
+\`forge\`, it stops that chat's running turn and runs your text next, and \`--to\`
+is accepted only then. When \`<to>\` is \`claude\`, \`codex\` or \`copilot\`, it
+withdraws the request this chat already put to that agent and asks this
+instead; Forge can stop only a session it started, never one the owner has open
+in a terminal. Use it to correct work mid-turn instead of waiting for it to
+finish.
 
 ## Withdrawing a queued message
 
@@ -167,6 +191,28 @@ A Forge question ends with its id. Answer with
 
 or write the answer to \`outbox/<id>-reply.md\` via a .tmp file and a rename.
 Forge's agent is blocked until the answer lands, then shows it to its user.
+Forge only reads an answer while it is still waiting: \`reply\` answers
+\`{"delivered":true}\` then, and once the question has ended (answered, timed
+out, or swept after 24 h) it answers \`{"accepted":true,"live":false}\` and
+writes nothing, so send the answer again as a message with \`say\` or \`send\`.
+
+## Reaching the chat that opened an exchange
+
+A request that came from a remote chat carries the id of the exchange it
+opened. \`forge.sh remote-notify claude <exchangeId>\` posts a note into that
+chat; \`forge.sh remote-ask claude <exchangeId>\` posts a question, prints its
+id, and waits up to 20 minutes for the user's \`/answer\` — the answer arrives
+as \`remote-answers/<id>.md\`, and a timeout exits 124 with the question id, so
+an answer that comes late is still in that file. The name is the agent kind
+that opened the exchange — \`claude\`, \`codex\` or \`copilot\` — and the session
+proves itself the way \`say\` does, from that kind's session environment
+variable, so a session can only reach chats that opened its own active
+exchanges. When the exchange has ended, its transport is off, or its chat is
+no longer authorized, the request is refused with the reason (\`no active remote
+session exchange for this sender\`, \`remote transport is not active\`, \`the
+originating remote chat is no longer authorized\`) and nothing is queued, so an
+unanswered note never waits silently. An exchange carries at most 20 outbound
+messages.
 
 ## Messaging Forge first
 
@@ -184,26 +230,45 @@ PowerShell on Windows (Git Bash, not a bare \`bash\` that may launch WSL):
     $text = 'your message'
     $text | & "$(git --exec-path)/../../../bin/bash.exe" "$HOME/.forge/agent-bus/forge.sh" say codex
 
+\`git --exec-path\` resolves the bash that came with Git for Windows wherever it
+is installed - \`C:\\Program Files\\Git\\bin\\bash.exe\` for an all-users
+install, \`%LOCALAPPDATA%\\Programs\\Git\\bin\\bash.exe\` for a per-user one.
+If \`Get-Command git.exe\` finds nothing, this client cannot run at all: the
+machine needs Git for Windows (\`winget install --id Git.Git -e\`), and a bare
+\`bash\` in PowerShell is usually WSL, whose home is not the Windows profile
+Forge writes \`~/.forge\` into, so it will not find this folder either.
+
 Use \`forge.sh reply <id>\` to answer a Forge question; the client handles
 authentication and has an outbox fallback. A message is at most
-${MAX_INBOUND_CHARS} characters.
+${MAX_INBOUND_CHARS} characters. Forge holds at most ${INBOX_CAP} unread agent messages
+at once; the next \`say\` is refused with \`429 Forge has too many unread agent
+messages\`, so \`wait\` or \`view\` for one of your turns to finish before sending
+another.
+
+A \`say\` that starts a turn in an attended chat can stop on a tool-approval
+card. The owner answers it in the sidebar or the chat's bound Telegram.
+Nobody answers it, the card keeps waiting; with no \`permissions.approval_timeout_minutes\` set that is a hung turn, so \`wait\` exits 124 with the chat still busy. Read \`status\` before concluding anything.
 
 ## Claude to Codex or Copilot
 
-Use \`forge.sh send claude codex\` or \`forge.sh send claude copilot\` only
-when the intended recipient is linked to Claude's current Forge chat. Check
-\`who\` and that chat's links first. An exchange id confirms acceptance, not
-an answer; read the verdict or failure before reporting success. Do not retry
-through a stale link. \`send claude forge\` starts a Forge model turn instead.
+Use \`forge.sh send claude codex\` or \`forge.sh send claude copilot\`. If the
+chat already has a link for that agent, Forge asks that session; if it has
+none, Forge starts its own and links it to the chat - its title is
+\`Forge · <chat>\` and \`who\` lists it afterwards. Forge, not the caller,
+chooses the session: the chat's existing link, or a new one it starts, and you
+cannot pick which instance answers by retrying with another id. An exchange id
+confirms acceptance, not an answer; read the verdict or the failure before
+reporting success. \`send claude forge\` starts a Forge model turn instead.
 
 ## Codex to Claude
 
-Use \`forge.sh send codex claude\` only when that Claude session is linked to
-Codex's current Forge chat. If the owner names a different running Claude
-session, identify its exact session id first; Forge's Claude peer connection
-and question/reply protocol can reach it without starting a new CLI process.
-Do not guess from a chat title or retry the chat-linked relay after it reaches
-the wrong session. Copilot has no separate peer-pipe path here.
+Use \`forge.sh send codex claude\`. The same rule as above: the Claude session
+linked to Codex's current Forge chat answers if there is one, and Forge starts
+one if there is none. If the owner names a different running Claude session,
+identify its exact session id first; Forge's Claude peer connection and
+question/reply protocol can reach it without starting a new CLI process. Do not
+guess from a chat title or retry the chat-linked relay after it reaches the
+wrong session. Copilot has no separate peer-pipe path here.
 
 Never paste endpoint.json's token into a message. Files older than 24 hours
 are swept.

@@ -1,5 +1,4 @@
 import * as http from 'http';
-import type { AddressInfo } from 'net';
 import * as fs from 'fs/promises';
 import * as os from 'os';
 import * as path from 'path';
@@ -8,6 +7,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import { busPaths } from '../../src/agentBus/agentBus';
 import { AgentRoutes } from '../../src/backend/agentRoutes';
 import { TEST_BASH } from '../support/bash';
+import { listenLoopback } from '../support/listenLoopback';
 
 const id = '8e395649-705e-47f9-b499-03a36e908f50';
 const token = 'a'.repeat(64);
@@ -35,8 +35,8 @@ describe('agent bus remote session routes', () => {
       remoteSession: dispatch,
     });
     server = http.createServer((req, res) => void routes!.handle(req, res));
-    await new Promise<void>((resolve) => server!.listen(0, '127.0.0.1', resolve));
-    const base = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
+    const port = await listenLoopback(server!);
+    const base = `http://127.0.0.1:${port}`;
     routes.setEnabled(true);
     routes.onListening(base);
     const sender = encodeURIComponent(JSON.stringify({ kind: 'codex', sessionId: id }));

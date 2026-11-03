@@ -1,66 +1,16 @@
+/**
+ * `find_files`, plus the two things it needs: the note that explains a
+ * gitignored miss, and the ripgrep crawl that lists names without reading
+ * contents. `search_code` lives in `searchCodeTool.ts` — it reads contents,
+ * which is why the secret-path gate belongs there and not here.
+ */
 import { spawn } from 'child_process';
+import * as fs from 'fs';
 import * as path from 'path';
 import * as vscode from 'vscode';
 import type { RegisteredTool } from './ToolRegistry';
-import { DEFAULT_TOOL_OUTPUT_LIMITS } from './toolOutputLimits';
-import { renderSearchCodeMatches, type SearchCodeMatch } from './searchCodeOutput';
 import { resolveRipgrep, type RipgrepResolution } from './RipgrepResolver';
-import { capResultText } from './resultCap';
-import { capSnippetLine, MAX_SEARCH_RESULT_CHARS } from './searchSnippet';
-import {
-  namedExistingPath,
-  namedPathScope,
-  resolveSearchCodeScope,
-  rgScopeArgs,
-} from './searchScope';
-
-const CONTEXT_LINES = 2;
-/**
- * Per-file snippet cap.
- *
- * Without it, whichever file ripgrep reaches first spends the whole
- * OUTPUT_LINE_LIMIT and every other match is cut off. That is not hypothetical:
- * `.forge/embeddings.index.json` sorts first (dot-directory) and, being a copy
- * of every indexed chunk, matches nearly any query — so a search for "pickup"
- * in a workspace with an index returned 50 lines of index JSON and nothing from
- * the actual sources. The tool looked broken while working.
- */
-export const SNIPPETS_PER_FILE_LIMIT = 8;
-interface RipgrepLineData {
-  text?: string;
-}
-
-interface RipgrepPathData {
-  text?: string;
-}
-
-interface RipgrepMatchData {
-  path?: RipgrepPathData;
-  lines?: RipgrepLineData;
-  line_number?: number;
-  submatches?: Array<{ start: number; end: number }>;
-}
-
-interface RipgrepContextData {
-  path?: RipgrepPathData;
-  lines?: RipgrepLineData;
-  line_number?: number;
-}
-
-type RipgrepEvent =
-  | { type: 'match'; data: RipgrepMatchData }
-  | { type: 'context'; data: RipgrepContextData }
-  | { type: string; data?: unknown };
-
-function isMatchEvent(event: RipgrepEvent): event is { type: 'match'; data: RipgrepMatchData } {
-  return event.type === 'match';
-}
-
-function isContextEvent(
-  event: RipgrepEvent,
-): event is { type: 'context'; data: RipgrepContextData } {
-  return event.type === 'context';
-}
+import { namedExistingPath, namedPathScope, rgScopeArgs } from './searchScope';
 
 /**
  * A glob search skips files the workspace's `.gitignore` excludes; only an
@@ -69,9 +19,49 @@ function isContextEvent(
  * "no matches" three times in one session for text it plainly held, and the
  * agent fell back to eight blind `read_file` pages. Say so on the miss.
  */
-export function gitignoredNote(glob: string): string {
+export function gitignoredNote(
+  glob: string,
+  includeIgnored = false,
+  fix = 'pass an exact file or folder path, or set include_ignored: true',
+): string {
   if (!/[*?[\]{}!]/u.test(glob)) return '';
-  return ' Globs skip gitignored files; pass an exact file or folder path to search it.';
+  if (includeIgnored) return '';
+  return ` Globs skip gitignored files; ${fix}.`;
+}
+
+/**
+ * The sentence for an `include` that named one path exactly and that path is not
+ * there, so the search opened no file at all.
+ *
+ * Without it the answer is a bare "No matches found", which the model reads as
+ * "this text is not in the tree" and stops looking — while the real fact is that
+ * the folder it asked for was never opened. `namedExistingPath` already decided
+ * this include was not an existing path; this says which of the two reasons it
+ * was not, because they have two different fixes.
+ */
+export function missingIncludeNote(include: string, workspaceRoot: string): string | undefined {
+  if (/[*?[\]{}!]/u.test(include) || include.startsWith('-') || include.trim() === '')
+    return undefined;
+  if (path.isAbsolute(include)) return undefined; // the scope resolver already refused it
+  const resolved = path.resolve(workspaceRoot, include);
+  const inside = path.relative(workspaceRoot, resolved);
+  if (!inside || inside.startsWith('..') || path.isAbsolute(inside)) {
+    return (
+      ` The include \`${include}\` resolves outside the workspace root, so this search opened no ` +
+      "file. Prefix a nested repository's directory, lead with `**/` to match at any depth, or " +
+      'pass an absolute path to search outside the workspace.'
+    );
+  }
+  try {
+    fs.statSync(resolved);
+    return undefined;
+  } catch {
+    return (
+      ` The include \`${include}\` names one path exactly, and nothing at it exists under the ` +
+      'workspace root, so this search opened no file. Check the spelling against the tree with ' +
+      '`find_files`, or lead with `**/` to match the name at any depth.'
+    );
+  }
 }
 
 /**
@@ -90,6 +80,7 @@ export function gitignoredNote(glob: string): string {
 async function listWorkspaceFiles(
   pattern: string,
   maxResults: number,
+  includeIgnored: boolean,
   resolution: RipgrepResolution,
   signal?: AbortSignal,
 ): Promise<string[]> {
@@ -103,8 +94,17 @@ async function listWorkspaceFiles(
   const named = namedExistingPath(pattern, folder.uri.fsPath);
   const scope = named
     ? namedPathScope(named, folder.uri.fsPath)
-    : { target: '.', glob: pattern, explicitPath: false, applyExcludes: true };
-  const args = ['--files', '--hidden', ...rgScopeArgs(scope), scope.target];
+    : {
+        target: '.',
+        glob: pattern,
+        explicitPath: false,
+        applyExcludes: true,
+        rootDir: path.resolve(folder.uri.fsPath).replace(/\\/gu, '/'),
+      };
+  const scopeArgs = rgScopeArgs(scope);
+  const ignoreArgs =
+    includeIgnored && !scopeArgs.includes('--no-ignore-vcs') ? ['--no-ignore-vcs'] : [];
+  const args = ['--files', '--hidden', ...ignoreArgs, ...scopeArgs, scope.target];
 
   return new Promise<string[]>((resolve, reject) => {
     const found: string[] = [];
@@ -190,6 +190,10 @@ export function makeFindFilesTool(
               type: 'integer',
               description: 'Maximum number of files to return. Defaults to 100.',
             },
+            include_ignored: {
+              type: 'boolean',
+              description: 'Include gitignored files in glob results.',
+            },
           },
           required: ['pattern'],
           additionalProperties: false,
@@ -204,10 +208,12 @@ export function makeFindFilesTool(
         throw new Error('find_files: pattern must be a non-empty string.');
       }
       const maxResults = typeof args['max_results'] === 'number' ? args['max_results'] : 100;
+      const includeIgnored = args['include_ignored'] === true;
 
       const matches = await listWorkspaceFiles(
         pattern,
         maxResults,
+        includeIgnored,
         resolveCommand(),
         context?.abortSignal,
       );
@@ -216,253 +222,10 @@ export function makeFindFilesTool(
         return (
           `No files match "${pattern}". The glob is anchored at the workspace root — ` +
           `prefix a nested repository's directory, or lead with "**/" to match at any depth.` +
-          gitignoredNote(pattern)
+          gitignoredNote(pattern, includeIgnored)
         );
       }
       return matches.join('\n');
     },
   };
-}
-
-export function makeSearchCodeTool(
-  resolveCommand: () => RipgrepResolution = () => resolveRipgrep(vscode.env.appRoot),
-): RegisteredTool {
-  return {
-    definition: {
-      type: 'function',
-      function: {
-        name: 'search_code',
-        description:
-          'Search for a ripgrep regex by default, or plain text when literal is true, across workspace files or an explicitly named absolute path, folder, or glob outside the workspace. Relative includes are rooted at the workspace; absolute globs are rooted at the path before the first wildcard. Returns matching file paths and surrounding context lines. Ripgrep regex does not support lookaround or backreferences.',
-        parameters: {
-          type: 'object',
-          properties: {
-            query: { type: 'string', description: 'Text or ripgrep regex to search for.' },
-            literal: {
-              type: 'boolean',
-              description: 'Match the query as plain text (default false: ripgrep regex).',
-            },
-            include: {
-              type: 'string',
-              description:
-                'Glob pattern of files to include, e.g. "**/*.ts". Defaults to "**/*". ' +
-                'Relative patterns are anchored at the workspace root. An absolute path, ' +
-                'folder, or glob can target outside the workspace.',
-            },
-            max_results: {
-              type: 'integer',
-              description: 'Maximum number of matching files to return. Defaults to 20.',
-            },
-          },
-          required: ['query'],
-          additionalProperties: false,
-        },
-      },
-    },
-    permission: 'read',
-    handler: async (args, context) => {
-      const query = args['query'] as string;
-      const literal = args['literal'] === true;
-      const include = (args['include'] as string | undefined) ?? '**/*';
-      const maxResults = (args['max_results'] as number | undefined) ?? 20;
-
-      let matches: SearchCodeMatch[];
-      try {
-        matches = await searchWorkspaceText(
-          query,
-          literal,
-          include,
-          maxResults,
-          resolveCommand(),
-          context?.abortSignal,
-        );
-      } catch (error) {
-        const message = error instanceof Error ? error.message : String(error);
-        if (/regex parse error/iu.test(message)) {
-          return `${message}\nEscape the special characters, or retry with literal: true.`;
-        }
-        throw error;
-      }
-      if (matches.length === 0) {
-        const mode = literal ? 'plain-text' : 'ripgrep-regex';
-        const scopeNote = path.isAbsolute(include)
-          ? ' (absolute include paths are searched from their named path)'
-          : ' (relative include globs are anchored at the workspace root)';
-        return (
-          `No matches found for "${query}" in ${include} ` +
-          `(${mode} search${scopeNote}).` +
-          gitignoredNote(include)
-        );
-      }
-
-      return capResultText(
-        renderSearchCodeMatches(
-          matches,
-          context?.outputLimits?.searchLines ?? DEFAULT_TOOL_OUTPUT_LIMITS.searchLines,
-        ),
-        MAX_SEARCH_RESULT_CHARS,
-        'search_code',
-        'Narrow the search with a more specific query or an `include` glob.',
-      );
-    },
-  };
-}
-
-async function searchWorkspaceText(
-  query: string,
-  literal: boolean,
-  include: string,
-  maxResults: number,
-  resolution: RipgrepResolution,
-  signal?: AbortSignal,
-): Promise<SearchCodeMatch[]> {
-  signal?.throwIfAborted();
-  const folder = vscode.workspace.workspaceFolders?.[0];
-  if (!folder) throw new Error('No workspace folder open.');
-
-  const scope = resolveSearchCodeScope(include, folder.uri.fsPath);
-  const args = [
-    '--json',
-    ...(literal ? ['--fixed-strings'] : []),
-    '--line-number',
-    '--with-filename',
-    '--context',
-    String(CONTEXT_LINES),
-    '--hidden',
-    // The ignore-file decision and the noise-directory decision are separate;
-    // `rgScopeArgs` is the single owner of both (audit F1, 2026-10-03).
-    ...rgScopeArgs(scope),
-    // Behind --regexp, so a query like `--new` is the pattern, not a flag rg refuses.
-    '--regexp',
-    query,
-    scope.target,
-  ];
-
-  return new Promise<SearchCodeMatch[]>((resolve, reject) => {
-    const matches = new Map<string, SearchCodeMatch>();
-    let stdoutBuffer = '';
-    let stderr = '';
-    let settled = false;
-    let terminatedEarly = false;
-
-    const child = spawn(resolution.command, [...(resolution.argsPrefix ?? []), ...args], {
-      cwd: folder.uri.fsPath,
-      shell: false,
-      stdio: ['ignore', 'pipe', 'pipe'],
-    });
-
-    const onAbort = (): void => {
-      child.kill();
-      finish(new Error('search_code: cancelled'));
-    };
-
-    const finish = (result: SearchCodeMatch[] | Error): void => {
-      if (settled) return;
-      settled = true;
-      signal?.removeEventListener('abort', onAbort);
-      if (result instanceof Error) reject(result);
-      else resolve(result);
-    };
-    signal?.addEventListener('abort', onAbort, { once: true });
-    if (signal?.aborted) onAbort();
-
-    const stopIfEnoughMatches = (): void => {
-      if (matches.size < maxResults || child.killed) return;
-      terminatedEarly = true;
-      child.kill();
-    };
-
-    const appendEvent = (event: RipgrepEvent): void => {
-      const data = isMatchEvent(event) ? event.data : isContextEvent(event) ? event.data : null;
-      if (!data) return;
-
-      const filePath = data.path?.text;
-      const line = data.lines?.text;
-      const lineNumber = data.line_number;
-      if (!filePath || line === undefined || lineNumber === undefined) return;
-
-      const normalizedPath = filePath.replace(/\\/g, '/').replace(/^\.\//, '');
-      let entry = matches.get(normalizedPath);
-      if (!entry) {
-        if (matches.size >= maxResults) {
-          stopIfEnoughMatches();
-          return;
-        }
-        entry = { path: normalizedPath, snippets: [], snippetMatches: [], omittedSnippets: 0 };
-        matches.set(normalizedPath, entry);
-      }
-
-      const isMatchingLine = isMatchEvent(event);
-      if (entry.snippets.length >= SNIPPETS_PER_FILE_LIMIT) {
-        if (isMatchingLine) entry.omittedSnippets += 1;
-        stopIfEnoughMatches();
-        return;
-      }
-      const marker = event.type === 'match' ? '>' : ' ';
-      // Cap before the dedupe check below, so two distinct cuts of the same
-      // giant line are still compared as the strings the model will receive.
-      const text = capSnippetLine(
-        line.replace(/\r?\n$/, ''),
-        isMatchEvent(event) ? event.data.submatches?.[0]?.start : undefined,
-      );
-      const snippet = `${marker} ${lineNumber}: ${text}`;
-      if (!entry.snippets.includes(snippet)) {
-        entry.snippets.push(snippet);
-        entry.snippetMatches.push(isMatchingLine);
-      }
-      stopIfEnoughMatches();
-    };
-
-    const flushStdout = (): void => {
-      const lines = stdoutBuffer.split(/\r?\n/);
-      stdoutBuffer = lines.pop() ?? '';
-      for (const line of lines) {
-        const trimmed = line.trim();
-        if (!trimmed) continue;
-        try {
-          appendEvent(JSON.parse(trimmed) as RipgrepEvent);
-        } catch {
-          // Ignore malformed rg output and continue parsing subsequent lines.
-        }
-      }
-    };
-
-    child.stdout?.on('data', (chunk: Buffer) => {
-      stdoutBuffer += chunk.toString('utf8');
-      flushStdout();
-    });
-    child.stderr?.on('data', (chunk: Buffer) => {
-      stderr += chunk.toString('utf8');
-    });
-    child.once('error', (err) => {
-      const attempted = resolution.candidates.length
-        ? resolution.candidates.join(', ')
-        : '(VS Code app root unavailable)';
-      finish(
-        new Error(
-          `search_code: failed to start ripgrep command "${resolution.command}": ${err.message}. ` +
-            `Bundled candidates checked: ${attempted}`,
-        ),
-      );
-    });
-    child.once('close', (code) => {
-      flushStdout();
-      if (stdoutBuffer.trim().length > 0) {
-        try {
-          appendEvent(JSON.parse(stdoutBuffer.trim()) as RipgrepEvent);
-        } catch {
-          // Ignore malformed trailing output.
-        }
-      }
-
-      if (settled) return;
-      if (terminatedEarly || code === 0 || code === 1) {
-        finish(Array.from(matches.values()));
-        return;
-      }
-
-      const detail = stderr.trim() || `ripgrep exited with code ${code}`;
-      finish(new Error(`search_code: ${detail}`));
-    });
-  });
 }

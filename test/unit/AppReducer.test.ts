@@ -16,6 +16,7 @@ interface AppModule {
     tabs: unknown[];
     history: unknown[];
     activeConversationId: string;
+    clankerByConversationId: Map<string, boolean>;
     activityView: 'grouped' | 'compact' | 'full';
     thinkingDisplay: 'preview' | 'open' | 'collapsed';
   };
@@ -44,6 +45,7 @@ interface AppModule {
       | { type: 'BACKEND_STARTING'; message: string; convId?: string }
       | { type: 'BACKEND_DOWN'; message: string; convId?: string }
       | { type: 'ACTIVITY_VIEW'; mode: 'grouped' | 'compact' | 'full' }
+      | { type: 'CLANKER_CHANGED'; enabled: boolean; conversationId: string }
       | { type: 'THINKING_DISPLAY'; mode: 'preview' | 'open' | 'collapsed' }
       | {
           type: 'SESSION_SYNC';
@@ -72,6 +74,7 @@ interface AppModule {
         },
   ) => AppModule['initialState'];
   selectCheckpointPending: (state: AppModule['initialState']) => boolean;
+  selectClankerActive: (state: AppModule['initialState']) => boolean;
 }
 
 let appModule: AppModule;
@@ -113,6 +116,37 @@ describe('webview App reducer', () => {
     expect(
       appModule.reducer(opened, { type: 'THINKING_DISPLAY', mode: 'open' }),
     ).toBe(opened);
+  });
+
+  it('keeps Clanker per chat: arming one tab leaves the others alone', () => {
+    const armed = appModule.reducer(appModule.initialState, {
+      type: 'CLANKER_CHANGED',
+      enabled: true,
+      conversationId: 'tab-1',
+    });
+    expect(armed.clankerByConversationId.get('tab-1')).toBe(true);
+    expect(armed.clankerByConversationId.has('tab-2')).toBe(false);
+    const both = appModule.reducer(armed, {
+      type: 'CLANKER_CHANGED',
+      enabled: true,
+      conversationId: 'tab-2',
+    });
+    expect(both.clankerByConversationId.get('tab-1')).toBe(true);
+    expect(both.clankerByConversationId.get('tab-2')).toBe(true);
+    // Off is the absence of an entry: a host that posts a chat's state again as off
+    // after a reload must clear it, not leave the tab looking armed.
+    const ungated = appModule.reducer(both, {
+      type: 'CLANKER_CHANGED',
+      enabled: false,
+      conversationId: 'tab-1',
+    });
+    expect(ungated.clankerByConversationId.has('tab-1')).toBe(false);
+    expect(ungated.clankerByConversationId.get('tab-2')).toBe(true);
+    // Which tab the owner is typing into is what the composer advertises.
+    expect(appModule.selectClankerActive({ ...ungated, activeConversationId: 'tab-1' })).toBe(
+      false,
+    );
+    expect(appModule.selectClankerActive({ ...ungated, activeConversationId: 'tab-2' })).toBe(true);
   });
 
   it('tracks command-started generation until completion', () => {

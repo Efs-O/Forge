@@ -50,6 +50,7 @@ export interface SdcppImageBackendConfig {
   extra_args: string[];
   confirm_on_start: boolean;
   confirm_each: boolean;
+  media_gpu_lease_enabled: boolean;
 }
 
 /** One `image_generation.backends[]` entry (validated by imageGenerationSchema.ts). */

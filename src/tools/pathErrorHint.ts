@@ -16,6 +16,9 @@ import * as vscode from 'vscode';
  */
 export function describePathMiss(tool: string, requestedPath: string, err: unknown): string {
   const message = err instanceof Error ? err.message : String(err);
+  if (tool === 'read_file' && /\bEISDIR\b/u.test(message)) {
+    return `${tool}: "${requestedPath}" is a directory, not a file. Use list_directory to see what is in it, or find_files to search it.`;
+  }
   if (!/\bENOENT\b/u.test(message)) return `${tool}: ${message}`;
   if (path.isAbsolute(requestedPath)) {
     // An absolute path is used as given; naming the workspace root here sent

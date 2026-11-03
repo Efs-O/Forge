@@ -3,6 +3,7 @@ import * as os from 'os';
 import * as path from 'path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { writeConfigSafely } from '../../src/config/ConfigWriter';
+import { setNestedField, setTopLevel, updateConfigFile } from '../../src/config/ConfigWriter';
 import { loadConfig } from '../../src/config/ConfigLoader';
 
 vi.mock('fs', async (importOriginal) => ({
@@ -88,5 +89,107 @@ describe('writeConfigSafely', () => {
       models: [], active_model: null, llama_server: {},
     })).toThrow();
     expect(fs.readFileSync(configPath, 'utf8')).toBe('original: true\n');
+  });
+});
+
+/**
+ * The two halves of the writer rule, taken from the 2026-10-27 `llama-updates`
+ * failure: a stale model reference must NOT block an unrelated write (the
+ * llama.cpp binary switch was refused because of a name that had been stale for
+ * weeks), but a write that CREATES one must be refused, because that is how the
+ * stale name got there in the first place.
+ */
+describe('model references and the write path', () => {
+  let directory: string;
+  let configPath: string;
+
+  const VALID_HEAD = `llama_server:
+  binary: /bin/llama-server
+models:
+  - name: keep
+    provider: llama.cpp
+    gguf_path: /models/keep.gguf
+  - name: keep-cloud
+    provider: openrouter
+    api_key_secret: test.ref
+active_model: keep
+`;
+
+  beforeEach(() => {
+    directory = fs.mkdtempSync(path.join(os.tmpdir(), 'forge-config-writer-refs-'));
+    configPath = path.join(directory, 'config.yaml');
+  });
+
+  afterEach(() => {
+    vi.restoreAllMocks();
+    fs.rmSync(directory, { recursive: true, force: true });
+  });
+
+  function seed(body: string): void {
+    fs.writeFileSync(configPath, `${VALID_HEAD}${body}`, 'utf8');
+  }
+
+  it('refuses a write that creates a new leftover and names the path', () => {
+    seed('');
+    expect(() =>
+      updateConfigFile(configPath, (doc) => {
+        setTopLevel(doc, 'jobs', { enabled: true, default_model: 'gone-jobs-model' });
+      }),
+    ).toThrow(/jobs\.default_model.*gone-jobs-model/s);
+    // Nothing was written: the refusal happens before the atomic write.
+    expect(fs.readFileSync(configPath, 'utf8')).toBe(`${VALID_HEAD}`);
+    expect(loadConfig(directory).jobs).toBeUndefined();
+  });
+  it('writes normally while a stale reference is already in the file', () => {
+    seed(`cloud_relay:
+  enabled: true
+  port: 8797
+  max_body_mb: 32
+  models:
+    - gone-model
+`);
+    // The stale name is tolerated on write exactly as it is on load, so the
+    // llama.cpp switch and every other config edit still work.
+    updateConfigFile(configPath, (doc) => {
+      setNestedField(doc, ['llama_server', 'binary'], '/bin/llama-server-new');
+    });
+    const raw = fs.readFileSync(configPath, 'utf8');
+    expect(raw).toContain('gone-model');
+    expect(raw).toContain('/bin/llama-server-new');
+    const config = loadConfig(directory);
+    expect(config.llama_server.binary).toBe('/bin/llama-server-new');
+    expect(config.cloud_relay?.models).toEqual(['gone-model']);
+  });
+
+  /** Re-pointing an alias at a different removed model creates a NEW leftover
+   *  (path plus value is its identity), so it is refused like any other. */
+  it('refuses re-pointing an alias at another removed model', () => {
+    seed(`aliases:
+  old: gone-model-1
+`);
+    expect(() =>
+      updateConfigFile(configPath, (doc) => {
+        setTopLevel(doc, 'aliases', { old: 'gone-model-2' });
+      }),
+    ).toThrow(/aliases\.old.*gone-model-2/s);
+    expect(fs.readFileSync(configPath, 'utf8')).toContain('gone-model-1');
+  });
+
+  it('refuses a write that would leave two models sharing a short_name', () => {
+    seed('');
+    expect(() =>
+      updateConfigFile(configPath, (doc) => {
+        setTopLevel(doc, 'models', [
+          { name: 'keep', provider: 'llama.cpp', gguf_path: '/models/keep.gguf', short_name: 'k' },
+          {
+            name: 'keep-cloud',
+            provider: 'openrouter',
+            api_key_secret: 'test.ref',
+            short_name: 'k',
+          },
+        ]);
+      }),
+    ).toThrow(/short_name "k" is used by both/s);
+    expect(fs.readFileSync(configPath, 'utf8')).toBe(VALID_HEAD);
   });
 });

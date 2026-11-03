@@ -25,17 +25,19 @@ import type { ContextBudgetPublisher } from './ContextBudgetPublisher';
 import type { ConversationTabs } from './ConversationTabs';
 import type { SendPipeline } from './SendPipeline';
 import { routeWebviewMessage } from './webviewMessageRouter';
-import { createWebviewSendAction } from './turnMirrorWiring';
-import { logWebviewDiagnostic } from './webviewDiagnostics';
+import { createProviderWebviewActions } from './providerWebviewActions';
+import { JobsPanelBridge } from './jobPanelUpdates';
+import { SessionContentSearch } from './sessionContentSearch';
+import type { JobStore } from '../jobs/JobStore';
 import {
-  buildModelsMessage,
-  buildFollowedSessionMetrics,
+  modelsMessageFor,
+  followedSessionMetricsFor,
   buildSessionSyncMessage,
 } from './sidebarPayloads';
-import { workspaceInfoMessage } from './workspaceInfo';
+import { workspaceInfoMessageForView } from './workspaceInfo';
+import { readHistoryPanelSize } from './historyPanelSizeStore';
 import { buildWebviewHtml, webviewResourceRoots } from './WebviewBuilder';
 import type { IndexManager } from '../search/IndexManager';
-import type { RequestChainLifecycle } from './RequestChainLifecycle';
 import type { ForgeHostFacade } from './ForgeHostFacade';
 import { createSidebarHostFacade } from './sidebarFacadeWiring';
 import { agentLinkFacadeDeps } from './agentLinkFacadeDeps';
@@ -44,14 +46,16 @@ import { ResidencyPoller } from './ResidencyPoller';
 import type { UserQuestionService } from './UserQuestionService';
 import type { UserNotificationService } from './UserNotificationService';
 import { createSidebarAgentAsk } from './sidebarAgentAsk';
+import type { StartAgentAsk } from '../agentLinks/pendingAgentAsks';
 import type { MidTurnTellDrain } from '../agent/MidTurnTellDrain';
 import { HiddenChatAlerts } from './hiddenChatAlerts';
 import type { SidebarPromptRouter } from './backgroundExitNotice';
-import { attachmentsRootUri, openAttachment } from './attachmentAccess';
+import { attachmentsRootUri } from './attachmentAccess';
 import { listMemoryKeys } from '../tools/memoryTools';
 import { retainSessionMemoryKeys } from './memorySnapshotLifecycle';
 import { WebviewQueueState } from './evictionGate';
-import { postActivityViewSetting, watchActivityViewConfiguration } from './activityViewSetting';
+import { watchActivityViewConfiguration } from './activityViewSetting';
+import { liveConversationIds } from './liveConversationIds';
 
 export type { SidebarProviderEvents };
 const RESIDENCY_POLL_MS = 1500;
@@ -68,13 +72,16 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
   private readonly budget: ContextBudgetPublisher;
   private readonly tabs: ConversationTabs;
   private readonly send: SendPipeline;
-  private readonly requestChains: RequestChainLifecycle;
   public readonly tellDrain: MidTurnTellDrain;
   private readonly promptRouter: SidebarPromptRouter;
   private readonly hostFacade: ForgeHostFacade;
   private readonly hiddenChatAlerts: HiddenChatAlerts;
   private readonly agentAsker: ReturnType<typeof createSidebarAgentAsk>;
+  private readonly jobsBridge: JobsPanelBridge | undefined;
+  /** The panel's content search: panel-scoped and released the same way (`sessionContentSearch.ts`). */
+  private readonly sessionSearch: SessionContentSearch;
   remoteEvictionQuery: ((conversationId: string) => boolean | undefined) | undefined;
+  remoteOriginQuery: ((conversationId: string) => string | undefined) | undefined;
   private readonly residency = new ResidencyPoller(
     () => this.pool.residencySignature(),
     () => this.postModels(),
@@ -102,6 +109,9 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
     cliSessions?: CliSessionRegistry,
     private readonly attachmentStore?: ChatAttachmentStore,
     private readonly historyArchive?: HistoryArchive,
+    private readonly jobsStore?: JobStore,
+    /** The store the history panel's saved size lives in; see `HistoryPanelSize.ts`. */
+    private readonly globalState?: vscode.Memento,
   ) {
     this.agentAsker = createSidebarAgentAsk({
       getConfig: () => this.config,
@@ -109,12 +119,10 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
       checkpoints: this.checkpoints,
       ...(this.workspaceRoot ? { workspaceRoot: this.workspaceRoot } : {}),
       persist: () => this.persistSession(),
+      onPendingChanged: () => this.tabs.refreshRetention(),
+      deliver: (text, id) => this.promptRouter.deliverChatMessage(text, id),
     });
-    this.sidebar = loadSidebarSession(
-      workspaceState,
-      historyArchive,
-      vscode.window.showWarningMessage,
-    );
+    this.sidebar = loadSidebarSession(workspaceState, historyArchive);
     retainSessionMemoryKeys(this.sidebar, listMemoryKeys(workspaceState));
     const runtime = wireSidebar(
       {
@@ -133,6 +141,7 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
         postSessionSync: () => this.postSessionSync(),
         postTokenBudget: () => this.postTokenBudget(),
         persistSession: (changedId) => this.persistSession(changedId),
+        persistSidebar: (next) => saveSidebarSession(workspaceState, next, historyArchive),
         persistActiveId: () => this.persistActiveId(),
         baseOf: (id) => this.baseOf(id),
         reindexCodebase: () => this.reindexCodebase(),
@@ -141,10 +150,10 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
         submitPrompt: (text) => this.submitPrompt(text),
         undo: () => this.undo(),
         keep: () => this.keep(),
-        rememberClankerMode: (on) => void this.workspaceState.update('forge.clankerMode', on),
         unloadModels: () => this.unloadModels(),
         unloadActiveModel: () => this.unloadConversationModel(),
         isConversationQueued: (id) => this.webviewQueue.isQueued(id),
+        isConversationDrafted: (id) => this.webviewQueue.isDraftBearing(id),
         remoteEvictionBlocks: (id) =>
           this.remoteEvictionQuery ? this.remoteEvictionQuery(id) : false,
       },
@@ -174,7 +183,6 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
     this.budget = runtime.budget;
     this.tabs = runtime.tabs;
     this.send = runtime.send;
-    this.requestChains = runtime.requestChains;
     this.tellDrain = runtime.tellDrain;
     this.promptRouter = runtime.promptRouter;
     this.hiddenChatAlerts = new HiddenChatAlerts({
@@ -191,7 +199,7 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
       pool,
       questions,
       notifications,
-      workspaceState,
+      persistConversation: (conversationId) => void this.persistSession(conversationId),
       interrupt: (conversationId) => this.promptRouter.interruptForSteering(conversationId),
       unloadModels: () => this.unloadModels(),
       restartModel: (modelName) => this.restartModel(modelName),
@@ -205,9 +213,26 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
         this.agentAsker.ask(conversationId, request, signal, onSessionLinked, onAccepted),
       cancelAgentAsk: (conversationId) => this.agentAsker.cancel(conversationId),
     });
+    // The sessions panel's Jobs section: one bridge, pushing only while a panel
+    // is open, reading the same store the scheduler and `manage_jobs` write.
+    this.jobsBridge = this.jobsStore
+      ? new JobsPanelBridge({
+          store: this.jobsStore,
+          getView: () => this.view,
+          hostFacade: () => this.hostFacade,
+        })
+      : undefined;
+    // The search box's other half: the host reads the transcripts the webview cannot.
+    this.sessionSearch = new SessionContentSearch({
+      getSidebar: () => this.sidebar,
+      getView: () => this.view,
+      ...(this.historyArchive ? { overflow: this.historyArchive.overflow } : {}),
+    });
     this.agentLoop.restoreSessionTimers(this.sidebar);
     this.persistSession();
   }
+
+  startConversationRetention = (): void => this.tabs.startRetention();
 
   resolveWebviewView(
     webviewView: vscode.WebviewView,
@@ -216,6 +241,7 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
   ): void {
     this.view = webviewView;
     this.webviewQueue.viewResolved();
+    this.tabs.refreshRetention();
     webviewView.webview.options = {
       enableScripts: true,
       localResourceRoots: webviewResourceRoots(this.extensionUri, this.attachmentStore?.rootPath),
@@ -233,6 +259,10 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
       if (this.view === webviewView) {
         this.view = undefined;
         this.webviewQueue.viewDisposed();
+        this.tabs.refreshRetention();
+        // The view that opened the Jobs panel is gone: its store listener,
+        // watchers and pending publish go with it.
+        this.jobsBridge?.dispose();
       }
       this.residency.stop();
     });
@@ -242,6 +272,7 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
   // ── Public API ────────────────────────────────────────────────────────────
   setRemoteStatus(status: { transports: string[]; paired: boolean }): void {
     this.remoteStatus = { transports: [...status.transports], paired: status.paired };
+    this.tabs.refreshRetention();
     this.post({ type: 'remoteStatus', ...this.remoteStatus });
   }
   /** Opens the active turn's changes in VS Code's native diff editor. */
@@ -280,7 +311,7 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
   deliverChatMessage: SidebarPromptRouter['deliverChatMessage'] = (text, id, steer) =>
     this.promptRouter.deliverChatMessage(text, id, steer);
 
-  sweepIdleConversations = (): void => this.tabs.sweepIdleConversations();
+  startAgentAsk: StartAgentAsk = (id, request) => this.agentAsker.start(id, request);
 
   clearChat(): void {
     this.tabs.clearActive();
@@ -342,12 +373,7 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
   // ── Internal ──────────────────────────────────────────────────────────────
 
   private postModels(): void {
-    const active = this.sidebar.conversations.find(
-      (conversation) => conversation.id === this.sidebar.activeConversationId,
-    );
-    this.post(
-      buildModelsMessage(this.config, this.pool, active?.active_model ?? this.config.active_model),
-    );
+    this.post(modelsMessageFor(this.sidebar, this.config, this.pool));
   }
   private remoteStatus: { transports: string[]; paired: boolean } = {
     transports: [],
@@ -362,12 +388,7 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
 
   postWorkspaceInfo(): void {
     const webview = this.view?.webview;
-    this.post(
-      workspaceInfoMessage(
-        this.workspaceRoot ?? '',
-        webview ? (uri) => webview.asWebviewUri(uri).toString() : undefined,
-      ),
-    );
+    this.post(workspaceInfoMessageForView(this.workspaceRoot ?? '', this.extensionUri, webview));
   }
 
   private postSessionSync(): void {
@@ -383,17 +404,16 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
           ...this.questions.pendingConversationIds(),
         ]),
         this.historyArchive?.overflow.list(),
+        readHistoryPanelSize(this.globalState),
+        (conversationId) => this.remoteOriginQuery?.(conversationId),
       ),
     );
+    this.tabs.refreshRetention();
   }
 
   /** Every conversation id the session can still reach, open or archived. */
   liveConversationIds(): string[] {
-    return [
-      ...this.sidebar.conversations.map((conversation) => conversation.id),
-      ...this.sidebar.history.map((conversation) => conversation.id),
-      ...(this.historyArchive?.overflow.list().map((conversation) => conversation.id) ?? []),
-    ];
+    return liveConversationIds(this.sidebar, this.historyArchive?.overflow.list() ?? []);
   }
 
   /** A forgotten workspace memory must also leave already-saved compaction snapshots. */
@@ -404,8 +424,8 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
     }
   }
 
-  private persistSession(changedId?: string): void {
-    saveSidebarSession(this.workspaceState, this.sidebar, this.historyArchive, changedId);
+  private persistSession(changedId?: string): Promise<boolean> {
+    return saveSidebarSession(this.workspaceState, this.sidebar, this.historyArchive, changedId);
   }
 
   /** Tab-switch persistence: one string, not the whole transcript blob. */
@@ -426,68 +446,51 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
   private getActive = (): ConversationRuntime => this.tabs.active();
 
   getSessionMetrics(followedId: string | undefined) {
-    return buildFollowedSessionMetrics(
-      this.sidebar,
-      this.getActive(),
-      followedId,
-      (conversation) => this.agentLoop.getSessionActiveMs(conversation),
-      (conversationId) => this.agentLoop.getLiveStream(conversationId),
-    );
+    return followedSessionMetricsFor(this.sidebar, this.getActive(), this.agentLoop, followedId);
   }
 
   private handleMessage(msg: WebviewToHost): void {
     routeWebviewMessage(
-      {
+      createProviderWebviewActions({
         post: (out) => this.post(out),
         postModels: () => this.postModels(),
         postSessionSync: () => this.postSessionSync(),
-        postActivityView: () => postActivityViewSetting((message) => this.post(message)),
         postTokenBudget: () => this.postTokenBudget(),
         postWorkspaceInfo: () => this.postWorkspaceInfo(),
-        isBackendReady: () => this.pool.isAnyReady(),
-        getClankerMode: () => this.agentLoop.getClankerMode(),
+        getView: () => this.view,
+        activeConversationId: () => this.sidebar.activeConversationId,
+        pool: this.pool,
+        tabs: this.tabs,
+        agentLoop: this.agentLoop,
+        questions: this.questions,
+        slashHandler: this.slashHandler,
+        promptRouter: this.promptRouter,
+        cancelAgentAsk: (id) => this.agentAsker.cancel(id),
+        webviewQueue: this.webviewQueue,
+        ...(this.attachmentStore ? { attachmentStore: this.attachmentStore } : {}),
+        hostFacade: () => this.hostFacade,
         getRemoteStatus: () => this.remoteStatus,
-        pendingQuestions: () => this.questions.pendingQuestions(),
-        pendingApproval: () => this.agentLoop.pendingApproval(),
-        send: createWebviewSendAction(
-          (event) => this.hostFacade.emitHostActivity?.(event),
-          () => this.sidebar.activeConversationId,
-          this.promptRouter.route.bind(this.promptRouter),
-        ),
-        cancelTell: (id, tellId) => this.promptRouter.cancelTell(id, tellId),
-        sendQueuedNow: (id, tellId) => this.promptRouter.sendQueuedNow(id, tellId),
-        cancel: () => {
-          this.requestChains.markCancelling(this.sidebar.activeConversationId);
-          void this.agentLoop.cancel(this.sidebar.activeConversationId);
-        },
-        answerQuestion: (id, answer) => this.questions.answerStructured(id, answer),
-        skipQuestion: (id) => this.questions.skip(id),
-        switchModel: (name) => this.tabs.pinModel(name),
+        jobsBridge: () => this.jobsBridge,
+        sessionSearch: () => this.sessionSearch,
+        globalState: () => this.globalState,
         undo: () => this.undo(),
         keep: () => this.keep(),
         reviewCheckpoint: () => this.reviewCheckpoint(),
         newConversation: () => void this.newConversation(),
-        switchConversation: (id) => this.tabs.switch(id),
-        closeConversation: (id) => void this.tabs.close(id),
-        restoreConversation: (id) => this.tabs.restore(id),
-        deleteConversation: (id) => void this.tabs.deleteConversation(id),
-        renameConversation: (id, title) => this.tabs.rename(id, title),
-        runSlashCommand: (id, agent) => void this.slashHandler.handle(id, agent),
-        openFile: (path, line, beside) => this.agentLoop.openFile(path, { line, beside }),
-        openAttachment: (relativePath) =>
-          openAttachment({ store: this.attachmentStore, view: () => this.view }, relativePath),
-        resolveConfirmation: (id, approved) => this.agentLoop.resolveConfirmation(id, approved),
-        recordWebviewDiagnostic: (message) => logWebviewDiagnostic(message),
-        queuedConversationIds: (ids) => this.webviewQueue.report(ids),
-      },
+      }),
       msg,
     );
   }
 
   async dispose(): Promise<void> {
+    // Whatever panel is open stops here: its store listener, its three watchers,
+    // its pending publish and its transcript walk must not outlive the extension.
+    this.jobsBridge?.dispose();
+    this.sessionSearch.dispose();
     this.promptRouter.dispose();
     this.hiddenChatAlerts.dispose();
     this.residency.stop();
+    this.tabs.disposeRetention();
     this.budget.dispose();
     this.review.dispose();
     await this.agentLoop.dispose();
