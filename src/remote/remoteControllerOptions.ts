@@ -54,6 +54,14 @@ export interface RemoteControllerOptions {
    * the phone. See `remoteWorkspacePreflight`.
    */
   workspacePreflight?: (alias: string, channel: string) => string | undefined;
+  /**
+   * The window files' phone surface: `/workspace windows`, its Close button,
+   * `/workspace cap`, and the check that refuses a `new-window` switch when
+   * there is no room for another window. Built once per window in
+   * `remoteRuntimeSetup.ts`, and read by the command layer only through this
+   * field, so no command module touches the filesystem or PowerShell itself.
+   */
+  windowSurface?: import('./RemoteWindowRegistry').RemoteWindowSurface | undefined;
   inactivityTimeoutMinutes?: number;
   /** Seconds to keep a recognized /command before deleting it from Telegram; 0/absent disables. */
   deleteCommandMessagesAfter?: number;
@@ -145,6 +153,8 @@ export interface RemoteControllerOptionsDeps {
   ) => Promise<() => Promise<void>>;
   /** The same preflight, with the alias resolved against the applied config. */
   workspacePreflight?: (config: ForgeConfig, alias: string, channel: string) => string | undefined;
+  /** The window files' phone surface, passed straight through to the command layer. */
+  windowSurface?: import('./RemoteWindowRegistry').RemoteWindowSurface | undefined;
   /**
    * The shared `JobStore` (B3), created once in extension.ts and passed to
    * both the scheduler and the `manage_jobs` tool. Stable across config
@@ -224,6 +234,7 @@ export function buildRemoteControllerOptions(
             deps.workspacePreflight!(config, alias, channel),
         }
       : {}),
+    ...(deps.windowSurface ? { windowSurface: deps.windowSurface } : {}),
     inactivityTimeoutMinutes: remote.auth.inactivity_timeout_minutes,
     deleteCommandMessagesAfter: remote.delete_command_messages_after,
     deleteCommandRepliesAfter: remote.delete_command_replies_after,

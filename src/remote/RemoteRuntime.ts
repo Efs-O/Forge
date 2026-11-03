@@ -11,14 +11,13 @@ import type { MidTurnDrainResult } from '../agent/MidTurnInbox';
 import { RemoteAuditLog } from './RemoteAuditLog';
 import { RemoteAttachmentStore } from './RemoteAttachmentStore';
 import { RemoteTransportManager } from './RemoteTransportManager';
-import {
-  buildRemoteControllerOptions,
-  transportNames,
-  type RemoteControllerOptionsDeps,
-} from './remoteControllerOptions';
+import { type RemoteControllerOptionsDeps } from './remoteControllerOptions';
 import { RemoteHandoffCoordinator } from './RemoteHandoffCoordinator';
 import { RemoteCompactionNoticeBuffers } from './compactionNoticeBuffer';
-import { voiceRuntimeSignature } from './voiceRuntimeSignature';
+import {
+  canUpdateTransportsInPlace,
+  updateActiveTransportOptions,
+} from './remoteRuntimeInPlaceUpdate';
 import { RemoteStartRetry } from './RemoteStartRetry';
 import {
   claimWorkspaceArrivals,
@@ -30,7 +29,7 @@ import {
   takeTransportsForRollback,
   type WorkspaceHandoffRuntimeDeps,
 } from './remoteWorkspaceSwitch';
-import { RemoteWindowWatch } from './RemoteWindowWatch';
+import { createRemoteWindowWatch, RemoteWindowWatch } from './RemoteWindowWatch';
 import { buildRemoteValidationStatus } from './remoteValidationStatus';
 import { sendRemoteWorkspaceFile } from './remoteFileDelivery';
 import {
@@ -140,20 +139,20 @@ export class RemoteRuntime {
       globalStoragePath: options.storageDirectory,
       userConfigFileSetting: () => options.userConfigFileSetting?.() ?? undefined,
       ...(options.openWorkspace ? { openWorkspace: options.openWorkspace } : {}),
+      ...(options.closeWindow ? { closeWindow: options.closeWindow } : {}),
+      ...(options.hasUnsavedEditors ? { hasUnsavedEditors: options.hasUnsavedEditors } : {}),
     };
-    this.windowWatch = new RemoteWindowWatch({
+    // The whole watch, deps included, is built in `RemoteWindowWatch.ts`: this
+    // file is at the ESLint line stop and the plan says the room for phase 3 has
+    // to come from extracting the runtime's bodies, not from widening them.
+    this.windowWatch = createRemoteWindowWatch({
+      handoff: this.handoff,
+      // Through the lifecycle chain, or a retry could interleave a second
+      // `startAll` over the active map and leak a lease.
+      serialize: (task) => this.enqueue(task),
       ...(options.handoffWatch?.pollIntervalMs
         ? { tickIntervalMs: options.handoffWatch.pollIntervalMs }
         : {}),
-      handoffPending: () => this.store.hasPendingWorkspaceHandoff(options.workspaceId),
-      // From disk, not from this window's copy — see `WindowWatchDeps.refreshHandoff`.
-      refreshHandoff: () => this.store.refresh(),
-      serving: () => this.manager.names().length > 0,
-      // Through the lifecycle chain, or a retry could interleave a second
-      // `startAll` over the active map and leak a lease.
-      retryClaim: (signal) => this.enqueue(() => claimWorkspaceArrivals(this.handoff, { signal })),
-      isDisposed: () => this.disposed,
-      notifyLocal: options.notifyLocal,
     });
   }
 
@@ -429,25 +428,16 @@ export class RemoteRuntime {
   }
 
   private canUpdateInPlace(config: ForgeConfig): boolean {
-    if (!this.appliedConfig || this.disposed) return false;
-    const configured = transportNames(config);
-    const active = this.manager.names();
-    return (
-      configured.length === active.length &&
-      configured.every((name, index) => name === active[index]) &&
-      voiceRuntimeSignature(config) === voiceRuntimeSignature(this.appliedConfig)
+    return canUpdateTransportsInPlace(
+      config,
+      this.appliedConfig,
+      this.disposed,
+      this.manager.names(),
     );
   }
 
   private updateActiveOptions(config: ForgeConfig): void {
-    if (!config.remote) return;
-    this.auth.updateSessionPolicy({
-      inactivityTimeoutMinutes: config.remote.auth.inactivity_timeout_minutes,
-    });
-    for (const transport of this.manager.values()) {
-      transport.controller.updateOptions(buildRemoteControllerOptions(config, this.deps));
-      transport.speech?.setEnabled(config.voice?.output?.enabled === true);
-    }
+    updateActiveTransportOptions(config, this.auth, this.manager.values(), this.deps);
   }
 
   private applySerializedStop(): Promise<void> {
@@ -495,6 +485,7 @@ export class RemoteRuntime {
       workspacePreflight: (config, alias, channel) =>
         switchWorkspacePreflight(this.handoff, { config, alias, channel }),
       ...(this.options.jobStore ? { jobsStore: this.options.jobStore } : {}),
+      ...(this.options.windowSurface ? { windowSurface: this.options.windowSurface } : {}),
     };
   }
 }

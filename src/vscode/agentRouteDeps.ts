@@ -89,10 +89,35 @@ export function buildAgentRouteDeps(hosts: AgentRouteDepsHosts): AgentRoutesDeps
     isFocused,
   } = hosts;
   const busAt = () => busPaths(home);
-  const readTarget = (from: string, sender?: AgentSender) => {
+  const readTarget = (from: string, sender?: AgentSender, conversationId?: string) => {
     const facade = getFacade();
     watch.attach(facade);
     const status = facade.status();
+    if (conversationId !== undefined) {
+      // `--to <id>` names a chat outright instead of asking which chat this
+      // session last addressed. Two things have to hold: the chat is open in
+      // this window, and this window's links tie it to the caller's own
+      // session. A caller that gives an id but no session identity has nothing
+      // to check the id against, so it is refused — reading another session's
+      // chat by guessing its id is exactly what a read route must not allow.
+      const conversation = status.conversations.find((item) => item.id === conversationId);
+      if (!conversation || conversation.archived) {
+        return {
+          ok: false as const,
+          status: 404 as const,
+          error: `Forge chat "${conversationId}" is no longer open`,
+        };
+      }
+      const link = sender ? facade.getAgentLink(conversationId, sender.kind) : undefined;
+      if (!sender || link?.sessionId !== sender.sessionId) {
+        return {
+          ok: false as const,
+          status: 404 as const,
+          error: `Forge chat "${conversationId}" is not linked to ${from}'s session`,
+        };
+      }
+      return { ok: true as const, facade, status, id: conversationId, conversation };
+    }
     const kind = agentKindSchema.safeParse(from.trim().toLowerCase());
     const linkedId = sender ? linkedAgentOwner(getFacade, sender) : undefined;
     const id =
@@ -194,15 +219,19 @@ export function buildAgentRouteDeps(hosts: AgentRouteDepsHosts): AgentRoutesDeps
         }),
       );
     },
-    status: (from, sender) => {
-      const target = readTarget(from, sender);
+    status: (from, sender, conversationId) => {
+      const target = readTarget(from, sender, conversationId);
       if (!target.ok) {
         // F3: the message is accepted and queued and has no open chat to show
         // yet (`--new` opens its own when it runs), so answer 200 with the
         // queue instead of the 404 that made `forge.sh wait` exit 1 on a queue
-        // it had just been told existed.
-        const queued = inbox.pendingFrom(from);
-        if (queued > 0) return { ok: true, text: renderQueuedStatus(queued) };
+        // it had just been told existed. Only for a sender with no chat named:
+        // the queue says nothing about the specific chat an explicit `--to`
+        // asked for, so that request keeps its 404.
+        if (conversationId === undefined) {
+          const queued = inbox.pendingFrom(from);
+          if (queued > 0) return { ok: true, text: renderQueuedStatus(queued) };
+        }
         return target;
       }
       return {
@@ -218,8 +247,8 @@ export function buildAgentRouteDeps(hosts: AgentRouteDepsHosts): AgentRoutesDeps
         }),
       };
     },
-    view: (from, count, sender) => {
-      const target = readTarget(from, sender);
+    view: (from, count, sender, conversationId) => {
+      const target = readTarget(from, sender, conversationId);
       if (!target.ok) return target;
       const requested = parseViewCount(count);
       if (requested.kind === 'invalid') {
@@ -233,15 +262,12 @@ export function buildAgentRouteDeps(hosts: AgentRouteDepsHosts): AgentRoutesDeps
         }),
       };
     },
-    sendFile: async (from, conversationId, filePath, caption) => {
-      const target = readTarget(from);
+    sendFile: async (from, sender, conversationId, filePath, caption) => {
+      // The chat is named, so it is checked against the sender's own session
+      // link — not against "the chat this sender last wrote to", which is a
+      // different chat the moment the session holds two of them.
+      const target = readTarget(from, sender, conversationId);
       if (!target.ok) return { kind: 'refused', error: target.error };
-      if (target.id !== conversationId) {
-        return {
-          kind: 'refused',
-          error: `The selected conversation does not match ${from}'s established Forge chat.`,
-        };
-      }
       const runtime = getRemoteRuntime();
       if (!runtime) {
         return {

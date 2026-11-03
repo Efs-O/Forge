@@ -2,13 +2,14 @@ import { z } from 'zod';
 import { codePointLength } from '../util/codePoints';
 import type { RemoteFileSendResult } from '../remote/types';
 import { agentSenderSchema, type AgentSender } from '../agentLinks/chatAgentLinks';
+import { ConversationIdSchema } from './agentMessageOptions';
 
 const AgentFileRequestSchema = z
   .object({
     from: z.string().trim().min(1).max(40),
     sender_kind: agentSenderSchema.shape.kind,
     sender_session_id: agentSenderSchema.shape.sessionId,
-    conversation_id: z.string().trim().min(1).max(128),
+    conversation_id: ConversationIdSchema,
     path: z
       .string()
       .min(1)
@@ -28,6 +29,7 @@ export interface AgentFileRouteDeps {
   ) => { ok: true } | { ok: false; error: string };
   sendFile: (
     from: string,
+    sender: AgentSender,
     conversationId: string,
     workspaceRelativePath: string,
     caption: string,
@@ -59,6 +61,7 @@ export async function handleAgentFileRoute(
   try {
     result = await deps.sendFile(
       request.from,
+      senderIdentity,
       request.conversation_id,
       request.path,
       request.caption ?? '',

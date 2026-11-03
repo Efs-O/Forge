@@ -287,9 +287,15 @@ overlaps with an existing owner, extend the owner instead.
 | Concern                                       | Owner                                           |
 | --------------------------------------------- | ----------------------------------------------- |
 | Extension-scoped transport lifecycle          | `src/remote/RemoteRuntime.ts`                   |
+| A config reload that keeps the transports up  | `src/remote/remoteRuntimeInPlaceUpdate.ts`      |
 | Transport start/stop, lease takeover          | `src/remote/RemoteTransportManager.ts`          |
 | Retry timer + policy for failed remote starts | `src/remote/RemoteStartRetry.ts`                |
 | `/workspace` move, run after the cursor save  | `src/remote/remoteWorkspaceSwitch.ts`           |
+| One window record per VS Code window, and the open-window count | `src/remote/RemoteWindowRegistry.ts`       |
+| Close-request/result files; a window deciding on its own Close | `src/remote/RemoteWindowClose.ts`               |
+| OS window count on Windows (`pwsh` + `Add-Type`, degrades to the files) | `src/remote/RemoteWindowsProbe.ts` |
+| `/workspace windows`, its `✕` per row, `/workspace cap` | `src/remote/remoteWorkspaceWindows.ts`   |
+| This window's 5 s watch: claim retry, come-back, close inbox | `src/remote/RemoteWindowWatch.ts`              |
 | Bound-chat workspace file delivery            | `src/remote/remoteFileDelivery.ts`              |
 | Remote transport validation status projection | `src/remote/remoteValidationStatus.ts`          |
 | Inbound admission, queue drain, notifications | `src/remote/RemoteController.ts`                |
@@ -873,7 +879,7 @@ the configured override stays the existing `video.ffmpeg_path` key.
 | Which chat an inbound bus message lands in (sender affinity) | `src/agentBus/busTarget.ts`                                    |
 | Plain-text bus status, queue and transcript answers      | `src/agentBus/busStatusView.ts`                                |
 | `/agent/message` + `/agent/reply` routes, endpoint.json    | `src/backend/agentRoutes.ts`                                   |
-| `GET /agent/status` + `GET /agent/view` — read the sender's own chat | `src/backend/agentChatReadRoute.ts`         |
+| `GET /agent/status` + `GET /agent/view` — read the sender's own chat, or one linked to its session | `src/backend/agentChatReadRoute.ts` |
 | Authenticated `/agent/send-file` route                    | `src/backend/agentFileRoute.ts`                                |
 | Agent-route request body parsing                           | `src/backend/agentRouteFields.ts`                              |
 | `/agent/reply` route — the answer to a question still waited on | `src/backend/agentReplyRoute.ts`                        |

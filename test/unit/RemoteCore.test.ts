@@ -187,6 +187,9 @@ describe('remote configuration and lease', () => {
         },
       },
       workspace_aliases: {},
+      // Phase 3's window cap: absent means 5, and the schema is what makes an
+      // out-of-range value a load error rather than a surprise at switch time.
+      workspace_switch: { max_open_windows: 5 },
       telegram: { enabled: true },
       whatsapp: { enabled: false },
     });
@@ -209,6 +212,26 @@ describe('remote configuration and lease', () => {
         remote: { enabled: true, delete_command_messages_after: 3601 },
       }).success,
     ).toBe(false);
+    // `remote.workspace_switch.max_open_windows` takes 1-12 and nothing else: a
+    // cap a typo could raise to 100 would stop meaning anything, and 0 would make
+    // every `new-window` switch impossible.
+    for (const allowed of [1, 5, 12]) {
+      const parsed = ForgeConfigSchema.safeParse({
+        models: [{ name: 'm', provider: 'ollama', endpoint: 'http://127.0.0.1:11434' }],
+        remote: { enabled: true, workspace_switch: { max_open_windows: allowed } },
+      });
+      expect(parsed.success).toBe(true);
+      if (parsed.success)
+        expect(parsed.data.remote.workspace_switch.max_open_windows).toBe(allowed);
+    }
+    for (const refused of [0, 13, 2.5]) {
+      expect(
+        ForgeConfigSchema.safeParse({
+          models: [{ name: 'm', provider: 'ollama', endpoint: 'http://127.0.0.1:11434' }],
+          remote: { enabled: true, workspace_switch: { max_open_windows: refused } },
+        }).success,
+      ).toBe(false);
+    }
   });
 
   it('allows one fenced owner and releases only its token', async () => {

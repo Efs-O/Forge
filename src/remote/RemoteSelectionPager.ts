@@ -45,6 +45,8 @@ export interface RemoteSelectionContext {
     | undefined;
   /** Checked before a tapped confirmation is acted on: see `remoteWorkspacePreflight`. */
   workspacePreflight?: (alias: string, channel: string) => string | undefined;
+  /** The window files' phone surface, so a `✕` tap on the window list can write its close-request. */
+  windowSurface?: import('./RemoteWindowRegistry').RemoteWindowSurface | undefined;
 }
 
 type TextEvent = Extract<RemoteInboundEvent, { kind: 'text' }>;

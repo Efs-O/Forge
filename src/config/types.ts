@@ -275,6 +275,13 @@ export interface ForgeConfig {
     };
     contacts: RemoteContactsConfig;
     workspace_aliases: Record<string, { path: string; display_name: string }>;
+    /**
+     * The `new-window` switch cap: how many VS Code windows a switch asked from
+     * the phone may leave open. 1-12, default 5. `replace` adds no window and an
+     * already-open folder is only focused, so this is checked for `new-window`
+     * alone — see `RemoteWindowRegistry.ts`.
+     */
+    workspace_switch: { max_open_windows: number };
     /** Private-LAN receiver for a paired always-on WakeSleep relay. */
     wake_relay?: { enabled: boolean; host: string; port: number; relay_ip: string };
     telegram: { enabled: boolean };

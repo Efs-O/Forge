@@ -17,6 +17,7 @@ import { handleRemotePowerCommand } from './RemotePowerCommands';
 import { handleRemoteJobCommand } from './RemoteJobCommands';
 import type { JobStore } from '../jobs/JobStore';
 import { switchWorkspaceCommand } from './remoteWorkspaceCommand';
+import { handleWorkspaceWindowsSubcommand } from './remoteWorkspaceWindows';
 import { handleRemoteSettingsCommand } from './remoteSettingsCommands';
 import { handleRemoteModelCommand } from './remoteModelCommands';
 import { editProgress } from './remoteCommandShared';
@@ -99,6 +100,14 @@ export interface RemoteCommandContext {
     | undefined;
   /** Checked before a switch is announced: see `remoteWorkspacePreflight`. */
   workspacePreflight?: (alias: string, channel: string) => string | undefined;
+  /**
+   * The window files' phone surface — `/workspace windows`, its `✕`,
+   * `/workspace cap`, and the check that refuses a `new-window` switch when
+   * there is no room. Owner-only: this context is reached behind
+   * `applyRemoteAuthGate`, so a locked chat never gets past its challenge and a
+   * contact never gets here at all.
+   */
+  windowSurface?: import('./RemoteWindowRegistry').RemoteWindowSurface | undefined;
   setInactivityTimeout?: ((minutes: number) => Promise<void>) | undefined;
   setRateLimit?: ((perMinute: number) => Promise<void>) | undefined;
   reloadWindow?: (() => Promise<void>) | undefined;
@@ -257,6 +266,17 @@ async function executeRemoteCommand(
     // as a no-op verb so the namespace stays open for the create/confirm
     // subcommands the remote plan has queued behind it.
     const [first, second] = operands;
+    // `windows`, `cap` and `close` are subcommands, so they are read before the
+    // argument is treated as a workspace — the same way `list` already is, and
+    // they cannot be alias names. `/workspace windows` cannot be a workspace
+    // called `windows`, and that is stated in the help text.
+    const windowsCommand = await handleWorkspaceWindowsSubcommand(
+      first === 'list' ? undefined : first,
+      second,
+      event,
+      context,
+    );
+    if (windowsCommand) return windowsCommand;
     const selector = first === 'list' ? second : first;
     if (selector === undefined) return sendWorkspaceSelection(event, context);
     // The word after the workspace is the answer to a busy refusal

@@ -14,6 +14,8 @@ import {
   runWorkspaceSwitch,
   takeWorkspaceConfirm,
 } from './remoteWorkspaceCommand';
+import { isWindowListSelection } from './RemoteWindowRegistry';
+import { requestWindowClose } from './remoteWorkspaceWindows';
 import type { RemoteInboundDisposition, RemoteInboundEvent } from './types';
 
 type SelectionEvent = Extract<RemoteInboundEvent, { kind: 'selection' }>;
@@ -34,6 +36,19 @@ export async function selectWorkspaceMode(
     return { kind: 'rejected', reason: 'workspace choice expired; run /workspace again' };
   }
   const mode = selection.values[event.choice]!;
+  // The same `workspaces` record carries two different keyboards: the three
+  // answers to a refused switch, and the rows of `/workspace windows`. A window
+  // id is `<pid>-<startMs>` and an alias has to start with a letter, so a tap on
+  // one can never be read as a tap on the other — which is why no new selection
+  // `kind` was needed, and an older window's parse still cannot throw.
+  if (isWindowListSelection(selection.values)) {
+    return requestWindowClose({
+      windowId: mode,
+      event,
+      context,
+      ...(context.windowSurface ? { surface: context.windowSurface } : {}),
+    });
+  }
   // The confirm keyboard replaced the numbered workspace list, so the alias it
   // was answering lives in the pending confirmation, not in these values.
   const pending = pendingWorkspaceAlias(event.channel, event.chatId);

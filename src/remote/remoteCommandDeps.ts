@@ -24,6 +24,7 @@ export function workspaceContextOf(
   | 'getApprovalPolicyLines'
   | 'switchWorkspace'
   | 'workspacePreflight'
+  | 'windowSurface'
 > {
   return {
     // The workspace this window has open: a `new-window` switch has to know
@@ -32,6 +33,7 @@ export function workspaceContextOf(
     // line stop and cannot take another field at its own call site.
     workspaceId: options.workspaceId,
     ...(options.workspacePreflight ? { workspacePreflight: options.workspacePreflight } : {}),
+    ...(options.windowSurface ? { windowSurface: options.windowSurface } : {}),
     ...(options.currentWorkspaceAlias
       ? { currentWorkspaceAlias: options.currentWorkspaceAlias }
       : {}),

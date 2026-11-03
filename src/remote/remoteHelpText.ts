@@ -95,9 +95,14 @@ export const REMOTE_HELP_SECTIONS: RemoteHelpSection[] = [
       { usage: '/workspace', summary: 'List configured workspaces.' },
       { usage: '/workspace <n-or-alias>', summary: 'Switch to a workspace.' },
       { usage: '/workspace <n-or-alias> replace|cancel', summary: 'Answer a busy refusal.' },
+      { usage: '/workspace windows', summary: 'List the open windows, with a ✕ per closable one.' },
+      { usage: '/workspace close <row>', summary: 'Ask one of those windows to close itself.' },
+      { usage: '/workspace cap [1-12]', summary: 'Show or set the new-window window limit.' },
     ],
     notes: [
       '/workspace lists the workspaces, numbers them, and says which one you are in; /workspace <n-or-alias> goes to one and continues its most recent conversation. The VS Code window reloads, so the chat goes quiet for a few seconds and the remote session does not survive it — expect to send your code again. While anything is running the switch is refused first: it stops that answer and moves your whole connection on this channel, so any other chat bound to this workspace is refused until someone switches back — answer with /workspace <n-or-alias> replace to go ahead or cancel to leave it alone, or tap the two choices. /new <n> still works as an alias',
+      '/workspace windows lists every VS Code window Forge can see, names the workspace each one has open, and puts ✕ on each window it may close; /workspace close <row> is the same request for a chat without choice buttons. Tapping ✕ asks that window to close itself — it refuses if it is answering your phone, has unsaved editors, or has a turn, job, delegated agent or approval running, and tells you either way within a minute. Forge never closes a window on its own initiative and never force-closes one',
+      '/workspace cap shows how many VS Code windows a new-window switch may leave open (default 5) and /workspace cap <1-12> sets it, saved to config.yaml. A switch asked when that many are open is refused until you close one, and the refusal says how many windows Forge counted and how many it cannot close. A replace switch and a folder that is already open are never refused for it. All three are owner-only and need an unlocked session, and the words windows, cap and close cannot name a workspace alias',
     ],
   },
   {

@@ -10,11 +10,12 @@
 #   forge.sh steer <your-name> <to> [--to <conversationId>] [file] forge: interrupt the running turn and run this next (--to only here); claude/codex/copilot: withdraw this chat's earlier ask to that agent and ask this instead
 #   forge.sh stop <your-name> [--to <conversationId>]  cancel a running Forge turn; queued messages may still start
 #   forge.sh cancel <your-name> <id|all>  withdraw your queued message(s) to Forge not yet started
-#   forge.sh who                      linked agent sessions held by Forge windows
-#   forge.sh status <your-name>       what your chat with Forge is doing now (tool, last words, context); before your first turn starts, your queue
-#   forge.sh view <your-name> [n]     the last n answers in your chat (default 3, max 10)
+#   forge.sh who                      every live Forge window's linked agent sessions, one row per linked chat
+#   forge.sh status <your-name> [--to <conversationId>]  what your chat with Forge is doing now (tool, last words, context); --to reads a chat linked to your session, and a chat that is not linked is refused by name; before your first turn starts, your queue
+#   forge.sh view <your-name> [n] [--to <conversationId>]  the last n answers in your chat (default 3, max 10); --to reads a chat linked to your session
 #   forge.sh wait <your-name> [minutes]  block until your chat is idle with nothing queued (default 60 min, exit 124 on timeout)
 #   Agent sessions identify themselves from their kind-specific session environment variable.
+#   Every verb that knows your session identity follows that session's link to the Forge window holding it, so a second window being focused does not send your read somewhere else; who reads every live window.
 #   --unattended means nobody is watching: dangerous tools are refused, other confirmations are auto-approved, ask_user is refused, and a Claude/Codex ask is refused unless jobs.allow_cli_agents is true.
 #   A say to a busy chat is read at its next tool round; its answer arrives when the turn ends; use steer only to stop the current work.
 #   A say with --unattended, --model or --new needs its own turn, so it waits until the running turn ends.
@@ -51,6 +52,32 @@ set_optional_sender_identity() {
     copilot) [ -n "${COPILOT_AGENT_SESSION_ID:-}" ] && set_sender_identity "$1";;
   esac
 }
+# Pick the window this request should go to, and set EP. The window holding this
+# session's link wins; else the one whose workspace holds the current folder
+# (longest root), so a new chat opens in the sender's repo; else endpoint.json,
+# the last focused window. A window that does not answer within 1s is skipped.
+# Every verb that knows the sender's identity calls this — reads included — so a
+# read never lands on a window that never held the session.
+resolve_endpoint() {
+  [ -n "$SENDER_KIND" ] || return 0
+  local HOLDER="" NEAREST="" NEAREST_LEN=0 SENDER_CWD="$PWD" WINDOW_EP WINDOW_URL WINDOW_TOKEN HELD MATCH
+  if command -v cygpath >/dev/null 2>&1; then SENDER_CWD="$(cygpath -w "$PWD")"
+  elif [ -n "${WSL_DISTRO_NAME:-}" ] && command -v wslpath >/dev/null 2>&1; then SENDER_CWD="$(wslpath -w "$PWD" 2>/dev/null || printf '%s' "$PWD")"; fi
+  for WINDOW_EP in "$ROOT"/endpoints/*.json; do
+    [ -f "$WINDOW_EP" ] || continue
+    WINDOW_URL="$(grep '"url"' "$WINDOW_EP" | cut -d'"' -f4)"
+    WINDOW_TOKEN="$(grep '"token"' "$WINDOW_EP" | cut -d'"' -f4)"
+    [ -n "$WINDOW_URL" ] && [ -n "$WINDOW_TOKEN" ] || continue
+    HELD="$(curl -sS --connect-timeout 1 --max-time 3 -G -H "Authorization: Bearer $WINDOW_TOKEN" --data-urlencode "kind=$SENDER_KIND" --data-urlencode "sessionId=$SENDER_ID" --data-urlencode "cwd=$SENDER_CWD" "$WINDOW_URL/agent/holds-link" 2>/dev/null)" || continue
+    case "$HELD" in *'"holdsLink":true'*)
+      [ -z "$HOLDER" ] || { echo "forge.sh: more than one live Forge window claims this session" >&2; exit 1; }
+      HOLDER="$WINDOW_EP";;
+    esac
+    MATCH="$(printf '%s' "$HELD" | sed -n 's/.*"cwdMatch":\([0-9][0-9]*\).*/\1/p')"
+    if [ -n "$MATCH" ] && [ "$MATCH" -gt "$NEAREST_LEN" ]; then NEAREST="$WINDOW_EP"; NEAREST_LEN="$MATCH"; fi
+  done
+  if [ -n "$HOLDER" ]; then EP="$HOLDER"; elif [ -n "$NEAREST" ]; then EP="$NEAREST"; fi
+}
 # Under WSL2 (NAT on Windows 10) 127.0.0.1 is the Linux VM, not Windows where
 # Forge listens; Windows' curl.exe (via interop) reaches Windows' loopback.
 # It cannot read /tmp, so @file bodies are translated with wslpath -w.
@@ -66,15 +93,38 @@ fi
 # who is a GET with no body: it prints linked sessions and exits before the body logic.
 if [ "$VERB" = "who" ]; then
   [ $# -le 1 ] || usage
-  [ -f "$EP" ] || { echo "forge.sh: not reachable: open Forge with control_server and agent_bus enabled" >&2; exit 1; }
-  URL="$(grep '"url"' "$EP" | cut -d'"' -f4)"
-  TOKEN="$(grep '"token"' "$EP" | cut -d'"' -f4)"
-  BODY="$(curl -sS --fail-with-body -X GET -H "Authorization: Bearer $TOKEN" "$URL/agent/who")" || { echo "forge.sh: Forge's endpoint did not accept it." >&2; exit 1; }
-  printf '%s\n' "$BODY" | sed 's/.*\[/[/;s/\].*//' | sed 's/},{/}\n{/g' | awk -F'"' '{
+  # Ask every window, not the focused one: endpoint.json is a single window's
+  # url, so `who` used to list one window's sessions while other windows held
+  # sessions of their own. A window that does not answer within 1s is skipped
+  # (the holder search skips it the same way). A row is printed once — keyed on
+  # the whole printed line, not on the session column, because one agent session
+  # can hold several Forge chats (977ffbed) and each linked chat is its own row
+  # with a different chat title; keying on the session column would hide every
+  # chat after the first. Only the same window answering twice repeats a line,
+  # which two endpoint files naming one live window can do. Nothing answering
+  # is a failure with a reason, never an empty success.
+  WHO_TMP="$(mktemp)"; trap 'rm -f "$WHO_TMP"' EXIT
+  : > "$WHO_TMP"
+  WHO_REACHED=0
+  WHO_ENDPOINTS=("$ROOT"/endpoints/*.json)
+  [ -f "${WHO_ENDPOINTS[0]}" ] || WHO_ENDPOINTS=("$EP")
+  for WHO_EP in "${WHO_ENDPOINTS[@]}"; do
+    [ -f "$WHO_EP" ] || continue
+    URL="$(grep '"url"' "$WHO_EP" | cut -d'"' -f4)"
+    TOKEN="$(grep '"token"' "$WHO_EP" | cut -d'"' -f4)"
+    [ -n "$URL" ] && [ -n "$TOKEN" ] || continue
+    BODY="$(curl -sS --connect-timeout 1 --max-time 3 --fail-with-body -X GET -H "Authorization: Bearer $TOKEN" "$URL/agent/who" 2>/dev/null)" || continue
+    WHO_REACHED=1
+    printf '%s\n' "$BODY" | sed 's/.*\[/[/;s/\].*//' | sed 's/},{/}\n{/g' >> "$WHO_TMP"
+  done
+  [ "$WHO_REACHED" = 1 ] || { echo "forge.sh: not reachable: open Forge with control_server and agent_bus enabled" >&2; exit 1; }
+  awk -F'"' '{
     s="";att="";act="";det=""
     for(i=1;i<=NF;i++){ if($i=="session")s=$(i+2); else if($i=="attachment")att=$(i+2); else if($i=="activity")act=$(i+2); else if($i=="detail")det=$(i+2) }
-    printf "%-8s  %-9s  %-9s  %s\n", s, att, act, det
-  }'
+    if (s == "") next
+    row=sprintf("%-8s  %-9s  %-9s  %s", s, att, act, det)
+    if (!seen[row]++) print row
+  }' "$WHO_TMP"
   exit 0
 fi
 if [ "$VERB" = "remote-notify" ] || [ "$VERB" = "remote-ask" ]; then
@@ -85,6 +135,7 @@ if [ "$VERB" = "remote-notify" ] || [ "$VERB" = "remote-ask" ]; then
   case "$EXCHANGE_ID" in ""|*[!a-f0-9-]*) echo "forge.sh: invalid exchange id" >&2; exit 2;; esac
   TMP="$(mktemp)"; trap 'rm -f "$TMP"' EXIT
   if [ "$SRC" = "-" ]; then cat > "$TMP"; else cp "$SRC" "$TMP" || exit 2; fi
+  resolve_endpoint
   [ -f "$EP" ] || { echo "forge.sh: Forge is not reachable" >&2; exit 1; }
   URL="$(grep '"url"' "$EP" | cut -d'"' -f4)"
   TOKEN="$(grep '"token"' "$EP" | cut -d'"' -f4)"
@@ -109,16 +160,29 @@ if [ "$VERB" = "remote-notify" ] || [ "$VERB" = "remote-ask" ]; then
   exit 124
 fi
 if [ "$VERB" = "status" ] || [ "$VERB" = "view" ]; then
-  NAME="${2:-}"; COUNT="${3:-}"
-  { [ "$VERB" = "status" ] && [ $# -eq 2 ]; } || { [ "$VERB" = "view" ] && [ $# -ge 2 ] && [ $# -le 3 ]; } || usage
+  NAME="${2:-}"; COUNT=""; READ_CONVERSATION_ID=""
+  [ $# -ge 2 ] || usage
+  shift 2
+  while [ $# -gt 0 ]; do
+    case "$1" in
+      --to) [ $# -ge 2 ] && [ -z "$READ_CONVERSATION_ID" ] || usage; READ_CONVERSATION_ID="$2"; shift 2;;
+      --*) usage;;
+      *) [ "$VERB" = "view" ] && [ -z "$COUNT" ] || usage; COUNT="$1"; shift;;
+    esac
+  done
+  # Only `view` takes a count, and it takes it once, wherever `--to` sits.
+  [ "$VERB" != "status" ] || [ -z "$COUNT" ] || usage
   case "$NAME" in ""|*[!A-Za-z0-9._-]*) echo "forge.sh: a name is letters, digits, . _ - only" >&2; exit 2;; esac
+  case "$READ_CONVERSATION_ID" in ""|*[!A-Za-z0-9._-]*) [ -z "$READ_CONVERSATION_ID" ] || { echo "forge.sh: bad conversation id '$READ_CONVERSATION_ID'" >&2; exit 2; };; esac
   set_optional_sender_identity "$NAME"
   QUERY="from=$NAME"
   [ -n "$SENDER_KIND" ] && QUERY="$QUERY&kind=$SENDER_KIND&sessionId=$SENDER_ID"
+  [ -z "$READ_CONVERSATION_ID" ] || QUERY="$QUERY&conversation_id=$READ_CONVERSATION_ID"
   if [ -n "$COUNT" ]; then
     case "$COUNT" in *[!0-9]*) echo "forge.sh: n is a number (1-10)" >&2; exit 2;; esac
     QUERY="$QUERY&count=$COUNT"
   fi
+  resolve_endpoint
   [ -f "$EP" ] || { echo "forge.sh: not reachable: open Forge with control_server and agent_bus enabled" >&2; exit 1; }
   URL="$(grep '"url"' "$EP" | cut -d'"' -f4)"
   TOKEN="$(grep '"token"' "$EP" | cut -d'"' -f4)"
@@ -132,6 +196,7 @@ if [ "$VERB" = "read-verdict" ] || [ "$VERB" = "ack-verdict" ]; then
   case "$NAME" in ""|*[!A-Za-z0-9._-]*) echo "forge.sh: invalid sender" >&2; exit 2;; esac
   case "$EXCHANGE_ID" in ""|*[!A-Za-z0-9_-]*) echo "forge.sh: invalid exchange id" >&2; exit 2;; esac
   set_sender_identity "$NAME"
+  resolve_endpoint
   [ -f "$EP" ] || { echo "forge.sh: not reachable: open Forge with control_server and agent_bus enabled" >&2; exit 1; }
   URL="$(grep '"url"' "$EP" | cut -d'"' -f4)"
   TOKEN="$(grep '"token"' "$EP" | cut -d'"' -f4)"
@@ -166,10 +231,14 @@ if [ "$VERB" = "wait" ]; then
     case "$MINUTES" in *[!0-9]*) echo "forge.sh: minutes is a positive whole number" >&2; exit 2;; esac
     [ "$MINUTES" -ge 1 ] || { echo "forge.sh: minutes is a positive whole number" >&2; exit 2; }
   fi
+  # The sender identity first, because the window to poll is chosen by the
+  # session link: reading endpoint.json before this would have polled whichever
+  # window happened to be focused, not the one holding this session's chat.
+  set_optional_sender_identity "$NAME"
+  resolve_endpoint
   [ -f "$EP" ] || { echo "forge.sh: not reachable: open Forge with control_server and agent_bus enabled" >&2; exit 1; }
   URL="$(grep '"url"' "$EP" | cut -d'"' -f4)"
   TOKEN="$(grep '"token"' "$EP" | cut -d'"' -f4)"
-  set_optional_sender_identity "$NAME"
   IDENTITY_ARGS=()
   if [ -n "$SENDER_KIND" ]; then
     IDENTITY_ARGS+=(--data-urlencode "kind=$SENDER_KIND" --data-urlencode "sessionId=$SENDER_ID")
@@ -251,6 +320,7 @@ if [ "$VERB" = "send-file" ]; then
     echo "forge.sh: caption file does not exist or is not a regular file" >&2
     exit 2
   fi
+  resolve_endpoint
   [ -f "$EP" ] || { echo "forge.sh: not reachable: open Forge with control_server and agent_bus enabled" >&2; exit 1; }
   URL="$(grep '"url"' "$EP" | cut -d'"' -f4)"
   TOKEN="$(grep '"token"' "$EP" | cut -d'"' -f4)"
@@ -351,28 +421,7 @@ case "$VERB" in
 esac
 TMP="$(mktemp)"; trap 'rm -f "$TMP"' EXIT
 if [ "$SRC" = "-" ]; then cat > "$TMP"; else cp "$SRC" "$TMP" || exit 2; fi
-if [ -n "$SENDER_KIND" ]; then
-  # The window holding this session's link wins; else the one whose workspace
-  # holds the current folder (longest root), so a new chat opens in the
-  # sender's repo; else endpoint.json, the last focused window.
-  HOLDER=""; NEAREST=""; NEAREST_LEN=0; SENDER_CWD="$PWD"
-  if command -v cygpath >/dev/null 2>&1; then SENDER_CWD="$(cygpath -w "$PWD")"
-  elif [ -n "${WSL_DISTRO_NAME:-}" ] && command -v wslpath >/dev/null 2>&1; then SENDER_CWD="$(wslpath -w "$PWD" 2>/dev/null || printf '%s' "$PWD")"; fi
-  for WINDOW_EP in "$ROOT"/endpoints/*.json; do
-    [ -f "$WINDOW_EP" ] || continue
-    WINDOW_URL="$(grep '"url"' "$WINDOW_EP" | cut -d'"' -f4)"
-    WINDOW_TOKEN="$(grep '"token"' "$WINDOW_EP" | cut -d'"' -f4)"
-    [ -n "$WINDOW_URL" ] && [ -n "$WINDOW_TOKEN" ] || continue
-    HELD="$(curl -sS --connect-timeout 1 --max-time 3 -G -H "Authorization: Bearer $WINDOW_TOKEN" --data-urlencode "kind=$SENDER_KIND" --data-urlencode "sessionId=$SENDER_ID" --data-urlencode "cwd=$SENDER_CWD" "$WINDOW_URL/agent/holds-link" 2>/dev/null)" || continue
-    case "$HELD" in *'"holdsLink":true'*)
-      [ -z "$HOLDER" ] || { echo "forge.sh: more than one live Forge window claims this session" >&2; exit 1; }
-      HOLDER="$WINDOW_EP";;
-    esac
-    MATCH="$(printf '%s' "$HELD" | sed -n 's/.*"cwdMatch":\([0-9][0-9]*\).*/\1/p')"
-    if [ -n "$MATCH" ] && [ "$MATCH" -gt "$NEAREST_LEN" ]; then NEAREST="$WINDOW_EP"; NEAREST_LEN="$MATCH"; fi
-  done
-  if [ -n "$HOLDER" ]; then EP="$HOLDER"; elif [ -n "$NEAREST" ]; then EP="$NEAREST"; fi
-fi
+resolve_endpoint
 if [ -f "$EP" ]; then
   URL="$(grep '"url"' "$EP" | cut -d'"' -f4)"
   TOKEN="$(grep '"token"' "$EP" | cut -d'"' -f4)"

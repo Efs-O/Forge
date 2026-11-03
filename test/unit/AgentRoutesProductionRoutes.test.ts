@@ -140,6 +140,8 @@ describe('the routes a production window registers', () => {
   let logPaths: ExchangeLogPaths;
   const cancelled = new Set<string>();
   const interrupted = new Set<string>();
+  /** Which chat a `/agent/send-file` actually delivered to, in call order. */
+  const sentTo: string[] = [];
 
   /** The window, as little of it as the routes actually touch: one chat, holding
    *  the sender's chat by title, streaming, with the two agent sessions the
@@ -177,6 +179,8 @@ describe('the routes a production window registers', () => {
   const queued = { count: 0, conversationId: undefined as string | undefined };
   let runningNewChat = false;
   let twoClaudeChats = false;
+  /** One closed chat, so `--to` has a chat that is named and gone. */
+  let archivedReadChat = false;
   const claudeBLink = { ...links.claude, sessionId: CLAUDE_SESSION_B, title: 'Claude B', lastUsedAt: 3 };
   const newChatLink = { ...links.claude, lastUsedAt: 2 };
   const fakeFacade = {
@@ -187,6 +191,17 @@ describe('the routes a production window registers', () => {
         ? [
             { id: 'claude-a', title: 'Untitled A', updatedAt: 2, activeModel: 'alpha' },
             { id: 'claude-b', title: 'Untitled B', updatedAt: 3, activeModel: 'alpha' },
+            ...(archivedReadChat
+              ? [
+                  {
+                    id: 'claude-c',
+                    title: 'Untitled C',
+                    updatedAt: 4,
+                    activeModel: 'alpha',
+                    archived: true,
+                  },
+                ]
+              : []),
           ]
         : [
         runningNewChat
@@ -252,7 +267,10 @@ describe('the routes a production window registers', () => {
       askRuntime,
       getRemoteRuntime: () =>
         ({
-          sendFileToConversation: async () => ({ kind: 'sent' }),
+          sendFileToConversation: async (conversationId: string) => {
+            sentTo.push(conversationId);
+            return { kind: 'sent' };
+          },
           remoteSessionAction: async (_from: string, _s: string, _id: string, action: string) =>
             action === 'ask' ? { kind: 'asked', questionId: 'q7' } : { kind: 'notified' },
         }) as never,
@@ -297,6 +315,8 @@ describe('the routes a production window registers', () => {
     queued.conversationId = undefined;
     runningNewChat = false;
     twoClaudeChats = false;
+    archivedReadChat = false;
+    sentTo.length = 0;
     // Exchange `x1`: asked by codex, answered, and its full answer retained —
     // the state a `read-verdict` is meant to find.
     for (const event of [
@@ -532,6 +552,119 @@ describe('the routes a production window registers', () => {
       headers: { Authorization: `Bearer ${token}` },
     });
     expect(mismatch.status).toBe(400);
+  });
+
+  it('status, view and send-file --to reach only a chat linked to the sender session', async () => {
+    // `--to <conversationId>` names a chat outright. It has to be one this
+    // window has open and one the caller's own session is linked to: otherwise
+    // a session holding two chats could read the other one's status, or drop a
+    // file into another session's chat.
+    const sendFileTo = (from: string, sessionId: string, conversationId: string) =>
+      fetch(`${base}/agent/send-file`, {
+        method: 'POST',
+        headers: {
+          Authorization: `Bearer ${token}`,
+          'Content-Type': 'application/x-www-form-urlencoded',
+        },
+        body: [
+          `from=${from}`,
+          `sender_kind=${from}`,
+          `sender_session_id=${sessionId}`,
+          `conversation_id=${conversationId}`,
+          'path=notes.txt',
+        ].join('&'),
+      });
+    const errorOf = async (response: Response) =>
+      ((await response.json()) as { error?: string }).error ?? '';
+
+    // In the one-chat fixture: the chat named is the chat delivered to.
+    const toOwn = await sendFileTo('codex', CODEX_SESSION, 'c1');
+    expect(toOwn.status).toBe(200);
+    expect(await toOwn.json()).toEqual({ sent: true });
+    expect(sentTo).toEqual(['c1']);
+
+    twoClaudeChats = true;
+    archivedReadChat = true;
+    rebuildIndex([
+      { id: 'claude-a', title: 'Untitled A', agentLinks: { claude: links.claude } },
+      { id: 'claude-b', title: 'Untitled B', agentLinks: { claude: claudeBLink } },
+    ]);
+    sentTo.length = 0;
+
+    const read = (
+      endpoint: 'status' | 'view',
+      sessionId: string | undefined,
+      conversationId: string,
+    ) =>
+      fetch(
+        `${base}/agent/${endpoint}?from=claude${
+          sessionId ? `&kind=claude&sessionId=${sessionId}` : ''
+        }&conversation_id=${encodeURIComponent(conversationId)}`,
+        { headers: { Authorization: `Bearer ${token}` } },
+      );
+
+    for (const endpoint of ['status', 'view'] as const) {
+      const linked = await read(endpoint, CLAUDE_SESSION, 'claude-a');
+      expect(linked.status).toBe(200);
+      expect(await linked.text()).toContain(
+        endpoint === 'status' ? 'Untitled A · claude-a' : 'No answers',
+      );
+
+      const otherSession = await read(endpoint, CLAUDE_SESSION, 'claude-b');
+      expect(otherSession.status).toBe(404);
+      const refusal = await errorOf(otherSession);
+      expect(refusal).toContain('claude-b');
+      expect(refusal).toContain("not linked to claude's session");
+
+      const otherLinked = await read(endpoint, CLAUDE_SESSION_B, 'claude-b');
+      expect(otherLinked.status).toBe(200);
+      expect(await otherLinked.text()).toContain(
+        endpoint === 'status' ? 'Untitled B · claude-b' : 'No answers',
+      );
+    }
+
+    // `send-file --to` sends to the chat it names, not to whichever chat this
+    // session last wrote to. `claude-a` is not the chat recency would pick for
+    // `claude` (that is `claude-b`), yet it is linked to this session, so it is
+    // accepted: the old "does not match your established chat" refusal is gone,
+    // because a session that holds two chats has two established chats.
+    const toSecond = await sendFileTo('claude', CLAUDE_SESSION, 'claude-a');
+    expect(toSecond.status).toBe(200);
+    expect(await toSecond.json()).toEqual({ sent: true });
+    expect(sentTo).toEqual(['claude-a']);
+
+    const toOtherSession = await sendFileTo('claude', CLAUDE_SESSION, 'claude-b');
+    expect(toOtherSession.status).toBe(409);
+    expect(await errorOf(toOtherSession)).toContain("not linked to claude's session");
+    expect(sentTo).toEqual(['claude-a']); // the refused send delivered nothing
+
+    // A closed chat is refused by name; an id that is not an id is a 400 naming
+    // the field, before any chat is read at all.
+    const gone = await read('status', CLAUDE_SESSION, 'claude-c');
+    expect(gone.status).toBe(404);
+    expect(await errorOf(gone)).toContain('claude-c');
+    const badId = await read('status', CLAUDE_SESSION, 'bad/chat');
+    expect(badId.status).toBe(400);
+    expect(await errorOf(badId)).toContain('conversation_id');
+
+    // A caller that names a chat but supplies no session identity has nothing
+    // to check the id against, so it is refused rather than trusted.
+    const noSession = await fetch(`${base}/agent/status?from=claude&conversation_id=claude-a`, {
+      headers: { Authorization: `Bearer ${token}` },
+    });
+    expect(noSession.status).toBe(404);
+    expect(await errorOf(noSession)).toContain('claude-a');
+
+    // The queue answer for a sender (audit F3) does not swallow an explicit
+    // `--to`: the queue says nothing about the specific chat the caller named.
+    queued.count = 2;
+    const unlinkedWhileQueued = await read('status', CLAUDE_SESSION, 'claude-b');
+    expect(unlinkedWhileQueued.status).toBe(404);
+    const queuedWithoutTarget = await fetch(`${base}/agent/status?from=carol`, {
+      headers: { Authorization: `Bearer ${token}` },
+    });
+    expect(queuedWithoutTarget.status).toBe(200);
+    expect(await queuedWithoutTarget.text()).toContain('State: queued');
   });
 
   it('refuses a sender name that is not a bus name, and a stranger reading a verdict', async () => {

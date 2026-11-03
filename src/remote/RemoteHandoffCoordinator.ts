@@ -118,6 +118,18 @@ export class RemoteHandoffCoordinator {
     );
   }
 
+  /** True while a rollback is armed: this window recorded a departure, stopped
+   *  its transports and released the lease, and is waiting for the window it
+   *  asked to be opened to take the chat. `RemoteWindowWatch` reads it so a
+   *  window that ran a `new-window` switch does not take the phone back one tick
+   *  after making it, which would leave a still-starting target with no lease to
+   *  take and turn a switch that would have worked into a reported failure.
+   *  Cleared by the rollback firing, by `rollbackNow`, and by `dispose()`, so the
+   *  gate can never outlive the switch it belongs to. */
+  isRollbackArmed(): boolean {
+    return this.rollbackTimer !== undefined;
+  }
+
   /** The same undo, without the wait: the folder could not be opened at all. */
   async rollbackNow(context: HandoffRollbackContext): Promise<void> {
     if (this.rollbackTimer) clearTimeout(this.rollbackTimer);

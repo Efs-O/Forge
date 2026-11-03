@@ -13,6 +13,8 @@ import { globalBusyReason, transportsBusyReason } from './remoteCommandShared';
 import { numberedSelectionMiss, resolveSelection } from './remoteCommandSelectors';
 import type { RemoteRequestStore } from './RemoteRequestStore';
 import { SELECTION_TTL_MS } from './RemoteSelectionConstants';
+import { WINDOW_LIST_NUMBER_REFUSAL } from './remoteWorkspaceWindows';
+import { isWindowListSelection, type RemoteWindowSurface } from './RemoteWindowRegistry';
 import type {
   RemoteChannel,
   RemoteInboundDisposition,
@@ -49,6 +51,12 @@ export interface WorkspaceSwitchContext {
    * `remoteWorkspacePreflight`.
    */
   workspacePreflight?: (alias: string, channel: string) => string | undefined;
+  /**
+   * What the cap check asks: how many windows are open, which of them Forge can
+   * close, and whether this alias is already open somewhere. Only `new-window`
+   * is checked, because only that mode can add a window.
+   */
+  windowSurface?: RemoteWindowSurface | undefined;
 }
 
 /**
@@ -151,6 +159,14 @@ export async function switchWorkspaceCommand(
   // called `replace` if one ever existed. An alias typed in full still works,
   // because that is how the verbs reach a transport without choice buttons.
   const stored = context.store.selection(event.channel, event.chatId, 'workspaces');
+  // A window list can sit in the same `workspaces` record as the alias list (a
+  // new selection `kind` would make an older window's parse throw), so a number
+  // typed now would resolve to a window id and be answered as a missing
+  // workspace. Refuse it as what it is: the list the person is looking at is not
+  // the one a number can pick a workspace from.
+  if (stored && isWindowListSelection(stored.values) && /^\d+$/u.test(selector)) {
+    return { kind: 'rejected', reason: WINDOW_LIST_NUMBER_REFUSAL };
+  }
   const modeRecord =
     !!stored &&
     stored.values.length === WORKSPACE_MODE_VALUES.length &&
@@ -375,6 +391,15 @@ export async function runWorkspaceSwitch(
   // the chat and never speak again.
   const refused = context.workspacePreflight?.(alias, channel);
   if (refused) return { kind: 'rejected', reason: refused };
+  // The cap, asked before anything is promised: `replace` adds no window and a
+  // folder that is already open only gets focused, so this is checked for
+  // `new-window` alone, and the surface itself declines to refuse an already-open
+  // target. It is a soft limit — the OS count trails a window that was just
+  // opened — so two quick switches can both pass it.
+  if (mode === 'new-window' && context.windowSurface) {
+    const overCap = await context.windowSurface.capRefusal(alias);
+    if (overCap) return { kind: 'rejected', reason: overCap };
+  }
   pendingConfirms.delete(confirmKey(channel, chatId));
   // Says what the silence that follows means, and says it differently per mode:
   // in `replace` the VS Code window reloads, so this chat hears nothing until

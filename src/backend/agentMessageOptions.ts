@@ -2,7 +2,18 @@ import { z } from 'zod';
 import type { InboxMessageOptions } from '../agentBus/agentInbox';
 import { AgentRouteHttpError, type AgentRouteFields } from './agentRouteFields';
 
-const ConversationIdSchema = z.string().trim().min(1).max(128);
+/** The one contract every bus conversation id has to meet, whether it comes
+ *  from `--to` on a message, `origin_conversation`, `send-file` or a read
+ *  route's `conversation_id`. The character class is the set `forge.sh` already
+ *  checks before it puts an id in a query string, so the shell can never send
+ *  an id this server would refuse; a hand-built HTTP request that does gets a
+ *  400 naming the field instead of a 404 for a chat that never existed. */
+export const ConversationIdSchema = z
+  .string()
+  .trim()
+  .min(1)
+  .max(128)
+  .regex(/^[A-Za-z0-9._-]+$/u, 'must be 1-128 chars: letters, digits, . _ -');
 
 const AgentMessageOptionsSchema = z
   .object({
@@ -53,6 +64,19 @@ export function parseOriginConversation(fields: AgentRouteFields): string | unde
   const parsed = ConversationIdSchema.safeParse(raw);
   if (!parsed.success) {
     throw new AgentRouteHttpError(400, `origin_conversation: ${zodMessage(parsed.error)}`);
+  }
+  return parsed.data;
+}
+
+/** A `conversation_id` a read route was handed: absent means "the chat this
+ *  session last addressed" and is not an error; present but malformed is a 400
+ *  naming the field, so a caller that mistypes an id reads its own answer
+ *  instead of a 404 for a chat that never existed. */
+export function parseReadConversationId(raw: string | null): string | undefined {
+  if (raw === null) return undefined;
+  const parsed = ConversationIdSchema.safeParse(raw);
+  if (!parsed.success) {
+    throw new AgentRouteHttpError(400, `conversation_id: ${zodMessage(parsed.error)}`);
   }
   return parsed.data;
 }

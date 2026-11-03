@@ -39,6 +39,9 @@ function watchFixture(overrides: Partial<Parameters<typeof RemoteWindowWatch>[0]
   const disposed = { value: false };
   const notified: string[] = [];
   const refreshes = { count: 0 };
+  const claims: AbortSignal[] = [];
+  const comeBacks: AbortSignal[] = [];
+  const waitingForTargetWindow = { value: false };
   const watch = new RemoteWindowWatch({
     tickIntervalMs: TICK_MS,
     handoffPending: () => pending.value,
@@ -46,14 +49,31 @@ function watchFixture(overrides: Partial<Parameters<typeof RemoteWindowWatch>[0]
       refreshes.count += 1;
     },
     serving: () => serving.value,
+    waitingForTargetWindow: () => waitingForTargetWindow.value,
+    retryClaim: async (signal) => {
+      claims.push(signal);
+    },
+    comeBack: async (signal) => {
+      comeBacks.push(signal);
+    },
     isDisposed: () => disposed.value,
     notifyLocal: (message) => notified.push(message),
     ...overrides,
   });
-  return { watch, pending, serving, disposed, notified, refreshes };
+  return {
+    watch,
+    pending,
+    serving,
+    disposed,
+    notified,
+    refreshes,
+    claims,
+    comeBacks,
+    waitingForTargetWindow,
+  };
 }
 
-describe('RemoteWindowWatch', () => {
+describe('RemoteWindowWatch', { timeout: 30_000 }, () => {
   it('retries the claim while a handoff is pending and this window is not serving', async () => {
     const calls: AbortSignal[] = [];
     const fixture = watchFixture({
@@ -67,7 +87,7 @@ describe('RemoteWindowWatch', () => {
     fixture.watch.dispose();
   });
 
-  it('does nothing when nothing is waiting, or when this window already serves', async () => {
+  it('does not retry a claim when nothing is waiting, and does nothing when this window already serves', async () => {
     const calls: AbortSignal[] = [];
     const fixture = watchFixture({
       retryClaim: async (signal) => {
@@ -76,13 +96,25 @@ describe('RemoteWindowWatch', () => {
     });
     fixture.pending.value = false;
     fixture.watch.start();
-    await new Promise((resolve) => setTimeout(resolve, SETTLE_MS));
+    // A generous budget, not a weaker claim: under a loaded full-suite run this
+    // window's 20 ms tick can lag by seconds, and a come-back that has not
+    // started yet is indistinguishable from one that never will.
+    await vi.waitFor(() => expect(fixture.comeBacks.length).toBeGreaterThan(0), {
+      timeout: 5_000,
+    });
+    // Nothing was handed here, so no claim retry — but the window is not
+    // serving either, and phase 3 makes that a reason to try the transports
+    // back on its own account, so the come-back is what runs instead.
     expect(calls).toHaveLength(0);
 
     fixture.pending.value = true;
     fixture.serving.value = true;
+    const comeBacksSoFar = fixture.comeBacks.length;
     await new Promise((resolve) => setTimeout(resolve, SETTLE_MS));
     expect(calls).toHaveLength(0);
+    // Serving is the whole reason the watch exists to begin with: a window that
+    // is answering the phone takes no lease and starts nothing.
+    expect(fixture.comeBacks).toHaveLength(comeBacksSoFar);
     fixture.watch.dispose();
   });
 
@@ -313,5 +345,278 @@ describe('RemoteWindowWatch', () => {
       fixture.watch.dispose();
       await fs.rm(directory, { recursive: true, force: true });
     }
+  });
+
+  /**
+   * Phase 3's first criterion: a window that is not serving and has nothing
+   * handed to it is still a window that could serve, and this watch is the only
+   * thing that still tries. The window that used to answer the phone closed,
+   * its lease went stale at the 20 s horizon, and without this branch the chat
+   * is silent until somebody reloads — which is what `RemoteStartRetry` has
+   * always assumed, because it treats a lease refusal as "not mine to serve".
+   */
+  it('tries to come back into service when nothing was handed here', async () => {
+    const fixture = watchFixture();
+    fixture.pending.value = false;
+    fixture.watch.start();
+    await vi.waitFor(() => expect(fixture.comeBacks.length).toBeGreaterThan(0), {
+      timeout: 5_000,
+    });
+    expect(fixture.comeBacks[0]).toBeInstanceOf(AbortSignal);
+    // A claim retry is not the same thing and must not run: there is no record
+    // here, so a 90 s claim wait would be a wait for a chat that is not coming.
+    expect(fixture.claims).toHaveLength(0);
+    expect(fixture.notified).toEqual([]);
+    fixture.watch.dispose();
+  });
+
+  /** This repo's first question, asked of the new wait: what cancels it, and is
+   *  that path tested? A come-back has no record, so the record check must not
+   *  cancel it — otherwise a window merely waiting for a lease has its attempt
+   *  thrown away every tick and never takes one. `dispose()` is what cancels
+   *  it, and its own 2 s deadline bounds it; one may be in flight at a time.
+   */
+  it('runs one come-back at a time, keeps it out of the record check, and cancels it on dispose', async () => {
+    const signals: AbortSignal[] = [];
+    const fixture = watchFixture({
+      comeBack: (signal) =>
+        new Promise<void>((resolve) => {
+          signals.push(signal);
+          signal.addEventListener('abort', () => resolve(), { once: true });
+        }),
+    });
+    fixture.pending.value = false;
+    fixture.watch.start();
+    await vi.waitFor(() => expect(signals.length).toBe(1), { timeout: 5_000 });
+    expect(signals[0]?.aborted).toBe(false);
+    // Many ticks pass with the attempt in flight: exactly one may be running,
+    // and none of them reads the state file for a record that does not exist.
+    await new Promise((resolve) => setTimeout(resolve, SETTLE_MS));
+    expect(signals).toHaveLength(1);
+    expect(fixture.refreshes.count).toBe(0);
+    expect(signals[0]?.aborted).toBe(false);
+    expect(fixture.notified).toEqual([]);
+    fixture.watch.dispose();
+    expect(signals[0]?.aborted).toBe(true);
+    await new Promise((resolve) => setTimeout(resolve, SETTLE_MS));
+    expect(signals).toHaveLength(1);
+  });
+
+  /** A come-back that fails for a real reason is still worth saying once: the
+   *  next tick will try again, and a window that cannot start its transports
+   *  for a reason that is not a lease must not be invisible. A lease refusal
+   *  never reaches this message — `comeBackIntoService` swallows it. */
+  it('reports a failed come-back once and keeps trying', async () => {
+    let attempt = 0;
+    const fixture = watchFixture({
+      comeBack: async () => {
+        attempt += 1;
+        if (attempt === 1) throw new Error('the transport factory is unavailable');
+      },
+    });
+    fixture.pending.value = false;
+    fixture.watch.start();
+    await vi.waitFor(() =>
+      expect(fixture.notified).toEqual([
+        'Forge remote could not come back into service: the transport factory is unavailable',
+      ]),
+      { timeout: 5_000 },
+    );
+    await vi.waitFor(() => expect(attempt).toBeGreaterThan(1), { timeout: 5_000 });
+    fixture.watch.dispose();
+  });
+
+  /**
+   * The come-back's one gate, and the defect it prevents: this window ran a
+   * `new-window` switch, so it stopped its transports and released the lease on
+   * purpose, and it is waiting for the window it asked to be opened to claim the
+   * chat. Taking the free lease one tick after that switch would leave a cold
+   * target — 73 s open→activation, measured in phase 0 — unable to get the
+   * phone at all, and the switch would fail and be undone for a move that would
+   * have worked. The armed rollback, not this watch, owns that window's
+   * silence, and it clears itself: it fires, or the target claims and this
+   * window's next attempt is refused by a live lease.
+   */
+  it('waits for the window it asked to be opened instead of taking the phone back', async () => {
+    const fixture = watchFixture();
+    fixture.pending.value = false;
+    fixture.waitingForTargetWindow.value = true;
+    fixture.watch.start();
+    await new Promise((resolve) => setTimeout(resolve, SETTLE_MS));
+    // No lease work at all: not a come-back, not a claim, and not even a disk
+    // read for a record that is not coming here.
+    expect(fixture.comeBacks).toHaveLength(0);
+    expect(fixture.claims).toHaveLength(0);
+    expect(fixture.refreshes.count).toBe(0);
+    expect(fixture.notified).toEqual([]);
+    // A chat handed **here** still outranks the wait: that record is this
+    // window's own claim, while the switch it asked for is addressed to another
+    // window, so a pending record must never be traded away for the come-back.
+    fixture.pending.value = true;
+    await vi.waitFor(() => expect(fixture.claims.length).toBeGreaterThan(0), {
+      timeout: 5_000,
+    });
+    // The wait is over — the rollback fired, or the target took the chat — and
+    // this window is back in the contest for the phone.
+    fixture.pending.value = false;
+    fixture.waitingForTargetWindow.value = false;
+    await vi.waitFor(() => expect(fixture.comeBacks.length).toBeGreaterThan(0), {
+      timeout: 5_000,
+    });
+    fixture.watch.dispose();
+  });
+
+  /** A come-back that keeps failing must not turn into an error toast every five
+   *  seconds for as long as the window is open: `notifyLocal` is
+   *  `showErrorMessage`, and a transport that cannot start — a missing token,
+   *  say — fails identically on every tick, forever. Say it once; a different
+   *  failure is still new information and is still said.
+   */
+  it('says the same failure once, not once per tick', async () => {
+    let attempts = 0;
+    const fixture = watchFixture({
+      comeBack: async () => {
+        attempts += 1;
+        throw new Error('the transport factory is unavailable');
+      },
+      retryClaim: async () => {
+        throw new Error('the transport factory is unavailable');
+      },
+    });
+    fixture.pending.value = false;
+    fixture.watch.start();
+    await new Promise((resolve) => setTimeout(resolve, SETTLE_MS));
+    // Repeated, and reported once: the retrying is the point, the toast is not.
+    await vi.waitFor(() => expect(attempts).toBeGreaterThan(1), { timeout: 5_000 });
+    expect(fixture.notified).toEqual([
+      'Forge remote could not come back into service: the transport factory is unavailable',
+    ]);
+    // A different failure — here, the same window's claim path — is still worth
+    // hearing, so it is said too rather than swallowed by the de-duplication.
+    fixture.pending.value = true;
+    await vi.waitFor(
+      () =>
+        expect(fixture.notified).toEqual([
+          'Forge remote could not come back into service: the transport factory is unavailable',
+          'Forge remote could not claim an arriving chat: the transport factory is unavailable',
+        ]),
+      { timeout: 5_000 },
+    );
+    fixture.watch.dispose();
+  });
+});
+
+/**
+ * Phase 3's other half of the same timer: the window's own close inbox, and the
+ * outcomes it has to carry for windows that could not message the phone. The
+ * question this section answers is the one the plan asks of every new wait —
+ * `dispose()` has to clear the close read as well as the claim retry, and a
+ * window that is not serving must not try to send anything.
+ */
+describe('RemoteWindowWatch close inbox', { timeout: 30_000 }, () => {
+  it('reads its own close-request every tick, serving or not', async () => {
+    const reads: AbortSignal[] = [];
+    const fixture = watchFixture({
+      readCloseRequest: async (signal) => {
+        reads.push(signal);
+      },
+    });
+    // This window is answering the phone, which is exactly when a phone Close
+    // arrives at the wrong window: it still has to read its own inbox to refuse
+    // it, or the phone would sit waiting for a minute for nothing.
+    fixture.serving.value = true;
+    fixture.watch.start();
+    await vi.waitFor(() => expect(reads.length).toBeGreaterThan(1), { timeout: 5_000 });
+    expect(reads[0]).toBeInstanceOf(AbortSignal);
+    fixture.watch.dispose();
+  });
+
+  it('reports close outcomes only while this window holds the lease', async () => {
+    const reports: AbortSignal[] = [];
+    const fixture = watchFixture({
+      reportCloseResults: async (signal) => {
+        reports.push(signal);
+      },
+    });
+    fixture.watch.start();
+    await new Promise((resolve) => setTimeout(resolve, SETTLE_MS));
+    // Not serving: reading and sending the phone's messages is the serving
+    // window's job, which is why an outcome is a file instead of a send.
+    expect(reports).toHaveLength(0);
+    fixture.serving.value = true;
+    await vi.waitFor(() => expect(reports.length).toBeGreaterThan(0), { timeout: 5_000 });
+    fixture.watch.dispose();
+  });
+
+  it('cancels a close read in flight and never reads again after dispose', async () => {
+    const reads: AbortSignal[] = [];
+    const fixture = watchFixture({
+      // A read that only ends when its signal aborts: a window the phone asked
+      // to close, deciding, while the window itself goes away.
+      readCloseRequest: (signal) =>
+        new Promise<void>((resolve) => {
+          reads.push(signal);
+          signal.addEventListener('abort', () => resolve(), { once: true });
+        }),
+    });
+    fixture.watch.start();
+    await vi.waitFor(() => expect(reads.length).toBeGreaterThan(0), { timeout: 5_000 });
+    expect(reads[0]!.aborted).toBe(false);
+    fixture.watch.dispose();
+    expect(reads[0]!.aborted).toBe(true);
+    const whileShuttingDown = reads.length;
+    await new Promise((resolve) => setTimeout(resolve, SETTLE_MS));
+    // No new reads, because the interval is gone: a close cannot happen after
+    // `dispose()` on a window that is already closing.
+    expect(reads).toHaveLength(whileShuttingDown);
+  });
+
+  it('does not starve a close request behind a claim retry in flight', async () => {
+    const claims: AbortSignal[] = [];
+    const closeReads: AbortSignal[] = [];
+    let releaseClaim: () => void = () => undefined;
+    const claim = new Promise<void>((resolve) => {
+      releaseClaim = resolve;
+    });
+    const fixture = watchFixture({
+      retryClaim: async (signal) => {
+        claims.push(signal);
+        await claim;
+      },
+      readCloseRequest: async () => {
+        closeReads.push(new AbortController().signal);
+      },
+    });
+    fixture.pending.value = true;
+    fixture.watch.start();
+    await vi.waitFor(() => expect(claims.length).toBe(1), { timeout: 5_000 });
+    await new Promise((resolve) => setTimeout(resolve, SETTLE_MS));
+    // One attempt is still in flight, and only one: the watch is single-flight on
+    // its own account, because `takeOver` runs past the 20 s stale horizon.
+    expect(claims.length).toBe(1);
+    // The inbox kept being read on the later ticks anyway: a window the phone
+    // asked to close must not wait out another window's lease contest to answer.
+    expect(closeReads.length).toBeGreaterThan(1);
+    releaseClaim();
+    fixture.pending.value = false;
+    fixture.watch.dispose();
+  });
+
+  it('says an inbox failure once, the way it says every other repeating failure', async () => {
+    let attempts = 0;
+    const fixture = watchFixture({
+      readCloseRequest: async () => {
+        attempts += 1;
+        throw new Error('the window folder is unreadable');
+      },
+    });
+    fixture.pending.value = false;
+    fixture.serving.value = true;
+    fixture.watch.start();
+    await vi.waitFor(() => expect(attempts).toBeGreaterThan(1), { timeout: 5_000 });
+    expect(fixture.notified).toEqual([
+      'Forge remote could not act on a window request: the window folder is unreadable',
+    ]);
+    fixture.watch.dispose();
   });
 });

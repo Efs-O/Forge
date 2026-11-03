@@ -426,6 +426,17 @@ export interface RemoteRuntimeOptions {
   reloadWindow?: (() => Promise<void>) | undefined;
   openWorkspace?: ((directory: string, forceNewWindow: boolean) => Promise<void>) | undefined;
   /**
+   * The window files' phone surface (`/workspace windows`, the Close button, and
+   * the `new-window` cap check), built in `remoteRuntimeSetup.ts` from global
+   * storage, the OS probe and the config. Passed through the controller options
+   * to the command layer, which never touches the filesystem or PowerShell.
+   */
+  windowSurface?: import('./RemoteWindowRegistry').RemoteWindowSurface | undefined;
+  /** Close this window from its own close-request watch (`workbench.action.closeWindow`). */
+  closeWindow?: (() => Promise<void>) | undefined;
+  /** True while this window has editors with unsaved changes, which is why a phone Close is refused rather than attempted — see `WorkspaceHandoffRuntimeDeps.hasUnsavedEditors`. */
+  hasUnsavedEditors?: (() => boolean) | undefined;
+  /**
    * The user-scope `forge.configFile`, read live. A workspace switch has to
    * know what the **target** window will load, and the target reads the same
    * user settings this window does unless it pins a config file of its own.

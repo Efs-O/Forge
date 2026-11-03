@@ -732,6 +732,7 @@ describe.skipIf(!TEST_BASH)('forge.sh against the routes', () => {
     });
     expect(sendFile).toHaveBeenCalledWith(
       'codex',
+      { kind: 'codex', sessionId: '00000000-0000-4000-8000-000000000001' },
       'sender-chat',
       'plan with spaces.md',
       'owner-approved caption 📎\n',
@@ -924,6 +925,283 @@ describe.skipIf(!TEST_BASH)('forge.sh against the routes', () => {
     expect(said.out).toContain(
       '"receipt":"Forge received your message (chat \\\"Holder chat\\\")"',
     );
+  }, 30_000);
+
+  it(
+    'routes every read verb to the window holding the sender link, not the focused one',
+    async (ctx) => {
+      if (!usable) ctx.skip();
+      // Two windows: A holds this session's link, B is `endpoint.json` (the
+      // focused one). Every read verb used to read from B, so `status` answered
+      // for a window that never held the session — the live defect the owner
+      // reported with two windows open: `status claude` said `no chat holds a
+      // message from "claude"` while `say --to` reached the right chats.
+      routes.dispose();
+      const EP_ID = '00000000-0000-4000-8000-0000000000a1';
+      const calls: Record<'window-a' | 'window-b', string[]> = {
+        'window-a': [],
+        'window-b': [],
+      };
+      const readQueries: string[] = [];
+      const windows: http.Server[] = [];
+      const listenWindow = async (name: 'window-a' | 'window-b'): Promise<string> => {
+        const windowServer = http.createServer((req, res) => {
+          const route = new URL(req.url ?? '/', 'http://localhost').pathname;
+          calls[name].push(route);
+          if (route === '/agent/status' || route === '/agent/view')
+            readQueries.push(req.url ?? '');
+          if (route === '/agent/holds-link') {
+            res.end(JSON.stringify({ holdsLink: name === 'window-a', cwdMatch: 0 }));
+            return;
+          }
+          if (route === '/agent/status') {
+            res.end('State: idle\nQueued from you: 0\n');
+            return;
+          }
+          if (route === '/agent/view') {
+            res.end('the latest answer\n');
+            return;
+          }
+          if (route === '/agent/read-verdict') {
+            res.end('the full verdict\n');
+            return;
+          }
+          if (route === '/agent/ack-verdict') {
+            res.end('{"acknowledged":true}');
+            return;
+          }
+          if (route === '/agent/send-file') {
+            res.end('{"sent":true}');
+            return;
+          }
+          res.writeHead(404).end('{"error":"not found"}');
+        });
+        const port = await listenLoopback(windowServer);
+        windows.push(windowServer);
+        return `http://127.0.0.1:${port}`;
+      };
+      const endpoint = (url: string) =>
+        JSON.stringify({ windowId: EP_ID, url, token: TOKEN, pid: process.pid }, null, 2);
+      try {
+        const windowA = await listenWindow('window-a');
+        const windowB = await listenWindow('window-b');
+        fs.rmSync(path.join(paths.root, 'endpoints'), { recursive: true, force: true });
+        fs.mkdirSync(path.join(paths.root, 'endpoints'), { recursive: true });
+        // The focused window owns endpoint.json and its own file in endpoints/,
+        // so a read that falls back to endpoint.json would land on a window that
+        // was already probed for the link. Here that window is B, and the holder
+        // is A, so no read goes to either one twice.
+        fs.writeFileSync(paths.endpoint, endpoint(windowB));
+        fs.writeFileSync(path.join(paths.root, 'endpoints', 'window-a.json'), endpoint(windowA));
+        fs.writeFileSync(path.join(paths.root, 'endpoints', 'window-b.json'), endpoint(windowB));
+        fs.writeFileSync(path.join(home, 'read-routing-file.md'), 'approved file\n');
+        const env = { CODEX_SESSION_ID: '00000000-0000-4000-8000-000000000001' };
+
+        const runs = [
+          await runClient(['status', 'codex', '--to', 'chat-1'], '', env),
+          await runClient(['view', 'codex', '--to', 'chat-1'], '', env),
+          await runClient(['wait', 'codex', '1'], '', env),
+          await runClient(['read-verdict', 'codex', 'exchange-1'], '', env),
+          await runClient(['ack-verdict', 'codex', 'exchange-1'], '', env),
+          await runClient(
+            ['send-file', 'codex', '--to', 'chat-1', 'read-routing-file.md'],
+            '',
+            env,
+            20_000,
+            home,
+          ),
+        ];
+        const badTarget = await runClient(['status', 'codex', '--to', 'bad/id'], '', env);
+
+        for (const run of runs) expect(run.code, run.out).toBe(0);
+        expect(badTarget.code).toBe(2);
+        expect(badTarget.out).toContain('bad conversation id');
+        // Every read reached the holder, including `wait`, which polls `status`
+        // and then prints `view`.
+        for (const route of [
+          '/agent/status',
+          '/agent/view',
+          '/agent/read-verdict',
+          '/agent/ack-verdict',
+          '/agent/send-file',
+        ])
+          expect(calls['window-a'], calls['window-a'].join(' ')).toContain(route);
+        expect(readQueries).toEqual(
+          expect.arrayContaining([
+            expect.stringContaining(
+              '/agent/status?from=codex&kind=codex&sessionId=00000000-0000-4000-8000-000000000001&conversation_id=chat-1',
+            ),
+            expect.stringContaining(
+              '/agent/view?from=codex&kind=codex&sessionId=00000000-0000-4000-8000-000000000001&conversation_id=chat-1',
+            ),
+          ]),
+        );
+        // The focused window was only ever asked whether it holds the link:
+        // no read went to it, and nothing was refused because of it.
+        expect(calls['window-b'].every((route) => route === '/agent/holds-link')).toBe(true);
+        expect(calls['window-b']).toHaveLength(runs.length);
+      } finally {
+        fs.rmSync(path.join(paths.root, 'endpoints'), { recursive: true, force: true });
+        await Promise.all(
+          windows.map((windowServer) => new Promise<void>((resolve) => windowServer.close(() => resolve()))),
+        );
+      }
+    },
+    45_000,
+  );
+
+  it('who lists each live window once and skips an unreachable endpoint', async (ctx) => {
+    if (!usable) ctx.skip();
+    routes.dispose();
+    const EP_ID = '00000000-0000-4000-8000-0000000000a1';
+    const calls: string[] = [];
+    const windows: http.Server[] = [];
+    const listenWindow = async (label: string): Promise<string> => {
+      const windowServer = http.createServer((req, res) => {
+        calls.push(`${label}:${new URL(req.url ?? '/', 'http://localhost').pathname}`);
+        const participant = (session: string) => ({
+          session,
+          attachment: 'linked',
+          activity: 'idle',
+          detail: `${session} chat`,
+        });
+        res.end(
+          JSON.stringify({
+            participants:
+              label === 'window-a'
+                ? [
+                    participant('codex · Build'),
+                    participant('codex · Build'),
+                    participant('claude · Review'),
+                  ]
+                : [participant('claude · Review'), participant('claude · Review')],
+          }),
+        );
+      });
+      const port = await listenLoopback(windowServer);
+      windows.push(windowServer);
+      return `http://127.0.0.1:${port}`;
+    };
+    const endpoint = (url: string) =>
+      JSON.stringify({ windowId: EP_ID, url, token: TOKEN, pid: process.pid }, null, 2);
+    const writeEndpoints = (files: Record<string, string>): void => {
+      fs.rmSync(path.join(paths.root, 'endpoints'), { recursive: true, force: true });
+      fs.mkdirSync(path.join(paths.root, 'endpoints'), { recursive: true });
+      for (const [name, url] of Object.entries(files))
+        fs.writeFileSync(path.join(paths.root, 'endpoints', `${name}.json`), endpoint(url));
+    };
+    try {
+      const windowA = await listenWindow('window-a');
+      const windowB = await listenWindow('window-b');
+      writeEndpoints({
+        'window-a': windowA,
+        'window-b': windowB,
+        unreachable: 'http://127.0.0.1:1',
+      });
+      // The focused window is B, and it is also in endpoints/: its rows would
+      // print twice without the dedupe, and the dead file must not stop it.
+      fs.writeFileSync(paths.endpoint, endpoint(windowB));
+
+      const who = await runClient(['who'], '');
+      expect(who.code, who.out).toBe(0);
+      const rows = who.out.trim().split(/\r?\n/u);
+      expect(rows.filter((row) => row.includes('codex') && row.includes('Build'))).toHaveLength(1);
+      expect(rows.filter((row) => row.includes('claude') && row.includes('Review'))).toHaveLength(
+        1,
+      );
+      expect(who.out).toContain('Review chat');
+      expect(calls.filter((call) => call.endsWith(':/agent/who'))).toEqual([
+        'window-a:/agent/who',
+        'window-b:/agent/who',
+      ]);
+
+      // Every endpoint file present and none of them answers: that is a failure
+      // with a reason, not an empty success an agent would read as "nothing is
+      // linked", which is what it used to be.
+      writeEndpoints({ 'dead-a': 'http://127.0.0.1:1', 'dead-b': 'http://127.0.0.1:2' });
+      const dead = await runClient(['who'], '');
+      expect(dead.code).toBe(1);
+      expect(dead.out).toContain('not reachable');
+
+      // No endpoints/ folder at all: endpoint.json is still read on its own,
+      // and the window that is not written there is not asked.
+      fs.rmSync(path.join(paths.root, 'endpoints'), { recursive: true, force: true });
+      fs.writeFileSync(paths.endpoint, endpoint(windowA));
+      const fallback = await runClient(['who'], '');
+      expect(fallback.code, fallback.out).toBe(0);
+      expect(fallback.out).toContain('Build chat');
+      expect(calls.filter((call) => call.endsWith(':/agent/who'))).toEqual([
+        'window-a:/agent/who',
+        'window-b:/agent/who',
+        'window-a:/agent/who',
+      ]);
+    } finally {
+      fs.rmSync(path.join(paths.root, 'endpoints'), { recursive: true, force: true });
+      await Promise.all(
+        windows.map((windowServer) => new Promise<void>((resolve) => windowServer.close(() => resolve()))),
+      );
+    }
+  }, 45_000);
+
+  it('who prints two rows of one session when they name different chats', async (ctx) => {
+    if (!usable) ctx.skip();
+    // Since one agent session may hold several Forge chats (977ffbed), `who`
+    // answers with one row per linked chat: the same `session` column, a
+    // different chat title in the last one. Deduping by `session` alone hides
+    // every chat after the first, so the key has to be the whole printed line
+    // — which still collapses a window that answers through two files.
+    routes.dispose();
+    const EP_ID = '00000000-0000-4000-8000-0000000000a1';
+    const asked: string[] = [];
+    const windows: http.Server[] = [];
+    const windowServer = http.createServer((req, res) => {
+      asked.push(new URL(req.url ?? '/', 'http://localhost').pathname);
+      const row = (detail: string) => ({
+        session: 'codex · Build',
+        attachment: 'linked',
+        activity: 'idle',
+        detail,
+      });
+      res.end(
+        JSON.stringify({
+          participants: [row('Build chat'), row('Second chat'), row('Build chat')],
+        }),
+      );
+    });
+    try {
+      const port = await listenLoopback(windowServer);
+      windows.push(windowServer);
+      const endpoint = JSON.stringify(
+        {
+          windowId: EP_ID,
+          url: `http://127.0.0.1:${port}`,
+          token: TOKEN,
+          pid: process.pid,
+        },
+        null,
+        2,
+      );
+      fs.rmSync(path.join(paths.root, 'endpoints'), { recursive: true, force: true });
+      fs.mkdirSync(path.join(paths.root, 'endpoints'), { recursive: true });
+      // Two files naming the same live window: the window is asked twice, and
+      // its repeated rows still print once, while its two chats print twice.
+      fs.writeFileSync(path.join(paths.root, 'endpoints', 'window-a.json'), endpoint);
+      fs.writeFileSync(path.join(paths.root, 'endpoints', 'window-b.json'), endpoint);
+      fs.writeFileSync(paths.endpoint, endpoint);
+
+      const who = await runClient(['who'], '');
+      expect(who.code, who.out).toBe(0);
+      const rows = who.out.trim().split(/\r?\n/u);
+      expect(rows).toHaveLength(2);
+      expect(who.out).toContain('Second chat');
+      expect(rows.filter((row) => row.includes('Build chat'))).toHaveLength(1);
+      expect(asked).toEqual(['/agent/who', '/agent/who']);
+    } finally {
+      fs.rmSync(path.join(paths.root, 'endpoints'), { recursive: true, force: true });
+      await Promise.all(
+        windows.map((windowServer) => new Promise<void>((resolve) => windowServer.close(() => resolve()))),
+      );
+    }
   }, 30_000);
 
   it('sends an unlinked session to the window whose workspace holds its folder, not the focused one', async (ctx) => {

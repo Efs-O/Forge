@@ -52,10 +52,14 @@ Copilot sessions message each other, each message shown in the receiving window.
   \`say\` with \`--unattended\`, \`--model\` or \`--new\` needs a turn of its own,
   so it waits until the running turn ends.
 
-When several Forge windows are open, the client reaches the window that holds
-the sender's session link; failing that, the window whose workspace contains
-the sender's current folder; failing that, the last focused Forge window (if
-that one closes, another open window takes over without being focused).
+When several Forge windows are open, every verb that knows your session
+identity reaches the window holding that session's link — \`say\`, \`send\`,
+\`steer\`, \`stop\`, \`wait\`, \`status\`, \`view\`, \`read-verdict\`,
+\`ack-verdict\` and \`send-file\` all do; failing that, the window whose
+workspace contains the sender's current folder; failing that, the last focused
+Forge window (if that one closes, another open window takes over without being
+focused). \`forge.sh who\` asks every window that answers and prints each
+linked chat once, so a closed window is skipped instead of printing nothing.
 \`forge.sh say <name> --new\` opens and selects a new chat there;
 ordinary \`say\` follows that sender's previous chat without changing the view.
 Use \`say <name> --to <conversationId>\` to select a specific Forge chat, or
@@ -86,8 +90,9 @@ session environment variable.
 \`forge.sh send-file <your-name> --to <conversationId> <workspace-relative-path>
 [--caption-file <file>]\` sends one existing workspace file directly through the
 active Telegram transport. It does not enter Forge's inbox, start a model turn,
-or change conversation context. The named conversation must be the sender's
-established Forge chat and have exactly one Telegram binding in this workspace;
+or change conversation context. The named conversation must be a Forge chat this
+session is linked to — the same set \`--to\` may select for \`say\` — and have
+exactly one Telegram binding in this workspace;
 the client cannot choose a Telegram chat id. The path must resolve to a regular
 file inside this workspace, between 1 byte and 50 MB. \`--caption-file <file>\`
 supplies the Telegram caption text and is limited to 1,024 Unicode code points.
@@ -140,10 +145,14 @@ or fewer, in files already reviewed) applies it itself or hands it to
 
 ## Watching a running turn
 
-\`bash ~/.forge/agent-bus/forge.sh status <your-name>\` shows what YOUR chat with Forge is doing:
+\`bash ~/.forge/agent-bus/forge.sh status <your-name> [--to <conversationId>]\` shows what YOUR chat with Forge is doing:
 busy or idle, how long the turn has run, seconds since its last activity, the tool it is on, how
-many tool calls so far, the last thing it said, any warnings, and context use. \`view <your-name> [n]\`
-replays the last n answers (default 3, max 10). Both read only the chat your own messages went to.
+many tool calls so far, the last thing it said, any warnings, and context use. \`view <your-name> [n]
+[--to <conversationId>]\` replays the last n answers (default 3, max 10). Both read only the chat
+your own messages went to. With \`--to <conversationId>\` either verb reads a specific
+chat instead: that chat has to be linked to your session, and one that is not
+comes back a 404 naming it, so a read never lands on another session's chat.
+Without \`--to\`, both keep following the chat this session last addressed.
 Before your first message has started there is no chat to show: \`status\` then answers
 \`State: queued\` with how many of your messages are waiting (a \`--new\` message opens its own
 chat when it runs), while \`view\` still refuses until your first answer exists. Each is one

@@ -32,6 +32,13 @@ type LeaseRecord = z.infer<typeof LeaseSchema>;
 
 export class FileLeaseError extends Error {}
 
+/** The life of a lease sign: a record that has not written itself for this long
+ *  is nobody's any more, and any window may reclaim it. `acquire` and `isHeld`
+ *  read the same number, so a window that peeks before it tries is never looking
+ *  at a different horizon than the attempt it is skipping. */
+const DEFAULT_STALE_AFTER_MS = 20_000;
+const DEFAULT_HEARTBEAT_MS = 5_000;
+
 export class FileLease {
   private timer: ReturnType<typeof setInterval> | undefined;
   private heartbeatTask: Promise<void> | undefined;
@@ -53,11 +60,10 @@ export class FileLease {
     staleAfterMs?: number;
     onLost: (message: string) => void;
   }): Promise<FileLease> {
-    const heartbeatMs = options.heartbeatMs ?? 5_000;
-    const staleAfterMs = options.staleAfterMs ?? 20_000;
+    const heartbeatMs = options.heartbeatMs ?? DEFAULT_HEARTBEAT_MS;
+    const staleAfterMs = options.staleAfterMs ?? DEFAULT_STALE_AFTER_MS;
     await fs.mkdir(options.directory, { recursive: true });
-    const safeKey = options.key.replace(/[^a-zA-Z0-9._-]/g, '_');
-    const filePath = path.join(options.directory, `${safeKey}.lease.json`);
+    const filePath = FileLease.leaseFilePath(options.directory, options.key);
     const record: LeaseRecord = {
       version: 1,
       key: options.key,
@@ -78,13 +84,7 @@ export class FileLease {
       // them apart: fresh, it is live (reclaiming it would let both windows
       // hold the lease, U19-04); once stale, it is reclaimed like any other.
       const existing = await FileLease.read(filePath).catch(() => undefined);
-      const lastSign =
-        existing?.heartbeatAt ??
-        (await fs.stat(filePath).then(
-          (stat) => stat.mtimeMs,
-          () => 0,
-        ));
-      if (Date.now() - lastSign <= staleAfterMs) {
+      if (Date.now() - (await FileLease.lastSignMs(filePath, existing)) <= staleAfterMs) {
         throw new FileLeaseError(
           `Forge lease "${options.key}" is already owned by another window.`,
         );
@@ -113,6 +113,36 @@ export class FileLease {
     return lease;
   }
 
+  /** True while some process is still signing this key's lease. Read-only: no
+   *  directory is created, nothing is renamed and nothing is written, so a window
+   *  that is only asking costs one read, and a missing file or a missing
+   *  directory is `false`.
+   *
+   *  It is a gate, not a mutex: `false` means nobody proved alive just now, not
+   *  that the lease is yours — two windows may both see `false`, and only
+   *  `acquire`'s exclusive create decides who serves. It exists for the caller
+   *  that would write shared state on the way to finding the lease out: a remote
+   *  window that is not serving asks every five seconds forever, and
+   *  `RemoteTransportManager.startTransport` reconciles dead claims in
+   *  `remote-state-v2.json` **before** it tries the lease, so an attempt that was
+   *  always going to be refused rewrites that file every tick and resets the
+   *  modified time every other window's poll is gated on.
+   *
+   *  Same file name and the same freshness rule as `acquire`, because both call
+   *  the same two helpers — a peek that disagreed with the attempt would be worse
+   *  than no peek at all.
+   */
+  static async isHeld(options: {
+    directory: string;
+    key: string;
+    staleAfterMs?: number;
+  }): Promise<boolean> {
+    const filePath = FileLease.leaseFilePath(options.directory, options.key);
+    const existing = await FileLease.read(filePath).catch(() => undefined);
+    const lastSign = await FileLease.lastSignMs(filePath, existing);
+    return Date.now() - lastSign <= (options.staleAfterMs ?? DEFAULT_STALE_AFTER_MS);
+  }
+
   isLost(): boolean {
     return this.lost;
   }
@@ -132,9 +162,8 @@ export class FileLease {
     key: string,
   ): { token: string; pid: number; startedAt: number } | 'unreadable' | undefined {
     try {
-      const safeKey = key.replace(/[^a-zA-Z0-9._-]/g, '_');
       const record = LeaseSchema.parse(
-        JSON.parse(readFileSync(path.join(directory, `${safeKey}.lease.json`), 'utf8')),
+        JSON.parse(readFileSync(FileLease.leaseFilePath(directory, key), 'utf8')),
       );
       return { token: record.token, pid: record.pid, startedAt: record.processStartedAt };
     } catch (err) {
@@ -226,6 +255,34 @@ export class FileLease {
     if (this.timer) clearInterval(this.timer);
     this.timer = undefined;
     this.onLost(message);
+  }
+
+  /** The lease file for a key, spelled one way by every reader and writer:
+   *  characters a filesystem cannot take in a name are replaced, so a key with a
+   *  colon in it still has exactly one file. */
+  private static leaseFilePath(directory: string, key: string): string {
+    const safeKey = key.replace(/[^a-zA-Z0-9._-]/g, '_');
+    return path.join(directory, `${safeKey}.lease.json`);
+  }
+
+  /** When this lease last proved alive: its own heartbeat; or, when the record
+   *  cannot be read — another window's create caught between `wx` and its write,
+   *  or garbage from a crash mid-write — the file's modified time; or 0 when
+   *  there is no file to look at. U19-04: counting an unreadable lease as dead
+   *  would let a second window reclaim one a live window is still holding, and
+   *  then both would serve the same chat.
+   */
+  private static async lastSignMs(
+    filePath: string,
+    existing: LeaseRecord | undefined,
+  ): Promise<number> {
+    return (
+      existing?.heartbeatAt ??
+      (await fs.stat(filePath).then(
+        (stat) => stat.mtimeMs,
+        () => 0,
+      ))
+    );
   }
 
   private static async createExclusive(filePath: string, record: LeaseRecord): Promise<void> {

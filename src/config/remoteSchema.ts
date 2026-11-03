@@ -64,6 +64,18 @@ export const RemoteConfigSchema = z
         z.object({ path: z.string().min(1), display_name: z.string().min(1).max(80) }),
       )
       .default({}),
+    /**
+     * How many VS Code windows a `new-window` workspace switch may leave open.
+     * Only that mode is counted: `replace` adds no window, and opening a folder
+     * that is already open just focuses it. 1-12 so a typo cannot make the cap
+     * either unreachable or effectively absent; outside the range the whole
+     * config fails to load rather than silently clamping.
+     */
+    workspace_switch: z
+      .object({
+        max_open_windows: z.number().int().min(1).max(12).default(5),
+      })
+      .default({ max_open_windows: 5 }),
     wake_relay: z
       .object({
         enabled: z.boolean().default(false),

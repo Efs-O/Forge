@@ -119,16 +119,27 @@ export interface AgentRoutesDeps {
    * Absent ⇒ `GET /agent/who` is 404.
    */
   who?: () => Promise<unknown> | unknown;
-  /** Read-only view of the sender's chat; absent means the route is 404. */
-  status?: (from: string, sender?: AgentSender) => BusReadResult | Promise<BusReadResult>;
+  /** Read-only view of the sender's chat; absent means the route is 404.
+   *  `conversationId` is a chat named by `--to`; the dependency answers whether
+   *  this window's links allow this sender to read it. */
+  status?: (
+    from: string,
+    sender?: AgentSender,
+    conversationId?: string,
+  ) => BusReadResult | Promise<BusReadResult>;
   view?: (
     from: string,
     count: string | undefined,
     sender?: AgentSender,
+    conversationId?: string,
   ) => BusReadResult | Promise<BusReadResult>;
-  /** Direct, model-free delivery of a workspace file to the sender's bound chat. */
+  /** Direct, model-free delivery of a workspace file to a chat this sender's
+   *  session is linked to. The verified sender comes in because the chat is
+   *  chosen by id, and only the session id says whether that id is this
+   *  sender's chat and not another session's that happens to be linked too. */
   sendFile?: (
     from: string,
+    sender: AgentSender,
     conversationId: string,
     workspaceRelativePath: string,
     caption: string,

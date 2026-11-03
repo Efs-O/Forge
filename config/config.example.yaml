@@ -1114,6 +1114,14 @@ remote:
       max_results: 5
       max_fetch_bytes: 100000
       timeout_ms: 15000
+  # How many VS Code windows a `new-window` workspace switch asked from the phone
+  # may leave open (1-12, default 5). A `replace` switch adds no window and a
+  # folder that is already open is only focused, so this is checked for
+  # `new-window` alone. `/workspace windows` lists what is open and asks one to
+  # close itself; Forge never closes a window on its own to make room, so hitting
+  # the limit is a refusal to read, not a window to lose. Absent means 5.
+  # workspace_switch:
+  #   max_open_windows: 5
 
 # Agent bus: turns on `ask_agent` **and** the `/agent/*` routes `forge.sh`
 # uses (`src/config/agentBusSchema.ts:5-9`). Enabling it is what lets a Claude

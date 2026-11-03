@@ -16,6 +16,7 @@
  * **before** touching the handoff record: a window that cannot have it says
  * nothing and leaves the record for whoever can.
  */
+import * as path from 'path';
 import type { ForgeConfig } from '../config/types';
 import type { ForgeHostFacade } from '../sidebar/ForgeHostFacade';
 import { getLogger } from '../util/logger';
@@ -26,7 +27,7 @@ import {
   TAKEOVER_RACE_DEADLINE_MS,
   type RemoteTransportManager,
 } from './RemoteTransportManager';
-import { RemoteLeaseError } from './RemoteTransportLease';
+import { RemoteLeaseError, RemoteTransportLease } from './RemoteTransportLease';
 import { currentWorkspaceIdentity, workspaceAliases } from './remoteControllerOptions';
 import { preflightRemoteWorkspaceSwitch } from './remoteWorkspacePreflight';
 import type { WorkspaceHandoff } from './RemoteStoreSchemas';
@@ -140,6 +141,18 @@ export interface WorkspaceHandoffRuntimeDeps {
   /** Global storage, which is where a target window with no config of its own
    *  would look. */
   globalStoragePath: string;
+  /**
+   * Close **this** window, run by the window itself when its own 5 s watch reads
+   * a close-request it agreed to (`workbench.action.closeWindow`). Absent means
+   * there is no inbox: a window that cannot close itself must not accept a Close
+   * it cannot carry out.
+   */
+  closeWindow?: (() => Promise<void>) | undefined;
+  /** True while this window has editors with unsaved changes, which is why a
+   *  phone Close is refused rather than attempted: the command would open a
+   *  modal save prompt and leave the window open while the phone thinks it
+   *  closed. */
+  hasUnsavedEditors?: (() => boolean) | undefined;
   /** The user-scope `forge.configFile`, for the same preflight. */
   userConfigFileSetting?: (() => string | undefined) | undefined;
   openWorkspace?: ((directory: string, forceNewWindow: boolean) => Promise<void>) | undefined;
@@ -199,6 +212,93 @@ export async function takeTransportsForActivation(
     if (!opts.waitingForAChat || !(err instanceof RemoteLeaseError)) throw err;
     log.debug('[remote] activation lease held by another window; its watch will claim');
     return true;
+  }
+}
+
+/** True when a live window already holds the lease for **every** transport this
+ *  config would start, so this window could serve nothing even if it tried: the
+ *  read-only peek that keeps a window which is merely not serving from rewriting
+ *  the shared state every tick. `RemoteTransportManager.startTransport` calls
+ *  `reconcileDeadClaims()` — a write to `remote-state-v2.json` — **before** it
+ *  tries the lease, so an attempt that was always going to be refused would
+ *  rewrite that file every 5 s forever, and every other window's coordinator poll
+ *  is gated on its modified time, so each of them would re-read the whole state
+ *  every tick too. That is the cost the plan's audit 3.3 refuses heartbeat writes
+ *  for, arriving by a different route.
+ *
+ *  The folder and the key are the ones `startTransport` uses: `remote-leases`
+ *  under this window's storage directory (`globalStoragePath` is that same value,
+ *  handed here as `options.storageDirectory`), and the channel name. A channel
+ *  that is off is not checked, and a config with no channel on has nothing to
+ *  take, so it counts as held. `isHeld` is not a mutex (see its doc), so this
+ *  never wins a lease for anyone: it only says an attempt would be a write for
+ *  nothing.
+ */
+async function everyEnabledLeaseIsHeld(
+  deps: WorkspaceHandoffRuntimeDeps,
+  config: ForgeConfig,
+): Promise<boolean> {
+  const directory = path.join(deps.globalStoragePath, 'remote-leases');
+  for (const channelName of ['telegram', 'whatsapp'] as const) {
+    if (config.remote?.[channelName].enabled !== true) continue;
+    if (!(await RemoteTransportLease.isHeld({ directory, key: channelName }))) return false;
+  }
+  return true;
+}
+
+/**
+ * Come back into service (plan phase 3, named by the review of `64562cb5`).
+ *
+ * A window that lost the lease race and whose handoff record went away had no
+ * transports and no way back except a reload or a new switch, because
+ * `RemoteStartRetry` has always answered a lease refusal with "another window
+ * serves this chat" and never retried one. When the window that **was** serving
+ * closes, its lease goes stale at the 20 s horizon and any window that is
+ * **still trying** can take it — and only this window's own 5 s watch is still
+ * trying, because the watch stops with the record and this is the one timer a
+ * window keeps whatever a switch or a claim did to the others. The watch does
+ * not call this while it is waiting for a window it asked to be opened
+ * (`WindowWatchDeps.waitingForTargetWindow`), so a `new-window` target keeps its
+ * whole claim window instead of having the phone taken back a tick after it was
+ * promised.
+ *
+ * It goes through `takeTransportsForActivation`, so a `RemoteLeaseError` is
+ * swallowed here: a window whose lease is live elsewhere is not serving and is
+ * not wrong, and reporting it every tick is the log spam the plan's second pass
+ * asks to avoid — nothing reaches the phone either way. It asks `FileLease.isHeld`
+ * first (`everyEnabledLeaseIsHeld`), so the ordinary case — a live window signing
+ * its lease — returns before any lease attempt, and therefore before
+ * `startTransport`'s `reconcileDeadClaims` write: a window that is merely waiting
+ * writes nothing, logs nothing and says nothing every tick. `dispose()` aborts the
+ * wait, and `TAKEOVER_RACE_DEADLINE_MS` bounds an attempt that does run to one
+ * retry, so a tick that gets nothing costs two seconds and starts nothing.
+ */
+export async function comeBackIntoService(
+  deps: WorkspaceHandoffRuntimeDeps,
+  opts: { signal: AbortSignal },
+): Promise<void> {
+  const config = deps.requestedConfig();
+  if (deps.isDisposed() || config?.remote?.enabled !== true) return;
+  if (deps.activeTransports().length > 0) return;
+  // The zero-write steady state: while another window is signing its lease this
+  // tick touches nothing — no lease attempt, no state write, no log line.
+  if (await everyEnabledLeaseIsHeld(deps, config)) return;
+  try {
+    await takeTransportsForActivation(deps.manager, config, {
+      waitingForAChat: false,
+      signal: opts.signal,
+    });
+  } catch (err) {
+    // Including an abort that landed mid-retry: `takeOver` reports the last
+    // lease refusal, and this window has nothing to say about either. Nothing is
+    // logged either, not even at debug level: a window that is not serving while
+    // another one answers the phone is the normal steady state of a two-window
+    // setup, and this is the timer that runs forever inside it, so a line per
+    // tick is the same kind of churn the plan's audit 3.3 refuses heartbeat
+    // writes for. A failure that is **not** a lease refusal still throws, and
+    // the watch says it once.
+    if (err instanceof RemoteLeaseError) return;
+    throw err;
   }
 }
 
