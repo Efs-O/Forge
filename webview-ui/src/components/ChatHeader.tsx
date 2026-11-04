@@ -80,7 +80,7 @@ export function ChatHeader({
               .filter((item) => item !== undefined)
               .map((item) => (
                 <div
-                  className="agent-link-group"
+                  className={`agent-link-group agent-link-${item.kind}`}
                   key={item.kind}
                   aria-label={`${agentDisplayName(item.kind)} linked`}
                   title={`${item.title}\nLast used ${new Date(item.lastUsedAt).toLocaleString()}`}

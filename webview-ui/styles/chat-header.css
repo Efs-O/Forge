@@ -114,6 +114,8 @@ button#chat-header-title:hover {
   justify-content: flex-end;
   gap: 4px;
   min-width: 0;
+  /* Room between the chips and the History button. */
+  margin-right: 12px;
   color: var(--vscode-descriptionForeground);
   font-size: 10px;
 }
@@ -134,8 +136,21 @@ button#chat-header-title:hover {
   font-weight: 600;
 }
 
+/* Same name colours as the history-row agent badges (history-rows.css). */
+.agent-link-claude .agent-link-name {
+  color: color-mix(in srgb, var(--vscode-charts-orange, #cd9178) 75%, currentColor);
+}
+
+.agent-link-codex .agent-link-name {
+  color: color-mix(in srgb, var(--vscode-charts-cyan, #049fa5) 75%, currentColor);
+}
+
+.agent-link-copilot .agent-link-name {
+  color: color-mix(in srgb, var(--vscode-charts-purple, #b18cd1) 75%, currentColor);
+}
+
 .agent-link-state {
-  color: var(--vscode-descriptionForeground);
+  color: var(--vscode-foreground);
 }
 
 .agent-link-group button,
@@ -161,5 +176,6 @@ button#chat-header-title:hover {
     flex-basis: 100%;
     justify-content: flex-start;
     order: 3;
+    margin-right: 0;
   }
 }
