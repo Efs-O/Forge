@@ -1,5 +1,22 @@
 # Forge — Recent Changes
 
+## 0.17.120
+
+- A Strata or Maya model stopped outside Forge (by its own script, a bench or a
+  crash) no longer keeps a green dot in the model selector. While the sidebar is
+  open, Forge checks each managed server it believes is loaded every 10 s
+  (`/v1/models`, 2 s timeout); a refused connection or a model reported
+  `unloaded` turns the dot cold, and an unclear answer leaves it alone. A
+  request sent while a check is running keeps the dot green.
+- The model selector is wider, so long model descriptions fit: the button grows
+  to 440px and the list to 520px, still shortening on a narrow sidebar, and
+  hovering a model shows its full name and config name.
+- History search understands separate keywords, "quoted phrases" and
+  `-exclusions` across chat titles, sender badges and saved messages, ranks
+  results by relevance and recency, and shows a short highlighted preview of
+  each match.
+- The agent's final-answer rule is six short bullets instead of one long one.
+
 ## 0.17.119
 
 - A job card now tells the truth when you finish a stopped run yourself, and its
