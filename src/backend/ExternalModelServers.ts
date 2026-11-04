@@ -4,9 +4,12 @@ import { mergeGroupsIntoModel } from '../config/ConfigResolver';
 import { getLogger } from '../util/logger';
 import { deferredStopInvocation, STOP_GRACE_MS } from './deferredStop';
 import {
+  freeDecisionResidency,
   isConnectionRefused,
   probeExternalModelResidency,
   probeExternalResidencyEndpoints,
+  selectorResidency,
+  type ExternalResidency,
   type ExternalResidencyCandidate,
 } from './ExternalModelResidencyProbe';
 import { probeHttp } from './HealthCheck';
@@ -21,8 +24,6 @@ const STOP_TIMEOUT_MS = 90_000;
 export const START_TIMEOUT_MS = 180_000;
 /** How often to probe while waiting for a started server. */
 export const START_POLL_MS = 2_000;
-
-type Residency = 'unknown' | 'loaded' | 'unloaded';
 
 export type SecretLookup = (key: string) => Promise<string | undefined>;
 
@@ -48,9 +49,13 @@ export interface StopOnExitOptions {
 export class ExternalServerBusyError extends Error {}
 
 /**
- * Managed local servers Forge may unload (`openai-compatible` with
- * `unload_path`). Normal releases keep the server up; explicit unload commands
- * may also run `stop_command`. POSTing the path frees GPU/RAM; requests reload it.
+ * Local servers Forge does not spawn but can unload (Strata): an
+ * `openai-compatible` model with `unload_path`. A normal release keeps the
+ * server up; explicit unload commands also run `stop_command`. POSTing the path
+ * frees GPU/RAM and the next request reloads it. The pool treats each as
+ * resident, so every unload reaches it; it never shares VRAM with a llama.cpp/
+ * Ollama model or another managed server. See
+ * docs/plans/EXTERNAL_SERVER_UNLOAD_PLAN.md.
  */
 /** A managed external server: openai-compatible with an `unload_path` (Strata). */
 export function isManagedExternalModel(
@@ -60,7 +65,7 @@ export function isManagedExternalModel(
 }
 
 export class ExternalModelServers {
-  private readonly residency = new Map<string, Residency>();
+  private readonly residency = new Map<string, ExternalResidency>();
   /** Incremented before each request so a late unload completion cannot erase it. */
   private readonly activityGeneration = new Map<string, number>();
   /**
@@ -96,8 +101,10 @@ export class ExternalModelServers {
   }
 
   /**
-   * GPUs the group-resolved model's engine uses. No declared cards means it
-   * overlaps all; `BackendPoolExternal` uses this to choose which servers to free.
+   * GPUs the server's engine uses. Read via `managed()`, which folds in the
+   * resolver; `config.models`/`config.engines` miss engine-supplied values.
+   * `undefined` means no cards were named, so it overlaps every server, as before.
+   * `poolAcquisition.gpusOverlap` consumes this through `BackendPoolExternal`.
    */
   gpusOf(name: string): readonly number[] | undefined {
     return this.managed(name)?.gpus;
@@ -114,7 +121,11 @@ export class ExternalModelServers {
     return this.isManaged(name) && this.residency.get(name) !== 'unloaded';
   }
 
-  /** A selector dot is confirmed only after a request or matching server probe. */
+  /**
+   * Loaded as far as this window has seen. Unlike `isLoaded`, unknown is NOT
+   * loaded for the selector dot, so a server nobody used does not appear
+   * resident. A matching server probe also confirms it.
+   */
   isConfirmedLoaded(name: string): boolean {
     return this.isManaged(name) && this.residency.get(name) === 'loaded';
   }
@@ -179,18 +190,12 @@ export class ExternalModelServers {
     );
     if (this.starting.has(name)) return;
     if (result.state === 'connection-refused') {
-      this.markUnloadedUnlessReused(name, generation, 'residency refresh');
       log.info(`[ExternalModelServers] "${name}" stopped outside this window`);
-    } else if (
-      result.state === 'unloaded' ||
-      result.state === 'stale-claim' ||
-      (result.state === 'loaded' && !result.matchesModel)
-    ) {
+    }
+    const residency = selectorResidency(result);
+    if (residency === 'unloaded') {
       this.markUnloadedUnlessReused(name, generation, 'residency refresh');
-    } else if (
-      result.state === 'loaded' &&
-      (this.activityGeneration.get(name) ?? 0) === generation
-    ) {
+    } else if (residency === 'loaded' && (this.activityGeneration.get(name) ?? 0) === generation) {
       this.residency.set(name, 'loaded');
     }
   }
@@ -209,10 +214,7 @@ export class ExternalModelServers {
     }
     const results = await probeExternalResidencyEndpoints(candidates, this.secret, this.fetchImpl);
     for (const { names: endpointNames, result } of results) {
-      const residency: Residency =
-        result.state === 'connection-refused' || result.state === 'unloaded'
-          ? 'unloaded'
-          : 'unknown';
+      const residency = freeDecisionResidency(result);
       for (const name of endpointNames) {
         if (
           !this.starting.has(name) &&
@@ -313,7 +315,11 @@ export class ExternalModelServers {
     }
   }
 
-  /** Ensure the endpoint is reachable, starting it when `start_command` is configured. */
+  /**
+   * Ensure reachable first; start `start_command` detached, hidden and unref'd
+   * to survive the extension host. Without it, throw an actionable error. Called
+   * after freeing local and other managed servers, with GPUs available.
+   */
   async ensureStarted(name: string): Promise<void> {
     const pending = this.starting.get(name);
     if (pending) return pending;

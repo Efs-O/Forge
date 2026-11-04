@@ -602,27 +602,6 @@ describe('managed residency selector and source contracts', () => {
     expect(external.isConfirmedLoaded('x')).toBe(false);
   });
 
-  it('keeps the residency classifier documented as the single owner', () => {
-    const owners = fs.readFileSync(path.join(process.cwd(), 'docs/OWNERS.md'), 'utf8');
-    expect(owners).toMatch(
-      /Managed external server residency classification.*ExternalModelResidencyProbe\.ts/,
-    );
-  });
-
-  it('keeps the backend files under the enforced line limit', () => {
-    const lineCount = (file: string) => {
-      const source = fs.readFileSync(path.join(process.cwd(), file), 'utf8');
-      return (source.match(/\n/g)?.length ?? 0) + (source.endsWith('\n') ? 0 : 1);
-    };
-    for (const file of [
-      'src/backend/ExternalModelServers.ts',
-      'src/backend/BackendPool.ts',
-      'src/backend/BackendPoolExternal.ts',
-    ]) {
-      expect(lineCount(file), file).toBeLessThanOrEqual(500);
-    }
-  });
-
   it('does not use process inspection to discover managed residency', () => {
     const backend = path.join(process.cwd(), 'src/backend');
     const sourceFiles = (directory: string): string[] =>

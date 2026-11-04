@@ -5,6 +5,25 @@ export type ExternalModelResidencyProbeResult =
   | { state: 'connection-refused' | 'stale-claim' | 'unloaded' | 'unknown' }
   | { state: 'loaded'; matchesModel: boolean };
 
+export type ExternalResidency = 'unknown' | 'loaded' | 'unloaded';
+
+/** Keep uncertain endpoints eligible for the existing unload and busy checks. */
+export function freeDecisionResidency(
+  result: ExternalModelResidencyProbeResult,
+): ExternalResidency {
+  return result.state === 'connection-refused' || result.state === 'unloaded'
+    ? 'unloaded'
+    : 'unknown';
+}
+
+/** Map a probe to selector state; undefined leaves an unknown result unchanged. */
+export function selectorResidency(
+  result: ExternalModelResidencyProbeResult,
+): ExternalResidency | undefined {
+  if (result.state === 'unknown') return undefined;
+  return result.state === 'loaded' && result.matchesModel ? 'loaded' : 'unloaded';
+}
+
 const ModelsSchema = z.object({
   data: z.array(
     z.object({
