@@ -1,5 +1,26 @@
 # Forge — Recent Changes
 
+## 0.17.119
+
+- A job card now tells the truth when you finish a stopped run yourself, and its
+  age stays current. Stopping an `agent_task` turn wrote a `failed` row ("the
+  turn was cancelled"), counted it against the job and told Telegram; typing
+  "Resume" in that same job chat and completing the work left the card reading
+  `failed — the turn was cancelled · failing ×1` with `last_ok_at` still on the
+  previous run, because nothing linked that turn back to the job. A completed
+  turn in the chat a job names now closes a run stopped there: one `ok` row
+  carrying the first line of your own answer, the failure count cleared,
+  `last_ok_at` and `last_run_at` moved up, and `next_due_at` plus the last
+  observation left exactly where they were — and no Telegram message, since you
+  were in the chat. Only the two stopped-turn sentences are reconciled, so a
+  timeout, a config error or a stale-build row stays red. The card line kept the
+  age it had before the panel was closed until its first minute tick after
+  reopening, because the panel's relative-time clock only moved on a tick; it
+  now resets to the current time the moment the panel opens, so the age is right
+  at once. The row's tooltip, which the host formats rather than the webview,
+  is now re-read every 60 s while the panel is open, and that refresh stops with
+  the panel.
+
 ## 0.17.118
 
 Added opt-in local video and music generation with `generate_video` and

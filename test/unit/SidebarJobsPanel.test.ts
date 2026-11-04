@@ -13,11 +13,21 @@
 import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type * as vscode from 'vscode';
 import { defaultState, JobStore } from '../../src/jobs/JobStore';
-import { JobSchema, JobStateSchema, type Job, type JobFile } from '../../src/jobs/jobSchema';
-import { JobsPanelBridge, JOBS_REFRESH_DEBOUNCE_MS } from '../../src/sidebar/jobPanelUpdates';
+import {
+  JobSchema,
+  JobStateSchema,
+  type Job,
+  type JobFile,
+  type RunRow,
+} from '../../src/jobs/jobSchema';
+import {
+  JobsPanelBridge,
+  JOBS_PANEL_REFRESH_INTERVAL_MS,
+  JOBS_REFRESH_DEBOUNCE_MS,
+} from '../../src/sidebar/jobPanelUpdates';
 import { ChatCapacityError, type ForgeHostFacade } from '../../src/sidebar/ForgeHostFacade';
 import { chatCapMessage } from '../../src/sidebar/sessionTypes';
 import type { HostToWebview, JobPanelMeta } from '../../src/sidebar/messageBridge';
@@ -145,6 +155,31 @@ class FailsAfterFirstStore extends JobStore {
     this.reads += 1;
     if (this.reads === 1) return super.loadAll();
     throw new Error('EACCES: permission denied');
+  }
+}
+
+/**
+ * A store that answers its own reads from memory and never touches the disk.
+ * The refresh-pulse tests run on fake timers, and a real file read is a
+ * macrotask that no amount of timer advance completes, so a re-read triggered
+ * by the pulse has to resolve in microtasks to publish at all. This store also
+ * keeps `Date` as the only moving part, which is what the pulse is for.
+ */
+class PulseStore extends JobStore {
+  constructor(
+    rootDir: string,
+    private readonly listed: JobFile[],
+  ) {
+    super(rootDir);
+  }
+  override async loadAll(): Promise<JobFile[]> {
+    return [...this.listed];
+  }
+  override async load(id: string): Promise<JobFile | undefined> {
+    return this.listed.find((file) => file.job.id === id);
+  }
+  override async readRuns(): Promise<RunRow[]> {
+    return [];
   }
 }
 
@@ -398,5 +433,117 @@ describe('JobsPanelBridge — clicking a job row', () => {
     await bridge.clickJob(1, 'beta'); // a click from the panel that was replaced
     expect(facadeLog.restored).toHaveLength(0);
     expect(facadeLog.created).toBe(0);
+  });
+});
+
+describe('JobsPanelBridge — the age a card shows stays current', () => {
+  /** A run at a fixed instant. The fake clock starts ten minutes after it, so
+   *  the first snapshot says `10m ago` and each pulse after that says one more.
+   *  That text is host-formatted inside the snapshot (`jobDescribe.formatWhen`),
+   *  so without the pulse it stayed frozen at whatever moment the last store
+   *  write happened — the "23h ago" on a panel that had been open for a day.
+   */
+  const BASE = 1_700_000_000_000;
+
+  /** The `last run:` text of the alpha row in every snapshot, in posted order. */
+  const ages = (): string[] =>
+    snapshots().map(
+      (rows) =>
+        /last run: ([^\n]+)/.exec(rows.find((row) => row.id === 'alpha')?.description ?? '')?.[1] ??
+        '',
+    );
+
+  /** Pin the clock after the run, open the panel, and let the read it starts
+   *  land. This store answers from memory, so a microtask flush is all it takes.
+   */
+  async function openAfterTheRun(panelId = 1): Promise<JobsPanelBridge> {
+    const bridge = makeBridge({
+      storeOverride: new PulseStore(root, [
+        {
+          job: job({ id: 'alpha', name: 'Alpha' }),
+          state: state({ last_run_at: BASE, last_ok_at: BASE }),
+        },
+      ]),
+    });
+    vi.setSystemTime(BASE + 10 * 60_000);
+    bridge.openPanel(panelId);
+    await vi.advanceTimersByTimeAsync(1);
+    return bridge;
+  }
+
+  it('re-reads on the pulse while the panel is open, so the age moves', async () => {
+    vi.useFakeTimers();
+    try {
+      await openAfterTheRun();
+      expect(ages()).toEqual(['10m ago']);
+      await vi.advanceTimersByTimeAsync(JOBS_PANEL_REFRESH_INTERVAL_MS);
+      expect(ages()).toEqual(['10m ago', '11m ago']);
+      await vi.advanceTimersByTimeAsync(JOBS_PANEL_REFRESH_INTERVAL_MS);
+      expect(ages()).toEqual(['10m ago', '11m ago', '12m ago']);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('a close stops the pulse, and the card keeps the age the last read gave it', async () => {
+    vi.useFakeTimers();
+    try {
+      const bridge = await openAfterTheRun();
+      await vi.advanceTimersByTimeAsync(JOBS_PANEL_REFRESH_INTERVAL_MS);
+      expect(ages()).toEqual(['10m ago', '11m ago']);
+      bridge.closePanel(1);
+      await vi.advanceTimersByTimeAsync(JOBS_PANEL_REFRESH_INTERVAL_MS * 3);
+      expect(ages()).toEqual(['10m ago', '11m ago']);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('dispose stops the pulse too, which is what extension teardown calls', async () => {
+    vi.useFakeTimers();
+    try {
+      const bridge = await openAfterTheRun();
+      await vi.advanceTimersByTimeAsync(JOBS_PANEL_REFRESH_INTERVAL_MS);
+      expect(ages()).toEqual(['10m ago', '11m ago']);
+      bridge.dispose();
+      await vi.advanceTimersByTimeAsync(JOBS_PANEL_REFRESH_INTERVAL_MS * 3);
+      expect(ages()).toEqual(['10m ago', '11m ago']);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('reopening the panel that is already open does not stack a second timer', async () => {
+    vi.useFakeTimers();
+    try {
+      const bridge = await openAfterTheRun();
+      bridge.openPanel(1); // the same generation, already open: a read, not a timer
+      await vi.advanceTimersByTimeAsync(1);
+      expect(ages()).toEqual(['10m ago', '10m ago']);
+      await vi.advanceTimersByTimeAsync(JOBS_PANEL_REFRESH_INTERVAL_MS * 2);
+      // Two reads for the two opens, then one per minute. A second timer would
+      // have posted the same age twice a minute: six rows by now, not four.
+      expect(ages()).toEqual(['10m ago', '10m ago', '11m ago', '12m ago']);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('a pulse whose read lands after the panel closed publishes nothing', async () => {
+    vi.useFakeTimers();
+    try {
+      const bridge = await openAfterTheRun();
+      expect(ages()).toEqual(['10m ago']);
+      // Fire the pulse without draining the microtasks its read needs, so the
+      // close arrives while that read is still going. The read finishes, the
+      // publish guard (its own sequence plus `isCurrent`) fails, and nothing
+      // is posted into a webview that no longer has this panel open.
+      vi.advanceTimersByTime(JOBS_PANEL_REFRESH_INTERVAL_MS);
+      bridge.closePanel(1);
+      await vi.advanceTimersByTimeAsync(JOBS_PANEL_REFRESH_INTERVAL_MS);
+      expect(ages()).toEqual(['10m ago']);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 });

@@ -1,5 +1,13 @@
 import { formatAthensDateTime, parseResult } from './agentTaskPrompt';
 
+/**
+ * The two sentences a stopped turn reports, exported so the resumed-run
+ * reconciler (`resumedRun.ts`) matches the row it was written from instead of
+ * retyping the string and drifting from it.
+ */
+export const CANCELLED_TURN_ERROR = 'the turn was cancelled';
+export const INTERRUPTED_TURN_ERROR = 'the turn was interrupted';
+
 /** The parsed outcome of an agent turn's final message. */
 export interface AgentTaskOutcome {
   /** ok | no_change | skipped | failed | timeout. */
@@ -38,7 +46,12 @@ export function outcomeOf(
     return { kind: 'failed', sentence: result.error, restart: false, finalText };
   }
   if (result.kind === 'cancelled' || result.kind === 'interrupted') {
-    return { kind: 'failed', sentence: `the turn was ${result.kind}`, restart: false, finalText };
+    return {
+      kind: 'failed',
+      sentence: result.kind === 'cancelled' ? CANCELLED_TURN_ERROR : INTERRUPTED_TURN_ERROR,
+      restart: false,
+      finalText,
+    };
   }
   const parsed = parseResult(finalText);
   return {

@@ -55,7 +55,7 @@ import type { ArchivedSessions } from './ArchivedSessions';
 import { createConversationEvictionSignals } from './conversationEvictionSignals';
 import type { ConversationRetentionScheduler } from './ConversationRetentionScheduler';
 import { wireConversationTabs } from './conversationTabsWiring';
-
+import { withResumedRunReconciliation } from '../jobs/resumedRun';
 /** What the provider lends its collaborators. */
 export interface SidebarHost {
   getConfig: () => ForgeConfig;
@@ -360,7 +360,7 @@ export function wireSidebar(host: SidebarHost, parts: SidebarParts): SidebarRunt
     persistSession: host.persistSession,
     onConversationActivity: (id) => retentionRef.current?.markActivity(id),
     postSessionSync: host.postSessionSync,
-    evaluateAfterTurn: (conv, chain) => budget.evaluateAfterTurn(conv, chain),
+    evaluateAfterTurn: withResumedRunReconciliation(budget),
     evaluateAtAdmission: (conv) => budget.evaluateAtAdmission(conv),
     resetContextWarning: (conversationId) => budget.resetWarning(conversationId),
     attachmentStore: parts.attachmentStore,

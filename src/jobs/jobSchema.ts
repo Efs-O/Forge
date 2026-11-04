@@ -272,6 +272,12 @@ export const RunRowSchema = z.object({
   error: z.string().optional(),
   /** How many outbox items were delivered for this run. */
   delivered: z.number().int().nonnegative().default(0),
+  /**
+   * True on the row that closes a run the owner stopped and then finished by
+   * hand in the job's chat (`resumedRun.ts`). Absent on every row the scheduler
+   * writes, so old logs parse unchanged.
+   */
+  resumed: z.boolean().optional(),
 });
 export type RunRow = z.infer<typeof RunRowSchema>;
 

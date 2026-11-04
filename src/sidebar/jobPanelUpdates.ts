@@ -2,19 +2,25 @@
  * The sessions panel's Jobs section: the only place the sidebar reads the job
  * store, and the only thing that keeps an open panel current.
  *
- * Two sources feed one refresh path. Successful writes in this process arrive
+ * Three sources feed one refresh path. Successful writes in this process arrive
  * through `JobStore.addLocalChangeListener` (the scheduler, `manage_jobs`, and
  * Telegram `/job` all write through `JobStore`, so none of them needs its own
  * panel callback); writes from another window arrive through `fs.watch` on the
- * three directories the store owns. Both land on one debounced reload, so a
- * burst of writes — a run row and the state patch that follows it — converges
- * on a single snapshot rather than two.
+ * three directories the store owns; and, while the panel is open, a 60 s pulse
+ * re-reads on its own. All three land on the same reload, so a burst of writes
+ * — a run row and the state patch that follows it — converges on a single
+ * snapshot rather than two.
+ *
+ * The pulse is what keeps a card's "23h ago" honest: `formatWhen()` runs
+ * host-side when the snapshot is built, so a row nothing writes to would keep
+ * its time text frozen at whatever moment the last write happened, however
+ * long the panel stayed open.
  *
  * **What cancels it:** `jobsPanelClosed` for the generation that opened it,
  * the sidebar view's own disposal, and `dispose()` at extension teardown each
- * release the store listener, all three watchers, the debounce timer, and the
- * in-flight read's right to publish (its guard below fails once the panel is
- * gone). Nothing here outlives an open panel.
+ * release the store listener, all three watchers, the debounce timer, the
+ * refresh pulse, and the in-flight read's right to publish (its guard below
+ * fails once the panel is gone). Nothing here outlives an open panel.
  *
  * **What says this snapshot belongs to this panel:** the pair `(panelId, view)`.
  * `panelId` is the webview's open-panel generation and `view` is the exact
@@ -36,6 +42,14 @@ import type { HostToWebview } from './messageBridge';
 
 /** How long a burst of store writes has to settle before the panel re-reads. */
 export const JOBS_REFRESH_DEBOUNCE_MS = 400;
+
+/**
+ * How long the panel may sit with no write before its relative times are
+ * recomputed. One minute: the panel shows times rounded to hours and days, so
+ * a longer gap would show a stale one, and a shorter one would re-read the
+ * store for a panel nobody is looking at.
+ */
+export const JOBS_PANEL_REFRESH_INTERVAL_MS = 60_000;
 
 /** One directory the store owns, plus the file names in it that the panel shows. */
 interface WatchTarget {
@@ -67,16 +81,19 @@ export class JobsPanelBridge {
   private releaseStoreListener: () => void = () => {};
   private watchers: fs.FSWatcher[] = [];
   private debounce: ReturnType<typeof setTimeout> | undefined;
+  /** Re-reads on a pulse while the panel is open, so host-formatted "ago" text stays current. */
+  private pulse: ReturnType<typeof setInterval> | undefined;
   /** Counts reads; only the newest one may publish, so an older read cannot overwrite a newer snapshot. */
   private publishSeq = 0;
 
   constructor(private readonly deps: JobsPanelBridgeDeps) {}
 
   /**
-   * The panel opened. Captures this generation and this view, subscribes, and
-   * pushes the store as it reads right now. A reopen under a different
-   * generation — or the same number on a reloaded view — replaces the previous
-   * subscription rather than stacking a second one.
+   * The panel opened. Captures this generation and this view, subscribes,
+   * starts the refresh pulse, and pushes the store as it reads right now. A
+   * reopen under a different generation — or the same number on a reloaded
+   * view — replaces the previous subscription rather than stacking a second
+   * one, and a reopen of the panel that is already open starts nothing.
    */
   openPanel(panelId: number): void {
     const view = this.deps.getView();
@@ -87,6 +104,13 @@ export class JobsPanelBridge {
     if (!this.active) {
       this.active = { panelId, view };
       this.subscribe();
+      // One pulse per open panel: the `!this.active` guard above is what makes
+      // reopening the panel that is already open start nothing rather than
+      // stack a second timer, and `release()` — close, a replaced generation,
+      // a replaced view, `dispose()` — clears it on every path that stops the
+      // pushes. It re-reads through `refresh()`, so the same staleness guards
+      // apply: a pulse that lands after the panel closed publishes nothing.
+      this.pulse = setInterval(() => void this.refresh(), JOBS_PANEL_REFRESH_INTERVAL_MS);
     }
     void this.refresh();
   }
@@ -272,6 +296,10 @@ export class JobsPanelBridge {
     if (this.debounce) {
       clearTimeout(this.debounce);
       this.debounce = undefined;
+    }
+    if (this.pulse) {
+      clearInterval(this.pulse);
+      this.pulse = undefined;
     }
   }
 

@@ -868,6 +868,7 @@ the configured override stays the existing `video.ffmpeg_path` key.
 | `retitle` action: reading this workspace's chats off disk            | `src/jobs/retitleRecords.ts`                                     |
 | `retitle` action: gates, model ask, host apply, run row             | `src/jobs/retitleRun.ts`                                          |
 | `agent_task` report (outcome mapping, report text)                 | `src/jobs/agentTaskReport.ts`                                    |
+| A stopped run the owner closed by finishing it in the job's chat    | `src/jobs/resumedRun.ts` (wired at `src/sidebar/sidebarWiring.ts`) |
 | `llamacpp_update` action (stages 6-8, switch, rollback)    | `src/jobs/actions/llamacppUpdate.ts`                           |
 | llama.cpp install pipeline (download, verify, smoke test)  | `src/jobs/actions/llamacppInstall.ts`                          |
 | `install_llamacpp` tool (on-demand install + switch)       | `src/tools/llamacppInstallTool.ts`                             |

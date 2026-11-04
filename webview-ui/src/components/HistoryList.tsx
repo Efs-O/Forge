@@ -97,10 +97,15 @@ export function HistoryList({
   const contentSearch = useSessionContentSearch({ panelId, tab, query });
   // Relative last-run labels age by the minute without another store read. The
   // tick runs only while the panel is open — a hidden panel has nothing to age,
-  // and the interval goes with the close.
+  // and the interval goes with the close. It also resets the clock on open: a
+  // panel reopened hours later has to draw the age against the time it is now,
+  // not against the last tick before it closed, which is what a row showed until
+  // the first minute tick after reopening — a run stopped yesterday reading
+  // "23h ago" the moment you opened the panel again.
   const [nowTick, setNowTick] = useState(() => new Date());
   useEffect(() => {
     if (!expanded) return;
+    setNowTick(new Date());
     const timer = setInterval(() => setNowTick(new Date()), 60_000);
     return () => clearInterval(timer);
   }, [expanded]);

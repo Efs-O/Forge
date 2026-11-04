@@ -954,4 +954,59 @@ describe('sessions panel — the age line keeps itself current', () => {
       vi.useRealTimers();
     }
   });
+
+  /** The outcome line of a job row — the one that carries "… · 2h ago". */
+  const jobAgeLine = (): string => {
+    const row = container.querySelector('#history-jobs-list .history-item-row');
+    if (!row) return '';
+    return Array.from(row.querySelectorAll('.history-item-meta')).map((el) => el.textContent ?? '')[1] ?? '';
+  };
+
+  it('draws the age against the clock as it is now when the panel reopens', () => {
+    // The reopen is the case that mattered. A panel closed for ten hours kept
+    // showing the age from the last tick before it closed, and only the first
+    // minute tick after reopening moved it: a run stopped yesterday read
+    // "23h ago" the moment you opened the panel again, and stayed there for a
+    // minute. The reset belongs in the effect that owns the timer, so it runs
+    // on every open and goes away with the close.
+    vi.useFakeTimers();
+    try {
+      const job = {
+        id: 'j1',
+        name: 'Maya engine update',
+        schedule: 'daily at 08:20',
+        enabled: true,
+        description: 'Job "Maya engine update" [j1]',
+        lastOutcomeLabel: 'ok',
+        consecutiveFailures: 0,
+        lastRun: {
+          at: Date.now() - 10 * 60_000,
+          outcome: 'ok' as const,
+          detail: 'nothing changed',
+        },
+        runningConversationId: null,
+      };
+      render({}, { jobs: [job], jobsLoaded: true });
+      openTab('jobs');
+      expect(jobAgeLine()).toContain('10m ago');
+      // A tick moves the age, exactly as it always did.
+      act(() => {
+        vi.advanceTimersByTime(60_000);
+      });
+      expect(jobAgeLine()).toContain('11m ago');
+      // Close, ten hours pass with the panel shut and no timer running, reopen.
+      render({}, { expanded: false, jobs: [job], jobsLoaded: true });
+      act(() => {
+        vi.advanceTimersByTime(10 * 3_600_000);
+      });
+      render({}, { expanded: true, jobs: [job], jobsLoaded: true });
+      openTab('jobs');
+      // Eleven minutes after the run would still be the honest answer only if
+      // the clock had been frozen; it is 10h11m after, and no tick has run
+      // since the reopen, so this line can only be right if the open reset it.
+      expect(jobAgeLine()).toContain('10h ago');
+    } finally {
+      vi.useRealTimers();
+    }
+  });
 });
