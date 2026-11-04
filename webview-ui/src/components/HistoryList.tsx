@@ -224,6 +224,11 @@ export function HistoryList({
           maxLength={SESSION_SEARCH_QUERY_MAX_CHARS}
           aria-label={`Search ${SEARCH_PLACEHOLDER[tab].replace(/^Search /, '').toLowerCase()}`}
           placeholder={SEARCH_PLACEHOLDER[tab]}
+          title={
+            tab === 'jobs'
+              ? undefined
+              : 'All keywords must match. Use "exact phrases" and -exclude or -"excluded phrases".'
+          }
           value={query}
           onChange={(event) => setQuery(event.target.value)}
           onKeyDown={(event) => {
@@ -236,6 +241,9 @@ export function HistoryList({
             setQuery('');
           }}
         />
+        {tab !== 'jobs' && (
+          <span className="history-search-help">All keywords · "exact phrase" · -exclude</span>
+        )}
         <div
           role="tablist"
           aria-label="Panel sections"
@@ -310,6 +318,7 @@ export function HistoryList({
           jobs={jobs}
           jobsLoaded={jobsLoaded}
           contentMatches={contentSearch.ids}
+          contentHits={contentSearch.hits}
           contentSearchPending={contentSearch.pending}
           contentSearchUnreadable={contentSearch.unreadable}
           nowTick={nowTick}

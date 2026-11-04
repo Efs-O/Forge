@@ -93,12 +93,14 @@ function makeSearch(
     overflow?: ArchivedSessions;
     passBudgetMs?: number;
     resumeMs?: number;
+    originChannelOf?: (id: string) => string | undefined;
   } = {},
 ): SessionContentSearch {
   const bridge = new SessionContentSearch({
     getSidebar: () => sidebar,
     getView: () => options.view ?? view,
     ...(options.overflow ? { overflow: options.overflow } : {}),
+    ...(options.originChannelOf ? { originChannelOf: options.originChannelOf } : {}),
     passBudgetMs: options.passBudgetMs ?? 1,
     resumeMs: options.resumeMs ?? 5,
   });
@@ -254,6 +256,48 @@ describe('the in-memory half: open tabs and recent history', () => {
     await waitFor(() => latestResult()?.complete === true, 'the search never finished');
     expect(latestResult()?.ids).toEqual(['open-1']);
     expect(latestResult()?.query).toBe('  OVERFLOWS  ');
+  });
+
+  it('combines title, badge and separate messages, returning a scored preview', async () => {
+    const chat = conversation('rich', 'Model startup', 1, [
+      { role: 'user', content: 'server failed' },
+      { role: 'assistant', content: 'renderer fixed' },
+    ]);
+    chat.origin_agent = 'claude';
+    const bridge = makeSearch(session([], [chat]));
+    query(bridge, { query: 'model server renderer claude' });
+    await waitFor(() => latestResult()?.complete === true, 'rich search never finished');
+    expect(latestResult()?.ids).toEqual(['rich']);
+    expect(latestResult()?.hits).toEqual([
+      { id: 'rich', score: 17, snippet: 'server failed\nrenderer fixed' },
+    ]);
+  });
+
+  it('rejects a title match when its transcript contains an excluded phrase', async () => {
+    const chat = conversation('excluded', 'Model server', 1, [
+      { role: 'assistant', content: 'Out of memory' },
+    ]);
+    const bridge = makeSearch(session([], [chat]));
+    query(bridge, { query: 'server -"out of memory"' });
+    await waitFor(() => latestResult()?.complete === true, 'exclusion search never finished');
+    expect(latestResult()?.ids).toEqual([]);
+    query(bridge, { query: '-ollama', requestId: 2 });
+    await waitFor(() => latestResult()?.requestId === 2 && latestResult()?.complete === true, 'negative-only search never finished');
+    expect(latestResult()?.ids).toEqual(['excluded']);
+    expect(latestResult()?.hits?.[0].snippet).toBeUndefined();
+  });
+
+  it('uses live remote bindings for cross-field and excluded badge terms', async () => {
+    const chat = conversation('phone', 'Server', 1, [{ role: 'user', content: 'model loaded' }]);
+    let channel = 'telegram';
+    const bridge = makeSearch(session([], [chat]), { originChannelOf: () => channel });
+    query(bridge, { query: 'telegram model' });
+    await waitFor(() => latestResult()?.complete === true, 'badge search never finished');
+    expect(latestResult()?.ids).toEqual(['phone']);
+    channel = 'whatsapp';
+    query(bridge, { query: 'server -whatsapp', requestId: 2 });
+    await waitFor(() => latestResult()?.requestId === 2 && latestResult()?.complete === true, 'badge exclusion never finished');
+    expect(latestResult()?.ids).toEqual([]);
   });
 });
 

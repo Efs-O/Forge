@@ -226,6 +226,7 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
     this.sessionSearch = new SessionContentSearch({
       getSidebar: () => this.sidebar,
       getView: () => this.view,
+      originChannelOf: (id) => this.remoteOriginQuery?.(id),
       ...(this.historyArchive ? { overflow: this.historyArchive.overflow } : {}),
     });
     this.agentLoop.restoreSessionTimers(this.sidebar);

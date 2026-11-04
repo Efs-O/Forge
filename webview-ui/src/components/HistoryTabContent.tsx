@@ -18,6 +18,7 @@ import type {
 import { filterChatRows, filterJobRows, noMatchMessage } from '../historyFilter';
 import { HistoryChatRow, HistoryOpenRow } from './HistoryChatRow';
 import { HistoryJobRow } from './HistoryJobRow';
+import type { SessionSearchHit } from '../../../src/sidebar/sessionSearchMessages';
 
 /** The three sections the panel shows as tabs rather than as three scroll boxes. */
 export type PanelTab = 'chats' | 'archived' | 'jobs';
@@ -42,6 +43,7 @@ export interface HistoryTabContentProps {
    * walk is still going and an empty set proves nothing yet.
    */
   contentMatches: ReadonlySet<string>;
+  contentHits?: ReadonlyMap<string, SessionSearchHit>;
   /** True while the host has not finished reading the chats this tab shows. */
   contentSearchPending: boolean;
   /** Archived chats the host could not read; a no-match must not be read as proof. */
@@ -70,6 +72,7 @@ export function HistoryTabContent({
   jobs,
   jobsLoaded,
   contentMatches,
+  contentHits,
   contentSearchPending,
   contentSearchUnreadable = 0,
   nowTick,
@@ -94,6 +97,8 @@ export function HistoryTabContent({
         <HistoryChatRow
           key={item.id}
           item={item}
+          query={query}
+          snippet={contentHits?.get(item.id)?.snippet}
           renaming={renamingId === item.id}
           menuOpen={menuId === item.id}
           onOpenMenu={setMenuId}
@@ -169,7 +174,7 @@ export function HistoryTabContent({
   }
 
   if (tab === 'archived') {
-    const rows = filterChatRows(closed, query, contentMatches);
+    const rows = filterChatRows(closed, query, contentMatches, contentHits);
     if (rows.length > 0)
       return (
         <>
@@ -181,7 +186,7 @@ export function HistoryTabContent({
     return <p id="history-archive-empty">Nothing archived yet.</p>;
   }
 
-  const openRows = filterChatRows(openItems, query, contentMatches);
+  const openRows = filterChatRows(openItems, query, contentMatches, contentHits);
   if (openRows.length === 0) {
     // Nothing to show and nothing searched is the panel's own empty state;
     // nothing to show *because* of a search is the search's answer.
@@ -196,6 +201,8 @@ export function HistoryTabContent({
             <HistoryOpenRow
               key={item.id}
               item={item}
+              query={query}
+              snippet={contentHits?.get(item.id)?.snippet}
               active={item.id === activeId}
               live={
                 streamingIds.has(item.id)

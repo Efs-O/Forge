@@ -67,6 +67,26 @@
   margin-left: 0;
 }
 
+.history-search-preview {
+  grid-column: 2 / -1;
+  min-width: 0;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  display: -webkit-box;
+  -webkit-line-clamp: 3;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+  font-size: 11px;
+  line-height: 1.4;
+  color: var(--vscode-descriptionForeground);
+}
+
+.history-chat-item mark {
+  color: var(--vscode-editor-findMatchHighlightForeground, inherit);
+  background: var(--vscode-editor-findMatchHighlightBackground, #ea5c0040);
+  border-radius: 2px;
+}
+
 .history-item-sender {
   min-width: 0;
   display: flex;

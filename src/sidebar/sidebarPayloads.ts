@@ -12,7 +12,7 @@ import type { ArchivedSessionMeta } from './ArchivedSessions';
 import { availableProfilesFor, mergeGroupsIntoModel } from '../config/ConfigResolver';
 import type { HostToWebview, ModelResidency, SessionSyncMsg } from './messageBridge';
 import type { HistoryPanelSize } from './historyPanelSize';
-import type { RemoteOriginChannel } from '../remote/remoteInboundSchema';
+import { withOriginChannel } from './chatProvenance';
 import { classifyModelRoute } from '../llm/ModelRouteClassifier';
 import { isManagedExternalModel } from '../backend/ExternalModelServers';
 import type { ConversationRuntime, SidebarRuntime } from './sessionTypes';
@@ -100,26 +100,6 @@ export function buildModelsMessage(
     }),
     active: activeModel,
   };
-}
-
-/**
- * The rows that came in from a phone: the channel the remote store binds to a
- * conversation id, stamped onto the row that panel is about to draw. The
- * caller's reader may name any channel (`fake` is the test transport's); a
- * channel outside `RemoteOriginChannel` leaves its row exactly as it was, since
- * a badge that says the wrong thing is worse than a badge that is missing.
- */
-function withOriginChannel<T extends { id: string }>(
-  rows: T[],
-  originChannelOf?: (conversationId: string) => string | undefined,
-): Array<T & { origin_channel?: RemoteOriginChannel }> {
-  if (!originChannelOf) return rows;
-  return rows.map((row): T & { origin_channel?: RemoteOriginChannel } => {
-    const channel = originChannelOf(row.id);
-    return channel === 'telegram' || channel === 'whatsapp'
-      ? { ...row, origin_channel: channel }
-      : row;
-  });
 }
 
 /**

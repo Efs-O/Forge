@@ -2,10 +2,10 @@
  * The sessions panel's content search: the only place the host reads saved
  * transcripts to answer a search box.
  *
- * Titles and sender badges are filtered in the webview from the rows it already
- * has (`webview-ui/src/historyFilter.ts`); what the webview cannot do is read
- * the transcripts, so this bridge answers that, panel-scoped, exactly the way
- * `jobPanelUpdates.ts` answers the Jobs tab. It holds no copy of the session:
+ * Metadata matches can appear immediately from the webview's existing rows
+ * (`webview-ui/src/historyFilter.ts`). This bridge evaluates the full query
+ * across metadata and saved messages, including exclusions, panel-scoped like
+ * `jobPanelUpdates.ts` for the Jobs tab. It holds no copy of the session:
  * every read goes through `getSidebar()` or `ArchivedSessions.readForSearch`,
  * so a chat that closed, was renamed or was deleted mid-scan is searched as it
  * is at the moment the scan reaches it, never as it was when the panel opened.
@@ -37,11 +37,18 @@ import type { ChatMessage } from '../llm/types';
 import { textContent } from './sessionProjections';
 import type { SlimPersistMessage, SidebarRuntime } from './sessionTypes';
 import { ArchivedSessions, type ArchivedSessionMeta } from './ArchivedSessions';
+import { chatRowView, withOriginChannel, type ChatProvenance } from './chatProvenance';
+import {
+  matchSessionSearch,
+  parseSessionSearchQuery,
+  type SessionSearchQuery,
+} from './sessionSearchQuery';
 import type { HostToWebview } from './messageBridge';
 import {
   SESSION_SEARCH_QUERY_MAX_CHARS,
   type SessionSearchQueryMsg,
   type SessionSearchTab,
+  type SessionSearchHit,
 } from './sessionSearchMessages';
 
 /**
@@ -109,6 +116,8 @@ export interface SessionContentSearchDeps {
   getView: () => vscode.WebviewView | undefined;
   /** The overflow archive, or absent when this window has no workspace storage. */
   overflow?: ArchivedSessions;
+  /** The same live remote binding reader used by the panel's session rows. */
+  originChannelOf?: (conversationId: string) => string | undefined;
   /** Injectable timing; the exported constants are the production values. */
   passBudgetMs?: number;
   resumeMs?: number;
@@ -116,7 +125,7 @@ export interface SessionContentSearchDeps {
 
 /** Where one id's text came from, or why it could not be read. */
 type SearchText =
-  | { kind: 'text'; text: string }
+  | { kind: 'text'; text: string; meta: ChatProvenance }
   | { kind: 'unreadable'; reason: string }
   | { kind: 'gone' };
 
@@ -127,13 +136,13 @@ interface Scan {
   tab: SessionSearchTab;
   /** What was typed, echoed back so the webview can drop a reply for other text. */
   query: string;
-  /** The needle, made the same way `historyFilter.ts` makes its title match. */
-  needle: string;
+  /** The same parsed query the webview uses for metadata matching. */
+  parsed: SessionSearchQuery;
   view: vscode.WebviewView;
   /** Ids still to be read, newest first, as they were when the scan started. */
   pending: string[];
   /** Matches reached so far, newest first — every pass republishes this whole set. */
-  matched: string[];
+  matched: SessionSearchHit[];
   unreadable: number;
   /** Overflow rows read from the index at scan start, so a pass is not re-listing. */
   rowsById: Map<string, ArchivedSessionMeta>;
@@ -175,8 +184,8 @@ export class SessionContentSearch {
     }
     if (!view) return;
     const { panelId, requestId, tab, query } = parsed.data;
-    const needle = query.trim().toLowerCase();
-    if (!needle) {
+    const parsedQuery = parseSessionSearchQuery(query);
+    if (!parsedQuery.include.length && !parsedQuery.exclude.length) {
       this.current = undefined;
       this.clearResume();
       this.post(view, {
@@ -195,7 +204,7 @@ export class SessionContentSearch {
       requestId,
       tab,
       query,
-      needle,
+      parsed: parsedQuery,
       view,
       pending: [],
       matched: [],
@@ -270,7 +279,13 @@ export class SessionContentSearch {
       // is looking at, so it is dropped rather than published.
       if (!this.isCurrent(scan)) return;
       if (found.kind === 'text') {
-        if (found.text.toLowerCase().includes(scan.needle)) scan.matched.push(id);
+        const meta = withOriginChannel([{ ...found.meta, id }], this.deps.originChannelOf)[0]!;
+        const match = matchSessionSearch(scan.parsed, {
+          title: meta.title,
+          badge: chatRowView(meta).badge.label,
+          body: found.text,
+        });
+        if (match) scan.matched.push({ id, ...match });
       } else if (found.kind === 'unreadable') {
         scan.unreadable += 1;
         log.warn(`[SessionContentSearch] could not read ${id}: ${found.reason}`);
@@ -293,14 +308,20 @@ export class SessionContentSearch {
     const conversation =
       sidebar.conversations.find((item) => item.id === id) ??
       sidebar.history.find((item) => item.id === id);
-    if (conversation) return { kind: 'text', text: transcriptSearchText(conversation.messages) };
+    if (conversation)
+      return {
+        kind: 'text',
+        text: transcriptSearchText(conversation.messages),
+        meta: conversation,
+      };
     const row = scan.rowsById.get(id);
     if (!row) return { kind: 'gone' };
     const source = await (this.deps.overflow?.readForSearch(row) ?? Promise.resolve(undefined));
     if (source === undefined) return { kind: 'gone' };
     if (source.kind === 'body')
-      return { kind: 'text', text: transcriptSearchText(source.messages) };
-    if (source.kind === 'log') return { kind: 'text', text: sessionLogSearchText(source.rows) };
+      return { kind: 'text', text: transcriptSearchText(source.messages), meta: row };
+    if (source.kind === 'log')
+      return { kind: 'text', text: sessionLogSearchText(source.rows), meta: row };
     return { kind: 'unreadable', reason: source.reason };
   }
 
@@ -312,7 +333,8 @@ export class SessionContentSearch {
       requestId: scan.requestId,
       tab: scan.tab,
       query: scan.query,
-      ids: [...scan.matched],
+      ids: scan.matched.map((hit) => hit.id),
+      ...(scan.matched.length ? { hits: [...scan.matched] } : {}),
       complete,
       ...(scan.unreadable > 0 ? { unreadable: scan.unreadable } : {}),
     });

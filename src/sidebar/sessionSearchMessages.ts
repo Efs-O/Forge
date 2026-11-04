@@ -25,6 +25,13 @@
 /** The two tabs that hold chats. Jobs search stays in the webview's own list. */
 export type SessionSearchTab = 'chats' | 'archived';
 
+/** A bounded preview and shared relevance score; no full transcript crosses the bridge. */
+export interface SessionSearchHit {
+  id: string;
+  score: number;
+  snippet?: string;
+}
+
 /**
  * How long the webview waits after the last keystroke before it asks the host.
  * Owned here so both sides and the tests read one number; the timer itself is
@@ -48,7 +55,7 @@ export interface SessionSearchQueryMsg {
   /** This panel's query counter, so a late reply to an older query cannot land. */
   requestId: number;
   tab: SessionSearchTab;
-  /** Exactly what was typed. The host trims and lowercases it, then echoes it back. */
+  /** Exactly what was typed; the host parses keywords, phrases and exclusions. */
   query: string;
 }
 
@@ -66,8 +73,10 @@ export interface SessionSearchResultMsg {
   requestId: number;
   tab: SessionSearchTab;
   query: string;
-  /** Conversations whose saved text matches, in the order the scan reached them. */
+  /** Conversations satisfying the full query, in the order the scan reached them. */
   ids: string[];
+  /** Scores and previews for matching ids; omitted when there are no matches. */
+  hits?: SessionSearchHit[];
   /** False while the scan is still walking the archive; the panel says so. */
   complete: boolean;
   /** Archived chats this scan could not read, so a no-match is not taken as proof. */

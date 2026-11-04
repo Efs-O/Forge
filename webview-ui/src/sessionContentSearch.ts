@@ -25,6 +25,7 @@ import type { HostToWebview } from '../../src/sidebar/messageBridge';
 import {
   SESSION_SEARCH_DEBOUNCE_MS,
   type SessionSearchTab,
+  type SessionSearchHit,
 } from '../../src/sidebar/sessionSearchMessages';
 import { vscode } from './vscode';
 
@@ -32,6 +33,7 @@ import { vscode } from './vscode';
 export interface ContentSearchState {
   /** Conversations whose saved text matched. The panel filters its rows against these ids. */
   ids: ReadonlySet<string>;
+  hits: ReadonlyMap<string, SessionSearchHit>;
   /**
    * True from the moment a query is typed until the host says it has walked
    * everything: while it is true the panel must not report a no-match, because
@@ -45,6 +47,7 @@ export interface ContentSearchState {
 /** What a closed panel, a Jobs tab, or an empty box has: nothing searched, and nothing pending. */
 const NOTHING_SEARCHED: ContentSearchState = {
   ids: new Set<string>(),
+  hits: new Map(),
   pending: false,
   unreadable: 0,
 };
@@ -82,7 +85,7 @@ export function useSessionContentSearch(args: {
     // A search is running the moment the text changes, before the debounce has
     // fired and before the host has read a single chat, so the panel says
     // "searching" rather than "nothing matches" across the whole gap.
-    setState({ ids: new Set<string>(), pending: true, unreadable: 0 });
+    setState({ ids: new Set<string>(), hits: new Map(), pending: true, unreadable: 0 });
     const timer = setTimeout(() => {
       const requestId = ++sequence.current;
       const request: PendingRequest = { panelId, requestId, tab, query };
@@ -129,6 +132,7 @@ export function useSessionContentSearch(args: {
       // reached for this request, so a missed publish cannot leave half a result.
       setState({
         ids: new Set(message.ids),
+        hits: new Map(message.hits?.map((hit) => [hit.id, hit])),
         pending: !message.complete,
         unreadable: message.unreadable ?? 0,
       });

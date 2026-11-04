@@ -217,7 +217,7 @@ describe('applying what the host found', () => {
     // the filter that was already there.
     expect(closedTitles()).toEqual(['second chat']);
     answer({ tab: 'archived', query: 'second', ids: ['a'] });
-    expect(closedTitles()).toEqual(['hello man', 'second chat']);
+    expect(closedTitles()).toEqual(['second chat', 'hello man']);
   });
 
   it('says it is searching rather than that nothing matches, until the walk completes', () => {
@@ -275,6 +275,39 @@ describe('applying what the host found', () => {
     // asked for.
     type('hello');
     expect(closedTitles()).toEqual(['hello man']);
+  });
+
+  it('renders highlighted literal previews safely and orders results by relevance', () => {
+    render();
+    openTab('archived');
+    type('wobble');
+    answer({
+      ids: ['a', 'b'],
+      hits: [
+        { id: 'a', score: 1, snippet: 'a wobble' },
+        { id: 'b', score: 10, snippet: '<img src=x onerror=alert(1)> Wobble fixed' },
+      ],
+    });
+    expect(closedTitles()).toEqual(['second chat', 'hello man']);
+    const preview = container.querySelector('.history-search-preview')!;
+    expect(preview.textContent).toBe('<img src=x onerror=alert(1)> Wobble fixed');
+    expect(preview.querySelector('mark')?.textContent).toBe('Wobble');
+    expect(preview.querySelector('img')).toBeNull();
+    type('second');
+    expect(container.querySelector('.history-search-preview')).toBeNull();
+    expect(container.querySelector('.history-item-title mark')?.textContent).toBe('second');
+  });
+
+  it('keeps metadata matches hidden until exclusions are checked in the transcript', () => {
+    render();
+    openTab('archived');
+    type('second -ollama');
+    expect(closedTitles()).toEqual([]);
+    expect(container.querySelector('#history-search-pending')).not.toBeNull();
+    answer({ query: 'second -ollama', ids: [] });
+    expect(closedTitles()).toEqual([]);
+    answer({ query: 'second -ollama', ids: ['b'], hits: [{ id: 'b', score: 10 }] });
+    expect(closedTitles()).toEqual(['second chat']);
   });
 });
 

@@ -11,6 +11,7 @@ import { useCallback, useEffect, useLayoutEffect, useRef } from 'react';
 import type { ReactElement } from 'react';
 import type { SessionHistoryMeta, SessionTabMeta } from '../../../src/sidebar/messageBridge';
 import { chatRowView, type ChatProvenance } from '../historyFilter';
+import { SessionSearchPreview, SessionSearchText } from './SessionSearchPreview';
 
 /** The small outlined label beside a row: who it is answering, or `You`. */
 export function ChatRowBadge({ item }: { item: ChatProvenance }): ReactElement {
@@ -29,6 +30,8 @@ export function ChatRowBadge({ item }: { item: ChatProvenance }): ReactElement {
 
 interface HistoryChatRowProps {
   item: SessionHistoryMeta;
+  query?: string;
+  snippet?: string;
   renaming: boolean;
   menuOpen: boolean;
   onOpenMenu: (id: string | null) => void;
@@ -42,6 +45,8 @@ interface HistoryChatRowProps {
 
 export function HistoryChatRow({
   item,
+  query = '',
+  snippet,
   renaming,
   menuOpen,
   onOpenMenu,
@@ -141,10 +146,13 @@ export function HistoryChatRow({
         <span className="history-item-sender">
           <ChatRowBadge item={item} />
         </span>
-        <span className="history-item-title">{title}</span>
+        <span className="history-item-title">
+          <SessionSearchText text={title} query={query} />
+        </span>
         <span className="history-item-meta">
           {item.messageCount ?? 0} msg · {relativeTime(item.updatedAt)}
         </span>
+        <SessionSearchPreview snippet={snippet} query={query} />
       </button>
       <div className="history-item-menu-wrap" ref={menuRef}>
         <button
@@ -213,6 +221,8 @@ export function HistoryChatRow({
  */
 export function HistoryOpenRow({
   item,
+  query = '',
+  snippet,
   active,
   live,
   onSwitch,
@@ -220,6 +230,8 @@ export function HistoryOpenRow({
   onSetKeepOpen,
 }: {
   item: SessionTabMeta;
+  query?: string;
+  snippet?: string;
   active: boolean;
   live: 'running' | 'waiting' | 'queued' | 'open';
   onSwitch: (id: string) => void;
@@ -238,7 +250,9 @@ export function HistoryOpenRow({
         <span className="history-item-sender">
           <ChatRowBadge item={item} />
         </span>
-        <span className="history-item-title">{item.title}</span>
+        <span className="history-item-title">
+          <SessionSearchText text={item.title} query={query} />
+        </span>
         {live === 'running' ? (
           <span className="history-item-meta history-item-meta-running history-item-status">
             <span className="history-row-dot history-row-dot--running" aria-hidden="true" />
@@ -251,6 +265,7 @@ export function HistoryOpenRow({
             {live === 'queued' ? 'Queued' : live === 'waiting' ? 'Waiting' : 'Open'}
           </span>
         )}
+        <SessionSearchPreview snippet={snippet} query={query} />
       </button>
       <div className="history-item-row-actions">
         <button

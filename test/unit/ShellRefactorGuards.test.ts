@@ -105,10 +105,15 @@ describe('shell/core-group refactor guards', () => {
   // detail (hashes, paths, counts) at the end under "Detail for the record", so
   // an agent still gets the exact numbers without the owner wading through them.
   // Cap 6,577 keeps the same 25 bytes above the file.
-  it('config/templates/builtin/execute.njk is at most 6,577 bytes', () => {
+  // 2026-11-04, +78 bytes (6,630): the final-answer rule, one long bullet the
+  // owner found only half-followed, is split into six short ones, and it takes
+  // over the two parts only FORGE.md carried (what you measured versus only
+  // read; match depth to the question), so the rule lives in one place.
+  // Cap 6,655 keeps the same 25 bytes above the file.
+  it('config/templates/builtin/execute.njk is at most 6,655 bytes', () => {
     const file = path.join(root, 'config', 'templates', 'builtin', 'execute.njk');
     const size = fs.statSync(file).size;
-    expect(size, `execute.njk is ${size} bytes; the cap is 6577`).toBeLessThanOrEqual(6577);
+    expect(size, `execute.njk is ${size} bytes; the cap is 6655`).toBeLessThanOrEqual(6655);
   });
 
   it('the dead src/templates/builtin copy is deleted', () => {

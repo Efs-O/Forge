@@ -238,9 +238,11 @@ overlaps with an existing owner, extend the owner instead.
 | History panel shell: tabs, search, resize, dismissal | `webview-ui/src/components/HistoryList.tsx`     |
 | History panel rows (chat, open tab, job) and their badges | `webview-ui/src/components/HistoryChatRow.tsx` (open rows, `relativeTime`), `HistoryJobRow.tsx` |
 | What one tab of the panel shows: rows, empty, no-match | `webview-ui/src/components/HistoryTabContent.tsx` |
-| Panel row display rules: source badge, search, job status | `webview-ui/src/historyFilter.ts` (a row is searchable by its title, its badge, and the ids the host reports for its saved text) |
+| Panel row display rules: search ranking and job status | `webview-ui/src/historyFilter.ts` (title/badge metadata plus scored host results for saved text) |
 | Sessions panel search box: when it asks, which answer is still current | `webview-ui/src/sessionContentSearch.ts` (hook); host walk: `src/sidebar/sessionContentSearch.ts`; wire shapes + query validation: `src/sidebar/sessionSearchMessages.ts` |
 | What a chat content search may match (message text, not tool output, reasoning or hidden turns) | `src/sidebar/sessionContentSearch.ts` (`transcriptSearchText`, `sessionLogSearchText`) |
+| Session search query language, relevance scoring and highlight spans | `src/sidebar/sessionSearchQuery.ts`; safe preview rendering: `webview-ui/src/components/SessionSearchPreview.tsx` |
+| Shared chat title and sender-badge projection (host search + panel) | `src/sidebar/chatProvenance.ts` (`historyFilter.ts` re-exports it) |
 | Async, read-only archive reads for the search (`readForSearch`: never quarantines or deletes) | `src/sidebar/ArchivedSessions.ts` |
 | Session-log line split + replay decode, from disk or from text in hand | `src/sessions/sessionLogRows.ts` (`readSessionLogRows`, `parseSessionLogRows`) |
 | Panel size contract (bounds, clamp) and its `globalState` half | `src/sidebar/historyPanelSize.ts`; stored and read back: `src/sidebar/historyPanelSizeStore.ts` |

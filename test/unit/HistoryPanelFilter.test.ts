@@ -124,7 +124,7 @@ describe("the panel's search box", () => {
   it('keeps the rows whose title contains the text, case-insensitively', () => {
     expect(filterChatRows(rows, 'MAN').map((row) => row.id)).toEqual(['a']);
     expect(filterChatRows(rows, 'second').map((row) => row.id)).toEqual(['b']);
-    expect(filterChatRows(rows, 'claude').map((row) => row.id)).toEqual(['a', 'c']);
+    expect(filterChatRows(rows, 'claude').map((row) => row.id)).toEqual(['c', 'a']);
   });
 
   it('answers to the badge as well as the title, so an agent chat is findable by who sent it', () => {
@@ -160,6 +160,27 @@ describe("the panel's search box", () => {
     expect(filterChatRows(chats, '', new Set()).map((row) => row.id)).toEqual(['a', 'b']);
     // No set at all is the title-only rule this file has always asserted.
     expect(filterChatRows(chats, 'wobble').map((row) => row.id)).toEqual([]);
+  });
+
+  it('ranks title matches first, then shared host scores, with recency breaking ties', () => {
+    const chats = [
+      { id: 'body', title: 'other', updatedAt: 50 },
+      { id: 'old', title: 'model', updatedAt: 10 },
+      { id: 'new', title: 'Model', updatedAt: 20 },
+    ];
+    const hits = new Map([['body', { id: 'body', score: 1 }]]);
+    expect(filterChatRows(chats, 'model', new Set(['body']), hits).map((row) => row.id)).toEqual([
+      'new', 'old', 'body',
+    ]);
+    expect(filterChatRows(chats, '').map((row) => row.id)).toEqual(['body', 'old', 'new']);
+  });
+
+  it('waits for transcript checks on exclusion queries and accepts cross-field host matches', () => {
+    const chats = [{ id: 'a', title: 'model server' }, { id: 'b', title: 'Ollama server' }];
+    expect(filterChatRows(chats, 'server -ollama')).toEqual([]);
+    expect(filterChatRows(chats, 'server -ollama', new Set(['a', 'b']))).toEqual([chats[0]]);
+    expect(filterChatRows(chats, 'model renderer', new Set(['a']))).toEqual([chats[0]]);
+    expect(filterChatRows(chats, '-ollama', new Set(['a']))).toEqual([chats[0]]);
   });
 
   it('filters jobs on their name and their last outcome, not on the clock', () => {

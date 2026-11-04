@@ -72,6 +72,11 @@
   color: var(--vscode-input-placeholderForeground, var(--vscode-descriptionForeground));
 }
 
+.history-search-help {
+  font-size: 10px;
+  color: var(--vscode-descriptionForeground);
+}
+
 .history-tablist {
   display: flex;
   gap: 4px;

@@ -139,6 +139,11 @@ Codex, Copilot), your job here is planning, advice and review; delegate the impl
   at a time with a timeout of at least 600 s, then \`git branch -d\` and
   \`git worktree prune\`; never \`--force\`, and ask the owner if it holds uncommitted work.
 - Implement yourself only a trivial fix, or when the owner asks you to.
+- These rules are for the agent the owner talks to. If another agent handed you the
+  task (a Forge chat, or a \`codex exec\` or \`claude -p\` it started), you are the
+  implementer: do the work yourself. Ask that agent before you open or message a Forge
+  chat, start another agent, or load or stop a model. When you cannot ask, skip the
+  operation and say so in your report.
 
 **State, as Forge recorded it when this section was written:** __FORGE_MESH_STATE__
 Config: \`__FORGE_CONFIG__\`. \`agent_bus: { enabled: false }\` there stops agents from

@@ -231,6 +231,21 @@ describe('the content search against the real archive', () => {
     expect(result.ids).toEqual([LOG_ID]);
   });
 
+  it('matches independent keywords across title and saved messages in real body and log files', async () => {
+    const bridge = makeSearch(makeArchive());
+    const body = await searchArchived(bridge, 'saved size wobble');
+    expect(body.ids).toEqual([BODY_ID]);
+    expect(body.hits?.[0].score).toBe(12);
+    expect(body.hits?.[0].snippet).toContain('clamp the panel size');
+    const log = await searchArchived(bridge, 'saved rows sessions -wobble');
+    expect(log.ids).toEqual([LOG_ID]);
+    expect(log.hits?.[0].snippet).toContain('sessions panel');
+    expect((await searchArchived(bridge, '"panel size"')).ids).toEqual([BODY_ID]);
+    expect((await searchArchived(bridge, '"size panel"')).ids).toEqual([]);
+    expect((await searchArchived(bridge, 'saved -"panel size"')).ids).toEqual([LOG_ID]);
+    expect((await searchArchived(bridge, '-wobble')).ids).toEqual([LOG_ID]);
+  });
+
   it('matches case-insensitively, and echoes what was typed rather than a trimmed copy', async () => {
     const bridge = makeSearch(makeArchive());
     const result = await searchArchived(bridge, '  HOW DO I STOP THE WOBBLE  ');
