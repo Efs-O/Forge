@@ -1,5 +1,12 @@
 # Forge — Recent Changes
 
+## 0.17.122
+
+- Forge now checks what each managed model server (Strata) actually holds
+  before it frees the graphics cards, so a model another window loaded is
+  unloaded instead of left beside the new one. A server that still names a
+  model whose engine has gone is sent an unload too, which clears the claim.
+
 ## 0.17.121
 
 - `write_file` keeps a file's line endings: an overwrite or append follows the
