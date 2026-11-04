@@ -1,5 +1,15 @@
 # Forge — Recent Changes
 
+## 0.17.121
+
+- `write_file` keeps a file's line endings: an overwrite or append follows the
+  file's existing style, a new file follows the project's git `eol` setting,
+  and with none, `.bat`/`.cmd` get CRLF and everything else LF. Files git marks
+  `-text` are written as sent. The result says so when it converted anything.
+- `npm run check:changed -- <files>` fixes stray CRLF in named files the repo
+  wants as LF instead of failing the format check; files it finds by itself
+  are only reported, since they may be another agent's.
+
 ## 0.17.120
 
 - A Strata or Maya model stopped outside Forge (by its own script, a bench or a
