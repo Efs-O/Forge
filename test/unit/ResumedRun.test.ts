@@ -67,25 +67,40 @@ const sleep = (ms: number): Promise<void> => new Promise((resolve) => setTimeout
 
 /**
  * Poll until the reconciled row and the state patch that follows it have both
- * landed. The row is written first and the patch is synchronous right after it,
- * so a test that waits for the row alone can read the state in the gap between
- * the two — a race that only shows up under a loaded test runner.
+ * landed. The row is written first and the patch is synchronous right after it.
+ *
+ * Only the runs file is polled fast. The state file is read once the row is
+ * there, and then only every 250 ms: on Windows an open read blocks the atomic
+ * rename `patchState` makes onto that file, and a 10 ms read loop under a loaded
+ * `npm run ci` held it for the rename's whole 2.5 s retry budget, so the patch
+ * failed (logged and swallowed) and the test waited on a write that never came.
+ * Anything `recordResumedRun` logs is put in the failure message.
  */
+const RECONCILE_WAIT_MS = 15_000;
 async function waitForReconciliation(store: JobStore): Promise<void> {
-  const deadline = Date.now() + 4000;
-  for (;;) {
-    const rows = await store.readRuns(JOB_ID);
-    const fresh = await store.load(JOB_ID);
-    if (rows.length >= 2 && fresh?.state.consecutive_failures === 0) return;
-    if (Date.now() > deadline) {
-      throw new Error(
-        `the reconciliation never landed: ${JSON.stringify({
-          rows: rows.length,
-          consecutive: fresh?.state.consecutive_failures,
-        })}`,
-      );
+  const logged: string[] = [];
+  const spy = vi.spyOn(logger, 'error').mockImplementation((message: string) => {
+    logged.push(message);
+  });
+  try {
+    const deadline = Date.now() + RECONCILE_WAIT_MS;
+    let rows = 0;
+    let consecutive: number | undefined;
+    for (;;) {
+      rows = (await store.readRuns(JOB_ID)).length;
+      if (rows >= 2) {
+        consecutive = (await store.load(JOB_ID))?.state.consecutive_failures;
+        if (consecutive === 0) return;
+      }
+      if (Date.now() > deadline || logged.length > 0) {
+        throw new Error(
+          `the reconciliation never landed: ${JSON.stringify({ rows, consecutive, logged })}`,
+        );
+      }
+      await sleep(rows >= 2 ? 250 : 10);
     }
-    await sleep(10);
+  } finally {
+    spy.mockRestore();
   }
 }
 
@@ -508,7 +523,7 @@ describe('withResumedRunReconciliation — the post-turn wiring', () => {
     const rows = await store.readRuns(JOB_ID);
     expect(rows[1]).toMatchObject({ at: RESUME_AT, outcome: 'ok', resumed: true });
     expect((await store.load(JOB_ID))!.state.consecutive_failures).toBe(0);
-  });
+  }, RECONCILE_WAIT_MS + 5_000);
 
   it('a turn that did not complete writes nothing and still reaches the policy', async () => {
     const store = await storeWithStoppedRun();
