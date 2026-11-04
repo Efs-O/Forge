@@ -119,7 +119,7 @@
    there reads as a second input. Capped so the side columns keep room for the
    paperclip and the action button on a narrow panel; the name ellipsises. */
 #prompt-lane .ms-root {
-  max-width: min(200px, 45vw);
+  max-width: min(440px, 70vw);
 }
 #prompt-lane .ms-trigger {
   height: 20px;

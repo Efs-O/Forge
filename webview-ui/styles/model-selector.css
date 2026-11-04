@@ -8,7 +8,7 @@
 .ms-root {
   flex: 0 1 auto;
   min-width: 0;
-  max-width: 260px;
+  max-width: min(440px, 80vw);
   position: relative;
 }
 
@@ -149,7 +149,7 @@
   right: auto;
   width: max-content;
   min-width: 100%;
-  max-width: min(340px, 90vw);
+  max-width: min(520px, calc(100vw - 16px));
   z-index: 1000;
   background: var(--vscode-dropdown-background);
   border: 1px solid var(--forge-accent);

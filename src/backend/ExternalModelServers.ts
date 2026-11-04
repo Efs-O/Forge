@@ -3,6 +3,7 @@ import type { ForgeConfig, ModelConfig } from '../config/types';
 import { mergeGroupsIntoModel } from '../config/ConfigResolver';
 import { getLogger } from '../util/logger';
 import { deferredStopInvocation, STOP_GRACE_MS } from './deferredStop';
+import { isConnectionRefused, probeExternalModelResidency } from './ExternalModelResidencyProbe';
 import { probeHttp } from './HealthCheck';
 
 const log = getLogger();
@@ -70,6 +71,8 @@ export class ExternalModelServers {
    * `START_TIMEOUT_MS` before reporting failure (audit F2, 2026-10-03).
    */
   private readonly starting = new Map<string, Promise<void>>();
+  /** A selector refresh probes once per loaded managed model, even across callers. */
+  private residencyRefresh: Promise<void> | undefined;
 
   constructor(
     private readonly getConfig: () => ForgeConfig,
@@ -130,6 +133,63 @@ export class ExternalModelServers {
     if (!this.isManaged(name)) return;
     this.activityGeneration.set(name, (this.activityGeneration.get(name) ?? 0) + 1);
     this.residency.set(name, 'loaded');
+  }
+
+  /** Reconcile confirmed residency with the managed server without loading it. */
+  refreshResidency(): Promise<void> {
+    if (this.residencyRefresh) return this.residencyRefresh;
+    const refresh = this.refreshLoadedResidency()
+      .catch((error: unknown) => {
+        log.error('[ExternalModelServers] could not refresh residency', error);
+      })
+      .finally(() => {
+        if (this.residencyRefresh === refresh) this.residencyRefresh = undefined;
+      });
+    this.residencyRefresh = refresh;
+    return refresh;
+  }
+
+  private async refreshLoadedResidency(): Promise<void> {
+    const probes: Array<{ name: string; model: ModelConfig }> = [];
+    for (const entry of this.getConfig().models) {
+      const model = this.managed(entry.name);
+      if (
+        model?.endpoint &&
+        this.residency.get(entry.name) === 'loaded' &&
+        !this.starting.has(entry.name)
+      ) {
+        probes.push({ name: entry.name, model });
+      }
+    }
+
+    const results = await Promise.allSettled(
+      probes.map(({ name, model }) => this.refreshModelResidency(name, model)),
+    );
+    const failed = results.find(
+      (result): result is PromiseRejectedResult => result.status === 'rejected',
+    );
+    if (failed) throw failed.reason;
+  }
+
+  private async refreshModelResidency(name: string, model: ModelConfig): Promise<void> {
+    if (this.residency.get(name) !== 'loaded' || this.starting.has(name) || !model.endpoint) {
+      return;
+    }
+    const generation = this.activityGeneration.get(name) ?? 0;
+    const token = model.api_key_secret ? await this.secret(model.api_key_secret) : undefined;
+    if (this.residency.get(name) !== 'loaded' || this.starting.has(name)) return;
+    const result = await probeExternalModelResidency(
+      model.endpoint,
+      model.model,
+      token,
+      this.fetchImpl,
+    );
+    if (result === 'connection-refused') {
+      this.markUnloadedUnlessReused(name, generation, 'residency refresh');
+      log.info(`[ExternalModelServers] "${name}" stopped outside this window`);
+    } else if (result === 'unloaded') {
+      this.markUnloadedUnlessReused(name, generation, 'residency refresh');
+    }
   }
 
   async unload(name: string): Promise<void> {
@@ -347,12 +407,12 @@ export class ExternalModelServers {
     }
   }
 
-  private markUnloadedUnlessReused(name: string, generation: number): void {
+  private markUnloadedUnlessReused(name: string, generation: number, operation = 'unload'): void {
     if ((this.activityGeneration.get(name) ?? 0) === generation) {
       this.residency.set(name, 'unloaded');
     } else {
       log.info(
-        `[ExternalModelServers] "${name}" was requested during unload; residency stays loaded`,
+        `[ExternalModelServers] "${name}" was requested during ${operation}; residency stays loaded`,
       );
     }
   }
@@ -387,11 +447,6 @@ function describe(err: unknown): string {
   if (!(err instanceof Error)) return String(err);
   const cause = (err as Error & { cause?: unknown }).cause;
   return cause instanceof Error ? `${err.message} (${cause.message})` : err.message;
-}
-
-function isConnectionRefused(err: unknown): boolean {
-  const cause = err instanceof Error ? (err as Error & { cause?: unknown }).cause : undefined;
-  return (cause as { code?: string } | undefined)?.code === 'ECONNREFUSED';
 }
 
 /**

@@ -13,6 +13,7 @@ const pool: IBackendPool = {
   },
   release: async () => {},
   stopAll: async () => {},
+  refreshExternalResidency: async () => {},
   applyForgeConfig: () => {},
   showConsole: () => {},
   isAnyReady: () => false,

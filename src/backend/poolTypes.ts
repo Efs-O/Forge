@@ -66,6 +66,8 @@ export interface IBackendPool {
    *  can skip a repost; see docs/plans/MODEL_READINESS_DOT_PLAN.md for why this is polled
    *  rather than emitted. */
   residencySignature(): string;
+  /** Refresh confirmed residency for managed external servers, if configured. */
+  refreshExternalResidency(): Promise<void>;
 }
 
 export interface BackendTurnLease {

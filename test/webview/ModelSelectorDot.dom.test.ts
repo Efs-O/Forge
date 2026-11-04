@@ -83,6 +83,28 @@ describe('ModelSelector residency dot', () => {
     );
   });
 
+  it('shows the full display name in the trigger and model option titles', () => {
+    const displayName = 'Qwen Flash-Next Coder ABL (Strata IQ1_M, 3060) :8096';
+    render(
+      [
+        {
+          name: 'strata-flashnext-coder-iq1m-3060',
+          displayName,
+          provider: 'openai-compatible',
+        },
+      ],
+      'strata-flashnext-coder-iq1m-3060',
+    );
+
+    expect(container.querySelector<HTMLElement>('.ms-trigger-name')?.title).toBe(displayName);
+    openPanel();
+    expect(
+      Array.from(container.querySelectorAll<HTMLElement>('.ms-item')).find((item) =>
+        item.textContent?.includes(displayName),
+      )?.title,
+    ).toBe(`${displayName}\nstrata-flashnext-coder-iq1m-3060`);
+  });
+
   it('gives every dot a text label rather than relying on colour', () => {
     render([{ name: 'cold-model', provider: 'llama.cpp', residency: 'cold' }], 'cold-model');
 

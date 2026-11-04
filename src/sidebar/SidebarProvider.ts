@@ -86,6 +86,7 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
     () => this.pool.residencySignature(),
     () => this.postModels(),
     RESIDENCY_POLL_MS,
+    () => this.pool.refreshExternalResidency(),
   );
 
   constructor(
@@ -261,8 +262,7 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
         this.view = undefined;
         this.webviewQueue.viewDisposed();
         this.tabs.refreshRetention();
-        // The view that opened the Jobs panel is gone: its store listener,
-        // watchers and pending publish go with it.
+        // The Jobs panel's view is gone: its store listener, watchers and pending publish go too.
         this.jobsBridge?.dispose();
       }
       this.residency.stop();

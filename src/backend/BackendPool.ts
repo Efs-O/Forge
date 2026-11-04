@@ -392,6 +392,9 @@ export class BackendPool implements IBackendPool {
     const external = this.config.models.filter((m) => this.external?.isConfirmedLoaded(m.name));
     return `${backendResidencySignature(keys, (key) => this.backendFor(key))}|${external.map((m) => m.name).join(',')}`;
   }
+  async refreshExternalResidency(): Promise<void> {
+    await this.external?.refreshResidency();
+  }
 
   /** The backend behind an already-resolved pool key, wherever it lives. */
   private backendFor(key: string): DirectBackend | undefined {

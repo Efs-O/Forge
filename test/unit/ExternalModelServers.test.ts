@@ -24,6 +24,7 @@ import { ForgeConfigSchema } from '../../src/config/schema';
 import { resolveRequestModel } from '../../src/config/ConfigResolver';
 import type { ForgeConfig } from '../../src/config/types';
 import { runCloudProviderTurn, type ProviderTurnContext } from '../../src/sidebar/ProviderTurn';
+import { logger } from '../../src/util/logger';
 
 vi.mock('vscode', () => ({
   window: {
@@ -282,6 +283,160 @@ describe('ExternalModelServers', () => {
     expect(servers.isConfirmedLoaded('strata')).toBe(true);
     await servers.unload('strata');
     expect(servers.isConfirmedLoaded('strata')).toBe(false);
+  });
+
+  it('marks confirmed residency unloaded when the managed server refuses connections', async () => {
+    const config = makeConfig();
+    config.models[1].model = 'strata-model';
+    const fetchImpl = vi.fn<typeof fetch>(async () => {
+      throw Object.assign(new TypeError('fetch failed'), {
+        cause: Object.assign(new Error('connect ECONNREFUSED'), { code: 'ECONNREFUSED' }),
+      });
+    });
+    const servers = new ExternalModelServers(() => config, async () => 'token', fetchImpl);
+    servers.markInUse('strata');
+
+    await servers.refreshResidency();
+
+    expect(servers.isConfirmedLoaded('strata')).toBe(false);
+  });
+
+  it('marks confirmed residency unloaded when /v1/models reports status unloaded', async () => {
+    const config = makeConfig();
+    config.models[1].model = 'strata-model';
+    const fetchImpl = vi.fn<typeof fetch>(async () =>
+      new Response(JSON.stringify({ data: [{ id: 'strata-model', status: { value: 'unloaded' } }] })),
+    );
+    const servers = new ExternalModelServers(() => config, async () => 'token', fetchImpl);
+    servers.markInUse('strata');
+
+    await servers.refreshResidency();
+
+    expect(servers.isConfirmedLoaded('strata')).toBe(false);
+    expect(fetchImpl.mock.calls[0]?.[0]).toBe('http://127.0.0.1:8080/v1/models');
+    expect(fetchImpl.mock.calls[0]?.[1]).toMatchObject({
+      method: 'GET',
+      headers: { Authorization: 'Bearer token' },
+    });
+  });
+
+  it('keeps confirmed residency loaded when /v1/models reports loaded', async () => {
+    const config = makeConfig();
+    config.models[1].model = 'strata-model';
+    const fetchImpl = vi.fn<typeof fetch>(async () =>
+      new Response(JSON.stringify({ data: [{ id: 'strata-model', status: { value: 'loaded' } }] })),
+    );
+    const servers = new ExternalModelServers(() => config, async () => 'token', fetchImpl);
+    servers.markInUse('strata');
+
+    await servers.refreshResidency();
+
+    expect(servers.isConfirmedLoaded('strata')).toBe(true);
+  });
+
+  it.each([
+    ['a timeout', async () => { throw new DOMException('timed out', 'TimeoutError'); }],
+    ['an HTTP 500 response', async () => new Response('{}', { status: 500 })],
+    ['malformed JSON', async () => new Response('{', { status: 200 })],
+  ])('leaves confirmed residency unchanged after %s', async (_outcome, respond) => {
+    const config = makeConfig();
+    config.models[1].model = 'strata-model';
+    const fetchImpl = vi.fn<typeof fetch>(respond);
+    const servers = new ExternalModelServers(() => config, async () => 'token', fetchImpl);
+    servers.markInUse('strata');
+
+    await servers.refreshResidency();
+
+    expect(servers.isConfirmedLoaded('strata')).toBe(true);
+  });
+
+  it('keeps residency loaded when a request arrives while the probe is pending', async () => {
+    const config = makeConfig();
+    config.models[1].model = 'strata-model';
+    let resolveResponse: ((response: Response) => void) | undefined;
+    const response = new Promise<Response>((resolve) => {
+      resolveResponse = resolve;
+    });
+    const fetchImpl = vi.fn<typeof fetch>(() => response);
+    const servers = new ExternalModelServers(() => config, async () => 'token', fetchImpl);
+    servers.markInUse('strata');
+
+    const refresh = servers.refreshResidency();
+    await vi.waitFor(() => expect(fetchImpl).toHaveBeenCalledOnce());
+    servers.markInUse('strata');
+    resolveResponse?.(
+      new Response(JSON.stringify({ data: [{ id: 'strata-model', status: { value: 'unloaded' } }] })),
+    );
+    await refresh;
+
+    expect(servers.isConfirmedLoaded('strata')).toBe(true);
+  });
+
+  it('does not probe unknown or unloaded managed servers', async () => {
+    const config = makeConfig();
+    config.models[1].model = 'strata-model';
+    const fetchImpl = vi.fn<typeof fetch>(async () =>
+      new Response(JSON.stringify({ data: [{ id: 'strata-model', status: { value: 'unloaded' } }] })),
+    );
+    const servers = new ExternalModelServers(() => config, async () => 'token', fetchImpl);
+
+    await servers.refreshResidency();
+    expect(fetchImpl).not.toHaveBeenCalled();
+
+    servers.markInUse('strata');
+    await servers.unload('strata');
+    const callsAfterUnload = fetchImpl.mock.calls.length;
+    await servers.refreshResidency();
+    expect(fetchImpl).toHaveBeenCalledTimes(callsAfterUnload);
+  });
+
+  it('single-flights concurrent residency refreshes once per loaded managed model', async () => {
+    const config = makeConfig();
+    config.models[1].model = 'strata-model';
+    config.models.push({
+      name: 'maya',
+      provider: 'openai-compatible',
+      model: 'maya-model',
+      endpoint: 'http://127.0.0.1:8081',
+      unload_path: '/unload',
+    });
+    const fetchImpl = vi.fn<typeof fetch>(async () => new Response('{}'));
+    const servers = new ExternalModelServers(() => config, async () => undefined, fetchImpl);
+    servers.markInUse('strata');
+    servers.markInUse('maya');
+
+    const first = servers.refreshResidency();
+    const second = servers.refreshResidency();
+    expect(second).toBe(first);
+    await Promise.all([first, second]);
+
+    expect(fetchImpl).toHaveBeenCalledTimes(2);
+  });
+
+  it('logs one unexpected probe error and resolves the residency refresh', async () => {
+    const config = makeConfig();
+    config.models[1].model = 'strata-model';
+    config.models.push({
+      name: 'maya',
+      provider: 'openai-compatible',
+      model: 'maya-model',
+      endpoint: 'http://127.0.0.1:8081',
+      unload_path: '/unload',
+    });
+    const fetchImpl = vi.fn<typeof fetch>(async () => {
+      throw new Error('unexpected fetch failure');
+    });
+    const servers = new ExternalModelServers(() => config, async () => undefined, fetchImpl);
+    servers.markInUse('strata');
+    servers.markInUse('maya');
+    const logError = vi.spyOn(logger, 'error').mockImplementation(() => {});
+
+    try {
+      await expect(servers.refreshResidency()).resolves.toBeUndefined();
+      expect(logError).toHaveBeenCalledOnce();
+    } finally {
+      logError.mockRestore();
+    }
   });
 
   it('does not let a late unload completion erase a concurrent request', async () => {

@@ -90,6 +90,11 @@ export function ModelSelector({
   const activeModelEntry = activeSelection
     ? models.find((model) => model.name === activeSelection.base)
     : undefined;
+  const activeDisplayName =
+    activeModelEntry?.displayName ?? activeSelection?.base ?? activeModel ?? 'No model selected';
+  const triggerTitle = activeSelection?.profile
+    ? `${activeDisplayName}@${activeSelection.profile}`
+    : activeDisplayName;
   const close = () => {
     setOpen(false);
     setProfileModel(null);
@@ -103,11 +108,11 @@ export function ModelSelector({
           if (!disabled) setOpen((o) => !o);
         }}
         disabled={disabled}
-        title={activeModel ?? 'No model selected'}
+        title={triggerTitle}
         aria-haspopup="listbox"
         aria-expanded={open}
       >
-        <span className="ms-trigger-name">
+        <span className="ms-trigger-name" title={triggerTitle}>
           {activeModel ? (
             <>
               <ResidencyDot residency={activeModelEntry?.residency} />
@@ -135,6 +140,7 @@ export function ModelSelector({
               <div
                 className="ms-item"
                 role="option"
+                title="All models"
                 aria-selected={false}
                 onClick={() => setProfileModel(null)}
               >
@@ -143,6 +149,7 @@ export function ModelSelector({
               <div
                 className={`ms-item${activeModel === profileModel.name ? ' ms-item--active' : ''}`}
                 role="option"
+                title={profileModel.displayName ?? profileModel.name}
                 aria-selected={activeModel === profileModel.name}
                 onClick={() => {
                   onModelChange(profileModel.name);
@@ -157,6 +164,7 @@ export function ModelSelector({
                   <div
                     key={selection}
                     className={`ms-item${activeModel === selection ? ' ms-item--active' : ''}`}
+                    title={`${profileModel.displayName ?? profileModel.name}@${profile}`}
                     role="option"
                     aria-selected={activeModel === selection}
                     onClick={() => {
@@ -174,6 +182,7 @@ export function ModelSelector({
               <div
                 className={`ms-item${!activeModel ? ' ms-item--active' : ''}`}
                 role="option"
+                title="No model selected"
                 aria-selected={!activeModel}
                 onClick={() => {
                   onModelChange(null);
@@ -193,7 +202,7 @@ export function ModelSelector({
                       key={m.name}
                       className={`ms-item${m.name === activeModel ? ' ms-item--active' : ''}`}
                       role="option"
-                      title={m.displayName ? m.name : undefined}
+                      title={m.displayName ? `${m.displayName}\n${m.name}` : m.name}
                       aria-selected={m.name === activeModel}
                       onClick={() => {
                         if (m.profiles && m.profiles.length > 0) {

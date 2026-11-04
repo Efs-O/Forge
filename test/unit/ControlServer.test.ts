@@ -38,6 +38,7 @@ class FakePool implements IBackendPool {
   async stopAll(): Promise<void> {
     this.loaded.clear();
   }
+  async refreshExternalResidency(): Promise<void> {}
   applyForgeConfig(): void {}
   showConsole(): void {}
   isAnyReady(): boolean {
