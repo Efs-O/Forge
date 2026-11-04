@@ -10,7 +10,7 @@
 // It does not replace `npm run ci` before a push, a tag, `npm run package`,
 // or the end of a plan phase.
 import { execFileSync, spawnSync } from 'node:child_process';
-import { existsSync } from 'node:fs';
+import { existsSync, readFileSync, writeFileSync } from 'node:fs';
 
 const MAX_FILES = 3;
 const CODE = /\.(ts|tsx|mjs|js)$/;
@@ -46,6 +46,8 @@ const files = explicit.length
   ? explicit
   : [...new Set([...git(['diff', '--name-only', 'HEAD']), ...git(['ls-files', '--others', '--exclude-standard'])])];
 
+fixStrayCrLf(files, explicit.length > 0);
+
 if (!files.length) {
   console.log('check:changed: nothing changed.');
   process.exit(0);
@@ -75,3 +77,46 @@ const tests = [...code];
 if (files.some((f) => f.startsWith('docs/plans/'))) tests.push('test/unit/PlanLedgerContract.test.ts');
 if (tests.length) run('tests', `npx vitest related --run --passWithNoTests ${tests.map(quote).join(' ')}`);
 console.log('\ncheck:changed passed. Run `npm run ci` before a push, tag or package.');
+
+function fixStrayCrLf(files, namedOnCommandLine) {
+  const existing = files.filter((file) => existsSync(file));
+  if (!existing.length) return;
+
+  const output = execFileSync('git', ['check-attr', '-z', 'eol', 'text', '--', ...existing], {
+    encoding: 'buffer',
+  });
+  const fields = output.toString('utf8').split('\0');
+  const attrs = new Map();
+  for (let i = 0; i + 2 < fields.length; i += 3) {
+    const file = fields[i];
+    const name = fields[i + 1];
+    const value = fields[i + 2];
+    if (!attrs.has(file)) attrs.set(file, {});
+    attrs.get(file)[name] = value;
+  }
+
+  for (const file of existing) {
+    const values = attrs.get(file);
+    if (values?.eol !== 'lf' || values.text === 'unset') continue;
+    const bytes = readFileSync(file);
+    let crlfCount = 0;
+    for (let i = 0; i + 1 < bytes.length; i++) {
+      if (bytes[i] === 13 && bytes[i + 1] === 10) crlfCount++;
+    }
+    if (!crlfCount) continue;
+
+    if (!namedOnCommandLine) {
+      console.log(`check:changed: ${file} has CRLF; run \`npm run check:changed -- ${file}\` to fix it.`);
+      continue;
+    }
+
+    const fixed = Buffer.allocUnsafe(bytes.length - crlfCount);
+    let target = 0;
+    for (let i = 0; i < bytes.length; i++) {
+      if (bytes[i] === 13 && bytes[i + 1] === 10) continue;
+      fixed[target++] = bytes[i];
+    }
+    writeFileSync(file, fixed);
+    console.log(`check:changed: fixed CRLF line endings in ${file}`);
+  }
+}

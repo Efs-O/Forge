@@ -565,6 +565,7 @@ overlaps with an existing owner, extend the owner instead.
 | Shared workspace file delivery validation  | `src/util/fileDeliveryValidation.ts` |
 | `send_file` tool                           | `src/tools/sendFileTool.ts`           |
 | `edit_file` tool                           | `src/tools/editFileTool.ts`           |
+| `write_file` line-ending selection and result note | `src/tools/writeEol.ts`       |
 | `old_str` matching + line-ending handling + uniform indent shift | `src/tools/editMatch.ts`              |
 | Structured line-edit validation + tool     | `src/tools/structuredEditTool.ts`     |
 | The file-length line a write result carries, and how its globs match | `src/tools/fileLengthWarning.ts` |

@@ -6,6 +6,7 @@ import { resolveRealWorkspacePath } from '../util/WorkspacePaths';
 import { writeFileAtomicSync } from '../util/atomicWrite';
 import { withFileLengthWarning, type FileLengthWarningGetter } from './fileLengthWarning';
 import { NO_PROBLEM_WATCHER, withProblemNote, type ProblemWatcher } from './editDiagnostics';
+import { applyWriteEol, chooseWriteEol, readExistingForWrite } from './writeEol';
 
 /**
  * `read_file` moved to `src/tools/readFileTool.ts` on 2026-10-29 (tool-trim
@@ -72,7 +73,9 @@ export function makeWriteFileTool(
         allowMissing: true,
         extraRoots: extraRoots(),
       });
+      const existing = readExistingForWrite(filePath);
       const content = args['content'] as string;
+      const converted = applyWriteEol(content, await chooseWriteEol(filePath, existing));
       fs.mkdirSync(path.dirname(filePath), { recursive: true });
       // Snapshot before the write, whatever the mode: the append path is where a
       // cut-off write resumes, and a resumed write can introduce an error too.
@@ -84,22 +87,22 @@ export function makeWriteFileTool(
         // a resumed write can start with either mode, and the growing file has to
         // be measured here too - not only on a full write - or the length warning
         // never fires on a file built across calls.
-        fs.appendFileSync(filePath, content, 'utf8');
+        fs.appendFileSync(filePath, converted.content, 'utf8');
         const total = fs.statSync(filePath).size;
         const note = watch ? await watch.settle(context?.abortSignal) : '';
         return withFileLengthWarning(
           withProblemNote(
-            `Appended ${content.length} chars to ${filePath} (${total} bytes total)`,
+            `Appended ${content.length} chars to ${filePath} (${total} bytes total)${converted.note}`,
             note,
           ),
           filePath,
           lengthWarning(),
         );
       }
-      writeFileAtomicSync(filePath, content);
+      writeFileAtomicSync(filePath, converted.content);
       const note = watch ? await watch.settle(context?.abortSignal) : '';
       return withFileLengthWarning(
-        withProblemNote(`Written ${filePath}`, note),
+        withProblemNote(`Written ${filePath}${converted.note}`, note),
         filePath,
         lengthWarning(),
       );

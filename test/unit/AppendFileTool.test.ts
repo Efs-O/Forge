@@ -4,6 +4,9 @@ import * as os from 'os';
 import * as path from 'path';
 
 vi.mock('vscode', () => ({
+  window: {
+    createOutputChannel: () => ({ appendLine: () => {}, show: () => {}, dispose: () => {} }),
+  },
   workspace: {
     workspaceFolders: [{ uri: { fsPath: require('os').tmpdir() } }],
   },
