@@ -1,12 +1,54 @@
 # Forge — Recent Changes
 
-## 0.17.117
+## 0.17.118
 
 Added opt-in local video and music generation with `generate_video` and
 `generate_music`, Telegram `/video`, `/music` and `/media`, and the shipped
 `video-clip` and `music-track` skills. The media tool-group description now
 names video and music generation (+35 schema characters). See
 [media generation](docs/MEDIA.md).
+
+- A bus read now follows your session, not whoever was clicked last. With two
+  Forge windows open, `status`, `view`, `wait`, `read-verdict`, `ack-verdict`,
+  `send-file` and `who` all asked the focused window, so `forge.sh status claude`
+  answered `no chat holds a message from "claude"` and `who` listed someone
+  else's sessions, while `say --to` from the same session reached the right
+  chats. Every verb that knows your session identity resolves the window holding
+  that session's link through one shared search; `who` asks every window that
+  answers and prints each linked chat once (a session holding two chats shows
+  both, which is what `who` did before this fix), and prints a reason and fails
+  when none answers instead of exiting 0 with nothing; `status`/`view` take
+  `--to <conversationId>` to read a chat linked to your session, refusing by
+  name one that is not; and `send-file --to` sends to the chat it names, instead
+  of refusing whenever that chat was not the one your session last wrote to.
+- A Forge window that is **not** answering Telegram now takes the phone back by
+  itself. A window that lost a `/workspace` switch used to sit out the rest of the
+  session: when the window that *was* answering closed, its transport lease went
+  stale at 20 s and nothing tried for it, so the phone answered nobody until the
+  owner reloaded a window by hand. Each window's own 5 s watch now re-takes the
+  lease as soon as the old holder releases it or goes stale, and it stays silent
+  while waiting — a lease refusal is not a failure, and a window that is merely
+  second in line says nothing every tick — while a window that asked for a **new
+  window** waits out its rollback instead of taking the phone back one tick after
+  making the switch, so the window it opened still gets its whole claim window. A
+  start that fails for a reason that is not a lease is said once, not once per
+  tick.
+- The phone can now see and close the owner's VS Code windows. `/workspace windows`
+  lists every window Forge can see, names the workspace each one has open, and puts a
+  `✕` on each window it may close; tapping `✕` asks that window to close **itself** — it
+  refuses if it is answering your phone, has unsaved editors (a dirty notebook counts),
+  or has a turn, job, delegated agent or approval running, and reports the outcome
+  either way within a minute: “Forge closed X” is only said once that window is proved
+  gone, so a close VS Code vetoes comes back as unconfirmed instead of as a success the
+  phone already believed. `/workspace cap <1-12>` (default 5, `remote.workspace_switch.max_open_windows`)
+  limits how many windows a `new-window` switch may leave open; a `replace` switch and a
+  folder that is already open are never refused for it, and the refusal says how many
+  windows Forge counted, how many of them Forge cannot close, and — on Linux and macOS —
+  that it counted only the windows with Forge in them, because it cannot enumerate the
+  rest. Forge never closes a window on its own initiative and never force-closes one, and
+  Close and `/workspace cap` are owner-only and need an unlocked session.
+
+## 0.17.117
 
 Removed the approval stand-in (`permissions.approval_stand_in`); a leftover key is now a load error.
 
@@ -82,45 +124,6 @@ Removed the approval stand-in (`permissions.approval_stand_in`); a leftover key 
   agent task names the waits it still has to pass — your chats quiet for 10
   minutes, a free GPU for a local model — and `/job <id>` now says what a waiting
   job is waiting for.
-- A bus read now follows your session, not whoever was clicked last. With two
-  Forge windows open, `status`, `view`, `wait`, `read-verdict`, `ack-verdict`,
-  `send-file` and `who` all asked the focused window, so `forge.sh status claude`
-  answered `no chat holds a message from "claude"` and `who` listed someone
-  else's sessions, while `say --to` from the same session reached the right
-  chats. Every verb that knows your session identity resolves the window holding
-  that session's link through one shared search; `who` asks every window that
-  answers and prints each linked chat once (a session holding two chats shows
-  both, which is what `who` did before this fix), and prints a reason and fails
-  when none answers instead of exiting 0 with nothing; `status`/`view` take
-  `--to <conversationId>` to read a chat linked to your session, refusing by
-  name one that is not; and `send-file --to` sends to the chat it names, instead
-  of refusing whenever that chat was not the one your session last wrote to.
-- A Forge window that is **not** answering Telegram now takes the phone back by
-  itself. A window that lost a `/workspace` switch used to sit out the rest of the
-  session: when the window that *was* answering closed, its transport lease went
-  stale at 20 s and nothing tried for it, so the phone answered nobody until the
-  owner reloaded a window by hand. Each window's own 5 s watch now re-takes the
-  lease as soon as the old holder releases it or goes stale, and it stays silent
-  while waiting — a lease refusal is not a failure, and a window that is merely
-  second in line says nothing every tick — while a window that asked for a **new
-  window** waits out its rollback instead of taking the phone back one tick after
-  making the switch, so the window it opened still gets its whole claim window. A
-  start that fails for a reason that is not a lease is said once, not once per
-  tick.
-- The phone can now see and close the owner's VS Code windows. `/workspace windows`
-  lists every window Forge can see, names the workspace each one has open, and puts a
-  `✕` on each window it may close; tapping `✕` asks that window to close **itself** — it
-  refuses if it is answering your phone, has unsaved editors (a dirty notebook counts),
-  or has a turn, job, delegated agent or approval running, and reports the outcome
-  either way within a minute: “Forge closed X” is only said once that window is proved
-  gone, so a close VS Code vetoes comes back as unconfirmed instead of as a success the
-  phone already believed. `/workspace cap <1-12>` (default 5, `remote.workspace_switch.max_open_windows`)
-  limits how many windows a `new-window` switch may leave open; a `replace` switch and a
-  folder that is already open are never refused for it, and the refusal says how many
-  windows Forge counted, how many of them Forge cannot close, and — on Linux and macOS —
-  that it counted only the windows with Forge in them, because it cannot enumerate the
-  rest. Forge never closes a window on its own initiative and never force-closes one, and
-  Close and `/workspace cap` are owner-only and need an unlocked session.
 
 ## 0.17.116
 
