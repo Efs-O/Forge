@@ -42,6 +42,7 @@ const NON_MODEL_REF_FIELDS = [
   'video',
   'voice',
   'image_generation',
+  'media',
   'model_starter',
   'agent_bus',
   'agent_links',
@@ -112,10 +113,12 @@ describe('findModelReferences', () => {
    *  replacement is worse than the warning Phase 1 added. */
   it('marks only the list and alias entries as removed with the model', () => {
     const rows = findModelReferences(fixture(), 'keep-cloud');
-    expect(rows.filter((row) => row.removedWithModel).map((row) => row.kind).sort()).toEqual([
-      'alias',
-      'cloud_relay_model',
-    ]);
+    expect(
+      rows
+        .filter((row) => row.removedWithModel)
+        .map((row) => row.kind)
+        .sort(),
+    ).toEqual(['alias', 'cloud_relay_model']);
   });
 
   it('follows a @profile suffix, an alias key and a short_name', () => {
@@ -126,7 +129,11 @@ describe('findModelReferences', () => {
     } as ForgeConfig;
     // `active_model` may carry a profile the delete must not lose sight of.
     config.active_model = 'keep-cloud@main';
-    expect(findModelReferences(config, 'keep-cloud').map((row) => row.path).sort()).toEqual([
+    expect(
+      findModelReferences(config, 'keep-cloud')
+        .map((row) => row.path)
+        .sort(),
+    ).toEqual([
       'active_model',
       'aliases.laptop-alias',
       'cloud_relay.models[0]',
@@ -166,9 +173,7 @@ describe('findLeftoverModelRefs', () => {
       max_body_mb: 32,
       models: ['keep-cloud', 'gone-model'],
     };
-    expect(findLeftoverModelRefs(config).map((row) => row.path)).toEqual([
-      'cloud_relay.models[1]',
-    ]);
+    expect(findLeftoverModelRefs(config).map((row) => row.path)).toEqual(['cloud_relay.models[1]']);
   });
 
   /** `ConfigWriter` snapshots this on a `yaml` Document's raw `toJS()`, which is
@@ -177,9 +182,9 @@ describe('findLeftoverModelRefs', () => {
    *  even report what is wrong with the file. */
   it('never throws on the unvalidated document the writer snapshots it on', () => {
     expect(findLeftoverModelRefs({} as ForgeConfig)).toEqual([]);
-    expect(findLeftoverModelRefs({ active_model: 'anything' } as unknown as ForgeConfig)).toHaveLength(
-      1,
-    );
+    expect(
+      findLeftoverModelRefs({ active_model: 'anything' } as unknown as ForgeConfig),
+    ).toHaveLength(1);
     expect(() =>
       findLeftoverModelRefs({
         aliases: 'not-a-map',
@@ -229,7 +234,7 @@ describe('referenceRemovalNote', () => {
       'the laptop cloud list (it would be empty, so the whole `cloud_relay` block goes too)',
     );
     expect(note).toContain(
-      'Leaves the active model and the jobs model pointing at it. Forge will load '
+      'Leaves the active model and the jobs model pointing at it. Forge will load ',
     );
   });
 
@@ -250,8 +255,11 @@ describe('every model-naming config field is known', () => {
   it('the fixture puts the model in every field MODEL_REF_FIELDS claims, and nowhere else', () => {
     const config = fixture();
     expect(ForgeConfigSchema.safeParse(config).success).toBe(true);
-    expect(findModelReferences(config, 'keep-cloud').map((row) => row.path.split('.')[0]).sort())
-      .toEqual([...MODEL_REF_FIELDS].sort());
+    expect(
+      findModelReferences(config, 'keep-cloud')
+        .map((row) => row.path.split('.')[0])
+        .sort(),
+    ).toEqual([...MODEL_REF_FIELDS].sort());
     for (const field of NON_MODEL_REF_FIELDS) {
       // `models:` is in the ordinary list because it DEFINES models rather than
       // pointing at one, so its own names are expected there.

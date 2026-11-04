@@ -114,6 +114,10 @@
         "title": "Forge: Validate Config"
       },
       {
+        "command": "forge.checkMediaSetup",
+        "title": "Forge: Check Media Setup"
+      },
+      {
         "command": "forge.pickModel",
         "title": "Forge: Pick Model"
       },

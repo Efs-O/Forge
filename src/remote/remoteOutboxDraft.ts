@@ -1,5 +1,5 @@
 import { randomUUID } from 'crypto';
-import type { RemoteOutboxRecord } from './types';
+import type { RemoteMediaOutboxPayload, RemoteOutboxRecord } from './types';
 import type { OutboxState, RemoteStoreState } from './RemoteStoreSchemas';
 
 /** Add a host notice to the durable outbox in the store's locked draft; returns its id. */
@@ -12,6 +12,7 @@ export function appendHostNotification(
   requestId = `host-${randomUUID()}`,
   /** Appended to the last Telegram part at send time; never part of `text`. */
   speedLine?: string | undefined,
+  media?: RemoteMediaOutboxPayload | undefined,
 ): string {
   const id = randomUUID();
   draft.outbox.push({
@@ -25,6 +26,7 @@ export function appendHostNotification(
     updatedAt: Date.now(),
     ...(ephemeral ? { ephemeral: true } : {}),
     ...(speedLine ? { speedLine } : {}),
+    ...(media ? { media } : {}),
   });
   return id;
 }

@@ -39,8 +39,10 @@ export const TELEGRAM_BOT_COMMANDS = [
   },
   { command: 'jobs', description: 'List the persistent agent jobs' },
   { command: 'lock', description: 'Lock this remote session' },
+  { command: 'media', description: 'Check optional media generation setup' },
   { command: 'mirror', description: 'Echo sidebar answers here on/off' },
   { command: 'model', description: 'List models, or pin one to this chat by number or name' },
+  { command: 'music', description: 'Start a music request in this chat' },
   { command: 'new', description: 'Start a new chat here' },
   { command: 'notify', description: 'Agent notifications on/off' },
   { command: 'queue', description: 'List queued prompts' },
@@ -58,6 +60,7 @@ export const TELEGRAM_BOT_COMMANDS = [
   { command: 'timeout', description: 'Show/set session timeout' },
   { command: 'unload', description: "Free memory: release this chat's model" },
   { command: 'unloadall', description: 'Free memory: release every model' },
+  { command: 'video', description: 'Start a video request in this chat' },
   { command: 'view', description: 'Replay the last answers in this chat' },
   { command: 'voice', description: 'Spoken replies on/off' },
   { command: 'wake', description: 'Wake-on-LAN details, or arm a wake timer' },
@@ -292,6 +295,15 @@ export class TelegramChannel implements RemoteChannel {
   }
   sendPhoto(...args: Parameters<TelegramOutbound['sendPhoto']>) {
     return this.outbound.sendPhoto(...args);
+  }
+  sendVideo(...args: Parameters<TelegramOutbound['sendVideo']>) {
+    return this.outbound.sendVideo(...args);
+  }
+  sendAudio(...args: Parameters<TelegramOutbound['sendAudio']>) {
+    return this.outbound.sendAudio(...args);
+  }
+  sendDocument(...args: Parameters<TelegramOutbound['sendDocument']>) {
+    return this.outbound.sendDocument(...args);
   }
   sendVoice(...args: Parameters<TelegramOutbound['sendVoice']>) {
     return this.outbound.sendVoice(...args);

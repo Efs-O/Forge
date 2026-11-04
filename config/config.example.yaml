@@ -1295,3 +1295,59 @@ agent_links:
 # names a host not in this list fails to load once config.yaml opens to agents,
 # because otherwise an agent could add a model that sends the chat anywhere.
 # model_hosts: [100.64.0.10]
+
+# Optional local video and music generation. With enabled: false, generation
+# tools are not registered. Paths are machine-local and models are never
+# downloaded automatically. After editing this block, run Forge: Check Media Setup.
+# cuda_devices are physical GPU indexes; reserve cards with enough free VRAM.
+# media:
+#   enabled: false
+#   output_dir: media
+#   comfyui:
+#     root: ""                    # ComfyUI checkout; required by LTX, H3 and SA3
+#     python: ""                  # its interpreter, e.g. <root>/.venv/Scripts/python.exe
+#     port: 8190                  # loopback only; Forge owns the ComfyUI process
+#   ffmpeg: ffmpeg                # ffmpeg and ffprobe on PATH, or full path to ffmpeg
+#   video:
+#     default_seconds: 5
+#     default_size: [1344, 768]   # LTX-2.5 dimensions must be multiples of 64
+#     default_fps: 24
+#     still_backend: ""           # configured sd-server model for text → video
+#     engines:                    # order is preference; LTX-2.5 is the default
+#       - id: ltx25
+#         kind: ltx25
+#         models:
+#           diffusion: ""
+#           video_vae: ""
+#           audio_vae: ""
+#           text_encoder: ""
+#           latent_upscaler: ""
+#           prompt_enhancer: ""    # optional; needed only when prompt enhancement is enabled
+#         cuda_devices: [2]
+#         min_free_vram_mb: 11000
+#       - id: h3
+#         kind: comfyui_workflow
+#         models: { diffusion: "" } # installed H3 UNET filename used by the upstream blueprint
+#         workflow: ""            # e.g. <ComfyUI root>/blueprints/Image to Video (MiniMax H3).json
+#         cuda_devices: [0]        # one 16 GB Blackwell card
+#         min_free_vram_mb: 15000
+#         reserve_vram_gb: 0
+#   music:
+#     default_seconds: 120
+#     analyzer:
+#       kind: flamingo_dlt
+#       launcher: ""              # empty disables MP3 analysis; setup check names the missing path
+#     engines:
+#       - id: ace_step
+#         kind: ace_standalone
+#         root: ""                 # ACE-Step checkout with .venv
+#         checkpoints: ""
+#         cuda_devices: [2]
+#         min_free_vram_mb: 11000
+#       - id: stable_audio
+#         kind: comfyui_sa3
+#         checkpoint: ""           # stable_audio_3_medium.safetensors (post-trained)
+#         text_encoder: ""
+#         cuda_devices: [2]
+#         min_free_vram_mb: 11000
+#         max_seconds: 380

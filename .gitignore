@@ -36,6 +36,7 @@ fireworks.html
 # 2026-10-10); the copies committed before then remain in git history.
 # docs/local/ holds the machine-local scratch that used to sit at the root.
 docs/*
+!docs/MEDIA.md
 # Design references a plan points at - mockups meant to be opened in a browser.
 !docs/design/
 !docs/design/**
@@ -123,6 +124,7 @@ __pycache__/
 
 # Output of the generate_image tool (xAI/Grok) - regenerable, never track.
 generated-images/
+/media/
 /images/
 
 # One-off local analysis scripts (underscore prefix) - kept on disk, never tracked.

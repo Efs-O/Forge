@@ -171,10 +171,13 @@ export async function drainRemoteQueue(
     let progressOutcome: ProgressOutcome = 'failed';
     try {
       const attachmentStore = deps.attachmentStore();
-      const attachments = next.attachments?.length
-        ? await attachmentStore?.load(next.attachments)
+      const promptAttachments = next.attachments?.filter(
+        (attachment) => !attachment.mediaType.startsWith('audio/'),
+      );
+      const attachments = promptAttachments?.length
+        ? await attachmentStore?.load(promptAttachments)
         : undefined;
-      if (next.attachments?.length && !attachments) {
+      if (promptAttachments?.length && !attachments) {
         throw new Error('remote attachment sidecar is unavailable');
       }
       const outcome = await deps.host.send(conversationId, next.text, attachments, {

@@ -5,6 +5,7 @@ import type { SidebarProvider } from '../sidebar/SidebarProvider';
 import type { BackendStatusBar } from './BackendStatusBar';
 import { ForgeCodeActionProvider } from './codeActions';
 import { registerNativeCommands } from './nativeCommands';
+import { registerMediaSetupCommand } from './mediaCommands';
 import { registerSecretCommands } from './secretCommands';
 import { registerSidebarCommands } from './sidebarCommands';
 
@@ -35,6 +36,7 @@ export function registerActivationCommands(
     },
   });
   registerSecretCommands(context, options.getConfig, options.configPath);
+  registerMediaSetupCommand(context, options.getConfig, () => options.configPath);
   context.subscriptions.push(
     vscode.languages.registerCodeActionsProvider(
       { scheme: 'file' },

@@ -40,6 +40,7 @@ import { handleRemoteStopAction } from './RemoteStopActions';
 import { RemoteAgentAsk } from './remoteAgentAsk';
 import { handleRemoteReportCallback } from './RemoteReportCallbacks';
 export type { RemoteControllerOptions };
+type HostNotificationArgs = Parameters<RemoteNotificationFanout['toConversation']>;
 /** Durable transport-independent admission, FIFO execution, and notification. */
 export class RemoteController {
   private readonly abort = new AbortController();
@@ -217,13 +218,9 @@ export class RemoteController {
     await this.progress.dispose();
     await this.outbox.stop();
   }
-  /**
-   * Host-originated delivery. RemoteNotificationFanout owns who hears what and
-   * what silences it; the controller keeps the numbers it returns, because
-   * notify_user reports them straight to the model.
-   */
-  async enqueueHostNotification(conversationId: string, text: string): Promise<number> {
-    return this.fanout.toConversation(conversationId, text);
+  /** Host notifications use RemoteNotificationFanout so notify_user gets recipient counts. */
+  enqueueHostNotification(...args: HostNotificationArgs): Promise<number> {
+    return this.fanout.toConversation(...args);
   }
   deliverHostImage(conversationId: string, filePath: string, caption: string): number {
     return this.progress.deliverImage(conversationId, filePath, caption);

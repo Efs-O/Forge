@@ -101,6 +101,7 @@ describe('remote command map', () => {
     'src/remote/RemoteCommandHandler.ts',
     'src/remote/RemoteSessionCommands.ts',
     'src/remote/RemoteController.ts',
+    'src/remote/RemoteMediaCommands.ts',
     // Added late: /sleep and /wake shipped working but absent from the menu
     // precisely because they live in their own file and this list did not name
     // it. Any new file holding a `command === '/x'` line belongs here too.
@@ -137,6 +138,7 @@ describe('remote command map', () => {
     '/contact',
     '/contacts',
     '/send',
+    '/music',
     // Phase 5: these three are dispatched through an alias map (one entry per
     // mesh alias), not a `command === '/x'` literal, so the regex above cannot
     // see them. Named here so the correspondence below still holds: the menu

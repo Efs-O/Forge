@@ -394,6 +394,59 @@ Console** (`forge.showBackendConsole`) and pastes the `sd-server` output to you.
 Common causes: CUDA runtime DLLs not next to `sd-server.exe`, a mismatched
 vision file, a wrong `cuda_device`, or too little free VRAM.
 
+## Step 11 — Optional: local video and music generation
+
+Ask whether the user wants to set up local media generation. Skip this step if
+they say no. It is off by default and does not download models.
+
+If they say yes:
+
+1. Inspect the available GPUs and free VRAM, then locate the existing ComfyUI
+   checkout and Python interpreter, `ffmpeg`/`ffprobe`, LTX-2.5 model files,
+   ACE-Step 1.5 runtime and checkpoints, and any Stable Audio 3 files. Use paths
+   the user provides or likely model folders from Step 0; do not search personal
+   media libraries.
+2. Explain the engines before editing config:
+   - LTX-2.5 is the video default. It uses one configured GPU; the example
+     records 11 GB as its free-VRAM threshold. Its default is 5 seconds,
+     1344×768 at 24 fps. Both dimensions must be multiples of 64.
+   - MiniMax H3 is optional and runs only when the user asks for H3 by name. It
+     needs one 16 GB Blackwell card, the configured UNET, and the upstream
+     blueprint at `<ComfyUI root>/blueprints/Image to Video (MiniMax H3).json`.
+     The example records a 15 GB free-VRAM threshold.
+   - ACE-Step 1.5 makes tracks with or without vocals; Stable Audio 3 is
+     instrumental only. Each uses one configured GPU and they run sequentially.
+     The example gates each at 11 GB free VRAM. Stable Audio 3 Medium supports
+     up to 380 seconds.
+3. Name the model repositories: [Lightricks/LTX-2.5](https://huggingface.co/Lightricks/LTX-2.5)
+   and, for the Q8 GGUF used by this adapter, the community
+   [Abiray/LTX-2.5-Distilled-GGUF](https://huggingface.co/Abiray/LTX-2.5-Distilled-GGUF);
+   [MiniMaxAI/MiniMax-H3](https://huggingface.co/MiniMaxAI/MiniMax-H3);
+   [ACE-Step/Ace-Step1.5](https://huggingface.co/ACE-Step/Ace-Step1.5) (ComfyUI's
+   repackaged checkpoint is in
+   [Comfy-Org/ace_step_1.5_ComfyUI_files](https://huggingface.co/Comfy-Org/ace_step_1.5_ComfyUI_files));
+   and the post-trained
+   [stabilityai/stable-audio-3-medium](https://huggingface.co/stabilityai/stable-audio-3-medium)
+   plus its ComfyUI text encoder from
+   [Comfy-Org/stable-audio-3](https://huggingface.co/Comfy-Org/stable-audio-3).
+   Check each model's license and required files. Load the shipped
+   `hf-download` skill if the user asks for download help; never start a large
+   download without their explicit request.
+4. Back up the existing config, then fill only the needed `media:` engine
+   entries in `config.yaml`. Set the ComfyUI root, interpreter, model paths,
+   `cuda_devices`, and the output directory. Leave `media.enabled: false`
+   until paths and available hardware have been reviewed with the user.
+5. Ask before turning `media.enabled` on. Then have the user reload VS Code and
+   run **Forge: Check Media Setup** (`forge.checkMediaSetup`). Fix each required
+   missing path it names, then check again. The check reads paths and tool
+   versions; it does not launch a render or measure live GPU memory. Render
+   startup checks the configured free-VRAM threshold. A missing
+   text-to-video still backend or music analyzer is optional when that path is
+   not part of the user's chosen workflow.
+
+**Check:** the user confirms the setup report matches the engines and files they
+chose. For full setup instructions, see [docs/MEDIA.md](docs/MEDIA.md).
+
 ## Finish
 
 Report to the user:

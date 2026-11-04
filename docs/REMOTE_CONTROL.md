@@ -74,8 +74,12 @@ on Telegram prints the same list grouped this way. **Session:** `/help`,
 `/jobs`, `/job <n|name> pause|resume|run|delete|chat`. **Contacts:**
 `/contacts pending|list`, `/contact approve|bind|link|disable|unbind`,
 `/send <name>: <message>`. **Machine:** `/system`, `/sleep [8h|07:00]`,
-`/wake [8h|07:00|off]`. `/commands`, `/list`, `/select`, and `/models` still
+`/wake [8h|07:00|off]`. **Media:** `/media`, `/music <request>`,
+`/video <request>`. `/commands`, `/list`, `/select`, and `/models` still
 parse as silent aliases, as does `/new <n>` for a workspace switch.
+`/media` reports media engine setup. `/music` and `/video` start a normal turn
+with the matching shipped skill; attach or reply to an audio file for music or
+a still image for video.
 Telegram publishes the main commands in its native slash-command menu.
 Workspaces are listed with `/workspace` (`/workspace list` still parses) and
 opened with `/workspace <number-or-alias>`; the number after `/workspace` is a

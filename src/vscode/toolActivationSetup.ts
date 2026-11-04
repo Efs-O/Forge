@@ -3,6 +3,7 @@ import { createHash } from 'crypto';
 import * as vscode from 'vscode';
 import type { ForgeConfig } from '../config/types';
 import { BackendPool } from '../backend/BackendPool';
+import type { ControlServer } from '../backend/ControlServer';
 import { EmbeddingBackend } from '../backend/EmbeddingBackend';
 import {
   CliSessionRegistry,
@@ -16,6 +17,7 @@ import { renderPdfPages } from '../documents/pdfRenderer';
 import { connectMcpServers } from '../tools/mcpBridge';
 import { ToolRegistry } from '../tools/ToolRegistry';
 import { registerAllTools } from '../tools/registerAllTools';
+import { mediaLifecycleFor } from './mediaLifecycle';
 import { UserQuestionService } from '../sidebar/UserQuestionService';
 import { UserNotificationService } from '../sidebar/UserNotificationService';
 import { SidebarProvider } from '../sidebar/SidebarProvider';
@@ -35,6 +37,12 @@ export interface ToolActivationOptions {
   pool: BackendPool;
   getSidebarProvider: () => SidebarProvider;
   log: ReturnType<typeof getLogger>;
+  /**
+   * The window's model control server, resolved per call: it is wired AFTER
+   * the tool registry, and a media tool call can only happen once activation
+   * has finished, so the lifecycle holds a getter rather than a value.
+   */
+  getControlServer?: () => ControlServer | undefined;
 }
 
 export interface ToolActivationSetup {
@@ -62,6 +70,14 @@ export function setupToolActivation(options: ToolActivationOptions): ToolActivat
     getSidebarProvider,
     log,
   } = options;
+  // The media tools free GPUs through Forge's own lifecycle: the pool's loaded
+  // entries and busy state, and the control server's unload path.
+  const mediaTools = options.getControlServer
+    ? {
+        adaptersDir: path.join(context.extensionPath, 'resources', 'media'),
+        lifecycle: mediaLifecycleFor(pool, options.getControlServer, getConfig),
+      }
+    : undefined;
 
   // ── Tool registry ─────────────────────────────────────────────────────────
   const embeddingBackend = new EmbeddingBackend(config);
@@ -135,6 +151,7 @@ export function setupToolActivation(options: ToolActivationOptions): ToolActivat
     getSidebarProvider,
     skills,
     renderPdfPages,
+    mediaTools,
   );
   // Owns the sd-server children created by tool registration.
   if (sdServers) context.subscriptions.push(sdServers);

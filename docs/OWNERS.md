@@ -356,6 +356,8 @@ overlaps with an existing owner, extend the owner instead.
 | Remote absolute and relative date formatting      | `src/remote/RemoteDateTime.ts`                   |
 | Forge approval presentation + correlation     | `src/remote/RemoteApprovalBridge.ts`            |
 | Telegram Bot API transport                    | `src/remote/TelegramChannel.ts`                 |
+| Telegram media multipart transport            | `src/remote/TelegramMedia.ts`                   |
+| Telegram `/media`, `/video`, `/music` dispatch | `src/remote/RemoteMediaCommands.ts`             |
 | Telegram group-contact workflow (link, /owner) | `src/remote/TelegramGroupContacts.ts`          |
 | Owner-approved contact records (who may speak, group links, thread, outbound) | `src/remote/remoteContactRecords.ts` |
 | Telegram command-text parsing helpers         | `src/remote/telegramContactText.ts`             |
@@ -642,6 +644,12 @@ overlaps with an existing owner, extend the owner instead.
 | Local `/sdapi/v1/txt2img` backend          | `src/tools/imageGeneration/sdcppImageBackend.ts` |
 | VRAM gate shared by local generation and `upscale_image` | `src/tools/imageGeneration/sdcppVramGate.ts` |
 | Media GPU lease protocol shared with private media skills | `src/media/mediaGpuLease.ts` |
+| `media:` configuration schema                  | `src/config/mediaSchema.ts`            |
+| Media setup report (sidebar and Telegram)    | `src/media/mediaSetupCheck.ts`          |
+| `generate_video` tool                       | `src/tools/media/generateVideoTool.ts`  |
+| `generate_music` tool                       | `src/tools/media/generateMusicTool.ts`  |
+| Media source-file copies and accepted audio extensions | `src/tools/media/mediaInputFiles.ts` |
+| Telegram media previews and workspace-relative paths | `src/tools/media/mediaDelivery.ts` |
 | `image_generation:` config schema          | `src/config/imageGenerationSchema.ts` |
 | `upscale_image` tool (input cap, VRAM gate, one-shot `sd-cli` pass, `_x4.png` naming/delivery) | `src/tools/imageGeneration/upscaleImageTool.ts` |
 | `image_generation.upscale:` config schema   | `src/config/imageUpscaleSchema.ts` |
@@ -734,7 +742,7 @@ overlaps with an existing owner, extend the owner instead.
 | Two-flavor model/profile/alias resolver                 | `src/config/ConfigResolver.ts`       |
 | Config + model types                                    | `src/config/types.ts`                |
 | Config types: model/group/profile entries               | `src/config/modelTypes.ts`           |
-| Image, video and voice configuration types              | `src/config/mediaTypes.ts`           |
+| Image, video, music and voice configuration types        | `src/config/mediaTypes.ts`           |
 | Comment-preserving config writer (entry point)          | `src/config/ConfigWriter.ts`         |
 | YAML Document mutation helpers (set/add/remove)         | `src/config/ConfigWriterHelpers.ts`  |
 | Groups migration orchestration + resolved-diff verifier | `src/config/ConfigMigrator.ts`       |
@@ -748,6 +756,7 @@ overlaps with an existing owner, extend the owner instead.
 | ------------------------------------ | -------------------------------- |
 | Status bar (backend state indicator) | `src/vscode/BackendStatusBar.ts` |
 | Native VS Code commands              | `src/vscode/nativeCommands.ts`   |
+| `Forge: Check Media Setup`            | `src/vscode/mediaCommands.ts`    |
 | Stale build: window vs installed    | `src/vscode/staleBuild.ts`        |
 | Editor-context commands              | `src/vscode/editorCommands.ts`   |
 | Command behaviour (prefill, run)     | `src/vscode/commandHelpers.ts`   |

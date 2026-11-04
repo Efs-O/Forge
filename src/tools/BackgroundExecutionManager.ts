@@ -1,136 +1,34 @@
 import { randomUUID } from 'crypto';
-import { spawn, type ChildProcessByStdio } from 'child_process';
-import type { Readable } from 'stream';
+import { spawn } from 'child_process';
 import { terminateCliProcessTree } from '../agents/cliProcess';
 import { assertSpawnCwd, normalizeSpawnCwd } from '../util/processSpawn';
 import { getLogger } from '../util/logger';
-import type { ExecOutputOptions } from './execHelpers';
 import { backgroundRegistry, type BackgroundRegistry } from './backgroundRegistry';
 import { readOutput, retainOutput, tailLines } from './backgroundOutput';
 
 const MAX_BACKGROUND_EXECUTIONS = 32;
 const FINISHED_EXECUTION_TTL_MS = 10 * 60 * 1000;
 
-export type BackgroundExecutionStatus = 'running' | 'completed' | 'failed' | 'terminated';
-
-interface BackgroundExecution {
-  readonly id: string;
-  readonly command: string;
-  readonly args: readonly string[];
-  readonly cwd: string;
-  readonly pid: number | undefined;
-  readonly startedAt: number;
-  readonly process: ChildProcessByStdio<null, Readable, Readable>;
-  stdout: string;
-  stderr: string;
-  stdoutBase: number;
-  stderrBase: number;
-  status: BackgroundExecutionStatus;
-  exitCode: number | null;
-  error: string | undefined;
-  finishedAt: number | undefined;
-  stopRequested: boolean;
-  timeoutMs: number | undefined;
-  timeoutTimer: NodeJS.Timeout | undefined;
-  readonly waiters: Set<() => void>;
-  /** Cleared by `disarmNotify()` when the owner stops this chat's turn; the
-   *  exit notice is decided from this at `finish()`. */
-  notifyConversationId: string | undefined;
-  readonly conversationId: string | undefined;
-  readonly outputOptions: ExecOutputOptions | undefined;
-  terminalObserved: boolean;
-}
-
-export interface BackgroundExecutionSummary {
-  id: string;
-  command: string;
-  args: readonly string[];
-  cwd: string;
-  status: BackgroundExecutionStatus;
-  pid: number | undefined;
-  startedAt: number;
-  finishedAt: number | undefined;
-  exitCode: number | null;
-}
-
-export interface BackgroundExecutionStart {
-  id: string;
-  status: BackgroundExecutionStatus;
-  pid: number | undefined;
-  startedAt: number;
-}
-
-export interface BackgroundExecutionObservation {
-  id: string;
-  command: string;
-  status: BackgroundExecutionStatus;
-  pid: number | undefined;
-  startedAt: number;
-  finishedAt: number | undefined;
-  exitCode: number | null;
-  error: string | undefined;
-  stdout: string;
-  stderr: string;
-  /**
-   * Absolute position of the first returned character. The caller caps how much
-   * of `stdout` it actually shows, so only it can say where the next read
-   * resumes — reporting `stdoutEnd` as the next cursor skipped everything the
-   * cap held back and made truncated output unreachable.
-   */
-  stdoutStart: number;
-  stderrStart: number;
-  /** Absolute position one past the last character produced so far. */
-  stdoutEnd: number;
-  stderrEnd: number;
-  /** Oldest position still held; anything before it was dropped by the cap. */
-  stdoutOldest: number;
-  stderrOldest: number;
-  /** Characters between the caller's cursor and the window — lost for good. */
-  stdoutDropped: number;
-  stderrDropped: number;
-  /** Optional output view selected when the job started. */
-  outputOptions: ExecOutputOptions | undefined;
-}
-
-export interface BackgroundExecutionStartOptions {
-  command: string;
-  args: readonly string[];
-  cwd: string;
-  /**
-   * Kill deadline in ms. Undefined means the job runs until it exits, is
-   * stopped, or the extension shuts down — a background job is long by
-   * definition, so there is deliberately no default deadline here.
-   */
-  timeoutMs?: number | undefined;
-  /**
-   * Optional validated env for the child, merged over the inherited env. The
-   * foreground path (`spawnAndWait`) already takes `extraEnv`; without this the
-   * background path would silently drop a validated `env` and the foreground
-   * and background shell paths would disagree.
-   */
-  env?: NodeJS.ProcessEnv;
-  notifyConversationId?: string;
-  /**
-   * Output options (tail_lines and so on) given when the job started.
-   * monitor_execution applies them when its own call names none: CI started with tail_lines 200
-   * used to come back as its first 16,000 characters, and the agent paged twice
-   * to reach the test counts at the end.
-   */
-  outputOptions?: ExecOutputOptions;
-}
-
-export interface BackgroundExecutionExitNotice {
-  id: string;
-  conversationId: string;
-  command: string;
-  args: readonly string[];
-  status: BackgroundExecutionStatus;
-  exitCode: number | null;
-  error: string | undefined;
-  durationMs: number;
-  stdoutTail: string;
-  stderrTail: string;
-}
+export type {
+  BackgroundExecution,
+  BackgroundExecutionStatus,
+  BackgroundExecutionSummary,
+  BackgroundExecutionStart,
+  BackgroundExecutionObservation,
+  BackgroundExecutionStartOptions,
+  BackgroundExecutionCompletion,
+  BackgroundExecutionExitNotice,
+} from './backgroundExecutionTypes';
+import type {
+  BackgroundExecution,
+  BackgroundExecutionCompletion,
+  BackgroundExecutionExitNotice,
+  BackgroundExecutionObservation,
+  BackgroundExecutionStart,
+  BackgroundExecutionStartOptions,
+  BackgroundExecutionSummary,
+  BackgroundExecutionStatus,
+} from './backgroundExecutionTypes';
 
 export class BackgroundExecutionManager {
   private readonly executions = new Map<string, BackgroundExecution>();
@@ -192,6 +90,7 @@ export class BackgroundExecutionManager {
       timeoutTimer: undefined,
       waiters: new Set(),
       notifyConversationId: options.notifyConversationId,
+      exitSummary: options.exitSummary,
       // shellTool already passes the chat id in the child environment for every
       // background command, including jobs without notify_on_exit.
       conversationId: options.env?.FORGE_CONVERSATION_ID ?? options.notifyConversationId,
@@ -322,6 +221,49 @@ export class BackgroundExecutionManager {
     }
   }
 
+  /**
+   * Resolve when this execution reaches a terminal state, WITHOUT marking its
+   * exit notice seen — `observe` does, which would silence the wake the caller
+   * started the job for. The media tools hang the GPU lease release on this, so
+   * every exit path (clean, non-zero, child error, `stop`, a timeout kill) has
+   * to resolve it, and an abort resolves it too rather than hanging the lease.
+   */
+  async waitFinished(id: string, signal?: AbortSignal): Promise<BackgroundExecutionCompletion> {
+    const execution = this.get(id);
+    if (execution.status !== 'running') return this.completion(execution);
+    await new Promise<void>((resolve, reject) => {
+      if (signal?.aborted) {
+        reject(new Error('background execution wait aborted'));
+        return;
+      }
+      const awake = (): void => {
+        signal?.removeEventListener('abort', abort);
+        resolve();
+      };
+      const abort = (): void => {
+        execution.waiters.delete(awake);
+        reject(new Error('background execution wait aborted'));
+      };
+      // A waiter is cleared by `finish()` for every terminal path, including a
+      // child that never started (`process.on('error')`) and a `stop()`.
+      execution.waiters.add(awake);
+      signal?.addEventListener('abort', abort, { once: true });
+    });
+    return this.completion(execution);
+  }
+
+  private completion(execution: BackgroundExecution): BackgroundExecutionCompletion {
+    return {
+      id: execution.id,
+      status: execution.status,
+      exitCode: execution.exitCode,
+      error: execution.error,
+      pid: execution.pid,
+      startedAt: execution.startedAt,
+      finishedAt: execution.finishedAt,
+    };
+  }
+
   async stop(id: string): Promise<BackgroundExecutionObservation> {
     const execution = this.get(id);
     execution.terminalObserved = true;
@@ -420,6 +362,15 @@ export class BackgroundExecutionManager {
     for (const waiter of execution.waiters) waiter();
     execution.waiters.clear();
     if (execution.notifyConversationId) {
+      const completion: BackgroundExecutionCompletion = {
+        id: execution.id,
+        status,
+        exitCode,
+        error: execution.error,
+        pid: execution.pid,
+        startedAt: execution.startedAt,
+        finishedAt: execution.finishedAt,
+      };
       const notice: BackgroundExecutionExitNotice = {
         id: execution.id,
         conversationId: execution.notifyConversationId,
@@ -435,7 +386,32 @@ export class BackgroundExecutionManager {
       // Let an observe() promise awakened above return its terminal snapshot
       // first; that call marks the execution seen before delivery is decided.
       queueMicrotask(() => {
-        if (!execution.terminalObserved) this.exitListener?.(notice);
+        if (execution.terminalObserved) return;
+        if (!execution.exitSummary) {
+          this.exitListener?.(notice);
+          return;
+        }
+        // The summary is read at exit, so a manifest the child wrote last is
+        // on disk by then. A hook that throws or says nothing must not cost
+        // the wake: the plain notice still goes out.
+        let produced: string | Promise<string> | undefined;
+        try {
+          produced = execution.exitSummary(completion);
+        } catch {
+          this.exitListener?.(notice);
+          return;
+        }
+        void Promise.resolve(produced).then(
+          (summary) => {
+            if (execution.terminalObserved) return;
+            this.exitListener?.(
+              typeof summary === 'string' && summary.trim() ? { ...notice, summary } : notice,
+            );
+          },
+          () => {
+            if (!execution.terminalObserved) this.exitListener?.(notice);
+          },
+        );
       });
     }
   }

@@ -58,6 +58,10 @@ export async function admitRemotePrompt(
   dedupKey: string,
   deps: RemotePromptAdmissionDeps,
   sessionTarget?: RemoteSessionTarget,
+  decorateText?: (
+    text: string,
+    attachments: NonNullable<RemoteRequestRecord['attachments']>,
+  ) => string,
 ): Promise<RemoteInboundDisposition> {
   const duplicate = deps.store.getByDedupKey(dedupKey);
   if (duplicate) {
@@ -96,7 +100,7 @@ export async function admitRemotePrompt(
     chatId: event.chatId,
     providerMessageId: event.providerMessageId,
     conversationId: binding.conversationId,
-    text,
+    text: decorateText ? decorateText(text, attachments ?? []) : text,
     ...(sessionTarget ? { sessionTarget } : {}),
     ...(attachments ? { attachments } : {}),
     receivedAt: event.receivedAt,

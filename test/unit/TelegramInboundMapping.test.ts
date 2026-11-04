@@ -294,11 +294,86 @@ describe('Telegram inbound mapping — replies', () => {
 
 describe('Telegram inbound mapping — command suffix', () => {
   it('strips a bot suffix from a leading command only', () => {
-    expect(telegramUpdateToEvent(TelegramUpdateSchema.parse(message({ text: '/tell@forge_bot codex hi' }))))
-      .toMatchObject({ kind: 'text', text: '/tell codex hi' });
-    expect(telegramUpdateToEvent(TelegramUpdateSchema.parse(message({ text: '/status@forge_bot' }))))
-      .toMatchObject({ kind: 'text', text: '/status' });
-    expect(telegramUpdateToEvent(TelegramUpdateSchema.parse(message({ text: 'hello @someone' }))))
-      .toMatchObject({ kind: 'text', text: 'hello @someone' });
+    expect(
+      telegramUpdateToEvent(
+        TelegramUpdateSchema.parse(message({ text: '/tell@forge_bot codex hi' })),
+      ),
+    ).toMatchObject({ kind: 'text', text: '/tell codex hi' });
+    expect(
+      telegramUpdateToEvent(TelegramUpdateSchema.parse(message({ text: '/status@forge_bot' }))),
+    ).toMatchObject({ kind: 'text', text: '/status' });
+    expect(
+      telegramUpdateToEvent(TelegramUpdateSchema.parse(message({ text: 'hello @someone' }))),
+    ).toMatchObject({ kind: 'text', text: 'hello @someone' });
+  });
+});
+
+describe('Telegram inbound mapping — media commands', () => {
+  it('maps an attached or replied photo to /video as an image attachment', () => {
+    const attached = telegramUpdateToEvent(
+      TelegramUpdateSchema.parse(
+        message({ caption: '/video slow pan', photo: [{ file_id: 'photo-attached' }] }),
+      ),
+    );
+    expect(attached).toMatchObject({
+      kind: 'text',
+      text: '/video slow pan',
+      attachments: [{ mediaType: 'image/jpeg', providerFileId: 'photo-attached' }],
+    });
+    const replied = telegramUpdateToEvent(
+      TelegramUpdateSchema.parse(
+        message({
+          text: '/video gentle motion',
+          reply_to_message: { message_id: 8, photo: [{ file_id: 'photo-replied' }] },
+        }),
+      ),
+    );
+    expect(replied).toMatchObject({
+      kind: 'text',
+      attachments: [{ mediaType: 'image/jpeg', providerFileId: 'photo-replied' }],
+    });
+  });
+
+  it('maps attached and replied audio documents or voice notes to /music', () => {
+    const cases = [
+      message({
+        caption: '/music make it dreamy',
+        audio: { file_id: 'audio-1', mime_type: 'audio/mpeg', file_name: 'track.mp3' },
+      }),
+      message({
+        text: '/music use this melody',
+        reply_to_message: {
+          message_id: 8,
+          voice: { file_id: 'voice-1', duration: 4, mime_type: 'audio/ogg' },
+        },
+      }),
+      message({
+        text: '/music keep the rhythm',
+        document: {
+          file_id: 'document-1',
+          file_name: 'voice.ogg',
+          mime_type: 'application/octet-stream',
+        },
+      }),
+    ];
+    const ids = ['audio-1', 'voice-1', 'document-1'];
+    for (const [index, input] of cases.entries()) {
+      expect(telegramUpdateToEvent(TelegramUpdateSchema.parse(input))).toMatchObject({
+        kind: 'text',
+        attachments: [
+          { mediaType: expect.stringMatching(/^audio\//u), providerFileId: ids[index] },
+        ],
+      });
+    }
+  });
+
+  it('still rejects audio sent without /music', () => {
+    expect(
+      telegramUpdateToEvent(
+        TelegramUpdateSchema.parse(
+          message({ audio: { file_id: 'audio-1', mime_type: 'audio/mpeg' }, caption: 'listen' }),
+        ),
+      ),
+    ).toMatchObject({ kind: 'unsupported_media', mediaType: 'audio' });
   });
 });

@@ -4,6 +4,7 @@ import type {
   VideoConfig,
   VoiceConfig,
 } from './mediaTypes';
+import type { MediaConfig } from './mediaSchema';
 export type {
   CloudImageBackendConfig,
   ImageBackendConfig,
@@ -13,6 +14,7 @@ export type {
   VideoConfig,
   VoiceConfig,
 } from './mediaTypes';
+export type { MediaConfig } from './mediaSchema';
 
 import type { ToolPermission } from '../tools/ToolRegistry';
 import type { EmbeddingPromptStyle } from '../search/embeddingPrompts';
@@ -173,6 +175,8 @@ export interface ForgeConfig {
   voice?: VoiceConfig;
   /** `generate_image` backends. Absent means the tool is not advertised. */
   image_generation?: ImageGenerationConfig;
+  /** Local video and music engines. Absent or disabled means no media generation tools. */
+  media?: MediaConfig;
   /** Persistent agent jobs. Absent means no scheduler, no lease, no tool. */
   jobs?: JobsConfig;
   /**

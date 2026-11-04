@@ -3,6 +3,7 @@ import { isAbsolute } from 'path';
 import { CacheTypeSchema, GroupSchema } from './schemaShared';
 import { VoiceConfigSchema, validateVoiceConfig } from './voiceSchema';
 import { ImageGenerationConfigSchema } from './imageGenerationSchema';
+import { MediaConfigSchema } from './mediaSchema';
 import { JobsConfigSchema } from './jobsSchema';
 import { ModelStarterConfigSchema, validateModelStarterConfig } from './modelStarterSchema';
 import { EnginesSchema, ModelHostsSchema } from './engineSchema';
@@ -169,6 +170,7 @@ export const ForgeConfigShape = {
   video: VideoConfigSchema,
   voice: VoiceConfigSchema,
   image_generation: ImageGenerationConfigSchema,
+  media: MediaConfigSchema.optional(),
   jobs: JobsConfigSchema,
   model_starter: ModelStarterConfigSchema,
   cloud_relay: CloudRelayConfigSchema,

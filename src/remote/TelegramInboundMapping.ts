@@ -15,6 +15,20 @@ import { STOP_KEY_LABEL } from './TelegramStopButton';
  * polling loop.
  */
 
+const TelegramFileSchema = z.object({
+  file_id: z.string(),
+  file_name: z.string().optional(),
+  mime_type: z.string().optional(),
+  file_size: z.number().int().nonnegative().optional(),
+});
+
+const TelegramVoiceSchema = z.object({
+  file_id: z.string(),
+  duration: z.number().int().nonnegative(),
+  mime_type: z.string().optional(),
+  file_size: z.number().int().nonnegative().optional(),
+});
+
 export const TelegramUpdateSchema = z.object({
   update_id: z.number().int(),
   message: z
@@ -23,14 +37,7 @@ export const TelegramUpdateSchema = z.object({
       date: z.number().int(),
       text: z.string().optional(),
       caption: z.string().optional(),
-      document: z
-        .object({
-          file_id: z.string(),
-          file_name: z.string().optional(),
-          mime_type: z.string().optional(),
-          file_size: z.number().int().nonnegative().optional(),
-        })
-        .optional(),
+      document: TelegramFileSchema.optional(),
       photo: z
         .array(
           z.object({ file_id: z.string(), file_size: z.number().int().nonnegative().optional() }),
@@ -48,16 +55,22 @@ export const TelegramUpdateSchema = z.object({
        * the recording window that correlates a spoken command to one pending
        * approval (docs/VOICE_STT_TTS_IMPLEMENTATION_PLAN.md §22A R1-revised).
        */
-      voice: z
+      voice: TelegramVoiceSchema.optional(),
+      audio: TelegramFileSchema.extend({
+        duration: z.number().int().nonnegative().optional(),
+      }).optional(),
+      /** An explicit reply always wins over the recording-window heuristic. */
+      reply_to_message: z
         .object({
-          file_id: z.string(),
-          duration: z.number().int().nonnegative(),
-          mime_type: z.string().optional(),
-          file_size: z.number().int().nonnegative().optional(),
+          message_id: z.number().int(),
+          document: TelegramFileSchema.optional(),
+          audio: TelegramFileSchema.extend({
+            duration: z.number().int().nonnegative().optional(),
+          }).optional(),
+          voice: TelegramVoiceSchema.optional(),
+          photo: z.array(z.object({ file_id: z.string() })).optional(),
         })
         .optional(),
-      /** An explicit reply always wins over the recording-window heuristic. */
-      reply_to_message: z.object({ message_id: z.number().int() }).optional(),
       /**
        * Media Forge does not handle, named explicitly so their presence is
        * detectable. Zod strips unknown keys, so a field absent from this schema
@@ -70,7 +83,6 @@ export const TelegramUpdateSchema = z.object({
       video_note: z.object({ file_id: z.string() }).optional(),
       animation: z.object({ file_id: z.string() }).optional(),
       sticker: z.object({ file_id: z.string() }).optional(),
-      audio: z.object({ file_id: z.string() }).optional(),
       location: z.object({ latitude: z.number(), longitude: z.number() }).optional(),
       contact: z
         .object({
@@ -143,8 +155,76 @@ export function mediaTypeForPath(filePath: string): string {
     '.mp3': 'audio/mpeg',
     '.wav': 'audio/wav',
     '.webm': 'audio/webm',
+    '.aac': 'audio/aac',
+    '.flac': 'audio/flac',
   };
   return known[extension] ?? 'application/octet-stream';
+}
+
+type TelegramMessage = NonNullable<z.infer<typeof TelegramUpdateSchema>['message']>;
+
+function isMusicCommand(message: TelegramMessage): boolean {
+  return /^\/music(?:\s|$)/iu.test(
+    normalizeTelegramCommand(message.text ?? message.caption ?? '').trimStart(),
+  );
+}
+
+function isAudioDocument(file: {
+  file_name?: string | undefined;
+  mime_type?: string | undefined;
+}): boolean {
+  return (
+    file.mime_type?.startsWith('audio/') === true ||
+    /\.(mp3|ogg|oga|opus|m4a|wav|flac|aac|webm)$/iu.test(file.file_name ?? '')
+  );
+}
+
+function audioAttachment(
+  file: {
+    file_id: string;
+    file_name?: string | undefined;
+    mime_type?: string | undefined;
+  },
+  fallbackName: string,
+): { name: string; mediaType: string; providerFileId: string } {
+  const name = file.file_name || fallbackName;
+  const extensionType = mediaTypeForPath(name);
+  return {
+    name,
+    mediaType:
+      file.mime_type?.startsWith('audio/') === true
+        ? file.mime_type
+        : extensionType.startsWith('audio/')
+          ? extensionType
+          : 'audio/mpeg',
+    providerFileId: file.file_id,
+  };
+}
+
+function musicAudioAttachment(
+  message: TelegramMessage,
+): { name: string; mediaType: string; providerFileId: string } | undefined {
+  if (message.audio) return audioAttachment(message.audio, 'telegram-audio.mp3');
+  if (message.voice) return audioAttachment(message.voice, 'telegram-voice.ogg');
+  if (message.document && isAudioDocument(message.document)) {
+    return audioAttachment(message.document, 'telegram-audio.mp3');
+  }
+  const reply = message.reply_to_message;
+  if (reply?.audio) return audioAttachment(reply.audio, 'telegram-audio.mp3');
+  if (reply?.voice) return audioAttachment(reply.voice, 'telegram-voice.ogg');
+  if (reply?.document && isAudioDocument(reply.document)) {
+    return audioAttachment(reply.document, 'telegram-audio.mp3');
+  }
+  return undefined;
+}
+
+function videoStillAttachment(
+  message: TelegramMessage,
+): { name: string; mediaType: string; providerFileId: string } | undefined {
+  const photo = message.photo?.at(-1) ?? message.reply_to_message?.photo?.at(-1);
+  return photo
+    ? { name: 'telegram-photo.jpg', mediaType: 'image/jpeg', providerFileId: photo.file_id }
+    : undefined;
 }
 
 export function telegramChatType(value: string): RemoteInboundEvent['chatType'] {
@@ -211,10 +291,13 @@ type RemoteUnsupportedMediaEvent = Extract<RemoteInboundEvent, { kind: 'unsuppor
  */
 function unsupportedUserMedia(
   message: NonNullable<z.infer<typeof TelegramUpdateSchema>['message']>,
+  allowMusicAudio = false,
 ): RemoteUnsupportedMediaEvent['mediaType'] | undefined {
   for (const [field, mediaType] of UNSUPPORTED_USER_MEDIA) {
+    if (allowMusicAudio && mediaType === 'audio') continue;
     if (message[field as keyof typeof message] !== undefined) return mediaType;
   }
+  if (!allowMusicAudio && message.document && isAudioDocument(message.document)) return 'audio';
   return undefined;
 }
 
@@ -231,7 +314,7 @@ export function telegramUpdateToEvent(
    * cannot produce a rejection aimed at a user who is not there.
    */
   if (message && message.from) {
-    const mediaType = unsupportedUserMedia(message);
+    const mediaType = unsupportedUserMedia(message, isMusicCommand(message));
     if (mediaType) {
       return {
         channel: 'telegram',
@@ -248,7 +331,7 @@ export function telegramUpdateToEvent(
   }
   // Before the text branch: a voice note carries no `text`, so it would
   // otherwise fall through and be dropped while the cursor still advanced.
-  if (message && message.from && message.voice) {
+  if (message && message.from && message.voice && !isMusicCommand(message)) {
     return {
       channel: 'telegram',
       kind: 'voice',
@@ -287,19 +370,25 @@ export function telegramUpdateToEvent(
   if (
     message &&
     message.from &&
-    (message.text !== undefined || message.document || message.photo)
+    (message.text !== undefined ||
+      message.document ||
+      message.photo ||
+      (isMusicCommand(message) && (message.audio || message.voice)))
   ) {
     const document = message.document;
-    const photo = message.photo?.at(-1);
-    const attachment = document
-      ? {
-          name: document.file_name ?? 'telegram-document',
-          mediaType: document.mime_type ?? 'application/octet-stream',
-          providerFileId: document.file_id,
-        }
-      : photo
-        ? { name: 'telegram-photo.jpg', mediaType: 'image/jpeg', providerFileId: photo.file_id }
-        : undefined;
+    const music = isMusicCommand(message);
+    const musicAttachment = music ? musicAudioAttachment(message) : undefined;
+    const attachment =
+      musicAttachment ??
+      (document && !isAudioDocument(document)
+        ? {
+            name: document.file_name ?? 'telegram-document',
+            mediaType: document.mime_type ?? 'application/octet-stream',
+            providerFileId: document.file_id,
+          }
+        : !music
+          ? videoStillAttachment(message)
+          : undefined);
     return {
       channel: 'telegram',
       kind: 'text',

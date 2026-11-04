@@ -3,6 +3,7 @@ import { describeError } from '../util/describeError';
 import { downloadTelegramAttachment, downloadTelegramAttachmentToFile } from './TelegramDownloads';
 import { TelegramHelpMessages } from './TelegramHelpMessages';
 import { sendTelegramPhoto } from './TelegramPhoto';
+import { sendTelegramAudio, sendTelegramDocument, sendTelegramVideo } from './TelegramMedia';
 import { plainTelegramText, splitTelegramText } from './TelegramText';
 import { sendTelegramVoice } from './TelegramVoice';
 import { styleTelegramNotice } from './telegramNoticeStyle';
@@ -26,6 +27,7 @@ type TelegramCall = (
   signal?: AbortSignal,
   options?: { retryRateLimit?: boolean },
 ) => Promise<unknown>;
+type MediaSendArguments = [chatId: string, filePath: string, caption: string, signal?: AbortSignal];
 
 /** Only the queue options a bubble call carries; the keyboard is separate. */
 function callOptions(options?: ProgressMessageOptions): { retryRateLimit?: boolean } | undefined {
@@ -437,6 +439,31 @@ export class TelegramOutbound {
       caption,
       signal,
     );
+  }
+
+  private sendMedia(
+    kind: 'video' | 'audio' | 'document',
+    ...args: MediaSendArguments
+  ): Promise<void> {
+    const send =
+      kind === 'video'
+        ? sendTelegramVideo
+        : kind === 'audio'
+          ? sendTelegramAudio
+          : sendTelegramDocument;
+    return send(this.fetchImpl, this.token, this.sendQueue, ...args);
+  }
+
+  sendVideo(...args: MediaSendArguments): Promise<void> {
+    return this.sendMedia('video', ...args);
+  }
+
+  sendAudio(...args: MediaSendArguments): Promise<void> {
+    return this.sendMedia('audio', ...args);
+  }
+
+  sendDocument(...args: MediaSendArguments): Promise<void> {
+    return this.sendMedia('document', ...args);
   }
 
   async sendVoice(chatId: string, oggPath: string, signal?: AbortSignal): Promise<void> {

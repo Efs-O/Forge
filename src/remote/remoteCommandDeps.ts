@@ -1,6 +1,10 @@
 import type { RemoteCommandContext } from './RemoteCommandHandler';
 import type { CommandCleanupScheduler } from './CommandCleanupScheduler';
-import { resumeRemoteConversation, type RemotePromptAdmissionDeps } from './RemotePromptAdmission';
+import {
+  admitRemotePrompt,
+  resumeRemoteConversation,
+  type RemotePromptAdmissionDeps,
+} from './RemotePromptAdmission';
 import type { RemoteControllerOptions } from './remoteControllerOptions';
 import type { RemoteInboundEvent } from './types';
 
@@ -107,6 +111,34 @@ export function buildRemoteCommandDeps(
     ...(options.voiceToggle ? { voiceToggle: options.voiceToggle } : {}),
     ...(options.jobs ? { jobs: options.jobs } : {}),
     ...(deps.contactCommands ? { contactCommands: deps.contactCommands } : {}),
+    mediaCommands: {
+      enabled: options.mediaEnabled === true,
+      setupText: options.mediaSetupText ?? 'Media setup status is unavailable in this window.',
+      queue: (event, text, dedupKey, kind) =>
+        admitRemotePrompt(
+          event,
+          text,
+          dedupKey,
+          source.promptDeps(),
+          undefined,
+          (prompt, attachments) => {
+            const eligible = attachments.filter((attachment) =>
+              kind === 'video'
+                ? attachment.mediaType.startsWith('image/')
+                : attachment.mediaType.startsWith('audio/'),
+            );
+            if (eligible.length === 0) return prompt;
+            return [
+              prompt,
+              'Telegram input file in this workspace:',
+              ...eligible.map(
+                (attachment) =>
+                  `- .forge/remote-inbox/${attachment.relativePath} (${attachment.mediaType})`,
+              ),
+            ].join('\n');
+          },
+        ),
+    },
     resumeCurrent: (resumeEvent, resumeDedupKey) =>
       resumeRemoteConversation(resumeEvent, resumeDedupKey, source.promptDeps()),
   };

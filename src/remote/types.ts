@@ -127,6 +127,13 @@ export interface RemoteOutboxRecord {
   ephemeral?: boolean | undefined;
   /** This turn's speed line; see `OutboxSchema`. It is never part of `text`. */
   speedLine?: string | undefined;
+  media?: RemoteMediaOutboxPayload | undefined;
+}
+
+export interface RemoteMediaOutboxPayload {
+  kind: 'video' | 'audio';
+  workspacePath: string;
+  previewPath?: string | undefined;
 }
 
 interface RemoteTransportHealth {
@@ -321,6 +328,26 @@ export interface RemoteChannel {
   sendVoice?(chatId: string, oggPath: string, signal?: AbortSignal): Promise<void>;
   /** Deliver a local image file with a caption. Optional, like `sendVoice`. */
   sendPhoto?(
+    chatId: string,
+    filePath: string,
+    caption: string,
+    signal?: AbortSignal,
+  ): Promise<void>;
+  /** Deliver media output using Telegram's native video/audio methods. */
+  sendVideo?(
+    chatId: string,
+    filePath: string,
+    caption: string,
+    signal?: AbortSignal,
+  ): Promise<void>;
+  sendAudio?(
+    chatId: string,
+    filePath: string,
+    caption: string,
+    signal?: AbortSignal,
+  ): Promise<void>;
+  /** Document fallback for transports or media rejected by native methods. */
+  sendDocument?(
     chatId: string,
     filePath: string,
     caption: string,

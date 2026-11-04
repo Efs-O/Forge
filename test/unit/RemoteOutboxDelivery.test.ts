@@ -39,6 +39,7 @@ function delivery(
   state: RemoteRequestStore,
   maxBacklog = 5,
   onError = vi.fn(),
+  workspaceRoot?: string,
 ): RemoteOutboxDelivery {
   return new RemoteOutboxDelivery(
     channel,
@@ -51,7 +52,25 @@ function delivery(
     undefined,
     undefined,
     maxBacklog,
+    workspaceRoot,
   );
+}
+
+class MediaChannel extends FakeRemoteChannel {
+  readonly sentMedia: Array<{ kind: string; chatId: string; filePath: string; caption: string }> =
+    [];
+
+  async sendVideo(chatId: string, filePath: string, caption: string): Promise<void> {
+    this.sentMedia.push({ kind: 'video', chatId, filePath, caption });
+  }
+
+  async sendAudio(chatId: string, filePath: string, caption: string): Promise<void> {
+    this.sentMedia.push({ kind: 'audio', chatId, filePath, caption });
+  }
+
+  async sendDocument(chatId: string, filePath: string, caption: string): Promise<void> {
+    this.sentMedia.push({ kind: 'document', chatId, filePath, caption });
+  }
 }
 
 describe('RemoteOutboxDelivery unlock backlog cap', () => {
@@ -79,6 +98,67 @@ describe('RemoteOutboxDelivery unlock backlog cap', () => {
     const records = state.contactRead((snapshot) => snapshot.outbox);
     expect(records.slice(0, 13).every((item) => item.state === 'coalesced')).toBe(true);
     expect(records.slice(13).every((item) => item.state === 'delivered')).toBe(true);
+  });
+
+  it('keeps older media outbox items deliverable when text backlog is coalesced', async () => {
+    const directory = await fs.mkdtemp(path.join(os.tmpdir(), 'forge-outbox-media-'));
+    tempDirs.push(directory);
+    const workspace = path.join(directory, 'workspace');
+    await fs.mkdir(path.join(workspace, 'media'), { recursive: true });
+    const clip = path.join(workspace, 'media', 'clip.mp4');
+    await fs.writeFile(clip, 'clip');
+    const state = new RemoteRequestStore(path.join(directory, 'state.json'));
+    await state.load();
+    const channel = new MediaChannel();
+    await state.notifyOutbox('fake', 'chat-1', 'older text');
+    await state.notifyOutbox('fake', 'chat-1', 'video finished', {
+      media: { kind: 'video', workspacePath: 'media/clip.mp4' },
+    });
+    await state.notifyOutbox('fake', 'chat-1', 'newer text');
+    const outbox = delivery(channel, state, 1, vi.fn(), workspace);
+
+    outbox.start();
+    await vi.waitFor(() => expect(channel.sentMedia).toHaveLength(1));
+    await outbox.stop();
+
+    expect(channel.sentMedia[0]?.kind).toBe('video');
+    expect(await fs.realpath(channel.sentMedia[0]!.filePath)).toBe(await fs.realpath(clip));
+    const records = state.contactRead((snapshot) => snapshot.outbox);
+    expect(records[1]?.state).toBe('delivered');
+    expect(records[0]?.state).toBe('coalesced');
+  });
+
+  it('sends the Telegram preview and names the original path for an oversized render', async () => {
+    const directory = await fs.mkdtemp(path.join(os.tmpdir(), 'forge-outbox-preview-'));
+    tempDirs.push(directory);
+    const workspace = path.join(directory, 'workspace');
+    const mediaDir = path.join(workspace, 'media');
+    await fs.mkdir(mediaDir, { recursive: true });
+    const original = path.join(mediaDir, 'large.mp4');
+    const handle = await fs.open(original, 'w');
+    await handle.truncate(50 * 1024 * 1024 + 1);
+    await handle.close();
+    await fs.writeFile(path.join(mediaDir, 'large.telegram-preview.mp4'), 'preview');
+    const state = new RemoteRequestStore(path.join(directory, 'state.json'));
+    await state.load();
+    const channel = new MediaChannel();
+    await state.notifyOutbox('fake', 'chat-1', 'Video render completed.', {
+      media: {
+        kind: 'video',
+        workspacePath: 'media/large.mp4',
+        previewPath: 'media/large.telegram-preview.mp4',
+      },
+    });
+    const outbox = delivery(channel, state, 5, vi.fn(), workspace);
+
+    outbox.start();
+    await vi.waitFor(() => expect(channel.sentMedia).toHaveLength(1));
+    await outbox.stop();
+
+    expect(await fs.realpath(channel.sentMedia[0]!.filePath)).toBe(
+      await fs.realpath(path.join(mediaDir, 'large.telegram-preview.mp4')),
+    );
+    expect(channel.sentMedia[0]?.caption).toContain('media/large.mp4');
   });
 
   it('omits ephemeral lines from the summary and preserves an uncapped backlog', async () => {
@@ -126,7 +206,8 @@ describe('RemoteOutboxDelivery unlock backlog cap', () => {
     await vi.waitFor(() => expect(onError).toHaveBeenCalled());
     await outbox.stop();
 
-    expect(state.contactRead((snapshot) => snapshot.outbox).every((item) => item.state === 'pending'))
-      .toBe(true);
+    expect(
+      state.contactRead((snapshot) => snapshot.outbox).every((item) => item.state === 'pending'),
+    ).toBe(true);
   });
 });

@@ -50,6 +50,7 @@ import { makeShellTool } from './shellTool';
 import { makeSystemStatusTool } from './systemStatusTool';
 import type { BackendProcess } from '../system/SystemReport';
 import { makeLoadToolGroupTool } from './toolGroupTools';
+import type { MediaToolDeps } from './media/mediaToolDeps';
 import { makeInstallLlamacppTool } from './llamacppInstallTool';
 import { makeManageJobsTool } from './jobTools';
 import { makeAskAgentTool } from './askAgentTool';
@@ -81,7 +82,10 @@ import { makeGenerateImageTool } from './imageGeneration/generateImageTool';
 import { makeUpscaleImageTool, upscaleConfigFor } from './imageGeneration/upscaleImageTool';
 import { makeSetCheckinTool } from './setCheckinTool';
 import { makeRenderHtmlToImageTool } from './renderHtmlToImageTool';
+import { makeGenerateMusicTool } from './media/generateMusicTool';
+import { makeGenerateVideoTool } from './media/generateVideoTool';
 import { SdServerRegistry } from '../backend/sdServerRegistry';
+import type { MediaModelLifecycle } from './media/mediaGpuFreeing';
 import { makeImageSearchTool } from './imageSearch/imageSearchTool';
 import { makeBrowserTools } from './browser/browserTools';
 import { makeDesktopTools } from './desktop/desktopTools';
@@ -126,6 +130,14 @@ export function registerAllTools(
    */
   skills?: LoadSkillProvider,
   pdfPageRenderer?: PdfPageRenderer,
+  /**
+   * The shipped media renderers: the adapters folder inside this extension's
+   * install, and the model-lifecycle seam (loaded models, busy state, the
+   * control server's unload) the tools drive to free a GPU. Supplied by
+   * `vscode/toolActivationSetup.ts`, which owns both the pool and the extension
+   * path; absent, no media tool is registered at all.
+   */
+  mediaTools?: { adaptersDir: string; lifecycle: MediaModelLifecycle },
 ): SdServerRegistry | undefined {
   // config.yaml `extra_file_roots`: absolute folders outside the workspace that
   // delete_file and every file-writing tool may also reach. A getter, so a
@@ -393,6 +405,39 @@ export function registerAllTools(
     // Desktop tools (plan §4.2): same pattern; `desktop` permission +
     // `advertise: isWin` (B7) filter advertisement and dispatch.
     for (const tool of makeDesktopTools(getConfig)) registry.register(tool);
+  }
+
+  // The shipped media renderers (docs/plans/MEDIA_SHIPPED_PLAN.md §1). Registered
+  // ONLY while `media.enabled` is true: a config without media pays no schema,
+  // and each tool also carries an `advertise` predicate so turning media off in
+  // a reloaded config hides it without a window reload. They are appended after
+  // the image tools and before `load_tool_group`, keeping the native prefix
+  // byte-identical for existing users.
+  if (mediaTools && getConfig) {
+    const mediaDeps: MediaToolDeps = {
+      getConfig,
+      adaptersDir: mediaTools.adaptersDir,
+      lifecycle: mediaTools.lifecycle,
+      deliverMediaFile: async (event) => {
+        const result = await notifications.deliverFile({
+          conversationId: event.conversationId,
+          text: event.text,
+          mediaFile: {
+            kind: event.kind,
+            workspacePath: event.workspacePath,
+            ...(event.previewPath ? { previewPath: event.previewPath } : {}),
+          },
+        });
+        return result.kind === 'queued' ? result.chats : 0;
+      },
+      ...(getConfig().image_generation
+        ? { sdServers: () => sdServers?.handles() ?? new Map() }
+        : {}),
+    };
+    if (getConfig().media?.enabled) {
+      registry.register(makeGenerateVideoTool(mediaDeps));
+      registry.register(makeGenerateMusicTool(mediaDeps));
+    }
   }
 
   // Registered last, and self-suppressing until a lazy group is actually

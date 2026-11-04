@@ -5,6 +5,10 @@ import type { RemoteSpeechDelivery } from './RemoteSpeechDelivery';
 import type { RemoteControllerOptions } from './remoteControllerOptions';
 import type { CommandCleanupScheduler } from './CommandCleanupScheduler';
 import { recordSessionQuestionMessages } from './RemoteSessionBridge';
+import {
+  fileDeliveryRefusal,
+  validateWorkspaceFileForDelivery,
+} from '../util/fileDeliveryValidation';
 
 const MAX_ATTEMPTS = 10;
 type CanDeliver = (chatId: string) => boolean | Promise<boolean>;
@@ -30,6 +34,7 @@ export function createRemoteOutboxDelivery(input: {
     speech ? (chatId, text) => speech.speak(chatId, text) : undefined,
     (chatId, messageIds) => commandCleanup.armEphemeral(chatId, messageIds),
     options.unlockBacklogMax,
+    options.workspaceRoot,
   );
 }
 
@@ -61,6 +66,7 @@ export class RemoteOutboxDelivery {
      */
     private readonly armEphemeral?: (chatId: string, messageIds: string[]) => void,
     private maxBacklog = 5,
+    private readonly workspaceRoot?: string,
   ) {}
 
   start(): void {
@@ -179,14 +185,7 @@ export class RemoteOutboxDelivery {
     await this.store.markOutbox(item.id, 'sending');
     let sentIds: string[] | void;
     try {
-      sentIds = await this.channel.send(item.chatId, item.text.slice(0, this.maxMessageChars), {
-        signal: this.signal,
-        // The speed line travels beside the text, never inside it: `speak` below
-        // reads `item.text`, and the backlog summary coalesces `item.text`, so
-        // an item that had the line in its text would have it read aloud and
-        // swallowed by a summary.
-        ...(item.speedLine ? { speedLine: item.speedLine } : {}),
-      });
+      sentIds = await this.sendItem(item);
       await this.store.markOutbox(item.id, 'delivered');
       // Never inside the try that owns delivery state: `speak` swallows its
       // own errors, but the ordering has to make that impossible to get wrong
@@ -225,6 +224,53 @@ export class RemoteOutboxDelivery {
     return true;
   }
 
+  private async sendItem(
+    item: ReturnType<RemoteRequestStore['pendingOutbox']>[number],
+  ): Promise<string[] | void> {
+    if (!item.media) {
+      return this.channel.send(item.chatId, item.text.slice(0, this.maxMessageChars), {
+        signal: this.signal,
+        ...(item.speedLine ? { speedLine: item.speedLine } : {}),
+      });
+    }
+    const original = await validateWorkspaceFileForDelivery(
+      item.media.workspacePath,
+      this.workspaceRoot,
+    );
+    let chosen = original.ok ? original : undefined;
+    let preview = false;
+    if (!original.ok && original.reason === 'too-large' && item.media.previewPath) {
+      const candidate = await validateWorkspaceFileForDelivery(
+        item.media.previewPath,
+        this.workspaceRoot,
+      );
+      if (candidate.ok) {
+        chosen = candidate;
+        preview = true;
+      }
+    }
+    if (!chosen) {
+      const detail = !original.ok ? ` (${fileDeliveryRefusal(original)})` : '';
+      const note = `Forge: the media file could not be attached${detail}. Full file: ${item.media.workspacePath}`;
+      return this.channel.send(item.chatId, note.slice(0, this.maxMessageChars), {
+        signal: this.signal,
+      });
+    }
+    const caption = preview
+      ? `${item.text}\nPreview; full file: ${item.media.workspacePath}`
+      : item.text;
+    const native = item.media.kind === 'video' ? this.channel.sendVideo : this.channel.sendAudio;
+    const send = native ?? this.channel.sendDocument;
+    if (!send) {
+      return this.channel.send(
+        item.chatId,
+        `Forge: this transport cannot send ${item.media.kind} files. Full file: ${item.media.workspacePath}`,
+        { signal: this.signal },
+      );
+    }
+    await send.call(this.channel, item.chatId, chosen.absolutePath, caption, this.signal);
+  }
+
   private async scheduleRetry(): Promise<void> {
     if (this.stopped || this.retryTimer) return;
     try {
@@ -260,12 +306,16 @@ function coalesceBacklog(
   deliverable: typeof items;
 } {
   const persistent = items.filter((item) => !item.ephemeral);
+  const mediaIds = new Set(persistent.filter((item) => item.media).map((item) => item.id));
+  const textItems = persistent.filter((item) => !item.media);
+  const recentTextIds = new Set(textItems.slice(-maximum).map((item) => item.id));
+  const deliverableIds = new Set([...mediaIds, ...recentTextIds]);
   return {
     coalesced: [
       ...items.filter((item) => item.ephemeral),
-      ...persistent.slice(0, Math.max(0, persistent.length - maximum)),
+      ...textItems.filter((item) => !recentTextIds.has(item.id)),
     ],
-    deliverable: persistent.slice(-maximum),
+    deliverable: persistent.filter((item) => deliverableIds.has(item.id)),
   };
 }
 

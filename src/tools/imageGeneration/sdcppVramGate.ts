@@ -37,6 +37,8 @@ export interface VramGateSubject {
   label: string;
   /** Config key a refusal points at when the CUDA index does not exist. */
   configKey: string;
+  /** Override for callers whose device list has a plural config key. */
+  deviceConfigKey?: string;
   /** CUDA ordinal the spawn would pin with `CUDA_VISIBLE_DEVICES`. */
   cudaDevice: number;
   /** Floor on free memory. Required, never defaulted: a gate that guesses lies. */
@@ -45,12 +47,18 @@ export interface VramGateSubject {
   modelPath: string;
   /** Named in every refusal (refusals name the alternative). */
   alternatives: readonly string[];
+  /** A non-image caller can name its own alternative wording. */
+  alternativeMessage?: string;
   /** Phrase for "nothing ran", lower-case, e.g. `no image was generated`. */
   nothingRan: string;
   /** What to stop, named in the too-little-VRAM refusal. */
   holdersHint: string;
   /** Injectable: the real probe spawns nvidia-smi. */
   probe?: () => Promise<GpuInfo[]>;
+}
+
+export interface VramGateDevicesRequest extends Omit<VramGateSubject, 'cudaDevice'> {
+  cudaDevices: readonly number[];
 }
 
 export async function assertVramAvailable(request: VramGateRequest): Promise<void> {
@@ -68,9 +76,21 @@ export async function assertVramAvailable(request: VramGateRequest): Promise<voi
   });
 }
 
+/** Gate every configured device through the same probe and free-memory check. */
+export async function assertDevicesVramAvailable(request: VramGateDevicesRequest): Promise<void> {
+  const { cudaDevices, ...subject } = request;
+  if (cudaDevices.length === 0) {
+    throw new Error(`${subject.label}: no CUDA devices are configured, so ${subject.nothingRan}.`);
+  }
+  for (const cudaDevice of cudaDevices) {
+    await assertDeviceVramAvailable({ ...subject, cudaDevice });
+  }
+}
+
 /** The gate itself. See `VramGateSubject` for what each field is for. */
 export async function assertDeviceVramAvailable(subject: VramGateSubject): Promise<void> {
   const { label, configKey, cudaDevice, minFreeVramMb, alternatives, nothingRan } = subject;
+  const alternative = subject.alternativeMessage ?? alternativeText(alternatives);
   let gpus: GpuInfo[];
   try {
     gpus = await (subject.probe ?? probeGpus)();
@@ -78,7 +98,7 @@ export async function assertDeviceVramAvailable(subject: VramGateSubject): Promi
     throw new Error(
       `${label}: could not check free VRAM on CUDA device ${cudaDevice} ` +
         `(${describeProbeFailure(error)}), so ${nothingRan}. Fix the probe, or use ` +
-        `${alternativeText(alternatives)}.`,
+        `${alternative}.`,
     );
   }
   const gpu = gpus.find((entry) => entry.index === cudaDevice);
@@ -87,8 +107,8 @@ export async function assertDeviceVramAvailable(subject: VramGateSubject): Promi
       gpus.map((entry) => `${entry.index} (${entry.name})`).join(', ') || 'no GPUs at all';
     throw new Error(
       `${label}: nvidia-smi reported ${seen}, so there is no GPU at index ` +
-        `${cudaDevice}. Set ${configKey}.cuda_device to one of them, or use ` +
-        `${alternativeText(alternatives)}.`,
+        `${cudaDevice}. Set ${subject.deviceConfigKey ?? `${configKey}.cuda_device`} to one of them, or use ` +
+        `${alternative}.`,
     );
   }
   if (gpu.memoryTotalMb === null || gpu.memoryUsedMb === null) {
@@ -96,7 +116,7 @@ export async function assertDeviceVramAvailable(subject: VramGateSubject): Promi
     throw new Error(
       `${label}: nvidia-smi gave no memory figures for GPU ${gpu.index} (${gpu.name}), so Forge ` +
         `cannot tell whether ${minFreeVramMb.toLocaleString()} MB is free. ${sentence}; use ` +
-        `${alternativeText(alternatives)}.`,
+        `${alternative}.`,
     );
   }
   const free = gpu.memoryTotalMb - gpu.memoryUsedMb;
@@ -105,7 +125,7 @@ export async function assertDeviceVramAvailable(subject: VramGateSubject): Promi
       `${label}: only ${free.toLocaleString()} MB free on GPU ${gpu.index} (${gpu.name}); ` +
         `${minFreeVramMb.toLocaleString()} MB is required to load ` +
         `"${path.win32.basename(subject.modelPath)}". Stop whatever holds that card ` +
-        `(${subject.holdersHint}) or use ${alternativeText(alternatives)}.`,
+        `(${subject.holdersHint}) or use ${alternative}.`,
     );
   }
 }

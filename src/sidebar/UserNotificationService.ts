@@ -4,7 +4,13 @@ export interface UserNotificationEvent {
   text: string;
   /** Absolute path of an image to deliver as a photo (`generate_image`). */
   imagePath?: string;
+  /** Workspace-relative media render delivered through the remote notification outbox. */
+  mediaFile?: { kind: 'video' | 'audio'; workspacePath: string; previewPath?: string };
 }
+
+type FileEvent =
+  | { text: string; imagePath: string; mediaFile?: never }
+  | { text: string; mediaFile: NonNullable<UserNotificationEvent['mediaFile']>; imagePath?: never };
 
 /** Returns the number of remote chats the message was queued to. */
 export type UserNotificationSink = (event: UserNotificationEvent) => Promise<number>;
@@ -42,7 +48,7 @@ type FileLeaseSendResult =
 export interface FileDeliveryLease {
   readonly granted: number;
   readonly remaining: number;
-  deliver(event: { text: string; imagePath: string }): Promise<FileLeaseSendResult>;
+  deliver(event: FileEvent): Promise<FileLeaseSendResult>;
 }
 
 /**
@@ -245,7 +251,9 @@ export class UserNotificationService {
         const chats = await this.fanOut({
           ...(conversationId !== undefined ? { conversationId } : {}),
           text: event.text,
-          imagePath: event.imagePath,
+          ...('imagePath' in event
+            ? { imagePath: event.imagePath }
+            : { mediaFile: event.mediaFile }),
         });
         return { kind: 'queued', chats };
       },
@@ -265,9 +273,8 @@ export class UserNotificationService {
    * path -- so a per-turn ceiling is enough. A queued send is NOT refunded when
    * the later transport fails; the turn already spent the slot it was given.
    */
-  async deliverFile(
-    event: UserNotificationEvent & { imagePath: string },
-  ): Promise<FileDeliveryResult> {
+  async deliverFile(event: UserNotificationEvent & FileEvent): Promise<FileDeliveryResult> {
+    const path = 'imagePath' in event ? event.imagePath : event.mediaFile.workspacePath;
     const lease = this.reserveFileDeliveries(event.conversationId, 1);
     if (lease.granted === 0) {
       const spent = FILE_DELIVERY_TURN_LIMIT - lease.remaining;
@@ -276,11 +283,15 @@ export class UserNotificationService {
         spentThisTurn: spent,
         reason:
           `File delivery limit reached: ${spent} of ${FILE_DELIVERY_TURN_LIMIT} allowed this turn. ` +
-          `The file is still on disk at ${event.imagePath} — give the user that path instead of ` +
+          `The file is still on disk at ${path} — give the user that path instead of ` +
           'sending it, or send it in a later turn.',
       };
     }
-    const result = await lease.deliver({ text: event.text, imagePath: event.imagePath });
+    const result = await lease.deliver(
+      'imagePath' in event
+        ? { text: event.text, imagePath: event.imagePath }
+        : { text: event.text, mediaFile: event.mediaFile },
+    );
     if (result.kind === 'queued') return result;
     const spent = FILE_DELIVERY_TURN_LIMIT - this.remainingFileDeliveries(event.conversationId);
     return {
@@ -288,7 +299,7 @@ export class UserNotificationService {
       spentThisTurn: spent,
       reason:
         `File delivery limit reached: ${spent} of ${FILE_DELIVERY_TURN_LIMIT} allowed this turn. ` +
-        `The file is still on disk at ${event.imagePath} — give the user that path instead of ` +
+        `The file is still on disk at ${path} — give the user that path instead of ` +
         'sending it, or send it in a later turn.',
     };
   }

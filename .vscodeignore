@@ -25,6 +25,8 @@ tool-result-context-ab-results/**
 # over an hour on this before it was ignored. Nothing under it belongs in a
 # published extension.
 results/**
+# Workspace render inputs and outputs are user data, not extension resources.
+media/**
 # The runner that reads these manifests is scripts/forge-bench.mjs, which is
 # excluded below, and nothing in src/ resolves this path -- so shipping them put
 # dead files in front of users with no way to run them.
@@ -52,6 +54,20 @@ vitest.config.*
 !resources/skills/**/SKILL.md
 !resources/skills/**/*.md
 !resources/skills/**/*.py
+# Runtime Python adapters and the LTX graph skeleton are loaded from the
+# extension folder; exclude only their tests from the shipped package.
+!resources/media/media_job.py
+!resources/media/media_comfy.py
+!resources/media/video_ltx25.py
+!resources/media/video_h3.py
+!resources/media/video_h3_blueprint.py
+!resources/media/video_ltx25_api_skeleton.json
+!resources/media/music_ace.py
+!resources/media/music_sa3.py
+!resources/media/music_analyze.py
+resources/media/tests/**
+resources/media/tests/*.py
+resources/media/.gitignore
 # Generated from CHANGES.md by scripts/sync-changelog.mjs. Without this line the
 # `*.md` rule above strips it and both registries show "No changelog available".
 !CHANGELOG.md

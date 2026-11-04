@@ -22,6 +22,7 @@ import { handleRemoteSettingsCommand } from './remoteSettingsCommands';
 import { handleRemoteModelCommand } from './remoteModelCommands';
 import { editProgress } from './remoteCommandShared';
 import { resolveConversationSelection, shortId } from './remoteCommandSelectors';
+import { handleRemoteMediaCommand } from './RemoteMediaCommands';
 
 export interface RemoteCommandContext {
   channel: RemoteChannel;
@@ -144,6 +145,17 @@ export interface RemoteCommandContext {
     event: Extract<RemoteInboundEvent, { kind: 'text' }>,
     channel: RemoteChannel,
   ) => Promise<RemoteInboundDisposition | undefined>;
+  /** Optional media setup report and durable prompt admission for Telegram. */
+  mediaCommands?: {
+    enabled: boolean;
+    setupText: string;
+    queue: (
+      event: Extract<RemoteInboundEvent, { kind: 'text' }>,
+      text: string,
+      dedupKey: string,
+      kind: 'video' | 'music',
+    ) => Promise<RemoteInboundDisposition>;
+  };
 }
 
 /**
@@ -184,6 +196,8 @@ async function executeRemoteCommand(
 ): Promise<RemoteInboundDisposition> {
   const contactCommand = await context.contactCommands?.(event, context.channel);
   if (contactCommand) return contactCommand;
+  const mediaCommand = await handleRemoteMediaCommand(event, context, dedupKey);
+  if (mediaCommand) return mediaCommand;
   // Split whole: `/workspace list 2` needs two operands, and a limit of 2 threw
   // the page number away, so the documented page fallback never paged.
   const [command, ...operands] = event.text.trim().split(/\s+/);

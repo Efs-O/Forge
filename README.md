@@ -198,6 +198,11 @@ where a picture appears online — a reverse search against Google Lens or Yande
 on an attachment or a public URL, needing an `image_search:` block with a
 SerpApi key.
 
+**Video and music.** Optional local `generate_video` and `generate_music` tools
+make short clips and music tracks with configured engines on the user's own
+hardware. Setup, model paths, GPU needs and what source audio does are covered in
+[media generation](docs/MEDIA.md).
+
 **Browser and desktop.** Computer-use tools require a vision model and the
 corresponding `permissions.browser.enabled` or `permissions.desktop.enabled`
 setting. Desktop tools click and type into whichever window is focused.
@@ -265,7 +270,7 @@ running turn; plain text reaches it at its next step), `/new`,
 `/ratelimit`, `/unload`, `/unloadall`, `/restart`, `/jobs`, `/job`, `/reload`,
 `/compact`, `/lock`, `/speed`, `/timeout`, `/notify`, `/mirror`, `/voice`,
 `/clanker on|off`, `/workspace`, `/contacts`, `/contact`, `/send`,
-`/sleep`, `/wake`, `/approvals`, `/help`. Telegram shows them in its native command menu, and
+`/sleep`, `/wake`, `/approvals`, `/help`, `/media`, `/music`, `/video`. Telegram shows them in its native command menu, and
 `/help` prints the same list grouped by section; the list itself lives in
 `src/remote/remoteHelpText.ts`.
 

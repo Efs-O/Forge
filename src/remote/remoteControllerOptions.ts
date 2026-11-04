@@ -11,6 +11,7 @@ import type { WorkspaceSwitchModeChoice } from './types';
 import { createRemoteModelSpeedReader } from './remoteModelSpeed';
 import { approvalEnvFor } from '../sidebar/chatApprovalRules';
 import { approvalPolicyLinesForWorkspace } from '../sidebar/approvalPolicyRules';
+import { checkMediaSetup } from '../media/mediaSetupCheck';
 
 /**
  * What a RemoteController is configured with.
@@ -22,6 +23,9 @@ import { approvalPolicyLinesForWorkspace } from '../sidebar/approvalPolicyRules'
  */
 export interface RemoteControllerOptions {
   workspaceId: string;
+  workspaceRoot?: string | undefined;
+  mediaEnabled?: boolean;
+  mediaSetupText?: string;
   queueLimit: number;
   maxMessageChars: number;
   rateLimitPerMinute: number;
@@ -184,6 +188,14 @@ export function buildRemoteControllerOptions(
   }).ctx;
   return {
     workspaceId: deps.workspaceId,
+    ...(deps.workspaceRoot ? { workspaceRoot: deps.workspaceRoot } : {}),
+    mediaEnabled: config.media?.enabled === true,
+    mediaSetupText: checkMediaSetup(config.media, deps.workspaceRoot ?? '', {
+      stillBackendNames:
+        config.image_generation?.backends
+          .filter((backend) => backend.provider === 'sdcpp')
+          .map((backend) => backend.name) ?? [],
+    }).text,
     queueLimit: remote.queue_limit,
     maxMessageChars: remote.max_message_chars,
     rateLimitPerMinute: remote.rate_limit_per_minute,

@@ -73,6 +73,13 @@ export const OutboxSchema = z.object({
    * builds its last message, so none of those ever carries it.
    */
   speedLine: z.string().min(1).max(200).optional(),
+  media: z
+    .object({
+      kind: z.enum(['video', 'audio']),
+      workspacePath: z.string().min(1).max(2_048),
+      previewPath: z.string().min(1).max(2_048).optional(),
+    })
+    .optional(),
 });
 
 const BindingSchema = z.object({

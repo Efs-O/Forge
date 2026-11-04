@@ -26,7 +26,30 @@ const ALLOW_LIST = [
   'dist/pdfjs/pdf.mjs',
   'dist/pdfjs/pdf.worker.mjs',
   'dist/webview/**',
+  'resources/media/media_job.py',
+  'resources/media/media_comfy.py',
+  'resources/media/video_ltx25.py',
+  'resources/media/video_h3.py',
+  'resources/media/video_h3_blueprint.py',
+  'resources/media/video_ltx25_api_skeleton.json',
+  'resources/media/music_ace.py',
+  'resources/media/music_sa3.py',
+  'resources/media/music_analyze.py',
   'resources/skills/**',
+];
+
+const REQUIRED_VSIX_FILES = [
+  'resources/media/media_job.py',
+  'resources/media/media_comfy.py',
+  'resources/media/video_ltx25.py',
+  'resources/media/video_h3.py',
+  'resources/media/video_h3_blueprint.py',
+  'resources/media/video_ltx25_api_skeleton.json',
+  'resources/media/music_ace.py',
+  'resources/media/music_sa3.py',
+  'resources/media/music_analyze.py',
+  'resources/skills/video-clip/SKILL.md',
+  'resources/skills/music-track/SKILL.md',
 ];
 
 /** Return VSIX entries that are not explicitly approved for shipping. */
@@ -40,6 +63,11 @@ export function findUnexpectedVsixFiles(files) {
       return file === pattern;
     });
   });
+}
+
+/** Runtime adapters, their graph skeleton and the media skills must ship. */
+export function findMissingRequiredVsixFiles(files) {
+  return REQUIRED_VSIX_FILES.filter((file) => !files.includes(file));
 }
 
 function checkVsixContents() {
@@ -59,6 +87,12 @@ function checkVsixContents() {
           )
           .join('\n'),
     );
+    process.exitCode = 1;
+    return;
+  }
+  const missing = findMissingRequiredVsixFiles(files);
+  if (missing.length) {
+    console.error(`VSIX contents are missing required media files:\n${missing.map((file) => `- ${file}`).join('\n')}`);
     process.exitCode = 1;
     return;
   }

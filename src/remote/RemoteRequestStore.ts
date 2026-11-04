@@ -167,7 +167,7 @@ export class RemoteRequestStore {
     channel: RemoteOutboxRecord['channel'],
     chatId: string,
     text: string,
-    options?: { ephemeral?: boolean; speedLine?: string },
+    options?: { ephemeral?: boolean; speedLine?: string; media?: RemoteOutboxRecord['media'] },
   ): Promise<void> {
     await this.mutate((draft) =>
       appendHostNotification(
@@ -178,6 +178,7 @@ export class RemoteRequestStore {
         options?.ephemeral,
         undefined,
         options?.speedLine,
+        options?.media,
       ),
     );
   }

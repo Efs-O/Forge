@@ -2,6 +2,12 @@
 
 ## 0.17.117
 
+Added opt-in local video and music generation with `generate_video` and
+`generate_music`, Telegram `/video`, `/music` and `/media`, and the shipped
+`video-clip` and `music-track` skills. The media tool-group description now
+names video and music generation (+35 schema characters). See
+[media generation](docs/MEDIA.md).
+
 Removed the approval stand-in (`permissions.approval_stand_in`); a leftover key is now a load error.
 
 - The gate classification that used to say whether a model may answer a card

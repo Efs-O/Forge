@@ -89,6 +89,11 @@ const NATIVE_GROUP_BY_TOOL: ReadonlyMap<string, string> = new Map([
     // 53 sessions called 0 times. Its verbs now ride in the media purpose line.
     'render_html_to_image',
     'export_document',
+    // The shipped render tools join the group with it: registered only while
+    // `media.enabled` is true (docs/plans/MEDIA_SHIPPED_PLAN.md §1), and a
+    // coding conversation that never renders should not pay their schemas.
+    'generate_video',
+    'generate_music',
   ].map((name) => [name, 'media'] as const),
   ...[
     'get_editor_context',

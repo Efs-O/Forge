@@ -8,6 +8,7 @@ import { setExternalRequestHook } from './backend/ExternalModelServers';
 import { disposeServerChannel } from './backend/DirectBackend';
 import { wireTailnetServices, type TailnetServicesWiring } from './vscode/tailnetServicesSetup';
 import { wireControlServer } from './vscode/controlServerSetup';
+import type { ControlServer } from './backend/ControlServer';
 import { wireRemoteStarter, releaseRemoteStarterLeases } from './llm/RemoteStarterClient';
 import { configureRemoteWindowRoute } from './llm/RemoteWindowRoute';
 import { thisWindowHostedElsewhere } from './vscode/remoteWindowKind';
@@ -117,6 +118,9 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
   // Declared early (closures use it); assigned after CodeLens, so an early route sees it unset.
   // eslint-disable-next-line prefer-const
   let sidebarProvider: SidebarProvider;
+  // The media tools unload models through the control server, which is wired
+  // below the tool registry; the getter resolves it per call.
+  let controlServerRef: ControlServer | undefined;
   const toolSetup = setupToolActivation({
     context,
     config,
@@ -126,6 +130,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
     pool,
     getSidebarProvider: () => sidebarProvider,
     log,
+    getControlServer: () => controlServerRef,
   });
   const {
     indexManager,
@@ -142,7 +147,8 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
 
   const checkpoints = createCheckpointStack(context);
 
-  const { controlServer, recoverPendingReplies } = wireControlServer({
+  controlServerRef = undefined;
+  const wiredControlServer = wireControlServer({
     context,
     pool,
     getConfig: () => config,
@@ -150,6 +156,8 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
     getSidebarProvider: () => sidebarProvider,
     getRemoteRuntime: () => activeRemoteRuntime,
   });
+  const { controlServer, recoverPendingReplies } = wiredControlServer;
+  controlServerRef = controlServer;
   const getConfig = () => config;
   const tailnetServices = wireTailnetServices(
     context,

@@ -238,6 +238,20 @@ export class ControlServer implements vscode.Disposable {
   }
 
   /** Snapshot for status UI: listener state + per-model loaded/hold counts. */
+  /**
+   * Eager teardown of one model ’ the path `POST /unload` takes, exposed so
+   * in-extension callers (the media tools) reach the same lifecycle instead of
+   * POSTing to a port: holds are refused, a managed external (Strata) is
+   * unloaded through its own stop, and a direct-spawn backend is stopped and
+   * its port returned. Runs on the server's own chain, so capacity and
+   * eviction decisions stay atomic across every holder of these maps.
+   */
+  async unloadModel(
+    model: string,
+  ): Promise<EnsureResult | { status: number; body: { unloaded: boolean } }> {
+    return this.serialize(() => unloadModel(this.lifecycleContext(), model));
+  }
+
   status(): ControlStatus {
     const catalog = this.modelCatalog();
     return {
@@ -289,7 +303,7 @@ export class ControlServer implements vscode.Disposable {
       if (method === 'POST' && path === '/unload') {
         const model = requireModel(await readJson(req));
         if (!model) return sendJson(res, 400, { error: 'model is required' });
-        const result = await this.serialize(() => unloadModel(this.lifecycleContext(), model));
+        const result = await this.unloadModel(model);
         return sendJson(res, result.status, result.body);
       }
       if (method === 'POST' && path === '/chat') {

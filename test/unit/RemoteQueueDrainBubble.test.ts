@@ -116,14 +116,8 @@ async function drainWith(
     }),
   } as unknown as ForgeHostFacade;
 
-  const outbox = new RemoteOutboxDelivery(
-    channel,
-    state,
-    3_900,
-    signal,
-    1_000,
-    undefined,
-    () => canDeliver(),
+  const outbox = new RemoteOutboxDelivery(channel, state, 3_900, signal, 1_000, undefined, () =>
+    canDeliver(),
   );
   const deps = {
     signal,
@@ -152,11 +146,7 @@ describe('queue drain status bubble', () => {
     expect(channel.progress).toEqual([{ chatId: 'chat-1', text: 'Forge: working…' }]);
     // The answer first, then the teardown, and no status message in between:
     // the reply is on screen before the line the owner was reading goes.
-    expect(calls).toEqual([
-      'progress Forge: working…',
-      'send Here is the answer.',
-      'delete 1',
-    ]);
+    expect(calls).toEqual(['progress Forge: working…', 'send Here is the answer.', 'delete 1']);
     // Nothing was ever edited into an outcome line, so nothing is left to delete
     // ten seconds later.
     expect(channel.edits).toEqual([]);
@@ -165,6 +155,75 @@ describe('queue drain status bubble', () => {
     expect(state.pendingOutbox()).toEqual([]);
     expect(channel.sent.map((item) => item.text)).toEqual(['Here is the answer.']);
     expect(channel.edits.map((e) => e.text).join('\n')).not.toContain('Here is the answer.');
+  });
+
+  it('keeps audio source bytes out of the model attachment list while preserving its prompt path', async () => {
+    const state = await store();
+    const image = {
+      name: 'still.jpg',
+      mediaType: 'image/jpeg',
+      relativePath: 'conversation/request/still.jpg',
+      bytes: 12,
+    };
+    const audio = {
+      name: 'voice.ogg',
+      mediaType: 'audio/ogg',
+      relativePath: 'conversation/request/voice.ogg',
+      bytes: 20,
+    };
+    await state.enqueue(
+      request({
+        text: 'Use .forge/remote-inbox/conversation/request/voice.ogg as source_audio_path.',
+        attachments: [image, audio],
+      }),
+    );
+    const channel = new FakeRemoteChannel('telegram');
+    const signal = new AbortController().signal;
+    const progress = new RemoteAgentProgress(channel, signal, () => true, 3_900, 0);
+    const loaded: RemoteRequestRecord['attachments'][] = [];
+    const received: Array<unknown[] | undefined> = [];
+    const host = {
+      send: async (_conversationId: string, _text: string, attachments?: unknown[]) => {
+        received.push(attachments);
+        return { kind: 'completed' as const, finalText: 'Done.' };
+      },
+      cancel: async () => undefined,
+      status: () => ({
+        activeConversationId: 'c1',
+        conversations: [{ id: 'c1', title: 'Remote', activeModel: 'local', archived: false }],
+        requestChains: [],
+        streamingConversationIds: [],
+      }),
+    } as unknown as ForgeHostFacade;
+    const outbox = new RemoteOutboxDelivery(channel, state, 3_900, signal);
+    const attachmentStore = {
+      load: async (references: NonNullable<RemoteRequestRecord['attachments']>) => {
+        loaded.push(references);
+        return references.map((reference) => ({
+          name: reference.name,
+          mediaType: reference.mediaType,
+          data: 'c3RpbGw=',
+        }));
+      },
+    };
+    const deps = {
+      signal,
+      channel,
+      store: state,
+      auth: { canDeliver: async () => true },
+      host,
+      progress,
+      outbox,
+      activeConversations: new Set<string>(),
+      attachmentStore: () => attachmentStore,
+      isBusy: () => false,
+    } as unknown as RemoteQueueDrainDeps;
+
+    await drainRemoteQueue('c1', deps);
+
+    expect(loaded[0]).toEqual([image]);
+    expect(received[0]).toHaveLength(1);
+    expect(received[0]?.[0]).toMatchObject({ name: 'still.jpg', mediaType: 'image/jpeg' });
   });
 
   it('deletes the streamed copy only after the answer has landed', async () => {

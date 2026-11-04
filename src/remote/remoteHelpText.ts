@@ -161,6 +161,19 @@ export const REMOTE_HELP_SECTIONS: RemoteHelpSection[] = [
       '/wake with no argument reports how to wake this machine from outside — the MAC address for a Wake-on-LAN magic packet, the broadcast address, and whether the adapter is armed. Forge CANNOT wake the machine itself: once it sleeps nothing on it is running, so no message can reach it. "/wake 07:00" arms the clock instead, which does work; "/wake off" clears it',
     ],
   },
+  {
+    key: 'media',
+    title: 'Media',
+    commands: [
+      { usage: '/media', summary: 'Check media generation setup.' },
+      { usage: '/music <request>', summary: 'Start a music request in this chat.' },
+      { usage: '/video <request>', summary: 'Start a video request in this chat.' },
+    ],
+    notes: [
+      '/music and /video start a normal Forge turn and load the matching shipped skill; attach or reply to an audio file for music, or a still image for video. Media generation is optional and requires media.enabled: true.',
+      '/media reports which engines and files are configured. A completed render is sent to this chat; oversized outputs use a smaller preview and include the full workspace path.',
+    ],
+  },
 ];
 
 export const HELP_SECTIONS = new Set(REMOTE_HELP_SECTIONS.map((section) => section.title));

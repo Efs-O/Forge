@@ -6,6 +6,7 @@ import * as vscode from 'vscode';
 import { FakeRemoteChannel } from '../../src/remote/FakeRemoteChannel';
 import { RemoteAgentProgress } from '../../src/remote/RemoteAgentProgress';
 import { sendTelegramPhoto, TELEGRAM_MAX_PHOTO_BYTES } from '../../src/remote/TelegramPhoto';
+import { sendTelegramAudio, sendTelegramVideo } from '../../src/remote/TelegramMedia';
 import { TelegramChatQueue } from '../../src/remote/telegramSendQueue';
 import { UserNotificationService } from '../../src/sidebar/UserNotificationService';
 import { makeSendFileTool } from '../../src/tools/sendFileTool';
@@ -119,9 +120,7 @@ describe('send_file through the remote delivery chain', () => {
   afterEach(() => {
     if (dir) fs.rmSync(dir, { recursive: true, force: true });
     dir = undefined;
-    (
-      vscode.workspace as unknown as { workspaceFolders: unknown }
-    ).workspaceFolders = undefined;
+    (vscode.workspace as unknown as { workspaceFolders: unknown }).workspaceFolders = undefined;
   });
 
   it('queues the file behind the narration that preceded it', async () => {
@@ -253,7 +252,14 @@ describe('sendTelegramPhoto', () => {
       return new Response('{}', { status: 200 });
     }) as unknown as typeof fetch;
     return (async () => {
-      await sendTelegramPhoto(captureFetch, 't', new TelegramChatQueue(), '1', imageFile(10), caption);
+      await sendTelegramPhoto(
+        captureFetch,
+        't',
+        new TelegramChatQueue(),
+        '1',
+        imageFile(10),
+        caption,
+      );
       if (captured === undefined) throw new Error('no caption was posted');
       return captured;
     })();
@@ -287,5 +293,67 @@ describe('sendTelegramPhoto', () => {
       sendTelegramPhoto(fetchImpl, 't', new TelegramChatQueue(), '1', imageFile(10), 'fox'),
     ).rejects.toThrow(/sendPhoto HTTP 401/);
     expect(methods).toEqual(['sendPhoto']);
+  });
+});
+
+describe('sendTelegramMedia', () => {
+  const dirs: string[] = [];
+  afterEach(() => {
+    for (const dir of dirs.splice(0)) fs.rmSync(dir, { recursive: true, force: true });
+  });
+
+  function mediaFile(name: string): string {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'forge-tg-media-'));
+    dirs.push(dir);
+    const file = path.join(dir, name);
+    fs.writeFileSync(file, Buffer.from('media bytes'));
+    return file;
+  }
+
+  function recordingFetch(statuses: Record<string, number>) {
+    const methods: string[] = [];
+    const fetchImpl = (async (url: string | URL | Request) => {
+      methods.push(String(url).split('/').pop() ?? '');
+      return new Response('{}', { status: statuses[methods.at(-1) ?? ''] ?? 200 });
+    }) as unknown as typeof fetch;
+    return { methods, fetchImpl };
+  }
+
+  it('uses native video/audio methods and falls back to a document on HTTP 400', async () => {
+    const video = recordingFetch({ sendVideo: 400 });
+    await sendTelegramVideo(
+      video.fetchImpl,
+      'token',
+      new TelegramChatQueue(),
+      'chat',
+      mediaFile('clip.mp4'),
+      'clip',
+    );
+    const audio = recordingFetch({});
+    await sendTelegramAudio(
+      audio.fetchImpl,
+      'token',
+      new TelegramChatQueue(),
+      'chat',
+      mediaFile('track.mp3'),
+      'track',
+    );
+    expect(video.methods).toEqual(['sendVideo', 'sendDocument']);
+    expect(audio.methods).toEqual(['sendAudio']);
+  });
+
+  it('does not retry authorization or server failures as a document', async () => {
+    const { methods, fetchImpl } = recordingFetch({ sendAudio: 401 });
+    await expect(
+      sendTelegramAudio(
+        fetchImpl,
+        'token',
+        new TelegramChatQueue(),
+        'chat',
+        mediaFile('track.mp3'),
+        'track',
+      ),
+    ).rejects.toThrow(/sendAudio HTTP 401/);
+    expect(methods).toEqual(['sendAudio']);
   });
 });

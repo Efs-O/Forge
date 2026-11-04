@@ -27,6 +27,7 @@ These commands are currently contributed by the extension.
 | `Forge: Check connection` | On a laptop: walk the path to the desktop — Tailscale here, the desktop online in Tailscale, the model starter, the cloud relay, the models the desktop will serve — and name the first link that is broken in plain words. Reuses the address probe that every prompt already uses, reads only, and starts nothing |
 | `Forge: Open Config`          | Open the active config file          |
 | `Forge: Validate Config`      | Validate the active config           |
+| `Forge: Check Media Setup`    | Report configured media engines and missing paths |
 | `Forge: Pick Model`           | Pick the active model                |
 | `Forge: Pick GGUF Model File` | Pick a GGUF file during setup        |
 | `Forge: Model Manager`        | Open the Model Manager panel         |

@@ -52,6 +52,13 @@ export function subscribeHostToRemote(
       if (event.imagePath) {
         return controller.deliverHostImage(event.conversationId, event.imagePath, event.text);
       }
+      if (event.mediaFile) {
+        return controller.enqueueHostNotification(
+          event.conversationId,
+          event.text,
+          event.mediaFile,
+        );
+      }
       return controller.enqueueHostNotification(event.conversationId, event.text);
     }),
     // Registered and disposed with the sink, so the count a turn is told can

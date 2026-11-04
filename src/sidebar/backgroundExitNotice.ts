@@ -18,6 +18,14 @@ function formatBackgroundExitNotice(notice: BackgroundExecutionExitNotice): stri
     `[Forge notice — not a message from the user] Background job ${notice.id} finished.`,
     `Command: ${command}`,
     `Status: ${status} after ${duration}. Started by you in this chat.`,
+    // A job that knows what it produced says so: the media tools hand over their
+    // run manifest summary here, so the wake names the files that landed.
+    ...(notice.summary
+      ? [
+          `Result:
+${notice.summary}`,
+        ]
+      : []),
     ...(notice.error ? [`Error: ${notice.error}`] : []),
     ...(notice.stdoutTail ? [`Last stdout lines:\n${notice.stdoutTail}`] : []),
     ...(notice.stderrTail ? [`Last stderr lines:\n${notice.stderrTail}`] : []),

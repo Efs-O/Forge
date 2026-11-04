@@ -37,7 +37,7 @@ const GROUP_PURPOSE: Readonly<Record<(typeof NATIVE_LAZY_GROUP_NAMES)[number], s
   halluscribe:
     'search previous AI coding sessions and historical workspace/user context: past implementation decisions, the exact wording of an earlier error or command, prior project history, the user profile/digest',
   media:
-    'view, generate and upscale images, reverse image search, video stills, render HTML to a PNG or preview, export documents, send files',
+    'view, generate and upscale images, reverse image search, generate videos and music, inspect video stills, render HTML to a PNG or preview, export documents, send files',
   memory: 'remember, recall, forget notes kept across conversations',
   notebook: 'Jupyter notebook cells',
   system: 'this PC: power, sleep/wake, status, llama.cpp',

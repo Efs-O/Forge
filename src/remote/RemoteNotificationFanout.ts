@@ -1,5 +1,6 @@
 import type { RemoteBinding } from './types';
 import type { RemoteRequestStore } from './RemoteRequestStore';
+import type { RemoteMediaOutboxPayload } from './types';
 
 export interface NotificationFanoutDeps {
   store: RemoteRequestStore;
@@ -59,8 +60,29 @@ export class RemoteNotificationFanout {
   }
 
   /** Conversation-scoped: compaction lines, notify_user, "chat cleared". */
-  async toConversation(conversationId: string, text: string): Promise<number> {
+  async toConversation(
+    conversationId: string,
+    text: string,
+    media?: RemoteMediaOutboxPayload,
+  ): Promise<number> {
+    if (media) return this.toConversationMedia(conversationId, text, media);
     return this.send(this.chatsOn(conversationId), text);
+  }
+
+  /** Durable file delivery; the same outbox owns its ordering, retries and acknowledgement. */
+  async toConversationMedia(
+    conversationId: string,
+    text: string,
+    media: RemoteMediaOutboxPayload,
+  ): Promise<number> {
+    if (this.deps.channelName !== 'telegram') return 0;
+    const chats = this.chatsOn(conversationId);
+    if (chats.length === 0) return 0;
+    for (const chatId of chats) {
+      await this.deps.store.notifyOutbox(this.deps.channelName, chatId, text, { media });
+    }
+    this.deps.kick();
+    return chats.length;
   }
 
   /**

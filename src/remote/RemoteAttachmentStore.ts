@@ -16,6 +16,7 @@ import type { RemoteAttachmentReference, RemoteInboundAttachment } from './types
 import { extractPdfText as extractSharedPdfText } from '../documents';
 
 const MAX_PDF_BYTES = 10 * 1024 * 1024;
+const MAX_REMOTE_AUDIO_BYTES = 20 * 1024 * 1024;
 
 /** Owns the remote-only sidecar. Project files are never written by this class. */
 export class RemoteAttachmentStore {
@@ -37,7 +38,8 @@ export class RemoteAttachmentStore {
       total += prepared.bytes.length;
       if (total > MAX_ATTACHMENT_TOTAL_BYTES)
         throw new Error('attachments exceed the 25 MiB total limit');
-      const extension = prepared.kind === 'text' ? '.txt' : extensionFor(prepared.mediaType);
+      const extension =
+        prepared.kind === 'text' ? '.txt' : extensionFor(prepared.mediaType, prepared.name);
       const filename = `${refs.length + 1}-${randomUUID()}${extension}`;
       const target = path.join(root, filename);
       await writeFileAtomic(target, prepared.bytes, { mode: 0o600 });
@@ -62,9 +64,10 @@ export class RemoteAttachmentStore {
         return {
           name: ref.name,
           mediaType: ref.mediaType,
-          data: ref.mediaType.startsWith('image/')
-            ? bytes.toString('base64')
-            : bytes.toString('utf8'),
+          data:
+            ref.mediaType.startsWith('image/') || ref.mediaType.startsWith('audio/')
+              ? bytes.toString('base64')
+              : bytes.toString('utf8'),
         };
       }),
     );
@@ -92,7 +95,7 @@ export class RemoteAttachmentStore {
   private async prepare(attachment: RemoteInboundAttachment): Promise<{
     name: string;
     mediaType: string;
-    kind: 'image' | 'text';
+    kind: 'image' | 'text' | 'audio';
     bytes: Buffer;
   }> {
     if (!attachment.data) throw new Error('attachment payload is unavailable');
@@ -110,6 +113,16 @@ export class RemoteAttachmentStore {
         mediaType: 'text/plain',
         kind: 'text',
         bytes: Buffer.from(text),
+      };
+    }
+    if (isRemoteMusicAudio(attachment.name, attachment.mediaType)) {
+      if (bytes.length > MAX_REMOTE_AUDIO_BYTES)
+        throw new Error(`${attachment.name} exceeds its 20 MiB music-source limit`);
+      return {
+        name: attachment.name,
+        mediaType: normalizeRemoteAudioType(attachment.name, attachment.mediaType),
+        kind: 'audio',
+        bytes,
       };
     }
     const kind = attachmentKind(attachment.name, attachment.mediaType);
@@ -131,16 +144,47 @@ async function extractPdfText(bytes: Buffer): Promise<string> {
   return extractSharedPdfText(bytes);
 }
 
-function extensionFor(mediaType: string): string {
-  return (
-    (
-      {
-        'image/png': '.png',
-        'image/jpeg': '.jpg',
-        'image/webp': '.webp',
-        'image/gif': '.gif',
-        'image/bmp': '.bmp',
-      } as Record<string, string>
-    )[mediaType] ?? '.bin'
-  );
+function extensionFor(mediaType: string, name: string): string {
+  const mediaExtension = (
+    {
+      'image/png': '.png',
+      'image/jpeg': '.jpg',
+      'image/webp': '.webp',
+      'image/gif': '.gif',
+      'image/bmp': '.bmp',
+      'audio/mpeg': '.mp3',
+      'audio/ogg': '.ogg',
+      'audio/webm': '.webm',
+      'audio/opus': '.opus',
+      'audio/mp4': '.m4a',
+      'audio/wav': '.wav',
+      'audio/flac': '.flac',
+      'audio/aac': '.aac',
+    } as Record<string, string>
+  )[mediaType];
+  if (mediaExtension) return mediaExtension;
+  const fileExtension = path.extname(name).toLowerCase();
+  if (fileExtension in REMOTE_AUDIO_TYPES) return fileExtension;
+  return '.bin';
+}
+
+const REMOTE_AUDIO_TYPES: Readonly<Record<string, string>> = {
+  '.aac': 'audio/aac',
+  '.flac': 'audio/flac',
+  '.m4a': 'audio/mp4',
+  '.mp3': 'audio/mpeg',
+  '.oga': 'audio/ogg',
+  '.ogg': 'audio/ogg',
+  '.opus': 'audio/opus',
+  '.wav': 'audio/wav',
+  '.webm': 'audio/webm',
+};
+
+function isRemoteMusicAudio(name: string, mediaType: string): boolean {
+  return mediaType.startsWith('audio/') || path.extname(name).toLowerCase() in REMOTE_AUDIO_TYPES;
+}
+
+function normalizeRemoteAudioType(name: string, mediaType: string): string {
+  if (mediaType.startsWith('audio/')) return mediaType;
+  return REMOTE_AUDIO_TYPES[path.extname(name).toLowerCase()] ?? 'audio/mpeg';
 }
