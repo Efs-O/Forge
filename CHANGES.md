@@ -20,6 +20,9 @@
   at once. The row's tooltip, which the host formats rather than the webview,
   is now re-read every 60 s while the panel is open, and that refresh stops with
   the panel.
+- The chat header's linked-agent chips sit further from the History button,
+  each agent's name takes the colour of its history badge (Claude orange, Codex
+  cyan, Copilot purple), and "Linked" uses the normal text colour.
 
 ## 0.17.118
 
