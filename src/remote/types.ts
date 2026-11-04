@@ -196,6 +196,14 @@ export interface ProgressMessageOptions {
   retryRateLimit?: boolean;
 }
 
+/** Sends one local file with a caption to a chat. */
+type RemoteFileSender = (
+  chatId: string,
+  filePath: string,
+  caption: string,
+  signal?: AbortSignal,
+) => Promise<void>;
+
 export interface RemoteChannel {
   readonly name: RemoteInboundEvent['channel'];
   onEvent(handler: (event: RemoteInboundEvent) => Promise<RemoteInboundDisposition>): {
@@ -327,32 +335,12 @@ export interface RemoteChannel {
   /** Deliver a playable voice reply; channels without support skip speech. */
   sendVoice?(chatId: string, oggPath: string, signal?: AbortSignal): Promise<void>;
   /** Deliver a local image file with a caption. Optional, like `sendVoice`. */
-  sendPhoto?(
-    chatId: string,
-    filePath: string,
-    caption: string,
-    signal?: AbortSignal,
-  ): Promise<void>;
+  sendPhoto?: RemoteFileSender;
   /** Deliver media output using Telegram's native video/audio methods. */
-  sendVideo?(
-    chatId: string,
-    filePath: string,
-    caption: string,
-    signal?: AbortSignal,
-  ): Promise<void>;
-  sendAudio?(
-    chatId: string,
-    filePath: string,
-    caption: string,
-    signal?: AbortSignal,
-  ): Promise<void>;
+  sendVideo?: RemoteFileSender;
+  sendAudio?: RemoteFileSender;
   /** Document fallback for transports or media rejected by native methods. */
-  sendDocument?(
-    chatId: string,
-    filePath: string,
-    caption: string,
-    signal?: AbortSignal,
-  ): Promise<void>;
+  sendDocument?: RemoteFileSender;
   /** Stream to a caller-owned file so voice cleanup stays operation-scoped. */
   downloadAttachmentToFile?(
     providerFileId: string,
