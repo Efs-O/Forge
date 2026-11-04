@@ -177,7 +177,10 @@ describe('prepareExternalForRequest unloads only an overlapping server', () => {
    * shape `BackendPool.externalContext()` hands, with no local slots (this is
    * the managed-to-managed case) and nothing busy.
    */
-  function makeCtx(external: ExternalModelServers, registry: SharedRuntimeRegistry): ExternalCoordinationContext {
+  function makeCtx(
+    external: ExternalModelServers,
+    registry: SharedRuntimeRegistry,
+  ): ExternalCoordinationContext {
     return {
       external,
       slots: new Map(),
@@ -204,6 +207,8 @@ describe('prepareExternalForRequest unloads only an overlapping server', () => {
     const byName = new Map(spec.map((entry) => [entry.name, entry]));
     const external = {
       isManaged: (name: string) => byName.has(name),
+      managedNames: () => spec.map((entry) => entry.name),
+      reconcileForFree: async () => {},
       loadedNames: () => spec.map((entry) => entry.name),
       gpusOf: (name: string) => byName.get(name)?.gpus,
       unload: async (name: string) => {
@@ -222,7 +227,11 @@ describe('prepareExternalForRequest unloads only an overlapping server', () => {
    * always records this process's pid, and the registry here reports any pid alive
    * so the foreign record is not reclaimed as abandoned.
    */
-  function heldByOtherWindow(dir: string, model: string, title = 'Other window chat'): SharedRuntimeRegistry {
+  function heldByOtherWindow(
+    dir: string,
+    model: string,
+    title = 'Other window chat',
+  ): SharedRuntimeRegistry {
     const registry = new SharedRuntimeRegistry(dir, () => true);
     const id = '999999-other-window';
     const holds = path.join(dir, 'external-turn-holds');
@@ -312,9 +321,9 @@ describe('prepareExternalForRequest unloads only an overlapping server', () => {
         { name: 'strata-mid', gpus: [1] },
       ]);
       const registry = heldByOtherWindow(dir, 'strata-prod');
-      await expect(prepareExternalForRequest('strata-mid', makeCtx(external, registry))).rejects.toThrow(
-        /strata-prod is serving chat 'Other window chat' right now/,
-      );
+      await expect(
+        prepareExternalForRequest('strata-mid', makeCtx(external, registry)),
+      ).rejects.toThrow(/strata-prod is serving chat 'Other window chat' right now/);
       // Refused before any free or any start: the GPUs stay as they were.
       expect(unloaded).toEqual([]);
       expect(started).toEqual([]);
@@ -328,9 +337,9 @@ describe('prepareExternalForRequest unloads only an overlapping server', () => {
         { name: 'strata-coder', gpus: [2] },
       ]);
       const registry = heldByOtherWindow(dir, 'strata-prod');
-      await expect(prepareExternalForRequest('strata-coder', makeCtx(external, registry))).rejects.toThrow(
-        /strata-prod is serving chat/,
-      );
+      await expect(
+        prepareExternalForRequest('strata-coder', makeCtx(external, registry)),
+      ).rejects.toThrow(/strata-prod is serving chat/);
       expect(started).toEqual([]);
     });
   });
@@ -342,9 +351,9 @@ describe('prepareExternalForRequest unloads only an overlapping server', () => {
         { name: 'strata-mid', gpus: [1] },
       ]);
       const registry = heldByOtherWindow(dir, 'strata-prod');
-      await expect(prepareExternalForRequest('strata-mid', makeCtx(external, registry))).rejects.toThrow(
-        /serving chat/,
-      );
+      await expect(
+        prepareExternalForRequest('strata-mid', makeCtx(external, registry)),
+      ).rejects.toThrow(/serving chat/);
       // Only the foreign record remains: a refused load must not leave this
       // window's own claim on the board, or every other window would stay off
       // these GPUs until this one closes.
@@ -363,7 +372,8 @@ describe('prepareExternalForRequest unloads only an overlapping server', () => {
       'strata-mid': [1],
       'strata-quiet': undefined,
     };
-    const sharesWith = (model: string) => (other: string) => gpusOverlap(cards[model], cards[other]);
+    const sharesWith = (model: string) => (other: string) =>
+      gpusOverlap(cards[model], cards[other]);
 
     it('takes a hold beside a turn on other cards', async () => {
       await withBoard(async (dir) => {
@@ -374,10 +384,12 @@ describe('prepareExternalForRequest unloads only an overlapping server', () => {
           'Coder chat',
           sharesWith('strata-coder'),
         );
-        expect(registry.externalTurnHolders().map((hold) => hold.model).sort()).toEqual([
-          'strata-coder',
-          'strata-prod',
-        ]);
+        expect(
+          registry
+            .externalTurnHolders()
+            .map((hold) => hold.model)
+            .sort(),
+        ).toEqual(['strata-coder', 'strata-prod']);
         lease.release();
       });
     });
@@ -386,7 +398,12 @@ describe('prepareExternalForRequest unloads only an overlapping server', () => {
       await withBoard(async (dir) => {
         const registry = heldByOtherWindow(dir, 'strata-prod');
         await expect(
-          registry.acquireExternalTurnHold('strata-mid', 'mid-chat', 'Mid chat', sharesWith('strata-mid')),
+          registry.acquireExternalTurnHold(
+            'strata-mid',
+            'mid-chat',
+            'Mid chat',
+            sharesWith('strata-mid'),
+          ),
         ).rejects.toThrow(/strata-prod is serving chat 'Other window chat' right now/);
       });
     });
@@ -395,7 +412,12 @@ describe('prepareExternalForRequest unloads only an overlapping server', () => {
       await withBoard(async (dir) => {
         const registry = heldByOtherWindow(dir, 'strata-quiet');
         await expect(
-          registry.acquireExternalTurnHold('strata-coder', 'coder-chat', 'Coder chat', sharesWith('strata-coder')),
+          registry.acquireExternalTurnHold(
+            'strata-coder',
+            'coder-chat',
+            'Coder chat',
+            sharesWith('strata-coder'),
+          ),
         ).rejects.toThrow(/strata-quiet is serving chat/);
       });
     });

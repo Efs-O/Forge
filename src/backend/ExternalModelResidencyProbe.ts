@@ -1,50 +1,141 @@
-export type ExternalResidencyProbeResult = 'connection-refused' | 'unloaded' | 'unchanged';
+import { z } from 'zod';
+import { StrataStatusSchema } from './strataStatus';
 
-/** Read only confirmed model state; this endpoint never causes a model load. */
+export type ExternalModelResidencyProbeResult =
+  | { state: 'connection-refused' | 'stale-claim' | 'unloaded' | 'unknown' }
+  | { state: 'loaded'; matchesModel: boolean };
+
+const ModelsSchema = z.object({
+  data: z.array(
+    z.object({
+      id: z.string().optional(),
+      status: z.object({ value: z.enum(['loaded', 'unloaded']) }),
+    }),
+  ),
+});
+
+const ResidencyStatusSchema = z.object({
+  service: z.string().optional(),
+  model: StrataStatusSchema.shape.model.optional(),
+  loaded: z.boolean().optional(),
+});
+
+type JsonReadResult = { state: 'ok'; body: unknown } | { state: 'connection-refused' | 'unknown' };
+
+export interface ExternalResidencyCandidate {
+  name: string;
+  endpoint: string;
+  apiKeySecret?: string | undefined;
+}
+
+export interface ExternalResidencyEndpointResult {
+  names: string[];
+  result: ExternalModelResidencyProbeResult;
+}
+
+/** Read only confirmed model state; these endpoints never cause a model load. */
 export async function probeExternalModelResidency(
   endpoint: string,
   modelId: string | undefined,
   token: string | undefined,
   fetchImpl: typeof fetch,
-): Promise<ExternalResidencyProbeResult> {
+): Promise<ExternalModelResidencyProbeResult> {
+  const base = endpoint.replace(/\/+$/, '');
+  const headers = token ? { Authorization: `Bearer ${token}` } : {};
+  const models = await readJson(`${base}/v1/models`, headers, fetchImpl);
+  if (models.state !== 'ok') return models;
+
+  const parsedModels = ModelsSchema.safeParse(models.body);
+  if (!parsedModels.success) return { state: 'unknown' };
+  const loaded = parsedModels.data.data.filter((entry) => entry.status.value === 'loaded');
+  if (loaded.length) {
+    return {
+      state: 'loaded',
+      matchesModel: loaded.some(
+        (entry) =>
+          (modelId !== undefined && entry.id === modelId) ||
+          (parsedModels.data.data.length === 1 && entry.id === undefined),
+      ),
+    };
+  }
+
+  const status = await readJson(`${base}/v1/status`, headers, fetchImpl);
+  if (status.state !== 'ok') return status;
+  const parsedStatus = ResidencyStatusSchema.safeParse(status.body);
+  if (!parsedStatus.success) return { state: 'unknown' };
+  if (
+    parsedStatus.data.service === 'strata' &&
+    parsedStatus.data.model !== undefined &&
+    parsedStatus.data.loaded === true
+  ) {
+    return { state: 'stale-claim' };
+  }
+  return { state: 'unloaded' };
+}
+
+/** Probe distinct managed endpoints in parallel, using the first entry's credentials. */
+export async function probeExternalResidencyEndpoints(
+  candidates: readonly ExternalResidencyCandidate[],
+  secret: (key: string) => Promise<string | undefined>,
+  fetchImpl: typeof fetch,
+): Promise<ExternalResidencyEndpointResult[]> {
+  const endpoints = new Map<
+    string,
+    Omit<ExternalResidencyEndpointResult, 'result'> & {
+      endpoint: string;
+      apiKeySecret?: string | undefined;
+    }
+  >();
+  for (const candidate of candidates) {
+    const endpoint = candidate.endpoint.replace(/\/+$/, '');
+    const group = endpoints.get(endpoint);
+    if (group) {
+      group.names.push(candidate.name);
+    } else {
+      endpoints.set(endpoint, {
+        endpoint,
+        names: [candidate.name],
+        apiKeySecret: candidate.apiKeySecret,
+      });
+    }
+  }
+
+  return Promise.all(
+    [...endpoints.values()].map(async (group) => {
+      try {
+        const token = group.apiKeySecret ? await secret(group.apiKeySecret) : undefined;
+        return {
+          names: group.names,
+          result: await probeExternalModelResidency(group.endpoint, undefined, token, fetchImpl),
+        };
+      } catch {
+        return { names: group.names, result: { state: 'unknown' as const } };
+      }
+    }),
+  );
+}
+
+async function readJson(
+  url: string,
+  headers: Record<string, string>,
+  fetchImpl: typeof fetch,
+): Promise<JsonReadResult> {
   let response: Response;
   try {
-    response = await fetchImpl(`${endpoint.replace(/\/+$/, '')}/v1/models`, {
+    response = await fetchImpl(url, {
       method: 'GET',
-      headers: token ? { Authorization: `Bearer ${token}` } : {},
+      headers,
       signal: AbortSignal.timeout(2_000),
     });
   } catch (error) {
-    if (isConnectionRefused(error)) return 'connection-refused';
-    if (error instanceof TypeError || (error instanceof Error && error.name === 'TimeoutError')) {
-      return 'unchanged';
-    }
-    throw error;
+    return isConnectionRefused(error) ? { state: 'connection-refused' } : { state: 'unknown' };
   }
-  if (response.status !== 200) return 'unchanged';
-
-  let body: unknown;
+  if (response.status !== 200) return { state: 'unknown' };
   try {
-    body = await response.json();
+    return { state: 'ok', body: await response.json() };
   } catch {
-    return 'unchanged';
+    return { state: 'unknown' };
   }
-  if (typeof body !== 'object' || body === null || !('data' in body)) return 'unchanged';
-  const dataValue = (body as { data?: unknown }).data;
-  if (!Array.isArray(dataValue)) return 'unchanged';
-  const data = dataValue as unknown[];
-  const matching = data.find(
-    (entry) => typeof entry === 'object' && entry !== null && 'id' in entry && entry.id === modelId,
-  );
-  const entry = matching ?? (data.length === 1 ? data[0] : undefined);
-  if (typeof entry !== 'object' || entry === null || !('status' in entry)) return 'unchanged';
-  const status = entry.status;
-  return typeof status === 'object' &&
-    status !== null &&
-    'value' in status &&
-    status.value === 'unloaded'
-    ? 'unloaded'
-    : 'unchanged';
 }
 
 export function isConnectionRefused(error: unknown): boolean {

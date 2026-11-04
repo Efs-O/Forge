@@ -3,7 +3,12 @@ import type { ForgeConfig, ModelConfig } from '../config/types';
 import { mergeGroupsIntoModel } from '../config/ConfigResolver';
 import { getLogger } from '../util/logger';
 import { deferredStopInvocation, STOP_GRACE_MS } from './deferredStop';
-import { isConnectionRefused, probeExternalModelResidency } from './ExternalModelResidencyProbe';
+import {
+  isConnectionRefused,
+  probeExternalModelResidency,
+  probeExternalResidencyEndpoints,
+  type ExternalResidencyCandidate,
+} from './ExternalModelResidencyProbe';
 import { probeHttp } from './HealthCheck';
 
 const log = getLogger();
@@ -43,14 +48,9 @@ export interface StopOnExitOptions {
 export class ExternalServerBusyError extends Error {}
 
 /**
- * Local model servers Forge does not spawn but can unload (Strata): an
- * `openai-compatible` model with `unload_path`. A normal release keeps the
- * server up; explicit unload commands also run its configured stop command.
- * POSTing the path frees its GPU/RAM and it reloads on its next request. The
- * pool treats each one as a resident model, so every unload command reaches it
- * and it never shares VRAM with a llama.cpp/Ollama model this window loads, or
- * with another managed server (prepareExternal unloads the others first).
- * See docs/plans/EXTERNAL_SERVER_UNLOAD_PLAN.md.
+ * Managed local servers Forge may unload (`openai-compatible` with
+ * `unload_path`). Normal releases keep the server up; explicit unload commands
+ * may also run `stop_command`. POSTing the path frees GPU/RAM; requests reload it.
  */
 /** A managed external server: openai-compatible with an `unload_path` (Strata). */
 export function isManagedExternalModel(
@@ -71,7 +71,7 @@ export class ExternalModelServers {
    * `START_TIMEOUT_MS` before reporting failure (audit F2, 2026-10-03).
    */
   private readonly starting = new Map<string, Promise<void>>();
-  /** A selector refresh probes once per loaded managed model, even across callers. */
+  /** A selector refresh probes once per managed model, even across callers. */
   private residencyRefresh: Promise<void> | undefined;
 
   constructor(
@@ -96,16 +96,17 @@ export class ExternalModelServers {
   }
 
   /**
-   * Which GPUs the managed server `name` occupies, as its engine says in
-   * `~/.forge/policy.yaml`. Read through `managed`, which already folds the engine
-   * in via the resolver — reading `config.models` or `config.engines` here would
-   * miss an engine-supplied value. `undefined` = the engine named no cards, so
-   * this server overlaps EVERY other managed server, the behaviour before the
-   * field existed. Consumed by `poolAcquisition.gpusOverlap` at the one call site
-   * that decides whom to unload (`BackendPoolExternal`).
+   * GPUs the group-resolved model's engine uses. No declared cards means it
+   * overlaps all; `BackendPoolExternal` uses this to choose which servers to free.
    */
   gpusOf(name: string): readonly number[] | undefined {
     return this.managed(name)?.gpus;
+  }
+
+  managedNames(): string[] {
+    return this.getConfig()
+      .models.map((model) => model.name)
+      .filter((name) => this.isManaged(name));
   }
 
   /** Unknown counts as loaded: a server started by hand may hold VRAM. */
@@ -113,11 +114,7 @@ export class ExternalModelServers {
     return this.isManaged(name) && this.residency.get(name) !== 'unloaded';
   }
 
-  /**
-   * Loaded as far as this window has seen: a request went to it and no unload
-   * has run since. Unlike `isLoaded`, unknown is NOT loaded -- the selector's
-   * green dot must not claim a server nobody has used yet holds a model.
-   */
+  /** A selector dot is confirmed only after a request or matching server probe. */
   isConfirmedLoaded(name: string): boolean {
     return this.isManaged(name) && this.residency.get(name) === 'loaded';
   }
@@ -153,11 +150,7 @@ export class ExternalModelServers {
     const probes: Array<{ name: string; model: ModelConfig }> = [];
     for (const entry of this.getConfig().models) {
       const model = this.managed(entry.name);
-      if (
-        model?.endpoint &&
-        this.residency.get(entry.name) === 'loaded' &&
-        !this.starting.has(entry.name)
-      ) {
+      if (model?.endpoint && !this.starting.has(entry.name)) {
         probes.push({ name: entry.name, model });
       }
     }
@@ -172,23 +165,62 @@ export class ExternalModelServers {
   }
 
   private async refreshModelResidency(name: string, model: ModelConfig): Promise<void> {
-    if (this.residency.get(name) !== 'loaded' || this.starting.has(name) || !model.endpoint) {
+    if (this.starting.has(name) || !model.endpoint) {
       return;
     }
     const generation = this.activityGeneration.get(name) ?? 0;
     const token = model.api_key_secret ? await this.secret(model.api_key_secret) : undefined;
-    if (this.residency.get(name) !== 'loaded' || this.starting.has(name)) return;
+    if (this.starting.has(name)) return;
     const result = await probeExternalModelResidency(
       model.endpoint,
       model.model,
       token,
       this.fetchImpl,
     );
-    if (result === 'connection-refused') {
+    if (this.starting.has(name)) return;
+    if (result.state === 'connection-refused') {
       this.markUnloadedUnlessReused(name, generation, 'residency refresh');
       log.info(`[ExternalModelServers] "${name}" stopped outside this window`);
-    } else if (result === 'unloaded') {
+    } else if (
+      result.state === 'unloaded' ||
+      result.state === 'stale-claim' ||
+      (result.state === 'loaded' && !result.matchesModel)
+    ) {
       this.markUnloadedUnlessReused(name, generation, 'residency refresh');
+    } else if (
+      result.state === 'loaded' &&
+      (this.activityGeneration.get(name) ?? 0) === generation
+    ) {
+      this.residency.set(name, 'loaded');
+    }
+  }
+
+  /** Re-read endpoints whose remembered state could otherwise omit a resident server. */
+  async reconcileForFree(names: readonly string[]): Promise<void> {
+    const generations = new Map<string, number>();
+    const candidates: ExternalResidencyCandidate[] = [];
+    for (const name of names) {
+      const model = this.managed(name);
+      if (!model?.endpoint || this.residency.get(name) === 'loaded' || this.starting.has(name)) {
+        continue;
+      }
+      generations.set(name, this.activityGeneration.get(name) ?? 0);
+      candidates.push({ name, endpoint: model.endpoint, apiKeySecret: model.api_key_secret });
+    }
+    const results = await probeExternalResidencyEndpoints(candidates, this.secret, this.fetchImpl);
+    for (const { names: endpointNames, result } of results) {
+      const residency: Residency =
+        result.state === 'connection-refused' || result.state === 'unloaded'
+          ? 'unloaded'
+          : 'unknown';
+      for (const name of endpointNames) {
+        if (
+          !this.starting.has(name) &&
+          (this.activityGeneration.get(name) ?? 0) === generations.get(name)
+        ) {
+          this.residency.set(name, residency);
+        }
+      }
     }
   }
 
@@ -281,14 +313,7 @@ export class ExternalModelServers {
     }
   }
 
-  /**
-   * Make sure the managed server is reachable before a request. If it is down
-   * and the model has a `start_command`, launch it (detached, hidden, unref'd
-   * so it survives the extension host) and wait until it accepts connections.
-   * If it is down with no `start_command`, throw an actionable error. Called
-   * from `prepareExternal` after local models and other managed servers are
-   * freed, so VRAM is available.
-   */
+  /** Ensure the endpoint is reachable, starting it when `start_command` is configured. */
   async ensureStarted(name: string): Promise<void> {
     const pending = this.starting.get(name);
     if (pending) return pending;
@@ -369,7 +394,8 @@ export class ExternalModelServers {
   }
 
   /** Unload every managed server that may hold memory; reports every failure. */
-  async unloadAll(): Promise<void> {
+  async unloadAll(alreadyReconciled = false): Promise<void> {
+    if (!alreadyReconciled) await this.reconcileForFree(this.managedNames());
     const results = await Promise.allSettled(this.loadedNames().map((n) => this.unload(n)));
     const failures = results
       .filter((r): r is PromiseRejectedResult => r.status === 'rejected')

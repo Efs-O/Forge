@@ -435,7 +435,7 @@ overlaps with an existing owner, extend the owner instead.
 | one `SdServerBackend` per configured sdcpp backend  | `src/backend/sdServerRegistry.ts`    |
 | External server log → output channel (`server_log`) | `src/backend/serverLogFollower.ts`   |
 | Unloading local servers Forge does not spawn (`unload_path`, Strata) | `src/backend/ExternalModelServers.ts` |
-| Managed external server `/v1/models` residency probe | `src/backend/ExternalModelResidencyProbe.ts` |
+| Managed external server residency classification (`/v1/models` and stale `/v1/status` claims) | `src/backend/ExternalModelResidencyProbe.ts` |
 | Deferred `stop_on_exit` watcher (reload vs close) | `src/backend/deferredStop.ts` |
 | Localhost model-control HTTP API                  | `src/backend/ControlServer.ts`         |
 | Localhost control-server session statistics (`GET /stats`) | `src/backend/controlStats.ts`          |

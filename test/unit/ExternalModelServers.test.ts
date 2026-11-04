@@ -115,12 +115,27 @@ function makeServers(respond: () => Promise<Response>): {
   calls: Array<{ url: string; init: RequestInit }>;
 } {
   const calls: Array<{ url: string; init: RequestInit }> = [];
-  const fetchImpl = (async (url: string, init: RequestInit) => {
-    calls.push({ url, init });
-    events.push('unload:strata');
-    return respond();
-  }) as unknown as typeof fetch;
   const config = makeConfig();
+  const modelId = config.models.find((model) => model.name === 'strata')?.model ?? 'strata-model';
+  let resident = true;
+  const fetchImpl = (async (url: string, init: RequestInit) => {
+    const requestUrl = new URL(String(url));
+    if (init.method === 'POST') {
+      calls.push({ url: String(url), init });
+      events.push('unload:strata');
+      const response = await respond();
+      if (response.ok) resident = false;
+      return response;
+    }
+    if (requestUrl.pathname === '/v1/status') {
+      return new Response(JSON.stringify({ service: 'strata', model: modelId, loaded: false }));
+    }
+    return new Response(
+      JSON.stringify({
+        data: [{ id: modelId, status: { value: resident ? 'loaded' : 'unloaded' } }],
+      }),
+    );
+  }) as unknown as typeof fetch;
   const servers = new ExternalModelServers(
     () => config,
     async (key) => `token-${key}`,
@@ -249,7 +264,11 @@ describe('ExternalModelServers', () => {
       deadWindowHold.release();
 
       let now = 1_000;
-      const ttlRegistry = new SharedRuntimeRegistry(dir, () => true, () => now);
+      const ttlRegistry = new SharedRuntimeRegistry(
+        dir,
+        () => true,
+        () => now,
+      );
       const asleep = await ttlRegistry.acquireExternalTurnHold(
         'iq2xs',
         'asleep',
@@ -267,7 +286,11 @@ describe('ExternalModelServers', () => {
       // A dead process is reclaimed however fresh its record looks, so a window
       // that went away during the sleep cannot keep protecting a model nobody
       // is using.
-      const deadAfter = new SharedRuntimeRegistry(dir, () => false, () => now);
+      const deadAfter = new SharedRuntimeRegistry(
+        dir,
+        () => false,
+        () => now,
+      );
       expect(deadAfter.externalTurnHolders()).toEqual([]);
       asleep.release();
     } finally {
@@ -293,7 +316,11 @@ describe('ExternalModelServers', () => {
         cause: Object.assign(new Error('connect ECONNREFUSED'), { code: 'ECONNREFUSED' }),
       });
     });
-    const servers = new ExternalModelServers(() => config, async () => 'token', fetchImpl);
+    const servers = new ExternalModelServers(
+      () => config,
+      async () => 'token',
+      fetchImpl,
+    );
     servers.markInUse('strata');
 
     await servers.refreshResidency();
@@ -304,10 +331,17 @@ describe('ExternalModelServers', () => {
   it('marks confirmed residency unloaded when /v1/models reports status unloaded', async () => {
     const config = makeConfig();
     config.models[1].model = 'strata-model';
-    const fetchImpl = vi.fn<typeof fetch>(async () =>
-      new Response(JSON.stringify({ data: [{ id: 'strata-model', status: { value: 'unloaded' } }] })),
+    const fetchImpl = vi.fn<typeof fetch>(
+      async () =>
+        new Response(
+          JSON.stringify({ data: [{ id: 'strata-model', status: { value: 'unloaded' } }] }),
+        ),
     );
-    const servers = new ExternalModelServers(() => config, async () => 'token', fetchImpl);
+    const servers = new ExternalModelServers(
+      () => config,
+      async () => 'token',
+      fetchImpl,
+    );
     servers.markInUse('strata');
 
     await servers.refreshResidency();
@@ -323,10 +357,17 @@ describe('ExternalModelServers', () => {
   it('keeps confirmed residency loaded when /v1/models reports loaded', async () => {
     const config = makeConfig();
     config.models[1].model = 'strata-model';
-    const fetchImpl = vi.fn<typeof fetch>(async () =>
-      new Response(JSON.stringify({ data: [{ id: 'strata-model', status: { value: 'loaded' } }] })),
+    const fetchImpl = vi.fn<typeof fetch>(
+      async () =>
+        new Response(
+          JSON.stringify({ data: [{ id: 'strata-model', status: { value: 'loaded' } }] }),
+        ),
     );
-    const servers = new ExternalModelServers(() => config, async () => 'token', fetchImpl);
+    const servers = new ExternalModelServers(
+      () => config,
+      async () => 'token',
+      fetchImpl,
+    );
     servers.markInUse('strata');
 
     await servers.refreshResidency();
@@ -335,14 +376,23 @@ describe('ExternalModelServers', () => {
   });
 
   it.each([
-    ['a timeout', async () => { throw new DOMException('timed out', 'TimeoutError'); }],
+    [
+      'a timeout',
+      async () => {
+        throw new DOMException('timed out', 'TimeoutError');
+      },
+    ],
     ['an HTTP 500 response', async () => new Response('{}', { status: 500 })],
     ['malformed JSON', async () => new Response('{', { status: 200 })],
   ])('leaves confirmed residency unchanged after %s', async (_outcome, respond) => {
     const config = makeConfig();
     config.models[1].model = 'strata-model';
     const fetchImpl = vi.fn<typeof fetch>(respond);
-    const servers = new ExternalModelServers(() => config, async () => 'token', fetchImpl);
+    const servers = new ExternalModelServers(
+      () => config,
+      async () => 'token',
+      fetchImpl,
+    );
     servers.markInUse('strata');
 
     await servers.refreshResidency();
@@ -358,36 +408,50 @@ describe('ExternalModelServers', () => {
       resolveResponse = resolve;
     });
     const fetchImpl = vi.fn<typeof fetch>(() => response);
-    const servers = new ExternalModelServers(() => config, async () => 'token', fetchImpl);
+    const servers = new ExternalModelServers(
+      () => config,
+      async () => 'token',
+      fetchImpl,
+    );
     servers.markInUse('strata');
 
     const refresh = servers.refreshResidency();
     await vi.waitFor(() => expect(fetchImpl).toHaveBeenCalledOnce());
     servers.markInUse('strata');
     resolveResponse?.(
-      new Response(JSON.stringify({ data: [{ id: 'strata-model', status: { value: 'unloaded' } }] })),
+      new Response(
+        JSON.stringify({ data: [{ id: 'strata-model', status: { value: 'unloaded' } }] }),
+      ),
     );
     await refresh;
 
     expect(servers.isConfirmedLoaded('strata')).toBe(true);
   });
 
-  it('does not probe unknown or unloaded managed servers', async () => {
+  it('probes unknown and unloaded managed servers during selector refresh', async () => {
     const config = makeConfig();
     config.models[1].model = 'strata-model';
-    const fetchImpl = vi.fn<typeof fetch>(async () =>
-      new Response(JSON.stringify({ data: [{ id: 'strata-model', status: { value: 'unloaded' } }] })),
+    const fetchImpl = vi.fn<typeof fetch>(
+      async () =>
+        new Response(
+          JSON.stringify({ data: [{ id: 'strata-model', status: { value: 'unloaded' } }] }),
+        ),
     );
-    const servers = new ExternalModelServers(() => config, async () => 'token', fetchImpl);
+    const servers = new ExternalModelServers(
+      () => config,
+      async () => 'token',
+      fetchImpl,
+    );
 
     await servers.refreshResidency();
-    expect(fetchImpl).not.toHaveBeenCalled();
+    expect(fetchImpl).toHaveBeenCalledTimes(2);
+    expect(servers.isConfirmedLoaded('strata')).toBe(false);
 
     servers.markInUse('strata');
     await servers.unload('strata');
     const callsAfterUnload = fetchImpl.mock.calls.length;
     await servers.refreshResidency();
-    expect(fetchImpl).toHaveBeenCalledTimes(callsAfterUnload);
+    expect(fetchImpl).toHaveBeenCalledTimes(callsAfterUnload + 2);
   });
 
   it('single-flights concurrent residency refreshes once per loaded managed model', async () => {
@@ -401,7 +465,11 @@ describe('ExternalModelServers', () => {
       unload_path: '/unload',
     });
     const fetchImpl = vi.fn<typeof fetch>(async () => new Response('{}'));
-    const servers = new ExternalModelServers(() => config, async () => undefined, fetchImpl);
+    const servers = new ExternalModelServers(
+      () => config,
+      async () => undefined,
+      fetchImpl,
+    );
     servers.markInUse('strata');
     servers.markInUse('maya');
 
@@ -413,7 +481,7 @@ describe('ExternalModelServers', () => {
     expect(fetchImpl).toHaveBeenCalledTimes(2);
   });
 
-  it('logs one unexpected probe error and resolves the residency refresh', async () => {
+  it('keeps prior residency when a probe fails unexpectedly', async () => {
     const config = makeConfig();
     config.models[1].model = 'strata-model';
     config.models.push({
@@ -426,14 +494,19 @@ describe('ExternalModelServers', () => {
     const fetchImpl = vi.fn<typeof fetch>(async () => {
       throw new Error('unexpected fetch failure');
     });
-    const servers = new ExternalModelServers(() => config, async () => undefined, fetchImpl);
+    const servers = new ExternalModelServers(
+      () => config,
+      async () => undefined,
+      fetchImpl,
+    );
     servers.markInUse('strata');
     servers.markInUse('maya');
     const logError = vi.spyOn(logger, 'error').mockImplementation(() => {});
 
     try {
       await expect(servers.refreshResidency()).resolves.toBeUndefined();
-      expect(logError).toHaveBeenCalledOnce();
+      expect(logError).not.toHaveBeenCalled();
+      expect(servers.isConfirmedLoaded('strata')).toBe(true);
     } finally {
       logError.mockRestore();
     }
@@ -1127,6 +1200,8 @@ describe('BackendPool with a managed external server', () => {
       const order: string[] = [];
       const external = {
         isManaged: () => true,
+        managedNames: () => ['strata'],
+        reconcileForFree: async () => {},
         loadedNames: () => ['strata'],
         unload: async () => {},
         ensureStarted: async () => {
@@ -1180,6 +1255,8 @@ describe('BackendPool with a managed external server', () => {
       const registry = new SharedRuntimeRegistry(board);
       const external = {
         isManaged: () => true,
+        managedNames: () => ['strata'],
+        reconcileForFree: async () => {},
         loadedNames: () => ['strata'],
         unload: async () => {},
         ensureStarted: async () => {
@@ -1252,9 +1329,24 @@ describe('BackendPool with a managed external server', () => {
       unload_path: '/unload',
     } as ForgeConfig['models'][number]);
     const urls: string[] = [];
-    const fetchImpl = (async (url: string) => {
-      urls.push(url);
-      return ok();
+    let resident = true;
+    const fetchImpl = (async (input: string, init?: RequestInit) => {
+      const url = new URL(input);
+      if (init?.method === 'POST') {
+        urls.push(input);
+        resident = false;
+        return ok();
+      }
+      if (url.pathname === '/v1/status') {
+        return new Response(
+          JSON.stringify({ service: 'strata', model: 'strata-model', loaded: false }),
+        );
+      }
+      return new Response(
+        JSON.stringify({
+          data: [{ id: 'strata-model', status: { value: resident ? 'loaded' : 'unloaded' } }],
+        }),
+      );
     }) as unknown as typeof fetch;
     const servers = new ExternalModelServers(
       () => config,
@@ -1469,7 +1561,10 @@ describe('ExternalModelServers stopOnExit and remote leases', () => {
       spawnImpl,
     );
     let clock = 1_700_000_000_000;
-    const leases = new ModelStarterLeases(() => 600_000, () => clock);
+    const leases = new ModelStarterLeases(
+      () => 600_000,
+      () => clock,
+    );
     const pool = new BackendPool(config, new SharedRuntimeRegistry(), servers, leases);
     // What a laptop `POST /ensure` does to this window's pool: one pin, held by
     // a lease, with no desktop turn anywhere near it.

@@ -88,6 +88,9 @@ export async function prepareExternalForRequest(
       .externalTurnHolders()
       .find((hold) => hold.model !== key && shares(hold.model));
     if (crossWindowHold) throw externalHoldConflict(crossWindowHold, key);
+    await external.reconcileForFree(
+      external.managedNames().filter((name) => name !== key && shares(name)),
+    );
     await freeVramForExternal(key, {
       local: [...ctx.slots.keys(), ...ctx.sharedSlots.keys(), ...ctx.ollamaSlots.keys()],
       // Only the OVERLAPPING servers are offered to the free path: unloading a
@@ -152,7 +155,8 @@ export async function unloadManagedForLocalLoad(
   await ctx.registry.withExternalTurnHoldLock(async () => {
     const blocker = anyTurnHold(ctx.registry);
     if (blocker) throw externalHoldConflict(blocker, localKey, 'local-load');
-    if (external.loadedNames().length) await external.unloadAll();
+    await external.reconcileForFree(external.managedNames());
+    if (external.loadedNames().length) await external.unloadAll(true);
   });
 }
 
