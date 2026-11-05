@@ -277,6 +277,83 @@ describe('startMediaRender: the lease is released on every exit path', () => {
     expect(manager.starts.length).toBe(1);
   });
 
+  it('reports the reason to the chat when the chain ends before the render stage (BL-033)', async () => {
+    // Only the final stage carries a notice, so a run that dies at its analysis
+    // stage would otherwise leave the chat waiting for a wake that never comes.
+    const manager = fakeManager();
+    const notices: { conversationId: string; runId: string; reason: string }[] = [];
+    await startMediaRender(
+      {
+        ...request(),
+        next: () => Promise.reject(new Error('no Flamingo lyric text in this run')),
+      },
+      depsFor(manager, {
+        notifyChainFailure: async (event) => {
+          notices.push(event);
+        },
+      }),
+    );
+    manager.resolve();
+    expect(await leaseReleased()).toBe(true);
+    expect(notices).toHaveLength(1);
+    expect(notices[0]).toMatchObject({ conversationId: 'conversation-1', runId: 'm-run-1' });
+    expect(notices[0]?.reason).toContain('no Flamingo lyric text in this run');
+  });
+
+  it('never reports a run whose final stage completed, so the notice is not doubled', async () => {
+    const manager = fakeManager();
+    const notices: string[] = [];
+    const second = request({ engineId: 'ace_step' });
+    await startMediaRender(
+      { ...request(), next: () => Promise.resolve(second) },
+      depsFor(manager, {
+        notifyChainFailure: async (event) => {
+          notices.push(event.reason);
+        },
+      }),
+    );
+    manager.resolve();
+    expect(await startedStages(manager, 2)).toBe(true);
+    manager.resolve();
+    expect(await leaseReleased()).toBe(true);
+    expect(notices).toEqual([]);
+  });
+
+  it('reports a stage whose wait failed, and stays silent when the owner stopped the turn', async () => {
+    const manager = fakeManager();
+    const notices: string[] = [];
+    const deps = depsFor(manager, {
+      notifyChainFailure: async (event) => {
+        notices.push(event.reason);
+      },
+    });
+    manager.waitFinished = () => Promise.reject(new Error('execution vanished'));
+    await startMediaRender({ ...request(), next: () => Promise.resolve(request()) }, deps);
+    expect(await leaseReleased()).toBe(true);
+    expect(notices).toHaveLength(1);
+    expect(notices[0]).toContain('execution vanished');
+
+    // The abort break is the owner's own stop: nothing to report there.
+    const stopped = fakeManager();
+    const stoppedNotices: string[] = [];
+    const controller = new AbortController();
+    stopped.waitFinished = () => {
+      controller.abort();
+      return Promise.resolve({ status: 'completed', exitCode: 0 });
+    };
+    await startMediaRender(
+      { ...request(), abortSignal: controller.signal, next: () => Promise.resolve(request()) },
+      depsFor(stopped, {
+        notifyChainFailure: async (event) => {
+          stoppedNotices.push(event.reason);
+        },
+      }),
+    );
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    expect(stoppedNotices).toEqual([]);
+    expect(stopped.starts.length).toBe(1);
+  });
+
   it('refuses to take the lease at all when another render holds it', async () => {
     const holder = await acquireMediaGpuLease('media:video:ltx25', 2, {
       leasePath,

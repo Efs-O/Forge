@@ -131,6 +131,13 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
     getSidebarProvider: () => sidebarProvider,
     log,
     getControlServer: () => controlServerRef,
+    // The media tools free GPUs through this window's lifecycle, which has to
+    // see a managed external server as loaded and refuse while any window is
+    // streaming on it (BL-031).
+    getExternals: () => ({
+      servers: externalServers,
+      holds: sharedRegistry.externalTurnHolders(),
+    }),
   });
   const {
     indexManager,

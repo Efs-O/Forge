@@ -33,6 +33,20 @@ describe('edit_file batch cap', () => {
       'at most 200 edits per call',
     );
   });
+
+  it('names the fields a malformed edit sent, and a mixed top-level pair', async () => {
+    fs.writeFileSync(target, 'before');
+    await expect(
+      makeEditFileTool().handler({
+        path: target,
+        edits: [{ old_str: 'before', newStr: 'after' }],
+        old_str: 'before',
+        new_str: 'after',
+      }),
+    ).rejects.toThrow(
+      'edit 1 needs string old_str and new_str (it has: old_str, newStr). Top-level old_str/new_str were sent too',
+    );
+  });
 });
 
 describe('edit_file cancellable save', () => {

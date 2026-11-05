@@ -75,6 +75,20 @@ export interface MediaRenderDeps {
   idleWaitMs?: number;
   idlePollMs?: number;
   log?: (line: string) => void;
+  /**
+   * Told when a staged run ends before its final stage ran (BL-033). Only the
+   * final stage carries a notice, so without this the chat that was promised a
+   * wake hears nothing at all when the analysis child dies: the log line is the
+   * only evidence, and the owner on a bound remote chat cannot tell a dead run
+   * from a slow one. Not called for the abort break — the owner stopped that
+   * turn themselves.
+   */
+  notifyChainFailure?: (event: {
+    conversationId: string;
+    runId: string;
+    runDir: string;
+    reason: string;
+  }) => Promise<void>;
 }
 
 export interface MediaRenderStart {
@@ -171,6 +185,34 @@ async function spawnStage(
 }
 
 /**
+ * Say out loud, to the chat that was promised a wake, that the run is over and
+ * why. The log line is written by the caller, which owns the technical wording;
+ * this is the owner-facing half (BL-033). A failure to report is logged, never
+ * thrown: the chain is already ending and the lease is going back either way.
+ */
+async function reportChainFailure(
+  req: MediaRenderRequest,
+  reason: string,
+  deps: MediaRenderDeps,
+  log: (line: string) => void,
+): Promise<void> {
+  if (!deps.notifyChainFailure || !req.conversationId) return;
+  try {
+    await deps.notifyChainFailure({
+      conversationId: req.conversationId,
+      runId: req.runId,
+      runDir: req.runDir,
+      reason,
+    });
+  } catch (error) {
+    log(
+      `[media] The failure of run ${req.runId} could not be reported to the chat: ` +
+        `${error instanceof Error ? error.message : String(error)}`,
+    );
+  }
+}
+
+/**
  * Wait out every stage of this run, then release the lease exactly once.
  * `waitFinished` is used rather than `observe` because `observe` marks the exit
  * notice seen, and the notice is what tells the chat the render is done. A
@@ -210,10 +252,16 @@ async function runStages(
           break;
         }
       } catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
         log(
           `[media] Could not wait for execution ${current.executionId}: ` +
-            `${error instanceof Error ? error.message : String(error)}. ` +
-            'The lease is released now rather than left to staleness.',
+            `${message}. The lease is released now rather than left to staleness.`,
+        );
+        await reportChainFailure(
+          currentReq,
+          `its running stage could not be waited on (${message}), so the render is over`,
+          deps,
+          log,
         );
         break;
       }
@@ -228,19 +276,54 @@ async function runStages(
       try {
         nextReq = await currentReq.next();
       } catch (error) {
-        log(
-          `[media] The next stage of run ${currentReq.runId} was not started: ` +
-            `${error instanceof Error ? error.message : String(error)}`,
+        const message = error instanceof Error ? error.message : String(error);
+        log(`[media] The next stage of run ${currentReq.runId} was not started: ` + message);
+        await reportChainFailure(
+          currentReq,
+          `it was not started (${message}), so nothing was rendered`,
+          deps,
+          log,
         );
         break;
       }
-      if (!nextReq) break;
+      if (!nextReq) {
+        await reportChainFailure(
+          currentReq,
+          'the next stage was not scheduled, so nothing more was rendered',
+          deps,
+          log,
+        );
+        break;
+      }
       // The stage that just ended wrote its own `manifest.json`. Rename it
       // aside as `analysis-manifest.json` (kept: it is the analysis record) so
       // the final notice can only read the render's own manifest, and a render
       // that died without one is reported as "ended without a manifest".
-      if (!(await archiveAnalysisManifest(currentReq.runDir, log))) break;
-      current = await spawnStage(nextReq, lease, deps, background, log);
+      if (!(await archiveAnalysisManifest(currentReq.runDir, log))) {
+        await reportChainFailure(
+          currentReq,
+          'the finished stage’s manifest could not be moved aside, so the render stage was not started',
+          deps,
+          log,
+        );
+        break;
+      }
+      try {
+        current = await spawnStage(nextReq, lease, deps, background, log);
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
+        log(
+          `[media] The next stage of run ${currentReq.runId} could not be started: ${message}. ` +
+            'The lease is released now rather than left to staleness.',
+        );
+        await reportChainFailure(
+          nextReq,
+          `it could not be started (${message}), so nothing was rendered`,
+          deps,
+          log,
+        );
+        break;
+      }
       currentReq = nextReq;
       stage += 1;
     }

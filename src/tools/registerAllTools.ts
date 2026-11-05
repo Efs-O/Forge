@@ -430,6 +430,16 @@ export function registerAllTools(
         });
         return result.kind === 'queued' ? result.chats : 0;
       },
+      // A staged run that dies before its render stage has no completion notice
+      // to carry its failure, so it says so through the same text path (BL-033).
+      notifyChainFailure: async (event) => {
+        await notifications.notify({
+          conversationId: event.conversationId,
+          text:
+            `Forge: media run ${event.runId} did not finish — ${event.reason}. ` +
+            `Run folder: ${event.runDir}.`,
+        });
+      },
       ...(getConfig().image_generation
         ? { sdServers: () => sdServers?.handles() ?? new Map() }
         : {}),

@@ -58,7 +58,18 @@ function parseEdits(args: Record<string, unknown>): StringEdit[] {
     const oldStr = record?.['old_str'];
     const newStr = record?.['new_str'];
     if (typeof oldStr !== 'string' || typeof newStr !== 'string') {
-      throw new Error(`edit_file: edit ${index + 1} needs string old_str and new_str.`);
+      // Name what arrived: a model that sent `newStr`, or both shapes at once
+      // (a placeholder edits[] plus the real top-level pair, seen 2026-11-05),
+      // cannot tell from "needs old_str" which key it got wrong.
+      const fields =
+        record !== null && typeof record === 'object' ? Object.keys(record).join(', ') : '';
+      const mixed =
+        args['old_str'] !== undefined || args['new_str'] !== undefined
+          ? ' Top-level old_str/new_str were sent too: use edits[] or the top-level pair, not both.'
+          : '';
+      throw new Error(
+        `edit_file: edit ${index + 1} needs string old_str and new_str (it has: ${fields || 'no fields'}).${mixed}`,
+      );
     }
     return {
       oldStr,

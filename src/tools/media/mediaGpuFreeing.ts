@@ -28,7 +28,7 @@ export interface MediaModelLifecycle {
   /** Every model this window sees as loaded, with the cards its entry configured. */
   loadedModels(): readonly MediaLoadedModel[];
   /** A sidebar turn, a delegation hold or a remote lease is using this model. */
-  isBusy(modelName: string): boolean;
+  isBusy(modelName: string, ownConversationId?: string): boolean;
   /** Forge's eager teardown: `ControlModelLifecycle.unloadModel`. */
   unloadModel(modelName: string): Promise<{ unloaded: boolean; error?: string }>;
 }

@@ -36,8 +36,11 @@ const GROUP_PURPOSE: Readonly<Record<(typeof NATIVE_LAZY_GROUP_NAMES)[number], s
   git: 'git status, log, diff, blame and show, plus stage, commit and branch as tools (the shell runs git too)',
   halluscribe:
     'search previous AI coding sessions and historical workspace/user context: past implementation decisions, the exact wording of an earlier error or command, prior project history, the user profile/digest',
+  // The check-your-own-output cue and "headless" are measured (2026-11-05): on
+  // the same voxel-scene prompt one model never loaded media because "do not
+  // open a browser" read to it as "you cannot look", and verified blind.
   media:
-    'view, generate and upscale images, reverse image search, generate videos and music, inspect video stills, render HTML to a PNG or preview, export documents, send files',
+    'view images (including a picture of a page, chart or scene you rendered, to check your own visual work), generate and upscale images, reverse image search, generate videos and music, inspect video stills, render HTML to a PNG or preview (headless, opens no browser window), export documents, send files',
   memory: 'remember, recall, forget notes kept across conversations',
   notebook: 'Jupyter notebook cells',
   system: 'this PC: power, sleep/wake, status, llama.cpp',

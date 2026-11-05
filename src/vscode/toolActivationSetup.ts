@@ -17,7 +17,7 @@ import { renderPdfPages } from '../documents/pdfRenderer';
 import { connectMcpServers } from '../tools/mcpBridge';
 import { ToolRegistry } from '../tools/ToolRegistry';
 import { registerAllTools } from '../tools/registerAllTools';
-import { mediaLifecycleFor } from './mediaLifecycle';
+import { mediaLifecycleFor, type MediaExternals } from './mediaLifecycle';
 import { UserQuestionService } from '../sidebar/UserQuestionService';
 import { UserNotificationService } from '../sidebar/UserNotificationService';
 import { SidebarProvider } from '../sidebar/SidebarProvider';
@@ -43,6 +43,13 @@ export interface ToolActivationOptions {
    * has finished, so the lifecycle holds a getter rather than a value.
    */
   getControlServer?: () => ControlServer | undefined;
+  /**
+   * The window's managed externals (Strata) and the machine-wide managed turn
+   * holds. The media lifecycle needs both: a render that wants a card a managed
+   * server occupies has to see it as loaded, and it must not unload that server
+   * while any window is streaming on it (BL-031).
+   */
+  getExternals?: () => MediaExternals;
 }
 
 export interface ToolActivationSetup {
@@ -75,7 +82,12 @@ export function setupToolActivation(options: ToolActivationOptions): ToolActivat
   const mediaTools = options.getControlServer
     ? {
         adaptersDir: path.join(context.extensionPath, 'resources', 'media'),
-        lifecycle: mediaLifecycleFor(pool, options.getControlServer, getConfig),
+        lifecycle: mediaLifecycleFor(
+          pool,
+          options.getControlServer,
+          getConfig,
+          options.getExternals,
+        ),
       }
     : undefined;
 

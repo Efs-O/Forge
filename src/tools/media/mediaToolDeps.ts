@@ -62,6 +62,17 @@ export interface MediaToolDeps {
     previewPath?: string;
     text: string;
   }) => Promise<number>;
+  /**
+   * Told when a staged run ends before its final stage ran, so the chat that was
+   * promised a wake hears the reason instead of waiting forever (BL-033). The
+   * notification owner's text path, which is what the completion notice uses.
+   */
+  notifyChainFailure?: (event: {
+    conversationId: string;
+    runId: string;
+    runDir: string;
+    reason: string;
+  }) => Promise<void>;
 }
 
 export async function assertMediaEngineVram(
@@ -119,8 +130,17 @@ export function toolWorkspaceRoot(deps: MediaToolDeps): string {
  * not ask for.
  */
 export function renderDepsFrom(deps: MediaToolDeps, context?: ToolHandlerContext): MediaRenderDeps {
+  // The calling chat holds a managed server for its own turn, and the freeing
+  // path must not read that hold as somebody else's work when it asks who is
+  // busy — otherwise a Strata chat cannot render on its own cards (BL-031).
+  const conversationId = context?.conversationId;
   return {
-    lifecycle: deps.lifecycle,
+    lifecycle: conversationId
+      ? {
+          ...deps.lifecycle,
+          isBusy: (name: string) => deps.lifecycle.isBusy(name, conversationId),
+        }
+      : deps.lifecycle,
     ...(context?.modelName
       ? { ownModelName: context.modelName }
       : { ...(deps.ownModelName ? { ownModelName: deps.ownModelName } : {}) }),
@@ -134,5 +154,6 @@ export function renderDepsFrom(deps: MediaToolDeps, context?: ToolHandlerContext
     ...(deps.idleWaitMs ? { idleWaitMs: deps.idleWaitMs } : {}),
     ...(deps.idlePollMs ? { idlePollMs: deps.idlePollMs } : {}),
     ...(deps.log ? { log: deps.log } : {}),
+    ...(deps.notifyChainFailure ? { notifyChainFailure: deps.notifyChainFailure } : {}),
   };
 }
