@@ -19,6 +19,13 @@
   background: var(--vscode-editorWidget-background, #252526);
 }
 
+/* The question card owns its scroll area; confirmation keeps the panel rule above. */
+.docked-dialog-panel.question-docked-panel {
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
 .confirm-dialog {
   width: 100%;
   max-width: 640px;

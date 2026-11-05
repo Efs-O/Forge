@@ -6,6 +6,7 @@ import type { ToolHandlerResult, ToolPermission } from '../tools/ToolRegistry';
 import type { ToolOutputLimits } from '../tools/toolOutputLimits';
 import type { CheckinStage } from '../agent/elapsedTimeNote';
 import type { ConversationRuntime, PlanItem } from './sessionTypes';
+import type { QuestionAnswerRecord } from '../util/questionAnswers';
 import { recordToolArgumentRepair, type ToolArgumentRepairInfo } from '../tools/argCoercion';
 
 export interface RecordedFileDiff {
@@ -44,7 +45,16 @@ export function toolResultText(result: ToolHandlerResult): string {
 }
 
 export function toolResultContent(result: ToolHandlerResult): ChatMessage['content'] {
-  return typeof result === 'string' ? result : result.content;
+  if (typeof result === 'string') return result;
+  return 'content' in result ? result.content : result.text;
+}
+
+export function toolResultQuestionRecord(
+  result: ToolHandlerResult,
+): QuestionAnswerRecord | undefined {
+  return typeof result === 'string' || !('questionRecord' in result)
+    ? undefined
+    : result.questionRecord;
 }
 
 /** The one shape of a tool result message, carrying its own measured duration. */

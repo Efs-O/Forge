@@ -12,6 +12,12 @@ interface Props {
   onNoteChange: (note: string) => void;
 }
 
+function visibleDescription(description: string | undefined): string | undefined {
+  const trimmed = description?.trim();
+  if (!trimmed) return undefined;
+  return trimmed.replace(/^recommended\s*[:,]\s*/iu, '').trim() || undefined;
+}
+
 export function QuestionBody({
   spec,
   questionIndex,
@@ -44,6 +50,7 @@ export function QuestionBody({
         >
           {spec.options.map((option, optionIndex) => {
             const selected = picks.includes(optionIndex);
+            const description = visibleDescription(option.description);
             return (
               <button
                 key={`${optionIndex}-${option.label}`}
@@ -63,8 +70,8 @@ export function QuestionBody({
                       <span className="question-option-badge">Recommended</span>
                     )}
                   </span>
-                  {option.description && (
-                    <span className="question-option-description">{option.description}</span>
+                  {description && (
+                    <span className="question-option-description">{description}</span>
                   )}
                 </span>
                 <span className="question-option-key" aria-hidden="true">

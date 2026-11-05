@@ -1,4 +1,4 @@
-import type { QuestionSpec, StructuredAnswer } from '../util/questionAnswers';
+import type { QuestionAnswerRecord, QuestionSpec, StructuredAnswer } from '../util/questionAnswers';
 import type { ChatAttachmentRef } from '../llm/types';
 import type { AgentSenderMetadata } from '../agentLinks/chatAgentLinks';
 import type { ActivityViewMode, ThinkingDisplayMode } from './activityViewSetting';
@@ -179,6 +179,8 @@ interface ToolResultMsg {
   text: string;
   /** Size of the untruncated result, so the row can say what was cut. */
   totalChars: number;
+  /** Structured answer captured by `ask_user`, for the read-only transcript card. */
+  questionRecord?: QuestionAnswerRecord;
   /** Absolute path to offer as an "open" link, when the tool touched one file. */
   filePath?: string;
   isError?: boolean;

@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useRef } from 'react';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
 import type { StructuredAnswer } from '../../../src/util/questionAnswers';
 import { isAnswered, togglePick } from '../../../src/util/questionPicks';
 import type { AgentQuestion, QuestionDraft } from '../useAgentDialogs';
@@ -28,6 +28,10 @@ export function QuestionDialog({
   onSkip,
 }: Props): React.ReactElement {
   const panelRef = useRef<HTMLDivElement>(null);
+  const minimiseRef = useRef<HTMLButtonElement>(null);
+  const restoreRef = useRef<HTMLButtonElement>(null);
+  const wasMinimised = useRef(false);
+  const [minimised, setMinimised] = useState(false);
   const specs = question.specs;
   const hasTabs = specs.length > 1;
   const reviewTab = specs.length;
@@ -42,6 +46,12 @@ export function QuestionDialog({
   useEffect(() => {
     if (autoFocus) panelRef.current?.focus();
   }, [autoFocus, question.id]);
+
+  useEffect(() => {
+    if (minimised) restoreRef.current?.focus();
+    else if (wasMinimised.current) minimiseRef.current?.focus();
+    wasMinimised.current = minimised;
+  }, [minimised]);
 
   const updateTab = useCallback(
     (nextTab: number) => onDraftChange({ ...draft, tab: nextTab }),
@@ -141,17 +151,32 @@ export function QuestionDialog({
   const showAnswer = !hasTabs || tab === reviewTab;
   const primaryLabel = showAnswer ? 'Answer' : 'Next';
   const primaryDisabled = showAnswer && !allAnswered;
+  const foldedLabel = `Forge asks - ${specs.length} questions, ${answeredCount} answered`;
 
   return (
     <div
       ref={panelRef}
-      className="docked-dialog-panel question-docked-panel"
+      className={`docked-dialog-panel question-docked-panel${minimised ? ' is-minimised' : ''}`}
       role="dialog"
-      aria-labelledby="question-dialog-title"
+      aria-labelledby={minimised ? undefined : 'question-dialog-title'}
+      aria-label={minimised ? foldedLabel : undefined}
       tabIndex={-1}
       onKeyDown={onPanelKeyDown}
     >
-      <section className="question-card">
+      {minimised && (
+        <button
+          ref={restoreRef}
+          className="question-card-minimised"
+          type="button"
+          aria-label="Expand question card"
+          aria-expanded={false}
+          aria-controls="question-card"
+          onClick={() => setMinimised(false)}
+        >
+          {foldedLabel}
+        </button>
+      )}
+      <section id="question-card" className="question-card" hidden={minimised}>
         <header className="question-card-header">
           <div className="question-card-title">
             <span id="question-dialog-title">Forge asks</span>
@@ -159,12 +184,23 @@ export function QuestionDialog({
               {answeredCount} of {specs.length} answered
             </span>
           </div>
-          <span className="question-card-mark" aria-hidden="true">
-            ?
-          </span>
+          <div className="question-card-tools">
+            <span className="question-card-mark" aria-hidden="true">
+              ?
+            </span>
+            <button
+              ref={minimiseRef}
+              className="question-card-minimise"
+              type="button"
+              aria-label="Minimise question card"
+              aria-expanded={!minimised}
+              aria-controls="question-card"
+              onClick={() => setMinimised(true)}
+            >
+              −
+            </button>
+          </div>
         </header>
-
-        {hasTabs && preamble && <p className="question-preamble">{preamble}</p>}
 
         {hasTabs && (
           <div className="question-tabs" role="tablist" aria-label="Question steps">
@@ -207,6 +243,7 @@ export function QuestionDialog({
         )}
 
         <div id="question-panel-content" className="question-card-content">
+          {hasTabs && preamble && <p className="question-preamble">{preamble}</p>}
           {currentSpec ? (
             <QuestionBody
               key={tab}

@@ -130,6 +130,63 @@ describe('QuestionDialog', () => {
     expect(onAnswer).toHaveBeenCalledWith({ answers: [{ picks: [0] }] });
   });
 
+  it('minimises and restores the card without losing picks or notes', () => {
+    const { onAnswer } = render([
+      {
+        prompt: 'Which reviewer?',
+        multiSelect: false,
+        options: [{ label: 'Codex' }, { label: 'Claude' }],
+      },
+    ]);
+    const options = container.querySelectorAll<HTMLButtonElement>('.question-option');
+    act(() => options[1]!.click());
+    const note = container.querySelector<HTMLTextAreaElement>('.question-note')!;
+    act(() => type(note, 'keep the existing review notes'));
+
+    const minimise = container.querySelector<HTMLButtonElement>(
+      '[aria-label="Minimise question card"]',
+    )!;
+    expect(minimise.tagName).toBe('BUTTON');
+    act(() => minimise.click());
+    const folded = container.querySelector<HTMLButtonElement>(
+      '[aria-label="Expand question card"]',
+    )!;
+    expect(folded.textContent).toBe('Forge asks - 1 questions, 1 answered');
+
+    act(() => folded.click());
+    expect(container.querySelector<HTMLButtonElement>('.question-option[aria-checked="true"]'))
+      .toBeTruthy();
+    expect(container.querySelector<HTMLTextAreaElement>('.question-note')?.value).toBe(
+      'keep the existing review notes',
+    );
+    act(() => container.querySelector<HTMLButtonElement>('.question-answer')!.click());
+    expect(onAnswer).toHaveBeenCalledWith({
+      answers: [{ picks: [1], note: 'keep the existing review notes' }],
+    });
+  });
+
+  it.each([
+    ['Recommended: uses the cached build', 'uses the cached build'],
+    [' recommended, uses the cached build  ', 'uses the cached build'],
+  ])('strips a leading recommendation prefix while keeping the badge', (description, visible) => {
+    render([
+      {
+        prompt: 'Which build?',
+        multiSelect: false,
+        options: [
+          {
+            label: 'Fast',
+            recommended: true,
+            description,
+          },
+        ],
+      },
+    ]);
+    const option = container.querySelector('.question-option')!;
+    expect(option.querySelector('.question-option-badge')?.textContent).toBe('Recommended');
+    expect(option.querySelector('.question-option-description')?.textContent).toBe(visible);
+  });
+
   it('keeps multi-picks with a note and sends option indexes in spec order', () => {
     const { onAnswer } = render([
       {

@@ -97,6 +97,7 @@ export function hostMessageToAction(msg: HostToWebview): Action | undefined {
         label: msg.label,
         text: msg.text,
         totalChars: msg.totalChars,
+        ...(msg.questionRecord ? { questionRecord: msg.questionRecord } : {}),
         ...(msg.filePath ? { filePath: msg.filePath } : {}),
         ...(msg.isError ? { isError: true } : {}),
         convId: msg.conversationId,

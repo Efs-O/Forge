@@ -143,8 +143,9 @@ export function makeAskUserTool(
           'when the choices can be combined; choices that contradict each other ' +
           'belong in a single-select question. Mark an option such as "None of these" ' +
           'as exclusive. Mark the option you recommend with recommended: true, list it ' +
-          'first, and put the reason in its description; do not write "recommended" into ' +
-          'the label. The user can always add a note or write their own answer; ' +
+          'first; say what it leads to; the badge marks it recommended. Keep that word out of ' +
+          'labels. ' +
+          'The user can always add a note or write their own answer; ' +
           'do not add an “Other” option.',
         parameters: {
           type: 'object',
@@ -214,18 +215,22 @@ export function makeAskUserTool(
       const questionSpecs = specs.map((spec, index) =>
         index === 0 && !spec.prompt.trim() ? { ...spec, prompt } : spec,
       );
-      const answer = await questions.ask({
+      const result = await questions.askWithRecord({
         prompt,
         placeholder: parsed.placeholder,
         specs: questionSpecs,
         conversationId: context?.conversationId,
         signal: context?.abortSignal,
       });
-      return (
-        answer ??
-        'The user did not answer: the question was dismissed without a response. ' +
+      if (result.answer === undefined) {
+        return (
+          'The user did not answer: the question was dismissed without a response. ' +
           'Do not call ask_user again for this question -- ask it in your chat reply and end the turn.'
-      );
+        );
+      }
+      return result.questionRecord
+        ? { text: result.answer, questionRecord: result.questionRecord }
+        : result.answer;
     },
   };
 }

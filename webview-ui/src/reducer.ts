@@ -375,6 +375,7 @@ export function reducer(state: State, action: Action): State {
       const filled = {
         toolResult: action.text,
         toolResultTotal: action.totalChars,
+        ...(action.questionRecord ? { questionRecord: action.questionRecord } : {}),
         ...(action.filePath ? { toolFilePath: action.filePath } : {}),
         ...(action.isError ? { toolIsError: true } : {}),
       };

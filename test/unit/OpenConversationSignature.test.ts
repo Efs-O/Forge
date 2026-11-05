@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import {
-  conversationPersistedSchema,
+  conversationPersistedBaseSchema,
   type ConversationRuntime,
 } from '../../src/sidebar/sessionTypes';
 import {
@@ -21,7 +21,7 @@ function conversation(): ConversationRuntime {
 
 describe('open conversation signature', () => {
   it('classifies every persisted conversation field', () => {
-    const schemaFields = Object.keys(conversationPersistedSchema.shape).sort();
+    const schemaFields = Object.keys(conversationPersistedBaseSchema.shape).sort();
     const signatureFields = openConversationSignatureFields();
     const updatedAtOnlyFields = openConversationUpdatedAtOnlyFields();
     const classified = [...signatureFields, ...updatedAtOnlyFields];

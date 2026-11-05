@@ -3,6 +3,8 @@
  * answered. The sidebar, local quick pick and Telegram all use this shape.
  */
 
+import { z } from 'zod';
+
 export interface QuestionOption {
   label: string;
   description?: string;
@@ -51,6 +53,103 @@ export interface StructuredAnswer {
   /** One entry per spec, in the same order. */
   answers: { picks: number[]; note?: string }[];
 }
+
+/** The exact questions and response retained for the answered chat row. */
+export interface QuestionAnswerRecord {
+  specs: readonly QuestionSpec[];
+  answer: StructuredAnswer;
+}
+
+/** Copy the display record so later draft mutations cannot change transcript history. */
+export function questionAnswerRecord(
+  specs: readonly QuestionSpec[],
+  answer: StructuredAnswer,
+): QuestionAnswerRecord {
+  return {
+    specs: specs.map((spec) => ({
+      prompt: spec.prompt,
+      ...(spec.header !== undefined ? { header: spec.header } : {}),
+      multiSelect: spec.multiSelect,
+      options: spec.options.map((option) => ({
+        label: option.label,
+        ...(option.description !== undefined ? { description: option.description } : {}),
+        ...(option.exclusive !== undefined ? { exclusive: option.exclusive } : {}),
+        ...(option.recommended !== undefined ? { recommended: option.recommended } : {}),
+      })),
+    })),
+    answer: answer.skipped
+      ? { skipped: true, answers: [] }
+      : {
+          answers: answer.answers.map((entry) => ({
+            picks: [...entry.picks],
+            ...(entry.note !== undefined ? { note: entry.note } : {}),
+          })),
+        },
+  };
+}
+
+const questionRecordSpecSchema = z
+  .object({
+    prompt: z.string(),
+    header: z.string().optional(),
+    multiSelect: z.boolean(),
+    options: z.array(
+      z.object({
+        label: z.string(),
+        description: z.string().optional(),
+        exclusive: z.boolean().optional(),
+        recommended: z.boolean().optional(),
+      }),
+    ),
+  })
+  .transform((spec) => ({
+    prompt: spec.prompt,
+    ...(spec.header !== undefined ? { header: spec.header } : {}),
+    multiSelect: spec.multiSelect,
+    options: spec.options.map((option) => ({
+      label: option.label,
+      ...(option.description !== undefined ? { description: option.description } : {}),
+      ...(option.exclusive !== undefined ? { exclusive: option.exclusive } : {}),
+      ...(option.recommended !== undefined ? { recommended: option.recommended } : {}),
+    })),
+  }));
+
+/** Persisted independently from slim tool turns; validates old and new session data. */
+export const questionAnswerRecordSchema = z
+  .object({
+    specs: z.array(questionRecordSpecSchema),
+    answer: z
+      .object({
+        skipped: z.literal(true).optional(),
+        answers: z.array(
+          z.object({
+            picks: z.array(z.number().int().min(0)),
+            note: z.string().optional(),
+          }),
+        ),
+      })
+      .transform((answer) => ({
+        ...(answer.skipped ? { skipped: true as const } : {}),
+        answers: answer.answers.map((entry) => ({
+          picks: [...entry.picks],
+          ...(entry.note !== undefined ? { note: entry.note } : {}),
+        })),
+      })),
+  })
+  .superRefine((record, context) => {
+    record.answer.answers.forEach((answer, index) => {
+      const spec = record.specs[index];
+      if (!spec) return;
+      answer.picks.forEach((pick) => {
+        if (spec.options[pick] === undefined) {
+          context.addIssue({
+            code: 'custom',
+            message: `Question ${index + 1} has an invalid pick.`,
+          });
+        }
+      });
+    });
+  });
 
 export const QUESTION_SKIP_TEXT =
   'The user skipped this question without answering. Continue with your best judgement and state the assumption you made.';

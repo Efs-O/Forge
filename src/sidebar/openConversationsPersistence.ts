@@ -53,6 +53,7 @@ const OPEN_SIGNATURE_FIELDS = [
   'compaction',
   'plan',
   'display_diffs',
+  'display_question_records',
   'active_time_ms',
   'active_started_at',
   'input_tokens',
@@ -97,6 +98,7 @@ function lastToolCallCount(conversation: SignatureInput): number {
 function signatureFor(
   conversation: SignatureInput,
   displayDiffs: unknown,
+  displayQuestionRecords: unknown,
   forgeInstructionsPin: unknown,
 ): string {
   const historySignature = `${conversation.updatedAt}:${conversation.title}:${conversation.messages.length}:${JSON.stringify(conversation.agentLinks ?? {})}`;
@@ -120,6 +122,7 @@ function signatureFor(
     conversation.cli_sessions ?? null,
     conversation.plan ?? null,
     displayDiffs ?? null,
+    displayQuestionRecords ?? null,
     conversation.active_time_ms ?? null,
     conversation.active_started_at ?? null,
     conversation.input_tokens ?? null,
@@ -151,13 +154,19 @@ function signatureFor(
 }
 
 export function openConversationSignature(conversation: ConversationRuntime): string {
-  return signatureFor(conversation, conversation.displayDiffs, conversation.forgeInstructionsPin);
+  return signatureFor(
+    conversation,
+    conversation.displayDiffs,
+    conversation.displayQuestionRecords,
+    conversation.forgeInstructionsPin,
+  );
 }
 
 function persistedOpenConversationSignature(conversation: ConversationPersisted): string {
   return signatureFor(
     conversation,
     conversation.display_diffs,
+    conversation.display_question_records,
     conversation.forge_instructions_pin,
   );
 }

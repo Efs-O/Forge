@@ -15,8 +15,10 @@ import type { DiffDecorations } from './DiffDecorations';
 import { resolveWorkspacePath } from '../util/WorkspacePaths';
 import { capDisplayText } from '../tools/resultCap';
 import { describeDelete } from './deletePreview';
+import { rememberQuestionRecord } from './sessionQuestionRecords';
 import { isFailureResult, readPathArg, resultLabel, touchedFilePath } from './toolResultView';
 import type { PlanItem } from './sessionTypes';
+import type { QuestionAnswerRecord } from '../util/questionAnswers';
 import type { ChatRuleApproval } from './chatApprovalRules';
 import { getLogger } from '../util/logger';
 import {
@@ -49,6 +51,7 @@ import {
 import {
   toolResultContent,
   toolResultMessage,
+  toolResultQuestionRecord,
   toolResultText,
   type RecordedFileDiff,
   type ToolDispatchModelContext,
@@ -377,7 +380,11 @@ export class ToolDispatch {
         result = policyDenied ? err.message : toolErrorText(tc.function.name, err, args);
       }
 
-      this.postResult(tc, toolResultText(result), args, convId, effects.post);
+      const questionRecord = toolResultQuestionRecord(result);
+      if (questionRecord && modelContext?.conversation) {
+        rememberQuestionRecord(modelContext.conversation, tc.id, questionRecord);
+      }
+      this.postResult(tc, toolResultText(result), args, convId, effects.post, questionRecord);
       messages.push(toolResultMessage(tc, toolResultContent(result), startedAt, argumentRepair));
     }
   }
@@ -455,6 +462,7 @@ export class ToolDispatch {
     args?: Record<string, unknown>,
     convId?: string,
     post: (msg: HostToWebview) => void = this.post,
+    questionRecord?: QuestionAnswerRecord,
   ): void {
     const toolName = tc.function.name;
     const pathArg = readPathArg(args);
@@ -469,6 +477,7 @@ export class ToolDispatch {
       label: resultLabel(toolName, result, pathArg),
       text,
       totalChars,
+      ...(questionRecord ? { questionRecord } : {}),
       ...(touchedFile ? { filePath: touchedFile } : {}),
       ...(isError ? { isError: true } : {}),
       ...(convId ? { conversationId: convId } : {}),

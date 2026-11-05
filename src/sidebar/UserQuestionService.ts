@@ -3,9 +3,11 @@ import { z } from 'zod';
 import {
   formatStructuredAnswer,
   normalizeQuestions,
+  questionAnswerRecord,
   renderQuestionAsText,
   resolveAnswerText,
   type QuestionGroup,
+  type QuestionAnswerRecord,
   type QuestionOption,
   type QuestionSpec,
   type StructuredAnswer,
@@ -24,6 +26,12 @@ export interface UserQuestionRequestEvent {
 export interface UserQuestionAnsweredEvent extends UserQuestionRequestEvent {
   answer: string | undefined;
   reason: 'answered' | 'cancelled';
+  questionRecord?: QuestionAnswerRecord;
+}
+
+export interface UserQuestionResult {
+  answer: string | undefined;
+  questionRecord?: QuestionAnswerRecord;
 }
 
 export interface UserQuestionSink {
@@ -55,7 +63,11 @@ export interface UserQuestion {
 }
 
 interface PendingQuestion extends UserQuestionRequestEvent {
-  settle: (answer: string | undefined, reason: 'answered' | 'cancelled') => void;
+  settle: (
+    answer: string | undefined,
+    reason: 'answered' | 'cancelled',
+    questionRecord?: QuestionAnswerRecord,
+  ) => void;
 }
 
 interface QuestionPickItem extends vscode.QuickPickItem {
@@ -103,7 +115,12 @@ export class UserQuestionService {
   }
 
   ask(request: UserQuestion): Promise<string | undefined> {
-    if (request.signal?.aborted) return Promise.resolve(undefined);
+    return this.askWithRecord(request).then((result) => result.answer);
+  }
+
+  /** Like ask(), with the structured choice record from a card answer attached. */
+  askWithRecord(request: UserQuestion): Promise<UserQuestionResult> {
+    if (request.signal?.aborted) return Promise.resolve({ answer: undefined });
     const specs =
       request.specs ??
       normalizeQuestions({
@@ -114,19 +131,28 @@ export class UserQuestionService {
     const normalizedRequest: UserQuestion = { ...request, specs };
 
     const id = `ask-${Date.now()}-${Math.random().toString(36).slice(2)}`;
-    return new Promise<string | undefined>((resolve) => {
+    return new Promise<UserQuestionResult>((resolve) => {
       let done = false;
       // First writer wins, from whichever surface. Every path disposes the
       // desktop box, so a question answered from Telegram does not leave a
       // stale prompt sitting open over an answer that already arrived.
-      const settle = (answer: string | undefined, reason: 'answered' | 'cancelled'): void => {
+      const settle = (
+        answer: string | undefined,
+        reason: 'answered' | 'cancelled',
+        questionRecord?: QuestionAnswerRecord,
+      ): void => {
         if (done) return;
         done = true;
         this.pending.delete(id);
         input.dispose();
-        const event: UserQuestionAnsweredEvent = { ...eventOf(entry), answer, reason };
+        const event: UserQuestionAnsweredEvent = {
+          ...eventOf(entry),
+          answer,
+          reason,
+          ...(questionRecord ? { questionRecord } : {}),
+        };
         for (const sink of this.sinks) sink.answered(event);
-        resolve(answer);
+        resolve({ answer, ...(questionRecord ? { questionRecord } : {}) });
       };
 
       const entry: PendingQuestion = {
@@ -174,7 +200,8 @@ export class UserQuestionService {
       console.error('Forge: rejected invalid structured question answer', result.error.issues);
       return false;
     }
-    question.settle(formatStructuredAnswer(question.specs, answer), 'answered');
+    const questionRecord = questionAnswerRecord(question.specs, answer);
+    question.settle(formatStructuredAnswer(question.specs, answer), 'answered', questionRecord);
     return true;
   }
 
@@ -182,9 +209,11 @@ export class UserQuestionService {
   skip(id: string): boolean {
     const question = this.pending.get(id);
     if (!question) return false;
+    const questionRecord = questionAnswerRecord(question.specs, { skipped: true, answers: [] });
     question.settle(
       formatStructuredAnswer(question.specs, { skipped: true, answers: [] }),
       'answered',
+      questionRecord,
     );
     return true;
   }

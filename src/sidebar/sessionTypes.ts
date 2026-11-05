@@ -25,6 +25,9 @@ export {
 import type { ChatAttachmentRef, ChatMessage } from '../llm/types';
 import type { DiffHunk } from './messageBridge';
 import { slimMsgSchema } from './slimPersist';
+import { questionAnswerRecordSchema } from '../util/questionAnswers';
+import type { QuestionAnswerRecord } from '../util/questionAnswers';
+import { getLogger } from '../util/logger';
 // Only for the `title_source` field below; the same name is re-exported from
 // `conversationTitle.ts` at the bottom of this block, which does not bring it
 // into this file's scope.
@@ -94,6 +97,7 @@ export type DisplayPersistMessage =
       toolTarget?: string;
       toolResult: string;
       toolResultTotal: number;
+      questionRecord?: QuestionAnswerRecord;
       toolIsError?: boolean;
       toolMs?: number;
       stampedAt?: number;
@@ -116,6 +120,12 @@ export interface ConversationDisplayDiff {
   isDeleted: boolean;
 }
 
+/** Structured ask_user answers stored with the display transcript, not model history. */
+export interface ConversationDisplayQuestionRecord {
+  toolCallId: string;
+  record: QuestionAnswerRecord;
+}
+
 const diffLineSchema = z.object({
   kind: z.enum(['context', 'added', 'removed']),
   text: z.string(),
@@ -135,6 +145,33 @@ const displayDiffSchema = z.object({
   isNew: z.boolean(),
   isDeleted: z.boolean(),
 });
+const displayQuestionRecordSchema = z.object({
+  toolCallId: z.string().min(1),
+  record: questionAnswerRecordSchema,
+});
+
+const log = getLogger();
+
+function questionRecordToolCallId(value: unknown): string {
+  if (typeof value !== 'object' || value === null) return '<missing>';
+  const id = (value as Record<string, unknown>)['toolCallId'];
+  return typeof id === 'string' && id.length > 0 ? id : '<missing>';
+}
+
+function validDisplayQuestionRecords(chatId: string, values: unknown[]) {
+  const valid: z.infer<typeof displayQuestionRecordSchema>[] = [];
+  for (const value of values) {
+    const parsed = displayQuestionRecordSchema.safeParse(value);
+    if (parsed.success) {
+      valid.push(parsed.data);
+      continue;
+    }
+    log.warn(
+      `[sessionPersistence] dropped malformed question record for chat ${chatId}, tool call ${questionRecordToolCallId(value)}`,
+    );
+  }
+  return valid;
+}
 
 /**
  * Bounds on the agent-written task plan.
@@ -164,7 +201,7 @@ export interface ConversationPlan {
   updatedAt: number;
 }
 
-export const conversationPersistedSchema = z.object({
+export const conversationPersistedBaseSchema = z.object({
   id: z.string().min(1),
   title: z.string(),
   // The same three values as `TitleSource` in `conversationTitle.ts`, optional
@@ -206,6 +243,8 @@ export const conversationPersistedSchema = z.object({
   // Optional migration field: previews written by older Forge versions were
   // only live webview state and therefore were not recoverable after a sync.
   display_diffs: z.array(displayDiffSchema).optional(),
+  /** Read-only question cards, separate from the compact model-facing turns. */
+  display_question_records: z.array(z.unknown()).optional(),
   // Active-agent-time tracking. Optional so pre-existing records parse unchanged.
   active_time_ms: z.number().int().min(0).optional(),
   active_started_at: z.number().int().optional(),
@@ -244,6 +283,25 @@ export const conversationPersistedSchema = z.object({
   clanker: z.boolean().optional(),
 });
 
+export type ConversationPersisted = Omit<
+  z.infer<typeof conversationPersistedBaseSchema>,
+  'display_question_records'
+> & {
+  display_question_records?: ConversationDisplayQuestionRecord[];
+};
+
+export const conversationPersistedSchema = conversationPersistedBaseSchema.transform(
+  (conversation): ConversationPersisted => {
+    const { display_question_records: records, ...body } = conversation;
+    return records === undefined
+      ? body
+      : {
+          ...body,
+          display_question_records: validDisplayQuestionRecords(conversation.id, records),
+        };
+  },
+);
+
 export const sidebarSessionPersistedSchema = z.object({
   activeConversationId: z.string().min(1),
   conversations: z.array(conversationPersistedSchema),
@@ -251,7 +309,6 @@ export const sidebarSessionPersistedSchema = z.object({
 });
 
 export type SidebarSessionPersisted = z.infer<typeof sidebarSessionPersistedSchema>;
-export type ConversationPersisted = z.infer<typeof conversationPersistedSchema>;
 
 /** In-memory conversation (full transcript including tool/tool_result for agent loop). */
 export interface ConversationRuntime {
@@ -319,6 +376,8 @@ export interface ConversationRuntime {
   skillsCatalogSignature?: string;
   /** Durable presentation previews, deliberately separate from LLM messages. */
   displayDiffs?: ConversationDisplayDiff[];
+  /** Durable transcript records keyed by the ask_user tool call id. */
+  displayQuestionRecords?: ConversationDisplayQuestionRecord[];
   /**
    * Set once the user has been told this conversation lost images to a reload.
    *

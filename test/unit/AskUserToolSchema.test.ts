@@ -88,7 +88,9 @@ describe('ask_user schema', () => {
   it('tells the model to flag the recommendation instead of writing it into the label', () => {
     const description = tool.definition.function.description;
     expect(description).toContain('recommended: true');
-    expect(description).toContain('do not write "recommended" into the label');
+    expect(description).toContain('say what it leads to');
+    expect(description).toContain('badge marks it recommended');
+    expect(description).toContain('Keep that word out of labels');
   });
 });
 

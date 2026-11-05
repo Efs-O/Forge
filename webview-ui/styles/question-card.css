@@ -1,10 +1,4 @@
 .question-docked-panel {
-  border-top: 0;
-  padding: 8px 12px;
-  background: transparent;
-}
-
-.question-card {
   --q-card-bg: #22262c;
   --q-card-line: #3a3f47;
   --q-surface: #1b1e23;
@@ -18,12 +12,25 @@
   --q-answer-fg: #1b1e23;
   --q-chip-fg: var(--q-accent);
   --q-rec-fg: var(--q-ok);
+  border-top: 0;
+  padding: 8px 12px;
+  background: transparent;
+}
+
+.question-docked-panel.is-minimised {
+  flex: 0 1 auto;
+}
+
+.question-card {
   width: 100%;
   max-width: 720px;
+  max-height: 100%;
+  min-height: 0;
+  flex: 1 1 auto;
   margin: 0 auto;
   display: flex;
   flex-direction: column;
-  gap: 12px;
+  gap: 10px;
   padding: 14px;
   border: 1px solid var(--q-card-line);
   border-radius: var(--forge-radius-md);
@@ -34,7 +41,7 @@
   font-size: var(--forge-text-size);
 }
 
-body.vscode-light .question-card {
+body.vscode-light .question-docked-panel {
   --q-card-bg: #ffffff;
   --q-card-line: #cfd4db;
   --q-surface: #ffffff;
@@ -49,11 +56,14 @@ body.vscode-light .question-card {
   --q-chip-fg: #9a4510;
   /* --q-ok is 4.27:1 on the light selection; this clears 4.5:1 on all three. */
   --q-rec-fg: #2a7046;
+}
+
+body.vscode-light .question-card {
   box-shadow: 0 4px 18px rgb(24 31 40 / 12%);
 }
 
-body.vscode-high-contrast .question-card,
-body.vscode-high-contrast-light .question-card {
+body.vscode-high-contrast .question-docked-panel,
+body.vscode-high-contrast-light .question-docked-panel {
   --q-card-bg: var(--vscode-editorWidget-background);
   --q-card-line: var(--vscode-contrastBorder);
   --q-surface: var(--vscode-editorWidget-background);
@@ -67,6 +77,10 @@ body.vscode-high-contrast-light .question-card {
   --q-answer-fg: var(--vscode-foreground);
   --q-chip-fg: var(--vscode-foreground);
   --q-rec-fg: var(--vscode-foreground);
+}
+
+body.vscode-high-contrast .question-card,
+body.vscode-high-contrast-light .question-card {
   box-shadow: none;
 }
 
@@ -83,6 +97,54 @@ body.vscode-high-contrast-light .question-card {
 .question-footer {
   justify-content: space-between;
   gap: 12px;
+}
+
+.question-card-header,
+.question-tabs,
+.question-footer {
+  flex-shrink: 0;
+}
+
+.question-card[hidden] {
+  display: none;
+}
+
+.question-card-minimised {
+  width: 100%;
+  padding: 8px 12px;
+  border: 1px solid var(--q-card-line, #3a3f47);
+  border-radius: var(--forge-radius-md);
+  background: var(--q-card-bg, #22262c);
+  color: var(--q-fg, #e3e5e9);
+  font: inherit;
+  text-align: left;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  cursor: pointer;
+}
+
+.question-card-minimised:focus-visible,
+.question-card-minimise:focus-visible {
+  outline: 2px solid var(--vscode-focusBorder, #007fd4);
+  outline-offset: 2px;
+}
+
+.question-card-tools {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.question-card-minimise {
+  padding: 3px 7px;
+  border: 1px solid var(--q-card-line);
+  border-radius: var(--forge-radius-sm);
+  background: transparent;
+  color: var(--q-fg);
+  font: inherit;
+  line-height: 1;
+  cursor: pointer;
 }
 
 .question-card-title {
@@ -149,7 +211,10 @@ body.vscode-high-contrast-light .question-card {
 }
 
 .question-card-content {
+  flex: 1 1 auto;
+  min-height: 0;
   min-width: 0;
+  overflow-y: auto;
 }
 
 .question-body {
@@ -192,7 +257,7 @@ body.vscode-high-contrast-light .question-header-chip {
 
 .question-prompt {
   color: var(--q-fg);
-  font-size: 1.08em;
+  font-size: 1em;
   line-height: 1.45;
   white-space: pre-wrap;
   overflow-wrap: anywhere;
@@ -201,16 +266,16 @@ body.vscode-high-contrast-light .question-header-chip {
 .question-options {
   display: flex;
   flex-direction: column;
-  gap: 6px;
+  gap: 4px;
 }
 
 .question-option {
   display: grid;
-  grid-template-columns: 20px minmax(0, 1fr) 22px;
+  grid-template-columns: 18px minmax(0, 1fr) 18px;
   align-items: center;
-  gap: 10px;
+  gap: 7px;
   width: 100%;
-  padding: 9px 10px;
+  padding: 6px 8px;
   border: 1px solid var(--q-line);
   border-radius: var(--forge-radius-sm);
   background: transparent;
@@ -244,13 +309,20 @@ body.vscode-high-contrast-light .question-header-chip {
 .question-option-copy {
   display: flex;
   min-width: 0;
-  flex-direction: column;
-  gap: 2px;
+  align-items: baseline;
+  gap: 8px;
 }
 
-.question-option-label,
-.question-option-description {
+.question-option-label {
+  flex: 0 1 auto;
+  min-width: 0;
   overflow-wrap: anywhere;
+}
+
+.question-option-description {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow-wrap: break-word;
 }
 
 .question-option-label {
@@ -394,8 +466,12 @@ body.vscode-high-contrast-light .question-answer {
   cursor: pointer;
 }
 
-.question-review-row:hover {
+.question-review-row:is(button):hover {
   background: var(--q-opt-hover);
+}
+
+.question-review-row.is-read-only {
+  cursor: default;
 }
 
 .question-review-heading {

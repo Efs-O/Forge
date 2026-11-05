@@ -7,6 +7,7 @@ import type {
   ModelEntry,
 } from '../../src/sidebar/messageBridge';
 import type { AppMessage, MessageAttachment, PersistedRow } from './messageOps';
+import type { QuestionAnswerRecord } from '../../src/util/questionAnswers';
 import type { AgentSenderMetadata } from '../../src/agentLinks/chatAgentLinks';
 import type { ActivityViewMode } from './activityRows';
 import type { ThinkingDisplayMode } from '../../src/sidebar/activityViewSetting';
@@ -157,6 +158,7 @@ export type Action =
       label: string;
       text: string;
       totalChars: number;
+      questionRecord?: QuestionAnswerRecord;
       filePath?: string;
       isError?: boolean;
       convId?: string;

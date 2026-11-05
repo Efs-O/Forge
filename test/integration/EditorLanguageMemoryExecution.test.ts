@@ -163,6 +163,7 @@ describe('isolated editor, language, search, and memory tool execution', () => {
     // in UserQuestionService's own tests, so a stub is the honest double here.
     const questions = {
       ask: vi.fn(async () => 'fixture answer'),
+      askWithRecord: vi.fn(async () => ({ answer: 'fixture answer' })),
     } as unknown as UserQuestionService;
     await expect(makeAskUserTool(questions).handler({ prompt: 'Question?' })).resolves.toBe(
       'fixture answer',

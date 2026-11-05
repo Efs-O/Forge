@@ -11,6 +11,7 @@
  * `ToolRegistry.ts`, so every `import ... from './ToolRegistry'` keeps working.
  */
 import type { ChatMessage, ContentPart, ToolDefinition } from '../llm/types';
+import type { QuestionAnswerRecord } from '../util/questionAnswers';
 import type { PlanItem, ConversationRuntime } from '../sidebar/sessionTypes';
 import type { CheckinStage } from '../agent/elapsedTimeNote';
 import type { ToolOutputLimits } from './toolOutputLimits';
@@ -115,7 +116,12 @@ export interface MultimodalToolResult {
   content: ContentPart[];
 }
 
-export type ToolHandlerResult = string | MultimodalToolResult;
+export interface QuestionToolResult {
+  text: string;
+  questionRecord: QuestionAnswerRecord;
+}
+
+export type ToolHandlerResult = string | MultimodalToolResult | QuestionToolResult;
 
 export interface ToolHandler {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any -- tool args are schema-validated at call site

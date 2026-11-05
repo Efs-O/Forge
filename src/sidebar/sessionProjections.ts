@@ -16,6 +16,7 @@ import type { CompactionDividerMessage, SessionHistoryMeta, SessionTabMeta } fro
 import type { CompactionDivider, CompactionState } from './compactionTypes';
 import type {
   ConversationDisplayDiff,
+  ConversationDisplayQuestionRecord,
   ConversationRuntime,
   DisplayPersistMessage,
   SidebarRuntime,
@@ -62,23 +63,28 @@ export function displayTranscriptRows(
   messages: ChatMessage[],
   displayDiffs: ConversationDisplayDiff[] = [],
   compaction?: Pick<CompactionState, 'fromIndex' | 'generation' | 'dividers'>,
+  questionRecords: ConversationDisplayQuestionRecord[] = [],
 ): DisplayTranscriptRow[] {
   const dividers = compaction?.dividers?.length
     ? compaction.dividers
     : compaction
       ? [{ generation: compaction.generation ?? 1, fromIndex: compaction.fromIndex }]
       : [];
-  return buildDisplayTranscriptRows(messages, displayDiffs, dividers);
+  return buildDisplayTranscriptRows(messages, displayDiffs, dividers, questionRecords);
 }
 
 function buildDisplayTranscriptRows(
   messages: ChatMessage[],
   displayDiffs: ConversationDisplayDiff[],
   dividers: CompactionDivider[],
+  questionRecords: ConversationDisplayQuestionRecord[] = [],
 ): DisplayTranscriptRow[] {
   const out: DisplayTranscriptRow[] = [];
   const diffsByToolCall = new Map<string, ConversationDisplayDiff[]>();
   const toolDetailsByCall = new Map<string, string>();
+  const questionRecordsByCall = new Map(
+    questionRecords.map(({ toolCallId, record }) => [toolCallId, record]),
+  );
   const dividersByIndex = new Map<number, CompactionDivider[]>();
   for (const divider of dividers) {
     const index = Math.min(messages.length, Math.max(0, divider.fromIndex));
@@ -126,6 +132,9 @@ function buildDisplayTranscriptRows(
           : {}),
         toolResult,
         toolResultTotal,
+        ...(questionRecordsByCall.get(m.tool_call_id ?? '')
+          ? { questionRecord: questionRecordsByCall.get(m.tool_call_id ?? '')! }
+          : {}),
         ...(isFailureResult(toolText) ? { toolIsError: true } : {}),
         ...(typeof m.toolMs === 'number' ? { toolMs: m.toolMs } : {}),
       });
@@ -294,7 +303,12 @@ export function displayTranscriptRowsById(
   const out: Record<string, DisplayTranscriptRow[]> = {};
   for (const c of [...session.conversations, ...session.history]) {
     if (!ids.has(c.id)) continue;
-    out[c.id] = displayTranscriptRows(c.messages, c.displayDiffs, c.compaction);
+    out[c.id] = displayTranscriptRows(
+      c.messages,
+      c.displayDiffs,
+      c.compaction,
+      c.displayQuestionRecords,
+    );
   }
   return out;
 }

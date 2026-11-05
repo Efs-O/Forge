@@ -7,6 +7,7 @@ import type { HistoryArchive } from './HistoryArchive';
 import { persistedRetentionState, runtimeRetentionState } from './conversationRetentionState';
 import { seedChatHostApprovals } from './chatApprovalRules';
 import { openConversationsPersistenceFor, persistMemento } from './openConversationsPersistence';
+import { copyQuestionRecords } from './sessionQuestionRecords';
 import {
   ACTIVE_ID_KEY,
   HISTORY_KEY_LEGACY,
@@ -150,6 +151,9 @@ export function persistedToRuntime(p: ConversationPersisted): ConversationRuntim
     ...(p.display_diffs !== undefined
       ? { displayDiffs: p.display_diffs.map((diff) => ({ ...diff })) }
       : {}),
+    ...(p.display_question_records !== undefined
+      ? { displayQuestionRecords: copyQuestionRecords(p.display_question_records) }
+      : {}),
     ...(p.active_time_ms !== undefined ? { active_time_ms: p.active_time_ms } : {}),
     ...(p.active_started_at !== undefined ? { active_started_at: p.active_started_at } : {}),
     ...(p.input_tokens !== undefined ? { input_tokens: p.input_tokens } : {}),
@@ -195,6 +199,9 @@ function conversationToPersisted(c: ConversationRuntime): ConversationPersisted 
       : {}),
     ...(c.displayDiffs !== undefined
       ? { display_diffs: c.displayDiffs.map((diff) => ({ ...diff })) }
+      : {}),
+    ...(c.displayQuestionRecords !== undefined
+      ? { display_question_records: copyQuestionRecords(c.displayQuestionRecords) }
       : {}),
     ...(c.active_time_ms !== undefined ? { active_time_ms: c.active_time_ms } : {}),
     ...(c.active_started_at !== undefined ? { active_started_at: c.active_started_at } : {}),

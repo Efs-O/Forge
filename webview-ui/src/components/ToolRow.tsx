@@ -12,6 +12,7 @@ import { foldConsecutiveLines } from '../toolResultLines';
 import { displayDetail } from '../activityRows';
 import { ToolRowThumbnails } from './ToolThumbnails';
 import { FoldedContent, isShortToolOutput } from './FoldedContent';
+import { QuestionRecordReview } from './QuestionReview';
 
 export { ToolRowThumbnails } from './ToolThumbnails';
 
@@ -210,10 +211,14 @@ export function ToolRow({
       <ToolRowThumbnails message={message} />
       {open && (
         <div className="tool-row-body">
-          <ToolResultContent
-            message={message}
-            {...(commandVisible && detail ? { command: detail } : {})}
-          />
+          {message.questionRecord ? (
+            <QuestionRecordReview record={message.questionRecord} />
+          ) : (
+            <ToolResultContent
+              message={message}
+              {...(commandVisible && detail ? { command: detail } : {})}
+            />
+          )}
         </div>
       )}
     </div>

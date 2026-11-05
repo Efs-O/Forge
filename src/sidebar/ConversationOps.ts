@@ -8,6 +8,7 @@ import {
   upsertHistoryConversation,
 } from './sessionTypes';
 import { displayPersistMessages } from './sessionProjections';
+import { copyQuestionRecords } from './sessionQuestionRecords';
 import { resetContextTrimState } from '../agent/toolResultContext';
 
 export type NewConvResult =
@@ -231,6 +232,9 @@ export function opRestoreConversation(
     ...archived,
     messages: [...archived.messages],
     ...(archived.displayDiffs ? { displayDiffs: [...archived.displayDiffs] } : {}),
+    ...(archived.displayQuestionRecords
+      ? { displayQuestionRecords: copyQuestionRecords(archived.displayQuestionRecords) }
+      : {}),
     updatedAt: Date.now(),
   };
   const updated: SidebarRuntime = {
@@ -262,6 +266,7 @@ export function opClearMessages(conv: ConversationRuntime): void {
   delete conv.plan;
   delete conv.compaction;
   conv.displayDiffs = [];
+  delete conv.displayQuestionRecords;
   conv.title = UNTITLED_TITLE;
   conv.updatedAt = Date.now();
   opResetReportedContext(conv);

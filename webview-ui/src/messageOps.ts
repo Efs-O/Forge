@@ -4,6 +4,7 @@ import type {
   DiffHunk,
 } from '../../src/sidebar/messageBridge';
 import type { AgentSenderMetadata } from '../../src/agentLinks/chatAgentLinks';
+import type { QuestionAnswerRecord } from '../../src/util/questionAnswers';
 
 /**
  * One file shown under a message bubble.
@@ -52,6 +53,7 @@ export interface AppMessage {
   toolDetail?: string;
   toolResult?: string;
   toolResultTotal?: number;
+  questionRecord?: QuestionAnswerRecord;
   toolFilePath?: string;
   toolIsError?: boolean;
   /** Wall clock the call was announced at, and how long it ran. */
@@ -82,6 +84,7 @@ export type PersistedRow =
       toolDetail?: string;
       toolResult: string;
       toolResultTotal: number;
+      questionRecord?: QuestionAnswerRecord;
       toolIsError?: boolean | undefined;
       toolMs?: number | undefined;
     }
@@ -166,6 +169,7 @@ export function mergeSyncedMessages(
           ...(m.toolDetail !== undefined ? { toolDetail: m.toolDetail } : {}),
           toolResult: m.toolResult,
           toolResultTotal: m.toolResultTotal,
+          ...(m.questionRecord ? { questionRecord: m.questionRecord } : {}),
           ...(m.toolIsError ? { toolIsError: true } : {}),
           ...(m.toolMs !== undefined ? { toolMs: m.toolMs } : {}),
         }
