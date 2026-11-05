@@ -1,5 +1,16 @@
 # Forge — Recent Changes
 
+## 0.17.124
+
+- A video or music render can now free a card that a Strata server is holding.
+  Before, a render that wanted that card was refused and told to use another
+  engine or a card with room, while Strata was the only engine configured.
+  Another window's chat still cannot be cut off mid-turn, and a chat rendering
+  on the cards it is already using is not blocked by its own hold.
+- A music render that dies during its analysis stage now says so in the chat,
+  with the reason and where its run folder is. Before, the chat waited for a
+  completion notice that would never arrive, and only the log recorded why.
+
 ## 0.17.123
 
 - When the agent saves a file that another program has locked, it waits up to
