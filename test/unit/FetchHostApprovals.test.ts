@@ -412,14 +412,32 @@ describe('the redirect gate', () => {
   // otherwise launder a request to any host on the internet under a card the user
   // answered for a different one.
   it('refuses a target this chat has not approved, and names the next step', () => {
-    const gate = redirectGate(config(['www.google.com']), 'chat-12');
+    const gate = redirectGate(config(['www.google.com', 'docs.python.org']), 'chat-12');
+    markHostApproved('chat-12', 'pypi.org');
+    markHostApproved('chat-13', 'other-chat.example.net');
     const blocked = gate(urlOf('https://collector.example.net/?d=secret'));
     expect(blocked).toContain('the redirect goes to collector.example.net');
     expect(blocked).toContain('was not followed');
+    expect(blocked).toContain('fetch.allowed_hosts or approved earlier in this chat');
+    expect(blocked).toContain('docs.python.org, pypi.org, www.google.com');
+    expect(blocked).not.toContain('other-chat.example.net');
+    expect(blocked).toContain('To get another host approved');
     expect(blocked).toContain('call web_fetch with https://collector.example.net/?d=secret directly');
     expect(gate(urlOf('https://www.google.com/search'))).toBeUndefined();
     markHostApproved('chat-12', 'collector.example.net');
     expect(gate(urlOf('https://collector.example.net/?d=secret'))).toBeUndefined();
+  });
+
+  it('caps the approved host list at ten and reports the remainder', () => {
+    const configured = Array.from({ length: 12 }, (_, index) => `host-${index.toString().padStart(2, '0')}.example`);
+    markHostApproved('chat-12-cap', 'session.example');
+    const blocked = redirectGate(config(configured), 'chat-12-cap')!(
+      urlOf('https://new.example/path'),
+    );
+    expect(blocked).toContain('host-00.example');
+    expect(blocked).toContain('host-09.example');
+    expect(blocked).not.toContain('host-10.example');
+    expect(blocked).toContain('plus 3 more');
   });
 
   // The gate closes the moment the chat does, so a redirect that was followed in

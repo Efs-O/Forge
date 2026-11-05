@@ -1,4 +1,4 @@
-import { z } from 'zod';
+import { z, type ZodIssue } from 'zod';
 
 /**
  * What a refused tool call says back, in one place.
@@ -78,6 +78,7 @@ interface ZodIssueLike {
   minimum?: unknown;
   origin?: unknown;
   keys?: readonly string[];
+  values?: readonly unknown[];
 }
 
 /** Issues that get their own line before the rest are only counted. */
@@ -106,14 +107,22 @@ export function toolErrorText(
   if (!(error instanceof z.ZodError)) {
     return `Error: ${error instanceof Error ? error.message : String(error)}`;
   }
-  const issues = error.issues as unknown as readonly ZodIssueLike[];
+  return describeToolIssues(name, error.issues, args).join('\n');
+}
+
+/** The issue lines shared by thrown tool errors and tools with extra prefixes. */
+export function describeToolIssues(
+  name: string,
+  issues: readonly ZodIssue[],
+  args?: Record<string, unknown>,
+): string[] {
   const lines = issues
     .slice(0, ISSUES_PER_REFUSAL)
-    .map((issue) => `Error: ${name} ${describeIssue(issue, args)}`);
+    .map((issue) => `Error: ${name} ${describeIssue(issue as unknown as ZodIssueLike, args)}`);
   const rest = issues.length - lines.length;
   if (rest > 0) lines.push(`Error: ${name} has ${rest} more argument problem(s).`);
   if (lines.length > 1) lines.push('Resend the call with these fixed.');
-  return lines.join('\n');
+  return lines;
 }
 
 /** One issue as the sentence the model can act on. */
@@ -127,6 +136,10 @@ function describeIssue(issue: ZodIssueLike, args?: Record<string, unknown>): str
       return tooBigError(at, issue, value);
     case 'too_small':
       return tooSmallError(at, issue, value);
+    case 'invalid_value': {
+      const values = Array.isArray(issue.values) ? issue.values : [];
+      return `${at}must be one of ${values.map(issueValueText).join(', ')}; received ${issueValueText(value)}.`;
+    }
     case 'invalid_type':
       return value === undefined
         ? `${at}is missing; the schema wants ${typeNoun(issue.expected)}.`
@@ -144,6 +157,11 @@ function describeIssue(issue: ZodIssueLike, args?: Record<string, unknown>): str
       // as written: rewording it is how the advice gets lost.
       return `${at}${issue.message ?? 'was refused'}`;
   }
+}
+
+function issueValueText(value: unknown): string {
+  if (value === undefined) return '<missing>';
+  return JSON.stringify(value) ?? String(value);
 }
 
 function tooBigError(at: string, issue: ZodIssueLike, value: unknown): string {

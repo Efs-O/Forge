@@ -20,6 +20,7 @@ import { ShellOutputCollector } from './shellOutput';
 import { DEFAULT_TOOL_OUTPUT_LIMITS } from './toolOutputLimits';
 import type { RegisteredTool } from './ToolRegistry';
 import { markConversationReadSecret } from './exfilTaint';
+import { shellTimeoutError, TIMEOUT_HINT } from './shellToolTimeout';
 
 export interface ShellToolOptions {
   getConfig?: () => ForgeConfig;
@@ -180,7 +181,7 @@ function definition(windows: boolean, shell: ShellKind): ToolDefinition {
       type: 'integer',
       minimum: 1000,
       maximum: 600000,
-      description: 'Foreground timeout in milliseconds (default 120000).',
+      description: TIMEOUT_HINT,
     },
     background: {
       type: 'boolean',
@@ -329,7 +330,7 @@ export function makeShellTool(options: ShellToolOptions = {}): RegisteredTool {
               type: 'integer',
               minimum: 1000,
               maximum: 600000,
-              description: 'Foreground timeout in milliseconds (default 120000).',
+              description: TIMEOUT_HINT,
             },
             background: {
               type: 'boolean',
@@ -398,14 +399,8 @@ export function makeShellTool(options: ShellToolOptions = {}): RegisteredTool {
         throw new Error('shell: command must be a non-empty string.');
       if (args['cwd'] !== undefined && typeof args['cwd'] !== 'string')
         throw new Error('shell: cwd must be a string.');
-      if (
-        args['timeout_ms'] !== undefined &&
-        (!Number.isInteger(args['timeout_ms']) ||
-          Number(args['timeout_ms']) < 1000 ||
-          Number(args['timeout_ms']) > 600000)
-      ) {
-        throw new Error('shell: timeout_ms must be an integer from 1000 to 600000.');
-      }
+      const timeoutError = shellTimeoutError(args['timeout_ms']);
+      if (timeoutError) throw new Error(timeoutError);
       if (
         args['shell'] !== undefined &&
         (platform !== 'win32' || !['pwsh', 'bash'].includes(String(args['shell'])))

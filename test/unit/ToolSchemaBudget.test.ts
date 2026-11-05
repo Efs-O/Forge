@@ -109,7 +109,10 @@ import {
 // tool-group description; recorded with the shipped feature in CHANGES.md.
 // 2026-11-05: 63,092 (−8) after removing the Brave provider: `web_search`'s
 // `provider` enum lost the `"brave"` member and its comma.
-const MEASURED_CHARS = 63_092;
+// 2026-11-05: 63,628 (+536) after clarifying tool fields and failure guidance
+// for shell, message_chat, and ask_agent; still under the 64,625-char ceiling.
+// 2026-11-05: 63,554 (-74) after review removed duplicate ask_agent wording and added the shell timeout default; 1,071 below the ceiling.
+const MEASURED_CHARS = 63_554;
 // Phase 3 STOP: the historical full 88-tool wire schema was 67,128 chars.
 // Exclude computer_use (24 browser/desktop schemas) pending the owner's product
 // decision; the full and gated sizes are recorded in the report.

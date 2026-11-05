@@ -2,7 +2,8 @@ import { describe, expect, it, vi } from 'vitest';
 import { makeAskAgentTool } from '../../src/tools/askAgentTool';
 import { MAX_QUESTION_CHARS } from '../../src/agentBus/liveSessionLimit';
 import type { ForgeConfig } from '../../src/config/types';
-import type { ToolHandlerContext } from '../../src/tools/ToolRegistry';
+import { ToolRegistry, type ToolHandlerContext } from '../../src/tools/ToolRegistry';
+import { toolErrorText } from '../../src/tools/toolErrorText';
 
 describe('ask_agent request boundary', () => {
   const start = vi.fn(async () => 'Asked Claude (exchange ab12cd34).');
@@ -12,8 +13,29 @@ describe('ask_agent request boundary', () => {
   });
   const context = { conversation: { id: 'chat-1' } } as unknown as ToolHandlerContext;
 
-  it('rejects unknown agent kinds', async () => {
-    await expect(tool.handler({ agent: 'local', message: 'review' })).rejects.toThrow();
+  it('formats wrong and missing agent values through toolErrorText', async () => {
+    async function refusal(args: Record<string, unknown>): Promise<string> {
+      try {
+        await tool.handler(args, context);
+      } catch (error) {
+        return toolErrorText('ask_agent', error, args);
+      }
+      throw new Error('Expected ask_agent to reject invalid agent arguments.');
+    }
+
+    await expect(refusal({ agent: 'local', message: 'review' })).resolves.toBe(
+      'Error: ask_agent agent must be one of "claude", "codex", "copilot"; received "local".',
+    );
+    await expect(refusal({ message: 'review' })).resolves.toBe(
+      'Error: ask_agent agent must be one of "claude", "codex", "copilot"; received <missing>.',
+    );
+  });
+
+  it('names the advertised values when ToolRegistry rejects a missing agent before the handler', () => {
+    expect(new ToolRegistry().invalidArgs(tool, { message: 'review' })).toBe(
+      'Error: ask_agent is missing required argument "agent" (one of: claude, codex, copilot). ' +
+        'Resend the call with it set.',
+    );
   });
 
   it('rejects undeclared fields', async () => {
@@ -61,8 +83,19 @@ describe('ask_agent request boundary', () => {
 
   it('tells the model the reply comes later and not to ask again', () => {
     const description = tool.definition.function.description;
+    expect(description).toContain(
+      'Ask the Claude, Codex, or Copilot session linked to this chat (a missing link creates one).',
+    );
+    expect(description).not.toContain('`claude` is Claude Code');
+    expect(description).not.toContain('Codex CLI');
+    expect(description).not.toContain('Copilot CLI');
     expect(description).toContain('Returns at once; the reply arrives later as a message here');
     expect(description).toContain('do not ask again');
+    const agent = tool.definition.function.parameters?.properties['agent'];
+    expect(agent?.enum).toEqual(['claude', 'codex', 'copilot']);
+    expect(agent?.description).toContain('`claude` is Claude Code');
+    expect(agent?.description).toContain('`codex` is Codex CLI');
+    expect(agent?.description).toContain('`copilot` is Copilot CLI');
   });
 
   it('refuses outside a chat turn and before the sidebar exists', async () => {

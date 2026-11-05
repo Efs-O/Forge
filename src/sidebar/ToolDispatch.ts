@@ -3,7 +3,6 @@ import * as vscode from 'vscode';
 import type { HostToWebview } from './messageBridge';
 import { diffContents } from './DiffUtils';
 import { isExistingDirectory, readCallDiffBase } from './callDiffBase';
-import type { DiffHunk } from './messageBridge';
 import type { ChatMessage, ToolCall } from '../llm/types';
 import type { CheckpointStack } from '../checkpoint/CheckpointStack';
 import type { CheckpointSession } from '../checkpoint/CheckpointStack';
@@ -13,14 +12,12 @@ import { ToolRegistry } from '../tools/ToolRegistry';
 import { ToolFailureTracker } from '../tools/StripTools';
 import type { ToolBudget } from '../tools/ToolBudget';
 import type { DiffDecorations } from './DiffDecorations';
-import { resolveWorkspacePath, pathIsInWorkspace } from '../util/WorkspacePaths';
+import { resolveWorkspacePath } from '../util/WorkspacePaths';
 import { capDisplayText } from '../tools/resultCap';
-import { describeDelete, isDangerousDelete } from './deletePreview';
+import { describeDelete } from './deletePreview';
 import { isFailureResult, readPathArg, resultLabel, touchedFilePath } from './toolResultView';
 import type { PlanItem } from './sessionTypes';
 import type { ChatRuleApproval } from './chatApprovalRules';
-import type { CheckinStage } from '../agent/elapsedTimeNote';
-import type { ToolOutputLimits } from '../tools/toolOutputLimits';
 import { getLogger } from '../util/logger';
 import {
   ToolApprovalPolicyDenied,
@@ -32,44 +29,46 @@ import {
   coerceToolArgs,
   isJsonObject,
   parseJsonWithInvalidEscapeRepair,
-  recordToolArgumentRepair,
   repairedToolArgumentFields,
 } from '../tools/argCoercion';
 import type { ToolArgumentRepairInfo } from '../tools/argCoercion';
 import { unknownToolResult } from './retiredTools';
 import { toolErrorText } from '../tools/toolErrorText';
-import { decideUntrustedExit, type UntrustedExitInput } from './untrustedExitPolicy';
 import { approvalCallOptions } from './approvalCallOptions';
+import { markConversationReadUntrusted } from '../tools/exfilTaint';
 import {
-  carriesUntrustedContent,
-  hasConversationReadSecret,
-  markConversationReadUntrusted,
-} from '../tools/exfilTaint';
+  dispatchWithParallelReads,
+  type BufferedToolDispatchEffects,
+  type ToolDispatchEffects,
+} from './ToolDispatchParallel';
+import {
+  evaluateToolApproval,
+  readToolApprovalMetadata,
+  type CachedToolApproval,
+} from './toolApprovalEvaluation';
+import {
+  toolResultContent,
+  toolResultMessage,
+  toolResultText,
+  type RecordedFileDiff,
+  type ToolDispatchModelContext,
+  type ToolDispatchRoundContext,
+} from './toolDispatchTypes';
 
 const log = getLogger();
 export const resolveToolPath = resolveWorkspacePath;
-
-export interface RecordedFileDiff {
-  toolCallId: string;
-  filePath: string;
-  hunks: DiffHunk[] | null;
-  isNew: boolean;
-  isDeleted: boolean;
-}
-
-function toolResultText(result: ToolHandlerResult): string {
-  return typeof result === 'string' ? result : result.text;
-}
-
-function toolResultContent(result: ToolHandlerResult): ChatMessage['content'] {
-  return typeof result === 'string' ? result : result.content;
-}
 
 /** How a transcript file reference should be revealed in the editor. */
 export interface OpenFileOptions {
   /** 1-based line from a `path:42` reference. */
   line?: number | undefined;
   beside?: boolean | undefined;
+}
+
+interface InternalToolDispatchOptions {
+  skipParallel: boolean;
+  cachedApproval?: CachedToolApproval | undefined;
+  effects?: ToolDispatchEffects;
 }
 
 export class ToolDispatch {
@@ -105,19 +104,66 @@ export class ToolDispatch {
     unavailableTools?: ReadonlyMap<string, string>,
     setPlan?: (items: PlanItem[]) => void,
     tellArrived?: (callback: () => void) => () => void,
-    modelContext?: {
-      modelName: string;
-      isVisionModel: boolean;
-      outputLimits?: ToolOutputLimits;
-      conversation: import('./sessionTypes').ConversationRuntime;
-      checkpoint?: CheckpointSession;
-      persistConversation: () => void;
-      /** Session-scoped like the chat itself: `set_checkin`'s route to the clock. */
-      setCheckin?: (minutes: number, byThen: CheckinStage) => { dueAt: number } | undefined;
-    },
+    modelContext?: ToolDispatchModelContext,
+    internal?: InternalToolDispatchOptions,
   ): Promise<void> {
+    const effects = internal?.effects ?? {
+      messages,
+      post: this.post,
+      failureTracker: this.failureTracker,
+    };
+    const context: ToolDispatchRoundContext = {
+      allowed,
+      convId,
+      signal,
+      checkpoint,
+      budget,
+      recordFileDiff,
+      unavailableTools,
+      setPlan,
+      tellArrived,
+      modelContext,
+    };
+    const dispatchOne = (
+      call: ToolCall,
+      approval?: CachedToolApproval,
+      bufferedEffects?: BufferedToolDispatchEffects,
+    ): Promise<void> =>
+      this.dispatch(
+        [call],
+        allowed,
+        bufferedEffects?.messages ?? messages,
+        convId,
+        signal,
+        checkpoint,
+        budget,
+        recordFileDiff,
+        unavailableTools,
+        setPlan,
+        tellArrived,
+        modelContext,
+        {
+          skipParallel: true,
+          cachedApproval: approval,
+          ...(bufferedEffects ? { effects: bufferedEffects } : {}),
+        },
+      );
+    if (!internal?.skipParallel) {
+      await dispatchWithParallelReads(
+        toolCalls,
+        context,
+        this.toolRegistry,
+        messages,
+        effects.failureTracker,
+        effects.post,
+        dispatchOne,
+        dispatchOne,
+      );
+      return;
+    }
+
     for (const tc of toolCalls) {
-      // The span is stamped once here and read by `toolMessage` on whichever branch
+      // The span is stamped once here and read by `toolResultMessage` on whichever branch
       // wins. The early refusals (declined, unknown tool, budget) are timed too:
       // they are near-instant and fall under the display floor, so they simply
       // render without a duration rather than needing a special case.
@@ -128,8 +174,8 @@ export class ToolDispatch {
       try {
         if (signal?.aborted) {
           result = 'Error: tool execution cancelled';
-          this.postResult(tc, toolResultText(result), undefined, convId);
-          messages.push(this.toolMessage(tc, toolResultContent(result), startedAt));
+          this.postResult(tc, toolResultText(result), undefined, convId, effects.post);
+          messages.push(toolResultMessage(tc, toolResultContent(result), startedAt));
           continue;
         }
         try {
@@ -147,7 +193,7 @@ export class ToolDispatch {
         } catch {
           const rawArguments = tc.function.arguments;
           tc.function.arguments = '{}';
-          this.failureTracker.record(convId);
+          effects.failureTracker.record(convId);
           const registered = this.toolRegistry.get(tc.function.name);
           const required = registered?.definition.function.parameters.required;
           const fields =
@@ -156,8 +202,8 @@ export class ToolDispatch {
             `Error: ${tc.function.name} received malformed tool arguments (invalid JSON): ` +
             `${JSON.stringify(rawArguments.slice(0, 200))} (${rawArguments.length} chars). ` +
             `Required fields: ${fields}.`;
-          this.postResult(tc, toolResultText(result), undefined, convId);
-          messages.push(this.toolMessage(tc, toolResultContent(result), startedAt));
+          this.postResult(tc, toolResultText(result), undefined, convId, effects.post);
+          messages.push(toolResultMessage(tc, toolResultContent(result), startedAt));
           continue;
         }
 
@@ -166,8 +212,8 @@ export class ToolDispatch {
         // instead, so the model does not go hunting for a substitute.
         const unavailable = unavailableTools?.get(tc.function.name);
         if (unavailable) {
-          this.postResult(tc, unavailable, undefined, convId);
-          messages.push(this.toolMessage(tc, unavailable, startedAt, argumentRepair));
+          this.postResult(tc, unavailable, undefined, convId, effects.post);
+          messages.push(toolResultMessage(tc, unavailable, startedAt, argumentRepair));
           continue;
         }
 
@@ -181,8 +227,10 @@ export class ToolDispatch {
             convId,
             unavailableTools,
           );
-          this.postResult(tc, toolResultText(result), undefined, convId);
-          messages.push(this.toolMessage(tc, toolResultContent(result), startedAt, argumentRepair));
+          this.postResult(tc, toolResultText(result), undefined, convId, effects.post);
+          messages.push(
+            toolResultMessage(tc, toolResultContent(result), startedAt, argumentRepair),
+          );
           continue;
         }
         args = coerceToolArgs(reg.definition, args);
@@ -196,51 +244,28 @@ export class ToolDispatch {
         if (argumentRepair) tc.function.arguments = JSON.stringify(args);
         const invalid = this.toolRegistry.invalidArgs(reg, args);
         if (invalid) {
-          this.failureTracker.record(convId);
-          this.postResult(tc, invalid, undefined, convId);
-          messages.push(this.toolMessage(tc, invalid, startedAt, argumentRepair));
+          effects.failureTracker.record(convId);
+          this.postResult(tc, invalid, undefined, convId, effects.post);
+          messages.push(toolResultMessage(tc, invalid, startedAt, argumentRepair));
           continue;
         }
         const budgetBlock = budget?.check(tc.function.name);
         if (budgetBlock) {
-          this.postResult(tc, budgetBlock, undefined, convId);
-          messages.push(this.toolMessage(tc, budgetBlock, startedAt, argumentRepair));
+          this.postResult(tc, budgetBlock, undefined, convId, effects.post);
+          messages.push(toolResultMessage(tc, budgetBlock, startedAt, argumentRepair));
           continue;
         }
 
-        const approvalMetadata = await reg.approval?.(
-          args,
-          convId ? { conversationId: convId } : undefined,
-        );
-        const isDangerous =
-          approvalMetadata?.dangerous ??
-          (tc.function.name === 'delete_file' && isDangerousDelete(args));
-        const rawMutationPaths = reg.mutation?.paths(args) ?? [];
-        const mutationPaths = rawMutationPaths.map((p) => resolveToolPath(p));
-        const outsideMutationPaths = mutationPaths.filter((p) => !pathIsInWorkspace(p));
-        /* Phase 4 moved the card's reason out of the permission table and into
-         * `untrustedExitPolicy.ts`: a card is for content the owner did not choose.
-         * The same inputs go to `approvalKey.ts` below, so the two cannot disagree
-         * about what this call does.
-         */
-        const exitInput: UntrustedExitInput = {
-          toolName: tc.function.name,
-          dangerous: isDangerous,
-          // `cardTextOnly` metadata is the card's TEXT, not a gate: see `shellTool.ts`.
-          toolGate: approvalMetadata !== undefined && approvalMetadata.cardTextOnly !== true,
-          outsideWorkspace: outsideMutationPaths.length > 0,
-          declaredSafe: reg.autoApprove === true || reg.autoApproveIf?.(args) === true,
-          reachesOut: approvalMetadata?.reachesOut ?? reg.reachesOut ?? 'none',
-          // Asked fresh at every decision, from every source that still holds it,
-          // and each row judged by ITS OWN tool — `reg` is this call's entry.
-          untrustedContent: carriesUntrustedContent(
-            convId,
-            modelContext?.conversation,
-            this.toolRegistry,
-          ),
-          readSecret: hasConversationReadSecret(convId),
-        };
-        const exitVerdict = decideUntrustedExit(exitInput);
+        const approvalCache =
+          internal?.cachedApproval ?? (await readToolApprovalMetadata(reg, args, convId));
+        const {
+          approvalMetadata,
+          isDangerous,
+          mutationPaths,
+          outsideMutationPaths,
+          exitInput,
+          exitVerdict,
+        } = evaluateToolApproval(tc, reg, args, context, approvalCache, this.toolRegistry);
         // A chat rule that covers every key this call needs answers the card before
         // it opens and writes the `gate` row saying who answered it;
         // `createChatRuleApproval` itself refuses to consult rules for an unattended
@@ -278,9 +303,9 @@ export class ToolDispatch {
           );
           if (outcome !== 'approved') {
             result = toolApprovalResult(tc.function.name, outcome);
-            this.postResult(tc, toolResultText(result), undefined, convId);
+            this.postResult(tc, toolResultText(result), undefined, convId, effects.post);
             messages.push(
-              this.toolMessage(tc, toolResultContent(result), startedAt, argumentRepair),
+              toolResultMessage(tc, toolResultContent(result), startedAt, argumentRepair),
             );
             continue;
           }
@@ -326,7 +351,7 @@ export class ToolDispatch {
         // CONSECUTIVE failures: without this a model that recovered after nine
         // bad calls was still one call from losing its tools for the rest of
         // the chat. Refusals and declines are not successes and do not reset.
-        if (!isFailureResult(toolResultText(result))) this.failureTracker.reset(convId);
+        if (!isFailureResult(toolResultText(result))) effects.failureTracker.reset(convId);
         /* The flag this chat now carries: `untrustedResult` means the tool brought
          * content in from outside, and a model can be told what to do by the text it
          * is reading. Marked after the handler ran, and only for a result that is not
@@ -344,7 +369,7 @@ export class ToolDispatch {
         }
       } catch (err) {
         const policyDenied = err instanceof ToolApprovalPolicyDenied;
-        if (!policyDenied) this.failureTracker.record(convId);
+        if (!policyDenied) effects.failureTracker.record(convId);
         // A schema refusal is formatted, not printed: Zod's own message is a JSON
         // array of issues, which the model reads as data and re-sends unchanged.
         // `toolErrorText.ts` owns the one place every thrown tool error becomes a
@@ -352,40 +377,9 @@ export class ToolDispatch {
         result = policyDenied ? err.message : toolErrorText(tc.function.name, err, args);
       }
 
-      this.postResult(tc, toolResultText(result), args, convId);
-      messages.push(this.toolMessage(tc, toolResultContent(result), startedAt, argumentRepair));
+      this.postResult(tc, toolResultText(result), args, convId, effects.post);
+      messages.push(toolResultMessage(tc, toolResultContent(result), startedAt, argumentRepair));
     }
-  }
-
-  /**
-   * The one shape of a tool result message, carrying its own measured duration.
-   *
-   * The literal was written out at each of the dispatch loop's eight exits, and
-   * a duration added to seven of them is a row that silently loses its timing on
-   * whichever branch was missed.
-   */
-  private toolMessage(
-    tc: ToolCall,
-    content: ChatMessage['content'],
-    startedAt: number,
-    argumentRepair?: ToolArgumentRepairInfo,
-  ): ChatMessage {
-    // Same rule as the reasoning span: a zero is a clock that did not tick, not
-    // a call that took no time, and it does not go on the message.
-    const elapsed = Date.now() - startedAt;
-    const message: ChatMessage = {
-      role: 'tool',
-      content,
-      tool_call_id: tc.id,
-      name: tc.function.name,
-      ...(elapsed > 0 ? { toolMs: elapsed } : {}),
-      // When this result was produced, for the model-facing clock stamp. Fixed
-      // at creation so the rendered stamp is byte-identical on every later
-      // round -- see `stampToolResultClocks`.
-      stampedAt: Date.now(),
-    };
-    if (argumentRepair) recordToolArgumentRepair(message, argumentRepair);
-    return message;
   }
 
   async openFile(filePath: string, options?: OpenFileOptions): Promise<void> {
@@ -460,6 +454,7 @@ export class ToolDispatch {
     result: string,
     args?: Record<string, unknown>,
     convId?: string,
+    post: (msg: HostToWebview) => void = this.post,
   ): void {
     const toolName = tc.function.name;
     const pathArg = readPathArg(args);
@@ -467,7 +462,7 @@ export class ToolDispatch {
     const { text, totalChars } = capDisplayText(result);
     const isError = isFailureResult(result);
 
-    this.post({
+    post({
       type: 'toolResult',
       toolName,
       toolCallId: tc.id,

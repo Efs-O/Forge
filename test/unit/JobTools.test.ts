@@ -317,9 +317,10 @@ describe('manage_jobs — create', () => {
     ).rejects.toThrow(/needs a `name`/);
   });
 
-  it('rejects an invalid definition (interval below the 15-minute floor)', async () => {
-    await expect(
-      call({
+  it('reports each invalid definition field in a plain sentence', async () => {
+    let message = '';
+    try {
+      await call({
         action: 'create',
         definition: {
           name: 'Bad',
@@ -327,8 +328,17 @@ describe('manage_jobs — create', () => {
           check: { kind: 'disk_space', path: 'C:\\', min_free_gb: 10 },
           on_change: { kind: 'notify' },
         },
-      }),
-    ).rejects.toThrow(/invalid job definition.*use `wait`/s);
+      });
+    } catch (error) {
+      message = (error as Error).message;
+    }
+    expect(message).toBe(
+      'manage_jobs: invalid job definition:\n' +
+        'Error: manage_jobs schedule.minutes interval must be at least 15 minutes. ' +
+        'To wait for a reply, use `wait` (ends early on a new message).',
+    );
+    expect(message).toContain('use `wait`');
+    expect(message).not.toContain('"issues"');
   });
 });
 
@@ -435,13 +445,22 @@ describe('manage_jobs — update', () => {
 
   it('rejects an invalid partial before writing', async () => {
     await store.saveJob(job());
-    await expect(
-      call({
+    let message = '';
+    try {
+      await call({
         action: 'update',
         job: 'disk',
         definition: { schedule: { kind: 'interval', minutes: 5 } },
-      }),
-    ).rejects.toThrow(/update rejected/);
+      });
+    } catch (error) {
+      message = (error as Error).message;
+    }
+    expect(message).toBe(
+      'manage_jobs: update rejected:\n' +
+        'Error: manage_jobs schedule.minutes interval must be at least 15 minutes. ' +
+        'To wait for a reply, use `wait` (ends early on a new message).',
+    );
+    expect(message).toContain('use `wait`');
     // The job is unchanged on disk.
     expect((await store.load('disk'))?.job.schedule).toEqual({ kind: 'interval', minutes: 15 });
   });

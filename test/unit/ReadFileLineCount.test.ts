@@ -27,6 +27,13 @@ const read = async (args: Record<string, unknown>) =>
 // 500. read_file used to number an empty line 501 after it, and Qwen split
 // files the lint gate had already accepted.
 describe('read_file line count', () => {
+  it('states numbered is a top-level option applied to every reads section', () => {
+    const numbered = makeReadFileTool().definition.function.parameters?.properties['numbered'];
+    expect(numbered?.description).toContain('Top-level option only');
+    expect(numbered?.description).toContain('do not put it inside a reads item');
+    expect(numbered?.description).toContain('every section of a reads call');
+  });
+
   it('names both accepted fields and a minimal call when neither was supplied', async () => {
     await expect(read({})).rejects.toThrow(
       'neither path nor reads was given; minimal valid call: {"path":"src/a.ts"}',

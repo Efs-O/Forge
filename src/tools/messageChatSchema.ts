@@ -127,7 +127,13 @@ export function messageChatDefinition(flags: MessageChatActionFlags): Registered
         type: 'object',
         properties: {
           action: { type: 'string', enum: actions },
-          to: { type: 'string', minLength: 1, maxLength: 200 },
+          to: {
+            type: 'string',
+            minLength: 1,
+            maxLength: 200,
+            description:
+              'Another chat only: use its chat id, its #N tab number from list, or words from its title. Never target this chat. A closed chat must be read with action: view.',
+          },
           message: {
             type: 'string',
             minLength: 1,

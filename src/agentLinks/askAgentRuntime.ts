@@ -154,7 +154,7 @@ export function makeAskAgentRuntime(options: {
         return codexThreadIsLive(link.sessionId, {
           ...(codexCli ? { codexCli } : {}),
           cwd: link.cwd,
-          timeoutMs: 2_000,
+          timeoutMs: options.getConfig().agent_links.codex_liveness_timeout_ms,
         });
       }
       return false;

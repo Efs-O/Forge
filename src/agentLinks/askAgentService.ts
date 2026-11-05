@@ -252,16 +252,15 @@ async function ask(
     // thread list means spawning a throwaway app-server, and that process not
     // answering in time is an error, not a "no" (`codexThreadIsLive`). Read as
     // "the session is gone", that used to hard-fail the ask with a discovery
-    // message nobody could act on. Here it means "cannot be verified", so the
-    // ask goes straight to the headless resume below, which reports
-    // `sessionGone` only when the CLI itself says the thread is gone.
+    // message nobody could act on. Here it means "cannot be verified"; an
+    // `every_ask` policy still tries the panel, then resumes headlessly if that
+    // bounded check cannot confirm the session. The resume reports `sessionGone`
+    // only when the CLI itself says the thread is gone.
     let live: boolean;
-    let checked = true;
     try {
       live = await options.runtime.isLive(agent, linked);
     } catch (error) {
       live = false;
-      checked = false;
       lead = `${label} session could not be checked (${errorMessage(error)}); resumed headlessly. `;
     }
     let liveResult: AskAgentRunResult | undefined;
@@ -279,7 +278,7 @@ async function ask(
         'ask',
         () => markAccepted(linked!),
       );
-    } else if (panel && checked) {
+    } else if (panel) {
       const opened = await options.runtime.openPanel(agent, linked.sessionId);
       if (opened === 'opened') {
         // Opening a `vscode://` link is not a promise anyone can keep: the
@@ -298,6 +297,7 @@ async function ask(
           context.signal,
         );
         if (cameUp === true) {
+          lead = '';
           liveResult = await options.runtime.sendLive(
             agent,
             linked,
@@ -435,6 +435,11 @@ async function ask(
       },
       false,
     );
+  if (firstCodexAsk && acceptedId) {
+    const startedLine = `Codex: started a new background thread <${acceptedId}> (not your open Codex panel chat); use /link in this chat to link a panel chat instead.`;
+    lead = [startedLine, lead.trim()].filter(Boolean).join('\n');
+    lead += '\n';
+  }
   return structuredResult(
     agent,
     title,

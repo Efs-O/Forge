@@ -19,6 +19,7 @@ import type { ForgeHostFacade } from '../sidebar/ForgeHostFacade';
 import { CLI_AGENT_CONSENT_DETAIL, needsCliConsent } from '../jobs/cliAgentGate';
 import { jobDefaultModel, pinAgentTaskModel } from '../config/jobsSchema';
 import type { RegisteredTool } from './ToolRegistry';
+import { describeToolIssues } from './toolErrorText';
 
 /** The actions `manage_jobs` can perform. */
 const ACTIONS = [
@@ -342,7 +343,12 @@ async function createJob(deps: ManageJobsDeps, args: Record<string, unknown>): P
   };
   const result = JobSchema.safeParse(candidate);
   if (!result.success) {
-    throw new Error(`manage_jobs: invalid job definition: ${result.error.message}`);
+    throw new Error(
+      [
+        'manage_jobs: invalid job definition:',
+        ...describeToolIssues('manage_jobs', result.error.issues, candidate),
+      ].join('\n'),
+    );
   }
   assertWakeSupported(result.data.wake, deps.platform ?? process.platform);
   await deps.store.saveJob(result.data);
@@ -416,9 +422,15 @@ async function updateJob(
     merged['action'] = pinAgentTaskModel(partial['action'], deps.getConfig());
   }
   merged['updated_at'] = Date.now();
-  const result = JobSchema.safeParse({ ...merged, id });
+  const candidate = { ...merged, id };
+  const result = JobSchema.safeParse(candidate);
   if (!result.success) {
-    throw new Error(`manage_jobs: update rejected: ${result.error.message}`);
+    throw new Error(
+      [
+        'manage_jobs: update rejected:',
+        ...describeToolIssues('manage_jobs', result.error.issues, candidate),
+      ].join('\n'),
+    );
   }
   assertWakeSupported(result.data.wake, deps.platform ?? process.platform);
   await deps.store.saveJob(result.data);

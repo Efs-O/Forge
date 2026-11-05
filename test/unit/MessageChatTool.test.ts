@@ -106,7 +106,13 @@ describe('message_chat tool contract and handler', () => {
       type: 'object',
       properties: {
         action: { type: 'string', enum: ['list', 'send', 'view'] },
-        to: { type: 'string', minLength: 1, maxLength: 200 },
+        to: {
+          type: 'string',
+          minLength: 1,
+          maxLength: 200,
+          description:
+            'Another chat only: use its chat id, its #N tab number from list, or words from its title. Never target this chat. A closed chat must be read with action: view.',
+        },
         message: {
           type: 'string',
           minLength: 1,
@@ -118,6 +124,12 @@ describe('message_chat tool contract and handler', () => {
       required: [],
       additionalProperties: false,
     });
+    const toDescription = tool.definition.function.parameters?.properties['to']?.description;
+    expect(toDescription).toContain('chat id');
+    expect(toDescription).toContain('#N tab number from list');
+    expect(toDescription).toContain('words from its title');
+    expect(toDescription).toContain('Never target this chat');
+    expect(toDescription).toContain('closed chat must be read with action: view');
     // `action` is no longer required, and the description says what replaces it,
     // so the model is not asked to guess why a message-only call worked.
     expect(

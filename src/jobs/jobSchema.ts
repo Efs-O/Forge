@@ -16,12 +16,18 @@ import { z } from 'zod';
 /** `owner/name` GitHub repository. */
 const RepoSchema = z
   .string()
-  .regex(/^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/, 'use owner/name, e.g. ggml-org/llama.cpp');
+  .refine(
+    (repo) => /^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/.test(repo),
+    'use owner/name, e.g. ggml-org/llama.cpp',
+  );
 
 /** A local `HH:MM` clock time. */
 const ClockTimeSchema = z
   .string()
-  .regex(/^([01]?\d|2[0-3]):[0-5]\d$/, 'use HH:MM, e.g. 06:00 (24-hour clock, 00:00-23:59)');
+  .refine(
+    (at) => /^([01]?\d|2[0-3]):[0-5]\d$/.test(at),
+    'use HH:MM, e.g. 06:00 (24-hour clock, 00:00-23:59)',
+  );
 
 const WeekdaySchema = z.enum(['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun']);
 export type Weekday = z.infer<typeof WeekdaySchema>;
@@ -39,8 +45,8 @@ const ScheduleSchema = z.discriminatedUnion('kind', [
     minutes: z
       .number()
       .int()
-      .min(
-        15,
+      .refine(
+        (minutes) => minutes >= 15,
         'interval must be at least 15 minutes. To wait for a reply, use `wait` ' +
           '(ends early on a new message).',
       ),
@@ -51,7 +57,9 @@ const ScheduleSchema = z.discriminatedUnion('kind', [
   }),
   z.object({
     kind: z.literal('weekly'),
-    days: z.array(WeekdaySchema).min(1, 'weekly needs at least one weekday'),
+    days: z
+      .array(WeekdaySchema)
+      .refine((days) => days.length >= 1, 'weekly needs at least one weekday'),
     at: ClockTimeSchema,
   }),
 ]);
@@ -144,7 +152,10 @@ export const ActionSchema = z.discriminatedUnion('kind', [
   z.object({
     kind: z.literal('agent_task'),
     /** The plain-language task for the agent. Capped at 4000 characters. */
-    task: z.string().min(1).max(4000, 'task must be at most 4000 characters'),
+    task: z
+      .string()
+      .min(1)
+      .refine((task) => task.length <= 4000, 'task must be at most 4000 characters'),
     /** Optional model override; default: the default chat model. */
     model: z.string().min(1).optional(),
     /** Optional wall-clock cap in minutes; omitted = no clock cap. */
@@ -178,7 +189,9 @@ export const JobSchema = z.object({
   /** Schema version, for forward compatibility. */
   version: z.literal(1),
   /** Stable id, also the file name. Generated on create; never edited. */
-  id: z.string().regex(/^[A-Za-z0-9._-]+$/, 'use letters, digits, dot, underscore or dash'),
+  id: z
+    .string()
+    .refine((id) => /^[A-Za-z0-9._-]+$/.test(id), 'use letters, digits, dot, underscore or dash'),
   /** What the user calls it. */
   name: z.string().min(1),
   enabled: z.boolean().default(true),

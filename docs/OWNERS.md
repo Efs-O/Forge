@@ -105,6 +105,9 @@ overlaps with an existing owner, extend the owner instead.
 | Filesystem-miss error text for tools                 | `src/tools/pathErrorHint.ts`             |
 | Recycle-bin refusal diagnosis + short-lived path cache | `src/tools/trashRefusal.ts`             |
 | Tool call execution + result formatting              | `src/sidebar/ToolDispatch.ts`            |
+| Approval gate inputs and verdict for one tool call (shared by serial dispatch and parallel-read preflight) | `src/sidebar/toolApprovalEvaluation.ts` |
+| Tool dispatch context and result-message types/helpers | `src/sidebar/toolDispatchTypes.ts`       |
+| Ordered batching of independent read-only tool calls | `src/sidebar/ToolDispatchParallel.ts`     |
 | Retired + unknown tool-name answers                  | `src/sidebar/retiredTools.ts`            |
 | Delete approval preview and bounded inventory        | `src/sidebar/deletePreview.ts`           |
 | Conversation CRUD pure ops                           | `src/sidebar/ConversationOps.ts`         |
@@ -583,6 +586,7 @@ overlaps with an existing owner, extend the owner instead.
 | search_code snippet/result size bounds     | `src/tools/searchSnippet.ts`          |
 | list_directory + size/age formatting       | `src/tools/listDirectoryTool.ts`      |
 | `shell` tool (spawn, approval, background)  | `src/tools/shellTool.ts`              |
+| Shell `timeout_ms` hint text and argument check | `src/tools/shellToolTimeout.ts` |
 | Background-execution registry (~/.forge/background-execs/, reaped after a killed host) | `src/tools/backgroundRegistry.ts` |
 | Shell command classification (read-only/normal/dangerous/refused) | `src/tools/shellPolicy.ts` |
 | Which token lists are read-only invocations (the program table + argument checks) | `src/tools/shellReadOnlyRules.ts` |

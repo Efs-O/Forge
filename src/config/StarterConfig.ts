@@ -48,7 +48,11 @@ function starterRemote(): NonNullable<ForgeConfig['remote']> {
  * context leaves.
  */
 const STARTER_AGENT_SETTINGS = {
-  agent_links: { open_panel: 'every_ask', panel_live_timeout_ms: 20_000 },
+  agent_links: {
+    open_panel: 'every_ask',
+    panel_live_timeout_ms: 20_000,
+    codex_liveness_timeout_ms: 15_000,
+  },
   // On for a new install (owner's call, 0.17.5). The config types are the
   // parsed shapes, so agent_bus and remote take their schema defaults here and
   // the starter file spells them out. Remote is enabled with no transport:

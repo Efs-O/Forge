@@ -204,6 +204,20 @@ describe('a path built at run time asks, because nothing can judge it', () => {
 describe('the shell tool carries the gate to the card', () => {
   const tool = makeShellTool({ home: HOME, platform: 'win32' });
 
+  it('describes the foreground limit and names the background alternative in its error', async () => {
+    const timeout = tool.describe?.()?.function.parameters.properties['timeout_ms'];
+    expect(timeout?.description).toContain('1,000–600,000 ms');
+    expect(timeout?.description).toContain('(default 120,000)');
+    expect(timeout?.description).toContain('background: true');
+    const error =
+      'shell: timeout_ms must be a whole number of milliseconds. ' +
+      'Foreground timeout: 1,000–600,000 ms (default 120,000); set background: true for longer commands.';
+    await expect(tool.handler({ command: 'echo hi', timeout_ms: 600001 })).rejects.toThrow(
+      error,
+    );
+    await expect(tool.handler({ command: 'echo hi', timeout_ms: 1500.5 })).rejects.toThrow(error);
+  });
+
   it('asks as dangerous, naming the pattern, as a gate only the owner may answer', () => {
     const card = tool.approval?.({ command: 'Get-Content .env', shell: 'pwsh' });
     expect(card?.dangerous).toBe(true);

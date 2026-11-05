@@ -148,9 +148,9 @@ export function makeReadFileTool(deps: ReadFileDeps = {}): RegisteredTool {
             numbered: {
               type: 'boolean',
               description:
-                'Prefix each line with its number as "  12|text". Pass it when your answer will ' +
-                'cite line numbers (a review, an audit) or for apply_line_edits. Applies to every ' +
-                'section of a reads call. ' +
+                'Top-level option only; do not put it inside a reads item. Prefix each line with ' +
+                'its number as "  12|text". Pass it when your answer will cite line numbers (a ' +
+                'review, an audit) or for apply_line_edits. It applies to every section of a reads call. ' +
                 'The line starts right after the first "|": never copy the prefix into ' +
                 'old_str or expected_lines.',
             },

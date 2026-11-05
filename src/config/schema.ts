@@ -201,6 +201,7 @@ export const ForgeConfigShape = {
   agent_links: AgentLinksConfigSchema.default({
     open_panel: 'every_ask',
     panel_live_timeout_ms: 20_000,
+    codex_liveness_timeout_ms: 15_000,
   }),
   image_search: ImageSearchConfigSchema,
   log_level: z.enum(['trace', 'debug', 'info', 'warn', 'error']).optional(),

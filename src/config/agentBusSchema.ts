@@ -57,5 +57,7 @@ export type AgentBusConfig = NonNullable<z.infer<typeof AgentBusConfigSchema>>;
 export const AgentLinksConfigSchema = z.object({
   open_panel: z.enum(['every_ask', 'never']).default('every_ask'),
   panel_live_timeout_ms: z.number().int().positive().default(20_000),
+  /** Maximum time to wait for Codex thread discovery, in milliseconds. Defaults to 15 seconds. */
+  codex_liveness_timeout_ms: z.number().int().positive().default(15_000),
 });
 export type AgentLinksConfig = z.infer<typeof AgentLinksConfigSchema>;

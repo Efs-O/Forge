@@ -359,6 +359,26 @@ export function approvedHostsFor(conversationId: string | undefined): string[] {
   return [...(approvedHostsByChat.get(conversationId) ?? [])];
 }
 
+const MAX_APPROVED_HOSTS_IN_REFUSAL = 10;
+
+function approvedHostsSummary(
+  config: ForgeConfig | undefined,
+  conversationId: string | undefined,
+): string {
+  const hosts = [
+    ...new Set(
+      [...allowedHostsFor(config), ...approvedHostsFor(conversationId)]
+        .map((host) => host.trim().toLowerCase())
+        .filter(Boolean),
+    ),
+  ].sort();
+  const visible = hosts.slice(0, MAX_APPROVED_HOSTS_IN_REFUSAL);
+  const omitted = hosts.length - visible.length;
+  const list = visible.length > 0 ? visible.join(', ') : 'none';
+  const more = omitted > 0 ? `, plus ${String(omitted)} more` : '';
+  return `Hosts approved for this chat (from fetch.allowed_hosts or approved earlier in this chat): ${list}${more}.`;
+}
+
 /** Chat closed, `/clearChat`, window reload: the set goes with the chat. */
 export function clearConversationHostApprovals(conversationId?: string): void {
   if (conversationId === undefined) approvedHostsByChat.clear();
@@ -400,8 +420,8 @@ export function redirectGate(
     if (approved(host)) return undefined;
     return (
       `the redirect goes to ${host}, a host not approved in this chat, so it was ` +
-      `not followed. If you need that page, call web_fetch with ${url.toString()} ` +
-      'directly; that asks the user.'
+      `not followed. ${approvedHostsSummary(config, conversationId)} ` +
+      `To get another host approved, call web_fetch with ${url.toString()} directly; that asks the user.`
     );
   };
 }

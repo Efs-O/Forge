@@ -32,7 +32,12 @@ export function makeAskAgentTool(options: {
         parameters: {
           type: 'object',
           properties: {
-            agent: { type: 'string', enum: ['claude', 'codex', 'copilot'] },
+            agent: {
+              type: 'string',
+              enum: agentKindSchema.options,
+              description:
+                'Choose which linked CLI agent to ask: `claude` is Claude Code, `codex` is Codex CLI, and `copilot` is Copilot CLI. A missing link for the chosen agent creates one.',
+            },
             message: { type: 'string', minLength: 1, maxLength: MAX_QUESTION_CHARS },
             subject: { type: 'string', minLength: 1, maxLength: 160 },
           },

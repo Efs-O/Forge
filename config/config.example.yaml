@@ -1155,6 +1155,7 @@ agent_bus:
 agent_links:
   open_panel: every_ask # every_ask | never
   panel_live_timeout_ms: 20000
+  codex_liveness_timeout_ms: 15000 # maximum wait for Codex thread discovery
 
 # ===========================================================================
 # Optional top-level blocks. Every one is commented: uncomment to use it, and

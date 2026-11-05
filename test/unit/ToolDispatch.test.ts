@@ -1139,7 +1139,7 @@ describe('ToolDispatch', () => {
     expect(messages[0].content).toMatch(/boom/);
   });
 
-  it('dispatches multiple tool calls sequentially', async () => {
+  it('appends multiple tool results in call order', async () => {
     toolRegistry.register({
       definition: {
         type: 'function',

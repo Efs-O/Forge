@@ -90,6 +90,8 @@ describe('ask_agent session resolution', () => {
       live: true,
     });
     expect(renderAskAgentResult(result)).toContain('reply');
+    if (agent === 'codex')
+      expect(renderAskAgentResult(result)).not.toContain('started a new background thread');
     expect(state.runtime.sendLive).toHaveBeenCalledOnce();
     expect(state.runtime.runHeadless).not.toHaveBeenCalled();
     if (agent === 'copilot') expect(state.events[0]).toBe('checkpoint');
@@ -187,7 +189,7 @@ describe('ask_agent session resolution', () => {
   // not answer in time. Nothing caught it, so a slow app-server failed the ask
   // with a discovery message — read as "the thread is gone" when all it proves
   // is "I could not look".
-  it('a liveness check that fails is not read as a gone session; the ask goes straight to the headless resume', async () => {
+  it('opens the panel once when liveness cannot be checked, then resumes headlessly if still unknown', async () => {
     const state = setup({
       isLive: vi.fn(async () => {
         throw new Error('Codex discovery timed out after 2000ms.');
@@ -209,15 +211,40 @@ describe('ask_agent session resolution', () => {
     const rendered = renderAskAgentResult(result);
     expect(result.status).toBe('completed');
     expect(rendered).toContain('resumed');
-    expect(rendered).toContain(
-      'could not be checked (Codex discovery timed out after 2000ms.); resumed headlessly.',
-    );
+    expect(rendered).toContain('Codex session could not be checked; resumed headlessly.');
     expect(rendered).not.toContain('did not come up');
-    // No point opening a panel this window cannot verify: the resume is the
-    // check that can answer, and it says sessionGone if the thread is really gone.
-    expect(state.runtime.openPanel).not.toHaveBeenCalled();
+    expect(state.runtime.openPanel).toHaveBeenCalledOnce();
     expect(state.runtime.runHeadless).toHaveBeenCalledOnce();
     expect(state.conv.agentLinks?.codex?.sessionId).toBe(otherId);
+  });
+
+  it('does not open a panel when liveness cannot be checked and panel opening is disabled', async () => {
+    const state = setup(
+      {
+        isLive: vi.fn(async () => {
+          throw new Error('Codex discovery timed out after 2000ms.');
+        }),
+        runHeadless: vi.fn(async () => ({ status: 'completed', finalText: 'resumed' })),
+      },
+      'never',
+    );
+    state.conv.agentLinks = { codex: linked('codex') };
+    rebuildIndex([state.conv]);
+    const result = await state.handler(
+      { agent: 'codex', message: 'Continue' },
+      {
+        conversation: state.conv,
+        checkpoint: state.checkpoint,
+        signal: new AbortController().signal,
+        workspaceRoot: 'C:/repo',
+        persistConversation: state.persistConversation,
+      },
+    );
+    expect(renderAskAgentResult(result)).toContain(
+      'could not be checked (Codex discovery timed out after 2000ms.); resumed headlessly.',
+    );
+    expect(state.runtime.openPanel).not.toHaveBeenCalled();
+    expect(state.runtime.runHeadless).toHaveBeenCalledOnce();
   });
 
   it('a check that fails while waiting for the panel goes to the headless resume at once', async () => {
@@ -489,7 +516,7 @@ describe('ask_agent session resolution', () => {
         return { status: 'completed', finalText: 'done' };
       }),
     });
-    await state.handler(
+    const result = await state.handler(
       { agent: 'codex', message: 'Review' },
       {
         conversation: state.conv,
@@ -499,6 +526,10 @@ describe('ask_agent session resolution', () => {
         persistConversation: state.persistConversation,
       },
     );
+    const rendered = renderAskAgentResult(result);
+    expect(rendered.startsWith(
+      `Codex: started a new background thread <${thread}> (not your open Codex panel chat); use /link in this chat to link a panel chat instead.\n`,
+    )).toBe(true);
     expect(state.persistConversation).toHaveBeenCalledOnce();
   });
 
