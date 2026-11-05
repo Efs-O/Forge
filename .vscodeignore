@@ -120,3 +120,5 @@ artifacts/**
 **/.pytest_cache/**
 **/__pycache__/**
 **/*.pyc
+# A local working folder (session-scan output); never ships.
+scratch/**
