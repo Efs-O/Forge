@@ -21,7 +21,7 @@ vi.mock('../../src/tools/browser/BrowserSessionManager', async (importOriginal) 
 // Records the write order and whether the final name existed mid-write, without
 // replacing the real atomic writer (which has its own suite).
 const atomic = vi.hoisted(() => ({
-  calls: [] as Array<{ target: string; existedDuring: boolean }>,
+  calls: [] as Array<{ target: string; existedDuring: boolean; signal?: AbortSignal }>,
   order: [] as string[],
 }));
 
@@ -29,14 +29,22 @@ vi.mock('../../src/util/atomicWrite', async (importOriginal) => {
   const actual = await importOriginal<typeof import('../../src/util/atomicWrite')>();
   return {
     ...actual,
-    writeFileAtomicSync: (
+    writeFileAtomic: (
       target: string,
       content: string | Buffer,
-      expected?: { size: number; mtimeMs: number; ctimeMs: number },
+      options?: {
+        expected?: { size: number; mtimeMs: number; ctimeMs: number };
+        mode?: number;
+        signal?: AbortSignal;
+      },
     ) => {
-      atomic.calls.push({ target, existedDuring: fsSync.existsSync(target) });
+      atomic.calls.push({
+        target,
+        existedDuring: fsSync.existsSync(target),
+        ...(options?.signal ? { signal: options.signal } : {}),
+      });
       atomic.order.push('write');
-      return actual.writeFileAtomicSync(target, content, ...(expected ? [expected] : []));
+      return actual.writeFileAtomic(target, content, options);
     },
   };
 });
@@ -97,6 +105,24 @@ describe('render_html_to_image output and delivery', () => {
       ),
     );
     expect(result).toContain(`${STAMP}-birthday-invite.png`);
+  });
+
+  it('passes the turn AbortSignal to writeFileAtomic after checkpointing', async () => {
+    const controller = new AbortController();
+    const order: string[] = [];
+    const { tool } = rig();
+
+    await tool.handler(
+      { html: '<title>Cancelable</title>' },
+      context({
+        abortSignal: controller.signal,
+        beforeMutate: () => order.push('beforeMutate'),
+      }),
+    );
+
+    expect(order).toEqual(['beforeMutate']);
+    expect(atomic.calls[0]?.signal).toBe(controller.signal);
+    expect(atomic.order).toEqual(['write']);
   });
 
   it('writes through the atomic owner, never exposing a partial .png', async () => {

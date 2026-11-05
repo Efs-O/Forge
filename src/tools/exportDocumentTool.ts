@@ -6,7 +6,7 @@ import { markdownToDocx } from '../documents/docxFromMarkdown';
 import { localMarkdownImageResolver, markdownToHtml } from '../documents/markdownToHtml';
 import { printHtmlToPdf } from '../documents/pdfExport';
 import { resolveRealWorkspacePath, resolveWorkspacePath } from '../util/WorkspacePaths';
-import { writeFileAtomicSync } from '../util/atomicWrite';
+import { agentWriteOptions, writeFileAtomic } from '../util/atomicWrite';
 import { secretPatternForTaint } from './secretPaths';
 import type { RegisteredTool } from './ToolRegistry';
 
@@ -138,7 +138,7 @@ export function makeExportDocumentTool(deps: ExportDocumentDeps = {}): Registere
       if (context?.abortSignal?.aborted)
         throw new Error('export_document: cancelled before writing.');
       fs.mkdirSync(path.dirname(target), { recursive: true });
-      writeFileAtomicSync(target, bytes);
+      await writeFileAtomic(target, bytes, agentWriteOptions(context?.abortSignal));
       const omitted =
         omittedImages.length === 0
           ? ''

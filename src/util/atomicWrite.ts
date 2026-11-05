@@ -10,16 +10,29 @@ export interface ExpectedFileState {
 
 export interface AtomicWriteOptions {
   /** Refuse the replace if the target no longer matches this stat (edit tools). */
-  expected?: ExpectedFileState;
+  expected?: ExpectedFileState | null;
   /** Permission bits for the new file, e.g. 0o600 for tokens; POSIX only. */
   mode?: number;
+}
+
+export interface AsyncAtomicWriteOptions extends AtomicWriteOptions {
+  /** Cancels a pending retry wait and removes the attempt's temporary file. */
+  signal?: AbortSignal;
+  /** Total retry window. Existing callers keep the 2.5 s budget unless opted in. */
+  retryBudgetMs?: number;
 }
 
 function fileState(stat: fs.Stats): ExpectedFileState {
   return { size: stat.size, mtimeMs: stat.mtimeMs, ctimeMs: stat.ctimeMs };
 }
 
-function assertUnchanged(target: string, expected: ExpectedFileState): void {
+function assertUnchanged(target: string, expected: ExpectedFileState | null): void {
+  if (expected === null) {
+    if (fs.existsSync(target)) {
+      throw new Error(`File changed while Forge was writing it: ${target}`);
+    }
+    return;
+  }
   const current = fileState(fs.statSync(target));
   if (
     current.size !== expected.size ||
@@ -100,7 +113,11 @@ function isContended(error: unknown): boolean {
  * keeps `code` set, because callers branch on it (`mediaGpuLease.ts`,
  * `remoteStateFile.ts`) rather than on the text.
  */
-function contentionGiveUpError(target: string, cause: unknown): Error {
+function contentionGiveUpError(
+  target: string,
+  cause: unknown,
+  budgetMs: number = RENAME_BUDGET_MS,
+): Error {
   const errno = cause as NodeJS.ErrnoException;
   const code = errno.code ?? 'EPERM';
   // The errno's own sentence stays at the front, because `AtomicWrite.test.ts` and
@@ -108,11 +125,11 @@ function contentionGiveUpError(target: string, cause: unknown): Error {
   // there, and an agent that read only the guidance would lose what the OS said.
   const original = errno.message ?? `${code}: operation not permitted`;
   const error = new Error(
-    `${original} — rename onto ${target} was retried for ${RENAME_BUDGET_MS} ms and gave up. ` +
-      'Most likely another process — an editor, a watcher, a running script or antivirus — still ' +
-      'holds that file open, so retrying it, or writing under another name in the same folder, ' +
-      'will likely fail the same way; EACCES can also be a read-only file or an ACL. Tell the ' +
-      'user which file you wanted to change and what the change was. The destination is unchanged.',
+    `${original} — rename onto ${target} was retried for ${budgetMs} ms and gave up. ` +
+      'Most likely another process — an editor, watcher, a running script or antivirus — still ' +
+      'has the destination open. Ask the user to wait a few seconds and try again, save under a ' +
+      'new name and move it later, or close whatever has the file open. EACCES can also be a ' +
+      'read-only file or an ACL. Tell the user which file you could not change. The destination is unchanged.',
   ) as NodeJS.ErrnoException;
   error.code = code;
   error.path = target;
@@ -120,8 +137,23 @@ function contentionGiveUpError(target: string, cause: unknown): Error {
 }
 /** Maximum time spent retrying a contended rename. */
 export const RENAME_BUDGET_MS = 2_500;
+/** Agent file writes can wait without blocking the extension host. */
+export const ASYNC_RENAME_BUDGET_MS = 30_000;
 const RENAME_BASE_BACKOFF_MS = 25;
 const RENAME_MAX_BACKOFF_MS = 250;
+const LONG_RENAME_MAX_BACKOFF_MS = 2_000;
+
+/** Long retry policy owned here so only agent file saves opt into it. */
+export function agentWriteOptions(
+  signal?: AbortSignal,
+  extra: AtomicWriteOptions = {},
+): AsyncAtomicWriteOptions {
+  return {
+    ...extra,
+    ...(signal ? { signal } : {}),
+    retryBudgetMs: ASYNC_RENAME_BUDGET_MS,
+  };
+}
 
 /**
  * Told when a rename had to wait for another process. This module stays free
@@ -156,19 +188,18 @@ function retryDelay(
   target: string,
   elapsed: number,
   attempt: number,
+  budgetMs: number = RENAME_BUDGET_MS,
 ): number | undefined {
   if (!CONTENDED.has((error as NodeJS.ErrnoException).code ?? '')) return undefined;
-  if (elapsed >= RENAME_BUDGET_MS) {
+  if (elapsed >= budgetMs) {
     contentionListener?.(
       `[atomicWrite] rename onto ${target} still blocked after ${elapsed} ms (${attempt} retries); giving up`,
     );
     return undefined;
   }
-  return Math.min(
-    RENAME_MAX_BACKOFF_MS,
-    RENAME_BASE_BACKOFF_MS * 2 ** attempt,
-    RENAME_BUDGET_MS - elapsed,
-  );
+  const maxBackoffMs =
+    budgetMs > RENAME_BUDGET_MS ? LONG_RENAME_MAX_BACKOFF_MS : RENAME_MAX_BACKOFF_MS;
+  return Math.min(maxBackoffMs, RENAME_BASE_BACKOFF_MS * 2 ** attempt, budgetMs - elapsed);
 }
 
 function reportContended(target: string, elapsed: number, attempt: number): void {
@@ -207,23 +238,28 @@ export function renameContendedSync(
   }
 }
 
-/** {@link renameContendedSync} without blocking the host between attempts.
- *  Each attempt is still `renameSync`: Node's async rename on Windows raises
- *  a transient EPERM against a concurrent reader that the sync call does not. */
-async function renameContended(temporary: string, target: string): Promise<void> {
-  const startedAt = Date.now();
-  for (let attempt = 0; ; attempt += 1) {
-    try {
-      fs.renameSync(temporary, target);
-      reportContended(target, Date.now() - startedAt, attempt);
-      return;
-    } catch (error) {
-      const delay = retryDelay(error, target, Date.now() - startedAt, attempt);
-      if (delay === undefined)
-        throw isContended(error) ? contentionGiveUpError(target, error) : error;
-      await new Promise<void>((resolve) => setTimeout(resolve, delay));
-    }
-  }
+function abortError(): Error {
+  const error = new Error('The atomic file write was aborted.');
+  error.name = 'AbortError';
+  return error;
+}
+
+/** Wait without blocking the host; Stop rejects this wait immediately. */
+function waitForRetry(delayMs: number, signal?: AbortSignal): Promise<void> {
+  if (signal?.aborted) return Promise.reject(abortError());
+  return new Promise<void>((resolve, reject) => {
+    const timer = setTimeout(() => {
+      signal?.removeEventListener('abort', onAbort);
+      resolve();
+    }, delayMs);
+    const onAbort = () => {
+      clearTimeout(timer);
+      signal?.removeEventListener('abort', onAbort);
+      reject(abortError());
+    };
+    signal?.addEventListener('abort', onAbort, { once: true });
+    if (signal?.aborted) onAbort();
+  });
 }
 
 /** Removes the temp file after a failed write, keeping the write's own error. */
@@ -245,7 +281,7 @@ export function writeFileAtomicSync(
   const temporary = temporaryPathFor(target);
   try {
     writeAndSync(temporary, content, options.mode);
-    if (options.expected) assertUnchanged(target, options.expected);
+    if (options.expected !== undefined) assertUnchanged(target, options.expected);
     renameContendedSync(temporary, target);
     syncDirectory(path.dirname(target));
   } catch (error) {
@@ -258,16 +294,37 @@ export function writeFileAtomicSync(
 export async function writeFileAtomic(
   target: string,
   content: string | Buffer,
-  options: AtomicWriteOptions = {},
+  options: AsyncAtomicWriteOptions = {},
 ): Promise<void> {
-  const temporary = temporaryPathFor(target);
-  try {
-    await writeAndSyncAsync(temporary, content, options.mode);
-    if (options.expected) assertUnchanged(target, options.expected);
-    await renameContended(temporary, target);
-    syncDirectory(path.dirname(target));
-  } catch (error) {
-    discardTemporary(temporary);
-    throw error;
+  const startedAt = Date.now();
+  const retryBudgetMs = options.retryBudgetMs ?? RENAME_BUDGET_MS;
+  let attempt = 0;
+  for (;;) {
+    if (options.signal?.aborted) throw abortError();
+
+    const temporary = temporaryPathFor(target);
+    try {
+      await writeAndSyncAsync(temporary, content, options.mode);
+      if (options.expected !== undefined) assertUnchanged(target, options.expected);
+      // Keep the synchronous rename call: on Windows it reports the transient
+      // EPERM/EBUSY/EACCES codes that Node's async rename can mask.
+      fs.renameSync(temporary, target);
+      reportContended(target, Date.now() - startedAt, attempt);
+      syncDirectory(path.dirname(target));
+      return;
+    } catch (error) {
+      discardTemporary(temporary);
+      if ((error instanceof Error && error.name === 'AbortError') || options.signal?.aborted) {
+        throw abortError();
+      }
+      if (!isContended(error)) throw error;
+
+      const delay = retryDelay(error, target, Date.now() - startedAt, attempt, retryBudgetMs);
+      if (delay === undefined) {
+        throw contentionGiveUpError(target, error, retryBudgetMs);
+      }
+      await waitForRetry(delay, options.signal);
+      attempt += 1;
+    }
   }
 }

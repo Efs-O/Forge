@@ -1,7 +1,7 @@
 import * as fs from 'fs';
 import type { RegisteredTool } from './ToolRegistry';
 import { resolveRealWorkspacePath } from '../util/WorkspacePaths';
-import { writeFileAtomicSync } from '../util/atomicWrite';
+import { agentWriteOptions, writeFileAtomic } from '../util/atomicWrite';
 import { withFileLengthWarning, type FileLengthWarningGetter } from './fileLengthWarning';
 import { NO_PROBLEM_WATCHER, withProblemNote, type ProblemWatcher } from './editDiagnostics';
 
@@ -193,7 +193,11 @@ export function makeApplyLineEditsTool(
       // pointing at and move every problem below it. Awaiting the watcher is what
       // opens the document first, so the service sees this tool's write.
       const watch = await watchProblems(filePath);
-      writeFileAtomicSync(filePath, result.content, { expected: fileState });
+      await writeFileAtomic(
+        filePath,
+        result.content,
+        agentWriteOptions(context?.abortSignal, { expected: fileState }),
+      );
       // Said so the model knows the tool moved its argument rather than the call
       // having been right, and can put the path where it belongs next time.
       const liftedNote =

@@ -4,7 +4,7 @@ import { DEFAULT_BROWSER_CHANNEL } from '../config/browserSchema';
 import { DEFAULT_IMAGE_OUTPUT_DIR } from '../config/imageGenerationSchema';
 import type { ForgeConfig } from '../config/types';
 import { hostApprovedForChat } from './fetchHostApprovals';
-import { writeFileAtomicSync } from '../util/atomicWrite';
+import { agentWriteOptions, writeFileAtomic } from '../util/atomicWrite';
 import { RENDERED_IMAGE_PREFIX } from '../sidebar/toolResultView';
 import type { UserNotificationService } from '../sidebar/UserNotificationService';
 import { resolveRealWorkspacePath } from '../util/WorkspacePaths';
@@ -318,12 +318,10 @@ async function runRender(
     }
 
     // Atomic: a torn PNG must never reach deliverFile, which reads the path at
-    // send time from inside the queued task. This reuses the repo's atomic-write
-    // owner rather than hand-rolling tmp+rename, so it also gets the fsync, the
-    // Windows EPERM/EBUSY rename-retry, and removal of the temp file when the
-    // write itself fails. generate_image writes directly; this is new behaviour
-    // for the image pipeline, chosen because the delivery is asynchronous.
-    writeFileAtomicSync(absolute, png);
+    // send time from inside the queued task. The shared atomic-write owner gives
+    // it fsync, Windows rename retries, and temp removal after failures. The
+    // generate_image pipeline writes directly; Stop cancels a pending lock retry.
+    await writeFileAtomic(absolute, png, agentWriteOptions(context?.abortSignal));
 
     const reached = await deps.notifications.deliverFile({
       ...(context?.conversationId ? { conversationId: context.conversationId } : {}),

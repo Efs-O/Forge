@@ -110,6 +110,19 @@ describe('shell/core-group refactor guards', () => {
   // over the two parts only FORGE.md carried (what you measured versus only
   // read; match depth to the question), so the rule lives in one place.
   // Cap 6,655 keeps the same 25 bytes above the file.
+  // 2026-11-05, -886 bytes (5,744): the six reply-rule bullets are replaced by
+  // two, the owner's decision after the session scan (docs/reports/
+  // FORGE_SESSION_TOOL_FAILURES_2026-11-05.md): the six stated the plain-English
+  // rule once and loosened it four times, and the scan showed replies staying
+  // technical past the opening anyway. Two of the things the six carried — the
+  // direct answer goes first, and match the length to the question — came back
+  // for 64 of those bytes. The cap stays 6,655, so the file now sits 911 bytes
+  // under it rather than 25 above: the tripwire still catches a stray paragraph,
+  // which is what it is for.
+  // 2026-11-05, +245 bytes (5,989): three rules from the same scan, each tied to
+  // measured failures — copy edit text from the newest read (23 failed edits),
+  // a search with no matches is an answer (11), and tool and field names are
+  // fixed (3 bad names, 12 wrong fields). 666 bytes under the cap.
   it('config/templates/builtin/execute.njk is at most 6,655 bytes', () => {
     const file = path.join(root, 'config', 'templates', 'builtin', 'execute.njk');
     const size = fs.statSync(file).size;

@@ -17,20 +17,10 @@ interface TavilyResponse {
   results?: TavilyResult[];
 }
 
-interface BraveResult {
-  title?: string;
-  url?: string;
-  description?: string;
-}
-
-interface BraveResponse {
-  web?: { results?: BraveResult[] };
-}
-
 const REQUEST_TIMEOUT_MS = 15_000;
 const MAX_DUCKDUCKGO_HTML_BYTES = 1_000_000;
 const DUCKDUCKGO_PACING_MS = 1_000;
-const SEARCH_PROVIDERS = ['duckduckgo', 'tavily', 'brave'] as const;
+const SEARCH_PROVIDERS = ['duckduckgo', 'tavily'] as const;
 
 let duckDuckGoQueue = Promise.resolve();
 let lastDuckDuckGoRequestAt = Number.NEGATIVE_INFINITY;
@@ -83,7 +73,7 @@ export function makeWebSearchTool(
       }
 
       const apiKey = await readApiKey(provider, cfg, secrets);
-      return formatResults(provider, await searchApi(provider, query, apiKey, maxResults, signal));
+      return formatResults(provider, await searchTavily(query, apiKey, maxResults, signal));
     },
   };
 }
@@ -147,7 +137,7 @@ async function searchDuckDuckGoWithFallback(
 
   let fallbackResults: SearchResult[];
   try {
-    fallbackResults = await searchApi(fallback, query, fallbackKey, maxResults, signal);
+    fallbackResults = await searchTavily(query, fallbackKey, maxResults, signal);
   } catch (error) {
     if (signal?.aborted) throw error;
     const fallbackError = `Fallback ${providerLabel(fallback)} failed: ${describeError(error)}`;
@@ -233,18 +223,6 @@ async function waitForDuckDuckGoSlot(signal: AbortSignal | undefined): Promise<v
   }
 }
 
-async function searchApi(
-  provider: 'tavily' | 'brave',
-  query: string,
-  apiKey: string,
-  maxResults: number,
-  signal: AbortSignal | undefined,
-): Promise<SearchResult[]> {
-  return provider === 'tavily'
-    ? searchTavily(query, apiKey, maxResults, signal)
-    : searchBrave(query, apiKey, maxResults, signal);
-}
-
 async function searchTavily(
   query: string,
   apiKey: string,
@@ -281,47 +259,25 @@ async function searchTavily(
   }));
 }
 
-async function searchBrave(
-  query: string,
-  apiKey: string,
-  maxResults: number,
-  signal: AbortSignal | undefined,
-): Promise<SearchResult[]> {
-  const url = `https://api.search.brave.com/res/v1/web/search?q=${encodeURIComponent(query)}&count=${maxResults}`;
-  const response = await fetch(url, {
-    headers: { Accept: 'application/json', 'X-Subscription-Token': apiKey },
-    signal: withTimeout(signal),
-  });
-  if (!response.ok) throw new Error(`Brave search failed: HTTP ${response.status}`);
-  const data = (await response.json()) as BraveResponse;
-  return (data.web?.results ?? []).slice(0, maxResults).map((result) => ({
-    title: result.title ?? 'Untitled',
-    url: result.url ?? '',
-    snippet: result.description?.slice(0, 300) ?? '',
-  }));
-}
-
 /**
  * Which providers this machine can answer with right now. DuckDuckGo needs no
- * key; Tavily and Brave work only with one in SecretStorage. The retry text used
- * to name `"tavily" or "brave"` unconditionally, and on a box with no Brave key
- * 2 of 11 audited calls died on `API key not found … "forge.brave.apiKey"` — a
- * hint pointing at a provider that could never answer. A store that cannot be
- * read counts as "no key" for this hint; the real storage error still surfaces
- * on the call that actually needs that provider.
+ * key; Tavily works only with one in SecretStorage. The retry text used to
+ * name every keyed provider unconditionally, so on a box with no key it sent
+ * the model after a provider that could only answer `API key not found` — 2 of
+ * 11 audited calls died that way. A store that cannot be read counts as "no
+ * key" for this hint; the real storage error still surfaces on the call that
+ * actually needs that provider.
  */
 async function providersWithKeys(
   cfg: SearchConfig,
   secrets: vscode.SecretStorage,
 ): Promise<SearchProvider[]> {
   const usable: SearchProvider[] = ['duckduckgo'];
-  for (const provider of ['tavily', 'brave'] as const) {
-    try {
-      if (await secrets.get(secretKeyNameFor(provider, cfg))) usable.push(provider);
-    } catch {
-      // Unreadable store: treat it as no key here, and let the call that needs
-      // the provider report the real failure.
-    }
+  try {
+    if (await secrets.get(secretKeyNameFor('tavily', cfg))) usable.push('tavily');
+  } catch {
+    // Unreadable store: treat it as no key here, and let the call that needs
+    // the provider report the real failure.
   }
   return usable;
 }
@@ -331,7 +287,7 @@ function confirmWithProviders(usable: readonly SearchProvider[]): string {
   const others = usable.filter((provider) => provider !== 'duckduckgo');
   if (others.length === 0) {
     return (
-      'No Tavily or Brave key is stored on this machine, so DuckDuckGo is the only ' +
+      'No Tavily key is stored on this machine, so DuckDuckGo is the only ' +
       'provider: search again with different wording.'
     );
   }
@@ -351,7 +307,7 @@ function usableList(usable: readonly SearchProvider[]): string {
 }
 
 async function readApiKey(
-  provider: 'tavily' | 'brave',
+  provider: 'tavily',
   cfg: SearchConfig,
   secrets: vscode.SecretStorage,
 ): Promise<string> {
@@ -368,7 +324,7 @@ async function readApiKey(
   return apiKey;
 }
 
-function secretKeyNameFor(provider: 'tavily' | 'brave', cfg: SearchConfig): string {
+function secretKeyNameFor(provider: 'tavily', cfg: SearchConfig): string {
   return provider === cfg.provider && cfg.secret_key_name
     ? cfg.secret_key_name
     : `forge.${provider}.apiKey`;
@@ -401,7 +357,7 @@ function unconfirmedEmptyResult(reason: string, retry: string, extra?: string): 
 
 function fallbackUnavailable(
   reason: string,
-  provider: 'tavily' | 'brave',
+  provider: 'tavily',
   detail: string,
   retry: string,
 ): string {
@@ -413,7 +369,7 @@ function fallbackUnavailable(
 }
 
 function providerLabel(provider: SearchProvider): string {
-  return provider === 'duckduckgo' ? 'DuckDuckGo' : provider === 'tavily' ? 'Tavily' : 'Brave';
+  return provider === 'duckduckgo' ? 'DuckDuckGo' : 'Tavily';
 }
 
 function withTimeout(signal: AbortSignal | undefined): AbortSignal {

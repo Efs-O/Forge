@@ -116,7 +116,7 @@ models:
     gguf_path: C:/models/local.gguf
 search:
   provider: duckduckgo
-  fallback: brave
+  fallback: tavily
   max_results: 7
 `,
       'utf8',
@@ -124,7 +124,53 @@ search:
 
     const config = loadConfig(dir);
 
-    expect(config.search).toEqual({ provider: 'duckduckgo', fallback: 'brave', max_results: 7 });
+    expect(config.search).toEqual({ provider: 'duckduckgo', fallback: 'tavily', max_results: 7 });
+  });
+
+  it('refuses a config whose search provider is the removed Brave', () => {
+    const dir = mkTempDir();
+    fs.writeFileSync(
+      path.join(dir, 'config.yaml'),
+      `active_model: local-gguf
+llama_server:
+  binary: llama-server
+models:
+  - name: local-gguf
+    provider: llama.cpp
+    gguf_path: C:/models/local.gguf
+search:
+  provider: brave
+  max_results: 5
+`,
+      'utf8',
+    );
+
+    expect(() => loadConfig(dir)).toThrow(
+      /search\.provider: Brave was removed from Forge on 2026-11-05\. Set search\.provider to "duckduckgo" \(no key\) or "tavily" \(needs a key\)\./u,
+    );
+  });
+
+  it('refuses a config whose search fallback is the removed Brave', () => {
+    const dir = mkTempDir();
+    fs.writeFileSync(
+      path.join(dir, 'config.yaml'),
+      `active_model: local-gguf
+llama_server:
+  binary: llama-server
+models:
+  - name: local-gguf
+    provider: llama.cpp
+    gguf_path: C:/models/local.gguf
+search:
+  provider: duckduckgo
+  fallback: brave
+`,
+      'utf8',
+    );
+
+    expect(() => loadConfig(dir)).toThrow(
+      /search\.fallback: Brave was removed from Forge on 2026-11-05\. Set search\.fallback to "tavily", or delete the line\./u,
+    );
   });
 
   it('rejects eager tool groups outside the static native group list', () => {

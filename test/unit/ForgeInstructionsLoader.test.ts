@@ -72,7 +72,11 @@ describe('ensureForgeInstructionsFile', () => {
     // the symptom spent fourteen rounds on a discussion that the job state file
     // and that commit message each named outright. 46 bytes came back out of
     // the waiting line. Cap 5,964 keeps the same 75 bytes of slack.
-    expect(Buffer.byteLength(content, 'utf8')).toBeLessThan(5964);
+    // 2026-11-05: 6,260 bytes. "Asking the user" carries the general version of
+    // the question-card rule this repository's FORGE.md gained the same day:
+    // a choice between fixed answers goes on an ask_user card, not a numbered
+    // list, except in an unattended run. Cap 6,335 keeps the same 75 bytes.
+    expect(Buffer.byteLength(content, 'utf8')).toBeLessThan(6335);
   });
 
   it('carries the review items that took this repo to 0.8% failed calls', () => {

@@ -1,6 +1,7 @@
 import * as fs from 'fs';
 import * as path from 'path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
+import * as atomicWrite from '../../src/util/atomicWrite';
 import { makeEditFileTool, MAX_EDITS_PER_CALL } from '../../src/tools/editFileTool';
 
 vi.mock('vscode', () => ({
@@ -31,6 +32,32 @@ describe('edit_file batch cap', () => {
     await expect(tool.handler({ path: target, edits: [...edits, edits[0]] })).rejects.toThrow(
       'at most 200 edits per call',
     );
+  });
+});
+
+describe('edit_file cancellable save', () => {
+  it('passes the turn AbortSignal to writeFileAtomic', async () => {
+    fs.writeFileSync(target, 'before');
+    const controller = new AbortController();
+    const write = vi.spyOn(atomicWrite, 'writeFileAtomic').mockResolvedValue();
+    try {
+      await makeEditFileTool().handler(
+        { path: target, old_str: 'before', new_str: 'after' },
+        { beforeMutate: () => undefined, abortSignal: controller.signal },
+      );
+
+      expect(write).toHaveBeenCalledWith(
+        target,
+        'after',
+        expect.objectContaining({
+          signal: controller.signal,
+          expected: expect.any(Object),
+          retryBudgetMs: atomicWrite.ASYNC_RENAME_BUDGET_MS,
+        }),
+      );
+    } finally {
+      write.mockRestore();
+    }
   });
 });
 
@@ -236,20 +263,19 @@ describe('edit_file replace_all', () => {
     expect(fs.readFileSync(target, 'utf8')).toBe(content);
   });
 
-  // The cancel check is for the long case only: a cancelled turn that already
-  // did the work still gets its edit written, exactly as it has always.
-  it('still writes a short replace_all under an already-cancelled signal', async () => {
+  // The writer checks cancellation before it creates a temporary file, including
+  // when edit calculation was short enough not to observe the signal itself.
+  it('does not write a short replace_all under an already-cancelled signal', async () => {
     fs.writeFileSync(target, 'alpha\nalpha\n');
     const controller = new AbortController();
     controller.abort();
-    const result = String(
-      await tool.handler(
+    await expect(
+      tool.handler(
         { path: target, old_str: 'alpha', new_str: 'A', replace_all: true },
         { abortSignal: controller.signal },
       ),
-    );
-    expect(fs.readFileSync(target, 'utf8')).toBe('A\nA\n');
-    expect(result).toContain('Replaced 2 occurrences');
+    ).rejects.toMatchObject({ name: 'AbortError' });
+    expect(fs.readFileSync(target, 'utf8')).toBe('alpha\nalpha\n');
   });
 
   it('numbers the seams a replace_all joined after earlier replacements moved the offsets', async () => {

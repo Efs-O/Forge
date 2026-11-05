@@ -300,7 +300,7 @@ All of it is done by the user; your part is the config and the instructions.
 
 ## Step 9 — Optional: web search
 
-The user stores a Tavily or Brave key with **Forge: Set Search API Key**
+The user stores a Tavily key with **Forge: Set Search API Key**
 (`forge.setSearchApiKey`). You add the `search:` block (see
 `config.example.yaml`) and set `permissions.net.search: true`.
 

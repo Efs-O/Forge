@@ -1,4 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import * as atomicWrite from '../../src/util/atomicWrite';
 import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
@@ -34,6 +35,37 @@ const call = async (args: Record<string, unknown>) =>
 // sessions while costing a schema on every round; the behaviour it existed for
 // - rebuilding a file too large for one call - is the mode's job now.
 describe('write_file mode: "append"', () => {
+  it('passes the turn AbortSignal and long retry budget to overwrite and append saves', async () => {
+    const target = path.join(dir, 'signal.txt');
+    fs.writeFileSync(target, 'prefix');
+    const controller = new AbortController();
+    const write = vi.spyOn(atomicWrite, 'writeFileAtomic').mockResolvedValue();
+    try {
+      await tool().handler(
+        { path: target, content: 'replacement' },
+        { beforeMutate: () => undefined, abortSignal: controller.signal },
+      );
+      await tool().handler(
+        { path: target, content: 'suffix', mode: 'append' },
+        { beforeMutate: () => undefined, abortSignal: controller.signal },
+      );
+
+      const options = {
+        signal: controller.signal,
+        retryBudgetMs: atomicWrite.ASYNC_RENAME_BUDGET_MS,
+      };
+      const [writtenTarget, writtenContent] = write.mock.calls[0]!;
+      expect(path.basename(writtenTarget)).toBe('signal.txt');
+      expect(writtenContent).toBe('replacement');
+      expect(write.mock.calls[0]?.[2]).toEqual(options);
+      expect(write.mock.calls[1]?.[1]).toEqual(Buffer.from('prefixsuffix'));
+      expect(write.mock.calls[1]?.[2]).toMatchObject(options);
+      expect(write.mock.calls[1]?.[2]).toHaveProperty('expected');
+    } finally {
+      write.mockRestore();
+    }
+  });
+
   // The point of the mode: a file too large for one call is built across
   // several, so no single tool call has to fit in the remaining context.
   it('reconstructs a file byte-exactly across a write and two appends', async () => {
@@ -51,6 +83,16 @@ describe('write_file mode: "append"', () => {
     const target = path.join(dir, 'fresh.txt');
     await call({ path: target, content: 'first', mode: 'append' });
     expect(fs.readFileSync(target, 'utf8')).toBe('first');
+  });
+
+  it('preserves invalid UTF-8 bytes when appending', async () => {
+    const target = path.join(dir, 'latin1.txt');
+    const original = Buffer.from([0xe9, 0x0a]);
+    fs.writeFileSync(target, original);
+
+    await call({ path: target, content: 'tail', mode: 'append' });
+
+    expect(fs.readFileSync(target)).toEqual(Buffer.concat([original, Buffer.from('tail', 'utf8')]));
   });
 
   it('inserts no separator of its own', async () => {

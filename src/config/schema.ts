@@ -67,12 +67,35 @@ const LlamaServerConfigSchema = z.object({
 
 const SharedRuntimeSchema = z.object({ enabled: z.boolean() }).optional();
 
-const SearchConfigSchema = z.object({
-  provider: z.enum(['duckduckgo', 'tavily', 'brave']),
-  fallback: z.enum(['tavily', 'brave']).optional(),
-  secret_key_name: z.string().min(1).optional(),
-  max_results: z.number().int().positive().optional(),
-});
+/**
+ * Brave was removed (owner's decision, 2026-11-05): no key is stored on this
+ * machine, and 2 of 11 audited `web_search` calls died asking for one. It is
+ * still listed in the enums below because an unlisted value fails the enum
+ * with Zod's generic "Invalid enum value" before a refine runs — listing it is
+ * what lets the refine NAME it, so a config that still names Brave fails the
+ * load with that sentence instead of a bare enum error.
+ */
+const SearchConfigSchema = z
+  .object({
+    provider: z.enum(['duckduckgo', 'tavily', 'brave']),
+    fallback: z.enum(['tavily', 'brave']).optional(),
+    secret_key_name: z.string().min(1).optional(),
+    max_results: z.number().int().positive().optional(),
+  })
+  .superRefine((search, ctx) => {
+    for (const field of ['provider', 'fallback'] as const) {
+      if (search[field] !== 'brave') continue;
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: [field],
+        message:
+          'Brave was removed from Forge on 2026-11-05. ' +
+          (field === 'provider'
+            ? 'Set search.provider to "duckduckgo" (no key) or "tavily" (needs a key).'
+            : 'Set search.fallback to "tavily", or delete the line.'),
+      });
+    }
+  });
 
 const EmbeddingsConfigSchema = z
   .object({

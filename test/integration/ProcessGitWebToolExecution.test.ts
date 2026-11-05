@@ -300,7 +300,7 @@ describe('isolated process, Git, and web tool execution', () => {
   });
 
   // Stop used to leave a search request running with no timeout (U16-04).
-  it.each(['tavily', 'brave'] as const)('aborts a %s search when the turn is stopped', async (provider) => {
+  it('aborts a Tavily search when the turn is stopped', async () => {
     const signals: AbortSignal[] = [];
     vi.stubGlobal(
       'fetch',
@@ -314,7 +314,11 @@ describe('isolated process, Git, and web tool execution', () => {
       ),
     );
     const secrets = { get: async () => 'fixture-secret' } as unknown as vscode.SecretStorage;
-    const tool = makeWebSearchTool(secrets, { provider, secret_key_name: 'k', max_results: 1 });
+    const tool = makeWebSearchTool(secrets, {
+      provider: 'tavily',
+      secret_key_name: 'k',
+      max_results: 1,
+    });
     const controller = new AbortController();
     const pending = tool.handler({ query: 'fixture' }, {
       abortSignal: controller.signal,

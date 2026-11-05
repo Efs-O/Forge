@@ -1,6 +1,7 @@
 import * as fs from 'fs';
 import * as path from 'path';
 import { describe, expect, it, vi } from 'vitest';
+import * as atomicWrite from '../../src/util/atomicWrite';
 import {
   applyLineEditsToContent,
   makeApplyLineEditsTool,
@@ -12,6 +13,37 @@ vi.mock('vscode', () => ({
 }));
 
 describe('apply_line_edits', () => {
+  it('passes the turn AbortSignal to writeFileAtomic', async () => {
+    const directory = fs.mkdtempSync(path.join(process.cwd(), '.forge-line-edit-signal-'));
+    const filePath = path.join(directory, 'sample.ts');
+    fs.writeFileSync(filePath, 'before\n', 'utf8');
+    const controller = new AbortController();
+    const write = vi.spyOn(atomicWrite, 'writeFileAtomic').mockResolvedValue();
+    try {
+      await makeApplyLineEditsTool().handler(
+        {
+          path: filePath,
+          operations: [
+            { start_line: 1, end_line: 1, expected_lines: ['before'], replacement_lines: ['after'] },
+          ],
+        },
+        { beforeMutate: () => undefined, abortSignal: controller.signal },
+      );
+      expect(write).toHaveBeenCalledWith(
+        filePath,
+        'after\n',
+        expect.objectContaining({
+          signal: controller.signal,
+          expected: expect.any(Object),
+          retryBudgetMs: atomicWrite.ASYNC_RENAME_BUDGET_MS,
+        }),
+      );
+    } finally {
+      write.mockRestore();
+      fs.rmSync(directory, { recursive: true, force: true });
+    }
+  });
+
   it('applies ordered edits atomically from the bottom and preserves CRLF', () => {
     const result = applyLineEditsToContent('one\r\ntwo\r\nthree\r\nfour\r\n', [
       {

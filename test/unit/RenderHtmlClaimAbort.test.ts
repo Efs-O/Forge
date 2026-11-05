@@ -23,9 +23,9 @@ vi.mock('../../src/util/atomicWrite', async (importOriginal) => {
   const actual = await importOriginal<typeof import('../../src/util/atomicWrite')>();
   return {
     ...actual,
-    writeFileAtomicSync: (target: string, content: string | Buffer) => {
+    writeFileAtomic: async (target: string, content: string | Buffer) => {
       if (writeGate.failWith) throw new Error(writeGate.failWith);
-      return actual.writeFileAtomicSync(target, content);
+      return actual.writeFileAtomic(target, content);
     },
   };
 });

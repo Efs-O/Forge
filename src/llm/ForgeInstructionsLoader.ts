@@ -40,6 +40,9 @@ Fill in the blanks below; delete any rule that does not fit this project.
 - For an audit or a review, fix the exact commit range and the baseline first; never infer the scope from the newest commit.
 - "reply only" / "just tell me" means answer in chat with no tool calls at all.
 
+## Asking the user
+- When the user must choose between fixed answers, ask with \`ask_user\`, not a numbered list in your reply: up to 4 questions per card, one line per option saying what it leads to, one option marked recommended. More than 4 decisions: several cards, most urgent first. In an unattended run, state the assumption and continue instead of opening a card.
+
 ## Before calling a change done
 - After the last code edit, run the full gate above in one call and report its exact result. A subset of tests is not the gate. A task that changed no code (a report, an answer) needs no gate.
 - When you change behaviour, a new regression test must fail without the fix: write and run it before the fix, then fix. Do not revert a fix to prove it.

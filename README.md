@@ -86,7 +86,7 @@ telemetry, analytics, or auto-update pings.
 - Agent mesh: two-way messaging between Forge and Claude Code, Codex and Copilot sessions (`ask_agent`, plus the fifteen verbs in `forge.sh`'s own usage header)
 - Localhost control server for external orchestrators and shared model lifecycle
 - Reasoning token display and optional thinking-channel stripping
-- Optional Tavily or Brave web search with keys stored in VS Code SecretStorage
+- Optional Tavily web search with the key stored in VS Code SecretStorage
 - Local semantic code search and reindex support
 - External MCP tool servers: bridge tools from any MCP stdio server into the agent's tool catalog with explicit capability classification
 - Optional private-owner remote control through Telegram: local pairing,
@@ -219,7 +219,7 @@ a context compaction costs at most one stale item instead of the whole thread.
 started the turn — the sidebar, or your phone. `ask_user` asks a real question,
 or several related ones in a single round.
 
-**Web, when you configure it.** `web_search` (Tavily or Brave, your key) and
+**Web, when you configure it.** `web_search` (DuckDuckGo by default, Tavily with your key) and
 `web_fetch`.
 
 ## Run it from your phone
@@ -827,7 +827,6 @@ This is especially useful in multi-process local setups where an external proces
 Forge supports:
 
 - Tavily search
-- Brave Search
 - local semantic code search with a separate embedding model
 
 Search API keys are stored in VS Code SecretStorage.
@@ -1060,7 +1059,7 @@ Outbound traffic is limited to the endpoints you explicitly use:
 - local `llama-server`
 - local Ollama daemon
 - an explicitly configured cloud or OpenAI-compatible provider endpoint
-- Tavily or Brave if search is enabled
+- Tavily if search is enabled
 - user-approved fetch targets
 - an authenticated Claude Code or Codex CLI agent you explicitly invoke; that CLI uses its own tools and network configuration
 

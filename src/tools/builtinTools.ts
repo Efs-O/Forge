@@ -3,7 +3,7 @@ import * as path from 'path';
 import * as vscode from 'vscode';
 import type { RegisteredTool } from './ToolRegistry';
 import { resolveRealWorkspacePath } from '../util/WorkspacePaths';
-import { writeFileAtomicSync } from '../util/atomicWrite';
+import { agentWriteOptions, writeFileAtomic, type ExpectedFileState } from '../util/atomicWrite';
 import { withFileLengthWarning, type FileLengthWarningGetter } from './fileLengthWarning';
 import { NO_PROBLEM_WATCHER, withProblemNote, type ProblemWatcher } from './editDiagnostics';
 import { applyWriteEol, chooseWriteEol, readExistingForWrite } from './writeEol';
@@ -18,6 +18,37 @@ import { applyWriteEol, chooseWriteEol, readExistingForWrite } from './writeEol'
  * `docs/OWNERS.md` now names `readFileTool.ts` as the owner of file reads.
  */
 export { makeReadFileTool } from './readFileTool';
+
+interface AppendFileSnapshot {
+  bytes: Buffer;
+  text: string | undefined;
+  expected: ExpectedFileState | null;
+}
+
+/** Read append bytes and their state from the same open file handle. */
+function readAppendSnapshot(filePath: string): AppendFileSnapshot {
+  let descriptor: number;
+  try {
+    descriptor = fs.openSync(filePath, 'r');
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === 'ENOENT') {
+      return { bytes: Buffer.alloc(0), text: undefined, expected: null };
+    }
+    throw error;
+  }
+
+  try {
+    const bytes = fs.readFileSync(descriptor);
+    const stat = fs.fstatSync(descriptor);
+    return {
+      bytes,
+      text: bytes.toString('utf8'),
+      expected: { size: stat.size, mtimeMs: stat.mtimeMs, ctimeMs: stat.ctimeMs },
+    };
+  } finally {
+    fs.closeSync(descriptor);
+  }
+}
 
 export function makeWriteFileTool(
   extraRoots: () => readonly string[] = () => [],
@@ -73,7 +104,8 @@ export function makeWriteFileTool(
         allowMissing: true,
         extraRoots: extraRoots(),
       });
-      const existing = readExistingForWrite(filePath);
+      const appendSnapshot = mode === 'append' ? readAppendSnapshot(filePath) : undefined;
+      const existing = mode === 'append' ? appendSnapshot?.text : readExistingForWrite(filePath);
       const content = args['content'] as string;
       const converted = applyWriteEol(content, await chooseWriteEol(filePath, existing));
       fs.mkdirSync(path.dirname(filePath), { recursive: true });
@@ -83,11 +115,16 @@ export function makeWriteFileTool(
       // language service sees the bytes this call is about to write.
       const watch = await watchProblems(filePath);
       if (mode === 'append') {
-        // The chunked-write path: appendFileSync creates the file when absent, so
-        // a resumed write can start with either mode, and the growing file has to
-        // be measured here too - not only on a full write - or the length warning
-        // never fires on a file built across calls.
-        fs.appendFileSync(filePath, converted.content, 'utf8');
+        // Preserve append semantics while using the same lock-aware atomic save
+        // path as overwrite. The decoded text chooses EOL; the original bytes
+        // remain untouched, including when the file is not valid UTF-8.
+        const snapshot = appendSnapshot!;
+        const appended = Buffer.concat([snapshot.bytes, Buffer.from(converted.content, 'utf8')]);
+        await writeFileAtomic(
+          filePath,
+          appended,
+          agentWriteOptions(context?.abortSignal, { expected: snapshot.expected }),
+        );
         const total = fs.statSync(filePath).size;
         const note = watch ? await watch.settle(context?.abortSignal) : '';
         return withFileLengthWarning(
@@ -99,7 +136,7 @@ export function makeWriteFileTool(
           lengthWarning(),
         );
       }
-      writeFileAtomicSync(filePath, converted.content);
+      await writeFileAtomic(filePath, converted.content, agentWriteOptions(context?.abortSignal));
       const note = watch ? await watch.settle(context?.abortSignal) : '';
       return withFileLengthWarning(
         withProblemNote(`Written ${filePath}${converted.note}`, note),

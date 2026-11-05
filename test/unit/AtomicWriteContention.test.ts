@@ -61,7 +61,9 @@ describe('a rename whose contention budget is spent', () => {
     expect(caught?.message).toMatch(/gave up/);
     expect(caught?.message).toMatch(/another process/i);
     expect(caught?.message).toMatch(/most likely/i);
-    expect(caught?.message).toMatch(/same folder|same way/);
+    expect(caught?.message).toMatch(/wait a few seconds/i);
+    expect(caught?.message).toMatch(/new name and move it later/i);
+    expect(caught?.message).toMatch(/close whatever has the file open/i);
     expect(caught?.message).toMatch(/tell the user/i);
     expect(caught?.message).toMatch(/destination is unchanged/);
   });

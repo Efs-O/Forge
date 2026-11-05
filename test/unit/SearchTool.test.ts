@@ -82,27 +82,25 @@ describe('web_search DuckDuckGo provider', () => {
     expect(fetchMock).toHaveBeenCalledTimes(2);
   });
 
-  it('detects a 202 anomaly page and uses the configured Brave fallback', async () => {
+  it('detects a 202 anomaly page and uses the configured Tavily fallback', async () => {
     const fetchMock = vi
       .fn()
       .mockResolvedValueOnce(htmlResponse('<html><body>Anomaly detected</body></html>', 202))
       .mockResolvedValueOnce(
         jsonResponse({
-          web: {
-            results: [{ title: 'Brave hit', url: 'https://example.com', description: 'Snippet' }],
-          },
+          results: [{ title: 'Tavily hit', url: 'https://example.com', content: 'Snippet' }],
         }),
       );
     vi.stubGlobal('fetch', fetchMock);
     const search = tool(
-      { provider: 'duckduckgo', fallback: 'brave' },
-      secrets({ 'forge.brave.apiKey': 'brave-test-key' }),
+      { provider: 'duckduckgo', fallback: 'tavily' },
+      secrets({ 'forge.tavily.apiKey': 'tavily-test-key' }),
     );
 
     const result = await search.handler({ query: 'fixture query' });
 
-    expect(result).toContain('Results via Brave (DuckDuckGo was blocked; confirmed with Brave)');
-    expect(result).toContain('**Brave hit**');
+    expect(result).toContain('Results via Tavily (DuckDuckGo was blocked; confirmed with Tavily)');
+    expect(result).toContain('**Tavily hit**');
   });
 
   it('flags an unconfirmed empty result when no fallback is configured', async () => {
@@ -116,7 +114,7 @@ describe('web_search DuckDuckGo provider', () => {
       'DuckDuckGo returned no results; this is NOT proof that nothing exists',
     );
     expect(result).toContain('blocked or changed its layout');
-    expect(result).toContain('No Tavily or Brave key is stored on this machine');
+    expect(result).toContain('No Tavily key is stored on this machine');
     expect(result).not.toContain('provider "tavily"');
   });
 
@@ -191,17 +189,17 @@ describe('web_search DuckDuckGo provider', () => {
 
   it('lets the model override the configured provider for one call', async () => {
     const fetchMock = vi.fn(async () =>
-      jsonResponse({ web: { results: [{ title: 'Brave hit', url: 'https://example.com' }] } }),
+      jsonResponse({ results: [{ title: 'Tavily hit', url: 'https://example.com' }] }),
     );
     vi.stubGlobal('fetch', fetchMock);
-    const keyStore = secrets({ 'forge.brave.apiKey': 'brave-test-key' });
-    const search = tool({ provider: 'duckduckgo', fallback: 'tavily' }, keyStore);
+    const keyStore = secrets({ 'forge.tavily.apiKey': 'tavily-test-key' });
+    const search = tool({ provider: 'duckduckgo' }, keyStore);
 
-    const result = await search.handler({ query: 'fixture query', provider: 'brave' });
+    const result = await search.handler({ query: 'fixture query', provider: 'tavily' });
 
-    expect(result).toContain('Results via Brave');
-    expect(fetchMock.mock.calls[0]?.[0]).toContain('api.search.brave.com');
-    expect(keyStore.get).toHaveBeenCalledWith('forge.brave.apiKey');
+    expect(result).toContain('Results via Tavily');
+    expect(fetchMock.mock.calls[0]?.[0]).toContain('api.tavily.com');
+    expect(keyStore.get).toHaveBeenCalledWith('forge.tavily.apiKey');
   });
 
   it('aborts a pending DuckDuckGo request when Stop is pressed', async () => {
@@ -224,9 +222,9 @@ describe('web_search DuckDuckGo provider', () => {
     expect((fetchMock.mock.calls[0]?.[1] as RequestInit).signal).toMatchObject({ aborted: true });
   });
 
-  // TOOL_TRIM_PLAN.md B1: the retry text used to name `"tavily" or "brave"` no
-  // matter what keys exist, so on a machine with no Brave key it sent the model
-  // after a provider that could only answer `API key not found`.
+  // TOOL_TRIM_PLAN.md B1: the retry text used to name every keyed provider no
+  // matter what keys exist, so on a machine with no key it sent the model after
+  // a provider that could only answer `API key not found`.
   it('after a DuckDuckGo failure, names only the providers that have a key', async () => {
     vi.stubGlobal(
       'fetch',
@@ -241,10 +239,10 @@ describe('web_search DuckDuckGo provider', () => {
 
     expect(result).toContain('DuckDuckGo failed: socket disconnected');
     expect(result).toContain('call web_search with provider "tavily" to confirm');
-    expect(result).not.toContain('Brave');
+    expect(result).not.toMatch(/brave/iu);
   });
 
-  it('names both providers when both have keys', async () => {
+  it('does not offer the removed provider even when its key is still stored', async () => {
     vi.stubGlobal(
       'fetch',
       vi.fn(async () => {
@@ -256,23 +254,38 @@ describe('web_search DuckDuckGo provider', () => {
       secrets({ 'forge.tavily.apiKey': 'tvly-test-key', 'forge.brave.apiKey': 'brave-test-key' }),
     ).handler({ query: 'fixture query' });
 
-    expect(result).toContain('call web_search with provider "tavily" or "brave" to confirm');
+    expect(result).toContain('call web_search with provider "tavily" to confirm');
+    expect(result).not.toMatch(/brave/iu);
   });
 
   it('a request for a provider with no key says which providers do work', async () => {
-    const keyStore = secrets({ 'forge.tavily.apiKey': 'tvly-test-key' });
+    const keyStore = secrets();
+    const failure = String(
+      await tool({ provider: 'duckduckgo' }, keyStore)
+        .handler({ query: 'fixture query', provider: 'tavily' })
+        .catch((error: unknown) => error),
+    );
+
+    expect(failure).toContain('API key not found in SecretStorage under "forge.tavily.apiKey"');
+    expect(failure).toContain(
+      'Providers usable on this machine right now: DuckDuckGo (needs no key)',
+    );
+    expect(keyStore.get).toHaveBeenCalledWith('forge.tavily.apiKey');
+  });
+
+  it('refuses the removed Brave provider without reading a key or the network', async () => {
+    const fetchMock = vi.fn();
+    vi.stubGlobal('fetch', fetchMock);
+    const keyStore = secrets({ 'forge.brave.apiKey': 'brave-test-key' });
     const failure = String(
       await tool({ provider: 'duckduckgo' }, keyStore)
         .handler({ query: 'fixture query', provider: 'brave' })
         .catch((error: unknown) => error),
     );
 
-    expect(failure).toContain('API key not found in SecretStorage under "forge.brave.apiKey"');
-    expect(failure).toContain(
-      'Providers usable on this machine right now: DuckDuckGo (needs no key), Tavily ("tavily")',
-    );
-    expect(failure).not.toContain('Brave ("brave")');
-    expect(keyStore.get).toHaveBeenCalledWith('forge.brave.apiKey');
+    expect(failure).toContain('Unsupported web_search provider: brave');
+    expect(fetchMock).not.toHaveBeenCalled();
+    expect(keyStore.get).not.toHaveBeenCalled();
   });
 
   it('spaces request starts by at least one second', async () => {

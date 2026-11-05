@@ -16,7 +16,6 @@ export function registerSecretCommands(
           description: 'tavily.com — recommended',
           value: 'tavily' as const,
         },
-        { label: 'Brave Search', description: 'brave.com/search/api', value: 'brave' as const },
       ];
       const pick = await vscode.window.showQuickPick(options, {
         title: 'Forge: Select Search Provider',

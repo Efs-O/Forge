@@ -12,6 +12,7 @@ vi.mock('vscode', () => {
 import * as vscode from 'vscode';
 import { readDocument } from '../../src/documents';
 import { unzipTextParts } from '../../src/documents/zipXml';
+import * as atomicWrite from '../../src/util/atomicWrite';
 import { makeExportDocumentTool } from '../../src/tools/exportDocumentTool';
 import { applyOwnerOnlyWriteGuard, ownerOnlySetFor } from '../../src/tools/ownerPaths';
 
@@ -57,6 +58,26 @@ beforeAll(() => {
 afterAll(() => fs.rmSync(root, { recursive: true, force: true }));
 
 describe('export_document', () => {
+  it('passes the turn AbortSignal to writeFileAtomic', async () => {
+    const controller = new AbortController();
+    const write = vi.spyOn(atomicWrite, 'writeFileAtomic').mockResolvedValue();
+    try {
+      await makeExportDocumentTool({ printPdf: async () => Buffer.from('%PDF-test') }).handler(
+        { source: 'sample.md', format: 'pdf', output: 'signal.pdf' },
+        { beforeMutate: () => undefined, abortSignal: controller.signal },
+      );
+      const [writtenTarget, bytes, options] = write.mock.calls[0]!;
+      expect(path.basename(writtenTarget)).toBe('signal.pdf');
+      expect(bytes).toEqual(Buffer.from('%PDF-test'));
+      expect(options).toEqual({
+        signal: controller.signal,
+        retryBudgetMs: atomicWrite.ASYNC_RENAME_BUDGET_MS,
+      });
+    } finally {
+      write.mockRestore();
+    }
+  });
+
   it('refuses HTML to DOCX before resolving or reading the source', async () => {
     const tool = makeExportDocumentTool();
     await expect(

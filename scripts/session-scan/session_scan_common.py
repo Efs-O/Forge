@@ -1,0 +1,180 @@
+"""Shared argument handling for the scripts/session-scan/ scripts.
+
+These scripts used to live in scratch/, where the sessions folder, the output
+folder, the window start and the set of probe chats were hard-coded to one
+machine and one week. A weekly job needs all of them as arguments, so they
+move here. Nothing else is shared: the scanning logic stays in each script.
+
+One rule the scripts used to carry inline, kept in one place here: every output
+file is written as UTF-8 with '\n' line endings.
+"""
+
+import argparse
+import os
+import sys
+import time
+from datetime import date, timedelta
+from pathlib import Path
+
+# Where Forge writes its session logs on any machine.
+SESSIONS = Path.home() / '.forge' / 'sessions'
+# scripts/session-scan/x.py -> scripts -> repository root.
+REPO_ROOT = Path(__file__).resolve().parents[2]
+
+# Output names, so the four scripts cannot disagree about who writes what.
+OUT_FILES = {
+    'raw': 'failed_tools_raw.txt',
+    'sig': 'failed_tools_sig.txt',
+    'summary': 'scan_summary.txt',
+    'cutoff': 'scan_cutoff.txt',
+    'recovery': 'recovery.txt',
+    'spot': 'failed_tools_spot.txt',
+    'versions': 'failed_tools_versions.txt',
+}
+
+
+def parse(description):
+    p = argparse.ArgumentParser(description=description)
+    p.add_argument(
+        '--sessions',
+        type=Path,
+        default=SESSIONS,
+        help='folder of *.jsonl session logs (default: %(default)s)',
+    )
+    p.add_argument(
+        '--out',
+        type=Path,
+        required=True,
+        help='folder the outputs go to; created if missing',
+    )
+    p.add_argument(
+        '--since',
+        metavar='YYYY-MM-DD',
+        help='window start; default is 7 days before now',
+    )
+    p.add_argument(
+        '--exclude',
+        type=Path,
+        metavar='FILE',
+        help='chat-id prefixes to leave out of the production counts, one per line; '
+        'default is to exclude nothing',
+    )
+    return p.parse_args()
+
+
+def need_sessions(sessions):
+    if not Path(sessions).is_dir():
+        sys.exit(f'no sessions folder at {sessions}')
+
+
+def session_files(sessions):
+    """The *.jsonl logs, in a fixed order so a re-run is comparable."""
+    return sorted(str(p) for p in Path(sessions).glob('*.jsonl'))
+
+
+def start_epoch(since):
+    """--since as epoch seconds; default 7 days before now, at local midnight."""
+    if since:
+        try:
+            return time.mktime(time.strptime(since + ' 00:00:00', '%Y-%m-%d %H:%M:%S'))
+        except ValueError:
+            sys.exit(f'--since must be YYYY-MM-DD, not {since}')
+    day = date.today() - timedelta(days=7)
+    return time.mktime(time.strptime(day.isoformat() + ' 00:00:00', '%Y-%m-%d %H:%M:%S'))
+
+
+def read_cutoff(out_dir):
+    """The frozen window end.
+
+    One frozen cutoff, shared by every script that reads these logs. Both auditors
+    found the old report quoting figures taken from three different moments; re-running
+    reuses this value instead of drifting forward, so one number means one thing.
+    """
+    end = time.time()
+    cut_file = Path(out_dir) / OUT_FILES['cutoff']
+    if cut_file.exists():
+        try:
+            end = float(cut_file.read_text(encoding='utf-8').strip())
+        except Exception:
+            pass
+    return end
+
+
+def freeze_cutoff(out_dir, end):
+    """scan_logs.py only: save the end so the other scripts read the same value."""
+    Path(out_dir).mkdir(parents=True, exist_ok=True)
+    (Path(out_dir) / OUT_FILES['cutoff']).write_text(repr(end), encoding='utf-8', newline='\n')
+
+
+def window(args):
+    """(start_epoch, frozen_end_epoch) for this run."""
+    return start_epoch(args.since), read_cutoff(args.out)
+
+
+def exclude_set(exclude_file):
+    """Chat-id prefixes to leave out of the production counts; empty by default."""
+    if not exclude_file:
+        return set()
+    lines = Path(exclude_file).read_text(encoding='utf-8').splitlines()
+    return {ln.split()[0] for ln in lines if ln.strip() and not ln.lstrip().startswith('#')}
+
+
+def excluded(sid, prefixes):
+    return any(sid.startswith(p) for p in prefixes)
+
+
+def writer(out_dir, name, mode='w'):
+    """Open one of the named output files, UTF-8 and '\n', creating the folder."""
+    Path(out_dir).mkdir(parents=True, exist_ok=True)
+    return open(Path(out_dir) / OUT_FILES[name], mode, encoding='utf-8', newline='\n')
+
+
+def day_index(start, end):
+    """Map '%a %d' -> start-of-day epoch ms, for every day in the window.
+
+    The raw file stamps a failure only as 'Wed 04 15:30' — no year, no month.
+    scratch/ hard-coded 2026-11, which is wrong the moment a job runs in another
+    month, so the date is recovered from the window instead: the day in the window
+    whose weekday and day-of-month match the stamp.
+    """
+    idx = {}
+    d = date.fromtimestamp(start)
+    last = date.fromtimestamp(end)
+    while d <= last:
+        day_ms = time.mktime(d.timetuple()) * 1000
+        idx.setdefault(time.strftime('%a %d', time.localtime(day_ms / 1000)), []).append(day_ms)
+        d += timedelta(days=1)
+    return idx
+
+
+def epoch_of(ts_str, idx):
+    """'Wed 04 15:30' -> epoch ms, or None when no day in the window matches.
+
+    None means the raw file was written by a scan with a different --since, so this
+    row cannot be placed in this window; callers count it rather than guess a date.
+    """
+    parts = ts_str.split(' ')
+    if len(parts) < 3:
+        return None
+    hhmm = parts[2].split(':')
+    if len(hhmm) != 2:
+        return None
+    days = idx.get(' '.join(parts[:2]))
+    if not days:
+        return None
+    day = time.localtime(days[0] / 1000)
+    return time.mktime(
+        (day.tm_year, day.tm_mon, day.tm_mday, int(hhmm[0]), int(hhmm[1]), 0, -1, -1, -1)
+    ) * 1000
+
+
+def read_summary(out_dir):
+    """The scanner's summary as a dict, or {} when it has not been run yet."""
+    summ = {}
+    f = Path(out_dir) / OUT_FILES['summary']
+    if f.exists():
+        for line in f.read_text(encoding='utf-8').splitlines():
+            k, _, v = line.partition(' ')
+            if v.strip():
+                summ[k] = v.strip()
+    return summ

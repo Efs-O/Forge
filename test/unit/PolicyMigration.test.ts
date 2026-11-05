@@ -72,7 +72,7 @@ exec:
 # Which service the agent's search reaches, and which token it sends there.
 search:
   provider: duckduckgo
-  fallback: brave
+  fallback: tavily
   secret_key_name: TAVILY_API_KEY
 
 image_search:

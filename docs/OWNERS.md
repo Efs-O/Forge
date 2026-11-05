@@ -601,7 +601,7 @@ overlaps with an existing owner, extend the owner instead.
 | Git repository discovery + selection       | `src/tools/gitDiscovery.ts`           |
 | Git tracked/ignored state of a path        | `src/tools/gitTrackedStatus.ts`       |
 | git log argv, framing and parsing          | `src/tools/gitLog.ts`                 |
-| Search provider requests and result formatting (DuckDuckGo / Tavily / Brave) | `src/tools/searchTool.ts` |
+| Search provider requests and result formatting (DuckDuckGo / Tavily) | `src/tools/searchTool.ts` |
 | DuckDuckGo HTML result extraction and anomaly detection | `src/tools/searchToolDuckDuckGo.ts` |
 | HTML to plain text for fetched web pages                | `src/util/htmlText.ts` |
 | URL fetch tool and the SSRF guard (URL, DNS and address checks, pinned fetch) | `src/tools/fetchTool.ts` |

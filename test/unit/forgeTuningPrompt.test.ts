@@ -102,8 +102,6 @@ describe('builtin execute template', () => {
     // The scope guard read as "stay minimal" on one-shot builds (pelican run 5 vs 0.17.0).
     expect(prompt).not.toContain('Do not refactor, clean up');
     expect(prompt).toContain('- Within the task, do the work completely and very well.');
-    expect(prompt).toContain('Write the direct answer as a standalone first sentence');
-    expect(prompt).toContain('leave a blank line before short plain headings or bullets');
     expect(prompt).toContain(
       'After each result, determine what specific information or action is still required. If something necessary remains, continue.',
     );
@@ -138,27 +136,20 @@ describe('builtin execute template', () => {
       'A `delete_file` recycle-bin move is recoverable; only `to_trash: false` is a dangerous delete.',
     );
     expect(prompt).toContain('write code into files with write_file or edit_file');
-    expect(prompt).toContain('Final answer: at most 12 lines.');
+    // 2026-11-05 (owner): the six reply-rule bullets are two now. The word checks
+    // that pinned them proved only that the words were present; the session scan
+    // showed replies staying technical past the opening anyway. One check on the
+    // core sentence is left, so a tidy-up cannot delete the rule.
+    expect(prompt).toContain('the owner gets plain English');
     // When to preview is the agent's call; the tool description says what preview shows.
     expect(prompt).not.toContain('render_html_to_image');
     expect(prompt).toContain('a preview result is a tool result');
   });
 
-  it('lets a user-specified answer format win', () => {
-    expect(prompt).toContain(
-      'If the user asks for exhaustive detail or specifies a format, follow that request exactly.',
-    );
-    expect(prompt).toContain('Write the direct answer as a standalone first sentence');
-    expect(prompt).toContain('Keep one point per bullet');
-  });
-
-  it('keeps the plain opening when a request asks for detail (lane report, 2026-10-30)', () => {
+  it('keeps the guard that stops a user instruction from deleting the plain-English rule (lane report, 2026-10-30)', () => {
     // A lane reply opened with a hash because the brief asked for one and user
-    // instructions outrank project instructions, so the rule lives here.
-    expect(prompt).toContain('Open with a plain opening: one to three sentences in everyday words');
-    expect(prompt).toContain('with no commit hash, file path, code name or jargon in them');
-    expect(prompt).toContain('even when another agent or chat sent the request');
-    expect(prompt).toContain('It shapes what comes after the plain opening, never replaces it.');
+    // instructions outrank project instructions, so this override guard lives
+    // here. The reply-rule bullets it protected are two lines now (2026-11-05).
     expect(prompt).toContain("Neither does the final answer's plain opening.");
   });
 

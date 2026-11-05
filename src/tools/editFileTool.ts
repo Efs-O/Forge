@@ -9,7 +9,7 @@ import {
   findIndentShiftedMatch,
   type EditMatch,
 } from './editMatch';
-import { writeFileAtomicSync, type ExpectedFileState } from '../util/atomicWrite';
+import { agentWriteOptions, writeFileAtomic, type ExpectedFileState } from '../util/atomicWrite';
 import { withFileLengthWarning, type FileLengthWarningGetter } from './fileLengthWarning';
 import { NO_PROBLEM_WATCHER, withProblemNote, type ProblemWatcher } from './editDiagnostics';
 
@@ -294,7 +294,11 @@ export function makeEditFileTool(
       // loads the document into the language service BEFORE the bytes change,
       // which is what turns "nothing reported on this file" into a real answer.
       const watch = await watchProblems(filepath);
-      writeFileAtomicSync(filepath, updated, { expected: fileState });
+      await writeFileAtomic(
+        filepath,
+        updated,
+        agentWriteOptions(context?.abortSignal, { expected: fileState }),
+      );
       const suppliedPath = args['path'] as string;
       const adjusted = shifted.length > 0 ? ` (${shifted.join('; ')})` : '';
       /**

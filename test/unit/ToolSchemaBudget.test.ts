@@ -107,7 +107,9 @@ import {
 // from fix/tool-error-fixes onto the above.
 // 2026-11-04: 63,100 (+35) after naming video and music generation in the media
 // tool-group description; recorded with the shipped feature in CHANGES.md.
-const MEASURED_CHARS = 63_100;
+// 2026-11-05: 63,092 (−8) after removing the Brave provider: `web_search`'s
+// `provider` enum lost the `"brave"` member and its comma.
+const MEASURED_CHARS = 63_092;
 // Phase 3 STOP: the historical full 88-tool wire schema was 67,128 chars.
 // Exclude computer_use (24 browser/desktop schemas) pending the owner's product
 // decision; the full and gated sizes are recorded in the report.
