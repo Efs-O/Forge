@@ -1,5 +1,33 @@
 # Forge — Recent Changes
 
+## 0.17.123
+
+- When the agent saves a file that another program has locked, it waits up to
+  30 s for the lock instead of failing at once, and the wait no longer freezes
+  the window. Stop cancels the wait. This covers the agent's own write tools.
+- The Brave search provider is removed. Web search uses DuckDuckGo or Tavily.
+- The built-in reply rules are shorter: give the direct answer first, in plain
+  English, and match the length to the question. Three new rules come from the
+  session scan: copy the text to replace from your newest read of the file, use
+  only the tool and field names you were given, and treat a search with no
+  matches as an answer.
+- The `FORGE.md` that `/init` writes now says to put a choice between fixed
+  answers on an `ask_user` card instead of a numbered list in the reply.
+- Independent read-only tool calls in the same round now run in parallel. Their
+  results still come back in order, and approvals are still asked one at a time.
+- Clearer parameter text and error messages for `shell`, `message_chat`,
+  `ask_agent`, `read_file` and `manage_jobs`. A wrong value for any tool's
+  fixed-choice argument now names the allowed values.
+- Asking Codex: the check for a live Codex panel waits 15 s. It says when it
+  starts a new background thread instead of using the open panel chat, and
+  opens the panel when it is unsure.
+- The question card keeps its buttons in view, is smaller, and can be
+  minimised. After it is answered, it stays in the chat as a read-only record
+  of the questions and the answers given. A damaged record is dropped without
+  costing the chat.
+- The session-scan scripts moved to `scripts/session-scan/` and take their
+  paths as arguments, so a weekly Forge job can run them.
+
 ## 0.17.122
 
 - Forge now checks what each managed model server (Strata) actually holds
