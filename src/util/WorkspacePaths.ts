@@ -18,7 +18,7 @@ export interface ResolveWorkspacePathOptions {
   extraRoots?: readonly string[];
 }
 
-function defaultWorkspaceRoot(): string | undefined {
+export function defaultWorkspaceRoot(): string | undefined {
   return vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
 }
 

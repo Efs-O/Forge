@@ -65,9 +65,9 @@ export class SkillsService {
     this.log = options.log ?? (() => undefined);
   }
 
-  /** `skills:` absent means off, like every other optional block in `tools:`. */
+  /** Skills are on by default; only `skills.enabled: false` turns them off. */
   isEnabled(): boolean {
-    return this.options.getConfig().skills?.enabled === true;
+    return this.options.getConfig().skills?.enabled !== false;
   }
 
   /** The three roots, in the order later ones win. */
@@ -185,9 +185,8 @@ export class SkillsService {
 /**
  * Read a conversation's frozen catalog. The enabled flag is checked here rather
  * than left to the signature: `skills:` absent and `skills.enabled: true` share
- * one signature, so a stale marker left by an earlier enabled run must be
- * dropped, not trusted — trusting it would show a catalog to a conversation
- * whose config had since turned skills off.
+ * one signature and both mean enabled. A stale marker left by an earlier enabled
+ * run must still be dropped when the config has since turned skills off.
  */
 function readFrozen(
   conversation: ConversationRuntime,

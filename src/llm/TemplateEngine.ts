@@ -29,8 +29,8 @@ export interface TemplateContext {
   agentTools?: string;
   /**
    * The skills catalog for this conversation, rendered once and frozen for its
-   * life (`src/skills/skillsService.ts`). Absent means no block: a user with no
-   * skills, or skills off, keeps the prompt they always had.
+   * life (`src/skills/skillsService.ts`). No block means skills are explicitly
+   * off or no skills were discovered.
    */
   skillsCatalog?: string;
   /** Filled in by `render`; callers do not pass it. */
@@ -90,7 +90,7 @@ export class TemplateEngine {
     this.skillsCatalogGetter = getter;
   }
 
-  /** The catalog for `conversation`, or undefined when skills are off or none. */
+  /** The catalog for `conversation`, or undefined when disabled or empty. */
   skillsCatalogFor(conversation?: ConversationRuntime): string | undefined {
     return this.skillsCatalogGetter?.(conversation);
   }

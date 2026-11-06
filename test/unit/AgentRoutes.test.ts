@@ -690,6 +690,51 @@ describe.skipIf(!TEST_BASH)('forge.sh against the routes', () => {
     await expect(waitForReply(paths, 'fg2-abc', 1_000, undefined, 10)).resolves.toBe('pong\n');
   }, 30_000);
 
+  it('who prints bracketed and quoted titles and continues past an older JSON window', async (ctx) => {
+    if (!usable) ctx.skip();
+    const oldWindowId = '00000000-0000-4000-8000-000000000091';
+    const textWindowId = '00000000-0000-4000-8000-000000000092';
+    const oldWindow = http.createServer((_req, res) => {
+      res.writeHead(200, { 'Content-Type': 'application/json' });
+      res.end('{"participants":[{"session":"old","attachment":"linked","activity":"idle","detail":"old"}]}');
+    });
+    const textWindow = http.createServer((_req, res) => {
+      res.writeHead(200, { 'Content-Type': 'text/plain; charset=utf-8' });
+      res.end('claude · Job "Maya engine update" [maya-update]\tlinked\tbusy\tMaya [nightly]\n');
+    });
+    const oldPort = await listenLoopback(oldWindow);
+    const textPort = await listenLoopback(textWindow);
+    const endpointText = (windowId: string, port: number) =>
+      JSON.stringify(
+        { windowId, url: `http://127.0.0.1:${port}`, token: TOKEN, pid: process.pid },
+        null,
+        2,
+      );
+    fs.rmSync(path.join(paths.root, 'endpoints'), { recursive: true, force: true });
+    fs.mkdirSync(path.join(paths.root, 'endpoints'), { recursive: true });
+    fs.writeFileSync(
+      path.join(paths.root, 'endpoints', `${oldWindowId}.json`),
+      endpointText(oldWindowId, oldPort),
+    );
+    fs.writeFileSync(
+      path.join(paths.root, 'endpoints', `${textWindowId}.json`),
+      endpointText(textWindowId, textPort),
+    );
+    try {
+      const result = await runClient(['who'], '');
+      expect(result.code, result.out).toBe(0);
+      expect(result.out).toContain(`window ${oldWindowId} runs an older Forge`);
+      expect(result.out).toContain('claude · Job "Maya engine update" [maya-update]');
+      expect(result.out).toContain('Maya [nightly]');
+      expect(result.out).not.toContain('old  ');
+    } finally {
+      await Promise.all([
+        new Promise<void>((resolve) => oldWindow.close(() => resolve())),
+        new Promise<void>((resolve) => textWindow.close(() => resolve())),
+      ]);
+    }
+  }, 30_000);
+
   it('send-file uses the authenticated CLI route without accepting a Forge inbox turn', async (ctx) => {
     if (!usable) ctx.skip();
     const validateAgentSender = vi.fn((sender: { kind: string; sessionId: string }) =>
@@ -1058,25 +1103,33 @@ describe.skipIf(!TEST_BASH)('forge.sh against the routes', () => {
     const windows: http.Server[] = [];
     const listenWindow = async (label: string): Promise<string> => {
       const windowServer = http.createServer((req, res) => {
-        calls.push(`${label}:${new URL(req.url ?? '/', 'http://localhost').pathname}`);
+        const requestUrl = new URL(req.url ?? '/', 'http://localhost');
+        calls.push(`${label}:${requestUrl.pathname}${requestUrl.search}`);
         const participant = (session: string) => ({
           session,
           attachment: 'linked',
           activity: 'idle',
           detail: `${session} chat`,
         });
-        res.end(
-          JSON.stringify({
-            participants:
-              label === 'window-a'
-                ? [
-                    participant('codex · Build'),
-                    participant('codex · Build'),
-                    participant('claude · Review'),
-                  ]
-                : [participant('claude · Review'), participant('claude · Review')],
-          }),
-        );
+        const participants =
+          label === 'window-a'
+            ? [
+                participant('codex · Build'),
+                participant('codex · Build'),
+                participant('claude · Review'),
+              ]
+            : [participant('claude · Review'), participant('claude · Review')];
+        if (requestUrl.searchParams.get('format') === 'text') {
+          res.end(
+            participants
+              .map(({ session, attachment, activity, detail }) =>
+                [session, attachment, activity, detail].join('\t'),
+              )
+              .join('\n'),
+          );
+        } else {
+          res.end(JSON.stringify({ participants }));
+        }
       });
       const port = await listenLoopback(windowServer);
       windows.push(windowServer);
@@ -1110,9 +1163,9 @@ describe.skipIf(!TEST_BASH)('forge.sh against the routes', () => {
         1,
       );
       expect(who.out).toContain('Review chat');
-      expect(calls.filter((call) => call.endsWith(':/agent/who'))).toEqual([
-        'window-a:/agent/who',
-        'window-b:/agent/who',
+      expect(calls.filter((call) => call.includes(':/agent/who?'))).toEqual([
+        'window-a:/agent/who?format=text',
+        'window-b:/agent/who?format=text',
       ]);
 
       // Every endpoint file present and none of them answers: that is a failure
@@ -1130,10 +1183,10 @@ describe.skipIf(!TEST_BASH)('forge.sh against the routes', () => {
       const fallback = await runClient(['who'], '');
       expect(fallback.code, fallback.out).toBe(0);
       expect(fallback.out).toContain('Build chat');
-      expect(calls.filter((call) => call.endsWith(':/agent/who'))).toEqual([
-        'window-a:/agent/who',
-        'window-b:/agent/who',
-        'window-a:/agent/who',
+      expect(calls.filter((call) => call.includes(':/agent/who?'))).toEqual([
+        'window-a:/agent/who?format=text',
+        'window-b:/agent/who?format=text',
+        'window-a:/agent/who?format=text',
       ]);
     } finally {
       fs.rmSync(path.join(paths.root, 'endpoints'), { recursive: true, force: true });
@@ -1155,18 +1208,26 @@ describe.skipIf(!TEST_BASH)('forge.sh against the routes', () => {
     const asked: string[] = [];
     const windows: http.Server[] = [];
     const windowServer = http.createServer((req, res) => {
-      asked.push(new URL(req.url ?? '/', 'http://localhost').pathname);
+      const requestUrl = new URL(req.url ?? '/', 'http://localhost');
+      asked.push(`${requestUrl.pathname}${requestUrl.search}`);
       const row = (detail: string) => ({
         session: 'codex · Build',
         attachment: 'linked',
         activity: 'idle',
         detail,
       });
-      res.end(
-        JSON.stringify({
-          participants: [row('Build chat'), row('Second chat'), row('Build chat')],
-        }),
-      );
+      const participants = [row('Build chat'), row('Second chat'), row('Build chat')];
+      if (requestUrl.searchParams.get('format') === 'text') {
+        res.end(
+          participants
+            .map(({ session, attachment, activity, detail }) =>
+              [session, attachment, activity, detail].join('\t'),
+            )
+            .join('\n'),
+        );
+      } else {
+        res.end(JSON.stringify({ participants }));
+      }
     });
     try {
       const port = await listenLoopback(windowServer);
@@ -1195,7 +1256,7 @@ describe.skipIf(!TEST_BASH)('forge.sh against the routes', () => {
       expect(rows).toHaveLength(2);
       expect(who.out).toContain('Second chat');
       expect(rows.filter((row) => row.includes('Build chat'))).toHaveLength(1);
-      expect(asked).toEqual(['/agent/who', '/agent/who']);
+      expect(asked).toEqual(['/agent/who?format=text', '/agent/who?format=text']);
     } finally {
       fs.rmSync(path.join(paths.root, 'endpoints'), { recursive: true, force: true });
       await Promise.all(
@@ -1766,6 +1827,27 @@ describe('GET /agent/who', () => {
     const body = (await ok.json()) as { participants: unknown[] };
     expect(body.participants).toHaveLength(2);
     expect((body.participants[1] as { session: string }).session).toBe('codex · Build');
+  });
+
+  it('serves text rows without parsing-sensitive punctuation and sanitizes field breaks', async () => {
+    const participants = [
+      { session: 'claude · Job "Maya" [maya-update]', attachment: 'linked', activity: 'idle', detail: 'Title [x]' },
+      { session: 'codex · tab\tnewline\r\n', attachment: 'linked', activity: 'busy', detail: 'detail\tline\nnext' },
+    ];
+    install({
+      paths: () => paths,
+      inbox: stubInbox(),
+      token: TOKEN,
+      who: () => participants,
+    });
+
+    const text = await get('/agent/who?format=text');
+    expect(text.headers.get('content-type')).toBe('text/plain; charset=utf-8');
+    expect(await text.text()).toBe(
+      'claude · Job "Maya" [maya-update]\tlinked\tidle\tTitle [x]\n' +
+        'codex · tab newline  \tlinked\tbusy\tdetail line next\n',
+    );
+    expect(await (await get('/agent/who')).json()).toEqual({ participants });
   });
 
   it('is a GET-only route: a POST to /agent/who is 405', async () => {

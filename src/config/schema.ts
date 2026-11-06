@@ -263,8 +263,8 @@ export const ForgeConfigShape = {
   tools: ToolsConfigSchema,
   /**
    * Skills: instruction folders the model can open with `load_skill`. Absent
-   * means off — no catalog in the prompt and no `load_skill` schema, so a
-   * workspace that has none pays nothing for the feature (`toolsSchema.ts`).
+   * means on; `enabled: false` omits the catalog and `load_skill` schema
+   * (`toolsSchema.ts`).
    */
   skills: SkillsConfigSchema,
   engines: EnginesSchema,

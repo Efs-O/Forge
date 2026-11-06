@@ -150,4 +150,15 @@ describe('a decline by a human says no, and nothing else', () => {
     expect(neverRanResult(timedOut)).toBe(true);
     expect(isFailureResult(timedOut)).toBe(false);
   });
+
+  it('says no card was shown for a carried-over timeout', () => {
+    const carried = toolApprovalResult('write_file', {
+      kind: 'timeout',
+      minutes: 15,
+      carried: true,
+    });
+    expect(carried).toBe(
+      'Not run: an approval earlier in this turn went unanswered for 15 min, so no card was shown for this write_file call. Do not retry it this turn. Finish the remaining steps, then list this one as not done in your final reply.',
+    );
+  });
 });

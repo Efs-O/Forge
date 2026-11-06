@@ -52,9 +52,8 @@ import {
 // Reference measurement updated 2026-10-29 (skills lane F2): `load_skill` is
 // registered and advertised, +455 chars on the 89-tool catalog (90 tools, the
 // 300-char description plus the one-argument schema), so the gate number is
-// 61,203. Skills are off unless a workspace writes `skills: { enabled: true }`,
-// so a config that never asks for them still advertises nothing and pays
-// nothing -- the maximal config below is what turns it on.
+// 61,203. Skills are on unless `skills.enabled: false`; the maximal config
+// below includes `load_skill` and measures the advertised cost.
 // Reference measurement updated 2026-10-29 (tool-trim lane B, follow-up to B2):
 // `write_file`'s top-level description no longer says that `mode "append"` adds
 // to the end — the hold-back strips the `mode` property from the offer until a
@@ -207,7 +206,7 @@ function makeMaximalRegistry(): ToolRegistry {
     jobs,
     // The skills provider, so the maximally-advertised set prices `load_skill` in:
     // an unwired registry advertises it (nothing installed), which is exactly what
-    // a config with `skills: { enabled: true }` and no skill folders shows.
+    // a config with skills enabled and no skill folders shows.
     {
       isEnabled: () => true,
       listCatalogEntries: () => [],

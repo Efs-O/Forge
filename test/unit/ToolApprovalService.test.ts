@@ -395,6 +395,7 @@ describe('ToolApprovalService', () => {
     await expect(service.request('write_file', 'two', true, 'conv-1')).resolves.toEqual({
       kind: 'timeout',
       minutes: 1,
+      carried: true,
     });
     expect(
       posted.filter((message) => message.type === 'confirmRequest' && message.conversationId === 'conv-1'),

@@ -111,7 +111,7 @@ export function makeLoadSkillTool(provider: LoadSkillProvider): RegisteredTool {
       if (!provider.isEnabled()) {
         return (
           'Error: skills are off (`skills.enabled: false` in config.yaml). ' +
-          'Turn them on with `skills: { enabled: true }` to load a skill.'
+          'Remove that setting, or set `enabled: true`, to load a skill.'
         );
       }
       const raw = args['name'];

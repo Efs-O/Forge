@@ -11,7 +11,10 @@
 
 import type { ApprovalOffer } from './approvalMessages';
 
-export type ToolApprovalOutcome = 'approved' | 'declined' | { kind: 'timeout'; minutes: number };
+export type ToolApprovalOutcome =
+  | 'approved'
+  | 'declined'
+  | { kind: 'timeout'; minutes: number; carried?: true };
 
 /**
  * Format a declined or timed-out approval for the model's tool-result row.
@@ -30,7 +33,9 @@ export function toolApprovalResult(
 ): string {
   return typeof outcome === 'string'
     ? `User declined: ${toolName}. The user said no to this action: do not do the same thing another way (another tool, command or path) unless they ask for it.`
-    : `Not run: nobody answered the approval for ${toolName} within ${outcome.minutes} min. ` +
+    : outcome.carried
+      ? `Not run: an approval earlier in this turn went unanswered for ${outcome.minutes} min, so no card was shown for this ${toolName} call. Do not retry it this turn. Finish the remaining steps, then list this one as not done in your final reply.`
+      : `Not run: nobody answered the approval for ${toolName} within ${outcome.minutes} min. ` +
         'Do not retry it this turn. Finish the remaining steps, then list this one as not done in your final reply.';
 }
 

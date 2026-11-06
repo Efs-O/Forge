@@ -57,6 +57,11 @@ body {
   font-weight: 500;
   line-height: 1;
   white-space: nowrap;
+  /* Flex centring centres the em box, descender room included, so the
+     lowercase body sat ~3px below the mark's centre. Lift it to split the
+     difference between cap height and x-height (optical centre). */
+  position: relative;
+  top: -2px;
 }
 
 

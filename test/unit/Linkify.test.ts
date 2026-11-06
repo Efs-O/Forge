@@ -1,5 +1,13 @@
 import { describe, expect, it } from 'vitest';
-import { linkifyForRender, parseFileLink, FILE_LINK_SCHEME } from '../../webview-ui/src/linkify';
+import { createElement } from 'react';
+import { renderToStaticMarkup } from 'react-dom/server';
+import Markdown from 'react-markdown';
+import {
+  linkifyForRender,
+  parseFileLink,
+  FILE_LINK_SCHEME,
+  fileLinkUrlTransform,
+} from '../../webview-ui/src/linkify';
 
 function linkedTargets(text: string): string[] {
   return [...linkifyForRender(text).matchAll(/\[([^\]]+)\]\(forge-file:\/\/[^)]*\)/g)].map(
@@ -20,6 +28,17 @@ describe('linkifyForRender — paths', () => {
     ]);
     expect(linkedTargets('check ./config/config.yaml here')).toEqual(['./config/config.yaml']);
     expect(linkedTargets('and ../shared/util.ts too')).toEqual(['../shared/util.ts']);
+  });
+
+  it('keeps absolute roots, including Windows drives and UNC shares', () => {
+    for (const target of [
+      'N:\\Strata\\local\\LLM_FILES_INVENTORY.md',
+      'N:\\inventory.md',
+      '/tmp/inventory.md',
+      '\\\\server\\share\\inventory.md',
+    ]) {
+      expect(linkedTargets(`see ${target}.`)).toEqual([target]);
+    }
   });
 
   it('keeps a line suffix as part of the target', () => {
@@ -63,6 +82,26 @@ describe('linkifyForRender — paths', () => {
 });
 
 describe('linkifyForRender — protected regions', () => {
+  it('links the owner example while preserving code styling and the complete drive path', () => {
+    const target = 'N:\\Strata\\local\\LLM_FILES_INVENTORY.md';
+    const text = `Space list: \`${target}\`. 9`;
+    const href = `${FILE_LINK_SCHEME}${encodeURIComponent(target)}`;
+    expect(linkifyForRender(text)).toBe(`Space list: [\`${target}\`](${href}). 9`);
+    const rendered = renderToStaticMarkup(
+      createElement(Markdown, { urlTransform: fileLinkUrlTransform }, linkifyForRender(text)),
+    );
+    expect(rendered).toContain(`<a href="${href}"><code>${target}</code></a>`);
+    expect(parseFileLink(href)).toEqual({ path: target });
+  });
+
+  it('links inline paths with spaces and line numbers', () => {
+    for (const target of ['N:\\My Files\\inventory.md:9', 'src/app.ts:42']) {
+      expect(linkifyForRender(`\`${target}\``)).toBe(
+        `[\`${target}\`](${FILE_LINK_SCHEME}${encodeURIComponent(target)})`,
+      );
+    }
+  });
+
   it('leaves fenced code blocks untouched', () => {
     const text = 'before\n\n```ts\nimport "./src/a.ts";\n```\n\nafter src/b.ts';
     const out = linkifyForRender(text);
@@ -90,6 +129,19 @@ describe('linkifyForRender — protected regions', () => {
 });
 
 describe('linkifyForRender — urls', () => {
+  it('keeps filtering executable URLs and custom schemes used as image sources', () => {
+    const rendered = renderToStaticMarkup(
+      createElement(
+        Markdown,
+        { urlTransform: fileLinkUrlTransform },
+        '[bad](javascript:alert%281%29) ![bad](forge-file://src%2Fa.ts)',
+      ),
+    );
+    expect(rendered).not.toContain('javascript:');
+    expect(rendered).not.toContain('src="forge-file:');
+    expect(rendered).toContain('href=""');
+  });
+
   it('links a bare http url', () => {
     expect(linkifyForRender('see https://example.com/docs for more')).toBe(
       'see [https://example.com/docs](https://example.com/docs) for more',

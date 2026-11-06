@@ -1,6 +1,6 @@
 import * as fs from 'fs';
 import type { RegisteredTool } from './ToolRegistry';
-import { resolveRealWorkspacePath } from '../util/WorkspacePaths';
+import { defaultWorkspaceRoot, resolveRealWorkspacePath } from '../util/WorkspacePaths';
 import {
   applyEol,
   describeEditMiss,
@@ -164,7 +164,9 @@ export function makeEditFileTool(
     permission: 'write',
     mutation: { paths: (args) => [args['path'] as string], showDiff: true },
     handler: async (args, context) => {
-      const filepath = await resolveRealWorkspacePath(args['path'] as string, undefined, {
+      const workspaceRoot = defaultWorkspaceRoot();
+      const requestedPath = args['path'] as string;
+      const filepath = await resolveRealWorkspacePath(requestedPath, workspaceRoot, {
         allowMissing: true,
         extraRoots: extraRoots(),
       });
@@ -187,6 +189,11 @@ export function makeEditFileTool(
           throw new Error('file changed while it was being read; re-read and retry');
         }
       } catch (err) {
+        if ((err as NodeJS.ErrnoException).code === 'ENOENT') {
+          throw new Error(
+            `edit_file: no file at ${filepath} (the path "${requestedPath}" resolved against the workspace root ${workspaceRoot}). edit_file changes an existing file only: to create it, use write_file; to look for it, use find_files.`,
+          );
+        }
         throw new Error(`edit_file: cannot read file — ${(err as Error).message}`);
       }
 

@@ -357,9 +357,9 @@ export interface ForgeConfig {
   /**
    * Skills: folders of instructions plus tested scripts, discovered in the
    * shipped `resources/skills/`, `~/.forge/skills/` and the workspace's
-   * `.forge/skills/` (`src/skills/`). Absent means off: no catalog in the system
-   * prompt and no `load_skill` schema, so a workspace with no skills keeps the
-   * prompt prefix and tool list it always had.
+   * `.forge/skills/` (`src/skills/`). Absent means on: the catalog is added to
+   * the system prompt and `load_skill` is advertised. Set `enabled: false` to
+   * omit both.
    */
   skills?: { enabled?: boolean };
   /** External MCP stdio servers whose tools are bridged into the tool registry. */

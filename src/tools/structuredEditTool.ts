@@ -1,6 +1,6 @@
 import * as fs from 'fs';
 import type { RegisteredTool } from './ToolRegistry';
-import { resolveRealWorkspacePath } from '../util/WorkspacePaths';
+import { defaultWorkspaceRoot, resolveRealWorkspacePath } from '../util/WorkspacePaths';
 import { agentWriteOptions, writeFileAtomic } from '../util/atomicWrite';
 import { withFileLengthWarning, type FileLengthWarningGetter } from './fileLengthWarning';
 import { NO_PROBLEM_WATCHER, withProblemNote, type ProblemWatcher } from './editDiagnostics';
@@ -166,7 +166,8 @@ export function makeApplyLineEditsTool(
       const operations = parseOperations(
         liftedFromOperations > 0 ? withoutOperationPaths(args['operations']) : args['operations'],
       );
-      const filePath = await resolveRealWorkspacePath(suppliedPath, undefined, {
+      const workspaceRoot = defaultWorkspaceRoot();
+      const filePath = await resolveRealWorkspacePath(suppliedPath, workspaceRoot, {
         allowMissing: true,
         extraRoots: extraRoots(),
       });
@@ -185,6 +186,11 @@ export function makeApplyLineEditsTool(
           throw new Error('file changed while it was being read; re-read and retry');
         }
       } catch (error) {
+        if ((error as NodeJS.ErrnoException).code === 'ENOENT') {
+          throw new Error(
+            `apply_line_edits: no file at ${filePath} (the path "${suppliedPath}" resolved against the workspace root ${workspaceRoot}). apply_line_edits changes an existing file only: to create it, use write_file; to look for it, use find_files.`,
+          );
+        }
         throw new Error(`apply_line_edits: cannot read file — ${(error as Error).message}`);
       }
       const result = applyLineEditsToContent(content, operations);

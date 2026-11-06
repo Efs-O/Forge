@@ -1,5 +1,22 @@
 # Forge — Recent Changes
 
+## 0.17.126
+
+- Skills are now on unless `config.yaml` says `skills: { enabled: false }`. This
+  covers existing configs with no `skills:` block too: their next new chat lists
+  the shipped and user skills and offers `load_skill`. Set `enabled: false` to
+  keep the previous prompt and tool list.
+
+## 0.17.125
+
+- The warning that this window runs an older Forge now appears once per version
+  pair per window. Dismissing it stops scheduled-job retries and repeated config
+  failures from reopening it; installing a newer version allows a fresh warning.
+- File paths in chat are clickable even when written inside backticks. Clicking
+  opens the file in the editor; Ctrl/Cmd-click opens it beside the current editor.
+  Absolute paths retain their drive or root, and paths in backticks can include
+  spaces. Command snippets and fenced code blocks remain unchanged.
+
 ## 0.17.124
 
 - A video or music render can now free a card that a Strata server is holding.

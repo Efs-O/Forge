@@ -1248,9 +1248,9 @@ agent_links:
 # another): the skills shipped in the VSIX, `~/.forge/skills/` for this PC, and
 # `.forge/skills/` in the open workspace. A skill grants nothing — its scripts
 # run through `shell` under the same approvals as any other command.
-# Absent means OFF: one line per skill in the system prompt plus a `load_skill`
-# schema on every round is the cost, so a workspace with no skills keeps the
-# prompt it always had. Turn it on to get the catalog and the tool.
+# Skills are ON unless disabled: one line per skill in the system prompt plus a
+# `load_skill` schema on every round is the cost. The catalog is capped at 4,000
+# characters. Add `skills:` and set `enabled: false` to turn skills off.
 # skills:
 #   enabled: false
 

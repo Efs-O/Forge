@@ -512,10 +512,15 @@ describe('SkillsService', () => {
     expect(conv.skillsCatalog).toBe(service.catalogFor(conv));
   });
 
-  it('returns nothing when skills are off, and a fresh build when they are switched on', () => {
+  it('lists skills when config is absent and omits the catalog only when explicitly disabled', () => {
     makeSkill(userRoot, 'first');
     writeManifest(path.join(userRoot, 'first'), manifest('first'));
-    let config: ForgeConfig = { active_model: null, models: [], llama_server: {} };
+    let config: ForgeConfig = {
+      active_model: null,
+      models: [],
+      llama_server: {},
+      skills: { enabled: false },
+    };
     const service = new SkillsService({
       getConfig: () => config,
       extensionPath: fakeExtension,
@@ -526,7 +531,7 @@ describe('SkillsService', () => {
     const conv = conversation();
     expect(service.catalogFor(conv)).toBeUndefined();
     expect(conv.skillsCatalog).toBeUndefined();
-    config = { ...config, skills: { enabled: true } };
+    config = { active_model: null, models: [], llama_server: {} };
     expect(service.catalogFor(conv)).toContain('first');
   });
 

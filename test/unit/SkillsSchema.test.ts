@@ -41,8 +41,8 @@ function registryWithSkills(skills: ForgeConfig['skills']): ToolRegistry {
   };
   registry.register(
     makeLoadSkillTool({
-      // The same rule `SkillsService.isEnabled()` implements: absent means off.
-      isEnabled: () => config.skills?.enabled === true,
+      // The same rule `SkillsService.isEnabled()` implements: only false opts out.
+      isEnabled: () => config.skills?.enabled !== false,
       listCatalogEntries: () => [],
       loadSkill: async () => null,
     }),
@@ -102,7 +102,7 @@ describe('the example config and the starter', () => {
     expect(block).toContain('.forge/skills');
   });
 
-  it('leaves a generated starter without the block, because absent means off', () => {
+  it('leaves a generated starter without a skills setting', () => {
     const starter = ForgeConfigSchema.parse(makeOllamaStarterConfig('http://127.0.0.1:11434', ['m']));
     expect(starter.skills).toBeUndefined();
   });
@@ -120,16 +120,19 @@ describe('the registration gate', () => {
     expect(String(result)).toContain('enabled');
   });
 
-  it('advertises it when the block is enabled, and not when the block is absent', () => {
+  it('advertises it when skills are absent or enabled, and hides it when explicitly disabled', () => {
     const enabled = registryWithSkills({ enabled: true });
     expect(
       enabled.definitions(new Set(ALL_TOOL_PERMISSIONS)).map((tool) => tool.function.name),
     ).toContain('load_skill');
-    // Absent means off, the same convention as `tools.file_length_warning`: a
-    // workspace that never asks for skills pays neither the catalog nor the schema.
+    // Absent means on, so new conversations see both the catalog and the tool.
     const unwritten = registryWithSkills(undefined);
     expect(
       unwritten.definitions(new Set(ALL_TOOL_PERMISSIONS)).map((tool) => tool.function.name),
+    ).toContain('load_skill');
+    const disabled = registryWithSkills({ enabled: false });
+    expect(
+      disabled.definitions(new Set(ALL_TOOL_PERMISSIONS)).map((tool) => tool.function.name),
     ).not.toContain('load_skill');
   });
 });

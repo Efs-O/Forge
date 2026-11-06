@@ -49,6 +49,28 @@ describe('edit_file batch cap', () => {
   });
 });
 
+describe('edit_file missing-file diagnosis', () => {
+  it('names the absolute target, given path, workspace root, and creation tool', async () => {
+    const missing = path.join(process.cwd(), `edit-missing-${process.pid}.txt`);
+    await expect(
+      makeEditFileTool().handler({ path: missing, old_str: 'before', new_str: 'after' }),
+    ).rejects.toThrow(
+      `edit_file: no file at ${missing} (the path "${missing}" resolved against the workspace root ${process.cwd()}). edit_file changes an existing file only: to create it, use write_file; to look for it, use find_files.`,
+    );
+  });
+
+  it('keeps the existing message for a non-ENOENT read error', async () => {
+    const directory = fs.mkdtempSync(path.join(process.cwd(), '.forge-edit-read-error-'));
+    try {
+      await expect(
+        makeEditFileTool().handler({ path: directory, old_str: 'before', new_str: 'after' }),
+      ).rejects.toThrow('edit_file: cannot read file —');
+    } finally {
+      fs.rmSync(directory, { recursive: true, force: true });
+    }
+  });
+});
+
 describe('edit_file cancellable save', () => {
   it('passes the turn AbortSignal to writeFileAtomic', async () => {
     fs.writeFileSync(target, 'before');

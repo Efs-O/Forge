@@ -122,8 +122,16 @@ export function detectStaleBuild(): string | undefined {
   );
 }
 
-/** The toast naming both versions, with the button that actually fixes it. */
+// In-memory for this window only. Detection and failure reporting still run on
+// every call; dismissing a toast must survive scheduler retries. A new version
+// pair produces a new notice and can warn again without reloading the window.
+const shownStaleBuildWarnings = new Set<string>();
+
+/** Show each version notice once per window, keeping the reload action. */
 export async function showStaleBuildWarning(notice: string): Promise<void> {
+  if (shownStaleBuildWarnings.has(notice)) return;
+  // Remember before awaiting: another job can check while this toast is open.
+  shownStaleBuildWarnings.add(notice);
   const picked = await vscode.window.showWarningMessage(notice, 'Reload Window');
   if (picked === 'Reload Window')
     await vscode.commands.executeCommand('workbench.action.reloadWindow');
@@ -133,8 +141,8 @@ export async function showStaleBuildWarning(notice: string): Promise<void> {
  * The config-failure hook: when a config load or write fails, say if this
  * window is behind the installed build, because that is the difference between
  * "your config is wrong" and "this window is validating your config with last
- * night's rules". Logged every time — the toast fires only while the window is
- * behind, so it cannot repeat on every keystroke-to-disk once the build matches.
+ * night's rules". Logged every time; the toast is shown once per version pair
+ * in this window, even when config failures or scheduler retries repeat.
  */
 export function noticeStaleBuildOnConfigFailure(): void {
   const notice = detectStaleBuild();

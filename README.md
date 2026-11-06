@@ -96,6 +96,20 @@ telemetry, analytics, or auto-update pings.
   diagnostics, code actions, and symbol rename through VS Code's own language servers
 - Durable agent memory across sessions (`remember` / `recall`)
 
+## Skills
+
+Skills are folders containing a `SKILL.md` with `name` and `description`
+frontmatter, plus optional `scripts/`. They use the same format as Claude Code
+and Codex. Forge lists shipped skills, then skills in `~/.forge/skills/<name>/`,
+then `.forge/skills/<name>/` in the open workspace. When two folders have the
+same name, the later location wins.
+
+New skills appear in the next new chat because Forge builds the catalog once per
+conversation. Skills grant no permissions: scripts run through `shell` under
+the normal approvals. Skills are on by default; set `skills.enabled: false` in
+`config.yaml` to turn them off. For a worked example to copy, see
+[hf-download](resources/skills/hf-download/).
+
 ## What's New
 
 Forge ships a **Changelog** tab next to this one — that is the full account,

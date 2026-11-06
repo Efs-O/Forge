@@ -5,7 +5,12 @@ import rehypeHighlight from 'rehype-highlight';
 import type { AppMessage } from '../App';
 import { vscode } from '../vscode';
 import { normalizeMarkdownForRender } from '../markdown';
-import { FILE_LINK_SCHEME, linkifyForRender, parseFileLink } from '../linkify';
+import {
+  FILE_LINK_SCHEME,
+  fileLinkUrlTransform,
+  linkifyForRender,
+  parseFileLink,
+} from '../linkify';
 import { MessageAttachments } from './MessageAttachments';
 import { formatMessageTimestamp } from '../messageTimestamp';
 import { parseChatMessage } from '../../../src/sidebar/chatMessageText';
@@ -132,6 +137,7 @@ function AssistantContent({
         remarkPlugins={[remarkGfm]}
         rehypePlugins={[rehypeHighlight]}
         components={markdownComponents}
+        urlTransform={fileLinkUrlTransform}
       >
         {renderContent}
       </Markdown>
@@ -145,6 +151,7 @@ function AssistantContent({
           remarkPlugins={[remarkGfm]}
           rehypePlugins={[rehypeHighlight]}
           components={markdownComponents}
+          urlTransform={fileLinkUrlTransform}
         >
           {settled}
         </Markdown>

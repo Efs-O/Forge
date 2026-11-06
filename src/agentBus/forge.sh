@@ -10,7 +10,7 @@
 #   forge.sh steer <your-name> <to> [--to <conversationId>] [file] forge: interrupt the running turn and run this next (--to only here); claude/codex/copilot: withdraw this chat's earlier ask to that agent and ask this instead
 #   forge.sh stop <your-name> [--to <conversationId>]  cancel a running Forge turn; queued messages may still start
 #   forge.sh cancel <your-name> <id|all>  withdraw your queued message(s) to Forge not yet started
-#   forge.sh who                      every live Forge window's linked agent sessions, one row per linked chat
+#   forge.sh who                      every live Forge window's linked agent sessions, one row per linked chat (titles may contain brackets or quotes)
 #   forge.sh status <your-name> [--to <conversationId>]  what your chat with Forge is doing now (tool, last words, context); --to reads a chat linked to your session, and a chat that is not linked is refused by name; before your first turn starts, your queue
 #   forge.sh view <your-name> [n] [--to <conversationId>]  the last n answers in your chat (default 3, max 10); --to reads a chat linked to your session
 #   forge.sh wait <your-name> [minutes]  block until your chat is idle with nothing queued (default 60 min, exit 124 on timeout)
@@ -112,17 +112,18 @@ if [ "$VERB" = "who" ]; then
     [ -f "$WHO_EP" ] || continue
     URL="$(grep '"url"' "$WHO_EP" | cut -d'"' -f4)"
     TOKEN="$(grep '"token"' "$WHO_EP" | cut -d'"' -f4)"
+    WINDOW_ID="$(grep '"windowId"' "$WHO_EP" | cut -d'"' -f4)"
     [ -n "$URL" ] && [ -n "$TOKEN" ] || continue
-    BODY="$(curl -sS --connect-timeout 1 --max-time 3 --fail-with-body -X GET -H "Authorization: Bearer $TOKEN" "$URL/agent/who" 2>/dev/null)" || continue
+    BODY="$(curl -sS --connect-timeout 1 --max-time 3 --fail-with-body -X GET -H "Authorization: Bearer $TOKEN" "$URL/agent/who?format=text" 2>/dev/null)" || continue
     WHO_REACHED=1
-    printf '%s\n' "$BODY" | sed 's/.*\[/[/;s/\].*//' | sed 's/},{/}\n{/g' >> "$WHO_TMP"
+    case "$BODY" in
+      \{*) echo "forge.sh: window $WINDOW_ID runs an older Forge; update it to list its sessions" >&2; continue ;;
+    esac
+    printf '%s\n' "$BODY" >> "$WHO_TMP"
   done
   [ "$WHO_REACHED" = 1 ] || { echo "forge.sh: not reachable: open Forge with control_server and agent_bus enabled" >&2; exit 1; }
-  awk -F'"' '{
-    s="";att="";act="";det=""
-    for(i=1;i<=NF;i++){ if($i=="session")s=$(i+2); else if($i=="attachment")att=$(i+2); else if($i=="activity")act=$(i+2); else if($i=="detail")det=$(i+2) }
-    if (s == "") next
-    row=sprintf("%-8s  %-9s  %-9s  %s", s, att, act, det)
+  awk -F'\t' 'NF >= 3 {
+    row=sprintf("%-8s  %-9s  %-9s  %s", $1, $2, $3, $4)
     if (!seen[row]++) print row
   }' "$WHO_TMP"
   exit 0

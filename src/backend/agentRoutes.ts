@@ -12,6 +12,7 @@ import type {
   InboxMessageOptions,
 } from '../agentBus/agentInbox';
 import { sendJson, sendText } from './controlHttp';
+import { formatWhoText } from './agentWhoText';
 import { handleAgentFileRoute } from './agentFileRoute';
 import { handleVerdictAck, handleVerdictRead } from './agentVerdictRoute';
 import { handleAgentReplyRoute } from './agentReplyRoute';
@@ -281,6 +282,9 @@ export class AgentRoutes {
     if (route === '/agent/who') {
       if (req.method !== 'GET') return sendJson(res, 405, { error: 'GET only' });
       const participants = await this.deps.who?.();
+      if (url.searchParams.get('format') === 'text') {
+        return sendText(res, 200, formatWhoText(participants));
+      }
       return sendJson(res, 200, { participants });
     }
     if (route === '/agent/status' || route === '/agent/view') {

@@ -897,6 +897,7 @@ the configured override stays the existing `video.ffmpeg_path` key.
 | Which chat an inbound bus message lands in (sender affinity) | `src/agentBus/busTarget.ts`                                    |
 | Plain-text bus status, queue and transcript answers      | `src/agentBus/busStatusView.ts`                                |
 | `/agent/message` + `/agent/reply` routes, endpoint.json    | `src/backend/agentRoutes.ts`                                   |
+| `/agent/who?format=text` participant field projection       | `src/backend/agentWhoText.ts`                                   |
 | `GET /agent/status` + `GET /agent/view` — read the sender's own chat, or one linked to its session | `src/backend/agentChatReadRoute.ts` |
 | Authenticated `/agent/send-file` route                    | `src/backend/agentFileRoute.ts`                                |
 | Agent-route request body parsing                           | `src/backend/agentRouteFields.ts`                              |

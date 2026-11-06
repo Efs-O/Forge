@@ -3,6 +3,7 @@
  * contract `normalizeMarkdownForRender` follows — so a transcript round-trips
  * unaltered through persistence.
  */
+import { defaultUrlTransform, type UrlTransform } from 'react-markdown';
 
 /**
  * Extensions a bare token must end in to be treated as a file path. The list is
@@ -58,6 +59,14 @@ const PATH_EXTENSIONS = [
 ] as const;
 
 const EXT_GROUP = PATH_EXTENSIONS.join('|');
+const LINE_SUFFIX = String.raw`(?::\d+(?::\d+)?)?`;
+const PATH_TOKEN = String.raw`(?:(?:[A-Za-z]:[\\/]|[\\/]{1,2})(?:[\w.@~-]+[\\/])*|(?:\.{1,2}[\\/])?(?:[\w.@~-]+[\\/])+)[\w.@-]+\.(?:${EXT_GROUP})${LINE_SUFFIX}`;
+// Spaces are unambiguous inside a code span only with an absolute root. A
+// relative command such as `node src/app.ts` must stay code, not become a link.
+const INLINE_PATH_PATTERN = new RegExp(
+  String.raw`^(?:${PATH_TOKEN}|(?:[A-Za-z]:[\\/]|[\\/]{1,2})(?:[\w.@~ ()-]+[\\/])*[\w.@ ()-]+\.(?:${EXT_GROUP})${LINE_SUFFIX})$`,
+  'i',
+);
 
 /**
  * A path-shaped token: at least one separator, a filename, one of the known
@@ -67,7 +76,7 @@ const EXT_GROUP = PATH_EXTENSIONS.join('|');
 const PATH_PATTERN = new RegExp(
   String.raw`(^|[\s(\[<"'` +
     '`' +
-    String.raw`])((?:\.{1,2}[\\/])?(?:[\w.@~-]+[\\/])+[\w.@-]+\.(?:${EXT_GROUP})(?::\d+(?::\d+)?)?)(?=$|[\s)\]>,;:."'` +
+    String.raw`])(${PATH_TOKEN})(?=$|[\s)\]>,;:."'` +
     '`' +
     String.raw`]|:(?!\d))`,
   'gi',
@@ -76,6 +85,10 @@ const PATH_PATTERN = new RegExp(
 const BARE_URL_PATTERN = /(^|[\s([<])(https?:\/\/[^\s)\]<>"'`]+[^\s)\]<>"'`.,;:!?])/gi;
 
 export const FILE_LINK_SCHEME = 'forge-file://';
+
+/** Keep editor links; retain react-markdown's URL filtering everywhere else. */
+export const fileLinkUrlTransform: UrlTransform = (url, key) =>
+  key === 'href' && url.startsWith(FILE_LINK_SCHEME) ? url : defaultUrlTransform(url);
 
 export interface ParsedFileLink {
   path: string;
@@ -92,8 +105,8 @@ export function parseFileLink(href: string): ParsedFileLink {
 
 /**
  * Marks up bare file paths and URLs as Markdown links. Anything already inside a
- * fenced block, an inline-code span, or an existing Markdown link is left alone —
- * a path inside a code sample is content, not navigation.
+ * fenced block or an existing Markdown link is left alone. An inline-code span
+ * becomes a link only when the entire span is a file path, keeping code styling.
  */
 export function linkifyForRender(content: string): string {
   return mapUnprotectedSegments(content, (segment) =>
@@ -109,7 +122,7 @@ export function linkifyForRender(content: string): string {
 
 /**
  * Applies `transform` to the parts of `content` that are plain prose, skipping
- * fenced code blocks, inline code spans and existing Markdown links.
+ * fenced code blocks, command/code spans and existing Markdown links.
  */
 function mapUnprotectedSegments(content: string, transform: (text: string) => string): string {
   // Fenced blocks first — an inline-code or link pattern inside a fence is code.
@@ -118,7 +131,12 @@ function mapUnprotectedSegments(content: string, transform: (text: string) => st
   let last = 0;
   for (const match of content.matchAll(protectedPattern)) {
     const start = match.index;
-    out += transform(content.slice(last, start)) + match[0];
+    const inlinePath = /^`([^`\n]+)`$/.exec(match[0])?.[1];
+    const protectedText =
+      inlinePath && INLINE_PATH_PATTERN.test(inlinePath)
+        ? `[${match[0]}](${FILE_LINK_SCHEME}${encodeURIComponent(inlinePath)})`
+        : match[0];
+    out += transform(content.slice(last, start)) + protectedText;
     last = start + match[0].length;
   }
   return out + transform(content.slice(last));

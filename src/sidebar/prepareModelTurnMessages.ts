@@ -39,8 +39,8 @@ export interface PrepareModelTurnMessagesInput {
   workspaceIsProjectRoot: boolean;
   /**
    * The conversation's frozen skills catalog, snapshotted for the turn by
-   * `ModelTurn` from `src/skills/skillsService.ts`. Absent means skills are off
-   * or there are none, and the prompt gains no block.
+   * `ModelTurn` from `src/skills/skillsService.ts`. No catalog means skills are
+   * disabled or none were discovered, and the prompt gains no block.
    */
   skillsCatalog?: string;
   turnContext: TurnContextState;

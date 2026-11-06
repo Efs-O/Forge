@@ -13,6 +13,36 @@ vi.mock('vscode', () => ({
 }));
 
 describe('apply_line_edits', () => {
+  it('names the absolute target, given path, workspace root, and creation tool when missing', async () => {
+    const missing = path.join(process.cwd(), `line-edit-missing-${process.pid}.txt`);
+    await expect(
+      makeApplyLineEditsTool().handler({
+        path: missing,
+        operations: [
+          { start_line: 1, end_line: 1, expected_lines: ['before'], replacement_lines: ['after'] },
+        ],
+      }),
+    ).rejects.toThrow(
+      `apply_line_edits: no file at ${missing} (the path "${missing}" resolved against the workspace root ${process.cwd()}). apply_line_edits changes an existing file only: to create it, use write_file; to look for it, use find_files.`,
+    );
+  });
+
+  it('keeps the existing message for a non-ENOENT read error', async () => {
+    const directory = fs.mkdtempSync(path.join(process.cwd(), '.forge-line-edit-read-error-'));
+    try {
+      await expect(
+        makeApplyLineEditsTool().handler({
+          path: directory,
+          operations: [
+            { start_line: 1, end_line: 1, expected_lines: ['before'], replacement_lines: ['after'] },
+          ],
+        }),
+      ).rejects.toThrow('apply_line_edits: cannot read file —');
+    } finally {
+      fs.rmSync(directory, { recursive: true, force: true });
+    }
+  });
+
   it('passes the turn AbortSignal to writeFileAtomic', async () => {
     const directory = fs.mkdtempSync(path.join(process.cwd(), '.forge-line-edit-signal-'));
     const filePath = path.join(directory, 'sample.ts');

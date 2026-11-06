@@ -60,6 +60,8 @@ workspace contains the sender's current folder; failing that, the last focused
 Forge window (if that one closes, another open window takes over without being
 focused). \`forge.sh who\` asks every window that answers and prints each
 linked chat once, so a closed window is skipped instead of printing nothing.
+It requests tab-delimited text so titles may contain brackets or quotes; an
+older Forge window that only returns JSON is named on stderr and skipped.
 \`forge.sh say <name> --new\` opens and selects a new chat there;
 ordinary \`say\` follows that sender's previous chat without changing the view.
 Use \`say <name> --to <conversationId>\` to select a specific Forge chat, or

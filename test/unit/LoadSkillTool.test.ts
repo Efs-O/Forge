@@ -191,10 +191,9 @@ describe('load_skill', () => {
     expect(String(await tool.handler({ name: '   ' }, context))).toContain('name');
   });
 
-  it('refuses while skills are off, naming the config line that turns them on', async () => {
-    const tool = makeLoadSkillTool(serviceFor());
-    // `skills:` absent means off, like every other optional block in `tools:`.
-    expect(tool.advertise?.()).toBe(false);
+  it('refuses only when skills are explicitly disabled', async () => {
+    const absent = makeLoadSkillTool(serviceFor());
+    expect(absent.advertise?.()).toBe(true);
     const on = makeLoadSkillTool(serviceFor({ skills: { enabled: true } }));
     expect(on.advertise?.()).toBe(true);
     const off = makeLoadSkillTool(serviceFor({ skills: { enabled: false } }));

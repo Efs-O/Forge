@@ -26,9 +26,11 @@ export class ApprovalTimeoutState {
   }
 
   /** A chat whose card went unanswered: its next call gets that timeout, not a card. */
-  timedOutResult(conversationId: string): { kind: 'timeout'; minutes: number } | undefined {
+  timedOutResult(
+    conversationId: string,
+  ): { kind: 'timeout'; minutes: number; carried: true } | undefined {
     if (!this.timedOut.has(conversationId)) return undefined;
-    return { kind: 'timeout', minutes: this.minutesById.get(conversationId) ?? 0 };
+    return { kind: 'timeout', minutes: this.minutesById.get(conversationId) ?? 0, carried: true };
   }
 
   /** Record the timeout, so later calls in this chat do not wait either. `set` and

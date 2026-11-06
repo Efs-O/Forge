@@ -234,7 +234,7 @@ export function registerAllTools(
   // see cannot be asked for, and its catalog line is already in the prompt, so
   // holding this tool back would make half the catalog unreachable for a
   // `load_tool_group` round. Ungrouped means the schema is on every turn when
-  // skills are on -- which is why `skills:` is off unless a workspace asks for it.
+  // skills are on -- which is why `skills.enabled: false` opts out of the schema.
   registry.register(
     makeLoadSkillTool(
       skills ?? {
