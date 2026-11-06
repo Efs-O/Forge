@@ -5,6 +5,7 @@ import { baseProgram, type ShellKind } from './shellCommandTokens';
 import { parseCommand } from './shellCommandParse';
 import type { RedirectTarget } from './shellCommandParse';
 import type { ShellTokenRule } from './DenyList';
+import { commandIsAllReadOnly } from './shellReadOnlyRules';
 
 const MAX_SCRIPT_BYTES = 256 * 1024;
 const MAX_SCRIPT_DEPTH = 3;
@@ -229,17 +230,18 @@ export function scriptCommandsFor(
         sameScriptPath(redirect.target, absolute, options),
       ).length ?? 0;
     const otherRedirect = matchingRedirects > (pairedRedirect ? 1 : 0);
-    const otherArgument = parsed.statements.some(
-      (statement, index) =>
-        index !== launch.statementIndex &&
-        statement
-          .slice(1)
-          .some(
-            (token) =>
-              sameScriptPath(token, absolute, options) &&
-              (!pairedRedirect || !sameScriptPath(token, pairedRedirect, options)),
-          ),
-    );
+    const otherArgument = parsed.statements.some((statement, index) => {
+      if (index === launch.statementIndex) return false;
+      const program = baseProgram(statement[0] ?? '');
+      if (program === 'chmod' || commandIsAllReadOnly([statement], shell)) return false;
+      return statement
+        .slice(1)
+        .some(
+          (token) =>
+            sameScriptPath(token, absolute, options) &&
+            (!pairedRedirect || !sameScriptPath(token, pairedRedirect, options)),
+        );
+    });
     if (otherRedirect || otherArgument)
       return { scripts, error: `runs a script this same command changes (${absolute})` };
     const inlineBody = body?.text;

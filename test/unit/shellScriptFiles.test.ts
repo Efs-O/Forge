@@ -109,6 +109,27 @@ describe('shell scripts are classified from their file contents', () => {
     expect(result.rule?.description).toBe(`runs a script this same command changes (${abs('s.sh')})`);
   });
 
+  it.each([
+    'chmod +x s.sh && ./s.sh',
+    'cat s.sh && bash s.sh',
+    'ls -la s.sh; bash s.sh',
+  ])('does not treat a non-writing mention in %s as a script rewrite', (command) => {
+    const result = classifyShellCommand(command, 'bash', check({ [abs('s.sh')]: 'ls' }));
+    const direct = classifyShellCommand('bash s.sh', 'bash', check({ [abs('s.sh')]: 'ls' }));
+    expect(result.classification).toBe(direct.classification);
+    expect(result.rule?.description).toBe(direct.rule?.description);
+  });
+
+  it('classifies an in-place sed rewrite of a script run later in the command as dangerous', () => {
+    const result = classifyShellCommand(
+      "sed -i 's/a/b/' s.sh && bash s.sh",
+      'bash',
+      check({ [abs('s.sh')]: 'ls' }),
+    );
+    expect(result.classification).toBe('dangerous');
+    expect(result.rule?.description).toBe(`runs a script this same command changes (${abs('s.sh')})`);
+  });
+
   it('pairs a here-document body with its own redirect after an unrelated redirect', () => {
     const command =
       "echo note > a.txt\ncat > s.sh <<'EOF'\nrm -rf /c/x\nEOF\nbash s.sh";
