@@ -152,6 +152,9 @@ export async function runCloudProviderTurn(
     }
     log.error(`[AgentLoop] ${model.provider} setup failed: ${msg}`);
     postC({ type: 'error', message: msg });
+    // Setup can refuse a model switch while another chat holds the GPUs.
+    // No prompt was committed yet; preserve it just as local startup does.
+    postC({ type: 'setInput', text });
     ctx.lifecycle.settle(convId);
     return { kind: 'failed', error: msg, finalText: '' };
   }

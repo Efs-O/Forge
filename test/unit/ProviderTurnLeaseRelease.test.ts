@@ -77,6 +77,7 @@ import {
 } from '../../src/sidebar/ProviderTurn';
 import { TurnLifecycle } from '../../src/sidebar/TurnLifecycle';
 import { SystemPromptRenderError } from '../../src/llm/SystemPromptInjector';
+import * as cloudRequestResolver from '../../src/llm/CloudRequestResolver';
 import { BackendPool } from '../../src/backend/BackendPool';
 import type { ForgeConfig, ModelConfig } from '../../src/config/types';
 import type { ConversationRuntime } from '../../src/sidebar/sessionTypes';
@@ -330,6 +331,90 @@ describe('runLocalProviderTurn turn-lease release', () => {
 });
 
 describe('managed external turn failures', () => {
+  it.each(['hold', 'startup'] as const)(
+    'restores an uncommitted prompt after a %s refusal and permits retry',
+    async (failureAt) => {
+      const pool = countingPool();
+      const release = vi.fn();
+      const acquireHold = vi.fn().mockResolvedValue({ release });
+      Object.assign(pool, { acquireExternalTurnHold: acquireHold });
+      const target = vi.spyOn(cloudRequestResolver, 'resolveCloudRequestTarget');
+      target.mockResolvedValue({ baseUrl: 'http://127.0.0.1:8080', apiKey: '' });
+      const error = new Error('Cannot load model B: model A is serving another chat.');
+      if (failureAt === 'hold') acquireHold.mockRejectedValueOnce(error);
+      else target.mockRejectedValueOnce(error);
+      const h = fakeHarness(pool);
+      const commit = vi.fn();
+      h.ctx.commitUserPrompt = commit;
+      const post = vi.fn();
+      const request = {
+        conv: { ...fakeConv(), title: 'New chat' },
+        model: { ...fakeModel('B'), provider: 'openai-compatible' as const },
+        text: 'Keep this whole prompt\nso I can retry later.',
+        attachments: undefined,
+        activeFile: undefined,
+        ctrl: new AbortController(),
+        postC: post,
+      };
+      h.ctx.lifecycle.register(request.conv.id, request.ctrl);
+      try {
+        const outcome = await runCloudProviderTurn(h.ctx, request);
+
+        expect(outcome).toEqual({ kind: 'failed', error: error.message, finalText: '' });
+        expect(post).toHaveBeenCalledWith({ type: 'error', message: error.message });
+        expect(post).toHaveBeenCalledWith({ type: 'setInput', text: request.text });
+        expect(commit).not.toHaveBeenCalled();
+        expect(h.modelTurnCalls).toBe(0);
+        expect(release).toHaveBeenCalledTimes(failureAt === 'hold' ? 0 : 1);
+        expect(h.ctx.lifecycle.isStreaming(request.conv.id)).toBe(false);
+
+        post.mockClear();
+        request.ctrl = new AbortController();
+        h.ctx.lifecycle.register(request.conv.id, request.ctrl);
+        const retry = await runCloudProviderTurn(h.ctx, request);
+
+        expect(retry.kind).toBe('completed');
+        expect(commit).toHaveBeenCalledExactlyOnceWith(
+          request.conv,
+          request.text,
+          undefined,
+          undefined,
+        );
+        expect(h.modelTurnCalls).toBe(1);
+        expect(post).not.toHaveBeenCalledWith(expect.objectContaining({ type: 'setInput' }));
+      } finally {
+        target.mockRestore();
+      }
+    },
+  );
+
+  it('does not restore a prompt when the owner cancels external startup', async () => {
+    const h = fakeHarness(countingPool());
+    const ctrl = new AbortController();
+    const post = vi.fn();
+    const target = vi.spyOn(cloudRequestResolver, 'resolveCloudRequestTarget');
+    target.mockImplementationOnce(async () => {
+      ctrl.abort();
+      throw new Error('Startup cancelled');
+    });
+    h.ctx.lifecycle.register('conv-1', ctrl);
+    try {
+      const outcome = await runCloudProviderTurn(h.ctx, {
+        conv: fakeConv(),
+        model: { ...fakeModel('B'), provider: 'openai-compatible' },
+        text: 'cancelled prompt',
+        attachments: undefined,
+        activeFile: undefined,
+        ctrl,
+        postC: post,
+      });
+      expect(outcome.kind).toBe('cancelled');
+      expect(post).not.toHaveBeenCalledWith(expect.objectContaining({ type: 'setInput' }));
+    } finally {
+      target.mockRestore();
+    }
+  });
+
   it('names an unloaded server and preserves the raw engine error', async () => {
     const h = fakeHarness(countingPool());
     h.ctx.runModelTurn = async () => {

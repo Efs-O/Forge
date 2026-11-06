@@ -79,6 +79,23 @@ describe('the candidate filter', () => {
     expect(retitleSkipReason(record({ titleSource: 'auto' }), options)).toBe('already-auto-named');
   });
 
+  it('re-asks only the already-named chats the owner names, and never a person\'s name', () => {
+    const reassess = { ...options, reassessIds: new Set(['chat-old']) };
+    expect(retitleSkipReason(record({ titleSource: 'auto' }), reassess)).toBe('ok');
+    // A name a person typed is theirs for good, whatever the pass is for.
+    expect(
+      retitleSkipReason(record({ title: 'Tractor beam work', titleSource: 'user' }), reassess),
+    ).toBe('named-by-a-person');
+    // A re-asked chat still has to clear every other rule: open, too recent and
+    // nameless all stay shut.
+    expect(retitleSkipReason(record({ titleSource: 'auto', open: true }), reassess)).toBe(
+      'open-or-streaming',
+    );
+    expect(
+      retitleSkipReason(record({ titleSource: 'auto', updatedAt: now - 10 * 60_000 }), reassess),
+    ).toBe('too-recent');
+  });
+
   it('leaves a chat a person renamed alone', () => {
     expect(retitleSkipReason(record({ titleSource: 'user' }), options)).toBe('named-by-a-person');
   });
@@ -133,23 +150,49 @@ describe('the candidate filter', () => {
     expect(picked.map((c) => c.id)).toEqual(['old', 'middle']);
   });
 
-  it('names the current title and the two lines it is asked from', () => {
+  it('names the current title and the two passages it is asked from', () => {
     const request = buildRetitleRequest({
       id: 'x',
       title: deriveTitle(prompt),
       firstUserLine: prompt,
-      lastAssistantLine: 'The pitch was never wired to a key.',
+      firstUserText: `${prompt}\nand keep the pods attached`,
+      lastAssistantText: 'The pitch was never wired to a key.',
       updatedAt: now,
     });
     expect(request).toContain(prompt);
+    // The whole opening, not its first line: a long session opens with
+    // "continue", and a title from that names the bookkeeping, not the work.
+    expect(request).toContain('keep the pods attached');
     expect(request).toContain('The pitch was never wired to a key.');
-    expect(request).toContain('Reply with ONLY the new name');
+    expect(request).toContain('ONLY the new name');
+    // The rules the first 150 applied titles showed were missing: name the work
+    // and not the instruction, keep identifiers, one language, one case style.
+    expect(request).toContain('housekeeping instruction');
+    expect(request).toContain('language the opening is written in');
+    expect(request).toContain('capitalize the');
+  });
+
+  it('tells the model when another chat already carries the name it proposed', () => {
+    const request = buildRetitleRequest(
+      { id: 'x', title: deriveTitle(prompt), firstUserLine: prompt, updatedAt: now },
+      'Tractor beam work',
+    );
+    expect(request).toContain('A different chat is already called "Tractor beam work"');
   });
 });
 
 describe('what the model sent back', () => {
-  it('accepts a plain name and strips quotes', () => {
+  it('accepts a plain name and strips quotes, bullets and bold', () => {
     expect(parseProposedTitle('"Orbital salvage pitch controls"\n', 48)).toBe(
+      'Orbital salvage pitch controls',
+    );
+    expect(parseProposedTitle('- Orbital salvage pitch controls', 48)).toBe(
+      'Orbital salvage pitch controls',
+    );
+    expect(parseProposedTitle('1. Orbital salvage pitch controls', 48)).toBe(
+      'Orbital salvage pitch controls',
+    );
+    expect(parseProposedTitle('**Orbital salvage pitch controls**', 48)).toBe(
       'Orbital salvage pitch controls',
     );
   });
@@ -289,16 +332,24 @@ function deps(over: Partial<RetitleDeps> = {}): RetitleDeps {
 describe('RetitleRunner', () => {
   it('applies a title to each chat the filter offered, and to no other', async () => {
     const applied: Array<[string, string]> = [];
+    let asks = 0;
     const runner = new RetitleRunner({
       ...deps(),
       host: () => fakeHost(applied),
+      // A different name every time: one batch may not hand two chats the same
+      // title, so a fake that keeps answering the same thing would be refused
+      // from the second chat on.
+      summarize: async () => `Orbital salvage beam fix round ${asks++}`,
     });
     await runner.run(await savedJobFile({ max_chats: 20 }), false);
     const ids = applied.map(([id]) => id).sort();
     // `open-chat` is open, `owner-named` has a title that is not the derived
     // one, so only the two prompt-named closed chats are offered.
     expect(ids).toEqual(['log-named', 'prompt-named']);
-    expect(applied.every(([, title]) => title === 'Orbital salvage beam fix')).toBe(true);
+    expect(applied.map(([, title]) => title).sort()).toEqual([
+      'Orbital salvage beam fix round 0',
+      'Orbital salvage beam fix round 1',
+    ]);
     const runs = await store.readRuns('retitle-daily');
     expect(runs).toHaveLength(1);
     expect(runs[0]?.outcome).toBe('ok');
@@ -307,6 +358,68 @@ describe('RetitleRunner', () => {
     expect(state.last_ok_at).toBeTruthy();
     expect(state.next_due_at).toBeTruthy();
     expect(state.consecutive_failures).toBe(0);
+  });
+
+  it('refuses a name another chat already carries, once even in the same pass', async () => {
+    // Two of the first 150 applied titles were identical, which makes the
+    // history list impossible to search by name. The runner now names the
+    // collision to the model and asks again, and only refuses if it comes back
+    // colliding twice. A name handed out earlier in the same batch is taken too:
+    // the set it started with is a snapshot of what was on disk.
+    const applied: Array<[string, string]> = [];
+    const asked: string[] = [];
+    const answers = [
+      'Tractor beam work',
+      'Tractor beam pitch wiring',
+      'Tractor beam pitch wiring',
+      'Tractor beam pod pull',
+    ];
+    const runner = new RetitleRunner({
+      ...deps({ host: () => fakeHost(applied) }),
+      // `owner-named` already carries "Tractor beam work".
+      summarize: async (request) => {
+        asked.push(request);
+        return answers.shift() ?? 'Beam work';
+      },
+    });
+    await runner.run(await savedJobFile({ max_chats: 20 }), false);
+    expect(asked).toHaveLength(4);
+    expect(asked[1]).toContain('A different chat is already called "Tractor beam work"');
+    expect(asked[3]).toContain('A different chat is already called "Tractor beam pitch wiring"');
+    expect(applied.map(([, title]) => title)).toEqual([
+      'Tractor beam pitch wiring',
+      'Tractor beam pod pull',
+    ]);
+  });
+
+  it('a reassess pass re-names chats the job named, and never a person or itself', async () => {
+    // The one-off pass over titles the owner did not like. Only the ids handed to
+    // the job are re-asked; a name a person typed is out of reach, and a proposal
+    // equal to the chat's own name is a refusal — a run that reports a rename
+    // which renamed nothing is how this job looks like it worked while doing
+    // nothing.
+    writeBody('history', 'auto-named', 'Hello greeting chat', { title_source: 'auto' });
+    writeBody('history', 'auto-same', 'Tractor beam pitch wiring', { title_source: 'auto' });
+    writeBody('history', 'person-named', 'Tractor beam work', { title_source: 'user' });
+    const applied: Array<[string, string]> = [];
+    const runner = new RetitleRunner({
+      ...deps({ host: () => fakeHost(applied) }),
+      summarize: async (request) =>
+        request.includes('Its current name: Tractor beam pitch wiring')
+          ? 'Tractor beam pitch wiring'
+          : 'Tractor beam pod pull',
+    });
+    await runner.run(
+      await savedJobFile({
+        max_chats: 20,
+        reassess_ids: ['auto-named', 'auto-same', 'person-named'],
+      }),
+      false,
+    );
+    const ids = applied.map(([id]) => id);
+    expect(ids).toContain('auto-named');
+    expect(ids).not.toContain('person-named');
+    expect(ids).not.toContain('auto-same');
   });
 
   it('renames at most the batch limit', async () => {
@@ -394,7 +507,8 @@ describe('RetitleRunner', () => {
     expect(byId.get('owner-named')?.title).toBe('Tractor beam work');
     // A log-sourced archive row has no body: its lines come from the session log.
     expect(byId.get('log-named')?.firstUserLine).toBe(prompt);
-    expect(byId.get('log-named')?.lastAssistantLine).toBe('Beam fixed.');
+    expect(byId.get('log-named')?.firstUserText).toBe(prompt);
+    expect(byId.get('log-named')?.lastAssistantText).toBe('Beam fixed.');
   });
 
   it('the scheduler records an unwired retitle action as a failed run', async () => {
@@ -487,6 +601,33 @@ describe('RetitleRunner', () => {
     expect(applied).toHaveLength(1);
     const runs = await store.readRuns('retitle-daily');
     expect(runs[0]?.summary).toContain('stopped early: a turn started');
+  });
+
+  it('a turn starting before the first title defers the pass instead of losing the day', async () => {
+    // The 2026-11-06 defect: the pass was pushed out by a sibling job's turn
+    // before it had named anything, yet it was recorded ok and `next_due_at`
+    // jumped to tomorrow, so a whole day of naming was lost with a toast reading
+    // "gave 0 of 20 chats a new title". A stop with nothing applied is the busy
+    // admission case, so it must take the same pending path: no run row, no
+    // schedule advance, and the next tick tries again.
+    const summarize = vi.fn(async () => 'Orbital salvage beam fix');
+    const applied: Array<[string, string]> = [];
+    let busyChecks = 0;
+    const runner = new RetitleRunner({
+      ...deps({ host: () => fakeHost(applied) }),
+      summarize,
+      // Idle at admission (the first check is the gate's), busy from the loop on.
+      busy: () => (busyChecks++ === 0 ? undefined : 'a turn is streaming'),
+    });
+    await runner.run(await savedJobFile({ max_chats: 20 }), false);
+    expect(busyChecks).toBeGreaterThan(1);
+    expect(summarize).not.toHaveBeenCalled();
+    expect(applied).toEqual([]);
+    const state = (await store.load('retitle-daily'))!.state;
+    expect(state.task_pending).toBe(true);
+    expect(state.task_pending_reason).toContain('streaming');
+    expect(state.next_due_at).toBeNull();
+    expect(await store.readRuns('retitle-daily')).toHaveLength(0);
   });
 
   it('a job deleted while its pass is asking stops at once and writes no run row', async () => {

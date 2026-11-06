@@ -1,5 +1,21 @@
 # Forge — Recent Changes
 
+## 0.17.129
+
+- A prompt is returned to the input box when a managed model cannot start,
+  including when another chat is using the GPUs, so it can be retried without
+  being rewritten.
+- The orange focus outline around a question's answer box stays visible on
+  all four sides, including at the edges of the scrollable question panel.
+- The daily chat-retitle job is now asked from the whole opening prompt and the
+  whole closing answer instead of each message's first line, and the request
+  says to name the work rather than the last instruction, keep file and model
+  names as written, answer in the chat's language, and keep one case style. A
+  name another chat already carries is asked for once more and then refused, so
+  one pass cannot hand two chats the same title. A `retitle` job also takes
+  `reassess_ids`, to name again chats the job itself named; a name a person
+  typed is never in reach of it.
+
 ## 0.17.128
 
 - The shell check now reads the scripts a command runs. `powershell -File x.ps1`,

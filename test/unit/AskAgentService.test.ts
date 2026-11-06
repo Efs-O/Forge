@@ -24,7 +24,11 @@ function conversation(title = 'Design chat'): ConversationRuntime {
   return { id, title, createdAt: 1, updatedAt: 1, messages: [] };
 }
 
-function linked(agent: AgentKind, sessionId = otherId): AgentLink {
+function linked(
+  agent: AgentKind,
+  sessionId = otherId,
+  origin: AgentLink['origin'] = 'forge-created',
+): AgentLink {
   return {
     kind: agent,
     sessionId,
@@ -32,7 +36,7 @@ function linked(agent: AgentKind, sessionId = otherId): AgentLink {
     title: 'Forge · Design chat',
     linkedAt: 1,
     lastUsedAt: 1,
-    origin: 'forge-created',
+    origin,
   };
 }
 
@@ -99,14 +103,55 @@ describe('ask_agent session resolution', () => {
     expect(state.events).toContain('persist');
   });
 
-  // Laptop audit F10 (2026-10-26): a Forge-started Codex link answered once,
-  // then every later send failed with "the Codex panel did not come up …; the
-  // ask was not sent", while `who` and the chat header still showed the link as
+  // 2026-11-06: a Codex thread Forge started is an `exec` thread, which the VS
+  // Code Codex panel never lists, so opening the panel on it could only ever
+  // time out — and while it was open the panel's app-server held that thread's
+  // writer lock, which the headless resume then failed to take with a
+  // thread-store conflict. Forge was causing the lock itself, on its own thread.
+  // So a link Forge created is resumed headlessly and never gets a panel.
+  it('never opens a panel on a Codex thread Forge started, and resumes it headlessly', async () => {
+    const state = setup({
+      runHeadless: vi.fn(async (options) => {
+        expect(options.createSessionId).toBeUndefined(); // a resume, not a new session
+        expect(options.startNew).toBeUndefined();
+        expect(options.link.sessionId).toBe(otherId);
+        return { status: 'completed', finalText: 'resumed answer' };
+      }),
+    });
+    state.conv.agentLinks = { codex: linked('codex') }; // the helper's default origin
+    rebuildIndex([state.conv]);
+    const result = await state.handler(
+      { agent: 'codex', message: 'Continue' },
+      {
+        conversation: state.conv,
+        checkpoint: state.checkpoint,
+        signal: new AbortController().signal,
+        workspaceRoot: 'C:/repo',
+        persistConversation: state.persistConversation,
+      },
+    );
+    const rendered = renderAskAgentResult(result);
+    expect(rendered).toContain('resumed answer');
+    expect(rendered).not.toContain('did not come up');
+    expect(rendered).not.toContain('panel could not be opened');
+    expect(state.runtime.openPanel).not.toHaveBeenCalled();
+    expect(state.runtime.sendLive).not.toHaveBeenCalled();
+    expect(state.runtime.runHeadless).toHaveBeenCalledOnce();
+    expect(result).toMatchObject({ status: 'completed', live: false });
+    // The link is what the resume ran on, so it stays exactly where it was.
+    expect(state.conv.agentLinks?.codex?.sessionId).toBe(otherId);
+  });
+
+  // Laptop audit F10 (2026-10-26): a linked Codex thread answered once, then
+  // every later send failed with "the Codex panel did not come up …; the ask
+  // was not sent", while `who` and the chat header still showed the link as
   // healthy. `openExternal` on a `vscode://` link reports 'opened' whatever the
   // panel then does, so a thread that never appears in the thread list is the
   // only thing actually observed — and this branch used to make that a dead
   // end instead of the headless resume its `'unavailable'` sibling already was.
   // It used to be pinned the other way: "never falls back after timeout".
+  // 2026-11-06: a panel-owned (`user-set`) link only — a Forge-created one now
+  // skips the panel entirely, as the test above pins.
   it('resumes the same session headlessly when the opened panel never comes up', async () => {
     const state = setup({
       runHeadless: vi.fn(async (options) => {
@@ -115,7 +160,7 @@ describe('ask_agent session resolution', () => {
         return { status: 'completed', finalText: 'resumed answer' };
       }),
     });
-    state.conv.agentLinks = { codex: linked('codex') };
+    state.conv.agentLinks = { codex: linked('codex', otherId, 'user-set') };
     rebuildIndex([state.conv]);
     const result = await state.handler(
       { agent: 'codex', message: 'Continue' },
@@ -184,19 +229,70 @@ describe('ask_agent session resolution', () => {
     expect(findBySession(freshThread)).toBe(id);
   });
 
+  // 2026-11-06: a thread an earlier ask started still had an active writer, so
+  // every resume failed with Codex's thread-store conflict and the link stayed.
+  // The writer is a Codex panel or another Codex window holding the thread open,
+  // not a run still working, so the notice says where it is.
+  it('a Codex thread open in another window unlinks the row, starts a fresh session and says where it is', async () => {
+    const freshThread = 'c5a7c3a1-8cb0-427d-b3b7-8ca13d739c59';
+    const state = setup({
+      runHeadless: vi
+        .fn()
+        .mockResolvedValueOnce({
+          status: 'failed',
+          finalText: '',
+          error: 'thread-store conflict: thread x already has an active writer',
+          sessionLocked: true,
+        })
+        .mockImplementationOnce(async (options) => {
+          expect(options.createSessionId).toBeUndefined(); // a new Codex thread
+          expect(options.startNew).toBe(true);
+          options.onSessionId(freshThread);
+          return { status: 'completed', finalText: 'new reply' };
+        }),
+    });
+    state.conv.agentLinks = { codex: linked('codex') };
+    rebuildIndex([state.conv]);
+    const result = await state.handler(
+      { agent: 'codex', message: 'Continue' },
+      {
+        conversation: state.conv,
+        checkpoint: state.checkpoint,
+        signal: new AbortController().signal,
+        workspaceRoot: 'C:/repo',
+        persistConversation: state.persistConversation,
+      },
+    );
+    const rendered = renderAskAgentResult(result);
+    expect(rendered).toContain(
+      'Codex session "Forge · Design chat" is open in another Codex window (for example the VS Code Codex panel) and could not be resumed; unlinked it and started a new one.',
+    );
+    expect(rendered).not.toContain('no longer exists');
+    expect(rendered).not.toContain('unlink this session in the chat header');
+    expect(rendered).toContain('new reply');
+    expect(result).toMatchObject({ status: 'completed' });
+    expect(state.runtime.runHeadless).toHaveBeenCalledTimes(2);
+    expect(state.conv.agentLinks?.codex?.sessionId).toBe(freshThread);
+    expect(findBySession(otherId)).toBeUndefined();
+    expect(findBySession(freshThread)).toBe(id);
+  });
+
   // Suspect B of the same audit: the Codex thread list is read by spawning a
   // throwaway app-server, and `CodexDiscovery` REJECTS when that process does
   // not answer in time. Nothing caught it, so a slow app-server failed the ask
   // with a discovery message — read as "the thread is gone" when all it proves
   // is "I could not look".
-  it('opens the panel once when liveness cannot be checked, then resumes headlessly if still unknown', async () => {
+  // A panel-owned link only: a Forge-created Codex thread skips the panel, and
+  // the test above pins that. What stays here is that a liveness check that
+  // cannot answer is "unknown", not "gone".
+  it('opens the panel once for a panel-owned link when liveness cannot be checked, then resumes headlessly if still unknown', async () => {
     const state = setup({
       isLive: vi.fn(async () => {
         throw new Error('Codex discovery timed out after 2000ms.');
       }),
       runHeadless: vi.fn(async () => ({ status: 'completed', finalText: 'resumed' })),
     });
-    state.conv.agentLinks = { codex: linked('codex') };
+    state.conv.agentLinks = { codex: linked('codex', otherId, 'user-set') };
     rebuildIndex([state.conv]);
     const result = await state.handler(
       { agent: 'codex', message: 'Continue' },
@@ -247,7 +343,7 @@ describe('ask_agent session resolution', () => {
     expect(state.runtime.runHeadless).toHaveBeenCalledOnce();
   });
 
-  it('a check that fails while waiting for the panel goes to the headless resume at once', async () => {
+  it('a check that fails while waiting for a panel-owned panel goes to the headless resume at once', async () => {
     const isLive = vi
       .fn()
       .mockResolvedValueOnce(false)
@@ -258,7 +354,7 @@ describe('ask_agent session resolution', () => {
       isLive,
       runHeadless: vi.fn(async () => ({ status: 'completed', finalText: 'resumed' })),
     });
-    state.conv.agentLinks = { codex: linked('codex') };
+    state.conv.agentLinks = { codex: linked('codex', otherId, 'user-set') };
     rebuildIndex([state.conv]);
     const result = await state.handler(
       { agent: 'codex', message: 'Continue' },
@@ -277,6 +373,7 @@ describe('ask_agent session resolution', () => {
     expect(state.runtime.runHeadless).toHaveBeenCalledOnce();
   });
 
+  // Panel-owned, because the lead it asserts comes from the panel path.
   it('a headless resume that also fails says what the owner can do, and keeps the link', async () => {
     const state = setup({
       runHeadless: vi.fn(async () => ({
@@ -285,7 +382,7 @@ describe('ask_agent session resolution', () => {
         error: 'auth expired',
       })),
     });
-    state.conv.agentLinks = { codex: linked('codex') };
+    state.conv.agentLinks = { codex: linked('codex', otherId, 'user-set') };
     rebuildIndex([state.conv]);
     const result = await state.handler(
       { agent: 'codex', message: 'Continue' },
@@ -510,6 +607,8 @@ describe('ask_agent session resolution', () => {
     const state = setup({
       runHeadless: vi.fn(async (options) => {
         expect(state.conv.agentLinks?.codex).toBeUndefined();
+        expect(options.startNew).toBe(true); // a new thread, never a resume of the placeholder
+        expect(options.createSessionId).toBeUndefined();
         expect(options.prompt.startsWith('Forge · Design chat\n')).toBe(true);
         options.onSessionId(thread);
         expect(state.conv.agentLinks?.codex?.sessionId).toBe(thread);

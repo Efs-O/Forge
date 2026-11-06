@@ -50,7 +50,11 @@ export function describeAction(action: NonNullable<Job['action']>): string {
     case 'agent_task':
       return `agent_task [${action.report}]${action.model ? ` (${action.model})` : ''}${action.max_minutes ? ` (max ${action.max_minutes}m)` : ''}`;
     case 'retitle':
-      return `retitle [${action.report}]${action.dry_run ? ' (dry run)' : ''} (at most ${action.max_chats} chats, skip chats idle under ${action.min_idle_minutes}m)${action.model ? ` (${action.model})` : ''}`;
+      return `retitle [${action.report}]${action.dry_run ? ' (dry run)' : ''} (at most ${action.max_chats} chats, skip chats idle under ${action.min_idle_minutes}m${
+        action.reassess_ids.length
+          ? `, re-asking ${action.reassess_ids.length} already-named chats`
+          : ''
+      })${action.model ? ` (${action.model})` : ''}`;
   }
 }
 

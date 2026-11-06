@@ -33,11 +33,19 @@ export interface RetitleConversation {
   titleSource?: 'prompt' | 'user' | 'auto';
   /** The first user line, when it is on disk. Without it a title of unknown
    *  origin counts as the owner's, and a chat with nothing to name it from is
-   *  skipped anyway. */
+   *  skipped anyway. The filter reads this field; the ask reads the text below. */
   firstUserLine?: string;
-  /** A line of the last assistant answer, when it is on disk: the other half of
-   *  what the model is asked to name the chat from. */
-  lastAssistantLine?: string;
+  /** The opening prompt in full (up to a read-side cap): what a chat was opened
+   *  to do. The first line alone is not enough — long chats open with "continue",
+   *  "commit and push" or "hello", and a title taken from that names the
+   *  bookkeeping, not the work (owner review of the first 150 applied titles,
+   *  2026-11-06). */
+  firstUserText?: string;
+  /** The closing assistant answer in full (up to a read-side cap): the other half
+   *  of what the model is asked to name the chat from. Its first line is usually
+   *  a restatement of the instruction, so the whole answer is what carries the
+   *  subject. */
+  lastAssistantText?: string;
   updatedAt: number;
   /** True when a body for this chat sits in `open/`: the window may be using it. */
   open: boolean;
@@ -56,6 +64,22 @@ export interface RetitleFilterOptions {
   jobConversationIds: ReadonlySet<string>;
   /** The retitle job's own chat, when it has one: naming itself would loop. */
   ownConversationIds?: ReadonlySet<string>;
+  /**
+   * Chats the job already named that the owner asked to have re-asked. A name a
+   * person typed is never offered here whatever this set says; only a name the
+   * job gave is fair to take back, and a re-asked chat still has to be closed,
+   * idle and worth naming by every other rule below.
+   */
+  reassessIds?: ReadonlySet<string>;
+}
+
+/** A title compared with another: lower case, single-spaced, no trailing mark. */
+export function normalizeTitleKey(title: string): string {
+  return title
+    .toLowerCase()
+    .replace(/\s+/gu, ' ')
+    .replace(/[.!?]+$/u, '')
+    .trim();
 }
 
 /** A chat that passed the filter, with the text the title will be asked from. */
@@ -63,7 +87,8 @@ export interface RetitleCandidate {
   id: string;
   title: string;
   firstUserLine: string;
-  lastAssistantLine?: string;
+  firstUserText?: string;
+  lastAssistantText?: string;
   updatedAt: number;
 }
 
@@ -95,8 +120,12 @@ export function retitleSkipReason(
       { title_source: record.titleSource, title: record.title },
       record.firstUserLine,
     );
+    // A name a person typed is theirs for good; the job may never take it back,
+    // not even when asked to re-ask. A name the job gave can be taken back, but
+    // only for the ids the owner named, and only after every rule below still
+    // passes — a re-asked chat that is open, streaming or too recent stays shut.
     if (source === 'user') return 'named-by-a-person';
-    if (source === 'auto') return 'already-auto-named';
+    if (source === 'auto' && !options.reassessIds?.has(record.id)) return 'already-auto-named';
   }
   if (record.open || record.streaming) return 'open-or-streaming';
   if (options.now - record.updatedAt < options.minIdleMs) return 'too-recent';
@@ -126,8 +155,9 @@ export function pickRetitleCandidates(
       id: record.id,
       title: record.title,
       firstUserLine: record.firstUserLine!.trim(),
-      ...(record.lastAssistantLine?.trim()
-        ? { lastAssistantLine: record.lastAssistantLine.trim() }
+      ...(record.firstUserText?.trim() ? { firstUserText: record.firstUserText.trim() } : {}),
+      ...(record.lastAssistantText?.trim()
+        ? { lastAssistantText: record.lastAssistantText.trim() }
         : {}),
       updatedAt: record.updatedAt,
     });
@@ -139,29 +169,47 @@ export function pickRetitleCandidates(
  * The request for one title. Kept here so the shape of the question is a
  * decision of this module, not of the runner, and so a test can read it.
  *
- * The input is capped hard (a few thousand characters, as the proposal
- * specified): the job runs on the chat model, and pasting a whole transcript
- * to name a chat would cost more than the title is worth.
+ * The input is capped hard: the job runs on the chat model, and pasting a whole
+ * transcript to name a chat would cost more than the title is worth. The two
+ * passages share the cap, so neither can crowd the other out.
+ *
+ * What the wording is for, in order: name the work, not the last instruction (the
+ * first 150 applied titles read like "Cleanup commit push CI green" because the
+ * only thing the model saw was the first line of a long session); keep identifiers
+ * verbatim; one language and one case style; and never reuse a name another chat
+ * already carries.
  */
 export const RETITLE_INPUT_CAP_CHARS = 4000;
 
-export function buildRetitleRequest(candidate: RetitleCandidate): string {
+/** How much of each passage reaches the model. */
+export const RETITLE_PASSAGE_CHARS = 1600;
+
+export function buildRetitleRequest(candidate: RetitleCandidate, avoid?: string): string {
   const clip = (value: string): string =>
-    value.length > 1200 ? `${value.slice(0, 1200)}…` : value;
-  const first = clip(candidate.firstUserLine).replaceAll('<', '&lt;');
-  const last = candidate.lastAssistantLine
-    ? clip(candidate.lastAssistantLine).replaceAll('<', '&lt;')
+    value.length > RETITLE_PASSAGE_CHARS ? `${value.slice(0, RETITLE_PASSAGE_CHARS)}…` : value;
+  const esc = (value: string): string => value.replaceAll('<', '&lt;');
+  const opening = esc(clip(candidate.firstUserText ?? candidate.firstUserLine));
+  const closing = candidate.lastAssistantText
+    ? esc(clip(candidate.lastAssistantText))
     : '(no answer recorded)';
   return [
-    'You are naming one saved chat in Forge. Reply with ONLY the new name: three to',
-    'seven words, no quotes, no sentence, no trailing punctuation.',
+    'You are naming one saved chat in Forge so its owner can find it again. Reply',
+    'with ONLY the new name: three to seven words, no quotes, no markdown, no',
+    'trailing punctuation, not a sentence.',
     '',
-    `The chat is currently called: ${clip(candidate.title).replaceAll('<', '&lt;')}`,
-    `It began with: ${first}`,
-    `Its last recorded answer began: ${last}`,
+    `Its current name: ${esc(clip(candidate.title))}`,
+    `How the chat opened: ${opening}`,
+    `How it ended: ${closing}`,
     '',
-    'Say what the chat was for, in words a person would search for later. Do not',
-    'invent a detail that is not in the two lines above.',
+    'Name the work itself, in words the owner would type to find this chat again.',
+    '- If how it opened is a continuation or a housekeeping instruction',
+    '  ("continue", "commit and push", "verify the plan", "hello"), name the work',
+    '  the closing shows instead.',
+    '- Keep file names, model names, version numbers and error text exactly as',
+    '  written. Do not invent a detail that is not in the two passages above.',
+    '- Write it in the language the opening is written in, and capitalize the',
+    '  first word only.',
+    ...(avoid ? [`A different chat is already called "${avoid}". Choose another name.`] : []),
     `Input capped at ${RETITLE_INPUT_CAP_CHARS} characters per chat.`,
   ].join('\n');
 }
@@ -174,7 +222,12 @@ export function buildRetitleRequest(candidate: RetitleCandidate): string {
 export function parseProposedTitle(answer: string, capUnits: number): string | undefined {
   const line = answer
     .split('\n')
-    .map((candidate) => candidate.trim().replace(/^["'`]+|["'`]+$/g, ''))
+    .map((candidate) =>
+      candidate
+        .trim()
+        .replace(/^[-*•]\s+|^\d+[.)]\s+/u, '')
+        .replace(/^["'`*]+|["'`*]+$/g, ''),
+    )
     .find((candidate) => candidate.length > 0);
   if (!line) return undefined;
   // A model asked for a name sometimes answers in sentences; that is a failure

@@ -24,6 +24,10 @@ export interface AskAgentRunResult {
   finalText: string;
   error?: string;
   sessionGone?: boolean;
+  /** The session still exists but another process holds it as its writer
+   *  (Codex: "thread-store conflict … already has an active writer"), so it
+   *  cannot be resumed; not set for a gone session or any other failure. */
+  sessionLocked?: boolean;
   mayStillBeWorking?: boolean;
 }
 
@@ -49,6 +53,10 @@ export interface AskAgentRuntime {
     link: AgentLink;
     prompt: string;
     createSessionId?: string;
+    /** Start a session the CLI names itself: no id is passed to the driver at
+     *  all, so nothing is resumed. Used for a Codex first ask, where the link
+     *  is only Forge's placeholder and its "id" is not a thread Codex can find. */
+    startNew?: boolean;
     sessionTitle: string;
     signal: AbortSignal;
     onAccepted?: () => void;

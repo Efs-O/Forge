@@ -179,6 +179,11 @@ export const ActionSchema = z.discriminatedUnion('kind', [
     min_idle_minutes: z.number().int().min(0).max(1440).default(60),
     /** Report what would be renamed and change nothing. */
     dry_run: z.boolean().default(false),
+    /** Chats the job already named, named again on the owner's say-so, for a
+     *  one-off pass over titles it got wrong. A name a person typed is never in
+     *  reach whatever this list says, and the open, streaming, idle and job-chat
+     *  rules still apply. Empty outside such a pass. */
+    reassess_ids: z.array(z.string().min(1)).max(50).default([]),
     report: z.enum(['failures_and_changes', 'always']).default('failures_and_changes'),
   }),
 ]);

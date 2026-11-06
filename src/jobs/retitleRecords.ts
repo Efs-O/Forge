@@ -26,8 +26,17 @@ export interface RetitleDirs {
   logsDirectory: string;
 }
 
-/** Reads every chat this workspace knows, as the filter wants it. */
-export function readRetitleRecords(dirs: RetitleDirs): RetitleConversation[] {
+/**
+ * Reads every chat this workspace knows, as the filter wants it.
+ *
+ * `reassessIds` is the owner's list of chats the job already named and wants
+ * named again. It only matters for the archive, whose rows are skipped before
+ * their content is read — without it a re-ask would never see an archived chat.
+ */
+export function readRetitleRecords(
+  dirs: RetitleDirs,
+  options: { reassessIds?: ReadonlySet<string> } = {},
+): RetitleConversation[] {
   const found = new Map<string, RetitleConversation>();
   const readBody = (file: string): ConversationPersisted | undefined => {
     try {
@@ -40,15 +49,19 @@ export function readRetitleRecords(dirs: RetitleDirs): RetitleConversation[] {
       return undefined;
     }
   };
-  /** The two lines a title would be asked from, from a stored body. */
+  /** What a title is asked from, from a stored body: the opening line the filter
+   *  needs to tell a prompt-name from a person's name, and the two passages the
+   *  model is actually shown. */
   const linesOfBody = (
     body: ConversationPersisted | undefined,
-  ): { firstUserLine?: string; lastAssistantLine?: string } => {
-    const firstUserLine = body ? firstUserLineOf(body.messages) : undefined;
-    const lastAssistantLine = body ? lastAssistantLineOf(body.messages) : undefined;
+  ): Pick<RetitleConversation, 'firstUserLine' | 'firstUserText' | 'lastAssistantText'> => {
+    if (!body) return {};
+    const firstUser = firstUserOf(body.messages);
+    const lastAssistant = lastAssistantOf(body.messages);
     return {
-      ...(firstUserLine ? { firstUserLine } : {}),
-      ...(lastAssistantLine ? { lastAssistantLine } : {}),
+      ...(firstUser.line ? { firstUserLine: firstUser.line } : {}),
+      ...(firstUser.text ? { firstUserText: firstUser.text } : {}),
+      ...(lastAssistant ? { lastAssistantText: lastAssistant } : {}),
     };
   };
   const add = (
@@ -58,7 +71,8 @@ export function readRetitleRecords(dirs: RetitleDirs): RetitleConversation[] {
       updatedAt: number;
       titleSource?: 'prompt' | 'user' | 'auto';
       firstUserLine?: string;
-      lastAssistantLine?: string;
+      firstUserText?: string;
+      lastAssistantText?: string;
       open: boolean;
     },
   ): void => {
@@ -69,7 +83,8 @@ export function readRetitleRecords(dirs: RetitleDirs): RetitleConversation[] {
       open: record.open,
       ...(record.titleSource ? { titleSource: record.titleSource } : {}),
       ...(record.firstUserLine ? { firstUserLine: record.firstUserLine } : {}),
-      ...(record.lastAssistantLine ? { lastAssistantLine: record.lastAssistantLine } : {}),
+      ...(record.firstUserText ? { firstUserText: record.firstUserText } : {}),
+      ...(record.lastAssistantText ? { lastAssistantText: record.lastAssistantText } : {}),
     });
   };
 
@@ -99,7 +114,11 @@ export function readRetitleRecords(dirs: RetitleDirs): RetitleConversation[] {
   const archive = new ArchivedSessions(dirs.storageDir, undefined, dirs.logsDirectory);
   for (const row of archive.list()) {
     if (found.has(row.id)) continue;
-    if (row.title_source === 'user' || row.title_source === 'auto') continue;
+    // A name a person typed is never touched, so its content is never read. A
+    // name the job gave is skipped the same way — except for the ids the owner
+    // asked to have named again, which are the whole point of that pass.
+    if (row.title_source === 'user') continue;
+    if (row.title_source === 'auto' && !options.reassessIds?.has(row.id)) continue;
     const lines =
       row.source === 'log'
         ? readLogContent(path.join(dirs.logsDirectory, `${row.id}.jsonl`))
@@ -133,46 +152,76 @@ function textOf(message: SlimMessages[number]): string | undefined {
   return typeof message.content === 'string' ? message.content : undefined;
 }
 
-function firstUserLineOf(messages: SlimMessages): string | undefined {
+const RETITLE_READ_CAP_CHARS = 6000;
+
+function capText(text: string): string {
+  return text.length > RETITLE_READ_CAP_CHARS ? text.slice(0, RETITLE_READ_CAP_CHARS) : text;
+}
+
+function firstLineOf(text: string): string | undefined {
+  return text.split('\n')[0]?.trim() || undefined;
+}
+
+/**
+ * The opening prompt, both ways it is used: its first line, which the filter
+ * compares against the stored title to tell a prompt-name from a person's name,
+ * and its whole text, which is what the model is asked to name the chat from.
+ * They come from the same message so they cannot drift apart.
+ *
+ * The first line alone was not enough. A long session opens with "continue" or
+ * "commit and push", and a title taken from that names the bookkeeping, not the
+ * work (owner review of the first 150 applied titles, 2026-11-06).
+ */
+function firstUserOf(messages: SlimMessages): {
+  line?: string;
+  text?: string;
+} {
   for (const message of messages) {
     if (message.role !== 'user') continue;
-    const text = textOf(message);
-    if (text?.trim()) return text.split('\n')[0]?.trim();
+    const text = textOf(message)?.trim();
+    if (!text) continue;
+    const line = firstLineOf(text);
+    return { ...(line ? { line } : {}), text: capText(text) };
   }
-  return undefined;
+  return {};
 }
 
-function lastAssistantLineOf(messages: SlimMessages): string | undefined {
+/** The closing answer in full: its first line is usually a restatement of the
+ *  instruction, so the whole answer is what carries the subject. */
+function lastAssistantOf(messages: SlimMessages): string | undefined {
   for (const message of [...messages].reverse()) {
     if (message.role !== 'assistant') continue;
-    const text = textOf(message);
-    if (text?.trim()) return text.split('\n')[0]?.trim();
+    const text = textOf(message)?.trim();
+    if (!text) continue;
+    return capText(text);
   }
   return undefined;
 }
 
-/** First user line and last answer from a session log (a `source:'log'` row). */
+/** Opening prompt and closing answer from a session log (a `source:'log'` row). */
 function readLogContent(
   file: string,
-): { firstUserLine?: string; lastAssistantLine?: string } | undefined {
+): { firstUserLine?: string; firstUserText?: string; lastAssistantText?: string } | undefined {
   let rows;
   try {
     rows = readSessionLogRows(file);
   } catch {
     return undefined;
   }
-  const lineOf = (role: string, from: 'first' | 'last'): string | undefined => {
+  const textOfRow = (role: string, from: 'first' | 'last'): string | undefined => {
     const matches = (from === 'first' ? rows : [...rows].reverse()).filter(
       (row) => row['role'] === role && typeof row['content'] === 'string',
     );
     const row = matches[0];
-    const text = row ? String(row['content']) : '';
-    return text.trim() ? text.split('\n')[0]?.trim() : undefined;
+    const text = row ? String(row['content']).trim() : '';
+    return text ? capText(text) : undefined;
   };
-  const firstUserLine = lineOf('user', 'first');
-  const lastAssistantLine = lineOf('assistant', 'last');
+  const firstUserText = textOfRow('user', 'first');
+  const firstUserLine = firstUserText ? firstLineOf(firstUserText) : undefined;
+  const lastAssistantText = textOfRow('assistant', 'last');
   return {
     ...(firstUserLine ? { firstUserLine } : {}),
-    ...(lastAssistantLine ? { lastAssistantLine } : {}),
+    ...(firstUserText ? { firstUserText } : {}),
+    ...(lastAssistantText ? { lastAssistantText } : {}),
   };
 }

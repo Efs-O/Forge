@@ -233,8 +233,18 @@ async function ask(
   const agent = request.agent;
   const label = agentDisplayName(agent);
   const title = description(request, context.conversation.title);
-  const panel = options.getLinkConfig().open_panel === 'every_ask' && agent !== 'copilot';
   let linked = get(context.conversation, agent);
+  // One writer per Codex thread. A `forge-created` Codex link is an `exec`
+  // thread, which the VS Code Codex panel never lists (its `thread/list` read
+  // defaults to interactive sources), so the panel cannot show it — and opening
+  // the panel on it takes the thread's writer lock, the very lock the headless
+  // resume then fails to take. So Forge resumes a Codex thread it started itself
+  // headlessly and never opens a panel on one. `user-set` and `first-inbound`
+  // links are panel-owned threads and keep today's panel behaviour.
+  const panel =
+    options.getLinkConfig().open_panel === 'every_ask' &&
+    agent !== 'copilot' &&
+    !(agent === 'codex' && linked?.origin === 'forge-created');
   let sessionCwd = linked?.cwd ?? context.workspaceRoot;
   let lead = '';
   let accepted = false;
@@ -342,7 +352,7 @@ async function ask(
             );
         },
       });
-      if (!resumed.sessionGone)
+      if (!resumed.sessionGone && !resumed.sessionLocked)
         return structuredResult(
           agent,
           title,
@@ -355,11 +365,17 @@ async function ask(
               ? `${lead.trimEnd()}${RESUME_FAILED_HINT}`
               : undefined,
         );
+      // A thread another process still holds as its writer cannot be resumed,
+      // and keeping the link would make every later ask fail the same way. It is
+      // not gone, so the notice says where it is instead: usually a Codex panel
+      // or another Codex window holding it open, not a run still working.
       const goneTitle = linked.title;
       sessionCwd = linked.cwd;
       unlink(context.conversation, agent);
       context.persistConversation();
-      lead += `${label} session "${goneTitle}" no longer exists; started a new one. `;
+      lead += resumed.sessionLocked
+        ? `${label} session "${goneTitle}" is open in another Codex window (for example the VS Code Codex panel) and could not be resumed; unlinked it and started a new one. `
+        : `${label} session "${goneTitle}" no longer exists; started a new one. `;
     }
   }
 
@@ -390,7 +406,10 @@ async function ask(
     agent,
     link: placeholder,
     prompt,
-    ...(sessionId ? { createSessionId: sessionId } : {}),
+    // Codex names its own thread, so there is no id to hand it here; `startNew`
+    // says that explicitly so the runtime gives the driver nothing to resume.
+    // The placeholder link is Forge's bookkeeping, not a thread Codex can find.
+    ...(sessionId ? { createSessionId: sessionId } : { startNew: true }),
     sessionTitle: placeholder.title,
     signal: context.signal,
     onAccepted: () => markAccepted(linked ?? placeholder),

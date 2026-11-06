@@ -77,6 +77,17 @@ function isGoneMessage(message: string): boolean {
   );
 }
 
+/**
+ * Codex refuses a second writer on a thread another process still holds
+ * (`thread-store conflict: thread <id> already has an active writer`, then
+ * `thread/resume failed … (code -32600)`). The thread exists, so this is not
+ * "gone"; matched on Codex's own two phrases only, never on a bare -32600.
+ * Resume-only: a run that starts its own session has no thread to conflict with.
+ */
+function isWriterConflictMessage(message: string): boolean {
+  return /thread-store conflict|already has an active writer/iu.test(message);
+}
+
 async function sendToPanelOwnedCodex(
   config: () => ForgeConfig,
   link: AgentLink,
@@ -221,6 +232,7 @@ export function makeAskAgentRuntime(options: {
       link,
       prompt,
       createSessionId,
+      startNew,
       sessionTitle,
       signal,
       onAccepted,
@@ -235,12 +247,22 @@ export function makeAskAgentRuntime(options: {
             : agent === 'copilot'
               ? busConfig(config).copilot_model
               : undefined;
+        // Which session the CLI runs on: an id Forge pre-created, nothing at all
+        // when the caller asked for a new session (`startNew`, which wins over
+        // the link — the CLI names the session and reports it back), or the
+        // linked session to resume. A non-UUID handed to `codex exec resume` is
+        // read as a thread NAME, so a placeholder link must never reach it.
+        const sessionArgs = createSessionId
+          ? { createSessionId }
+          : startNew
+            ? {}
+            : { sessionId: link.sessionId };
         const result = await driver.run({
           cliName: cliName(agent),
           executable,
           task: prompt,
           cwd: link.cwd,
-          ...(createSessionId ? { createSessionId } : { sessionId: link.sessionId }),
+          ...sessionArgs,
           sessionTitle,
           signal,
           ...(onAccepted ? { onSpawned: onAccepted } : {}),
@@ -251,6 +273,14 @@ export function makeAskAgentRuntime(options: {
         const mapped = toRunResult(result);
         if (mapped.status === 'failed' && isGoneMessage(mapped.error ?? ''))
           return { ...mapped, sessionGone: true };
+        if (
+          mapped.status === 'failed' &&
+          agent === 'codex' &&
+          !createSessionId &&
+          !startNew &&
+          isWriterConflictMessage(mapped.error ?? '')
+        )
+          return { ...mapped, sessionLocked: true };
         return mapped;
       } catch (error) {
         return { status: 'failed', finalText: '', error: String(error) };

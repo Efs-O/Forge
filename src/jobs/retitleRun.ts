@@ -12,6 +12,7 @@ import type { GpuInfo } from '../system/systemProbes';
 import type { JobStore } from './JobStore';
 import {
   buildRetitleRequest,
+  normalizeTitleKey,
   parseProposedTitle,
   pickRetitleCandidates,
   type RetitleCandidate,
@@ -178,9 +179,10 @@ export class RetitleRunner {
     // A deleted job stops here: its files are gone, so nothing is left to write.
     if (!(await this.deps.store.load(job.id))) return;
 
+    const reassessIds = new Set(action.reassess_ids);
     let records: RetitleConversation[];
     try {
-      records = readRetitleRecords(dirs);
+      records = readRetitleRecords(dirs, { reassessIds });
     } catch (err) {
       await this.finish(jobFile, action, wasLate, startedAt, {
         ok: false,
@@ -211,6 +213,7 @@ export class RetitleRunner {
         minIdleMs: (action.min_idle_minutes ?? 60) * 60_000,
         limit: action.max_chats,
         jobConversationIds,
+        reassessIds,
       },
     );
 
@@ -233,6 +236,12 @@ export class RetitleRunner {
     let refused = 0;
     const errors: string[] = [];
     let stopped: string | undefined;
+    // Every name this workspace's chats already carry, so one pass cannot hand
+    // two chats the same title — two of the first 150 applied titles were
+    // identical, which makes the history list impossible to search by name.
+    const takenTitles = new Set(
+      records.map((record) => normalizeTitleKey(record.title)).filter((key) => key.length > 0),
+    );
     for (const candidate of candidates) {
       // Stop the pass early, before asking rather than after: an ask that lands
       // while the owner is mid-turn competes with that turn for the GPU (the
@@ -241,6 +250,22 @@ export class RetitleRunner {
       // batch of twelve kept going through a gate that had since turned red.
       const busy = this.deps.busy();
       if (busy) {
+        // Nothing named yet means the pass was pushed out before it started, not
+        // partway through: a sibling job's turn admitted in the same tick took the
+        // slot (2026-11-06: the 07:00 Maya update job and this 06:00 pass were both
+        // due while the box was asleep, caught up in one tick, and its agent turn
+        // was streaming by the first candidate — the run recorded ok, advanced
+        // `next_due_at` a whole day, and toasted "gave 0 of 20 chats a new title").
+        // A pass that named nothing is the same case as a busy admission, so hand it
+        // to the pending path: `JobScheduler.runTick` re-runs a pending `retitle`
+        // whatever the due time says, so it retries once the turn is over, and
+        // `deferBusyTask`'s TTL drops it with a `skipped` row if the box stays busy
+        // until the next scheduled pass. A pass that already named chats reports
+        // what it did: the rest are still oldest-first tomorrow, so nothing is lost.
+        if (applied === 0) {
+          await deferBusyTask(this.deps.store, jobFile, startedAt, wasLate, busy);
+          return;
+        }
         stopped = `a turn started (${busy})`;
         break;
       }
@@ -256,7 +281,7 @@ export class RetitleRunner {
       }
       let proposed: string | undefined;
       try {
-        proposed = await this.proposeTitle(candidate);
+        proposed = await this.proposeTitle(candidate, takenTitles);
       } catch (err) {
         // One dead model must not take the rest of the batch with it, and must
         // not leave this run unreported: the throw went out of `run()` into a
@@ -270,8 +295,15 @@ export class RetitleRunner {
         refused++;
         continue;
       }
-      if (host.applyAutoTitle!(candidate.id, proposed)) applied++;
-      else refused++;
+      if (host.applyAutoTitle!(candidate.id, proposed)) {
+        applied++;
+        // A name handed out in this pass is now taken: two chats renamed in one
+        // batch must not land on the same name, and the set this started with is
+        // a snapshot of what was on disk before the first rename.
+        takenTitles.add(normalizeTitleKey(proposed));
+      } else {
+        refused++;
+      }
     }
 
     const ok = errors.length === 0;
@@ -289,16 +321,48 @@ export class RetitleRunner {
     });
   }
 
-  /** One title from the model, or undefined when the answer is not usable. */
-  private async proposeTitle(candidate: RetitleCandidate): Promise<string | undefined> {
-    try {
-      const answer = await this.deps.summarize(buildRetitleRequest(candidate));
-      return parseProposedTitle(answer, TITLE_MAX_UNITS);
-    } catch (err) {
-      const detail = err instanceof Error ? err.message : String(err);
-      getLogger().warn(`[Retitle] request failed for ${candidate.id}: ${detail}`);
-      throw err;
+  /** One title from the model, or undefined when the answer is not usable.
+   *
+   *  A name another chat already carries is asked for once more before it is
+   *  refused: that is the failure the owner sees most, and one extra call on the
+   *  rare hit is cheaper than a history list nobody can search. A name equal to
+   *  the chat's own is not a new title at all — it is the model saying it would
+   *  not change it, and a re-ask that reports a rename which renamed nothing is
+   *  how a pass looks like it worked while doing nothing.
+   */
+  private async proposeTitle(
+    candidate: RetitleCandidate,
+    taken: ReadonlySet<string>,
+  ): Promise<string | undefined> {
+    const own = normalizeTitleKey(candidate.title);
+    let avoid: string | undefined;
+    for (let attempt = 0; attempt < 2; attempt++) {
+      let answer: string;
+      try {
+        answer = await this.deps.summarize(buildRetitleRequest(candidate, avoid));
+      } catch (err) {
+        const detail = err instanceof Error ? err.message : String(err);
+        getLogger().warn(`[Retitle] request failed for ${candidate.id}: ${detail}`);
+        throw err;
+      }
+      const title = parseProposedTitle(answer, TITLE_MAX_UNITS);
+      if (!title) return undefined;
+      const key = normalizeTitleKey(title);
+      if (key === own) {
+        getLogger().info(`[Retitle] left ${candidate.id} alone: the model would not change it`);
+        return undefined;
+      }
+      if (!taken.has(key)) return title;
+      if (attempt === 0) {
+        avoid = title;
+        continue;
+      }
+      getLogger().info(
+        `[Retitle] refused "${title}" for ${candidate.id}: another chat is already called that`,
+      );
+      return undefined;
     }
+    return undefined;
   }
 
   private async finish(
