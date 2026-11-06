@@ -475,7 +475,11 @@ export function makeShellTool(options: ShellToolOptions = {}): RegisteredTool {
         // so its next fetch is judged; a background run is not marked, as its
         // output never reaches the chat.
         if (classified.readSecretIgnoringAllowList)
-          markConversationReadSecret(context?.conversationId);
+          markConversationReadSecret(
+            context?.conversationId,
+            classified.readSecretIgnoringAllowList,
+            `shell "${command}"`,
+          );
         return (
           formatResult(result.code, result.seconds, result.timedOut, capped.text) +
           pwshHint(shell, result.code, command)

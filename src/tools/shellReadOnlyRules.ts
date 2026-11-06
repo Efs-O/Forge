@@ -87,6 +87,15 @@ const READ_ONLY_PS = new Set([
   'echo',
 ]);
 const READ_ONLY_BOTH = new Set(['rg', 'git', 'node', 'npm', 'icacls']);
+const METADATA_ONLY_UNIX = new Set(['ls', 'dir', 'stat']);
+const METADATA_ONLY_PS = new Set(['ls', 'dir', 'stat', 'test-path', 'get-item', 'get-childitem']);
+
+/** Does this read-only invocation inspect file metadata without printing bytes? */
+export function isMetadataOnlyRead(tokens: readonly string[], shell: ShellKind): boolean {
+  const program = baseProgram(tokens[0] ?? '');
+  return (shell === 'bash' ? METADATA_ONLY_UNIX : METADATA_ONLY_PS).has(program);
+}
+
 /**
  * Changing the working directory writes nothing: each shell tool call is its own
  * process, so a `cd` dies with it. They were refused anyway because the read-only

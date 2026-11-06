@@ -20,6 +20,7 @@ import {
   NET_KEY,
   NET_PROG_KEY,
   RDELETE_KEY,
+  SECRET_NET_KEY,
   SECRET_KEY,
   TOOL_KEY,
   WRITE_KEY,
@@ -36,6 +37,7 @@ const WORDS_FOR_EXACT_KEY: Readonly<Record<string, string>> = {
  *  and the card would say `any request to prog:curl`. */
 const WORDS_BY_PREFIX: ReadonlyArray<{ prefix: string; words: (value: string) => string }> = [
   { prefix: NET_PROG_KEY, words: (program) => `network commands run with ${program}` },
+  { prefix: SECRET_NET_KEY, words: (host) => `any request to ${host} after a secret read` },
   { prefix: NET_KEY, words: (host) => `any request to ${host}` },
   { prefix: DELEGATE_KEY, words: (agent) => `asking ${agent}` },
   { prefix: WRITE_KEY, words: (root) => `writes inside ${root}` },

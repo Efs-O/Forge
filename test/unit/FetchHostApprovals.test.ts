@@ -250,15 +250,18 @@ describe('the hostname and the user info, which the path and query rule cannot s
   // Order matters: the secret read is still judged first, so a hash-label
   // collector in a tainted chat is the `taintGate` card, never the `ownerGate`
   // one.
-  it('still judges a tainted chat on the secret first, not on the host payload', () => {
-    markConversationReadSecret('chat-31');
+  it('keeps a payload in a tainted chat owner-only and unkeyable', () => {
+    markConversationReadSecret('chat-31', '**/.env', 'read_file .env');
     const card = fetchApprovalFor(
       `https://${b64Label64}.collector.net/`,
       config(['collector.net']),
       'chat-31',
     );
     expect(card?.gateKind).toBe('taintGate');
-    expect(card?.cardReason).toContain('has read a secret path');
+    expect(card?.cardReason).toContain('**/.env');
+    expect(card?.cardReason).toContain('read_file .env');
+    expect(card?.approvalKey).toBeUndefined();
+    expect(card?.secretReadTaint).toBe(true);
   });
 
   it('leaves a new host with an ordinary long label the ordinary card it was', () => {
@@ -346,7 +349,7 @@ describe('what a fetch needs before it runs', () => {
   // exfiltration. `taintGate` is what makes the second half wait for the owner in
   // an attended chat and get refused at once in an autonomous one.
   it('asks, as dangerous, after this chat read a secret', () => {
-    markConversationReadSecret('chat-5');
+    markConversationReadSecret('chat-5', '~/.ssh/**', 'shell "cat ~/.ssh/id_rsa"');
     const card = fetchApprovalFor(
       'https://docs.python.org/3/library/asyncio-task.html',
       config(['docs.python.org']),
@@ -354,15 +357,18 @@ describe('what a fetch needs before it runs', () => {
     );
     expect(card?.dangerous).toBe(true);
     expect(card?.gateKind).toBe('taintGate');
-    expect(card?.cardReason).toContain('has read a secret path');
-    // A payload on top of the taint does not soften it to `ownerGate`.
-    expect(
-      fetchApprovalFor(
-        `https://api.example.net/?d=${'QUJD'.repeat(20)}`,
-        config([]),
-        'chat-5',
-      )?.gateKind,
-    ).toBe('taintGate');
+    expect(card?.cardReason).toContain('~/.ssh/**');
+    expect(card?.cardReason).toContain('cat ~/.ssh/id_rsa');
+    expect(card?.approvalKey).toBe('secret-net:docs.python.org');
+    // A payload on top of the taint stays owner-only and cannot be answered by
+    // the otherwise valid after-secret-read host rule.
+    const payload = fetchApprovalFor(
+      `https://docs.python.org/?d=${'QUJD'.repeat(20)}`,
+      config([]),
+      'chat-5',
+    );
+    expect(payload?.gateKind).toBe('taintGate');
+    expect(payload?.approvalKey).toBeUndefined();
     // A chat that read nothing is judged on its host rules alone: the owner listed
     // the host, so nothing is asked (`cardTextOnly` is not a gate).
     const listedForChat6 = fetchApprovalFor(

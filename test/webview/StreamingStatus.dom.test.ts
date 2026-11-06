@@ -30,9 +30,9 @@ afterEach(() => {
   vi.useRealTimers();
 });
 
-function render(streaming: boolean, local = true, clanker = false): void {
+function render(streaming: boolean, local = true, clanker = false, waiting = false): void {
   act(() => {
-    root.render(React.createElement(StreamingStatus, { streaming, local, clanker }));
+    root.render(React.createElement(StreamingStatus, { streaming, local, clanker, waiting }));
   });
 }
 
@@ -114,5 +114,13 @@ describe('StreamingStatus', () => {
     const live = container.querySelector<HTMLElement>('[aria-live="polite"]');
     expect(live?.textContent).toBe('Generating');
     expect(live?.className).toContain('visually-hidden');
+  });
+
+  it('holds the owner-waiting phrase while a card or question is open', () => {
+    render(true, true, true, true);
+    expect(text()).toBe('Waiting for you');
+    act(() => void vi.advanceTimersByTime(60_000));
+    expect(text()).toBe('Waiting for you');
+    expect(container.querySelector('[aria-live="polite"]')?.textContent).toBe('Waiting for you');
   });
 });

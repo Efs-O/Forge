@@ -68,6 +68,8 @@ export interface ToolApprovalMetadata {
    * is what honours it, so the rule cannot be talked around by a prompt.
    */
   gateKind?: 'ownerGate' | 'taintGate' | 'denyList';
+  /** Secret-read taint cards may be answered by the owner only, never Clanker. */
+  secretReadTaint?: boolean;
   /** What made this card exist, in one line, from the gate that knows it: a
    *  matched secret pattern, a new host, a payload size. It is the reason the
    *  gate was raised, and it travels with the refusal so the agent can act on

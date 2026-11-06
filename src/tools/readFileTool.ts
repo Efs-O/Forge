@@ -267,7 +267,7 @@ export function makeReadFileTool(deps: ReadFileDeps = {}): RegisteredTool {
         // free, and asking with nothing allow-listed is what keeps an
         // owner-allowed `.env` from reading the file and then fetching as if
         // nothing had happened.
-        if (pattern) markConversationReadSecret(context?.conversationId);
+        if (pattern) markConversationReadSecret(context?.conversationId, pattern, rawPath);
         return capRead(text);
       }
 
@@ -347,7 +347,7 @@ export function makeReadFileTool(deps: ReadFileDeps = {}): RegisteredTool {
             deps.maxTextFileBytes,
             readDoc,
           );
-          if (taint) markConversationReadSecret(context?.conversationId);
+          if (taint) markConversationReadSecret(context?.conversationId, taint, item.path);
           sections.push(`${sectionHeader(item, totalLines)}\n${text}`);
         } catch (err) {
           const message = err instanceof Error ? err.message : String(err);

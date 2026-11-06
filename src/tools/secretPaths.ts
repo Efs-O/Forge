@@ -98,6 +98,7 @@ export function expandUserTokens(value: string, home = os.homedir()): string {
       (match) => (match.startsWith('/') || match.startsWith('\\') ? match[0] : '') + homeNoSlash,
     )
     .replace(/\$env:USERPROFILE\b/giu, homeNoSlash)
+    .replace(/\$env:HOME\b/giu, homeNoSlash)
     .replace(/\$HOME\b/gu, homeNoSlash)
     .replace(/%USERPROFILE%/giu, homeNoSlash);
 }

@@ -37,6 +37,24 @@ function conversation(id: string, approval_rules?: string[]): ConversationRuntim
 describe('ToolApprovalService', () => {
   afterEach(() => vi.useRealTimers());
 
+  it('carries a gate reason to the confirmation card', async () => {
+    const posted: HostToWebview[] = [];
+    const service = new ToolApprovalService(
+      (message) => posted.push(message),
+      () => ({}) as never,
+    );
+    const reason = 'this chat read a secret path (**/.env, from: read_file .env)';
+    const pending = service.request('web_fetch', 'GET https://a.example/', true, 'conv', undefined, {
+      gateKind: 'taintGate',
+      cardReason: reason,
+    });
+    const request = posted.find((message) => message.type === 'confirmRequest');
+    expect(request).toMatchObject({ type: 'confirmRequest', cardReason: reason });
+    if (request?.type !== 'confirmRequest') throw new Error('confirmation was not posted');
+    service.resolve(request.id, 'decline');
+    await expect(pending).resolves.toBe('declined');
+  });
+
   it('never bypasses dangerous cloud egress approval in clanker mode', async () => {
     const posted: HostToWebview[] = [];
     const service = new ToolApprovalService(

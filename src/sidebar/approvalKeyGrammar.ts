@@ -40,6 +40,7 @@ export interface ApprovalKeyContext {
 
 /** The prefixes a rule may use. `cross_chat` is a whole key, not a prefix. */
 export const APPROVAL_KEY_PREFIXES = [
+  'secret-net:',
   'net:',
   'net:prog:',
   'cross_chat',
@@ -51,6 +52,7 @@ export const APPROVAL_KEY_PREFIXES = [
 ] as const;
 
 export const NET_KEY = 'net:';
+export const SECRET_NET_KEY = 'secret-net:';
 export const NET_PROG_KEY = 'net:prog:';
 export const DELEGATE_KEY = 'delegate:';
 export const WRITE_KEY = 'write:';
@@ -297,6 +299,8 @@ export function validateRuleKey(key: string, ctx: ApprovalKeyContext): string | 
   const rest = value.slice(colon + 1);
 
   switch (head) {
+    case SECRET_NET_KEY:
+      return hostOrProgramProblem(rest, 'a secret-net: rule');
     case NET_KEY:
       if (rest.startsWith('prog:')) return hostOrProgramProblem(rest.slice(5), 'a net:prog: rule');
       return hostOrProgramProblem(rest, 'a net: rule');
@@ -345,7 +349,8 @@ export function validateRuleKey(key: string, ctx: ApprovalKeyContext): string | 
  *  names and delegation targets are compared case-insensitively (DNS and Windows
  *  both are); tool names and `cross_chat` exactly. */
 function sameExactKey(rule: string, need: string, ctx: ApprovalKeyContext): boolean {
-  const foldable = need.startsWith(NET_KEY) || need.startsWith(DELEGATE_KEY);
+  const foldable =
+    need.startsWith(NET_KEY) || need.startsWith(SECRET_NET_KEY) || need.startsWith(DELEGATE_KEY);
   const a = foldable ? rule.toLowerCase() : rule;
   const b = foldable ? need.toLowerCase() : need;
   return foldCase(a, ctx) === foldCase(b, ctx);

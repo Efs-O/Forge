@@ -252,7 +252,7 @@ export function makeSearchCodeTool(
 
       const hidden: { path: string; lines: number; pattern: string }[] = [];
       const kept: SearchCodeMatch[] = [];
-      let printedSecretPath = false;
+      let printedSecret: { path: string; pattern: string } | undefined;
       for (const match of page) {
         const pattern = secretPatternOf(match.path);
         if (!pattern) {
@@ -260,7 +260,8 @@ export function makeSearchCodeTool(
           // Not a secret at all, or a secret the owner allowed: only the second
           // one put lines of a secret file into this chat's context, and that
           // one is what the fetch gate has to remember.
-          if (secretTaintOf(match.path)) printedSecretPath = true;
+          const taint = secretTaintOf(match.path);
+          if (taint && !printedSecret) printedSecret = { path: match.path, pattern: taint };
           continue;
         }
         hidden.push({ path: match.path, lines: match.matchCount, pattern });
@@ -268,7 +269,12 @@ export function makeSearchCodeTool(
       // A dropped hit taints nothing: its lines never reached the chat. Lines
       // from an allow-listed `.env` did, so the chat is marked for its next
       // fetch exactly as it would have been had the read gone through `read_file`.
-      if (printedSecretPath) markConversationReadSecret(context?.conversationId);
+      if (printedSecret)
+        markConversationReadSecret(
+          context?.conversationId,
+          printedSecret.pattern,
+          printedSecret.path,
+        );
       const hiddenNote = hidden.length
         ? `${hidden.reduce((total, file) => total + file.lines, 0)} matching lines in ${
             hidden.length

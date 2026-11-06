@@ -1,4 +1,4 @@
-import { hasConversationReadSecret } from './exfilTaint';
+import { conversationSecretReadReason, hasConversationReadSecret } from './exfilTaint';
 import type { ForgeConfig } from '../config/types';
 
 /**
@@ -247,13 +247,13 @@ export interface FetchApproval {
    *  (`cardTextOnly` is what `ToolDispatch` uses to tell the card's text from a gate).
    */
   cardTextOnly?: boolean;
-  /** `net:<normalized host>`. The key for this fetch, set for every row this
-   *  function can name a host for; the secret-tainted and payload rows deliberately
-   *  carry none, because their card is about the payload or the chat, not the host,
-   *  and a key for the host would let a chat rule answer a payload fetch. Read only
-   *  by `approvalKey.ts`; the approved-host half is answered from the fetch store
-   *  itself, so there is one source of truth per host. */
+  /** `net:<normalized host>`. Ordinary host cards and secret-taint cards carry
+   *  this key. Payload cards deliberately do not: a host rule must not answer a
+   *  request carrying encoded data. Read by `approvalKey.ts`; ordinary approved
+   *  hosts are also answered from the fetch store itself. */
   approvalKey?: string;
+  /** True only for the secret-read taint gate, which Clanker cannot answer. */
+  secretReadTaint?: boolean;
 }
 
 /**
@@ -287,17 +287,22 @@ export function fetchApprovalFor(
   // The full URL, query string included: that is where stolen data travels, and
   // a card that showed only the host would hide exactly the thing to look at.
   const detail = `GET ${url.toString()}`;
+  const host = normalizedHostname(url);
+  const payload = encodedPayloadChars(url);
   if (hasConversationReadSecret(conversationId)) {
     return {
       detail,
       dangerous: true,
-      cardReason: 'this chat has read a secret path, so nothing more leaves it without you',
+      cardReason:
+        conversationSecretReadReason(conversationId) ??
+        'this chat has read a secret path, so nothing more leaves it without you',
       declineHint:
         'tell the owner what you need from this host; a secret read taints the whole chat',
       gateKind: 'taintGate',
+      ...(payload === 0 ? { approvalKey: `secret-net:${host}` } : {}),
+      secretReadTaint: true,
     };
   }
-  const payload = encodedPayloadChars(url);
   if (payload > 0) {
     return {
       detail,
@@ -308,7 +313,6 @@ export function fetchApprovalFor(
       gateKind: 'ownerGate',
     };
   }
-  const host = normalizedHostname(url);
   // Already approved — by this chat, or by the owner's `fetch.allowed_hosts`.
   // There is nothing to ask, so this used to return nothing at all. It now returns
   // the card's text and the key with `cardTextOnly`, which is not a gate: a clean

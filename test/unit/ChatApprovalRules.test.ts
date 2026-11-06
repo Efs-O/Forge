@@ -110,6 +110,15 @@ describe('allowForChat', () => {
     clearConversationHostApprovals('chat-10');
   });
 
+  it('stores and lists the after-secret-read host rule separately', () => {
+    const conv = conversation();
+    expect(allowForChat(conv, 'chat-secret-net', 'secret-net:a.example', CTX)).toBeUndefined();
+    expect(chatRules(conv)).toEqual(['secret-net:a.example']);
+    expect(approvalLinesForChat('chat-secret-net', conv)).toEqual([
+      'any request to a.example after a secret read  (secret-net:a.example)',
+    ]);
+  });
+
   it('lists chat keys and hosts as one rule each', () => {
     const conv = conversation(['cross_chat']);
     markHostApproved(conv.id, 'docs.python.org');

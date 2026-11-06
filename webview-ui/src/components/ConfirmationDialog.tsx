@@ -1,10 +1,11 @@
-import React, { useEffect, useRef } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import type { ApprovalOffer } from '../../../src/sidebar/approvalMessages';
 import { useDockedDialogEscape } from '../useDockedDialogEscape';
 
 interface Props {
   toolName: string;
   detail: string;
+  cardReason?: string;
   isDangerous?: boolean;
   allowForChat?: ApprovalOffer;
   alwaysInProject?: ApprovalOffer;
@@ -30,6 +31,7 @@ const WarningIcon = (): React.ReactElement => (
 export function ConfirmationDialog({
   toolName,
   detail,
+  cardReason,
   isDangerous,
   allowForChat,
   alwaysInProject,
@@ -39,10 +41,17 @@ export function ConfirmationDialog({
   onDeny,
 }: Props): React.ReactElement {
   const panelRef = useRef<HTMLDivElement>(null);
+  const [actionsEnabled, setActionsEnabled] = useState(false);
 
   useEffect(() => {
-    panelRef.current?.querySelector<HTMLButtonElement>('button:not(:disabled)')?.focus();
+    const timer = window.setTimeout(() => setActionsEnabled(true), 600);
+    return () => window.clearTimeout(timer);
   }, []);
+
+  useEffect(() => {
+    if (actionsEnabled)
+      panelRef.current?.querySelector<HTMLButtonElement>('button:not(:disabled)')?.focus();
+  }, [actionsEnabled]);
 
   useDockedDialogEscape(panelRef, onDeny);
 
@@ -62,26 +71,47 @@ export function ConfirmationDialog({
           </span>
         </div>
         <pre className="confirm-detail">{detail}</pre>
+        {cardReason ? <p className="confirm-card-reason">{cardReason}</p> : null}
         {allowForChat ? (
           <p className="confirm-allow-chat-copy">
             Allow for this chat covers: {allowForChat.label}.
           </p>
         ) : null}
         <div className="confirm-actions">
-          <button className="confirm-btn-deny" type="button" onClick={onDeny}>
+          <button
+            className="confirm-btn-deny"
+            type="button"
+            disabled={!actionsEnabled}
+            onClick={onDeny}
+          >
             Decline
           </button>
           {allowForChat ? (
-            <button className="confirm-btn-approve" type="button" onClick={onAllowForChat}>
+            <button
+              className="confirm-btn-approve"
+              type="button"
+              disabled={!actionsEnabled}
+              onClick={onAllowForChat}
+            >
               Allow for this chat
             </button>
           ) : null}
           {alwaysInProject ? (
-            <button className="confirm-btn-approve" type="button" onClick={onAlwaysInProject}>
+            <button
+              className="confirm-btn-approve"
+              type="button"
+              disabled={!actionsEnabled}
+              onClick={onAlwaysInProject}
+            >
               Always in this project
             </button>
           ) : null}
-          <button className="confirm-btn-approve" type="button" onClick={onApprove}>
+          <button
+            className="confirm-btn-approve"
+            type="button"
+            disabled={!actionsEnabled}
+            onClick={onApprove}
+          >
             {isDangerous ? 'Run (I understand the risk)' : 'Approve'}
           </button>
         </div>

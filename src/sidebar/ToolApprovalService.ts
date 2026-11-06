@@ -459,6 +459,7 @@ export class ToolApprovalService {
       dangerous: item.dangerous,
       ...(item.conversationId ? { conversationId: item.conversationId } : {}),
       ...(item.waitingForOwner ? { waitingForOwner: true } : {}),
+      ...(item.cardReason ? { cardReason: item.cardReason } : {}),
       // The offer travels with every announce of the card — the first `requested`,
       // the re-announce that says only the owner may answer it, and the copy the
       // mirror keeps — so a card re-posted after a webview reload still shows the

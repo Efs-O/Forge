@@ -15,6 +15,7 @@ import {
 describe('describeApprovalKey', () => {
   it.each([
     ['net:huggingface.co', 'any request to huggingface.co'],
+    ['secret-net:a.example', 'any request to a.example after a secret read'],
     ['net:prog:curl', 'network commands run with curl'],
     ['net:prog:git-push', 'network commands run with git-push'],
     ['cross_chat', 'messages to other chats'],

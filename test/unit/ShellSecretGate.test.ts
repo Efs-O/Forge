@@ -67,6 +67,43 @@ describe('a read-only command naming a secret path asks', () => {
 });
 
 describe('what the gate must not ask about', () => {
+  it('does not taint on PowerShell members, search patterns, commit messages or metadata', () => {
+    const falseReads: Array<[string, 'bash' | 'pwsh']> = [
+      ['Where-Object { $_.Key -match "*.key" }', 'pwsh'],
+      ['pwsh -Command "Where-Object { $_.Key -match \'*.key\' }"', 'pwsh'],
+      ['grep -n "--env" maya.py', 'bash'],
+      ['rg -n "\\.env" test/a.ts test/b.ts', 'bash'],
+      ['git add a && git commit -m "~/.ssh/id_ed25519"', 'bash'],
+      ['ls -la "/c/Users/x/_netrc"', 'bash'],
+      ['ls -t ~/.forge/agent-bus/endpoints', 'bash'],
+      ['Get-ChildItem $HOME/.ssh/id_rsa', 'pwsh'],
+      ['Get-Item ~/.ssh/id_rsa', 'pwsh'],
+      ['Test-Path ~/.ssh/id_rsa', 'pwsh'],
+      ['stat ~/.ssh/id_rsa', 'bash'],
+      ['Select-String -Pattern ~/.ssh/id_rsa app.ps1', 'pwsh'],
+    ];
+    for (const [command, shell] of falseReads) {
+      expect(ask(command, shell).readSecretIgnoringAllowList, command).toBeUndefined();
+    }
+  });
+
+  it('keeps content reads in those command families tainted', () => {
+    const realReads: Array<[string, 'bash' | 'pwsh']> = [
+      ['Get-Content $HOME/.ssh/id_rsa', 'pwsh'],
+      ['Get-Content $env:USERPROFILE\\.ssh\\id_rsa', 'pwsh'],
+      ['grep KEY .env', 'bash'],
+      ['grep -f .env x', 'bash'],
+      ['git commit -F ~/.ssh/id_rsa', 'bash'],
+      ['cat ~/.forge/agent-bus/endpoints/abc.json', 'bash'],
+      ['awk 1 .env', 'bash'],
+      ['Get-ChildItem $HOME/.ssh/id_rsa | Get-Content', 'pwsh'],
+      ['Select-String -Pattern KEY ~/.ssh/id_rsa', 'pwsh'],
+    ];
+    for (const [command, shell] of realReads) {
+      expect(ask(command, shell).readSecretIgnoringAllowList, command).toBeDefined();
+    }
+  });
+
   // Whole-token matching is the difference between this gate being usable and
   // being switched off: `git rm -f notes.env.md` is not a `.env` read.
   it('does not mistake a longer name for a secret', () => {

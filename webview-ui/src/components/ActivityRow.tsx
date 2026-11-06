@@ -26,6 +26,9 @@ function isFailure(attempt: AppMessage[]): boolean {
 
 function status(step: ActivityStep): { glyph: string; className: string; label: string } {
   const last = finalAttempt(step);
+  if (last.length > 1) {
+    return { glyph: '↳', className: 'is-pending', label: 'parallel calls' };
+  }
   if (last.some((message) => message.toolResultTotal === undefined && !message.toolIsError)) {
     return { glyph: '○', className: 'is-pending', label: 'running' };
   }
@@ -156,7 +159,7 @@ function ActivityRowView({ step }: ActivityRowProps): React.ReactElement | null 
   const tag =
     step.diffs.length === 0 ? '' : step.diffs.some((diff) => diff.diffIsNew) ? 'NEW' : 'MODIFIED';
   const rowTitle = [tag, elapsed].filter(Boolean).join(' · ');
-  const failedMessages = final.filter((message) => message.toolIsError);
+  const failedMessages = final.length > 1 ? [] : final.filter((message) => message.toolIsError);
   const failedMessage = failedMessages[0];
   let errorLine = failedMessage ? firstErrorLine(failedMessage) : '';
   if (failedMessage && (failedMessage !== primary || failedMessages.length > 1)) {
@@ -253,6 +256,13 @@ function ActivityRowView({ step }: ActivityRowProps): React.ReactElement | null 
           {elapsed && <span className="activity-row-time">{elapsed}</span>}
         </span>
       </div>
+      {!open && final.length > 1 && (
+        <div className="activity-row-parallel-summary" aria-label="Parallel call results">
+          {final.map((message) => (
+            <AttemptLine key={message.id} message={message} />
+          ))}
+        </div>
+      )}
       {errorLine && (
         <div className="activity-row-error-line" title={failedMessage?.toolResult}>
           {errorLine}

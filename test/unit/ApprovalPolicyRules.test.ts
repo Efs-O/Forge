@@ -53,6 +53,18 @@ function call(conversation: ConversationRuntime): ChatRuleCall {
 }
 
 describe('approval policy decisions', () => {
+  it('does not let an ordinary network policy rule answer a secret-tainted fetch', () => {
+    expect(
+      approvalPolicyDecision(
+        { always: [{ key: 'net:a.example', workspace: WORKSPACE }] },
+        [{ key: 'secret-net:a.example' }],
+        context,
+        WORKSPACE,
+        false,
+      ),
+    ).toEqual({ kind: 'none' });
+  });
+
   it('answers before chat rules and Clanker for an owner project rule', () => {
     const conversation: ConversationRuntime = {
       id: 'chat-1',

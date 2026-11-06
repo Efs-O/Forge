@@ -108,6 +108,23 @@ describe('approvalKeysFor, the plan §2 table', () => {
     ).toEqual(['net:huggingface.co']);
   });
 
+  it('keys a secret-tainted fetch with a separate host rule', () => {
+    expect(
+      keysOf(
+        input({
+          toolName: 'web_fetch',
+          dangerous: true,
+          toolGate: true,
+          exitGateKind: 'taintGate',
+          reachesOut: 'network',
+          approvalKey: 'secret-net:a.example',
+        }),
+      ),
+    ).toEqual(['secret-net:a.example']);
+    expect(validateRuleKey('secret-net:a.example', CTX)).toBeUndefined();
+    expect(ruleCovers('net:a.example', req('secret-net:a.example'), CTX)).toBe(false);
+  });
+
   it('keys a cross-chat send with one key, whatever the tool', () => {
     // `message_chat` has no gate of its own, so in a flagged chat the flag is what
     // cards it, and `cross_chat` is the whole of what the call does.

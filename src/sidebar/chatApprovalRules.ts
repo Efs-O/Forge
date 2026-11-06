@@ -336,10 +336,10 @@ function keyInputFor(call: ChatRuleCall): ApprovalKeyInput {
  * Clanker, the same predicate `ToolApprovalService` uses to refuse an exit nobody
  * is there to answer. Attended chats do, and in the order the plan sets: the rules
  * the owner clicked for this chat first, then Clanker for this chat, which lets a
- * key the owner could have allowed run, dangerous and `taintGate` calls included —
- * every key except the deny list's, which `docs/plans/ASK_ONCE_APPROVALS_PLAN.md`
- * §2 keeps asking the owner even in a Clanker chat, because the banner promises
- * exactly that ("the deny list still asks"). What neither answers opens its card: a
+ * key the owner could have allowed run, including dangerous calls. The deny list
+ * and secret-read taint stay owner-only: the deny list's card is promised by the
+ * banner, and only the owner can judge what a secret-tainted chat may send. What
+ * neither answers opens its card: a
  * deny-list command, or any call with no key the owner could allow, waits like any
  * other card, and times out under `permissions.approval_timeout_minutes` when the
  * owner set one. `/clanker` refuses nothing without a card any more, so the queue's
@@ -445,7 +445,11 @@ export function createChatRuleApproval(options: {
       // so they stay gated here even though an owner chat rule may still answer them.
       const denyList =
         keyInput.approvalGateKind === 'denyList' || keyInput.exitGateKind === 'denyList';
-      if (!denyList && options.clankerMode?.(call.conversationId) === true) {
+      if (
+        !denyList &&
+        call.approvalMetadata?.secretReadTaint !== true &&
+        options.clankerMode?.(call.conversationId) === true
+      ) {
         return { kind: 'answered', key: answered('clanker') };
       }
       // These validated keys define both the card copy and what its button stores.

@@ -37,6 +37,7 @@ import type { ConversationRuntime } from '../../src/sidebar/sessionTypes';
 import type { ToolApprovalCallOptions } from '../../src/sidebar/toolApprovalOutcome';
 import { persistedToRuntime, runtimeToPersisted } from '../../src/sidebar/sessionPersistence';
 import { clearConversationHostApprovals } from '../../src/tools/fetchHostApprovals';
+import { clearConversationSecretState, markConversationReadSecret } from '../../src/tools/exfilTaint';
 
 /** A real folder the shell can `cd` into, so the delete rows below run for real.
  * The key the shell works out is case-folded on win32, so the rule the chat holds
@@ -290,6 +291,52 @@ describe('a covered call runs with no card and leaves one gate row', () => {
     await probe.runFetch('https://docs.example.test/another-page');
     expect(probe.requestApproval).toHaveBeenCalledTimes(1);
     clearConversationHostApprovals('chat-1');
+  });
+
+  it('allows one host per secret-tainted chat and keeps Clanker out of the decision', async () => {
+    clearConversationHostApprovals('chat-1');
+    const probe = harness(['net:a.example'], { allowForChat: true });
+    markConversationReadSecret('chat-1', '**/.env', 'read_file .env');
+
+    await probe.runFetch('https://a.example/first');
+    expect(probe.requestApproval.mock.calls[0]?.[5]).toMatchObject({
+      allowForChat: {
+        keys: ['secret-net:a.example'],
+        label: 'any request to a.example after a secret read',
+      },
+    });
+    expect(probe.requestApproval.mock.calls[0]?.[5]?.cardReason).toContain('read_file .env');
+    expect(probe.records.get('chat-1')?.approval_rules).toEqual([
+      'net:a.example',
+      'secret-net:a.example',
+    ]);
+    await probe.runFetch('https://a.example/second');
+    expect(probe.requestApproval).toHaveBeenCalledTimes(1);
+    await probe.runFetch('https://b.example/');
+    expect(probe.requestApproval).toHaveBeenCalledTimes(2);
+    clearConversationHostApprovals('chat-1');
+    clearConversationSecretState('chat-1');
+
+    const clanker = harness([], { clanker: true });
+    markConversationReadSecret('chat-1', '**/.env', 'read_file .env');
+    await clanker.runFetch('https://a.example/');
+    expect(clanker.requestApproval).toHaveBeenCalledTimes(1);
+    expect(clanker.rows).toHaveLength(0);
+    clearConversationHostApprovals('chat-1');
+    clearConversationSecretState('chat-1');
+  });
+
+  it('keeps encoded payloads unkeyable even with an after-secret host rule', async () => {
+    const probe = harness(['secret-net:a.example']);
+    markConversationReadSecret('chat-1', '**/.env', 'read_file .env');
+
+    await probe.runFetch(`https://a.example/?d=${'QUJD'.repeat(30)}`);
+
+    expect(probe.requestApproval).toHaveBeenCalledTimes(1);
+    expect(probe.requestApproval.mock.calls[0]?.[5]).not.toHaveProperty('allowForChat');
+    expect(probe.requestApproval.mock.calls[0]?.[5]?.gateKind).toBe('taintGate');
+    clearConversationHostApprovals('chat-1');
+    clearConversationSecretState('chat-1');
   });
 
   it('does not offer a rule for a protected folder key', () => {

@@ -430,6 +430,7 @@ export function App(): React.ReactElement {
           streaming={streaming}
           local={activeModelIsLocal}
           clanker={selectClankerActive(state)}
+          waiting={Boolean(visibleQuestion || dialogs.confirmRequest)}
         />
         <CheckpointBar visible={selectCheckpointPending(state)} stats={checkpointStats} />
         <div id="composer-area">
@@ -465,6 +466,7 @@ export function App(): React.ReactElement {
             <ConfirmationDialog
               toolName={dialogs.confirmRequest.toolName}
               detail={dialogs.confirmRequest.detail}
+              cardReason={dialogs.confirmRequest.cardReason}
               isDangerous={dialogs.confirmRequest.isDangerous}
               allowForChat={dialogs.confirmRequest.allowForChat}
               alwaysInProject={dialogs.confirmRequest.alwaysInProject}

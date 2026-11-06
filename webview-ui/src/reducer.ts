@@ -404,6 +404,7 @@ export function reducer(state: State, action: Action): State {
         role: 'tool' as const,
         content: `${action.toolName} → ${action.label}`,
         toolName: action.toolName,
+        ...(action.toolCallId ? { toolCallId: action.toolCallId } : {}),
         ...filled,
       });
     }

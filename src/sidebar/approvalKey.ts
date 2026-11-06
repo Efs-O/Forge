@@ -38,6 +38,7 @@ import {
   DELEGATE_KEY,
   NET_KEY,
   RDELETE_KEY,
+  SECRET_NET_KEY,
   TOOL_KEY,
   WRITE_KEY,
   commonFolderOf,
@@ -60,6 +61,7 @@ export {
   NET_KEY,
   NET_PROG_KEY,
   RDELETE_KEY,
+  SECRET_NET_KEY,
   SECRET_KEY,
   TOOL_KEY,
   WRITE_KEY,
@@ -263,7 +265,7 @@ export function approvalKeysFor(
   if (!denyList && input.exitGateKind === 'taintGate') {
     if (input.reachesOut === 'network') {
       const key = input.approvalKey ?? '';
-      if (!key.startsWith(NET_KEY)) {
+      if (!key.startsWith(NET_KEY) && !key.startsWith(SECRET_NET_KEY)) {
         return unkeyable(
           'this chat has taken in outside content, and this command reaches the network ' +
             'through more than one program or through a shell this matcher cannot read, ' +

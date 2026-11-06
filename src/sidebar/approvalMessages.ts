@@ -41,6 +41,8 @@ export interface ConfirmRequestMsg {
   id: string;
   toolName: string;
   detail: string;
+  /** Why this card is open, when its gate can name the cause. */
+  cardReason?: string;
   isDangerous?: boolean;
   conversationId?: string;
   /** Present only when the call has keys the owner could allow. It travels with

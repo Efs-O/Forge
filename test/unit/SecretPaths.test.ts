@@ -430,6 +430,12 @@ describe('whole tokens only, never substrings', () => {
     expect(read(['cat', 'environment.md'])).toBeUndefined();
     // An `option=path` argument is an option, not a path the command reads.
     expect(read(['rg', '--glob=**.env', 'KEY'])).toBeUndefined();
+    expect(read(['grep', '-i', 'password', '.env'])).toBe('**/.env');
+    expect(read(['grep', '-in', 'KEY', '.env'])).toBe('**/.env');
+    expect(read(['grep', '-v', 'x', '--', '.env'])).toBe('**/.env');
+    expect(read(['rg', '-i', 'token', '.env'])).toBe('**/.env');
+    expect(read(['grep', '-f', '.env', 'x'])).toBe('**/.env');
+    expect(read(['cat', '$env:HOME\\.ssh\\id_rsa'])).toBe('~/.ssh/**');
     expect(read(['Get-Content'])).toBeUndefined();
   });
 

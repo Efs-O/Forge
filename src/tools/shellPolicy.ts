@@ -321,10 +321,21 @@ export function classifyShellCommand(
   // this chat its next fetch), true is the CARD question (that same path asks for
   // nothing). Both are read before the rewrites below, because a path inside `$(…)`
   // or a here-document only surfaces in a nested classification.
-  const cardSecretRead = secretReadInStatements(statements, secretScan(check, true));
+  const readsMetadataTargets = new Set<number>();
+  for (let index = 0; index < parsed.separators.length; index += 1) {
+    if (
+      parsed.separators[index] === 'pipe' &&
+      baseProgram(statements[index + 1]?.[0] ?? '') === 'get-content'
+    )
+      readsMetadataTargets.add(index);
+  }
+  const cardSecretRead = secretReadInStatements(
+    statements,
+    secretScan(check, true, readsMetadataTargets, shell),
+  );
   const readSecret =
-    secretReadInStatements(statements, secretScan(check, false))?.pattern ??
-    strongest.readSecretIgnoringAllowList;
+    secretReadInStatements(statements, secretScan(check, false, readsMetadataTargets, shell))
+      ?.pattern ?? strongest.readSecretIgnoringAllowList;
   if (parsed.redirection && strongest.classification === 'read_only')
     strongest = { classification: 'normal' };
   // The owner guard, ahead of the secret gate: a command that both reads a
@@ -400,12 +411,16 @@ export function classifyShellCommand(
 function secretScan(
   check: ShellSecretCheck,
   honorAllowList: boolean,
+  readsMetadataTargets?: ReadonlySet<number>,
+  shell?: ShellKind,
 ): {
   config?: ForgeConfig;
   home?: string;
   platform?: NodeJS.Platform;
   cwd?: string;
   honorAllowList: boolean;
+  shell?: ShellKind;
+  readsMetadataTargets?: ReadonlySet<number>;
 } {
   return {
     ...(check.getConfig ? { config: check.getConfig() } : {}),
@@ -413,6 +428,8 @@ function secretScan(
     ...(check.platform ? { platform: check.platform } : {}),
     ...(check.cwd ? { cwd: check.cwd } : {}),
     honorAllowList,
+    ...(shell ? { shell } : {}),
+    ...(readsMetadataTargets ? { readsMetadataTargets } : {}),
   };
 }
 

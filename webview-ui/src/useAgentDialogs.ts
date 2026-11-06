@@ -21,6 +21,7 @@ export interface AgentDialogs {
     id: string;
     toolName: string;
     detail: string;
+    cardReason?: string;
     isDangerous?: boolean;
     allowForChat?: ApprovalOffer;
     alwaysInProject?: ApprovalOffer;
@@ -79,6 +80,7 @@ export function useAgentDialogs(activeConversationId: string): AgentDialogs {
           id: msg.id,
           toolName: msg.toolName,
           detail: msg.detail,
+          ...(msg.cardReason ? { cardReason: msg.cardReason } : {}),
           isDangerous: msg.isDangerous,
           ...(msg.allowForChat ? { allowForChat: msg.allowForChat } : {}),
           ...(msg.alwaysInProject ? { alwaysInProject: msg.alwaysInProject } : {}),

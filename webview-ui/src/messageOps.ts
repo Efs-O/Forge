@@ -366,14 +366,22 @@ export function findPendingToolRow(
   toolName: string,
   toolCallId?: string,
 ): number {
+  if (toolCallId !== undefined) {
+    for (let i = messages.length - 1; i >= 0; i--) {
+      const message = messages[i]!;
+      if (
+        message.role === 'tool' &&
+        message.toolCallId === toolCallId &&
+        message.toolResult === undefined
+      ) {
+        return i;
+      }
+    }
+    return -1;
+  }
   for (let i = messages.length - 1; i >= 0; i--) {
     const m = messages[i]!;
-    if (
-      m.role === 'tool' &&
-      m.toolName === toolName &&
-      m.toolResult === undefined &&
-      (toolCallId === undefined || m.toolCallId === toolCallId)
-    ) {
+    if (m.role === 'tool' && m.toolName === toolName && m.toolResult === undefined) {
       return i;
     }
   }

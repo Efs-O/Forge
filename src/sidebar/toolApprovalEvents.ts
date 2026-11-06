@@ -25,6 +25,8 @@ export interface ToolApprovalRequestEvent {
   id: string;
   toolName: string;
   detail: string;
+  /** Why this card is open, when its gate can name the cause. */
+  cardReason?: string;
   dangerous: boolean;
   conversationId?: string;
   /** True when only the owner can answer this card: the gate is one no
@@ -52,6 +54,7 @@ export function buildApprovalRequestMessage(event: ToolApprovalRequestEvent): Ho
     id: event.id,
     toolName: event.toolName,
     detail: event.detail,
+    ...(event.cardReason ? { cardReason: event.cardReason } : {}),
     ...(event.dangerous ? { isDangerous: true } : {}),
     ...(event.conversationId ? { conversationId: event.conversationId } : {}),
     ...(event.allowForChat ? { allowForChat: event.allowForChat } : {}),

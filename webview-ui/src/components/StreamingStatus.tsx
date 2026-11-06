@@ -21,6 +21,8 @@ interface Props {
   /** True when the active model runs on the user's own hardware. */
   local: boolean;
   clanker: boolean;
+  /** A confirmation or question is waiting for the owner to answer. */
+  waiting?: boolean;
 }
 
 /**
@@ -34,7 +36,12 @@ interface Props {
  * only per-turn would sit motionless for the length of a cold model load, and a
  * motionless indicator cannot distinguish working from hung.
  */
-export function StreamingStatus({ streaming, local, clanker }: Props): React.ReactElement {
+export function StreamingStatus({
+  streaming,
+  local,
+  clanker,
+  waiting = false,
+}: Props): React.ReactElement {
   const [phrase, setPhrase] = useState<string | null>(null);
   const [elapsedMs, setElapsedMs] = useState(0);
 
@@ -56,6 +63,10 @@ export function StreamingStatus({ streaming, local, clanker }: Props): React.Rea
       setPhrase(null);
       return;
     }
+    if (waiting) {
+      setPhrase('Waiting for you');
+      return;
+    }
     const pool = phrasePool({ local, clanker });
     // Picked here rather than during render: every arriving token re-renders
     // this component, and rolling in render would reshuffle the phrase on each
@@ -65,7 +76,7 @@ export function StreamingStatus({ streaming, local, clanker }: Props): React.Rea
     setPhrase((current) => nextPhrase(pool, current));
     const timer = setInterval(() => setPhrase((current) => nextPhrase(pool, current)), ROTATE_MS);
     return () => clearInterval(timer);
-  }, [streaming, local, clanker]);
+  }, [streaming, local, clanker, waiting]);
 
   return (
     <div id="streaming-status" className={streaming ? 'is-streaming' : undefined}>
@@ -82,7 +93,7 @@ export function StreamingStatus({ streaming, local, clanker }: Props): React.Rea
         </span>
       )}
       <span className="visually-hidden" role="status" aria-live="polite">
-        {streaming ? 'Generating' : ''}
+        {streaming ? (waiting ? 'Waiting for you' : 'Generating') : ''}
       </span>
     </div>
   );

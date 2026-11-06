@@ -160,13 +160,15 @@ describe('ActivityRow', () => {
         toolIsError: true, toolResultTotal: 1,
       }),
     ]) }));
-    const line = container.querySelector<HTMLElement>('.activity-row-error-line');
-    expect(line?.textContent).toBe('read_file docs/plans — EISDIR: illegal operation on a directory, read');
-    expect(line?.textContent).not.toMatch(/^echo/);
-    expect(container.querySelector('.activity-row.is-error')).not.toBeNull();
+    const lines = [...container.querySelectorAll<HTMLElement>('.activity-row-parallel-summary .activity-row-attempt')];
+    expect(lines[0]?.textContent).not.toContain('EISDIR');
+    expect(lines[1]?.textContent).toContain('read_file');
+    expect(lines[1]?.textContent).toContain('EISDIR: illegal operation on a directory, read');
+    expect(container.querySelector('.activity-row-error-line')).toBeNull();
+    expect(container.querySelector('.activity-row.is-error')).toBeNull();
   });
 
-  it('keeps a primary single failure line unchanged and counts additional failures', () => {
+  it('shows each parallel failure on its own line', () => {
     const error = 'Error: permission denied';
     const primaryFailure = tool('primary', { toolName: 'read_file', toolTarget: 'src/a.ts', toolResult: error, toolIsError: true });
     render(step({ attempts: rounds([primaryFailure]) }));
@@ -178,8 +180,11 @@ describe('ActivityRow', () => {
       primaryFailure,
       tool('secondary', { toolName: 'list_directory', toolTarget: 'src', toolResult: 'Error: missing', toolIsError: true }),
     ]) }));
-    expect(container.querySelector('.activity-row-error-line')?.textContent).toContain('(+1 more failed)');
-    expect(container.querySelector('.activity-row-error-line')?.textContent).toContain('read_file');
+    const errors = [...container.querySelectorAll('.activity-row-parallel-summary .activity-row-attempt-error')];
+    expect(errors).toHaveLength(2);
+    expect(errors[0]?.textContent).toContain('permission denied');
+    expect(errors[1]?.textContent).toContain('missing');
+    expect(container.querySelector('.activity-row-error-line')).toBeNull();
   });
 
   it('never shows the error line as the target of a failed call without one', () => {

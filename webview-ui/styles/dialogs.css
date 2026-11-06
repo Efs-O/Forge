@@ -75,6 +75,13 @@
   color: var(--vscode-foreground);
 }
 
+.confirm-card-reason {
+  margin: 0;
+  color: var(--vscode-descriptionForeground, #9d9d9d);
+  font-size: 12px;
+  overflow-wrap: anywhere;
+}
+
 .confirm-actions {
   display: flex;
   gap: 8px;

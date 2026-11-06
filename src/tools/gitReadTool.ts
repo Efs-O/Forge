@@ -149,8 +149,15 @@ export function makeGitReadTool(
       // not: `git show HEAD:.env` of a path the owner put in
       // `permissions.secret_paths_allow` gets no card, and without the flag its
       // next fetch would leave the machine as if nothing had been read.
-      if (contentPaths(args).some((candidate) => secretTaintOf(candidate)))
-        markConversationReadSecret(context?.conversationId);
+      const secretPath = contentPaths(args)
+        .map((candidate) => ({ candidate, pattern: secretTaintOf(candidate) }))
+        .find((entry) => entry.pattern);
+      if (secretPath)
+        markConversationReadSecret(
+          context?.conversationId,
+          secretPath.pattern,
+          secretPath.candidate,
+        );
       return capped.text;
     },
   };

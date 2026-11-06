@@ -72,11 +72,33 @@ export interface UntrustedFlagConversation {
 }
 
 const chatsThatReadSecret = new Set<string>();
+const secretReadReasons = new Map<string, { pattern: string; excerpt: string }>();
 const chatsWithUntrustedContent = new Map<string, number>();
 
 /** Called when an approved read of a secret path actually ran in this chat. */
-export function markConversationReadSecret(conversationId: string | undefined): void {
-  if (conversationId) chatsThatReadSecret.add(conversationId);
+export function markConversationReadSecret(
+  conversationId: string | undefined,
+  pattern = 'secret path',
+  excerpt = 'approved read',
+): void {
+  if (!conversationId) return;
+  chatsThatReadSecret.add(conversationId);
+  if (!secretReadReasons.has(conversationId)) {
+    secretReadReasons.set(conversationId, {
+      pattern: pattern.slice(0, 100),
+      excerpt: excerpt.replace(/\s+/gu, ' ').trim().slice(0, 120),
+    });
+  }
+}
+
+/** The first read that tainted this chat, for the next owner-facing egress card. */
+export function conversationSecretReadReason(
+  conversationId: string | undefined,
+): string | undefined {
+  if (!conversationId || !chatsThatReadSecret.has(conversationId)) return undefined;
+  const reason = secretReadReasons.get(conversationId);
+  if (!reason) return 'this chat has read a secret path';
+  return `this chat read a secret path (${reason.pattern}, from: ${reason.excerpt}); approve sends this request anyway`;
 }
 
 /** Has this chat read (or been approved to read) a secret file? */
@@ -119,8 +141,13 @@ export function conversationIsFlagged(conversationId: string | undefined): boole
 
 /** Chat closed, `/clearChat`, window reload: the flag goes with the chat. */
 export function clearConversationSecretState(conversationId?: string): void {
-  if (conversationId === undefined) chatsThatReadSecret.clear();
-  else chatsThatReadSecret.delete(conversationId);
+  if (conversationId === undefined) {
+    chatsThatReadSecret.clear();
+    secretReadReasons.clear();
+  } else {
+    chatsThatReadSecret.delete(conversationId);
+    secretReadReasons.delete(conversationId);
+  }
 }
 
 /** Every chat currently flagged — for the tests that prove clearing works. */

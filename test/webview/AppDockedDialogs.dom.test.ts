@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 import { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { HostToWebview } from '../../src/sidebar/messageBridge';
 
 (globalThis as unknown as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
@@ -71,7 +71,12 @@ beforeEach(() => {
 afterEach(() => {
   act(() => root.unmount());
   container.remove();
+  vi.useRealTimers();
 });
+
+function enableApprovalActions(): void {
+  act(() => void vi.advanceTimersByTime(600));
+}
 
 describe('App docked agent dialogs', () => {
   it('keeps the transcript scroll pane visible while the question replaces the composer', () => {
@@ -120,6 +125,7 @@ describe('App docked agent dialogs', () => {
 
   it('docks approvals, focuses the first control, and preserves question priority order', () => {
     act(() => hostMessage(question('question-pending')));
+    vi.useFakeTimers();
     act(() =>
       hostMessage({
         type: 'confirmRequest',
@@ -128,6 +134,7 @@ describe('App docked agent dialogs', () => {
         detail: 'Update the requested file',
       }),
     );
+    enableApprovalActions();
 
     let dialog = container.querySelector<HTMLElement>('[role="dialog"]')!;
     expect(dialog.classList.contains('docked-dialog-panel')).toBe(true);
@@ -231,18 +238,22 @@ describe('App docked agent dialogs', () => {
   });
 
   it('posts approve and decline responses and explains the dangerous action', () => {
+    vi.useFakeTimers();
     act(() =>
       hostMessage({
         type: 'confirmRequest',
         id: 'approval-dangerous',
         toolName: 'delete_file',
         detail: 'Delete the requested file',
+        cardReason: 'this chat read a secret path (**/.env, from: read_file .env)',
         isDangerous: true,
       }),
     );
+    enableApprovalActions();
     expect(container.querySelector('.confirm-tool-name')?.textContent).toContain(
       '⚠ DANGEROUS: delete_file',
     );
+    expect(container.querySelector('.confirm-card-reason')?.textContent).toContain('read_file .env');
     expect(container.querySelector('.confirm-btn-approve')?.textContent).toBe(
       'Run (I understand the risk)',
     );
@@ -261,6 +272,7 @@ describe('App docked agent dialogs', () => {
         detail: 'Write the requested file',
       }),
     );
+    enableApprovalActions();
     act(() => container.querySelector<HTMLButtonElement>('.confirm-btn-deny')!.click());
     expect(posted).toContainEqual({
       type: 'confirmResponse',
@@ -270,6 +282,7 @@ describe('App docked agent dialogs', () => {
   });
 
   it('offers Allow for this chat only when the card carries validated keys', () => {
+    vi.useFakeTimers();
     act(() =>
       hostMessage({
         type: 'confirmRequest',
@@ -279,6 +292,7 @@ describe('App docked agent dialogs', () => {
         allowForChat: { keys: ['cross_chat'], label: 'messages to other chats' },
       }),
     );
+    enableApprovalActions();
     expect(container.querySelector('.confirm-allow-chat-copy')?.textContent).toBe(
       'Allow for this chat covers: messages to other chats.',
     );
@@ -298,6 +312,7 @@ describe('App docked agent dialogs', () => {
   });
 
   it('offers Always in this project and sends its distinct owner decision', () => {
+    vi.useFakeTimers();
     act(() =>
       hostMessage({
         type: 'confirmRequest',
@@ -308,6 +323,7 @@ describe('App docked agent dialogs', () => {
         alwaysInProject: { keys: ['cross_chat'], label: 'messages to other chats' },
       }),
     );
+    enableApprovalActions();
     expect(
       [...container.querySelectorAll<HTMLButtonElement>('.confirm-actions button')].map(
         (button) => button.textContent,

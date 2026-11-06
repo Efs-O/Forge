@@ -24,6 +24,156 @@ import {
   tokenPathCandidate,
 } from './secretPaths';
 import type { ForgeConfig } from '../config/types';
+import { baseProgram, type ShellKind } from './shellCommandTokens';
+import { isMetadataOnlyRead } from './shellReadOnlyRules';
+
+const PATTERN_PROGRAMS = new Set(['grep', 'egrep', 'fgrep', 'rg']);
+const GREP_VALUE_OPTIONS = new Set([
+  '-m',
+  '-A',
+  '-B',
+  '-C',
+  '-d',
+  '-D',
+  '--max-count',
+  '--after-context',
+  '--before-context',
+  '--context',
+  '--directories',
+  '--devices',
+  '--include',
+  '--exclude',
+  '--exclude-from',
+  '--exclude-dir',
+  '--binary-files',
+  '--label',
+  '--context-separator',
+  '--group-separator',
+]);
+const RG_VALUE_OPTIONS = new Set([
+  '-g',
+  '-t',
+  '-T',
+  '-m',
+  '-A',
+  '-B',
+  '-C',
+  '-M',
+  '-j',
+  '--type',
+  '--type-not',
+  '--glob',
+  '--iglob',
+  '--max-count',
+  '--context',
+  '--after-context',
+  '--before-context',
+  '--max-columns',
+  '--threads',
+  '--max-depth',
+  '--max-filesize',
+  '--sort',
+  '--sortr',
+  '--engine',
+  '--encoding',
+  '--color',
+  '--colors',
+  '--type-add',
+  '--type-clear',
+]);
+/** Argument indexes which are expressions or labels, not file operands. */
+function nonPathArguments(
+  tokens: readonly string[],
+  readsMetadataTarget: boolean,
+  shell?: ShellKind,
+): Set<number> {
+  const result = new Set<number>();
+  const program = baseProgram(tokens[0] ?? '');
+  if (shell && isMetadataOnlyRead(tokens, shell) && !readsMetadataTarget)
+    return new Set(tokens.map((_, index) => index));
+
+  if (PATTERN_PROGRAMS.has(program)) {
+    let patternSeen = false;
+    let optionsEnded = false;
+    const valueOptions = program === 'rg' ? RG_VALUE_OPTIONS : GREP_VALUE_OPTIONS;
+    for (let index = 1; index < tokens.length; index += 1) {
+      const token = tokens[index] ?? '';
+      if (optionsEnded) {
+        if (!patternSeen) {
+          result.add(index);
+          patternSeen = true;
+        }
+        continue;
+      }
+      if (token === '--') {
+        result.add(index);
+        optionsEnded = true;
+        continue;
+      }
+      if (token === '-e' || token === '--regexp') {
+        result.add(index);
+        if (index + 1 < tokens.length) result.add(++index);
+        patternSeen = true;
+      } else if (token.startsWith('--regexp=')) {
+        result.add(index);
+        patternSeen = true;
+      } else if (token === '-f' || token === '--file') {
+        // Unlike -e, a file operand is itself a path and must be scanned.
+        result.add(index);
+        patternSeen = true;
+      } else if (valueOptions.has(token)) {
+        result.add(index);
+        if (index + 1 < tokens.length) result.add(++index);
+      } else if (token.startsWith('-') && token !== '-') {
+        // Flags do not take a value. In particular, `-i` must not hide a pattern.
+        result.add(index);
+      } else if (!patternSeen) {
+        result.add(index);
+        patternSeen = true;
+      }
+    }
+  }
+
+  if (program === 'select-string') {
+    let positionalPatternSeen = false;
+    for (let index = 1; index < tokens.length; index += 1) {
+      const token = tokens[index] ?? '';
+      if (/^-Pattern(?::|$)/iu.test(token)) {
+        result.add(index);
+        positionalPatternSeen = true;
+        if (!token.includes(':') && index + 1 < tokens.length) result.add(++index);
+      } else if (token.startsWith('-')) {
+        result.add(index);
+      } else if (!positionalPatternSeen) {
+        result.add(index);
+        positionalPatternSeen = true;
+      }
+    }
+  }
+
+  if (program === 'git') {
+    const subcommand = tokens
+      .slice(1)
+      .find((token) => !token.startsWith('-'))
+      ?.toLowerCase();
+    if (subcommand === 'commit' || subcommand === 'tag') {
+      for (let index = 1; index < tokens.length; index += 1) {
+        const token = tokens[index] ?? '';
+        if (token === '-m' || token === '--message') {
+          result.add(index);
+          if (index + 1 < tokens.length) result.add(++index);
+        } else if (token.startsWith('--message=') || (token.startsWith('-m') && token.length > 2)) {
+          result.add(index);
+        } else if ((token === '-F' || token === '--file') && tokens[index + 1] === '-') {
+          result.add(index + 1);
+          index += 1;
+        }
+      }
+    }
+  }
+
+  return result;
+}
 
 /**
  * The first token of a statement that reads a secret path, the pattern that matched
@@ -47,12 +197,27 @@ function firstSecretTokenIn(
     home: string;
     platform: NodeJS.Platform;
     allow: readonly string[];
+    shell?: ShellKind;
     resolve?: (value: string) => string | undefined;
+    readsMetadataTarget?: boolean;
   },
 ): { pattern: string; candidate: string; total: number } | undefined {
   let total = 0;
   let first: { pattern: string; candidate: string } | undefined;
-  for (const token of tokens.slice(1)) {
+  const ignored = nonPathArguments(tokens, options.readsMetadataTarget === true, options.shell);
+  for (let index = 1; index < tokens.length; index += 1) {
+    if (
+      /^\$(?:_|[A-Za-z][\w]*)\.[A-Za-z_][\w]*$/u.test(tokens[index] ?? '') &&
+      tokens[index + 1]?.toLowerCase() === '-match'
+    ) {
+      ignored.add(index + 1);
+      if (index + 2 < tokens.length) ignored.add(index + 2);
+    }
+    if (ignored.has(index)) continue;
+    const token = tokens[index] ?? '';
+    // PowerShell's `$_.Key` member expressions are values, not
+    // paths. A real path still has a separator after the variable reference.
+    if (/^\$(?:_|[A-Za-z][\w]*)\.[A-Za-z_][\w]*$/u.test(token)) continue;
     const candidate = tokenPathCandidate(token);
     if (!candidate || candidate.includes('=')) continue;
     const matched = matchesSecretPattern(candidate, patterns, options);
@@ -77,6 +242,7 @@ export function shellStatementReadsSecret(
     home?: string;
     platform?: NodeJS.Platform;
     allow?: readonly string[];
+    shell?: ShellKind;
     /** The folder the command runs in, so a relative token can be recognised as the
      *  absolute path the owner put on the allow list. */
     cwd?: string;
@@ -88,6 +254,7 @@ export function shellStatementReadsSecret(
     home,
     platform,
     allow: options.allow ?? [],
+    ...(options.shell ? { shell: options.shell } : {}),
     ...(options.cwd
       ? { resolve: (value: string) => resolvePathForMatch(value, home, platform, options.cwd) }
       : {}),
@@ -120,6 +287,9 @@ export function secretReadInStatements(
     /** The folder the command runs in, so a relative token can be located. */
     cwd?: string;
     honorAllowList: boolean;
+    shell?: ShellKind;
+    /** Statements whose metadata operand flows to a content-reading pipe. */
+    readsMetadataTargets?: ReadonlySet<number>;
   },
 ): { pattern: string; file?: string; count: number } | undefined {
   const home = options.home ?? os.homedir();
@@ -136,8 +306,12 @@ export function secretReadInStatements(
   };
   let total = 0;
   let first: { pattern: string; candidate: string } | undefined;
-  for (const statement of statements) {
-    const read = firstSecretTokenIn(statement, patterns, scan);
+  for (const [index, statement] of statements.entries()) {
+    const read = firstSecretTokenIn(statement, patterns, {
+      ...scan,
+      ...(options.shell ? { shell: options.shell } : {}),
+      readsMetadataTarget: options.readsMetadataTargets?.has(index) === true,
+    });
     if (!read) continue;
     total += read.total;
     if (!first) first = { pattern: read.pattern, candidate: read.candidate };
