@@ -1,5 +1,20 @@
 # Forge — Recent Changes
 
+## 0.17.128
+
+- The shell check now reads the scripts a command runs. `powershell -File x.ps1`,
+  `bash x.sh`, `./x.sh`, `cmd /c x.bat`, `& .\x.ps1` and `Start-Process` with a
+  literal script path are judged by what the script contains, so a recursive
+  delete or a write into Forge's own files inside a script asks exactly as it
+  would typed inline. An ordinary script still runs without asking.
+- A script Forge cannot read (missing, a directory, over 256 KB), one nested
+  more than three scripts deep, or one the same command rewrites before running
+  it (`echo ... > s.sh; bash s.sh`, `cp other.sh s.sh && bash s.sh`) asks first.
+  Reading or `chmod +x` on it in the same command does not.
+- After a command starts an elevated process (`Start-Process -Verb RunAs`,
+  `runas`, `gsudo`), the result tells the agent to say why before starting
+  another one. No card is added: Windows' own admin prompt already asks.
+
 ## 0.17.127
 
 - A chat is no longer marked as having read a secret when nothing was read.
