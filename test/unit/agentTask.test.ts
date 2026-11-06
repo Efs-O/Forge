@@ -1171,6 +1171,10 @@ describe('AgentTaskRunner', () => {
       tickMs: 30_000,
       agentTask: makeDeps({ now: () => nowMs }),
     });
+    // The scheduler frees its running guard in a `.finally` on the runner's
+    // promise, after the store already shows the run ended. Awaiting that same
+    // promise resumes after the guard is freed, since the scheduler chained first.
+    const runSpy = vi.spyOn(AgentTaskRunner.prototype, 'run');
     try {
       await scheduler.start({ immediate: false });
       await scheduler.tick(); // due: the detached run starts and waits on send
@@ -1187,6 +1191,8 @@ describe('AgentTaskRunner', () => {
         expect((await store.load('agent-task'))!.state.task_run).toBeNull(),
       );
       await vi.waitFor(async () => expect(await store.readRuns('agent-task')).toHaveLength(1));
+      expect(runSpy).toHaveBeenCalledOnce();
+      await runSpy.mock.results[0]!.value;
       nowMs += 30_000;
       await scheduler.tick(); // the run ended: the request runs now
       expect(fs.existsSync(marker)).toBe(false);
@@ -1194,6 +1200,7 @@ describe('AgentTaskRunner', () => {
       resolveSend({ kind: 'completed', finalText: 'RESULT: ok — done' });
       await vi.waitFor(async () => expect(await store.readRuns('agent-task')).toHaveLength(2));
     } finally {
+      runSpy.mockRestore();
       await scheduler.stop();
     }
   });

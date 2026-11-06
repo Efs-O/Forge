@@ -3,7 +3,6 @@ import * as os from 'os';
 import * as path from 'path';
 import { afterAll, afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { ChatMessage, ToolCall } from '../../src/llm/types';
-import { recordToolArgumentRepair } from '../../src/tools/argCoercion';
 
 const { fakeHome, streamModelChatCompletion } = vi.hoisted(() => {
   const nodeFs = require('fs') as typeof import('fs');
@@ -191,7 +190,7 @@ describe('session log forensics', () => {
     expect(rows().find((row) => row['role'] === 'user')?.['internal']).toBe(true);
   });
 
-  it('records repaired tool arguments in the session log', () => {
+  it('records malformed arguments unchanged without repair metadata', () => {
     const raw = String.raw`{"path":"N:\vs code apps\Forge"}`;
     const call: ToolCall = {
       id: 'call-path',
@@ -204,7 +203,6 @@ describe('session log forensics', () => {
       name: call.function.name,
       content: '',
     };
-    recordToolArgumentRepair(toolResult, { wholeArguments: true, fields: [] });
 
     new SessionLogger(id, 'Forensics', 'model').flush(
       [{ role: 'assistant', content: null, tool_calls: [call] }, toolResult],
@@ -217,14 +215,9 @@ describe('session log forensics', () => {
     )?.[0];
     expect(loggedCall).toMatchObject({
       raw_arguments: raw,
-      input: { path: String.raw`N:\vs code apps\Forge` },
-      arguments_repaired: true,
+      input: {},
     });
-    expect(rows().find((row) => row['role'] === 'tool')?.['argument_repair']).toEqual({
-      method: 'double_invalid_escape_backslashes',
-      whole_arguments: true,
-      fields: [],
-    });
+    expect(rows().find((row) => row['role'] === 'tool')?.['argument_repair']).toBeUndefined();
   });
 
   it('reads legacy logs without these fields and ignores unknown event rows', () => {

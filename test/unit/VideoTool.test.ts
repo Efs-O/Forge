@@ -171,17 +171,19 @@ describe('applyRequestedFrameCount', () => {
     expect(applied.maxFrames).toBe(VIDEO_DEFAULTS.maxFrames);
   });
 
-  it('records a request above the ceiling; frameCountFor clamps it', () => {
-    expect(applyRequestedFrameCount(VIDEO_DEFAULTS, 40).requestedFrames).toBe(40);
-    expect(applyRequestedFrameCount(VIDEO_DEFAULTS, 40).maxFrames).toBe(VIDEO_DEFAULTS.maxFrames);
+  it('refuses an explicit request above the configured ceiling', () => {
+    expect(() => applyRequestedFrameCount(VIDEO_DEFAULTS, 40)).toThrow(
+      'view_video: "max_frames" must be an integer from 1 to 26.',
+    );
   });
 
-  it('ignores absent or nonsensical values', () => {
+  it('uses the default only when omitted and refuses nonsensical values', () => {
     expect(applyRequestedFrameCount(VIDEO_DEFAULTS, undefined)).toEqual(VIDEO_DEFAULTS);
-    expect(applyRequestedFrameCount(VIDEO_DEFAULTS, 0)).toEqual(VIDEO_DEFAULTS);
-    expect(applyRequestedFrameCount(VIDEO_DEFAULTS, -5)).toEqual(VIDEO_DEFAULTS);
-    expect(applyRequestedFrameCount(VIDEO_DEFAULTS, 'lots')).toEqual(VIDEO_DEFAULTS);
-    expect(applyRequestedFrameCount(VIDEO_DEFAULTS, Number.NaN)).toEqual(VIDEO_DEFAULTS);
+    for (const bad of [0, -5, 'lots', Number.NaN, 1.5]) {
+      expect(() => applyRequestedFrameCount(VIDEO_DEFAULTS, bad)).toThrow(
+        'view_video: "max_frames" must be an integer from 1 to 26.',
+      );
+    }
   });
 });
 
@@ -271,13 +273,19 @@ describe('per-call ffmpeg overrides', () => {
     expect(extractFrames.mock.calls[0]?.[3]).toMatchObject({ frameMaxDimension: 1024 });
   });
 
-  it('clamps an absurd resolution instead of failing the call', () => {
-    expect(applyRequestedDimension(VIDEO_DEFAULTS, 99999).frameMaxDimension).toBe(4096);
-    expect(applyRequestedDimension(VIDEO_DEFAULTS, 1).frameMaxDimension).toBe(64);
+  it('refuses dimensions outside the declared range', () => {
+    expect(() => applyRequestedDimension(VIDEO_DEFAULTS, 99999)).toThrow(
+      'view_video: "frame_max_dimension" must be an integer from 64 to 4096.',
+    );
+    expect(() => applyRequestedDimension(VIDEO_DEFAULTS, 1)).toThrow(
+      'view_video: "frame_max_dimension" must be an integer from 64 to 4096.',
+    );
   });
 
-  it('ignores a non-numeric resolution', () => {
-    expect(applyRequestedDimension(VIDEO_DEFAULTS, 'big')).toEqual(VIDEO_DEFAULTS);
+  it('uses the default only when the resolution is omitted and refuses wrong types', () => {
+    expect(() => applyRequestedDimension(VIDEO_DEFAULTS, 'big')).toThrow(
+      'view_video: "frame_max_dimension" must be an integer from 64 to 4096.',
+    );
     expect(applyRequestedDimension(VIDEO_DEFAULTS, undefined)).toEqual(VIDEO_DEFAULTS);
   });
 
@@ -296,8 +304,10 @@ describe('per-call ffmpeg overrides', () => {
     expect(applyRequestedWindow(VIDEO_DEFAULTS, 4, undefined).endSeconds).toBeUndefined();
   });
 
-  it('ignores non-numeric window values', () => {
-    expect(applyRequestedWindow(VIDEO_DEFAULTS, 'start', 'end')).toEqual(VIDEO_DEFAULTS);
+  it('refuses non-numeric window values', () => {
+    expect(() => applyRequestedWindow(VIDEO_DEFAULTS, 'start', 'end')).toThrow(
+      'view_video: "start_seconds" must be a finite number from 0 to the clip duration.',
+    );
   });
 
   it('combines all three overrides in one call', async () => {
@@ -326,13 +336,14 @@ describe('per-call ffmpeg overrides', () => {
     expect(line).toContain('Sampled only 4.0s-5.0s of the clip, not all of it.');
   });
 
-  it('reports an end past the clip as the clamped span (U17-05)', () => {
+  it('reports both the requested end and the clip end (U17-05)', () => {
     const line = summaryLine('clips/a.mp4', PROBE, [3.2, 4.6], {
       ...VIDEO_DEFAULTS,
       startSeconds: 3,
       endSeconds: 60,
     });
     expect(line).toContain('Sampled only 3.0s-5.0s of the clip');
+    expect(line).toContain('requested end 60.0 s, clip ends at 5.0 s');
   });
 
   it('stays quiet about the window when the whole clip was sampled', () => {

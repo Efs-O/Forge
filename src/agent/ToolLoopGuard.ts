@@ -1,5 +1,5 @@
 import type { ChatMessage, ToolCall } from '../llm/types';
-import { isJsonObject, parseJsonWithInvalidEscapeRepair } from '../tools/argCoercion';
+import { isJsonObject, parseJson } from '../tools/jsonInput';
 
 interface ToolRoundRecord {
   call: string;
@@ -56,7 +56,7 @@ function canonicalize(value: unknown): unknown {
 }
 
 function canonicalArguments(raw: string): string {
-  const parsed = parseJsonWithInvalidEscapeRepair(raw);
+  const parsed = parseJson(raw);
   return parsed.ok ? JSON.stringify(canonicalize(parsed.value)) : raw.trim();
 }
 
@@ -182,7 +182,7 @@ export class ToolLoopGuard {
   }
 
   private pathArgument(call: ToolCall): string | undefined {
-    const parsed = parseJsonWithInvalidEscapeRepair(call.function.arguments);
+    const parsed = parseJson(call.function.arguments);
     if (!parsed.ok || !isJsonObject(parsed.value)) return undefined;
     return typeof parsed.value['path'] === 'string' ? parsed.value['path'] : undefined;
   }

@@ -52,6 +52,28 @@ afterEach(() => {
 });
 
 describe('OpenAIClient truncation handling', () => {
+  it('stops on malformed SSE JSON and reports the frame prefix', async () => {
+    const malformed = 'x'.repeat(240);
+    vi.stubGlobal('fetch', vi.fn(async () => sseResponse([`data: ${malformed}`])));
+    const h = handlers();
+    await streamChatCompletion('http://127.0.0.1:8080', request, h);
+    expect(h.onError).toHaveBeenCalledWith(
+      expect.objectContaining({
+        message: `OpenAI-compatible stream sent malformed JSON (${malformed.slice(0, 200)}); the reply was stopped there.`,
+      }),
+    );
+    expect(h.onDone).not.toHaveBeenCalled();
+  });
+
+  it('ignores SSE comments and empty lines and still handles [DONE]', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => sseResponse([': keep-alive', '', chunk({ content: 'ok' }), 'data: [DONE]'])));
+    const h = handlers();
+    await streamChatCompletion('http://127.0.0.1:8080', request, h);
+    expect(h.onToken).toHaveBeenCalledWith('ok');
+    expect(h.onError).not.toHaveBeenCalled();
+    expect(h.onDone).toHaveBeenCalledOnce();
+  });
+
   it('throttles 20 argument deltas per call and sends the final count', async () => {
     const progress = vi.fn();
     vi.stubGlobal('fetch', vi.fn(async () => sseResponse([

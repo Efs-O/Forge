@@ -294,6 +294,9 @@ visible seam:
 floor (libx264 crf 10 re-encode, 96 frames): first vs last 0.273
 ```
 
+If the re-encode itself fails, the run exits 4 with `ffmpeg re-encode failed:` and
+ffmpeg's last error line.
+
 JSON: `first_last`, `first_image`, `last_image` (the last two are `null` without the
 matching flag), `first_frame`, `last_frame`, and with `--floor` also `floor`
 `{first_last, first_image, last_image}` and `floor_crf`.

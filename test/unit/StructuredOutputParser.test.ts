@@ -67,7 +67,8 @@ describe('StructuredOutputStripper', () => {
 });
 
 describe('Hermes <tool_call> JSON in content', () => {
-  // Qwopus emitted exactly this as text after its first native call.
+  // Qwopus emitted exactly this as text after its first native call. `name` is
+  // the Hermes format's own envelope, so inside <tool_call> tags it is a call.
   const text = [
     'Reading it.',
     '<tool_call>',
@@ -89,6 +90,46 @@ describe('Hermes <tool_call> JSON in content', () => {
     const prose = '<tool_call>\nnot a call\n</tool_call>';
     expect(parseStructuredOutput(prose)).toEqual([]);
     expect(stripStructuredOutputFromFullText(prose)).toBe(prose);
+  });
+});
+
+describe('malformed Ollama markers', () => {
+  it('returns a tool-call error and keeps malformed marker text visible', () => {
+    const text = `${TOOL_CALL_BEGIN}read_file${TOOL_SEP}{"path":"bad\\q"}${TOOL_CALL_END}`;
+    expect(parseStructuredOutput(text)).toEqual([
+      {
+        name: '__tool_call_error__',
+        arguments: {},
+        error: expect.stringMatching(
+          /^malformed tool call: its arguments are not valid JSON \(.+\), so no tool ran\. Resend it\.$/u,
+        ),
+      },
+    ]);
+    expect(stripStructuredOutputFromFullText(text)).toBe(text);
+  });
+
+  it('refuses the name envelope in a json fence, where Forge teaches tool', () => {
+    expect(
+      parseStructuredOutput('```json\n{"name":"read_file","arguments":{"path":"a"}}\n```'),
+    ).toEqual([
+      {
+        name: '__tool_call_error__',
+        arguments: { __tool: 'read_file' },
+        error:
+          'tool call: use {"tool": "<name>", "arguments": {...}}; the "name" form is not accepted.',
+      },
+    ]);
+  });
+
+  it('refuses single-key fenced calls in favor of the canonical envelope', () => {
+    expect(parseStructuredOutput('```json\n{"read_file":{"path":"a"}}\n```')).toEqual([
+      {
+        name: '__tool_call_error__',
+        arguments: { __tool: 'read_file' },
+        error:
+          'tool call: use {"tool": "<name>", "arguments": {...}}; the "single-key" form is not accepted.',
+      },
+    ]);
   });
 });
 
@@ -117,7 +158,8 @@ describe('XML <function=...> tool calls in content', () => {
   });
 
   it('keeps multi-line values intact', () => {
-    const body = '<tool_call>\n<function=write_file>\n<parameter=content>\na\n\nb\n</parameter>\n</function>\n</tool_call>';
+    const body =
+      '<tool_call>\n<function=write_file>\n<parameter=content>\na\n\nb\n</parameter>\n</function>\n</tool_call>';
     expect(parseStructuredOutput(body)).toEqual([
       { name: 'write_file', arguments: { content: 'a\n\nb' } },
     ]);

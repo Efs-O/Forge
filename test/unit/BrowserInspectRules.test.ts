@@ -52,19 +52,24 @@ const live = (over: Partial<NodeRecheck> = {}): NodeRecheck => ({
 });
 
 describe('clampInspectMax', () => {
-  it('defaults for anything that is not a usable number', () => {
-    for (const bad of [undefined, null, NaN, Infinity, -Infinity, 0, -5, '50', true]) {
-      expect(clampInspectMax(bad)).toBe(DEFAULT_INSPECT_MAX);
-    }
+  it('uses the default only when omitted', () => {
+    expect(clampInspectMax(undefined)).toBe(DEFAULT_INSPECT_MAX);
   });
 
-  it('honours an explicit value and clamps it to the documented ceiling', () => {
+  it('honours explicit values inside the documented range', () => {
     expect(clampInspectMax(1)).toBe(1);
     expect(clampInspectMax(250)).toBe(250);
     expect(clampInspectMax(MAX_INSPECT_ELEMENTS)).toBe(MAX_INSPECT_ELEMENTS);
-    expect(clampInspectMax(1_000_000)).toBe(MAX_INSPECT_ELEMENTS);
-    expect(clampInspectMax(12.9)).toBe(12);
   });
+
+  it.each([null, NaN, Infinity, -Infinity, 0, -5, 501, 12.9, '50', true])(
+    'refuses an invalid explicit max: %s',
+    (bad) => {
+      expect(() => clampInspectMax(bad)).toThrow(
+        `browser_inspect: "max" must be an integer from 1 to ${MAX_INSPECT_ELEMENTS}.`,
+      );
+    },
+  );
 });
 
 describe('roleFromFacts', () => {

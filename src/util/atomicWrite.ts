@@ -1,6 +1,13 @@
 import { randomUUID } from 'crypto';
 import * as fs from 'fs';
 import * as path from 'path';
+import { windowsFileHolders, windowsFileHoldersAsync } from './windowsFileHolders';
+
+export interface DelayedWriteReport {
+  elapsedMs: number;
+  retries: number;
+  holders: string | undefined;
+}
 
 export interface ExpectedFileState {
   size: number;
@@ -20,6 +27,7 @@ export interface AsyncAtomicWriteOptions extends AtomicWriteOptions {
   signal?: AbortSignal;
   /** Total retry window. Existing callers keep the 2.5 s budget unless opted in. */
   retryBudgetMs?: number;
+  onDelayedSuccess?: (report: DelayedWriteReport) => void;
 }
 
 function fileState(stat: fs.Stats): ExpectedFileState {
@@ -124,8 +132,11 @@ function contentionGiveUpError(
   // any caller that matches on the text expect `operation not permitted` to be
   // there, and an agent that read only the guidance would lose what the OS said.
   const original = errno.message ?? `${code}: operation not permitted`;
+  const holders = windowsFileHolders(target);
   const error = new Error(
-    `${original} — rename onto ${target} was retried for ${budgetMs} ms and gave up. ` +
+    `${original} — rename onto ${target} was retried for ${budgetMs} ms and gave up; ${
+      holders ? `held by ${holders}` : 'holder not identified'
+    }. ` +
       'Most likely another process — an editor, watcher, a running script or antivirus — still ' +
       'has the destination open. Ask the user to wait a few seconds and try again, save under a ' +
       'new name and move it later, or close whatever has the file open. EACCES can also be a ' +
@@ -147,12 +158,18 @@ const LONG_RENAME_MAX_BACKOFF_MS = 2_000;
 export function agentWriteOptions(
   signal?: AbortSignal,
   extra: AtomicWriteOptions = {},
+  onDelayedSuccess?: (report: DelayedWriteReport) => void,
 ): AsyncAtomicWriteOptions {
   return {
     ...extra,
+    ...(onDelayedSuccess ? { onDelayedSuccess } : {}),
     ...(signal ? { signal } : {}),
     retryBudgetMs: ASYNC_RENAME_BUDGET_MS,
   };
+}
+
+export function delayedWriteNote(report: DelayedWriteReport): string {
+  return `Note: Windows blocked the save for ${report.elapsedMs} ms (${report.retries} retries); held by ${report.holders ?? 'holder not identified'}.`;
 }
 
 /**
@@ -299,6 +316,7 @@ export async function writeFileAtomic(
   const startedAt = Date.now();
   const retryBudgetMs = options.retryBudgetMs ?? RENAME_BUDGET_MS;
   let attempt = 0;
+  let holderLookup: Promise<string | undefined> | undefined;
   for (;;) {
     if (options.signal?.aborted) throw abortError();
 
@@ -310,6 +328,10 @@ export async function writeFileAtomic(
       // EPERM/EBUSY/EACCES codes that Node's async rename can mask.
       fs.renameSync(temporary, target);
       reportContended(target, Date.now() - startedAt, attempt);
+      if (attempt > 0 && options.onDelayedSuccess) {
+        const holders = holderLookup ? await holderLookup : undefined;
+        options.onDelayedSuccess({ elapsedMs: Date.now() - startedAt, retries: attempt, holders });
+      }
       syncDirectory(path.dirname(target));
       return;
     } catch (error) {
@@ -318,6 +340,10 @@ export async function writeFileAtomic(
         throw abortError();
       }
       if (!isContended(error)) throw error;
+
+      if (!holderLookup && options.onDelayedSuccess) {
+        holderLookup = windowsFileHoldersAsync(target);
+      }
 
       const delay = retryDelay(error, target, Date.now() - startedAt, attempt, retryBudgetMs);
       if (delay === undefined) {

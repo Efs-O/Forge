@@ -17,7 +17,7 @@
  */
 
 import type { ChatMessage } from '../llm/types';
-import { isJsonObject, parseJsonWithInvalidEscapeRepair } from '../tools/argCoercion';
+import { isJsonObject, parseJson } from '../tools/jsonInput';
 import { RECORDED_ACTION_KEY_MAX_CHARS, type RecordedCompactionAction } from './compactionTypes';
 import { renderRecordedActionsBlock } from './compactionRecordedState';
 import { isFailureResult } from './toolResultView';
@@ -108,7 +108,7 @@ function resultsByCallId(messages: readonly ChatMessage[]): Map<string, string> 
 }
 
 function parseArgs(raw: string): Record<string, unknown> | undefined {
-  const parsed = parseJsonWithInvalidEscapeRepair(raw);
+  const parsed = parseJson(raw);
   return parsed.ok && isJsonObject(parsed.value) ? parsed.value : undefined;
 }
 

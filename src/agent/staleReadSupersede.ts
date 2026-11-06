@@ -1,6 +1,6 @@
 import type { ChatMessage } from '../llm/types';
 import { isCapTruncated } from '../tools/resultCap';
-import { parseJsonWithInvalidEscapeRepair } from '../tools/argCoercion';
+import { parseJson } from '../tools/jsonInput';
 
 /**
  * Model-facing annotation of `read_file` results that re-read a path already
@@ -50,7 +50,7 @@ function isCompleteRead(content: string): boolean {
 }
 
 function readFilePath(argumentsJson: string): string | undefined {
-  const result = parseJsonWithInvalidEscapeRepair(argumentsJson);
+  const result = parseJson(argumentsJson);
   if (!result.ok) return undefined;
   const parsed = result.value;
   if (typeof parsed !== 'object' || parsed === null) return undefined;

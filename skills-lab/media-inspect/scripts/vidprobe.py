@@ -1,6 +1,8 @@
 #!/usr/bin/env python3
 """Measure a clip's motion, audio and sound-to-motion timing without watching it."""
 
+from __future__ import annotations
+
 import sys
 
 sys.dont_write_bytecode = True   # a __pycache__ under a skill folder fails the VSIX content check
@@ -564,11 +566,19 @@ def cmd_loudness(target: "Target", args: argparse.Namespace) -> tuple[list[str],
     return lines, payload
 
 
+def _open_still(path: str | None) -> Image.Image | None:
+    """Load a still as an RGB copy, closing the source handle before returning it."""
+    if path is None:
+        return None
+    with Image.open(path) as image:
+        return image.convert("RGB")
+
+
 def cmd_seam(target: "Target", args: argparse.Namespace) -> tuple[list[str], dict]:
     last = target.info.frames - 1
     frames = mediakit.grab_frames(target.path, indices=[0, last])
-    first_image = Image.open(args.first).convert("RGB") if args.first else None
-    last_image = Image.open(args.last).convert("RGB") if args.last else None
+    first_image = _open_still(args.first)
+    last_image = _open_still(args.last)
 
     def pair_mad(reference: Image.Image, index: int) -> float:
         return mediakit.mad(reference, frames[index])
@@ -593,11 +603,17 @@ def cmd_seam(target: "Target", args: argparse.Namespace) -> tuple[list[str], dic
     if args.floor:
         with tempfile.TemporaryDirectory(prefix="vidprobe-") as temp:
             reencoded = Path(temp) / "floor.mp4"
-            subprocess.run(
+            encoded = subprocess.run(
                 ["ffmpeg", "-hide_banner", "-y", "-v", "error", "-i", str(target.path),
                  "-an", "-c:v", "libx264", "-crf", "10", "-pix_fmt", "yuv420p", str(reencoded)],
-                check=True, capture_output=True, text=True, errors="replace",
+                capture_output=True, text=True, errors="replace",
             )
+            if encoded.returncode != 0:
+                detail = (encoded.stderr or "").strip().splitlines()
+                raise RuntimeError(
+                    "ffmpeg re-encode failed: "
+                    + (detail[-1] if detail else f"exit {encoded.returncode}")
+                )
             floor_info = mediakit.probe(reencoded)
             floor_last = floor_info.frames - 1
             floor_frames = mediakit.grab_frames(reencoded, indices=[0, floor_last])

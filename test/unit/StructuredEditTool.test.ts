@@ -6,7 +6,7 @@ import {
   applyLineEditsToContent,
   makeApplyLineEditsTool,
 } from '../../src/tools/structuredEditTool';
-import { coerceToolArgs } from '../../src/tools/argCoercion';
+import { ToolRegistry } from '../../src/tools/ToolRegistry';
 
 vi.mock('vscode', () => ({
   workspace: { workspaceFolders: [{ uri: { fsPath: process.cwd() } }] },
@@ -423,27 +423,17 @@ describe('the file named inside the operations', () => {
     expect(tool.mutation?.paths({ operations: [{ start_line: 1 }] })).toEqual([]);
   });
 
-  it('operations arriving as a JSON string still lift, because the registry parses first', async () => {
-    // The ordering the plan asked to confirm: `coerceToolArgs` turns a string
-    // array into an array in `ToolDispatch` before `invalidArgs` and before this
-    // handler, so the lift sees parsed operations, never a string to guess at.
+  it('refuses operations sent as a JSON string and leaves the file unchanged', async () => {
     const { tool, relative, file, cleanup } = fixture();
     try {
-      const coerced = coerceToolArgs(tool.definition, {
-        operations: JSON.stringify([
-          {
-            path: relative,
-            start_line: 1,
-            end_line: 1,
-            expected_lines: ['one'],
-            replacement_lines: ['ONE'],
-          },
-        ]),
+      const message = new ToolRegistry().invalidArgs(tool, {
+        operations: JSON.stringify([{ path: relative, start_line: 1 }]),
       });
-      expect(Array.isArray(coerced['operations'])).toBe(true);
-      const result = String(await tool.handler(coerced, context));
-      expect(result).toContain('No "path" at the top level');
-      expect(fs.readFileSync(file, 'utf8')).toBe('ONE\ntwo\nthree\n');
+      expect(message).toBe(
+        'apply_line_edits: "operations" must be a JSON array, not a string. ' +
+          'Resend the call with operations as [].',
+      );
+      expect(fs.readFileSync(file, 'utf8')).toBe('one\ntwo\nthree\n');
     } finally {
       cleanup();
     }

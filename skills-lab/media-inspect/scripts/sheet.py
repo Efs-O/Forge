@@ -45,6 +45,18 @@ def _die(message, code=EXIT_USAGE):
     raise SystemExit(code)
 
 
+def _image_size(path):
+    """Read an image's dimensions and release the handle.
+
+    The explicit close() also covers an image object whose context manager does
+    not own its file: a sheet run should not leave file handles behind.
+    """
+    with Image.open(path) as opened:
+        size = opened.size
+        opened.close()
+    return size
+
+
 # ---------------------------------------------------------------- reporters --
 
 
@@ -66,8 +78,7 @@ class Reporter:
 
     def wrote_image(self, path, tiles):
         path = Path(path)
-        with Image.open(path) as opened:
-            width, height = opened.size
+        width, height = _image_size(path)
         size = path.stat().st_size
         record = {
             "path": str(path), "width": width, "height": height,
@@ -380,10 +391,15 @@ def cmd_images(args, rep):
         if not path.exists():
             _die(f"input not found: {path}", EXIT_INPUT)
         try:
-            image = Image.open(path).convert("RGB")
+            # Letterbox while the source is open, then keep only the small cell:
+            # a folder of large stills must not all be resident at once, and only
+            # one source handle may be open at a time.
+            with Image.open(path) as source:
+                cell = _letterbox(source.convert("RGB"), args.cell)
+                source.close()
         except (OSError, ValueError) as exc:
             _die(f"cannot read {path}: {exc}", EXIT_INPUT)
-        opened.append((entry, image))
+        opened.append((entry, cell))
 
     per_page = max(1, args.cols * args.rows)
     pages = math.ceil(len(opened) / per_page)
@@ -398,10 +414,10 @@ def cmd_images(args, rep):
     for page, path in enumerate(paths):
         group = opened[page * per_page:(page + 1) * per_page]
         pairs = []
-        for offset, (entry, image) in enumerate(group):
+        for offset, (entry, cell) in enumerate(group):
             number = args.number_from + page * per_page + offset
             numbers.append((number, entry))
-            pairs.append((_letterbox(image, args.cell), str(number)))
+            pairs.append((cell, str(number)))
         sheet = tile(pairs, cols=args.cols, tile_w=args.cell, label_h=LABEL_H)
         _save_png(sheet, path)
         rep.wrote_image(path, len(pairs))
@@ -512,16 +528,18 @@ def _pad_to_aspect(tiles):
     """Give every tile the tallest aspect so cells line up across every sheet."""
     if not tiles:
         return tiles
-    aspect = max(image.height / image.width for image, _label in tiles)
+    aspect = max(
+        image.height / image.width for image, _label, _crop_width in tiles
+    )
     padded = []
-    for image, label in tiles:
+    for image, label, crop_width in tiles:
         height = max(image.height, math.ceil(image.width * aspect))
         if height == image.height:
-            padded.append((image, label))
+            padded.append((image, label, crop_width))
             continue
         canvas = Image.new("RGB", (image.width, height), BG)
         canvas.paste(image, (0, (height - image.height) // 2))
-        padded.append((canvas, label))
+        padded.append((canvas, label, crop_width))
     return padded
 
 
@@ -588,7 +606,11 @@ def cmd_grid(args, rep):
         if not path.exists():
             _die(f"input not found: {path}", EXIT_INPUT)
         try:
-            image = Image.open(path).convert("RGB")
+            # convert() returns an independent copy, so the source handle can be
+            # closed before the next image is opened.
+            with Image.open(path) as source:
+                image = source.convert("RGB")
+                source.close()
         except (OSError, ValueError) as exc:
             _die(f"cannot read {path}: {exc}", EXIT_INPUT)
         opened.append((path, image))
@@ -614,21 +636,33 @@ def cmd_grid(args, rep):
         if args.overview:
             rep.note("overview skipped in band mode: every tile already spans the width")
         pages = []
-        for index, token in enumerate(bands, start=1):
+        all_scales = []
+        for token in bands:
             pairs = []
             for path, image in opened:
                 top, bottom = _parse_band(token, image.height)
+                crop = image.crop((0, top, image.width, bottom))
                 pairs.append((
-                    _scaled_crop(image.crop((0, top, image.width, bottom)), args.scale),
-                    f"{path.stem} {token}",
+                    _scaled_crop(crop, args.scale), f"{path.stem} {token}", crop.width,
                 ))
             pairs = _pad_to_aspect(pairs)
             cols = max(1, min(len(pairs), args.per_sheet))
             tile_w = max(1, min(max(pair[0].width for pair in pairs), args.max_width // cols))
-            sheet = tile(pairs, cols=cols, tile_w=tile_w, label_h=LABEL_H)
-            pages.append((f"band {token}", sheet, len(pairs), tile_w))
+            scales = [tile_w / crop_width for _image, _label, crop_width in pairs]
+            all_scales.extend(scales)
+            sheet = tile(
+                [(image, label) for image, label, _crop_width in pairs],
+                cols=cols, tile_w=tile_w, label_h=LABEL_H,
+            )
+            pages.append((token, sheet, len(pairs), min(scales), max(scales)))
+        if all_scales and max(all_scales) < args.scale * 0.999:
+            rep.note("--scale capped by --max-width; raise --max-width or lower --per-sheet")
         paths = _numbered_pages(args.out, len(pages), first_plain=False)
-        for (label, sheet, tiles, tile_w), path in zip(pages, paths):
+        for (token, sheet, tiles, low, high), path in zip(pages, paths):
+            rep.line(
+                f"band {token}: magnification {low:.2f}x-{high:.2f}x "
+                f"(asked {args.scale:g}x)"
+            )
             _save_png(sheet, path)
             rep.wrote_image(path, tiles)
         rep.finish({
@@ -636,6 +670,9 @@ def cmd_grid(args, rep):
             "images": [str(path) for path, _image in opened],
             "bands": bands,
             "scale": args.scale,
+            "effective_scale": (
+                [min(all_scales), max(all_scales)] if all_scales else [0.0, 0.0]
+            ),
             "per_sheet": args.per_sheet,
             "max_width": args.max_width,
             "overview": 0.0,
@@ -652,11 +689,15 @@ def cmd_grid(args, rep):
             except ValueError as exc:
                 _die(f"region {name} is not valid for {path}: {exc}")
             label = f"{path.stem}:{name}" if multiple else name
-            tiles.append((_scaled_crop(image.crop(box), args.scale), label))
+            crop = image.crop(box)
+            tiles.append((_scaled_crop(crop, args.scale), label, crop.width))
 
     tiles = _pad_to_aspect(tiles)
     cols = max(1, min(args.per_sheet, len(tiles)))
     tile_w = max(1, min(max(pair[0].width for pair in tiles), args.max_width // cols))
+    all_scales = [tile_w / crop_width for _image, _label, crop_width in tiles]
+    if all_scales and max(all_scales) < args.scale * 0.999:
+        rep.note("--scale capped by --max-width; raise --max-width or lower --per-sheet")
     groups = _chunks(tiles, args.per_sheet)
     paths = _numbered_pages(args.out, len(groups), first_plain=False)
     rep.line(f"tile-w {tile_w}px, {len(groups)} sheet(s) of up to {args.per_sheet} tiles")
@@ -671,7 +712,15 @@ def cmd_grid(args, rep):
             for path, image in opened
         ]
     for group, path in zip(groups, paths):
-        sheet = tile(group, cols=min(args.per_sheet, len(group)), tile_w=tile_w, label_h=LABEL_H)
+        scales = [tile_w / crop_width for _image, _label, crop_width in group]
+        rep.line(
+            f"magnification {min(scales):.2f}x-{max(scales):.2f}x "
+            f"(asked {args.scale:g}x)"
+        )
+        sheet = tile(
+            [(image, label) for image, label, _crop_width in group],
+            cols=min(args.per_sheet, len(group)), tile_w=tile_w, label_h=LABEL_H,
+        )
         if bands_of_images:
             header = sum(band.height for band in bands_of_images)
             width = max([sheet.width] + [band.width for band in bands_of_images])
@@ -694,6 +743,7 @@ def cmd_grid(args, rep):
         "max_width": args.max_width,
         "overview": args.overview,
         "tile_w": tile_w,
+        "effective_scale": [min(all_scales), max(all_scales)],
         "sheets": len(groups),
     })
     return 0
@@ -760,7 +810,7 @@ def _build_parser():
     images = modes.add_parser("images", help="numbered sheet of still images")
     images.add_argument("files", nargs="*", help="image files, in the order to number them")
     images.add_argument("--cols", type=int, default=5, help="cells per row (default 5)")
-    images.add_argument("--rows", type=int, default=7, help="cells per sheet (default 7)")
+    images.add_argument("--rows", type=int, default=7, help="rows per sheet (default 7)")
     images.add_argument("--cell", type=int, default=340, help="square cell size in px (default 340)")
     images.add_argument(
         "--number-from", type=int, default=1,

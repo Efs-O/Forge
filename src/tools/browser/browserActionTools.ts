@@ -84,8 +84,10 @@ export function makeBrowserActionTools(ctx: BrowserToolContext): RegisteredTool[
             properties: {
               tab_id: { type: 'string', description: 'Optional tab id (default: active tab).' },
               max: {
-                type: 'number',
-                description: `Maximum elements to list (default ${DEFAULT_INSPECT_MAX}, capped at ${MAX_INSPECT_ELEMENTS}).`,
+                type: 'integer',
+                minimum: 1,
+                maximum: MAX_INSPECT_ELEMENTS,
+                description: `Maximum elements to list (default ${DEFAULT_INSPECT_MAX}; range 1-${MAX_INSPECT_ELEMENTS}). Omit it to use the default.`,
               },
             },
             additionalProperties: false,
@@ -99,8 +101,8 @@ export function makeBrowserActionTools(ctx: BrowserToolContext): RegisteredTool[
       untrustedResult: true,
       autoApprove: true,
       handler: async (args) => {
-        // The clamp lives in one place (`clampInspectMax`) so an explicit `max`
-        // cannot ask for an unbounded enumeration of a huge page.
+        // Validation refuses explicit out-of-range limits; omission alone uses
+        // the default in clampInspectMax.
         const els = await ctx.mgr.inspect(ctx.str(args, 'tab_id'), args.max);
         if (els.length === 0) return 'No interactive elements found on this page.';
         return els

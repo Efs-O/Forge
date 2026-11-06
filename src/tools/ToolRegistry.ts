@@ -1,6 +1,5 @@
 import type { ToolDefinition } from '../llm/types';
 import { recordNativeLazyTool } from './lazyToolGroups';
-import { invalidArrayJsonDiagnostic } from './argCoercion';
 import { advertisedValues, missingArgumentError } from './toolErrorText';
 /** The declarations live in `toolContract.ts`; re-exported from here so every
  *  consumer that has always imported them from the registry keeps working. */
@@ -21,7 +20,65 @@ import {
   type RegisteredTool,
 } from './toolContract';
 /** A declared property, narrowed to the two fields the refusals read. */
-type DeclaredProperty = { type?: unknown; items?: unknown };
+type DeclaredProperty = {
+  type?: unknown;
+  items?: unknown;
+  minimum?: unknown;
+  maximum?: unknown;
+  exclusiveMinimum?: unknown;
+  exclusiveMaximum?: unknown;
+};
+
+function matchesJsonType(value: unknown, type: string): boolean {
+  switch (type) {
+    case 'array':
+      return Array.isArray(value);
+    case 'object':
+      return value !== null && typeof value === 'object' && !Array.isArray(value);
+    case 'integer':
+      return typeof value === 'number' && Number.isInteger(value);
+    case 'number':
+      return typeof value === 'number' && Number.isFinite(value);
+    case 'boolean':
+      return typeof value === 'boolean';
+    case 'string':
+      return typeof value === 'string';
+    default:
+      return true;
+  }
+}
+
+function jsonTypeExample(type: string, schema: DeclaredProperty): string | undefined {
+  switch (type) {
+    case 'array':
+      return '[]';
+    case 'object':
+      return '{}';
+    case 'integer':
+      return String(typeof schema.minimum === 'number' ? schema.minimum : 1);
+    case 'number':
+      return String(
+        typeof schema.minimum === 'number'
+          ? schema.minimum
+          : typeof schema.exclusiveMinimum === 'number'
+            ? schema.exclusiveMinimum + 0.1
+            : 0,
+      );
+    case 'boolean':
+      return 'false';
+    case 'string':
+      return '"text"';
+    default:
+      return undefined;
+  }
+}
+
+function jsonTypeName(value: unknown): string {
+  if (value === null) return 'null';
+  if (Array.isArray(value)) return 'an array';
+  if (typeof value === 'object') return 'an object';
+  return `a ${typeof value}`;
+}
 
 /**
  * Refusal text when an array argument is well-formed at the top level but its
@@ -202,52 +259,44 @@ export class ToolRegistry {
     const declared = Object.entries(properties as Record<string, DeclaredProperty>).filter(
       ([key]) => present[key] !== undefined,
     );
-    const notBoolean = declared
-      .filter(([key, schema]) => schema?.type === 'boolean' && typeof present[key] !== 'boolean')
-      .map(([key]) => {
-        const value = present[key];
-        // "True"/"False" are the observed Python-style spellings: show the
-        // unquoted JSON boolean beside the field so the retry is unambiguous.
-        const unquoted = value === 'True' ? 'true' : value === 'False' ? 'false' : undefined;
-        const correction =
-          unquoted !== undefined ? `use ${unquoted}` : 'use true or false without quotes';
-        return `${key}=${JSON.stringify(value)}: ${correction}`;
-      });
-    if (notBoolean.length > 0) {
-      const message = `Error: ${name} ${notBoolean.join(', ')}`;
-      // Hard 200-char cap on the refusal; a pathological field list falls back
-      // to a short generic that still names the tool and the fix.
-      if (message.length <= 200) return message;
-      const fallback = `Error: ${name} needs JSON true or false, not a string or number. Resend with bare booleans.`;
-      return fallback.length <= 200
-        ? fallback
-        : 'Error: invalid boolean argument; use unquoted JSON true or false.';
-    }
-    // Structured arguments must arrive as arrays, not a JSON string inside one.
-    const notArray = declared
-      .filter(([key, schema]) => schema?.type === 'array' && !Array.isArray(present[key]))
-      .map(([key]) => `"${key}" (got ${typeof present[key]})`);
-    if (notArray.length > 0) {
-      for (const [key, schema] of declared) {
-        if (schema?.type !== 'array' || typeof present[key] !== 'string') continue;
-        const value = present[key];
-        const diagnostic = invalidArrayJsonDiagnostic(value);
-        if (diagnostic) {
-          const format = (excerpt: string): string =>
-            `Error: ${name} "${key}" has invalid JSON at character index ${diagnostic.position}; near: \`${excerpt}\`. Likely cause: ${diagnostic.cause}. Resend "${key}" as a JSON array, not a string.`;
-          let message = format(diagnostic.excerpt);
-          if (message.length > 320) {
-            const maxExcerptLength = Math.max(
-              0,
-              320 - (message.length - diagnostic.excerpt.length),
-            );
-            const bounded = invalidArrayJsonDiagnostic(value, maxExcerptLength);
-            if (bounded) message = format(bounded.excerpt);
-          }
-          return message;
+    for (const [key, schema] of declared) {
+      const expected = schema?.type;
+      const value = present[key];
+      if (typeof value === 'number' && Number.isFinite(value)) {
+        if (expected === 'integer' && !Number.isInteger(value)) {
+          return `${name}: "${key}" must be an integer${numericRange(schema)}. Resend it in that range.`;
+        }
+        const min = typeof schema.minimum === 'number' ? schema.minimum : undefined;
+        const max = typeof schema.maximum === 'number' ? schema.maximum : undefined;
+        const exclusiveMin =
+          typeof schema.exclusiveMinimum === 'number' ? schema.exclusiveMinimum : undefined;
+        const exclusiveMax =
+          typeof schema.exclusiveMaximum === 'number' ? schema.exclusiveMaximum : undefined;
+        if (
+          (min !== undefined && value < min) ||
+          (max !== undefined && value > max) ||
+          (exclusiveMin !== undefined && value <= exclusiveMin) ||
+          (exclusiveMax !== undefined && value >= exclusiveMax)
+        ) {
+          return `${name}: "${key}" must be within ${numericRangeText(schema)}. Resend it in that range.`;
         }
       }
-      return `Error: ${name} needs a JSON array for ${notArray.join(', ')}, not a string holding one. Resend it as a bare array, e.g. ["a", "b"].`;
+      if (typeof expected !== 'string' || matchesJsonType(present[key], expected)) continue;
+      const example = jsonTypeExample(expected, schema);
+      if (example) {
+        const range =
+          (expected === 'integer' || expected === 'number') &&
+          (typeof schema.minimum === 'number' ||
+            typeof schema.maximum === 'number' ||
+            typeof schema.exclusiveMinimum === 'number' ||
+            typeof schema.exclusiveMaximum === 'number')
+            ? ` in range ${numericRangeText(schema)}`
+            : '';
+        return (
+          `${name}: "${key}" must be a JSON ${expected}${range}, not ${jsonTypeName(present[key])}. ` +
+          `Resend the call with ${key} as ${example}.`
+        );
+      }
     }
     return invalidArrayItems(name, declared, present);
   }
@@ -346,4 +395,24 @@ export class ToolRegistry {
     }
     return map;
   }
+}
+
+function numericRange(schema: DeclaredProperty): string {
+  const text = numericRangeText(schema);
+  return text ? ` from ${text}` : '';
+}
+
+function numericRangeText(schema: DeclaredProperty): string {
+  const min = typeof schema.minimum === 'number' ? schema.minimum : undefined;
+  const max = typeof schema.maximum === 'number' ? schema.maximum : undefined;
+  const exclusiveMin =
+    typeof schema.exclusiveMinimum === 'number' ? schema.exclusiveMinimum : undefined;
+  const exclusiveMax =
+    typeof schema.exclusiveMaximum === 'number' ? schema.exclusiveMaximum : undefined;
+  if (min !== undefined && max !== undefined) return `${min} to ${max}`;
+  if (min !== undefined) return `at least ${min}`;
+  if (max !== undefined) return `at most ${max}`;
+  if (exclusiveMin !== undefined) return `greater than ${exclusiveMin}`;
+  if (exclusiveMax !== undefined) return `less than ${exclusiveMax}`;
+  return 'the declared range';
 }

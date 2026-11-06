@@ -324,7 +324,12 @@ export async function streamChatCompletion(
         try {
           chunk = JSON.parse(data) as StreamChunk;
         } catch {
-          continue;
+          fail(
+            new Error(
+              `OpenAI-compatible stream sent malformed JSON (${data.slice(0, 200)}); the reply was stopped there.`,
+            ),
+          );
+          return;
         }
 
         // Error frames carry no `choices`, so the old `if (!choice) continue`

@@ -69,6 +69,34 @@ describe('extractFallbackToolCalls', () => {
     expect(calls?.map((call) => call.function.name)).toEqual(['read_file', 'ask_user']);
   });
 
+  it('turns malformed Ollama marker arguments into a model-facing tool error', () => {
+    const calls = extractFallbackToolCalls(
+      `${TOOL_CALL_BEGIN}read_file${TOOL_SEP}{"path":"bad\\q"}${TOOL_CALL_END}`,
+    );
+    expect(calls).toHaveLength(1);
+    expect(calls?.[0]?.function.name).toBe('__tool_call_error__');
+    expect(JSON.parse(calls?.[0]?.function.arguments ?? '{}')).toMatchObject({
+      __error: expect.stringMatching(/^malformed tool call: its arguments are not valid JSON/u),
+    });
+  });
+
+  it('turns a non-canonical fenced envelope into a model-facing refusal', () => {
+    const definitions = [
+      {
+        type: 'function' as const,
+        function: { name: 'read_file', description: '', parameters: { type: 'object' } },
+      },
+    ];
+    const calls = extractFallbackToolCalls(
+      '```json\n{"name":"read_file","arguments":{"path":"a"}}\n```',
+      definitions,
+    );
+    expect(calls?.[0]?.function.name).toBe('__tool_call_error__');
+    expect(JSON.parse(calls?.[0]?.function.arguments ?? '{}')).toEqual({
+      __error: 'tool call: use {"tool": "<name>", "arguments": {...}}; the "name" form is not accepted.',
+    });
+  });
+
   it('types XML parameter strings from the tool schema', () => {
     const definitions = [
       {

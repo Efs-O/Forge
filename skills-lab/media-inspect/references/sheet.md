@@ -112,7 +112,7 @@ whole-image map of where each crop came from.
 | `--region-file PATH` | - | `.json` object mapping name to a box string or a 4-number list, or flat `name: x0,y0,x1,y1` lines with `#` comments |
 | `--preset thirds\|halves\|center` | - | neutral geometry only; repeatable. `thirds` is a 3x3 grid (9 regions, `thirds_r1c1`...), `halves` is 2x2, `center` is the middle half |
 | `--bands y0-y1,y0-y1` | - | the same horizontal bands across images, one sheet per band, images side by side. Replaces the region list |
-| `--scale F` | `3.0` | crop magnification; upscaled with nearest-neighbour so pixel edges stay honest |
+| `--scale F` | `3.0` | crop magnification; upscaled with nearest-neighbour so pixel edges stay honest. What the sheet really draws is printed per sheet, see `magnification` |
 | `--per-sheet N` | `3` | most tiles on one sheet |
 | `--max-width N` | `1600` | sheet width cap in px; tile width is `min(widest crop, max-width // tiles-per-sheet)` |
 | `--overview F` | `0.5` | add a labelled whole-image map row at the top of every sheet with every region outlined. Width is `min(image width, F * max-width)`, so it never upscales. `0` disables it |
@@ -123,10 +123,15 @@ Region order is the `--region` flags first, then the `--region-file`, then the
 presets. Fraction boxes scale to each image; pixel boxes do not, so prefer
 fractions when the images differ in size. Tiles are padded to the tallest
 aspect on the sheet so cells line up across pages. `--bands` turns the overview
-off (every tile already spans the width) and says so in a `note:` line. If a
-crop's scaled width is wider than `max-width` divided by the tiles per sheet,
-the tile is scaled down to fit, so the magnification you see is lower than
-`--scale`; the printed `tile-w` is the width actually used.
+off (every tile already spans the width) and says so in a `note:` line.
+
+`--scale` is a request, not what the sheet shows: every crop on a sheet is
+resized to one tile width so the sheet fits `--max-width`. Each sheet prints
+what it really draws, `magnification 0.83x-0.83x (asked 3x)`, as the min-max
+range over that sheet's tiles, and the JSON carries the same range for the whole
+run in `effective_scale`. When the widest tile cannot reach the asked scale, one
+`note:` line reads `--scale capped by --max-width; raise --max-width or lower
+--per-sheet`.
 
 ### Text output
 
@@ -135,17 +140,24 @@ the tile is scaled down to fit, so the magnification you see is lower than
 layout: scale 3, per-sheet 3, max-width 1600, overview 0.5, label-h 22
 image C:\fixtures\a.png 200x200
 tile-w 201px, 3 sheet(s) of up to 3 tiles
+magnification 3.00x-3.05x (asked 3x)
 wrote C:\out\thirds-1.png 603x449px 4172 bytes tiles=3
+magnification 3.00x-3.05x (asked 3x)
 wrote C:\out\thirds-2.png 603x449px 4234 bytes tiles=3
+magnification 3.00x-3.05x (asked 3x)
 wrote C:\out\thirds-3.png 603x449px 4188 bytes tiles=3
 ```
+
+In band mode the magnification line is prefixed with the band, e.g.
+`band 0.0-0.5: magnification 3.00x-3.00x (asked 3x)`.
 
 ### JSON keys
 
 `mode`, `images`, `regions` (list of `{name, box}`), `scale`, `per_sheet`,
-`max_width`, `overview`, `tile_w`, `sheets`, `written`, `notes`. Band mode
-reports `bands` (the tokens) instead of `regions`, and omits `tile_w` because
-it changes per band.
+`max_width`, `overview`, `tile_w`, `effective_scale` (`[min, max]` over every
+tile in the run), `sheets`, `written`, `notes`. Band mode reports `bands` (the
+tokens) instead of `regions` and omits `tile_w`, which changes per band; its
+`effective_scale` spans all bands.
 
 ---
 

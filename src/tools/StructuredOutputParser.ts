@@ -5,13 +5,12 @@
  *
  * Supported shapes inside a ```json block:
  *   { "tool": "tool_name",  "arguments": { ... } }
- *   { "name": "tool_name",  "arguments": { ... } }
- *   { "tool_name": { ... } }   (shorthand: single key whose value is an object)
+ *   The `name` and single-key forms are rejected with a tool-call error.
  *
  * Supported marker syntax used by some Ollama-hosted/cloud models:
  *   <｜tool▁call▁begin｜>tool_name<｜tool▁sep｜>{"arg":"value"}<｜tool▁call▁end｜>
  *
- * Hermes-style JSON inside <tool_call> tags, as plain content:
+ * Hermes-style JSON inside <tool_call> tags, in that format's own envelope:
  *   <tool_call>{"name":"tool_name","arguments":{...}}</tool_call>
  * Qwen-family fine-tunes drift into this after a few native calls; llama-server
  * only parses the template's own `<function=...>` form, so without this the
@@ -26,7 +25,10 @@
 export interface ParsedToolCall {
   name: string;
   arguments: Record<string, unknown>;
+  error?: string;
 }
+
+const PARSE_ERROR_TOOL = '__tool_call_error__';
 
 const OLLAMA_TOOL_CALL_BEGIN = '<｜tool▁call▁begin｜>';
 const OLLAMA_TOOL_CALL_SEP = '<｜tool▁sep｜>';
@@ -167,17 +169,28 @@ export function stripStructuredOutputFromFullText(
   text: string,
   toolNames?: ReadonlySet<string>,
 ): string {
-  const withoutMarkers = text.replace(OLLAMA_TOOL_CALL_RE, '').replace(OLLAMA_TOOL_WRAPPER_RE, '');
+  const hasRejectedMarkerCall = parseStructuredOutput(text).some(
+    (call) => call.error !== undefined,
+  );
+  const withoutMarkers = hasRejectedMarkerCall
+    ? text
+    : text.replace(OLLAMA_TOOL_CALL_RE, '').replace(OLLAMA_TOOL_WRAPPER_RE, '');
 
-  const isFenceCall = (match: string, body: string): string =>
-    fenceCall(body, toolNames) ? '' : match;
+  const isFenceCall = (match: string, body: string): string => {
+    const call = fenceCall(body, toolNames);
+    return call !== null && call.error === undefined ? '' : match;
+  };
   const isCall = (match: string, body: string): string => (isHermesCall(body) ? '' : match);
   return withoutMarkers.replace(JSON_FENCE_RE, isFenceCall).replace(HERMES_TOOL_CALL_RE, isCall);
 }
 
 function fenceCall(body: string, toolNames?: ReadonlySet<string>): ParsedToolCall | null {
-  const candidate = parseJsonToolObject(body.trim());
-  return candidate && (!toolNames || toolNames.has(candidate.name)) ? candidate : null;
+  const candidate = parseJsonToolObject(body.trim(), 'fence');
+  if (!candidate || !toolNames) return candidate;
+  // A refused envelope still counts as a call only when it names a real tool,
+  // so an ordinary JSON snippet in the answer is left alone.
+  const named = candidate.error === undefined ? candidate.name : candidate.arguments['__tool'];
+  return typeof named === 'string' && toolNames.has(named) ? candidate : null;
 }
 
 function collectJsonFenceToolCalls(
@@ -203,22 +216,31 @@ function collectOllamaMarkerToolCalls(text: string, results: ParsedToolCall[]): 
   while ((match = OLLAMA_TOOL_CALL_RE.exec(text)) !== null) {
     const name = match[1]?.trim();
     if (!name) continue;
-    const parsedArgs = parseJsonArguments(match[2]?.trim() ?? '');
-    if (!parsedArgs) continue;
-    results.push({ name, arguments: parsedArgs });
+    const raw = match[2]?.trim() ?? '';
+    const parsedArgs = parseJsonArguments(raw);
+    if (!parsedArgs.ok) {
+      results.push({
+        name: PARSE_ERROR_TOOL,
+        arguments: {},
+        error: `malformed tool call: its arguments are not valid JSON (${parsedArgs.message}), so no tool ran. Resend it.`,
+      });
+      continue;
+    }
+    results.push({ name, arguments: parsedArgs.value });
   }
 }
 
 function collectHermesToolCalls(text: string, results: ParsedToolCall[]): void {
   for (const match of text.matchAll(HERMES_TOOL_CALL_RE)) {
     const body = match[1] ?? '';
-    const candidate = parseJsonToolObject(body) ?? parseXmlFunction(body);
+    const candidate = parseJsonToolObject(body, 'hermes') ?? parseXmlFunction(body);
     if (candidate) results.push(candidate);
   }
 }
 
 function isHermesCall(body: string): boolean {
-  return (parseJsonToolObject(body.trim()) ?? parseXmlFunction(body)) !== null;
+  const candidate = parseJsonToolObject(body.trim(), 'hermes') ?? parseXmlFunction(body);
+  return candidate !== null && candidate.error === undefined;
 }
 
 function parseXmlFunction(body: string): ParsedToolCall | null {
@@ -229,15 +251,30 @@ function parseXmlFunction(body: string): ParsedToolCall | null {
   return { name: fn[1], arguments: args };
 }
 
-function parseJsonToolObject(raw: string): ParsedToolCall | null {
+/**
+ * `fence`: a ```json block, where Forge's fallback prompt teaches `tool` and
+ * nothing else. `hermes`: inside `<tool_call>` tags, where `name` is that
+ * format's own envelope (the one Qwen-family models are trained on).
+ */
+type Envelope = 'fence' | 'hermes';
+
+function parseJsonToolObject(raw: string, envelope: Envelope): ParsedToolCall | null {
   const parsed = parseJsonObject(raw);
   if (!parsed) return null;
-  return tryNormalize(parsed);
+  return tryNormalize(parsed, envelope);
 }
 
-function parseJsonArguments(raw: string): Record<string, unknown> | null {
-  const parsed = parseJsonObject(raw);
-  return isPlainObject(parsed) ? parsed : null;
+function parseJsonArguments(
+  raw: string,
+): { ok: true; value: Record<string, unknown> } | { ok: false; message: string } {
+  try {
+    const parsed: unknown = JSON.parse(raw);
+    return isPlainObject(parsed)
+      ? { ok: true, value: parsed }
+      : { ok: false, message: 'the JSON value is not an object' };
+  } catch (error) {
+    return { ok: false, message: error instanceof Error ? error.message : String(error) };
+  }
 }
 
 function parseJsonObject(raw: string): Record<string, unknown> | null {
@@ -259,7 +296,7 @@ function parseJsonObject(raw: string): Record<string, unknown> | null {
  * Try to extract a `{ name, arguments }` pair from a parsed JSON object.
  * Returns null if the object does not match any supported shape.
  */
-function tryNormalize(obj: Record<string, unknown>): ParsedToolCall | null {
+function tryNormalize(obj: Record<string, unknown>, envelope: Envelope): ParsedToolCall | null {
   if (typeof obj.tool === 'string' && isPlainObject(obj.arguments)) {
     const name = obj.tool.trim();
     if (!name) return null;
@@ -267,6 +304,7 @@ function tryNormalize(obj: Record<string, unknown>): ParsedToolCall | null {
   }
 
   if (typeof obj.name === 'string' && isPlainObject(obj.arguments)) {
+    if (envelope === 'fence') return invalidEnvelope('name', obj.name);
     const name = obj.name.trim();
     if (!name) return null;
     return { name, arguments: obj.arguments as Record<string, unknown> };
@@ -276,13 +314,19 @@ function tryNormalize(obj: Record<string, unknown>): ParsedToolCall | null {
   if (keys.length === 1) {
     const [key] = keys;
     if (isPlainObject(obj[key])) {
-      const name = key.trim();
-      if (!name) return null;
-      return { name, arguments: obj[key] as Record<string, unknown> };
+      return invalidEnvelope('single-key', key);
     }
   }
 
   return null;
+}
+
+function invalidEnvelope(shape: string, toolName: unknown): ParsedToolCall {
+  return {
+    name: PARSE_ERROR_TOOL,
+    arguments: { __tool: toolName },
+    error: `tool call: use {"tool": "<name>", "arguments": {...}}; the "${shape}" form is not accepted.`,
+  };
 }
 
 function isPlainObject(v: unknown): v is Record<string, unknown> {

@@ -2,11 +2,7 @@ import type { HostToWebview } from './messageBridge';
 import type { ChatMessage, ToolCall } from '../llm/types';
 import type { ToolRegistry } from '../tools/ToolRegistry';
 import type { ToolFailureTracker } from '../tools/StripTools';
-import {
-  coerceToolArgs,
-  isJsonObject,
-  parseJsonWithInvalidEscapeRepair,
-} from '../tools/argCoercion';
+import { isJsonObject, parseJson } from '../tools/jsonInput';
 import {
   evaluateToolApproval,
   readToolApprovalMetadata,
@@ -89,16 +85,16 @@ export async function checkParallelReadCall(
     return { eligible: false };
   }
 
-  // This block mirrors ToolDispatch.ts's refusal order (malformed JSON, then coercion, then schema); a change to one must change the other.
-  const parsed = parseJsonWithInvalidEscapeRepair(tc.function.arguments);
-  if (!parsed.ok || (parsed.repaired && !isJsonObject(parsed.value))) {
+  // This block mirrors ToolDispatch.ts's refusal order (malformed JSON, object shape, then schema).
+  const parsed = parseJson(tc.function.arguments);
+  if (!parsed.ok || !isJsonObject(parsed.value)) {
     // The normal path refuses malformed arguments before it reaches approval.
     return { eligible: true };
   }
 
   let args: Record<string, unknown>;
   try {
-    args = coerceToolArgs(reg.definition, parsed.value as Record<string, unknown>);
+    args = parsed.value;
     if (toolRegistry.invalidArgs(reg, args)) return { eligible: true };
   } catch {
     // Coercion and schema refusals also precede approval on the serial path.

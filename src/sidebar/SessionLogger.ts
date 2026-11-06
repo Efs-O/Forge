@@ -12,11 +12,6 @@ import {
 import type { ForgeTurnEndKind } from './turnOutcome';
 import type { CompactionAttemptLogEntry, CompactionLogEntry } from './compactionLogTypes';
 import { buildGateRefusalRow, type GateEventRow } from './gateEventLog';
-import {
-  isJsonObject,
-  parseJsonWithInvalidEscapeRepair,
-  toolArgumentRepairForMessage,
-} from '../tools/argCoercion';
 import { readResumeCursor } from '../sessions/sessionCursor';
 
 const SESSIONS_DIR = path.join(os.homedir(), '.forge', 'sessions');
@@ -311,15 +306,19 @@ export class SessionLogger {
           // turn; a hardcoded null left it in the sidebar and nowhere else.
           content: typeof msg.content === 'string' && msg.content ? msg.content : null,
           tool_calls: msg.tool_calls.map((tc) => {
-            const parsed = parseJsonWithInvalidEscapeRepair(tc.function.arguments);
-            const acceptableRepair = parsed.ok && parsed.repaired && isJsonObject(parsed.value);
+            let parsed: unknown;
+            try {
+              parsed = JSON.parse(tc.function.arguments) as unknown;
+            } catch {
+              parsed = undefined;
+            }
+            const objectArgs =
+              parsed !== null && typeof parsed === 'object' && !Array.isArray(parsed);
             return {
               id: tc.id,
               name: tc.function.name,
               raw_arguments: tc.function.arguments,
-              input:
-                parsed.ok && (!parsed.repaired || isJsonObject(parsed.value)) ? parsed.value : {},
-              ...(acceptableRepair ? { arguments_repaired: true } : {}),
+              input: objectArgs ? parsed : {},
             };
           }),
           timestamp_ms: Date.now(),
@@ -348,8 +347,7 @@ export class SessionLogger {
 
       // A turn that produced only reasoning — cut off, refused, or interrupted
       // mid-thought — still says why. Requiring content dropped those entirely.
-      const argumentRepair = toolArgumentRepairForMessage(msg);
-      if (!content && !msg.reasoning && !argumentRepair) continue;
+      if (!content && !msg.reasoning) continue;
 
       const line: Record<string, unknown> = {
         role: msg.role,
@@ -362,13 +360,6 @@ export class SessionLogger {
       if (msg.role === 'user' && msg.midTurn === true) line['delivered'] = 'mid_turn';
       if (msg.role === 'tool' && msg.tool_call_id) line['tool_call_id'] = msg.tool_call_id;
       if (msg.role === 'tool' && msg.name) line['name'] = msg.name;
-      if (argumentRepair) {
-        line['argument_repair'] = {
-          method: 'double_invalid_escape_backslashes',
-          whole_arguments: argumentRepair.wholeArguments,
-          fields: argumentRepair.fields,
-        };
-      }
       if (msg.role === 'user' && typeof msg.turnContext === 'string') {
         line['turn_context'] = msg.turnContext;
       }

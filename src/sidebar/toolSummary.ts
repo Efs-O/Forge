@@ -1,8 +1,8 @@
-import { isJsonObject, parseJsonWithInvalidEscapeRepair } from '../tools/argCoercion';
+import { isJsonObject, parseJson } from '../tools/jsonInput';
 
 /** Extracts a human-readable detail string from a tool call's argument JSON. */
 export function extractToolDetail(argsJson: string): string {
-  const parsed = parseJsonWithInvalidEscapeRepair(argsJson);
+  const parsed = parseJson(argsJson);
   if (parsed.ok && isJsonObject(parsed.value)) {
     const args = parsed.value;
     const model = args['model'];

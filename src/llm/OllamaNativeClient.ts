@@ -6,7 +6,7 @@ import { wireMessageContent } from './wireRequest';
 import { StreamWatchdog } from './streamWatchdog';
 import { withDescribedCause } from '../util/describeError';
 import { ToolCallTruncatedError, argumentsAreIncomplete } from './ToolCallTruncatedError';
-import { isJsonObject, parseJsonWithInvalidEscapeRepair } from '../tools/argCoercion';
+import { isJsonObject, parseJson } from '../tools/jsonInput';
 import { createRequestClientClock, createRequestStatsReporter } from '../sessions/requestStats';
 import {
   reportOllamaUsage,
@@ -73,7 +73,7 @@ function contentPartsToOllama(parts: ContentPart[]): { content: string; images?:
 
 function parseToolArguments(argumentsJson: string): Record<string, unknown> {
   if (!argumentsJson.trim()) return {};
-  const parsed = parseJsonWithInvalidEscapeRepair(argumentsJson);
+  const parsed = parseJson(argumentsJson);
   return parsed.ok && isJsonObject(parsed.value) ? parsed.value : {};
 }
 
@@ -166,7 +166,7 @@ function argumentsAreWhole(value: unknown): boolean {
 /** True when accumulated text is a complete, non-empty argument object. */
 function argumentsAreComplete(argumentsText: string): boolean {
   if (!argumentsText || argumentsText === '{}') return false;
-  return parseJsonWithInvalidEscapeRepair(argumentsText).ok;
+  return parseJson(argumentsText).ok;
 }
 
 /**
@@ -375,7 +375,12 @@ export async function streamOllamaChatCompletion(
     try {
       chunk = JSON.parse(raw) as OllamaStreamChunk;
     } catch {
-      return 'continue';
+      fail(
+        new Error(
+          `Ollama stream sent malformed JSON (${raw.slice(0, 200)}); the reply was stopped there.`,
+        ),
+      );
+      return 'error';
     }
     if (chunk.error) {
       fail(new Error(chunk.error));

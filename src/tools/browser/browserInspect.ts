@@ -54,11 +54,13 @@ export const MAX_INSPECT_ELEMENTS = 500;
  */
 export const TEXT_SCAN_LIMIT = 400;
 
-/** Clamp an explicit `max` so one call cannot produce an unbounded result. */
+/** Default only when omitted; invalid explicit limits are refused. */
 export function clampInspectMax(max: unknown): number {
-  const n = typeof max === 'number' && Number.isFinite(max) ? Math.floor(max) : DEFAULT_INSPECT_MAX;
-  if (n < 1) return DEFAULT_INSPECT_MAX;
-  return Math.min(n, MAX_INSPECT_ELEMENTS);
+  if (max === undefined) return DEFAULT_INSPECT_MAX;
+  if (typeof max !== 'number' || !Number.isInteger(max) || max < 1 || max > MAX_INSPECT_ELEMENTS) {
+    throw new Error(`browser_inspect: "max" must be an integer from 1 to ${MAX_INSPECT_ELEMENTS}.`);
+  }
+  return max;
 }
 
 /** The serializable payload the inspect callback receives. */

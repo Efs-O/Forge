@@ -59,10 +59,16 @@ export function resolveVideoOptions(config: VideoConfig | undefined): VideoOptio
  * nothing in the result explaining why.
  */
 export function applyRequestedFrameCount(options: VideoOptions, requested: unknown): VideoOptions {
-  if (typeof requested !== 'number' || !Number.isFinite(requested)) return options;
-  const floored = Math.floor(requested);
-  if (floored < 1) return options;
-  return { ...options, requestedFrames: floored };
+  if (requested === undefined) return options;
+  if (
+    typeof requested !== 'number' ||
+    !Number.isInteger(requested) ||
+    requested < 1 ||
+    requested > options.maxFrames
+  ) {
+    throw new Error(`view_video: "max_frames" must be an integer from 1 to ${options.maxFrames}.`);
+  }
+  return { ...options, requestedFrames: requested };
 }
 
 /** Bounds mirror the config schema, so a tool arg can never reach a value the config would reject. */
@@ -75,12 +81,18 @@ const MAX_FRAME_DIMENSION = 4096;
  * over it costs a round for nothing.
  */
 export function applyRequestedDimension(options: VideoOptions, requested: unknown): VideoOptions {
-  if (typeof requested !== 'number' || !Number.isFinite(requested)) return options;
-  const clamped = Math.min(
-    MAX_FRAME_DIMENSION,
-    Math.max(MIN_FRAME_DIMENSION, Math.floor(requested)),
-  );
-  return { ...options, frameMaxDimension: clamped };
+  if (requested === undefined) return options;
+  if (
+    typeof requested !== 'number' ||
+    !Number.isInteger(requested) ||
+    requested < MIN_FRAME_DIMENSION ||
+    requested > MAX_FRAME_DIMENSION
+  ) {
+    throw new Error(
+      `view_video: "frame_max_dimension" must be an integer from ${MIN_FRAME_DIMENSION} to ${MAX_FRAME_DIMENSION}.`,
+    );
+  }
+  return { ...options, frameMaxDimension: requested };
 }
 
 /**
@@ -93,8 +105,20 @@ export function applyRequestedWindow(
   end: unknown,
 ): VideoOptions {
   const next = { ...options };
-  if (typeof start === 'number' && Number.isFinite(start)) next.startSeconds = start;
-  if (typeof end === 'number' && Number.isFinite(end)) next.endSeconds = end;
+  if (start !== undefined) {
+    if (typeof start !== 'number' || !Number.isFinite(start) || start < 0) {
+      throw new Error(
+        'view_video: "start_seconds" must be a finite number from 0 to the clip duration.',
+      );
+    }
+    next.startSeconds = start;
+  }
+  if (end !== undefined) {
+    if (typeof end !== 'number' || !Number.isFinite(end) || end <= 0) {
+      throw new Error('view_video: "end_seconds" must be a finite number greater than 0.');
+    }
+    next.endSeconds = end;
+  }
   return next;
 }
 
@@ -122,7 +146,12 @@ export function summaryLine(
   // The end is clamped to the clip as `resolveWindow` clamps it, so an
   // end_seconds past the end is reported as the span actually sampled.
   const start = options?.startSeconds ?? 0;
-  const end = Math.min(options?.endSeconds ?? probe.durationSeconds, probe.durationSeconds);
+  const requestedEnd = options?.endSeconds;
+  const end = Math.min(requestedEnd ?? probe.durationSeconds, probe.durationSeconds);
+  const pastEnd =
+    requestedEnd !== undefined && requestedEnd > probe.durationSeconds
+      ? ` requested end ${requestedEnd.toFixed(1)} s, clip ends at ${probe.durationSeconds.toFixed(1)} s.`
+      : '';
   const windowed =
     start > 0 || end < probe.durationSeconds
       ? ` Sampled only ${start.toFixed(1)}s-${end.toFixed(1)}s of the clip, not all of it.`
@@ -137,12 +166,13 @@ export function summaryLine(
         : '';
   return (
     `Video ${relativePath} — ${probe.durationSeconds.toFixed(1)}s, ${probe.width}x${probe.height}. ` +
-    `${times.length} still frame${times.length === 1 ? '' : 's'} sampled at ${at}.${windowed}${why} ` +
+    `${times.length} still frame${times.length === 1 ? '' : 's'} sampled at ${at}.${windowed}${pastEnd}${why} ` +
     'These are stills, not motion: you cannot see what happens between them, and you have no audio.'
   );
 }
 
 export function makeViewVideoTool(getVideoConfig?: () => VideoConfig | undefined): RegisteredTool {
+  const maxFrames = getVideoConfig?.()?.max_frames ?? VIDEO_DEFAULTS.maxFrames;
   return {
     definition: {
       type: 'function',
@@ -165,38 +195,37 @@ export function makeViewVideoTool(getVideoConfig?: () => VideoConfig | undefined
             },
             max_frames: {
               type: 'integer',
+              minimum: 1,
+              maximum: maxFrames,
               description:
                 'How many frames to sample. Omit and the count is chosen from the clip length ' +
                 '(roughly one frame per 5 seconds, minimum 3), which is sparse for a short ' +
                 'clip — an 11-second clip gets 3. Pass a number to sample more densely; it is ' +
-                'honoured exactly unless it exceeds the configured ceiling, in which case you ' +
-                'get the ceiling. Each extra frame costs prompt tokens.',
-              minimum: 1,
+                `honoured exactly within the configured range 1-${maxFrames}. Each extra frame costs prompt tokens.`,
             },
             frame_max_dimension: {
               type: 'integer',
+              minimum: MIN_FRAME_DIMENSION,
+              maximum: MAX_FRAME_DIMENSION,
               description:
                 'Longest edge of each frame in pixels (default 640). Raise it when detail in ' +
                 'the frame is too small to read — on-screen text, a face, fine texture. Cost ' +
                 'rises steeply: 640 costs roughly 2.5x what 384 does. Lower it to fit a small ' +
                 'context.',
-              minimum: 64,
-              maximum: 4096,
             },
             start_seconds: {
               type: 'number',
+              minimum: 0,
               description:
                 'Sample only from this point onward. Use with end_seconds to concentrate frames ' +
                 'on the part of the clip you care about instead of spreading them over the whole ' +
                 'thing. Defaults to the start of the clip.',
-              minimum: 0,
             },
             end_seconds: {
               type: 'number',
-              description:
-                'Stop sampling at this point. Defaults to the end of the clip. Values past the ' +
-                'end are clamped, not rejected.',
               exclusiveMinimum: 0,
+              description:
+                'Stop sampling at this point. Omit it to use the clip end; values after the end are reported.',
             },
           },
           required: ['path'],

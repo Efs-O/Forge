@@ -1,12 +1,12 @@
 import type { ToolCallProgress } from '../llm/OpenAIClient';
 import type { ToolCallProgressMsg } from './messageBridge';
-import { parseJsonWithInvalidEscapeRepair } from '../tools/argCoercion';
+import { parseJson } from '../tools/jsonInput';
 
 /** Read a path only after its JSON string closes in streamed arguments. */
 export function partialToolPath(args: string): string | undefined {
   const match = /(?:^|[{,])\s*"path"\s*:\s*("(?:\\.|[^"\\])*")/.exec(args);
   if (!match) return undefined;
-  const parsed = parseJsonWithInvalidEscapeRepair(match[1]!);
+  const parsed = parseJson(match[1]!);
   return parsed.ok && typeof parsed.value === 'string' ? parsed.value : undefined;
 }
 

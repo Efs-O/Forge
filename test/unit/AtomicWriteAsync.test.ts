@@ -6,9 +6,11 @@ import {
   ASYNC_RENAME_BUDGET_MS,
   RENAME_BUDGET_MS,
   agentWriteOptions,
+  delayedWriteNote,
   renameContendedSync,
   writeFileAtomic,
 } from '../../src/util/atomicWrite';
+import * as fileHolders from '../../src/util/windowsFileHolders';
 
 vi.mock('fs', async (importOriginal) => ({
   ...(await importOriginal<typeof import('fs')>()),
@@ -97,6 +99,47 @@ describe('writeFileAtomic async contention', () => {
     expect(new Set(temporaryNames).size).toBe(temporaryNames.length);
     expect(fs.readFileSync(target, 'utf8')).toBe('after');
     expect(fs.readdirSync(root).filter((name) => name.includes('.forge-'))).toEqual([]);
+  });
+
+  it('reports the holder once when a contended async save later succeeds', async () => {
+    vi.useFakeTimers();
+    useFakeAsyncFileHandle();
+    const root = rootFolder();
+    const target = path.join(root, 'delayed.txt');
+    fs.writeFileSync(target, 'before');
+    const realRename = fs.renameSync;
+    let attempts = 0;
+    const lookup = vi.spyOn(fileHolders, 'windowsFileHoldersAsync').mockResolvedValue('123 Editor');
+    const onDelayedSuccess = vi.fn();
+    vi.spyOn(fs, 'renameSync').mockImplementation((from, to) => {
+      attempts += 1;
+      if (attempts === 1) throw errno('EPERM', 'rename: operation not permitted');
+      return realRename(from, to);
+    });
+
+    const pending = writeFileAtomic(target, 'after', { onDelayedSuccess });
+    await vi.runAllTimersAsync();
+    await pending;
+
+    expect(lookup).toHaveBeenCalledOnce();
+    expect(onDelayedSuccess).toHaveBeenCalledWith({
+      elapsedMs: expect.any(Number),
+      retries: 1,
+      holders: '123 Editor',
+    });
+    const report = onDelayedSuccess.mock.calls[0]?.[0];
+    expect(report).toBeDefined();
+    if (report) expect(delayedWriteNote(report)).toMatch(/^Note: Windows blocked the save for \d+ ms \(1 retries\); held by 123 Editor\.$/u);
+    expect(fs.readFileSync(target, 'utf8')).toBe('after');
+  });
+
+  it('does not look up a holder when the first rename succeeds', async () => {
+    useFakeAsyncFileHandle();
+    const root = rootFolder();
+    const target = path.join(root, 'uncontended.txt');
+    const lookup = vi.spyOn(fileHolders, 'windowsFileHoldersAsync');
+    await writeFileAtomic(target, 'after');
+    expect(lookup).not.toHaveBeenCalled();
   });
 
   it('gives up at 30 seconds with clear advice and removes the temp file', async () => {

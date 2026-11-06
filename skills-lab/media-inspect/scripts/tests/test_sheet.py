@@ -4,6 +4,8 @@ Fixtures are built by scripts/selftest.py's build_fixtures() into this test's ow
 temporary folder, so the tests never write into the shared fixture directory.
 """
 
+import contextlib
+import io
 import json
 import re
 import shutil
@@ -43,6 +45,8 @@ class SheetTests(unittest.TestCase):
         tall.save(cls.extra / "tall.png")
         flat = Image.new("RGB", (160, 160), (180, 40, 40))
         flat.save(cls.extra / "flat.png")
+        cls.big = cls.extra / "big1920.png"
+        Image.new("RGB", (1920, 1080), (90, 120, 150)).save(cls.big)
 
     @classmethod
     def tearDownClass(cls):
@@ -257,6 +261,39 @@ class SheetTests(unittest.TestCase):
 
     # ------------------------------------------------------------- grid mode --
 
+    def test_images_keeps_only_one_source_image_open(self):
+        """12 sources in: at most one full-size image is resident at a time."""
+        import importlib
+        from unittest import mock
+
+        sheet = importlib.import_module("sheet")
+        files = [self.image("a"), self.image("b")] * 6
+        args = sheet._build_parser().parse_args(
+            ["images", *files, "--out", self.out_path("memory.png")]
+        )
+        real_open = Image.open
+        state = {"open": 0, "peak": 0}
+
+        def counted(*open_args, **kwargs):
+            image = real_open(*open_args, **kwargs)
+            original_close = image.close
+
+            def close():
+                state["open"] -= 1
+                original_close()
+
+            image.close = close
+            state["open"] += 1
+            state["peak"] = max(state["peak"], state["open"])
+            return image
+
+        with mock.patch.object(Image, "open", counted), \
+                contextlib.redirect_stdout(io.StringIO()):
+            code = sheet.cmd_images(args, sheet.Reporter(json_mode=True))
+        self.assertEqual(code, 0)
+        self.assertEqual(state["open"], 0, f"sources left open: {state}")
+        self.assertLessEqual(state["peak"], 1, f"peak open sources: {state}")
+
     def test_grid_preset_thirds_writes_three_sheets_of_three_tiles(self):
         """The plan's test: a.png --preset thirds writes 3 sheets of 3 tiles each."""
         result = self.run_ok("grid", self.image("a"), "--preset", "thirds",
@@ -331,6 +368,41 @@ class SheetTests(unittest.TestCase):
         # plus its 22 px label row.
         self.assertEqual(mapped[0], bare[0], (mapped, bare))
         self.assertEqual(mapped[1] - bare[1], 222, (mapped, bare))
+
+    def test_grid_reports_effective_magnification_when_scale_is_capped(self):
+        """--scale 3 on a 1920 px wide image at max-width 1600 shows about 0.83x."""
+        payload = self.json_of(
+            "grid", str(self.big), "--preset", "thirds", "--per-sheet", "3",
+            "--max-width", "1600", "--out", str(self.out / "capped"),
+        )
+        low, high = payload["effective_scale"]
+        self.assertLess(high, 3.0, payload["effective_scale"])
+        self.assertAlmostEqual(low, 533 / 640, places=6, msg=payload["effective_scale"])
+        self.assertIn(
+            "--scale capped by --max-width; raise --max-width or lower --per-sheet",
+            payload["notes"], payload["notes"],
+        )
+        text = self.run_ok(
+            "grid", str(self.big), "--preset", "thirds", "--per-sheet", "3",
+            "--max-width", "1600", "--out", str(self.out / "capped2"),
+        ).stdout
+        self.assertEqual(
+            text.count("magnification 0.83x-0.83x (asked 3x)"), 3, text,
+        )
+
+    def test_grid_effective_magnification_reaches_the_asked_scale_when_it_fits(self):
+        result = self.run_ok(
+            "grid", str(self.big), "--region", "centre:0.25,0.25,0.75,0.75",
+            "--per-sheet", "1", "--max-width", "4000", "--out", str(self.out / "fits"),
+        )
+        self.assertNotIn("capped by --max-width", result.stdout)
+        self.assertIn("magnification 3.00x-3.00x (asked 3x)", result.stdout)
+        payload = self.json_of(
+            "grid", str(self.big), "--region", "centre:0.25,0.25,0.75,0.75",
+            "--per-sheet", "1", "--max-width", "4000", "--out", str(self.out / "fits2"),
+        )
+        self.assertEqual(payload["effective_scale"], [3.0, 3.0], payload["effective_scale"])
+        self.assertEqual(payload["notes"], [], payload["notes"])
 
     def test_grid_usage_errors(self):
         for argv in (

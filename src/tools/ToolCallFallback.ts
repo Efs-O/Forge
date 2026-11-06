@@ -23,7 +23,11 @@ export function extractFallbackToolCalls(
     type: 'function',
     function: {
       name: call.name,
-      arguments: JSON.stringify(typeArguments(call.name, call.arguments, definitions)),
+      arguments: JSON.stringify(
+        call.error !== undefined
+          ? { __error: call.error }
+          : typeArguments(call.name, call.arguments, definitions),
+      ),
     },
   }));
 }

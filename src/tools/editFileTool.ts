@@ -9,7 +9,12 @@ import {
   findIndentShiftedMatch,
   type EditMatch,
 } from './editMatch';
-import { agentWriteOptions, writeFileAtomic, type ExpectedFileState } from '../util/atomicWrite';
+import {
+  agentWriteOptions,
+  delayedWriteNote,
+  writeFileAtomic,
+  type ExpectedFileState,
+} from '../util/atomicWrite';
 import { withFileLengthWarning, type FileLengthWarningGetter } from './fileLengthWarning';
 import { NO_PROBLEM_WATCHER, withProblemNote, type ProblemWatcher } from './editDiagnostics';
 
@@ -312,10 +317,13 @@ export function makeEditFileTool(
       // loads the document into the language service BEFORE the bytes change,
       // which is what turns "nothing reported on this file" into a real answer.
       const watch = await watchProblems(filepath);
+      let contentionNote = '';
       await writeFileAtomic(
         filepath,
         updated,
-        agentWriteOptions(context?.abortSignal, { expected: fileState }),
+        agentWriteOptions(context?.abortSignal, { expected: fileState }, (report) => {
+          contentionNote = delayedWriteNote(report);
+        }),
       );
       const suppliedPath = args['path'] as string;
       const adjusted = shifted.length > 0 ? ` (${shifted.join('; ')})` : '';
@@ -380,7 +388,11 @@ export function makeEditFileTool(
       // A partly-applied call still grew the file, so the line count is said
       // for it too: the agent needs to know before its next edit, not after.
       const note = watch ? await watch.settle(context?.abortSignal) : '';
-      return withFileLengthWarning(withProblemNote(text, note), filepath, lengthWarning());
+      return withFileLengthWarning(
+        withProblemNote(text + (contentionNote ? `\n${contentionNote}` : ''), note),
+        filepath,
+        lengthWarning(),
+      );
     },
   };
 }

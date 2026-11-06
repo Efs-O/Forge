@@ -7,7 +7,6 @@ import type { ToolOutputLimits } from '../tools/toolOutputLimits';
 import type { CheckinStage } from '../agent/elapsedTimeNote';
 import type { ConversationRuntime, PlanItem } from './sessionTypes';
 import type { QuestionAnswerRecord } from '../util/questionAnswers';
-import { recordToolArgumentRepair, type ToolArgumentRepairInfo } from '../tools/argCoercion';
 
 export interface RecordedFileDiff {
   toolCallId: string;
@@ -62,7 +61,6 @@ export function toolResultMessage(
   tc: ToolCall,
   content: ChatMessage['content'],
   startedAt: number,
-  argumentRepair?: ToolArgumentRepairInfo,
 ): ChatMessage {
   const elapsed = Date.now() - startedAt;
   const message: ChatMessage = {
@@ -73,6 +71,5 @@ export function toolResultMessage(
     ...(elapsed > 0 ? { toolMs: elapsed } : {}),
     stampedAt: Date.now(),
   };
-  if (argumentRepair) recordToolArgumentRepair(message, argumentRepair);
   return message;
 }

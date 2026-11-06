@@ -3,7 +3,12 @@ import * as path from 'path';
 import * as vscode from 'vscode';
 import type { RegisteredTool } from './ToolRegistry';
 import { resolveRealWorkspacePath } from '../util/WorkspacePaths';
-import { agentWriteOptions, writeFileAtomic, type ExpectedFileState } from '../util/atomicWrite';
+import {
+  agentWriteOptions,
+  delayedWriteNote,
+  writeFileAtomic,
+  type ExpectedFileState,
+} from '../util/atomicWrite';
 import { withFileLengthWarning, type FileLengthWarningGetter } from './fileLengthWarning';
 import { NO_PROBLEM_WATCHER, withProblemNote, type ProblemWatcher } from './editDiagnostics';
 import { applyWriteEol, chooseWriteEol, readExistingForWrite } from './writeEol';
@@ -120,26 +125,40 @@ export function makeWriteFileTool(
         // remain untouched, including when the file is not valid UTF-8.
         const snapshot = appendSnapshot!;
         const appended = Buffer.concat([snapshot.bytes, Buffer.from(converted.content, 'utf8')]);
+        let contentionNote = '';
         await writeFileAtomic(
           filePath,
           appended,
-          agentWriteOptions(context?.abortSignal, { expected: snapshot.expected }),
+          agentWriteOptions(context?.abortSignal, { expected: snapshot.expected }, (report) => {
+            contentionNote = delayedWriteNote(report);
+          }),
         );
         const total = fs.statSync(filePath).size;
         const note = watch ? await watch.settle(context?.abortSignal) : '';
         return withFileLengthWarning(
           withProblemNote(
-            `Appended ${content.length} chars to ${filePath} (${total} bytes total)${converted.note}`,
+            `Appended ${content.length} chars to ${filePath} (${total} bytes total)${converted.note}` +
+              (contentionNote ? `\n${contentionNote}` : ''),
             note,
           ),
           filePath,
           lengthWarning(),
         );
       }
-      await writeFileAtomic(filePath, converted.content, agentWriteOptions(context?.abortSignal));
+      let contentionNote = '';
+      await writeFileAtomic(
+        filePath,
+        converted.content,
+        agentWriteOptions(context?.abortSignal, {}, (report) => {
+          contentionNote = delayedWriteNote(report);
+        }),
+      );
       const note = watch ? await watch.settle(context?.abortSignal) : '';
       return withFileLengthWarning(
-        withProblemNote(`Written ${filePath}${converted.note}`, note),
+        withProblemNote(
+          `Written ${filePath}${converted.note}${contentionNote ? `\n${contentionNote}` : ''}`,
+          note,
+        ),
         filePath,
         lengthWarning(),
       );

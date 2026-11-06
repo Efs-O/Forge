@@ -1,3 +1,5 @@
+import contextlib
+import io
 import json
 import os
 import shutil
@@ -7,6 +9,7 @@ import tempfile
 import unittest
 from fractions import Fraction
 from pathlib import Path
+from unittest import mock
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
@@ -136,7 +139,7 @@ class VidprobeTests(unittest.TestCase):
         self.assertIn("cycles: none above r 0.40; best r", out)
         self.assertIn("at lag 12", out)
 
-    def test_sync_reports_the_sound_as_late_by_three_frames(self):
+    def test_sync_reports_the_sound_late_within_one_frame_of_three(self):
         payload = run_json(FIXTURES / "beep.mp4", "sync")
         self.assertEqual(payload["motion_onsets"], 8, payload)
         self.assertEqual(payload["audio_onsets"], 8, payload)
@@ -206,6 +209,38 @@ class VidprobeTests(unittest.TestCase):
         floor_line = [line for line in out.splitlines() if line.startswith("floor (")]
         self.assertEqual(len(floor_line), 1, out)
         self.assertLess(float(floor_line[0].rsplit(" ", 1)[1]), 1.0, out)
+
+    def test_seam_floor_exits_four_when_the_reencode_fails(self):
+        import vidprobe
+
+        real_run = subprocess.run
+
+        def fake_run(args, **kwargs):
+            if "-crf" in args:
+                return subprocess.CompletedProcess(
+                    args, 1, "", "[libx264 @ 0x1] encoder initialization failed\n",
+                )
+            return real_run(args, **kwargs)
+
+        errors = io.StringIO()
+        with mock.patch.object(vidprobe.subprocess, "run", fake_run):
+            with contextlib.redirect_stderr(errors):
+                code = vidprobe.main([str(FIXTURES / "still.mp4"), "seam", "--floor"])
+        self.assertEqual(code, 4)
+        report = errors.getvalue()
+        self.assertIn("ffmpeg re-encode failed", report)
+        self.assertIn("encoder initialization failed", report)
+
+    def test_open_still_closes_the_source_handle(self):
+        import vidprobe
+
+        copy = self.work / "handle.png"
+        shutil.copyfile(FIXTURES / "a.png", copy)
+        image = vidprobe._open_still(str(copy))
+        self.assertEqual(image.size, (200, 200))
+        del image
+        os.remove(copy)   # Windows refuses this while a handle to the file is open
+        self.assertFalse(copy.exists())
 
     def test_seam_compares_against_a_given_still(self):
         payload = run_json(FIXTURES / "beep.mp4", "seam", "--first", FIXTURES / "a.png")

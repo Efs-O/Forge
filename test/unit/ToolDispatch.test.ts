@@ -25,7 +25,6 @@ import {
   clearConversationUntrustedState,
   markConversationReadUntrusted,
 } from '../../src/tools/exfilTaint';
-import { toolArgumentRepairForMessage } from '../../src/tools/argCoercion';
 import { TEST_BASH } from '../support/bash';
 
 // vi.mock is hoisted — compute WS inside the factory using require
@@ -197,10 +196,8 @@ describe('ToolDispatch', () => {
       'conv-a',
     );
 
-    expect(messages[0]?.content).toContain('malformed tool arguments');
-    // The length tells two cut-off calls with the same opening apart, so the
-    // loop guard does not read them as one repeated call.
-    expect(messages[0]?.content).toContain('"{\\"path\\":" (8 chars)');
+    expect(messages[0]?.content).toContain('the arguments are not valid JSON');
+    expect(messages[0]?.content).toContain('Unexpected end of JSON input');
     expect(failureTracker.record).toHaveBeenCalledWith('conv-a');
   });
 
@@ -1010,7 +1007,7 @@ describe('ToolDispatch', () => {
     expect(failureTracker.record).not.toHaveBeenCalled();
   });
 
-  it('sanitizes malformed arguments for replay and reports the raw prefix and required fields', async () => {
+  it('refuses malformed JSON with the parser error and literal-backslash correction', async () => {
     toolRegistry.register({
       definition: {
         type: 'function',
@@ -1034,14 +1031,12 @@ describe('ToolDispatch', () => {
     await dispatch.dispatch([call], allowed, transcript);
 
     expect(failureTracker.record).toHaveBeenCalled();
-    expect(call.function.arguments).toBe('{}');
-    expect(transcript[0]?.tool_calls?.[0]?.function.arguments).toBe('{}');
-    expect(transcript[1]?.content).toContain('read_file');
-    expect(transcript[1]?.content).toContain(JSON.stringify(raw.slice(0, 200)));
-    expect(transcript[1]?.content).toContain('Required fields: path, encoding');
+    expect(call.function.arguments).toBe(raw);
+    expect(transcript[0]?.tool_calls?.[0]?.function.arguments).toBe(raw);
+    expect(transcript[1]?.content).toMatch(/^read_file: the arguments are not valid JSON \(.+\)\. Write each literal backslash as \\ and resend\.$/u);
   });
 
-  it('repairs invalid escapes in whole tool arguments and dispatches the original path', async () => {
+  it('refuses invalid escapes and asks for literal backslashes to be escaped', async () => {
     const handler = vi.fn().mockResolvedValue('contents');
     toolRegistry.register({
       definition: {
@@ -1059,7 +1054,6 @@ describe('ToolDispatch', () => {
       permission: 'read',
       handler,
     });
-    const expectedPath = String.raw`N:\vs code apps\Forge\README.md`;
     const raw = String.raw`{"path":"N:\vs code apps\Forge\README.md"}`;
     const call: ToolCall = {
       id: 'call-read-file',
@@ -1070,17 +1064,13 @@ describe('ToolDispatch', () => {
 
     await dispatch.dispatch([call], allowed, transcript);
 
-    expect(handler).toHaveBeenCalledWith({ path: expectedPath }, expect.any(Object));
-    expect(call.function.arguments).toBe(JSON.stringify({ path: expectedPath }));
-    expect(transcript[1]?.content).toContain('contents');
-    expect(toolArgumentRepairForMessage(transcript[1]!)).toEqual({
-      wholeArguments: true,
-      fields: [],
-    });
-    expect(failureTracker.record).not.toHaveBeenCalled();
+    expect(handler).not.toHaveBeenCalled();
+    expect(transcript[1]?.content).toContain('read_file: the arguments are not valid JSON');
+    expect(transcript[1]?.content).toContain('Write each literal backslash as');
+    expect(failureTracker.record).toHaveBeenCalled();
   });
 
-  it('refuses a repaired top-level JSON value that is not an arguments object', async () => {
+  it('refuses a top-level array as not an arguments object', async () => {
     const handler = vi.fn().mockResolvedValue('contents');
     toolRegistry.register({
       definition: {
@@ -1090,7 +1080,7 @@ describe('ToolDispatch', () => {
       permission: 'read',
       handler,
     });
-    const raw = String.raw`["N:\vs"]`;
+    const raw = '["N:\\\\vs"]';
     const call: ToolCall = {
       id: 'call-read-file-array',
       type: 'function',
@@ -1101,8 +1091,51 @@ describe('ToolDispatch', () => {
     await dispatch.dispatch([call], allowed, transcript);
 
     expect(handler).not.toHaveBeenCalled();
-    expect(transcript[1]?.content).toContain('malformed tool arguments');
-    expect(transcript[1]?.content).toContain(JSON.stringify(raw));
+    expect(transcript[1]?.content).toBe('read_file: arguments must be a JSON object, got array.');
+  });
+
+  it('refuses top-level null and quoted schema values before the handler runs', async () => {
+    const handler = vi.fn().mockResolvedValue('unexpected success');
+    toolRegistry.register({
+      definition: {
+        type: 'function',
+        function: {
+          name: 'probe',
+          description: 'Probe types',
+          parameters: {
+            type: 'object',
+            properties: { count: { type: 'integer' } },
+          },
+        },
+      },
+      permission: 'read',
+      handler,
+    });
+    const nullCall: ToolCall = {
+      id: 'call-null', type: 'function', function: { name: 'probe', arguments: 'null' },
+    };
+    const nullMessages: ChatMessage[] = [];
+    await dispatch.dispatch([nullCall], allowed, nullMessages);
+    expect(nullMessages[0]?.content).toBe('probe: arguments must be a JSON object, got null.');
+
+    const quotedMessages: ChatMessage[] = [];
+    await dispatch.dispatch([makeToolCall('probe', { count: '5' })], allowed, quotedMessages);
+    expect(quotedMessages[0]?.content).toBe(
+      'probe: "count" must be a JSON integer, not a string. ' +
+        'Resend the call with count as 1.',
+    );
+    expect(handler).not.toHaveBeenCalled();
+  });
+
+  it('returns synthetic parser refusals as tool results the model can read', async () => {
+    const messages: ChatMessage[] = [];
+    const error = 'tool call: use {"tool": "<name>", "arguments": {...}}; the "name" form is not accepted.';
+    await dispatch.dispatch(
+      [makeToolCall('__tool_call_error__', { __error: error })],
+      allowed,
+      messages,
+    );
+    expect(messages[0]?.content).toBe(error);
   });
 
   it('handles unknown tools gracefully', async () => {

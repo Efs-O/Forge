@@ -201,15 +201,14 @@ describe('isolated editor, language, search, and memory tool execution', () => {
     expect(show.mock.calls[1]?.[1]).toMatchObject({ viewColumn: vscode.ViewColumn.Beside });
   });
 
-  it('reveals a 1-based line, clamped to the file rather than refused', async () => {
+  it('reports a requested line past EOF after opening at the final line', async () => {
     const show = vi.spyOn(vscode.window, 'showTextDocument');
 
     await expect(makeOpenFileTool().handler({ path: 'sample.ts', line: 1 })).resolves.toBe(
       'Opened sample.ts in the editor at line 1.',
     );
-    // The stub document reports one line, so a stale line number lands on it.
     await expect(makeOpenFileTool().handler({ path: 'sample.ts', line: 900 })).resolves.toBe(
-      'Opened sample.ts in the editor at line 1.',
+      'line 900 is past the end of the file (1 lines); opened at line 1.',
     );
     expect(show).toHaveBeenCalledTimes(2);
   });

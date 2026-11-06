@@ -112,7 +112,7 @@ import {
 // for shell, message_chat, and ask_agent; still under the 64,625-char ceiling.
 // 2026-11-05: 63,554 (-74) after review removed duplicate ask_agent wording and added the shell timeout default; 1,071 below the ceiling.
 // 2026-11-05: 63,689 (+135) after the media group line named checking your own rendered work and headless rendering.
-const MEASURED_CHARS = 63_689;
+const MEASURED_CHARS = 63_672;
 // Phase 3 STOP: the historical full 88-tool wire schema was 67,128 chars.
 // Exclude computer_use (24 browser/desktop schemas) pending the owner's product
 // decision; the full and gated sizes are recorded in the report.

@@ -4,7 +4,6 @@ import { z } from 'zod';
 import { describe, expect, it, vi } from 'vitest';
 import { ToolRegistry, type RegisteredTool } from '../../src/tools/ToolRegistry';
 import { makeApplyLineEditsTool } from '../../src/tools/structuredEditTool';
-import { coerceToolArgs, invalidArrayJsonDiagnostic } from '../../src/tools/argCoercion';
 import { toolErrorText } from '../../src/tools/toolErrorText';
 import { makeAskUserTool } from '../../src/tools/askUserTool';
 import { UserQuestionService } from '../../src/sidebar/UserQuestionService';
@@ -102,7 +101,7 @@ describe('ToolRegistry.invalidArgs missing-argument refusal', () => {
   });
 });
 
-describe('ToolRegistry.invalidArgs boolean refusal (Fix B)', () => {
+describe('ToolRegistry.invalidArgs quoted-type refusals', () => {
   const registry = new ToolRegistry();
   const execTool = makeBoolTool('shell', {
     command: { type: 'string' },
@@ -110,60 +109,63 @@ describe('ToolRegistry.invalidArgs boolean refusal (Fix B)', () => {
     notify_on_exit: { type: 'boolean' },
   });
 
-  it('names the field and shows the unquoted JSON boolean for "True"', () => {
-    const message = registry.invalidArgs(execTool, { command: 'npx', background: 'True' });
-    expect(message).toBe('Error: shell background="True": use true');
-    expect(message?.length).toBeLessThanOrEqual(200);
-  });
-
-  it('names the field and shows the unquoted JSON boolean for "False"', () => {
-    const message = registry.invalidArgs(execTool, { command: 'npx', background: 'False' });
-    expect(message).toBe('Error: shell background="False": use false');
-  });
-
-  it('uses a short generic instruction for a non-True/False string', () => {
-    const message = registry.invalidArgs(execTool, { command: 'npx', background: 'yes' });
-    expect(message).toBe('Error: shell background="yes": use true or false without quotes');
-  });
-
-  it('uses a short generic instruction for a number', () => {
-    const message = registry.invalidArgs(execTool, { command: 'npx', background: 1 });
-    expect(message).toBe('Error: shell background=1: use true or false without quotes');
-  });
-
-  it('names each offending field when several booleans are wrong', () => {
-    const message = registry.invalidArgs(execTool, {
-      command: 'npx',
-      background: 'True',
-      notify_on_exit: 'False',
-    });
-    expect(message).toBe(
-      'Error: shell background="True": use true, notify_on_exit="False": use false',
-    );
-    expect(message?.length).toBeLessThanOrEqual(200);
-  });
-
-  it('stays within 200 characters even for a pathological field list', () => {
-    const properties: Record<string, { type: string }> = { command: { type: 'string' } };
-    const args: Record<string, unknown> = { command: 'npx' };
-    for (let i = 0; i < 6; i += 1) {
-      const field = `field_${String(i).padStart(4, '0')}`;
-      properties[field] = { type: 'boolean' };
-      args[field] = 'True';
-    }
-    const tool = makeBoolTool('a_very_long_tool_name_for_testing', properties);
-    const message = registry.invalidArgs(tool, args);
-    expect(message?.length).toBeLessThanOrEqual(200);
-    expect(message).toBe(
-      'Error: a_very_long_tool_name_for_testing needs JSON true or false, not a string or number. Resend with bare booleans.',
+  it('names the field and an unquoted JSON boolean example for "True"', () => {
+    expect(registry.invalidArgs(execTool, { command: 'npx', background: 'True' })).toBe(
+      'shell: "background" must be a JSON boolean, not a string. Resend the call with background as false.',
     );
   });
 
-  it('keeps the refusal bounded when the tool name itself is long', () => {
+  it('refuses "False" as a string instead of accepting it', () => {
+    expect(registry.invalidArgs(execTool, { command: 'npx', background: 'False' })).toBe(
+      'shell: "background" must be a JSON boolean, not a string. Resend the call with background as false.',
+    );
+  });
+
+  it('refuses other string spellings with the same required JSON shape', () => {
+    expect(registry.invalidArgs(execTool, { command: 'npx', background: 'yes' })).toBe(
+      'shell: "background" must be a JSON boolean, not a string. Resend the call with background as false.',
+    );
+  });
+
+  it('names the actual JSON type when a number is sent for a boolean', () => {
+    expect(registry.invalidArgs(execTool, { command: 'npx', background: 1 })).toBe(
+      'shell: "background" must be a JSON boolean, not a number. Resend the call with background as false.',
+    );
+  });
+
+  it('refuses the first wrong field and lets a corrected retry expose the next one', () => {
+    const args = { command: 'npx', background: 'True', notify_on_exit: 'False' };
+    expect(registry.invalidArgs(execTool, args)).toContain('"background" must be a JSON boolean');
+    expect(registry.invalidArgs(execTool, { ...args, background: false })).toContain(
+      '"notify_on_exit" must be a JSON boolean',
+    );
+  });
+
+  it('does not cap or replace the source correction message for long tool names', () => {
     const tool = makeBoolTool('x'.repeat(220), { background: { type: 'boolean' } });
-    const message = registry.invalidArgs(tool, { background: 'True' });
-    expect(message).toBe('Error: invalid boolean argument; use unquoted JSON true or false.');
-    expect(message?.length).toBeLessThanOrEqual(200);
+    expect(registry.invalidArgs(tool, { background: 'True' })).toBe(
+      `${'x'.repeat(220)}: "background" must be a JSON boolean, not a string. ` +
+        'Resend the call with background as false.',
+    );
+  });
+
+  it('includes the declared numeric range when refusing a quoted integer', () => {
+    const tool = makeBoolTool('browser_inspect', {
+      max: { type: 'integer', minimum: 1, maximum: 500 },
+    });
+    expect(registry.invalidArgs(tool, { max: '25' })).toBe(
+      'browser_inspect: "max" must be a JSON integer in range 1 to 500, not a string. ' +
+        'Resend the call with max as 1.',
+    );
+  });
+
+  it('refuses an integer beyond the declared range with the allowed bounds', () => {
+    const tool = makeBoolTool('browser_inspect', {
+      max: { type: 'integer', minimum: 1, maximum: 500 },
+    });
+    expect(registry.invalidArgs(tool, { max: 501 })).toBe(
+      'browser_inspect: "max" must be within 1 to 500. Resend it in that range.',
+    );
   });
 });
 
@@ -305,23 +307,9 @@ describe('tool argument field locations (PTF F5)', () => {
   });
 });
 
-describe('apply_line_edits reports invalid JSON array positions', () => {
+describe('ToolRegistry.invalidArgs refuses quoted JSON types', () => {
   const registry = new ToolRegistry();
-  const tool = makeApplyLineEditsTool();
-
-  it.each([
-    // Trimmed from 5dd2e479: embedded source contains an unescaped quote.
-    '[{"end_line":52,"expected_lines":["bad "quote"]}]',
-    // Trimmed from 9e9e82dc: the session argument ended before its JSON value closed.
-    '[{"start_line":859,"end_line":923,"expected_lines":["/* ---- pelican',
-  ])('identifies a JSON.parse position in the operations string', (operations) => {
-    const args = coerceToolArgs(tool.definition, { path: 'scene.js', operations });
-    expect(registry.invalidArgs(tool, args)).toMatch(/invalid JSON at character index \d+/u);
-  });
-});
-
-describe('ToolRegistry.invalidArgs malformed array JSON refusal', () => {
-  const registry = new ToolRegistry();
+  const editTool = makeApplyLineEditsTool();
   const askTool = makeBoolTool('ask_user', {
     questions: {
       type: 'array',
@@ -329,140 +317,37 @@ describe('ToolRegistry.invalidArgs malformed array JSON refusal', () => {
     },
   } as never);
 
-  it.each([
-    {
-      label: 'an extra object closer',
-      value: '[{"options": ["...", "You tell me the exact wording to use"]}]}',
-      marker: '⟦HERE⟧}',
-      position: '[{"options": ["...", "You tell me the exact wording to use"]}]}'.lastIndexOf('}'),
-      cause:
-        'a closing bracket that does not match the open one (an array closes with ], an object with })',
-    },
-    {
-      label: 'a missing options-array closer',
-      value:
-        '[{"options": ["...", "(0.16.79 ships without num_ctx; you lose it from your local build)"}]',
-      marker: '⟦HERE⟧}',
-      position:
-        '[{"options": ["...", "(0.16.79 ships without num_ctx; you lose it from your local build)"}]'.lastIndexOf(
-          '}',
-        ),
-      cause:
-        'a closing bracket that does not match the open one (an array closes with ], an object with })',
-    },
-    {
-      label: 'a stray inner list',
-      value: '[{"options": ["...", "..."], ["", ""]], "prompt": "..."}]',
-      marker: '⟦HERE⟧[',
-      position: '[{"options": ["...", "..."], ["", ""]], "prompt": "..."}]'.indexOf('["",'),
-      cause: undefined,
-    },
-  ])('points to $label in ask_user questions', ({ value, marker, position, cause }) => {
-    const message = registry.invalidArgs(askTool, { questions: value });
-    expect(message).toContain(
-      `Error: ask_user "questions" has invalid JSON at character index ${position};`,
+  it('refuses operations sent as a JSON string with the array example', () => {
+    expect(registry.invalidArgs(editTool, { operations: '[{"path":"scene.js"}]' })).toBe(
+      'apply_line_edits: "operations" must be a JSON array, not a string. ' +
+        'Resend the call with operations as [].',
     );
-    expect(message).toContain(marker);
-    if (cause) expect(message).toContain(`Likely cause: ${cause}.`);
-    else {
-      let parseMessage = '';
-      try {
-        JSON.parse(value);
-      } catch (error) {
-        parseMessage = error instanceof Error ? error.message : String(error);
-      }
-      expect(message).toContain(`Likely cause: JSON.parse says: ${parseMessage}.`);
-    }
-    expect(message?.endsWith('Resend "questions" as a JSON array, not a string.')).toBe(true);
   });
 
-  it('points out a single-backslash escape in a non-ask_user array field', () => {
-    const tool = makeBoolTool('stage', {
-      paths: { type: 'array', items: { type: 'string' } },
-    } as never);
-    const value = '[{"path":"N:\\vs code apps\\Forge"}]';
-    const message = registry.invalidArgs(tool, { paths: value });
-
-    expect(message).toContain(
-      `"paths" has invalid JSON at character index ${value.indexOf('N:') + 3};`,
-    );
-    expect(message).toContain('⟦HERE⟧v');
-    expect(message).toContain(
-      'Likely cause: a single backslash; write \\\\ (for example in Windows paths).',
-    );
-    expect(message?.endsWith('Resend "paths" as a JSON array, not a string.')).toBe(true);
-  });
-
-  it('accepts a Windows path in an ask_user questions array', () => {
+  it('refuses malformed array JSON without repairing its backslashes', () => {
     const value = String.raw`[{"prompt":"Use N:\vs code apps\Forge"}]`;
-    const args = coerceToolArgs(askTool.definition, { questions: value });
-
-    expect(args['questions']).toEqual([{ prompt: String.raw`Use N:\vs code apps\Forge` }]);
-  });
-
-  it('does not repair a backslash outside a JSON string and shows the original excerpt', () => {
-    const tool = makeBoolTool('stage', {
-      paths: { type: 'array', items: { type: 'string' } },
-    } as never);
-    const value = String.raw`[\N]`;
-    const args = coerceToolArgs(tool.definition, { paths: value });
-    const diagnostic = invalidArrayJsonDiagnostic(value);
-    const message = registry.invalidArgs(tool, args);
-
-    expect(args['paths']).toBe(value);
-    expect(diagnostic).toBeDefined();
-    expect(message).toContain(`near: \`${diagnostic?.excerpt}\``);
-  });
-
-  it.each(['[{"prompt":"unfinished', '[{"prompt":"pick"'])(
-    'explains a cut-off array: %s',
-    (value) => {
-      const message = registry.invalidArgs(askTool, { questions: value });
-      expect(message).toContain(`at character index ${value.length};`);
-      expect(message).toContain('⟦HERE⟧');
-      expect(message).toContain('Likely cause: the array is cut off before it closes.');
-    },
-  );
-
-  it('shows newlines visibly and keeps a long-value refusal under 320 characters', () => {
-    const withNewline = '[{"prompt":"before\ninside"}]';
-    const newlineMessage = registry.invalidArgs(askTool, { questions: withNewline });
-    expect(newlineMessage).toContain('before⟦HERE⟧\\ninside');
-    expect(newlineMessage).not.toContain('\n');
-
-    const longValue = `[{"prompt":"${'x'.repeat(1_000)}`;
-    const longMessage = registry.invalidArgs(askTool, { questions: longValue });
-    expect(longMessage).toContain('⟦HERE⟧');
-    expect(longMessage?.length).toBeLessThanOrEqual(320);
-    expect(longMessage).not.toContain('x'.repeat(100));
-  });
-
-  it('maps a line-and-column-only JSON.parse error to the marked character', () => {
-    const parse = vi.spyOn(JSON, 'parse').mockImplementation(() => {
-      throw new SyntaxError('Unexpected token in JSON at line 2 column 3');
-    });
-    try {
-      const diagnostic = invalidArrayJsonDiagnostic('[\n  x]');
-      expect(diagnostic?.position).toBe(4);
-      expect(diagnostic?.excerpt).toContain('⟦HERE⟧x');
-    } finally {
-      parse.mockRestore();
-    }
-  });
-
-  it('keeps the generic refusal for non-strings and valid JSON that is not an array', () => {
-    const tool = makeBoolTool('stage', {
-      paths: { type: 'array', items: { type: 'string' } },
-    } as never);
-    expect(registry.invalidArgs(tool, { paths: { value: 'x' } })).toBe(
-      'Error: stage needs a JSON array for "paths" (got object), not a string holding one. ' +
-        'Resend it as a bare array, e.g. ["a", "b"].',
-    );
-    expect(registry.invalidArgs(tool, { paths: '{"value":"x"}' })).toBe(
-      'Error: stage needs a JSON array for "paths" (got string), not a string holding one. ' +
-        'Resend it as a bare array, e.g. ["a", "b"].',
+    expect(registry.invalidArgs(askTool, { questions: value })).toBe(
+      'ask_user: "questions" must be a JSON array, not a string. ' +
+        'Resend the call with questions as [].',
     );
   });
+
+  it('refuses quoted booleans using the JSON boolean example', () => {
+    const tool = makeBoolTool('probe', { enabled: { type: 'boolean' } } as never);
+    expect(registry.invalidArgs(tool, { enabled: 'True' })).toBe(
+      'probe: "enabled" must be a JSON boolean, not a string. ' +
+        'Resend the call with enabled as false.',
+    );
+  });
+
+  it('refuses quoted numbers using a JSON number example', () => {
+    const tool = makeBoolTool('probe', { count: { type: 'integer' } } as never);
+    expect(registry.invalidArgs(tool, { count: '5' })).toBe(
+      'probe: "count" must be a JSON integer, not a string. ' +
+        'Resend the call with count as 1.',
+    );
+  });
+
 });
 
 describe('unavailable tool refusals', () => {

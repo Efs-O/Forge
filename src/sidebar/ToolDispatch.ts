@@ -27,13 +27,6 @@ import {
   type ToolApprovalCallOptions,
   type ToolApprovalOutcome,
 } from './toolApprovalOutcome';
-import {
-  coerceToolArgs,
-  isJsonObject,
-  parseJsonWithInvalidEscapeRepair,
-  repairedToolArgumentFields,
-} from '../tools/argCoercion';
-import type { ToolArgumentRepairInfo } from '../tools/argCoercion';
 import { unknownToolResult } from './retiredTools';
 import { toolErrorText } from '../tools/toolErrorText';
 import { approvalCallOptions } from './approvalCallOptions';
@@ -173,7 +166,6 @@ export class ToolDispatch {
       const startedAt = Date.now();
       let result: ToolHandlerResult;
       let args: Record<string, unknown> | undefined;
-      let argumentRepair: ToolArgumentRepairInfo | undefined;
       try {
         if (signal?.aborted) {
           result = 'Error: tool execution cancelled';
@@ -182,29 +174,30 @@ export class ToolDispatch {
           continue;
         }
         try {
-          const parsed = parseJsonWithInvalidEscapeRepair(tc.function.arguments);
-          if (!parsed.ok || (parsed.repaired && !isJsonObject(parsed.value))) {
-            throw parsed.ok
-              ? new Error('Repaired tool arguments are not a JSON object')
-              : parsed.error;
+          const parsed: unknown = JSON.parse(tc.function.arguments);
+          if (parsed === null || Array.isArray(parsed) || typeof parsed !== 'object') {
+            const got = parsed === null ? 'null' : Array.isArray(parsed) ? 'array' : typeof parsed;
+            result = `${tc.function.name}: arguments must be a JSON object, got ${got}.`;
+            effects.failureTracker.record(convId);
+            this.postResult(tc, toolResultText(result), undefined, convId, effects.post);
+            messages.push(toolResultMessage(tc, toolResultContent(result), startedAt));
+            continue;
           }
-          args = parsed.value as Record<string, unknown>;
-          if (parsed.repaired) {
-            argumentRepair = { wholeArguments: true, fields: [] };
-            tc.function.arguments = JSON.stringify(args);
-          }
-        } catch {
-          const rawArguments = tc.function.arguments;
-          tc.function.arguments = '{}';
+          args = parsed as Record<string, unknown>;
+        } catch (error) {
+          const parserMessage = error instanceof Error ? error.message : String(error);
           effects.failureTracker.record(convId);
-          const registered = this.toolRegistry.get(tc.function.name);
-          const required = registered?.definition.function.parameters.required;
-          const fields =
-            Array.isArray(required) && required.length ? required.join(', ') : '(none declared)';
           result =
-            `Error: ${tc.function.name} received malformed tool arguments (invalid JSON): ` +
-            `${JSON.stringify(rawArguments.slice(0, 200))} (${rawArguments.length} chars). ` +
-            `Required fields: ${fields}.`;
+            `${tc.function.name}: the arguments are not valid JSON (${parserMessage}). ` +
+            'Write each literal backslash as \\ and resend.';
+          this.postResult(tc, toolResultText(result), undefined, convId, effects.post);
+          messages.push(toolResultMessage(tc, toolResultContent(result), startedAt));
+          continue;
+        }
+
+        if (tc.function.name === '__tool_call_error__' && typeof args['__error'] === 'string') {
+          result = args['__error'];
+          effects.failureTracker.record(convId);
           this.postResult(tc, toolResultText(result), undefined, convId, effects.post);
           messages.push(toolResultMessage(tc, toolResultContent(result), startedAt));
           continue;
@@ -216,7 +209,7 @@ export class ToolDispatch {
         const unavailable = unavailableTools?.get(tc.function.name);
         if (unavailable) {
           this.postResult(tc, unavailable, undefined, convId, effects.post);
-          messages.push(toolResultMessage(tc, unavailable, startedAt, argumentRepair));
+          messages.push(toolResultMessage(tc, unavailable, startedAt));
           continue;
         }
 
@@ -231,31 +224,20 @@ export class ToolDispatch {
             unavailableTools,
           );
           this.postResult(tc, toolResultText(result), undefined, convId, effects.post);
-          messages.push(
-            toolResultMessage(tc, toolResultContent(result), startedAt, argumentRepair),
-          );
+          messages.push(toolResultMessage(tc, toolResultContent(result), startedAt));
           continue;
         }
-        args = coerceToolArgs(reg.definition, args);
-        const repairedFields = repairedToolArgumentFields(args);
-        if (repairedFields.length > 0) {
-          argumentRepair = {
-            wholeArguments: argumentRepair?.wholeArguments ?? false,
-            fields: [...(argumentRepair?.fields ?? []), ...repairedFields],
-          };
-        }
-        if (argumentRepair) tc.function.arguments = JSON.stringify(args);
         const invalid = this.toolRegistry.invalidArgs(reg, args);
         if (invalid) {
           effects.failureTracker.record(convId);
           this.postResult(tc, invalid, undefined, convId, effects.post);
-          messages.push(toolResultMessage(tc, invalid, startedAt, argumentRepair));
+          messages.push(toolResultMessage(tc, invalid, startedAt));
           continue;
         }
         const budgetBlock = budget?.check(tc.function.name);
         if (budgetBlock) {
           this.postResult(tc, budgetBlock, undefined, convId, effects.post);
-          messages.push(toolResultMessage(tc, budgetBlock, startedAt, argumentRepair));
+          messages.push(toolResultMessage(tc, budgetBlock, startedAt));
           continue;
         }
 
@@ -307,9 +289,7 @@ export class ToolDispatch {
           if (outcome !== 'approved') {
             result = toolApprovalResult(tc.function.name, outcome);
             this.postResult(tc, toolResultText(result), undefined, convId, effects.post);
-            messages.push(
-              toolResultMessage(tc, toolResultContent(result), startedAt, argumentRepair),
-            );
+            messages.push(toolResultMessage(tc, toolResultContent(result), startedAt));
             continue;
           }
         }
@@ -385,7 +365,7 @@ export class ToolDispatch {
         rememberQuestionRecord(modelContext.conversation, tc.id, questionRecord);
       }
       this.postResult(tc, toolResultText(result), args, convId, effects.post, questionRecord);
-      messages.push(toolResultMessage(tc, toolResultContent(result), startedAt, argumentRepair));
+      messages.push(toolResultMessage(tc, toolResultContent(result), startedAt));
     }
   }
 

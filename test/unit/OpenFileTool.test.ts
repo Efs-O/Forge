@@ -8,6 +8,11 @@ const { executeCommand, openTextDocument, showTextDocument } = vi.hoisted(() => 
 }));
 
 vi.mock('vscode', () => ({
+  Range: class {
+    constructor(...positions: number[]) {
+      Object.assign(this, { positions });
+    }
+  },
   Uri: { file: (fsPath: string) => ({ fsPath, path: fsPath }) },
   commands: { executeCommand },
   workspace: {
@@ -18,6 +23,7 @@ vi.mock('vscode', () => ({
 }));
 
 import { makeOpenFileTool } from '../../src/tools/uxTools';
+import { ToolRegistry } from '../../src/tools/ToolRegistry';
 
 describe('open_file', () => {
   beforeEach(() => {
@@ -41,5 +47,22 @@ describe('open_file', () => {
     expect(openTextDocument).toHaveBeenCalledOnce();
     expect(showTextDocument).toHaveBeenCalledOnce();
     expect(executeCommand).not.toHaveBeenCalled();
+  });
+
+  it('reports a requested line past EOF after opening at the final line', async () => {
+    openTextDocument.mockResolvedValueOnce({ lineCount: 3 });
+    const tool = makeOpenFileTool();
+    await expect(tool.handler({ path: 'src/a.ts', line: 9 })).resolves.toBe(
+      'line 9 is past the end of the file (3 lines); opened at line 3.',
+    );
+    expect(showTextDocument).toHaveBeenCalledOnce();
+  });
+
+  it('refuses a quoted line number and names the required integer range', () => {
+    const tool = makeOpenFileTool();
+    expect(new ToolRegistry().invalidArgs(tool, { path: 'src/a.ts', line: '2' })).toBe(
+      'open_file: "line" must be a JSON integer in range at least 1, not a string. ' +
+        'Resend the call with line as 1.',
+    );
   });
 });

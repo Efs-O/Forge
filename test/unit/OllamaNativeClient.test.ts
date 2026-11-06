@@ -29,6 +29,43 @@ const baseRequest: ChatCompletionRequest = {
 };
 
 describe('streamOllamaChatCompletion', () => {
+  it('stops on malformed JSON stream lines and reports the line prefix', async () => {
+    const malformed = 'x'.repeat(240);
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue({
+      ok: true,
+      body: new Response(`\n${malformed}\n`).body,
+    }));
+    const onError = vi.fn();
+    await streamOllamaChatCompletion('http://127.0.0.1:11434', baseRequest, baseModel, {
+      onToken: vi.fn(), onDone: vi.fn(), onError,
+    });
+    expect(onError).toHaveBeenCalledWith(
+      expect.objectContaining({
+        message: `Ollama stream sent malformed JSON (${malformed.slice(0, 200)}); the reply was stopped there.`,
+      }),
+    );
+    vi.unstubAllGlobals();
+  });
+
+  it('skips empty keep-alive lines between JSONL frames', async () => {
+    const lines = [
+      '',
+      JSON.stringify({ message: { content: 'ok' }, done: false }),
+      '',
+      JSON.stringify({ done: true }),
+    ].join('\n');
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue({
+      ok: true,
+      body: new Response(`${lines}\n`).body,
+    }));
+    const handlers = { onToken: vi.fn(), onDone: vi.fn(), onError: vi.fn() };
+    await streamOllamaChatCompletion('http://127.0.0.1:11434', baseRequest, baseModel, handlers);
+    expect(handlers.onToken).toHaveBeenCalledWith('ok');
+    expect(handlers.onDone).toHaveBeenCalledOnce();
+    expect(handlers.onError).not.toHaveBeenCalled();
+    vi.unstubAllGlobals();
+  });
+
   it('uses an explicit recovery think=false override', async () => {
     const fetchMock = vi.fn().mockResolvedValue({ ok: true, body: new Response(`${JSON.stringify({ done: true })}\n`).body });
     vi.stubGlobal('fetch', fetchMock);

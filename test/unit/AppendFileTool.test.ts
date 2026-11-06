@@ -57,7 +57,8 @@ describe('write_file mode: "append"', () => {
       const [writtenTarget, writtenContent] = write.mock.calls[0]!;
       expect(path.basename(writtenTarget)).toBe('signal.txt');
       expect(writtenContent).toBe('replacement');
-      expect(write.mock.calls[0]?.[2]).toEqual(options);
+      expect(write.mock.calls[0]?.[2]).toMatchObject(options);
+      expect(write.mock.calls[0]?.[2]?.onDelayedSuccess).toEqual(expect.any(Function));
       expect(write.mock.calls[1]?.[1]).toEqual(Buffer.from('prefixsuffix'));
       expect(write.mock.calls[1]?.[2]).toMatchObject(options);
       expect(write.mock.calls[1]?.[2]).toHaveProperty('expected');

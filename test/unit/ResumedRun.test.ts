@@ -18,7 +18,7 @@
 import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi, type MockInstance } from 'vitest';
 import { CANCELLED_TURN_ERROR, INTERRUPTED_TURN_ERROR } from '../../src/jobs/agentTaskReport';
 import { JobStore, defaultState } from '../../src/jobs/JobStore';
 import {
@@ -66,41 +66,47 @@ type TaskRun = { started_at: number; conversation_id?: string | null; heartbeat_
 const sleep = (ms: number): Promise<void> => new Promise((resolve) => setTimeout(resolve, ms));
 
 /**
- * Poll until the reconciled row and the state patch that follows it have both
- * landed. The row is written first and the patch is synchronous right after it.
+ * Wait until the reconciliation's state patch has returned, then let the test
+ * read the result once. The row is written first and the patch is synchronous
+ * right after it.
  *
- * Only the runs file is polled fast. The state file is read once the row is
- * there, and then only every 250 ms: on Windows an open read blocks the atomic
- * rename `patchState` makes onto that file, and a 10 ms read loop under a loaded
- * `npm run ci` held it for the rename's whole 2.5 s retry budget, so the patch
- * failed (logged and swallowed) and the test waited on a write that never came.
- * Anything `recordResumedRun` logs is put in the failure message.
+ * Nothing here reads the state file while the patch may be in flight: on
+ * Windows an open read blocks the atomic rename `patchState` makes onto that
+ * file, and a read loop under a loaded `npm run ci` held it for the rename's
+ * whole 2.5 s retry budget, so the patch failed and the test waited on a write
+ * that never came. Anything `recordResumedRun` logs is put in the failure message.
  */
 const RECONCILE_WAIT_MS = 15_000;
-async function waitForReconciliation(store: JobStore): Promise<void> {
+/** Start watching before the turn runs: the reconciliation is fire-and-forget. */
+function watchReconciliation(store: JobStore): () => Promise<void> {
   const logged: string[] = [];
-  const spy = vi.spyOn(logger, 'error').mockImplementation((message: string) => {
+  const logSpy = vi.spyOn(logger, 'error').mockImplementation((message: string) => {
     logged.push(message);
   });
+  const patchSpy = vi.spyOn(store, 'patchState');
+  return () => waitForReconciliation(patchSpy, logSpy, logged);
+}
+
+async function waitForReconciliation(
+  patchSpy: MockInstance<JobStore['patchState']>,
+  logSpy: MockInstance<(typeof logger)['error']>,
+  logged: string[],
+): Promise<void> {
   try {
     const deadline = Date.now() + RECONCILE_WAIT_MS;
-    let rows = 0;
-    let consecutive: number | undefined;
     for (;;) {
-      rows = (await store.readRuns(JOB_ID)).length;
-      if (rows >= 2) {
-        consecutive = (await store.load(JOB_ID))?.state.consecutive_failures;
-        if (consecutive === 0) return;
-      }
-      if (Date.now() > deadline || logged.length > 0) {
-        throw new Error(
-          `the reconciliation never landed: ${JSON.stringify({ rows, consecutive, logged })}`,
-        );
-      }
-      await sleep(rows >= 2 ? 250 : 10);
+      const patched = patchSpy.mock.results.some((result) => result.type === 'return');
+      if (patched || logged.length > 0 || Date.now() > deadline) break;
+      await sleep(10);
+    }
+    if (logged.length > 0 || !patchSpy.mock.results.some((result) => result.type === 'return')) {
+      throw new Error(
+        `the reconciliation never landed: ${JSON.stringify({ patches: patchSpy.mock.results, logged })}`,
+      );
     }
   } finally {
-    spy.mockRestore();
+    patchSpy.mockRestore();
+    logSpy.mockRestore();
   }
 }
 
@@ -503,6 +509,7 @@ describe('withResumedRunReconciliation — the post-turn wiring', () => {
     const store = await storeWithStoppedRun();
     const calls: { convId: string; chain: RequestChainContext }[] = [];
     const wrapped = withResumedRunReconciliation(recordingPolicy(calls), store);
+    const reconciled = watchReconciliation(store);
     const turn: ForgeTurnOutcome = {
       kind: 'completed',
       finalText: 'RESULT: ok — 5 fixes shipped',
@@ -519,7 +526,7 @@ describe('withResumedRunReconciliation — the post-turn wiring', () => {
     );
     expect(action).toBe(CONTINUE);
     expect(calls).toEqual([{ convId: CHAT, chain: CHAIN }]);
-    await waitForReconciliation(store);
+    await reconciled();
     const rows = await store.readRuns(JOB_ID);
     expect(rows[1]).toMatchObject({ at: RESUME_AT, outcome: 'ok', resumed: true });
     expect((await store.load(JOB_ID))!.state.consecutive_failures).toBe(0);

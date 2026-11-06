@@ -596,7 +596,8 @@ overlaps with an existing owner, extend the owner instead.
 | Shell/git output cap + spill files          | `src/tools/shellOutput.ts`            |
 | Exec child-process helpers                 | `src/tools/execHelpers.ts`            |
 | Git Bash / program resolution              | `src/tools/execProgramResolver.ts`    |
-| Lossless tool-argument coercion             | `src/tools/argCoercion.ts`            |
+| Strict JSON input parsing for tool arguments and session views | `src/tools/jsonInput.ts` |
+| Windows Restart Manager file-holder lookup | `src/util/windowsFileHolders.ts` |
 | Git tools (status, diff, commit)           | `src/tools/gitTools.ts`               |
 | Strict `git_read` operation schema/dispatch | `src/tools/gitReadTool.ts`           |
 | Git read-operation handlers                 | `src/tools/gitReadTools.ts`          |

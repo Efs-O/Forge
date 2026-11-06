@@ -33,7 +33,7 @@ import {
 } from './turnModelBehavior';
 import { reasoningReserve } from '../util/contextBudget';
 import { getLogger } from '../util/logger';
-import { isJsonObject, parseJsonWithInvalidEscapeRepair } from '../tools/argCoercion';
+import { isJsonObject, parseJson } from '../tools/jsonInput';
 
 const log = getLogger();
 
@@ -357,8 +357,8 @@ export async function runPromptToMarkdown(
       for (const call of toolCalls) {
         let result: string;
         try {
-          const parsed = parseJsonWithInvalidEscapeRepair(call.function.arguments);
-          if (!parsed.ok || (parsed.repaired && !isJsonObject(parsed.value))) {
+          const parsed = parseJson(call.function.arguments);
+          if (!parsed.ok || !isJsonObject(parsed.value)) {
             throw parsed.ok
               ? new Error('Repaired tool arguments are not a JSON object')
               : parsed.error;

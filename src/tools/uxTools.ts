@@ -140,9 +140,10 @@ export function makeOpenFileTool(): RegisteredTool {
                 'directory when the file lives inside one.',
             },
             line: {
-              type: 'number',
+              type: 'integer',
               minimum: 1,
-              description: 'Optional 1-based line to reveal and place the cursor on.',
+              description:
+                'Optional 1-based line to reveal and place the cursor on; must be a positive integer.',
             },
             beside: {
               type: 'boolean',
@@ -171,8 +172,6 @@ export function makeOpenFileTool(): RegisteredTool {
         throw new Error(`open_file: cannot open ${suppliedPath} — ${(err as Error).message}`);
       }
       // `line` arrives 1-based from the model; VS Code positions are 0-based.
-      // A line past the end is clamped rather than refused: the file is open
-      // either way, and a stale line number is not worth failing the call over.
       const rawLine = args['line'] as number | undefined;
       const lastLine = doc.lineCount > 0 ? doc.lineCount - 1 : 0;
       const zeroBased =
@@ -187,6 +186,9 @@ export function makeOpenFileTool(): RegisteredTool {
         ...(args['beside'] === true ? { viewColumn: vscode.ViewColumn.Beside } : {}),
         ...(target ? { selection: target } : {}),
       });
+      if (rawLine !== undefined && rawLine > doc.lineCount) {
+        return `line ${rawLine} is past the end of the file (${doc.lineCount} lines); opened at line ${doc.lineCount}.`;
+      }
       return zeroBased === undefined
         ? `Opened ${suppliedPath} in the editor.`
         : `Opened ${suppliedPath} in the editor at line ${zeroBased + 1}.`;
