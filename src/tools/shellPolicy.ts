@@ -16,6 +16,7 @@ import { statementNetworkProgram } from './shellNetworkPrograms';
 import { firstOwnerOnlyRedirect } from './ownerPaths';
 import { commonFolderOf } from '../sidebar/approvalKeyGrammar';
 import { ownerOnlySetForGuard, ownerOnlyShellRule } from './shellOwnerRule';
+import { commandStartsElevation, scriptNestedCommands } from './shellScriptFiles';
 import type { ForgeConfig } from '../config/types';
 
 type ShellClass = 'read_only' | 'normal' | 'dangerous' | 'refused';
@@ -36,11 +37,14 @@ export interface ShellSecretCheck {
    *  Absent or empty: the owner guard is inert, so a wiring that never supplies
    *  it keeps the classifications it always had. */
   ownerOnly?: readonly string[];
+  /** Injectable script reader so classification tests do not need filesystem fixtures. */
+  readScript?: (absPath: string) => string | { error: string };
 }
 
 export interface ShellClassification {
   classification: ShellClass;
   rule?: ShellTokenRule;
+  elevatedProcess?: boolean;
   /** The secret path this command reads even though the owner put that exact
    *  path in `permissions.secret_paths_allow`: the allow list may skip the card,
    *  never the chat's taint, so the tool marks the chat from this field. */
@@ -177,6 +181,16 @@ export function classifyShellCommand(
   shell: ShellKind,
   check: ShellSecretCheck = {},
 ): ShellClassification {
+  return classifyShellCommandAtDepth(command, shell, check, 0, new Set());
+}
+
+function classifyShellCommandAtDepth(
+  command: string,
+  shell: ShellKind,
+  check: ShellSecretCheck,
+  scriptDepth: number,
+  scriptPaths: ReadonlySet<string>,
+): ShellClassification {
   // A here-document body is stdin, not commands, unless a shell reads it or bash expands `$(` in it.
   const heredocs = extractHeredocs(command, shell);
   // `<<'PY` with the quote never closed is bash's own parse error, refused here
@@ -220,6 +234,7 @@ export function classifyShellCommand(
     if (rule) return { classification: 'refused', rule };
   }
   let strongest: ShellClassification = { classification: 'read_only' };
+  let elevationSeen = commandStartsElevation(command, shell, check.platform ?? process.platform);
   let networkSeen = false;
   /** Every distinct network-reaching program this command names. More than one means
    *  no key, so the set stays small and the answer is a name or nothing. */
@@ -235,20 +250,47 @@ export function classifyShellCommand(
   /** The one file the secret gate can locate, when it is what raised this card. */
   let secretApprovalFile: string | undefined;
   const shellReadsHeredoc = parsed.statements.some((statement) => feedsHeredocToShell(statement));
+  const scriptNested = scriptNestedCommands(
+    command,
+    shell,
+    {
+      platform: check.platform ?? process.platform,
+      ...(check.cwd ? { cwd: check.cwd } : {}),
+      ...(check.home ? { home: check.home } : {}),
+      ...(check.readScript ? { readScript: check.readScript } : {}),
+    },
+    { bodies: heredocs.bodies, redirects: parsed.redirects },
+    scriptDepth,
+    scriptPaths,
+  );
   const nestedCommands = [
+    ...scriptNested,
     ...heredocs.bodies.filter((body) => shellReadsHeredoc || body.expands).map((body) => body.text),
     ...nestedShellCommands(command, shell),
     ...extractCommandStrings(parsed.statements),
   ];
   for (const nestedCommand of nestedCommands) {
+    if (typeof nestedCommand !== 'string' && 'rule' in nestedCommand) {
+      if (precedence(nestedCommand.rule.class) > precedence(strongest.classification)) {
+        strongest = { classification: nestedCommand.rule.class, rule: nestedCommand.rule };
+      }
+      continue;
+    }
     const nestedText = typeof nestedCommand === 'string' ? nestedCommand : nestedCommand.command;
     // A block that only compares `$_` properties stays read-only; any other
     // nested command (a call, an assignment) ranks like a top-level one.
     if (shell !== 'bash' && isPurePwshExpression(nestedText)) continue;
-    const nested = classifyShellCommand(
+    const nestedIsScript =
+      typeof nestedCommand !== 'string' && 'script' in nestedCommand && nestedCommand.script;
+    const nestedPaths = nestedIsScript
+      ? new Set([...scriptPaths, nestedCommand.path])
+      : scriptPaths;
+    const nested = classifyShellCommandAtDepth(
       nestedText,
       typeof nestedCommand === 'string' ? shell : nestedCommand.shell,
       check,
+      scriptDepth + (nestedIsScript ? 1 : 0),
+      nestedPaths,
     );
     if (precedence(nested.classification) > precedence(strongest.classification)) {
       // The nested block's OWN approval key is dropped rather than inherited. The
@@ -271,6 +313,7 @@ export function classifyShellCommand(
       networkSeen = true;
       networkThroughNestedShell = true;
     }
+    if (nested.elevatedProcess) elevationSeen = true;
   }
   // A `cd` writes nothing, so it may count as a read — but only when nothing in
   // the same command writes INTO Forge's own files. A redirection is the trap:
@@ -388,6 +431,7 @@ export function classifyShellCommand(
       : undefined;
   return {
     ...strongest,
+    ...(elevationSeen ? { elevatedProcess: true } : {}),
     ...(readSecret ? { readSecretIgnoringAllowList: readSecret } : {}),
     ...(networkSeen && !strongest.networkReaching ? { networkReaching: true } : {}),
     ...(singleNetworkProgram ? { networkProgram: singleNetworkProgram } : {}),

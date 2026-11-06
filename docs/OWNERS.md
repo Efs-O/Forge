@@ -589,6 +589,7 @@ overlaps with an existing owner, extend the owner instead.
 | Shell `timeout_ms` hint text and argument check | `src/tools/shellToolTimeout.ts` |
 | Background-execution registry (~/.forge/background-execs/, reaped after a killed host) | `src/tools/backgroundRegistry.ts` |
 | Shell command classification (read-only/normal/dangerous/refused) | `src/tools/shellPolicy.ts` |
+| Shell scripts read and added to command classification | `src/tools/shellScriptFiles.ts` |
 | Which token lists are read-only invocations (the program table + argument checks) | `src/tools/shellReadOnlyRules.ts` |
 | Shell program names and Git global-option tokens | `src/tools/shellCommandTokens.ts` |
 | The shell command-line parser: statements, separators, redirection targets, what can still be a read | `src/tools/shellCommandParse.ts` |

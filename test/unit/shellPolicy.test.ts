@@ -79,7 +79,7 @@ const cases: Array<[string, string, 'read_only' | 'normal' | 'dangerous' | 'refu
   ["pwsh -cwa 'Remove-Item -Recurse -Force x'", 'pwsh', 'dangerous'],
   ["powershell 'Remove-Item -Recurse -Force x'", 'pwsh', 'dangerous'],
   ['powershell -ExecutionPolicy Bypass Remove-Item -Recurse -Force x', 'pwsh', 'dangerous'],
-  ['powershell -ExecutionPolicy Bypass -File x.ps1', 'pwsh', 'normal'],
+  ['powershell -ExecutionPolicy Bypass -File x.ps1', 'pwsh', 'dangerous'],
   ['pwsh x.ps1', 'pwsh', 'normal'],
   ['sudo --user root ls', 'bash', 'normal'],
   ['rm -rf build', 'bash', 'dangerous'],

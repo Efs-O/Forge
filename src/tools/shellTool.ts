@@ -21,6 +21,7 @@ import { DEFAULT_TOOL_OUTPUT_LIMITS } from './toolOutputLimits';
 import type { RegisteredTool } from './ToolRegistry';
 import { markConversationReadSecret } from './exfilTaint';
 import { shellTimeoutError, TIMEOUT_HINT } from './shellToolTimeout';
+import { appendElevationResultNote } from './shellScriptFiles';
 
 export interface ShellToolOptions {
   getConfig?: () => ForgeConfig;
@@ -47,7 +48,6 @@ export interface ShellToolOptions {
   ownerOnly?: () => readonly string[];
 }
 
-/** Adds `dir` to PATH (key case varies on Windows): appending lets a user-installed program win, prepending makes `dir` win. */
 /** The PATH helpers live in `shellPathEnv.ts`; re-exported so the tests that
  *  name them keep one import path. */
 export { gitBashDir, withPathEntry } from './shellPathEnv';
@@ -237,12 +237,8 @@ const POSIX_ONLY = new Set([
   'grep',
 ]);
 const GLOB_TAKERS = new Set(['rg', 'grep', 'cat', 'wc', 'head', 'tail']);
-
-/**
- * Names the POSIX idioms in a command that failed under PowerShell, where
- * native tools get globs unexpanded and `sort -rn` hits Sort-Object. Whole
- * tokens only; quoted arguments are not inspected.
- */
+/** Names POSIX idioms that fail under PowerShell, such as `sort -rn`; whole
+ * tokens only and quoted arguments are ignored. */
 export function posixIdioms(command: string): string[] {
   const found = new Set<string>();
   for (const segment of command.split(/\||&&|;/u)) {
@@ -453,7 +449,10 @@ export function makeShellTool(options: ShellToolOptions = {}): RegisteredTool {
             ? { notifyConversationId: context.conversationId }
             : {}),
         });
-        return `execution_id: ${start.id}\nstatus: ${start.status}\npid: ${start.pid ?? 'unknown'}`;
+        return appendElevationResultNote(
+          `execution_id: ${start.id}\nstatus: ${start.status}\npid: ${start.pid ?? 'unknown'}`,
+          classified.elevatedProcess,
+        );
       }
       const output = new ShellOutputCollector(
         context?.conversationId ?? 'unknown',
@@ -480,9 +479,10 @@ export function makeShellTool(options: ShellToolOptions = {}): RegisteredTool {
             classified.readSecretIgnoringAllowList,
             `shell "${command}"`,
           );
-        return (
+        return appendElevationResultNote(
           formatResult(result.code, result.seconds, result.timedOut, capped.text) +
-          pwshHint(shell, result.code, command)
+            pwshHint(shell, result.code, command),
+          classified.elevatedProcess,
         );
       } catch (error) {
         if ((error as NodeJS.ErrnoException).code === 'ENOENT' && shell === 'pwsh') {

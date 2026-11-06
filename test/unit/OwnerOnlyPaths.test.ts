@@ -35,7 +35,13 @@ const set: OwnerOnlySet = ownerOnlySetFor({
   ...win,
 });
 /** What `classifyShellCommand` is given in production: the roots, the home folder `~` expands against, the OS, and the folder the command runs in. */
-const check = { ownerOnly: set.roots, home: HOME, platform: 'win32', cwd: WORKSPACE };
+const check = {
+  ownerOnly: set.roots,
+  home: HOME,
+  platform: 'win32',
+  cwd: WORKSPACE,
+  readScript: () => '',
+};
 
 describe('the owner-only set', () => {
   it('holds ~/.forge plus both config.yaml files while no policy file exists', () => {
@@ -110,17 +116,23 @@ describe('the owner-only set once the policy file exists', () => {
     expect(built().roots).toEqual([expectedHomeRoot]);
     expect(ownerOnlyWriteTargetFor('.forge/config.yaml', built(), realWorkspace)).toBeUndefined();
     expect(
-      ownerOnlyStatementTargetFor(['Add-Content', '.forge/config.yaml', 'x'], built(), realWorkspace),
+      ownerOnlyStatementTargetFor(
+        ['Add-Content', '.forge/config.yaml', 'x'],
+        built(),
+        realWorkspace,
+      ),
     ).toBeUndefined();
     // The owner's file beside them is not: it is what says what an agent may do, and
     // it lives in the folder that is still protected.
-    expect(ownerOnlyWriteTargetFor(path.join(realHome, '.forge', 'policy.yaml'), built()).root).toBe(
-      expectedHomeRoot,
-    );
+    expect(
+      ownerOnlyWriteTargetFor(path.join(realHome, '.forge', 'policy.yaml'), built()).root,
+    ).toBe(expectedHomeRoot);
     // A config.yaml that lives inside ~/.forge is still refused, by the folder and
     // not by its name: the root is what the rule protects, which is why opening
     // config.yaml to agents did not open the owner's own copy of it.
-    expect(ownerOnlyWriteTargetFor(path.join(realHome, '.forge', 'config.yaml'), built())).toBeDefined();
+    expect(
+      ownerOnlyWriteTargetFor(path.join(realHome, '.forge', 'config.yaml'), built()),
+    ).toBeDefined();
   });
 
   it('asks again on every decision, so deleting policy.yaml brings the wall back at once', () => {
