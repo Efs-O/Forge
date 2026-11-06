@@ -1,5 +1,27 @@
 # Forge — Recent Changes
 
+## 0.17.127
+
+- A chat is no longer marked as having read a secret when nothing was read.
+  PowerShell member access such as `$_.Key`, a grep or `Select-String` search
+  pattern, `git commit -m` text, and `ls`/`stat`/`Test-Path`/`Get-Item` (which
+  show a name, never contents) used to match the secret-path patterns. After
+  that, every `web_fetch` in the chat opened an owner-only card with no
+  "Allow for this chat", even for a host already approved. Real reads such as
+  `cat` of a key file or `grep -i password .env` are still caught.
+- After a real secret read, the fetch card names the command that flagged the
+  chat and offers "Allow for this chat" for that host. That allowance
+  (`secret-net:<host>`) is separate from an ordinary host approval, so a host
+  approved before the secret read still asks. Clanker never answers it, an
+  unattended run still refuses it, and a URL carrying encoded data always asks.
+- Approval card buttons ignore clicks for their first 600 ms, so a click meant
+  for the row underneath can no longer decline a card.
+- In a group of tool calls that ran together, each row shows its own result
+  and error. A successful call no longer shows a red mark carrying another
+  call's decline.
+- While an approval card or a question waits for you, the status line says
+  "Waiting for you" instead of cycling phrases such as "Warming the GPU…".
+
 ## 0.17.126
 
 - Skills are now on unless `config.yaml` says `skills: { enabled: false }`. This
