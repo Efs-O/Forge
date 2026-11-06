@@ -51,6 +51,7 @@ vitest.config.*
 # is here because a shipped skill's script is the feature too, and `*.json` and
 # `*.txt` at the root would otherwise leave nothing to check. What actually lands
 # in the VSIX is checked by `test/unit/ShippedSkills.test.ts`.
+skills-lab/**
 !resources/skills/**/SKILL.md
 !resources/skills/**/*.md
 !resources/skills/**/*.py

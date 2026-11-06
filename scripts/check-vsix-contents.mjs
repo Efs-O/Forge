@@ -56,6 +56,7 @@ const REQUIRED_VSIX_FILES = [
 export function findUnexpectedVsixFiles(files) {
   return files.filter((file) => {
     const lower = file.toLowerCase();
+    if (file.startsWith('skills-lab/')) return true;
     if (lower.split('/').includes('__pycache__') || lower.endsWith('.pyc') || lower.endsWith('.log'))
       return true;
     return !ALLOW_LIST.some((pattern) => {
@@ -65,7 +66,7 @@ export function findUnexpectedVsixFiles(files) {
   });
 }
 
-/** Runtime adapters, their graph skeleton and the media skills must ship. */
+/** Runtime adapters, their graph skeleton and shipped skills must ship. */
 export function findMissingRequiredVsixFiles(files) {
   return REQUIRED_VSIX_FILES.filter((file) => !files.includes(file));
 }

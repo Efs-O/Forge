@@ -65,4 +65,10 @@ describe('VSIX contents allow-list', () => {
       ]),
     ).toEqual(['ci-b.log', '.pytest_cache/v/cache/nodeids', 'resources/skills/x/__pycache__/a.pyc']);
   });
+
+  it('refuses lab skills in the packaged extension', () => {
+    expect(findUnexpectedVsixFiles(['skills-lab/media-inspect/SKILL.md'])).toEqual([
+      'skills-lab/media-inspect/SKILL.md',
+    ]);
+  });
 });

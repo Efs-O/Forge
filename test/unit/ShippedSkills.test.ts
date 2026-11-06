@@ -24,6 +24,7 @@ import { discoverSkills, parseSkillManifest } from '../../src/skills/discover';
 
 const REPO_ROOT = path.resolve(__dirname, '..', '..');
 const SKILLS_ROOT = path.join(REPO_ROOT, 'resources', 'skills');
+const LAB_SKILLS_ROOT = path.join(REPO_ROOT, 'skills-lab');
 const USER_SKILL_SCRIPT = path.join(
   os.homedir(),
   '.forge',
@@ -38,6 +39,14 @@ function shippedFolders(): string[] {
   if (!fs.existsSync(SKILLS_ROOT)) return [];
   return fs
     .readdirSync(SKILLS_ROOT, { withFileTypes: true })
+    .filter((entry) => entry.isDirectory())
+    .map((entry) => entry.name);
+}
+
+function labFolders(): string[] {
+  if (!fs.existsSync(LAB_SKILLS_ROOT)) return [];
+  return fs
+    .readdirSync(LAB_SKILLS_ROOT, { withFileTypes: true })
     .filter((entry) => entry.isDirectory())
     .map((entry) => entry.name);
 }
@@ -178,4 +187,18 @@ describe('resources/skills/ (the shipped skill folder)', () => {
       fs.existsSync(path.join(REPO_ROOT, 'test', 'unit', 'ShippedHelperScripts.test.ts')),
     ).toBe(false);
   });
+});
+
+describe('skills-lab/ (unshipped skills)', () => {
+  it.skipIf(!fs.existsSync(LAB_SKILLS_ROOT))(
+    'every folder parses with its name equal to the folder name',
+    () => {
+      for (const folder of labFolders()) {
+        const manifestPath = path.join(LAB_SKILLS_ROOT, folder, 'SKILL.md');
+        expect(fs.existsSync(manifestPath), `${folder}/SKILL.md missing`).toBe(true);
+        const parsed = parseSkillManifest(fs.readFileSync(manifestPath, 'utf8'), folder);
+        expect(parsed.ok, `${folder}: ${parsed.ok ? '' : parsed.reason}`).toBe(true);
+      }
+    },
+  );
 });
