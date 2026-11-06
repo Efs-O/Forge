@@ -6,6 +6,24 @@
   covers existing configs with no `skills:` block too: their next new chat lists
   the shipped and user skills and offers `load_skill`. Set `enabled: false` to
   keep the previous prompt and tool list.
+- Tool arguments are no longer repaired or coerced. A call whose arguments are
+  not valid JSON, or that passes `"True"` or `"5"` where the schema wants a
+  boolean or a number, is refused with the field and the expected type, so the
+  model corrects the call instead of running something it did not write. Ranges
+  in the browser and media tools that are out of bounds are refused the same way.
+- Tool calls written as text are accepted only in the shapes Forge teaches: a
+  ```json fence with `tool`, or the Hermes `<tool_call>` tags with `name` and
+  `arguments`. Other shapes are refused with the canonical one, rather than
+  guessed at.
+- A model reply whose stream carries a malformed JSON frame now stops with that
+  error instead of continuing with the frame silently dropped.
+- When a save is refused because another program holds the file, the message
+  names that program. A save that had to wait for a lock says how long it waited.
+- Edit tools say that a missing file does not exist and point to `write_file`.
+- An approval that timed out earlier in a chat now says that no card was shown
+  for the later call, instead of reading as if the owner let a new card expire.
+- `forge.sh who` lists sessions whose chat titles contain brackets or quotes.
+- The Forge wordmark in the sidebar header sits at the mark's optical centre.
 
 ## 0.17.125
 
