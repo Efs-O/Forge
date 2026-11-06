@@ -60,7 +60,7 @@ export function commandStartsElevation(
 }
 
 export interface ScriptHeredocSource {
-  bodies: readonly { text: string }[];
+  bodies: readonly { text: string; redirectTarget?: string }[];
   redirects: readonly RedirectTarget[];
 }
 
@@ -120,13 +120,46 @@ function resolveScriptPath(token: string, options: ScriptReadOptions): string {
     : api.resolve(options.cwd ?? process.cwd(), folded);
 }
 
+function sameScriptPath(left: string, right: string, options: ScriptReadOptions): boolean {
+  const leftPath = resolveScriptPath(left, options);
+  const rightPath = resolveScriptPath(right, options);
+  return options.platform === 'win32'
+    ? leftPath.toLowerCase() === rightPath.toLowerCase()
+    : leftPath === rightPath;
+}
+
+function literalPath(token: string | undefined): token is string {
+  return Boolean(token && !/[\s$`(){}]/u.test(token));
+}
+
+function startProcessTarget(tokens: readonly string[]): string | undefined {
+  let filePath: string | undefined;
+  let argumentListIndex = -1;
+  for (let index = 1; index < tokens.length; index += 1) {
+    const option = (tokens[index] ?? '').toLowerCase();
+    if (option === '-filepath') filePath = tokens[index + 1];
+    else if (option === '-argumentlist') argumentListIndex = index + 1;
+    else if (!option.startsWith('-') && filePath === undefined) filePath = tokens[index];
+  }
+  if (scriptPath(filePath ?? '')) return filePath;
+  if (!['powershell', 'pwsh'].includes(baseProgram(filePath ?? ''))) return undefined;
+  const args = (argumentListIndex < 0 ? [] : tokens.slice(argumentListIndex)).flatMap((token) =>
+    token.split(','),
+  );
+  for (let index = 0; index < args.length; index += 1) {
+    if (/^-file$|^-f$/iu.test(args[index] ?? '') && literalPath(args[index + 1]))
+      return args[index + 1];
+  }
+  return undefined;
+}
+
 function launchedPaths(
   command: string,
   shell: ShellKind,
-): Array<{ token: string; launcher: ShellKind }> {
+): Array<{ token: string; launcher: ShellKind; statementIndex: number }> {
   const statements = parseCommand(command, shell).statements;
-  const found: Array<{ token: string; launcher: ShellKind }> = [];
-  for (const statement of statements) {
+  const found: Array<{ token: string; launcher: ShellKind; statementIndex: number }> = [];
+  for (const [statementIndex, statement] of statements.entries()) {
     const tokens = [...statement];
     if (!tokens.length) continue;
     const first = tokens[0] ?? '';
@@ -154,9 +187,12 @@ function launchedPaths(
     } else if (scriptPath(first)) {
       target = first;
       launcher = shell;
+    } else if (shell !== 'bash' && ['start-process', 'start', 'saps'].includes(program)) {
+      target = startProcessTarget(tokens);
+      launcher = 'pwsh';
     }
     if (target && (scriptPath(target) || (launcher === 'bash' && !path.extname(target))))
-      found.push({ token: target, launcher });
+      found.push({ token: target, launcher, statementIndex });
   }
   return found;
 }
@@ -173,6 +209,7 @@ export function scriptCommandsFor(
   const launches = launchedPaths(command, shell);
   const scripts: ScriptCommand[] = [];
   const read = options.readScript ?? defaultReadScript;
+  const parsed = parseCommand(command, shell);
   for (const launch of launches) {
     const absolute = resolveScriptPath(launch.token, options);
     const identity = options.platform === 'win32' ? absolute.toLowerCase() : absolute;
@@ -182,14 +219,30 @@ export function scriptCommandsFor(
         scripts,
         error: `runs a script deeper than the limit (${MAX_SCRIPT_DEPTH}) at ${absolute}`,
       };
-    const redirectIndex = heredocSource?.redirects.findIndex(
-      (redirect) =>
-        resolveScriptPath(redirect.target, options).toLowerCase() === absolute.toLowerCase(),
+    const body = heredocSource?.bodies.find(
+      (candidate) =>
+        candidate.redirectTarget && sameScriptPath(candidate.redirectTarget, absolute, options),
     );
-    const inlineBody =
-      redirectIndex !== undefined && redirectIndex >= 0
-        ? heredocSource?.bodies[redirectIndex]?.text
-        : undefined;
+    const pairedRedirect = body?.redirectTarget;
+    const matchingRedirects =
+      heredocSource?.redirects.filter((redirect) =>
+        sameScriptPath(redirect.target, absolute, options),
+      ).length ?? 0;
+    const otherRedirect = matchingRedirects > (pairedRedirect ? 1 : 0);
+    const otherArgument = parsed.statements.some(
+      (statement, index) =>
+        index !== launch.statementIndex &&
+        statement
+          .slice(1)
+          .some(
+            (token) =>
+              sameScriptPath(token, absolute, options) &&
+              (!pairedRedirect || !sameScriptPath(token, pairedRedirect, options)),
+          ),
+    );
+    if (otherRedirect || otherArgument)
+      return { scripts, error: `runs a script this same command changes (${absolute})` };
+    const inlineBody = body?.text;
     const content = inlineBody ?? read(absolute);
     if (typeof content !== 'string')
       return {

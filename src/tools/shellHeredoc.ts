@@ -10,6 +10,8 @@ import type { ShellTokenRule } from './DenyList';
 
 export interface HeredocBody {
   text: string;
+  /** The output redirection on the opening command line, when present. */
+  redirectTarget?: string;
   /** Unquoted delimiter and the body holds `$(` or a backtick: bash runs those while expanding it. */
   expands: boolean;
 }
@@ -18,6 +20,7 @@ interface Pending {
   delimiter: string;
   stripTabs: boolean;
   quoted: boolean;
+  redirectTarget?: string;
 }
 
 /** Programs that execute a here-document fed to them as commands. */
@@ -151,8 +154,18 @@ export function extractHeredocs(
       const read = readDelimiter(command, index + 2);
       if (read) {
         if (read.unterminated && !unterminated) unterminated = read.unterminated;
-        pending.push(read.pending);
+        const lineStart = command.lastIndexOf('\n', index - 1) + 1;
+        const lineEnd = command.indexOf('\n', index);
+        const openingLine = command.slice(lineStart, lineEnd === -1 ? command.length : lineEnd);
+        const redirects = [
+          ...openingLine.matchAll(/(?:^|\s)>{1,2}\s*(?:"([^"]+)"|'([^']+)'|([^\s;&|]+))/gu),
+        ];
+        const redirectMatch = redirects.at(-1);
+        const redirectTarget = redirectMatch?.[1] ?? redirectMatch?.[2] ?? redirectMatch?.[3];
+        pending.push({ ...read.pending, ...(redirectTarget ? { redirectTarget } : {}) });
         out += command.slice(index, read.end);
+        // Keep the output path beside its own body. A command may have an
+        // unrelated redirect before this one, so parallel array indexes lie.
         index = read.end - 1;
         continue;
       }
@@ -172,7 +185,11 @@ export function extractHeredocs(
         lines.push(line);
       }
       const text = lines.join('\n');
-      bodies.push({ text, expands: !doc.quoted && /\$\(|`/u.test(text) });
+      bodies.push({
+        text,
+        expands: !doc.quoted && /\$\(|`/u.test(text),
+        ...(doc.redirectTarget ? { redirectTarget: doc.redirectTarget } : {}),
+      });
     }
     pending.length = 0;
     index = cursor - 1;

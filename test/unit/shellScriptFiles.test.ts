@@ -89,6 +89,45 @@ describe('shell scripts are classified from their file contents', () => {
     expect(result.rule?.description).toBe(inline.rule?.description);
   });
 
+  it('classifies a redirect rewrite of a script run later in the command as dangerous', () => {
+    const result = classifyShellCommand(
+      "echo 'rm -rf /c/x' > s.sh; bash s.sh",
+      'bash',
+      check({ [abs('s.sh')]: 'ls' }),
+    );
+    expect(result.classification).toBe('dangerous');
+    expect(result.rule?.description).toBe(`runs a script this same command changes (${abs('s.sh')})`);
+  });
+
+  it('classifies a program rewrite of a script run later in the command as dangerous', () => {
+    const result = classifyShellCommand(
+      'cp evil.sh s.sh && bash s.sh',
+      'bash',
+      check({ [abs('s.sh')]: 'ls', [abs('evil.sh')]: 'ls' }),
+    );
+    expect(result.classification).toBe('dangerous');
+    expect(result.rule?.description).toBe(`runs a script this same command changes (${abs('s.sh')})`);
+  });
+
+  it('pairs a here-document body with its own redirect after an unrelated redirect', () => {
+    const command =
+      "echo note > a.txt\ncat > s.sh <<'EOF'\nrm -rf /c/x\nEOF\nbash s.sh";
+    const result = classifyShellCommand(command, 'bash', check({ [abs('s.sh')]: 'ls' }));
+    const inline = classifyShellCommand('rm -rf /c/x', 'bash');
+    expect(result.classification).toBe(inline.classification);
+    expect(result.rule?.description).toBe(inline.rule?.description);
+  });
+
+  it('follows literal script paths in elevated Start-Process argument lists', () => {
+    const contents = 'Remove-Item -Recurse -Force C:\\x';
+    const command =
+      `powershell -Command "Start-Process powershell -Verb RunAs -ArgumentList '-File','evil.ps1'"`;
+    const result = classifyShellCommand(command, 'pwsh', check({ [abs('evil.ps1')]: contents }));
+    const inline = classifyShellCommand(contents, 'pwsh');
+    expect(result.classification).toBe(inline.classification);
+    expect(result.rule?.description).toBe(inline.rule?.description);
+  });
+
   it('makes missing, unreadable, directory, and oversized scripts dangerous with their paths named', () => {
     for (const [error, file] of [
       ['does not exist', undefined],
