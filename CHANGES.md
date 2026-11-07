@@ -1,5 +1,13 @@
 # Forge — Recent Changes
 
+## 0.17.132
+
+- Source maintenance, no behaviour change: six oversized files were split along
+  their real seams — the machine-wide model turn holds, the deferred stop
+  watcher for external servers, the web-fetch address guard, the context budget,
+  and two duplications (the job-name matcher and a path helper). Four files
+  moved under the 450-line threshold; the owner map names every new file.
+
 ## 0.17.131
 
 - Scheduled model jobs now enter one fair, due-time-ordered lane. A job waiting
