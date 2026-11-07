@@ -1,0 +1,5 @@
+#!/bin/sh
+# The push gate. Install once per clone with:
+#   git config core.hooksPath .githooks
+# See scripts/check-push.mjs for what it refuses and why.
+node scripts/check-push.mjs --pre-push

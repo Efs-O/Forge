@@ -542,6 +542,7 @@
     "ci:steps": "npm run type-check && npm run lint && npm test && npm run build && npm run check:bundle",
     "check:bundle": "node scripts/bundle-load-check.js",
     "check:changed": "node scripts/check-changed.mjs",
+    "check:push": "node scripts/check-push.mjs",
     "ab:compaction": "node scripts/compaction-ab.mjs",
     "ab:tool-result-context": "node scripts/tool-result-context-ab.mjs"
   },

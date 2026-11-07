@@ -258,5 +258,20 @@
         "anchor": "Every plan has acceptance criteria listing the invariants and edge cases"
       }
     ]
+  },
+  {
+    "concern": "push-hygiene",
+    "source": {
+      "file": "CLAUDE.md",
+      "heading": "## Push Hygiene (before every push)"
+    },
+    "copies": [
+      {
+        "file": "AGENTS.md",
+        "mode": "pointer",
+        "pointer": "`CLAUDE.md` § `## Push Hygiene (before every push)`"
+      }
+    ],
+    "general": []
   }
 ]

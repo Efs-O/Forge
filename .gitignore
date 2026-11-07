@@ -141,3 +141,6 @@ artifacts/
 # Local test scratch directory.
 .test-tmp/
 /.forge-watch-*.txt
+
+# Machine identity patterns for the push gate - local only, never committed.
+.secrets-patterns.txt
