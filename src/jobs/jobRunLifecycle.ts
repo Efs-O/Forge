@@ -7,17 +7,31 @@
  * fields are private, so the class passes them at the call site).
  */
 
-import type { JobFile } from './jobSchema';
+import type { JobFile, RunRow } from './jobSchema';
 import type { JobStore } from './JobStore';
 import type { JobDelivery } from './JobDelivery';
+import { nextDue } from './schedule';
 import { runCheck, buildCheckContext } from './checks/runCheck';
 import { nextDueWithBackoff, BACKOFF_THRESHOLD } from './backoff';
 import {
   shouldSleepIfIdle,
+  PowerControlUnsupportedError,
   type PowerControl,
   type SleepIfIdleInput,
 } from '../system/PowerControl';
 import type { LlamacppAction } from './actions/llamacppAction';
+import type { PendingModelAction } from './jobModelLane';
+
+export interface ScheduledJobRunDeps {
+  store: JobStore;
+  power: PowerControl;
+  delivery: JobDelivery;
+  now: () => Date;
+  runCheck: (jobFile: JobFile) => Promise<CheckOutcome>;
+  applyBackoff: (jobFile: JobFile, message: string) => Promise<void>;
+  hasModelRunner: (jobFile: JobFile) => boolean;
+  queueModelAction: (candidate: PendingModelAction) => void;
+}
 
 /** The result of running a job's check. */
 export interface CheckOutcome {
@@ -57,6 +71,134 @@ export async function runJobCheck(
   }
 
   return checkResult;
+}
+
+/** Run one bounded check and hand any model work to the scheduler's lane. */
+export async function executeScheduledJob(
+  jobFile: JobFile,
+  isResume: boolean,
+  runNow: boolean,
+  deps: ScheduledJobRunDeps,
+): Promise<void> {
+  const { job, state } = jobFile;
+  const now = deps.now();
+  const wasLate = isResume && state.next_due_at !== null && state.next_due_at < now.getTime();
+  let hold: ReturnType<PowerControl['holdAwake']> | undefined;
+  try {
+    let holdError: string | undefined;
+    if (job.wake) {
+      try {
+        hold = deps.power.holdAwake(`job ${job.id}`);
+      } catch (err) {
+        if (!(err instanceof PowerControlUnsupportedError)) throw err;
+        holdError = `wake hold unsupported: ${err.message}; this run continued without a hold`;
+      }
+    }
+    const pendingTask =
+      state.task_pending && (job.action?.kind === 'agent_task' || job.action?.kind === 'retitle');
+    const result = pendingTask
+      ? {
+          observation: state.task_pending_observation ?? state.last_observation,
+          changed: true,
+          summary: 'retrying pending task',
+        }
+      : await deps.runCheck(jobFile);
+    const modelAction =
+      job.action?.kind === 'agent_task'
+        ? 'agent_task'
+        : job.action?.kind === 'retitle'
+          ? 'retitle'
+          : undefined;
+    if (result.changed && modelAction) {
+      const fresh = await deps.store.load(job.id);
+      if (!fresh || (!fresh.job.enabled && !runNow)) return;
+      if (deps.hasModelRunner(fresh)) {
+        const pendingSince = state.task_pending_since ?? now.getTime();
+        const pendingState: JobFile = {
+          ...fresh,
+          state: {
+            ...fresh.state,
+            last_observation: result.observation,
+            task_pending: true,
+            task_pending_reason: fresh.state.task_pending_reason ?? 'waiting for model admission',
+            task_pending_since: pendingSince,
+            task_pending_observation: result.observation,
+          },
+        };
+        deps.store.patchState(job.id, {
+          task_pending: true,
+          task_pending_reason: pendingState.state.task_pending_reason,
+          task_pending_since: pendingSince,
+          task_pending_observation: result.observation,
+        });
+        deps.queueModelAction({
+          jobFile: pendingState,
+          wasLate,
+          runNow,
+          orderAt:
+            state.task_pending && state.task_pending_since !== null
+              ? state.task_pending_since
+              : (state.next_due_at ?? now.getTime()),
+        });
+        return;
+      }
+      const error =
+        modelAction === 'agent_task'
+          ? 'agent_task runner not wired (no host facade or backend pool)'
+          : 'retitle runner not wired (no storage folder for this workspace)';
+      await recordUnwiredActionRun(deps.store, deps.delivery, deps.now, jobFile, wasLate, error);
+      return;
+    }
+    if (!(await deps.store.load(job.id))) return;
+    const change = await deps.delivery.deliverForChange(job, result);
+    let delivered = change.delivered;
+    if (
+      state.consecutive_failures >= BACKOFF_THRESHOLD &&
+      job.action?.kind !== 'agent_task' &&
+      job.action?.kind !== 'retitle'
+    ) {
+      await deps.delivery.deliver(
+        job,
+        `recovered after ${state.consecutive_failures} consecutive failures`,
+      );
+      delivered++;
+    }
+    const nextSummaryPending = result.changed ? change.summaryPending : state.summary_pending;
+    const row: RunRow = {
+      at: now.getTime(),
+      late: wasLate,
+      outcome: 'ok',
+      changed: result.changed,
+      summary: holdError ? `${result.summary}; ${holdError}` : result.summary,
+      delivered,
+      ...(holdError ? { error: holdError } : {}),
+    };
+    await deps.store.appendRun(job.id, row);
+    deps.store.patchState(job.id, {
+      last_run_at: now.getTime(),
+      last_ok_at: now.getTime(),
+      last_observation: result.observation,
+      consecutive_failures: 0,
+      next_due_at: nextDue(job.schedule, now).getTime(),
+      summary_pending: nextSummaryPending,
+    });
+  } catch (err) {
+    const message = (err as Error).message;
+    await deps.store
+      .appendRun(job.id, {
+        at: now.getTime(),
+        late: wasLate,
+        outcome: 'failed',
+        changed: false,
+        summary: 'run failed',
+        error: message,
+        delivered: 0,
+      })
+      .catch(() => undefined);
+    await deps.applyBackoff(jobFile, message).catch(() => undefined);
+  } finally {
+    hold?.dispose();
+  }
 }
 
 /**

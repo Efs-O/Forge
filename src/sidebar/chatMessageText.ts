@@ -92,7 +92,7 @@ export function formatChatMirrorLine(
   const label = direction === 'in' ? `📨 ${title} → this chat` : `📤 this chat → ${title}`;
   const statusText =
     status === 'tell'
-      ? 'busy · reads it mid-turn'
+      ? 'busy · queued, not processed yet'
       : status === 'turn'
         ? 'idle · started a turn'
         : status === 'unconfirmed'

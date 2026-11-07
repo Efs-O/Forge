@@ -15,7 +15,7 @@ export interface IBackendPool {
   /** Free VRAM for a managed external server (Strata) and start it if it is down. */
   prepareExternal?(modelName: string): Promise<void>;
   /** Acquire a backend for an active turn and pin its slot until release. */
-  acquireForTurn?(modelName: string): Promise<BackendTurnLease>;
+  acquireForTurn?(modelName: string, options?: { signal?: AbortSignal }): Promise<BackendTurnLease>;
   /** Hold a managed external server across a full sidebar turn in every window. */
   acquireExternalTurnHold?(
     modelName: string,

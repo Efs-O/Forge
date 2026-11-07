@@ -109,6 +109,9 @@ describe('worker chat turn-end wake', () => {
       h.opener.id,
       false,
       true,
+        undefined,
+        undefined,
+        { kind: 'worker-wake', workerId: h.worker.id },
     );
     expect(h.addTell).not.toHaveBeenCalled();
   });

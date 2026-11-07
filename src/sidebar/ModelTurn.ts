@@ -55,6 +55,7 @@ import { writeChunkLimit } from '../tools/writeChunking';
 import { toolCallProgressMsg } from './toolCallProgress';
 import type { RequestOfferedListener } from '../sessions/requestFingerprint';
 import type { RequestCapture } from '../sessions/requestStats';
+import type { QuestionWaitRunner } from '../tools/toolContract';
 import { reportRequestUsage } from './requestUsageReporting';
 import { startStrataBusyWarning } from './strataBusyWarning';
 
@@ -125,7 +126,9 @@ export interface ModelTurnRequest {
   ctrl: AbortController;
   postC: (msg: HostToWebview) => void;
   apiKey?: string;
+  getApiKey?: () => string | undefined;
   checkpoint?: CheckpointSession;
+  withQuestionWait?: QuestionWaitRunner;
 }
 
 /**
@@ -148,7 +151,18 @@ async function trackTurnCompletion<T>(
 
 export async function runModelTurn(
   ctx: ModelTurnContext,
-  { resolveBaseUrl, conv, model, activeFile, ctrl, postC, apiKey, checkpoint }: ModelTurnRequest,
+  {
+    resolveBaseUrl,
+    conv,
+    model,
+    activeFile,
+    ctrl,
+    postC,
+    apiKey,
+    getApiKey,
+    checkpoint,
+    withQuestionWait,
+  }: ModelTurnRequest,
 ): Promise<ToolCallingLoopResult> {
   const config = ctx.getConfig();
   startStrataBusyWarning(model, conv.id, ctx.lifecycle.streamingIds(), postC, ctrl.signal);
@@ -273,6 +287,7 @@ export async function runModelTurn(
       canUseThinkingKwargs: thinkingKwargs,
       stripThinkingChannels,
       ...(apiKey ? { apiKey } : {}),
+      ...(getApiKey ? { getApiKey } : {}),
       prepareMessages: (messages) => {
         const contextTrimState =
           conv.contextTrimState ?? (conv.contextTrimState = createContextTrimState());
@@ -337,6 +352,7 @@ export async function runModelTurn(
             conversation: conv,
             ...(checkpoint ? { checkpoint } : {}),
             persistConversation: () => ctx.onTranscriptChanged?.(conv),
+            ...(withQuestionWait ? { withQuestionWait } : {}),
             // Bound to this conversation here, so the tool never sees a
             // conversation id and cannot reach another chat's clock.
             ...(ctx.setCheckin

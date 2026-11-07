@@ -102,6 +102,7 @@ export function createSidebarHostFacade(deps: SidebarFacadeDeps): ForgeHostFacad
     getArchivedConversations: () => deps.getSidebar().history,
     getRequestChains: () => requestChains.status(),
     getStreamingConversationIds: () => agentLoop.getStreamingIds(),
+    getModelDemandConversationIds: () => agentLoop.getModelDemandIds(),
     getSessionActiveMs: (conversation) => agentLoop.getSessionActiveMs(conversation),
     // The cap question a transport must be able to ask BEFORE it wants a chat:
     // the agent bus pre-flights a `--new` message against this so a sender gets

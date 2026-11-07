@@ -12,12 +12,17 @@ import { buildUserContent } from './ConversationOps';
 import { deriveTitle, stripHeadingMarker } from './sessionTypes';
 import { parseForgeInboundPrompt } from '../agentBus/busContent';
 import type { AgentSenderMetadata } from '../agentLinks/chatAgentLinks';
+import type { MidTurnTellOrigin } from '../agent/MidTurnInbox';
 
 /** Presentation metadata for a prompt injected by Forge rather than authored by the user. */
 export interface UserPromptOptions {
   /** Creation time shared with the optimistic webview row, when supplied. */
   createdAt?: number;
   internal?: boolean;
+  /** Non-user prompts never become editable drafts on refusal. */
+  origin?: MidTurnTellOrigin;
+  /** Transient delivery acknowledgement, after startup and prompt commit. */
+  onStarted?: () => void;
   /**
    * On-disk references to what this prompt carried, stamped on the transcript
    * so the webview can show the images back. The pixels stay out of the

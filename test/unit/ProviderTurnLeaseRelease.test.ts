@@ -115,6 +115,7 @@ interface FakeTurnHarness {
   releases: number;
   /** How many times the model turn itself was started. */
   modelTurnCalls: number;
+  acquires: number;
 }
 
 /** A pool whose lease release is observable, with no real backend involved. */
@@ -150,14 +151,18 @@ function fakeHarness(pool: ProviderTurnContext['pool']): FakeTurnHarness {
     get modelTurnCalls() {
       return state.modelTurnCalls;
     },
+    get acquires() {
+      return (pool as unknown as { acquires?: number }).acquires ?? 0;
+    },
   };
 }
 
 /** A pool fake whose acquireForTurn hands out a counting lease. */
 function countingPool(order?: string[]): ProviderTurnContext['pool'] {
-  const state = { releases: 0 };
+  const state = { releases: 0, acquires: 0 };
   const pool = {
     acquireForTurn: async () => {
+      state.acquires += 1;
       let released = false;
       return {
         backend: {
@@ -188,6 +193,7 @@ function countingPool(order?: string[]): ProviderTurnContext['pool'] {
   };
   return Object.defineProperties(pool, {
     releases: { get: () => state.releases },
+    acquires: { get: () => state.acquires },
   }) as unknown as ProviderTurnContext['pool'];
 }
 
@@ -240,6 +246,297 @@ describe('runLocalProviderTurn turn-lease release', () => {
 
     expect(outcome.kind).toBe('completed');
     expect((pool as unknown as { releases: number }).releases).toBe(1);
+  });
+
+  it('releases capacity during a question wait and reacquires before continuation', async () => {
+    const pool = countingPool();
+    const h = fakeHarness(pool);
+    const ctrl = new AbortController();
+    h.ctx.lifecycle.register('conv-1', ctrl);
+    const posted: HostToWebview[] = [];
+    let resolveAnswer!: (answer: string) => void;
+    let noteQuestionWaiting!: () => void;
+    const questionWaiting = new Promise<void>((resolve) => (noteQuestionWaiting = resolve));
+    h.ctx.runModelTurn = async (...args) => {
+      const withQuestionWait = args[8];
+      expect(withQuestionWait).toBeTypeOf('function');
+      const answer = await withQuestionWait!(
+        () =>
+          new Promise<string>((resolve) => {
+            resolveAnswer = resolve;
+            noteQuestionWaiting();
+          }),
+      );
+      expect(answer).toBe('answered');
+      expect(h.ctx.lifecycle.isStreaming('conv-1')).toBe(true);
+      expect([...h.ctx.lifecycle.modelDemandIds()]).toEqual(['conv-1']);
+      return {
+        finalText: 'answer',
+        finishReason: 'stop',
+        rounds: 1,
+        repeatedCall: false,
+        hitRoundCap: false,
+      };
+    };
+
+    const turn = runTurn(h.ctx, ctrl, (message) => posted.push(message));
+    await questionWaiting;
+    await new Promise((resolve) => setTimeout(resolve, 600));
+    expect(posted.some((message) => message.type === 'backendStarting')).toBe(false);
+    expect((pool as unknown as { releases: number }).releases).toBe(1);
+    expect(h.acquires).toBe(1);
+    expect(h.ctx.lifecycle.isStreaming('conv-1')).toBe(true);
+    expect([...h.ctx.lifecycle.streamingIds()]).toEqual(['conv-1']);
+    expect([...h.ctx.lifecycle.modelDemandIds()]).toEqual([]);
+    resolveAnswer('answered');
+
+    await expect(turn).resolves.toMatchObject({ kind: 'completed' });
+    expect(h.acquires).toBe(2);
+    expect((pool as unknown as { releases: number }).releases).toBe(2);
+    expect(posted.some((message) => message.type === 'backendStarting')).toBe(false);
+  });
+
+  it('keeps an answer saved and waits visibly when the original model slot is occupied', async () => {
+    const pool = countingPool();
+    const acquire = pool.acquireForTurn!;
+    let attempts = 0;
+    let allowResume = false;
+    let noteBlocked!: () => void;
+    const blocked = new Promise<void>((resolve) => (noteBlocked = resolve));
+    Object.assign(pool, {
+      acquireForTurn: async (...args: Parameters<typeof acquire>) => {
+        attempts += 1;
+        if (attempts > 1 && !allowResume) {
+          if (attempts === 2) noteBlocked();
+          throw new Error('no free slot and no eviction candidate');
+        }
+        return acquire(...args);
+      },
+    });
+    const h = fakeHarness(pool);
+    const ctrl = new AbortController();
+    h.ctx.lifecycle.register('conv-1', ctrl);
+    const posted: HostToWebview[] = [];
+    let answerSaved = false;
+    let continued = false;
+    let answerValue: string | undefined;
+    h.ctx.runModelTurn = async (...args) => {
+      const withQuestionWait = args[8]!;
+      answerValue = await withQuestionWait(async () => {
+        answerSaved = true;
+        return 'Q1 multi';
+      });
+      continued = true;
+      return {
+        finalText: 'answer',
+        finishReason: 'stop',
+        rounds: 1,
+        repeatedCall: false,
+        hitRoundCap: false,
+      };
+    };
+
+    const turn = runTurn(h.ctx, ctrl, (message) => posted.push(message));
+    await blocked;
+    await new Promise((resolve) => setTimeout(resolve, 600));
+
+    expect(answerSaved).toBe(true);
+    expect(answerValue).toBeUndefined();
+    expect(continued).toBe(false);
+    expect(h.ctx.lifecycle.isStreaming('conv-1')).toBe(true);
+    expect([...h.ctx.lifecycle.modelDemandIds()]).toEqual([]);
+    expect(
+      posted.some(
+        (message) =>
+          message.type === 'backendStarting' && message.message.includes('your answer is saved'),
+      ),
+    ).toBe(true);
+
+    allowResume = true;
+    await expect(turn).resolves.toMatchObject({ kind: 'completed' });
+
+    expect(answerValue).toBe('Q1 multi');
+    expect(continued).toBe(true);
+    expect(h.acquires).toBe(2);
+    expect((pool as unknown as { releases: number }).releases).toBe(2);
+    expect(posted.some((message) => message.type === 'ready')).toBe(true);
+  });
+
+  it('does not reacquire after Stop cancels a question wait', async () => {
+    const pool = countingPool();
+    const h = fakeHarness(pool);
+    const ctrl = new AbortController();
+    h.ctx.lifecycle.register('conv-1', ctrl);
+    let noteQuestionWaiting!: () => void;
+    const questionWaiting = new Promise<void>((resolve) => (noteQuestionWaiting = resolve));
+    h.ctx.runModelTurn = async (...args) => {
+      const withQuestionWait = args[8]!;
+      await withQuestionWait(
+        () =>
+          new Promise<string>((resolve) => {
+            ctrl.signal.addEventListener('abort', () => resolve('cancelled'), { once: true });
+            noteQuestionWaiting();
+          }),
+      );
+      return {
+        finalText: '',
+        finishReason: 'stop',
+        rounds: 1,
+        repeatedCall: false,
+        hitRoundCap: false,
+      };
+    };
+
+    const turn = runTurn(h.ctx, ctrl);
+    await questionWaiting;
+    expect(h.ctx.lifecycle.isStreaming('conv-1')).toBe(true);
+    expect([...h.ctx.lifecycle.modelDemandIds()]).toEqual([]);
+    await h.ctx.lifecycle.cancel('conv-1');
+
+    await expect(turn).resolves.toMatchObject({ kind: 'cancelled' });
+    expect(h.acquires).toBe(1);
+    expect((pool as unknown as { releases: number }).releases).toBe(1);
+    expect(h.ctx.lifecycle.isStreaming('conv-1')).toBe(false);
+    expect([...h.ctx.lifecycle.modelDemandIds()]).toEqual([]);
+  });
+
+  it('fails safely when the original model cannot be reacquired after an answer', async () => {
+    const pool = countingPool();
+    const acquire = pool.acquireForTurn!;
+    let acquisitions = 0;
+    Object.assign(pool, {
+      acquireForTurn: async (...args: Parameters<typeof acquire>) => {
+        acquisitions += 1;
+        if (acquisitions === 2) throw new Error('original model is unavailable');
+        return acquire(...args);
+      },
+    });
+    const h = fakeHarness(pool);
+    const ctrl = new AbortController();
+    h.ctx.lifecycle.register('conv-1', ctrl);
+    h.ctx.runModelTurn = async (...args) => {
+      const withQuestionWait = args[8]!;
+      await withQuestionWait(async () => 'answer is saved');
+      throw new Error('continuation must not run without the original model');
+    };
+
+    const outcome = await runTurn(h.ctx, ctrl);
+
+    expect(outcome).toMatchObject({ kind: 'failed', error: 'original model is unavailable' });
+    expect(acquisitions).toBe(2);
+    expect((pool as unknown as { releases: number }).releases).toBe(1);
+    expect(h.ctx.lifecycle.isStreaming('conv-1')).toBe(false);
+    expect([...h.ctx.lifecycle.modelDemandIds()]).toEqual([]);
+  });
+
+  it('stops during original model reacquisition without continuing the answered turn', async () => {
+    const pool = countingPool();
+    const acquire = pool.acquireForTurn!;
+    let acquisitions = 0;
+    let noteReacquiring!: () => void;
+    const reacquiring = new Promise<void>((resolve) => (noteReacquiring = resolve));
+    Object.assign(pool, {
+      acquireForTurn: async (modelName: string, options?: { signal?: AbortSignal }) => {
+        acquisitions += 1;
+        if (acquisitions === 1) return acquire(modelName, options);
+        return new Promise((_, reject) => {
+          options?.signal?.addEventListener(
+            'abort',
+            () => reject(new Error('Backend turn acquisition cancelled.')),
+            { once: true },
+          );
+          noteReacquiring();
+        });
+      },
+    });
+    const h = fakeHarness(pool);
+    const ctrl = new AbortController();
+    h.ctx.lifecycle.register('conv-1', ctrl);
+    let continued = false;
+    h.ctx.runModelTurn = async (...args) => {
+      const withQuestionWait = args[8]!;
+      await withQuestionWait(async () => 'answer is saved');
+      continued = true;
+      return {
+        finalText: 'answer',
+        finishReason: 'stop',
+        rounds: 1,
+        repeatedCall: false,
+        hitRoundCap: false,
+      };
+    };
+
+    const turn = runTurn(h.ctx, ctrl);
+    await reacquiring;
+    await h.ctx.lifecycle.cancel('conv-1');
+
+    await expect(turn).resolves.toMatchObject({ kind: 'cancelled' });
+    expect(acquisitions).toBe(2);
+    expect(continued).toBe(false);
+    expect((pool as unknown as { releases: number }).releases).toBe(1);
+    expect(h.ctx.lifecycle.isStreaming('conv-1')).toBe(false);
+    expect([...h.ctx.lifecycle.modelDemandIds()]).toEqual([]);
+  });
+
+  it('releases and refreshes a cloud hold, endpoint, and key around a question', async () => {
+    const pool = countingPool();
+    let holds = 0;
+    let releases = 0;
+    Object.assign(pool, {
+      acquireExternalTurnHold: async () => {
+        holds += 1;
+        return { release: () => (releases += 1) };
+      },
+    });
+    const target = vi.spyOn(cloudRequestResolver, 'resolveCloudRequestTarget');
+    target
+      .mockResolvedValueOnce({ baseUrl: 'http://127.0.0.1:8091', apiKey: 'key-one' })
+      .mockResolvedValueOnce({ baseUrl: 'http://127.0.0.1:8092', apiKey: 'key-two' });
+    const h = fakeHarness(pool);
+    const ctrl = new AbortController();
+    h.ctx.lifecycle.register('conv-1', ctrl);
+    h.ctx.runModelTurn = async (...args) => {
+      const resolveBaseUrl = args[0];
+      const withQuestionWait = args[8]!;
+      const getApiKey = args[9]!;
+      expect(await resolveBaseUrl()).toBe('http://127.0.0.1:8091');
+      expect(args[6]).toBe('key-one');
+      expect(getApiKey()).toBe('key-one');
+      await withQuestionWait(async () => {
+        expect(h.ctx.lifecycle.isStreaming('conv-1')).toBe(true);
+        expect([...h.ctx.lifecycle.modelDemandIds()]).toEqual([]);
+        return 'answered';
+      });
+      expect(await resolveBaseUrl()).toBe('http://127.0.0.1:8092');
+      expect(getApiKey()).toBe('key-two');
+      return {
+        finalText: 'answer',
+        finishReason: 'stop',
+        rounds: 1,
+        repeatedCall: false,
+        hitRoundCap: false,
+      };
+    };
+
+    try {
+      const outcome = await runCloudProviderTurn(h.ctx, {
+        conv: fakeConv(),
+        model: { ...fakeModel('cloud'), provider: 'openai-compatible' },
+        text: 'hello',
+        attachments: undefined,
+        activeFile: undefined,
+        ctrl,
+        postC: vi.fn(),
+      });
+
+      expect(outcome.kind).toBe('completed');
+      expect(holds).toBe(2);
+      expect(releases).toBe(2);
+      expect(h.ctx.lifecycle.isStreaming('conv-1')).toBe(false);
+      expect([...h.ctx.lifecycle.modelDemandIds()]).toEqual([]);
+    } finally {
+      target.mockRestore();
+    }
   });
 
   it('posts a template render failure as a visible failed turn', async () => {

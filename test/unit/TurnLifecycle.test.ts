@@ -16,6 +16,28 @@ function backend(stop: () => Promise<void>): BackendController {
 }
 
 describe('TurnLifecycle steering', () => {
+  it('suspends model demand while retaining live streaming ownership', () => {
+    const lifecycle = new TurnLifecycle();
+    lifecycle.register('question-chat', new AbortController());
+    lifecycle.markStreaming('question-chat');
+
+    lifecycle.suspendModelDemand('question-chat');
+
+    expect(lifecycle.isStreaming('question-chat')).toBe(true);
+    expect([...lifecycle.streamingIds()]).toEqual(['question-chat']);
+    expect([...lifecycle.modelDemandIds()]).toEqual([]);
+
+    const endBackground = lifecycle.beginBackgroundWork('question-chat');
+    expect([...lifecycle.modelDemandIds()]).toEqual(['question-chat']);
+    endBackground();
+    expect([...lifecycle.modelDemandIds()]).toEqual([]);
+
+    lifecycle.resumeModelDemand('question-chat');
+    expect([...lifecycle.modelDemandIds()]).toEqual(['question-chat']);
+    lifecycle.clearStreaming('question-chat');
+    expect([...lifecycle.modelDemandIds()]).toEqual([]);
+  });
+
   it('interrupts and settles a request without stopping its loaded backend', async () => {
     const lifecycle = new TurnLifecycle();
     const controller = new AbortController();

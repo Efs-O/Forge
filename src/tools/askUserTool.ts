@@ -215,13 +215,17 @@ export function makeAskUserTool(
       const questionSpecs = specs.map((spec, index) =>
         index === 0 && !spec.prompt.trim() ? { ...spec, prompt } : spec,
       );
-      const result = await questions.askWithRecord({
-        prompt,
-        placeholder: parsed.placeholder,
-        specs: questionSpecs,
-        conversationId: context?.conversationId,
-        signal: context?.abortSignal,
-      });
+      const wait = () =>
+        questions.askWithRecord({
+          prompt,
+          placeholder: parsed.placeholder,
+          specs: questionSpecs,
+          conversationId: context?.conversationId,
+          signal: context?.abortSignal,
+        });
+      const result = context?.withQuestionWait
+        ? await context.withQuestionWait(wait)
+        : await wait();
       if (result.answer === undefined) {
         return (
           'The user did not answer: the question was dismissed without a response. ' +

@@ -19,6 +19,7 @@ export interface ToolCallingLoopOptions {
   prepareMessages?: (messages: ChatMessage[]) => ChatMessage[] | ToolResultContextResult;
   signal: AbortSignal;
   apiKey?: string;
+  getApiKey?: () => string | undefined;
   maxRounds: number;
   /** The model's `writeChunkLimit`; truncation recovery stays under it. */
   writeChunkLimit?: number;

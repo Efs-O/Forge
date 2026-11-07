@@ -108,8 +108,8 @@ export function setupJobs(
         // A turn streaming anywhere means the GPU is busy: a summarize must not
         // compete with a live chat, and sleep_if_idle must not suspend a box the
         // user is actively using.
-        const { streamingConversationIds } = sidebar.getHostFacade().status();
-        return streamingConversationIds.length > 0 ? 'a turn is streaming' : undefined;
+        const { modelDemandConversationIds } = sidebar.getHostFacade().status();
+        return modelDemandConversationIds.length > 0 ? 'model work is active' : undefined;
       },
       summarize: async (prompt) => sidebar.runPromptToMarkdown(prompt),
       // The agent-task runner (AGENT_TASK_JOBS_PLAN phase 3). Wired whenever a
@@ -147,8 +147,8 @@ export function setupJobs(
         outboxDir: store.outboxDir,
         notifyLocal: (message) => void vscode.window.showInformationMessage(message),
         busy: () => {
-          const { streamingConversationIds } = sidebar.getHostFacade().status();
-          return streamingConversationIds.length > 0 ? 'a turn is streaming' : undefined;
+          const { modelDemandConversationIds } = sidebar.getHostFacade().status();
+          return modelDemandConversationIds.length > 0 ? 'model work is active' : undefined;
         },
         now: () => Date.now(),
         ...(configPath ? { configPath } : {}),
@@ -169,7 +169,9 @@ export function setupJobs(
               }
             : undefined;
         },
-        summarize: async (prompt) => sidebar.runPromptToMarkdown(prompt),
+        summarize: async (prompt, modelName) => sidebar.runPromptToMarkdown(prompt, { modelName }),
+        pool: () => pool,
+        externalTurnHolds: () => externalTurnHolds.externalTurnHolders(),
         defaultModel: () => jobDefaultModel(getConfig()),
         outboxDir: store.outboxDir,
         notifyLocal: (message) => void vscode.window.showInformationMessage(message),

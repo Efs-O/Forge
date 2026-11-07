@@ -131,6 +131,7 @@ export async function runCliTurn(
       },
       onPrepared: () => {
         ctx.commitUserPrompt(conv, text, attachments, promptOptions);
+        promptOptions?.onStarted?.();
         generationStarted = true;
         ctx.events.onBackendReady?.(model.name);
         ctx.events.onGenerationStarted?.(model.name, convId);

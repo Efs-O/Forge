@@ -1,6 +1,8 @@
 import * as vscode from 'vscode';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { ToolDispatch } from '../../src/sidebar/ToolDispatch';
+import { dispatchWithParallelReads } from '../../src/sidebar/ToolDispatchParallel';
+import type { ToolDispatchRoundContext } from '../../src/sidebar/toolDispatchTypes';
 import type { ChatMessage, ToolCall } from '../../src/llm/types';
 import type { CheckpointStack } from '../../src/checkpoint/CheckpointStack';
 import type { KeepUndoCodeLensProvider } from '../../src/sidebar/KeepUndoCodeLens';
@@ -195,6 +197,65 @@ describe('ToolDispatch parallel read batches', () => {
       'after:end',
     ]);
     expect(messages.map((message) => message.tool_call_id)).toEqual(['before', 'write', 'after']);
+  });
+
+  it('waits for the whole parallel read batch before suspending on ask_user', async () => {
+    const steps: string[] = [];
+    const read = async (label: string): Promise<string> => {
+      steps.push(`${label}:start`);
+      await pause(10);
+      steps.push(`${label}:end`);
+      return label;
+    };
+    toolRegistry.register(readTool('search_code', async () => read('read-a')));
+    toolRegistry.register(readTool('list_directory', async () => read('read-b')));
+    const calls = [
+      makeToolCall('search_code', { query: 'a' }, 'read-a'),
+      makeToolCall('list_directory', { query: 'b' }, 'read-b'),
+      makeToolCall('ask_user', {}, 'question'),
+    ];
+    const context: ToolDispatchRoundContext = {
+      allowed,
+      convId: 'question-after-reads',
+      signal: undefined,
+      checkpoint: undefined,
+      budget: undefined,
+      recordFileDiff: undefined,
+      unavailableTools: undefined,
+      setPlan: undefined,
+      tellArrived: undefined,
+      modelContext: undefined,
+    };
+    await dispatchWithParallelReads(
+      calls,
+      context,
+      toolRegistry,
+      messages,
+      failureTracker,
+      post,
+      async (call) => {
+        expect(call.function.name).toBe('ask_user');
+        steps.push('question:start');
+        await (async (wait: () => Promise<string>) => wait())(async () => {
+          steps.push('question:wait');
+          return 'answered';
+        });
+      },
+      async (call, _approval, effects) => {
+        await read(call.function.name === 'search_code' ? 'read-a' : 'read-b');
+        return effects;
+      },
+    );
+
+    expect(steps).toEqual([
+      'read-a:start',
+      'read-b:start',
+      'read-a:end',
+      'read-b:end',
+      'question:start',
+      'question:wait',
+    ]);
+    expect(messages).toEqual([]);
   });
 
   it('runs a read that needs approval serially in its original position', async () => {

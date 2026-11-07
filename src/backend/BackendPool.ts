@@ -28,6 +28,7 @@ import type { PortClaim, PoolSlot, SlotTable } from './poolSlots';
 import type { BackendTurnLease, IBackendPool, RemoteLeaseReleaser } from './poolTypes';
 import type { BackendProcess } from '../system/SystemReport';
 import { effectiveParallelCapacity } from './parallelCapacity';
+import { acquireTurnLease } from './turnLeaseAcquisition';
 import type { ExternalModelServers } from './ExternalModelServers';
 import { reconcileDeadSlot, restartSlot, startSlot, type SlotStartContext } from './poolStart';
 import {
@@ -117,23 +118,16 @@ export class BackendPool implements IBackendPool {
     return this.acquireByKey(this.poolKey(modelName), true);
   }
 
-  acquireForTurn(modelName: string): Promise<BackendTurnLease> {
+  acquireForTurn(
+    modelName: string,
+    options: { signal?: AbortSignal } = {},
+  ): Promise<BackendTurnLease> {
     const key = this.poolKey(modelName);
-    this.turnPins.set(key, (this.turnPins.get(key) ?? 0) + 1);
-    let released = false;
-    return this.acquireByKey(key, true).then(
-      (backend) => ({
-        backend,
-        release: async () => {
-          if (released) return;
-          released = true;
-          this.unpinTurn(key);
-        },
-      }),
-      (error: unknown) => {
-        this.unpinTurn(key);
-        throw error;
-      },
+    return acquireTurnLease(
+      () => this.acquireByKey(key, true),
+      () => this.turnPins.set(key, (this.turnPins.get(key) ?? 0) + 1),
+      () => this.unpinTurn(key),
+      options.signal,
     );
   }
 

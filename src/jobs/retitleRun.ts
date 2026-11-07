@@ -2,7 +2,13 @@ import { TITLE_MAX_UNITS } from '../sidebar/conversationTitle';
 import { getLogger } from '../util/logger';
 import { nextDue } from './schedule';
 import { nextDueWithBackoff } from './backoff';
-import { CLEAR_PENDING, deferBusyTask, userQuietGate, USER_QUIET_MS } from './agentTaskAdmission';
+import {
+  CLEAR_PENDING,
+  deferBusyTask,
+  userQuietGate,
+  USER_QUIET_MS,
+  type ModelJobAdmission,
+} from './agentTaskAdmission';
 import { gpuGateReason } from './gpuIdleGate';
 import { JobDelivery } from './JobDelivery';
 import type { ForgeHostFacade } from '../sidebar/ForgeHostFacade';
@@ -10,6 +16,10 @@ import type { Action, JobFile, RunRow } from './jobSchema';
 import type { GpuGateConfig, ModelConfig } from '../config/types';
 import type { GpuInfo } from '../system/systemProbes';
 import type { JobStore } from './JobStore';
+import type { IBackendPool } from '../backend/poolTypes';
+import type { ExternalTurnHold } from '../backend/SharedRuntimeRegistry';
+import { supportsSharedModelSlots } from '../backend/strataStatus';
+import { canStartNow } from './agentTaskAdmission';
 import {
   buildRetitleRequest,
   normalizeTitleKey,
@@ -49,7 +59,11 @@ export interface RetitleDeps {
   /** This workspace's conversation stores; undefined when no folder is open. */
   dirs: () => RetitleDirs | undefined;
   /** One no-tools model call through the sidebar's own path (`runPromptToMarkdown`). */
-  summarize: (prompt: string) => Promise<string>;
+  summarize: (prompt: string, modelName: string) => Promise<string>;
+  /** The same backend pool that PromptRun will use to dispatch the title request. */
+  pool: () => IBackendPool | undefined;
+  /** Managed-server holds owned by turns in any window. */
+  externalTurnHolds: () => readonly ExternalTurnHold[];
   /** The model when the action names none. */
   defaultModel: () => string | undefined;
   outboxDir: string;
@@ -68,7 +82,13 @@ export interface RetitleDeps {
     signal?: () => AbortSignal;
     probe?: (signal?: AbortSignal) => Promise<GpuInfo[]>;
     wait?: (ms: number, signal?: AbortSignal) => Promise<void>;
+    fetchImpl?: typeof fetch;
   };
+}
+
+interface TitleProposal {
+  title?: string;
+  blocked?: string;
 }
 
 /** What one run did, for the run row and the toast. */
@@ -98,7 +118,7 @@ export class RetitleRunner {
   }
 
   /** Run one retitle pass: gate, scan, ask, apply, report. */
-  async run(jobFile: JobFile, wasLate: boolean): Promise<void> {
+  async run(jobFile: JobFile, wasLate: boolean, admission: ModelJobAdmission = {}): Promise<void> {
     const { job } = jobFile;
     const action = job.action;
     if (action?.kind !== 'retitle') return;
@@ -141,39 +161,30 @@ export class RetitleRunner {
       return;
     }
 
-    const status = host.status();
-    const gpu = this.deps.gpuGate;
-    const admissionReason = await gpuGateReason(
-      {
-        jobsRoot: this.deps.store.root,
-        model: gpu?.model(model),
-        gpuGate: gpu?.config(),
-        loadedModels: gpu?.loadedModels ?? ((): readonly ModelConfig[] => []),
-        now: this.deps.now,
-        ...(gpu?.signal ? { signal: gpu.signal() } : {}),
-        ...(gpu?.probe ? { probe: gpu.probe } : {}),
-        ...(gpu?.wait ? { wait: gpu.wait } : {}),
-      },
-      async () => {
-        // The same two cheap gates an agent task uses: nothing may compete with
-        // a live turn, and the owner's own activity holds the job back.
-        const busy = this.deps.busy();
-        if (busy) return busy;
-        const jobConversationIds = new Set(
-          (await this.deps.store.loadAll()).flatMap((jf) =>
-            [jf.state.conversation_id, jf.state.task_run?.conversation_id].filter(
-              (id): id is string => typeof id === 'string' && id.length > 0,
-            ),
-          ),
-        );
-        const recent = status.conversations.filter((c) => startedAt - c.updatedAt < USER_QUIET_MS);
-        return recent.length ? userQuietGate(recent, jobConversationIds, startedAt) : undefined;
-      },
-    );
+    if (!this.deps.pool()) {
+      await this.finish(jobFile, action, wasLate, startedAt, {
+        ok: false,
+        scanned: 0,
+        offered: 0,
+        applied: 0,
+        refused: 0,
+        sentence: 'retitle is not wired (no backend pool)',
+      });
+      return;
+    }
+    const admissionReason = await this.admissionReason(model, startedAt, true);
     if (admissionReason !== undefined) {
       await deferBusyTask(this.deps.store, jobFile, startedAt, wasLate, admissionReason);
       return;
     }
+    const latest = await this.deps.store.load(job.id);
+    if (
+      !latest ||
+      (!latest.job.enabled && !admission.allowDisabled) ||
+      latest.state.task_run !== null
+    )
+      return;
+    admission.onAdmitted?.();
     this.deps.store.patchState(job.id, CLEAR_PENDING);
 
     // A deleted job stops here: its files are gone, so nothing is left to write.
@@ -195,6 +206,7 @@ export class RetitleRunner {
       return;
     }
 
+    const status = host.status();
     const streaming = new Set(status.streamingConversationIds);
     const jobConversationIds = new Set(
       (await this.deps.store.loadAll()).flatMap((jf) =>
@@ -243,32 +255,6 @@ export class RetitleRunner {
       records.map((record) => normalizeTitleKey(record.title)).filter((key) => key.length > 0),
     );
     for (const candidate of candidates) {
-      // Stop the pass early, before asking rather than after: an ask that lands
-      // while the owner is mid-turn competes with that turn for the GPU (the
-      // admission gate's whole point), and an ask for a job that has been
-      // deleted buys nothing. Both were checked once at admission only, so a
-      // batch of twelve kept going through a gate that had since turned red.
-      const busy = this.deps.busy();
-      if (busy) {
-        // Nothing named yet means the pass was pushed out before it started, not
-        // partway through: a sibling job's turn admitted in the same tick took the
-        // slot (2026-11-06: the 07:00 Maya update job and this 06:00 pass were both
-        // due while the box was asleep, caught up in one tick, and its agent turn
-        // was streaming by the first candidate — the run recorded ok, advanced
-        // `next_due_at` a whole day, and toasted "gave 0 of 20 chats a new title").
-        // A pass that named nothing is the same case as a busy admission, so hand it
-        // to the pending path: `JobScheduler.runTick` re-runs a pending `retitle`
-        // whatever the due time says, so it retries once the turn is over, and
-        // `deferBusyTask`'s TTL drops it with a `skipped` row if the box stays busy
-        // until the next scheduled pass. A pass that already named chats reports
-        // what it did: the rest are still oldest-first tomorrow, so nothing is lost.
-        if (applied === 0) {
-          await deferBusyTask(this.deps.store, jobFile, startedAt, wasLate, busy);
-          return;
-        }
-        stopped = `a turn started (${busy})`;
-        break;
-      }
       if (!(await this.deps.store.load(job.id))) {
         stopped = 'the job was deleted';
         break;
@@ -279,9 +265,9 @@ export class RetitleRunner {
         refused++;
         continue;
       }
-      let proposed: string | undefined;
+      let proposal: TitleProposal;
       try {
-        proposed = await this.proposeTitle(candidate, takenTitles);
+        proposal = await this.proposeTitle(candidate, takenTitles, model, startedAt);
       } catch (err) {
         // One dead model must not take the rest of the batch with it, and must
         // not leave this run unreported: the throw went out of `run()` into a
@@ -291,7 +277,25 @@ export class RetitleRunner {
         refused++;
         continue;
       }
+      if (proposal.blocked) {
+        // A pass with no applied title remains pending if a model slot became
+        // unavailable during a request or duplicate-title retry.
+        if (applied === 0 && errors.length === 0) {
+          await deferBusyTask(this.deps.store, jobFile, startedAt, wasLate, proposal.blocked);
+          return;
+        }
+        stopped = proposal.blocked;
+        break;
+      }
+      const proposed = proposal.title;
       if (!proposed) {
+        refused++;
+        continue;
+      }
+      // The candidate may have become live while the model was writing. A
+      // question-waiting chat stays in streamingConversationIds and is protected
+      // here even though it no longer consumes a model slot.
+      if (host.status().streamingConversationIds.includes(candidate.id)) {
         refused++;
         continue;
       }
@@ -321,7 +325,7 @@ export class RetitleRunner {
     });
   }
 
-  /** One title from the model, or undefined when the answer is not usable.
+  /** One title from the model, or a gate refusal when no request should start.
    *
    *  A name another chat already carries is asked for once more before it is
    *  refused: that is the failure the owner sees most, and one extra call on the
@@ -333,26 +337,35 @@ export class RetitleRunner {
   private async proposeTitle(
     candidate: RetitleCandidate,
     taken: ReadonlySet<string>,
-  ): Promise<string | undefined> {
+    model: string,
+    startedAt: number,
+  ): Promise<TitleProposal> {
     const own = normalizeTitleKey(candidate.title);
     let avoid: string | undefined;
     for (let attempt = 0; attempt < 2; attempt++) {
+      const blocked = await this.admissionReason(model, startedAt, true);
+      if (blocked) return { blocked };
+      const host = this.deps.host();
+      if (!host) return { blocked: 'the sidebar host is unavailable' };
+      if (host.status().streamingConversationIds.includes(candidate.id)) {
+        return { blocked: `chat '${candidate.id}' is streaming` };
+      }
       let answer: string;
       try {
-        answer = await this.deps.summarize(buildRetitleRequest(candidate, avoid));
+        answer = await this.deps.summarize(buildRetitleRequest(candidate, avoid), model);
       } catch (err) {
         const detail = err instanceof Error ? err.message : String(err);
         getLogger().warn(`[Retitle] request failed for ${candidate.id}: ${detail}`);
         throw err;
       }
       const title = parseProposedTitle(answer, TITLE_MAX_UNITS);
-      if (!title) return undefined;
+      if (!title) return {};
       const key = normalizeTitleKey(title);
       if (key === own) {
         getLogger().info(`[Retitle] left ${candidate.id} alone: the model would not change it`);
-        return undefined;
+        return {};
       }
-      if (!taken.has(key)) return title;
+      if (!taken.has(key)) return { title };
       if (attempt === 0) {
         avoid = title;
         continue;
@@ -360,9 +373,61 @@ export class RetitleRunner {
       getLogger().info(
         `[Retitle] refused "${title}" for ${candidate.id}: another chat is already called that`,
       );
-      return undefined;
+      return {};
     }
-    return undefined;
+    return {};
+  }
+
+  /** Reuses agent-task slot admission before the pass and every API request. */
+  private async admissionReason(
+    model: string,
+    startedAt: number,
+    checkQuiet: boolean,
+  ): Promise<string | undefined> {
+    const host = this.deps.host();
+    const pool = this.deps.pool();
+    if (!host) return 'the sidebar host is unavailable';
+    if (!pool) return 'the backend pool is unavailable';
+    const gpu = this.deps.gpuGate;
+    const gpuModel = gpu?.model(model);
+    return gpuGateReason(
+      {
+        jobsRoot: this.deps.store.root,
+        model: gpuModel,
+        gpuGate: gpu?.config(),
+        loadedModels: gpu?.loadedModels ?? ((): readonly ModelConfig[] => []),
+        now: this.deps.now,
+        ...(gpu?.signal ? { signal: gpu.signal() } : {}),
+        ...(gpu?.probe ? { probe: gpu.probe } : {}),
+        ...(gpu?.wait ? { wait: gpu.wait } : {}),
+        ...(gpu?.fetchImpl ? { fetchImpl: gpu.fetchImpl } : {}),
+      },
+      async (slots) => {
+        const status = host.status();
+        const admission = canStartNow(
+          model,
+          null,
+          pool,
+          status.streamingConversationIds,
+          slots,
+          this.deps.externalTurnHolds(),
+          status.modelDemandConversationIds,
+          supportsSharedModelSlots(gpuModel),
+        );
+        if (!admission.start) return admission.reason;
+        if (!checkQuiet || slots) return undefined;
+        const recent = status.conversations.filter((c) => startedAt - c.updatedAt < USER_QUIET_MS);
+        if (recent.length === 0) return undefined;
+        const jobConversationIds = new Set(
+          (await this.deps.store.loadAll()).flatMap((jf) =>
+            [jf.state.conversation_id, jf.state.task_run?.conversation_id].filter(
+              (id): id is string => typeof id === 'string' && id.length > 0,
+            ),
+          ),
+        );
+        return userQuietGate(recent, jobConversationIds, startedAt);
+      },
+    );
   }
 
   private async finish(

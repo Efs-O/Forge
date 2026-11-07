@@ -59,7 +59,7 @@ export async function streamOnce(
         ...(options.onRequestStats ? { onRequestStats: options.onRequestStats } : {}),
       },
       options.signal,
-      options.apiKey,
+      options.getApiKey?.() ?? options.apiKey,
     ).catch(reject);
   });
 }

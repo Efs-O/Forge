@@ -110,7 +110,7 @@ export class SendPipeline {
       remoteRequestId?: string;
       echoPrompt?: boolean;
       createdAt?: number;
-      /** Called once the turn is admitted; a refusal before that resolves `send` as `failed`. */
+      /** Called after backend startup and prompt commit, before model completion. */
       onAdmitted?: () => void;
       /** Nested tell sends share their parent's final wake. */
       suppressWorkerWake?: boolean;
@@ -139,12 +139,8 @@ export class SendPipeline {
     }));
     const attachmentError = validateAttachments(attachments);
     if (attachmentError) return refuse(attachmentError, attachmentError, conv.id);
-    // Every refusal below MUST name the conversation it refers to. The webview
-    // resolves an unaddressed message against the ACTIVE tab, and its ERROR
-    // action clears that tab's streaming state — so a background conversation
-    // failing a guard used to hide the Stop button on whichever tab the user
-    // happened to be looking at, while leaving the real one streaming with no
-    // way to cancel it.
+    // Address every refusal: an unaddressed ERROR clears the visible tab's
+    // streaming state and strands the background tab without Stop.
     if (deps.agentLoop.isStreamingConv(conv.id) && !deps.agentLoop.isCancellationPending(conv.id)) {
       return refuse(
         'Forge: this conversation is still generating. Cancel it first or open a new tab.',
@@ -198,20 +194,17 @@ export class SendPipeline {
     }
     const chain = deps.requestChains.accept(admission.reservation, metadata?.remoteRequestId);
     deps.onConversationActivity?.(conv.id);
-    metadata?.onAdmitted?.();
     const createdAt = messageCreatedAt(metadata?.createdAt);
-    const initialPromptOptions = { ...(promptOptions ?? {}), createdAt };
-    // Persist the full selection (incl. @profile) on the conversation so tab
-    // switches restore the same profile, not just the base model (F6).
+    const initialPromptOptions = {
+      ...(promptOptions ?? {}),
+      createdAt,
+      ...(metadata?.onAdmitted ? { onStarted: metadata.onAdmitted } : {}),
+    };
+    // Preserve @profile across tab switches (F6).
     conv.active_model = modelName;
     deps.resetContextWarning(conv.id);
-    // USER_SEND covers clicks in the current webview, but auto-compaction
-    // resumes, commands, and restored webviews have no such action. Announce
-    // every accepted turn here so Stop does not depend on its caller.
-    // A prompt the webview did not type has no user bubble yet: only the
-    // webview's own send dispatches one. Posted before generationStarted so the
-    // transcript reads in the order it happened, and only when the caller asks
-    // -- a webview send would otherwise render its prompt twice.
+    // External prompts need a bubble before generationStarted; webview sends
+    // already rendered theirs. Every sender needs generationStarted for Stop.
     if (metadata?.echoPrompt) {
       deps.post({
         type: 'userPrompt',
@@ -270,7 +263,8 @@ export class SendPipeline {
         const stoppedBeforeTurn = (): ForgeRequestOutcome | undefined => {
           const kind = deps.requestChains.terminationKind(chain);
           if (!kind) return undefined;
-          deps.post({ type: 'setInput', text, conversationId: conv.id });
+          if (!promptOptions?.internal && !promptOptions?.origin && !promptOptions?.sender)
+            deps.post({ type: 'setInput', text, conversationId: conv.id });
           deps.post({ type: 'done', finishReason: 'cancelled', conversationId: conv.id });
           return { kind };
         };
@@ -295,7 +289,8 @@ export class SendPipeline {
           if (decision.kind === 'blocked') {
             // The prompt never reached conv.messages; hand it back so it is not lost.
             deps.post({ type: 'error', message: decision.reason, conversationId: conv.id });
-            deps.post({ type: 'setInput', text, conversationId: conv.id });
+            if (!promptOptions?.origin && !promptOptions?.sender)
+              deps.post({ type: 'setInput', text, conversationId: conv.id });
             deps.post({ type: 'done', finishReason: 'stop', conversationId: conv.id });
             this.sessionLogs.logTurnEnd(conv.id, 'blocked', 0);
             return { kind: 'failed', error: decision.reason };
@@ -355,6 +350,7 @@ export class SendPipeline {
             nextAttachments = undefined;
             nextOptions = {
               ...(nextBatch.internal ? { internal: true } : {}),
+              ...(nextBatch.origin ? { origin: nextBatch.origin } : {}),
               createdAt: nextCreatedAt,
             };
             continue;
@@ -432,7 +428,10 @@ export class SendPipeline {
           batch.text,
           undefined,
           conv.id,
-          batch.internal ? { internal: true } : undefined,
+          {
+            ...(batch.internal ? { internal: true } : {}),
+            ...(batch.origin ? { origin: batch.origin } : {}),
+          },
           {
             suppressWorkerWake: true,
             ...(batch.internal ? {} : { echoPrompt: true }),

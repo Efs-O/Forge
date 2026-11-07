@@ -71,6 +71,7 @@ export interface SidebarHostFacadeDeps {
   getArchivedConversations?: () => ConversationRuntime[];
   getRequestChains: () => RequestChainStatus[];
   getStreamingConversationIds: () => ReadonlySet<string>;
+  getModelDemandConversationIds: () => ReadonlySet<string>;
   getSessionActiveMs: (conversation: ConversationRuntime) => number;
   /** Counts per reason a slot cannot be freed; empty when a slot can be. */
   capBlockers: (options?: { activate?: boolean }) => string[];

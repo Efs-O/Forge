@@ -85,7 +85,7 @@ describe('chat-to-chat message text', () => {
   });
 
   it.each([
-    ['tell', 'busy · reads it mid-turn'],
+    ['tell', 'busy · queued, not processed yet'],
     ['turn', 'idle · started a turn'],
     ['unconfirmed', 'not confirmed yet'],
     ['steer', 'steering · interrupts its turn if it is generating'],

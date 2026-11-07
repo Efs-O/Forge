@@ -124,6 +124,7 @@ export interface QuestionToolResult {
 }
 
 export type ToolHandlerResult = string | MultimodalToolResult | QuestionToolResult;
+export type QuestionWaitRunner = <T>(wait: () => Promise<T>) => Promise<T>;
 
 export interface ToolHandler {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any -- tool args are schema-validated at call site
@@ -171,6 +172,8 @@ export interface ToolHandlerContext {
   conversation?: ConversationRuntime;
   checkpoint?: CheckpointSession;
   persistConversation?: () => void;
+  /** Runs an attended question wait while the provider releases model capacity. */
+  withQuestionWait?: QuestionWaitRunner;
 }
 
 interface ToolMutation {

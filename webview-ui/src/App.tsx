@@ -168,7 +168,6 @@ export function App(): React.ReactElement {
           break;
         case 'setInput':
           clearTellPrompts(msg.conversationId);
-          setPrefillText(msg.text);
           break;
         case 'thread-stream-state-changed':
         case 'thread-read-state-changed':

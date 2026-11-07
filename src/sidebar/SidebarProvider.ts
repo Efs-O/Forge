@@ -15,8 +15,8 @@ import { CheckpointReview } from './CheckpointReview';
 import { ToolFailureTracker } from '../tools/StripTools';
 import type { TemplateEngine } from '../llm/TemplateEngine';
 import type { ForgeInstructionsLoader } from '../llm/ForgeInstructionsLoader';
-import type { AgentLoop } from './AgentLoop';
-import type { SidebarProviderEvents } from './AgentLoop';
+import type { AgentLoop, SidebarProviderEvents } from './AgentLoop';
+import type { PromptRunOptions } from './PromptRun';
 import type { SlashCommandHandler } from './SlashCommandHandler';
 import type { ChatAttachmentStore } from './ChatAttachmentStore';
 import { wireSidebar } from './sidebarWiring';
@@ -355,8 +355,8 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
       .then(() => this.post({ type: 'setInput', text }));
   }
 
-  async runPromptToMarkdown(text: string): Promise<string> {
-    return this.agentLoop.runPromptToMarkdown(text);
+  async runPromptToMarkdown(text: string, options?: PromptRunOptions): Promise<string> {
+    return this.agentLoop.runPromptToMarkdown(text, undefined, options);
   }
 
   async reindexCodebase(): Promise<void> {

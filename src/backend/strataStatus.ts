@@ -22,19 +22,22 @@ export interface SharedModelSlotsOptions {
   fetchImpl?: typeof fetch;
 }
 
+/** Whether this managed loopback model exposes an exact serving-slot status API. */
+export function supportsSharedModelSlots(model: ModelConfig | undefined): boolean {
+  return (
+    usesLocalGpu(model) &&
+    model?.provider === 'openai-compatible' &&
+    Boolean(model.endpoint && model.unload_path && model.model)
+  );
+}
+
 /** Read capacity only for a managed, named local Strata model. */
 export async function sharedModelSlots(
   model: ModelConfig | undefined,
   options: SharedModelSlotsOptions = {},
 ): Promise<SharedModelSlots | undefined> {
-  if (
-    !usesLocalGpu(model) ||
-    model?.provider !== 'openai-compatible' ||
-    !model.endpoint ||
-    !model.unload_path ||
-    !model.model
-  )
-    return undefined;
+  if (!supportsSharedModelSlots(model)) return undefined;
+  if (!model?.endpoint || !model.model) return undefined;
   try {
     const url = new URL('/v1/status', model.endpoint);
     const signal = options.signal

@@ -5,6 +5,13 @@ import type { JobFile, Schedule } from './jobSchema';
 import type { SharedModelSlots } from '../backend/strataStatus';
 import type { ExternalTurnHold } from '../backend/SharedRuntimeRegistry';
 
+export interface ModelJobAdmission {
+  /** Called exactly once after every gate passes and before the job starts. */
+  onAdmitted?: () => void;
+  /** A consumed run_now request may run a disabled job. */
+  allowDisabled?: boolean;
+}
+
 /**
  * Decide whether a slot is free for the job to start now (step 1). The job does
  * not wait for full idle: it starts when its model is usable, enough parallel
@@ -18,10 +25,14 @@ export function canStartNow(
   sharedSlots?: SharedModelSlots,
   /** Live managed-external turn holds — see `blockingExternalHolds`. */
   externalHolds?: readonly ExternalTurnHold[],
+  /** Streaming remains true during ask_user, but that wait has no model demand. */
+  modelDemandConversationIds: readonly string[] = streamingConversationIds,
+  /** Do not infer a shared server's spare slots from config if its status is unknown. */
+  requireVerifiedSharedSlots = false,
 ): { start: boolean; reason: string } {
   const streaming = sharedSlots
-    ? Math.max(sharedSlots.inFlight, streamingConversationIds.length)
-    : streamingConversationIds.length;
+    ? Math.max(sharedSlots.inFlight, modelDemandConversationIds.length)
+    : modelDemandConversationIds.length;
   const others = pool.loadedModelsExcept(jobModel);
 
   // Hard wait: its own chat is busy (two turns in one conversation interleave).
@@ -31,7 +42,7 @@ export function canStartNow(
   // Hard wait: another model is loaded and a chat is streaming. The job may not
   // unload it mid-turn, and loading beside it spills VRAM (2026-09-23: two
   // resident models plus a job's third server took every GPU down).
-  if (others.length > 0 && streamingConversationIds.length > 0) {
+  if (others.length > 0 && modelDemandConversationIds.length > 0) {
     return { start: false, reason: `another model (${others.join(', ')}) is in use` };
   }
   // Hard wait: a chat is holding a managed server this job would have to
@@ -44,6 +55,18 @@ export function canStartNow(
     return {
       start: false,
       reason: holdWaitReason(held[0]!),
+    };
+  }
+  const baseModel = jobModel.split('@')[0];
+  const sameModelHeld = externalHolds?.some((hold) => hold.model === baseModel) ?? false;
+  if (
+    requireVerifiedSharedSlots &&
+    !sharedSlots &&
+    (modelDemandConversationIds.length > 0 || sameModelHeld)
+  ) {
+    return {
+      start: false,
+      reason: `cannot verify shared serving capacity for "${baseModel}" while a turn is active`,
     };
   }
   // Nothing else streams: step 3 unloads every other model before the turn.

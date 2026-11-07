@@ -49,6 +49,8 @@ export interface ForgeHostStatus {
   conversations: ForgeConversationSummary[];
   requestChains: RequestChainStatus[];
   streamingConversationIds: string[];
+  /** Live model requests and tools, excluding question-only waits. */
+  modelDemandConversationIds: string[];
   pendingApproval?: ToolApprovalRequestEvent;
 }
 
@@ -439,6 +441,7 @@ export class SidebarHostFacade implements ForgeHostFacade {
       ],
       requestChains: this.deps.getRequestChains(),
       streamingConversationIds: [...this.deps.getStreamingConversationIds()],
+      modelDemandConversationIds: [...this.deps.getModelDemandConversationIds()],
       ...(pendingApproval ? { pendingApproval } : {}),
     };
   }

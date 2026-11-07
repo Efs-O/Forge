@@ -1,10 +1,10 @@
 import type { FileLease } from '../util/FileLease';
 import { defaultOutboxDir } from './JobOutbox';
 import { JobDelivery } from './JobDelivery';
-import { isDue, nextDue, wakeTimesFor } from './schedule';
-import type { JobFile, RunRow } from './jobSchema';
+import { isDue, wakeTimesFor } from './schedule';
+import type { JobFile } from './jobSchema';
 import type { JobStore } from './JobStore';
-import { PowerControlUnsupportedError, type PowerControl } from '../system/PowerControl';
+import type { PowerControl } from '../system/PowerControl';
 import { LlamacppAction, type LlamacppActionDeps } from './actions/llamacppAction';
 import { AgentTaskRunner, type AgentTaskDeps } from './agentTask';
 import { RetitleRunner, type RetitleDeps } from './retitleRun';
@@ -12,11 +12,12 @@ import { recoverInterruptedRuns } from './agentTaskState';
 import { WakeReconciler } from './schedulerWakes';
 import { acquireSchedulerLease } from './jobLease';
 import { describeError } from '../util/describeError';
-import { BACKOFF_THRESHOLD } from './backoff';
 import { makeApprovalWarnings } from './approvalJobRuleWarnings';
 import type { ForgeConfig } from '../config/types';
+import { JobModelLane, type PendingModelAction } from './jobModelLane';
 import {
   runJobCheck,
+  executeScheduledJob,
   applyJobBackoff,
   recordUnwiredActionRun,
   sleepIfIdleIfRequested,
@@ -66,6 +67,10 @@ const DEFAULT_TICK_MS = 30_000;
 /** A tick arriving more than this late counts as a resume from sleep (B.3). */
 const RESUME_GAP_MS = 90_000;
 
+function isModelAction(job: JobFile['job'] | undefined): boolean {
+  return job?.action?.kind === 'agent_task' || job?.action?.kind === 'retitle';
+}
+
 export class JobScheduler {
   private readonly store: JobStore;
   private readonly power: PowerControl;
@@ -101,6 +106,12 @@ export class JobScheduler {
   private lastTickAt: number | undefined;
   /** Job ids with a run in progress, so the same job is not double-run. */
   private readonly runningJobs = new Set<string>();
+  /** Checks use maxConcurrent; a detached model action does not consume a check worker. */
+  private readonly checkingJobs = new Set<string>();
+  /** The one admitted background model action, held until its entire run ends. */
+  private readonly modelLane = new JobModelLane();
+  /** A pending admission attempt is detached so stop() can abort it without holding a tick. */
+  private modelAdmission: Promise<void> | undefined;
 
   constructor(deps: JobSchedulerDeps) {
     this.store = deps.store;
@@ -251,6 +262,7 @@ export class JobScheduler {
     this.timer = undefined;
     // Its failure was already reported to whoever started it.
     await this.running?.catch(() => undefined);
+    await this.modelAdmission?.catch(() => undefined);
     await this.lease?.release();
     this.lease = undefined;
   }
@@ -327,11 +339,17 @@ export class JobScheduler {
     const seen = new Set<string>();
     // A `run_now` marker (B2) runs the job even if not due or paused. It is
     // consumed before the run (no replay after a crash); a busy job keeps it.
-    const keep = (id: string): boolean => isOwn(id) || busy(byId.get(id));
+    const keep = (id: string): boolean =>
+      isOwn(id) ||
+      busy(byId.get(id)) ||
+      ((this.modelLane.occupied || this.modelAdmission !== undefined) &&
+        isModelAction(byId.get(id)?.job));
+    const runNowIds = new Set<string>();
     for (const id of await this.store.consumeRunRequests(keep)) {
       const jobFile = byId.get(id);
       if (!jobFile || seen.has(id)) continue;
       seen.add(id);
+      runNowIds.add(id);
       toRun.push(jobFile);
     }
     for (const jf of jobs) {
@@ -344,20 +362,43 @@ export class JobScheduler {
       toRun.push(jf);
     }
     const limit = this.getConfig().maxConcurrent;
+    const modelActions: PendingModelAction[] = [];
     let cursor = 0;
     const workers = Array.from({ length: Math.min(limit, toRun.length) }, async () => {
-      // Detached agent turns remain in runningJobs after runJob returns.
-      // Count them across ticks as well as synchronous checks in this tick.
-      while (cursor < toRun.length && this.runningJobs.size < limit) {
+      // Only check work consumes this pool. A detached model action keeps its
+      // job identity for de-duplication, but must not prevent later due checks.
+      while (cursor < toRun.length && this.checkingJobs.size < limit) {
         const index = cursor++;
         const jobFile = toRun[index]!;
         if (this.runningJobs.has(jobFile.job.id)) continue;
-        await this.runJob(jobFile, isResume);
+        await this.runJob(jobFile, isResume, modelActions, runNowIds.has(jobFile.job.id));
       }
     });
     await Promise.all(workers);
 
-    await this.delivery.processPendingSummaries();
+    // Checks for every due job have now run. Admission proceeds off-tick, so
+    // Stop can abort a slow GPU sample and later ticks can keep checking.
+    if (!this.modelLane.occupied && this.modelAdmission === undefined) {
+      let resolveStarted!: () => void;
+      const started = new Promise<void>((resolve) => (resolveStarted = resolve));
+      const attempt = this.modelLane.process(
+        modelActions,
+        () => this.disposed || this.gpuGateAbortController.signal.aborted,
+        (candidate) => this.admitModelAction(candidate, resolveStarted),
+      );
+      const tracked = attempt
+        .catch((err: unknown) =>
+          this.notifyLocal(`Forge jobs: admission failed: ${describeError(err)}`),
+        )
+        .finally(() => {
+          if (this.modelAdmission === tracked) this.modelAdmission = undefined;
+        });
+      this.modelAdmission = tracked;
+      await Promise.race([started, tracked]);
+    }
+
+    if (!this.modelLane.occupied && this.modelAdmission === undefined)
+      await this.delivery.processPendingSummaries();
 
     // A llamacpp_update that staged a build (apply, or an approved prepare)
     // switches now that the tick has reached it, only when idle (B5).
@@ -369,116 +410,71 @@ export class JobScheduler {
   }
 
   /** Run one job: check, act, record. Updates state and the run log. */
-  private async runJob(jobFile: JobFile, isResume: boolean): Promise<void> {
-    const { job, state } = jobFile;
-    this.runningJobs.add(job.id);
-    const now = this.now();
-    // A job is late when it fell due before this resume tick (the machine was
-    // off when it was due). A first-ever run (no next_due_at) is not late.
-    const wasLate = isResume && state.next_due_at !== null && state.next_due_at < now.getTime();
-    let hold: ReturnType<PowerControl['holdAwake']> | undefined;
-    let detached = false;
+  private async runJob(
+    jobFile: JobFile,
+    isResume: boolean,
+    modelActions: PendingModelAction[],
+    runNow: boolean,
+  ): Promise<void> {
+    const id = jobFile.job.id;
+    this.runningJobs.add(id);
+    this.checkingJobs.add(id);
     try {
-      let holdError: string | undefined;
-      if (job.wake) {
-        try {
-          hold = this.power.holdAwake(`job ${job.id}`);
-        } catch (err) {
-          if (!(err instanceof PowerControlUnsupportedError)) throw err;
-          holdError = `wake hold unsupported: ${err.message}; this run continued without a hold`;
-        }
-      }
-      // A pending agent task is a retry of the already-observed change. The
-      // etag cache may quite correctly report the same observation again, so
-      // do not make the pending task pass through the check a second time.
-      const result =
-        state.task_pending && (job.action?.kind === 'agent_task' || job.action?.kind === 'retitle')
-          ? {
-              observation: state.task_pending_observation ?? state.last_observation,
-              changed: true,
-              summary: 'retrying pending task',
-            }
-          : await this.runCheck(jobFile);
-      const actionRunner =
-        job.action?.kind === 'agent_task'
-          ? this.agentTask
-          : job.action?.kind === 'retitle'
-            ? this.retitle
-            : undefined;
-      if (result.changed && (job.action?.kind === 'agent_task' || job.action?.kind === 'retitle')) {
-        if (!(await this.store.load(job.id))) return;
-        if (actionRunner) {
-          // Started, not awaited: the runner owns the `runningJobs` guard until
-          // it ends, so the next tick cannot start a second run (AC11).
-          detached = true;
-          // Hand over THIS check's observation; the runner saves it on success only.
-          const runFile = { job, state: { ...state, last_observation: result.observation } };
-          void actionRunner.run(runFile, wasLate).finally(() => this.runningJobs.delete(job.id));
-          return;
-        }
-        const error =
-          job.action.kind === 'agent_task'
-            ? 'agent_task runner not wired (no host facade or backend pool)'
-            : 'retitle runner not wired (no storage folder for this workspace)';
-        await recordUnwiredActionRun(this.store, this.delivery, this.now, jobFile, wasLate, error);
-        return;
-      }
-      if (!(await this.store.load(job.id))) return;
-      const change = await this.delivery.deliverForChange(job, result);
-      let delivered = change.delivered;
-      // Skip the "recovered" line for an agent task: it already reports every
-      // failure, so one run must not yield two messages (AC10).
-      if (
-        state.consecutive_failures >= BACKOFF_THRESHOLD &&
-        job.action?.kind !== 'agent_task' &&
-        job.action?.kind !== 'retitle'
-      ) {
-        await this.delivery.deliver(
-          job,
-          `recovered after ${state.consecutive_failures} consecutive failures`,
-        );
-        delivered++;
-      }
-      // survive this run so JobDelivery.processPendingSummaries can deliver it once
-      // idle. A no-change run must not clobber a pending summarize.
-      const nextSummaryPending = result.changed ? change.summaryPending : state.summary_pending;
-      const row: RunRow = {
-        at: now.getTime(),
-        late: wasLate,
-        outcome: 'ok',
-        changed: result.changed,
-        summary: holdError ? `${result.summary}; ${holdError}` : result.summary,
-        delivered,
-        ...(holdError ? { error: holdError } : {}),
-      };
-      await this.store.appendRun(job.id, row);
-      this.store.patchState(job.id, {
-        last_run_at: now.getTime(),
-        last_ok_at: now.getTime(),
-        last_observation: result.observation,
-        consecutive_failures: 0,
-        next_due_at: nextDue(job.schedule, now).getTime(),
-        summary_pending: nextSummaryPending,
+      await executeScheduledJob(jobFile, isResume, runNow, {
+        store: this.store,
+        power: this.power,
+        delivery: this.delivery,
+        now: this.now,
+        runCheck: (file) => this.runCheck(file),
+        applyBackoff: (file, message) => this.applyBackoff(file, message),
+        hasModelRunner: (file) =>
+          file.job.action?.kind === 'agent_task'
+            ? this.agentTask !== undefined
+            : file.job.action?.kind === 'retitle' && this.retitle !== undefined,
+        queueModelAction: (candidate) => modelActions.push(candidate),
       });
-    } catch (err) {
-      const message = (err as Error).message;
-      await this.store
-        .appendRun(job.id, {
-          at: now.getTime(),
-          late: wasLate,
-          outcome: 'failed',
-          changed: false,
-          summary: 'run failed',
-          error: message,
-          delivered: 0,
-        })
-        .catch(() => undefined);
-      // Reporting every failed run turned one GitHub outage into a toast a tick.
-      await this.applyBackoff(jobFile, message).catch(() => undefined);
     } finally {
-      hold?.dispose();
-      if (!detached) this.runningJobs.delete(job.id);
+      this.checkingJobs.delete(id);
+      this.runningJobs.delete(id);
     }
+  }
+
+  private async admitModelAction(
+    candidate: PendingModelAction,
+    onAttemptStarted: () => void,
+  ): Promise<void> {
+    const fresh = await this.store.load(candidate.jobFile.job.id);
+    if (
+      !fresh ||
+      (!fresh.job.enabled && !candidate.runNow) ||
+      (fresh.state.task_run !== null && !this.runningJobs.has(fresh.job.id))
+    )
+      return;
+    const runner = fresh.job.action?.kind === 'agent_task' ? this.agentTask : this.retitle;
+    if (!runner) {
+      const error =
+        fresh.job.action?.kind === 'agent_task'
+          ? 'agent_task runner not wired (no host facade or backend pool)'
+          : 'retitle runner not wired (no storage folder for this workspace)';
+      await recordUnwiredActionRun(
+        this.store,
+        this.delivery,
+        this.now,
+        { ...fresh, state: candidate.jobFile.state },
+        candidate.wasLate,
+        error,
+      );
+      return;
+    }
+    await this.modelLane.run(candidate, fresh, runner, {
+      onStart: () => {
+        this.runningJobs.add(fresh.job.id);
+        onAttemptStarted();
+      },
+      onFinish: () => this.runningJobs.delete(fresh.job.id),
+      onError: (err) =>
+        this.notifyLocal(`Forge jobs: ${fresh.job.name} failed: ${describeError(err)}`),
+    });
   }
 
   /** D6: suspend again after a wake if a job asked to and nothing is busy. */

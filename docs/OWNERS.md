@@ -69,6 +69,7 @@ overlaps with an existing owner, extend the owner instead.
 | Sidebar attachment access (root URI + open)          | `src/sidebar/attachmentAccess.ts`        |
 | Composer draft/attachment retention report           | `webview-ui/src/components/InputRow.tsx` + `useConversationDrafts.ts` + `useAttachments.ts` + `webview-ui/src/sessionRetentionMessages.ts` |
 | Per-conversation streaming/cancel state              | `src/sidebar/TurnLifecycle.ts`           |
+| Provider question wait suspension and resumption     | `src/sidebar/providerQuestionWait.ts`     |
 | Model-endpoint turn: preflight + request             | `src/sidebar/ModelTurn.ts`               |
 | Vision-only turn preflight and its owner-facing refusal | `src/sidebar/turnPreflight.ts` |
 | Vision gate: single source of truth (advertise + refuse) | `src/sidebar/visionGate.ts`    |
@@ -401,6 +402,7 @@ overlaps with an existing owner, extend the owner instead.
 | ------------------------------------------------- | -------------------------------------- |
 | Mode-agnostic backend interface                   | `src/backend/BackendController.ts`     |
 | Multi-backend lifecycle + port allocation         | `src/backend/BackendPool.ts`           |
+| Cancellable turn-lease acquisition                 | `src/backend/turnLeaseAcquisition.ts`   |
 | Backend pool activation, shared-runtime lease and external-model shutdown | `src/vscode/backendPoolSetup.ts` |
 | Remote (laptop) model starter HTTP surface: four routes, `127.0.0.1`, no token; delegates listener lifecycle to TailnetListener | `src/backend/ModelStarterServer.ts`    |
 | Desktop tailnet services activation, config reload and disposal wiring | `src/vscode/tailnetServicesSetup.ts` |
@@ -850,6 +852,7 @@ the configured override stays the existing `video.ffmpeg_path` key.
 | Job schema (Zod) + state / run-row types                   | `src/jobs/jobSchema.ts`                                        |
 | Schedule math (`nextDue`, `isDue`, `wakeTimesFor`)         | `src/jobs/schedule.ts`                                         |
 | Tick loop, lease, concurrency                               | `src/jobs/JobScheduler.ts`                                     |
+| Single admitted model-job lane + pending admission ordering | `src/jobs/jobModelLane.ts`                                     |
 | Scheduler lease acquisition (FileLease + wake reset)        | `src/jobs/jobLease.ts`                                         |
 | Per-job run leaves: check, backoff, sleep-if-idle           | `src/jobs/jobRunLifecycle.ts`                                  |
 | Failure threshold and next-due backoff math                 | `src/jobs/backoff.ts`                                          |

@@ -95,6 +95,8 @@ export function routeSidebarPrompt(
     echoPrompt?: boolean,
     internal?: boolean,
     createdAt?: number,
+    onAdmitted?: () => void,
+    origin?: MidTurnTellOrigin,
   ) => Promise<ForgeRequestOutcome> | void,
   echoPrompt = false,
   internal = false,
@@ -109,7 +111,18 @@ export function routeSidebarPrompt(
     else addTell(id, text, false, target.tellId, target.createdAt);
     return;
   }
-  if (target.createdAt === undefined)
+  if (origin)
+    void send(
+      text,
+      target.attachments,
+      target.conversationId,
+      echoPrompt,
+      internal,
+      target.createdAt,
+      undefined,
+      origin,
+    );
+  else if (target.createdAt === undefined)
     void send(text, target.attachments, target.conversationId, echoPrompt, internal);
   else
     void send(
@@ -163,7 +176,7 @@ export interface SidebarPromptRouter {
   /**
    * A message from another chat (`message_chat`): a tell when `id` is busy,
    * else a visible turn there. Resolves once delivery is known: `turn` on
-   * admission, `refused` when the send was turned away before it started.
+   * backend readiness and prompt commit, `refused` when startup failed.
    */
   deliverChatMessage: (text: string, id: string, steer?: boolean) => Promise<ChatMessageDelivery>;
   /** False when the tell had already reached the turn. */
@@ -198,26 +211,35 @@ function deliverChatMessage(
     return Promise.resolve({ kind: 'tell' });
   }
   return new Promise((resolve) => {
-    let admitted = false;
-    const sent = options.send(text, undefined, id, true, false, undefined, () => {
-      admitted = true;
-      resolve({ kind: 'turn' });
-    });
+    let started = false;
+    const sent = options.send(
+      text,
+      undefined,
+      id,
+      true,
+      false,
+      undefined,
+      () => {
+        started = true;
+        resolve({ kind: 'turn' });
+      },
+      { kind: 'chat' },
+    );
     if (!sent) {
-      if (!admitted) resolve({ kind: 'refused', error: 'Forge: the chat could not start a turn.' });
+      if (!started) resolve({ kind: 'refused', error: 'Forge: the chat could not start a turn.' });
       return;
     }
-    // A send settles only when its turn ends; before admission that is a refusal.
+    // A send settles only when its turn ends; before startup it is a refusal.
     sent.then(
       (outcome) => {
-        if (admitted) return;
+        if (started) return;
         resolve({
           kind: 'refused',
           error: outcome.kind === 'failed' ? outcome.error : `the turn ended as ${outcome.kind}`,
         });
       },
       (err: unknown) => {
-        if (!admitted)
+        if (!started)
           resolve({ kind: 'refused', error: err instanceof Error ? err.message : String(err) });
       },
     );
@@ -247,6 +269,7 @@ export function createSidebarPromptRouter(options: {
     internal?: boolean,
     createdAt?: number,
     onAdmitted?: () => void,
+    origin?: MidTurnTellOrigin,
   ) => Promise<ForgeRequestOutcome> | void;
   isOpen: (id: string) => boolean;
 }): SidebarPromptRouter {
@@ -289,7 +312,7 @@ export function createSidebarPromptRouter(options: {
   };
   const steerChatMessage = (text: string, conversationId: string): boolean => {
     const tellId = randomUUID();
-    options.addTell(conversationId, text, false, tellId);
+    options.addTell(conversationId, text, false, tellId, undefined, { kind: 'chat' });
     return sendQueuedNow(conversationId, tellId);
   };
   return {

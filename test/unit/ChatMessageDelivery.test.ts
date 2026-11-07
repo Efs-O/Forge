@@ -41,7 +41,7 @@ describe('SidebarPromptRouter.deliverChatMessage', () => {
     expect(send).not.toHaveBeenCalled();
   });
 
-  it('starts an echoed, non-internal turn in an idle chat and resolves on admission', async () => {
+  it('starts an echoed, non-internal turn and resolves after startup and prompt commit', async () => {
     // The turn never ends in this test: delivery must not wait for it.
     const send = vi.fn<Send>((...args) => {
       args[6]?.();
@@ -57,10 +57,11 @@ describe('SidebarPromptRouter.deliverChatMessage', () => {
       false,
       undefined,
       expect.any(Function),
+      { kind: 'chat' },
     );
   });
 
-  it('reports a send refused before admission with its error', async () => {
+  it('reports a send refused before startup with its error', async () => {
     const send = vi.fn<Send>(() =>
       Promise.resolve<ForgeRequestOutcome>({ kind: 'failed', error: 'Forge: no active model.' }),
     );

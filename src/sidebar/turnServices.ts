@@ -33,6 +33,7 @@ import type { LiveStreamMeter } from './LiveStreamMeter';
 import type { CheckinStage } from '../agent/elapsedTimeNote';
 import type { RequestOfferedListener } from '../sessions/requestFingerprint';
 import type { RequestCapture } from '../sessions/requestStats';
+import type { QuestionWaitRunner } from '../tools/toolContract';
 
 export interface TurnServices {
   pool: IBackendPool;
@@ -93,6 +94,8 @@ export interface TurnServices {
     postC: (msg: HostToWebview) => void,
     apiKey: string | undefined,
     checkpoint: CheckpointSession,
+    withQuestionWait?: QuestionWaitRunner,
+    getApiKey?: () => string | undefined,
   ) => Promise<ToolCallingLoopResult>;
   waitForCancelledTurns: () => Promise<void>;
   /** Associates an out-of-band model request with its owning conversation when
@@ -110,7 +113,18 @@ export function makeRunModelTurn(
   getServices: () => TurnServices,
   run: (services: TurnServices, options: ModelTurnRequest) => Promise<ToolCallingLoopResult>,
 ): TurnServices['runModelTurn'] {
-  return (resolveBaseUrl, conv, model, activeFile, ctrl, postC, apiKey, checkpoint) =>
+  return (
+    resolveBaseUrl,
+    conv,
+    model,
+    activeFile,
+    ctrl,
+    postC,
+    apiKey,
+    checkpoint,
+    withQuestionWait,
+    getApiKey,
+  ) =>
     run(getServices(), {
       resolveBaseUrl,
       conv,
@@ -120,6 +134,8 @@ export function makeRunModelTurn(
       postC,
       ...(apiKey ? { apiKey } : {}),
       checkpoint,
+      ...(withQuestionWait ? { withQuestionWait } : {}),
+      ...(getApiKey ? { getApiKey } : {}),
     });
 }
 

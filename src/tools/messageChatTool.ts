@@ -480,7 +480,9 @@ export function makeMessageChatTool(options: {
       // or is refused; otherwise the mark dies with the hour.
       if (delivery.kind === 'unconfirmed') markUnclaimedSend(window, target.id, at);
       if (delivery.kind === 'tell')
-        return say(`Delivered to ${name} (running): it reads this at its next tool round.`);
+        return say(
+          `Queued for ${name} (running): not processed yet; it will be read at a tool round or in a follow-up turn.`,
+        );
       if (delivery.kind === 'turn')
         return say(`Delivered to ${name} (idle): a turn started there.`);
       return say(

@@ -15,6 +15,9 @@ const log = getLogger();
 
 export class TurnLifecycle {
   private readonly streamingConvIds = new Set<string>();
+  private readonly modelDemandConvIds = new Set<string>();
+  private readonly backgroundDemandConvIds = new Set<string>();
+  private readonly questionSuspendedConvIds = new Set<string>();
   private readonly activeBackends = new Map<string, BackendController>();
   private readonly cancelControllers = new Map<string, AbortController>();
   private readonly settledMap = new Map<string, Promise<void>>();
@@ -43,6 +46,11 @@ export class TurnLifecycle {
     return this.streamingConvIds;
   }
 
+  /** Conversations with live model work, excluding turns suspended on a question. */
+  modelDemandIds(): ReadonlySet<string> {
+    return this.modelDemandConvIds;
+  }
+
   isCancellationPending(convId: string): boolean {
     return this.cancellingConvIds.has(convId);
   }
@@ -59,10 +67,28 @@ export class TurnLifecycle {
 
   markStreaming(convId: string): void {
     this.streamingConvIds.add(convId);
+    this.questionSuspendedConvIds.delete(convId);
+    this.modelDemandConvIds.add(convId);
   }
 
   clearStreaming(convId: string): void {
     this.streamingConvIds.delete(convId);
+    this.questionSuspendedConvIds.delete(convId);
+    if (!this.backgroundDemandConvIds.has(convId)) this.modelDemandConvIds.delete(convId);
+  }
+
+  /** Drop scheduler/model demand without ending the live turn or send lock. */
+  suspendModelDemand(convId: string): void {
+    if (!this.streamingConvIds.has(convId)) return;
+    this.questionSuspendedConvIds.add(convId);
+    if (!this.backgroundDemandConvIds.has(convId)) this.modelDemandConvIds.delete(convId);
+  }
+
+  /** Restore demand after the provider has reacquired its original model. */
+  resumeModelDemand(convId: string): void {
+    if (!this.streamingConvIds.has(convId)) return;
+    this.questionSuspendedConvIds.delete(convId);
+    this.modelDemandConvIds.add(convId);
   }
 
   setBackend(convId: string, backend: BackendController): void {
@@ -93,7 +119,14 @@ export class TurnLifecycle {
    *  send guards both read as idle. */
   beginBackgroundWork(convId: string): () => void {
     this.streamingConvIds.add(convId);
-    return () => this.streamingConvIds.delete(convId);
+    this.backgroundDemandConvIds.add(convId);
+    this.modelDemandConvIds.add(convId);
+    return () => {
+      this.backgroundDemandConvIds.delete(convId);
+      if (!this.streamingConvIds.has(convId) || this.questionSuspendedConvIds.has(convId)) {
+        this.modelDemandConvIds.delete(convId);
+      }
+    };
   }
 
   /** Why the last turn on this conversation stopped short, if it did. */

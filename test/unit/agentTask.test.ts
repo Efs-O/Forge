@@ -37,6 +37,9 @@ import type { ForgeRequestOutcome } from '../../src/sidebar/turnOutcome';
 import { readOutboxItem } from '../../src/jobs/JobOutbox';
 import { openDiscussChat } from '../../src/jobs/jobDiscuss';
 import { nextDueWithBackoff } from '../../src/jobs/backoff';
+import { UserQuestionService } from '../../src/sidebar/UserQuestionService';
+import { unattendedConversations } from '../../src/sidebar/unattendedConversations';
+import { makeAskUserTool } from '../../src/tools/askUserTool';
 
 // ── Fakes ────────────────────────────────────────────────────────────────────
 
@@ -79,6 +82,7 @@ function fakeHost(
       conversations: [],
       requestChains: [],
       streamingConversationIds: streaming,
+      modelDemandConversationIds: streaming,
     }),
     send: vi.fn().mockResolvedValue(sendResult),
     restoreConversation: vi.fn().mockResolvedValue(fakeConversation(conversationId)),
@@ -170,6 +174,16 @@ describe('canStartNow', () => {
     });
   });
 
+  it('keeps a question-waiting chat same-chat busy but releases its model demand', () => {
+    const pool = fakePool(['other-model'], 1);
+    expect(
+      canStartNow('qwen', 'waiting-chat', pool, ['waiting-chat'], undefined, [], []),
+    ).toMatchObject({ start: false, reason: 'its own conversation is streaming' });
+    expect(canStartNow('qwen', null, pool, ['waiting-chat'], undefined, [], [])).toMatchObject({
+      start: true,
+    });
+  });
+
   it('waits when it needs a different model while one is streaming', () => {
     const pool = fakePool(['other'], 1);
     expect(canStartNow('qwen', null, pool, ['other-chat'])).toMatchObject({ start: false });
@@ -204,6 +218,19 @@ describe('canStartNow', () => {
       start: false,
       reason: 'all 2 parallel slot(s) are streaming',
     });
+  });
+
+  it('does not assume a managed shared slot when status is unavailable', () => {
+    const pool = fakePool(['strata'], 2);
+    expect(
+      canStartNow('strata', null, pool, ['live-chat'], undefined, [], ['live-chat'], true),
+    ).toMatchObject({
+      start: false,
+      reason: 'cannot verify shared serving capacity for "strata" while a turn is active',
+    });
+    expect(
+      canStartNow('strata', null, pool, ['live-chat'], { capacity: 2, inFlight: 1 }, [], ['live-chat'], true),
+    ).toMatchObject({ start: true });
   });
 
   it('waits when another window holds a managed server the job would unload', () => {
@@ -1122,7 +1149,7 @@ describe('AgentTaskRunner', () => {
       } as unknown as ForgeHostFacade;
       nowMs += 1_000;
       await scheduler.tick();
-      expect(host.send).toHaveBeenCalledOnce();
+      await vi.waitFor(() => expect(host.send).toHaveBeenCalledOnce());
       // Two issue fetches, both from the earlier ticks: the retry reruns no check.
       expect(jobsFetch).toHaveBeenCalledTimes(2);
       resolveSend({ kind: 'completed', finalText: 'RESULT: ok — retried' });
@@ -1283,6 +1310,32 @@ describe('AgentTaskRunner', () => {
     // conversation_id was set by the runner; the marker was disposed.
     expect(convId).not.toBeNull();
     expect(unattendedConversations.has(convId!)).toBe(false);
+  });
+
+  it('refuses ask_user immediately inside a scheduled job turn', async () => {
+    const job = baseJob();
+    await store.saveJob(job);
+    const questions = new UserQuestionService();
+    const askUser = makeAskUserTool(questions);
+    let refusal = '';
+    host = {
+      ...fakeHost([], { kind: 'completed', finalText: 'RESULT: ok — used a safe assumption' }),
+      send: vi.fn(async (conversationId: string) => {
+        refusal = (await askUser.handler(
+          { prompt: 'Which option?' },
+          { beforeMutate: () => undefined, conversationId },
+        )) as string;
+        return { kind: 'completed', finalText: 'RESULT: ok — used a safe assumption' };
+      }),
+    } as unknown as ForgeHostFacade;
+
+    await new AgentTaskRunner(makeDeps()).run({ job, state: JobStateSchema.parse({}) }, false);
+
+    const conversationId = (await store.load('agent-task'))!.state.conversation_id;
+    expect(refusal).toContain('unattended: no user present');
+    expect(questions.pendingConversationIds().size).toBe(0);
+    expect(conversationId).not.toBeNull();
+    expect(unattendedConversations.has(conversationId!)).toBe(false);
   });
 
   it('max_minutes cap cancels the turn and records a timeout', async () => {

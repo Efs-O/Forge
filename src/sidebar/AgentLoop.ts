@@ -162,6 +162,7 @@ export class AgentLoop {
   getStreamingIds(): ReadonlySet<string> {
     return this.lifecycle.streamingIds();
   }
+  getModelDemandIds = (): ReadonlySet<string> => this.lifecycle.modelDemandIds();
 
   constructor(
     pool: IBackendPool,

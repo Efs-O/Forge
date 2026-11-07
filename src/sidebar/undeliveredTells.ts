@@ -4,11 +4,12 @@
  * the two sites cannot drift apart.
  */
 
-import type { MidTurnTell } from '../agent/MidTurnInbox';
+import type { MidTurnTell, MidTurnTellOrigin } from '../agent/MidTurnInbox';
 
 export interface TellBatch {
   text: string;
   internal: boolean;
+  origin?: MidTurnTellOrigin;
   createdAt?: number;
   /** Source tells are retained so a stopped/failed pipeline can restore them. */
   tells?: MidTurnTell[];
@@ -20,13 +21,19 @@ export function groupTellBatches(tells: readonly MidTurnTell[]): TellBatch[] {
   for (const tell of tells) {
     const internal = tell.internal === true;
     const current = batches[batches.length - 1];
-    if (current?.internal === internal) {
+    if (
+      current?.internal === internal &&
+      current.origin?.kind === tell.origin?.kind &&
+      (current.origin?.kind !== 'worker-wake' ||
+        (tell.origin?.kind === 'worker-wake' && current.origin.workerId === tell.origin.workerId))
+    ) {
       current.text += `\n\n${tell.text}`;
       current.tells?.push({ ...tell });
     } else
       batches.push({
         text: tell.text,
         internal,
+        ...(tell.origin ? { origin: tell.origin } : {}),
         ...(tell.createdAt !== undefined ? { createdAt: tell.createdAt } : {}),
         tells: [{ ...tell }],
       });

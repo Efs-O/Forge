@@ -409,10 +409,7 @@ export function wireSidebar(host: SidebarHost, parts: SidebarParts): SidebarRunt
   });
   retentionRef.current = retention;
 
-  // Last, because it needs both halves: the events object AgentLoop decorates
-  // and the slashHandler that owns the activity listeners a transport hangs
-  // off. Decorating rather than emitting from the turn path keeps every
-  // outbound hook subscribed in one place.
+  // Wire last: this needs AgentLoop's events and slashHandler's listeners.
   wireTurnMirror(events, {
     lookup: (id) => host.getSidebar().conversations.find((conv) => conv.id === id),
     emit: (event) => slashHandler.emitActivity(event),
@@ -430,10 +427,7 @@ export function wireSidebar(host: SidebarHost, parts: SidebarParts): SidebarRunt
   // from a phone. Routed through the notification service rather than the
   // remote controller: that class already owns "can I reach the user".
   agentLoop.setRemoteReach((id) => parts.notifications.reach(id));
-  // The sidebar's own seat at the question table. Registered at construction,
-  // not when the view resolves, because the sink must exist before the first
-  // turn; `presentsLocally` is what makes it conditional, so a window whose view
-  // has never been resolved still falls back to the VS Code input box.
+  // Register the sidebar before the first turn; presentsLocally checks the view.
   parts.questions.addSink({
     asked: (event) => {
       host.post(buildQuestionMessage(event));
@@ -449,8 +443,7 @@ export function wireSidebar(host: SidebarHost, parts: SidebarParts): SidebarRunt
     requested: () => host.postSessionSync(),
     resolved: () => host.postSessionSync(),
   });
-  // The gate ledger: one `gate` row per card and per guard refusal, into the
-  // same transcript as the turns. It answers nothing.
+  // Log cards and refusals into the turn transcript without answering them.
   agentLoop.addApprovalSink(
     new GateEventLog({
       write: (row) => send.sessionLogs.logGate(row.conversation_id ?? '', row),
@@ -462,12 +455,13 @@ export function wireSidebar(host: SidebarHost, parts: SidebarParts): SidebarRunt
   const promptRouter = createSidebarPromptRouter({
     activeId: () => host.getSidebar().activeConversationId,
     isReserved: (id) => requestChains.isReserved(id),
-    addTell: (id, text, internal, tellId, createdAt) =>
+    addTell: (id, text, internal, tellId, createdAt, origin) =>
       midTurnInbox.add(id, {
         id: tellId ?? randomUUID(),
         text,
         ...(internal ? { internal: true } : {}),
         ...(createdAt !== undefined ? { createdAt } : {}),
+        ...(origin ? { origin } : {}),
       }),
     removeTell: (id, tellId) => midTurnInbox.remove(id, tellId),
     markSendNow: (id, tellId) => midTurnInbox.markSendNow(id, tellId),
@@ -476,12 +470,18 @@ export function wireSidebar(host: SidebarHost, parts: SidebarParts): SidebarRunt
       requestChains.markCancelling(id, 'interrupted');
       await agentLoop.interrupt(id);
     },
-    send: (text, attachments, id, echo, internal, createdAt, onAdmitted) =>
-      send.send(text, attachments, id, internal ? { internal: true } : undefined, {
-        ...(echo ? { echoPrompt: true } : {}),
-        ...(createdAt !== undefined ? { createdAt } : {}),
-        ...(onAdmitted ? { onAdmitted } : {}),
-      }),
+    send: (text, attachments, id, echo, internal, createdAt, onAdmitted, origin) =>
+      send.send(
+        text,
+        attachments,
+        id,
+        { ...(internal ? { internal: true } : {}), ...(origin ? { origin } : {}) },
+        {
+          ...(echo ? { echoPrompt: true } : {}),
+          ...(createdAt !== undefined ? { createdAt } : {}),
+          ...(onAdmitted ? { onAdmitted } : {}),
+        },
+      ),
     isOpen: (id) => host.getSidebar().conversations.some((conversation) => conversation.id === id),
   });
   return {

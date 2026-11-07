@@ -1,5 +1,17 @@
 import { describe, expect, it } from 'vitest';
-import { inputTextOf, runsAfterStop } from '../../src/sidebar/undeliveredTells';
+import { groupTellBatches, inputTextOf, runsAfterStop } from '../../src/sidebar/undeliveredTells';
+
+it('preserves origin when queued agent messages become follow-up prompts', () => {
+  const batches = groupTellBatches([
+    { id: 'user', text: 'user words' },
+    { id: 'agent', text: 'agent note', origin: { kind: 'chat' } },
+  ]);
+  expect(batches).toMatchObject([
+    { text: 'user words', internal: false },
+    { text: 'agent note', internal: false, origin: { kind: 'chat' } },
+  ]);
+  expect(inputTextOf(batches)).toBe('user words');
+});
 
 describe('runsAfterStop', () => {
   const sendNow = [

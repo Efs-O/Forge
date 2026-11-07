@@ -16,6 +16,7 @@ import type { ModelConfig, GpuGateConfig } from '../config/types';
 import type { GpuInfo } from '../system/systemProbes';
 import { gpuGateReason } from './gpuIdleGate';
 import type { SharedModelSlots } from '../backend/strataStatus';
+import { supportsSharedModelSlots } from '../backend/strataStatus';
 import type { ExternalTurnHold } from '../backend/SharedRuntimeRegistry';
 import { buildAgentTaskPrompt } from './agentTaskPrompt';
 import {
@@ -24,6 +25,7 @@ import {
   CLEAR_PENDING,
   deferBusyTask,
   holdWaitReason,
+  type ModelJobAdmission,
   USER_QUIET_MS,
   userQuietGate,
 } from './agentTaskAdmission';
@@ -104,7 +106,7 @@ export class AgentTaskRunner {
   }
 
   /** Run one agent task (steps 1-6, 8, 9), recording every failure. */
-  async run(jobFile: JobFile, wasLate: boolean): Promise<void> {
+  async run(jobFile: JobFile, wasLate: boolean, admission: ModelJobAdmission = {}): Promise<void> {
     const { job, state } = jobFile;
     const action = job.action;
     if (action?.kind !== 'agent_task') return;
@@ -171,11 +173,12 @@ export class AgentTaskRunner {
     }
     const status = host.status();
     const gpu = this.deps.gpuGate;
+    const gpuModel = gpu?.model(jobModel);
     let sharedSlots: SharedModelSlots | undefined;
     const admissionReason = await gpuGateReason(
       {
         jobsRoot: this.deps.store.root,
-        model: gpu?.model(jobModel),
+        model: gpuModel,
         gpuGate: gpu?.config(),
         loadedModels: gpu?.loadedModels ?? (() => []),
         now: this.deps.now,
@@ -192,6 +195,8 @@ export class AgentTaskRunner {
           status.streamingConversationIds,
           slots,
           this.deps.externalTurnHolds(),
+          status.modelDemandConversationIds,
+          supportsSharedModelSlots(gpuModel),
         );
         // Only a recent conversation can hold the job back; read which ones are
         // the jobs' own (they must not) only when there is one.
@@ -237,6 +242,15 @@ export class AgentTaskRunner {
       );
       return;
     }
+    const latest = await this.deps.store.load(job.id);
+    if (
+      !latest ||
+      (!latest.job.enabled && !admission.allowDisabled) ||
+      latest.state.task_run !== null
+    ) {
+      return;
+    }
+    admission.onAdmitted?.();
     // A previously-pending task that can now start: clear the pending flag.
     this.deps.store.patchState(job.id, CLEAR_PENDING);
 

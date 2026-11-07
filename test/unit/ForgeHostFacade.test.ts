@@ -46,6 +46,7 @@ describe('SidebarHostFacade', () => {
       getOpenConversations: () => open,
       getRequestChains: () => [],
       getStreamingConversationIds: () => new Set(),
+      getModelDemandConversationIds: () => new Set(),
       getSessionActiveMs: () => 0,
       capBlockers,
     });
@@ -87,6 +88,7 @@ describe('SidebarHostFacade', () => {
       getOpenConversations: () => open,
       getRequestChains: () => [],
       getStreamingConversationIds: () => new Set(),
+      getModelDemandConversationIds: () => new Set(),
       getSessionActiveMs: () => 0,
       capBlockers: () => ['12 running a turn'],
     });
@@ -115,6 +117,7 @@ describe('SidebarHostFacade', () => {
       getOpenConversations: () => [conversation('c0')],
       getRequestChains: () => [],
       getStreamingConversationIds: () => new Set(),
+      getModelDemandConversationIds: () => new Set(),
       getSessionActiveMs: () => 0,
       capBlockers: () => [],
     });
@@ -169,6 +172,7 @@ describe('SidebarHostFacade', () => {
       getOpenConversations: () => [created, restored],
       getRequestChains: () => [],
       getStreamingConversationIds: () => new Set(),
+      getModelDemandConversationIds: () => new Set(),
       getSessionActiveMs: () => 0,
       capBlockers: () => [],
     });
@@ -226,6 +230,7 @@ describe('SidebarHostFacade', () => {
       getOpenConversations: () => [conv],
       getRequestChains: () => [],
       getStreamingConversationIds: () => new Set(['c1']),
+      getModelDemandConversationIds: () => new Set(['c1']),
       getSessionActiveMs: () => 125_000,
       capBlockers: () => [],
     });
@@ -238,6 +243,7 @@ describe('SidebarHostFacade', () => {
     expect(facade.status()).toMatchObject({
       activeConversationId: 'c1',
       streamingConversationIds: ['c1'],
+      modelDemandConversationIds: ['c1'],
       conversations: [{ id: 'c1', activeModel: 'local', archived: false, activeMs: 125_000 }],
     });
   });
@@ -261,6 +267,7 @@ describe('SidebarHostFacade', () => {
       getOpenConversations: () => [conversation('c1')],
       getRequestChains: () => [],
       getStreamingConversationIds: () => new Set(),
+      getModelDemandConversationIds: () => new Set(),
       getSessionActiveMs: () => 0,
       capBlockers: () => [],
     };

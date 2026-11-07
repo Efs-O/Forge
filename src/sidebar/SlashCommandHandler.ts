@@ -276,13 +276,13 @@ export class SlashCommandHandler {
       case 'initForge':
         await runInitForgeCommand(deps);
         return;
-
       case 'clanker': {
         const conversationId = deps.getActiveConv().id;
         const on = deps.toggleClanker(conversationId);
         deps.post({
-          type: 'token',
-          text: on
+          type: 'notice',
+          conversationId,
+          message: on
             ? "\n> 💥 **Clanker Mode ON** — this chat only. A call the owner could have allowed by key runs with no card; the deny list's dangerous commands and anything with no key still get one, and it waits or times out like any other card. `/clanker` again turns it off.\n"
             : '\n> 💥 **Clanker Mode OFF** — this chat is gated again. The approvals this chat earned are not revoked.\n',
         });

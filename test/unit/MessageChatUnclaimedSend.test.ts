@@ -214,7 +214,7 @@ describe('message_chat refuses to send the same message twice while the first is
         { action: 'send', to: 'running', message: 'lane 5 here' },
         context(),
       );
-      expect(other).toContain('Delivered to #2 "Bug hunt" (running)');
+      expect(other).toContain('Queued for #2 "Bug hunt" (running): not processed yet');
 
       sidebar.deliverChatMessage.mockReturnValueOnce(heldDelivery().promise);
       const same = await tool.handler(SEND, context());

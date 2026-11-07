@@ -7,6 +7,7 @@ import type { ToolOutputLimits } from '../tools/toolOutputLimits';
 import type { CheckinStage } from '../agent/elapsedTimeNote';
 import type { ConversationRuntime, PlanItem } from './sessionTypes';
 import type { QuestionAnswerRecord } from '../util/questionAnswers';
+import type { QuestionWaitRunner } from '../tools/toolContract';
 
 export interface RecordedFileDiff {
   toolCallId: string;
@@ -24,6 +25,7 @@ export interface ToolDispatchModelContext {
   checkpoint?: CheckpointSession;
   persistConversation: () => void;
   setCheckin?: (minutes: number, byThen: CheckinStage) => { dueAt: number } | undefined;
+  withQuestionWait?: QuestionWaitRunner;
 }
 
 export interface ToolDispatchRoundContext {

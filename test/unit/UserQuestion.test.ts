@@ -388,6 +388,25 @@ describe('ask_user tool', () => {
     await expect(call).resolves.toBe('src/index.ts');
   });
 
+  it('keeps a waiting card answerable inside the provider suspension wrapper', async () => {
+    const service = new UserQuestionService();
+    const tool = makeAskUserTool(service);
+    const asked = vi.fn();
+    service.addSink({ asked, answered: () => undefined });
+    const withQuestionWait = vi.fn(<T>(wait: () => Promise<T>) => wait());
+    const call = tool.handler(
+      { prompt: 'Which build?' },
+      { beforeMutate: () => undefined, conversationId: 'waiting-chat', withQuestionWait },
+    );
+
+    expect(withQuestionWait).toHaveBeenCalledOnce();
+    expect(currentInput().visible).toBe(true);
+    expect(service.pendingConversationIds().has('waiting-chat')).toBe(true);
+    expect(service.answer(asked.mock.calls[0]![0].id, 'Q1 multi')).toBe(true);
+    await expect(call).resolves.toBe('Q1 multi');
+    expect(currentInput().disposed).toBe(true);
+  });
+
   it('returns immediately without opening a question when the conversation is unattended', async () => {
     const service = new UserQuestionService();
     const ask = vi.spyOn(service, 'ask');

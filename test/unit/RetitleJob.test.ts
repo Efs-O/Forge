@@ -37,6 +37,8 @@ import {
 } from '../../src/jobs/retitleCandidates';
 import { deriveTitle, titleSourceOf, UNTITLED_TITLE } from '../../src/sidebar/conversationTitle';
 import type { ForgeHostFacade } from '../../src/sidebar/ForgeHostFacade';
+import type { IBackendPool } from '../../src/backend/poolTypes';
+import type { ModelConfig } from '../../src/config/types';
 
 const DAY_MS = 86_400_000;
 const now = 1_700_000_000_000;
@@ -298,13 +300,18 @@ async function savedJobFile(over: Record<string, unknown> = {}): Promise<JobFile
   return file;
 }
 
-function fakeHost(applied: Array<[string, string]>): ForgeHostFacade {
+function fakeHost(
+  applied: Array<[string, string]>,
+  status: Partial<ReturnType<ForgeHostFacade['status']>> = {},
+): ForgeHostFacade {
   return {
     status: () => ({
       activeConversationId: 'open-chat',
       conversations: [],
       requestChains: [],
       streamingConversationIds: [],
+      modelDemandConversationIds: [],
+      ...status,
     }),
     applyAutoTitle: (conversationId: string, title: string) => {
       applied.push([conversationId, title]);
@@ -313,6 +320,21 @@ function fakeHost(applied: Array<[string, string]>): ForgeHostFacade {
   } as unknown as ForgeHostFacade;
 }
 
+function fakePool(capacity = 1, otherModels: string[] = []): IBackendPool {
+  return {
+    parallelCapacity: () => capacity,
+    loadedModelsExcept: () => otherModels,
+  } as unknown as IBackendPool;
+}
+
+const sharedQ1: ModelConfig = {
+  name: 'q1-multi',
+  provider: 'openai-compatible',
+  endpoint: 'http://127.0.0.1:8096',
+  model: 'qwen3.8-flash-next-unsloth-v3.1-ud-iq1_s',
+  unload_path: '/unload',
+};
+
 function deps(over: Partial<RetitleDeps> = {}): RetitleDeps {
   const applied: Array<[string, string]> = [];
   return {
@@ -320,6 +342,8 @@ function deps(over: Partial<RetitleDeps> = {}): RetitleDeps {
     host: () => fakeHost(applied),
     dirs: () => ({ storageDir: storage, logsDirectory: logs }),
     summarize: async () => 'Orbital salvage beam fix',
+    pool: () => fakePool(),
+    externalTurnHolds: () => [],
     defaultModel: () => 'strata',
     outboxDir: store.outboxDir,
     notifyLocal: () => undefined,
@@ -330,6 +354,166 @@ function deps(over: Partial<RetitleDeps> = {}): RetitleDeps {
 }
 
 describe('RetitleRunner', () => {
+  it('uses the job model on a verified free shared slot despite another selected chat model', async () => {
+    const applied: Array<[string, string]> = [];
+    const requestedModels: string[] = [];
+    const fetchImpl = vi.fn<typeof fetch>().mockResolvedValue(
+      new Response(
+        JSON.stringify({
+          service: 'strata',
+          model: sharedQ1.model,
+          loaded: true,
+          concurrency: { serving: 2 },
+          activity: { in_flight: 1 },
+        }),
+        { status: 200 },
+      ),
+    );
+    const runner = new RetitleRunner({
+      ...deps({
+        host: () =>
+          fakeHost(applied, {
+            activeConversationId: 'open-chat',
+            conversations: [
+              {
+                id: 'open-chat',
+                title: 'Selected model is different',
+                activeModel: 'active-model',
+                archived: false,
+                updatedAt: now - 30 * DAY_MS,
+                requestCount: 0,
+                toolCallCount: 0,
+                compactCount: 0,
+                activeMs: 0,
+              },
+            ],
+          }),
+        pool: () => fakePool(1, ['active-model']),
+        defaultModel: () => 'active-model',
+        summarize: async (_prompt, modelName) => {
+          requestedModels.push(modelName);
+          return 'Q1 multi retitle';
+        },
+      }),
+      gpuGate: {
+        config: () => undefined,
+        model: () => sharedQ1,
+        loadedModels: () => [sharedQ1],
+        fetchImpl,
+      },
+    });
+
+    await runner.run(await savedJobFile({ model: 'q1-multi', max_chats: 1 }), false);
+
+    expect(requestedModels).toEqual(['q1-multi']);
+    expect(fetchImpl).toHaveBeenCalledTimes(2);
+    expect(fetchImpl.mock.calls[0]?.[0].toString()).toBe('http://127.0.0.1:8096/v1/status');
+    expect(applied).toHaveLength(1);
+  });
+
+  it('defers when every verified shared slot is occupied', async () => {
+    const summarize = vi.fn(async () => 'Should not run');
+    const applied: Array<[string, string]> = [];
+    const runner = new RetitleRunner({
+      ...deps({ host: () => fakeHost(applied), summarize }),
+      gpuGate: {
+        config: () => undefined,
+        model: () => sharedQ1,
+        loadedModels: () => [sharedQ1],
+        fetchImpl: async () =>
+          new Response(
+            JSON.stringify({
+              service: 'strata',
+              model: sharedQ1.model,
+              loaded: true,
+              concurrency: { serving: 2 },
+              activity: { in_flight: 2 },
+            }),
+            { status: 200 },
+          ),
+      },
+    });
+
+    await runner.run(await savedJobFile(), false);
+
+    expect(summarize).not.toHaveBeenCalled();
+    expect((await store.load('retitle-daily'))?.state.task_pending).toBe(true);
+    expect(await store.readRuns('retitle-daily')).toHaveLength(0);
+  });
+
+  it('rechecks shared capacity before a duplicate-title retry', async () => {
+    const summarize = vi.fn(async () => 'Tractor beam work');
+    const applied: Array<[string, string]> = [];
+    const response = (inFlight: number): Response =>
+      new Response(
+        JSON.stringify({
+          service: 'strata',
+          model: sharedQ1.model,
+          loaded: true,
+          concurrency: { serving: 2 },
+          activity: { in_flight: inFlight },
+        }),
+        { status: 200 },
+      );
+    const fetchImpl = vi
+      .fn<typeof fetch>()
+      .mockResolvedValueOnce(response(1))
+      .mockResolvedValueOnce(response(1))
+      .mockResolvedValueOnce(response(2));
+    const runner = new RetitleRunner({
+      ...deps({ host: () => fakeHost(applied), summarize }),
+      gpuGate: {
+        config: () => undefined,
+        model: () => sharedQ1,
+        loadedModels: () => [sharedQ1],
+        fetchImpl,
+      },
+    });
+
+    await runner.run(await savedJobFile({ max_chats: 1 }), false);
+
+    expect(summarize).toHaveBeenCalledOnce();
+    expect(fetchImpl).toHaveBeenCalledTimes(3);
+    expect(applied).toEqual([]);
+    expect((await store.load('retitle-daily'))?.state.task_pending).toBe(true);
+  });
+
+  it('does not use a spare target slot while a different model is actively held', async () => {
+    const summarize = vi.fn(async () => 'Should not run');
+    const applied: Array<[string, string]> = [];
+    const runner = new RetitleRunner({
+      ...deps({
+        host: () => fakeHost(applied, {
+          streamingConversationIds: ['active-chat'],
+          modelDemandConversationIds: ['active-chat'],
+        }),
+        pool: () => fakePool(2, ['active-model']),
+        summarize,
+      }),
+      gpuGate: {
+        config: () => undefined,
+        model: () => sharedQ1,
+        loadedModels: () => [sharedQ1],
+        fetchImpl: async () =>
+          new Response(
+            JSON.stringify({
+              service: 'strata',
+              model: sharedQ1.model,
+              loaded: true,
+              concurrency: { serving: 2 },
+              activity: { in_flight: 0 },
+            }),
+            { status: 200 },
+          ),
+      },
+    });
+
+    await runner.run(await savedJobFile(), false);
+
+    expect(summarize).not.toHaveBeenCalled();
+    expect((await store.load('retitle-daily'))?.state.task_pending).toBe(true);
+  });
+
   it('applies a title to each chat the filter offered, and to no other', async () => {
     const applied: Array<[string, string]> = [];
     let asks = 0;
@@ -448,7 +632,11 @@ describe('RetitleRunner', () => {
     const applied: Array<[string, string]> = [];
     await new RetitleRunner({
       ...deps(),
-      host: () => fakeHost(applied),
+      host: () => fakeHost(applied, {
+        streamingConversationIds: ['active-chat'],
+        modelDemandConversationIds: ['active-chat'],
+      }),
+      pool: () => fakePool(1),
       busy: () => 'a turn is streaming',
       summarize,
     }).run(await savedJobFile(), false);
@@ -468,6 +656,7 @@ describe('RetitleRunner', () => {
     let statusReads = 0;
     const runner = new RetitleRunner({
       ...deps(),
+      pool: () => fakePool(2),
       host: () =>
         ({
           status: () => {
@@ -477,6 +666,9 @@ describe('RetitleRunner', () => {
               conversations: [],
               requestChains: [],
               streamingConversationIds: statusReads > 1 ? ['prompt-named'] : [],
+              // This is a question-only wait: the turn remains live, while
+              // another conversation may use a separately verified free slot.
+              modelDemandConversationIds: [],
             };
           },
           applyAutoTitle: (id: string, title: string) => {
@@ -587,8 +779,28 @@ describe('RetitleRunner', () => {
     const applied: Array<[string, string]> = [];
     let asks = 0;
     let streaming = false;
+    let statusReads = 0;
     const runner = new RetitleRunner({
-      ...deps({ host: () => fakeHost(applied) }),
+      ...deps({
+        host: () => ({
+          status: () => {
+            statusReads += 1;
+            const active = streaming;
+            return {
+              activeConversationId: 'x',
+              conversations: [],
+              requestChains: [],
+              streamingConversationIds: active ? ['active-chat'] : [],
+              modelDemandConversationIds: active ? ['active-chat'] : [],
+            };
+          },
+          applyAutoTitle: (id: string, title: string) => {
+            applied.push([id, title]);
+            return true;
+          },
+        }) as unknown as ForgeHostFacade,
+      }),
+      pool: () => fakePool(1),
       summarize: async () => {
         asks += 1;
         streaming = true;
@@ -598,9 +810,10 @@ describe('RetitleRunner', () => {
     });
     await runner.run(await savedJobFile({ max_chats: 20 }), false);
     expect(asks).toBe(1);
+    expect(statusReads).toBeGreaterThan(0);
     expect(applied).toHaveLength(1);
     const runs = await store.readRuns('retitle-daily');
-    expect(runs[0]?.summary).toContain('stopped early: a turn started');
+    expect(runs[0]?.summary).toContain('stopped early: all 1 parallel slot(s) are streaming');
   });
 
   it('a turn starting before the first title defers the pass instead of losing the day', async () => {
@@ -612,15 +825,32 @@ describe('RetitleRunner', () => {
     // schedule advance, and the next tick tries again.
     const summarize = vi.fn(async () => 'Orbital salvage beam fix');
     const applied: Array<[string, string]> = [];
-    let busyChecks = 0;
+    let statusReads = 0;
     const runner = new RetitleRunner({
-      ...deps({ host: () => fakeHost(applied) }),
+      ...deps({
+        host: () => ({
+          status: () => {
+            statusReads += 1;
+            const active = statusReads >= 3;
+            return {
+              activeConversationId: 'x',
+              conversations: [],
+              requestChains: [],
+              streamingConversationIds: active ? ['active-chat'] : [],
+              modelDemandConversationIds: active ? ['active-chat'] : [],
+            };
+          },
+          applyAutoTitle: (id: string, title: string) => {
+            applied.push([id, title]);
+            return true;
+          },
+        }) as unknown as ForgeHostFacade,
+      }),
+      pool: () => fakePool(1),
       summarize,
-      // Idle at admission (the first check is the gate's), busy from the loop on.
-      busy: () => (busyChecks++ === 0 ? undefined : 'a turn is streaming'),
     });
     await runner.run(await savedJobFile({ max_chats: 20 }), false);
-    expect(busyChecks).toBeGreaterThan(1);
+    expect(statusReads).toBeGreaterThan(2);
     expect(summarize).not.toHaveBeenCalled();
     expect(applied).toEqual([]);
     const state = (await store.load('retitle-daily'))!.state;

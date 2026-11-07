@@ -132,9 +132,9 @@ describe('message_chat tool contract and handler', () => {
     expect(toDescription).toContain('closed chat must be read with action: view');
     // `action` is no longer required, and the description says what replaces it,
     // so the model is not asked to guess why a message-only call worked.
-    expect(
-      (tool.definition.function as { description: string }).description,
-    ).toContain('`action` defaults to `send` when a `message` is given');
+    expect((tool.definition.function as { description: string }).description).toContain(
+      '`action` defaults to `send` when a `message` is given',
+    );
     await expect(tool.handler({ action: 'list', extra: true }, context())).rejects.toThrow();
   });
 
@@ -157,7 +157,7 @@ describe('message_chat tool contract and handler', () => {
     const result = String(
       await tool.handler({ action: 'send', to: 'running', message }, context()),
     );
-    expect(result).toContain('Delivered to #2 "Bug hunt" (running)');
+    expect(result).toContain('Queued for #2 "Bug hunt" (running)');
     expect(sidebar.deliverChatMessage).toHaveBeenCalledTimes(1);
   });
 
@@ -166,7 +166,7 @@ describe('message_chat tool contract and handler', () => {
     const result = String(await tool.handler({ to: '#2', message: 'Lane 5 here.' }, context()));
     expect(sidebar.deliverChatMessage).toHaveBeenCalledTimes(1);
     expect(sidebar.createConversation).not.toHaveBeenCalled();
-    expect(result).toContain('Delivered to #2 "Bug hunt" (running)');
+    expect(result).toContain('Queued for #2 "Bug hunt" (running)');
     expect(result).toContain('No `action` was given, so `send` was used.');
   });
 
@@ -177,9 +177,13 @@ describe('message_chat tool contract and handler', () => {
     const { tool } = makeTool();
     const results: string[] = [];
     for (let index = 0; index < 7; index += 1) {
-      results.push(String(await tool.handler({ to: 'idle', message: `wake ${index + 1}` }, context())));
+      results.push(
+        String(await tool.handler({ to: 'idle', message: `wake ${index + 1}` }, context())),
+      );
     }
-    expect(results.slice(0, 6).every((result) => result.includes('a turn started there'))).toBe(true);
+    expect(results.slice(0, 6).every((result) => result.includes('a turn started there'))).toBe(
+      true,
+    );
     expect(results[6]).toContain('idle-chat-wake-per-hour limit');
     expect(results[6]).toContain('No `action` was given, so `send` was used.');
   });
@@ -219,7 +223,7 @@ describe('message_chat tool contract and handler', () => {
     const result = String(await tool.handler({ to: '#2', message: 'Lane 5 here.' }, context()));
     expect(sidebar.createConversation).not.toHaveBeenCalled();
     expect(sidebar.deliverChatMessage).toHaveBeenCalledTimes(1);
-    expect(result).toContain('Delivered to #2');
+    expect(result).toContain('Queued for #2');
     expect(result).toContain('No `action` was given, so `send` was used.');
     // An explicit `new` is still `new`: the inference did not swallow the action
     // that creates a chat, and its result does not claim it was inferred.
@@ -282,7 +286,7 @@ describe('message_chat tool contract and handler', () => {
         '(Reply with message_chat to "sender" if you need to; no need to just acknowledge.)',
     );
     expect(result).toBe(
-      'Delivered to #2 "Bug hunt" (running): it reads this at its next tool round.',
+      'Queued for #2 "Bug hunt" (running): not processed yet; it will be read at a tool round or in a follow-up turn.',
     );
   });
 
@@ -306,8 +310,20 @@ describe('message_chat tool contract and handler', () => {
     const body = 'x'.repeat(501);
     await tool.handler({ action: 'send', to: '#2', message: body }, context());
     expect(sidebar.emitHostActivity.mock.calls).toEqual([
-      [{ kind: 'prompt', conversationId: 'running', text: `📨 Sender → this chat\n${'x'.repeat(499)}…` }],
-      [{ kind: 'prompt', conversationId: 'sender', text: `📤 this chat → Bug hunt  (busy · reads it mid-turn)\n${'x'.repeat(499)}…` }],
+      [
+        {
+          kind: 'prompt',
+          conversationId: 'running',
+          text: `📨 Sender → this chat\n${'x'.repeat(499)}…`,
+        },
+      ],
+      [
+        {
+          kind: 'prompt',
+          conversationId: 'sender',
+      text: `📤 this chat → Bug hunt  (busy · queued, not processed yet)\n${'x'.repeat(499)}…`,
+        },
+      ],
     ]);
   });
 
@@ -317,7 +333,13 @@ describe('message_chat tool contract and handler', () => {
     await tool.handler({ action: 'send', to: 'idle', message: 'Please review.' }, context());
     expect(sidebar.emitHostActivity.mock.calls).toEqual([
       [{ kind: 'prompt', conversationId: 'idle', text: '📨 Sender → this chat\nPlease review.' }],
-      [{ kind: 'prompt', conversationId: 'sender', text: '📤 this chat → Release notes  (idle · started a turn)\nPlease review.' }],
+      [
+        {
+          kind: 'prompt',
+          conversationId: 'sender',
+          text: '📤 this chat → Release notes  (idle · started a turn)\nPlease review.',
+        },
+      ],
     ]);
   });
 
@@ -333,7 +355,7 @@ describe('message_chat tool contract and handler', () => {
     const [delivered] = sidebar.deliverChatMessage.mock.calls[0]!;
 
     expect(result).toBe(
-      'Delivered to #2 "Bug \'hunt\'" (running): it reads this at its next tool round.',
+      'Queued for #2 "Bug \'hunt\'" (running): not processed yet; it will be read at a tool round or in a follow-up turn.',
     );
     expect(sidebar.emitHostActivity.mock.calls).toEqual([
       [
@@ -347,7 +369,7 @@ describe('message_chat tool contract and handler', () => {
         {
           kind: 'prompt',
           conversationId: 'sender',
-          text: '📤 this chat → Bug "hunt"  (busy · reads it mid-turn)\nUse plain quotes.',
+          text: '📤 this chat → Bug "hunt"  (busy · queued, not processed yet)\nUse plain quotes.',
         },
       ],
     ]);
@@ -367,12 +389,21 @@ describe('message_chat tool contract and handler', () => {
     try {
       const { tool, sidebar } = makeTool();
       sidebar.deliverChatMessage.mockReturnValue(new Promise<ChatMessageDelivery>(() => {}));
-      const pending = tool.handler({ action: 'send', to: 'idle', message: 'Please review.' }, context());
+      const pending = tool.handler(
+        { action: 'send', to: 'idle', message: 'Please review.' },
+        context(),
+      );
       await vi.advanceTimersByTimeAsync(20_000);
       await expect(pending).resolves.toContain('had not started after 20 s');
       expect(sidebar.emitHostActivity.mock.calls).toEqual([
         [{ kind: 'prompt', conversationId: 'idle', text: '📨 Sender → this chat\nPlease review.' }],
-        [{ kind: 'prompt', conversationId: 'sender', text: '📤 this chat → Release notes  (not confirmed yet)\nPlease review.' }],
+        [
+          {
+            kind: 'prompt',
+            conversationId: 'sender',
+            text: '📤 this chat → Release notes  (not confirmed yet)\nPlease review.',
+          },
+        ],
       ]);
     } finally {
       vi.useRealTimers();
@@ -385,7 +416,7 @@ describe('message_chat tool contract and handler', () => {
     const absentTool = makeMessageChatTool({ getSidebar: () => absentSidebar });
     await expect(
       absentTool.handler({ action: 'send', to: 'running', message: 'hello' }, context()),
-    ).resolves.toBe('Delivered to #2 "Bug hunt" (running): it reads this at its next tool round.');
+    ).resolves.toBe('Queued for #2 "Bug hunt" (running): not processed yet; it will be read at a tool round or in a follow-up turn.');
 
     const throwing = makeSidebar(hostStatus({ running: ['running'] }));
     throwing.emitHostActivity.mockImplementation(() => {
@@ -394,7 +425,7 @@ describe('message_chat tool contract and handler', () => {
     const throwingTool = makeMessageChatTool({ getSidebar: () => throwing });
     await expect(
       throwingTool.handler({ action: 'send', to: 'running', message: 'hello' }, context()),
-    ).resolves.toBe('Delivered to #2 "Bug hunt" (running): it reads this at its next tool round.');
+    ).resolves.toBe('Queued for #2 "Bug hunt" (running): not processed yet; it will be read at a tool round or in a follow-up turn.');
   });
 
   it('treats a reserved target as running and still routes through the shared prompt router', async () => {
@@ -408,7 +439,7 @@ describe('message_chat tool contract and handler', () => {
       context(),
     );
     expect(sidebar.deliverChatMessage).toHaveBeenCalledWith(expect.any(String), 'running');
-    expect(result).toContain('(running): it reads this at its next tool round.');
+    expect(result).toContain('(running): not processed yet; it will be read at a tool round or in a follow-up turn.');
   });
 
   it('returns actionable list lines for missing message and unresolved references', async () => {
@@ -453,7 +484,7 @@ describe('message_chat tool contract and handler', () => {
       { action: 'send', to: 'running', message: 'window expired' },
       context(),
     );
-    expect(afterWindow).toContain('Delivered to #2');
+    expect(afterWindow).toContain('Queued for #2');
     const otherSender = await tool.handler(
       { action: 'send', to: 'sender', message: 'independent sender cap' },
       context('running'),
@@ -505,7 +536,7 @@ describe('message_chat tool contract and handler', () => {
     sidebar.deliverChatMessage.mockResolvedValue({ kind: 'tell' });
     const result = await tool.handler({ action: 'send', to: 'idle', message: 'hi' }, context());
     expect(result).toBe(
-      'Delivered to #3 "Release notes" (running): it reads this at its next tool round.',
+      'Queued for #3 "Release notes" (running): not processed yet; it will be read at a tool round or in a follow-up turn.',
     );
   });
 

@@ -403,7 +403,12 @@ describe('JobScheduler maxConcurrent (AC4)', () => {
     }
     let finish: () => void = () => undefined;
     const heldRun = new Promise<void>((resolve) => { finish = resolve; });
-    const run = vi.spyOn(AgentTaskRunner.prototype, 'run').mockReturnValue(heldRun);
+    const run = vi.spyOn(AgentTaskRunner.prototype, 'run').mockImplementation(
+      async (_file, _late, admission) => {
+        admission?.onAdmitted?.();
+        await heldRun;
+      },
+    );
     makeScheduler({
       maxConcurrent: 1,
       agentTask: {
@@ -420,6 +425,104 @@ describe('JobScheduler maxConcurrent (AC4)', () => {
       expect(run).toHaveBeenCalledTimes(1);
     } finally {
       finish();
+      await scheduler.stop();
+      run.mockRestore();
+    }
+  });
+
+  it('finishes every due check before waiting on a model admission', async () => {
+    await store.saveJob(
+      makeJob({
+        id: 'model',
+        name: 'model',
+        check: { kind: 'none' },
+        action: { kind: 'agent_task', task: 'run' },
+      }),
+    );
+    store.patchState('model', { task_pending: true, task_pending_since: nowMs });
+    await store.saveJob(makeJob({ id: 'light', name: 'light', check: { kind: 'none' } }));
+    let admit!: () => void;
+    const gate = new Promise<void>((resolve) => (admit = resolve));
+    let finish!: () => void;
+    const active = new Promise<void>((resolve) => (finish = resolve));
+    const run = vi.spyOn(AgentTaskRunner.prototype, 'run').mockImplementation(
+      async (_file, _late, admission) => {
+        await gate;
+        admission?.onAdmitted?.();
+        await active;
+      },
+    );
+    makeScheduler({
+      maxConcurrent: 1,
+      agentTask: {
+        store, power, outboxDir,
+        notifyLocal: vi.fn(), busy: () => undefined, now: () => nowMs,
+        host: () => undefined, pool: () => undefined, defaultModel: () => undefined,
+      },
+    });
+    await scheduler.start({ immediate: false });
+    const ticking = scheduler.tick();
+    try {
+      await vi.waitFor(() => expect(run).toHaveBeenCalledTimes(1));
+      expect(await store.readRuns('light')).toHaveLength(1);
+    } finally {
+      admit();
+      finish();
+      await ticking;
+      await scheduler.stop();
+      run.mockRestore();
+    }
+  });
+
+  it('admits pending model jobs by original pending time, then job id', async () => {
+    for (const id of ['z-tie', 'later', 'a-tie', 'earlier']) {
+      await store.saveJob(
+        makeJob({
+          id,
+          name: id,
+          check: { kind: 'none' },
+          action: { kind: 'agent_task', task: 'run' },
+        }),
+      );
+    }
+    store.patchState('earlier', { task_pending: true, task_pending_since: nowMs - 3_000 });
+    store.patchState('a-tie', { task_pending: true, task_pending_since: nowMs - 2_000 });
+    store.patchState('z-tie', { task_pending: true, task_pending_since: nowMs - 2_000 });
+    store.patchState('later', { task_pending: true, task_pending_since: nowMs - 1_000 });
+
+    const order: string[] = [];
+    const releases = new Map<string, () => void>();
+    const run = vi.spyOn(AgentTaskRunner.prototype, 'run').mockImplementation(
+      async (file, _late, admission) => {
+        const id = file.job.id;
+        order.push(id);
+        admission?.onAdmitted?.();
+        store.patchState(id, {
+          task_pending: false,
+          task_pending_since: null,
+          next_due_at: nowMs + 24 * 60 * 60_000,
+        });
+        await new Promise<void>((resolve) => releases.set(id, resolve));
+      },
+    );
+    makeScheduler({
+      agentTask: {
+        store, power, outboxDir,
+        notifyLocal: vi.fn(), busy: () => undefined, now: () => nowMs,
+        host: () => undefined, pool: () => undefined, defaultModel: () => undefined,
+      },
+    });
+    await scheduler.start({ immediate: false });
+    try {
+      await scheduler.tick();
+      expect(order).toEqual(['earlier']);
+      releases.get('earlier')?.();
+      await vi.waitFor(() => expect((scheduler as unknown as { activeModelJobId?: string }).activeModelJobId).toBeUndefined());
+
+      await scheduler.tick();
+      expect(order).toEqual(['earlier', 'a-tie']);
+    } finally {
+      for (const release of releases.values()) release();
       await scheduler.stop();
       run.mockRestore();
     }

@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import type { HostToWebview } from '../../../src/sidebar/messageBridge';
 
 interface ConversationDraftsOptions {
   activeConversationId: string;
@@ -38,6 +39,23 @@ export function useConversationDrafts({
     },
     [activeConversationId],
   );
+  // Failed user sends return to their own draft, even while another tab is
+  // visible. Preserve anything typed since Send instead of replacing it.
+  useEffect(() => {
+    const recover = (event: MessageEvent<HostToWebview>): void => {
+      const msg = event.data;
+      if (msg.type !== 'setInput' || !msg.text) return;
+      const id = msg.conversationId ?? activeConversationId;
+      if (!openConversationIds.has(id)) return;
+      setDraftByConversation((previous) => {
+        const draft = previous[id] ?? '';
+        if (draft === msg.text || draft.endsWith(`\n\n${msg.text}`)) return previous;
+        return { ...previous, [id]: draft ? `${draft}\n\n${msg.text}` : msg.text };
+      });
+    };
+    window.addEventListener('message', recover);
+    return () => window.removeEventListener('message', recover);
+  }, [activeConversationId, openConversationIds]);
   const draftBearingConversationIds = useMemo(
     () => [
       ...new Set([

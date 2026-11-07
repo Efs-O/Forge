@@ -21,10 +21,19 @@ import { getLogger } from '../util/logger';
 import type * as vscode from 'vscode';
 import type { UserPromptOptions } from './transcriptMutations';
 import type { ToolCallingLoopResult } from '../agent/ToolCallingLoop';
+import type { QuestionWaitRunner } from '../tools/toolContract';
 import { abortedTurnOutcome, type ForgeTurnOutcome } from './turnOutcome';
 import type { AgentProgressEvent } from './AgentProgress';
 import { describeError } from '../util/describeError';
 import { checkpointReadyMessage } from './checkpointStats';
+import {
+  acquireExternalHold,
+  isExternalCapacityRefusal,
+  isLocalCapacityRefusal,
+  retryResumeAcquire,
+  resumeWaitMessages,
+  withSuspendedQuestionWait,
+} from './providerQuestionWait';
 
 const log = getLogger();
 
@@ -51,6 +60,8 @@ export interface ProviderTurnContext {
     postC: (msg: HostToWebview) => void,
     apiKey: string | undefined,
     checkpoint: CheckpointSession,
+    withQuestionWait?: QuestionWaitRunner,
+    getApiKey?: () => string | undefined,
   ) => Promise<ToolCallingLoopResult>;
 }
 
@@ -139,8 +150,9 @@ export async function runCloudProviderTurn(
   let apiKey: string;
   let baseUrl: string;
   try {
-    externalHold = await ctx.pool.acquireExternalTurnHold?.(model.name, convId, conv.title);
+    externalHold = await acquireExternalHold(ctx.pool, model.name, convId, conv.title, ctrl.signal);
     ({ baseUrl, apiKey } = await resolveCloudRequestTarget(model, ctx.secrets, ctrl.signal));
+    if (ctrl.signal.aborted) throw new Error('Cloud model startup cancelled.');
     log.info(`[AgentLoop] ${model.provider} token resolved for model=${model.name}`);
   } catch (err) {
     externalHold?.release();
@@ -154,11 +166,13 @@ export async function runCloudProviderTurn(
     postC({ type: 'error', message: msg });
     // Setup can refuse a model switch while another chat holds the GPUs.
     // No prompt was committed yet; preserve it just as local startup does.
-    postC({ type: 'setInput', text });
+    if (!promptOptions?.internal && !promptOptions?.origin && !promptOptions?.sender)
+      postC({ type: 'setInput', text });
     ctx.lifecycle.settle(convId);
     return { kind: 'failed', error: msg, finalText: '' };
   }
   ctx.commitUserPrompt(conv, text, attachments, promptOptions);
+  promptOptions?.onStarted?.();
   ctx.events.onBackendReady?.(model.name);
   postC({ type: 'ready' });
   const checkpoint = ctx.checkpoints.beginTurn(`turn-${Date.now()}`, convId);
@@ -176,6 +190,54 @@ export async function runCloudProviderTurn(
       postC,
       apiKey,
       checkpoint,
+      async <T>(wait: () => Promise<T>): Promise<T> =>
+        withSuspendedQuestionWait(
+          ctx.lifecycle,
+          convId,
+          ctrl.signal,
+          wait,
+          async () => {
+            externalHold?.release();
+            externalHold = undefined;
+          },
+          async () => {
+            const messages = resumeWaitMessages(convId, model.name, postC);
+            externalHold = await retryResumeAcquire(
+              ctrl.signal,
+              async () => {
+                let nextHold: { release(): void } | undefined;
+                try {
+                  nextHold = await acquireExternalHold(
+                    ctx.pool,
+                    model.name,
+                    convId,
+                    conv.title,
+                    ctrl.signal,
+                  );
+                  const target = await resolveCloudRequestTarget(model, ctx.secrets, ctrl.signal);
+                  if (ctrl.signal.aborted) throw new Error('Cloud model reacquisition cancelled.');
+                  baseUrl = target.baseUrl;
+                  apiKey = target.apiKey;
+                  return nextHold;
+                } catch (error) {
+                  nextHold?.release();
+                  throw error;
+                }
+              },
+              isExternalCapacityRefusal,
+              messages.waiting,
+              messages.ready,
+              (hold) => hold?.release(),
+            );
+            if (ctrl.signal.aborted) {
+              externalHold?.release();
+              externalHold = undefined;
+              throw new Error('Cloud model reacquisition cancelled.');
+            }
+            ctx.events.onBackendReady?.(model.name);
+          },
+        ),
+      () => apiKey,
     );
     const incompleteReason = ctx.lifecycle.incompleteReason(convId);
     outcome = ctrl.signal.aborted
@@ -261,7 +323,7 @@ export async function runLocalProviderTurn(
     try {
       try {
         if (typeof ctx.pool.acquireForTurn === 'function') {
-          turnLease = await ctx.pool.acquireForTurn(model.name);
+          turnLease = await ctx.pool.acquireForTurn(model.name, { signal: ctrl.signal });
         } else {
           const legacyBackend = await ctx.pool.acquire(model.name);
           turnLease = { backend: legacyBackend, release: async () => undefined };
@@ -294,6 +356,7 @@ export async function runLocalProviderTurn(
         return abortedTurnOutcome(ctx.lifecycle.terminationKind(convId));
       }
       ctx.commitUserPrompt(conv, text, attachments, promptOptions);
+      promptOptions?.onStarted?.();
       postC({ type: 'ready' });
     } catch (err) {
       await turnLease?.release();
@@ -305,7 +368,13 @@ export async function runLocalProviderTurn(
       postC({ type: 'backendDown', message: msg });
       // The prompt never reached conv.messages, so the next sync drops its
       // optimistic row; hand it back, as an admission refusal does (U20-01).
-      if (!ctrl.signal.aborted) postC({ type: 'setInput', text });
+      if (
+        !ctrl.signal.aborted &&
+        !promptOptions?.internal &&
+        !promptOptions?.origin &&
+        !promptOptions?.sender
+      )
+        postC({ type: 'setInput', text });
       if (ctrl.signal.aborted) postC({ type: 'done', finishReason: 'cancelled' });
       ctx.lifecycle.settle(convId);
       return ctrl.signal.aborted
@@ -333,6 +402,46 @@ export async function runLocalProviderTurn(
         postC,
         undefined,
         checkpoint,
+        async <T>(wait: () => Promise<T>): Promise<T> =>
+          withSuspendedQuestionWait(
+            ctx.lifecycle,
+            convId,
+            ctrl.signal,
+            wait,
+            async () => {
+              await turnLease?.release();
+              turnLease = undefined;
+            },
+            async () => {
+              const messages = resumeWaitMessages(convId, model.name, postC);
+              if (!ctx.pool.acquireForTurn) {
+                throw new Error('Backend pool cannot safely reacquire the turn model.');
+              }
+              turnLease = await retryResumeAcquire(
+                ctrl.signal,
+                async () => {
+                  const lease = await ctx.pool.acquireForTurn!(model.name, { signal: ctrl.signal });
+                  if (ctrl.signal.aborted) {
+                    await lease.release();
+                    throw new Error('Model reacquisition cancelled.');
+                  }
+                  return lease;
+                },
+                isLocalCapacityRefusal,
+                messages.waiting,
+                messages.ready,
+                (lease) => lease.release(),
+              );
+              if (ctrl.signal.aborted) {
+                await turnLease.release();
+                turnLease = undefined;
+                throw new Error('Model reacquisition cancelled.');
+              }
+              backend = turnLease.backend;
+              ctx.lifecycle.setBackend(convId, backend);
+              ctx.events.onBackendReady?.(model.name);
+            },
+          ),
       );
       const incompleteReason = ctx.lifecycle.incompleteReason(convId);
       outcome = ctrl.signal.aborted
