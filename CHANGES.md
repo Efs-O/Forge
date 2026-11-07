@@ -1,5 +1,18 @@
 # Forge — Recent Changes
 
+## 0.17.131
+
+- Scheduled model jobs now enter one fair, due-time-ordered lane. A job waiting
+  for capacity stays pending without occupying the running slot, and chat
+  retitling uses the same admission path.
+- A chat waiting for an answer releases its managed-model reservation without
+  closing the question. Answering reacquires the model and resumes the same
+  turn and checkpoint, including clear handling when reacquisition fails or is
+  cancelled.
+- Agent-originated startup messages no longer leak into the composer, startup
+  acknowledgement waits for a committed turn, and adjacent Clanker notices
+  merge consistently.
+
 ## 0.17.130
 
 - A daily retitle pass that another job's turn pushes out before it has named
