@@ -1,17 +1,17 @@
 import { lookup as dnsLookup } from 'dns/promises';
-import { Agent } from 'undici';
 import {
   MAX_REDIRECT_HOPS,
   REQUEST_TIMEOUT_MS,
   ToolError,
   USER_AGENT,
   blockedResolvedAddress,
+  createPinnedAgent,
   defaultPinnedFetch,
   parseFetchUrl,
   ssrfCheck,
   type ResolvedAddress,
   type WebFetchDependencies,
-} from '../fetchTool';
+} from '../webFetchSsrf';
 import { normalizedHostname } from '../fetchHostApprovals';
 
 /**
@@ -100,18 +100,7 @@ async function fetchResourceHop(
     if (reason) throw new ToolError(`web_fetch: ${reason}`);
   }
   const pinned = addresses[0] as ResolvedAddress;
-  const agent = new Agent({
-    connect: {
-      lookup: (host, lookupOptions, callback) => {
-        if (host.toLowerCase() !== hostname) {
-          callback(new Error(`No vetted address for ${host}`), '', 0);
-          return;
-        }
-        if (lookupOptions.all) callback(null, [{ address: pinned.address, family: pinned.family }]);
-        else callback(null, pinned.address, pinned.family);
-      },
-    },
-  });
+  const agent = createPinnedAgent(new Map([[hostname, pinned]]));
   try {
     const response = await (dependencies.fetch ?? defaultPinnedFetch)(
       url,

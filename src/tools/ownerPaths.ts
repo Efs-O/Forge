@@ -3,6 +3,7 @@ import * as os from 'os';
 import * as path from 'path';
 import { defaultPolicyPath } from '../config/PolicyLoader';
 import { realPathOfNearestAncestor } from '../util/realPath';
+import { pathApiFor } from '../util/drivePath';
 import { expandUserTokens, normalizePathForMatch, tokenPathCandidate } from './secretPaths';
 import { nonWriteArguments } from './shellWritePositions';
 import { isDirectoryChange } from './shellReadOnlyRules';
@@ -103,11 +104,6 @@ export interface OwnerOnlySetOptions {
   policyPath?: string;
 }
 
-/** The path API of the OS the check is being made for, so a Windows-shaped path on a Linux runner is judged as Windows judged it. */
-function apiFor(platform: NodeJS.Platform): path.PlatformPath {
-  return platform === 'win32' ? path.win32 : path.posix;
-}
-
 /**
  * The owner-only roots for one window: `~/.forge/` always, and `config.yaml` only
  * while the policy file is absent.
@@ -128,7 +124,7 @@ function apiFor(platform: NodeJS.Platform): path.PlatformPath {
 export function ownerOnlySetFor(options: OwnerOnlySetOptions): OwnerOnlySet {
   const platform = options.platform ?? process.platform;
   const home = options.home ?? os.homedir();
-  const api = apiFor(platform);
+  const api = pathApiFor(platform);
   const roots: string[] = [];
   const add = (value: string | undefined): void => {
     if (typeof value !== 'string' || !value.trim()) return;
@@ -184,7 +180,7 @@ function resolveArgumentTarget(
   if (typeof supplied !== 'string') return undefined;
   const trimmed = supplied.trim();
   if (!trimmed) return undefined;
-  const api = apiFor(set.platform);
+  const api = pathApiFor(set.platform);
   const expanded = normalizePathForMatch(expandUserTokens(trimmed, set.home), set.platform);
   const fallbackBase = base ?? set.workspaceRoot;
   const absolute = api.isAbsolute(expanded)

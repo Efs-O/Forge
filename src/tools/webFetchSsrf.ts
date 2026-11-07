@@ -1,0 +1,179 @@
+import { isIP } from 'net';
+import { Agent, fetch as undiciFetch } from 'undici';
+import type { ForgeConfig } from '../config/types';
+import { normalizedHostname } from './fetchHostApprovals';
+
+// ── SSRF guard ────────────────────────────────────────────────────────────────
+
+export class ToolError extends Error {}
+
+const BLOCKED_SCHEMES = ['file://', 'data:', 'javascript:'];
+export const MAX_REDIRECT_HOPS = 3;
+export const REQUEST_TIMEOUT_MS = 10_000;
+export const USER_AGENT = 'Forge-VSCode/0.16 (local-llm assistant)';
+export interface ResolvedAddress {
+  address: string;
+  family: number;
+}
+
+interface RequestInitWithSignal {
+  redirect: 'manual';
+  signal: AbortSignal;
+  method: string;
+  body?: Uint8Array;
+  headers: Record<string, string>;
+}
+
+export type PinnedFetch = (
+  url: string,
+  address: ResolvedAddress,
+  init: RequestInitWithSignal,
+  agent: Agent,
+) => Promise<Response>;
+
+export interface WebFetchDependencies {
+  lookup?: (hostname: string) => Promise<ResolvedAddress[]>;
+  fetch?: PinnedFetch;
+  /** The config, for `fetch.allowed_hosts`. Absent means no host is
+   *  pre-approved, which is the safe direction: everything asks. */
+  getConfig?: () => ForgeConfig;
+}
+
+export function parseFetchUrl(value: string): URL | string {
+  for (const scheme of BLOCKED_SCHEMES) {
+    if (value.toLowerCase().startsWith(scheme)) return `Blocked scheme: ${scheme}`;
+  }
+  let url: URL;
+  try {
+    url = new URL(value);
+  } catch {
+    return 'Invalid URL.';
+  }
+  if (url.protocol !== 'http:' && url.protocol !== 'https:') {
+    return `Blocked scheme: ${url.protocol}`;
+  }
+  const hostname = normalizedHostname(url);
+  if (!hostname.includes('.')) return `Blocked: hostname has no dot: ${hostname}`;
+  if (isIP(hostname) !== 0) return `Blocked: raw IP address not permitted: ${hostname}`;
+  return url;
+}
+
+function parseIpv6(address: string): number[] | undefined {
+  let value = address.toLowerCase().split('%')[0] ?? '';
+  if (!value.includes(':')) return undefined;
+  const lastColon = value.lastIndexOf(':');
+  const dotted = value.slice(lastColon + 1);
+  if (dotted.includes('.')) {
+    const octets = dotted.split('.').map(Number);
+    if (octets.length !== 4 || octets.some((part) => !Number.isInteger(part) || part > 255)) {
+      return undefined;
+    }
+    const firstGroup = (((octets[0] as number) << 8) | (octets[1] as number)).toString(16);
+    const secondGroup = (((octets[2] as number) << 8) | (octets[3] as number)).toString(16);
+    value = `${value.slice(0, lastColon + 1)}` + `${firstGroup}:${secondGroup}`;
+  }
+  const halves = value.split('::');
+  if (halves.length > 2) return undefined;
+  const left = halves[0] ? halves[0].split(':') : [];
+  const right = halves.length === 2 && halves[1] ? halves[1].split(':') : [];
+  const groups = [...left, ...Array(8 - left.length - right.length).fill('0'), ...right];
+  if (groups.length !== 8 || groups.some((part) => !/^[\da-f]{1,4}$/i.test(part))) {
+    return undefined;
+  }
+  return groups.map((part) => Number.parseInt(part, 16));
+}
+
+function blockedIpv4(address: string): boolean {
+  const parts = address.split('.').map(Number);
+  if (parts.length !== 4 || parts.some((part) => !Number.isInteger(part) || part > 255)) {
+    return true;
+  }
+  const [a, b, c] = parts as [number, number, number, number];
+  return (
+    a === 0 ||
+    a === 10 ||
+    a === 127 ||
+    (a === 100 && b !== undefined && b >= 64 && b <= 127) ||
+    (a === 169 && b === 254) ||
+    (a === 172 && b !== undefined && b >= 16 && b <= 31) ||
+    (a === 192 && b === 168) ||
+    (a === 192 && b === 0 && c === 0) ||
+    (a === 198 && (b === 18 || b === 19)) ||
+    a >= 224
+  );
+}
+
+function blockedAddress(address: string): boolean {
+  const family = isIP(address);
+  if (family === 4) return blockedIpv4(address);
+  if (family !== 6) return true;
+  const groups = parseIpv6(address);
+  if (!groups) return true;
+  if (groups.every((group) => group === 0)) return true;
+  if (groups.slice(0, 7).every((group) => group === 0) && groups[7] === 1) return true;
+  if ((groups[0] as number) >= 0xfc00 && (groups[0] as number) <= 0xfdff) return true;
+  if ((groups[0] as number) >= 0xfe80 && (groups[0] as number) <= 0xfebf) return true;
+  if (groups.slice(0, 6).every((group) => group === 0)) {
+    const compatibleIpv4 = [
+      ((groups[6] as number) >> 8) & 0xff,
+      (groups[6] as number) & 0xff,
+      ((groups[7] as number) >> 8) & 0xff,
+      (groups[7] as number) & 0xff,
+    ].join('.');
+    return blockedIpv4(compatibleIpv4);
+  }
+  if (groups.slice(0, 5).every((group) => group === 0) && groups[5] === 0xffff) {
+    const mappedIpv4 = [
+      ((groups[6] as number) >> 8) & 0xff,
+      (groups[6] as number) & 0xff,
+      ((groups[7] as number) >> 8) & 0xff,
+      (groups[7] as number) & 0xff,
+    ].join('.');
+    return blockedIpv4(mappedIpv4);
+  }
+  return false;
+}
+
+export function blockedResolvedAddress(address: ResolvedAddress): string | undefined {
+  if (address.family !== isIP(address.address) || blockedAddress(address.address)) {
+    return `Blocked private, loopback, or reserved address: ${address.address}`;
+  }
+  return undefined;
+}
+
+/**
+ * Validate the URL's shape before DNS resolution. Resolved addresses are
+ * checked separately immediately before each connection.
+ */
+export function ssrfCheck(url: string): string | null {
+  const parsed = parseFetchUrl(url);
+  return typeof parsed === 'string' ? parsed : null;
+}
+
+export function defaultPinnedFetch(
+  url: string,
+  _address: ResolvedAddress,
+  init: RequestInitWithSignal,
+  agent: Agent,
+): Promise<Response> {
+  return undiciFetch(url, {
+    ...init,
+    dispatcher: agent,
+  } as unknown as Parameters<typeof undiciFetch>[1]) as unknown as Promise<Response>;
+}
+
+export function createPinnedAgent(pins: Map<string, ResolvedAddress>): Agent {
+  return new Agent({
+    connect: {
+      lookup: (hostname, options, callback) => {
+        const pin = pins.get(hostname.toLowerCase());
+        if (!pin) {
+          callback(new Error(`No vetted address for ${hostname}`), '', 0);
+          return;
+        }
+        if (options.all) callback(null, [{ address: pin.address, family: pin.family }]);
+        else callback(null, pin.address, pin.family);
+      },
+    },
+  });
+}

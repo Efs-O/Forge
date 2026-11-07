@@ -11,6 +11,7 @@ import * as vscode from 'vscode';
 import type { ForgeConfig } from '../config/types';
 import { defaultState, type JobStore } from '../jobs/JobStore';
 import { JobSchema, type Job, type JobFile } from '../jobs/jobSchema';
+import { resolveJobRef, type JobMatch } from '../jobs/jobRefResolver';
 import { appendHomeNote } from '../jobs/jobsHome';
 import { nextDue } from '../jobs/schedule';
 import { describeJob, describeSchedule, formatWhen, lastRunOutcome } from '../jobs/jobDescribe';
@@ -263,26 +264,9 @@ async function runManageJobs(deps: ManageJobsDeps, args: Record<string, unknown>
   }
 }
 
-/** The result of fuzzy-matching a job reference. */
-type JobMatch =
-  | { kind: 'none' }
-  | { kind: 'ambiguous'; candidates: JobFile[] }
-  | { kind: 'one'; jobFile: JobFile };
-
 /** Resolve a job by exact id, exact name, or unique substring (case-insensitive). */
 async function resolveJob(deps: ManageJobsDeps, ref: string): Promise<JobMatch> {
-  const all = await deps.store.loadAll();
-  const needle = ref.trim().toLowerCase();
-  const exact = all.find(
-    (jf) => jf.job.id.toLowerCase() === needle || jf.job.name.toLowerCase() === needle,
-  );
-  if (exact) return { kind: 'one', jobFile: exact };
-  const partial = all.filter(
-    (jf) => jf.job.id.toLowerCase().includes(needle) || jf.job.name.toLowerCase().includes(needle),
-  );
-  if (partial.length === 0) return { kind: 'none' };
-  if (partial.length === 1) return { kind: 'one', jobFile: partial[0]! };
-  return { kind: 'ambiguous', candidates: partial };
+  return resolveJobRef(await deps.store.loadAll(), ref);
 }
 
 /** One line per job: name, enabled, schedule, last run and outcome, next due. */

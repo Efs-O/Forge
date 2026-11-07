@@ -1,6 +1,5 @@
 import * as os from 'os';
-import * as path from 'path';
-import { foldDrivePath } from '../util/drivePath';
+import { foldDrivePath, pathApiFor } from '../util/drivePath';
 import type { ForgeConfig } from '../config/types';
 
 /**
@@ -120,13 +119,6 @@ export function normalizePathForMatch(
   return platform === 'win32' ? slashes.toLowerCase() : slashes;
 }
 
-/** The path API of the OS being judged, so a Windows-shaped path on a Linux
- *  runner is judged the way Windows judged it (the same idea as
- *  `ownerPaths.ts`'s `apiFor`). */
-function apiFor(platform: NodeJS.Platform): path.PlatformPath {
-  return platform === 'win32' ? path.win32 : path.posix;
-}
-
 /** A path that is already absolute, in the form the matcher compares: `~` forms
  *  expanded, `..` collapsed, case folded where the OS is. undefined when it is
  *  not absolute — a relative path has no absolute form until something resolves
@@ -137,7 +129,7 @@ function absoluteForMatch(
   home: string,
   platform: NodeJS.Platform,
 ): string | undefined {
-  const api = apiFor(platform);
+  const api = pathApiFor(platform);
   const expanded = expandUserTokens(value, home);
   if (!api.isAbsolute(expanded)) return undefined;
   try {
@@ -171,7 +163,7 @@ export function resolvePathForMatch(
   base?: string,
 ): string | undefined {
   if (base === undefined) return absoluteForMatch(value, home, platform);
-  const api = apiFor(platform);
+  const api = pathApiFor(platform);
   const expandedBase = expandUserTokens(base, home);
   if (!api.isAbsolute(expandedBase)) return undefined;
   try {

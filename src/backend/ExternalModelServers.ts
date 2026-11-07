@@ -1,8 +1,13 @@
-import { spawn, type SpawnOptions } from 'child_process';
+import { spawn } from 'child_process';
 import type { ForgeConfig, ModelConfig } from '../config/types';
 import { mergeGroupsIntoModel } from '../config/ConfigResolver';
 import { getLogger } from '../util/logger';
-import { deferredStopInvocation, STOP_GRACE_MS } from './deferredStop';
+import {
+  launchStopWatcher,
+  type StopChild,
+  type StopOnExitOptions,
+  type StopSpawner,
+} from './ExternalServerStopWatcher';
 import {
   freeDecisionResidency,
   isConnectionRefused,
@@ -27,24 +32,7 @@ export const START_POLL_MS = 2_000;
 
 export type SecretLookup = (key: string) => Promise<string | undefined>;
 
-export interface StopChild {
-  unref(): void;
-  kill?(): boolean;
-  once?(event: 'error', listener: (error: Error) => void): unknown;
-}
-
-export type StopSpawner = (
-  command: string,
-  args: readonly string[],
-  options: SpawnOptions,
-) => StopChild;
-
-export interface StopOnExitOptions {
-  lastWindow: boolean;
-  isBusy: (modelName: string) => boolean;
-  /** Lifecycle lease directory the deferred watcher re-checks before stopping. */
-  leaseDir: string;
-}
+export type { StopChild, StopOnExitOptions, StopSpawner } from './ExternalServerStopWatcher';
 
 export class ExternalServerBusyError extends Error {}
 
@@ -450,28 +438,7 @@ export class ExternalModelServers {
   }
 
   private launchStop(model: ModelConfig, leaseDir: string): StopChild | undefined {
-    const stopCommand = model.stop_command ?? [];
-    if (!stopCommand[0]) return undefined; // Config validation makes this unreachable in production.
-    const { command, args, env } = deferredStopInvocation(leaseDir, STOP_GRACE_MS, stopCommand);
-    try {
-      const child = this.spawnImpl(command, args, {
-        detached: true,
-        windowsHide: true,
-        stdio: 'ignore',
-        env,
-      });
-      child.once?.('error', (error) =>
-        log.error(`[ExternalModelServers] stop watcher failed for "${model.name}"`, error),
-      );
-      child.unref();
-      log.info(
-        `[ExternalModelServers] stop scheduled for "${model.name}" in ${STOP_GRACE_MS / 1000} s unless a Forge window reopens`,
-      );
-      return child;
-    } catch (error) {
-      log.error(`[ExternalModelServers] could not launch stop for "${model.name}"`, error);
-      return undefined;
-    }
+    return launchStopWatcher(this.spawnImpl, model, leaseDir);
   }
 }
 

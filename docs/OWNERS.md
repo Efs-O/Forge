@@ -440,6 +440,7 @@ overlaps with an existing owner, extend the owner instead.
 | one `SdServerBackend` per configured sdcpp backend  | `src/backend/sdServerRegistry.ts`    |
 | External server log → output channel (`server_log`) | `src/backend/serverLogFollower.ts`   |
 | Unloading local servers Forge does not spawn (`unload_path`, Strata) | `src/backend/ExternalModelServers.ts` |
+| The detached deferred-stop watcher a managed external server leaves behind (`stop_command`, grace period, lease re-check) | `src/backend/ExternalServerStopWatcher.ts` |
 | Managed external server residency classification (`/v1/models` and stale `/v1/status` claims) | `src/backend/ExternalModelResidencyProbe.ts` |
 | Deferred `stop_on_exit` watcher (reload vs close) | `src/backend/deferredStop.ts` |
 | Localhost model-control HTTP API                  | `src/backend/ControlServer.ts`         |
@@ -450,6 +451,7 @@ overlaps with an existing owner, extend the owner instead.
 | `/models` catalog contract + availability         | `src/backend/ControlModelCatalog.ts`   |
 | Control-server discovery records (LOCALAPPDATA)   | `src/backend/ControlServerRegistry.ts` |
 | Machine-wide llama.cpp runtime discovery + leases | `src/backend/SharedRuntimeRegistry.ts` |
+| Machine-wide managed-external turn holds (record dir, TTL, refresh interval, lock) | `src/backend/ExternalTurnHolds.ts` |
 | Backend pool contract (IBackendPool)              | `src/backend/poolTypes.ts`             |
 | Slot boot/restart + dead-slot reconcile           | `src/backend/poolStart.ts`             |
 | llama-server stdio/exit diagnostics               | `src/backend/serverDiagnostics.ts`     |
@@ -521,7 +523,9 @@ overlaps with an existing owner, extend the owner instead.
 | Local llama.cpp fetch (30 min headers wait)  | `src/llm/localLlamaFetch.ts`                 |
 | Cut-off tool call: type + classification     | `src/llm/ToolCallTruncatedError.ts`          |
 | No-projector backend error classification    | `src/llm/imageUnsupportedError.ts`           |
-| Context measured + output budget estimate, per-slot context, `DEFAULT_LLAMA_CTX` and `DEFAULT_LLAMA_PARALLEL` | `src/util/contextBudget.ts` |
+| Live per-request output budget tracking, and the re-export facade every consumer still imports from | `src/util/contextBudget.ts` |
+| Token estimation for prompts and tool results (`CHARS_PER_TOKEN`, `estimateTokens`, `estimateContextParts`) | `src/util/tokenEstimate.ts` |
+| llama.cpp context and KV sizing (`spawnArgs`, `kvUnified`, `perSlotContext`, `reasoningReserve`) | `src/util/llamaContextBudget.ts` |
 | Token-count display formatting               | `src/util/formatTokens.ts`                   |
 | Elapsed-duration display formatting          | `src/util/formatDuration.ts`                 |
 | Local date + wall clock for the model        | `src/util/localClock.ts`                     |
@@ -612,7 +616,8 @@ overlaps with an existing owner, extend the owner instead.
 | Search provider requests and result formatting (DuckDuckGo / Tavily) | `src/tools/searchTool.ts` |
 | DuckDuckGo HTML result extraction and anomaly detection | `src/tools/searchToolDuckDuckGo.ts` |
 | HTML to plain text for fetched web pages                | `src/util/htmlText.ts` |
-| URL fetch tool and the SSRF guard (URL, DNS and address checks, pinned fetch) | `src/tools/fetchTool.ts` |
+| URL fetch tool: redirects, response limits and tool wiring — the guard itself is owned by the row below | `src/tools/fetchTool.ts` |
+| SSRF primitives + pinned-agent factory shared by `web_fetch` and the render-html preview | `src/tools/webFetchSsrf.ts` |
 | Bounded streamed response text reader (shared web and jobs fetch) | `src/util/readTextCapped.ts` |
 | LSP provider handlers dispatched by `code_intel`, and the `path:line: severity code: message` spelling both diagnostics readers share | `src/tools/lspTools.ts` |
 | In-memory workspace memory tool            | `src/tools/memoryTools.ts`            |
@@ -868,6 +873,7 @@ the configured override stays the existing `video.ffmpeg_path` key.
 | Check context + result types                               | `src/jobs/checks/checkTypes.ts`                                |
 | Human-readable job description (for `/jobs`)               | `src/jobs/jobDescribe.ts`                                      |
 | `manage_jobs` tool (create/update/pause/delete)            | `src/tools/jobTools.ts`                                        |
+| Job reference resolution (exact id/name, then substring) shared by `manage_jobs` and `/job` | `src/jobs/jobRefResolver.ts` |
 | Discuss chat seeding (`manage_jobs` + `/job chat`)         | `src/jobs/jobDiscuss.ts`                                       |
 | `agent_task` runner (unattended agent turn)                 | `src/jobs/agentTask.ts`                                        |
 | Sessions panel Jobs tab: what the store says, as one snapshot | `src/jobs/jobPanelSnapshot.ts` (push bridge: `src/sidebar/jobPanelUpdates.ts`) |
@@ -960,6 +966,7 @@ the configured override stays the existing `video.ffmpeg_path` key.
 | ------------------------------------------- | ----------------------------- |
 | Path containment test (vscode-free)         | `src/util/pathContainment.ts` |
 | The drive fold `/n/x` → `N:/x` (vscode-free) | `src/util/drivePath.ts`       |
+| The path API of the OS being judged, so a Windows-shaped path on a Linux runner is judged the Windows way (`pathApiFor`) | `src/util/drivePath.ts` |
 | Real path of the nearest existing ancestor (8.3 names, junctions; sync) | `src/util/realPath.ts` |
 | Spawn-and-collect child process (no vscode) | `src/util/processSpawn.ts`    |
 | Streamed child-output head+tail cap         | `src/util/outputCap.ts`       |

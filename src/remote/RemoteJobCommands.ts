@@ -17,6 +17,7 @@
 
 import type { JobStore } from '../jobs/JobStore';
 import type { JobFile } from '../jobs/jobSchema';
+import { resolveJobRef, type JobMatch } from '../jobs/jobRefResolver';
 import { describeJob, describeSchedule, formatWhen } from '../jobs/jobDescribe';
 import { USER_QUIET_MS } from '../jobs/agentTaskAdmission';
 import { openDiscussChat } from '../jobs/jobDiscuss';
@@ -462,11 +463,6 @@ async function editJobCard(
 }
 
 /** Resolve a job by number (1-based, as listed by /jobs), exact id, exact name, or unique substring. */
-type JobMatch =
-  | { kind: 'none' }
-  | { kind: 'ambiguous'; candidates: JobFile[] }
-  | { kind: 'one'; jobFile: JobFile };
-
 function resolveJob(all: readonly JobFile[], ref: string): JobMatch {
   const trimmed = ref.trim();
   // A bare number is the position in the /jobs list (1-based).
@@ -476,17 +472,7 @@ function resolveJob(all: readonly JobFile[], ref: string): JobMatch {
     if (byNumber) return { kind: 'one', jobFile: byNumber };
     return { kind: 'none' };
   }
-  const needle = trimmed.toLowerCase();
-  const exact = all.find(
-    (jf) => jf.job.id.toLowerCase() === needle || jf.job.name.toLowerCase() === needle,
-  );
-  if (exact) return { kind: 'one', jobFile: exact };
-  const partial = all.filter(
-    (jf) => jf.job.id.toLowerCase().includes(needle) || jf.job.name.toLowerCase().includes(needle),
-  );
-  if (partial.length === 0) return { kind: 'none' };
-  if (partial.length === 1) return { kind: 'one', jobFile: partial[0]! };
-  return { kind: 'ambiguous', candidates: partial };
+  return resolveJobRef(all, ref);
 }
 
 /** Test seam: drops any delete confirmation this process is holding. */

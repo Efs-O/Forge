@@ -117,6 +117,18 @@ describe('/job — pause and resume', () => {
     expect((await store.load('disk'))?.job.enabled).toBe(true);
   });
 
+  it('takes a bare number as the list position, not a substring', async () => {
+    // Position wins over substring: job 2 is the second row of /jobs even when
+    // the first row's id also contains the number.
+    await store.saveJob(job({ id: 'a2', name: 'Beta2', created_at: 0 }));
+    await store.saveJob(job({ id: 'disk', name: 'Disk', created_at: 1, enabled: false }));
+    const result = await run('/job 2 pause');
+    expect(result).toEqual({ kind: 'handled' });
+    expect(channel.sent.at(-1)!.text).toContain('paused "Disk"');
+    expect((await store.load('disk'))?.job.enabled).toBe(false);
+    expect((await store.load('a2'))?.job.enabled).toBe(true);
+  });
+
   it('resolves a case-insensitive name', async () => {
     await store.saveJob(job());
     const result = await run('/job DISK pause');
