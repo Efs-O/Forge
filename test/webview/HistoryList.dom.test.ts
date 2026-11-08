@@ -109,6 +109,43 @@ const input = (): HTMLInputElement | null =>
   container.querySelector<HTMLInputElement>('.history-rename-input');
 
 describe('HistoryList row actions', () => {
+  it('hides legacy copies by default but can reveal and restore them without deleting anything', () => {
+    const onRestore = vi.fn();
+    const onDelete = vi.fn();
+    const props = {
+      items: [ITEMS[0], { ...ITEMS[1], legacy_global: true }],
+      archived: [
+        {
+          id: 'legacy-overflow',
+          title: 'old shared chat',
+          createdAt: 1,
+          updatedAt: 1,
+          legacy_global: true,
+        },
+      ],
+    };
+    renderClosed({ onRestore, onDelete }, props);
+    expect(tabButton('archived').textContent).toContain('1');
+    expect(container.querySelectorAll('#history-list .history-item')).toHaveLength(1);
+    const checkbox = container.querySelector<HTMLInputElement>('input[type="checkbox"]')!;
+    expect(checkbox.checked).toBe(false);
+    expect(checkbox.parentElement?.textContent).toContain('Include legacy chats (2)');
+    click(checkbox);
+    expect(tabButton('archived').textContent).toContain('3');
+    const rows = container.querySelectorAll<HTMLButtonElement>('#history-list .history-item');
+    expect(rows).toHaveLength(3);
+    click(rows[1]!);
+    expect(onRestore).toHaveBeenCalledWith('b');
+    expect(onDelete).not.toHaveBeenCalled();
+    render({ onRestore, onDelete }, { ...props, expanded: false });
+    renderClosed({ onRestore, onDelete }, props);
+    expect(container.querySelector<HTMLInputElement>('input[type="checkbox"]')?.checked).toBe(
+      false,
+    );
+    expect(container.querySelectorAll('#history-list .history-item')).toHaveLength(1);
+    expect(onDelete).not.toHaveBeenCalled();
+  });
+
   it('lists every closed chat, recent and overflow, under Archived and none under Chats', () => {
     render({}, { archived: [{ id: 'old', title: 'old chat', createdAt: 1, updatedAt: 1 }] });
     const toggle = container.querySelector<HTMLButtonElement>('#history-tab-archived');
@@ -134,11 +171,7 @@ describe('HistoryList row actions', () => {
   it('opens one row menu at a time', () => {
     renderClosed();
     click(kebabs()[0]!);
-    expect(menuItems().map((b) => b.textContent)).toEqual([
-      'Rename',
-      'Reset approvals',
-      'Delete…',
-    ]);
+    expect(menuItems().map((b) => b.textContent)).toEqual(['Rename', 'Reset approvals', 'Delete…']);
 
     click(kebabs()[1]!);
     // Second row replaces the first rather than both standing open.
@@ -250,7 +283,9 @@ describe('HistoryList row actions', () => {
     expect(open.querySelector('.history-item-status')?.textContent).toContain('Open');
     openTab('archived');
     const archived = container.querySelector('#history-list .history-chat-item')!;
-    expect(archived.querySelector('.history-item-sender .history-row-badge')?.textContent).toBe('You');
+    expect(archived.querySelector('.history-item-sender .history-row-badge')?.textContent).toBe(
+      'You',
+    );
     expect(archived.querySelector('.history-item-title')?.textContent).toBe('hello man');
     expect(container.querySelector('.history-tab-count--archived')).not.toBeNull();
     expect(container.querySelector('.history-tab-count--chats')).not.toBeNull();
@@ -502,12 +537,15 @@ describe('sessions panel — tabs', () => {
     );
     expect(tabLabels()).toEqual(['Chats', 'Archived', 'Jobs']);
     expect(tabCounts()).toEqual(['Chats0', 'Archived4', 'Jobs1']);
-    expect(tabButton('chats').querySelector('.history-tab-count')?.className)
-      .toContain('history-tab-count--chats');
-    expect(tabButton('archived').querySelector('.history-tab-count')?.className)
-      .toContain('history-tab-count--archived');
-    expect(tabButton('jobs').querySelector('.history-tab-count')?.className)
-      .not.toMatch(/--(chats|archived|failing)/u);
+    expect(tabButton('chats').querySelector('.history-tab-count')?.className).toContain(
+      'history-tab-count--chats',
+    );
+    expect(tabButton('archived').querySelector('.history-tab-count')?.className).toContain(
+      'history-tab-count--archived',
+    );
+    expect(tabButton('jobs').querySelector('.history-tab-count')?.className).not.toMatch(
+      /--(chats|archived|failing)/u,
+    );
     expect(tabButton('chats').getAttribute('aria-selected')).toBe('true');
     expect(tabButton('archived').getAttribute('aria-selected')).toBe('false');
     // One tabpanel, not three scroll boxes: the rows you are not looking at are
@@ -959,7 +997,10 @@ describe('sessions panel — the age line keeps itself current', () => {
   const jobAgeLine = (): string => {
     const row = container.querySelector('#history-jobs-list .history-item-row');
     if (!row) return '';
-    return Array.from(row.querySelectorAll('.history-item-meta')).map((el) => el.textContent ?? '')[1] ?? '';
+    return (
+      Array.from(row.querySelectorAll('.history-item-meta')).map((el) => el.textContent ?? '')[1] ??
+      ''
+    );
   };
 
   it('draws the age against the clock as it is now when the panel reopens', () => {

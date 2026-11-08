@@ -23,12 +23,11 @@ import { registerDesktopShareCommands } from './desktopShare';
 import { registerDesktopCheckConnectionCommands } from './desktopCheckConnection';
 import { wireDesktopKeepingUp } from './desktopKeepingUp';
 import type { ForgeConfig } from '../config/types';
-import { SESSION_KEY_V1 } from '../sidebar/sessionTypes';
 import { getLogger } from '../util/logger';
 
 /**
- * One-shot, idempotent workspace bootstrap on activation: the globalState →
- * workspaceState session migration (v2), the optional FORGE.md auto-create,
+ * One-shot, idempotent workspace bootstrap on activation: retiring the old
+ * global-session migration, the optional FORGE.md auto-create,
  * and the agent note when the mesh is on. Each runs at most once per
  * workspace; their order does not matter. The four desktop-bridge commands are
  * registered above the no-folder return, because none of them needs a folder
@@ -49,13 +48,9 @@ export async function bootstrapWorkspace(
 ): Promise<void> {
   const log = getLogger();
   const autoCreate = config.forge_instructions?.auto_create;
-  // Migration v2: globalState → workspaceState (sessions now per-workspace)
-  // The marker goes last, so a copy that fails is retried next activation (U20-02).
+  // Retire the old import: it seeded every new project with the same global
+  // chats. Keep the legacy data untouched, and the marker for older builds.
   if (!context.workspaceState.get<boolean>('forge.migrated.sessions.v2')) {
-    if (!context.workspaceState.get(SESSION_KEY_V1)) {
-      const globalSession = context.globalState.get(SESSION_KEY_V1);
-      if (globalSession) await context.workspaceState.update(SESSION_KEY_V1, globalSession);
-    }
     await context.workspaceState.update('forge.migrated.sessions.v2', true);
   }
   // The desktop bridge (docs/plans/V1_FINISH_PLAN.md lane 3): "Connect to my

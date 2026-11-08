@@ -56,10 +56,10 @@ import { retainSessionMemoryKeys } from './memorySnapshotLifecycle';
 import { WebviewQueueState } from './evictionGate';
 import { watchActivityViewConfiguration } from './activityViewSetting';
 import { liveConversationIds } from './liveConversationIds';
+import { legacyGlobalHistoryIds } from './legacyGlobalHistory';
 
 export type { SidebarProviderEvents };
 const RESIDENCY_POLL_MS = 1500;
-
 export class SidebarProvider implements vscode.WebviewViewProvider {
   public static readonly viewId = 'forge.sidebar';
 
@@ -78,7 +78,6 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
   private readonly hiddenChatAlerts: HiddenChatAlerts;
   private readonly agentAsker: ReturnType<typeof createSidebarAgentAsk>;
   private readonly jobsBridge: JobsPanelBridge | undefined;
-  /** The panel's content search: panel-scoped and released the same way (`sessionContentSearch.ts`). */
   private readonly sessionSearch: SessionContentSearch;
   remoteEvictionQuery: ((conversationId: string) => boolean | undefined) | undefined;
   remoteOriginQuery: ((conversationId: string) => string | undefined) | undefined;
@@ -407,6 +406,7 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
         this.historyArchive?.overflow.list(),
         readHistoryPanelSize(this.globalState),
         (conversationId) => this.remoteOriginQuery?.(conversationId),
+        legacyGlobalHistoryIds(this.globalState, this.sidebar, this.historyArchive),
       ),
     );
     this.tabs.refreshRetention();

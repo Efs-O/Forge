@@ -62,4 +62,6 @@ export interface SessionHistoryMeta {
   origin_agent?: string;
   /** The remote chat this closed chat is bound to; see `SessionTabMeta`. */
   origin_channel?: RemoteOriginChannel;
+  /** Unchanged copy of the old global history; presentation only, never persisted. */
+  legacy_global?: boolean;
 }

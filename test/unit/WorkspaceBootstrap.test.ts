@@ -39,22 +39,18 @@ vi.mock('../../src/llm/ForgeInstructionsLoader', () => ({
 }));
 
 const { bootstrapWorkspace } = await import('../../src/vscode/workspaceBootstrap');
-const { NOTE_INSTALLED_MARKER, NOTE_OFF_NOTICE_MARKER } = await import(
-  '../../src/vscode/agentMeshNoteSetup'
-);
-const { countAgentMeshSections, buildAgentMeshNote } = await import(
-  '../../src/agentBus/agentMeshNote'
-);
+const { NOTE_INSTALLED_MARKER, NOTE_OFF_NOTICE_MARKER } =
+  await import('../../src/vscode/agentMeshNoteSetup');
+const { countAgentMeshSections, buildAgentMeshNote } =
+  await import('../../src/agentBus/agentMeshNote');
 const { SESSION_KEY_V1 } = await import('../../src/sidebar/sessionTypes');
 const vscodeMock = await import('vscode');
 // The four command ids `package.json` contributes, read from the modules that
 // register them so this file cannot drift from what the extension really offers.
-const { DESKTOP_CONNECT_COMMAND, DESKTOP_CHECK_COMMAND } = await import(
-  '../../src/vscode/desktopConnect'
-);
-const { DESKTOP_SHARE_COMMAND, DESKTOP_STOP_SHARING_COMMAND } = await import(
-  '../../src/vscode/desktopShare'
-);
+const { DESKTOP_CONNECT_COMMAND, DESKTOP_CHECK_COMMAND } =
+  await import('../../src/vscode/desktopConnect');
+const { DESKTOP_SHARE_COMMAND, DESKTOP_STOP_SHARING_COMMAND } =
+  await import('../../src/vscode/desktopShare');
 
 const MARKER = 'forge.migrated.sessions.v2';
 const meshOn = { agent_bus: { enabled: true }, control_server: { enabled: true, port: 8799 } };
@@ -64,19 +60,21 @@ const infoMock = () =>
 const warnMock = () => vscodeMock.window.showWarningMessage as unknown as ReturnType<typeof vi.fn>;
 const openDocMock = () =>
   vscodeMock.workspace.openTextDocument as unknown as ReturnType<typeof vi.fn>;
-const showDocMock = () =>
-  vscodeMock.window.showTextDocument as unknown as ReturnType<typeof vi.fn>;
+const showDocMock = () => vscodeMock.window.showTextDocument as unknown as ReturnType<typeof vi.fn>;
 
-function fakeContext(failSessionCopy = false) {
+function fakeContext(failMigrationMarker = false) {
   const workspace = new Map<string, unknown>();
   return {
     workspace,
     context: {
-      globalState: { get: (key: string) => (key === SESSION_KEY_V1 ? { tabs: [] } : undefined) },
+      globalState: {
+        get: vi.fn((key: string) => (key === SESSION_KEY_V1 ? { tabs: [] } : undefined)),
+        update: vi.fn(),
+      },
       workspaceState: {
         get: (key: string) => workspace.get(key),
         update: async (key: string, value: unknown) => {
-          if (failSessionCopy && key === SESSION_KEY_V1) throw new Error('disk full');
+          if (failMigrationMarker && key === MARKER) throw new Error('disk full');
           workspace.set(key, value);
         },
       },
@@ -99,20 +97,35 @@ function read(name: string): string {
 }
 
 describe('bootstrapWorkspace session migration', () => {
-  it('copies the global session, then marks the migration done', async () => {
+  it('retires the import without copying or changing the global session', async () => {
     const { workspace, context } = fakeContext();
     await bootstrapWorkspace(context, '', meshOn as never, 'config.yaml');
-    expect(workspace.get(SESSION_KEY_V1)).toEqual({ tabs: [] });
+    expect(workspace.has(SESSION_KEY_V1)).toBe(false);
     expect(workspace.get(MARKER)).toBe(true);
+    expect((context as { globalState: { get: unknown } }).globalState.get).not.toHaveBeenCalled();
+    expect(
+      (context as { globalState: { update: unknown } }).globalState.update,
+    ).not.toHaveBeenCalled();
   });
 
-  // The marker used to be written first, so a failed copy was never retried (U20-02).
-  it('leaves the migration retryable when the copy fails', async () => {
+  it('leaves both sessions untouched if marking retirement fails', async () => {
     const { workspace, context } = fakeContext(true);
+    const localSession = { conversations: [{ id: 'keep-this-chat' }] };
+    workspace.set(SESSION_KEY_V1, localSession);
     await expect(bootstrapWorkspace(context, '', meshOn as never, 'config.yaml')).rejects.toThrow(
       'disk full',
     );
     expect(workspace.has(MARKER)).toBe(false);
+    expect(workspace.get(SESSION_KEY_V1)).toBe(localSession);
+  });
+
+  it('preserves existing local sessions across repeated activations', async () => {
+    const { workspace, context } = fakeContext();
+    const localSession = { conversations: [{ id: 'local-chat' }] };
+    workspace.set(SESSION_KEY_V1, localSession);
+    await bootstrapWorkspace(context, '', meshOn as never, 'config.yaml');
+    await bootstrapWorkspace(context, '', meshOn as never, 'config.yaml');
+    expect(workspace.get(SESSION_KEY_V1)).toBe(localSession);
   });
 });
 
@@ -188,7 +201,11 @@ describe('the agent note on workspace bootstrap', () => {
           .some((message: string) => message.includes('could not open it')),
       ).toBe(true),
     );
-    expect(warnMock().mock.calls.map((call) => String(call[0])).at(-1)).toContain('no such file');
+    expect(
+      warnMock()
+        .mock.calls.map((call) => String(call[0]))
+        .at(-1),
+    ).toContain('no such file');
     expect(logged.lines.some((line) => line.includes('could not open the written note'))).toBe(
       true,
     );
@@ -290,8 +307,8 @@ describe('the desktop bridge on workspace bootstrap', () => {
     await bootstrapWorkspace(context, '', meshOn as never, 'C:/Users/x/config.yaml');
     const registered = (
       vscodeMock.commands.registerCommand as unknown as ReturnType<typeof vi.fn>
-    )
-      .mock.calls.map((call) => String(call[0]))
+    ).mock.calls
+      .map((call) => String(call[0]))
       .filter((id) => desktopIds.includes(id));
     // Each exactly once: a window reloads and re-activates, and `bootstrapWorkspace`
     // is called again, so a second `registerCommand` of the same id is the
