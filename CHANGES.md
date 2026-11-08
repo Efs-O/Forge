@@ -1,5 +1,11 @@
 # Forge — Recent Changes
 
+## 0.17.135
+
+- Removed the "Include legacy chats" checkbox and its display filter. The
+  Archived panel shows the workspace's saved history directly. New workspaces
+  continue to start with their own conversations.
+
 ## 0.17.134
 
 - New workspaces start with their own conversations. Old shared history is
