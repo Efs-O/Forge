@@ -32,6 +32,10 @@ media/**
 # dead files in front of users with no way to run them.
 benchmarks/**
 .github/**
+# The git hooks are this repository's push gate (`git config core.hooksPath .githooks`): they
+# must stay tracked, but an installed extension has no repository to read them from, and the
+# VSIX contents gate in scripts/check-vsix-contents.mjs rejects any path it does not allow.
+.githooks/**
 esbuild.config.mjs
 tsconfig.json
 .eslintrc.json
