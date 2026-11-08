@@ -91,7 +91,6 @@ export function HistoryList({
 }: Props): ReactElement {
   const [tab, setTab] = useState<PanelTab>('chats');
   const [query, setQuery] = useState('');
-  const [includeLegacy, setIncludeLegacy] = useState(false);
   // The saved chats the host has read so far for the text in the box. Titles
   // and badges are matched in `historyFilter.ts`; only the host can say which
   // transcripts contain a phrase, so this is the half that comes back from it.
@@ -119,7 +118,6 @@ export function HistoryList({
     if (expanded) return;
     setTab('chats');
     setQuery('');
-    setIncludeLegacy(false);
   }, [expanded]);
 
   const panelRef = useRef<HTMLElement>(null);
@@ -174,15 +172,11 @@ export function HistoryList({
       (a, b) => b.updatedAt - a.updatedAt,
     );
   }, [items, archived]);
-  const legacyCount = closedRows.filter((row) => row.legacy_global).length;
-  const visibleClosedRows = includeLegacy
-    ? closedRows
-    : closedRows.filter((row) => !row.legacy_global);
   // The badges count what a tab holds, not what the search box is leaving in: a
   // number that moved with every typed letter would read as a different panel.
   const counts: Record<PanelTab, { total: number; failing: number }> = {
     chats: { total: orderedOpenItems.length, failing: 0 },
-    archived: { total: visibleClosedRows.length, failing: 0 },
+    archived: { total: closedRows.length, failing: 0 },
     jobs: { total: jobs.length, failing: failingJobCount(jobs) },
   };
 
@@ -297,16 +291,6 @@ export function HistoryList({
             );
           })}
         </div>
-        {tab === 'archived' && legacyCount > 0 && (
-          <label title="Copies from Forge's old shared history. All saved sessions are kept intact.">
-            <input
-              type="checkbox"
-              checked={includeLegacy}
-              onChange={(event) => setIncludeLegacy(event.target.checked)}
-            />
-            Include legacy chats ({legacyCount})
-          </label>
-        )}
       </div>
       {/* One scroll container for all three sections: three nested scroll boxes
           is three places to lose a row, and the Archived list used to open with
@@ -325,7 +309,7 @@ export function HistoryList({
           key={tab}
           tab={tab}
           query={query}
-          closed={visibleClosedRows}
+          closed={closedRows}
           openItems={orderedOpenItems}
           activeId={activeId}
           streamingIds={streamingIds}

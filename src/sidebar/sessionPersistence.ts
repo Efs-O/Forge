@@ -174,7 +174,7 @@ export function persistedToRuntime(p: ConversationPersisted): ConversationRuntim
  *  `compactionLedger.ts` and the archive tests keep one import path. */
 export { TOOL_INTERRUPTED_RESULT } from './interruptedToolCalls';
 
-export function conversationToPersisted(c: ConversationRuntime): ConversationPersisted {
+function conversationToPersisted(c: ConversationRuntime): ConversationPersisted {
   return {
     id: c.id,
     title: c.title,

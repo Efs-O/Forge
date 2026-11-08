@@ -123,7 +123,6 @@ export function buildSessionSyncMessage(
   historyPanelSize?: HistoryPanelSize,
   /** Which remote chat each conversation id is bound to, for the phone badge. */
   originChannelOf?: (conversationId: string) => string | undefined,
-  legacyGlobalIds: ReadonlySet<string> = new Set(),
 ): SessionSyncMsg {
   const wanted = new Set<string>([sidebar.activeConversationId, ...streamingIds]);
   // A row can briefly duplicate a chat that was just restored; the open/recent copy wins.
@@ -166,12 +165,8 @@ export function buildSessionSyncMessage(
       tabMetasFromSession(sidebar, streamingIds, sessionActiveMs),
       originChannelOf,
     ),
-    history: withOriginChannel(historyMetasFromSession(sidebar), originChannelOf).map((row) =>
-      legacyGlobalIds.has(row.id) ? { ...row, legacy_global: true } : row,
-    ),
-    archived: withOriginChannel(overflowRows, originChannelOf).map((row) =>
-      legacyGlobalIds.has(row.id) ? { ...row, legacy_global: true } : row,
-    ),
+    history: withOriginChannel(historyMetasFromSession(sidebar), originChannelOf),
+    archived: withOriginChannel(overflowRows, originChannelOf),
     waitingIds: [...waitingIds].filter(Boolean),
     messagesById: displayTranscriptRowsById(sidebar, wanted),
     ...(attachmentsRoot ? { attachmentsRoot } : {}),

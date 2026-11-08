@@ -14,7 +14,6 @@ overlaps with an existing owner, extend the owner instead.
 | Webview lifecycle + message bridge entry             | `src/sidebar/SidebarProvider.ts`         |
 | Webview message routing                              | `src/sidebar/webviewMessageRouter.ts`    |
 | Outbound webview payloads + status metrics           | `src/sidebar/sidebarPayloads.ts`         |
-| Non-destructive identification of old global-history copies | `src/sidebar/legacyGlobalHistory.ts` |
 | Transcript view setting parse + validation           | `src/sidebar/activityViewSetting.ts`     |
 | Active workspace root + folder-change watch          | `src/sidebar/workspaceInfo.ts`           |
 | Webview crash/diagnostic relay to host log           | `src/sidebar/webviewDiagnostics.ts`      |
