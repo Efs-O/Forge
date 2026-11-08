@@ -175,6 +175,35 @@ describe('ExternalModelServers', () => {
     expect(servers.isLoaded('strata')).toBe(true);
   });
 
+  it('publishes the residency-change token on a load and an unload, never on a probe', async () => {
+    const { servers } = makeServers(ok);
+    const bumps: string[] = [];
+    servers.setResidencyChangeHook(() => bumps.push('b'));
+    servers.markInUse('strata');
+    await servers.unload('strata');
+    // A window freeing GPUs re-reads residency outside the machine-wide lock and
+    // trusts this token to tell it when that map went stale (BL-032). Only a change
+    // this window MADE publishes: if a probe observation did, every window would
+    // invalidate its own probe and the re-read would land back inside the lock.
+    expect(bumps).toEqual(['b', 'b']);
+    await servers.reconcileForFree(['strata']);
+    await servers.refreshResidency();
+    // Neither re-read published: a probe that merely caught up with the board
+    // would otherwise invalidate every probe in flight, including its own window's.
+    expect(bumps).toEqual(['b', 'b']);
+  });
+
+  it('frees the names it is given, not only the ones its map believes loaded', async () => {
+    const { servers, calls } = makeServers(ok);
+    await servers.unload('strata');
+    expect(servers.loadedNames()).toEqual([]);
+    calls.length = 0;
+    // A caller that cannot prove its residency map current passes the names
+    // (BL-032): `unloadAll` iterating an empty map would free nothing at all.
+    await servers.unloadAll(true, ['strata']);
+    expect(calls.map((call) => call.url)).toEqual(['http://127.0.0.1:8080/unload']);
+  });
+
   it('refuses a real swap while another window holds the managed server for a turn', async () => {
     const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'forge-external-turn-'));
     try {
@@ -1083,7 +1112,13 @@ describe('BackendPool with a managed external server', () => {
 
   it('unloads the external server before spawning a local model', async () => {
     const { servers } = makeServers(ok);
-    const pool = new BackendPool(makeConfig(), new SharedRuntimeRegistry(boardDir!), servers);
+    const registry = new SharedRuntimeRegistry(boardDir!);
+    // The production wiring: the servers publish the machine-wide residency change
+    // token the pool consults before trusting its map (BL-032). Without a hook the
+    // pool can never prove its map current and frees conservatively, which is the
+    // safe side but re-POSTs here.
+    servers.setResidencyChangeHook(() => registry.bumpExternalResidencyGeneration());
+    const pool = new BackendPool(makeConfig(), registry, servers);
     await pool.acquire('llama');
     expect(events).toEqual(['unload:strata', 'spawn:9100']);
     // Already unloaded: a second local spawn does not POST again.
@@ -1202,6 +1237,7 @@ describe('BackendPool with a managed external server', () => {
         isManaged: () => true,
         managedNames: () => ['strata'],
         reconcileForFree: async () => {},
+        residencyPublicationTrusted: () => true,
         loadedNames: () => ['strata'],
         unload: async () => {},
         ensureStarted: async () => {
@@ -1257,6 +1293,7 @@ describe('BackendPool with a managed external server', () => {
         isManaged: () => true,
         managedNames: () => ['strata'],
         reconcileForFree: async () => {},
+        residencyPublicationTrusted: () => true,
         loadedNames: () => ['strata'],
         unload: async () => {},
         ensureStarted: async () => {
@@ -1353,7 +1390,13 @@ describe('BackendPool with a managed external server', () => {
       async () => undefined,
       fetchImpl,
     );
-    const pool = new BackendPool(config, new SharedRuntimeRegistry(boardDir!), servers);
+    const registry = new SharedRuntimeRegistry(boardDir!);
+    // Production wiring: the servers publish the machine-wide residency change token
+    // the pool consults before trusting its map (BL-032). Unwired, the pool can
+    // never prove its map current and re-POSTs each request — safe, but this test
+    // pins the opposite optimisation.
+    servers.setResidencyChangeHook(() => registry.bumpExternalResidencyGeneration());
+    const pool = new BackendPool(config, registry, servers);
     servers.markInUse('strata');
     await pool.prepareExternal('strata-xxs');
     expect(urls).toEqual(['http://127.0.0.1:8080/unload']);

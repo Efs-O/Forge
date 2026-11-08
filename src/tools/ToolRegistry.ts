@@ -264,7 +264,7 @@ export class ToolRegistry {
       const value = present[key];
       if (typeof value === 'number' && Number.isFinite(value)) {
         if (expected === 'integer' && !Number.isInteger(value)) {
-          return `${name}: "${key}" must be an integer${numericRange(schema)}. Resend it in that range.`;
+          return `Error: ${name}: "${key}" must be an integer${numericRange(schema)}. Resend it in that range.`;
         }
         const min = typeof schema.minimum === 'number' ? schema.minimum : undefined;
         const max = typeof schema.maximum === 'number' ? schema.maximum : undefined;
@@ -278,7 +278,7 @@ export class ToolRegistry {
           (exclusiveMin !== undefined && value <= exclusiveMin) ||
           (exclusiveMax !== undefined && value >= exclusiveMax)
         ) {
-          return `${name}: "${key}" must be within ${numericRangeText(schema)}. Resend it in that range.`;
+          return `Error: ${name}: "${key}" must be within ${numericRangeText(schema)}. Resend it in that range.`;
         }
       }
       if (typeof expected !== 'string' || matchesJsonType(present[key], expected)) continue;
@@ -293,7 +293,7 @@ export class ToolRegistry {
             ? ` in range ${numericRangeText(schema)}`
             : '';
         return (
-          `${name}: "${key}" must be a JSON ${expected}${range}, not ${jsonTypeName(present[key])}. ` +
+          `Error: ${name}: "${key}" must be a JSON ${expected}${range}, not ${jsonTypeName(present[key])}. ` +
           `Resend the call with ${key} as ${example}.`
         );
       }

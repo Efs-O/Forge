@@ -28,6 +28,44 @@ import { baseProgram, type ShellKind } from './shellCommandTokens';
 import { isMetadataOnlyRead } from './shellReadOnlyRules';
 
 const PATTERN_PROGRAMS = new Set(['grep', 'egrep', 'fgrep', 'rg']);
+/**
+ * `Select-String`'s parameters, read from `Get-Command Select-String | % Parameters`
+ * on this machine under the `pwsh` this tool classifies (PowerShell 7.6.9), each under
+ * its name and its aliases (`LiteralPath` carries `PSPath` and `LP`; Windows PowerShell
+ * 5.1 has no `LP`, and refuses `-LP` outright): what a flag takes, so only the file
+ * parameters are scanned. PowerShell binds a parameter by any prefix that names exactly
+ * one of them, which is why `-Patt`, `-LiteralP` and `-LP` are real spellings, while an
+ * ambiguous prefix (`-p`, `-pa`, `-li`) is refused and treated here as taking nothing.
+ */
+type FlagTakes = 'pattern' | 'file' | 'value' | 'switch';
+const SELECT_STRING_FLAG_TAKES = new Map<string, FlagTakes>([
+  ['pattern', 'pattern'],
+  ['path', 'file'],
+  ['literalpath', 'file'],
+  ['pspath', 'file'],
+  ['lp', 'file'],
+  ['context', 'value'],
+  ['include', 'value'],
+  ['exclude', 'value'],
+  ['encoding', 'value'],
+  ['inputobject', 'value'],
+  ['pipelinevariable', 'value'],
+  ['list', 'switch'],
+  ['notmatch', 'switch'],
+  ['simplematch', 'switch'],
+  ['casesensitive', 'switch'],
+  ['allmatches', 'switch'],
+  ['quiet', 'switch'],
+]);
+
+/** Which parameter a flag token names, or undefined when its prefix is ambiguous or
+ *  unknown. `-Path` and `-Path:.env` and `-PS:C:\proj\.env` all name the same thing. */
+function selectStringFlagTakes(token: string): FlagTakes | undefined {
+  const prefix = /^-([\w]+)/u.exec(token)?.[1]?.toLowerCase();
+  if (!prefix) return undefined;
+  const named = [...SELECT_STRING_FLAG_TAKES.keys()].filter((name) => name.startsWith(prefix));
+  return named.length === 1 ? SELECT_STRING_FLAG_TAKES.get(named[0] ?? '') : undefined;
+}
 const GREP_VALUE_OPTIONS = new Set([
   '-m',
   '-A',
@@ -135,18 +173,44 @@ function nonPathArguments(
   }
 
   if (program === 'select-string') {
-    let positionalPatternSeen = false;
+    // PowerShell fills a named parameter first — from the next token, or from the text
+    // after a colon in `-Path:.env` — and only then binds the bare words left over, in
+    // the order the parameters declare them. `Get-Help Select-String -Parameter Pattern`
+    // reports position 0 and `-Parameter Path` position 1 on this machine, so a bare
+    // word is the pattern only while `-Pattern` is still unbound, and every other
+    // operand is a file the command reads:
+    //   Select-String -Path .env -Pattern KEY   reads .env
+    //   Select-String .env -Pattern KEY         reads .env
+    //   Select-String -LiteralPath .env KEY     reads .env (KEY is the pattern)
+    //   Select-String KEY .env                  reads .env (KEY is the pattern)
+    let patternStillUnbound = !tokens
+      .slice(1)
+      .some((token) => selectStringFlagTakes(token) === 'pattern');
     for (let index = 1; index < tokens.length; index += 1) {
       const token = tokens[index] ?? '';
-      if (/^-Pattern(?::|$)/iu.test(token)) {
+      const takes = selectStringFlagTakes(token);
+      if (takes === 'pattern') {
+        // The pattern is never a path: skip the flag, and for the space form the
+        // token it takes as its value.
         result.add(index);
-        positionalPatternSeen = true;
+        if (!token.includes(':') && index + 1 < tokens.length) result.add(++index);
+        patternStillUnbound = false;
+      } else if (takes === 'file') {
+        // `-Path .env` names the file in the NEXT token: skip the flag and step over
+        // the value without skipping it. `-Path:.env` carries it inside the token:
+        // skip nothing, so the token is tested by the path it carries.
+        if (token.includes(':')) continue;
+        result.add(index);
+        index += 1;
+      } else if (takes === 'value') {
+        // A value that is not a path (`-Encoding utf8`, `-Context 2 4`): skip both.
+        result.add(index);
         if (!token.includes(':') && index + 1 < tokens.length) result.add(++index);
       } else if (token.startsWith('-')) {
         result.add(index);
-      } else if (!positionalPatternSeen) {
+      } else if (patternStillUnbound) {
         result.add(index);
-        positionalPatternSeen = true;
+        patternStillUnbound = false;
       }
     }
   }
@@ -218,7 +282,12 @@ function firstSecretTokenIn(
     // PowerShell's `$_.Key` member expressions are values, not
     // paths. A real path still has a separator after the variable reference.
     if (/^\$(?:_|[A-Za-z][\w]*)\.[A-Za-z_][\w]*$/u.test(token)) continue;
-    const candidate = tokenPathCandidate(token);
+    // PowerShell can bind a parameter's value inside the token — `-Path:.env`,
+    // `-LiteralPath:C:\proj\.env` — so a flag token that survived the skip set above
+    // is tested by the text after its first colon, not whole. A pattern spelled
+    // `-Pattern:KEY` never reaches here: the scanner already skipped it.
+    const carriedValue = /^-[A-Za-z]\w*:(.+)$/u.exec(token)?.[1];
+    const candidate = tokenPathCandidate(carriedValue ?? token);
     if (!candidate || candidate.includes('=')) continue;
     const matched = matchesSecretPattern(candidate, patterns, options);
     if (!matched) continue;

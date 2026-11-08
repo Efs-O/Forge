@@ -30,6 +30,27 @@ const cases: Array<[string, string, 'read_only' | 'normal' | 'dangerous' | 'refu
   ['Write-Output $(Get-Content file.txt)', 'pwsh', 'normal'],
   ['Write-Output $(Remove-Item -Recurse build)', 'pwsh', 'dangerous'],
   ['ls | grep forge && git status', 'bash', 'read_only'],
+  // BL-030: `&&` inside a bash `[[ … ]]` is an operand of the test, not a statement
+  // break, so the whole test is one read; a real break after the closing `]]` is.
+  ['[[ -n "$HOME" && -d .cache ]]', 'bash', 'read_only'],
+  ['[[ -f a && -r b ]] && cat a', 'bash', 'read_only'],
+  ['[[ $x =~ a|b && -f a ]]', 'bash', 'read_only'],
+  ['[[ -f a && -r b ]] && rm x', 'bash', 'normal'],
+  ['[[ -f a ]] || [[ -f b ]]', 'bash', 'read_only'],
+  // A quoted or backslashed `[[` is data, not the test, and a `]]` that arrives with no
+  // space before the operator still closes it: neither may swallow a following write.
+  ['echo "[[" && touch x', 'bash', 'normal'],
+  ['echo \\[\\[ && touch x', 'bash', 'normal'],
+  ['[[ -f package.json ]]&&touch x', 'bash', 'normal'],
+  // An empty quote pair is still a word, and a quoted `[[` is data: neither may open a
+  // test and swallow the operator after it.
+  ['""[[ -f a || touch x', 'bash', 'normal'],
+  ['"" [[ -f a || touch x', 'bash', 'normal'],
+  // An empty quoted operand must not leave its word flagged as quoted, or the bare `]]`
+  // after it is not the test's closer and the write following the test is swallowed.
+  ['[[ -z "" ]] && touch x', 'bash', 'normal'],
+  ['[[ -z "" ]]&&touch x', 'bash', 'normal'],
+  ['[[ -z "" ]]', 'bash', 'read_only'],
   ['ls & rm -rf /', 'bash', 'dangerous'],
   ['rm \\-rf x', 'bash', 'dangerous'],
   ['r\\m -rf x', 'bash', 'dangerous'],

@@ -61,7 +61,7 @@ describe('open_file', () => {
   it('refuses a quoted line number and names the required integer range', () => {
     const tool = makeOpenFileTool();
     expect(new ToolRegistry().invalidArgs(tool, { path: 'src/a.ts', line: '2' })).toBe(
-      'open_file: "line" must be a JSON integer in range at least 1, not a string. ' +
+      'Error: open_file: "line" must be a JSON integer in range at least 1, not a string. ' +
         'Resend the call with line as 1.',
     );
   });

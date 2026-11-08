@@ -93,6 +93,29 @@ describe('inspection of Forge own files, which reads and changes nothing', () =>
       'a test that reads must not excuse a touch that writes',
     ).toBe('refused');
   });
+
+  /**
+   * BL-030, the half of BL-027 Claude asked to keep separate from it: the parser ended
+   * a statement at the `&&` INSIDE a bash `[[ … ]]`, so `[[ -n "$HOME" && -d ~/.forge ]]`
+   * came out as `[[ -n "$HOME"` plus `-d ~/.forge ]]`, and the second statement's program
+   * was `-d` — absent from `READ_ONLY_UNIX`, so the owner guard refused it with the very
+   * wording BL-027 had fixed for the single-condition form. Only `[[` nests: `[ … ]` and
+   * `test …` join their conditions with `-a`/`-o`, so a `&&` after them is a real break.
+   */
+  it('reads a compound [[ … ]] test instead of refusing it as a write', () => {
+    expect(judged('[[ -n "$HOME" && -d ~/.forge ]]', 'bash')).toBe('read_only');
+    expect(
+      judged('[[ -r ~/.forge/policy.yaml && -s ~/.forge/jobs/state/x.json ]]', 'bash'),
+      'the operands on both sides of the && are inspections',
+    ).toBe('read_only');
+    expect(
+      judged(
+        '[[ -f ~/.forge/policy.yaml && -r ~/.forge/policy.yaml ]] && touch ~/.forge/policy.yaml',
+        'bash',
+      ),
+      'the test must not excuse the touch that follows it',
+    ).toBe('refused');
+  });
 });
 
 describe('a copy that reads Forge own files', () => {

@@ -6,6 +6,8 @@ import { z } from 'zod';
 import { afterAll, afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { ToolDispatch, resolveToolPath } from '../../src/sidebar/ToolDispatch';
 import { ToolApprovalPolicyDenied } from '../../src/sidebar/toolApprovalOutcome';
+import { isFailureResult } from '../../src/sidebar/toolResultView';
+import { classifyResult } from '../../src/sidebar/compactionLedger';
 import type { ChatMessage, ToolCall } from '../../src/llm/types';
 import type { CheckpointStack } from '../../src/checkpoint/CheckpointStack';
 import type { KeepUndoCodeLensProvider } from '../../src/sidebar/KeepUndoCodeLens';
@@ -1033,7 +1035,7 @@ describe('ToolDispatch', () => {
     expect(failureTracker.record).toHaveBeenCalled();
     expect(call.function.arguments).toBe(raw);
     expect(transcript[0]?.tool_calls?.[0]?.function.arguments).toBe(raw);
-    expect(transcript[1]?.content).toMatch(/^read_file: the arguments are not valid JSON \(.+\)\. Write each literal backslash as \\ and resend\.$/u);
+    expect(transcript[1]?.content).toMatch(/^Error: read_file: the arguments are not valid JSON \(.+\)\. Write each literal backslash as \\ and resend\.$/u);
   });
 
   it('refuses invalid escapes and asks for literal backslashes to be escaped', async () => {
@@ -1091,7 +1093,51 @@ describe('ToolDispatch', () => {
     await dispatch.dispatch([call], allowed, transcript);
 
     expect(handler).not.toHaveBeenCalled();
-    expect(transcript[1]?.content).toBe('read_file: arguments must be a JSON object, got array.');
+    expect(transcript[1]?.content).toBe('Error: read_file: arguments must be a JSON object, got array.');
+  });
+
+  it('records every pre-handler refusal as a failure for the row, the stats and the ledger', async () => {
+    toolRegistry.register({
+      definition: {
+        type: 'function',
+        function: {
+          name: 'probe',
+          description: 'Probe',
+          parameters: {
+            type: 'object',
+            properties: { enabled: { type: 'boolean' } },
+            required: [],
+          },
+        },
+      },
+      permission: 'read',
+      handler: vi.fn().mockResolvedValue('unexpected success'),
+    });
+    const malformed = makeToolCall('probe', {});
+    malformed.function.arguments = '{broken';
+    const notAnObject = makeToolCall('probe', {});
+    notAnObject.function.arguments = '[]';
+    const quotedBoolean = makeToolCall('probe', { enabled: 'True' });
+    const parserRefusal = makeToolCall('__tool_call_error__', {
+      __error: 'tool call: the "name" form is not accepted.',
+    });
+    const transcript: ChatMessage[] = [
+      {
+        role: 'assistant',
+        content: null,
+        tool_calls: [malformed, notAnObject, quotedBoolean, parserRefusal],
+      },
+    ];
+
+    await dispatch.dispatch([malformed, notAnObject, quotedBoolean, parserRefusal], allowed, transcript);
+
+    const refused = transcript.slice(1).map((message) => message.content as string);
+    expect(refused).toHaveLength(4);
+    for (const text of refused) {
+      expect(text).toMatch(/^Error: /u);
+      expect(isFailureResult(text), text).toBe(true);
+      expect(classifyResult(text), text).toBe('failed');
+    }
   });
 
   it('refuses top-level null and quoted schema values before the handler runs', async () => {
@@ -1116,12 +1162,12 @@ describe('ToolDispatch', () => {
     };
     const nullMessages: ChatMessage[] = [];
     await dispatch.dispatch([nullCall], allowed, nullMessages);
-    expect(nullMessages[0]?.content).toBe('probe: arguments must be a JSON object, got null.');
+    expect(nullMessages[0]?.content).toBe('Error: probe: arguments must be a JSON object, got null.');
 
     const quotedMessages: ChatMessage[] = [];
     await dispatch.dispatch([makeToolCall('probe', { count: '5' })], allowed, quotedMessages);
     expect(quotedMessages[0]?.content).toBe(
-      'probe: "count" must be a JSON integer, not a string. ' +
+      'Error: probe: "count" must be a JSON integer, not a string. ' +
         'Resend the call with count as 1.',
     );
     expect(handler).not.toHaveBeenCalled();
@@ -1135,7 +1181,7 @@ describe('ToolDispatch', () => {
       allowed,
       messages,
     );
-    expect(messages[0]?.content).toBe(error);
+    expect(messages[0]?.content).toBe('Error: ' + error);
   });
 
   it('handles unknown tools gracefully', async () => {

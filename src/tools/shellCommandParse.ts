@@ -46,19 +46,59 @@ export function parseCommand(command: string, shell: ShellKind): ParsedCommand {
   let token = '';
   let quote: 'single' | 'double' | 'backtick' | undefined;
   let escaped = false;
+  /** Whether the token being built carries characters that came from quotes or a
+   *  backslash. They are data, not grammar: `echo "[["` must not open a test. */
+  let tokenQuoted = false;
+  let tokenEscaped = false;
   let redirection = false;
   let disqualifiesReadOnly = false;
   /** True between a `>` and the word that names the file it writes into. It
    *  never crosses a statement boundary, so `echo a > b && rm c > d` records
    *  both `b` and `d`, not `c` twice. */
   let pendingRedirectTarget = false;
+  /** True between a bash `[[` and its closing `]]`. The test is ONE command whose
+   *  operands include `&&` and `||`, so the splitter stays put until it closes:
+   *  `[[ -n "$HOME" && -d ~/.forge ]]` used to become `[[ -n "$HOME"` plus
+   *  `-d ~/.forge ]]`, and the second statement's program was `-d` (BL-030). Only
+   *  `[[` nests: `[ … ]` and `test …` join conditions with `-a`/`-o`, so a real `&&`
+   *  after them is a genuine statement break, and PowerShell has no `[[` at all. */
+  let insideTest = false;
+  /** Words seen in the statement being built, an empty quoted word (`""`) included:
+   *  `"" [[ -f a || touch x` already starts with a word, so its `[[` is not a test. */
+  let wordsInStatement = 0;
+  /** Set when a quote pair closes without adding anything, so that empty word has to be
+   *  counted at the next boundary rather than vanish as if it were nothing. */
+  let emptyQuotedWord = false;
   const redirects: RedirectTarget[] = [];
   const pushToken = (): void => {
-    if (!token) return;
+    if (!token) {
+      if (emptyQuotedWord) {
+        wordsInStatement += 1;
+        emptyQuotedWord = false;
+        // The word is finished, so its flags are: otherwise the empty pair inside
+        // `[[ -z "" ]]` leaves `tokenQuoted` set and the bare `]]` after it is not
+        // seen as the test's closer, and the write that follows is swallowed.
+        tokenQuoted = false;
+        tokenEscaped = false;
+      }
+      return;
+    }
     if (pendingRedirectTarget) {
       redirects.push({ target: token, statementIndex: statements.length - 1 });
       pendingRedirectTarget = false;
     }
+    // Only a bare `[[` that opens a statement is the bash test: `echo "[["` hands the
+    // characters over as data, `""[[` is one quoted word, and a `[[` after another word
+    // is not a test either.
+    const opensStatement = wordsInStatement === 0;
+    if (shell === 'bash' && !tokenQuoted && !tokenEscaped) {
+      if (token === '[[') {
+        if (opensStatement) insideTest = true;
+      } else if (token === ']]') insideTest = false;
+    }
+    tokenQuoted = false;
+    tokenEscaped = false;
+    wordsInStatement += 1;
     statements[statements.length - 1]?.push(token);
     token = '';
   };
@@ -70,6 +110,8 @@ export function parseCommand(command: string, shell: ShellKind): ParsedCommand {
     if (statements[statements.length - 1]?.length) {
       separators.push(separator);
       statements.push([]);
+      wordsInStatement = 0;
+      emptyQuotedWord = false;
     }
   };
   for (let i = 0; i < command.length; i += 1) {
@@ -77,18 +119,30 @@ export function parseCommand(command: string, shell: ShellKind): ParsedCommand {
     const next = command[i + 1] ?? '';
     if (escaped) {
       // bash: backslash-newline is a line continuation, not a character.
-      if (char !== '\n') token += char;
+      if (char !== '\n') {
+        token += char;
+        tokenEscaped = true;
+      }
       escaped = false;
       continue;
     }
     if (quote === 'single') {
-      if (char === "'") quote = undefined;
-      else token += char;
+      if (char === "'") {
+        quote = undefined;
+        // A quote pair that added nothing is still a word: `"" [[ …` does not open a
+        // test, because the empty word comes first.
+        if (!token) emptyQuotedWord = true;
+      } else {
+        token += char;
+        tokenQuoted = true;
+      }
       continue;
     }
     if (quote === 'double') {
-      if (char === '"') quote = undefined;
-      else if (
+      if (char === '"') {
+        quote = undefined;
+        if (!token) emptyQuotedWord = true;
+      } else if (
         shell === 'bash' &&
         char === '\\' &&
         (next === '$' || next === '`' || next === '"' || next === '\\' || next === '\n')
@@ -97,20 +151,26 @@ export function parseCommand(command: string, shell: ShellKind): ParsedCommand {
         else escaped = true;
       } else if ((char === '$' && next === '(') || (shell === 'bash' && char === '`')) {
         disqualifiesReadOnly = true;
-      } else token += char;
+      } else {
+        token += char;
+        tokenQuoted = true;
+      }
       continue;
     }
     if (quote === 'backtick') {
       token += char;
+      tokenQuoted = true;
       quote = undefined;
       continue;
     }
     if (char === "'") {
       quote = 'single';
+      tokenQuoted = true;
       continue;
     }
     if (char === '"') {
       quote = 'double';
+      tokenQuoted = true;
       continue;
     }
     if (char === '`') {
@@ -133,23 +193,48 @@ export function parseCommand(command: string, shell: ShellKind): ParsedCommand {
       continue;
     }
     if (char === '&') {
+      // A word still in the buffer is finished before the operator is judged: in
+      // `[[ -f a ]]&&touch x` the `]]` closes the test, so the `&&` is a break.
+      pushToken();
       if (next === '&') {
+        if (insideTest) {
+          // Inside `[[ … ]]` this is an operand of the test, not a statement break.
+          token += '&&';
+          i += 1;
+          continue;
+        }
         pushStatement('other');
         i += 1;
         continue;
       }
       if (shell === 'bash') {
+        if (insideTest) {
+          token += char;
+          continue;
+        }
         pushStatement('other');
         continue;
       }
       disqualifiesReadOnly = true;
     }
     if (char === '|' && next === '|') {
+      pushToken();
+      if (insideTest) {
+        token += '||';
+        i += 1;
+        continue;
+      }
       pushStatement('other');
       i += 1;
       continue;
     }
     if (char === '|') {
+      pushToken();
+      if (insideTest) {
+        // `[[ $x =~ a|b ]]` keeps its regular-expression bar inside the test.
+        token += char;
+        continue;
+      }
       pushStatement('pipe');
       continue;
     }

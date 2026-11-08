@@ -177,7 +177,7 @@ export class ToolDispatch {
           const parsed: unknown = JSON.parse(tc.function.arguments);
           if (parsed === null || Array.isArray(parsed) || typeof parsed !== 'object') {
             const got = parsed === null ? 'null' : Array.isArray(parsed) ? 'array' : typeof parsed;
-            result = `${tc.function.name}: arguments must be a JSON object, got ${got}.`;
+            result = `Error: ${tc.function.name}: arguments must be a JSON object, got ${got}.`;
             effects.failureTracker.record(convId);
             this.postResult(tc, toolResultText(result), undefined, convId, effects.post);
             messages.push(toolResultMessage(tc, toolResultContent(result), startedAt));
@@ -188,7 +188,7 @@ export class ToolDispatch {
           const parserMessage = error instanceof Error ? error.message : String(error);
           effects.failureTracker.record(convId);
           result =
-            `${tc.function.name}: the arguments are not valid JSON (${parserMessage}). ` +
+            `Error: ${tc.function.name}: the arguments are not valid JSON (${parserMessage}). ` +
             'Write each literal backslash as \\ and resend.';
           this.postResult(tc, toolResultText(result), undefined, convId, effects.post);
           messages.push(toolResultMessage(tc, toolResultContent(result), startedAt));
@@ -196,7 +196,11 @@ export class ToolDispatch {
         }
 
         if (tc.function.name === '__tool_call_error__' && typeof args['__error'] === 'string') {
-          result = args['__error'];
+          // The parser's own refusal is a failure by definition, and every consumer
+          // that reads a result's text keys on the `Error:` prefix, so the marker is
+          // added when the model sent the text without it.
+          const reported = args['__error'];
+          result = reported.startsWith('Error:') ? reported : `Error: ${reported}`;
           effects.failureTracker.record(convId);
           this.postResult(tc, toolResultText(result), undefined, convId, effects.post);
           messages.push(toolResultMessage(tc, toolResultContent(result), startedAt));

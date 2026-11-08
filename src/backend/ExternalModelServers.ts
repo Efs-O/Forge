@@ -18,6 +18,7 @@ import {
   type ExternalResidencyCandidate,
 } from './ExternalModelResidencyProbe';
 import { probeHttp } from './HealthCheck';
+import { ResidencyPublisher } from './externalResidencyPublication';
 
 const log = getLogger();
 
@@ -66,6 +67,9 @@ export class ExternalModelServers {
   private readonly starting = new Map<string, Promise<void>>();
   /** A selector refresh probes once per managed model, even across callers. */
   private residencyRefresh: Promise<void> | undefined;
+  /** Publishes the machine-wide residency-change token when THIS window changes a
+   *  managed server's residency (BL-032); a probe observation never publishes. */
+  private readonly residencyPublisher = new ResidencyPublisher();
 
   constructor(
     private readonly getConfig: () => ForgeConfig,
@@ -74,6 +78,19 @@ export class ExternalModelServers {
     private readonly spawnImpl: StopSpawner = (command, args, options) =>
       spawn(command, [...args], options),
   ) {}
+
+  /** Wire the machine-wide residency-change publisher (BL-032). Unwired means this
+   *  window's changes never reach the token, and `residencyPublicationTrusted`
+   *  reports that, so no caller trusts a residency map. */
+  setResidencyChangeHook(hook: (() => void) | undefined): void {
+    this.residencyPublisher.wire(hook);
+  }
+
+  /** Whether every residency change made here is visible to the other windows
+   *  (`ResidencyPublisher.trusted`); false means no residency map may be trusted. */
+  residencyPublicationTrusted(): boolean {
+    return this.residencyPublisher.trusted();
+  }
 
   /** The resolved model when `name` (a pool key) is a managed server. */
   private managed(name: string): ModelConfig | undefined {
@@ -129,6 +146,7 @@ export class ExternalModelServers {
     if (!this.isManaged(name)) return;
     this.activityGeneration.set(name, (this.activityGeneration.get(name) ?? 0) + 1);
     this.residency.set(name, 'loaded');
+    this.residencyPublisher.publish();
   }
 
   /** Reconcile confirmed residency with the managed server without loading it. */
@@ -182,7 +200,10 @@ export class ExternalModelServers {
     }
     const residency = selectorResidency(result);
     if (residency === 'unloaded') {
-      this.markUnloadedUnlessReused(name, generation, 'residency refresh');
+      // A probe OBSERVING an unload publishes nothing: this window's map merely
+      // caught up with the board, and publishing would invalidate the probe of
+      // every other window that is mid-flight, including this window's own.
+      this.markUnloadedUnlessReused(name, generation, 'residency refresh', false);
     } else if (residency === 'loaded' && (this.activityGeneration.get(name) ?? 0) === generation) {
       this.residency.set(name, 'loaded');
     }
@@ -387,10 +408,14 @@ export class ExternalModelServers {
     }
   }
 
-  /** Unload every managed server that may hold memory; reports every failure. */
-  async unloadAll(alreadyReconciled = false): Promise<void> {
+  /** Unload every managed server that may hold memory; reports every failure.
+   *  `names` replaces the residency map for a caller that cannot prove it current —
+   *  the map is what it would otherwise iterate, and a stale one frees nothing. */
+  async unloadAll(alreadyReconciled = false, names?: readonly string[]): Promise<void> {
     if (!alreadyReconciled) await this.reconcileForFree(this.managedNames());
-    const results = await Promise.allSettled(this.loadedNames().map((n) => this.unload(n)));
+    const results = await Promise.allSettled(
+      (names ?? this.loadedNames()).map((n) => this.unload(n)),
+    );
     const failures = results
       .filter((r): r is PromiseRejectedResult => r.status === 'rejected')
       .map((r) => (r.reason instanceof Error ? r.reason.message : String(r.reason)));
@@ -427,9 +452,17 @@ export class ExternalModelServers {
     }
   }
 
-  private markUnloadedUnlessReused(name: string, generation: number, operation = 'unload'): void {
+  /** `publish` is false where a probe merely OBSERVED the board: only a change
+   *  this window caused may invalidate another window's in-flight probe (BL-032). */
+  private markUnloadedUnlessReused(
+    name: string,
+    generation: number,
+    operation = 'unload',
+    publish = true,
+  ): void {
     if ((this.activityGeneration.get(name) ?? 0) === generation) {
       this.residency.set(name, 'unloaded');
+      if (publish) this.residencyPublisher.publish();
     } else {
       log.info(
         `[ExternalModelServers] "${name}" was requested during ${operation}; residency stays loaded`,

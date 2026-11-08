@@ -97,6 +97,146 @@ export function isMetadataOnlyRead(tokens: readonly string[], shell: ShellKind):
 }
 
 /**
+ * The other half of that pair: a pipeline stage that turns a metadata listing back into
+ * the file's bytes, so the listing was a content read after all. PowerShell pipes
+ * OBJECTS, so `Get-ChildItem .env | cat` binds the FileInfo to Get-Content and prints
+ * the file — `cat`, `gc` and `type` are this machine's aliases for Get-Content
+ * (measured with `Get-Alias`) and `sls` is Select-String, which binds pipeline paths
+ * too. Bash pipes TEXT, so a listing piped to `head` there shows only names; its
+ * contents arrive only when something re-opens the names — and `xargs` is not itself
+ * that something, it runs whatever the owner wrote after it, so the program it invokes
+ * decides: `ls FILE | xargs echo` prints names, `ls FILE | xargs cat` prints bytes.
+ */
+const CONTENT_READING_PIPE_PS = new Set([
+  'get-content',
+  'cat',
+  'gc',
+  'type',
+  'select-string',
+  'sls',
+]);
+/** What `xargs` may be handed that reads the files it is given. A shell is in the list
+ *  because `xargs sh -c 'cat $1'` reads them inside it, and asking when the program is
+ *  a shell is the fail-safe side of that. */
+const XARGS_READERS = new Set([
+  'cat',
+  'head',
+  'tail',
+  'sed',
+  'awk',
+  'more',
+  'less',
+  'nl',
+  'od',
+  'strings',
+  'tac',
+  'tee',
+  'grep',
+  'egrep',
+  'fgrep',
+  'rg',
+  'sort',
+  'uniq',
+  'wc',
+  'tr',
+  'cut',
+  'fold',
+  'md5sum',
+  'sha1sum',
+  'sha256sum',
+  'xxd',
+  'hexdump',
+  'base64',
+  'sh',
+  'bash',
+  'zsh',
+  'dash',
+  'pwsh',
+  'powershell',
+  'cmd',
+]);
+/** GNU xargs' short options that take a value — read off `xargs --help` on this machine
+ *  (findutils 4.10.0, and confirmed by running each form). The value may be attached
+ *  (`-n1`) or in the next token (`-n 1`), and options cluster (`-rn 1` is `-r` then
+ *  `-n 1`). */
+const XARGS_SHORT_VALUE = new Set(['a', 'd', 'E', 'I', 'L', 'n', 'P', 's']);
+/** Short options that take nothing: the next character is another option. */
+const XARGS_SHORT_SWITCH = new Set(['0', 'o', 'p', 'r', 't', 'x']);
+/** Short options whose value is OPTIONAL and only attached (`-eEOF`, `-i{}`): the rest
+ *  of the token belongs to them, and the next token is the program it runs. */
+const XARGS_SHORT_ATTACHED = new Set(['e', 'i']);
+/** xargs' long options that take their value in the NEXT token (`--max-args 1`). */
+const XARGS_LONG_SEPARATE_VALUE = [
+  '--arg-file',
+  '--delimiter',
+  '--max-args',
+  '--max-chars',
+  '--max-procs',
+  '--process-slot-var',
+];
+/** Every long option this file knows, so a prefix resolves the way GNU resolves it:
+ *  exactly one match decides, and an ambiguous prefix (`--max-` names four of these)
+ *  or an unknown one is left alone. `--max-lines`, `--replace` and `--eof` are here but
+ *  not above: their value is optional and only attached, so the word after them is the
+ *  program — measured, `xargs --max-lines cat` runs cat and `--max-lines 1 cat` runs 1. */
+const XARGS_LONG_OPTIONS = new Set([
+  ...XARGS_LONG_SEPARATE_VALUE,
+  '--max-lines',
+  '--replace',
+  '--eof',
+  '--null',
+  '--interactive',
+  '--verbose',
+  '--exit',
+  '--exit-code',
+  '--open-tty',
+  '--no-run-if-empty',
+  '--show-limits',
+  '--help',
+  '--version',
+]);
+
+/** The program `xargs` will run: its first argument that is not one of its own options,
+ *  with an option's value skipped whether it is attached or in its own token. With no
+ *  argument it runs `echo`, which prints the names it was given. */
+function xargsInvokedProgram(tokens: readonly string[]): string {
+  for (let index = 1; index < tokens.length; index += 1) {
+    const token = tokens[index] ?? '';
+    if (token.startsWith('--')) {
+      const equals = token.indexOf('=');
+      if (equals === -1) {
+        const matched = [...XARGS_LONG_OPTIONS].filter((name) => name.startsWith(token));
+        if (matched.length === 1 && XARGS_LONG_SEPARATE_VALUE.includes(matched[0] ?? ''))
+          index += 1;
+      }
+      continue; // `--opt=value` carries its value; anything else takes none
+    }
+    if (token.startsWith('-')) {
+      for (let position = 1; position < token.length; position += 1) {
+        const option = token[position] ?? '';
+        if (XARGS_SHORT_SWITCH.has(option)) continue;
+        if (XARGS_SHORT_ATTACHED.has(option)) break; // the rest of the token is its value
+        if (!XARGS_SHORT_VALUE.has(option)) break; // an option this file does not know
+        if (position + 1 < token.length) break; // the value is attached, as in `-n1`
+        index += 1; // the value is the next token
+        break;
+      }
+      continue;
+    }
+    return baseProgram(token);
+  }
+  return '';
+}
+
+/** Does this pipeline stage read the contents of what the listing handed it? */
+export function pipeTargetReadsContents(statement: readonly string[], shell: ShellKind): boolean {
+  const program = baseProgram(statement[0] ?? '');
+  if (shell === 'bash')
+    return program === 'xargs' && XARGS_READERS.has(xargsInvokedProgram(statement));
+  return CONTENT_READING_PIPE_PS.has(program);
+}
+
+/**
  * Changing the working directory writes nothing: each shell tool call is its own
  * process, so a `cd` dies with it. They were refused anyway because the read-only
  * table did not name them, which made `cd ~/.forge/agent-bus && ls` — a pure read

@@ -34,6 +34,11 @@ const EXTERNAL_HOLD_REFRESH_MS = 15_000;
  */
 export class ExternalTurnHolds {
   private readonly root: string;
+  /** True while this window knows it made a residency change that no reader can
+   *  see in the token. Its own answer then becomes "cannot prove", so nothing in
+   *  this window may trust a residency map until a publication succeeds again —
+   *  and any later success publishes a token no earlier read can match anyway. */
+  private residencyPublicationBroken = false;
 
   constructor(
     root = path.join(process.env.LOCALAPPDATA ?? '', 'forge-llm', 'shared-runtimes'),
@@ -118,6 +123,16 @@ export class ExternalTurnHolds {
         if (released) return;
         released = true;
         clearInterval(refresh);
+        // Publish BEFORE the record goes, never after: a scan that runs once the
+        // record is gone must be able to see the newer token, while one that ran
+        // before it still saw the hold (BL-032, Codex's fourth round — removing
+        // first lets a reader scan in the gap and trust a map that is already
+        // stale, and a crash in that gap leaves nothing to reclaim). If the
+        // publication cannot be made at all the record stays: a hold another
+        // window can see is a refusal, which is the safe side of a filesystem it
+        // cannot write. The TTL cannot help here — BL-021 keeps an expired record
+        // whose process lives, so this one lasts until this window exits.
+        if (!this.bumpExternalResidencyGeneration()) return;
         fs.rmSync(file, { force: true });
       },
     };
@@ -148,13 +163,95 @@ export class ExternalTurnHolds {
       // the failure the hold exists to prevent. The cost is bounded: a window
       // that leaks a hold keeps it until that window closes, and every turn path
       // releases in its `finally`.
+      // A dead host's turn ends with no release publication, so this reclaim is the
+      // only thing that can tell the other windows the model is now resident and
+      // unheld (BL-032). Publishing before the removal is what makes the scanning
+      // window distrust a residency map it read earlier, and a record whose
+      // publication failed is left standing for the next scan to try again — a dead
+      // record never blocks a load, while a token that silently never changed would
+      // let every reader trust the map it cannot prove.
+      if (!this.bumpExternalResidencyGeneration()) continue;
       try {
         fs.rmSync(file, { force: true });
       } catch {
-        // A concurrent window reclaimed it first.
+        // A concurrent window reclaimed it first, and published for it.
       }
     }
     return holds;
+  }
+
+  /**
+   * The machine-wide residency-change token (BL-032).
+   *
+   * A window that is about to free GPUs re-reads the managed endpoints' residency
+   * BEFORE taking `withExternalTurnHoldLock`, because that re-read is a network
+   * wait of up to ~4 s and the lock is the one thing another window's first
+   * managed turn waits 5 s on. A probe outside the lock cannot answer the
+   * question the frees need: did the board change while it was in flight? Every
+   * window that loads a managed server, unloads one, or releases a turn hold
+   * publishes a new token here, so the probing window compares the token it read
+   * before the probe with the token it reads inside the lock — after its holder
+   * scan — and frees conservatively when they differ.
+   *
+   * The token is a value, not a counter: a counter written by two windows at once
+   * can lose an update, and a lost update would be a missed change, while two
+   * tokens are never equal, so a lost write can only cost one extra unload.
+   *
+   * `''` means no trustworthy token exists — nothing published yet, or a publisher
+   * that could not write. It is never equal to a published token, and a reader
+   * must treat it as "cannot prove", never as "nothing changed".
+   */
+  externalResidencyGeneration(): string {
+    if (this.residencyPublicationBroken) {
+      // A change happened here that the token never recorded. Answering with the
+      // token a reader might already hold would let it trust a map that is stale.
+      return '';
+    }
+    try {
+      return fs.readFileSync(this.residencyGenerationPath(), 'utf8');
+    } catch {
+      // Nothing to read: "cannot prove", which differs from every published
+      // token, so a window that looked before the file existed still sees the
+      // first change — and never mistakes an absent file for no change.
+      return '';
+    }
+  }
+
+  /** Publish that THIS window changed a managed server's residency, or that it
+   *  cannot be trusted to know. A failed write removes the file rather than
+   *  leaving the old token standing: a reader that had that token now reads `''`
+   *  and takes the conservative path, so a lost publication cannot hide a change.
+   *  Returns false only when NEITHER could be done — the old token is still
+   *  readable and a reader would trust it — so the caller must keep whatever
+   *  protection the record it was removing provides. */
+  bumpExternalResidencyGeneration(): boolean {
+    try {
+      fs.mkdirSync(this.externalHoldDir(), { recursive: true });
+      writeFileAtomicSync(
+        this.residencyGenerationPath(),
+        `${process.pid} ${this.now()} ${crypto.randomUUID()}\n`,
+      );
+      this.residencyPublicationBroken = false;
+      return true;
+    } catch (error) {
+      try {
+        fs.rmSync(this.residencyGenerationPath(), { force: true });
+        // An absent file is itself "cannot prove", so this window is honest again.
+        this.residencyPublicationBroken = false;
+        log.warn(`[SharedRuntimeRegistry] residency change published as unknown: ${String(error)}`);
+        return true;
+      } catch {
+        // Neither the token nor its removal could be written: the old token is
+        // still readable and would be trusted, so this window's own answer becomes
+        // unknown and the caller keeps whatever record it was about to remove.
+        this.residencyPublicationBroken = true;
+        log.error(
+          `[SharedRuntimeRegistry] could not publish a residency change at all: ${String(error)} — ` +
+            `a window that read the old token may still trust its residency map`,
+        );
+        return false;
+      }
+    }
   }
 
   async withExternalTurnHoldLock<T>(fn: () => Promise<T>): Promise<T> {
@@ -216,6 +313,12 @@ export class ExternalTurnHolds {
 
   private externalHoldPath(id: string): string {
     return path.join(this.externalHoldDir(), `${id}.json`);
+  }
+
+  /** Not a `.json` hold record, so `externalTurnHolders` never reads it back as
+   *  one, and not the `.lock` directory the reclaim logic stats. */
+  private residencyGenerationPath(): string {
+    return path.join(this.externalHoldDir(), '.residency-generation');
   }
 
   private readExternalHold(file: string): ExternalTurnHold | undefined {

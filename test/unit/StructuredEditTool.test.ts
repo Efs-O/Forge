@@ -430,7 +430,7 @@ describe('the file named inside the operations', () => {
         operations: JSON.stringify([{ path: relative, start_line: 1 }]),
       });
       expect(message).toBe(
-        'apply_line_edits: "operations" must be a JSON array, not a string. ' +
+        'Error: apply_line_edits: "operations" must be a JSON array, not a string. ' +
           'Resend the call with operations as [].',
       );
       expect(fs.readFileSync(file, 'utf8')).toBe('one\ntwo\nthree\n');

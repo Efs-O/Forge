@@ -78,9 +78,20 @@ describe('what the gate must not ask about', () => {
       ['ls -t ~/.forge/agent-bus/endpoints', 'bash'],
       ['Get-ChildItem $HOME/.ssh/id_rsa', 'pwsh'],
       ['Get-Item ~/.ssh/id_rsa', 'pwsh'],
+      // Bash pipes text, so a listing piped to a text filter shows names, not bytes —
+      // and bash's `type` is the builtin that describes a command, not Get-Content.
+      ['ls -la ~/.ssh/id_rsa | head', 'bash'],
+      ['ls ~/.ssh/id_rsa | type', 'bash'],
+      // xargs runs the program named after it, and `echo` prints the names it is handed.
+      ['ls ~/.ssh/id_rsa | xargs echo', 'bash'],
+      ['ls ~/.ssh/id_rsa | xargs -e echo', 'bash'],
+      ['Get-ChildItem ~/.ssh/id_rsa | Measure-Object', 'pwsh'],
       ['Test-Path ~/.ssh/id_rsa', 'pwsh'],
       ['stat ~/.ssh/id_rsa', 'bash'],
       ['Select-String -Pattern ~/.ssh/id_rsa app.ps1', 'pwsh'],
+      ['Select-String -Pattern KEY -Path app.ps1', 'pwsh'],
+      ['Select-String -Pattern:~/.ssh/id_rsa app.ps1', 'pwsh'],
+      ['Select-String -Patt KEY app.ps1', 'pwsh'],
     ];
     for (const [command, shell] of falseReads) {
       expect(ask(command, shell).readSecretIgnoringAllowList, command).toBeUndefined();
@@ -97,7 +108,57 @@ describe('what the gate must not ask about', () => {
       ['cat ~/.forge/agent-bus/endpoints/abc.json', 'bash'],
       ['awk 1 .env', 'bash'],
       ['Get-ChildItem $HOME/.ssh/id_rsa | Get-Content', 'pwsh'],
+      // A metadata listing that flows to a content reader is a content read: in
+      // PowerShell the pipe carries the file object, and `cat`/`gc`/`type` are
+      // Get-Content's aliases while `sls` binds pipeline paths too.
+      ['Get-ChildItem ~/.ssh/id_rsa | cat', 'pwsh'],
+      ['Get-ChildItem ~/.ssh/id_rsa | type', 'pwsh'],
+      ['Get-ChildItem ~/.ssh/id_rsa | gc', 'pwsh'],
+      ['Get-ChildItem .env | sls KEY', 'pwsh'],
+      // Bash pipes text, so only a target that re-opens the names reads them.
+      ['ls ~/.ssh/id_rsa | xargs cat', 'bash'],
+      ['ls ~/.ssh/id_rsa | xargs -n 1 cat', 'bash'],
+      // xargs' own options take values in their own tokens, so the word after one of
+      // them is not the program it runs.
+      ['ls ~/.ssh/id_rsa | xargs --max-args 1 cat', 'bash'],
+      ['ls ~/.ssh/id_rsa | xargs -s 100 cat', 'bash'],
+      // Option values are read off `xargs --help` (GNU findutils 4.10.0): `-a` takes
+      // one, `-e`/`--eof` take theirs optionally and must not swallow the program.
+      ['ls ~/.ssh/id_rsa | xargs -e cat', 'bash'],
+      ['ls ~/.ssh/id_rsa | xargs --eof cat', 'bash'],
+      ['ls ~/.ssh/id_rsa | xargs -a /dev/stdin cat', 'bash'],
+      // `--replace` takes its value optionally and only attached, and short options
+      // cluster: `-rn 1` is `-r` followed by `-n 1`.
+      ['ls ~/.ssh/id_rsa | xargs --replace cat {}', 'bash'],
+      ['ls ~/.ssh/id_rsa | xargs -rn 1 cat', 'bash'],
+      ['ls ~/.ssh/id_rsa | xargs -n1 cat', 'bash'],
+      // Measured against this xargs: `-e` takes its EOF string attached, so `n` is not
+      // an option; `--max-lines` takes its value attached only, so `cat` is the program;
+      // and GNU resolves an unambiguous long prefix, so `--max-a 1` is `--max-args 1`.
+      ['ls ~/.ssh/id_rsa | xargs -en cat', 'bash'],
+      ['ls ~/.ssh/id_rsa | xargs --max-lines cat', 'bash'],
+      ['ls ~/.ssh/id_rsa | xargs --max-a 1 cat', 'bash'],
+      // A reader can sit behind an intermediate stage: the objects still flow to it.
+      ['Get-ChildItem .env | Select-Object -First 1 | cat', 'pwsh'],
       ['Select-String -Pattern KEY ~/.ssh/id_rsa', 'pwsh'],
+      // -Pattern named means a positional binds to -Path, so the file is read.
+      ['Select-String -Path ~/.ssh/id_rsa -Pattern KEY', 'pwsh'],
+      ['Select-String ~/.ssh/id_rsa -Pattern KEY', 'pwsh'],
+      ['Select-String -Path .env -Pattern KEY', 'pwsh'],
+      // PowerShell's colon form carries the file inside the token, and a named
+      // -LiteralPath leaves the bare word to bind to -Pattern instead.
+      ['Select-String -Path:~/.ssh/id_rsa -Pattern KEY', 'pwsh'],
+      ['Select-String -LiteralPath ~/.ssh/id_rsa KEY', 'pwsh'],
+      // PowerShell binds a parameter by any prefix naming exactly one: -Patt is
+      // -Pattern, -Lit is -LiteralPath, -PS and -LP are its PSPath and LP aliases
+      // (measured under pwsh 7.6.9: `Get-Command Select-String | % Parameters` reports
+      // LiteralPath aliases PSPath,LP; -Pat and -Pa are refused as ambiguous).
+      ['Select-String .env -Patt KEY', 'pwsh'],
+      ['Select-String -LiteralP .env KEY', 'pwsh'],
+      ['Select-String -Lit .env KEY', 'pwsh'],
+      ['Select-String -LP .env KEY', 'pwsh'],
+      ['Select-String -LP:.env KEY', 'pwsh'],
+      ['Select-String -PS ~/.ssh/id_rsa -Pattern KEY', 'pwsh'],
     ];
     for (const [command, shell] of realReads) {
       expect(ask(command, shell).readSecretIgnoringAllowList, command).toBeDefined();

@@ -26,8 +26,10 @@ import { ModelConfigSchema } from '../../src/config/modelSchema';
 import { resolveModelEntry } from '../../src/config/ConfigResolver';
 import { gpusOverlap } from '../../src/backend/poolAcquisition';
 import { ExternalModelServers } from '../../src/backend/ExternalModelServers';
+import { ExternalTurnHolds } from '../../src/backend/ExternalTurnHolds';
 import {
   prepareExternalForRequest,
+  unloadManagedForLocalLoad,
   type ExternalCoordinationContext,
 } from '../../src/backend/BackendPoolExternal';
 import { SharedRuntimeRegistry } from '../../src/backend/SharedRuntimeRegistry';
@@ -209,6 +211,10 @@ describe('prepareExternalForRequest unloads only an overlapping server', () => {
       isManaged: (name: string) => byName.has(name),
       managedNames: () => spec.map((entry) => entry.name),
       reconcileForFree: async () => {},
+      // Production wires a publisher into the real servers; a fake says which way
+      // this window leans (BL-032): a window that cannot publish its own changes
+      // may not trust a residency map, because its own loads never reach the token.
+      residencyPublicationTrusted: () => true,
       loadedNames: () => spec.map((entry) => entry.name),
       gpusOf: (name: string) => byName.get(name)?.gpus,
       unload: async (name: string) => {
@@ -419,6 +425,395 @@ describe('prepareExternalForRequest unloads only an overlapping server', () => {
             sharesWith('strata-coder'),
           ),
         ).rejects.toThrow(/strata-quiet is serving chat/);
+      });
+    });
+  });
+
+  /**
+   * BL-032: the residency re-read is a network wait — a 2 s read of `/v1/models` per
+   * endpoint and a second 2 s read of `/v1/status` when the list comes back empty — and
+   * the machine-wide turn-hold lock is the only thing another window's first managed
+   * turn waits on, with a 5 s deadline. Four of those seconds spent inside the lock
+   * left that waiter one second and made it fail outright. These two tests pin the
+   * lock's discipline: the probe runs outside it, and the cross-window hold check and
+   * every free still run inside it.
+   */
+  describe('the residency probe and the machine-wide lock', () => {
+    /** A registry that reports, for anything called while its lock is held, that it is. */
+    function lockAwareRegistry(
+      dir: string,
+      isAlive: (pid: number) => boolean = () => true,
+    ): {
+      registry: SharedRuntimeRegistry;
+      held: () => boolean;
+    } {
+      const registry = new SharedRuntimeRegistry(dir, isAlive);
+      let held = false;
+      const real = registry.withExternalTurnHoldLock.bind(registry);
+      const wrapped = <T,>(fn: () => Promise<T>): Promise<T> =>
+        real(async () => {
+          held = true;
+          try {
+            return await fn();
+          } finally {
+            held = false;
+          }
+        });
+      registry.withExternalTurnHoldLock = wrapped;
+      return { registry, held: () => held };
+    }
+
+    it('re-reads residency before the lock and frees inside it', async () => {
+      await withBoard(async (dir) => {
+        const { external, unloaded } = fakeExternal([
+          { name: 'strata-prod', gpus: [0, 1] },
+          { name: 'strata-mid', gpus: [1] },
+        ]);
+        const { registry, held } = lockAwareRegistry(dir);
+        const events: string[] = [];
+        const recording = external as unknown as {
+          reconcileForFree: () => Promise<void>;
+          unload: (name: string) => Promise<void>;
+        };
+        recording.reconcileForFree = async () => {
+          events.push(held() ? 'reconcile:inside' : 'reconcile:outside');
+        };
+        recording.unload = async (name: string) => {
+          events.push(held() ? `unload:inside:${name}` : `unload:outside:${name}`);
+          unloaded.push(name);
+        };
+        await prepareExternalForRequest('strata-mid', makeCtx(external, registry));
+        expect(events).toEqual(['reconcile:outside', 'unload:inside:strata-prod']);
+        expect(unloaded).toEqual(['strata-prod']);
+      });
+    });
+
+    it('re-reads residency before the lock when a local model frees them all', async () => {
+      await withBoard(async (dir) => {
+        const events: string[] = [];
+        const { registry, held } = lockAwareRegistry(dir);
+        // A token this window can read, and nothing published during the probe: this
+        // is the fast path, where the map is trusted and nothing is added to it.
+        registry.bumpExternalResidencyGeneration();
+        const external = {
+          isManaged: () => true,
+          managedNames: () => ['strata-prod', 'strata-mid'],
+          residencyPublicationTrusted: () => true,
+          loadedNames: () => ['strata-prod'],
+          reconcileForFree: async () => {
+            events.push(held() ? 'reconcile:inside' : 'reconcile:outside');
+          },
+          unloadAll: async (_alreadyReconciled?: boolean, names?: readonly string[]) => {
+            events.push(`unloadAll:inside:${(names ?? ['from-map']).join('+')}`);
+          },
+        } as unknown as ExternalModelServers;
+        await unloadManagedForLocalLoad('local-gguf', makeCtx(external, registry));
+        // The map's one name, not the managed list: a map this window can prove
+        // current decides, and the probe ran outside the lock (BL-032).
+        expect(events).toEqual(['reconcile:outside', 'unloadAll:inside:strata-prod']);
+      });
+    });
+
+    /**
+     * Another window's ENTIRE managed turn — hold acquired, model loaded into VRAM,
+     * hold released — inside this window's residency probe. A cross-window hold check
+     * alone cannot see any of it: by the time this window takes the lock the record is
+     * gone, and the model is resident in a server this window last saw unloaded. This
+     * is the sequence Codex named when rejecting the probe move (BL-032), and what the
+     * residency-change token is for.
+     */
+    function otherWindowManagedTurn(
+      dir: string,
+      registry: SharedRuntimeRegistry,
+      model: string,
+    ): void {
+      const holds = path.join(dir, 'external-turn-holds');
+      fs.mkdirSync(holds, { recursive: true });
+      const file = path.join(holds, '999999-other-window.json');
+      fs.writeFileSync(
+        file,
+        JSON.stringify({
+          id: '999999-other-window',
+          model,
+          pid: 999999,
+          conversationId: 'other-window-chat',
+          title: 'Other window chat',
+          expiresAt: Date.now() + 60_000,
+        }),
+      );
+      registry.bumpExternalResidencyGeneration(); // that window's markInUse: now resident
+      fs.rmSync(file, { force: true }); // and its turn is over, so the hold is gone
+    }
+
+    it('frees the server the map missed when another window loaded and released during the probe', async () => {
+      await withBoard(async (dir) => {
+        const { external, unloaded } = fakeExternal([
+          { name: 'strata-prod', gpus: [0, 1] },
+          { name: 'strata-mid', gpus: [1] },
+        ]);
+        const { registry, held } = lockAwareRegistry(dir);
+        // A token published before the probe, so this test proves the token did the
+        // work and not merely a file that has never been written.
+        registry.bumpExternalResidencyGeneration();
+        const events: string[] = [];
+        const recording = external as unknown as {
+          reconcileForFree: () => Promise<void>;
+          loadedNames: () => string[];
+          unload: (name: string) => Promise<void>;
+        };
+        // This window's map exactly as its probe left it: strata-prod looks unloaded.
+        recording.loadedNames = () => [];
+        recording.reconcileForFree = async () => {
+          events.push(held() ? 'reconcile:inside' : 'reconcile:outside');
+          // Another window's WHOLE turn — hold acquired, model loaded into VRAM,
+          // hold released — lands after this probe read the board. By the time this
+          // window takes the lock there is nothing left to find: no hold, and the
+          // map says unloaded. This is the sequence a hold check alone cannot see.
+          otherWindowManagedTurn(dir, registry, 'strata-prod');
+        };
+        recording.unload = async (name: string) => {
+          events.push(held() ? `unload:inside:${name}` : `unload:outside:${name}`);
+          unloaded.push(name);
+        };
+        await prepareExternalForRequest('strata-mid', makeCtx(external, registry));
+        // A map that cannot be proved current is not used: the frees offer every
+        // overlapping managed server, so strata-prod comes off the cards strata-mid
+        // is about to load onto. The probe still ran exactly once, and outside the
+        // lock — BL-032's stall is gone, and so is the missed unload.
+        expect(events).toEqual(['reconcile:outside', 'unload:inside:strata-prod']);
+        expect(unloaded).toEqual(['strata-prod']);
+      });
+    });
+
+    it('frees every managed server for a local load on the same evidence', async () => {
+      await withBoard(async (dir) => {
+        const events: string[] = [];
+        const { registry, held } = lockAwareRegistry(dir);
+        registry.bumpExternalResidencyGeneration();
+        const external = {
+          isManaged: () => true,
+          managedNames: () => ['strata-prod'],
+          residencyPublicationTrusted: () => true,
+          loadedNames: () => [], // the probe saw nothing resident
+          reconcileForFree: async () => {
+            events.push(held() ? 'reconcile:inside' : 'reconcile:outside');
+            otherWindowManagedTurn(dir, registry, 'strata-prod');
+          },
+          unloadAll: async (_alreadyReconciled?: boolean, names?: readonly string[]) => {
+            events.push(`unloadAll:inside:${(names ?? ['from-map']).join('+')}`);
+          },
+        } as unknown as ExternalModelServers;
+        await unloadManagedForLocalLoad('local-gguf', makeCtx(external, registry));
+        // The managed names, not the map: `unloadAll` frees exactly what it is
+        // given, and this window's map still says nothing is loaded.
+        expect(events).toEqual(['reconcile:outside', 'unloadAll:inside:strata-prod']);
+      });
+    });
+
+    it('trusts the map when nothing was published during the probe', async () => {
+      await withBoard(async (dir) => {
+        const { external, unloaded } = fakeExternal([
+          { name: 'strata-prod', gpus: [0, 1] },
+          { name: 'strata-mid', gpus: [1] },
+        ]);
+        const { registry } = lockAwareRegistry(dir);
+        registry.bumpExternalResidencyGeneration();
+        const recording = external as unknown as { loadedNames: () => string[] };
+        recording.loadedNames = () => [];
+        await prepareExternalForRequest('strata-mid', makeCtx(external, registry));
+        // No over-unloading for its own sake: a map this window can prove current
+        // still decides which servers to offer, so a server on those cards survives.
+        expect(unloaded).toEqual([]);
+      });
+    });
+
+    it('frees conservatively when no token can be read at all', async () => {
+      await withBoard(async (dir) => {
+        const { external, unloaded } = fakeExternal([
+          { name: 'strata-prod', gpus: [0, 1] },
+          { name: 'strata-mid', gpus: [1] },
+        ]);
+        const { registry } = lockAwareRegistry(dir);
+        const recording = external as unknown as { loadedNames: () => string[] };
+        recording.loadedNames = () => [];
+        await prepareExternalForRequest('strata-mid', makeCtx(external, registry));
+        // An absent token means "cannot prove", never "nothing changed": it also
+        // covers a publisher whose write failed, because that removes the file.
+        expect(unloaded).toEqual(['strata-prod']);
+      });
+    });
+
+    it('publishes a token when a dead host\'s turn hold is reclaimed', async () => {
+      await withBoard(async (dir) => {
+        const reader = heldByOtherWindow(dir, 'strata-prod'); // a hold from pid 999999
+        reader.bumpExternalResidencyGeneration();
+        const before = reader.externalResidencyGeneration();
+        // That host died: its turn ends with no release to publish, so the reclaim
+        // is the only publication that can reach a window holding a stale map.
+        const reclaimer = new SharedRuntimeRegistry(dir, () => false);
+        expect(reclaimer.externalTurnHolders()).toEqual([]);
+        expect(reader.externalResidencyGeneration()).not.toBe(before);
+      });
+    });
+
+    it('publishes a residency-change token that differs on every change, and on a lost file', async () => {
+      await withBoard(async (dir) => {
+        const registry = new SharedRuntimeRegistry(dir, () => true);
+        const absent = registry.externalResidencyGeneration();
+        expect(absent).toBe('');
+        registry.bumpExternalResidencyGeneration();
+        const first = registry.externalResidencyGeneration();
+        expect(first).not.toBe(absent);
+        registry.bumpExternalResidencyGeneration();
+        // Two tokens are never equal, so a write lost to a concurrent bump can only
+        // cost one extra unload, never hide a change.
+        expect(registry.externalResidencyGeneration()).not.toBe(first);
+        // A publisher that could not write removes the file, so a reader holding the
+        // old token sees "cannot prove" rather than the token it already had.
+        fs.rmSync(path.join(dir, 'external-turn-holds', '.residency-generation'), {
+          force: true,
+        });
+        expect(registry.externalResidencyGeneration()).not.toBe(first);
+      });
+    });
+
+    it('publishes a token when a turn hold is released', async () => {
+      await withBoard(async (dir) => {
+        const registry = new SharedRuntimeRegistry(dir, () => true);
+        registry.bumpExternalResidencyGeneration();
+        const lease = registry.claimExternalTurnHold('strata-prod', 'chat-1', 'a turn');
+        const token = registry.externalResidencyGeneration();
+        expect(token).not.toBe('');
+        lease.release();
+        // The release is the moment the model becomes resident with no record left
+        // to point at it, so it is the publication a stale map must not miss.
+        expect(registry.externalResidencyGeneration()).not.toBe(token);
+      });
+    });
+
+    it('publishes before it removes a released hold, so no reader can scan the gap', async () => {
+      await withBoard(async (dir) => {
+        // `claimExternalTurnHold` is only ever called inside the machine-wide lock,
+        // which creates this folder; a bare test has to create it too.
+        fs.mkdirSync(path.join(dir, 'external-turn-holds'), { recursive: true });
+        const holds = new ExternalTurnHolds(dir, () => true);
+        const lease = holds.claimExternalTurnHold('strata-prod', 'chat-1', 'a turn');
+        const records = () =>
+          fs
+            .readdirSync(path.join(dir, 'external-turn-holds'))
+            .filter((name) => name.endsWith('.json'));
+        const real = holds.bumpExternalResidencyGeneration.bind(holds);
+        const publishedWhileHeld: number[] = [];
+        holds.bumpExternalResidencyGeneration = () => {
+          publishedWhileHeld.push(records().length);
+          return real();
+        };
+        lease.release();
+        // Published while its own record still stood. A reader that scans once the
+        // record is gone has to see the newer token, and removing first lets a scan
+        // land in the gap and trust a stale map — a crash there leaves nothing for
+        // anyone to reclaim.
+        expect(publishedWhileHeld).toEqual([1]);
+      });
+    });
+
+    it('keeps a turn hold it cannot publish instead of removing protection silently', async () => {
+      await withBoard(async (dir) => {
+        fs.mkdirSync(path.join(dir, 'external-turn-holds'), { recursive: true });
+        const holds = new ExternalTurnHolds(dir, () => true);
+        const lease = holds.claimExternalTurnHold('strata-prod', 'chat-1', 'a turn');
+        holds.bumpExternalResidencyGeneration = () => false; // a filesystem it cannot write
+        lease.release();
+        // Other windows are left refusing rather than thrashing: a hold they can see
+        // names the chat it protects, while a silent removal would let them unload
+        // the model on the strength of a token that never changed.
+        expect(holds.externalTurnHolders().map((hold) => hold.model)).toEqual(['strata-prod']);
+      });
+    });
+
+    it('frees conservatively when a reclaim could not publish, and still loads', async () => {
+      await withBoard(async (dir) => {
+        const { external, unloaded } = fakeExternal([
+          { name: 'strata-prod', gpus: [0, 1] },
+          { name: 'strata-mid', gpus: [1] },
+        ]);
+        heldByOtherWindow(dir, 'strata-prod'); // a record from a host that has died
+        fs.mkdirSync(path.join(dir, 'external-turn-holds', '.residency-generation'));
+        // A directory where the token file belongs: neither writing it nor removing
+        // it can succeed, so the reclaim of that dead record cannot publish. The
+        // scan still finds no blocker and the load goes ahead — on a map this window
+        // now knows it cannot prove, so every overlapping server is offered.
+        const { registry, held } = lockAwareRegistry(dir, (pid) => pid !== 999999);
+        const events: string[] = [];
+        const recording = external as unknown as {
+          reconcileForFree: () => Promise<void>;
+          loadedNames: () => string[];
+          unload: (name: string) => Promise<void>;
+        };
+        recording.loadedNames = () => [];
+        recording.reconcileForFree = async () => {
+          events.push(held() ? 'reconcile:inside' : 'reconcile:outside');
+        };
+        recording.unload = async (name: string) => {
+          events.push(held() ? `unload:inside:${name}` : `unload:outside:${name}`);
+          unloaded.push(name);
+        };
+        await prepareExternalForRequest('strata-mid', makeCtx(external, registry));
+        expect(events).toEqual(['reconcile:outside', 'unload:inside:strata-prod']);
+        expect(unloaded).toEqual(['strata-prod']);
+        // The atomic writer retries a directory it cannot replace, so this test is
+        // deliberately slower than the rest: it needs more than its 5 s default.
+      });
+    }, 30_000);
+
+    it('does not trust the map when this window cannot publish its own changes', async () => {
+      await withBoard(async (dir) => {
+        const { external, unloaded } = fakeExternal([
+          { name: 'strata-prod', gpus: [0, 1] },
+          { name: 'strata-mid', gpus: [1] },
+        ]);
+        const { registry } = lockAwareRegistry(dir);
+        registry.bumpExternalResidencyGeneration(); // a token that never changes
+        const recording = external as unknown as {
+          loadedNames: () => string[];
+          residencyPublicationTrusted: () => boolean;
+        };
+        recording.loadedNames = () => [];
+        // A token can only vouch for changes that reached it: with no publisher
+        // wired, this window's own loads are invisible, so the token proves nothing.
+        recording.residencyPublicationTrusted = () => false;
+        await prepareExternalForRequest('strata-mid', makeCtx(external, registry));
+        expect(unloaded).toEqual(['strata-prod']);
+      });
+    });
+
+    it('reports a publication it could not make, and then answers unknown', async () => {
+      await withBoard(async (dir) => {
+        const holds = new ExternalTurnHolds(dir, () => true);
+        fs.mkdirSync(path.join(dir, 'external-turn-holds'), { recursive: true });
+        // A directory where the token file belongs: neither writing it nor removing
+        // it can succeed, so the change cannot be published at all — and the answer
+        // a reader gets must not be a token it would trust.
+        fs.mkdirSync(path.join(dir, 'external-turn-holds', '.residency-generation'));
+        expect(holds.bumpExternalResidencyGeneration()).toBe(false);
+        expect(holds.externalResidencyGeneration()).toBe('');
+      });
+    }, 30_000);
+
+    it('leaves a dead hold standing when its reclaim cannot be published', async () => {
+      await withBoard(async (dir) => {
+        heldByOtherWindow(dir, 'strata-prod'); // a record from pid 999999
+        const reclaimer = new ExternalTurnHolds(dir, () => false);
+        reclaimer.bumpExternalResidencyGeneration = () => false;
+        expect(reclaimer.externalTurnHolders()).toEqual([]);
+        // Still on disk for the next scan to try again. A dead record never blocks a
+        // load, while a token that silently never changed would let every reader
+        // trust a map that cannot be proved.
+        expect(
+          fs
+            .readdirSync(path.join(dir, 'external-turn-holds'))
+            .filter((name) => name.endsWith('.json')),
+        ).toHaveLength(1);
       });
     });
   });

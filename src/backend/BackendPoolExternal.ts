@@ -77,27 +77,54 @@ export async function prepareExternalForRequest(
 ): Promise<void> {
   const external = ctx.external;
   if (!external?.isManaged(key)) return;
+  // A turn in ANOTHER window blocks this load only when the two servers want the
+  // same card: a production turn on GPU 0/1 must not refuse a coder load on GPU 2,
+  // which is the same thrash one layer up from unloading every server. `gpusOf`
+  // answers from the engine; an engine that names no GPUs blocks everything, as it
+  // did before the field existed.
+  const shares = sharesGpusWith(external, key);
+  // The residency re-read goes BEFORE the machine-wide lock. It is a network wait —
+  // `probeExternalResidencyEndpoints` runs a 2 s read of `/v1/models` per endpoint and
+  // a second 2 s read of `/v1/status` when the list comes back empty, so up to ~4 s —
+  // and this lock is the only thing another window's first managed turn waits on, with
+  // a 5 s deadline: 4 s spent inside it left that waiter one second and made it fail
+  // outright (BL-032, the same reason the START runs outside). What the lock still owns
+  // is the cross-window hold check, every free and the claim, so a server that appeared
+  // while this probe was in flight is still caught — by the check BL-020 moved in for a load
+  // that has not published its residency yet, and by the token below for one that finished and
+  // released its hold while we were looking.
+  const freeNames = external.managedNames().filter((name) => name !== key && shares(name));
+  // The token is read BEFORE the probe and compared INSIDE the lock, after the holder scan.
+  // Every window that loads a managed server, unloads one, or releases a turn hold publishes a
+  // new token, and a publisher that cannot write removes the file so readers see `''` — unknown.
+  // The comparison below is therefore this window's only proof about its own map, and `''` is
+  // never proof: a fresh board, or a failed publication, takes the conservative path.
+  const generation = ctx.registry.externalResidencyGeneration();
+  await external.reconcileForFree(freeNames);
   const claim = await ctx.registry.withExternalTurnHoldLock(async () => {
-    // A turn in ANOTHER window blocks this load only when the two servers want the
-    // same card: a production turn on GPU 0/1 must not refuse a coder load on GPU
-    // 2, which is the same thrash one layer up from unloading every server. `gpusOf`
-    // answers from the engine; an engine that names no GPUs blocks everything, as
-    // it did before the field existed.
-    const shares = sharesGpusWith(external, key);
     const crossWindowHold = ctx.registry
       .externalTurnHolders()
       .find((hold) => hold.model !== key && shares(hold.model));
     if (crossWindowHold) throw externalHoldConflict(crossWindowHold, key);
-    await external.reconcileForFree(
-      external.managedNames().filter((name) => name !== key && shares(name)),
-    );
+    // Read AFTER the holder scan, so a turn that ended during the scan is caught by the scan
+    // (its hold was live when the scan ran) and one that ended before the scan is caught here
+    // (its release published a newer token). When the map cannot be proved current, the frees
+    // do not trust it: every OVERLAPPING managed server is offered, not only the ones the map
+    // believes are loaded. Over-unloading a server that holds nothing costs one fast POST;
+    // missing one costs the cards this load is about to take.
+    const mapIsCurrent =
+      external.residencyPublicationTrusted() &&
+      generation !== '' &&
+      ctx.registry.externalResidencyGeneration() === generation;
     await freeVramForExternal(key, {
       local: [...ctx.slots.keys(), ...ctx.sharedSlots.keys(), ...ctx.ollamaSlots.keys()],
       // Only the OVERLAPPING servers are offered to the free path: unloading a
       // server on other cards would cut off another window's work for no VRAM
       // gain. `gpusOf` is reached only for a name that is not this one, so a
       // window with a single managed server loaded never asks about GPUs at all.
-      otherExternal: external.loadedNames().filter((name) => name !== key && shares(name)),
+      otherExternal: mapIsCurrent
+        ? external.loadedNames().filter((name) => name !== key && shares(name))
+        : freeNames,
       busy: (model) => ctx.isBusy(model),
       stopLocal: () => stopOwnedSlots(ctx),
       unloadExternal: (name) => external.unload(name),
@@ -152,11 +179,31 @@ export async function unloadManagedForLocalLoad(
   // holding one" test would let this load walk over that server and start a
   // local model beside it. Residency is not the gate either — a claim for a
   // model still starting is not in `loadedNames()` yet.
+  // BL-032: the residency re-read is a network wait (up to ~4 s of two 2 s reads per
+  // endpoint), and the lock below is the one another window's first managed turn waits
+  // 5 s on — so it runs before the lock, and only the check stays inside it. The token
+  // makes that safe the same way `prepareExternalForRequest` does, including the case
+  // Codex named: another window that loads a server, finishes its turn and releases its
+  // hold while this probe is in flight leaves no hold to find, so an unprovable map means
+  // every managed server is freed rather than the map's subset.
+  const reconcileNames = external.managedNames();
+  const generation = ctx.registry.externalResidencyGeneration();
+  await external.reconcileForFree(reconcileNames);
   await ctx.registry.withExternalTurnHoldLock(async () => {
     const blocker = anyTurnHold(ctx.registry);
     if (blocker) throw externalHoldConflict(blocker, localKey, 'local-load');
-    await external.reconcileForFree(external.managedNames());
-    if (external.loadedNames().length) await external.unloadAll(true);
+    // Read after the scan, for the reason given at the other site: a release either
+    // landed before the scan (then its token is newer here) or after it (then the hold
+    // was live and the scan refused). `loadedNames()` is only trusted when it can be.
+    const mapIsCurrent =
+      external.residencyPublicationTrusted() &&
+      generation !== '' &&
+      ctx.registry.externalResidencyGeneration() === generation;
+    if (mapIsCurrent && !external.loadedNames().length) return;
+    // `unloadAll` frees the names it is given, so an unprovable map has to be
+    // replaced by the list itself: asking it to free "everything loaded" with a map
+    // that says nothing is loaded would free nothing at all.
+    await external.unloadAll(true, mapIsCurrent ? external.loadedNames() : reconcileNames);
   });
 }
 

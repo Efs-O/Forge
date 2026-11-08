@@ -39,6 +39,11 @@ export function setupBackendPool(
   // Reuse the shared-runtime lease registry for cross-window liveness. Its
   // existing PID cleanup means a crashed extension host cannot block shutdown.
   const sharedRegistry = new SharedRuntimeRegistry();
+  // BL-032: a window freeing GPUs for a managed load re-reads the endpoints'
+  // residency OUTSIDE the machine-wide lock and validates this token to learn
+  // whether it must re-read inside the lock. The registry owns the shared
+  // folder; the servers publish into it on every load and unload they perform.
+  externalServers.setResidencyChangeHook(() => sharedRegistry.bumpExternalResidencyGeneration());
   const externalLifecycleLeaseId = randomUUID();
   sharedRegistry.acquireLease(EXTERNAL_LIFECYCLE_LEASE_KEY, externalLifecycleLeaseId);
   // Remote (laptop) leases on this window's pool pins: the pool drops a lease

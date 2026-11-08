@@ -3,6 +3,8 @@ import * as path from 'path';
 import { z } from 'zod';
 import { describe, expect, it, vi } from 'vitest';
 import { ToolRegistry, type RegisteredTool } from '../../src/tools/ToolRegistry';
+import { isFailureResult } from '../../src/sidebar/toolResultView';
+import { classifyResult } from '../../src/sidebar/compactionLedger';
 import { makeApplyLineEditsTool } from '../../src/tools/structuredEditTool';
 import { toolErrorText } from '../../src/tools/toolErrorText';
 import { makeAskUserTool } from '../../src/tools/askUserTool';
@@ -10,6 +12,15 @@ import { UserQuestionService } from '../../src/sidebar/UserQuestionService';
 
 vi.mock('vscode', () => ({
   workspace: { workspaceFolders: [{ uri: { fsPath: process.cwd() } }] },
+  // `compactionLedger` reaches the Logger, which builds its output channel on import.
+  window: {
+    createOutputChannel: () => ({
+      appendLine: () => undefined,
+      show: () => undefined,
+      clear: () => undefined,
+      dispose: () => undefined,
+    }),
+  },
 }));
 
 function makeBoolTool(name: string, properties: Record<string, { type: string }>): RegisteredTool {
@@ -111,25 +122,25 @@ describe('ToolRegistry.invalidArgs quoted-type refusals', () => {
 
   it('names the field and an unquoted JSON boolean example for "True"', () => {
     expect(registry.invalidArgs(execTool, { command: 'npx', background: 'True' })).toBe(
-      'shell: "background" must be a JSON boolean, not a string. Resend the call with background as false.',
+      'Error: shell: "background" must be a JSON boolean, not a string. Resend the call with background as false.',
     );
   });
 
   it('refuses "False" as a string instead of accepting it', () => {
     expect(registry.invalidArgs(execTool, { command: 'npx', background: 'False' })).toBe(
-      'shell: "background" must be a JSON boolean, not a string. Resend the call with background as false.',
+      'Error: shell: "background" must be a JSON boolean, not a string. Resend the call with background as false.',
     );
   });
 
   it('refuses other string spellings with the same required JSON shape', () => {
     expect(registry.invalidArgs(execTool, { command: 'npx', background: 'yes' })).toBe(
-      'shell: "background" must be a JSON boolean, not a string. Resend the call with background as false.',
+      'Error: shell: "background" must be a JSON boolean, not a string. Resend the call with background as false.',
     );
   });
 
   it('names the actual JSON type when a number is sent for a boolean', () => {
     expect(registry.invalidArgs(execTool, { command: 'npx', background: 1 })).toBe(
-      'shell: "background" must be a JSON boolean, not a number. Resend the call with background as false.',
+      'Error: shell: "background" must be a JSON boolean, not a number. Resend the call with background as false.',
     );
   });
 
@@ -144,7 +155,7 @@ describe('ToolRegistry.invalidArgs quoted-type refusals', () => {
   it('does not cap or replace the source correction message for long tool names', () => {
     const tool = makeBoolTool('x'.repeat(220), { background: { type: 'boolean' } });
     expect(registry.invalidArgs(tool, { background: 'True' })).toBe(
-      `${'x'.repeat(220)}: "background" must be a JSON boolean, not a string. ` +
+      `Error: ${'x'.repeat(220)}: "background" must be a JSON boolean, not a string. ` +
         'Resend the call with background as false.',
     );
   });
@@ -154,7 +165,7 @@ describe('ToolRegistry.invalidArgs quoted-type refusals', () => {
       max: { type: 'integer', minimum: 1, maximum: 500 },
     });
     expect(registry.invalidArgs(tool, { max: '25' })).toBe(
-      'browser_inspect: "max" must be a JSON integer in range 1 to 500, not a string. ' +
+      'Error: browser_inspect: "max" must be a JSON integer in range 1 to 500, not a string. ' +
         'Resend the call with max as 1.',
     );
   });
@@ -164,7 +175,7 @@ describe('ToolRegistry.invalidArgs quoted-type refusals', () => {
       max: { type: 'integer', minimum: 1, maximum: 500 },
     });
     expect(registry.invalidArgs(tool, { max: 501 })).toBe(
-      'browser_inspect: "max" must be within 1 to 500. Resend it in that range.',
+      'Error: browser_inspect: "max" must be within 1 to 500. Resend it in that range.',
     );
   });
 });
@@ -319,7 +330,7 @@ describe('ToolRegistry.invalidArgs refuses quoted JSON types', () => {
 
   it('refuses operations sent as a JSON string with the array example', () => {
     expect(registry.invalidArgs(editTool, { operations: '[{"path":"scene.js"}]' })).toBe(
-      'apply_line_edits: "operations" must be a JSON array, not a string. ' +
+      'Error: apply_line_edits: "operations" must be a JSON array, not a string. ' +
         'Resend the call with operations as [].',
     );
   });
@@ -327,7 +338,7 @@ describe('ToolRegistry.invalidArgs refuses quoted JSON types', () => {
   it('refuses malformed array JSON without repairing its backslashes', () => {
     const value = String.raw`[{"prompt":"Use N:\vs code apps\Forge"}]`;
     expect(registry.invalidArgs(askTool, { questions: value })).toBe(
-      'ask_user: "questions" must be a JSON array, not a string. ' +
+      'Error: ask_user: "questions" must be a JSON array, not a string. ' +
         'Resend the call with questions as [].',
     );
   });
@@ -335,7 +346,7 @@ describe('ToolRegistry.invalidArgs refuses quoted JSON types', () => {
   it('refuses quoted booleans using the JSON boolean example', () => {
     const tool = makeBoolTool('probe', { enabled: { type: 'boolean' } } as never);
     expect(registry.invalidArgs(tool, { enabled: 'True' })).toBe(
-      'probe: "enabled" must be a JSON boolean, not a string. ' +
+      'Error: probe: "enabled" must be a JSON boolean, not a string. ' +
         'Resend the call with enabled as false.',
     );
   });
@@ -343,7 +354,7 @@ describe('ToolRegistry.invalidArgs refuses quoted JSON types', () => {
   it('refuses quoted numbers using a JSON number example', () => {
     const tool = makeBoolTool('probe', { count: { type: 'integer' } } as never);
     expect(registry.invalidArgs(tool, { count: '5' })).toBe(
-      'probe: "count" must be a JSON integer, not a string. ' +
+      'Error: probe: "count" must be a JSON integer, not a string. ' +
         'Resend the call with count as 1.',
     );
   });
@@ -570,5 +581,33 @@ describe('a schema refusal comes back as plain lines', () => {
     const lines = text.split('\n');
     expect(lines.filter((line) => line.startsWith('Error: probe values['))).toHaveLength(8);
     expect(text).toContain('has 2 more argument problem(s).');
+  });
+});
+
+/**
+ * The text is the record. Four consumers decide whether a call failed by reading the
+ * result string — the transcript row's error badge (`sessionProjections.toolIsError`),
+ * `tool_failures` in `/stats` and the per-session usage record, the compaction ledger's
+ * account of what the model actually did, and `isFailureResult` itself — so a refusal
+ * the model was told about in words has to carry the marker they all key on.
+ * BL-036: the argument refusals introduced with the strict-argument change did not.
+ */
+describe('a refusal before the handler runs is recorded as a failure', () => {
+  const registry = new ToolRegistry();
+  const tool = makeBoolTool('probe', {
+    enabled: { type: 'boolean' },
+    count: { type: 'integer', minimum: 1, maximum: 8 },
+  });
+
+  it.each([
+    ['a quoted boolean', { enabled: 'True' }],
+    ['an integer outside the declared range', { count: 9 }],
+    ['a fractional integer', { count: 1.5 }],
+  ])('marks %s failed for the row, the stats and the ledger', (_label, args) => {
+    const refusal = registry.invalidArgs(tool, args);
+    expect(typeof refusal).toBe('string');
+    expect(refusal).toMatch(/^Error: /u);
+    expect(isFailureResult(refusal as string), refusal).toBe(true);
+    expect(classifyResult(refusal), refusal).toBe('failed');
   });
 });

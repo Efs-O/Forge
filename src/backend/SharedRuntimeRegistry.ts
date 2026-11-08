@@ -229,6 +229,17 @@ export class SharedRuntimeRegistry {
   withExternalTurnHoldLock<T>(fn: () => Promise<T>): Promise<T> {
     return this.holds.withExternalTurnHoldLock(fn);
   }
+
+  /** The machine-wide residency-change token; see `ExternalTurnHolds`. */
+  externalResidencyGeneration(): string {
+    return this.holds.externalResidencyGeneration();
+  }
+
+  /** Publish that this window changed a managed server's residency; false means
+   *  the change could not be published at all, so the caller keeps its own guard. */
+  bumpExternalResidencyGeneration(): boolean {
+    return this.holds.bumpExternalResidencyGeneration();
+  }
 }
 
 /**

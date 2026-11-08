@@ -3,7 +3,7 @@ import { getBuiltinDenyList, rdeleteTargetsFor, type ShellTokenRule } from './De
 import { extractHeredocs, feedsHeredocToShell, openHeredocRule } from './shellHeredoc';
 import { baseProgram, type ShellKind } from './shellCommandTokens';
 import { parseCommand } from './shellCommandParse';
-import { commandIsAllReadOnly, isReadOnly } from './shellReadOnlyRules';
+import { commandIsAllReadOnly, isReadOnly, pipeTargetReadsContents } from './shellReadOnlyRules';
 import {
   executableStatements,
   expandLiteralBashAssignments,
@@ -366,11 +366,17 @@ function classifyShellCommandAtDepth(
   // or a here-document only surfaces in a nested classification.
   const readsMetadataTargets = new Set<number>();
   for (let index = 0; index < parsed.separators.length; index += 1) {
-    if (
-      parsed.separators[index] === 'pipe' &&
-      baseProgram(statements[index + 1]?.[0] ?? '') === 'get-content'
-    )
-      readsMetadataTargets.add(index);
+    if (parsed.separators[index] !== 'pipe') continue;
+    // A listing's objects reach every later stage of the SAME pipeline, so the reader
+    // may sit behind `Select-Object -First 1`: walk forward while the separators stay
+    // pipes, and stop at a `&&` or `;`, which starts a different command.
+    for (let stage = index + 1; stage < statements.length; stage += 1) {
+      if (pipeTargetReadsContents(statements[stage] ?? [], shell)) {
+        readsMetadataTargets.add(index);
+        break;
+      }
+      if (parsed.separators[stage] !== 'pipe') break;
+    }
   }
   const cardSecretRead = secretReadInStatements(
     statements,
