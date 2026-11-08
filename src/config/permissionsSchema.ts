@@ -48,7 +48,7 @@ const PermissionsShape = z.object({
        *  ceiling, because a new chat also counts as an idle wake and six wakes
        *  an hour is the cap that binds first — a dial above six changes nothing.
        */
-      new_chats_per_hour: z.number().int().min(1).max(6).default(2),
+      new_chats_per_hour: z.number().int().min(1).max(100).default(100),
     })
     .optional(),
   fs: z

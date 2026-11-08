@@ -1,6 +1,6 @@
-import React, { useCallback, useEffect, useMemo, useRef } from 'react';
+import React, { useCallback, useEffect, useRef } from 'react';
 import type { AppMessage } from '../App';
-import { rowKey, toRows, type ActivityViewMode } from '../activityRows';
+import { rowKey, type ActivityViewMode } from '../activityRows';
 import { Message } from './Message';
 import { DiffGroup } from './DiffGroup';
 import { ThinkingGroup } from './ThinkingGroup';
@@ -12,6 +12,7 @@ import { PendingToolCallRow } from './PendingToolCallRow';
 import type { PendingToolCall } from '../pendingToolCalls';
 import type { ThinkingDisplayMode } from '../../../src/sidebar/activityViewSetting';
 import { isScrollUpIntent, nextScrolledUp } from '../scrollFollow';
+import { useTranscriptWindow } from '../useTranscriptWindow';
 
 interface Props {
   messages: AppMessage[];
@@ -33,15 +34,7 @@ interface Props {
   emptyState?: React.ReactNode;
   /** "resumed · 3 days ago · 12 msgs" hairline, or null when this is not a resumed tab. */
   resumedNote?: string | null;
-  /**
-   * Whether this pane is the one on screen.
-   *
-   * One `MessageList` is mounted per visited tab and hidden rather than
-   * unmounted, because a switch that unmounts re-runs `react-markdown` +
-   * `rehype-highlight` over the whole incoming transcript - the single largest
-   * remaining cost of a tab switch once the host stopped shipping every
-   * transcript. See `docs/plans/SIDEBAR_SWITCH_LATENCY_PLAN.md`.
-   */
+  /** Whether this pane is on screen. */
   active: boolean;
   activityView: ActivityViewMode;
   thinkingDisplay: ThinkingDisplayMode;
@@ -74,7 +67,15 @@ export function MessageList({
   // is already hidden and the value is already gone.
   const savedScrollTop = useRef(0);
   const cancelSettling = useRef<(() => void) | undefined>(undefined);
-  const rows = useMemo(() => toRows(messages, activityView), [messages, activityView]);
+  const { rows, visibleMessageCount, hiddenCount, loadEarlier, holdWindow, followTail } =
+    useTranscriptWindow(
+      messages,
+      conversationId,
+      activityView,
+      containerRef,
+      userScrolledUp,
+      cancelSettling,
+    );
 
   // The MutationObserver is installed once; a ref is how its closure reads the
   // current `active` without re-subscribing on every switch.
@@ -181,6 +182,8 @@ export function MessageList({
       }
       lastScrollTop = el.scrollTop;
       savedScrollTop.current = el.scrollTop;
+      if (userScrolledUp.current) holdWindow();
+      else if (distFromBottom <= 1) followTail();
     };
     // An image finishing its load changes the height without a DOM mutation, so
     // the MutationObserver below never sees it. `load` does not bubble; capture.
@@ -196,12 +199,14 @@ export function MessageList({
       ) {
         userScrolledUp.current = true;
         cancelSettling.current?.();
+        holdWindow();
       }
     };
     const onKeyDown = (event: KeyboardEvent) => {
       if (isScrollUpIntent({ kind: 'keyboard', key: event.key, shiftKey: event.shiftKey })) {
         userScrolledUp.current = true;
         cancelSettling.current?.();
+        holdWindow();
       }
     };
     const onTouchStart = (event: TouchEvent) => {
@@ -213,6 +218,7 @@ export function MessageList({
         if (isScrollUpIntent({ kind: 'touch', delta: touchY - nextY })) {
           userScrolledUp.current = true;
           cancelSettling.current?.();
+          holdWindow();
         }
       }
       touchY = nextY;
@@ -255,7 +261,7 @@ export function MessageList({
       el.removeEventListener('load', onLoad, true);
       resize?.disconnect();
     };
-  }, [scrollToBottom, settleToBottom]);
+  }, [scrollToBottom, settleToBottom, holdWindow, followTail]);
 
   useEffect(() => {
     const el = containerRef.current;
@@ -326,7 +332,7 @@ export function MessageList({
       // tokens are arriving and keep the animation for settled updates.
       scrollToBottom(streaming ? 'auto' : 'smooth');
     }
-  }, [active, messages, conversationId, scrollToBottom, streaming]);
+  }, [active, messages, rows, conversationId, scrollToBottom, streaming]);
 
   // Only a bulk arrival needs warming — a loaded or resumed transcript. Rows
   // appended during a turn mount at the bottom, on screen, and measure
@@ -366,52 +372,61 @@ export function MessageList({
       ref={containerRef}
       tabIndex={0}
     >
-      {isEmpty && emptyState}
-      {rows.map((row, rowIndex) =>
-        row.kind === 'diffGroup' ? (
-          <DiffGroup key={rowKey(row)} diffs={row.diffs} />
-        ) : row.kind === 'thinkingGroup' ? (
-          <ThinkingGroup
-            key={rowKey(row)}
-            steps={row.steps}
-            displayMode={thinkingDisplay}
-            streaming={streaming}
-          />
-        ) : row.kind === 'toolGroup' ? (
-          <ToolGroup key={rowKey(row)} tools={row.tools} />
-        ) : row.kind === 'step' ? (
-          <ActivityRow key={rowKey(row)} step={row.step} />
-        ) : row.kind === 'activityGroup' ? (
-          <ActivityGroup
-            key={rowKey(row)}
-            items={row.items}
-            live={streaming && rowIndex === rows.length - 1}
-            pendingCalls={
-              pendingInLastGroup && rowIndex === rows.length - 1 ? pendingToolCalls : undefined
-            }
-          />
-        ) : row.message.role === 'compaction' ? (
-          <div
-            key={rowKey(row)}
-            className="compaction-divider"
-            role="separator"
-            data-generation={row.message.compactionGeneration}
-          >
-            <span>
-              {row.message.content} · generation {row.message.compactionGeneration ?? '?'}
-              {row.message.compactionSource ? ` · ${row.message.compactionSource}` : ''}
-            </span>
-          </div>
-        ) : (
-          <Message
-            key={rowKey(row)}
-            {...row.message}
-            streaming={
-              streaming && row.index === messages.length - 1 && row.message.role === 'assistant'
-            }
-          />
-        ),
+      {hiddenCount > 0 && (
+        <button type="button" onClick={loadEarlier}>
+          Load earlier messages ({hiddenCount} earlier)
+        </button>
       )}
+      {isEmpty && emptyState}
+      {rows.map((row, rowIndex) => (
+        <div key={rowKey(row)} data-transcript-row={rowKey(row)}>
+          {row.kind === 'diffGroup' ? (
+            <DiffGroup key={rowKey(row)} diffs={row.diffs} />
+          ) : row.kind === 'thinkingGroup' ? (
+            <ThinkingGroup
+              key={rowKey(row)}
+              steps={row.steps}
+              displayMode={thinkingDisplay}
+              streaming={streaming}
+            />
+          ) : row.kind === 'toolGroup' ? (
+            <ToolGroup key={rowKey(row)} tools={row.tools} />
+          ) : row.kind === 'step' ? (
+            <ActivityRow key={rowKey(row)} step={row.step} />
+          ) : row.kind === 'activityGroup' ? (
+            <ActivityGroup
+              key={rowKey(row)}
+              items={row.items}
+              live={streaming && rowIndex === rows.length - 1}
+              pendingCalls={
+                pendingInLastGroup && rowIndex === rows.length - 1 ? pendingToolCalls : undefined
+              }
+            />
+          ) : row.message.role === 'compaction' ? (
+            <div
+              key={rowKey(row)}
+              className="compaction-divider"
+              role="separator"
+              data-generation={row.message.compactionGeneration}
+            >
+              <span>
+                {row.message.content} · generation {row.message.compactionGeneration ?? '?'}
+                {row.message.compactionSource ? ` · ${row.message.compactionSource}` : ''}
+              </span>
+            </div>
+          ) : (
+            <Message
+              key={rowKey(row)}
+              {...row.message}
+              streaming={
+                streaming &&
+                row.index === visibleMessageCount - 1 &&
+                row.message.role === 'assistant'
+              }
+            />
+          )}
+        </div>
+      ))}
       {groupedPending && !pendingInLastGroup && (
         <ActivityGroup items={[]} live pendingCalls={pendingToolCalls} />
       )}

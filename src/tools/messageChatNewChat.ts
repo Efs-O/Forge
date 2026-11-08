@@ -25,6 +25,8 @@ import {
   emitDeliveryActivity,
   formatDeliveryResult,
   messageChatSendLimit,
+  MESSAGE_CHAT_WINDOW_MINUTES,
+  MESSAGE_CHAT_WINDOW_MS,
   nextAllowedAt,
   pruneMessageChatWindow,
   recordAction,
@@ -140,7 +142,7 @@ export async function createNewChat(input: MessageChatActionContext): Promise<st
   if (sendLimit) return input.refuse(sendLimit);
   if (window.newChatsAt.length >= input.newChatsPerHour) {
     return input.refuse(
-      `Error: the ${input.newChatsPerHour}-new-chat-per-hour limit for this chat was reached; the next new chat is allowed at ${atText(nextAllowedAt(window.newChatsAt))}.`,
+      `Error: the ${input.newChatsPerHour}-new-chat-per-${MESSAGE_CHAT_WINDOW_MINUTES}-min limit for this chat was reached; the next new chat is allowed at ${atText(nextAllowedAt(window.newChatsAt, MESSAGE_CHAT_WINDOW_MS))}.`,
     );
   }
 

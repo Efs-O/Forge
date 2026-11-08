@@ -176,16 +176,16 @@ describe('message_chat tool contract and handler', () => {
     // sixth idle wake is the last one and the seventh is refused.
     const { tool } = makeTool();
     const results: string[] = [];
-    for (let index = 0; index < 7; index += 1) {
+    for (let index = 0; index < 21; index += 1) {
       results.push(
         String(await tool.handler({ to: 'idle', message: `wake ${index + 1}` }, context())),
       );
     }
-    expect(results.slice(0, 6).every((result) => result.includes('a turn started there'))).toBe(
+    expect(results.slice(0, 20).every((result) => result.includes('a turn started there'))).toBe(
       true,
     );
-    expect(results[6]).toContain('idle-chat-wake-per-hour limit');
-    expect(results[6]).toContain('No `action` was given, so `send` was used.');
+    expect(results[20]).toContain('20-idle-chat-wake-per-30-min limit');
+    expect(results[20]).toContain('No `action` was given, so `send` was used.');
   });
 
   it('a call with neither action nor message is refused, naming the actions', async () => {
@@ -578,7 +578,7 @@ describe('message_chat tool contract and handler', () => {
     expect(unresolved).toMatch(/send: .*only other running chat\.$/u);
   });
 
-  it('refuses the 31st send in an hour with the next-allowed time', async () => {
+  it('refuses the 31st send in a 30-minute window with the next-allowed time', async () => {
     const at = Date.parse('2026-10-24T10:00:00.000Z');
     const { tool, sidebar } = makeTool(hostStatus({ running: ['running'] }), () => at);
     for (let index = 0; index < 30; index += 1) {
@@ -588,18 +588,18 @@ describe('message_chat tool contract and handler', () => {
       { action: 'send', to: 'running', message: 'one too many' },
       context(),
     );
-    expect(result).toContain('30-send-per-hour limit');
-    expect(result).toContain('next send is allowed at 2026-10-24T11:00:00.000Z');
+    expect(result).toContain('30-send-per-30-min limit');
+    expect(result).toContain('next send is allowed at 2026-10-24T10:30:00.000Z');
     expect(sidebar.deliverChatMessage).toHaveBeenCalledTimes(30);
   });
 
-  it('expires sends at the rolling one-hour boundary and keeps caps per sending chat', async () => {
+  it('expires sends at the rolling thirty-minute boundary and keeps caps per sending chat', async () => {
     let at = Date.parse('2026-10-24T10:00:00.000Z');
     const { tool, sidebar } = makeTool(hostStatus({ running: ['running'] }), () => at);
     for (let index = 0; index < 30; index += 1) {
       await tool.handler({ action: 'send', to: 'running', message: `message ${index}` }, context());
     }
-    at += 60 * 60 * 1000;
+    at += 30 * 60 * 1000;
     const afterWindow = await tool.handler(
       { action: 'send', to: 'running', message: 'window expired' },
       context(),
@@ -613,19 +613,19 @@ describe('message_chat tool contract and handler', () => {
     expect(sidebar.deliverChatMessage).toHaveBeenCalledTimes(32);
   });
 
-  it('refuses the seventh idle wake in an hour with the next-allowed time', async () => {
+  it('refuses the twenty-first idle wake in a 30-minute window with the next-allowed time', async () => {
     const at = Date.parse('2026-10-24T10:00:00.000Z');
     const { tool, sidebar } = makeTool(hostStatus(), () => at);
-    for (let index = 0; index < 6; index += 1) {
+    for (let index = 0; index < 20; index += 1) {
       await tool.handler({ action: 'send', to: 'idle', message: `wake ${index}` }, context());
     }
     const result = await tool.handler(
-      { action: 'send', to: 'idle', message: 'seventh wake' },
+      { action: 'send', to: 'idle', message: 'twenty-first wake' },
       context(),
     );
-    expect(result).toContain('6-idle-chat-wake-per-hour limit');
-    expect(result).toContain('next idle wake is allowed at 2026-10-24T11:00:00.000Z');
-    expect(sidebar.deliverChatMessage).toHaveBeenCalledTimes(6);
+    expect(result).toContain('20-idle-chat-wake-per-30-min limit');
+    expect(result).toContain('next idle wake is allowed at 2026-10-24T10:30:00.000Z');
+    expect(sidebar.deliverChatMessage).toHaveBeenCalledTimes(20);
   });
 
   it('reports a refused delivery as an error and does not count it against the caps', async () => {

@@ -68,10 +68,14 @@ describe('MessageList scroll behavior in Edge', () => {
         throw new Error(`MessageList did not render: ${pageErrors.join('; ')}`, { cause: error });
       }
       const atBottom = () =>
-        page.waitForFunction(() => {
-          const el = document.querySelector<HTMLElement>('.messages-pane');
-          return Boolean(el && el.scrollHeight - el.scrollTop - el.clientHeight <= 1);
-        }, undefined, { timeout: 5000 });
+        page.waitForFunction(
+          () => {
+            const el = document.querySelector<HTMLElement>('.messages-pane');
+            return Boolean(el && el.scrollHeight - el.scrollTop - el.clientHeight <= 1);
+          },
+          undefined,
+          { timeout: 5000 },
+        );
       const longReply = `Streaming content reflows the transcript. ${'More text grows this answer. '.repeat(180)}`;
 
       await atBottom();
@@ -83,10 +87,14 @@ describe('MessageList scroll behavior in Edge', () => {
 
       await page.mouse.move(600, 400);
       await page.mouse.wheel(0, -500);
-      await page.waitForFunction(() => {
-        const el = document.querySelector<HTMLElement>('.messages-pane');
-        return Boolean(el && el.scrollTop < el.scrollHeight - el.clientHeight - 100);
-      }, undefined, { timeout: 5000 });
+      await page.waitForFunction(
+        () => {
+          const el = document.querySelector<HTMLElement>('.messages-pane');
+          return Boolean(el && el.scrollTop < el.scrollHeight - el.clientHeight - 100);
+        },
+        undefined,
+        { timeout: 5000 },
+      );
       const readerPosition = await pane.evaluate((el) => el.scrollTop);
       const previousHeight = await pane.evaluate((el) => el.scrollHeight);
       await page.evaluate(
@@ -120,6 +128,47 @@ describe('MessageList scroll behavior in Edge', () => {
         longReply,
       );
       await atBottom();
+      // Paging must preserve actual layout, not just synthetic jsdom heights.
+      await page.evaluate(() => window.resetTranscript(10000));
+      await atBottom();
+      expect(await pane.locator('[data-transcript-row]').count()).toBe(100);
+      await pane.evaluate((el) => {
+        el.dispatchEvent(new WheelEvent('wheel', { deltaY: -100 }));
+        el.scrollTop = 0;
+      });
+      const loadEarlier = pane.getByRole('button', { name: 'Load earlier messages', exact: false });
+      await loadEarlier.waitFor({ state: 'visible' });
+      // Allow the initial content-visibility measurement pass to settle.
+      await page.evaluate(
+        () =>
+          new Promise<void>((resolve) => {
+            requestAnimationFrame(() => requestAnimationFrame(() => resolve()));
+          }),
+      );
+      const anchor = pane.locator('[data-transcript-row="history-9900"]');
+      const beforePrepend = await anchor.evaluate((el) => el.getBoundingClientRect().top);
+      await loadEarlier.click();
+      await page.waitForFunction(
+        () => document.querySelectorAll('[data-transcript-row]').length === 200,
+      );
+      await page.evaluate(
+        () =>
+          new Promise<void>((resolve) => {
+            requestAnimationFrame(() =>
+              requestAnimationFrame(() => requestAnimationFrame(() => resolve())),
+            );
+          }),
+      );
+      const afterPrepend = await anchor.evaluate((el) => el.getBoundingClientRect().top);
+      expect(Math.abs(afterPrepend - beforePrepend)).toBeLessThan(2);
+      await pane.evaluate((el) => {
+        el.scrollTop = el.scrollHeight;
+      });
+      await page.waitForFunction(
+        () => document.querySelectorAll('[data-transcript-row]').length === 100,
+      );
+      await atBottom();
+      expect(pageErrors).toEqual([]);
       await page.close();
     } finally {
       await browser.close();

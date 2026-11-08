@@ -183,7 +183,7 @@ describe('message_chat new and steer actions', () => {
     expect(ForgeConfigSchema.parse(modelConfig).permissions).toBeUndefined();
     expect(
       ForgeConfigSchema.parse({ ...modelConfig, permissions: { chats: {} } }).permissions?.chats,
-    ).toEqual({ new_chat: false, steer: false, new_chats_per_hour: 2 });
+    ).toEqual({ new_chat: false, steer: false, new_chats_per_hour: 100 });
     expect(
       ForgeConfigSchema.parse({
         ...modelConfig,
@@ -267,11 +267,11 @@ describe('message_chat new and steer actions', () => {
   });
 
   it('enforces the two-new-chat cap and refunds refused deliveries', async () => {
-    const rig = makeRig({ actions: { new_chat: true } });
+    const rig = makeRig({ actions: { new_chat: true }, newChatsPerHour: 2 });
     await rig.tool.handler({ action: 'new', message: 'one' }, context());
     await rig.tool.handler({ action: 'new', message: 'two' }, context());
     const capped = await rig.tool.handler({ action: 'new', message: 'three' }, context());
-    expect(capped).toContain('2-new-chat-per-hour limit');
+    expect(capped).toContain('2-new-chat-per-30-min limit');
     expect(rig.sidebar.createConversation).toHaveBeenCalledTimes(2);
 
     const refused = makeRig({ actions: { new_chat: true }, delivery: { kind: 'refused', error: 'no model' } });
@@ -288,11 +288,11 @@ describe('message_chat new and steer actions', () => {
 
   it('counts a new chat against the idle-wake cap', async () => {
     const rig = makeRig({ actions: { new_chat: true } });
-    for (let index = 0; index < 6; index += 1) {
+    for (let index = 0; index < 20; index += 1) {
       await rig.tool.handler({ action: 'send', to: 'target', message: 'wake ' + index }, context());
     }
     const result = await rig.tool.handler({ action: 'new', message: 'one more wake' }, context());
-    expect(result).toContain('6-idle-chat-wake-per-hour limit');
+    expect(result).toContain('20-idle-chat-wake-per-30-min limit');
     expect(rig.sidebar.createConversation).not.toHaveBeenCalled();
   });
 
@@ -466,9 +466,9 @@ describe('message_chat new and steer actions', () => {
     expect(rig.sidebar.deliverChatMessage).not.toHaveBeenCalled();
     const second = await rig.tool.handler({ action: 'new', message: 'Again.' }, context());
     // The refund is what this asserts: an unrefunded counter would have answered
-    // `1-new-chat-per-hour limit` here, and the sender would have lost its whole
-    // hour to a chat that never got a message.
-    expect(second).not.toContain('new-chat-per-hour limit');
+    // `1-new-chat-per-30-min limit` here, and the sender would have lost its whole
+    // window to a chat that never got a message.
+    expect(second).not.toContain('new-chat-per-30-min limit');
     expect(second).toContain('could not be pinned');
     expect(rig.sidebar.createConversation).toHaveBeenCalledTimes(2);
   });
@@ -481,8 +481,8 @@ describe('message_chat new and steer actions', () => {
   });
 
   it('honours permissions.chats.new_chats_per_hour', async () => {
-    // Three, not twelve: a `new` also counts as an idle wake, and six wakes an
-    // hour is the ceiling that binds first, so a dial above six changes nothing.
+    // Three, not a hundred: a `new` also counts as an idle wake, and the 20-wake
+    // cap is the ceiling that binds first, so a dial above twenty changes nothing.
     const configured = makeRig({ actions: { new_chat: true }, newChatsPerHour: 3 });
     for (let index = 0; index < 3; index += 1) {
       await configured.tool.handler({ action: 'new', message: `worker ${index}` }, context());
@@ -491,20 +491,20 @@ describe('message_chat new and steer actions', () => {
       { action: 'new', message: 'one too many' },
       context(),
     );
-    expect(capped).toContain('3-new-chat-per-hour limit');
+    expect(capped).toContain('3-new-chat-per-30-min limit');
     expect(capped).toContain('next new chat is allowed at');
     expect(configured.sidebar.createConversation).toHaveBeenCalledTimes(3);
 
-    // With the block unset, the tool behaves exactly as it did before the dial
-    // existed: two chats an hour.
-    const defaultRig = makeRig({ actions: { new_chat: true } });
+    // The dial at 2 (explicit): the third `new` is refused by the dial itself —
+    // the unset case now defaults to 100, where the 20-wake cap binds first.
+    const defaultRig = makeRig({ actions: { new_chat: true }, newChatsPerHour: 2 });
     await defaultRig.tool.handler({ action: 'new', message: 'worker one' }, context());
     await defaultRig.tool.handler({ action: 'new', message: 'worker two' }, context());
     const atTwo = await defaultRig.tool.handler(
       { action: 'new', message: 'worker three' },
       context(),
     );
-    expect(atTwo).toContain('2-new-chat-per-hour limit');
+    expect(atTwo).toContain('2-new-chat-per-30-min limit');
     expect(defaultRig.sidebar.createConversation).toHaveBeenCalledTimes(2);
   });
 
@@ -725,16 +725,16 @@ describe('message_chat new and steer actions', () => {
     expect(rig.sidebar.deliverChatMessage).not.toHaveBeenCalled();
     expect(rig.emitHostActivity).not.toHaveBeenCalled();
     expect(rig.sidebar.createConversation).not.toHaveBeenCalled();
-    // Nothing was counted, so a closed worker cannot eat the sender's hour: the
-    // idle-wake cap still binds at exactly six wakes, as it did before.
-    for (let index = 0; index < 6; index += 1) {
+    // Nothing was counted, so a closed worker cannot eat the sender's window: the
+    // idle-wake cap still binds at exactly twenty wakes, as it did before.
+    for (let index = 0; index < 20; index += 1) {
       await rig.tool.handler({ action: 'send', to: 'target', message: 'wake ' + index }, context());
     }
     const capped = await rig.tool.handler(
       { action: 'send', to: 'target', message: 'one too many' },
       context(),
     );
-    expect(capped).toContain('6-idle-chat-wake-per-hour limit');
+    expect(capped).toContain('20-idle-chat-wake-per-30-min limit');
   });
 
   it('refuses a chat in neither the open tabs nor recent history as before', async () => {

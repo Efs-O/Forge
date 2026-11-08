@@ -276,6 +276,10 @@ export class AgentRoutes {
       // nothing here was ever going to make.
       if (steerForge && !this.deps.interruptForge)
         throw new HttpError(409, 'this window cannot steer a Forge chat. Nothing was queued.');
+      const steerEpochField =
+        typeof fields['steer_epoch'] === 'string' ? fields['steer_epoch'].trim() : '';
+      if (steerForge && steerEpochField !== '' && !Number.isInteger(Number(steerEpochField)))
+        throw new HttpError(400, 'steer_epoch must be an integer when it is sent');
       const admission = await admitInboundMessage({
         from,
         ...(declaredSender ? { sender: declaredSender } : {}),
@@ -286,21 +290,28 @@ export class AgentRoutes {
       const target = admission.target;
       const pendingReplyId = admission.pendingReplyId;
       const queuedBehindRunningTurn = admission.queuedBehindRunningTurn ?? false;
-      // A steer is refused before anything is queued. `accept` can start the
-      // drain in the same tick, so a message cancelled after the answer came back
-      // is not reliably withdrawn — it may already be the turn this one meant to
-      // replace. `steer_epoch` is the chain the sender read, so a steer written
-      // against a turn that has since been followed by the owner's own message is
-      // refused rather than interrupting the newer work.
+      // A steer is refused before anything is queued, and its last check runs
+      // AFTER admission with the queue holding the message unstarted until it
+      // passes: `accept` can start the drain in the same tick, so a message
+      // cancelled after the answer came back is not reliably withdrawn — it may
+      // already be the turn this one meant to replace. `steer_epoch` is the
+      // chain the sender read, so a steer written against a turn that has since
+      // been followed by the owner's own message is refused rather than
+      // interrupting the newer work. A steer whose chat cannot be named, or
+      // with no guard to check it against, is refused here while nothing is
+      // queued: after acceptance no answer could honestly say "nothing was
+      // queued".
+      let expectedEpoch: number | undefined;
       if (steerForge) {
-        const rawEpoch =
-          typeof fields['steer_epoch'] === 'string' ? fields['steer_epoch'].trim() : '';
-        const expectedEpoch = rawEpoch === '' ? undefined : Number(rawEpoch);
-        if (rawEpoch !== '' && !Number.isInteger(expectedEpoch))
-          throw new HttpError(400, 'steer_epoch must be an integer when it is sent');
-        const refusal = await this.deps.steerGuard?.(
-          target?.conversationId,
-          target?.title,
+        expectedEpoch = steerEpochField === '' ? undefined : Number(steerEpochField);
+        if (target === undefined || this.deps.steerGuard === undefined)
+          throw new HttpError(
+            409,
+            'this window cannot say which chat a steer would reach. Nothing was queued.',
+          );
+        const refusal = await this.deps.steerGuard(
+          target.conversationId,
+          target.title,
           expectedEpoch,
         );
         if (refusal) {
@@ -314,7 +325,7 @@ export class AgentRoutes {
           forgeInboundPrompt(from, text, options.sender),
           from,
           steerForge,
-          options,
+          steerForge ? { ...options, hold: true } : options,
         );
       } catch (error) {
         if (pendingReplyId) this.deps.pendingReplies?.remove(pendingReplyId);
@@ -336,18 +347,32 @@ export class AgentRoutes {
       }
       const { position: queued, id } = accepted;
       if (steerForge) {
-        const outcome = (await this.deps.interruptForge?.(from, target?.conversationId)) ?? {
-          steered: false as const,
-          reason: 'no Forge turn was stopped',
-        };
+        let outcome: Awaited<ReturnType<NonNullable<typeof this.deps.interruptForge>>>;
+        try {
+          // The backstop carries the epoch the sender read: a chain that moved
+          // between the guard and here is caught while the held message has
+          // still never run, so taking it back is a guaranteed withdrawal.
+          outcome = (await this.deps.interruptForge?.(
+            from,
+            target?.conversationId,
+            expectedEpoch,
+          )) ?? { steered: false as const, reason: 'no Forge turn was stopped' };
+        } catch (error) {
+          this.deps.inbox.cancel(from, id);
+          if (pendingReplyId) this.deps.pendingReplies?.remove(pendingReplyId);
+          throw error;
+        }
         // Nothing was interrupted, so this message does not belong in the
         // inbox either: it would land in front of a turn the owner has not
-        // answered. Take it back and refuse, so the sender's counters return.
+        // answered. The queue never started it, so taking it back is certain.
         if (!outcome.steered && outcome.blocked) {
           this.deps.inbox.cancel(from, id);
           if (pendingReplyId) this.deps.pendingReplies?.remove(pendingReplyId);
           throw new HttpError(409, `${outcome.reason}. Nothing was queued.`);
         }
+        // The last guard has passed: the held message may now start, in the
+        // lane the interrupted turn is freeing.
+        this.deps.inbox.release(id);
         return sendJson(res, 202, { queued, id, ...outcome });
       }
       return sendJson(res, 202, {

@@ -37,7 +37,7 @@ export type AgentRelayResult =
 
 export interface AgentRoutesDeps {
   paths: () => BusPaths;
-  inbox: Pick<AgentInbox, 'accept' | 'cancel'>;
+  inbox: Pick<AgentInbox, 'accept' | 'cancel' | 'release'>;
   /** Only the focused Forge window may claim the shared client endpoint. */
   isFocused?: () => boolean;
   /** Injected by tests; production mints one per activation. */
@@ -92,8 +92,14 @@ export interface AgentRoutesDeps {
   /** Interrupt Forge's addressed chat and report whether it was streaming. A
    *  window that will not interrupt answers `blocked`, and the route takes its
    *  own message back out of the inbox rather than queueing into a turn the
-   *  owner has not answered. */
-  interruptForge?: (from: string, conversationId: string | undefined) => Promise<ForgeSteerResult>;
+   *  owner has not answered. It carries the chain the sender read
+   *  (`expectedEpoch`) so the post-accept backstop compares against the same
+   *  epoch the pre-accept guard did. */
+  interruptForge?: (
+    from: string,
+    conversationId: string | undefined,
+    expectedEpoch?: number,
+  ) => Promise<ForgeSteerResult>;
   /**
    * Why a `priority=steer` message must not be queued at all, as the sentence the
    * sender reads, or nothing when it may proceed. Asked BEFORE `inbox.accept`,

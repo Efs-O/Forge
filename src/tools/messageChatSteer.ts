@@ -18,7 +18,6 @@ import {
   clearUnclaimedSend,
   emitDeliveryActivity,
   formatDeliveryResult,
-  HOUR_MS,
   markUnclaimedSend,
   messageChatSendLimit,
   nextAllowedAt,
@@ -32,6 +31,9 @@ import {
 } from './messageChatShared';
 
 const MESSAGE_CHAT_STEERS_PER_HOUR = 3;
+/** Steer keeps the full hour: the cadence `lastSteerByTarget` enforces is a
+ *  per-target hour, independent of the 30-minute send/wake window. */
+const HOUR_MS = 60 * 60 * 1000;
 const MESSAGE_CHAT_STEER_TARGET_GAP_MS = 2 * 60 * 1000;
 
 export interface SteerContext extends MessageChatActionContext {

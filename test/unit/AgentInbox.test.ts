@@ -626,3 +626,70 @@ describe('AgentInbox runs different chats at once (INBOX_PARALLEL_CHATS_PLAN)', 
     inbox.dispose();
   });
 });
+
+describe('a held message', () => {
+  it('never starts until released, even once its lane is free', async () => {
+    const h = host();
+    const inbox = new AgentInbox(h, 5);
+    inbox.accept('running');
+    await tick();
+    const steer = inbox.accept('steer', 'claude', true, { hold: true });
+    expect(steer?.position).toBe(1);
+    h.finish(); // the lane frees while the steer's guard is still deciding
+    await tick();
+    expect(h.submitted).toEqual(['running']); // the drain skipped the held steer
+    expect(inbox.release(steer!.id)).toBe(true);
+    await tick();
+    expect(h.submitted).toEqual(['running', 'steer']);
+    inbox.dispose();
+  });
+
+  it('holds its lane so nothing queued later slips into the chat first', async () => {
+    const h = host();
+    const inbox = new AgentInbox(h, 5);
+    inbox.accept('running');
+    await tick();
+    const steer = inbox.accept('steer', 'claude', true, { hold: true });
+    inbox.accept('follow-up', 'sara');
+    h.finish();
+    await tick();
+    expect(h.submitted).toEqual(['running']); // the follow-up waits behind the held steer
+    inbox.release(steer!.id);
+    await tick();
+    expect(h.submitted).toEqual(['running', 'steer']);
+    h.finish();
+    await tick();
+    expect(h.submitted).toEqual(['running', 'steer', 'follow-up']);
+    inbox.dispose();
+  });
+
+  it('a refused steer can be cancelled while it is still held', () => {
+    const h = host();
+    h.busy = true; // the lane stays busy: nothing starts either way
+    const inbox = new AgentInbox(h, 5);
+    const steer = inbox.accept('steer', 'claude', true, { hold: true });
+    expect(inbox.pending).toBe(1);
+    expect(inbox.cancel('claude', steer!.id)).toBe(1);
+    expect(inbox.pending).toBe(0);
+    expect(inbox.release(steer!.id)).toBe(false);
+    inbox.dispose();
+  });
+
+  it('cancelling a held steer resumes the follow-up that waited behind it', async () => {
+    // The regression: the removal scheduled no pass, so the follow-up sat on
+    // a free lane until some unrelated event woke the queue.
+    const h = host();
+    const inbox = new AgentInbox(h, 5);
+    inbox.accept('running');
+    await tick();
+    const steer = inbox.accept('steer', 'claude', true, { hold: true });
+    inbox.accept('follow-up', 'sara');
+    h.finish();
+    await tick();
+    expect(h.submitted).toEqual(['running']); // the follow-up waits behind the held steer
+    inbox.cancel('claude', steer!.id);
+    await tick();
+    expect(h.submitted).toEqual(['running', 'follow-up']); // the removal itself wakes the queue
+    inbox.dispose();
+  });
+});

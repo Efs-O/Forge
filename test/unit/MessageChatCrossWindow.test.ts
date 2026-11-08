@@ -207,6 +207,7 @@ function makeCrossTool(
     busHere?: boolean;
     steer?: boolean;
     newChat?: boolean;
+  newChatsPerHour?: number;
     clanker?: boolean;
     /** The windows discovery finds, for a test that needs more than one. */
     peers?: () => PeerWindow[];
@@ -225,7 +226,11 @@ function makeCrossTool(
     getConfig: () =>
       ({
         permissions: {
-          chats: { steer: options.steer === true, new_chat: options.newChat === true },
+          chats: {
+            steer: options.steer === true,
+            new_chat: options.newChat === true,
+            new_chats_per_hour: options.newChatsPerHour ?? 100,
+          },
         },
       }) as ForgeConfig,
     getPeerContext: () =>
@@ -380,16 +385,16 @@ describe('message_chat send to a chat in another window', () => {
     );
     expect(refused).toContain('bad token');
     expect(refused).toContain('not sharing one agent-bus folder');
-    // The refused send burned nothing, so the six idle wakes are still available.
+    // The refused send burned nothing, so the twenty idle wakes are still available.
     reply = { status: 202, body: '{}' };
-    for (let i = 0; i < 6; i++) {
+    for (let i = 0; i < 20; i++) {
       expect(
         String(await tool.handler({ action: 'send', to: IDLE, message: `n${i}` }, context)),
       ).toContain('Queued in');
     }
     expect(
-      String(await tool.handler({ action: 'send', to: IDLE, message: 'seventh' }, context)),
-    ).toContain('idle-chat-wake-per-hour');
+      String(await tool.handler({ action: 'send', to: IDLE, message: 'twenty-first' }, context)),
+    ).toContain('idle-chat-wake-per-30-min');
   }, 20_000);
 
   it('passes on what the peer window itself said', async () => {
@@ -411,17 +416,17 @@ describe('message_chat send to a chat in another window', () => {
     expect(lost).toContain('do not resend');
     expect(lost).not.toContain('no counter was used');
     expect(received).toHaveLength(1);
-    // The lost send stayed counted, so five more idle wakes fit and the sixth
-    // is refused: a refund here would let the same report be paid for twice.
+    // The lost send stayed counted, so nineteen more idle wakes fit and the
+    // twentieth is refused: a refund here would let the same report be paid for twice.
     mode = 'answer';
-    for (let i = 0; i < 5; i++) {
+    for (let i = 0; i < 19; i++) {
       expect(
         String(await tool.handler({ action: 'send', to: IDLE, message: `n${i}` }, context)),
       ).toContain('Queued in');
     }
     expect(
-      String(await tool.handler({ action: 'send', to: IDLE, message: 'sixth' }, context)),
-    ).toContain('idle-chat-wake-per-hour');
+      String(await tool.handler({ action: 'send', to: IDLE, message: 'twentieth' }, context)),
+    ).toContain('idle-chat-wake-per-30-min');
   }, 20_000);
 
   it('does not call a 2xx that is not the documented 202 a queued message', async () => {
@@ -438,15 +443,15 @@ describe('message_chat send to a chat in another window', () => {
   it('shares the idle-wake cap with the local chats', async () => {
     const at = 1_700_000_000_000;
     const { tool } = makeCrossTool({ now: () => at });
-    for (let i = 0; i < 6; i++) {
+    for (let i = 0; i < 20; i++) {
       expect(
         String(await tool.handler({ action: 'send', to: IDLE, message: `wake ${i}` }, context)),
       ).toContain('Queued in');
     }
-    const seventh = String(
+    const twentyFirst = String(
       await tool.handler({ action: 'send', to: IDLE, message: 'one too many' }, context),
     );
-    expect(seventh).toContain('idle-chat-wake-per-hour');
+    expect(twentyFirst).toContain('idle-chat-wake-per-30-min');
     // A send into a chat that is already busy is not a wake, so it still fits.
     expect(
       String(await tool.handler({ action: 'send', to: RUNNING, message: 'tell' }, context)),
@@ -507,16 +512,16 @@ describe('message_chat steer to a chat in another window', () => {
     const result = await steer(tool, IDLE, 'Start with the parser.');
     expect(result).toContain('Steered "Worker" in N:/repo-b (idle)');
     expect(result).toContain('started a turn there');
-    // A steer that starts a turn is a wake, so it burns the same six as a send.
+    // A steer that starts a turn is a wake, so it burns the same twenty as a send.
     reply = { status: 202, body: '{}' };
-    for (let i = 0; i < 5; i++) {
+    for (let i = 0; i < 19; i++) {
       expect(
         String(await tool.handler({ action: 'send', to: IDLE, message: `n${i}` }, context)),
       ).toContain('Queued in');
     }
     expect(
-      String(await tool.handler({ action: 'send', to: IDLE, message: 'sixth' }, context)),
-    ).toContain('idle-chat-wake-per-hour');
+      String(await tool.handler({ action: 'send', to: IDLE, message: 'twentieth' }, context)),
+    ).toContain('idle-chat-wake-per-30-min');
   });
 
   it('keeps the loop memory of a chat it did not steer next', async () => {
@@ -556,34 +561,34 @@ describe('message_chat steer to a chat in another window', () => {
 
   it('refuses a steer at the wake cap before asking the peer, when the chat looked busy', async () => {
     // The wake is reserved before the message leaves. A steer that checked the cap
-    // only when its snapshot said idle could spend a seventh slot on a stale
+    // only when its snapshot said idle could spend a twenty-first slot on a stale
     // "it is running" — and the cap is what bounds paid turns.
     const { tool } = makeCrossTool({ steer: true });
     reply = { status: 202, body: '{}' };
-    for (let i = 0; i < 6; i++) {
+    for (let i = 0; i < 20; i++) {
       expect(
         String(await tool.handler({ action: 'send', to: IDLE, message: `n${i}` }, context)),
       ).toContain('Queued in');
     }
     reply = { status: 202, body: '{"steered":true}' };
-    expect(await steer(tool, RUNNING, 'Stop.')).toContain('idle-chat-wake-per-hour');
-    expect(posts()).toHaveLength(6);
+    expect(await steer(tool, RUNNING, 'Stop.')).toContain('idle-chat-wake-per-30-min');
+    expect(posts()).toHaveLength(20);
   });
 
   it('hands the reserved wake back when that window proves the chat was already busy', async () => {
     reply = { status: 202, body: '{"steered":true}' };
     const { tool } = makeCrossTool({ steer: true });
     expect(await steer(tool, RUNNING, 'Stop.')).toContain('Interrupted');
-    // Nothing was added, so all six wakes are still there for idle chats.
+    // Nothing was added, so all twenty wakes are still there for idle chats.
     reply = { status: 202, body: '{}' };
-    for (let i = 0; i < 6; i++) {
+    for (let i = 0; i < 20; i++) {
       expect(
         String(await tool.handler({ action: 'send', to: IDLE, message: `n${i}` }, context)),
       ).toContain('Queued in');
     }
     expect(
-      String(await tool.handler({ action: 'send', to: IDLE, message: 'seventh' }, context)),
-    ).toContain('idle-chat-wake-per-hour');
+      String(await tool.handler({ action: 'send', to: IDLE, message: 'twenty-first' }, context)),
+    ).toContain('idle-chat-wake-per-30-min');
   });
 
   it('keeps the reserved wake when that window says nothing was stopped', async () => {
@@ -593,14 +598,14 @@ describe('message_chat steer to a chat in another window', () => {
     const { tool } = makeCrossTool({ steer: true });
     expect(await steer(tool, RUNNING, 'Start anyway.')).toContain('(idle)');
     reply = { status: 202, body: '{}' };
-    for (let i = 0; i < 5; i++) {
+    for (let i = 0; i < 19; i++) {
       expect(
         String(await tool.handler({ action: 'send', to: IDLE, message: `n${i}` }, context)),
       ).toContain('Queued in');
     }
     expect(
-      String(await tool.handler({ action: 'send', to: IDLE, message: 'sixth' }, context)),
-    ).toContain('idle-chat-wake-per-hour');
+      String(await tool.handler({ action: 'send', to: IDLE, message: 'twentieth' }, context)),
+    ).toContain('idle-chat-wake-per-30-min');
   });
 
   it('keeps a peer chat’s loop memory across a steer to a chat in this window', async () => {
@@ -703,18 +708,18 @@ describe('message_chat steer to a chat in another window', () => {
     const lost = await steer(tool, IDLE, 'Start.');
     expect(lost).toContain('may already be queued');
     expect(lost).toContain('do not resend');
-    // A steer that burned a wake is still counted: five more idle wakes fit and
-    // the sixth is refused. A refund here would let one chat pay twice for an
-    // interruption it may already have caused over there.
+    // A steer that burned a wake is still counted: nineteen more idle wakes fit
+    // and the twentieth is refused. A refund here would let one chat pay twice for
+    // an interruption it may already have caused over there.
     mode = 'answer';
-    for (let i = 0; i < 5; i++) {
+    for (let i = 0; i < 19; i++) {
       expect(
         String(await tool.handler({ action: 'send', to: IDLE, message: `n${i}` }, context)),
       ).toContain('Queued in');
     }
     expect(
-      String(await tool.handler({ action: 'send', to: IDLE, message: 'sixth' }, context)),
-    ).toContain('idle-chat-wake-per-hour');
+      String(await tool.handler({ action: 'send', to: IDLE, message: 'twentieth' }, context)),
+    ).toContain('idle-chat-wake-per-30-min');
   }, 20_000);
 
   it('asks the owner before a peer steer, and not when that chat is armed', async () => {
@@ -799,17 +804,17 @@ describe('message_chat new in another window', () => {
       status: 409,
       body: JSON.stringify({ error: 'Forge cannot open a new chat — 7 running a turn' }),
     };
-    const { tool } = makeCrossTool({ newChat: true, now: () => 1_700_000_000_000 });
+    const { tool } = makeCrossTool({ newChat: true, newChatsPerHour: 2, now: () => 1_700_000_000_000 });
     const refused = await open(tool, { window: 'repo-b', message: 'One.' });
     expect(refused).toContain('7 running a turn');
     expect(refused).toContain('no counter was used');
-    // The same hour cap a local `new` has: the refund above spent no slot, so
+    // The same window cap a local `new` has: the refund above spent no slot, so
     // two chats open and the third is the one that runs out.
     reply = { status: 202, body: JSON.stringify({ conversationId: OPENED, title: 'Worker' }) };
     expect(await open(tool, { window: 'repo-b', message: 'Two.' })).toContain('Opened');
     expect(await open(tool, { window: 'repo-b', message: 'Three.' })).toContain('Opened');
     expect(await open(tool, { window: 'repo-b', message: 'Four.' })).toContain(
-      'new-chat-per-hour limit',
+      'new-chat-per-30-min limit',
     );
     expect(posts()).toHaveLength(3);
   });

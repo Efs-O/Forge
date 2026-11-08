@@ -83,7 +83,10 @@ type StreamingBusTarget =
   | { ok: true; conversationId: string; title: string }
   | { ok: false; status: 400 | 409; error: string };
 
-/** Resolve a sender's target and require a running turn for stop or steer. */
+/** Resolve a sender's target and require a running turn — what `stop` needs.
+ *  A steer does NOT use this: it must answer for an idle chat (its message
+ *  may simply run) and refuse for a closed one, so it checks these states in
+ *  its own order, guard first. */
 function resolveStreamingBusTarget(
   facade: ForgeHostFacade,
   from: string,
@@ -138,28 +141,52 @@ export function steerBlockReason(
   return undefined;
 }
 
-/** Interrupt only the chat the sender's message will be routed to. */
+/** Interrupt only the chat the sender's message will be routed to. The
+ *  `expectedEpoch` is the chain the sender read: the guard already ran before
+ *  admission, and it runs again here because the queue holds the steer
+ *  unstarted until this returns — a chain that moved in between still costs
+ *  nothing, because the queue could not have started the message yet. */
 export async function interruptForgeForSender(
   facade: ForgeHostFacade,
   from: string,
   targetConversationId?: string,
+  expectedEpoch?: number,
 ): Promise<ForgeSteerResult> {
-  const target = resolveStreamingBusTarget(facade, from, targetConversationId);
-  if (!target.ok) return { steered: false, reason: target.error };
-  // The window that owns the chat answers for the card that is actually out, not
-  // for the one the sender's chat list described a request ago.
-  const blocked = steerBlockReason(facade, target.conversationId, target.title);
+  const resolved = resolveBusMessageTarget(
+    facade,
+    from,
+    { ...(targetConversationId ? { conversationId: targetConversationId } : {}) },
+    exchangeConversationFromLedger,
+  );
+  // A chat the sender's message will not reach — closed, or no longer
+  // resolvable — is a refusal, not an idle turn: the held message must come
+  // back, or it would land in a chat nobody can see. This check runs BEFORE
+  // the streaming test, as does the guard below: a target that stopped
+  // streaming mid-request must not skip the checks the first guard ran.
+  if (!resolved.ok) return { steered: false, blocked: true, reason: resolved.error };
+  // The window that owns the chat answers for the card that is actually out,
+  // not for the one the sender's chat list described a request ago — and for
+  // the chain the sender read, not one that has since moved on.
+  const blocked = steerBlockReason(facade, resolved.conversationId, resolved.title, expectedEpoch);
   if (blocked)
     return {
       steered: false,
       blocked: true,
       reason: blocked,
     };
-  await facade.interrupt(target.conversationId);
+  // Only now is idle different from busy: an idle chat has nothing to
+  // interrupt, but the steer is a message too, and the route releases it to
+  // run as its own turn.
+  if (!facade.status().streamingConversationIds.includes(resolved.conversationId))
+    return {
+      steered: false,
+      reason: `Forge chat "${resolved.title}" (${resolved.conversationId}) is not streaming`,
+    };
+  await facade.interrupt(resolved.conversationId);
   return {
     steered: true,
-    conversationId: target.conversationId,
-    title: target.title,
+    conversationId: resolved.conversationId,
+    title: resolved.title,
   };
 }
 

@@ -74,7 +74,9 @@ it('places each thinking block in the main flow before the collapsed tool group'
   });
 
   const pane = container.querySelector('.messages-pane')!;
-  const rows = [...pane.children];
+  const rows = [...pane.children].flatMap((row) =>
+    row.hasAttribute('data-transcript-row') ? [...row.children] : [row],
+  );
   expect(rows.map((row) => row.className)).toEqual([
     'msg-wrapper msg-wrapper-assistant',
     'thinking-block',

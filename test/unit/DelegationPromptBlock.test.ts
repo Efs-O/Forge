@@ -126,7 +126,9 @@ describe('the delegation block in the system prompt', () => {
     expect(rendered).toContain('one completion with no tool channel');
     expect(rendered).toContain('`ask_agent` asks the session already linked to this chat');
     expect(rendered).toContain('goes to a NEW session');
-    expect(rendered).toContain('shared board is not a notification');
+    // The "shared board" line is gone: no tool writes a board line any more,
+    // so the rule named something the model could not act on.
+    expect(rendered).not.toContain('shared board');
     expect(rendered).toContain('Never claim a delegate ran unless the tool returned its result');
     // What is only true of THIS workspace stays out: Forge Relay, and the rule
     // about the mesh-run Codex reviewer, belong in this repo's FORGE.md.

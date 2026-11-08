@@ -1,6 +1,11 @@
 import { randomBytes } from 'crypto';
 import { getLogger } from '../util/logger';
 import type { AgentSenderMetadata } from '../agentLinks/chatAgentLinks';
+import { deliveredPrompt, type BusTurnEnd } from './agentInboxPrompt';
+
+// The prompt shapes live in `agentInboxPrompt.ts`; re-exported here so the
+// queue's own surface stays the one its eleven importers already reach.
+export * from './agentInboxPrompt';
 
 const log = getLogger();
 
@@ -23,6 +28,11 @@ export interface InboxMessageOptions {
   toRunning?: boolean;
   /** A sender-selected conversation before host-side resolution. */
   conversationId?: string;
+  /** Queue this message but start nothing: the drain skips it until
+   *  `release(id)`. A steer uses it because the window's last guard runs
+   *  AFTER admission — the queue must not start the turn that guard is
+   *  still deciding on. */
+  hold?: boolean;
   /**
    * Nobody is watching this turn: dangerous tools are refused at once instead
    * of raising an approval dialog that would hang it, and other confirmations
@@ -51,36 +61,6 @@ export type ForgeSteerResult =
    *  because the owner is being asked something, so the route withdraws the
    *  message it had queued and answers a refusal the sender can retry. */
   | { steered: false; reason: string; blocked?: boolean };
-
-/**
- * How a bus-started turn ended. `submit` resolving used to mean "finished",
- * so a turn that was cancelled while queued behind a busy local server, or
- * that failed, reached its sender as `finished` with no answer and no reason.
- */
-export interface BusTurnEnd {
-  kind: 'completed' | 'failed' | 'cancelled' | 'interrupted';
-  /** The failure, for `failed`. */
-  error?: string;
-  finalText?: string;
-}
-
-/** The sender's one line for how its turn ended. Only `completed` says finished. */
-export function busTurnEndLine(end: BusTurnEnd, durationMs: number): string {
-  const took =
-    durationMs < 60_000
-      ? `${Math.max(1, Math.round(durationMs / 1000))} s`
-      : `${Math.round(durationMs / 60_000)} min`;
-  switch (end.kind) {
-    case 'completed':
-      return `finished · ${took} · the turn you started has ended`;
-    case 'failed':
-      return `failed · ${took} · the turn you started ended with an error: ${end.error ?? 'unknown error'}`;
-    case 'cancelled':
-      return `cancelled · ${took} · the turn you started was stopped before it answered`;
-    case 'interrupted':
-      return `interrupted · ${took} · the turn you started was interrupted before it answered`;
-  }
-}
 
 /** What the inbox needs from Forge's chat. */
 export interface InboxHost {
@@ -136,34 +116,10 @@ interface QueuedMessage {
   options?: InboxMessageOptions;
   /** A steer interrupts the turn and runs as its own; never claimed mid-turn. */
   steer?: boolean;
+  /** The drain skips this message until `release(id)` clears the hold. */
+  hold?: boolean;
   /** When the sender wrote it; delivery can come much later. */
   queuedAt: number;
-}
-
-/** Waits shorter than this are ordinary queueing and say nothing. */
-export const STALE_NOTE_AFTER_MS = 60_000;
-
-/**
- * A bus message's prompt as delivered. One that sat in the queue gets its age
- * appended: a "redo 70K/120K" queued while Forge was blocked on a question
- * reached it after the sender's newer "no redo" reply, and with nothing
- * showing the order the agent read delivery order as authorship order and
- * started the withdrawn redo. The note sits after the agent-bus trailer, so
- * `parseForgeInboundPrompt` strips it from remote views.
- */
-export function deliveredPrompt(
-  item: Pick<QueuedMessage, 'prompt' | 'from' | 'queuedAt'>,
-  now: number,
-): string {
-  const waited = now - item.queuedAt;
-  if (!item.from || waited < STALE_NOTE_AFTER_MS) return item.prompt;
-  const sent = new Date(item.queuedAt).toTimeString().slice(0, 8);
-  const mins = Math.round(waited / 60_000);
-  return (
-    `${item.prompt}\n\n_(Queued: ${item.from} wrote this at ${sent}, ${mins} min before it ` +
-    `reached you. Anything ${item.from} told you after that, including an answer to your ` +
-    `question, is newer and overrides it.)_`
-  );
 }
 
 /** A queued message's options as the host sees them: with its sender. */
@@ -215,6 +171,7 @@ export class AgentInbox {
       ...(from ? { from } : {}),
       ...(options ? { options } : {}),
       ...(front ? { steer: true } : {}),
+      ...(options?.hold ? { hold: true } : {}),
     };
     if (front) this.queue.unshift(item);
     else this.queue.push(item);
@@ -237,6 +194,11 @@ export class AgentInbox {
       if (item.options?.sender) this.host.onAgentTurnCancelled?.(item.options);
       removed++;
     }
+    if (removed > 0) {
+      // Removing a held steer unblocks the lane it was holding: a follow-up
+      // waiting behind it needs a pass now, not at the next unrelated event.
+      this.scheduleScan();
+    }
     return removed;
   }
 
@@ -247,6 +209,23 @@ export class AgentInbox {
   /** How many of `from`'s messages are queued and not yet started. */
   pendingFrom(from: string): number {
     return this.queue.filter((item) => item.from === from).length;
+  }
+
+  /**
+   * Clear a `hold: true` message's hold so the drain may start it, and say
+   * whether such a message was still queued. The route that accepted a steer
+   * releases it only once its last guard has passed — until then the queue
+   * cannot start a turn the guard is still deciding on, so a refusal after
+   * admission is a guaranteed withdrawal (`cancel` removes the held message).
+   */
+  release(id: string): boolean {
+    const item = this.queue.find((queued) => queued.id === id);
+    if (!item) return false;
+    if (item.hold) {
+      delete item.hold;
+      this.scheduleScan();
+    }
+    return true;
   }
 
   /**
@@ -373,6 +352,13 @@ export class AgentInbox {
     for (let i = 0; i < this.queue.length; i++) {
       if (this.disposed) return;
       const item = this.queue[i] as QueuedMessage;
+      if (item.hold) {
+        // Held back until the route's last guard passes. Its lane blocks too,
+        // so nothing queued later can slip into that chat ahead of the steer.
+        const heldLane = this.laneOf(item);
+        if (heldLane !== undefined) blocked.add(heldLane);
+        continue;
+      }
       const lane = this.laneOf(item);
       if (lane === undefined) {
         // No chat named yet. Starting a later message out of order is worse

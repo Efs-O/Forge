@@ -68,7 +68,7 @@ permissions:
   chats:
     new_chat: false          # message_chat action=new (open a second chat)
     steer: false             # message_chat action=steer (interrupt a running turn)
-    new_chats_per_hour: 2    # 1-6; raise it for a supervisor dispatching several workers
+    new_chats_per_hour: 100    # 1-100; counted per 30-minute window
   net:
     search: true
     fetch: true

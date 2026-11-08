@@ -237,7 +237,8 @@ overlaps with an existing owner, extend the owner instead.
 | Agent question card theme | `webview-ui/styles/question-card.css` |
 | Escape rule for the docked agent dialogs        | `webview-ui/src/useDockedDialogEscape.ts`       |
 | Transcript row folding (diff / thinking runs)   | `webview-ui/src/components/MessageList.tsx`     |
-| One mounted transcript pane per visited tab     | `webview-ui/src/components/TranscriptPanes.tsx` |
+| Active transcript pane lifecycle               | `webview-ui/src/components/TranscriptPanes.tsx` |
+| Transcript paging, page folding, and prepend viewport anchor | `webview-ui/src/useTranscriptWindow.ts` |
 | Single-file diff rendering + stats              | `webview-ui/src/components/DiffBlock.tsx`       |
 | Per-turn multi-file diff summary card           | `webview-ui/src/components/DiffGroup.tsx`       |
 | Top-level reasoning blocks                    | `webview-ui/src/components/ThinkingGroup.tsx`   |

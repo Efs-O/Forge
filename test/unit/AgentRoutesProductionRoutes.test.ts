@@ -140,6 +140,9 @@ describe('the routes a production window registers', () => {
   let logPaths: ExchangeLogPaths;
   const cancelled = new Set<string>();
   const interrupted = new Set<string>();
+  /** Steer ids the route released from hold, so a test can say whether the
+   *  queue was ever allowed to start a message its guard later refused. */
+  const released = new Set<string>();
   /** Which chat a `/agent/send-file` actually delivered to, in call order. */
   const sentTo: string[] = [];
 
@@ -195,12 +198,18 @@ describe('the routes a production window registers', () => {
    *  has to re-check for itself, because the sender read a chat list a tool
    *  round ago and the owner may have been asked something since. */
   let approvalForTarget = false;
+  /** The steer's chat vanishing or going idle — the transitions between the
+   *  first guard and the interrupt that the final check must not skip. */
+  let closedForTarget = false;
+  let idleForTarget = false;
   const claudeBLink = { ...links.claude, sessionId: CLAUDE_SESSION_B, title: 'Claude B', lastUsedAt: 3 };
   const newChatLink = { ...links.claude, lastUsedAt: 2 };
   const fakeFacade = {
     status: () => ({
       activeConversationId: runningNewChat ? 'new-chat' : 'c1',
-      streamingConversationIds: [runningNewChat ? 'new-chat' : 'c1'],
+      streamingConversationIds: idleForTarget
+        ? []
+        : [runningNewChat ? 'new-chat' : 'c1'],
       conversations: twoClaudeChats
         ? [
             { id: 'claude-a', title: 'Untitled A', updatedAt: 2, activeModel: 'alpha' },
@@ -217,7 +226,9 @@ describe('the routes a production window registers', () => {
                 ]
               : []),
           ]
-        : [
+        : closedForTarget
+          ? ([] as { id: string; title: string; updatedAt: number; activeModel: string }[])
+          : [
         runningNewChat
           ? { id: 'new-chat', title: 'Untitled chat', updatedAt: 3, activeModel: 'alpha' }
           : { id: 'c1', title: 'codex: task', updatedAt: 2, activeModel: 'alpha' },
@@ -295,7 +306,8 @@ describe('the routes a production window registers', () => {
       home,
       inbox: {
         accept: (prompt) => (accepts++, { position: 1, id: `m${prompt.length}` }),
-        cancel: () => 1,
+        cancel: (_from, id) => (cancelled.add(id), 1),
+        release: (id: string) => (released.add(id), true),
         pendingFrom: (from: string) => (from === 'carol' ? queued.count : 0),
         queuedTargetConversation: (from: string) =>
           from === 'carol' && queued.count > 0 ? queued.conversationId : undefined,
@@ -349,12 +361,15 @@ describe('the routes a production window registers', () => {
     ]);
     cancelled.clear();
     interrupted.clear();
+    released.clear();
     queued.count = 0;
     queued.conversationId = undefined;
     runningNewChat = false;
     twoClaudeChats = false;
     archivedReadChat = false;
     approvalForTarget = false;
+    closedForTarget = false;
+    idleForTarget = false;
     targetChainEpoch = undefined;
     accepts = 0;
     sentTo.length = 0;
@@ -547,6 +562,82 @@ describe('the routes a production window registers', () => {
     expect(accepts).toBe(1);
     expect(interrupted).toContain('c1');
     targetChainEpoch = undefined;
+  });
+
+  it('refuses a steer whose chain moved after the guard, carrying the read epoch to the interrupt', async () => {
+    // The owner's own message lands after the guard read the chain and before
+    // the backstop reads it: the wrapper bumps the epoch the moment the real
+    // guard returns. Without the epoch carried into the interrupt, the
+    // backstop would interrupt the owner's newer work and answer 202.
+    targetChainEpoch = 5;
+    const deps = buildAgentRouteDeps(hosts());
+    const realGuard = deps.steerGuard!;
+    deps.steerGuard = async (...args) => {
+      const refusal = await realGuard(...args);
+      targetChainEpoch = 6; // the owner's message: the chain moved
+      return refusal;
+    };
+    routes = new AgentRoutes(deps);
+    routes.setEnabled(true);
+    routes.onListening(base);
+    token = routes.token; // a fresh window publishes a fresh token
+    const steer = ROUTE_FOR_VERB['steer']!;
+    const response = await call('steer', {
+      ...steer,
+      query: '?from=codex&to=forge&priority=steer&steer_epoch=5',
+    });
+    // The real guard and the real backstop share one `steerBlockReason`, and
+    // the epoch moved between them: the backstop can only catch that if the
+    // route carried the sender's epoch through the interrupt. (The fake inbox
+    // fakes the cancel; a real one had never started the held message.)
+    expect(response.status).toBe(409);
+    expect(String(response.body['error'])).toContain('different chain');
+    expect(String(response.body['error'])).toContain('you read 5');
+    expect(accepts).toBe(1);
+    expect(interrupted.size).toBe(0);
+    expect([...released]).toEqual([]);
+    targetChainEpoch = undefined;
+  });
+
+  it('refuses a steer whose chat closed between the guard and the interrupt', async () => {
+    // The chat vanishes the moment the first guard returns: the backstop must
+    // say so as a refusal (blocked), not release the held steer into a chat
+    // nobody can see. Closed targets are blocked even though the old code
+    // reached them through the streaming test, which answered them unblocked.
+    const deps = buildAgentRouteDeps(hosts());
+    const realGuard = deps.steerGuard!;
+    deps.steerGuard = async (...args) => {
+      const refusal = await realGuard(...args);
+      closedForTarget = true;
+      return refusal;
+    };
+    routes = new AgentRoutes(deps);
+    routes.setEnabled(true);
+    routes.onListening(base);
+    token = routes.token; // a fresh window publishes a fresh token
+    const response = await call('steer', ROUTE_FOR_VERB['steer']!);
+    expect(response.status).toBe(409);
+    expect(String(response.body['error'])).toContain('no longer open');
+    expect(String(response.body['error'])).toContain('Nothing was queued');
+    expect(accepts).toBe(1);
+    expect(interrupted.size).toBe(0);
+    expect([...released]).toEqual([]);
+    closedForTarget = false;
+  });
+
+  it('releases a steer whose chat went idle after the guard — an idle chat runs it, it does not block it', async () => {
+    // Idle is NOT blocked: the steer is a message too, and with nothing to
+    // interrupt the route releases the held message to run as its own turn.
+    // Only a card, a moved chain, or a gone chat withdraw it.
+    idleForTarget = true;
+    const response = await call('steer', ROUTE_FOR_VERB['steer']!);
+    expect(response.status).toBe(202);
+    expect(response.body['steered']).toBe(false);
+    expect(String(response.body['reason'])).toContain('not streaming');
+    expect(accepts).toBe(1);
+    expect(interrupted.size).toBe(0);
+    expect([...released]).toEqual(['m32']); // the fake names ids by prompt length: the bus-wrapped message is 32 characters
+    idleForTarget = false;
   });
 
   it("hands a peer window one chat's transcript, and reads nothing but the transcript", async () => {

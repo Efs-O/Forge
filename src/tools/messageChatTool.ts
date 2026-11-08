@@ -234,8 +234,8 @@ export function makeMessageChatTool(options: {
       const at = now();
       pruneMessageChatWindow(window, at);
       // `new_chats_per_hour` is the owner's dial on how many workers one chat may
-      // open in an hour; the config default is the same 2 this tool used to
-      // hard-code, so a window that sets nothing behaves exactly as before.
+      // open in a window; the config default is 100 (owner raised it 2026-11-08),
+      // counted against the same 30-minute window as sends and wakes.
       const newChatsPerHour =
         options.getConfig?.().permissions?.chats?.new_chats_per_hour ??
         MESSAGE_CHAT_NEW_CHATS_PER_HOUR_DEFAULT;

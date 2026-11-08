@@ -988,9 +988,10 @@ windows on this machine reach each other when `agent_bus.enabled` is on in both.
 words mean **this** window's chats; a chat in another window is addressed by its
 full id only, because a tab number or a title means a different chat over there.
 
-**The caps belong to the sending chat, per hour, and cover every window it
-reaches:** 30 messages, at most 6 of them waking an idle chat, 3 steers with a
-two-minute gap to the same chat, and 2 new chats
+**The caps belong to the sending chat, and cover every window it reaches — the
+message, wake and new-chat caps count a 30-minute window; steers keep an hour:**
+30 messages, at most 20 of them waking an idle chat, 3 steers with a
+two-minute gap to the same chat, and 100 new chats
 (`permissions.chats.new_chats_per_hour` changes that one).
 `permissions.chats.steer` and `permissions.chats.new_chat` turn the two expensive
 actions off entirely. Caps reset when the sending window reloads.

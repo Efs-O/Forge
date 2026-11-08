@@ -55,7 +55,10 @@ export interface AgentRouteDepsHosts {
    *  their verdicts and pending replies there instead of into the operator's
    *  `~/.forge`. */
   home?: string;
-  inbox: Pick<AgentInbox, 'accept' | 'cancel' | 'pendingFrom' | 'queuedTargetConversation'>;
+  inbox: Pick<
+    AgentInbox,
+    'accept' | 'cancel' | 'release' | 'pendingFrom' | 'queuedTargetConversation'
+  >;
   watch: BusTurnWatch;
   pendingReplies: PendingAgentReplies;
   askRuntime: AskAgentRuntime;
@@ -196,8 +199,8 @@ export function buildAgentRouteDeps(hosts: AgentRouteDepsHosts): AgentRoutesDeps
     // Phase 4). An idle chat has nothing to interrupt.
     resolveChatTarget: (from, selection) =>
       resolveBusMessageTarget(getFacade(), from, selection, exchangeConversationFromLedger),
-    interruptForge: async (from, conversationId) =>
-      interruptForgeForSender(getFacade(), from, conversationId),
+    interruptForge: async (from, conversationId, expectedEpoch) =>
+      interruptForgeForSender(getFacade(), from, conversationId, expectedEpoch),
     // A steer is refused before its message is queued, because a queued message
     // cannot always be withdrawn: the drain may start it in the same tick the
     // route answers in. The chat is named here, so the card and the chain are

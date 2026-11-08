@@ -41,6 +41,8 @@ let home: string;
 let paths: BusPaths;
 let accepted: string[];
 let acceptedOptions: unknown[];
+/** Ids the route released from hold — a steer may only start after its last guard. */
+let released: string[];
 /** Queued message id → sender, for the stub inbox's `cancel`. */
 let queuedFrom: Map<string, string>;
 let full: boolean;
@@ -62,6 +64,7 @@ beforeEach(async () => {
   paths = busPaths(home);
   accepted = [];
   acceptedOptions = [];
+  released = [];
   queuedFrom = new Map();
   full = false;
   focused = true;
@@ -84,6 +87,7 @@ beforeEach(async () => {
         }
         return n;
       },
+      release: (id: string) => (released.push(id), true),
     },
     token: TOKEN,
     configuredModels: () => ['alpha', 'beta'],
@@ -104,11 +108,13 @@ afterAll(async () => {
 /** An inbox that records prompts and cancels nothing. */
 function stubInbox() {
   return {
-    accept: (p: string) => (
+    accept: (p: string, _from?: string, _front?: boolean, options?: Record<string, unknown>) => (
       accepted.push(p),
+      acceptedOptions.push(options),
       { position: accepted.length, id: `m${accepted.length}` }
     ),
     cancel: () => 0,
+    release: (id: string) => (released.push(id), true),
   };
 }
 
@@ -550,8 +556,11 @@ describe('routes', () => {
         conversationId: 'sender-chat',
         title: 'Codex: task',
       }),
+      steerGuard: () => undefined,
       interruptForge: async () => ({
         steered: false,
+        // An idle chat is not `blocked`: the route releases the held steer to
+        // run as its own turn. Only a card, a moved chain, or a gone chat is.
         reason: 'Forge chat "Codex: task" (sender-chat) is not streaming',
       }),
     });
@@ -592,14 +601,17 @@ describe('routes', () => {
     routes = new AgentRoutes({
       paths: () => paths,
       inbox: {
-        accept: (prompt) => (
+        accept: (prompt, _from, _front, options) => (
           accepted.push(prompt),
+          acceptedOptions.push(options),
           { position: accepted.length, id: `m${accepted.length}` }
         ),
         cancel: (_from, id) => (cancelled.push(id), 1),
+        release: (id: string) => (released.push(id), true),
       },
       token: TOKEN,
       resolveChatTarget: () => ({ ok: true, conversationId: 'sender-chat', title: 'Codex: task' }),
+      steerGuard: () => undefined,
       // The sender checked the chat list a tool round ago; this window answers
       // from the card that is actually out, and says so with `blocked`.
       interruptForge: async () => ({
@@ -619,6 +631,11 @@ describe('routes', () => {
     // owner has not answered.
     expect(cancelled).toEqual(['m1']);
     expect(accepted).toEqual(['**codex says:**\n\nstop']);
+    // The steer was accepted HELD, and released once: a held message the
+    // guard refused cannot have been started by the drain, so the withdrawal
+    // above is a certainty rather than a race.
+    expect(acceptedOptions[0]).toMatchObject({ hold: true });
+    expect(released).toEqual([]);
   });
 
   it('refuses a steer whose chain has moved on, before its message is queued', async () => {
@@ -659,6 +676,10 @@ describe('routes', () => {
     expect(current.status).toBe(202);
     expect(epochs).toEqual([5, 7]);
     expect(accepted).toHaveLength(1);
+    // The accepted steer is held until its LAST guard passes, then released:
+    // the queue may not start the turn the guard is still deciding on.
+    expect(acceptedOptions[0]).toMatchObject({ hold: true });
+    expect(released).toEqual(['m1']);
   });
 
   it('refuses a steer_epoch that is not a number, and queues nothing', async () => {
@@ -667,6 +688,7 @@ describe('routes', () => {
       inbox: stubInbox(),
       token: TOKEN,
       resolveChatTarget: () => ({ ok: true, conversationId: 'sender-chat', title: 'Codex: task' }),
+      steerGuard: () => undefined,
       interruptForge: async () => ({
         steered: true,
         conversationId: 'sender-chat',
@@ -682,6 +704,70 @@ describe('routes', () => {
     expect(response.status).toBe(400);
     expect(response.body.error).toContain('steer_epoch');
     expect(accepted).toEqual([]);
+  });
+
+  it('refuses a steer this window cannot resolve or guard, before accepting it', async () => {
+    routes = new AgentRoutes({
+      paths: () => paths,
+      inbox: stubInbox(),
+      token: TOKEN,
+      resolveChatTarget: () => ({ ok: true, conversationId: 'sender-chat', title: 'Codex: task' }),
+      interruptForge: async () => ({ steered: true, conversationId: 'sender-chat', title: 'x' }),
+      // No steerGuard: this window cannot say what chain the steer was
+      // written against, and after acceptance no answer could honestly say
+      // "nothing was queued", so the refusal happens before `accept`.
+    });
+    routes.setEnabled(true);
+    routes.onListening(base);
+    const response = await post(
+      '/agent/message?from=codex&to=forge&priority=steer&steer_epoch=5',
+      'stop',
+    );
+    expect(response.status).toBe(409);
+    expect(String(response.body.error)).toContain('cannot say which chat a steer would reach');
+    expect(String(response.body.error)).toContain('Nothing was queued');
+    expect(accepted).toEqual([]);
+  });
+
+  it('refuses a steer whose chain moved between the guard and the interrupt', async () => {
+    const seenEpochs: (number | undefined)[] = [];
+    routes = new AgentRoutes({
+      paths: () => paths,
+      inbox: stubInbox(),
+      token: TOKEN,
+      resolveChatTarget: () => ({ ok: true, conversationId: 'sender-chat', title: 'Codex: task' }),
+      // The guard passes, and the owner's own message lands in the microtask
+      // between the guard finishing and the message being accepted — the
+      // exact window that made the pre-accept-only check a race.
+      steerGuard: async () => {
+        await new Promise((resolve) => setTimeout(resolve, 0));
+        return undefined;
+      },
+      // The backstop must carry the epoch the sender read, not drop it: that
+      // is the only way the moved chain is caught while the message is held.
+      interruptForge: async (_from, _id, expectedEpoch) => {
+        seenEpochs.push(expectedEpoch);
+        return {
+          steered: false,
+          blocked: true,
+          reason: 'Forge chat "Codex: task" is on a different chain now (epoch 9, you read 5)',
+        };
+      },
+    });
+    routes.setEnabled(true);
+    routes.onListening(base);
+    const response = await post(
+      '/agent/message?from=codex&to=forge&priority=steer&steer_epoch=5',
+      'stop',
+    );
+    expect(response.status).toBe(409);
+    expect(String(response.body.error)).toContain('different chain');
+    expect(String(response.body.error)).toContain('Nothing was queued');
+    expect(seenEpochs).toEqual([5]);
+    // Held, refused, withdrawn: it was never started, and never released.
+    expect(accepted).toHaveLength(1);
+    expect(acceptedOptions[0]).toMatchObject({ hold: true });
+    expect(released).toEqual([]);
   });
 
   it('names the chat a full inbox left behind, so the owner can find it', async () => {
@@ -1687,8 +1773,10 @@ describe.skipIf(!TEST_BASH)('forge.sh against the routes', () => {
           { position: 1, id: 'm1' }
         ),
         cancel: () => 0,
+        release: () => true,
       },
       token: TOKEN,
+      steerGuard: () => undefined,
       resolveChatTarget: (_from, selection) => ({
         ok: true,
         conversationId: selection.conversationId ?? 'sender-chat',

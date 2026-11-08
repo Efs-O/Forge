@@ -6,11 +6,12 @@ import type { AppMessage } from '../../webview-ui/src/messageOps';
 declare global {
   interface Window {
     setTranscriptMessage(id: string, content: string): void;
+    resetTranscript(count: number): void;
   }
 }
 
-function initialMessages(): AppMessage[] {
-  return Array.from({ length: 100 }, (_, index) => ({
+function initialMessages(count = 100): AppMessage[] {
+  return Array.from({ length: count }, (_, index) => ({
     id: `history-${index}`,
     role: 'assistant' as const,
     content: `Historical reply ${index}: this answer contains a sentence that wraps in the transcript and gives the long conversation enough content to scroll.`,
@@ -18,7 +19,8 @@ function initialMessages(): AppMessage[] {
 }
 
 function Fixture(): React.ReactElement {
-  const [messages, setMessages] = useState(initialMessages);
+  const [messages, setMessages] = useState(() => initialMessages());
+  window.resetTranscript = (count) => setMessages(initialMessages(count));
   window.setTranscriptMessage = (id, content) => {
     setMessages((current) =>
       current.map((message) => (message.id === id ? { ...message, content } : message)),

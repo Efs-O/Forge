@@ -161,6 +161,13 @@ body {
   contain-intrinsic-size: auto 60px;
 }
 
+/* A folded thinking row can render several blocks inside its paging anchor. */
+.messages-pane > [data-transcript-row] {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
 /*
  * ...except the tail. The newest rows are what auto-scroll aims at, and a row
  * still on its 60px estimate makes `scrollHeight` wrong at the moment we read

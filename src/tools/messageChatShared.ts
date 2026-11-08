@@ -21,10 +21,14 @@ import { clipMirroredPrompt } from '../sidebar/turnMirrorWiring';
 import type { ChatRef } from './chatMessageResolver';
 
 export const HOUR_MS = 60 * 60 * 1000;
-const MESSAGE_CHAT_SENDS_PER_HOUR = 30;
-const MESSAGE_CHAT_IDLE_WAKES_PER_HOUR = 6;
+/** 2026-11-08 (owner): the send/wake/new-chat counters count a 30-minute window, not
+ *  an hour; `HOUR_MS` stays for the steer cadence, which keeps its hour. */
+export const MESSAGE_CHAT_WINDOW_MS = 30 * 60 * 1000;
+export const MESSAGE_CHAT_WINDOW_MINUTES = 30;
+const MESSAGE_CHAT_SENDS_PER_WINDOW = 30;
+const MESSAGE_CHAT_IDLE_WAKES_PER_WINDOW = 20;
 /** The default of `permissions.chats.new_chats_per_hour`, which a config raises. */
-export const MESSAGE_CHAT_NEW_CHATS_PER_HOUR_DEFAULT = 2;
+export const MESSAGE_CHAT_NEW_CHATS_PER_HOUR_DEFAULT = 100;
 export const MESSAGE_CHAT_DELIVERY_CONFIRM_MS = 20_000;
 
 export interface MessageChatWindow {
@@ -36,7 +40,7 @@ export interface MessageChatWindow {
    *  target chat. It is what stops a supervisor from paying for the same report
    *  twice: the first send answered "not confirmed yet", and a second one would
    *  deliver it again. Cleared the moment the real delivery settles (see
-   *  `awaitMessageChatDelivery`), and by the same hour cutoff as the counters. */
+   *  `awaitMessageChatDelivery`), and by the same 30-minute cutoff as the counters. */
   unclaimed: { targetId: string; at: number }[];
 }
 
@@ -92,7 +96,7 @@ export interface MessageChatActionContext {
   at: number;
   message: string;
   /** How many chats this sender may open in an hour, from
-   *  `permissions.chats.new_chats_per_hour`; the schema default is the 2 above. */
+   *  `permissions.chats.new_chats_per_hour`; the schema default is the 100 above. */
   newChatsPerHour: number;
   /** For `new`: the model to pin the fresh chat to. The sender's own model unless
    *  the call named one, so a worker does not load a second engine. Absent when
@@ -111,8 +115,8 @@ export interface MessageChatActionContext {
   ) => string;
 }
 
-export function nextAllowedAt(times: number[]): number {
-  return Math.min(...times) + HOUR_MS;
+export function nextAllowedAt(times: number[], windowMs: number = HOUR_MS): number {
+  return Math.min(...times) + windowMs;
 }
 
 export function atText(at: number): string {
@@ -120,7 +124,7 @@ export function atText(at: number): string {
 }
 
 export function pruneMessageChatWindow(window: MessageChatWindow, now: number): void {
-  const cutoff = now - HOUR_MS;
+  const cutoff = now - MESSAGE_CHAT_WINDOW_MS;
   window.sentAt = window.sentAt.filter((at) => at > cutoff);
   window.wakesAt = window.wakesAt.filter((at) => at > cutoff);
   window.newChatsAt = window.newChatsAt.filter((at) => at > cutoff);
@@ -135,8 +139,8 @@ export function pruneMessageChatWindow(window: MessageChatWindow, now: number): 
  *  from a send to an **idle** chat whose admission was held by
  *  `agentLoop.waitForCancelledTurns()` (`SendPipeline.ts:145`,
  *  `TurnLifecycle.ts:194-198`) — a cancellation settling in some other chat, not a
- *  compaction. The mark dies with the hour, so a stuck attempt cannot block a
- *  chat forever. */
+ *  compaction. The mark dies with the 30-minute window, so a stuck attempt cannot
+ *  block a chat forever. */
 export function unclaimedSendRefusal(
   window: MessageChatWindow,
   targetId: string,
@@ -147,7 +151,7 @@ export function unclaimedSendRefusal(
   return (
     `Error: the earlier send has not started yet. ${name} still holds the message ` +
     `you sent at ${atText(earlier.at)}; it is counted as delivered until it starts ` +
-    `or this hour expires. Do not send it again — read the chat with \`view\` or \`list\`.`
+    `or this window expires. Do not send it again — read the chat with \`view\` or \`list\`.`
   );
 }
 
@@ -166,11 +170,11 @@ export function clearUnclaimedSend(window: MessageChatWindow, targetId: string):
 }
 
 export function messageChatSendLimit(window: MessageChatWindow, idle: boolean): string | undefined {
-  if (window.sentAt.length >= MESSAGE_CHAT_SENDS_PER_HOUR) {
-    return `Error: the ${MESSAGE_CHAT_SENDS_PER_HOUR}-send-per-hour limit for this chat was reached; the next send is allowed at ${atText(nextAllowedAt(window.sentAt))}.`;
+  if (window.sentAt.length >= MESSAGE_CHAT_SENDS_PER_WINDOW) {
+    return `Error: the ${MESSAGE_CHAT_SENDS_PER_WINDOW}-send-per-${MESSAGE_CHAT_WINDOW_MINUTES}-min limit for this chat was reached; the next send is allowed at ${atText(nextAllowedAt(window.sentAt, MESSAGE_CHAT_WINDOW_MS))}.`;
   }
-  if (idle && window.wakesAt.length >= MESSAGE_CHAT_IDLE_WAKES_PER_HOUR) {
-    return `Error: the ${MESSAGE_CHAT_IDLE_WAKES_PER_HOUR}-idle-chat-wake-per-hour limit for this chat was reached; the next idle wake is allowed at ${atText(nextAllowedAt(window.wakesAt))}.`;
+  if (idle && window.wakesAt.length >= MESSAGE_CHAT_IDLE_WAKES_PER_WINDOW) {
+    return `Error: the ${MESSAGE_CHAT_IDLE_WAKES_PER_WINDOW}-idle-chat-wake-per-${MESSAGE_CHAT_WINDOW_MINUTES}-min limit for this chat was reached; the next idle wake is allowed at ${atText(nextAllowedAt(window.wakesAt, MESSAGE_CHAT_WINDOW_MS))}.`;
   }
   return undefined;
 }

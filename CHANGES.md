@@ -1,5 +1,12 @@
 # Forge — Recent Changes
 
+## Unreleased
+
+- message_chat budgets widened (owner, 2026-11-08): the send, idle-wake and
+  new-chat caps now count a 30-minute window — 30 messages, 20 idle-chat wakes,
+  and `permissions.chats.new_chats_per_hour` defaults to 100 (was 2, max 6, per
+  hour). Steers keep their hour. Error strings name the real window.
+
 ## 0.17.135
 
 - Removed the "Include legacy chats" checkbox and its display filter. The
