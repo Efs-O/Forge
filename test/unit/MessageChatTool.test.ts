@@ -232,6 +232,23 @@ describe('message_chat tool contract and handler', () => {
     expect(created).not.toContain('No `action` was given');
   });
 
+  it('refuses a field that belongs to another action, whichever one was asked for', async () => {
+    const { tool } = makeTool();
+    // `window` says which window a `new` should open its chat in. Every other
+    // action aims at a chat that already exists, and a chat is addressed by its
+    // id wherever it lives — so a `window` there is a second answer to a
+    // question `to` has already answered, and a model that meant one and typed
+    // the other would silently act on this window instead.
+    for (const action of ['send', 'view', 'list']) {
+      await expect(
+        tool.handler({ action, message: 'x', to: '#2', window: 'repo-b' }, context()),
+      ).rejects.toThrow('window is only for new');
+    }
+    await expect(tool.handler({ action: 'list', model: 'alpha' }, context())).rejects.toThrow(
+      'model is only for new',
+    );
+  });
+
   it('lists open chats in tab order, marks the caller and rejects ignored fields', async () => {
     const { tool } = makeTool(hostStatus({ archived: true }));
     const result = await tool.handler({ action: 'list' }, context());
@@ -246,6 +263,103 @@ describe('message_chat tool contract and handler', () => {
     expect(refused).toContain('send:');
     const targetRefused = await tool.handler({ action: 'list', to: '#2' }, context());
     expect(targetRefused).toContain('does not take `to` or `message`');
+  });
+
+  it('keeps `list` byte-identical when there is nobody else to talk to', async () => {
+    const { tool } = makeTool();
+    const plain = await tool.handler({ action: 'list' }, context());
+    // Bus off here: the peer branch never runs.
+    expect(plain).not.toContain('Other windows');
+    // Bus on, no peers: the same bytes, because an empty section is no section.
+    const noPeers = await makeMessageChatTool({
+      getSidebar: () => makeSidebar(hostStatus()),
+      getPeerContext: () => ({ busRoot: 'x', windowId: 'self', workspaceRoot: 'N:/repo' }),
+      discoverPeers: async () => ({ peers: [], unreachable: [] }),
+    }).handler({ action: 'list' }, context());
+    expect(noPeers).toBe(plain);
+  });
+
+  /** One peer window on a port nothing serves, holding two chats (one running,
+   *  one closed), plus a window that was listed but is not reachable. A send to
+   *  one of its chats reaches for that port and comes back refused. */
+  function makeToolWithPeers() {
+    const sidebar = makeSidebar(hostStatus());
+    const tool = makeMessageChatTool({
+      getSidebar: () => sidebar,
+      getPeerContext: () => ({ busRoot: 'x', windowId: 'self', workspaceRoot: 'N:/repo' }),
+      discoverPeers: async () => ({
+        peers: [
+          {
+            windowId: 'peer-1',
+            url: 'http://127.0.0.1:1',
+            token: 't',
+            workspace: 'N:/other',
+            models: ['alpha'],
+            chats: [
+              {
+                id: 'ffff1111-2222-4333-8444-555566667777',
+                title: 'Worker',
+                running: true,
+                closed: false,
+                awaitingApproval: false,
+              },
+              {
+                id: 'peer-chat-2',
+                title: 'Old run',
+                running: false,
+                closed: true,
+                awaitingApproval: false,
+              },
+            ],
+          },
+        ],
+        unreachable: [{ windowId: 'peer-2', url: 'http://127.0.0.1:2', reason: 'not serving' }],
+      }),
+    });
+    return { tool, sidebar };
+  }
+
+  it("lists another window's chats and says how to address them", async () => {
+    const { tool } = makeToolWithPeers();
+    const list = String(await tool.handler({ action: 'list' }, context()));
+    expect(list).toContain('Other windows:');
+    expect(list).toContain('other (N:/other) — 2 chat(s):');
+    expect(list).toContain('Worker · running · id ffff1111-2222-4333-8444-555566667777');
+    expect(list).toContain('Old run · closed · id peer-chat-2');
+    expect(list).toContain('Not reachable: peer-2 (not serving)');
+    expect(list).toContain('`#N` is this window only');
+  });
+
+  it('hands a full chat id to the window that holds it, and reports what that window said', async () => {
+    const { tool, sidebar } = makeToolWithPeers();
+    const refused = String(
+      await tool.handler(
+        { action: 'send', to: 'ffff1111-2222-4333-8444-555566667777', message: 'hi' },
+        context(),
+      ),
+    );
+    // No longer the local "no chat matches" refusal: the send went to the window
+    // that holds the chat, and that window is not serving on this port.
+    expect(refused).not.toContain('No open chat matches');
+    expect(refused).toContain('"Worker" in N:/other did not accept the message');
+    expect(refused).toContain('Nothing was queued and no counter was used');
+    // And the local sidebar was never asked to route it.
+    expect(sidebar.deliverChatMessage).not.toHaveBeenCalled();
+  });
+
+  it('names the switch that would let this window ask, when the bus is off here', async () => {
+    const tool = makeMessageChatTool({
+      getSidebar: () => makeSidebar(hostStatus()),
+      getPeerContext: () => undefined,
+    });
+    const refused = String(
+      await tool.handler(
+        { action: 'send', to: 'ffff1111-2222-4333-8444-555566667777', message: 'hi' },
+        context(),
+      ),
+    );
+    expect(refused).toContain('No open chat matches');
+    expect(refused).toContain('agent_bus.enabled: true');
   });
 
   it('reads a closed chat with `view` and marks the read closed', async () => {
@@ -321,7 +435,7 @@ describe('message_chat tool contract and handler', () => {
         {
           kind: 'prompt',
           conversationId: 'sender',
-      text: `📤 this chat → Bug hunt  (busy · queued, not processed yet)\n${'x'.repeat(499)}…`,
+          text: `📤 this chat → Bug hunt  (busy · queued, not processed yet)\n${'x'.repeat(499)}…`,
         },
       ],
     ]);
@@ -416,7 +530,9 @@ describe('message_chat tool contract and handler', () => {
     const absentTool = makeMessageChatTool({ getSidebar: () => absentSidebar });
     await expect(
       absentTool.handler({ action: 'send', to: 'running', message: 'hello' }, context()),
-    ).resolves.toBe('Queued for #2 "Bug hunt" (running): not processed yet; it will be read at a tool round or in a follow-up turn.');
+    ).resolves.toBe(
+      'Queued for #2 "Bug hunt" (running): not processed yet; it will be read at a tool round or in a follow-up turn.',
+    );
 
     const throwing = makeSidebar(hostStatus({ running: ['running'] }));
     throwing.emitHostActivity.mockImplementation(() => {
@@ -425,7 +541,9 @@ describe('message_chat tool contract and handler', () => {
     const throwingTool = makeMessageChatTool({ getSidebar: () => throwing });
     await expect(
       throwingTool.handler({ action: 'send', to: 'running', message: 'hello' }, context()),
-    ).resolves.toBe('Queued for #2 "Bug hunt" (running): not processed yet; it will be read at a tool round or in a follow-up turn.');
+    ).resolves.toBe(
+      'Queued for #2 "Bug hunt" (running): not processed yet; it will be read at a tool round or in a follow-up turn.',
+    );
   });
 
   it('treats a reserved target as running and still routes through the shared prompt router', async () => {
@@ -439,7 +557,9 @@ describe('message_chat tool contract and handler', () => {
       context(),
     );
     expect(sidebar.deliverChatMessage).toHaveBeenCalledWith(expect.any(String), 'running');
-    expect(result).toContain('(running): not processed yet; it will be read at a tool round or in a follow-up turn.');
+    expect(result).toContain(
+      '(running): not processed yet; it will be read at a tool round or in a follow-up turn.',
+    );
   });
 
   it('returns actionable list lines for missing message and unresolved references', async () => {

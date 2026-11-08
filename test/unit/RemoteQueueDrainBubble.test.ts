@@ -19,15 +19,8 @@ import type { ForgeHostFacade } from '../../src/sidebar/ForgeHostFacade';
  * The drain opens the turn's first bubble, streams the turn into it, and closes
  * it. Two invariants are under test here and they are not the same one:
  *
- * 1. Separation. The status is one message, the answer is another, and neither
- *    is allowed to become the other. A status in a draft was re-typed letter by
- *    letter; editing the streamed words into the answer would duplicate it,
- *    arrive with no notification, and skip the outbox's retry, speed line,
- *    identity header and reply ids.
- * 2. Order. The answer has to be on screen BEFORE the drain tears the streamed
- *    bubbles down. Delivered first, deleted second is the whole of the fix for
- *    the owner's "the instant the reply finishes my own message drops to the
- *    bottom and the answer lands below it".
+ * The outbox finalizes streamed Telegram bubbles in place. A turn with only a
+ * working line still sends the answer before removing that line.
  *
  * The outbox here is the real delivery loop, not a stub: the order is only
  * meaningful if the delivery really happens inside the drain's `finally`, and
@@ -117,7 +110,7 @@ async function drainWith(
     }),
   } as unknown as ForgeHostFacade;
 
-  const outbox = new RemoteOutboxDelivery(channel, state, 3_900, signal, 1_000, undefined, () =>
+  const outbox = new RemoteOutboxDelivery(channel, state, 12_000, signal, 1_000, undefined, () =>
     canDeliver(),
   );
   const deps = {
@@ -228,7 +221,7 @@ describe('queue drain status bubble', () => {
     expect(received[0]?.[0]).toMatchObject({ name: 'still.jpg', mediaType: 'image/jpeg' });
   });
 
-  it('deletes the streamed copy only after the answer has landed', async () => {
+  it('finalizes the streamed Telegram bubble without deleting or reposting it', async () => {
     const { channel, calls, armAfter } = await drainWith(
       { kind: 'completed', finalText: 'The full answer.' },
       async () => true,
@@ -241,15 +234,65 @@ describe('queue drain status bubble', () => {
     );
 
     const streamed = callIndex(calls, 'edit 1 Reading the file');
-    const answer = callIndex(calls, 'send The full answer.');
-    const removed = callIndex(calls, 'delete 1');
-    // The streamed words stay on screen until the answer arrives, and go after it.
+    const answer = callIndex(calls, 'edit 1 The full answer.');
     expect(answer).toBeGreaterThan(streamed);
-    expect(removed).toBeGreaterThan(answer);
-    expect(channel.edits.at(-1)?.text).not.toBe('Forge: completed.');
+    expect(channel.edits.at(-1)).toMatchObject({ messageId: '1', text: 'The full answer.' });
     expect(armAfter).not.toHaveBeenCalled();
-    // The streamed copy is not left as a second copy of the answer.
-    expect(channel.deleted.map((d) => d.messageId)).toEqual(['1']);
+    expect(channel.deleted).toEqual([]);
+    expect(channel.sent).toEqual([]);
+  });
+
+  it('keeps every streamed bubble for a multi-part reply', async () => {
+    const first = 'A'.repeat(3_198);
+    const last = 'B'.repeat(2_000);
+    const finalText = first + last;
+    const { channel } = await drainWith(
+      { kind: 'completed', finalText },
+      async () => true,
+      async (progress) => {
+        progress.handle({ conversationId: 'c1', kind: 'commentary', text: finalText });
+        await new Promise((resolve) => setTimeout(resolve, 30));
+      },
+    );
+
+    expect(channel.edits.at(-1)).toMatchObject({ messageId: '2', text: last });
+    expect(channel.stopButtons.size).toBe(0);
+    expect(channel.edits.some((edit) => edit.messageId === '1' && edit.text === first)).toBe(true);
+    expect(channel.sent).toEqual([]);
+    expect(channel.deleted).toEqual([]);
+    expect(channel.progress).toHaveLength(2);
+  });
+
+  it('reuses a checkpointed overflow bubble when a later send fails', async () => {
+    const state = await store();
+    const channel = new FakeRemoteChannel('telegram');
+    const signal = new AbortController().signal;
+    const outbox = new RemoteOutboxDelivery(channel, state, 12_000, signal);
+    const sendProgress = channel.sendProgress.bind(channel);
+    const first = (await sendProgress('chat-1', 'Working'))!;
+    let fail = true;
+    vi.spyOn(channel, 'sendProgress').mockImplementation(async (...args) => {
+      if (args[1] === 'Last' && fail) {
+        fail = false;
+        throw new Error('temporary send failure');
+      }
+      return sendProgress(...args);
+    });
+    await state.notifyOutbox('telegram', 'chat-1', 'First\nMiddle\nLast', {
+      telegramReply: [{ text: 'First', messageId: first }, { text: 'Middle' }, { text: 'Last' }],
+    });
+    try {
+      await expect(outbox.flush('chat-1')).resolves.toBe(true);
+      expect(channel.progress.map((message) => message.text)).toEqual([
+        'Working',
+        'Middle',
+        'Last',
+      ]);
+      expect(channel.edits).toContainEqual({ chatId: 'chat-1', messageId: '2', text: 'Middle' });
+      expect(channel.sent).toEqual([]);
+    } finally {
+      await outbox.stop();
+    }
   });
 
   it('closes a cancelled turn with its own status', async () => {
@@ -268,11 +311,14 @@ describe('queue drain status bubble', () => {
       const { channel, state, outbox } = await drainWith(
         { kind, finalText: 'Partial answer.' },
         async () => unlocked,
-        async () => { unlocked = false; },
+        async () => {
+          unlocked = false;
+        },
       );
       try {
         expect(channel.sent).toEqual([]);
-        const notice = 'Forge: request cancelled.\nWorkspace: Forge\nOriginal request: hello\n\nPartial answer.';
+        const notice =
+          'Forge: request cancelled.\nWorkspace: Forge\nOriginal request: hello\n\nPartial answer.';
         expect(state.pendingOutbox('telegram')).toEqual([
           expect.objectContaining({ text: notice, requestId: 'r1', state: 'pending' }),
         ]);

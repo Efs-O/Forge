@@ -73,6 +73,10 @@ export const OutboxSchema = z.object({
    * builds its last message, so none of those ever carries it.
    */
   speedLine: z.string().min(1).max(200).optional(),
+  telegramReply: z
+    .array(z.object({ text: z.string().min(1), messageId: z.string().optional() }))
+    .min(1)
+    .optional(),
   media: z
     .object({
       kind: z.enum(['video', 'audio']),

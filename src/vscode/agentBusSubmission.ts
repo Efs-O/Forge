@@ -1,6 +1,11 @@
 import * as path from 'path';
 import { busPaths } from '../agentBus/agentBus';
-import type { BusTurnEnd, ChatTargetSelection, InboxMessageOptions } from '../agentBus/agentInbox';
+import type {
+  BusTurnEnd,
+  ChatTargetSelection,
+  ForgeSteerResult,
+  InboxMessageOptions,
+} from '../agentBus/agentInbox';
 import { BUS_TARGET_SCAN, busTargetConversation } from '../agentBus/busTarget';
 import { parseForgeInboundPrompt } from '../agentBus/busContent';
 import { EXCHANGES_LOG_NAME, readEvents } from '../agentMesh/exchangeLog';
@@ -101,16 +106,55 @@ function resolveStreamingBusTarget(
   return { ok: true, conversationId: target.conversationId, title: target.title };
 }
 
+/** Why this steer cannot run now, as the sentence its sender reads, or nothing
+ *  when it may. Asked twice on purpose: once before the message is accepted,
+ *  where a refusal costs the inbox nothing, and again before the interrupt,
+ *  because the queue can start a turn while the answer is on its way back.
+ *
+ *  Two things stop a steer here. A card the owner has not answered: interrupting
+ *  would take that answer away, and the sender checked a chat list it read a tool
+ *  round ago. And a chain the sender never saw: `expectedEpoch` is the chain its
+ *  message was written against, and a different one means the owner, or a reply,
+ *  has since put that chat on new work this steer would interrupt instead. */
+export function steerBlockReason(
+  facade: ForgeHostFacade,
+  conversationId: string,
+  title: string,
+  expectedEpoch?: number,
+): string | undefined {
+  const status = facade.status();
+  const approval = status.pendingApproval;
+  if (
+    approval &&
+    (approval.conversationId === undefined || approval.conversationId === conversationId)
+  )
+    return `Forge chat "${title}" is waiting for the owner's approval`;
+  const chain = status.requestChains.find((entry) => entry.conversationId === conversationId);
+  if (expectedEpoch !== undefined && chain !== undefined && chain.userIntentEpoch !== expectedEpoch)
+    return (
+      `Forge chat "${title}" is on a different chain now ` +
+      `(epoch ${chain.userIntentEpoch}, you read ${expectedEpoch}); read it again before steering`
+    );
+  return undefined;
+}
+
 /** Interrupt only the chat the sender's message will be routed to. */
 export async function interruptForgeForSender(
   facade: ForgeHostFacade,
   from: string,
   targetConversationId?: string,
-): Promise<
-  { steered: true; conversationId: string; title: string } | { steered: false; reason: string }
-> {
+): Promise<ForgeSteerResult> {
   const target = resolveStreamingBusTarget(facade, from, targetConversationId);
   if (!target.ok) return { steered: false, reason: target.error };
+  // The window that owns the chat answers for the card that is actually out, not
+  // for the one the sender's chat list described a request ago.
+  const blocked = steerBlockReason(facade, target.conversationId, target.title);
+  if (blocked)
+    return {
+      steered: false,
+      blocked: true,
+      reason: blocked,
+    };
   await facade.interrupt(target.conversationId);
   return {
     steered: true,
@@ -189,6 +233,39 @@ export function busMessageActivityText(
  * changes the configured default for this new chat.
  */
 
+/** Open, pin and name the chat a bus `--new` runs in, under the prologue lock
+ *  `message_chat action=new` shares. One owner for the three sidebar calls so a
+ *  route that answers a 202 naming that chat and the drain that delivers into it
+ *  cannot drift apart — and so a pin that fails can be answered with the id of
+ *  the chat it left behind, which a throw loses. */
+export async function openBusChat(
+  facade: ForgeHostFacade,
+  options: { model?: string; title?: string } = {},
+): Promise<{ ok: true; id: string; title: string } | { ok: false; id: string; error: string }> {
+  return inNewChatPrologueLock(async () => {
+    const created = await facade.createConversation({ activate: true });
+    if (options.model) {
+      try {
+        await facade.setConversationModel(created.id, options.model);
+      } catch (error) {
+        return {
+          ok: false as const,
+          id: created.id,
+          error: error instanceof Error ? error.message : String(error),
+        };
+      }
+    }
+    return {
+      ok: true as const,
+      id: created.id,
+      title:
+        options.title && facade.applyAutoTitle?.(created.id, options.title)
+          ? options.title
+          : created.title,
+    };
+  });
+}
+
 /** An explicit new chat becomes visible; follow-ups keep their addressed chat. */
 export async function submitBusMessage(
   facade: ForgeHostFacade,
@@ -196,13 +273,19 @@ export async function submitBusMessage(
   options: InboxMessageOptions | undefined,
 ): Promise<BusTurnEnd> {
   let conversationId: string;
-  if (options?.newChat) {
-    const wanted = options.model;
-    conversationId = await inNewChatPrologueLock(async () => {
-      const created = (await facade.createConversation({ activate: true })).id;
-      if (wanted) await facade.setConversationModel(created, wanted);
-      return created;
+  if (options?.newChat && !options.targetConversationId) {
+    // A `--new` whose chat already exists — opened by admission so the 202 could
+    // name it — is delivered below, not created twice.
+    const opened = await openBusChat(facade, {
+      ...(options.model ? { model: options.model } : {}),
+      ...(options.title ? { title: options.title } : {}),
     });
+    if (!opened.ok) {
+      throw new Error(
+        `the new chat ${opened.id} was opened but could not be pinned to ${options.model}: ${opened.error}`,
+      );
+    }
+    conversationId = opened.id;
   } else {
     const target = busTarget(facade, options?.from, options?.targetConversationId);
     conversationId = target;

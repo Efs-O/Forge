@@ -112,7 +112,6 @@ export function wireTurnMirror(events: SidebarProviderEvents, deps: TurnMirrorWi
   events.onGenerationFinished = (modelName, conversationId, finalText) => {
     original?.(modelName, conversationId, finalText);
     if (conversationId === undefined) return;
-    deps.endProgress(conversationId, true);
     // The provider already has the exact final answer at this point. Reading
     // the transcript here was racy around cold backend startup/restart: a
     // session sync or a continuation could make the callback see a different
@@ -122,6 +121,7 @@ export function wireTurnMirror(events: SidebarProviderEvents, deps: TurnMirrorWi
       // A turn with no answer has no reply to carry a speed line, so the sums
       // are dropped rather than kept for something that will never be sent.
       deps.turnSpeeds.abandonTurn(conversationId);
+      deps.endProgress(conversationId, true);
       return;
     }
     const line = deps.turnSpeeds.finishTurn(conversationId);
@@ -134,6 +134,7 @@ export function wireTurnMirror(events: SidebarProviderEvents, deps: TurnMirrorWi
       kind: 'turn',
       ...(line ? { speedLine: line } : {}),
     });
+    deps.endProgress(conversationId, true);
   };
 
   // A failed turn fires onGenerationFinished too, but with no final text — so

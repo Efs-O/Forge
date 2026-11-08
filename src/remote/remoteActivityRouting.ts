@@ -25,6 +25,7 @@ import type { RemoteController } from './RemoteController';
 export function routeHostActivity(
   event: HostActivityEvent,
   controller: RemoteController,
+  before?: Promise<void>,
 ): Promise<number> {
   if (event.conversationId === undefined) {
     return controller.broadcastHostNotification(event.text, event.ephemeral);
@@ -33,7 +34,7 @@ export function routeHostActivity(
     return controller.mirrorPrompt(event.conversationId, event.text);
   }
   if (event.kind === 'turn')
-    return controller.mirrorTurn(event.conversationId, event.text, event.speedLine);
+    return controller.mirrorTurn(event.conversationId, event.text, event.speedLine, before);
   if (event.kind === 'failure') {
     return controller.reportTurnFailure(event.conversationId, event.text);
   }

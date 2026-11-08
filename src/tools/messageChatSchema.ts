@@ -33,6 +33,9 @@ export const requestShapeSchema = z
     to: z.string().min(1).max(200).optional(),
     message: z.string().min(1).max(MESSAGE_CHAT_MESSAGE_MAX_CHARS).optional(),
     model: z.string().min(1).max(200).optional(),
+    /** Which OTHER window a `new` should open its chat in. Not a blob: it is
+     *  matched against the closed set of windows answering on this machine. */
+    window: z.string().min(1).max(200).optional(),
   })
   .strict();
 
@@ -101,6 +104,16 @@ export function requestSchema(flags: MessageChatActionFlags) {
         message: 'model is only for new: a chat already open keeps its own model.',
       });
     }
+    // `send`, `steer` and `view` aim at a chat, and a chat in another window is
+    // already named by its id — a `window` there would say nothing they do not
+    // already know, and a model that guesses a window can only guess wrong.
+    if (request.action !== 'new' && request.window !== undefined) {
+      context.addIssue({
+        code: 'custom',
+        path: ['window'],
+        message: 'window is only for new: send, steer and view address a chat by its id.',
+      });
+    }
   });
 }
 
@@ -120,8 +133,8 @@ export function messageChatDefinition(flags: MessageChatActionFlags): Registered
     function: {
       name: 'message_chat',
       description:
-        "Message another Forge chat in this window. `send`: `to` is a chat id, `#N` from `list`, or words from the chat's title; omit `to` to reach the other chat when exactly one other chat is running (or open). No `list` needed first. A running chat reads it at its next tool round; an idle chat starts a turn. Replies arrive the same way. `list`: show the chats. " +
-        '`action` defaults to `send` when a `message` is given, so a message alone is enough.' +
+        "Message another Forge chat. `to` is a chat id, `#N` from `list`, or words from the chat's title — `#N` and title words mean this window's chats; a chat in another Forge window on this machine takes its id only. Omit `to` to reach the other chat when exactly one other chat is running (or open). No `list` needed first. A running chat reads it at its next tool round; an idle chat starts a turn. Replies arrive the same way. `list`: show the chats, including other windows'." +
+        ' `action` defaults to `send` when a `message` is given, so a message alone is enough.' +
         (additions.length > 0 ? ` ${additions.join(' ')}` : ''),
       parameters: {
         type: 'object',
@@ -152,6 +165,13 @@ export function messageChatDefinition(flags: MessageChatActionFlags): Registered
                   maxLength: 200,
                   description:
                     'The model to open the new chat on: a name or alias from config.yaml. Omit it to follow the model this chat is on, so a worker does not load a second engine.',
+                },
+                window: {
+                  type: 'string',
+                  minLength: 1,
+                  maxLength: 200,
+                  description:
+                    'Open the new chat in ANOTHER Forge window on this machine: name it the way `list` prints it. Omit it to open the chat here.',
                 },
               }
             : {}),

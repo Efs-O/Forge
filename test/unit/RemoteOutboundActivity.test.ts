@@ -5,6 +5,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import { RemoteAgentProgress } from '../../src/remote/RemoteAgentProgress';
 import { RemoteRequestStore } from '../../src/remote/RemoteRequestStore';
 import { RemoteNotificationFanout } from '../../src/remote/RemoteNotificationFanout';
+import { RemoteOutboxDelivery } from '../../src/remote/RemoteOutboxDelivery';
 import { FakeRemoteChannel } from '../../src/remote/FakeRemoteChannel';
 import { routeHostActivity } from '../../src/remote/remoteActivityRouting';
 import type { RemoteController } from '../../src/remote/RemoteController';
@@ -128,6 +129,43 @@ describe('window-scoped ephemeral host notifications', () => {
     expect(record).toBeDefined();
     expect('ephemeral' in record).toBe(false);
   });
+});
+
+it('keeps the mirrored reply bubble through turn end and outbox delivery', async () => {
+  const state = await store();
+  await state.setBinding({
+    channel: 'telegram',
+    chatId: 'chat-a',
+    workspaceId: 'ws',
+    conversationId: 'c1',
+  });
+  const channel = new FakeRemoteChannel('telegram');
+  const signal = new AbortController().signal;
+  const outbox = new RemoteOutboxDelivery(channel, state, 12_000, signal);
+  const progress = new RemoteAgentProgress(channel, signal, () => true, 3_900, 0);
+  const fanout = new RemoteNotificationFanout({
+    store: state,
+    channelName: 'telegram',
+    workspaceId: 'ws',
+    kick: () => outbox.kick(),
+    ownsProgress: (id) => progress.owns(id),
+    progress,
+    outbox,
+  });
+  const id = (await channel.sendProgress('chat-a', 'Working'))!;
+  progress.begin('c1', 'chat-a', id, 'host');
+  progress.handle({ conversationId: 'c1', kind: 'commentary', text: 'The reply.' });
+  const delivery = fanout.mirrorTurn('c1', 'The reply.', 'Speed: 20 tok/s');
+  progress.handle({ conversationId: 'c1', kind: 'end', ok: true });
+  await expect(delivery).resolves.toBe(1);
+  await expect(outbox.flush('chat-a')).resolves.toBe(true);
+  expect(channel.edits.at(-1)).toMatchObject({
+    messageId: id,
+    text: 'The reply.\n\nSpeed: 20 tok/s',
+  });
+  expect(channel.deleted).toEqual([]);
+  expect(channel.sent).toEqual([]);
+  await outbox.stop();
 });
 
 describe('routeHostActivity ephemeral forwarding', () => {

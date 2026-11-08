@@ -15,9 +15,18 @@ export const ConversationIdSchema = z
   .max(128)
   .regex(/^[A-Za-z0-9._-]+$/u, 'must be 1-128 chars: letters, digits, . _ -');
 
+/** A `--new` chat's name, as short as a tab's and shorter than `deriveTitle`'s
+ *  160: it travels in a query string, and the window that opens the chat applies
+ *  it before its own title would. One number, so a caller that builds a name can
+ *  cut it to exactly what this route will accept. */
+export const BUS_CHAT_TITLE_LIMIT = 80;
+
+const TitleSchema = z.string().trim().min(1).max(BUS_CHAT_TITLE_LIMIT);
+
 const AgentMessageOptionsSchema = z
   .object({
     model: z.string().trim().min(1).optional(),
+    title: TitleSchema.optional(),
     new_chat: z.boolean().optional(),
     conversation_id: ConversationIdSchema.optional(),
     to_running: z.boolean().optional(),
@@ -40,6 +49,7 @@ function zodMessage(error: z.ZodError): string {
 export function parseAgentMessageOptions(fields: AgentRouteFields): InboxMessageOptions {
   const parsed = AgentMessageOptionsSchema.safeParse({
     model: fields['model'],
+    title: fields['title'],
     new_chat: fields['new_chat'],
     conversation_id: fields['conversation_id'],
     to_running: fields['to_running'],
@@ -48,6 +58,7 @@ export function parseAgentMessageOptions(fields: AgentRouteFields): InboxMessage
   if (!parsed.success) throw new AgentRouteHttpError(400, zodMessage(parsed.error));
   return {
     ...(parsed.data.model !== undefined ? { model: parsed.data.model } : {}),
+    ...(parsed.data.title !== undefined ? { title: parsed.data.title } : {}),
     ...(parsed.data.new_chat !== undefined ? { newChat: parsed.data.new_chat } : {}),
     ...(parsed.data.conversation_id !== undefined
       ? { conversationId: parsed.data.conversation_id }

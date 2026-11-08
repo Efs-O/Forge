@@ -1,7 +1,7 @@
 import type { AgentSender } from '../agentLinks/chatAgentLinks';
 import { formatAlsoLinkedNotice } from '../agentLinks/inboundAgentRouting';
 import type { InboxMessageOptions, ChatTargetResult } from '../agentBus/agentInbox';
-import type { AgentRoutesDeps } from './agentRoutes';
+import type { AgentRoutesDeps } from './agentRoutesDeps';
 import { AgentRouteHttpError } from './agentRouteFields';
 
 export async function admitInboundMessage(options: {
@@ -64,6 +64,30 @@ export async function admitInboundMessage(options: {
     throw new AgentRouteHttpError(400, 'Forge chat targeting is unavailable in this window');
   }
   if (messageOptions.newChat && deps.chatCapBlockers) requireCapacity(deps, true);
+  // A `--new` that this window can open right now: doing it here is what lets
+  // the 202 name the chat, and lets a pin failure answer 409 with that chat's
+  // id while nothing was queued — the same order `message_chat action=new` uses
+  // locally, so a worker opened from next door behaves like one opened here.
+  if (messageOptions.newChat && deps.openBusChat) {
+    const opened = await deps.openBusChat({
+      ...(messageOptions.model ? { model: messageOptions.model } : {}),
+      ...(messageOptions.title ? { title: messageOptions.title } : {}),
+    });
+    if (!opened.ok)
+      throw new AgentRouteHttpError(
+        409,
+        `The new chat ${opened.id} was opened but could not be pinned to ${messageOptions.model}: ${opened.error}. Nothing was queued; close that chat, or pin it by hand and send again.`,
+      );
+    target = { ok: true, conversationId: opened.id, title: opened.title };
+    // Opened now, so the drain delivers into it instead of opening a second one,
+    // and the pin is done — asking for the same model again would be a second
+    // engine request for the chat this message has not started yet. `newChat`
+    // stays set on purpose: it is what tells the inbox this message still needs a
+    // turn of its own, so a turn that starts in the new chat before this one is
+    // admitted cannot swallow it as a mid-turn tell.
+    messageOptions = { ...messageOptions, targetConversationId: opened.id };
+    delete messageOptions.model;
+  }
   return { messageOptions, ...(target ? { target } : {}) };
 }
 

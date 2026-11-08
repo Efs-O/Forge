@@ -147,6 +147,8 @@ export class RemoteController {
       workspaceId: options.workspaceId,
       kick: () => this.outbox.kick(),
       ownsProgress: (conversationId) => this.progress.owns(conversationId),
+      progress: this.progress,
+      outbox: this.outbox,
     });
     this.hostProgress = new HostProgressOpener({
       channel,
@@ -231,9 +233,7 @@ export class RemoteController {
   async broadcastHostNotification(text: string, ephemeral?: boolean): Promise<number> {
     return this.fanout.toWorkspace(text, ephemeral);
   }
-  async mirrorTurn(conversationId: string, text: string, line?: string): Promise<number> {
-    return this.fanout.mirrorTurn(conversationId, text, line);
-  }
+  mirrorTurn: RemoteNotificationFanout['mirrorTurn'] = (...args) => this.fanout.mirrorTurn(...args);
   mirrorPrompt(conversationId: string, text: string): Promise<number> {
     if (this.agentOriginTurns.has(conversationId)) return Promise.resolve(0);
     const chatId = this.fanout.mirrorTarget(conversationId);

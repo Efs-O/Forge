@@ -1,6 +1,6 @@
 import type { AgentSender } from '../agentLinks/chatAgentLinks';
 import { AgentRouteHttpError } from './agentRouteFields';
-import type { AgentRelayResult, AgentRoutesDeps } from './agentRoutes';
+import type { AgentRelayResult, AgentRoutesDeps } from './agentRoutesDeps';
 
 /** The kinds a `to` can name that Forge has a session link for. */
 const AGENT_TARGETS = ['claude', 'codex', 'copilot'];

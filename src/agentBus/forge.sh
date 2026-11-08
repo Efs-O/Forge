@@ -19,6 +19,7 @@
 #   --unattended means nobody is watching: dangerous tools are refused, other confirmations are auto-approved, ask_user is refused, and a Claude/Codex ask is refused unless jobs.allow_cli_agents is true.
 #   A say to a busy chat is read at its next tool round; its answer arrives when the turn ends; use steer only to stop the current work.
 #   A say with --unattended, --model or --new needs its own turn, so it waits until the running turn ends.
+#   A say with --new opens that chat and names it before its first message runs, and the answer carries its conversation id: keep it, because a later --to needs it, and a refusal that names a chat id means that chat is already open and empty.
 # The text comes from the file, or from stdin when no file is given.
 # Written by Forge on every start; edits are overwritten.
 

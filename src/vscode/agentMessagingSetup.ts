@@ -1,6 +1,7 @@
 import * as path from 'path';
 import * as vscode from 'vscode';
 import { busPaths, removeLegacyAliasFiles } from '../agentBus/agentBus';
+import { clearSelfWindow, setSelfWindow } from '../agentBus/selfWindow';
 import { EXCHANGES_LOG_NAME } from '../agentMesh/exchangeLog';
 import { setBoardContext } from '../agentMesh/meshContext';
 import { AgentInbox, type InboxMessageOptions } from '../agentBus/agentInbox';
@@ -252,6 +253,11 @@ export function setupAgentMessaging(
       isFocused: () => vscode.window.state.focused,
     }),
   );
+  // This window's own address on the bus, for a chat that talks to a peer
+  // window: the bus folder, this window's id, and the folder it is open on. The
+  // id exists nowhere else, and the tool layer cannot reach this file.
+  setSelfWindow({ busRoot: paths.root, windowId: routes.windowId, workspaceRoot });
+  context.subscriptions.push({ dispose: () => clearSelfWindow(routes.windowId) });
   context.subscriptions.push(
     vscode.window.onDidChangeWindowState((state) => {
       if (state.focused) routes.claim();

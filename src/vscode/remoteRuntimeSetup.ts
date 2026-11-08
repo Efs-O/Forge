@@ -25,6 +25,8 @@ import type { SidebarProvider } from '../sidebar/SidebarProvider';
 import { getLogger } from '../util/logger';
 
 const log = getLogger();
+const RELOAD_NOTICE_KEY = 'forge.remote.telegramReloadNotice';
+const RELOAD_NOTICE_TTL_MS = 5 * 60_000;
 
 /**
  * Build and start the remote runtime: the channel factories (Telegram from
@@ -77,6 +79,23 @@ export async function setupRemoteRuntime(
   // spawns PowerShell.
   const windowsDirectory = windowDirectory(context.globalStorageUri.fsPath);
   const windowsProbe = new RemoteWindowsProbe();
+  let reloadNotice = context.workspaceState.get<{ chatId: string; expiresAt: number }>(
+    RELOAD_NOTICE_KEY,
+  );
+  const deliverReloadNotice = async (): Promise<void> => {
+    const notice = reloadNotice;
+    if (!notice) return;
+    const expired = notice.expiresAt <= Date.now();
+    if (!expired && !remoteRuntime.activeTransports().includes('telegram')) return;
+    reloadNotice = undefined;
+    try {
+      // A lost Telegram response can still mean delivery. Consume before sending.
+      await context.workspaceState.update(RELOAD_NOTICE_KEY, undefined);
+      if (!expired) await remoteRuntime.sendTelegramReloadNotice(notice.chatId);
+    } catch (error) {
+      log.warn(`[remote] Telegram reload notice failed: ${String(error)}`);
+    }
+  };
 
   const remoteRuntime = new RemoteRuntime({
     storageDirectory: context.globalStorageUri.fsPath,
@@ -139,8 +158,26 @@ export async function setupRemoteRuntime(
       deps.setConfig(next);
       await remoteRuntime.applyConfig(next);
     },
-    reloadWindow: async () => {
-      await vscode.commands.executeCommand('workbench.action.reloadWindow');
+    reloadWindow: async (telegramChatId) => {
+      try {
+        if (telegramChatId) {
+          await context.workspaceState.update(RELOAD_NOTICE_KEY, {
+            chatId: telegramChatId,
+            expiresAt: Date.now() + RELOAD_NOTICE_TTL_MS,
+          });
+        }
+        await vscode.commands.executeCommand('workbench.action.reloadWindow');
+      } catch (error) {
+        if (telegramChatId) {
+          await context.workspaceState
+            .update(RELOAD_NOTICE_KEY, undefined)
+            .then(undefined, (err) => {
+              log.warn(`[remote] could not clear Telegram reload notice: ${String(err)}`);
+            });
+        }
+        log.error(`[remote] window reload failed: ${String(error)}`);
+        void vscode.window.showErrorMessage(`Forge window reload failed: ${String(error)}`);
+      }
     },
     openWorkspace: async (directory, forceNewWindow) => {
       // `forceNewWindow` is what makes `new-window` a second window instead of
@@ -190,6 +227,7 @@ export async function setupRemoteRuntime(
       vscode.workspace.textDocuments.some((document) => document.isDirty) ||
       vscode.workspace.notebookDocuments.some((notebook) => notebook.isDirty),
     onStatusChanged: () => {
+      void deliverReloadNotice();
       void publishRemoteStatus();
       // Serving is a state change, not a heartbeat: this is the one timer that
       // moves the record's `serving` field, and it fires when transports start or
@@ -247,6 +285,7 @@ export async function setupRemoteRuntime(
     log.error(`[remote] start failed: ${message}`);
     void vscode.window.showErrorMessage(`Forge remote failed to start: ${message}`);
   });
+  await deliverReloadNotice();
   await publishRemoteStatus();
   await publishWindowRecordNow();
   context.subscriptions.push({ dispose: () => void windowsProbe.dispose() });

@@ -2,21 +2,15 @@ import * as fs from 'fs';
 import type * as http from 'http';
 import * as path from 'path';
 import { timingSafeEqual } from 'crypto';
-import type { BusPaths } from '../agentBus/agentBus';
 import { MAX_INBOUND_CHARS, forgeInboundPrompt } from '../agentBus/busContent';
-import type {
-  AgentInbox,
-  ChatTargetResult,
-  ChatTargetSelection,
-  ForgeSteerResult,
-  InboxMessageOptions,
-} from '../agentBus/agentInbox';
+import type { AgentInbox, InboxMessageOptions } from '../agentBus/agentInbox';
 import { sendJson, sendText } from './controlHttp';
 import { formatWhoText } from './agentWhoText';
 import { handleAgentFileRoute } from './agentFileRoute';
 import { handleVerdictAck, handleVerdictRead } from './agentVerdictRoute';
 import { handleAgentReplyRoute } from './agentReplyRoute';
-import { handleAgentChatReadRoute, type BusReadResult } from './agentChatReadRoute';
+import { handleAgentChatReadRoute } from './agentChatReadRoute';
+import { isKnownAgentRoute } from './agentKnownRoutes';
 import {
   AgentRouteHttpError as HttpError,
   readAgentRouteFields as readFields,
@@ -26,145 +20,15 @@ import {
 import { parseAgentMessageOptions, parseOriginConversation } from './agentMessageOptions';
 import { dispatchAgentRelay } from './agentRelayDispatch';
 import { handleAgentRemoteSessionRoute } from './agentRemoteSessionRoute';
-import type { RemoteSessionActionResult } from '../remote/RemoteSessionBridge';
-import type { AgentSender } from '../agentLinks/chatAgentLinks';
 import { isPathInside } from '../util/pathContainment';
-import type { InboundAgentSelection, InboundAgentTarget } from '../agentLinks/inboundAgentRouting';
-import { PendingAgentReplies } from '../agentLinks/pendingAgentReplies';
 import { AgentWindowEndpointRegistry } from './agentWindowEndpointRegistry';
 import { admitInboundMessage } from './agentInboundAdmission';
+import type { AgentRoutesDeps } from './agentRoutesDeps';
 import {
   parseAgentSender,
   parseOptionalAgentSender,
   validateBusSenderName,
 } from './agentSenderParsing';
-import type { PendingAgentReply } from '../agentLinks/pendingAgentReplies';
-
-/** What a relay, an agent relay and a steer all report: an exchange accepted,
- *  how it was delivered, and `note` for a steer that withdrew an earlier
- *  request from the same chat (audit F2: every agent steer answered
- *  `no relay available to deliver to "<agent>"` because no window supplied a
- *  steer handler at all). */
-export type AgentRelayResult =
-  | { ok: true; exchangeId?: string; deliveredTo?: string; note?: string }
-  | { ok: false; error: string };
-
-export interface AgentRoutesDeps {
-  paths: () => BusPaths;
-  inbox: Pick<AgentInbox, 'accept' | 'cancel'>;
-  /** Only the focused Forge window may claim the shared client endpoint. */
-  isFocused?: () => boolean;
-  /** Injected by tests; production mints one per activation. */
-  token?: string;
-  windowId?: string;
-  holdsLink?: (sender: AgentSender) => boolean;
-  resolveInboundAgent?: (
-    sender: AgentSender,
-    selection: InboundAgentSelection,
-  ) => Promise<InboundAgentTarget>;
-  showAlsoLinkedNotice?: (conversationId: string, message: string) => void;
-  pendingReplies?: PendingAgentReplies;
-  workspaceRoot?: string;
-  recordPendingAccepted?: (record: PendingAgentReply) => Promise<void>;
-  isChatBusy?: (conversationId: string) => boolean;
-  /**
-   * Relay for non-agent senders that name a recipient. Agent senders use their
-   * session links through `relayAgent`. Absent ⇒ a non-Forge `to` is rejected.
-   */
-  relay?: (
-    from: string,
-    to: string,
-    text: string,
-    originConversation?: string,
-  ) => Promise<AgentRelayResult>;
-  relayAgent?: (
-    sender: AgentSender,
-    to: string,
-    text: string,
-    originConversation?: string,
-  ) => Promise<AgentRelayResult>;
-  /**
-   * A `priority=steer` message to another agent session: withdraw the request
-   * this chat has already put to that agent and run this text as the next
-   * relay. It takes the verified `AgentSender` like `relayAgent` does — the
-   * chat whose link is steered is found through the session id, not through a
-   * name. Absent ⇒ a steer to an agent is refused, not queued behind the very
-   * request it was meant to replace.
-   */
-  steer?: (sender: AgentSender, to: string, text: string) => Promise<AgentRelayResult>;
-  /**
-   * Validate a non-agent sender name against the configured sender set.
-   * Agent identities are validated by session id in `validateAgentSender`.
-   */
-  validateFrom?: (
-    from: string,
-  ) =>
-    | { ok: true }
-    | { ok: false; error: string }
-    | Promise<{ ok: true } | { ok: false; error: string }>;
-  validateAgentSender?: (sender: AgentSender) => { ok: true } | { ok: false; error: string };
-  /** Interrupt Forge's addressed chat and report whether it was streaming. */
-  interruptForge?: (from: string, conversationId: string | undefined) => Promise<ForgeSteerResult>;
-  /** Cancel Forge's addressed running turn, without queuing another turn. */
-  stopForge?: (
-    from: string,
-    conversationId: string | undefined,
-  ) => Promise<
-    | { ok: true; conversationId: string; title: string }
-    | { ok: false; status: 400 | 409; error: string }
-  >;
-  /** Resolve the Forge chat that will receive an accepted agent message. */
-  resolveChatTarget?: (from: string, selection: ChatTargetSelection) => ChatTargetResult;
-  /**
-   * `forge.sh who` — read-only projection of agent sessions linked to chats.
-   * Absent ⇒ `GET /agent/who` is 404.
-   */
-  who?: () => Promise<unknown> | unknown;
-  /** Read-only view of the sender's chat; absent means the route is 404.
-   *  `conversationId` is a chat named by `--to`; the dependency answers whether
-   *  this window's links allow this sender to read it. */
-  status?: (
-    from: string,
-    sender?: AgentSender,
-    conversationId?: string,
-  ) => BusReadResult | Promise<BusReadResult>;
-  view?: (
-    from: string,
-    count: string | undefined,
-    sender?: AgentSender,
-    conversationId?: string,
-  ) => BusReadResult | Promise<BusReadResult>;
-  /** Direct, model-free delivery of a workspace file to a chat this sender's
-   *  session is linked to. The verified sender comes in because the chat is
-   *  chosen by id, and only the session id says whether that id is this
-   *  sender's chat and not another session's that happens to be linked too. */
-  sendFile?: (
-    from: string,
-    sender: AgentSender,
-    conversationId: string,
-    workspaceRelativePath: string,
-    caption: string,
-  ) => Promise<
-    { kind: 'sent' } | { kind: 'refused'; error: string } | { kind: 'unknown'; error: string }
-  >;
-  remoteSession?: (
-    from: string,
-    sessionId: string,
-    id: string,
-    action: 'ask' | 'notify',
-    text: string,
-  ) => Promise<RemoteSessionActionResult>;
-  /** Valid model ids for an inbound message, `model@profile` forms included. */
-  configuredModels?: () => readonly string[];
-  /**
-   * Why a `--new` message could not open a chat, as counts per reason; EMPTY
-   * when one can be opened. Asked BEFORE the message is accepted, because the
-   * 202 is the last thing the caller can see: without the pre-flight an
-   * undeliverable `--new` is accepted, then silently dropped in `drain()`.
-   * Absent ⇒ no pre-flight (the failure is only reported afterwards).
-   */
-  chatCapBlockers?: (options?: { activate?: boolean }) => string[];
-}
 
 /**
  * The path with symlinks resolved, or as given when it cannot be resolved
@@ -231,26 +95,7 @@ export class AgentRoutes {
   async handle(req: http.IncomingMessage, res: http.ServerResponse): Promise<void> {
     const url = new URL(req.url ?? '/', 'http://127.0.0.1');
     const route = url.pathname;
-    const known =
-      route === '/agent/message' ||
-      route === '/agent/holds-link' ||
-      route === '/agent/reply' ||
-      route === '/agent/cancel' ||
-      (route === '/agent/stop' && !!this.deps.stopForge) ||
-      (route === '/agent/who' && !!this.deps.who) ||
-      (route === '/agent/status' && !!this.deps.status) ||
-      (route === '/agent/view' && !!this.deps.view) ||
-      (route === '/agent/send-file' && !!this.deps.sendFile && !!this.deps.validateAgentSender) ||
-      ((route === '/agent/remote-ask' || route === '/agent/remote-notify') &&
-        !!this.deps.remoteSession) ||
-      // The verdict routes depend on nothing but the bus folder: `readVerdictArtifact`
-      // and `acknowledgeVerdict` authorize the reader against the exchange's own
-      // sender (and its session id, when the caller supplied one), so a stranger
-      // gets 404 whatever this window thinks of the name. Gating them on
-      // `validateFrom` — an optional dependency neither one uses — is what made
-      // both answer `no route` in every production window (audit F1).
-      route === '/agent/read-verdict' ||
-      route === '/agent/ack-verdict';
+    const known = isKnownAgentRoute(route, this.deps);
     if (!this.endpoints.isEnabled() || !known) {
       return sendJson(res, 404, { error: `no route for ${req.method ?? 'GET'} ${route}` });
     }
@@ -287,8 +132,13 @@ export class AgentRoutes {
       }
       return sendJson(res, 200, { participants });
     }
-    if (route === '/agent/status' || route === '/agent/view') {
-      return handleAgentChatReadRoute(req, res, url, route, this.deps);
+    if (
+      route === '/agent/status' ||
+      route === '/agent/view' ||
+      route === '/agent/chats' ||
+      route === '/agent/peer-view'
+    ) {
+      return handleAgentChatReadRoute(req, res, url, route, this.deps, this.windowId);
     }
     if (route === '/agent/read-verdict') {
       return handleVerdictRead(req, res, url, this.deps);
@@ -419,7 +269,13 @@ export class AgentRoutes {
       const text = requireText(fields, MAX_INBOUND_CHARS);
       const steerForge =
         (typeof fields['priority'] === 'string' ? fields['priority'] : '').trim().toLowerCase() ===
-          'steer' && !!this.deps.interruptForge;
+        'steer';
+      // A window that cannot interrupt cannot steer. Said here, before anything
+      // is queued, because the answer it would otherwise give is the one a plain
+      // send gives — "queued" — and the sender would report an interruption that
+      // nothing here was ever going to make.
+      if (steerForge && !this.deps.interruptForge)
+        throw new HttpError(409, 'this window cannot steer a Forge chat. Nothing was queued.');
       const admission = await admitInboundMessage({
         from,
         ...(declaredSender ? { sender: declaredSender } : {}),
@@ -430,6 +286,28 @@ export class AgentRoutes {
       const target = admission.target;
       const pendingReplyId = admission.pendingReplyId;
       const queuedBehindRunningTurn = admission.queuedBehindRunningTurn ?? false;
+      // A steer is refused before anything is queued. `accept` can start the
+      // drain in the same tick, so a message cancelled after the answer came back
+      // is not reliably withdrawn — it may already be the turn this one meant to
+      // replace. `steer_epoch` is the chain the sender read, so a steer written
+      // against a turn that has since been followed by the owner's own message is
+      // refused rather than interrupting the newer work.
+      if (steerForge) {
+        const rawEpoch =
+          typeof fields['steer_epoch'] === 'string' ? fields['steer_epoch'].trim() : '';
+        const expectedEpoch = rawEpoch === '' ? undefined : Number(rawEpoch);
+        if (rawEpoch !== '' && !Number.isInteger(expectedEpoch))
+          throw new HttpError(400, 'steer_epoch must be an integer when it is sent');
+        const refusal = await this.deps.steerGuard?.(
+          target?.conversationId,
+          target?.title,
+          expectedEpoch,
+        );
+        if (refusal) {
+          if (pendingReplyId) this.deps.pendingReplies?.remove(pendingReplyId);
+          throw new HttpError(409, `${refusal}. Nothing was queued.`);
+        }
+      }
       let accepted: ReturnType<AgentInbox['accept']>;
       try {
         accepted = this.deps.inbox.accept(
@@ -444,7 +322,17 @@ export class AgentRoutes {
       }
       if (accepted === undefined) {
         if (pendingReplyId) this.deps.pendingReplies?.remove(pendingReplyId);
-        throw new HttpError(429, 'Forge has too many unread agent messages');
+        // A `--new` opened its chat before the inbox was asked, so the refusal
+        // has to name what it left behind: an empty chat nobody told the owner
+        // about is a tab they cannot find, and a retry opens a second one.
+        throw new HttpError(
+          429,
+          `Forge has too many unread agent messages${
+            target
+              ? `. The new chat "${target.title}" (${target.conversationId}) is open and empty; close it, or clear the inbox and send again`
+              : ''
+          }.`,
+        );
       }
       const { position: queued, id } = accepted;
       if (steerForge) {
@@ -452,6 +340,14 @@ export class AgentRoutes {
           steered: false as const,
           reason: 'no Forge turn was stopped',
         };
+        // Nothing was interrupted, so this message does not belong in the
+        // inbox either: it would land in front of a turn the owner has not
+        // answered. Take it back and refuse, so the sender's counters return.
+        if (!outcome.steered && outcome.blocked) {
+          this.deps.inbox.cancel(from, id);
+          if (pendingReplyId) this.deps.pendingReplies?.remove(pendingReplyId);
+          throw new HttpError(409, `${outcome.reason}. Nothing was queued.`);
+        }
         return sendJson(res, 202, { queued, id, ...outcome });
       }
       return sendJson(res, 202, {

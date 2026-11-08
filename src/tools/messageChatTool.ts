@@ -1,8 +1,6 @@
-import type { ForgeHostFacade, ForgeHostStatus } from '../sidebar/ForgeHostFacade';
+import type { ForgeHostStatus } from '../sidebar/ForgeHostFacade';
 import type { ForgeConfig } from '../config/types';
-import { resolvesToConfiguredModel } from '../config/modelReferences';
 import type { RegisteredTool, ToolHandlerContext } from './ToolRegistry';
-import { logger } from '../util/logger';
 import {
   actionFlags,
   actionList,
@@ -16,6 +14,7 @@ import {
   awaitMessageChatDelivery,
   clearUnclaimedSend,
   createMessageChatActions,
+  emitPromptActivity,
   markUnclaimedSend,
   MESSAGE_CHAT_DELIVERY_CONFIRM_MS,
   MESSAGE_CHAT_NEW_CHATS_PER_HOUR_DEFAULT,
@@ -28,64 +27,38 @@ import {
   type MessageChatDeliveryResult,
 } from './messageChatActions';
 import { clipMirroredPrompt } from '../sidebar/turnMirrorWiring';
-import { formatChatMessage, formatChatMirrorLine, quoteTitle } from '../sidebar/chatMessageText';
+import { formatChatMessage, formatChatMirrorLine } from '../sidebar/chatMessageText';
 import {
+  activeChatIds,
+  chatRefs,
+  closedChatHint,
+  closedChatRefs,
   formatChatId,
   formatChatList,
+  formatChatName,
   resolveChatReference,
+  resolveViewTarget,
   type ChatRef,
   type ChatReferenceResolution,
 } from './chatMessageResolver';
+import { peerNew, peerSend, peerSteer, peerView } from './messageChatPeerActions';
+import {
+  discoverPeers,
+  formatPeerSection,
+  peerContextFor,
+  peerWindowTarget,
+  resolvePeerTarget,
+  type PeerChatRef,
+  type PeerContext,
+  type PeerTarget,
+} from './messageChatPeers';
+import { peerWorkerTitle, pickWorkerModel } from './messageChatNewChat';
 
 /** The sidebar seam the tool dispatches through, re-exported so the tests and
  *  the wiring name it from the tool that uses it. */
 export type MessageChatSidebar = MessageChatActionSidebar;
 
-function emitPromptActivity(
-  facade: Pick<ForgeHostFacade, 'emitHostActivity'> | undefined,
-  conversationId: string,
-  text: string,
-): void {
-  try {
-    facade?.emitHostActivity?.({ kind: 'prompt', conversationId, text });
-  } catch (error) {
-    try {
-      logger.warn(
-        `message_chat: failed to emit prompt activity for ${conversationId}: ${error instanceof Error ? error.message : String(error)}`,
-      );
-    } catch {
-      // Logging failure must not change the result of an already-delivered message.
-    }
-  }
-}
-
-function chatRefs(status: ForgeHostStatus): ChatRef[] {
-  const open = status.conversations.filter((conversation) => !conversation.archived);
-  const runningIds = new Set(status.streamingConversationIds);
-  const reservedIds = new Set(status.requestChains.map((chain) => chain.conversationId));
-  return open.map((conversation, index) => ({
-    id: conversation.id,
-    title: conversation.title,
-    position: index + 1,
-    running: runningIds.has(conversation.id) || reservedIds.has(conversation.id),
-    ...(conversation.activeModel ? { model: conversation.activeModel } : {}),
-  }));
-}
-
-function closedChatRefs(status: ForgeHostStatus): ChatRef[] {
-  return status.conversations
-    .filter((conversation) => conversation.archived)
-    .map((conversation) => ({
-      id: conversation.id,
-      title: conversation.title,
-      // No tab, so no position: the `#N` tier never resolves a closed chat.
-      position: 0,
-      running: false,
-      closed: true,
-      ...(conversation.activeModel ? { model: conversation.activeModel } : {}),
-    }));
-}
-
+/** A refusal that also shows the caller the chats it can address instead. */
 function listRefusal(message: string, chats: ChatRef[], selfId: string): string {
   return `${message}\n\n${formatChatList(chats, selfId)}`;
 }
@@ -95,67 +68,27 @@ function messageFrom(sender: ChatRef, chats: ChatRef[], text: string): string {
   return formatChatMessage(sender.title, senderId, text);
 }
 
-function formatChatName(chat: ChatRef): string {
-  // A closed chat has no tab number to name it by, so `view`'s header quotes its
-  // title alone and `renderChatView` marks the read `closed`.
-  return chat.closed ? quoteTitle(chat.title) : `#${chat.position} ${quoteTitle(chat.title)}`;
-}
-
-/** Which chat `view` reads. An open chat always wins: only a reference that
- *  named one chat and matched nothing among the open tabs is tried again
- *  against the closed chats, so a supervisor can read back a worker that closed
- *  its tab while `send` and `steer` still refuse it. Every refusal comes back
- *  fully formatted, because a closed-chat ambiguity lists its own candidates
- *  rather than the open tabs. */
-function resolveViewTarget(
-  ref: string | undefined,
-  chats: ChatRef[],
-  closed: ChatRef[],
-  selfId: string,
-): { ok: true; chat: ChatRef } | { ok: false; refusal: string } {
-  const open = resolveChatReference(ref, chats, selfId);
-  if (open.ok) return open;
-  // Ambiguous, self-matched, or an omitted reference: the open chats already
-  // answered it, and a closed chat must never win over an open one.
-  if (open.reasonCode !== 'unmatched' || closed.length === 0) {
-    return { ok: false, refusal: listRefusal(`Error: ${open.reason}`, chats, selfId) };
-  }
-  const history = resolveChatReference(ref, closed, selfId);
-  if (history.ok) return { ok: true, chat: history.chat };
-  // Two closed chats match the same words: name both, never pick one. The
-  // reason already lists them by title and id, so the open-tab list would only
-  // add chats this read cannot reach. (`unmatched` lists every closed chat as
-  // candidates, so the code, not the count, is what tells the two apart.)
-  if (history.reasonCode === 'ambiguous') return { ok: false, refusal: `Error: ${history.reason}` };
-  // Neither an open tab nor recent history — an overflow-archive chat, or no
-  // such chat at all — keeps the refusal it had before the fallback existed.
-  return { ok: false, refusal: listRefusal(`Error: ${open.reason}`, chats, selfId) };
-}
-
-/** The one sentence a `send` or `steer` earns when the reference matched a chat
- *  that is closed rather than open: the caller learns its worker is still
- *  readable instead of guessing the chat is gone. Nothing else about those
- *  actions changes — a closed chat is never delivered to, queued or woken. */
-function closedChatHint(
-  resolution: ChatReferenceResolution,
-  ref: string | undefined,
-  closed: ChatRef[],
-  selfId: string,
-): string {
-  if (resolution.ok || resolution.reasonCode !== 'unmatched' || closed.length === 0) return '';
-  return resolveChatReference(ref, closed, selfId).ok
-    ? '\nThat chat is closed; `view` can still read it.'
-    : '';
-}
-
 export function makeMessageChatTool(options: {
   getSidebar: () => MessageChatSidebar | undefined;
   getConfig?: () => ForgeConfig;
   now?: () => number;
+  /** This window's bus address, or undefined while the bus is off — which is
+   *  also the shape a test uses to say "no other windows exist here". Defaults
+   *  to the live bus folder and window id. */
+  getPeerContext?: () => PeerContext | undefined;
+  /** How the other windows are found. Overridable so a test can say "there is
+   *  one peer, holding these chats" without a real bus folder and a socket. */
+  discoverPeers?: typeof discoverPeers;
 }): RegisteredTool {
   const windows = new Map<string, MessageChatWindow>();
   const now = options.now ?? Date.now;
   const actions = createMessageChatActions();
+  // This window's bus address. Undefined while the bus is off, which keeps
+  // every peer branch off and `list` printing exactly what it printed before
+  // cross-window messaging existed.
+  const peerContext = (): PeerContext | undefined =>
+    options.getPeerContext ? options.getPeerContext() : peerContextFor(options.getConfig);
+  const listPeers = options.discoverPeers ?? discoverPeers;
   const windowFor = (senderId: string): MessageChatWindow => {
     let window = windows.get(senderId);
     if (!window) {
@@ -288,7 +221,13 @@ export function makeMessageChatTool(options: {
             selfId,
           );
         }
-        return formatChatList(chats, selfId);
+        const local = formatChatList(chats, selfId);
+        const ctx = peerContext();
+        if (!ctx) return local;
+        // Re-read disk every call: a window that reloads comes back with a new
+        // id and token, and a cached list would name the one that went away.
+        const { peers, unreachable } = await listPeers(ctx, context?.abortSignal);
+        return `${local}${formatPeerSection(peers, unreachable)}`;
       }
 
       const window = windowFor(selfId);
@@ -317,10 +256,49 @@ export function makeMessageChatTool(options: {
         formatMirrorLine: formatChatMirrorLine,
       };
 
+      /** A chat id that is not open here may be open in a peer window. Only a
+       *  full id is looked up: `#N` and title words mean something different in
+       *  every window, and a wrong guess costs the owner a paid turn there. */
+      const peerOf = (ref: string | undefined) =>
+        resolvePeerTarget(ref, peerContext(), listPeers, context?.abortSignal);
+      /** The refusal for a `to` matched nowhere, plus what the other windows have
+       *  to say about it — that it lives next door, or that this window cannot
+       *  ask and which switch would let it. */
+      const unmatchedRefusal = async (
+        resolution: Extract<ChatReferenceResolution, { ok: false }>,
+        peer: PeerTarget,
+      ): Promise<string> =>
+        listRefusal(
+          `Error: ${resolution.reason}${closedChatHint(resolution, parsed.to, closed, selfId)}${
+            'note' in peer ? peer.note : ''
+          }`,
+          chats,
+          selfId,
+        );
+
+      /** What a peer action needs on top of the local context: the chat, the
+       *  message and this window's folder (the prompt names it, so the other chat
+       *  knows where to answer). */
+      const peerBase = (target: PeerChatRef, selfWorkspace: string, message: string) => ({
+        ...baseContext,
+        message,
+        target,
+        selfWorkspace,
+      });
+
       if (parsed.action === 'view') {
         const target = resolveViewTarget(parsed.to, chats, closed, selfId);
-        if (!target.ok) return target.refusal;
-        const name = formatChatName(target.chat);
+        if (!target.ok) {
+          // A full id this window does not hold may belong to a peer window: the
+          // same read, answered there and rendered by the same function.
+          const peer = await peerOf(parsed.to);
+          if ('chat' in peer)
+            return peerView({
+              target: peer.chat,
+              ...(context?.abortSignal ? { signal: context.abortSignal } : {}),
+            });
+          return target.refusal;
+        }
         try {
           // A read, so it burns nothing: no send, no wake, no new-chat or steer
           // counter, and a supervisor can watch a worker as often as it has turns.
@@ -332,7 +310,7 @@ export function makeMessageChatTool(options: {
           });
         } catch (error) {
           return listRefusal(
-            `Error: message_chat could not read ${name}: ${String(error)}.`,
+            `Error: message_chat could not read ${formatChatName(target.chat)}: ${String(error)}.`,
             chats,
             selfId,
           );
@@ -344,29 +322,32 @@ export function makeMessageChatTool(options: {
         // The default is the model this chat is already on, not the window's
         // active model: a supervisor's worker should reuse the engine its
         // supervisor is talking through, and anything else loads a second one.
-        let pinModel = sender.model;
-        if (parsed.model !== undefined) {
-          const config = options.getConfig?.();
-          if (!config) {
-            return listRefusal(
-              "Error: message_chat cannot check a `model` name without the loaded config. Omit `model` to open the new chat on this chat's own model.",
-              chats,
-              selfId,
-            );
-          }
-          // Checked before anything is opened, so a name that points at nothing
-          // configured costs nothing: no chat, no counters, no second server.
-          if (!resolvesToConfiguredModel(config, parsed.model)) {
-            return listRefusal(
-              `Error: "${parsed.model}" does not name a model in config.yaml (configured: ${config.models.map((model) => model.name).join(', ') || 'none'}). Nothing was created and no counter was used.`,
-              chats,
-              selfId,
-            );
-          }
-          // Passed on as it was given, not as the base name it resolved to, so a
-          // `model@profile` keeps its profile — the agent bus hands the same
-          // strings to `setConversationModel` unchanged.
-          pinModel = parsed.model;
+        const model = pickWorkerModel({
+          ...(parsed.model !== undefined ? { requested: parsed.model } : {}),
+          ...(sender.model ? { senderModel: sender.model } : {}),
+          openedHere: parsed.window === undefined,
+          ...(options.getConfig ? { config: options.getConfig() } : {}),
+        });
+        if ('refusal' in model) return listRefusal(model.refusal, chats, selfId);
+        const pinModel = model.pinModel;
+        // A `window` names another window, and that one owns its own sidebar,
+        // chat cap and prologue lock — so this window only asks, and burns the
+        // same counters a local `new` would.
+        if (parsed.window !== undefined) {
+          const where = await peerWindowTarget(
+            parsed.window,
+            peerContext(),
+            listPeers,
+            context?.abortSignal,
+          );
+          if (!('peer' in where)) return listRefusal(where.refusal, chats, selfId);
+          return peerNew({
+            ...baseContext,
+            message: workerMessage,
+            ...where,
+            title: peerWorkerTitle(sender, workerMessage),
+            ...(pinModel ? { pinModel } : {}),
+          });
         }
         const actionContext: MessageChatActionContext = {
           ...baseContext,
@@ -387,12 +368,17 @@ export function makeMessageChatTool(options: {
         }
         const steerMessage = parsed.message;
         const resolution = resolveChatReference(parsed.to, chats, selfId);
-        if (!resolution.ok)
-          return listRefusal(
-            `Error: ${resolution.reason}${closedChatHint(resolution, parsed.to, closed, selfId)}`,
-            chats,
-            selfId,
-          );
+        if (!resolution.ok) {
+          // A full chat id this window does not know may be a peer chat: the steer
+          // goes over there, on that window's fresh report of the chat.
+          const peer = await peerOf(parsed.to);
+          if ('chat' in peer)
+            return await peerSteer({
+              ...peerBase(peer.chat, peer.selfWorkspace, steerMessage),
+              steerAction: actions.steer,
+            });
+          return await unmatchedRefusal(resolution, peer);
+        }
         const actionContext: MessageChatActionContext = {
           ...baseContext,
           message: steerMessage,
@@ -401,6 +387,9 @@ export function makeMessageChatTool(options: {
         return actions.steer({
           ...actionContext,
           target: resolution.chat,
+          activeIds: activeChatIds(status),
+          deliver: (text, conversationId, running) =>
+            sidebar.deliverChatMessage(text, conversationId, running),
           ...(parsed.to ? { to: parsed.to } : {}),
         });
       }
@@ -414,14 +403,14 @@ export function makeMessageChatTool(options: {
       }
 
       const resolution = resolveChatReference(parsed.to, chats, selfId);
-      if (!resolution.ok)
-        return say(
-          listRefusal(
-            `Error: ${resolution.reason}${closedChatHint(resolution, parsed.to, closed, selfId)}`,
-            chats,
-            selfId,
-          ),
-        );
+      if (!resolution.ok) {
+        // A full chat id this window does not know may belong to a peer window:
+        // the whole send goes over there, so no local guard or counter runs it.
+        const peer = await peerOf(parsed.to);
+        if ('chat' in peer)
+          return say(await peerSend(peerBase(peer.chat, peer.selfWorkspace, parsed.message)));
+        return say(await unmatchedRefusal(resolution, peer));
+      }
       const target = resolution.chat;
       const sendLimit = messageChatSendLimit(window, !target.running);
       if (sendLimit) return say(listRefusal(sendLimit, chats, selfId));

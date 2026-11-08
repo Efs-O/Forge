@@ -127,6 +127,7 @@ export interface RemoteOutboxRecord {
   ephemeral?: boolean | undefined;
   /** This turn's speed line; see `OutboxSchema`. It is never part of `text`. */
   speedLine?: string | undefined;
+  telegramReply?: Array<{ text: string; messageId?: string | undefined }> | undefined;
   media?: RemoteMediaOutboxPayload | undefined;
 }
 
@@ -438,7 +439,7 @@ export interface RemoteRuntimeOptions {
   setInactivityTimeout?: ((minutes: number) => Promise<void>) | undefined;
   /** Persist `remote.rate_limit_per_minute` and re-apply it live (`/ratelimit`). */
   setRateLimit?: ((perMinute: number) => Promise<void>) | undefined;
-  reloadWindow?: (() => Promise<void>) | undefined;
+  reloadWindow?: ((telegramChatId?: string) => Promise<void>) | undefined;
   openWorkspace?: ((directory: string, forceNewWindow: boolean) => Promise<void>) | undefined;
   /**
    * The window files' phone surface (`/workspace windows`, the Close button, and

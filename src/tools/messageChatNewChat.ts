@@ -15,6 +15,9 @@
 import { deriveTitle } from '../sidebar/conversationTitle';
 import { shortChatTitle } from '../sidebar/chatMessageText';
 import { inNewChatPrologueLock } from '../sidebar/newChatPrologue';
+import { resolvesToConfiguredModel } from '../config/modelReferences';
+import type { ForgeConfig } from '../config/types';
+import { BUS_CHAT_TITLE_LIMIT } from '../backend/agentMessageOptions';
 import type { ChatRef } from './chatMessageResolver';
 import {
   atText,
@@ -40,12 +43,57 @@ interface WorkerChatOpening {
   pinError?: string;
 }
 
+/** Which model to pin the new chat to, and the refusal that says why a name is
+ *  not usable. `model` is checked against this window's config only when the
+ *  chat opens in this window: for one opened in another, that window's own
+ *  advertised list decides, and a worker model only it has configured is a
+ *  worker this window can ask for and could never run itself. Checked before
+ *  anything is opened, so a name that points at nothing costs no chat, no
+ *  counter and no second engine. */
+export function pickWorkerModel(input: {
+  requested?: string;
+  senderModel?: string;
+  openedHere: boolean;
+  config?: ForgeConfig;
+}): { pinModel?: string } | { refusal: string } {
+  const { requested, senderModel, openedHere, config } = input;
+  if (requested === undefined) return senderModel ? { pinModel: senderModel } : {};
+  if (openedHere) {
+    if (!config)
+      return {
+        refusal:
+          "Error: message_chat cannot check a `model` name without the loaded config. Omit `model` to open the new chat on this chat's own model.",
+      };
+    if (!resolvesToConfiguredModel(config, requested))
+      return {
+        refusal: `Error: "${requested}" does not name a model in config.yaml (configured: ${
+          config.models.map((model) => model.name).join(', ') || 'none'
+        }). Nothing was created and no counter was used.`,
+      };
+  }
+  // Passed on as it was given, not as the base name it resolved to, so a
+  // `model@profile` keeps its profile — the agent bus hands the same strings to
+  // `setConversationModel` unchanged.
+  return { pinModel: requested };
+}
+
 /** A worker chat's name: who opened it and the first words of what they asked
  *  for, inside the cap `deriveTitle` enforces. The sender's title is cut to 16
  *  units so the task keeps the rest — a tab named `📨 Message from Sender (id
  *  sender): Ple…` tells a supervisor nothing about which worker it is. */
-function workerTitle(sender: ChatRef, message: string): string {
+export function workerTitle(sender: ChatRef, message: string): string {
   return deriveTitle(`${shortChatTitle(sender.title, 16)}: ${message.replace(/\s+/g, ' ').trim()}`);
+}
+
+/** The same name for a chat that opens in ANOTHER window: it has to fit the
+ *  `title` field that request carries, which is shorter than a tab's name, so
+ *  the tail is cut rather than the head — the sender's name is the part that
+ *  says whose worker it is. */
+export function peerWorkerTitle(sender: ChatRef, message: string): string {
+  const title = workerTitle(sender, message);
+  return title.length <= BUS_CHAT_TITLE_LIMIT
+    ? title
+    : `${title.slice(0, BUS_CHAT_TITLE_LIMIT - 1)}…`;
 }
 
 /** Open the chat, pin its model, name it: the sidebar calls that must not

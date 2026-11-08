@@ -14,6 +14,7 @@
  */
 
 import type { ForgeHostFacade } from '../sidebar/ForgeHostFacade';
+import { logger } from '../util/logger';
 import type { ChatMessageDelivery } from '../sidebar/backgroundExitNotice';
 import type { ChatMessageMirrorStatus } from '../sidebar/chatMessageText';
 import { clipMirroredPrompt } from '../sidebar/turnMirrorWiring';
@@ -40,8 +41,23 @@ export interface MessageChatWindow {
 }
 
 export type MessageChatDeliveryResult =
-  | ChatMessageDelivery
+  | DeliveryOutcome
   | { kind: 'unconfirmed'; why: 'timeout' | 'aborted' };
+
+/** A refusal that may nevertheless have landed. Only a peer can report it: this
+ *  window's own router either took the message or said it did not. A peer whose
+ *  answer was lost after the bytes left cannot be told apart from one that
+ *  queued the message and then died, so the caller keeps its counters and its
+ *  cooldown and tells the sender not to resend. */
+export interface UncertainDelivery {
+  kind: 'refused';
+  error: string;
+  uncertain: true;
+}
+
+/** What any `deliver` port — the sidebar's router, or another window's route —
+ *  may answer. */
+export type DeliveryOutcome = ChatMessageDelivery | UncertainDelivery;
 
 export interface MessageChatActionSidebar {
   /** The sidebar seam every action reads through: status and activity for all of
@@ -160,13 +176,13 @@ export function messageChatSendLimit(window: MessageChatWindow, idle: boolean): 
 }
 
 export function awaitMessageChatDelivery(
-  delivery: Promise<ChatMessageDelivery>,
+  delivery: Promise<DeliveryOutcome>,
   signal: AbortSignal | undefined,
   /** Called only when the real delivery settles after we have already answered
    *  "unconfirmed". The 20 s wait is a guess about admission; this is the fact, and
    *  it is what makes a refused duplicate allowed again — the caller clears its
    *  unclaimed mark here. */
-  onLateSettle?: (result: ChatMessageDelivery) => void,
+  onLateSettle?: (result: DeliveryOutcome) => void,
 ): Promise<MessageChatDeliveryResult> {
   return new Promise((resolve, reject) => {
     // True once we have answered without seeing the delivery. Every later
@@ -192,7 +208,7 @@ export function awaitMessageChatDelivery(
     }
     signal?.addEventListener('abort', onAbort, { once: true });
     delivery.then(
-      (value) => {
+      (value: DeliveryOutcome) => {
         if (answeredEarly) onLateSettle?.(value);
         else finish(value);
       },
@@ -292,4 +308,26 @@ export function formatDeliveryResult(
     return `Error: ${name} did not accept the message: ${result.error} Nothing was delivered; retry later or pick another chat.`;
   }
   return `Sent to ${name}, but its turn had not started after ${result.why === 'timeout' ? `${MESSAGE_CHAT_DELIVERY_CONFIRM_MS / 1000} s` : 'this turn was stopped'}; it may still start. Do not resend; check with \`list\` later.`;
+}
+
+/** Draw one activity line on a chat's transcript. Never allowed to throw: the
+ *  line is decoration on a delivery that already happened, and a failure here
+ *  would reach the caller as a failed send. Shared because a local action and a
+ *  peer action draw the same line in the sender's own transcript. */
+export function emitPromptActivity(
+  facade: Pick<ForgeHostFacade, 'emitHostActivity'> | undefined,
+  conversationId: string,
+  text: string,
+): void {
+  try {
+    facade?.emitHostActivity?.({ kind: 'prompt', conversationId, text });
+  } catch (error) {
+    try {
+      logger.warn(
+        `message_chat: failed to emit prompt activity for ${conversationId}: ${error instanceof Error ? error.message : String(error)}`,
+      );
+    } catch {
+      // Logging failure must not change the result of an already-delivered message.
+    }
+  }
 }

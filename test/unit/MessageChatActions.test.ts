@@ -13,7 +13,7 @@ const L1_DISABLED_DEFINITION = {
   function: {
     name: 'message_chat',
     description:
-      "Message another Forge chat in this window. `send`: `to` is a chat id, `#N` from `list`, or words from the chat's title; omit `to` to reach the other chat when exactly one other chat is running (or open). No `list` needed first. A running chat reads it at its next tool round; an idle chat starts a turn. Replies arrive the same way. `list`: show the chats. `action` defaults to `send` when a `message` is given, so a message alone is enough. `view`: read what one named chat has done — its last prompt/answer pairs, at most 10; `to` is required, and reading changes nothing. `view` also reads a closed chat by id or title, and marks the result `closed`.",
+      "Message another Forge chat. `to` is a chat id, `#N` from `list`, or words from the chat's title — `#N` and title words mean this window's chats; a chat in another Forge window on this machine takes its id only. Omit `to` to reach the other chat when exactly one other chat is running (or open). No `list` needed first. A running chat reads it at its next tool round; an idle chat starts a turn. Replies arrive the same way. `list`: show the chats, including other windows'. `action` defaults to `send` when a `message` is given, so a message alone is enough. `view`: read what one named chat has done — its last prompt/answer pairs, at most 10; `to` is required, and reading changes nothing. `view` also reads a closed chat by id or title, and marks the result `closed`.",
     parameters: {
       type: 'object',
       properties: {

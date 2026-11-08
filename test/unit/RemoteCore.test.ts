@@ -1389,9 +1389,8 @@ describe('remote compaction progress notifications', () => {
   it('warns that /reload ends the session only when a code can end it', async () => {
     vi.useFakeTimers({ shouldAdvanceTime: true });
     try {
-      // Enrolled: the session dies with the window, so the acknowledgement has
-      // to say so. Nothing else does -- the chat just goes silent, which is
-      // indistinguishable from a reload that hung.
+      // The acknowledgement explains that the session ends. The reload also
+      // receives the chat to notify once Telegram starts again.
       const enrolled = await runReloadNotice(true, 'enrolled');
       expect(enrolled).toContain('6-digit');
       expect(enrolled).toContain('this session ends with it');
@@ -1423,7 +1422,7 @@ describe('remote compaction progress notifications', () => {
     };
     await handleRemoteCommand(
       {
-        channel: 'fake',
+        channel: 'telegram',
         kind: 'text',
         providerMessageId: `notice-${tag}`,
         senderId: 'owner',
@@ -1436,6 +1435,8 @@ describe('remote compaction progress notifications', () => {
       `notice-${tag}`,
     );
     await vi.advanceTimersByTimeAsync(1_000);
+    if (totp) expect(context.reloadWindow).toHaveBeenCalledWith('chat-a');
+    else expect(context.reloadWindow).toHaveBeenCalledWith();
     return channel.sent.map((message) => message.text).join(' | ');
   }
 

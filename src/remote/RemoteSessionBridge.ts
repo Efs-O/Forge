@@ -81,8 +81,7 @@ export async function remoteSessionAction(input: {
         ? `${from} asks: ${text}\n\nReply to this message with your answer ` +
             `(or send /answer ${questionId} <your answer>).`
         : `${from}: ${text}`,
-      false,
-      exchangeId,
+      { requestId: exchangeId },
     );
     if (questionId) {
       draft.sessionQuestions.push({

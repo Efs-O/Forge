@@ -75,7 +75,7 @@ export interface RemoteControllerOptions {
   unlockBacklogMax: number;
   setInactivityTimeout?: ((minutes: number) => Promise<void>) | undefined;
   setRateLimit?: ((perMinute: number) => Promise<void>) | undefined;
-  reloadWindow?: (() => Promise<void>) | undefined;
+  reloadWindow?: ((telegramChatId?: string) => Promise<void>) | undefined;
   onError?: (message: string) => void;
   /** Global spoken-reply toggle, persisted to config.yaml. */
   voiceToggle?: { get: () => boolean; set: (on: boolean) => Promise<void> };
@@ -140,7 +140,7 @@ export interface RemoteControllerOptionsDeps {
   isModelLoaded?: ((modelName: string) => boolean) | undefined;
   setInactivityTimeout?: ((minutes: number) => Promise<void>) | undefined;
   setRateLimit?: ((perMinute: number) => Promise<void>) | undefined;
-  reloadWindow?: (() => Promise<void>) | undefined;
+  reloadWindow?: ((telegramChatId?: string) => Promise<void>) | undefined;
   onError: (message: string) => void;
   /** Live read of the applied config's voice output flag. */
   voiceOutputEnabled: () => boolean;

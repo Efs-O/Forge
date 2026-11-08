@@ -957,6 +957,57 @@ edits need the CLI's recovery features or Git.
 [Delegation and CLI agents in detail](docs/DELEGATION.md) covers warm-process
 lifecycle, cancellation, capacity limits, and the checkpoint settings.
 
+## Chat to chat: `message_chat`
+
+A Forge chat can talk to another Forge chat — one beside it in the same window,
+or one in another VS Code window open on a different folder. The agent does this
+with the `message_chat` tool, so you see every call in its transcript. Two
+windows on this machine reach each other when `agent_bus.enabled` is on in both.
+
+- **`list`** shows this window's chats, and under `Other windows:` the chats of
+  every other Forge window answering here, each with its state, its model and
+  its id.
+- **`send`** puts a message in another chat. An idle chat starts a turn; a
+  running one reads it at its next tool round. The answer comes back as a normal
+  message into the chat that sent it — nothing waits for it, and the other chat
+  replies only if you told it to. A message to a chat in another window is capped
+  at 8,000 characters (12,000 locally).
+- **`view`** reads the last ten prompt/answer pairs of one named chat. A read
+  costs nothing, so a supervisor can watch a worker as often as it likes, in
+  either window, and a closed chat can still be read.
+- **`steer`** interrupts a running chat and puts your text next in its queue. It
+  asks you first — a card, unless Clanker mode is on — and it is capped harder
+  than `send`, because it is the action that can make two chats ping-pong until a
+  model has run out of paid turns.
+- **`new`** opens a worker chat and sends it the first message. `window` opens it
+  in another window instead, on this chat's own model where that window has it
+  (if it does not, the call refuses and lists the models that window does have),
+  and the answer names the chat id it opened.
+
+`to` is a chat id, a `#N` tab number, or words from a title. `#N` and title
+words mean **this** window's chats; a chat in another window is addressed by its
+full id only, because a tab number or a title means a different chat over there.
+
+**The caps belong to the sending chat, per hour, and cover every window it
+reaches:** 30 messages, at most 6 of them waking an idle chat, 3 steers with a
+two-minute gap to the same chat, and 2 new chats
+(`permissions.chats.new_chats_per_hour` changes that one).
+`permissions.chats.steer` and `permissions.chats.new_chat` turn the two expensive
+actions off entirely. Caps reset when the sending window reloads.
+
+**When an answer is lost.** A cross-window message is one request and the tool
+never retries it. If that window's answer does not arrive, the result says it may
+already be queued and not to resend, and the message stays counted against the
+caps until `list` or `view` shows you what actually happened.
+
+**What a reload costs.** The receiving window's queue is in memory, so a message
+or a steer still waiting there when that window reloads or closes is lost — for a
+steer, the interrupt may already have happened. Nothing retries it; `list` and
+`view` tell you the truth.
+
+**Two windows on one folder** share the same chat store, so they are not peers:
+`list` does not show their chats twice, and there is nothing to send between them.
+
 ## Slash Commands
 
 Type `/` in chat to open the built-in command list. Forge also contributes commands to the VS Code palette — the full list is in [docs/COMMANDS.md](docs/COMMANDS.md).

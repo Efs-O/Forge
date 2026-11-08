@@ -11,7 +11,6 @@
  * not a ping-pong that burns two models until the hour runs out.
  */
 
-import type { ForgeHostStatus } from '../sidebar/ForgeHostFacade';
 import type { ChatRef } from './chatMessageResolver';
 import {
   atText,
@@ -27,7 +26,9 @@ import {
   recordAction,
   rollbackAction,
   unclaimedSendRefusal,
+  type DeliveryOutcome,
   type MessageChatActionContext,
+  type MessageChatDeliveryResult,
 } from './messageChatShared';
 
 const MESSAGE_CHAT_STEERS_PER_HOUR = 3;
@@ -36,11 +37,34 @@ const MESSAGE_CHAT_STEER_TARGET_GAP_MS = 2 * 60 * 1000;
 export interface SteerContext extends MessageChatActionContext {
   target: ChatRef;
   to?: string;
+  /** The chats this window (or a peer's fresh chat list) says are mid-turn. The
+   *  loop guard forgets a chat that left this set, so a finished turn cannot
+   *  hold the guard forever. */
+  activeIds: Set<string>;
+  /** What this caller actually read. `self` means every chat in THIS window, so
+   *  the loop memory of a chat in another window is left alone; `target` means
+   *  one chat in one window — a peer's chat list answers for the chat it names,
+   *  and nothing else. The default is `self`. */
+  readScope?: 'self' | 'target';
+  /** How the text reaches the target: the sidebar's router locally, another
+   *  window's route for a peer. A peer may only be able to say the outcome is
+   *  unknown, and then the cooldown and the counters stay where they are. */
+  deliver(text: string, conversationId: string, running: boolean): Promise<DeliveryOutcome>;
+  /** The sentence this action earns, for a caller whose delivery means something
+   *  the local wording does not describe — a peer that interrupted its turn
+   *  deserves to be told so, not told "only if it is generating one". */
+  formatResult?(result: MessageChatDeliveryResult): string;
 }
 
 interface SteerOrigin {
   senderId: string;
   baseEpoch?: number;
+  /** Which read can speak for this chat: `self` for a chat in this window, or
+   *  `target` for one this caller learned about from a single-chat report — a
+   *  peer's chat list, or any read that names one chat. A `self` read cannot
+   *  forget a `target` origin: this window's chat list never mentions a chat it
+   *  does not hold, so its absence there says nothing about that turn. */
+  scope: 'self' | 'target';
 }
 
 /** The `steer` action, with its two per-target maps in the closure: one sender's
@@ -51,9 +75,9 @@ export function createSteerAction(): (input: SteerContext) => Promise<string> {
   const steerOrigins = new Map<string, SteerOrigin>();
 
   return async (input) => {
-    const { sidebar, target, window, at, selfId } = input;
+    const { target, window, at, selfId } = input;
     pruneMessageChatWindow(window, at);
-    const sendLimit = messageChatSendLimit(window, !target.running);
+    const sendLimit = messageChatSendLimit(window, true);
     if (sendLimit) return input.refuse(sendLimit);
     if (window.steersAt.length >= MESSAGE_CHAT_STEERS_PER_HOUR) {
       return input.refuse(
@@ -76,29 +100,27 @@ export function createSteerAction(): (input: SteerContext) => Promise<string> {
     const unclaimed = unclaimedSendRefusal(window, target.id, input.formatName(target));
     if (unclaimed) return input.refuse(unclaimed);
 
-    const status: ForgeHostStatus = sidebar.getHostFacade().status();
-    const activeIds = new Set([
-      ...status.streamingConversationIds,
-      ...status.requestChains.map((chain) => chain.conversationId),
-    ]);
-    for (const id of steerOrigins.keys()) {
-      if (!activeIds.has(id)) steerOrigins.delete(id);
+    // The target's own state travels with its ref, so the same guard runs on a
+    // chat in another window: `chatRefs` fills it from `status()` here, a peer's
+    // chat list fills it over there. A read may only forget the chats it covered:
+    // a peer's list speaks for the one chat it names, and this window's list
+    // speaks for none of the chats it does not hold. Erasing the rest would let a
+    // chat still on a steered turn be steered again — the loop this guard stops.
+    for (const [id, origin] of steerOrigins) {
+      const covered = id === target.id || (input.readScope !== 'target' && origin.scope === 'self');
+      if (covered && !input.activeIds.has(id)) steerOrigins.delete(id);
     }
-    if (
-      status.pendingApproval &&
-      (status.pendingApproval.conversationId === undefined ||
-        status.pendingApproval.conversationId === target.id)
-    ) {
+    if (target.awaitingApproval) {
       return input.refuse(
         `Error: ${input.formatName(target)} is waiting for the owner's approval.`,
       );
     }
-    const currentChain = status.requestChains.find((chain) => chain.conversationId === target.id);
+    const currentEpoch = target.userIntentEpoch;
     const origin = steerOrigins.get(target.id);
     if (!target.running) {
       steerOrigins.delete(target.id);
     } else if (origin?.senderId === selfId) {
-      const epoch = currentChain?.userIntentEpoch;
+      const epoch = currentEpoch;
       if (origin.baseEpoch === undefined || epoch === undefined || epoch <= origin.baseEpoch + 1) {
         return input.refuse(
           `Error: refusing a steer loop: ${input.formatName(target)} is still on a turn started by your earlier steer.`,
@@ -107,46 +129,68 @@ export function createSteerAction(): (input: SteerContext) => Promise<string> {
       steerOrigins.delete(target.id);
     }
 
-    const idleWake = !target.running;
+    // The wake is reserved before the message leaves, whatever the snapshot said:
+    // a steer can start a turn in a chat this window believed was mid-turn, and a
+    // cap that is only checked after the answer has let one turn through already.
+    // It is handed back below, and only on proof — when the receiver says it
+    // stopped a turn, the chat was busy and this steer added no wake.
     lastSteerByTarget.set(target.id, at);
+    const wakeReserved = true;
     const rollbackCooldown = (): void => {
       if (lastSteerByTarget.get(target.id) !== at) return;
       if (previous === undefined) lastSteerByTarget.delete(target.id);
       else lastSteerByTarget.set(target.id, previous);
     };
-    recordAction(window, at, idleWake, false, true);
+    recordAction(window, at, wakeReserved, false, true);
     let result: Awaited<ReturnType<typeof awaitMessageChatDelivery>>;
     try {
       result = await awaitMessageChatDelivery(
-        sidebar.deliverChatMessage(input.formatMessage(), target.id, target.running),
+        input.deliver(input.formatMessage(), target.id, target.running),
         input.signal,
         () => clearUnclaimedSend(window, target.id),
       );
     } catch (error) {
       rollbackCooldown();
-      rollbackAction(window, at, idleWake, false, true);
+      rollbackAction(window, at, wakeReserved, false, true);
       return input.refuse(
         `Error: message_chat could not route the steering message: ${String(error)}.`,
       );
     }
     if (result.kind === 'refused') {
-      rollbackCooldown();
-      rollbackAction(window, at, idleWake, false, true);
+      // A lost answer after the bytes left is not a refusal: the other window may
+      // have interrupted its turn already, so the cooldown and the counters stay
+      // and the sender is told not to resend.
+      const certain = !('uncertain' in result && result.uncertain === true);
+      if (certain) {
+        rollbackCooldown();
+        rollbackAction(window, at, wakeReserved, false, true);
+      }
       return input.refuse(
-        `Error: ${input.formatName(target)} did not accept the steering message: ${result.error} Nothing was delivered; retry later or pick another chat.`,
+        certain
+          ? `Error: ${input.formatName(target)} did not accept the steering message: ${result.error} Nothing was delivered; retry later or pick another chat.`
+          : `Error: ${input.formatName(target)} did not confirm the steering message: ${result.error}. It may already be queued there, so do not resend; the steer stays counted against your caps.`,
       );
     }
 
     steerOrigins.set(target.id, {
       senderId: selfId,
-      ...(currentChain ? { baseEpoch: currentChain.userIntentEpoch } : {}),
+      ...(currentEpoch === undefined ? {} : { baseEpoch: currentEpoch }),
+      scope: input.readScope === 'target' ? 'target' : 'self',
     });
     emitDeliveryActivity(input, target, result, target.running);
-    if (idleWake && result.kind === 'tell') {
+    // The refund for the reserved wake, and the only one: the receiver answered
+    // that it stopped a turn, so the chat was busy and no turn was added. A
+    // `turn` outcome keeps the charge even when the snapshot said the chat was
+    // running — a stale snapshot owes that turn, and over-charging is the only
+    // error a cap is allowed to make.
+    if (result.kind === 'tell') {
       const wakeIndex = window.wakesAt.lastIndexOf(at);
       if (wakeIndex >= 0) window.wakesAt.splice(wakeIndex, 1);
     }
     if (result.kind === 'unconfirmed') markUnclaimedSend(window, target.id, at);
-    return formatDeliveryResult(input.formatName(target), result, 'steer');
+    return (
+      input.formatResult?.(result) ??
+      formatDeliveryResult(input.formatName(target), result, 'steer')
+    );
   };
 }

@@ -112,7 +112,13 @@ import {
 // for shell, message_chat, and ask_agent; still under the 64,625-char ceiling.
 // 2026-11-05: 63,554 (-74) after review removed duplicate ask_agent wording and added the shell timeout default; 1,071 below the ceiling.
 // 2026-11-05: 63,689 (+135) after the media group line named checking your own rendered work and headless rendering.
-const MEASURED_CHARS = 63_672;
+// 2026-11-08: 63,789 (+117) after the message_chat description named other Forge
+// windows on this machine and the id-only rule for their chats; 836 below the ceiling.
+// 2026-11-08: 64,604 (+815) — the maximal config now turns `permissions.chats`
+// on, so the ceiling prices the two gated actions and their `model`/`window`
+// fields as well as the ungated catalog. A window that enables them sits 21
+// chars under the ceiling; one that does not is what the older number measured.
+const MEASURED_CHARS = 64_604;
 // Phase 3 STOP: the historical full 88-tool wire schema was 67,128 chars.
 // Exclude computer_use (24 browser/desktop schemas) pending the owner's product
 // decision; the full and gated sizes are recorded in the report.
@@ -168,6 +174,10 @@ function maximalConfig(): ForgeConfig {
     },
     jobs: { enabled: true },
     agent_bus: { enabled: true },
+    // `message_chat`'s gated actions are advertised text, so pricing the worst
+    // case means pricing them: a window with `permissions.chats` on shows more
+    // than one without, and the ceiling has to cover what a user can turn on.
+    permissions: { chats: { new_chat: true, steer: true } },
     agent_links: { open_panel: 'every_ask', panel_live_timeout_ms: 20_000 },
     // `set_checkin` is registered only when this block exists, so pricing the
     // maximally-advertised set means pricing it with the block present.

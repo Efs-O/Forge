@@ -211,7 +211,8 @@ export async function handleRemoteSessionCommand(
     // Returning first lets both land, after which a redelivery is recognised
     // as already handled and dropped.
     setTimeout(() => {
-      void context.reloadWindow?.();
+      if (reauth && event.channel === 'telegram') void context.reloadWindow?.(event.chatId);
+      else void context.reloadWindow?.();
     }, RELOAD_SETTLE_MS).unref?.();
     return { kind: 'handled' };
   }

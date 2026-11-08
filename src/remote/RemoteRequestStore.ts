@@ -167,20 +167,9 @@ export class RemoteRequestStore {
     channel: RemoteOutboxRecord['channel'],
     chatId: string,
     text: string,
-    options?: { ephemeral?: boolean; speedLine?: string; media?: RemoteOutboxRecord['media'] },
+    options?: Pick<RemoteOutboxRecord, 'ephemeral' | 'speedLine' | 'media' | 'telegramReply'>,
   ): Promise<void> {
-    await this.mutate((draft) =>
-      appendHostNotification(
-        draft,
-        channel,
-        chatId,
-        text,
-        options?.ephemeral,
-        undefined,
-        options?.speedLine,
-        options?.media,
-      ),
-    );
+    await this.mutate((draft) => appendHostNotification(draft, channel, chatId, text, options));
   }
 
   async coalesceOutbox(
@@ -384,6 +373,7 @@ export class RemoteRequestStore {
       ephemeral?: boolean;
       /** This turn's speed line; see `OutboxSchema`. It is never part of `text`. */
       speedLine?: string;
+      telegramReply?: RemoteOutboxRecord['telegramReply'];
     },
   ): Promise<void> {
     await this.mutate((draft) => {
@@ -405,6 +395,7 @@ export class RemoteRequestStore {
         updatedAt: Date.now(),
         ...(payload.ephemeral ? { ephemeral: true } : {}),
         ...(payload.speedLine ? { speedLine: payload.speedLine } : {}),
+        ...(payload.telegramReply ? { telegramReply: payload.telegramReply } : {}),
       });
       if (payload.announceConversationId) {
         const binding = draft.bindings.find(
@@ -424,6 +415,14 @@ export class RemoteRequestStore {
       item.state = state;
       item.updatedAt = Date.now();
       if (state === 'sending') item.attempts += 1;
+    });
+  }
+
+  async recordTelegramReplyPart(id: string, index: number, messageId: string): Promise<void> {
+    await this.mutate((draft) => {
+      const part = draft.outbox.find((item) => item.id === id)?.telegramReply?.[index];
+      if (!part) throw new Error('Forge Telegram reply part is missing.');
+      part.messageId = messageId;
     });
   }
 

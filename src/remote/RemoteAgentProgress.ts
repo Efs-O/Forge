@@ -86,20 +86,7 @@ interface ActiveProgress {
   closed: boolean;
 }
 
-/**
- * Mirrors a turn into the chat as it happens.
- *
- * The agent's words stream into real messages, one per text block, and the
- * status footer and the inline Stop ride on the newest of them (see
- * `RemoteLiveBubble`).
- * A separate status message was tried first and failed:
- * Telegram never moves a message, so it stayed where it was opened while every
- * later bubble appeared below it and the live status scrolled out of view.
- *
- * A new bubble per block is also what notifies the phone: Telegram raises a
- * notification for a send and none for an edit, so a turn that only ever
- * edited one message was silent until it ended.
- */
+/** Streams turn text into messages, with the footer and Stop on the newest bubble. */
 export class RemoteAgentProgress {
   private readonly active = new Map<string, ActiveProgress>();
 
@@ -213,25 +200,13 @@ export class RemoteAgentProgress {
     state.bubble?.resume();
   }
 
-  /**
-   * Whether ANY live message reports this turn, whoever started it.
-   *
-   * Distinct from `owns` on purpose: this is the guard that stops a second
-   * message being opened for a turn already being reported, and it must count
-   * the host-started ones that `owns` deliberately hides from the fanout.
-   */
+  /** Whether either a sidebar or a chat started a live turn. */
   has(conversationId: string): boolean {
     const state = this.active.get(conversationId);
     return state !== undefined && !state.closed;
   }
 
-  /**
-   * The chat a live sidebar-started ('host') message reports to, if any.
-   * HostProgressOpener re-checks it against the current pairing on every
-   * event, so a chat switched to another conversation mid-turn stops hearing
-   * this one. Chat-queued ('remote') messages belong to the chat that sent the
-   * prompt and are not asked about.
-   */
+  /** The chat watching a sidebar-started turn. */
   hostChat(conversationId: string): string | undefined {
     const state = this.active.get(conversationId);
     return state && !state.closed && state.origin === 'host' ? state.chatId : undefined;
@@ -375,9 +350,22 @@ export class RemoteAgentProgress {
    * is left for the delete timer — the caller delivers first for exactly that
    * reason.
    */
-  async finish(conversationId: string, terminalText?: string): Promise<void> {
+  async finish(
+    conversationId: string,
+    terminalText?: string,
+    replyIds?: ReadonlySet<string>,
+  ): Promise<void> {
     const state = this.active.get(conversationId);
     if (!state) return;
+    await this.finishState(conversationId, state, terminalText, replyIds);
+  }
+
+  private async finishState(
+    conversationId: string,
+    state: ActiveProgress,
+    terminalText?: string,
+    replyIds?: ReadonlySet<string>,
+  ): Promise<void> {
     state.closed = true;
     if (state.clock) clearInterval(state.clock);
     try {
@@ -390,13 +378,39 @@ export class RemoteAgentProgress {
     if (this.active.get(conversationId) === state) this.active.delete(conversationId);
     try {
       if (state.bubble && !this.signal.aborted) {
-        const statusOnly = await state.bubble.close(terminalText);
+        const statusOnly = await state.bubble.close(terminalText, replyIds);
         if (statusOnly.length > 0)
           this.armAfter?.(state.chatId, statusOnly, QUEUED_ACK_DELETE_SECONDS);
       }
     } catch (err) {
       this.report(err);
     }
+  }
+
+  async telegramReplyTargets(conversationId: string) {
+    if (this.channel.name !== 'telegram') return [];
+    const state = this.active.get(conversationId);
+    if (!state?.bubble || state.closed) return [];
+    return state.bubble.replyTargets();
+  }
+
+  claimMirroredReply(conversationId: string, chatId: string) {
+    const state = this.active.get(conversationId);
+    if (
+      this.channel.name !== 'telegram' ||
+      !state?.bubble ||
+      state.origin !== 'host' ||
+      state.chatId !== chatId ||
+      state.closed
+    )
+      return undefined;
+    state.closed = true;
+    if (state.clock) clearInterval(state.clock);
+    return {
+      targets: state.bubble.replyTargets(),
+      finish: (ids?: ReadonlySet<string>) =>
+        this.finishState(conversationId, state, undefined, ids),
+    };
   }
 
   async dispose(): Promise<void> {

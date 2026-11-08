@@ -10,6 +10,9 @@ const BUSY_POLL_MS = 2_000;
 export interface InboxMessageOptions {
   model?: string;
   newChat?: boolean;
+  /** A name for the chat a `--new` opens, when the caller has one. The window
+   *  applies it to the chat it creates; absent means the window's own title. */
+  title?: string;
   sender?: AgentSenderMetadata;
   pendingReplyId?: string;
   /** The bus sender; the host routes its message to the chat it last wrote in. */
@@ -44,7 +47,10 @@ export type ChatTargetResult =
 
 export type ForgeSteerResult =
   | { steered: true; conversationId: string; title: string }
-  | { steered: false; reason: string };
+  /** `blocked` is not "it was idle": the window refused to interrupt, usually
+   *  because the owner is being asked something, so the route withdraws the
+   *  message it had queued and answers a refusal the sender can retry. */
+  | { steered: false; reason: string; blocked?: boolean };
 
 /**
  * How a bus-started turn ended. `submit` resolving used to mean "finished",

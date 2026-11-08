@@ -73,11 +73,7 @@ export class RemoteLiveBubble {
   private current: Bubble;
   /** Bubbles that left the bottom of the chat and still owe their final edit. */
   private readonly retiring: Bubble[] = [];
-  /**
-   * Bubbles split off the block that is still streaming. If that block turns
-   * out to be the final answer, the answer arrives as its own message, so these
-   * are deleted rather than left as a second copy of it.
-   */
+  /** Bubbles split off the block that is still streaming. */
   private overflow: Bubble[] = [];
   private block: BlockState = 'none';
   /** Whether the streaming block spans more than the current bubble. */
@@ -217,7 +213,7 @@ export class RemoteLiveBubble {
    * instead of becoming a `Forge: completed.` the caller then deletes ten
    * seconds later — the second churn point the owner watched.
    */
-  async close(terminalText?: string): Promise<string[]> {
+  async close(terminalText?: string, replyIds?: ReadonlySet<string>): Promise<string[]> {
     this.closed = true;
     if (this.timer) clearTimeout(this.timer);
     this.timer = undefined;
@@ -230,9 +226,11 @@ export class RemoteLiveBubble {
       for (const bubble of this.overflow) {
         const queued = this.retiring.indexOf(bubble);
         if (queued >= 0) this.retiring.splice(queued, 1);
+        if (bubble.id && replyIds?.has(bubble.id)) continue;
         bubble.text = '';
         await this.settle(bubble).catch((err) => this.deps.report(err));
       }
+      if (this.current.id && replyIds?.has(this.current.id)) this.current.gone = true;
       this.current.text = '';
     }
     for (const bubble of this.retiring.splice(0)) {
@@ -269,6 +267,18 @@ export class RemoteLiveBubble {
     const outcomeBubble: Bubble = { text: '' };
     await this.show(outcomeBubble, outcome, false).catch((err) => this.deps.report(err));
     return outcomeBubble.id === undefined ? [] : [outcomeBubble.id];
+  }
+
+  /** Freeze live edits before the outbox takes ownership of the reply. */
+  async replyTargets(): Promise<Array<{ id: string; length: number }>> {
+    if (this.closed || this.block !== 'streaming') return [];
+    this.abandon();
+    await this.inFlight;
+    return [...this.overflow, this.current].flatMap((bubble) =>
+      bubble.id && !bubble.gone && bubble.text.trim()
+        ? [{ id: bubble.id, length: bubble.text.trim().length }]
+        : [],
+    );
   }
 
   /**

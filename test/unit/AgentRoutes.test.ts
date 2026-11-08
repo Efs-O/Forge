@@ -361,6 +361,126 @@ describe('routes', () => {
     expect(asked).toBe(1);
   });
 
+  it('opens a --new chat at once, names it in the 202, and queues into it', async () => {
+    const asked: unknown[] = [];
+    const options: unknown[] = [];
+    routes = new AgentRoutes({
+      paths: () => paths,
+      inbox: {
+        accept: (prompt, _from, _front, messageOptions) => (
+          accepted.push(prompt),
+          options.push(messageOptions),
+          { position: accepted.length, id: `m${accepted.length}` }
+        ),
+        cancel: () => 0,
+      },
+      token: TOKEN,
+      configuredModels: () => ['alpha', 'beta'],
+      chatCapBlockers: () => [],
+      openBusChat: async (open) => {
+        asked.push(open);
+        return { ok: true, id: 'worker-1', title: 'Codex: start a phase' };
+      },
+    });
+    routes.setEnabled(true);
+    routes.onListening(base);
+    const response = await post(
+      '/agent/message?from=forge-x&new_chat=true&model=alpha&title=Worker%20one',
+      'start a phase',
+    );
+    expect(response.status).toBe(202);
+    // The sender learns which chat its worker is in from the same call that
+    // opened it; the answer before this one could only say "queued".
+    expect(response.body).toMatchObject({
+      conversationId: 'worker-1',
+      title: 'Codex: start a phase',
+      id: expect.any(String),
+    });
+    expect(asked).toEqual([{ model: 'alpha', title: 'Worker one' }]);
+    // The drain must deliver into that chat, not open another, so the chat is
+    // named and the pin it already applied is dropped — the same model is not
+    // asked for twice before the turn even starts. `newChat` stays set on
+    // purpose: it is the marker that says this message still needs a turn of its
+    // own, so a turn started in that chat while this one was being admitted
+    // cannot swallow the owner's first message as a mid-turn tell.
+    expect(options).toEqual([
+      { newChat: true, targetConversationId: 'worker-1', title: 'Worker one' },
+    ]);
+  });
+
+  it('answers 409 with the chat a failed pin left behind, and queues nothing', async () => {
+    routes = new AgentRoutes({
+      paths: () => paths,
+      inbox: stubInbox(),
+      token: TOKEN,
+      configuredModels: () => ['alpha', 'beta'],
+      chatCapBlockers: () => [],
+      openBusChat: async () => ({ ok: false, id: 'worker-9', error: 'model load refused' }),
+    });
+    routes.setEnabled(true);
+    routes.onListening(base);
+    const response = await post('/agent/message?from=forge-x&new_chat=true&model=alpha', 'go');
+    expect(response.status).toBe(409);
+    // The id is in the sentence because the chat exists either way, and the
+    // owner has to be able to find the empty one to close it.
+    expect(response.body.error).toContain('worker-9');
+    expect(response.body.error).toContain('model load refused');
+    expect(response.body).not.toHaveProperty('id');
+    expect(accepted).toEqual([]);
+  });
+
+  it('asks the cap before opening anything, so a full window opens no chat', async () => {
+    let opened = 0;
+    routes = new AgentRoutes({
+      paths: () => paths,
+      inbox: stubInbox(),
+      token: TOKEN,
+      configuredModels: () => ['alpha', 'beta'],
+      chatCapBlockers: () => ['7 running a turn'],
+      openBusChat: async () => {
+        opened++;
+        return { ok: true, id: 'x', title: 'x' };
+      },
+    });
+    routes.setEnabled(true);
+    routes.onListening(base);
+    const response = await post('/agent/message?from=forge-x&new_chat=true', 'go');
+    expect(response.status).toBe(409);
+    expect(opened).toBe(0);
+    expect(accepted).toEqual([]);
+  });
+
+  it('refuses an unknown model or an overlong title before opening a chat', async () => {
+    let opened = 0;
+    routes = new AgentRoutes({
+      paths: () => paths,
+      inbox: stubInbox(),
+      token: TOKEN,
+      configuredModels: () => ['alpha', 'beta'],
+      chatCapBlockers: () => [],
+      openBusChat: async () => {
+        opened++;
+        return { ok: true, id: 'x', title: 'x' };
+      },
+    });
+    routes.setEnabled(true);
+    routes.onListening(base);
+    const badModel = await post('/agent/message?from=forge-x&new_chat=true&model=nope', 'go');
+    expect(badModel.status).toBe(400);
+    expect(badModel.body.error).toContain('alpha, beta');
+    // A name longer than a chat can be is refused here rather than truncated by
+    // whichever window happens to receive the message.
+    const badTitle = await post(
+      `/agent/message?from=forge-x&new_chat=true&title=${'t'.repeat(81)}`,
+      'go',
+    );
+    expect(badTitle.status).toBe(400);
+    expect(badTitle.body.error).toContain('title');
+    expect(opened).toBe(0);
+    expect(accepted).toEqual([]);
+  });
+
+
   it('turns a message into a labelled prompt (text or JSON)', async () => {
     const plain = await post('/agent/message?from=forge-dd', 'hello');
     expect(plain).toEqual({ status: 202, body: { queued: 1, id: 'm1' } });
@@ -447,6 +567,139 @@ describe('routes', () => {
         reason: 'Forge chat "Codex: task" (sender-chat) is not streaming',
       },
     });
+  });
+
+  it('refuses a steer this window cannot interrupt, and queues nothing', async () => {
+    routes = new AgentRoutes({
+      paths: () => paths,
+      inbox: stubInbox(),
+      token: TOKEN,
+      resolveChatTarget: () => ({ ok: true, conversationId: 'sender-chat', title: 'Codex: task' }),
+    });
+    routes.setEnabled(true);
+    routes.onListening(base);
+    const response = await post('/agent/message?from=codex&to=forge&priority=steer', 'stop');
+    // Without an interrupt handler this window answers a steer the way it
+    // answers a plain send — "queued" — and the sender would report an
+    // interruption that nothing here was ever going to make.
+    expect(response.status).toBe(409);
+    expect(response.body.error).toContain('cannot steer');
+    expect(accepted).toEqual([]);
+  });
+
+  it('takes the message back when the chat is waiting for the owner, and refuses', async () => {
+    const cancelled: string[] = [];
+    routes = new AgentRoutes({
+      paths: () => paths,
+      inbox: {
+        accept: (prompt) => (
+          accepted.push(prompt),
+          { position: accepted.length, id: `m${accepted.length}` }
+        ),
+        cancel: (_from, id) => (cancelled.push(id), 1),
+      },
+      token: TOKEN,
+      resolveChatTarget: () => ({ ok: true, conversationId: 'sender-chat', title: 'Codex: task' }),
+      // The sender checked the chat list a tool round ago; this window answers
+      // from the card that is actually out, and says so with `blocked`.
+      interruptForge: async () => ({
+        steered: false,
+        blocked: true,
+        reason: 'Forge chat "Codex: task" is waiting for the owner\'s approval',
+      }),
+    });
+    routes.setEnabled(true);
+    routes.onListening(base);
+    const response = await post('/agent/message?from=codex&to=forge&priority=steer', 'stop');
+    expect(response.status).toBe(409);
+    expect(response.body.error).toContain("waiting for the owner's approval");
+    expect(response.body.error).toContain('Nothing was queued');
+    // It was accepted before the interrupt was attempted, so the route has to
+    // take it back: left in the inbox it would run in front of a question the
+    // owner has not answered.
+    expect(cancelled).toEqual(['m1']);
+    expect(accepted).toEqual(['**codex says:**\n\nstop']);
+  });
+
+  it('refuses a steer whose chain has moved on, before its message is queued', async () => {
+    const epochs: (number | undefined)[] = [];
+    routes = new AgentRoutes({
+      paths: () => paths,
+      inbox: stubInbox(),
+      token: TOKEN,
+      resolveChatTarget: () => ({ ok: true, conversationId: 'sender-chat', title: 'Codex: task' }),
+      steerGuard: (_conversationId, _title, expectedEpoch) => {
+        epochs.push(expectedEpoch);
+        return expectedEpoch === 7
+          ? undefined
+          : `Forge chat "Codex: task" is on a different chain now (epoch 9, you read ${expectedEpoch}); read it again before steering`;
+      },
+      interruptForge: async () => ({
+        steered: true,
+        conversationId: 'sender-chat',
+        title: 'Codex: task',
+      }),
+    });
+    routes.setEnabled(true);
+    routes.onListening(base);
+    const stale = await post(
+      '/agent/message?from=codex&to=forge&priority=steer&steer_epoch=5',
+      'stop',
+    );
+    expect(stale.status).toBe(409);
+    expect(stale.body.error).toContain('different chain');
+    expect(stale.body.error).toContain('Nothing was queued');
+    // The whole point: `accept` can start the drain in the same tick, so a steer
+    // cancelled afterwards is not reliably withdrawn.
+    expect(accepted).toEqual([]);
+    const current = await post(
+      '/agent/message?from=codex&to=forge&priority=steer&steer_epoch=7',
+      'stop',
+    );
+    expect(current.status).toBe(202);
+    expect(epochs).toEqual([5, 7]);
+    expect(accepted).toHaveLength(1);
+  });
+
+  it('refuses a steer_epoch that is not a number, and queues nothing', async () => {
+    routes = new AgentRoutes({
+      paths: () => paths,
+      inbox: stubInbox(),
+      token: TOKEN,
+      resolveChatTarget: () => ({ ok: true, conversationId: 'sender-chat', title: 'Codex: task' }),
+      interruptForge: async () => ({
+        steered: true,
+        conversationId: 'sender-chat',
+        title: 'Codex: task',
+      }),
+    });
+    routes.setEnabled(true);
+    routes.onListening(base);
+    const response = await post(
+      '/agent/message?from=codex&to=forge&priority=steer&steer_epoch=recent',
+      'stop',
+    );
+    expect(response.status).toBe(400);
+    expect(response.body.error).toContain('steer_epoch');
+    expect(accepted).toEqual([]);
+  });
+
+  it('names the chat a full inbox left behind, so the owner can find it', async () => {
+    routes = new AgentRoutes({
+      paths: () => paths,
+      inbox: { accept: () => undefined, cancel: () => 0 },
+      token: TOKEN,
+      chatCapBlockers: () => [],
+      openBusChat: async () => ({ ok: true, id: 'worker-3', title: 'Codex: go' }),
+    });
+    routes.setEnabled(true);
+    routes.onListening(base);
+    const response = await post('/agent/message?from=forge-x&new_chat=true', 'go');
+    expect(response.status).toBe(429);
+    // The chat was opened before the inbox was asked, so the refusal names the
+    // empty tab it left: otherwise a retry opens a second one behind it.
+    expect(response.body.error).toContain('worker-3');
+    expect(response.body.error).toContain('open and empty');
   });
 
   it('passes --unattended through as an inbox option', async () => {
@@ -1966,6 +2219,188 @@ describe('GET /agent/status and /agent/view', () => {
     expect(await (await get('/agent/view?from=claude&count=2')).text()).toBe('answers\n');
     expect(await (await get('/agent/view?from=claude')).text()).toBe('answers\n');
     expect(received).toEqual(['2', undefined]);
+  });
+});
+
+describe('GET /agent/chats', () => {
+  function install(deps: ConstructorParameters<typeof AgentRoutes>[0]): void {
+    routes = new AgentRoutes(deps);
+    routes.setEnabled(true);
+    routes.onListening(base);
+  }
+  const get = (route: string, token: string | null = TOKEN): Promise<Response> =>
+    fetch(`${base}${route}`, {
+      headers: token === null ? {} : { Authorization: `Bearer ${token}` },
+    });
+  const report = {
+    windowId: 'ignored-by-the-dep',
+    workspace: 'N:/other',
+    models: ['alpha'],
+    chats: [{ id: 'peer-1', title: 'Worker', running: true, closed: false, awaitingApproval: false }],
+  };
+
+  it('is not registered when the window has no chats dependency', async () => {
+    install({ paths: () => paths, inbox: stubInbox(), token: TOKEN });
+    const res = await get('/agent/chats');
+    expect(res.status).toBe(404);
+    expect((await res.json()).error).toBe('no route for GET /agent/chats');
+  });
+
+  it('requires a token and GET only', async () => {
+    install({ paths: () => paths, inbox: stubInbox(), token: TOKEN, chats: () => report });
+    expect((await get('/agent/chats', null)).status).toBe(401);
+    const post = await fetch(`${base}/agent/chats`, {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${TOKEN}` },
+      body: 'x',
+    });
+    expect(post.status).toBe(405);
+  });
+
+  it('answers before the sender check, with this window\'s id handed to the dependency', async () => {
+    const seen: string[] = [];
+    install({
+      paths: () => paths,
+      inbox: stubInbox(),
+      token: TOKEN,
+      // A `from` this window would refuse outright: a peer has no session
+      // identity, only the token, and it needs ids before it can name a chat.
+      validateFrom: () => ({ ok: false, error: 'unknown sender' }),
+      chats: (windowId) => {
+        seen.push(windowId);
+        return report;
+      },
+    });
+    const res = await get('/agent/chats');
+    expect(res.status).toBe(200);
+    expect(seen).toEqual([routes.windowId]);
+    expect(await res.json()).toEqual(report);
+  });
+
+  it('answers as JSON, and carries neither a tab number nor a transcript', async () => {
+    install({
+      paths: () => paths,
+      inbox: stubInbox(),
+      token: TOKEN,
+      chats: (windowId) => ({
+        windowId,
+        workspace: 'N:/work',
+        models: ['alpha'],
+        chats: [
+          { id: 'peer-1', title: 'Worker', running: false, closed: true, awaitingApproval: false },
+        ],
+      }),
+    });
+    const res = await get('/agent/chats');
+    expect(res.headers.get('content-type')).toMatch(/application\/json/u);
+    const text = await res.text();
+    expect(JSON.parse(text).chats[0].closed).toBe(true);
+    // `#N` is window-local and a transcript is what `view` exists to fetch.
+    expect(text).not.toMatch(/"position"/u);
+    expect(text).not.toMatch(/transcript/iu);
+  });
+});
+
+describe('GET /agent/peer-view', () => {
+  function install(deps: ConstructorParameters<typeof AgentRoutes>[0]): void {
+    routes = new AgentRoutes(deps);
+    routes.setEnabled(true);
+    routes.onListening(base);
+  }
+  const get = (route: string, token: string | null = TOKEN): Promise<Response> =>
+    fetch(`${base}${route}`, {
+      headers: token === null ? {} : { Authorization: `Bearer ${token}` },
+    });
+  const report = {
+    windowId: 'ignored-by-the-dep',
+    workspace: 'N:/other',
+    conversationId: 'peer-1',
+    title: 'Worker',
+    closed: false,
+    streaming: true,
+    clamped: false,
+    exchanges: [{ prompt: 'Read the plan.', answer: 'I read the plan.' }],
+  };
+
+  it('is not registered when the window has no peerView dependency', async () => {
+    install({ paths: () => paths, inbox: stubInbox(), token: TOKEN });
+    const res = await get('/agent/peer-view?conversation_id=peer-1');
+    expect(res.status).toBe(404);
+    expect((await res.json()).error).toBe('no route for GET /agent/peer-view');
+  });
+
+  it('requires a token, and answers GET only', async () => {
+    install({
+      paths: () => paths,
+      inbox: stubInbox(),
+      token: TOKEN,
+      peerView: () => ({ ok: true, report }),
+    });
+    expect((await get('/agent/peer-view?conversation_id=peer-1', null)).status).toBe(401);
+    const post = await fetch(`${base}/agent/peer-view?conversation_id=peer-1`, {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${TOKEN}` },
+      body: 'x',
+    });
+    expect(post.status).toBe(405);
+  });
+
+  it('names the chat and the count it was asked for, before any sender check', async () => {
+    const seen: unknown[] = [];
+    install({
+      paths: () => paths,
+      inbox: stubInbox(),
+      token: TOKEN,
+      // A peer window has no session identity to attribute a read to, so this
+      // route answers on the token alone — the same rule as `/agent/chats`.
+      validateFrom: () => ({ ok: false, error: 'unknown sender' }),
+      peerView: (conversationId, count, windowId) => {
+        seen.push([conversationId, count, windowId]);
+        return { ok: true, report };
+      },
+    });
+    const res = await get('/agent/peer-view?conversation_id=peer-1&count=3');
+    expect(res.status).toBe(200);
+    expect(seen).toEqual([['peer-1', 3, routes.windowId]]);
+    expect(await res.json()).toEqual(report);
+  });
+
+  it('refuses a read that does not name a chat, and clamps a count too big to send', async () => {
+    const counts: number[] = [];
+    install({
+      paths: () => paths,
+      inbox: stubInbox(),
+      token: TOKEN,
+      peerView: (_conversationId, count) => {
+        counts.push(count);
+        return { ok: true, report };
+      },
+    });
+    expect((await get('/agent/peer-view')).status).toBe(400);
+    expect((await get('/agent/peer-view?conversation_id=%20')).status).toBe(400);
+    expect((await get('/agent/peer-view?conversation_id=peer-1&count=abc')).status).toBe(400);
+    expect((await get('/agent/peer-view?conversation_id=peer-1&count=0')).status).toBe(400);
+    // A count over the cap is clamped by the same parser the phone's `/view`
+    // uses, so a caller that asks for 99 gets the most any window will send.
+    expect((await get('/agent/peer-view?conversation_id=peer-1&count=99')).status).toBe(200);
+    expect((await get('/agent/peer-view?conversation_id=peer-1&count=4')).status).toBe(200);
+    expect(counts).toEqual([10, 4]);
+  });
+
+  it('forwards the window’s own 404 for a chat it does not hold', async () => {
+    install({
+      paths: () => paths,
+      inbox: stubInbox(),
+      token: TOKEN,
+      peerView: () => ({
+        ok: false,
+        status: 404 as const,
+        error: 'Forge chat "peer-9" is no longer open',
+      }),
+    });
+    const res = await get('/agent/peer-view?conversation_id=peer-9');
+    expect(res.status).toBe(404);
+    expect((await res.json()).error).toContain('no longer open');
   });
 });
 

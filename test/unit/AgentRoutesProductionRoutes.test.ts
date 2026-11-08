@@ -181,6 +181,20 @@ describe('the routes a production window registers', () => {
   let twoClaudeChats = false;
   /** One closed chat, so `--to` has a chat that is named and gone. */
   let archivedReadChat = false;
+  /** A chat holding a request chain, and one sitting on a card the owner must
+   *  answer: the two states a cross-window steer compares against or refuses on,
+   *  which `GET /agent/chats` has to report because the guard runs on peer data. */
+  let peerChainChat = false;
+  let peerApprovalChat = false;
+  /** A chain on the chat a steer is aimed at, at the epoch it carries: the
+   *  receiving window compares the chain the sender read against this. */
+  let targetChainEpoch: number | undefined;
+  /** How many messages this window's inbox was ever asked to hold. */
+  let accepts = 0;
+  /** A card on the chat a steer is aimed at — the state the receiving window
+   *  has to re-check for itself, because the sender read a chat list a tool
+   *  round ago and the owner may have been asked something since. */
+  let approvalForTarget = false;
   const claudeBLink = { ...links.claude, sessionId: CLAUDE_SESSION_B, title: 'Claude B', lastUsedAt: 3 };
   const newChatLink = { ...links.claude, lastUsedAt: 2 };
   const fakeFacade = {
@@ -208,6 +222,30 @@ describe('the routes a production window registers', () => {
           ? { id: 'new-chat', title: 'Untitled chat', updatedAt: 3, activeModel: 'alpha' }
           : { id: 'c1', title: 'codex: task', updatedAt: 2, activeModel: 'alpha' },
       ],
+      requestChains: targetChainEpoch
+        ? [
+            {
+              conversationId: 'c1',
+              userIntentEpoch: targetChainEpoch,
+              stage: 'model' as const,
+              managed: false,
+            },
+          ]
+        : peerChainChat
+          ? [
+              {
+                conversationId: 'claude-a',
+                userIntentEpoch: 7,
+                stage: 'model' as const,
+                managed: false,
+              },
+            ]
+          : [],
+      pendingApproval: peerApprovalChat
+        ? { id: 'a1', toolName: 'shell', detail: '', dangerous: false, conversationId: 'claude-b' }
+        : approvalForTarget
+          ? { id: 'a2', toolName: 'shell', detail: '', dangerous: false, conversationId: 'c1' }
+          : undefined,
     }),
     recentExchanges: () => [],
     getAgentLink: (conversationId: string, kind: keyof typeof links) =>
@@ -256,7 +294,7 @@ describe('the routes a production window registers', () => {
       workspaceRoot: workspace,
       home,
       inbox: {
-        accept: (prompt) => ({ position: 1, id: `m${prompt.length}` }),
+        accept: (prompt) => (accepts++, { position: 1, id: `m${prompt.length}` }),
         cancel: () => 1,
         pendingFrom: (from: string) => (from === 'carol' ? queued.count : 0),
         queuedTargetConversation: (from: string) =>
@@ -316,6 +354,9 @@ describe('the routes a production window registers', () => {
     runningNewChat = false;
     twoClaudeChats = false;
     archivedReadChat = false;
+    approvalForTarget = false;
+    targetChainEpoch = undefined;
+    accepts = 0;
     sentTo.length = 0;
     // Exchange `x1`: asked by codex, answered, and its full answer retained —
     // the state a `read-verdict` is meant to find.
@@ -408,6 +449,134 @@ describe('the routes a production window registers', () => {
     }
     expect(cancelled).toContain('c1'); // `stop` reached the addressed chat
     expect(interrupted).toContain('c1'); // `steer` reached it too
+  });
+
+  it('reports its own chats to a peer window — open and closed, and never a tab number', async () => {
+    twoClaudeChats = true;
+    archivedReadChat = true;
+    peerChainChat = true;
+    peerApprovalChat = true;
+    try {
+      const res = await fetch(`${base}/agent/chats`, {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      expect(res.status).toBe(200);
+      const body = (await res.json()) as {
+        windowId: string;
+        workspace: string;
+        models: string[];
+        chats: Array<Record<string, unknown>>;
+      };
+      expect(body.windowId).toBe(routes.windowId);
+      expect(body.workspace).toBe(workspace);
+      expect(Array.isArray(body.models)).toBe(true);
+      // The chat holding a chain is running and carries its epoch; the one on a
+      // card is flagged; the archived one is closed, so a peer `send` refuses it
+      // and a peer `view` can still read it.
+      expect(body.chats).toEqual([
+        {
+          id: 'claude-a',
+          title: 'Untitled A',
+          running: true,
+          closed: false,
+          awaitingApproval: false,
+          userIntentEpoch: 7,
+          model: 'alpha',
+        },
+        {
+          id: 'claude-b',
+          title: 'Untitled B',
+          running: false,
+          closed: false,
+          awaitingApproval: true,
+          model: 'alpha',
+        },
+        {
+          id: 'claude-c',
+          title: 'Untitled C',
+          running: false,
+          closed: true,
+          awaitingApproval: false,
+          model: 'alpha',
+        },
+      ]);
+      // No `#N`: tab numbers are window-local, and a peer that guessed one would
+      // steer whoever happened to hold that tab.
+      expect(JSON.stringify(body)).not.toMatch(/"position"/u);
+    } finally {
+      twoClaudeChats = false;
+      archivedReadChat = false;
+      peerChainChat = false;
+      peerApprovalChat = false;
+    }
+  });
+
+  it('refuses a steer into a chat the owner is being asked about, interrupting nothing', async () => {
+    approvalForTarget = true;
+    const response = await call('steer', ROUTE_FOR_VERB['steer']!);
+    // The chat was streaming, so a plain interrupt would have stopped it — and
+    // taken the answer to the owner's question with it.
+    expect(response.status).toBe(409);
+    expect(String(response.body['error'])).toContain("waiting for the owner's approval");
+    expect(String(response.body['error'])).toContain('Nothing was queued');
+    expect(interrupted.size).toBe(0);
+    // Refused before the inbox was asked at all: accepting can start the drain in
+    // the same tick, and a message cancelled afterwards may already be the turn
+    // this one was meant to replace.
+    expect(accepts).toBe(0);
+    approvalForTarget = false;
+  });
+
+  it('refuses a steer written against a chain that has moved on, before queuing it', async () => {
+    targetChainEpoch = 9;
+    const steer = ROUTE_FOR_VERB['steer']!;
+    const stale = await call('steer', {
+      ...steer,
+      query: '?from=codex&to=forge&priority=steer&steer_epoch=5',
+    });
+    expect(stale.status).toBe(409);
+    expect(String(stale.body['error'])).toContain('different chain');
+    expect(String(stale.body['error'])).toContain('you read 5');
+    expect(accepts).toBe(0);
+    expect(interrupted.size).toBe(0);
+    const current = await call('steer', {
+      ...steer,
+      query: '?from=codex&to=forge&priority=steer&steer_epoch=9',
+    });
+    expect(current.status).toBe(202);
+    expect(accepts).toBe(1);
+    expect(interrupted).toContain('c1');
+    targetChainEpoch = undefined;
+  });
+
+  it("hands a peer window one chat's transcript, and reads nothing but the transcript", async () => {
+    const res = await fetch(`${base}/agent/peer-view?conversation_id=c1&count=2`, {
+      headers: { Authorization: `Bearer ${token}` },
+    });
+    expect(res.status).toBe(200);
+    expect(await res.json()).toMatchObject({
+      windowId: routes.windowId,
+      workspace,
+      conversationId: 'c1',
+      title: 'codex: task',
+      closed: false,
+      // The chat is streaming here, and that is the fact the sender's `view`
+      // note about a partial last entry is drawn from.
+      streaming: true,
+      clamped: false,
+      exchanges: [],
+    });
+    const gone = await fetch(`${base}/agent/peer-view?conversation_id=chat-9`, {
+      headers: { Authorization: `Bearer ${token}` },
+    });
+    expect(gone.status).toBe(404);
+    expect(String((await gone.json()).error)).toContain('no longer open');
+    // Read-only by construction: no turn was stopped, cancelled or started, and
+    // nothing was restored into a tab — a neighbour reading over the socket
+    // cannot move the owner's window or wake an engine behind their back.
+    expect(interrupted.size).toBe(0);
+    expect(cancelled.size).toBe(0);
+    expect(askAgent).not.toHaveBeenCalled();
   });
 
   it('steers a linked agent session, not only Forge (audit F2)', async () => {

@@ -1,6 +1,8 @@
 import type { RemoteBinding } from './types';
 import type { RemoteRequestStore } from './RemoteRequestStore';
 import type { RemoteMediaOutboxPayload } from './types';
+import type { RemoteAgentProgress } from './RemoteAgentProgress';
+import type { RemoteOutboxDelivery } from './RemoteOutboxDelivery';
 
 export interface NotificationFanoutDeps {
   store: RemoteRequestStore;
@@ -13,6 +15,8 @@ export interface NotificationFanoutDeps {
   kick: () => void;
   /** Whether a live remote progress message already reports this turn. */
   ownsProgress: (conversationId: string) => boolean;
+  progress?: RemoteAgentProgress;
+  outbox?: RemoteOutboxDelivery;
 }
 
 /**
@@ -117,10 +121,39 @@ export class RemoteNotificationFanout {
     conversationId: string,
     text: string,
     speedLine?: string | undefined,
+    before?: Promise<void>,
   ): Promise<number> {
-    if (this.deps.ownsProgress(conversationId)) return 0;
+    if (this.deps.ownsProgress(conversationId)) {
+      await before;
+      return 0;
+    }
     const chatIds = this.chatsOn(conversationId).filter((id) => !this.unmirrored.has(id));
-    return this.send(chatIds, text, speedLine ? { speedLine } : undefined);
+    const chatId = chatIds[0];
+    const { outbox, progress } = this.deps;
+    const live =
+      chatId === undefined ? undefined : progress?.claimMirroredReply(conversationId, chatId);
+    let ids: ReadonlySet<string> | undefined;
+    try {
+      await before;
+      const telegramReply =
+        live && outbox
+          ? outbox.prepareTelegramReply(text, speedLine, await live.targets)
+          : undefined;
+      if (!telegramReply || chatId === undefined) {
+        const count = await this.send(chatIds, text, speedLine ? { speedLine } : undefined);
+        if (live && chatId !== undefined) await outbox?.flush(chatId);
+        return count;
+      }
+      await this.deps.store.notifyOutbox(this.deps.channelName, chatId, text, {
+        speedLine,
+        telegramReply,
+      });
+      ids = new Set(telegramReply.flatMap((part) => part.messageId ?? []));
+      return 1 + (await this.send(chatIds.slice(1), text, speedLine ? { speedLine } : undefined));
+    } finally {
+      if (live) await live.finish(ids);
+      if (ids) this.deps.kick();
+    }
   }
 
   /**

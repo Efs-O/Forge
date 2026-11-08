@@ -79,10 +79,12 @@ export function subscribeHostToRemote(
         if (event.suppressProgress && event.conversationId !== undefined) {
           controller.suppressAgentOriginProgress(event.conversationId);
         }
-        if (event.conversationId !== undefined) {
-          await handlers.onBeforeConversationNotify(controller, event.conversationId);
-        }
-        await routeHostActivity(event, controller);
+        const before =
+          event.conversationId === undefined
+            ? undefined
+            : handlers.onBeforeConversationNotify(controller, event.conversationId);
+        if (event.kind !== 'turn') await before;
+        await routeHostActivity(event, controller, before);
       })().catch((err) => {
         handlers.onActivityError((err as Error).message);
       });

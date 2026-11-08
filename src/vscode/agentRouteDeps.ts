@@ -25,7 +25,9 @@ import { isAskAgentRunning, type AskAgentRuntime } from '../agentLinks/askAgentS
 import { agentKindSchema, type AgentSender } from '../agentLinks/chatAgentLinks';
 import { findSessionChatIn } from '../agentLinks/chatAgentLinks';
 import { PendingAgentReplies } from '../agentLinks/pendingAgentReplies';
-import type { AgentRoutesDeps } from '../backend/agentRoutes';
+import type { AgentRoutesDeps } from '../backend/agentRoutesDeps';
+import type { ChatsReport } from '../backend/agentChatReadRoute';
+import { chatRefs, closedChatRefs } from '../tools/chatMessageResolver';
 import { validateBusSenderName } from '../backend/agentSenderParsing';
 import type { RemoteRuntime } from '../remote/RemoteRuntime';
 import { MAX_VIEW_COUNT, parseViewCount } from '../remote/RemoteTranscriptView';
@@ -34,7 +36,9 @@ import {
   busModelIds,
   exchangeConversationFromLedger,
   interruptForgeForSender,
+  openBusChat,
   resolveBusMessageTarget,
+  steerBlockReason,
   stopForgeForSender,
 } from './agentBusSubmission';
 
@@ -194,12 +198,24 @@ export function buildAgentRouteDeps(hosts: AgentRouteDepsHosts): AgentRoutesDeps
       resolveBusMessageTarget(getFacade(), from, selection, exchangeConversationFromLedger),
     interruptForge: async (from, conversationId) =>
       interruptForgeForSender(getFacade(), from, conversationId),
+    // A steer is refused before its message is queued, because a queued message
+    // cannot always be withdrawn: the drain may start it in the same tick the
+    // route answers in. The chat is named here, so the card and the chain are
+    // read for that chat alone.
+    steerGuard: (conversationId, title, expectedEpoch) =>
+      conversationId === undefined
+        ? undefined
+        : steerBlockReason(getFacade(), conversationId, title ?? conversationId, expectedEpoch),
     stopForge: async (from, conversationId) =>
       stopForgeForSender(getFacade(), from, conversationId),
     // A `--new` message needs a tab to exist. Ask the sidebar NOW whether one
     // could be opened, so the route can answer 409 with the reasons instead of
     // answering 202 and dropping the message in `drain()`.
     chatCapBlockers: (options) => getFacade().chatCapBlockers(options),
+    // A `--new` opens its chat here, so the 202 can name it and a pin failure
+    // can be answered 409 with that id. Same `openBusChat` the drain calls, so
+    // a bus `--new` and a `message_chat new` cannot race each other's pin.
+    openBusChat: (options) => openBusChat(getFacade(), options),
     who: () => {
       const facade = getFacade();
       const status = facade.status();
@@ -260,6 +276,81 @@ export function buildAgentRouteDeps(hosts: AgentRouteDepsHosts): AgentRoutesDeps
           clamped: requested.clamped,
           streaming: target.status.streamingConversationIds.includes(target.id),
         }),
+      };
+    },
+    // `GET /agent/chats`: which chats this window holds, for a chat in another
+    // window that has to address one by id. Built from the same two functions
+    // the `message_chat` tool builds its own list from, so "which chats are
+    // open, and which of them are running" has one answer in this window rather
+    // than two that can drift. No `#N` — a peer that guessed a tab number would
+    // steer whoever happened to hold it.
+    chats: (windowId) => {
+      const status = getFacade().status();
+      // A card this window cannot tie to a chat blocks every chat it reports:
+      // the guard exists to stop a steer interrupting a question the owner has
+      // not answered, and reading "no card anywhere" from a missing id is the
+      // wrong way to be wrong.
+      const approval = status.pendingApproval;
+      const blocksApproval = (id: string) =>
+        approval !== undefined &&
+        (approval.conversationId === undefined || approval.conversationId === id);
+      const epochs = new Map(
+        status.requestChains.map((chain) => [chain.conversationId, chain.userIntentEpoch]),
+      );
+      const report = (refs: ReturnType<typeof chatRefs>, closed: boolean): ChatsReport['chats'] =>
+        refs.map((chat) => {
+          const epoch = epochs.get(chat.id);
+          return {
+            id: chat.id,
+            title: chat.title,
+            running: chat.running,
+            closed,
+            awaitingApproval: !closed && blocksApproval(chat.id),
+            ...(epoch === undefined ? {} : { userIntentEpoch: epoch }),
+            ...(chat.model ? { model: chat.model } : {}),
+          };
+        });
+      return {
+        windowId,
+        workspace: workspaceRoot,
+        models: [...busModelIds(getConfig())],
+        chats: [...report(chatRefs(status), false), ...report(closedChatRefs(status), true)],
+      };
+    },
+    // `GET /agent/peer-view`: one chat's transcript for a window that has
+    // nothing but the token and the chat's id. Read-only by construction —
+    // `status()` and the transcript, with no `watch.attach`, no restore and no
+    // model load, so a neighbour reading a chat cannot move the owner's tab or
+    // wake an engine behind their back.
+    peerView: (conversationId, count, windowId) => {
+      const facade = getFacade();
+      const status = facade.status();
+      const open = chatRefs(status).find((chat) => chat.id === conversationId);
+      const closed = open
+        ? undefined
+        : closedChatRefs(status).find((chat) => chat.id === conversationId);
+      const chat = open ?? closed;
+      if (!chat)
+        return {
+          ok: false as const,
+          status: 404 as const,
+          error: `Forge chat "${conversationId}" is no longer open`,
+        };
+      // One more than the caller asked for, so "there was more" is a measurement
+      // taken here rather than a guess made at the far end.
+      const fetched = facade.recentExchanges(conversationId, count + 1);
+      return {
+        ok: true as const,
+        report: {
+          windowId,
+          workspace: workspaceRoot,
+          conversationId,
+          title: chat.title,
+          closed: closed !== undefined,
+          streaming: status.streamingConversationIds.includes(conversationId),
+          clamped: fetched.length > count,
+          exchanges: fetched.slice(Math.max(fetched.length - count, 0)),
+        },
       };
     },
     sendFile: async (from, sender, conversationId, filePath, caption) => {

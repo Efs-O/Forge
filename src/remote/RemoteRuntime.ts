@@ -466,6 +466,13 @@ export class RemoteRuntime {
     this.options.onStatusChanged?.();
   }
 
+  async sendTelegramReloadNotice(chatId: string): Promise<void> {
+    const channel = this.manager.get('telegram')?.channel;
+    if (!channel || (await this.auth.getOwner('telegram')) !== chatId) return;
+    if (await this.auth.canDeliver('telegram', chatId)) return;
+    await channel.send(chatId, 'Forge is back online. Send your 6-digit code to unlock this chat.');
+  }
+
   /** Callbacks read live runtime state rather than a config snapshot. */
   private controllerOptionsDeps(): RemoteControllerOptionsDeps {
     return {

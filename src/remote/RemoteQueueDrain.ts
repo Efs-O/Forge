@@ -170,6 +170,7 @@ export async function drainRemoteQueue(
       deps.onError?.(`Forge remote progress could not be opened: ${bubble.error}`);
     }
     let progressOutcome: ProgressOutcome = 'failed';
+    let replyIds: ReadonlySet<string> | undefined;
     try {
       const attachmentStore = deps.attachmentStore();
       const promptAttachments = next.attachments?.filter(
@@ -196,6 +197,14 @@ export async function drainRemoteQueue(
         // delivered by this path only when no mirrored echo took it, and the
         // ledger hands a line out once so it cannot land on both.
         const speedLine = deps.host.takeTurnSpeedLine?.(conversationId);
+        const telegramReply =
+          next.channel === 'telegram' && bubble.kind !== 'declined' && notification
+            ? deps.outbox.prepareTelegramReply(
+                notification,
+                speedLine,
+                await deps.progress.telegramReplyTargets(conversationId),
+              )
+            : undefined;
         if (
           !(await persistResult(() =>
             deps.store.finish(next.id, 'completed', {
@@ -203,10 +212,13 @@ export async function drainRemoteQueue(
               notification: notification ?? 'Forge request completed.',
               ...(notification ? { announceConversationId: next.conversationId } : {}),
               ...(speedLine ? { speedLine } : {}),
+              ...(telegramReply ? { telegramReply } : {}),
             }),
           ))
         )
           return;
+        if (telegramReply)
+          replyIds = new Set(telegramReply.flatMap((part) => part.messageId ?? []));
       } else if (outcome.kind === 'cancelled' || outcome.kind === 'interrupted') {
         progressOutcome = 'cancelled';
         if (
@@ -265,15 +277,13 @@ export async function drainRemoteQueue(
         return;
     } finally {
       if (bubble.kind !== 'declined') {
-        // The answer goes up first, then the teardown. `progress.finish` deletes
-        // the bubbles the owner was reading, and Telegram raises no
-        // notification for an edit, so a status line written before the reply
-        // lands makes their own message the last thing on screen and the answer
-        // then arrives below it — the drop-and-move-back-up they reported.
+        // The outbox owns reply bubbles. Any leftover progress is cleaned up
+        // after the delivery attempt.
         const delivered = await deps.outbox.flush(next.chatId);
         await deps.progress.finish(
           conversationId,
-          progressTerminalText(progressOutcome, delivered),
+          replyIds ? undefined : progressTerminalText(progressOutcome, delivered),
+          replyIds,
         );
       }
       deps.activeConversations.delete(conversationId);

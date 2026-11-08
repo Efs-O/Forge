@@ -372,7 +372,9 @@ export class TelegramOutbound {
         chat_id: chatId,
         message_id: Number(messageId),
         text: widenForStopButton(text, options),
-        ...stopKeyboard(options),
+        ...(options?.stopButton === false
+          ? { reply_markup: { inline_keyboard: [] } }
+          : stopKeyboard(options)),
       },
       options?.signal,
       callOptions(options),

@@ -1,3 +1,6 @@
+import type { ForgeHostStatus } from '../sidebar/ForgeHostFacade';
+import { quoteTitle } from '../sidebar/chatMessageText';
+
 export interface ChatRef {
   id: string;
   title: string;
@@ -10,6 +13,14 @@ export interface ChatRef {
    *  while `send` and `steer` refuse it. Only `view`'s closed fallback builds
    *  these, from the archived rows `status()` already reports. */
   closed?: boolean;
+  /** Sitting on a card the owner has to answer, so a steer refuses. `chatRefs`
+   *  fills it from `status().pendingApproval`; a peer window's chat list carries
+   *  the same fact, which is what lets the steer guard run on a chat that lives
+   *  in another window without reading that window's status. */
+  awaitingApproval?: boolean;
+  /** The request-chain epoch of the turn this chat holds, when it holds one: the
+   *  number the steer-loop guard compares against, from the same two sources. */
+  userIntentEpoch?: number;
 }
 
 /** Why a reference was refused, said as data rather than as text to match on.
@@ -196,4 +207,115 @@ export function formatChatList(chats: ChatRef[], selfId: string): string {
     ...lines,
     'send: {"action":"send","to":"#2","message":"…"} — or omit "to" to reach the only other running chat.',
   ].join('\n');
+}
+
+/** The open tabs as refs: every non-archived row `status()` reports, in tab
+ *  order, marked running when it is streaming or holds a request chain. */
+export function chatRefs(status: ForgeHostStatus): ChatRef[] {
+  const open = status.conversations.filter((conversation) => !conversation.archived);
+  const runningIds = new Set(status.streamingConversationIds);
+  const reservedIds = new Set(status.requestChains.map((chain) => chain.conversationId));
+  const pending = status.pendingApproval;
+  // A card with no chat attached to it blocks every steer in the window, as the
+  // guard that read `status()` directly used to; the epoch travels with the ref
+  // so the same guard sees the same number whichever window the chat is in.
+  const awaiting = (id: string): boolean =>
+    pending !== undefined &&
+    (pending.conversationId === undefined || pending.conversationId === id);
+  const epochs = new Map(
+    status.requestChains.map((chain) => [chain.conversationId, chain.userIntentEpoch] as const),
+  );
+  return open.map((conversation, index) => {
+    const epoch = epochs.get(conversation.id);
+    return {
+      id: conversation.id,
+      title: conversation.title,
+      position: index + 1,
+      running: runningIds.has(conversation.id) || reservedIds.has(conversation.id),
+      ...(conversation.activeModel ? { model: conversation.activeModel } : {}),
+      ...(awaiting(conversation.id) ? { awaitingApproval: true } : {}),
+      ...(epoch === undefined ? {} : { userIntentEpoch: epoch }),
+    };
+  });
+}
+
+/** The chats this window says are mid-turn: streaming, or holding a request
+ *  chain. The steer action prunes its record of who started a turn here against
+ *  this set, so a chat that finished cannot hold a loop guard forever. */
+export function activeChatIds(status: ForgeHostStatus): Set<string> {
+  return new Set([
+    ...status.streamingConversationIds,
+    ...status.requestChains.map((chain) => chain.conversationId),
+  ]);
+}
+
+/** The archived rows as closed refs, for `view`'s fallback. */
+export function closedChatRefs(status: ForgeHostStatus): ChatRef[] {
+  return status.conversations
+    .filter((conversation) => conversation.archived)
+    .map((conversation) => ({
+      id: conversation.id,
+      title: conversation.title,
+      // No tab, so no position: the `#N` tier never resolves a closed chat.
+      position: 0,
+      running: false,
+      closed: true,
+      ...(conversation.activeModel ? { model: conversation.activeModel } : {}),
+    }));
+}
+
+/** How to name one chat: its tab number when it has one, its title alone when it
+ *  does not. */
+/** Which chat `view` reads. An open chat always wins: only a reference that
+ *  named one chat and matched nothing among the open tabs is tried again
+ *  against the closed chats, so a supervisor can read back a worker that closed
+ *  its tab while `send` and `steer` still refuse it. Every refusal comes back
+ *  fully formatted, because a closed-chat ambiguity lists its own candidates
+ *  rather than the open tabs. */
+export function resolveViewTarget(
+  ref: string | undefined,
+  chats: ChatRef[],
+  closed: ChatRef[],
+  selfId: string,
+): { ok: true; chat: ChatRef } | { ok: false; refusal: string } {
+  const withTabList = (message: string): string => `${message}\n\n${formatChatList(chats, selfId)}`;
+  const open = resolveChatReference(ref, chats, selfId);
+  if (open.ok) return open;
+  // Ambiguous, self-matched, or an omitted reference: the open chats already
+  // answered it, and a closed chat must never win over an open one.
+  if (open.reasonCode !== 'unmatched' || closed.length === 0) {
+    return { ok: false, refusal: withTabList(`Error: ${open.reason}`) };
+  }
+  const history = resolveChatReference(ref, closed, selfId);
+  if (history.ok) return { ok: true, chat: history.chat };
+  // Two closed chats match the same words: name both, never pick one. The
+  // reason already lists them by title and id, so the open-tab list would only
+  // add chats this read cannot reach. (`unmatched` lists every closed chat as
+  // candidates, so the code, not the count, is what tells the two apart.)
+  if (history.reasonCode === 'ambiguous') return { ok: false, refusal: `Error: ${history.reason}` };
+  // Neither an open tab nor recent history — an overflow-archive chat, or no
+  // such chat at all — keeps the refusal it had before the fallback existed.
+  return { ok: false, refusal: withTabList(`Error: ${open.reason}`) };
+}
+
+export function formatChatName(chat: ChatRef): string {
+  // A closed chat has no tab number to name it by, so `view`'s header quotes its
+  // title alone and `renderChatView` marks the read `closed`.
+  return chat.closed ? quoteTitle(chat.title) : `#${chat.position} ${quoteTitle(chat.title)}`;
+}
+
+/** The one sentence a `send` or `steer` earns when the reference matched a chat
+ *  that is closed rather than open: the caller learns its worker is still
+ *  readable instead of guessing the chat is gone. Nothing else about those
+ *  actions changes — a closed chat is never delivered to, queued or woken. */
+export function closedChatHint(
+  resolution: ChatReferenceResolution,
+  ref: string | undefined,
+  closed: ChatRef[],
+  selfId: string,
+): string {
+  if (resolution.ok || resolution.reasonCode !== 'unmatched' || closed.length === 0) return '';
+  return resolveChatReference(ref, closed, selfId).ok
+    ? '\nThat chat is closed; `view` can still read it.'
+    : '';
 }

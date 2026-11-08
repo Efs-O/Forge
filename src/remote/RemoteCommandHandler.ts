@@ -111,7 +111,7 @@ export interface RemoteCommandContext {
   windowSurface?: import('./RemoteWindowRegistry').RemoteWindowSurface | undefined;
   setInactivityTimeout?: ((minutes: number) => Promise<void>) | undefined;
   setRateLimit?: ((perMinute: number) => Promise<void>) | undefined;
-  reloadWindow?: (() => Promise<void>) | undefined;
+  reloadWindow?: ((telegramChatId?: string) => Promise<void>) | undefined;
   /**
    * Whether this channel has a TOTP enrollment, so `/reload` can say that the
    * session dies with the window. Asked rather than assumed: an installation

@@ -1,10 +1,11 @@
 import type { RemoteRequestStore } from './RemoteRequestStore';
-import type { RemoteChannel } from './types';
+import type { RemoteChannel, RemoteOutboxRecord } from './types';
 import type { RemoteAuth } from './RemoteAuth';
 import type { RemoteSpeechDelivery } from './RemoteSpeechDelivery';
 import type { RemoteControllerOptions } from './remoteControllerOptions';
 import type { CommandCleanupScheduler } from './CommandCleanupScheduler';
 import { recordSessionQuestionMessages } from './RemoteSessionBridge';
+import { plainTelegramText, splitTelegramText } from './TelegramText';
 import {
   fileDeliveryRefusal,
   validateWorkspaceFileForDelivery,
@@ -102,10 +103,35 @@ export class RemoteOutboxDelivery {
   async flush(chatId: string): Promise<boolean> {
     if (this.stopped || this.signal.aborted) return false;
     for (let round = 0; round < 2; round += 1) {
-      if (!this.hasQueuedFor(chatId)) return true;
+      if (!this.running && !this.hasQueuedFor(chatId)) return true;
       await this.ensureRunning();
     }
     return !this.hasQueuedFor(chatId);
+  }
+
+  /** Keep the live split points where possible, with the canonical reply as the source. */
+  prepareTelegramReply(
+    text: string,
+    speedLine: string | undefined,
+    targets: ReadonlyArray<{ id: string; length: number }>,
+  ): RemoteOutboxRecord['telegramReply'] {
+    if (!targets.length) return undefined;
+    const chars = Array.from(plainTelegramText(text.slice(0, this.maxMessageChars)).trim());
+    if (chars.length < targets.length) return undefined;
+    let offset = 0;
+    const parts: NonNullable<RemoteOutboxRecord['telegramReply']> = targets.map((target, index) => {
+      const remaining = targets.length - index - 1;
+      const end = Math.min(offset + target.length, chars.length - remaining);
+      const part = chars.slice(offset, end).join('');
+      offset = end;
+      return { text: part, messageId: target.id };
+    });
+    const last = parts.at(-1)!;
+    const lastText = last.text + chars.slice(offset).join('');
+    const [head, ...tail] = splitTelegramText(speedLine ? `${lastText}\n\n${speedLine}` : lastText);
+    last.text = head!;
+    for (const part of tail) parts.push({ text: part });
+    return parts.every((part) => part.text.trim()) ? parts : undefined;
   }
 
   /** Items still waiting to be sent to this chat; `sending` is not `pendingOutbox`. */
@@ -227,6 +253,24 @@ export class RemoteOutboxDelivery {
   private async sendItem(
     item: ReturnType<RemoteRequestStore['pendingOutbox']>[number],
   ): Promise<string[] | void> {
+    if (item.telegramReply) {
+      const { editMessage, sendProgress } = this.channel;
+      if (!editMessage || !sendProgress) throw new Error('Telegram reply editing is unavailable.');
+      const ids: string[] = [];
+      for (const [index, part] of item.telegramReply.entries()) {
+        const options = { signal: this.signal, stopButton: false };
+        let id = part.messageId;
+        if (id) {
+          await editMessage.call(this.channel, item.chatId, id, part.text, options);
+        } else {
+          id = await sendProgress.call(this.channel, item.chatId, part.text, options);
+          if (!id) throw new Error('Telegram did not return a reply message id.');
+          await this.store.recordTelegramReplyPart(item.id, index, id);
+        }
+        ids.push(id);
+      }
+      return ids;
+    }
     if (!item.media) {
       return this.channel.send(item.chatId, item.text.slice(0, this.maxMessageChars), {
         signal: this.signal,
@@ -306,10 +350,12 @@ function coalesceBacklog(
   deliverable: typeof items;
 } {
   const persistent = items.filter((item) => !item.ephemeral);
-  const mediaIds = new Set(persistent.filter((item) => item.media).map((item) => item.id));
-  const textItems = persistent.filter((item) => !item.media);
+  const retainedIds = new Set(
+    persistent.filter((item) => item.media || item.telegramReply).map((item) => item.id),
+  );
+  const textItems = persistent.filter((item) => !item.media && !item.telegramReply);
   const recentTextIds = new Set(textItems.slice(-maximum).map((item) => item.id));
-  const deliverableIds = new Set([...mediaIds, ...recentTextIds]);
+  const deliverableIds = new Set([...retainedIds, ...recentTextIds]);
   return {
     coalesced: [
       ...items.filter((item) => item.ephemeral),

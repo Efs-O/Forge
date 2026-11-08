@@ -4,6 +4,7 @@ import {
   busMessageActivityText,
   interruptForgeForSender,
   resolveBusMessageTarget,
+  steerBlockReason,
   stopForgeForSender,
   submitBusMessage,
 } from '../../src/vscode/agentBusSubmission';
@@ -19,6 +20,7 @@ describe('agent bus conversation targeting', () => {
       status: () => ({
         activeConversationId: 'visible',
         streamingConversationIds: ['visible'],
+        requestChains: [],
         conversations: [
           { id: 'visible', title: 'Visible', updatedAt: 2 },
           { id: 'sender-chat', title: 'Codex: task', updatedAt: 1 },
@@ -36,12 +38,62 @@ describe('agent bus conversation targeting', () => {
     expect(interrupt).toHaveBeenCalledExactlyOnceWith('visible');
   });
 
+  it('refuses a steer only for the chat the owner is being asked about', () => {
+    const facade = {
+      status: () => ({
+        activeConversationId: 'visible',
+        streamingConversationIds: ['visible'],
+        requestChains: [{ conversationId: 'visible', userIntentEpoch: 4 }],
+        conversations: [{ id: 'visible', title: 'Visible', updatedAt: 2 }],
+        pendingApproval: {
+          id: 'a1',
+          toolName: 'shell',
+          detail: '',
+          dangerous: false,
+          conversationId: 'other',
+        },
+      }),
+    } as unknown as ForgeHostFacade;
+    // A card in a different chat does not stop this one.
+    expect(steerBlockReason(facade, 'visible', 'Visible', 4)).toBeUndefined();
+    // A card with no chat attached blocks every chat in this window: reading
+    // "no card anywhere" from a missing id is the wrong way to be wrong.
+    const unowned = {
+      status: () => ({
+        activeConversationId: 'visible',
+        streamingConversationIds: ['visible'],
+        requestChains: [],
+        conversations: [{ id: 'visible', title: 'Visible', updatedAt: 2 }],
+        pendingApproval: { id: 'a1', toolName: 'shell', detail: '', dangerous: false },
+      }),
+    } as unknown as ForgeHostFacade;
+    expect(steerBlockReason(unowned, 'visible', 'Visible')).toContain(
+      "waiting for the owner's approval",
+    );
+  });
+
+  it('refuses a steer written against a chain that has moved on', () => {
+    const facade = {
+      status: () => ({
+        activeConversationId: 'visible',
+        streamingConversationIds: ['visible'],
+        requestChains: [{ conversationId: 'visible', userIntentEpoch: 9 }],
+        conversations: [{ id: 'visible', title: 'Visible', updatedAt: 2 }],
+      }),
+    } as unknown as ForgeHostFacade;
+    expect(steerBlockReason(facade, 'visible', 'Visible', 5)).toContain('different chain');
+    expect(steerBlockReason(facade, 'visible', 'Visible', 9)).toBeUndefined();
+    // A sender that read no epoch gets no verdict it cannot support.
+    expect(steerBlockReason(facade, 'visible', 'Visible')).toBeUndefined();
+  });
+
   it('reports that no turn was stopped when the sender conversation is idle', async () => {
     const interrupt = vi.fn(async () => {});
     const facade = {
       status: () => ({
         activeConversationId: 'visible',
         streamingConversationIds: [],
+        requestChains: [],
         conversations: [{ id: 'visible', title: 'Visible', updatedAt: 2 }],
       }),
       recentExchanges: () => [],

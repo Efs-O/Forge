@@ -170,6 +170,11 @@ overlaps with an existing owner, extend the owner instead.
 | Solo/multi chat mode for Strata launchers and llama.cpp slots | `src/config/ChatMode.ts` |
 | Effective llama.cpp request-slot count shared by pool and chat mode | `src/backend/parallelCapacity.ts` |
 | `message_chat` reference resolution and chat-list formatting | `src/tools/chatMessageResolver.ts` |
+| `message_chat` peer windows: discovery, chat lists, limits, window/chat matching | `src/tools/messageChatPeers.ts` |
+| `message_chat` cross-window send/steer/new/view | `src/tools/messageChatPeerActions.ts` |
+| Bounded peer HTTP transport (one deadline, uncertain answers) | `src/agentBus/peerHttp.ts` |
+| This window's own bus identity (window id, bus root) | `src/agentBus/selfWindow.ts` |
+| `AgentRoutesDeps` + `AgentRelayResult` (the route dependency contract) | `src/backend/agentRoutesDeps.ts` |
 | Copilot one-shot CLI argv and output parsing | `src/agents/adapters/copilotAdapter.ts` |
 | Conversation titles: placeholder + derive + `title_source` | `src/sidebar/conversationTitle.ts`       |
 | Host-facing conversation summary (title, counts, `titleSource`) | `src/sidebar/hostConversationSummary.ts` (types in `ForgeHostFacade.ts`) |
@@ -910,6 +915,8 @@ the configured override stays the existing `video.ffmpeg_path` key.
 | `/agent/message` + `/agent/reply` routes, endpoint.json    | `src/backend/agentRoutes.ts`                                   |
 | `/agent/who?format=text` participant field projection       | `src/backend/agentWhoText.ts`                                   |
 | `GET /agent/status` + `GET /agent/view` — read the sender's own chat, or one linked to its session | `src/backend/agentChatReadRoute.ts` |
+| `GET /agent/chats` + `GET /agent/peer-view` — what one window answers to another, on the bus token alone | `src/backend/agentChatReadRoute.ts` |
+| Which `/agent/*` paths a window serves (the 404 gate)          | `src/backend/agentKnownRoutes.ts`                              |
 | Authenticated `/agent/send-file` route                    | `src/backend/agentFileRoute.ts`                                |
 | Agent-route request body parsing                           | `src/backend/agentRouteFields.ts`                              |
 | `/agent/reply` route — the answer to a question still waited on | `src/backend/agentReplyRoute.ts`                        |
