@@ -1,5 +1,15 @@
 # Forge — Recent Changes
 
+## 0.17.134
+
+- New workspaces start with their own conversations. Old shared history is
+  preserved, and imported copies in an existing workspace are available through
+  the Archived panel's "Include legacy chats" checkbox.
+- Telegram's workspace picker puts the active workspace first and keeps its
+  displayed numbers aligned with the saved selection.
+- Cancellation notices identify the source workspace and original request, so
+  a notice delivered after unlocking can be matched to the earlier work.
+
 ## 0.17.133
 
 - The shell's secret-file gate sees two reads it used to let through: a
