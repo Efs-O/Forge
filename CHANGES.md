@@ -1,5 +1,29 @@
 # Forge — Recent Changes
 
+## 0.17.133
+
+- The shell's secret-file gate sees two reads it used to let through: a
+  PowerShell `Select-String` whose file arrives as a `-Path` (with any
+  abbreviation of the switch, or the `-Path:value` colon form) now gates that
+  file, and a metadata listing piped into a reader of contents —
+  `Get-ChildItem .env | cat`, `ls ~/.ssh/id_rsa | xargs cat` — is gated for
+  every reader name, not just the one spelled out.
+- A call refused before its handler ran — a wrong argument type, a number
+  outside the declared range, arguments that are not a JSON object — is
+  recorded as a failure again, so it counts in the tool-failure and per-session
+  usage stats and is reported to the model after a compaction as a failure
+  rather than as success.
+- A compound `[[ … ]]` test is parsed as one statement again, so
+  `[[ -n "$HOME" && -d ~/.forge ]]` no longer reads as two commands whose second
+  "program" is `-d` — it stops costing the "refuses to change Forge's own
+  files" refusal and the approval card that a single-condition test does not.
+- Freeing VRAM for a managed external server no longer waits on the slow
+  residency re-read inside the machine-wide lock, so another window's first
+  managed turn stops failing with the lock-timeout sentence; the free now
+  trusts the residency map only while an unchanged change-token still matches,
+  and falls back to unloading every overlapping server when it cannot prove the
+  map.
+
 ## 0.17.132
 
 - Source maintenance, no behaviour change: six oversized files were split along
