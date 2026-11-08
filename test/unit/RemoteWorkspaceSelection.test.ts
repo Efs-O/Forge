@@ -76,13 +76,13 @@ const manyAliases = (count: number): Record<string, string> =>
   );
 
 describe('workspace selection', () => {
-  it('numbers aliases and marks the one this chat is already in', async () => {
+  it('puts the current workspace first and keeps the numbered selection in that order', async () => {
     const store = await requestStore();
     const channel = new FakeRemoteChannel();
     const ctx = context(
       channel,
       store,
-      { forge: 'Forge', qwen: 'Qwen Testing', ssuno: 'Ssuno' },
+      { qwen: 'Qwen Testing', ssuno: 'Ssuno', forge: 'Forge' },
       'forge',
     );
 
@@ -93,6 +93,10 @@ describe('workspace selection', () => {
     const sent = channel.selectionPageSends[0]!;
     expect(sent.text).toContain('1. forge — Forge · ● current');
     expect(sent.text).toContain('2. qwen — Qwen Testing');
+    expect(sent.text).toContain('3. ssuno — Ssuno');
+    expect(store.selection('fake', 'chat', 'workspaces')?.values).toEqual([
+      'forge', 'qwen', 'ssuno',
+    ]);
     expect(sent.text).not.toContain('Qwen Testing · current');
     // The numbering is the point of reusing the pager at all, and the command
     // it names is the same one that listed: /workspace lists, /workspace 2 goes.

@@ -22,6 +22,7 @@ export interface RemoteQueueDrainDeps {
   store: RemoteRequestStore;
   auth: RemoteAuth;
   host: ForgeHostFacade;
+  workspaceName?: string | undefined;
   progress: RemoteAgentProgress;
   outbox: RemoteOutboxDelivery;
   activeConversations: Set<string>;
@@ -212,7 +213,12 @@ export async function drainRemoteQueue(
           !(await persistResult(() =>
             deps.store.finish(next.id, 'cancelled', {
               ...(outcome.finalText ? { finalText: outcome.finalText } : {}),
-              notification: outcome.finalText || 'Forge request cancelled.',
+              notification: [
+                'Forge: request cancelled.',
+                ...(deps.workspaceName ? [`Workspace: ${deps.workspaceName}`] : []),
+                `Original request: ${next.text.replace(/\s+/g, ' ').trim().slice(0, 160)}`,
+                ...(outcome.finalText ? ['', outcome.finalText] : []),
+              ].join('\n'),
             }),
           ))
         )

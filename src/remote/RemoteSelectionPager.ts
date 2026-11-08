@@ -131,6 +131,10 @@ export async function sendWorkspaceSelection(
   context: RemoteSelectionContext,
 ): Promise<RemoteInboundDisposition> {
   const values = Object.keys(context.workspaceAliases);
+  const currentIndex = values.indexOf(context.currentWorkspaceAlias ?? '');
+  if (currentIndex > 0) {
+    values.unshift(...values.splice(currentIndex, 1));
+  }
   if (values.length === 0) {
     await context.channel.send(
       event.chatId,

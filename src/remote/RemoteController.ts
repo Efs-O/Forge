@@ -482,6 +482,7 @@ export class RemoteController {
       progress: this.progress,
       outbox: this.outbox,
       activeConversations: this.activeConversations,
+      workspaceName: this.options.currentWorkspaceName,
       attachmentStore: () => this.options.attachmentStore,
       isBusy: (id) => this.isBusy(id),
       ...(this.options.onError ? { onError: this.options.onError } : {}),

@@ -72,12 +72,13 @@ interface DrainRig {
   calls: string[];
   armAfter: ReturnType<typeof vi.fn>;
   progress: RemoteAgentProgress;
+  outbox: RemoteOutboxDelivery;
 }
 
 async function drainWith(
   outcome:
     | { kind: 'completed'; finalText: string }
-    | { kind: 'cancelled'; finalText?: string }
+    | { kind: 'cancelled' | 'interrupted'; finalText?: string }
     | { kind: 'failed'; error: string },
   canDeliver: () => Promise<boolean> = async () => true,
   duringTurn?: (progress: RemoteAgentProgress) => Promise<void>,
@@ -128,12 +129,13 @@ async function drainWith(
     progress,
     outbox,
     activeConversations: new Set<string>(),
+    workspaceName: 'Forge',
     attachmentStore: () => undefined,
     isBusy: () => false,
   } as unknown as RemoteQueueDrainDeps;
 
   await drainRemoteQueue('c1', deps);
-  return { state, channel, calls, armAfter, progress };
+  return { state, channel, calls, armAfter, progress, outbox };
 }
 
 describe('queue drain status bubble', () => {
@@ -252,9 +254,43 @@ describe('queue drain status bubble', () => {
 
   it('closes a cancelled turn with its own status', async () => {
     const { channel, armAfter } = await drainWith({ kind: 'cancelled' });
+    expect(channel.sent[0]?.text).toBe(
+      'Forge: request cancelled.\nWorkspace: Forge\nOriginal request: hello',
+    );
     expect(channel.edits.at(-1)?.text).toBe('Forge: cancelled.');
     expect(armAfter).toHaveBeenCalledWith('chat-1', ['1'], QUEUED_ACK_DELETE_SECONDS);
   });
+
+  it.each(['cancelled', 'interrupted'] as const)(
+    'keeps a %s notice identifiable while locked and delivers it once after a retry',
+    async (kind) => {
+      let unlocked = true;
+      const { channel, state, outbox } = await drainWith(
+        { kind, finalText: 'Partial answer.' },
+        async () => unlocked,
+        async () => { unlocked = false; },
+      );
+      try {
+        expect(channel.sent).toEqual([]);
+        const notice = 'Forge: request cancelled.\nWorkspace: Forge\nOriginal request: hello\n\nPartial answer.';
+        expect(state.pendingOutbox('telegram')).toEqual([
+          expect.objectContaining({ text: notice, requestId: 'r1', state: 'pending' }),
+        ]);
+        expect(state.getRequest('r1')?.finalText).toBe('Partial answer.');
+        const send = vi.spyOn(channel, 'send').mockRejectedValueOnce(new Error('offline'));
+        unlocked = true;
+        await outbox.flush('chat-1');
+        await outbox.flush('chat-1');
+        expect(send).toHaveBeenCalledTimes(2);
+        expect(channel.sent.map((item) => item.text)).toEqual([notice]);
+        expect(state.pendingOutbox('telegram')).toEqual([]);
+        await outbox.flush('chat-1');
+        expect(send).toHaveBeenCalledTimes(2);
+      } finally {
+        await outbox.stop();
+      }
+    },
+  );
 
   it('closes a failed turn with a status that is not the error text', async () => {
     const { channel, state } = await drainWith({ kind: 'failed', error: 'backend exploded' });
