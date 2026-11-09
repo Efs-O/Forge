@@ -1,7 +1,18 @@
 # Forge — Recent Changes
 
-## Unreleased
+## 0.17.137
 
+- Two `ask_agent` questions to Codex sent at the same moment now share one liveness check
+  instead of starting two, so the second no longer times out (2026-11-09, lab).
+- A job definition with an unknown `kind` names the kinds it accepts (2026-11-09, lab arm
+  U3a): `manage_jobs` answered a bad schedule with `schedule.kind Invalid input`; it now says
+  `schedule.kind must be one of "interval", "daily", "weekly"; received "hourly".` The list
+  is read from the schema's own shapes, for schedules, checks and actions alike.
+- The edit note "no language service reported on this file" is said once per language
+  instead of after every write (2026-11-09, lab): a file type nothing on this host checks
+  (plain text, Markdown, data files) paid the cold wait and got the same hedge on every
+  write. The mark is in memory only and clears the first time any service reports on a
+  file of that language.
 - Added `forge.sh reload <name> --to <conversationId> [--force]` to reload the VS Code window that holds a chat after a VSIX install. Running turns in that window refuse the reload unless `--force` is supplied.
 
 ## 0.17.136
