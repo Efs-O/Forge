@@ -261,13 +261,14 @@ async function ask(
   // thread, which the VS Code Codex panel never lists (its `thread/list` read
   // defaults to interactive sources), so the panel cannot show it — and opening
   // the panel on it takes the thread's writer lock, the very lock the headless
-  // resume then fails to take. So Forge resumes a Codex thread it started itself
-  // headlessly and never opens a panel on one. `user-set` and `first-inbound`
-  // links are panel-owned threads and keep today's panel behaviour.
+  // resume then fails to take. No panel serves it either, so `codex queue` would
+  // wait for a reader that never comes: Forge resumes a Codex thread it started
+  // itself headlessly, without a liveness check, and never opens a panel on one.
+  // `user-set` and `first-inbound` links are panel-owned threads and keep
+  // today's panel behaviour.
+  const headlessOnly = agent === 'codex' && linked?.origin === 'forge-created';
   const panel =
-    options.getLinkConfig().open_panel === 'every_ask' &&
-    agent !== 'copilot' &&
-    !(agent === 'codex' && linked?.origin === 'forge-created');
+    options.getLinkConfig().open_panel === 'every_ask' && agent !== 'copilot' && !headlessOnly;
   let sessionCwd = linked?.cwd ?? context.workspaceRoot;
   let lead = '';
   let accepted = false;
@@ -289,12 +290,13 @@ async function ask(
     // `every_ask` policy still tries the panel, then resumes headlessly if that
     // bounded check cannot confirm the session. The resume reports `sessionGone`
     // only when the CLI itself says the thread is gone.
-    let live: boolean;
-    try {
-      live = await options.runtime.isLive(agent, linked);
-    } catch (error) {
-      live = false;
-      lead = `${label} session could not be checked (${errorMessage(error)}); resumed headlessly. `;
+    let live = false;
+    if (!headlessOnly) {
+      try {
+        live = await options.runtime.isLive(agent, linked);
+      } catch (error) {
+        lead = `${label} session could not be checked (${errorMessage(error)}); resumed headlessly. `;
+      }
     }
     let liveResult: AskAgentRunResult | undefined;
     if (live) {

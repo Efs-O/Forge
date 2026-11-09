@@ -93,7 +93,6 @@ async function sendToPanelOwnedCodex(
   link: AgentLink,
   prompt: string,
   signal: AbortSignal,
-  timeoutMessage: string,
   waitMs: number,
   onAccepted?: () => void,
 ): Promise<AskAgentRunResult> {
@@ -113,7 +112,11 @@ async function sendToPanelOwnedCodex(
     withdrawQuestion(paths, id);
     return signal.aborted
       ? { status: 'cancelled', finalText: '', mayStillBeWorking: true }
-      : { status: 'timed_out', finalText: '', error: timeoutMessage };
+      : {
+          status: 'timed_out',
+          finalText: '',
+          error: `The linked Codex thread ${link.sessionId} did not reply before the wait limit (exchange ${id}).`,
+        };
   } catch (error) {
     withdrawQuestion(paths, id);
     const detail = String(error);
@@ -178,7 +181,6 @@ export function makeAskAgentRuntime(options: {
           link,
           prompt,
           signal,
-          'The linked Codex thread did not reply before the wait limit.',
           liveWaitMs,
           onAccepted,
         );
@@ -214,7 +216,7 @@ export function makeAskAgentRuntime(options: {
             : {
                 status: 'timed_out',
                 finalText: '',
-                error: 'The linked Claude session did not reply before the wait limit.',
+                error: `The linked Claude session ${session.sessionId} did not reply before the wait limit (exchange ${id}).`,
               };
         } catch (error) {
           withdrawQuestion(paths, id);

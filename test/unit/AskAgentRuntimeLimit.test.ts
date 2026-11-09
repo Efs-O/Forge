@@ -6,6 +6,20 @@ import { AgentLinksConfigSchema } from '../../src/config/agentBusSchema';
 import type { ForgeConfig } from '../../src/config/types';
 import type { AgentLink } from '../../src/agentLinks/chatAgentLinks';
 
+vi.mock('../../src/agentBus/agentBus', () => ({
+  busPaths: () => ({ root: '/bus', inbox: '/bus/inbox', outbox: '/bus/outbox', endpoint: '/bus/endpoint', script: '/bus/forge.sh' }),
+  clearExchange: vi.fn(),
+  ensureBus: vi.fn(),
+  newBusId: () => 'fg-test-exchange',
+  replyFile: (_paths: unknown, id: string) => `/bus/outbox/${id}-reply.md`,
+  waitForReply: vi.fn(async () => undefined),
+  withdrawQuestion: vi.fn(),
+  writeQuestion: vi.fn(),
+}));
+vi.mock('../../src/agentBus/codexDelivery', () => ({
+  codexMessage: vi.fn(() => 'message'),
+  queueToCodex: vi.fn(async () => undefined),
+}));
 vi.mock('../../src/agentLinks/codexThreadLiveness', () => ({
   codexThreadIsLive: vi.fn(),
 }));
@@ -106,6 +120,24 @@ describe('ask_agent runtime wait limit', () => {
     expect(codexThreadIsLive).toHaveBeenCalledWith(
       codexLink.sessionId,
       expect.objectContaining({ timeoutMs: 25_000 }),
+    );
+  });
+
+  it('names the Codex thread and exchange when a live ask times out', async () => {
+    const runtime = makeAskAgentRuntime({
+      getConfig: () => codexConfig(),
+      driver: { run: vi.fn() } as unknown as CliAgentDriver,
+      waitLimitMs: 1,
+    });
+    const result = await runtime.sendLive(
+      'codex',
+      codexLink,
+      'review',
+      new AbortController().signal,
+    );
+    expect(result.status).toBe('timed_out');
+    expect(result.error).toBe(
+      'The linked Codex thread 01a1ab00-0000-4000-8000-000000000000 did not reply before the wait limit (exchange fg-test-exchange).',
     );
   });
 });

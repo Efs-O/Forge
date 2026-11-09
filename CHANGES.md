@@ -3,6 +3,10 @@
 ## Unreleased
 
 - `code_intel` `code_actions`, `rename_symbol`, `read_notebook`, and `edit_notebook_cell` work again (2026-11-09, lab): they passed the URI Forge constructed instead of the canonical URI returned by VS Code when it opened the document; the language commands failed with bare "Illegal argument" / "Unexpected type" errors. Failures now name the tool, file, and position or explain how to check the notebook.
+- An `ask_agent` to a Codex thread Forge started itself answers again instead of waiting 20
+  minutes (2026-11-09, lab): the faster liveness check in 0.17.138 found Forge's own background
+  threads too, and sent the ask to a queue only an open Codex panel reads. Forge resumes its own
+  threads headlessly again, and a timed-out ask now names the thread and the exchange.
 
 ## 0.17.138
 

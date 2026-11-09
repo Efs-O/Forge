@@ -72,7 +72,7 @@ function setup(
 describe('ask_agent session resolution', () => {
   beforeEach(() => rebuildIndex([]));
 
-  it.each(['claude', 'codex', 'copilot'] as const)('uses an exact live %s link', async (agent) => {
+  it.each(['claude', 'copilot'] as const)('uses an exact live %s link', async (agent) => {
     const state = setup({ isLive: vi.fn(async () => true) });
     state.conv.agentLinks = { [agent]: linked(agent) };
     rebuildIndex([state.conv]);
@@ -135,6 +135,7 @@ describe('ask_agent session resolution', () => {
   // So a link Forge created is resumed headlessly and never gets a panel.
   it('never opens a panel on a Codex thread Forge started, and resumes it headlessly', async () => {
     const state = setup({
+      isLive: vi.fn(async () => true),
       runHeadless: vi.fn(async (options) => {
         expect(options.createSessionId).toBeUndefined(); // a resume, not a new session
         expect(options.startNew).toBeUndefined();
@@ -159,11 +160,32 @@ describe('ask_agent session resolution', () => {
     expect(rendered).not.toContain('did not come up');
     expect(rendered).not.toContain('panel could not be opened');
     expect(state.runtime.openPanel).not.toHaveBeenCalled();
+    expect(state.runtime.isLive).not.toHaveBeenCalled();
     expect(state.runtime.sendLive).not.toHaveBeenCalled();
     expect(state.runtime.runHeadless).toHaveBeenCalledOnce();
     expect(result).toMatchObject({ status: 'completed', live: false });
     // The link is what the resume ran on, so it stays exactly where it was.
     expect(state.conv.agentLinks?.codex?.sessionId).toBe(otherId);
+  });
+
+  it('keeps a live user-set Codex link on the live delivery path', async () => {
+    const state = setup({ isLive: vi.fn(async () => true) });
+    state.conv.agentLinks = { codex: linked('codex', otherId, 'user-set') };
+    rebuildIndex([state.conv]);
+    const result = await state.handler(
+      { agent: 'codex', message: 'Continue' },
+      {
+        conversation: state.conv,
+        checkpoint: state.checkpoint,
+        signal: new AbortController().signal,
+        workspaceRoot: 'C:/repo',
+        persistConversation: state.persistConversation,
+      },
+    );
+    expect(result).toMatchObject({ status: 'completed', finalText: 'reply', live: true });
+    expect(state.runtime.isLive).toHaveBeenCalledOnce();
+    expect(state.runtime.sendLive).toHaveBeenCalledOnce();
+    expect(state.runtime.runHeadless).not.toHaveBeenCalled();
   });
 
   // Laptop audit F10 (2026-10-26): a linked Codex thread answered once, then
@@ -217,6 +239,7 @@ describe('ask_agent session resolution', () => {
   it('a gone thread found by that resume unlinks the row and starts a fresh session', async () => {
     const freshThread = 'c5a7c3a1-8cb0-427d-b3b7-8ca13d739c59';
     const state = setup({
+      isLive: vi.fn(async () => true),
       runHeadless: vi
         .fn()
         .mockResolvedValueOnce({
@@ -243,8 +266,11 @@ describe('ask_agent session resolution', () => {
       },
     );
     const rendered = renderAskAgentResult(result);
-    expect(rendered).toContain('no longer exists; started a new one');
+    expect(rendered).toContain(
+      'Codex session "Forge · Design chat" no longer exists; started a new one.',
+    );
     expect(rendered).toContain('new reply');
+    expect(state.runtime.isLive).not.toHaveBeenCalled();
     expect(state.runtime.runHeadless).toHaveBeenCalledTimes(2);
     // The header strip's row is the new thread, not the dead one, and the dead
     // id no longer resolves to this chat.
@@ -348,7 +374,7 @@ describe('ask_agent session resolution', () => {
       },
       'never',
     );
-    state.conv.agentLinks = { codex: linked('codex') };
+    state.conv.agentLinks = { codex: linked('codex', otherId, 'user-set') };
     rebuildIndex([state.conv]);
     const result = await state.handler(
       { agent: 'codex', message: 'Continue' },
