@@ -12,6 +12,9 @@ import { forgeInboundPrompt } from '../../src/agentBus/busContent';
 import type { ForgeConfig } from '../../src/config/types';
 import type { ForgeHostFacade } from '../../src/sidebar/ForgeHostFacade';
 import { unattendedConversations } from '../../src/sidebar/unattendedConversations';
+import { approvalPolicyDecision } from '../../src/sidebar/approvalPolicyRules';
+import { approvalEnvFor } from '../../src/sidebar/chatApprovalRules';
+import { ToolApprovalPolicyDenied } from '../../src/sidebar/toolApprovalOutcome';
 
 describe('agent bus conversation targeting', () => {
   it('steers the active conversation for an agent sender', async () => {
@@ -364,23 +367,115 @@ describe('a --new without --model uses the configured default', () => {
 });
 
 describe('--unattended', () => {
-  const makeFacade = (seen: boolean[]) =>
+  const makeFacade = (
+    seen: boolean[],
+    seenMeta: (ReturnType<typeof unattendedConversations.jobMeta>)[],
+  ) =>
     ({
       status: () => ({ activeConversationId: 'visible', conversations: [{ id: 'visible', title: 'V' }] }),
       recentExchanges: () => [],
       restoreConversation: vi.fn(async () => ({})),
       send: vi.fn(async (id: string) => {
         seen.push(unattendedConversations.has(id));
+        seenMeta.push(unattendedConversations.jobMeta(id));
         return { kind: 'completed' as const };
       }),
     }) as unknown as ForgeHostFacade;
 
   it('marks the chat unattended for exactly its own turn', async () => {
     const seen: boolean[] = [];
-    await submitBusMessage(makeFacade(seen), 'audit', { from: 'codex', targetConversationId: 'visible', unattended: true });
+    const seenMeta: (ReturnType<typeof unattendedConversations.jobMeta>)[] = [];
+    await submitBusMessage(makeFacade(seen, seenMeta), 'audit', { from: 'codex', targetConversationId: 'visible', unattended: true });
     expect(unattendedConversations.has('visible')).toBe(false);
-    await submitBusMessage(makeFacade(seen), 'hello', { from: 'codex', targetConversationId: 'visible' });
+    await submitBusMessage(makeFacade(seen, seenMeta), 'hello', { from: 'codex', targetConversationId: 'visible' });
     expect(seen).toEqual([true, false]);
+    // An unattended bus turn uses the receiver window's bus policy, with no job id.
+    expect(seenMeta).toEqual([undefined, undefined]);
+  });
+
+  it('applies a peer-delivered job marker and its own keyed approval policy during the turn', async () => {
+    const config = (allow: boolean) => ({
+      approvals: {
+        jobs: allow ? { 'nightly-job': { allow: ['cross_chat'] } } : {},
+      },
+    });
+    const run = async (allow: boolean) => {
+      const facade = {
+        status: () => ({
+          activeConversationId: 'recipient',
+          conversations: [{ id: 'recipient', title: 'Recipient' }],
+        }),
+        recentExchanges: () => [],
+        send: vi.fn(async (id: string) => {
+          const decision = approvalPolicyDecision(
+            config(allow).approvals,
+            [{ key: 'cross_chat' }],
+            approvalEnvFor({
+              getConfig: () => config(allow),
+              home: 'C:/Users/test',
+              platform: 'win32',
+              workspaceRoot: 'N:/repo',
+            }).ctx,
+            'N:/repo',
+            unattendedConversations.has(id),
+            unattendedConversations.jobMeta(id)?.jobId,
+          );
+          if (decision.kind === 'denied') {
+            throw new ToolApprovalPolicyDenied('message_chat', {
+              job: true,
+              allowPath: decision.allowPath,
+              approvalKey: 'cross_chat',
+            });
+          }
+          return { kind: 'completed' as const };
+        }),
+      } as unknown as ForgeHostFacade;
+      return submitBusMessage(facade, 'audit', {
+        from: 'peer Sender',
+        targetConversationId: 'recipient',
+        unattended: true,
+        jobId: 'nightly-job',
+        jobName: 'Nightly review',
+      });
+    };
+
+    await expect(run(true)).resolves.toEqual({ kind: 'completed' });
+    await expect(run(false)).rejects.toMatchObject({
+      name: 'ToolApprovalPolicyDenied',
+      message: expect.stringContaining('approvals.jobs.nightly-job.allow'),
+    });
+    expect(unattendedConversations.has('recipient')).toBe(false);
+  });
+
+  it('preserves an already-marked recipient job across a peer-delivered turn', async () => {
+    const ownMeta = { jobId: 'recipient-job', jobName: 'Recipient job' };
+    const marker = unattendedConversations.mark('recipient', ownMeta);
+    let seen: ReturnType<typeof unattendedConversations.jobMeta> = undefined;
+    const facade = {
+      status: () => ({
+        activeConversationId: 'recipient',
+        conversations: [{ id: 'recipient', title: 'Recipient' }],
+      }),
+      recentExchanges: () => [],
+      send: vi.fn(async (id: string) => {
+        seen = unattendedConversations.jobMeta(id);
+        return { kind: 'completed' as const };
+      }),
+    } as unknown as ForgeHostFacade;
+    try {
+      await submitBusMessage(facade, 'audit', {
+        from: 'peer Sender',
+        targetConversationId: 'recipient',
+        unattended: true,
+        jobId: 'sender-job',
+        jobName: 'Sender job',
+      });
+      expect(seen).toEqual(ownMeta);
+      expect(unattendedConversations.has('recipient')).toBe(true);
+      expect(unattendedConversations.jobMeta('recipient')).toEqual(ownMeta);
+    } finally {
+      marker.dispose();
+    }
   });
 });
 

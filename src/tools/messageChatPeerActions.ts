@@ -65,6 +65,19 @@ export function peerName(target: PeerChatRef): string {
   return `"${target.title}" in ${target.peer.workspace}`;
 }
 
+/** Carry the sender's unattended marker only for a turn that starts remotely. */
+function peerUnattendedFields(
+  input: Pick<PeerActionContext, 'unattended'>,
+): Record<string, string> {
+  if (!input.unattended) return {};
+  return {
+    unattended: 'true',
+    ...(input.unattended.job
+      ? { job_id: input.unattended.job.jobId, job_name: input.unattended.job.jobName }
+      : {}),
+  };
+}
+
 /** The one refusal shape every peer failure shares: what the other window said,
  *  that nothing was delivered, and what to do instead of resending. A 401 is the
  *  one case worth naming, because the caller cannot tell it from a dead window:
@@ -152,7 +165,11 @@ export async function peerSend(input: PeerActionContext): Promise<string> {
     target.peer,
     // The chat id is the whole point of the request: without it the receiving
     // window would fall back to routing by sender name.
-    { conversation_id: target.id, from: chatLabel(sender.title) },
+    {
+      conversation_id: target.id,
+      from: chatLabel(sender.title),
+      ...peerUnattendedFields(input),
+    },
     text.body,
     signal,
   );
@@ -372,6 +389,7 @@ export async function peerNew(input: PeerNewContext): Promise<string> {
       // queues this text as its first message, then answers with its id.
       new_chat: 'true',
       from: chatLabel(sender.title),
+      ...peerUnattendedFields(input),
       ...(model ? { model } : {}),
       // A name only when there is one: an empty `title` is a 400 from that
       // window, and the chat it would have named is worth opening regardless.

@@ -21,6 +21,7 @@ import {
 } from '../../src/tools/gitTrackedStatus';
 import { makeCommitTool, makeRestoreFileTool, makeStageTool } from '../../src/tools/gitTools';
 import { makeDeleteFileTool } from '../../src/tools/fileEditTools';
+import { repoRootForLocation } from '../../src/tools/gitDiscovery';
 
 const env = {
   ...process.env,
@@ -119,6 +120,48 @@ describe('git awareness around delete and restore', () => {
       await makeStageTool().handler({ paths: ['CHANGES.md'] }, undefined as never),
     );
     expect(result).toBe('Staged: CHANGES.md (deleted)');
+  });
+
+  it('stages a path relative to cwd inside a nested repository', async () => {
+    const nested = path.join(root, 'nested');
+    fs.mkdirSync(nested);
+    git(nested, ['init', '-b', 'main']);
+    fs.writeFileSync(path.join(nested, 'a.txt'), 'nested file\n', 'utf8');
+
+    const result = String(
+      await makeStageTool().handler({ cwd: 'nested', paths: ['a.txt'] }, undefined as never),
+    );
+
+    expect(result).toBe('Staged: a.txt (added)');
+    expect(git(nested, ['diff', '--cached', '--name-only']).trim()).toBe('a.txt');
+    expect(git(root, ['diff', '--cached', '--name-only']).trim()).toBe('');
+  });
+
+  it('includes the resolved absolute location in a relative not-a-repository error', async () => {
+    const outside = fs.realpathSync.native(fs.mkdtempSync(path.join(os.tmpdir(), 'forge-norepo-')));
+    try {
+      const location = path.relative(root, path.join(outside, 'x.txt'));
+      let message = '';
+      try {
+        await repoRootForLocation(location);
+      } catch (error) {
+        message = error instanceof Error ? error.message : String(error);
+      }
+      let detail = '';
+      try {
+        execFileSync('git', ['rev-parse', '--show-toplevel'], {
+          cwd: outside,
+          encoding: 'utf8',
+        });
+      } catch (error) {
+        detail = String((error as NodeJS.ErrnoException & { stderr?: string }).stderr ?? '').trim();
+      }
+      expect(message).toBe(
+        `git_*: no git repository contains "${location}" (resolved to ${path.resolve(root, location)}; relative paths resolve from the workspace root): ${detail}`,
+      );
+    } finally {
+      fs.rmSync(outside, { recursive: true, force: true });
+    }
   });
 
   it('restores a file a previous commit deleted', async () => {

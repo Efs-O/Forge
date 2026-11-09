@@ -5,11 +5,13 @@
  * confirmation-gated, and keeping them together makes that boundary visible.
  */
 
+import * as path from 'path';
 import type { RegisteredTool } from './ToolRegistry';
 import {
   getRepo,
   getRepoForPaths,
   readLiveGitStatus,
+  resolveFilePath,
   repoRelative,
   runGit,
   type GitRepoHandle,
@@ -106,6 +108,11 @@ export function makeStageTool(): RegisteredTool {
               items: { type: 'string' },
               description: 'File paths to stage (absolute or workspace-relative).',
             },
+            cwd: {
+              type: 'string',
+              description:
+                'Workspace-relative directory that relative paths are resolved from (for example the root of a nested repository). Omit it to resolve paths from the workspace root.',
+            },
           },
           required: ['paths'],
           additionalProperties: false,
@@ -115,8 +122,13 @@ export function makeStageTool(): RegisteredTool {
     permission: 'git-write',
     handler: async (args) => {
       const requestedPaths = args['paths'] as string[];
-      const repo = await getRepoForPaths(requestedPaths);
-      const relativePaths = requestedPaths.map((filePath) => repoRelative(repo, filePath));
+      const cwd = args['cwd'] as string | undefined;
+      const base = cwd === undefined ? undefined : resolveFilePath(cwd);
+      const resolvedPaths = requestedPaths.map((filePath) =>
+        base !== undefined && !path.isAbsolute(filePath) ? path.resolve(base, filePath) : filePath,
+      );
+      const repo = await getRepoForPaths(resolvedPaths);
+      const relativePaths = resolvedPaths.map((filePath) => repoRelative(repo, filePath));
       await runGit(repo, ['add', '--', ...relativePaths]);
 
       const requested = new Set(relativePaths.map(normalizeGitPath));
@@ -132,7 +144,16 @@ export function makeStageTool(): RegisteredTool {
       // edit when it was in fact a deletion, and the commit message written
       // from it said so.
       return `Staged: ${staged
-        .map((entry) => `${entry.path} (${describeIndexState(entry.index)})`)
+        .map((entry) => {
+          const requestedIndex = relativePaths.findIndex(
+            (filePath) =>
+              normalizeGitPath(filePath) === normalizeGitPath(entry.path) ||
+              (entry.originalPath !== undefined &&
+                normalizeGitPath(filePath) === normalizeGitPath(entry.originalPath)),
+          );
+          const displayPath = requestedPaths[requestedIndex] ?? entry.path;
+          return `${displayPath} (${describeIndexState(entry.index)})`;
+        })
         .join(', ')}`;
     },
   };

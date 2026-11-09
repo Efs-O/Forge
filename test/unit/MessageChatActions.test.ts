@@ -72,6 +72,8 @@ function makeRig(options: {
   pinError?: string;
   /** Whether `applyAutoTitle` accepts the name the tool proposes. */
   titled?: boolean;
+  /** Make the notice line fail after the worker's first message is delivered. */
+  noticeThrows?: boolean;
   /** Closed chats in recent history: the archived rows `status()` reports once a
    *  tab is closed, appended after the open tabs in the order the sidebar holds
    *  them. `view` can read these; `send` and `steer` must refuse them. */
@@ -105,6 +107,9 @@ function makeRig(options: {
     return fresh;
   });
   const emitHostActivity = vi.fn();
+  const showConversationNotice = vi.fn((_id: string, _notice: string) => {
+    if (options.noticeThrows) throw new Error('notice unavailable');
+  });
   const setConversationModel = vi.fn(async (_id: string, _model: string | null) => {
     if (options.pinError !== undefined) throw new Error(options.pinError);
   });
@@ -149,6 +154,7 @@ function makeRig(options: {
       setConversationModel,
       applyAutoTitle,
       recentExchanges,
+      showConversationNotice,
       // Clanker is read for the chat that is sending, so the fake answers for every
       // chat except the one the per-chat case below asks about.
       clankerMode: (conversationId: string) =>
@@ -169,7 +175,7 @@ function makeRig(options: {
     ),
   };
   const tool = makeMessageChatTool({ getSidebar: () => sidebar, getConfig });
-  return { state, sidebar, tool, getConfig, emitHostActivity };
+  return { state, sidebar, tool, getConfig, emitHostActivity, showConversationNotice };
 }
 
 function context(conversationId = 'sender'): ToolHandlerContext {
@@ -264,6 +270,65 @@ describe('message_chat new and steer actions', () => {
     expect(result).toContain('#3 "Sender: Please inspect the build output."');
     expect(result).toContain('model local-model');
     expect(result).toContain('a turn started there');
+  });
+
+  it('tells the opener when a new worker inherits Clanker and steer is available', async () => {
+    const rig = makeRig({ clanker: true, actions: { new_chat: true, steer: true } });
+    const result = await rig.tool.handler(
+      { action: 'new', message: 'Please inspect the build output.' },
+      context(),
+    );
+    expect(result).toBe(
+      'Opened #3 "Sender: Please inspect the build output." on model local-model (idle): a turn started there.\n' +
+        'Clanker is on in #3 "Sender: Please inspect the build output.", inherited from this chat: it runs without approval cards, except at Clanker\'s three stops (destructive actions, Forge guard files, a secret read followed by egress). Tell the user. While it works, check on it with message_chat `view`; if it runs commands you did not ask for, interrupt it with `steer` and tell the user what you saw.',
+    );
+    expect(rig.showConversationNotice).toHaveBeenCalledTimes(1);
+    expect(rig.showConversationNotice).toHaveBeenCalledWith(
+      'sender',
+      'Opened #3 "Sender: Please inspect the build output." with Clanker on, inherited from this chat. Its three stops still hold; turn it off there with /clanker.',
+    );
+  });
+
+  it('tells the opener when a new worker inherits Clanker and steer is unavailable', async () => {
+    const rig = makeRig({ clanker: true, actions: { new_chat: true } });
+    const result = await rig.tool.handler(
+      { action: 'new', message: 'Please inspect the build output.' },
+      context(),
+    );
+    expect(result).toBe(
+      'Opened #3 "Sender: Please inspect the build output." on model local-model (idle): a turn started there.\n' +
+        'Clanker is on in #3 "Sender: Please inspect the build output.", inherited from this chat: it runs without approval cards, except at Clanker\'s three stops (destructive actions, Forge guard files, a secret read followed by egress). Tell the user. While it works, check on it with message_chat `view`; if it runs commands you did not ask for, tell the user what you saw.',
+    );
+    expect(rig.showConversationNotice).toHaveBeenCalledTimes(1);
+    expect(rig.showConversationNotice).toHaveBeenCalledWith(
+      'sender',
+      'Opened #3 "Sender: Please inspect the build output." with Clanker on, inherited from this chat. Its three stops still hold; turn it off there with /clanker.',
+    );
+  });
+
+  it('leaves the result and notice unchanged when the new worker has Clanker off', async () => {
+    const rig = makeRig({ actions: { new_chat: true, steer: true } });
+    const result = await rig.tool.handler(
+      { action: 'new', message: 'Please inspect the build output.' },
+      context(),
+    );
+    expect(result).toBe(
+      'Opened #3 "Sender: Please inspect the build output." on model local-model (idle): a turn started there.',
+    );
+    expect(rig.showConversationNotice).not.toHaveBeenCalled();
+  });
+
+  it('keeps a successful delivery result when its Clanker notice throws', async () => {
+    const rig = makeRig({ clanker: true, actions: { new_chat: true }, noticeThrows: true });
+    const result = await rig.tool.handler(
+      { action: 'new', message: 'Please inspect the build output.' },
+      context(),
+    );
+    expect(result).toBe(
+      'Opened #3 "Sender: Please inspect the build output." on model local-model (idle): a turn started there.\n' +
+        'Clanker is on in #3 "Sender: Please inspect the build output.", inherited from this chat: it runs without approval cards, except at Clanker\'s three stops (destructive actions, Forge guard files, a secret read followed by egress). Tell the user. While it works, check on it with message_chat `view`; if it runs commands you did not ask for, tell the user what you saw.',
+    );
+    expect(rig.showConversationNotice).toHaveBeenCalledTimes(1);
   });
 
   it('enforces the two-new-chat cap and refunds refused deliveries', async () => {

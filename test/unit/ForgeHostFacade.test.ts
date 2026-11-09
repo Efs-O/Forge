@@ -6,6 +6,8 @@ import {
 } from '../../src/sidebar/sidebarFacadeWiring';
 import type { ConversationRuntime } from '../../src/sidebar/sessionTypes';
 import { MAX_CONVERSATIONS } from '../../src/sidebar/sessionTypes';
+import { ToolApprovalService } from '../../src/sidebar/ToolApprovalService';
+import { chatClankerRecords } from '../../src/sidebar/chatClanker';
 
 function conversation(id: string): ConversationRuntime {
   return {
@@ -16,6 +18,44 @@ function conversation(id: string): ConversationRuntime {
     updatedAt: 0,
     active_model: 'local',
   } as ConversationRuntime;
+}
+
+function clankerFacade(initial: ConversationRuntime[] = []) {
+  const conversations = [...initial];
+  const posted: unknown[] = [];
+  const approval = new ToolApprovalService(
+    (message) => posted.push(message),
+    () => undefined,
+    undefined,
+    undefined,
+    chatClankerRecords((id) => conversations.find((chat) => chat.id === id)),
+  );
+  let nextId = 0;
+  const create = vi.fn(() => {
+    const chat = conversation(`created-${++nextId}`);
+    conversations.push(chat);
+    return chat;
+  });
+  const persistSession = vi.fn();
+  const postSessionSync = vi.fn();
+  const send = vi.fn(async () => ({ kind: 'completed' as const, finalText: 'sent' }));
+  const facade = createSidebarHostFacade({
+    runtime: {
+      tabs: { create },
+      send: { send },
+      agentLoop: {
+        getSessionActiveMs: () => 0,
+        getClankerMode: (id: string) => approval.getClankerMode(id),
+        setClankerMode: (id: string, on: boolean) => approval.setClankerMode(id, on),
+      },
+    } as never,
+    getSidebar: () => ({ activeConversationId: 'opener', conversations, history: [] }) as never,
+    persistSession,
+    postSessionSync,
+    persistConversation: vi.fn(),
+    workspaceRoot: 'N:\\workspace',
+  } as unknown as SidebarFacadeDeps);
+  return { facade, conversations, approval, posted, create, persistSession, postSessionSync, send };
 }
 
 describe('SidebarHostFacade', () => {
@@ -193,7 +233,11 @@ describe('SidebarHostFacade', () => {
     const facade = createSidebarHostFacade({
       runtime: {
         tabs: { create },
-        agentLoop: { getSessionActiveMs: () => 0 },
+        agentLoop: {
+          getSessionActiveMs: () => 0,
+          getClankerMode: () => false,
+          setClankerMode: vi.fn(),
+        },
       } as never,
       getSidebar: () =>
         ({ activeConversationId: 'opener', conversations: [created], history: [] }) as never,
@@ -207,6 +251,81 @@ describe('SidebarHostFacade', () => {
     expect(created.opened_by).toBe('opener');
     expect(persistSession).toHaveBeenCalledOnce();
     expect(postSessionSync).toHaveBeenCalledOnce();
+  });
+
+  it('a worker from an armed opener inherits Clanker in one session save', async () => {
+    const opener = conversation('opener');
+    const state = clankerFacade([opener]);
+    state.approval.setClankerMode(opener.id, true);
+    state.posted.length = 0;
+
+    const worker = await state.facade.createConversation({ activate: false, openedBy: opener.id });
+
+    expect(state.facade.clankerMode(worker.id)).toBe(true);
+    expect(state.posted.filter((item) => (item as { type?: string }).type === 'clankerChanged'))
+      .toEqual([{ type: 'clankerChanged', enabled: true, conversationId: worker.id }]);
+    expect(state.persistSession).toHaveBeenCalledOnce();
+    expect(state.postSessionSync).toHaveBeenCalledOnce();
+  });
+
+  it('a worker from an unarmed opener starts with Clanker off', async () => {
+    const state = clankerFacade([conversation('opener')]);
+
+    const worker = await state.facade.createConversation({ activate: false, openedBy: 'opener' });
+
+    expect(state.facade.clankerMode(worker.id)).toBe(false);
+    expect(state.posted).toEqual([]);
+  });
+
+  it('a chat created without an opener starts off even when another chat is armed', async () => {
+    const other = conversation('other');
+    const state = clankerFacade([other]);
+    state.approval.setClankerMode(other.id, true);
+    state.posted.length = 0;
+
+    const chat = await state.facade.createConversation();
+
+    expect(state.facade.clankerMode(chat.id)).toBe(false);
+    expect(state.posted).toEqual([]);
+  });
+
+  it('sending to an existing chat leaves its Clanker mode unchanged', async () => {
+    const target = conversation('target');
+    const state = clankerFacade([target]);
+    state.approval.setClankerMode(target.id, true);
+    state.posted.length = 0;
+
+    await state.facade.send(target.id, 'hello');
+
+    expect(state.facade.clankerMode(target.id)).toBe(true);
+    expect(state.posted).toEqual([]);
+  });
+
+  it('turning the opener off leaves the worker on until its own Clanker is turned off', async () => {
+    const opener = conversation('opener');
+    const state = clankerFacade([opener]);
+    state.approval.setClankerMode(opener.id, true);
+    const worker = await state.facade.createConversation({ activate: false, openedBy: opener.id });
+
+    state.facade.setClankerMode(opener.id, false);
+    expect(state.facade.clankerMode(worker.id)).toBe(true);
+    state.facade.setClankerMode(worker.id, false);
+    expect(state.facade.clankerMode(worker.id)).toBe(false);
+  });
+
+  it('an inbound new_chat from another window starts with Clanker off', async () => {
+    const opener = conversation('opener');
+    const state = clankerFacade([opener]);
+    state.approval.setClankerMode(opener.id, true);
+
+    const inbound = await state.facade.routeInboundAgent(
+      { kind: 'codex', sessionId: '123e4567-e89b-42d3-a456-426614174000' },
+      { newChat: true },
+    );
+
+    expect(state.facade.clankerMode(inbound.conversationId)).toBe(false);
+    expect(state.posted.filter((item) => (item as { type?: string }).type === 'clankerChanged'))
+      .toEqual([{ type: 'clankerChanged', enabled: true, conversationId: opener.id }]);
   });
 
   it('returns the addressed typed outcome and bounded status', async () => {

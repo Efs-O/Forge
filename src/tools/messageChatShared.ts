@@ -14,6 +14,7 @@
  */
 
 import type { ForgeHostFacade } from '../sidebar/ForgeHostFacade';
+import type { UnattendedJobMeta } from '../sidebar/unattendedConversations';
 import { logger } from '../util/logger';
 import type { ChatMessageDelivery } from '../sidebar/backgroundExitNotice';
 import type { ChatMessageMirrorStatus } from '../sidebar/chatMessageText';
@@ -79,11 +80,13 @@ export interface MessageChatActionSidebar {
     | 'applyAutoTitle'
     | 'recentExchanges'
     | 'clankerMode'
+    | 'showConversationNotice'
   >;
   deliverChatMessage(
     text: string,
     conversationId: string,
     steer?: boolean,
+    unattended?: { job?: UnattendedJobMeta },
   ): Promise<ChatMessageDelivery>;
 }
 
@@ -92,6 +95,8 @@ export interface MessageChatActionContext {
   sender: ChatRef;
   chats: ChatRef[];
   selfId: string;
+  /** The source turn's unattended state, captured by message_chat at delivery. */
+  unattended?: { job?: UnattendedJobMeta };
   window: MessageChatWindow;
   at: number;
   message: string;
@@ -102,6 +107,8 @@ export interface MessageChatActionContext {
    *  the call named one, so a worker does not load a second engine. Absent when
    *  the sender's chat has no model of its own, leaving the window default. */
   pinModel?: string;
+  /** Whether this window permits the caller to interrupt a worker with `steer`. */
+  steerAvailable?: boolean;
   signal?: AbortSignal;
   formatMessage: () => string;
   formatName: (chat: ChatRef) => string;

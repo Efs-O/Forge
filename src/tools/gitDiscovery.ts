@@ -208,7 +208,11 @@ function isProbeFailure(value: string | ProbeFailure): value is ProbeFailure {
 }
 
 /** Turn a probe failure into the error the tool caller should see. */
-function probeFailureError(location: string, failure: ProbeFailure): GitDiscoveryError {
+function probeFailureError(
+  location: string,
+  resolvedLocation: string,
+  failure: ProbeFailure,
+): GitDiscoveryError {
   const where = `"${location}"`;
   switch (failure.kind) {
     case 'git-missing':
@@ -230,7 +234,7 @@ function probeFailureError(location: string, failure: ProbeFailure): GitDiscover
     default:
       return new GitDiscoveryError(
         'not-a-repository',
-        `git_*: no git repository contains ${where}: ${failure.detail}`,
+        `git_*: no git repository contains ${where} (resolved to ${resolvedLocation}; relative paths resolve from the workspace root): ${failure.detail}`,
       );
   }
 }
@@ -299,7 +303,7 @@ export async function repoRootForLocation(location: string): Promise<string> {
     const fromApi = deepestContaining(await apiRepoRoots(), resolveFilePath(location));
     if (fromApi) return fromApi;
   }
-  throw probeFailureError(location, probed);
+  throw probeFailureError(location, resolveFilePath(location), probed);
 }
 
 /**
@@ -334,7 +338,7 @@ export async function repoRootForWorkspace(): Promise<string> {
   }
 
   if (lastFailure && lastFailure.kind !== 'not-a-repository') {
-    throw probeFailureError(roots[0], lastFailure);
+    throw probeFailureError(roots[0], resolveFilePath(roots[0]), lastFailure);
   }
   throw new GitDiscoveryError(
     'not-a-repository',

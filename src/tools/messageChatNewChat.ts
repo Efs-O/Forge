@@ -188,7 +188,9 @@ export async function createNewChat(input: MessageChatActionContext): Promise<st
   let result: Awaited<ReturnType<typeof awaitMessageChatDelivery>>;
   try {
     result = await awaitMessageChatDelivery(
-      sidebar.deliverChatMessage(input.formatMessage(), target.id),
+      input.unattended
+        ? sidebar.deliverChatMessage(input.formatMessage(), target.id, false, input.unattended)
+        : sidebar.deliverChatMessage(input.formatMessage(), target.id),
       input.signal,
     );
   } catch (error) {
@@ -207,5 +209,24 @@ export async function createNewChat(input: MessageChatActionContext): Promise<st
   emitDeliveryActivity(input, target, result, false);
   // The model belongs in the result: not pinning a worker is what makes it load a
   // second engine, and the sender cannot learn that from a chat id.
-  return formatDeliveryResult(name, result, 'new', `model ${target.model ?? 'the window default'}`);
+  const deliveryResult = formatDeliveryResult(
+    name,
+    result,
+    'new',
+    `model ${target.model ?? 'the window default'}`,
+  );
+  if (!facade.clankerMode(opened.id)) return deliveryResult;
+
+  const hint = input.steerAvailable
+    ? `Clanker is on in ${name}, inherited from this chat: it runs without approval cards, except at Clanker's three stops (destructive actions, Forge guard files, a secret read followed by egress). Tell the user. While it works, check on it with message_chat \`view\`; if it runs commands you did not ask for, interrupt it with \`steer\` and tell the user what you saw.`
+    : `Clanker is on in ${name}, inherited from this chat: it runs without approval cards, except at Clanker's three stops (destructive actions, Forge guard files, a secret read followed by egress). Tell the user. While it works, check on it with message_chat \`view\`; if it runs commands you did not ask for, tell the user what you saw.`;
+  try {
+    facade.showConversationNotice(
+      input.selfId,
+      `Opened ${name} with Clanker on, inherited from this chat. Its three stops still hold; turn it off there with /clanker.`,
+    );
+  } catch {
+    // The worker and its first message already exist; a notice is decoration.
+  }
+  return `${deliveryResult}\n${hint}`;
 }

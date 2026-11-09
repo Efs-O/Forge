@@ -3,6 +3,7 @@ import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
 import * as vscode from 'vscode';
+import { toolErrorText } from '../../src/tools/toolErrorText';
 
 vi.mock('vscode', () => ({ workspace: { workspaceFolders: undefined } }));
 
@@ -70,6 +71,22 @@ afterEach(() => {
 });
 
 describe('view_video handler', () => {
+  it('returns an actionable tool error for a missing video', async () => {
+    const requestedPath = 'demo-out/none.mp4';
+    let error: unknown;
+    try {
+      await makeViewVideoTool().handler({ path: requestedPath });
+    } catch (caught) {
+      error = caught;
+    }
+
+    const result = toolErrorText('view_video', error, { path: requestedPath });
+    expect(result.startsWith('Error: view_video: nothing exists there. "demo-out/none.mp4"')).toBe(
+      true,
+    );
+    expect(result).toContain('Use find_files to locate it before retrying.');
+  });
+
   it('returns a label before every frame, in time order', async () => {
     writeClip('clips/ss01.mp4');
     const result = await makeViewVideoTool().handler({ path: 'clips/ss01.mp4' });

@@ -839,6 +839,44 @@ describe('routes', () => {
     expect(acceptedOptions[0]).toEqual({ unattended: true });
   });
 
+  it('passes unattended job identity through as inbox options', async () => {
+    const response = await post(
+      '/agent/message?from=codex&unattended=true&job_id=nightly-job&job_name=Nightly%20review',
+      'audit',
+    );
+    expect(response.status).toBe(202);
+    expect(acceptedOptions[0]).toEqual({
+      unattended: true,
+      jobId: 'nightly-job',
+      jobName: 'Nightly review',
+    });
+  });
+
+  it('requires unattended=true for job identity with the exact route error', async () => {
+    const response = await post('/agent/message?from=codex&job_id=nightly-job', 'audit');
+    expect(response).toEqual({
+      status: 400,
+      body: { error: 'job_id and job_name are only accepted with unattended=true' },
+    });
+    expect(accepted).toEqual([]);
+  });
+
+  it('validates both job identity fields as non-empty strings of at most 200 characters', async () => {
+    for (const query of [
+      '&job_id=',
+      `&job_id=${'x'.repeat(201)}`,
+      '&job_name=',
+      `&job_name=${'x'.repeat(201)}`,
+    ]) {
+      const response = await post(
+        `/agent/message?from=codex&unattended=true${query}`,
+        'audit',
+      );
+      expect(response.status).toBe(400);
+    }
+    expect(accepted).toEqual([]);
+  });
+
   it('rejects an unknown model with the configured valid names', async () => {
     const response = await post('/agent/message?from=codex&model=missing', 'nope');
     expect(response.status).toBe(400);

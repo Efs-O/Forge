@@ -1,4 +1,6 @@
 import { z, type ZodIssue } from 'zod';
+import { formatPathMiss } from './pathMissText';
+import { WorkspacePathMissingError } from '../util/workspacePathMissingError';
 
 /**
  * What a refused tool call says back, in one place.
@@ -108,6 +110,9 @@ export function toolErrorText(
   error: unknown,
   args?: Record<string, unknown>,
 ): string {
+  if (error instanceof WorkspacePathMissingError) {
+    return `Error: ${formatPathMiss(name, error.requestedPath, error, error.workspaceRoot)}`;
+  }
   if (!(error instanceof z.ZodError)) {
     return `Error: ${error instanceof Error ? error.message : String(error)}`;
   }

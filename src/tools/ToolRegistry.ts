@@ -258,6 +258,33 @@ export class ToolRegistry {
       const fieldError = updatePlanFieldError(present);
       if (fieldError) return fieldError;
     }
+    const advertisedParameters = tool.describe
+      ? tool.describe().function.parameters
+      : tool.definition.function.parameters;
+    const advertisedProperties = advertisedParameters.properties;
+    if (
+      advertisedParameters.additionalProperties === false &&
+      typeof advertisedProperties === 'object' &&
+      advertisedProperties !== null
+    ) {
+      const declaredKeys = Object.keys(advertisedProperties);
+      const unknown = Object.keys(present).filter(
+        (key) => !Object.hasOwn(advertisedProperties, key) && present[key] !== undefined,
+      );
+      if (unknown.length === 1) {
+        return (
+          `Error: ${name}: unknown argument "${unknown[0]}"; this tool takes: ${declaredKeys.join(', ')}. ` +
+          'Nothing ran. Resend the call without it, or use the argument that means what you intended.'
+        );
+      }
+      if (unknown.length > 1) {
+        const quoted = unknown.map((key) => `"${key}"`).join(', ');
+        return (
+          `Error: ${name}: unknown arguments ${quoted}; this tool takes: ${declaredKeys.join(', ')}. ` +
+          'Nothing ran. Resend the call without them, or use the arguments that mean what you intended.'
+        );
+      }
+    }
     const required = Array.isArray(parameters.required) ? parameters.required : [];
     const missing = required.filter(
       (key): key is string => typeof key === 'string' && present[key] === undefined,

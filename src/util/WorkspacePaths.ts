@@ -3,6 +3,7 @@ import * as path from 'path';
 import * as vscode from 'vscode';
 import { isPathInside } from './pathContainment';
 import { foldDrivePath } from './drivePath';
+import { WorkspacePathMissingError } from './workspacePathMissingError';
 
 export interface ResolveWorkspacePathOptions {
   workspaceRoot?: string;
@@ -150,7 +151,15 @@ export async function resolveRealWorkspacePath(
     return realCandidate;
   } catch (err) {
     const code = (err as NodeJS.ErrnoException).code;
-    if (!options.allowMissing || (code !== 'ENOENT' && code !== 'ENOTDIR')) throw err;
+    if (code !== 'ENOENT' && code !== 'ENOTDIR') throw err;
+    if (!options.allowMissing) {
+      throw new WorkspacePathMissingError(
+        filePath,
+        code,
+        (err as Error).message,
+        vscode.workspace.workspaceFolders?.[0]?.uri.fsPath,
+      );
+    }
   }
 
   // Target does not exist yet. Walk up to the nearest existing ancestor and

@@ -53,6 +53,9 @@ export function createSidebarHostFacade(deps: SidebarFacadeDeps): ForgeHostFacad
       );
       if (conversation && options.openedBy) {
         conversation.opened_by = options.openedBy;
+        // The worker runs under the rules of the chat that opened it; only an owner-armed chat can pass Clanker on.
+        if (agentLoop.getClankerMode(options.openedBy))
+          agentLoop.setClankerMode(conversation.id, true);
         deps.persistSession();
         deps.postSessionSync();
       }

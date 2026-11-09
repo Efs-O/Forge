@@ -104,6 +104,7 @@ overlaps with an existing owner, extend the owner instead.
 | LSP code-action read/write handler                   | `src/tools/codeActionTools.ts`            |
 | Guarded apply + save of a language-server WorkspaceEdit | `src/tools/workspaceEditApply.ts`     |
 | Filesystem-miss error text for tools                 | `src/tools/pathErrorHint.ts`             |
+| Pure filesystem-miss error text                      | `src/tools/pathMissText.ts`              |
 | Recycle-bin refusal diagnosis + short-lived path cache | `src/tools/trashRefusal.ts`             |
 | Tool call execution + result formatting              | `src/sidebar/ToolDispatch.ts`            |
 | Early refusals that stop a tool call before approval (cancelled, bad args, unknown/withheld tool, budget) | `src/sidebar/toolCallPreflight.ts` |
@@ -984,6 +985,7 @@ the configured override stays the existing `video.ffmpeg_path` key.
 | Spawn-and-collect child process (no vscode) | `src/util/processSpawn.ts`    |
 | Streamed child-output head+tail cap         | `src/util/outputCap.ts`       |
 | Workspace path resolution + realpath        | `src/util/WorkspacePaths.ts`  |
+| Missing workspace path error (vscode-free)  | `src/util/workspacePathMissingError.ts` |
 | Structured logging                          | `src/util/logger.ts`          |
 | Error message + cause-chain description     | `src/util/describeError.ts`   |
 | The "keys are per computer" sentence on every missing-secret message | `src/util/secretHint.ts` |

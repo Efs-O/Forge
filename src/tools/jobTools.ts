@@ -176,6 +176,31 @@ export function makeManageJobsTool(deps: ManageJobsDeps): RegisteredTool {
         detail: `Delete job "${String(args['job'] ?? '')}". Its definition, state, and run log are removed.`,
       };
     },
+    refuseBeforeApproval: (args) => {
+      const action = args['action'];
+      if (action === 'create' || action === 'update') {
+        const definition = args['definition'];
+        if (definition === null || typeof definition !== 'object' || Array.isArray(definition)) {
+          // "not a string" only when it is one; a missing definition is simply missing.
+          const asString = typeof definition === 'string' ? ', not a string' : '';
+          const job = args['job'];
+          if (typeof job === 'string' && job.trim().startsWith('{')) {
+            return `Error: manage_jobs: \`${action}\` needs \`definition\`, the job definition as a JSON object${asString}. The definition was sent in \`job\`, which names an existing job (id or name). Nothing ran. Resend it as \`definition\`.`;
+          }
+          return `Error: manage_jobs: \`${action}\` needs \`definition\`, the job definition as a JSON object${asString}. Nothing ran.`;
+        }
+      }
+      if (
+        typeof action === 'string' &&
+        ACTIONS.includes(action as Action) &&
+        action !== 'list' &&
+        action !== 'create' &&
+        (typeof args['job'] !== 'string' || !args['job'].trim())
+      ) {
+        return `Error: manage_jobs: \`${String(action)}\` needs \`job\`, the id or name of an existing job (list them with {action:"list"}). Nothing ran.`;
+      }
+      return undefined;
+    },
     handler: (args) => {
       // Reached only past the approval card above, so a CLI model here was consented to.
       if (needsCliConsent(deps.getConfig(), jobModelOf(deps, args))) {

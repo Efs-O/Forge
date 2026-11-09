@@ -265,8 +265,12 @@ describe('Forge own configuration is refused by the file tools', () => {
     };
     (vscode.window as unknown as { activeTextEditor: unknown }).activeTextEditor = editorOnConfig;
     for (const tool of editorTools) {
+      const args =
+        tool.definition.function.name === 'insert_code'
+          ? { text: 'x', line: 0 }
+          : { text: 'x' };
       expect(
-        registry.invalidArgs(tool, { text: 'x', line: 0 }),
+        registry.invalidArgs(tool, args),
         `${tool.definition.function.name} must refuse the open config`,
       ).toMatch(/is part of Forge/);
     }
@@ -275,7 +279,11 @@ describe('Forge own configuration is refused by the file tools', () => {
       selection: { isEmpty: true },
     };
     for (const tool of editorTools) {
-      expect(registry.invalidArgs(tool, { text: 'x', line: 0 })).toBeUndefined();
+      const args =
+        tool.definition.function.name === 'insert_code'
+          ? { text: 'x', line: 0 }
+          : { text: 'x' };
+      expect(registry.invalidArgs(tool, args)).toBeUndefined();
     }
     (vscode.window as unknown as { activeTextEditor: unknown }).activeTextEditor = undefined;
   });

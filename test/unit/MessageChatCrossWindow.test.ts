@@ -23,6 +23,7 @@ import type { ForgeConfig } from '../../src/config/types';
 import { makeMessageChatTool, type MessageChatSidebar } from '../../src/tools/messageChatTool';
 import type { PeerWindow } from '../../src/tools/messageChatPeers';
 import type { ToolHandlerContext } from '../../src/tools/ToolRegistry';
+import { unattendedConversations } from '../../src/sidebar/unattendedConversations';
 
 const IDLE = 'aaaa1111-1111-4111-8111-111111111111';
 const RUNNING = 'bbbb1111-1111-4111-8111-111111111111';
@@ -275,8 +276,7 @@ describe('message_chat send to a chat in another window', () => {
     expect(post.path).toBe('/agent/message');
     // The chat id is the whole point: without it the receiving window would
     // route by sender name and could interrupt somebody else's turn.
-    expect(post.query['conversation_id']).toBe(IDLE);
-    expect(post.query['from']).toBe('peer Sender');
+    expect(post.query).toEqual({ conversation_id: IDLE, from: 'peer Sender' });
     expect(post.auth).toBe('Bearer peer-token');
     // The prompt names the sender and its chat id, so the reply comes back to
     // this chat even after this window reloads under a new window id.
@@ -765,7 +765,7 @@ describe('message_chat new in another window', () => {
     const sent = posts()[0];
     // One call, and it says everything the other window needs to open, pin and
     // name the chat before its first message runs.
-    expect(sent?.query).toMatchObject({
+    expect(sent?.query).toEqual({
       new_chat: 'true',
       model: 'strata-flash',
       title: 'Sender: Open the phase.',
@@ -774,6 +774,38 @@ describe('message_chat new in another window', () => {
     expect(sent?.body).toContain('Open the phase.');
     expect(result).toContain(`Opened "Sender: Open the phase." (${OPENED}) in N:/repo-b`);
     expect(result).toContain('model strata-flash');
+  });
+
+  it('carries an unattended sender job through peer send and new requests', async () => {
+    chatsReport = { ...chatsReport, models: ['alpha', 'strata-flash'] };
+    const marker = unattendedConversations.mark('sender', {
+      jobId: 'nightly-job',
+      jobName: 'Nightly review',
+    });
+    try {
+      const { tool } = makeCrossTool({ newChat: true });
+      await tool.handler({ action: 'send', to: IDLE, message: 'Send this.' }, context);
+      expect(posts()[0]?.query).toEqual({
+        conversation_id: IDLE,
+        from: 'peer Sender',
+        unattended: 'true',
+        job_id: 'nightly-job',
+        job_name: 'Nightly review',
+      });
+
+      await tool.handler({ action: 'new', window: 'repo-b', message: 'Open this.' }, context);
+      expect(posts()[1]?.query).toEqual({
+        new_chat: 'true',
+        from: 'peer Sender',
+        model: 'strata-flash',
+        title: 'Sender: Open this.',
+        unattended: 'true',
+        job_id: 'nightly-job',
+        job_name: 'Nightly review',
+      });
+    } finally {
+      marker.dispose();
+    }
   });
 
   it('refuses a model that window does not have, naming its list, and posts nothing', async () => {

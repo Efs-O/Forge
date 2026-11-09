@@ -27,6 +27,10 @@ import {
   type MessageChatDeliveryResult,
 } from './messageChatActions';
 import { clipMirroredPrompt } from '../sidebar/turnMirrorWiring';
+import {
+  unattendedConversations,
+  type UnattendedJobMeta,
+} from '../sidebar/unattendedConversations';
 import { formatChatMessage, formatChatMirrorLine } from '../sidebar/chatMessageText';
 import {
   activeChatIds,
@@ -246,6 +250,11 @@ export function makeMessageChatTool(options: {
         sender,
         chats,
         selfId,
+        ...((): { unattended?: { job?: UnattendedJobMeta } } => {
+          if (!unattendedConversations.has(selfId)) return {};
+          const job = unattendedConversations.jobMeta(selfId);
+          return { unattended: job ? { job } : {} };
+        })(),
         window,
         at,
         newChatsPerHour,
@@ -352,6 +361,7 @@ export function makeMessageChatTool(options: {
         const actionContext: MessageChatActionContext = {
           ...baseContext,
           message: workerMessage,
+          steerAvailable: flags.steer,
           ...(pinModel ? { pinModel } : {}),
           formatMessage: () => messageFrom(sender, chats, workerMessage),
         };
@@ -424,7 +434,14 @@ export function makeMessageChatTool(options: {
       let delivery: MessageChatDeliveryResult;
       try {
         delivery = await awaitMessageChatDelivery(
-          sidebar.deliverChatMessage(messageFrom(sender, chats, parsed.message), target.id),
+          baseContext.unattended
+            ? sidebar.deliverChatMessage(
+                messageFrom(sender, chats, parsed.message),
+                target.id,
+                false,
+                baseContext.unattended,
+              )
+            : sidebar.deliverChatMessage(messageFrom(sender, chats, parsed.message), target.id),
           context.abortSignal,
           () => clearUnclaimedSend(window, target.id),
         );

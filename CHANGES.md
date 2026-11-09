@@ -1,5 +1,33 @@
 # Forge — Recent Changes
 
+## Unreleased
+
+- A tool given a file that does not exist answers "nothing exists there", with the base the path
+  resolved against and a pointer to `find_files`, instead of a bare `ENOENT ... realpath`
+  (2026-11-09, tool lab: `view_video`). The fix is in the shared path resolver, so it covers every
+  tool that opens an existing workspace file.
+- `manage_jobs` refuses a `create` or `update` without an object `definition`, and an action
+  without `job`, before asking for approval (2026-11-09, tool lab): such a call used to open a
+  card and fail only after it was answered, and a definition sent in `job` waited 15 minutes for
+  nobody.
+- A tool call that carries an argument the tool does not take is refused with the tool's real
+  argument list instead of running without it (2026-11-09, lab): `search_code` given `path`
+  searched the default scope and said nothing, and `stage` given `cwd` failed on the wrong
+  directory.
+- `stage` takes `cwd`, so paths relative to a nested repository work, and a git tool's "no git
+  repository" error names the absolute path it looked at.
+- The advertised tool-schema budget is 65,000 characters to make room for `stage.cwd`, which
+  gives nested-repository paths an explicit resolution base.
+- A worker chat opened with `message_chat new` from a chat that has Clanker on starts with
+  Clanker on too (2026-11-09, owner), so the worker runs under the rules of the chat that opened
+  it instead of stopping at cards. Clanker's three stops are unchanged; a chat opened any other
+  way still starts with it off. The opening chat is told so in its tool result and in a notice
+  line, and is asked to tell the user and watch the worker for commands it did not ask for.
+- A chat that a job (or an unattended bus turn) opens or messages runs that turn under the job's
+  own rules (2026-11-09, owner): its `approvals.jobs.<id>.allow` lines apply, dangerous actions
+  are refused at once, and other confirmations go through, instead of every card waiting for
+  nobody. A chat messaged from an attended chat is unchanged, in this window and across windows.
+
 ## 0.17.139
 
 - `code_intel` `code_actions`, `rename_symbol`, `read_notebook`, and `edit_notebook_cell` work again (2026-11-09, lab): they passed the URI Forge constructed instead of the canonical URI returned by VS Code when it opened the document; the language commands failed with bare "Illegal argument" / "Unexpected type" errors. Failures now name the tool, file, and position or explain how to check the notebook.

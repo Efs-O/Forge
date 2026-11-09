@@ -337,7 +337,14 @@ export async function submitBusMessage(
   }
   // The marker lasts exactly this turn, like a job's: the conversation is
   // attended again for whoever writes in it next.
-  const marker = options?.unattended ? unattendedConversations.mark(conversationId) : undefined;
+  const job =
+    options?.jobId !== undefined && options.jobName !== undefined
+      ? { jobId: options.jobId, jobName: options.jobName }
+      : undefined;
+  const marker =
+    options?.unattended && !unattendedConversations.has(conversationId)
+      ? unattendedConversations.mark(conversationId, job)
+      : undefined;
   let outcome: Awaited<ReturnType<ForgeHostFacade['send']>>;
   try {
     outcome = options?.sender

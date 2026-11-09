@@ -8,6 +8,7 @@ import type { ChatMessageDelivery } from '../../src/sidebar/backgroundExitNotice
 import { makeMessageChatTool, type MessageChatSidebar } from '../../src/tools/messageChatTool';
 import type { ToolHandlerContext } from '../../src/tools/ToolRegistry';
 import type { ForgeConfig } from '../../src/config/types';
+import { unattendedConversations } from '../../src/sidebar/unattendedConversations';
 
 function conversation(
   id: string,
@@ -49,7 +50,12 @@ function hostStatus(
 }
 
 type DeliverMock = ReturnType<
-  typeof vi.fn<(text: string, id: string, steer?: boolean) => Promise<ChatMessageDelivery>>
+  typeof vi.fn<(
+    text: string,
+    id: string,
+    steer?: boolean,
+    unattended?: { job?: { jobId: string; jobName: string } },
+  ) => Promise<ChatMessageDelivery>>
 >;
 
 /** Mirrors the router: a busy (streaming or reserved) chat takes a tell, an idle one a turn. */
@@ -100,6 +106,31 @@ function makeTool(status = hostStatus(), now?: () => number) {
 }
 
 describe('message_chat tool contract and handler', () => {
+  it('passes its job mark to local send and new deliveries', async () => {
+    const sidebar = makeSidebar(hostStatus());
+    const tool = makeMessageChatTool({
+      getSidebar: () => sidebar,
+      getConfig: () => ({ permissions: { chats: { new_chat: true } } }) as ForgeConfig,
+    });
+    const marker = unattendedConversations.mark('sender', {
+      jobId: 'nightly-job',
+      jobName: 'Nightly review',
+    });
+    try {
+      await tool.handler({ action: 'send', to: 'idle', message: 'Review this.' }, context());
+      expect(sidebar.deliverChatMessage.mock.calls[0]?.[3]).toEqual({
+        job: { jobId: 'nightly-job', jobName: 'Nightly review' },
+      });
+
+      await tool.handler({ action: 'new', message: 'Start here.' }, context());
+      expect(sidebar.deliverChatMessage.mock.calls[1]?.[3]).toEqual({
+        job: { jobId: 'nightly-job', jobName: 'Nightly review' },
+      });
+    } finally {
+      marker.dispose();
+    }
+  });
+
   it('advertises the exact strict schema and rejects extra keys', async () => {
     const { tool } = makeTool();
     expect(tool.definition.function.parameters).toEqual({

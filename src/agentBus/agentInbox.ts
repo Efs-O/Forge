@@ -39,6 +39,9 @@ export interface InboxMessageOptions {
    * are auto-approved — the same policy a job run gets.
    */
   unattended?: boolean;
+  /** Job identity carried with an unattended peer-delivered turn. */
+  jobId?: string;
+  jobName?: string;
 }
 
 export interface ClaimedMidTurnMessage {

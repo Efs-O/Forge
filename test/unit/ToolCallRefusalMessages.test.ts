@@ -10,6 +10,8 @@ import { toolErrorText, describeToolIssues } from '../../src/tools/toolErrorText
 import { JobSchema } from '../../src/jobs/jobSchema';
 import { makeAskUserTool } from '../../src/tools/askUserTool';
 import { UserQuestionService } from '../../src/sidebar/UserQuestionService';
+import { makeShellTool } from '../../src/tools/shellTool';
+import { makeStageTool } from '../../src/tools/gitTools';
 
 vi.mock('vscode', () => ({
   workspace: { workspaceFolders: [{ uri: { fsPath: process.cwd() } }] },
@@ -110,6 +112,80 @@ describe('ToolRegistry.invalidArgs missing-argument refusal', () => {
       'Error: fetch_page is missing required arguments "url", "max_chars". ' +
         'Resend the call with them set.',
     );
+  });
+});
+
+describe('ToolRegistry.invalidArgs unknown-argument refusal', () => {
+  const registry = new ToolRegistry();
+
+  it('refuses one undeclared argument and lists keys in advertised schema order', () => {
+    const searchCode: RegisteredTool = {
+      definition: {
+        type: 'function',
+        function: {
+          name: 'search_code',
+          description: 'Search source.',
+          parameters: {
+            type: 'object',
+            properties: { query: { type: 'string' }, include: { type: 'string' } },
+            required: ['query'],
+            additionalProperties: false,
+          },
+        },
+      },
+      permission: 'read',
+      handler: async () => 'unused',
+    };
+    expect(registry.invalidArgs(searchCode, { query: 'needle', path: 'src' })).toBe(
+      'Error: search_code: unknown argument "path"; this tool takes: query, include. ' +
+        'Nothing ran. Resend the call without it, or use the argument that means what you intended.',
+    );
+  });
+
+  it('refuses multiple unknown arguments in call order, before other schema checks', () => {
+    expect(registry.invalidArgs(makeStageTool(), { paths: ['a.txt'], repo: 'x', root: 'y' })).toBe(
+      'Error: stage: unknown arguments "repo", "root"; this tool takes: paths, cwd. ' +
+        'Nothing ran. Resend the call without them, or use the arguments that mean what you intended.',
+    );
+  });
+
+  it('uses ask_user declared keys when refusing its question and ask aliases', () => {
+    const tool = makeAskUserTool(new UserQuestionService());
+    expect(registry.invalidArgs(tool, { prompt: 'Which?', question: 'Which?', ask: 'x' })).toBe(
+      'Error: ask_user: unknown arguments "question", "ask"; this tool takes: prompt, placeholder, options, questions. ' +
+        'Nothing ran. Resend the call without them, or use the arguments that mean what you intended.',
+    );
+  });
+
+  it('allows shell.shell from the Windows advertised schema', () => {
+    const platform = vi.spyOn(process, 'platform', 'get').mockReturnValue('win32');
+    try {
+      const shell = makeShellTool({ platform: 'win32' });
+      expect(Object.keys(shell.describe!().function.parameters.properties)).toContain('shell');
+      expect(registry.invalidArgs(shell, { command: 'git status', shell: 'bash' })).toBeUndefined();
+    } finally {
+      platform.mockRestore();
+    }
+  });
+
+  it('allows an undefined extra value and schemas without additionalProperties false', () => {
+    expect(
+      registry.invalidArgs(makeStageTool(), { paths: ['a.txt'], stray: undefined }),
+    ).toBeUndefined();
+    expect(
+      registry.invalidArgs(makeBoolTool('open_schema', { path: { type: 'string' } }), {
+        path: 'a.txt',
+        extra: true,
+      }),
+    ).toBeUndefined();
+  });
+
+  it('still coerces a quoted boolean before checking unknown keys', () => {
+    const tool = makeBoolTool('flag_tool', { enabled: { type: 'boolean' } });
+    tool.definition.function.parameters.additionalProperties = false;
+    const args: Record<string, unknown> = { enabled: 'true' };
+    expect(registry.invalidArgs(tool, args)).toBeUndefined();
+    expect(args.enabled).toBe(true);
   });
 });
 

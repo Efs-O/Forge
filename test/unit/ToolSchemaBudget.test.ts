@@ -118,7 +118,7 @@ import {
 // on, so the ceiling prices the two gated actions and their `model`/`window`
 // fields as well as the ungated catalog. A window that enables them sits 21
 // chars under the ceiling; one that does not is what the older number measured.
-const MEASURED_CHARS = 64_604;
+const MEASURED_CHARS = 64_808;
 // Phase 3 STOP: the historical full 88-tool wire schema was 67,128 chars.
 // Exclude computer_use (24 browser/desktop schemas) pending the owner's product
 // decision; the full and gated sizes are recorded in the report.
@@ -132,7 +132,10 @@ const COMPUTER_USE_TOOLS_EXCLUDED_PENDING_DECISION = ['browser_', 'desktop_'] as
 // 58,750 → 64,625, on 2026-10-28 (owner's call, CHANGES.md Unreleased): the
 // catalog sat 9 chars under the old ceiling, so every description fix had to
 // be paid for by cutting another one.
-const TOOL_SCHEMA_CHAR_BUDGET = 64_625;
+// Raised to 65,000 for the optional `stage.cwd` argument (CHANGES.md Unreleased):
+// nested-repository paths can name their base, and the old budget had only
+// 21 chars of headroom.
+const TOOL_SCHEMA_CHAR_BUDGET = 65_000;
 
 const ALL_PERMISSIONS = new Set(ALL_TOOL_PERMISSIONS);
 

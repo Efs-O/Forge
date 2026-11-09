@@ -31,6 +31,8 @@ const AgentMessageOptionsSchema = z
     conversation_id: ConversationIdSchema.optional(),
     to_running: z.boolean().optional(),
     unattended: z.boolean().optional(),
+    job_id: z.string().min(1).max(200).optional(),
+    job_name: z.string().min(1).max(200).optional(),
   })
   .refine(
     (options) =>
@@ -47,6 +49,15 @@ function zodMessage(error: z.ZodError): string {
 
 /** Parse and normalize Forge-chat targeting fields from /agent/message. */
 export function parseAgentMessageOptions(fields: AgentRouteFields): InboxMessageOptions {
+  if (
+    fields['unattended'] !== true &&
+    (fields['job_id'] !== undefined || fields['job_name'] !== undefined)
+  ) {
+    throw new AgentRouteHttpError(
+      400,
+      'job_id and job_name are only accepted with unattended=true',
+    );
+  }
   const parsed = AgentMessageOptionsSchema.safeParse({
     model: fields['model'],
     title: fields['title'],
@@ -54,6 +65,8 @@ export function parseAgentMessageOptions(fields: AgentRouteFields): InboxMessage
     conversation_id: fields['conversation_id'],
     to_running: fields['to_running'],
     unattended: fields['unattended'],
+    job_id: fields['job_id'],
+    job_name: fields['job_name'],
   });
   if (!parsed.success) throw new AgentRouteHttpError(400, zodMessage(parsed.error));
   return {
@@ -65,6 +78,8 @@ export function parseAgentMessageOptions(fields: AgentRouteFields): InboxMessage
       : {}),
     ...(parsed.data.to_running !== undefined ? { toRunning: parsed.data.to_running } : {}),
     ...(parsed.data.unattended !== undefined ? { unattended: parsed.data.unattended } : {}),
+    ...(parsed.data.job_id !== undefined ? { jobId: parsed.data.job_id } : {}),
+    ...(parsed.data.job_name !== undefined ? { jobName: parsed.data.job_name } : {}),
   };
 }
 

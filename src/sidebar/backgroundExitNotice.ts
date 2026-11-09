@@ -9,6 +9,7 @@ import { backgroundExecutionManager } from '../tools/BackgroundExecutionManager'
 import { logger } from '../util/logger';
 import { randomUUID } from 'node:crypto';
 import { pendingAgentAsksNotice } from '../agentLinks/pendingAgentAsks';
+import { unattendedConversations, type UnattendedJobMeta } from './unattendedConversations';
 
 function formatBackgroundExitNotice(notice: BackgroundExecutionExitNotice): string {
   const command = [notice.command, ...notice.args].join(' ').slice(0, 200);
@@ -178,7 +179,12 @@ export interface SidebarPromptRouter {
    * else a visible turn there. Resolves once delivery is known: `turn` on
    * backend readiness and prompt commit, `refused` when startup failed.
    */
-  deliverChatMessage: (text: string, id: string, steer?: boolean) => Promise<ChatMessageDelivery>;
+  deliverChatMessage: (
+    text: string,
+    id: string,
+    steer?: boolean,
+    unattended?: { job?: UnattendedJobMeta },
+  ) => Promise<ChatMessageDelivery>;
   /** False when the tell had already reached the turn. */
   cancelTell: (conversationId: string, tellId: string) => boolean;
   /**
@@ -205,6 +211,7 @@ function deliverChatMessage(
   options: ChatMessageRouterOptions,
   text: string,
   id: string,
+  unattended?: { job?: UnattendedJobMeta },
 ): Promise<ChatMessageDelivery> {
   if (options.isReserved(id)) {
     options.addTell(id, text, false, undefined, undefined, { kind: 'chat' });
@@ -212,26 +219,38 @@ function deliverChatMessage(
   }
   return new Promise((resolve) => {
     let started = false;
-    const sent = options.send(
-      text,
-      undefined,
-      id,
-      true,
-      false,
-      undefined,
-      () => {
-        started = true;
-        resolve({ kind: 'turn' });
-      },
-      { kind: 'chat' },
-    );
+    const marker =
+      unattended && !unattendedConversations.has(id)
+        ? unattendedConversations.mark(id, unattended.job)
+        : undefined;
+    let sent: ReturnType<ChatMessageRouterOptions['send']>;
+    try {
+      sent = options.send(
+        text,
+        undefined,
+        id,
+        true,
+        false,
+        undefined,
+        () => {
+          started = true;
+          resolve({ kind: 'turn' });
+        },
+        { kind: 'chat' },
+      );
+    } catch (error) {
+      marker?.dispose();
+      throw error;
+    }
     if (!sent) {
+      marker?.dispose();
       if (!started) resolve({ kind: 'refused', error: 'Forge: the chat could not start a turn.' });
       return;
     }
     // A send settles only when its turn ends; before startup it is a refusal.
     sent.then(
       (outcome) => {
+        marker?.dispose();
         if (started) return;
         resolve({
           kind: 'refused',
@@ -239,6 +258,7 @@ function deliverChatMessage(
         });
       },
       (err: unknown) => {
+        marker?.dispose();
         if (!started)
           resolve({ kind: 'refused', error: err instanceof Error ? err.message : String(err) });
       },
@@ -320,7 +340,7 @@ export function createSidebarPromptRouter(options: {
       route(text, attachments, id, false, false, tellId, createdAt),
     routeInternal: (text, id, origin) =>
       route(text, undefined, id, false, true, undefined, undefined, origin),
-    deliverChatMessage: (text, id, steer = false) =>
+    deliverChatMessage: (text, id, steer = false, unattended) =>
       steer
         ? Promise.resolve(
             steerChatMessage(text, id)
@@ -330,7 +350,7 @@ export function createSidebarPromptRouter(options: {
                   error: 'Forge: the chat could not accept the steering message.',
                 },
           )
-        : deliverChatMessage(options, text, id),
+        : deliverChatMessage(options, text, id, unattended),
     cancelTell: options.removeTell,
     sendQueuedNow,
     steerChatMessage,

@@ -5,7 +5,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { JobStore } from '../../src/jobs/JobStore';
 import { JobSchema, type Job } from '../../src/jobs/jobSchema';
 import { makeManageJobsTool, type ManageJobsDeps } from '../../src/tools/jobTools';
-import type { RegisteredTool } from '../../src/tools/ToolRegistry';
+import { ToolRegistry, type RegisteredTool } from '../../src/tools/ToolRegistry';
 import type { ForgeConfig } from '../../src/config/types';
 
 const workspaceMock = vi.hoisted(() => ({
@@ -695,6 +695,66 @@ describe('manage_jobs — discuss', () => {
 describe('manage_jobs — argument validation', () => {
   it('rejects an unknown action', async () => {
     await expect(call({ action: 'explode' })).rejects.toThrow(/action must be one of/);
+  });
+});
+
+describe('manage_jobs — pre-approval refusal', () => {
+  const registry = new ToolRegistry();
+
+  it('refuses create when the definition was sent in job', () => {
+    expect(registry.invalidArgs(tool, { action: 'create', job: ' {"name":"Daily"}' })).toBe(
+      'Error: manage_jobs: `create` needs `definition`, the job definition as a JSON object. The definition was sent in `job`, which names an existing job (id or name). Nothing ran. Resend it as `definition`.',
+    );
+  });
+
+  it('refuses create without a definition', () => {
+    expect(registry.invalidArgs(tool, { action: 'create' })).toBe(
+      'Error: manage_jobs: `create` needs `definition`, the job definition as a JSON object. Nothing ran.',
+    );
+  });
+
+  it('refuses update with a string definition before checking job', () => {
+    expect(registry.invalidArgs(tool, { action: 'update', job: 'disk', definition: '{}' })).toBe(
+      'Error: manage_jobs: `update` needs `definition`, the job definition as a JSON object, not a string. Nothing ran.',
+    );
+  });
+
+  it('refuses pause without a job', () => {
+    expect(registry.invalidArgs(tool, { action: 'pause' })).toBe(
+      'Error: manage_jobs: `pause` needs `job`, the id or name of an existing job (list them with {action:"list"}). Nothing ran.',
+    );
+  });
+
+  it('refuses get with a whitespace-only job', () => {
+    expect(registry.invalidArgs(tool, { action: 'get', job: '  ' })).toBe(
+      'Error: manage_jobs: `get` needs `job`, the id or name of an existing job (list them with {action:"list"}). Nothing ran.',
+    );
+  });
+
+  it('allows list', () => {
+    expect(registry.invalidArgs(tool, { action: 'list' })).toBeUndefined();
+  });
+
+  it('allows create with an object definition', () => {
+    expect(registry.invalidArgs(tool, { action: 'create', definition: {} })).toBeUndefined();
+  });
+
+  it('allows update with a job and partial object definition', () => {
+    expect(
+      registry.invalidArgs(tool, {
+        action: 'update',
+        job: 'x',
+        definition: { schedule: { kind: 'daily', at: '08:00' } },
+      }),
+    ).toBeUndefined();
+  });
+
+  it('allows pause with a job', () => {
+    expect(registry.invalidArgs(tool, { action: 'pause', job: 'x' })).toBeUndefined();
+  });
+
+  it('allows delete with a job', () => {
+    expect(registry.invalidArgs(tool, { action: 'delete', job: 'x' })).toBeUndefined();
   });
 });
 
