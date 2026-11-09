@@ -1,6 +1,6 @@
 # Forge — Recent Changes
 
-## Unreleased
+## 0.17.136
 
 - A path argument that ends in a space is repaired instead of refused (2026-11-09, lab arm
   U6b): `read_file`/`list_directory` were answering "nothing exists there" about a file that
