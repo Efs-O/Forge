@@ -132,7 +132,10 @@ export function makeForgetTool(
     },
     permission: 'delete',
     workspaceStateMutation: true,
-    approval: (args) => ({ detail: `Remove stored workspace memory "${String(args['key'])}"?` }),
+    approval: (args) => ({
+      detail: `Remove stored workspace memory "${String(args['key'])}"?`,
+      clankerStop: true,
+    }),
     handler: async (args) => {
       const key = memoryKey(args);
       let existed = false;

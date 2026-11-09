@@ -96,11 +96,11 @@ export function approvalEnvFor(options: {
 
 /** Has this chat already been allowed every key this call needs?
  *
- *  False for `unkeyable` — that is the plan's fail-closed half, and it is what
- *  makes "deny-list dangerous commands still get a card" true without a list of
- *  commands here. A `net:<host>` requirement is answered from the fetch store (so
- *  `fetch.allowed_hosts` counts too); every other key is matched against the
- *  chat's rules with `ruleCovers`, which refuses a rule that is not a legal key.
+ *  False for `unkeyable`. The caller applies Clanker's separate stop filter to
+ *  those calls: non-protected ones are answered, while the deny list and owner-only
+ *  wall remain in force. A `net:<host>` requirement is answered from the fetch
+ *  store (so `fetch.allowed_hosts` counts too); every other key is matched against
+ *  the chat's rules with `ruleCovers`, which refuses a rule that is not a legal key.
  */
 export function coveredByChatRules(
   conversation: ConversationRuntime | undefined,
@@ -258,18 +258,8 @@ export interface ChatRuleCall {
   conversation: ConversationRuntime | undefined;
 }
 
-/** What the seam answers with when a card is about to open:
- *
- * - `answered` — a chat rule, or this chat's Clanker, covered every key, so no
- *   card opens and the `gate` row names the key that answered it;
- * - `offer` — nothing covered it AND this call has keys the owner could allow, so
- *   the card opens with "Allow for this chat" between Decline and Approve;
- * - `undefined` — the card opens with Approve and Decline only, because this call
- *   has no key (`approvalKey.ts` `unkeyable`) or because nobody is in the run to be
- *   shown a button. A deny-list command like `git rebase` lands here, which is what
- *   keeps plan §2's "the deny list always asks the owner" true on the CARD as well
- *   as in the queue, and is why a keyed recursive delete gets the button while
- *   `git rebase` never does.
+/** Queue outcome: `answered` bypasses the card, and `offer` adds chat/project rules.
+ * `undefined` leaves the queue to apply the Clanker stop filter and card behavior.
  */
 export type ChatRuleDecision =
   | { kind: 'answered'; key: string }
@@ -293,6 +283,8 @@ export interface ChatRuleAllowFailure {
  */
 export interface ChatRuleApproval {
   decide(call: ChatRuleCall): ChatRuleDecision | undefined;
+  /** Read the same chat-scoped flag for tool behavior that is not an approval card. */
+  isClankerEnabled?(conversationId: string): boolean;
   /** Store each offered key as this chat's rule and save the chat. Returns the keys
    *  it refused, which should be none (`decide` validated them before the card was
    *  built) and is shown to the owner when it is not.
@@ -334,16 +326,11 @@ function keyInputFor(call: ChatRuleCall): ApprovalKeyInput {
  *
  * An unattended run — a job, an unattended bus turn — never asks a chat's rules or
  * Clanker, the same predicate `ToolApprovalService` uses to refuse an exit nobody
- * is there to answer. Attended chats do, and in the order the plan sets: the rules
- * the owner clicked for this chat first, then Clanker for this chat, which lets a
- * key the owner could have allowed run, including dangerous calls. The deny list
- * and secret-read taint stay owner-only: the deny list's card is promised by the
- * banner, and only the owner can judge what a secret-tainted chat may send. What
- * neither answers opens its card: a
- * deny-list command, or any call with no key the owner could allow, waits like any
- * other card, and times out under `permissions.approval_timeout_minutes` when the
- * owner set one. `/clanker` refuses nothing without a card any more, so the queue's
- * own behaviour is unchanged by this seam.
+ * is there to answer. Attended chats do, in order: owner-created rules, then
+ * Clanker. Clanker answers keyed and unkeyable calls, including dangerous ones,
+ * except deny-list matches, the owner-only wall, marked destructive actions, and
+ * egress after a secret read. Other unanswered calls open their card; unattended
+ * runs keep their existing policy-denied and queue behavior.
  *
  * `allow` is the other half of the same object, and it belongs here for one reason:
  * the environment that decided a card may be skipped is the environment that
@@ -396,21 +383,13 @@ export function createChatRuleApproval(options: {
     ...(options.getConfig ? { getConfig: options.getConfig } : {}),
   });
   return {
+    isClankerEnabled: (conversationId) => options.clankerMode?.(conversationId) === true,
     decide: (call) => {
       const { ctx, config } = env();
       const keyInput = keyInputFor(call);
       const keys = approvalKeysFor(keyInput, ctx);
-      if (keys.kind !== 'keyed') return undefined;
       const approvalKey = approvalKeysText(keys);
       const unattended = unattendedConversations.has(call.conversationId);
-      const policy = approvalPolicyDecision(
-        policySession.rulesFor(config?.approvals),
-        keys.requirements,
-        ctx,
-        options.workspaceRoot,
-        unattended,
-        unattendedConversations.jobMeta(call.conversationId)?.jobId,
-      );
       const answered = (answeredBy: 'policy_rule' | 'chat_rule' | 'clanker'): string => {
         options.recordAutoGate({
           toolName: call.toolName,
@@ -422,6 +401,29 @@ export function createChatRuleApproval(options: {
         });
         return approvalKey;
       };
+      // The owner-only wall is the first result from approvalKeysFor, before any
+      // policy or Clanker lookup. Keep that ordering even for a keyless call.
+      if (keys.kind === 'unkeyable' && keys.ownerOnly) return undefined;
+      const clankerMayAnswer =
+        !unattended &&
+        options.clankerMode?.(call.conversationId) === true &&
+        keyInput.approvalGateKind !== 'denyList' &&
+        keyInput.exitGateKind !== 'denyList' &&
+        call.approvalMetadata?.clankerStop !== true &&
+        call.approvalMetadata?.secretReadTaint !== true &&
+        !(call.exitVerdict.flaggedBy === 'secret' && call.reachesOut !== 'none');
+      if (keys.kind !== 'keyed') {
+        if (clankerMayAnswer) return { kind: 'answered', key: answered('clanker') };
+        return undefined;
+      }
+      const policy = approvalPolicyDecision(
+        policySession.rulesFor(config?.approvals),
+        keys.requirements,
+        ctx,
+        options.workspaceRoot,
+        unattended,
+        unattendedConversations.jobMeta(call.conversationId)?.jobId,
+      );
       if (policy.kind === 'allowed') {
         return { kind: 'answered', key: answered('policy_rule') };
       }
@@ -445,11 +447,7 @@ export function createChatRuleApproval(options: {
       // so they stay gated here even though an owner chat rule may still answer them.
       const denyList =
         keyInput.approvalGateKind === 'denyList' || keyInput.exitGateKind === 'denyList';
-      if (
-        !denyList &&
-        call.approvalMetadata?.secretReadTaint !== true &&
-        options.clankerMode?.(call.conversationId) === true
-      ) {
+      if (clankerMayAnswer && !denyList) {
         return { kind: 'answered', key: answered('clanker') };
       }
       // These validated keys define both the card copy and what its button stores.

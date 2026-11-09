@@ -5,7 +5,7 @@ import { resolveCliExecutable } from '../agents/resolveCliExecutable';
  * Check that a linked Codex thread is still present before Forge queues work.
  *
  * Every `ask_agent` to a linked Codex ran its own check, and each check spawns
- * a throwaway `codex app-server` process and lists every thread in it. Two asks
+ * a throwaway `codex app-server` process and reads the one thread by id. Two asks
  * in one round therefore paid for the same answer twice, and the second one
  * timed out at 15 s while the first was still answering (lab run U2b,
  * 2026-11-09). One check per (executable, cwd, sessionId) is in flight at a
@@ -41,6 +41,5 @@ async function checkOnce(
   timeoutMs: number,
 ): Promise<boolean> {
   const discovery = new CodexDiscovery({ executable, cwd, timeoutMs });
-  const { threads } = await discovery.discover();
-  return threads.some((thread) => thread.id === sessionId);
+  return discovery.readThread(sessionId);
 }

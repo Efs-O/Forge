@@ -482,12 +482,13 @@ export function applyOwnerOnlyWriteGuard(
   };
   return {
     ...tool,
-    refuseBeforeApproval: (args) => {
+    refuseBeforeApproval: (args, context) => {
       const refusal = refusalFor(args);
       // `invalidArgs` refusals carry the `Error:` prefix by that file's
       // convention; the handler throws the same sentence bare and
       // `toolErrorText.ts` adds it, so both paths say the same thing.
-      return refusal ? `Error: ${refusal}` : undefined;
+      // The wrapped tool's own pre-check runs after the wall, never instead of it.
+      return refusal ? `Error: ${refusal}` : tool.refuseBeforeApproval?.(args, context);
     },
     handler: async (args, context) => {
       const hit = hitFor(args);

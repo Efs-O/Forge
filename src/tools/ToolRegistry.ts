@@ -225,7 +225,11 @@ export class ToolRegistry {
    * the handler without naming the field. A malformed `background` boolean
    * also used to silently select the foreground path.
    */
-  invalidArgs(tool: RegisteredTool, args: Record<string, unknown>): string | undefined {
+  invalidArgs(
+    tool: RegisteredTool,
+    args: Record<string, unknown>,
+    context?: Pick<ToolHandlerContext, 'conversationId' | 'clankerMode'>,
+  ): string | undefined {
     const { name, parameters } = tool.definition.function;
     // JSON.parse can hand back `null` for a call whose arguments were "null".
     const present: Record<string, unknown> = typeof args === 'object' && args !== null ? args : {};
@@ -244,7 +248,7 @@ export class ToolRegistry {
         else if (value === 'false') present[key] = false;
       }
     }
-    const preApproval = tool.refuseBeforeApproval?.(present);
+    const preApproval = tool.refuseBeforeApproval?.(present, context);
     if (preApproval) return preApproval;
     if (name === 'edit_file') {
       const stringArrayError = editFileStringArrayError(present);

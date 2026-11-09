@@ -48,16 +48,14 @@ const WORKSPACE = vscode.workspace.workspaceFolders![0]!.uri.fsPath;
  * §2): in an UNATTENDED turn a secret-path read and a large-payload URL are refused
  * at once, naming the pattern and the alternative, because the decision belongs to
  * the owner (`gateKind: 'ownerGate'`), and a fetch after a secret read is refused in
- * both unattended halves as well (`gateKind: 'taintGate'`). A chat with Clanker on is
- * no longer one of those autonomous runs: it has a human, in the tab it was armed in,
- * so every call it does not answer with a key gets its card and waits — refused
- * without a card only when nobody is present at all.
+ * both unattended halves as well (`gateKind: 'taintGate'`). Attended Clanker chats
+ * answer every other gate, including local secret reads and unkeyable calls; only
+ * the deny list, owner-only wall, explicit destructive markers, and secret egress
+ * remain stops.
  *
- * The unattended half may not wait for a human, and that is what it asserts: either a
- * refusal that arrives with no card, or the card attended mode always got. The Clanker
- * half asserts the opposite, and that is the point of the change: a card, timed out
- * when the owner configured `permissions.approval_timeout_minutes` and waiting when
- * they did not, and never a refusal that arrived before the card opened.
+ * The unattended half may not wait for a human, and that is what it asserts. The
+ * Clanker half checks the three retained stops and the local secret-read case that
+ * now proceeds without a card.
  */
 
 /** What `read_file`'s gate passes, copied so the wording a refusal carries is tested. */
@@ -173,32 +171,22 @@ describe('an unattended run never waits on these gates', () => {
   });
 });
 
-describe('a chat with Clanker on gets a card instead of a refusal', () => {
-  it('shows the card for an owner-only gate instead of refusing it', async () => {
+describe('attended Clanker answers every gate except its three stops', () => {
+  it('answers a local secret read without a card', async () => {
     const { service, cards } = harness();
     service.setClankerMode('clanker-2', true);
-    const pending = service.request(
+    await expect(service.request(
       'read_file',
       '.env',
       true,
       'clanker-2',
       undefined,
       SECRET_READ,
-    );
-    const card = cards()[0];
-    if (card?.type !== 'confirmRequest')
-      throw new Error('a Clanker chat refused a dangerous call without a card');
-    // The card carries the gate's own reason and its alternative, so the owner can
-    // answer it and the agent can act on the decline.
-    expect(card.detail).toContain('.env');
-    service.resolve(card.id, 'decline');
-    await expect(pending).resolves.toBe('declined');
+    )).resolves.toBe('approved');
+    expect(cards()).toHaveLength(0);
   });
 
-  // The deny-list half of the plan's change, run as the plan states it: `git
-  // rebase` in a Clanker chat opens a card, mirrored like every card, and with
-  // `permissions.approval_timeout_minutes` set it ends with the timeout outcome and
-  // the turn carries on. It is never refused without a card any more.
+  // The deny-list K1 stop still opens its card in an attended Clanker chat.
   it('cards a deny-list command and returns the timeout outcome', async () => {
     vi.useFakeTimers();
     const { service, cards, posted } = harness(30);
@@ -241,20 +229,17 @@ describe('a chat with Clanker on gets a card instead of a refusal', () => {
     vi.useRealTimers();
   });
 
-  // `/clanker`'s existing behaviour for dangerous calls it was already asking
-  // about — a permanent delete, say — must not change because a gate exists.
-  it('still asks for a dangerous call that is not one of these gates', async () => {
+  // A permanent single-file delete is restored by ToolDispatch's turn checkpoint.
+  it('answers a checkpointed permanent delete', async () => {
     const { service, cards } = harness();
     service.setClankerMode('clanker-1', true);
-    const pending = service.request(
+    await expect(service.request(
       'delete_file',
       'C:\\notes\\old.md (to_trash: false)',
       true,
       'clanker-1',
-    );
-    expect(cards()).toHaveLength(1);
-    service.resolve(cards()[0]!.id, 'approve');
-    await expect(pending).resolves.toBe('approved');
+    )).resolves.toBe('approved');
+    expect(cards()).toHaveLength(0);
   });
 
   it('still approves a safe call with no card', async () => {
@@ -290,6 +275,7 @@ describe('a chat with Clanker on gets a card instead of a refusal', () => {
       undefined,
       {
         gateKind: 'taintGate',
+        clankerStop: true,
         cardReason: 'this chat has read a secret path, so nothing more leaves it without you',
         alternative:
           'tell the owner what you need from this host; a secret read taints the whole chat',

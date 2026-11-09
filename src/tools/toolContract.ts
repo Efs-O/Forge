@@ -48,28 +48,19 @@ export interface ToolApprovalMetadata {
   declineHint?: string;
   /**
    * Which kind of gate this call's gate is, set by the gate that raises the card.
-   * It classifies the gate for an autonomous run — it does not choose who answers
-   * it, and no automated answer is offered for any of the three.
+   * It classifies the gate for unattended runs; it does not choose who answers it.
    *
-   * `ownerGate` is the exfil gates' request: the decision belongs to the owner,
-   * so in an autonomous run (`/clanker`, an unattended turn, a job), where
-   * nobody is at the card, the call is refused at once instead of waiting.
-   * `taintGate` is the opposite half of the same fact: a fetch in a chat that
-   * has read a secret may be answered by the owner and nothing else, because
-   * nothing else can see what this chat has already read — so it is refused
-   * at once in every autonomous run, `/clanker` included, where nothing can
-   * answer the card it would raise either. `denyList` is the deny list's own
-   * answer: in an autonomous run there is no judgement to make — refuse at once,
-   * with no card, and name the sanctioned tool in `declineHint` — while attended
-   * mode keeps its card and its wait exactly as before, `taintGate`'s card
-   * included. Absent means the ordinary rule: a dangerous call keeps its card
-   * and waits for the owner, and an unattended run refuses it because nobody
-   * is there to answer it. The gate that raises the card sets it; `ToolApprovalService`
-   * is what honours it, so the rule cannot be talked around by a prompt.
+   * `ownerGate` and `taintGate` explain an unattended refusal rather than waiting
+   * for an owner. `denyList` carries the deny list's refusal and sanctioned
+   * alternative. Attended Clanker chats answer these gates except for the three
+   * protected stop classes; `ToolApprovalService` receives that decision through
+   * the `clankerStop` option. With Clanker off, the normal approval card remains.
    */
   gateKind?: 'ownerGate' | 'taintGate' | 'denyList';
-  /** Secret-read taint cards may be answered by the owner only, never Clanker. */
+  /** True on fetch metadata when this chat has read a secret and the request sends data out. */
   secretReadTaint?: boolean;
+  /** A destructive action outside the turn checkpoint; Clanker must leave it to the owner. */
+  clankerStop?: boolean;
   /** What made this card exist, in one line, from the gate that knows it: a
    *  matched secret pattern, a new host, a payload size. It is the reason the
    *  gate was raised, and it travels with the refusal so the agent can act on
@@ -137,6 +128,8 @@ export interface ToolHandlerContext {
   abortSignal?: AbortSignal;
   /** Conversation the call belongs to. */
   conversationId?: string;
+  /** The owning chat has attended Clanker mode enabled for this call. */
+  clankerMode?: boolean;
   /** Current call id, used by shell spill files. */
   toolCallId?: string;
   /** Resolved model name, used by model-specific tool-group refusals. */
@@ -226,7 +219,10 @@ export interface RegisteredTool {
    * config, where a handler-throw would land after the write had already been
    * allowed past the gate that decides whether the agent may touch that file.
    */
-  refuseBeforeApproval?: (args: Record<string, unknown>) => string | undefined;
+  refuseBeforeApproval?: (
+    args: Record<string, unknown>,
+    context?: Pick<ToolHandlerContext, 'conversationId' | 'clankerMode'>,
+  ) => string | undefined;
   /**
    * True when this tool's RESULT is content from outside this machine: a page, a
    * search engine's answer, a browser snapshot, an image-search hit, or a reply

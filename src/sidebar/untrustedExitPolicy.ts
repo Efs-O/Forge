@@ -18,28 +18,11 @@
  * its shell, edits, builds and reads run with no card, because the only thing
  * they could send out is the workspace the owner already owns.
  *
- * So the rule is not "clean chats are safe and flagged chats are not". It is
- * "a card is raised for the ways OUT, and only the ways out":
- *
- * - a gate that called itself `dangerous` keeps its card in every chat — the deny
- *   list, a permanent delete, a brand-new egress host or browser origin, a secret
- *   read, the exfil gates;
- * - a tool-specific gate that wants the owner to see it (`semanticSearchTool`
- *   starting an index, `powerTools`, a desktop click) keeps its card in every
- *   chat: those gates were designed per tool, and this file does not silently
- *   un-make them;
- * - a write that lands outside the workspace keeps its card in every chat, which
- *   is what the plan means by "writes outside the workspace stay as today";
- * - the permission card itself is gone in BOTH states — that is the relaxation,
- *   and it is the whole reason this file exists;
- * - a call that leaves the machine (`network`, `cross_chat`, `delegation`) cards
- *   only when the chat is flagged, and when the flag is what raised it the
- *   owner's answer is the only allowed one: nothing that cannot see what the
- *   chat has already read can approve the sending half of an exfiltration.
- *
- * The deny list (`DenyList.ts`) and the owner-only wall (`ownerPaths.ts`) are not
- * in this table because they never reach it: both refuse the call before any card
- * is considered, and both stay in force in every chat, clean or flagged.
+ * This module computes which calls need a candidate card. The chat approval layer
+ * then applies Clanker's three-stop rule: deny-list and owner-only refusals stay,
+ * and secret-tainted egress stays owner-gated; other dangerous, tool-specific,
+ * outside-workspace, or content-tainted candidates may be answered by Clanker.
+ * Chats with Clanker off and unattended runs retain their existing paths.
  */
 import { SECRET_TAINT_REFUSAL_REASON } from './toolApprovalOutcome';
 import { hasConversationReadSecret, hasConversationReadUntrusted } from '../tools/exfilTaint';
@@ -166,9 +149,8 @@ export function decideUntrustedExit(input: UntrustedExitInput): UntrustedExitVer
     : input.untrustedContent
       ? 'content'
       : undefined;
-  // A gate that stands on its own — dangerous, a tool's own judgement, or a write
-  // outside the workspace by a tool the owner did not pre-approve — cards in every
-  // chat, flagged or not. Narrowing those is a later phase's job, not this rule's.
+  // These conditions create a candidate card. The chat approval layer lets attended
+  // Clanker answer it unless it is a deny-list, owner-only, destructive, or secret-egress stop.
   const gateCard =
     input.dangerous || input.toolGate || (input.outsideWorkspace && !input.declaredSafe);
   const exitCard = flaggedBy !== undefined && input.reachesOut !== 'none';

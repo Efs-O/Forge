@@ -82,7 +82,7 @@ export {
  *  must always ask. A call is never part-keyed: half a key is not an approval. */
 export type CallApprovalKeys =
   | { kind: 'keyed'; requirements: readonly ApprovalRequirement[] }
-  | { kind: 'unkeyable'; why: string };
+  | { kind: 'unkeyable'; why: string; ownerOnly?: true };
 
 /** What `ToolDispatch` already worked out for `decideUntrustedExit`, plus the
  *  things only the gate that raised the card knows.
@@ -153,7 +153,11 @@ export function delegateTargetFor(
   return trimmed.length > 0 ? trimmed : undefined;
 }
 
-const unkeyable = (why: string): CallApprovalKeys => ({ kind: 'unkeyable', why });
+const unkeyable = (why: string, ownerOnly = false): CallApprovalKeys => ({
+  kind: 'unkeyable',
+  why,
+  ...(ownerOnly ? { ownerOnly: true } : {}),
+});
 
 /** The first path this call touches that sits inside Forge's own files. Checked
  *  before any key is built, because the wall is not a key question: a rule for the
@@ -242,6 +246,7 @@ export function approvalKeysFor(
     return unkeyable(
       `${wall} is inside Forge's own files, which only the owner may change: no key, ` +
         'no Clanker and no policy rule reaches past it.',
+      true,
     );
   }
 

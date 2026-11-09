@@ -1,5 +1,20 @@
 # Forge — Recent Changes
 
+## Unreleased
+
+- Clanker now answers every attended approval except destructive actions,
+  Forge's own guard files, and data sent out after a secret read. Local secret
+  reads and changes protected by the turn checkpoint run without another prompt.
+- `restore_file` and `generate_image` no longer ask before every call (2026-11-09, owner): their
+  card text counted as a gate. A `restore_file` overwrite is snapshotted first, so Undo brings back
+  the uncommitted edits it replaced; `generate_image` still asks when its backend sets
+  `confirm_each` (billed per image) or `confirm_on_start` needs a cold server start.
+- The first `ask_agent` to a linked Codex session no longer waits up to 15 s (2026-11-09, lab):
+  checking that the thread still exists listed every thread Codex had stored (779 here, about
+  32 pages) and timed out under load. It now reads that one thread by id (`thread/read`), a
+  few milliseconds; an unknown id is "gone", and a check that fails or times out still resumes
+  headlessly as before.
+
 ## 0.17.137
 
 - Two `ask_agent` questions to Codex sent at the same moment now share one liveness check

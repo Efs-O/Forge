@@ -39,12 +39,10 @@ export function toolApprovalResult(
         'Do not retry it this turn. Finish the remaining steps, then list this one as not done in your final reply.';
 }
 
-/** Why a gate that no automated answer is allowed for is refused on the spot, in
- *  an unattended run. It lives here because it is the wording the model acts on,
- *  which is what this file owns, not the queue's business. A chat with Clanker on
- *  no longer gets this refusal: its keyed calls were answered by
- *  `chatApprovalRules.ts` and an unkeyable one gets a card, so the only run that
- *  still refuses a taint gate without one is a run with nobody in it at all. */
+/** Why secret egress is refused on the spot in an unattended run. It lives here
+ *  because this is the wording the model acts on, not the queue's business. An
+ *  attended Clanker chat keeps the secret-egress stop as an owner card; unattended
+ *  runs retain their existing policy-denied outcome. */
 export const SECRET_TAINT_REFUSAL_REASON =
   'This chat has read a secret file, so nothing more is sent out of it without you.';
 
@@ -60,11 +58,9 @@ function asSentence(part: string): string {
   return /[.?!]["')\]]*$/u.test(text) ? text : `${text}.`;
 }
 
-/** A tool was refused by policy rather than by a human. Only an unattended run
- *  refuses this way now: a chat with Clanker on gets a card for every call the
- *  key rules do not answer, so there is no `/clanker` refusal left to word and
- *  the three tails that carried one (`denyList`, `ownerGate`, `taintGate`) went
- *  with it. */
+/** A tool was refused by policy rather than by a human. Unattended runs retain
+ *  this outcome; attended Clanker calls are handled by the three-stop rule before
+ *  they reach the queue. */
 export class ToolApprovalPolicyDenied extends Error {
   constructor(
     toolName: string,
@@ -112,24 +108,16 @@ export class ToolApprovalPolicyDenied extends Error {
  * raised the card (`ToolDispatch` passes it straight through). It classifies
  * the gate; it does not choose who answers it.
  *
- * `ownerGate` is the exfil gates' request: the decision belongs to the owner, so
- * in an unattended run — where nobody is at the card — the call is refused at
- * once instead of waiting. `taintGate` is the opposite half of the same fact: a
- * fetch in a chat that has read a secret may never be answered by anything but
- * the owner, because no automated answer can see what this chat has already
- * read, so an unattended run refuses it at once too. A chat with Clanker on is
- * not an unattended run: `chatApprovalRules.ts` answers its keyed calls before a
- * card opens, and an unkeyable one gets the card, so these three kinds now refuse
- * without one only where nobody is present at all. `denyList` is the deny list's
- * own answer: an unattended run has no judgement to make — refuse at once, with
- * no card, and name the sanctioned tool in `alternative` — while a chat with
- * somebody in it keeps its card and its wait exactly as before, `taintGate`'s
- * included. Absent means the ordinary rule: a dangerous call keeps its card in
- * any chat with a human — Clanker included — and an unattended run refuses it,
- * because nobody is there to answer that card.
+ * `ownerGate` and `taintGate` describe why unattended runs refuse a gated call
+ * instead of waiting for an owner. `denyList` carries the deny list's refusal and
+ * sanctioned alternative. In attended chats, Clanker answers these gates unless
+ * the call is one of its three explicit stops; the `clankerStop` option carries
+ * those stops into this queue. With Clanker off, normal approval cards remain.
  */
 export interface ToolApprovalCallOptions {
   gateKind?: 'ownerGate' | 'taintGate' | 'denyList';
+  /** A tool-owned irreversible action that Clanker must leave to the owner. */
+  clankerStop?: boolean;
   /** What made this card exist, in one line, from the gate that knows it. */
   cardReason?: string;
   /** What the agent should do instead, from the same gate. It travels with the

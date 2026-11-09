@@ -118,7 +118,7 @@ export const REMOTE_HELP_SECTIONS: RemoteHelpSection[] = [
       { usage: '/timeout [1-1440|off]', summary: 'Set the session idle timeout.' },
     ],
     notes: [
-      "/clanker on arms THIS chat only: a call the owner could have allowed by key then runs with no approval, while the deny list's dangerous commands and anything with no key still get a card — here or in the sidebar — and that card waits, or times out if the owner set `permissions.approval_timeout_minutes`. The mode is saved with the chat and survives a window reload, so it stays armed until someone turns it off; /clanker off, or the sidebar toggle in that tab, is the only thing that clears it, and it revokes nothing this chat was already allowed to do",
+      "/clanker on arms THIS chat only: destructive commands, Forge's own guard files, and sending data out after reading a secret still stop — here or in the sidebar. Every other confirmation is answered until /clanker off or the sidebar toggle in that tab turns it off. The mode is saved with the chat and survives a window reload, and it revokes nothing this chat was already allowed to do",
       '/compact summarises the conversation in place to win back context; the chat and its queue survive it',
       '/lock ends this authenticated session and discards any held prompt; the next message asks for the code again',
       '/ratelimit sets how many messages this chat may send per minute (default 30); off raises it to the 600 ceiling rather than removing it, because the limit is also what stops a stuck message being retried forever',

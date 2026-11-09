@@ -37,16 +37,18 @@ function conversation(id: string, approval_rules?: string[]): ConversationRuntim
 describe('ToolApprovalService', () => {
   afterEach(() => vi.useRealTimers());
 
-  it('carries a gate reason to the confirmation card', async () => {
+  it('keeps secret egress on the confirmation card', async () => {
     const posted: HostToWebview[] = [];
     const service = new ToolApprovalService(
       (message) => posted.push(message),
       () => ({}) as never,
     );
     const reason = 'this chat read a secret path (**/.env, from: read_file .env)';
+    service.setClankerMode('conv', true);
     const pending = service.request('web_fetch', 'GET https://a.example/', true, 'conv', undefined, {
       gateKind: 'taintGate',
       cardReason: reason,
+      clankerStop: true,
     });
     const request = posted.find((message) => message.type === 'confirmRequest');
     expect(request).toMatchObject({ type: 'confirmRequest', cardReason: reason });
@@ -55,37 +57,42 @@ describe('ToolApprovalService', () => {
     await expect(pending).resolves.toBe('declined');
   });
 
-  it('never bypasses dangerous cloud egress approval in clanker mode', async () => {
+  it('answers dangerous calls unless the approval marks a protected stop', async () => {
     const posted: HostToWebview[] = [];
+    const events: { answeredBy: string }[] = [];
     const service = new ToolApprovalService(
       (message) => posted.push(message),
       () => ({}) as never,
     );
+    service.addSink({
+      requested: () => undefined,
+      resolved: () => undefined,
+      autoApproved: (event) => events.push(event),
+    });
     service.setClankerMode('conv', true);
     await expect(service.request('write_file', 'safe', false, 'conv')).resolves.toBe('approved');
     await expect(
       service.request('delete_file', 'recycle-bin move', false, 'conv'),
     ).resolves.toBe('approved');
-    const pending = service.request('budget_test_tool', 'cloud egress', true, 'conv');
-    const request = posted.find((message) => message.type === 'confirmRequest');
-    expect(request).toMatchObject({
-      type: 'confirmRequest',
-      toolName: 'budget_test_tool',
-      isDangerous: true,
-    });
-    if (request?.type !== 'confirmRequest') throw new Error('confirmation was not posted');
-    service.resolve(request.id, 'decline');
-    await expect(pending).resolves.toBe('declined');
+    await expect(service.request('budget_test_tool', 'non-protected gate', true, 'conv')).resolves.toBe(
+      'approved',
+    );
+    expect(events.at(-1)?.answeredBy).toBe('clanker');
+    expect(posted.some((message) => message.type === 'confirmRequest')).toBe(false);
 
-    const permanentDelete = service.request('delete_file', 'permanent delete', true, 'conv');
-    const permanentCard = posted
-      .filter((message) => message.type === 'confirmRequest' && message.toolName === 'delete_file')
-      .at(-1);
-    if (permanentCard?.type !== 'confirmRequest')
-      throw new Error('permanent delete approval was not posted');
-    expect(permanentCard.isDangerous).toBe(true);
-    service.resolve(permanentCard.id, 'decline');
-    await expect(permanentDelete).resolves.toBe('declined');
+    const protectedStop = service.request('web_fetch', 'secret egress', true, 'conv', undefined, {
+      clankerStop: true,
+      gateKind: 'taintGate',
+    });
+    const request = posted.find((message) => message.type === 'confirmRequest');
+    expect(request).toMatchObject({ type: 'confirmRequest', toolName: 'web_fetch', isDangerous: true });
+    if (request?.type !== 'confirmRequest') throw new Error('protected confirmation was not posted');
+    service.resolve(request.id, 'decline');
+    await expect(protectedStop).resolves.toBe('declined');
+
+    await expect(
+      service.request('delete_file', 'checkpointed permanent delete', true, 'conv'),
+    ).resolves.toBe('approved');
   });
 
   it('denies a dangerous unattended action without prompting or changing clanker mode', async () => {

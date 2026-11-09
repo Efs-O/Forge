@@ -140,10 +140,13 @@ export function makeGenerateImageTool(deps: GenerateImageDeps): RegisteredTool {
         backend.provider === 'sdcpp'
           ? deps.sdServers?.().get(backend.name)?.startApproval()
           : undefined;
+      const dangerous = backend.confirm_each || starting !== undefined;
       return {
         // `confirm_on_start` must actually ask: with `confirm_each: false` the
         // start notice alone sat in a detail no prompt showed.
-        dangerous: backend.confirm_each || starting !== undefined,
+        dangerous,
+        // With neither switch on, the text only labels a card some other rule opens.
+        cardTextOnly: !dangerous,
         detail:
           `${detail}${starting ? `\n${starting.detail}` : ''}` +
           `${backend.provider !== 'sdcpp' && backend.confirm_each ? ' — billed per image' : ''}\n\n${prompt.slice(0, 600)}`,

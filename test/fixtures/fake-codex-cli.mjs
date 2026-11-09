@@ -85,10 +85,22 @@ if (process.argv.includes('app-server')) {
       return;
     }
     if (message.method === 'thread/read') {
+      if (message.params.threadId === 'threadless-reply') {
+        line({ id: message.id, result: {} });
+        return;
+      }
+      if (message.params.threadId === 'missing-thread') {
+        line({
+          id: message.id,
+          error: { code: -32600, message: 'thread not loaded: missing-thread' },
+        });
+        return;
+      }
       line({
         id: message.id,
         result: {
           thread: {
+            id: message.params?.threadId,
             turns: [
               {
                 id: activeTurn,

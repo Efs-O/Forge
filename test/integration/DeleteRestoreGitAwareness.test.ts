@@ -143,6 +143,15 @@ describe('git awareness around delete and restore', () => {
     expect(readNormalized(path.join(root, 'CHANGES.md'))).toBe('# 1.0\n');
   });
 
+  it('restore_file labels its card instead of opening one', () => {
+    expect(makeRestoreFileTool().approval?.({ paths: ['CHANGES.md'] })).toEqual({
+      detail:
+        'About to overwrite from git HEAD:\nCHANGES.md\n' +
+        'Any uncommitted changes to these paths are discarded.',
+      cardTextOnly: true,
+    });
+  });
+
   it('rejects a ref that would reach git as an option', async () => {
     await expect(
       makeRestoreFileTool().handler({ paths: ['CHANGES.md'], ref: '--hard' }, undefined as never),

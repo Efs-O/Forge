@@ -106,4 +106,9 @@ describe('workspace memory lifecycle', () => {
     expect(() => registry.assertAllowed(forget, new Set(['delete']))).not.toThrow();
     expect(forget.mutation).toBeUndefined();
   });
+
+  it('marks workspace memory deletion as a Clanker stop', () => {
+    const forget = makeForgetTool(memory().state);
+    expect(forget.approval?.({ key: 'old-note' })?.clankerStop).toBe(true);
+  });
 });

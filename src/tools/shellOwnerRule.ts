@@ -119,6 +119,7 @@ export function ownerOnlyShellRule(input: OwnerOnlyShellRuleInput): ShellTokenRu
     description: `refuses to change Forge's own files (${hit.supplied})`,
     alternative: ownerOnlyInstruction(),
     class: 'refused',
+    gateKind: 'ownerGate',
   });
   /** A `>` that only lands inside Forge's own files because a `cd` earlier in
    *  the line moved it. It is still a change, so the words say change — and say
@@ -135,6 +136,7 @@ export function ownerOnlyShellRule(input: OwnerOnlyShellRuleInput): ShellTokenRu
       'not keep a working directory between calls, so a `cwd` is a folder this guard can ' +
       `judge. ${ownerOnlyInstruction()}`,
     class: 'refused',
+    gateKind: 'ownerGate',
   });
   /** A `cd` this table cannot follow, with NOTHING in the command classed as a
    *  change. Saying "refuses to change" here would tell the agent it had tried
@@ -152,6 +154,7 @@ export function ownerOnlyShellRule(input: OwnerOnlyShellRuleInput): ShellTokenRu
       'in full, or read it with `read_file` / `search_code`. ' +
       `${ownerOnlyInstruction()}`,
     class: 'refused',
+    gateKind: 'ownerGate',
   });
   /** A `cd` refused because something later in the same command writes needs its
    *  own words, naming both: the agent has to see that the `cd` was not the
@@ -170,6 +173,7 @@ export function ownerOnlyShellRule(input: OwnerOnlyShellRuleInput): ShellTokenRu
       'working directory between calls, so `cd` in one call and the write in the ' +
       'next runs the write where the first call started, not where the `cd` went.',
     class: 'refused',
+    gateKind: 'ownerGate',
   });
   /** A write that reaches Forge's own files only because a `cd` earlier in the
    *  line moved it there. */
@@ -180,6 +184,7 @@ export function ownerOnlyShellRule(input: OwnerOnlyShellRuleInput): ShellTokenRu
       `line moves \`${statement.join(' ')}\` inside them`,
     alternative: ownerOnlyInstruction(),
     class: 'refused',
+    gateKind: 'ownerGate',
   });
   /** A write after a `cd` this check cannot follow, naming a path whose last
    *  parts match one of Forge's own roots: where it lands cannot be known, and
@@ -193,6 +198,7 @@ export function ownerOnlyShellRule(input: OwnerOnlyShellRuleInput): ShellTokenRu
       'Spell the `cd` folder in full, or give the write an absolute path, so the guard can ' +
       `see where it lands. ${ownerOnlyInstruction()}`,
     class: 'refused',
+    gateKind: 'ownerGate',
   });
   if (redirectHit) {
     return redirectHit.viaCd

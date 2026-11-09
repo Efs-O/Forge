@@ -27,6 +27,19 @@ export interface JsonRpcHandlers {
   onUnmatchedResponse?: (id: number) => void;
 }
 
+/** A JSON-RPC error response, preserving its optional numeric protocol code. */
+export class JsonRpcResponseError extends Error {
+  readonly code: number | undefined;
+
+  constructor(method: string, error: unknown) {
+    super(`${method} failed: ${JSON.stringify(error)}`);
+    this.name = 'JsonRpcResponseError';
+    const value =
+      error && typeof error === 'object' ? (error as Record<string, unknown>) : undefined;
+    this.code = typeof value?.['code'] === 'number' ? value['code'] : undefined;
+  }
+}
+
 /** Correlates outbound requests with their replies. */
 export class JsonRpcPending {
   private nextId = 1;
@@ -48,7 +61,7 @@ export class JsonRpcPending {
     if (!pending) return false;
     this.pending.delete(id);
     if (message['error']) {
-      pending.reject(new Error(`${pending.method} failed: ${JSON.stringify(message['error'])}`));
+      pending.reject(new JsonRpcResponseError(pending.method, message['error']));
     } else {
       pending.resolve(message['result']);
     }

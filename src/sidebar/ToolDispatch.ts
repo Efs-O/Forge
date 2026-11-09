@@ -28,10 +28,10 @@ import {
   type ToolApprovalCallOptions,
   type ToolApprovalOutcome,
 } from './toolApprovalOutcome';
-import { unknownToolResult } from './retiredTools';
 import { toolErrorText } from '../tools/toolErrorText';
 import { approvalCallOptions } from './approvalCallOptions';
 import { markConversationReadUntrusted } from '../tools/exfilTaint';
+import { unattendedConversations } from './unattendedConversations';
 import {
   dispatchWithParallelReads,
   type BufferedToolDispatchEffects,
@@ -51,6 +51,7 @@ import {
   type ToolDispatchModelContext,
   type ToolDispatchRoundContext,
 } from './toolDispatchTypes';
+import { preflightToolCall } from './toolCallPreflight';
 
 const log = getLogger();
 export const resolveToolPath = resolveWorkspacePath;
@@ -168,83 +169,27 @@ export class ToolDispatch {
       let result: ToolHandlerResult;
       let args: Record<string, unknown> | undefined;
       try {
-        if (signal?.aborted) {
-          result = 'Error: tool execution cancelled';
-          this.postResult(tc, toolResultText(result), undefined, convId, effects.post);
-          messages.push(toolResultMessage(tc, toolResultContent(result), startedAt));
+        const clankerMode =
+          convId !== undefined &&
+          !unattendedConversations.has(convId) &&
+          this.chatRuleApproval?.isClankerEnabled?.(convId) === true;
+        const pre = preflightToolCall(tc, {
+          toolRegistry: this.toolRegistry,
+          allowed,
+          convId,
+          signal,
+          budget,
+          unavailableTools,
+          clankerMode,
+        });
+        if (pre.kind === 'refused') {
+          if (pre.recordFailure) effects.failureTracker.record(convId);
+          this.postResult(tc, toolResultText(pre.result), undefined, convId, effects.post);
+          messages.push(toolResultMessage(tc, toolResultContent(pre.result), startedAt));
           continue;
         }
-        try {
-          const parsed: unknown = JSON.parse(tc.function.arguments);
-          if (parsed === null || Array.isArray(parsed) || typeof parsed !== 'object') {
-            const got = parsed === null ? 'null' : Array.isArray(parsed) ? 'array' : typeof parsed;
-            result = `Error: ${tc.function.name}: arguments must be a JSON object, got ${got}.`;
-            effects.failureTracker.record(convId);
-            this.postResult(tc, toolResultText(result), undefined, convId, effects.post);
-            messages.push(toolResultMessage(tc, toolResultContent(result), startedAt));
-            continue;
-          }
-          args = parsed as Record<string, unknown>;
-        } catch (error) {
-          const parserMessage = error instanceof Error ? error.message : String(error);
-          effects.failureTracker.record(convId);
-          result =
-            `Error: ${tc.function.name}: the arguments are not valid JSON (${parserMessage}). ` +
-            'Write each literal backslash as \\ and resend.';
-          this.postResult(tc, toolResultText(result), undefined, convId, effects.post);
-          messages.push(toolResultMessage(tc, toolResultContent(result), startedAt));
-          continue;
-        }
-
-        if (tc.function.name === '__tool_call_error__' && typeof args['__error'] === 'string') {
-          // The parser's own refusal is a failure by definition, and every consumer
-          // that reads a result's text keys on the `Error:` prefix, so the marker is
-          // added when the model sent the text without it.
-          const reported = args['__error'];
-          result = reported.startsWith('Error:') ? reported : `Error: ${reported}`;
-          effects.failureTracker.record(convId);
-          this.postResult(tc, toolResultText(result), undefined, convId, effects.post);
-          messages.push(toolResultMessage(tc, toolResultContent(result), startedAt));
-          continue;
-        }
-
-        // Registered but withheld from this model (e.g. view_image without a
-        // projector). The tool would still execute if called blind — say why
-        // instead, so the model does not go hunting for a substitute.
-        const unavailable = unavailableTools?.get(tc.function.name);
-        if (unavailable) {
-          this.postResult(tc, unavailable, undefined, convId, effects.post);
-          messages.push(toolResultMessage(tc, unavailable, startedAt));
-          continue;
-        }
-
-        const reg = this.toolRegistry.get(tc.function.name);
-        if (!reg) {
-          result = unknownToolResult(
-            tc.function.name,
-            this.toolRegistry,
-            allowed,
-            budget,
-            convId,
-            unavailableTools,
-          );
-          this.postResult(tc, toolResultText(result), undefined, convId, effects.post);
-          messages.push(toolResultMessage(tc, toolResultContent(result), startedAt));
-          continue;
-        }
-        const invalid = this.toolRegistry.invalidArgs(reg, args);
-        if (invalid) {
-          effects.failureTracker.record(convId);
-          this.postResult(tc, invalid, undefined, convId, effects.post);
-          messages.push(toolResultMessage(tc, invalid, startedAt));
-          continue;
-        }
-        const budgetBlock = budget?.check(tc.function.name);
-        if (budgetBlock) {
-          this.postResult(tc, budgetBlock, undefined, convId, effects.post);
-          messages.push(toolResultMessage(tc, budgetBlock, startedAt));
-          continue;
-        }
+        args = pre.args;
+        const reg = pre.reg;
 
         // A path argument ending in whitespace is a stray space, not a filename
         // (pathArgTrim.ts). Repair it here, before the approval metadata, `mutation.paths`
@@ -265,8 +210,8 @@ export class ToolDispatch {
           exitInput,
           exitVerdict,
         } = evaluateToolApproval(tc, reg, args, context, approvalCache, this.toolRegistry);
-        // A chat rule that covers every key this call needs answers the card before
-        // it opens and writes the `gate` row saying who answered it;
+        // A chat rule or attended Clanker can answer this candidate card before it
+        // opens and writes the `gate` row saying who answered it;
         // `createChatRuleApproval` itself refuses to consult rules for an unattended
         // run, so a job or an unattended bus turn behaves exactly as it does today.
         // What it answers with when NOTHING covered the call is the other half: the
@@ -298,7 +243,7 @@ export class ToolDispatch {
             isDangerous,
             convId,
             signal,
-            approvalCallOptions(approvalMetadata, exitVerdict, chatRule),
+            approvalCallOptions(approvalMetadata, exitVerdict, chatRule, exitInput.reachesOut),
           );
           if (outcome !== 'approved') {
             result = toolApprovalResult(tc.function.name, outcome);
@@ -318,6 +263,7 @@ export class ToolDispatch {
           },
           ...(signal !== undefined ? { abortSignal: signal } : {}),
           ...(convId !== undefined ? { conversationId: convId } : {}),
+          ...(convId !== undefined ? { clankerMode } : {}),
           toolCallId: tc.id,
           ...(modelContext ?? {}),
           conversationMessages: messages,

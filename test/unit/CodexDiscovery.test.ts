@@ -101,6 +101,37 @@ describe('CodexDiscovery (P4: scriptable thread/list against the app-server)', (
       await d.dispose();
     }
   });
+
+  it('reads one thread by id', async () => {
+    const d = discovery();
+    await expect(d.readThread('fixture-thread-1')).resolves.toBe(true);
+  });
+
+  it('returns false when the requested thread is missing', async () => {
+    const d = discovery();
+    await expect(d.readThread('missing-thread')).resolves.toBe(false);
+  });
+
+  it('reports a reply without a thread as unknown, not missing', async () => {
+    const d = discovery();
+    await expect(d.readThread('threadless-reply')).rejects.toThrow(
+      'thread/read returned no thread for threadless-reply',
+    );
+  });
+
+  it('disposes the app-server process after reading a thread', async () => {
+    const d = discovery();
+    const state = d as unknown as { child?: ChildProcess };
+    const result = d.readThread('fixture-thread-1');
+    try {
+      await vi.waitFor(() => expect(state.child).toBeDefined());
+      const child = state.child!;
+      await result;
+      expect(child.exitCode !== null || child.signalCode !== null).toBe(true);
+    } finally {
+      await d.dispose();
+    }
+  });
 });
 
 describe('CodexDiscovery start failures (pinned)', () => {
@@ -116,6 +147,21 @@ describe('CodexDiscovery start failures (pinned)', () => {
       cwd: process.cwd(),
     });
     const failure = await d.discover().catch((error) => error as Error);
+    expect(failure).toBeInstanceOf(Error);
+    expect(failure.message).toContain('Codex app-server transport failed');
+    expect(failure.message).toContain('ENOENT');
+    expect(failure.message).toContain('forge_probe_missing_program');
+    expect(failure.message).not.toContain('write failed');
+    await d.dispose();
+  });
+
+  it('reports the spawn error when reading a thread', async () => {
+    fake.behaviour = { spawnError: { code: 'ENOENT' } };
+    const d = new CodexDiscovery({
+      executable: 'forge_probe_missing_program',
+      cwd: process.cwd(),
+    });
+    const failure = await d.readThread('fixture-thread-1').catch((error) => error as Error);
     expect(failure).toBeInstanceOf(Error);
     expect(failure.message).toContain('Codex app-server transport failed');
     expect(failure.message).toContain('ENOENT');

@@ -172,6 +172,7 @@ export function makeManageJobsTool(deps: ManageJobsDeps): RegisteredTool {
       if (args['action'] !== DELETE_ACTION) return undefined;
       return {
         dangerous: true,
+        clankerStop: true,
         detail: `Delete job "${String(args['job'] ?? '')}". Its definition, state, and run log are removed.`,
       };
     },

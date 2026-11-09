@@ -9,6 +9,7 @@ import { resolveRealWorkspacePath, resolveWorkspacePath } from '../util/Workspac
 import { agentWriteOptions, writeFileAtomic } from '../util/atomicWrite';
 import { secretPatternForTaint } from './secretPaths';
 import type { RegisteredTool } from './ToolRegistry';
+import { unattendedConversations } from '../sidebar/unattendedConversations';
 
 const MAX_SOURCE_BYTES = 2 * 1024 * 1024;
 
@@ -16,6 +17,7 @@ export interface ExportDocumentDeps {
   getConfig?: () => ForgeConfig;
   extraRoots?: () => readonly string[];
   printPdf?: typeof printHtmlToPdf;
+  clankerMode?: (conversationId: string) => boolean;
 }
 
 export function makeExportDocumentTool(deps: ExportDocumentDeps = {}): RegisteredTool {
@@ -58,9 +60,33 @@ export function makeExportDocumentTool(deps: ExportDocumentDeps = {}): Registere
     },
     permission: 'write',
     mutation: { paths: outputPath },
-    refuseBeforeApproval: (args) => {
+    approval: (args, approvalContext) => {
+      const source = typeof args['source'] === 'string' ? args['source'] : undefined;
+      const conversationId = approvalContext?.conversationId;
+      if (!source || !conversationId || unattendedConversations.has(conversationId))
+        return undefined;
+      const output = typeof args['output'] === 'string' ? args['output'] : undefined;
+      const outputSecret = output ? secretOutput(output) : undefined;
+      const sourceSecret = secretPatternForTaint(source, deps.getConfig?.(), (value) => {
+        try {
+          return resolveWorkspacePath(value);
+        } catch {
+          return undefined;
+        }
+      });
+      if (deps.clankerMode?.(conversationId) !== true || (!sourceSecret && !outputSecret))
+        return undefined;
+      return {
+        ...(outputSecret ? { dangerous: true } : {}),
+        detail: outputSecret
+          ? `Write export output ${output} to secret path ${outputSecret}.`
+          : `Read secret source ${source} into a local document export.`,
+      };
+    },
+    refuseBeforeApproval: (args, context) => {
       const raw = typeof args['output'] === 'string' ? args['output'] : undefined;
       const match = raw ? secretOutput(raw) : undefined;
+      if (match && context?.clankerMode === true) return undefined;
       return match
         ? `Error: export_document: output matches secret path rule ${match}; choose a non-secret path.`
         : undefined;
@@ -78,7 +104,7 @@ export function makeExportDocumentTool(deps: ExportDocumentDeps = {}): Registere
           'export_document: HTML sources can be exported to PDF; use a Markdown source for DOCX.',
         );
       const secret = secretOutput(output);
-      if (secret)
+      if (secret && context?.clankerMode !== true)
         throw new Error(
           `export_document: output matches secret path rule ${secret}; choose a non-secret path.`,
         );
@@ -95,7 +121,7 @@ export function makeExportDocumentTool(deps: ExportDocumentDeps = {}): Registere
           return undefined;
         }
       });
-      if (sourceSecret)
+      if (sourceSecret && context?.clankerMode !== true)
         throw new Error(
           `export_document: source matches secret path rule ${sourceSecret}; choose a non-secret document.`,
         );

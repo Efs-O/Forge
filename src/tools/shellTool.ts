@@ -10,11 +10,12 @@ import {
 import { execCwdPreview, resolveExecCwd, runShellInForeground } from './execHelpers';
 import { NOTIFY_ON_EXIT_DESCRIPTION } from './backgroundExecutionTools';
 import { resolveGitBash, systemProbe } from './execProgramResolver';
+import { type ShellClassification, type ShellSecretCheck } from './shellPolicy';
 import {
-  classifyShellCommand,
-  type ShellClassification,
-  type ShellSecretCheck,
-} from './shellPolicy';
+  classifyShellCall,
+  clankerMayRunShellRefusal,
+  clankerShellRefusalApproval,
+} from './shellToolCallGate';
 import type { ShellKind } from './shellCommandTokens';
 import { ShellOutputCollector } from './shellOutput';
 import { DEFAULT_TOOL_OUTPUT_LIMITS } from './toolOutputLimits';
@@ -39,33 +40,15 @@ export interface ShellToolOptions {
    * bundled `rg`, since most machines have none on PATH.
    */
   ripgrepDir?: () => string | undefined;
-  /**
-   * The normalised absolute roots an agent may not change (`ownerPaths.ts`), read
-   * live so a config reload that moves `config.yaml` needs no re-registration.
-   * Absent, or an empty list: the owner guard is inert and the classifications
-   * stay exactly what they were.
-   */
+  /** Live normalized roots that `ownerPaths.ts` forbids changing. */
   ownerOnly?: () => readonly string[];
+  clankerMode?: (conversationId: string) => boolean;
 }
 
 /** The PATH helpers live in `shellPathEnv.ts`; re-exported so the tests that
  *  name them keep one import path. */
 export { gitBashDir, withPathEntry } from './shellPathEnv';
 import { gitBashDir, withPathEntry } from './shellPathEnv';
-
-const classifications = new WeakMap<Record<string, unknown>, ShellClassification>();
-
-function getClassification(
-  args: Record<string, unknown>,
-  shell: ShellKind,
-  check?: ShellSecretCheck,
-): ShellClassification {
-  const existing = classifications.get(args);
-  if (existing) return existing;
-  const value = classifyShellCommand(String(args['command'] ?? ''), shell, check ?? {});
-  classifications.set(args, value);
-  return value;
-}
 
 /**
  * True when this turn is a scheduled job run. The agent_task runner marks its
@@ -339,10 +322,19 @@ export function makeShellTool(options: ShellToolOptions = {}): RegisteredTool {
     },
     describe: () => definition(platform === 'win32', shellFor(undefined)),
     permission: 'headless',
-    approval: (args) => {
+    approval: (args, approvalContext) => {
       const shell = shellFor(args['shell']);
-      const result = getClassification(args, shell, checkFor(args));
+      const result = classifyShellCall(args, shell, checkFor(args));
       const approvalKey = approvalKeyFor(result);
+      if (result.classification === 'refused') {
+        const conversationId = approvalContext?.conversationId;
+        return clankerShellRefusalApproval(
+          result,
+          String(args['command']),
+          conversationId !== undefined && options.clankerMode?.(conversationId) === true,
+          conversationId !== undefined && !unattendedConversations.has(conversationId),
+        );
+      }
       if (result.classification === 'normal')
         return {
           detail: `${String(args['command'])}\ncwd: ${String(args['cwd'] ?? '(workspace root)')}\nshell: ${shell}`,
@@ -353,7 +345,6 @@ export function makeShellTool(options: ShellToolOptions = {}): RegisteredTool {
           ...(result.networkReaching ? { reachesOut: 'network' } : {}),
           ...(approvalKey ? { approvalKey } : {}),
         };
-      if (result.classification === 'refused') return undefined;
       if (result.classification === 'read_only')
         // A read-only command can still reach a host (`curl -I https://x`), and the
         // classifier lets it through. In a flagged chat the egress rule still wants
@@ -388,7 +379,7 @@ export function makeShellTool(options: ShellToolOptions = {}): RegisteredTool {
     },
     autoApproveIf: (args) =>
       ['read_only', 'refused'].includes(
-        getClassification(args, shellFor(args['shell']), checkFor(args)).classification,
+        classifyShellCall(args, shellFor(args['shell']), checkFor(args)).classification,
       ),
     handler: async (args, context) => {
       if (typeof args['command'] !== 'string' || args['command'].length === 0)
@@ -405,8 +396,16 @@ export function makeShellTool(options: ShellToolOptions = {}): RegisteredTool {
       }
       const command = args['command'];
       const shell = shellFor(args['shell']);
-      const classified = getClassification(args, shell, checkFor(args));
-      if (classified.classification === 'refused') {
+      const classified = classifyShellCall(args, shell, checkFor(args));
+      if (
+        classified.classification === 'refused' &&
+        !clankerMayRunShellRefusal(
+          classified,
+          context?.clankerMode === true,
+          context?.conversationId !== undefined &&
+            !unattendedConversations.has(context.conversationId),
+        )
+      ) {
         throw new Error(
           `shell: ${classified.rule?.description ?? 'command refused'} (deny list) — ${classified.rule?.alternative ?? 'choose a safe alternative'}`,
         );

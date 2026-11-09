@@ -15,6 +15,8 @@ import { unzipTextParts } from '../../src/documents/zipXml';
 import * as atomicWrite from '../../src/util/atomicWrite';
 import { makeExportDocumentTool } from '../../src/tools/exportDocumentTool';
 import { applyOwnerOnlyWriteGuard, ownerOnlySetFor } from '../../src/tools/ownerPaths';
+import { ToolRegistry } from '../../src/tools/ToolRegistry';
+import type { ForgeConfig } from '../../src/config/types';
 
 const root = vscode.workspace.workspaceFolders![0]!.uri.fsPath;
 const copy = (fixture: string, name: string) =>
@@ -84,6 +86,59 @@ describe('export_document', () => {
       tool.handler({ source: 'missing.html', format: 'docx', output: 'out.docx' }),
     ).rejects.toThrow('HTML sources can be exported to PDF; use a Markdown source for DOCX.');
     expect(fs.existsSync(path.join(root, 'out.docx'))).toBe(false);
+  });
+
+  it('lets attended Clanker read a secret source into a local export', async () => {
+    const source = path.join(root, 'secret.md');
+    fs.writeFileSync(source, 'local secret marker');
+    const getConfig = () => ({ permissions: { secret_paths: [source] } }) as ForgeConfig;
+    const tool = makeExportDocumentTool({
+      getConfig,
+      clankerMode: (conversationId) => conversationId === 'clanker-chat',
+    });
+    const args = { source: 'secret.md', format: 'docx', output: 'secret-copy.docx' };
+    const metadata = await tool.approval?.(args, { conversationId: 'clanker-chat' });
+    expect(metadata?.detail).toContain('Read secret source');
+    const result = await tool.handler(args, {
+      beforeMutate: () => undefined,
+      conversationId: 'clanker-chat',
+      clankerMode: true,
+    });
+    expect(result).toContain('DOCX');
+    expect(await readDocument('secret-copy.docx', fs.readFileSync(path.join(root, 'secret-copy.docx')))).toContain(
+      'local secret marker',
+    );
+    await expect(
+      tool.handler({ ...args, output: 'ordinary-copy.docx' }, {
+        beforeMutate: () => undefined,
+        clankerMode: false,
+      }),
+    ).rejects.toThrow('source matches secret path rule');
+  });
+
+  it('lets attended Clanker write a secret-pattern output path through approval', async () => {
+    const output = path.join(root, 'private.docx');
+    const getConfig = () => ({ permissions: { secret_paths: [output] } }) as ForgeConfig;
+    const tool = makeExportDocumentTool({
+      getConfig,
+      clankerMode: (conversationId) => conversationId === 'clanker-chat',
+    });
+    const args = { source: 'sample.md', format: 'docx', output: 'private.docx' };
+    const registry = new ToolRegistry();
+    expect(registry.invalidArgs(tool, args)).toContain('secret path rule');
+    expect(registry.invalidArgs(tool, args, { clankerMode: true })).toBeUndefined();
+    const metadata = await tool.approval?.(args, { conversationId: 'clanker-chat' });
+    expect(metadata?.dangerous).toBe(true);
+    const result = await tool.handler(args, {
+      beforeMutate: () => undefined,
+      conversationId: 'clanker-chat',
+      clankerMode: true,
+    });
+    expect(result).toContain('DOCX');
+    expect(fs.existsSync(output)).toBe(true);
+    await expect(
+      tool.handler(args, { beforeMutate: () => undefined, clankerMode: false }),
+    ).rejects.toThrow('output matches secret path rule');
   });
 
   it('creates a DOCX with headings, lists, tables and embedded Markdown images', async () => {
@@ -205,6 +260,11 @@ describe('export_document', () => {
     await expect(
       guarded.handler({ source: 'sample.md', format: 'docx', output: '.forge/config.yaml' }),
     ).rejects.toThrow(/Forge's own files/);
+    // The wall wraps the tool's own pre-check rather than replacing it.
+    expect(guarded.refuseBeforeApproval?.({ output: '.env' })).toBe(
+      tool.refuseBeforeApproval?.({ output: '.env' }),
+    );
+    expect(guarded.refuseBeforeApproval?.({ output: '.env' }, { clankerMode: true })).toBeUndefined();
     await expect(
       tool.handler({
         source: 'sample.md',

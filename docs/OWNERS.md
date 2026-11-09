@@ -106,6 +106,7 @@ overlaps with an existing owner, extend the owner instead.
 | Filesystem-miss error text for tools                 | `src/tools/pathErrorHint.ts`             |
 | Recycle-bin refusal diagnosis + short-lived path cache | `src/tools/trashRefusal.ts`             |
 | Tool call execution + result formatting              | `src/sidebar/ToolDispatch.ts`            |
+| Early refusals that stop a tool call before approval (cancelled, bad args, unknown/withheld tool, budget) | `src/sidebar/toolCallPreflight.ts` |
 | Approval gate inputs and verdict for one tool call (shared by serial dispatch and parallel-read preflight) | `src/sidebar/toolApprovalEvaluation.ts` |
 | Tool dispatch context and result-message types/helpers | `src/sidebar/toolDispatchTypes.ts`       |
 | Ordered batching of independent read-only tool calls | `src/sidebar/ToolDispatchParallel.ts`     |
@@ -600,6 +601,7 @@ overlaps with an existing owner, extend the owner instead.
 | search_code snippet/result size bounds     | `src/tools/searchSnippet.ts`          |
 | list_directory + size/age formatting       | `src/tools/listDirectoryTool.ts`      |
 | `shell` tool (spawn, approval, background)  | `src/tools/shellTool.ts`              |
+| Shell call classification cache and attended Clanker refusal release | `src/tools/shellToolCallGate.ts` |
 | Shell `timeout_ms` hint text and argument check | `src/tools/shellToolTimeout.ts` |
 | Background-execution registry (~/.forge/background-execs/, reaped after a killed host) | `src/tools/backgroundRegistry.ts` |
 | Shell command classification (read-only/normal/dangerous/refused) | `src/tools/shellPolicy.ts` |

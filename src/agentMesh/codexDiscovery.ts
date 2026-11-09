@@ -1,16 +1,17 @@
 import * as readline from 'readline';
 import { spawnCliProcess, terminateProcessTree, waitForCliProcessExit } from '../agents/cliProcess';
 import { codexAppServerArgs } from '../agents/codexAppServerArgs';
-import { JsonRpcPending, routeJsonRpcLine } from '../agents/jsonRpcStdio';
+import { JsonRpcPending, JsonRpcResponseError, routeJsonRpcLine } from '../agents/jsonRpcStdio';
 
 /**
  * Codex session discovery (AGENT_MESH_PLAN §0, P4).
  *
  * The scriptable equivalent of the `codex agents` TUI: a short-lived
- * `codex app-server --stdio` process we drive with a single `thread/list`
- * JSON-RPC request, then dispose. The app-server is the daemon that owns the
- * live threads (the sidebar's `codex.exe app-server` IS it), so listing its
- * threads finds every live session — not just the one Forge spawned.
+ * `codex app-server --stdio` process we drive with `thread/list` or
+ * `thread/read`, then dispose. The app-server is the daemon that owns the
+ * live threads (the sidebar's `codex.exe app-server` IS it), so listing finds
+ * every live session — not just the one Forge spawned — and reading checks one
+ * thread without walking that list.
  *
  * The wire contract is the Codex app-server protocol, versioned by the CLI:
  * `codex app-server generate-json-schema` emits the JSON Schema bundle
@@ -70,6 +71,50 @@ export class CodexDiscovery {
   constructor(private readonly options: CodexDiscoveryOptions) {}
 
   async discover(): Promise<CodexDiscoveryResult> {
+    return this.withServer(async () => {
+      // F-11: follow the pagination cursor so a matching thread on a later page
+      // is not invisible (a no-match/one-match decision would otherwise be
+      // wrong). The caller matches by cwd/name in-process.
+      const threads: DiscoveredThread[] = [];
+      let cursor: string | undefined;
+      for (let page = 0; page < MAX_PAGES; page++) {
+        const result = await this.request('thread/list', {
+          ...(cursor ? { cursor } : {}),
+        });
+        threads.push(...this.parseThreads(result));
+        cursor = this.nextCursor(result);
+        if (!cursor) break;
+      }
+      return { threads };
+    });
+  }
+
+  /** Check whether a single stored thread id can be read from the app-server. */
+  async readThread(threadId: string): Promise<boolean> {
+    return this.withServer(async () => {
+      try {
+        const result = await this.request('thread/read', { threadId });
+        const value =
+          result && typeof result === 'object' ? (result as Record<string, unknown>) : undefined;
+        const thread = value?.['thread'];
+        if (
+          thread &&
+          typeof thread === 'object' &&
+          typeof (thread as Record<string, unknown>)['id'] === 'string'
+        ) {
+          return true;
+        }
+        // Only -32600 means the thread is gone; any other answer is unknown.
+        throw new Error(`thread/read returned no thread for ${threadId}`);
+      } catch (error) {
+        if (error instanceof JsonRpcResponseError && error.code === -32600) return false;
+        throw error;
+      }
+    });
+  }
+
+  /** Shared app-server lifecycle, handshake, timeout and teardown. */
+  private async withServer<T>(operation: () => Promise<T>): Promise<T> {
     const child = spawnCliProcess({
       executable: this.options.executable,
       args: codexAppServerArgs({
@@ -94,8 +139,8 @@ export class CodexDiscovery {
     if (this.options.signal) {
       this.options.signal.addEventListener('abort', () => this.dispose(), { once: true });
     }
-    // F-11: a hard bound on the whole discovery. Without it a hung app-server
-    // (a response that never arrives) leaves `discover()` awaiting forever, so
+    // F-11: a hard bound on the whole request. Without it a hung app-server
+    // (a response that never arrives) leaves the operation awaiting forever, so
     // its `finally` never runs and the throwaway process leaks. The timer
     // disposes the process and rejects any in-flight request.
     let timeout: NodeJS.Timeout | undefined;
@@ -114,20 +159,7 @@ export class CodexDiscovery {
         capabilities: null,
       });
       this.notify('initialized');
-      // F-11: follow the pagination cursor so a matching thread on a later page
-      // is not invisible (a no-match/one-match decision would otherwise be
-      // wrong). The caller matches by cwd/name in-process.
-      const threads: DiscoveredThread[] = [];
-      let cursor: string | undefined;
-      for (let page = 0; page < MAX_PAGES; page++) {
-        const result = await this.request('thread/list', {
-          ...(cursor ? { cursor } : {}),
-        });
-        threads.push(...this.parseThreads(result));
-        cursor = this.nextCursor(result);
-        if (!cursor) break;
-      }
-      return { threads };
+      return await operation();
     } finally {
       if (timeout) clearTimeout(timeout);
       await this.dispose();

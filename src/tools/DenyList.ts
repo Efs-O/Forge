@@ -9,14 +9,10 @@ export interface ShellTokenRule {
   description: string;
   alternative: string;
   class: 'dangerous' | 'refused';
-  /** How an autonomous run — unattended or `/clanker` — should treat this match.
-   *  `ownerGate` is the secret-path gate: the decision belongs to the owner, so
-   *  the run refuses at once rather than waiting on a card nobody is there to
-   *  answer. `denyList` is the deny list's own answer: refuse at once with no
-   *  card, because nobody is watching the cards, a card that waits for one
-   *  stops the run (the 2026-10-27 lane that hung 2 h on `git checkout`), and
-   *  the tool named in `alternative` is the way round. Attended mode is
-   *  unchanged either way: the card still opens and waits for the owner.
+  /** The gate that raised this match. `ownerGate` labels a tool-specific gate;
+   *  unattended runs refuse it instead of waiting. `denyList` is a K1 stop for
+   *  Clanker and a policy refusal for unattended runs; ordinary attended chats
+   *  still get the gate's original card or refusal.
    */
   gateKind?: 'ownerGate' | 'denyList';
   /** Which approval key this rule is able to name, if any. `rdelete` marks the
@@ -144,10 +140,9 @@ function isDestructiveGitPush(tokens: readonly string[]): boolean {
 }
 
 export function getBuiltinDenyList(): ShellTokenRule[] {
-  // Every `dangerous` entry carries `gateKind: 'denyList'`: in an autonomous run
-  // the deny list is policy, not a judgement — nobody is there to answer the card
-  // it would raise, and the sanctioned tool is named in `alternative`. A rule that
-  // is dangerous but has no safe counterpart would have to say so explicitly.
+  // Every deny-list entry carries `gateKind: 'denyList'`: Clanker does not answer
+  // these calls, and an unattended run refuses them with the sanctioned tool in
+  // `alternative`. A dangerous rule with no safe counterpart must say so explicitly.
   const dangerous = (
     description: string,
     alternative: string,
@@ -165,7 +160,13 @@ export function getBuiltinDenyList(): ShellTokenRule[] {
     description: string,
     alternative: string,
     match: ShellTokenRule['match'],
-  ): ShellTokenRule => ({ class: 'refused', description, alternative, match });
+  ): ShellTokenRule => ({
+    class: 'refused',
+    description,
+    alternative,
+    gateKind: 'denyList',
+    match,
+  });
   return [
     dangerous(
       'recursive force delete',

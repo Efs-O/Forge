@@ -109,7 +109,9 @@ describe('manage_jobs — definition and permissions', () => {
   });
 
   it('requires approval (dangerous) only for delete', () => {
-    expect(tool.approval?.({ action: 'delete', job: 'disk' })?.dangerous).toBe(true);
+    const deletion = tool.approval?.({ action: 'delete', job: 'disk' });
+    expect(deletion?.dangerous).toBe(true);
+    expect(deletion?.clankerStop).toBe(true);
     expect(tool.approval?.({ action: 'pause', job: 'disk' })).toBeUndefined();
   });
 

@@ -1,19 +1,16 @@
 /**
- * What the dispatch does when a chat rule covers a gated call: it runs the call with
- * no card and writes exactly one `auto` / `chat_rule` `gate` row naming the key that
- * covered it. And what it does when the rules do not cover it, when the call has no
- * key at all, and when the run is unattended: the card opens exactly as it does today.
+ * What the dispatch does when a chat rule or attended Clanker covers a gated call:
+ * it runs with no card and writes a `gate` row naming the answer. Clanker answers
+ * keyed and unkeyable calls except deny-list matches, Forge's owner-only wall,
+ * explicit destructive markers, and secret egress.
  *
- * The "today" rows matter most. Phase 2 is only safe because a chat with no rules
- * behaves as it always did — `test/unit/ToolDispatch.test.ts` pins that unchanged,
- * and this file pins the new path beside it, through the same shell tool the real
- * dispatch runs and the same `GateEventLog` that writes the session ledger.
+ * Clanker-off and unattended rows must keep their existing behavior —
+ * `test/unit/ToolDispatch.test.ts` pins the normal path, and this file exercises the
+ * changed path through the real shell and the same `GateEventLog` used by sessions.
  *
- * Phase 3a adds the second answer in the plan's order: Clanker, for one chat. It
- * answers a call that has a key the owner could have allowed — `docs/plans/
- * ASK_ONCE_APPROVALS_PLAN.md` §2 item 3 — except the deny list's, which still asks
- * the owner in a Clanker chat, and nothing that has no key, so the deny-list command
- * below gets its card either way, while a chat rule for its folder still answers it.
+ * Clanker is scoped to one chat. The deny list and K2/K3 stops still reach the
+ * owner; ordinary tool gates, danger labels and unkeyable calls get Clanker's
+ * answer. A keyed recursive delete may still be answered by an owner-created rule.
  */
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
 import * as fs from 'fs';
@@ -481,7 +478,7 @@ describe('Clanker, armed for this chat, answers a key the owner could have allow
     marker.dispose();
   });
 
-  it('does not answer a command that has no key: `git reset --hard` still gets its card', async () => {
+  it('keeps an unkeyable deny-list command on its card', async () => {
     const probe = harness([], { approve: 'declined', clanker: true });
     const result = await probe.run('git reset --hard');
     expect(probe.requestApproval).toHaveBeenCalledTimes(1);

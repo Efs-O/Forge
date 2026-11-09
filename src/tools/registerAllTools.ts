@@ -268,7 +268,14 @@ export function registerAllTools(
 
   // v0.6 write tools
   registry.register(
-    guarded(makeExportDocumentTool({ ...(getConfig ? { getConfig } : {}), extraRoots })),
+    guarded(
+      makeExportDocumentTool({
+        ...(getConfig ? { getConfig } : {}),
+        extraRoots,
+        clankerMode: (conversationId) =>
+          messageChatSidebar?.()?.getHostFacade().clankerMode(conversationId) ?? false,
+      }),
+    ),
   );
   registry.register(guarded(makeEditFileTool(extraRoots, lengthWarning, watchProblems)));
   registry.register(guarded(makeApplyLineEditsTool(extraRoots, lengthWarning, watchProblems)));
@@ -283,6 +290,8 @@ export function registerAllTools(
   registry.register(
     makeShellTool({
       ...(getConfig ? { getConfig } : {}),
+      clankerMode: (conversationId) =>
+        messageChatSidebar?.()?.getHostFacade().clankerMode(conversationId) ?? false,
       ripgrepDir: () => bundledRipgrepDir(vscode.env.appRoot),
       // The shell route onto the same paths: `Add-Content .forge/config.yaml`,
       // `echo x > .forge/config.yaml`, `cp`, `mv`, `rm`. Refused as a `refused`

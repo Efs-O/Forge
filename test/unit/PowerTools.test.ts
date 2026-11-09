@@ -125,7 +125,7 @@ describe('schedule_wake', () => {
 });
 
 describe('sleep_computer', () => {
-  it('is always dangerous, so clanker mode cannot suspend the machine unasked', () => {
+  it('declares a dangerous gate for the centralized approval rule', () => {
     const tool = makeSleepComputerTool(fakePower().control);
     expect(tool.approval?.({})?.dangerous).toBe(true);
     expect(tool.autoApprove).toBeUndefined();

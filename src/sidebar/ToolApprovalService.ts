@@ -237,10 +237,14 @@ export class ToolApprovalService {
       }
       return Promise.resolve('approved');
     }
-    /* Keyed calls were answered by policy/chat rules before reaching the queue.
-     * Clanker covers only remaining non-dangerous calls; dangerous calls keep a
-     * card, while the deny list and owner-only wall refuse before this branch. */
-    if (conversationId && !dangerous && this.getClankerMode(conversationId)) {
+    /* Clanker covers every remaining call except protected stops. Dangerous alone
+     * is not a stop; the owner wall runs earlier and deny-list gates are tagged. */
+    if (
+      conversationId &&
+      options?.clankerStop !== true &&
+      options?.gateKind !== 'denyList' &&
+      this.getClankerMode(conversationId)
+    ) {
       this.autoApproved({
         toolName,
         ...(detail ? { detail } : {}),

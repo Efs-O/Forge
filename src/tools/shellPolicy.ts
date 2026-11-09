@@ -484,9 +484,8 @@ function secretScan(
 }
 
 /**
- * The rule for a secret path the owner has not allowed. The command is then
- * dangerous, not merely `normal`, because in `/clanker` and unattended runs a
- * `normal` call would be approved without anyone looking.
+ * The rule for a secret path the owner has not allowed. The command is dangerous
+ * so unattended policy denies it instead of allowing a job to read the file.
  */
 function secretRuleFor(pattern: string | undefined): ShellTokenRule | undefined {
   if (!pattern) return undefined;

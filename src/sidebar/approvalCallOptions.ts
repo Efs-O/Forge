@@ -13,7 +13,7 @@
  * gate kind, its alternative and its offer all arrive from outside.
  */
 import type { ToolApprovalMetadata } from '../tools/toolContract';
-import type { UntrustedExitVerdict } from './untrustedExitPolicy';
+import type { ExitKind, UntrustedExitVerdict } from './untrustedExitPolicy';
 import type { ToolApprovalCallOptions } from './toolApprovalOutcome';
 import type { ChatRuleDecision } from './chatApprovalRules';
 
@@ -34,6 +34,7 @@ export function approvalCallOptions(
   metadata: ToolApprovalMetadata | undefined,
   exitVerdict: UntrustedExitVerdict,
   chatRule: ChatRuleDecision | undefined,
+  reachesOut: ExitKind,
 ): ToolApprovalCallOptions {
   const options: ToolApprovalCallOptions = {};
   const gateKind = metadata?.gateKind ?? exitVerdict.gateKind;
@@ -42,6 +43,14 @@ export function approvalCallOptions(
   if (cardReason !== undefined) options.cardReason = cardReason;
   const alternative = metadata?.declineHint ?? exitVerdict.alternative;
   if (alternative !== undefined) options.alternative = alternative;
+  if (
+    metadata?.clankerStop === true ||
+    gateKind === 'denyList' ||
+    metadata?.secretReadTaint === true ||
+    (exitVerdict.flaggedBy === 'secret' && reachesOut !== 'none')
+  ) {
+    options.clankerStop = true;
+  }
   if (chatRule?.kind === 'offer') {
     options.allowForChat = chatRule.offer;
     if (chatRule.alwaysInProject !== undefined) options.alwaysInProject = chatRule.alwaysInProject;

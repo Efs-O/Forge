@@ -154,10 +154,13 @@ describe('generate_image', () => {
   it('forces a dangerous confirmation for a billed backend but not for an opted-out one', () => {
     const { tool } = rig();
     expect(tool.approval?.({ prompt: 'a fox' })).toMatchObject({ dangerous: true });
+    // A billed call is a gate of its own, so its text is not merely card wording.
+    expect(tool.approval?.({ prompt: 'a fox' })?.cardTextOnly).toBe(false);
     expect(tool.approval?.({ prompt: 'a fox' })?.detail).toContain('billed per image');
     expect(tool.approval?.({ prompt: 'a fox', backend: 'other-api' })).toMatchObject({
       dangerous: false,
     });
+    expect(tool.approval?.({ prompt: 'a fox', backend: 'other-api' })?.cardTextOnly).toBe(true);
   });
 
   it('saves with the returned format, snapshots before writing, and delivers remotely', async () => {
@@ -490,6 +493,7 @@ describe('generate_image with an sdcpp backend', () => {
   it('asks a dangerous confirmation for a billed backend and a plain one for a warm local backend', () => {
     const { tool, startApproval } = localRig();
     expect(tool.approval?.({ prompt: 'a fox' })).toMatchObject({ dangerous: false });
+    expect(tool.approval?.({ prompt: 'a fox' })?.cardTextOnly).toBe(true);
     expect(tool.approval?.({ prompt: 'a fox' })?.detail).toContain(
       'local · free · sdcpp · qwen_image_2.1-Q4_K',
     );
@@ -497,6 +501,7 @@ describe('generate_image with an sdcpp backend', () => {
     expect(tool.approval?.({ prompt: 'a fox', backend: 'grok-imagine' })).toMatchObject({
       dangerous: true,
     });
+    expect(tool.approval?.({ prompt: 'a fox', backend: 'grok-imagine' })?.cardTextOnly).toBe(false);
     expect(startApproval).toHaveBeenCalled();
   });
 
@@ -510,9 +515,11 @@ describe('generate_image with an sdcpp backend', () => {
     );
     // confirm_each is false for the local backend, so only the start makes it ask.
     expect(coldApproval).toMatchObject({ dangerous: true });
+    expect(coldApproval?.cardTextOnly).toBe(false);
     const warm = localRig();
     expect(warm.tool.approval?.({ prompt: 'a fox' })?.detail).not.toContain('Start qwen-local');
     expect(warm.tool.approval?.({ prompt: 'a fox' })).toMatchObject({ dangerous: false });
+    expect(warm.tool.approval?.({ prompt: 'a fox' })?.cardTextOnly).toBe(true);
   });
 
   it('lists backends with cost tags and never an undefined model', () => {

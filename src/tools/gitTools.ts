@@ -186,6 +186,9 @@ export function makeRestoreFileTool(): RegisteredTool {
       const paths = Array.isArray(args['paths']) ? (args['paths'] as string[]) : [];
       const ref = typeof args['ref'] === 'string' ? args['ref'] : 'HEAD';
       return {
+        // `mutation.paths` snapshots these paths before the write, so Undo already
+        // brings back the uncommitted edits this overwrite replaces.
+        cardTextOnly: true,
         detail:
           `About to overwrite from git ${ref}:\n${paths.join('\n')}\n` +
           'Any uncommitted changes to these paths are discarded.',

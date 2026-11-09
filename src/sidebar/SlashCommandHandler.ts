@@ -283,7 +283,7 @@ export class SlashCommandHandler {
           type: 'notice',
           conversationId,
           message: on
-            ? "\n> 💥 **Clanker Mode ON** — this chat only. A call the owner could have allowed by key runs with no card; the deny list's dangerous commands and anything with no key still get one, and it waits or times out like any other card. `/clanker` again turns it off.\n"
+            ? "\n> 💥 **Clanker Mode ON** — this chat only. Destructive commands, Forge's own guard files, and sending data out after reading a secret still stop. `/clanker` again turns it off.\n"
             : '\n> 💥 **Clanker Mode OFF** — this chat is gated again. The approvals this chat earned are not revoked.\n',
         });
         return;
