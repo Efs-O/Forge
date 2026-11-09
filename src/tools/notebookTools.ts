@@ -29,9 +29,17 @@ export async function openNotebookOrExplain(
     );
   }
   try {
-    return await vscode.workspace.openNotebookDocument(uri);
+    const textDocument = await vscode.workspace.openTextDocument(uri);
+    return await vscode.workspace.openNotebookDocument(textDocument.uri);
   } catch (err) {
-    throw new Error(describePathMiss(tool, requestedPath, err));
+    const message = err instanceof Error ? err.message : String(err);
+    if (/\b(?:ENOENT|nonexistent file)\b/u.test(message)) {
+      throw new Error(describePathMiss(tool, requestedPath, err));
+    }
+    throw new Error(
+      `${tool} could not open ${requestedPath} as a notebook: VS Code said "${message}". ` +
+        'The file must be a valid .ipynb (nbformat 4); read_file shows its JSON.',
+    );
   }
 }
 

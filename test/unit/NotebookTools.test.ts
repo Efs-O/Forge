@@ -1,6 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 const vscodeMocks = vi.hoisted(() => ({
+  openTextDocument: vi.fn(),
   openNotebookDocument: vi.fn(),
   applyEdit: vi.fn(),
   replaceCells: vi.fn((range: unknown, cells: unknown[]) => ({ range, cells })),
@@ -33,6 +34,7 @@ vi.mock('vscode', () => {
 
   return {
     workspace: {
+      openTextDocument: vscodeMocks.openTextDocument,
       openNotebookDocument: vscodeMocks.openNotebookDocument,
       applyEdit: vscodeMocks.applyEdit,
     },
@@ -81,7 +83,38 @@ function notebook(cells: ReturnType<typeof cell>[]) {
 describe('notebook tools', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    vscodeMocks.openTextDocument.mockImplementation(async (uri: unknown) => ({ uri }));
     vscodeMocks.applyEdit.mockResolvedValue(true);
+  });
+
+  it.each(['read_notebook', 'edit_notebook_cell'] as const)(
+    '%s names the exact VS Code failure when a valid .ipynb cannot be opened',
+    async (tool) => {
+      vscodeMocks.openNotebookDocument.mockRejectedValue(new Error('Assertion Failed: Argument is undefined or null.'));
+      const handler = tool === 'read_notebook' ? makeReadNotebookTool().handler : makeEditNotebookCellTool().handler;
+      const args = tool === 'read_notebook'
+        ? { path: 'notes.ipynb' }
+        : { path: 'notes.ipynb', cell_index: 0, source: 'new source' };
+
+      const message = await handler(args).then(
+        () => '',
+        (error: Error) => error.message,
+      );
+
+      expect(message).toBe(
+        `${tool} could not open notes.ipynb as a notebook: VS Code said "Assertion Failed: Argument is undefined or null.". The file must be a valid .ipynb (nbformat 4); read_file shows its JSON.`,
+      );
+    },
+  );
+
+  it('passes the URI returned by openTextDocument to the notebook provider', async () => {
+    const canonicalUri = { fsPath: 'canonical/notes.ipynb' };
+    vscodeMocks.openTextDocument.mockResolvedValue({ uri: canonicalUri });
+    vscodeMocks.openNotebookDocument.mockResolvedValue(notebook([cell(0, 'source')]));
+
+    await makeReadNotebookTool().handler({ path: 'notes.ipynb' });
+
+    expect(vscodeMocks.openNotebookDocument).toHaveBeenCalledWith(canonicalUri);
   });
 
   it('reads every cell and reports source, kind, language, and output counts', async () => {

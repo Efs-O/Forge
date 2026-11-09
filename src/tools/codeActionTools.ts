@@ -14,17 +14,27 @@ async function codeActions(
   path: string,
   line: number,
   character: number,
+  requestedPath = path,
+  toolName = 'code_intel code_actions',
 ): Promise<vscode.CodeAction[]> {
   const uri = resolveWorkspaceUri(path);
-  await vscode.workspace.openTextDocument(uri);
+  const document = await vscode.workspace.openTextDocument(uri);
   const position = new vscode.Position(line, character);
-  return (
-    (await vscode.commands.executeCommand<vscode.CodeAction[] | undefined>(
-      'vscode.executeCodeActionProvider',
-      uri,
-      new vscode.Range(position, position),
-    )) ?? []
-  );
+  try {
+    return (
+      (await vscode.commands.executeCommand<vscode.CodeAction[] | undefined>(
+        'vscode.executeCodeActionProvider',
+        document.uri,
+        new vscode.Range(position, position),
+      )) ?? []
+    );
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    throw new Error(
+      `${toolName} failed at ${requestedPath}:${line}:${character} (zero-based): VS Code said "${message}". ` +
+        'Check the position is on code (read_file the line), or use code_intel diagnostics to see what the language server reports for this file.',
+    );
+  }
 }
 
 /** Lists LSP quick fixes without executing provider commands or making edits. */
@@ -82,6 +92,8 @@ export function makeApplyCodeActionTool(
         filePath,
         args['line'] as number,
         args['character'] as number,
+        args['path'] as string,
+        'apply_code_action',
       );
       const action = actions.find((candidate) => candidate.title === args['title']);
       if (!action)

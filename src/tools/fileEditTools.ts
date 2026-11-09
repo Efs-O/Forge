@@ -422,14 +422,26 @@ export function makeRenameSymbolTool(
           extraRoots: extraRoots(),
         }),
       );
-      const position = new vscode.Position(args['line'] as number, args['character'] as number);
+      const line = args['line'] as number;
+      const character = args['character'] as number;
+      const position = new vscode.Position(line, character);
 
-      const edit = await vscode.commands.executeCommand<vscode.WorkspaceEdit>(
-        'vscode.executeDocumentRenameProvider',
-        uri,
-        position,
-        newName,
-      );
+      let edit: vscode.WorkspaceEdit | undefined;
+      try {
+        const document = await vscode.workspace.openTextDocument(uri);
+        edit = await vscode.commands.executeCommand<vscode.WorkspaceEdit | undefined>(
+          'vscode.executeDocumentRenameProvider',
+          document.uri,
+          position,
+          newName,
+        );
+      } catch (err) {
+        const message = err instanceof Error ? err.message : String(err);
+        throw new Error(
+          `rename_symbol failed at ${filePath}:${line}:${character} (zero-based): VS Code said "${message}". ` +
+            "Check the position is on the symbol's name (code_intel definition at the same position should find it).",
+        );
+      }
 
       if (!edit) throw new Error('rename_symbol: no rename provider available for this file type');
       await applyAndSaveWorkspaceEdit('rename_symbol', edit, extraRoots(), context);
