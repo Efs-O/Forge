@@ -104,13 +104,14 @@ describe('one-shot compaction', () => {
     expect(runPrompt).toHaveBeenCalledTimes(1);
   });
 
-  it('rejects an incomplete note without retrying', async () => {
+  it('rejects an unusable tool-call reply without retrying', async () => {
     const runPrompt = vi.fn(async (_text: string, _id: string, _options: PromptRunOptions) =>
-      'Goal: audit.\nState: incomplete.'.repeat(20),
+      `{ "tool": "read_file", "arguments": { "path": "${'a'.repeat(300)}" } }`,
     );
-    await expect(summarizeCompaction(input(messages, runPrompt))).rejects.toThrow(
-      /missing required sections/u,
-    );
+    await expect(summarizeCompaction(input(messages, runPrompt))).rejects.toMatchObject({
+      category: 'invalid-summary',
+      invalidSummary: { invalid_reason: 'unusable', invalid_check: 'tool-call' },
+    });
     expect(runPrompt).toHaveBeenCalledTimes(1);
   });
 

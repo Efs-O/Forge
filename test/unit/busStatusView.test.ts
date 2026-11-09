@@ -24,10 +24,68 @@ const turn = (extra: Partial<TurnSnapshot> = {}): TurnSnapshot => ({
 
 describe('renderBusStatus', () => {
   it('renders an idle chat with no turn in six lines', () => {
-    expect(renderBusStatus(base()).split('\n')).toEqual([
-      'Chat: Chat · c1', 'State: idle', 'Model: Qwen', 'Context: 59000/100000 tokens (59%)',
-      'Queued from you: 0', 'Work: 2 model request(s), 3 tool call(s), 0 compaction(s) in this chat',
-    ]);
+    expect(renderBusStatus(base())).toBe(
+      'Chat: Chat · c1\n' +
+        'State: idle\n' +
+        'Model: Qwen\n' +
+        'Context: 59000/100000 tokens (59%)\n' +
+        'Queued from you: 0\n' +
+        'Work: 2 model request(s), 3 tool call(s), 0 compaction(s) in this chat',
+    );
+  });
+
+  it('names an owner-only approval after Now', () => {
+    expect(
+      renderBusStatus(
+        base({
+          streaming: true,
+          turn: turn({ lastTool: 'rm_file' }),
+          waiting: { kind: 'approval', toolName: 'rm_file', ownerOnly: true },
+        }),
+      ),
+    ).toBe(
+      'Chat: Chat · c1\n' +
+        'State: busy · turn running 1 min · last activity 50 s ago\n' +
+        'Model: Qwen\n' +
+        'Now: working · last tool rm_file · 2 tool call(s) this turn\n' +
+        'Waiting: an approval card for rm_file is open in this chat; only the owner can answer it\n' +
+        'Context: 59000/100000 tokens (59%)\n' +
+        'Queued from you: 0\n' +
+        'Work: 2 model request(s), 3 tool call(s), 0 compaction(s) in this chat',
+    );
+  });
+
+  it('names an approval after Now', () => {
+    expect(
+      renderBusStatus(
+        base({
+          streaming: true,
+          turn: turn({ lastTool: 'write_file' }),
+          waiting: { kind: 'approval', toolName: 'write_file', ownerOnly: false },
+        }),
+      ),
+    ).toBe(
+      'Chat: Chat · c1\n' +
+        'State: busy · turn running 1 min · last activity 50 s ago\n' +
+        'Model: Qwen\n' +
+        'Now: working · last tool write_file · 2 tool call(s) this turn\n' +
+        'Waiting: an approval card for write_file is open in this chat\n' +
+        'Context: 59000/100000 tokens (59%)\n' +
+        'Queued from you: 0\n' +
+        'Work: 2 model request(s), 3 tool call(s), 0 compaction(s) in this chat',
+    );
+  });
+
+  it('names a question after Model when no Now line is present', () => {
+    expect(renderBusStatus(base({ waiting: { kind: 'question' } }))).toBe(
+      'Chat: Chat · c1\n' +
+        'State: idle\n' +
+        'Model: Qwen\n' +
+        'Waiting: a question (ask_user) is open in this chat\n' +
+        'Context: 59000/100000 tokens (59%)\n' +
+        'Queued from you: 0\n' +
+        'Work: 2 model request(s), 3 tool call(s), 0 compaction(s) in this chat',
+    );
   });
 
   it('reports the compaction count on the Work line', () => {

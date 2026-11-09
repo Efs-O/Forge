@@ -84,6 +84,7 @@ overlaps with an existing owner, extend the owner instead.
 | Thinking kwargs, strip, template context             | `src/sidebar/turnModelBehavior.ts`       |
 | Collaborator set handed to turn modules              | `src/sidebar/turnServices.ts`            |
 | Confirmation FIFO, the per-chat Clanker flag's live copy and its announcement | `src/sidebar/ToolApprovalService.ts` |
+| First pending approval event for a conversation (read-through selection) | `src/sidebar/approvalEventLookup.ts` |
 | Approval key and policy details passed to the confirmation queue | `src/sidebar/approvalCallOptions.ts` |
 | Plain-language approval-card offer text | `src/sidebar/approvalMessages.ts` |
 | `/approvals` listing and reset command | `src/sidebar/approvalSlashCommands.ts` |

@@ -7,6 +7,7 @@ import {
   unusableSummaryReason,
   missingSummarySections,
   salvageCutSummary,
+  mergeMissingSummarySections,
 } from './compactionPrompt';
 import { CompactionFailure, compactionFailureCategory } from './compactionFailure';
 import type { PlanItem } from './sessionTypes';
@@ -94,6 +95,8 @@ export interface CompactionSummaryResult {
   cutFromChars?: number;
   /** The output cap ended the summary and its complete part was kept. */
   salvagedFromLength?: boolean;
+  /** Required sections restored by the one allowed repair call. */
+  repairedSections?: string[];
 }
 
 function visibleOutputLimit(input: CompactionSummaryInput, withHeadroom: boolean): number {
@@ -244,16 +247,75 @@ async function summarizeCompactionCounted(
   // The same heading rule the cut used, so a cut can never drop a heading the
   // check counted.
   const missing = missingSummarySections(summary);
+  let repairedSections: string[] | undefined;
   if (missing.length > 0) {
-    throw new CompactionFailure(
-      'invalid-summary',
-      `Summary is missing required sections: ${missing.join(', ')}; previous context kept.`,
-      {
-        invalid_reason: 'missing-sections',
-        missing_sections: missing,
-        written_chars: written.length,
-      },
-    );
+    const repairPrompt = [
+      prompt,
+      '',
+      'SUMMARY SECTION REPAIR',
+      'Use the same conversation transcript above. Return only the missing sections listed below, in the required summary format, under these exact headings:',
+      ...missing.map((section) => `${section}:`),
+      '',
+      'Already-written summary for context (do not repeat these sections):',
+      summary,
+      '',
+      'Do not repeat any section already present. Output only the requested missing sections.',
+    ].join('\n');
+    let repairWritten: string;
+    try {
+      repairWritten = (await runOneShot(input, repairPrompt, outputTokens)).trim();
+    } catch (error) {
+      if (compactionFailureCategory(error) === 'cancelled') throw error;
+      const repairError = error instanceof Error ? error.message : String(error);
+      throw new CompactionFailure(
+        'invalid-summary',
+        `Summary is missing required sections: ${missing.join(', ')}; previous context kept.`,
+        {
+          invalid_reason: 'missing-sections',
+          missing_sections: missing,
+          written_chars: written.length,
+          repair_attempted: true,
+          repair_error: repairError,
+        },
+      );
+    }
+    const merged = mergeMissingSummarySections(summary, repairWritten);
+    written = merged;
+    const fitted = fitSummaryToChars(merged, input.maximumSummaryChars);
+    const checked = fitted ?? merged;
+    const repairUnusable = unusableSummaryReason(checked);
+    const stillMissing = missingSummarySections(checked);
+    if (repairUnusable !== undefined) {
+      throw new CompactionFailure(
+        'invalid-summary',
+        'The summarizer returned no usable summary; previous context kept.',
+        {
+          invalid_reason: 'unusable',
+          invalid_check: repairUnusable,
+          written_chars: summary.length + repairWritten.length,
+        },
+      );
+    }
+    if (stillMissing.length > 0) {
+      throw new CompactionFailure(
+        'invalid-summary',
+        `Summary is missing required sections: ${stillMissing.join(', ')}; previous context kept.`,
+        {
+          invalid_reason: 'missing-sections',
+          missing_sections: stillMissing,
+          written_chars: summary.length + repairWritten.length,
+          repair_attempted: true,
+        },
+      );
+    }
+    if (fitted === undefined) {
+      throw new CompactionFailure(
+        'budget-refusal',
+        `Summary exceeds its ${input.maximumSummaryChars}-character allocation even with every section cut; previous context kept.`,
+      );
+    }
+    summary = fitted;
+    repairedSections = missing;
   }
   return {
     summary,
@@ -263,5 +325,6 @@ async function summarizeCompactionCounted(
     outputTokens,
     ...(summary.length < written.length ? { cutFromChars: written.length } : {}),
     ...(salvaged ? { salvagedFromLength: true } : {}),
+    ...(repairedSections ? { repairedSections } : {}),
   };
 }

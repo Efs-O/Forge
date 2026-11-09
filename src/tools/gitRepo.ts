@@ -60,18 +60,26 @@ export interface LiveGitStatusEntry {
  * repository is never captured by an outer one. Without a location, the choice
  * must be unambiguous — see `repoRootForWorkspace`.
  */
-export async function getRepo(location?: string): Promise<GitRepoHandle> {
+export async function getRepo(
+  location?: string,
+  options: { base?: string; cwd?: string } = {},
+): Promise<GitRepoHandle> {
   const root =
-    location === undefined ? await repoRootForWorkspace() : await repoRootForLocation(location);
+    location === undefined
+      ? await repoRootForWorkspace()
+      : await repoRootForLocation(location, options);
   return { root };
 }
 
 /** Select one repository for a stage request and reject cross-repository calls. */
-export async function getRepoForPaths(paths: readonly string[]): Promise<GitRepoHandle> {
+export async function getRepoForPaths(
+  paths: readonly string[],
+  options: { base?: string; cwd?: string } = {},
+): Promise<GitRepoHandle> {
   if (!paths.length) throw new Error('git_stage: at least one path is required');
   // Resolve every path against the same discovery rules; a batch spanning two
   // repositories must fail rather than stage half of itself.
-  const roots = await Promise.all(paths.map((filePath) => repoRootForLocation(filePath)));
+  const roots = await Promise.all(paths.map((filePath) => repoRootForLocation(filePath, options)));
   const first = roots[0];
   if (roots.some((root) => canonicalPath(root) !== canonicalPath(first))) {
     throw new Error(

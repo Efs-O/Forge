@@ -37,6 +37,19 @@ function conversation(id: string, approval_rules?: string[]): ConversationRuntim
 describe('ToolApprovalService', () => {
   afterEach(() => vi.useRealTimers());
 
+  it('finds a queued card by conversation without returning another chat active card', () => {
+    const service = new ToolApprovalService(() => undefined, () => ({}) as never);
+    void service.request('delete_file', 'active A', true, 'chat-A');
+    void service.request('write_file', 'queued B', true, 'chat-B');
+
+    expect(service.pendingForConversation('chat-B')).toMatchObject({
+      toolName: 'write_file',
+      detail: 'queued B',
+      conversationId: 'chat-B',
+    });
+    expect(service.pendingForConversation('chat-C')).toBeUndefined();
+  });
+
   it('keeps secret egress on the confirmation card', async () => {
     const posted: HostToWebview[] = [];
     const service = new ToolApprovalService(

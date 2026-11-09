@@ -233,8 +233,22 @@ State: ${'detail. '.repeat(40)}`,
       invalid_reason: 'missing-sections',
       missing_sections: ['Next', 'Files', 'Constraints', 'Errors', 'Reference'],
       written_chars: expect.any(Number),
+      repair_attempted: true,
     });
     expect(JSON.stringify(h.rows)).not.toContain('detail.');
+  });
+
+  it('records which required sections a successful repair restored', async () => {
+    let calls = 0;
+    const h = setup(async () => {
+      calls += 1;
+      return calls === 1
+        ? `Goal: complete the request.\nState: recorded. ${'detail. '.repeat(40)}\nFiles: src/a.ts.\nConstraints: none.\nErrors: none.\nReference: none recorded.`
+        : 'Next: continue.';
+    });
+
+    await expect(runCompaction(h.deps, 'c1', { auto: true })).resolves.toBe('compacted');
+    expect(h.rows[1]).toMatchObject({ calls: 2, repairedSections: ['Next'] });
   });
 
   it('a successful attempt carries no invalid-summary detail', async () => {

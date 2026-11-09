@@ -72,6 +72,7 @@ export type CompactionStageResult =
       shed: string[];
       /** The output cap ended the summary and its complete part was kept. */
       salvagedFromLength: boolean;
+      repairedSections: string[];
     };
 
 export async function runCompactionStage(
@@ -191,5 +192,6 @@ export async function runCompactionStage(
     groupsNote,
     shed: hostFit.shed,
     salvagedFromLength: summaryRun.salvagedFromLength === true,
+    repairedSections: summaryRun.repairedSections ?? [],
   };
 }

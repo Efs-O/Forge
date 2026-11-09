@@ -17,6 +17,8 @@ export interface InvalidSummaryDetail {
   invalid_reason: 'unusable' | 'missing-sections';
   invalid_check?: UnusableSummaryReason;
   missing_sections?: string[];
+  repair_attempted?: boolean;
+  repair_error?: string;
   written_chars: number;
 }
 

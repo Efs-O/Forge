@@ -118,7 +118,7 @@ import {
 // on, so the ceiling prices the two gated actions and their `model`/`window`
 // fields as well as the ungated catalog. A window that enables them sits 21
 // chars under the ceiling; one that does not is what the older number measured.
-const MEASURED_CHARS = 64_808;
+const MEASURED_CHARS = 64_948;
 // Phase 3 STOP: the historical full 88-tool wire schema was 67,128 chars.
 // Exclude computer_use (24 browser/desktop schemas) pending the owner's product
 // decision; the full and gated sizes are recorded in the report.

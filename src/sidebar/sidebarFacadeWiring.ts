@@ -92,6 +92,9 @@ export function createSidebarHostFacade(deps: SidebarFacadeDeps): ForgeHostFacad
     interrupt: (conversationId) => deps.interrupt(conversationId),
     queueIntent: (conversationId) => requestChains.suppressContinuation(conversationId),
     addApprovalSink: (sink) => agentLoop.addApprovalSink(sink),
+    pendingApprovalForConversation: (conversationId) =>
+      agentLoop.pendingApprovalForConversation(conversationId),
+    hasPendingQuestion: (conversationId) => questions.hasPending(conversationId),
     resolveApproval: (id, approved) => agentLoop.resolveConfirmation(id, approved),
     resetApprovals: (conversationId) => slashHandler.resetApprovals(conversationId),
     addQuestionSink: (sink) => questions.addSink(sink),

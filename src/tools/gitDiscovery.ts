@@ -109,9 +109,9 @@ export function workspaceRoot(): string {
   return roots[0];
 }
 
-export function resolveFilePath(p: string): string {
+export function resolveFilePath(p: string, base?: string): string {
   if (path.isAbsolute(p)) return p;
-  return path.join(workspaceRoot(), p);
+  return path.resolve(base ?? workspaceRoot(), p);
 }
 
 /**
@@ -121,8 +121,8 @@ export function resolveFilePath(p: string): string {
  * agent is about to create is the ordinary case — so walking up is not a
  * fallback, it is the normal path.
  */
-function nearestExistingDirectory(location: string): string {
-  let current = resolveFilePath(location);
+function nearestExistingDirectory(location: string, resolvedLocation: string): string {
+  let current = resolvedLocation;
   for (;;) {
     try {
       if (fs.statSync(current).isDirectory()) return current;
@@ -133,7 +133,7 @@ function nearestExistingDirectory(location: string): string {
     if (parent === current) {
       throw new GitDiscoveryError(
         'invalid-location',
-        `git_*: no existing directory at or above "${location}"`,
+        `no existing directory at or above "${location}"`,
       );
     }
     current = parent;
@@ -186,7 +186,7 @@ function classifyProbeError(err: unknown, dir: string): ProbeFailure {
     if (!cliUnavailableReported) {
       cliUnavailableReported = true;
       logger.warn(
-        'git_*: the git executable was not found on PATH; falling back to the VS Code Git extension',
+        'git: the git executable was not found on PATH; falling back to the VS Code Git extension',
       );
     }
     return { kind: 'git-missing', detail: 'the git executable was not found on PATH' };
@@ -212,29 +212,30 @@ function probeFailureError(
   location: string,
   resolvedLocation: string,
   failure: ProbeFailure,
+  cwd?: string,
 ): GitDiscoveryError {
   const where = `"${location}"`;
   switch (failure.kind) {
     case 'git-missing':
       return new GitDiscoveryError(
         'git-missing',
-        `git_*: ${failure.detail}, and VS Code's Git extension reported no repository for ${where}. ` +
+        `${failure.detail}, and VS Code's Git extension reported no repository for ${where}. ` +
           'Install Git and make it available on PATH.',
       );
     case 'invalid-location':
-      return new GitDiscoveryError('invalid-location', `git_*: ${failure.detail}`);
+      return new GitDiscoveryError('invalid-location', failure.detail);
     case 'permission':
-      return new GitDiscoveryError('permission', `git_*: cannot read ${where}: ${failure.detail}`);
+      return new GitDiscoveryError('permission', `cannot read ${where}: ${failure.detail}`);
     case 'trust':
       return new GitDiscoveryError(
         'trust',
-        `git_*: git refused to use the repository at ${where}: ${failure.detail}. ` +
+        `git refused to use the repository at ${where}: ${failure.detail}. ` +
           'Forge does not change git trust settings; resolve this in git configuration.',
       );
     default:
       return new GitDiscoveryError(
         'not-a-repository',
-        `git_*: no git repository contains ${where} (resolved to ${resolvedLocation}; relative paths resolve from the workspace root): ${failure.detail}`,
+        `no git repository contains ${where} (resolved to ${resolvedLocation}; ${cwd === undefined ? 'relative paths resolve from the workspace root' : `relative paths resolve from the cwd you passed, ${cwd}`}): ${failure.detail}`,
       );
   }
 }
@@ -266,7 +267,7 @@ async function apiRepoRoots(): Promise<string[]> {
       .map((root) => path.resolve(root));
   } catch (err) {
     logger.warn(
-      `git_*: VS Code Git extension API unavailable (${err instanceof Error ? err.message : String(err)}); using the git CLI`,
+      `git: VS Code Git extension API unavailable (${err instanceof Error ? err.message : String(err)}); using the git CLI`,
     );
     return [];
   }
@@ -294,16 +295,20 @@ function dedupe(roots: readonly string[]): string[] {
  * nested repository the Git extension has not opened. The extension is consulted
  * only when git itself could not run.
  */
-export async function repoRootForLocation(location: string): Promise<string> {
-  const directory = nearestExistingDirectory(location);
+export async function repoRootForLocation(
+  location: string,
+  options: { base?: string; cwd?: string } = {},
+): Promise<string> {
+  const resolvedLocation = resolveFilePath(location, options.base);
+  const directory = nearestExistingDirectory(location, resolvedLocation);
   const probed = await probeRepoRoot(directory);
   if (!isProbeFailure(probed)) return probed;
 
   if (probed.kind === 'git-missing') {
-    const fromApi = deepestContaining(await apiRepoRoots(), resolveFilePath(location));
+    const fromApi = deepestContaining(await apiRepoRoots(), resolvedLocation);
     if (fromApi) return fromApi;
   }
-  throw probeFailureError(location, resolveFilePath(location), probed);
+  throw probeFailureError(location, resolvedLocation, probed, options.cwd);
 }
 
 /**
@@ -333,7 +338,7 @@ export async function repoRootForWorkspace(): Promise<string> {
   if (distinct.length > 1) {
     throw new GitDiscoveryError(
       'ambiguous',
-      `git_*: multiple repositories found; pass cwd (${distinct.join(', ')})`,
+      `multiple repositories found; pass cwd (${distinct.join(', ')})`,
     );
   }
 
@@ -342,7 +347,7 @@ export async function repoRootForWorkspace(): Promise<string> {
   }
   throw new GitDiscoveryError(
     'not-a-repository',
-    `git_*: no git repository at the workspace root (${roots.join(', ')}). ` +
+    `no git repository at the workspace root (${roots.join(', ')}). ` +
       'If the repository is in a subdirectory, pass cwd naming it.',
   );
 }

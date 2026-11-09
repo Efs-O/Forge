@@ -159,6 +159,31 @@ function splitSummarySections(text: string): SummarySection[] {
   return sections;
 }
 
+/** Merge newly generated missing sections into an existing summary in canonical order. */
+export function mergeMissingSummarySections(summary: string, repair: string): string {
+  const original = splitSummarySections(summary);
+  const repaired = splitSummarySections(repair);
+  const prefix = original.find((section) => !section.heading)?.body ?? '';
+  const byName = new Map<string, SummarySection>();
+  for (const section of [...original, ...repaired]) {
+    const match = SECTION_HEADING_TOKEN.exec(section.heading);
+    const name = REQUIRED_SECTIONS.find(([, pattern]) =>
+      new RegExp(`^(?:${pattern})$`, 'iu').test(match?.[1] ?? ''),
+    )?.[0];
+    if (name && !byName.has(name)) byName.set(name, section);
+  }
+  const sections = REQUIRED_SECTIONS.map(([name]) => {
+    const section = byName.get(name);
+    return section ? `${section.heading}${section.body}` : '';
+  }).filter(Boolean);
+  let merged = prefix;
+  for (const section of sections) {
+    if (merged && !merged.endsWith('\n')) merged += '\n';
+    merged += section;
+  }
+  return merged.trim();
+}
+
 function joinWithCap(sections: readonly SummarySection[], cap: number, all: boolean): string {
   return sections
     .map(({ heading, body, keepWhole }) =>

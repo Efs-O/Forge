@@ -32,7 +32,10 @@ export function makeGitStatusTool(): RegisteredTool {
     },
     permission: 'git-read',
     handler: async (args) => {
-      const repo = await getRepo(args['cwd'] as string | undefined);
+      const cwd = args['cwd'] as string | undefined;
+      const repo = await getRepo(cwd, {
+        ...(cwd === undefined ? {} : { cwd: resolveFilePath(cwd) }),
+      });
       const lines: string[] = [];
 
       for (const change of await readLiveGitStatus(repo)) {
@@ -73,7 +76,10 @@ export function makeGitLogTool(): RegisteredTool {
     },
     permission: 'git-read',
     handler: async (args) => {
-      const repo = await getRepo(args['cwd'] as string | undefined);
+      const cwd = args['cwd'] as string | undefined;
+      const repo = await getRepo(cwd, {
+        ...(cwd === undefined ? {} : { cwd: resolveFilePath(cwd) }),
+      });
       const maxEntries = (args['max_entries'] as number | undefined) ?? 20;
       const ref = args['branch'] as string | undefined;
 
@@ -117,7 +123,9 @@ export function makeGitDiffTool(): RegisteredTool {
       const staged = args['staged'] === true;
 
       const filePath = args['path'] as string | undefined;
-      const repo = await getRepo(filePath ?? cwd);
+      const repo = await getRepo(filePath ?? cwd, {
+        ...(cwd === undefined || filePath !== undefined ? {} : { cwd: resolveFilePath(cwd) }),
+      });
       const pathspec = filePath ? ['--', resolveFilePath(filePath)] : [];
       const diff = await runGit(repo, ['diff', ...(staged ? ['--staged'] : []), ...pathspec]);
       return diff || '(no diff)';
@@ -147,8 +155,9 @@ export function makeGitBlameTool(): RegisteredTool {
     },
     permission: 'git-read',
     handler: async (args) => {
-      const filePath = resolveFilePath(args['path'] as string);
-      const repo = await getRepo((args['path'] as string) ?? (args['cwd'] as string | undefined));
+      const requestedPath = args['path'] as string;
+      const filePath = resolveFilePath(requestedPath);
+      const repo = await getRepo(requestedPath);
       return (await runGit(repo, ['blame', '--line-porcelain', '--', filePath])) || '(no output)';
     },
   };
@@ -184,7 +193,10 @@ export function makeGitShowTool(): RegisteredTool {
     },
     permission: 'git-read',
     handler: async (args) => {
-      const repo = await getRepo(args['cwd'] as string | undefined);
+      const cwd = args['cwd'] as string | undefined;
+      const repo = await getRepo(cwd, {
+        ...(cwd === undefined ? {} : { cwd: resolveFilePath(cwd) }),
+      });
       return (await runGit(repo, gitShowArgs(args['ref']))) || '(no output)';
     },
   };

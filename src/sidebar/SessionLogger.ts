@@ -184,6 +184,7 @@ export class SessionLogger {
         ...(entry.shed !== undefined ? { shed: entry.shed } : {}),
         ...(entry.floorMode ? { floor_mode: true } : {}),
         ...(entry.salvagedFromLength ? { salvaged_from_length: true } : {}),
+        ...(entry.repairedSections ? { repaired_sections: entry.repairedSections } : {}),
         ...entry.invalidSummary,
         timestamp_ms: Date.now(),
         model,

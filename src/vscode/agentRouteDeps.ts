@@ -291,6 +291,16 @@ export function buildAgentRouteDeps(hosts: AgentRouteDepsHosts): AgentRoutesDeps
         }
         return target;
       }
+      const approval = target.facade.pendingApprovalForConversation(target.id);
+      const waiting = approval
+        ? {
+            kind: 'approval' as const,
+            toolName: approval.toolName,
+            ownerOnly: approval.waitingForOwner === true,
+          }
+        : target.facade.hasPendingQuestion(target.id)
+          ? { kind: 'question' as const }
+          : undefined;
       return {
         ok: true,
         text: renderBusStatus({
@@ -301,6 +311,7 @@ export function buildAgentRouteDeps(hosts: AgentRouteDepsHosts): AgentRoutesDeps
           turn: watch.snapshot(target.id),
           watchAttached: watch.attached,
           now: Date.now(),
+          ...(waiting ? { waiting } : {}),
         }),
       };
     },

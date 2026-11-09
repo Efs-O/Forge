@@ -92,9 +92,13 @@ export class ToolApprovalPolicyDenied extends Error {
         run.alternative ? `Use this instead: ${asSentence(run.alternative)}` : '',
         job
           ? 'Stop and report RESULT: failed naming the action you needed.'
-          : 'Nobody is present to approve it, so do not retry it. Recycle-bin ' +
-            'deletes are allowed; only a permanent delete (to_trash: false) is ' +
-            'dangerous. Continue with safe steps or report the step as not done.',
+          : 'Nobody is present to approve it, so do not retry it. ' +
+            // The recycle-bin hint is delete_file's alone: on any other tool it
+            // points the model at a to_trash argument that tool does not take.
+            (toolName === 'delete_file'
+              ? 'Recycle-bin deletes are allowed; only a permanent delete (to_trash: false) is dangerous. '
+              : '') +
+            'Continue with safe steps or report the step as not done.',
       ]
         .filter((part) => part !== '')
         .join(' '),

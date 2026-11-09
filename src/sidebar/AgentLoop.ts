@@ -101,10 +101,8 @@ export class AgentLoop {
     this.conversationLookup = lookup;
   }
 
-  /**
-   * Registers the remote-reach probe used to tell a turn whether anyone is
-   * listening from a phone. A setter for the same reason as the two above.
-   */
+  /** Registers the remote-reach probe used to tell a turn whether anyone is
+   *  listening from a phone. A setter for the same reason as the two above. */
   setRemoteReach(probe: (conversationId: string) => number): void {
     this.remoteReach = probe;
   }
@@ -368,6 +366,7 @@ export class AgentLoop {
     return this.approvals.pending();
   }
 
+  pendingApprovalForConversation = (id: string) => this.approvals.pendingForConversation(id);
   pendingApprovalConversationIds = (): Set<string> => this.approvals.pendingConversationIds();
 
   clearCapabilityCache(): void {

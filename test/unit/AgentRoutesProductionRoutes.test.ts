@@ -264,6 +264,15 @@ describe('the routes a production window registers', () => {
           ? { id: 'a2', toolName: 'shell', detail: '', dangerous: false, conversationId: 'c1' }
           : undefined,
     }),
+    pendingApprovalForConversation: (conversationId: string) => {
+      const pending = peerApprovalChat
+        ? { id: 'a1', toolName: 'shell', detail: '', dangerous: false, conversationId: 'claude-b' }
+        : approvalForTarget
+          ? { id: 'a2', toolName: 'shell', detail: '', dangerous: false, conversationId: 'c1' }
+          : undefined;
+      return pending?.conversationId === conversationId ? pending : undefined;
+    },
+    hasPendingQuestion: () => false,
     recentExchanges: () => [],
     getAgentLink: (conversationId: string, kind: keyof typeof links) =>
       twoClaudeChats && kind === 'claude' && conversationId === 'claude-a'

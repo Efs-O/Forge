@@ -113,6 +113,9 @@ export function toolErrorText(
   if (error instanceof WorkspacePathMissingError) {
     return `Error: ${formatPathMiss(name, error.requestedPath, error, error.workspaceRoot)}`;
   }
+  if (error instanceof Error && error.name === 'GitDiscoveryError') {
+    return `Error: ${name}: ${error.message}`;
+  }
   if (!(error instanceof z.ZodError)) {
     return `Error: ${error instanceof Error ? error.message : String(error)}`;
   }

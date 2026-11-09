@@ -22,6 +22,7 @@ import {
 import { makeCommitTool, makeRestoreFileTool, makeStageTool } from '../../src/tools/gitTools';
 import { makeDeleteFileTool } from '../../src/tools/fileEditTools';
 import { repoRootForLocation } from '../../src/tools/gitDiscovery';
+import { toolErrorText } from '../../src/tools/toolErrorText';
 
 const env = {
   ...process.env,
@@ -157,7 +158,63 @@ describe('git awareness around delete and restore', () => {
         detail = String((error as NodeJS.ErrnoException & { stderr?: string }).stderr ?? '').trim();
       }
       expect(message).toBe(
-        `git_*: no git repository contains "${location}" (resolved to ${path.resolve(root, location)}; relative paths resolve from the workspace root): ${detail}`,
+        `no git repository contains "${location}" (resolved to ${path.resolve(root, location)}; relative paths resolve from the workspace root): ${detail}`,
+      );
+    } finally {
+      fs.rmSync(outside, { recursive: true, force: true });
+    }
+  });
+
+  it('formats a stage discovery error relative to the workspace root', async () => {
+    const outside = fs.realpathSync.native(fs.mkdtempSync(path.join(os.tmpdir(), 'forge-norepo-')));
+    try {
+      const location = path.relative(root, path.join(outside, 'probe.txt'));
+      let detail = '';
+      try {
+        execFileSync('git', ['rev-parse', '--show-toplevel'], {
+          cwd: outside,
+          encoding: 'utf8',
+        });
+      } catch (error) {
+        detail = String((error as NodeJS.ErrnoException & { stderr?: string }).stderr ?? '').trim();
+      }
+      let errorText = '';
+      try {
+        await makeStageTool().handler({ paths: [location] }, undefined as never);
+      } catch (error) {
+        errorText = toolErrorText('stage', error);
+      }
+      expect(errorText).toBe(
+        `Error: stage: no git repository contains "${location}" (resolved to ${path.resolve(root, location)}; relative paths resolve from the workspace root): ${detail}`,
+      );
+    } finally {
+      fs.rmSync(outside, { recursive: true, force: true });
+    }
+  });
+
+  it('formats a stage discovery error relative to the passed cwd', async () => {
+    const outside = fs.realpathSync.native(fs.mkdtempSync(path.join(os.tmpdir(), 'forge-norepo-')));
+    try {
+      let detail = '';
+      try {
+        execFileSync('git', ['rev-parse', '--show-toplevel'], {
+          cwd: outside,
+          encoding: 'utf8',
+        });
+      } catch (error) {
+        detail = String((error as NodeJS.ErrnoException & { stderr?: string }).stderr ?? '').trim();
+      }
+      let errorText = '';
+      try {
+        await makeStageTool().handler(
+          { cwd: outside, paths: ['probe.txt'] },
+          undefined as never,
+        );
+      } catch (error) {
+        errorText = toolErrorText('stage', error);
+      }
+      expect(errorText).toBe(
+        `Error: stage: no git repository contains "probe.txt" (resolved to ${path.join(outside, 'probe.txt')}; relative paths resolve from the cwd you passed, ${outside}): ${detail}`,
       );
     } finally {
       fs.rmSync(outside, { recursive: true, force: true });

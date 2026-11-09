@@ -10,6 +10,8 @@ import { summarySource } from '../../src/sidebar/compactionSummarySource';
 import {
   compactionResumeNote,
   compactionSummaryAllowance,
+  summarizeCompaction,
+  type CompactionSummaryInput,
 } from '../../src/sidebar/compactionSummaryRunner';
 import type { ChatMessage } from '../../src/llm/types';
 
@@ -196,6 +198,126 @@ describe('compaction summary content', () => {
     expect(prompt).toContain('Next:');
     expect(prompt).toContain('continue the exact pending action.');
     expect(prompt).not.toContain('Files: src/a.ts');
+  });
+});
+
+describe('compaction summary section repair', () => {
+  const missingTwo = [
+    'Goal: Preserve the active task.',
+    'State: The source check is complete and the result is recorded.\nThe outcome is stable.',
+    'Files: src/a.ts was reviewed.',
+    'Constraints: Keep the current API.',
+    'Errors: none recorded.',
+  ].join('\n');
+  const completeSummary = [
+    'Goal: Preserve the active task.',
+    'State: The source check is complete and the result is recorded.\nThe outcome is stable.',
+    'Next: continue the exact pending task.',
+    'Files: src/a.ts was reviewed.',
+    'Constraints: Keep the current API.',
+    'Errors: none recorded.',
+    'Reference: src/a.ts.',
+  ].join('\n');
+
+  function input(runPrompt: CompactionSummaryInput['runPrompt']): CompactionSummaryInput {
+    return {
+      messages: [{ role: 'user', content: 'Continue the active task.' }],
+      currentLocalTime: 'test time',
+      recordedFacts: '',
+      userContext: '',
+      modelMaxTokens: 32_000,
+      outputLimitTokens: 8_000,
+      reasoningTokens: 0,
+      budget: compactionBudget(0, 80_000, 32_000, 0, undefined, 32_000),
+      maximumSummaryChars: 8_000,
+      conversationId: 'repair-test',
+      runPrompt,
+    };
+  }
+
+  it('repairs two missing sections and merges them in canonical order', async () => {
+    const prompts: string[] = [];
+    let calls = 0;
+    const result = await summarizeCompaction(
+      input(async (prompt) => {
+        prompts.push(prompt);
+        calls += 1;
+        return calls === 1 ? missingTwo : 'Next: continue the exact pending task.\nReference: src/a.ts.';
+      }),
+    );
+
+    expect(result.summary).toBe(completeSummary);
+    expect(result.calls).toBe(2);
+    expect(result.repairedSections).toEqual(['Next', 'Reference']);
+    expect(prompts[1]).toContain('Use the same conversation transcript above. Return only the missing sections');
+    expect(prompts[1]).toContain('Next:\nReference:');
+    expect(prompts[1]).toContain(`Already-written summary for context (do not repeat these sections):\n${missingTwo}`);
+    expect(prompts[1]).toContain('Do not repeat any section already present. Output only the requested missing sections.');
+  });
+
+  it('reports only the section still missing after the single repair call', async () => {
+    let calls = 0;
+    try {
+      await summarizeCompaction(
+        input(async () => {
+          calls += 1;
+          return calls === 1 ? missingTwo : 'Next: continue the exact pending task.';
+        }),
+      );
+      throw new Error('expected missing section failure');
+    } catch (error) {
+      expect(error).toBeInstanceOf(CompactionFailure);
+      expect(error).toMatchObject({
+        category: 'invalid-summary',
+        invalidSummary: {
+          invalid_reason: 'missing-sections',
+          missing_sections: ['Reference'],
+          repair_attempted: true,
+          written_chars: missingTwo.length + 'Next: continue the exact pending task.'.length,
+        },
+      });
+    }
+    expect(calls).toBe(2);
+  });
+
+  it('reports the first missing sections when the repair call throws', async () => {
+    let calls = 0;
+    try {
+      await summarizeCompaction(
+        input(async () => {
+          calls += 1;
+          if (calls === 1) return missingTwo;
+          throw new Error('repair network failure');
+        }),
+      );
+      throw new Error('expected missing section failure');
+    } catch (error) {
+      expect(error).toBeInstanceOf(CompactionFailure);
+      expect(error).toMatchObject({
+        category: 'invalid-summary',
+        invalidSummary: {
+          invalid_reason: 'missing-sections',
+          missing_sections: ['Next', 'Reference'],
+          repair_attempted: true,
+          repair_error: 'repair network failure',
+          written_chars: missingTwo.length,
+        },
+      });
+    }
+    expect(calls).toBe(2);
+  });
+
+  it('does not make a repair call when the first summary is complete', async () => {
+    let calls = 0;
+    const result = await summarizeCompaction(
+      input(async () => {
+        calls += 1;
+        return completeSummary;
+      }),
+    );
+
+    expect(result.summary).toBe(completeSummary);
+    expect(result.calls).toBe(1);
   });
 });
 

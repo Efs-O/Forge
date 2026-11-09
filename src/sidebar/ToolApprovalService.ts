@@ -23,6 +23,7 @@ import {
 } from './toolApprovalOutcome';
 import { refusalReasonForGate } from './untrustedExitPolicy';
 import { ApprovalTimeoutState } from './approvalTimeoutState';
+import { approvalEventForConversation } from './approvalEventLookup';
 
 /**
  * The card contract lives in `toolApprovalEvents.ts` — the webview bridge, the
@@ -54,12 +55,9 @@ interface PendingApproval extends ToolApprovalRequestEvent {
 export class ToolApprovalService {
   private readonly queue: PendingApproval[] = [];
   private active: PendingApproval | null = null;
-  /** Clanker is a chat's, not a window's: `conversation.clanker` on the chat's own
-   *  record is where it lives, and this is the queue's read-through cache of it —
-   *  so it can answer for a chat without hunting for the record each call, and can
-   *  tell a real change from a repeat before it announces one. A chat the window
-   *  has not spoken to yet answers from its own record, which is what lets a tab
-   *  restored from the archive mid-window keep the mode its owner armed. */
+  /** Clanker is chat-local: this read-through cache lets the queue answer without
+   *  looking up a record each call and distinguish real changes. The record stays
+   *  authoritative, so a tab restored from archive keeps the mode its owner armed. */
   private readonly clankerFlags = new Map<string, boolean>();
   private onApprovalStart?: (conversationId: string) => void;
   private onApprovalEnd?: (conversationId: string) => void;
@@ -71,12 +69,9 @@ export class ToolApprovalService {
     private readonly getView: () => vscode.WebviewView | undefined,
     private readonly unattended: UnattendedConversationRegistry = unattendedConversations,
     private readonly getTimeoutMinutes: () => number | undefined = () => undefined,
-    /** The conversation records behind this window's chats. Read to answer for a
-     *  chat this queue has never been told about, and written so a toggle survives a
-     *  window reload: a mode that only lived in memory would be off again after a
-     *  reload while the banner still claimed it was armed. Absent means no records
-     *  behind it — a window that has loaded no conversations, and the shape a test
-     *  that arms one chat from here replaces. */
+    /** Conversation records behind this window's chats. Read to answer for chats
+     *  this queue has not seen, and written so toggles survive reloads. Absent means
+     *  no records are loaded — the shape a test that arms one chat replaces. */
     private readonly chatRecords?: {
       read: (conversationId: string) => boolean | undefined;
       write: (conversationId: string, on: boolean) => void;
@@ -111,6 +106,9 @@ export class ToolApprovalService {
     return this.active ? this.eventOf(this.active) : undefined;
   }
 
+  pendingForConversation(id: string): ToolApprovalRequestEvent | undefined {
+    return approvalEventForConversation(this.active, this.queue, id, this.eventOf.bind(this));
+  }
   /** All attributed approvals, including requests queued behind the active gate. */
   pendingConversationIds(): Set<string> {
     const ids = new Set<string>();

@@ -3,7 +3,7 @@
 import type { ForgeExchange } from '../sidebar/sessionProjections';
 import { describeBudget, describeWork } from '../remote/RemoteSessionCommands';
 import { MAX_VIEW_COUNT, renderExchange } from '../remote/RemoteTranscriptView';
-import type { TurnSnapshot } from './busTurnWatch';
+import { clip, MAX_TOOL_NAME_CHARS, type TurnSnapshot } from './busTurnWatch';
 
 export interface BusStatusInput {
   conversation: {
@@ -21,6 +21,7 @@ export interface BusStatusInput {
   turn: TurnSnapshot | undefined;
   watchAttached: boolean;
   now: number;
+  waiting?: { kind: 'approval'; toolName: string; ownerOnly: boolean } | { kind: 'question' };
 }
 
 export function renderBusStatus(input: BusStatusInput): string {
@@ -44,6 +45,16 @@ export function renderBusStatus(input: BusStatusInput): string {
     lines.push(
       `Now: ${turn.phase ?? 'working'} · last tool ${turn.lastTool ?? 'none yet'} · ${turn.toolCalls} tool call(s) this turn`,
     );
+  }
+  if (input.waiting?.kind === 'approval') {
+    const toolName = clip(input.waiting.toolName, MAX_TOOL_NAME_CHARS);
+    lines.push(
+      input.waiting.ownerOnly
+        ? `Waiting: an approval card for ${toolName} is open in this chat; only the owner can answer it`
+        : `Waiting: an approval card for ${toolName} is open in this chat`,
+    );
+  } else if (input.waiting?.kind === 'question') {
+    lines.push('Waiting: a question (ask_user) is open in this chat');
   }
   if (streaming && turn?.lastNarration) lines.push(`Said: ${turn.lastNarration}`);
   if (turn && turn.warnings.length > 0) lines.push(`Warnings: ${turn.warnings.join(' | ')}`);

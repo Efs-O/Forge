@@ -127,7 +127,10 @@ export function makeStageTool(): RegisteredTool {
       const resolvedPaths = requestedPaths.map((filePath) =>
         base !== undefined && !path.isAbsolute(filePath) ? path.resolve(base, filePath) : filePath,
       );
-      const repo = await getRepoForPaths(resolvedPaths);
+      const repo = await getRepoForPaths(
+        requestedPaths,
+        base === undefined ? {} : { base, cwd: base },
+      );
       const relativePaths = resolvedPaths.map((filePath) => repoRelative(repo, filePath));
       await runGit(repo, ['add', '--', ...relativePaths]);
 
@@ -195,6 +198,11 @@ export function makeRestoreFileTool(): RegisteredTool {
                 'Commit, branch, or tag to restore from. Defaults to HEAD. Use HEAD~1 to ' +
                 'recover a file the most recent commit deleted.',
             },
+            cwd: {
+              type: 'string',
+              description:
+                'Workspace-relative directory that relative paths are resolved from and that selects the repository.',
+            },
           },
           required: ['paths'],
           additionalProperties: false,
@@ -202,7 +210,18 @@ export function makeRestoreFileTool(): RegisteredTool {
       },
     },
     permission: 'write',
-    mutation: { paths: (args) => args['paths'] as string[], showDiff: true },
+    mutation: {
+      paths: (args) => {
+        const cwd = args['cwd'] as string | undefined;
+        const base = cwd === undefined ? undefined : resolveFilePath(cwd);
+        return (args['paths'] as string[]).map((filePath) =>
+          base !== undefined && !path.isAbsolute(filePath)
+            ? path.resolve(base, filePath)
+            : filePath,
+        );
+      },
+      showDiff: true,
+    },
     approval: (args) => {
       const paths = Array.isArray(args['paths']) ? (args['paths'] as string[]) : [];
       const ref = typeof args['ref'] === 'string' ? args['ref'] : 'HEAD';
@@ -217,12 +236,20 @@ export function makeRestoreFileTool(): RegisteredTool {
     },
     handler: async (args) => {
       const requestedPaths = args['paths'] as string[];
+      const cwd = args['cwd'] as string | undefined;
+      const base = cwd === undefined ? undefined : resolveFilePath(cwd);
       if (!Array.isArray(requestedPaths) || requestedPaths.length === 0) {
         throw new Error('restore_file: at least one path is required');
       }
       const ref = validateRef('restore_file', (args['ref'] as string | undefined) ?? 'HEAD');
-      const repo = await getRepoForPaths(requestedPaths);
-      const relativePaths = requestedPaths.map((filePath) => repoRelative(repo, filePath));
+      const repo = await getRepoForPaths(
+        requestedPaths,
+        base === undefined ? {} : { base, cwd: base },
+      );
+      const resolvedPaths = requestedPaths.map((filePath) =>
+        base !== undefined && !path.isAbsolute(filePath) ? path.resolve(base, filePath) : filePath,
+      );
+      const relativePaths = resolvedPaths.map((filePath) => repoRelative(repo, filePath));
       await runGit(repo, ['checkout', ref, '--', ...relativePaths]);
       return `Restored from ${ref}: ${relativePaths.join(', ')}`;
     },
@@ -259,7 +286,10 @@ export function makeCommitTool(): RegisteredTool {
     },
     permission: 'git-write',
     handler: async (args) => {
-      const repo = await getRepo(args['cwd'] as string | undefined);
+      const cwd = args['cwd'] as string | undefined;
+      const repo = await getRepo(cwd, {
+        ...(cwd === undefined ? {} : { cwd: resolveFilePath(cwd) }),
+      });
       const message = args['message'] as string;
       const amend = args['amend'] === true;
       const staged = (await readLiveGitStatus(repo)).some(

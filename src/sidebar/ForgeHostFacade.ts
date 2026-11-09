@@ -96,6 +96,8 @@ export interface ForgeHostFacade {
   interrupt(conversationId: string): Promise<void>;
   queueIntent(conversationId: string): void;
   addApprovalSink(sink: ToolApprovalSink): { dispose(): void };
+  pendingApprovalForConversation(conversationId: string): ToolApprovalRequestEvent | undefined;
+  hasPendingQuestion(conversationId: string): boolean;
   resolveApproval(id: string, decision: import('./approvalMessages').ApprovalDecision): void;
   resetApprovals(conversationId: string): Promise<boolean>;
   addQuestionSink(sink: UserQuestionSink): { dispose(): void };
@@ -296,6 +298,14 @@ export class SidebarHostFacade implements ForgeHostFacade {
 
   addApprovalSink(sink: ToolApprovalSink): { dispose(): void } {
     return this.deps.addApprovalSink(sink);
+  }
+
+  pendingApprovalForConversation(conversationId: string): ToolApprovalRequestEvent | undefined {
+    return this.deps.pendingApprovalForConversation(conversationId);
+  }
+
+  hasPendingQuestion(conversationId: string): boolean {
+    return this.deps.hasPendingQuestion(conversationId);
   }
 
   resolveApproval(id: string, decision: import('./approvalMessages').ApprovalDecision): void {

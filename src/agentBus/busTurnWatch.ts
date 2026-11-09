@@ -87,7 +87,7 @@ function oneLine(text: string): string {
   return text.replace(/\s+/gu, ' ').trim();
 }
 
-function clip(text: string, max: number): string {
+export function clip(text: string, max: number): string {
   return text.length <= max ? text : `${text.slice(0, max - 1).trimEnd()}…`;
 }
 

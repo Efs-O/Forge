@@ -46,5 +46,6 @@ export interface CompactionAttemptLogEntry {
   floorMode?: boolean;
   /** The summary was cut off by the output cap and its complete part kept. */
   salvagedFromLength?: boolean;
+  repairedSections?: string[];
   invalidSummary?: import('./compactionFailure').InvalidSummaryDetail;
 }
